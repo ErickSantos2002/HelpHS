@@ -5,7 +5,7 @@ Pydantic v2 schemas for Product and Equipment endpoints.
 import uuid
 from datetime import datetime
 
-from pydantic import Field
+from pydantic import ConfigDict, Field
 
 from app.schemas.base import AppBaseModel
 
@@ -26,8 +26,7 @@ class ProductUpdate(AppBaseModel):
 
 
 class ProductResponse(AppBaseModel):
-    model_config = AppBaseModel.model_config.copy()
-    model_config["from_attributes"] = True
+    model_config = ConfigDict(from_attributes=True, str_strip_whitespace=True)
 
     id: uuid.UUID
     name: str
@@ -64,8 +63,7 @@ class EquipmentUpdate(AppBaseModel):
 
 
 class EquipmentResponse(AppBaseModel):
-    model_config = AppBaseModel.model_config.copy()
-    model_config["from_attributes"] = True
+    model_config = ConfigDict(from_attributes=True, str_strip_whitespace=True)
 
     id: uuid.UUID
     product_id: uuid.UUID

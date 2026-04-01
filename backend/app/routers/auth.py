@@ -6,36 +6,31 @@ from datetime import UTC, datetime
 from typing import Annotated
 
 from fastapi import APIRouter, Depends, HTTPException, Request, status
-from fastapi.security import HTTPAuthorizationCredentials, HTTPBearer
+from fastapi.security import HTTPAuthorizationCredentials
 from jose import JWTError
 from loguru import logger
-from passlib.context import CryptContext
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.core.config import get_settings
 from app.core.database import get_db
 from app.core.security import (
-    _decode_token,
+    bearer_scheme,
     blacklist_token,
     create_access_token,
     create_refresh_token,
+    decode_token,
     delete_refresh_token,
     get_current_user,
     get_stored_refresh_token,
     store_refresh_token,
+    verify_password,
 )
 from app.models.models import AuditAction, AuditLog, User, UserStatus
 from app.schemas.auth import AccessTokenResponse, LoginRequest, RefreshRequest, TokenResponse
 
 router = APIRouter(prefix="/auth", tags=["Auth"])
 settings = get_settings()
-pwd_context = CryptContext(schemes=["bcrypt"], deprecated="auto")
-_bearer = HTTPBearer(auto_error=False)
-
-
-def _verify_password(plain: str, hashed: str) -> bool:
-    return pwd_context.verify(plain, hashed)
 
 
 def _audit(
@@ -44,15 +39,16 @@ def _audit(
     user_id,
     request: Request,
 ) -> None:
-    entry = AuditLog(
-        user_id=user_id,
-        action=action,
-        entity_type="user",
-        entity_id=user_id,
-        ip_address=request.client.host if request.client else None,
-        user_agent=request.headers.get("user-agent", ""),
+    db.add(
+        AuditLog(
+            user_id=user_id,
+            action=action,
+            entity_type="user",
+            entity_id=user_id,
+            ip_address=request.client.host if request.client else None,
+            user_agent=request.headers.get("user-agent", ""),
+        )
     )
-    db.add(entry)
 
 
 # ── POST /auth/login ──────────────────────────────────────────
@@ -67,7 +63,7 @@ async def login(
     result = await db.execute(select(User).where(User.email == body.email))
     user: User | None = result.scalar_one_or_none()
 
-    if user is None or not _verify_password(body.password, user.password):
+    if user is None or not verify_password(body.password, user.password):
         logger.warning(f"Failed login attempt for email={body.email}")
         raise HTTPException(
             status_code=status.HTTP_401_UNAUTHORIZED,
@@ -113,7 +109,7 @@ async def refresh_token(
     )
 
     try:
-        payload = _decode_token(body.refresh_token)
+        payload = decode_token(body.refresh_token)
     except JWTError:
         raise credentials_exc
 
@@ -152,14 +148,14 @@ async def refresh_token(
 @router.post("/logout", status_code=status.HTTP_204_NO_CONTENT)
 async def logout(
     request: Request,
-    credentials: Annotated[HTTPAuthorizationCredentials | None, Depends(_bearer)],
+    credentials: Annotated[HTTPAuthorizationCredentials | None, Depends(bearer_scheme)],
     db: Annotated[AsyncSession, Depends(get_db)],
     current_user: Annotated[User, Depends(get_current_user)],
 ) -> None:
     if credentials:
         token = credentials.credentials
         try:
-            payload = _decode_token(token)
+            payload = decode_token(token)
             exp = payload.get("exp", 0)
             now = int(datetime.now(UTC).timestamp())
             ttl = max(exp - now, 1)

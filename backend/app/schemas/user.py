@@ -5,7 +5,7 @@ Pydantic v2 schemas for User endpoints.
 import uuid
 from datetime import datetime
 
-from pydantic import EmailStr, Field, field_validator
+from pydantic import ConfigDict, EmailStr, Field, field_validator
 
 from app.models.models import UserRole, UserStatus
 from app.schemas.base import AppBaseModel
@@ -43,8 +43,7 @@ class UserStatusUpdate(AppBaseModel):
 
 
 class UserResponse(AppBaseModel):
-    model_config = AppBaseModel.model_config.copy()
-    model_config["from_attributes"] = True
+    model_config = ConfigDict(from_attributes=True, str_strip_whitespace=True)
 
     id: uuid.UUID
     name: str

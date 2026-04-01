@@ -44,26 +44,6 @@ _PYDANTIC_MSG: dict[str, str] = {
     "string_pattern_mismatch": "Formato inválido",
 }
 
-_FIELD_NAMES: dict[str, str] = {
-    "email": "e-mail",
-    "password": "senha",
-    "name": "nome",
-    "phone": "telefone",
-    "department": "departamento",
-    "role": "perfil",
-    "status": "status",
-    "refresh_token": "token de atualização",
-    "access_token": "token de acesso",
-    "serial_number": "número de série",
-    "product_id": "produto",
-    "is_active": "ativo",
-    "lgpd_consent": "consentimento LGPD",
-    "avatar_url": "avatar",
-    "version": "versão",
-    "description": "descrição",
-    "model": "modelo",
-}
-
 
 def _translate_error(error: dict) -> dict:
     """Convert a single Pydantic error dict into a pt-BR friendly dict."""

@@ -10,6 +10,7 @@ from fastapi import Depends, HTTPException, status
 from fastapi.security import HTTPAuthorizationCredentials, HTTPBearer
 from jose import JWTError, jwt
 from loguru import logger
+from passlib.context import CryptContext
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
@@ -19,7 +20,17 @@ from app.core.redis import get_redis
 
 settings = get_settings()
 
-_bearer = HTTPBearer(auto_error=False)
+bearer_scheme = HTTPBearer(auto_error=False)
+pwd_context = CryptContext(schemes=["bcrypt"], deprecated="auto")
+
+
+def verify_password(plain: str, hashed: str) -> bool:
+    return pwd_context.verify(plain, hashed)
+
+
+def hash_password(password: str) -> str:
+    return pwd_context.hash(password)
+
 
 # Redis key prefixes
 _BLACKLIST_PREFIX = "token:blacklist:"
@@ -70,7 +81,7 @@ def create_refresh_token(user_id: UUID) -> str:
 # ── Token validation ──────────────────────────────────────────
 
 
-def _decode_token(token: str) -> dict:
+def decode_token(token: str) -> dict:
     """Decode and verify signature/expiry. Raises JWTError on failure."""
     return jwt.decode(
         token,
@@ -80,9 +91,9 @@ def _decode_token(token: str) -> dict:
     )
 
 
-async def _is_blacklisted(jti_or_token: str) -> bool:
+async def _is_blacklisted(token: str) -> bool:
     redis = await get_redis()
-    return bool(await redis.exists(f"{_BLACKLIST_PREFIX}{jti_or_token}"))
+    return bool(await redis.exists(f"{_BLACKLIST_PREFIX}{token}"))
 
 
 async def blacklist_token(token: str, expires_in_seconds: int) -> None:
@@ -113,7 +124,7 @@ async def delete_refresh_token(user_id: UUID) -> None:
 
 
 async def get_current_user(
-    credentials: Annotated[HTTPAuthorizationCredentials | None, Depends(_bearer)],
+    credentials: Annotated[HTTPAuthorizationCredentials | None, Depends(bearer_scheme)],
     db: Annotated[AsyncSession, Depends(get_db)],
 ):
     """
@@ -134,7 +145,7 @@ async def get_current_user(
     token = credentials.credentials
 
     try:
-        payload = _decode_token(token)
+        payload = decode_token(token)
     except JWTError as exc:
         logger.debug(f"JWT decode error: {exc}")
         raise credentials_exc

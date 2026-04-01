@@ -15,12 +15,11 @@ from datetime import UTC, datetime
 from typing import Annotated
 
 from fastapi import APIRouter, Depends, HTTPException, Query, status
-from passlib.context import CryptContext
 from sqlalchemy import func, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.core.database import get_db
-from app.core.security import authorize, get_current_user
+from app.core.security import authorize, get_current_user, hash_password
 from app.models.models import AuditAction, AuditLog, User, UserRole, UserStatus
 from app.schemas.user import (
     UserCreate,
@@ -31,7 +30,6 @@ from app.schemas.user import (
 )
 
 router = APIRouter(prefix="/users", tags=["Users"])
-_pwd = CryptContext(schemes=["bcrypt"], deprecated="auto")
 
 
 # ── Helpers ───────────────────────────────────────────────────
@@ -72,7 +70,7 @@ async def create_user(
         id=uuid.uuid4(),
         name=body.name,
         email=body.email,
-        password=_pwd.hash(body.password),
+        password=hash_password(body.password),
         role=body.role,
         status=UserStatus.active,
         phone=body.phone,
