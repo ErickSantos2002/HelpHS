@@ -29,37 +29,13 @@ ADMIN_USER = {
 }
 
 PRODUCTS = [
-    {
-        "name": "HSGrowth CRM",
-        "description": "Plataforma de CRM para gestão de relacionamento com clientes",
-        "version": "2.0",
-    },
-    {
-        "name": "HSGuard",
-        "description": "Sistema de monitoramento e segurança do trabalho",
-        "version": "1.5",
-    },
-    {
-        "name": "HSFlow",
-        "description": "Gestão de fluxos e processos internos de SST",
-        "version": "1.2",
-    },
-    {
-        "name": "HSDoc",
-        "description": "Gestão documental e conformidade regulatória",
-        "version": "1.0",
-    },
-    {
-        "name": "HSTraining",
-        "description": "Plataforma de treinamentos e capacitações em SST",
-        "version": "1.1",
-    },
-    {
-        "name": "HSAudit",
-        "description": "Auditorias internas e externas de saúde e segurança",
-        "version": "1.3",
-    },
-    {"name": "HSRisk", "description": "Análise e gestão de riscos ocupacionais", "version": "1.0"},
+    {"name": "Deimos", "description": "Bafômetro Deimos", "version": None},
+    {"name": "EBS-010", "description": "Bafômetro EBS-010", "version": None},
+    {"name": "iBlow 10 Pro", "description": "Bafômetro iBlow 10 Pro", "version": None},
+    {"name": "Mark X", "description": "Bafômetro Mark X", "version": None},
+    {"name": "Mercury", "description": "Bafômetro Mercury", "version": None},
+    {"name": "Phoebus", "description": "Bafômetro Phoebus", "version": None},
+    {"name": "Titan", "description": "Bafômetro Titan", "version": None},
 ]
 
 SLA_CONFIGS = [
