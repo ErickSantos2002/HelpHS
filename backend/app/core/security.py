@@ -168,20 +168,47 @@ async def get_current_user(
     return user
 
 
-async def require_admin(user=Depends(get_current_user)):
+def authorize(*roles):
+    """
+    Dependency factory for role-based access control.
+
+    Usage::
+
+        @router.get("/admin-only")
+        async def admin_endpoint(user=Depends(authorize(UserRole.admin))):
+            ...
+
+        @router.get("/staff")
+        async def staff_endpoint(user=Depends(authorize(UserRole.admin, UserRole.technician))):
+            ...
+
+    Always applied on top of ``get_current_user`` — so the token must be valid
+    before the role check runs.
+    """
+
+    allowed = frozenset(roles)
+
+    async def _check(user=Depends(get_current_user)):
+        if user.role not in allowed:
+            raise HTTPException(
+                status_code=status.HTTP_403_FORBIDDEN,
+                detail="You do not have permission to perform this action",
+            )
+        return user
+
+    return _check
+
+
+# ── Convenience aliases ───────────────────────────────────────
+
+
+def require_admin():
     from app.models.models import UserRole
 
-    if user.role != UserRole.admin:
-        raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="Admin access required")
-    return user
+    return authorize(UserRole.admin)
 
 
-async def require_technician_or_admin(user=Depends(get_current_user)):
+def require_technician_or_admin():
     from app.models.models import UserRole
 
-    if user.role not in (UserRole.admin, UserRole.technician):
-        raise HTTPException(
-            status_code=status.HTTP_403_FORBIDDEN,
-            detail="Technician or admin access required",
-        )
-    return user
+    return authorize(UserRole.admin, UserRole.technician)
