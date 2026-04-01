@@ -9,7 +9,7 @@ from app.core.config import get_settings
 from app.core.database import engine
 from app.core.logging import setup_logging
 from app.core.redis import close_redis, get_redis
-from app.routers import auth
+from app.routers import auth, users
 
 settings = get_settings()
 
@@ -63,6 +63,7 @@ app.add_middleware(
 
 
 app.include_router(auth.router, prefix=settings.api_prefix)
+app.include_router(users.router, prefix=settings.api_prefix)
 
 
 @app.get("/health", tags=["Health"])
