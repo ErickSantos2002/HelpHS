@@ -5,12 +5,13 @@ Pydantic v2 schemas for User endpoints.
 import uuid
 from datetime import datetime
 
-from pydantic import BaseModel, EmailStr, Field, field_validator
+from pydantic import EmailStr, Field, field_validator
 
 from app.models.models import UserRole, UserStatus
+from app.schemas.base import AppBaseModel
 
 
-class UserCreate(BaseModel):
+class UserCreate(AppBaseModel):
     name: str = Field(..., min_length=2, max_length=255)
     email: EmailStr
     password: str = Field(..., min_length=8, max_length=128)
@@ -23,27 +24,27 @@ class UserCreate(BaseModel):
     @classmethod
     def password_strength(cls, v: str) -> str:
         if not any(c.isupper() for c in v):
-            raise ValueError("Password must contain at least one uppercase letter")
+            raise ValueError("A senha deve conter ao menos uma letra maiúscula")
         if not any(c.isdigit() for c in v):
-            raise ValueError("Password must contain at least one digit")
+            raise ValueError("A senha deve conter ao menos um número")
         return v
 
 
-class UserUpdate(BaseModel):
+class UserUpdate(AppBaseModel):
     name: str | None = Field(default=None, min_length=2, max_length=255)
     phone: str | None = Field(default=None, max_length=20)
     department: str | None = Field(default=None, max_length=100)
     avatar_url: str | None = Field(default=None, max_length=500)
-    # role can only be changed by admin — enforced in the router
     role: UserRole | None = None
 
 
-class UserStatusUpdate(BaseModel):
+class UserStatusUpdate(AppBaseModel):
     status: UserStatus
 
 
-class UserResponse(BaseModel):
-    model_config = {"from_attributes": True}
+class UserResponse(AppBaseModel):
+    model_config = AppBaseModel.model_config.copy()
+    model_config["from_attributes"] = True
 
     id: uuid.UUID
     name: str
@@ -59,7 +60,7 @@ class UserResponse(BaseModel):
     updated_at: datetime
 
 
-class UserListResponse(BaseModel):
+class UserListResponse(AppBaseModel):
     items: list[UserResponse]
     total: int
     limit: int

@@ -5,26 +5,29 @@ Pydantic v2 schemas for Product and Equipment endpoints.
 import uuid
 from datetime import datetime
 
-from pydantic import BaseModel, Field
+from pydantic import Field
+
+from app.schemas.base import AppBaseModel
 
 # ── Product ───────────────────────────────────────────────────
 
 
-class ProductCreate(BaseModel):
+class ProductCreate(AppBaseModel):
     name: str = Field(..., min_length=1, max_length=255)
     description: str | None = None
     version: str | None = Field(default=None, max_length=50)
 
 
-class ProductUpdate(BaseModel):
+class ProductUpdate(AppBaseModel):
     name: str | None = Field(default=None, min_length=1, max_length=255)
     description: str | None = None
     version: str | None = Field(default=None, max_length=50)
     is_active: bool | None = None
 
 
-class ProductResponse(BaseModel):
-    model_config = {"from_attributes": True}
+class ProductResponse(AppBaseModel):
+    model_config = AppBaseModel.model_config.copy()
+    model_config["from_attributes"] = True
 
     id: uuid.UUID
     name: str
@@ -35,7 +38,7 @@ class ProductResponse(BaseModel):
     updated_at: datetime
 
 
-class ProductListResponse(BaseModel):
+class ProductListResponse(AppBaseModel):
     items: list[ProductResponse]
     total: int
     limit: int
@@ -45,14 +48,14 @@ class ProductListResponse(BaseModel):
 # ── Equipment ─────────────────────────────────────────────────
 
 
-class EquipmentCreate(BaseModel):
+class EquipmentCreate(AppBaseModel):
     name: str = Field(..., min_length=1, max_length=255)
     serial_number: str | None = Field(default=None, max_length=100)
     model: str | None = Field(default=None, max_length=100)
     description: str | None = None
 
 
-class EquipmentUpdate(BaseModel):
+class EquipmentUpdate(AppBaseModel):
     name: str | None = Field(default=None, min_length=1, max_length=255)
     serial_number: str | None = Field(default=None, max_length=100)
     model: str | None = Field(default=None, max_length=100)
@@ -60,8 +63,9 @@ class EquipmentUpdate(BaseModel):
     is_active: bool | None = None
 
 
-class EquipmentResponse(BaseModel):
-    model_config = {"from_attributes": True}
+class EquipmentResponse(AppBaseModel):
+    model_config = AppBaseModel.model_config.copy()
+    model_config["from_attributes"] = True
 
     id: uuid.UUID
     product_id: uuid.UUID
@@ -74,7 +78,7 @@ class EquipmentResponse(BaseModel):
     updated_at: datetime
 
 
-class EquipmentListResponse(BaseModel):
+class EquipmentListResponse(AppBaseModel):
     items: list[EquipmentResponse]
     total: int
     limit: int
