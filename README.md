@@ -1,5 +1,7 @@
 # HelpHS — Help Desk Health & Safety
 
+[![CI](https://github.com/ErickSantos2002/HelpHS/actions/workflows/ci.yml/badge.svg)](https://github.com/ErickSantos2002/HelpHS/actions/workflows/ci.yml)
+
 Sistema de Help Desk / Gestão de Chamados para organizações de Saúde & Segurança do Trabalho.
 
 ## Estrutura do Projeto
