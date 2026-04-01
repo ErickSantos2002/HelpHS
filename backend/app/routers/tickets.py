@@ -19,7 +19,8 @@ from datetime import UTC, datetime
 from typing import Annotated
 
 from fastapi import APIRouter, Depends, HTTPException, Query, status
-from sqlalchemy import func, select
+from sqlalchemy import func, select  # func used in list_tickets subquery
+from sqlalchemy.exc import IntegrityError
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.core.database import get_db
@@ -40,6 +41,7 @@ from app.schemas.ticket import (
     TicketStatusUpdate,
     TicketUpdate,
 )
+from app.utils.protocol import MAX_RETRIES, generate_protocol
 
 router = APIRouter(tags=["Tickets"])
 
@@ -96,16 +98,6 @@ async def _get_ticket_or_404(ticket_id: uuid.UUID, db: AsyncSession) -> Ticket:
     return ticket
 
 
-async def _generate_protocol(db: AsyncSession) -> str:
-    """Generate the next sequential protocol in the format HS-YYYY-NNNN."""
-    year = datetime.now(UTC).year
-    result = await db.execute(
-        select(func.count()).select_from(Ticket).where(Ticket.protocol.like(f"HS-{year}-%"))
-    )
-    count = result.scalar_one()
-    return f"HS-{year}-{(count + 1):04d}"
-
-
 # ═══════════════════════════════════════════════════════════════
 # TICKETS
 # ═══════════════════════════════════════════════════════════════
@@ -117,29 +109,40 @@ async def create_ticket(
     db: Annotated[AsyncSession, Depends(get_db)],
     actor: Annotated[User, Depends(get_current_user)],
 ) -> TicketResponse:
-    protocol = await _generate_protocol(db)
     ts = datetime.now(UTC)
+    ticket_id = uuid.uuid4()
 
-    ticket = Ticket(
-        id=uuid.uuid4(),
-        protocol=protocol,
-        title=body.title,
-        description=body.description,
-        priority=body.priority,
-        category=body.category,
-        status=TicketStatus.open,
-        creator_id=actor.id,
-        product_id=body.product_id,
-        equipment_id=body.equipment_id,
-        sla_response_breach=False,
-        sla_resolve_breach=False,
-        sla_total_paused_ms=0,
-        created_at=ts,
-        updated_at=ts,
-    )
-    db.add(ticket)
-    _audit(db, AuditAction.create, actor.id, ticket.id)
-    await db.commit()
+    for attempt in range(MAX_RETRIES):
+        protocol = await generate_protocol(db)
+        ticket = Ticket(
+            id=ticket_id,
+            protocol=protocol,
+            title=body.title,
+            description=body.description,
+            priority=body.priority,
+            category=body.category,
+            status=TicketStatus.open,
+            creator_id=actor.id,
+            product_id=body.product_id,
+            equipment_id=body.equipment_id,
+            sla_response_breach=False,
+            sla_resolve_breach=False,
+            sla_total_paused_ms=0,
+            created_at=ts,
+            updated_at=ts,
+        )
+        db.add(ticket)
+        _audit(db, AuditAction.create, actor.id, ticket.id)
+        try:
+            await db.commit()
+            break
+        except IntegrityError:
+            await db.rollback()
+            if attempt == MAX_RETRIES - 1:
+                raise
+            # Regenerate a fresh ticket_id on retry to avoid PK collision
+            ticket_id = uuid.uuid4()
+
     await db.refresh(ticket)
     return TicketResponse.model_validate(ticket)
 
