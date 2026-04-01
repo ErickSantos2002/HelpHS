@@ -6,6 +6,7 @@ uvicorn[standard]==0.34.0
 sqlalchemy[asyncio]==2.0.40
 alembic==1.15.2
 asyncpg==0.30.0
+aiosqlite==0.21.0
 
 # Validation & Settings
 pydantic==2.11.3

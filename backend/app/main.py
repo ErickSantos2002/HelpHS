@@ -9,6 +9,7 @@ from app.core.config import get_settings
 from app.core.database import engine
 from app.core.logging import setup_logging
 from app.core.redis import close_redis, get_redis
+from app.routers import auth
 
 settings = get_settings()
 
@@ -59,6 +60,9 @@ app.add_middleware(
     allow_methods=["GET", "POST", "PUT", "PATCH", "DELETE", "OPTIONS"],
     allow_headers=["Authorization", "Content-Type", "Accept", "X-Request-ID"],
 )
+
+
+app.include_router(auth.router, prefix=settings.api_prefix)
 
 
 @app.get("/health", tags=["Health"])
