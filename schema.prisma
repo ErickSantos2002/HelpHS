@@ -1,0 +1,394 @@
+// ============================================================
+// HELP DESK — HEALTH & SAFETY
+// Prisma Schema — Banco de Dados PostgreSQL
+// Baseado no Dicionario de Dados v1.0
+// ============================================================
+
+generator client {
+  provider = "prisma-client-js"
+}
+
+datasource db {
+  provider = "postgresql"
+  url      = env("DATABASE_URL")
+}
+
+// ── ENUMS ────────────────────────────────────────────────────
+
+enum UserRole {
+  admin
+  technician
+  client
+}
+
+enum UserStatus {
+  active
+  inactive
+}
+
+enum TicketStatus {
+  open
+  in_progress
+  awaiting_client
+  awaiting_technical
+  resolved
+  closed
+  cancelled
+}
+
+enum TicketPriority {
+  critical
+  high
+  medium
+  low
+}
+
+enum TicketCategory {
+  hardware
+  software
+  network
+  access
+  email
+  security
+  general
+  other
+}
+
+enum SLALevel {
+  critical
+  high
+  medium
+  low
+}
+
+enum NotificationType {
+  ticket_created
+  ticket_assigned
+  ticket_updated
+  ticket_resolved
+  ticket_closed
+  sla_warning
+  sla_breached
+  chat_message
+  satisfaction_survey
+  system
+}
+
+enum AuditAction {
+  create
+  update
+  delete
+  login
+  logout
+  export
+  assign
+  status_change
+  password_change
+}
+
+enum KBArticleStatus {
+  draft
+  published
+  archived
+}
+
+// ── MODELS ───────────────────────────────────────────────────
+
+/// Usuarios do sistema (admin, tecnico, cliente)
+model User {
+  id         String     @id @default(uuid()) @db.Uuid
+  name       String     @db.VarChar(255)
+  email      String     @unique @db.VarChar(255)
+  password   String     @db.VarChar(255)
+  role       UserRole   @default(client)
+  status     UserStatus @default(active)
+  phone      String?    @db.VarChar(20)
+  department String?    @db.VarChar(100)
+  avatar_url String?    @db.VarChar(500)
+  last_login DateTime?  @db.Timestamptz
+
+  // LGPD
+  lgpd_consent    Boolean   @default(false)
+  lgpd_consent_at DateTime? @db.Timestamptz
+
+  created_at DateTime @default(now()) @db.Timestamptz
+  updated_at DateTime @updatedAt @db.Timestamptz
+
+  // Relacionamentos
+  created_tickets    Ticket[]             @relation("TicketCreator")
+  assigned_tickets   Ticket[]             @relation("TicketAssignee")
+  ticket_histories   TicketHistory[]
+  chat_messages      ChatMessage[]
+  attachments        Attachment[]
+  kb_articles        KBArticle[]
+  notifications      Notification[]
+  satisfaction_given SatisfactionSurvey[]
+  audit_logs         AuditLog[]
+
+  @@index([email])
+  @@index([role, status])
+  @@map("users")
+}
+
+/// Produtos da empresa Health & Safety
+model Product {
+  id          String   @id @default(uuid()) @db.Uuid
+  name        String   @db.VarChar(255)
+  description String?  @db.Text
+  version     String?  @db.VarChar(50)
+  is_active   Boolean  @default(true)
+  created_at  DateTime @default(now()) @db.Timestamptz
+  updated_at  DateTime @updatedAt @db.Timestamptz
+
+  // Relacionamentos
+  equipments Equipment[]
+  tickets    Ticket[]
+
+  @@index([name])
+  @@map("products")
+}
+
+/// Equipamentos associados a produtos
+model Equipment {
+  id            String   @id @default(uuid()) @db.Uuid
+  product_id    String   @db.Uuid
+  name          String   @db.VarChar(255)
+  serial_number String?  @unique @db.VarChar(100)
+  model         String?  @db.VarChar(100)
+  description   String?  @db.Text
+  is_active     Boolean  @default(true)
+  created_at    DateTime @default(now()) @db.Timestamptz
+  updated_at    DateTime @updatedAt @db.Timestamptz
+
+  // Relacionamentos
+  product Product  @relation(fields: [product_id], references: [id], onDelete: Cascade)
+  tickets Ticket[]
+
+  @@index([product_id])
+  @@index([serial_number])
+  @@map("equipments")
+}
+
+/// Tickets de suporte (entidade principal)
+model Ticket {
+  id           String         @id @default(uuid()) @db.Uuid
+  protocol     String         @unique @db.VarChar(20) // HS-2026-0001
+  title        String         @db.VarChar(255)
+  description  String         @db.Text
+  status       TicketStatus   @default(open)
+  priority     TicketPriority @default(medium)
+  category     TicketCategory @default(general)
+  creator_id   String         @db.Uuid
+  assignee_id  String?        @db.Uuid
+  product_id   String?        @db.Uuid
+  equipment_id String?        @db.Uuid
+
+  // SLA
+  sla_config_id       String?   @db.Uuid
+  sla_response_due_at DateTime? @db.Timestamptz
+  sla_resolve_due_at  DateTime? @db.Timestamptz
+  sla_first_response  DateTime? @db.Timestamptz
+  sla_resolved_at     DateTime? @db.Timestamptz
+  sla_response_breach Boolean   @default(false)
+  sla_resolve_breach  Boolean   @default(false)
+  sla_paused_at       DateTime? @db.Timestamptz
+  sla_total_paused_ms Int       @default(0)
+
+  // IA
+  ai_classification String? @db.VarChar(100)
+  ai_confidence     Float?  @db.DoublePrecision
+  ai_summary        String? @db.Text
+
+  closed_at  DateTime? @db.Timestamptz
+  created_at DateTime  @default(now()) @db.Timestamptz
+  updated_at DateTime  @updatedAt @db.Timestamptz
+
+  // Relacionamentos
+  creator    User       @relation("TicketCreator", fields: [creator_id], references: [id])
+  assignee   User?      @relation("TicketAssignee", fields: [assignee_id], references: [id])
+  product    Product?   @relation(fields: [product_id], references: [id])
+  equipment  Equipment? @relation(fields: [equipment_id], references: [id])
+  sla_config SLAConfig? @relation(fields: [sla_config_id], references: [id])
+
+  histories           TicketHistory[]
+  attachments         Attachment[]
+  chat_messages       ChatMessage[]
+  satisfaction_survey SatisfactionSurvey?
+
+  @@index([protocol])
+  @@index([status])
+  @@index([priority])
+  @@index([creator_id])
+  @@index([assignee_id])
+  @@index([created_at])
+  @@index([status, priority])
+  @@index([assignee_id, status])
+  @@map("tickets")
+}
+
+/// Historico de alteracoes de tickets
+model TicketHistory {
+  id         String   @id @default(uuid()) @db.Uuid
+  ticket_id  String   @db.Uuid
+  user_id    String   @db.Uuid
+  field      String   @db.VarChar(100) // campo alterado
+  old_value  String?  @db.Text
+  new_value  String?  @db.Text
+  comment    String?  @db.Text
+  created_at DateTime @default(now()) @db.Timestamptz
+
+  // Relacionamentos
+  ticket Ticket @relation(fields: [ticket_id], references: [id], onDelete: Cascade)
+  user   User   @relation(fields: [user_id], references: [id])
+
+  @@index([ticket_id])
+  @@index([ticket_id, created_at])
+  @@map("ticket_history")
+}
+
+/// Anexos de tickets
+model Attachment {
+  id            String   @id @default(uuid()) @db.Uuid
+  ticket_id     String   @db.Uuid
+  uploaded_by   String   @db.Uuid
+  original_name String   @db.VarChar(255)
+  stored_name   String   @db.VarChar(255) // nome no MinIO
+  mime_type     String   @db.VarChar(100)
+  size_bytes    Int
+  s3_key        String   @db.VarChar(500) // path no MinIO
+  s3_bucket     String   @db.VarChar(100)
+  virus_scanned Boolean  @default(false)
+  virus_clean   Boolean  @default(false)
+  created_at    DateTime @default(now()) @db.Timestamptz
+
+  // Relacionamentos
+  ticket Ticket @relation(fields: [ticket_id], references: [id], onDelete: Cascade)
+  user   User   @relation(fields: [uploaded_by], references: [id])
+
+  @@index([ticket_id])
+  @@map("attachments")
+}
+
+/// Mensagens de chat em tempo real (Socket.IO)
+model ChatMessage {
+  id        String   @id @default(uuid()) @db.Uuid
+  ticket_id String   @db.Uuid
+  sender_id String   @db.Uuid
+  content   String   @db.Text
+  is_system Boolean  @default(false) // mensagens automaticas
+  is_ai     Boolean  @default(false) // mensagens geradas por IA
+  read_at   DateTime? @db.Timestamptz
+  created_at DateTime @default(now()) @db.Timestamptz
+
+  // Relacionamentos
+  ticket Ticket @relation(fields: [ticket_id], references: [id], onDelete: Cascade)
+  sender User   @relation(fields: [sender_id], references: [id])
+
+  @@index([ticket_id])
+  @@index([ticket_id, created_at])
+  @@map("chat_messages")
+}
+
+/// Artigos da Base de Conhecimento
+model KBArticle {
+  id         String          @id @default(uuid()) @db.Uuid
+  title      String          @db.VarChar(255)
+  content    String          @db.Text
+  slug       String          @unique @db.VarChar(255)
+  category   TicketCategory  @default(general)
+  tags       String[]        @db.VarChar(50) // array de tags
+  status     KBArticleStatus @default(draft)
+  author_id  String          @db.Uuid
+  view_count Int             @default(0)
+  helpful    Int             @default(0) // votos positivos
+  not_helpful Int            @default(0) // votos negativos
+  created_at DateTime        @default(now()) @db.Timestamptz
+  updated_at DateTime        @updatedAt @db.Timestamptz
+
+  // Relacionamentos
+  author User @relation(fields: [author_id], references: [id])
+
+  @@index([slug])
+  @@index([category, status])
+  @@index([status])
+  @@map("kb_articles")
+}
+
+/// Configuracoes de SLA por nivel de prioridade
+model SLAConfig {
+  id                  String   @id @default(uuid()) @db.Uuid
+  level               SLALevel @unique
+  response_time_hours Int      // horas uteis para primeira resposta
+  resolve_time_hours  Int      // horas uteis para resolucao
+  warning_threshold   Int      @default(80) // % do tempo para alerta
+  is_active           Boolean  @default(true)
+  created_at          DateTime @default(now()) @db.Timestamptz
+  updated_at          DateTime @updatedAt @db.Timestamptz
+
+  // Relacionamentos
+  tickets Ticket[]
+
+  @@map("sla_configs")
+}
+
+/// Pesquisa de satisfacao (CSAT)
+model SatisfactionSurvey {
+  id         String   @id @default(uuid()) @db.Uuid
+  ticket_id  String   @unique @db.Uuid
+  user_id    String   @db.Uuid
+  rating     Int      @db.SmallInt // 1 a 5
+  comment    String?  @db.Text
+  created_at DateTime @default(now()) @db.Timestamptz
+
+  // Relacionamentos
+  ticket Ticket @relation(fields: [ticket_id], references: [id], onDelete: Cascade)
+  user   User   @relation(fields: [user_id], references: [id])
+
+  @@index([ticket_id])
+  @@index([rating])
+  @@map("satisfaction_surveys")
+}
+
+/// Notificacoes in-app e email
+model Notification {
+  id         String           @id @default(uuid()) @db.Uuid
+  user_id    String           @db.Uuid
+  type       NotificationType
+  title      String           @db.VarChar(255)
+  message    String           @db.Text
+  data       Json?            @db.JsonB // dados extras (ticket_id, etc.)
+  read       Boolean          @default(false)
+  read_at    DateTime?        @db.Timestamptz
+  email_sent Boolean          @default(false)
+  created_at DateTime         @default(now()) @db.Timestamptz
+
+  // Relacionamentos
+  user User @relation(fields: [user_id], references: [id], onDelete: Cascade)
+
+  @@index([user_id, read])
+  @@index([user_id, created_at])
+  @@map("notifications")
+}
+
+/// Logs de auditoria (LGPD compliance)
+model AuditLog {
+  id          String      @id @default(uuid()) @db.Uuid
+  user_id     String?     @db.Uuid
+  action      AuditAction
+  entity_type String      @db.VarChar(50) // nome da tabela
+  entity_id   String?     @db.Uuid
+  old_data    Json?       @db.JsonB
+  new_data    Json?       @db.JsonB
+  ip_address  String?     @db.VarChar(45) // suporta IPv6
+  user_agent  String?     @db.VarChar(500)
+  created_at  DateTime    @default(now()) @db.Timestamptz
+
+  // Relacionamentos
+  user User? @relation(fields: [user_id], references: [id])
+
+  @@index([user_id])
+  @@index([entity_type, entity_id])
+  @@index([action])
+  @@index([created_at])
+  @@map("audit_logs")
+}

@@ -1,0 +1,145 @@
+# ============================================================
+# HELP DESK — HEALTH & SAFETY
+# Docker Compose — Ambiente de Desenvolvimento
+# Uso: docker compose -f docker-compose.dev.yml up -d
+# ============================================================
+
+version: "3.9"
+
+services:
+  # ── PostgreSQL 15 ───────────────────────────────────────────
+  postgres:
+    image: postgres:15-alpine
+    container_name: helpdesk-postgres
+    restart: unless-stopped
+    environment:
+      POSTGRES_USER: ${POSTGRES_USER:-helpdesk_user}
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:-helpdesk_dev_123}
+      POSTGRES_DB: ${POSTGRES_DB:-helpdesk_db}
+    ports:
+      - "5432:5432"
+    volumes:
+      - postgres_data:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U ${POSTGRES_USER:-helpdesk_user} -d ${POSTGRES_DB:-helpdesk_db}"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+    networks:
+      - helpdesk-network
+
+  # ── Redis 7 ─────────────────────────────────────────────────
+  redis:
+    image: redis:7-alpine
+    container_name: helpdesk-redis
+    restart: unless-stopped
+    command: redis-server --requirepass ${REDIS_PASSWORD:-helpdesk_redis_dev}
+    ports:
+      - "6379:6379"
+    volumes:
+      - redis_data:/data
+    healthcheck:
+      test: ["CMD", "redis-cli", "-a", "${REDIS_PASSWORD:-helpdesk_redis_dev}", "ping"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+    networks:
+      - helpdesk-network
+
+  # ── MinIO (S3-compatible) ───────────────────────────────────
+  minio:
+    image: minio/minio:latest
+    container_name: helpdesk-minio
+    restart: unless-stopped
+    command: server /data --console-address ":9001"
+    environment:
+      MINIO_ROOT_USER: ${MINIO_ACCESS_KEY:-minioadmin}
+      MINIO_ROOT_PASSWORD: ${MINIO_SECRET_KEY:-minioadmin123}
+    ports:
+      - "9000:9000"   # API S3
+      - "9001:9001"   # Console Web
+    volumes:
+      - minio_data:/data
+    healthcheck:
+      test: ["CMD", "mc", "ready", "local"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+    networks:
+      - helpdesk-network
+
+  # ── ClamAV (Antivirus) ─────────────────────────────────────
+  clamav:
+    image: clamav/clamav:1.2
+    container_name: helpdesk-clamav
+    restart: unless-stopped
+    ports:
+      - "3310:3310"
+    volumes:
+      - clamav_data:/var/lib/clamav
+    healthcheck:
+      test: ["CMD", "clamdcheck"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+      start_period: 120s  # ClamAV demora para baixar as definicoes
+    networks:
+      - helpdesk-network
+
+  # ── Mailpit (SMTP fake para dev — substitui MailHog) ────────
+  mailpit:
+    image: axllent/mailpit:latest
+    container_name: helpdesk-mailpit
+    restart: unless-stopped
+    ports:
+      - "8025:8025"   # Web UI para ver emails
+      - "1025:1025"   # SMTP server
+    networks:
+      - helpdesk-network
+
+  # ── pgAdmin (opcional — interface web para PostgreSQL) ──────
+  pgadmin:
+    image: dpage/pgadmin4:latest
+    container_name: helpdesk-pgadmin
+    restart: unless-stopped
+    environment:
+      PGADMIN_DEFAULT_EMAIL: admin@healthsafety.com
+      PGADMIN_DEFAULT_PASSWORD: admin123
+      PGADMIN_LISTEN_PORT: 5050
+    ports:
+      - "5050:5050"
+    depends_on:
+      postgres:
+        condition: service_healthy
+    networks:
+      - helpdesk-network
+
+  # ── RedisInsight (opcional — interface web para Redis) ──────
+  redis-insight:
+    image: redislabs/redisinsight:latest
+    container_name: helpdesk-redis-insight
+    restart: unless-stopped
+    ports:
+      - "5540:5540"
+    depends_on:
+      redis:
+        condition: service_healthy
+    networks:
+      - helpdesk-network
+
+# ── Volumes ───────────────────────────────────────────────────
+volumes:
+  postgres_data:
+    driver: local
+  redis_data:
+    driver: local
+  minio_data:
+    driver: local
+  clamav_data:
+    driver: local
+
+# ── Network ───────────────────────────────────────────────────
+networks:
+  helpdesk-network:
+    driver: bridge
+    name: helpdesk-network
