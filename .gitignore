@@ -1,0 +1,53 @@
+# Claude Code
+CLAUDE.md
+
+# Environment
+.env
+.env.local
+.env.*.local
+
+# JWT Keys
+keys/
+
+# Node
+node_modules/
+npm-debug.log*
+yarn-debug.log*
+yarn-error.log*
+pnpm-debug.log*
+
+# Build outputs
+dist/
+build/
+.vite/
+
+# Logs
+logs/
+*.log
+
+# OS
+.DS_Store
+Thumbs.db
+
+# IDE
+.vscode/
+.idea/
+*.suo
+*.ntvs*
+*.njsproj
+*.sln
+
+# Prisma
+prisma/migrations/
+*.db
+*.db-journal
+
+# Uploads / temp files
+uploads/
+tmp/
+temp/
+
+# Docker volumes (if mounted locally)
+postgres-data/
+redis-data/
+minio-data/

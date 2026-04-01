@@ -1,6 +1,12 @@
 // ============================================================
 // HELP DESK — HEALTH & SAFETY
-// Prisma Schema — Banco de Dados PostgreSQL
+// REFERÊNCIA DE SCHEMA — NÃO UTILIZADO EM PRODUÇÃO
+//
+// Este arquivo serve como referência do design original do banco.
+// O projeto usa FastAPI + SQLAlchemy 2.0 + Alembic.
+// Os models reais estão em backend/src/models/
+// ============================================================
+// Prisma Schema — Banco de Dados PostgreSQL (REFERÊNCIA)
 // Baseado no Dicionario de Dados v1.0
 // ============================================================
 
