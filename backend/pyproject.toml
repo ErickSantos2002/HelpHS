@@ -40,6 +40,23 @@ ignore_missing_imports = true
 [tool.pytest.ini_options]
 asyncio_mode = "auto"
 testpaths = ["tests"]
+addopts = "--cov=app --cov-report=term-missing --cov-fail-under=80"
+
+# ── Coverage ─────────────────────────────────────────────────
+[tool.coverage.run]
+source = ["app"]
+omit = [
+    "app/seeds.py",
+    "app/worker/*",
+    "app/core/logging.py",
+]
+
+[tool.coverage.report]
+exclude_lines = [
+    "pragma: no cover",
+    "if __name__ == .__main__.:",
+    "raise NotImplementedError",
+]
 
 # ── Commitizen ───────────────────────────────────────────────
 [tool.commitizen]
