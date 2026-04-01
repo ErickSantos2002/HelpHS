@@ -32,13 +32,27 @@ class Settings(BaseSettings):
     redis_port: int = 6379
     redis_password: str = ""
 
-    # JWT
+    # JWT — suporta conteudo direto (producao) ou caminho de arquivo (dev)
     jwt_private_key_path: str = "./keys/private.pem"
     jwt_public_key_path: str = "./keys/public.pem"
+    jwt_private_key: str = ""  # conteudo PEM direto (prioridade sobre path)
+    jwt_public_key: str = ""  # conteudo PEM direto (prioridade sobre path)
     jwt_access_token_expires_minutes: int = 15
     jwt_refresh_token_expires_days: int = 7
     jwt_algorithm: str = "RS256"
     jwt_issuer: str = "helpdesk.healthsafetytech.com"
+
+    def get_private_key(self) -> str:
+        if self.jwt_private_key:
+            return self.jwt_private_key.replace("\\n", "\n")
+        with open(self.jwt_private_key_path) as f:
+            return f.read()
+
+    def get_public_key(self) -> str:
+        if self.jwt_public_key:
+            return self.jwt_public_key.replace("\\n", "\n")
+        with open(self.jwt_public_key_path) as f:
+            return f.read()
 
     # Security
     secret_key: str = ""
