@@ -98,6 +98,9 @@ class Settings(BaseSettings):
     # Celery
     celery_broker_url: str = "redis://localhost:6379/1"
     celery_result_backend: str = "redis://localhost:6379/2"
+    celery_default_max_retries: int = 3
+    celery_task_soft_time_limit: int = 300
+    celery_task_time_limit: int = 600
 
     # Logging
     log_level: str = "INFO"
