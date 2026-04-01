@@ -17,12 +17,17 @@ def setup_logging() -> None:
         colorize=True,
     )
 
-    logger.add(
-        f"{settings.log_dir}/app.log",
-        level=settings.log_level,
-        format="{time:YYYY-MM-DD HH:mm:ss} | {level: <8} | {name}:{line} - {message}",
-        rotation="10 MB",
-        retention="30 days",
-        compression="zip",
-        serialize=True,
-    )
+    # File logging apenas em desenvolvimento
+    if settings.is_development:
+        try:
+            logger.add(
+                f"{settings.log_dir}/app.log",
+                level=settings.log_level,
+                format="{time:YYYY-MM-DD HH:mm:ss} | {level: <8} | {name}:{line} - {message}",
+                rotation="10 MB",
+                retention="30 days",
+                compression="zip",
+                serialize=True,
+            )
+        except PermissionError:
+            logger.warning("Could not create log file — stdout only")
