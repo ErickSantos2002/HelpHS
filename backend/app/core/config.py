@@ -87,7 +87,9 @@ class Settings(BaseSettings):
     # Upload
     upload_max_file_size_mb: int = 25
     upload_max_files_per_ticket: int = 10
-    upload_allowed_extensions: str = ".pdf,.doc,.docx,.xls,.xlsx,.png,.jpg,.jpeg,.gif,.txt,.csv,.zip,.rar"
+    upload_allowed_extensions: str = (
+        ".pdf,.doc,.docx,.xls,.xlsx,.png,.jpg,.jpeg,.gif,.txt,.csv,.zip,.rar"
+    )
 
     # SLA
     sla_business_hours_start: str = "08:00"
