@@ -58,6 +58,10 @@ class Settings(BaseSettings):
     secret_key: str = ""
     bcrypt_rounds: int = 12
 
+    def model_post_init(self, __context) -> None:
+        if self.app_env == "production" and len(self.secret_key) < 32:
+            raise ValueError("SECRET_KEY must be at least 32 characters in production")
+
     # MinIO
     minio_endpoint: str = "localhost"
     minio_port: int = 9000

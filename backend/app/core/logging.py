@@ -10,15 +10,13 @@ def setup_logging() -> None:
 
     logger.remove()
 
-    logger.add(
-        sys.stdout,
-        level=settings.log_level,
-        format="<green>{time:YYYY-MM-DD HH:mm:ss}</green> | <level>{level: <8}</level> | <cyan>{name}</cyan>:<cyan>{line}</cyan> - <level>{message}</level>",
-        colorize=True,
-    )
-
-    # File logging apenas em desenvolvimento
     if settings.is_development:
+        logger.add(
+            sys.stdout,
+            level=settings.log_level,
+            format="<green>{time:YYYY-MM-DD HH:mm:ss}</green> | <level>{level: <8}</level> | <cyan>{name}</cyan>:<cyan>{line}</cyan> - <level>{message}</level>",
+            colorize=True,
+        )
         try:
             logger.add(
                 f"{settings.log_dir}/app.log",
@@ -31,3 +29,10 @@ def setup_logging() -> None:
             )
         except PermissionError:
             logger.warning("Could not create log file — stdout only")
+    else:
+        # Producao: JSON estruturado para facilitar parsing no EasyPanel/Loki
+        logger.add(
+            sys.stdout,
+            level=settings.log_level,
+            serialize=True,
+        )

@@ -8,18 +8,23 @@ settings = get_settings()
 _redis_client: aioredis.Redis | None = None
 
 
+def _make_client() -> aioredis.Redis:
+    return aioredis.from_url(
+        settings.redis_url,
+        encoding="utf-8",
+        decode_responses=True,
+        socket_connect_timeout=5,
+        socket_timeout=5,
+        retry_on_timeout=True,
+        health_check_interval=30,
+    )
+
+
 async def get_redis() -> aioredis.Redis:
+    """Retorna o cliente Redis. Thread-safe: cada worker cria sua propria instancia."""
     global _redis_client
     if _redis_client is None:
-        _redis_client = aioredis.from_url(
-            settings.redis_url,
-            encoding="utf-8",
-            decode_responses=True,
-            socket_connect_timeout=5,
-            socket_timeout=5,
-            retry_on_timeout=True,
-            health_check_interval=30,
-        )
+        _redis_client = _make_client()
     return _redis_client
 
 
