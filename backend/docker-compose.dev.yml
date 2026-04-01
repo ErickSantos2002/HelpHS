@@ -19,7 +19,7 @@ services:
     ports:
       - "5432:5432"
     volumes:
-      - postgres_data:/var/lib/postgresql/data
+      - helpdesk_postgres_data:/var/lib/postgresql/data
     healthcheck:
       test: ["CMD-SHELL", "pg_isready -U ${POSTGRES_USER:-helpdesk_user} -d ${POSTGRES_DB:-helpdesk_db}"]
       interval: 10s
@@ -37,7 +37,7 @@ services:
     ports:
       - "6379:6379"
     volumes:
-      - redis_data:/data
+      - helpdesk_redis_data:/data
     healthcheck:
       test: ["CMD", "redis-cli", "-a", "${REDIS_PASSWORD:-helpdesk_redis_dev}", "ping"]
       interval: 10s
@@ -59,7 +59,7 @@ services:
       - "9000:9000"   # API S3
       - "9001:9001"   # Console Web
     volumes:
-      - minio_data:/data
+      - helpdesk_minio_data:/data
     healthcheck:
       test: ["CMD", "curl", "-f", "http://localhost:9000/minio/health/live"]
       interval: 10s
@@ -76,7 +76,7 @@ services:
     ports:
       - "3310:3310"
     volumes:
-      - clamav_data:/var/lib/clamav
+      - helpdesk_clamav_data:/var/lib/clamav
     healthcheck:
       test: ["CMD", "clamdcheck"]
       interval: 30s
@@ -129,13 +129,13 @@ services:
 
 # ── Volumes ───────────────────────────────────────────────────
 volumes:
-  postgres_data:
+  helpdesk_postgres_data:
     driver: local
-  redis_data:
+  helpdesk_redis_data:
     driver: local
-  minio_data:
+  helpdesk_minio_data:
     driver: local
-  clamav_data:
+  helpdesk_clamav_data:
     driver: local
 
 # ── Network ───────────────────────────────────────────────────
