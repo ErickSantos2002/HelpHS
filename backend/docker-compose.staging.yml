@@ -1,0 +1,101 @@
+# ============================================================
+# HELP DESK — HEALTH & SAFETY
+# Docker Compose — Ambiente de Staging
+# Uso: docker compose -f docker-compose.staging.yml up -d
+# ============================================================
+
+services:
+  # ── PostgreSQL 15 ───────────────────────────────────────────
+  postgres:
+    image: postgres:15-alpine
+    container_name: helpdesk-staging-postgres
+    restart: unless-stopped
+    environment:
+      POSTGRES_USER: ${POSTGRES_USER}
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD}
+      POSTGRES_DB: ${POSTGRES_DB}
+    volumes:
+      - postgres_staging_data:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U ${POSTGRES_USER} -d ${POSTGRES_DB}"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+    networks:
+      - helpdesk-staging-network
+
+  # ── Redis 7 ─────────────────────────────────────────────────
+  redis:
+    image: redis:7-alpine
+    container_name: helpdesk-staging-redis
+    restart: unless-stopped
+    command: redis-server --requirepass ${REDIS_PASSWORD}
+    volumes:
+      - redis_staging_data:/data
+    healthcheck:
+      test: ["CMD", "redis-cli", "-a", "${REDIS_PASSWORD}", "ping"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+    networks:
+      - helpdesk-staging-network
+
+  # ── MinIO (S3-compatible) ───────────────────────────────────
+  minio:
+    image: minio/minio:latest
+    container_name: helpdesk-staging-minio
+    restart: unless-stopped
+    command: server /data --console-address ":9001"
+    environment:
+      MINIO_ROOT_USER: ${MINIO_ACCESS_KEY}
+      MINIO_ROOT_PASSWORD: ${MINIO_SECRET_KEY}
+    volumes:
+      - minio_staging_data:/data
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:9000/minio/health/live"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+    networks:
+      - helpdesk-staging-network
+
+  # ── ClamAV (Antivirus) ─────────────────────────────────────
+  clamav:
+    image: clamav/clamav:1.2
+    container_name: helpdesk-staging-clamav
+    restart: unless-stopped
+    volumes:
+      - clamav_staging_data:/var/lib/clamav
+    healthcheck:
+      test: ["CMD", "clamdcheck"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+      start_period: 120s
+    networks:
+      - helpdesk-staging-network
+
+  # ── Mailpit (SMTP fake para staging) ────────────────────────
+  mailpit:
+    image: axllent/mailpit:latest
+    container_name: helpdesk-staging-mailpit
+    restart: unless-stopped
+    networks:
+      - helpdesk-staging-network
+
+# ── Volumes ───────────────────────────────────────────────────
+volumes:
+  postgres_staging_data:
+    driver: local
+  redis_staging_data:
+    driver: local
+  minio_staging_data:
+    driver: local
+  clamav_staging_data:
+    driver: local
+
+# ── Network ───────────────────────────────────────────────────
+networks:
+  helpdesk-staging-network:
+    driver: bridge
+    name: helpdesk-staging-network
