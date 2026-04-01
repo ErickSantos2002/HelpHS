@@ -1,0 +1,38 @@
+# Web Framework
+fastapi==0.115.12
+uvicorn[standard]==0.34.0
+
+# Database
+sqlalchemy[asyncio]==2.0.40
+alembic==1.15.2
+asyncpg==0.30.0
+
+# Validation & Settings
+pydantic==2.11.3
+pydantic-settings==2.9.1
+
+# Authentication
+python-jose[cryptography]==3.3.0
+passlib[bcrypt]==1.7.4
+python-multipart==0.0.20
+
+# Storage (MinIO)
+boto3==1.38.8
+
+# Queue (Celery)
+celery==5.5.1
+redis==5.2.1
+
+# Email
+fastapi-mail==1.4.2
+
+# HTTP Client (for LLM integrations)
+httpx==0.28.1
+
+# Logging
+loguru==0.7.3
+
+# Utils
+python-dotenv==1.1.0
+python-dateutil==2.9.0
+pytz==2025.2
