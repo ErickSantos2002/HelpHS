@@ -28,6 +28,7 @@ from app.core.security import authorize, get_current_user
 from app.models.models import (
     AuditAction,
     AuditLog,
+    SLAConfig,
     Ticket,
     TicketStatus,
     User,
@@ -42,6 +43,13 @@ from app.schemas.ticket import (
     TicketUpdate,
 )
 from app.utils.protocol import MAX_RETRIES, generate_protocol
+from app.utils.sla import (
+    _PAUSE_STATUSES,
+    apply_sla_config,
+    check_breaches,
+    pause_sla,
+    resume_sla,
+)
 
 router = APIRouter(tags=["Tickets"])
 
@@ -112,6 +120,15 @@ async def create_ticket(
     ts = datetime.now(UTC)
     ticket_id = uuid.uuid4()
 
+    # Look up SLA config matching this ticket's priority
+    sla_result = await db.execute(
+        select(SLAConfig).where(
+            SLAConfig.level == body.priority.value,
+            SLAConfig.is_active.is_(True),
+        )
+    )
+    sla_config = sla_result.scalar_one_or_none()
+
     for attempt in range(MAX_RETRIES):
         protocol = await generate_protocol(db)
         ticket = Ticket(
@@ -131,6 +148,8 @@ async def create_ticket(
             created_at=ts,
             updated_at=ts,
         )
+        if sla_config:
+            apply_sla_config(ticket, sla_config, ts)
         db.add(ticket)
         _audit(db, AuditAction.create, actor.id, ticket.id)
         try:
@@ -252,11 +271,25 @@ async def update_ticket_status(
             detail=f"Cannot transition from '{ticket.status}' to '{body.status}'",
         )
 
+    now = datetime.now(UTC)
+    old_status = ticket.status
     ticket.status = body.status
-    ticket.updated_at = datetime.now(UTC)
+    ticket.updated_at = now
+
+    # SLA: first response timestamp (when leaving open state)
+    if old_status == TicketStatus.open and body.status != TicketStatus.open:
+        ticket.sla_first_response = now
+
+    # SLA: pause / resume clock
+    if old_status not in _PAUSE_STATUSES and body.status in _PAUSE_STATUSES:
+        pause_sla(ticket, now)
+    elif old_status in _PAUSE_STATUSES and body.status not in _PAUSE_STATUSES:
+        resume_sla(ticket, now)
+
+    check_breaches(ticket, now)
 
     if body.status in (TicketStatus.resolved, TicketStatus.closed, TicketStatus.cancelled):
-        ticket.closed_at = ticket.updated_at
+        ticket.closed_at = now
 
     _audit(db, AuditAction.status_change, actor.id, ticket.id)
     await db.commit()

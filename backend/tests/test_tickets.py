@@ -80,6 +80,9 @@ def _mock_ticket(
     t.equipment_id = None
     t.sla_response_due_at = None
     t.sla_resolve_due_at = None
+    t.sla_first_response = None
+    t.sla_paused_at = None
+    t.sla_total_paused_ms = 0
     t.sla_response_breach = False
     t.sla_resolve_breach = False
     t.closed_at = None
