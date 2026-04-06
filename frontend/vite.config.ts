@@ -23,10 +23,16 @@ export default defineConfig({
     environment: "happy-dom",
     globals: true,
     setupFiles: ["./src/test/setup.ts"],
+    exclude: ["node_modules", "e2e/**"],
     coverage: {
       provider: "v8",
       reporter: ["text", "lcov"],
-      include: ["src/components/ui/**/*.tsx", "src/lib/**/*.ts"],
+      include: [
+        "src/components/ui/**/*.tsx",
+        "src/lib/**/*.ts",
+        "src/services/**/*.ts",
+        "src/contexts/**/*.tsx",
+      ],
     },
   },
 });
