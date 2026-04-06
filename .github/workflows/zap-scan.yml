@@ -1,0 +1,69 @@
+name: OWASP ZAP DAST
+
+# Triggered manually against any live environment (staging, prod, or local tunnel).
+# Requires the backend to be running and accessible at the provided URL.
+#
+# Usage:
+#   gh workflow run zap-scan.yml \
+#     -f target_url=https://staging.example.com/api/v1
+#
+# Local run (Docker):
+#   docker run --rm -v $(pwd)/zap:/zap/wrk/:rw \
+#     ghcr.io/zaproxy/zaproxy:stable \
+#     zap-api-scan.py -t http://host.docker.internal:8001/api/v1/openapi.json \
+#     -f openapi -r zap/results/zap-report.html
+
+on:
+  workflow_dispatch:
+    inputs:
+      target_url:
+        description: "Base API URL to scan (must be reachable from runner)"
+        required: true
+        default: "https://staging.helphs.example.com/api/v1"
+      fail_on_warn:
+        description: "Fail the job if ZAP finds warnings (WARN-NEW alerts)"
+        required: false
+        default: "false"
+        type: choice
+        options:
+          - "true"
+          - "false"
+
+jobs:
+  zap-api-scan:
+    name: ZAP API Scan
+    runs-on: ubuntu-latest
+
+    permissions:
+      contents: read
+      issues: write   # ZAP action can open GitHub issues for findings
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Verify target is reachable
+        run: |
+          echo "Scanning: ${{ github.event.inputs.target_url }}"
+          curl --fail --max-time 10 \
+            "${{ github.event.inputs.target_url }}/health" \
+            || (echo "ERROR: target not reachable" && exit 1)
+
+      - name: OWASP ZAP API Scan
+        uses: zaproxy/action-api-scan@v0.9.0
+        with:
+          # FastAPI exposes OpenAPI spec at /openapi.json
+          target: "${{ github.event.inputs.target_url }}/openapi.json"
+          format: openapi
+          # -l WARN: report warnings and above; remove to report INFO too
+          cmd_options: "-l WARN"
+          fail_action: ${{ github.event.inputs.fail_on_warn == 'true' }}
+          artifact_name: zap-report
+
+      - name: Upload ZAP report
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: zap-report-${{ github.run_number }}
+          path: report_html.html
+          retention-days: 30
