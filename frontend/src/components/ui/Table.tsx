@@ -1,4 +1,4 @@
-import { ReactNode } from "react";
+import type { ReactNode } from "react";
 import { cn } from "../../lib/utils";
 
 // ── Table ─────────────────────────────────────────────────────
@@ -42,7 +42,7 @@ export function TableBody({
   children,
   className,
 }: {
-  children: ReactNode;
+  children?: ReactNode;
   className?: string;
 }) {
   return (

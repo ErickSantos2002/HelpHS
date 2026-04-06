@@ -5,7 +5,8 @@
  * Response: on 401, tries to refresh the token once, then retries;
  *           if refresh fails, clears session and redirects to /login.
  */
-import axios, { AxiosError, InternalAxiosRequestConfig } from "axios";
+import axios, { AxiosError } from "axios";
+import type { InternalAxiosRequestConfig } from "axios";
 
 const BASE_URL = import.meta.env.VITE_API_URL ?? "/api/v1";
 

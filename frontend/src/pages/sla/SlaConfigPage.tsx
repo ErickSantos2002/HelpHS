@@ -1,6 +1,6 @@
 import { zodResolver } from "@hookform/resolvers/zod";
 import { useEffect, useState } from "react";
-import { useForm } from "react-hook-form";
+import { useForm, type Resolver } from "react-hook-form";
 import { z } from "zod";
 import {
   Alert,
@@ -79,7 +79,7 @@ function SlaEditModal({ config, onClose, onSaved }: SlaEditModalProps) {
   const [submitError, setSubmitError] = useState<string | null>(null);
 
   const form = useForm<EditValues>({
-    resolver: zodResolver(editSchema),
+    resolver: zodResolver(editSchema) as Resolver<EditValues>,
     defaultValues: {
       response_time_hours: config.response_time_hours,
       resolve_time_hours: config.resolve_time_hours,

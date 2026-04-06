@@ -24,6 +24,7 @@ from sqlalchemy import func, literal, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.core.database import get_db
+from app.core.redis import get_redis
 from app.core.security import authorize
 from app.models.models import (
     SatisfactionSurvey,
@@ -48,71 +49,90 @@ from app.schemas.dashboard import (
 
 router = APIRouter(tags=["Dashboard"])
 
+_STATS_CACHE_KEY = "dashboard:stats"
+_STATS_CACHE_TTL = 60  # seconds
+
 
 @router.get("/dashboard/stats", response_model=DashboardStats)
 async def get_dashboard_stats(
     db: Annotated[AsyncSession, Depends(get_db)],
     _actor: Annotated[User, Depends(authorize(UserRole.admin, UserRole.technician))],
 ) -> DashboardStats:
-    # ── Ticket counts by status ───────────────────────────────
-    async def count_tickets(**filters) -> int:
-        q = select(func.count()).select_from(Ticket)
-        for col, val in filters.items():
-            q = q.where(getattr(Ticket, col) == val)
-        return (await db.execute(q)).scalar_one()
+    # ── Try Redis cache first ─────────────────────────────────
+    try:
+        redis = await get_redis()
+        cached = await redis.get(_STATS_CACHE_KEY)
+        if cached:
+            return DashboardStats.model_validate_json(cached)
+    except Exception:
+        pass  # Redis unavailable — fall through to DB
 
-    total = await count_tickets()
-    open_ = await count_tickets(status=TicketStatus.open)
-    in_progress = await count_tickets(status=TicketStatus.in_progress)
-    awaiting = await count_tickets(status=TicketStatus.awaiting_client) + await count_tickets(
-        status=TicketStatus.awaiting_technical
+    # ── Ticket counts — single GROUP BY query per dimension ───
+    status_rows = (
+        await db.execute(select(Ticket.status, func.count().label("cnt")).group_by(Ticket.status))
+    ).all()
+    by_status: dict[str, int] = {r.status.value: r.cnt for r in status_rows}
+
+    priority_rows = (
+        await db.execute(
+            select(Ticket.priority, func.count().label("cnt")).group_by(Ticket.priority)
+        )
+    ).all()
+    by_priority: dict[str, int] = {r.priority.value: r.cnt for r in priority_rows}
+
+    total = sum(by_status.values())
+    awaiting = by_status.get(TicketStatus.awaiting_client.value, 0) + by_status.get(
+        TicketStatus.awaiting_technical.value, 0
     )
-    resolved = await count_tickets(status=TicketStatus.resolved)
-    closed = await count_tickets(status=TicketStatus.closed)
-    cancelled = await count_tickets(status=TicketStatus.cancelled)
 
-    # ── Ticket counts by priority ─────────────────────────────
-    p_critical = await count_tickets(priority=TicketPriority.critical)
-    p_high = await count_tickets(priority=TicketPriority.high)
-    p_medium = await count_tickets(priority=TicketPriority.medium)
-    p_low = await count_tickets(priority=TicketPriority.low)
-
-    # ── SLA breaches ──────────────────────────────────────────
-    resp_breached = (
+    # ── SLA breaches — single query with conditional aggregation
+    sla_row = (
         await db.execute(
-            select(func.count()).select_from(Ticket).where(Ticket.sla_response_breach.is_(True))
+            select(
+                func.count().filter(Ticket.sla_response_breach.is_(True)).label("resp"),
+                func.count().filter(Ticket.sla_resolve_breach.is_(True)).label("resolve"),
+            ).select_from(Ticket)
         )
-    ).scalar_one()
-    resolve_breached = (
+    ).one()
+
+    # ── Survey stats — single query ───────────────────────────
+    survey_row = (
         await db.execute(
-            select(func.count()).select_from(Ticket).where(Ticket.sla_resolve_breach.is_(True))
+            select(
+                func.count().label("total"),
+                func.avg(SatisfactionSurvey.rating).label("avg"),
+            ).select_from(SatisfactionSurvey)
         )
-    ).scalar_one()
+    ).one()
 
-    # ── Survey stats ──────────────────────────────────────────
-    survey_total = (
-        await db.execute(select(func.count()).select_from(SatisfactionSurvey))
-    ).scalar_one()
-    avg_raw = (await db.execute(select(func.avg(SatisfactionSurvey.rating)))).scalar_one()
-    avg_rating = round(float(avg_raw), 2) if avg_raw is not None else None
+    avg_rating = round(float(survey_row.avg), 2) if survey_row.avg is not None else None
 
-    return DashboardStats(
+    result = DashboardStats(
         tickets=TicketStats(
             total=total,
-            open=open_,
-            in_progress=in_progress,
+            open=by_status.get(TicketStatus.open.value, 0),
+            in_progress=by_status.get(TicketStatus.in_progress.value, 0),
             awaiting=awaiting,
-            resolved=resolved,
-            closed=closed,
-            cancelled=cancelled,
-            by_priority_critical=p_critical,
-            by_priority_high=p_high,
-            by_priority_medium=p_medium,
-            by_priority_low=p_low,
+            resolved=by_status.get(TicketStatus.resolved.value, 0),
+            closed=by_status.get(TicketStatus.closed.value, 0),
+            cancelled=by_status.get(TicketStatus.cancelled.value, 0),
+            by_priority_critical=by_priority.get(TicketPriority.critical.value, 0),
+            by_priority_high=by_priority.get(TicketPriority.high.value, 0),
+            by_priority_medium=by_priority.get(TicketPriority.medium.value, 0),
+            by_priority_low=by_priority.get(TicketPriority.low.value, 0),
         ),
-        surveys=SurveyStats(total=survey_total, average_rating=avg_rating),
-        sla=SlaStats(response_breached=resp_breached, resolve_breached=resolve_breached),
+        surveys=SurveyStats(total=survey_row.total, average_rating=avg_rating),
+        sla=SlaStats(response_breached=sla_row.resp, resolve_breached=sla_row.resolve),
     )
+
+    # ── Populate cache ────────────────────────────────────────
+    try:
+        redis = await get_redis()
+        await redis.setex(_STATS_CACHE_KEY, _STATS_CACHE_TTL, result.model_dump_json())
+    except Exception:
+        pass
+
+    return result
 
 
 async def _build_report(db: AsyncSession, period: int) -> ReportData:
@@ -157,26 +177,24 @@ async def _build_report(db: AsyncSession, period: int) -> ReportData:
         if cat.value not in present:
             tickets_by_category.append(CategoryCount(category=cat.value, count=0))
 
+    # ── SLA compliance — single query with conditional aggregation
+    sla_rows = (
+        await db.execute(
+            select(
+                Ticket.priority,
+                func.count().label("total"),
+                func.count().filter(Ticket.sla_resolve_breach.is_(True)).label("breached"),
+            )
+            .where(Ticket.created_at >= since)
+            .group_by(Ticket.priority)
+        )
+    ).all()
+    sla_by_priority: dict[str, tuple[int, int]] = {
+        r.priority.value: (r.total, r.breached) for r in sla_rows
+    }
     sla_compliance: list[SLAComplianceItem] = []
     for priority in TicketPriority:
-        p_total = (
-            await db.execute(
-                select(func.count())
-                .select_from(Ticket)
-                .where(Ticket.priority == priority, Ticket.created_at >= since)
-            )
-        ).scalar_one()
-        p_breached = (
-            await db.execute(
-                select(func.count())
-                .select_from(Ticket)
-                .where(
-                    Ticket.priority == priority,
-                    Ticket.created_at >= since,
-                    Ticket.sla_resolve_breach.is_(True),
-                )
-            )
-        ).scalar_one()
+        p_total, p_breached = sla_by_priority.get(priority.value, (0, 0))
         rate = round((1 - p_breached / p_total) * 100, 1) if p_total > 0 else 100.0
         sla_compliance.append(
             SLAComplianceItem(

@@ -230,8 +230,8 @@ export default function ReportsPage() {
                 />
                 <Tooltip
                   contentStyle={tooltipStyle}
-                  labelFormatter={(v: string) => `Data: ${v}`}
-                  formatter={(v: number) => [v, "Tickets"]}
+                  labelFormatter={(v) => `Data: ${v}`}
+                  formatter={(v) => [v ?? 0, "Tickets"]}
                 />
                 <Area
                   type="monotone"
@@ -274,8 +274,8 @@ export default function ReportsPage() {
                   />
                   <Tooltip
                     contentStyle={tooltipStyle}
-                    formatter={(v: number) => [v, "Tickets"]}
-                    labelFormatter={(v: string) => CATEGORY_LABELS[v] ?? v}
+                    formatter={(v) => [v ?? 0, "Tickets"]}
+                    labelFormatter={(v) => CATEGORY_LABELS[String(v)] ?? v}
                   />
                   <Bar dataKey="count" fill="#6366f1" radius={[0, 4, 4, 0]} />
                 </BarChart>
@@ -302,8 +302,8 @@ export default function ReportsPage() {
                   />
                   <Tooltip
                     contentStyle={tooltipStyle}
-                    formatter={(v: number) => [`${v}%`, "Conformidade"]}
-                    labelFormatter={(v: string) => PRIORITY_LABELS[v] ?? v}
+                    formatter={(v) => [`${v ?? 0}%`, "Conformidade"]}
+                    labelFormatter={(v) => PRIORITY_LABELS[String(v)] ?? v}
                   />
                   <Bar dataKey="compliance_rate" radius={[4, 4, 0, 0]}>
                     {data.sla_compliance.map((entry) => (
@@ -336,10 +336,11 @@ export default function ReportsPage() {
                   />
                   <Tooltip
                     contentStyle={tooltipStyle}
-                    formatter={(v: number) => [v, "Avaliações"]}
-                    labelFormatter={(v: number) =>
-                      `${v} estrela${v !== 1 ? "s" : ""}`
-                    }
+                    formatter={(v) => [v ?? 0, "Avaliações"]}
+                    labelFormatter={(v) => {
+                      const n = Number(v ?? 0);
+                      return `${n} estrela${n !== 1 ? "s" : ""}`;
+                    }}
                   />
                   <Bar dataKey="count" radius={[4, 4, 0, 0]}>
                     {data.csat_distribution.map((entry) => (

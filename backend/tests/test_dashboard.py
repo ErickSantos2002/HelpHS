@@ -63,6 +63,7 @@ def _empty_db():
       - scalar_one_or_none()   → None
       - .all()                 → []
       - scalars().all()        → []
+      - .one()                 → named-tuple-like object with all fields = 0/None
     """
 
     async def _execute(*args, **kwargs):
@@ -71,6 +72,13 @@ def _empty_db():
         result.scalar_one_or_none.return_value = None
         result.all.return_value = []
         result.scalars.return_value.all.return_value = []
+        # Cover combined-column queries that call .one()
+        one = MagicMock()
+        one.resp = 0
+        one.resolve = 0
+        one.total = 0
+        one.avg = None
+        result.one.return_value = one
         return result
 
     session = AsyncMock()
@@ -93,7 +101,10 @@ def _clear_overrides():
 
 @pytest.fixture()
 def patch_redis():
-    with patch("app.core.security.get_redis", new=_get_redis):
+    with (
+        patch("app.core.security.get_redis", new=_get_redis),
+        patch("app.routers.dashboard.get_redis", new=_get_redis),
+    ):
         yield
 
 

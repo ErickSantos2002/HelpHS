@@ -29,10 +29,10 @@ const STATUS_OPTIONS = [
   { value: "archived", label: "Arquivado" },
 ];
 
-const STATUS_BADGE: Record<KBArticleStatus, string> = {
+const STATUS_BADGE: Record<KBArticleStatus, "success" | "warning" | "muted"> = {
   published: "success",
   draft: "warning",
-  archived: "default",
+  archived: "muted",
 };
 
 const STATUS_LABEL: Record<KBArticleStatus, string> = {
@@ -172,14 +172,7 @@ export default function KBListPage() {
                       {article.title}
                     </Link>
                     {isStaff && (
-                      <Badge
-                        variant={
-                          STATUS_BADGE[article.status] as
-                            | "success"
-                            | "warning"
-                            | "default"
-                        }
-                      >
+                      <Badge variant={STATUS_BADGE[article.status]}>
                         {STATUS_LABEL[article.status]}
                       </Badge>
                     )}

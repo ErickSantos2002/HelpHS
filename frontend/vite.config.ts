@@ -1,9 +1,21 @@
-import { defineConfig } from "vite";
+import { defineConfig } from "vitest/config";
 import react from "@vitejs/plugin-react-swc";
 
 // https://vite.dev/config/
 export default defineConfig({
   plugins: [react()],
+  build: {
+    rollupOptions: {
+      output: {
+        manualChunks: {
+          // Core React runtime — cached across all page loads
+          "vendor-react": ["react", "react-dom", "react-router-dom"],
+          // Form / validation libs
+          "vendor-forms": ["react-hook-form", "@hookform/resolvers", "zod"],
+        },
+      },
+    },
+  },
   server: {
     port: 5173,
     proxy: {

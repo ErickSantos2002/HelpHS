@@ -4,8 +4,8 @@ import {
   useState,
   useEffect,
   useCallback,
-  ReactNode,
 } from "react";
+import type { ReactNode } from "react";
 import type { AuthUser } from "../types/auth";
 import { tokenStorage } from "../services/api";
 import { getMeApi, loginApi, logoutApi } from "../services/authService";

@@ -37,7 +37,7 @@ const schema = z.object({
     .min(10, "Descrição deve ter ao menos 10 caracteres")
     .max(5000, "Descrição muito longa"),
   priority: z.enum(["critical", "high", "medium", "low"], {
-    required_error: "Selecione uma prioridade",
+    message: "Selecione uma prioridade",
   }),
   category: z.string().min(1, "Selecione uma categoria"),
   product_id: z.string().optional(),
@@ -360,7 +360,7 @@ export default function TicketFormPage() {
     setValue("equipment_id", "");
     setEquipments([]);
     if (selectedProductId) {
-      getEquipments(selectedProductId).then(setEquipments);
+      getEquipments(selectedProductId).then((res) => setEquipments(res.items));
     }
   }, [selectedProductId, setValue]);
 
