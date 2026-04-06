@@ -5,7 +5,7 @@ Pydantic v2 schemas for Chat endpoints.
 import uuid
 from datetime import datetime
 
-from pydantic import ConfigDict
+from pydantic import ConfigDict, Field
 
 from app.schemas.base import AppBaseModel
 
@@ -43,7 +43,7 @@ class ChatMessageListResponse(AppBaseModel):
 
 
 class ChatMessageCreate(AppBaseModel):
-    content: str
+    content: str = Field(..., min_length=1)
 
 
 class SuggestReplyResponse(AppBaseModel):

@@ -83,6 +83,10 @@ def _mock_ticket(status=TicketStatus.open, creator_id=None):
     t.closed_at = None
     t.created_at = _NOW
     t.updated_at = _NOW
+    t.ai_classification = None
+    t.ai_confidence = None
+    t.ai_summary = None
+    t.ai_conversation_summary = None
     return t
 
 
