@@ -7,13 +7,15 @@ export default defineConfig({
   server: {
     port: 5173,
     proxy: {
+      // WebSocket must be matched before the generic /api rule
+      "/api/v1/ws": {
+        target: "ws://localhost:8001",
+        ws: true,
+        changeOrigin: true,
+      },
       "/api": {
         target: "http://localhost:8001",
         changeOrigin: true,
-      },
-      "/ws": {
-        target: "ws://localhost:8000",
-        ws: true,
       },
     },
   },
