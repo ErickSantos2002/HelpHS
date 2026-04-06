@@ -394,3 +394,245 @@ async def test_list_users_as_client_forbidden(patch_redis):
     async with AsyncClient(transport=ASGITransport(app=app), base_url="http://test") as c:
         resp = await c.get("/api/v1/users")
     assert resp.status_code == 403
+
+
+# ── Helper: two-step DB (user lookup + scalar count) ─────────
+
+
+def _db_two_step(first_user, count_value: int = 0):
+    """First execute returns a user; second returns a scalar count."""
+    calls = iter([first_user, count_value])
+
+    async def _execute(*args, **kwargs):
+        val = next(calls, None)
+        result = MagicMock()
+        if isinstance(val, int):
+            result.scalar_one_or_none.return_value = None
+            result.scalar_one.return_value = val
+        else:
+            result.scalar_one_or_none.return_value = val
+            result.scalar_one.return_value = 1 if val else 0
+        result.scalars.return_value.all.return_value = (
+            [val] if val and not isinstance(val, int) else []
+        )
+        return result
+
+    session = AsyncMock()
+    session.execute = _execute
+    session.add = MagicMock()
+    session.commit = AsyncMock()
+    session.refresh = AsyncMock()
+    session.delete = AsyncMock()
+
+    async def _gen():
+        yield session
+
+    return _gen
+
+
+# GET /users/{id} — 404
+
+
+@pytest.mark.asyncio
+async def test_get_user_not_found(patch_redis):
+    from app.core.database import get_db
+    from app.core.security import get_current_user
+
+    app.dependency_overrides[get_db] = _simple_db(None)
+
+    async def _admin():
+        return _ADMIN
+
+    app.dependency_overrides[get_current_user] = _admin
+
+    async with AsyncClient(transport=ASGITransport(app=app), base_url="http://test") as c:
+        resp = await c.get(f"/api/v1/users/{uuid.uuid4()}")
+    assert resp.status_code == 404
+
+
+# PATCH /users/{id}/status — 404
+
+
+@pytest.mark.asyncio
+async def test_update_status_user_not_found(patch_redis):
+    from app.core.database import get_db
+    from app.core.security import get_current_user
+
+    target_id = uuid.uuid4()
+    app.dependency_overrides[get_db] = _simple_db(None)
+
+    async def _admin():
+        return _ADMIN
+
+    app.dependency_overrides[get_current_user] = _admin
+
+    async with AsyncClient(transport=ASGITransport(app=app), base_url="http://test") as c:
+        resp = await c.patch(f"/api/v1/users/{target_id}/status", json={"status": "inactive"})
+    assert resp.status_code == 404
+
+
+# PATCH /users/me/lgpd-consent
+
+
+@pytest.mark.asyncio
+async def test_update_lgpd_consent(patch_redis):
+    from app.core.database import get_db
+    from app.core.security import get_current_user
+
+    app.dependency_overrides[get_db] = _simple_db(_CLIENT)
+
+    async def _client_user():
+        return _CLIENT
+
+    app.dependency_overrides[get_current_user] = _client_user
+
+    async with AsyncClient(transport=ASGITransport(app=app), base_url="http://test") as c:
+        resp = await c.patch("/api/v1/users/me/lgpd-consent", json={"lgpd_consent": True})
+    assert resp.status_code == 200
+
+
+# PATCH /users/{id} — admin updates another user
+
+
+@pytest.mark.asyncio
+async def test_update_user_as_admin(patch_redis):
+    target = _user(UserRole.client)
+    from app.core.database import get_db
+    from app.core.security import get_current_user
+
+    app.dependency_overrides[get_db] = _simple_db(target)
+
+    async def _admin():
+        return _ADMIN
+
+    app.dependency_overrides[get_current_user] = _admin
+
+    async with AsyncClient(transport=ASGITransport(app=app), base_url="http://test") as c:
+        resp = await c.patch(f"/api/v1/users/{target.id}", json={"name": "Nome Atualizado"})
+    assert resp.status_code == 200
+
+
+# POST /users/{id}/anonymize — success
+
+
+@pytest.mark.asyncio
+async def test_anonymize_user(patch_redis):
+    target = _user(UserRole.client)
+    from app.core.database import get_db
+    from app.core.security import get_current_user
+
+    app.dependency_overrides[get_db] = _simple_db(target)
+
+    async def _admin():
+        return _ADMIN
+
+    app.dependency_overrides[get_current_user] = _admin
+
+    async with AsyncClient(transport=ASGITransport(app=app), base_url="http://test") as c:
+        resp = await c.post(f"/api/v1/users/{target.id}/anonymize")
+    assert resp.status_code == 200
+
+
+# POST /users/{id}/anonymize — cannot anonymize self
+
+
+@pytest.mark.asyncio
+async def test_anonymize_self_blocked(patch_redis):
+    from app.core.database import get_db
+    from app.core.security import get_current_user
+
+    app.dependency_overrides[get_db] = _simple_db(_ADMIN)
+
+    async def _admin():
+        return _ADMIN
+
+    app.dependency_overrides[get_current_user] = _admin
+
+    async with AsyncClient(transport=ASGITransport(app=app), base_url="http://test") as c:
+        resp = await c.post(f"/api/v1/users/{_ADMIN.id}/anonymize")
+    assert resp.status_code == 400
+
+
+# POST /users/{id}/anonymize — already anonymized → 409
+
+
+@pytest.mark.asyncio
+async def test_anonymize_already_anonymized(patch_redis):
+    target = _user(UserRole.client, status=UserStatus.anonymized)
+    from app.core.database import get_db
+    from app.core.security import get_current_user
+
+    app.dependency_overrides[get_db] = _simple_db(target)
+
+    async def _admin():
+        return _ADMIN
+
+    app.dependency_overrides[get_current_user] = _admin
+
+    async with AsyncClient(transport=ASGITransport(app=app), base_url="http://test") as c:
+        resp = await c.post(f"/api/v1/users/{target.id}/anonymize")
+    assert resp.status_code == 409
+
+
+# DELETE /users/{id} — success (no tickets)
+
+
+@pytest.mark.asyncio
+async def test_delete_user_success(patch_redis):
+    target = _user(UserRole.client)
+    from app.core.database import get_db
+    from app.core.security import get_current_user
+
+    # First execute: returns user; second: count = 0 tickets
+    app.dependency_overrides[get_db] = _db_two_step(target, count_value=0)
+
+    async def _admin():
+        return _ADMIN
+
+    app.dependency_overrides[get_current_user] = _admin
+
+    async with AsyncClient(transport=ASGITransport(app=app), base_url="http://test") as c:
+        resp = await c.delete(f"/api/v1/users/{target.id}")
+    assert resp.status_code == 204
+
+
+# DELETE /users/{id} — cannot delete self
+
+
+@pytest.mark.asyncio
+async def test_delete_self_blocked(patch_redis):
+    from app.core.database import get_db
+    from app.core.security import get_current_user
+
+    app.dependency_overrides[get_db] = _simple_db(_ADMIN)
+
+    async def _admin():
+        return _ADMIN
+
+    app.dependency_overrides[get_current_user] = _admin
+
+    async with AsyncClient(transport=ASGITransport(app=app), base_url="http://test") as c:
+        resp = await c.delete(f"/api/v1/users/{_ADMIN.id}")
+    assert resp.status_code == 400
+
+
+# DELETE /users/{id} — user has tickets → 409
+
+
+@pytest.mark.asyncio
+async def test_delete_user_has_tickets(patch_redis):
+    target = _user(UserRole.client)
+    from app.core.database import get_db
+    from app.core.security import get_current_user
+
+    # First execute: returns user; second: count = 3 tickets
+    app.dependency_overrides[get_db] = _db_two_step(target, count_value=3)
+
+    async def _admin():
+        return _ADMIN
+
+    app.dependency_overrides[get_current_user] = _admin
+
+    async with AsyncClient(transport=ASGITransport(app=app), base_url="http://test") as c:
+        resp = await c.delete(f"/api/v1/users/{target.id}")
+    assert resp.status_code == 409
