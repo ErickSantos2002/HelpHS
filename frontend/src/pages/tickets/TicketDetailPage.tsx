@@ -11,6 +11,7 @@ import {
   StatusBadge,
   Textarea,
 } from "../../components/ui";
+import { ChatPanel } from "../../components/chat/ChatPanel";
 import { useAuth } from "../../contexts/AuthContext";
 import {
   deleteAttachment,
@@ -464,6 +465,9 @@ export default function TicketDetailPage() {
               </div>
             )}
           </div>
+
+          {/* Chat */}
+          <ChatPanel ticketId={ticket.id} currentUserId={user?.id ?? ""} />
 
           {/* Timeline */}
           <div className="rounded-xl bg-background-surface border border-border p-5">
