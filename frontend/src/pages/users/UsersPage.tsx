@@ -20,7 +20,9 @@ import {
   TableRow,
 } from "../../components/ui";
 import {
+  anonymizeUser,
   createUser,
+  deleteUser,
   getUsers,
   setUserStatus,
   updateUser,
@@ -47,12 +49,14 @@ const STATUS_LABEL: Record<string, string> = {
   active: "Ativo",
   inactive: "Inativo",
   suspended: "Suspenso",
+  anonymized: "Anonimizado",
 };
 
 const STATUS_COLOR: Record<string, string> = {
   active: "text-primary",
   inactive: "text-slate-500",
   suspended: "text-danger",
+  anonymized: "text-slate-600",
 };
 
 const ROLE_OPTIONS = [
@@ -329,6 +333,11 @@ export default function UsersPage() {
   // Modals
   const [formOpen, setFormOpen] = useState(false);
   const [editing, setEditing] = useState<UserSummary | null>(null);
+  const [confirmAnonymize, setConfirmAnonymize] = useState<UserSummary | null>(
+    null,
+  );
+  const [confirmDelete, setConfirmDelete] = useState<UserSummary | null>(null);
+  const [actionLoading, setActionLoading] = useState<string | null>(null);
 
   function load(p = page) {
     setLoading(true);
@@ -371,6 +380,33 @@ export default function UsersPage() {
 
   function handleToggled(updated: UserSummary) {
     setUsers((prev) => prev.map((u) => (u.id === updated.id ? updated : u)));
+  }
+
+  async function handleAnonymize(user: UserSummary) {
+    setActionLoading(user.id);
+    try {
+      const updated = await anonymizeUser(user.id);
+      setUsers((prev) => prev.map((u) => (u.id === updated.id ? updated : u)));
+    } finally {
+      setActionLoading(null);
+      setConfirmAnonymize(null);
+    }
+  }
+
+  async function handleDelete(user: UserSummary) {
+    setActionLoading(user.id);
+    try {
+      await deleteUser(user.id);
+      setUsers((prev) => prev.filter((u) => u.id !== user.id));
+      setTotal((t) => t - 1);
+    } catch (err: unknown) {
+      const msg = (err as { response?: { data?: { detail?: string } } })
+        ?.response?.data?.detail;
+      setError(msg ?? "Erro ao excluir usuário.");
+    } finally {
+      setActionLoading(null);
+      setConfirmDelete(null);
+    }
   }
 
   const createdAt = (u: UserSummary) =>
@@ -462,15 +498,16 @@ export default function UsersPage() {
                 <TableHeaderCell className="w-52">E-mail</TableHeaderCell>
                 <TableHeaderCell className="w-32">Perfil</TableHeaderCell>
                 <TableHeaderCell className="w-28">Status</TableHeaderCell>
+                <TableHeaderCell className="w-20">LGPD</TableHeaderCell>
                 <TableHeaderCell className="w-28">Cadastrado</TableHeaderCell>
-                <TableHeaderCell className="w-24 text-right">
+                <TableHeaderCell className="w-32 text-right">
                   Ações
                 </TableHeaderCell>
               </TableRow>
             </TableHead>
             <TableBody>
               {users.length === 0 ? (
-                <TableEmpty colSpan={6} message="Nenhum usuário encontrado." />
+                <TableEmpty colSpan={7} message="Nenhum usuário encontrado." />
               ) : (
                 users.map((u) => (
                   <TableRow key={u.id}>
@@ -496,26 +533,64 @@ export default function UsersPage() {
                     </TableCell>
                     <TableCell>
                       <div className="flex items-center gap-2">
-                        <StatusToggle user={u} onToggled={handleToggled} />
+                        {u.status !== "anonymized" && (
+                          <StatusToggle user={u} onToggled={handleToggled} />
+                        )}
                         <span className={`text-xs ${STATUS_COLOR[u.status]}`}>
                           {STATUS_LABEL[u.status]}
                         </span>
                       </div>
                     </TableCell>
+                    <TableCell>
+                      <span
+                        title={
+                          u.lgpd_consent
+                            ? `Consentimento em ${new Date(u.lgpd_consent_at!).toLocaleDateString("pt-BR")}`
+                            : "Sem consentimento"
+                        }
+                        className={`text-xs font-medium ${u.lgpd_consent ? "text-green-500" : "text-slate-600"}`}
+                      >
+                        {u.lgpd_consent ? "✓ Sim" : "✗ Não"}
+                      </span>
+                    </TableCell>
                     <TableCell muted className="text-xs">
                       {createdAt(u)}
                     </TableCell>
                     <TableCell className="text-right">
-                      <Button
-                        variant="ghost"
-                        size="sm"
-                        onClick={() => {
-                          setEditing(u);
-                          setFormOpen(true);
-                        }}
-                      >
-                        Editar
-                      </Button>
+                      <div className="flex items-center justify-end gap-1">
+                        {u.status !== "anonymized" && (
+                          <Button
+                            variant="ghost"
+                            size="sm"
+                            onClick={() => {
+                              setEditing(u);
+                              setFormOpen(true);
+                            }}
+                          >
+                            Editar
+                          </Button>
+                        )}
+                        {u.status !== "anonymized" && (
+                          <Button
+                            variant="ghost"
+                            size="sm"
+                            className="text-warning hover:text-warning"
+                            onClick={() => setConfirmAnonymize(u)}
+                            loading={actionLoading === u.id}
+                          >
+                            Anonimizar
+                          </Button>
+                        )}
+                        <Button
+                          variant="ghost"
+                          size="sm"
+                          className="text-danger hover:text-danger"
+                          onClick={() => setConfirmDelete(u)}
+                          loading={actionLoading === u.id}
+                        >
+                          Excluir
+                        </Button>
+                      </div>
                     </TableCell>
                   </TableRow>
                 ))
@@ -545,6 +620,75 @@ export default function UsersPage() {
           }}
           onSaved={handleSaved}
         />
+      )}
+
+      {/* Anonymize confirmation */}
+      {confirmAnonymize && (
+        <Modal
+          open
+          onClose={() => setConfirmAnonymize(null)}
+          title="Anonimizar usuário"
+        >
+          <p className="text-sm text-slate-300 mb-2">
+            Esta ação irá substituir os dados pessoais de{" "}
+            <span className="font-semibold text-slate-100">
+              {confirmAnonymize.name}
+            </span>{" "}
+            por valores anonimizados, conforme a LGPD.
+          </p>
+          <p className="text-xs text-slate-500 mb-4">
+            Os tickets e registros de auditoria serão preservados. Esta ação não
+            pode ser desfeita.
+          </p>
+          <ModalFooter>
+            <Button
+              variant="secondary"
+              onClick={() => setConfirmAnonymize(null)}
+            >
+              Cancelar
+            </Button>
+            <Button
+              variant="danger"
+              loading={actionLoading === confirmAnonymize.id}
+              onClick={() => handleAnonymize(confirmAnonymize)}
+            >
+              Confirmar anonimização
+            </Button>
+          </ModalFooter>
+        </Modal>
+      )}
+
+      {/* Delete confirmation */}
+      {confirmDelete && (
+        <Modal
+          open
+          onClose={() => setConfirmDelete(null)}
+          title="Excluir usuário"
+        >
+          <p className="text-sm text-slate-300 mb-2">
+            Tem certeza que deseja excluir permanentemente o usuário{" "}
+            <span className="font-semibold text-slate-100">
+              {confirmDelete.name}
+            </span>
+            ?
+          </p>
+          <p className="text-xs text-slate-500 mb-4">
+            Só é possível excluir usuários sem tickets. Se o usuário possuir
+            tickets, use &ldquo;Anonimizar&rdquo; em vez disso.
+          </p>
+          <ModalFooter>
+            <Button variant="secondary" onClick={() => setConfirmDelete(null)}>
+              Cancelar
+            </Button>
+            <Button
+              variant="danger"
+              loading={actionLoading === confirmDelete.id}
+              onClick={() => handleDelete(confirmDelete)}
+            >
+              Excluir permanentemente
+            </Button>
+          </ModalFooter>
+        </Modal>
       )}
     </div>
   );

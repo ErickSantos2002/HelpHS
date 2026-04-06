@@ -5,12 +5,13 @@ export interface UserSummary {
   name: string;
   email: string;
   role: "admin" | "technician" | "client";
-  status: "active" | "inactive" | "suspended";
+  status: "active" | "inactive" | "suspended" | "anonymized";
   phone: string | null;
   department: string | null;
   avatar_url: string | null;
   last_login: string | null;
   lgpd_consent: boolean;
+  lgpd_consent_at: string | null;
   created_at: string;
   updated_at: string;
 }
@@ -85,6 +86,24 @@ export async function setUserStatus(
 ): Promise<UserSummary> {
   const { data } = await api.patch<UserSummary>(`/users/${id}/status`, {
     status,
+  });
+  return data;
+}
+
+export async function anonymizeUser(id: string): Promise<UserSummary> {
+  const { data } = await api.post<UserSummary>(`/users/${id}/anonymize`);
+  return data;
+}
+
+export async function deleteUser(id: string): Promise<void> {
+  await api.delete(`/users/${id}`);
+}
+
+export async function updateLGPDConsent(
+  consent: boolean,
+): Promise<UserSummary> {
+  const { data } = await api.patch<UserSummary>("/users/me/lgpd-consent", {
+    lgpd_consent: consent,
   });
   return data;
 }

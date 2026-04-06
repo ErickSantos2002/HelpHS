@@ -43,6 +43,7 @@ class UserRole(str, enum.Enum):
 class UserStatus(str, enum.Enum):
     active = "active"
     inactive = "inactive"
+    anonymized = "anonymized"
 
 
 class TicketStatus(str, enum.Enum):
@@ -103,6 +104,7 @@ class AuditAction(str, enum.Enum):
     assign = "assign"
     status_change = "status_change"
     password_change = "password_change"
+    anonymize = "anonymize"
 
 
 class KBArticleStatus(str, enum.Enum):

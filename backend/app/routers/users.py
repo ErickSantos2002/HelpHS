@@ -2,12 +2,15 @@
 CRUD de usuários.
 
 Permissões:
-  POST   /users              — admin
-  GET    /users              — admin
-  GET    /users/me           — qualquer autenticado
-  GET    /users/{id}         — admin (ou o próprio usuário)
-  PATCH  /users/{id}         — admin (ou o próprio usuário, sem mudar role)
-  PATCH  /users/{id}/status  — admin
+  POST   /users                   — admin
+  GET    /users                   — admin
+  GET    /users/me                — qualquer autenticado
+  GET    /users/{id}              — admin (ou o próprio usuário)
+  PATCH  /users/{id}              — admin (ou o próprio usuário, sem mudar role)
+  PATCH  /users/{id}/status       — admin
+  PATCH  /users/me/lgpd-consent   — qualquer autenticado (próprio consentimento)
+  POST   /users/{id}/anonymize    — admin (anonimiza PII — LGPD)
+  DELETE /users/{id}              — admin (exclusão, apenas sem tickets)
 """
 
 import uuid
@@ -20,8 +23,9 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.core.database import get_db
 from app.core.security import authorize, get_current_user, hash_password
-from app.models.models import AuditAction, AuditLog, User, UserRole, UserStatus
+from app.models.models import AuditAction, AuditLog, Ticket, User, UserRole, UserStatus
 from app.schemas.user import (
+    LGPDConsentUpdate,
     UserCreate,
     UserListResponse,
     UserResponse,
@@ -215,3 +219,114 @@ async def update_user_status(
     await db.commit()
     await db.refresh(user)
     return _to_response(user)
+
+
+# ── PATCH /users/me/lgpd-consent ──────────────────────────────
+
+
+@router.patch("/me/lgpd-consent", response_model=UserResponse)
+async def update_lgpd_consent(
+    body: LGPDConsentUpdate,
+    db: Annotated[AsyncSession, Depends(get_db)],
+    current_user: Annotated[User, Depends(get_current_user)],
+) -> UserResponse:
+    result = await db.execute(select(User).where(User.id == current_user.id))
+    user = result.scalar_one_or_none()
+    if not user:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="User not found")
+
+    user.lgpd_consent = body.lgpd_consent
+    user.lgpd_consent_at = datetime.now(UTC) if body.lgpd_consent else None
+    user.updated_at = datetime.now(UTC)
+    _audit(db, AuditAction.update, current_user.id, user.id)
+    await db.commit()
+    await db.refresh(user)
+    return _to_response(user)
+
+
+# ── POST /users/{user_id}/anonymize ───────────────────────────
+
+
+@router.post("/{user_id}/anonymize", response_model=UserResponse)
+async def anonymize_user(
+    user_id: uuid.UUID,
+    db: Annotated[AsyncSession, Depends(get_db)],
+    actor: Annotated[User, Depends(authorize(UserRole.admin))],
+) -> UserResponse:
+    """Anonimiza os dados pessoais do usuário (LGPD — direito ao esquecimento)."""
+    if actor.id == user_id:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail="Admins cannot anonymize their own account",
+        )
+
+    result = await db.execute(select(User).where(User.id == user_id))
+    user = result.scalar_one_or_none()
+    if not user:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="User not found")
+
+    if user.status == UserStatus.anonymized:
+        raise HTTPException(
+            status_code=status.HTTP_409_CONFLICT, detail="User is already anonymized"
+        )
+
+    ts = datetime.now(UTC)
+    user.name = f"Usuário Anonimizado {str(user_id)[:8]}"
+    user.email = f"anon_{str(user_id).replace('-', '')}@anonymized.invalid"
+    user.phone = None
+    user.department = None
+    user.avatar_url = None
+    user.lgpd_consent = False
+    user.lgpd_consent_at = None
+    user.status = UserStatus.anonymized
+    user.updated_at = ts
+
+    db.add(
+        AuditLog(
+            user_id=actor.id,
+            action=AuditAction.anonymize,
+            entity_type="user",
+            entity_id=user_id,
+            new_data={"anonymized_at": ts.isoformat()},
+        )
+    )
+    await db.commit()
+    await db.refresh(user)
+    return _to_response(user)
+
+
+# ── DELETE /users/{user_id} ───────────────────────────────────
+
+
+@router.delete("/{user_id}", status_code=status.HTTP_204_NO_CONTENT)
+async def delete_user(
+    user_id: uuid.UUID,
+    db: Annotated[AsyncSession, Depends(get_db)],
+    actor: Annotated[User, Depends(authorize(UserRole.admin))],
+) -> None:
+    """Exclui permanentemente um usuário sem tickets (LGPD)."""
+    if actor.id == user_id:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail="Admins cannot delete their own account",
+        )
+
+    result = await db.execute(select(User).where(User.id == user_id))
+    user = result.scalar_one_or_none()
+    if not user:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="User not found")
+
+    ticket_count = (
+        await db.execute(
+            select(func.count()).select_from(Ticket).where(Ticket.creator_id == user_id)
+        )
+    ).scalar_one()
+    if ticket_count > 0:
+        raise HTTPException(
+            status_code=status.HTTP_409_CONFLICT,
+            detail="Cannot delete user with existing tickets. Use anonymize instead.",
+        )
+
+    _audit(db, AuditAction.delete, actor.id, user_id)
+    await db.delete(user)
+    await db.commit()

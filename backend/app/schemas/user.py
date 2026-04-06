@@ -42,6 +42,10 @@ class UserStatusUpdate(AppBaseModel):
     status: UserStatus
 
 
+class LGPDConsentUpdate(AppBaseModel):
+    lgpd_consent: bool
+
+
 class UserResponse(AppBaseModel):
     model_config = ConfigDict(from_attributes=True, str_strip_whitespace=True)
 
@@ -55,6 +59,7 @@ class UserResponse(AppBaseModel):
     avatar_url: str | None
     last_login: datetime | None
     lgpd_consent: bool
+    lgpd_consent_at: datetime | None
     created_at: datetime
     updated_at: datetime
 
