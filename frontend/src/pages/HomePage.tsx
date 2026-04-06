@@ -1,11 +1,18 @@
-import { lazy, Suspense } from "react";
-import { Spinner } from "../components/ui";
+import { lazy, Suspense, useState } from "react";
+import {
+  Spinner,
+  Tabs,
+  TabsList,
+  TabsTrigger,
+  TabsContent,
+} from "../components/ui";
 import { useAuth } from "../contexts/AuthContext";
 
 const AdminDashboard = lazy(() => import("./dashboard/AdminDashboard"));
 const TechnicianDashboard = lazy(
   () => import("./dashboard/TechnicianDashboard"),
 );
+const ClientDashboard = lazy(() => import("./dashboard/ClientDashboard"));
 
 function Loading() {
   return (
@@ -15,21 +22,36 @@ function Loading() {
   );
 }
 
+function AdminHome() {
+  const [tab, setTab] = useState("admin");
+
+  return (
+    <Tabs value={tab} onChange={setTab} className="space-y-4">
+      <TabsList>
+        <TabsTrigger value="admin">Dashboard Admin</TabsTrigger>
+        <TabsTrigger value="technician">Dashboard Técnico</TabsTrigger>
+      </TabsList>
+
+      <Suspense fallback={<Loading />}>
+        <TabsContent value="admin">
+          <AdminDashboard />
+        </TabsContent>
+        <TabsContent value="technician">
+          <TechnicianDashboard />
+        </TabsContent>
+      </Suspense>
+    </Tabs>
+  );
+}
+
 export default function HomePage() {
   const { user } = useAuth();
 
   return (
     <Suspense fallback={<Loading />}>
-      {user?.role === "admin" && <AdminDashboard />}
+      {user?.role === "admin" && <AdminHome />}
       {user?.role === "technician" && <TechnicianDashboard />}
-      {user?.role === "client" && (
-        <div className="space-y-2">
-          <h1 className="text-2xl font-bold text-slate-100">Meus Tickets</h1>
-          <p className="text-slate-400">
-            Dashboard do cliente — disponível no T34.
-          </p>
-        </div>
-      )}
+      {user?.role === "client" && <ClientDashboard />}
     </Suspense>
   );
 }

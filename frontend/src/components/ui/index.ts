@@ -24,5 +24,8 @@ export type { SelectProps, SelectOption } from "./Select";
 
 export { Spinner } from "./Spinner";
 
+export { Tabs, TabsList, TabsTrigger, TabsContent } from "./Tabs";
+export type { TabsProps, TabsTriggerProps, TabsContentProps } from "./Tabs";
+
 export { Textarea } from "./Textarea";
 export type { TextareaProps } from "./Textarea";
