@@ -1,4 +1,4 @@
-import { ReactNode, useEffect, useRef } from "react";
+import { ReactNode, useEffect, useId, useRef } from "react";
 import { cn } from "../../lib/utils";
 
 type ModalSize = "sm" | "md" | "lg" | "xl";
@@ -9,6 +9,9 @@ const sizeClasses: Record<ModalSize, string> = {
   lg: "max-w-lg",
   xl: "max-w-2xl",
 };
+
+const FOCUSABLE =
+  'a[href], button:not([disabled]), input:not([disabled]), select:not([disabled]), textarea:not([disabled]), [tabindex]:not([tabindex="-1"])';
 
 export interface ModalProps {
   open: boolean;
@@ -27,16 +30,48 @@ export function Modal({
   children,
   className,
 }: ModalProps) {
-  const overlayRef = useRef<HTMLDivElement>(null);
+  const panelRef = useRef<HTMLDivElement>(null);
+  const titleId = useId();
 
-  // Close on Escape
+  // Close on Escape + focus trap
   useEffect(() => {
     if (!open) return;
-    const handler = (e: KeyboardEvent) => {
-      if (e.key === "Escape") onClose();
-    };
-    document.addEventListener("keydown", handler);
-    return () => document.removeEventListener("keydown", handler);
+
+    // Move focus into the modal
+    const firstFocusable =
+      panelRef.current?.querySelector<HTMLElement>(FOCUSABLE);
+    firstFocusable?.focus();
+
+    function handleKeyDown(e: KeyboardEvent) {
+      if (e.key === "Escape") {
+        onClose();
+        return;
+      }
+      if (e.key !== "Tab") return;
+
+      const focusable = Array.from(
+        panelRef.current?.querySelectorAll<HTMLElement>(FOCUSABLE) ?? [],
+      );
+      if (focusable.length === 0) return;
+
+      const first = focusable[0];
+      const last = focusable[focusable.length - 1];
+
+      if (e.shiftKey) {
+        if (document.activeElement === first) {
+          e.preventDefault();
+          last.focus();
+        }
+      } else {
+        if (document.activeElement === last) {
+          e.preventDefault();
+          first.focus();
+        }
+      }
+    }
+
+    document.addEventListener("keydown", handleKeyDown);
+    return () => document.removeEventListener("keydown", handleKeyDown);
   }, [open, onClose]);
 
   // Prevent body scroll
@@ -51,10 +86,10 @@ export function Modal({
 
   return (
     <div
-      ref={overlayRef}
       className="fixed inset-0 z-50 flex items-center justify-center p-4"
       aria-modal="true"
       role="dialog"
+      aria-labelledby={title ? titleId : undefined}
     >
       {/* Backdrop */}
       <div
@@ -64,6 +99,7 @@ export function Modal({
 
       {/* Panel */}
       <div
+        ref={panelRef}
         className={cn(
           "relative z-10 w-full rounded-xl border border-border bg-background-surface shadow-xl",
           "animate-in fade-in zoom-in-95 duration-150",
@@ -73,7 +109,9 @@ export function Modal({
       >
         {title && (
           <div className="flex items-center justify-between border-b border-border px-6 py-4">
-            <h2 className="text-base font-semibold text-slate-100">{title}</h2>
+            <h2 id={titleId} className="text-base font-semibold text-slate-100">
+              {title}
+            </h2>
             <button
               onClick={onClose}
               className="rounded-lg p-1 text-slate-400 hover:bg-background-elevated hover:text-slate-200 transition-colors"
@@ -81,6 +119,7 @@ export function Modal({
             >
               <svg
                 className="w-5 h-5"
+                aria-hidden="true"
                 fill="none"
                 viewBox="0 0 24 24"
                 stroke="currentColor"

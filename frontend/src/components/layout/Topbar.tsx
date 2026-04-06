@@ -231,10 +231,13 @@ export function Topbar({ onMenuClick }: TopbarProps) {
       <button
         className="rounded-lg p-2 text-slate-400 hover:bg-background-elevated hover:text-slate-100 transition-colors md:hidden"
         onClick={onMenuClick}
-        aria-label="Abrir menu"
+        aria-label="Abrir menu de navegação"
+        aria-expanded={false}
+        aria-controls="sidebar-nav"
       >
         <svg
           className="w-5 h-5"
+          aria-hidden="true"
           fill="none"
           viewBox="0 0 24 24"
           stroke="currentColor"
@@ -260,11 +263,18 @@ export function Topbar({ onMenuClick }: TopbarProps) {
               "relative rounded-lg p-2 text-slate-400 hover:bg-background-elevated hover:text-slate-100 transition-colors",
               notifOpen && "bg-background-elevated text-slate-100",
             )}
-            aria-label="Notificações"
+            aria-label={
+              unreadCount > 0
+                ? `Notificações — ${unreadCount} não lida${unreadCount > 1 ? "s" : ""}`
+                : "Notificações"
+            }
+            aria-expanded={notifOpen}
+            aria-haspopup="dialog"
             onClick={() => setNotifOpen((v) => !v)}
           >
             <svg
               className="w-5 h-5"
+              aria-hidden="true"
               fill="none"
               viewBox="0 0 24 24"
               stroke="currentColor"
@@ -297,6 +307,9 @@ export function Topbar({ onMenuClick }: TopbarProps) {
               userMenuOpen && "bg-background-elevated",
             )}
             onClick={() => setUserMenuOpen((v) => !v)}
+            aria-label={`Menu do usuário — ${user?.name ?? ""}`}
+            aria-expanded={userMenuOpen}
+            aria-haspopup="menu"
           >
             <Avatar name={user?.name ?? "?"} size="sm" />
             <div className="hidden md:block text-left">
@@ -309,6 +322,7 @@ export function Topbar({ onMenuClick }: TopbarProps) {
             </div>
             <svg
               className="w-4 h-4 text-slate-500 hidden md:block"
+              aria-hidden="true"
               fill="none"
               viewBox="0 0 24 24"
               stroke="currentColor"

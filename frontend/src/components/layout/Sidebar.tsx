@@ -9,6 +9,7 @@ function IconDashboard() {
   return (
     <svg
       className="w-5 h-5 shrink-0"
+      aria-hidden="true"
       fill="none"
       viewBox="0 0 24 24"
       stroke="currentColor"
@@ -27,6 +28,7 @@ function IconTicket() {
   return (
     <svg
       className="w-5 h-5 shrink-0"
+      aria-hidden="true"
       fill="none"
       viewBox="0 0 24 24"
       stroke="currentColor"
@@ -45,6 +47,7 @@ function IconUsers() {
   return (
     <svg
       className="w-5 h-5 shrink-0"
+      aria-hidden="true"
       fill="none"
       viewBox="0 0 24 24"
       stroke="currentColor"
@@ -63,6 +66,7 @@ function IconBox() {
   return (
     <svg
       className="w-5 h-5 shrink-0"
+      aria-hidden="true"
       fill="none"
       viewBox="0 0 24 24"
       stroke="currentColor"
@@ -81,6 +85,7 @@ function IconChart() {
   return (
     <svg
       className="w-5 h-5 shrink-0"
+      aria-hidden="true"
       fill="none"
       viewBox="0 0 24 24"
       stroke="currentColor"
@@ -99,6 +104,7 @@ function IconShield() {
   return (
     <svg
       className="w-5 h-5 shrink-0"
+      aria-hidden="true"
       fill="none"
       viewBox="0 0 24 24"
       stroke="currentColor"
@@ -117,6 +123,7 @@ function IconClock() {
   return (
     <svg
       className="w-5 h-5 shrink-0"
+      aria-hidden="true"
       fill="none"
       viewBox="0 0 24 24"
       stroke="currentColor"
@@ -135,6 +142,7 @@ function IconBook() {
   return (
     <svg
       className="w-5 h-5 shrink-0"
+      aria-hidden="true"
       fill="none"
       viewBox="0 0 24 24"
       stroke="currentColor"
@@ -227,13 +235,20 @@ export function Sidebar({ open, onClose }: SidebarProps) {
       {/* Mobile backdrop */}
       {open && (
         <div
+          role="button"
+          tabIndex={0}
+          aria-label="Fechar menu"
           className="fixed inset-0 z-20 bg-black/50 md:hidden"
           onClick={onClose}
+          onKeyDown={(e) => {
+            if (e.key === "Enter" || e.key === " ") onClose();
+          }}
         />
       )}
 
       {/* Sidebar panel */}
       <aside
+        id="sidebar-nav"
         className={cn(
           "fixed inset-y-0 left-0 z-30 flex w-60 flex-col bg-background-surface border-r border-border",
           "transition-transform duration-200 ease-in-out",
