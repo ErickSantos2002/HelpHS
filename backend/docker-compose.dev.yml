@@ -70,7 +70,7 @@ services:
 
   # ── ClamAV (Antivirus) ─────────────────────────────────────
   clamav:
-    image: clamav/clamav:1.2
+    image: clamav/clamav:latest
     container_name: helpdesk-clamav
     restart: unless-stopped
     ports:
