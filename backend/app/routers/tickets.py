@@ -48,6 +48,7 @@ from app.schemas.ticket import (
     TicketStatusUpdate,
     TicketUpdate,
 )
+from app.services.email import send_email
 from app.services.llm import classify_ticket
 from app.services.notifications import notify
 from app.utils.protocol import MAX_RETRIES, generate_protocol
@@ -434,6 +435,22 @@ async def update_ticket_status(
             data={"ticket_id": str(ticket.id), "protocol": ticket.protocol},
             settings=settings,
         )
+        # Send email invitation to the creator
+        creator_result = await db.execute(select(User).where(User.id == ticket.creator_id))
+        creator = creator_result.scalar_one_or_none()
+        if creator:
+            await send_email(
+                to_email=creator.email,
+                subject=f"[HelpHS] Como foi o atendimento? — {ticket.protocol}",
+                body=(
+                    f"Olá, {creator.name}!\n\n"
+                    f"Seu ticket {ticket.protocol} foi resolvido.\n\n"
+                    f"Gostaríamos de saber sua opinião sobre o atendimento. "
+                    f"Acesse o sistema e deixe sua avaliação.\n\n"
+                    f"Obrigado!\nEquipe HelpHS"
+                ),
+                settings=settings,
+            )
     await db.commit()
     await db.refresh(ticket)
     return TicketResponse.model_validate(ticket)

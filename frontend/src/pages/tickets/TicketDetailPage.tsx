@@ -29,6 +29,11 @@ import {
   type Ticket,
   type TicketHistory,
 } from "../../services/ticketService";
+import {
+  getTicketSurvey,
+  submitSurvey,
+  type Survey,
+} from "../../services/surveyService";
 import { getTechnicians, type UserSummary } from "../../services/userService";
 
 // ── Status options ────────────────────────────────────────────
@@ -210,6 +215,153 @@ function InfoRow({ label, value }: { label: string; value?: string | null }) {
         {label}
       </p>
       <p className="text-sm text-slate-200">{value}</p>
+    </div>
+  );
+}
+
+// ── SurveyPanel ───────────────────────────────────────────────
+
+function StarRating({
+  value,
+  onChange,
+}: {
+  value: number;
+  onChange: (v: number) => void;
+}) {
+  const [hovered, setHovered] = useState(0);
+  return (
+    <div className="flex gap-1">
+      {[1, 2, 3, 4, 5].map((star) => (
+        <button
+          key={star}
+          type="button"
+          onClick={() => onChange(star)}
+          onMouseEnter={() => setHovered(star)}
+          onMouseLeave={() => setHovered(0)}
+          className="text-2xl leading-none transition-colors"
+          aria-label={`${star} estrela${star > 1 ? "s" : ""}`}
+        >
+          <span
+            className={
+              star <= (hovered || value) ? "text-yellow-400" : "text-slate-600"
+            }
+          >
+            ★
+          </span>
+        </button>
+      ))}
+    </div>
+  );
+}
+
+const RATING_LABELS: Record<number, string> = {
+  1: "Péssimo",
+  2: "Ruim",
+  3: "Regular",
+  4: "Bom",
+  5: "Excelente",
+};
+
+function SurveyPanel({ ticketId }: { ticketId: string }) {
+  const [survey, setSurvey] = useState<Survey | null | undefined>(undefined);
+  const [rating, setRating] = useState(0);
+  const [comment, setComment] = useState("");
+  const [submitting, setSubmitting] = useState(false);
+  const [error, setError] = useState<string | null>(null);
+
+  useEffect(() => {
+    getTicketSurvey(ticketId).then(setSurvey);
+  }, [ticketId]);
+
+  if (survey === undefined) return null; // loading
+
+  async function handleSubmit() {
+    if (rating === 0) return;
+    setSubmitting(true);
+    setError(null);
+    try {
+      const result = await submitSurvey(ticketId, {
+        rating,
+        comment: comment.trim() || undefined,
+      });
+      setSurvey(result);
+    } catch {
+      setError("Não foi possível enviar a avaliação. Tente novamente.");
+    } finally {
+      setSubmitting(false);
+    }
+  }
+
+  return (
+    <div className="rounded-xl bg-background-surface border border-border p-5 space-y-4">
+      <h2 className="text-sm font-semibold text-slate-300">
+        Pesquisa de satisfação
+      </h2>
+
+      {survey ? (
+        <div className="space-y-2">
+          <div className="flex items-center gap-2">
+            <span className="text-slate-400 text-sm">Sua avaliação:</span>
+            <div className="flex gap-0.5">
+              {[1, 2, 3, 4, 5].map((star) => (
+                <span
+                  key={star}
+                  className={`text-xl leading-none ${
+                    star <= survey.rating ? "text-yellow-400" : "text-slate-600"
+                  }`}
+                >
+                  ★
+                </span>
+              ))}
+            </div>
+            <span className="text-xs text-slate-400">
+              {RATING_LABELS[survey.rating]}
+            </span>
+          </div>
+          {survey.comment && (
+            <p className="text-sm text-slate-400 italic">"{survey.comment}"</p>
+          )}
+          <p className="text-xs text-slate-600">
+            Enviado em{" "}
+            {new Date(survey.created_at).toLocaleString("pt-BR", {
+              day: "2-digit",
+              month: "2-digit",
+              year: "numeric",
+              hour: "2-digit",
+              minute: "2-digit",
+            })}
+          </p>
+        </div>
+      ) : (
+        <div className="space-y-3">
+          <p className="text-sm text-slate-400">
+            Como você avalia o atendimento deste ticket?
+          </p>
+          <div className="flex items-center gap-3">
+            <StarRating value={rating} onChange={setRating} />
+            {rating > 0 && (
+              <span className="text-sm text-slate-300">
+                {RATING_LABELS[rating]}
+              </span>
+            )}
+          </div>
+          <Textarea
+            placeholder="Comentário opcional…"
+            rows={2}
+            value={comment}
+            onChange={(e) => setComment(e.target.value)}
+          />
+          {error && <Alert variant="danger">{error}</Alert>}
+          <Button
+            onClick={handleSubmit}
+            loading={submitting}
+            disabled={rating === 0}
+            size="sm"
+          >
+            Enviar avaliação
+          </Button>
+        </div>
+      )}
     </div>
   );
 }
@@ -477,6 +629,12 @@ export default function TicketDetailPage() {
 
           {/* KB Suggestions (staff only) */}
           {isStaff && <KBSuggestionsPanel ticketId={ticket.id} />}
+
+          {/* CSAT survey — client only, ticket resolved or closed */}
+          {user?.role === "client" &&
+            (ticket.status === "resolved" || ticket.status === "closed") && (
+              <SurveyPanel ticketId={ticket.id} />
+            )}
 
           {/* Timeline */}
           <div className="rounded-xl bg-background-surface border border-border p-5">
