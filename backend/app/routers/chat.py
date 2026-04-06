@@ -109,7 +109,7 @@ async def _get_ticket_or_403(
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Ticket not found")
 
     is_staff = actor.role in (UserRole.admin, UserRole.technician)
-    is_requester = ticket.requester_id == actor.id
+    is_requester = ticket.creator_id == actor.id
     if not is_staff and not is_requester:
         raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="Access denied")
 
@@ -248,7 +248,7 @@ async def websocket_chat(
             return
 
         is_staff = user.role in (UserRole.admin, UserRole.technician)
-        is_requester = ticket.requester_id == user.id
+        is_requester = ticket.creator_id == user.id
         if not is_staff and not is_requester:
             await websocket.close(code=4003, reason="Forbidden")
             return
@@ -333,7 +333,7 @@ async def _notify_other_party(
     - If sender is the requester → notify assignee (if any)
     - If sender is staff → notify requester
     """
-    is_requester = ticket.requester_id == sender.id
+    is_requester = ticket.creator_id == sender.id
 
     if is_requester:
         # Notify assignee if assigned
@@ -350,7 +350,7 @@ async def _notify_other_party(
         # Notify requester
         await notify(
             db,
-            ticket.requester_id,
+            ticket.creator_id,
             NotificationType.chat_message,
             f"Nova mensagem no chamado {ticket.protocol}",
             f"{sender.name}: {msg.content[:120]}",
