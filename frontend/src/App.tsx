@@ -12,6 +12,7 @@ import PlaceholderPage from "./pages/PlaceholderPage";
 const LoginPage = lazy(() => import("./pages/auth/LoginPage"));
 const HomePage = lazy(() => import("./pages/HomePage"));
 const TicketListPage = lazy(() => import("./pages/tickets/TicketListPage"));
+const UsersPage = lazy(() => import("./pages/users/UsersPage"));
 const TicketFormPage = lazy(() => import("./pages/tickets/TicketFormPage"));
 const TicketDetailPage = lazy(() => import("./pages/tickets/TicketDetailPage"));
 const ForbiddenPage = lazy(() => import("./pages/errors/ForbiddenPage"));
@@ -82,15 +83,7 @@ function App() {
 
               {/* Admin only */}
               <Route element={<RoleGuard roles={["admin"]} />}>
-                <Route
-                  path="/users"
-                  element={
-                    <PlaceholderPage
-                      title="Usuários"
-                      description="Gestão de usuários — Sprint 5"
-                    />
-                  }
-                />
+                <Route path="/users" element={<UsersPage />} />
                 <Route
                   path="/products"
                   element={
