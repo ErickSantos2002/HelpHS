@@ -23,6 +23,7 @@ const NotificationsPage = lazy(
 const KBListPage = lazy(() => import("./pages/kb/KBListPage"));
 const KBArticlePage = lazy(() => import("./pages/kb/KBArticlePage"));
 const KBFormPage = lazy(() => import("./pages/kb/KBFormPage"));
+const ReportsPage = lazy(() => import("./pages/reports/ReportsPage"));
 const ForbiddenPage = lazy(() => import("./pages/errors/ForbiddenPage"));
 const NotFoundPage = lazy(() => import("./pages/errors/NotFoundPage"));
 
@@ -74,15 +75,7 @@ function App() {
               <Route element={<RoleGuard roles={["admin", "technician"]} />}>
                 <Route path="/kb/new" element={<KBFormPage />} />
                 <Route path="/kb/:id/edit" element={<KBFormPage />} />
-                <Route
-                  path="/reports"
-                  element={
-                    <PlaceholderPage
-                      title="Relatórios"
-                      description="Relatórios e métricas — Sprint 7"
-                    />
-                  }
-                />
+                <Route path="/reports" element={<ReportsPage />} />
               </Route>
 
               {/* Admin only */}

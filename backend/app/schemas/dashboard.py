@@ -37,3 +37,38 @@ class DashboardStats(AppBaseModel):
     tickets: TicketStats
     surveys: SurveyStats
     sla: SlaStats
+
+
+# ── Report schemas ────────────────────────────────────────────
+
+
+class DailyCount(AppBaseModel):
+    date: str  # YYYY-MM-DD
+    count: int
+
+
+class CategoryCount(AppBaseModel):
+    category: str
+    count: int
+
+
+class SLAComplianceItem(AppBaseModel):
+    priority: str
+    total: int
+    breached: int
+    compliance_rate: float  # 0–100
+
+
+class CSATDistributionItem(AppBaseModel):
+    rating: int  # 1–5
+    count: int
+
+
+class ReportData(AppBaseModel):
+    period_days: int
+    total_tickets: int
+    tickets_by_day: list[DailyCount]
+    tickets_by_category: list[CategoryCount]
+    sla_compliance: list[SLAComplianceItem]
+    csat_distribution: list[CSATDistributionItem]
+    csat_average: float | None
