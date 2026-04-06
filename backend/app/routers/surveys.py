@@ -25,6 +25,8 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from app.core.database import get_db
 from app.core.security import authorize, get_current_user
 from app.models.models import (
+    AuditAction,
+    AuditLog,
     SatisfactionSurvey,
     Ticket,
     TicketStatus,
@@ -36,6 +38,17 @@ from app.schemas.survey import SurveyCreate, SurveyListResponse, SurveyResponse
 router = APIRouter(tags=["Surveys"])
 
 _ELIGIBLE_STATUSES = frozenset({TicketStatus.resolved, TicketStatus.closed})
+
+
+def _audit(db: AsyncSession, actor_id: uuid.UUID, entity_id: uuid.UUID) -> None:
+    db.add(
+        AuditLog(
+            user_id=actor_id,
+            action=AuditAction.create,
+            entity_type="survey",
+            entity_id=entity_id,
+        )
+    )
 
 
 # ── Helpers ───────────────────────────────────────────────────
@@ -87,6 +100,7 @@ async def submit_survey(
         created_at=datetime.now(UTC),
     )
     db.add(survey)
+    _audit(db, actor.id, survey.id)
 
     try:
         await db.commit()

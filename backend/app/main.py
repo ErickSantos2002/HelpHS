@@ -12,7 +12,7 @@ from app.core.database import engine
 from app.core.exceptions import http_exception_handler, validation_exception_handler
 from app.core.logging import setup_logging
 from app.core.redis import close_redis, get_redis
-from app.routers import attachments, auth, notifications, products, surveys, tickets, users
+from app.routers import attachments, audit, auth, notifications, products, surveys, tickets, users
 
 settings = get_settings()
 
@@ -75,6 +75,7 @@ app.include_router(tickets.router, prefix=settings.api_prefix)
 app.include_router(attachments.router, prefix=settings.api_prefix)
 app.include_router(notifications.router, prefix=settings.api_prefix)
 app.include_router(surveys.router, prefix=settings.api_prefix)
+app.include_router(audit.router, prefix=settings.api_prefix)
 
 
 @app.get("/health", tags=["Health"])
