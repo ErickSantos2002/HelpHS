@@ -12,6 +12,7 @@ import {
   Textarea,
 } from "../../components/ui";
 import { ChatPanel } from "../../components/chat/ChatPanel";
+import { KBSuggestionsPanel } from "../../components/kb/KBSuggestionsPanel";
 import { useAuth } from "../../contexts/AuthContext";
 import {
   deleteAttachment,
@@ -473,6 +474,9 @@ export default function TicketDetailPage() {
             currentUserRole={user?.role}
             savedSummary={ticket.ai_conversation_summary}
           />
+
+          {/* KB Suggestions (staff only) */}
+          {isStaff && <KBSuggestionsPanel ticketId={ticket.id} />}
 
           {/* Timeline */}
           <div className="rounded-xl bg-background-surface border border-border p-5">

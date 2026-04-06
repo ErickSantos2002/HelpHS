@@ -25,6 +25,7 @@ from app.core.security import authorize, get_current_user
 from app.models.models import (
     KBArticle,
     KBArticleStatus,
+    Ticket,
     User,
     UserRole,
 )
@@ -102,6 +103,92 @@ async def _get_article_or_404(article_id: uuid.UUID, db: AsyncSession) -> KBArti
 
 
 # ── Endpoints ─────────────────────────────────────────────────
+
+
+@router.get("/kb/articles/suggestions", response_model=KBArticleListResponse)
+async def suggest_articles_for_ticket(
+    db: Annotated[AsyncSession, Depends(get_db)],
+    actor: Annotated[User, Depends(authorize(UserRole.admin, UserRole.technician))],
+    ticket_id: uuid.UUID = Query(...),
+    limit: int = Query(default=5, ge=1, le=20),
+) -> KBArticleListResponse:
+    """
+    Return published KB articles relevant to the given ticket.
+
+    Strategy (ordered by priority):
+    1. Same category + keyword match in title
+    2. Same category only
+    3. Keyword match across all categories (fallback)
+    """
+    ticket_result = await db.execute(select(Ticket).where(Ticket.id == ticket_id))
+    ticket = ticket_result.scalar_one_or_none()
+    if ticket is None:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Ticket not found")
+
+    # Extract meaningful keywords from title (words > 3 chars)
+    words = [w for w in ticket.title.lower().split() if len(w) > 3]
+    category_val = (
+        ticket.category.value if hasattr(ticket.category, "value") else str(ticket.category)
+    )
+
+    base = (
+        select(KBArticle)
+        .options(selectinload(KBArticle.author))
+        .where(KBArticle.status == KBArticleStatus.published)
+    )
+
+    # Build keyword filter
+    keyword_filter = None
+    if words:
+        keyword_filter = or_(*[KBArticle.title.ilike(f"%{w}%") for w in words[:5]])
+
+    # Priority 1: same category + keyword
+    if keyword_filter is not None:
+        q1 = await db.execute(
+            base.where(KBArticle.category == category_val).where(keyword_filter).limit(limit)
+        )
+        results = q1.scalars().all()
+        if len(results) >= limit:
+            return KBArticleListResponse(
+                items=[_to_response(a) for a in results[:limit]],
+                total=len(results),
+                limit=limit,
+                offset=0,
+            )
+    else:
+        results = []
+
+    seen_ids = {a.id for a in results}
+
+    # Priority 2: same category only (fill up to limit)
+    needed = limit - len(results)
+    if needed > 0:
+        q2 = await db.execute(
+            base.where(KBArticle.category == category_val)
+            .where(KBArticle.id.notin_(seen_ids) if seen_ids else True)
+            .limit(needed)
+        )
+        extra = q2.scalars().all()
+        results = list(results) + list(extra)
+        seen_ids.update(a.id for a in extra)
+
+    # Priority 3: keyword match across all categories (fallback)
+    needed = limit - len(results)
+    if needed > 0 and keyword_filter is not None:
+        q3 = await db.execute(
+            base.where(keyword_filter)
+            .where(KBArticle.id.notin_(seen_ids) if seen_ids else True)
+            .limit(needed)
+        )
+        extra = q3.scalars().all()
+        results = list(results) + list(extra)
+
+    return KBArticleListResponse(
+        items=[_to_response(a) for a in results],
+        total=len(results),
+        limit=limit,
+        offset=0,
+    )
 
 
 @router.get("/kb/articles", response_model=KBArticleListResponse)

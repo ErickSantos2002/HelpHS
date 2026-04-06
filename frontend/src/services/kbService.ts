@@ -93,3 +93,13 @@ export async function submitKBFeedback(
 ): Promise<void> {
   await api.post(`/kb/articles/${id}/feedback`, { helpful });
 }
+
+export async function suggestArticlesForTicket(
+  ticketId: string,
+  limit = 5,
+): Promise<KBArticle[]> {
+  const { data } = await api.get<KBArticleListResponse>(
+    `/kb/articles/suggestions?ticket_id=${ticketId}&limit=${limit}`,
+  );
+  return data.items;
+}
