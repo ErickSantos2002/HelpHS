@@ -20,6 +20,8 @@ export interface Ticket {
   updated_at: string;
   sla_response_breach: boolean;
   sla_resolve_breach: boolean;
+  product_id: string | null;
+  equipment_id: string | null;
 }
 
 export interface TicketListResponse {
@@ -38,6 +40,44 @@ export interface TicketFilters {
   search?: string;
   limit?: number;
   offset?: number;
+}
+
+export interface TicketCreatePayload {
+  title: string;
+  description: string;
+  priority: "critical" | "high" | "medium" | "low";
+  category: string;
+  product_id?: string | null;
+  equipment_id?: string | null;
+}
+
+export interface TicketUpdatePayload {
+  title?: string;
+  description?: string;
+  priority?: "critical" | "high" | "medium" | "low";
+  category?: string;
+  product_id?: string | null;
+  equipment_id?: string | null;
+}
+
+export async function createTicket(
+  payload: TicketCreatePayload,
+): Promise<Ticket> {
+  const { data } = await api.post<Ticket>("/tickets", payload);
+  return data;
+}
+
+export async function updateTicket(
+  id: string,
+  payload: TicketUpdatePayload,
+): Promise<Ticket> {
+  const { data } = await api.patch<Ticket>(`/tickets/${id}`, payload);
+  return data;
+}
+
+export async function getTicket(id: string): Promise<Ticket> {
+  const { data } = await api.get<Ticket>(`/tickets/${id}`);
+  return data;
 }
 
 export async function getTickets(

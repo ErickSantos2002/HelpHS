@@ -11,6 +11,7 @@ import PlaceholderPage from "./pages/PlaceholderPage";
 // Pages (lazy-loaded for code splitting)
 const LoginPage = lazy(() => import("./pages/auth/LoginPage"));
 const HomePage = lazy(() => import("./pages/HomePage"));
+const TicketFormPage = lazy(() => import("./pages/tickets/TicketFormPage"));
 const ForbiddenPage = lazy(() => import("./pages/errors/ForbiddenPage"));
 const NotFoundPage = lazy(() => import("./pages/errors/NotFoundPage"));
 
@@ -46,7 +47,18 @@ function App() {
                 element={
                   <PlaceholderPage
                     title="Tickets"
-                    description="Listagem de tickets — Sprint 5"
+                    description="Listagem de tickets — T39"
+                  />
+                }
+              />
+              <Route path="/tickets/new" element={<TicketFormPage />} />
+              <Route path="/tickets/:id/edit" element={<TicketFormPage />} />
+              <Route
+                path="/tickets/:id"
+                element={
+                  <PlaceholderPage
+                    title="Detalhe do Ticket"
+                    description="Tela de detalhe — T38"
                   />
                 }
               />
