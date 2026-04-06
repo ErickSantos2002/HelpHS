@@ -18,10 +18,64 @@ export interface Ticket {
   assignee_id: string | null;
   created_at: string;
   updated_at: string;
+  sla_response_due_at: string | null;
+  sla_resolve_due_at: string | null;
   sla_response_breach: boolean;
   sla_resolve_breach: boolean;
   product_id: string | null;
   equipment_id: string | null;
+  closed_at: string | null;
+  created_at: string;
+  updated_at: string;
+}
+
+export interface TicketHistory {
+  id: string;
+  ticket_id: string;
+  user_id: string;
+  field: string;
+  old_value: string | null;
+  new_value: string | null;
+  comment: string | null;
+  created_at: string;
+}
+
+export interface TicketHistoryListResponse {
+  items: TicketHistory[];
+  total: number;
+  limit: number;
+  offset: number;
+}
+
+export async function getTicketHistory(
+  id: string,
+): Promise<TicketHistoryListResponse> {
+  const { data } = await api.get<TicketHistoryListResponse>(
+    `/tickets/${id}/history?limit=100`,
+  );
+  return data;
+}
+
+export async function updateTicketStatus(
+  id: string,
+  status: string,
+  comment?: string,
+): Promise<Ticket> {
+  const { data } = await api.patch<Ticket>(`/tickets/${id}/status`, {
+    status,
+    comment,
+  });
+  return data;
+}
+
+export async function assignTicket(
+  id: string,
+  assignee_id: string | null,
+): Promise<Ticket> {
+  const { data } = await api.patch<Ticket>(`/tickets/${id}/assign`, {
+    assignee_id,
+  });
+  return data;
 }
 
 export interface TicketListResponse {
