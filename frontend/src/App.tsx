@@ -24,6 +24,7 @@ const KBListPage = lazy(() => import("./pages/kb/KBListPage"));
 const KBArticlePage = lazy(() => import("./pages/kb/KBArticlePage"));
 const KBFormPage = lazy(() => import("./pages/kb/KBFormPage"));
 const ReportsPage = lazy(() => import("./pages/reports/ReportsPage"));
+const AuditLogsPage = lazy(() => import("./pages/audit/AuditLogsPage"));
 const ForbiddenPage = lazy(() => import("./pages/errors/ForbiddenPage"));
 const NotFoundPage = lazy(() => import("./pages/errors/NotFoundPage"));
 
@@ -83,15 +84,7 @@ function App() {
                 <Route path="/users" element={<UsersPage />} />
                 <Route path="/products" element={<ProductsPage />} />
                 <Route path="/sla-config" element={<SlaConfigPage />} />
-                <Route
-                  path="/audit-logs"
-                  element={
-                    <PlaceholderPage
-                      title="Audit Logs"
-                      description="Registros de auditoria — Sprint 7"
-                    />
-                  }
-                />
+                <Route path="/audit-logs" element={<AuditLogsPage />} />
               </Route>
             </Route>
           </Route>
