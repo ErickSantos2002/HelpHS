@@ -22,8 +22,4 @@
   ::-webkit-scrollbar-thumb:hover {
     @apply bg-slate-500;
   }
-
-  * {
-    @apply border-border;
-  }
 }

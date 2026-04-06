@@ -1,3 +1,6 @@
+export { Alert } from "./Alert";
+export type { AlertProps } from "./Alert";
+
 export { Avatar } from "./Avatar";
 export type { AvatarProps } from "./Avatar";
 
@@ -13,4 +16,13 @@ export type { CardProps } from "./Card";
 export { Input } from "./Input";
 export type { InputProps } from "./Input";
 
+export { Modal, ModalFooter } from "./Modal";
+export type { ModalProps } from "./Modal";
+
+export { Select } from "./Select";
+export type { SelectProps, SelectOption } from "./Select";
+
 export { Spinner } from "./Spinner";
+
+export { Textarea } from "./Textarea";
+export type { TextareaProps } from "./Textarea";
