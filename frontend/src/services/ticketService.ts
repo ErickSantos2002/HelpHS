@@ -4,6 +4,7 @@ export interface Ticket {
   id: string;
   protocol: string;
   title: string;
+  description: string;
   status:
     | "open"
     | "in_progress"
@@ -25,6 +26,10 @@ export interface Ticket {
   product_id: string | null;
   equipment_id: string | null;
   closed_at: string | null;
+  ai_classification: string | null;
+  ai_confidence: number | null;
+  ai_summary: string | null;
+  ai_conversation_summary: string | null;
 }
 
 export interface TicketHistory {

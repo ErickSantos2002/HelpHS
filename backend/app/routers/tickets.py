@@ -14,6 +14,7 @@ Permissões:
   DELETE /tickets/{id}               — admin (cancela o ticket)
 """
 
+import asyncio
 import uuid
 from datetime import UTC, datetime
 from typing import Annotated
@@ -47,6 +48,7 @@ from app.schemas.ticket import (
     TicketStatusUpdate,
     TicketUpdate,
 )
+from app.services.llm import classify_ticket
 from app.services.notifications import notify
 from app.utils.protocol import MAX_RETRIES, generate_protocol
 from app.utils.sla import (
@@ -58,6 +60,40 @@ from app.utils.sla import (
 )
 
 router = APIRouter(tags=["Tickets"])
+
+
+# ── LLM background classification ────────────────────────────
+
+
+async def _classify_ticket_async(
+    ticket_id: uuid.UUID,
+    title: str,
+    description: str,
+    category: str,
+) -> None:
+    """Fire-and-forget: classify ticket with LLM and persist results."""
+    from app.core.database import AsyncSessionLocal
+
+    result = await classify_ticket(title, description, category)
+    if result is None:
+        return
+
+    try:
+        async with AsyncSessionLocal() as db:
+            row = await db.execute(select(Ticket).where(Ticket.id == ticket_id))
+            ticket = row.scalar_one_or_none()
+            if ticket is None:
+                return
+            ticket.ai_classification = result["priority"]
+            ticket.ai_confidence = result["confidence"]
+            ticket.ai_summary = result["summary"]
+            ticket.updated_at = datetime.now(UTC)
+            await db.commit()
+    except Exception as exc:  # noqa: BLE001
+        from loguru import logger
+
+        logger.warning(f"Failed to persist LLM classification for ticket {ticket_id}: {exc}")
+
 
 # ── Valid status transitions ──────────────────────────────────
 
@@ -202,6 +238,12 @@ async def create_ticket(
             ticket_id = uuid.uuid4()
 
     await db.refresh(ticket)
+
+    # Fire-and-forget LLM classification (non-blocking)
+    asyncio.create_task(
+        _classify_ticket_async(ticket.id, body.title, body.description, body.category.value)
+    )
+
     return TicketResponse.model_validate(ticket)
 
 

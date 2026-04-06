@@ -59,6 +59,10 @@ class TicketResponse(AppBaseModel):
     closed_at: datetime | None
     created_at: datetime
     updated_at: datetime
+    ai_classification: str | None = None
+    ai_confidence: float | None = None
+    ai_summary: str | None = None
+    ai_conversation_summary: str | None = None
 
 
 class TicketListResponse(AppBaseModel):

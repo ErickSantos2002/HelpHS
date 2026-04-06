@@ -4,6 +4,7 @@ Chat em tempo real para tickets.
 Endpoints REST:
   GET  /tickets/{ticket_id}/messages          — histórico paginado
   POST /tickets/{ticket_id}/messages          — criar mensagem (staff/sistema)
+  POST /tickets/{ticket_id}/suggest-reply     — sugestão de resposta por IA (staff only)
 
 WebSocket:
   WS   /ws/tickets/{ticket_id}?token=<jwt>    — canal de tempo real
@@ -27,7 +28,7 @@ from sqlalchemy.orm import selectinload
 
 from app.core.config import get_settings
 from app.core.database import AsyncSessionLocal, get_db
-from app.core.security import decode_token, get_current_user
+from app.core.security import authorize, decode_token, get_current_user
 from app.models.models import (
     ChatMessage,
     NotificationType,
@@ -36,7 +37,14 @@ from app.models.models import (
     UserRole,
     UserStatus,
 )
-from app.schemas.chat import ChatMessageCreate, ChatMessageListResponse, ChatMessageResponse
+from app.schemas.chat import (
+    ChatMessageCreate,
+    ChatMessageListResponse,
+    ChatMessageResponse,
+    ConversationSummaryResponse,
+    SuggestReplyResponse,
+)
+from app.services.llm import suggest_reply, summarize_conversation
 from app.services.notifications import notify
 
 router = APIRouter(tags=["Chat"])
@@ -223,6 +231,122 @@ async def create_message(
     )
 
     return response
+
+
+@router.post(
+    "/tickets/{ticket_id}/suggest-reply",
+    response_model=SuggestReplyResponse,
+)
+async def suggest_ticket_reply(
+    ticket_id: uuid.UUID,
+    db: Annotated[AsyncSession, Depends(get_db)],
+    actor: Annotated[User, Depends(authorize(UserRole.admin, UserRole.technician))],
+) -> SuggestReplyResponse:
+    """Generate an AI-suggested reply for a technician based on ticket and chat history."""
+    ticket = await _get_ticket_or_403(ticket_id, actor, db)
+
+    # Load last 10 messages with sender info
+    rows = await db.execute(
+        select(ChatMessage)
+        .options(selectinload(ChatMessage.sender))
+        .where(ChatMessage.ticket_id == ticket_id)
+        .order_by(ChatMessage.created_at.desc())
+        .limit(10)
+    )
+    messages = list(reversed(rows.scalars().all()))
+
+    history = [
+        {
+            "sender": m.sender.name if m.sender else "Sistema",
+            "role": m.sender.role.value if m.sender else "system",
+            "content": m.content,
+        }
+        for m in messages
+    ]
+
+    suggestion = await suggest_reply(
+        title=ticket.title,
+        description=ticket.description,
+        category=(
+            ticket.category.value if hasattr(ticket.category, "value") else str(ticket.category)
+        ),
+        priority=(
+            ticket.priority.value if hasattr(ticket.priority, "value") else str(ticket.priority)
+        ),
+        status=ticket.status.value if hasattr(ticket.status, "value") else str(ticket.status),
+        history=history,
+    )
+
+    if suggestion is None:
+        raise HTTPException(
+            status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
+            detail="LLM service unavailable — check API key configuration",
+        )
+
+    return SuggestReplyResponse(suggestion=suggestion)
+
+
+@router.post(
+    "/tickets/{ticket_id}/summarize",
+    response_model=ConversationSummaryResponse,
+)
+async def summarize_ticket_conversation(
+    ticket_id: uuid.UUID,
+    db: Annotated[AsyncSession, Depends(get_db)],
+    actor: Annotated[User, Depends(authorize(UserRole.admin, UserRole.technician))],
+) -> ConversationSummaryResponse:
+    """
+    Generate an AI summary of the full ticket conversation and persist it in the ticket.
+    Returns the summary text. Subsequent calls regenerate and overwrite the stored summary.
+    """
+    ticket = await _get_ticket_or_403(ticket_id, actor, db)
+
+    # Load all messages (up to 200 to keep context manageable)
+    rows = await db.execute(
+        select(ChatMessage)
+        .options(selectinload(ChatMessage.sender))
+        .where(ChatMessage.ticket_id == ticket_id)
+        .order_by(ChatMessage.created_at.asc())
+        .limit(200)
+    )
+    messages = rows.scalars().all()
+
+    if not messages:
+        raise HTTPException(
+            status_code=status.HTTP_422_UNPROCESSABLE_ENTITY,
+            detail="No messages to summarize",
+        )
+
+    history = [
+        {
+            "sender": m.sender.name if m.sender else "Sistema",
+            "role": m.sender.role.value if m.sender else "system",
+            "content": m.content,
+        }
+        for m in messages
+    ]
+
+    summary = await summarize_conversation(
+        title=ticket.title,
+        category=(
+            ticket.category.value if hasattr(ticket.category, "value") else str(ticket.category)
+        ),
+        status=ticket.status.value if hasattr(ticket.status, "value") else str(ticket.status),
+        history=history,
+    )
+
+    if summary is None:
+        raise HTTPException(
+            status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
+            detail="LLM service unavailable — check API key configuration",
+        )
+
+    # Persist summary in the ticket
+    ticket.ai_conversation_summary = summary
+    ticket.updated_at = datetime.now(UTC)
+    await db.commit()
+
+    return ConversationSummaryResponse(summary=summary)
 
 
 # ── WebSocket endpoint ────────────────────────────────────────

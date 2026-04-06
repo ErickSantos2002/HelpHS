@@ -255,6 +255,7 @@ class Ticket(Base):
     ai_classification: Mapped[str | None] = mapped_column(String(100))
     ai_confidence: Mapped[float | None] = mapped_column(Float)
     ai_summary: Mapped[str | None] = mapped_column(Text)
+    ai_conversation_summary: Mapped[str | None] = mapped_column(Text)
 
     closed_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
     created_at: Mapped[datetime] = mapped_column(

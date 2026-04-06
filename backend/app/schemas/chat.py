@@ -44,3 +44,11 @@ class ChatMessageListResponse(AppBaseModel):
 
 class ChatMessageCreate(AppBaseModel):
     content: str
+
+
+class SuggestReplyResponse(AppBaseModel):
+    suggestion: str
+
+
+class ConversationSummaryResponse(AppBaseModel):
+    summary: str

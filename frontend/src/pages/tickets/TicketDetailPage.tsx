@@ -467,7 +467,12 @@ export default function TicketDetailPage() {
           </div>
 
           {/* Chat */}
-          <ChatPanel ticketId={ticket.id} currentUserId={user?.id ?? ""} />
+          <ChatPanel
+            ticketId={ticket.id}
+            currentUserId={user?.id ?? ""}
+            currentUserRole={user?.role}
+            savedSummary={ticket.ai_conversation_summary}
+          />
 
           {/* Timeline */}
           <div className="rounded-xl bg-background-surface border border-border p-5">

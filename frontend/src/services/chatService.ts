@@ -34,6 +34,20 @@ export async function getChatMessages(
   return data;
 }
 
+export async function suggestReply(ticketId: string): Promise<string> {
+  const { data } = await api.post<{ suggestion: string }>(
+    `/tickets/${ticketId}/suggest-reply`,
+  );
+  return data.suggestion;
+}
+
+export async function summarizeConversation(ticketId: string): Promise<string> {
+  const { data } = await api.post<{ summary: string }>(
+    `/tickets/${ticketId}/summarize`,
+  );
+  return data.summary;
+}
+
 export function buildWsUrl(ticketId: string): string {
   const token = tokenStorage.getAccess() ?? "";
   const apiBase = import.meta.env.VITE_API_URL ?? "/api/v1";

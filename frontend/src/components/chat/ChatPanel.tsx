@@ -3,6 +3,8 @@ import { cn } from "../../lib/utils";
 import {
   buildWsUrl,
   getChatMessages,
+  suggestReply,
+  summarizeConversation,
   type ChatMessage,
 } from "../../services/chatService";
 
@@ -125,14 +127,28 @@ function StatusDot({ status }: { status: WsStatus }) {
 interface ChatPanelProps {
   ticketId: string;
   currentUserId: string;
+  currentUserRole?: string;
+  savedSummary?: string | null;
 }
 
-export function ChatPanel({ ticketId, currentUserId }: ChatPanelProps) {
+export function ChatPanel({
+  ticketId,
+  currentUserId,
+  currentUserRole,
+  savedSummary,
+}: ChatPanelProps) {
+  const isStaff =
+    currentUserRole === "admin" || currentUserRole === "technician";
+
   const [messages, setMessages] = useState<ChatMessage[]>([]);
   const [wsStatus, setWsStatus] = useState<WsStatus>("connecting");
   const [input, setInput] = useState("");
   const [sending, setSending] = useState(false);
   const [loadError, setLoadError] = useState(false);
+  const [suggesting, setSuggesting] = useState(false);
+  const [summarizing, setSummarizing] = useState(false);
+  const [summary, setSummary] = useState<string | null>(savedSummary ?? null);
+  const [showSummary, setShowSummary] = useState(false);
 
   const wsRef = useRef<WebSocket | null>(null);
   const bottomRef = useRef<HTMLDivElement>(null);
@@ -220,22 +236,144 @@ export function ChatPanel({ ticketId, currentUserId }: ChatPanelProps) {
     }
   }
 
+  async function handleSuggest() {
+    setSuggesting(true);
+    try {
+      const suggestion = await suggestReply(ticketId);
+      setInput(suggestion);
+      inputRef.current?.focus();
+    } catch {
+      // silently ignore — user can retry
+    } finally {
+      setSuggesting(false);
+    }
+  }
+
+  async function handleSummarize() {
+    setSummarizing(true);
+    try {
+      const result = await summarizeConversation(ticketId);
+      setSummary(result);
+      setShowSummary(true);
+    } catch {
+      // silently ignore — user can retry
+    } finally {
+      setSummarizing(false);
+    }
+  }
+
   return (
     <div className="rounded-xl bg-background-surface border border-border flex flex-col h-[480px]">
       {/* Header */}
       <div className="flex items-center justify-between px-4 py-3 border-b border-border shrink-0">
         <h2 className="text-sm font-semibold text-slate-300">Chat</h2>
-        <div className="flex items-center gap-1.5">
-          <StatusDot status={wsStatus} />
-          <span className="text-xs text-slate-500">
-            {wsStatus === "connected"
-              ? "ao vivo"
-              : wsStatus === "connecting"
-                ? "conectando…"
-                : "desconectado"}
-          </span>
+        <div className="flex items-center gap-3">
+          {isStaff && (
+            <button
+              onClick={
+                summary ? () => setShowSummary((v) => !v) : handleSummarize
+              }
+              disabled={summarizing}
+              className={cn(
+                "flex items-center gap-1 text-xs px-2 py-1 rounded-md transition-colors",
+                "border border-slate-700 text-slate-400 hover:bg-background-elevated hover:text-slate-300",
+                "disabled:opacity-40 disabled:cursor-not-allowed",
+              )}
+              title={
+                summary
+                  ? "Ver/ocultar resumo da conversa"
+                  : "Gerar resumo da conversa com IA"
+              }
+            >
+              {summarizing ? (
+                <span className="inline-block w-3 h-3 border border-slate-400 border-t-transparent rounded-full animate-spin" />
+              ) : (
+                <svg
+                  className="w-3 h-3"
+                  fill="none"
+                  viewBox="0 0 24 24"
+                  stroke="currentColor"
+                  strokeWidth={2}
+                >
+                  <path
+                    strokeLinecap="round"
+                    strokeLinejoin="round"
+                    d="M9 12h6m-6 4h6m2 5H7a2 2 0 01-2-2V5a2 2 0 012-2h5.586a1 1 0 01.707.293l5.414 5.414a1 1 0 01.293.707V19a2 2 0 01-2 2z"
+                  />
+                </svg>
+              )}
+              {summarizing ? "Resumindo…" : summary ? "Resumo" : "Resumir"}
+            </button>
+          )}
+          <div className="flex items-center gap-1.5">
+            <StatusDot status={wsStatus} />
+            <span className="text-xs text-slate-500">
+              {wsStatus === "connected"
+                ? "ao vivo"
+                : wsStatus === "connecting"
+                  ? "conectando…"
+                  : "desconectado"}
+            </span>
+          </div>
         </div>
       </div>
+
+      {/* Summary panel */}
+      {isStaff && showSummary && summary && (
+        <div className="border-b border-border bg-background-elevated/50 px-4 py-3 shrink-0">
+          <div className="flex items-start justify-between gap-2">
+            <div className="flex-1">
+              <p className="text-xs font-medium text-slate-400 mb-1">
+                Resumo da conversa (IA)
+              </p>
+              <p className="text-xs text-slate-300 leading-relaxed">
+                {summary}
+              </p>
+            </div>
+            <div className="flex items-center gap-1.5 shrink-0">
+              <button
+                onClick={handleSummarize}
+                disabled={summarizing}
+                className="text-xs text-slate-500 hover:text-slate-300 transition-colors disabled:opacity-40"
+                title="Regenerar resumo"
+              >
+                <svg
+                  className="w-3.5 h-3.5"
+                  fill="none"
+                  viewBox="0 0 24 24"
+                  stroke="currentColor"
+                  strokeWidth={2}
+                >
+                  <path
+                    strokeLinecap="round"
+                    strokeLinejoin="round"
+                    d="M4 4v5h.582m15.356 2A8.001 8.001 0 004.582 9m0 0H9m11 11v-5h-.581m0 0a8.003 8.003 0 01-15.357-2m15.357 2H15"
+                  />
+                </svg>
+              </button>
+              <button
+                onClick={() => setShowSummary(false)}
+                className="text-xs text-slate-500 hover:text-slate-300 transition-colors"
+                title="Fechar resumo"
+              >
+                <svg
+                  className="w-3.5 h-3.5"
+                  fill="none"
+                  viewBox="0 0 24 24"
+                  stroke="currentColor"
+                  strokeWidth={2}
+                >
+                  <path
+                    strokeLinecap="round"
+                    strokeLinejoin="round"
+                    d="M6 18L18 6M6 6l12 12"
+                  />
+                </svg>
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
 
       {/* Message list */}
       <div className="flex-1 overflow-y-auto px-4 py-3 space-y-0">
@@ -261,6 +399,43 @@ export function ChatPanel({ ticketId, currentUserId }: ChatPanelProps) {
 
       {/* Input */}
       <div className="border-t border-border px-3 py-2.5 shrink-0">
+        {isStaff && (
+          <div className="mb-2">
+            <button
+              onClick={handleSuggest}
+              disabled={suggesting || wsStatus === "disconnected"}
+              className={cn(
+                "flex items-center gap-1.5 text-xs px-2.5 py-1 rounded-md transition-colors",
+                "border border-purple-700 text-purple-400 hover:bg-purple-900/40",
+                "disabled:opacity-40 disabled:cursor-not-allowed",
+              )}
+            >
+              {suggesting ? (
+                <>
+                  <span className="inline-block w-3 h-3 border border-purple-400 border-t-transparent rounded-full animate-spin" />
+                  Gerando…
+                </>
+              ) : (
+                <>
+                  <svg
+                    className="w-3 h-3"
+                    fill="none"
+                    viewBox="0 0 24 24"
+                    stroke="currentColor"
+                    strokeWidth={2}
+                  >
+                    <path
+                      strokeLinecap="round"
+                      strokeLinejoin="round"
+                      d="M9.663 17h4.673M12 3v1m6.364 1.636l-.707.707M21 12h-1M4 12H3m3.343-5.657l-.707-.707m2.828 9.9a5 5 0 117.072 0l-.347.346a3 3 0 01-1.595.835l-.468.094a2 2 0 01-2.362-1.174l-.101-.302a3 3 0 01.22-2.562l.345-.518"
+                    />
+                  </svg>
+                  Sugerir resposta (IA)
+                </>
+              )}
+            </button>
+          </div>
+        )}
         <div className="flex items-end gap-2">
           <textarea
             ref={inputRef}
