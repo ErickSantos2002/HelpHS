@@ -65,3 +65,9 @@ minio-data/
 
 # k6 test results (run artifacts)
 k6/results/
+
+# Test artifacts (generated locally)
+backend/.coverage
+backend/htmlcov/
+frontend/playwright-report/
+frontend/test-results/
