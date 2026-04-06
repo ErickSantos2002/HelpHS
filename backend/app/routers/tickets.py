@@ -350,6 +350,17 @@ async def update_ticket_status(
         },
         settings=settings,
     )
+    # Invite creator to fill CSAT survey when ticket is resolved
+    if body.status == TicketStatus.resolved:
+        await notify(
+            db,
+            ticket.creator_id,
+            NotificationType.satisfaction_survey,
+            "Como foi o atendimento?",
+            f"O ticket {ticket.protocol} foi resolvido. Deixe sua avaliação!",
+            data={"ticket_id": str(ticket.id), "protocol": ticket.protocol},
+            settings=settings,
+        )
     await db.commit()
     await db.refresh(ticket)
     return TicketResponse.model_validate(ticket)
