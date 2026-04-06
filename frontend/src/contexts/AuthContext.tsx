@@ -1,45 +1,80 @@
-/**
- * Auth context stub — T30 will implement the full JWT flow.
- * For now provides a mock user so the layout renders correctly.
- */
-import { createContext, useContext, useState, ReactNode } from "react";
+import {
+  createContext,
+  useContext,
+  useState,
+  useEffect,
+  useCallback,
+  ReactNode,
+} from "react";
 import type { AuthUser } from "../types/auth";
+import { tokenStorage } from "../services/api";
+import { getMeApi, loginApi, logoutApi } from "../services/authService";
 
 interface AuthContextValue {
   user: AuthUser | null;
   token: string | null;
-  login: (token: string, user: AuthUser) => void;
-  logout: () => void;
   isAuthenticated: boolean;
+  isLoading: boolean;
+  login: (email: string, password: string) => Promise<void>;
+  logout: () => Promise<void>;
 }
 
 const AuthContext = createContext<AuthContextValue | null>(null);
 
-// Temporary mock user — replaced by real JWT data in T30
-const MOCK_USER: AuthUser = {
-  id: "00000000-0000-0000-0000-000000000001",
-  name: "Erick Santos",
-  email: "erick@helphs.com",
-  role: "admin",
-};
-
 export function AuthProvider({ children }: { children: ReactNode }) {
-  const [user, setUser] = useState<AuthUser | null>(MOCK_USER);
-  const [token, setToken] = useState<string | null>("mock-token");
+  const [user, setUser] = useState<AuthUser | null>(null);
+  const [token, setToken] = useState<string | null>(null);
+  const [isLoading, setIsLoading] = useState(true);
 
-  function login(newToken: string, newUser: AuthUser) {
-    setToken(newToken);
-    setUser(newUser);
-  }
+  // Restore session from localStorage on mount
+  useEffect(() => {
+    async function restore() {
+      const stored = tokenStorage.getAccess();
+      if (!stored) {
+        setIsLoading(false);
+        return;
+      }
+      try {
+        setToken(stored);
+        const me = await getMeApi();
+        setUser({ id: me.id, name: me.name, email: me.email, role: me.role });
+      } catch {
+        // Token invalid or expired beyond refresh — clear session
+        tokenStorage.clear();
+        setToken(null);
+      } finally {
+        setIsLoading(false);
+      }
+    }
+    restore();
+  }, []);
 
-  function logout() {
+  const login = useCallback(async (email: string, password: string) => {
+    const tokens = await loginApi({ email, password });
+    tokenStorage.set(tokens.access_token, tokens.refresh_token);
+    setToken(tokens.access_token);
+
+    const me = await getMeApi();
+    setUser({ id: me.id, name: me.name, email: me.email, role: me.role });
+  }, []);
+
+  const logout = useCallback(async () => {
+    await logoutApi();
+    tokenStorage.clear();
     setToken(null);
     setUser(null);
-  }
+  }, []);
 
   return (
     <AuthContext.Provider
-      value={{ user, token, login, logout, isAuthenticated: !!user }}
+      value={{
+        user,
+        token,
+        isAuthenticated: !!user,
+        isLoading,
+        login,
+        logout,
+      }}
     >
       {children}
     </AuthContext.Provider>
