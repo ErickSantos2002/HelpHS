@@ -49,7 +49,7 @@ describe("Tabs", () => {
 
   it("calls onChange when a trigger is clicked", async () => {
     let current = "a";
-    const { rerender } = render(
+    render(
       <Tabs
         value={current}
         onChange={(v) => {

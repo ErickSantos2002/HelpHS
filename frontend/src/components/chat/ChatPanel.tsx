@@ -211,7 +211,7 @@ export function ChatPanel({
   useEffect(() => {
     connect();
     return () => {
-      reconnectTimer.current && clearTimeout(reconnectTimer.current);
+      if (reconnectTimer.current) clearTimeout(reconnectTimer.current);
       wsRef.current?.close(1000);
     };
   }, [connect]);

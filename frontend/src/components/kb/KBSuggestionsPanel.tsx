@@ -41,7 +41,7 @@ export function KBSuggestionsPanel({ ticketId }: KBSuggestionsPanelProps) {
       return;
     }
 
-    searchTimer.current && clearTimeout(searchTimer.current);
+    if (searchTimer.current) clearTimeout(searchTimer.current);
     searchTimer.current = setTimeout(() => {
       setSearching(true);
       getKBArticles({ search: search.trim(), limit: 5 })
@@ -51,7 +51,7 @@ export function KBSuggestionsPanel({ ticketId }: KBSuggestionsPanelProps) {
     }, 400);
 
     return () => {
-      searchTimer.current && clearTimeout(searchTimer.current);
+      if (searchTimer.current) clearTimeout(searchTimer.current);
     };
   }, [search, ticketId]);
 

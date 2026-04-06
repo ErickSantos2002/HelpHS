@@ -1,5 +1,5 @@
 import { test, expect } from "@playwright/test";
-import { login, logout, CREDENTIALS } from "./helpers";
+import { login, logout } from "./helpers";
 
 test.describe("Autenticação", () => {
   test("redireciona para /login quando não autenticado", async ({ page }) => {
