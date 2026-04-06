@@ -23,11 +23,13 @@ from sqlalchemy import func, select  # func used in list_tickets subquery
 from sqlalchemy.exc import IntegrityError
 from sqlalchemy.ext.asyncio import AsyncSession
 
+from app.core.config import Settings, get_settings
 from app.core.database import get_db
 from app.core.security import authorize, get_current_user
 from app.models.models import (
     AuditAction,
     AuditLog,
+    NotificationType,
     SLAConfig,
     Ticket,
     TicketHistory,
@@ -45,6 +47,7 @@ from app.schemas.ticket import (
     TicketStatusUpdate,
     TicketUpdate,
 )
+from app.services.notifications import notify
 from app.utils.protocol import MAX_RETRIES, generate_protocol
 from app.utils.sla import (
     _PAUSE_STATUSES,
@@ -141,6 +144,7 @@ async def create_ticket(
     body: TicketCreate,
     db: Annotated[AsyncSession, Depends(get_db)],
     actor: Annotated[User, Depends(get_current_user)],
+    settings: Annotated[Settings, Depends(get_settings)],
 ) -> TicketResponse:
     ts = datetime.now(UTC)
     ticket_id = uuid.uuid4()
@@ -178,6 +182,15 @@ async def create_ticket(
         db.add(ticket)
         _record_history(db, ticket.id, actor.id, "created", None, "open")
         _audit(db, AuditAction.create, actor.id, ticket.id)
+        await notify(
+            db,
+            actor.id,
+            NotificationType.ticket_created,
+            "Ticket aberto",
+            f"Seu ticket foi registrado com o protocolo {protocol}.",
+            data={"ticket_id": str(ticket.id), "protocol": protocol},
+            settings=settings,
+        )
         try:
             await db.commit()
             break
@@ -290,6 +303,7 @@ async def update_ticket_status(
     body: TicketStatusUpdate,
     db: Annotated[AsyncSession, Depends(get_db)],
     actor: Annotated[User, Depends(authorize(UserRole.admin, UserRole.technician))],
+    settings: Annotated[Settings, Depends(get_settings)],
 ) -> TicketResponse:
     ticket = await _get_ticket_or_404(ticket_id, db)
 
@@ -323,6 +337,19 @@ async def update_ticket_status(
         db, ticket.id, actor.id, "status", old_status.value, body.status.value, body.comment
     )
     _audit(db, AuditAction.status_change, actor.id, ticket.id)
+    await notify(
+        db,
+        ticket.creator_id,
+        NotificationType.ticket_updated,
+        "Status do ticket alterado",
+        f"O status do ticket {ticket.protocol} foi alterado para '{body.status.value}'.",
+        data={
+            "ticket_id": str(ticket.id),
+            "old_status": old_status.value,
+            "new_status": body.status.value,
+        },
+        settings=settings,
+    )
     await db.commit()
     await db.refresh(ticket)
     return TicketResponse.model_validate(ticket)
@@ -334,6 +361,7 @@ async def assign_ticket(
     body: TicketAssign,
     db: Annotated[AsyncSession, Depends(get_db)],
     actor: Annotated[User, Depends(authorize(UserRole.admin, UserRole.technician))],
+    settings: Annotated[Settings, Depends(get_settings)],
 ) -> TicketResponse:
     ticket = await _get_ticket_or_404(ticket_id, db)
 
@@ -347,6 +375,16 @@ async def assign_ticket(
     ticket.updated_at = datetime.now(UTC)
     _record_history(db, ticket.id, actor.id, "assignee_id", old_assignee, body.assignee_id)
     _audit(db, AuditAction.assign, actor.id, ticket.id)
+    if body.assignee_id is not None:
+        await notify(
+            db,
+            body.assignee_id,
+            NotificationType.ticket_assigned,
+            "Ticket atribuído a você",
+            f"O ticket {ticket.protocol} foi atribuído a você.",
+            data={"ticket_id": str(ticket.id), "protocol": ticket.protocol},
+            settings=settings,
+        )
     await db.commit()
     await db.refresh(ticket)
     return TicketResponse.model_validate(ticket)
@@ -357,6 +395,7 @@ async def cancel_ticket(
     ticket_id: uuid.UUID,
     db: Annotated[AsyncSession, Depends(get_db)],
     actor: Annotated[User, Depends(authorize(UserRole.admin))],
+    settings: Annotated[Settings, Depends(get_settings)],
 ) -> None:
     ticket = await _get_ticket_or_404(ticket_id, db)
 
@@ -372,6 +411,15 @@ async def cancel_ticket(
     ticket.updated_at = ticket.closed_at
     _record_history(db, ticket.id, actor.id, "status", old_status.value, "cancelled")
     _audit(db, AuditAction.delete, actor.id, ticket.id)
+    await notify(
+        db,
+        ticket.creator_id,
+        NotificationType.ticket_closed,
+        "Ticket cancelado",
+        f"O ticket {ticket.protocol} foi cancelado.",
+        data={"ticket_id": str(ticket.id), "protocol": ticket.protocol},
+        settings=settings,
+    )
     await db.commit()
 
 
