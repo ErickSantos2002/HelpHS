@@ -31,6 +31,7 @@ import {
   type Ticket,
 } from "../../services/ticketService";
 import { getTechnicians, type UserSummary } from "../../services/userService";
+import { TICKET_TRANSITIONS } from "../../lib/ticketConstants";
 
 // ── Constants ─────────────────────────────────────────────────
 
@@ -44,21 +45,6 @@ const STATUS_LABEL: Record<string, string> = {
   resolved: "Resolvido",
   closed: "Fechado",
   cancelled: "Cancelado",
-};
-
-const TRANSITIONS: Record<string, string[]> = {
-  open: ["in_progress", "cancelled"],
-  in_progress: [
-    "awaiting_client",
-    "awaiting_technical",
-    "resolved",
-    "cancelled",
-  ],
-  awaiting_client: ["in_progress", "resolved", "cancelled"],
-  awaiting_technical: ["in_progress", "resolved", "cancelled"],
-  resolved: ["closed"],
-  closed: [],
-  cancelled: [],
 };
 
 // ── SLA cell ──────────────────────────────────────────────────
@@ -258,7 +244,9 @@ export default function TicketListPage() {
   const commonTransitions =
     selectedTickets.length > 0
       ? Object.keys(STATUS_LABEL).filter((s) =>
-          selectedTickets.every((t) => TRANSITIONS[t.status]?.includes(s)),
+          selectedTickets.every((t) =>
+            TICKET_TRANSITIONS[t.status]?.includes(s),
+          ),
         )
       : [];
 

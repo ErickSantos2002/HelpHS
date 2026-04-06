@@ -51,6 +51,7 @@ from app.schemas.ticket import (
 from app.services.email import send_email
 from app.services.llm import classify_ticket
 from app.services.notifications import notify
+from app.utils.crud import get_or_404
 from app.utils.protocol import MAX_RETRIES, generate_protocol
 from app.utils.sla import (
     _PAUSE_STATUSES,
@@ -163,14 +164,6 @@ def _record_history(
     )
 
 
-async def _get_ticket_or_404(ticket_id: uuid.UUID, db: AsyncSession) -> Ticket:
-    result = await db.execute(select(Ticket).where(Ticket.id == ticket_id))
-    ticket = result.scalar_one_or_none()
-    if not ticket:
-        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Ticket not found")
-    return ticket
-
-
 # ═══════════════════════════════════════════════════════════════
 # TICKETS
 # ═══════════════════════════════════════════════════════════════
@@ -183,6 +176,11 @@ async def create_ticket(
     actor: Annotated[User, Depends(get_current_user)],
     settings: Annotated[Settings, Depends(get_settings)],
 ) -> TicketResponse:
+    """Create a new support ticket.
+
+    Generates a unique protocol number (HS-YYYY-NNNN), applies the matching
+    SLA configuration, persists the ticket, and triggers async AI classification.
+    """
     ts = datetime.now(UTC)
     ticket_id = uuid.uuid4()
 
@@ -248,9 +246,6 @@ async def create_ticket(
     return TicketResponse.model_validate(ticket)
 
 
-# Priority sort order: critical=0, high=1, medium=2, low=3
-_PRIORITY_ORDER = {"critical": 0, "high": 1, "medium": 2, "low": 3}
-
 _SORT_COLUMNS = {
     "created_at": Ticket.created_at,
     "updated_at": Ticket.updated_at,
@@ -276,6 +271,12 @@ async def list_tickets(
     ),
     sort_dir: str = Query(default="desc", pattern="^(asc|desc)$"),
 ) -> TicketListResponse:
+    """List tickets with filtering, sorting, and pagination.
+
+    Clients automatically see only their own tickets; admins and technicians
+    see all. Supports filtering by status, priority, category, assignee, creator,
+    and full-text search across title and description.
+    """
     from sqlalchemy import asc, case, desc
 
     base = select(Ticket)
@@ -329,7 +330,12 @@ async def get_ticket(
     db: Annotated[AsyncSession, Depends(get_db)],
     actor: Annotated[User, Depends(get_current_user)],
 ) -> TicketResponse:
-    ticket = await _get_ticket_or_404(ticket_id, db)
+    """Retrieve a single ticket by ID.
+
+    Clients may only access tickets they created; admins and technicians
+    have unrestricted read access.
+    """
+    ticket = await get_or_404(db, Ticket, ticket_id, "Ticket not found")
 
     if actor.role == UserRole.client and ticket.creator_id != actor.id:
         raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="Access denied")
@@ -344,7 +350,7 @@ async def update_ticket(
     db: Annotated[AsyncSession, Depends(get_db)],
     actor: Annotated[User, Depends(get_current_user)],
 ) -> TicketResponse:
-    ticket = await _get_ticket_or_404(ticket_id, db)
+    ticket = await get_or_404(db, Ticket, ticket_id, "Ticket not found")
 
     if actor.role == UserRole.client:
         if ticket.creator_id != actor.id:
@@ -379,7 +385,7 @@ async def update_ticket_status(
     actor: Annotated[User, Depends(authorize(UserRole.admin, UserRole.technician))],
     settings: Annotated[Settings, Depends(get_settings)],
 ) -> TicketResponse:
-    ticket = await _get_ticket_or_404(ticket_id, db)
+    ticket = await get_or_404(db, Ticket, ticket_id, "Ticket not found")
 
     if body.status not in _TRANSITIONS.get(ticket.status, set()):
         raise HTTPException(
@@ -464,7 +470,7 @@ async def assign_ticket(
     actor: Annotated[User, Depends(authorize(UserRole.admin, UserRole.technician))],
     settings: Annotated[Settings, Depends(get_settings)],
 ) -> TicketResponse:
-    ticket = await _get_ticket_or_404(ticket_id, db)
+    ticket = await get_or_404(db, Ticket, ticket_id, "Ticket not found")
 
     if body.assignee_id is not None:
         result = await db.execute(select(User).where(User.id == body.assignee_id))
@@ -498,7 +504,7 @@ async def cancel_ticket(
     actor: Annotated[User, Depends(authorize(UserRole.admin))],
     settings: Annotated[Settings, Depends(get_settings)],
 ) -> None:
-    ticket = await _get_ticket_or_404(ticket_id, db)
+    ticket = await get_or_404(db, Ticket, ticket_id, "Ticket not found")
 
     if ticket.status in (TicketStatus.closed, TicketStatus.cancelled):
         raise HTTPException(
@@ -532,7 +538,7 @@ async def get_ticket_history(
     offset: int = Query(default=0, ge=0),
     limit: int = Query(default=50, ge=1, le=200),
 ) -> TicketHistoryListResponse:
-    ticket = await _get_ticket_or_404(ticket_id, db)
+    ticket = await get_or_404(db, Ticket, ticket_id, "Ticket not found")
 
     if actor.role == UserRole.client and ticket.creator_id != actor.id:
         raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="Access denied")

@@ -38,6 +38,7 @@ from app.schemas.product import (
     ProductResponse,
     ProductUpdate,
 )
+from app.utils.crud import get_or_404
 
 router = APIRouter(tags=["Products & Equipments"])
 
@@ -60,22 +61,6 @@ def _audit(
             entity_id=entity_id,
         )
     )
-
-
-async def _get_product_or_404(product_id: uuid.UUID, db: AsyncSession) -> Product:
-    result = await db.execute(select(Product).where(Product.id == product_id))
-    product = result.scalar_one_or_none()
-    if not product:
-        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Product not found")
-    return product
-
-
-async def _get_equipment_or_404(equipment_id: uuid.UUID, db: AsyncSession) -> Equipment:
-    result = await db.execute(select(Equipment).where(Equipment.id == equipment_id))
-    equipment = result.scalar_one_or_none()
-    if not equipment:
-        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Equipment not found")
-    return equipment
 
 
 # ═══════════════════════════════════════════════════════════════
@@ -145,7 +130,9 @@ async def get_product(
     db: Annotated[AsyncSession, Depends(get_db)],
     _actor: Annotated[User, Depends(get_current_user)],
 ) -> ProductResponse:
-    return ProductResponse.model_validate(await _get_product_or_404(product_id, db))
+    return ProductResponse.model_validate(
+        await get_or_404(db, Product, product_id, "Product not found")
+    )
 
 
 @router.patch("/products/{product_id}", response_model=ProductResponse)
@@ -155,7 +142,7 @@ async def update_product(
     db: Annotated[AsyncSession, Depends(get_db)],
     actor: Annotated[User, Depends(authorize(UserRole.admin))],
 ) -> ProductResponse:
-    product = await _get_product_or_404(product_id, db)
+    product = await get_or_404(db, Product, product_id, "Product not found")
 
     if body.name and body.name != product.name:
         dup = await db.execute(select(Product).where(Product.name == body.name))
@@ -179,7 +166,7 @@ async def delete_product(
     db: Annotated[AsyncSession, Depends(get_db)],
     actor: Annotated[User, Depends(authorize(UserRole.admin))],
 ) -> None:
-    product = await _get_product_or_404(product_id, db)
+    product = await get_or_404(db, Product, product_id, "Product not found")
     product.is_active = False
     _audit(db, AuditAction.delete, actor.id, "product", product.id)
     await db.commit()
@@ -201,7 +188,7 @@ async def create_equipment(
     db: Annotated[AsyncSession, Depends(get_db)],
     actor: Annotated[User, Depends(authorize(UserRole.admin))],
 ) -> EquipmentResponse:
-    await _get_product_or_404(product_id, db)
+    await get_or_404(db, Product, product_id, "Product not found")
 
     if body.serial_number:
         dup = await db.execute(
@@ -240,7 +227,7 @@ async def list_equipments(
     limit: int = Query(default=20, ge=1, le=100),
     is_active: bool | None = Query(default=None),
 ) -> EquipmentListResponse:
-    await _get_product_or_404(product_id, db)
+    await get_or_404(db, Product, product_id, "Product not found")
 
     base = select(Equipment).where(Equipment.product_id == product_id)
     if is_active is not None:
@@ -264,7 +251,9 @@ async def get_equipment(
     db: Annotated[AsyncSession, Depends(get_db)],
     _actor: Annotated[User, Depends(get_current_user)],
 ) -> EquipmentResponse:
-    return EquipmentResponse.model_validate(await _get_equipment_or_404(equipment_id, db))
+    return EquipmentResponse.model_validate(
+        await get_or_404(db, Equipment, equipment_id, "Equipment not found")
+    )
 
 
 @router.patch("/equipments/{equipment_id}", response_model=EquipmentResponse)
@@ -274,7 +263,7 @@ async def update_equipment(
     db: Annotated[AsyncSession, Depends(get_db)],
     actor: Annotated[User, Depends(authorize(UserRole.admin))],
 ) -> EquipmentResponse:
-    equipment = await _get_equipment_or_404(equipment_id, db)
+    equipment = await get_or_404(db, Equipment, equipment_id, "Equipment not found")
 
     if body.serial_number and body.serial_number != equipment.serial_number:
         dup = await db.execute(
@@ -300,7 +289,7 @@ async def delete_equipment(
     db: Annotated[AsyncSession, Depends(get_db)],
     actor: Annotated[User, Depends(authorize(UserRole.admin))],
 ) -> None:
-    equipment = await _get_equipment_or_404(equipment_id, db)
+    equipment = await get_or_404(db, Equipment, equipment_id, "Equipment not found")
     equipment.is_active = False
     _audit(db, AuditAction.delete, actor.id, "equipment", equipment.id)
     await db.commit()

@@ -114,28 +114,31 @@ function DropZone({ files, onChange }: DropZoneProps) {
   const [dragOver, setDragOver] = useState(false);
   const [fileError, setFileError] = useState<string | null>(null);
 
-  function validateAndAdd(incoming: File[]) {
-    setFileError(null);
-    const valid: File[] = [];
-    for (const f of incoming) {
-      const ext = "." + f.name.split(".").pop()?.toLowerCase();
-      if (!ALLOWED_EXTENSIONS.includes(ext)) {
-        setFileError(`Tipo não permitido: ${f.name}`);
-        continue;
+  const validateAndAdd = useCallback(
+    (incoming: File[]) => {
+      setFileError(null);
+      const valid: File[] = [];
+      for (const f of incoming) {
+        const ext = "." + f.name.split(".").pop()?.toLowerCase();
+        if (!ALLOWED_EXTENSIONS.includes(ext)) {
+          setFileError(`Tipo não permitido: ${f.name}`);
+          continue;
+        }
+        if (f.size > MAX_FILE_SIZE_MB * 1024 * 1024) {
+          setFileError(
+            `Arquivo muito grande (máx ${MAX_FILE_SIZE_MB} MB): ${f.name}`,
+          );
+          continue;
+        }
+        if (!files.find((x) => x.name === f.name && x.size === f.size)) {
+          valid.push(f);
+        }
       }
-      if (f.size > MAX_FILE_SIZE_MB * 1024 * 1024) {
-        setFileError(
-          `Arquivo muito grande (máx ${MAX_FILE_SIZE_MB} MB): ${f.name}`,
-        );
-        continue;
-      }
-      if (!files.find((x) => x.name === f.name && x.size === f.size)) {
-        valid.push(f);
-      }
-    }
-    const next = [...files, ...valid].slice(0, MAX_FILES);
-    onChange(next);
-  }
+      const next = [...files, ...valid].slice(0, MAX_FILES);
+      onChange(next);
+    },
+    [files, onChange],
+  );
 
   const handleDrop = useCallback(
     (e: React.DragEvent) => {
@@ -143,7 +146,7 @@ function DropZone({ files, onChange }: DropZoneProps) {
       setDragOver(false);
       validateAndAdd(Array.from(e.dataTransfer.files));
     },
-    [files],
+    [validateAndAdd],
   );
 
   return (

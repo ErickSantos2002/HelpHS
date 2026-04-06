@@ -35,6 +35,7 @@ import {
   type Survey,
 } from "../../services/surveyService";
 import { getTechnicians, type UserSummary } from "../../services/userService";
+import { TICKET_TRANSITIONS } from "../../lib/ticketConstants";
 
 // ── Status options ────────────────────────────────────────────
 
@@ -46,21 +47,6 @@ const STATUS_LABEL: Record<string, string> = {
   resolved: "Resolvido",
   closed: "Fechado",
   cancelled: "Cancelado",
-};
-
-const TRANSITIONS: Record<string, string[]> = {
-  open: ["in_progress", "cancelled"],
-  in_progress: [
-    "awaiting_client",
-    "awaiting_technical",
-    "resolved",
-    "cancelled",
-  ],
-  awaiting_client: ["in_progress", "resolved", "cancelled"],
-  awaiting_technical: ["in_progress", "resolved", "cancelled"],
-  resolved: ["closed"],
-  closed: [],
-  cancelled: [],
 };
 
 const FIELD_LABEL: Record<string, string> = {
@@ -514,7 +500,7 @@ export default function TicketDetailPage() {
     return <Alert variant="danger">{error ?? "Ticket não encontrado."}</Alert>;
   }
 
-  const transitions = TRANSITIONS[ticket.status] ?? [];
+  const transitions = TICKET_TRANSITIONS[ticket.status] ?? [];
   const transitionOptions = transitions.map((s) => ({
     value: s,
     label: STATUS_LABEL[s] ?? s,

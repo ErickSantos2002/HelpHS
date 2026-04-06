@@ -43,6 +43,7 @@ from app.schemas.attachment import (
     AttachmentResponse,
 )
 from app.services import antivirus, storage
+from app.utils.crud import get_or_404
 
 router = APIRouter(tags=["Attachments"])
 
@@ -52,20 +53,8 @@ _TERMINAL_STATUSES = frozenset({TicketStatus.closed, TicketStatus.cancelled})
 # ── Helpers ───────────────────────────────────────────────────
 
 
-async def _get_ticket_or_404(ticket_id: uuid.UUID, db: AsyncSession) -> Ticket:
-    result = await db.execute(select(Ticket).where(Ticket.id == ticket_id))
-    ticket = result.scalar_one_or_none()
-    if not ticket:
-        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Ticket not found")
-    return ticket
-
-
 async def _get_attachment_or_404(attachment_id: uuid.UUID, db: AsyncSession) -> Attachment:
-    result = await db.execute(select(Attachment).where(Attachment.id == attachment_id))
-    attachment = result.scalar_one_or_none()
-    if not attachment:
-        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Attachment not found")
-    return attachment
+    return await get_or_404(db, Attachment, attachment_id, "Attachment not found")
 
 
 def _check_ticket_access(ticket: Ticket, actor: User) -> None:
@@ -110,7 +99,7 @@ async def upload_attachments(
     actor: Annotated[User, Depends(get_current_user)],
     settings: Annotated[Settings, Depends(get_settings)],
 ) -> list[AttachmentResponse]:
-    ticket = await _get_ticket_or_404(ticket_id, db)
+    ticket = await get_or_404(db, Ticket, ticket_id, "Ticket not found")
     _check_ticket_access(ticket, actor)
 
     if ticket.status in _TERMINAL_STATUSES:
@@ -199,7 +188,7 @@ async def list_attachments(
     db: Annotated[AsyncSession, Depends(get_db)],
     actor: Annotated[User, Depends(get_current_user)],
 ) -> AttachmentListResponse:
-    ticket = await _get_ticket_or_404(ticket_id, db)
+    ticket = await get_or_404(db, Ticket, ticket_id, "Ticket not found")
     _check_ticket_access(ticket, actor)
 
     result = await db.execute(
@@ -225,7 +214,7 @@ async def get_attachment_url(
     attachment = await _get_attachment_or_404(attachment_id, db)
 
     # Verify the actor has access to the parent ticket
-    ticket = await _get_ticket_or_404(attachment.ticket_id, db)
+    ticket = await get_or_404(db, Ticket, attachment.ticket_id, "Ticket not found")
     _check_ticket_access(ticket, actor)
 
     url = await storage.get_presigned_url(attachment.s3_key, settings)
