@@ -25,8 +25,6 @@ export interface Ticket {
   product_id: string | null;
   equipment_id: string | null;
   closed_at: string | null;
-  created_at: string;
-  updated_at: string;
 }
 
 export interface TicketHistory {
@@ -85,6 +83,13 @@ export interface TicketListResponse {
   offset: number;
 }
 
+export type SortBy =
+  | "created_at"
+  | "updated_at"
+  | "priority"
+  | "sla_resolve_due_at";
+export type SortDir = "asc" | "desc";
+
 export interface TicketFilters {
   status?: string;
   priority?: string;
@@ -94,6 +99,8 @@ export interface TicketFilters {
   search?: string;
   limit?: number;
   offset?: number;
+  sort_by?: SortBy;
+  sort_dir?: SortDir;
 }
 
 export interface TicketCreatePayload {
@@ -147,6 +154,8 @@ export async function getTickets(
   if (filters.limit !== undefined) params.set("limit", String(filters.limit));
   if (filters.offset !== undefined)
     params.set("offset", String(filters.offset));
+  if (filters.sort_by) params.set("sort_by", filters.sort_by);
+  if (filters.sort_dir) params.set("sort_dir", filters.sort_dir);
 
   const { data } = await api.get<TicketListResponse>(
     `/tickets?${params.toString()}`,

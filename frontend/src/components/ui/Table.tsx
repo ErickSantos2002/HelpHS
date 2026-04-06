@@ -125,11 +125,18 @@ export interface TableCellProps {
   children?: ReactNode;
   className?: string;
   muted?: boolean;
+  onClick?: (e: React.MouseEvent<HTMLTableCellElement>) => void;
 }
 
-export function TableCell({ children, className, muted }: TableCellProps) {
+export function TableCell({
+  children,
+  className,
+  muted,
+  onClick,
+}: TableCellProps) {
   return (
     <td
+      onClick={onClick}
       className={cn(
         "px-4 py-3",
         muted ? "text-slate-500" : "text-slate-200",

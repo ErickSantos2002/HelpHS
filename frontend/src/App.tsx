@@ -11,6 +11,7 @@ import PlaceholderPage from "./pages/PlaceholderPage";
 // Pages (lazy-loaded for code splitting)
 const LoginPage = lazy(() => import("./pages/auth/LoginPage"));
 const HomePage = lazy(() => import("./pages/HomePage"));
+const TicketListPage = lazy(() => import("./pages/tickets/TicketListPage"));
 const TicketFormPage = lazy(() => import("./pages/tickets/TicketFormPage"));
 const TicketDetailPage = lazy(() => import("./pages/tickets/TicketDetailPage"));
 const ForbiddenPage = lazy(() => import("./pages/errors/ForbiddenPage"));
@@ -43,15 +44,7 @@ function App() {
             <Route element={<AppLayout />}>
               {/* All authenticated roles */}
               <Route path="/" element={<HomePage />} />
-              <Route
-                path="/tickets"
-                element={
-                  <PlaceholderPage
-                    title="Tickets"
-                    description="Listagem de tickets — T39"
-                  />
-                }
-              />
+              <Route path="/tickets" element={<TicketListPage />} />
               <Route path="/tickets/new" element={<TicketFormPage />} />
               <Route path="/tickets/:id/edit" element={<TicketFormPage />} />
               <Route path="/tickets/:id" element={<TicketDetailPage />} />

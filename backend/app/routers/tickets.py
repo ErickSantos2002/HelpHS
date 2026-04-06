@@ -205,6 +205,17 @@ async def create_ticket(
     return TicketResponse.model_validate(ticket)
 
 
+# Priority sort order: critical=0, high=1, medium=2, low=3
+_PRIORITY_ORDER = {"critical": 0, "high": 1, "medium": 2, "low": 3}
+
+_SORT_COLUMNS = {
+    "created_at": Ticket.created_at,
+    "updated_at": Ticket.updated_at,
+    "priority": Ticket.priority,
+    "sla_resolve_due_at": Ticket.sla_resolve_due_at,
+}
+
+
 @router.get("/tickets", response_model=TicketListResponse)
 async def list_tickets(
     db: Annotated[AsyncSession, Depends(get_db)],
@@ -217,7 +228,13 @@ async def list_tickets(
     assignee_id: uuid.UUID | None = Query(default=None),
     creator_id: uuid.UUID | None = Query(default=None),
     search: str | None = Query(default=None, max_length=100),
+    sort_by: str = Query(
+        default="created_at", pattern="^(created_at|updated_at|priority|sla_resolve_due_at)$"
+    ),
+    sort_dir: str = Query(default="desc", pattern="^(asc|desc)$"),
 ) -> TicketListResponse:
+    from sqlalchemy import asc, case, desc
+
     base = select(Ticket)
 
     # Clients only see their own tickets
@@ -235,10 +252,24 @@ async def list_tickets(
     if assignee_id:
         base = base.where(Ticket.assignee_id == assignee_id)
     if search:
-        base = base.where(Ticket.title.ilike(f"%{search}%"))
+        base = base.where(Ticket.title.ilike(f"%{search}%") | Ticket.protocol.ilike(f"%{search}%"))
+
+    # Build sort expression
+    if sort_by == "priority":
+        sort_expr = case(
+            (Ticket.priority == "critical", 0),
+            (Ticket.priority == "high", 1),
+            (Ticket.priority == "medium", 2),
+            (Ticket.priority == "low", 3),
+            else_=4,
+        )
+    else:
+        sort_expr = _SORT_COLUMNS[sort_by]
+
+    order = asc(sort_expr) if sort_dir == "asc" else desc(sort_expr)
 
     total = (await db.execute(select(func.count()).select_from(base.subquery()))).scalar_one()
-    rows = await db.execute(base.order_by(Ticket.created_at.desc()).offset(offset).limit(limit))
+    rows = await db.execute(base.order_by(order).offset(offset).limit(limit))
     tickets = rows.scalars().all()
 
     return TicketListResponse(
