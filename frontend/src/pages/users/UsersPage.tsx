@@ -491,112 +491,117 @@ export default function UsersPage() {
         </div>
       ) : (
         <div className="rounded-xl border border-border bg-background-surface overflow-hidden">
-          <Table>
-            <TableHead>
-              <TableRow>
-                <TableHeaderCell>Nome</TableHeaderCell>
-                <TableHeaderCell className="w-52">E-mail</TableHeaderCell>
-                <TableHeaderCell className="w-32">Perfil</TableHeaderCell>
-                <TableHeaderCell className="w-28">Status</TableHeaderCell>
-                <TableHeaderCell className="w-20">LGPD</TableHeaderCell>
-                <TableHeaderCell className="w-28">Cadastrado</TableHeaderCell>
-                <TableHeaderCell className="w-32 text-right">
-                  Ações
-                </TableHeaderCell>
-              </TableRow>
-            </TableHead>
-            <TableBody>
-              {users.length === 0 ? (
-                <TableEmpty colSpan={7} message="Nenhum usuário encontrado." />
-              ) : (
-                users.map((u) => (
-                  <TableRow key={u.id}>
-                    <TableCell>
-                      <div>
-                        <p className="font-medium text-slate-200">{u.name}</p>
-                        {u.department && (
-                          <p className="text-xs text-slate-500">
-                            {u.department}
-                          </p>
-                        )}
-                      </div>
-                    </TableCell>
-                    <TableCell muted className="text-xs">
-                      {u.email}
-                    </TableCell>
-                    <TableCell>
-                      <span
-                        className={`text-xs font-medium ${ROLE_COLOR[u.role]}`}
-                      >
-                        {ROLE_LABEL[u.role]}
-                      </span>
-                    </TableCell>
-                    <TableCell>
-                      <div className="flex items-center gap-2">
-                        {u.status !== "anonymized" && (
-                          <StatusToggle user={u} onToggled={handleToggled} />
-                        )}
-                        <span className={`text-xs ${STATUS_COLOR[u.status]}`}>
-                          {STATUS_LABEL[u.status]}
+          <div className="overflow-x-auto">
+            <Table>
+              <TableHead>
+                <TableRow>
+                  <TableHeaderCell>Nome</TableHeaderCell>
+                  <TableHeaderCell className="w-52">E-mail</TableHeaderCell>
+                  <TableHeaderCell className="w-32">Perfil</TableHeaderCell>
+                  <TableHeaderCell className="w-28">Status</TableHeaderCell>
+                  <TableHeaderCell className="w-20">LGPD</TableHeaderCell>
+                  <TableHeaderCell className="w-28">Cadastrado</TableHeaderCell>
+                  <TableHeaderCell className="w-32 text-right">
+                    Ações
+                  </TableHeaderCell>
+                </TableRow>
+              </TableHead>
+              <TableBody>
+                {users.length === 0 ? (
+                  <TableEmpty
+                    colSpan={7}
+                    message="Nenhum usuário encontrado."
+                  />
+                ) : (
+                  users.map((u) => (
+                    <TableRow key={u.id}>
+                      <TableCell>
+                        <div>
+                          <p className="font-medium text-slate-200">{u.name}</p>
+                          {u.department && (
+                            <p className="text-xs text-slate-500">
+                              {u.department}
+                            </p>
+                          )}
+                        </div>
+                      </TableCell>
+                      <TableCell muted className="text-xs">
+                        {u.email}
+                      </TableCell>
+                      <TableCell>
+                        <span
+                          className={`text-xs font-medium ${ROLE_COLOR[u.role]}`}
+                        >
+                          {ROLE_LABEL[u.role]}
                         </span>
-                      </div>
-                    </TableCell>
-                    <TableCell>
-                      <span
-                        title={
-                          u.lgpd_consent
-                            ? `Consentimento em ${new Date(u.lgpd_consent_at!).toLocaleDateString("pt-BR")}`
-                            : "Sem consentimento"
-                        }
-                        className={`text-xs font-medium ${u.lgpd_consent ? "text-green-500" : "text-slate-600"}`}
-                      >
-                        {u.lgpd_consent ? "✓ Sim" : "✗ Não"}
-                      </span>
-                    </TableCell>
-                    <TableCell muted className="text-xs">
-                      {createdAt(u)}
-                    </TableCell>
-                    <TableCell className="text-right">
-                      <div className="flex items-center justify-end gap-1">
-                        {u.status !== "anonymized" && (
+                      </TableCell>
+                      <TableCell>
+                        <div className="flex items-center gap-2">
+                          {u.status !== "anonymized" && (
+                            <StatusToggle user={u} onToggled={handleToggled} />
+                          )}
+                          <span className={`text-xs ${STATUS_COLOR[u.status]}`}>
+                            {STATUS_LABEL[u.status]}
+                          </span>
+                        </div>
+                      </TableCell>
+                      <TableCell>
+                        <span
+                          title={
+                            u.lgpd_consent
+                              ? `Consentimento em ${new Date(u.lgpd_consent_at!).toLocaleDateString("pt-BR")}`
+                              : "Sem consentimento"
+                          }
+                          className={`text-xs font-medium ${u.lgpd_consent ? "text-green-500" : "text-slate-600"}`}
+                        >
+                          {u.lgpd_consent ? "✓ Sim" : "✗ Não"}
+                        </span>
+                      </TableCell>
+                      <TableCell muted className="text-xs">
+                        {createdAt(u)}
+                      </TableCell>
+                      <TableCell className="text-right">
+                        <div className="flex items-center justify-end gap-1">
+                          {u.status !== "anonymized" && (
+                            <Button
+                              variant="ghost"
+                              size="sm"
+                              onClick={() => {
+                                setEditing(u);
+                                setFormOpen(true);
+                              }}
+                            >
+                              Editar
+                            </Button>
+                          )}
+                          {u.status !== "anonymized" && (
+                            <Button
+                              variant="ghost"
+                              size="sm"
+                              className="text-warning hover:text-warning"
+                              onClick={() => setConfirmAnonymize(u)}
+                              loading={actionLoading === u.id}
+                            >
+                              Anonimizar
+                            </Button>
+                          )}
                           <Button
                             variant="ghost"
                             size="sm"
-                            onClick={() => {
-                              setEditing(u);
-                              setFormOpen(true);
-                            }}
-                          >
-                            Editar
-                          </Button>
-                        )}
-                        {u.status !== "anonymized" && (
-                          <Button
-                            variant="ghost"
-                            size="sm"
-                            className="text-warning hover:text-warning"
-                            onClick={() => setConfirmAnonymize(u)}
+                            className="text-danger hover:text-danger"
+                            onClick={() => setConfirmDelete(u)}
                             loading={actionLoading === u.id}
                           >
-                            Anonimizar
+                            Excluir
                           </Button>
-                        )}
-                        <Button
-                          variant="ghost"
-                          size="sm"
-                          className="text-danger hover:text-danger"
-                          onClick={() => setConfirmDelete(u)}
-                          loading={actionLoading === u.id}
-                        >
-                          Excluir
-                        </Button>
-                      </div>
-                    </TableCell>
-                  </TableRow>
-                ))
-              )}
-            </TableBody>
-          </Table>
+                        </div>
+                      </TableCell>
+                    </TableRow>
+                  ))
+                )}
+              </TableBody>
+            </Table>
+          </div>
         </div>
       )}
 

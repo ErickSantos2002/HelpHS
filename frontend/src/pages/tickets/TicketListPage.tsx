@@ -320,118 +320,120 @@ export default function TicketListPage() {
         </div>
       ) : (
         <div className="rounded-xl border border-border bg-background-surface overflow-hidden">
-          <Table>
-            <TableHead>
-              <TableRow>
-                {isStaff && (
-                  <TableHeaderCell className="w-10">
-                    <input
-                      type="checkbox"
-                      checked={
-                        tickets.length > 0 && selected.size === tickets.length
-                      }
-                      onChange={toggleAll}
-                      className="accent-primary"
-                      aria-label="Selecionar todos"
-                    />
-                  </TableHeaderCell>
-                )}
-                <TableHeaderCell className="w-36">Protocolo</TableHeaderCell>
-                <TableHeaderCell>Título</TableHeaderCell>
-                <TableHeaderCell className="w-36">Status</TableHeaderCell>
-                <TableHeaderCell
-                  className="w-28"
-                  sortable
-                  sorted={sortedState("priority")}
-                  onSort={() => handleSort("priority")}
-                >
-                  Prioridade
-                </TableHeaderCell>
-                <TableHeaderCell className="w-28">Categoria</TableHeaderCell>
-                <TableHeaderCell
-                  className="w-28"
-                  sortable
-                  sorted={sortedState("sla_resolve_due_at")}
-                  onSort={() => handleSort("sla_resolve_due_at")}
-                >
-                  SLA
-                </TableHeaderCell>
-                <TableHeaderCell
-                  className="w-28"
-                  sortable
-                  sorted={sortedState("created_at")}
-                  onSort={() => handleSort("created_at")}
-                >
-                  Criado em
-                </TableHeaderCell>
-              </TableRow>
-            </TableHead>
-            <TableBody>
-              {tickets.length === 0 ? (
-                <TableEmpty
-                  colSpan={isStaff ? 8 : 7}
-                  message="Nenhum ticket encontrado para os filtros aplicados."
-                />
-              ) : (
-                tickets.map((t) => (
-                  <TableRow
-                    key={t.id}
-                    clickable
-                    onClick={() => navigate(`/tickets/${t.id}`)}
-                    className={selected.has(t.id) ? "bg-primary/5" : ""}
+          <div className="overflow-x-auto">
+            <Table>
+              <TableHead>
+                <TableRow>
+                  {isStaff && (
+                    <TableHeaderCell className="w-10">
+                      <input
+                        type="checkbox"
+                        checked={
+                          tickets.length > 0 && selected.size === tickets.length
+                        }
+                        onChange={toggleAll}
+                        className="accent-primary"
+                        aria-label="Selecionar todos"
+                      />
+                    </TableHeaderCell>
+                  )}
+                  <TableHeaderCell className="w-36">Protocolo</TableHeaderCell>
+                  <TableHeaderCell>Título</TableHeaderCell>
+                  <TableHeaderCell className="w-36">Status</TableHeaderCell>
+                  <TableHeaderCell
+                    className="w-28"
+                    sortable
+                    sorted={sortedState("priority")}
+                    onSort={() => handleSort("priority")}
                   >
-                    {isStaff && (
-                      <TableCell
-                        onClick={(e) => e.stopPropagation()}
-                        className="w-10"
-                      >
-                        <input
-                          type="checkbox"
-                          checked={selected.has(t.id)}
-                          onChange={() => toggleOne(t.id)}
-                          className="accent-primary"
-                          aria-label={`Selecionar ${t.protocol}`}
-                        />
-                      </TableCell>
-                    )}
-                    <TableCell muted>
-                      <span className="font-mono text-xs">{t.protocol}</span>
-                      {(t.sla_response_breach || t.sla_resolve_breach) && (
-                        <span className="ml-1 text-danger text-xs">⚠</span>
+                    Prioridade
+                  </TableHeaderCell>
+                  <TableHeaderCell className="w-28">Categoria</TableHeaderCell>
+                  <TableHeaderCell
+                    className="w-28"
+                    sortable
+                    sorted={sortedState("sla_resolve_due_at")}
+                    onSort={() => handleSort("sla_resolve_due_at")}
+                  >
+                    SLA
+                  </TableHeaderCell>
+                  <TableHeaderCell
+                    className="w-28"
+                    sortable
+                    sorted={sortedState("created_at")}
+                    onSort={() => handleSort("created_at")}
+                  >
+                    Criado em
+                  </TableHeaderCell>
+                </TableRow>
+              </TableHead>
+              <TableBody>
+                {tickets.length === 0 ? (
+                  <TableEmpty
+                    colSpan={isStaff ? 8 : 7}
+                    message="Nenhum ticket encontrado para os filtros aplicados."
+                  />
+                ) : (
+                  tickets.map((t) => (
+                    <TableRow
+                      key={t.id}
+                      clickable
+                      onClick={() => navigate(`/tickets/${t.id}`)}
+                      className={selected.has(t.id) ? "bg-primary/5" : ""}
+                    >
+                      {isStaff && (
+                        <TableCell
+                          onClick={(e) => e.stopPropagation()}
+                          className="w-10"
+                        >
+                          <input
+                            type="checkbox"
+                            checked={selected.has(t.id)}
+                            onChange={() => toggleOne(t.id)}
+                            className="accent-primary"
+                            aria-label={`Selecionar ${t.protocol}`}
+                          />
+                        </TableCell>
                       )}
-                    </TableCell>
-                    <TableCell>
-                      <span className="line-clamp-1">{t.title}</span>
-                    </TableCell>
-                    <TableCell>
-                      <StatusBadge status={t.status} />
-                    </TableCell>
-                    <TableCell>
-                      <PriorityBadge priority={t.priority} />
-                    </TableCell>
-                    <TableCell muted className="text-xs capitalize">
-                      {{
-                        hardware: "Hardware",
-                        software: "Software",
-                        network: "Rede",
-                        access: "Acesso",
-                        email: "E-mail",
-                        security: "Segurança",
-                        general: "Geral",
-                        other: "Outro",
-                      }[t.category] ?? t.category}
-                    </TableCell>
-                    <TableCell>
-                      <SlaCell ticket={t} />
-                    </TableCell>
-                    <TableCell muted className="text-xs">
-                      {createdAt(t)}
-                    </TableCell>
-                  </TableRow>
-                ))
-              )}
-            </TableBody>
-          </Table>
+                      <TableCell muted>
+                        <span className="font-mono text-xs">{t.protocol}</span>
+                        {(t.sla_response_breach || t.sla_resolve_breach) && (
+                          <span className="ml-1 text-danger text-xs">⚠</span>
+                        )}
+                      </TableCell>
+                      <TableCell>
+                        <span className="line-clamp-1">{t.title}</span>
+                      </TableCell>
+                      <TableCell>
+                        <StatusBadge status={t.status} />
+                      </TableCell>
+                      <TableCell>
+                        <PriorityBadge priority={t.priority} />
+                      </TableCell>
+                      <TableCell muted className="text-xs capitalize">
+                        {{
+                          hardware: "Hardware",
+                          software: "Software",
+                          network: "Rede",
+                          access: "Acesso",
+                          email: "E-mail",
+                          security: "Segurança",
+                          general: "Geral",
+                          other: "Outro",
+                        }[t.category] ?? t.category}
+                      </TableCell>
+                      <TableCell>
+                        <SlaCell ticket={t} />
+                      </TableCell>
+                      <TableCell muted className="text-xs">
+                        {createdAt(t)}
+                      </TableCell>
+                    </TableRow>
+                  ))
+                )}
+              </TableBody>
+            </Table>
+          </div>
         </div>
       )}
 

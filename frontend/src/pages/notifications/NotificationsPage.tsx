@@ -175,86 +175,88 @@ export default function NotificationsPage() {
         </div>
       ) : (
         <div className="rounded-xl border border-border bg-background-surface overflow-hidden">
-          <Table>
-            <TableHead>
-              <TableRow>
-                <TableHeaderCell className="w-8" />
-                <TableHeaderCell>Título</TableHeaderCell>
-                <TableHeaderCell className="w-40">Tipo</TableHeaderCell>
-                <TableHeaderCell className="w-40">Data</TableHeaderCell>
-                <TableHeaderCell className="w-20 text-right">
-                  Ações
-                </TableHeaderCell>
-              </TableRow>
-            </TableHead>
-            <TableBody>
-              {items.length === 0 ? (
-                <TableEmpty
-                  colSpan={5}
-                  message="Nenhuma notificação encontrada."
-                />
-              ) : (
-                items.map((n) => (
-                  <TableRow
-                    key={n.id}
-                    className={cn(
-                      "cursor-pointer",
-                      !n.read && "bg-background-elevated/30",
-                    )}
-                    onClick={() => handleMarkRead(n)}
-                  >
-                    <TableCell>
-                      {!n.read && (
-                        <span className="block w-2 h-2 rounded-full bg-primary mx-auto" />
+          <div className="overflow-x-auto">
+            <Table>
+              <TableHead>
+                <TableRow>
+                  <TableHeaderCell className="w-8" />
+                  <TableHeaderCell>Título</TableHeaderCell>
+                  <TableHeaderCell className="w-40">Tipo</TableHeaderCell>
+                  <TableHeaderCell className="w-40">Data</TableHeaderCell>
+                  <TableHeaderCell className="w-20 text-right">
+                    Ações
+                  </TableHeaderCell>
+                </TableRow>
+              </TableHead>
+              <TableBody>
+                {items.length === 0 ? (
+                  <TableEmpty
+                    colSpan={5}
+                    message="Nenhuma notificação encontrada."
+                  />
+                ) : (
+                  items.map((n) => (
+                    <TableRow
+                      key={n.id}
+                      className={cn(
+                        "cursor-pointer",
+                        !n.read && "bg-background-elevated/30",
                       )}
-                    </TableCell>
-                    <TableCell>
-                      <div>
-                        <p
+                      onClick={() => handleMarkRead(n)}
+                    >
+                      <TableCell>
+                        {!n.read && (
+                          <span className="block w-2 h-2 rounded-full bg-primary mx-auto" />
+                        )}
+                      </TableCell>
+                      <TableCell>
+                        <div>
+                          <p
+                            className={cn(
+                              "text-sm",
+                              n.read
+                                ? "text-slate-400"
+                                : "font-medium text-slate-200",
+                            )}
+                          >
+                            {n.title}
+                          </p>
+                          <p className="text-xs text-slate-500 line-clamp-1">
+                            {n.message}
+                          </p>
+                        </div>
+                      </TableCell>
+                      <TableCell>
+                        <span
                           className={cn(
-                            "text-sm",
-                            n.read
-                              ? "text-slate-400"
-                              : "font-medium text-slate-200",
+                            "text-xs",
+                            TYPE_COLOR[n.type] ?? "text-slate-400",
                           )}
                         >
-                          {n.title}
-                        </p>
-                        <p className="text-xs text-slate-500 line-clamp-1">
-                          {n.message}
-                        </p>
-                      </div>
-                    </TableCell>
-                    <TableCell>
-                      <span
-                        className={cn(
-                          "text-xs",
-                          TYPE_COLOR[n.type] ?? "text-slate-400",
-                        )}
+                          {TYPE_LABEL[n.type] ?? n.type}
+                        </span>
+                      </TableCell>
+                      <TableCell muted className="text-xs">
+                        {formatDate(n.created_at)}
+                      </TableCell>
+                      <TableCell
+                        className="text-right"
+                        onClick={(e) => e.stopPropagation()}
                       >
-                        {TYPE_LABEL[n.type] ?? n.type}
-                      </span>
-                    </TableCell>
-                    <TableCell muted className="text-xs">
-                      {formatDate(n.created_at)}
-                    </TableCell>
-                    <TableCell
-                      className="text-right"
-                      onClick={(e) => e.stopPropagation()}
-                    >
-                      <Button
-                        variant="ghost"
-                        size="sm"
-                        onClick={() => handleDelete(n.id)}
-                      >
-                        Remover
-                      </Button>
-                    </TableCell>
-                  </TableRow>
-                ))
-              )}
-            </TableBody>
-          </Table>
+                        <Button
+                          variant="ghost"
+                          size="sm"
+                          onClick={() => handleDelete(n.id)}
+                        >
+                          Remover
+                        </Button>
+                      </TableCell>
+                    </TableRow>
+                  ))
+                )}
+              </TableBody>
+            </Table>
+          </div>
         </div>
       )}
 

@@ -91,7 +91,7 @@ function NotificationDropdown({ onClose }: NotificationDropdownProps) {
   }
 
   return (
-    <div className="absolute right-0 top-full mt-1 w-80 rounded-xl border border-border bg-background-surface shadow-xl z-50 overflow-hidden">
+    <div className="absolute right-0 top-full mt-1 w-80 max-w-[calc(100vw-1rem)] rounded-xl border border-border bg-background-surface shadow-xl z-50 overflow-hidden">
       {/* Header */}
       <div className="flex items-center justify-between px-4 py-3 border-b border-border">
         <div className="flex items-center gap-2">

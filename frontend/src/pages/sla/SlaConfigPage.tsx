@@ -210,64 +210,66 @@ export default function SlaConfigPage() {
         </div>
       ) : (
         <div className="rounded-xl border border-border bg-background-surface overflow-hidden">
-          <Table>
-            <TableHead>
-              <TableRow>
-                <TableHeaderCell>Prioridade</TableHeaderCell>
-                <TableHeaderCell className="w-48">
-                  Resposta (h úteis)
-                </TableHeaderCell>
-                <TableHeaderCell className="w-48">
-                  Resolução (h úteis)
-                </TableHeaderCell>
-                <TableHeaderCell className="w-40">Alerta (%)</TableHeaderCell>
-                <TableHeaderCell className="w-36">
-                  Atualizado em
-                </TableHeaderCell>
-                <TableHeaderCell className="w-24 text-right">
-                  Ações
-                </TableHeaderCell>
-              </TableRow>
-            </TableHead>
-            <TableBody>
-              {configs.map((c) => (
-                <TableRow key={c.id}>
-                  <TableCell>
-                    <span className={LEVEL_COLOR[c.level]}>
-                      {LEVEL_LABEL[c.level]}
-                    </span>
-                  </TableCell>
-                  <TableCell>
-                    <span className="text-slate-200">
-                      {c.response_time_hours}h
-                    </span>
-                  </TableCell>
-                  <TableCell>
-                    <span className="text-slate-200">
-                      {c.resolve_time_hours}h
-                    </span>
-                  </TableCell>
-                  <TableCell>
-                    <span className="text-slate-200">
-                      {c.warning_threshold}%
-                    </span>
-                  </TableCell>
-                  <TableCell muted className="text-xs">
-                    {updatedAt(c)}
-                  </TableCell>
-                  <TableCell className="text-right">
-                    <Button
-                      variant="ghost"
-                      size="sm"
-                      onClick={() => setEditing(c)}
-                    >
-                      Editar
-                    </Button>
-                  </TableCell>
+          <div className="overflow-x-auto">
+            <Table>
+              <TableHead>
+                <TableRow>
+                  <TableHeaderCell>Prioridade</TableHeaderCell>
+                  <TableHeaderCell className="w-48">
+                    Resposta (h úteis)
+                  </TableHeaderCell>
+                  <TableHeaderCell className="w-48">
+                    Resolução (h úteis)
+                  </TableHeaderCell>
+                  <TableHeaderCell className="w-40">Alerta (%)</TableHeaderCell>
+                  <TableHeaderCell className="w-36">
+                    Atualizado em
+                  </TableHeaderCell>
+                  <TableHeaderCell className="w-24 text-right">
+                    Ações
+                  </TableHeaderCell>
                 </TableRow>
-              ))}
-            </TableBody>
-          </Table>
+              </TableHead>
+              <TableBody>
+                {configs.map((c) => (
+                  <TableRow key={c.id}>
+                    <TableCell>
+                      <span className={LEVEL_COLOR[c.level]}>
+                        {LEVEL_LABEL[c.level]}
+                      </span>
+                    </TableCell>
+                    <TableCell>
+                      <span className="text-slate-200">
+                        {c.response_time_hours}h
+                      </span>
+                    </TableCell>
+                    <TableCell>
+                      <span className="text-slate-200">
+                        {c.resolve_time_hours}h
+                      </span>
+                    </TableCell>
+                    <TableCell>
+                      <span className="text-slate-200">
+                        {c.warning_threshold}%
+                      </span>
+                    </TableCell>
+                    <TableCell muted className="text-xs">
+                      {updatedAt(c)}
+                    </TableCell>
+                    <TableCell className="text-right">
+                      <Button
+                        variant="ghost"
+                        size="sm"
+                        onClick={() => setEditing(c)}
+                      >
+                        Editar
+                      </Button>
+                    </TableCell>
+                  </TableRow>
+                ))}
+              </TableBody>
+            </Table>
+          </div>
         </div>
       )}
 
