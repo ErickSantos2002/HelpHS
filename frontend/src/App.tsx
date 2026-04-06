@@ -20,6 +20,9 @@ const SlaConfigPage = lazy(() => import("./pages/sla/SlaConfigPage"));
 const NotificationsPage = lazy(
   () => import("./pages/notifications/NotificationsPage"),
 );
+const KBListPage = lazy(() => import("./pages/kb/KBListPage"));
+const KBArticlePage = lazy(() => import("./pages/kb/KBArticlePage"));
+const KBFormPage = lazy(() => import("./pages/kb/KBFormPage"));
 const ForbiddenPage = lazy(() => import("./pages/errors/ForbiddenPage"));
 const NotFoundPage = lazy(() => import("./pages/errors/NotFoundPage"));
 
@@ -55,6 +58,8 @@ function App() {
               <Route path="/tickets/:id/edit" element={<TicketFormPage />} />
               <Route path="/tickets/:id" element={<TicketDetailPage />} />
               <Route path="/notifications" element={<NotificationsPage />} />
+              <Route path="/kb" element={<KBListPage />} />
+              <Route path="/kb/:id" element={<KBArticlePage />} />
               <Route
                 path="/profile"
                 element={
@@ -67,6 +72,8 @@ function App() {
 
               {/* Admin + Technician */}
               <Route element={<RoleGuard roles={["admin", "technician"]} />}>
+                <Route path="/kb/new" element={<KBFormPage />} />
+                <Route path="/kb/:id/edit" element={<KBFormPage />} />
                 <Route
                   path="/reports"
                   element={

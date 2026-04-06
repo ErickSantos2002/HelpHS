@@ -18,6 +18,7 @@ from app.routers import (
     auth,
     chat,
     dashboard,
+    kb,
     notifications,
     products,
     sla,
@@ -89,6 +90,7 @@ app.include_router(notifications.router, prefix=settings.api_prefix)
 app.include_router(surveys.router, prefix=settings.api_prefix)
 app.include_router(audit.router, prefix=settings.api_prefix)
 app.include_router(chat.router, prefix=settings.api_prefix)
+app.include_router(kb.router, prefix=settings.api_prefix)
 app.include_router(sla.router, prefix=settings.api_prefix)
 app.include_router(dashboard.router, prefix=settings.api_prefix)
 
