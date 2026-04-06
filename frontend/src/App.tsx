@@ -16,6 +16,7 @@ const UsersPage = lazy(() => import("./pages/users/UsersPage"));
 const TicketFormPage = lazy(() => import("./pages/tickets/TicketFormPage"));
 const TicketDetailPage = lazy(() => import("./pages/tickets/TicketDetailPage"));
 const ProductsPage = lazy(() => import("./pages/products/ProductsPage"));
+const SlaConfigPage = lazy(() => import("./pages/sla/SlaConfigPage"));
 const ForbiddenPage = lazy(() => import("./pages/errors/ForbiddenPage"));
 const NotFoundPage = lazy(() => import("./pages/errors/NotFoundPage"));
 
@@ -86,6 +87,7 @@ function App() {
               <Route element={<RoleGuard roles={["admin"]} />}>
                 <Route path="/users" element={<UsersPage />} />
                 <Route path="/products" element={<ProductsPage />} />
+                <Route path="/sla-config" element={<SlaConfigPage />} />
                 <Route
                   path="/audit-logs"
                   element={

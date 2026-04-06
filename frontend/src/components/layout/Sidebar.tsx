@@ -113,6 +113,24 @@ function IconShield() {
   );
 }
 
+function IconClock() {
+  return (
+    <svg
+      className="w-5 h-5 shrink-0"
+      fill="none"
+      viewBox="0 0 24 24"
+      stroke="currentColor"
+      strokeWidth={1.75}
+    >
+      <path
+        strokeLinecap="round"
+        strokeLinejoin="round"
+        d="M12 8v4l3 3m6-3a9 9 0 11-18 0 9 9 0 0118 0z"
+      />
+    </svg>
+  );
+}
+
 // ── Nav items ─────────────────────────────────────────────────
 
 interface NavItem {
@@ -152,6 +170,12 @@ const NAV_ITEMS: NavItem[] = [
     path: "/reports",
     icon: <IconChart />,
     roles: ["admin", "technician"],
+  },
+  {
+    label: "Config. SLA",
+    path: "/sla-config",
+    icon: <IconClock />,
+    roles: ["admin"],
   },
   {
     label: "Audit Logs",
