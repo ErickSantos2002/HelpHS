@@ -2,15 +2,25 @@
 Dashboard statistics endpoint.
 
 Permissões:
-  GET /dashboard/stats   — admin, technician
-  GET /dashboard/reports — admin, technician
+  GET /dashboard/stats          — admin, technician
+  GET /dashboard/reports        — admin, technician
+  GET /dashboard/reports/export/csv — admin, technician
+  GET /dashboard/reports/export/pdf — admin, technician
 """
 
+import csv
+import io
 from datetime import UTC, datetime, timedelta
 from typing import Annotated
 
 from fastapi import APIRouter, Depends, Query
-from sqlalchemy import func, select
+from fastapi.responses import StreamingResponse
+from reportlab.lib import colors
+from reportlab.lib.pagesizes import A4
+from reportlab.lib.styles import getSampleStyleSheet
+from reportlab.lib.units import cm
+from reportlab.platypus import Paragraph, SimpleDocTemplate, Spacer, Table, TableStyle
+from sqlalchemy import func, literal, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.core.database import get_db
@@ -105,32 +115,25 @@ async def get_dashboard_stats(
     )
 
 
-@router.get("/dashboard/reports", response_model=ReportData)
-async def get_reports(
-    db: Annotated[AsyncSession, Depends(get_db)],
-    _actor: Annotated[User, Depends(authorize(UserRole.admin, UserRole.technician))],
-    period: Annotated[int, Query(ge=7, le=365)] = 30,
-) -> ReportData:
+async def _build_report(db: AsyncSession, period: int) -> ReportData:
+    """Shared data collection used by JSON, CSV and PDF endpoints."""
     since = datetime.now(UTC) - timedelta(days=period)
 
-    # ── Total tickets in period ───────────────────────────────
     total = (
         await db.execute(select(func.count()).select_from(Ticket).where(Ticket.created_at >= since))
     ).scalar_one()
 
-    # ── Tickets per day ───────────────────────────────────────
     rows = (
         await db.execute(
             select(
-                func.date_trunc("day", Ticket.created_at).label("day"),
+                func.date_trunc(literal("day"), Ticket.created_at).label("day"),
                 func.count().label("cnt"),
             )
             .where(Ticket.created_at >= since)
-            .group_by(func.date_trunc("day", Ticket.created_at))
-            .order_by(func.date_trunc("day", Ticket.created_at))
+            .group_by(func.date_trunc(literal("day"), Ticket.created_at))
+            .order_by(func.date_trunc(literal("day"), Ticket.created_at))
         )
     ).all()
-    # Fill every day in range so the chart has no gaps
     counts_by_day: dict[str, int] = {r.day.strftime("%Y-%m-%d"): r.cnt for r in rows}
     tickets_by_day = [
         DailyCount(
@@ -140,7 +143,6 @@ async def get_reports(
         for i in range(period + 1)
     ]
 
-    # ── Tickets by category ───────────────────────────────────
     cat_rows = (
         await db.execute(
             select(Ticket.category, func.count().label("cnt"))
@@ -150,13 +152,11 @@ async def get_reports(
         )
     ).all()
     tickets_by_category = [CategoryCount(category=r.category.value, count=r.cnt) for r in cat_rows]
-    # Ensure all categories appear even if count is zero
     present = {c.category for c in tickets_by_category}
     for cat in TicketCategory:
         if cat.value not in present:
             tickets_by_category.append(CategoryCount(category=cat.value, count=0))
 
-    # ── SLA compliance by priority ────────────────────────────
     sla_compliance: list[SLAComplianceItem] = []
     for priority in TicketPriority:
         p_total = (
@@ -187,7 +187,6 @@ async def get_reports(
             )
         )
 
-    # ── CSAT distribution ─────────────────────────────────────
     csat_rows = (
         await db.execute(
             select(SatisfactionSurvey.rating, func.count().label("cnt"))
@@ -218,4 +217,168 @@ async def get_reports(
         sla_compliance=sla_compliance,
         csat_distribution=csat_distribution,
         csat_average=csat_average,
+    )
+
+
+@router.get("/dashboard/reports", response_model=ReportData)
+async def get_reports(
+    db: Annotated[AsyncSession, Depends(get_db)],
+    _actor: Annotated[User, Depends(authorize(UserRole.admin, UserRole.technician))],
+    period: Annotated[int, Query(ge=7, le=365)] = 30,
+) -> ReportData:
+    return await _build_report(db, period)
+
+
+@router.get("/dashboard/reports/export/csv")
+async def export_reports_csv(
+    db: Annotated[AsyncSession, Depends(get_db)],
+    _actor: Annotated[User, Depends(authorize(UserRole.admin, UserRole.technician))],
+    period: Annotated[int, Query(ge=7, le=365)] = 30,
+) -> StreamingResponse:
+    data = await _build_report(db, period)
+    buf = io.StringIO()
+    writer = csv.writer(buf)
+
+    writer.writerow([f"Relatório HelpHS — últimos {period} dias"])
+    writer.writerow([f"Gerado em: {datetime.now(UTC).strftime('%d/%m/%Y %H:%M')} UTC"])
+    writer.writerow([])
+
+    writer.writerow(["TICKETS POR DIA"])
+    writer.writerow(["Data", "Quantidade"])
+    for d in data.tickets_by_day:
+        writer.writerow([d.date, d.count])
+    writer.writerow([])
+
+    writer.writerow(["TICKETS POR CATEGORIA"])
+    writer.writerow(["Categoria", "Quantidade"])
+    for c in sorted(data.tickets_by_category, key=lambda x: x.count, reverse=True):
+        if c.count > 0:
+            writer.writerow([c.category, c.count])
+    writer.writerow([])
+
+    writer.writerow(["CONFORMIDADE SLA POR PRIORIDADE"])
+    writer.writerow(["Prioridade", "Total", "Violações", "Conformidade (%)"])
+    for s in data.sla_compliance:
+        writer.writerow([s.priority, s.total, s.breached, s.compliance_rate])
+    writer.writerow([])
+
+    writer.writerow(["DISTRIBUIÇÃO CSAT"])
+    writer.writerow(["Nota", "Avaliações"])
+    for c in data.csat_distribution:
+        writer.writerow([c.rating, c.count])
+    if data.csat_average is not None:
+        writer.writerow(["Média", data.csat_average])
+
+    buf.seek(0)
+    filename = f"relatorio_helphs_{datetime.now(UTC).strftime('%Y%m%d')}_{period}d.csv"
+    return StreamingResponse(
+        iter([buf.getvalue()]),
+        media_type="text/csv",
+        headers={"Content-Disposition": f'attachment; filename="{filename}"'},
+    )
+
+
+@router.get("/dashboard/reports/export/pdf")
+async def export_reports_pdf(
+    db: Annotated[AsyncSession, Depends(get_db)],
+    _actor: Annotated[User, Depends(authorize(UserRole.admin, UserRole.technician))],
+    period: Annotated[int, Query(ge=7, le=365)] = 30,
+) -> StreamingResponse:
+    data = await _build_report(db, period)
+    buf = io.BytesIO()
+    styles = getSampleStyleSheet()
+    doc = SimpleDocTemplate(buf, pagesize=A4, leftMargin=2 * cm, rightMargin=2 * cm)
+
+    story = []
+    title_style = styles["Title"]
+    h2_style = styles["Heading2"]
+    normal_style = styles["Normal"]
+
+    story.append(Paragraph("Relatório HelpHS", title_style))
+    story.append(
+        Paragraph(
+            f"Período: últimos {period} dias &nbsp;·&nbsp; "
+            f"Gerado em {datetime.now(UTC).strftime('%d/%m/%Y %H:%M')} UTC",
+            normal_style,
+        )
+    )
+    story.append(Spacer(1, 0.4 * cm))
+
+    def _table(header: list[str], rows: list[list]) -> Table:
+        table_data = [header] + rows
+        t = Table(table_data, hAlign="LEFT")
+        t.setStyle(
+            TableStyle(
+                [
+                    ("BACKGROUND", (0, 0), (-1, 0), colors.HexColor("#6366f1")),
+                    ("TEXTCOLOR", (0, 0), (-1, 0), colors.white),
+                    ("FONTNAME", (0, 0), (-1, 0), "Helvetica-Bold"),
+                    ("FONTSIZE", (0, 0), (-1, -1), 9),
+                    (
+                        "ROWBACKGROUNDS",
+                        (0, 1),
+                        (-1, -1),
+                        [colors.white, colors.HexColor("#f1f5f9")],
+                    ),
+                    ("GRID", (0, 0), (-1, -1), 0.25, colors.HexColor("#cbd5e1")),
+                    ("TOPPADDING", (0, 0), (-1, -1), 4),
+                    ("BOTTOMPADDING", (0, 0), (-1, -1), 4),
+                ]
+            )
+        )
+        return t
+
+    # Summary
+    story.append(Paragraph("Resumo", h2_style))
+    story.append(
+        _table(
+            ["Métrica", "Valor"],
+            [
+                ["Total de tickets no período", str(data.total_tickets)],
+                ["Média CSAT", str(data.csat_average) if data.csat_average else "—"],
+            ],
+        )
+    )
+    story.append(Spacer(1, 0.5 * cm))
+
+    # Tickets por categoria
+    story.append(Paragraph("Tickets por Categoria", h2_style))
+    cat_rows = [
+        [c.category.capitalize(), str(c.count)]
+        for c in sorted(data.tickets_by_category, key=lambda x: x.count, reverse=True)
+        if c.count > 0
+    ]
+    if cat_rows:
+        story.append(_table(["Categoria", "Quantidade"], cat_rows))
+    story.append(Spacer(1, 0.5 * cm))
+
+    # SLA compliance
+    story.append(Paragraph("Conformidade SLA por Prioridade", h2_style))
+    story.append(
+        _table(
+            ["Prioridade", "Total", "Violações", "Conformidade"],
+            [
+                [s.priority.capitalize(), str(s.total), str(s.breached), f"{s.compliance_rate}%"]
+                for s in data.sla_compliance
+            ],
+        )
+    )
+    story.append(Spacer(1, 0.5 * cm))
+
+    # CSAT
+    story.append(Paragraph("Distribuição CSAT", h2_style))
+    story.append(
+        _table(
+            ["Nota", "Avaliações"],
+            [[f"{'★' * c.rating}", str(c.count)] for c in data.csat_distribution],
+        )
+    )
+
+    doc.build(story)
+    buf.seek(0)
+    filename = f"relatorio_helphs_{datetime.now(UTC).strftime('%Y%m%d')}_{period}d.pdf"
+    return StreamingResponse(
+        buf,
+        media_type="application/pdf",
+        headers={"Content-Disposition": f'attachment; filename="{filename}"'},
     )

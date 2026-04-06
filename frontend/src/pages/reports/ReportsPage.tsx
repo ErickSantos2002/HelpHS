@@ -12,7 +12,11 @@ import {
   YAxis,
 } from "recharts";
 import { Select } from "../../components/ui";
-import { getReports, type ReportData } from "../../services/reportService";
+import {
+  exportReportsUrl,
+  getReports,
+  type ReportData,
+} from "../../services/reportService";
 
 const PERIOD_OPTIONS = [
   { value: "7", label: "Últimos 7 dias" },
@@ -114,12 +118,54 @@ export default function ReportsPage() {
             Visão geral de desempenho e SLA
           </p>
         </div>
-        <Select
-          value={period}
-          onChange={(e) => setPeriod(e.target.value)}
-          options={PERIOD_OPTIONS}
-          className="w-44"
-        />
+        <div className="flex items-center gap-2">
+          <Select
+            value={period}
+            onChange={(e) => setPeriod(e.target.value)}
+            options={PERIOD_OPTIONS}
+            className="w-44"
+          />
+          <a
+            href={exportReportsUrl("csv", Number(period))}
+            download
+            className="flex items-center gap-1.5 px-3 py-2 rounded-lg border border-border text-sm text-slate-300 hover:bg-background-elevated transition-colors"
+          >
+            <svg
+              className="w-4 h-4"
+              fill="none"
+              viewBox="0 0 24 24"
+              stroke="currentColor"
+              strokeWidth={2}
+            >
+              <path
+                strokeLinecap="round"
+                strokeLinejoin="round"
+                d="M4 16v1a3 3 0 003 3h10a3 3 0 003-3v-1m-4-4l-4 4m0 0l-4-4m4 4V4"
+              />
+            </svg>
+            CSV
+          </a>
+          <a
+            href={exportReportsUrl("pdf", Number(period))}
+            download
+            className="flex items-center gap-1.5 px-3 py-2 rounded-lg border border-border text-sm text-slate-300 hover:bg-background-elevated transition-colors"
+          >
+            <svg
+              className="w-4 h-4"
+              fill="none"
+              viewBox="0 0 24 24"
+              stroke="currentColor"
+              strokeWidth={2}
+            >
+              <path
+                strokeLinecap="round"
+                strokeLinejoin="round"
+                d="M4 16v1a3 3 0 003 3h10a3 3 0 003-3v-1m-4-4l-4 4m0 0l-4-4m4 4V4"
+              />
+            </svg>
+            PDF
+          </a>
+        </div>
       </div>
 
       {loading && (

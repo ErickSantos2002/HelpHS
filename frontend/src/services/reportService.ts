@@ -38,3 +38,10 @@ export async function getReports(period: number = 30): Promise<ReportData> {
   });
   return data;
 }
+
+export function exportReportsUrl(
+  format: "csv" | "pdf",
+  period: number,
+): string {
+  return `/api/v1/dashboard/reports/export/${format}?period=${period}`;
+}
