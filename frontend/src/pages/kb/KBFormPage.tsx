@@ -145,26 +145,16 @@ export default function KBFormPage() {
             <Select
               value={category}
               onChange={(e) => setCategory(e.target.value)}
-            >
-              {CATEGORIES.map((c) => (
-                <option key={c.value} value={c.value}>
-                  {c.label}
-                </option>
-              ))}
-            </Select>
+              options={CATEGORIES}
+            />
           </div>
           <div className="space-y-1.5">
             <label className="text-sm font-medium text-slate-300">Status</label>
             <Select
               value={status}
               onChange={(e) => setStatus(e.target.value as KBArticleStatus)}
-            >
-              {STATUS_OPTIONS.map((s) => (
-                <option key={s.value} value={s.value}>
-                  {s.label}
-                </option>
-              ))}
-            </Select>
+              options={STATUS_OPTIONS}
+            />
           </div>
         </div>
 

@@ -134,25 +134,15 @@ export default function KBListPage() {
           value={category}
           onChange={(e) => setCategory(e.target.value)}
           className="w-48"
-        >
-          {CATEGORIES.map((c) => (
-            <option key={c.value} value={c.value}>
-              {c.label}
-            </option>
-          ))}
-        </Select>
+          options={CATEGORIES}
+        />
         {isStaff && (
           <Select
             value={statusFilter}
             onChange={(e) => setStatusFilter(e.target.value)}
             className="w-44"
-          >
-            {STATUS_OPTIONS.map((s) => (
-              <option key={s.value} value={s.value}>
-                {s.label}
-              </option>
-            ))}
-          </Select>
+            options={STATUS_OPTIONS}
+          />
         )}
       </div>
 
