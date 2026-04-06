@@ -66,3 +66,23 @@ class TicketListResponse(AppBaseModel):
     total: int
     limit: int
     offset: int
+
+
+class TicketHistoryResponse(AppBaseModel):
+    model_config = ConfigDict(from_attributes=True, str_strip_whitespace=True)
+
+    id: uuid.UUID
+    ticket_id: uuid.UUID
+    user_id: uuid.UUID
+    field: str
+    old_value: str | None
+    new_value: str | None
+    comment: str | None
+    created_at: datetime
+
+
+class TicketHistoryListResponse(AppBaseModel):
+    items: list[TicketHistoryResponse]
+    total: int
+    limit: int
+    offset: int

@@ -30,6 +30,7 @@ from app.models.models import (
     AuditLog,
     SLAConfig,
     Ticket,
+    TicketHistory,
     TicketStatus,
     User,
     UserRole,
@@ -37,6 +38,8 @@ from app.models.models import (
 from app.schemas.ticket import (
     TicketAssign,
     TicketCreate,
+    TicketHistoryListResponse,
+    TicketHistoryResponse,
     TicketListResponse,
     TicketResponse,
     TicketStatusUpdate,
@@ -98,6 +101,28 @@ def _audit(
     )
 
 
+def _record_history(
+    db: AsyncSession,
+    ticket_id: uuid.UUID,
+    user_id: uuid.UUID,
+    field: str,
+    old_value: str | None,
+    new_value: str | None,
+    comment: str | None = None,
+) -> None:
+    db.add(
+        TicketHistory(
+            id=uuid.uuid4(),
+            ticket_id=ticket_id,
+            user_id=user_id,
+            field=field,
+            old_value=str(old_value) if old_value is not None else None,
+            new_value=str(new_value) if new_value is not None else None,
+            comment=comment,
+        )
+    )
+
+
 async def _get_ticket_or_404(ticket_id: uuid.UUID, db: AsyncSession) -> Ticket:
     result = await db.execute(select(Ticket).where(Ticket.id == ticket_id))
     ticket = result.scalar_one_or_none()
@@ -151,6 +176,7 @@ async def create_ticket(
         if sla_config:
             apply_sla_config(ticket, sla_config, ts)
         db.add(ticket)
+        _record_history(db, ticket.id, actor.id, "created", None, "open")
         _audit(db, AuditAction.create, actor.id, ticket.id)
         try:
             await db.commit()
@@ -241,13 +267,15 @@ async def update_ticket(
                 status_code=status.HTTP_409_CONFLICT,
                 detail="Ticket can only be edited while open",
             )
-        # Clients may only update title and description
-        allowed = body.model_dump(include={"title", "description"}, exclude_unset=True)
-        for field, value in allowed.items():
-            setattr(ticket, field, value)
+        changes = body.model_dump(include={"title", "description"}, exclude_unset=True)
     else:
-        for field, value in body.model_dump(exclude_unset=True).items():
-            setattr(ticket, field, value)
+        changes = body.model_dump(exclude_unset=True)
+
+    for field, new_val in changes.items():
+        old_val = getattr(ticket, field)
+        if old_val != new_val:
+            _record_history(db, ticket.id, actor.id, field, old_val, new_val)
+        setattr(ticket, field, new_val)
 
     ticket.updated_at = datetime.now(UTC)
     _audit(db, AuditAction.update, actor.id, ticket.id)
@@ -291,6 +319,9 @@ async def update_ticket_status(
     if body.status in (TicketStatus.resolved, TicketStatus.closed, TicketStatus.cancelled):
         ticket.closed_at = now
 
+    _record_history(
+        db, ticket.id, actor.id, "status", old_status.value, body.status.value, body.comment
+    )
     _audit(db, AuditAction.status_change, actor.id, ticket.id)
     await db.commit()
     await db.refresh(ticket)
@@ -311,8 +342,10 @@ async def assign_ticket(
         if not result.scalar_one_or_none():
             raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Assignee not found")
 
+    old_assignee = ticket.assignee_id
     ticket.assignee_id = body.assignee_id
     ticket.updated_at = datetime.now(UTC)
+    _record_history(db, ticket.id, actor.id, "assignee_id", old_assignee, body.assignee_id)
     _audit(db, AuditAction.assign, actor.id, ticket.id)
     await db.commit()
     await db.refresh(ticket)
@@ -333,8 +366,38 @@ async def cancel_ticket(
             detail=f"Ticket is already '{ticket.status}'",
         )
 
+    old_status = ticket.status
     ticket.status = TicketStatus.cancelled
     ticket.closed_at = datetime.now(UTC)
     ticket.updated_at = ticket.closed_at
+    _record_history(db, ticket.id, actor.id, "status", old_status.value, "cancelled")
     _audit(db, AuditAction.delete, actor.id, ticket.id)
     await db.commit()
+
+
+@router.get("/tickets/{ticket_id}/history", response_model=TicketHistoryListResponse)
+async def get_ticket_history(
+    ticket_id: uuid.UUID,
+    db: Annotated[AsyncSession, Depends(get_db)],
+    actor: Annotated[User, Depends(get_current_user)],
+    offset: int = Query(default=0, ge=0),
+    limit: int = Query(default=50, ge=1, le=200),
+) -> TicketHistoryListResponse:
+    ticket = await _get_ticket_or_404(ticket_id, db)
+
+    if actor.role == UserRole.client and ticket.creator_id != actor.id:
+        raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="Access denied")
+
+    base = select(TicketHistory).where(TicketHistory.ticket_id == ticket_id)
+    total = (await db.execute(select(func.count()).select_from(base.subquery()))).scalar_one()
+    rows = await db.execute(
+        base.order_by(TicketHistory.created_at.asc()).offset(offset).limit(limit)
+    )
+    entries = rows.scalars().all()
+
+    return TicketHistoryListResponse(
+        items=[TicketHistoryResponse.model_validate(h) for h in entries],
+        total=total,
+        limit=limit,
+        offset=offset,
+    )
