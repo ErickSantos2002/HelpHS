@@ -17,6 +17,9 @@ const TicketFormPage = lazy(() => import("./pages/tickets/TicketFormPage"));
 const TicketDetailPage = lazy(() => import("./pages/tickets/TicketDetailPage"));
 const ProductsPage = lazy(() => import("./pages/products/ProductsPage"));
 const SlaConfigPage = lazy(() => import("./pages/sla/SlaConfigPage"));
+const NotificationsPage = lazy(
+  () => import("./pages/notifications/NotificationsPage"),
+);
 const ForbiddenPage = lazy(() => import("./pages/errors/ForbiddenPage"));
 const NotFoundPage = lazy(() => import("./pages/errors/NotFoundPage"));
 
@@ -51,15 +54,7 @@ function App() {
               <Route path="/tickets/new" element={<TicketFormPage />} />
               <Route path="/tickets/:id/edit" element={<TicketFormPage />} />
               <Route path="/tickets/:id" element={<TicketDetailPage />} />
-              <Route
-                path="/notifications"
-                element={
-                  <PlaceholderPage
-                    title="Notificações"
-                    description="Central de notificações — Sprint 5"
-                  />
-                }
-              />
+              <Route path="/notifications" element={<NotificationsPage />} />
               <Route
                 path="/profile"
                 element={
