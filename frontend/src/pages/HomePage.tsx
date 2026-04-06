@@ -3,6 +3,9 @@ import { Spinner } from "../components/ui";
 import { useAuth } from "../contexts/AuthContext";
 
 const AdminDashboard = lazy(() => import("./dashboard/AdminDashboard"));
+const TechnicianDashboard = lazy(
+  () => import("./dashboard/TechnicianDashboard"),
+);
 
 function Loading() {
   return (
@@ -18,14 +21,7 @@ export default function HomePage() {
   return (
     <Suspense fallback={<Loading />}>
       {user?.role === "admin" && <AdminDashboard />}
-      {user?.role === "technician" && (
-        <div className="space-y-2">
-          <h1 className="text-2xl font-bold text-slate-100">Dashboard</h1>
-          <p className="text-slate-400">
-            Dashboard do técnico — disponível no T33.
-          </p>
-        </div>
-      )}
+      {user?.role === "technician" && <TechnicianDashboard />}
       {user?.role === "client" && (
         <div className="space-y-2">
           <h1 className="text-2xl font-bold text-slate-100">Meus Tickets</h1>
