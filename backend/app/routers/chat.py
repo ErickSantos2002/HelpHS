@@ -23,6 +23,7 @@ from jose import JWTError
 from loguru import logger
 from sqlalchemy import func, select
 from sqlalchemy.ext.asyncio import AsyncSession
+from sqlalchemy.orm import selectinload
 
 from app.core.config import get_settings
 from app.core.database import AsyncSessionLocal, get_db
@@ -160,16 +161,13 @@ async def list_messages(
 
     rows = await db.execute(
         select(ChatMessage)
+        .options(selectinload(ChatMessage.sender))
         .where(ChatMessage.ticket_id == ticket_id)
         .order_by(ChatMessage.created_at.asc())
         .offset(offset)
         .limit(limit)
     )
     messages = rows.scalars().all()
-
-    # Eagerly load senders
-    for msg in messages:
-        await db.refresh(msg, ["sender"])
 
     return ChatMessageListResponse(
         items=[_msg_to_response(m) for m in messages],
@@ -207,7 +205,14 @@ async def create_message(
     await _notify_other_party(db, ticket, actor, msg)
 
     await db.commit()
-    await db.refresh(msg, ["sender"])
+
+    # Reload with sender using selectinload
+    result = await db.execute(
+        select(ChatMessage)
+        .options(selectinload(ChatMessage.sender))
+        .where(ChatMessage.id == msg.id)
+    )
+    msg = result.scalar_one()
 
     response = _msg_to_response(msg)
 
@@ -291,7 +296,13 @@ async def websocket_chat(
                 await _notify_other_party(db, ticket, user, msg)
 
                 await db.commit()
-                await db.refresh(msg, ["sender"])
+
+                result = await db.execute(
+                    select(ChatMessage)
+                    .options(selectinload(ChatMessage.sender))
+                    .where(ChatMessage.id == msg.id)
+                )
+                msg = result.scalar_one()
 
             response = _msg_to_response(msg)
             await manager.broadcast(
