@@ -24,6 +24,28 @@ export type { SelectProps, SelectOption } from "./Select";
 
 export { Spinner } from "./Spinner";
 
+export {
+  Table,
+  TableHead,
+  TableBody,
+  TableRow,
+  TableHeaderCell,
+  TableCell,
+  TableEmpty,
+} from "./Table";
+export type {
+  TableProps,
+  TableRowProps,
+  TableHeaderCellProps,
+  TableCellProps,
+} from "./Table";
+
+export { Pagination } from "./Pagination";
+export type { PaginationProps } from "./Pagination";
+
+export { TicketFilters, EMPTY_FILTERS } from "./TicketFilters";
+export type { TicketFilterState, TicketFiltersProps } from "./TicketFilters";
+
 export { Tabs, TabsList, TabsTrigger, TabsContent } from "./Tabs";
 export type { TabsProps, TabsTriggerProps, TabsContentProps } from "./Tabs";
 
