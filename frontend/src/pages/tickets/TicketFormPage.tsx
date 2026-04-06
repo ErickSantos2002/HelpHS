@@ -351,7 +351,7 @@ export default function TicketFormPage() {
   // Load products on mount
   useEffect(() => {
     getProducts()
-      .then(setProducts)
+      .then((res) => setProducts(res.items))
       .finally(() => setLoadingProducts(false));
   }, []);
 

@@ -2,16 +2,16 @@ import { Page } from "@playwright/test";
 
 export const CREDENTIALS = {
   admin: {
-    email: process.env.ADMIN_EMAIL ?? "admin@helphs.dev",
-    password: process.env.ADMIN_PASSWORD ?? "Admin@1234",
+    email: process.env.ADMIN_EMAIL ?? "admin@healthsafety.com",
+    password: process.env.ADMIN_PASSWORD ?? "Admin@123456",
   },
   technician: {
-    email: process.env.TECH_EMAIL ?? "tech@helphs.dev",
-    password: process.env.TECH_PASSWORD ?? "Tech@1234",
+    email: process.env.TECH_EMAIL ?? "tech.e2e@healthsafety.com",
+    password: process.env.TECH_PASSWORD ?? "TechE2E@123",
   },
   client: {
-    email: process.env.CLIENT_EMAIL ?? "client@helphs.dev",
-    password: process.env.CLIENT_PASSWORD ?? "Client@1234",
+    email: process.env.CLIENT_EMAIL ?? "client.e2e@healthsafety.com",
+    password: process.env.CLIENT_PASSWORD ?? "ClientE2E@123",
   },
 };
 

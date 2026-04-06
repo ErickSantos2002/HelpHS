@@ -14,45 +14,44 @@ test.describe("Tickets", () => {
 
   test("filtro por status atualiza a lista", async ({ page }) => {
     await page.goto("/tickets");
-    // Open status filter
     await page.locator("select").first().selectOption("open");
-    // URL or list updates (count in header changes)
-    await expect(page.getByText(/chamado/i)).toBeVisible({ timeout: 5_000 });
+    // The count subtitle updates with the result
+    await expect(page.getByText(/chamados? encontrados?/i)).toBeVisible({
+      timeout: 5_000,
+    });
   });
 
   test("abre formulário de novo ticket", async ({ page }) => {
     await page.goto("/tickets");
     await page.getByRole("button", { name: "Abrir chamado" }).click();
     await expect(page).toHaveURL("/tickets/new");
+    // Heading is "Abrir chamado" on the form page
     await expect(
-      page.getByRole("heading", { name: /novo chamado/i }),
-    ).toBeVisible();
+      page.getByRole("heading", { name: /abrir chamado/i }),
+    ).toBeVisible({ timeout: 5_000 });
   });
 
   test("cria novo ticket com sucesso", async ({ page }) => {
     await page.goto("/tickets/new");
+    // Wait for products to load and form to render
+    await expect(
+      page.getByRole("heading", { name: /abrir chamado/i }),
+    ).toBeVisible({ timeout: 10_000 });
 
     const title = `Teste E2E ${Date.now()}`;
-    await page.getByLabel(/título/i).fill(title);
+    await page.getByPlaceholder("Descreva o problema brevemente").fill(title);
     await page
-      .getByLabel(/descrição/i)
+      .getByPlaceholder(/descreva o problema com detalhes/i)
       .fill("Descrição criada por teste automatizado.");
 
-    // Select category
-    const categorySelect = page
-      .locator("select")
-      .filter({ hasText: /categoria/i })
-      .or(
-        page
-          .locator("label")
-          .filter({ hasText: /categoria/i })
-          .locator("..")
-          .locator("select"),
-      )
-      .first();
-    await categorySelect.selectOption("software");
+    // Priority and category selects (1st = priority, 2nd = category)
+    await page.locator("select").first().selectOption("medium");
+    await page.locator("select").nth(1).selectOption("software");
 
-    await page.getByRole("button", { name: /abrir chamado/i }).click();
+    // Submit goes to preview step first
+    await page.getByRole("button", { name: /revisar e enviar/i }).click();
+    // Confirm on preview step
+    await page.getByRole("button", { name: /confirmar e enviar/i }).click();
 
     // Should redirect to ticket detail
     await expect(page).toHaveURL(/\/tickets\/[^/]+$/, { timeout: 10_000 });
@@ -66,8 +65,10 @@ test.describe("Tickets", () => {
     await firstRow.click();
     await expect(page).toHaveURL(/\/tickets\/[^/]+$/);
     // Should show protocol, status, description section
-    await expect(page.getByText(/HS-/)).toBeVisible({ timeout: 5_000 });
-    await expect(page.getByText(/Descrição/i)).toBeVisible();
+    await expect(page.getByText(/HS-/).first()).toBeVisible({ timeout: 5_000 });
+    await expect(
+      page.getByRole("heading", { name: "Descrição" }),
+    ).toBeVisible();
   });
 
   test("botão voltar retorna para lista de tickets", async ({ page }) => {
