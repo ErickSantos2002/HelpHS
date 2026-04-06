@@ -15,6 +15,7 @@ const TicketListPage = lazy(() => import("./pages/tickets/TicketListPage"));
 const UsersPage = lazy(() => import("./pages/users/UsersPage"));
 const TicketFormPage = lazy(() => import("./pages/tickets/TicketFormPage"));
 const TicketDetailPage = lazy(() => import("./pages/tickets/TicketDetailPage"));
+const ProductsPage = lazy(() => import("./pages/products/ProductsPage"));
 const ForbiddenPage = lazy(() => import("./pages/errors/ForbiddenPage"));
 const NotFoundPage = lazy(() => import("./pages/errors/NotFoundPage"));
 
@@ -84,15 +85,7 @@ function App() {
               {/* Admin only */}
               <Route element={<RoleGuard roles={["admin"]} />}>
                 <Route path="/users" element={<UsersPage />} />
-                <Route
-                  path="/products"
-                  element={
-                    <PlaceholderPage
-                      title="Produtos e Equipamentos"
-                      description="Gestão de produtos — Sprint 5"
-                    />
-                  }
-                />
+                <Route path="/products" element={<ProductsPage />} />
                 <Route
                   path="/audit-logs"
                   element={
