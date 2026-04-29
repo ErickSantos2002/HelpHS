@@ -25,6 +25,7 @@ import {
   assignTicket,
   getTicket,
   getTicketHistory,
+  updateTicket,
   updateTicketStatus,
   type Ticket,
   type TicketHistory,
@@ -388,6 +389,11 @@ export default function TicketDetailPage() {
   const [uploadLoading, setUploadLoading] = useState(false);
   const [uploadError, setUploadError] = useState<string | null>(null);
 
+  // Notas internas do técnico
+  const [notesEdit, setNotesEdit] = useState(false);
+  const [notesValue, setNotesValue] = useState("");
+  const [notesSaving, setNotesSaving] = useState(false);
+
   const isStaff = user?.role === "admin" || user?.role === "technician";
 
   const load = useCallback(async () => {
@@ -399,6 +405,7 @@ export default function TicketDetailPage() {
         getAttachments(id),
       ]);
       setTicket(t);
+      setNotesValue(t.technician_notes ?? "");
       setHistory(h.items);
       setAttachments(a.items);
     } catch {
@@ -476,6 +483,20 @@ export default function TicketDetailPage() {
       );
     } finally {
       setUploadLoading(false);
+    }
+  }
+
+  async function handleSaveNotes() {
+    if (!ticket) return;
+    setNotesSaving(true);
+    try {
+      const updated = await updateTicket(ticket.id, {
+        technician_notes: notesValue || null,
+      });
+      setTicket(updated);
+      setNotesEdit(false);
+    } finally {
+      setNotesSaving(false);
     }
   }
 
@@ -605,6 +626,68 @@ export default function TicketDetailPage() {
             )}
           </div>
 
+          {/* Notas internas — visível apenas para admin/técnico */}
+          {isStaff && (
+            <div className="rounded-xl bg-background-surface border border-yellow-800/40 p-5 space-y-3">
+              <div className="flex items-center justify-between">
+                <h2 className="text-sm font-semibold text-yellow-400 flex items-center gap-2">
+                  🔒 Notas internas
+                  <span className="text-xs font-normal text-slate-500">
+                    (não visível pelo cliente)
+                  </span>
+                </h2>
+                {!notesEdit && (
+                  <Button
+                    variant="ghost"
+                    size="sm"
+                    onClick={() => setNotesEdit(true)}
+                  >
+                    {ticket.technician_notes ? "Editar" : "+ Adicionar"}
+                  </Button>
+                )}
+              </div>
+
+              {notesEdit ? (
+                <div className="space-y-3">
+                  <Textarea
+                    rows={4}
+                    placeholder="Observações internas, diagnósticos, próximos passos…"
+                    value={notesValue}
+                    onChange={(e) => setNotesValue(e.target.value)}
+                  />
+                  <div className="flex gap-2 justify-end">
+                    <Button
+                      variant="secondary"
+                      size="sm"
+                      onClick={() => {
+                        setNotesEdit(false);
+                        setNotesValue(ticket.technician_notes ?? "");
+                      }}
+                      disabled={notesSaving}
+                    >
+                      Cancelar
+                    </Button>
+                    <Button
+                      size="sm"
+                      onClick={handleSaveNotes}
+                      loading={notesSaving}
+                    >
+                      Salvar
+                    </Button>
+                  </div>
+                </div>
+              ) : ticket.technician_notes ? (
+                <p className="text-sm text-slate-300 whitespace-pre-wrap leading-relaxed bg-yellow-950/20 rounded-lg p-3">
+                  {ticket.technician_notes}
+                </p>
+              ) : (
+                <p className="text-sm text-slate-500 italic">
+                  Nenhuma nota interna registrada.
+                </p>
+              )}
+            </div>
+          )}
+
           {/* Chat */}
           <ChatPanel
             ticketId={ticket.id}
@@ -665,14 +748,16 @@ export default function TicketDetailPage() {
               >
                 {ticket.assignee_id ? "Reatribuir" : "Atribuir técnico"}
               </Button>
-              <Button
-                className="w-full"
-                variant="ghost"
-                size="sm"
-                onClick={() => navigate(`/tickets/${ticket.id}/edit`)}
-              >
-                Editar ticket
-              </Button>
+              {user?.role === "admin" && (
+                <Button
+                  className="w-full"
+                  variant="ghost"
+                  size="sm"
+                  onClick={() => navigate(`/tickets/${ticket.id}/edit`)}
+                >
+                  Editar ticket
+                </Button>
+              )}
             </div>
           )}
 

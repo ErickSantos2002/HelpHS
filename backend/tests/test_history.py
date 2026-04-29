@@ -83,6 +83,7 @@ def _mock_ticket(status=TicketStatus.open, creator_id=None):
     t.closed_at = None
     t.created_at = _NOW
     t.updated_at = _NOW
+    t.technician_notes = None
     t.ai_classification = None
     t.ai_confidence = None
     t.ai_summary = None
@@ -400,9 +401,9 @@ async def test_update_ticket_records_changed_fields(patch_redis):
         async with AsyncClient(transport=ASGITransport(app=app), base_url="http://test") as c:
             await c.patch(
                 f"/api/v1/tickets/{_TICKET_ID}",
-                json={"title": "Novo título"},
+                json={"technician_notes": "Diagnóstico registrado."},
             )
     finally:
         tickets_module._record_history = original
 
-    assert any(call[3] == "title" for call in calls)
+    assert any(call[3] == "technician_notes" for call in calls)

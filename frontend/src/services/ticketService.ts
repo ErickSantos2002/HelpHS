@@ -26,6 +26,7 @@ export interface Ticket {
   product_id: string | null;
   equipment_id: string | null;
   closed_at: string | null;
+  technician_notes: string | null;
   ai_classification: string | null;
   ai_confidence: number | null;
   ai_summary: string | null;
@@ -124,6 +125,7 @@ export interface TicketUpdatePayload {
   category?: string;
   product_id?: string | null;
   equipment_id?: string | null;
+  technician_notes?: string | null;
 }
 
 export async function createTicket(

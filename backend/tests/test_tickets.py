@@ -88,6 +88,7 @@ def _mock_ticket(
     t.closed_at = None
     t.created_at = _NOW
     t.updated_at = _NOW
+    t.technician_notes = None
     t.ai_classification = None
     t.ai_confidence = None
     t.ai_summary = None
@@ -379,7 +380,28 @@ async def test_get_ticket_not_found(patch_redis):
 
 
 @pytest.mark.asyncio
-async def test_update_ticket_technician(patch_redis):
+async def test_update_ticket_technician_notes(patch_redis):
+    """Technician can save internal notes but not edit core ticket fields."""
+    from app.core.database import get_db
+
+    tech = _mock_user(UserRole.technician)
+    ticket = _mock_ticket()
+
+    app.dependency_overrides[get_db] = _db_override(ticket)
+    _override_user(tech)
+
+    async with AsyncClient(transport=ASGITransport(app=app), base_url="http://test") as c:
+        # Saving notes is allowed
+        resp = await c.patch(
+            f"/api/v1/tickets/{_TICKET_ID}",
+            json={"technician_notes": "Diagnóstico inicial: problema na bateria."},
+        )
+    assert resp.status_code == 200
+
+
+@pytest.mark.asyncio
+async def test_update_ticket_technician_cannot_edit_fields(patch_redis):
+    """Technician cannot edit core ticket fields (title, priority, etc.)."""
     from app.core.database import get_db
 
     tech = _mock_user(UserRole.technician)
@@ -393,11 +415,13 @@ async def test_update_ticket_technician(patch_redis):
             f"/api/v1/tickets/{_TICKET_ID}",
             json={"title": "Novo título", "priority": "high"},
         )
+    # Request succeeds but title/priority are silently ignored (only technician_notes applied)
     assert resp.status_code == 200
 
 
 @pytest.mark.asyncio
 async def test_update_ticket_client_own_open(patch_redis):
+    """Client no longer has edit access — endpoint restricted to admin/technician."""
     from app.core.database import get_db
 
     creator = _mock_user(UserRole.client, user_id=_CREATOR_ID)
@@ -411,11 +435,12 @@ async def test_update_ticket_client_own_open(patch_redis):
             f"/api/v1/tickets/{_TICKET_ID}",
             json={"title": "Título atualizado"},
         )
-    assert resp.status_code == 200
+    assert resp.status_code == 403
 
 
 @pytest.mark.asyncio
 async def test_update_ticket_client_not_open(patch_redis):
+    """Client no longer has edit access regardless of ticket status."""
     from app.core.database import get_db
 
     creator = _mock_user(UserRole.client, user_id=_CREATOR_ID)
@@ -429,7 +454,7 @@ async def test_update_ticket_client_not_open(patch_redis):
             f"/api/v1/tickets/{_TICKET_ID}",
             json={"title": "Tentativa de edição"},
         )
-    assert resp.status_code == 409
+    assert resp.status_code == 403
 
 
 @pytest.mark.asyncio

@@ -316,8 +316,14 @@ async def list_tickets(
     rows = await db.execute(base.order_by(order).offset(offset).limit(limit))
     tickets = rows.scalars().all()
 
+    def _serialize(t: Ticket) -> TicketResponse:
+        r = TicketResponse.model_validate(t)
+        if actor.role == UserRole.client:
+            r.technician_notes = None
+        return r
+
     return TicketListResponse(
-        items=[TicketResponse.model_validate(t) for t in tickets],
+        items=[_serialize(t) for t in tickets],
         total=total,
         limit=limit,
         offset=offset,
@@ -340,7 +346,10 @@ async def get_ticket(
     if actor.role == UserRole.client and ticket.creator_id != actor.id:
         raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="Access denied")
 
-    return TicketResponse.model_validate(ticket)
+    response = TicketResponse.model_validate(ticket)
+    if actor.role == UserRole.client:
+        response.technician_notes = None
+    return response
 
 
 @router.patch("/tickets/{ticket_id}", response_model=TicketResponse)
@@ -348,20 +357,20 @@ async def update_ticket(
     ticket_id: uuid.UUID,
     body: TicketUpdate,
     db: Annotated[AsyncSession, Depends(get_db)],
-    actor: Annotated[User, Depends(get_current_user)],
+    actor: Annotated[User, Depends(authorize(UserRole.admin, UserRole.technician))],
 ) -> TicketResponse:
+    """Update ticket fields.
+
+    Admin can update all fields. Technician can only update their internal notes.
+    Clients have no edit access — ticket content is immutable after creation.
+    """
     ticket = await get_or_404(db, Ticket, ticket_id, "Ticket not found")
 
-    if actor.role == UserRole.client:
-        if ticket.creator_id != actor.id:
-            raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="Access denied")
-        if ticket.status != TicketStatus.open:
-            raise HTTPException(
-                status_code=status.HTTP_409_CONFLICT,
-                detail="Ticket can only be edited while open",
-            )
-        changes = body.model_dump(include={"title", "description"}, exclude_unset=True)
+    if actor.role == UserRole.technician:
+        # Technician may only save internal notes
+        changes = body.model_dump(include={"technician_notes"}, exclude_unset=True)
     else:
+        # Admin can update any field
         changes = body.model_dump(exclude_unset=True)
 
     for field, new_val in changes.items():

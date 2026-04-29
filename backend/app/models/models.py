@@ -253,6 +253,9 @@ class Ticket(Base):
     sla_paused_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
     sla_total_paused_ms: Mapped[int] = mapped_column(Integer, default=0)
 
+    # Notas internas (visível apenas para admin/técnico)
+    technician_notes: Mapped[str | None] = mapped_column(Text, nullable=True)
+
     # IA
     ai_classification: Mapped[str | None] = mapped_column(String(100))
     ai_confidence: Mapped[float | None] = mapped_column(Float)

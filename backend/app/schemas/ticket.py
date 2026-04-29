@@ -27,6 +27,7 @@ class TicketUpdate(AppBaseModel):
     category: TicketCategory | None = None
     product_id: uuid.UUID | None = None
     equipment_id: uuid.UUID | None = None
+    technician_notes: str | None = None
 
 
 class TicketStatusUpdate(AppBaseModel):
@@ -59,6 +60,7 @@ class TicketResponse(AppBaseModel):
     closed_at: datetime | None
     created_at: datetime
     updated_at: datetime
+    technician_notes: str | None = None
     ai_classification: str | None = None
     ai_confidence: float | None = None
     ai_summary: str | None = None
