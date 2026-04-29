@@ -80,8 +80,12 @@ export default function TicketListPage() {
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
 
-  // Filters + pagination + sort
-  const [filters, setFilters] = useState<TicketFilterState>(EMPTY_FILTERS);
+  // Filters + pagination + sort — T84: technician defaults to their own queue
+  const [filters, setFilters] = useState<TicketFilterState>(() =>
+    user?.role === "technician" && user.id
+      ? { ...EMPTY_FILTERS, assignee_id: user.id }
+      : EMPTY_FILTERS,
+  );
   const [page, setPage] = useState(1);
   const [sortBy, setSortBy] = useState<SortBy>("created_at");
   const [sortDir, setSortDir] = useState<SortDir>("desc");
@@ -98,14 +102,14 @@ export default function TicketListPage() {
   const [bulkError, setBulkError] = useState<string | null>(null);
   const [technicians, setTechnicians] = useState<UserSummary[]>([]);
 
-  // Load technicians for bulk assign (admin only)
+  // Load technicians for filter dropdown (staff) and bulk assign (admin)
   useEffect(() => {
-    if (user?.role === "admin") {
+    if (isStaff) {
       getTechnicians()
         .then(setTechnicians)
         .catch(() => {});
     }
-  }, [user?.role]);
+  }, [isStaff]);
 
   // Fetch tickets whenever deps change
   useEffect(() => {
@@ -117,6 +121,7 @@ export default function TicketListPage() {
       status: filters.status || undefined,
       priority: filters.priority || undefined,
       category: filters.category || undefined,
+      assignee_id: filters.assignee_id || undefined,
       search: filters.search || undefined,
       limit: PAGE_SIZE,
       offset: (page - 1) * PAGE_SIZE,
@@ -190,6 +195,7 @@ export default function TicketListPage() {
         status: filters.status || undefined,
         priority: filters.priority || undefined,
         category: filters.category || undefined,
+        assignee_id: filters.assignee_id || undefined,
         search: filters.search || undefined,
         limit: PAGE_SIZE,
         offset: (page - 1) * PAGE_SIZE,
@@ -221,6 +227,7 @@ export default function TicketListPage() {
         status: filters.status || undefined,
         priority: filters.priority || undefined,
         category: filters.category || undefined,
+        assignee_id: filters.assignee_id || undefined,
         search: filters.search || undefined,
         limit: PAGE_SIZE,
         offset: (page - 1) * PAGE_SIZE,
@@ -238,6 +245,9 @@ export default function TicketListPage() {
 
   const createdAt = (t: Ticket) =>
     new Date(t.created_at).toLocaleDateString("pt-BR");
+
+  const techName = (id: string | null) =>
+    id ? (technicians.find((t) => t.id === id)?.name ?? "—") : "—";
 
   // Compute the common valid transitions for all selected tickets
   const selectedTickets = tickets.filter((t) => selected.has(t.id));
@@ -264,7 +274,11 @@ export default function TicketListPage() {
       </div>
 
       {/* Filters */}
-      <TicketFilters value={filters} onChange={handleFiltersChange} />
+      <TicketFilters
+        value={filters}
+        onChange={handleFiltersChange}
+        technicians={isStaff ? technicians : undefined}
+      />
 
       {/* Bulk action bar */}
       {isStaff && selected.size > 0 && (
@@ -341,6 +355,11 @@ export default function TicketListPage() {
                     Prioridade
                   </TableHeaderCell>
                   <TableHeaderCell className="w-28">Categoria</TableHeaderCell>
+                  {isStaff && (
+                    <TableHeaderCell className="w-36">
+                      Responsável
+                    </TableHeaderCell>
+                  )}
                   <TableHeaderCell
                     className="w-28"
                     sortable
@@ -362,7 +381,7 @@ export default function TicketListPage() {
               <TableBody>
                 {tickets.length === 0 ? (
                   <TableEmpty
-                    colSpan={isStaff ? 8 : 7}
+                    colSpan={isStaff ? 9 : 7}
                     message="Nenhum ticket encontrado para os filtros aplicados."
                   />
                 ) : (
@@ -414,6 +433,11 @@ export default function TicketListPage() {
                           other: "Outro",
                         }[t.category] ?? t.category}
                       </TableCell>
+                      {isStaff && (
+                        <TableCell muted className="text-xs">
+                          {techName(t.assignee_id)}
+                        </TableCell>
+                      )}
                       <TableCell>
                         <SlaCell ticket={t} />
                       </TableCell>

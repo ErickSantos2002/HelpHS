@@ -11,6 +11,7 @@ export interface TicketFilterState {
   status: string;
   priority: string;
   category: string;
+  assignee_id: string;
 }
 
 // eslint-disable-next-line react-refresh/only-export-components
@@ -19,6 +20,7 @@ export const EMPTY_FILTERS: TicketFilterState = {
   status: "",
   priority: "",
   category: "",
+  assignee_id: "",
 };
 
 // ── Options ───────────────────────────────────────────────────
@@ -56,12 +58,14 @@ const CATEGORY_OPTIONS = [
 export interface TicketFiltersProps {
   value: TicketFilterState;
   onChange: (filters: TicketFilterState) => void;
+  technicians?: { id: string; name: string }[];
   className?: string;
 }
 
 export function TicketFilters({
   value,
   onChange,
+  technicians,
   className,
 }: TicketFiltersProps) {
   const searchRef = useRef<HTMLInputElement>(null);
@@ -83,7 +87,11 @@ export function TicketFilters({
   }, []);
 
   const hasActiveFilters =
-    value.search || value.status || value.priority || value.category;
+    value.search ||
+    value.status ||
+    value.priority ||
+    value.category ||
+    value.assignee_id;
 
   return (
     <div className={cn("flex flex-wrap items-end gap-3", className)}>
@@ -126,6 +134,20 @@ export function TicketFilters({
           onChange={(e) => onChange({ ...value, category: e.target.value })}
         />
       </div>
+
+      {/* Responsável (staff only) */}
+      {technicians && technicians.length > 0 && (
+        <div className="w-44">
+          <Select
+            placeholder="Responsável"
+            options={technicians.map((t) => ({ value: t.id, label: t.name }))}
+            value={value.assignee_id}
+            onChange={(e) =>
+              onChange({ ...value, assignee_id: e.target.value })
+            }
+          />
+        </div>
+      )}
 
       {/* Clear */}
       {hasActiveFilters && (
