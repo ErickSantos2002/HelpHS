@@ -422,6 +422,7 @@ const STEPS = ["Empresa", "Equipamentos", "Pronto"];
 
 export default function OnboardingPage() {
   const [step, setStep] = useState(0);
+  const { logout } = useAuth();
 
   return (
     <div className="min-h-screen flex items-center justify-center bg-background px-4 py-8">
@@ -450,6 +451,16 @@ export default function OnboardingPage() {
 
         <p className="text-center text-xs text-slate-600">
           Passo {step + 1} de {STEPS.length} — {STEPS[step]}
+        </p>
+
+        <p className="text-center text-xs text-slate-600">
+          Quer sair?{" "}
+          <button
+            onClick={() => logout()}
+            className="text-slate-500 hover:text-slate-300 transition-colors underline underline-offset-2"
+          >
+            Deslogar
+          </button>
         </p>
       </div>
     </div>
