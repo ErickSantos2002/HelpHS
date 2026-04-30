@@ -2,7 +2,7 @@ import { useState } from "react";
 import type { FormEvent } from "react";
 import { Link, useNavigate } from "react-router-dom";
 import { Alert, Button, Input } from "../../components/ui";
-import api from "../../services/api";
+import { api } from "../../services/api";
 
 interface RegisterPayload {
   name: string;

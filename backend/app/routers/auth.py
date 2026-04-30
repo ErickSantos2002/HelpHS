@@ -90,7 +90,7 @@ async def register(
     db.add(user)
     await db.flush()
 
-    _audit(db, AuditAction.user_created, user.id, request)
+    _audit(db, AuditAction.create, user.id, request)
     await db.commit()
     await db.refresh(user)
 
