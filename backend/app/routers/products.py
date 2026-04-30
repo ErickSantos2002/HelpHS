@@ -349,6 +349,20 @@ async def list_my_equipment(
     )
 
 
+@router.delete("/equipment/my/{equipment_id}", status_code=status.HTTP_204_NO_CONTENT)
+async def delete_my_equipment(
+    equipment_id: uuid.UUID,
+    db: Annotated[AsyncSession, Depends(get_db)],
+    actor: Annotated[User, Depends(get_current_user)],
+) -> None:
+    equipment = await get_or_404(db, Equipment, equipment_id, "Equipment not found")
+    if equipment.owner_id != actor.id:
+        raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="Not your equipment")
+    equipment.is_active = False
+    _audit(db, AuditAction.delete, actor.id, "equipment", equipment.id)
+    await db.commit()
+
+
 @router.delete("/equipments/{equipment_id}", status_code=status.HTTP_204_NO_CONTENT)
 async def delete_equipment(
     equipment_id: uuid.UUID,

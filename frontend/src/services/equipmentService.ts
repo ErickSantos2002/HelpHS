@@ -53,6 +53,10 @@ export async function getMyEquipment(): Promise<Equipment[]> {
   return data.items;
 }
 
+export async function deleteMyEquipment(id: string): Promise<void> {
+  await api.delete(`/equipment/my/${id}`);
+}
+
 export async function lookupCnpj(cnpj: string): Promise<CnpjInfo> {
   const clean = cnpj.replace(/\D/g, "");
   const { data } = await api.get<CnpjInfo>(`/auth/cnpj/${clean}`);
