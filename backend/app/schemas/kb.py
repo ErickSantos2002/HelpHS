@@ -55,3 +55,31 @@ class KBArticleListResponse(AppBaseModel):
 
 class KBFeedbackPayload(AppBaseModel):
     helpful: bool
+
+
+class KBCommentCreate(AppBaseModel):
+    content: str = Field(..., min_length=1, max_length=2000)
+    parent_id: uuid.UUID | None = None
+
+
+class KBCommentResponse(AppBaseModel):
+    model_config = ConfigDict(from_attributes=True)
+
+    id: uuid.UUID
+    article_id: uuid.UUID
+    author_id: uuid.UUID | None
+    author_name: str = ""
+    author_role: str = ""
+    content: str
+    parent_id: uuid.UUID | None
+    created_at: datetime
+    updated_at: datetime
+    replies: list["KBCommentResponse"] = []
+
+
+KBCommentResponse.model_rebuild()
+
+
+class KBCommentListResponse(AppBaseModel):
+    items: list[KBCommentResponse]
+    total: int

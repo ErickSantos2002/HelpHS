@@ -23,6 +23,7 @@ from app.routers import (
     products,
     sla,
     surveys,
+    tags,
     tickets,
     users,
 )
@@ -92,6 +93,7 @@ app.include_router(audit.router, prefix=settings.api_prefix)
 app.include_router(chat.router, prefix=settings.api_prefix)
 app.include_router(kb.router, prefix=settings.api_prefix)
 app.include_router(sla.router, prefix=settings.api_prefix)
+app.include_router(tags.router, prefix=settings.api_prefix)
 app.include_router(dashboard.router, prefix=settings.api_prefix)
 
 

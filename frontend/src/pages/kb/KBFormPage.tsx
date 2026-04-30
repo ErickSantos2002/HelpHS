@@ -1,6 +1,10 @@
+import { marked } from "marked";
 import { useEffect, useState } from "react";
 import { useNavigate, useParams } from "react-router-dom";
 import { Button, Input, Select, Textarea } from "../../components/ui";
+import { useAuth } from "../../contexts/AuthContext";
+
+marked.setOptions({ breaks: true });
 import {
   createKBArticle,
   getKBArticle,
@@ -25,10 +29,100 @@ const STATUS_OPTIONS: { value: KBArticleStatus; label: string }[] = [
   { value: "archived", label: "Arquivado" },
 ];
 
+function ContentEditor({
+  value,
+  onChange,
+  error,
+}: {
+  value: string;
+  onChange: (v: string) => void;
+  error?: string;
+}) {
+  const [tab, setTab] = useState<"write" | "preview">("write");
+  const html = marked.parse(value) as string;
+
+  return (
+    <div className="space-y-1.5">
+      <div className="flex items-center justify-between">
+        <label className="text-sm font-medium text-slate-300">Conteúdo</label>
+        <div className="flex rounded-lg border border-border overflow-hidden text-xs">
+          <button
+            type="button"
+            onClick={() => setTab("write")}
+            className={`px-3 py-1 transition-colors ${
+              tab === "write"
+                ? "bg-background-elevated text-slate-200"
+                : "text-slate-500 hover:text-slate-300"
+            }`}
+          >
+            Editar
+          </button>
+          <button
+            type="button"
+            onClick={() => setTab("preview")}
+            className={`px-3 py-1 border-l border-border transition-colors ${
+              tab === "preview"
+                ? "bg-background-elevated text-slate-200"
+                : "text-slate-500 hover:text-slate-300"
+            }`}
+          >
+            Preview
+          </button>
+        </div>
+      </div>
+
+      {tab === "write" ? (
+        <>
+          <Textarea
+            value={value}
+            onChange={(e) => onChange(e.target.value)}
+            placeholder={
+              "Escreva o conteúdo em Markdown:\n\n## Título\n\nDescrição do problema...\n\n### Solução\n\n1. Passo um\n2. Passo dois\n\n**Nota:** informação importante"
+            }
+            rows={16}
+            error={error}
+          />
+          <p className="text-xs text-slate-600">
+            Suporta Markdown: **negrito**, *itálico*, ## títulos, listas,
+            `código`, links
+          </p>
+        </>
+      ) : (
+        <div className="min-h-[400px] rounded-lg border border-border bg-background-elevated px-4 py-3">
+          {value.trim() ? (
+            <div
+              className="prose prose-invert prose-sm max-w-none
+                prose-headings:text-slate-100 prose-p:text-slate-300
+                prose-a:text-primary prose-strong:text-slate-100
+                prose-code:text-primary prose-code:bg-background prose-code:px-1 prose-code:rounded
+                prose-pre:bg-background prose-pre:border prose-pre:border-border
+                prose-ul:text-slate-300 prose-ol:text-slate-300
+                prose-blockquote:border-l-primary prose-blockquote:text-slate-400
+                prose-hr:border-border"
+              dangerouslySetInnerHTML={{ __html: html }}
+            />
+          ) : (
+            <p className="text-slate-500 text-sm italic">
+              Nada para pré-visualizar ainda…
+            </p>
+          )}
+        </div>
+      )}
+    </div>
+  );
+}
+
 export default function KBFormPage() {
   const { id } = useParams<{ id: string }>();
   const navigate = useNavigate();
+  const { user } = useAuth();
   const isEdit = Boolean(id);
+
+  const isStaff = user?.role === "admin" || user?.role === "technician";
+  if (!isStaff) {
+    navigate("/403", { replace: true });
+    return null;
+  }
 
   const [title, setTitle] = useState("");
   const [content, setContent] = useState("");
@@ -173,17 +267,14 @@ export default function KBFormPage() {
           />
         </div>
 
-        {/* Content */}
+        {/* Content with preview toggle */}
         <div className="space-y-1.5">
-          <label className="text-sm font-medium text-slate-300">Conteúdo</label>
-          <Textarea
+          <ContentEditor
             value={content}
-            onChange={(e) => {
-              setContent(e.target.value);
+            onChange={(v) => {
+              setContent(v);
               setErrors((prev) => ({ ...prev, content: "" }));
             }}
-            placeholder="Escreva o conteúdo do artigo… (suporta texto simples ou Markdown)"
-            rows={16}
             error={errors.content}
           />
         </div>

@@ -10,22 +10,23 @@ Permissões:
 
 import csv
 import io
+import uuid
 from datetime import UTC, datetime, timedelta
 from typing import Annotated
 
-from fastapi import APIRouter, Depends, Query
+from fastapi import APIRouter, Depends, HTTPException, Query, status
 from fastapi.responses import StreamingResponse
 from reportlab.lib import colors
 from reportlab.lib.pagesizes import A4
 from reportlab.lib.styles import getSampleStyleSheet
 from reportlab.lib.units import cm
 from reportlab.platypus import Paragraph, SimpleDocTemplate, Spacer, Table, TableStyle
-from sqlalchemy import func, literal, select
+from sqlalchemy import extract, func, select, text
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.core.database import get_db
 from app.core.redis import get_redis
-from app.core.security import authorize
+from app.core.security import authorize, get_current_user
 from app.models.models import (
     SatisfactionSurvey,
     Ticket,
@@ -34,6 +35,7 @@ from app.models.models import (
     TicketStatus,
     User,
     UserRole,
+    UserStatus,
 )
 from app.schemas.dashboard import (
     CategoryCount,
@@ -44,6 +46,9 @@ from app.schemas.dashboard import (
     SLAComplianceItem,
     SlaStats,
     SurveyStats,
+    TechnicianDetailReport,
+    TechnicianListReport,
+    TechnicianSummary,
     TicketStats,
 )
 
@@ -146,12 +151,12 @@ async def _build_report(db: AsyncSession, period: int) -> ReportData:
     rows = (
         await db.execute(
             select(
-                func.date_trunc(literal("day"), Ticket.created_at).label("day"),
+                func.date_trunc(text("'day'"), Ticket.created_at).label("day"),
                 func.count().label("cnt"),
             )
             .where(Ticket.created_at >= since)
-            .group_by(func.date_trunc(literal("day"), Ticket.created_at))
-            .order_by(func.date_trunc(literal("day"), Ticket.created_at))
+            .group_by(func.date_trunc(text("'day'"), Ticket.created_at))
+            .order_by(func.date_trunc(text("'day'"), Ticket.created_at))
         )
     ).all()
     counts_by_day: dict[str, int] = {r.day.strftime("%Y-%m-%d"): r.cnt for r in rows}
@@ -399,4 +404,183 @@ async def export_reports_pdf(
         buf,
         media_type="application/pdf",
         headers={"Content-Disposition": f'attachment; filename="{filename}"'},
+    )
+
+
+# ── Technician reports ────────────────────────────────────────
+
+
+async def _technician_summary(
+    db: AsyncSession, tech_id: uuid.UUID, tech_name: str, since: datetime
+) -> TechnicianSummary:
+    """Compute aggregated metrics for a single technician."""
+    ticket_row = (
+        await db.execute(
+            select(
+                func.count().label("total"),
+                func.count()
+                .filter(Ticket.status.in_([TicketStatus.resolved, TicketStatus.closed]))
+                .label("resolved"),
+                func.count()
+                .filter(
+                    Ticket.status.in_(
+                        [
+                            TicketStatus.open,
+                            TicketStatus.in_progress,
+                            TicketStatus.awaiting_client,
+                            TicketStatus.awaiting_technical,
+                        ]
+                    )
+                )
+                .label("open_count"),
+                func.count().filter(Ticket.sla_resolve_breach.is_(True)).label("breached"),
+                func.avg(extract("epoch", Ticket.closed_at - Ticket.created_at) / 3600)
+                .filter(Ticket.closed_at.is_not(None))
+                .label("avg_hours"),
+            ).where(Ticket.assignee_id == tech_id, Ticket.created_at >= since)
+        )
+    ).one()
+
+    csat_row = (
+        await db.execute(
+            select(
+                func.avg(SatisfactionSurvey.rating).label("avg"),
+                func.count(SatisfactionSurvey.id).label("cnt"),
+            )
+            .join(Ticket, SatisfactionSurvey.ticket_id == Ticket.id)
+            .where(Ticket.assignee_id == tech_id, SatisfactionSurvey.created_at >= since)
+        )
+    ).one()
+
+    total = ticket_row.total or 0
+    breached = ticket_row.breached or 0
+    compliance = round((1 - breached / total) * 100, 1) if total > 0 else 100.0
+
+    return TechnicianSummary(
+        technician_id=str(tech_id),
+        technician_name=tech_name,
+        total_assigned=total,
+        resolved=ticket_row.resolved or 0,
+        open_count=ticket_row.open_count or 0,
+        sla_breached=breached,
+        sla_compliance_rate=compliance,
+        avg_resolution_hours=(
+            round(float(ticket_row.avg_hours), 1) if ticket_row.avg_hours else None
+        ),
+        csat_average=round(float(csat_row.avg), 2) if csat_row.avg else None,
+        csat_count=csat_row.cnt or 0,
+    )
+
+
+@router.get("/dashboard/reports/technicians", response_model=TechnicianListReport)
+async def get_technician_list_report(
+    db: Annotated[AsyncSession, Depends(get_db)],
+    _actor: Annotated[User, Depends(authorize(UserRole.admin))],
+    period: Annotated[int, Query(ge=7, le=365)] = 30,
+) -> TechnicianListReport:
+    """Admin-only: returns summary metrics for every active technician."""
+    since = datetime.now(UTC) - timedelta(days=period)
+
+    tech_rows = (
+        await db.execute(
+            select(User.id, User.name)
+            .where(User.role == UserRole.technician, User.status == UserStatus.active)
+            .order_by(User.name)
+        )
+    ).all()
+
+    summaries = [await _technician_summary(db, row.id, row.name, since) for row in tech_rows]
+
+    return TechnicianListReport(period_days=period, technicians=summaries)
+
+
+@router.get("/dashboard/reports/technician", response_model=TechnicianDetailReport)
+async def get_technician_detail_report(
+    db: Annotated[AsyncSession, Depends(get_db)],
+    actor: Annotated[User, Depends(get_current_user)],
+    period: Annotated[int, Query(ge=7, le=365)] = 30,
+    technician_id: uuid.UUID | None = Query(default=None),
+) -> TechnicianDetailReport:
+    """
+    Detailed metrics for a single technician.
+    - Admin: can request any technician via ?technician_id=...
+    - Technician: always sees own data (technician_id param ignored)
+    """
+    is_admin = actor.role == UserRole.admin
+    is_tech = actor.role == UserRole.technician
+
+    if not is_admin and not is_tech:
+        raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="Access denied")
+
+    if is_tech:
+        tech_id = actor.id
+        tech_name = actor.name
+    else:
+        if technician_id is None:
+            raise HTTPException(
+                status_code=status.HTTP_400_BAD_REQUEST,
+                detail="technician_id is required for admin",
+            )
+        tech_row = (
+            await db.execute(
+                select(User).where(User.id == technician_id, User.role == UserRole.technician)
+            )
+        ).scalar_one_or_none()
+        if tech_row is None:
+            raise HTTPException(
+                status_code=status.HTTP_404_NOT_FOUND, detail="Technician not found"
+            )
+        tech_id = tech_row.id
+        tech_name = tech_row.name
+
+    since = datetime.now(UTC) - timedelta(days=period)
+
+    summary = await _technician_summary(db, tech_id, tech_name, since)
+
+    # In-progress count (not in resolved/closed/open)
+    in_progress_row = (
+        await db.execute(
+            select(func.count()).where(
+                Ticket.assignee_id == tech_id,
+                Ticket.created_at >= since,
+                Ticket.status == TicketStatus.in_progress,
+            )
+        )
+    ).scalar_one()
+
+    # Daily ticket volume for this technician
+    day_rows = (
+        await db.execute(
+            select(
+                func.date_trunc(text("'day'"), Ticket.created_at).label("day"),
+                func.count().label("cnt"),
+            )
+            .where(Ticket.assignee_id == tech_id, Ticket.created_at >= since)
+            .group_by(func.date_trunc(text("'day'"), Ticket.created_at))
+            .order_by(func.date_trunc(text("'day'"), Ticket.created_at))
+        )
+    ).all()
+    counts_by_day: dict[str, int] = {r.day.strftime("%Y-%m-%d"): r.cnt for r in day_rows}
+    tickets_by_day = [
+        DailyCount(
+            date=(since + timedelta(days=i)).strftime("%Y-%m-%d"),
+            count=counts_by_day.get((since + timedelta(days=i)).strftime("%Y-%m-%d"), 0),
+        )
+        for i in range(period + 1)
+    ]
+
+    return TechnicianDetailReport(
+        period_days=period,
+        technician_id=str(tech_id),
+        technician_name=tech_name,
+        total_assigned=summary.total_assigned,
+        resolved=summary.resolved,
+        in_progress=in_progress_row,
+        open_count=summary.open_count,
+        sla_breached=summary.sla_breached,
+        sla_compliance_rate=summary.sla_compliance_rate,
+        avg_resolution_hours=summary.avg_resolution_hours,
+        csat_average=summary.csat_average,
+        csat_count=summary.csat_count,
+        tickets_by_day=tickets_by_day,
     )

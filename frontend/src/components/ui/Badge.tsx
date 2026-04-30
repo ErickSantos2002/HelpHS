@@ -101,3 +101,38 @@ export function PriorityBadge({ priority }: { priority: TicketPriority }) {
     <Badge variant={priorityVariant[priority]}>{priorityLabel[priority]}</Badge>
   );
 }
+
+// ── Tag badge ─────────────────────────────────────────────────
+
+export function TagBadge({
+  name,
+  color,
+  onRemove,
+}: {
+  name: string;
+  color: string;
+  onRemove?: () => void;
+}) {
+  return (
+    <span
+      className="inline-flex items-center gap-1 rounded-full border px-2 py-0.5 text-xs font-medium"
+      style={{
+        backgroundColor: `${color}22`,
+        borderColor: `${color}55`,
+        color,
+      }}
+    >
+      {name}
+      {onRemove && (
+        <button
+          type="button"
+          onClick={onRemove}
+          className="ml-0.5 hover:opacity-70 transition-opacity leading-none"
+          aria-label={`Remover etiqueta ${name}`}
+        >
+          ×
+        </button>
+      )}
+    </span>
+  );
+}

@@ -4,7 +4,7 @@ export type { AlertProps } from "./Alert";
 export { Avatar } from "./Avatar";
 export type { AvatarProps } from "./Avatar";
 
-export { Badge, StatusBadge, PriorityBadge } from "./Badge";
+export { Badge, StatusBadge, PriorityBadge, TagBadge } from "./Badge";
 export type { BadgeProps } from "./Badge";
 
 export { Button } from "./Button";

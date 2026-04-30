@@ -37,6 +37,7 @@ from app.models.models import (
     TicketStatus,
     User,
     UserRole,
+    ticket_tags,
 )
 from app.schemas.ticket import (
     TicketAssign,
@@ -44,6 +45,7 @@ from app.schemas.ticket import (
     TicketHistoryListResponse,
     TicketHistoryResponse,
     TicketListResponse,
+    TicketObservationUpdate,
     TicketResponse,
     TicketStatusUpdate,
     TicketUpdate,
@@ -206,6 +208,7 @@ async def create_ticket(
             creator_id=actor.id,
             product_id=body.product_id,
             equipment_id=body.equipment_id,
+            client_observation=body.client_observation,
             sla_response_breach=False,
             sla_resolve_breach=False,
             sla_total_paused_ms=0,
@@ -259,12 +262,13 @@ async def list_tickets(
     db: Annotated[AsyncSession, Depends(get_db)],
     actor: Annotated[User, Depends(get_current_user)],
     offset: int = Query(default=0, ge=0),
-    limit: int = Query(default=20, ge=1, le=100),
+    limit: int = Query(default=20, ge=1, le=500),
     status_filter: TicketStatus | None = Query(default=None, alias="status"),
     priority: str | None = Query(default=None),
     category: str | None = Query(default=None),
     assignee_id: uuid.UUID | None = Query(default=None),
     creator_id: uuid.UUID | None = Query(default=None),
+    tag_id: uuid.UUID | None = Query(default=None),
     search: str | None = Query(default=None, max_length=100),
     sort_by: str = Query(
         default="created_at", pattern="^(created_at|updated_at|priority|sla_resolve_due_at)$"
@@ -295,6 +299,10 @@ async def list_tickets(
         base = base.where(Ticket.category == category)
     if assignee_id:
         base = base.where(Ticket.assignee_id == assignee_id)
+    if tag_id:
+        base = base.where(
+            Ticket.id.in_(select(ticket_tags.c.ticket_id).where(ticket_tags.c.tag_id == tag_id))
+        )
     if search:
         base = base.where(Ticket.title.ilike(f"%{search}%") | Ticket.protocol.ilike(f"%{search}%"))
 
@@ -391,6 +399,38 @@ async def update_ticket(
         setattr(ticket, field, new_val)
 
     ticket.updated_at = datetime.now(UTC)
+    _audit(db, AuditAction.update, actor.id, ticket.id)
+    await db.commit()
+    await db.refresh(ticket)
+    return TicketResponse.model_validate(ticket)
+
+
+@router.patch("/tickets/{ticket_id}/observation", response_model=TicketResponse)
+async def update_client_observation(
+    ticket_id: uuid.UUID,
+    body: TicketObservationUpdate,
+    db: Annotated[AsyncSession, Depends(get_db)],
+    actor: Annotated[User, Depends(get_current_user)],
+) -> TicketResponse:
+    """Client updates their own observation field. Admins may also edit it."""
+    ticket = await get_or_404(db, Ticket, ticket_id, "Ticket not found")
+
+    if actor.role == UserRole.client:
+        if ticket.creator_id != actor.id:
+            raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="Access denied")
+        if ticket.status in (TicketStatus.closed, TicketStatus.cancelled):
+            raise HTTPException(
+                status_code=status.HTTP_409_CONFLICT,
+                detail="Cannot edit observation on a closed or cancelled ticket",
+            )
+    elif actor.role == UserRole.technician:
+        raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="Access denied")
+
+    old = ticket.client_observation
+    ticket.client_observation = body.client_observation
+    ticket.updated_at = datetime.now(UTC)
+    if old != body.client_observation:
+        _record_history(db, ticket.id, actor.id, "client_observation", old, body.client_observation)
     _audit(db, AuditAction.update, actor.id, ticket.id)
     await db.commit()
     await db.refresh(ticket)

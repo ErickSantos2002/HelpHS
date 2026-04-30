@@ -1,4 +1,5 @@
 import { api } from "./api";
+import type { Tag } from "./tagService";
 
 export interface Ticket {
   id: string;
@@ -32,6 +33,8 @@ export interface Ticket {
   ai_confidence: number | null;
   ai_summary: string | null;
   ai_conversation_summary: string | null;
+  client_observation: string | null;
+  tags: Tag[];
 }
 
 export interface TicketHistory {
@@ -102,6 +105,7 @@ export interface TicketFilters {
   priority?: string;
   category?: string;
   assignee_id?: string;
+  tag_id?: string;
   creator_id?: string;
   search?: string;
   limit?: number;
@@ -117,6 +121,7 @@ export interface TicketCreatePayload {
   category: string;
   product_id?: string | null;
   equipment_id?: string | null;
+  client_observation?: string | null;
 }
 
 export interface TicketUpdatePayload {
@@ -144,6 +149,16 @@ export async function updateTicket(
   return data;
 }
 
+export async function updateClientObservation(
+  id: string,
+  client_observation: string | null,
+): Promise<Ticket> {
+  const { data } = await api.patch<Ticket>(`/tickets/${id}/observation`, {
+    client_observation,
+  });
+  return data;
+}
+
 export async function getTicket(id: string): Promise<Ticket> {
   const { data } = await api.get<Ticket>(`/tickets/${id}`);
   return data;
@@ -157,6 +172,7 @@ export async function getTickets(
   if (filters.priority) params.set("priority", filters.priority);
   if (filters.category) params.set("category", filters.category);
   if (filters.assignee_id) params.set("assignee_id", filters.assignee_id);
+  if (filters.tag_id) params.set("tag_id", filters.tag_id);
   if (filters.creator_id) params.set("creator_id", filters.creator_id);
   if (filters.search) params.set("search", filters.search);
   if (filters.limit !== undefined) params.set("limit", String(filters.limit));

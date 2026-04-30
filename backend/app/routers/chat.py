@@ -42,9 +42,11 @@ from app.schemas.chat import (
     ChatMessageListResponse,
     ChatMessageResponse,
     ConversationSummaryResponse,
+    ImproveMessageRequest,
+    ImproveMessageResponse,
     SuggestReplyResponse,
 )
-from app.services.llm import suggest_reply, summarize_conversation
+from app.services.llm import improve_message, suggest_reply, summarize_conversation
 from app.services.notifications import notify
 
 router = APIRouter(tags=["Chat"])
@@ -284,6 +286,34 @@ async def suggest_ticket_reply(
         )
 
     return SuggestReplyResponse(suggestion=suggestion)
+
+
+@router.post(
+    "/tickets/{ticket_id}/improve-message",
+    response_model=ImproveMessageResponse,
+)
+async def improve_ticket_message(
+    ticket_id: uuid.UUID,
+    body: ImproveMessageRequest,
+    db: Annotated[AsyncSession, Depends(get_db)],
+    actor: Annotated[User, Depends(authorize(UserRole.admin, UserRole.technician))],
+) -> ImproveMessageResponse:
+    """Improve a technician's draft message using AI (grammar, clarity, professionalism)."""
+    ticket = await _get_ticket_or_403(ticket_id, actor, db)
+
+    result = await improve_message(
+        draft=body.draft,
+        title=ticket.title,
+        description=ticket.description,
+    )
+
+    if result is None:
+        raise HTTPException(
+            status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
+            detail="LLM service unavailable — check API key configuration",
+        )
+
+    return ImproveMessageResponse(improved=result)
 
 
 @router.post(

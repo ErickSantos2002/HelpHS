@@ -9,6 +9,7 @@ import {
   Select,
   Spinner,
   StatusBadge,
+  TagBadge,
   Textarea,
 } from "../../components/ui";
 import { ChatPanel } from "../../components/chat/ChatPanel";
@@ -25,6 +26,7 @@ import {
   assignTicket,
   getTicket,
   getTicketHistory,
+  updateClientObservation,
   updateTicket,
   updateTicketStatus,
   type Ticket,
@@ -36,6 +38,7 @@ import {
   type Survey,
 } from "../../services/surveyService";
 import { getTechnicians, type UserSummary } from "../../services/userService";
+import { getTags, setTicketTags, type Tag } from "../../services/tagService";
 import { TICKET_TRANSITIONS } from "../../lib/ticketConstants";
 
 // ── Status options ────────────────────────────────────────────
@@ -395,6 +398,17 @@ export default function TicketDetailPage() {
   const [notesValue, setNotesValue] = useState("");
   const [notesSaving, setNotesSaving] = useState(false);
 
+  // Observação do cliente
+  const [obsEdit, setObsEdit] = useState(false);
+  const [obsValue, setObsValue] = useState("");
+  const [obsSaving, setObsSaving] = useState(false);
+
+  // Tags
+  const [allTags, setAllTags] = useState<Tag[]>([]);
+  const [tagsEdit, setTagsEdit] = useState(false);
+  const [selectedTagIds, setSelectedTagIds] = useState<Set<string>>(new Set());
+  const [tagsSaving, setTagsSaving] = useState(false);
+
   const isStaff = user?.role === "admin" || user?.role === "technician";
 
   const load = useCallback(async () => {
@@ -407,6 +421,7 @@ export default function TicketDetailPage() {
       ]);
       setTicket(t);
       setNotesValue(t.technician_notes ?? "");
+      setObsValue(t.client_observation ?? "");
       setHistory(h.items);
       setAttachments(a.items);
     } catch {
@@ -425,6 +440,15 @@ export default function TicketDetailPage() {
     if (user?.role === "admin") {
       getTechnicians()
         .then(setTechnicians)
+        .catch(() => {});
+    }
+  }, [user?.role]);
+
+  // Load all available tags (staff only, for tag editing)
+  useEffect(() => {
+    if (user?.role === "admin" || user?.role === "technician") {
+      getTags()
+        .then(setAllTags)
         .catch(() => {});
     }
   }, [user?.role]);
@@ -501,6 +525,38 @@ export default function TicketDetailPage() {
     }
   }
 
+  async function handleSaveObs() {
+    if (!ticket) return;
+    setObsSaving(true);
+    try {
+      const updated = await updateClientObservation(
+        ticket.id,
+        obsValue || null,
+      );
+      setTicket(updated);
+      setObsEdit(false);
+    } finally {
+      setObsSaving(false);
+    }
+  }
+
+  function openTagsEdit() {
+    setSelectedTagIds(new Set(ticket?.tags.map((t) => t.id) ?? []));
+    setTagsEdit(true);
+  }
+
+  async function handleSaveTags() {
+    if (!ticket) return;
+    setTagsSaving(true);
+    try {
+      const updated = await setTicketTags(ticket.id, [...selectedTagIds]);
+      setTicket({ ...ticket, tags: updated });
+      setTagsEdit(false);
+    } finally {
+      setTagsSaving(false);
+    }
+  }
+
   async function handleDeleteAttachment(attachmentId: string) {
     try {
       await deleteAttachment(attachmentId);
@@ -556,6 +612,9 @@ export default function TicketDetailPage() {
             </span>
             <StatusBadge status={ticket.status} />
             <PriorityBadge priority={ticket.priority} />
+            {ticket.tags.map((tag) => (
+              <TagBadge key={tag.id} name={tag.name} color={tag.color} />
+            ))}
             {(ticket.sla_response_breach || ticket.sla_resolve_breach) && (
               <span className="text-xs font-medium text-danger bg-danger/10 px-2 py-0.5 rounded-full">
                 ⚠ SLA violado
@@ -595,6 +654,68 @@ export default function TicketDetailPage() {
               {ticket.description}
             </p>
           </div>
+
+          {/* Observação do cliente */}
+          {(ticket.client_observation || user?.role === "client") && (
+            <div className="rounded-xl bg-background-surface border border-border p-5 space-y-3">
+              <div className="flex items-center justify-between">
+                <h2 className="text-sm font-semibold text-slate-300">
+                  Observações do solicitante
+                </h2>
+                {user?.role === "client" &&
+                  ticket.status !== "closed" &&
+                  ticket.status !== "cancelled" &&
+                  !obsEdit && (
+                    <Button
+                      variant="ghost"
+                      size="sm"
+                      onClick={() => setObsEdit(true)}
+                    >
+                      {ticket.client_observation ? "Editar" : "+ Adicionar"}
+                    </Button>
+                  )}
+              </div>
+
+              {obsEdit ? (
+                <div className="space-y-3">
+                  <Textarea
+                    rows={4}
+                    placeholder="Informações adicionais que podem ajudar o técnico…"
+                    value={obsValue}
+                    onChange={(e) => setObsValue(e.target.value)}
+                  />
+                  <div className="flex gap-2 justify-end">
+                    <Button
+                      variant="secondary"
+                      size="sm"
+                      onClick={() => {
+                        setObsEdit(false);
+                        setObsValue(ticket.client_observation ?? "");
+                      }}
+                      disabled={obsSaving}
+                    >
+                      Cancelar
+                    </Button>
+                    <Button
+                      size="sm"
+                      onClick={handleSaveObs}
+                      loading={obsSaving}
+                    >
+                      Salvar
+                    </Button>
+                  </div>
+                </div>
+              ) : ticket.client_observation ? (
+                <p className="text-sm text-slate-200 whitespace-pre-wrap leading-relaxed">
+                  {ticket.client_observation}
+                </p>
+              ) : (
+                <p className="text-xs text-slate-500 italic">
+                  Nenhuma observação registrada.
+                </p>
+              )}
+            </div>
+          )}
 
           {/* Attachments */}
           <div className="rounded-xl bg-background-surface border border-border p-5 space-y-3">
@@ -741,6 +862,88 @@ export default function TicketDetailPage() {
               />
             )}
           </div>
+
+          {/* Etiquetas — visível para todos, editável para staff */}
+          {(ticket.tags.length > 0 || isStaff) && (
+            <div className="rounded-xl bg-background-surface border border-border p-4 space-y-3">
+              <div className="flex items-center justify-between">
+                <h2 className="text-xs font-semibold text-slate-500 uppercase tracking-wider">
+                  Etiquetas
+                </h2>
+                {isStaff && !tagsEdit && (
+                  <Button variant="ghost" size="sm" onClick={openTagsEdit}>
+                    {ticket.tags.length > 0 ? "Editar" : "+ Adicionar"}
+                  </Button>
+                )}
+              </div>
+
+              {tagsEdit ? (
+                <div className="space-y-3">
+                  <div className="flex flex-wrap gap-2">
+                    {allTags.map((tag) => {
+                      const selected = selectedTagIds.has(tag.id);
+                      return (
+                        <button
+                          key={tag.id}
+                          type="button"
+                          onClick={() => {
+                            setSelectedTagIds((prev) => {
+                              const next = new Set(prev);
+                              if (next.has(tag.id)) next.delete(tag.id);
+                              else next.add(tag.id);
+                              return next;
+                            });
+                          }}
+                          className={`rounded-full border px-2.5 py-1 text-xs font-medium transition-opacity ${
+                            selected ? "opacity-100" : "opacity-40"
+                          }`}
+                          style={{
+                            backgroundColor: `${tag.color}22`,
+                            borderColor: `${tag.color}55`,
+                            color: tag.color,
+                          }}
+                        >
+                          {tag.name}
+                        </button>
+                      );
+                    })}
+                    {allTags.length === 0 && (
+                      <p className="text-xs text-slate-500">
+                        Nenhuma etiqueta cadastrada.
+                      </p>
+                    )}
+                  </div>
+                  <div className="flex gap-2 justify-end">
+                    <Button
+                      variant="secondary"
+                      size="sm"
+                      onClick={() => setTagsEdit(false)}
+                      disabled={tagsSaving}
+                    >
+                      Cancelar
+                    </Button>
+                    <Button
+                      size="sm"
+                      onClick={handleSaveTags}
+                      loading={tagsSaving}
+                    >
+                      Salvar
+                    </Button>
+                  </div>
+                </div>
+              ) : ticket.tags.length > 0 ? (
+                <div className="flex flex-wrap gap-1.5">
+                  {ticket.tags.map((tag) => (
+                    <TagBadge key={tag.id} name={tag.name} color={tag.color} />
+                  ))}
+                </div>
+              ) : (
+                <p className="text-xs text-slate-500 italic">
+                  Nenhuma etiqueta vinculada.
+                </p>
+              )}
+            </div>
+          )}
 
           {/* Notas internas — visível apenas para admin/técnico */}
           {isStaff && (

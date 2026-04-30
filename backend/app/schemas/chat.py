@@ -52,3 +52,11 @@ class SuggestReplyResponse(AppBaseModel):
 
 class ConversationSummaryResponse(AppBaseModel):
     summary: str
+
+
+class ImproveMessageRequest(AppBaseModel):
+    draft: str = Field(..., min_length=1, max_length=4000)
+
+
+class ImproveMessageResponse(AppBaseModel):
+    improved: str

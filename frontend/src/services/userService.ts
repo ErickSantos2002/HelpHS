@@ -112,3 +112,25 @@ export async function getTechnicians(): Promise<UserSummary[]> {
   const { data } = await api.get<UserListResponse>("/users/technicians");
   return data.items;
 }
+
+export async function getMe(): Promise<UserSummary> {
+  const { data } = await api.get<UserSummary>("/users/me");
+  return data;
+}
+
+export async function updateMe(
+  payload: Pick<UserUpdatePayload, "name" | "phone" | "department">,
+): Promise<UserSummary> {
+  const { data } = await api.patch<UserSummary>("/users/me", payload);
+  return data;
+}
+
+export async function changePassword(
+  currentPassword: string,
+  newPassword: string,
+): Promise<void> {
+  await api.post("/users/me/change-password", {
+    current_password: currentPassword,
+    new_password: newPassword,
+  });
+}

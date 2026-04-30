@@ -10,6 +10,7 @@ from datetime import datetime
 
 from sqlalchemy import (
     Boolean,
+    Column,
     DateTime,
     Enum,
     Float,
@@ -18,6 +19,7 @@ from sqlalchemy import (
     Integer,
     SmallInteger,
     String,
+    Table,
     Text,
 )
 from sqlalchemy.dialects.postgresql import ARRAY, JSONB, UUID
@@ -207,6 +209,24 @@ class Equipment(Base):
     tickets: Mapped[list["Ticket"]] = relationship(back_populates="equipment")
 
 
+ticket_tags = Table(
+    "ticket_tags",
+    Base.metadata,
+    Column(
+        "ticket_id",
+        UUID(as_uuid=True),
+        ForeignKey("tickets.id", ondelete="CASCADE"),
+        primary_key=True,
+    ),
+    Column(
+        "tag_id",
+        UUID(as_uuid=True),
+        ForeignKey("tags.id", ondelete="CASCADE"),
+        primary_key=True,
+    ),
+)
+
+
 class Ticket(Base):
     """Tickets de suporte (entidade principal)"""
 
@@ -256,6 +276,9 @@ class Ticket(Base):
     # Notas internas (visível apenas para admin/técnico)
     technician_notes: Mapped[str | None] = mapped_column(Text, nullable=True)
 
+    # Observação do cliente (visível para todos, editável apenas pelo cliente)
+    client_observation: Mapped[str | None] = mapped_column(Text, nullable=True)
+
     # IA
     ai_classification: Mapped[str | None] = mapped_column(String(100))
     ai_confidence: Mapped[float | None] = mapped_column(Float)
@@ -291,6 +314,9 @@ class Ticket(Base):
     )
     satisfaction_survey: Mapped["SatisfactionSurvey | None"] = relationship(
         back_populates="ticket", uselist=False
+    )
+    tags: Mapped[list["Tag"]] = relationship(
+        secondary=ticket_tags, back_populates="tickets", lazy="selectin"
     )
 
     __table_args__ = (
@@ -397,8 +423,43 @@ class KBArticle(Base):
 
     # Relacionamentos
     author: Mapped["User"] = relationship(back_populates="kb_articles")
+    comments: Mapped[list["KBComment"]] = relationship(
+        back_populates="article", cascade="all, delete-orphan"
+    )
 
     __table_args__ = (Index("ix_kb_articles_category_status", "category", "status"),)
+
+
+class KBComment(Base):
+    """Comentários e respostas em artigos da Base de Conhecimento"""
+
+    __tablename__ = "kb_comments"
+
+    id: Mapped[uuid.UUID] = mapped_column(UUID(as_uuid=True), primary_key=True, default=uuid.uuid4)
+    article_id: Mapped[uuid.UUID] = mapped_column(
+        UUID(as_uuid=True), ForeignKey("kb_articles.id", ondelete="CASCADE"), nullable=False
+    )
+    author_id: Mapped[uuid.UUID | None] = mapped_column(
+        UUID(as_uuid=True), ForeignKey("users.id", ondelete="SET NULL"), nullable=True
+    )
+    content: Mapped[str] = mapped_column(Text, nullable=False)
+    parent_id: Mapped[uuid.UUID | None] = mapped_column(
+        UUID(as_uuid=True), ForeignKey("kb_comments.id", ondelete="CASCADE"), nullable=True
+    )
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now())
+    updated_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), server_default=func.now(), onupdate=func.now()
+    )
+
+    # Relacionamentos
+    article: Mapped["KBArticle"] = relationship(back_populates="comments")
+    author: Mapped["User | None"] = relationship()
+    replies: Mapped[list["KBComment"]] = relationship(
+        primaryjoin="KBComment.parent_id == KBComment.id",
+        foreign_keys="KBComment.parent_id",
+        lazy="selectin",
+        order_by="KBComment.created_at",
+    )
 
 
 class SLAConfig(Base):
@@ -493,3 +554,19 @@ class AuditLog(Base):
     user: Mapped["User | None"] = relationship(back_populates="audit_logs")
 
     __table_args__ = (Index("ix_audit_logs_entity", "entity_type", "entity_id"),)
+
+
+class Tag(Base):
+    """Etiquetas para classificação de tickets"""
+
+    __tablename__ = "tags"
+
+    id: Mapped[uuid.UUID] = mapped_column(UUID(as_uuid=True), primary_key=True, default=uuid.uuid4)
+    name: Mapped[str] = mapped_column(String(50), unique=True, nullable=False, index=True)
+    color: Mapped[str] = mapped_column(String(7), nullable=False, default="#6366f1")
+    created_by: Mapped[uuid.UUID | None] = mapped_column(
+        UUID(as_uuid=True), ForeignKey("users.id", ondelete="SET NULL"), nullable=True
+    )
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now())
+
+    tickets: Mapped[list["Ticket"]] = relationship(secondary=ticket_tags, back_populates="tags")

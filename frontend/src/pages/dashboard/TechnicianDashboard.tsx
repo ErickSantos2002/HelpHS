@@ -113,20 +113,25 @@ export default function TechnicianDashboard() {
 
     Promise.all([
       getDashboardStats(),
-      getTickets({ assignee_id: user.id, limit: 6 }),
-      getTickets({ status: "open", limit: 6 }),
-      getTickets({ limit: 100 }),
+      getTickets({ assignee_id: user.id, limit: 200 }),
+      getTickets({ status: "open", limit: 200 }),
+      // Fetch every active status separately to avoid missing tickets due to pagination
+      Promise.all([
+        getTickets({ status: "open", limit: 200 }),
+        getTickets({ status: "in_progress", limit: 200 }),
+        getTickets({ status: "awaiting_client", limit: 200 }),
+        getTickets({ status: "awaiting_technical", limit: 200 }),
+      ]).then((results) => results.flatMap((r) => r.items)),
     ])
-      .then(([statsData, myData, queueData, allData]) => {
+      .then(([statsData, myData, queueData, activeTickets]) => {
         setStats(statsData);
         setMyTickets(myData.items);
         setQueue(queueData.items);
 
         // Group active tickets from other technicians
         const map = new Map<string, TechGroup>();
-        for (const t of allData.items) {
+        for (const t of activeTickets) {
           if (!t.assignee_id || t.assignee_id === user.id) continue;
-          if (!ACTIVE_STATUSES.has(t.status)) continue;
           const key = t.assignee_id;
           if (!map.has(key)) {
             map.set(key, { name: t.assignee_name ?? "Técnico", tickets: [] });
@@ -209,7 +214,7 @@ export default function TechnicianDashboard() {
               Nenhum ticket atribuído a você
             </p>
           ) : (
-            <div className="p-2 space-y-0.5">
+            <div className="overflow-y-auto max-h-[360px] p-2 space-y-0.5">
               {myTickets.map((t) => (
                 <TicketRow key={t.id} ticket={t} />
               ))}
@@ -230,10 +235,9 @@ export default function TechnicianDashboard() {
               Nenhum ticket ativo na equipe
             </p>
           ) : (
-            <div className="p-2 space-y-0.5">
+            <div className="overflow-y-auto max-h-[360px] p-2 space-y-0.5">
               {teamGroups
                 .flatMap((g) => g.tickets)
-                .slice(0, 8)
                 .map((t) => (
                   <TicketRow key={t.id} ticket={t} showTech />
                 ))}
@@ -252,7 +256,7 @@ export default function TechnicianDashboard() {
               Nenhum ticket aberto na fila
             </p>
           ) : (
-            <div className="p-2 space-y-0.5">
+            <div className="overflow-y-auto max-h-[360px] p-2 space-y-0.5">
               {queue.map((t) => (
                 <TicketRow key={t.id} ticket={t} />
               ))}

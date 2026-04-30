@@ -17,6 +17,7 @@ import {
   TableHead,
   TableHeaderCell,
   TableRow,
+  TagBadge,
   TicketFilters,
   type TicketFilterState,
   EMPTY_FILTERS,
@@ -31,6 +32,7 @@ import {
   type Ticket,
 } from "../../services/ticketService";
 import { getTechnicians, type UserSummary } from "../../services/userService";
+import { getTags, type Tag } from "../../services/tagService";
 import { TICKET_TRANSITIONS } from "../../lib/ticketConstants";
 
 // ── Constants ─────────────────────────────────────────────────
@@ -101,14 +103,18 @@ export default function TicketListPage() {
   const [bulkLoading, setBulkLoading] = useState(false);
   const [bulkError, setBulkError] = useState<string | null>(null);
   const [technicians, setTechnicians] = useState<UserSummary[]>([]);
+  const [tags, setTags] = useState<Tag[]>([]);
 
-  // Load technicians for filter dropdown (staff) and bulk assign (admin)
+  // Load technicians and tags for filter dropdowns
   useEffect(() => {
     if (isStaff) {
       getTechnicians()
         .then(setTechnicians)
         .catch(() => {});
     }
+    getTags()
+      .then(setTags)
+      .catch(() => {});
   }, [isStaff]);
 
   // Fetch tickets whenever deps change
@@ -122,6 +128,7 @@ export default function TicketListPage() {
       priority: filters.priority || undefined,
       category: filters.category || undefined,
       assignee_id: filters.assignee_id || undefined,
+      tag_id: filters.tag_id || undefined,
       search: filters.search || undefined,
       limit: PAGE_SIZE,
       offset: (page - 1) * PAGE_SIZE,
@@ -196,6 +203,7 @@ export default function TicketListPage() {
         priority: filters.priority || undefined,
         category: filters.category || undefined,
         assignee_id: filters.assignee_id || undefined,
+        tag_id: filters.tag_id || undefined,
         search: filters.search || undefined,
         limit: PAGE_SIZE,
         offset: (page - 1) * PAGE_SIZE,
@@ -228,6 +236,7 @@ export default function TicketListPage() {
         priority: filters.priority || undefined,
         category: filters.category || undefined,
         assignee_id: filters.assignee_id || undefined,
+        tag_id: filters.tag_id || undefined,
         search: filters.search || undefined,
         limit: PAGE_SIZE,
         offset: (page - 1) * PAGE_SIZE,
@@ -278,6 +287,7 @@ export default function TicketListPage() {
         value={filters}
         onChange={handleFiltersChange}
         technicians={isStaff ? technicians : undefined}
+        tags={tags.length > 0 ? tags : undefined}
       />
 
       {/* Bulk action bar */}
@@ -346,6 +356,7 @@ export default function TicketListPage() {
                   <TableHeaderCell className="w-36">Protocolo</TableHeaderCell>
                   <TableHeaderCell>Título</TableHeaderCell>
                   <TableHeaderCell className="w-36">Status</TableHeaderCell>
+                  <TableHeaderCell className="w-40">Etiquetas</TableHeaderCell>
                   <TableHeaderCell
                     className="w-28"
                     sortable
@@ -381,7 +392,7 @@ export default function TicketListPage() {
               <TableBody>
                 {tickets.length === 0 ? (
                   <TableEmpty
-                    colSpan={isStaff ? 9 : 7}
+                    colSpan={isStaff ? 10 : 8}
                     message="Nenhum ticket encontrado para os filtros aplicados."
                   />
                 ) : (
@@ -417,6 +428,21 @@ export default function TicketListPage() {
                       </TableCell>
                       <TableCell>
                         <StatusBadge status={t.status} />
+                      </TableCell>
+                      <TableCell>
+                        {t.tags.length > 0 ? (
+                          <div className="flex flex-wrap gap-1">
+                            {t.tags.map((tag) => (
+                              <TagBadge
+                                key={tag.id}
+                                name={tag.name}
+                                color={tag.color}
+                              />
+                            ))}
+                          </div>
+                        ) : (
+                          <span className="text-slate-600 text-xs">—</span>
+                        )}
                       </TableCell>
                       <TableCell>
                         <PriorityBadge priority={t.priority} />

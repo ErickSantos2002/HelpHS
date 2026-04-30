@@ -25,6 +25,7 @@ from app.core.security import authorize, get_current_user
 from app.models.models import (
     KBArticle,
     KBArticleStatus,
+    KBComment,
     Ticket,
     User,
     UserRole,
@@ -34,6 +35,9 @@ from app.schemas.kb import (
     KBArticleListResponse,
     KBArticleResponse,
     KBArticleUpdate,
+    KBCommentCreate,
+    KBCommentListResponse,
+    KBCommentResponse,
     KBFeedbackPayload,
 )
 
@@ -278,7 +282,6 @@ async def get_article(
     if not is_staff and article.status != KBArticleStatus.published:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Article not found")
 
-    # Increment view count without loading the full object again
     await db.execute(
         update(KBArticle)
         .where(KBArticle.id == article_id)
@@ -286,8 +289,12 @@ async def get_article(
     )
     await db.commit()
 
-    article.view_count += 1
-    return _to_response(article)
+    # Reload after commit — session expires all objects on commit, and accessing
+    # expired attributes in async context raises MissingGreenlet.
+    result = await db.execute(
+        select(KBArticle).options(selectinload(KBArticle.author)).where(KBArticle.id == article_id)
+    )
+    return _to_response(result.scalar_one())
 
 
 @router.patch("/kb/articles/{article_id}", response_model=KBArticleResponse)
@@ -330,6 +337,21 @@ async def delete_article(
     await db.commit()
 
 
+def _to_comment_response(comment: KBComment) -> KBCommentResponse:
+    return KBCommentResponse(
+        id=comment.id,
+        article_id=comment.article_id,
+        author_id=comment.author_id,
+        author_name=comment.author.name if comment.author else "Usuário removido",
+        author_role=comment.author.role.value if comment.author else "",
+        content=comment.content,
+        parent_id=comment.parent_id,
+        created_at=comment.created_at,
+        updated_at=comment.updated_at,
+        replies=[_to_comment_response(r) for r in (comment.replies or [])],
+    )
+
+
 @router.post("/kb/articles/{article_id}/feedback", status_code=status.HTTP_204_NO_CONTENT)
 async def article_feedback(
     article_id: uuid.UUID,
@@ -354,4 +376,112 @@ async def article_feedback(
             .where(KBArticle.id == article_id)
             .values(not_helpful=KBArticle.not_helpful + 1)
         )
+    await db.commit()
+
+
+# ── Comments ──────────────────────────────────────────────────
+
+
+@router.get("/kb/articles/{article_id}/comments", response_model=KBCommentListResponse)
+async def list_comments(
+    article_id: uuid.UUID,
+    db: Annotated[AsyncSession, Depends(get_db)],
+    actor: Annotated[User, Depends(get_current_user)],
+) -> KBCommentListResponse:
+    """Return all top-level comments (with nested replies) for an article."""
+    await _get_article_or_404(article_id, db)
+
+    rows = await db.execute(
+        select(KBComment)
+        .options(
+            selectinload(KBComment.author),
+            selectinload(KBComment.replies).selectinload(KBComment.author),
+        )
+        .where(KBComment.article_id == article_id, KBComment.parent_id.is_(None))
+        .order_by(KBComment.created_at.asc())
+    )
+    comments = rows.scalars().all()
+
+    return KBCommentListResponse(
+        items=[_to_comment_response(c) for c in comments],
+        total=len(comments),
+    )
+
+
+@router.post(
+    "/kb/articles/{article_id}/comments",
+    response_model=KBCommentResponse,
+    status_code=status.HTTP_201_CREATED,
+)
+async def create_comment(
+    article_id: uuid.UUID,
+    body: KBCommentCreate,
+    db: Annotated[AsyncSession, Depends(get_db)],
+    actor: Annotated[User, Depends(get_current_user)],
+) -> KBCommentResponse:
+    """Create a comment or reply on an article."""
+    await _get_article_or_404(article_id, db)
+
+    if body.parent_id is not None:
+        parent_result = await db.execute(
+            select(KBComment).where(
+                KBComment.id == body.parent_id, KBComment.article_id == article_id
+            )
+        )
+        if parent_result.scalar_one_or_none() is None:
+            raise HTTPException(
+                status_code=status.HTTP_404_NOT_FOUND, detail="Parent comment not found"
+            )
+        # Only allow 1 level of nesting — replies cannot be replied to
+        parent_check = await db.execute(select(KBComment).where(KBComment.id == body.parent_id))
+        parent = parent_check.scalar_one()
+        if parent.parent_id is not None:
+            raise HTTPException(
+                status_code=status.HTTP_422_UNPROCESSABLE_ENTITY,
+                detail="Replies to replies are not allowed",
+            )
+
+    now = datetime.now(UTC)
+    comment = KBComment(
+        id=uuid.uuid4(),
+        article_id=article_id,
+        author_id=actor.id,
+        content=body.content.strip(),
+        parent_id=body.parent_id,
+        created_at=now,
+        updated_at=now,
+    )
+    db.add(comment)
+    await db.commit()
+
+    result = await db.execute(
+        select(KBComment)
+        .options(
+            selectinload(KBComment.author),
+            selectinload(KBComment.replies).selectinload(KBComment.author),
+        )
+        .where(KBComment.id == comment.id)
+    )
+    comment = result.scalar_one()
+    return _to_comment_response(comment)
+
+
+@router.delete("/kb/comments/{comment_id}", status_code=status.HTTP_204_NO_CONTENT)
+async def delete_comment(
+    comment_id: uuid.UUID,
+    db: Annotated[AsyncSession, Depends(get_db)],
+    actor: Annotated[User, Depends(get_current_user)],
+) -> None:
+    """Delete a comment. Admin can delete any; others can only delete their own."""
+    result = await db.execute(select(KBComment).where(KBComment.id == comment_id))
+    comment = result.scalar_one_or_none()
+    if comment is None:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Comment not found")
+
+    is_admin = actor.role == UserRole.admin
+    is_own = comment.author_id == actor.id
+    if not is_admin and not is_own:
+        raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="Access denied")
+
+    await db.delete(comment)
     await db.commit()

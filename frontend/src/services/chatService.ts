@@ -48,6 +48,17 @@ export async function summarizeConversation(ticketId: string): Promise<string> {
   return data.summary;
 }
 
+export async function improveMessage(
+  ticketId: string,
+  draft: string,
+): Promise<string> {
+  const { data } = await api.post<{ improved: string }>(
+    `/tickets/${ticketId}/improve-message`,
+    { draft },
+  );
+  return data.improved;
+}
+
 export function buildWsUrl(ticketId: string): string {
   const token = tokenStorage.getAccess() ?? "";
   const apiBase = import.meta.env.VITE_API_URL ?? "/api/v1";

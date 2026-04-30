@@ -9,6 +9,7 @@ from pydantic import ConfigDict, Field
 
 from app.models.models import TicketCategory, TicketPriority, TicketStatus
 from app.schemas.base import AppBaseModel
+from app.schemas.tag import TagResponse
 
 
 class TicketCreate(AppBaseModel):
@@ -18,6 +19,7 @@ class TicketCreate(AppBaseModel):
     category: TicketCategory = TicketCategory.general
     product_id: uuid.UUID | None = None
     equipment_id: uuid.UUID | None = None
+    client_observation: str | None = Field(default=None, max_length=2000)
 
 
 class TicketUpdate(AppBaseModel):
@@ -37,6 +39,10 @@ class TicketStatusUpdate(AppBaseModel):
 
 class TicketAssign(AppBaseModel):
     assignee_id: uuid.UUID | None = None
+
+
+class TicketObservationUpdate(AppBaseModel):
+    client_observation: str | None = Field(default=None, max_length=2000)
 
 
 class TicketResponse(AppBaseModel):
@@ -66,6 +72,8 @@ class TicketResponse(AppBaseModel):
     ai_confidence: float | None = None
     ai_summary: str | None = None
     ai_conversation_summary: str | None = None
+    client_observation: str | None = None
+    tags: list[TagResponse] = []
 
 
 class TicketListResponse(AppBaseModel):

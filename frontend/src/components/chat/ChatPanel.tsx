@@ -3,6 +3,7 @@ import { cn } from "../../lib/utils";
 import {
   buildWsUrl,
   getChatMessages,
+  improveMessage,
   suggestReply,
   summarizeConversation,
   type ChatMessage,
@@ -146,6 +147,7 @@ export function ChatPanel({
   const [sending, setSending] = useState(false);
   const [loadError, setLoadError] = useState(false);
   const [suggesting, setSuggesting] = useState(false);
+  const [improving, setImproving] = useState(false);
   const [summarizing, setSummarizing] = useState(false);
   const [summary, setSummary] = useState<string | null>(savedSummary ?? null);
   const [showSummary, setShowSummary] = useState(false);
@@ -246,6 +248,21 @@ export function ChatPanel({
       // silently ignore — user can retry
     } finally {
       setSuggesting(false);
+    }
+  }
+
+  async function handleImprove() {
+    const draft = input.trim();
+    if (!draft) return;
+    setImproving(true);
+    try {
+      const improved = await improveMessage(ticketId, draft);
+      setInput(improved);
+      inputRef.current?.focus();
+    } catch {
+      // silently ignore — user keeps original draft
+    } finally {
+      setImproving(false);
     }
   }
 
@@ -400,7 +417,7 @@ export function ChatPanel({
       {/* Input */}
       <div className="border-t border-border px-3 py-2.5 shrink-0">
         {isStaff && (
-          <div className="mb-2">
+          <div className="mb-2 flex flex-wrap gap-2">
             <button
               onClick={handleSuggest}
               disabled={suggesting || wsStatus === "disconnected"}
@@ -431,6 +448,43 @@ export function ChatPanel({
                     />
                   </svg>
                   Sugerir resposta (IA)
+                </>
+              )}
+            </button>
+
+            <button
+              onClick={handleImprove}
+              disabled={
+                improving || !input.trim() || wsStatus === "disconnected"
+              }
+              className={cn(
+                "flex items-center gap-1.5 text-xs px-2.5 py-1 rounded-md transition-colors",
+                "border border-slate-600 text-slate-400 hover:bg-background-elevated hover:text-slate-300",
+                "disabled:opacity-40 disabled:cursor-not-allowed",
+              )}
+              title="Melhorar gramática e clareza do texto digitado"
+            >
+              {improving ? (
+                <>
+                  <span className="inline-block w-3 h-3 border border-slate-400 border-t-transparent rounded-full animate-spin" />
+                  Melhorando…
+                </>
+              ) : (
+                <>
+                  <svg
+                    className="w-3 h-3"
+                    fill="none"
+                    viewBox="0 0 24 24"
+                    stroke="currentColor"
+                    strokeWidth={2}
+                  >
+                    <path
+                      strokeLinecap="round"
+                      strokeLinejoin="round"
+                      d="M11 5H6a2 2 0 00-2 2v11a2 2 0 002 2h11a2 2 0 002-2v-5m-1.414-9.414a2 2 0 112.828 2.828L11.828 15H9v-2.828l8.586-8.586z"
+                    />
+                  </svg>
+                  Melhorar texto (IA)
                 </>
               )}
             </button>

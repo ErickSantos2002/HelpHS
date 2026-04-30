@@ -33,19 +33,24 @@ export function Modal({
 }: ModalProps) {
   const panelRef = useRef<HTMLDivElement>(null);
   const titleId = useId();
+  const onCloseRef = useRef(onClose);
+  useEffect(() => {
+    onCloseRef.current = onClose;
+  });
 
-  // Close on Escape + focus trap
+  // Close on Escape + focus trap — only re-runs when `open` changes,
+  // so typing inside modal inputs never re-triggers the focus logic.
   useEffect(() => {
     if (!open) return;
 
-    // Move focus into the modal
+    // Move focus into the modal only when it first opens
     const firstFocusable =
       panelRef.current?.querySelector<HTMLElement>(FOCUSABLE);
     firstFocusable?.focus();
 
     function handleKeyDown(e: KeyboardEvent) {
       if (e.key === "Escape") {
-        onClose();
+        onCloseRef.current();
         return;
       }
       if (e.key !== "Tab") return;
@@ -73,7 +78,7 @@ export function Modal({
 
     document.addEventListener("keydown", handleKeyDown);
     return () => document.removeEventListener("keydown", handleKeyDown);
-  }, [open, onClose]);
+  }, [open]);
 
   // Prevent body scroll
   useEffect(() => {

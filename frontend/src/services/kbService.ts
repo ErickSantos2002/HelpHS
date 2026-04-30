@@ -94,6 +94,47 @@ export async function submitKBFeedback(
   await api.post(`/kb/articles/${id}/feedback`, { helpful });
 }
 
+export interface KBComment {
+  id: string;
+  article_id: string;
+  author_id: string | null;
+  author_name: string;
+  author_role: string;
+  content: string;
+  parent_id: string | null;
+  created_at: string;
+  updated_at: string;
+  replies: KBComment[];
+}
+
+export interface KBCommentListResponse {
+  items: KBComment[];
+  total: number;
+}
+
+export async function getKBComments(articleId: string): Promise<KBComment[]> {
+  const { data } = await api.get<KBCommentListResponse>(
+    `/kb/articles/${articleId}/comments`,
+  );
+  return data.items;
+}
+
+export async function createKBComment(
+  articleId: string,
+  content: string,
+  parentId?: string,
+): Promise<KBComment> {
+  const { data } = await api.post<KBComment>(
+    `/kb/articles/${articleId}/comments`,
+    { content, parent_id: parentId ?? null },
+  );
+  return data;
+}
+
+export async function deleteKBComment(commentId: string): Promise<void> {
+  await api.delete(`/kb/comments/${commentId}`);
+}
+
 export async function suggestArticlesForTicket(
   ticketId: string,
   limit = 5,

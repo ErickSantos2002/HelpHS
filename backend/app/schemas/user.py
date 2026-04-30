@@ -38,6 +38,20 @@ class UserUpdate(AppBaseModel):
     role: UserRole | None = None
 
 
+class PasswordChange(AppBaseModel):
+    current_password: str = Field(..., min_length=1)
+    new_password: str = Field(..., min_length=8, max_length=128)
+
+    @field_validator("new_password")
+    @classmethod
+    def password_strength(cls, v: str) -> str:
+        if not any(c.isupper() for c in v):
+            raise ValueError("A senha deve conter ao menos uma letra maiúscula")
+        if not any(c.isdigit() for c in v):
+            raise ValueError("A senha deve conter ao menos um número")
+        return v
+
+
 class UserStatusUpdate(AppBaseModel):
     status: UserStatus
 

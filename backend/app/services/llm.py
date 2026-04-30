@@ -80,6 +80,27 @@ _SUGGEST_REPLY_SYSTEM = (
     "chamados de suporte. Responda APENAS com JSON válido, sem markdown, sem explicações."
 )
 
+_IMPROVE_MESSAGE_SYSTEM = (
+    "Você é um assistente de escrita para técnicos de suporte em Saúde & Segurança do Trabalho. "
+    "Seu papel é melhorar a clareza, gramática e profissionalismo de rascunhos de mensagens, "
+    "mantendo o tom e a intenção original. Responda APENAS com JSON válido, sem markdown."
+)
+
+_IMPROVE_MESSAGE_TEMPLATE = """Ticket de suporte:
+Título: {title}
+Descrição: {description}
+
+Rascunho da mensagem do técnico:
+{draft}
+
+Melhore o rascunho acima: corrija gramática, pontuação e ortografia, torne o texto mais claro e \
+profissional, mas preserve o significado e o tom original. Escreva em português brasileiro.
+
+Responda com este JSON exato (sem markdown):
+{{
+  "improved": "texto melhorado"
+}}"""
+
 _SUGGEST_REPLY_TEMPLATE = """Ticket de suporte:
 Título: {title}
 Descrição: {description}
@@ -440,4 +461,93 @@ async def summarize_conversation(
             return result
 
     logger.debug("LLM summarize_conversation unavailable — no valid API keys configured")
+    return None
+
+
+async def improve_message(draft: str, title: str, description: str) -> str | None:
+    """
+    Improve a technician's draft message: fix grammar, clarity and professionalism
+    while preserving original intent.
+
+    Returns the improved text, or None if all providers fail.
+    """
+    prompt = _IMPROVE_MESSAGE_TEMPLATE.format(
+        title=title[:500],
+        description=description[:500],
+        draft=draft[:2000],
+    )
+
+    async def _parse_improved(text: str) -> str | None:
+        text = re.sub(r"```(?:json)?", "", text).strip()
+        try:
+            data = json.loads(text)
+        except json.JSONDecodeError:
+            match = re.search(r'\{"improved"\s*:\s*"((?:[^"\\]|\\.)*)"\}', text, re.DOTALL)
+            if match:
+                return match.group(1).replace("\\n", "\n")
+            return None
+        improved = data.get("improved", "")
+        return str(improved).strip() if improved else None
+
+    async def _call_openai_improve(prompt: str) -> str | None:
+        key = settings.openai_api_key
+        if not key or key.startswith("CHANGE_ME") or key.startswith("sk-CHANGE"):
+            return None
+        try:
+            async with httpx.AsyncClient(timeout=settings.llm_request_timeout_seconds) as client:
+                resp = await client.post(
+                    "https://api.openai.com/v1/chat/completions",
+                    headers={"Authorization": f"Bearer {key}"},
+                    json={
+                        "model": settings.openai_model,
+                        "messages": [
+                            {"role": "system", "content": _IMPROVE_MESSAGE_SYSTEM},
+                            {"role": "user", "content": prompt},
+                        ],
+                        "max_tokens": 512,
+                        "temperature": 0.3,
+                    },
+                )
+            resp.raise_for_status()
+            content = resp.json()["choices"][0]["message"]["content"]
+            return await _parse_improved(content)
+        except Exception as exc:
+            logger.warning(f"OpenAI improve_message failed: {exc}")
+            return None
+
+    async def _call_anthropic_improve(prompt: str) -> str | None:
+        key = settings.anthropic_api_key
+        if not key or key.startswith("CHANGE_ME") or key.startswith("sk-ant-CHANGE"):
+            return None
+        try:
+            async with httpx.AsyncClient(timeout=settings.llm_request_timeout_seconds) as client:
+                resp = await client.post(
+                    "https://api.anthropic.com/v1/messages",
+                    headers={"x-api-key": key, "anthropic-version": "2023-06-01"},
+                    json={
+                        "model": settings.anthropic_model,
+                        "max_tokens": 512,
+                        "system": _IMPROVE_MESSAGE_SYSTEM,
+                        "messages": [{"role": "user", "content": prompt}],
+                    },
+                )
+            resp.raise_for_status()
+            content = resp.json()["content"][0]["text"]
+            return await _parse_improved(content)
+        except Exception as exc:
+            logger.warning(f"Anthropic improve_message failed: {exc}")
+            return None
+
+    result = await _call_openai_improve(prompt)
+    if result:
+        logger.info("Message improved via OpenAI")
+        return result
+
+    if settings.llm_fallback_enabled:
+        result = await _call_anthropic_improve(prompt)
+        if result:
+            logger.info("Message improved via Anthropic")
+            return result
+
+    logger.debug("LLM improve_message unavailable — no valid API keys configured")
     return None

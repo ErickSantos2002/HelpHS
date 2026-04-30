@@ -24,7 +24,9 @@ const KBListPage = lazy(() => import("./pages/kb/KBListPage"));
 const KBArticlePage = lazy(() => import("./pages/kb/KBArticlePage"));
 const KBFormPage = lazy(() => import("./pages/kb/KBFormPage"));
 const ReportsPage = lazy(() => import("./pages/reports/ReportsPage"));
+const ProfilePage = lazy(() => import("./pages/profile/ProfilePage"));
 const AuditLogsPage = lazy(() => import("./pages/audit/AuditLogsPage"));
+const SettingsPage = lazy(() => import("./pages/settings/SettingsPage"));
 const ForbiddenPage = lazy(() => import("./pages/errors/ForbiddenPage"));
 const NotFoundPage = lazy(() => import("./pages/errors/NotFoundPage"));
 
@@ -61,22 +63,15 @@ function App() {
               <Route path="/tickets/:id" element={<TicketDetailPage />} />
               <Route path="/notifications" element={<NotificationsPage />} />
               <Route path="/kb" element={<KBListPage />} />
+              <Route path="/kb/new" element={<KBFormPage />} />
+              <Route path="/kb/:id/edit" element={<KBFormPage />} />
               <Route path="/kb/:id" element={<KBArticlePage />} />
-              <Route
-                path="/profile"
-                element={
-                  <PlaceholderPage
-                    title="Meu perfil"
-                    description="Edição de perfil — Sprint 5"
-                  />
-                }
-              />
+              <Route path="/profile" element={<ProfilePage />} />
 
               {/* Admin + Technician */}
               <Route element={<RoleGuard roles={["admin", "technician"]} />}>
-                <Route path="/kb/new" element={<KBFormPage />} />
-                <Route path="/kb/:id/edit" element={<KBFormPage />} />
                 <Route path="/reports" element={<ReportsPage />} />
+                <Route path="/settings" element={<SettingsPage />} />
               </Route>
 
               {/* Admin only */}

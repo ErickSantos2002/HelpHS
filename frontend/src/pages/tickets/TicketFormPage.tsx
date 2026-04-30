@@ -40,6 +40,7 @@ const schema = z.object({
   category: z.string().min(1, "Selecione uma categoria"),
   product_id: z.string().optional(),
   equipment_id: z.string().optional(),
+  client_observation: z.string().max(2000, "Observação muito longa").optional(),
 });
 
 type FormValues = z.infer<typeof schema>;
@@ -236,6 +237,7 @@ interface PreviewProps {
   onBack: () => void;
   onSubmit: () => void;
   submitting: boolean;
+  isEdit: boolean;
 }
 
 function PreviewStep({
@@ -246,6 +248,7 @@ function PreviewStep({
   onBack,
   onSubmit,
   submitting,
+  isEdit,
 }: PreviewProps) {
   return (
     <div className="space-y-6">
@@ -269,6 +272,16 @@ function PreviewStep({
             {values.description}
           </p>
         </div>
+        {!isEdit && values.client_observation && (
+          <div>
+            <p className="text-xs font-medium text-slate-500 uppercase tracking-wider mb-1">
+              Observações adicionais
+            </p>
+            <p className="text-sm text-slate-200 whitespace-pre-wrap">
+              {values.client_observation}
+            </p>
+          </div>
+        )}
         {files.length > 0 && (
           <div>
             <p className="text-xs font-medium text-slate-500 uppercase tracking-wider mb-1">
@@ -402,7 +415,7 @@ export default function TicketFormPage() {
     setSubmitting(true);
     setSubmitError(null);
     try {
-      const payload = {
+      const basePayload = {
         title: currentValues.title,
         description: currentValues.description,
         priority: currentValues.priority,
@@ -413,9 +426,12 @@ export default function TicketFormPage() {
 
       let ticket: Ticket;
       if (isEdit && id) {
-        ticket = await updateTicket(id, payload);
+        ticket = await updateTicket(id, basePayload);
       } else {
-        ticket = await createTicket(payload);
+        ticket = await createTicket({
+          ...basePayload,
+          client_observation: currentValues.client_observation || null,
+        });
       }
 
       // Note: file upload requires multipart POST to /attachments/{ticket_id}
@@ -467,6 +483,7 @@ export default function TicketFormPage() {
           onBack={() => setStep("form")}
           onSubmit={submitForm}
           submitting={submitting}
+          isEdit={isEdit}
         />
       ) : (
         <form
@@ -553,6 +570,23 @@ export default function TicketFormPage() {
               10 caracteres.
             </p>
           </div>
+
+          {/* Client observation — creation only */}
+          {!isEdit && (
+            <div className="space-y-1">
+              <Textarea
+                label="Observações adicionais"
+                placeholder="Alguma informação extra que pode ajudar o técnico? Ex: horários disponíveis para atendimento, tentativas anteriores de solução, impacto no trabalho…"
+                rows={3}
+                error={errors.client_observation?.message}
+                {...register("client_observation")}
+              />
+              <p className="text-xs text-slate-500">
+                Campo opcional — você poderá editar esta observação depois de
+                abrir o chamado.
+              </p>
+            </div>
+          )}
 
           {/* Attachments */}
           <div className="space-y-1">

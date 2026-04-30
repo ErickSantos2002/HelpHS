@@ -72,3 +72,40 @@ class ReportData(AppBaseModel):
     sla_compliance: list[SLAComplianceItem]
     csat_distribution: list[CSATDistributionItem]
     csat_average: float | None
+
+
+# ── Technician report schemas ─────────────────────────────────
+
+
+class TechnicianSummary(AppBaseModel):
+    technician_id: str
+    technician_name: str
+    total_assigned: int
+    resolved: int
+    open_count: int
+    sla_breached: int
+    sla_compliance_rate: float  # 0–100
+    avg_resolution_hours: float | None
+    csat_average: float | None
+    csat_count: int
+
+
+class TechnicianListReport(AppBaseModel):
+    period_days: int
+    technicians: list[TechnicianSummary]
+
+
+class TechnicianDetailReport(AppBaseModel):
+    period_days: int
+    technician_id: str
+    technician_name: str
+    total_assigned: int
+    resolved: int
+    in_progress: int
+    open_count: int
+    sla_breached: int
+    sla_compliance_rate: float
+    avg_resolution_hours: float | None
+    csat_average: float | None
+    csat_count: int
+    tickets_by_day: list[DailyCount]
