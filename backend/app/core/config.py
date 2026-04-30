@@ -37,7 +37,7 @@ class Settings(BaseSettings):
     jwt_public_key_path: str = "./keys/public.pem"
     jwt_private_key: str = ""  # conteudo PEM direto (prioridade sobre path)
     jwt_public_key: str = ""  # conteudo PEM direto (prioridade sobre path)
-    jwt_access_token_expires_minutes: int = 15
+    jwt_access_token_expires_minutes: int = 480
     jwt_refresh_token_expires_days: int = 7
     jwt_algorithm: str = "RS256"
     jwt_issuer: str = "helpdesk.healthsafetytech.com"

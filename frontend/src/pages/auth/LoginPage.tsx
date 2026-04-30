@@ -1,6 +1,6 @@
 import { useState } from "react";
 import type { FormEvent } from "react";
-import { useNavigate, useLocation } from "react-router-dom";
+import { useNavigate, useLocation, Link } from "react-router-dom";
 import { Alert, Button, Input } from "../../components/ui";
 import { useAuth } from "../../contexts/AuthContext";
 
@@ -13,6 +13,8 @@ export default function LoginPage() {
   const [password, setPassword] = useState("");
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
+  const justRegistered =
+    (location.state as { registered?: boolean })?.registered === true;
 
   // Redirect to the page the user was trying to access, or /
   const from = (location.state as { from?: string })?.from ?? "/";
@@ -65,6 +67,12 @@ export default function LoginPage() {
             </p>
           </div>
 
+          {justRegistered && (
+            <Alert variant="success">
+              Conta criada com sucesso! Faça login para continuar.
+            </Alert>
+          )}
+
           {error && (
             <Alert variant="danger" onDismiss={() => setError(null)}>
               {error}
@@ -103,9 +111,20 @@ export default function LoginPage() {
           </form>
         </div>
 
-        <p className="text-center text-xs text-slate-600">
-          Problemas para acessar? Contate o administrador do sistema.
-        </p>
+        <div className="space-y-2 text-center">
+          <p className="text-sm text-slate-500">
+            Não tem uma conta?{" "}
+            <Link
+              to="/register"
+              className="text-primary hover:text-primary/80 transition-colors font-medium"
+            >
+              Registre-se
+            </Link>
+          </p>
+          <p className="text-xs text-slate-600">
+            Problemas para acessar? Contate o administrador do sistema.
+          </p>
+        </div>
       </div>
     </div>
   );

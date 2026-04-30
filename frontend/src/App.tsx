@@ -10,6 +10,7 @@ import PlaceholderPage from "./pages/PlaceholderPage";
 
 // Pages (lazy-loaded for code splitting)
 const LoginPage = lazy(() => import("./pages/auth/LoginPage"));
+const RegisterPage = lazy(() => import("./pages/auth/RegisterPage"));
 const HomePage = lazy(() => import("./pages/HomePage"));
 const TicketListPage = lazy(() => import("./pages/tickets/TicketListPage"));
 const UsersPage = lazy(() => import("./pages/users/UsersPage"));
@@ -46,6 +47,7 @@ function App() {
           {/* ── Public only ──────────────────────────────────── */}
           <Route element={<PublicOnlyRoute />}>
             <Route path="/login" element={<LoginPage />} />
+            <Route path="/register" element={<RegisterPage />} />
           </Route>
 
           {/* ── Error pages ──────────────────────────────────── */}

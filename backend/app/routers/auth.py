@@ -23,11 +23,19 @@ from app.core.security import (
     delete_refresh_token,
     get_current_user,
     get_stored_refresh_token,
+    hash_password,
     store_refresh_token,
     verify_password,
 )
-from app.models.models import AuditAction, AuditLog, User, UserStatus
-from app.schemas.auth import AccessTokenResponse, LoginRequest, RefreshRequest, TokenResponse
+from app.models.models import AuditAction, AuditLog, User, UserRole, UserStatus
+from app.schemas.auth import (
+    AccessTokenResponse,
+    LoginRequest,
+    RefreshRequest,
+    RegisterRequest,
+    TokenResponse,
+)
+from app.schemas.user import UserResponse
 
 router = APIRouter(prefix="/auth", tags=["Auth"])
 settings = get_settings()
@@ -49,6 +57,45 @@ def _audit(
             user_agent=request.headers.get("user-agent", ""),
         )
     )
+
+
+# ── POST /auth/register ───────────────────────────────────────
+
+
+@router.post("/register", response_model=UserResponse, status_code=status.HTTP_201_CREATED)
+async def register(
+    body: RegisterRequest,
+    request: Request,
+    db: Annotated[AsyncSession, Depends(get_db)],
+) -> UserResponse:
+    existing = await db.execute(select(User).where(User.email == body.email))
+    if existing.scalar_one_or_none():
+        raise HTTPException(
+            status_code=status.HTTP_409_CONFLICT,
+            detail="Email already registered",
+        )
+
+    now = datetime.now(UTC)
+    user = User(
+        name=body.name,
+        email=body.email,
+        password=hash_password(body.password),
+        role=UserRole.client,
+        status=UserStatus.active,
+        phone=body.phone,
+        department=body.department,
+        lgpd_consent=True,
+        lgpd_consent_at=now,
+    )
+    db.add(user)
+    await db.flush()
+
+    _audit(db, AuditAction.user_created, user.id, request)
+    await db.commit()
+    await db.refresh(user)
+
+    logger.info(f"New client registered: {user.email}")
+    return UserResponse.model_validate(user)
 
 
 # ── POST /auth/login ──────────────────────────────────────────
