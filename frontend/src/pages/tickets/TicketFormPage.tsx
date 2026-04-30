@@ -36,9 +36,7 @@ const schema = z.object({
     .string()
     .min(10, "Descrição deve ter ao menos 10 caracteres")
     .max(5000, "Descrição muito longa"),
-  priority: z.enum(["critical", "high", "medium", "low"], {
-    message: "Selecione uma prioridade",
-  }),
+  priority: z.enum(["critical", "high", "medium", "low"]).default("medium"),
   category: z.string().min(1, "Selecione uma categoria"),
   product_id: z.string().optional(),
   equipment_id: z.string().optional(),
@@ -260,7 +258,6 @@ function PreviewStep({
 
       <Card className="space-y-4">
         <Field label="Título" value={values.title} />
-        <Field label="Prioridade" value={PRIORITY_LABEL[values.priority]} />
         <Field label="Categoria" value={CATEGORY_LABEL[values.category]} />
         {productName && <Field label="Produto" value={productName} />}
         {equipmentName && <Field label="Equipamento" value={equipmentName} />}
@@ -477,61 +474,95 @@ export default function TicketFormPage() {
           className="space-y-5"
         >
           {/* Title */}
-          <Input
-            label="Título *"
-            placeholder="Descreva o problema brevemente"
-            error={errors.title?.message}
-            {...register("title")}
-          />
-
-          {/* Priority + Category */}
-          <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
-            <Select
-              label="Prioridade *"
-              options={PRIORITY_OPTIONS}
-              placeholder="Selecione"
-              error={errors.priority?.message}
-              {...register("priority")}
+          <div className="space-y-1">
+            <Input
+              label="Título *"
+              placeholder="Ex: Computador não liga, Impressora sem conexão, Acesso bloqueado ao sistema…"
+              error={errors.title?.message}
+              {...register("title")}
             />
+            <p className="text-xs text-slate-500">
+              Resumo curto e objetivo do problema — use entre 5 e 200
+              caracteres.
+            </p>
+          </div>
+
+          {/* Category */}
+          <div className="space-y-1">
             <Select
               label="Categoria *"
               options={CATEGORY_OPTIONS}
-              placeholder="Selecione"
+              placeholder="Selecione o tipo de problema"
               error={errors.category?.message}
               {...register("category")}
             />
+            <p className="text-xs text-slate-500">
+              Escolha a categoria que melhor descreve a natureza do problema.
+            </p>
           </div>
 
           {/* Product + Equipment cascade */}
           <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
-            <Select
-              label="Produto"
-              options={productOptions}
-              placeholder="Nenhum"
-              {...register("product_id")}
-            />
-            <Select
-              label="Equipamento"
-              options={equipmentOptions}
-              placeholder={
-                selectedProductId ? "Nenhum" : "Selecione um produto"
-              }
-              disabled={!selectedProductId || equipmentOptions.length === 0}
-              {...register("equipment_id")}
-            />
+            <div className="space-y-1">
+              <Select
+                label="Produto"
+                options={productOptions}
+                placeholder="Nenhum (opcional)"
+                {...register("product_id")}
+              />
+              <p className="text-xs text-slate-500">
+                Informe o produto afetado, se aplicável.
+              </p>
+            </div>
+            <div className="space-y-1">
+              <Select
+                label="Equipamento"
+                options={equipmentOptions}
+                placeholder={
+                  selectedProductId
+                    ? "Nenhum (opcional)"
+                    : "Selecione um produto primeiro"
+                }
+                disabled={!selectedProductId || equipmentOptions.length === 0}
+                {...register("equipment_id")}
+              />
+              <p className="text-xs text-slate-500">
+                Equipamento específico vinculado ao produto selecionado.
+              </p>
+            </div>
           </div>
 
           {/* Description */}
-          <Textarea
-            label="Descrição *"
-            placeholder="Descreva o problema com detalhes: o que ocorreu, quando, com qual frequência, impacto na operação…"
-            rows={6}
-            error={errors.description?.message}
-            {...register("description")}
-          />
+          <div className="space-y-1">
+            <Textarea
+              label="Descrição *"
+              placeholder={
+                "Descreva o problema com o máximo de detalhes:\n" +
+                "• O que aconteceu exatamente?\n" +
+                "• Quando começou e com que frequência ocorre?\n" +
+                "• Aparece alguma mensagem de erro? Qual?\n" +
+                "• Outros usuários estão sendo afetados?\n" +
+                "• O que você já tentou fazer para resolver?"
+              }
+              rows={7}
+              error={errors.description?.message}
+              {...register("description")}
+            />
+            <p className="text-xs text-slate-500">
+              Quanto mais detalhes, mais rápido conseguimos resolver. Mínimo de
+              10 caracteres.
+            </p>
+          </div>
 
           {/* Attachments */}
-          <DropZone files={files} onChange={setFiles} />
+          <div className="space-y-1">
+            <DropZone files={files} onChange={setFiles} />
+            <p className="text-xs text-slate-500">
+              Anexe prints de tela, fotos do equipamento ou documentos
+              relacionados ao problema — isso ajuda o técnico a entender e
+              resolver mais rapidamente.
+            </p>
+          </div>
 
           {/* Actions */}
           <div className="flex justify-end gap-3 pt-2">
