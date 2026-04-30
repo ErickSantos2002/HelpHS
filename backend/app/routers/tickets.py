@@ -316,8 +316,16 @@ async def list_tickets(
     rows = await db.execute(base.order_by(order).offset(offset).limit(limit))
     tickets = rows.scalars().all()
 
+    # Batch-fetch assignee names (single query)
+    assignee_ids = {t.assignee_id for t in tickets if t.assignee_id}
+    name_map: dict[uuid.UUID, str] = {}
+    if assignee_ids:
+        user_rows = await db.execute(select(User.id, User.name).where(User.id.in_(assignee_ids)))
+        name_map = {row.id: row.name for row in user_rows}
+
     def _serialize(t: Ticket) -> TicketResponse:
         r = TicketResponse.model_validate(t)
+        r.assignee_name = name_map.get(t.assignee_id) if t.assignee_id else None
         if actor.role == UserRole.client:
             r.technician_notes = None
         return r
@@ -347,6 +355,9 @@ async def get_ticket(
         raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="Access denied")
 
     response = TicketResponse.model_validate(ticket)
+    if ticket.assignee_id:
+        assignee = await db.get(User, ticket.assignee_id)
+        response.assignee_name = assignee.name if assignee else None
     if actor.role == UserRole.client:
         response.technician_notes = None
     return response

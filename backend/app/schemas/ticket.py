@@ -60,6 +60,7 @@ class TicketResponse(AppBaseModel):
     closed_at: datetime | None
     created_at: datetime
     updated_at: datetime
+    assignee_name: str | None = None
     technician_notes: str | None = None
     ai_classification: str | None = None
     ai_confidence: float | None = None

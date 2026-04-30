@@ -109,8 +109,6 @@ export async function updateLGPDConsent(
 }
 
 export async function getTechnicians(): Promise<UserSummary[]> {
-  const { data } = await api.get<UserListResponse>(
-    "/users?role=technician&status=active&limit=100",
-  );
+  const { data } = await api.get<UserListResponse>("/users/technicians");
   return data.items;
 }

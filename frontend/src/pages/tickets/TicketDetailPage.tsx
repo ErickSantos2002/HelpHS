@@ -60,6 +60,7 @@ const FIELD_LABEL: Record<string, string> = {
   assignee_id: "Técnico atribuído",
   product_id: "Produto alterado",
   equipment_id: "Equipamento alterado",
+  technician_notes: "Notas internas atualizadas",
 };
 
 // ── SLA Countdown ─────────────────────────────────────────────
@@ -535,7 +536,8 @@ export default function TicketDetailPage() {
     minute: "2-digit",
   });
 
-  const assignedTech = technicians.find((t) => t.id === ticket.assignee_id);
+  const assignedTech =
+    ticket.assignee_name ?? (ticket.assignee_id ? "Técnico" : null);
 
   return (
     <div className="space-y-6">
@@ -626,68 +628,6 @@ export default function TicketDetailPage() {
             )}
           </div>
 
-          {/* Notas internas — visível apenas para admin/técnico */}
-          {isStaff && (
-            <div className="rounded-xl bg-background-surface border border-yellow-800/40 p-5 space-y-3">
-              <div className="flex items-center justify-between">
-                <h2 className="text-sm font-semibold text-yellow-400 flex items-center gap-2">
-                  🔒 Notas internas
-                  <span className="text-xs font-normal text-slate-500">
-                    (não visível pelo cliente)
-                  </span>
-                </h2>
-                {!notesEdit && (
-                  <Button
-                    variant="ghost"
-                    size="sm"
-                    onClick={() => setNotesEdit(true)}
-                  >
-                    {ticket.technician_notes ? "Editar" : "+ Adicionar"}
-                  </Button>
-                )}
-              </div>
-
-              {notesEdit ? (
-                <div className="space-y-3">
-                  <Textarea
-                    rows={4}
-                    placeholder="Observações internas, diagnósticos, próximos passos…"
-                    value={notesValue}
-                    onChange={(e) => setNotesValue(e.target.value)}
-                  />
-                  <div className="flex gap-2 justify-end">
-                    <Button
-                      variant="secondary"
-                      size="sm"
-                      onClick={() => {
-                        setNotesEdit(false);
-                        setNotesValue(ticket.technician_notes ?? "");
-                      }}
-                      disabled={notesSaving}
-                    >
-                      Cancelar
-                    </Button>
-                    <Button
-                      size="sm"
-                      onClick={handleSaveNotes}
-                      loading={notesSaving}
-                    >
-                      Salvar
-                    </Button>
-                  </div>
-                </div>
-              ) : ticket.technician_notes ? (
-                <p className="text-sm text-slate-300 whitespace-pre-wrap leading-relaxed bg-yellow-950/20 rounded-lg p-3">
-                  {ticket.technician_notes}
-                </p>
-              ) : (
-                <p className="text-sm text-slate-500 italic">
-                  Nenhuma nota interna registrada.
-                </p>
-              )}
-            </div>
-          )}
-
           {/* Chat */}
           <ChatPanel
             ticketId={ticket.id}
@@ -710,15 +650,23 @@ export default function TicketDetailPage() {
             <h2 className="text-sm font-semibold text-slate-300 mb-4">
               Histórico
             </h2>
-            {history.length === 0 ? (
-              <p className="text-sm text-slate-500">Sem histórico.</p>
-            ) : (
-              <div>
-                {history.map((entry) => (
-                  <TimelineEntry key={entry.id} entry={entry} />
-                ))}
-              </div>
-            )}
+            {(() => {
+              const visibleHistory =
+                user?.role === "client"
+                  ? history.filter((e) =>
+                      ["created", "status"].includes(e.field),
+                    )
+                  : history;
+              return visibleHistory.length === 0 ? (
+                <p className="text-sm text-slate-500">Sem histórico.</p>
+              ) : (
+                <div>
+                  {visibleHistory.map((entry) => (
+                    <TimelineEntry key={entry.id} entry={entry} />
+                  ))}
+                </div>
+              );
+            })()}
           </div>
         </div>
 
@@ -783,10 +731,7 @@ export default function TicketDetailPage() {
             />
             <InfoRow
               label="Atribuído a"
-              value={
-                assignedTech?.name ??
-                (ticket.assignee_id ? "Técnico" : "Não atribuído")
-              }
+              value={assignedTech ?? "Não atribuído"}
             />
             <InfoRow label="Aberto em" value={createdDate} />
             {ticket.closed_at && (
@@ -796,6 +741,65 @@ export default function TicketDetailPage() {
               />
             )}
           </div>
+
+          {/* Notas internas — visível apenas para admin/técnico */}
+          {isStaff && (
+            <div className="rounded-xl bg-background-surface border border-yellow-800/40 p-4 space-y-3">
+              <div className="flex items-center justify-between">
+                <h2 className="text-xs font-semibold text-yellow-400 uppercase tracking-wider flex items-center gap-1.5">
+                  🔒 Notas internas
+                </h2>
+                {!notesEdit && (
+                  <Button
+                    variant="ghost"
+                    size="sm"
+                    onClick={() => setNotesEdit(true)}
+                  >
+                    {ticket.technician_notes ? "Editar" : "+ Adicionar"}
+                  </Button>
+                )}
+              </div>
+
+              {notesEdit ? (
+                <div className="space-y-3">
+                  <Textarea
+                    rows={4}
+                    placeholder="Observações internas, diagnósticos, próximos passos…"
+                    value={notesValue}
+                    onChange={(e) => setNotesValue(e.target.value)}
+                  />
+                  <div className="flex gap-2 justify-end">
+                    <Button
+                      variant="secondary"
+                      size="sm"
+                      onClick={() => {
+                        setNotesEdit(false);
+                        setNotesValue(ticket.technician_notes ?? "");
+                      }}
+                      disabled={notesSaving}
+                    >
+                      Cancelar
+                    </Button>
+                    <Button
+                      size="sm"
+                      onClick={handleSaveNotes}
+                      loading={notesSaving}
+                    >
+                      Salvar
+                    </Button>
+                  </div>
+                </div>
+              ) : ticket.technician_notes ? (
+                <p className="text-sm text-slate-300 whitespace-pre-wrap leading-relaxed bg-yellow-950/20 rounded-lg p-3">
+                  {ticket.technician_notes}
+                </p>
+              ) : (
+                <p className="text-xs text-slate-500 italic">
+                  Nenhuma nota registrada.
+                </p>
+              )}
+            </div>
+          )}
         </div>
       </div>
 

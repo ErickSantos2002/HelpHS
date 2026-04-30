@@ -246,8 +246,8 @@ export default function TicketListPage() {
   const createdAt = (t: Ticket) =>
     new Date(t.created_at).toLocaleDateString("pt-BR");
 
-  const techName = (id: string | null) =>
-    id ? (technicians.find((t) => t.id === id)?.name ?? "—") : "—";
+  const techName = (t: Ticket) =>
+    t.assignee_name ?? (t.assignee_id ? "—" : "—");
 
   // Compute the common valid transitions for all selected tickets
   const selectedTickets = tickets.filter((t) => selected.has(t.id));
@@ -435,7 +435,7 @@ export default function TicketListPage() {
                       </TableCell>
                       {isStaff && (
                         <TableCell muted className="text-xs">
-                          {techName(t.assignee_id)}
+                          {techName(t)}
                         </TableCell>
                       )}
                       <TableCell>

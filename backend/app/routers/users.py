@@ -5,6 +5,7 @@ Permissões:
   POST   /users                   — admin
   GET    /users                   — admin
   GET    /users/me                — qualquer autenticado
+  GET    /users/technicians       — admin | technician (lista técnicos ativos)
   GET    /users/{id}              — admin (ou o próprio usuário)
   PATCH  /users/{id}              — admin (ou o próprio usuário, sem mudar role)
   PATCH  /users/{id}/status       — admin
@@ -135,6 +136,26 @@ async def get_me(
     current_user: Annotated[User, Depends(get_current_user)],
 ) -> UserResponse:
     return _to_response(current_user)
+
+
+# ── GET /users/technicians ────────────────────────────────────
+
+
+@router.get("/technicians", response_model=UserListResponse)
+async def list_technicians(
+    db: Annotated[AsyncSession, Depends(get_db)],
+    _actor: Annotated[User, Depends(authorize(UserRole.admin, UserRole.technician))],
+) -> UserListResponse:
+    """Active technicians — used by staff to populate assignee filter/dropdown."""
+    rows = await db.execute(
+        select(User)
+        .where(User.role == UserRole.technician, User.status == UserStatus.active)
+        .order_by(User.name)
+    )
+    users = rows.scalars().all()
+    return UserListResponse(
+        items=[_to_response(u) for u in users], total=len(users), limit=100, offset=0
+    )
 
 
 # ── GET /users/{user_id} ──────────────────────────────────────

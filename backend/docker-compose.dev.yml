@@ -97,6 +97,40 @@ services:
     networks:
       - helpdesk-network
 
+  # ── Backend FastAPI ─────────────────────────────────────────
+  backend:
+    build:
+      context: .
+      dockerfile: Dockerfile.dev
+    container_name: helpdesk-backend
+    restart: unless-stopped
+    env_file: .env
+    environment:
+      # Sobrescreve localhost → hostname interno do Docker
+      DATABASE_URL: postgresql+asyncpg://${POSTGRES_USER:-helpdesk_user}:${POSTGRES_PASSWORD:-helpdesk_dev_123}@postgres:5432/${POSTGRES_DB:-helpdesk_db}
+      REDIS_URL: redis://:${REDIS_PASSWORD:-helpdesk_redis_dev}@redis:6379/0
+    volumes:
+      - ./app:/app/app
+      - ./alembic:/app/alembic
+      - ./alembic.ini:/app/alembic.ini
+      - ./keys:/app/keys
+      - ./logs:/app/logs
+    ports:
+      - "8000:8000"
+    depends_on:
+      postgres:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:8000/health"]
+      interval: 30s
+      timeout: 10s
+      start_period: 15s
+      retries: 3
+    networks:
+      - helpdesk-network
+
   # ── pgAdmin (opcional — interface web para PostgreSQL) ──────
   pgadmin:
     image: dpage/pgadmin4:latest

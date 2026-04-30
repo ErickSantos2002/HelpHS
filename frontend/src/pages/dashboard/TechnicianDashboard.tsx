@@ -15,6 +15,18 @@ import {
 } from "../../services/dashboardService";
 import { getTickets, type Ticket } from "../../services/ticketService";
 
+const ACTIVE_STATUSES = new Set([
+  "open",
+  "in_progress",
+  "awaiting_client",
+  "awaiting_technical",
+]);
+
+interface TechGroup {
+  name: string;
+  tickets: Ticket[];
+}
+
 // ── KPI Card ──────────────────────────────────────────────────
 
 interface KpiCardProps {
@@ -43,7 +55,13 @@ function KpiCard({
 
 // ── Ticket Row ────────────────────────────────────────────────
 
-function TicketRow({ ticket }: { ticket: Ticket }) {
+function TicketRow({
+  ticket,
+  showTech,
+}: {
+  ticket: Ticket;
+  showTech?: boolean;
+}) {
   const navigate = useNavigate();
   const hasBreach = ticket.sla_response_breach || ticket.sla_resolve_breach;
 
@@ -60,6 +78,11 @@ function TicketRow({ ticket }: { ticket: Ticket }) {
           {hasBreach && (
             <span className="text-xs text-danger font-medium shrink-0">
               ⚠ SLA
+            </span>
+          )}
+          {showTech && ticket.assignee_name && (
+            <span className="text-xs text-slate-400 shrink-0">
+              · {ticket.assignee_name}
             </span>
           )}
         </div>
@@ -81,6 +104,7 @@ export default function TechnicianDashboard() {
   const [stats, setStats] = useState<DashboardStats | null>(null);
   const [myTickets, setMyTickets] = useState<Ticket[]>([]);
   const [queue, setQueue] = useState<Ticket[]>([]);
+  const [teamGroups, setTeamGroups] = useState<TechGroup[]>([]);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
 
@@ -91,11 +115,27 @@ export default function TechnicianDashboard() {
       getDashboardStats(),
       getTickets({ assignee_id: user.id, limit: 6 }),
       getTickets({ status: "open", limit: 6 }),
+      getTickets({ limit: 100 }),
     ])
-      .then(([statsData, myData, queueData]) => {
+      .then(([statsData, myData, queueData, allData]) => {
         setStats(statsData);
         setMyTickets(myData.items);
         setQueue(queueData.items);
+
+        // Group active tickets from other technicians
+        const map = new Map<string, TechGroup>();
+        for (const t of allData.items) {
+          if (!t.assignee_id || t.assignee_id === user.id) continue;
+          if (!ACTIVE_STATUSES.has(t.status)) continue;
+          const key = t.assignee_id;
+          if (!map.has(key)) {
+            map.set(key, { name: t.assignee_name ?? "Técnico", tickets: [] });
+          }
+          map.get(key)!.tickets.push(t);
+        }
+        setTeamGroups(
+          [...map.values()].sort((a, b) => a.name.localeCompare(b.name)),
+        );
       })
       .catch(() => setError("Não foi possível carregar os dados."))
       .finally(() => setLoading(false));
@@ -157,11 +197,12 @@ export default function TechnicianDashboard() {
       </div>
 
       {/* Tickets lists */}
-      <div className="grid grid-cols-1 lg:grid-cols-2 gap-4">
+      <div className="grid grid-cols-1 lg:grid-cols-3 gap-4">
         {/* My assigned tickets */}
         <Card padding="none">
-          <div className="px-4 py-3 border-b border-border">
+          <div className="px-4 py-3 border-b border-border flex items-center justify-between">
             <CardTitle>Meus tickets</CardTitle>
+            <span className="text-xs text-slate-500">{myTickets.length}</span>
           </div>
           {myTickets.length === 0 ? (
             <p className="text-slate-500 text-sm px-4 py-8 text-center">
@@ -176,10 +217,35 @@ export default function TechnicianDashboard() {
           )}
         </Card>
 
+        {/* Team tickets */}
+        <Card padding="none">
+          <div className="px-4 py-3 border-b border-border flex items-center justify-between">
+            <CardTitle>Tickets da equipe</CardTitle>
+            <span className="text-xs text-slate-500">
+              {teamGroups.reduce((acc, g) => acc + g.tickets.length, 0)}
+            </span>
+          </div>
+          {teamGroups.length === 0 ? (
+            <p className="text-slate-500 text-sm px-4 py-8 text-center">
+              Nenhum ticket ativo na equipe
+            </p>
+          ) : (
+            <div className="p-2 space-y-0.5">
+              {teamGroups
+                .flatMap((g) => g.tickets)
+                .slice(0, 8)
+                .map((t) => (
+                  <TicketRow key={t.id} ticket={t} showTech />
+                ))}
+            </div>
+          )}
+        </Card>
+
         {/* Open queue */}
         <Card padding="none">
-          <div className="px-4 py-3 border-b border-border">
+          <div className="px-4 py-3 border-b border-border flex items-center justify-between">
             <CardTitle>Fila — Tickets abertos</CardTitle>
+            <span className="text-xs text-slate-500">{queue.length}</span>
           </div>
           {queue.length === 0 ? (
             <p className="text-slate-500 text-sm px-4 py-8 text-center">

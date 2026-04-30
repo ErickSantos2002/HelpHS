@@ -22,6 +22,14 @@ import {
   getDashboardStats,
   type DashboardStats,
 } from "../../services/dashboardService";
+import { getTickets } from "../../services/ticketService";
+
+const ACTIVE_STATUSES = new Set([
+  "open",
+  "in_progress",
+  "awaiting_client",
+  "awaiting_technical",
+]);
 
 // ── KPI Card ──────────────────────────────────────────────────
 
@@ -71,12 +79,29 @@ const PRIORITY_COLORS: Record<string, string> = {
 
 export default function AdminDashboard() {
   const [stats, setStats] = useState<DashboardStats | null>(null);
+  const [workload, setWorkload] = useState<{ name: string; tickets: number }[]>(
+    [],
+  );
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
 
   useEffect(() => {
-    getDashboardStats()
-      .then(setStats)
+    Promise.all([getDashboardStats(), getTickets({ limit: 100 })])
+      .then(([statsData, allData]) => {
+        setStats(statsData);
+
+        // Build workload map from active tickets with an assignee
+        const map = new Map<string, number>();
+        for (const t of allData.items) {
+          if (!t.assignee_name || !ACTIVE_STATUSES.has(t.status)) continue;
+          map.set(t.assignee_name, (map.get(t.assignee_name) ?? 0) + 1);
+        }
+        setWorkload(
+          [...map.entries()]
+            .map(([name, tickets]) => ({ name, tickets }))
+            .sort((a, b) => b.tickets - a.tickets),
+        );
+      })
       .catch(() => setError("Não foi possível carregar as estatísticas."))
       .finally(() => setLoading(false));
   }, []);
@@ -242,6 +267,49 @@ export default function AdminDashboard() {
           </ResponsiveContainer>
         </Card>
       </div>
+
+      {/* Workload by technician */}
+      {workload.length > 0 && (
+        <Card>
+          <CardHeader>
+            <CardTitle>Carga por Técnico — tickets ativos</CardTitle>
+          </CardHeader>
+          <ResponsiveContainer width="100%" height={240}>
+            <BarChart
+              data={workload}
+              margin={{ top: 8, right: 8, left: -16, bottom: 0 }}
+            >
+              <XAxis
+                dataKey="name"
+                tick={{ fill: "#94a3b8", fontSize: 12 }}
+                axisLine={false}
+                tickLine={false}
+              />
+              <YAxis
+                tick={{ fill: "#94a3b8", fontSize: 12 }}
+                axisLine={false}
+                tickLine={false}
+                allowDecimals={false}
+              />
+              <Tooltip
+                contentStyle={{
+                  backgroundColor: "#1E293B",
+                  border: "1px solid #334155",
+                  borderRadius: "8px",
+                  color: "#f1f5f9",
+                }}
+                cursor={{ fill: "rgba(255,255,255,0.04)" }}
+              />
+              <Bar
+                dataKey="tickets"
+                fill="#3B82F6"
+                radius={[4, 4, 0, 0]}
+                name="Tickets ativos"
+              />
+            </BarChart>
+          </ResponsiveContainer>
+        </Card>
+      )}
 
       {/* SLA detail */}
       <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
