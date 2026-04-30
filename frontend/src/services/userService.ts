@@ -12,8 +12,20 @@ export interface UserSummary {
   last_login: string | null;
   lgpd_consent: boolean;
   lgpd_consent_at: string | null;
+  company_name: string | null;
+  cnpj: string | null;
+  company_city: string | null;
+  company_state: string | null;
+  onboarding_completed: boolean;
   created_at: string;
   updated_at: string;
+}
+
+export interface OnboardingPayload {
+  company_name: string;
+  cnpj: string | null;
+  company_city: string | null;
+  company_state: string | null;
 }
 
 export interface UserListResponse {
@@ -122,6 +134,16 @@ export async function updateMe(
   payload: Pick<UserUpdatePayload, "name" | "phone" | "department">,
 ): Promise<UserSummary> {
   const { data } = await api.patch<UserSummary>("/users/me", payload);
+  return data;
+}
+
+export async function completeOnboarding(
+  payload: OnboardingPayload,
+): Promise<UserSummary> {
+  const { data } = await api.patch<UserSummary>(
+    "/users/me/onboarding",
+    payload,
+  );
   return data;
 }
 

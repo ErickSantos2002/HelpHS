@@ -27,6 +27,7 @@ from app.core.security import authorize, get_current_user, hash_password, verify
 from app.models.models import AuditAction, AuditLog, Ticket, User, UserRole, UserStatus
 from app.schemas.user import (
     LGPDConsentUpdate,
+    OnboardingUpdate,
     PasswordChange,
     UserCreate,
     UserListResponse,
@@ -199,6 +200,33 @@ async def update_me(
         setattr(user, field, value)
 
     user.updated_at = datetime.now(UTC)
+    _audit(db, AuditAction.update, current_user.id, user.id)
+    await db.commit()
+    await db.refresh(user)
+    return _to_response(user)
+
+
+# ── PATCH /users/me/onboarding ───────────────────────────────
+
+
+@router.patch("/me/onboarding", response_model=UserResponse)
+async def complete_onboarding(
+    body: OnboardingUpdate,
+    db: Annotated[AsyncSession, Depends(get_db)],
+    current_user: Annotated[User, Depends(get_current_user)],
+) -> UserResponse:
+    result = await db.execute(select(User).where(User.id == current_user.id))
+    user = result.scalar_one_or_none()
+    if not user:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="User not found")
+
+    user.company_name = body.company_name
+    user.cnpj = body.cnpj
+    user.company_city = body.company_city
+    user.company_state = body.company_state
+    user.onboarding_completed = True
+    user.updated_at = datetime.now(UTC)
+
     _audit(db, AuditAction.update, current_user.id, user.id)
     await db.commit()
     await db.refresh(user)

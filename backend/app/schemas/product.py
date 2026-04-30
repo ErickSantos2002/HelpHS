@@ -52,6 +52,7 @@ class EquipmentCreate(AppBaseModel):
     serial_number: str | None = Field(default=None, max_length=100)
     model: str | None = Field(default=None, max_length=100)
     description: str | None = None
+    location: str | None = Field(default=None, max_length=255)
 
 
 class EquipmentUpdate(AppBaseModel):
@@ -59,6 +60,7 @@ class EquipmentUpdate(AppBaseModel):
     serial_number: str | None = Field(default=None, max_length=100)
     model: str | None = Field(default=None, max_length=100)
     description: str | None = None
+    location: str | None = Field(default=None, max_length=255)
     is_active: bool | None = None
 
 
@@ -67,10 +69,12 @@ class EquipmentResponse(AppBaseModel):
 
     id: uuid.UUID
     product_id: uuid.UUID
+    owner_id: uuid.UUID | None
     name: str
     serial_number: str | None
     model: str | None
     description: str | None
+    location: str | None
     is_active: bool
     created_at: datetime
     updated_at: datetime

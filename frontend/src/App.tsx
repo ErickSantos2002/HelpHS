@@ -5,12 +5,14 @@ import { AppLayout } from "./components/layout/AppLayout";
 import { AuthGuard } from "./components/layout/AuthGuard";
 import { RoleGuard } from "./components/layout/RoleGuard";
 import { PublicOnlyRoute } from "./components/layout/PublicOnlyRoute";
+import { OnboardingGuard } from "./components/layout/OnboardingGuard";
 import { Spinner } from "./components/ui";
 import PlaceholderPage from "./pages/PlaceholderPage";
 
 // Pages (lazy-loaded for code splitting)
 const LoginPage = lazy(() => import("./pages/auth/LoginPage"));
 const RegisterPage = lazy(() => import("./pages/auth/RegisterPage"));
+const OnboardingPage = lazy(() => import("./pages/onboarding/OnboardingPage"));
 const HomePage = lazy(() => import("./pages/HomePage"));
 const TicketListPage = lazy(() => import("./pages/tickets/TicketListPage"));
 const UsersPage = lazy(() => import("./pages/users/UsersPage"));
@@ -56,32 +58,37 @@ function App() {
 
           {/* ── Protected ────────────────────────────────────── */}
           <Route element={<AuthGuard />}>
-            <Route element={<AppLayout />}>
-              {/* All authenticated roles */}
-              <Route path="/" element={<HomePage />} />
-              <Route path="/tickets" element={<TicketListPage />} />
-              <Route path="/tickets/new" element={<TicketFormPage />} />
-              <Route path="/tickets/:id/edit" element={<TicketFormPage />} />
-              <Route path="/tickets/:id" element={<TicketDetailPage />} />
-              <Route path="/notifications" element={<NotificationsPage />} />
-              <Route path="/kb" element={<KBListPage />} />
-              <Route path="/kb/new" element={<KBFormPage />} />
-              <Route path="/kb/:id/edit" element={<KBFormPage />} />
-              <Route path="/kb/:id" element={<KBArticlePage />} />
-              <Route path="/profile" element={<ProfilePage />} />
+            {/* Onboarding — outside AppLayout, no nav */}
+            <Route path="/onboarding" element={<OnboardingPage />} />
 
-              {/* Admin + Technician */}
-              <Route element={<RoleGuard roles={["admin", "technician"]} />}>
-                <Route path="/reports" element={<ReportsPage />} />
-                <Route path="/settings" element={<SettingsPage />} />
-              </Route>
+            <Route element={<OnboardingGuard />}>
+              <Route element={<AppLayout />}>
+                {/* All authenticated roles */}
+                <Route path="/" element={<HomePage />} />
+                <Route path="/tickets" element={<TicketListPage />} />
+                <Route path="/tickets/new" element={<TicketFormPage />} />
+                <Route path="/tickets/:id/edit" element={<TicketFormPage />} />
+                <Route path="/tickets/:id" element={<TicketDetailPage />} />
+                <Route path="/notifications" element={<NotificationsPage />} />
+                <Route path="/kb" element={<KBListPage />} />
+                <Route path="/kb/new" element={<KBFormPage />} />
+                <Route path="/kb/:id/edit" element={<KBFormPage />} />
+                <Route path="/kb/:id" element={<KBArticlePage />} />
+                <Route path="/profile" element={<ProfilePage />} />
 
-              {/* Admin only */}
-              <Route element={<RoleGuard roles={["admin"]} />}>
-                <Route path="/users" element={<UsersPage />} />
-                <Route path="/products" element={<ProductsPage />} />
-                <Route path="/sla-config" element={<SlaConfigPage />} />
-                <Route path="/audit-logs" element={<AuditLogsPage />} />
+                {/* Admin + Technician */}
+                <Route element={<RoleGuard roles={["admin", "technician"]} />}>
+                  <Route path="/reports" element={<ReportsPage />} />
+                  <Route path="/settings" element={<SettingsPage />} />
+                </Route>
+
+                {/* Admin only */}
+                <Route element={<RoleGuard roles={["admin"]} />}>
+                  <Route path="/users" element={<UsersPage />} />
+                  <Route path="/products" element={<ProductsPage />} />
+                  <Route path="/sla-config" element={<SlaConfigPage />} />
+                  <Route path="/audit-logs" element={<AuditLogsPage />} />
+                </Route>
               </Route>
             </Route>
           </Route>

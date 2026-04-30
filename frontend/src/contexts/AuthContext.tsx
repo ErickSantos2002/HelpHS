@@ -17,6 +17,7 @@ interface AuthContextValue {
   isLoading: boolean;
   login: (email: string, password: string) => Promise<void>;
   logout: () => Promise<void>;
+  markOnboardingComplete: () => void;
 }
 
 const AuthContext = createContext<AuthContextValue | null>(null);
@@ -37,7 +38,13 @@ export function AuthProvider({ children }: { children: ReactNode }) {
       try {
         setToken(stored);
         const me = await getMeApi();
-        setUser({ id: me.id, name: me.name, email: me.email, role: me.role });
+        setUser({
+          id: me.id,
+          name: me.name,
+          email: me.email,
+          role: me.role,
+          onboarding_completed: me.onboarding_completed,
+        });
       } catch {
         // Token invalid or expired beyond refresh — clear session
         tokenStorage.clear();
@@ -55,7 +62,13 @@ export function AuthProvider({ children }: { children: ReactNode }) {
     setToken(tokens.access_token);
 
     const me = await getMeApi();
-    setUser({ id: me.id, name: me.name, email: me.email, role: me.role });
+    setUser({
+      id: me.id,
+      name: me.name,
+      email: me.email,
+      role: me.role,
+      onboarding_completed: me.onboarding_completed,
+    });
   }, []);
 
   const logout = useCallback(async () => {
@@ -63,6 +76,10 @@ export function AuthProvider({ children }: { children: ReactNode }) {
     tokenStorage.clear();
     setToken(null);
     setUser(null);
+  }, []);
+
+  const markOnboardingComplete = useCallback(() => {
+    setUser((prev) => (prev ? { ...prev, onboarding_completed: true } : prev));
   }, []);
 
   return (
@@ -74,6 +91,7 @@ export function AuthProvider({ children }: { children: ReactNode }) {
         isLoading,
         login,
         logout,
+        markOnboardingComplete,
       }}
     >
       {children}

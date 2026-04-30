@@ -2,9 +2,11 @@
 Endpoints de autenticação: login, refresh, logout.
 """
 
+import re
 from datetime import UTC, datetime
 from typing import Annotated
 
+import httpx
 from fastapi import APIRouter, Depends, HTTPException, Request, status
 from fastapi.security import HTTPAuthorizationCredentials
 from jose import JWTError
@@ -57,6 +59,34 @@ def _audit(
             user_agent=request.headers.get("user-agent", ""),
         )
     )
+
+
+# ── GET /auth/cnpj/{cnpj} ────────────────────────────────────
+
+
+@router.get("/cnpj/{cnpj}")
+async def lookup_cnpj(
+    cnpj: str,
+    _: Annotated[User, Depends(get_current_user)],
+) -> dict:
+    cnpj_clean = re.sub(r"\D", "", cnpj)
+    if len(cnpj_clean) != 14:
+        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="CNPJ inválido")
+
+    async with httpx.AsyncClient(timeout=10) as client:
+        resp = await client.get(f"https://brasilapi.com.br/api/cnpj/v1/{cnpj_clean}")
+
+    if resp.status_code != 200:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="CNPJ não encontrado")
+
+    data = resp.json()
+    return {
+        "cnpj": cnpj_clean,
+        "company_name": data.get("razao_social") or "",
+        "trade_name": data.get("nome_fantasia") or "",
+        "city": data.get("municipio") or "",
+        "state": data.get("uf") or "",
+    }
 
 
 # ── POST /auth/register ───────────────────────────────────────

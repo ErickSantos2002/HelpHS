@@ -140,6 +140,13 @@ class User(Base):
     lgpd_consent: Mapped[bool] = mapped_column(Boolean, default=False)
     lgpd_consent_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
 
+    # Empresa (onboarding do cliente)
+    company_name: Mapped[str | None] = mapped_column(String(255))
+    cnpj: Mapped[str | None] = mapped_column(String(18))
+    company_city: Mapped[str | None] = mapped_column(String(100))
+    company_state: Mapped[str | None] = mapped_column(String(2))
+    onboarding_completed: Mapped[bool] = mapped_column(Boolean, default=False)
+
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now())
     updated_at: Mapped[datetime] = mapped_column(
         DateTime(timezone=True), server_default=func.now(), onupdate=func.now()
@@ -159,6 +166,9 @@ class User(Base):
     notifications: Mapped[list["Notification"]] = relationship(back_populates="user")
     satisfaction_given: Mapped[list["SatisfactionSurvey"]] = relationship(back_populates="user")
     audit_logs: Mapped[list["AuditLog"]] = relationship(back_populates="user")
+    equipments: Mapped[list["Equipment"]] = relationship(
+        back_populates="owner", foreign_keys="Equipment.owner_id"
+    )
 
     __table_args__ = (Index("ix_users_role_status", "role", "status"),)
 
@@ -199,6 +209,10 @@ class Equipment(Base):
     model: Mapped[str | None] = mapped_column(String(100))
     description: Mapped[str | None] = mapped_column(Text)
     is_active: Mapped[bool] = mapped_column(Boolean, default=True)
+    owner_id: Mapped[uuid.UUID | None] = mapped_column(
+        UUID(as_uuid=True), ForeignKey("users.id", ondelete="SET NULL"), nullable=True, index=True
+    )
+    location: Mapped[str | None] = mapped_column(String(255))
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now())
     updated_at: Mapped[datetime] = mapped_column(
         DateTime(timezone=True), server_default=func.now(), onupdate=func.now()
@@ -206,6 +220,9 @@ class Equipment(Base):
 
     # Relacionamentos
     product: Mapped["Product"] = relationship(back_populates="equipments")
+    owner: Mapped["User | None"] = relationship(
+        "User", back_populates="equipments", foreign_keys=[owner_id]
+    )
     tickets: Mapped[list["Ticket"]] = relationship(back_populates="equipment")
 
 

@@ -207,6 +207,7 @@ async def create_equipment(
         serial_number=body.serial_number,
         model=body.model,
         description=body.description,
+        location=body.location,
         is_active=True,
         created_at=ts,
         updated_at=ts,
@@ -281,6 +282,71 @@ async def update_equipment(
     await db.commit()
     await db.refresh(equipment)
     return EquipmentResponse.model_validate(equipment)
+
+
+# ── Client self-service equipment endpoints ───────────────────
+
+
+@router.post(
+    "/equipment/my",
+    response_model=EquipmentResponse,
+    status_code=status.HTTP_201_CREATED,
+)
+async def create_my_equipment(
+    body: EquipmentCreate,
+    product_id: uuid.UUID,
+    db: Annotated[AsyncSession, Depends(get_db)],
+    actor: Annotated[User, Depends(get_current_user)],
+) -> EquipmentResponse:
+    await get_or_404(db, Product, product_id, "Product not found")
+
+    if body.serial_number:
+        dup = await db.execute(
+            select(Equipment).where(Equipment.serial_number == body.serial_number)
+        )
+        if dup.scalar_one_or_none():
+            raise HTTPException(
+                status_code=status.HTTP_409_CONFLICT, detail="Serial number already in use"
+            )
+
+    ts = datetime.now(UTC)
+    equipment = Equipment(
+        id=uuid.uuid4(),
+        product_id=product_id,
+        owner_id=actor.id,
+        name=body.name,
+        serial_number=body.serial_number,
+        model=body.model,
+        description=body.description,
+        location=body.location,
+        is_active=True,
+        created_at=ts,
+        updated_at=ts,
+    )
+    db.add(equipment)
+    _audit(db, AuditAction.create, actor.id, "equipment", equipment.id)
+    await db.commit()
+    await db.refresh(equipment)
+    return EquipmentResponse.model_validate(equipment)
+
+
+@router.get("/equipment/my", response_model=EquipmentListResponse)
+async def list_my_equipment(
+    db: Annotated[AsyncSession, Depends(get_db)],
+    actor: Annotated[User, Depends(get_current_user)],
+) -> EquipmentListResponse:
+    rows = await db.execute(
+        select(Equipment)
+        .where(Equipment.owner_id == actor.id, Equipment.is_active == True)  # noqa: E712
+        .order_by(Equipment.name)
+    )
+    equipments = rows.scalars().all()
+    return EquipmentListResponse(
+        items=[EquipmentResponse.model_validate(e) for e in equipments],
+        total=len(equipments),
+        limit=100,
+        offset=0,
+    )
 
 
 @router.delete("/equipments/{equipment_id}", status_code=status.HTTP_204_NO_CONTENT)

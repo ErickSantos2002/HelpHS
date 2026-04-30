@@ -60,6 +60,13 @@ class LGPDConsentUpdate(AppBaseModel):
     lgpd_consent: bool
 
 
+class OnboardingUpdate(AppBaseModel):
+    company_name: str = Field(..., min_length=1, max_length=255)
+    cnpj: str | None = Field(default=None, max_length=18)
+    company_city: str | None = Field(default=None, max_length=100)
+    company_state: str | None = Field(default=None, max_length=2)
+
+
 class UserResponse(AppBaseModel):
     model_config = ConfigDict(from_attributes=True, str_strip_whitespace=True)
 
@@ -74,6 +81,11 @@ class UserResponse(AppBaseModel):
     last_login: datetime | None
     lgpd_consent: bool
     lgpd_consent_at: datetime | None
+    company_name: str | None
+    cnpj: str | None
+    company_city: str | None
+    company_state: str | None
+    onboarding_completed: bool
     created_at: datetime
     updated_at: datetime
 

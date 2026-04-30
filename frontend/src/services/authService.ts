@@ -17,6 +17,7 @@ export interface MeResponse {
   name: string;
   email: string;
   role: AuthUser["role"];
+  onboarding_completed: boolean;
 }
 
 export async function loginApi(body: LoginRequest): Promise<TokenResponse> {
