@@ -35,6 +35,7 @@ settings = get_settings()
 async def lifespan(app: FastAPI):
     setup_logging()
     logger.info(f"Starting HelpHS API — env={settings.app_env}")
+    logger.info(f"CORS allowed origins: {settings.cors_origins}")
 
     # Validate database connection
     try:
@@ -74,8 +75,8 @@ app.add_middleware(
     CORSMiddleware,
     allow_origins=settings.cors_origins,
     allow_credentials=True,
-    allow_methods=["GET", "POST", "PUT", "PATCH", "DELETE", "OPTIONS"],
-    allow_headers=["Authorization", "Content-Type", "Accept", "X-Request-ID"],
+    allow_methods=["*"],
+    allow_headers=["*"],
 )
 
 
