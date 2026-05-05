@@ -1,6 +1,7 @@
 import { lazy, Suspense } from "react";
 import { Routes, Route } from "react-router-dom";
 import { AuthProvider } from "./contexts/AuthContext";
+import { ThemeProvider } from "./contexts/ThemeContext";
 import { AppLayout } from "./components/layout/AppLayout";
 import { AuthGuard } from "./components/layout/AuthGuard";
 import { RoleGuard } from "./components/layout/RoleGuard";
@@ -43,7 +44,8 @@ function Loading() {
 
 function App() {
   return (
-    <AuthProvider>
+    <ThemeProvider>
+      <AuthProvider>
       <Suspense fallback={<Loading />}>
         <Routes>
           {/* ── Public only ──────────────────────────────────── */}
@@ -95,7 +97,8 @@ function App() {
           </Route>
         </Routes>
       </Suspense>
-    </AuthProvider>
+      </AuthProvider>
+    </ThemeProvider>
   );
 }
 

@@ -4,10 +4,45 @@
 @tailwind components;
 @tailwind utilities;
 
+/* ── Design tokens ──────────────────────────────────────────── */
 @layer base {
-  body {
-    @apply bg-background text-slate-100 font-sans antialiased;
+  /* Light mode (default) */
+  :root {
+    --bg-base:     248 250 252;       /* #F8FAFC */
+    --bg-surface:  255 255 255;       /* #FFFFFF */
+    --bg-elevated: 241 245 249;       /* #F1F5F9 */
+
+    --border-color: 226 232 240;      /* #E2E8F0 */
+    --border-muted: 241 245 249;      /* #F1F5F9 */
   }
+
+  /* Dark mode */
+  .dark {
+    --bg-base:     13 27 42;          /* #0D1B2A deep navy */
+    --bg-surface:  19 34 56;          /* #132238 */
+    --bg-elevated: 26 47 74;          /* #1A2F4A */
+
+    --border-color: 30 58 95;         /* #1E3A5F */
+    --border-muted: 19 34 56;         /* #132238 */
+  }
+
+  body {
+    @apply bg-background font-sans antialiased;
+    color: rgb(15 23 42);             /* slate-900 — light mode default */
+  }
+
+  .dark body {
+    color: rgb(241 245 249);          /* slate-100 — dark mode */
+  }
+
+  /* ── Text color inversion for light mode ─────────────────── */
+  /* Components use text-slate-* hardcoded for dark; invert in light */
+  html:not(.dark) .text-slate-100 { color: rgb(15 23 42);   }   /* slate-900 */
+  html:not(.dark) .text-slate-200 { color: rgb(30 41 59);   }   /* slate-800 */
+  html:not(.dark) .text-slate-300 { color: rgb(51 65 85);   }   /* slate-700 */
+  html:not(.dark) .text-slate-400 { color: rgb(71 85 105);  }   /* slate-600 */
+  html:not(.dark) .text-slate-500 { color: rgb(100 116 139); }  /* slate-500 */
+  html:not(.dark) .text-slate-600 { color: rgb(148 163 184); }  /* slate-400 */
 
   /* Custom scrollbar */
   ::-webkit-scrollbar {
@@ -20,6 +55,6 @@
     @apply bg-background-elevated rounded-full;
   }
   ::-webkit-scrollbar-thumb:hover {
-    @apply bg-slate-500;
+    background: rgb(var(--border-color));
   }
 }
