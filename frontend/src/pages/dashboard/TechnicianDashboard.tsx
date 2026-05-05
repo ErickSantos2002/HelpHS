@@ -15,13 +15,6 @@ import {
 } from "../../services/dashboardService";
 import { getTickets, type Ticket } from "../../services/ticketService";
 
-const ACTIVE_STATUSES = new Set([
-  "open",
-  "in_progress",
-  "awaiting_client",
-  "awaiting_technical",
-]);
-
 interface TechGroup {
   name: string;
   tickets: Ticket[];

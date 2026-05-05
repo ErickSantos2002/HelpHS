@@ -36,7 +36,7 @@ const schema = z.object({
     .string()
     .min(10, "Descrição deve ter ao menos 10 caracteres")
     .max(5000, "Descrição muito longa"),
-  priority: z.enum(["critical", "high", "medium", "low"]).default("medium"),
+  priority: z.enum(["critical", "high", "medium", "low"]),
   category: z.string().min(1, "Selecione uma categoria"),
   product_id: z.string().optional(),
   equipment_id: z.string().optional(),
@@ -46,13 +46,6 @@ const schema = z.object({
 type FormValues = z.infer<typeof schema>;
 
 // ── Options ───────────────────────────────────────────────────
-
-const PRIORITY_OPTIONS = [
-  { value: "critical", label: "Crítico" },
-  { value: "high", label: "Alto" },
-  { value: "medium", label: "Médio" },
-  { value: "low", label: "Baixo" },
-];
 
 const CATEGORY_OPTIONS = [
   { value: "hardware", label: "Hardware" },
@@ -64,13 +57,6 @@ const CATEGORY_OPTIONS = [
   { value: "general", label: "Geral" },
   { value: "other", label: "Outro" },
 ];
-
-const PRIORITY_LABEL: Record<string, string> = {
-  critical: "Crítico",
-  high: "Alto",
-  medium: "Médio",
-  low: "Baixo",
-};
 
 const CATEGORY_LABEL: Record<string, string> = {
   hardware: "Hardware",

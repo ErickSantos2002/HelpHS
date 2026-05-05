@@ -7,7 +7,6 @@ import { RoleGuard } from "./components/layout/RoleGuard";
 import { PublicOnlyRoute } from "./components/layout/PublicOnlyRoute";
 import { OnboardingGuard } from "./components/layout/OnboardingGuard";
 import { Spinner } from "./components/ui";
-import PlaceholderPage from "./pages/PlaceholderPage";
 
 // Pages (lazy-loaded for code splitting)
 const LoginPage = lazy(() => import("./pages/auth/LoginPage"));

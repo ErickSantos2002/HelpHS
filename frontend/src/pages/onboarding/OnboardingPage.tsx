@@ -18,6 +18,7 @@ interface Product {
   id: string;
   name: string;
   version: string | null;
+  is_active: boolean;
 }
 
 // ── Step indicator ─────────────────────────────────────────────

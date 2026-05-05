@@ -80,6 +80,7 @@ describe("AuthProvider — session restore", () => {
       name: "Admin",
       email: "admin@test.com",
       role: "admin",
+      onboarding_completed: true,
     });
 
     renderWithProvider();
@@ -118,6 +119,7 @@ describe("AuthProvider — login", () => {
       name: "Admin",
       email: "admin@test.com",
       role: "admin",
+      onboarding_completed: true,
     });
 
     renderWithProvider();
@@ -148,6 +150,7 @@ describe("AuthProvider — logout", () => {
       name: "Admin",
       email: "admin@test.com",
       role: "admin",
+      onboarding_completed: true,
     });
     mockLogoutApi.mockResolvedValue(undefined);
 

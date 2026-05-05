@@ -21,7 +21,6 @@ import {
   type ReportData,
   type TechnicianDetailReport,
   type TechnicianListReport,
-  type TechnicianSummary,
 } from "../../services/reportService";
 
 // ── Constants ─────────────────────────────────────────────────
