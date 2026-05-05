@@ -36,6 +36,10 @@ COPY . .
 
 # Usuário não-root por segurança
 RUN addgroup --system appgroup && adduser --system --ingroup appgroup appuser
+
+COPY start.sh /app/start.sh
+RUN chmod +x /app/start.sh
+
 USER appuser
 
 EXPOSE 8000
@@ -43,4 +47,4 @@ EXPOSE 8000
 HEALTHCHECK --interval=30s --timeout=10s --start-period=10s --retries=3 \
     CMD curl -f http://localhost:8000/health || exit 1
 
-CMD ["uvicorn", "app.main:app", "--host", "0.0.0.0", "--port", "8000", "--workers", "2"]
+CMD ["/app/start.sh"]
