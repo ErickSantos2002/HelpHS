@@ -14,6 +14,8 @@ export interface UserSummary {
   lgpd_consent_at: string | null;
   company_name: string | null;
   cnpj: string | null;
+  company_cep: string | null;
+  company_address: string | null;
   company_city: string | null;
   company_state: string | null;
   onboarding_completed: boolean;
@@ -24,6 +26,8 @@ export interface UserSummary {
 export interface OnboardingPayload {
   company_name: string;
   cnpj: string | null;
+  company_cep: string | null;
+  company_address: string | null;
   company_city: string | null;
   company_state: string | null;
 }

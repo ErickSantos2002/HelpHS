@@ -89,6 +89,37 @@ async def lookup_cnpj(
     }
 
 
+# ── GET /auth/cep/{cep} ──────────────────────────────────────
+
+
+@router.get("/cep/{cep}")
+async def lookup_cep(
+    cep: str,
+    _: Annotated[User, Depends(get_current_user)],
+) -> dict:
+    cep_clean = re.sub(r"\D", "", cep)
+    if len(cep_clean) != 8:
+        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="CEP inválido")
+
+    async with httpx.AsyncClient(timeout=10) as client:
+        resp = await client.get(f"https://viacep.com.br/ws/{cep_clean}/json/")
+
+    if resp.status_code != 200:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="CEP não encontrado")
+
+    data = resp.json()
+    if data.get("erro"):
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="CEP não encontrado")
+
+    return {
+        "cep": f"{cep_clean[:5]}-{cep_clean[5:]}",
+        "address": data.get("logradouro") or "",
+        "neighborhood": data.get("bairro") or "",
+        "city": data.get("localidade") or "",
+        "state": data.get("uf") or "",
+    }
+
+
 # ── POST /auth/register ───────────────────────────────────────
 
 

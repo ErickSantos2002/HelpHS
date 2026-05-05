@@ -222,6 +222,8 @@ async def complete_onboarding(
 
     user.company_name = body.company_name
     user.cnpj = body.cnpj
+    user.company_cep = body.company_cep
+    user.company_address = body.company_address
     user.company_city = body.company_city
     user.company_state = body.company_state
     user.onboarding_completed = True

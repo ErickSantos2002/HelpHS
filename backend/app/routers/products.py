@@ -334,12 +334,12 @@ async def create_my_equipment(
 async def list_my_equipment(
     db: Annotated[AsyncSession, Depends(get_db)],
     actor: Annotated[User, Depends(get_current_user)],
+    is_active: bool | None = Query(default=None),
 ) -> EquipmentListResponse:
-    rows = await db.execute(
-        select(Equipment)
-        .where(Equipment.owner_id == actor.id, Equipment.is_active == True)  # noqa: E712
-        .order_by(Equipment.name)
-    )
+    base = select(Equipment).where(Equipment.owner_id == actor.id)
+    if is_active is not None:
+        base = base.where(Equipment.is_active == is_active)  # noqa: E712
+    rows = await db.execute(base.order_by(Equipment.name))
     equipments = rows.scalars().all()
     return EquipmentListResponse(
         items=[EquipmentResponse.model_validate(e) for e in equipments],
@@ -347,6 +347,38 @@ async def list_my_equipment(
         limit=100,
         offset=0,
     )
+
+
+@router.patch(
+    "/equipment/my/{equipment_id}",
+    response_model=EquipmentResponse,
+)
+async def update_my_equipment(
+    equipment_id: uuid.UUID,
+    body: EquipmentUpdate,
+    db: Annotated[AsyncSession, Depends(get_db)],
+    actor: Annotated[User, Depends(get_current_user)],
+) -> EquipmentResponse:
+    equipment = await get_or_404(db, Equipment, equipment_id, "Equipment not found")
+    if equipment.owner_id != actor.id:
+        raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="Not your equipment")
+
+    if body.serial_number and body.serial_number != equipment.serial_number:
+        dup = await db.execute(
+            select(Equipment).where(Equipment.serial_number == body.serial_number)
+        )
+        if dup.scalar_one_or_none():
+            raise HTTPException(
+                status_code=status.HTTP_409_CONFLICT, detail="Serial number already in use"
+            )
+
+    for field, value in body.model_dump(exclude_unset=True).items():
+        setattr(equipment, field, value)
+
+    _audit(db, AuditAction.update, actor.id, "equipment", equipment.id)
+    await db.commit()
+    await db.refresh(equipment)
+    return EquipmentResponse.model_validate(equipment)
 
 
 @router.delete("/equipment/my/{equipment_id}", status_code=status.HTTP_204_NO_CONTENT)

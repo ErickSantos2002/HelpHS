@@ -48,8 +48,11 @@ export async function createMyEquipment(
   return data;
 }
 
-export async function getMyEquipment(): Promise<Equipment[]> {
-  const { data } = await api.get<EquipmentListResponse>("/equipment/my");
+export async function getMyEquipment(isActive?: boolean): Promise<Equipment[]> {
+  const params = isActive !== undefined ? `?is_active=${isActive}` : "";
+  const { data } = await api.get<EquipmentListResponse>(
+    `/equipment/my${params}`,
+  );
   return data.items;
 }
 
@@ -57,8 +60,37 @@ export async function deleteMyEquipment(id: string): Promise<void> {
   await api.delete(`/equipment/my/${id}`);
 }
 
+export interface UpdateMyEquipmentPayload {
+  name?: string;
+  serial_number?: string | null;
+  location?: string | null;
+  is_active?: boolean;
+}
+
+export async function updateMyEquipment(
+  id: string,
+  payload: UpdateMyEquipmentPayload,
+): Promise<Equipment> {
+  const { data } = await api.patch<Equipment>(`/equipment/my/${id}`, payload);
+  return data;
+}
+
 export async function lookupCnpj(cnpj: string): Promise<CnpjInfo> {
   const clean = cnpj.replace(/\D/g, "");
   const { data } = await api.get<CnpjInfo>(`/auth/cnpj/${clean}`);
+  return data;
+}
+
+export interface CepInfo {
+  cep: string;
+  address: string;
+  neighborhood: string;
+  city: string;
+  state: string;
+}
+
+export async function lookupCep(cep: string): Promise<CepInfo> {
+  const clean = cep.replace(/\D/g, "");
+  const { data } = await api.get<CepInfo>(`/auth/cep/${clean}`);
   return data;
 }

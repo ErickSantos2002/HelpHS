@@ -163,6 +163,25 @@ function IconClock() {
   );
 }
 
+function IconCpu() {
+  return (
+    <svg
+      className="w-5 h-5 shrink-0"
+      aria-hidden="true"
+      fill="none"
+      viewBox="0 0 24 24"
+      stroke="currentColor"
+      strokeWidth={1.75}
+    >
+      <path
+        strokeLinecap="round"
+        strokeLinejoin="round"
+        d="M9 3H7a2 2 0 00-2 2v2M9 3h6M9 3v2m6-2h2a2 2 0 012 2v2M15 3v2M3 9h2m16 0h-2M3 15h2m16 0h-2M9 21H7a2 2 0 01-2-2v-2m4 4h6m-6 0v-2m6 2h2a2 2 0 002-2v-2m-4 4v-2M9 9h6v6H9V9z"
+      />
+    </svg>
+  );
+}
+
 function IconBook() {
   return (
     <svg
@@ -203,6 +222,12 @@ const NAV_ITEMS: NavItem[] = [
     path: "/tickets",
     icon: <IconTicket />,
     roles: ["admin", "technician", "client"],
+  },
+  {
+    label: "Meus Equipamentos",
+    path: "/equipment",
+    icon: <IconCpu />,
+    roles: ["client"],
   },
   {
     label: "Base de Conhecimento",

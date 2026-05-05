@@ -45,6 +45,10 @@ class TicketObservationUpdate(AppBaseModel):
     client_observation: str | None = Field(default=None, max_length=2000)
 
 
+class TicketResolve(AppBaseModel):
+    resolution_note: str = Field(..., min_length=1, max_length=5000)
+
+
 class TicketResponse(AppBaseModel):
     model_config = ConfigDict(from_attributes=True, str_strip_whitespace=True)
 
@@ -73,6 +77,7 @@ class TicketResponse(AppBaseModel):
     ai_summary: str | None = None
     ai_conversation_summary: str | None = None
     client_observation: str | None = None
+    resolution_note: str | None = None
     tags: list[TagResponse] = []
 
 

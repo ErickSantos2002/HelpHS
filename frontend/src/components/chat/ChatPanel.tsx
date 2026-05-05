@@ -130,6 +130,8 @@ interface ChatPanelProps {
   currentUserId: string;
   currentUserRole?: string;
   savedSummary?: string | null;
+  locked?: boolean;
+  onStatusChange?: (status: string) => void;
 }
 
 export function ChatPanel({
@@ -137,6 +139,8 @@ export function ChatPanel({
   currentUserId,
   currentUserRole,
   savedSummary,
+  locked = false,
+  onStatusChange,
 }: ChatPanelProps) {
   const isStaff =
     currentUserRole === "admin" || currentUserRole === "technician";
@@ -183,8 +187,11 @@ export function ChatPanel({
       try {
         const payload = JSON.parse(event.data as string) as {
           type: string;
-          data?: ChatMessage;
+          data?: ChatMessage & { status?: string };
         };
+        if (payload.type === "status_update" && payload.data?.status) {
+          onStatusChange?.(payload.data.status);
+        }
         if (payload.type === "message" && payload.data) {
           setMessages((prev) => {
             // Deduplicate by id
@@ -416,123 +423,131 @@ export function ChatPanel({
 
       {/* Input */}
       <div className="border-t border-border px-3 py-2.5 shrink-0">
-        {isStaff && (
-          <div className="mb-2 flex flex-wrap gap-2">
-            <button
-              onClick={handleSuggest}
-              disabled={suggesting || wsStatus === "disconnected"}
-              className={cn(
-                "flex items-center gap-1.5 text-xs px-2.5 py-1 rounded-md transition-colors",
-                "border border-purple-700 text-purple-400 hover:bg-purple-900/40",
-                "disabled:opacity-40 disabled:cursor-not-allowed",
-              )}
-            >
-              {suggesting ? (
-                <>
-                  <span className="inline-block w-3 h-3 border border-purple-400 border-t-transparent rounded-full animate-spin" />
-                  Gerando…
-                </>
-              ) : (
-                <>
-                  <svg
-                    className="w-3 h-3"
-                    fill="none"
-                    viewBox="0 0 24 24"
-                    stroke="currentColor"
-                    strokeWidth={2}
-                  >
-                    <path
-                      strokeLinecap="round"
-                      strokeLinejoin="round"
-                      d="M9.663 17h4.673M12 3v1m6.364 1.636l-.707.707M21 12h-1M4 12H3m3.343-5.657l-.707-.707m2.828 9.9a5 5 0 117.072 0l-.347.346a3 3 0 01-1.595.835l-.468.094a2 2 0 01-2.362-1.174l-.101-.302a3 3 0 01.22-2.562l.345-.518"
-                    />
-                  </svg>
-                  Sugerir resposta (IA)
-                </>
-              )}
-            </button>
+        {locked ? (
+          <p className="text-xs text-slate-500 text-center py-2 italic">
+            Este ticket foi encerrado — o chat está bloqueado.
+          </p>
+        ) : (
+          <>
+            {isStaff && (
+              <div className="mb-2 flex flex-wrap gap-2">
+                <button
+                  onClick={handleSuggest}
+                  disabled={suggesting || wsStatus === "disconnected"}
+                  className={cn(
+                    "flex items-center gap-1.5 text-xs px-2.5 py-1 rounded-md transition-colors",
+                    "border border-purple-700 text-purple-400 hover:bg-purple-900/40",
+                    "disabled:opacity-40 disabled:cursor-not-allowed",
+                  )}
+                >
+                  {suggesting ? (
+                    <>
+                      <span className="inline-block w-3 h-3 border border-purple-400 border-t-transparent rounded-full animate-spin" />
+                      Gerando…
+                    </>
+                  ) : (
+                    <>
+                      <svg
+                        className="w-3 h-3"
+                        fill="none"
+                        viewBox="0 0 24 24"
+                        stroke="currentColor"
+                        strokeWidth={2}
+                      >
+                        <path
+                          strokeLinecap="round"
+                          strokeLinejoin="round"
+                          d="M9.663 17h4.673M12 3v1m6.364 1.636l-.707.707M21 12h-1M4 12H3m3.343-5.657l-.707-.707m2.828 9.9a5 5 0 117.072 0l-.347.346a3 3 0 01-1.595.835l-.468.094a2 2 0 01-2.362-1.174l-.101-.302a3 3 0 01.22-2.562l.345-.518"
+                        />
+                      </svg>
+                      Sugerir resposta (IA)
+                    </>
+                  )}
+                </button>
 
-            <button
-              onClick={handleImprove}
-              disabled={
-                improving || !input.trim() || wsStatus === "disconnected"
-              }
-              className={cn(
-                "flex items-center gap-1.5 text-xs px-2.5 py-1 rounded-md transition-colors",
-                "border border-slate-600 text-slate-400 hover:bg-background-elevated hover:text-slate-300",
-                "disabled:opacity-40 disabled:cursor-not-allowed",
-              )}
-              title="Melhorar gramática e clareza do texto digitado"
-            >
-              {improving ? (
-                <>
-                  <span className="inline-block w-3 h-3 border border-slate-400 border-t-transparent rounded-full animate-spin" />
-                  Melhorando…
-                </>
-              ) : (
-                <>
-                  <svg
-                    className="w-3 h-3"
-                    fill="none"
-                    viewBox="0 0 24 24"
-                    stroke="currentColor"
-                    strokeWidth={2}
-                  >
-                    <path
-                      strokeLinecap="round"
-                      strokeLinejoin="round"
-                      d="M11 5H6a2 2 0 00-2 2v11a2 2 0 002 2h11a2 2 0 002-2v-5m-1.414-9.414a2 2 0 112.828 2.828L11.828 15H9v-2.828l8.586-8.586z"
-                    />
-                  </svg>
-                  Melhorar texto (IA)
-                </>
-              )}
-            </button>
-          </div>
-        )}
-        <div className="flex items-end gap-2">
-          <textarea
-            ref={inputRef}
-            rows={1}
-            className={cn(
-              "flex-1 resize-none rounded-lg border bg-background-elevated px-3 py-2 text-sm text-slate-100",
-              "placeholder:text-slate-500 focus:outline-none focus:ring-2 focus:ring-primary focus:border-transparent",
-              "border-border hover:border-slate-500 transition-colors leading-relaxed",
-              "max-h-28 overflow-y-auto",
+                <button
+                  onClick={handleImprove}
+                  disabled={
+                    improving || !input.trim() || wsStatus === "disconnected"
+                  }
+                  className={cn(
+                    "flex items-center gap-1.5 text-xs px-2.5 py-1 rounded-md transition-colors",
+                    "border border-slate-600 text-slate-400 hover:bg-background-elevated hover:text-slate-300",
+                    "disabled:opacity-40 disabled:cursor-not-allowed",
+                  )}
+                  title="Melhorar gramática e clareza do texto digitado"
+                >
+                  {improving ? (
+                    <>
+                      <span className="inline-block w-3 h-3 border border-slate-400 border-t-transparent rounded-full animate-spin" />
+                      Melhorando…
+                    </>
+                  ) : (
+                    <>
+                      <svg
+                        className="w-3 h-3"
+                        fill="none"
+                        viewBox="0 0 24 24"
+                        stroke="currentColor"
+                        strokeWidth={2}
+                      >
+                        <path
+                          strokeLinecap="round"
+                          strokeLinejoin="round"
+                          d="M11 5H6a2 2 0 00-2 2v11a2 2 0 002 2h11a2 2 0 002-2v-5m-1.414-9.414a2 2 0 112.828 2.828L11.828 15H9v-2.828l8.586-8.586z"
+                        />
+                      </svg>
+                      Melhorar texto (IA)
+                    </>
+                  )}
+                </button>
+              </div>
             )}
-            placeholder="Escreva uma mensagem… (Enter para enviar)"
-            value={input}
-            onChange={(e) => setInput(e.target.value)}
-            onKeyDown={handleKeyDown}
-            disabled={wsStatus === "disconnected"}
-          />
-          <button
-            onClick={send}
-            disabled={!input.trim() || sending || wsStatus !== "connected"}
-            className={cn(
-              "shrink-0 rounded-lg px-3 py-2 text-sm font-medium transition-colors",
-              "bg-primary text-white hover:bg-primary/90",
-              "disabled:opacity-40 disabled:cursor-not-allowed",
-            )}
-          >
-            <svg
-              className="w-4 h-4"
-              fill="none"
-              viewBox="0 0 24 24"
-              stroke="currentColor"
-              strokeWidth={2}
-            >
-              <path
-                strokeLinecap="round"
-                strokeLinejoin="round"
-                d="M12 19l9 2-9-18-9 18 9-2zm0 0v-8"
+            <div className="flex items-end gap-2">
+              <textarea
+                ref={inputRef}
+                rows={1}
+                className={cn(
+                  "flex-1 resize-none rounded-lg border bg-background-elevated px-3 py-2 text-sm text-slate-100",
+                  "placeholder:text-slate-500 focus:outline-none focus:ring-2 focus:ring-primary focus:border-transparent",
+                  "border-border hover:border-slate-500 transition-colors leading-relaxed",
+                  "max-h-28 overflow-y-auto",
+                )}
+                placeholder="Escreva uma mensagem… (Enter para enviar)"
+                value={input}
+                onChange={(e) => setInput(e.target.value)}
+                onKeyDown={handleKeyDown}
+                disabled={wsStatus === "disconnected"}
               />
-            </svg>
-          </button>
-        </div>
-        <p className="text-xs text-slate-600 mt-1 pl-1">
-          Enter para enviar · Shift+Enter para nova linha
-        </p>
+              <button
+                onClick={send}
+                disabled={!input.trim() || sending || wsStatus !== "connected"}
+                className={cn(
+                  "shrink-0 rounded-lg px-3 py-2 text-sm font-medium transition-colors",
+                  "bg-primary text-white hover:bg-primary/90",
+                  "disabled:opacity-40 disabled:cursor-not-allowed",
+                )}
+              >
+                <svg
+                  className="w-4 h-4"
+                  fill="none"
+                  viewBox="0 0 24 24"
+                  stroke="currentColor"
+                  strokeWidth={2}
+                >
+                  <path
+                    strokeLinecap="round"
+                    strokeLinejoin="round"
+                    d="M12 19l9 2-9-18-9 18 9-2zm0 0v-8"
+                  />
+                </svg>
+              </button>
+            </div>
+            <p className="text-xs text-slate-600 mt-1 pl-1">
+              Enter para enviar · Shift+Enter para nova linha
+            </p>
+          </>
+        )}
       </div>
     </div>
   );

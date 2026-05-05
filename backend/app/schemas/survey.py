@@ -11,14 +11,14 @@ from app.schemas.base import AppBaseModel
 
 
 class SurveyCreate(AppBaseModel):
-    rating: int = Field(..., ge=1, le=5, description="Avaliação de 1 (péssimo) a 5 (excelente)")
+    rating: int = Field(..., ge=1, le=10, description="Avaliação de 1 (péssimo) a 10 (excelente)")
     comment: str | None = Field(default=None, max_length=2000)
 
     @field_validator("rating")
     @classmethod
     def rating_must_be_valid(cls, v: int) -> int:
-        if not 1 <= v <= 5:
-            raise ValueError("A avaliação deve ser entre 1 e 5")
+        if not 1 <= v <= 10:
+            raise ValueError("A avaliação deve ser entre 1 e 10")
         return v
 
 

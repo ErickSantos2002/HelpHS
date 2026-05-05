@@ -8,14 +8,7 @@ import {
   updateMe,
   type UserSummary,
 } from "../../services/userService";
-import {
-  createMyEquipment,
-  deleteMyEquipment,
-  getMyEquipment,
-  lookupCnpj,
-  type Equipment,
-} from "../../services/equipmentService";
-import { api } from "../../services/api";
+import { lookupCnpj, lookupCep } from "../../services/equipmentService";
 
 // ── Shared primitives ──────────────────────────────────────────
 
@@ -277,9 +270,12 @@ function CompanySection({
   const [editing, setEditing] = useState(false);
   const [companyName, setCompanyName] = useState(profile.company_name ?? "");
   const [cnpj, setCnpj] = useState(profile.cnpj ?? "");
+  const [cep, setCep] = useState(profile.company_cep ?? "");
+  const [address, setAddress] = useState(profile.company_address ?? "");
   const [city, setCity] = useState(profile.company_city ?? "");
   const [state, setState] = useState(profile.company_state ?? "");
-  const [looking, setLooking] = useState(false);
+  const [lookingCnpj, setLookingCnpj] = useState(false);
+  const [lookingCep, setLookingCep] = useState(false);
   const [saving, setSaving] = useState(false);
   const [error, setError] = useState("");
 
@@ -292,10 +288,15 @@ function CompanySection({
       .replace(/(\d{4})(\d)/, "$1-$2");
   }
 
+  function formatCep(v: string) {
+    const d = v.replace(/\D/g, "").slice(0, 8);
+    return d.replace(/^(\d{5})(\d)/, "$1-$2");
+  }
+
   async function handleCnpjBlur() {
     const digits = cnpj.replace(/\D/g, "");
     if (digits.length !== 14) return;
-    setLooking(true);
+    setLookingCnpj(true);
     try {
       const info = await lookupCnpj(digits);
       setCompanyName(info.trade_name || info.company_name);
@@ -304,7 +305,23 @@ function CompanySection({
     } catch {
       /* manual fill */
     } finally {
-      setLooking(false);
+      setLookingCnpj(false);
+    }
+  }
+
+  async function handleCepBlur() {
+    const digits = cep.replace(/\D/g, "");
+    if (digits.length !== 8) return;
+    setLookingCep(true);
+    try {
+      const info = await lookupCep(digits);
+      if (info.address) setAddress(info.address);
+      if (info.city) setCity(info.city);
+      if (info.state) setState(info.state);
+    } catch {
+      /* manual fill */
+    } finally {
+      setLookingCep(false);
     }
   }
 
@@ -320,6 +337,8 @@ function CompanySection({
       const updated = await completeOnboarding({
         company_name: companyName.trim(),
         cnpj: cnpj.replace(/\D/g, "") || null,
+        company_cep: cep.replace(/\D/g, "") || null,
+        company_address: address.trim() || null,
         company_city: city.trim() || null,
         company_state: state.trim().toUpperCase().slice(0, 2) || null,
       });
@@ -347,7 +366,7 @@ function CompanySection({
                 placeholder="00.000.000/0000-00"
                 className={INPUT_CLS}
               />
-              {looking && (
+              {lookingCnpj && (
                 <div className="absolute right-3 top-2.5">
                   <Spinner size="sm" />
                 </div>
@@ -362,6 +381,32 @@ function CompanySection({
               placeholder="Razão social ou nome fantasia"
               className={INPUT_CLS}
               required
+            />
+          </div>
+          <div className="space-y-1.5">
+            <label className="text-xs text-slate-400">CEP</label>
+            <div className="relative">
+              <input
+                value={cep}
+                onChange={(e) => setCep(formatCep(e.target.value))}
+                onBlur={handleCepBlur}
+                placeholder="00000-000"
+                className={INPUT_CLS}
+              />
+              {lookingCep && (
+                <div className="absolute right-3 top-2.5">
+                  <Spinner size="sm" />
+                </div>
+              )}
+            </div>
+          </div>
+          <div className="space-y-1.5">
+            <label className="text-xs text-slate-400">Endereço</label>
+            <input
+              value={address}
+              onChange={(e) => setAddress(e.target.value)}
+              placeholder="Ex: Rua das Flores, 123"
+              className={INPUT_CLS}
             />
           </div>
           <div className="grid grid-cols-2 gap-3">
@@ -404,6 +449,15 @@ function CompanySection({
                   : ""
               }
             />
+            <Field
+              label="CEP"
+              value={
+                profile.company_cep
+                  ? profile.company_cep.replace(/^(\d{5})(\d{3})$/, "$1-$2")
+                  : ""
+              }
+            />
+            <Field label="Endereço" value={profile.company_address ?? ""} />
             <Field label="Cidade" value={profile.company_city ?? ""} />
             <Field label="Estado" value={profile.company_state ?? ""} />
           </div>
@@ -416,229 +470,6 @@ function CompanySection({
             </button>
           </div>
         </>
-      )}
-    </SectionCard>
-  );
-}
-
-// ── Equipment section ──────────────────────────────────────────
-
-interface Product {
-  id: string;
-  name: string;
-  version: string | null;
-  is_active: boolean;
-}
-
-function EquipmentSection() {
-  const [equipments, setEquipments] = useState<Equipment[]>([]);
-  const [products, setProducts] = useState<Product[]>([]);
-  const [loading, setLoading] = useState(true);
-  const [adding, setAdding] = useState(false);
-  const [showForm, setShowForm] = useState(false);
-
-  const [productId, setProductId] = useState("");
-  const [name, setName] = useState("");
-  const [serial, setSerial] = useState("");
-  const [location, setLocation] = useState("");
-  const [formError, setFormError] = useState("");
-
-  useEffect(() => {
-    Promise.all([
-      api.get<{ items: Product[] }>("/products").then((r) => r.data.items),
-      getMyEquipment(),
-    ])
-      .then(([prods, equips]) => {
-        const active = prods.filter((p) => p.is_active);
-        setProducts(active);
-        setEquipments(equips);
-        if (active.length > 0) setProductId(active[0].id);
-      })
-      .catch(() => {})
-      .finally(() => setLoading(false));
-  }, []);
-
-  async function handleAdd(e: React.FormEvent) {
-    e.preventDefault();
-    if (!productId) {
-      setFormError("Selecione um produto.");
-      return;
-    }
-    if (!name.trim()) {
-      setFormError("Nome do equipamento é obrigatório.");
-      return;
-    }
-    setAdding(true);
-    setFormError("");
-    try {
-      const eq = await createMyEquipment(productId, {
-        name: name.trim(),
-        serial_number: serial.trim() || null,
-        location: location.trim() || null,
-      });
-      setEquipments((prev) => [...prev, eq]);
-      setName("");
-      setSerial("");
-      setLocation("");
-      setShowForm(false);
-    } catch (err: unknown) {
-      const detail = (err as { response?: { data?: { detail?: string } } })
-        ?.response?.data?.detail;
-      setFormError(detail ?? "Erro ao adicionar equipamento.");
-    } finally {
-      setAdding(false);
-    }
-  }
-
-  async function handleDelete(id: string) {
-    if (!confirm("Remover este equipamento?")) return;
-    try {
-      await deleteMyEquipment(id);
-      setEquipments((prev) => prev.filter((e) => e.id !== id));
-    } catch {
-      /* ignore */
-    }
-  }
-
-  if (loading)
-    return (
-      <SectionCard title="Meus equipamentos">
-        <div className="flex justify-center py-4">
-          <Spinner size="sm" />
-        </div>
-      </SectionCard>
-    );
-
-  return (
-    <SectionCard title="Meus equipamentos">
-      {equipments.length === 0 && !showForm && (
-        <p className="text-sm text-slate-500">
-          Nenhum equipamento cadastrado ainda.
-        </p>
-      )}
-
-      {equipments.length > 0 && (
-        <div className="space-y-2">
-          {equipments.map((eq) => {
-            const prod = products.find((p) => p.id === eq.product_id);
-            return (
-              <div
-                key={eq.id}
-                className="flex items-start gap-3 rounded-lg border border-border bg-background-elevated px-4 py-3"
-              >
-                <div className="w-2 h-2 rounded-full bg-primary mt-1.5 shrink-0" />
-                <div className="flex-1 min-w-0">
-                  <p className="text-sm text-slate-200 font-medium truncate">
-                    {eq.name}
-                  </p>
-                  <p className="text-xs text-slate-500 mt-0.5">
-                    {[prod?.name, eq.serial_number, eq.location]
-                      .filter(Boolean)
-                      .join(" · ")}
-                  </p>
-                </div>
-                <button
-                  onClick={() => handleDelete(eq.id)}
-                  className="text-xs text-slate-600 hover:text-danger transition-colors shrink-0 mt-0.5"
-                >
-                  Remover
-                </button>
-              </div>
-            );
-          })}
-        </div>
-      )}
-
-      {showForm && (
-        <form
-          onSubmit={handleAdd}
-          className="space-y-3 pt-2 border-t border-border"
-        >
-          {formError && <ErrorMsg msg={formError} />}
-          <div className="space-y-1.5">
-            <label className="text-xs text-slate-400">Produto</label>
-            <select
-              value={productId}
-              onChange={(e) => setProductId(e.target.value)}
-              className={INPUT_CLS}
-            >
-              {products.map((p) => (
-                <option key={p.id} value={p.id}>
-                  {p.name}
-                  {p.version ? ` (${p.version})` : ""}
-                </option>
-              ))}
-            </select>
-          </div>
-          <div className="space-y-1.5">
-            <label className="text-xs text-slate-400">
-              Nome do equipamento
-            </label>
-            <input
-              value={name}
-              onChange={(e) => setName(e.target.value)}
-              placeholder="Ex: Phoebus-Pernambuco"
-              className={INPUT_CLS}
-              required
-            />
-          </div>
-          <div className="grid grid-cols-2 gap-3">
-            <div className="space-y-1.5">
-              <label className="text-xs text-slate-400">Número de série</label>
-              <input
-                value={serial}
-                onChange={(e) => setSerial(e.target.value)}
-                placeholder="Ex: WATFR01-12453"
-                className={INPUT_CLS}
-              />
-            </div>
-            <div className="space-y-1.5">
-              <label className="text-xs text-slate-400">Localização</label>
-              <input
-                value={location}
-                onChange={(e) => setLocation(e.target.value)}
-                placeholder="Ex: Sala 201, Recife"
-                className={INPUT_CLS}
-              />
-            </div>
-          </div>
-          <div className="flex gap-2 justify-end">
-            <button
-              type="button"
-              onClick={() => {
-                setShowForm(false);
-                setFormError("");
-              }}
-              className="px-4 py-2 text-sm text-slate-400 hover:text-slate-200 transition-colors"
-            >
-              Cancelar
-            </button>
-            <button
-              type="submit"
-              disabled={adding}
-              className="px-4 py-2 rounded-lg bg-primary text-white text-sm hover:bg-primary/90 disabled:opacity-50 transition-colors"
-            >
-              {adding ? "Adicionando…" : "Adicionar"}
-            </button>
-          </div>
-        </form>
-      )}
-
-      {!showForm && products.length > 0 && (
-        <div className="flex justify-end">
-          <button
-            onClick={() => setShowForm(true)}
-            className="text-sm text-primary hover:text-primary/80 transition-colors"
-          >
-            + Adicionar equipamento
-          </button>
-        </div>
-      )}
-
-      {!showForm && products.length === 0 && (
-        <p className="text-xs text-slate-600">
-          Nenhum produto disponível no sistema ainda.
-        </p>
       )}
     </SectionCard>
   );
@@ -751,12 +582,9 @@ export default function ProfilePage() {
         )}
       </SectionCard>
 
-      {/* Company + Equipment — clients only */}
+      {/* Company — clients only */}
       {profile.role === "client" && (
-        <>
-          <CompanySection profile={profile} onSaved={setProfile} />
-          <EquipmentSection />
-        </>
+        <CompanySection profile={profile} onSaved={setProfile} />
       )}
 
       {/* Password */}

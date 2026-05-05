@@ -26,6 +26,7 @@ import {
   assignTicket,
   getTicket,
   getTicketHistory,
+  resolveTicket,
   updateClientObservation,
   updateTicket,
   updateTicketStatus,
@@ -212,7 +213,7 @@ function InfoRow({ label, value }: { label: string; value?: string | null }) {
 
 // ── SurveyPanel ───────────────────────────────────────────────
 
-function StarRating({
+function ScoreRating({
   value,
   onChange,
 }: {
@@ -221,36 +222,42 @@ function StarRating({
 }) {
   const [hovered, setHovered] = useState(0);
   return (
-    <div className="flex gap-1">
-      {[1, 2, 3, 4, 5].map((star) => (
-        <button
-          key={star}
-          type="button"
-          onClick={() => onChange(star)}
-          onMouseEnter={() => setHovered(star)}
-          onMouseLeave={() => setHovered(0)}
-          className="text-2xl leading-none transition-colors"
-          aria-label={`${star} estrela${star > 1 ? "s" : ""}`}
-        >
-          <span
-            className={
-              star <= (hovered || value) ? "text-yellow-400" : "text-slate-600"
-            }
+    <div className="flex gap-1 flex-wrap">
+      {[1, 2, 3, 4, 5, 6, 7, 8, 9, 10].map((n) => {
+        const active = n <= (hovered || value);
+        return (
+          <button
+            key={n}
+            type="button"
+            onClick={() => onChange(n)}
+            onMouseEnter={() => setHovered(n)}
+            onMouseLeave={() => setHovered(0)}
+            aria-label={`Nota ${n}`}
+            className={`w-8 h-8 rounded-md text-sm font-semibold transition-colors border ${
+              active
+                ? "bg-yellow-400 border-yellow-400 text-slate-900"
+                : "border-slate-600 text-slate-400 hover:border-yellow-400 hover:text-yellow-400"
+            }`}
           >
-            ★
-          </span>
-        </button>
-      ))}
+            {n}
+          </button>
+        );
+      })}
     </div>
   );
 }
 
 const RATING_LABELS: Record<number, string> = {
   1: "Péssimo",
-  2: "Ruim",
-  3: "Regular",
-  4: "Bom",
-  5: "Excelente",
+  2: "Muito ruim",
+  3: "Ruim",
+  4: "Abaixo do esperado",
+  5: "Regular",
+  6: "Satisfatório",
+  7: "Bom",
+  8: "Muito bom",
+  9: "Ótimo",
+  10: "Excelente",
 };
 
 function SurveyPanel({ ticketId }: { ticketId: string }) {
@@ -291,20 +298,12 @@ function SurveyPanel({ ticketId }: { ticketId: string }) {
 
       {survey ? (
         <div className="space-y-2">
-          <div className="flex items-center gap-2">
+          <div className="flex items-center gap-3">
             <span className="text-slate-400 text-sm">Sua avaliação:</span>
-            <div className="flex gap-0.5">
-              {[1, 2, 3, 4, 5].map((star) => (
-                <span
-                  key={star}
-                  className={`text-xl leading-none ${
-                    star <= survey.rating ? "text-yellow-400" : "text-slate-600"
-                  }`}
-                >
-                  ★
-                </span>
-              ))}
-            </div>
+            <span className="text-2xl font-bold text-yellow-400">
+              {survey.rating}
+              <span className="text-base text-slate-500 font-normal">/10</span>
+            </span>
             <span className="text-xs text-slate-400">
               {RATING_LABELS[survey.rating]}
             </span>
@@ -329,7 +328,7 @@ function SurveyPanel({ ticketId }: { ticketId: string }) {
             Como você avalia o atendimento deste ticket?
           </p>
           <div className="flex items-center gap-3">
-            <StarRating value={rating} onChange={setRating} />
+            <ScoreRating value={rating} onChange={setRating} />
             {rating > 0 && (
               <span className="text-sm text-slate-300">
                 {RATING_LABELS[rating]}
@@ -375,6 +374,12 @@ export default function TicketDetailPage() {
   const [statusModal, setStatusModal] = useState(false);
   const [assignModal, setAssignModal] = useState(false);
   const [uploadModal, setUploadModal] = useState(false);
+  const [resolveModal, setResolveModal] = useState(false);
+
+  // Resolve form
+  const [resolveNote, setResolveNote] = useState("");
+  const [resolveLoading, setResolveLoading] = useState(false);
+  const [resolveError, setResolveError] = useState<string | null>(null);
 
   // Status change form
   const [newStatus, setNewStatus] = useState("");
@@ -473,6 +478,24 @@ export default function TicketDetailPage() {
       setStatusError("Não foi possível alterar o status.");
     } finally {
       setStatusLoading(false);
+    }
+  }
+
+  async function handleResolve() {
+    if (!ticket || !resolveNote.trim()) return;
+    setResolveLoading(true);
+    setResolveError(null);
+    try {
+      const updated = await resolveTicket(ticket.id, resolveNote.trim());
+      setTicket(updated);
+      const h = await getTicketHistory(ticket.id);
+      setHistory(h.items);
+      setResolveModal(false);
+      setResolveNote("");
+    } catch {
+      setResolveError("Não foi possível concluir o ticket.");
+    } finally {
+      setResolveLoading(false);
     }
   }
 
@@ -665,6 +688,7 @@ export default function TicketDetailPage() {
                 {user?.role === "client" &&
                   ticket.status !== "closed" &&
                   ticket.status !== "cancelled" &&
+                  ticket.status !== "resolved" &&
                   !obsEdit && (
                     <Button
                       variant="ghost"
@@ -749,12 +773,34 @@ export default function TicketDetailPage() {
             )}
           </div>
 
+          {/* Resolution note */}
+          {ticket.resolution_note && (
+            <div className="rounded-xl bg-background-surface border border-success/30 p-5 space-y-2">
+              <h2 className="text-sm font-semibold text-success-400 flex items-center gap-1.5">
+                ✓ Resolução
+              </h2>
+              <p className="text-sm text-slate-200 whitespace-pre-wrap leading-relaxed">
+                {ticket.resolution_note}
+              </p>
+            </div>
+          )}
+
           {/* Chat */}
           <ChatPanel
             ticketId={ticket.id}
             currentUserId={user?.id ?? ""}
             currentUserRole={user?.role}
             savedSummary={ticket.ai_conversation_summary}
+            locked={
+              ticket.status === "resolved" ||
+              ticket.status === "closed" ||
+              ticket.status === "cancelled"
+            }
+            onStatusChange={(s) =>
+              setTicket((prev) =>
+                prev ? { ...prev, status: s as typeof prev.status } : prev,
+              )
+            }
           />
 
           {/* KB Suggestions (staff only) */}
@@ -799,6 +845,17 @@ export default function TicketDetailPage() {
               <h2 className="text-xs font-semibold text-slate-500 uppercase tracking-wider mb-3">
                 Ações
               </h2>
+              {ticket.status !== "resolved" &&
+                ticket.status !== "closed" &&
+                ticket.status !== "cancelled" && (
+                  <Button
+                    className="w-full"
+                    size="sm"
+                    onClick={() => setResolveModal(true)}
+                  >
+                    ✓ Concluir ticket
+                  </Button>
+                )}
               {transitions.length > 0 && (
                 <Button
                   className="w-full"
@@ -1159,6 +1216,49 @@ export default function TicketDetailPage() {
             disabled={uploadFiles.length === 0}
           >
             Enviar
+          </Button>
+        </ModalFooter>
+      </Modal>
+
+      {/* ── Resolve modal ────────────────────────────────────── */}
+      <Modal
+        open={resolveModal}
+        onClose={() => {
+          setResolveModal(false);
+          setResolveError(null);
+          setResolveNote("");
+        }}
+        title="Concluir ticket"
+      >
+        <div className="space-y-4">
+          {resolveError && <Alert variant="danger">{resolveError}</Alert>}
+          <p className="text-sm text-slate-400">
+            Descreva como o problema foi resolvido. Após confirmar, o chat será
+            bloqueado e o cliente receberá uma notificação para avaliar o
+            atendimento.
+          </p>
+          <Textarea
+            label="Nota de resolução"
+            placeholder="Descreva a solução aplicada…"
+            rows={5}
+            value={resolveNote}
+            onChange={(e) => setResolveNote(e.target.value)}
+          />
+        </div>
+        <ModalFooter>
+          <Button
+            variant="secondary"
+            onClick={() => setResolveModal(false)}
+            disabled={resolveLoading}
+          >
+            Cancelar
+          </Button>
+          <Button
+            onClick={handleResolve}
+            loading={resolveLoading}
+            disabled={!resolveNote.trim()}
+          >
+            Confirmar conclusão
           </Button>
         </ModalFooter>
       </Modal>

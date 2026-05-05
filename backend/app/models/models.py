@@ -143,6 +143,8 @@ class User(Base):
     # Empresa (onboarding do cliente)
     company_name: Mapped[str | None] = mapped_column(String(255))
     cnpj: Mapped[str | None] = mapped_column(String(18))
+    company_cep: Mapped[str | None] = mapped_column(String(9))
+    company_address: Mapped[str | None] = mapped_column(String(255))
     company_city: Mapped[str | None] = mapped_column(String(100))
     company_state: Mapped[str | None] = mapped_column(String(2))
     onboarding_completed: Mapped[bool] = mapped_column(Boolean, default=False)
@@ -295,6 +297,9 @@ class Ticket(Base):
 
     # Observação do cliente (visível para todos, editável apenas pelo cliente)
     client_observation: Mapped[str | None] = mapped_column(Text, nullable=True)
+
+    # Nota de resolução (preenchida ao concluir o ticket)
+    resolution_note: Mapped[str | None] = mapped_column(Text, nullable=True)
 
     # IA
     ai_classification: Mapped[str | None] = mapped_column(String(100))

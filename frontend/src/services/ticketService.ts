@@ -34,6 +34,7 @@ export interface Ticket {
   ai_summary: string | null;
   ai_conversation_summary: string | null;
   client_observation: string | null;
+  resolution_note: string | null;
   tags: Tag[];
 }
 
@@ -155,6 +156,16 @@ export async function updateClientObservation(
 ): Promise<Ticket> {
   const { data } = await api.patch<Ticket>(`/tickets/${id}/observation`, {
     client_observation,
+  });
+  return data;
+}
+
+export async function resolveTicket(
+  id: string,
+  resolution_note: string,
+): Promise<Ticket> {
+  const { data } = await api.post<Ticket>(`/tickets/${id}/resolve`, {
+    resolution_note,
   });
   return data;
 }

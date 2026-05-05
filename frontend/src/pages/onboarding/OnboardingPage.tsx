@@ -7,6 +7,7 @@ import {
   createMyEquipment,
   getMyEquipment,
   lookupCnpj,
+  lookupCep,
   type Equipment,
 } from "../../services/equipmentService";
 import { api } from "../../services/api";
@@ -56,15 +57,20 @@ function StepCompany({
   onNext: (data: {
     company_name: string;
     cnpj: string;
+    company_cep: string;
+    company_address: string;
     company_city: string;
     company_state: string;
   }) => void;
 }) {
   const [cnpj, setCnpj] = useState("");
   const [companyName, setCompanyName] = useState("");
+  const [cep, setCep] = useState("");
+  const [address, setAddress] = useState("");
   const [city, setCity] = useState("");
   const [state, setState] = useState("");
-  const [looking, setLooking] = useState(false);
+  const [lookingCnpj, setLookingCnpj] = useState(false);
+  const [lookingCep, setLookingCep] = useState(false);
   const [saving, setSaving] = useState(false);
   const [error, setError] = useState<string | null>(null);
 
@@ -77,10 +83,15 @@ function StepCompany({
       .replace(/(\d{4})(\d)/, "$1-$2");
   }
 
+  function formatCep(value: string) {
+    const digits = value.replace(/\D/g, "").slice(0, 8);
+    return digits.replace(/^(\d{5})(\d)/, "$1-$2");
+  }
+
   async function handleCnpjBlur() {
     const digits = cnpj.replace(/\D/g, "");
     if (digits.length !== 14) return;
-    setLooking(true);
+    setLookingCnpj(true);
     setError(null);
     try {
       const info = await lookupCnpj(digits);
@@ -90,7 +101,24 @@ function StepCompany({
     } catch {
       setError("CNPJ não encontrado. Preencha os dados manualmente.");
     } finally {
-      setLooking(false);
+      setLookingCnpj(false);
+    }
+  }
+
+  async function handleCepBlur() {
+    const digits = cep.replace(/\D/g, "");
+    if (digits.length !== 8) return;
+    setLookingCep(true);
+    setError(null);
+    try {
+      const info = await lookupCep(digits);
+      if (info.address) setAddress(info.address);
+      if (info.city) setCity(info.city);
+      if (info.state) setState(info.state);
+    } catch {
+      setError("CEP não encontrado. Preencha os dados manualmente.");
+    } finally {
+      setLookingCep(false);
     }
   }
 
@@ -106,12 +134,16 @@ function StepCompany({
       await completeOnboarding({
         company_name: companyName.trim(),
         cnpj: cnpj.replace(/\D/g, "") || null,
+        company_cep: cep.replace(/\D/g, "") || null,
+        company_address: address.trim() || null,
         company_city: city.trim() || null,
         company_state: state.trim().toUpperCase().slice(0, 2) || null,
       });
       onNext({
         company_name: companyName,
         cnpj,
+        company_cep: cep,
+        company_address: address,
         company_city: city,
         company_state: state,
       });
@@ -150,7 +182,7 @@ function StepCompany({
             placeholder="00.000.000/0000-00"
             className="w-full rounded-lg border border-border bg-background-elevated px-3 py-2 text-sm text-slate-100 placeholder:text-slate-500 focus:outline-none focus:ring-2 focus:ring-primary focus:border-transparent transition-colors"
           />
-          {looking && (
+          {lookingCnpj && (
             <div className="absolute right-3 top-2.5">
               <Spinner size="sm" />
             </div>
@@ -164,6 +196,31 @@ function StepCompany({
         onChange={(e) => setCompanyName(e.target.value)}
         placeholder="Razão social ou nome fantasia"
         required
+      />
+
+      <div className="space-y-1.5">
+        <label className="text-xs text-slate-400">CEP</label>
+        <div className="relative">
+          <input
+            value={cep}
+            onChange={(e) => setCep(formatCep(e.target.value))}
+            onBlur={handleCepBlur}
+            placeholder="00000-000"
+            className="w-full rounded-lg border border-border bg-background-elevated px-3 py-2 text-sm text-slate-100 placeholder:text-slate-500 focus:outline-none focus:ring-2 focus:ring-primary focus:border-transparent transition-colors"
+          />
+          {lookingCep && (
+            <div className="absolute right-3 top-2.5">
+              <Spinner size="sm" />
+            </div>
+          )}
+        </div>
+      </div>
+
+      <Input
+        label="Endereço"
+        value={address}
+        onChange={(e) => setAddress(e.target.value)}
+        placeholder="Ex: Rua das Flores, 123"
       />
 
       <div className="grid grid-cols-2 gap-3">

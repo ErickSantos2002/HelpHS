@@ -33,10 +33,12 @@ from app.models.models import (
     ChatMessage,
     NotificationType,
     Ticket,
+    TicketStatus,
     User,
     UserRole,
     UserStatus,
 )
+from app.routers.tickets import _auto_transition
 from app.schemas.chat import (
     ChatMessageCreate,
     ChatMessageListResponse,
@@ -214,6 +216,9 @@ async def create_message(
     # Notify the other party
     await _notify_other_party(db, ticket, actor, msg)
 
+    # Auto status transition based on who is sending
+    new_status_value = await _apply_chat_transition(db, ticket, actor)
+
     await db.commit()
 
     # Reload with sender using selectinload
@@ -226,11 +231,18 @@ async def create_message(
 
     response = _msg_to_response(msg)
 
-    # Broadcast to WebSocket room
+    # Broadcast message
     await manager.broadcast(
         str(ticket_id),
         {"type": "message", "data": _response_to_dict(response)},
     )
+
+    # Broadcast status change if a transition occurred
+    if new_status_value:
+        await manager.broadcast(
+            str(ticket_id),
+            {"type": "status_update", "data": {"status": new_status_value}},
+        )
 
     return response
 
@@ -449,6 +461,8 @@ async def websocket_chat(
 
                 await _notify_other_party(db, ticket, user, msg)
 
+                new_status_value = await _apply_chat_transition(db, ticket, user)
+
                 await db.commit()
 
                 result = await db.execute(
@@ -463,6 +477,11 @@ async def websocket_chat(
                 tid_str,
                 {"type": "message", "data": _response_to_dict(response)},
             )
+            if new_status_value:
+                await manager.broadcast(
+                    tid_str,
+                    {"type": "status_update", "data": {"status": new_status_value}},
+                )
 
     except WebSocketDisconnect:
         logger.info(f"WS disconnected: user={user.id} ticket={ticket_id}")
@@ -485,6 +504,35 @@ def _response_to_dict(r: ChatMessageResponse) -> dict:
         "is_ai": r.is_ai,
         "created_at": r.created_at.isoformat(),
     }
+
+
+async def _apply_chat_transition(
+    db: AsyncSession,
+    ticket: Ticket,
+    sender: User,
+) -> str | None:
+    """Auto-transition ticket status when a chat message is sent.
+
+    Staff sending → awaiting_client (if in_progress or awaiting_technical).
+    Client sending → awaiting_technical (if awaiting_client).
+
+    Returns the new status value string if a transition occurred, else None.
+    """
+    is_staff = sender.role in (UserRole.admin, UserRole.technician)
+
+    if is_staff and ticket.status in (TicketStatus.in_progress, TicketStatus.awaiting_technical):
+        changed = await _auto_transition(
+            db, ticket, TicketStatus.awaiting_client, sender.id, "Técnico respondeu"
+        )
+        return TicketStatus.awaiting_client.value if changed else None
+
+    if not is_staff and ticket.status in (TicketStatus.in_progress, TicketStatus.awaiting_client):
+        changed = await _auto_transition(
+            db, ticket, TicketStatus.awaiting_technical, sender.id, "Cliente respondeu"
+        )
+        return TicketStatus.awaiting_technical.value if changed else None
+
+    return None
 
 
 async def _notify_other_party(

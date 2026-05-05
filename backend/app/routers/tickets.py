@@ -46,6 +46,7 @@ from app.schemas.ticket import (
     TicketHistoryResponse,
     TicketListResponse,
     TicketObservationUpdate,
+    TicketResolve,
     TicketResponse,
     TicketStatusUpdate,
     TicketUpdate,
@@ -111,11 +112,13 @@ _TRANSITIONS: dict[TicketStatus, set[TicketStatus]] = {
     },
     TicketStatus.awaiting_client: {
         TicketStatus.in_progress,
+        TicketStatus.awaiting_technical,
         TicketStatus.resolved,
         TicketStatus.cancelled,
     },
     TicketStatus.awaiting_technical: {
         TicketStatus.in_progress,
+        TicketStatus.awaiting_client,
         TicketStatus.resolved,
         TicketStatus.cancelled,
     },
@@ -123,6 +126,57 @@ _TRANSITIONS: dict[TicketStatus, set[TicketStatus]] = {
     TicketStatus.closed: set(),
     TicketStatus.cancelled: set(),
 }
+
+
+# ── Auto status transition (internal) ────────────────────────
+
+
+async def _auto_transition(
+    db: AsyncSession,
+    ticket: Ticket,
+    new_status: TicketStatus,
+    actor_id: uuid.UUID,
+    comment: str = "Transição automática",
+) -> bool:
+    """Apply a status transition programmatically (no HTTP validation).
+
+    Returns True if the transition was applied, False if it was skipped
+    (e.g. the transition is not allowed from the current status).
+    The caller is responsible for committing the session.
+    """
+    if new_status not in _TRANSITIONS.get(ticket.status, set()):
+        return False
+
+    now = datetime.now(UTC)
+    old_status = ticket.status
+    ticket.status = new_status
+    ticket.updated_at = now
+
+    if old_status == TicketStatus.open:
+        ticket.sla_first_response = now
+
+    if old_status not in _PAUSE_STATUSES and new_status in _PAUSE_STATUSES:
+        pause_sla(ticket, now)
+    elif old_status in _PAUSE_STATUSES and new_status not in _PAUSE_STATUSES:
+        resume_sla(ticket, now)
+
+    check_breaches(ticket, now)
+
+    _record_history(db, ticket.id, actor_id, "status", old_status.value, new_status.value, comment)
+    _audit(db, AuditAction.status_change, actor_id, ticket.id)
+    await notify(
+        db,
+        ticket.creator_id,
+        NotificationType.ticket_updated,
+        "Status do ticket atualizado",
+        f"O status do ticket {ticket.protocol} foi atualizado para '{new_status.value}'.",
+        data={
+            "ticket_id": str(ticket.id),
+            "old_status": old_status.value,
+            "new_status": new_status.value,
+        },
+    )
+    return True
 
 
 # ── Helpers ───────────────────────────────────────────────────
@@ -522,6 +576,70 @@ async def update_ticket_status(
     return TicketResponse.model_validate(ticket)
 
 
+@router.post("/tickets/{ticket_id}/resolve", response_model=TicketResponse)
+async def resolve_ticket(
+    ticket_id: uuid.UUID,
+    body: TicketResolve,
+    db: Annotated[AsyncSession, Depends(get_db)],
+    actor: Annotated[User, Depends(authorize(UserRole.admin, UserRole.technician))],
+    settings: Annotated[Settings, Depends(get_settings)],
+) -> TicketResponse:
+    ticket = await get_or_404(db, Ticket, ticket_id, "Ticket not found")
+
+    if ticket.status in (TicketStatus.resolved, TicketStatus.closed, TicketStatus.cancelled):
+        raise HTTPException(
+            status_code=status.HTTP_409_CONFLICT,
+            detail=f"Ticket is already '{ticket.status.value}'",
+        )
+
+    now = datetime.now(UTC)
+    old_status = ticket.status
+    ticket.status = TicketStatus.resolved
+    ticket.resolution_note = body.resolution_note
+    ticket.closed_at = now
+    ticket.updated_at = now
+
+    if old_status == TicketStatus.open:
+        ticket.sla_first_response = now
+    if old_status in _PAUSE_STATUSES:
+        resume_sla(ticket, now)
+    check_breaches(ticket, now)
+
+    _record_history(
+        db,
+        ticket.id,
+        actor.id,
+        "status",
+        old_status.value,
+        TicketStatus.resolved.value,
+        f"Ticket resolvido: {body.resolution_note[:100]}",
+    )
+    _audit(db, AuditAction.status_change, actor.id, ticket.id)
+
+    await notify(
+        db,
+        ticket.creator_id,
+        NotificationType.ticket_updated,
+        "Ticket resolvido",
+        f"O ticket {ticket.protocol} foi marcado como resolvido.",
+        data={"ticket_id": str(ticket.id), "new_status": "resolved"},
+        settings=settings,
+    )
+    await notify(
+        db,
+        ticket.creator_id,
+        NotificationType.satisfaction_survey,
+        "Como foi o atendimento?",
+        f"O ticket {ticket.protocol} foi resolvido. Deixe sua avaliação!",
+        data={"ticket_id": str(ticket.id), "protocol": ticket.protocol},
+        settings=settings,
+    )
+
+    await db.commit()
+    await db.refresh(ticket)
+    return TicketResponse.model_validate(ticket)
+
+
 @router.patch("/tickets/{ticket_id}/assign", response_model=TicketResponse)
 async def assign_ticket(
     ticket_id: uuid.UUID,
@@ -552,6 +670,11 @@ async def assign_ticket(
             data={"ticket_id": str(ticket.id), "protocol": ticket.protocol},
             settings=settings,
         )
+        # Auto-transition open → in_progress on first assignment
+        if ticket.status == TicketStatus.open:
+            await _auto_transition(
+                db, ticket, TicketStatus.in_progress, actor.id, "Atribuído — em andamento"
+            )
     await db.commit()
     await db.refresh(ticket)
     return TicketResponse.model_validate(ticket)
