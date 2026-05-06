@@ -4,11 +4,11 @@ import { Sidebar } from "./Sidebar";
 import { Topbar } from "./Topbar";
 
 export function AppLayout() {
-  const [sidebarOpen, setSidebarOpen] = useState(false);
+  const [sidebarCollapsed, setSidebarCollapsed] = useState(false);
+  const [sidebarMobileOpen, setSidebarMobileOpen] = useState(false);
 
   return (
-    <div className="flex h-screen overflow-hidden bg-background">
-      {/* Skip navigation link */}
+    <div className="flex h-screen overflow-hidden bg-slate-50 dark:bg-background">
       <a
         href="#main-content"
         className="sr-only focus:not-sr-only focus:fixed focus:top-2 focus:left-2 focus:z-[100] focus:rounded-lg focus:bg-primary focus:px-4 focus:py-2 focus:text-sm focus:font-medium focus:text-white"
@@ -16,12 +16,18 @@ export function AppLayout() {
         Pular para o conteúdo principal
       </a>
 
-      <Sidebar open={sidebarOpen} onClose={() => setSidebarOpen(false)} />
+      <Sidebar
+        collapsed={sidebarCollapsed}
+        mobileOpen={sidebarMobileOpen}
+        onMobileClose={() => setSidebarMobileOpen(false)}
+      />
 
-      {/* Main area */}
-      <div className="flex flex-1 flex-col overflow-hidden">
-        <Topbar onMenuClick={() => setSidebarOpen(true)} />
-
+      <div className="flex flex-1 flex-col overflow-hidden min-w-0">
+        <Topbar
+          onMobileMenuClick={() => setSidebarMobileOpen(true)}
+          onToggleCollapsed={() => setSidebarCollapsed((v) => !v)}
+          sidebarCollapsed={sidebarCollapsed}
+        />
         <main id="main-content" className="flex-1 overflow-y-auto p-4 md:p-6">
           <Outlet />
         </main>

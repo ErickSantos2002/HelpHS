@@ -31,7 +31,9 @@ const NOTIF_TYPE_LABEL: Record<string, string> = {
 };
 
 interface TopbarProps {
-  onMenuClick: () => void;
+  onMobileMenuClick: () => void;
+  onToggleCollapsed: () => void;
+  sidebarCollapsed: boolean;
 }
 
 // ── NotificationDropdown ──────────────────────────────────────
@@ -92,9 +94,9 @@ function NotificationDropdown({ onClose }: NotificationDropdownProps) {
   }
 
   return (
-    <div className="absolute right-0 top-full mt-1 w-80 max-w-[calc(100vw-1rem)] rounded-xl border border-border bg-background-surface shadow-xl z-50 overflow-hidden">
+    <div className="absolute right-0 top-[calc(100%+0.5rem)] w-80 max-w-[calc(100vw-1rem)] rounded-xl border border-slate-200 dark:border-border bg-white dark:bg-background-surface shadow-xl z-50 overflow-hidden">
       {/* Header */}
-      <div className="flex items-center justify-between px-4 py-3 border-b border-border">
+      <div className="flex items-center justify-between px-4 py-3 border-b border-slate-200 dark:border-border">
         <div className="flex items-center gap-2">
           <span className="text-sm font-semibold text-slate-100">
             Notificações
@@ -131,8 +133,8 @@ function NotificationDropdown({ onClose }: NotificationDropdownProps) {
             <button
               key={n.id}
               className={cn(
-                "w-full text-left px-4 py-3 border-b border-border/50 hover:bg-background-elevated transition-colors",
-                !n.read && "bg-background-elevated/40",
+                "w-full text-left px-4 py-3 border-b border-slate-100 dark:border-border/50 hover:bg-slate-50 dark:hover:bg-background-elevated transition-colors",
+                !n.read && "bg-slate-50 dark:bg-background-elevated/40",
               )}
               onClick={() => handleMarkRead(n)}
             >
@@ -163,7 +165,7 @@ function NotificationDropdown({ onClose }: NotificationDropdownProps) {
       </div>
 
       {/* Footer */}
-      <div className="px-4 py-2.5 border-t border-border">
+      <div className="px-4 py-2.5 border-t border-slate-200 dark:border-border">
         <button
           className="w-full text-center text-xs text-primary hover:text-primary/80 transition-colors"
           onClick={() => {
@@ -196,7 +198,7 @@ function IconMoon() {
   );
 }
 
-export function Topbar({ onMenuClick }: TopbarProps) {
+export function Topbar({ onMobileMenuClick, onToggleCollapsed, sidebarCollapsed }: TopbarProps) {
   const { user, logout } = useAuth();
   const { theme, toggleTheme } = useTheme();
   const navigate = useNavigate();
@@ -244,51 +246,45 @@ export function Topbar({ onMenuClick }: TopbarProps) {
   }
 
   return (
-    <header className="flex h-16 shrink-0 items-center justify-between border-b border-border bg-background-surface px-4 md:px-6">
-      {/* Left: hamburger (mobile) */}
-      <button
-        className="rounded-lg p-2 text-slate-400 hover:bg-background-elevated hover:text-slate-100 transition-colors md:hidden"
-        onClick={onMenuClick}
-        aria-label="Abrir menu de navegação"
-        aria-expanded={false}
-        aria-controls="sidebar-nav"
-      >
-        <svg
-          className="w-5 h-5"
-          aria-hidden="true"
-          fill="none"
-          viewBox="0 0 24 24"
-          stroke="currentColor"
-          strokeWidth={2}
+    <header className="flex h-16 shrink-0 items-center justify-between border-b border-slate-200 dark:border-border bg-white dark:bg-background-surface px-4 md:px-6">
+      {/* Left: hamburger desktop (colapsa sidebar) + mobile (abre drawer) */}
+      <div className="flex items-center gap-1">
+        {/* Desktop toggle */}
+        <button
+          className="hidden md:flex rounded-lg p-2 text-slate-500 dark:text-slate-400 hover:bg-slate-100 dark:hover:bg-background-elevated hover:text-slate-900 dark:hover:text-slate-100 transition-colors"
+          onClick={onToggleCollapsed}
+          aria-label={sidebarCollapsed ? "Expandir menu" : "Recolher menu"}
         >
-          <path
-            strokeLinecap="round"
-            strokeLinejoin="round"
-            d="M4 6h16M4 12h16M4 18h16"
-          />
-        </svg>
-      </button>
+          <svg className="w-5 h-5" aria-hidden="true" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
+            <path strokeLinecap="round" strokeLinejoin="round" d="M4 6h16M4 12h16M4 18h16" />
+          </svg>
+        </button>
+
+        {/* Mobile toggle */}
+        <button
+          className="md:hidden rounded-lg p-2 text-slate-500 dark:text-slate-400 hover:bg-slate-100 dark:hover:bg-background-elevated hover:text-slate-900 dark:hover:text-slate-100 transition-colors"
+          onClick={onMobileMenuClick}
+          aria-label="Abrir menu de navegação"
+          aria-controls="sidebar-nav"
+        >
+          <svg className="w-5 h-5" aria-hidden="true" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
+            <path strokeLinecap="round" strokeLinejoin="round" d="M4 6h16M4 12h16M4 18h16" />
+          </svg>
+        </button>
+      </div>
 
       {/* Spacer */}
       <div className="flex-1" />
 
       {/* Right: notifications + user menu */}
-      <div className="flex items-center gap-2">
-        {/* Theme toggle */}
-        <button
-          className="rounded-lg p-2 text-slate-400 hover:bg-background-elevated hover:text-slate-100 transition-colors"
-          onClick={toggleTheme}
-          aria-label={theme === "dark" ? "Mudar para modo claro" : "Mudar para modo escuro"}
-        >
-          {theme === "dark" ? <IconSun /> : <IconMoon />}
-        </button>
-
+      <div className="relative flex items-center gap-2">
         {/* Notification bell */}
-        <div className="relative" ref={notifRef}>
+        <div ref={notifRef}>
           <button
             className={cn(
-              "relative rounded-lg p-2 text-slate-400 hover:bg-background-elevated hover:text-slate-100 transition-colors",
-              notifOpen && "bg-background-elevated text-slate-100",
+              "relative rounded-lg p-2 text-slate-500 dark:text-slate-400 transition-colors",
+              "hover:bg-slate-100 dark:hover:bg-background-elevated hover:text-slate-900 dark:hover:text-slate-100",
+              notifOpen && "bg-slate-100 dark:bg-background-elevated text-slate-900 dark:text-slate-100",
             )}
             aria-label={
               unreadCount > 0
@@ -326,12 +322,12 @@ export function Topbar({ onMenuClick }: TopbarProps) {
         </div>
 
         {/* User dropdown */}
-        <div className="relative" ref={userMenuRef}>
+        <div ref={userMenuRef}>
           <button
             className={cn(
               "flex items-center gap-2.5 rounded-lg px-2 py-1.5 transition-colors",
-              "hover:bg-background-elevated",
-              userMenuOpen && "bg-background-elevated",
+              "hover:bg-slate-100 dark:hover:bg-background-elevated",
+              userMenuOpen && "bg-slate-100 dark:bg-background-elevated",
             )}
             onClick={() => setUserMenuOpen((v) => !v)}
             aria-label={`Menu do usuário — ${user?.name ?? ""}`}
@@ -365,54 +361,60 @@ export function Topbar({ onMenuClick }: TopbarProps) {
 
           {/* Dropdown menu */}
           {userMenuOpen && (
-            <div className="absolute right-0 top-full mt-1 w-48 rounded-xl border border-border bg-background-surface shadow-xl z-50 py-1">
-              <div className="px-3 py-2 border-b border-border">
-                <p className="text-sm font-medium text-slate-100 truncate">
+            <div className="absolute right-0 top-[calc(100%+0.5rem)] w-56 rounded-xl border border-slate-200 dark:border-border bg-white dark:bg-background-surface shadow-xl z-50 py-1">
+              {/* User info */}
+              <div className="px-3 py-2.5 border-b border-slate-200 dark:border-border">
+                <p className="text-sm font-semibold text-slate-900 dark:text-slate-100 truncate">
                   {user?.name}
                 </p>
                 <p className="text-xs text-slate-500 truncate">{user?.email}</p>
               </div>
+
+              {/* Meu perfil */}
               <button
-                className="flex w-full items-center gap-2 px-3 py-2 text-sm text-slate-300 hover:bg-background-elevated hover:text-slate-100 transition-colors"
-                onClick={() => {
-                  setUserMenuOpen(false);
-                  navigate("/profile");
-                }}
+                className="flex w-full items-center gap-2.5 px-3 py-2 text-sm text-slate-600 dark:text-slate-300 hover:bg-slate-50 dark:hover:bg-background-elevated hover:text-slate-900 dark:hover:text-slate-100 transition-colors"
+                onClick={() => { setUserMenuOpen(false); navigate("/profile"); }}
               >
-                <svg
-                  className="w-4 h-4"
-                  fill="none"
-                  viewBox="0 0 24 24"
-                  stroke="currentColor"
-                  strokeWidth={2}
-                >
-                  <path
-                    strokeLinecap="round"
-                    strokeLinejoin="round"
-                    d="M16 7a4 4 0 11-8 0 4 4 0 018 0zM12 14a7 7 0 00-7 7h14a7 7 0 00-7-7z"
-                  />
+                <svg className="w-4 h-4 shrink-0" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
+                  <path strokeLinecap="round" strokeLinejoin="round" d="M16 7a4 4 0 11-8 0 4 4 0 018 0zM12 14a7 7 0 00-7 7h14a7 7 0 00-7-7z" />
                 </svg>
                 Meu perfil
               </button>
+
+              {/* Tema */}
               <button
-                className="flex w-full items-center gap-2 px-3 py-2 text-sm text-danger hover:bg-background-elevated transition-colors"
+                className="flex w-full items-center gap-2.5 px-3 py-2 text-sm text-slate-600 dark:text-slate-300 hover:bg-slate-50 dark:hover:bg-background-elevated hover:text-slate-900 dark:hover:text-slate-100 transition-colors"
+                onClick={toggleTheme}
+              >
+                {theme === "dark" ? (
+                  <svg className="w-4 h-4 shrink-0" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
+                    <path strokeLinecap="round" strokeLinejoin="round" d="M12 3v1m0 16v1m9-9h-1M4 12H3m15.364-6.364l-.707.707M6.343 17.657l-.707.707M17.657 17.657l-.707-.707M6.343 6.343l-.707-.707M12 7a5 5 0 100 10A5 5 0 0012 7z" />
+                  </svg>
+                ) : (
+                  <svg className="w-4 h-4 shrink-0" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
+                    <path strokeLinecap="round" strokeLinejoin="round" d="M21 12.79A9 9 0 1111.21 3 7 7 0 0021 12.79z" />
+                  </svg>
+                )}
+                <span className="flex-1 text-left">
+                  {theme === "dark" ? "Modo claro" : "Modo escuro"}
+                </span>
+                {/* Toggle switch */}
+                <div className={`relative w-9 h-5 rounded-full transition-colors duration-200 ${theme === "dark" ? "bg-primary" : "bg-slate-300"}`}>
+                  <div className={`absolute top-0.5 w-4 h-4 rounded-full bg-white shadow transition-transform duration-200 ${theme === "dark" ? "translate-x-4" : "translate-x-0.5"}`} />
+                </div>
+              </button>
+
+              <div className="border-t border-slate-200 dark:border-border mt-1 pt-1">
+              <button
+                className="flex w-full items-center gap-2.5 px-3 py-2 text-sm text-danger hover:bg-slate-50 dark:hover:bg-background-elevated transition-colors"
                 onClick={handleLogout}
               >
-                <svg
-                  className="w-4 h-4"
-                  fill="none"
-                  viewBox="0 0 24 24"
-                  stroke="currentColor"
-                  strokeWidth={2}
-                >
-                  <path
-                    strokeLinecap="round"
-                    strokeLinejoin="round"
-                    d="M17 16l4-4m0 0l-4-4m4 4H7m6 4v1a3 3 0 01-3 3H6a3 3 0 01-3-3V7a3 3 0 013-3h4a3 3 0 013 3v1"
-                  />
+                <svg className="w-4 h-4 shrink-0" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
+                  <path strokeLinecap="round" strokeLinejoin="round" d="M17 16l4-4m0 0l-4-4m4 4H7m6 4v1a3 3 0 01-3 3H6a3 3 0 01-3-3V7a3 3 0 013-3h4a3 3 0 013 3v1" />
                 </svg>
                 Sair
               </button>
+            </div>
             </div>
           )}
         </div>
