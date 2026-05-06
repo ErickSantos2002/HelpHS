@@ -225,12 +225,20 @@ export default function TechnicianDashboard() {
       .finally(() => setLoading(false));
   }, [user, activePeriod]);
 
-  const tooltipStyle = {
-    backgroundColor: theme === "dark" ? "#132238" : "#ffffff",
-    border: `1px solid ${theme === "dark" ? "#1E3A5F" : "#e2e8f0"}`,
+  const tooltipBg     = theme === "dark" ? "#132238" : "#ffffff";
+  const tooltipBorder = theme === "dark" ? "#1E3A5F" : "#e2e8f0";
+  const tooltipStyle  = {
+    backgroundColor: tooltipBg,
+    border: `1px solid ${tooltipBorder}`,
     borderRadius: "8px",
     color: theme === "dark" ? "#f1f5f9" : "#0f172a",
     fontSize: "12px",
+  };
+  const tooltipWrapper = {
+    backgroundColor: tooltipBg,
+    border: `1px solid ${tooltipBorder}`,
+    borderRadius: "8px",
+    outline: "none",
   };
 
   if (loading) return <div className="flex h-64 items-center justify-center"><Spinner size="lg" /></div>;
@@ -381,7 +389,7 @@ export default function TechnicianDashboard() {
                   </defs>
                   <XAxis dataKey="date" tickFormatter={fmtDate} tick={{ fill: axisColor, fontSize: 11 }} axisLine={false} tickLine={false} interval="preserveStartEnd" />
                   <YAxis tick={{ fill: axisColor, fontSize: 11 }} axisLine={false} tickLine={false} allowDecimals={false} />
-                  <Tooltip contentStyle={tooltipStyle} labelFormatter={(v) => fmtDate(String(v))} formatter={(v: number) => [v, "Tickets"]} />
+                  <Tooltip contentStyle={tooltipStyle} wrapperStyle={tooltipWrapper} labelFormatter={(v) => fmtDate(String(v))} formatter={(v: number) => [v, "Tickets"]} />
                   <Area type="monotone" dataKey="count" stroke="#0ea5e9" strokeWidth={2} fill="url(#techGradient)" dot={false} activeDot={{ r: 4, fill: "#0ea5e9" }} />
                 </AreaChart>
               </ResponsiveContainer>

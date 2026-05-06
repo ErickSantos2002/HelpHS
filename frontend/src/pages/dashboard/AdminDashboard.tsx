@@ -217,12 +217,21 @@ export default function AdminDashboard() {
     return () => document.removeEventListener("mousedown", onClickOutside);
   }, []);
 
+  const tooltipBg     = theme === "dark" ? "#132238" : "#ffffff";
+  const tooltipBorder = theme === "dark" ? "#1E3A5F" : "#e2e8f0";
+  const tooltipColor  = theme === "dark" ? "#f1f5f9" : "#0f172a";
   const tooltipStyle = {
-    backgroundColor: theme === "dark" ? "#132238" : "#ffffff",
-    border: `1px solid ${theme === "dark" ? "#1E3A5F" : "#e2e8f0"}`,
+    backgroundColor: tooltipBg,
+    border: `1px solid ${tooltipBorder}`,
     borderRadius: "8px",
-    color: theme === "dark" ? "#f1f5f9" : "#0f172a",
+    color: tooltipColor,
     fontSize: "12px",
+  };
+  const tooltipWrapper = {
+    backgroundColor: tooltipBg,
+    border: `1px solid ${tooltipBorder}`,
+    borderRadius: "8px",
+    outline: "none",
   };
   const axisColor = theme === "dark" ? "#475569" : "#94a3b8";
   const gridColor = theme === "dark" ? "#1E3A5F" : "#f1f5f9";
@@ -534,7 +543,7 @@ export default function AdminDashboard() {
                   </defs>
                   <XAxis dataKey="date" tickFormatter={fmtDate} tick={{ fill: axisColor, fontSize: 11 }} axisLine={false} tickLine={false} interval="preserveStartEnd" />
                   <YAxis tick={{ fill: axisColor, fontSize: 11 }} axisLine={false} tickLine={false} allowDecimals={false} />
-                  <Tooltip contentStyle={tooltipStyle} labelFormatter={(v) => fmtDate(String(v))} formatter={(v: number) => [v, "Tickets"]} />
+                  <Tooltip contentStyle={tooltipStyle} wrapperStyle={tooltipWrapper} labelFormatter={(v) => fmtDate(String(v))} formatter={(v: number) => [v, "Tickets"]} />
                   <Area type="monotone" dataKey="count" stroke="#0ea5e9" strokeWidth={2.5} fill="url(#aGrad)" dot={false} activeDot={{ r: 4, fill: "#0ea5e9", strokeWidth: 0 }} />
                 </AreaChart>
               </ResponsiveContainer>
@@ -558,7 +567,7 @@ export default function AdminDashboard() {
                       <Pie data={statusData} cx="50%" cy="50%" innerRadius={55} outerRadius={82} paddingAngle={3} dataKey="value">
                         {statusData.map((e) => <Cell key={e.name} fill={STATUS_COLORS[e.name] ?? "#475569"} />)}
                       </Pie>
-                      <Tooltip contentStyle={tooltipStyle} />
+                      <Tooltip contentStyle={tooltipStyle} wrapperStyle={tooltipWrapper} />
                     </PieChart>
                   </ResponsiveContainer>
                   <div className="absolute inset-0 flex flex-col items-center justify-center pointer-events-none">
@@ -615,7 +624,18 @@ export default function AdminDashboard() {
             <BarChart data={priorityData} margin={{ top: 4, right: 4, left: -24, bottom: 0 }} barSize={36}>
               <XAxis dataKey="name" tick={{ fill: axisColor, fontSize: 12 }} axisLine={false} tickLine={false} />
               <YAxis tick={{ fill: axisColor, fontSize: 12 }} axisLine={false} tickLine={false} allowDecimals={false} />
-              <Tooltip contentStyle={tooltipStyle} cursor={{ fill: gridColor }} formatter={(v: number) => [v, "Tickets"]} />
+              <Tooltip
+                cursor={{ fill: gridColor }}
+                content={({ active, payload, label }) => {
+                  if (!active || !payload?.length) return null;
+                  return (
+                    <div style={{ backgroundColor: tooltipBg, border: `1px solid ${tooltipBorder}`, borderRadius: 8, padding: "8px 12px", fontSize: 12, color: tooltipColor }}>
+                      <p style={{ fontWeight: 600, marginBottom: 4 }}>{label}</p>
+                      <p style={{ color: "#0ea5e9" }}>Tickets : {payload[0].value}</p>
+                    </div>
+                  );
+                }}
+              />
               <Bar dataKey="value" radius={[6, 6, 0, 0]} name="Tickets">
                 {priorityData.map((e) => <Cell key={e.name} fill={PRIORITY_COLORS[e.name] ?? "#475569"} />)}
               </Bar>
