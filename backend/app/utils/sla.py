@@ -32,8 +32,8 @@ from app.models.models import SLAConfig, Ticket, TicketStatus
 
 SP_TZ = pytz.timezone("America/Sao_Paulo")
 _WORK_START = 8  # 08:00
-_WORK_END = 18  # 18:00
-_WORK_HOURS_PER_DAY = _WORK_END - _WORK_START  # 10 h
+_WORK_END = 17  # 17:00
+_WORK_HOURS_PER_DAY = _WORK_END - _WORK_START  # 9 h
 
 _PAUSE_STATUSES = frozenset({TicketStatus.awaiting_client, TicketStatus.awaiting_technical})
 _TERMINAL_STATUSES = frozenset({TicketStatus.resolved, TicketStatus.closed, TicketStatus.cancelled})

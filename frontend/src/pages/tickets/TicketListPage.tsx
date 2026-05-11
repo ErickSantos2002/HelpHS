@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useState } from "react";
+import { useEffect, useMemo, useRef, useState } from "react";
 import { useNavigate } from "react-router-dom";
 import { Alert, Spinner } from "../../components/ui";
 import { cn } from "../../lib/utils";
@@ -53,11 +53,62 @@ const COLUMNS: {
   { status: "closed",             label: "Fechado",      desc: "Encerrado",                   color: "#64748b", bg: "bg-slate-500/10",   text: "text-slate-500 dark:text-slate-400",   headerBg: "bg-slate-500/5 dark:bg-slate-500/10"    },
 ];
 
+// ── SLA indicator ─────────────────────────────────────────────
+
+function SlaIndicator({ ticket, now }: { ticket: Ticket; now: number }) {
+  const dueAt = ticket.sla_resolve_due_at;
+  if (!dueAt) return null;
+
+  const dueMs     = new Date(dueAt).getTime();
+  const createdMs = new Date(ticket.created_at).getTime();
+  const totalMs   = dueMs - createdMs;
+  const timeLeft  = dueMs - now;
+  const breached  = timeLeft <= 0 || ticket.sla_resolve_breach;
+  const pct       = totalMs > 0 ? Math.min(100, Math.max(0, ((now - createdMs) / totalMs) * 100)) : 100;
+
+  // Color thresholds
+  const isRed    = breached || pct >= 80;
+  const isAmber  = !isRed && pct >= 60;
+  const barColor = isRed ? "#ef4444" : isAmber ? "#f59e0b" : "#10b981";
+  const textCls  = isRed
+    ? "text-red-500 dark:text-red-400"
+    : isAmber
+    ? "text-amber-500 dark:text-amber-400"
+    : "text-emerald-500 dark:text-emerald-400";
+
+  // Format remaining time
+  let display = "Vencido";
+  if (!breached && timeLeft > 0) {
+    const h = Math.floor(timeLeft / 3_600_000);
+    const m = Math.floor((timeLeft % 3_600_000) / 60_000);
+    display = h > 0 ? `${h}h ${m}m` : `${m}m`;
+  }
+
+  return (
+    <div className="mt-2.5 space-y-1">
+      {/* Progress bar */}
+      <div className="h-1 w-full overflow-hidden rounded-full bg-slate-100 dark:bg-background-elevated">
+        <div
+          className="h-full rounded-full transition-all duration-700"
+          style={{ width: `${pct}%`, backgroundColor: barColor }}
+        />
+      </div>
+      {/* Time label */}
+      <div className={cn("flex items-center gap-1 text-[10px] font-bold", textCls)}>
+        <svg className="w-3 h-3 shrink-0" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
+          <path strokeLinecap="round" strokeLinejoin="round" d="M12 8v4l3 3m6-3a9 9 0 11-18 0 9 9 0 0118 0z" />
+        </svg>
+        <span>{breached ? "SLA Vencido" : `Resolução: ${display}`}</span>
+      </div>
+    </div>
+  );
+}
+
 // ── TicketCard ────────────────────────────────────────────────
 
-function TicketCard({ ticket }: { ticket: Ticket }) {
+function TicketCard({ ticket, now }: { ticket: Ticket; now: number }) {
   const navigate = useNavigate();
-  const pCfg    = PRIORITY_CFG[ticket.priority] ?? PRIORITY_CFG.low;
+  const pCfg     = PRIORITY_CFG[ticket.priority] ?? PRIORITY_CFG.low;
   const hasBreach = ticket.sla_response_breach || ticket.sla_resolve_breach;
   const initials  = ticket.assignee_name
     ? ticket.assignee_name.split(" ").slice(0, 2).map((w) => w[0]).join("").toUpperCase()
@@ -122,13 +173,16 @@ function TicketCard({ ticket }: { ticket: Ticket }) {
           </div>
         )}
       </div>
+
+      {/* SLA bar — only when sla_resolve_due_at is set */}
+      <SlaIndicator ticket={ticket} now={now} />
     </button>
   );
 }
 
 // ── KanbanColumn ──────────────────────────────────────────────
 
-function KanbanColumn({ col, tickets }: { col: typeof COLUMNS[0]; tickets: Ticket[] }) {
+function KanbanColumn({ col, tickets, now }: { col: typeof COLUMNS[0]; tickets: Ticket[]; now: number }) {
   return (
     <div className="flex flex-col w-[268px] min-w-[268px] rounded-xl bg-slate-100 dark:bg-background-elevated border border-slate-200 dark:border-border overflow-hidden">
       {/* Header */}
@@ -158,7 +212,7 @@ function KanbanColumn({ col, tickets }: { col: typeof COLUMNS[0]; tickets: Ticke
             <p className="text-xs text-slate-400">Nenhum ticket</p>
           </div>
         ) : (
-          tickets.map((t) => <TicketCard key={t.id} ticket={t} />)
+          tickets.map((t) => <TicketCard key={t.id} ticket={t} now={now} />)
         )}
       </div>
     </div>
@@ -176,6 +230,14 @@ export default function TicketListPage() {
   const [search, setSearch]                 = useState("");
   const [filterPriority, setFilterPriority] = useState("");
   const [filterAssignee, setFilterAssignee] = useState<"all" | "unassigned" | "assigned">("all");
+
+  // Clock compartilhado — atualiza todos os cards a cada minuto sem um interval por card
+  const [now, setNow] = useState(() => Date.now());
+  const clockRef = useRef<ReturnType<typeof setInterval> | null>(null);
+  useEffect(() => {
+    clockRef.current = setInterval(() => setNow(Date.now()), 60_000);
+    return () => { if (clockRef.current) clearInterval(clockRef.current); };
+  }, []);
 
   useEffect(() => {
     setLoading(true);
@@ -308,6 +370,7 @@ export default function TicketListPage() {
                 key={col.status}
                 col={col}
                 tickets={grouped.get(col.status) ?? []}
+                now={now}
               />
             ))}
           </div>

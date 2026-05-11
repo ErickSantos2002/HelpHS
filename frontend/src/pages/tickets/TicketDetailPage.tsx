@@ -42,7 +42,7 @@ import { getTechnicians, type UserSummary } from "../../services/userService";
 import { getTags, setTicketTags, type Tag } from "../../services/tagService";
 import { TICKET_TRANSITIONS } from "../../lib/ticketConstants";
 
-// ── Status options ────────────────────────────────────────────
+// ── Constants ─────────────────────────────────────────────────
 
 const STATUS_LABEL: Record<string, string> = {
   open: "Aberto",
@@ -67,9 +67,120 @@ const FIELD_LABEL: Record<string, string> = {
   technician_notes: "Notas internas atualizadas",
 };
 
+const CATEGORY_LABEL: Record<string, string> = {
+  hardware: "Hardware",
+  software: "Software",
+  network: "Rede",
+  access: "Acesso",
+  email: "E-mail",
+  security: "Segurança",
+  general: "Geral",
+  other: "Outro",
+};
+
+// ── SVG Icons ─────────────────────────────────────────────────
+
+const IC = {
+  ArrowLeft: (
+    <svg className="w-3.5 h-3.5" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2.5}>
+      <path strokeLinecap="round" strokeLinejoin="round" d="M10 19l-7-7m0 0l7-7m-7 7h18" />
+    </svg>
+  ),
+  Check: (cls = "w-4 h-4") => (
+    <svg className={cls} fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2.5}>
+      <path strokeLinecap="round" strokeLinejoin="round" d="M5 13l4 4L19 7" />
+    </svg>
+  ),
+  User: (
+    <svg className="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
+      <path strokeLinecap="round" strokeLinejoin="round" d="M16 7a4 4 0 11-8 0 4 4 0 018 0zM12 14a7 7 0 00-7 7h14a7 7 0 00-7-7z" />
+    </svg>
+  ),
+  Calendar: (
+    <svg className="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
+      <path strokeLinecap="round" strokeLinejoin="round" d="M8 7V3m8 4V3m-9 8h10M5 21h14a2 2 0 002-2V7a2 2 0 00-2-2H5a2 2 0 00-2 2v12a2 2 0 002 2z" />
+    </svg>
+  ),
+  Folder: (
+    <svg className="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
+      <path strokeLinecap="round" strokeLinejoin="round" d="M3 7a2 2 0 012-2h3.586a1 1 0 01.707.293l1.414 1.414A1 1 0 0011.414 7H19a2 2 0 012 2v9a2 2 0 01-2 2H5a2 2 0 01-2-2V7z" />
+    </svg>
+  ),
+  Clip: (
+    <svg className="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
+      <path strokeLinecap="round" strokeLinejoin="round" d="M15.172 7l-6.586 6.586a2 2 0 102.828 2.828l6.414-6.586a4 4 0 00-5.656-5.656l-6.415 6.585a6 6 0 108.486 8.486L20.5 13" />
+    </svg>
+  ),
+  Clock: (
+    <svg className="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
+      <path strokeLinecap="round" strokeLinejoin="round" d="M12 8v4l3 3m6-3a9 9 0 11-18 0 9 9 0 0118 0z" />
+    </svg>
+  ),
+  Edit: (
+    <svg className="w-3.5 h-3.5" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
+      <path strokeLinecap="round" strokeLinejoin="round" d="M11 5H6a2 2 0 00-2 2v11a2 2 0 002 2h11a2 2 0 002-2v-5m-1.414-9.414a2 2 0 112.828 2.828L11.828 15H9v-2.828l8.586-8.586z" />
+    </svg>
+  ),
+  Lock: (
+    <svg className="w-3.5 h-3.5" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
+      <path strokeLinecap="round" strokeLinejoin="round" d="M12 15v2m-6 4h12a2 2 0 002-2v-6a2 2 0 00-2-2H6a2 2 0 00-2 2v6a2 2 0 002 2zm10-10V7a4 4 0 00-8 0v4h8z" />
+    </svg>
+  ),
+  Refresh: (
+    <svg className="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
+      <path strokeLinecap="round" strokeLinejoin="round" d="M4 4v5h.582m15.356 2A8.001 8.001 0 004.582 9m0 0H9m11 11v-5h-.581m0 0a8.003 8.003 0 01-15.357-2m15.357 2H15" />
+    </svg>
+  ),
+  UserPlus: (
+    <svg className="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
+      <path strokeLinecap="round" strokeLinejoin="round" d="M18 9v3m0 0v3m0-3h3m-3 0h-3m-2-5a4 4 0 11-8 0 4 4 0 018 0zM3 20a6 6 0 0112 0v1H3v-1z" />
+    </svg>
+  ),
+  Download: (
+    <svg className="w-3.5 h-3.5" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
+      <path strokeLinecap="round" strokeLinejoin="round" d="M4 16v1a3 3 0 003 3h10a3 3 0 003-3v-1m-4-4l-4 4m0 0l-4-4m4 4V4" />
+    </svg>
+  ),
+  X: (
+    <svg className="w-3.5 h-3.5" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2.5}>
+      <path strokeLinecap="round" strokeLinejoin="round" d="M6 18L18 6M6 6l12 12" />
+    </svg>
+  ),
+  Alert: (
+    <svg className="w-3.5 h-3.5" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
+      <path strokeLinecap="round" strokeLinejoin="round" d="M12 9v2m0 4h.01m-6.938 4h13.856c1.54 0 2.502-1.667 1.732-3L13.732 4c-.77-1.333-2.694-1.333-3.464 0L3.34 16c-.77 1.333.192 3 1.732 3z" />
+    </svg>
+  ),
+  Tag: (
+    <svg className="w-3.5 h-3.5" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
+      <path strokeLinecap="round" strokeLinejoin="round" d="M7 7h.01M7 3h5c.512 0 1.024.195 1.414.586l7 7a2 2 0 010 2.828l-7 7a2 2 0 01-2.828 0l-7-7A1.994 1.994 0 013 12V7a4 4 0 014-4z" />
+    </svg>
+  ),
+  Text: (
+    <svg className="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
+      <path strokeLinecap="round" strokeLinejoin="round" d="M4 6h16M4 12h16M4 18h7" />
+    </svg>
+  ),
+  Activity: (
+    <svg className="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
+      <path strokeLinecap="round" strokeLinejoin="round" d="M13 10V3L4 14h7v7l9-11h-7z" />
+    </svg>
+  ),
+  Star: (
+    <svg className="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
+      <path strokeLinecap="round" strokeLinejoin="round" d="M11.049 2.927c.3-.921 1.603-.921 1.902 0l1.519 4.674a1 1 0 00.95.69h4.915c.969 0 1.371 1.24.588 1.81l-3.976 2.888a1 1 0 00-.363 1.118l1.518 4.674c.3.922-.755 1.688-1.538 1.118l-3.976-2.888a1 1 0 00-1.176 0l-3.976 2.888c-.783.57-1.838-.197-1.538-1.118l1.518-4.674a1 1 0 00-.363-1.118l-3.976-2.888c-.784-.57-.38-1.81.588-1.81h4.914a1 1 0 00.951-.69l1.519-4.674z" />
+    </svg>
+  ),
+  Plus: (
+    <svg className="w-3.5 h-3.5" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2.5}>
+      <path strokeLinecap="round" strokeLinejoin="round" d="M12 4v16m8-8H4" />
+    </svg>
+  ),
+};
+
 // ── SLA Countdown ─────────────────────────────────────────────
 
-function SlaCountdown({
+function SlaChip({
   label,
   dueAt,
   breached,
@@ -82,82 +193,91 @@ function SlaCountdown({
 
   useEffect(() => {
     if (!dueAt) return;
-
     function update() {
       const diff = new Date(dueAt!).getTime() - Date.now();
-      if (diff <= 0) {
-        setDisplay("Vencido");
-        return;
-      }
+      if (diff <= 0) { setDisplay("Vencido"); return; }
       const h = Math.floor(diff / 3600000);
       const m = Math.floor((diff % 3600000) / 60000);
       setDisplay(h > 0 ? `${h}h ${m}m` : `${m}m`);
     }
-
     update();
-    const interval = setInterval(update, 60000);
-    return () => clearInterval(interval);
+    const t = setInterval(update, 60000);
+    return () => clearInterval(t);
   }, [dueAt]);
 
   if (!dueAt) return null;
 
   return (
-    <div
-      className={`text-xs px-2 py-1 rounded-md font-medium ${
+    <span
+      className={`inline-flex items-center gap-1.5 rounded-md px-2 py-1 text-xs font-semibold ${
         breached
-          ? "bg-danger/20 text-danger-400"
-          : "bg-warning/20 text-warning-400"
+          ? "bg-red-500/15 text-red-400 ring-1 ring-inset ring-red-500/25"
+          : "bg-amber-500/15 text-amber-400 ring-1 ring-inset ring-amber-500/25"
       }`}
     >
-      {label}: {display}
-    </div>
+      {IC.Clock}
+      {label}: <span>{display}</span>
+    </span>
   );
 }
 
-// ── Timeline entry ────────────────────────────────────────────
+// ── Activity entry ────────────────────────────────────────────
 
-function TimelineEntry({ entry }: { entry: TicketHistory }) {
+function ActivityEntry({ entry }: { entry: TicketHistory }) {
   const label = FIELD_LABEL[entry.field] ?? entry.field;
-  const date = new Date(entry.created_at).toLocaleString("pt-BR", {
-    day: "2-digit",
-    month: "2-digit",
-    year: "numeric",
-    hour: "2-digit",
-    minute: "2-digit",
-  });
+  const diff = Date.now() - new Date(entry.created_at).getTime();
+  const mins = Math.floor(diff / 60000);
+  const hours = Math.floor(mins / 60);
+  const days = Math.floor(hours / 24);
+  const relTime =
+    days > 0 ? `${days}d atrás` : hours > 0 ? `${hours}h atrás` : mins > 0 ? `${mins}m atrás` : "agora";
+
+  const dotColor =
+    entry.field === "created"
+      ? "bg-sky-500"
+      : entry.field === "status"
+      ? "bg-violet-500"
+      : entry.field === "assignee_id"
+      ? "bg-emerald-500"
+      : "bg-slate-500";
 
   return (
-    <div className="flex gap-3">
-      {/* Dot */}
-      <div className="flex flex-col items-center">
-        <div className="w-2 h-2 rounded-full bg-border mt-1.5 shrink-0" />
-        <div className="w-px flex-1 bg-border mt-1" />
+    <div className="flex gap-3 group">
+      <div className="flex flex-col items-center pt-1 shrink-0">
+        <span className={`w-2 h-2 rounded-full shrink-0 ${dotColor}`} />
+        <span className="w-px flex-1 bg-border/40 mt-1.5" />
       </div>
-
-      <div className="pb-4 min-w-0">
-        <p className="text-sm font-medium text-slate-200">{label}</p>
+      <div className="pb-4 min-w-0 flex-1">
+        <div className="flex items-baseline justify-between gap-2">
+          <p className="text-sm font-medium text-slate-200">{label}</p>
+          <time className="text-[11px] text-slate-500 shrink-0">{relTime}</time>
+        </div>
         {entry.field === "status" && entry.new_value && (
-          <p className="text-xs text-slate-400 mt-0.5">
-            {entry.old_value
-              ? `${STATUS_LABEL[entry.old_value] ?? entry.old_value} → `
-              : ""}
+          <div className="flex items-center gap-2 mt-1">
+            {entry.old_value && (
+              <>
+                <StatusBadge status={entry.old_value as never} />
+                <svg className="w-3 h-3 text-slate-600" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
+                  <path strokeLinecap="round" strokeLinejoin="round" d="M9 5l7 7-7 7" />
+                </svg>
+              </>
+            )}
             <StatusBadge status={entry.new_value as never} />
-          </p>
+          </div>
         )}
         {entry.comment && (
-          <p className="text-xs text-slate-400 mt-1 italic">
+          <p className="mt-1.5 text-xs text-slate-400 italic bg-background-elevated/60 rounded-lg px-3 py-2 border border-border/30">
             "{entry.comment}"
           </p>
         )}
-        <p className="text-xs text-slate-600 mt-0.5">{date}</p>
       </div>
     </div>
   );
 }
 
-// ── Attachment row ────────────────────────────────────────────
+// ── Attachment item ───────────────────────────────────────────
 
-function AttachmentRow({
+function AttachmentItem({
   attachment,
   canDelete,
   onDelete,
@@ -170,59 +290,112 @@ function AttachmentRow({
     const url = await getAttachmentUrl(attachment.id);
     window.open(url, "_blank");
   }
-
+  const ext = attachment.original_name.split(".").pop()?.toUpperCase() ?? "FILE";
   const sizeMb = (attachment.size_bytes / 1024 / 1024).toFixed(1);
 
   return (
-    <div className="flex items-center justify-between rounded-md bg-background-elevated px-3 py-2 text-sm">
-      <button
-        onClick={download}
-        className="text-primary hover:underline truncate max-w-xs text-left"
-      >
-        {attachment.original_name}
-      </button>
-      <span className="flex items-center gap-3 shrink-0">
-        <span className="text-slate-500 text-xs">{sizeMb} MB</span>
+    <div className="group flex items-center gap-3 rounded-lg border border-border/50 bg-background-elevated/40 px-3 py-2.5 hover:border-primary/30 hover:bg-primary/5 transition-all">
+      <div className="flex h-9 w-9 shrink-0 items-center justify-center rounded-lg bg-primary/10 text-[10px] font-bold text-primary">
+        {ext.slice(0, 4)}
+      </div>
+      <div className="min-w-0 flex-1">
+        <button
+          onClick={download}
+          className="block w-full truncate text-left text-sm font-medium text-slate-200 hover:text-primary transition-colors cursor-pointer"
+        >
+          {attachment.original_name}
+        </button>
+        <p className="text-xs text-slate-500">{sizeMb} MB</p>
+      </div>
+      <div className="flex items-center gap-1 opacity-0 group-hover:opacity-100 transition-opacity">
+        <button
+          onClick={download}
+          className="p-1.5 rounded-md text-slate-500 hover:text-primary hover:bg-primary/10 transition-colors cursor-pointer"
+          title="Baixar"
+        >
+          {IC.Download}
+        </button>
         {canDelete && (
           <button
             onClick={() => onDelete(attachment.id)}
-            className="text-slate-500 hover:text-danger transition-colors text-xs"
-            aria-label="Excluir anexo"
+            className="p-1.5 rounded-md text-slate-500 hover:text-red-400 hover:bg-red-500/10 transition-colors cursor-pointer"
+            title="Excluir"
           >
-            ✕
+            {IC.X}
           </button>
         )}
-      </span>
+      </div>
     </div>
   );
 }
 
-// ── Info row ──────────────────────────────────────────────────
+// ── Sidebar prop row ──────────────────────────────────────────
 
-function InfoRow({ label, value }: { label: string; value?: string | null }) {
-  if (!value) return null;
+function PropRow({ icon, label, children }: { icon: JSX.Element; label: string; children: React.ReactNode }) {
   return (
-    <div>
-      <p className="text-xs font-medium text-slate-500 uppercase tracking-wider mb-0.5">
-        {label}
-      </p>
-      <p className="text-sm text-slate-200">{value}</p>
+    <div className="flex items-start gap-3 py-2.5 border-b border-border/30 last:border-0">
+      <span className="mt-0.5 shrink-0 text-slate-500">{icon}</span>
+      <div className="min-w-0 flex-1">
+        <p className="mb-0.5 text-[10px] font-semibold uppercase tracking-widest text-slate-500">{label}</p>
+        <div className="text-sm font-medium text-slate-200">{children}</div>
+      </div>
     </div>
   );
 }
 
-// ── SurveyPanel ───────────────────────────────────────────────
+// ── Section header ────────────────────────────────────────────
 
-function ScoreRating({
-  value,
-  onChange,
+function SectionHeader({ icon, title, action }: { icon: JSX.Element; title: string; action?: JSX.Element }) {
+  return (
+    <div className="flex items-center justify-between mb-4">
+      <h2 className="flex items-center gap-2 text-sm font-semibold text-slate-200">
+        <span className="text-slate-500">{icon}</span>
+        {title}
+      </h2>
+      {action}
+    </div>
+  );
+}
+
+// ── Sidebar action button ─────────────────────────────────────
+
+function SidebarAction({
+  icon,
+  label,
+  onClick,
+  variant = "default",
 }: {
-  value: number;
-  onChange: (v: number) => void;
+  icon: JSX.Element;
+  label: string;
+  onClick: () => void;
+  variant?: "primary" | "default" | "ghost";
 }) {
+  const cls = {
+    primary:
+      "bg-emerald-600 hover:bg-emerald-500 text-white border-emerald-600",
+    default:
+      "bg-background-elevated hover:bg-background-elevated/80 text-slate-200 border-border/50 hover:border-border",
+    ghost:
+      "bg-transparent hover:bg-background-elevated text-slate-400 hover:text-slate-200 border-border/30",
+  }[variant];
+
+  return (
+    <button
+      onClick={onClick}
+      className={`flex w-full items-center justify-center gap-2 rounded-lg border px-4 py-2 text-sm font-semibold transition-all cursor-pointer ${cls}`}
+    >
+      {icon}
+      {label}
+    </button>
+  );
+}
+
+// ── CSAT Survey ───────────────────────────────────────────────
+
+function ScoreRating({ value, onChange }: { value: number; onChange: (v: number) => void }) {
   const [hovered, setHovered] = useState(0);
   return (
-    <div className="flex gap-1 flex-wrap">
+    <div className="flex flex-wrap gap-1.5">
       {[1, 2, 3, 4, 5, 6, 7, 8, 9, 10].map((n) => {
         const active = n <= (hovered || value);
         return (
@@ -233,10 +406,10 @@ function ScoreRating({
             onMouseEnter={() => setHovered(n)}
             onMouseLeave={() => setHovered(0)}
             aria-label={`Nota ${n}`}
-            className={`w-8 h-8 rounded-md text-sm font-semibold transition-colors border ${
+            className={`h-9 w-9 rounded-lg text-sm font-bold transition-all border cursor-pointer ${
               active
-                ? "bg-yellow-400 border-yellow-400 text-slate-900"
-                : "border-slate-600 text-slate-400 hover:border-yellow-400 hover:text-yellow-400"
+                ? "bg-yellow-400 border-yellow-400 text-slate-900 shadow-sm"
+                : "border-border/60 text-slate-400 hover:border-yellow-400/60 hover:text-yellow-400"
             }`}
           >
             {n}
@@ -248,16 +421,8 @@ function ScoreRating({
 }
 
 const RATING_LABELS: Record<number, string> = {
-  1: "Péssimo",
-  2: "Muito ruim",
-  3: "Ruim",
-  4: "Abaixo do esperado",
-  5: "Regular",
-  6: "Satisfatório",
-  7: "Bom",
-  8: "Muito bom",
-  9: "Ótimo",
-  10: "Excelente",
+  1: "Péssimo", 2: "Muito ruim", 3: "Ruim", 4: "Abaixo do esperado", 5: "Regular",
+  6: "Satisfatório", 7: "Bom", 8: "Muito bom", 9: "Ótimo", 10: "Excelente",
 };
 
 function SurveyPanel({ ticketId }: { ticketId: string }) {
@@ -267,101 +432,111 @@ function SurveyPanel({ ticketId }: { ticketId: string }) {
   const [submitting, setSubmitting] = useState(false);
   const [error, setError] = useState<string | null>(null);
 
-  useEffect(() => {
-    getTicketSurvey(ticketId).then(setSurvey);
-  }, [ticketId]);
-
-  if (survey === undefined) return null; // loading
+  useEffect(() => { getTicketSurvey(ticketId).then(setSurvey); }, [ticketId]);
+  if (survey === undefined) return null;
 
   async function handleSubmit() {
     if (rating === 0) return;
     setSubmitting(true);
     setError(null);
     try {
-      const result = await submitSurvey(ticketId, {
-        rating,
-        comment: comment.trim() || undefined,
-      });
-      setSurvey(result);
+      setSurvey(await submitSurvey(ticketId, { rating, comment: comment.trim() || undefined }));
     } catch {
-      setError("Não foi possível enviar a avaliação. Tente novamente.");
+      setError("Não foi possível enviar a avaliação.");
     } finally {
       setSubmitting(false);
     }
   }
 
   return (
-    <div className="rounded-xl bg-background-surface border border-border p-5 space-y-4">
-      <h2 className="text-sm font-semibold text-slate-300">
-        Pesquisa de satisfação
-      </h2>
-
-      {survey ? (
-        <div className="space-y-2">
-          <div className="flex items-center gap-3">
-            <span className="text-slate-400 text-sm">Sua avaliação:</span>
-            <span className="text-2xl font-bold text-yellow-400">
-              {survey.rating}
-              <span className="text-base text-slate-500 font-normal">/10</span>
-            </span>
-            <span className="text-xs text-slate-400">
-              {RATING_LABELS[survey.rating]}
-            </span>
-          </div>
-          {survey.comment && (
-            <p className="text-sm text-slate-400 italic">"{survey.comment}"</p>
-          )}
-          <p className="text-xs text-slate-600">
-            Enviado em{" "}
-            {new Date(survey.created_at).toLocaleString("pt-BR", {
-              day: "2-digit",
-              month: "2-digit",
-              year: "numeric",
-              hour: "2-digit",
-              minute: "2-digit",
-            })}
-          </p>
-        </div>
-      ) : (
-        <div className="space-y-3">
-          <p className="text-sm text-slate-400">
-            Como você avalia o atendimento deste ticket?
-          </p>
-          <div className="flex items-center gap-3">
-            <ScoreRating value={rating} onChange={setRating} />
-            {rating > 0 && (
-              <span className="text-sm text-slate-300">
-                {RATING_LABELS[rating]}
+    <div className="rounded-xl border border-border/50 bg-background-surface">
+      <div className="flex items-center gap-2 border-b border-border/40 px-5 py-3.5">
+        <span className="text-yellow-400">{IC.Star}</span>
+        <h2 className="text-sm font-semibold text-slate-200">Pesquisa de satisfação</h2>
+      </div>
+      <div className="p-5">
+        {survey ? (
+          <div className="space-y-2">
+            <div className="flex items-center gap-3">
+              <span className="text-3xl font-extrabold text-yellow-400">
+                {survey.rating}<span className="text-base font-normal text-slate-500">/10</span>
               </span>
+              <span className="text-sm text-slate-400">{RATING_LABELS[survey.rating]}</span>
+            </div>
+            {survey.comment && (
+              <p className="text-sm italic text-slate-400 bg-background-elevated/60 rounded-lg px-3 py-2">
+                "{survey.comment}"
+              </p>
             )}
+            <p className="text-xs text-slate-600">
+              Enviado em {new Date(survey.created_at).toLocaleString("pt-BR")}
+            </p>
           </div>
-          <Textarea
-            placeholder="Comentário opcional…"
-            rows={2}
-            value={comment}
-            onChange={(e) => setComment(e.target.value)}
-          />
-          {error && <Alert variant="danger">{error}</Alert>}
-          <Button
-            onClick={handleSubmit}
-            loading={submitting}
-            disabled={rating === 0}
-            size="sm"
-          >
-            Enviar avaliação
-          </Button>
-        </div>
-      )}
+        ) : (
+          <div className="space-y-4">
+            <p className="text-sm text-slate-400">Como você avalia o atendimento?</p>
+            <div className="space-y-2">
+              <ScoreRating value={rating} onChange={setRating} />
+              {rating > 0 && (
+                <p className="text-sm font-semibold text-yellow-400">{RATING_LABELS[rating]}</p>
+              )}
+            </div>
+            <Textarea placeholder="Comentário opcional…" rows={2} value={comment} onChange={(e) => setComment(e.target.value)} />
+            {error && <Alert variant="danger">{error}</Alert>}
+            <Button onClick={handleSubmit} loading={submitting} disabled={rating === 0} size="sm">
+              Enviar avaliação
+            </Button>
+          </div>
+        )}
+      </div>
     </div>
   );
 }
 
-// ── TicketDetailPage ──────────────────────────────────────────
+// ── Tabs ──────────────────────────────────────────────────────
+
+type Tab = "conversa" | "detalhes" | "historico" | "anexos";
+
+function TabBar({ active, setActive, counts }: { active: Tab; setActive: (t: Tab) => void; counts: Partial<Record<Tab, number>> }) {
+  const tabs: { id: Tab; label: string }[] = [
+    { id: "conversa", label: "Conversa" },
+    { id: "detalhes", label: "Detalhes" },
+    { id: "historico", label: "Atividade" },
+    { id: "anexos", label: "Anexos" },
+  ];
+  return (
+    <div className="flex gap-0.5 rounded-xl bg-background-elevated/50 p-1">
+      {tabs.map((tab) => (
+        <button
+          key={tab.id}
+          onClick={() => setActive(tab.id)}
+          className={`flex flex-1 items-center justify-center gap-1.5 rounded-lg px-3 py-2 text-sm font-semibold transition-all cursor-pointer ${
+            active === tab.id
+              ? "bg-background-surface text-slate-100 shadow-sm"
+              : "text-slate-500 hover:text-slate-300"
+          }`}
+        >
+          {tab.label}
+          {counts[tab.id] !== undefined && counts[tab.id]! > 0 && (
+            <span className={`rounded-full px-1.5 py-0.5 text-[10px] font-bold leading-none ${
+              active === tab.id ? "bg-primary/20 text-primary" : "bg-background-elevated text-slate-500"
+            }`}>
+              {counts[tab.id]}
+            </span>
+          )}
+        </button>
+      ))}
+    </div>
+  );
+}
+
+// ── Main Component ────────────────────────────────────────────
 
 export default function TicketDetailPage() {
   const { id } = useParams<{ id: string }>();
   const navigate = useNavigate();
   const { user } = useAuth();
+  const [activeTab, setActiveTab] = useState<Tab>("conversa");
 
   const [ticket, setTicket] = useState<Ticket | null>(null);
   const [history, setHistory] = useState<TicketHistory[]>([]);
@@ -370,60 +545,49 @@ export default function TicketDetailPage() {
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
 
-  // Modals
   const [statusModal, setStatusModal] = useState(false);
   const [assignModal, setAssignModal] = useState(false);
   const [uploadModal, setUploadModal] = useState(false);
   const [resolveModal, setResolveModal] = useState(false);
 
-  // Resolve form
   const [resolveNote, setResolveNote] = useState("");
   const [resolveLoading, setResolveLoading] = useState(false);
   const [resolveError, setResolveError] = useState<string | null>(null);
 
-  // Status change form
   const [newStatus, setNewStatus] = useState("");
   const [statusComment, setStatusComment] = useState("");
   const [statusLoading, setStatusLoading] = useState(false);
   const [statusError, setStatusError] = useState<string | null>(null);
 
-  // Assign form
   const [newAssignee, setNewAssignee] = useState("");
   const [assignLoading, setAssignLoading] = useState(false);
   const [assignError, setAssignError] = useState<string | null>(null);
 
-  // Upload
   const fileInputRef = useRef<HTMLInputElement>(null);
   const [uploadFiles, setUploadFiles] = useState<File[]>([]);
   const [uploadLoading, setUploadLoading] = useState(false);
   const [uploadError, setUploadError] = useState<string | null>(null);
 
-  // Notas internas do técnico
   const [notesEdit, setNotesEdit] = useState(false);
   const [notesValue, setNotesValue] = useState("");
   const [notesSaving, setNotesSaving] = useState(false);
 
-  // Observação do cliente
   const [obsEdit, setObsEdit] = useState(false);
   const [obsValue, setObsValue] = useState("");
   const [obsSaving, setObsSaving] = useState(false);
 
-  // Tags
   const [allTags, setAllTags] = useState<Tag[]>([]);
   const [tagsEdit, setTagsEdit] = useState(false);
   const [selectedTagIds, setSelectedTagIds] = useState<Set<string>>(new Set());
   const [tagsSaving, setTagsSaving] = useState(false);
 
   const isStaff = user?.role === "admin" || user?.role === "technician";
+  const isClosed = ticket?.status === "resolved" || ticket?.status === "closed" || ticket?.status === "cancelled";
 
   const load = useCallback(async () => {
     if (!id) return;
     try {
-      const [t, h, a] = await Promise.all([
-        getTicket(id),
-        getTicketHistory(id),
-        getAttachments(id),
-      ]);
+      const [t, h, a] = await Promise.all([getTicket(id), getTicketHistory(id), getAttachments(id)]);
       setTicket(t);
       setNotesValue(t.technician_notes ?? "");
       setObsValue(t.client_observation ?? "");
@@ -436,131 +600,77 @@ export default function TicketDetailPage() {
     }
   }, [id]);
 
-  useEffect(() => {
-    load();
-  }, [load]);
+  useEffect(() => { load(); }, [load]);
 
-  // Load technicians for admin assign modal
   useEffect(() => {
-    if (user?.role === "admin") {
-      getTechnicians()
-        .then(setTechnicians)
-        .catch(() => {});
-    }
+    if (user?.role === "admin") getTechnicians().then(setTechnicians).catch(() => {});
   }, [user?.role]);
 
-  // Load all available tags (staff only, for tag editing)
   useEffect(() => {
-    if (user?.role === "admin" || user?.role === "technician") {
-      getTags()
-        .then(setAllTags)
-        .catch(() => {});
-    }
-  }, [user?.role]);
+    if (isStaff) getTags().then(setAllTags).catch(() => {});
+  }, [isStaff]);
 
   async function handleStatusChange() {
     if (!ticket || !newStatus) return;
-    setStatusLoading(true);
-    setStatusError(null);
+    setStatusLoading(true); setStatusError(null);
     try {
-      const updated = await updateTicketStatus(
-        ticket.id,
-        newStatus,
-        statusComment || undefined,
-      );
+      const updated = await updateTicketStatus(ticket.id, newStatus, statusComment || undefined);
       setTicket(updated);
-      const h = await getTicketHistory(ticket.id);
-      setHistory(h.items);
-      setStatusModal(false);
-      setNewStatus("");
-      setStatusComment("");
-    } catch {
-      setStatusError("Não foi possível alterar o status.");
-    } finally {
-      setStatusLoading(false);
-    }
+      setHistory((await getTicketHistory(ticket.id)).items);
+      setStatusModal(false); setNewStatus(""); setStatusComment("");
+    } catch { setStatusError("Não foi possível alterar o status."); }
+    finally { setStatusLoading(false); }
   }
 
   async function handleResolve() {
     if (!ticket || !resolveNote.trim()) return;
-    setResolveLoading(true);
-    setResolveError(null);
+    setResolveLoading(true); setResolveError(null);
     try {
       const updated = await resolveTicket(ticket.id, resolveNote.trim());
       setTicket(updated);
-      const h = await getTicketHistory(ticket.id);
-      setHistory(h.items);
-      setResolveModal(false);
-      setResolveNote("");
-    } catch {
-      setResolveError("Não foi possível concluir o ticket.");
-    } finally {
-      setResolveLoading(false);
-    }
+      setHistory((await getTicketHistory(ticket.id)).items);
+      setResolveModal(false); setResolveNote("");
+    } catch { setResolveError("Não foi possível concluir o ticket."); }
+    finally { setResolveLoading(false); }
   }
 
   async function handleAssign(assigneeId: string | null) {
     if (!ticket) return;
-    setAssignLoading(true);
-    setAssignError(null);
+    setAssignLoading(true); setAssignError(null);
     try {
-      const updated = await assignTicket(ticket.id, assigneeId);
-      setTicket(updated);
-      setAssignModal(false);
-      setNewAssignee("");
-    } catch {
-      setAssignError("Não foi possível atribuir o ticket.");
-    } finally {
-      setAssignLoading(false);
-    }
+      setTicket(await assignTicket(ticket.id, assigneeId));
+      setAssignModal(false); setNewAssignee("");
+    } catch { setAssignError("Não foi possível atribuir o ticket."); }
+    finally { setAssignLoading(false); }
   }
 
   async function handleUpload() {
     if (!ticket || uploadFiles.length === 0) return;
-    setUploadLoading(true);
-    setUploadError(null);
+    setUploadLoading(true); setUploadError(null);
     try {
       await uploadAttachments(ticket.id, uploadFiles);
-      const a = await getAttachments(ticket.id);
-      setAttachments(a.items);
-      setUploadModal(false);
-      setUploadFiles([]);
-    } catch {
-      setUploadError(
-        "Falha no upload. Verifique os arquivos e tente novamente.",
-      );
-    } finally {
-      setUploadLoading(false);
-    }
+      setAttachments((await getAttachments(ticket.id)).items);
+      setUploadModal(false); setUploadFiles([]);
+    } catch { setUploadError("Falha no upload. Verifique os arquivos e tente novamente."); }
+    finally { setUploadLoading(false); }
   }
 
   async function handleSaveNotes() {
     if (!ticket) return;
     setNotesSaving(true);
     try {
-      const updated = await updateTicket(ticket.id, {
-        technician_notes: notesValue || null,
-      });
-      setTicket(updated);
+      setTicket(await updateTicket(ticket.id, { technician_notes: notesValue || null }));
       setNotesEdit(false);
-    } finally {
-      setNotesSaving(false);
-    }
+    } finally { setNotesSaving(false); }
   }
 
   async function handleSaveObs() {
     if (!ticket) return;
     setObsSaving(true);
     try {
-      const updated = await updateClientObservation(
-        ticket.id,
-        obsValue || null,
-      );
-      setTicket(updated);
+      setTicket(await updateClientObservation(ticket.id, obsValue || null));
       setObsEdit(false);
-    } finally {
-      setObsSaving(false);
-    }
+    } finally { setObsSaving(false); }
   }
 
   function openTagsEdit() {
@@ -572,21 +682,16 @@ export default function TicketDetailPage() {
     if (!ticket) return;
     setTagsSaving(true);
     try {
-      const updated = await setTicketTags(ticket.id, [...selectedTagIds]);
-      setTicket({ ...ticket, tags: updated });
+      setTicket({ ...ticket, tags: await setTicketTags(ticket.id, [...selectedTagIds]) });
       setTagsEdit(false);
-    } finally {
-      setTagsSaving(false);
-    }
+    } finally { setTagsSaving(false); }
   }
 
   async function handleDeleteAttachment(attachmentId: string) {
     try {
       await deleteAttachment(attachmentId);
       setAttachments((prev) => prev.filter((a) => a.id !== attachmentId));
-    } catch {
-      // silent — attachment stays visible
-    }
+    } catch { /* silent */ }
   }
 
   if (loading) {
@@ -596,606 +701,464 @@ export default function TicketDetailPage() {
       </div>
     );
   }
-
   if (error || !ticket) {
     return <Alert variant="danger">{error ?? "Ticket não encontrado."}</Alert>;
   }
 
   const transitions = TICKET_TRANSITIONS[ticket.status] ?? [];
-  const transitionOptions = transitions.map((s) => ({
-    value: s,
-    label: STATUS_LABEL[s] ?? s,
-  }));
+  const transitionOptions = transitions.map((s) => ({ value: s, label: STATUS_LABEL[s] ?? s }));
+  const assignedTech = ticket.assignee_name ?? (ticket.assignee_id ? "Técnico" : null);
+  const slaBreach = ticket.sla_response_breach || ticket.sla_resolve_breach;
 
-  const createdDate = new Date(ticket.created_at).toLocaleString("pt-BR", {
-    day: "2-digit",
-    month: "2-digit",
-    year: "numeric",
-    hour: "2-digit",
-    minute: "2-digit",
-  });
-
-  const assignedTech =
-    ticket.assignee_name ?? (ticket.assignee_id ? "Técnico" : null);
+  const visibleHistory = user?.role === "client"
+    ? history.filter((e) => ["created", "status"].includes(e.field))
+    : history;
 
   return (
-    <div className="space-y-6">
-      {/* ── Header ─────────────────────────────────────────── */}
-      <div className="flex flex-wrap items-start justify-between gap-4">
-        <div>
+    <div className="space-y-5 pb-10">
+      {/* ── Page Header ──────────────────────────────────────── */}
+      <div className="flex flex-wrap items-start justify-between gap-4 rounded-2xl border border-border/40 bg-background-surface px-5 py-4">
+        {/* Breadcrumb + title */}
+        <div className="min-w-0">
           <button
             onClick={() => navigate(-1)}
-            className="text-xs text-slate-500 hover:text-slate-300 mb-2 flex items-center gap-1 transition-colors"
+            className="mb-2 flex items-center gap-1.5 text-xs font-medium text-slate-500 hover:text-primary transition-colors cursor-pointer"
           >
-            ← Voltar
+            {IC.ArrowLeft}
+            <span>Tickets</span>
+            <span className="text-slate-600">/</span>
+            <span className="font-mono text-slate-500">{ticket.protocol}</span>
           </button>
-          <div className="flex flex-wrap items-center gap-2">
-            <span className="text-xs font-mono text-slate-500">
-              {ticket.protocol}
-            </span>
+          <h1 className="text-xl font-extrabold leading-tight text-white">{ticket.title}</h1>
+          <div className="mt-2 flex flex-wrap items-center gap-2">
             <StatusBadge status={ticket.status} />
             <PriorityBadge priority={ticket.priority} />
             {ticket.tags.map((tag) => (
               <TagBadge key={tag.id} name={tag.name} color={tag.color} />
             ))}
-            {(ticket.sla_response_breach || ticket.sla_resolve_breach) && (
-              <span className="text-xs font-medium text-danger bg-danger/10 px-2 py-0.5 rounded-full">
-                ⚠ SLA violado
+            {slaBreach && (
+              <span className="inline-flex items-center gap-1 rounded-full bg-red-500/15 px-2.5 py-0.5 text-xs font-semibold text-red-400 ring-1 ring-inset ring-red-500/25">
+                {IC.Alert}
+                SLA violado
               </span>
             )}
+            <SlaChip label="Resposta" dueAt={ticket.sla_response_due_at} breached={ticket.sla_response_breach} />
+            <SlaChip label="Resolução" dueAt={ticket.sla_resolve_due_at} breached={ticket.sla_resolve_breach} />
           </div>
-          <h1 className="text-xl font-bold text-slate-100 mt-1">
-            {ticket.title}
-          </h1>
         </div>
 
-        {/* SLA countdowns */}
-        <div className="flex flex-wrap gap-2 shrink-0">
-          <SlaCountdown
-            label="Resposta"
-            dueAt={ticket.sla_response_due_at}
-            breached={ticket.sla_response_breach}
-          />
-          <SlaCountdown
-            label="Resolução"
-            dueAt={ticket.sla_resolve_due_at}
-            breached={ticket.sla_resolve_breach}
-          />
-        </div>
+        {/* Quick resolve button in header */}
+        {isStaff && !isClosed && (
+          <button
+            onClick={() => setResolveModal(true)}
+            className="flex shrink-0 items-center gap-2 rounded-xl bg-emerald-600 px-5 py-2.5 text-sm font-bold text-white shadow-sm hover:bg-emerald-500 transition-colors cursor-pointer"
+          >
+            {IC.Check("w-4 h-4")}
+            Concluir ticket
+          </button>
+        )}
       </div>
 
-      {/* ── Body: main + sidebar ────────────────────────────── */}
-      <div className="grid grid-cols-1 lg:grid-cols-3 gap-6">
-        {/* ── Main content ──────────────────────────────────── */}
-        <div className="lg:col-span-2 space-y-6">
-          {/* Description */}
-          <div className="rounded-xl bg-background-surface border border-border p-5">
-            <h2 className="text-sm font-semibold text-slate-300 mb-3">
-              Descrição
-            </h2>
-            <p className="text-sm text-slate-200 whitespace-pre-wrap leading-relaxed">
-              {ticket.description}
-            </p>
-          </div>
-
-          {/* Observação do cliente */}
-          {(ticket.client_observation || user?.role === "client") && (
-            <div className="rounded-xl bg-background-surface border border-border p-5 space-y-3">
-              <div className="flex items-center justify-between">
-                <h2 className="text-sm font-semibold text-slate-300">
-                  Observações do solicitante
-                </h2>
-                {user?.role === "client" &&
-                  ticket.status !== "closed" &&
-                  ticket.status !== "cancelled" &&
-                  ticket.status !== "resolved" &&
-                  !obsEdit && (
-                    <Button
-                      variant="ghost"
-                      size="sm"
-                      onClick={() => setObsEdit(true)}
-                    >
-                      {ticket.client_observation ? "Editar" : "+ Adicionar"}
-                    </Button>
-                  )}
-              </div>
-
-              {obsEdit ? (
-                <div className="space-y-3">
-                  <Textarea
-                    rows={4}
-                    placeholder="Informações adicionais que podem ajudar o técnico…"
-                    value={obsValue}
-                    onChange={(e) => setObsValue(e.target.value)}
-                  />
-                  <div className="flex gap-2 justify-end">
-                    <Button
-                      variant="secondary"
-                      size="sm"
-                      onClick={() => {
-                        setObsEdit(false);
-                        setObsValue(ticket.client_observation ?? "");
-                      }}
-                      disabled={obsSaving}
-                    >
-                      Cancelar
-                    </Button>
-                    <Button
-                      size="sm"
-                      onClick={handleSaveObs}
-                      loading={obsSaving}
-                    >
-                      Salvar
-                    </Button>
-                  </div>
-                </div>
-              ) : ticket.client_observation ? (
-                <p className="text-sm text-slate-200 whitespace-pre-wrap leading-relaxed">
-                  {ticket.client_observation}
-                </p>
-              ) : (
-                <p className="text-xs text-slate-500 italic">
-                  Nenhuma observação registrada.
-                </p>
-              )}
-            </div>
-          )}
-
-          {/* Attachments */}
-          <div className="rounded-xl bg-background-surface border border-border p-5 space-y-3">
-            <div className="flex items-center justify-between">
-              <h2 className="text-sm font-semibold text-slate-300">
-                Anexos ({attachments.length})
-              </h2>
-              {isStaff && (
-                <Button
-                  variant="ghost"
-                  size="sm"
-                  onClick={() => setUploadModal(true)}
-                >
-                  + Adicionar
-                </Button>
-              )}
-            </div>
-            {attachments.length === 0 ? (
-              <p className="text-sm text-slate-500">Nenhum anexo.</p>
-            ) : (
-              <div className="space-y-1.5">
-                {attachments.map((a) => (
-                  <AttachmentRow
-                    key={a.id}
-                    attachment={a}
-                    canDelete={isStaff}
-                    onDelete={handleDeleteAttachment}
-                  />
-                ))}
-              </div>
-            )}
-          </div>
-
-          {/* Resolution note */}
-          {ticket.resolution_note && (
-            <div className="rounded-xl bg-background-surface border border-success/30 p-5 space-y-2">
-              <h2 className="text-sm font-semibold text-success-400 flex items-center gap-1.5">
-                ✓ Resolução
-              </h2>
-              <p className="text-sm text-slate-200 whitespace-pre-wrap leading-relaxed">
-                {ticket.resolution_note}
-              </p>
-            </div>
-          )}
-
-          {/* Chat */}
-          <ChatPanel
-            ticketId={ticket.id}
-            currentUserId={user?.id ?? ""}
-            currentUserRole={user?.role}
-            savedSummary={ticket.ai_conversation_summary}
-            locked={
-              ticket.status === "resolved" ||
-              ticket.status === "closed" ||
-              ticket.status === "cancelled"
-            }
-            onStatusChange={(s) =>
-              setTicket((prev) =>
-                prev ? { ...prev, status: s as typeof prev.status } : prev,
-              )
-            }
+      {/* ── Body ─────────────────────────────────────────────── */}
+      <div className="grid grid-cols-1 gap-5 lg:grid-cols-[1fr_300px]">
+        {/* ── Main column ───────────────────────────────────── */}
+        <div className="space-y-5 min-w-0">
+          {/* Tabs */}
+          <TabBar
+            active={activeTab}
+            setActive={setActiveTab}
+            counts={{ historico: visibleHistory.length, anexos: attachments.length }}
           />
 
-          {/* KB Suggestions (staff only) */}
-          {isStaff && <KBSuggestionsPanel ticketId={ticket.id} />}
-
-          {/* CSAT survey — client only, ticket resolved or closed */}
-          {user?.role === "client" &&
-            (ticket.status === "resolved" || ticket.status === "closed") && (
-              <SurveyPanel ticketId={ticket.id} />
-            )}
-
-          {/* Timeline */}
-          <div className="rounded-xl bg-background-surface border border-border p-5">
-            <h2 className="text-sm font-semibold text-slate-300 mb-4">
-              Histórico
-            </h2>
-            {(() => {
-              const visibleHistory =
-                user?.role === "client"
-                  ? history.filter((e) =>
-                      ["created", "status"].includes(e.field),
-                    )
-                  : history;
-              return visibleHistory.length === 0 ? (
-                <p className="text-sm text-slate-500">Sem histórico.</p>
-              ) : (
-                <div>
-                  {visibleHistory.map((entry) => (
-                    <TimelineEntry key={entry.id} entry={entry} />
-                  ))}
+          {/* ── TAB: Conversa ───────────────────────────────── */}
+          {activeTab === "conversa" && (
+            <div className="space-y-5">
+              {/* Description */}
+              <div className="rounded-xl border border-border/40 bg-background-surface">
+                <div className="flex items-center gap-2 border-b border-border/40 px-5 py-3.5">
+                  <span className="text-slate-500">{IC.Text}</span>
+                  <h2 className="text-sm font-semibold text-slate-200">Descrição</h2>
                 </div>
-              );
-            })()}
-          </div>
+                <div className="px-5 py-4">
+                  <p className="text-sm leading-relaxed text-slate-300 whitespace-pre-wrap">
+                    {ticket.description}
+                  </p>
+                </div>
+              </div>
+
+              {/* Client observation */}
+              {(ticket.client_observation || user?.role === "client") && (
+                <div className="rounded-xl border border-border/40 bg-background-surface">
+                  <div className="flex items-center justify-between border-b border-border/40 px-5 py-3.5">
+                    <div className="flex items-center gap-2">
+                      <span className="text-slate-500">{IC.User}</span>
+                      <h2 className="text-sm font-semibold text-slate-200">Observações do solicitante</h2>
+                    </div>
+                    {user?.role === "client" && !isClosed && !obsEdit && (
+                      <button
+                        onClick={() => setObsEdit(true)}
+                        className="flex items-center gap-1 text-xs font-medium text-primary hover:text-primary/80 transition-colors cursor-pointer"
+                      >
+                        {IC.Edit}
+                        {ticket.client_observation ? "Editar" : "Adicionar"}
+                      </button>
+                    )}
+                  </div>
+                  <div className="px-5 py-4">
+                    {obsEdit ? (
+                      <div className="space-y-3">
+                        <Textarea rows={4} placeholder="Informações adicionais…" value={obsValue} onChange={(e) => setObsValue(e.target.value)} />
+                        <div className="flex justify-end gap-2">
+                          <Button variant="secondary" size="sm" onClick={() => { setObsEdit(false); setObsValue(ticket.client_observation ?? ""); }} disabled={obsSaving}>Cancelar</Button>
+                          <Button size="sm" onClick={handleSaveObs} loading={obsSaving}>Salvar</Button>
+                        </div>
+                      </div>
+                    ) : ticket.client_observation ? (
+                      <p className="text-sm leading-relaxed text-slate-300 whitespace-pre-wrap">{ticket.client_observation}</p>
+                    ) : (
+                      <p className="text-xs italic text-slate-500">Nenhuma observação registrada.</p>
+                    )}
+                  </div>
+                </div>
+              )}
+
+              {/* Resolution note */}
+              {ticket.resolution_note && (
+                <div className="rounded-xl border border-emerald-700/30 bg-emerald-950/20">
+                  <div className="flex items-center gap-2 border-b border-emerald-700/20 px-5 py-3.5">
+                    <span className="text-emerald-400">{IC.Check("w-4 h-4")}</span>
+                    <h2 className="text-sm font-semibold text-emerald-400">Resolução</h2>
+                  </div>
+                  <div className="px-5 py-4">
+                    <p className="text-sm leading-relaxed text-slate-300 whitespace-pre-wrap">{ticket.resolution_note}</p>
+                  </div>
+                </div>
+              )}
+
+              {/* Chat */}
+              <ChatPanel
+                ticketId={ticket.id}
+                currentUserId={user?.id ?? ""}
+                currentUserRole={user?.role}
+                savedSummary={ticket.ai_conversation_summary}
+                locked={!!isClosed}
+                onStatusChange={(s) =>
+                  setTicket((prev) => prev ? { ...prev, status: s as typeof prev.status } : prev)
+                }
+              />
+
+              {/* KB */}
+              {isStaff && <KBSuggestionsPanel ticketId={ticket.id} />}
+
+              {/* CSAT */}
+              {user?.role === "client" && (ticket.status === "resolved" || ticket.status === "closed") && (
+                <SurveyPanel ticketId={ticket.id} />
+              )}
+            </div>
+          )}
+
+          {/* ── TAB: Detalhes ────────────────────────────────── */}
+          {activeTab === "detalhes" && (
+            <div className="rounded-xl border border-border/40 bg-background-surface">
+              <div className="border-b border-border/40 px-5 py-3.5">
+                <h2 className="text-sm font-semibold text-slate-200">Descrição completa</h2>
+              </div>
+              <div className="px-5 py-4">
+                <p className="text-sm leading-relaxed text-slate-300 whitespace-pre-wrap">{ticket.description}</p>
+              </div>
+            </div>
+          )}
+
+          {/* ── TAB: Atividade ───────────────────────────────── */}
+          {activeTab === "historico" && (
+            <div className="rounded-xl border border-border/40 bg-background-surface">
+              <div className="flex items-center gap-2 border-b border-border/40 px-5 py-3.5">
+                <span className="text-slate-500">{IC.Activity}</span>
+                <h2 className="text-sm font-semibold text-slate-200">Histórico de atividades</h2>
+              </div>
+              <div className="px-5 py-5">
+                {visibleHistory.length === 0 ? (
+                  <div className="py-10 text-center">
+                    <div className="mx-auto mb-3 flex h-12 w-12 items-center justify-center rounded-full bg-background-elevated text-slate-600">
+                      {IC.Activity}
+                    </div>
+                    <p className="text-sm text-slate-500">Sem histórico de atividades.</p>
+                  </div>
+                ) : (
+                  <div>
+                    {visibleHistory.map((entry) => (
+                      <ActivityEntry key={entry.id} entry={entry} />
+                    ))}
+                  </div>
+                )}
+              </div>
+            </div>
+          )}
+
+          {/* ── TAB: Anexos ──────────────────────────────────── */}
+          {activeTab === "anexos" && (
+            <div className="rounded-xl border border-border/40 bg-background-surface">
+              <div className="flex items-center justify-between border-b border-border/40 px-5 py-3.5">
+                <div className="flex items-center gap-2">
+                  <span className="text-slate-500">{IC.Clip}</span>
+                  <h2 className="text-sm font-semibold text-slate-200">Anexos ({attachments.length})</h2>
+                </div>
+                {!isClosed && (
+                  <button
+                    onClick={() => setUploadModal(true)}
+                    className="flex items-center gap-1 text-xs font-medium text-primary hover:text-primary/80 transition-colors cursor-pointer"
+                  >
+                    {IC.Plus}
+                    Adicionar
+                  </button>
+                )}
+              </div>
+              <div className="p-5">
+                {attachments.length === 0 ? (
+                  <div className="py-10 text-center">
+                    <div className="mx-auto mb-3 flex h-12 w-12 items-center justify-center rounded-full bg-background-elevated text-slate-600">
+                      {IC.Clip}
+                    </div>
+                    <p className="text-sm text-slate-500">Nenhum anexo adicionado.</p>
+                    {!isClosed && (
+                      <button
+                        onClick={() => setUploadModal(true)}
+                        className="mt-3 text-xs font-medium text-primary hover:text-primary/80 cursor-pointer transition-colors"
+                      >
+                        + Adicionar arquivo
+                      </button>
+                    )}
+                  </div>
+                ) : (
+                  <div className="space-y-2">
+                    {attachments.map((a) => (
+                      <AttachmentItem key={a.id} attachment={a} canDelete={isStaff} onDelete={handleDeleteAttachment} />
+                    ))}
+                  </div>
+                )}
+              </div>
+            </div>
+          )}
         </div>
 
         {/* ── Sidebar ───────────────────────────────────────── */}
         <div className="space-y-4">
-          {/* Actions */}
+          {/* Actions (staff only) */}
           {isStaff && (
-            <div className="rounded-xl bg-background-surface border border-border p-4 space-y-2">
-              <h2 className="text-xs font-semibold text-slate-500 uppercase tracking-wider mb-3">
-                Ações
-              </h2>
-              {ticket.status !== "resolved" &&
-                ticket.status !== "closed" &&
-                ticket.status !== "cancelled" && (
-                  <Button
-                    className="w-full"
-                    size="sm"
-                    onClick={() => setResolveModal(true)}
-                  >
-                    ✓ Concluir ticket
-                  </Button>
-                )}
-              {transitions.length > 0 && (
-                <Button
-                  className="w-full"
-                  variant="secondary"
-                  size="sm"
-                  onClick={() => setStatusModal(true)}
-                >
-                  Alterar status
-                </Button>
+            <div className="rounded-xl border border-border/40 bg-background-surface p-4 space-y-2">
+              <p className="mb-3 text-[10px] font-bold uppercase tracking-widest text-slate-500">Ações</p>
+              {!isClosed && (
+                <SidebarAction icon={IC.Check("w-4 h-4")} label="Concluir ticket" onClick={() => setResolveModal(true)} variant="primary" />
               )}
-              <Button
-                className="w-full"
-                variant="secondary"
-                size="sm"
-                onClick={() => setAssignModal(true)}
-              >
-                {ticket.assignee_id ? "Reatribuir" : "Atribuir técnico"}
-              </Button>
+              {transitions.length > 0 && (
+                <SidebarAction icon={IC.Refresh} label="Alterar status" onClick={() => setStatusModal(true)} variant="default" />
+              )}
+              <SidebarAction icon={IC.UserPlus} label={ticket.assignee_id ? "Reatribuir" : "Atribuir técnico"} onClick={() => setAssignModal(true)} variant="default" />
               {user?.role === "admin" && (
-                <Button
-                  className="w-full"
-                  variant="ghost"
-                  size="sm"
-                  onClick={() => navigate(`/tickets/${ticket.id}/edit`)}
-                >
-                  Editar ticket
-                </Button>
+                <SidebarAction icon={IC.Edit} label="Editar ticket" onClick={() => navigate(`/tickets/${ticket.id}/edit`)} variant="ghost" />
               )}
             </div>
           )}
 
-          {/* Ticket info */}
-          <div className="rounded-xl bg-background-surface border border-border p-4 space-y-3">
-            <h2 className="text-xs font-semibold text-slate-500 uppercase tracking-wider">
-              Informações
-            </h2>
-            <InfoRow
-              label="Categoria"
-              value={
-                {
-                  hardware: "Hardware",
-                  software: "Software",
-                  network: "Rede",
-                  access: "Acesso",
-                  email: "E-mail",
-                  security: "Segurança",
-                  general: "Geral",
-                  other: "Outro",
-                }[ticket.category] ?? ticket.category
-              }
-            />
-            <InfoRow
-              label="Atribuído a"
-              value={assignedTech ?? "Não atribuído"}
-            />
-            <InfoRow label="Aberto em" value={createdDate} />
-            {ticket.closed_at && (
-              <InfoRow
-                label="Fechado em"
-                value={new Date(ticket.closed_at).toLocaleString("pt-BR")}
-              />
-            )}
+          {/* Properties */}
+          <div className="rounded-xl border border-border/40 bg-background-surface p-4">
+            <p className="mb-1 text-[10px] font-bold uppercase tracking-widest text-slate-500">Propriedades</p>
+            <div>
+              <PropRow icon={IC.Activity} label="Status">
+                <StatusBadge status={ticket.status} />
+              </PropRow>
+              <PropRow icon={IC.Alert} label="Prioridade">
+                <PriorityBadge priority={ticket.priority} />
+              </PropRow>
+              <PropRow icon={IC.User} label="Responsável">
+                {assignedTech ? (
+                  <span className="flex items-center gap-2">
+                    <span className="flex h-5 w-5 items-center justify-center rounded-full bg-primary/20 text-[10px] font-bold text-primary">
+                      {assignedTech.charAt(0).toUpperCase()}
+                    </span>
+                    {assignedTech}
+                  </span>
+                ) : (
+                  <span className="text-slate-500 font-normal italic text-xs">Não atribuído</span>
+                )}
+              </PropRow>
+              <PropRow icon={IC.Folder} label="Categoria">
+                {CATEGORY_LABEL[ticket.category] ?? ticket.category}
+              </PropRow>
+              <PropRow icon={IC.Calendar} label="Criado em">
+                {new Date(ticket.created_at).toLocaleString("pt-BR", { day: "2-digit", month: "2-digit", year: "numeric", hour: "2-digit", minute: "2-digit" })}
+              </PropRow>
+              {ticket.closed_at && (
+                <PropRow icon={IC.Check("w-4 h-4")} label="Fechado em">
+                  {new Date(ticket.closed_at).toLocaleString("pt-BR")}
+                </PropRow>
+              )}
+            </div>
           </div>
 
-          {/* Etiquetas — visível para todos, editável para staff */}
-          {(ticket.tags.length > 0 || isStaff) && (
-            <div className="rounded-xl bg-background-surface border border-border p-4 space-y-3">
-              <div className="flex items-center justify-between">
-                <h2 className="text-xs font-semibold text-slate-500 uppercase tracking-wider">
-                  Etiquetas
-                </h2>
-                {isStaff && !tagsEdit && (
-                  <Button variant="ghost" size="sm" onClick={openTagsEdit}>
-                    {ticket.tags.length > 0 ? "Editar" : "+ Adicionar"}
-                  </Button>
+          {/* SLA status */}
+          {(ticket.sla_response_due_at || ticket.sla_resolve_due_at) && (
+            <div className="rounded-xl border border-border/40 bg-background-surface p-4">
+              <p className="mb-3 text-[10px] font-bold uppercase tracking-widest text-slate-500">SLA</p>
+              <div className="space-y-2">
+                {ticket.sla_response_due_at && (
+                  <div className="flex items-center justify-between">
+                    <span className="text-xs text-slate-500">Resposta</span>
+                    <SlaChip label="" dueAt={ticket.sla_response_due_at} breached={ticket.sla_response_breach} />
+                  </div>
+                )}
+                {ticket.sla_resolve_due_at && (
+                  <div className="flex items-center justify-between">
+                    <span className="text-xs text-slate-500">Resolução</span>
+                    <SlaChip label="" dueAt={ticket.sla_resolve_due_at} breached={ticket.sla_resolve_breach} />
+                  </div>
                 )}
               </div>
+            </div>
+          )}
 
+          {/* Tags */}
+          {(ticket.tags.length > 0 || isStaff) && (
+            <div className="rounded-xl border border-border/40 bg-background-surface p-4">
+              <div className="mb-3 flex items-center justify-between">
+                <p className="text-[10px] font-bold uppercase tracking-widest text-slate-500 flex items-center gap-1.5">
+                  {IC.Tag}
+                  Etiquetas
+                </p>
+                {isStaff && !tagsEdit && (
+                  <button onClick={openTagsEdit} className="flex items-center gap-1 text-[10px] font-semibold text-primary hover:text-primary/80 cursor-pointer transition-colors">
+                    {IC.Edit}
+                    {ticket.tags.length > 0 ? "Editar" : "Adicionar"}
+                  </button>
+                )}
+              </div>
               {tagsEdit ? (
                 <div className="space-y-3">
-                  <div className="flex flex-wrap gap-2">
+                  <div className="flex flex-wrap gap-1.5">
                     {allTags.map((tag) => {
-                      const selected = selectedTagIds.has(tag.id);
+                      const sel = selectedTagIds.has(tag.id);
                       return (
                         <button
                           key={tag.id}
                           type="button"
-                          onClick={() => {
-                            setSelectedTagIds((prev) => {
-                              const next = new Set(prev);
-                              if (next.has(tag.id)) next.delete(tag.id);
-                              else next.add(tag.id);
-                              return next;
-                            });
-                          }}
-                          className={`rounded-full border px-2.5 py-1 text-xs font-medium transition-opacity ${
-                            selected ? "opacity-100" : "opacity-40"
-                          }`}
-                          style={{
-                            backgroundColor: `${tag.color}22`,
-                            borderColor: `${tag.color}55`,
-                            color: tag.color,
-                          }}
+                          onClick={() => setSelectedTagIds((prev) => { const n = new Set(prev); if (n.has(tag.id)) n.delete(tag.id); else n.add(tag.id); return n; })}
+                          className={`rounded-full border px-2.5 py-1 text-xs font-semibold transition-all cursor-pointer ${sel ? "opacity-100" : "opacity-35 hover:opacity-60"}`}
+                          style={{ backgroundColor: `${tag.color}22`, borderColor: `${tag.color}55`, color: tag.color }}
                         >
                           {tag.name}
                         </button>
                       );
                     })}
-                    {allTags.length === 0 && (
-                      <p className="text-xs text-slate-500">
-                        Nenhuma etiqueta cadastrada.
-                      </p>
-                    )}
+                    {allTags.length === 0 && <p className="text-xs text-slate-500">Nenhuma etiqueta cadastrada.</p>}
                   </div>
-                  <div className="flex gap-2 justify-end">
-                    <Button
-                      variant="secondary"
-                      size="sm"
-                      onClick={() => setTagsEdit(false)}
-                      disabled={tagsSaving}
-                    >
-                      Cancelar
-                    </Button>
-                    <Button
-                      size="sm"
-                      onClick={handleSaveTags}
-                      loading={tagsSaving}
-                    >
-                      Salvar
-                    </Button>
+                  <div className="flex justify-end gap-2">
+                    <Button variant="secondary" size="sm" onClick={() => setTagsEdit(false)} disabled={tagsSaving}>Cancelar</Button>
+                    <Button size="sm" onClick={handleSaveTags} loading={tagsSaving}>Salvar</Button>
                   </div>
                 </div>
               ) : ticket.tags.length > 0 ? (
                 <div className="flex flex-wrap gap-1.5">
-                  {ticket.tags.map((tag) => (
-                    <TagBadge key={tag.id} name={tag.name} color={tag.color} />
-                  ))}
+                  {ticket.tags.map((tag) => <TagBadge key={tag.id} name={tag.name} color={tag.color} />)}
                 </div>
               ) : (
-                <p className="text-xs text-slate-500 italic">
-                  Nenhuma etiqueta vinculada.
-                </p>
+                <p className="text-xs italic text-slate-500">Nenhuma etiqueta.</p>
               )}
             </div>
           )}
 
-          {/* Notas internas — visível apenas para admin/técnico */}
+          {/* Internal notes */}
           {isStaff && (
-            <div className="rounded-xl bg-background-surface border border-yellow-800/40 p-4 space-y-3">
-              <div className="flex items-center justify-between">
-                <h2 className="text-xs font-semibold text-yellow-400 uppercase tracking-wider flex items-center gap-1.5">
-                  🔒 Notas internas
-                </h2>
+            <div className="rounded-xl border border-amber-700/25 bg-amber-950/15 p-4">
+              <div className="mb-3 flex items-center justify-between">
+                <p className="text-[10px] font-bold uppercase tracking-widest text-amber-500/80 flex items-center gap-1.5">
+                  {IC.Lock}
+                  Notas internas
+                </p>
                 {!notesEdit && (
-                  <Button
-                    variant="ghost"
-                    size="sm"
-                    onClick={() => setNotesEdit(true)}
-                  >
-                    {ticket.technician_notes ? "Editar" : "+ Adicionar"}
-                  </Button>
+                  <button onClick={() => setNotesEdit(true)} className="flex items-center gap-1 text-[10px] font-semibold text-amber-500/70 hover:text-amber-400 cursor-pointer transition-colors">
+                    {IC.Edit}
+                    {ticket.technician_notes ? "Editar" : "Adicionar"}
+                  </button>
                 )}
               </div>
-
               {notesEdit ? (
                 <div className="space-y-3">
-                  <Textarea
-                    rows={4}
-                    placeholder="Observações internas, diagnósticos, próximos passos…"
-                    value={notesValue}
-                    onChange={(e) => setNotesValue(e.target.value)}
-                  />
-                  <div className="flex gap-2 justify-end">
-                    <Button
-                      variant="secondary"
-                      size="sm"
-                      onClick={() => {
-                        setNotesEdit(false);
-                        setNotesValue(ticket.technician_notes ?? "");
-                      }}
-                      disabled={notesSaving}
-                    >
-                      Cancelar
-                    </Button>
-                    <Button
-                      size="sm"
-                      onClick={handleSaveNotes}
-                      loading={notesSaving}
-                    >
-                      Salvar
-                    </Button>
+                  <Textarea rows={4} placeholder="Observações internas, diagnósticos, próximos passos…" value={notesValue} onChange={(e) => setNotesValue(e.target.value)} />
+                  <div className="flex justify-end gap-2">
+                    <Button variant="secondary" size="sm" onClick={() => { setNotesEdit(false); setNotesValue(ticket.technician_notes ?? ""); }} disabled={notesSaving}>Cancelar</Button>
+                    <Button size="sm" onClick={handleSaveNotes} loading={notesSaving}>Salvar</Button>
                   </div>
                 </div>
               ) : ticket.technician_notes ? (
-                <p className="text-sm text-slate-300 whitespace-pre-wrap leading-relaxed bg-yellow-950/20 rounded-lg p-3">
-                  {ticket.technician_notes}
-                </p>
+                <p className="text-sm leading-relaxed text-amber-200/60 whitespace-pre-wrap">{ticket.technician_notes}</p>
               ) : (
-                <p className="text-xs text-slate-500 italic">
-                  Nenhuma nota registrada.
-                </p>
+                <p className="text-xs italic text-amber-700/50">Nenhuma nota registrada.</p>
               )}
             </div>
           )}
         </div>
       </div>
 
-      {/* ── Status modal ────────────────────────────────────── */}
+      {/* ── Modals ───────────────────────────────────────────── */}
       <Modal
         open={statusModal}
-        onClose={() => {
-          setStatusModal(false);
-          setStatusError(null);
-          setNewStatus("");
-          setStatusComment("");
-        }}
+        onClose={() => { setStatusModal(false); setStatusError(null); setNewStatus(""); setStatusComment(""); }}
         title="Alterar status"
       >
         <div className="space-y-4">
           {statusError && <Alert variant="danger">{statusError}</Alert>}
-          <Select
-            label="Novo status"
-            options={transitionOptions}
-            placeholder="Selecione"
-            value={newStatus}
-            onChange={(e) => setNewStatus(e.target.value)}
-          />
-          <Textarea
-            label="Comentário (opcional)"
-            placeholder="Motivo da alteração…"
-            rows={3}
-            value={statusComment}
-            onChange={(e) => setStatusComment(e.target.value)}
-          />
+          <Select label="Novo status" options={transitionOptions} placeholder="Selecione" value={newStatus} onChange={(e) => setNewStatus(e.target.value)} />
+          <Textarea label="Comentário (opcional)" placeholder="Motivo da alteração…" rows={3} value={statusComment} onChange={(e) => setStatusComment(e.target.value)} />
         </div>
         <ModalFooter>
-          <Button
-            variant="secondary"
-            onClick={() => setStatusModal(false)}
-            disabled={statusLoading}
-          >
-            Cancelar
-          </Button>
-          <Button
-            onClick={handleStatusChange}
-            loading={statusLoading}
-            disabled={!newStatus}
-          >
-            Confirmar
-          </Button>
+          <Button variant="secondary" onClick={() => setStatusModal(false)} disabled={statusLoading}>Cancelar</Button>
+          <Button onClick={handleStatusChange} loading={statusLoading} disabled={!newStatus}>Confirmar</Button>
         </ModalFooter>
       </Modal>
 
-      {/* ── Assign modal ─────────────────────────────────────── */}
       <Modal
         open={assignModal}
-        onClose={() => {
-          setAssignModal(false);
-          setAssignError(null);
-        }}
+        onClose={() => { setAssignModal(false); setAssignError(null); }}
         title={ticket.assignee_id ? "Reatribuir ticket" : "Atribuir técnico"}
       >
         <div className="space-y-4">
           {assignError && <Alert variant="danger">{assignError}</Alert>}
           {user?.role === "admin" ? (
-            <Select
-              label="Técnico"
-              options={technicians.map((t) => ({
-                value: t.id,
-                label: t.name,
-              }))}
-              placeholder="Selecione um técnico"
-              value={newAssignee}
-              onChange={(e) => setNewAssignee(e.target.value)}
-            />
+            <Select label="Técnico" options={technicians.map((t) => ({ value: t.id, label: t.name }))} placeholder="Selecione um técnico" value={newAssignee} onChange={(e) => setNewAssignee(e.target.value)} />
           ) : (
-            <p className="text-sm text-slate-300">
-              Deseja assumir este ticket para você?
-            </p>
+            <p className="text-sm text-slate-300">Deseja assumir este ticket para você?</p>
           )}
         </div>
         <ModalFooter>
-          <Button
-            variant="secondary"
-            onClick={() => setAssignModal(false)}
-            disabled={assignLoading}
-          >
-            Cancelar
-          </Button>
+          <Button variant="secondary" onClick={() => setAssignModal(false)} disabled={assignLoading}>Cancelar</Button>
           {user?.role === "admin" ? (
-            <Button
-              onClick={() => handleAssign(newAssignee || null)}
-              loading={assignLoading}
-              disabled={!newAssignee}
-            >
-              Atribuir
-            </Button>
+            <Button onClick={() => handleAssign(newAssignee || null)} loading={assignLoading} disabled={!newAssignee}>Atribuir</Button>
           ) : (
-            <Button
-              onClick={() => handleAssign(user!.id)}
-              loading={assignLoading}
-            >
-              Assumir ticket
-            </Button>
+            <Button onClick={() => handleAssign(user!.id)} loading={assignLoading}>Assumir ticket</Button>
           )}
         </ModalFooter>
       </Modal>
 
-      {/* ── Upload modal ─────────────────────────────────────── */}
       <Modal
         open={uploadModal}
-        onClose={() => {
-          setUploadModal(false);
-          setUploadFiles([]);
-          setUploadError(null);
-        }}
+        onClose={() => { setUploadModal(false); setUploadFiles([]); setUploadError(null); }}
         title="Adicionar anexos"
       >
         <div className="space-y-4">
           {uploadError && <Alert variant="danger">{uploadError}</Alert>}
-          <input
-            ref={fileInputRef}
-            type="file"
-            multiple
-            className="hidden"
-            onChange={(e) => {
-              if (e.target.files) setUploadFiles(Array.from(e.target.files));
-            }}
-          />
-          <Button
-            variant="secondary"
-            className="w-full"
+          <input ref={fileInputRef} type="file" multiple className="hidden" onChange={(e) => { if (e.target.files) setUploadFiles(Array.from(e.target.files)); }} />
+          <button
             onClick={() => fileInputRef.current?.click()}
+            className="flex w-full flex-col items-center gap-2 rounded-xl border-2 border-dashed border-border/60 bg-background-elevated/30 py-10 text-sm text-slate-400 hover:border-primary/40 hover:bg-primary/5 hover:text-primary transition-all cursor-pointer"
           >
-            Selecionar arquivos
-          </Button>
+            {IC.Clip}
+            <span>Clique para selecionar arquivos</span>
+          </button>
           {uploadFiles.length > 0 && (
             <ul className="space-y-1">
               {uploadFiles.map((f, i) => (
-                <li key={i} className="text-sm text-slate-300">
+                <li key={i} className="flex items-center gap-2 rounded-lg bg-background-elevated px-3 py-2 text-sm text-slate-300">
+                  <span className="text-slate-500">{IC.Clip}</span>
                   {f.name}
                 </li>
               ))}
@@ -1203,63 +1166,26 @@ export default function TicketDetailPage() {
           )}
         </div>
         <ModalFooter>
-          <Button
-            variant="secondary"
-            onClick={() => setUploadModal(false)}
-            disabled={uploadLoading}
-          >
-            Cancelar
-          </Button>
-          <Button
-            onClick={handleUpload}
-            loading={uploadLoading}
-            disabled={uploadFiles.length === 0}
-          >
-            Enviar
-          </Button>
+          <Button variant="secondary" onClick={() => setUploadModal(false)} disabled={uploadLoading}>Cancelar</Button>
+          <Button onClick={handleUpload} loading={uploadLoading} disabled={uploadFiles.length === 0}>Enviar</Button>
         </ModalFooter>
       </Modal>
 
-      {/* ── Resolve modal ────────────────────────────────────── */}
       <Modal
         open={resolveModal}
-        onClose={() => {
-          setResolveModal(false);
-          setResolveError(null);
-          setResolveNote("");
-        }}
+        onClose={() => { setResolveModal(false); setResolveError(null); setResolveNote(""); }}
         title="Concluir ticket"
       >
         <div className="space-y-4">
           {resolveError && <Alert variant="danger">{resolveError}</Alert>}
           <p className="text-sm text-slate-400">
-            Descreva como o problema foi resolvido. Após confirmar, o chat será
-            bloqueado e o cliente receberá uma notificação para avaliar o
-            atendimento.
+            Descreva como o problema foi resolvido. O chat será bloqueado e o cliente receberá uma notificação.
           </p>
-          <Textarea
-            label="Nota de resolução"
-            placeholder="Descreva a solução aplicada…"
-            rows={5}
-            value={resolveNote}
-            onChange={(e) => setResolveNote(e.target.value)}
-          />
+          <Textarea label="Nota de resolução" placeholder="Descreva a solução aplicada…" rows={5} value={resolveNote} onChange={(e) => setResolveNote(e.target.value)} />
         </div>
         <ModalFooter>
-          <Button
-            variant="secondary"
-            onClick={() => setResolveModal(false)}
-            disabled={resolveLoading}
-          >
-            Cancelar
-          </Button>
-          <Button
-            onClick={handleResolve}
-            loading={resolveLoading}
-            disabled={!resolveNote.trim()}
-          >
-            Confirmar conclusão
-          </Button>
+          <Button variant="secondary" onClick={() => setResolveModal(false)} disabled={resolveLoading}>Cancelar</Button>
+          <Button onClick={handleResolve} loading={resolveLoading} disabled={!resolveNote.trim()}>Confirmar conclusão</Button>
         </ModalFooter>
       </Modal>
     </div>

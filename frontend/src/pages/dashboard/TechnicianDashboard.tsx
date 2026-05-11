@@ -174,16 +174,6 @@ export default function TechnicianDashboard() {
   const [loading, setLoading]     = useState(true);
   const [error, setError]         = useState<string | null>(null);
 
-  const emptyDetail: TechnicianDetailReport = {
-    period_days: activePeriod,
-    technician_id: user?.id ?? "",
-    technician_name: user?.name ?? "",
-    total_assigned: 0, resolved: 0, in_progress: 0, open_count: 0,
-    sla_breached: 0, sla_compliance_rate: 100,
-    avg_resolution_hours: null, csat_average: null, csat_count: 0,
-    tickets_by_day: [],
-  };
-
   useEffect(() => {
     function onClickOutside(e: MouseEvent) {
       if (periodRef.current && !periodRef.current.contains(e.target as Node)) setPeriodOpen(false);
@@ -195,6 +185,15 @@ export default function TechnicianDashboard() {
   useEffect(() => {
     if (!user) return;
     setLoading(true);
+    const emptyDetail: TechnicianDetailReport = {
+      period_days: activePeriod,
+      technician_id: user.id,
+      technician_name: user.name,
+      total_assigned: 0, resolved: 0, in_progress: 0, open_count: 0,
+      sla_breached: 0, sla_compliance_rate: 100,
+      avg_resolution_hours: null, csat_average: null, csat_count: 0,
+      tickets_by_day: [],
+    };
     Promise.all([
       getTechnicianDetailReport(activePeriod).catch(() => emptyDetail),
       getDashboardStats(),
@@ -389,7 +388,7 @@ export default function TechnicianDashboard() {
                   </defs>
                   <XAxis dataKey="date" tickFormatter={fmtDate} tick={{ fill: axisColor, fontSize: 11 }} axisLine={false} tickLine={false} interval="preserveStartEnd" />
                   <YAxis tick={{ fill: axisColor, fontSize: 11 }} axisLine={false} tickLine={false} allowDecimals={false} />
-                  <Tooltip contentStyle={tooltipStyle} wrapperStyle={tooltipWrapper} labelFormatter={(v) => fmtDate(String(v))} formatter={(v: number) => [v, "Tickets"]} />
+                  <Tooltip contentStyle={tooltipStyle} wrapperStyle={tooltipWrapper} labelFormatter={(v) => fmtDate(String(v))} formatter={(v) => [v, "Tickets"]} />
                   <Area type="monotone" dataKey="count" stroke="#0ea5e9" strokeWidth={2} fill="url(#techGradient)" dot={false} activeDot={{ r: 4, fill: "#0ea5e9" }} />
                 </AreaChart>
               </ResponsiveContainer>
