@@ -1,575 +1,318 @@
-import { useEffect, useState } from "react";
+import { useEffect, useMemo, useState } from "react";
 import { useNavigate } from "react-router-dom";
-import {
-  Alert,
-  Button,
-  Modal,
-  ModalFooter,
-  Pagination,
-  PriorityBadge,
-  Select,
-  Spinner,
-  StatusBadge,
-  Table,
-  TableBody,
-  TableCell,
-  TableEmpty,
-  TableHead,
-  TableHeaderCell,
-  TableRow,
-  TagBadge,
-  TicketFilters,
-  type TicketFilterState,
-  EMPTY_FILTERS,
-} from "../../components/ui";
-import { useAuth } from "../../contexts/AuthContext";
-import {
-  assignTicket,
-  getTickets,
-  updateTicketStatus,
-  type SortBy,
-  type SortDir,
-  type Ticket,
-} from "../../services/ticketService";
-import { getTechnicians, type UserSummary } from "../../services/userService";
-import { getTags, type Tag } from "../../services/tagService";
-import { TICKET_TRANSITIONS } from "../../lib/ticketConstants";
+import { Alert, Spinner } from "../../components/ui";
+import { cn } from "../../lib/utils";
+import { getTickets, type Ticket } from "../../services/ticketService";
 
-// ── Constants ─────────────────────────────────────────────────
+// ── Priority ──────────────────────────────────────────────────
 
-const PAGE_SIZE = 20;
-
-const STATUS_LABEL: Record<string, string> = {
-  open: "Aberto",
-  in_progress: "Em andamento",
-  awaiting_client: "Ag. cliente",
-  awaiting_technical: "Ag. técnico",
-  resolved: "Resolvido",
-  closed: "Fechado",
-  cancelled: "Cancelado",
+const PRIORITY_ORDER: Record<string, number> = {
+  critical: 0, high: 1, medium: 2, low: 3,
 };
 
-// ── SLA cell ──────────────────────────────────────────────────
+const PRIORITY_CFG: Record<string, {
+  label: string; borderCls: string; dotColor: string; badgeCls: string;
+}> = {
+  critical: {
+    label: "Crítico",
+    borderCls: "border-l-red-500",
+    dotColor: "#ef4444",
+    badgeCls: "bg-red-500/10 text-red-600 dark:text-red-400",
+  },
+  high: {
+    label: "Alto",
+    borderCls: "border-l-amber-500",
+    dotColor: "#f59e0b",
+    badgeCls: "bg-amber-500/10 text-amber-600 dark:text-amber-400",
+  },
+  medium: {
+    label: "Médio",
+    borderCls: "border-l-indigo-400",
+    dotColor: "#818cf8",
+    badgeCls: "bg-indigo-500/10 text-indigo-600 dark:text-indigo-400",
+  },
+  low: {
+    label: "Baixo",
+    borderCls: "border-l-slate-300 dark:border-l-slate-600",
+    dotColor: "#94a3b8",
+    badgeCls: "bg-slate-100 dark:bg-background-elevated text-slate-500",
+  },
+};
 
-function SlaCell({ ticket }: { ticket: Ticket }) {
-  if (ticket.sla_resolve_breach) {
-    return <span className="text-xs font-medium text-danger">Vencido</span>;
-  }
-  if (!ticket.sla_resolve_due_at) {
-    return <span className="text-xs text-slate-600">—</span>;
-  }
-  const diff = new Date(ticket.sla_resolve_due_at).getTime() - Date.now();
-  if (diff <= 0) {
-    return <span className="text-xs font-medium text-danger">Vencido</span>;
-  }
-  const h = Math.floor(diff / 3600000);
-  const m = Math.floor((diff % 3600000) / 60000);
-  const display = h > 0 ? `${h}h ${m}m` : `${m}m`;
-  const color = h < 4 ? "text-warning-400" : "text-slate-400";
-  return <span className={`text-xs ${color}`}>{display}</span>;
+// ── Columns ───────────────────────────────────────────────────
+
+const COLUMNS: {
+  status: string; label: string; desc: string;
+  color: string; bg: string; text: string; headerBg: string;
+}[] = [
+  { status: "open",               label: "Aberto",       desc: "Aguardando atendimento",     color: "#0ea5e9", bg: "bg-sky-500/10",     text: "text-sky-600 dark:text-sky-400",       headerBg: "bg-sky-500/5 dark:bg-sky-500/10"      },
+  { status: "in_progress",        label: "Em Andamento", desc: "Técnico vinculado",           color: "#6366f1", bg: "bg-indigo-500/10",  text: "text-indigo-600 dark:text-indigo-400", headerBg: "bg-indigo-500/5 dark:bg-indigo-500/10"  },
+  { status: "awaiting_technical", label: "Ag. Técnico",  desc: "Aguardando resp. técnica",    color: "#f59e0b", bg: "bg-amber-500/10",   text: "text-amber-600 dark:text-amber-400",   headerBg: "bg-amber-500/5 dark:bg-amber-500/10"    },
+  { status: "awaiting_client",    label: "Ag. Cliente",  desc: "Aguardando resp. cliente",    color: "#8b5cf6", bg: "bg-violet-500/10",  text: "text-violet-600 dark:text-violet-400", headerBg: "bg-violet-500/5 dark:bg-violet-500/10"  },
+  { status: "resolved",           label: "Resolvido",    desc: "Finalizado com sucesso",      color: "#10b981", bg: "bg-emerald-500/10", text: "text-emerald-600 dark:text-emerald-400",headerBg: "bg-emerald-500/5 dark:bg-emerald-500/10"},
+  { status: "closed",             label: "Fechado",      desc: "Encerrado",                   color: "#64748b", bg: "bg-slate-500/10",   text: "text-slate-500 dark:text-slate-400",   headerBg: "bg-slate-500/5 dark:bg-slate-500/10"    },
+];
+
+// ── TicketCard ────────────────────────────────────────────────
+
+function TicketCard({ ticket }: { ticket: Ticket }) {
+  const navigate = useNavigate();
+  const pCfg    = PRIORITY_CFG[ticket.priority] ?? PRIORITY_CFG.low;
+  const hasBreach = ticket.sla_response_breach || ticket.sla_resolve_breach;
+  const initials  = ticket.assignee_name
+    ? ticket.assignee_name.split(" ").slice(0, 2).map((w) => w[0]).join("").toUpperCase()
+    : null;
+
+  return (
+    <button
+      onClick={() => navigate(`/tickets/${ticket.id}`)}
+      className={cn(
+        "w-full text-left rounded-lg",
+        "bg-white dark:bg-background-surface",
+        "border border-slate-200 dark:border-border border-l-4",
+        "p-3 shadow-sm hover:shadow-md hover:-translate-y-0.5 active:translate-y-0",
+        "transition-all duration-150 cursor-pointer group",
+        pCfg.borderCls,
+      )}
+    >
+      {/* Protocol + indicators */}
+      <div className="flex items-center justify-between mb-2 gap-1">
+        <span className="text-[11px] font-mono text-slate-400 truncate">{ticket.protocol}</span>
+        <div className="flex items-center gap-1 shrink-0">
+          {hasBreach && (
+            <span className="text-[10px] font-bold text-red-600 dark:text-red-400 bg-red-500/10 px-1.5 py-0.5 rounded">
+              SLA
+            </span>
+          )}
+          <span
+            className="w-2 h-2 rounded-full"
+            style={{ backgroundColor: pCfg.dotColor }}
+            title={pCfg.label}
+          />
+        </div>
+      </div>
+
+      {/* Title */}
+      <p className="text-sm font-medium text-slate-800 dark:text-slate-100 line-clamp-2 mb-3 leading-snug group-hover:text-primary transition-colors duration-150">
+        {ticket.title}
+      </p>
+
+      {/* Footer */}
+      <div className="flex items-center justify-between gap-2">
+        <div className="flex items-center gap-1.5 min-w-0 flex-1 overflow-hidden">
+          <span className="text-[11px] text-slate-500 bg-slate-100 dark:bg-background-elevated px-2 py-0.5 rounded truncate max-w-[100px]">
+            {ticket.category}
+          </span>
+          <span className={cn("text-[10px] font-bold px-1.5 py-0.5 rounded shrink-0", pCfg.badgeCls)}>
+            {pCfg.label}
+          </span>
+        </div>
+        {initials ? (
+          <div
+            className="w-6 h-6 rounded-full bg-primary/10 border border-primary/20 flex items-center justify-center shrink-0"
+            title={ticket.assignee_name ?? ""}
+          >
+            <span className="text-[9px] font-bold text-primary leading-none">{initials}</span>
+          </div>
+        ) : (
+          <div className="w-6 h-6 rounded-full bg-slate-100 dark:bg-background-elevated border border-slate-200 dark:border-border flex items-center justify-center shrink-0">
+            <svg className="w-3 h-3 text-slate-400" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
+              <path strokeLinecap="round" strokeLinejoin="round" d="M16 7a4 4 0 11-8 0 4 4 0 018 0zM12 14a7 7 0 00-7 7h14a7 7 0 00-7-7z" />
+            </svg>
+          </div>
+        )}
+      </div>
+    </button>
+  );
+}
+
+// ── KanbanColumn ──────────────────────────────────────────────
+
+function KanbanColumn({ col, tickets }: { col: typeof COLUMNS[0]; tickets: Ticket[] }) {
+  return (
+    <div className="flex flex-col w-[268px] min-w-[268px] rounded-xl bg-slate-100 dark:bg-background-elevated border border-slate-200 dark:border-border overflow-hidden">
+      {/* Header */}
+      <div className={cn("px-3 py-3 shrink-0", col.headerBg)}>
+        <div className="flex items-center justify-between">
+          <div className="flex items-center gap-2 min-w-0">
+            <span className="w-2 h-2 rounded-full shrink-0" style={{ backgroundColor: col.color }} />
+            <p className={cn("text-sm font-semibold truncate", col.text)}>{col.label}</p>
+          </div>
+          <span className={cn("text-xs font-bold px-2 py-0.5 rounded-full shrink-0 ml-2", col.bg, col.text)}>
+            {tickets.length}
+          </span>
+        </div>
+        <p className="text-[11px] text-slate-400 mt-0.5 pl-4">{col.desc}</p>
+      </div>
+
+      {/* Thin color bar */}
+      <div className="h-0.5 shrink-0" style={{ backgroundColor: col.color, opacity: 0.4 }} />
+
+      {/* Cards — scrolls independently */}
+      <div className="flex-1 min-h-0 overflow-y-auto p-2 space-y-2">
+        {tickets.length === 0 ? (
+          <div className="flex flex-col items-center justify-center py-10 mx-1 rounded-lg border-2 border-dashed border-slate-200 dark:border-border/40 mt-1">
+            <svg className="w-6 h-6 text-slate-300 dark:text-slate-600 mb-1.5" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={1.25}>
+              <path strokeLinecap="round" strokeLinejoin="round" d="M9 12l2 2 4-4m6 2a9 9 0 11-18 0 9 9 0 0118 0z" />
+            </svg>
+            <p className="text-xs text-slate-400">Nenhum ticket</p>
+          </div>
+        ) : (
+          tickets.map((t) => <TicketCard key={t.id} ticket={t} />)
+        )}
+      </div>
+    </div>
+  );
 }
 
 // ── TicketListPage ────────────────────────────────────────────
 
 export default function TicketListPage() {
   const navigate = useNavigate();
-  const { user } = useAuth();
-  const isStaff = user?.role === "admin" || user?.role === "technician";
 
-  // Data
-  const [tickets, setTickets] = useState<Ticket[]>([]);
-  const [total, setTotal] = useState(0);
-  const [loading, setLoading] = useState(true);
-  const [error, setError] = useState<string | null>(null);
+  const [tickets, setTickets]               = useState<Ticket[]>([]);
+  const [loading, setLoading]               = useState(true);
+  const [error, setError]                   = useState<string | null>(null);
+  const [search, setSearch]                 = useState("");
+  const [filterPriority, setFilterPriority] = useState("");
+  const [filterAssignee, setFilterAssignee] = useState<"all" | "unassigned" | "assigned">("all");
 
-  // Filters + pagination + sort — T84: technician defaults to their own queue
-  const [filters, setFilters] = useState<TicketFilterState>(() =>
-    user?.role === "technician" && user.id
-      ? { ...EMPTY_FILTERS, assignee_id: user.id }
-      : EMPTY_FILTERS,
-  );
-  const [page, setPage] = useState(1);
-  const [sortBy, setSortBy] = useState<SortBy>("created_at");
-  const [sortDir, setSortDir] = useState<SortDir>("desc");
-
-  // Bulk selection
-  const [selected, setSelected] = useState<Set<string>>(new Set());
-
-  // Bulk action modals
-  const [bulkStatusModal, setBulkStatusModal] = useState(false);
-  const [bulkAssignModal, setBulkAssignModal] = useState(false);
-  const [bulkStatus, setBulkStatus] = useState("");
-  const [bulkAssignee, setBulkAssignee] = useState("");
-  const [bulkLoading, setBulkLoading] = useState(false);
-  const [bulkError, setBulkError] = useState<string | null>(null);
-  const [technicians, setTechnicians] = useState<UserSummary[]>([]);
-  const [tags, setTags] = useState<Tag[]>([]);
-
-  // Load technicians and tags for filter dropdowns
-  useEffect(() => {
-    if (isStaff) {
-      getTechnicians()
-        .then(setTechnicians)
-        .catch(() => {});
-    }
-    getTags()
-      .then(setTags)
-      .catch(() => {});
-  }, [isStaff]);
-
-  // Fetch tickets whenever deps change
   useEffect(() => {
     setLoading(true);
-    setError(null);
-    setSelected(new Set());
-
-    getTickets({
-      status: filters.status || undefined,
-      priority: filters.priority || undefined,
-      category: filters.category || undefined,
-      assignee_id: filters.assignee_id || undefined,
-      tag_id: filters.tag_id || undefined,
-      search: filters.search || undefined,
-      limit: PAGE_SIZE,
-      offset: (page - 1) * PAGE_SIZE,
-      sort_by: sortBy,
-      sort_dir: sortDir,
-    })
-      .then((res) => {
-        setTickets(res.items);
-        setTotal(res.total);
-      })
+    getTickets({ limit: 500 })
+      .then((r) => setTickets(r.items))
       .catch(() => setError("Não foi possível carregar os tickets."))
       .finally(() => setLoading(false));
-  }, [filters, page, sortBy, sortDir]);
+  }, []);
 
-  // Reset to page 1 when filters change
-  function handleFiltersChange(f: TicketFilterState) {
-    setFilters(f);
-    setPage(1);
-  }
-
-  // Sort toggle
-  function handleSort(col: SortBy) {
-    if (sortBy === col) {
-      setSortDir((d) => (d === "asc" ? "desc" : "asc"));
-    } else {
-      setSortBy(col);
-      setSortDir("desc");
-    }
-    setPage(1);
-  }
-
-  function sortedState(col: SortBy): "asc" | "desc" | null {
-    return sortBy === col ? sortDir : null;
-  }
-
-  // Row selection
-  function toggleAll() {
-    if (selected.size === tickets.length) {
-      setSelected(new Set());
-    } else {
-      setSelected(new Set(tickets.map((t) => t.id)));
-    }
-  }
-
-  function toggleOne(id: string) {
-    setSelected((prev) => {
-      const next = new Set(prev);
-      if (next.has(id)) {
-        next.delete(id);
-      } else {
-        next.add(id);
-      }
-      return next;
-    });
-  }
-
-  // Bulk status change
-  async function handleBulkStatus() {
-    if (!bulkStatus) return;
-    setBulkLoading(true);
-    setBulkError(null);
-    try {
-      await Promise.all(
-        [...selected].map((id) => updateTicketStatus(id, bulkStatus)),
+  const filtered = useMemo(() => {
+    let items = tickets;
+    if (search.trim()) {
+      const q = search.toLowerCase();
+      items = items.filter((t) =>
+        t.title.toLowerCase().includes(q) || t.protocol.toLowerCase().includes(q),
       );
-      setBulkStatusModal(false);
-      setBulkStatus("");
-      setSelected(new Set());
-      // Refresh
-      const res = await getTickets({
-        status: filters.status || undefined,
-        priority: filters.priority || undefined,
-        category: filters.category || undefined,
-        assignee_id: filters.assignee_id || undefined,
-        tag_id: filters.tag_id || undefined,
-        search: filters.search || undefined,
-        limit: PAGE_SIZE,
-        offset: (page - 1) * PAGE_SIZE,
-        sort_by: sortBy,
-        sort_dir: sortDir,
-      });
-      setTickets(res.items);
-      setTotal(res.total);
-    } catch {
-      setBulkError("Falha ao alterar status de alguns tickets.");
-    } finally {
-      setBulkLoading(false);
     }
-  }
+    if (filterPriority) items = items.filter((t) => t.priority === filterPriority);
+    if (filterAssignee === "unassigned") items = items.filter((t) => !t.assignee_id);
+    if (filterAssignee === "assigned")   items = items.filter((t) => !!t.assignee_id);
+    return items;
+  }, [tickets, search, filterPriority, filterAssignee]);
 
-  // Bulk assign
-  async function handleBulkAssign() {
-    if (!bulkAssignee) return;
-    setBulkLoading(true);
-    setBulkError(null);
-    try {
-      await Promise.all(
-        [...selected].map((id) => assignTicket(id, bulkAssignee)),
-      );
-      setBulkAssignModal(false);
-      setBulkAssignee("");
-      setSelected(new Set());
-      const res = await getTickets({
-        status: filters.status || undefined,
-        priority: filters.priority || undefined,
-        category: filters.category || undefined,
-        assignee_id: filters.assignee_id || undefined,
-        tag_id: filters.tag_id || undefined,
-        search: filters.search || undefined,
-        limit: PAGE_SIZE,
-        offset: (page - 1) * PAGE_SIZE,
-        sort_by: sortBy,
-        sort_dir: sortDir,
-      });
-      setTickets(res.items);
-      setTotal(res.total);
-    } catch {
-      setBulkError("Falha ao atribuir alguns tickets.");
-    } finally {
-      setBulkLoading(false);
+  const grouped = useMemo(() => {
+    const map = new Map<string, Ticket[]>();
+    COLUMNS.forEach((c) => map.set(c.status, []));
+    for (const t of filtered) {
+      if (map.has(t.status)) map.get(t.status)!.push(t);
     }
-  }
+    for (const arr of map.values()) {
+      arr.sort((a, b) => (PRIORITY_ORDER[a.priority] ?? 3) - (PRIORITY_ORDER[b.priority] ?? 3));
+    }
+    return map;
+  }, [filtered]);
 
-  const createdAt = (t: Ticket) =>
-    new Date(t.created_at).toLocaleDateString("pt-BR");
+  const totalShown = filtered.filter((t) => COLUMNS.some((c) => c.status === t.status)).length;
+  const hasFilters = !!(search || filterPriority || filterAssignee !== "all");
 
-  const techName = (t: Ticket) =>
-    t.assignee_name ?? (t.assignee_id ? "—" : "—");
-
-  // Compute the common valid transitions for all selected tickets
-  const selectedTickets = tickets.filter((t) => selected.has(t.id));
-  const commonTransitions =
-    selectedTickets.length > 0
-      ? Object.keys(STATUS_LABEL).filter((s) =>
-          selectedTickets.every((t) =>
-            TICKET_TRANSITIONS[t.status]?.includes(s),
-          ),
-        )
-      : [];
+  if (loading) return <div className="flex h-64 items-center justify-center"><Spinner size="lg" /></div>;
+  if (error)   return <Alert variant="danger">{error}</Alert>;
 
   return (
-    <div className="space-y-4">
-      {/* Header */}
-      <div className="flex items-center justify-between gap-4">
+    // h-full fills the <main> container; flex-col stacks header + board
+    <div className="h-full flex flex-col gap-4 min-h-0">
+
+      {/* ── Top bar ─────────────────────────────────────────── */}
+      <div className="flex flex-wrap items-center justify-between gap-3 shrink-0">
         <div>
-          <h1 className="text-2xl font-bold text-slate-100">Tickets</h1>
-          <p className="text-slate-400 text-sm mt-0.5">
-            {total} {total === 1 ? "chamado" : "chamados"} encontrados
+          <h1 className="text-xl font-semibold text-slate-900 dark:text-slate-100">Tickets</h1>
+          <p className="text-sm text-slate-500 mt-0.5">
+            {totalShown} ticket{totalShown !== 1 ? "s" : ""} encontrado{totalShown !== 1 ? "s" : ""}
           </p>
         </div>
-        <Button onClick={() => navigate("/tickets/new")}>Abrir chamado</Button>
+
+        {/* Filters + new */}
+        <div className="flex flex-wrap items-center gap-2">
+          {/* Search */}
+          <div className="relative">
+            <svg className="absolute left-3 top-1/2 -translate-y-1/2 w-4 h-4 text-slate-400" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
+              <path strokeLinecap="round" strokeLinejoin="round" d="M21 21l-6-6m2-5a7 7 0 11-14 0 7 7 0 0114 0z" />
+            </svg>
+            <input
+              type="text"
+              placeholder="Buscar…"
+              value={search}
+              onChange={(e) => setSearch(e.target.value)}
+              className="pl-9 pr-3 py-2 text-sm w-52 rounded-lg border border-slate-200 dark:border-border bg-white dark:bg-background-elevated text-slate-700 dark:text-slate-200 placeholder-slate-400 focus:outline-none focus:ring-2 focus:ring-primary"
+            />
+            {search && (
+              <button onClick={() => setSearch("")} className="absolute right-2.5 top-1/2 -translate-y-1/2 text-slate-400 hover:text-slate-600 cursor-pointer">
+                <svg className="w-3.5 h-3.5" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2.5}><path strokeLinecap="round" strokeLinejoin="round" d="M6 18L18 6M6 6l12 12" /></svg>
+              </button>
+            )}
+          </div>
+
+          {/* Priority */}
+          <select
+            value={filterPriority}
+            onChange={(e) => setFilterPriority(e.target.value)}
+            className="text-sm rounded-lg border border-slate-200 dark:border-border bg-white dark:bg-background-elevated text-slate-700 dark:text-slate-200 px-3 py-2 focus:outline-none focus:ring-2 focus:ring-primary cursor-pointer"
+          >
+            <option value="">Todas prioridades</option>
+            <option value="critical">Crítico</option>
+            <option value="high">Alto</option>
+            <option value="medium">Médio</option>
+            <option value="low">Baixo</option>
+          </select>
+
+          {/* Assignee */}
+          <select
+            value={filterAssignee}
+            onChange={(e) => setFilterAssignee(e.target.value as typeof filterAssignee)}
+            className="text-sm rounded-lg border border-slate-200 dark:border-border bg-white dark:bg-background-elevated text-slate-700 dark:text-slate-200 px-3 py-2 focus:outline-none focus:ring-2 focus:ring-primary cursor-pointer"
+          >
+            <option value="all">Todos</option>
+            <option value="unassigned">Sem técnico</option>
+            <option value="assigned">Com técnico</option>
+          </select>
+
+          {/* Clear filters */}
+          {hasFilters && (
+            <button
+              onClick={() => { setSearch(""); setFilterPriority(""); setFilterAssignee("all"); }}
+              className="flex items-center gap-1.5 text-xs font-medium text-slate-500 hover:text-danger transition-colors cursor-pointer px-2 py-2 rounded-lg border border-slate-200 dark:border-border hover:border-danger/30"
+            >
+              <svg className="w-3.5 h-3.5" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2.5}><path strokeLinecap="round" strokeLinejoin="round" d="M6 18L18 6M6 6l12 12" /></svg>
+              Limpar
+            </button>
+          )}
+
+          {/* New ticket */}
+          <button
+            onClick={() => navigate("/tickets/new")}
+            className="flex items-center gap-2 px-4 py-2 text-sm font-semibold rounded-lg bg-primary text-white hover:bg-primary/90 active:scale-95 transition-all duration-150 cursor-pointer"
+          >
+            <svg className="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2.5}><path strokeLinecap="round" strokeLinejoin="round" d="M12 4v16m8-8H4" /></svg>
+            Novo Ticket
+          </button>
+        </div>
       </div>
 
-      {/* Filters */}
-      <TicketFilters
-        value={filters}
-        onChange={handleFiltersChange}
-        technicians={isStaff ? technicians : undefined}
-        tags={tags.length > 0 ? tags : undefined}
-      />
-
-      {/* Bulk action bar */}
-      {isStaff && selected.size > 0 && (
-        <div className="flex items-center gap-3 rounded-lg bg-background-elevated border border-border px-4 py-2.5">
-          <span className="text-sm text-slate-300 font-medium">
-            {selected.size} selecionado{selected.size > 1 ? "s" : ""}
-          </span>
-          <div className="flex gap-2 ml-auto">
-            {commonTransitions.length > 0 && (
-              <Button
-                size="sm"
-                variant="secondary"
-                onClick={() => setBulkStatusModal(true)}
-              >
-                Alterar status
-              </Button>
-            )}
-            {user?.role === "admin" && (
-              <Button
-                size="sm"
-                variant="secondary"
-                onClick={() => setBulkAssignModal(true)}
-              >
-                Atribuir técnico
-              </Button>
-            )}
-            <Button
-              size="sm"
-              variant="ghost"
-              onClick={() => setSelected(new Set())}
-            >
-              Limpar seleção
-            </Button>
+      {/* ── Kanban Board ─────────────────────────────────────── */}
+      {/* flex-1 min-h-0 = preenche o restante sem overflow vertical */}
+      <div className="flex-1 min-h-0 rounded-2xl bg-slate-200/60 dark:bg-slate-900/50 border border-slate-200 dark:border-border overflow-hidden">
+        {/* overflow-x-auto = scroll horizontal quando colunas não cabem */}
+        <div className="h-full overflow-x-auto">
+          <div className="flex gap-3 h-full p-3 min-w-max">
+            {COLUMNS.map((col) => (
+              <KanbanColumn
+                key={col.status}
+                col={col}
+                tickets={grouped.get(col.status) ?? []}
+              />
+            ))}
           </div>
         </div>
-      )}
-
-      {/* Error */}
-      {error && <Alert variant="danger">{error}</Alert>}
-
-      {/* Table */}
-      {loading ? (
-        <div className="flex h-48 items-center justify-center">
-          <Spinner size="lg" />
-        </div>
-      ) : (
-        <div className="rounded-xl border border-border bg-background-surface overflow-hidden">
-          <div className="overflow-x-auto">
-            <Table>
-              <TableHead>
-                <TableRow>
-                  {isStaff && (
-                    <TableHeaderCell className="w-10">
-                      <input
-                        type="checkbox"
-                        checked={
-                          tickets.length > 0 && selected.size === tickets.length
-                        }
-                        onChange={toggleAll}
-                        className="accent-primary"
-                        aria-label="Selecionar todos"
-                      />
-                    </TableHeaderCell>
-                  )}
-                  <TableHeaderCell className="w-36">Protocolo</TableHeaderCell>
-                  <TableHeaderCell>Título</TableHeaderCell>
-                  <TableHeaderCell className="w-36">Status</TableHeaderCell>
-                  <TableHeaderCell className="w-40">Etiquetas</TableHeaderCell>
-                  <TableHeaderCell
-                    className="w-28"
-                    sortable
-                    sorted={sortedState("priority")}
-                    onSort={() => handleSort("priority")}
-                  >
-                    Prioridade
-                  </TableHeaderCell>
-                  <TableHeaderCell className="w-28">Categoria</TableHeaderCell>
-                  {isStaff && (
-                    <TableHeaderCell className="w-36">
-                      Responsável
-                    </TableHeaderCell>
-                  )}
-                  <TableHeaderCell
-                    className="w-28"
-                    sortable
-                    sorted={sortedState("sla_resolve_due_at")}
-                    onSort={() => handleSort("sla_resolve_due_at")}
-                  >
-                    SLA
-                  </TableHeaderCell>
-                  <TableHeaderCell
-                    className="w-28"
-                    sortable
-                    sorted={sortedState("created_at")}
-                    onSort={() => handleSort("created_at")}
-                  >
-                    Criado em
-                  </TableHeaderCell>
-                </TableRow>
-              </TableHead>
-              <TableBody>
-                {tickets.length === 0 ? (
-                  <TableEmpty
-                    colSpan={isStaff ? 10 : 8}
-                    message="Nenhum ticket encontrado para os filtros aplicados."
-                  />
-                ) : (
-                  tickets.map((t) => (
-                    <TableRow
-                      key={t.id}
-                      clickable
-                      onClick={() => navigate(`/tickets/${t.id}`)}
-                      className={selected.has(t.id) ? "bg-primary/5" : ""}
-                    >
-                      {isStaff && (
-                        <TableCell
-                          onClick={(e) => e.stopPropagation()}
-                          className="w-10"
-                        >
-                          <input
-                            type="checkbox"
-                            checked={selected.has(t.id)}
-                            onChange={() => toggleOne(t.id)}
-                            className="accent-primary"
-                            aria-label={`Selecionar ${t.protocol}`}
-                          />
-                        </TableCell>
-                      )}
-                      <TableCell muted>
-                        <span className="font-mono text-xs">{t.protocol}</span>
-                        {(t.sla_response_breach || t.sla_resolve_breach) && (
-                          <span className="ml-1 text-danger text-xs">⚠</span>
-                        )}
-                      </TableCell>
-                      <TableCell>
-                        <span className="line-clamp-1">{t.title}</span>
-                      </TableCell>
-                      <TableCell>
-                        <StatusBadge status={t.status} />
-                      </TableCell>
-                      <TableCell>
-                        {t.tags.length > 0 ? (
-                          <div className="flex flex-wrap gap-1">
-                            {t.tags.map((tag) => (
-                              <TagBadge
-                                key={tag.id}
-                                name={tag.name}
-                                color={tag.color}
-                              />
-                            ))}
-                          </div>
-                        ) : (
-                          <span className="text-slate-600 text-xs">—</span>
-                        )}
-                      </TableCell>
-                      <TableCell>
-                        <PriorityBadge priority={t.priority} />
-                      </TableCell>
-                      <TableCell muted className="text-xs capitalize">
-                        {{
-                          hardware: "Hardware",
-                          software: "Software",
-                          network: "Rede",
-                          access: "Acesso",
-                          email: "E-mail",
-                          security: "Segurança",
-                          general: "Geral",
-                          other: "Outro",
-                        }[t.category] ?? t.category}
-                      </TableCell>
-                      {isStaff && (
-                        <TableCell muted className="text-xs">
-                          {techName(t)}
-                        </TableCell>
-                      )}
-                      <TableCell>
-                        <SlaCell ticket={t} />
-                      </TableCell>
-                      <TableCell muted className="text-xs">
-                        {createdAt(t)}
-                      </TableCell>
-                    </TableRow>
-                  ))
-                )}
-              </TableBody>
-            </Table>
-          </div>
-        </div>
-      )}
-
-      {/* Pagination */}
-      {!loading && total > PAGE_SIZE && (
-        <Pagination
-          page={page}
-          pageSize={PAGE_SIZE}
-          total={total}
-          onPageChange={setPage}
-        />
-      )}
-
-      {/* ── Bulk status modal ─────────────────────────── */}
-      <Modal
-        open={bulkStatusModal}
-        onClose={() => {
-          setBulkStatusModal(false);
-          setBulkError(null);
-          setBulkStatus("");
-        }}
-        title={`Alterar status — ${selected.size} ticket${selected.size > 1 ? "s" : ""}`}
-      >
-        <div className="space-y-4">
-          {bulkError && <Alert variant="danger">{bulkError}</Alert>}
-          <Select
-            label="Novo status"
-            options={commonTransitions.map((s) => ({
-              value: s,
-              label: STATUS_LABEL[s] ?? s,
-            }))}
-            placeholder="Selecione"
-            value={bulkStatus}
-            onChange={(e) => setBulkStatus(e.target.value)}
-          />
-        </div>
-        <ModalFooter>
-          <Button
-            variant="secondary"
-            onClick={() => setBulkStatusModal(false)}
-            disabled={bulkLoading}
-          >
-            Cancelar
-          </Button>
-          <Button
-            onClick={handleBulkStatus}
-            loading={bulkLoading}
-            disabled={!bulkStatus}
-          >
-            Confirmar
-          </Button>
-        </ModalFooter>
-      </Modal>
-
-      {/* ── Bulk assign modal ─────────────────────────── */}
-      <Modal
-        open={bulkAssignModal}
-        onClose={() => {
-          setBulkAssignModal(false);
-          setBulkError(null);
-          setBulkAssignee("");
-        }}
-        title={`Atribuir técnico — ${selected.size} ticket${selected.size > 1 ? "s" : ""}`}
-      >
-        <div className="space-y-4">
-          {bulkError && <Alert variant="danger">{bulkError}</Alert>}
-          <Select
-            label="Técnico"
-            options={technicians.map((t) => ({
-              value: t.id,
-              label: t.name,
-            }))}
-            placeholder="Selecione um técnico"
-            value={bulkAssignee}
-            onChange={(e) => setBulkAssignee(e.target.value)}
-          />
-        </div>
-        <ModalFooter>
-          <Button
-            variant="secondary"
-            onClick={() => setBulkAssignModal(false)}
-            disabled={bulkLoading}
-          >
-            Cancelar
-          </Button>
-          <Button
-            onClick={handleBulkAssign}
-            loading={bulkLoading}
-            disabled={!bulkAssignee}
-          >
-            Atribuir
-          </Button>
-        </ModalFooter>
-      </Modal>
+      </div>
     </div>
   );
 }
