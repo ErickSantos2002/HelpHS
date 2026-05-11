@@ -16,12 +16,12 @@ export interface BadgeProps {
 }
 
 const variantClasses: Record<BadgeVariant, string> = {
-  primary: "bg-primary/20 text-primary border-primary/30",
+  primary: "bg-primary/20 text-primary-700 dark:text-primary border-primary/30",
   secondary: "bg-background-elevated text-slate-300 border-border",
-  danger: "bg-danger/20 text-danger-400 border-danger/30",
-  warning: "bg-warning/20 text-warning-400 border-warning/30",
-  info: "bg-info/20 text-info-400 border-info/30",
-  success: "bg-primary/20 text-primary border-primary/30",
+  danger: "bg-danger/20 text-danger-700 dark:text-danger-400 border-danger/30",
+  warning: "bg-warning/20 text-warning-700 dark:text-warning-400 border-warning/30",
+  info: "bg-info/20 text-info-700 dark:text-info-400 border-info/30",
+  success: "bg-success/20 text-success-700 dark:text-success-400 border-success/30",
   muted: "bg-background-elevated text-slate-500 border-border",
 };
 

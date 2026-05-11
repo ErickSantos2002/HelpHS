@@ -211,8 +211,8 @@ function SlaChip({
     <span
       className={`inline-flex items-center gap-1.5 rounded-md px-2 py-1 text-xs font-semibold ${
         breached
-          ? "bg-red-500/15 text-red-400 ring-1 ring-inset ring-red-500/25"
-          : "bg-amber-500/15 text-amber-400 ring-1 ring-inset ring-amber-500/25"
+          ? "bg-red-500/15 text-red-700 dark:text-red-400 ring-1 ring-inset ring-red-500/25"
+          : "bg-amber-500/15 text-amber-700 dark:text-amber-400 ring-1 ring-inset ring-amber-500/25"
       }`}
     >
       {IC.Clock}
@@ -737,7 +737,7 @@ export default function TicketDetailPage() {
               <TagBadge key={tag.id} name={tag.name} color={tag.color} />
             ))}
             {slaBreach && (
-              <span className="inline-flex items-center gap-1 rounded-full bg-red-500/15 px-2.5 py-0.5 text-xs font-semibold text-red-400 ring-1 ring-inset ring-red-500/25">
+              <span className="inline-flex items-center gap-1 rounded-full bg-red-500/15 px-2.5 py-0.5 text-xs font-semibold text-red-700 dark:text-red-400 ring-1 ring-inset ring-red-500/25">
                 {IC.Alert}
                 SLA violado
               </span>
