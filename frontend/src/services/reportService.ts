@@ -66,9 +66,23 @@ export interface TechnicianDetailReport {
   tickets_by_day: DailyCount[];
 }
 
-export async function getReports(period: number = 30): Promise<ReportData> {
+export interface ReportFilters {
+  period?: number;
+  category?: string;
+  priority?: string;
+  start_date?: string;
+  end_date?: string;
+}
+
+export async function getReports(filters: ReportFilters = {}): Promise<ReportData> {
   const { data } = await api.get<ReportData>("/dashboard/reports", {
-    params: { period },
+    params: {
+      ...(filters.period   !== undefined && { period:     filters.period   }),
+      ...(filters.category !== undefined && { category:   filters.category }),
+      ...(filters.priority !== undefined && { priority:   filters.priority }),
+      ...(filters.start_date             && { start_date: filters.start_date }),
+      ...(filters.end_date               && { end_date:   filters.end_date   }),
+    },
   });
   return data;
 }
@@ -101,7 +115,16 @@ export async function getTechnicianDetailReport(
 
 export function exportReportsUrl(
   format: "csv" | "pdf",
-  period: number,
+  filters: ReportFilters,
 ): string {
-  return `/api/v1/dashboard/reports/export/${format}?period=${period}`;
+  const params = new URLSearchParams();
+  if (filters.start_date && filters.end_date) {
+    params.set("start_date", filters.start_date);
+    params.set("end_date",   filters.end_date);
+  } else if (filters.period !== undefined) {
+    params.set("period", String(filters.period));
+  }
+  if (filters.category) params.set("category", filters.category);
+  if (filters.priority) params.set("priority", filters.priority);
+  return `/api/v1/dashboard/reports/export/${format}?${params.toString()}`;
 }

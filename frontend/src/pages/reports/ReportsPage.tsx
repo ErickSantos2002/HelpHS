@@ -1,4 +1,4 @@
-import { useEffect, useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import {
   Area,
   AreaChart,
@@ -20,6 +20,7 @@ import {
   getTechnicianDetailReport,
   getTechnicianListReport,
   type ReportData,
+  type ReportFilters,
   type TechnicianDetailReport,
   type TechnicianListReport,
 } from "../../services/reportService";
@@ -32,6 +33,24 @@ const PERIOD_OPTIONS = [
   { value: "30",          label: "Últimos 30 dias"  },
   { value: "90",          label: "Últimos 90 dias"  },
   { value: "personalizado", label: "Personalizado"  },
+];
+
+const CATEGORY_OPTIONS = [
+  { value: "hardware", label: "Hardware"  },
+  { value: "software", label: "Software"  },
+  { value: "network",  label: "Rede"      },
+  { value: "access",   label: "Acesso"    },
+  { value: "email",    label: "E-mail"    },
+  { value: "security", label: "Segurança" },
+  { value: "general",  label: "Geral"     },
+  { value: "other",    label: "Outro"     },
+];
+
+const PRIORITY_OPTIONS = [
+  { value: "critical", label: "Crítica" },
+  { value: "high",     label: "Alta"    },
+  { value: "medium",   label: "Média"   },
+  { value: "low",      label: "Baixa"   },
 ];
 
 const PRIORITY_COLORS: Record<string, string> = {
@@ -52,11 +71,12 @@ const tooltipWrapperStyle = { outline: "none", border: "none" };
 // ── Icons ─────────────────────────────────────────────────────
 
 const IC = {
-  Download: <svg className="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}><path strokeLinecap="round" strokeLinejoin="round" d="M4 16v1a3 3 0 003 3h10a3 3 0 003-3v-1m-4-4l-4 4m0 0l-4-4m4 4V4" /></svg>,
-  ChevLeft: <svg className="w-3.5 h-3.5" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2.5}><path strokeLinecap="round" strokeLinejoin="round" d="M15 19l-7-7 7-7" /></svg>,
-  Chart: <svg className="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}><path strokeLinecap="round" strokeLinejoin="round" d="M9 19v-6a2 2 0 00-2-2H5a2 2 0 00-2 2v6a2 2 0 002 2h2a2 2 0 002-2zm0 0V9a2 2 0 012-2h2a2 2 0 012 2v10m-6 0a2 2 0 002 2h2a2 2 0 002-2m0 0V5a2 2 0 012-2h2a2 2 0 012 2v14a2 2 0 01-2 2h-2a2 2 0 01-2-2z" /></svg>,
-  Users: <svg className="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}><path strokeLinecap="round" strokeLinejoin="round" d="M17 20h5v-2a3 3 0 00-5.356-1.857M17 20H7m10 0v-2c0-.656-.126-1.283-.356-1.857M7 20H2v-2a3 3 0 015.356-1.857M7 20v-2c0-.656.126-1.283.356-1.857m0 0a5.002 5.002 0 019.288 0M15 7a3 3 0 11-6 0 3 3 0 016 0z" /></svg>,
-  Calendar: <svg className="w-3.5 h-3.5" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}><path strokeLinecap="round" strokeLinejoin="round" d="M8 7V3m8 4V3m-9 8h10M5 21h14a2 2 0 002-2V7a2 2 0 00-2-2H5a2 2 0 00-2 2v12a2 2 0 002 2z" /></svg>,
+  Download:  <svg className="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}><path strokeLinecap="round" strokeLinejoin="round" d="M4 16v1a3 3 0 003 3h10a3 3 0 003-3v-1m-4-4l-4 4m0 0l-4-4m4 4V4" /></svg>,
+  ChevLeft:  <svg className="w-3.5 h-3.5" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2.5}><path strokeLinecap="round" strokeLinejoin="round" d="M15 19l-7-7 7-7" /></svg>,
+  ChevDown:  <svg className="w-3.5 h-3.5" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2.5}><path strokeLinecap="round" strokeLinejoin="round" d="M19 9l-7 7-7-7" /></svg>,
+  Chart:     <svg className="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}><path strokeLinecap="round" strokeLinejoin="round" d="M9 19v-6a2 2 0 00-2-2H5a2 2 0 00-2 2v6a2 2 0 002 2h2a2 2 0 002-2zm0 0V9a2 2 0 012-2h2a2 2 0 012 2v10m-6 0a2 2 0 002 2h2a2 2 0 002-2m0 0V5a2 2 0 012-2h2a2 2 0 012 2v14a2 2 0 01-2 2h-2a2 2 0 01-2-2z" /></svg>,
+  Users:     <svg className="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}><path strokeLinecap="round" strokeLinejoin="round" d="M17 20h5v-2a3 3 0 00-5.356-1.857M17 20H7m10 0v-2c0-.656-.126-1.283-.356-1.857M7 20H2v-2a3 3 0 015.356-1.857M7 20v-2c0-.656.126-1.283.356-1.857m0 0a5.002 5.002 0 019.288 0M15 7a3 3 0 11-6 0 3 3 0 016 0z" /></svg>,
+  Calendar:  <svg className="w-3.5 h-3.5" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}><path strokeLinecap="round" strokeLinejoin="round" d="M8 7V3m8 4V3m-9 8h10M5 21h14a2 2 0 002-2V7a2 2 0 00-2-2H5a2 2 0 00-2 2v12a2 2 0 002 2z" /></svg>,
 };
 
 // ── Shared sub-components ─────────────────────────────────────
@@ -402,6 +422,57 @@ function TechnicianDetailPanel({ techDetail, techDetailLoading, onClose }: {
   );
 }
 
+// ── Export dropdown ───────────────────────────────────────────
+
+function ExportDropdown({ filters }: { filters: ReportFilters }) {
+  const [open, setOpen] = useState(false);
+  const ref = useRef<HTMLDivElement>(null);
+
+  useEffect(() => {
+    function handle(e: MouseEvent) {
+      if (ref.current && !ref.current.contains(e.target as Node)) setOpen(false);
+    }
+    document.addEventListener("mousedown", handle);
+    return () => document.removeEventListener("mousedown", handle);
+  }, []);
+
+  return (
+    <div ref={ref} className="relative">
+      <button
+        onClick={() => setOpen((v) => !v)}
+        className="flex h-9 items-center gap-1.5 rounded-lg border border-border/40 bg-background-elevated px-3 text-xs font-medium text-slate-400 hover:bg-background-surface hover:text-slate-200 transition-colors cursor-pointer"
+      >
+        {IC.Download}
+        Exportar
+        <span className={`transition-transform duration-200 ${open ? "rotate-180" : ""}`}>
+          {IC.ChevDown}
+        </span>
+      </button>
+
+      {open && (
+        <div className="absolute right-0 top-full mt-1 z-20 min-w-[140px] rounded-xl border border-border/40 bg-background-surface shadow-lg overflow-hidden">
+          <a
+            href={exportReportsUrl("csv", filters)}
+            download
+            onClick={() => setOpen(false)}
+            className="flex items-center gap-2 px-4 py-2.5 text-xs font-medium text-slate-300 hover:bg-background-elevated transition-colors"
+          >
+            {IC.Download} Exportar CSV
+          </a>
+          <a
+            href={exportReportsUrl("pdf", filters)}
+            download
+            onClick={() => setOpen(false)}
+            className="flex items-center gap-2 px-4 py-2.5 text-xs font-medium text-slate-300 hover:bg-background-elevated transition-colors border-t border-border/30"
+          >
+            {IC.Download} Exportar PDF
+          </a>
+        </div>
+      )}
+    </div>
+  );
+}
+
 // ── Main ──────────────────────────────────────────────────────
 
 type Tab = "global" | "technicians";
@@ -414,6 +485,8 @@ export default function ReportsPage() {
   const [period,      setPeriod]      = useState("30");
   const [customStart, setCustomStart] = useState("");
   const [customEnd,   setCustomEnd]   = useState("");
+  const [category,    setCategory]    = useState("");
+  const [priority,    setPriority]    = useState("");
   const [tab,         setTab]         = useState<Tab>(isAdmin ? "global" : "technicians");
 
   const [globalData,        setGlobalData]        = useState<ReportData | null>(null);
@@ -426,15 +499,23 @@ export default function ReportsPage() {
   const [techDetail,        setTechDetail]        = useState<TechnicianDetailReport | null>(null);
   const [techDetailLoading, setTechDetailLoading] = useState(false);
 
-  const p = period === "personalizado" && customStart && customEnd
+  const isCustom = period === "personalizado" && !!customStart && !!customEnd;
+  const p = isCustom
     ? Math.max(1, Math.ceil((new Date(customEnd).getTime() - new Date(customStart).getTime()) / 86400000))
     : Number(period) || 30;
+
+  const reportFilters: ReportFilters = {
+    ...(isCustom ? { start_date: customStart, end_date: customEnd } : { period: p }),
+    ...(category ? { category } : {}),
+    ...(priority ? { priority } : {}),
+  };
 
   useEffect(() => {
     if (tab !== "global" || !isAdmin) return;
     setGlobalLoading(true);
-    getReports(p).then(setGlobalData).catch(() => {}).finally(() => setGlobalLoading(false));
-  }, [tab, p, isAdmin]);
+    getReports(reportFilters).then(setGlobalData).catch(() => {}).finally(() => setGlobalLoading(false));
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [tab, p, isAdmin, category, priority, customStart, customEnd]);
 
   useEffect(() => {
     if (tab !== "technicians" || !isAdmin) return;
@@ -458,6 +539,8 @@ export default function ReportsPage() {
     setTechDetail(null);
   }
 
+  const activeFiltersCount = (category ? 1 : 0) + (priority ? 1 : 0);
+
   const tabs: { key: Tab; label: string; icon: React.ReactNode }[] = [
     { key: "global",       label: "Visão geral", icon: IC.Chart  },
     { key: "technicians",  label: "Por técnico", icon: IC.Users  },
@@ -471,6 +554,11 @@ export default function ReportsPage() {
           <h1 className="text-xl font-extrabold text-slate-100">Relatórios</h1>
           <p className="mt-0.5 text-sm text-slate-500">
             {isTechnician ? "Suas métricas de desempenho" : "Visão geral e desempenho da equipe"}
+            {activeFiltersCount > 0 && (
+              <span className="ml-2 rounded-full bg-primary/20 px-2 py-0.5 text-[10px] font-semibold text-primary">
+                {activeFiltersCount} filtro{activeFiltersCount > 1 ? "s" : ""} ativo{activeFiltersCount > 1 ? "s" : ""}
+              </span>
+            )}
           </p>
         </div>
 
@@ -495,47 +583,30 @@ export default function ReportsPage() {
             </div>
           )}
 
-          <FilterSelect
-            value={period}
-            onChange={setPeriod}
-            options={PERIOD_OPTIONS}
-            placeholder="Período"
-          />
+          <FilterSelect value={period} onChange={setPeriod} options={PERIOD_OPTIONS} placeholder="Período" />
 
-          {/* Date range inputs — shown when "Personalizado" is selected */}
           {period === "personalizado" && (
             <div className="flex h-9 items-center gap-1.5 rounded-lg border border-border/60 bg-background-elevated px-3 text-sm">
               <span className="shrink-0 text-slate-400">{IC.Calendar}</span>
-              <input
-                type="date"
-                value={customStart}
-                max={customEnd || undefined}
+              <input type="date" value={customStart} max={customEnd || undefined}
                 onChange={(e) => setCustomStart(e.target.value)}
-                className="bg-transparent text-slate-300 text-xs outline-none cursor-pointer w-28 [color-scheme:dark]"
-              />
+                className="bg-transparent text-slate-300 text-xs outline-none cursor-pointer w-28 [color-scheme:dark]" />
               <span className="text-slate-500 text-xs">até</span>
-              <input
-                type="date"
-                value={customEnd}
-                min={customStart || undefined}
+              <input type="date" value={customEnd} min={customStart || undefined}
                 onChange={(e) => setCustomEnd(e.target.value)}
-                className="bg-transparent text-slate-300 text-xs outline-none cursor-pointer w-28 [color-scheme:dark]"
-              />
+                className="bg-transparent text-slate-300 text-xs outline-none cursor-pointer w-28 [color-scheme:dark]" />
             </div>
           )}
 
-          {isAdmin && (
+          {/* Filtros de categoria e prioridade (visão geral apenas) */}
+          {(isAdmin && tab === "global") || isTechnician ? (
             <>
-              <a href={exportReportsUrl("csv", p)} download
-                className="flex items-center gap-1.5 rounded-lg border border-border/40 bg-background-elevated px-3 py-2 text-xs font-medium text-slate-400 hover:bg-background-surface hover:text-slate-200 transition-colors">
-                {IC.Download} CSV
-              </a>
-              <a href={exportReportsUrl("pdf", p)} download
-                className="flex items-center gap-1.5 rounded-lg border border-border/40 bg-background-elevated px-3 py-2 text-xs font-medium text-slate-400 hover:bg-background-surface hover:text-slate-200 transition-colors">
-                {IC.Download} PDF
-              </a>
+              <FilterSelect value={category} onChange={setCategory} options={CATEGORY_OPTIONS} placeholder="Todas as categorias" />
+              <FilterSelect value={priority} onChange={setPriority} options={PRIORITY_OPTIONS} placeholder="Todas as prioridades" />
             </>
-          )}
+          ) : null}
+
+          {isAdmin && <ExportDropdown filters={reportFilters} />}
         </div>
       </div>
 
@@ -551,6 +622,27 @@ export default function ReportsPage() {
       {/* ── Technicians tab (admin) ── */}
       {isAdmin && tab === "technicians" && (
         <div className="space-y-4">
+          {/* Seletor rápido de técnico */}
+          {techList && techList.technicians.length > 0 && (
+            <div className="flex items-center gap-3 rounded-xl border border-border/40 bg-background-surface px-4 py-3">
+              <span className="text-xs font-medium text-slate-500 shrink-0">Ver detalhes de:</span>
+              <FilterSelect
+                value={selectedTechId ?? ""}
+                onChange={(v) => v ? handleSelectTechnician(v) : (setSelectedTechId(undefined), setTechDetail(null))}
+                options={techList.technicians.map((t) => ({ value: t.technician_id, label: t.technician_name }))}
+                placeholder="Selecione um técnico"
+              />
+              {selectedTechId && (
+                <button
+                  onClick={() => { setSelectedTechId(undefined); setTechDetail(null); }}
+                  className="text-xs text-slate-500 hover:text-slate-200 transition-colors cursor-pointer shrink-0"
+                >
+                  Limpar
+                </button>
+              )}
+            </div>
+          )}
+
           {techListLoading
             ? <div className="flex h-48 items-center justify-center"><Spinner size="lg" /></div>
             : techList && <TechnicianRanking data={techList} onSelect={handleSelectTechnician} />

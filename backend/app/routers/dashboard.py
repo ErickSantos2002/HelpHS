@@ -11,7 +11,7 @@ Permissões:
 import csv
 import io
 import uuid
-from datetime import UTC, datetime, timedelta
+from datetime import UTC, date as DateType, datetime, timedelta
 from typing import Annotated
 
 from fastapi import APIRouter, Depends, HTTPException, Query, status
@@ -140,12 +140,36 @@ async def get_dashboard_stats(
     return result
 
 
-async def _build_report(db: AsyncSession, period: int) -> ReportData:
+async def _build_report(
+    db: AsyncSession,
+    period: int = 30,
+    category: TicketCategory | None = None,
+    priority: TicketPriority | None = None,
+    start_date: DateType | None = None,
+    end_date: DateType | None = None,
+) -> ReportData:
     """Shared data collection used by JSON, CSV and PDF endpoints."""
-    since = datetime.now(UTC) - timedelta(days=period)
+    if start_date and end_date:
+        since = datetime(start_date.year, start_date.month, start_date.day, 0, 0, 0, tzinfo=UTC)
+        until = datetime(end_date.year, end_date.month, end_date.day, 23, 59, 59, tzinfo=UTC)
+        actual_period = (end_date - start_date).days + 1
+        date_cond = [Ticket.created_at >= since, Ticket.created_at <= until]
+    else:
+        since = datetime.now(UTC) - timedelta(days=period)
+        until = datetime.now(UTC)
+        actual_period = period
+        date_cond = [Ticket.created_at >= since]
+
+    extra: list = []
+    if category:
+        extra.append(Ticket.category == category)
+    if priority:
+        extra.append(Ticket.priority == priority)
+
+    base = [*date_cond, *extra]
 
     total = (
-        await db.execute(select(func.count()).select_from(Ticket).where(Ticket.created_at >= since))
+        await db.execute(select(func.count()).select_from(Ticket).where(*base))
     ).scalar_one()
 
     rows = (
@@ -154,7 +178,7 @@ async def _build_report(db: AsyncSession, period: int) -> ReportData:
                 func.date_trunc(text("'day'"), Ticket.created_at).label("day"),
                 func.count().label("cnt"),
             )
-            .where(Ticket.created_at >= since)
+            .where(*base)
             .group_by(func.date_trunc(text("'day'"), Ticket.created_at))
             .order_by(func.date_trunc(text("'day'"), Ticket.created_at))
         )
@@ -165,13 +189,13 @@ async def _build_report(db: AsyncSession, period: int) -> ReportData:
             date=(since + timedelta(days=i)).strftime("%Y-%m-%d"),
             count=counts_by_day.get((since + timedelta(days=i)).strftime("%Y-%m-%d"), 0),
         )
-        for i in range(period + 1)
+        for i in range(actual_period + 1)
     ]
 
     cat_rows = (
         await db.execute(
             select(Ticket.category, func.count().label("cnt"))
-            .where(Ticket.created_at >= since)
+            .where(*base)
             .group_by(Ticket.category)
             .order_by(func.count().desc())
         )
@@ -182,7 +206,6 @@ async def _build_report(db: AsyncSession, period: int) -> ReportData:
         if cat.value not in present:
             tickets_by_category.append(CategoryCount(category=cat.value, count=0))
 
-    # ── SLA compliance — single query with conditional aggregation
     sla_rows = (
         await db.execute(
             select(
@@ -190,7 +213,7 @@ async def _build_report(db: AsyncSession, period: int) -> ReportData:
                 func.count().label("total"),
                 func.count().filter(Ticket.sla_resolve_breach.is_(True)).label("breached"),
             )
-            .where(Ticket.created_at >= since)
+            .where(*base)
             .group_by(Ticket.priority)
         )
     ).all()
@@ -198,22 +221,35 @@ async def _build_report(db: AsyncSession, period: int) -> ReportData:
         r.priority.value: (r.total, r.breached) for r in sla_rows
     }
     sla_compliance: list[SLAComplianceItem] = []
-    for priority in TicketPriority:
-        p_total, p_breached = sla_by_priority.get(priority.value, (0, 0))
+    priorities_iter = [priority] if priority else list(TicketPriority)
+    for prio in priorities_iter:
+        p_total, p_breached = sla_by_priority.get(prio.value, (0, 0))
         rate = round((1 - p_breached / p_total) * 100, 1) if p_total > 0 else 100.0
         sla_compliance.append(
             SLAComplianceItem(
-                priority=priority.value,
+                priority=prio.value,
                 total=p_total,
                 breached=p_breached,
                 compliance_rate=rate,
             )
         )
 
+    # CSAT — join with Ticket when category/priority filter is active
+    csat_date_cond = (
+        [SatisfactionSurvey.created_at >= since, SatisfactionSurvey.created_at <= until]
+        if (start_date and end_date)
+        else [SatisfactionSurvey.created_at >= since]
+    )
+    if extra:
+        ticket_subq = select(Ticket.id).where(*date_cond, *extra).scalar_subquery()
+        csat_cond = [*csat_date_cond, SatisfactionSurvey.ticket_id.in_(ticket_subq)]
+    else:
+        csat_cond = csat_date_cond
+
     csat_rows = (
         await db.execute(
             select(SatisfactionSurvey.rating, func.count().label("cnt"))
-            .where(SatisfactionSurvey.created_at >= since)
+            .where(*csat_cond)
             .group_by(SatisfactionSurvey.rating)
             .order_by(SatisfactionSurvey.rating)
         )
@@ -224,16 +260,12 @@ async def _build_report(db: AsyncSession, period: int) -> ReportData:
     ]
 
     avg_raw = (
-        await db.execute(
-            select(func.avg(SatisfactionSurvey.rating)).where(
-                SatisfactionSurvey.created_at >= since
-            )
-        )
+        await db.execute(select(func.avg(SatisfactionSurvey.rating)).where(*csat_cond))
     ).scalar_one()
     csat_average = round(float(avg_raw), 2) if avg_raw is not None else None
 
     return ReportData(
-        period_days=period,
+        period_days=actual_period,
         total_tickets=total,
         tickets_by_day=tickets_by_day,
         tickets_by_category=tickets_by_category,
@@ -247,22 +279,43 @@ async def _build_report(db: AsyncSession, period: int) -> ReportData:
 async def get_reports(
     db: Annotated[AsyncSession, Depends(get_db)],
     _actor: Annotated[User, Depends(authorize(UserRole.admin, UserRole.technician))],
-    period: Annotated[int, Query(ge=7, le=365)] = 30,
+    period: Annotated[int, Query(ge=1, le=365)] = 30,
+    category: TicketCategory | None = Query(default=None),
+    priority: TicketPriority | None = Query(default=None),
+    start_date: DateType | None = Query(default=None),
+    end_date: DateType | None = Query(default=None),
 ) -> ReportData:
-    return await _build_report(db, period)
+    return await _build_report(db, period, category, priority, start_date, end_date)
 
 
 @router.get("/dashboard/reports/export/csv")
 async def export_reports_csv(
     db: Annotated[AsyncSession, Depends(get_db)],
     _actor: Annotated[User, Depends(authorize(UserRole.admin, UserRole.technician))],
-    period: Annotated[int, Query(ge=7, le=365)] = 30,
+    period: Annotated[int, Query(ge=1, le=365)] = 30,
+    category: TicketCategory | None = Query(default=None),
+    priority: TicketPriority | None = Query(default=None),
+    start_date: DateType | None = Query(default=None),
+    end_date: DateType | None = Query(default=None),
 ) -> StreamingResponse:
-    data = await _build_report(db, period)
+    data = await _build_report(db, period, category, priority, start_date, end_date)
     buf = io.StringIO()
     writer = csv.writer(buf)
 
-    writer.writerow([f"Relatório HelpHS — últimos {period} dias"])
+    period_label = (
+        f"{start_date} a {end_date}"
+        if (start_date and end_date)
+        else f"últimos {data.period_days} dias"
+    )
+    filter_parts = []
+    if category:
+        filter_parts.append(f"Categoria: {category.value}")
+    if priority:
+        filter_parts.append(f"Prioridade: {priority.value}")
+    filter_label = " | ".join(filter_parts) if filter_parts else "Todos"
+
+    writer.writerow([f"Relatório HelpHS — {period_label}"])
+    writer.writerow([f"Filtros: {filter_label}"])
     writer.writerow([f"Gerado em: {datetime.now(UTC).strftime('%d/%m/%Y %H:%M')} UTC"])
     writer.writerow([])
 
@@ -293,7 +346,9 @@ async def export_reports_csv(
         writer.writerow(["Média", data.csat_average])
 
     buf.seek(0)
-    filename = f"relatorio_helphs_{datetime.now(UTC).strftime('%Y%m%d')}_{period}d.csv"
+    suffix = f"_{category.value}" if category else ""
+    suffix += f"_{priority.value}" if priority else ""
+    filename = f"relatorio_helphs_{datetime.now(UTC).strftime('%Y%m%d')}_{data.period_days}d{suffix}.csv"
     return StreamingResponse(
         iter([buf.getvalue()]),
         media_type="text/csv",
@@ -305,9 +360,13 @@ async def export_reports_csv(
 async def export_reports_pdf(
     db: Annotated[AsyncSession, Depends(get_db)],
     _actor: Annotated[User, Depends(authorize(UserRole.admin, UserRole.technician))],
-    period: Annotated[int, Query(ge=7, le=365)] = 30,
+    period: Annotated[int, Query(ge=1, le=365)] = 30,
+    category: TicketCategory | None = Query(default=None),
+    priority: TicketPriority | None = Query(default=None),
+    start_date: DateType | None = Query(default=None),
+    end_date: DateType | None = Query(default=None),
 ) -> StreamingResponse:
-    data = await _build_report(db, period)
+    data = await _build_report(db, period, category, priority, start_date, end_date)
     buf = io.BytesIO()
     styles = getSampleStyleSheet()
     doc = SimpleDocTemplate(buf, pagesize=A4, leftMargin=2 * cm, rightMargin=2 * cm)
@@ -317,11 +376,24 @@ async def export_reports_pdf(
     h2_style = styles["Heading2"]
     normal_style = styles["Normal"]
 
+    period_label = (
+        f"{start_date} a {end_date}"
+        if (start_date and end_date)
+        else f"últimos {data.period_days} dias"
+    )
+    filter_parts = []
+    if category:
+        filter_parts.append(f"Categoria: {category.value}")
+    if priority:
+        filter_parts.append(f"Prioridade: {priority.value}")
+    filter_str = " · ".join(filter_parts)
+
     story.append(Paragraph("Relatório HelpHS", title_style))
     story.append(
         Paragraph(
-            f"Período: últimos {period} dias &nbsp;·&nbsp; "
-            f"Gerado em {datetime.now(UTC).strftime('%d/%m/%Y %H:%M')} UTC",
+            f"Período: {period_label}"
+            + (f" &nbsp;·&nbsp; {filter_str}" if filter_str else "")
+            + f" &nbsp;·&nbsp; Gerado em {datetime.now(UTC).strftime('%d/%m/%Y %H:%M')} UTC",
             normal_style,
         )
     )
@@ -399,7 +471,9 @@ async def export_reports_pdf(
 
     doc.build(story)
     buf.seek(0)
-    filename = f"relatorio_helphs_{datetime.now(UTC).strftime('%Y%m%d')}_{period}d.pdf"
+    suffix = f"_{category.value}" if category else ""
+    suffix += f"_{priority.value}" if priority else ""
+    filename = f"relatorio_helphs_{datetime.now(UTC).strftime('%Y%m%d')}_{data.period_days}d{suffix}.pdf"
     return StreamingResponse(
         buf,
         media_type="application/pdf",
