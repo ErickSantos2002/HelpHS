@@ -31,6 +31,7 @@ from app.models.models import (
     SatisfactionSurvey,
     Ticket,
     TicketCategory,
+    TicketHistory,
     TicketPriority,
     TicketStatus,
     User,
@@ -38,18 +39,24 @@ from app.models.models import (
     UserStatus,
 )
 from app.schemas.dashboard import (
+    AvgResolutionItem,
     CategoryCount,
+    CsatDailyItem,
     CSATDistributionItem,
     DailyCount,
     DashboardStats,
+    OldestTicketItem,
+    ReportComparison,
     ReportData,
     SLAComplianceItem,
     SlaStats,
     SurveyStats,
     TechnicianDetailReport,
+    TechnicianDistItem,
     TechnicianListReport,
     TechnicianSummary,
     TicketStats,
+    WeekdayCount,
 )
 
 router = APIRouter(tags=["Dashboard"])
@@ -264,6 +271,177 @@ async def _build_report(
     ).scalar_one()
     csat_average = round(float(avg_raw), 2) if avg_raw is not None else None
 
+    # ── Tempo médio de resolução por prioridade ───────────────
+    resolution_rows = (
+        await db.execute(
+            select(
+                Ticket.priority,
+                func.avg(
+                    extract("epoch", Ticket.closed_at - Ticket.created_at) / 3600
+                ).label("avg_hours"),
+            )
+            .where(
+                *base,
+                Ticket.closed_at.is_not(None),
+                Ticket.status.in_([TicketStatus.resolved, TicketStatus.closed]),
+            )
+            .group_by(Ticket.priority)
+        )
+    ).all()
+    resolution_map: dict[str, float | None] = {
+        r.priority.value: round(float(r.avg_hours), 1) if r.avg_hours else None
+        for r in resolution_rows
+    }
+    avg_resolution_by_priority = [
+        AvgResolutionItem(
+            priority=prio.value,
+            avg_hours=resolution_map.get(prio.value),
+        )
+        for prio in ([priority] if priority else list(TicketPriority))
+    ]
+
+    # ── CSAT diário ───────────────────────────────────────────
+    csat_day_rows = (
+        await db.execute(
+            select(
+                func.date_trunc(text("'day'"), SatisfactionSurvey.created_at).label("day"),
+                func.avg(SatisfactionSurvey.rating).label("avg_rating"),
+                func.count().label("cnt"),
+            )
+            .where(*csat_cond)
+            .group_by(func.date_trunc(text("'day'"), SatisfactionSurvey.created_at))
+            .order_by(func.date_trunc(text("'day'"), SatisfactionSurvey.created_at))
+        )
+    ).all()
+    csat_day_map: dict[str, tuple[float, int]] = {
+        r.day.strftime("%Y-%m-%d"): (round(float(r.avg_rating), 2), r.cnt)
+        for r in csat_day_rows
+    }
+    csat_by_day = [
+        CsatDailyItem(
+            date=(since + timedelta(days=i)).strftime("%Y-%m-%d"),
+            avg_rating=csat_day_map[(since + timedelta(days=i)).strftime("%Y-%m-%d")][0]
+            if (since + timedelta(days=i)).strftime("%Y-%m-%d") in csat_day_map else None,
+            count=csat_day_map[(since + timedelta(days=i)).strftime("%Y-%m-%d")][1]
+            if (since + timedelta(days=i)).strftime("%Y-%m-%d") in csat_day_map else 0,
+        )
+        for i in range(actual_period + 1)
+    ]
+
+    # ── Distribuição por dia da semana (ISO: 1=Seg … 7=Dom) ──
+    weekday_rows = (
+        await db.execute(
+            select(
+                extract("isodow", Ticket.created_at).label("dow"),
+                func.count().label("cnt"),
+            )
+            .where(*base)
+            .group_by(extract("isodow", Ticket.created_at))
+            .order_by(extract("isodow", Ticket.created_at))
+        )
+    ).all()
+    weekday_map: dict[int, int] = {int(r.dow): r.cnt for r in weekday_rows}
+    tickets_by_weekday = [
+        WeekdayCount(weekday=d, count=weekday_map.get(d, 0)) for d in range(1, 8)
+    ]
+
+    # ── Tickets em aberto há mais tempo ──────────────────────────
+    open_statuses = [
+        TicketStatus.open,
+        TicketStatus.in_progress,
+        TicketStatus.awaiting_client,
+        TicketStatus.awaiting_technical,
+    ]
+    oldest_rows = (
+        await db.execute(
+            select(
+                Ticket.id,
+                Ticket.protocol,
+                Ticket.title,
+                Ticket.priority,
+                Ticket.category,
+                Ticket.status,
+                Ticket.created_at,
+                Ticket.sla_resolve_breach,
+                User.name.label("assignee_name"),
+            )
+            .outerjoin(User, Ticket.assignee_id == User.id)
+            .where(Ticket.status.in_(open_statuses), *extra)
+            .order_by(Ticket.created_at.asc())
+            .limit(10)
+        )
+    ).all()
+    now = datetime.now(UTC)
+    oldest_open_tickets = [
+        OldestTicketItem(
+            ticket_id=str(r.id),
+            protocol=r.protocol,
+            title=r.title,
+            priority=r.priority.value,
+            category=r.category.value,
+            status=r.status.value,
+            age_hours=round((now - r.created_at).total_seconds() / 3600, 1),
+            sla_breached=bool(r.sla_resolve_breach),
+            assignee_name=r.assignee_name,
+        )
+        for r in oldest_rows
+    ]
+
+    # ── Distribuição de tickets por técnico ──────────────────────
+    resolved_statuses = [TicketStatus.resolved, TicketStatus.closed]
+    active_statuses = [
+        TicketStatus.open,
+        TicketStatus.in_progress,
+        TicketStatus.awaiting_client,
+        TicketStatus.awaiting_technical,
+    ]
+    tech_dist_rows = (
+        await db.execute(
+            select(
+                User.name.label("tech_name"),
+                func.count().label("total"),
+                func.count().filter(Ticket.status.in_(resolved_statuses)).label("resolved"),
+                func.count().filter(Ticket.status.in_(active_statuses)).label("open_count"),
+            )
+            .join(User, Ticket.assignee_id == User.id)
+            .where(*base)
+            .group_by(User.name)
+            .order_by(func.count().desc())
+            .limit(15)
+        )
+    ).all()
+    technicians_dist = [
+        TechnicianDistItem(
+            technician_name=r.tech_name,
+            total=r.total,
+            resolved=r.resolved,
+            open_count=r.open_count,
+        )
+        for r in tech_dist_rows
+    ]
+
+    # ── Taxa de reabertura ────────────────────────────────────────
+    reopen_date_cond = (
+        [TicketHistory.created_at >= since, TicketHistory.created_at <= until]
+        if (start_date and end_date)
+        else [TicketHistory.created_at >= since]
+    )
+    reopen_q = (
+        select(func.count(func.distinct(TicketHistory.ticket_id)))
+        .join(Ticket, TicketHistory.ticket_id == Ticket.id)
+        .where(
+            TicketHistory.field == "status",
+            TicketHistory.old_value.in_(["resolved", "closed"]),
+            TicketHistory.new_value.in_(["open", "in_progress"]),
+            *reopen_date_cond,
+            *extra,
+        )
+    )
+    reopened_count: int = (await db.execute(reopen_q)).scalar_one() or 0
+    reopen_rate = round(reopened_count / total * 100, 1) if total > 0 else 0.0
+
+    comparison = await _build_comparison(db, since, actual_period, category, priority)
+
     return ReportData(
         period_days=actual_period,
         total_tickets=total,
@@ -272,6 +450,76 @@ async def _build_report(
         sla_compliance=sla_compliance,
         csat_distribution=csat_distribution,
         csat_average=csat_average,
+        avg_resolution_by_priority=avg_resolution_by_priority,
+        csat_by_day=csat_by_day,
+        tickets_by_weekday=tickets_by_weekday,
+        oldest_open_tickets=oldest_open_tickets,
+        technicians_dist=technicians_dist,
+        reopened_count=reopened_count,
+        reopen_rate=reopen_rate,
+        comparison=comparison,
+    )
+
+
+async def _build_comparison(
+    db: AsyncSession,
+    current_since: datetime,
+    period: int,
+    category: TicketCategory | None,
+    priority: TicketPriority | None,
+) -> ReportComparison:
+    """Calcula as mesmas métricas para o período imediatamente anterior."""
+    prev_until = current_since
+    prev_since = current_since - timedelta(days=period)
+
+    prev_date = [Ticket.created_at >= prev_since, Ticket.created_at < prev_until]
+    prev_extra: list = []
+    if category:
+        prev_extra.append(Ticket.category == category)
+    if priority:
+        prev_extra.append(Ticket.priority == priority)
+    prev_base = [*prev_date, *prev_extra]
+
+    prev_total = (
+        await db.execute(select(func.count()).select_from(Ticket).where(*prev_base))
+    ).scalar_one()
+
+    prev_sla_rows = (
+        await db.execute(
+            select(
+                Ticket.priority,
+                func.count().label("total"),
+                func.count().filter(Ticket.sla_resolve_breach.is_(True)).label("breached"),
+            )
+            .where(*prev_base)
+            .group_by(Ticket.priority)
+        )
+    ).all()
+    prev_sla_map: dict[str, tuple[int, int]] = {
+        r.priority.value: (r.total, r.breached) for r in prev_sla_rows
+    }
+    prev_sla: list[SLAComplianceItem] = []
+    for prio in ([priority] if priority else list(TicketPriority)):
+        t, b = prev_sla_map.get(prio.value, (0, 0))
+        rate = round((1 - b / t) * 100, 1) if t > 0 else 100.0
+        prev_sla.append(SLAComplianceItem(priority=prio.value, total=t, breached=b, compliance_rate=rate))
+
+    prev_csat_date = [SatisfactionSurvey.created_at >= prev_since, SatisfactionSurvey.created_at < prev_until]
+    if prev_extra:
+        ticket_subq = select(Ticket.id).where(*prev_date, *prev_extra).scalar_subquery()
+        prev_csat_cond = [*prev_csat_date, SatisfactionSurvey.ticket_id.in_(ticket_subq)]
+    else:
+        prev_csat_cond = prev_csat_date
+
+    prev_avg_raw = (
+        await db.execute(select(func.avg(SatisfactionSurvey.rating)).where(*prev_csat_cond))
+    ).scalar_one()
+    prev_csat = round(float(prev_avg_raw), 2) if prev_avg_raw is not None else None
+
+    return ReportComparison(
+        total_tickets=prev_total,
+        csat_average=prev_csat,
+        sla_compliance=prev_sla,
     )
 
 

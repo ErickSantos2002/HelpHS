@@ -6,6 +6,8 @@ import {
   BarChart,
   CartesianGrid,
   Cell,
+  Legend,
+  ReferenceLine,
   ResponsiveContainer,
   Tooltip,
   XAxis,
@@ -19,7 +21,10 @@ import {
   getReports,
   getTechnicianDetailReport,
   getTechnicianListReport,
+  type CsatDailyItem,
+  type OldestTicketItem,
   type ReportData,
+  type TechnicianDistItem,
   type ReportFilters,
   type TechnicianDetailReport,
   type TechnicianListReport,
@@ -66,6 +71,14 @@ const CATEGORY_LABELS: Record<string, string> = {
 };
 const CSAT_COLORS = ["#ef4444", "#f97316", "#eab308", "#84cc16", "#22c55e"];
 
+const WEEKDAY_LABELS: Record<number, string> = {
+  1: "Seg", 2: "Ter", 3: "Qua", 4: "Qui", 5: "Sex", 6: "Sáb", 7: "Dom",
+};
+const WEEKDAY_FULL: Record<number, string> = {
+  1: "Segunda-feira", 2: "Terça-feira", 3: "Quarta-feira",
+  4: "Quinta-feira", 5: "Sexta-feira", 6: "Sábado", 7: "Domingo",
+};
+
 const tooltipWrapperStyle = { outline: "none", border: "none" };
 
 // ── Icons ─────────────────────────────────────────────────────
@@ -81,14 +94,30 @@ const IC = {
 
 // ── Shared sub-components ─────────────────────────────────────
 
-function StatCard({ label, value, sub, colorCls = "text-slate-100" }: {
+function Delta({ current, prev }: { current: number; prev: number | null }) {
+  if (prev === null || prev === 0) return null;
+  const pct = Math.round(((current - prev) / prev) * 100);
+  if (pct === 0) return <span className="text-[10px] font-semibold text-slate-500">= igual</span>;
+  const up = pct > 0;
+  return (
+    <span className={`flex items-center gap-0.5 text-[10px] font-semibold ${up ? "text-success-700 dark:text-success-400" : "text-danger-700 dark:text-danger-400"}`}>
+      {up ? "▲" : "▼"} {Math.abs(pct)}% vs anterior
+    </span>
+  );
+}
+
+function StatCard({ label, value, sub, colorCls = "text-slate-100", delta }: {
   label: string; value: string | number; sub?: string; colorCls?: string;
+  delta?: React.ReactNode;
 }) {
   return (
     <div className="rounded-xl border border-border/40 bg-background-surface p-4">
       <p className="mb-2 text-xs font-medium text-slate-500">{label}</p>
       <p className={`text-2xl font-bold leading-none ${colorCls}`}>{value}</p>
-      {sub && <p className="mt-1.5 text-xs text-slate-500">{sub}</p>}
+      <div className="mt-1.5 flex items-center gap-2 flex-wrap">
+        {sub && <p className="text-xs text-slate-500">{sub}</p>}
+        {delta}
+      </div>
     </div>
   );
 }
@@ -100,6 +129,120 @@ function ChartCard({ title, children }: { title: string; children: React.ReactNo
         <h2 className="text-sm font-semibold text-slate-200">{title}</h2>
       </div>
       <div className="p-5">{children}</div>
+    </div>
+  );
+}
+
+// ── Technician distribution chart ────────────────────────────
+
+function TechnicianDistChart({ data, gridColor, tooltipBg, tooltipBorder, tooltipColor }: {
+  data: TechnicianDistItem[];
+  gridColor: string;
+  tooltipBg: string;
+  tooltipBorder: string;
+  tooltipColor: string;
+}) {
+  const chartData = [...data].reverse();
+  const chartHeight = Math.max(200, chartData.length * 40);
+
+  return (
+    <ChartCard title="Distribuição de tickets por técnico">
+      <ResponsiveContainer width="100%" height={chartHeight}>
+        <BarChart
+          data={chartData}
+          layout="vertical"
+          margin={{ top: 0, right: 8, left: 4, bottom: 0 }}
+        >
+          <CartesianGrid strokeDasharray="3 3" stroke="#2d3748" horizontal={false} />
+          <XAxis type="number" tick={{ fontSize: 10, fill: "#94a3b8" }} allowDecimals={false} />
+          <YAxis dataKey="technician_name" type="category" tick={{ fontSize: 10, fill: "#94a3b8" }}
+            width={90} tickFormatter={(v: string) => v.length > 12 ? `${v.slice(0, 12)}…` : v} />
+          <Tooltip
+            cursor={{ fill: gridColor }}
+            wrapperStyle={{ outline: "none", border: "none" }}
+            content={({ active, payload, label }) => {
+              if (!active || !payload?.length) return null;
+              const resolved = (payload.find((p) => p.dataKey === "resolved")?.value as number) ?? 0;
+              const open = (payload.find((p) => p.dataKey === "open_count")?.value as number) ?? 0;
+              return (
+                <div style={{ backgroundColor: tooltipBg, border: `1px solid ${tooltipBorder}`, borderRadius: 8, padding: "8px 12px", fontSize: 12, color: tooltipColor, outline: "none" }}>
+                  <p style={{ fontWeight: 600, marginBottom: 4 }}>{label}</p>
+                  <p style={{ color: "#22c55e" }}>Resolvidos: {resolved}</p>
+                  <p style={{ color: "#f59e0b" }}>Em aberto: {open}</p>
+                  <p style={{ color: "#94a3b8", marginTop: 2 }}>Total: {resolved + open}</p>
+                </div>
+              );
+            }}
+          />
+          <Legend
+            formatter={(v) => v === "resolved" ? "Resolvidos" : "Em aberto"}
+            wrapperStyle={{ fontSize: 11, color: "#94a3b8", paddingTop: 8 }}
+          />
+          <Bar dataKey="resolved" stackId="a" fill="#22c55e" radius={[0, 0, 0, 0]} name="resolved" />
+          <Bar dataKey="open_count" stackId="a" fill="#f59e0b" radius={[0, 4, 4, 0]} name="open_count" />
+        </BarChart>
+      </ResponsiveContainer>
+    </ChartCard>
+  );
+}
+
+// ── Oldest open tickets table ─────────────────────────────────
+
+const STATUS_LABELS: Record<string, string> = {
+  open: "Aberto", in_progress: "Em andamento",
+  awaiting_client: "Aguard. cliente", awaiting_technical: "Aguard. técnico",
+};
+
+function fmtAge(hours: number): string {
+  if (hours < 1)   return `${Math.round(hours * 60)} min`;
+  if (hours < 24)  return `${hours.toFixed(1)}h`;
+  if (hours < 168) return `${(hours / 24).toFixed(1)} dias`;
+  return `${(hours / 168).toFixed(1)} sem`;
+}
+
+function OldestOpenTable({ tickets }: { tickets: OldestTicketItem[] }) {
+  return (
+    <div className="rounded-xl border border-border/40 bg-background-surface overflow-hidden">
+      <div className="border-b border-border/40 px-5 py-3.5 flex items-center gap-2">
+        <h2 className="text-sm font-semibold text-slate-200">Tickets em aberto há mais tempo</h2>
+        <span className="rounded-full bg-danger-500/15 px-2 py-0.5 text-[10px] font-semibold text-danger-400">
+          {tickets.length} ticket{tickets.length !== 1 ? "s" : ""}
+        </span>
+      </div>
+      <div className="overflow-x-auto">
+        <table className="w-full text-sm">
+          <thead>
+            <tr className="border-b border-border/40">
+              {["Protocolo", "Título", "Prioridade", "Categoria", "Status", "Técnico", "Tempo em aberto"].map((h) => (
+                <th key={h} className="px-4 py-3 text-left text-[11px] font-semibold uppercase tracking-wider text-slate-500">{h}</th>
+              ))}
+            </tr>
+          </thead>
+          <tbody className="divide-y divide-border/30">
+            {tickets.map((t) => (
+              <tr key={t.ticket_id} className="hover:bg-background-elevated/50 transition-colors">
+                <td className="px-4 py-3 font-mono text-xs text-primary">{t.protocol}</td>
+                <td className="px-4 py-3 text-slate-300 max-w-[220px] truncate" title={t.title}>{t.title}</td>
+                <td className="px-4 py-3">
+                  <span className="rounded-full px-2 py-0.5 text-[10px] font-semibold"
+                    style={{ backgroundColor: `${PRIORITY_COLORS[t.priority]}22`, color: PRIORITY_COLORS[t.priority] }}>
+                    {PRIORITY_LABELS[t.priority] ?? t.priority}
+                  </span>
+                </td>
+                <td className="px-4 py-3 text-slate-400 text-xs">{CATEGORY_LABELS[t.category] ?? t.category}</td>
+                <td className="px-4 py-3 text-slate-400 text-xs">{STATUS_LABELS[t.status] ?? t.status}</td>
+                <td className="px-4 py-3 text-slate-400 text-xs">{t.assignee_name ?? <span className="text-slate-600">—</span>}</td>
+                <td className="px-4 py-3">
+                  <span className={`font-semibold text-xs ${t.sla_breached ? "text-danger-400" : "text-slate-300"}`}>
+                    {fmtAge(t.age_hours)}
+                    {t.sla_breached && <span className="ml-1.5 rounded bg-danger-500/20 px-1 py-0.5 text-[9px] font-bold text-danger-400">SLA</span>}
+                  </span>
+                </td>
+              </tr>
+            ))}
+          </tbody>
+        </table>
+      </div>
     </div>
   );
 }
@@ -140,19 +283,47 @@ function GlobalReport({ data, period }: { data: ReportData; period: number }) {
     return "text-danger-700 dark:text-danger-400";
   }
 
+  function fmtHours(h: number | null): string {
+    if (h == null) return "—";
+    if (h < 1)  return `${Math.round(h * 60)} min`;
+    if (h < 24) return `${h.toFixed(1)}h`;
+    return `${(h / 24).toFixed(1)}d`;
+  }
+
+  const cmp = data.comparison;
+  const prevCriticalSla = cmp?.sla_compliance.find((s) => s.priority === "critical")?.compliance_rate ?? null;
+  const prevHighSla     = cmp?.sla_compliance.find((s) => s.priority === "high")?.compliance_rate ?? null;
+
+  const resolutionChartData = (data.avg_resolution_by_priority ?? [])
+    .filter((r) => r.avg_hours != null)
+    .map((r) => ({ priority: r.priority, avg_hours: r.avg_hours ?? 0 }));
+
+  const csatTrendData: CsatDailyItem[] = (data.csat_by_day ?? []).filter((d) => d.avg_rating != null);
+  const hasCsatTrend = csatTrendData.length >= 2;
+
   return (
     <div className="space-y-4">
       {/* KPIs */}
-      <div className="grid grid-cols-2 sm:grid-cols-4 gap-3">
-        <StatCard label="Tickets no período"   value={data.total_tickets}
-          sub={`últimos ${data.period_days} dias`} />
+      <div className="grid grid-cols-2 sm:grid-cols-3 lg:grid-cols-5 gap-3">
+        <StatCard label="Tickets no período" value={data.total_tickets}
+          sub={`últimos ${data.period_days} dias`}
+          delta={<Delta current={data.total_tickets} prev={cmp?.total_tickets ?? null} />} />
         <StatCard label="Média CSAT"
           value={data.csat_average ? `${data.csat_average} / 5` : "—"}
-          sub={`${totalCsat} avaliação${totalCsat !== 1 ? "ões" : ""}`} />
-        <StatCard label="SLA Crítico"  value={`${criticalSla}%`}
-          sub="conformidade resolução" colorCls={slaColor(criticalSla)} />
-        <StatCard label="SLA Alto"     value={`${highSla}%`}
-          sub="conformidade resolução" colorCls={slaColor(highSla)} />
+          sub={`${totalCsat} avaliação${totalCsat !== 1 ? "ões" : ""}`}
+          delta={data.csat_average != null && cmp?.csat_average != null
+            ? <Delta current={data.csat_average * 10} prev={cmp.csat_average * 10} />
+            : undefined} />
+        <StatCard label="SLA Crítico" value={`${criticalSla}%`}
+          sub="conformidade resolução" colorCls={slaColor(criticalSla)}
+          delta={<Delta current={criticalSla} prev={prevCriticalSla} />} />
+        <StatCard label="SLA Alto" value={`${highSla}%`}
+          sub="conformidade resolução" colorCls={slaColor(highSla)}
+          delta={<Delta current={highSla} prev={prevHighSla} />} />
+        <StatCard label="Taxa de reabertura"
+          value={`${data.reopen_rate ?? 0}%`}
+          sub={`${data.reopened_count ?? 0} ticket${(data.reopened_count ?? 0) !== 1 ? "s" : ""} reaberto${(data.reopened_count ?? 0) !== 1 ? "s" : ""}`}
+          colorCls={(data.reopen_rate ?? 0) === 0 ? "text-success-700 dark:text-success-400" : (data.reopen_rate ?? 0) <= 5 ? "text-slate-100" : (data.reopen_rate ?? 0) <= 15 ? "text-warning-700 dark:text-warning-400" : "text-danger-700 dark:text-danger-400"} />
       </div>
 
       {/* Tickets por dia */}
@@ -253,6 +424,127 @@ function GlobalReport({ data, period }: { data: ReportData; period: number }) {
           </ResponsiveContainer>
         </ChartCard>
       </div>
+
+      {/* Tempo médio de resolução por prioridade */}
+      {(resolutionChartData?.length ?? 0) > 0 && (
+        <ChartCard title="Tempo médio de resolução por prioridade">
+          <ResponsiveContainer width="100%" height={220}>
+            <BarChart data={resolutionChartData} margin={{ top: 4, right: 4, left: 0, bottom: 0 }} barSize={48}>
+              <CartesianGrid strokeDasharray="3 3" stroke="#2d3748" />
+              <XAxis dataKey="priority" tick={{ fontSize: 10, fill: "#94a3b8" }}
+                tickFormatter={(v: string) => PRIORITY_LABELS[v] ?? v} />
+              <YAxis tick={{ fontSize: 10, fill: "#94a3b8" }}
+                tickFormatter={(v: number) => v >= 24 ? `${(v / 24).toFixed(0)}d` : `${v}h`} />
+              <Tooltip
+                cursor={{ fill: gridColor }}
+                wrapperStyle={tooltipWrapperStyle}
+                content={({ active, payload, label }) => {
+                  if (!active || !payload?.length) return null;
+                  return (
+                    <div style={{ backgroundColor: tooltipBg, border: `1px solid ${tooltipBorder}`, borderRadius: 8, padding: "8px 12px", fontSize: 12, color: tooltipColor, outline: "none" }}>
+                      <p style={{ fontWeight: 600, marginBottom: 4 }}>{PRIORITY_LABELS[String(label)] ?? label}</p>
+                      <p style={{ color: "#6366f1" }}>Tempo médio: {fmtHours(payload[0].value as number)}</p>
+                    </div>
+                  );
+                }}
+              />
+              <Bar dataKey="avg_hours" radius={[4, 4, 0, 0]}>
+                {resolutionChartData.map((entry) => (
+                  <Cell key={entry.priority} fill={PRIORITY_COLORS[entry.priority] ?? "#6366f1"} />
+                ))}
+              </Bar>
+            </BarChart>
+          </ResponsiveContainer>
+        </ChartCard>
+      )}
+
+      {/* CSAT ao longo do tempo */}
+      {hasCsatTrend && (
+        <ChartCard title="Tendência CSAT ao longo do tempo">
+          <ResponsiveContainer width="100%" height={220}>
+            <AreaChart data={data.csat_by_day} margin={{ top: 8, right: 4, left: -20, bottom: 0 }}>
+              <defs>
+                <linearGradient id="csatGradient" x1="0" y1="0" x2="0" y2="1">
+                  <stop offset="5%"  stopColor="#f59e0b" stopOpacity={0.3} />
+                  <stop offset="95%" stopColor="#f59e0b" stopOpacity={0}   />
+                </linearGradient>
+              </defs>
+              <CartesianGrid strokeDasharray="3 3" stroke="#2d3748" />
+              <XAxis dataKey="date" tick={{ fontSize: 10, fill: "#94a3b8" }}
+                tickFormatter={(v: string) => v.slice(5)}
+                interval={Math.max(1, Math.floor(data.csat_by_day.length / 6))} />
+              <YAxis tick={{ fontSize: 10, fill: "#94a3b8" }} domain={[1, 5]}
+                ticks={[1, 2, 3, 4, 5]} />
+              <ReferenceLine y={4} stroke="#10b981" strokeDasharray="4 3"
+                label={{ value: "Meta 4.0", fill: "#10b981", fontSize: 10, position: "insideTopRight" }} />
+              <Tooltip contentStyle={tooltipStyle} wrapperStyle={tooltipWrapperStyle}
+                labelFormatter={(v) => `Data: ${v}`}
+                formatter={(v: number, _: string, props: { payload: CsatDailyItem }) => [
+                  v != null ? `${Number(v).toFixed(2)} ★ (${props.payload.count} avaliações)` : "—",
+                  "CSAT",
+                ]} />
+              <Area type="monotone" dataKey="avg_rating" stroke="#f59e0b" strokeWidth={2}
+                fill="url(#csatGradient)" dot={false}
+                connectNulls={false} />
+            </AreaChart>
+          </ResponsiveContainer>
+        </ChartCard>
+      )}
+
+      {/* Tickets em aberto há mais tempo */}
+      {(data.oldest_open_tickets?.length ?? 0) > 0 && (
+        <OldestOpenTable tickets={data.oldest_open_tickets} />
+      )}
+
+      {/* Distribuição por dia da semana */}
+      {(data.tickets_by_weekday?.length ?? 0) > 0 && (
+        <ChartCard title="Volume por dia da semana">
+          <ResponsiveContainer width="100%" height={220}>
+            <BarChart
+              data={data.tickets_by_weekday}
+              margin={{ top: 4, right: 4, left: -20, bottom: 0 }}
+              barSize={40}
+            >
+              <CartesianGrid strokeDasharray="3 3" stroke="#2d3748" />
+              <XAxis dataKey="weekday" tick={{ fontSize: 10, fill: "#94a3b8" }}
+                tickFormatter={(v: number) => WEEKDAY_LABELS[v] ?? v} />
+              <YAxis tick={{ fontSize: 10, fill: "#94a3b8" }} allowDecimals={false} />
+              <Tooltip
+                cursor={{ fill: gridColor }}
+                wrapperStyle={tooltipWrapperStyle}
+                content={({ active, payload, label }) => {
+                  if (!active || !payload?.length) return null;
+                  const wd = Number(label ?? 0);
+                  const isWeekend = wd >= 6;
+                  return (
+                    <div style={{ backgroundColor: tooltipBg, border: `1px solid ${tooltipBorder}`, borderRadius: 8, padding: "8px 12px", fontSize: 12, color: tooltipColor, outline: "none" }}>
+                      <p style={{ fontWeight: 600, marginBottom: 4 }}>{WEEKDAY_FULL[wd] ?? label}</p>
+                      <p style={{ color: isWeekend ? "#f59e0b" : "#6366f1" }}>Tickets: {payload[0].value ?? 0}</p>
+                    </div>
+                  );
+                }}
+              />
+              <Bar dataKey="count" radius={[4, 4, 0, 0]}>
+                {data.tickets_by_weekday.map((entry) => (
+                  <Cell
+                    key={entry.weekday}
+                    fill={entry.weekday >= 6 ? "#f59e0b" : "#6366f1"}
+                  />
+                ))}
+              </Bar>
+            </BarChart>
+          </ResponsiveContainer>
+          <p className="mt-2 text-center text-[10px] text-slate-500">
+            Barras em <span style={{ color: "#f59e0b" }}>âmbar</span> = fim de semana
+          </p>
+        </ChartCard>
+      )}
+
+      {/* Distribuição de tickets por técnico */}
+      {(data.technicians_dist?.length ?? 0) > 0 && (
+        <TechnicianDistChart data={data.technicians_dist} gridColor={gridColor}
+          tooltipBg={tooltipBg} tooltipBorder={tooltipBorder} tooltipColor={tooltipColor} />
+      )}
 
     </div>
   );

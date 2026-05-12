@@ -64,6 +64,47 @@ class CSATDistributionItem(AppBaseModel):
     count: int
 
 
+class AvgResolutionItem(AppBaseModel):
+    priority: str
+    avg_hours: float | None
+
+
+class CsatDailyItem(AppBaseModel):
+    date: str        # YYYY-MM-DD
+    avg_rating: float | None
+    count: int
+
+
+class WeekdayCount(AppBaseModel):
+    weekday: int   # 1 = Segunda … 7 = Domingo (ISO)
+    count: int
+
+
+class TechnicianDistItem(AppBaseModel):
+    technician_name: str
+    total: int
+    resolved: int
+    open_count: int
+
+
+class OldestTicketItem(AppBaseModel):
+    ticket_id: str
+    protocol: str
+    title: str
+    priority: str
+    category: str
+    status: str
+    age_hours: float
+    sla_breached: bool
+    assignee_name: str | None
+
+
+class ReportComparison(AppBaseModel):
+    total_tickets: int
+    csat_average: float | None
+    sla_compliance: list[SLAComplianceItem]
+
+
 class ReportData(AppBaseModel):
     period_days: int
     total_tickets: int
@@ -72,6 +113,14 @@ class ReportData(AppBaseModel):
     sla_compliance: list[SLAComplianceItem]
     csat_distribution: list[CSATDistributionItem]
     csat_average: float | None
+    avg_resolution_by_priority: list[AvgResolutionItem] = []
+    csat_by_day: list[CsatDailyItem] = []
+    tickets_by_weekday: list[WeekdayCount] = []
+    oldest_open_tickets: list[OldestTicketItem] = []
+    technicians_dist: list[TechnicianDistItem] = []
+    reopened_count: int = 0
+    reopen_rate: float = 0.0
+    comparison: ReportComparison | None = None
 
 
 # ── Technician report schemas ─────────────────────────────────

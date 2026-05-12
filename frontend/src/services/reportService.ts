@@ -22,6 +22,47 @@ export interface CSATDistributionItem {
   count: number;
 }
 
+export interface AvgResolutionItem {
+  priority: string;
+  avg_hours: number | null;
+}
+
+export interface CsatDailyItem {
+  date: string;
+  avg_rating: number | null;
+  count: number;
+}
+
+export interface WeekdayCount {
+  weekday: number; // 1 = Seg … 7 = Dom
+  count: number;
+}
+
+export interface TechnicianDistItem {
+  technician_name: string;
+  total: number;
+  resolved: number;
+  open_count: number;
+}
+
+export interface OldestTicketItem {
+  ticket_id: string;
+  protocol: string;
+  title: string;
+  priority: string;
+  category: string;
+  status: string;
+  age_hours: number;
+  sla_breached: boolean;
+  assignee_name: string | null;
+}
+
+export interface ReportComparison {
+  total_tickets: number;
+  csat_average: number | null;
+  sla_compliance: SLAComplianceItem[];
+}
+
 export interface ReportData {
   period_days: number;
   total_tickets: number;
@@ -30,6 +71,14 @@ export interface ReportData {
   sla_compliance: SLAComplianceItem[];
   csat_distribution: CSATDistributionItem[];
   csat_average: number | null;
+  avg_resolution_by_priority: AvgResolutionItem[];
+  csat_by_day: CsatDailyItem[];
+  tickets_by_weekday: WeekdayCount[];
+  oldest_open_tickets: OldestTicketItem[];
+  technicians_dist: TechnicianDistItem[];
+  reopened_count: number;
+  reopen_rate: number;
+  comparison: ReportComparison | null;
 }
 
 export interface TechnicianSummary {
