@@ -375,6 +375,7 @@ async def _build_report(
     product_rows = (
         await db.execute(
             select(Product.name.label("product_name"), func.count().label("cnt"))
+            .select_from(Ticket)
             .join(Product, Ticket.product_id == Product.id)
             .where(*base)
             .group_by(Product.name)
@@ -459,6 +460,7 @@ async def _build_report(
                 func.count().filter(Ticket.status.in_(resolved_statuses)).label("resolved"),
                 func.count().filter(Ticket.status.in_(active_statuses)).label("open_count"),
             )
+            .select_from(Ticket)
             .join(User, Ticket.assignee_id == User.id)
             .where(*base)
             .group_by(User.name)
