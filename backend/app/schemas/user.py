@@ -36,6 +36,12 @@ class UserUpdate(AppBaseModel):
     department: str | None = Field(default=None, max_length=100)
     avatar_url: str | None = Field(default=None, max_length=500)
     role: UserRole | None = None
+    company_name: str | None = Field(default=None, max_length=255)
+    cnpj: str | None = Field(default=None, max_length=18)
+    company_cep: str | None = Field(default=None, max_length=9)
+    company_address: str | None = Field(default=None, max_length=255)
+    company_city: str | None = Field(default=None, max_length=100)
+    company_state: str | None = Field(default=None, max_length=2)
 
 
 class PasswordChange(AppBaseModel):
