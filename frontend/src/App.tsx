@@ -27,6 +27,7 @@ const KBListPage = lazy(() => import("./pages/kb/KBListPage"));
 const KBArticlePage = lazy(() => import("./pages/kb/KBArticlePage"));
 const KBFormPage = lazy(() => import("./pages/kb/KBFormPage"));
 const ReportsPage = lazy(() => import("./pages/reports/ReportsPage"));
+const GroupsPage = lazy(() => import("./pages/groups/GroupsPage"));
 const ProfilePage = lazy(() => import("./pages/profile/ProfilePage"));
 const EquipmentPage = lazy(() => import("./pages/equipment/EquipmentPage"));
 const AuditLogsPage = lazy(() => import("./pages/audit/AuditLogsPage"));
@@ -91,6 +92,7 @@ function App() {
                   <Route path="/products" element={<ProductsPage />} />
                   <Route path="/sla-config" element={<SlaConfigPage />} />
                   <Route path="/audit-logs" element={<AuditLogsPage />} />
+                  <Route path="/grupos" element={<GroupsPage />} />
                 </Route>
               </Route>
             </Route>

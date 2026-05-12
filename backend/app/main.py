@@ -18,6 +18,7 @@ from app.routers import (
     auth,
     chat,
     dashboard,
+    groups,
     kb,
     notifications,
     products,
@@ -96,6 +97,7 @@ app.include_router(kb.router, prefix=settings.api_prefix)
 app.include_router(sla.router, prefix=settings.api_prefix)
 app.include_router(tags.router, prefix=settings.api_prefix)
 app.include_router(dashboard.router, prefix=settings.api_prefix)
+app.include_router(groups.router, prefix=settings.api_prefix)
 
 
 @app.get("/health", tags=["Health"])

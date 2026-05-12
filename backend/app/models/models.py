@@ -118,6 +118,52 @@ class KBArticleStatus(str, enum.Enum):
 # ── MODELS ───────────────────────────────────────────────────
 
 
+class Group(Base):
+    """Grupos organizacionais de clientes"""
+
+    __tablename__ = "groups"
+
+    id: Mapped[uuid.UUID] = mapped_column(UUID(as_uuid=True), primary_key=True, default=uuid.uuid4)
+    name: Mapped[str] = mapped_column(String(255), nullable=False, index=True)
+    description: Mapped[str | None] = mapped_column(Text)
+    notes: Mapped[str | None] = mapped_column(Text)
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now())
+    updated_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), server_default=func.now(), onupdate=func.now()
+    )
+
+    companies: Mapped[list["Company"]] = relationship(
+        back_populates="group", cascade="all, delete-orphan"
+    )
+
+
+class Company(Base):
+    """Empresas dentro de um grupo"""
+
+    __tablename__ = "companies"
+
+    id: Mapped[uuid.UUID] = mapped_column(UUID(as_uuid=True), primary_key=True, default=uuid.uuid4)
+    group_id: Mapped[uuid.UUID] = mapped_column(
+        UUID(as_uuid=True), ForeignKey("groups.id", ondelete="CASCADE"), index=True
+    )
+    name: Mapped[str] = mapped_column(String(255), nullable=False)
+    cnpj: Mapped[str | None] = mapped_column(String(18))
+    phone: Mapped[str | None] = mapped_column(String(20))
+    address: Mapped[str | None] = mapped_column(String(255))
+    city: Mapped[str | None] = mapped_column(String(100))
+    state: Mapped[str | None] = mapped_column(String(2))
+    notes: Mapped[str | None] = mapped_column(Text)
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now())
+    updated_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), server_default=func.now(), onupdate=func.now()
+    )
+
+    group: Mapped["Group"] = relationship(back_populates="companies")
+    clients: Mapped[list["User"]] = relationship(
+        back_populates="company", foreign_keys="User.company_id"
+    )
+
+
 class User(Base):
     """Usuarios do sistema (admin, tecnico, cliente)"""
 
@@ -149,6 +195,12 @@ class User(Base):
     company_state: Mapped[str | None] = mapped_column(String(2))
     onboarding_completed: Mapped[bool] = mapped_column(Boolean, default=False)
 
+    # Vínculo ao grupo (clientes)
+    company_id: Mapped[uuid.UUID | None] = mapped_column(
+        UUID(as_uuid=True), ForeignKey("companies.id", ondelete="SET NULL"), nullable=True, index=True
+    )
+    client_notes: Mapped[str | None] = mapped_column(Text, nullable=True)
+
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now())
     updated_at: Mapped[datetime] = mapped_column(
         DateTime(timezone=True), server_default=func.now(), onupdate=func.now()
@@ -170,6 +222,9 @@ class User(Base):
     audit_logs: Mapped[list["AuditLog"]] = relationship(back_populates="user")
     equipments: Mapped[list["Equipment"]] = relationship(
         back_populates="owner", foreign_keys="Equipment.owner_id"
+    )
+    company: Mapped["Company | None"] = relationship(
+        "Company", back_populates="clients", foreign_keys=[company_id]
     )
 
     __table_args__ = (Index("ix_users_role_status", "role", "status"),)
