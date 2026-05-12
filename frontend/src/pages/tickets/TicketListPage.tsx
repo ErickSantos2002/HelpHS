@@ -1,6 +1,6 @@
 import { useEffect, useMemo, useRef, useState } from "react";
 import { useNavigate } from "react-router-dom";
-import { Alert, Spinner } from "../../components/ui";
+import { Alert, FilterSelect, Spinner } from "../../components/ui";
 import { cn } from "../../lib/utils";
 import { getTickets, type Ticket } from "../../services/ticketService";
 
@@ -314,28 +314,28 @@ export default function TicketListPage() {
           </div>
 
           {/* Priority */}
-          <select
+          <FilterSelect
             value={filterPriority}
-            onChange={(e) => setFilterPriority(e.target.value)}
-            className="text-sm rounded-lg border border-slate-200 dark:border-border bg-white dark:bg-background-elevated text-slate-700 dark:text-slate-200 px-3 py-2 focus:outline-none focus:ring-2 focus:ring-primary cursor-pointer"
-          >
-            <option value="">Todas prioridades</option>
-            <option value="critical">Crítico</option>
-            <option value="high">Alto</option>
-            <option value="medium">Médio</option>
-            <option value="low">Baixo</option>
-          </select>
+            onChange={setFilterPriority}
+            placeholder="Todas prioridades"
+            options={[
+              { value: "critical", label: "Crítico",  dot: "#ef4444" },
+              { value: "high",     label: "Alto",     dot: "#f59e0b" },
+              { value: "medium",   label: "Médio",    dot: "#3b82f6" },
+              { value: "low",      label: "Baixo",    dot: "#64748b" },
+            ]}
+          />
 
           {/* Assignee */}
-          <select
-            value={filterAssignee}
-            onChange={(e) => setFilterAssignee(e.target.value as typeof filterAssignee)}
-            className="text-sm rounded-lg border border-slate-200 dark:border-border bg-white dark:bg-background-elevated text-slate-700 dark:text-slate-200 px-3 py-2 focus:outline-none focus:ring-2 focus:ring-primary cursor-pointer"
-          >
-            <option value="all">Todos</option>
-            <option value="unassigned">Sem técnico</option>
-            <option value="assigned">Com técnico</option>
-          </select>
+          <FilterSelect
+            value={filterAssignee === "all" ? "" : filterAssignee}
+            onChange={(v) => setFilterAssignee((v || "all") as typeof filterAssignee)}
+            placeholder="Todos"
+            options={[
+              { value: "unassigned", label: "Sem técnico" },
+              { value: "assigned",   label: "Com técnico" },
+            ]}
+          />
 
           {/* Clear filters */}
           {hasFilters && (

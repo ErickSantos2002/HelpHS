@@ -22,6 +22,9 @@ export type { ModalProps } from "./Modal";
 export { Select } from "./Select";
 export type { SelectProps, SelectOption } from "./Select";
 
+export { FilterSelect } from "./FilterSelect";
+export type { FilterSelectProps, FilterSelectOption } from "./FilterSelect";
+
 export { Spinner } from "./Spinner";
 
 export {
