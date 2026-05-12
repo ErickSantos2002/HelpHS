@@ -729,7 +729,7 @@ export default function TicketDetailPage() {
             <span className="text-slate-600">/</span>
             <span className="font-mono text-slate-500">{ticket.protocol}</span>
           </button>
-          <h1 className="text-xl font-extrabold leading-tight text-white">{ticket.title}</h1>
+          <h1 className="text-xl font-extrabold leading-tight text-slate-100">{ticket.title}</h1>
           <div className="mt-2 flex flex-wrap items-center gap-2">
             <StatusBadge status={ticket.status} />
             <PriorityBadge priority={ticket.priority} />

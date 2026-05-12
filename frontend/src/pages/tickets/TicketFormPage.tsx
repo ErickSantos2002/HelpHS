@@ -452,7 +452,7 @@ export default function TicketFormPage() {
               {isEdit && existingTicket ? existingTicket.protocol : "Novo chamado"}
             </span>
           </button>
-          <h1 className="text-xl font-extrabold leading-tight text-white">
+          <h1 className="text-xl font-extrabold leading-tight text-slate-100">
             {isEdit ? "Editar chamado" : "Abrir chamado"}
           </h1>
           <p className="mt-1 text-sm text-slate-500">

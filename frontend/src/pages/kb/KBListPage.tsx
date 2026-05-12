@@ -80,7 +80,7 @@ export default function KBListPage() {
       {/* ── Header ───────────────────────────────────────────── */}
       <div className="flex flex-wrap items-center justify-between gap-4 rounded-2xl border border-border/40 bg-background-surface px-5 py-4">
         <div>
-          <h1 className="text-xl font-extrabold text-white">Base de Conhecimento</h1>
+          <h1 className="text-xl font-extrabold text-slate-100">Base de Conhecimento</h1>
           <p className="mt-0.5 text-sm text-slate-500">
             Artigos e guias de suporte{total > 0 && ` · ${total} artigo${total !== 1 ? "s" : ""}`}
           </p>

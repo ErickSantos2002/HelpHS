@@ -261,7 +261,7 @@ export default function KBArticlePage() {
             <span className="text-slate-600">/</span>
             <span className="text-slate-500 truncate max-w-xs">{article.title}</span>
           </button>
-          <h1 className="text-xl font-extrabold leading-tight text-white">{article.title}</h1>
+          <h1 className="text-xl font-extrabold leading-tight text-slate-100">{article.title}</h1>
         </div>
         {isStaff && (
           <button

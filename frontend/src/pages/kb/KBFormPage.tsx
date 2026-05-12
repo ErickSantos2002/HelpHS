@@ -196,7 +196,7 @@ export default function KBFormPage() {
             <span>Base de Conhecimento</span>
             {id && <><span className="text-slate-600">/</span><span className="text-slate-500 truncate max-w-xs">{title || "Artigo"}</span></>}
           </button>
-          <h1 className="text-xl font-extrabold text-white">{isEdit ? "Editar artigo" : "Novo artigo"}</h1>
+          <h1 className="text-xl font-extrabold text-slate-100">{isEdit ? "Editar artigo" : "Novo artigo"}</h1>
           <p className="mt-1 text-sm text-slate-500">{isEdit ? "Atualize o conteúdo do artigo." : "Preencha as informações para criar um novo artigo."}</p>
         </div>
       </div>
