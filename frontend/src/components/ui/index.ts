@@ -25,6 +25,9 @@ export type { SelectProps, SelectOption } from "./Select";
 export { FilterSelect } from "./FilterSelect";
 export type { FilterSelectProps, FilterSelectOption } from "./FilterSelect";
 
+export { FormDropdown } from "./FormDropdown";
+export type { FormDropdownProps, FormDropdownOption } from "./FormDropdown";
+
 export { Spinner } from "./Spinner";
 
 export {

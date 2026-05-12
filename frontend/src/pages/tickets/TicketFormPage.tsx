@@ -3,7 +3,7 @@ import { useCallback, useEffect, useRef, useState } from "react";
 import { useForm } from "react-hook-form";
 import { useNavigate, useParams } from "react-router-dom";
 import { z } from "zod";
-import { Alert, Button, Input, Spinner, Textarea } from "../../components/ui";
+import { Alert, Button, FormDropdown, Input, Spinner, Textarea } from "../../components/ui";
 import {
   getEquipments,
   getProducts,
@@ -509,27 +509,21 @@ export default function TicketFormPage() {
             {/* Produto / Equipamento */}
             <FormSection title="Produto e equipamento (opcional)">
               <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
-                <div className="space-y-1">
-                  <label className="text-sm font-medium text-slate-300">Produto</label>
-                  <select
-                    className="w-full rounded-lg border border-border/60 bg-background-elevated px-3 py-2 text-sm text-slate-200 focus:outline-none focus:ring-2 focus:ring-primary focus:border-transparent transition-colors hover:border-border cursor-pointer"
-                    {...register("product_id")}
-                  >
-                    <option value="">Nenhum (opcional)</option>
-                    {productOptions.map((o) => <option key={o.value} value={o.value}>{o.label}</option>)}
-                  </select>
-                </div>
-                <div className="space-y-1">
-                  <label className="text-sm font-medium text-slate-300">Equipamento</label>
-                  <select
-                    className="w-full rounded-lg border border-border/60 bg-background-elevated px-3 py-2 text-sm text-slate-200 focus:outline-none focus:ring-2 focus:ring-primary focus:border-transparent transition-colors hover:border-border cursor-pointer disabled:opacity-40 disabled:cursor-not-allowed"
-                    disabled={!selectedProductId || equipmentOptions.length === 0}
-                    {...register("equipment_id")}
-                  >
-                    <option value="">{selectedProductId ? "Nenhum (opcional)" : "Selecione um produto primeiro"}</option>
-                    {equipmentOptions.map((o) => <option key={o.value} value={o.value}>{o.label}</option>)}
-                  </select>
-                </div>
+                <FormDropdown
+                  label="Produto"
+                  value={currentValues.product_id ?? ""}
+                  onChange={(v) => setValue("product_id", v, { shouldValidate: true })}
+                  options={productOptions}
+                  placeholder="Nenhum (opcional)"
+                />
+                <FormDropdown
+                  label="Equipamento"
+                  value={currentValues.equipment_id ?? ""}
+                  onChange={(v) => setValue("equipment_id", v, { shouldValidate: true })}
+                  options={equipmentOptions}
+                  placeholder={selectedProductId ? "Nenhum (opcional)" : "Selecione um produto primeiro"}
+                  disabled={!selectedProductId || equipmentOptions.length === 0}
+                />
               </div>
             </FormSection>
 
