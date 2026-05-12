@@ -173,3 +173,17 @@ export async function listUnassignedClients(): Promise<ClientInCompany[]> {
   const { data } = await api.get<ClientInCompany[]>("/clients/unassigned");
   return data;
 }
+
+export interface CompanySuggestion {
+  company_name: string;
+  cnpj: string | null;
+  city: string | null;
+  state: string | null;
+  address: string | null;
+  client_count: number;
+}
+
+export async function getCompanySuggestions(): Promise<CompanySuggestion[]> {
+  const { data } = await api.get<CompanySuggestion[]>("/companies/suggestions");
+  return data;
+}

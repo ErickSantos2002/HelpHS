@@ -374,3 +374,48 @@ async def list_unassigned_clients(db: _DBDep, _: _AdminDep) -> list[ClientInComp
         ClientInCompany(id=u.id, name=u.name, email=u.email, phone=u.phone, client_notes=u.client_notes)
         for u in rows
     ]
+
+
+# ── Company suggestions from client onboarding data ───────────
+
+
+@router.get("/companies/suggestions")
+async def get_company_suggestions(db: _DBDep, _: _AdminDep) -> list[dict]:
+    """Unique companies from client onboarding not yet linked to any group."""
+    rows = (
+        await db.execute(
+            select(
+                User.company_name,
+                User.cnpj,
+                User.company_city,
+                User.company_state,
+                User.company_address,
+                func.count().label("client_count"),
+            )
+            .where(
+                User.role == UserRole.client,
+                User.status == UserStatus.active,
+                User.company_name.is_not(None),
+                User.company_id.is_(None),
+            )
+            .group_by(
+                User.company_name,
+                User.cnpj,
+                User.company_city,
+                User.company_state,
+                User.company_address,
+            )
+            .order_by(User.company_name)
+        )
+    ).all()
+    return [
+        {
+            "company_name": r.company_name,
+            "cnpj": r.cnpj,
+            "city": r.company_city,
+            "state": r.company_state,
+            "address": r.company_address,
+            "client_count": r.client_count,
+        }
+        for r in rows
+    ]
