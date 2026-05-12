@@ -28,12 +28,16 @@ import {
   updateClientNotes,
   listUnassignedClients,
   getCompanySuggestions,
+  listGroupNotes,
+  createGroupNote,
+  deleteGroupNote,
   type GroupResponse,
   type GroupDetail,
   type CompanyResponse,
   type CompanyDetail,
   type ClientInCompany,
   type CompanySuggestion,
+  type GroupNote,
 } from "../../services/groupService";
 
 // ── Icons ─────────────────────────────────────────────────────
@@ -100,7 +104,6 @@ function IconUsers() {
 const groupSchema = z.object({
   name: z.string().min(1, "Nome obrigatório").max(255),
   description: z.string().optional(),
-  notes: z.string().optional(),
 });
 type GroupFormValues = z.infer<typeof groupSchema>;
 
@@ -128,7 +131,7 @@ function GroupModal({
 }) {
   const { register, handleSubmit, formState: { errors, isSubmitting } } = useForm<GroupFormValues>({
     resolver: zodResolver(groupSchema),
-    defaultValues: { name: initial?.name ?? "", description: initial?.description ?? "", notes: initial?.notes ?? "" },
+    defaultValues: { name: initial?.name ?? "", description: initial?.description ?? "" },
   });
   const [error, setError] = useState("");
   const onSubmit = async (v: GroupFormValues) => {
@@ -140,8 +143,7 @@ function GroupModal({
       <form onSubmit={handleSubmit(onSubmit)} className="space-y-4">
         {error && <Alert variant="error">{error}</Alert>}
         <Input label="Nome" {...register("name")} error={errors.name?.message} />
-        <Textarea label="Descrição" {...register("description")} rows={2} />
-        <Textarea label="Notas internas" {...register("notes")} rows={3} />
+        <Textarea label="Descrição" {...register("description")} rows={3} />
         <ModalFooter>
           <Button variant="outline" type="button" onClick={onClose}>Cancelar</Button>
           <Button type="submit" loading={isSubmitting}>{initial ? "Salvar" : "Criar Grupo"}</Button>
@@ -630,6 +632,14 @@ export default function GroupsPage() {
   const [selectedCompany, setSelectedCompany] = useState<CompanyResponse | null>(null);
   const [deletingCompanyId, setDeletingCompanyId] = useState<string | null>(null);
 
+  // Notes
+  const [groupNotes, setGroupNotes] = useState<GroupNote[]>([]);
+  const [showAddNote, setShowAddNote] = useState(false);
+  const [viewNote, setViewNote] = useState<GroupNote | null>(null);
+  const [newNoteContent, setNewNoteContent] = useState("");
+  const [noteSaving, setNoteSaving] = useState(false);
+  const [noteDeleting, setNoteDeleting] = useState<string | null>(null);
+
   const loadGroups = async () => {
     setLoading(true);
     try { setGroups(await listGroups()); } catch { setError("Erro ao carregar grupos."); } finally { setLoading(false); }
@@ -645,7 +655,30 @@ export default function GroupsPage() {
 
   const handleSelectGroup = (g: GroupResponse) => {
     setSelectedGroup(g);
+    setGroupNotes([]);
     loadGroupDetail(g);
+    listGroupNotes(g.id).then(setGroupNotes).catch(() => {});
+  };
+
+  const handleAddNote = async () => {
+    if (!selectedGroup || !newNoteContent.trim()) return;
+    setNoteSaving(true);
+    try {
+      const note = await createGroupNote(selectedGroup.id, newNoteContent.trim());
+      setGroupNotes((p) => [note, ...p]);
+      setNewNoteContent("");
+      setShowAddNote(false);
+    } finally { setNoteSaving(false); }
+  };
+
+  const handleDeleteNote = async (noteId: string) => {
+    if (!selectedGroup || !confirm("Deletar esta nota?")) return;
+    setNoteDeleting(noteId);
+    try {
+      await deleteGroupNote(selectedGroup.id, noteId);
+      setGroupNotes((p) => p.filter((n) => n.id !== noteId));
+      if (viewNote?.id === noteId) setViewNote(null);
+    } finally { setNoteDeleting(null); }
   };
 
   const handleDeleteGroup = async () => {
@@ -674,7 +707,7 @@ export default function GroupsPage() {
 
   return (
     <div className="flex h-full overflow-hidden">
-      {/* ── Left: Groups list ─────────────────────────────── */}
+      {/* ── Left: Groups list ──────────────────────────────── */}
       <aside className="w-64 shrink-0 flex flex-col border-r border-slate-200 dark:border-border bg-white dark:bg-background-surface overflow-hidden">
         <div className="flex items-center justify-between px-4 py-4 border-b border-slate-200 dark:border-border">
           <h1 className="text-sm font-semibold text-slate-700 dark:text-slate-300">Grupos</h1>
@@ -722,7 +755,7 @@ export default function GroupsPage() {
         </div>
       </aside>
 
-      {/* ── Right: Group detail ───────────────────────────── */}
+      {/* ── Center: Group detail + companies ──────────────── */}
       <main className="flex-1 overflow-y-auto overflow-x-hidden p-6 min-w-0">
         {!selectedGroup ? (
           <div className="flex flex-col items-center justify-center h-full text-center">
@@ -749,14 +782,6 @@ export default function GroupsPage() {
                 <Button size="sm" variant="outline" className="text-red-500 hover:bg-red-50 dark:hover:bg-red-900/20" onClick={handleDeleteGroup}><IconTrash /></Button>
               </div>
             </div>
-
-            {/* Group notes */}
-            {groupDetail?.notes && (
-              <div className="mb-5 rounded-lg bg-amber-50 dark:bg-amber-900/20 border border-amber-200 dark:border-amber-800/40 p-3 overflow-hidden">
-                <div className="flex items-center gap-1.5 text-amber-700 dark:text-amber-400 text-xs font-semibold mb-1"><IconNote />Notas do grupo</div>
-                <p className="text-sm text-amber-800 dark:text-amber-300 whitespace-pre-wrap break-words">{groupDetail.notes}</p>
-              </div>
-            )}
 
             {/* Companies section */}
             <div className="flex items-center justify-between mb-3">
@@ -807,6 +832,61 @@ export default function GroupsPage() {
         )}
       </main>
 
+      {/* ── Right: Notes panel ────────────────────────────── */}
+      {selectedGroup && (
+        <aside className="w-72 shrink-0 flex flex-col border-l border-slate-200 dark:border-border bg-white dark:bg-background-surface overflow-hidden">
+          <div className="flex items-center justify-between px-4 py-4 border-b border-slate-200 dark:border-border">
+            <p className="text-xs font-bold uppercase tracking-widest text-amber-500/80 flex items-center gap-1.5">
+              <IconNote />
+              Notas do grupo
+            </p>
+            <button
+              onClick={() => setShowAddNote(true)}
+              title="Adicionar nota"
+              className="p-1.5 rounded-lg text-slate-400 hover:text-amber-400 hover:bg-amber-900/20 transition-colors cursor-pointer"
+            >
+              <IconPlus />
+            </button>
+          </div>
+
+          <div className="flex-1 overflow-y-auto p-3 space-y-2">
+            {groupNotes.length === 0 ? (
+              <div className="text-center py-8 text-xs text-amber-700/50 italic">
+                Nenhuma nota ainda.
+                <button onClick={() => setShowAddNote(true)} className="block mt-2 text-amber-500/70 hover:text-amber-400 cursor-pointer mx-auto not-italic">
+                  Adicionar nota
+                </button>
+              </div>
+            ) : (
+              groupNotes.map((n) => (
+                <div
+                  key={n.id}
+                  className="group rounded-lg border border-amber-700/20 bg-amber-950/15 p-3 cursor-pointer hover:border-amber-600/40 transition-colors"
+                  onClick={() => setViewNote(n)}
+                >
+                  <div className="flex items-center justify-between gap-1 mb-1">
+                    <span className="text-[10px] font-semibold text-amber-500/70 truncate">{n.author_name}</span>
+                    <div className="flex items-center gap-1 shrink-0">
+                      <span className="text-[10px] text-amber-700/50">
+                        {new Date(n.created_at).toLocaleDateString("pt-BR", { day: "2-digit", month: "2-digit", year: "2-digit" })}
+                      </span>
+                      <button
+                        onClick={(e) => { e.stopPropagation(); handleDeleteNote(n.id); }}
+                        disabled={noteDeleting === n.id}
+                        className="opacity-0 group-hover:opacity-100 p-0.5 rounded text-amber-700/60 hover:text-red-400 transition-all cursor-pointer"
+                      >
+                        {noteDeleting === n.id ? <Spinner size="sm" /> : <IconTrash />}
+                      </button>
+                    </div>
+                  </div>
+                  <p className="text-xs text-amber-200/60 line-clamp-3 whitespace-pre-wrap">{n.content}</p>
+                </div>
+              ))
+            )}
+          </div>
+        </aside>
+      )}
+
       {/* ── Modals ────────────────────────────────────────── */}
       {showNewGroup && (
         <GroupModal
@@ -843,6 +923,47 @@ export default function GroupsPage() {
           onClose={() => setSelectedCompany(null)}
           onUpdated={refreshDetail}
         />
+      )}
+
+      {/* Add note */}
+      <Modal open={showAddNote} onClose={() => { setShowAddNote(false); setNewNoteContent(""); }} title="Nova nota">
+        <div className="space-y-4">
+          <Textarea
+            rows={5}
+            placeholder="Escreva a nota aqui…"
+            value={newNoteContent}
+            onChange={(e) => setNewNoteContent(e.target.value)}
+          />
+          <ModalFooter>
+            <Button variant="outline" onClick={() => { setShowAddNote(false); setNewNoteContent(""); }}>Cancelar</Button>
+            <Button onClick={handleAddNote} loading={noteSaving} disabled={!newNoteContent.trim()}>Salvar</Button>
+          </ModalFooter>
+        </div>
+      </Modal>
+
+      {/* View note */}
+      {viewNote && (
+        <Modal open onClose={() => setViewNote(null)} title="Nota do grupo" size="lg">
+          <div className="space-y-3">
+            <div className="flex items-center justify-between text-xs text-amber-500/70">
+              <span className="font-semibold">{viewNote.author_name}</span>
+              <span>{new Date(viewNote.created_at).toLocaleString("pt-BR")}</span>
+            </div>
+            <p className="text-sm text-amber-200/80 whitespace-pre-wrap leading-relaxed min-h-[80px]">{viewNote.content}</p>
+            <ModalFooter>
+              <Button
+                variant="outline"
+                size="sm"
+                className="text-red-500 hover:bg-red-900/20"
+                loading={noteDeleting === viewNote.id}
+                onClick={() => handleDeleteNote(viewNote.id)}
+              >
+                Deletar
+              </Button>
+              <Button onClick={() => setViewNote(null)}>Fechar</Button>
+            </ModalFooter>
+          </div>
+        </Modal>
       )}
     </div>
   );

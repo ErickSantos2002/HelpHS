@@ -187,3 +187,28 @@ export async function getCompanySuggestions(): Promise<CompanySuggestion[]> {
   const { data } = await api.get<CompanySuggestion[]>("/companies/suggestions");
   return data;
 }
+
+// ── Group Notes ───────────────────────────────────────────────
+
+export interface GroupNote {
+  id: string;
+  group_id: string;
+  author_id: string;
+  author_name: string;
+  content: string;
+  created_at: string;
+}
+
+export async function listGroupNotes(groupId: string): Promise<GroupNote[]> {
+  const { data } = await api.get<GroupNote[]>(`/groups/${groupId}/notes`);
+  return data;
+}
+
+export async function createGroupNote(groupId: string, content: string): Promise<GroupNote> {
+  const { data } = await api.post<GroupNote>(`/groups/${groupId}/notes`, { content });
+  return data;
+}
+
+export async function deleteGroupNote(groupId: string, noteId: string): Promise<void> {
+  await api.delete(`/groups/${groupId}/notes/${noteId}`);
+}

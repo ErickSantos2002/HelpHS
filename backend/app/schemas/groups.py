@@ -99,3 +99,19 @@ class CompanyDetail(CompanyResponse):
 
 class GroupDetail(GroupResponse):
     companies: list[CompanyResponse] = []
+
+
+# ── Group Note schemas ────────────────────────────────────────
+
+
+class GroupNoteCreate(AppBaseModel):
+    content: str
+
+
+class GroupNoteResponse(AppBaseModel):
+    id: uuid.UUID
+    group_id: uuid.UUID
+    author_id: uuid.UUID
+    author_name: str
+    content: str
+    created_at: datetime

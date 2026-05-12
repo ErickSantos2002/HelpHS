@@ -14,7 +14,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.core.database import get_db
 from app.core.security import authorize
-from app.models.models import Company, Group, User, UserRole, UserStatus
+from app.models.models import Company, Group, GroupNote, User, UserRole, UserStatus
 from app.schemas.groups import (
     AssignClientRequest,
     ClientInCompany,
@@ -24,6 +24,8 @@ from app.schemas.groups import (
     CompanyUpdate,
     GroupCreate,
     GroupDetail,
+    GroupNoteCreate,
+    GroupNoteResponse,
     GroupResponse,
     GroupUpdate,
     UpdateClientNotesRequest,
@@ -419,3 +421,70 @@ async def get_company_suggestions(db: _DBDep, _: _AdminDep) -> list[dict]:
         }
         for r in rows
     ]
+
+
+# ── Group Notes ───────────────────────────────────────────────
+
+
+@router.get("/groups/{group_id}/notes", response_model=list[GroupNoteResponse])
+async def list_group_notes(
+    group_id: uuid.UUID, db: _DBDep, _: _AdminDep
+) -> list[GroupNoteResponse]:
+    await _get_group_or_404(db, group_id)
+    rows = (
+        await db.execute(
+            select(GroupNote, User.name.label("author_name"))
+            .join(User, User.id == GroupNote.author_id)
+            .where(GroupNote.group_id == group_id)
+            .order_by(GroupNote.created_at.desc())
+        )
+    ).all()
+    return [
+        GroupNoteResponse(
+            id=row.GroupNote.id,
+            group_id=row.GroupNote.group_id,
+            author_id=row.GroupNote.author_id,
+            author_name=row.author_name,
+            content=row.GroupNote.content,
+            created_at=row.GroupNote.created_at,
+        )
+        for row in rows
+    ]
+
+
+@router.post(
+    "/groups/{group_id}/notes",
+    response_model=GroupNoteResponse,
+    status_code=status.HTTP_201_CREATED,
+)
+async def create_group_note(
+    group_id: uuid.UUID, body: GroupNoteCreate, db: _DBDep, actor: _AdminDep
+) -> GroupNoteResponse:
+    await _get_group_or_404(db, group_id)
+    note = GroupNote(group_id=group_id, author_id=actor.id, content=body.content)
+    db.add(note)
+    await db.commit()
+    await db.refresh(note)
+    return GroupNoteResponse(
+        id=note.id,
+        group_id=note.group_id,
+        author_id=note.author_id,
+        author_name=actor.name,
+        content=note.content,
+        created_at=note.created_at,
+    )
+
+
+@router.delete("/groups/{group_id}/notes/{note_id}", status_code=status.HTTP_204_NO_CONTENT)
+async def delete_group_note(
+    group_id: uuid.UUID, note_id: uuid.UUID, db: _DBDep, actor: _AdminDep
+) -> None:
+    note = (
+        await db.execute(
+            select(GroupNote).where(GroupNote.id == note_id, GroupNote.group_id == group_id)
+        )
+    ).scalar_one_or_none()
+    if note is None:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Nota não encontrada")
+    await db.delete(note)
+    await db.commit()

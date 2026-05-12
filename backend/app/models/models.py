@@ -135,6 +135,9 @@ class Group(Base):
     companies: Mapped[list["Company"]] = relationship(
         back_populates="group", cascade="all, delete-orphan"
     )
+    group_notes: Mapped[list["GroupNote"]] = relationship(
+        back_populates="group", cascade="all, delete-orphan"
+    )
 
 
 class Company(Base):
@@ -426,6 +429,23 @@ class TicketHistory(Base):
     user: Mapped["User"] = relationship(back_populates="ticket_histories")
 
     __table_args__ = (Index("ix_ticket_history_ticket_created", "ticket_id", "created_at"),)
+
+
+class GroupNote(Base):
+    """Notas de grupos (múltiplas por grupo)"""
+
+    __tablename__ = "group_notes"
+
+    id: Mapped[uuid.UUID] = mapped_column(UUID(as_uuid=True), primary_key=True, default=uuid.uuid4)
+    group_id: Mapped[uuid.UUID] = mapped_column(
+        UUID(as_uuid=True), ForeignKey("groups.id", ondelete="CASCADE"), index=True
+    )
+    author_id: Mapped[uuid.UUID] = mapped_column(UUID(as_uuid=True), ForeignKey("users.id"))
+    content: Mapped[str] = mapped_column(Text, nullable=False)
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now())
+
+    group: Mapped["Group"] = relationship(back_populates="group_notes")
+    author: Mapped["User"] = relationship()
 
 
 class TicketNote(Base):
