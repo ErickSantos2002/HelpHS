@@ -80,6 +80,21 @@ class WeekdayCount(AppBaseModel):
     count: int
 
 
+class AvgFirstResponseItem(AppBaseModel):
+    priority: str
+    avg_hours: float | None
+
+
+class ProductCount(AppBaseModel):
+    product_name: str
+    count: int
+
+
+class HourlyCount(AppBaseModel):
+    hour: int   # 0–23
+    count: int
+
+
 class TechnicianDistItem(AppBaseModel):
     technician_name: str
     total: int
@@ -114,8 +129,11 @@ class ReportData(AppBaseModel):
     csat_distribution: list[CSATDistributionItem]
     csat_average: float | None
     avg_resolution_by_priority: list[AvgResolutionItem] = []
+    avg_first_response_by_priority: list[AvgFirstResponseItem] = []
     csat_by_day: list[CsatDailyItem] = []
+    tickets_by_product: list[ProductCount] = []
     tickets_by_weekday: list[WeekdayCount] = []
+    tickets_by_hour: list[HourlyCount] = []
     oldest_open_tickets: list[OldestTicketItem] = []
     technicians_dist: list[TechnicianDistItem] = []
     reopened_count: int = 0

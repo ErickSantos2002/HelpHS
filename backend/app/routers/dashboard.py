@@ -28,6 +28,7 @@ from app.core.database import get_db
 from app.core.redis import get_redis
 from app.core.security import authorize, get_current_user
 from app.models.models import (
+    Product,
     SatisfactionSurvey,
     Ticket,
     TicketCategory,
@@ -39,13 +40,16 @@ from app.models.models import (
     UserStatus,
 )
 from app.schemas.dashboard import (
+    AvgFirstResponseItem,
     AvgResolutionItem,
     CategoryCount,
     CsatDailyItem,
     CSATDistributionItem,
     DailyCount,
     DashboardStats,
+    HourlyCount,
     OldestTicketItem,
+    ProductCount,
     ReportComparison,
     ReportData,
     SLAComplianceItem,
@@ -345,6 +349,58 @@ async def _build_report(
         WeekdayCount(weekday=d, count=weekday_map.get(d, 0)) for d in range(1, 8)
     ]
 
+    # ── Tempo médio de primeira resposta por prioridade ──────────
+    first_resp_rows = (
+        await db.execute(
+            select(
+                Ticket.priority,
+                func.avg(
+                    extract("epoch", Ticket.sla_first_response - Ticket.created_at) / 3600
+                ).label("avg_hours"),
+            )
+            .where(*base, Ticket.sla_first_response.is_not(None))
+            .group_by(Ticket.priority)
+        )
+    ).all()
+    first_resp_map: dict[str, float | None] = {
+        r.priority.value: round(float(r.avg_hours), 1) if r.avg_hours else None
+        for r in first_resp_rows
+    }
+    avg_first_response_by_priority = [
+        AvgFirstResponseItem(priority=prio.value, avg_hours=first_resp_map.get(prio.value))
+        for prio in ([priority] if priority else list(TicketPriority))
+    ]
+
+    # ── Tickets por produto ───────────────────────────────────────
+    product_rows = (
+        await db.execute(
+            select(Product.name.label("product_name"), func.count().label("cnt"))
+            .join(Product, Ticket.product_id == Product.id)
+            .where(*base)
+            .group_by(Product.name)
+            .order_by(func.count().desc())
+            .limit(10)
+        )
+    ).all()
+    tickets_by_product = [
+        ProductCount(product_name=r.product_name, count=r.cnt) for r in product_rows
+    ]
+
+    # ── Distribuição por hora do dia ─────────────────────────────
+    hour_rows = (
+        await db.execute(
+            select(
+                extract("hour", Ticket.created_at).label("hr"),
+                func.count().label("cnt"),
+            )
+            .where(*base)
+            .group_by(extract("hour", Ticket.created_at))
+            .order_by(extract("hour", Ticket.created_at))
+        )
+    ).all()
+    hour_map: dict[int, int] = {int(r.hr): r.cnt for r in hour_rows}
+    tickets_by_hour = [HourlyCount(hour=h, count=hour_map.get(h, 0)) for h in range(24)]
+
     # ── Tickets em aberto há mais tempo ──────────────────────────
     open_statuses = [
         TicketStatus.open,
@@ -451,8 +507,11 @@ async def _build_report(
         csat_distribution=csat_distribution,
         csat_average=csat_average,
         avg_resolution_by_priority=avg_resolution_by_priority,
+        avg_first_response_by_priority=avg_first_response_by_priority,
         csat_by_day=csat_by_day,
+        tickets_by_product=tickets_by_product,
         tickets_by_weekday=tickets_by_weekday,
+        tickets_by_hour=tickets_by_hour,
         oldest_open_tickets=oldest_open_tickets,
         technicians_dist=technicians_dist,
         reopened_count=reopened_count,

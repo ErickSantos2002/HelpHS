@@ -21,8 +21,11 @@ import {
   getReports,
   getTechnicianDetailReport,
   getTechnicianListReport,
+  type AvgFirstResponseItem,
   type CsatDailyItem,
+  type HourlyCount,
   type OldestTicketItem,
+  type ProductCount,
   type ReportData,
   type TechnicianDistItem,
   type ReportFilters,
@@ -130,6 +133,126 @@ function ChartCard({ title, children }: { title: string; children: React.ReactNo
       </div>
       <div className="p-5">{children}</div>
     </div>
+  );
+}
+
+// ── Avg first response chart ──────────────────────────────────
+
+function FirstResponseChart({ data, gridColor, tooltipBg, tooltipBorder, tooltipColor, fmtHours }: {
+  data: AvgFirstResponseItem[]; gridColor: string;
+  tooltipBg: string; tooltipBorder: string; tooltipColor: string;
+  fmtHours: (h: number | null) => string;
+}) {
+  const chartData = data.filter((r) => r.avg_hours != null).map((r) => ({ priority: r.priority, avg_hours: r.avg_hours ?? 0 }));
+  if (chartData.length === 0) return null;
+  return (
+    <ChartCard title="Tempo médio de 1ª resposta por prioridade">
+      <ResponsiveContainer width="100%" height={220}>
+        <BarChart data={chartData} margin={{ top: 4, right: 4, left: 0, bottom: 0 }} barSize={48}>
+          <CartesianGrid strokeDasharray="3 3" stroke="#2d3748" />
+          <XAxis dataKey="priority" tick={{ fontSize: 10, fill: "#94a3b8" }}
+            tickFormatter={(v: string) => PRIORITY_LABELS[v] ?? v} />
+          <YAxis tick={{ fontSize: 10, fill: "#94a3b8" }}
+            tickFormatter={(v: number) => v >= 24 ? `${(v / 24).toFixed(0)}d` : `${v}h`} />
+          <Tooltip cursor={{ fill: gridColor }} wrapperStyle={{ outline: "none", border: "none" }}
+            content={({ active, payload, label }) => {
+              if (!active || !payload?.length) return null;
+              return (
+                <div style={{ backgroundColor: tooltipBg, border: `1px solid ${tooltipBorder}`, borderRadius: 8, padding: "8px 12px", fontSize: 12, color: tooltipColor, outline: "none" }}>
+                  <p style={{ fontWeight: 600, marginBottom: 4 }}>{PRIORITY_LABELS[String(label)] ?? label}</p>
+                  <p style={{ color: "#6366f1" }}>Tempo médio: {fmtHours(payload[0].value as number)}</p>
+                </div>
+              );
+            }} />
+          <Bar dataKey="avg_hours" radius={[4, 4, 0, 0]}>
+            {chartData.map((e) => <Cell key={e.priority} fill={PRIORITY_COLORS[e.priority] ?? "#6366f1"} />)}
+          </Bar>
+        </BarChart>
+      </ResponsiveContainer>
+    </ChartCard>
+  );
+}
+
+// ── Tickets by product chart ──────────────────────────────────
+
+function ProductChart({ data, gridColor, tooltipBg, tooltipBorder, tooltipColor }: {
+  data: ProductCount[]; gridColor: string;
+  tooltipBg: string; tooltipBorder: string; tooltipColor: string;
+}) {
+  if (data.length === 0) return null;
+  return (
+    <ChartCard title="Tickets por produto">
+      <ResponsiveContainer width="100%" height={220}>
+        <BarChart data={data} layout="vertical" margin={{ top: 0, right: 8, left: 4, bottom: 0 }}>
+          <CartesianGrid strokeDasharray="3 3" stroke="#2d3748" horizontal={false} />
+          <XAxis type="number" tick={{ fontSize: 10, fill: "#94a3b8" }} allowDecimals={false} />
+          <YAxis dataKey="product_name" type="category" tick={{ fontSize: 10, fill: "#94a3b8" }} width={80}
+            tickFormatter={(v: string) => v.length > 12 ? `${v.slice(0, 12)}…` : v} />
+          <Tooltip cursor={{ fill: gridColor }} wrapperStyle={{ outline: "none", border: "none" }}
+            content={({ active, payload, label }) => {
+              if (!active || !payload?.length) return null;
+              return (
+                <div style={{ backgroundColor: tooltipBg, border: `1px solid ${tooltipBorder}`, borderRadius: 8, padding: "8px 12px", fontSize: 12, color: tooltipColor, outline: "none" }}>
+                  <p style={{ fontWeight: 600, marginBottom: 4 }}>{label}</p>
+                  <p style={{ color: "#6366f1" }}>Tickets: {payload[0].value ?? 0}</p>
+                </div>
+              );
+            }} />
+          <Bar dataKey="count" fill="#6366f1" radius={[0, 4, 4, 0]} />
+        </BarChart>
+      </ResponsiveContainer>
+    </ChartCard>
+  );
+}
+
+// ── Hourly distribution chart ─────────────────────────────────
+
+function HourlyChart({ data, gridColor, tooltipBg, tooltipBorder, tooltipColor }: {
+  data: HourlyCount[]; gridColor: string;
+  tooltipBg: string; tooltipBorder: string; tooltipColor: string;
+}) {
+  const hasData = data.some((d) => d.count > 0);
+  if (!hasData) return null;
+
+  function hourColor(h: number): string {
+    if (h >= 6 && h < 12)  return "#6366f1";  // manhã
+    if (h >= 12 && h < 18) return "#8b5cf6";  // tarde
+    if (h >= 18 && h < 22) return "#a78bfa";  // noite
+    return "#475569";                           // madrugada
+  }
+
+  return (
+    <ChartCard title="Tickets por hora do dia">
+      <ResponsiveContainer width="100%" height={220}>
+        <BarChart data={data} margin={{ top: 4, right: 4, left: -20, bottom: 0 }}>
+          <CartesianGrid strokeDasharray="3 3" stroke="#2d3748" />
+          <XAxis dataKey="hour" tick={{ fontSize: 10, fill: "#94a3b8" }}
+            tickFormatter={(v: number) => v % 3 === 0 ? `${v}h` : ""} />
+          <YAxis tick={{ fontSize: 10, fill: "#94a3b8" }} allowDecimals={false} />
+          <Tooltip cursor={{ fill: gridColor }} wrapperStyle={{ outline: "none", border: "none" }}
+            content={({ active, payload, label }) => {
+              if (!active || !payload?.length) return null;
+              const h = Number(label ?? 0);
+              const period = h >= 6 && h < 12 ? "Manhã" : h >= 12 && h < 18 ? "Tarde" : h >= 18 && h < 22 ? "Noite" : "Madrugada";
+              return (
+                <div style={{ backgroundColor: tooltipBg, border: `1px solid ${tooltipBorder}`, borderRadius: 8, padding: "8px 12px", fontSize: 12, color: tooltipColor, outline: "none" }}>
+                  <p style={{ fontWeight: 600, marginBottom: 4 }}>{h}h — {period}</p>
+                  <p style={{ color: hourColor(h) }}>Tickets: {payload[0].value ?? 0}</p>
+                </div>
+              );
+            }} />
+          <Bar dataKey="count" radius={[4, 4, 0, 0]}>
+            {data.map((e) => <Cell key={e.hour} fill={hourColor(e.hour)} />)}
+          </Bar>
+        </BarChart>
+      </ResponsiveContainer>
+      <p className="mt-2 text-center text-[10px] text-slate-500">
+        <span style={{ color: "#6366f1" }}>■</span> manhã &nbsp;
+        <span style={{ color: "#8b5cf6" }}>■</span> tarde &nbsp;
+        <span style={{ color: "#a78bfa" }}>■</span> noite &nbsp;
+        <span style={{ color: "#475569" }}>■</span> madrugada
+      </p>
+    </ChartCard>
   );
 }
 
@@ -425,70 +548,76 @@ function GlobalReport({ data, period }: { data: ReportData; period: number }) {
         </ChartCard>
       </div>
 
-      {/* Tempo médio de resolução por prioridade */}
-      {(resolutionChartData?.length ?? 0) > 0 && (
-        <ChartCard title="Tempo médio de resolução por prioridade">
-          <ResponsiveContainer width="100%" height={220}>
-            <BarChart data={resolutionChartData} margin={{ top: 4, right: 4, left: 0, bottom: 0 }} barSize={48}>
-              <CartesianGrid strokeDasharray="3 3" stroke="#2d3748" />
-              <XAxis dataKey="priority" tick={{ fontSize: 10, fill: "#94a3b8" }}
-                tickFormatter={(v: string) => PRIORITY_LABELS[v] ?? v} />
-              <YAxis tick={{ fontSize: 10, fill: "#94a3b8" }}
-                tickFormatter={(v: number) => v >= 24 ? `${(v / 24).toFixed(0)}d` : `${v}h`} />
-              <Tooltip
-                cursor={{ fill: gridColor }}
-                wrapperStyle={tooltipWrapperStyle}
-                content={({ active, payload, label }) => {
-                  if (!active || !payload?.length) return null;
-                  return (
-                    <div style={{ backgroundColor: tooltipBg, border: `1px solid ${tooltipBorder}`, borderRadius: 8, padding: "8px 12px", fontSize: 12, color: tooltipColor, outline: "none" }}>
-                      <p style={{ fontWeight: 600, marginBottom: 4 }}>{PRIORITY_LABELS[String(label)] ?? label}</p>
-                      <p style={{ color: "#6366f1" }}>Tempo médio: {fmtHours(payload[0].value as number)}</p>
-                    </div>
-                  );
-                }}
-              />
-              <Bar dataKey="avg_hours" radius={[4, 4, 0, 0]}>
-                {resolutionChartData.map((entry) => (
-                  <Cell key={entry.priority} fill={PRIORITY_COLORS[entry.priority] ?? "#6366f1"} />
-                ))}
-              </Bar>
-            </BarChart>
-          </ResponsiveContainer>
-        </ChartCard>
+      {/* 2-col: Tempo médio resolução | Tempo médio 1ª resposta */}
+      {((resolutionChartData?.length ?? 0) > 0 || (data.avg_first_response_by_priority ?? []).some((r) => r.avg_hours != null)) && (
+        <div className="grid grid-cols-1 lg:grid-cols-2 gap-4">
+          {(resolutionChartData?.length ?? 0) > 0 && (
+            <ChartCard title="Tempo médio de resolução por prioridade">
+              <ResponsiveContainer width="100%" height={220}>
+                <BarChart data={resolutionChartData} margin={{ top: 4, right: 4, left: 0, bottom: 0 }} barSize={48}>
+                  <CartesianGrid strokeDasharray="3 3" stroke="#2d3748" />
+                  <XAxis dataKey="priority" tick={{ fontSize: 10, fill: "#94a3b8" }}
+                    tickFormatter={(v: string) => PRIORITY_LABELS[v] ?? v} />
+                  <YAxis tick={{ fontSize: 10, fill: "#94a3b8" }}
+                    tickFormatter={(v: number) => v >= 24 ? `${(v / 24).toFixed(0)}d` : `${v}h`} />
+                  <Tooltip cursor={{ fill: gridColor }} wrapperStyle={tooltipWrapperStyle}
+                    content={({ active, payload, label }) => {
+                      if (!active || !payload?.length) return null;
+                      return (
+                        <div style={{ backgroundColor: tooltipBg, border: `1px solid ${tooltipBorder}`, borderRadius: 8, padding: "8px 12px", fontSize: 12, color: tooltipColor, outline: "none" }}>
+                          <p style={{ fontWeight: 600, marginBottom: 4 }}>{PRIORITY_LABELS[String(label)] ?? label}</p>
+                          <p style={{ color: "#6366f1" }}>Tempo médio: {fmtHours(payload[0].value as number)}</p>
+                        </div>
+                      );
+                    }} />
+                  <Bar dataKey="avg_hours" radius={[4, 4, 0, 0]}>
+                    {resolutionChartData.map((e) => <Cell key={e.priority} fill={PRIORITY_COLORS[e.priority] ?? "#6366f1"} />)}
+                  </Bar>
+                </BarChart>
+              </ResponsiveContainer>
+            </ChartCard>
+          )}
+          <FirstResponseChart data={data.avg_first_response_by_priority ?? []}
+            gridColor={gridColor} tooltipBg={tooltipBg} tooltipBorder={tooltipBorder}
+            tooltipColor={tooltipColor} fmtHours={fmtHours} />
+        </div>
       )}
 
-      {/* CSAT ao longo do tempo */}
-      {hasCsatTrend && (
-        <ChartCard title="Tendência CSAT ao longo do tempo">
-          <ResponsiveContainer width="100%" height={220}>
-            <AreaChart data={data.csat_by_day} margin={{ top: 8, right: 4, left: -20, bottom: 0 }}>
-              <defs>
-                <linearGradient id="csatGradient" x1="0" y1="0" x2="0" y2="1">
-                  <stop offset="5%"  stopColor="#f59e0b" stopOpacity={0.3} />
-                  <stop offset="95%" stopColor="#f59e0b" stopOpacity={0}   />
-                </linearGradient>
-              </defs>
-              <CartesianGrid strokeDasharray="3 3" stroke="#2d3748" />
-              <XAxis dataKey="date" tick={{ fontSize: 10, fill: "#94a3b8" }}
-                tickFormatter={(v: string) => v.slice(5)}
-                interval={Math.max(1, Math.floor(data.csat_by_day.length / 6))} />
-              <YAxis tick={{ fontSize: 10, fill: "#94a3b8" }} domain={[1, 5]}
-                ticks={[1, 2, 3, 4, 5]} />
-              <ReferenceLine y={4} stroke="#10b981" strokeDasharray="4 3"
-                label={{ value: "Meta 4.0", fill: "#10b981", fontSize: 10, position: "insideTopRight" }} />
-              <Tooltip contentStyle={tooltipStyle} wrapperStyle={tooltipWrapperStyle}
-                labelFormatter={(v) => `Data: ${v}`}
-                formatter={(v: number, _: string, props: { payload: CsatDailyItem }) => [
-                  v != null ? `${Number(v).toFixed(2)} ★ (${props.payload.count} avaliações)` : "—",
-                  "CSAT",
-                ]} />
-              <Area type="monotone" dataKey="avg_rating" stroke="#f59e0b" strokeWidth={2}
-                fill="url(#csatGradient)" dot={false}
-                connectNulls={false} />
-            </AreaChart>
-          </ResponsiveContainer>
-        </ChartCard>
+      {/* 2-col: Tendência CSAT | Tickets por produto */}
+      {(hasCsatTrend || (data.tickets_by_product?.length ?? 0) > 0) && (
+        <div className="grid grid-cols-1 lg:grid-cols-2 gap-4">
+          {hasCsatTrend && (
+            <ChartCard title="Tendência CSAT ao longo do tempo">
+              <ResponsiveContainer width="100%" height={220}>
+                <AreaChart data={data.csat_by_day} margin={{ top: 8, right: 4, left: -20, bottom: 0 }}>
+                  <defs>
+                    <linearGradient id="csatGradient" x1="0" y1="0" x2="0" y2="1">
+                      <stop offset="5%"  stopColor="#f59e0b" stopOpacity={0.3} />
+                      <stop offset="95%" stopColor="#f59e0b" stopOpacity={0}   />
+                    </linearGradient>
+                  </defs>
+                  <CartesianGrid strokeDasharray="3 3" stroke="#2d3748" />
+                  <XAxis dataKey="date" tick={{ fontSize: 10, fill: "#94a3b8" }}
+                    tickFormatter={(v: string) => v.slice(5)}
+                    interval={Math.max(1, Math.floor(data.csat_by_day.length / 6))} />
+                  <YAxis tick={{ fontSize: 10, fill: "#94a3b8" }} domain={[1, 5]} ticks={[1, 2, 3, 4, 5]} />
+                  <ReferenceLine y={4} stroke="#10b981" strokeDasharray="4 3"
+                    label={{ value: "Meta 4.0", fill: "#10b981", fontSize: 10, position: "insideTopRight" }} />
+                  <Tooltip contentStyle={tooltipStyle} wrapperStyle={tooltipWrapperStyle}
+                    labelFormatter={(v) => `Data: ${v}`}
+                    formatter={(v: number, _: string, props: { payload: CsatDailyItem }) => [
+                      v != null ? `${Number(v).toFixed(2)} ★ (${props.payload.count} avaliações)` : "—",
+                      "CSAT",
+                    ]} />
+                  <Area type="monotone" dataKey="avg_rating" stroke="#f59e0b" strokeWidth={2}
+                    fill="url(#csatGradient)" dot={false} connectNulls={false} />
+                </AreaChart>
+              </ResponsiveContainer>
+            </ChartCard>
+          )}
+          <ProductChart data={data.tickets_by_product ?? []}
+            gridColor={gridColor} tooltipBg={tooltipBg} tooltipBorder={tooltipBorder} tooltipColor={tooltipColor} />
+        </div>
       )}
 
       {/* Tickets em aberto há mais tempo */}
@@ -496,48 +625,41 @@ function GlobalReport({ data, period }: { data: ReportData; period: number }) {
         <OldestOpenTable tickets={data.oldest_open_tickets} />
       )}
 
-      {/* Distribuição por dia da semana */}
-      {(data.tickets_by_weekday?.length ?? 0) > 0 && (
-        <ChartCard title="Volume por dia da semana">
-          <ResponsiveContainer width="100%" height={220}>
-            <BarChart
-              data={data.tickets_by_weekday}
-              margin={{ top: 4, right: 4, left: -20, bottom: 0 }}
-              barSize={40}
-            >
-              <CartesianGrid strokeDasharray="3 3" stroke="#2d3748" />
-              <XAxis dataKey="weekday" tick={{ fontSize: 10, fill: "#94a3b8" }}
-                tickFormatter={(v: number) => WEEKDAY_LABELS[v] ?? v} />
-              <YAxis tick={{ fontSize: 10, fill: "#94a3b8" }} allowDecimals={false} />
-              <Tooltip
-                cursor={{ fill: gridColor }}
-                wrapperStyle={tooltipWrapperStyle}
-                content={({ active, payload, label }) => {
-                  if (!active || !payload?.length) return null;
-                  const wd = Number(label ?? 0);
-                  const isWeekend = wd >= 6;
-                  return (
-                    <div style={{ backgroundColor: tooltipBg, border: `1px solid ${tooltipBorder}`, borderRadius: 8, padding: "8px 12px", fontSize: 12, color: tooltipColor, outline: "none" }}>
-                      <p style={{ fontWeight: 600, marginBottom: 4 }}>{WEEKDAY_FULL[wd] ?? label}</p>
-                      <p style={{ color: isWeekend ? "#f59e0b" : "#6366f1" }}>Tickets: {payload[0].value ?? 0}</p>
-                    </div>
-                  );
-                }}
-              />
-              <Bar dataKey="count" radius={[4, 4, 0, 0]}>
-                {data.tickets_by_weekday.map((entry) => (
-                  <Cell
-                    key={entry.weekday}
-                    fill={entry.weekday >= 6 ? "#f59e0b" : "#6366f1"}
-                  />
-                ))}
-              </Bar>
-            </BarChart>
-          </ResponsiveContainer>
-          <p className="mt-2 text-center text-[10px] text-slate-500">
-            Barras em <span style={{ color: "#f59e0b" }}>âmbar</span> = fim de semana
-          </p>
-        </ChartCard>
+      {/* 2-col: Dia da semana | Hora do dia */}
+      {((data.tickets_by_weekday ?? []).some((d) => d.count > 0) || (data.tickets_by_hour ?? []).some((d) => d.count > 0)) && (
+        <div className="grid grid-cols-1 lg:grid-cols-2 gap-4">
+          {(data.tickets_by_weekday?.length ?? 0) > 0 && (
+            <ChartCard title="Volume por dia da semana">
+              <ResponsiveContainer width="100%" height={220}>
+                <BarChart data={data.tickets_by_weekday} margin={{ top: 4, right: 4, left: -20, bottom: 0 }} barSize={40}>
+                  <CartesianGrid strokeDasharray="3 3" stroke="#2d3748" />
+                  <XAxis dataKey="weekday" tick={{ fontSize: 10, fill: "#94a3b8" }}
+                    tickFormatter={(v: number) => WEEKDAY_LABELS[v] ?? v} />
+                  <YAxis tick={{ fontSize: 10, fill: "#94a3b8" }} allowDecimals={false} />
+                  <Tooltip cursor={{ fill: gridColor }} wrapperStyle={tooltipWrapperStyle}
+                    content={({ active, payload, label }) => {
+                      if (!active || !payload?.length) return null;
+                      const wd = Number(label ?? 0);
+                      return (
+                        <div style={{ backgroundColor: tooltipBg, border: `1px solid ${tooltipBorder}`, borderRadius: 8, padding: "8px 12px", fontSize: 12, color: tooltipColor, outline: "none" }}>
+                          <p style={{ fontWeight: 600, marginBottom: 4 }}>{WEEKDAY_FULL[wd] ?? label}</p>
+                          <p style={{ color: wd >= 6 ? "#f59e0b" : "#6366f1" }}>Tickets: {payload[0].value ?? 0}</p>
+                        </div>
+                      );
+                    }} />
+                  <Bar dataKey="count" radius={[4, 4, 0, 0]}>
+                    {data.tickets_by_weekday.map((e) => <Cell key={e.weekday} fill={e.weekday >= 6 ? "#f59e0b" : "#6366f1"} />)}
+                  </Bar>
+                </BarChart>
+              </ResponsiveContainer>
+              <p className="mt-2 text-center text-[10px] text-slate-500">
+                <span style={{ color: "#f59e0b" }}>■</span> fim de semana
+              </p>
+            </ChartCard>
+          )}
+          <HourlyChart data={data.tickets_by_hour ?? []}
+            gridColor={gridColor} tooltipBg={tooltipBg} tooltipBorder={tooltipBorder} tooltipColor={tooltipColor} />
+        </div>
       )}
 
       {/* Distribuição de tickets por técnico */}
