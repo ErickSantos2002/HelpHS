@@ -2,13 +2,14 @@ import { useEffect, useId, useRef } from "react";
 import type { ReactNode } from "react";
 import { cn } from "../../lib/utils";
 
-type ModalSize = "sm" | "md" | "lg" | "xl";
+type ModalSize = "sm" | "md" | "lg" | "xl" | "2xl";
 
 const sizeClasses: Record<ModalSize, string> = {
   sm: "max-w-sm",
   md: "max-w-md",
   lg: "max-w-lg",
   xl: "max-w-2xl",
+  "2xl": "max-w-3xl",
 };
 
 const FOCUSABLE =

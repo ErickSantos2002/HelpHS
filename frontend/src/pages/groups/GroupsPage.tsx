@@ -153,6 +153,8 @@ function GroupModal({
 
 // ── Add company modal (suggestions + manual) ──────────────────
 
+const SUGG_PAGE_SIZE = 5;
+
 function AddCompanyModal({
   groupId,
   onAdded,
@@ -166,6 +168,7 @@ function AddCompanyModal({
   const [suggestions, setSuggestions] = useState<CompanySuggestion[]>([]);
   const [loadingSugg, setLoadingSugg] = useState(true);
   const [search, setSearch] = useState("");
+  const [suggPage, setSuggPage] = useState(1);
   const [adding, setAdding] = useState<string | null>(null);
   const [error, setError] = useState("");
 
@@ -182,6 +185,7 @@ function AddCompanyModal({
     s.company_name.toLowerCase().includes(search.toLowerCase()) ||
     (s.cnpj ?? "").includes(search),
   );
+  const pagedSugg = filtered.slice((suggPage - 1) * SUGG_PAGE_SIZE, suggPage * SUGG_PAGE_SIZE);
 
   const handleAddFromSuggestion = async (s: CompanySuggestion) => {
     setAdding(s.company_name);
@@ -224,7 +228,7 @@ function AddCompanyModal({
   };
 
   return (
-    <Modal open onClose={onClose} title="Adicionar Empresa" size="lg">
+    <Modal open onClose={onClose} title="Adicionar Empresa" size="2xl">
       {/* Tabs */}
       <div className="flex border-b border-border mb-4 -mt-1">
         {(["suggestions", "manual"] as const).map((t) => (
@@ -250,7 +254,7 @@ function AddCompanyModal({
           <Input
             placeholder="Buscar por nome ou CNPJ..."
             value={search}
-            onChange={(e) => setSearch(e.target.value)}
+            onChange={(e) => { setSearch(e.target.value); setSuggPage(1); }}
           />
           {loadingSugg ? (
             <div className="flex justify-center py-6"><Spinner /></div>
@@ -266,28 +270,37 @@ function AddCompanyModal({
               </div>
             </div>
           ) : (
-            <ul className="divide-y divide-border rounded-lg border border-border overflow-hidden max-h-72 overflow-y-auto">
-              {filtered.map((s) => (
-                <li key={s.company_name} className="flex items-center justify-between px-4 py-3 hover:bg-background-elevated">
-                  <div className="min-w-0 flex-1">
-                    <p className="text-sm font-medium text-slate-100 truncate">{s.company_name}</p>
-                    <div className="flex gap-3 text-xs text-slate-500 mt-0.5">
-                      {s.cnpj && <span>{s.cnpj}</span>}
-                      {s.city && <span>{s.city}{s.state ? ` - ${s.state}` : ""}</span>}
-                      <span className="flex items-center gap-1"><IconUsers />{s.client_count} cliente{s.client_count !== 1 ? "s" : ""}</span>
+            <div>
+              <ul className="divide-y divide-border rounded-lg border border-border overflow-hidden">
+                {pagedSugg.map((s) => (
+                  <li key={s.company_name} className="flex items-center justify-between px-4 py-3 hover:bg-background-elevated">
+                    <div className="min-w-0 flex-1">
+                      <p className="text-sm font-medium text-slate-100 truncate">{s.company_name}</p>
+                      <div className="flex gap-3 text-xs text-slate-500 mt-0.5">
+                        {s.cnpj && <span>{s.cnpj}</span>}
+                        {s.city && <span>{s.city}{s.state ? ` - ${s.state}` : ""}</span>}
+                        <span className="flex items-center gap-1"><IconUsers />{s.client_count} cliente{s.client_count !== 1 ? "s" : ""}</span>
+                      </div>
                     </div>
-                  </div>
-                  <div className="flex gap-2 ml-3 shrink-0">
-                    <Button size="sm" variant="outline" onClick={() => prefillManual(s)} title="Editar antes de adicionar">
-                      <IconEdit />
-                    </Button>
-                    <Button size="sm" loading={adding === s.company_name} onClick={() => handleAddFromSuggestion(s)}>
-                      <IconPlus /> Adicionar
-                    </Button>
-                  </div>
-                </li>
-              ))}
-            </ul>
+                    <div className="flex gap-2 ml-3 shrink-0">
+                      <Button size="sm" variant="outline" onClick={() => prefillManual(s)} title="Editar antes de adicionar">
+                        <IconEdit />
+                      </Button>
+                      <Button size="sm" loading={adding === s.company_name} onClick={() => handleAddFromSuggestion(s)}>
+                        <IconPlus /> Adicionar
+                      </Button>
+                    </div>
+                  </li>
+                ))}
+              </ul>
+              <Pagination
+                page={suggPage}
+                pageSize={SUGG_PAGE_SIZE}
+                total={filtered.length}
+                onPageChange={setSuggPage}
+                itemLabel="empresas"
+              />
+            </div>
           )}
         </div>
       )}
@@ -363,12 +376,15 @@ function EditCompanyModal({
 
 // ── Assign client modal ───────────────────────────────────────
 
+const ASSIGN_PAGE_SIZE = 5;
+
 function AssignClientModal({
   groupId, companyId, onAssigned, onClose,
 }: { groupId: string; companyId: string; onAssigned: (c: ClientInCompany) => void; onClose: () => void; }) {
   const [clients, setClients] = useState<ClientInCompany[]>([]);
   const [loading, setLoading] = useState(true);
   const [search, setSearch] = useState("");
+  const [assignPage, setAssignPage] = useState(1);
   const [assigning, setAssigning] = useState<string | null>(null);
   const [error, setError] = useState("");
 
@@ -377,6 +393,7 @@ function AssignClientModal({
   const filtered = clients.filter((c) =>
     c.name.toLowerCase().includes(search.toLowerCase()) || c.email.toLowerCase().includes(search.toLowerCase()),
   );
+  const pagedClients = filtered.slice((assignPage - 1) * ASSIGN_PAGE_SIZE, assignPage * ASSIGN_PAGE_SIZE);
 
   const handleAssign = async (userId: string) => {
     setAssigning(userId);
@@ -384,32 +401,42 @@ function AssignClientModal({
       const client = await assignClient(groupId, companyId, userId);
       onAssigned(client);
       setClients((prev) => prev.filter((c) => c.id !== userId));
+      setAssignPage(1);
     } catch { setError("Erro ao vincular cliente."); }
     finally { setAssigning(null); }
   };
 
   return (
-    <Modal open onClose={onClose} title="Vincular Cliente">
+    <Modal open onClose={onClose} title="Vincular Cliente" size="2xl">
       <div className="space-y-3">
         {error && <Alert variant="error">{error}</Alert>}
-        <Input placeholder="Buscar por nome ou e-mail..." value={search} onChange={(e) => setSearch(e.target.value)} />
+        <Input placeholder="Buscar por nome ou e-mail..." value={search} onChange={(e) => { setSearch(e.target.value); setAssignPage(1); }} />
         {loading ? <div className="flex justify-center py-6"><Spinner /></div>
           : filtered.length === 0 ? (
             <p className="text-sm text-slate-500 text-center py-4">
               {clients.length === 0 ? "Todos os clientes já estão vinculados." : "Nenhum resultado."}
             </p>
           ) : (
-            <ul className="divide-y divide-border max-h-72 overflow-y-auto rounded-lg border border-border">
-              {filtered.map((c) => (
-                <li key={c.id} className="flex items-center justify-between px-3 py-2.5 hover:bg-background-elevated">
-                  <div className="min-w-0">
-                    <p className="text-sm font-medium text-slate-100 truncate">{c.name}</p>
-                    <p className="text-xs text-slate-500 truncate">{c.email}</p>
-                  </div>
-                  <Button size="sm" variant="outline" loading={assigning === c.id} onClick={() => handleAssign(c.id)}>Vincular</Button>
-                </li>
-              ))}
-            </ul>
+            <div>
+              <ul className="divide-y divide-border rounded-lg border border-border">
+                {pagedClients.map((c) => (
+                  <li key={c.id} className="flex items-center justify-between px-3 py-2.5 hover:bg-background-elevated">
+                    <div className="min-w-0">
+                      <p className="text-sm font-medium text-slate-100 truncate">{c.name}</p>
+                      <p className="text-xs text-slate-500 truncate">{c.email}</p>
+                    </div>
+                    <Button size="sm" variant="outline" loading={assigning === c.id} onClick={() => handleAssign(c.id)}>Vincular</Button>
+                  </li>
+                ))}
+              </ul>
+              <Pagination
+                page={assignPage}
+                pageSize={ASSIGN_PAGE_SIZE}
+                total={filtered.length}
+                onPageChange={setAssignPage}
+                itemLabel="clientes"
+              />
+            </div>
           )}
         <ModalFooter><Button variant="outline" onClick={onClose}>Fechar</Button></ModalFooter>
       </div>

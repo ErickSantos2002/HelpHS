@@ -24,14 +24,18 @@ import {
 } from "../../services/attachmentService";
 import {
   assignTicket,
+  createTicketNote,
+  deleteTicketNote,
   getTicket,
   getTicketHistory,
+  listTicketNotes,
   resolveTicket,
   updateClientObservation,
   updateTicket,
   updateTicketStatus,
   type Ticket,
   type TicketHistory,
+  type TicketNote,
 } from "../../services/ticketService";
 import {
   getTicketSurvey,
@@ -124,6 +128,11 @@ const IC = {
   Lock: (
     <svg className="w-3.5 h-3.5" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
       <path strokeLinecap="round" strokeLinejoin="round" d="M12 15v2m-6 4h12a2 2 0 002-2v-6a2 2 0 00-2-2H6a2 2 0 00-2 2v6a2 2 0 002 2zm10-10V7a4 4 0 00-8 0v4h8z" />
+    </svg>
+  ),
+  Trash: (
+    <svg className="w-3.5 h-3.5" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
+      <path strokeLinecap="round" strokeLinejoin="round" d="M19 7l-.867 12.142A2 2 0 0116.138 21H7.862a2 2 0 01-1.995-1.858L5 7m5 4v6m4-6v6m1-10V4a1 1 0 00-1-1h-4a1 1 0 00-1 1v3M4 7h16" />
     </svg>
   ),
   Refresh: (
@@ -568,9 +577,12 @@ export default function TicketDetailPage() {
   const [uploadLoading, setUploadLoading] = useState(false);
   const [uploadError, setUploadError] = useState<string | null>(null);
 
-  const [notesEdit, setNotesEdit] = useState(false);
-  const [notesValue, setNotesValue] = useState("");
-  const [notesSaving, setNotesSaving] = useState(false);
+  const [ticketNotes, setTicketNotes] = useState<TicketNote[]>([]);
+  const [showAddNote, setShowAddNote] = useState(false);
+  const [viewNote, setViewNote] = useState<TicketNote | null>(null);
+  const [newNoteContent, setNewNoteContent] = useState("");
+  const [noteSaving, setNoteSaving] = useState(false);
+  const [noteDeleting, setNoteDeleting] = useState<string | null>(null);
 
   const [obsEdit, setObsEdit] = useState(false);
   const [obsValue, setObsValue] = useState("");
@@ -589,10 +601,10 @@ export default function TicketDetailPage() {
     try {
       const [t, h, a] = await Promise.all([getTicket(id), getTicketHistory(id), getAttachments(id)]);
       setTicket(t);
-      setNotesValue(t.technician_notes ?? "");
       setObsValue(t.client_observation ?? "");
       setHistory(h.items);
       setAttachments(a.items);
+      listTicketNotes(id).then(setTicketNotes).catch(() => {});
     } catch {
       setError("Não foi possível carregar o ticket.");
     } finally {
@@ -655,13 +667,24 @@ export default function TicketDetailPage() {
     finally { setUploadLoading(false); }
   }
 
-  async function handleSaveNotes() {
-    if (!ticket) return;
-    setNotesSaving(true);
+  async function handleAddNote() {
+    if (!ticket || !newNoteContent.trim()) return;
+    setNoteSaving(true);
     try {
-      setTicket(await updateTicket(ticket.id, { technician_notes: notesValue || null }));
-      setNotesEdit(false);
-    } finally { setNotesSaving(false); }
+      const note = await createTicketNote(ticket.id, newNoteContent.trim());
+      setTicketNotes((p) => [note, ...p]);
+      setNewNoteContent("");
+      setShowAddNote(false);
+    } finally { setNoteSaving(false); }
+  }
+
+  async function handleDeleteNote(noteId: string) {
+    if (!ticket || !confirm("Deletar esta nota?")) return;
+    setNoteDeleting(noteId);
+    try {
+      await deleteTicketNote(ticket.id, noteId);
+      setTicketNotes((p) => p.filter((n) => n.id !== noteId));
+    } finally { setNoteDeleting(null); }
   }
 
   async function handleSaveObs() {
@@ -1074,25 +1097,44 @@ export default function TicketDetailPage() {
                   {IC.Lock}
                   Notas internas
                 </p>
-                {!notesEdit && (
-                  <button onClick={() => setNotesEdit(true)} className="flex items-center gap-1 text-[10px] font-semibold text-amber-500/70 hover:text-amber-400 cursor-pointer transition-colors">
-                    {IC.Edit}
-                    {ticket.technician_notes ? "Editar" : "Adicionar"}
-                  </button>
-                )}
+                <button
+                  onClick={() => setShowAddNote(true)}
+                  className="flex items-center gap-1 text-[10px] font-semibold text-amber-500/70 hover:text-amber-400 cursor-pointer transition-colors"
+                >
+                  {IC.Edit}
+                  Adicionar
+                </button>
               </div>
-              {notesEdit ? (
-                <div className="space-y-3">
-                  <Textarea rows={4} placeholder="Observações internas, diagnósticos, próximos passos…" value={notesValue} onChange={(e) => setNotesValue(e.target.value)} />
-                  <div className="flex justify-end gap-2">
-                    <Button variant="secondary" size="sm" onClick={() => { setNotesEdit(false); setNotesValue(ticket.technician_notes ?? ""); }} disabled={notesSaving}>Cancelar</Button>
-                    <Button size="sm" onClick={handleSaveNotes} loading={notesSaving}>Salvar</Button>
-                  </div>
-                </div>
-              ) : ticket.technician_notes ? (
-                <p className="text-sm leading-relaxed text-amber-200/60 whitespace-pre-wrap">{ticket.technician_notes}</p>
-              ) : (
+
+              {ticketNotes.length === 0 ? (
                 <p className="text-xs italic text-amber-700/50">Nenhuma nota registrada.</p>
+              ) : (
+                <ul className="space-y-2">
+                  {ticketNotes.map((n) => (
+                    <li
+                      key={n.id}
+                      className="group relative rounded-lg border border-amber-700/20 bg-amber-950/20 p-3 cursor-pointer hover:border-amber-600/40 transition-colors"
+                      onClick={() => setViewNote(n)}
+                    >
+                      <div className="flex items-center justify-between gap-2 mb-1">
+                        <span className="text-[10px] font-semibold text-amber-500/70 truncate">{n.author_name}</span>
+                        <div className="flex items-center gap-1 shrink-0">
+                          <span className="text-[10px] text-amber-700/50">
+                            {new Date(n.created_at).toLocaleDateString("pt-BR", { day: "2-digit", month: "2-digit", year: "2-digit" })}
+                          </span>
+                          <button
+                            onClick={(e) => { e.stopPropagation(); handleDeleteNote(n.id); }}
+                            disabled={noteDeleting === n.id}
+                            className="opacity-0 group-hover:opacity-100 p-0.5 rounded text-amber-700/60 hover:text-red-400 transition-all cursor-pointer"
+                          >
+                            {noteDeleting === n.id ? <Spinner size="sm" /> : IC.Trash}
+                          </button>
+                        </div>
+                      </div>
+                      <p className="text-xs text-amber-200/60 line-clamp-2 whitespace-pre-wrap">{n.content}</p>
+                    </li>
+                  ))}
+                </ul>
               )}
             </div>
           )}
@@ -1100,6 +1142,48 @@ export default function TicketDetailPage() {
       </div>
 
       {/* ── Modals ───────────────────────────────────────────── */}
+
+      {/* Add note */}
+      <Modal open={showAddNote} onClose={() => { setShowAddNote(false); setNewNoteContent(""); }} title="Nova nota interna">
+        <div className="space-y-4">
+          <Textarea
+            rows={5}
+            placeholder="Observações internas, diagnósticos, próximos passos…"
+            value={newNoteContent}
+            onChange={(e) => setNewNoteContent(e.target.value)}
+          />
+          <ModalFooter>
+            <Button variant="secondary" onClick={() => { setShowAddNote(false); setNewNoteContent(""); }}>Cancelar</Button>
+            <Button onClick={handleAddNote} loading={noteSaving} disabled={!newNoteContent.trim()}>Salvar nota</Button>
+          </ModalFooter>
+        </div>
+      </Modal>
+
+      {/* View note */}
+      {viewNote && (
+        <Modal open onClose={() => setViewNote(null)} title="Nota interna" size="lg">
+          <div className="space-y-3">
+            <div className="flex items-center justify-between text-xs text-amber-500/70">
+              <span className="font-semibold">{viewNote.author_name}</span>
+              <span>{new Date(viewNote.created_at).toLocaleString("pt-BR")}</span>
+            </div>
+            <p className="text-sm text-amber-200/80 whitespace-pre-wrap leading-relaxed min-h-[80px]">{viewNote.content}</p>
+            <ModalFooter>
+              <Button
+                variant="outline"
+                size="sm"
+                className="text-red-500 hover:bg-red-900/20"
+                loading={noteDeleting === viewNote.id}
+                onClick={() => { handleDeleteNote(viewNote.id); setViewNote(null); }}
+              >
+                Deletar
+              </Button>
+              <Button onClick={() => setViewNote(null)}>Fechar</Button>
+            </ModalFooter>
+          </div>
+        </Modal>
+      )}
+
       <Modal
         open={statusModal}
         onClose={() => { setStatusModal(false); setStatusError(null); setNewStatus(""); setStatusComment(""); }}

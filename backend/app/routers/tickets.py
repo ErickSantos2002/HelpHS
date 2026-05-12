@@ -34,6 +34,7 @@ from app.models.models import (
     SLAConfig,
     Ticket,
     TicketHistory,
+    TicketNote,
     TicketStatus,
     User,
     UserRole,
@@ -45,6 +46,8 @@ from app.schemas.ticket import (
     TicketHistoryListResponse,
     TicketHistoryResponse,
     TicketListResponse,
+    TicketNoteCreate,
+    TicketNoteResponse,
     TicketObservationUpdate,
     TicketResolve,
     TicketResponse,
@@ -710,6 +713,83 @@ async def cancel_ticket(
         data={"ticket_id": str(ticket.id), "protocol": ticket.protocol},
         settings=settings,
     )
+    await db.commit()
+
+
+# ── Ticket Notes ─────────────────────────────────────────────
+
+
+@router.get("/tickets/{ticket_id}/notes", response_model=list[TicketNoteResponse])
+async def list_ticket_notes(
+    ticket_id: uuid.UUID,
+    db: Annotated[AsyncSession, Depends(get_db)],
+    actor: Annotated[User, Depends(authorize(UserRole.admin, UserRole.technician))],
+) -> list[TicketNoteResponse]:
+    await get_or_404(db, Ticket, ticket_id, "Ticket not found")
+    rows = (
+        await db.execute(
+            select(TicketNote, User.name.label("author_name"))
+            .join(User, User.id == TicketNote.author_id)
+            .where(TicketNote.ticket_id == ticket_id)
+            .order_by(TicketNote.created_at.desc())
+        )
+    ).all()
+    return [
+        TicketNoteResponse(
+            id=row.TicketNote.id,
+            ticket_id=row.TicketNote.ticket_id,
+            author_id=row.TicketNote.author_id,
+            author_name=row.author_name,
+            content=row.TicketNote.content,
+            created_at=row.TicketNote.created_at,
+        )
+        for row in rows
+    ]
+
+
+@router.post(
+    "/tickets/{ticket_id}/notes",
+    response_model=TicketNoteResponse,
+    status_code=status.HTTP_201_CREATED,
+)
+async def create_ticket_note(
+    ticket_id: uuid.UUID,
+    body: TicketNoteCreate,
+    db: Annotated[AsyncSession, Depends(get_db)],
+    actor: Annotated[User, Depends(authorize(UserRole.admin, UserRole.technician))],
+) -> TicketNoteResponse:
+    await get_or_404(db, Ticket, ticket_id, "Ticket not found")
+    note = TicketNote(ticket_id=ticket_id, author_id=actor.id, content=body.content)
+    db.add(note)
+    await db.commit()
+    await db.refresh(note)
+    return TicketNoteResponse(
+        id=note.id,
+        ticket_id=note.ticket_id,
+        author_id=note.author_id,
+        author_name=actor.name,
+        content=note.content,
+        created_at=note.created_at,
+    )
+
+
+@router.delete("/tickets/{ticket_id}/notes/{note_id}", status_code=status.HTTP_204_NO_CONTENT)
+async def delete_ticket_note(
+    ticket_id: uuid.UUID,
+    note_id: uuid.UUID,
+    db: Annotated[AsyncSession, Depends(get_db)],
+    actor: Annotated[User, Depends(authorize(UserRole.admin, UserRole.technician))],
+) -> None:
+    note = (
+        await db.execute(
+            select(TicketNote).where(TicketNote.id == note_id, TicketNote.ticket_id == ticket_id)
+        )
+    ).scalar_one_or_none()
+    if note is None:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Nota não encontrada")
+    if actor.role != UserRole.admin and note.author_id != actor.id:
+        raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="Sem permissão para deletar esta nota")
+    await db.delete(note)
     await db.commit()
 
 

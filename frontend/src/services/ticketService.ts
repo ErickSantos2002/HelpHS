@@ -175,6 +175,29 @@ export async function getTicket(id: string): Promise<Ticket> {
   return data;
 }
 
+export interface TicketNote {
+  id: string;
+  ticket_id: string;
+  author_id: string;
+  author_name: string;
+  content: string;
+  created_at: string;
+}
+
+export async function listTicketNotes(ticketId: string): Promise<TicketNote[]> {
+  const { data } = await api.get<TicketNote[]>(`/tickets/${ticketId}/notes`);
+  return data;
+}
+
+export async function createTicketNote(ticketId: string, content: string): Promise<TicketNote> {
+  const { data } = await api.post<TicketNote>(`/tickets/${ticketId}/notes`, { content });
+  return data;
+}
+
+export async function deleteTicketNote(ticketId: string, noteId: string): Promise<void> {
+  await api.delete(`/tickets/${ticketId}/notes/${noteId}`);
+}
+
 export async function getTickets(
   filters: TicketFilters = {},
 ): Promise<TicketListResponse> {

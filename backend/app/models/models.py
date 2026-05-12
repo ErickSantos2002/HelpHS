@@ -395,6 +395,9 @@ class Ticket(Base):
     tags: Mapped[list["Tag"]] = relationship(
         secondary=ticket_tags, back_populates="tickets", lazy="selectin"
     )
+    ticket_notes: Mapped[list["TicketNote"]] = relationship(
+        back_populates="ticket", cascade="all, delete-orphan"
+    )
 
     __table_args__ = (
         Index("ix_tickets_status_priority", "status", "priority"),
@@ -423,6 +426,23 @@ class TicketHistory(Base):
     user: Mapped["User"] = relationship(back_populates="ticket_histories")
 
     __table_args__ = (Index("ix_ticket_history_ticket_created", "ticket_id", "created_at"),)
+
+
+class TicketNote(Base):
+    """Notas internas de tickets (múltiplas por ticket)"""
+
+    __tablename__ = "ticket_notes"
+
+    id: Mapped[uuid.UUID] = mapped_column(UUID(as_uuid=True), primary_key=True, default=uuid.uuid4)
+    ticket_id: Mapped[uuid.UUID] = mapped_column(
+        UUID(as_uuid=True), ForeignKey("tickets.id", ondelete="CASCADE"), index=True
+    )
+    author_id: Mapped[uuid.UUID] = mapped_column(UUID(as_uuid=True), ForeignKey("users.id"))
+    content: Mapped[str] = mapped_column(Text, nullable=False)
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now())
+
+    ticket: Mapped["Ticket"] = relationship(back_populates="ticket_notes")
+    author: Mapped["User"] = relationship()
 
 
 class Attachment(Base):
