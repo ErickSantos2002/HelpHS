@@ -9,6 +9,7 @@ import {
   Input,
   Modal,
   ModalFooter,
+  Pagination,
   Spinner,
   Textarea,
 } from "../../components/ui";
@@ -447,6 +448,8 @@ function ClientNotesModal({
 
 // ── Company detail modal ──────────────────────────────────────
 
+const CLIENTS_PAGE_SIZE = 5;
+
 function CompanyDetailModal({
   groupId, company, onClose, onUpdated,
 }: { groupId: string; company: CompanyResponse; onClose: () => void; onUpdated: () => void; }) {
@@ -456,6 +459,7 @@ function CompanyDetailModal({
   const [showAssign, setShowAssign] = useState(false);
   const [noteClient, setNoteClient] = useState<ClientInCompany | null>(null);
   const [removingId, setRemovingId] = useState<string | null>(null);
+  const [clientsPage, setClientsPage] = useState(1);
 
   const load = async () => {
     setLoading(true);
@@ -474,64 +478,82 @@ function CompanyDetailModal({
     } finally { setRemovingId(null); }
   };
 
+  const pagedClients = detail
+    ? detail.clients.slice((clientsPage - 1) * CLIENTS_PAGE_SIZE, clientsPage * CLIENTS_PAGE_SIZE)
+    : [];
+
   return (
     <>
-      <Modal open onClose={onClose} title={company.name} size="lg">
-        {loading ? <div className="flex justify-center py-8"><Spinner /></div> : detail && (
-          <div className="space-y-4">
-            {/* Company info */}
-            <div className="flex flex-wrap gap-x-5 gap-y-1 text-sm text-slate-400">
-              {detail.cnpj && <span>CNPJ: <span className="text-slate-300">{detail.cnpj}</span></span>}
-              {detail.phone && <span>Tel: <span className="text-slate-300">{detail.phone}</span></span>}
-              {detail.city && <span>{detail.city}{detail.state ? ` - ${detail.state}` : ""}</span>}
-              {detail.address && <span>{detail.address}</span>}
-            </div>
-
-            {detail.notes && (
-              <div className="rounded-lg bg-amber-900/20 border border-amber-800/40 p-3">
-                <div className="flex items-center gap-1.5 text-amber-400 text-xs font-semibold mb-1"><IconNote />Notas internas</div>
-                <p className="text-sm text-amber-300 whitespace-pre-wrap">{detail.notes}</p>
+      <Modal open onClose={onClose} title={company.name} size="xl">
+        <div className="flex flex-col" style={{ minHeight: 480, maxHeight: "75vh" }}>
+          {loading ? (
+            <div className="flex justify-center items-center flex-1 py-8"><Spinner /></div>
+          ) : detail && (
+            <>
+              {/* Company info */}
+              <div className="flex flex-wrap gap-x-5 gap-y-1 text-sm text-slate-400 mb-4">
+                {detail.cnpj && <span>CNPJ: <span className="text-slate-300">{detail.cnpj}</span></span>}
+                {detail.phone && <span>Tel: <span className="text-slate-300">{detail.phone}</span></span>}
+                {detail.city && <span>{detail.city}{detail.state ? ` - ${detail.state}` : ""}</span>}
+                {detail.address && <span>{detail.address}</span>}
               </div>
-            )}
 
-            {/* Clients */}
-            <div>
+              {detail.notes && (
+                <div className="rounded-lg bg-amber-900/20 border border-amber-800/40 p-3 mb-4">
+                  <div className="flex items-center gap-1.5 text-amber-400 text-xs font-semibold mb-1"><IconNote />Notas internas</div>
+                  <p className="text-sm text-amber-300 whitespace-pre-wrap break-words">{detail.notes}</p>
+                </div>
+              )}
+
+              {/* Clients */}
               <div className="flex items-center justify-between mb-2">
                 <p className="text-sm font-semibold text-slate-300">Clientes ({detail.client_count})</p>
                 <Button size="sm" onClick={() => setShowAssign(true)}><IconPlus />Vincular</Button>
               </div>
+
               {detail.clients.length === 0 ? (
-                <div className="text-center py-6 rounded-lg border border-dashed border-border text-sm text-slate-500">
+                <div className="flex-1 flex flex-col items-center justify-center text-center py-6 rounded-lg border border-dashed border-border text-sm text-slate-500">
                   Nenhum cliente vinculado.
                   <div className="mt-2"><Button size="sm" onClick={() => setShowAssign(true)}><IconPlus />Vincular cliente</Button></div>
                 </div>
               ) : (
-                <ul className="divide-y divide-border rounded-lg border border-border overflow-hidden">
-                  {detail.clients.map((c) => (
-                    <li key={c.id} className="flex items-center justify-between px-3 py-2.5 hover:bg-background-elevated">
-                      <div className="min-w-0 flex-1">
-                        <p className="text-sm font-medium text-slate-100 truncate">{c.name}</p>
-                        <p className="text-xs text-slate-500 truncate">{c.email}</p>
-                        {c.client_notes && <p className="text-xs text-amber-400 line-clamp-1 mt-0.5">{c.client_notes}</p>}
-                      </div>
-                      <div className="flex gap-1 ml-2">
-                        <button title="Notas" onClick={() => setNoteClient(c)} className="p-1.5 rounded text-slate-500 hover:text-amber-400 hover:bg-amber-900/20 transition-colors cursor-pointer"><IconNote /></button>
-                        <button title="Desvincular" onClick={() => handleUnassign(c.id)} disabled={removingId === c.id} className="p-1.5 rounded text-slate-500 hover:text-red-400 hover:bg-red-900/20 transition-colors cursor-pointer disabled:opacity-50">
-                          {removingId === c.id ? <Spinner size="sm" /> : <IconX />}
-                        </button>
-                      </div>
-                    </li>
-                  ))}
-                </ul>
-              )}
-            </div>
+                <div className="flex-1 flex flex-col min-h-0">
+                  <ul className="divide-y divide-border rounded-lg border border-border overflow-y-auto flex-1">
+                    {pagedClients.map((c) => (
+                      <li key={c.id} className="flex items-center justify-between px-3 py-2.5 hover:bg-background-elevated">
+                        <div className="min-w-0 flex-1">
+                          <p className="text-sm font-medium text-slate-100 truncate">{c.name}</p>
+                          <p className="text-xs text-slate-500 truncate">{c.email}</p>
+                          {c.client_notes && <p className="text-xs text-amber-400 line-clamp-1 mt-0.5">{c.client_notes}</p>}
+                        </div>
+                        <div className="flex gap-1 ml-2 shrink-0">
+                          <button title="Notas" onClick={() => setNoteClient(c)} className="p-1.5 rounded text-slate-500 hover:text-amber-400 hover:bg-amber-900/20 transition-colors cursor-pointer"><IconNote /></button>
+                          <button title="Desvincular" onClick={() => handleUnassign(c.id)} disabled={removingId === c.id} className="p-1.5 rounded text-slate-500 hover:text-red-400 hover:bg-red-900/20 transition-colors cursor-pointer disabled:opacity-50">
+                            {removingId === c.id ? <Spinner size="sm" /> : <IconX />}
+                          </button>
+                        </div>
+                      </li>
+                    ))}
+                  </ul>
 
-            <ModalFooter>
-              <Button variant="outline" onClick={() => setShowEdit(true)}><IconEdit />Editar empresa</Button>
-              <Button onClick={onClose}>Fechar</Button>
-            </ModalFooter>
-          </div>
-        )}
+                  <Pagination
+                    page={clientsPage}
+                    pageSize={CLIENTS_PAGE_SIZE}
+                    total={detail.client_count}
+                    onPageChange={(p) => setClientsPage(p)}
+                    itemLabel="clientes"
+                    className="pt-3"
+                  />
+                </div>
+              )}
+
+              <ModalFooter>
+                <Button variant="outline" onClick={() => setShowEdit(true)}><IconEdit />Editar empresa</Button>
+                <Button onClick={onClose}>Fechar</Button>
+              </ModalFooter>
+            </>
+          )}
+        </div>
       </Modal>
 
       {showEdit && detail && (
@@ -546,7 +568,10 @@ function CompanyDetailModal({
         <AssignClientModal
           groupId={groupId}
           companyId={company.id}
-          onAssigned={(client) => { setDetail((p) => p ? { ...p, clients: [...p.clients, client], client_count: p.client_count + 1 } : p); onUpdated(); }}
+          onAssigned={(client) => {
+            setDetail((p) => p ? { ...p, clients: [...p.clients, client], client_count: p.client_count + 1 } : p);
+            onUpdated();
+          }}
           onClose={() => setShowAssign(false)}
         />
       )}
@@ -671,7 +696,7 @@ export default function GroupsPage() {
       </aside>
 
       {/* ── Right: Group detail ───────────────────────────── */}
-      <main className="flex-1 overflow-y-auto p-6">
+      <main className="flex-1 overflow-y-auto overflow-x-hidden p-6 min-w-0">
         {!selectedGroup ? (
           <div className="flex flex-col items-center justify-center h-full text-center">
             <div className="text-slate-300 dark:text-slate-700 mb-3">
@@ -700,9 +725,9 @@ export default function GroupsPage() {
 
             {/* Group notes */}
             {groupDetail?.notes && (
-              <div className="mb-5 rounded-lg bg-amber-50 dark:bg-amber-900/20 border border-amber-200 dark:border-amber-800/40 p-3">
+              <div className="mb-5 rounded-lg bg-amber-50 dark:bg-amber-900/20 border border-amber-200 dark:border-amber-800/40 p-3 overflow-hidden">
                 <div className="flex items-center gap-1.5 text-amber-700 dark:text-amber-400 text-xs font-semibold mb-1"><IconNote />Notas do grupo</div>
-                <p className="text-sm text-amber-800 dark:text-amber-300 whitespace-pre-wrap">{groupDetail.notes}</p>
+                <p className="text-sm text-amber-800 dark:text-amber-300 whitespace-pre-wrap break-words">{groupDetail.notes}</p>
               </div>
             )}
 

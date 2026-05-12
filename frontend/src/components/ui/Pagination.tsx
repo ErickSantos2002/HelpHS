@@ -5,7 +5,21 @@ export interface PaginationProps {
   pageSize: number;
   total: number;
   onPageChange: (page: number) => void;
+  itemLabel?: string;
   className?: string;
+}
+
+const WINDOW_SIZE = 5;
+
+function getVisiblePages(current: number, total: number): number[] {
+  const half = Math.floor(WINDOW_SIZE / 2);
+  let start = Math.max(1, current - half);
+  let end = start + WINDOW_SIZE - 1;
+  if (end > total) {
+    end = total;
+    start = Math.max(1, end - WINDOW_SIZE + 1);
+  }
+  return Array.from({ length: end - start + 1 }, (_, i) => start + i);
 }
 
 export function Pagination({
@@ -13,92 +27,81 @@ export function Pagination({
   pageSize,
   total,
   onPageChange,
+  itemLabel = "registros",
   className,
 }: PaginationProps) {
   const totalPages = Math.max(1, Math.ceil(total / pageSize));
   const from = total === 0 ? 0 : (page - 1) * pageSize + 1;
   const to = Math.min(page * pageSize, total);
-
-  const pages = buildPageList(page, totalPages);
+  const hasPrev = page > 1;
+  const hasNext = page < totalPages;
+  const visiblePages = getVisiblePages(page, totalPages);
 
   return (
-    <div
-      className={cn(
-        "flex items-center justify-between gap-4 text-sm",
-        className,
-      )}
-    >
-      {/* Count */}
-      <p className="text-slate-500 shrink-0">
-        {total === 0 ? "Nenhum resultado" : `${from}–${to} de ${total}`}
-      </p>
+    <div className={cn("border-t border-border pt-3", className)}>
+      {/* Desktop */}
+      <div className="hidden md:flex items-center justify-between text-sm text-slate-500 dark:text-slate-400">
+        <span>
+          {total === 0
+            ? `Nenhum ${itemLabel}`
+            : `Mostrando ${from} a ${to} de ${total} ${itemLabel}`}
+        </span>
 
-      {/* Page buttons */}
-      <div className="flex items-center gap-1">
-        <PageButton
-          onClick={() => onPageChange(page - 1)}
-          disabled={page <= 1}
-          aria-label="Página anterior"
-        >
-          ‹
-        </PageButton>
+        <div className="flex items-center gap-1.5">
+          <NavBtn onClick={() => onPageChange(page - 1)} disabled={!hasPrev}>
+            Anterior
+          </NavBtn>
 
-        {pages.map((p, i) =>
-          p === "..." ? (
-            <span key={`ellipsis-${i}`} className="px-2 text-slate-500">
-              …
-            </span>
-          ) : (
-            <PageButton
-              key={p}
-              onClick={() => onPageChange(p as number)}
-              active={p === page}
-            >
-              {p}
-            </PageButton>
-          ),
-        )}
+          <div className="flex items-center gap-1">
+            {visiblePages.map((p) => (
+              <PageBtn key={p} active={p === page} onClick={() => onPageChange(p)}>
+                {p}
+              </PageBtn>
+            ))}
+          </div>
 
-        <PageButton
-          onClick={() => onPageChange(page + 1)}
-          disabled={page >= totalPages}
-          aria-label="Próxima página"
-        >
-          ›
-        </PageButton>
+          <NavBtn onClick={() => onPageChange(page + 1)} disabled={!hasNext}>
+            Próxima
+          </NavBtn>
+        </div>
+      </div>
+
+      {/* Mobile */}
+      <div className="flex flex-col items-center gap-2 text-sm text-slate-500 dark:text-slate-400 md:hidden">
+        <span>
+          {total === 0
+            ? `Nenhum ${itemLabel}`
+            : `${from}–${to} de ${total} ${itemLabel}`}
+        </span>
+        <div className="flex items-center gap-2">
+          <NavBtn onClick={() => onPageChange(page - 1)} disabled={!hasPrev}>‹</NavBtn>
+          <PageBtn active>{page}</PageBtn>
+          <NavBtn onClick={() => onPageChange(page + 1)} disabled={!hasNext}>›</NavBtn>
+        </div>
       </div>
     </div>
   );
 }
 
-// ── PageButton ────────────────────────────────────────────────
+// ── Sub-components ────────────────────────────────────────────
 
-interface PageButtonProps {
-  children: React.ReactNode;
-  onClick: () => void;
-  disabled?: boolean;
-  active?: boolean;
-  "aria-label"?: string;
-}
-
-function PageButton({
+function NavBtn({
   children,
   onClick,
   disabled,
-  active,
-  "aria-label": ariaLabel,
-}: PageButtonProps) {
+}: {
+  children: React.ReactNode;
+  onClick: () => void;
+  disabled?: boolean;
+}) {
   return (
     <button
       onClick={onClick}
       disabled={disabled}
-      aria-label={ariaLabel}
       className={cn(
-        "min-w-[2rem] h-8 px-2 rounded-md text-sm font-medium transition-colors",
-        "disabled:opacity-40 disabled:cursor-not-allowed",
-        active
-          ? "bg-primary text-white"
-          : "text-slate-400 hover:bg-background-elevated hover:text-slate-200",
+        "rounded-lg border border-border bg-background-surface px-3 py-1.5 text-sm font-medium transition-colors cursor-pointer",
+        "text-slate-300 hover:bg-background-elevated hover:text-slate-100",
+        "disabled:cursor-not-allowed disabled:opacity-40",
       )}
     >
       {children}
@@ -106,24 +109,27 @@ function PageButton({
   );
 }
 
-// ── buildPageList ─────────────────────────────────────────────
-// Returns page numbers + "..." ellipsis markers
-
-function buildPageList(current: number, total: number): (number | "...")[] {
-  if (total <= 7) {
-    return Array.from({ length: total }, (_, i) => i + 1);
-  }
-
-  const pages: (number | "...")[] = [1];
-
-  if (current > 3) pages.push("...");
-
-  const start = Math.max(2, current - 1);
-  const end = Math.min(total - 1, current + 1);
-  for (let i = start; i <= end; i++) pages.push(i);
-
-  if (current < total - 2) pages.push("...");
-
-  pages.push(total);
-  return pages;
+function PageBtn({
+  children,
+  active,
+  onClick,
+}: {
+  children?: React.ReactNode;
+  active?: boolean;
+  onClick?: () => void;
+}) {
+  return (
+    <button
+      onClick={onClick}
+      disabled={active}
+      className={cn(
+        "min-w-9 h-8 rounded-lg px-2.5 text-sm font-medium transition-colors cursor-pointer",
+        active
+          ? "bg-primary text-white cursor-default"
+          : "border border-border bg-background-surface text-slate-300 hover:bg-background-elevated hover:text-slate-100",
+      )}
+    >
+      {children}
+    </button>
+  );
 }
