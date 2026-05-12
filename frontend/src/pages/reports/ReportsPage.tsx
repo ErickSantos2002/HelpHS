@@ -13,6 +13,7 @@ import {
 } from "recharts";
 import { FilterSelect, Spinner } from "../../components/ui";
 import { useAuth } from "../../contexts/AuthContext";
+import { useTheme } from "../../contexts/ThemeContext";
 import {
   exportReportsUrl,
   getReports,
@@ -46,12 +47,7 @@ const CATEGORY_LABELS: Record<string, string> = {
 };
 const CSAT_COLORS = ["#ef4444", "#f97316", "#eab308", "#84cc16", "#22c55e"];
 
-const tooltipStyle = {
-  backgroundColor: "#1e2433", border: "1px solid #2d3748",
-  borderRadius: "8px", fontSize: "12px", color: "#e2e8f0",
-};
-const tooltipWrapperStyle = { outline: "none" };
-const tooltipCursor       = { fill: "rgba(255,255,255,0.05)" };
+const tooltipWrapperStyle = { outline: "none", border: "none" };
 
 // ── Icons ─────────────────────────────────────────────────────
 
@@ -91,9 +87,32 @@ function ChartCard({ title, children }: { title: string; children: React.ReactNo
 // ── Global report (admin) ─────────────────────────────────────
 
 function GlobalReport({ data, period }: { data: ReportData; period: number }) {
+  const { theme } = useTheme();
   const totalCsat = data.csat_distribution.reduce((s, d) => s + d.count, 0);
   const criticalSla = data.sla_compliance.find((s) => s.priority === "critical")?.compliance_rate ?? 100;
   const highSla     = data.sla_compliance.find((s) => s.priority === "high")?.compliance_rate ?? 100;
+
+  const tooltipBg     = theme === "dark" ? "#132238" : "#ffffff";
+  const tooltipBorder = theme === "dark" ? "#1E3A5F" : "#e2e8f0";
+  const tooltipColor  = theme === "dark" ? "#f1f5f9" : "#0f172a";
+  const tooltipStyle = {
+    backgroundColor: tooltipBg, border: `1px solid ${tooltipBorder}`,
+    borderRadius: "8px", fontSize: "12px", color: tooltipColor,
+  };
+  const gridColor = theme === "dark" ? "#132238" : "#ffffff";
+
+  function BarTooltip({ active, payload, label, labelFn, valueFn, valueLabel }: {
+    active?: boolean; payload?: { value: number }[]; label?: string;
+    labelFn: (v: string) => string; valueFn: (v: number) => string; valueLabel: string;
+  }) {
+    if (!active || !payload?.length) return null;
+    return (
+      <div style={{ backgroundColor: tooltipBg, border: `1px solid ${tooltipBorder}`, borderRadius: 8, padding: "8px 12px", fontSize: 12, color: tooltipColor, outline: "none" }}>
+        <p style={{ fontWeight: 600, marginBottom: 4 }}>{labelFn(String(label ?? ""))}</p>
+        <p style={{ color: "#6366f1" }}>{valueLabel}: {valueFn(payload[0].value)}</p>
+      </div>
+    );
+  }
 
   function slaColor(rate: number) {
     if (rate >= 90) return "text-success-700 dark:text-success-400";
@@ -149,9 +168,15 @@ function GlobalReport({ data, period }: { data: ReportData; period: number }) {
               <XAxis type="number" tick={{ fontSize: 10, fill: "#94a3b8" }} allowDecimals={false} />
               <YAxis dataKey="category" type="category" tick={{ fontSize: 10, fill: "#94a3b8" }}
                 tickFormatter={(v: string) => CATEGORY_LABELS[v] ?? v} width={60} />
-              <Tooltip contentStyle={tooltipStyle} wrapperStyle={tooltipWrapperStyle}
-                cursor={tooltipCursor} formatter={(v) => [v ?? 0, "Tickets"]}
-                labelFormatter={(v) => CATEGORY_LABELS[String(v)] ?? v} />
+              <Tooltip
+                cursor={{ fill: gridColor }}
+                wrapperStyle={tooltipWrapperStyle}
+                content={({ active, payload, label }) => (
+                  <BarTooltip active={active} payload={payload as { value: number }[]} label={String(label ?? "")}
+                    labelFn={(v) => CATEGORY_LABELS[v] ?? v}
+                    valueFn={(v) => String(v ?? 0)}
+                    valueLabel="Tickets" />
+                )} />
               <Bar dataKey="count" fill="#6366f1" radius={[0, 4, 4, 0]} />
             </BarChart>
           </ResponsiveContainer>
@@ -165,10 +190,15 @@ function GlobalReport({ data, period }: { data: ReportData; period: number }) {
                 tickFormatter={(v: string) => PRIORITY_LABELS[v] ?? v} />
               <YAxis tick={{ fontSize: 10, fill: "#94a3b8" }} domain={[0, 100]}
                 tickFormatter={(v: number) => `${v}%`} />
-              <Tooltip contentStyle={tooltipStyle} wrapperStyle={tooltipWrapperStyle}
-                cursor={tooltipCursor}
-                formatter={(v) => [`${v ?? 0}%`, "Conformidade"]}
-                labelFormatter={(v) => PRIORITY_LABELS[String(v)] ?? v} />
+              <Tooltip
+                cursor={{ fill: gridColor }}
+                wrapperStyle={tooltipWrapperStyle}
+                content={({ active, payload, label }) => (
+                  <BarTooltip active={active} payload={payload as { value: number }[]} label={String(label ?? "")}
+                    labelFn={(v) => PRIORITY_LABELS[v] ?? v}
+                    valueFn={(v) => `${v ?? 0}%`}
+                    valueLabel="Conformidade" />
+                )} />
               <Bar dataKey="compliance_rate" radius={[4, 4, 0, 0]}>
                 {data.sla_compliance.map((entry) => (
                   <Cell key={entry.priority} fill={PRIORITY_COLORS[entry.priority] ?? "#6366f1"} />
@@ -185,9 +215,15 @@ function GlobalReport({ data, period }: { data: ReportData; period: number }) {
               <XAxis dataKey="rating" tick={{ fontSize: 10, fill: "#94a3b8" }}
                 tickFormatter={(v: number) => `★ ${v}`} />
               <YAxis tick={{ fontSize: 10, fill: "#94a3b8" }} allowDecimals={false} />
-              <Tooltip contentStyle={tooltipStyle} wrapperStyle={tooltipWrapperStyle}
-                cursor={tooltipCursor} formatter={(v) => [v ?? 0, "Avaliações"]}
-                labelFormatter={(v) => { const n = Number(v ?? 0); return `${n} estrela${n !== 1 ? "s" : ""}`; }} />
+              <Tooltip
+                cursor={{ fill: gridColor }}
+                wrapperStyle={tooltipWrapperStyle}
+                content={({ active, payload, label }) => (
+                  <BarTooltip active={active} payload={payload as { value: number }[]} label={String(label ?? "")}
+                    labelFn={(v) => { const n = Number(v ?? 0); return `${n} estrela${n !== 1 ? "s" : ""}`; }}
+                    valueFn={(v) => String(v ?? 0)}
+                    valueLabel="Avaliações" />
+                )} />
               <Bar dataKey="count" radius={[4, 4, 0, 0]}>
                 {data.csat_distribution.map((entry) => (
                   <Cell key={entry.rating} fill={CSAT_COLORS[entry.rating - 1]} />
@@ -205,6 +241,15 @@ function GlobalReport({ data, period }: { data: ReportData; period: number }) {
 // ── Technician detail ─────────────────────────────────────────
 
 function TechnicianDetail({ data }: { data: TechnicianDetailReport }) {
+  const { theme } = useTheme();
+  const tooltipBg     = theme === "dark" ? "#132238" : "#ffffff";
+  const tooltipBorder = theme === "dark" ? "#1E3A5F" : "#e2e8f0";
+  const tooltipColor  = theme === "dark" ? "#f1f5f9" : "#0f172a";
+  const tooltipStyle = {
+    backgroundColor: tooltipBg, border: `1px solid ${tooltipBorder}`,
+    borderRadius: "8px", fontSize: "12px", color: tooltipColor,
+  };
+
   function slaColor(rate: number) {
     if (rate >= 90) return "text-success-700 dark:text-success-400";
     if (rate >= 70) return "text-warning-700 dark:text-warning-400";
