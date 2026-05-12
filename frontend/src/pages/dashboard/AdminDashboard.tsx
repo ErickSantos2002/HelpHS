@@ -1,10 +1,10 @@
-import { useEffect, useRef, useState } from "react";
+import { useEffect, useState } from "react";
 import { useNavigate } from "react-router-dom";
 import {
   Area, AreaChart, Bar, BarChart, Cell,
   Pie, PieChart, ResponsiveContainer, Tooltip, XAxis, YAxis,
 } from "recharts";
-import { Alert, Spinner } from "../../components/ui";
+import { Alert, FilterSelect, Spinner } from "../../components/ui";
 import { cn } from "../../lib/utils";
 import { useTheme } from "../../contexts/ThemeContext";
 import { getDashboardStats, type DashboardStats } from "../../services/dashboardService";
@@ -169,13 +169,9 @@ export default function AdminDashboard() {
   // Period state
   const [periodKey, setPeriodKey] = useState<PeriodKey>("mes");
   const [customDates, setCustomDates] = useState(getDefaultCustomDates);
-  const [periodOpen, setPeriodOpen] = useState(false);
-  const periodRef = useRef<HTMLDivElement>(null);
 
   // Technician filter
   const [selectedTechId, setSelectedTechId] = useState<string>("all");
-  const [techOpen, setTechOpen] = useState(false);
-  const techRef = useRef<HTMLDivElement>(null);
 
   // Data
   const [stats, setStats]         = useState<DashboardStats | null>(null);
@@ -208,14 +204,6 @@ export default function AdminDashboard() {
       .catch(() => setTechDetail(null));
   }, [selectedTechId, activePeriod]);
 
-  useEffect(() => {
-    function onClickOutside(e: MouseEvent) {
-      if (periodRef.current && !periodRef.current.contains(e.target as Node)) setPeriodOpen(false);
-      if (techRef.current && !techRef.current.contains(e.target as Node)) setTechOpen(false);
-    }
-    document.addEventListener("mousedown", onClickOutside);
-    return () => document.removeEventListener("mousedown", onClickOutside);
-  }, []);
 
   const tooltipBg     = theme === "dark" ? "#132238" : "#ffffff";
   const tooltipBorder = theme === "dark" ? "#1E3A5F" : "#e2e8f0";
@@ -278,145 +266,58 @@ export default function AdminDashboard() {
     <div className="space-y-5">
 
       {/* ── Header ──────────────────────────────────────────── */}
-      <div className="flex flex-wrap items-start justify-between gap-3">
+      <div className="flex flex-wrap items-center justify-between gap-4 rounded-2xl border border-border/40 bg-background-surface px-5 py-4">
         <div>
-          <h1 className="text-xl font-semibold text-slate-900 dark:text-slate-100">Dashboard</h1>
-          <p className="text-sm text-slate-500 mt-0.5">Visão geral do sistema de atendimento</p>
+          <h1 className="text-xl font-extrabold text-slate-100">Dashboard</h1>
+          <p className="mt-0.5 text-sm text-slate-500">Visão geral do sistema de atendimento</p>
         </div>
 
         <div className="flex flex-wrap items-center gap-2">
-          {/* Technician dropdown */}
+          {/* Technician filter */}
           {techList && (
-            <div className="relative" ref={techRef}>
-              <button
-                onClick={() => setTechOpen((o) => !o)}
-                className={cn(
-                  "flex items-center gap-2 px-3 py-2 text-sm font-medium rounded-lg border transition-colors",
-                  selectedTechId !== "all"
-                    ? "bg-primary/10 border-primary/30 text-primary dark:text-primary"
-                    : "bg-white dark:bg-background-elevated border-slate-200 dark:border-border text-slate-700 dark:text-slate-200 hover:bg-slate-50 dark:hover:bg-background-surface",
-                )}
-              >
-                <svg className="w-4 h-4 shrink-0" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
-                  <path strokeLinecap="round" strokeLinejoin="round" d="M16 7a4 4 0 11-8 0 4 4 0 018 0zM12 14a7 7 0 00-7 7h14a7 7 0 00-7-7z" />
-                </svg>
-                <span className="whitespace-nowrap">
-                  {selectedTechId === "all"
-                    ? "Todos os técnicos"
-                    : techList.technicians.find((t) => t.technician_id === selectedTechId)?.technician_name ?? "Técnico"}
-                </span>
-                <svg className={cn("w-3.5 h-3.5 shrink-0 transition-transform", techOpen && "rotate-180")} fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
-                  <path strokeLinecap="round" strokeLinejoin="round" d="M19 9l-7 7-7-7" />
-                </svg>
-              </button>
-
-              {techOpen && (
-                <div className="absolute right-0 top-full mt-1 z-50 min-w-[200px] rounded-xl border border-slate-200 dark:border-border bg-white dark:bg-background-surface shadow-xl overflow-hidden">
-                  {[{ id: "all", name: "Todos os técnicos" }, ...techList.technicians.map((t) => ({ id: t.technician_id, name: t.technician_name }))].map((item) => (
-                    <button
-                      key={item.id}
-                      onClick={() => { setSelectedTechId(item.id); setTechOpen(false); }}
-                      className={cn(
-                        "w-full flex items-center gap-2.5 px-4 py-2.5 text-sm text-left transition-colors",
-                        selectedTechId === item.id
-                          ? "bg-primary/10 text-primary font-medium"
-                          : "text-slate-700 dark:text-slate-200 hover:bg-slate-50 dark:hover:bg-background-elevated",
-                      )}
-                    >
-                      {selectedTechId === item.id && (
-                        <svg className="w-3.5 h-3.5 text-primary shrink-0" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2.5}>
-                          <path strokeLinecap="round" strokeLinejoin="round" d="M5 13l4 4L19 7" />
-                        </svg>
-                      )}
-                      <span className={selectedTechId !== item.id ? "ml-6" : ""}>{item.name}</span>
-                    </button>
-                  ))}
-                </div>
-              )}
-            </div>
+            <FilterSelect
+              value={selectedTechId}
+              onChange={setSelectedTechId}
+              options={[
+                { value: "all", label: "Todos os técnicos" },
+                ...techList.technicians.map((t) => ({ value: t.technician_id, label: t.technician_name })),
+              ]}
+              placeholder="Todos os técnicos"
+            />
           )}
 
-          {/* Period dropdown */}
-          <div className="relative" ref={periodRef}>
-            <button
-              onClick={() => setPeriodOpen((o) => !o)}
-              className="flex items-center gap-2 px-3 py-2 text-sm font-medium rounded-lg border border-slate-200 dark:border-border bg-white dark:bg-background-elevated text-slate-700 dark:text-slate-200 hover:bg-slate-50 dark:hover:bg-background-surface transition-colors"
-            >
-              <svg className="w-4 h-4 shrink-0 text-slate-400" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
-                <path strokeLinecap="round" strokeLinejoin="round" d="M8 7V3m8 4V3m-9 8h10M5 21h14a2 2 0 002-2V7a2 2 0 00-2-2H5a2 2 0 00-2 2v12a2 2 0 002 2z" />
-              </svg>
-              <span>{PERIOD_OPTIONS.find((p) => p.key === periodKey)?.label ?? "Período"}</span>
-              <svg className={cn("w-3.5 h-3.5 shrink-0 text-slate-400 transition-transform", periodOpen && "rotate-180")} fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
-                <path strokeLinecap="round" strokeLinejoin="round" d="M19 9l-7 7-7-7" />
-              </svg>
-            </button>
+          {/* Period filter */}
+          <FilterSelect
+            value={periodKey}
+            onChange={(v) => setPeriodKey(v as PeriodKey)}
+            options={PERIOD_OPTIONS.map((p) => ({ value: p.key, label: p.label }))}
+            placeholder="Período"
+          />
 
-            {periodOpen && (
-              <div className="absolute right-0 top-full mt-1 z-50 w-48 rounded-xl border border-slate-200 dark:border-border bg-white dark:bg-background-surface shadow-xl overflow-hidden">
-                {PERIOD_OPTIONS.map((p) => (
-                  <button
-                    key={p.key}
-                    onClick={() => { setPeriodKey(p.key); setPeriodOpen(false); }}
-                    className={cn(
-                      "w-full flex items-center gap-2.5 px-4 py-2.5 text-sm text-left transition-colors",
-                      periodKey === p.key
-                        ? "bg-primary/10 text-primary font-medium"
-                        : "text-slate-700 dark:text-slate-200 hover:bg-slate-50 dark:hover:bg-background-elevated",
-                    )}
-                  >
-                    {periodKey === p.key && (
-                      <svg className="w-3.5 h-3.5 text-primary shrink-0" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2.5}>
-                        <path strokeLinecap="round" strokeLinejoin="round" d="M5 13l4 4L19 7" />
-                      </svg>
-                    )}
-                    <span className={periodKey !== p.key ? "ml-6" : ""}>{p.label}</span>
-                  </button>
-                ))}
-              </div>
-            )}
-          </div>
-
-          {/* Custom date inputs — inline, next to dropdown */}
+          {/* Custom date range */}
           {periodKey === "custom" && (
-            <div className="flex items-center gap-2 flex-wrap">
+            <div className="flex h-9 items-center gap-1.5 rounded-lg border border-border/60 bg-background-elevated px-3 text-sm">
+              <svg className="w-3.5 h-3.5 shrink-0 text-slate-400" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}><path strokeLinecap="round" strokeLinejoin="round" d="M8 7V3m8 4V3m-9 8h10M5 21h14a2 2 0 002-2V7a2 2 0 00-2-2H5a2 2 0 00-2 2v12a2 2 0 002 2z" /></svg>
               <input
                 type="date"
                 value={customDates.start}
                 max={customDates.end}
                 onChange={(e) => setCustomDates((d) => ({ ...d, start: e.target.value }))}
-                className="text-sm rounded-lg border border-slate-200 dark:border-border bg-white dark:bg-background-elevated text-slate-700 dark:text-slate-200 px-3 py-2 focus:outline-none focus:ring-2 focus:ring-primary"
+                className="bg-transparent text-slate-300 text-xs outline-none cursor-pointer w-28 [color-scheme:dark]"
               />
-              <span className="text-xs text-slate-400">até</span>
+              <span className="text-slate-500 text-xs">até</span>
               <input
                 type="date"
                 value={customDates.end}
                 min={customDates.start}
                 max={new Date().toISOString().slice(0, 10)}
                 onChange={(e) => setCustomDates((d) => ({ ...d, end: e.target.value }))}
-                className="text-sm rounded-lg border border-slate-200 dark:border-border bg-white dark:bg-background-elevated text-slate-700 dark:text-slate-200 px-3 py-2 focus:outline-none focus:ring-2 focus:ring-primary"
+                className="bg-transparent text-slate-300 text-xs outline-none cursor-pointer w-28 [color-scheme:dark]"
               />
             </div>
           )}
         </div>
       </div>
-
-      {/* Tech filter badge */}
-      {selectedTechId !== "all" && techList && (
-        <div className="flex items-center gap-2 px-4 py-2.5 rounded-xl bg-primary/5 border border-primary/20">
-          <svg className="w-4 h-4 text-primary shrink-0" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
-            <path strokeLinecap="round" strokeLinejoin="round" d="M16 7a4 4 0 11-8 0 4 4 0 018 0zM12 14a7 7 0 00-7 7h14a7 7 0 00-7-7z" />
-          </svg>
-          <p className="text-sm text-primary font-medium">
-            Exibindo dados de: <span className="font-bold">{techList.technicians.find((t) => t.technician_id === selectedTechId)?.technician_name}</span>
-          </p>
-          <button
-            onClick={() => setSelectedTechId("all")}
-            className="ml-auto text-xs text-primary/70 hover:text-primary transition-colors"
-          >
-            Limpar filtro ×
-          </button>
-        </div>
-      )}
 
       {/* ── KPI Row ─────────────────────────────────────────── */}
       <div className="grid grid-cols-2 sm:grid-cols-3 lg:grid-cols-6 gap-4">

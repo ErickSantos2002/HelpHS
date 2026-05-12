@@ -284,10 +284,10 @@ export default function TicketListPage() {
     <div className="h-full flex flex-col gap-4 min-h-0">
 
       {/* ── Top bar ─────────────────────────────────────────── */}
-      <div className="flex flex-wrap items-center justify-between gap-3 shrink-0">
+      <div className="flex flex-wrap items-center justify-between gap-4 rounded-2xl border border-border/40 bg-background-surface px-5 py-4 shrink-0">
         <div>
-          <h1 className="text-xl font-semibold text-slate-900 dark:text-slate-100">Tickets</h1>
-          <p className="text-sm text-slate-500 mt-0.5">
+          <h1 className="text-xl font-extrabold text-slate-100">Tickets</h1>
+          <p className="mt-0.5 text-sm text-slate-500">
             {totalShown} ticket{totalShown !== 1 ? "s" : ""} encontrado{totalShown !== 1 ? "s" : ""}
           </p>
         </div>
@@ -304,10 +304,10 @@ export default function TicketListPage() {
               placeholder="Buscar…"
               value={search}
               onChange={(e) => setSearch(e.target.value)}
-              className="pl-9 pr-3 py-2 text-sm w-52 rounded-lg border border-slate-200 dark:border-border bg-white dark:bg-background-elevated text-slate-700 dark:text-slate-200 placeholder-slate-400 focus:outline-none focus:ring-2 focus:ring-primary"
+              className="pl-9 pr-8 py-2 text-sm w-52 rounded-lg border border-border/60 bg-background-elevated text-slate-200 placeholder-slate-500 focus:outline-none focus:ring-2 focus:ring-primary focus:border-transparent transition-colors"
             />
             {search && (
-              <button onClick={() => setSearch("")} className="absolute right-2.5 top-1/2 -translate-y-1/2 text-slate-400 hover:text-slate-600 cursor-pointer">
+              <button onClick={() => setSearch("")} className="absolute right-2.5 top-1/2 -translate-y-1/2 text-slate-400 hover:text-slate-200 cursor-pointer">
                 <svg className="w-3.5 h-3.5" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2.5}><path strokeLinecap="round" strokeLinejoin="round" d="M6 18L18 6M6 6l12 12" /></svg>
               </button>
             )}
@@ -341,7 +341,7 @@ export default function TicketListPage() {
           {hasFilters && (
             <button
               onClick={() => { setSearch(""); setFilterPriority(""); setFilterAssignee("all"); }}
-              className="flex items-center gap-1.5 text-xs font-medium text-slate-500 hover:text-danger transition-colors cursor-pointer px-2 py-2 rounded-lg border border-slate-200 dark:border-border hover:border-danger/30"
+              className="flex items-center gap-1.5 text-xs font-medium text-slate-500 hover:text-danger transition-colors cursor-pointer px-2 py-2 rounded-lg border border-border/40 hover:border-danger/30"
             >
               <svg className="w-3.5 h-3.5" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2.5}><path strokeLinecap="round" strokeLinejoin="round" d="M6 18L18 6M6 6l12 12" /></svg>
               Limpar

@@ -1,9 +1,9 @@
-import { useEffect, useRef, useState } from "react";
+import { useEffect, useState } from "react";
 import { useNavigate } from "react-router-dom";
 import {
   Area, AreaChart, ResponsiveContainer, Tooltip, XAxis, YAxis,
 } from "recharts";
-import { Alert, Spinner, StatusBadge } from "../../components/ui";
+import { Alert, FilterSelect, Spinner, StatusBadge } from "../../components/ui";
 import { cn } from "../../lib/utils";
 import { useAuth } from "../../contexts/AuthContext";
 import { useTheme } from "../../contexts/ThemeContext";
@@ -156,8 +156,6 @@ export default function TechnicianDashboard() {
   // Period state
   const [periodKey, setPeriodKey] = useState<PeriodKey>("mes");
   const [customDates, setCustomDates] = useState(getDefaultCustomDates);
-  const [periodOpen, setPeriodOpen] = useState(false);
-  const periodRef = useRef<HTMLDivElement>(null);
 
   const activePeriod = periodKey === "custom"
     ? customDays(customDates.start, customDates.end)
@@ -174,13 +172,6 @@ export default function TechnicianDashboard() {
   const [loading, setLoading]     = useState(true);
   const [error, setError]         = useState<string | null>(null);
 
-  useEffect(() => {
-    function onClickOutside(e: MouseEvent) {
-      if (periodRef.current && !periodRef.current.contains(e.target as Node)) setPeriodOpen(false);
-    }
-    document.addEventListener("mousedown", onClickOutside);
-    return () => document.removeEventListener("mousedown", onClickOutside);
-  }, []);
 
   useEffect(() => {
     if (!user) return;
@@ -253,73 +244,42 @@ export default function TechnicianDashboard() {
     <div className="space-y-5">
 
       {/* ── Header ──────────────────────────────────────────── */}
-      <div className="flex items-start justify-between gap-4 flex-wrap">
+      <div className="flex flex-wrap items-center justify-between gap-4 rounded-2xl border border-border/40 bg-background-surface px-5 py-4">
         <div>
-          <h1 className="text-xl font-semibold text-slate-900 dark:text-slate-100">Dashboard</h1>
-          <p className="text-sm text-slate-500 mt-0.5">
-            Olá, <span className="font-medium text-slate-700 dark:text-slate-300">{user?.name?.split(" ")[0]}</span>! Aqui está sua fila de hoje.
+          <h1 className="text-xl font-extrabold text-slate-100">Dashboard</h1>
+          <p className="mt-0.5 text-sm text-slate-500">
+            Olá, <span className="font-semibold text-slate-300">{user?.name?.split(" ")[0]}</span>! Aqui está sua fila de hoje.
           </p>
         </div>
 
         <div className="flex flex-wrap items-center gap-2">
-          {/* Period dropdown */}
-          <div className="relative" ref={periodRef}>
-            <button
-              onClick={() => setPeriodOpen((o) => !o)}
-              className="flex items-center gap-2 px-3 py-2 text-sm font-medium rounded-lg border border-slate-200 dark:border-border bg-white dark:bg-background-elevated text-slate-700 dark:text-slate-200 hover:bg-slate-50 dark:hover:bg-background-surface transition-colors"
-            >
-              <svg className="w-4 h-4 shrink-0 text-slate-400" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
-                <path strokeLinecap="round" strokeLinejoin="round" d="M8 7V3m8 4V3m-9 8h10M5 21h14a2 2 0 002-2V7a2 2 0 00-2-2H5a2 2 0 00-2 2v12a2 2 0 002 2z" />
-              </svg>
-              <span>{periodLabel}</span>
-              <svg className={cn("w-3.5 h-3.5 shrink-0 text-slate-400 transition-transform", periodOpen && "rotate-180")} fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
-                <path strokeLinecap="round" strokeLinejoin="round" d="M19 9l-7 7-7-7" />
-              </svg>
-            </button>
+          {/* Period filter */}
+          <FilterSelect
+            value={periodKey}
+            onChange={(v) => setPeriodKey(v as PeriodKey)}
+            options={PERIOD_OPTIONS.map((p) => ({ value: p.key, label: p.label }))}
+            placeholder="Período"
+          />
 
-            {periodOpen && (
-              <div className="absolute right-0 top-full mt-1 z-50 w-48 rounded-xl border border-slate-200 dark:border-border bg-white dark:bg-background-surface shadow-xl overflow-hidden">
-                {PERIOD_OPTIONS.map((p) => (
-                  <button
-                    key={p.key}
-                    onClick={() => { setPeriodKey(p.key); setPeriodOpen(false); }}
-                    className={cn(
-                      "w-full flex items-center gap-2.5 px-4 py-2.5 text-sm text-left transition-colors",
-                      periodKey === p.key
-                        ? "bg-primary/10 text-primary font-medium"
-                        : "text-slate-700 dark:text-slate-200 hover:bg-slate-50 dark:hover:bg-background-elevated",
-                    )}
-                  >
-                    {periodKey === p.key && (
-                      <svg className="w-3.5 h-3.5 text-primary shrink-0" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2.5}>
-                        <path strokeLinecap="round" strokeLinejoin="round" d="M5 13l4 4L19 7" />
-                      </svg>
-                    )}
-                    <span className={periodKey !== p.key ? "ml-6" : ""}>{p.label}</span>
-                  </button>
-                ))}
-              </div>
-            )}
-          </div>
-
-          {/* Custom date inputs — inline */}
+          {/* Custom date range */}
           {periodKey === "custom" && (
-            <div className="flex items-center gap-2 flex-wrap">
+            <div className="flex h-9 items-center gap-1.5 rounded-lg border border-border/60 bg-background-elevated px-3 text-sm">
+              <svg className="w-3.5 h-3.5 shrink-0 text-slate-400" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}><path strokeLinecap="round" strokeLinejoin="round" d="M8 7V3m8 4V3m-9 8h10M5 21h14a2 2 0 002-2V7a2 2 0 00-2-2H5a2 2 0 00-2 2v12a2 2 0 002 2z" /></svg>
               <input
                 type="date"
                 value={customDates.start}
                 max={customDates.end}
                 onChange={(e) => setCustomDates((d) => ({ ...d, start: e.target.value }))}
-                className="text-sm rounded-lg border border-slate-200 dark:border-border bg-white dark:bg-background-elevated text-slate-700 dark:text-slate-200 px-3 py-2 focus:outline-none focus:ring-2 focus:ring-primary"
+                className="bg-transparent text-slate-300 text-xs outline-none cursor-pointer w-28 [color-scheme:dark]"
               />
-              <span className="text-xs text-slate-400">até</span>
+              <span className="text-slate-500 text-xs">até</span>
               <input
                 type="date"
                 value={customDates.end}
                 min={customDates.start}
                 max={new Date().toISOString().slice(0, 10)}
                 onChange={(e) => setCustomDates((d) => ({ ...d, end: e.target.value }))}
-                className="text-sm rounded-lg border border-slate-200 dark:border-border bg-white dark:bg-background-elevated text-slate-700 dark:text-slate-200 px-3 py-2 focus:outline-none focus:ring-2 focus:ring-primary"
+                className="bg-transparent text-slate-300 text-xs outline-none cursor-pointer w-28 [color-scheme:dark]"
               />
             </div>
           )}
