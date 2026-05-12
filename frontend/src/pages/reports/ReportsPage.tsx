@@ -26,10 +26,11 @@ import {
 // ── Constants ─────────────────────────────────────────────────
 
 const PERIOD_OPTIONS = [
-  { value: "7",  label: "Últimos 7 dias"  },
-  { value: "14", label: "Últimos 14 dias" },
-  { value: "30", label: "Últimos 30 dias" },
-  { value: "90", label: "Últimos 90 dias" },
+  { value: "7",           label: "Últimos 7 dias"   },
+  { value: "14",          label: "Últimos 14 dias"  },
+  { value: "30",          label: "Últimos 30 dias"  },
+  { value: "90",          label: "Últimos 90 dias"  },
+  { value: "personalizado", label: "Personalizado"  },
 ];
 
 const PRIORITY_COLORS: Record<string, string> = {
@@ -49,15 +50,17 @@ const tooltipStyle = {
   backgroundColor: "#1e2433", border: "1px solid #2d3748",
   borderRadius: "8px", fontSize: "12px", color: "#e2e8f0",
 };
+const tooltipWrapperStyle = { outline: "none" };
+const tooltipCursor       = { fill: "rgba(255,255,255,0.05)" };
 
 // ── Icons ─────────────────────────────────────────────────────
 
 const IC = {
   Download: <svg className="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}><path strokeLinecap="round" strokeLinejoin="round" d="M4 16v1a3 3 0 003 3h10a3 3 0 003-3v-1m-4-4l-4 4m0 0l-4-4m4 4V4" /></svg>,
   ChevLeft: <svg className="w-3.5 h-3.5" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2.5}><path strokeLinecap="round" strokeLinejoin="round" d="M15 19l-7-7 7-7" /></svg>,
-  TrendUp: <svg className="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}><path strokeLinecap="round" strokeLinejoin="round" d="M13 7h8m0 0v8m0-8l-8 8-4-4-6 6" /></svg>,
   Chart: <svg className="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}><path strokeLinecap="round" strokeLinejoin="round" d="M9 19v-6a2 2 0 00-2-2H5a2 2 0 00-2 2v6a2 2 0 002 2h2a2 2 0 002-2zm0 0V9a2 2 0 012-2h2a2 2 0 012 2v10m-6 0a2 2 0 002 2h2a2 2 0 002-2m0 0V5a2 2 0 012-2h2a2 2 0 012 2v14a2 2 0 01-2 2h-2a2 2 0 01-2-2z" /></svg>,
   Users: <svg className="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}><path strokeLinecap="round" strokeLinejoin="round" d="M17 20h5v-2a3 3 0 00-5.356-1.857M17 20H7m10 0v-2c0-.656-.126-1.283-.356-1.857M7 20H2v-2a3 3 0 015.356-1.857M7 20v-2c0-.656.126-1.283.356-1.857m0 0a5.002 5.002 0 019.288 0M15 7a3 3 0 11-6 0 3 3 0 016 0z" /></svg>,
+  Calendar: <svg className="w-3.5 h-3.5" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}><path strokeLinecap="round" strokeLinejoin="round" d="M8 7V3m8 4V3m-9 8h10M5 21h14a2 2 0 002-2V7a2 2 0 00-2-2H5a2 2 0 00-2 2v12a2 2 0 002 2z" /></svg>,
 };
 
 // ── Shared sub-components ─────────────────────────────────────
@@ -128,7 +131,7 @@ function GlobalReport({ data, period }: { data: ReportData; period: number }) {
               tickFormatter={(v: string) => v.slice(5)}
               interval={Math.max(1, Math.floor(data.tickets_by_day.length / 6))} />
             <YAxis tick={{ fontSize: 10, fill: "#94a3b8" }} allowDecimals={false} />
-            <Tooltip contentStyle={tooltipStyle}
+            <Tooltip contentStyle={tooltipStyle} wrapperStyle={tooltipWrapperStyle}
               labelFormatter={(v) => `Data: ${v}`} formatter={(v) => [v ?? 0, "Tickets"]} />
             <Area type="monotone" dataKey="count" stroke="#6366f1" strokeWidth={2}
               fill="url(#ticketGradient)" dot={false} />
@@ -146,7 +149,8 @@ function GlobalReport({ data, period }: { data: ReportData; period: number }) {
               <XAxis type="number" tick={{ fontSize: 10, fill: "#94a3b8" }} allowDecimals={false} />
               <YAxis dataKey="category" type="category" tick={{ fontSize: 10, fill: "#94a3b8" }}
                 tickFormatter={(v: string) => CATEGORY_LABELS[v] ?? v} width={60} />
-              <Tooltip contentStyle={tooltipStyle} formatter={(v) => [v ?? 0, "Tickets"]}
+              <Tooltip contentStyle={tooltipStyle} wrapperStyle={tooltipWrapperStyle}
+                cursor={tooltipCursor} formatter={(v) => [v ?? 0, "Tickets"]}
                 labelFormatter={(v) => CATEGORY_LABELS[String(v)] ?? v} />
               <Bar dataKey="count" fill="#6366f1" radius={[0, 4, 4, 0]} />
             </BarChart>
@@ -161,7 +165,8 @@ function GlobalReport({ data, period }: { data: ReportData; period: number }) {
                 tickFormatter={(v: string) => PRIORITY_LABELS[v] ?? v} />
               <YAxis tick={{ fontSize: 10, fill: "#94a3b8" }} domain={[0, 100]}
                 tickFormatter={(v: number) => `${v}%`} />
-              <Tooltip contentStyle={tooltipStyle}
+              <Tooltip contentStyle={tooltipStyle} wrapperStyle={tooltipWrapperStyle}
+                cursor={tooltipCursor}
                 formatter={(v) => [`${v ?? 0}%`, "Conformidade"]}
                 labelFormatter={(v) => PRIORITY_LABELS[String(v)] ?? v} />
               <Bar dataKey="compliance_rate" radius={[4, 4, 0, 0]}>
@@ -180,7 +185,8 @@ function GlobalReport({ data, period }: { data: ReportData; period: number }) {
               <XAxis dataKey="rating" tick={{ fontSize: 10, fill: "#94a3b8" }}
                 tickFormatter={(v: number) => `★ ${v}`} />
               <YAxis tick={{ fontSize: 10, fill: "#94a3b8" }} allowDecimals={false} />
-              <Tooltip contentStyle={tooltipStyle} formatter={(v) => [v ?? 0, "Avaliações"]}
+              <Tooltip contentStyle={tooltipStyle} wrapperStyle={tooltipWrapperStyle}
+                cursor={tooltipCursor} formatter={(v) => [v ?? 0, "Avaliações"]}
                 labelFormatter={(v) => { const n = Number(v ?? 0); return `${n} estrela${n !== 1 ? "s" : ""}`; }} />
               <Bar dataKey="count" radius={[4, 4, 0, 0]}>
                 {data.csat_distribution.map((entry) => (
@@ -249,7 +255,7 @@ function TechnicianDetail({ data }: { data: TechnicianDetailReport }) {
               tickFormatter={(v: string) => v.slice(5)}
               interval={Math.max(1, Math.floor(data.tickets_by_day.length / 6))} />
             <YAxis tick={{ fontSize: 10, fill: "#94a3b8" }} allowDecimals={false} />
-            <Tooltip contentStyle={tooltipStyle}
+            <Tooltip contentStyle={tooltipStyle} wrapperStyle={tooltipWrapperStyle}
               labelFormatter={(v) => `Data: ${v}`} formatter={(v) => [v ?? 0, "Tickets"]} />
             <Area type="monotone" dataKey="count" stroke="#22c55e" strokeWidth={2}
               fill="url(#techGradient)" dot={false} />
@@ -360,8 +366,10 @@ export default function ReportsPage() {
   const isAdmin      = user?.role === "admin";
   const isTechnician = user?.role === "technician";
 
-  const [period, setPeriod]   = useState("30");
-  const [tab,    setTab]      = useState<Tab>(isAdmin ? "global" : "technicians");
+  const [period,      setPeriod]      = useState("30");
+  const [customStart, setCustomStart] = useState("");
+  const [customEnd,   setCustomEnd]   = useState("");
+  const [tab,         setTab]         = useState<Tab>(isAdmin ? "global" : "technicians");
 
   const [globalData,        setGlobalData]        = useState<ReportData | null>(null);
   const [globalLoading,     setGlobalLoading]     = useState(false);
@@ -373,7 +381,9 @@ export default function ReportsPage() {
   const [techDetail,        setTechDetail]        = useState<TechnicianDetailReport | null>(null);
   const [techDetailLoading, setTechDetailLoading] = useState(false);
 
-  const p = Number(period);
+  const p = period === "personalizado" && customStart && customEnd
+    ? Math.max(1, Math.ceil((new Date(customEnd).getTime() - new Date(customStart).getTime()) / 86400000))
+    : Number(period) || 30;
 
   useEffect(() => {
     if (tab !== "global" || !isAdmin) return;
@@ -422,12 +432,12 @@ export default function ReportsPage() {
         <div className="flex flex-wrap items-center gap-2">
           {/* Tabs inline (admin only) */}
           {isAdmin && (
-            <div className="flex items-center gap-1 rounded-xl border border-border/40 bg-background-elevated p-1">
+            <div className="flex h-9 items-center gap-0.5 rounded-xl border border-border/40 bg-background-elevated px-1">
               {tabs.map((t) => (
                 <button
                   key={t.key}
                   onClick={() => setTab(t.key)}
-                  className={`flex items-center gap-2 rounded-lg px-4 py-2 text-sm font-medium transition-all cursor-pointer ${
+                  className={`flex h-7 items-center gap-2 rounded-lg px-4 text-sm font-medium transition-all cursor-pointer ${
                     tab === t.key
                       ? "bg-primary text-white shadow-sm"
                       : "text-slate-400 hover:text-slate-200 hover:bg-background-surface"
@@ -446,6 +456,28 @@ export default function ReportsPage() {
             options={PERIOD_OPTIONS}
             placeholder="Período"
           />
+
+          {/* Date range inputs — shown when "Personalizado" is selected */}
+          {period === "personalizado" && (
+            <div className="flex h-9 items-center gap-1.5 rounded-lg border border-border/60 bg-background-elevated px-3 text-sm">
+              <span className="shrink-0 text-slate-400">{IC.Calendar}</span>
+              <input
+                type="date"
+                value={customStart}
+                max={customEnd || undefined}
+                onChange={(e) => setCustomStart(e.target.value)}
+                className="bg-transparent text-slate-300 text-xs outline-none cursor-pointer w-28 [color-scheme:dark]"
+              />
+              <span className="text-slate-500 text-xs">até</span>
+              <input
+                type="date"
+                value={customEnd}
+                min={customStart || undefined}
+                onChange={(e) => setCustomEnd(e.target.value)}
+                className="bg-transparent text-slate-300 text-xs outline-none cursor-pointer w-28 [color-scheme:dark]"
+              />
+            </div>
+          )}
 
           {isAdmin && (
             <>

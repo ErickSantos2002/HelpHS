@@ -54,7 +54,7 @@ export function FilterSelect({ value, onChange, options, placeholder = "Todos", 
         type="button"
         onClick={() => setOpen((v) => !v)}
         className={cn(
-          "flex items-center gap-2 rounded-lg border px-3 py-2 text-sm font-medium transition-all cursor-pointer select-none",
+          "flex h-9 items-center gap-2 rounded-lg border px-3 text-sm font-medium transition-all cursor-pointer select-none",
           "bg-background-surface dark:bg-background-elevated",
           open
             ? "border-primary ring-2 ring-primary/20 text-slate-100"
