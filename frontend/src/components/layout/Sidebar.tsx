@@ -84,6 +84,13 @@ function IconGroups() {
     </svg>
   );
 }
+function IconTag() {
+  return (
+    <svg className="w-5 h-5 shrink-0" aria-hidden="true" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={1.75}>
+      <path strokeLinecap="round" strokeLinejoin="round" d="M7 7h.01M7 3h5.586a1 1 0 01.707.293l7.414 7.414a2 2 0 010 2.828l-5.586 5.586a2 2 0 01-2.828 0L4.879 11.707A2 2 0 014.293 11.1L3 5.414A2 2 0 014.414 4L7 3z" />
+    </svg>
+  );
+}
 
 // ── Nav structure ─────────────────────────────────────────────
 
@@ -111,9 +118,8 @@ const NAV_GROUPS: NavGroup[] = [
   {
     label: "Gestão",
     items: [
-      { label: "Relatórios",    path: "/reports",  icon: <IconChart />,    roles: ["admin", "technician"] },
-      { label: "Grupos",        path: "/grupos",   icon: <IconGroups />,   roles: ["admin"] },
-      { label: "Configurações", path: "/settings", icon: <IconSettings />, roles: ["admin", "technician"] },
+      { label: "Relatórios", path: "/reports", icon: <IconChart />,  roles: ["admin", "technician"] },
+      { label: "Grupos",     path: "/grupos",  icon: <IconGroups />, roles: ["admin"] },
     ],
   },
   {
@@ -121,6 +127,7 @@ const NAV_GROUPS: NavGroup[] = [
     items: [
       { label: "Usuários",    path: "/users",      icon: <IconUsers />,  roles: ["admin"] },
       { label: "Produtos",    path: "/products",   icon: <IconBox />,    roles: ["admin"] },
+      { label: "Etiquetas",   path: "/etiquetas",  icon: <IconTag />,    roles: ["admin"] },
       { label: "Config. SLA", path: "/sla-config", icon: <IconClock />,  roles: ["admin"] },
       { label: "Audit Logs",  path: "/audit-logs", icon: <IconShield />, roles: ["admin"] },
     ],

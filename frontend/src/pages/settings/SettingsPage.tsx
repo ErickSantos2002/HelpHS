@@ -7,6 +7,7 @@ import {
   Input,
   Modal,
   ModalFooter,
+  Pagination,
   Spinner,
 } from "../../components/ui";
 import { TagBadge } from "../../components/ui";
@@ -18,6 +19,23 @@ import {
   updateTag,
   type Tag,
 } from "../../services/tagService";
+
+// ── Icons ─────────────────────────────────────────────────────
+
+function IconEdit() {
+  return (
+    <svg className="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
+      <path strokeLinecap="round" strokeLinejoin="round" d="M11 5H6a2 2 0 00-2 2v11a2 2 0 002 2h11a2 2 0 002-2v-5m-1.414-9.414a2 2 0 112.828 2.828L11.828 15H9v-2.828l8.586-8.586z" />
+    </svg>
+  );
+}
+function IconTrash() {
+  return (
+    <svg className="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
+      <path strokeLinecap="round" strokeLinejoin="round" d="M19 7l-.867 12.142A2 2 0 0116.138 21H7.862a2 2 0 01-1.995-1.858L5 7m5 4v6m4-6v6m1-10V4a1 1 0 00-1-1h-4a1 1 0 00-1 1v3M4 7h16" />
+    </svg>
+  );
+}
 
 // ── Color picker ──────────────────────────────────────────────
 
@@ -74,6 +92,8 @@ function ColorPicker({
 
 // ── Tags section ──────────────────────────────────────────────
 
+const PAGE_SIZE = 10;
+
 function TagsSection() {
   const { user } = useAuth();
   const isAdmin = user?.role === "admin";
@@ -82,6 +102,7 @@ function TagsSection() {
   const [tags, setTags] = useState<Tag[]>([]);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
+  const [page, setPage] = useState(1);
 
   const [createModal, setCreateModal] = useState(false);
   const [newName, setNewName] = useState("");
@@ -212,34 +233,44 @@ function TagsSection() {
             )}
           </p>
         ) : (
-          <div className="divide-y divide-border">
-            {tags.map((tag) => (
-              <div
-                key={tag.id}
-                className="flex items-center justify-between px-4 py-3"
-              >
-                <TagBadge name={tag.name} color={tag.color} />
-                {canCreate && (
-                  <div className="flex items-center gap-2">
-                    <Button
-                      variant="ghost"
-                      size="sm"
-                      onClick={() => openEdit(tag)}
-                    >
-                      Editar
-                    </Button>
-                    <Button
-                      variant="ghost"
-                      size="sm"
-                      onClick={() => setDeleteTarget(tag)}
-                      className="text-danger hover:text-danger"
-                    >
-                      Excluir
-                    </Button>
-                  </div>
-                )}
-              </div>
-            ))}
+          <div>
+            <div className="divide-y divide-border" style={{ minHeight: 520 }}>
+              {tags.slice((page - 1) * PAGE_SIZE, page * PAGE_SIZE).map((tag) => (
+                <div
+                  key={tag.id}
+                  className="flex items-center justify-between px-4 py-3"
+                >
+                  <TagBadge name={tag.name} color={tag.color} />
+                  {canCreate && (
+                    <div className="flex items-center gap-1">
+                      <button
+                        onClick={() => openEdit(tag)}
+                        title="Editar"
+                        className="p-1.5 rounded-lg text-slate-400 hover:text-primary hover:bg-primary/10 transition-colors cursor-pointer"
+                      >
+                        <IconEdit />
+                      </button>
+                      <button
+                        onClick={() => setDeleteTarget(tag)}
+                        title="Excluir"
+                        className="p-1.5 rounded-lg text-slate-400 hover:text-red-400 hover:bg-red-900/20 transition-colors cursor-pointer"
+                      >
+                        <IconTrash />
+                      </button>
+                    </div>
+                  )}
+                </div>
+              ))}
+            </div>
+            <div className="px-4 py-2 border-t border-border">
+              <Pagination
+                page={page}
+                pageSize={PAGE_SIZE}
+                total={tags.length}
+                onPageChange={setPage}
+                itemLabel="etiquetas"
+              />
+            </div>
           </div>
         )}
       </Card>
@@ -366,15 +397,13 @@ export default function SettingsPage() {
   return (
     <div className="space-y-8">
       <div>
-        <h1 className="text-2xl font-bold text-slate-100">Configurações</h1>
+        <h1 className="text-2xl font-bold text-slate-100">Etiquetas</h1>
         <p className="text-slate-400 text-sm mt-0.5">
-          Gerencie as configurações do sistema.
+          Classifique tickets com etiquetas coloridas para facilitar a organização.
         </p>
       </div>
 
-      <section className="space-y-3">
-        <TagsSection />
-      </section>
+      <TagsSection />
     </div>
   );
 }

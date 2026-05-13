@@ -775,6 +775,7 @@ function CompanyDetailModal({
 
 export default function GroupsPage() {
   const [groups, setGroups] = useState<GroupResponse[]>([]);
+  const [groupSearch, setGroupSearch] = useState("");
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState("");
   const [selectedGroup, setSelectedGroup] = useState<GroupResponse | null>(null);
@@ -874,6 +875,21 @@ export default function GroupsPage() {
           </button>
         </div>
 
+        <div className="px-3 py-2 border-b border-slate-200 dark:border-border">
+          <div className="relative">
+            <svg className="absolute left-2.5 top-1/2 -translate-y-1/2 w-3.5 h-3.5 text-slate-400 pointer-events-none" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
+              <path strokeLinecap="round" strokeLinejoin="round" d="M21 21l-4.35-4.35M17 11A6 6 0 111 11a6 6 0 0116 0z" />
+            </svg>
+            <input
+              type="text"
+              placeholder="Pesquisar grupos..."
+              value={groupSearch}
+              onChange={(e) => setGroupSearch(e.target.value)}
+              className="w-full pl-8 pr-3 py-1.5 text-xs rounded-md bg-slate-100 dark:bg-background-elevated border border-transparent focus:border-primary focus:outline-none text-slate-700 dark:text-slate-300 placeholder-slate-400"
+            />
+          </div>
+        </div>
+
         {error && <Alert variant="error" className="m-3">{error}</Alert>}
 
         <div className="flex-1 overflow-y-auto py-2">
@@ -886,8 +902,16 @@ export default function GroupsPage() {
                 Criar primeiro grupo
               </button>
             </div>
-          ) : (
-            groups.map((g) => (
+          ) : (() => {
+            const filtered = groups.filter((g) =>
+              g.name.toLowerCase().includes(groupSearch.toLowerCase())
+            );
+            if (filtered.length === 0) return (
+              <div className="text-center px-4 py-8 text-sm text-slate-500">
+                Nenhum resultado para "{groupSearch}".
+              </div>
+            );
+            return filtered.map((g) => (
               <button
                 key={g.id}
                 onClick={() => handleSelectGroup(g)}
@@ -904,8 +928,8 @@ export default function GroupsPage() {
                 </div>
                 <IconChevronRight />
               </button>
-            ))
-          )}
+            ));
+          })()}
         </div>
       </aside>
 

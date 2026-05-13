@@ -83,13 +83,13 @@ function App() {
                 {/* Admin + Technician */}
                 <Route element={<RoleGuard roles={["admin", "technician"]} />}>
                   <Route path="/reports" element={<ReportsPage />} />
-                  <Route path="/settings" element={<SettingsPage />} />
                 </Route>
 
                 {/* Admin only */}
                 <Route element={<RoleGuard roles={["admin"]} />}>
                   <Route path="/users" element={<UsersPage />} />
                   <Route path="/products" element={<ProductsPage />} />
+                  <Route path="/etiquetas" element={<SettingsPage />} />
                   <Route path="/sla-config" element={<SlaConfigPage />} />
                   <Route path="/audit-logs" element={<AuditLogsPage />} />
                   <Route path="/grupos" element={<GroupsPage />} />
