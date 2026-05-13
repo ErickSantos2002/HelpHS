@@ -94,6 +94,35 @@ const equipmentSchema = z.object({
 type ProductValues = z.infer<typeof productSchema>;
 type EquipmentValues = z.infer<typeof equipmentSchema>;
 
+// ── FilterTabs ────────────────────────────────────────────────
+
+type FilterTab = "all" | "active" | "inactive";
+
+function FilterTabs({ value, onChange }: { value: FilterTab; onChange: (v: FilterTab) => void }) {
+  const tabs: { key: FilterTab; label: string }[] = [
+    { key: "all", label: "Todos" },
+    { key: "active", label: "Ativos" },
+    { key: "inactive", label: "Inativos" },
+  ];
+  return (
+    <div className="flex items-center gap-0.5 bg-background-elevated border border-border/60 rounded-lg p-0.5">
+      {tabs.map((t) => (
+        <button
+          key={t.key}
+          onClick={() => onChange(t.key)}
+          className={`px-3 py-1 rounded-md text-xs font-medium transition-colors cursor-pointer ${
+            value === t.key
+              ? "bg-primary/20 text-primary"
+              : "text-slate-400 hover:text-slate-200"
+          }`}
+        >
+          {t.label}
+        </button>
+      ))}
+    </div>
+  );
+}
+
 // ── ActivePill ────────────────────────────────────────────────
 
 function ActivePill({
@@ -255,7 +284,7 @@ export default function ProductsPage() {
   const [productsLoading, setProductsLoading] = useState(true);
   const [productsError, setProductsError] = useState<string | null>(null);
   const [productSearch, setProductSearch] = useState("");
-  const [showInactive, setShowInactive] = useState(false);
+  const [productFilter, setProductFilter] = useState<FilterTab>("active");
   const [productPage, setProductPage] = useState(1);
   const [togglingProduct, setTogglingProduct] = useState<string | null>(null);
 
@@ -270,7 +299,7 @@ export default function ProductsPage() {
   const [equipLoading, setEquipLoading] = useState(false);
   const [equipError, setEquipError] = useState<string | null>(null);
   const [equipPage, setEquipPage] = useState(1);
-  const [showInactiveEquip, setShowInactiveEquip] = useState(false);
+  const [equipFilter, setEquipFilter] = useState<FilterTab>("active");
   const [togglingEquip, setTogglingEquip] = useState<string | null>(null);
 
   // Equipment modals
@@ -282,7 +311,7 @@ export default function ProductsPage() {
     setProductsError(null);
     getProducts({
       search: productSearch || undefined,
-      is_active: showInactive ? undefined : true,
+      is_active: productFilter === "all" ? undefined : productFilter === "active",
       limit: PROD_PAGE,
       offset: (p - 1) * PROD_PAGE,
     })
@@ -292,13 +321,13 @@ export default function ProductsPage() {
   }
 
   // eslint-disable-next-line react-hooks/exhaustive-deps
-  useEffect(() => { loadProducts(); }, [productSearch, showInactive, productPage]);
+  useEffect(() => { loadProducts(); }, [productSearch, productFilter, productPage]);
 
   function loadEquipments(productId: string, p = equipPage) {
     setEquipLoading(true);
     setEquipError(null);
     getEquipments(productId, {
-      is_active: showInactiveEquip ? undefined : true,
+      is_active: equipFilter === "all" ? undefined : equipFilter === "active",
       limit: EQUIP_PAGE,
       offset: (p - 1) * EQUIP_PAGE,
     })
@@ -310,7 +339,7 @@ export default function ProductsPage() {
   useEffect(() => {
     if (selectedProduct) loadEquipments(selectedProduct.id, equipPage);
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [selectedProduct?.id, showInactiveEquip, equipPage]);
+  }, [selectedProduct?.id, equipFilter, equipPage]);
 
   async function toggleProduct(product: Product) {
     setTogglingProduct(product.id);
@@ -375,10 +404,10 @@ export default function ProductsPage() {
             {totalProducts} {totalProducts === 1 ? "produto cadastrado" : "produtos cadastrados"}
           </p>
         </div>
-        <Button onClick={() => { setEditingProduct(null); setProductFormOpen(true); }}>
-          {IC.Plus} Novo produto
-        </Button>
       </div>
+
+      {/* Products + Equipment — split layout when product selected */}
+      <div className={`grid gap-5 items-start transition-all duration-300 ${selectedProduct ? "grid-cols-1 xl:grid-cols-2" : "grid-cols-1"}`}>
 
       {/* Products card */}
       <Card padding="none">
@@ -387,15 +416,12 @@ export default function ProductsPage() {
             <p className="text-sm font-semibold text-slate-200">Catálogo de produtos</p>
             <p className="text-xs text-slate-500 mt-0.5">Clique num produto para ver seus equipamentos.</p>
           </div>
-          <label className="flex items-center gap-1.5 text-xs text-slate-400 cursor-pointer select-none">
-            <input
-              type="checkbox"
-              checked={showInactive}
-              onChange={(e) => { setShowInactive(e.target.checked); setProductPage(1); }}
-              className="accent-primary"
-            />
-            Mostrar inativos
-          </label>
+          <div className="flex items-center gap-3">
+            <FilterTabs value={productFilter} onChange={(v) => { setProductFilter(v); setProductPage(1); }} />
+            <Button size="sm" onClick={() => { setEditingProduct(null); setProductFormOpen(true); }}>
+              {IC.Plus} Novo produto
+            </Button>
+          </div>
         </div>
 
         {/* Search */}
@@ -501,17 +527,9 @@ export default function ProductsPage() {
               </p>
             </div>
             <div className="flex items-center gap-3">
-              <label className="flex items-center gap-1.5 text-xs text-slate-400 cursor-pointer select-none">
-                <input
-                  type="checkbox"
-                  checked={showInactiveEquip}
-                  onChange={(e) => { setShowInactiveEquip(e.target.checked); setEquipPage(1); }}
-                  className="accent-primary"
-                />
-                Mostrar inativos
-              </label>
+              <FilterTabs value={equipFilter} onChange={(v) => { setEquipFilter(v); setEquipPage(1); }} />
               <Button size="sm" onClick={() => { setEditingEquip(null); setEquipFormOpen(true); }}>
-                {IC.Plus} Equipamento
+                {IC.Plus} Novo Equipamento
               </Button>
             </div>
           </div>
@@ -556,13 +574,12 @@ export default function ProductsPage() {
                     )}
 
                     {/* Owner + company — always visible */}
-                    <div className="hidden lg:flex flex-col shrink-0 max-w-[200px]">
+                    <div className="flex flex-col items-end shrink-0 max-w-[180px]">
                       <span className="flex items-center gap-1 text-xs text-slate-300 truncate">
-                        {IC.User}
                         {e.owner_name ?? <span className="text-slate-600">—</span>}
+                        {IC.User}
                       </span>
                       <span className="flex items-center gap-1 text-xs text-slate-500 truncate mt-0.5">
-                        {IC.Building}
                         {e.company_name
                           ? <>
                               {e.company_name}
@@ -570,6 +587,7 @@ export default function ProductsPage() {
                             </>
                           : <span className="text-slate-600">—</span>
                         }
+                        {IC.Building}
                       </span>
                     </div>
 
@@ -601,6 +619,8 @@ export default function ProductsPage() {
           )}
         </Card>
       )}
+
+      </div> {/* end split grid */}
 
       {/* Modals */}
       {productFormOpen && (
