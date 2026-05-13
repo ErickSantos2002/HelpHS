@@ -85,14 +85,14 @@ function CommentForm({ onSubmit, placeholder = "Deixe um comentário…", autoFo
 
   return (
     <form onSubmit={handleSubmit} className="space-y-2">
-      <div className="flex items-end gap-2">
+      <div className="flex items-center gap-2">
         <textarea
           ref={textareaRef}
-          rows={2}
+          rows={1}
           value={content}
           onChange={(e) => setContent(e.target.value)}
           placeholder={placeholder}
-          className="flex-1 resize-none rounded-lg border border-border/60 bg-background-elevated px-3 py-2 text-sm text-slate-200 placeholder:text-slate-500 focus:outline-none focus:ring-2 focus:ring-primary focus:border-transparent transition-colors"
+          className="flex-1 resize-none rounded-lg border border-border/60 bg-background-elevated px-3 py-2 text-sm text-slate-200 placeholder:text-slate-500 focus:outline-none focus:ring-2 focus:ring-primary focus:border-transparent transition-colors max-h-24 overflow-y-auto leading-relaxed break-words"
           onKeyDown={(e) => { if (e.key === "Enter" && !e.shiftKey) { e.preventDefault(); handleSubmit(e as unknown as React.FormEvent); } }}
         />
         <button
@@ -121,8 +121,10 @@ function CommentItem({ comment, currentUserId, isStaff, onReply, onDelete }: {
   onDelete: (commentId: string) => Promise<void>;
 }) {
   const [showReplyForm, setShowReplyForm] = useState(false);
+  const [showReplies, setShowReplies] = useState(false);
   const canDelete = isStaff || comment.author_id === currentUserId;
   const date = new Date(comment.created_at).toLocaleString("pt-BR", { day: "2-digit", month: "2-digit", year: "numeric", hour: "2-digit", minute: "2-digit" });
+  const replyCount = comment.replies.length;
 
   return (
     <div className="space-y-3">
@@ -140,10 +142,29 @@ function CommentItem({ comment, currentUserId, isStaff, onReply, onDelete }: {
             )}
             <span className="text-xs text-slate-600">{date}</span>
           </div>
-          <p className="text-sm text-slate-300 leading-relaxed whitespace-pre-wrap">{comment.content}</p>
+          <p className="text-sm text-slate-300 leading-relaxed whitespace-pre-wrap break-words">{comment.content}</p>
           <div className="flex items-center gap-3 mt-2">
             {!comment.parent_id && (
-              <button onClick={() => setShowReplyForm((v) => !v)} className="text-xs text-slate-500 hover:text-primary transition-colors cursor-pointer">Responder</button>
+              <button
+                onClick={() => setShowReplyForm((v) => !v)}
+                className="text-xs text-slate-500 hover:text-primary transition-colors cursor-pointer"
+              >
+                Responder
+              </button>
+            )}
+            {replyCount > 0 && (
+              <button
+                onClick={() => setShowReplies((v) => !v)}
+                className="flex items-center gap-1 text-xs text-slate-500 hover:text-slate-300 transition-colors cursor-pointer"
+              >
+                <svg
+                  className={`w-3 h-3 transition-transform duration-150 ${showReplies ? "rotate-180" : ""}`}
+                  fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2.5}
+                >
+                  <path strokeLinecap="round" strokeLinejoin="round" d="M19 9l-7 7-7-7" />
+                </svg>
+                {showReplies ? "Ocultar" : "Ver"} {replyCount} resposta{replyCount !== 1 ? "s" : ""}
+              </button>
             )}
             {canDelete && (
               <button onClick={() => onDelete(comment.id)} className="text-xs text-slate-600 hover:text-danger transition-colors cursor-pointer">Excluir</button>
@@ -161,7 +182,7 @@ function CommentItem({ comment, currentUserId, isStaff, onReply, onDelete }: {
         </div>
       )}
 
-      {comment.replies.length > 0 && (
+      {showReplies && replyCount > 0 && (
         <div className="ml-11 space-y-4 border-l-2 border-border/40 pl-4">
           {comment.replies.map((reply) => (
             <CommentItem key={reply.id} comment={reply} currentUserId={currentUserId} isStaff={isStaff} onReply={onReply} onDelete={onDelete} />
@@ -248,9 +269,9 @@ export default function KBArticlePage() {
   const catLabel = CATEGORY_LABEL[article.category] ?? article.category;
 
   return (
-    <div className="space-y-5 pb-10">
+    <div className="flex flex-col h-full gap-4">
       {/* ── Header ───────────────────────────────────────────── */}
-      <div className="flex flex-wrap items-start justify-between gap-4 rounded-2xl border border-border/40 bg-background-surface px-5 py-4">
+      <div className="shrink-0 flex flex-wrap items-start justify-between gap-4 rounded-2xl border border-border/40 bg-background-surface px-5 py-4">
         <div className="min-w-0">
           <button
             onClick={() => navigate("/kb")}
@@ -275,11 +296,11 @@ export default function KBArticlePage() {
       </div>
 
       {/* ── Body ─────────────────────────────────────────────── */}
-      <div className="grid grid-cols-1 gap-5 lg:grid-cols-[1fr_300px]">
+      <div className="grid grid-cols-1 gap-5 lg:grid-cols-[1fr_260px] flex-1 min-h-0">
         {/* ── Main column ───────────────────────────────────── */}
-        <div className="space-y-5 min-w-0">
+        <div className="flex flex-col gap-5 min-h-0 min-w-0">
           {/* Article content */}
-          <div className="rounded-xl border border-border/40 bg-background-surface">
+          <div className="shrink-0 rounded-xl border border-border/40 bg-background-surface">
             <div className="px-6 py-5">
               <MarkdownContent content={article.content} />
             </div>
@@ -314,36 +335,39 @@ export default function KBArticlePage() {
           </div>
 
           {/* Comments */}
-          <div className="rounded-xl border border-border/40 bg-background-surface">
-            <div className="flex items-center gap-2 border-b border-border/40 px-5 py-3.5">
+          <div className="flex-1 min-h-0 flex flex-col rounded-xl border border-border/40 bg-background-surface">
+            <div className="shrink-0 flex items-center gap-2 border-b border-border/40 px-5 py-3.5">
               <span className="text-slate-500">{IC.Chat}</span>
               <h2 className="text-sm font-semibold text-slate-200">Comentários ({totalComments})</h2>
             </div>
-            <div className="p-5 space-y-5">
-              <CommentForm onSubmit={handleAddComment} />
-
-              {commentsLoading ? (
-                <div className="flex justify-center py-4"><Spinner size="sm" /></div>
-              ) : comments.length === 0 ? (
-                <div className="py-8 text-center">
-                  <div className="mx-auto mb-3 flex h-10 w-10 items-center justify-center rounded-full bg-background-elevated text-slate-600">{IC.Chat}</div>
-                  <p className="text-sm text-slate-500">Nenhum comentário ainda. Seja o primeiro!</p>
-                </div>
-              ) : (
-                <div className="space-y-5 divide-y divide-border/40">
-                  {comments.map((comment) => (
-                    <div key={comment.id} className="pt-5 first:pt-0">
-                      <CommentItem comment={comment} currentUserId={user?.id} currentUserRole={user?.role} isStaff={isStaff} onReply={handleReply} onDelete={handleDeleteComment} />
-                    </div>
-                  ))}
-                </div>
-              )}
+            <div className="flex flex-col flex-1 min-h-0 p-5 gap-4">
+              <div className="shrink-0">
+                <CommentForm onSubmit={handleAddComment} />
+              </div>
+              <div className="flex-1 min-h-0 overflow-y-auto pr-1">
+                {commentsLoading ? (
+                  <div className="flex justify-center py-4"><Spinner size="sm" /></div>
+                ) : comments.length === 0 ? (
+                  <div className="py-10 text-center">
+                    <div className="mx-auto mb-3 flex h-10 w-10 items-center justify-center rounded-full bg-background-elevated text-slate-600">{IC.Chat}</div>
+                    <p className="text-sm text-slate-500">Nenhum comentário ainda. Seja o primeiro!</p>
+                  </div>
+                ) : (
+                  <div className="space-y-5 divide-y divide-border/40">
+                    {comments.map((comment) => (
+                      <div key={comment.id} className="pt-5 first:pt-0">
+                        <CommentItem comment={comment} currentUserId={user?.id} currentUserRole={user?.role} isStaff={isStaff} onReply={handleReply} onDelete={handleDeleteComment} />
+                      </div>
+                    ))}
+                  </div>
+                )}
+              </div>
             </div>
           </div>
         </div>
 
         {/* ── Sidebar ───────────────────────────────────────── */}
-        <div className="space-y-4">
+        <div className="min-h-0 overflow-y-auto space-y-4">
           <div className="rounded-xl border border-border/40 bg-background-surface p-4">
             <p className="mb-1 text-[10px] font-bold uppercase tracking-widest text-slate-500">Sobre o artigo</p>
             <div>

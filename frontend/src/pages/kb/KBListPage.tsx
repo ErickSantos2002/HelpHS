@@ -1,6 +1,6 @@
 import { useEffect, useState } from "react";
 import { useNavigate } from "react-router-dom";
-import { FilterSelect, Spinner } from "../../components/ui";
+import { Button, FilterSelect, Modal, ModalFooter, Spinner } from "../../components/ui";
 import { useAuth } from "../../contexts/AuthContext";
 import {
   deleteKBArticle,
@@ -28,16 +28,17 @@ const PAGE_SIZE = 20;
 // ── Icons ─────────────────────────────────────────────────────
 
 const IC = {
-  Plus: <svg className="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2.5}><path strokeLinecap="round" strokeLinejoin="round" d="M12 4v16m8-8H4" /></svg>,
-  Search: <svg className="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}><path strokeLinecap="round" strokeLinejoin="round" d="M21 21l-6-6m2-5a7 7 0 11-14 0 7 7 0 0114 0z" /></svg>,
-  Book: <svg className="w-5 h-5" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={1.5}><path strokeLinecap="round" strokeLinejoin="round" d="M12 6.253v13m0-13C10.832 5.477 9.246 5 7.5 5S4.168 5.477 3 6.253v13C4.168 18.477 5.754 18 7.5 18s3.332.477 4.5 1.253m0-13C13.168 5.477 14.754 5 16.5 5c1.747 0 3.332.477 4.5 1.253v13C19.832 18.477 18.247 18 16.5 18c-1.746 0-3.332.477-4.5 1.253" /></svg>,
-  Edit: <svg className="w-3.5 h-3.5" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}><path strokeLinecap="round" strokeLinejoin="round" d="M11 5H6a2 2 0 00-2 2v11a2 2 0 002 2h11a2 2 0 002-2v-5m-1.414-9.414a2 2 0 112.828 2.828L11.828 15H9v-2.828l8.586-8.586z" /></svg>,
-  Archive: <svg className="w-3.5 h-3.5" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}><path strokeLinecap="round" strokeLinejoin="round" d="M5 8h14M5 8a2 2 0 110-4h14a2 2 0 110 4M5 8l1 12a2 2 0 002 2h8a2 2 0 002-2L19 8m-9 4v4m4-4v4" /></svg>,
-  Eye: <svg className="w-3.5 h-3.5" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}><path strokeLinecap="round" strokeLinejoin="round" d="M15 12a3 3 0 11-6 0 3 3 0 016 0z" /><path strokeLinecap="round" strokeLinejoin="round" d="M2.458 12C3.732 7.943 7.523 5 12 5c4.478 0 8.268 2.943 9.542 7-1.274 4.057-5.064 7-9.542 7-4.477 0-8.268-2.943-9.542-7z" /></svg>,
-  ThumbUp: <svg className="w-3.5 h-3.5" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}><path strokeLinecap="round" strokeLinejoin="round" d="M14 10h4.764a2 2 0 011.789 2.894l-3.5 7A2 2 0 0115.263 21h-4.017c-.163 0-.326-.02-.485-.06L7 20m7-10V5a2 2 0 00-2-2h-.095c-.5 0-.905.405-.905.905 0 .714-.211 1.412-.608 2.006L7 11v9m7-10h-2M7 20H5a2 2 0 01-2-2v-6a2 2 0 012-2h2.5" /></svg>,
-  ChevLeft: <svg className="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}><path strokeLinecap="round" strokeLinejoin="round" d="M15 19l-7-7 7-7" /></svg>,
-  ChevRight: <svg className="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}><path strokeLinecap="round" strokeLinejoin="round" d="M9 5l7 7-7 7" /></svg>,
-  X: <svg className="w-3.5 h-3.5" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2.5}><path strokeLinecap="round" strokeLinejoin="round" d="M6 18L18 6M6 6l12 12" /></svg>,
+  Plus:       <svg className="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2.5}><path strokeLinecap="round" strokeLinejoin="round" d="M12 4v16m8-8H4" /></svg>,
+  Search:     <svg className="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}><path strokeLinecap="round" strokeLinejoin="round" d="M21 21l-6-6m2-5a7 7 0 11-14 0 7 7 0 0114 0z" /></svg>,
+  Book:       <svg className="w-5 h-5" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={1.5}><path strokeLinecap="round" strokeLinejoin="round" d="M12 6.253v13m0-13C10.832 5.477 9.246 5 7.5 5S4.168 5.477 3 6.253v13C4.168 18.477 5.754 18 7.5 18s3.332.477 4.5 1.253m0-13C13.168 5.477 14.754 5 16.5 5c1.747 0 3.332.477 4.5 1.253v13C19.832 18.477 18.247 18 16.5 18c-1.746 0-3.332.477-4.5 1.253" /></svg>,
+  Edit:       <svg className="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}><path strokeLinecap="round" strokeLinejoin="round" d="M11 5H6a2 2 0 00-2 2v11a2 2 0 002 2h11a2 2 0 002-2v-5m-1.414-9.414a2 2 0 112.828 2.828L11.828 15H9v-2.828l8.586-8.586z" /></svg>,
+  Trash:      <svg className="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}><path strokeLinecap="round" strokeLinejoin="round" d="M19 7l-.867 12.142A2 2 0 0116.138 21H7.862a2 2 0 01-1.995-1.858L5 7m5 4v6m4-6v6m1-10V4a1 1 0 00-1-1h-4a1 1 0 00-1 1v3M4 7h16" /></svg>,
+  TrashSm:    <svg className="w-3.5 h-3.5" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}><path strokeLinecap="round" strokeLinejoin="round" d="M19 7l-.867 12.142A2 2 0 0116.138 21H7.862a2 2 0 01-1.995-1.858L5 7m5 4v6m4-6v6m1-10V4a1 1 0 00-1-1h-4a1 1 0 00-1 1v3M4 7h16" /></svg>,
+  Eye:        <svg className="w-3.5 h-3.5" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}><path strokeLinecap="round" strokeLinejoin="round" d="M15 12a3 3 0 11-6 0 3 3 0 016 0z" /><path strokeLinecap="round" strokeLinejoin="round" d="M2.458 12C3.732 7.943 7.523 5 12 5c4.478 0 8.268 2.943 9.542 7-1.274 4.057-5.064 7-9.542 7-4.477 0-8.268-2.943-9.542-7z" /></svg>,
+  ThumbUp:    <svg className="w-3.5 h-3.5" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}><path strokeLinecap="round" strokeLinejoin="round" d="M14 10h4.764a2 2 0 011.789 2.894l-3.5 7A2 2 0 0115.263 21h-4.017c-.163 0-.326-.02-.485-.06L7 20m7-10V5a2 2 0 00-2-2h-.095c-.5 0-.905.405-.905.905 0 .714-.211 1.412-.608 2.006L7 11v9m7-10h-2M7 20H5a2 2 0 01-2-2v-6a2 2 0 012-2h2.5" /></svg>,
+  ChevLeft:   <svg className="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}><path strokeLinecap="round" strokeLinejoin="round" d="M15 19l-7-7 7-7" /></svg>,
+  ChevRight:  <svg className="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}><path strokeLinecap="round" strokeLinejoin="round" d="M9 5l7 7-7 7" /></svg>,
+  X:          <svg className="w-3.5 h-3.5" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2.5}><path strokeLinecap="round" strokeLinejoin="round" d="M6 18L18 6M6 6l12 12" /></svg>,
 };
 
 // ── Main ──────────────────────────────────────────────────────
@@ -54,6 +55,8 @@ export default function KBListPage() {
   const [category, setCategory] = useState("");
   const [statusFilter, setStatusFilter] = useState("");
   const [loading, setLoading] = useState(true);
+  const [deleteTarget, setDeleteTarget] = useState<KBArticle | null>(null);
+  const [deleteLoading, setDeleteLoading] = useState(false);
 
   useEffect(() => { setOffset(0); }, [search, category, statusFilter]);
 
@@ -64,11 +67,17 @@ export default function KBListPage() {
       .finally(() => setLoading(false));
   }, [search, category, statusFilter, offset]);
 
-  async function handleDelete(id: string) {
-    if (!confirm("Arquivar este artigo?")) return;
-    await deleteKBArticle(id);
-    setArticles((prev) => prev.filter((a) => a.id !== id));
-    setTotal((t) => t - 1);
+  async function handleDelete() {
+    if (!deleteTarget) return;
+    setDeleteLoading(true);
+    try {
+      await deleteKBArticle(deleteTarget.id);
+      setArticles((prev) => prev.filter((a) => a.id !== deleteTarget.id));
+      setTotal((t) => t - 1);
+      setDeleteTarget(null);
+    } finally {
+      setDeleteLoading(false);
+    }
   }
 
   const totalPages = Math.ceil(total / PAGE_SIZE);
@@ -174,7 +183,7 @@ export default function KBListPage() {
             return (
               <div
                 key={article.id}
-                className="group flex items-start gap-4 rounded-xl border border-border/40 bg-background-surface px-5 py-4 hover:border-primary/30 hover:bg-primary/[0.02] transition-all cursor-pointer"
+                className="flex items-start gap-4 rounded-xl border border-border/40 bg-background-surface px-5 py-4 hover:border-primary/30 hover:bg-primary/[0.02] transition-all cursor-pointer"
                 onClick={() => navigate(`/kb/${article.id}`)}
               >
                 {/* Icon */}
@@ -185,7 +194,7 @@ export default function KBListPage() {
                 {/* Content */}
                 <div className="flex-1 min-w-0">
                   <div className="flex flex-wrap items-center gap-2 mb-1">
-                    <span className="text-sm font-semibold text-slate-100 group-hover:text-primary transition-colors truncate">
+                    <span className="text-sm font-semibold text-slate-100 hover:text-primary transition-colors truncate">
                       {article.title}
                     </span>
                     {isStaff && (
@@ -198,24 +207,48 @@ export default function KBListPage() {
                     </span>
                   </div>
                   <p className="text-xs text-slate-500 line-clamp-1">{preview}…</p>
-                  <div className="mt-2 flex flex-wrap items-center gap-3">
-                    {article.tags.map((tag) => (
-                      <span key={tag} className="rounded-md bg-background-elevated px-1.5 py-0.5 text-[10px] text-slate-500">{tag}</span>
-                    ))}
-                    <span className="ml-auto flex items-center gap-1 text-[11px] text-slate-600">{IC.Eye} {article.view_count}</span>
-                    <span className="flex items-center gap-1 text-[11px] text-success-700 dark:text-success-400">{IC.ThumbUp} {article.helpful}</span>
-                  </div>
+                  {article.tags.length > 0 && (
+                    <div className="mt-2 flex flex-wrap items-center gap-2">
+                      {article.tags.map((tag) => (
+                        <span key={tag} className="rounded-md bg-background-elevated px-1.5 py-0.5 text-[10px] text-slate-500">{tag}</span>
+                      ))}
+                    </div>
+                  )}
                 </div>
 
-                {/* Actions (staff) */}
-                {isStaff && (
-                  <div className="flex items-center gap-1 shrink-0 opacity-0 group-hover:opacity-100 transition-opacity" onClick={(e) => e.stopPropagation()}>
-                    <button onClick={() => navigate(`/kb/${article.id}/edit`)} className="p-1.5 rounded-md text-slate-500 hover:text-primary hover:bg-primary/10 transition-colors cursor-pointer" title="Editar">{IC.Edit}</button>
-                    {user?.role === "admin" && (
-                      <button onClick={() => handleDelete(article.id)} className="p-1.5 rounded-md text-slate-500 hover:text-danger hover:bg-danger/10 transition-colors cursor-pointer" title="Arquivar">{IC.Archive}</button>
-                    )}
+                {/* Right: stats + actions */}
+                <div
+                  className="flex flex-col items-end gap-2.5 shrink-0 self-center"
+                  onClick={(e) => e.stopPropagation()}
+                >
+                  {/* Stats */}
+                  <div className="flex items-center gap-3">
+                    <span className="flex items-center gap-1 text-[11px] text-slate-500">{IC.Eye}{article.view_count}</span>
+                    <span className="flex items-center gap-1 text-[11px] text-success-700 dark:text-success-400">{IC.ThumbUp}{article.helpful}</span>
                   </div>
-                )}
+
+                  {/* Action buttons — sempre visíveis */}
+                  {isStaff && (
+                    <div className="flex items-center gap-1">
+                      <button
+                        onClick={() => navigate(`/kb/${article.id}/edit`)}
+                        title="Editar"
+                        className="p-1.5 rounded-lg text-slate-400 hover:text-primary hover:bg-primary/10 transition-colors cursor-pointer"
+                      >
+                        {IC.Edit}
+                      </button>
+                      {user?.role === "admin" && (
+                        <button
+                          onClick={() => setDeleteTarget(article)}
+                          title="Excluir"
+                          className="p-1.5 rounded-lg text-slate-400 hover:text-red-400 hover:bg-red-900/20 transition-colors cursor-pointer"
+                        >
+                          {IC.Trash}
+                        </button>
+                      )}
+                    </div>
+                  )}
+                </div>
               </div>
             );
           })}
@@ -245,6 +278,58 @@ export default function KBListPage() {
           </div>
         </div>
       )}
+
+      {/* ── Delete modal ─────────────────────────────────────── */}
+      <Modal
+        open={!!deleteTarget}
+        onClose={() => setDeleteTarget(null)}
+        title="Excluir artigo"
+      >
+        <div className="space-y-4">
+          {/* Warning banner */}
+          <div className="flex gap-3 rounded-xl bg-red-900/20 border border-red-800/40 p-4">
+            <div className="shrink-0 w-9 h-9 rounded-full bg-red-900/40 flex items-center justify-center text-red-400">
+              {IC.TrashSm}
+            </div>
+            <div>
+              <p className="text-sm font-semibold text-red-300">Ação irreversível</p>
+              <p className="text-xs text-red-400/80 mt-0.5">
+                Este artigo será removido permanentemente da base de conhecimento.
+              </p>
+            </div>
+          </div>
+
+          {/* Article preview */}
+          {deleteTarget && (
+            <div className="flex items-center gap-3 rounded-xl border border-border bg-background-elevated px-4 py-3">
+              <div className="flex h-9 w-9 shrink-0 items-center justify-center rounded-lg bg-primary/10 text-primary">
+                {IC.Book}
+              </div>
+              <div className="min-w-0">
+                <p className="text-sm font-medium text-slate-100 truncate">{deleteTarget.title}</p>
+                <p className="text-xs text-slate-500">
+                  {CATEGORY_LABEL[deleteTarget.category] ?? deleteTarget.category}
+                  {" · "}
+                  {STATUS_CONFIG[deleteTarget.status].label}
+                </p>
+              </div>
+            </div>
+          )}
+
+          <p className="text-sm text-slate-400">
+            Tem certeza que deseja excluir{" "}
+            <span className="text-slate-200 font-medium">"{deleteTarget?.title}"</span>?
+          </p>
+        </div>
+        <ModalFooter>
+          <Button variant="outline" onClick={() => setDeleteTarget(null)} disabled={deleteLoading}>
+            Cancelar
+          </Button>
+          <Button variant="danger" onClick={handleDelete} loading={deleteLoading}>
+            Sim, excluir
+          </Button>
+        </ModalFooter>
+      </Modal>
     </div>
   );
 }

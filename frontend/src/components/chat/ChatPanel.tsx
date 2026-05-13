@@ -49,7 +49,7 @@ function ChatBubble({ msg, isOwn }: { msg: ChatMessage; isOwn: boolean }) {
         </div>
         <div className="max-w-[75%]">
           <p className="text-xs text-purple-400 mb-0.5">Assistente IA</p>
-          <div className="rounded-xl rounded-tl-none bg-purple-950 border border-purple-800 px-3 py-2 text-sm text-slate-200 leading-relaxed">
+          <div className="rounded-xl rounded-tl-none bg-purple-950 border border-purple-800 px-3 py-2 text-sm text-slate-200 leading-relaxed break-words whitespace-pre-wrap">
             {msg.content}
           </div>
           <p className="text-xs text-slate-600 mt-0.5">{time}</p>
@@ -62,7 +62,7 @@ function ChatBubble({ msg, isOwn }: { msg: ChatMessage; isOwn: boolean }) {
     return (
       <div className="flex flex-col items-end mb-3">
         <div className="max-w-[75%]">
-          <div className="rounded-xl rounded-tr-none bg-primary/20 border border-primary/30 px-3 py-2 text-sm text-slate-100 leading-relaxed">
+          <div className="rounded-xl rounded-tr-none bg-primary/20 border border-primary/30 px-3 py-2 text-sm text-slate-100 leading-relaxed break-words whitespace-pre-wrap">
             {msg.content}
           </div>
           <p className="text-xs text-slate-600 mt-0.5 text-right">{time}</p>
@@ -91,7 +91,7 @@ function ChatBubble({ msg, isOwn }: { msg: ChatMessage; isOwn: boolean }) {
             </span>
           )}
         </p>
-        <div className="rounded-xl rounded-tl-none bg-background-elevated border border-border px-3 py-2 text-sm text-slate-200 leading-relaxed">
+        <div className="rounded-xl rounded-tl-none bg-background-elevated border border-border px-3 py-2 text-sm text-slate-200 leading-relaxed break-words whitespace-pre-wrap">
           {msg.content}
         </div>
         <p className="text-xs text-slate-600 mt-0.5">{time}</p>
