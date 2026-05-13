@@ -212,3 +212,44 @@ export async function createGroupNote(groupId: string, content: string): Promise
 export async function deleteGroupNote(groupId: string, noteId: string): Promise<void> {
   await api.delete(`/groups/${groupId}/notes/${noteId}`);
 }
+
+// ── Company Notes ─────────────────────────────────────────────
+
+export interface CompanyNote {
+  id: string;
+  company_id: string;
+  author_id: string;
+  author_name: string;
+  content: string;
+  created_at: string;
+}
+
+export async function listCompanyNotes(
+  groupId: string,
+  companyId: string,
+): Promise<CompanyNote[]> {
+  const { data } = await api.get<CompanyNote[]>(
+    `/groups/${groupId}/companies/${companyId}/notes`,
+  );
+  return data;
+}
+
+export async function createCompanyNote(
+  groupId: string,
+  companyId: string,
+  content: string,
+): Promise<CompanyNote> {
+  const { data } = await api.post<CompanyNote>(
+    `/groups/${groupId}/companies/${companyId}/notes`,
+    { content },
+  );
+  return data;
+}
+
+export async function deleteCompanyNote(
+  groupId: string,
+  companyId: string,
+  noteId: string,
+): Promise<void> {
+  await api.delete(`/groups/${groupId}/companies/${companyId}/notes/${noteId}`);
+}

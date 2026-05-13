@@ -31,6 +31,9 @@ import {
   listGroupNotes,
   createGroupNote,
   deleteGroupNote,
+  listCompanyNotes,
+  createCompanyNote,
+  deleteCompanyNote,
   type GroupResponse,
   type GroupDetail,
   type CompanyResponse,
@@ -38,6 +41,7 @@ import {
   type ClientInCompany,
   type CompanySuggestion,
   type GroupNote,
+  type CompanyNote,
 } from "../../services/groupService";
 
 // ── Icons ─────────────────────────────────────────────────────
@@ -490,9 +494,25 @@ function CompanyDetailModal({
   const [removingId, setRemovingId] = useState<string | null>(null);
   const [clientsPage, setClientsPage] = useState(1);
 
+  // Company notes
+  const [companyNotes, setCompanyNotes] = useState<CompanyNote[]>([]);
+  const [showAddCompanyNote, setShowAddCompanyNote] = useState(false);
+  const [viewCompanyNote, setViewCompanyNote] = useState<CompanyNote | null>(null);
+  const [newCompanyNoteContent, setNewCompanyNoteContent] = useState("");
+  const [companyNoteSaving, setCompanyNoteSaving] = useState(false);
+  const [companyNoteDeleting, setCompanyNoteDeleting] = useState<string | null>(null);
+  const [activeTab, setActiveTab] = useState<"clients" | "notes">("clients");
+
   const load = async () => {
     setLoading(true);
-    try { setDetail(await getCompany(groupId, company.id)); } finally { setLoading(false); }
+    try {
+      const [d, notes] = await Promise.all([
+        getCompany(groupId, company.id),
+        listCompanyNotes(groupId, company.id),
+      ]);
+      setDetail(d);
+      setCompanyNotes(notes);
+    } finally { setLoading(false); }
   };
 
   useEffect(() => { load(); }, [company.id]);
@@ -507,13 +527,34 @@ function CompanyDetailModal({
     } finally { setRemovingId(null); }
   };
 
+  const handleAddCompanyNote = async () => {
+    if (!newCompanyNoteContent.trim()) return;
+    setCompanyNoteSaving(true);
+    try {
+      const note = await createCompanyNote(groupId, company.id, newCompanyNoteContent.trim());
+      setCompanyNotes((p) => [note, ...p]);
+      setNewCompanyNoteContent("");
+      setShowAddCompanyNote(false);
+    } finally { setCompanyNoteSaving(false); }
+  };
+
+  const handleDeleteCompanyNote = async (noteId: string) => {
+    if (!confirm("Deletar esta nota?")) return;
+    setCompanyNoteDeleting(noteId);
+    try {
+      await deleteCompanyNote(groupId, company.id, noteId);
+      setCompanyNotes((p) => p.filter((n) => n.id !== noteId));
+      if (viewCompanyNote?.id === noteId) setViewCompanyNote(null);
+    } finally { setCompanyNoteDeleting(null); }
+  };
+
   const pagedClients = detail
     ? detail.clients.slice((clientsPage - 1) * CLIENTS_PAGE_SIZE, clientsPage * CLIENTS_PAGE_SIZE)
     : [];
 
   return (
     <>
-      <Modal open onClose={onClose} title={company.name} size="xl">
+      <Modal open onClose={onClose} title={company.name} size="2xl">
         <div className="flex flex-col" style={{ minHeight: 480, maxHeight: "75vh" }}>
           {loading ? (
             <div className="flex justify-center items-center flex-1 py-8"><Spinner /></div>
@@ -527,53 +568,126 @@ function CompanyDetailModal({
                 {detail.address && <span>{detail.address}</span>}
               </div>
 
-              {detail.notes && (
-                <div className="rounded-lg bg-amber-900/20 border border-amber-800/40 p-3 mb-4">
-                  <div className="flex items-center gap-1.5 text-amber-400 text-xs font-semibold mb-1"><IconNote />Notas internas</div>
-                  <p className="text-sm text-amber-300 whitespace-pre-wrap break-words">{detail.notes}</p>
-                </div>
-              )}
-
-              {/* Clients */}
-              <div className="flex items-center justify-between mb-2">
-                <p className="text-sm font-semibold text-slate-300">Clientes ({detail.client_count})</p>
-                <Button size="sm" onClick={() => setShowAssign(true)}><IconPlus />Vincular</Button>
+              {/* Tabs */}
+              <div className="flex border-b border-border mb-4 -mt-1">
+                <button
+                  onClick={() => setActiveTab("clients")}
+                  className={cn(
+                    "px-4 py-2 text-sm font-medium border-b-2 transition-colors cursor-pointer",
+                    activeTab === "clients"
+                      ? "border-primary text-primary"
+                      : "border-transparent text-slate-500 hover:text-slate-300",
+                  )}
+                >
+                  Clientes ({detail.client_count})
+                </button>
+                <button
+                  onClick={() => setActiveTab("notes")}
+                  className={cn(
+                    "px-4 py-2 text-sm font-medium border-b-2 transition-colors cursor-pointer flex items-center gap-1.5",
+                    activeTab === "notes"
+                      ? "border-amber-500 text-amber-400"
+                      : "border-transparent text-slate-500 hover:text-slate-300",
+                  )}
+                >
+                  <IconNote />
+                  Notas ({companyNotes.length})
+                </button>
               </div>
 
-              {detail.clients.length === 0 ? (
-                <div className="flex-1 flex flex-col items-center justify-center text-center py-6 rounded-lg border border-dashed border-border text-sm text-slate-500">
-                  Nenhum cliente vinculado.
-                  <div className="mt-2"><Button size="sm" onClick={() => setShowAssign(true)}><IconPlus />Vincular cliente</Button></div>
-                </div>
-              ) : (
-                <div className="flex-1 flex flex-col min-h-0">
-                  <ul className="divide-y divide-border rounded-lg border border-border overflow-y-auto flex-1">
-                    {pagedClients.map((c) => (
-                      <li key={c.id} className="flex items-center justify-between px-3 py-2.5 hover:bg-background-elevated">
-                        <div className="min-w-0 flex-1">
-                          <p className="text-sm font-medium text-slate-100 truncate">{c.name}</p>
-                          <p className="text-xs text-slate-500 truncate">{c.email}</p>
-                          {c.client_notes && <p className="text-xs text-amber-400 line-clamp-1 mt-0.5">{c.client_notes}</p>}
-                        </div>
-                        <div className="flex gap-1 ml-2 shrink-0">
-                          <button title="Notas" onClick={() => setNoteClient(c)} className="p-1.5 rounded text-slate-500 hover:text-amber-400 hover:bg-amber-900/20 transition-colors cursor-pointer"><IconNote /></button>
-                          <button title="Desvincular" onClick={() => handleUnassign(c.id)} disabled={removingId === c.id} className="p-1.5 rounded text-slate-500 hover:text-red-400 hover:bg-red-900/20 transition-colors cursor-pointer disabled:opacity-50">
-                            {removingId === c.id ? <Spinner size="sm" /> : <IconX />}
-                          </button>
-                        </div>
-                      </li>
-                    ))}
-                  </ul>
+              {/* Clients tab */}
+              {activeTab === "clients" && (
+                <>
+                  <div className="flex items-center justify-between mb-2">
+                    <p className="text-sm font-semibold text-slate-300">Clientes</p>
+                    <Button size="sm" onClick={() => setShowAssign(true)}><IconPlus />Vincular</Button>
+                  </div>
 
-                  <Pagination
-                    page={clientsPage}
-                    pageSize={CLIENTS_PAGE_SIZE}
-                    total={detail.client_count}
-                    onPageChange={(p) => setClientsPage(p)}
-                    itemLabel="clientes"
-                    className="pt-3"
-                  />
-                </div>
+                  {detail.clients.length === 0 ? (
+                    <div className="flex-1 flex flex-col items-center justify-center text-center py-6 rounded-lg border border-dashed border-border text-sm text-slate-500">
+                      Nenhum cliente vinculado.
+                      <div className="mt-2"><Button size="sm" onClick={() => setShowAssign(true)}><IconPlus />Vincular cliente</Button></div>
+                    </div>
+                  ) : (
+                    <div className="flex-1 flex flex-col min-h-0">
+                      <ul className="divide-y divide-border rounded-lg border border-border overflow-y-auto flex-1">
+                        {pagedClients.map((c) => (
+                          <li key={c.id} className="flex items-center justify-between px-3 py-2.5 hover:bg-background-elevated">
+                            <div className="min-w-0 flex-1">
+                              <p className="text-sm font-medium text-slate-100 truncate">{c.name}</p>
+                              <p className="text-xs text-slate-500 truncate">{c.email}</p>
+                              {c.client_notes && <p className="text-xs text-amber-400 line-clamp-1 mt-0.5">{c.client_notes}</p>}
+                            </div>
+                            <div className="flex gap-1 ml-2 shrink-0">
+                              <button title="Notas" onClick={() => setNoteClient(c)} className="p-1.5 rounded text-slate-500 hover:text-amber-400 hover:bg-amber-900/20 transition-colors cursor-pointer"><IconNote /></button>
+                              <button title="Desvincular" onClick={() => handleUnassign(c.id)} disabled={removingId === c.id} className="p-1.5 rounded text-slate-500 hover:text-red-400 hover:bg-red-900/20 transition-colors cursor-pointer disabled:opacity-50">
+                                {removingId === c.id ? <Spinner size="sm" /> : <IconX />}
+                              </button>
+                            </div>
+                          </li>
+                        ))}
+                      </ul>
+                      <Pagination
+                        page={clientsPage}
+                        pageSize={CLIENTS_PAGE_SIZE}
+                        total={detail.client_count}
+                        onPageChange={(p) => setClientsPage(p)}
+                        itemLabel="clientes"
+                        className="pt-3"
+                      />
+                    </div>
+                  )}
+                </>
+              )}
+
+              {/* Notes tab */}
+              {activeTab === "notes" && (
+                <>
+                  <div className="flex items-center justify-between mb-3">
+                    <p className="text-sm font-semibold text-amber-400/80">Notas da empresa</p>
+                    <Button size="sm" variant="outline" onClick={() => setShowAddCompanyNote(true)}>
+                      <IconPlus />Adicionar nota
+                    </Button>
+                  </div>
+
+                  {companyNotes.length === 0 ? (
+                    <div className="flex-1 flex flex-col items-center justify-center text-center py-8 rounded-lg border border-dashed border-amber-800/30 text-sm text-amber-700/50">
+                      Nenhuma nota ainda.
+                      <div className="mt-2">
+                        <Button size="sm" variant="outline" onClick={() => setShowAddCompanyNote(true)}>
+                          <IconPlus />Adicionar nota
+                        </Button>
+                      </div>
+                    </div>
+                  ) : (
+                    <div className="flex-1 overflow-y-auto space-y-2 pr-0.5">
+                      {companyNotes.map((n) => (
+                        <div
+                          key={n.id}
+                          className="group rounded-lg border border-amber-700/20 bg-amber-950/15 p-3 cursor-pointer hover:border-amber-600/40 transition-colors"
+                          onClick={() => setViewCompanyNote(n)}
+                        >
+                          <div className="flex items-center justify-between gap-1 mb-1">
+                            <span className="text-[11px] font-semibold text-amber-500/70 truncate">{n.author_name}</span>
+                            <div className="flex items-center gap-1.5 shrink-0">
+                              <span className="text-[10px] text-amber-700/50">
+                                {new Date(n.created_at).toLocaleDateString("pt-BR", { day: "2-digit", month: "2-digit", year: "2-digit" })}
+                              </span>
+                              <button
+                                onClick={(e) => { e.stopPropagation(); handleDeleteCompanyNote(n.id); }}
+                                disabled={companyNoteDeleting === n.id}
+                                className="opacity-0 group-hover:opacity-100 p-0.5 rounded text-amber-700/60 hover:text-red-400 transition-all cursor-pointer"
+                              >
+                                {companyNoteDeleting === n.id ? <Spinner size="sm" /> : <IconTrash />}
+                              </button>
+                            </div>
+                          </div>
+                          <p className="text-xs text-amber-200/60 line-clamp-3 whitespace-pre-wrap">{n.content}</p>
+                        </div>
+                      ))}
+                    </div>
+                  )}
+                </>
               )}
 
               <ModalFooter>
@@ -612,6 +726,47 @@ function CompanyDetailModal({
           onSaved={(u) => { setDetail((p) => p ? { ...p, clients: p.clients.map((c) => c.id === u.id ? u : c) } : p); setNoteClient(null); }}
           onClose={() => setNoteClient(null)}
         />
+      )}
+
+      {/* Add company note */}
+      <Modal open={showAddCompanyNote} onClose={() => { setShowAddCompanyNote(false); setNewCompanyNoteContent(""); }} title="Nova nota da empresa">
+        <div className="space-y-4">
+          <Textarea
+            rows={5}
+            placeholder="Escreva a nota aqui…"
+            value={newCompanyNoteContent}
+            onChange={(e) => setNewCompanyNoteContent(e.target.value)}
+          />
+          <ModalFooter>
+            <Button variant="outline" onClick={() => { setShowAddCompanyNote(false); setNewCompanyNoteContent(""); }}>Cancelar</Button>
+            <Button onClick={handleAddCompanyNote} loading={companyNoteSaving} disabled={!newCompanyNoteContent.trim()}>Salvar</Button>
+          </ModalFooter>
+        </div>
+      </Modal>
+
+      {/* View company note */}
+      {viewCompanyNote && (
+        <Modal open onClose={() => setViewCompanyNote(null)} title="Nota da empresa" size="lg">
+          <div className="space-y-3">
+            <div className="flex items-center justify-between text-xs text-amber-500/70">
+              <span className="font-semibold">{viewCompanyNote.author_name}</span>
+              <span>{new Date(viewCompanyNote.created_at).toLocaleString("pt-BR")}</span>
+            </div>
+            <p className="text-sm text-amber-200/80 whitespace-pre-wrap leading-relaxed min-h-[80px]">{viewCompanyNote.content}</p>
+            <ModalFooter>
+              <Button
+                variant="outline"
+                size="sm"
+                className="text-red-500 hover:bg-red-900/20"
+                loading={companyNoteDeleting === viewCompanyNote.id}
+                onClick={() => handleDeleteCompanyNote(viewCompanyNote.id)}
+              >
+                Deletar
+              </Button>
+              <Button onClick={() => setViewCompanyNote(null)}>Fechar</Button>
+            </ModalFooter>
+          </div>
+        </Modal>
       )}
     </>
   );

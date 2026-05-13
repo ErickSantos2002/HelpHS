@@ -115,3 +115,19 @@ class GroupNoteResponse(AppBaseModel):
     author_name: str
     content: str
     created_at: datetime
+
+
+# ── Company Note schemas ──────────────────────────────────────
+
+
+class CompanyNoteCreate(AppBaseModel):
+    content: str
+
+
+class CompanyNoteResponse(AppBaseModel):
+    id: uuid.UUID
+    company_id: uuid.UUID
+    author_id: uuid.UUID
+    author_name: str
+    content: str
+    created_at: datetime

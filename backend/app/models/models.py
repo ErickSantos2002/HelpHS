@@ -165,6 +165,9 @@ class Company(Base):
     clients: Mapped[list["User"]] = relationship(
         back_populates="company", foreign_keys="User.company_id"
     )
+    company_notes: Mapped[list["CompanyNote"]] = relationship(
+        back_populates="company", cascade="all, delete-orphan"
+    )
 
 
 class User(Base):
@@ -445,6 +448,23 @@ class GroupNote(Base):
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now())
 
     group: Mapped["Group"] = relationship(back_populates="group_notes")
+    author: Mapped["User"] = relationship()
+
+
+class CompanyNote(Base):
+    """Notas de empresas (múltiplas por empresa)"""
+
+    __tablename__ = "company_notes"
+
+    id: Mapped[uuid.UUID] = mapped_column(UUID(as_uuid=True), primary_key=True, default=uuid.uuid4)
+    company_id: Mapped[uuid.UUID] = mapped_column(
+        UUID(as_uuid=True), ForeignKey("companies.id", ondelete="CASCADE"), index=True
+    )
+    author_id: Mapped[uuid.UUID] = mapped_column(UUID(as_uuid=True), ForeignKey("users.id"))
+    content: Mapped[str] = mapped_column(Text, nullable=False)
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now())
+
+    company: Mapped["Company"] = relationship(back_populates="company_notes")
     author: Mapped["User"] = relationship()
 
 

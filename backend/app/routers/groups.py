@@ -14,12 +14,14 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.core.database import get_db
 from app.core.security import authorize
-from app.models.models import Company, Group, GroupNote, User, UserRole, UserStatus
+from app.models.models import Company, CompanyNote, Group, GroupNote, User, UserRole, UserStatus
 from app.schemas.groups import (
     AssignClientRequest,
     ClientInCompany,
     CompanyCreate,
     CompanyDetail,
+    CompanyNoteCreate,
+    CompanyNoteResponse,
     CompanyResponse,
     CompanyUpdate,
     GroupCreate,
@@ -482,6 +484,89 @@ async def delete_group_note(
     note = (
         await db.execute(
             select(GroupNote).where(GroupNote.id == note_id, GroupNote.group_id == group_id)
+        )
+    ).scalar_one_or_none()
+    if note is None:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Nota não encontrada")
+    await db.delete(note)
+    await db.commit()
+
+
+# ── Company Notes ─────────────────────────────────────────────
+
+
+@router.get(
+    "/groups/{group_id}/companies/{company_id}/notes",
+    response_model=list[CompanyNoteResponse],
+)
+async def list_company_notes(
+    group_id: uuid.UUID, company_id: uuid.UUID, db: _DBDep, _: _AdminDep
+) -> list[CompanyNoteResponse]:
+    await _get_company_or_404(db, group_id, company_id)
+    rows = (
+        await db.execute(
+            select(CompanyNote, User.name.label("author_name"))
+            .join(User, User.id == CompanyNote.author_id)
+            .where(CompanyNote.company_id == company_id)
+            .order_by(CompanyNote.created_at.desc())
+        )
+    ).all()
+    return [
+        CompanyNoteResponse(
+            id=row.CompanyNote.id,
+            company_id=row.CompanyNote.company_id,
+            author_id=row.CompanyNote.author_id,
+            author_name=row.author_name,
+            content=row.CompanyNote.content,
+            created_at=row.CompanyNote.created_at,
+        )
+        for row in rows
+    ]
+
+
+@router.post(
+    "/groups/{group_id}/companies/{company_id}/notes",
+    response_model=CompanyNoteResponse,
+    status_code=status.HTTP_201_CREATED,
+)
+async def create_company_note(
+    group_id: uuid.UUID,
+    company_id: uuid.UUID,
+    body: CompanyNoteCreate,
+    db: _DBDep,
+    actor: _AdminDep,
+) -> CompanyNoteResponse:
+    await _get_company_or_404(db, group_id, company_id)
+    note = CompanyNote(company_id=company_id, author_id=actor.id, content=body.content)
+    db.add(note)
+    await db.commit()
+    await db.refresh(note)
+    return CompanyNoteResponse(
+        id=note.id,
+        company_id=note.company_id,
+        author_id=note.author_id,
+        author_name=actor.name,
+        content=note.content,
+        created_at=note.created_at,
+    )
+
+
+@router.delete(
+    "/groups/{group_id}/companies/{company_id}/notes/{note_id}",
+    status_code=status.HTTP_204_NO_CONTENT,
+)
+async def delete_company_note(
+    group_id: uuid.UUID,
+    company_id: uuid.UUID,
+    note_id: uuid.UUID,
+    db: _DBDep,
+    actor: _AdminDep,
+) -> None:
+    note = (
+        await db.execute(
+            select(CompanyNote).where(
+                CompanyNote.id == note_id, CompanyNote.company_id == company_id
+            )
         )
     ).scalar_one_or_none()
     if note is None:
