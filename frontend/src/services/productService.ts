@@ -16,6 +16,15 @@ export interface Equipment {
   model: string | null;
   description: string | null;
   is_active: boolean;
+  location?: string | null;
+  created_at?: string;
+  updated_at?: string;
+  // Owner info (populated by list endpoint)
+  owner_id?: string | null;
+  owner_name?: string | null;
+  owner_email?: string | null;
+  company_name?: string | null;
+  company_cnpj?: string | null;
 }
 
 export interface ProductListResponse {

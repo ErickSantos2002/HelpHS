@@ -78,6 +78,11 @@ class EquipmentResponse(AppBaseModel):
     is_active: bool
     created_at: datetime
     updated_at: datetime
+    # Owner info (populated by admin list endpoint)
+    owner_name: str | None = None
+    owner_email: str | None = None
+    company_name: str | None = None
+    company_cnpj: str | None = None
 
 
 class EquipmentListResponse(AppBaseModel):

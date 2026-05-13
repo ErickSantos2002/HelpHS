@@ -238,8 +238,26 @@ async def list_equipments(
     rows = await db.execute(base.order_by(Equipment.name).offset(offset).limit(limit))
     equipments = rows.scalars().all()
 
+    # Fetch owner info for all equipments in one query
+    owner_ids = [e.owner_id for e in equipments if e.owner_id]
+    owners: dict[uuid.UUID, User] = {}
+    if owner_ids:
+        owner_rows = await db.execute(select(User).where(User.id.in_(owner_ids)))
+        for u in owner_rows.scalars().all():
+            owners[u.id] = u
+
+    def _to_response(e: Equipment) -> EquipmentResponse:
+        data = EquipmentResponse.model_validate(e)
+        owner = owners.get(e.owner_id) if e.owner_id else None
+        if owner:
+            data.owner_name = owner.name
+            data.owner_email = owner.email
+            data.company_name = owner.company_name
+            data.company_cnpj = owner.cnpj
+        return data
+
     return EquipmentListResponse(
-        items=[EquipmentResponse.model_validate(e) for e in equipments],
+        items=[_to_response(e) for e in equipments],
         total=total,
         limit=limit,
         offset=offset,
