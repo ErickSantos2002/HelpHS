@@ -248,6 +248,7 @@ async def get_company(
         state=c.state,
         notes=c.notes,
         client_count=len(clients),
+        note_count=await _company_note_count(db, c.id),
         created_at=c.created_at,
         updated_at=c.updated_at,
         clients=clients,
