@@ -506,12 +506,9 @@ function CompanyDetailModal({
   const load = async () => {
     setLoading(true);
     try {
-      const [d, notes] = await Promise.all([
-        getCompany(groupId, company.id),
-        listCompanyNotes(groupId, company.id),
-      ]);
+      const d = await getCompany(groupId, company.id);
       setDetail(d);
-      setCompanyNotes(notes);
+      listCompanyNotes(groupId, company.id).then(setCompanyNotes).catch(() => {});
     } finally { setLoading(false); }
   };
 
