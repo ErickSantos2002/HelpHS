@@ -40,51 +40,61 @@ function IconTrash() {
 // ── Color picker ──────────────────────────────────────────────
 
 const PRESET_COLORS = [
-  "#6366f1",
-  "#8b5cf6",
-  "#ec4899",
-  "#ef4444",
-  "#f97316",
-  "#eab308",
-  "#22c55e",
-  "#10b981",
-  "#06b6d4",
-  "#3b82f6",
-  "#64748b",
-  "#a16207",
+  { hex: "#6366f1", label: "Índigo"   },
+  { hex: "#8b5cf6", label: "Violeta"  },
+  { hex: "#ec4899", label: "Rosa"     },
+  { hex: "#ef4444", label: "Vermelho" },
+  { hex: "#f97316", label: "Laranja"  },
+  { hex: "#eab308", label: "Amarelo"  },
+  { hex: "#22c55e", label: "Verde"    },
+  { hex: "#10b981", label: "Esmeralda"},
+  { hex: "#06b6d4", label: "Ciano"    },
+  { hex: "#3b82f6", label: "Azul"     },
+  { hex: "#64748b", label: "Ardósia"  },
+  { hex: "#a16207", label: "Âmbar"    },
+  { hex: "#be185d", label: "Fucsia"   },
+  { hex: "#0f766e", label: "Teal"     },
+  { hex: "#1d4ed8", label: "Royal"    },
+  { hex: "#7c3aed", label: "Púrpura"  },
 ];
 
-function ColorPicker({
-  value,
-  onChange,
-}: {
-  value: string;
-  onChange: (c: string) => void;
-}) {
+function ColorPicker({ value, onChange }: { value: string; onChange: (c: string) => void }) {
   return (
-    <div>
-      <p className="text-xs font-medium text-slate-400 mb-2">Cor</p>
-      <div className="flex flex-wrap gap-2">
+    <div className="space-y-3">
+      <p className="text-xs font-semibold text-slate-400 uppercase tracking-wider">Cor da etiqueta</p>
+      <div className="grid grid-cols-8 gap-2">
         {PRESET_COLORS.map((c) => (
           <button
-            key={c}
+            key={c.hex}
             type="button"
-            onClick={() => onChange(c)}
-            className="w-7 h-7 rounded-full border-2 transition-transform hover:scale-110"
-            style={{
-              backgroundColor: c,
-              borderColor: value === c ? "white" : "transparent",
-            }}
-            aria-label={c}
-          />
+            onClick={() => onChange(c.hex)}
+            title={c.label}
+            className="relative w-8 h-8 rounded-lg transition-all duration-150 hover:scale-110 focus:outline-none"
+            style={{ backgroundColor: c.hex }}
+          >
+            {value === c.hex && (
+              <span className="absolute inset-0 flex items-center justify-center">
+                <svg className="w-4 h-4 text-white drop-shadow" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={3}>
+                  <path strokeLinecap="round" strokeLinejoin="round" d="M5 13l4 4L19 7" />
+                </svg>
+              </span>
+            )}
+          </button>
         ))}
-        <input
-          type="color"
-          value={value}
-          onChange={(e) => onChange(e.target.value)}
-          className="w-7 h-7 rounded-full cursor-pointer border-0 bg-transparent"
+        <label
           title="Cor personalizada"
-        />
+          className="w-8 h-8 rounded-lg border-2 border-dashed border-slate-600 hover:border-primary flex items-center justify-center cursor-pointer transition-colors overflow-hidden"
+        >
+          <input
+            type="color"
+            value={value}
+            onChange={(e) => onChange(e.target.value)}
+            className="opacity-0 absolute w-0 h-0"
+          />
+          <svg className="w-4 h-4 text-slate-500" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
+            <path strokeLinecap="round" strokeLinejoin="round" d="M12 4v16m8-8H4" />
+          </svg>
+        </label>
       </div>
     </div>
   );
@@ -278,42 +288,45 @@ function TagsSection() {
       {/* Create modal */}
       <Modal
         open={createModal}
-        onClose={() => {
-          setCreateModal(false);
-          setCreateError(null);
-        }}
+        onClose={() => { setCreateModal(false); setCreateError(null); }}
         title="Nova etiqueta"
+        size="lg"
       >
-        <div className="space-y-4">
+        <div className="space-y-5">
           {createError && <Alert variant="danger">{createError}</Alert>}
+
           <Input
-            label="Nome"
+            label="Nome da etiqueta"
             placeholder="ex.: Urgente, Bug, Solicitação…"
             value={newName}
             onChange={(e) => setNewName(e.target.value)}
             onKeyDown={(e) => e.key === "Enter" && handleCreate()}
             autoFocus
           />
+
           <ColorPicker value={newColor} onChange={setNewColor} />
-          <div className="pt-1">
-            <p className="text-xs text-slate-500 mb-2">Prévia</p>
-            <TagBadge name={newName || "Etiqueta"} color={newColor} />
+
+          {/* Preview */}
+          <div className="rounded-xl border border-border bg-background-elevated p-4">
+            <p className="text-[11px] font-semibold uppercase tracking-widest text-slate-500 mb-3">Prévia</p>
+            <div className="flex items-center gap-3">
+              <div
+                className="w-10 h-10 rounded-xl shrink-0 shadow-lg"
+                style={{ backgroundColor: newColor }}
+              />
+              <div>
+                <TagBadge name={newName || "Nome da etiqueta"} color={newColor} />
+                <p className="text-xs text-slate-500 mt-1">Assim aparecerá nos tickets</p>
+              </div>
+            </div>
           </div>
         </div>
         <ModalFooter>
-          <Button
-            variant="secondary"
-            onClick={() => setCreateModal(false)}
-            disabled={createLoading}
-          >
+          <Button variant="outline" onClick={() => setCreateModal(false)} disabled={createLoading}>
             Cancelar
           </Button>
-          <Button
-            onClick={handleCreate}
-            loading={createLoading}
-            disabled={!newName.trim()}
-          >
-            Criar
+          <Button onClick={handleCreate} loading={createLoading} disabled={!newName.trim()}>
+            Criar etiqueta
           </Button>
         </ModalFooter>
       </Modal>
@@ -323,36 +336,42 @@ function TagsSection() {
         open={!!editTag}
         onClose={() => setEditTag(null)}
         title="Editar etiqueta"
+        size="lg"
       >
-        <div className="space-y-4">
+        <div className="space-y-5">
           {editError && <Alert variant="danger">{editError}</Alert>}
+
           <Input
-            label="Nome"
+            label="Nome da etiqueta"
             value={editName}
             onChange={(e) => setEditName(e.target.value)}
             onKeyDown={(e) => e.key === "Enter" && handleEdit()}
             autoFocus
           />
+
           <ColorPicker value={editColor} onChange={setEditColor} />
-          <div className="pt-1">
-            <p className="text-xs text-slate-500 mb-2">Prévia</p>
-            <TagBadge name={editName || "Etiqueta"} color={editColor} />
+
+          {/* Preview */}
+          <div className="rounded-xl border border-border bg-background-elevated p-4">
+            <p className="text-[11px] font-semibold uppercase tracking-widest text-slate-500 mb-3">Prévia</p>
+            <div className="flex items-center gap-3">
+              <div
+                className="w-10 h-10 rounded-xl shrink-0 shadow-lg"
+                style={{ backgroundColor: editColor }}
+              />
+              <div>
+                <TagBadge name={editName || "Nome da etiqueta"} color={editColor} />
+                <p className="text-xs text-slate-500 mt-1">Assim aparecerá nos tickets</p>
+              </div>
+            </div>
           </div>
         </div>
         <ModalFooter>
-          <Button
-            variant="secondary"
-            onClick={() => setEditTag(null)}
-            disabled={editLoading}
-          >
+          <Button variant="outline" onClick={() => setEditTag(null)} disabled={editLoading}>
             Cancelar
           </Button>
-          <Button
-            onClick={handleEdit}
-            loading={editLoading}
-            disabled={!editName.trim()}
-          >
-            Salvar
+          <Button onClick={handleEdit} loading={editLoading} disabled={!editName.trim()}>
+            Salvar alterações
           </Button>
         </ModalFooter>
       </Modal>
@@ -363,27 +382,41 @@ function TagsSection() {
         onClose={() => setDeleteTarget(null)}
         title="Excluir etiqueta"
       >
-        <p className="text-sm text-slate-300">
-          Tem certeza que deseja excluir a etiqueta{" "}
-          <span className="font-medium text-slate-100">
-            "{deleteTarget?.name}"
-          </span>
-          ? Ela será removida de todos os tickets.
-        </p>
+        <div className="space-y-4">
+          {/* Warning banner */}
+          <div className="flex gap-3 rounded-xl bg-red-900/20 border border-red-800/40 p-4">
+            <div className="shrink-0 w-9 h-9 rounded-full bg-red-900/40 flex items-center justify-center">
+              <IconTrash />
+            </div>
+            <div>
+              <p className="text-sm font-semibold text-red-300">Ação irreversível</p>
+              <p className="text-xs text-red-400/80 mt-0.5">
+                Esta etiqueta será removida de todos os tickets que a utilizam.
+              </p>
+            </div>
+          </div>
+
+          {/* Tag being deleted */}
+          {deleteTarget && (
+            <div className="flex items-center gap-3 rounded-xl border border-border bg-background-elevated px-4 py-3">
+              <div className="w-8 h-8 rounded-lg shrink-0" style={{ backgroundColor: deleteTarget.color }} />
+              <div>
+                <p className="text-sm font-medium text-slate-100">{deleteTarget.name}</p>
+                <p className="text-xs text-slate-500">Etiqueta selecionada</p>
+              </div>
+            </div>
+          )}
+
+          <p className="text-sm text-slate-400">
+            Tem certeza que deseja excluir <span className="text-slate-200 font-medium">"{deleteTarget?.name}"</span>?
+          </p>
+        </div>
         <ModalFooter>
-          <Button
-            variant="secondary"
-            onClick={() => setDeleteTarget(null)}
-            disabled={deleteLoading}
-          >
+          <Button variant="outline" onClick={() => setDeleteTarget(null)} disabled={deleteLoading}>
             Cancelar
           </Button>
-          <Button
-            variant="danger"
-            onClick={handleDelete}
-            loading={deleteLoading}
-          >
-            Excluir
+          <Button variant="danger" onClick={handleDelete} loading={deleteLoading}>
+            Sim, excluir
           </Button>
         </ModalFooter>
       </Modal>
