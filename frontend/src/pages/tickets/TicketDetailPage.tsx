@@ -366,6 +366,50 @@ function SectionHeader({ icon, title, action }: { icon: JSX.Element; title: stri
   );
 }
 
+// ── Collapsible sidebar section ──────────────────────────────
+
+function SidebarSection({
+  title,
+  icon,
+  action,
+  accent,
+  defaultOpen = true,
+  children,
+}: {
+  title: string;
+  icon?: JSX.Element;
+  action?: JSX.Element;
+  accent?: "amber";
+  defaultOpen?: boolean;
+  children: React.ReactNode;
+}) {
+  const [open, setOpen] = useState(defaultOpen);
+  const isAmber = accent === "amber";
+  return (
+    <div className={`rounded-xl border ${isAmber ? "border-amber-700/25 bg-amber-950/15" : "border-border/40 bg-background-surface"}`}>
+      <button
+        type="button"
+        onClick={() => setOpen((v) => !v)}
+        className={`flex w-full items-center justify-between px-4 py-3 cursor-pointer transition-colors ${isAmber ? "hover:bg-amber-900/10" : "hover:bg-background-elevated/40"} rounded-xl`}
+      >
+        <span className={`text-[10px] font-bold uppercase tracking-widest flex items-center gap-1.5 ${isAmber ? "text-amber-500/80" : "text-slate-500"}`}>
+          {icon}{title}
+        </span>
+        <div className="flex items-center gap-2" onClick={(e) => e.stopPropagation()}>
+          {action}
+          <svg
+            className={`w-3 h-3 shrink-0 transition-transform duration-200 ${open ? "rotate-180" : ""} ${isAmber ? "text-amber-600/60" : "text-slate-600"}`}
+            fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2.5}
+          >
+            <path strokeLinecap="round" strokeLinejoin="round" d="M19 9l-7 7-7-7" />
+          </svg>
+        </div>
+      </button>
+      {open && <div className="px-4 pb-4">{children}</div>}
+    </div>
+  );
+}
+
 // ── Sidebar action button ─────────────────────────────────────
 
 function SidebarAction({
@@ -504,14 +548,15 @@ function SurveyPanel({ ticketId }: { ticketId: string }) {
 
 // ── Tabs ──────────────────────────────────────────────────────
 
-type Tab = "conversa" | "detalhes" | "historico" | "anexos";
+type Tab = "conversa" | "kb" | "detalhes" | "historico" | "anexos";
 
-function TabBar({ active, setActive, counts }: { active: Tab; setActive: (t: Tab) => void; counts: Partial<Record<Tab, number>> }) {
+function TabBar({ active, setActive, counts, showKb }: { active: Tab; setActive: (t: Tab) => void; counts: Partial<Record<Tab, number>>; showKb: boolean }) {
   const tabs: { id: Tab; label: string }[] = [
-    { id: "conversa", label: "Conversa" },
-    { id: "detalhes", label: "Detalhes" },
+    { id: "conversa",  label: "Conversa" },
+    { id: "detalhes",  label: "Detalhes" },
+    ...(showKb ? [{ id: "kb" as Tab, label: "Base de Conhecimento" }] : []),
     { id: "historico", label: "Atividade" },
-    { id: "anexos", label: "Anexos" },
+    { id: "anexos",    label: "Anexos" },
   ];
   return (
     <div className="flex gap-0.5 rounded-xl bg-background-elevated/50 p-1">
@@ -738,9 +783,9 @@ export default function TicketDetailPage() {
     : history;
 
   return (
-    <div className="space-y-5 pb-10">
+    <div className="flex flex-col h-full gap-4">
       {/* ── Page Header ──────────────────────────────────────── */}
-      <div className="flex flex-wrap items-start justify-between gap-4 rounded-2xl border border-border/40 bg-background-surface px-5 py-4">
+      <div className="shrink-0 flex flex-wrap items-start justify-between gap-4 rounded-2xl border border-border/40 bg-background-surface px-5 py-4">
         {/* Breadcrumb + title */}
         <div className="min-w-0">
           <button
@@ -783,35 +828,25 @@ export default function TicketDetailPage() {
       </div>
 
       {/* ── Body ─────────────────────────────────────────────── */}
-      <div className="grid grid-cols-1 gap-5 lg:grid-cols-[1fr_300px]">
+      {/* TabBar acima do grid — ambas as colunas começam na mesma altura */}
+      <TabBar
+        active={activeTab}
+        setActive={setActiveTab}
+        counts={{ historico: visibleHistory.length, anexos: attachments.length }}
+        showKb={isStaff}
+      />
+
+      <div className="grid grid-cols-1 lg:grid-cols-[1fr_256px] gap-5 flex-1 min-h-0">
         {/* ── Main column ───────────────────────────────────── */}
-        <div className="space-y-5 min-w-0">
-          {/* Tabs */}
-          <TabBar
-            active={activeTab}
-            setActive={setActiveTab}
-            counts={{ historico: visibleHistory.length, anexos: attachments.length }}
-          />
+        <div className="flex flex-col min-h-0 min-w-0">
+          <div className="flex-1 min-h-0 overflow-y-auto">
 
           {/* ── TAB: Conversa ───────────────────────────────── */}
           {activeTab === "conversa" && (
-            <div className="space-y-5">
-              {/* Description */}
-              <div className="rounded-xl border border-border/40 bg-background-surface">
-                <div className="flex items-center gap-2 border-b border-border/40 px-5 py-3.5">
-                  <span className="text-slate-500">{IC.Text}</span>
-                  <h2 className="text-sm font-semibold text-slate-200">Descrição</h2>
-                </div>
-                <div className="px-5 py-4">
-                  <p className="text-sm leading-relaxed text-slate-300 whitespace-pre-wrap">
-                    {ticket.description}
-                  </p>
-                </div>
-              </div>
-
+            <div className="flex flex-col gap-4 h-full">
               {/* Client observation */}
               {(ticket.client_observation || user?.role === "client") && (
-                <div className="rounded-xl border border-border/40 bg-background-surface">
+                <div className="shrink-0 rounded-xl border border-border/40 bg-background-surface">
                   <div className="flex items-center justify-between border-b border-border/40 px-5 py-3.5">
                     <div className="flex items-center gap-2">
                       <span className="text-slate-500">{IC.User}</span>
@@ -847,7 +882,7 @@ export default function TicketDetailPage() {
 
               {/* Resolution note */}
               {ticket.resolution_note && (
-                <div className="rounded-xl border border-emerald-700/30 bg-emerald-950/20">
+                <div className="shrink-0 rounded-xl border border-emerald-700/30 bg-emerald-950/20">
                   <div className="flex items-center gap-2 border-b border-emerald-700/20 px-5 py-3.5">
                     <span className="text-emerald-400">{IC.Check("w-4 h-4")}</span>
                     <h2 className="text-sm font-semibold text-emerald-400">Resolução</h2>
@@ -858,26 +893,30 @@ export default function TicketDetailPage() {
                 </div>
               )}
 
-              {/* Chat */}
-              <ChatPanel
-                ticketId={ticket.id}
-                currentUserId={user?.id ?? ""}
-                currentUserRole={user?.role}
-                savedSummary={ticket.ai_conversation_summary}
-                locked={!!isClosed}
-                onStatusChange={(s) =>
-                  setTicket((prev) => prev ? { ...prev, status: s as typeof prev.status } : prev)
-                }
-              />
-
-              {/* KB */}
-              {isStaff && <KBSuggestionsPanel ticketId={ticket.id} />}
+              {/* Chat — cresce para preencher o espaço disponível */}
+              <div className="flex-1 min-h-0">
+                <ChatPanel
+                  ticketId={ticket.id}
+                  currentUserId={user?.id ?? ""}
+                  currentUserRole={user?.role}
+                  savedSummary={ticket.ai_conversation_summary}
+                  locked={!!isClosed}
+                  onStatusChange={(s) =>
+                    setTicket((prev) => prev ? { ...prev, status: s as typeof prev.status } : prev)
+                  }
+                />
+              </div>
 
               {/* CSAT */}
               {user?.role === "client" && (ticket.status === "resolved" || ticket.status === "closed") && (
-                <SurveyPanel ticketId={ticket.id} />
+                <div className="shrink-0"><SurveyPanel ticketId={ticket.id} /></div>
               )}
             </div>
+          )}
+
+          {/* ── TAB: Base de Conhecimento ───────────────────── */}
+          {activeTab === "kb" && (
+            <KBSuggestionsPanel ticketId={ticket.id} />
           )}
 
           {/* ── TAB: Detalhes ────────────────────────────────── */}
@@ -962,67 +1001,66 @@ export default function TicketDetailPage() {
               </div>
             </div>
           )}
+
+          </div>{/* flex-1 tab wrapper */}
         </div>
 
         {/* ── Sidebar ───────────────────────────────────────── */}
-        <div className="space-y-4">
+        <div className="space-y-4 overflow-y-auto min-h-0 pr-1">
           {/* Actions (staff only) */}
           {isStaff && (
-            <div className="rounded-xl border border-border/40 bg-background-surface p-4 space-y-2">
-              <p className="mb-3 text-[10px] font-bold uppercase tracking-widest text-slate-500">Ações</p>
-              {!isClosed && (
-                <SidebarAction icon={IC.Check("w-4 h-4")} label="Concluir ticket" onClick={() => setResolveModal(true)} variant="primary" />
-              )}
-              {transitions.length > 0 && (
-                <SidebarAction icon={IC.Refresh} label="Alterar status" onClick={() => setStatusModal(true)} variant="default" />
-              )}
-              <SidebarAction icon={IC.UserPlus} label={ticket.assignee_id ? "Reatribuir" : "Atribuir técnico"} onClick={() => setAssignModal(true)} variant="default" />
-              {user?.role === "admin" && (
-                <SidebarAction icon={IC.Edit} label="Editar ticket" onClick={() => navigate(`/tickets/${ticket.id}/edit`)} variant="ghost" />
-              )}
-            </div>
+            <SidebarSection title="Ações">
+              <div className="space-y-2">
+                {!isClosed && (
+                  <SidebarAction icon={IC.Check("w-4 h-4")} label="Concluir ticket" onClick={() => setResolveModal(true)} variant="primary" />
+                )}
+                {transitions.length > 0 && (
+                  <SidebarAction icon={IC.Refresh} label="Alterar status" onClick={() => setStatusModal(true)} variant="default" />
+                )}
+                <SidebarAction icon={IC.UserPlus} label={ticket.assignee_id ? "Reatribuir" : "Atribuir técnico"} onClick={() => setAssignModal(true)} variant="default" />
+                {user?.role === "admin" && (
+                  <SidebarAction icon={IC.Edit} label="Editar ticket" onClick={() => navigate(`/tickets/${ticket.id}/edit`)} variant="ghost" />
+                )}
+              </div>
+            </SidebarSection>
           )}
 
           {/* Properties */}
-          <div className="rounded-xl border border-border/40 bg-background-surface p-4">
-            <p className="mb-1 text-[10px] font-bold uppercase tracking-widest text-slate-500">Propriedades</p>
-            <div>
-              <PropRow icon={IC.Activity} label="Status">
-                <StatusBadge status={ticket.status} />
-              </PropRow>
-              <PropRow icon={IC.Alert} label="Prioridade">
-                <PriorityBadge priority={ticket.priority} />
-              </PropRow>
-              <PropRow icon={IC.User} label="Responsável">
-                {assignedTech ? (
-                  <span className="flex items-center gap-2">
-                    <span className="flex h-5 w-5 items-center justify-center rounded-full bg-primary/20 text-[10px] font-bold text-primary">
-                      {assignedTech.charAt(0).toUpperCase()}
-                    </span>
-                    {assignedTech}
+          <SidebarSection title="Propriedades">
+            <PropRow icon={IC.Activity} label="Status">
+              <StatusBadge status={ticket.status} />
+            </PropRow>
+            <PropRow icon={IC.Alert} label="Prioridade">
+              <PriorityBadge priority={ticket.priority} />
+            </PropRow>
+            <PropRow icon={IC.User} label="Responsável">
+              {assignedTech ? (
+                <span className="flex items-center gap-2">
+                  <span className="flex h-5 w-5 items-center justify-center rounded-full bg-primary/20 text-[10px] font-bold text-primary">
+                    {assignedTech.charAt(0).toUpperCase()}
                   </span>
-                ) : (
-                  <span className="text-slate-500 font-normal italic text-xs">Não atribuído</span>
-                )}
-              </PropRow>
-              <PropRow icon={IC.Folder} label="Categoria">
-                {CATEGORY_LABEL[ticket.category] ?? ticket.category}
-              </PropRow>
-              <PropRow icon={IC.Calendar} label="Criado em">
-                {new Date(ticket.created_at).toLocaleString("pt-BR", { day: "2-digit", month: "2-digit", year: "numeric", hour: "2-digit", minute: "2-digit" })}
-              </PropRow>
-              {ticket.closed_at && (
-                <PropRow icon={IC.Check("w-4 h-4")} label="Fechado em">
-                  {new Date(ticket.closed_at).toLocaleString("pt-BR")}
-                </PropRow>
+                  {assignedTech}
+                </span>
+              ) : (
+                <span className="text-slate-500 font-normal italic text-xs">Não atribuído</span>
               )}
-            </div>
-          </div>
+            </PropRow>
+            <PropRow icon={IC.Folder} label="Categoria">
+              {CATEGORY_LABEL[ticket.category] ?? ticket.category}
+            </PropRow>
+            <PropRow icon={IC.Calendar} label="Criado em">
+              {new Date(ticket.created_at).toLocaleString("pt-BR", { day: "2-digit", month: "2-digit", year: "numeric", hour: "2-digit", minute: "2-digit" })}
+            </PropRow>
+            {ticket.closed_at && (
+              <PropRow icon={IC.Check("w-4 h-4")} label="Fechado em">
+                {new Date(ticket.closed_at).toLocaleString("pt-BR")}
+              </PropRow>
+            )}
+          </SidebarSection>
 
           {/* SLA status */}
           {(ticket.sla_response_due_at || ticket.sla_resolve_due_at) && (
-            <div className="rounded-xl border border-border/40 bg-background-surface p-4">
-              <p className="mb-3 text-[10px] font-bold uppercase tracking-widest text-slate-500">SLA</p>
+            <SidebarSection title="SLA" defaultOpen={slaBreach}>
               <div className="space-y-2">
                 {ticket.sla_response_due_at && (
                   <div className="flex items-center justify-between">
@@ -1037,24 +1075,23 @@ export default function TicketDetailPage() {
                   </div>
                 )}
               </div>
-            </div>
+            </SidebarSection>
           )}
 
           {/* Tags */}
           {(ticket.tags.length > 0 || isStaff) && (
-            <div className="rounded-xl border border-border/40 bg-background-surface p-4">
-              <div className="mb-3 flex items-center justify-between">
-                <p className="text-[10px] font-bold uppercase tracking-widest text-slate-500 flex items-center gap-1.5">
-                  {IC.Tag}
-                  Etiquetas
-                </p>
-                {isStaff && !tagsEdit && (
+            <SidebarSection
+              title="Etiquetas"
+              icon={IC.Tag}
+              action={
+                isStaff && !tagsEdit ? (
                   <button onClick={openTagsEdit} className="flex items-center gap-1 text-[10px] font-semibold text-primary hover:text-primary/80 cursor-pointer transition-colors">
                     {IC.Edit}
                     {ticket.tags.length > 0 ? "Editar" : "Adicionar"}
                   </button>
-                )}
-              </div>
+                ) : undefined
+              }
+            >
               {tagsEdit ? (
                 <div className="space-y-3">
                   <div className="flex flex-wrap gap-1.5">
@@ -1086,17 +1123,16 @@ export default function TicketDetailPage() {
               ) : (
                 <p className="text-xs italic text-slate-500">Nenhuma etiqueta.</p>
               )}
-            </div>
+            </SidebarSection>
           )}
 
           {/* Internal notes */}
           {isStaff && (
-            <div className="rounded-xl border border-amber-700/25 bg-amber-950/15 p-4">
-              <div className="mb-3 flex items-center justify-between">
-                <p className="text-[10px] font-bold uppercase tracking-widest text-amber-500/80 flex items-center gap-1.5">
-                  {IC.Lock}
-                  Notas internas
-                </p>
+            <SidebarSection
+              title="Notas internas"
+              icon={IC.Lock}
+              accent="amber"
+              action={
                 <button
                   onClick={() => setShowAddNote(true)}
                   className="flex items-center gap-1 text-[10px] font-semibold text-amber-500/70 hover:text-amber-400 cursor-pointer transition-colors"
@@ -1104,8 +1140,8 @@ export default function TicketDetailPage() {
                   {IC.Edit}
                   Adicionar
                 </button>
-              </div>
-
+              }
+            >
               {ticketNotes.length === 0 ? (
                 <p className="text-xs italic text-amber-700/50">Nenhuma nota registrada.</p>
               ) : (
@@ -1136,7 +1172,7 @@ export default function TicketDetailPage() {
                   ))}
                 </ul>
               )}
-            </div>
+            </SidebarSection>
           )}
         </div>
       </div>
