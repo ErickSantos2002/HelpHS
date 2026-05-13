@@ -535,6 +535,7 @@ function CompanyDetailModal({
       setCompanyNotes((p) => [note, ...p]);
       setNewCompanyNoteContent("");
       setShowAddCompanyNote(false);
+      onUpdated();
     } finally { setCompanyNoteSaving(false); }
   };
 
@@ -545,6 +546,7 @@ function CompanyDetailModal({
       await deleteCompanyNote(groupId, company.id, noteId);
       setCompanyNotes((p) => p.filter((n) => n.id !== noteId));
       if (viewCompanyNote?.id === noteId) setViewCompanyNote(null);
+      onUpdated();
     } finally { setCompanyNoteDeleting(null); }
   };
 
@@ -974,9 +976,13 @@ export default function GroupsPage() {
                           </button>
                         </div>
                       </div>
-                      <button onClick={() => setSelectedCompany(c)} className="mt-3 flex items-center gap-1.5 text-xs text-slate-500 hover:text-primary transition-colors cursor-pointer">
-                        <IconUsers />{c.client_count} cliente{c.client_count !== 1 ? "s" : ""}
-                        {c.notes && <span className="ml-2 flex items-center gap-1 text-amber-500"><IconNote />com notas</span>}
+                      <button onClick={() => setSelectedCompany(c)} className="mt-3 flex items-center gap-2 text-xs text-slate-500 hover:text-primary transition-colors cursor-pointer">
+                        <span className="flex items-center gap-1"><IconUsers />{c.client_count} cliente{c.client_count !== 1 ? "s" : ""}</span>
+                        {c.note_count > 0 && (
+                          <span className="flex items-center gap-1 text-amber-500 bg-amber-900/20 border border-amber-700/30 rounded-full px-2 py-0.5">
+                            <IconNote />{c.note_count} nota{c.note_count !== 1 ? "s" : ""}
+                          </span>
+                        )}
                       </button>
                     </div>
                   </div>

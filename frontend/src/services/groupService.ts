@@ -21,6 +21,7 @@ export interface CompanyResponse {
   state: string | null;
   notes: string | null;
   client_count: number;
+  note_count: number;
   created_at: string;
   updated_at: string;
 }

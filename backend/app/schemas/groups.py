@@ -67,6 +67,7 @@ class CompanyResponse(AppBaseModel):
     state: str | None
     notes: str | None
     client_count: int
+    note_count: int
     created_at: datetime
     updated_at: datetime
 

@@ -70,6 +70,14 @@ async def _company_client_count(db: AsyncSession, company_id: uuid.UUID) -> int:
     ).scalar_one()
 
 
+async def _company_note_count(db: AsyncSession, company_id: uuid.UUID) -> int:
+    return (
+        await db.execute(
+            select(func.count()).select_from(CompanyNote).where(CompanyNote.company_id == company_id)
+        )
+    ).scalar_one()
+
+
 async def _group_company_count(db: AsyncSession, group_id: uuid.UUID) -> int:
     return (
         await db.execute(
@@ -90,6 +98,7 @@ async def _company_to_response(db: AsyncSession, c: Company) -> CompanyResponse:
         state=c.state,
         notes=c.notes,
         client_count=await _company_client_count(db, c.id),
+        note_count=await _company_note_count(db, c.id),
         created_at=c.created_at,
         updated_at=c.updated_at,
     )
