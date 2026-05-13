@@ -71,11 +71,15 @@ async def _company_client_count(db: AsyncSession, company_id: uuid.UUID) -> int:
 
 
 async def _company_note_count(db: AsyncSession, company_id: uuid.UUID) -> int:
-    return (
-        await db.execute(
-            select(func.count()).select_from(CompanyNote).where(CompanyNote.company_id == company_id)
-        )
-    ).scalar_one()
+    try:
+        return (
+            await db.execute(
+                select(func.count()).select_from(CompanyNote).where(CompanyNote.company_id == company_id)
+            )
+        ).scalar_one()
+    except Exception:
+        await db.rollback()
+        return 0
 
 
 async def _group_company_count(db: AsyncSession, group_id: uuid.UUID) -> int:
