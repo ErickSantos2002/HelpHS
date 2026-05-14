@@ -128,7 +128,7 @@ const NAV_GROUPS: NavGroup[] = [
       { label: "Usuários",    path: "/users",      icon: <IconUsers />,  roles: ["admin"] },
       { label: "Produtos",    path: "/products",   icon: <IconBox />,    roles: ["admin"] },
       { label: "Etiquetas",   path: "/etiquetas",  icon: <IconTag />,    roles: ["admin"] },
-      { label: "Config. SLA", path: "/sla-config", icon: <IconClock />,  roles: ["admin"] },
+      { label: "Configuração SLA", path: "/sla-config", icon: <IconClock />,  roles: ["admin"] },
       { label: "Audit Logs",  path: "/audit-logs", icon: <IconShield />, roles: ["admin"] },
     ],
   },
