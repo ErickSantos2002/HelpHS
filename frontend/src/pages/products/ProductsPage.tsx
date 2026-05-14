@@ -1,11 +1,12 @@
 import { zodResolver } from "@hookform/resolvers/zod";
 import { useEffect, useState } from "react";
-import { useForm } from "react-hook-form";
+import { useForm, Controller } from "react-hook-form";
 import { z } from "zod";
 import {
   Alert,
   Button,
   Card,
+  FormDropdown,
   Input,
   Modal,
   ModalFooter,
@@ -216,21 +217,33 @@ function ProductFormModal({
 
 function EquipmentFormModal({
   productId,
+  productName,
   editing,
   onClose,
   onSaved,
 }: {
   productId: string;
+  productName: string;
   editing: Equipment | null;
   onClose: () => void;
   onSaved: (e: Equipment) => void;
 }) {
   const [submitError, setSubmitError] = useState<string | null>(null);
+  const [allProducts, setAllProducts] = useState<Product[]>([]);
+
+  useEffect(() => {
+    getProducts({ is_active: true, limit: 100 }).then((r) => {
+      setAllProducts(r.items);
+      if (!editing) form.setValue("model", productName);
+    });
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
+
   const form = useForm<EquipmentValues>({
     resolver: zodResolver(equipmentSchema),
     defaultValues: editing
       ? { name: editing.name, serial_number: editing.serial_number ?? "", model: editing.model ?? "", description: editing.description ?? "" }
-      : {},
+      : { model: productName },
   });
 
   async function onSubmit(values: EquipmentValues) {
@@ -263,7 +276,19 @@ function EquipmentFormModal({
         <Input label="Nome *" autoFocus error={form.formState.errors.name?.message} {...form.register("name")} />
         <div className="grid grid-cols-2 gap-3">
           <Input label="Número de série" placeholder="ex: SN-001234" {...form.register("serial_number")} />
-          <Input label="Modelo" placeholder="ex: ThinkPad X1" {...form.register("model")} />
+          <Controller
+            control={form.control}
+            name="model"
+            render={({ field }) => (
+              <FormDropdown
+                label="Modelo"
+                placeholder="— Selecionar —"
+                value={field.value ?? ""}
+                onChange={field.onChange}
+                options={allProducts.map((p) => ({ value: p.name, label: p.name }))}
+              />
+            )}
+          />
         </div>
         <Textarea label="Descrição" rows={2} {...form.register("description")} />
         <ModalFooter>
@@ -649,6 +674,7 @@ export default function ProductsPage() {
       {equipFormOpen && selectedProduct && (
         <EquipmentFormModal
           productId={selectedProduct.id}
+          productName={selectedProduct.name}
           editing={editingEquip}
           onClose={() => { setEquipFormOpen(false); setEditingEquip(null); }}
           onSaved={handleEquipSaved}
