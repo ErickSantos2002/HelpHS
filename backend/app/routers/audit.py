@@ -56,8 +56,22 @@ async def list_audit_logs(
     rows = await db.execute(base.order_by(AuditLog.created_at.desc()).offset(offset).limit(limit))
     entries = rows.scalars().all()
 
+    # Batch-fetch user names
+    user_ids = [e.user_id for e in entries if e.user_id]
+    users: dict[uuid.UUID, User] = {}
+    if user_ids:
+        user_rows = await db.execute(select(User).where(User.id.in_(user_ids)))
+        for u in user_rows.scalars().all():
+            users[u.id] = u
+
+    def _to_response(e: AuditLog) -> AuditLogResponse:
+        data = AuditLogResponse.model_validate(e)
+        if e.user_id and e.user_id in users:
+            data.user_name = users[e.user_id].name
+        return data
+
     return AuditLogListResponse(
-        items=[AuditLogResponse.model_validate(e) for e in entries],
+        items=[_to_response(e) for e in entries],
         total=total,
         limit=limit,
         offset=offset,

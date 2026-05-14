@@ -16,6 +16,7 @@ class AuditLogResponse(AppBaseModel):
 
     id: uuid.UUID
     user_id: uuid.UUID | None
+    user_name: str | None = None
     action: AuditAction
     entity_type: str
     entity_id: uuid.UUID | None
