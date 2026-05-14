@@ -227,12 +227,15 @@ async def list_equipments(
     offset: int = Query(default=0, ge=0),
     limit: int = Query(default=20, ge=1, le=100),
     is_active: bool | None = Query(default=None),
+    search: str | None = Query(default=None, max_length=100),
 ) -> EquipmentListResponse:
     await get_or_404(db, Product, product_id, "Product not found")
 
     base = select(Equipment).where(Equipment.product_id == product_id)
     if is_active is not None:
         base = base.where(Equipment.is_active == is_active)
+    if search:
+        base = base.where(Equipment.name.ilike(f"%{search}%"))
 
     total = (await db.execute(select(func.count()).select_from(base.subquery()))).scalar_one()
     rows = await db.execute(base.order_by(Equipment.name).offset(offset).limit(limit))

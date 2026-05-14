@@ -300,6 +300,7 @@ export default function ProductsPage() {
   const [equipError, setEquipError] = useState<string | null>(null);
   const [equipPage, setEquipPage] = useState(1);
   const [equipFilter, setEquipFilter] = useState<FilterTab>("active");
+  const [equipSearch, setEquipSearch] = useState("");
   const [togglingEquip, setTogglingEquip] = useState<string | null>(null);
 
   // Equipment modals
@@ -327,6 +328,7 @@ export default function ProductsPage() {
     setEquipLoading(true);
     setEquipError(null);
     getEquipments(productId, {
+      search: equipSearch || undefined,
       is_active: equipFilter === "all" ? undefined : equipFilter === "active",
       limit: EQUIP_PAGE,
       offset: (p - 1) * EQUIP_PAGE,
@@ -339,7 +341,7 @@ export default function ProductsPage() {
   useEffect(() => {
     if (selectedProduct) loadEquipments(selectedProduct.id, equipPage);
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [selectedProduct?.id, equipFilter, equipPage]);
+  }, [selectedProduct?.id, equipFilter, equipSearch, equipPage]);
 
   async function toggleProduct(product: Product) {
     setTogglingProduct(product.id);
@@ -391,6 +393,7 @@ export default function ProductsPage() {
     } else {
       setSelectedProduct(p);
       setEquipPage(1);
+      setEquipSearch("");
     }
   }
 
@@ -531,6 +534,19 @@ export default function ProductsPage() {
               <Button size="sm" onClick={() => { setEditingEquip(null); setEquipFormOpen(true); }}>
                 {IC.Plus} Novo Equipamento
               </Button>
+            </div>
+          </div>
+
+          {/* Equipment search */}
+          <div className="px-4 py-2.5 border-b border-border">
+            <div className="relative">
+              <span className="absolute left-3 top-1/2 -translate-y-1/2 text-slate-500 pointer-events-none">{IC.Search}</span>
+              <input
+                className="w-full pl-9 pr-3 py-2 rounded-xl border border-border/60 bg-background-elevated text-sm text-slate-200 placeholder:text-slate-500 focus:outline-none focus:ring-2 focus:ring-primary focus:border-transparent transition-colors"
+                placeholder="Buscar equipamento…"
+                value={equipSearch}
+                onChange={(e) => { setEquipSearch(e.target.value); setEquipPage(1); }}
+              />
             </div>
           </div>
 

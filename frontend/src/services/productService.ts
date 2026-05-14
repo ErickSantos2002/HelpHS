@@ -94,9 +94,10 @@ export async function setProductActive(
 
 export async function getEquipments(
   productId: string,
-  params: { is_active?: boolean; limit?: number; offset?: number } = {},
+  params: { search?: string; is_active?: boolean; limit?: number; offset?: number } = {},
 ): Promise<EquipmentListResponse> {
   const p = new URLSearchParams();
+  if (params.search) p.set("search", params.search);
   if (params.is_active !== undefined)
     p.set("is_active", String(params.is_active));
   if (params.limit !== undefined) p.set("limit", String(params.limit));
