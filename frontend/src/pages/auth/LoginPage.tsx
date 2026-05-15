@@ -1,5 +1,4 @@
-import { useState } from "react";
-import type { FormEvent } from "react";
+import React, { useState } from "react";
 import { useNavigate, useLocation, Link } from "react-router-dom";
 import { Alert, Button, Input } from "../../components/ui";
 import { useAuth } from "../../contexts/AuthContext";
@@ -58,7 +57,7 @@ export default function LoginPage() {
     (location.state as { registered?: boolean })?.registered === true;
   const from = (location.state as { from?: string })?.from ?? "/";
 
-  async function handleSubmit(e: FormEvent) {
+  async function handleSubmit(e: React.FormEvent<HTMLFormElement>) {
     e.preventDefault();
     if (!email || !password) return;
     setLoading(true);
@@ -132,7 +131,7 @@ export default function LoginPage() {
       </div>
 
       {/* ── Right panel 40% — form ──────────────────────────── */}
-      <div className="flex flex-1 lg:w-2/5 flex-col items-center justify-center bg-background px-6 py-12">
+      <div className="flex flex-1 lg:w-2/5 flex-col items-center justify-center bg-[#0D1623] px-6 py-12">
         <div className="w-full max-w-sm space-y-8">
           {/* Mobile logo */}
           <div className="flex lg:hidden items-center justify-center gap-2.5">
