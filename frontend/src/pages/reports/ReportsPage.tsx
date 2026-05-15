@@ -548,13 +548,13 @@ function GlobalReport({ data, period }: { data: ReportData; period: number }) {
         </ChartCard>
       </div>
 
-      {/* 2-col: Tempo médio resolução | Tempo médio 1ª resposta */}
-      {((resolutionChartData?.length ?? 0) > 0 || (data.avg_first_response_by_priority ?? []).some((r) => r.avg_hours != null)) && (
-        <div className="grid grid-cols-1 lg:grid-cols-2 gap-4">
+      {/* 3-col: Tempo médio resolução | Tempo médio 1ª resposta | Tickets por produto */}
+      {((resolutionChartData?.length ?? 0) > 0 || (data.avg_first_response_by_priority ?? []).some((r) => r.avg_hours != null) || (data.tickets_by_product?.length ?? 0) > 0) && (
+        <div className="grid grid-cols-1 lg:grid-cols-3 gap-4">
           {(resolutionChartData?.length ?? 0) > 0 && (
             <ChartCard title="Tempo médio de resolução por prioridade">
               <ResponsiveContainer width="100%" height={220}>
-                <BarChart data={resolutionChartData} margin={{ top: 4, right: 4, left: 0, bottom: 0 }} barSize={48}>
+                <BarChart data={resolutionChartData} margin={{ top: 4, right: 4, left: 0, bottom: 0 }} barSize={36}>
                   <CartesianGrid strokeDasharray="3 3" stroke="#2d3748" />
                   <XAxis dataKey="priority" tick={{ fontSize: 10, fill: "#94a3b8" }}
                     tickFormatter={(v: string) => PRIORITY_LABELS[v] ?? v} />
@@ -580,44 +580,40 @@ function GlobalReport({ data, period }: { data: ReportData; period: number }) {
           <FirstResponseChart data={data.avg_first_response_by_priority ?? []}
             gridColor={gridColor} tooltipBg={tooltipBg} tooltipBorder={tooltipBorder}
             tooltipColor={tooltipColor} fmtHours={fmtHours} />
-        </div>
-      )}
-
-      {/* 2-col: Tendência CSAT | Tickets por produto */}
-      {(hasCsatTrend || (data.tickets_by_product?.length ?? 0) > 0) && (
-        <div className="grid grid-cols-1 lg:grid-cols-2 gap-4">
-          {hasCsatTrend && (
-            <ChartCard title="Tendência CSAT ao longo do tempo">
-              <ResponsiveContainer width="100%" height={220}>
-                <AreaChart data={data.csat_by_day} margin={{ top: 8, right: 4, left: -20, bottom: 0 }}>
-                  <defs>
-                    <linearGradient id="csatGradient" x1="0" y1="0" x2="0" y2="1">
-                      <stop offset="5%"  stopColor="#f59e0b" stopOpacity={0.3} />
-                      <stop offset="95%" stopColor="#f59e0b" stopOpacity={0}   />
-                    </linearGradient>
-                  </defs>
-                  <CartesianGrid strokeDasharray="3 3" stroke="#2d3748" />
-                  <XAxis dataKey="date" tick={{ fontSize: 10, fill: "#94a3b8" }}
-                    tickFormatter={(v: string) => v.slice(5)}
-                    interval={Math.max(1, Math.floor(data.csat_by_day.length / 6))} />
-                  <YAxis tick={{ fontSize: 10, fill: "#94a3b8" }} domain={[1, 5]} ticks={[1, 2, 3, 4, 5]} />
-                  <ReferenceLine y={4} stroke="#10b981" strokeDasharray="4 3"
-                    label={{ value: "Meta 4.0", fill: "#10b981", fontSize: 10, position: "insideTopRight" }} />
-                  <Tooltip contentStyle={tooltipStyle} wrapperStyle={tooltipWrapperStyle}
-                    labelFormatter={(v) => `Data: ${v}`}
-                    formatter={(v: number, _: string, props: { payload: CsatDailyItem }) => [
-                      v != null ? `${Number(v).toFixed(2)} ★ (${props.payload.count} avaliações)` : "—",
-                      "CSAT",
-                    ]} />
-                  <Area type="monotone" dataKey="avg_rating" stroke="#f59e0b" strokeWidth={2}
-                    fill="url(#csatGradient)" dot={false} connectNulls={false} />
-                </AreaChart>
-              </ResponsiveContainer>
-            </ChartCard>
-          )}
           <ProductChart data={data.tickets_by_product ?? []}
             gridColor={gridColor} tooltipBg={tooltipBg} tooltipBorder={tooltipBorder} tooltipColor={tooltipColor} />
         </div>
+      )}
+
+      {/* Tendência CSAT */}
+      {hasCsatTrend && (
+        <ChartCard title="Tendência CSAT ao longo do tempo">
+          <ResponsiveContainer width="100%" height={220}>
+            <AreaChart data={data.csat_by_day} margin={{ top: 8, right: 4, left: -20, bottom: 0 }}>
+              <defs>
+                <linearGradient id="csatGradient" x1="0" y1="0" x2="0" y2="1">
+                  <stop offset="5%"  stopColor="#f59e0b" stopOpacity={0.3} />
+                  <stop offset="95%" stopColor="#f59e0b" stopOpacity={0}   />
+                </linearGradient>
+              </defs>
+              <CartesianGrid strokeDasharray="3 3" stroke="#2d3748" />
+              <XAxis dataKey="date" tick={{ fontSize: 10, fill: "#94a3b8" }}
+                tickFormatter={(v: string) => v.slice(5)}
+                interval={Math.max(1, Math.floor(data.csat_by_day.length / 6))} />
+              <YAxis tick={{ fontSize: 10, fill: "#94a3b8" }} domain={[1, 5]} ticks={[1, 2, 3, 4, 5]} />
+              <ReferenceLine y={4} stroke="#10b981" strokeDasharray="4 3"
+                label={{ value: "Meta 4.0", fill: "#10b981", fontSize: 10, position: "insideTopRight" }} />
+              <Tooltip contentStyle={tooltipStyle} wrapperStyle={tooltipWrapperStyle}
+                labelFormatter={(v) => `Data: ${v}`}
+                formatter={(v: number, _: string, props: { payload: CsatDailyItem }) => [
+                  v != null ? `${Number(v).toFixed(2)} ★ (${props.payload.count} avaliações)` : "—",
+                  "CSAT",
+                ]} />
+              <Area type="monotone" dataKey="avg_rating" stroke="#f59e0b" strokeWidth={2}
+                fill="url(#csatGradient)" dot={false} connectNulls={false} />
+            </AreaChart>
+          </ResponsiveContainer>
+        </ChartCard>
       )}
 
       {/* Tickets em aberto há mais tempo */}
