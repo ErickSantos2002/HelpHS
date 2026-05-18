@@ -114,7 +114,7 @@ function FilterTabs({ value, onChange }: { value: FilterTab; onChange: (v: Filte
           className={`px-3 py-1 rounded-md text-xs font-medium transition-colors cursor-pointer ${
             value === t.key
               ? "bg-primary/20 text-primary"
-              : "text-slate-400 hover:text-slate-200"
+              : "text-slate-500 dark:text-slate-400 hover:text-slate-700 dark:hover:text-slate-200"
           }`}
         >
           {t.label}
@@ -142,14 +142,14 @@ function ActivePill({
       title={active ? "Clique para desativar" : "Clique para ativar"}
       className={`inline-flex items-center gap-1.5 px-2.5 py-1 rounded-full border text-xs font-medium transition-colors shrink-0 ${
         active
-          ? "border-emerald-700/50 bg-emerald-900/20 text-emerald-300 hover:bg-emerald-900/40 cursor-pointer"
-          : "border-slate-600/50 bg-slate-800/40 text-slate-400 hover:bg-slate-700/40 cursor-pointer"
+          ? "border-emerald-300 bg-emerald-50 text-emerald-600 hover:bg-emerald-100 dark:border-emerald-700/50 dark:bg-emerald-900/20 dark:text-emerald-300 dark:hover:bg-emerald-900/40 cursor-pointer"
+          : "border-slate-300 bg-slate-100 text-slate-500 hover:bg-slate-200 dark:border-slate-600/50 dark:bg-slate-800/40 dark:text-slate-400 dark:hover:bg-slate-700/40 cursor-pointer"
       } disabled:cursor-default`}
     >
       {loading ? (
         <span className="w-1.5 h-1.5 rounded-full bg-current animate-pulse" />
       ) : (
-        <span className={`w-1.5 h-1.5 rounded-full shrink-0 ${active ? "bg-emerald-400" : "bg-slate-500"}`} />
+        <span className={`w-1.5 h-1.5 rounded-full shrink-0 ${active ? "bg-emerald-500" : "bg-slate-400 dark:bg-slate-500"}`} />
       )}
       {active ? "Ativo" : "Inativo"}
     </button>
@@ -427,8 +427,8 @@ export default function ProductsPage() {
       {/* Header */}
       <div className="flex items-center justify-between gap-4 flex-wrap">
         <div>
-          <h1 className="text-2xl font-bold text-slate-100">Produtos</h1>
-          <p className="text-slate-400 text-sm mt-0.5">
+          <h1 className="text-2xl font-bold text-slate-800 dark:text-slate-100">Produtos</h1>
+          <p className="text-slate-500 dark:text-slate-400 text-sm mt-0.5">
             {totalProducts} {totalProducts === 1 ? "produto cadastrado" : "produtos cadastrados"}
           </p>
         </div>
@@ -441,7 +441,7 @@ export default function ProductsPage() {
       <Card padding="none">
         <div className="px-4 py-3 border-b border-border flex flex-wrap items-center justify-between gap-3">
           <div>
-            <p className="text-sm font-semibold text-slate-200">Catálogo de produtos</p>
+            <p className="text-sm font-semibold text-slate-700 dark:text-slate-200">Catálogo de produtos</p>
             <p className="text-xs text-slate-500 mt-0.5">Clique num produto para ver seus equipamentos.</p>
           </div>
           <div className="flex items-center gap-3">
@@ -457,7 +457,7 @@ export default function ProductsPage() {
           <div className="relative">
             <span className="absolute left-3 top-1/2 -translate-y-1/2 text-slate-500 pointer-events-none">{IC.Search}</span>
             <input
-              className="w-full pl-9 pr-3 py-2 rounded-xl border border-border/60 bg-background-elevated text-sm text-slate-200 placeholder:text-slate-500 focus:outline-none focus:ring-2 focus:ring-primary focus:border-transparent transition-colors"
+              className="w-full pl-9 pr-3 py-2 rounded-xl border border-border/60 bg-background-elevated text-sm text-slate-700 dark:text-slate-200 placeholder:text-slate-500 focus:outline-none focus:ring-2 focus:ring-primary focus:border-transparent transition-colors"
               placeholder="Buscar produto…"
               value={productSearch}
               onChange={(e) => { setProductSearch(e.target.value); setProductPage(1); }}
@@ -493,7 +493,7 @@ export default function ProductsPage() {
 
                   {/* Name + description */}
                   <div className="flex-1 min-w-0">
-                    <p className={`text-sm font-medium truncate ${p.is_active ? "text-slate-200" : "text-slate-500 line-through"}`}>
+                    <p className={`text-sm font-medium truncate ${p.is_active ? "text-slate-800 dark:text-slate-200" : "text-slate-400 line-through"}`}>
                       {p.name}
                     </p>
                     {p.description && (
@@ -527,7 +527,7 @@ export default function ProductsPage() {
                   </button>
 
                   {/* Chevron */}
-                  <span className={`text-slate-600 transition-transform ${selectedProduct?.id === p.id ? "rotate-90" : ""}`}>
+                  <span className={`text-slate-400 dark:text-slate-600 transition-transform ${selectedProduct?.id === p.id ? "rotate-90" : ""}`}>
                     {IC.ChevronRight}
                   </span>
                 </div>
@@ -546,9 +546,9 @@ export default function ProductsPage() {
         <Card padding="none">
           <div className="px-4 py-3 border-b border-border flex flex-wrap items-center justify-between gap-3">
             <div>
-              <p className="text-sm font-semibold text-slate-200">
+              <p className="text-sm font-semibold text-slate-700 dark:text-slate-200">
                 Equipamentos
-                <span className="font-normal text-slate-400 ml-2">— {selectedProduct.name}</span>
+                <span className="font-normal text-slate-500 dark:text-slate-400 ml-2">— {selectedProduct.name}</span>
               </p>
               <p className="text-xs text-slate-500 mt-0.5">
                 {totalEquip} {totalEquip === 1 ? "equipamento" : "equipamentos"}
@@ -567,7 +567,7 @@ export default function ProductsPage() {
             <div className="relative">
               <span className="absolute left-3 top-1/2 -translate-y-1/2 text-slate-500 pointer-events-none">{IC.Search}</span>
               <input
-                className="w-full pl-9 pr-3 py-2 rounded-xl border border-border/60 bg-background-elevated text-sm text-slate-200 placeholder:text-slate-500 focus:outline-none focus:ring-2 focus:ring-primary focus:border-transparent transition-colors"
+                className="w-full pl-9 pr-3 py-2 rounded-xl border border-border/60 bg-background-elevated text-sm text-slate-700 dark:text-slate-200 placeholder:text-slate-500 focus:outline-none focus:ring-2 focus:ring-primary focus:border-transparent transition-colors"
                 placeholder="Buscar equipamento…"
                 value={equipSearch}
                 onChange={(e) => { setEquipSearch(e.target.value); setEquipPage(1); }}
@@ -599,7 +599,7 @@ export default function ProductsPage() {
 
                     {/* Name + serial */}
                     <div className="flex-1 min-w-0">
-                      <p className={`text-sm font-medium truncate ${e.is_active ? "text-slate-200" : "text-slate-500 line-through"}`}>
+                      <p className={`text-sm font-medium truncate ${e.is_active ? "text-slate-800 dark:text-slate-200" : "text-slate-400 line-through"}`}>
                         {e.name}
                       </p>
                       {e.serial_number && (
@@ -616,7 +616,7 @@ export default function ProductsPage() {
 
                     {/* Owner + company — always visible */}
                     <div className="flex flex-col items-end shrink-0 max-w-[180px]">
-                      <span className="flex items-center gap-1 text-xs text-slate-300 truncate">
+                      <span className="flex items-center gap-1 text-xs text-slate-600 dark:text-slate-300 truncate">
                         {e.owner_name ?? <span className="text-slate-600">—</span>}
                         {IC.User}
                       </span>
