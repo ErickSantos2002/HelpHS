@@ -57,8 +57,8 @@ export function FilterSelect({ value, onChange, options, placeholder = "Todos", 
           "flex h-9 items-center gap-2 rounded-lg border px-3 text-sm font-medium transition-all cursor-pointer select-none",
           "bg-background-surface dark:bg-background-elevated",
           open
-            ? "border-primary ring-2 ring-primary/20 text-slate-100"
-            : "border-border/60 text-slate-300 hover:border-border hover:text-slate-100",
+            ? "border-primary ring-2 ring-primary/20 text-slate-800 dark:text-slate-100"
+            : "border-border/60 text-slate-600 dark:text-slate-300 hover:border-border hover:text-slate-800 dark:hover:text-slate-100",
         )}
       >
         {selected?.dot && (
@@ -72,7 +72,7 @@ export function FilterSelect({ value, onChange, options, placeholder = "Todos", 
 
       {/* Dropdown */}
       {open && (
-        <div className="absolute left-0 top-full z-50 mt-1.5 min-w-[160px] rounded-xl border border-border/60 bg-background-surface shadow-xl shadow-black/20 overflow-hidden">
+        <div className="absolute left-0 top-full z-50 mt-1.5 min-w-[160px] rounded-xl border border-border/60 bg-white dark:bg-background-surface shadow-lg shadow-black/10 dark:shadow-black/20 overflow-hidden">
           {/* Placeholder option */}
           <button
             type="button"
@@ -81,16 +81,16 @@ export function FilterSelect({ value, onChange, options, placeholder = "Todos", 
               "flex w-full items-center gap-2.5 px-3 py-2.5 text-sm transition-colors cursor-pointer",
               !value
                 ? "bg-primary/10 text-primary font-semibold"
-                : "text-slate-400 hover:bg-background-elevated hover:text-slate-200",
+                : "text-slate-500 dark:text-slate-400 hover:bg-slate-50 dark:hover:bg-background-elevated hover:text-slate-700 dark:hover:text-slate-200",
             )}
           >
-            <span className="w-2 h-2 rounded-full shrink-0 bg-transparent border border-slate-600" />
+            <span className="w-2 h-2 rounded-full shrink-0 bg-transparent border border-slate-400 dark:border-slate-600" />
             <span className="flex-1 text-left">{placeholder}</span>
             {!value && <span className="text-primary">{CheckIcon}</span>}
           </button>
 
           {/* Divider */}
-          <div className="h-px bg-border/40 mx-2" />
+          <div className="h-px bg-slate-200 dark:bg-border/40 mx-2" />
 
           {/* Options */}
           {options.map((opt) => {
@@ -104,7 +104,7 @@ export function FilterSelect({ value, onChange, options, placeholder = "Todos", 
                   "flex w-full items-center gap-2.5 px-3 py-2.5 text-sm transition-colors cursor-pointer",
                   active
                     ? "bg-primary/10 text-primary font-semibold"
-                    : "text-slate-300 hover:bg-background-elevated hover:text-slate-100",
+                    : "text-slate-600 dark:text-slate-300 hover:bg-slate-50 dark:hover:bg-background-elevated hover:text-slate-800 dark:hover:text-slate-100",
                 )}
               >
                 {opt.dot ? (
