@@ -49,12 +49,18 @@
     @apply w-1.5 h-1.5;
   }
   ::-webkit-scrollbar-track {
-    @apply bg-background-surface;
+    background: transparent;
   }
   ::-webkit-scrollbar-thumb {
-    @apply bg-background-elevated rounded-full;
+    @apply rounded-full;
+    background: rgb(148 163 184 / 0.5); /* slate-400/50 — visible in both modes */
   }
   ::-webkit-scrollbar-thumb:hover {
-    background: rgb(var(--border-color));
+    background: rgb(100 116 139 / 0.8); /* slate-500/80 */
+  }
+  /* Kanban drag cursor */
+  .kanban-scroll.dragging {
+    cursor: grabbing !important;
+    user-select: none;
   }
 }

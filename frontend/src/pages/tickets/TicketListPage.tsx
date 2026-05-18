@@ -239,6 +239,26 @@ export default function TicketListPage() {
     return () => { if (clockRef.current) clearInterval(clockRef.current); };
   }, []);
 
+  // Drag-to-scroll no Kanban
+  const scrollRef = useRef<HTMLDivElement>(null);
+  const dragState = useRef({ active: false, startX: 0, scrollLeft: 0 });
+
+  function onMouseDown(e: React.MouseEvent) {
+    if (!scrollRef.current) return;
+    dragState.current = { active: true, startX: e.pageX - scrollRef.current.offsetLeft, scrollLeft: scrollRef.current.scrollLeft };
+    scrollRef.current.classList.add("dragging");
+  }
+  function onMouseMove(e: React.MouseEvent) {
+    if (!dragState.current.active || !scrollRef.current) return;
+    e.preventDefault();
+    const x = e.pageX - scrollRef.current.offsetLeft;
+    scrollRef.current.scrollLeft = dragState.current.scrollLeft - (x - dragState.current.startX);
+  }
+  function stopDrag() {
+    dragState.current.active = false;
+    scrollRef.current?.classList.remove("dragging");
+  }
+
   useEffect(() => {
     setLoading(true);
     getTickets({ limit: 500 })
@@ -363,7 +383,14 @@ export default function TicketListPage() {
       {/* flex-1 min-h-0 = preenche o restante sem overflow vertical */}
       <div className="flex-1 min-h-0 rounded-2xl bg-slate-200/60 dark:bg-slate-900/50 border border-slate-200 dark:border-border overflow-hidden">
         {/* overflow-x-auto = scroll horizontal quando colunas não cabem */}
-        <div className="h-full overflow-x-auto">
+        <div
+          ref={scrollRef}
+          onMouseDown={onMouseDown}
+          onMouseMove={onMouseMove}
+          onMouseLeave={stopDrag}
+          onMouseUp={stopDrag}
+          className="h-full overflow-x-auto kanban-scroll cursor-grab"
+        >
           <div className="flex gap-3 h-full p-3 min-w-max">
             {COLUMNS.map((col) => (
               <KanbanColumn
