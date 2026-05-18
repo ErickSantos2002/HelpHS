@@ -89,11 +89,11 @@ function ActivePill({ active }: { active: boolean }) {
     <span
       className={`inline-flex items-center gap-1.5 px-2.5 py-1 rounded-full border text-xs font-medium shrink-0 ${
         active
-          ? "border-emerald-700/50 bg-emerald-900/20 text-emerald-300"
-          : "border-slate-600/50 bg-slate-800/40 text-slate-400"
+          ? "border-emerald-300 bg-emerald-50 text-emerald-600 dark:border-emerald-700/50 dark:bg-emerald-900/20 dark:text-emerald-300"
+          : "border-slate-300 bg-slate-100 text-slate-500 dark:border-slate-600/50 dark:bg-slate-800/40 dark:text-slate-400"
       }`}
     >
-      <span className={`w-1.5 h-1.5 rounded-full shrink-0 ${active ? "bg-emerald-400" : "bg-slate-500"}`} />
+      <span className={`w-1.5 h-1.5 rounded-full shrink-0 ${active ? "bg-emerald-500 dark:bg-emerald-400" : "bg-slate-400 dark:bg-slate-500"}`} />
       {active ? "Ativo" : "Inativo"}
     </span>
   );
@@ -105,7 +105,7 @@ function KpiCard({ label, value, accent }: { label: string; value: number; accen
   return (
     <div className="rounded-xl bg-background-surface border border-border p-4 flex flex-col gap-1">
       <p className="text-xs text-slate-500 font-medium uppercase tracking-wide">{label}</p>
-      <p className={`text-2xl font-bold ${accent ?? "text-slate-100"}`}>{value}</p>
+      <p className={`text-2xl font-bold ${accent ?? "text-slate-700 dark:text-slate-100"}`}>{value}</p>
     </div>
   );
 }
@@ -143,9 +143,9 @@ function AddModal({ products, onClose, onAdded }: {
       <form onSubmit={form.handleSubmit(handleSubmit)} className="space-y-4">
         {submitError && <Alert variant="danger">{submitError}</Alert>}
         <div className="space-y-1.5">
-          <label className="text-xs font-medium text-slate-400">Produto *</label>
+          <label className="text-xs font-medium text-slate-600 dark:text-slate-400">Produto *</label>
           <select
-            className="w-full rounded-xl border border-border/60 bg-background-elevated px-3 py-2 text-sm text-slate-200 focus:outline-none focus:ring-2 focus:ring-primary focus:border-transparent transition-colors"
+            className="w-full rounded-xl border border-border/60 bg-background-elevated px-3 py-2 text-sm text-slate-700 dark:text-slate-200 focus:outline-none focus:ring-2 focus:ring-primary focus:border-transparent transition-colors"
             {...form.register("product_id")}
           >
             {products.map((p) => (
@@ -260,22 +260,22 @@ function DeleteModal({ equipment, onClose, onDeleted }: {
     <Modal open onClose={onClose} title="Excluir equipamento">
       <div className="space-y-4">
         {error && <Alert variant="danger">{error}</Alert>}
-        <div className="flex gap-3 rounded-xl bg-red-900/20 border border-red-800/40 p-4">
-          <div className="shrink-0 w-9 h-9 rounded-full bg-red-900/40 flex items-center justify-center text-red-400">{IC.Trash}</div>
+        <div className="flex gap-3 rounded-xl bg-red-50 border border-red-200 dark:bg-red-900/20 dark:border-red-800/40 p-4">
+          <div className="shrink-0 w-9 h-9 rounded-full bg-red-100 dark:bg-red-900/40 flex items-center justify-center text-red-500 dark:text-red-400">{IC.Trash}</div>
           <div>
-            <p className="text-sm font-semibold text-red-300">Ação irreversível</p>
-            <p className="text-xs text-red-400/80 mt-0.5">Este equipamento será removido permanentemente.</p>
+            <p className="text-sm font-semibold text-red-600 dark:text-red-300">Ação irreversível</p>
+            <p className="text-xs text-red-500/80 dark:text-red-400/80 mt-0.5">Este equipamento será removido permanentemente.</p>
           </div>
         </div>
         <div className="flex items-center gap-3 rounded-xl border border-border bg-background-elevated px-4 py-3">
           <div className="w-9 h-9 rounded-lg bg-background-surface border border-border flex items-center justify-center text-slate-500">{IC.Cpu}</div>
           <div className="flex-1 min-w-0">
-            <p className="text-sm font-medium text-slate-100 truncate">{equipment.name}</p>
+            <p className="text-sm font-medium text-slate-800 dark:text-slate-100 truncate">{equipment.name}</p>
             {equipment.serial_number && <p className="text-xs font-mono text-slate-500">{equipment.serial_number}</p>}
           </div>
         </div>
-        <p className="text-sm text-slate-400">
-          Tem certeza que deseja excluir <span className="font-medium text-slate-200">{equipment.name}</span>?
+        <p className="text-sm text-slate-500 dark:text-slate-400">
+          Tem certeza que deseja excluir <span className="font-medium text-slate-700 dark:text-slate-200">{equipment.name}</span>?
         </p>
       </div>
       <ModalFooter>
@@ -347,8 +347,8 @@ export default function EquipmentPage() {
       {/* Header */}
       <div className="flex items-center justify-between gap-4 flex-wrap">
         <div>
-          <h1 className="text-2xl font-bold text-slate-100">Meus equipamentos</h1>
-          <p className="text-slate-400 text-sm mt-0.5">
+          <h1 className="text-2xl font-bold text-slate-800 dark:text-slate-100">Meus equipamentos</h1>
+          <p className="text-slate-500 dark:text-slate-400 text-sm mt-0.5">
             Gerencie os equipamentos sob sua responsabilidade.
           </p>
         </div>
@@ -360,7 +360,7 @@ export default function EquipmentPage() {
       {/* KPIs */}
       <div className="grid grid-cols-3 gap-3">
         <KpiCard label="Total" value={total} />
-        <KpiCard label="Ativos" value={active} accent="text-emerald-400" />
+        <KpiCard label="Ativos" value={active} accent="text-emerald-600 dark:text-emerald-400" />
         <KpiCard label="Inativos" value={inactive} accent="text-slate-500" />
       </div>
 
@@ -373,7 +373,7 @@ export default function EquipmentPage() {
               key={key}
               onClick={() => { setFilter(key); setPage(1); }}
               className={`px-4 py-2.5 text-sm font-medium border-b-2 transition-colors cursor-pointer -mb-px ${
-                filter === key ? "border-primary text-primary" : "border-transparent text-slate-500 hover:text-slate-300"
+                filter === key ? "border-primary text-primary" : "border-transparent text-slate-500 hover:text-slate-700 dark:hover:text-slate-300"
               }`}
             >
               {label}
@@ -412,7 +412,7 @@ export default function EquipmentPage() {
 
                     {/* Name + details */}
                     <div className="flex-1 min-w-0">
-                      <p className={`text-sm font-medium truncate ${e.is_active ? "text-slate-200" : "text-slate-500 line-through"}`}>
+                      <p className={`text-sm font-medium truncate ${e.is_active ? "text-slate-800 dark:text-slate-200" : "text-slate-400 line-through"}`}>
                         {e.name}
                       </p>
                       <div className="flex items-center gap-2 flex-wrap mt-0.5">

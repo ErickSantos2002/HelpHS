@@ -1,4 +1,5 @@
 import { useEffect, useId, useRef } from "react";
+import { createPortal } from "react-dom";
 import type { ReactNode } from "react";
 import { cn } from "../../lib/utils";
 
@@ -91,9 +92,9 @@ export function Modal({
 
   if (!open) return null;
 
-  return (
+  return createPortal(
     <div
-      className="fixed inset-0 z-50 flex items-center justify-center p-4"
+      className="fixed inset-0 z-[200] flex items-center justify-center p-4"
       aria-modal="true"
       role="dialog"
       aria-labelledby={title ? titleId : undefined}
@@ -116,12 +117,12 @@ export function Modal({
       >
         {title && (
           <div className="flex items-center justify-between border-b border-border px-6 py-4">
-            <h2 id={titleId} className="text-base font-semibold text-slate-100">
+            <h2 id={titleId} className="text-base font-semibold text-slate-800 dark:text-slate-100">
               {title}
             </h2>
             <button
               onClick={onClose}
-              className="rounded-lg p-1 text-slate-400 hover:bg-background-elevated hover:text-slate-200 transition-colors"
+              className="rounded-lg p-1 text-slate-500 dark:text-slate-400 hover:bg-background-elevated hover:text-slate-700 dark:hover:text-slate-200 transition-colors"
               aria-label="Fechar"
             >
               <svg
@@ -143,7 +144,8 @@ export function Modal({
         )}
         <div className="px-6 py-4">{children}</div>
       </div>
-    </div>
+    </div>,
+    document.body,
   );
 }
 
