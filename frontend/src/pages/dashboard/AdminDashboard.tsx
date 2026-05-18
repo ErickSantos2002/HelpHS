@@ -297,13 +297,13 @@ export default function AdminDashboard() {
           {/* Custom date range */}
           {periodKey === "custom" && (
             <div className="flex h-9 items-center gap-1.5 rounded-lg border border-border/60 bg-background-elevated px-3 text-sm">
-              <svg className="w-3.5 h-3.5 shrink-0 text-slate-400" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}><path strokeLinecap="round" strokeLinejoin="round" d="M8 7V3m8 4V3m-9 8h10M5 21h14a2 2 0 002-2V7a2 2 0 00-2-2H5a2 2 0 00-2 2v12a2 2 0 002 2z" /></svg>
+              <svg className="w-3.5 h-3.5 shrink-0 text-slate-500" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}><path strokeLinecap="round" strokeLinejoin="round" d="M8 7V3m8 4V3m-9 8h10M5 21h14a2 2 0 002-2V7a2 2 0 00-2-2H5a2 2 0 00-2 2v12a2 2 0 002 2z" /></svg>
               <input
                 type="date"
                 value={customDates.start}
                 max={customDates.end}
                 onChange={(e) => setCustomDates((d) => ({ ...d, start: e.target.value }))}
-                className="bg-transparent text-slate-300 text-xs outline-none cursor-pointer w-28 [color-scheme:dark]"
+                className="bg-transparent text-slate-700 dark:text-slate-300 text-xs outline-none cursor-pointer w-28 [color-scheme:light] dark:[color-scheme:dark]"
               />
               <span className="text-slate-500 text-xs">até</span>
               <input
@@ -312,7 +312,7 @@ export default function AdminDashboard() {
                 min={customDates.start}
                 max={new Date().toISOString().slice(0, 10)}
                 onChange={(e) => setCustomDates((d) => ({ ...d, end: e.target.value }))}
-                className="bg-transparent text-slate-300 text-xs outline-none cursor-pointer w-28 [color-scheme:dark]"
+                className="bg-transparent text-slate-700 dark:text-slate-300 text-xs outline-none cursor-pointer w-28 [color-scheme:light] dark:[color-scheme:dark]"
               />
             </div>
           )}
