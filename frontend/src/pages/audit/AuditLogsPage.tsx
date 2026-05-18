@@ -33,16 +33,16 @@ const ENTITY_OPTIONS = [
 ];
 
 const ACTION_BADGE: Record<AuditAction, { label: string; cls: string }> = {
-  create:          { label: "Criação",          cls: "bg-emerald-900/30 text-emerald-300 border border-emerald-700/40" },
-  update:          { label: "Atualização",       cls: "bg-blue-900/30 text-blue-300 border border-blue-700/40" },
-  delete:          { label: "Exclusão",          cls: "bg-red-900/30 text-red-300 border border-red-700/40" },
+  create:          { label: "Criação",          cls: "bg-emerald-50 text-emerald-600 border border-emerald-200 dark:bg-emerald-900/30 dark:text-emerald-300 dark:border-emerald-700/40" },
+  update:          { label: "Atualização",       cls: "bg-blue-50 text-blue-600 border border-blue-200 dark:bg-blue-900/30 dark:text-blue-300 dark:border-blue-700/40" },
+  delete:          { label: "Exclusão",          cls: "bg-red-50 text-red-600 border border-red-200 dark:bg-red-900/30 dark:text-red-300 dark:border-red-700/40" },
   login:           { label: "Login",             cls: "bg-primary/10 text-primary border border-primary/30" },
-  logout:          { label: "Logout",            cls: "bg-slate-800/60 text-slate-400 border border-slate-600/40" },
-  export:          { label: "Exportação",        cls: "bg-yellow-900/30 text-yellow-300 border border-yellow-700/40" },
-  assign:          { label: "Atribuição",        cls: "bg-cyan-900/30 text-cyan-300 border border-cyan-700/40" },
-  status_change:   { label: "Status",            cls: "bg-orange-900/30 text-orange-300 border border-orange-700/40" },
-  password_change: { label: "Senha",             cls: "bg-pink-900/30 text-pink-300 border border-pink-700/40" },
-  anonymize:       { label: "Anonimização",      cls: "bg-purple-900/30 text-purple-300 border border-purple-700/40" },
+  logout:          { label: "Logout",            cls: "bg-slate-100 text-slate-500 border border-slate-300 dark:bg-slate-800/60 dark:text-slate-400 dark:border-slate-600/40" },
+  export:          { label: "Exportação",        cls: "bg-yellow-50 text-yellow-600 border border-yellow-200 dark:bg-yellow-900/30 dark:text-yellow-300 dark:border-yellow-700/40" },
+  assign:          { label: "Atribuição",        cls: "bg-cyan-50 text-cyan-600 border border-cyan-200 dark:bg-cyan-900/30 dark:text-cyan-300 dark:border-cyan-700/40" },
+  status_change:   { label: "Status",            cls: "bg-orange-50 text-orange-600 border border-orange-200 dark:bg-orange-900/30 dark:text-orange-300 dark:border-orange-700/40" },
+  password_change: { label: "Senha",             cls: "bg-pink-50 text-pink-600 border border-pink-200 dark:bg-pink-900/30 dark:text-pink-300 dark:border-pink-700/40" },
+  anonymize:       { label: "Anonimização",      cls: "bg-purple-50 text-purple-600 border border-purple-200 dark:bg-purple-900/30 dark:text-purple-300 dark:border-purple-700/40" },
 };
 
 const ENTITY_LABEL: Record<string, string> = {
@@ -79,7 +79,7 @@ function shortUuid(id: string | null) {
 // ── DetailModal ───────────────────────────────────────────────
 
 function DetailModal({ log, onClose }: { log: AuditLog; onClose: () => void }) {
-  const badge = ACTION_BADGE[log.action] ?? { label: log.action, cls: "bg-slate-800/60 text-slate-400 border border-slate-600/40" };
+  const badge = ACTION_BADGE[log.action] ?? { label: log.action, cls: "bg-slate-100 text-slate-500 border border-slate-300 dark:bg-slate-800/60 dark:text-slate-400 dark:border-slate-600/40" };
   const hasOld = log.old_data && Object.keys(log.old_data).length > 0;
   const hasNew = log.new_data && Object.keys(log.new_data).length > 0;
 
@@ -92,7 +92,7 @@ function DetailModal({ log, onClose }: { log: AuditLog; onClose: () => void }) {
           <span className={`inline-flex items-center px-2.5 py-1 rounded-full text-xs font-semibold ${badge.cls}`}>
             {badge.label}
           </span>
-          <span className="text-slate-400">
+          <span className="text-slate-500 dark:text-slate-400">
             {ENTITY_LABEL[log.entity_type] ?? log.entity_type}
           </span>
         </div>
@@ -101,20 +101,20 @@ function DetailModal({ log, onClose }: { log: AuditLog; onClose: () => void }) {
         <div className="grid grid-cols-2 gap-3">
           <div className="rounded-lg bg-background-elevated border border-border/40 p-3 space-y-0.5">
             <p className="text-[10px] text-slate-500 uppercase tracking-wide">Data / Hora</p>
-            <p className="text-slate-200 text-xs font-mono">{formatDate(log.created_at)}</p>
+            <p className="text-slate-700 dark:text-slate-200 text-xs font-mono">{formatDate(log.created_at)}</p>
           </div>
           <div className="rounded-lg bg-background-elevated border border-border/40 p-3 space-y-0.5">
             <p className="text-[10px] text-slate-500 uppercase tracking-wide">IP</p>
-            <p className="text-slate-200 text-xs font-mono">{log.ip_address ?? "—"}</p>
+            <p className="text-slate-700 dark:text-slate-200 text-xs font-mono">{log.ip_address ?? "—"}</p>
           </div>
           <div className="rounded-lg bg-background-elevated border border-border/40 p-3 space-y-0.5">
             <p className="text-[10px] text-slate-500 uppercase tracking-wide">Usuário</p>
-            <p className="text-slate-200 text-xs">{log.user_name ?? "—"}</p>
-            {log.user_id && <p className="text-slate-600 text-[10px] font-mono">{log.user_id}</p>}
+            <p className="text-slate-700 dark:text-slate-200 text-xs">{log.user_name ?? "—"}</p>
+            {log.user_id && <p className="text-slate-400 dark:text-slate-600 text-[10px] font-mono">{log.user_id}</p>}
           </div>
           <div className="rounded-lg bg-background-elevated border border-border/40 p-3 space-y-0.5">
             <p className="text-[10px] text-slate-500 uppercase tracking-wide">ID Entidade</p>
-            <p className="text-slate-200 text-[10px] font-mono break-all">{log.entity_id ?? "—"}</p>
+            <p className="text-slate-700 dark:text-slate-200 text-[10px] font-mono break-all">{log.entity_id ?? "—"}</p>
           </div>
         </div>
 
@@ -122,7 +122,7 @@ function DetailModal({ log, onClose }: { log: AuditLog; onClose: () => void }) {
         {log.user_agent && (
           <div className="rounded-lg bg-background-elevated border border-border/40 p-3 space-y-0.5">
             <p className="text-[10px] text-slate-500 uppercase tracking-wide">User Agent</p>
-            <p className="text-slate-400 text-xs break-all">{log.user_agent}</p>
+            <p className="text-slate-500 dark:text-slate-400 text-xs break-all">{log.user_agent}</p>
           </div>
         )}
 
@@ -132,7 +132,7 @@ function DetailModal({ log, onClose }: { log: AuditLog; onClose: () => void }) {
             {hasOld && (
               <div>
                 <p className="text-[10px] text-slate-500 uppercase tracking-wide mb-1.5">Dados anteriores</p>
-                <pre className="text-xs text-red-300/80 bg-red-900/10 border border-red-800/20 rounded-lg p-3 overflow-auto max-h-48 whitespace-pre-wrap break-all">
+                <pre className="text-xs text-red-600 bg-red-50 border border-red-200 dark:text-red-300/80 dark:bg-red-900/10 dark:border-red-800/20 rounded-lg p-3 overflow-auto max-h-48 whitespace-pre-wrap break-all">
                   {JSON.stringify(log.old_data, null, 2)}
                 </pre>
               </div>
@@ -140,7 +140,7 @@ function DetailModal({ log, onClose }: { log: AuditLog; onClose: () => void }) {
             {hasNew && (
               <div>
                 <p className="text-[10px] text-slate-500 uppercase tracking-wide mb-1.5">Dados novos</p>
-                <pre className="text-xs text-emerald-300/80 bg-emerald-900/10 border border-emerald-800/20 rounded-lg p-3 overflow-auto max-h-48 whitespace-pre-wrap break-all">
+                <pre className="text-xs text-emerald-700 bg-emerald-50 border border-emerald-200 dark:text-emerald-300/80 dark:bg-emerald-900/10 dark:border-emerald-800/20 rounded-lg p-3 overflow-auto max-h-48 whitespace-pre-wrap break-all">
                   {JSON.stringify(log.new_data, null, 2)}
                 </pre>
               </div>
@@ -191,15 +191,15 @@ export default function AuditLogsPage() {
     setDateFrom(""); setDateTo("");
   }
 
-  const dateInputCls = "rounded-lg border border-border/60 bg-background-elevated px-3 py-[7px] text-sm text-slate-200 focus:outline-none focus:ring-2 focus:ring-primary transition-colors [color-scheme:dark]";
+  const dateInputCls = "rounded-lg border border-border/60 bg-background-elevated px-3 py-[7px] text-sm text-slate-700 dark:text-slate-200 focus:outline-none focus:ring-2 focus:ring-primary transition-colors [color-scheme:light] dark:[color-scheme:dark]";
 
   return (
     <div className="space-y-5">
       {/* Header */}
       <div className="flex items-center justify-between gap-4 flex-wrap">
         <div>
-          <h1 className="text-2xl font-bold text-slate-100">Logs de Auditoria</h1>
-          <p className="text-slate-400 text-sm mt-0.5">Registro completo de operações — conformidade LGPD</p>
+          <h1 className="text-2xl font-bold text-slate-800 dark:text-slate-100">Logs de Auditoria</h1>
+          <p className="text-slate-500 dark:text-slate-400 text-sm mt-0.5">Registro completo de operações — conformidade LGPD</p>
         </div>
         {!loading && (
           <span className="text-xs text-slate-500 bg-background-elevated border border-border/60 px-3 py-1.5 rounded-full">
@@ -212,9 +212,9 @@ export default function AuditLogsPage() {
       <Card padding="none">
         <div className="px-4 py-3 border-b border-border flex items-center gap-2">
           <span className="text-slate-500">{IC.Filter}</span>
-          <p className="text-sm font-semibold text-slate-200">Filtros</p>
+          <p className="text-sm font-semibold text-slate-700 dark:text-slate-200">Filtros</p>
           {hasFilters && (
-            <button onClick={clearFilters} className="ml-auto inline-flex items-center gap-1 text-xs text-slate-400 hover:text-slate-200 transition-colors cursor-pointer">
+            <button onClick={clearFilters} className="ml-auto inline-flex items-center gap-1 text-xs text-slate-500 hover:text-slate-700 dark:text-slate-400 dark:hover:text-slate-200 transition-colors cursor-pointer">
               {IC.X} Limpar filtros
             </button>
           )}
@@ -262,24 +262,24 @@ export default function AuditLogsPage() {
         ) : (
           <div className="divide-y divide-border">
             {logs.map((log) => {
-              const badge = ACTION_BADGE[log.action] ?? { label: log.action, cls: "bg-slate-800/60 text-slate-400 border border-slate-600/40" };
+              const badge = ACTION_BADGE[log.action] ?? { label: log.action, cls: "bg-slate-100 text-slate-500 border border-slate-300 dark:bg-slate-800/60 dark:text-slate-400 dark:border-slate-600/40" };
               const hasData = (log.old_data && Object.keys(log.old_data).length > 0) || (log.new_data && Object.keys(log.new_data).length > 0);
               return (
                 <div key={log.id} className="grid grid-cols-[1fr_110px_110px_160px_100px_44px] items-center px-4 py-3 hover:bg-background-elevated/40 transition-colors">
 
                   {/* Evento: data + ID entidade */}
                   <div className="min-w-0">
-                    <div className="flex items-center gap-1.5 text-xs text-slate-400">
-                      <span className="text-slate-600 shrink-0">{IC.Clock}</span>
+                    <div className="flex items-center gap-1.5 text-xs text-slate-500 dark:text-slate-400">
+                      <span className="text-slate-400 dark:text-slate-600 shrink-0">{IC.Clock}</span>
                       <span className="whitespace-nowrap">{formatDate(log.created_at)}</span>
                     </div>
-                    <p className="text-[11px] text-slate-600 font-mono mt-0.5">
+                    <p className="text-[11px] text-slate-400 dark:text-slate-600 font-mono mt-0.5">
                       {log.entity_id ? shortUuid(log.entity_id) : "—"}
                     </p>
                   </div>
 
                   {/* Entidade */}
-                  <span className="text-xs text-slate-300">
+                  <span className="text-xs text-slate-600 dark:text-slate-300">
                     {ENTITY_LABEL[log.entity_type] ?? log.entity_type}
                   </span>
 
@@ -292,12 +292,12 @@ export default function AuditLogsPage() {
 
                   {/* Usuário */}
                   <div className="min-w-0">
-                    <div className="flex items-center gap-1 text-xs text-slate-300 truncate">
-                      <span className="text-slate-600 shrink-0">{IC.User}</span>
+                    <div className="flex items-center gap-1 text-xs text-slate-600 dark:text-slate-300 truncate">
+                      <span className="text-slate-400 dark:text-slate-600 shrink-0">{IC.User}</span>
                       <span className="truncate">{log.user_name ?? "—"}</span>
                     </div>
                     {log.user_id && (
-                      <p className="text-[11px] text-slate-600 font-mono mt-0.5">{shortUuid(log.user_id)}</p>
+                      <p className="text-[11px] text-slate-400 dark:text-slate-600 font-mono mt-0.5">{shortUuid(log.user_id)}</p>
                     )}
                   </div>
 
@@ -308,7 +308,7 @@ export default function AuditLogsPage() {
                   <button
                     onClick={() => setDetail(log)}
                     title="Ver detalhes"
-                    className={`p-1.5 rounded-lg transition-colors cursor-pointer ${hasData ? "text-primary hover:bg-primary/10" : "text-slate-600 hover:text-slate-400 hover:bg-background-elevated"}`}
+                    className={`p-1.5 rounded-lg transition-colors cursor-pointer ${hasData ? "text-primary hover:bg-primary/10" : "text-slate-400 dark:text-slate-600 hover:text-slate-600 dark:hover:text-slate-400 hover:bg-background-elevated"}`}
                   >
                     {IC.Eye}
                   </button>
