@@ -3,7 +3,6 @@ import {
   Alert,
   Button,
   Card,
-  CardTitle,
   Input,
   Modal,
   ModalFooter,
@@ -104,7 +103,15 @@ function ColorPicker({ value, onChange }: { value: string; onChange: (c: string)
 
 const PAGE_SIZE = 10;
 
-function TagsSection() {
+function TagsSection({
+  createOpen,
+  onOpenCreate,
+  onCreateClose,
+}: {
+  createOpen: boolean;
+  onOpenCreate: () => void;
+  onCreateClose: () => void;
+}) {
   const { user } = useAuth();
   const isAdmin = user?.role === "admin";
   const canCreate = isAdmin || user?.role === "technician";
@@ -113,8 +120,6 @@ function TagsSection() {
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
   const [page, setPage] = useState(1);
-
-  const [createModal, setCreateModal] = useState(false);
   const [newName, setNewName] = useState("");
   const [newColor, setNewColor] = useState(PRESET_COLORS[0]);
   const [createLoading, setCreateLoading] = useState(false);
@@ -145,7 +150,7 @@ function TagsSection() {
       setTags((prev) =>
         [...prev, tag].sort((a, b) => a.name.localeCompare(b.name)),
       );
-      setCreateModal(false);
+      onCreateClose();
       setNewName("");
       setNewColor(PRESET_COLORS[0]);
     } catch (err: unknown) {
@@ -207,20 +212,6 @@ function TagsSection() {
   return (
     <>
       <Card padding="none">
-        <div className="px-4 py-3 border-b border-border flex items-center justify-between">
-          <div>
-            <CardTitle>Etiquetas</CardTitle>
-            <p className="text-xs text-slate-500 mt-0.5">
-              Classifique tickets com etiquetas coloridas para facilitar a
-              organização.
-            </p>
-          </div>
-          {canCreate && (
-            <Button size="sm" onClick={() => setCreateModal(true)}>
-              + Nova etiqueta
-            </Button>
-          )}
-        </div>
 
         {loading ? (
           <div className="flex h-24 items-center justify-center">
@@ -235,7 +226,7 @@ function TagsSection() {
             Nenhuma etiqueta cadastrada.{" "}
             {canCreate && (
               <button
-                onClick={() => setCreateModal(true)}
+                onClick={onOpenCreate}
                 className="text-primary hover:underline"
               >
                 Criar a primeira
@@ -287,8 +278,8 @@ function TagsSection() {
 
       {/* Create modal */}
       <Modal
-        open={createModal}
-        onClose={() => { setCreateModal(false); setCreateError(null); }}
+        open={createOpen}
+        onClose={() => { onCreateClose(); setCreateError(null); }}
         title="Nova etiqueta"
         size="lg"
       >
@@ -322,7 +313,7 @@ function TagsSection() {
           </div>
         </div>
         <ModalFooter>
-          <Button variant="outline" onClick={() => setCreateModal(false)} disabled={createLoading}>
+          <Button variant="outline" onClick={onCreateClose} disabled={createLoading}>
             Cancelar
           </Button>
           <Button onClick={handleCreate} loading={createLoading} disabled={!newName.trim()}>
@@ -427,16 +418,31 @@ function TagsSection() {
 // ── SettingsPage ──────────────────────────────────────────────
 
 export default function SettingsPage() {
+  const { user } = useAuth();
+  const canCreate = user?.role === "admin" || user?.role === "technician";
+  const [createOpen, setCreateOpen] = useState(false);
+
   return (
-    <div className="space-y-8">
-      <div>
-        <h1 className="text-2xl font-bold text-slate-100">Etiquetas</h1>
-        <p className="text-slate-400 text-sm mt-0.5">
-          Classifique tickets com etiquetas coloridas para facilitar a organização.
-        </p>
+    <div className="space-y-5">
+      <div className="flex items-center justify-between gap-4 flex-wrap">
+        <div>
+          <h1 className="text-2xl font-bold text-slate-800 dark:text-slate-100">Etiquetas</h1>
+          <p className="text-slate-500 dark:text-slate-400 text-sm mt-0.5">
+            Classifique tickets com etiquetas coloridas para facilitar a organização.
+          </p>
+        </div>
+        {canCreate && (
+          <Button onClick={() => setCreateOpen(true)}>
+            + Nova etiqueta
+          </Button>
+        )}
       </div>
 
-      <TagsSection />
+      <TagsSection
+        createOpen={createOpen}
+        onOpenCreate={() => setCreateOpen(true)}
+        onCreateClose={() => setCreateOpen(false)}
+      />
     </div>
   );
 }
