@@ -334,7 +334,7 @@ export function Topbar({ onMobileMenuClick, onToggleCollapsed, sidebarCollapsed 
             aria-expanded={userMenuOpen}
             aria-haspopup="menu"
           >
-            <Avatar name={user?.name ?? "?"} size="sm" />
+            <Avatar name={user?.name ?? "?"} src={user?.avatar_url ?? undefined} size="sm" />
             <div className="hidden md:block text-left">
               <p className="text-sm font-medium text-slate-100 leading-tight">
                 {user?.name}

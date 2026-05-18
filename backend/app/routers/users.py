@@ -18,10 +18,11 @@ import uuid
 from datetime import UTC, datetime
 from typing import Annotated
 
-from fastapi import APIRouter, Depends, HTTPException, Query, status
+from fastapi import APIRouter, Depends, File, HTTPException, Query, UploadFile, status
 from sqlalchemy import func, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
+from app.core.config import Settings, get_settings
 from app.core.database import get_db
 from app.core.security import authorize, get_current_user, hash_password, verify_password
 from app.models.models import AuditAction, AuditLog, Ticket, User, UserRole, UserStatus
@@ -35,6 +36,7 @@ from app.schemas.user import (
     UserStatusUpdate,
     UserUpdate,
 )
+from app.services import storage
 
 router = APIRouter(prefix="/users", tags=["Users"])
 
@@ -136,8 +138,17 @@ async def list_users(
 @router.get("/me", response_model=UserResponse)
 async def get_me(
     current_user: Annotated[User, Depends(get_current_user)],
+    settings: Annotated[Settings, Depends(get_settings)],
 ) -> UserResponse:
-    return _to_response(current_user)
+    response = _to_response(current_user)
+    if current_user.avatar_url and current_user.avatar_url.startswith("avatars/"):
+        try:
+            response.avatar_url = await storage.get_presigned_url(
+                current_user.avatar_url, settings, expires=604800
+            )
+        except Exception:
+            response.avatar_url = None
+    return response
 
 
 # ── GET /users/technicians ────────────────────────────────────
@@ -204,6 +215,51 @@ async def update_me(
     await db.commit()
     await db.refresh(user)
     return _to_response(user)
+
+
+# ── POST /users/me/avatar ────────────────────────────────────
+
+
+@router.post("/me/avatar", response_model=UserResponse)
+async def upload_avatar(
+    file: Annotated[UploadFile, File(...)],
+    db: Annotated[AsyncSession, Depends(get_db)],
+    current_user: Annotated[User, Depends(get_current_user)],
+    settings: Annotated[Settings, Depends(get_settings)],
+) -> UserResponse:
+    ALLOWED = {"image/jpeg", "image/png", "image/gif", "image/webp"}
+    if file.content_type not in ALLOWED:
+        raise HTTPException(
+            status_code=status.HTTP_422_UNPROCESSABLE_ENTITY,
+            detail="Formato inválido. Use JPG, PNG, GIF ou WebP.",
+        )
+
+    data = await file.read()
+    if len(data) > 5 * 1024 * 1024:
+        raise HTTPException(
+            status_code=status.HTTP_422_UNPROCESSABLE_ENTITY,
+            detail="Arquivo muito grande. Máximo: 5 MB.",
+        )
+
+    ext_map = {"image/jpeg": ".jpg", "image/png": ".png", "image/gif": ".gif", "image/webp": ".webp"}
+    key = f"avatars/{current_user.id}{ext_map[file.content_type]}"
+    await storage.upload_file(data, key, file.content_type, settings)
+    url = await storage.get_presigned_url(key, settings, expires=604800)
+
+    result = await db.execute(select(User).where(User.id == current_user.id))
+    user = result.scalar_one_or_none()
+    if not user:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="User not found")
+
+    user.avatar_url = key
+    user.updated_at = datetime.now(UTC)
+    _audit(db, AuditAction.update, current_user.id, user.id)
+    await db.commit()
+    await db.refresh(user)
+
+    response = _to_response(user)
+    response.avatar_url = url
+    return response
 
 
 # ── PATCH /users/me/onboarding ───────────────────────────────

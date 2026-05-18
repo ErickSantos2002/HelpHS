@@ -160,3 +160,12 @@ export async function changePassword(
     new_password: newPassword,
   });
 }
+
+export async function uploadAvatar(file: File): Promise<UserSummary> {
+  const form = new FormData();
+  form.append("file", file);
+  const { data } = await api.post<UserSummary>("/users/me/avatar", form, {
+    headers: { "Content-Type": "multipart/form-data" },
+  });
+  return data;
+}

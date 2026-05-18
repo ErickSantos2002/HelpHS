@@ -18,6 +18,7 @@ interface AuthContextValue {
   login: (email: string, password: string) => Promise<void>;
   logout: () => Promise<void>;
   markOnboardingComplete: () => void;
+  updateAvatarUrl: (url: string | null) => void;
 }
 
 const AuthContext = createContext<AuthContextValue | null>(null);
@@ -43,6 +44,7 @@ export function AuthProvider({ children }: { children: ReactNode }) {
           name: me.name,
           email: me.email,
           role: me.role,
+          avatar_url: me.avatar_url,
           onboarding_completed: me.onboarding_completed,
         });
       } catch {
@@ -82,6 +84,10 @@ export function AuthProvider({ children }: { children: ReactNode }) {
     setUser((prev) => (prev ? { ...prev, onboarding_completed: true } : prev));
   }, []);
 
+  const updateAvatarUrl = useCallback((url: string | null) => {
+    setUser((prev) => (prev ? { ...prev, avatar_url: url } : prev));
+  }, []);
+
   return (
     <AuthContext.Provider
       value={{
@@ -92,6 +98,7 @@ export function AuthProvider({ children }: { children: ReactNode }) {
         login,
         logout,
         markOnboardingComplete,
+        updateAvatarUrl,
       }}
     >
       {children}

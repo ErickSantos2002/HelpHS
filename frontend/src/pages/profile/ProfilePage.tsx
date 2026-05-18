@@ -1,4 +1,4 @@
-import { useEffect, useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import { useAuth } from "../../contexts/AuthContext";
 import { Spinner } from "../../components/ui";
 import {
@@ -6,6 +6,7 @@ import {
   completeOnboarding,
   getMe,
   updateMe,
+  uploadAvatar,
   type UserSummary,
 } from "../../services/userService";
 import { lookupCnpj, lookupCep } from "../../services/equipmentService";
@@ -29,28 +30,62 @@ const INPUT_CLS =
 
 // ── Sub-components ────────────────────────────────────────────
 
-function ProfileAvatar({ name }: { name: string }) {
+function ProfileAvatar({
+  name,
+  avatarUrl,
+  uploading,
+  onFileSelect,
+}: {
+  name: string;
+  avatarUrl: string | null;
+  uploading: boolean;
+  onFileSelect: (file: File) => void;
+}) {
+  const inputRef = useRef<HTMLInputElement>(null);
   const initials = name
     .split(" ")
     .slice(0, 2)
     .map((w) => w[0])
     .join("")
     .toUpperCase();
+
   return (
     <div className="relative shrink-0">
-      <div className="w-20 h-20 rounded-full bg-primary/15 border-2 border-primary/30 flex items-center justify-center">
-        <span className="text-2xl font-bold text-primary">{initials}</span>
+      <div className="w-20 h-20 rounded-full bg-primary/15 border-2 border-primary/30 overflow-hidden flex items-center justify-center">
+        {avatarUrl ? (
+          <img src={avatarUrl} alt={name} className="w-full h-full object-cover" />
+        ) : (
+          <span className="text-2xl font-bold text-primary">{initials}</span>
+        )}
+        {uploading && (
+          <div className="absolute inset-0 bg-black/40 flex items-center justify-center rounded-full">
+            <Spinner size="sm" />
+          </div>
+        )}
       </div>
       <button
         type="button"
         aria-label="Alterar foto"
-        className="absolute bottom-0 right-0 w-7 h-7 rounded-full bg-white dark:bg-background-elevated border border-slate-200 dark:border-border flex items-center justify-center shadow-sm hover:bg-slate-50 dark:hover:bg-background-surface transition-colors"
+        onClick={() => inputRef.current?.click()}
+        disabled={uploading}
+        className="absolute bottom-0 right-0 w-7 h-7 rounded-full bg-white dark:bg-background-elevated border border-slate-200 dark:border-border flex items-center justify-center shadow-sm hover:bg-slate-50 dark:hover:bg-background-surface transition-colors cursor-pointer disabled:opacity-50"
       >
         <svg className="w-3.5 h-3.5 text-slate-500 dark:text-slate-400" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
           <path strokeLinecap="round" strokeLinejoin="round" d="M3 9a2 2 0 012-2h.93a2 2 0 001.664-.89l.812-1.22A2 2 0 0110.07 4h3.86a2 2 0 011.664.89l.812 1.22A2 2 0 0018.07 7H19a2 2 0 012 2v9a2 2 0 01-2 2H5a2 2 0 01-2-2V9z" />
           <path strokeLinecap="round" strokeLinejoin="round" d="M15 13a3 3 0 11-6 0 3 3 0 016 0z" />
         </svg>
       </button>
+      <input
+        ref={inputRef}
+        type="file"
+        accept="image/jpeg,image/png,image/gif,image/webp"
+        className="hidden"
+        onChange={(e) => {
+          const file = e.target.files?.[0];
+          if (file) onFileSelect(file);
+          e.target.value = "";
+        }}
+      />
     </div>
   );
 }
@@ -368,11 +403,28 @@ function CompanySection({ profile, onSaved }: { profile: UserSummary; onSaved: (
 // ── ProfilePage ───────────────────────────────────────────────
 
 export default function ProfilePage() {
-  const { user: authUser } = useAuth();
+  const { user: authUser, updateAvatarUrl } = useAuth();
   const [profile, setProfile] = useState<UserSummary | null>(null);
   const [loading, setLoading] = useState(true);
   const [editingInfo, setEditingInfo] = useState(false);
   const [editingPassword, setEditingPassword] = useState(false);
+  const [uploadingAvatar, setUploadingAvatar] = useState(false);
+  const [avatarError, setAvatarError] = useState<string | null>(null);
+
+  async function handleAvatarFile(file: File) {
+    setUploadingAvatar(true);
+    setAvatarError(null);
+    try {
+      const updated = await uploadAvatar(file);
+      setProfile(updated);
+      updateAvatarUrl(updated.avatar_url);
+    } catch (err: unknown) {
+      const detail = (err as { response?: { data?: { detail?: string } } })?.response?.data?.detail;
+      setAvatarError(detail ?? "Erro ao enviar foto.");
+    } finally {
+      setUploadingAvatar(false);
+    }
+  }
 
   useEffect(() => {
     getMe().then(setProfile).catch(() => {}).finally(() => setLoading(false));
@@ -407,8 +459,16 @@ export default function ProfilePage() {
 
       {/* Identity card */}
       <div className="rounded-xl bg-white dark:bg-background-surface border border-slate-200 dark:border-border p-6">
+        {avatarError && (
+          <p className="mb-3 text-xs text-danger bg-danger/10 border border-danger/20 rounded-lg px-3 py-2">{avatarError}</p>
+        )}
         <div className="flex items-center gap-5">
-          <ProfileAvatar name={profile.name} />
+          <ProfileAvatar
+            name={profile.name}
+            avatarUrl={profile.avatar_url}
+            uploading={uploadingAvatar}
+            onFileSelect={handleAvatarFile}
+          />
           <div className="min-w-0 flex-1 space-y-1.5">
             <h2 className="text-lg font-semibold text-slate-900 dark:text-slate-100 truncate">{profile.name}</h2>
             <p className="text-sm text-slate-500 truncate">{profile.email}</p>
