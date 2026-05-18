@@ -6,6 +6,7 @@ import {
   Alert,
   Button,
   Card,
+  FilterSelect,
   FormDropdown,
   Input,
   Modal,
@@ -432,6 +433,40 @@ export default function ProductsPage() {
             {totalProducts} {totalProducts === 1 ? "produto cadastrado" : "produtos cadastrados"}
           </p>
         </div>
+        <Button onClick={() => { setEditingProduct(null); setProductFormOpen(true); }}>
+          {IC.Plus} Novo produto
+        </Button>
+      </div>
+
+      {/* Filters */}
+      <div className="flex flex-wrap gap-3 items-center">
+        <div className="flex-1 min-w-48 relative">
+          <span className="absolute left-3 top-1/2 -translate-y-1/2 text-slate-500 pointer-events-none">{IC.Search}</span>
+          <input
+            className="w-full pl-9 pr-3 py-2 rounded-xl border border-border/60 bg-background-surface text-sm text-slate-700 dark:text-slate-200 placeholder:text-slate-500 focus:outline-none focus:ring-2 focus:ring-primary focus:border-transparent transition-colors"
+            placeholder="Buscar produto…"
+            value={productSearch}
+            onChange={(e) => { setProductSearch(e.target.value); setProductPage(1); }}
+          />
+        </div>
+        <FilterSelect
+          options={[
+            { value: "all", label: "Todos" },
+            { value: "active", label: "Ativos" },
+            { value: "inactive", label: "Inativos" },
+          ]}
+          placeholder="Status"
+          value={productFilter}
+          onChange={(v) => { setProductFilter(v as FilterTab); setProductPage(1); }}
+        />
+        {(productSearch || productFilter !== "active") && (
+          <button
+            onClick={() => { setProductSearch(""); setProductFilter("active"); setProductPage(1); }}
+            className="text-xs text-slate-500 hover:text-slate-300 transition-colors px-2 py-1.5 rounded-lg hover:bg-background-elevated cursor-pointer"
+          >
+            Limpar filtros
+          </button>
+        )}
       </div>
 
       {/* Products + Equipment — split layout when product selected */}
@@ -439,32 +474,6 @@ export default function ProductsPage() {
 
       {/* Products card */}
       <Card padding="none">
-        <div className="px-4 py-3 border-b border-border flex flex-wrap items-center justify-between gap-3">
-          <div>
-            <p className="text-sm font-semibold text-slate-700 dark:text-slate-200">Catálogo de produtos</p>
-            <p className="text-xs text-slate-500 mt-0.5">Clique num produto para ver seus equipamentos.</p>
-          </div>
-          <div className="flex items-center gap-3">
-            <FilterTabs value={productFilter} onChange={(v) => { setProductFilter(v); setProductPage(1); }} />
-            <Button size="sm" onClick={() => { setEditingProduct(null); setProductFormOpen(true); }}>
-              {IC.Plus} Novo produto
-            </Button>
-          </div>
-        </div>
-
-        {/* Search */}
-        <div className="px-4 py-2.5 border-b border-border">
-          <div className="relative">
-            <span className="absolute left-3 top-1/2 -translate-y-1/2 text-slate-500 pointer-events-none">{IC.Search}</span>
-            <input
-              className="w-full pl-9 pr-3 py-2 rounded-xl border border-border/60 bg-background-elevated text-sm text-slate-700 dark:text-slate-200 placeholder:text-slate-500 focus:outline-none focus:ring-2 focus:ring-primary focus:border-transparent transition-colors"
-              placeholder="Buscar produto…"
-              value={productSearch}
-              onChange={(e) => { setProductSearch(e.target.value); setProductPage(1); }}
-            />
-          </div>
-        </div>
-
         {productsError && <div className="p-4"><Alert variant="danger">{productsError}</Alert></div>}
 
         {productsLoading ? (
