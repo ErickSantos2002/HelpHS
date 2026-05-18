@@ -28,23 +28,23 @@ const LEVEL_LABEL: Record<string, string> = {
 
 const LEVEL_STYLE: Record<string, { badge: string; bar: string; dot: string }> = {
   critical: {
-    badge: "bg-red-900/30 text-red-300 border border-red-700/40",
+    badge: "bg-red-50 text-red-600 border border-red-200 dark:bg-red-900/30 dark:text-red-300 dark:border-red-700/40",
     bar: "bg-red-500",
-    dot: "bg-red-400",
+    dot: "bg-red-500 dark:bg-red-400",
   },
   high: {
-    badge: "bg-orange-900/30 text-orange-300 border border-orange-700/40",
+    badge: "bg-orange-50 text-orange-600 border border-orange-200 dark:bg-orange-900/30 dark:text-orange-300 dark:border-orange-700/40",
     bar: "bg-orange-500",
-    dot: "bg-orange-400",
+    dot: "bg-orange-500 dark:bg-orange-400",
   },
   medium: {
-    badge: "bg-yellow-900/30 text-yellow-300 border border-yellow-700/40",
+    badge: "bg-yellow-50 text-yellow-600 border border-yellow-200 dark:bg-yellow-900/30 dark:text-yellow-300 dark:border-yellow-700/40",
     bar: "bg-yellow-500",
-    dot: "bg-yellow-400",
+    dot: "bg-yellow-500 dark:bg-yellow-400",
   },
   low: {
-    badge: "bg-slate-800/60 text-slate-400 border border-slate-600/40",
-    bar: "bg-slate-500",
+    badge: "bg-slate-100 text-slate-500 border border-slate-300 dark:bg-slate-800/60 dark:text-slate-400 dark:border-slate-600/40",
+    bar: "bg-slate-400 dark:bg-slate-500",
     dot: "bg-slate-400",
   },
 };
@@ -214,8 +214,8 @@ export default function SlaConfigPage() {
     <div className="space-y-5">
       {/* Header */}
       <div>
-        <h1 className="text-2xl font-bold text-slate-100">Configurações de SLA</h1>
-        <p className="text-slate-400 text-sm mt-0.5">
+        <h1 className="text-2xl font-bold text-slate-800 dark:text-slate-100">Configurações de SLA</h1>
+        <p className="text-slate-500 dark:text-slate-400 text-sm mt-0.5">
           Tempos limite de resposta e resolução por nível de prioridade (seg–sex, 08h–18h)
         </p>
       </div>
@@ -229,7 +229,7 @@ export default function SlaConfigPage() {
           <Card padding="none">
             {/* Card header */}
             <div className="px-4 py-3 border-b border-border">
-              <p className="text-sm font-semibold text-slate-200">Níveis de SLA</p>
+              <p className="text-sm font-semibold text-slate-700 dark:text-slate-200">Níveis de SLA</p>
               <p className="text-xs text-slate-500 mt-0.5">Clique em editar para ajustar os tempos de cada nível.</p>
             </div>
 
@@ -264,7 +264,7 @@ export default function SlaConfigPage() {
                           <span className="text-slate-500">{IC.Clock}</span>
                           <div>
                             <p className="text-[10px] text-slate-500 leading-none">Resposta</p>
-                            <p className="text-sm font-semibold text-slate-200 mt-0.5">{formatHours(c.response_time_hours)}</p>
+                            <p className="text-sm font-semibold text-slate-700 dark:text-slate-200 mt-0.5">{formatHours(c.response_time_hours)}</p>
                           </div>
                         </div>
 
@@ -273,7 +273,7 @@ export default function SlaConfigPage() {
                           <span className="text-slate-500">{IC.Shield}</span>
                           <div>
                             <p className="text-[10px] text-slate-500 leading-none">Resolução</p>
-                            <p className="text-sm font-semibold text-slate-200 mt-0.5">{formatHours(c.resolve_time_hours)}</p>
+                            <p className="text-sm font-semibold text-slate-700 dark:text-slate-200 mt-0.5">{formatHours(c.resolve_time_hours)}</p>
                           </div>
                         </div>
 
@@ -282,14 +282,14 @@ export default function SlaConfigPage() {
                           <span className="text-slate-500">{IC.Bell}</span>
                           <div>
                             <p className="text-[10px] text-slate-500 leading-none">Alerta</p>
-                            <p className="text-sm font-semibold text-slate-200 mt-0.5">{c.warning_threshold}%</p>
+                            <p className="text-sm font-semibold text-slate-700 dark:text-slate-200 mt-0.5">{c.warning_threshold}%</p>
                           </div>
                         </div>
                       </div>
                     </div>
 
                     {/* Updated at */}
-                    <p className="hidden md:block shrink-0 text-xs text-slate-600">
+                    <p className="hidden md:block shrink-0 text-xs text-slate-500 dark:text-slate-600">
                       {new Date(c.updated_at).toLocaleDateString("pt-BR", { day: "2-digit", month: "2-digit", year: "numeric" })}
                     </p>
 
@@ -309,15 +309,15 @@ export default function SlaConfigPage() {
 
           {/* Info card */}
           <div className="rounded-xl border border-border/60 bg-background-surface/50 p-4">
-            <div className="flex items-center gap-2 mb-2 text-slate-300">
+            <div className="flex items-center gap-2 mb-2 text-slate-600 dark:text-slate-300">
               <span className="text-slate-500">{IC.Info}</span>
               <p className="text-sm font-medium">Como funciona</p>
             </div>
             <ul className="space-y-1 text-xs text-slate-500">
-              <li><span className="text-slate-400 font-medium">Resposta:</span> tempo máximo para a primeira interação de um técnico no chamado.</li>
-              <li><span className="text-slate-400 font-medium">Resolução:</span> tempo máximo para fechar o chamado.</li>
-              <li><span className="text-slate-400 font-medium">Alerta:</span> notificação antecipada quando o percentual do prazo consumido atingir o limiar.</li>
-              <li>Períodos de espera (aguardando cliente / aguardando técnico) <span className="text-slate-400 font-medium">pausam</span> o contador de SLA.</li>
+              <li><span className="text-slate-600 dark:text-slate-400 font-medium">Resposta:</span> tempo máximo para a primeira interação de um técnico no chamado.</li>
+              <li><span className="text-slate-600 dark:text-slate-400 font-medium">Resolução:</span> tempo máximo para fechar o chamado.</li>
+              <li><span className="text-slate-600 dark:text-slate-400 font-medium">Alerta:</span> notificação antecipada quando o percentual do prazo consumido atingir o limiar.</li>
+              <li>Períodos de espera (aguardando cliente / aguardando técnico) <span className="text-slate-600 dark:text-slate-400 font-medium">pausam</span> o contador de SLA.</li>
             </ul>
           </div>
         </>
