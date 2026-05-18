@@ -585,7 +585,7 @@ function CompanyDetailModal({
                   className={cn(
                     "px-4 py-2 text-sm font-medium border-b-2 transition-colors cursor-pointer flex items-center gap-1.5",
                     activeTab === "notes"
-                      ? "border-amber-500 text-amber-400"
+                      ? "border-amber-500 text-amber-500 dark:text-amber-400"
                       : "border-transparent text-slate-500 hover:text-slate-300",
                   )}
                 >
@@ -615,10 +615,10 @@ function CompanyDetailModal({
                             <div className="min-w-0 flex-1">
                               <p className="text-sm font-medium text-slate-100 truncate">{c.name}</p>
                               <p className="text-xs text-slate-500 truncate">{c.email}</p>
-                              {c.client_notes && <p className="text-xs text-amber-400 line-clamp-1 mt-0.5">{c.client_notes}</p>}
+                              {c.client_notes && <p className="text-xs text-amber-600 dark:text-amber-400 line-clamp-1 mt-0.5">{c.client_notes}</p>}
                             </div>
                             <div className="flex gap-1 ml-2 shrink-0">
-                              <button title="Notas" onClick={() => setNoteClient(c)} className="p-1.5 rounded text-slate-500 hover:text-amber-400 hover:bg-amber-900/20 transition-colors cursor-pointer"><IconNote /></button>
+                              <button title="Notas" onClick={() => setNoteClient(c)} className="p-1.5 rounded text-slate-500 hover:text-amber-500 hover:bg-amber-100 dark:hover:text-amber-400 dark:hover:bg-amber-900/20 transition-colors cursor-pointer"><IconNote /></button>
                               <button title="Desvincular" onClick={() => handleUnassign(c.id)} disabled={removingId === c.id} className="p-1.5 rounded text-slate-500 hover:text-red-400 hover:bg-red-900/20 transition-colors cursor-pointer disabled:opacity-50">
                                 {removingId === c.id ? <Spinner size="sm" /> : <IconX />}
                               </button>
@@ -643,14 +643,14 @@ function CompanyDetailModal({
               {activeTab === "notes" && (
                 <>
                   <div className="flex items-center justify-between mb-3">
-                    <p className="text-sm font-semibold text-amber-400/80">Notas da empresa</p>
+                    <p className="text-sm font-semibold text-amber-600 dark:text-amber-400/80">Notas da empresa</p>
                     <Button size="sm" variant="outline" onClick={() => setShowAddCompanyNote(true)}>
                       <IconPlus />Adicionar nota
                     </Button>
                   </div>
 
                   {companyNotes.length === 0 ? (
-                    <div className="flex-1 flex flex-col items-center justify-center text-center py-8 rounded-lg border border-dashed border-amber-800/30 text-sm text-amber-700/50">
+                    <div className="flex-1 flex flex-col items-center justify-center text-center py-8 rounded-lg border border-dashed border-amber-200 dark:border-amber-800/30 text-sm text-amber-600/70 dark:text-amber-700/50">
                       Nenhuma nota ainda.
                       <div className="mt-2">
                         <Button size="sm" variant="outline" onClick={() => setShowAddCompanyNote(true)}>
@@ -663,25 +663,25 @@ function CompanyDetailModal({
                       {companyNotes.map((n) => (
                         <div
                           key={n.id}
-                          className="group rounded-lg border border-amber-700/20 bg-amber-950/15 p-3 cursor-pointer hover:border-amber-600/40 transition-colors"
+                          className="group rounded-lg border border-amber-200 bg-amber-50 dark:border-amber-700/20 dark:bg-amber-950/15 p-3 cursor-pointer hover:border-amber-300 dark:hover:border-amber-600/40 transition-colors"
                           onClick={() => setViewCompanyNote(n)}
                         >
                           <div className="flex items-center justify-between gap-1 mb-1">
-                            <span className="text-[11px] font-semibold text-amber-500/70 truncate">{n.author_name}</span>
+                            <span className="text-[11px] font-semibold text-amber-600 dark:text-amber-500/70 truncate">{n.author_name}</span>
                             <div className="flex items-center gap-1.5 shrink-0">
-                              <span className="text-[10px] text-amber-700/50">
+                              <span className="text-[10px] text-amber-600/70 dark:text-amber-700/50">
                                 {new Date(n.created_at).toLocaleDateString("pt-BR", { day: "2-digit", month: "2-digit", year: "2-digit" })}
                               </span>
                               <button
                                 onClick={(e) => { e.stopPropagation(); handleDeleteCompanyNote(n.id); }}
                                 disabled={companyNoteDeleting === n.id}
-                                className="opacity-0 group-hover:opacity-100 p-0.5 rounded text-amber-700/60 hover:text-red-400 transition-all cursor-pointer"
+                                className="opacity-0 group-hover:opacity-100 p-0.5 rounded text-amber-500 dark:text-amber-700/60 hover:text-red-400 transition-all cursor-pointer"
                               >
                                 {companyNoteDeleting === n.id ? <Spinner size="sm" /> : <IconTrash />}
                               </button>
                             </div>
                           </div>
-                          <p className="text-xs text-amber-200/60 line-clamp-3 whitespace-pre-wrap">{n.content}</p>
+                          <p className="text-xs text-slate-600 dark:text-amber-200/60 line-clamp-3 whitespace-pre-wrap">{n.content}</p>
                         </div>
                       ))}
                     </div>
@@ -747,11 +747,11 @@ function CompanyDetailModal({
       {viewCompanyNote && (
         <Modal open onClose={() => setViewCompanyNote(null)} title="Nota da empresa" size="lg">
           <div className="space-y-3">
-            <div className="flex items-center justify-between text-xs text-amber-500/70">
+            <div className="flex items-center justify-between text-xs text-amber-600 dark:text-amber-500/70">
               <span className="font-semibold">{viewCompanyNote.author_name}</span>
               <span>{new Date(viewCompanyNote.created_at).toLocaleString("pt-BR")}</span>
             </div>
-            <p className="text-sm text-amber-200/80 whitespace-pre-wrap leading-relaxed min-h-[80px]">{viewCompanyNote.content}</p>
+            <p className="text-sm text-slate-700 dark:text-amber-200/80 whitespace-pre-wrap leading-relaxed min-h-[80px]">{viewCompanyNote.content}</p>
             <ModalFooter>
               <Button
                 variant="outline"
@@ -1000,7 +1000,7 @@ export default function GroupsPage() {
                       <button onClick={() => setSelectedCompany(c)} className="mt-3 flex items-center gap-2 text-xs text-slate-500 hover:text-primary transition-colors cursor-pointer">
                         <span className="flex items-center gap-1"><IconUsers />{c.client_count} cliente{c.client_count !== 1 ? "s" : ""}</span>
                         {c.note_count > 0 && (
-                          <span className="flex items-center gap-1 text-amber-500 bg-amber-900/20 border border-amber-700/30 rounded-full px-2 py-0.5">
+                          <span className="flex items-center gap-1 text-amber-600 bg-amber-100 border border-amber-300 dark:text-amber-500 dark:bg-amber-900/20 dark:border-amber-700/30 rounded-full px-2 py-0.5">
                             <IconNote />{c.note_count} nota{c.note_count !== 1 ? "s" : ""}
                           </span>
                         )}
@@ -1018,14 +1018,14 @@ export default function GroupsPage() {
       {selectedGroup && (
         <aside className="w-72 shrink-0 flex flex-col border-l border-slate-200 dark:border-border bg-white dark:bg-background-surface overflow-hidden">
           <div className="flex items-center justify-between px-4 py-4 border-b border-slate-200 dark:border-border">
-            <p className="text-xs font-bold uppercase tracking-widest text-amber-500/80 flex items-center gap-1.5">
+            <p className="text-xs font-bold uppercase tracking-widest text-amber-600 dark:text-amber-500/80 flex items-center gap-1.5">
               <IconNote />
               Notas do grupo
             </p>
             <button
               onClick={() => setShowAddNote(true)}
               title="Adicionar nota"
-              className="p-1.5 rounded-lg text-slate-400 hover:text-amber-400 hover:bg-amber-900/20 transition-colors cursor-pointer"
+              className="p-1.5 rounded-lg text-slate-400 hover:text-amber-500 hover:bg-amber-100 dark:hover:text-amber-400 dark:hover:bg-amber-900/20 transition-colors cursor-pointer"
             >
               <IconPlus />
             </button>
@@ -1033,9 +1033,9 @@ export default function GroupsPage() {
 
           <div className="flex-1 overflow-y-auto p-3 space-y-2">
             {groupNotes.length === 0 ? (
-              <div className="text-center py-8 text-xs text-amber-700/50 italic">
+              <div className="text-center py-8 text-xs text-amber-600/70 dark:text-amber-700/50 italic">
                 Nenhuma nota ainda.
-                <button onClick={() => setShowAddNote(true)} className="block mt-2 text-amber-500/70 hover:text-amber-400 cursor-pointer mx-auto not-italic">
+                <button onClick={() => setShowAddNote(true)} className="block mt-2 text-amber-500 hover:text-amber-600 dark:text-amber-500/70 dark:hover:text-amber-400 cursor-pointer mx-auto not-italic">
                   Adicionar nota
                 </button>
               </div>
@@ -1043,25 +1043,25 @@ export default function GroupsPage() {
               groupNotes.map((n) => (
                 <div
                   key={n.id}
-                  className="group rounded-lg border border-amber-700/20 bg-amber-950/15 p-3 cursor-pointer hover:border-amber-600/40 transition-colors"
+                  className="group rounded-lg border border-amber-200 bg-amber-50 dark:border-amber-700/20 dark:bg-amber-950/15 p-3 cursor-pointer hover:border-amber-300 dark:hover:border-amber-600/40 transition-colors"
                   onClick={() => setViewNote(n)}
                 >
                   <div className="flex items-center justify-between gap-1 mb-1">
-                    <span className="text-[10px] font-semibold text-amber-500/70 truncate">{n.author_name}</span>
+                    <span className="text-[10px] font-semibold text-amber-600 dark:text-amber-500/70 truncate">{n.author_name}</span>
                     <div className="flex items-center gap-1 shrink-0">
-                      <span className="text-[10px] text-amber-700/50">
+                      <span className="text-[10px] text-amber-600/70 dark:text-amber-700/50">
                         {new Date(n.created_at).toLocaleDateString("pt-BR", { day: "2-digit", month: "2-digit", year: "2-digit" })}
                       </span>
                       <button
                         onClick={(e) => { e.stopPropagation(); handleDeleteNote(n.id); }}
                         disabled={noteDeleting === n.id}
-                        className="opacity-0 group-hover:opacity-100 p-0.5 rounded text-amber-700/60 hover:text-red-400 transition-all cursor-pointer"
+                        className="opacity-0 group-hover:opacity-100 p-0.5 rounded text-amber-500 dark:text-amber-700/60 hover:text-red-400 transition-all cursor-pointer"
                       >
                         {noteDeleting === n.id ? <Spinner size="sm" /> : <IconTrash />}
                       </button>
                     </div>
                   </div>
-                  <p className="text-xs text-amber-200/60 line-clamp-3 whitespace-pre-wrap">{n.content}</p>
+                  <p className="text-xs text-slate-600 dark:text-amber-200/60 line-clamp-3 whitespace-pre-wrap">{n.content}</p>
                 </div>
               ))
             )}
@@ -1127,11 +1127,11 @@ export default function GroupsPage() {
       {viewNote && (
         <Modal open onClose={() => setViewNote(null)} title="Nota do grupo" size="lg">
           <div className="space-y-3">
-            <div className="flex items-center justify-between text-xs text-amber-500/70">
+            <div className="flex items-center justify-between text-xs text-amber-600 dark:text-amber-500/70">
               <span className="font-semibold">{viewNote.author_name}</span>
               <span>{new Date(viewNote.created_at).toLocaleString("pt-BR")}</span>
             </div>
-            <p className="text-sm text-amber-200/80 whitespace-pre-wrap leading-relaxed min-h-[80px]">{viewNote.content}</p>
+            <p className="text-sm text-slate-700 dark:text-amber-200/80 whitespace-pre-wrap leading-relaxed min-h-[80px]">{viewNote.content}</p>
             <ModalFooter>
               <Button
                 variant="outline"
