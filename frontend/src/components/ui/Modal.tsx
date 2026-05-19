@@ -94,7 +94,7 @@ export function Modal({
 
   return createPortal(
     <div
-      className="fixed inset-0 z-[200] flex items-center justify-center p-4"
+      className="fixed inset-0 z-[200] flex items-center justify-center p-3 sm:p-4"
       aria-modal="true"
       role="dialog"
       aria-labelledby={title ? titleId : undefined}
@@ -109,14 +109,15 @@ export function Modal({
       <div
         ref={panelRef}
         className={cn(
-          "relative z-10 w-full rounded-xl border border-border bg-background-surface shadow-xl",
+          "relative z-10 w-full flex flex-col rounded-xl border border-border bg-background-surface shadow-xl",
           "animate-in fade-in zoom-in-95 duration-150",
+          "max-h-[92vh]",
           sizeClasses[size],
           className,
         )}
       >
         {title && (
-          <div className="flex items-center justify-between border-b border-border px-6 py-4">
+          <div className="flex items-center justify-between border-b border-border px-4 py-3 sm:px-6 sm:py-4 shrink-0">
             <h2 id={titleId} className="text-base font-semibold text-slate-800 dark:text-slate-100">
               {title}
             </h2>
@@ -142,7 +143,7 @@ export function Modal({
             </button>
           </div>
         )}
-        <div className="px-6 py-4">{children}</div>
+        <div className="px-4 py-4 sm:px-6 overflow-y-auto flex-1">{children}</div>
       </div>
     </div>,
     document.body,

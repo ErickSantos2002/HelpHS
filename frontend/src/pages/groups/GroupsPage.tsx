@@ -1,4 +1,4 @@
-import { useEffect, useState } from "react";
+﻿import { useEffect, useState } from "react";
 import { useForm } from "react-hook-form";
 import { zodResolver } from "@hookform/resolvers/zod";
 import { z } from "zod";
@@ -44,7 +44,7 @@ import {
   type CompanyNote,
 } from "../../services/groupService";
 
-// ── Icons ─────────────────────────────────────────────────────
+// â”€â”€ Icons â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
 
 function IconPlus() {
   return (
@@ -88,6 +88,13 @@ function IconChevronRight() {
     </svg>
   );
 }
+function IconChevronLeft() {
+  return (
+    <svg className="w-4 h-4 shrink-0" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
+      <path strokeLinecap="round" strokeLinejoin="round" d="M15 19l-7-7 7-7" />
+    </svg>
+  );
+}
 function IconBuilding() {
   return (
     <svg className="w-5 h-5 shrink-0" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={1.75}>
@@ -103,16 +110,16 @@ function IconUsers() {
   );
 }
 
-// ── Form schemas ──────────────────────────────────────────────
+// â”€â”€ Form schemas â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
 
 const groupSchema = z.object({
-  name: z.string().min(1, "Nome obrigatório").max(255),
+  name: z.string().min(1, "Nome obrigatÃ³rio").max(255),
   description: z.string().optional(),
 });
 type GroupFormValues = z.infer<typeof groupSchema>;
 
 const companySchema = z.object({
-  name: z.string().min(1, "Nome obrigatório").max(255),
+  name: z.string().min(1, "Nome obrigatÃ³rio").max(255),
   cnpj: z.string().optional(),
   phone: z.string().optional(),
   address: z.string().optional(),
@@ -122,7 +129,7 @@ const companySchema = z.object({
 });
 type CompanyFormValues = z.infer<typeof companySchema>;
 
-// ── Group modal ───────────────────────────────────────────────
+// â”€â”€ Group modal â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
 
 function GroupModal({
   initial,
@@ -147,7 +154,7 @@ function GroupModal({
       <form onSubmit={handleSubmit(onSubmit)} className="space-y-4">
         {error && <Alert variant="error">{error}</Alert>}
         <Input label="Nome" {...register("name")} error={errors.name?.message} />
-        <Textarea label="Descrição" {...register("description")} rows={3} />
+        <Textarea label="DescriÃ§Ã£o" {...register("description")} rows={3} />
         <ModalFooter>
           <Button variant="outline" type="button" onClick={onClose}>Cancelar</Button>
           <Button type="submit" loading={isSubmitting}>{initial ? "Salvar" : "Criar Grupo"}</Button>
@@ -157,7 +164,7 @@ function GroupModal({
   );
 }
 
-// ── Add company modal (suggestions + manual) ──────────────────
+// â”€â”€ Add company modal (suggestions + manual) â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
 
 const SUGG_PAGE_SIZE = 5;
 
@@ -279,16 +286,16 @@ function AddCompanyModal({
             <div>
               <ul className="divide-y divide-border rounded-lg border border-border overflow-hidden">
                 {pagedSugg.map((s) => (
-                  <li key={s.company_name} className="flex items-center justify-between px-4 py-3 hover:bg-background-elevated">
+                  <li key={s.company_name} className="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-2 px-4 py-3 hover:bg-background-elevated">
                     <div className="min-w-0 flex-1">
                       <p className="text-sm font-medium text-slate-100 truncate">{s.company_name}</p>
-                      <div className="flex gap-3 text-xs text-slate-500 mt-0.5">
+                      <div className="flex flex-wrap gap-x-3 gap-y-0.5 text-xs text-slate-500 mt-0.5">
                         {s.cnpj && <span>{s.cnpj}</span>}
                         {s.city && <span>{s.city}{s.state ? ` - ${s.state}` : ""}</span>}
                         <span className="flex items-center gap-1"><IconUsers />{s.client_count} cliente{s.client_count !== 1 ? "s" : ""}</span>
                       </div>
                     </div>
-                    <div className="flex gap-2 ml-3 shrink-0">
+                    <div className="flex gap-2 shrink-0 justify-end">
                       <Button size="sm" variant="outline" onClick={() => prefillManual(s)} title="Editar antes de adicionar">
                         <IconEdit />
                       </Button>
@@ -318,7 +325,7 @@ function AddCompanyModal({
             <Input label="CNPJ" {...register("cnpj")} placeholder="00.000.000/0000-00" />
             <Input label="Telefone" {...register("phone")} />
           </div>
-          <Input label="Endereço" {...register("address")} />
+          <Input label="EndereÃ§o" {...register("address")} />
           <div className="grid grid-cols-3 gap-3">
             <div className="col-span-2"><Input label="Cidade" {...register("city")} /></div>
             <Input label="UF" {...register("state")} maxLength={2} placeholder="SP" />
@@ -334,7 +341,7 @@ function AddCompanyModal({
   );
 }
 
-// ── Edit company modal ────────────────────────────────────────
+// â”€â”€ Edit company modal â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
 
 function EditCompanyModal({
   groupId,
@@ -365,7 +372,7 @@ function EditCompanyModal({
           <Input label="CNPJ" {...register("cnpj")} />
           <Input label="Telefone" {...register("phone")} />
         </div>
-        <Input label="Endereço" {...register("address")} />
+        <Input label="EndereÃ§o" {...register("address")} />
         <div className="grid grid-cols-3 gap-3">
           <div className="col-span-2"><Input label="Cidade" {...register("city")} /></div>
           <Input label="UF" {...register("state")} maxLength={2} />
@@ -380,7 +387,7 @@ function EditCompanyModal({
   );
 }
 
-// ── Assign client modal ───────────────────────────────────────
+// â”€â”€ Assign client modal â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
 
 const ASSIGN_PAGE_SIZE = 5;
 
@@ -420,7 +427,7 @@ function AssignClientModal({
         {loading ? <div className="flex justify-center py-6"><Spinner /></div>
           : filtered.length === 0 ? (
             <p className="text-sm text-slate-500 text-center py-4">
-              {clients.length === 0 ? "Todos os clientes já estão vinculados." : "Nenhum resultado."}
+              {clients.length === 0 ? "Todos os clientes jÃ¡ estÃ£o vinculados." : "Nenhum resultado."}
             </p>
           ) : (
             <div>
@@ -450,7 +457,7 @@ function AssignClientModal({
   );
 }
 
-// ── Client notes modal ────────────────────────────────────────
+// â”€â”€ Client notes modal â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
 
 function ClientNotesModal({
   groupId, companyId, client, onSaved, onClose,
@@ -466,10 +473,10 @@ function ClientNotesModal({
     finally { setSaving(false); }
   };
   return (
-    <Modal open onClose={onClose} title={`Notas — ${client.name}`}>
+    <Modal open onClose={onClose} title={`Notas â€” ${client.name}`}>
       <div className="space-y-3">
         {error && <Alert variant="error">{error}</Alert>}
-        <Textarea label="Notas internas" value={notes} onChange={(e) => setNotes(e.target.value)} rows={5} placeholder="Informações relevantes, histórico..." />
+        <Textarea label="Notas internas" value={notes} onChange={(e) => setNotes(e.target.value)} rows={5} placeholder="InformaÃ§Ãµes relevantes, histÃ³rico..." />
         <ModalFooter>
           <Button variant="outline" onClick={onClose}>Cancelar</Button>
           <Button onClick={handleSave} loading={saving}>Salvar</Button>
@@ -479,7 +486,7 @@ function ClientNotesModal({
   );
 }
 
-// ── Company detail modal ──────────────────────────────────────
+// â”€â”€ Company detail modal â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
 
 const CLIENTS_PAGE_SIZE = 5;
 
@@ -732,7 +739,7 @@ function CompanyDetailModal({
         <div className="space-y-4">
           <Textarea
             rows={5}
-            placeholder="Escreva a nota aqui…"
+            placeholder="Escreva a nota aquiâ€¦"
             value={newCompanyNoteContent}
             onChange={(e) => setNewCompanyNoteContent(e.target.value)}
           />
@@ -771,9 +778,57 @@ function CompanyDetailModal({
   );
 }
 
-// ── Main page ─────────────────────────────────────────────────
+// â”€â”€ Group notes list (shared mobile/desktop) â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
+
+function GroupNotesList({ notes, noteDeleting, onView, onDelete, onAdd }: {
+  notes: GroupNote[];
+  noteDeleting: string | null;
+  onView: (n: GroupNote) => void;
+  onDelete: (id: string) => void;
+  onAdd: () => void;
+}) {
+  if (notes.length === 0) return (
+    <div className="text-center py-8 text-xs text-amber-600/70 dark:text-amber-700/50 italic">
+      Nenhuma nota ainda.
+      <button onClick={onAdd} className="block mt-2 text-amber-500 hover:text-amber-600 dark:text-amber-500/70 dark:hover:text-amber-400 cursor-pointer mx-auto not-italic">
+        Adicionar nota
+      </button>
+    </div>
+  );
+  return (
+    <div className="space-y-2">
+      {notes.map((n) => (
+        <div
+          key={n.id}
+          className="group rounded-lg border border-amber-200 bg-amber-50 dark:border-amber-700/20 dark:bg-amber-950/15 p-3 cursor-pointer hover:border-amber-300 dark:hover:border-amber-600/40 transition-colors"
+          onClick={() => onView(n)}
+        >
+          <div className="flex items-center justify-between gap-1 mb-1">
+            <span className="text-[10px] font-semibold text-amber-600 dark:text-amber-500/70 truncate">{n.author_name}</span>
+            <div className="flex items-center gap-1 shrink-0">
+              <span className="text-[10px] text-amber-600/70 dark:text-amber-700/50">
+                {new Date(n.created_at).toLocaleDateString("pt-BR", { day: "2-digit", month: "2-digit", year: "2-digit" })}
+              </span>
+              <button
+                onClick={(e) => { e.stopPropagation(); onDelete(n.id); }}
+                disabled={noteDeleting === n.id}
+                className="opacity-0 group-hover:opacity-100 p-0.5 rounded text-amber-500 dark:text-amber-700/60 hover:text-red-400 transition-all cursor-pointer"
+              >
+                {noteDeleting === n.id ? <Spinner size="sm" /> : <IconTrash />}
+              </button>
+            </div>
+          </div>
+          <p className="text-xs text-slate-600 dark:text-amber-200/60 line-clamp-3 whitespace-pre-wrap">{n.content}</p>
+        </div>
+      ))}
+    </div>
+  );
+}
+
+// â”€â”€ Main page â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
 
 export default function GroupsPage() {
+  const [sidebarOpen, setSidebarOpen] = useState(true);
   const [groups, setGroups] = useState<GroupResponse[]>([]);
   const [groupSearch, setGroupSearch] = useState("");
   const [loading, setLoading] = useState(true);
@@ -813,6 +868,7 @@ export default function GroupsPage() {
     setGroupNotes([]);
     loadGroupDetail(g);
     listGroupNotes(g.id).then(setGroupNotes).catch(() => {});
+    setSidebarOpen(false);
   };
 
   const handleAddNote = async () => {
@@ -861,18 +917,44 @@ export default function GroupsPage() {
   const refreshDetail = () => selectedGroup && loadGroupDetail(selectedGroup);
 
   return (
-    <div className="flex h-full overflow-hidden">
-      {/* ── Left: Groups list ──────────────────────────────── */}
-      <aside className="w-64 shrink-0 flex flex-col border-r border-slate-200 dark:border-border bg-white dark:bg-background-surface overflow-hidden">
+    <div className="relative flex h-full overflow-hidden">
+
+      {/* Mobile backdrop */}
+      {sidebarOpen && (
+        <div
+          className="xl:hidden absolute inset-0 z-20 bg-black/60 backdrop-blur-sm"
+          onClick={() => setSidebarOpen(false)}
+        />
+      )}
+
+      {/* â”€â”€ Left: Groups list â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€ */}
+      <aside className={cn(
+        "shrink-0 flex flex-col w-64 border-r border-slate-200 dark:border-border bg-white dark:bg-background-surface overflow-hidden",
+        "transition-transform duration-300 ease-in-out",
+        "absolute inset-y-0 left-0 z-30",
+        sidebarOpen ? "translate-x-0" : "-translate-x-full",
+        "xl:relative xl:inset-auto xl:z-auto xl:translate-x-0",
+      )}>
         <div className="flex items-center justify-between px-4 py-4 border-b border-slate-200 dark:border-border">
           <h1 className="text-sm font-semibold text-slate-700 dark:text-slate-300">Grupos</h1>
-          <button
-            onClick={() => setShowNewGroup(true)}
-            title="Novo grupo"
-            className="p-1.5 rounded-lg text-slate-400 hover:text-primary hover:bg-primary/10 transition-colors cursor-pointer"
-          >
-            <IconPlus />
-          </button>
+          <div className="flex items-center gap-1">
+            <button
+              onClick={() => setShowNewGroup(true)}
+              title="Novo grupo"
+              className="p-1.5 rounded-lg text-slate-400 hover:text-primary hover:bg-primary/10 transition-colors cursor-pointer"
+            >
+              <IconPlus />
+            </button>
+            {selectedGroup && (
+              <button
+                onClick={() => setSidebarOpen(false)}
+                className="xl:hidden p-1.5 rounded-lg text-slate-400 hover:text-slate-600 dark:hover:text-slate-200 hover:bg-slate-100 dark:hover:bg-background-elevated transition-colors cursor-pointer"
+                title="Fechar"
+              >
+                <IconX />
+              </button>
+            )}
+          </div>
         </div>
 
         <div className="px-3 py-2 border-b border-slate-200 dark:border-border">
@@ -918,7 +1000,7 @@ export default function GroupsPage() {
                 className={cn(
                   "w-full text-left px-4 py-3 flex items-center justify-between gap-2 transition-colors cursor-pointer",
                   selectedGroup?.id === g.id
-                    ? "bg-primary/10 text-primary border-r-2 border-primary"
+                    ? "bg-primary/10 text-primary border-l-2 border-primary"
                     : "text-slate-600 dark:text-slate-400 hover:bg-slate-50 dark:hover:bg-background-elevated",
                 )}
               >
@@ -933,29 +1015,44 @@ export default function GroupsPage() {
         </div>
       </aside>
 
-      {/* ── Center: Group detail + companies ──────────────── */}
-      <main className="flex-1 overflow-y-auto overflow-x-hidden p-6 min-w-0">
+      {/* â”€â”€ Center: Group detail + companies â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€ */}
+      <main className="flex-1 overflow-y-auto overflow-x-hidden p-4 sm:p-6 min-w-0">
+
+        {/* Mobile toggle â€” abrir sidebar */}
+        <button
+          onClick={() => setSidebarOpen(true)}
+          className={cn(
+            "xl:hidden mb-4 flex items-center gap-1.5 text-xs font-medium border rounded-lg px-3 py-1.5 transition-colors cursor-pointer",
+            selectedGroup
+              ? "text-primary border-primary/30 bg-primary/10 hover:bg-primary/20"
+              : "text-slate-400 border-border/50 bg-background-elevated hover:bg-background-surface",
+          )}
+        >
+          <IconChevronLeft />
+          {selectedGroup ? selectedGroup.name : "Ver grupos"}
+        </button>
+
         {!selectedGroup ? (
-          <div className="flex flex-col items-center justify-center h-full text-center">
+          <div className="flex flex-col items-center justify-center h-3/4 text-center">
             <div className="text-slate-300 dark:text-slate-700 mb-3">
               <svg className="w-16 h-16 mx-auto" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={0.75}>
                 <path strokeLinecap="round" strokeLinejoin="round" d="M17 20h5v-2a3 3 0 00-5.356-1.857M17 20H7m10 0v-2c0-.656-.126-1.283-.356-1.857M7 20H2v-2a3 3 0 015.356-1.857M7 20v-2c0-.656.126-1.283.356-1.857m0 0a5.002 5.002 0 019.288 0M15 7a3 3 0 11-6 0 3 3 0 016 0zm6 3a2 2 0 11-4 0 2 2 0 014 0zM7 10a2 2 0 11-4 0 2 2 0 014 0z" />
               </svg>
             </div>
             <p className="text-slate-500 dark:text-slate-400 font-medium">Selecione um grupo</p>
-            <p className="text-sm text-slate-400 dark:text-slate-500 mt-1">Escolha um grupo à esquerda para ver detalhes</p>
+            <p className="text-sm text-slate-400 dark:text-slate-500 mt-1">Escolha um grupo Ã  esquerda para ver detalhes</p>
           </div>
         ) : (
           <div>
             {/* Group header */}
-            <div className="flex items-start justify-between mb-6">
-              <div>
-                <h2 className="text-xl font-semibold text-slate-800 dark:text-slate-100">{selectedGroup.name}</h2>
+            <div className="flex items-start justify-between mb-6 gap-3">
+              <div className="min-w-0">
+                <h2 className="text-xl font-semibold text-slate-800 dark:text-slate-100 break-words">{selectedGroup.name}</h2>
                 {groupDetail?.description && (
                   <p className="text-sm text-slate-500 dark:text-slate-400 mt-0.5">{groupDetail.description}</p>
                 )}
               </div>
-              <div className="flex gap-2">
+              <div className="flex gap-2 shrink-0">
                 <Button size="sm" variant="outline" onClick={() => setShowEditGroup(true)}><IconEdit />Editar</Button>
                 <Button size="sm" variant="outline" className="text-red-500 hover:bg-red-50 dark:hover:bg-red-900/20" onClick={handleDeleteGroup}><IconTrash /></Button>
               </div>
@@ -1010,13 +1107,37 @@ export default function GroupsPage() {
                 ))}
               </div>
             )}
+
+            {/* â”€â”€ Notas â€” mobile only (below companies) â”€â”€ */}
+            <div className="mt-5 xl:hidden rounded-xl border border-amber-200/50 dark:border-amber-800/20 bg-white dark:bg-background-surface overflow-hidden">
+              <div className="flex items-center justify-between px-4 py-3 border-b border-amber-200/50 dark:border-amber-800/20">
+                <p className="text-xs font-bold uppercase tracking-widest text-amber-600 dark:text-amber-500/80 flex items-center gap-1.5">
+                  <IconNote />Notas do grupo
+                </p>
+                <button
+                  onClick={() => setShowAddNote(true)}
+                  className="p-1.5 rounded-lg text-slate-400 hover:text-amber-500 hover:bg-amber-100 dark:hover:text-amber-400 dark:hover:bg-amber-900/20 transition-colors cursor-pointer"
+                >
+                  <IconPlus />
+                </button>
+              </div>
+              <div className="p-3">
+                <GroupNotesList
+                  notes={groupNotes}
+                  noteDeleting={noteDeleting}
+                  onView={setViewNote}
+                  onDelete={handleDeleteNote}
+                  onAdd={() => setShowAddNote(true)}
+                />
+              </div>
+            </div>
           </div>
         )}
       </main>
 
-      {/* ── Right: Notes panel ────────────────────────────── */}
+      {/* â”€â”€ Right: Notes panel â€” desktop only â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€ */}
       {selectedGroup && (
-        <aside className="w-72 shrink-0 flex flex-col border-l border-slate-200 dark:border-border bg-white dark:bg-background-surface overflow-hidden">
+        <aside className="hidden xl:flex w-72 shrink-0 flex-col border-l border-slate-200 dark:border-border bg-white dark:bg-background-surface overflow-hidden">
           <div className="flex items-center justify-between px-4 py-4 border-b border-slate-200 dark:border-border">
             <p className="text-xs font-bold uppercase tracking-widest text-amber-600 dark:text-amber-500/80 flex items-center gap-1.5">
               <IconNote />
@@ -1030,46 +1151,19 @@ export default function GroupsPage() {
               <IconPlus />
             </button>
           </div>
-
-          <div className="flex-1 overflow-y-auto p-3 space-y-2">
-            {groupNotes.length === 0 ? (
-              <div className="text-center py-8 text-xs text-amber-600/70 dark:text-amber-700/50 italic">
-                Nenhuma nota ainda.
-                <button onClick={() => setShowAddNote(true)} className="block mt-2 text-amber-500 hover:text-amber-600 dark:text-amber-500/70 dark:hover:text-amber-400 cursor-pointer mx-auto not-italic">
-                  Adicionar nota
-                </button>
-              </div>
-            ) : (
-              groupNotes.map((n) => (
-                <div
-                  key={n.id}
-                  className="group rounded-lg border border-amber-200 bg-amber-50 dark:border-amber-700/20 dark:bg-amber-950/15 p-3 cursor-pointer hover:border-amber-300 dark:hover:border-amber-600/40 transition-colors"
-                  onClick={() => setViewNote(n)}
-                >
-                  <div className="flex items-center justify-between gap-1 mb-1">
-                    <span className="text-[10px] font-semibold text-amber-600 dark:text-amber-500/70 truncate">{n.author_name}</span>
-                    <div className="flex items-center gap-1 shrink-0">
-                      <span className="text-[10px] text-amber-600/70 dark:text-amber-700/50">
-                        {new Date(n.created_at).toLocaleDateString("pt-BR", { day: "2-digit", month: "2-digit", year: "2-digit" })}
-                      </span>
-                      <button
-                        onClick={(e) => { e.stopPropagation(); handleDeleteNote(n.id); }}
-                        disabled={noteDeleting === n.id}
-                        className="opacity-0 group-hover:opacity-100 p-0.5 rounded text-amber-500 dark:text-amber-700/60 hover:text-red-400 transition-all cursor-pointer"
-                      >
-                        {noteDeleting === n.id ? <Spinner size="sm" /> : <IconTrash />}
-                      </button>
-                    </div>
-                  </div>
-                  <p className="text-xs text-slate-600 dark:text-amber-200/60 line-clamp-3 whitespace-pre-wrap">{n.content}</p>
-                </div>
-              ))
-            )}
+          <div className="flex-1 overflow-y-auto p-3">
+            <GroupNotesList
+              notes={groupNotes}
+              noteDeleting={noteDeleting}
+              onView={setViewNote}
+              onDelete={handleDeleteNote}
+              onAdd={() => setShowAddNote(true)}
+            />
           </div>
         </aside>
       )}
 
-      {/* ── Modals ────────────────────────────────────────── */}
+      {/* â”€â”€ Modals â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€ */}
       {showNewGroup && (
         <GroupModal
           onSave={async (v) => { const g = await createGroup(v); setGroups((p) => [...p, g]); }}
@@ -1112,7 +1206,7 @@ export default function GroupsPage() {
         <div className="space-y-4">
           <Textarea
             rows={5}
-            placeholder="Escreva a nota aqui…"
+            placeholder="Escreva a nota aquiâ€¦"
             value={newNoteContent}
             onChange={(e) => setNewNoteContent(e.target.value)}
           />
@@ -1150,3 +1244,4 @@ export default function GroupsPage() {
     </div>
   );
 }
+
