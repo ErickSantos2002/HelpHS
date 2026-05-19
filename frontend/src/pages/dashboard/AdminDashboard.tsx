@@ -266,13 +266,13 @@ export default function AdminDashboard() {
     <div className="space-y-5">
 
       {/* ── Header ──────────────────────────────────────────── */}
-      <div className="flex flex-wrap items-center justify-between gap-4 rounded-2xl border border-border/40 bg-background-surface px-5 py-4">
-        <div>
+      <div className="flex flex-col sm:flex-row sm:flex-wrap sm:items-center sm:justify-between gap-4 rounded-2xl border border-border/40 bg-background-surface px-5 py-4">
+        <div className="text-center sm:text-left">
           <h1 className="text-xl font-extrabold text-slate-100">Dashboard</h1>
           <p className="mt-0.5 text-sm text-slate-500">Visão geral do sistema de atendimento</p>
         </div>
 
-        <div className="flex flex-wrap items-center gap-2">
+        <div className="flex flex-wrap items-center justify-center sm:justify-end gap-2">
           {/* Technician filter */}
           {techList && (
             <FilterSelect
