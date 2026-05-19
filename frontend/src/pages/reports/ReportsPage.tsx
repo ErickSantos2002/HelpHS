@@ -323,7 +323,13 @@ function fmtAge(hours: number): string {
   return `${(hours / 168).toFixed(1)} sem`;
 }
 
+const OLDEST_PAGE_SIZE = 10;
+
 function OldestOpenTable({ tickets }: { tickets: OldestTicketItem[] }) {
+  const [page, setPage] = useState(0);
+  const totalPages = Math.ceil(tickets.length / OLDEST_PAGE_SIZE);
+  const paged = tickets.slice(page * OLDEST_PAGE_SIZE, (page + 1) * OLDEST_PAGE_SIZE);
+
   return (
     <div className="rounded-xl border border-border/40 bg-background-surface overflow-hidden">
       <div className="border-b border-border/40 px-5 py-3.5 flex items-center gap-2">
@@ -342,7 +348,7 @@ function OldestOpenTable({ tickets }: { tickets: OldestTicketItem[] }) {
             </tr>
           </thead>
           <tbody className="divide-y divide-border/30">
-            {tickets.map((t) => (
+            {paged.map((t) => (
               <tr key={t.ticket_id} className="hover:bg-background-elevated/50 transition-colors">
                 <td className="px-4 py-3 font-mono text-xs text-primary">{t.protocol}</td>
                 <td className="px-4 py-3 text-slate-300 max-w-[220px] truncate" title={t.title}>{t.title}</td>
@@ -365,6 +371,42 @@ function OldestOpenTable({ tickets }: { tickets: OldestTicketItem[] }) {
             ))}
           </tbody>
         </table>
+      </div>
+
+      {/* Paginação */}
+      <div className="flex items-center justify-between border-t border-border/40 px-5 py-3">
+        <span className="text-xs text-slate-500">
+          {page * OLDEST_PAGE_SIZE + 1}–{Math.min((page + 1) * OLDEST_PAGE_SIZE, tickets.length)} de {tickets.length}
+        </span>
+        <div className="flex items-center gap-1">
+          <button
+            onClick={() => setPage((p) => Math.max(0, p - 1))}
+            disabled={page === 0}
+            className="rounded-lg border border-border/40 px-2.5 py-1.5 text-xs text-slate-400 hover:bg-background-elevated disabled:opacity-30 disabled:cursor-not-allowed transition-colors cursor-pointer"
+          >
+            ‹
+          </button>
+          {Array.from({ length: totalPages }, (_, i) => (
+            <button
+              key={i}
+              onClick={() => setPage(i)}
+              className={`rounded-lg border px-2.5 py-1.5 text-xs transition-colors cursor-pointer ${
+                i === page
+                  ? "border-primary bg-primary/20 text-primary font-semibold"
+                  : "border-border/40 text-slate-400 hover:bg-background-elevated"
+              }`}
+            >
+              {i + 1}
+            </button>
+          ))}
+          <button
+            onClick={() => setPage((p) => Math.min(totalPages - 1, p + 1))}
+            disabled={page >= totalPages - 1}
+            className="rounded-lg border border-border/40 px-2.5 py-1.5 text-xs text-slate-400 hover:bg-background-elevated disabled:opacity-30 disabled:cursor-not-allowed transition-colors cursor-pointer"
+          >
+            ›
+          </button>
+        </div>
       </div>
     </div>
   );
@@ -427,7 +469,7 @@ function GlobalReport({ data, period }: { data: ReportData; period: number }) {
   return (
     <div className="space-y-4">
       {/* KPIs */}
-      <div className="grid grid-cols-2 sm:grid-cols-3 lg:grid-cols-5 gap-3">
+      <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-5 gap-3">
         <StatCard label="Tickets no período" value={data.total_tickets}
           sub={`últimos ${data.period_days} dias`}
           delta={<Delta current={data.total_tickets} prev={cmp?.total_tickets ?? null} />} />
@@ -693,7 +735,7 @@ function TechnicianDetail({ data }: { data: TechnicianDetailReport }) {
 
   return (
     <div className="space-y-4">
-      <div className="grid grid-cols-2 sm:grid-cols-4 gap-3">
+      <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-3">
         <StatCard label="Atribuídos no período"  value={data.total_assigned}
           sub={`últimos ${data.period_days} dias`} />
         <StatCard label="Resolvidos / Fechados"  value={data.resolved}
@@ -707,7 +749,7 @@ function TechnicianDetail({ data }: { data: TechnicianDetailReport }) {
           sub={data.csat_count > 0 ? `${data.csat_count} avaliação${data.csat_count !== 1 ? "ões" : ""}` : "sem avaliações"} />
       </div>
 
-      <div className="grid grid-cols-2 sm:grid-cols-4 gap-3">
+      <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-3">
         <StatCard label="Em andamento"           value={data.in_progress} />
         <StatCard label="Em aberto"              value={data.open_count} />
         <StatCard label="Tempo médio resolução"  value={resolutionStr(data.avg_resolution_hours)}
@@ -959,8 +1001,8 @@ export default function ReportsPage() {
   return (
     <div className="space-y-5 pb-10">
       {/* ── Header ───────────────────────────────────────────── */}
-      <div className="flex flex-wrap items-center justify-between gap-4 rounded-2xl border border-border/40 bg-background-surface px-5 py-4">
-        <div>
+      <div className="flex flex-col sm:flex-row sm:flex-wrap sm:items-center sm:justify-between gap-4 rounded-2xl border border-border/40 bg-background-surface px-5 py-4">
+        <div className="text-center sm:text-left">
           <h1 className="text-xl font-extrabold text-slate-100">Relatórios</h1>
           <p className="mt-0.5 text-sm text-slate-500">
             {isTechnician ? "Suas métricas de desempenho" : "Visão geral e desempenho da equipe"}
@@ -972,7 +1014,7 @@ export default function ReportsPage() {
           </p>
         </div>
 
-        <div className="flex flex-wrap items-center gap-2">
+        <div className="flex flex-wrap items-center justify-center sm:justify-end gap-2">
           {/* Tabs inline (admin only) */}
           {isAdmin && (
             <div className="flex h-9 items-center gap-0.5 rounded-xl border border-border/40 bg-background-elevated px-1">
