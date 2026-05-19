@@ -399,7 +399,7 @@ async def list_comments(
         select(KBComment)
         .options(selectinload(KBComment.author))
         .where(KBComment.article_id == article_id)
-        .order_by(KBComment.created_at.asc())
+        .order_by(KBComment.created_at.desc())
     )
     all_comments = list(rows.scalars().all())
 

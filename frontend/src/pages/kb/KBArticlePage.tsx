@@ -122,7 +122,7 @@ function CommentItem({ comment, currentUserId, isStaff, onReply, onDelete }: {
 }) {
   const [showReplyForm, setShowReplyForm] = useState(false);
   const [showReplies, setShowReplies] = useState(false);
-  const canDelete = isStaff || comment.author_id === currentUserId;
+  const canDelete = isStaff || (comment.replies.length === 0 && comment.author_id === currentUserId);
   const date = new Date(comment.created_at).toLocaleString("pt-BR", { day: "2-digit", month: "2-digit", year: "numeric", hour: "2-digit", minute: "2-digit" });
   const replyCount = comment.replies.length;
 
@@ -241,7 +241,7 @@ export default function KBArticlePage() {
     setCommentError(null);
     try {
       const comment = await createKBComment(id, content);
-      setComments((prev) => [...prev, comment]);
+      setComments((prev) => [comment, ...prev]);
     } catch {
       setCommentError("Não foi possível salvar o comentário. Tente novamente.");
       throw new Error("comment_failed");
@@ -294,7 +294,7 @@ export default function KBArticlePage() {
             <span className="text-slate-600">/</span>
             <span className="text-slate-500 truncate max-w-[160px] sm:max-w-xs">{article.title}</span>
           </button>
-          <h1 className="text-xl font-extrabold leading-tight text-slate-100">{article.title}</h1>
+          <h1 className="text-xl font-extrabold leading-tight text-slate-100 break-words [overflow-wrap:anywhere]">{article.title}</h1>
         </div>
         {isStaff && (
           <div className="flex justify-center sm:justify-end">
