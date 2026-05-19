@@ -96,9 +96,9 @@ function TicketRow({ ticket, showTech }: { ticket: Ticket; showTech?: boolean })
   return (
     <button
       onClick={() => navigate(`/tickets/${ticket.id}`)}
-      className="w-full group flex items-start gap-3 rounded-lg px-3 py-3 text-left hover:bg-slate-50 dark:hover:bg-background-elevated transition-colors"
+      className="w-full flex items-center gap-3 px-4 py-3 text-left hover:bg-slate-50 dark:hover:bg-background-elevated transition-colors"
     >
-      <div className={cn("mt-2 w-1.5 h-1.5 rounded-full shrink-0", PRIORITY_DOT[ticket.priority] ?? "bg-slate-400")} />
+      <div className={cn("w-1.5 h-1.5 rounded-full shrink-0", PRIORITY_DOT[ticket.priority] ?? "bg-slate-400")} />
       <div className="flex-1 min-w-0">
         <div className="flex items-center gap-1.5 mb-0.5">
           <span className="text-xs font-mono text-slate-400">{ticket.protocol}</span>
@@ -128,7 +128,7 @@ function TicketListCard({
         <span className="text-xs font-medium text-slate-500 bg-slate-100 dark:bg-background-elevated px-2 py-0.5 rounded-full">{count}</span>
       </div>
       {tickets.length === 0 ? (
-        <div className="flex flex-col items-center justify-center flex-1 py-10 gap-2">
+        <div className="flex flex-col items-center justify-center py-10 gap-2">
           <div className="w-8 h-8 rounded-full bg-slate-100 dark:bg-background-elevated flex items-center justify-center">
             <svg className="w-4 h-4 text-slate-400" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={1.5}>
               <path strokeLinecap="round" strokeLinejoin="round" d="M9 12l2 2 4-4m6 2a9 9 0 11-18 0 9 9 0 0118 0z" />
@@ -137,7 +137,7 @@ function TicketListCard({
           <p className="text-sm text-slate-500">{emptyMsg}</p>
         </div>
       ) : (
-        <div className="overflow-y-auto max-h-80 p-2 space-y-0.5">
+        <div className="overflow-y-auto max-h-[168px] divide-y divide-border/60">
           {tickets.map((t) => <TicketRow key={t.id} ticket={t} showTech={showTech} />)}
         </div>
       )}
@@ -244,15 +244,15 @@ export default function TechnicianDashboard() {
     <div className="space-y-5">
 
       {/* ── Header ──────────────────────────────────────────── */}
-      <div className="flex flex-wrap items-center justify-between gap-4 rounded-2xl border border-border/40 bg-background-surface px-5 py-4">
-        <div>
+      <div className="flex flex-col sm:flex-row sm:flex-wrap sm:items-center sm:justify-between gap-4 rounded-2xl border border-border/40 bg-background-surface px-5 py-4">
+        <div className="text-center sm:text-left">
           <h1 className="text-xl font-extrabold text-slate-100">Dashboard</h1>
           <p className="mt-0.5 text-sm text-slate-500">
             Olá, <span className="font-semibold text-slate-300">{user?.name?.split(" ")[0]}</span>! Aqui está sua fila de hoje.
           </p>
         </div>
 
-        <div className="flex flex-wrap items-center gap-2">
+        <div className="flex flex-wrap items-center justify-center sm:justify-end gap-2">
           {/* Period filter */}
           <FilterSelect
             value={periodKey}
@@ -287,7 +287,7 @@ export default function TechnicianDashboard() {
       </div>
 
       {/* ── KPI Row ─────────────────────────────────────────── */}
-      <div className="grid grid-cols-2 lg:grid-cols-4 gap-4">
+      <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-4">
         <KpiCard
           label="Meus tickets ativos"
           value={myActiveCount}
