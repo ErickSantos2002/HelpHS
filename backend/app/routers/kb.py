@@ -251,7 +251,7 @@ async def create_article(
         content=body.content,
         slug=slug,
         category=body.category,
-        tags=body.tags,
+        tags=list(dict.fromkeys(body.tags)),
         status=body.status,
         author_id=actor.id,
         view_count=0,
@@ -312,6 +312,8 @@ async def update_article(
         article.slug = new_slug
 
     for field, value in changes.items():
+        if field == "tags" and isinstance(value, list):
+            value = list(dict.fromkeys(value))
         setattr(article, field, value)
 
     article.updated_at = datetime.now(UTC)
@@ -337,7 +339,9 @@ async def delete_article(
     await db.commit()
 
 
-def _to_comment_response(comment: KBComment) -> KBCommentResponse:
+def _to_comment_response(
+    comment: KBComment, replies: list[KBComment] | None = None
+) -> KBCommentResponse:
     return KBCommentResponse(
         id=comment.id,
         article_id=comment.article_id,
@@ -348,7 +352,7 @@ def _to_comment_response(comment: KBComment) -> KBCommentResponse:
         parent_id=comment.parent_id,
         created_at=comment.created_at,
         updated_at=comment.updated_at,
-        replies=[_to_comment_response(r) for r in (comment.replies or [])],
+        replies=[_to_comment_response(r) for r in (replies or [])],
     )
 
 
@@ -393,18 +397,23 @@ async def list_comments(
 
     rows = await db.execute(
         select(KBComment)
-        .options(
-            selectinload(KBComment.author),
-            selectinload(KBComment.replies).selectinload(KBComment.author),
-        )
-        .where(KBComment.article_id == article_id, KBComment.parent_id.is_(None))
+        .options(selectinload(KBComment.author))
+        .where(KBComment.article_id == article_id)
         .order_by(KBComment.created_at.asc())
     )
-    comments = rows.scalars().all()
+    all_comments = list(rows.scalars().all())
+
+    replies_map: dict[uuid.UUID, list[KBComment]] = {}
+    top_level: list[KBComment] = []
+    for c in all_comments:
+        if c.parent_id is not None:
+            replies_map.setdefault(c.parent_id, []).append(c)
+        else:
+            top_level.append(c)
 
     return KBCommentListResponse(
-        items=[_to_comment_response(c) for c in comments],
-        total=len(comments),
+        items=[_to_comment_response(c, replies_map.get(c.id, [])) for c in top_level],
+        total=len(top_level),
     )
 
 
@@ -456,14 +465,11 @@ async def create_comment(
 
     result = await db.execute(
         select(KBComment)
-        .options(
-            selectinload(KBComment.author),
-            selectinload(KBComment.replies).selectinload(KBComment.author),
-        )
+        .options(selectinload(KBComment.author))
         .where(KBComment.id == comment.id)
     )
     comment = result.scalar_one()
-    return _to_comment_response(comment)
+    return _to_comment_response(comment, replies=[])
 
 
 @router.delete("/kb/comments/{comment_id}", status_code=status.HTTP_204_NO_CONTENT)

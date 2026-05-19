@@ -403,7 +403,7 @@ export default function KBArticlePage() {
             <div className="rounded-xl border border-border/40 bg-background-surface p-4">
               <p className="mb-3 text-[10px] font-bold uppercase tracking-widest text-slate-500">Tags</p>
               <div className="flex flex-wrap gap-1.5">
-                {article.tags.map((tag) => (
+                {[...new Set(article.tags)].map((tag) => (
                   <span key={tag} className="rounded-full border border-border/50 bg-background-elevated px-2.5 py-1 text-xs text-slate-400">{tag}</span>
                 ))}
               </div>

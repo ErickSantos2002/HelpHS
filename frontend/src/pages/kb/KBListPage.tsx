@@ -209,7 +209,7 @@ export default function KBListPage() {
                   <p className="text-xs text-slate-500 line-clamp-1">{preview}…</p>
                   {article.tags.length > 0 && (
                     <div className="mt-2 flex flex-wrap items-center gap-2">
-                      {article.tags.map((tag) => (
+                      {[...new Set(article.tags)].map((tag) => (
                         <span key={tag} className="rounded-md bg-background-elevated px-1.5 py-0.5 text-[10px] text-slate-500">{tag}</span>
                       ))}
                     </div>

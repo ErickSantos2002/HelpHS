@@ -591,13 +591,6 @@ class KBComment(Base):
     # Relacionamentos
     article: Mapped["KBArticle"] = relationship(back_populates="comments")
     author: Mapped["User | None"] = relationship()
-    replies: Mapped[list["KBComment"]] = relationship(
-        "KBComment",
-        primaryjoin="foreign(KBComment.parent_id) == KBComment.id",
-        uselist=True,
-        lazy="selectin",
-        order_by="KBComment.created_at",
-    )
 
 
 class SLAConfig(Base):
