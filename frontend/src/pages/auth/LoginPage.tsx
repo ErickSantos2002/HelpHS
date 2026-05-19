@@ -87,7 +87,7 @@ export default function LoginPage() {
 
         {/* Logo */}
         <div className="relative z-10">
-          <img src={logoFull} alt="HelpHS" className="h-10 w-auto object-contain" />
+          <img src={logoFull} alt="HelpHS" className="h-14 w-auto object-contain animate-logo-pulse" />
         </div>
 
         {/* Main copy */}
@@ -134,12 +134,12 @@ export default function LoginPage() {
       <div className="flex flex-1 lg:w-2/5 flex-col items-center justify-center bg-[#0D1623] px-6 py-12">
         <div className="w-full max-w-sm space-y-8">
           {/* Mobile logo */}
-          <div className="flex lg:hidden items-center justify-center gap-2.5">
-            <img src={logoFull} alt="HelpHS" className="h-8 w-auto object-contain" />
+          <div className="flex lg:hidden items-center justify-center">
+            <img src={logoFull} alt="HelpHS" className="h-12 w-auto object-contain animate-logo-pulse" />
           </div>
 
           {/* Heading */}
-          <div className="space-y-1">
+          <div className="space-y-1 text-center lg:text-left">
             <h2 className="text-2xl font-bold text-slate-100">Bem-vindo de volta</h2>
             <p className="text-sm text-slate-500">Entre com suas credenciais para continuar</p>
           </div>

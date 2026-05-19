@@ -67,6 +67,15 @@ export default {
       fontFamily: {
         sans: ["Plus Jakarta Sans", "ui-sans-serif", "system-ui", "sans-serif"],
       },
+      keyframes: {
+        "logo-pulse": {
+          "0%, 100%": { transform: "scale(1)", filter: "drop-shadow(0 0 0px rgba(14,165,233,0))" },
+          "50%": { transform: "scale(1.06)", filter: "drop-shadow(0 0 10px rgba(14,165,233,0.55))" },
+        },
+      },
+      animation: {
+        "logo-pulse": "logo-pulse 3s ease-in-out infinite",
+      },
     },
   },
   plugins: [],
