@@ -1,3 +1,4 @@
+import { createPortal } from "react-dom";
 import { useEffect, useRef, useState } from "react";
 import { cn } from "../../lib/utils";
 
@@ -27,52 +28,76 @@ const CheckIcon = (
   </svg>
 );
 
+const DROPDOWN_MIN_W = 160;
+
 export function FilterSelect({ value, onChange, options, placeholder = "Todos", className }: FilterSelectProps) {
   const [open, setOpen] = useState(false);
-  const ref = useRef<HTMLDivElement>(null);
+  const [pos, setPos] = useState<{ top: number; left?: number; right?: number }>({ top: 0, left: 0 });
+  const triggerRef = useRef<HTMLButtonElement>(null);
+  const dropdownRef = useRef<HTMLDivElement>(null);
 
   const selected = options.find((o) => o.value === value);
   const label = selected?.label ?? placeholder;
 
+  // Close on outside click
   useEffect(() => {
     function handle(e: MouseEvent) {
-      if (ref.current && !ref.current.contains(e.target as Node)) setOpen(false);
+      const target = e.target as Node;
+      if (
+        triggerRef.current && !triggerRef.current.contains(target) &&
+        dropdownRef.current && !dropdownRef.current.contains(target)
+      ) {
+        setOpen(false);
+      }
     }
     document.addEventListener("mousedown", handle);
     return () => document.removeEventListener("mousedown", handle);
   }, []);
+
+  // Close on scroll / resize
+  useEffect(() => {
+    if (!open) return;
+    const close = () => setOpen(false);
+    window.addEventListener("scroll", close, true);
+    window.addEventListener("resize", close);
+    return () => {
+      window.removeEventListener("scroll", close, true);
+      window.removeEventListener("resize", close);
+    };
+  }, [open]);
+
+  function handleToggle() {
+    if (!triggerRef.current) { setOpen((v) => !v); return; }
+    const rect = triggerRef.current.getBoundingClientRect();
+    const vw = window.innerWidth;
+    // If dropdown would overflow right edge, anchor to right of trigger instead
+    if (rect.left + DROPDOWN_MIN_W > vw - 8) {
+      setPos({ top: rect.bottom + 6, right: vw - rect.right });
+    } else {
+      setPos({ top: rect.bottom + 6, left: rect.left });
+    }
+    setOpen((v) => !v);
+  }
 
   function choose(val: string) {
     onChange(val);
     setOpen(false);
   }
 
-  return (
-    <div ref={ref} className={cn("relative", className)}>
-      {/* Trigger */}
-      <button
-        type="button"
-        onClick={() => setOpen((v) => !v)}
-        className={cn(
-          "flex h-9 items-center gap-2 rounded-lg border px-3 text-sm font-medium transition-all cursor-pointer select-none",
-          "bg-background-surface dark:bg-background-elevated",
-          open
-            ? "border-primary ring-2 ring-primary/20 text-slate-800 dark:text-slate-100"
-            : "border-border/60 text-slate-600 dark:text-slate-300 hover:border-border hover:text-slate-800 dark:hover:text-slate-100",
-        )}
-      >
-        {selected?.dot && (
-          <span className="w-2 h-2 rounded-full shrink-0" style={{ backgroundColor: selected.dot }} />
-        )}
-        <span>{label}</span>
-        <span className={cn("transition-transform duration-150", open && "rotate-180")}>
-          {ChevronDown}
-        </span>
-      </button>
-
-      {/* Dropdown */}
-      {open && (
-        <div className="absolute left-0 top-full z-50 mt-1.5 min-w-[160px] rounded-xl border border-border/60 bg-white dark:bg-background-surface shadow-lg shadow-black/10 dark:shadow-black/20 overflow-hidden">
+  const dropdown = open
+    ? createPortal(
+        <div
+          ref={dropdownRef}
+          style={{
+            position: "fixed",
+            top: pos.top,
+            left: pos.left,
+            right: pos.right,
+            minWidth: DROPDOWN_MIN_W,
+            zIndex: 9999,
+          }}
+          className="rounded-xl border border-border/60 bg-white dark:bg-background-surface shadow-lg shadow-black/10 dark:shadow-black/20 overflow-hidden"
+        >
           {/* Placeholder option */}
           <button
             type="button"
@@ -89,10 +114,8 @@ export function FilterSelect({ value, onChange, options, placeholder = "Todos", 
             {!value && <span className="text-primary">{CheckIcon}</span>}
           </button>
 
-          {/* Divider */}
           <div className="h-px bg-slate-200 dark:bg-border/40 mx-2" />
 
-          {/* Options */}
           {options.map((opt) => {
             const active = value === opt.value;
             return (
@@ -117,8 +140,35 @@ export function FilterSelect({ value, onChange, options, placeholder = "Todos", 
               </button>
             );
           })}
-        </div>
-      )}
+        </div>,
+        document.body
+      )
+    : null;
+
+  return (
+    <div className={cn("relative", className)}>
+      <button
+        ref={triggerRef}
+        type="button"
+        onClick={handleToggle}
+        className={cn(
+          "flex h-9 items-center gap-2 rounded-lg border px-3 text-sm font-medium transition-all cursor-pointer select-none",
+          "bg-background-surface dark:bg-background-elevated",
+          open
+            ? "border-primary ring-2 ring-primary/20 text-slate-800 dark:text-slate-100"
+            : "border-border/60 text-slate-600 dark:text-slate-300 hover:border-border hover:text-slate-800 dark:hover:text-slate-100",
+        )}
+      >
+        {selected?.dot && (
+          <span className="w-2 h-2 rounded-full shrink-0" style={{ backgroundColor: selected.dot }} />
+        )}
+        <span>{label}</span>
+        <span className={cn("transition-transform duration-150", open && "rotate-180")}>
+          {ChevronDown}
+        </span>
+      </button>
+
+      {dropdown}
     </div>
   );
 }

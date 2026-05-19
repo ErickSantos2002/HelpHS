@@ -304,8 +304,8 @@ export default function TicketListPage() {
     <div className="h-full flex flex-col gap-4 min-h-0">
 
       {/* ── Top bar ─────────────────────────────────────────── */}
-      <div className="flex flex-wrap items-center justify-between gap-4 rounded-2xl border border-border/40 bg-background-surface px-5 py-4 shrink-0">
-        <div>
+      <div className="flex flex-col sm:flex-row sm:flex-wrap sm:items-center sm:justify-between gap-4 rounded-2xl border border-border/40 bg-background-surface px-5 py-4 shrink-0">
+        <div className="text-center sm:text-left">
           <h1 className="text-xl font-extrabold text-slate-100">Tickets</h1>
           <p className="mt-0.5 text-sm text-slate-500">
             {totalShown} ticket{totalShown !== 1 ? "s" : ""} encontrado{totalShown !== 1 ? "s" : ""}
@@ -313,9 +313,9 @@ export default function TicketListPage() {
         </div>
 
         {/* Filters + new */}
-        <div className="flex flex-wrap items-center gap-2">
+        <div className="flex flex-wrap items-center justify-center sm:justify-end gap-2">
           {/* Search */}
-          <div className="relative">
+          <div className="relative w-full sm:w-auto">
             <svg className="absolute left-3 top-1/2 -translate-y-1/2 w-4 h-4 text-slate-400" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
               <path strokeLinecap="round" strokeLinejoin="round" d="M21 21l-6-6m2-5a7 7 0 11-14 0 7 7 0 0114 0z" />
             </svg>
@@ -324,7 +324,7 @@ export default function TicketListPage() {
               placeholder="Buscar…"
               value={search}
               onChange={(e) => setSearch(e.target.value)}
-              className="pl-9 pr-8 py-2 text-sm w-52 rounded-lg border border-border/60 bg-background-elevated text-slate-200 placeholder-slate-500 focus:outline-none focus:ring-2 focus:ring-primary focus:border-transparent transition-colors"
+              className="pl-9 pr-8 py-2 text-sm w-full sm:w-52 rounded-lg border border-border/60 bg-background-elevated text-slate-200 placeholder-slate-500 focus:outline-none focus:ring-2 focus:ring-primary focus:border-transparent transition-colors"
             />
             {search && (
               <button onClick={() => setSearch("")} className="absolute right-2.5 top-1/2 -translate-y-1/2 text-slate-400 hover:text-slate-200 cursor-pointer">
