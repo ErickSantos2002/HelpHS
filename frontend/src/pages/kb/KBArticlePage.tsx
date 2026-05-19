@@ -45,13 +45,13 @@ function MarkdownContent({ content }: { content: string }) {
   const html = marked.parse(content) as string;
   return (
     <div
-      className="prose prose-invert prose-sm max-w-none
+      className="prose prose-invert prose-sm max-w-none [overflow-wrap:anywhere] [word-break:break-word]
         prose-headings:text-slate-100 prose-headings:font-semibold
         prose-p:text-slate-300 prose-p:leading-relaxed
         prose-a:text-primary prose-a:no-underline hover:prose-a:underline
         prose-strong:text-slate-100
         prose-code:text-primary prose-code:bg-background-elevated prose-code:px-1 prose-code:rounded
-        prose-pre:bg-background-elevated prose-pre:border prose-pre:border-border
+        prose-pre:bg-background-elevated prose-pre:border prose-pre:border-border prose-pre:overflow-x-auto
         prose-ul:text-slate-300 prose-ol:text-slate-300
         prose-li:marker:text-slate-500
         prose-blockquote:border-l-primary prose-blockquote:text-slate-400
@@ -221,11 +221,12 @@ export default function KBArticlePage() {
   const [feedbackGiven, setFeedbackGiven] = useState<boolean | null>(null);
   const [comments, setComments] = useState<KBComment[]>([]);
   const [commentsLoading, setCommentsLoading] = useState(true);
+  const [commentError, setCommentError] = useState<string | null>(null);
 
   useEffect(() => {
     if (!id) return;
     getKBArticle(id).then(setArticle).catch(() => setNotFound(true)).finally(() => setLoading(false));
-    getKBComments(id).then(setComments).catch(() => {}).finally(() => setCommentsLoading(false));
+    getKBComments(id).then(setComments).catch(() => setCommentError("Erro ao carregar comentários. O servidor retornou um erro.")).finally(() => setCommentsLoading(false));
   }, [id]);
 
   async function handleFeedback(helpful: boolean) {
@@ -237,14 +238,25 @@ export default function KBArticlePage() {
 
   async function handleAddComment(content: string) {
     if (!id) return;
-    const comment = await createKBComment(id, content);
-    setComments((prev) => [...prev, comment]);
+    setCommentError(null);
+    try {
+      const comment = await createKBComment(id, content);
+      setComments((prev) => [...prev, comment]);
+    } catch {
+      setCommentError("Não foi possível salvar o comentário. Tente novamente.");
+      throw new Error("comment_failed");
+    }
   }
 
   async function handleReply(parentId: string, content: string) {
     if (!id) return;
-    const reply = await createKBComment(id, content, parentId);
-    setComments((prev) => prev.map((c) => c.id === parentId ? { ...c, replies: [...c.replies, reply] } : c));
+    try {
+      const reply = await createKBComment(id, content, parentId);
+      setComments((prev) => prev.map((c) => c.id === parentId ? { ...c, replies: [...c.replies, reply] } : c));
+    } catch {
+      setCommentError("Não foi possível salvar a resposta. Tente novamente.");
+      throw new Error("reply_failed");
+    }
   }
 
   async function handleDeleteComment(commentId: string) {
@@ -269,105 +281,112 @@ export default function KBArticlePage() {
   const catLabel = CATEGORY_LABEL[article.category] ?? article.category;
 
   return (
-    <div className="flex flex-col h-full gap-4">
+    <div className="space-y-5 pb-10">
       {/* ── Header ───────────────────────────────────────────── */}
-      <div className="shrink-0 flex flex-wrap items-start justify-between gap-4 rounded-2xl border border-border/40 bg-background-surface px-5 py-4">
-        <div className="min-w-0">
+      <div className="flex flex-col sm:flex-row sm:items-start sm:justify-between gap-4 rounded-2xl border border-border/40 bg-background-surface px-5 py-4">
+        <div className="min-w-0 text-center sm:text-left">
           <button
             onClick={() => navigate("/kb")}
-            className="mb-2 flex items-center gap-1.5 text-xs font-medium text-slate-500 hover:text-primary transition-colors cursor-pointer"
+            className="mb-2 inline-flex items-center gap-1.5 text-xs font-medium text-slate-500 hover:text-primary transition-colors cursor-pointer"
           >
             {IC.ArrowLeft}
             <span>Base de Conhecimento</span>
             <span className="text-slate-600">/</span>
-            <span className="text-slate-500 truncate max-w-xs">{article.title}</span>
+            <span className="text-slate-500 truncate max-w-[160px] sm:max-w-xs">{article.title}</span>
           </button>
           <h1 className="text-xl font-extrabold leading-tight text-slate-100">{article.title}</h1>
         </div>
         {isStaff && (
-          <button
-            onClick={() => navigate(`/kb/${article.id}/edit`)}
-            className="flex shrink-0 items-center gap-2 rounded-xl border border-border/50 bg-background-elevated px-4 py-2 text-sm font-semibold text-slate-200 hover:border-border hover:bg-background-elevated/80 transition-colors cursor-pointer"
-          >
-            {IC.Edit}
-            Editar artigo
-          </button>
+          <div className="flex justify-center sm:justify-end">
+            <button
+              onClick={() => navigate(`/kb/${article.id}/edit`)}
+              className="flex items-center gap-2 rounded-xl border border-border/50 bg-background-elevated px-4 py-2 text-sm font-semibold text-slate-200 hover:border-border hover:bg-background-elevated/80 transition-colors cursor-pointer"
+            >
+              {IC.Edit}
+              Editar artigo
+            </button>
+          </div>
         )}
       </div>
 
       {/* ── Body ─────────────────────────────────────────────── */}
-      <div className="grid grid-cols-1 gap-5 lg:grid-cols-[1fr_260px] flex-1 min-h-0">
+      <div className="grid grid-cols-1 gap-5 lg:grid-cols-[1fr_260px]">
         {/* ── Main column ───────────────────────────────────── */}
-        <div className="flex flex-col gap-5 min-h-0 min-w-0">
+        <div className="flex flex-col gap-5 min-w-0">
           {/* Article content */}
-          <div className="shrink-0 rounded-xl border border-border/40 bg-background-surface">
-            <div className="px-6 py-5">
-              <MarkdownContent content={article.content} />
+          <div className="rounded-xl border border-border/40 bg-background-surface overflow-hidden">
+            <div className="px-6 pt-5 pb-0">
+              <div className="max-h-[15rem] overflow-y-auto pb-5 pr-1">
+                <MarkdownContent content={article.content} />
+              </div>
             </div>
 
             {/* Feedback */}
-            <div className="border-t border-border/40 px-6 py-4 flex flex-wrap items-center gap-3">
+            <div className="border-t border-border/40 px-6 py-5 flex flex-col items-center gap-3 text-center">
               <span className="text-sm text-slate-400">Este artigo foi útil?</span>
-              <button
-                onClick={() => handleFeedback(true)}
-                disabled={feedbackGiven !== null}
-                className={`flex items-center gap-1.5 text-sm px-3 py-1.5 rounded-lg border transition-colors cursor-pointer disabled:cursor-not-allowed ${
-                  feedbackGiven === true
-                    ? "border-success/50 text-success-700 dark:text-success-400 bg-success/10"
-                    : "border-border/50 text-slate-400 hover:border-success/50 hover:text-success-700 dark:hover:text-success-400 disabled:opacity-50"
-                }`}
-              >
-                {IC.ThumbUp} Sim ({article.helpful})
-              </button>
-              <button
-                onClick={() => handleFeedback(false)}
-                disabled={feedbackGiven !== null}
-                className={`flex items-center gap-1.5 text-sm px-3 py-1.5 rounded-lg border transition-colors cursor-pointer disabled:cursor-not-allowed ${
-                  feedbackGiven === false
-                    ? "border-danger/50 text-danger-700 dark:text-danger-400 bg-danger/10"
-                    : "border-border/50 text-slate-400 hover:border-danger/50 hover:text-danger-700 dark:hover:text-danger-400 disabled:opacity-50"
-                }`}
-              >
-                {IC.ThumbDown} Não ({article.not_helpful})
-              </button>
+              <div className="flex items-center gap-3">
+                <button
+                  onClick={() => handleFeedback(true)}
+                  disabled={feedbackGiven !== null}
+                  className={`flex items-center gap-1.5 text-sm px-4 py-2 rounded-lg border transition-colors cursor-pointer disabled:cursor-not-allowed ${
+                    feedbackGiven === true
+                      ? "border-success/50 text-success-700 dark:text-success-400 bg-success/10"
+                      : "border-border/50 text-slate-400 hover:border-success/50 hover:text-success-700 dark:hover:text-success-400 disabled:opacity-50"
+                  }`}
+                >
+                  {IC.ThumbUp} Sim ({article.helpful})
+                </button>
+                <button
+                  onClick={() => handleFeedback(false)}
+                  disabled={feedbackGiven !== null}
+                  className={`flex items-center gap-1.5 text-sm px-4 py-2 rounded-lg border transition-colors cursor-pointer disabled:cursor-not-allowed ${
+                    feedbackGiven === false
+                      ? "border-danger/50 text-danger-700 dark:text-danger-400 bg-danger/10"
+                      : "border-border/50 text-slate-400 hover:border-danger/50 hover:text-danger-700 dark:hover:text-danger-400 disabled:opacity-50"
+                  }`}
+                >
+                  {IC.ThumbDown} Não ({article.not_helpful})
+                </button>
+              </div>
               {feedbackGiven !== null && <span className="text-xs text-slate-500">Obrigado pelo feedback!</span>}
             </div>
           </div>
 
           {/* Comments */}
-          <div className="flex-1 min-h-0 flex flex-col rounded-xl border border-border/40 bg-background-surface">
-            <div className="shrink-0 flex items-center gap-2 border-b border-border/40 px-5 py-3.5">
+          <div className="rounded-xl border border-border/40 bg-background-surface">
+            <div className="flex items-center gap-2 border-b border-border/40 px-5 py-3.5">
               <span className="text-slate-500">{IC.Chat}</span>
               <h2 className="text-sm font-semibold text-slate-200">Comentários ({totalComments})</h2>
             </div>
-            <div className="flex flex-col flex-1 min-h-0 p-5 gap-4">
-              <div className="shrink-0">
-                <CommentForm onSubmit={handleAddComment} />
-              </div>
-              <div className="flex-1 min-h-0 overflow-y-auto pr-1">
-                {commentsLoading ? (
-                  <div className="flex justify-center py-4"><Spinner size="sm" /></div>
-                ) : comments.length === 0 ? (
-                  <div className="py-10 text-center">
-                    <div className="mx-auto mb-3 flex h-10 w-10 items-center justify-center rounded-full bg-background-elevated text-slate-600">{IC.Chat}</div>
-                    <p className="text-sm text-slate-500">Nenhum comentário ainda. Seja o primeiro!</p>
-                  </div>
-                ) : (
-                  <div className="space-y-5 divide-y divide-border/40">
-                    {comments.map((comment) => (
-                      <div key={comment.id} className="pt-5 first:pt-0">
-                        <CommentItem comment={comment} currentUserId={user?.id} currentUserRole={user?.role} isStaff={isStaff} onReply={handleReply} onDelete={handleDeleteComment} />
-                      </div>
-                    ))}
-                  </div>
-                )}
-              </div>
+            <div className="p-5 space-y-4">
+              <CommentForm onSubmit={handleAddComment} />
+              {commentError && (
+                <p className="text-xs text-danger bg-danger/10 border border-danger/30 rounded-lg px-3 py-2">
+                  {commentError}
+                </p>
+              )}
+              {commentsLoading ? (
+                <div className="flex justify-center py-4"><Spinner size="sm" /></div>
+              ) : comments.length === 0 ? (
+                <div className="py-10 text-center">
+                  <div className="mx-auto mb-3 flex h-10 w-10 items-center justify-center rounded-full bg-background-elevated text-slate-600">{IC.Chat}</div>
+                  <p className="text-sm text-slate-500">Nenhum comentário ainda. Seja o primeiro!</p>
+                </div>
+              ) : (
+                <div className="overflow-y-auto max-h-[280px] pr-1 space-y-5 divide-y divide-border/40">
+                  {comments.map((comment) => (
+                    <div key={comment.id} className="pt-5 first:pt-0">
+                      <CommentItem comment={comment} currentUserId={user?.id} currentUserRole={user?.role} isStaff={isStaff} onReply={handleReply} onDelete={handleDeleteComment} />
+                    </div>
+                  ))}
+                </div>
+              )}
             </div>
           </div>
         </div>
 
         {/* ── Sidebar ───────────────────────────────────────── */}
-        <div className="min-h-0 overflow-y-auto space-y-4">
+        <div className="space-y-4">
           <div className="rounded-xl border border-border/40 bg-background-surface p-4">
             <p className="mb-1 text-[10px] font-bold uppercase tracking-widest text-slate-500">Sobre o artigo</p>
             <div>

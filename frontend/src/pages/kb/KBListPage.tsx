@@ -87,23 +87,23 @@ export default function KBListPage() {
   return (
     <div className="space-y-5 pb-10">
       {/* ── Header ───────────────────────────────────────────── */}
-      <div className="flex flex-wrap items-center justify-between gap-4 rounded-2xl border border-border/40 bg-background-surface px-5 py-4">
-        <div>
+      <div className="flex flex-col sm:flex-row sm:flex-wrap sm:items-center sm:justify-between gap-4 rounded-2xl border border-border/40 bg-background-surface px-5 py-4">
+        <div className="text-center sm:text-left">
           <h1 className="text-xl font-extrabold text-slate-100">Base de Conhecimento</h1>
           <p className="mt-0.5 text-sm text-slate-500">
             Artigos e guias de suporte{total > 0 && ` · ${total} artigo${total !== 1 ? "s" : ""}`}
           </p>
         </div>
-        <div className="flex flex-wrap items-center gap-2">
+        <div className="flex flex-wrap items-center justify-center sm:justify-end gap-2">
           {/* Search */}
-          <div className="relative">
+          <div className="relative w-full sm:w-auto">
             <span className="absolute left-3 top-1/2 -translate-y-1/2 text-slate-400">{IC.Search}</span>
             <input
               type="text"
               placeholder="Buscar artigos…"
               value={search}
               onChange={(e) => setSearch(e.target.value)}
-              className="pl-9 pr-8 py-2 text-sm w-52 rounded-lg border border-border/60 bg-background-elevated text-slate-200 placeholder-slate-500 focus:outline-none focus:ring-2 focus:ring-primary focus:border-transparent transition-colors"
+              className="pl-9 pr-8 py-2 text-sm w-full sm:w-52 rounded-lg border border-border/60 bg-background-elevated text-slate-200 placeholder-slate-500 focus:outline-none focus:ring-2 focus:ring-primary focus:border-transparent transition-colors"
             />
             {search && (
               <button onClick={() => setSearch("")} className="absolute right-2.5 top-1/2 -translate-y-1/2 text-slate-400 hover:text-slate-200 cursor-pointer">{IC.X}</button>
