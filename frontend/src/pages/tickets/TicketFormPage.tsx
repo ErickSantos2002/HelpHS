@@ -487,7 +487,7 @@ export default function TicketFormPage() {
               <div className="space-y-1">
                 <Input
                   label="Título *"
-                  placeholder="Ex: Computador não liga, Impressora sem conexão, Acesso bloqueado…"
+                  placeholder="Ex: Sem acesso à Plataforma do Phoebus, Impressora sem conexão…"
                   error={errors.title?.message}
                   {...register("title")}
                 />
