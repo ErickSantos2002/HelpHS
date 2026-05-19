@@ -159,7 +159,7 @@ export function Sidebar({ collapsed, mobileOpen, onMobileClose }: SidebarProps) 
           role="button"
           tabIndex={0}
           aria-label="Fechar menu"
-          className="fixed inset-0 z-20 bg-black/50 md:hidden"
+          className="fixed inset-0 z-[35] bg-black/50 md:hidden"
           onClick={onMobileClose}
           onKeyDown={(e) => { if (e.key === "Enter" || e.key === " ") onMobileClose(); }}
         />
@@ -169,7 +169,7 @@ export function Sidebar({ collapsed, mobileOpen, onMobileClose }: SidebarProps) 
       <aside
         id="sidebar-nav"
         className={cn(
-          "fixed inset-y-0 left-0 z-30 flex flex-col",
+          "fixed inset-y-0 left-0 z-[40] flex flex-col",
           "bg-white dark:bg-background-surface",
           "border-r border-slate-200 dark:border-border",
           "transition-[width] duration-300 ease-in-out overflow-hidden",
