@@ -61,6 +61,12 @@ const IC = {
       <path strokeLinecap="round" strokeLinejoin="round" d="M9 5l7 7-7 7" />
     </svg>
   ),
+  Eye: (
+    <svg className="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
+      <path strokeLinecap="round" strokeLinejoin="round" d="M15 12a3 3 0 11-6 0 3 3 0 016 0z" />
+      <path strokeLinecap="round" strokeLinejoin="round" d="M2.458 12C3.732 7.943 7.523 5 12 5c4.478 0 8.268 2.943 9.542 7-1.274 4.057-5.064 7-9.542 7-4.477 0-8.268-2.943-9.542-7z" />
+    </svg>
+  ),
   User: (
     <svg className="w-3.5 h-3.5" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
       <path strokeLinecap="round" strokeLinejoin="round" d="M16 7a4 4 0 11-8 0 4 4 0 018 0zM12 14a7 7 0 00-7 7h14a7 7 0 00-7-7z" />
@@ -301,6 +307,72 @@ function EquipmentFormModal({
   );
 }
 
+// ── EquipmentDetailModal ──────────────────────────────────────
+
+function EquipmentDetailModal({ equip, onClose, onEdit }: { equip: Equipment; onClose: () => void; onEdit: () => void }) {
+  function row(label: string, value?: string | null) {
+    if (!value) return null;
+    return (
+      <div className="flex flex-col gap-0.5">
+        <span className="text-[11px] font-semibold uppercase tracking-wide text-slate-500 dark:text-slate-400">{label}</span>
+        <span className="text-sm text-slate-800 dark:text-slate-100 break-words">{value}</span>
+      </div>
+    );
+  }
+
+  return (
+    <Modal open onClose={onClose} title={equip.name}>
+      <div className="space-y-4">
+        <div className="flex items-center gap-2">
+          <ActivePill active={equip.is_active} />
+          {equip.model && (
+            <span className="text-xs px-2 py-0.5 rounded-full bg-background-elevated border border-border/50 text-slate-400">
+              {equip.model}
+            </span>
+          )}
+        </div>
+
+        <div className="grid grid-cols-1 sm:grid-cols-2 gap-3 rounded-xl border border-border bg-background-elevated p-4">
+          {row("Número de série", equip.serial_number)}
+          {row("Modelo", equip.model)}
+          {row("Localização", equip.location)}
+          {row("Descrição", equip.description)}
+        </div>
+
+        {(equip.owner_name || equip.company_name) && (
+          <div className="grid grid-cols-1 sm:grid-cols-2 gap-3 rounded-xl border border-border bg-background-elevated p-4">
+            {equip.owner_name && (
+              <div className="flex flex-col gap-0.5">
+                <span className="text-[11px] font-semibold uppercase tracking-wide text-slate-500 dark:text-slate-400">Responsável</span>
+                <span className="text-sm text-slate-800 dark:text-slate-100">{equip.owner_name}</span>
+                {equip.owner_email && <span className="text-xs text-slate-500">{equip.owner_email}</span>}
+              </div>
+            )}
+            {equip.company_name && (
+              <div className="flex flex-col gap-0.5">
+                <span className="text-[11px] font-semibold uppercase tracking-wide text-slate-500 dark:text-slate-400">Empresa</span>
+                <span className="text-sm text-slate-800 dark:text-slate-100">{equip.company_name}</span>
+                {equip.company_cnpj && <span className="text-xs text-slate-500">{equip.company_cnpj}</span>}
+              </div>
+            )}
+          </div>
+        )}
+
+        {(equip.created_at || equip.updated_at) && (
+          <div className="flex flex-wrap gap-x-5 gap-y-1 text-xs text-slate-500">
+            {equip.created_at && <span>Criado em {new Date(equip.created_at).toLocaleDateString("pt-BR")}</span>}
+            {equip.updated_at && <span>Atualizado em {new Date(equip.updated_at).toLocaleDateString("pt-BR")}</span>}
+          </div>
+        )}
+      </div>
+      <ModalFooter>
+        <Button variant="secondary" onClick={onClose}>Fechar</Button>
+        <Button onClick={() => { onClose(); onEdit(); }}>{IC.Edit} Editar</Button>
+      </ModalFooter>
+    </Modal>
+  );
+}
+
 // ── ProductsPage ──────────────────────────────────────────────
 
 export default function ProductsPage() {
@@ -332,6 +404,7 @@ export default function ProductsPage() {
   // Equipment modals
   const [equipFormOpen, setEquipFormOpen] = useState(false);
   const [editingEquip, setEditingEquip] = useState<Equipment | null>(null);
+  const [viewEquip, setViewEquip] = useState<Equipment | null>(null);
 
   function loadProducts(p = productPage) {
     setProductsLoading(true);
@@ -426,21 +499,21 @@ export default function ProductsPage() {
   return (
     <div className="space-y-5">
       {/* Header */}
-      <div className="flex items-center justify-between gap-4 flex-wrap">
-        <div>
+      <div className="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-3">
+        <div className="text-center sm:text-left">
           <h1 className="text-2xl font-bold text-slate-800 dark:text-slate-100">Produtos</h1>
           <p className="text-slate-500 dark:text-slate-400 text-sm mt-0.5">
             {totalProducts} {totalProducts === 1 ? "produto cadastrado" : "produtos cadastrados"}
           </p>
         </div>
-        <Button onClick={() => { setEditingProduct(null); setProductFormOpen(true); }}>
+        <Button className="w-full sm:w-auto" onClick={() => { setEditingProduct(null); setProductFormOpen(true); }}>
           {IC.Plus} Novo produto
         </Button>
       </div>
 
       {/* Filters */}
-      <div className="flex flex-wrap gap-3 items-center">
-        <div className="flex-1 min-w-48 relative">
+      <div className="flex flex-col md:flex-row md:items-center gap-2">
+        <div className="relative md:flex-1">
           <span className="absolute left-3 top-1/2 -translate-y-1/2 text-slate-500 pointer-events-none">{IC.Search}</span>
           <input
             className="w-full pl-9 pr-3 py-2 rounded-xl border border-border/60 bg-background-surface text-sm text-slate-700 dark:text-slate-200 placeholder:text-slate-500 focus:outline-none focus:ring-2 focus:ring-primary focus:border-transparent transition-colors"
@@ -449,24 +522,26 @@ export default function ProductsPage() {
             onChange={(e) => { setProductSearch(e.target.value); setProductPage(1); }}
           />
         </div>
-        <FilterSelect
-          options={[
-            { value: "all", label: "Todos" },
-            { value: "active", label: "Ativos" },
-            { value: "inactive", label: "Inativos" },
-          ]}
-          placeholder="Status"
-          value={productFilter}
-          onChange={(v) => { setProductFilter(v as FilterTab); setProductPage(1); }}
-        />
-        {(productSearch || productFilter !== "active") && (
-          <button
-            onClick={() => { setProductSearch(""); setProductFilter("active"); setProductPage(1); }}
-            className="text-xs text-slate-500 hover:text-slate-300 transition-colors px-2 py-1.5 rounded-lg hover:bg-background-elevated cursor-pointer"
-          >
-            Limpar filtros
-          </button>
-        )}
+        <div className="flex flex-wrap gap-2 items-center justify-center sm:justify-start">
+          <FilterSelect
+            options={[
+              { value: "all", label: "Todos" },
+              { value: "active", label: "Ativos" },
+              { value: "inactive", label: "Inativos" },
+            ]}
+            placeholder="Status"
+            value={productFilter}
+            onChange={(v) => { setProductFilter(v as FilterTab); setProductPage(1); }}
+          />
+          {(productSearch || productFilter !== "active") && (
+            <button
+              onClick={() => { setProductSearch(""); setProductFilter("active"); setProductPage(1); }}
+              className="text-xs text-slate-500 hover:text-slate-300 transition-colors px-2 py-1.5 rounded-lg hover:bg-background-elevated cursor-pointer"
+            >
+              Limpar filtros
+            </button>
+          )}
+        </div>
       </div>
 
       {/* Products + Equipment — split layout when product selected */}
@@ -553,7 +628,7 @@ export default function ProductsPage() {
       {/* Equipments card */}
       {selectedProduct && (
         <Card padding="none">
-          <div className="px-4 py-3 border-b border-border flex flex-wrap items-center justify-between gap-3">
+          <div className="px-4 py-3 border-b border-border flex flex-col gap-2 sm:flex-row sm:flex-wrap sm:items-center sm:justify-between">
             <div>
               <p className="text-sm font-semibold text-slate-700 dark:text-slate-200">
                 Equipamentos
@@ -563,10 +638,10 @@ export default function ProductsPage() {
                 {totalEquip} {totalEquip === 1 ? "equipamento" : "equipamentos"}
               </p>
             </div>
-            <div className="flex items-center gap-3">
+            <div className="flex items-center justify-between sm:justify-end gap-3">
               <FilterTabs value={equipFilter} onChange={(v) => { setEquipFilter(v); setEquipPage(1); }} />
               <Button size="sm" onClick={() => { setEditingEquip(null); setEquipFormOpen(true); }}>
-                {IC.Plus} Novo Equipamento
+                {IC.Plus} <span className="hidden xs:inline">Novo </span>Equipamento
               </Button>
             </div>
           </div>
@@ -600,7 +675,7 @@ export default function ProductsPage() {
             <>
               <div className="divide-y divide-border">
                 {equipments.map((e) => (
-                  <div key={e.id} className="flex items-center gap-4 px-4 py-3 hover:bg-background-elevated/40 transition-colors">
+                  <div key={e.id} className="flex items-center gap-4 px-4 py-3 hover:bg-background-elevated/40 transition-colors cursor-pointer" onClick={() => setViewEquip(e)}>
                     {/* Icon */}
                     <div className="w-9 h-9 rounded-lg bg-background-elevated border border-border/60 flex items-center justify-center shrink-0 text-slate-400">
                       {IC.Cpu}
@@ -623,8 +698,8 @@ export default function ProductsPage() {
                       </span>
                     )}
 
-                    {/* Owner + company — always visible */}
-                    <div className="flex flex-col items-end shrink-0 max-w-[180px]">
+                    {/* Owner + company */}
+                    <div className="hidden sm:flex flex-col items-end shrink-0 max-w-[180px]">
                       <span className="flex items-center gap-1 text-xs text-slate-600 dark:text-slate-300 truncate">
                         {e.owner_name ?? <span className="text-slate-600">—</span>}
                         {IC.User}
@@ -642,7 +717,7 @@ export default function ProductsPage() {
                     </div>
 
                     {/* Status */}
-                    <div onClick={(e) => e.stopPropagation()}>
+                    <div onClick={(ev) => ev.stopPropagation()}>
                       <ActivePill
                         active={e.is_active}
                         loading={togglingEquip === e.id}
@@ -650,14 +725,23 @@ export default function ProductsPage() {
                       />
                     </div>
 
-                    {/* Edit */}
-                    <button
-                      onClick={() => { setEditingEquip(e); setEquipFormOpen(true); }}
-                      title="Editar"
-                      className="p-1.5 rounded-lg text-slate-400 hover:text-primary hover:bg-primary/10 transition-colors cursor-pointer"
-                    >
-                      {IC.Edit}
-                    </button>
+                    {/* Actions */}
+                    <div className="flex items-center gap-0.5 shrink-0" onClick={(ev) => ev.stopPropagation()}>
+                      <button
+                        onClick={() => setViewEquip(e)}
+                        title="Visualizar"
+                        className="p-1.5 rounded-lg text-slate-400 hover:text-primary hover:bg-primary/10 transition-colors cursor-pointer"
+                      >
+                        {IC.Eye}
+                      </button>
+                      <button
+                        onClick={() => { setEditingEquip(e); setEquipFormOpen(true); }}
+                        title="Editar"
+                        className="p-1.5 rounded-lg text-slate-400 hover:text-primary hover:bg-primary/10 transition-colors cursor-pointer"
+                      >
+                        {IC.Edit}
+                      </button>
+                    </div>
                   </div>
                 ))}
               </div>
@@ -687,6 +771,13 @@ export default function ProductsPage() {
           editing={editingEquip}
           onClose={() => { setEquipFormOpen(false); setEditingEquip(null); }}
           onSaved={handleEquipSaved}
+        />
+      )}
+      {viewEquip && (
+        <EquipmentDetailModal
+          equip={viewEquip}
+          onClose={() => setViewEquip(null)}
+          onEdit={() => { setEditingEquip(viewEquip); setEquipFormOpen(true); }}
         />
       )}
     </div>
