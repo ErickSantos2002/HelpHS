@@ -21,7 +21,7 @@ from reportlab.lib.pagesizes import A4
 from reportlab.lib.styles import getSampleStyleSheet
 from reportlab.lib.units import cm
 from reportlab.platypus import Paragraph, SimpleDocTemplate, Spacer, Table, TableStyle
-from sqlalchemy import extract, func, select, text
+from sqlalchemy import and_, extract, func, or_, select, text
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.core.database import get_db
@@ -39,6 +39,43 @@ from app.models.models import (
     UserRole,
     UserStatus,
 )
+
+# ── SLA breach expressions (calculadas em tempo real via SQL) ──
+# Evita depender de flags desatualizadas no banco — nenhum worker necessário.
+
+_ACTIVE_SLA_STATUSES = [
+    TicketStatus.open,
+    TicketStatus.in_progress,
+    TicketStatus.awaiting_client,
+    TicketStatus.awaiting_technical,
+]
+
+
+def _resolve_breached_cond():
+    """True se SLA de resolução foi violado (flag salva OU prazo já passou)."""
+    return or_(
+        Ticket.sla_resolve_breach.is_(True),
+        and_(
+            Ticket.sla_resolve_due_at.is_not(None),
+            Ticket.sla_resolve_due_at < func.now(),
+            Ticket.status.in_(_ACTIVE_SLA_STATUSES),
+        ),
+    )
+
+
+def _response_breached_cond():
+    """True se SLA de 1ª resposta foi violado (flag salva OU prazo já passou)."""
+    return or_(
+        Ticket.sla_response_breach.is_(True),
+        and_(
+            Ticket.sla_response_due_at.is_not(None),
+            Ticket.sla_response_due_at < func.now(),
+            Ticket.sla_first_response.is_(None),
+            Ticket.status.in_(_ACTIVE_SLA_STATUSES),
+        ),
+    )
+
+
 from app.schemas.dashboard import (
     AvgFirstResponseItem,
     AvgResolutionItem,
@@ -105,8 +142,8 @@ async def get_dashboard_stats(
     sla_row = (
         await db.execute(
             select(
-                func.count().filter(Ticket.sla_response_breach.is_(True)).label("resp"),
-                func.count().filter(Ticket.sla_resolve_breach.is_(True)).label("resolve"),
+                func.count().filter(_response_breached_cond()).label("resp"),
+                func.count().filter(_resolve_breached_cond()).label("resolve"),
             ).select_from(Ticket)
         )
     ).one()
@@ -222,7 +259,7 @@ async def _build_report(
             select(
                 Ticket.priority,
                 func.count().label("total"),
-                func.count().filter(Ticket.sla_resolve_breach.is_(True)).label("breached"),
+                func.count().filter(_resolve_breached_cond()).label("breached"),
             )
             .where(*base)
             .group_by(Ticket.priority)
@@ -550,7 +587,7 @@ async def _build_comparison(
             select(
                 Ticket.priority,
                 func.count().label("total"),
-                func.count().filter(Ticket.sla_resolve_breach.is_(True)).label("breached"),
+                func.count().filter(_resolve_breached_cond()).label("breached"),
             )
             .where(*prev_base)
             .group_by(Ticket.priority)
@@ -816,7 +853,7 @@ async def _technician_summary(
                     )
                 )
                 .label("open_count"),
-                func.count().filter(Ticket.sla_resolve_breach.is_(True)).label("breached"),
+                func.count().filter(_resolve_breached_cond()).label("breached"),
                 func.avg(extract("epoch", Ticket.closed_at - Ticket.created_at) / 3600)
                 .filter(Ticket.closed_at.is_not(None))
                 .label("avg_hours"),
