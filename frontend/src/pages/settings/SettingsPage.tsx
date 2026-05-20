@@ -424,15 +424,15 @@ export default function SettingsPage() {
 
   return (
     <div className="space-y-5">
-      <div className="flex items-center justify-between gap-4 flex-wrap">
-        <div>
+      <div className="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-3">
+        <div className="text-center sm:text-left">
           <h1 className="text-2xl font-bold text-slate-800 dark:text-slate-100">Etiquetas</h1>
           <p className="text-slate-500 dark:text-slate-400 text-sm mt-0.5">
             Classifique tickets com etiquetas coloridas para facilitar a organização.
           </p>
         </div>
         {canCreate && (
-          <Button onClick={() => setCreateOpen(true)}>
+          <Button className="w-full sm:w-auto" onClick={() => setCreateOpen(true)}>
             + Nova etiqueta
           </Button>
         )}
