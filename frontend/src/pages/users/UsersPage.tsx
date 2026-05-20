@@ -457,21 +457,21 @@ export default function UsersPage() {
   return (
     <div className="space-y-5">
       {/* Header */}
-      <div className="flex items-center justify-between gap-4 flex-wrap">
-        <div>
+      <div className="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-3">
+        <div className="text-center sm:text-left">
           <h1 className="text-2xl font-bold text-slate-800 dark:text-slate-100">Usuários</h1>
           <p className="text-slate-500 dark:text-slate-400 text-sm mt-0.5">
             {total} {total === 1 ? "usuário cadastrado" : "usuários cadastrados"}
           </p>
         </div>
-        <Button onClick={() => setCreateOpen(true)}>
+        <Button onClick={() => setCreateOpen(true)} className="w-full sm:w-auto">
           {IC.Plus} Novo usuário
         </Button>
       </div>
 
       {/* Filters */}
-      <div className="flex flex-wrap gap-3 items-center">
-        <div className="flex-1 min-w-48 relative">
+      <div className="flex flex-col md:flex-row md:items-center gap-2">
+        <div className="relative md:flex-1">
           <span className="absolute left-3 top-1/2 -translate-y-1/2 text-slate-500 pointer-events-none">
             {IC.Search}
           </span>
@@ -482,26 +482,28 @@ export default function UsersPage() {
             onChange={(e) => { setSearch(e.target.value); setPage(1); }}
           />
         </div>
-        <FilterSelect
-          options={FILTER_ROLE_OPTIONS}
-          placeholder="Perfil"
-          value={roleFilter}
-          onChange={(v) => { setRoleFilter(v); setPage(1); }}
-        />
-        <FilterSelect
-          options={FILTER_STATUS_OPTIONS}
-          placeholder="Status"
-          value={statusFilter}
-          onChange={(v) => { setStatusFilter(v); setPage(1); }}
-        />
-        {hasFilters && (
-          <button
-            onClick={() => { setSearch(""); setRoleFilter(""); setStatusFilter(""); setPage(1); }}
-            className="text-xs text-slate-500 hover:text-slate-300 transition-colors px-2 py-1.5 rounded-lg hover:bg-background-elevated cursor-pointer"
-          >
-            Limpar filtros
-          </button>
-        )}
+        <div className="flex flex-wrap gap-2 items-center justify-center sm:justify-start">
+          <FilterSelect
+            options={FILTER_ROLE_OPTIONS}
+            placeholder="Perfil"
+            value={roleFilter}
+            onChange={(v) => { setRoleFilter(v); setPage(1); }}
+          />
+          <FilterSelect
+            options={FILTER_STATUS_OPTIONS}
+            placeholder="Status"
+            value={statusFilter}
+            onChange={(v) => { setStatusFilter(v); setPage(1); }}
+          />
+          {hasFilters && (
+            <button
+              onClick={() => { setSearch(""); setRoleFilter(""); setStatusFilter(""); setPage(1); }}
+              className="text-xs text-slate-500 hover:text-slate-300 transition-colors px-2 py-1.5 rounded-lg hover:bg-background-elevated cursor-pointer"
+            >
+              Limpar filtros
+            </button>
+          )}
+        </div>
       </div>
 
       {error && <Alert variant="danger">{error}</Alert>}

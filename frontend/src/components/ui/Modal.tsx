@@ -143,7 +143,7 @@ export function Modal({
             </button>
           </div>
         )}
-        <div className="px-4 py-4 sm:px-6 overflow-y-auto flex-1">{children}</div>
+        <div className="px-4 pt-4 sm:px-6 overflow-y-auto flex-1 min-h-0">{children}</div>
       </div>
     </div>,
     document.body,
@@ -159,7 +159,7 @@ export function ModalFooter({ children, className }: ModalFooterProps) {
   return (
     <div
       className={cn(
-        "flex items-center justify-end gap-3 border-t border-border px-6 py-4 -mx-6 -mb-4 mt-4",
+        "flex items-center justify-end gap-3 border-t border-border px-4 sm:px-6 py-4 -mx-4 sm:-mx-6 mt-4",
         className,
       )}
     >
