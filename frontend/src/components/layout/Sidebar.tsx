@@ -1,8 +1,11 @@
+import { useState } from "react";
 import { NavLink } from "react-router-dom";
 import { cn } from "../../lib/utils";
 import { useAuth } from "../../contexts/AuthContext";
 import type { UserRole } from "../../types/auth";
 import logoFull from "../../assets/Logo HelpHS.png";
+import { APP_VERSION } from "../../data/changelog";
+import { ChangelogModal } from "./ChangelogModal";
 
 // ── Icons ─────────────────────────────────────────────────────
 
@@ -41,14 +44,7 @@ function IconChart() {
     </svg>
   );
 }
-function IconSettings() {
-  return (
-    <svg className="w-5 h-5 shrink-0" aria-hidden="true" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={1.75}>
-      <path strokeLinecap="round" strokeLinejoin="round" d="M10.325 4.317c.426-1.756 2.924-1.756 3.35 0a1.724 1.724 0 002.573 1.066c1.543-.94 3.31.826 2.37 2.37a1.724 1.724 0 001.065 2.572c1.756.426 1.756 2.924 0 3.35a1.724 1.724 0 00-1.066 2.573c.94 1.543-.826 3.31-2.37 2.37a1.724 1.724 0 00-2.572 1.065c-.426 1.756-2.924 1.756-3.35 0a1.724 1.724 0 00-2.573-1.066c-1.543.94-3.31-.826-2.37-2.37a1.724 1.724 0 00-1.065-2.572c-1.756-.426-1.756-2.924 0-3.35a1.724 1.724 0 001.066-2.573c-.94-1.543.826-3.31 2.37-2.37.996.608 2.296.07 2.572-1.065z" />
-      <path strokeLinecap="round" strokeLinejoin="round" d="M15 12a3 3 0 11-6 0 3 3 0 016 0z" />
-    </svg>
-  );
-}
+
 function IconShield() {
   return (
     <svg className="w-5 h-5 shrink-0" aria-hidden="true" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={1.75}>
@@ -145,6 +141,7 @@ interface SidebarProps {
 export function Sidebar({ collapsed, mobileOpen, onMobileClose }: SidebarProps) {
   const { user } = useAuth();
   const role = user?.role ?? "client";
+  const [changelogOpen, setChangelogOpen] = useState(false);
 
   const visibleGroups = NAV_GROUPS.map((g) => ({
     ...g,
@@ -255,16 +252,26 @@ export function Sidebar({ collapsed, mobileOpen, onMobileClose }: SidebarProps) 
 
         {/* Footer */}
         {!collapsed && (
-          <div className="shrink-0 border-t border-slate-200 dark:border-border px-5 py-4">
-            <div className="flex items-center justify-between">
-              <p className="text-xs text-slate-400 dark:text-slate-600">HelpHS</p>
-              <span className="rounded-full bg-slate-100 dark:bg-background-elevated px-2 py-0.5 text-[10px] font-medium text-slate-500">
-                v1.0.0
+          <div className="shrink-0 border-t border-slate-200 dark:border-border px-5 py-4 space-y-0.5 flex flex-col items-center">
+            <div className="relative group">
+              <button
+                onClick={() => setChangelogOpen(true)}
+                className="text-xs font-medium text-slate-500 dark:text-slate-400 hover:text-primary dark:hover:text-primary transition-colors cursor-pointer"
+              >
+                HelpHS {APP_VERSION}
+              </button>
+              <span className="pointer-events-none absolute bottom-full left-1/2 -translate-x-1/2 mb-2 z-50 whitespace-nowrap rounded-lg bg-slate-900 dark:bg-slate-700 px-2.5 py-1.5 text-xs font-medium text-white shadow-lg opacity-0 group-hover:opacity-100 transition-opacity duration-150">
+                Ver o que há de novo nessa versão
               </span>
             </div>
+            <p className="text-[11px] text-slate-400 dark:text-slate-600">
+              © 2026 Health &amp; Safety Tech
+            </p>
           </div>
         )}
       </aside>
+
+      <ChangelogModal open={changelogOpen} onClose={() => setChangelogOpen(false)} />
     </>
   );
 }
