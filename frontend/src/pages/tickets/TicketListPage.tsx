@@ -55,15 +55,53 @@ const COLUMNS: {
 
 // ── SLA indicator ─────────────────────────────────────────────
 
+const TERMINAL_STATUSES = ["resolved", "closed", "cancelled"];
+
+function formatDuration(ms: number): string {
+  const h = Math.floor(ms / 3_600_000);
+  const m = Math.floor((ms % 3_600_000) / 60_000);
+  if (h >= 24) {
+    const d = Math.floor(h / 24);
+    const rh = h % 24;
+    return rh > 0 ? `${d}d ${rh}h` : `${d}d`;
+  }
+  return h > 0 ? `${h}h ${m}m` : `${m}m`;
+}
+
 function SlaIndicator({ ticket, now }: { ticket: Ticket; now: number }) {
-  const dueAt = ticket.sla_resolve_due_at;
+  const isOpen     = ticket.status === "open";
+  const isTerminal = TERMINAL_STATUSES.includes(ticket.status);
+
+  // Terminal: mostrar tempo total que o ticket ficou aberto
+  if (isTerminal) {
+    const endMs     = ticket.closed_at ? new Date(ticket.closed_at).getTime() : new Date(ticket.updated_at).getTime();
+    const createdMs = new Date(ticket.created_at).getTime();
+    const duration  = formatDuration(endMs - createdMs);
+    const breached  = ticket.sla_response_breach || ticket.sla_resolve_breach;
+    return (
+      <div className="mt-2.5 space-y-1">
+        <div className={`flex items-center gap-1 text-[10px] font-bold ${breached ? "text-red-400" : "text-emerald-400"}`}>
+          <svg className="w-3 h-3 shrink-0" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
+            <path strokeLinecap="round" strokeLinejoin="round" d="M9 12l2 2 4-4m6 2a9 9 0 11-18 0 9 9 0 0118 0z" />
+          </svg>
+          <span>{breached ? `Concluído em ${duration} • SLA vencido` : `Concluído em ${duration} • No prazo`}</span>
+        </div>
+      </div>
+    );
+  }
+
+  // Phase: 1ª resposta enquanto aberto, resolução depois
+  const dueAt  = isOpen ? ticket.sla_response_due_at : ticket.sla_resolve_due_at;
+  const breach = isOpen ? ticket.sla_response_breach  : ticket.sla_resolve_breach;
+  const phase  = isOpen ? "1ª Resposta" : "Resolução";
+
   if (!dueAt) return null;
 
   const dueMs     = new Date(dueAt).getTime();
   const createdMs = new Date(ticket.created_at).getTime();
   const totalMs   = dueMs - createdMs;
   const timeLeft  = dueMs - now;
-  const breached  = timeLeft <= 0 || ticket.sla_resolve_breach;
+  const breached  = timeLeft <= 0 || breach;
   const pct       = totalMs > 0 ? Math.min(100, Math.max(0, ((now - createdMs) / totalMs) * 100)) : 100;
 
   // Color thresholds
@@ -77,7 +115,7 @@ function SlaIndicator({ ticket, now }: { ticket: Ticket; now: number }) {
     : "text-emerald-500 dark:text-emerald-400";
 
   // Format remaining time
-  let display = "Vencido";
+  let display = "";
   if (!breached && timeLeft > 0) {
     const h = Math.floor(timeLeft / 3_600_000);
     const m = Math.floor((timeLeft % 3_600_000) / 60_000);
@@ -86,19 +124,17 @@ function SlaIndicator({ ticket, now }: { ticket: Ticket; now: number }) {
 
   return (
     <div className="mt-2.5 space-y-1">
-      {/* Progress bar */}
       <div className="h-1 w-full overflow-hidden rounded-full bg-slate-100 dark:bg-background-elevated">
         <div
           className="h-full rounded-full transition-all duration-700"
           style={{ width: `${pct}%`, backgroundColor: barColor }}
         />
       </div>
-      {/* Time label */}
       <div className={cn("flex items-center gap-1 text-[10px] font-bold", textCls)}>
         <svg className="w-3 h-3 shrink-0" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
           <path strokeLinecap="round" strokeLinejoin="round" d="M12 8v4l3 3m6-3a9 9 0 11-18 0 9 9 0 0118 0z" />
         </svg>
-        <span>{breached ? "SLA Vencido" : `Resolução: ${display}`}</span>
+        <span>{breached ? "SLA Vencido" : `${phase}: ${display}`}</span>
       </div>
     </div>
   );

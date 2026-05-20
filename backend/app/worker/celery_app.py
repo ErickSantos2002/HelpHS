@@ -23,6 +23,13 @@ celery_app.conf.update(
     task_max_retries=settings.celery_default_max_retries,
     worker_prefetch_multiplier=1,
     task_acks_late=True,
+    beat_schedule={
+        # Verifica SLA vencido a cada hora — mantém dashboard e contadores atualizados
+        "check-sla-breaches-hourly": {
+            "task": "tasks.check_sla_breaches",
+            "schedule": 3600,  # segundos — a cada 1 hora
+        },
+    },
 )
 
 
