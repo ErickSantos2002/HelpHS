@@ -3,18 +3,18 @@ CRUD de Produtos e Equipamentos.
 
 Permissões:
   Products:
-    POST   /products            — admin
+    POST   /products            — admin | technician
     GET    /products            — qualquer autenticado
     GET    /products/{id}       — qualquer autenticado
-    PATCH  /products/{id}       — admin
-    DELETE /products/{id}       — admin (soft-delete: is_active=False)
+    PATCH  /products/{id}       — admin | technician
+    DELETE /products/{id}       — admin | technician (soft-delete: is_active=False)
 
   Equipments (sub-resource de produto):
-    POST   /products/{id}/equipments        — admin
+    POST   /products/{id}/equipments        — admin | technician
     GET    /products/{id}/equipments        — qualquer autenticado
     GET    /equipments/{id}                 — qualquer autenticado
-    PATCH  /equipments/{id}                 — admin
-    DELETE /equipments/{id}                 — admin (soft-delete)
+    PATCH  /equipments/{id}                 — admin | technician
+    DELETE /equipments/{id}                 — admin | technician (soft-delete)
 """
 
 import uuid
@@ -72,7 +72,7 @@ def _audit(
 async def create_product(
     body: ProductCreate,
     db: Annotated[AsyncSession, Depends(get_db)],
-    actor: Annotated[User, Depends(authorize(UserRole.admin))],
+    actor: Annotated[User, Depends(authorize(UserRole.admin, UserRole.technician))],
 ) -> ProductResponse:
     result = await db.execute(select(Product).where(Product.name == body.name))
     if result.scalar_one_or_none():
@@ -140,7 +140,7 @@ async def update_product(
     product_id: uuid.UUID,
     body: ProductUpdate,
     db: Annotated[AsyncSession, Depends(get_db)],
-    actor: Annotated[User, Depends(authorize(UserRole.admin))],
+    actor: Annotated[User, Depends(authorize(UserRole.admin, UserRole.technician))],
 ) -> ProductResponse:
     product = await get_or_404(db, Product, product_id, "Product not found")
 
@@ -164,7 +164,7 @@ async def update_product(
 async def delete_product(
     product_id: uuid.UUID,
     db: Annotated[AsyncSession, Depends(get_db)],
-    actor: Annotated[User, Depends(authorize(UserRole.admin))],
+    actor: Annotated[User, Depends(authorize(UserRole.admin, UserRole.technician))],
 ) -> None:
     product = await get_or_404(db, Product, product_id, "Product not found")
     product.is_active = False
@@ -186,7 +186,7 @@ async def create_equipment(
     product_id: uuid.UUID,
     body: EquipmentCreate,
     db: Annotated[AsyncSession, Depends(get_db)],
-    actor: Annotated[User, Depends(authorize(UserRole.admin))],
+    actor: Annotated[User, Depends(authorize(UserRole.admin, UserRole.technician))],
 ) -> EquipmentResponse:
     await get_or_404(db, Product, product_id, "Product not found")
 
@@ -283,7 +283,7 @@ async def update_equipment(
     equipment_id: uuid.UUID,
     body: EquipmentUpdate,
     db: Annotated[AsyncSession, Depends(get_db)],
-    actor: Annotated[User, Depends(authorize(UserRole.admin))],
+    actor: Annotated[User, Depends(authorize(UserRole.admin, UserRole.technician))],
 ) -> EquipmentResponse:
     equipment = await get_or_404(db, Equipment, equipment_id, "Equipment not found")
 
@@ -420,7 +420,7 @@ async def delete_my_equipment(
 async def delete_equipment(
     equipment_id: uuid.UUID,
     db: Annotated[AsyncSession, Depends(get_db)],
-    actor: Annotated[User, Depends(authorize(UserRole.admin))],
+    actor: Annotated[User, Depends(authorize(UserRole.admin, UserRole.technician))],
 ) -> None:
     equipment = await get_or_404(db, Equipment, equipment_id, "Equipment not found")
     equipment.is_active = False

@@ -196,13 +196,13 @@ export default function AuditLogsPage() {
   return (
     <div className="space-y-5">
       {/* Header */}
-      <div className="flex items-center justify-between gap-4 flex-wrap">
-        <div>
+      <div className="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-3">
+        <div className="text-center sm:text-left">
           <h1 className="text-2xl font-bold text-slate-800 dark:text-slate-100">Logs de Auditoria</h1>
           <p className="text-slate-500 dark:text-slate-400 text-sm mt-0.5">Registro completo de operações — conformidade LGPD</p>
         </div>
         {!loading && (
-          <span className="text-xs text-slate-500 bg-background-elevated border border-border/60 px-3 py-1.5 rounded-full">
+          <span className="self-center sm:self-auto text-xs text-slate-500 bg-background-elevated border border-border/60 px-3 py-1.5 rounded-full">
             {total} {total === 1 ? "registro" : "registros"}
           </span>
         )}
@@ -219,19 +219,24 @@ export default function AuditLogsPage() {
             </button>
           )}
         </div>
-        <div className="px-4 py-3 flex flex-wrap gap-3 items-end">
-          <FilterSelect value={actionFilter} onChange={setActionFilter} options={ACTION_OPTIONS} placeholder="Todas as ações" />
-          <FilterSelect value={entityFilter} onChange={setEntityFilter} options={ENTITY_OPTIONS} placeholder="Todas as entidades" />
-          <div className="flex items-center gap-2">
-            <span className="text-xs text-slate-500">De</span>
-            <input type="date" value={dateFrom} onChange={(e) => setDateFrom(e.target.value)} className={dateInputCls} />
-            <span className="text-xs text-slate-500">até</span>
-            <input type="date" value={dateTo} onChange={(e) => setDateTo(e.target.value)} className={dateInputCls} />
+        <div className="px-4 py-3 flex flex-col gap-3">
+          {/* Dropdowns */}
+          <div className="flex flex-wrap gap-3 items-center justify-center sm:justify-start">
+            <FilterSelect value={actionFilter} onChange={setActionFilter} options={ACTION_OPTIONS} placeholder="Todas as ações" />
+            <FilterSelect value={entityFilter} onChange={setEntityFilter} options={ENTITY_OPTIONS} placeholder="Todas as entidades" />
           </div>
-          <div className="relative flex-1 min-w-48">
+          {/* Date range */}
+          <div className="flex flex-wrap items-center gap-2">
+            <span className="text-xs text-slate-500 shrink-0">De</span>
+            <input type="date" value={dateFrom} onChange={(e) => setDateFrom(e.target.value)} className={`${dateInputCls} flex-1 min-w-[130px]`} />
+            <span className="text-xs text-slate-500 shrink-0">até</span>
+            <input type="date" value={dateTo} onChange={(e) => setDateTo(e.target.value)} className={`${dateInputCls} flex-1 min-w-[130px]`} />
+          </div>
+          {/* User ID search */}
+          <div className="relative">
             <span className="absolute left-3 top-1/2 -translate-y-1/2 text-slate-500 pointer-events-none">{IC.Search}</span>
             <Input
-              className="pl-9"
+              className="pl-9 w-full"
               placeholder="Buscar por User ID (UUID)…"
               value={userIdFilter}
               onChange={(e) => setUserIdFilter(e.target.value)}
@@ -242,8 +247,8 @@ export default function AuditLogsPage() {
 
       {/* Logs list */}
       <Card padding="none">
-        {/* Column headers */}
-        <div className="grid grid-cols-[1fr_110px_110px_160px_100px_44px] px-4 py-2.5 border-b border-border bg-background-elevated/30">
+        {/* Column headers — desktop only */}
+        <div className="hidden lg:grid grid-cols-[1fr_110px_110px_160px_100px_44px] px-4 py-2.5 border-b border-border bg-background-elevated/30">
           {["Evento", "Entidade", "Ação", "Usuário", "IP", ""].map((h, i) => (
             <span key={i} className="text-[11px] font-medium text-slate-500 uppercase tracking-wide">{h}</span>
           ))}
@@ -265,53 +270,67 @@ export default function AuditLogsPage() {
               const badge = ACTION_BADGE[log.action] ?? { label: log.action, cls: "bg-slate-100 text-slate-500 border border-slate-300 dark:bg-slate-800/60 dark:text-slate-400 dark:border-slate-600/40" };
               const hasData = (log.old_data && Object.keys(log.old_data).length > 0) || (log.new_data && Object.keys(log.new_data).length > 0);
               return (
-                <div key={log.id} className="grid grid-cols-[1fr_110px_110px_160px_100px_44px] items-center px-4 py-3 hover:bg-background-elevated/40 transition-colors">
-
-                  {/* Evento: data + ID entidade */}
-                  <div className="min-w-0">
-                    <div className="flex items-center gap-1.5 text-xs text-slate-500 dark:text-slate-400">
-                      <span className="text-slate-400 dark:text-slate-600 shrink-0">{IC.Clock}</span>
-                      <span className="whitespace-nowrap">{formatDate(log.created_at)}</span>
-                    </div>
-                    <p className="text-[11px] text-slate-400 dark:text-slate-600 font-mono mt-0.5">
-                      {log.entity_id ? shortUuid(log.entity_id) : "—"}
-                    </p>
-                  </div>
-
-                  {/* Entidade */}
-                  <span className="text-xs text-slate-600 dark:text-slate-300">
-                    {ENTITY_LABEL[log.entity_type] ?? log.entity_type}
-                  </span>
-
-                  {/* Ação */}
-                  <div>
-                    <span className={`inline-flex items-center px-2 py-0.5 rounded-full text-xs font-medium ${badge.cls}`}>
-                      {badge.label}
-                    </span>
-                  </div>
-
-                  {/* Usuário */}
-                  <div className="min-w-0">
-                    <div className="flex items-center gap-1 text-xs text-slate-600 dark:text-slate-300 truncate">
-                      <span className="text-slate-400 dark:text-slate-600 shrink-0">{IC.User}</span>
-                      <span className="truncate">{log.user_name ?? "—"}</span>
-                    </div>
-                    {log.user_id && (
-                      <p className="text-[11px] text-slate-400 dark:text-slate-600 font-mono mt-0.5">{shortUuid(log.user_id)}</p>
-                    )}
-                  </div>
-
-                  {/* IP */}
-                  <span className="text-xs text-slate-500 font-mono">{log.ip_address ?? "—"}</span>
-
-                  {/* Detalhes */}
-                  <button
+                <div key={log.id}>
+                  {/* Mobile layout */}
+                  <div
+                    className="lg:hidden flex items-start justify-between gap-3 px-4 py-3 hover:bg-background-elevated/40 transition-colors cursor-pointer"
                     onClick={() => setDetail(log)}
-                    title="Ver detalhes"
-                    className={`p-1.5 rounded-lg transition-colors cursor-pointer ${hasData ? "text-primary hover:bg-primary/10" : "text-slate-400 dark:text-slate-600 hover:text-slate-600 dark:hover:text-slate-400 hover:bg-background-elevated"}`}
                   >
-                    {IC.Eye}
-                  </button>
+                    <div className="flex-1 min-w-0 space-y-1">
+                      <div className="flex items-center gap-2 flex-wrap">
+                        <span className={`inline-flex items-center px-2 py-0.5 rounded-full text-xs font-medium ${badge.cls}`}>{badge.label}</span>
+                        <span className="text-xs text-slate-500 dark:text-slate-400">{ENTITY_LABEL[log.entity_type] ?? log.entity_type}</span>
+                      </div>
+                      <div className="flex items-center gap-1.5 text-xs text-slate-500 dark:text-slate-400">
+                        <span className="shrink-0">{IC.Clock}</span>
+                        <span>{formatDate(log.created_at)}</span>
+                      </div>
+                      <div className="flex items-center gap-1.5 text-xs text-slate-500 dark:text-slate-400 truncate">
+                        <span className="shrink-0">{IC.User}</span>
+                        <span className="truncate">{log.user_name ?? "—"}</span>
+                        {log.ip_address && <span className="font-mono text-slate-400 ml-1">· {log.ip_address}</span>}
+                      </div>
+                    </div>
+                    <button
+                      title="Ver detalhes"
+                      className={`shrink-0 p-1.5 rounded-lg transition-colors cursor-pointer ${hasData ? "text-primary hover:bg-primary/10" : "text-slate-400 hover:bg-background-elevated"}`}
+                      onClick={(e) => { e.stopPropagation(); setDetail(log); }}
+                    >
+                      {IC.Eye}
+                    </button>
+                  </div>
+
+                  {/* Desktop layout */}
+                  <div className="hidden lg:grid grid-cols-[1fr_110px_110px_160px_100px_44px] items-center px-4 py-3 hover:bg-background-elevated/40 transition-colors">
+                    <div className="min-w-0">
+                      <div className="flex items-center gap-1.5 text-xs text-slate-500 dark:text-slate-400">
+                        <span className="text-slate-400 dark:text-slate-600 shrink-0">{IC.Clock}</span>
+                        <span className="whitespace-nowrap">{formatDate(log.created_at)}</span>
+                      </div>
+                      <p className="text-[11px] text-slate-400 dark:text-slate-600 font-mono mt-0.5">
+                        {log.entity_id ? shortUuid(log.entity_id) : "—"}
+                      </p>
+                    </div>
+                    <span className="text-xs text-slate-600 dark:text-slate-300">{ENTITY_LABEL[log.entity_type] ?? log.entity_type}</span>
+                    <div>
+                      <span className={`inline-flex items-center px-2 py-0.5 rounded-full text-xs font-medium ${badge.cls}`}>{badge.label}</span>
+                    </div>
+                    <div className="min-w-0">
+                      <div className="flex items-center gap-1 text-xs text-slate-600 dark:text-slate-300 truncate">
+                        <span className="text-slate-400 dark:text-slate-600 shrink-0">{IC.User}</span>
+                        <span className="truncate">{log.user_name ?? "—"}</span>
+                      </div>
+                      {log.user_id && <p className="text-[11px] text-slate-400 dark:text-slate-600 font-mono mt-0.5">{shortUuid(log.user_id)}</p>}
+                    </div>
+                    <span className="text-xs text-slate-500 font-mono">{log.ip_address ?? "—"}</span>
+                    <button
+                      onClick={() => setDetail(log)}
+                      title="Ver detalhes"
+                      className={`p-1.5 rounded-lg transition-colors cursor-pointer ${hasData ? "text-primary hover:bg-primary/10" : "text-slate-400 dark:text-slate-600 hover:text-slate-600 dark:hover:text-slate-400 hover:bg-background-elevated"}`}
+                    >
+                      {IC.Eye}
+                    </button>
+                  </div>
                 </div>
               );
             })}

@@ -2,7 +2,7 @@
 Groups, Companies and Client-assignment endpoints.
 
 Permissões:
-  Todos os endpoints — admin only
+  Todos os endpoints — admin | technician
 """
 
 import uuid
@@ -35,7 +35,7 @@ from app.schemas.groups import (
 
 router = APIRouter(tags=["Groups"])
 
-_AdminDep = Annotated[User, Depends(authorize(UserRole.admin))]
+_AdminDep = Annotated[User, Depends(authorize(UserRole.admin, UserRole.technician))]
 _DBDep = Annotated[AsyncSession, Depends(get_db)]
 
 

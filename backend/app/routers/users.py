@@ -2,16 +2,16 @@
 CRUD de usuários.
 
 Permissões:
-  POST   /users                   — admin
-  GET    /users                   — admin
+  POST   /users                   — admin | technician
+  GET    /users                   — admin | technician
   GET    /users/me                — qualquer autenticado
   GET    /users/technicians       — admin | technician (lista técnicos ativos)
-  GET    /users/{id}              — admin (ou o próprio usuário)
-  PATCH  /users/{id}              — admin (ou o próprio usuário, sem mudar role)
-  PATCH  /users/{id}/status       — admin
+  GET    /users/{id}              — admin | technician (ou o próprio usuário)
+  PATCH  /users/{id}              — admin | technician (ou o próprio usuário, só admin muda role)
+  PATCH  /users/{id}/status       — admin | technician
   PATCH  /users/me/lgpd-consent   — qualquer autenticado (próprio consentimento)
-  POST   /users/{id}/anonymize    — admin (anonimiza PII — LGPD)
-  DELETE /users/{id}              — admin (exclusão, apenas sem tickets)
+  POST   /users/{id}/anonymize    — admin | technician (anonimiza PII — LGPD)
+  DELETE /users/{id}              — admin | technician (exclusão, apenas sem tickets)
 """
 
 import uuid
@@ -68,7 +68,7 @@ def _audit(
 async def create_user(
     body: UserCreate,
     db: Annotated[AsyncSession, Depends(get_db)],
-    actor: Annotated[User, Depends(authorize(UserRole.admin))],
+    actor: Annotated[User, Depends(authorize(UserRole.admin, UserRole.technician))],
 ) -> UserResponse:
     result = await db.execute(select(User).where(User.email == body.email))
     if result.scalar_one_or_none():
@@ -102,7 +102,7 @@ async def create_user(
 @router.get("", response_model=UserListResponse)
 async def list_users(
     db: Annotated[AsyncSession, Depends(get_db)],
-    _actor: Annotated[User, Depends(authorize(UserRole.admin))],
+    _actor: Annotated[User, Depends(authorize(UserRole.admin, UserRole.technician))],
     offset: int = Query(default=0, ge=0),
     limit: int = Query(default=20, ge=1, le=100),
     role: UserRole | None = Query(default=None),
@@ -180,8 +180,9 @@ async def get_user(
     db: Annotated[AsyncSession, Depends(get_db)],
     current_user: Annotated[User, Depends(get_current_user)],
 ) -> UserResponse:
-    # Non-admins can only see their own profile
-    if current_user.role != UserRole.admin and current_user.id != user_id:
+    # Only admin/technician can view any user; others only their own profile
+    is_staff = current_user.role in (UserRole.admin, UserRole.technician)
+    if not is_staff and current_user.id != user_id:
         raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="Access denied")
 
     result = await db.execute(select(User).where(User.id == user_id))
@@ -327,15 +328,15 @@ async def update_user(
     db: Annotated[AsyncSession, Depends(get_db)],
     current_user: Annotated[User, Depends(get_current_user)],
 ) -> UserResponse:
-    # Non-admins can only edit themselves and cannot change role
-    if current_user.role != UserRole.admin:
-        if current_user.id != user_id:
-            raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="Access denied")
-        if body.role is not None:
-            raise HTTPException(
-                status_code=status.HTTP_403_FORBIDDEN,
-                detail="Only admins can change roles",
-            )
+    # Admin/technician can edit any user; others only themselves. Only admin can change role.
+    is_staff = current_user.role in (UserRole.admin, UserRole.technician)
+    if not is_staff and current_user.id != user_id:
+        raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="Access denied")
+    if current_user.role != UserRole.admin and body.role is not None:
+        raise HTTPException(
+            status_code=status.HTTP_403_FORBIDDEN,
+            detail="Only admins can change roles",
+        )
 
     result = await db.execute(select(User).where(User.id == user_id))
     user = result.scalar_one_or_none()
@@ -360,7 +361,7 @@ async def update_user_status(
     user_id: uuid.UUID,
     body: UserStatusUpdate,
     db: Annotated[AsyncSession, Depends(get_db)],
-    actor: Annotated[User, Depends(authorize(UserRole.admin))],
+    actor: Annotated[User, Depends(authorize(UserRole.admin, UserRole.technician))],
 ) -> UserResponse:
     if actor.id == user_id:
         raise HTTPException(
@@ -410,7 +411,7 @@ async def update_lgpd_consent(
 async def anonymize_user(
     user_id: uuid.UUID,
     db: Annotated[AsyncSession, Depends(get_db)],
-    actor: Annotated[User, Depends(authorize(UserRole.admin))],
+    actor: Annotated[User, Depends(authorize(UserRole.admin, UserRole.technician))],
 ) -> UserResponse:
     """Anonimiza os dados pessoais do usuário (LGPD — direito ao esquecimento)."""
     if actor.id == user_id:
@@ -461,7 +462,7 @@ async def anonymize_user(
 async def delete_user(
     user_id: uuid.UUID,
     db: Annotated[AsyncSession, Depends(get_db)],
-    actor: Annotated[User, Depends(authorize(UserRole.admin))],
+    actor: Annotated[User, Depends(authorize(UserRole.admin, UserRole.technician))],
 ) -> None:
     """Exclui permanentemente um usuário sem tickets (LGPD)."""
     if actor.id == user_id:
