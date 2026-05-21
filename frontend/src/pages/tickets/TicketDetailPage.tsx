@@ -1,4 +1,6 @@
 import { useCallback, useEffect, useRef, useState } from "react";
+import { toast } from "sonner";
+import { getApiError } from "../../lib/apiError";
 import { useNavigate, useParams } from "react-router-dom";
 import {
   Alert,
@@ -456,24 +458,28 @@ function SidebarSection({
   const isAmber = accent === "amber";
   return (
     <div className={`rounded-xl border ${isAmber ? "border-amber-700/25 bg-amber-950/15" : "border-border/40 bg-background-surface"}`}>
-      <button
-        type="button"
-        onClick={() => setOpen((v) => !v)}
-        className={`flex w-full items-center justify-between px-4 py-3 cursor-pointer transition-colors ${isAmber ? "hover:bg-amber-900/10" : "hover:bg-background-elevated/40"} rounded-xl`}
-      >
-        <span className={`text-[10px] font-bold uppercase tracking-widest flex items-center gap-1.5 ${isAmber ? "text-amber-500/80" : "text-slate-500"}`}>
-          {icon}{title}
-        </span>
-        <div className="flex items-center gap-2" onClick={(e) => e.stopPropagation()}>
+      <div className={`flex w-full items-center justify-between px-4 py-3 rounded-xl ${isAmber ? "hover:bg-amber-900/10" : "hover:bg-background-elevated/40"} transition-colors`}>
+        <button
+          type="button"
+          onClick={() => setOpen((v) => !v)}
+          className="flex flex-1 items-center gap-1.5 cursor-pointer text-left"
+        >
+          <span className={`text-[10px] font-bold uppercase tracking-widest flex items-center gap-1.5 ${isAmber ? "text-amber-500/80" : "text-slate-500"}`}>
+            {icon}{title}
+          </span>
+        </button>
+        <div className="flex items-center gap-2">
           {action}
-          <svg
-            className={`w-3 h-3 shrink-0 transition-transform duration-200 ${open ? "rotate-180" : ""} ${isAmber ? "text-amber-600/60" : "text-slate-600"}`}
-            fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2.5}
-          >
-            <path strokeLinecap="round" strokeLinejoin="round" d="M19 9l-7 7-7-7" />
-          </svg>
+          <button type="button" onClick={() => setOpen((v) => !v)} className="cursor-pointer">
+            <svg
+              className={`w-3 h-3 shrink-0 transition-transform duration-200 ${open ? "rotate-180" : ""} ${isAmber ? "text-amber-600/60" : "text-slate-600"}`}
+              fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2.5}
+            >
+              <path strokeLinecap="round" strokeLinejoin="round" d="M19 9l-7 7-7-7" />
+            </svg>
+          </button>
         </div>
-      </button>
+      </div>
       {open && <div className="px-4 pb-4">{children}</div>}
     </div>
   );
@@ -619,6 +625,34 @@ function SurveyPanel({ ticketId }: { ticketId: string }) {
 
 type Tab = "conversa" | "kb" | "detalhes" | "historico" | "anexos";
 
+const TAB_ICONS: Record<string, JSX.Element> = {
+  conversa: (
+    <svg className="w-4 h-4 shrink-0" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
+      <path strokeLinecap="round" strokeLinejoin="round" d="M8 10h.01M12 10h.01M16 10h.01M9 16H5a2 2 0 01-2-2V6a2 2 0 012-2h14a2 2 0 012 2v8a2 2 0 01-2 2h-5l-5 5v-5z" />
+    </svg>
+  ),
+  detalhes: (
+    <svg className="w-4 h-4 shrink-0" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
+      <path strokeLinecap="round" strokeLinejoin="round" d="M9 12h6m-6 4h6m2 5H7a2 2 0 01-2-2V5a2 2 0 012-2h5.586a1 1 0 01.707.293l5.414 5.414a1 1 0 01.293.707V19a2 2 0 01-2 2z" />
+    </svg>
+  ),
+  kb: (
+    <svg className="w-4 h-4 shrink-0" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
+      <path strokeLinecap="round" strokeLinejoin="round" d="M12 6.253v13m0-13C10.832 5.477 9.246 5 7.5 5S4.168 5.477 3 6.253v13C4.168 18.477 5.754 18 7.5 18s3.332.477 4.5 1.253m0-13C13.168 5.477 14.754 5 16.5 5c1.747 0 3.332.477 4.5 1.253v13C19.832 18.477 18.247 18 16.5 18c-1.746 0-3.332.477-4.5 1.253" />
+    </svg>
+  ),
+  historico: (
+    <svg className="w-4 h-4 shrink-0" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
+      <path strokeLinecap="round" strokeLinejoin="round" d="M12 8v4l3 3m6-3a9 9 0 11-18 0 9 9 0 0118 0z" />
+    </svg>
+  ),
+  anexos: (
+    <svg className="w-4 h-4 shrink-0" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
+      <path strokeLinecap="round" strokeLinejoin="round" d="M15.172 7l-6.586 6.586a2 2 0 102.828 2.828l6.414-6.586a4 4 0 00-5.656-5.656l-6.415 6.585a6 6 0 108.486 8.486L20.5 13" />
+    </svg>
+  ),
+};
+
 function TabBar({ active, setActive, counts, showKb }: { active: Tab; setActive: (t: Tab) => void; counts: Partial<Record<Tab, number>>; showKb: boolean }) {
   const tabs: { id: Tab; label: string }[] = [
     { id: "conversa",  label: "Conversa" },
@@ -628,27 +662,30 @@ function TabBar({ active, setActive, counts, showKb }: { active: Tab; setActive:
     { id: "anexos",    label: "Anexos" },
   ];
   return (
-    <div className="flex gap-0.5 rounded-xl bg-background-elevated/50 p-1">
-      {tabs.map((tab) => (
-        <button
-          key={tab.id}
-          onClick={() => setActive(tab.id)}
-          className={`flex flex-1 items-center justify-center gap-1.5 rounded-lg px-3 py-2 text-sm font-semibold transition-all cursor-pointer ${
-            active === tab.id
-              ? "bg-background-surface text-slate-100 shadow-sm"
-              : "text-slate-500 hover:text-slate-300"
-          }`}
-        >
-          {tab.label}
-          {counts[tab.id] !== undefined && counts[tab.id]! > 0 && (
-            <span className={`rounded-full px-1.5 py-0.5 text-[10px] font-bold leading-none ${
-              active === tab.id ? "bg-primary/20 text-primary" : "bg-background-elevated text-slate-500"
-            }`}>
-              {counts[tab.id]}
-            </span>
-          )}
-        </button>
-      ))}
+    <div className="shrink-0">
+      <div className="flex gap-0.5 rounded-xl bg-background-elevated/50 p-1">
+        {tabs.map((tab) => (
+          <button
+            key={tab.id}
+            onClick={() => setActive(tab.id)}
+            className={`flex flex-1 items-center justify-center gap-1.5 rounded-lg px-3 py-2 text-sm font-semibold transition-all cursor-pointer ${
+              active === tab.id
+                ? "bg-background-surface text-slate-100 shadow-sm"
+                : "text-slate-500 hover:text-slate-300"
+            }`}
+          >
+            <span className="sm:hidden">{TAB_ICONS[tab.id]}</span>
+            <span className="hidden sm:inline">{tab.label}</span>
+            {counts[tab.id] !== undefined && counts[tab.id]! > 0 && (
+              <span className={`rounded-full px-1.5 py-0.5 text-[10px] font-bold leading-none ${
+                active === tab.id ? "bg-primary/20 text-primary" : "bg-background-elevated text-slate-500"
+              }`}>
+                {counts[tab.id]}
+              </span>
+            )}
+          </button>
+        ))}
+      </div>
     </div>
   );
 }
@@ -675,21 +712,17 @@ export default function TicketDetailPage() {
 
   const [resolveNote, setResolveNote] = useState("");
   const [resolveLoading, setResolveLoading] = useState(false);
-  const [resolveError, setResolveError] = useState<string | null>(null);
 
   const [newStatus, setNewStatus] = useState("");
   const [statusComment, setStatusComment] = useState("");
   const [statusLoading, setStatusLoading] = useState(false);
-  const [statusError, setStatusError] = useState<string | null>(null);
 
   const [newAssignee, setNewAssignee] = useState("");
   const [assignLoading, setAssignLoading] = useState(false);
-  const [assignError, setAssignError] = useState<string | null>(null);
 
   const fileInputRef = useRef<HTMLInputElement>(null);
   const [uploadFiles, setUploadFiles] = useState<File[]>([]);
   const [uploadLoading, setUploadLoading] = useState(false);
-  const [uploadError, setUploadError] = useState<string | null>(null);
 
   const [ticketNotes, setTicketNotes] = useState<TicketNote[]>([]);
   const [showAddNote, setShowAddNote] = useState(false);
@@ -738,47 +771,55 @@ export default function TicketDetailPage() {
 
   async function handleStatusChange() {
     if (!ticket || !newStatus) return;
-    setStatusLoading(true); setStatusError(null);
+    setStatusLoading(true);
     try {
       const updated = await updateTicketStatus(ticket.id, newStatus, statusComment || undefined);
       setTicket(updated);
       setHistory((await getTicketHistory(ticket.id)).items);
       setStatusModal(false); setNewStatus(""); setStatusComment("");
-    } catch { setStatusError("Não foi possível alterar o status."); }
-    finally { setStatusLoading(false); }
+      toast.success("Status atualizado com sucesso.");
+    } catch (err) {
+      toast.error(getApiError(err, "Não foi possível alterar o status."));
+    } finally { setStatusLoading(false); }
   }
 
   async function handleResolve() {
     if (!ticket || !resolveNote.trim()) return;
-    setResolveLoading(true); setResolveError(null);
+    setResolveLoading(true);
     try {
       const updated = await resolveTicket(ticket.id, resolveNote.trim());
       setTicket(updated);
       setHistory((await getTicketHistory(ticket.id)).items);
       setResolveModal(false); setResolveNote("");
-    } catch { setResolveError("Não foi possível concluir o ticket."); }
-    finally { setResolveLoading(false); }
+      toast.success("Ticket concluído com sucesso.");
+    } catch (err) {
+      toast.error(getApiError(err, "Não foi possível concluir o ticket."));
+    } finally { setResolveLoading(false); }
   }
 
   async function handleAssign(assigneeId: string | null) {
     if (!ticket) return;
-    setAssignLoading(true); setAssignError(null);
+    setAssignLoading(true);
     try {
       setTicket(await assignTicket(ticket.id, assigneeId));
       setAssignModal(false); setNewAssignee("");
-    } catch { setAssignError("Não foi possível atribuir o ticket."); }
-    finally { setAssignLoading(false); }
+      toast.success(assigneeId ? "Ticket atribuído com sucesso." : "Atribuição removida.");
+    } catch (err) {
+      toast.error(getApiError(err, "Não foi possível atribuir o ticket."));
+    } finally { setAssignLoading(false); }
   }
 
   async function handleUpload() {
     if (!ticket || uploadFiles.length === 0) return;
-    setUploadLoading(true); setUploadError(null);
+    setUploadLoading(true);
     try {
       await uploadAttachments(ticket.id, uploadFiles);
       setAttachments((await getAttachments(ticket.id)).items);
       setUploadModal(false); setUploadFiles([]);
-    } catch { setUploadError("Falha no upload. Verifique os arquivos e tente novamente."); }
-    finally { setUploadLoading(false); }
+      toast.success("Anexos enviados com sucesso.");
+    } catch (err) {
+      toast.error(getApiError(err, "Falha no upload. Verifique os arquivos e tente novamente."));
+    } finally { setUploadLoading(false); }
   }
 
   async function handleAddNote() {
@@ -789,6 +830,9 @@ export default function TicketDetailPage() {
       setTicketNotes((p) => [note, ...p]);
       setNewNoteContent("");
       setShowAddNote(false);
+      toast.success("Nota adicionada.");
+    } catch (err) {
+      toast.error(getApiError(err, "Não foi possível adicionar a nota."));
     } finally { setNoteSaving(false); }
   }
 
@@ -798,6 +842,9 @@ export default function TicketDetailPage() {
     try {
       await deleteTicketNote(ticket.id, noteId);
       setTicketNotes((p) => p.filter((n) => n.id !== noteId));
+      toast.success("Nota removida.");
+    } catch (err) {
+      toast.error(getApiError(err, "Não foi possível remover a nota."));
     } finally { setNoteDeleting(null); }
   }
 
@@ -807,6 +854,9 @@ export default function TicketDetailPage() {
     try {
       setTicket(await updateClientObservation(ticket.id, obsValue || null));
       setObsEdit(false);
+      toast.success("Observação salva.");
+    } catch (err) {
+      toast.error(getApiError(err, "Não foi possível salvar a observação."));
     } finally { setObsSaving(false); }
   }
 
@@ -821,6 +871,9 @@ export default function TicketDetailPage() {
     try {
       setTicket({ ...ticket, tags: await setTicketTags(ticket.id, [...selectedTagIds]) });
       setTagsEdit(false);
+      toast.success("Etiquetas atualizadas.");
+    } catch (err) {
+      toast.error(getApiError(err, "Não foi possível atualizar as etiquetas."));
     } finally { setTagsSaving(false); }
   }
 
@@ -828,7 +881,10 @@ export default function TicketDetailPage() {
     try {
       await deleteAttachment(attachmentId);
       setAttachments((prev) => prev.filter((a) => a.id !== attachmentId));
-    } catch { /* silent */ }
+      toast.success("Anexo removido.");
+    } catch (err) {
+      toast.error(getApiError(err, "Não foi possível remover o anexo."));
+    }
   }
 
   if (loading) {
@@ -852,9 +908,9 @@ export default function TicketDetailPage() {
     : history;
 
   return (
-    <div className="flex flex-col h-full gap-4">
+    <div className="flex flex-col gap-4 lg:h-full">
       {/* ── Page Header ──────────────────────────────────────── */}
-      <div className="shrink-0 flex flex-wrap items-start justify-between gap-4 rounded-2xl border border-border/40 bg-background-surface px-5 py-4">
+      <div className="shrink-0 flex flex-col sm:flex-row sm:items-start sm:justify-between gap-4 rounded-2xl border border-border/40 bg-background-surface px-5 py-4">
         {/* Breadcrumb + title */}
         <div className="min-w-0">
           <button
@@ -888,7 +944,7 @@ export default function TicketDetailPage() {
         {isStaff && !isClosed && (
           <button
             onClick={() => setResolveModal(true)}
-            className="flex shrink-0 items-center gap-2 rounded-xl bg-emerald-600 px-5 py-2.5 text-sm font-bold text-white shadow-sm hover:bg-emerald-500 transition-colors cursor-pointer"
+            className="flex w-full sm:w-auto shrink-0 items-center justify-center gap-2 rounded-xl bg-emerald-600 px-5 py-2.5 text-sm font-bold text-white shadow-sm hover:bg-emerald-500 transition-colors cursor-pointer"
           >
             {IC.Check("w-4 h-4")}
             Concluir ticket
@@ -905,14 +961,14 @@ export default function TicketDetailPage() {
         showKb={isStaff}
       />
 
-      <div className="grid grid-cols-1 lg:grid-cols-[1fr_256px] gap-5 flex-1 min-h-0">
+      <div className="grid grid-cols-1 lg:grid-cols-[1fr_256px] gap-5 lg:flex-1 lg:min-h-0">
         {/* ── Main column ───────────────────────────────────── */}
-        <div className="flex flex-col min-h-0 min-w-0">
-          <div className="flex-1 min-h-0 overflow-y-auto">
+        <div className="flex flex-col lg:min-h-0 min-w-0">
+          <div className="lg:flex-1 lg:min-h-0 lg:overflow-y-auto">
 
           {/* ── TAB: Conversa ───────────────────────────────── */}
           {activeTab === "conversa" && (
-            <div className="flex flex-col gap-4 h-full">
+            <div className="flex flex-col gap-4 lg:h-full">
               {/* Resolution note */}
               {ticket.resolution_note && (
                 <div className="shrink-0 rounded-xl border border-emerald-700/30 bg-emerald-950/20">
@@ -927,7 +983,7 @@ export default function TicketDetailPage() {
               )}
 
               {/* Chat — cresce para preencher o espaço disponível */}
-              <div className="flex-1 min-h-0">
+              <div className="min-h-[420px] lg:flex-1 lg:min-h-0">
                 <ChatPanel
                   ticketId={ticket.id}
                   currentUserId={user?.id ?? ""}
@@ -1293,11 +1349,10 @@ export default function TicketDetailPage() {
 
       <Modal
         open={statusModal}
-        onClose={() => { setStatusModal(false); setStatusError(null); setNewStatus(""); setStatusComment(""); }}
+        onClose={() => { setStatusModal(false); setNewStatus(""); setStatusComment(""); }}
         title="Alterar status"
       >
         <div className="space-y-4">
-          {statusError && <Alert variant="danger">{statusError}</Alert>}
           <Select label="Novo status" options={transitionOptions} placeholder="Selecione" value={newStatus} onChange={(e) => setNewStatus(e.target.value)} />
           <Textarea label="Comentário (opcional)" placeholder="Motivo da alteração…" rows={3} value={statusComment} onChange={(e) => setStatusComment(e.target.value)} />
         </div>
@@ -1309,11 +1364,10 @@ export default function TicketDetailPage() {
 
       <Modal
         open={assignModal}
-        onClose={() => { setAssignModal(false); setAssignError(null); }}
+        onClose={() => { setAssignModal(false); }}
         title={ticket.assignee_id ? "Reatribuir ticket" : "Atribuir técnico"}
       >
         <div className="space-y-4">
-          {assignError && <Alert variant="danger">{assignError}</Alert>}
           {user?.role === "admin" ? (
             <Select label="Técnico" options={technicians.map((t) => ({ value: t.id, label: t.name }))} placeholder="Selecione um técnico" value={newAssignee} onChange={(e) => setNewAssignee(e.target.value)} />
           ) : (
@@ -1332,11 +1386,10 @@ export default function TicketDetailPage() {
 
       <Modal
         open={uploadModal}
-        onClose={() => { setUploadModal(false); setUploadFiles([]); setUploadError(null); }}
+        onClose={() => { setUploadModal(false); setUploadFiles([]); }}
         title="Adicionar anexos"
       >
         <div className="space-y-4">
-          {uploadError && <Alert variant="danger">{uploadError}</Alert>}
           <input ref={fileInputRef} type="file" multiple className="hidden" onChange={(e) => { if (e.target.files) setUploadFiles(Array.from(e.target.files)); }} />
           <button
             onClick={() => fileInputRef.current?.click()}
@@ -1364,11 +1417,10 @@ export default function TicketDetailPage() {
 
       <Modal
         open={resolveModal}
-        onClose={() => { setResolveModal(false); setResolveError(null); setResolveNote(""); }}
+        onClose={() => { setResolveModal(false); setResolveNote(""); }}
         title="Concluir ticket"
       >
         <div className="space-y-4">
-          {resolveError && <Alert variant="danger">{resolveError}</Alert>}
           <p className="text-sm text-slate-400">
             Descreva como o problema foi resolvido. O chat será bloqueado e o cliente receberá uma notificação.
           </p>

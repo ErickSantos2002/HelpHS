@@ -1,7 +1,9 @@
 import { marked } from "marked";
 import { useEffect, useRef, useState } from "react";
 import { useNavigate, useParams } from "react-router-dom";
+import { toast } from "sonner";
 import { Spinner } from "../../components/ui";
+import { getApiError } from "../../lib/apiError";
 import { useAuth } from "../../contexts/AuthContext";
 import {
   createKBComment,
@@ -221,12 +223,11 @@ export default function KBArticlePage() {
   const [feedbackGiven, setFeedbackGiven] = useState<boolean | null>(null);
   const [comments, setComments] = useState<KBComment[]>([]);
   const [commentsLoading, setCommentsLoading] = useState(true);
-  const [commentError, setCommentError] = useState<string | null>(null);
 
   useEffect(() => {
     if (!id) return;
     getKBArticle(id).then(setArticle).catch(() => setNotFound(true)).finally(() => setLoading(false));
-    getKBComments(id).then(setComments).catch(() => setCommentError("Erro ao carregar comentários. O servidor retornou um erro.")).finally(() => setCommentsLoading(false));
+    getKBComments(id).then(setComments).catch(() => toast.error("Erro ao carregar comentários.")).finally(() => setCommentsLoading(false));
   }, [id]);
 
   async function handleFeedback(helpful: boolean) {
@@ -238,12 +239,11 @@ export default function KBArticlePage() {
 
   async function handleAddComment(content: string) {
     if (!id) return;
-    setCommentError(null);
     try {
       const comment = await createKBComment(id, content);
       setComments((prev) => [comment, ...prev]);
-    } catch {
-      setCommentError("Não foi possível salvar o comentário. Tente novamente.");
+    } catch (err) {
+      toast.error(getApiError(err, "Não foi possível salvar o comentário."));
       throw new Error("comment_failed");
     }
   }
@@ -253,8 +253,8 @@ export default function KBArticlePage() {
     try {
       const reply = await createKBComment(id, content, parentId);
       setComments((prev) => prev.map((c) => c.id === parentId ? { ...c, replies: [...c.replies, reply] } : c));
-    } catch {
-      setCommentError("Não foi possível salvar a resposta. Tente novamente.");
+    } catch (err) {
+      toast.error(getApiError(err, "Não foi possível salvar a resposta."));
       throw new Error("reply_failed");
     }
   }
@@ -360,11 +360,7 @@ export default function KBArticlePage() {
             </div>
             <div className="p-5 space-y-4">
               <CommentForm onSubmit={handleAddComment} />
-              {commentError && (
-                <p className="text-xs text-danger bg-danger/10 border border-danger/30 rounded-lg px-3 py-2">
-                  {commentError}
-                </p>
-              )}
+
               {commentsLoading ? (
                 <div className="flex justify-center py-4"><Spinner size="sm" /></div>
               ) : comments.length === 0 ? (

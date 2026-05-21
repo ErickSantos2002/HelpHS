@@ -1,5 +1,6 @@
 import { useState } from "react";
 import { Outlet } from "react-router-dom";
+import { Toaster } from "sonner";
 import { Sidebar } from "./Sidebar";
 import { Topbar } from "./Topbar";
 
@@ -32,6 +33,14 @@ export function AppLayout() {
           <Outlet />
         </main>
       </div>
+
+      <Toaster
+        theme="dark"
+        position="top-right"
+        richColors
+        closeButton
+        toastOptions={{ duration: 4000 }}
+      />
     </div>
   );
 }

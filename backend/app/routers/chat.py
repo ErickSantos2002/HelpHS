@@ -455,6 +455,13 @@ async def websocket_chat(
                 if ticket is None:
                     break
 
+                if user.role == UserRole.technician and ticket.assignee_id != user.id:
+                    await websocket.send_json({
+                        "type": "error",
+                        "detail": "Você precisa se atribuir ao ticket antes de enviar mensagens.",
+                    })
+                    continue
+
                 msg = ChatMessage(
                     id=uuid.uuid4(),
                     ticket_id=ticket_id,

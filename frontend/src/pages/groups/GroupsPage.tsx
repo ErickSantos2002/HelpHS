@@ -2,6 +2,8 @@
 import { useForm } from "react-hook-form";
 import { zodResolver } from "@hookform/resolvers/zod";
 import { z } from "zod";
+import { toast } from "sonner";
+import { getApiError } from "../../lib/apiError";
 import { cn } from "../../lib/utils";
 import {
   Alert,
@@ -144,15 +146,12 @@ function GroupModal({
     resolver: zodResolver(groupSchema),
     defaultValues: { name: initial?.name ?? "", description: initial?.description ?? "" },
   });
-  const [error, setError] = useState("");
   const onSubmit = async (v: GroupFormValues) => {
-    setError("");
-    try { await onSave(v); onClose(); } catch { setError("Erro ao salvar grupo."); }
+    try { await onSave(v); onClose(); } catch (err) { toast.error(getApiError(err, "Erro ao salvar grupo.")); }
   };
   return (
     <Modal open onClose={onClose} title={initial ? "Editar Grupo" : "Novo Grupo"}>
       <form onSubmit={handleSubmit(onSubmit)} className="space-y-4">
-        {error && <Alert variant="error">{error}</Alert>}
         <Input label="Nome" {...register("name")} error={errors.name?.message} />
         <Textarea label="DescriÃ§Ã£o" {...register("description")} rows={3} />
         <ModalFooter>
@@ -183,7 +182,6 @@ function AddCompanyModal({
   const [search, setSearch] = useState("");
   const [suggPage, setSuggPage] = useState(1);
   const [adding, setAdding] = useState<string | null>(null);
-  const [error, setError] = useState("");
 
   const { register, handleSubmit, setValue, formState: { errors, isSubmitting } } = useForm<CompanyFormValues>({
     resolver: zodResolver(companySchema),
@@ -202,7 +200,6 @@ function AddCompanyModal({
 
   const handleAddFromSuggestion = async (s: CompanySuggestion) => {
     setAdding(s.company_name);
-    setError("");
     try {
       const newC = await createCompany(groupId, {
         name: s.company_name,
@@ -213,21 +210,20 @@ function AddCompanyModal({
       });
       onAdded(newC);
       onClose();
-    } catch {
-      setError("Erro ao adicionar empresa.");
+    } catch (err) {
+      toast.error(getApiError(err, "Erro ao adicionar empresa."));
     } finally {
       setAdding(null);
     }
   };
 
   const handleManualSubmit = async (v: CompanyFormValues) => {
-    setError("");
     try {
       const newC = await createCompany(groupId, v);
       onAdded(newC);
       onClose();
-    } catch {
-      setError("Erro ao criar empresa.");
+    } catch (err) {
+      toast.error(getApiError(err, "Erro ao criar empresa."));
     }
   };
 
@@ -260,7 +256,6 @@ function AddCompanyModal({
         ))}
       </div>
 
-      {error && <Alert variant="error" className="mb-3">{error}</Alert>}
 
       {tab === "suggestions" && (
         <div className="space-y-3">
@@ -358,15 +353,12 @@ function EditCompanyModal({
     resolver: zodResolver(companySchema),
     defaultValues: { name: company.name, cnpj: company.cnpj ?? "", phone: company.phone ?? "", address: company.address ?? "", city: company.city ?? "", state: company.state ?? "", notes: company.notes ?? "" },
   });
-  const [error, setError] = useState("");
   const onSubmit = async (v: CompanyFormValues) => {
-    setError("");
-    try { const c = await updateCompany(groupId, company.id, v); onSaved(c); onClose(); } catch { setError("Erro ao salvar empresa."); }
+    try { const c = await updateCompany(groupId, company.id, v); onSaved(c); onClose(); } catch (err) { toast.error(getApiError(err, "Erro ao salvar empresa.")); }
   };
   return (
     <Modal open onClose={onClose} title="Editar Empresa">
       <form onSubmit={handleSubmit(onSubmit)} className="space-y-4">
-        {error && <Alert variant="error">{error}</Alert>}
         <Input label="Nome da empresa" {...register("name")} error={errors.name?.message} />
         <div className="grid grid-cols-2 gap-3">
           <Input label="CNPJ" {...register("cnpj")} />
@@ -399,7 +391,6 @@ function AssignClientModal({
   const [search, setSearch] = useState("");
   const [assignPage, setAssignPage] = useState(1);
   const [assigning, setAssigning] = useState<string | null>(null);
-  const [error, setError] = useState("");
 
   useEffect(() => { listUnassignedClients().then(setClients).finally(() => setLoading(false)); }, []);
 
@@ -415,14 +406,13 @@ function AssignClientModal({
       onAssigned(client);
       setClients((prev) => prev.filter((c) => c.id !== userId));
       setAssignPage(1);
-    } catch { setError("Erro ao vincular cliente."); }
+    } catch (err) { toast.error(getApiError(err, "Erro ao vincular cliente.")); }
     finally { setAssigning(null); }
   };
 
   return (
     <Modal open onClose={onClose} title="Vincular Cliente" size="2xl">
       <div className="space-y-3">
-        {error && <Alert variant="error">{error}</Alert>}
         <Input placeholder="Buscar por nome ou e-mail..." value={search} onChange={(e) => { setSearch(e.target.value); setAssignPage(1); }} />
         {loading ? <div className="flex justify-center py-6"><Spinner /></div>
           : filtered.length === 0 ? (
@@ -464,18 +454,16 @@ function ClientNotesModal({
 }: { groupId: string; companyId: string; client: ClientInCompany; onSaved: (u: ClientInCompany) => void; onClose: () => void; }) {
   const [notes, setNotes] = useState(client.client_notes ?? "");
   const [saving, setSaving] = useState(false);
-  const [error, setError] = useState("");
 
   const handleSave = async () => {
     setSaving(true);
     try { const u = await updateClientNotes(groupId, companyId, client.id, notes || null); onSaved(u); onClose(); }
-    catch { setError("Erro ao salvar notas."); }
+    catch (err) { toast.error(getApiError(err, “Erro ao salvar notas.”)); }
     finally { setSaving(false); }
   };
   return (
     <Modal open onClose={onClose} title={`Notas â€” ${client.name}`}>
-      <div className="space-y-3">
-        {error && <Alert variant="error">{error}</Alert>}
+      <div className=”space-y-3”>
         <Textarea label="Notas internas" value={notes} onChange={(e) => setNotes(e.target.value)} rows={5} placeholder="InformaÃ§Ãµes relevantes, histÃ³rico..." />
         <ModalFooter>
           <Button variant="outline" onClick={onClose}>Cancelar</Button>
@@ -832,7 +820,6 @@ export default function GroupsPage() {
   const [groups, setGroups] = useState<GroupResponse[]>([]);
   const [groupSearch, setGroupSearch] = useState("");
   const [loading, setLoading] = useState(true);
-  const [error, setError] = useState("");
   const [selectedGroup, setSelectedGroup] = useState<GroupResponse | null>(null);
   const [groupDetail, setGroupDetail] = useState<GroupDetail | null>(null);
   const [loadingDetail, setLoadingDetail] = useState(false);
@@ -852,7 +839,7 @@ export default function GroupsPage() {
 
   const loadGroups = async () => {
     setLoading(true);
-    try { setGroups(await listGroups()); } catch { setError("Erro ao carregar grupos."); } finally { setLoading(false); }
+    try { setGroups(await listGroups()); } catch { toast.error("Não foi possível carregar os grupos."); } finally { setLoading(false); }
   };
 
   const loadGroupDetail = async (g: GroupResponse) => {
@@ -900,7 +887,7 @@ export default function GroupsPage() {
       setGroups((p) => p.filter((g) => g.id !== selectedGroup.id));
       setSelectedGroup(null);
       setGroupDetail(null);
-    } catch { setError("Erro ao deletar grupo."); }
+    } catch (err) { toast.error(getApiError(err, "Erro ao deletar grupo.")); }
   };
 
   const handleDeleteCompany = async (company: CompanyResponse) => {

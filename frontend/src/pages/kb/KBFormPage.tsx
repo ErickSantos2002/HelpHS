@@ -1,7 +1,9 @@
 import { marked } from "marked";
 import { useEffect, useState } from "react";
 import { useNavigate, useParams } from "react-router-dom";
+import { toast } from "sonner";
 import { Alert, Button, Input, Spinner, Textarea } from "../../components/ui";
+import { getApiError } from "../../lib/apiError";
 import { useAuth } from "../../contexts/AuthContext";
 import {
   createKBArticle,
@@ -169,8 +171,8 @@ export default function KBFormPage() {
         const article = await createKBArticle({ title, content, category, tags, status });
         navigate(`/kb/${article.id}`);
       }
-    } catch {
-      setErrors({ form: "Erro ao salvar artigo. Tente novamente." });
+    } catch (err) {
+      toast.error(getApiError(err, "Erro ao salvar artigo. Tente novamente."));
     } finally {
       setLoading(false);
     }
@@ -201,7 +203,6 @@ export default function KBFormPage() {
         </div>
       </div>
 
-      {errors.form && <Alert variant="danger" onDismiss={() => setErrors((p) => ({ ...p, form: "" }))}>{errors.form}</Alert>}
 
       {/* ── Body ─────────────────────────────────────────────── */}
       <form onSubmit={handleSubmit}>

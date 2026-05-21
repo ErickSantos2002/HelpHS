@@ -1,4 +1,5 @@
 import { useCallback, useEffect, useRef, useState } from "react";
+import { toast } from "sonner";
 import { cn } from "../../lib/utils";
 import {
   buildWsUrl,
@@ -187,8 +188,13 @@ export function ChatPanel({
       try {
         const payload = JSON.parse(event.data as string) as {
           type: string;
+          detail?: string;
           data?: ChatMessage & { status?: string };
         };
+        if (payload.type === "error" && payload.detail) {
+          toast.error(payload.detail);
+          return;
+        }
         if (payload.type === "status_update" && payload.data?.status) {
           onStatusChange?.(payload.data.status);
         }
