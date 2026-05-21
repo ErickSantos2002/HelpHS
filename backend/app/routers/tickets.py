@@ -596,6 +596,12 @@ async def resolve_ticket(
             detail=f"Ticket is already '{ticket.status.value}'",
         )
 
+    if actor.role == UserRole.technician and ticket.assignee_id != actor.id:
+        raise HTTPException(
+            status_code=status.HTTP_403_FORBIDDEN,
+            detail="Você precisa estar atribuído ao ticket para concluí-lo.",
+        )
+
     now = datetime.now(UTC)
     old_status = ticket.status
     ticket.status = TicketStatus.resolved
