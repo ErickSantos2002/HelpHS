@@ -42,6 +42,7 @@ export interface TicketHistory {
   id: string;
   ticket_id: string;
   user_id: string;
+  user_name: string | null;
   field: string;
   old_value: string | null;
   new_value: string | null;

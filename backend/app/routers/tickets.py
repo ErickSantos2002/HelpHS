@@ -23,6 +23,7 @@ from fastapi import APIRouter, Depends, HTTPException, Query, status
 from sqlalchemy import func, select  # func used in list_tickets subquery
 from sqlalchemy.exc import IntegrityError
 from sqlalchemy.ext.asyncio import AsyncSession
+from sqlalchemy.orm import selectinload
 
 from app.core.config import Settings, get_settings
 from app.core.database import get_db
@@ -653,15 +654,20 @@ async def assign_ticket(
 ) -> TicketResponse:
     ticket = await get_or_404(db, Ticket, ticket_id, "Ticket not found")
 
+    new_assignee_user: User | None = None
     if body.assignee_id is not None:
         result = await db.execute(select(User).where(User.id == body.assignee_id))
-        if not result.scalar_one_or_none():
+        new_assignee_user = result.scalar_one_or_none()
+        if not new_assignee_user:
             raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Assignee not found")
 
     old_assignee = ticket.assignee_id
     ticket.assignee_id = body.assignee_id
     ticket.updated_at = datetime.now(UTC)
-    _record_history(db, ticket.id, actor.id, "assignee_id", old_assignee, body.assignee_id)
+    _record_history(
+        db, ticket.id, actor.id, "assignee_id", old_assignee, body.assignee_id,
+        comment=new_assignee_user.name if new_assignee_user else None,
+    )
     _audit(db, AuditAction.assign, actor.id, ticket.id)
     if body.assignee_id is not None:
         await notify(
@@ -673,8 +679,12 @@ async def assign_ticket(
             data={"ticket_id": str(ticket.id), "protocol": ticket.protocol},
             settings=settings,
         )
-        # Auto-transition open → in_progress on first assignment
-        if ticket.status == TicketStatus.open:
+        # Auto-transition → in_progress ao atribuir (de qualquer status ativo)
+        if ticket.status in (
+            TicketStatus.open,
+            TicketStatus.awaiting_client,
+            TicketStatus.awaiting_technical,
+        ):
             await _auto_transition(
                 db, ticket, TicketStatus.in_progress, actor.id, "Atribuído — em andamento"
             )
@@ -809,12 +819,19 @@ async def get_ticket_history(
     base = select(TicketHistory).where(TicketHistory.ticket_id == ticket_id)
     total = (await db.execute(select(func.count()).select_from(base.subquery()))).scalar_one()
     rows = await db.execute(
-        base.order_by(TicketHistory.created_at.asc()).offset(offset).limit(limit)
+        base.options(selectinload(TicketHistory.user))
+        .order_by(TicketHistory.created_at.asc()).offset(offset).limit(limit)
     )
     entries = rows.scalars().all()
 
+    items = []
+    for h in entries:
+        item = TicketHistoryResponse.model_validate(h)
+        item.user_name = h.user.name if h.user else None
+        items.append(item)
+
     return TicketHistoryListResponse(
-        items=[TicketHistoryResponse.model_validate(h) for h in entries],
+        items=items,
         total=total,
         limit=limit,
         offset=offset,

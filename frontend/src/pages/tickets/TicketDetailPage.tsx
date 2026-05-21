@@ -65,10 +65,25 @@ const FIELD_LABEL: Record<string, string> = {
   description: "Descrição alterada",
   priority: "Prioridade alterada",
   category: "Categoria alterada",
-  assignee_id: "Técnico atribuído",
+  assignee_id: "Responsável alterado",
   product_id: "Produto alterado",
   equipment_id: "Equipamento alterado",
   technician_notes: "Notas internas atualizadas",
+  client_observation: "Observação atualizada",
+};
+
+const PRIORITY_LABEL: Record<string, string> = {
+  low: "Baixa",
+  medium: "Média",
+  high: "Alta",
+  critical: "Crítica",
+};
+
+const PRIORITY_COLOR: Record<string, string> = {
+  low: "text-sky-400",
+  medium: "text-yellow-400",
+  high: "text-orange-400",
+  critical: "text-red-400",
 };
 
 const CATEGORY_LABEL: Record<string, string> = {
@@ -248,7 +263,11 @@ function ActivityEntry({ entry }: { entry: TicketHistory }) {
       ? "bg-violet-500"
       : entry.field === "assignee_id"
       ? "bg-emerald-500"
+      : entry.field === "priority"
+      ? "bg-orange-500"
       : "bg-slate-500";
+
+  const isUnassign = entry.field === "assignee_id" && !entry.new_value;
 
   return (
     <div className="flex gap-3 group">
@@ -258,11 +277,20 @@ function ActivityEntry({ entry }: { entry: TicketHistory }) {
       </div>
       <div className="pb-4 min-w-0 flex-1">
         <div className="flex items-baseline justify-between gap-2">
-          <p className="text-sm font-medium text-slate-200">{label}</p>
+          <p className="text-sm font-medium text-slate-200">
+            {isUnassign ? "Responsável removido" : label}
+          </p>
           <time className="text-[11px] text-slate-500 shrink-0">{relTime}</time>
         </div>
+
+        {/* Quem fez a ação */}
+        {entry.user_name && (
+          <p className="text-xs text-slate-500 mt-0.5">por {entry.user_name}</p>
+        )}
+
+        {/* Status: de → para */}
         {entry.field === "status" && entry.new_value && (
-          <div className="flex items-center gap-2 mt-1">
+          <div className="flex items-center gap-2 mt-1.5">
             {entry.old_value && (
               <>
                 <StatusBadge status={entry.old_value as never} />
@@ -274,7 +302,48 @@ function ActivityEntry({ entry }: { entry: TicketHistory }) {
             <StatusBadge status={entry.new_value as never} />
           </div>
         )}
-        {entry.comment && (
+
+        {/* Técnico atribuído */}
+        {entry.field === "assignee_id" && entry.comment && !isUnassign && (
+          <p className="mt-1 text-xs text-emerald-400 font-medium">{entry.comment}</p>
+        )}
+
+        {/* Prioridade: de → para */}
+        {entry.field === "priority" && entry.new_value && (
+          <div className="flex items-center gap-1.5 mt-1">
+            {entry.old_value && (
+              <>
+                <span className={`text-xs font-medium ${PRIORITY_COLOR[entry.old_value] ?? "text-slate-400"}`}>
+                  {PRIORITY_LABEL[entry.old_value] ?? entry.old_value}
+                </span>
+                <svg className="w-3 h-3 text-slate-600" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
+                  <path strokeLinecap="round" strokeLinejoin="round" d="M9 5l7 7-7 7" />
+                </svg>
+              </>
+            )}
+            <span className={`text-xs font-medium ${PRIORITY_COLOR[entry.new_value] ?? "text-slate-400"}`}>
+              {PRIORITY_LABEL[entry.new_value] ?? entry.new_value}
+            </span>
+          </div>
+        )}
+
+        {/* Categoria: de → para */}
+        {entry.field === "category" && entry.new_value && (
+          <div className="flex items-center gap-1.5 mt-1">
+            {entry.old_value && (
+              <>
+                <span className="text-xs text-slate-500">{CATEGORY_LABEL[entry.old_value] ?? entry.old_value}</span>
+                <svg className="w-3 h-3 text-slate-600" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
+                  <path strokeLinecap="round" strokeLinejoin="round" d="M9 5l7 7-7 7" />
+                </svg>
+              </>
+            )}
+            <span className="text-xs text-slate-300">{CATEGORY_LABEL[entry.new_value] ?? entry.new_value}</span>
+          </div>
+        )}
+
+        {/* Comentário geral (status manual com observação, resolução, etc.) */}
+        {entry.comment && entry.field !== "assignee_id" && (
           <p className="mt-1.5 text-xs text-slate-400 italic bg-background-elevated/60 rounded-lg px-3 py-2 border border-border/30">
             "{entry.comment}"
           </p>
@@ -844,42 +913,6 @@ export default function TicketDetailPage() {
           {/* ── TAB: Conversa ───────────────────────────────── */}
           {activeTab === "conversa" && (
             <div className="flex flex-col gap-4 h-full">
-              {/* Client observation */}
-              {(ticket.client_observation || user?.role === "client") && (
-                <div className="shrink-0 rounded-xl border border-border/40 bg-background-surface">
-                  <div className="flex items-center justify-between border-b border-border/40 px-5 py-3.5">
-                    <div className="flex items-center gap-2">
-                      <span className="text-slate-500">{IC.User}</span>
-                      <h2 className="text-sm font-semibold text-slate-200">Observações do solicitante</h2>
-                    </div>
-                    {user?.role === "client" && !isClosed && !obsEdit && (
-                      <button
-                        onClick={() => setObsEdit(true)}
-                        className="flex items-center gap-1 text-xs font-medium text-primary hover:text-primary/80 transition-colors cursor-pointer"
-                      >
-                        {IC.Edit}
-                        {ticket.client_observation ? "Editar" : "Adicionar"}
-                      </button>
-                    )}
-                  </div>
-                  <div className="px-5 py-4">
-                    {obsEdit ? (
-                      <div className="space-y-3">
-                        <Textarea rows={4} placeholder="Informações adicionais…" value={obsValue} onChange={(e) => setObsValue(e.target.value)} />
-                        <div className="flex justify-end gap-2">
-                          <Button variant="secondary" size="sm" onClick={() => { setObsEdit(false); setObsValue(ticket.client_observation ?? ""); }} disabled={obsSaving}>Cancelar</Button>
-                          <Button size="sm" onClick={handleSaveObs} loading={obsSaving}>Salvar</Button>
-                        </div>
-                      </div>
-                    ) : ticket.client_observation ? (
-                      <p className="text-sm leading-relaxed text-slate-300 whitespace-pre-wrap">{ticket.client_observation}</p>
-                    ) : (
-                      <p className="text-xs italic text-slate-500">Nenhuma observação registrada.</p>
-                    )}
-                  </div>
-                </div>
-              )}
-
               {/* Resolution note */}
               {ticket.resolution_note && (
                 <div className="shrink-0 rounded-xl border border-emerald-700/30 bg-emerald-950/20">
@@ -921,13 +954,51 @@ export default function TicketDetailPage() {
 
           {/* ── TAB: Detalhes ────────────────────────────────── */}
           {activeTab === "detalhes" && (
-            <div className="rounded-xl border border-border/40 bg-background-surface">
-              <div className="border-b border-border/40 px-5 py-3.5">
-                <h2 className="text-sm font-semibold text-slate-200">Descrição completa</h2>
+            <div className="flex flex-col gap-4">
+              <div className="rounded-xl border border-border/40 bg-background-surface">
+                <div className="border-b border-border/40 px-5 py-3.5">
+                  <h2 className="text-sm font-semibold text-slate-200">Descrição completa</h2>
+                </div>
+                <div className="px-5 py-4">
+                  <p className="text-sm leading-relaxed text-slate-300 whitespace-pre-wrap">{ticket.description}</p>
+                </div>
               </div>
-              <div className="px-5 py-4">
-                <p className="text-sm leading-relaxed text-slate-300 whitespace-pre-wrap">{ticket.description}</p>
-              </div>
+
+              {/* Observações do solicitante */}
+              {(ticket.client_observation || user?.role === "client") && (
+                <div className="rounded-xl border border-border/40 bg-background-surface">
+                  <div className="flex items-center justify-between border-b border-border/40 px-5 py-3.5">
+                    <div className="flex items-center gap-2">
+                      <span className="text-slate-500">{IC.User}</span>
+                      <h2 className="text-sm font-semibold text-slate-200">Observações do solicitante</h2>
+                    </div>
+                    {user?.role === "client" && !isClosed && !obsEdit && (
+                      <button
+                        onClick={() => setObsEdit(true)}
+                        className="flex items-center gap-1 text-xs font-medium text-primary hover:text-primary/80 transition-colors cursor-pointer"
+                      >
+                        {IC.Edit}
+                        {ticket.client_observation ? "Editar" : "Adicionar"}
+                      </button>
+                    )}
+                  </div>
+                  <div className="px-5 py-4">
+                    {obsEdit ? (
+                      <div className="space-y-3">
+                        <Textarea rows={4} placeholder="Informações adicionais…" value={obsValue} onChange={(e) => setObsValue(e.target.value)} />
+                        <div className="flex justify-end gap-2">
+                          <Button variant="secondary" size="sm" onClick={() => { setObsEdit(false); setObsValue(ticket.client_observation ?? ""); }} disabled={obsSaving}>Cancelar</Button>
+                          <Button size="sm" onClick={handleSaveObs} loading={obsSaving}>Salvar</Button>
+                        </div>
+                      </div>
+                    ) : ticket.client_observation ? (
+                      <p className="text-sm leading-relaxed text-slate-300 whitespace-pre-wrap">{ticket.client_observation}</p>
+                    ) : (
+                      <p className="text-xs italic text-slate-500">Nenhuma observação registrada.</p>
+                    )}
+                  </div>
+                </div>
+              )}
             </div>
           )}
 

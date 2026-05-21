@@ -94,6 +94,7 @@ class TicketHistoryResponse(AppBaseModel):
     id: uuid.UUID
     ticket_id: uuid.UUID
     user_id: uuid.UUID
+    user_name: str | None = None
     field: str
     old_value: str | None
     new_value: str | None
