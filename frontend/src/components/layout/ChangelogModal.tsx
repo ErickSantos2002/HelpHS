@@ -51,7 +51,7 @@ export function ChangelogModal({ open, onClose }: ChangelogModalProps) {
               <div className="flex items-center gap-2 mb-3">
                 <span className={cn(
                   "rounded-full px-2.5 py-0.5 text-xs font-bold",
-                  isCurrent ? "bg-emerald-500 text-white" : "bg-slate-700 text-slate-300",
+                  isCurrent ? "bg-emerald-500 text-white" : "bg-slate-200 text-slate-600 dark:bg-slate-700 dark:text-slate-300",
                 )}>
                   {v.version}
                 </span>

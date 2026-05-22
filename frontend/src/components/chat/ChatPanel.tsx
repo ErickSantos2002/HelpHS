@@ -167,6 +167,14 @@ export function ChatPanel({
     bottomRef.current?.scrollIntoView({ behavior: "smooth" });
   }, [messages]);
 
+  // Auto-resize textarea as content grows (max ~8 lines)
+  useEffect(() => {
+    const el = inputRef.current;
+    if (!el) return;
+    el.style.height = "auto";
+    el.style.height = Math.min(el.scrollHeight, 200) + "px";
+  }, [input]);
+
   // Load initial history via REST
   useEffect(() => {
     getChatMessages(ticketId, { limit: 100 })
@@ -293,7 +301,7 @@ export function ChatPanel({
   }
 
   return (
-    <div className="rounded-xl bg-background-surface border border-border flex flex-col h-full">
+    <div className="rounded-xl bg-background-surface border border-border flex flex-col lg:h-full">
       {/* Header */}
       <div className="flex items-center justify-between px-4 py-3 border-b border-border shrink-0">
         <h2 className="text-sm font-semibold text-slate-300">Chat</h2>
@@ -406,7 +414,7 @@ export function ChatPanel({
       )}
 
       {/* Message list */}
-      <div className="flex-1 overflow-y-auto px-4 py-3 space-y-0">
+      <div className="h-[320px] overflow-y-auto lg:h-auto lg:flex-1 lg:overflow-y-auto px-4 py-3 space-y-0">
         {loadError && (
           <p className="text-xs text-danger text-center py-4">
             Não foi possível carregar o histórico.
@@ -517,7 +525,7 @@ export function ChatPanel({
                   "flex-1 resize-none rounded-lg border bg-background-elevated px-3 py-2 text-sm text-slate-100",
                   "placeholder:text-slate-500 focus:outline-none focus:ring-2 focus:ring-primary focus:border-transparent",
                   "border-border hover:border-slate-500 transition-colors leading-relaxed",
-                  "max-h-28 overflow-y-auto",
+                  "overflow-hidden",
                 )}
                 placeholder="Escreva uma mensagem… (Enter para enviar)"
                 value={input}

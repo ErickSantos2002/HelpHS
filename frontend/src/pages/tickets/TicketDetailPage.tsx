@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useRef, useState } from "react";
+import React, { useCallback, useEffect, useRef, useState } from "react";
 import { toast } from "sonner";
 import { getApiError } from "../../lib/apiError";
 import { useNavigate, useParams } from "react-router-dom";
@@ -411,7 +411,7 @@ function AttachmentItem({
 
 // ── Sidebar prop row ──────────────────────────────────────────
 
-function PropRow({ icon, label, children }: { icon: JSX.Element; label: string; children: React.ReactNode }) {
+function PropRow({ icon, label, children }: { icon: React.JSX.Element; label: string; children: React.ReactNode }) {
   return (
     <div className="flex items-start gap-3 py-2.5 border-b border-border/30 last:border-0">
       <span className="mt-0.5 shrink-0 text-slate-500">{icon}</span>
@@ -423,19 +423,6 @@ function PropRow({ icon, label, children }: { icon: JSX.Element; label: string; 
   );
 }
 
-// ── Section header ────────────────────────────────────────────
-
-function SectionHeader({ icon, title, action }: { icon: JSX.Element; title: string; action?: JSX.Element }) {
-  return (
-    <div className="flex items-center justify-between mb-4">
-      <h2 className="flex items-center gap-2 text-sm font-semibold text-slate-200">
-        <span className="text-slate-500">{icon}</span>
-        {title}
-      </h2>
-      {action}
-    </div>
-  );
-}
 
 // ── Collapsible sidebar section ──────────────────────────────
 
@@ -448,8 +435,8 @@ function SidebarSection({
   children,
 }: {
   title: string;
-  icon?: JSX.Element;
-  action?: JSX.Element;
+  icon?: React.JSX.Element;
+  action?: React.JSX.Element;
   accent?: "amber";
   defaultOpen?: boolean;
   children: React.ReactNode;
@@ -493,7 +480,7 @@ function SidebarAction({
   onClick,
   variant = "default",
 }: {
-  icon: JSX.Element;
+  icon: React.JSX.Element;
   label: string;
   onClick: () => void;
   variant?: "primary" | "default" | "ghost";
@@ -625,7 +612,7 @@ function SurveyPanel({ ticketId }: { ticketId: string }) {
 
 type Tab = "conversa" | "kb" | "detalhes" | "historico" | "anexos";
 
-const TAB_ICONS: Record<string, JSX.Element> = {
+const TAB_ICONS: Record<string, React.JSX.Element> = {
   conversa: (
     <svg className="w-4 h-4 shrink-0" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
       <path strokeLinecap="round" strokeLinejoin="round" d="M8 10h.01M12 10h.01M16 10h.01M9 16H5a2 2 0 01-2-2V6a2 2 0 012-2h14a2 2 0 012 2v8a2 2 0 01-2 2h-5l-5 5v-5z" />
@@ -983,7 +970,7 @@ export default function TicketDetailPage() {
               )}
 
               {/* Chat — cresce para preencher o espaço disponível */}
-              <div className="min-h-[420px] lg:flex-1 lg:min-h-0">
+              <div className="lg:flex-1 lg:min-h-0">
                 <ChatPanel
                   ticketId={ticket.id}
                   currentUserId={user?.id ?? ""}
@@ -1333,7 +1320,7 @@ export default function TicketDetailPage() {
             <p className="text-sm text-amber-200/80 whitespace-pre-wrap leading-relaxed min-h-[80px]">{viewNote.content}</p>
             <ModalFooter>
               <Button
-                variant="outline"
+                variant="ghost"
                 size="sm"
                 className="text-red-500 hover:bg-red-900/20"
                 loading={noteDeleting === viewNote.id}
