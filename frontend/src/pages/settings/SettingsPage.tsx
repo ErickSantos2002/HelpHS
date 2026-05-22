@@ -121,7 +121,7 @@ function TagsSection({
   const [error, setError] = useState<string | null>(null);
   const [page, setPage] = useState(1);
   const [newName, setNewName] = useState("");
-  const [newColor, setNewColor] = useState(PRESET_COLORS[0]);
+  const [newColor, setNewColor] = useState(PRESET_COLORS[0].hex);
   const [createLoading, setCreateLoading] = useState(false);
   const [createError, setCreateError] = useState<string | null>(null);
 
@@ -152,7 +152,7 @@ function TagsSection({
       );
       onCreateClose();
       setNewName("");
-      setNewColor(PRESET_COLORS[0]);
+      setNewColor(PRESET_COLORS[0].hex);
     } catch (err: unknown) {
       setCreateError(
         (err as { response?: { status?: number } })?.response?.status === 409
@@ -313,7 +313,7 @@ function TagsSection({
           </div>
         </div>
         <ModalFooter>
-          <Button variant="outline" onClick={onCreateClose} disabled={createLoading}>
+          <Button variant="ghost" onClick={onCreateClose} disabled={createLoading}>
             Cancelar
           </Button>
           <Button onClick={handleCreate} loading={createLoading} disabled={!newName.trim()}>
@@ -358,7 +358,7 @@ function TagsSection({
           </div>
         </div>
         <ModalFooter>
-          <Button variant="outline" onClick={() => setEditTag(null)} disabled={editLoading}>
+          <Button variant="ghost" onClick={() => setEditTag(null)} disabled={editLoading}>
             Cancelar
           </Button>
           <Button onClick={handleEdit} loading={editLoading} disabled={!editName.trim()}>
@@ -403,7 +403,7 @@ function TagsSection({
           </p>
         </div>
         <ModalFooter>
-          <Button variant="outline" onClick={() => setDeleteTarget(null)} disabled={deleteLoading}>
+          <Button variant="ghost" onClick={() => setDeleteTarget(null)} disabled={deleteLoading}>
             Cancelar
           </Button>
           <Button variant="danger" onClick={handleDelete} loading={deleteLoading}>

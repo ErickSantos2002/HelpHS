@@ -1,3 +1,4 @@
+import React from "react";
 import { marked } from "marked";
 import { useEffect, useRef, useState } from "react";
 import { useNavigate, useParams } from "react-router-dom";
@@ -65,7 +66,7 @@ function MarkdownContent({ content }: { content: string }) {
 
 // ── Comment form ──────────────────────────────────────────────
 
-function CommentForm({ onSubmit, placeholder = "Deixe um comentário…", autoFocus = false, onCancel, submitLabel = "Comentar" }: {
+function CommentForm({ onSubmit, placeholder = "Deixe um comentário…", autoFocus = false, onCancel }: {
   onSubmit: (content: string) => Promise<void>;
   placeholder?: string; autoFocus?: boolean;
   onCancel?: () => void; submitLabel?: string;
@@ -197,7 +198,7 @@ function CommentItem({ comment, currentUserId, isStaff, onReply, onDelete }: {
 
 // ── Sidebar prop row ──────────────────────────────────────────
 
-function PropRow({ icon, label, children }: { icon: JSX.Element; label: string; children: React.ReactNode }) {
+function PropRow({ icon, label, children }: { icon: React.JSX.Element; label: string; children: React.ReactNode }) {
   return (
     <div className="flex items-start gap-3 py-2.5 border-b border-border/30 last:border-0">
       <span className="mt-0.5 shrink-0 text-slate-500">{icon}</span>

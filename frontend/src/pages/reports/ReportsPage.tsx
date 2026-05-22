@@ -414,7 +414,7 @@ function OldestOpenTable({ tickets }: { tickets: OldestTicketItem[] }) {
 
 // ── Global report (admin) ─────────────────────────────────────
 
-function GlobalReport({ data, period }: { data: ReportData; period: number }) {
+function GlobalReport({ data }: { data: ReportData; period?: number }) {
   const { theme } = useTheme();
   const totalCsat = data.csat_distribution.reduce((s, d) => s + d.count, 0);
   const criticalSla = data.sla_compliance.find((s) => s.priority === "critical")?.compliance_rate ?? 100;
@@ -528,7 +528,7 @@ function GlobalReport({ data, period }: { data: ReportData; period: number }) {
                 cursor={{ fill: gridColor }}
                 wrapperStyle={tooltipWrapperStyle}
                 content={({ active, payload, label }) => (
-                  <BarTooltip active={active} payload={payload as { value: number }[]} label={String(label ?? "")}
+                  <BarTooltip active={active} payload={payload as unknown as { value: number }[]} label={String(label ?? "")}
                     labelFn={(v) => CATEGORY_LABELS[v] ?? v}
                     valueFn={(v) => String(v ?? 0)}
                     valueLabel="Tickets" />
@@ -550,7 +550,7 @@ function GlobalReport({ data, period }: { data: ReportData; period: number }) {
                 cursor={{ fill: gridColor }}
                 wrapperStyle={tooltipWrapperStyle}
                 content={({ active, payload, label }) => (
-                  <BarTooltip active={active} payload={payload as { value: number }[]} label={String(label ?? "")}
+                  <BarTooltip active={active} payload={payload as unknown as { value: number }[]} label={String(label ?? "")}
                     labelFn={(v) => PRIORITY_LABELS[v] ?? v}
                     valueFn={(v) => `${v ?? 0}%`}
                     valueLabel="Conformidade" />
@@ -575,7 +575,7 @@ function GlobalReport({ data, period }: { data: ReportData; period: number }) {
                 cursor={{ fill: gridColor }}
                 wrapperStyle={tooltipWrapperStyle}
                 content={({ active, payload, label }) => (
-                  <BarTooltip active={active} payload={payload as { value: number }[]} label={String(label ?? "")}
+                  <BarTooltip active={active} payload={payload as unknown as { value: number }[]} label={String(label ?? "")}
                     labelFn={(v) => { const n = Number(v ?? 0); return `${n} estrela${n !== 1 ? "s" : ""}`; }}
                     valueFn={(v) => String(v ?? 0)}
                     valueLabel="Avaliações" />
@@ -647,8 +647,8 @@ function GlobalReport({ data, period }: { data: ReportData; period: number }) {
                 label={{ value: "Meta 4.0", fill: "#10b981", fontSize: 10, position: "insideTopRight" }} />
               <Tooltip contentStyle={tooltipStyle} wrapperStyle={tooltipWrapperStyle}
                 labelFormatter={(v) => `Data: ${v}`}
-                formatter={(v: number, _: string, props: { payload: CsatDailyItem }) => [
-                  v != null ? `${Number(v).toFixed(2)} ★ (${props.payload.count} avaliações)` : "—",
+                formatter={(v, _, props: { payload?: CsatDailyItem }) => [
+                  v != null ? `${Number(v).toFixed(2)} ★ (${props.payload?.count ?? 0} avaliações)` : "—",
                   "CSAT",
                 ]} />
               <Area type="monotone" dataKey="avg_rating" stroke="#f59e0b" strokeWidth={2}

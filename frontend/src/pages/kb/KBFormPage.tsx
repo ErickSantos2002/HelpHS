@@ -2,7 +2,7 @@ import { marked } from "marked";
 import { useEffect, useState } from "react";
 import { useNavigate, useParams } from "react-router-dom";
 import { toast } from "sonner";
-import { Alert, Button, Input, Spinner, Textarea } from "../../components/ui";
+import { Button, Input, Spinner, Textarea } from "../../components/ui";
 import { getApiError } from "../../lib/apiError";
 import { useAuth } from "../../contexts/AuthContext";
 import {

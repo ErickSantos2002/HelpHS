@@ -322,7 +322,7 @@ export default function KBListPage() {
           </p>
         </div>
         <ModalFooter>
-          <Button variant="outline" onClick={() => setDeleteTarget(null)} disabled={deleteLoading}>
+          <Button variant="ghost" onClick={() => setDeleteTarget(null)} disabled={deleteLoading}>
             Cancelar
           </Button>
           <Button variant="danger" onClick={handleDelete} loading={deleteLoading}>

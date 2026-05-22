@@ -17,6 +17,7 @@ export interface MeResponse {
   name: string;
   email: string;
   role: AuthUser["role"];
+  avatar_url?: string | null;
   onboarding_completed: boolean;
 }
 

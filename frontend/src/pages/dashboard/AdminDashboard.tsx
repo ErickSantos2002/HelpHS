@@ -1,5 +1,4 @@
 import { useEffect, useState } from "react";
-import { useNavigate } from "react-router-dom";
 import {
   Area, AreaChart, Bar, BarChart, Cell,
   Pie, PieChart, ResponsiveContainer, Tooltip, XAxis, YAxis,
@@ -163,7 +162,6 @@ function SectionCard({ title, action, children }: { title: string; action?: Reac
 // ── AdminDashboard ────────────────────────────────────────────
 
 export default function AdminDashboard() {
-  const navigate = useNavigate();
   const { theme } = useTheme();
 
   // Period state
@@ -189,7 +187,7 @@ export default function AdminDashboard() {
     setLoading(true);
     Promise.all([
       getDashboardStats(),
-      getReports(activePeriod),
+      getReports({ period: activePeriod }),
       getTechnicianListReport(activePeriod),
     ])
       .then(([s, r, tl]) => { setStats(s); setReport(r); setTechList(tl); setTechDetail(null); })
@@ -444,7 +442,7 @@ export default function AdminDashboard() {
                   </defs>
                   <XAxis dataKey="date" tickFormatter={fmtDate} tick={{ fill: axisColor, fontSize: 11 }} axisLine={false} tickLine={false} interval="preserveStartEnd" />
                   <YAxis tick={{ fill: axisColor, fontSize: 11 }} axisLine={false} tickLine={false} allowDecimals={false} />
-                  <Tooltip contentStyle={tooltipStyle} wrapperStyle={tooltipWrapper} labelFormatter={(v) => fmtDate(String(v))} formatter={(v: number) => [v, "Tickets"]} />
+                  <Tooltip contentStyle={tooltipStyle} wrapperStyle={tooltipWrapper} labelFormatter={(v) => fmtDate(String(v))} formatter={(v) => [v, "Tickets"]} />
                   <Area type="monotone" dataKey="count" stroke="#0ea5e9" strokeWidth={2.5} fill="url(#aGrad)" dot={false} activeDot={{ r: 4, fill: "#0ea5e9", strokeWidth: 0 }} />
                 </AreaChart>
               </ResponsiveContainer>

@@ -6,7 +6,6 @@ import { toast } from "sonner";
 import { getApiError } from "../../lib/apiError";
 import { cn } from "../../lib/utils";
 import {
-  Alert,
   Button,
   Input,
   Modal,
@@ -46,7 +45,7 @@ import {
   type CompanyNote,
 } from "../../services/groupService";
 
-// â”€â”€ Icons â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
+// â"€â"€ Icons â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€
 
 function IconPlus() {
   return (
@@ -112,7 +111,7 @@ function IconUsers() {
   );
 }
 
-// â”€â”€ Form schemas â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
+// â"€â"€ Form schemas â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€
 
 const groupSchema = z.object({
   name: z.string().min(1, "Nome obrigatÃ³rio").max(255),
@@ -131,7 +130,7 @@ const companySchema = z.object({
 });
 type CompanyFormValues = z.infer<typeof companySchema>;
 
-// â”€â”€ Group modal â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
+// â"€â"€ Group modal â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€
 
 function GroupModal({
   initial,
@@ -155,7 +154,7 @@ function GroupModal({
         <Input label="Nome" {...register("name")} error={errors.name?.message} />
         <Textarea label="DescriÃ§Ã£o" {...register("description")} rows={3} />
         <ModalFooter>
-          <Button variant="outline" type="button" onClick={onClose}>Cancelar</Button>
+          <Button variant="ghost" type="button" onClick={onClose}>Cancelar</Button>
           <Button type="submit" loading={isSubmitting}>{initial ? "Salvar" : "Criar Grupo"}</Button>
         </ModalFooter>
       </form>
@@ -163,7 +162,7 @@ function GroupModal({
   );
 }
 
-// â”€â”€ Add company modal (suggestions + manual) â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
+// â"€â"€ Add company modal (suggestions + manual) â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€
 
 const SUGG_PAGE_SIZE = 5;
 
@@ -272,7 +271,7 @@ function AddCompanyModal({
                 ? "Nenhum cliente com empresa cadastrada ainda."
                 : "Nenhuma empresa encontrada."}
               <div className="mt-3">
-                <Button size="sm" variant="outline" onClick={() => setTab("manual")}>
+                <Button size="sm" variant="ghost" onClick={() => setTab("manual")}>
                   Cadastrar nova empresa
                 </Button>
               </div>
@@ -291,7 +290,7 @@ function AddCompanyModal({
                       </div>
                     </div>
                     <div className="flex gap-2 shrink-0 justify-end">
-                      <Button size="sm" variant="outline" onClick={() => prefillManual(s)} title="Editar antes de adicionar">
+                      <Button size="sm" variant="ghost" onClick={() => prefillManual(s)} title="Editar antes de adicionar">
                         <IconEdit />
                       </Button>
                       <Button size="sm" loading={adding === s.company_name} onClick={() => handleAddFromSuggestion(s)}>
@@ -327,7 +326,7 @@ function AddCompanyModal({
           </div>
           <Textarea label="Notas internas" {...register("notes")} rows={2} />
           <ModalFooter>
-            <Button variant="outline" type="button" onClick={onClose}>Cancelar</Button>
+            <Button variant="ghost" type="button" onClick={onClose}>Cancelar</Button>
             <Button type="submit" loading={isSubmitting}>Criar Empresa</Button>
           </ModalFooter>
         </form>
@@ -336,7 +335,7 @@ function AddCompanyModal({
   );
 }
 
-// â”€â”€ Edit company modal â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
+// â"€â"€ Edit company modal â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€
 
 function EditCompanyModal({
   groupId,
@@ -371,7 +370,7 @@ function EditCompanyModal({
         </div>
         <Textarea label="Notas internas" {...register("notes")} rows={2} />
         <ModalFooter>
-          <Button variant="outline" type="button" onClick={onClose}>Cancelar</Button>
+          <Button variant="ghost" type="button" onClick={onClose}>Cancelar</Button>
           <Button type="submit" loading={isSubmitting}>Salvar</Button>
         </ModalFooter>
       </form>
@@ -379,7 +378,7 @@ function EditCompanyModal({
   );
 }
 
-// â”€â”€ Assign client modal â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
+// â"€â"€ Assign client modal â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€
 
 const ASSIGN_PAGE_SIZE = 5;
 
@@ -428,7 +427,7 @@ function AssignClientModal({
                       <p className="text-sm font-medium text-slate-100 truncate">{c.name}</p>
                       <p className="text-xs text-slate-500 truncate">{c.email}</p>
                     </div>
-                    <Button size="sm" variant="outline" loading={assigning === c.id} onClick={() => handleAssign(c.id)}>Vincular</Button>
+                    <Button size="sm" variant="ghost" loading={assigning === c.id} onClick={() => handleAssign(c.id)}>Vincular</Button>
                   </li>
                 ))}
               </ul>
@@ -441,13 +440,13 @@ function AssignClientModal({
               />
             </div>
           )}
-        <ModalFooter><Button variant="outline" onClick={onClose}>Fechar</Button></ModalFooter>
+        <ModalFooter><Button variant="ghost" onClick={onClose}>Fechar</Button></ModalFooter>
       </div>
     </Modal>
   );
 }
 
-// â”€â”€ Client notes modal â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
+// â"€â"€ Client notes modal â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€
 
 function ClientNotesModal({
   groupId, companyId, client, onSaved, onClose,
@@ -458,15 +457,15 @@ function ClientNotesModal({
   const handleSave = async () => {
     setSaving(true);
     try { const u = await updateClientNotes(groupId, companyId, client.id, notes || null); onSaved(u); onClose(); }
-    catch (err) { toast.error(getApiError(err, “Erro ao salvar notas.”)); }
+    catch (err) { toast.error(getApiError(err, "Erro ao salvar notas.")); }
     finally { setSaving(false); }
   };
   return (
-    <Modal open onClose={onClose} title={`Notas â€” ${client.name}`}>
-      <div className=”space-y-3”>
+    <Modal open onClose={onClose} title={`Notas â€" ${client.name}`}>
+      <div className="space-y-3">
         <Textarea label="Notas internas" value={notes} onChange={(e) => setNotes(e.target.value)} rows={5} placeholder="InformaÃ§Ãµes relevantes, histÃ³rico..." />
         <ModalFooter>
-          <Button variant="outline" onClick={onClose}>Cancelar</Button>
+          <Button variant="ghost" onClick={onClose}>Cancelar</Button>
           <Button onClick={handleSave} loading={saving}>Salvar</Button>
         </ModalFooter>
       </div>
@@ -474,7 +473,7 @@ function ClientNotesModal({
   );
 }
 
-// â”€â”€ Company detail modal â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
+// â"€â"€ Company detail modal â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€
 
 const CLIENTS_PAGE_SIZE = 5;
 
@@ -639,7 +638,7 @@ function CompanyDetailModal({
                 <>
                   <div className="flex items-center justify-between mb-3">
                     <p className="text-sm font-semibold text-amber-600 dark:text-amber-400/80">Notas da empresa</p>
-                    <Button size="sm" variant="outline" onClick={() => setShowAddCompanyNote(true)}>
+                    <Button size="sm" variant="ghost" onClick={() => setShowAddCompanyNote(true)}>
                       <IconPlus />Adicionar nota
                     </Button>
                   </div>
@@ -648,7 +647,7 @@ function CompanyDetailModal({
                     <div className="flex-1 flex flex-col items-center justify-center text-center py-8 rounded-lg border border-dashed border-amber-200 dark:border-amber-800/30 text-sm text-amber-600/70 dark:text-amber-700/50">
                       Nenhuma nota ainda.
                       <div className="mt-2">
-                        <Button size="sm" variant="outline" onClick={() => setShowAddCompanyNote(true)}>
+                        <Button size="sm" variant="ghost" onClick={() => setShowAddCompanyNote(true)}>
                           <IconPlus />Adicionar nota
                         </Button>
                       </div>
@@ -685,7 +684,7 @@ function CompanyDetailModal({
               )}
 
               <ModalFooter>
-                <Button variant="outline" onClick={() => setShowEdit(true)}><IconEdit />Editar empresa</Button>
+                <Button variant="ghost" onClick={() => setShowEdit(true)}><IconEdit />Editar empresa</Button>
                 <Button onClick={onClose}>Fechar</Button>
               </ModalFooter>
             </>
@@ -727,12 +726,12 @@ function CompanyDetailModal({
         <div className="space-y-4">
           <Textarea
             rows={5}
-            placeholder="Escreva a nota aquiâ€¦"
+            placeholder="Escreva a nota aqui..."
             value={newCompanyNoteContent}
             onChange={(e) => setNewCompanyNoteContent(e.target.value)}
           />
           <ModalFooter>
-            <Button variant="outline" onClick={() => { setShowAddCompanyNote(false); setNewCompanyNoteContent(""); }}>Cancelar</Button>
+            <Button variant="ghost" onClick={() => { setShowAddCompanyNote(false); setNewCompanyNoteContent(""); }}>Cancelar</Button>
             <Button onClick={handleAddCompanyNote} loading={companyNoteSaving} disabled={!newCompanyNoteContent.trim()}>Salvar</Button>
           </ModalFooter>
         </div>
@@ -749,7 +748,7 @@ function CompanyDetailModal({
             <p className="text-sm text-slate-700 dark:text-amber-200/80 whitespace-pre-wrap leading-relaxed min-h-[80px]">{viewCompanyNote.content}</p>
             <ModalFooter>
               <Button
-                variant="outline"
+                variant="ghost"
                 size="sm"
                 className="text-red-500 hover:bg-red-900/20"
                 loading={companyNoteDeleting === viewCompanyNote.id}
@@ -766,7 +765,7 @@ function CompanyDetailModal({
   );
 }
 
-// â”€â”€ Group notes list (shared mobile/desktop) â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
+// â"€â"€ Group notes list (shared mobile/desktop) â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€
 
 function GroupNotesList({ notes, noteDeleting, onView, onDelete, onAdd }: {
   notes: GroupNote[];
@@ -813,7 +812,7 @@ function GroupNotesList({ notes, noteDeleting, onView, onDelete, onAdd }: {
   );
 }
 
-// â”€â”€ Main page â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
+// â"€â"€ Main page â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€
 
 export default function GroupsPage() {
   const [sidebarOpen, setSidebarOpen] = useState(true);
@@ -914,7 +913,7 @@ export default function GroupsPage() {
         />
       )}
 
-      {/* â”€â”€ Left: Groups list â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€ */}
+      {/* â"€â"€ Left: Groups list â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€ */}
       <aside className={cn(
         "shrink-0 flex flex-col w-64 border-r border-slate-200 dark:border-border bg-white dark:bg-background-surface overflow-hidden",
         "transition-transform duration-300 ease-in-out",
@@ -959,8 +958,6 @@ export default function GroupsPage() {
           </div>
         </div>
 
-        {error && <Alert variant="error" className="m-3">{error}</Alert>}
-
         <div className="flex-1 overflow-y-auto py-2">
           {loading ? (
             <div className="flex justify-center py-8"><Spinner /></div>
@@ -1002,10 +999,10 @@ export default function GroupsPage() {
         </div>
       </aside>
 
-      {/* â”€â”€ Center: Group detail + companies â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€ */}
+      {/* â"€â"€ Center: Group detail + companies â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€ */}
       <main className="flex-1 overflow-y-auto overflow-x-hidden p-4 sm:p-6 min-w-0">
 
-        {/* Mobile toggle â€” abrir sidebar */}
+        {/* Mobile toggle â€" abrir sidebar */}
         <button
           onClick={() => setSidebarOpen(true)}
           className={cn(
@@ -1040,8 +1037,8 @@ export default function GroupsPage() {
                 )}
               </div>
               <div className="flex gap-2 shrink-0">
-                <Button size="sm" variant="outline" onClick={() => setShowEditGroup(true)}><IconEdit />Editar</Button>
-                <Button size="sm" variant="outline" className="text-red-500 hover:bg-red-50 dark:hover:bg-red-900/20" onClick={handleDeleteGroup}><IconTrash /></Button>
+                <Button size="sm" variant="ghost" onClick={() => setShowEditGroup(true)}><IconEdit />Editar</Button>
+                <Button size="sm" variant="ghost" className="text-red-500 hover:bg-red-50 dark:hover:bg-red-900/20" onClick={handleDeleteGroup}><IconTrash /></Button>
               </div>
             </div>
 
@@ -1095,7 +1092,7 @@ export default function GroupsPage() {
               </div>
             )}
 
-            {/* â”€â”€ Notas â€” mobile only (below companies) â”€â”€ */}
+            {/* â"€â"€ Notas â€" mobile only (below companies) â"€â"€ */}
             <div className="mt-5 xl:hidden rounded-xl border border-amber-200/50 dark:border-amber-800/20 bg-white dark:bg-background-surface overflow-hidden">
               <div className="flex items-center justify-between px-4 py-3 border-b border-amber-200/50 dark:border-amber-800/20">
                 <p className="text-xs font-bold uppercase tracking-widest text-amber-600 dark:text-amber-500/80 flex items-center gap-1.5">
@@ -1122,7 +1119,7 @@ export default function GroupsPage() {
         )}
       </main>
 
-      {/* â”€â”€ Right: Notes panel â€” desktop only â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€ */}
+      {/* â"€â"€ Right: Notes panel â€" desktop only â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€ */}
       {selectedGroup && (
         <aside className="hidden xl:flex w-72 shrink-0 flex-col border-l border-slate-200 dark:border-border bg-white dark:bg-background-surface overflow-hidden">
           <div className="flex items-center justify-between px-4 py-4 border-b border-slate-200 dark:border-border">
@@ -1150,7 +1147,7 @@ export default function GroupsPage() {
         </aside>
       )}
 
-      {/* â”€â”€ Modals â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€ */}
+      {/* â"€â"€ Modals â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€ */}
       {showNewGroup && (
         <GroupModal
           onSave={async (v) => { const g = await createGroup(v); setGroups((p) => [...p, g]); }}
@@ -1193,12 +1190,12 @@ export default function GroupsPage() {
         <div className="space-y-4">
           <Textarea
             rows={5}
-            placeholder="Escreva a nota aquiâ€¦"
+            placeholder="Escreva a nota aqui..."
             value={newNoteContent}
             onChange={(e) => setNewNoteContent(e.target.value)}
           />
           <ModalFooter>
-            <Button variant="outline" onClick={() => { setShowAddNote(false); setNewNoteContent(""); }}>Cancelar</Button>
+            <Button variant="ghost" onClick={() => { setShowAddNote(false); setNewNoteContent(""); }}>Cancelar</Button>
             <Button onClick={handleAddNote} loading={noteSaving} disabled={!newNoteContent.trim()}>Salvar</Button>
           </ModalFooter>
         </div>
@@ -1215,7 +1212,7 @@ export default function GroupsPage() {
             <p className="text-sm text-slate-700 dark:text-amber-200/80 whitespace-pre-wrap leading-relaxed min-h-[80px]">{viewNote.content}</p>
             <ModalFooter>
               <Button
-                variant="outline"
+                variant="ghost"
                 size="sm"
                 className="text-red-500 hover:bg-red-900/20"
                 loading={noteDeleting === viewNote.id}

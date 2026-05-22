@@ -44,7 +44,7 @@ export function AuthProvider({ children }: { children: ReactNode }) {
           name: me.name,
           email: me.email,
           role: me.role,
-          avatar_url: me.avatar_url,
+          avatar_url: me.avatar_url ?? null,
           onboarding_completed: me.onboarding_completed,
         });
       } catch {
@@ -69,6 +69,7 @@ export function AuthProvider({ children }: { children: ReactNode }) {
       name: me.name,
       email: me.email,
       role: me.role,
+      avatar_url: me.avatar_url ?? null,
       onboarding_completed: me.onboarding_completed,
     });
   }, []);
