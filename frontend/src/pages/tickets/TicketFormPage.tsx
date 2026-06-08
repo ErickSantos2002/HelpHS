@@ -5,11 +5,10 @@ import { useNavigate, useParams } from "react-router-dom";
 import { z } from "zod";
 import { Alert, Button, FormDropdown, Input, Spinner, Textarea } from "../../components/ui";
 import {
-  getEquipments,
   getProducts,
-  type Equipment,
   type Product,
 } from "../../services/productService";
+import { getMyEquipment, type Equipment } from "../../services/equipmentService";
 import {
   createTicket,
   getTicket,
@@ -367,6 +366,7 @@ export default function TicketFormPage() {
   const [submitError, setSubmitError] = useState<string | null>(null);
 
   const [products, setProducts] = useState<Product[]>([]);
+  const [allMyEquipments, setAllMyEquipments] = useState<Equipment[]>([]);
   const [equipments, setEquipments] = useState<Equipment[]>([]);
   const [loadingProducts, setLoadingProducts] = useState(true);
   const [loadingTicket, setLoadingTicket] = useState(isEdit);
@@ -383,14 +383,20 @@ export default function TicketFormPage() {
   const currentValues = watch();
 
   useEffect(() => {
-    getProducts().then((res) => setProducts(res.items)).finally(() => setLoadingProducts(false));
+    Promise.all([
+      getProducts().then((res) => setProducts(res.items)),
+      getMyEquipment().then(setAllMyEquipments).catch(() => {}),
+    ]).finally(() => setLoadingProducts(false));
   }, []);
 
   useEffect(() => {
     setValue("equipment_id", "");
-    setEquipments([]);
-    if (selectedProductId) getEquipments(selectedProductId).then((res) => setEquipments(res.items));
-  }, [selectedProductId, setValue]);
+    if (selectedProductId) {
+      setEquipments(allMyEquipments.filter((e) => e.product_id === selectedProductId));
+    } else {
+      setEquipments([]);
+    }
+  }, [selectedProductId, allMyEquipments, setValue]);
 
   useEffect(() => {
     if (!isEdit || !id) return;
