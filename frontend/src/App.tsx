@@ -28,6 +28,7 @@ const KBArticlePage = lazy(() => import("./pages/kb/KBArticlePage"));
 const KBFormPage = lazy(() => import("./pages/kb/KBFormPage"));
 const ReportsPage = lazy(() => import("./pages/reports/ReportsPage"));
 const GroupsPage = lazy(() => import("./pages/groups/GroupsPage"));
+const CalendarPage = lazy(() => import("./pages/calendar/CalendarPage"));
 const ProfilePage = lazy(() => import("./pages/profile/ProfilePage"));
 const EquipmentPage = lazy(() => import("./pages/equipment/EquipmentPage"));
 const AuditLogsPage = lazy(() => import("./pages/audit/AuditLogsPage"));
@@ -83,6 +84,7 @@ function App() {
                 {/* Admin + Technician */}
                 <Route element={<RoleGuard roles={["admin", "technician"]} />}>
                   <Route path="/reports" element={<ReportsPage />} />
+                  <Route path="/agenda" element={<CalendarPage />} />
                 </Route>
 
                 {/* Admin + Technician */}

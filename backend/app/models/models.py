@@ -115,6 +115,14 @@ class KBArticleStatus(str, enum.Enum):
     archived = "archived"
 
 
+class CalendarEventType(str, enum.Enum):
+    event = "event"
+    meeting = "meeting"
+    training = "training"
+    deadline = "deadline"
+    holiday = "holiday"
+
+
 # ── MODELS ───────────────────────────────────────────────────
 
 
@@ -701,3 +709,30 @@ class Tag(Base):
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now())
 
     tickets: Mapped[list["Ticket"]] = relationship(secondary=ticket_tags, back_populates="tags")
+
+
+class CalendarEvent(Base):
+    """Eventos da agenda da equipe (admin + técnicos)"""
+
+    __tablename__ = "calendar_events"
+
+    id: Mapped[uuid.UUID] = mapped_column(UUID(as_uuid=True), primary_key=True, default=uuid.uuid4)
+    title: Mapped[str] = mapped_column(String(200), nullable=False)
+    description: Mapped[str | None] = mapped_column(Text)
+    event_type: Mapped[CalendarEventType] = mapped_column(
+        Enum(CalendarEventType), default=CalendarEventType.event, nullable=False
+    )
+    color: Mapped[str] = mapped_column(String(7), nullable=False, default="#6366f1")
+    start_date: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False, index=True)
+    end_date: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False)
+    created_by: Mapped[uuid.UUID | None] = mapped_column(
+        UUID(as_uuid=True), ForeignKey("users.id", ondelete="SET NULL"), nullable=True
+    )
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now())
+    updated_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), server_default=func.now(), onupdate=func.now()
+    )
+
+    creator: Mapped["User | None"] = relationship()
+
+    __table_args__ = (Index("ix_calendar_events_start_date", "start_date"),)

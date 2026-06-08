@@ -16,6 +16,7 @@ from app.routers import (
     attachments,
     audit,
     auth,
+    calendar,
     chat,
     dashboard,
     groups,
@@ -98,6 +99,7 @@ app.include_router(sla.router, prefix=settings.api_prefix)
 app.include_router(tags.router, prefix=settings.api_prefix)
 app.include_router(dashboard.router, prefix=settings.api_prefix)
 app.include_router(groups.router, prefix=settings.api_prefix)
+app.include_router(calendar.router, prefix=settings.api_prefix)
 
 
 @app.get("/health", tags=["Health"])
