@@ -56,9 +56,10 @@ function dateStr(d: Date) {
 function isEventOnDay(event: CalendarEvent, year: number, month: number, day: number): boolean {
   const start = new Date(event.start_date);
   const end = new Date(event.end_date);
-  const target = new Date(year, month, day);
-  const startDay = new Date(start.getFullYear(), start.getMonth(), start.getDate());
-  const endDay = new Date(end.getFullYear(), end.getMonth(), end.getDate());
+  // Use UTC to avoid timezone shift (event dates are stored as UTC midnight)
+  const target = Date.UTC(year, month, day);
+  const startDay = Date.UTC(start.getUTCFullYear(), start.getUTCMonth(), start.getUTCDate());
+  const endDay = Date.UTC(end.getUTCFullYear(), end.getUTCMonth(), end.getUTCDate());
   return target >= startDay && target <= endDay;
 }
 
@@ -423,23 +424,23 @@ function UpcomingList({ events }: { events: CalendarEvent[] }) {
   const now = new Date();
   const upcoming = events
     .filter((e) => new Date(e.end_date) >= now)
-    .slice(0, 6);
+    .slice(0, 4);
 
   if (upcoming.length === 0) {
     return <p className="text-xs text-slate-500 py-2">Nenhum evento próximo.</p>;
   }
 
   return (
-    <div className="space-y-2">
+    <div className="space-y-2 max-h-[168px] overflow-y-auto pr-0.5">
       {upcoming.map((e) => (
         <div key={e.id} className="flex items-start gap-2.5 rounded-lg bg-background-elevated/40 px-3 py-2">
           <div className="mt-1 h-2.5 w-2.5 shrink-0 rounded-full" style={{ backgroundColor: e.color }} />
           <div className="min-w-0 flex-1">
             <p className="text-xs font-medium text-slate-200 truncate">{e.title}</p>
             <p className="text-[10px] text-slate-500 mt-0.5">
-              {new Date(e.start_date).toLocaleDateString("pt-BR", { day: "2-digit", month: "short" })}
+              {new Date(e.start_date).toLocaleDateString("pt-BR", { day: "2-digit", month: "short", timeZone: "UTC" })}
               {e.start_date.slice(0, 10) !== e.end_date.slice(0, 10) && (
-                <> → {new Date(e.end_date).toLocaleDateString("pt-BR", { day: "2-digit", month: "short" })}</>
+                <> → {new Date(e.end_date).toLocaleDateString("pt-BR", { day: "2-digit", month: "short", timeZone: "UTC" })}</>
               )}
             </p>
           </div>
@@ -653,8 +654,8 @@ export default function CalendarPage() {
                   const s = new Date(e.start_date);
                   const en = new Date(e.end_date);
                   return (
-                    (s.getFullYear() === year && s.getMonth() === i) ||
-                    (en.getFullYear() === year && en.getMonth() === i)
+                    (s.getUTCFullYear() === year && s.getUTCMonth() === i) ||
+                    (en.getUTCFullYear() === year && en.getUTCMonth() === i)
                   );
                 });
                 const isCurrent = i === month;
@@ -683,12 +684,26 @@ export default function CalendarPage() {
             </div>
           </div>
 
-          {/* Manage events — só para admin/technician */}
-          {canEdit && events.length > 0 && (
+          {/* Manage events — só para admin/technician, filtrado pelo mês visível */}
+          {canEdit && (() => {
+            const monthEvents = events.filter((e) => {
+              const s = new Date(e.start_date);
+              const en = new Date(e.end_date);
+              const monthStart = Date.UTC(year, month, 1);
+              const monthEnd = Date.UTC(year, month + 1, 1) - 1;
+              return (
+                Date.UTC(s.getUTCFullYear(), s.getUTCMonth(), s.getUTCDate()) <= monthEnd &&
+                Date.UTC(en.getUTCFullYear(), en.getUTCMonth(), en.getUTCDate()) >= monthStart
+              );
+            });
+            if (monthEvents.length === 0) return null;
+            return (
             <div className="rounded-xl border border-border bg-background-surface p-4 space-y-3">
-              <h3 className="text-sm font-semibold text-slate-200">Gerenciar eventos</h3>
-              <div className="space-y-1.5 max-h-64 overflow-y-auto">
-                {events.slice(0, 10).map((e) => (
+              <h3 className="text-sm font-semibold text-slate-200">
+                Gerenciar eventos — {MONTHS_SHORT[month]}
+              </h3>
+              <div className="space-y-1.5 max-h-[168px] overflow-y-auto pr-0.5">
+                {monthEvents.slice(0, 4).map((e) => (
                   <div key={e.id} className="flex items-center gap-2 rounded-lg bg-background-elevated/30 px-2.5 py-1.5">
                     <div className="h-2 w-2 shrink-0 rounded-full" style={{ backgroundColor: e.color }} />
                     <span className="flex-1 text-xs text-slate-300 truncate">{e.title}</span>
@@ -710,7 +725,8 @@ export default function CalendarPage() {
                 ))}
               </div>
             </div>
-          )}
+            );
+          })()}
         </div>
       </div>
     </div>
