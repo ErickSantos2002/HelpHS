@@ -145,7 +145,7 @@ async def list_surveys(
     _actor: Annotated[User, Depends(authorize(UserRole.admin, UserRole.technician))],
     offset: int = Query(default=0, ge=0),
     limit: int = Query(default=20, ge=1, le=100),
-    rating: int | None = Query(default=None, ge=1, le=5),
+    rating: int | None = Query(default=None, ge=1, le=10),
 ) -> SurveyListResponse:
     base = select(SatisfactionSurvey)
     if rating is not None:

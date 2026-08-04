@@ -316,7 +316,7 @@ export default function TechnicianDashboard() {
         />
         <KpiCard
           label="Meu CSAT"
-          value={detail.csat_average != null ? `${detail.csat_average.toFixed(1)} / 5` : "—"}
+          value={detail.csat_average != null ? `${detail.csat_average.toFixed(1)} / 10` : "—"}
           sub={`${detail.csat_count} avaliações · ${periodLabel}`}
           accent="border-l-amber-400"
           iconBg="bg-amber-500/10"

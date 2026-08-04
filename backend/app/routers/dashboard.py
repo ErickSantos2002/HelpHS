@@ -303,8 +303,9 @@ async def _build_report(
         )
     ).all()
     counts_by_rating: dict[int, int] = {r.rating: r.cnt for r in csat_rows}
+    # A pesquisa de satisfação usa escala de 1 a 10 (ver SurveyCreate)
     csat_distribution = [
-        CSATDistributionItem(rating=i, count=counts_by_rating.get(i, 0)) for i in range(1, 6)
+        CSATDistributionItem(rating=i, count=counts_by_rating.get(i, 0)) for i in range(1, 11)
     ]
 
     avg_raw = (
@@ -684,7 +685,7 @@ async def export_reports_csv(
         writer.writerow([s.priority, s.total, s.breached, s.compliance_rate])
     writer.writerow([])
 
-    writer.writerow(["DISTRIBUIÇÃO CSAT"])
+    writer.writerow(["DISTRIBUIÇÃO CSAT (1 a 10)"])
     writer.writerow(["Nota", "Avaliações"])
     for c in data.csat_distribution:
         writer.writerow([c.rating, c.count])
@@ -776,7 +777,10 @@ async def export_reports_pdf(
             ["Métrica", "Valor"],
             [
                 ["Total de tickets no período", str(data.total_tickets)],
-                ["Média CSAT", str(data.csat_average) if data.csat_average else "—"],
+                [
+                    "Média CSAT (1 a 10)",
+                    f"{data.csat_average} / 10" if data.csat_average else "—",
+                ],
             ],
         )
     )

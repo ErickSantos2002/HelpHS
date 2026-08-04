@@ -293,7 +293,7 @@ async def test_submit_survey_invalid_rating(patch_redis):
     async with AsyncClient(transport=ASGITransport(app=app), base_url="http://test") as c:
         resp = await c.post(
             f"/api/v1/tickets/{_TICKET_ID}/survey",
-            json={"rating": 6},  # out of range
+            json={"rating": 11},  # fora da escala (1 a 10)
         )
 
     assert resp.status_code == 422

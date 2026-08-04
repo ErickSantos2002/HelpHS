@@ -631,7 +631,7 @@ class SatisfactionSurvey(Base):
         UUID(as_uuid=True), ForeignKey("tickets.id", ondelete="CASCADE"), unique=True, index=True
     )
     user_id: Mapped[uuid.UUID] = mapped_column(UUID(as_uuid=True), ForeignKey("users.id"))
-    rating: Mapped[int] = mapped_column(SmallInteger, nullable=False)  # 1 a 5
+    rating: Mapped[int] = mapped_column(SmallInteger, nullable=False)  # 1 a 10
     comment: Mapped[str | None] = mapped_column(Text)
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now())
 
