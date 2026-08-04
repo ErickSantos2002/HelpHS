@@ -86,6 +86,9 @@ async def create_user(
         department=body.department,
         lgpd_consent=body.lgpd_consent,
         lgpd_consent_at=ts if body.lgpd_consent else None,
+        # Explícito: o default da coluna só seria aplicado no INSERT, e a resposta
+        # é montada a partir do objeto em memória
+        onboarding_completed=False,
         created_at=ts,
         updated_at=ts,
     )

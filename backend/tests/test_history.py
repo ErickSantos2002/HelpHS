@@ -88,6 +88,12 @@ def _mock_ticket(status=TicketStatus.open, creator_id=None):
     t.ai_confidence = None
     t.ai_summary = None
     t.ai_conversation_summary = None
+    # Campos opcionais do TicketResponse — sem valor explícito o MagicMock
+    # devolve um objeto no lugar de None e a validação falha
+    t.assignee_name = None
+    t.client_observation = None
+    t.resolution_note = None
+    t.tags = []
     return t
 
 
@@ -96,6 +102,7 @@ def _mock_history_entry(field="status", old_value=None, new_value="open"):
     h.id = uuid.uuid4()
     h.ticket_id = _TICKET_ID
     h.user_id = _CREATOR_ID
+    h.user_name = "Autor do histórico"
     h.field = field
     h.old_value = old_value
     h.new_value = new_value

@@ -1,7 +1,7 @@
 """
 SLA Engine — business-hours calculator and breach tracker.
 
-Business hours: 08:00–18:00, Mon–Fri, America/Sao_Paulo (10 h/day).
+Business hours: 08:00–17:00, Mon–Fri, America/Sao_Paulo (9 h/day).
 Holidays are not modelled in this version.
 
 Public API

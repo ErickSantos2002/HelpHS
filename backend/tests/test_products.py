@@ -76,9 +76,16 @@ def _mock_equipment(serial=None):
     e.serial_number = serial or "SN-001"
     e.model = "TN-X"
     e.description = None
+    e.location = None
+    e.owner_id = None
     e.is_active = True
     e.created_at = _NOW
     e.updated_at = _NOW
+    # Dados do dono, preenchidos só na listagem de admin
+    e.owner_name = None
+    e.owner_email = None
+    e.company_name = None
+    e.company_cnpj = None
     return e
 
 

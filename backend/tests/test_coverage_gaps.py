@@ -63,6 +63,14 @@ def _mock_user(role=UserRole.admin, uid=None):
     u.last_login = None
     u.lgpd_consent = True
     u.lgpd_consent_at = None
+    # Dados de empresa do onboarding — fazem parte do UserResponse
+    u.company_name = None
+    u.cnpj = None
+    u.company_cep = None
+    u.company_address = None
+    u.company_city = None
+    u.company_state = None
+    u.onboarding_completed = True
     u.created_at = _NOW
     u.updated_at = _NOW
     return u
@@ -248,9 +256,15 @@ async def test_patch_equipment_as_admin(patch_redis):
     equip.serial_number = "SN-001"
     equip.model = "TN-X"
     equip.description = None
+    equip.location = None
+    equip.owner_id = None
     equip.is_active = True
     equip.created_at = _NOW
     equip.updated_at = _NOW
+    equip.owner_name = None
+    equip.owner_email = None
+    equip.company_name = None
+    equip.company_cnpj = None
 
     app.dependency_overrides[get_db] = _simple_db(equip)
     _override_user(_mock_user(UserRole.admin))

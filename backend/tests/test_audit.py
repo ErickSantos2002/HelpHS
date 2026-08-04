@@ -71,6 +71,8 @@ def _mock_entry(action=AuditAction.create, entity_type="ticket"):
     e.ip_address = "127.0.0.1"
     e.user_agent = "pytest"
     e.created_at = _NOW
+    # Nome do autor, resolvido pelo router ao montar a resposta
+    e.user_name = "Test Admin"
     return e
 
 

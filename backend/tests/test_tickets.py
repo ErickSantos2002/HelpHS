@@ -93,6 +93,12 @@ def _mock_ticket(
     t.ai_confidence = None
     t.ai_summary = None
     t.ai_conversation_summary = None
+    # Campos opcionais do TicketResponse — sem valor explícito o MagicMock
+    # devolve um objeto no lugar de None e a validação falha
+    t.assignee_name = None
+    t.client_observation = None
+    t.resolution_note = None
+    t.tags = []
     return t
 
 

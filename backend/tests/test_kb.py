@@ -284,12 +284,17 @@ async def test_get_article_increments_view_count(patch_redis):
     _override_user(tech)
     from app.core.database import get_db
 
+    # O endpoint executa três queries: busca o artigo, incrementa o view_count e
+    # recarrega o artigo depois do commit (a sessão expira os objetos no commit).
+    reloaded = _make_result(article)
+    reloaded.scalar_one.return_value = article
+
     session = _db_sequence(article)
-    # Also mock the UPDATE for view_count
     session.execute = AsyncMock(
         side_effect=[
             _make_result(article),
-            _make_result(None),  # UPDATE result
+            _make_result(None),  # UPDATE do view_count
+            reloaded,
         ]
     )
 

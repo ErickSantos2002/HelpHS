@@ -57,6 +57,15 @@ def _user(role=UserRole.admin, uid=None, status=UserStatus.active):
     u.last_login = None
     u.lgpd_consent = True
     u.lgpd_consent_at = None
+    # Dados de empresa preenchidos no onboarding do cliente — fazem parte do
+    # UserResponse, então precisam existir no mock
+    u.company_name = None
+    u.cnpj = None
+    u.company_cep = None
+    u.company_address = None
+    u.company_city = None
+    u.company_state = None
+    u.onboarding_completed = True
     from datetime import datetime
 
     u.created_at = datetime.now(UTC)

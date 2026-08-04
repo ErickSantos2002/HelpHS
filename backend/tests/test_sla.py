@@ -63,19 +63,19 @@ def test_add_hours_same_day():
 
 
 def test_add_hours_crosses_end_of_day():
-    """8h from 14:00 Mon: 4h left today → ends at 18:00, then 4h Tue → 12:00 Tue."""
+    """8h from 14:00 Mon: 3h left today → ends at 17:00, then 5h Tue → 13:00 Tue."""
     start = _sp(2026, 4, 6, 14, 0)  # Monday 14:00
     result = add_business_hours(start, 8)
     assert result.weekday() == 1  # Tuesday
-    assert result.hour == 12
+    assert result.hour == 13
 
 
 def test_add_hours_crosses_weekend():
-    """4h from Friday 16:00 (2h left today) → Monday 10:00."""
+    """4h from Friday 16:00 (1h left today) → Monday 11:00."""
     start = _sp(2026, 4, 10, 16, 0)  # Friday 16:00
     result = add_business_hours(start, 4)
     assert result.weekday() == 0  # Monday
-    assert result.hour == 10
+    assert result.hour == 11
 
 
 def test_add_hours_start_before_work():
@@ -87,7 +87,7 @@ def test_add_hours_start_before_work():
 
 
 def test_add_hours_start_after_work():
-    """Starting after 18:00 advances to next business day 08:00."""
+    """Starting after 17:00 advances to next business day 08:00."""
     start = _sp(2026, 4, 6, 19, 0)  # Monday 19:00
     result = add_business_hours(start, 2)
     assert result.weekday() == 1  # Tuesday
@@ -103,12 +103,12 @@ def test_add_hours_start_on_saturday():
 
 
 def test_add_hours_multiple_days():
-    """24 business hours = 2 full working days + 4h (24 = 10+10+4)."""
+    """24 horas úteis = 2 dias cheios + 6h (24 = 9+9+6)."""
     start = _sp(2026, 4, 6, 8, 0)  # Monday 08:00
     result = add_business_hours(start, 24)
-    # 10h Mon + 10h Tue + 4h Wed = Wednesday 12:00
+    # 9h Mon + 9h Tue + 6h Wed = Wednesday 14:00
     assert result.weekday() == 2  # Wednesday
-    assert result.hour == 12
+    assert result.hour == 14
 
 
 def test_add_zero_hours():
