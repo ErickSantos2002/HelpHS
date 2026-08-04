@@ -537,6 +537,92 @@ async def test_assign_ticket(patch_redis):
 
 
 @pytest.mark.asyncio
+async def test_assign_ticket_fechado_explica_o_motivo(patch_redis):
+    """Reatribuir ticket fechado precisa dizer por que não dá."""
+    from app.core.database import get_db
+
+    admin = _mock_user(UserRole.admin)
+    ticket = _mock_ticket(status=TicketStatus.closed)
+    assignee = _mock_user(UserRole.technician, user_id=_TECH_ID)
+
+    app.dependency_overrides[get_db] = _db_seq_override(ticket, assignee)
+    _override_user(admin)
+
+    async with AsyncClient(transport=ASGITransport(app=app), base_url="http://test") as c:
+        resp = await c.patch(
+            f"/api/v1/tickets/{_TICKET_ID}/assign",
+            json={"assignee_id": str(_TECH_ID)},
+        )
+    assert resp.status_code == 409
+    assert "fechado" in resp.json()["detail"]
+
+
+@pytest.mark.asyncio
+async def test_assign_ticket_para_cliente_e_rejeitado(patch_redis):
+    """Só técnico ou admin pode receber ticket."""
+    from app.core.database import get_db
+
+    admin = _mock_user(UserRole.admin)
+    ticket = _mock_ticket()
+    cliente = _mock_user(UserRole.client, user_id=_TECH_ID)
+
+    app.dependency_overrides[get_db] = _db_seq_override(ticket, cliente)
+    _override_user(admin)
+
+    async with AsyncClient(transport=ASGITransport(app=app), base_url="http://test") as c:
+        resp = await c.patch(
+            f"/api/v1/tickets/{_TICKET_ID}/assign",
+            json={"assignee_id": str(_TECH_ID)},
+        )
+    assert resp.status_code == 422
+    assert "técnicos ou administradores" in resp.json()["detail"]
+
+
+@pytest.mark.asyncio
+async def test_assign_ticket_para_usuario_inativo_e_rejeitado(patch_redis):
+    from app.core.database import get_db
+    from app.models.models import UserStatus
+
+    admin = _mock_user(UserRole.admin)
+    ticket = _mock_ticket()
+    inativo = _mock_user(UserRole.technician, user_id=_TECH_ID)
+    inativo.status = UserStatus.inactive
+
+    app.dependency_overrides[get_db] = _db_seq_override(ticket, inativo)
+    _override_user(admin)
+
+    async with AsyncClient(transport=ASGITransport(app=app), base_url="http://test") as c:
+        resp = await c.patch(
+            f"/api/v1/tickets/{_TICKET_ID}/assign",
+            json={"assignee_id": str(_TECH_ID)},
+        )
+    assert resp.status_code == 422
+    assert "inativo" in resp.json()["detail"]
+
+
+@pytest.mark.asyncio
+async def test_assign_ticket_para_o_mesmo_tecnico_avisa(patch_redis):
+    """Reatribuir para quem já é o responsável não é erro silencioso."""
+    from app.core.database import get_db
+
+    admin = _mock_user(UserRole.admin)
+    ticket = _mock_ticket()
+    ticket.assignee_id = _TECH_ID
+    assignee = _mock_user(UserRole.technician, user_id=_TECH_ID)
+
+    app.dependency_overrides[get_db] = _db_seq_override(ticket, assignee)
+    _override_user(admin)
+
+    async with AsyncClient(transport=ASGITransport(app=app), base_url="http://test") as c:
+        resp = await c.patch(
+            f"/api/v1/tickets/{_TICKET_ID}/assign",
+            json={"assignee_id": str(_TECH_ID)},
+        )
+    assert resp.status_code == 409
+    assert "já está atribuído" in resp.json()["detail"]
+
+
+@pytest.mark.asyncio
 async def test_assign_ticket_unassign(patch_redis):
     from app.core.database import get_db
 

@@ -88,7 +88,7 @@ async def create_event(
     if body.end_date < body.start_date:
         raise HTTPException(
             status_code=status.HTTP_422_UNPROCESSABLE_ENTITY,
-            detail="end_date must be >= start_date",
+            detail="A data de fim precisa ser igual ou posterior à data de início.",
         )
 
     event = CalendarEvent(
@@ -122,7 +122,7 @@ async def update_event(
     result = await db.execute(select(CalendarEvent).where(CalendarEvent.id == event_id))
     event = result.scalar_one_or_none()
     if not event:
-        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Event not found")
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Evento não encontrado. Ele pode ter sido removido da agenda.")
 
     if body.title is not None:
         event.title = body.title
@@ -140,7 +140,7 @@ async def update_event(
     if event.end_date < event.start_date:
         raise HTTPException(
             status_code=status.HTTP_422_UNPROCESSABLE_ENTITY,
-            detail="end_date must be >= start_date",
+            detail="A data de fim precisa ser igual ou posterior à data de início.",
         )
 
     await db.commit()
@@ -165,7 +165,7 @@ async def delete_event(
     result = await db.execute(select(CalendarEvent).where(CalendarEvent.id == event_id))
     event = result.scalar_one_or_none()
     if not event:
-        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Event not found")
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Evento não encontrado. Ele pode ter sido removido da agenda.")
 
     await db.delete(event)
     await db.commit()

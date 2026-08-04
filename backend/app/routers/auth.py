@@ -133,7 +133,7 @@ async def register(
     if existing.scalar_one_or_none():
         raise HTTPException(
             status_code=status.HTTP_409_CONFLICT,
-            detail="Email already registered",
+            detail="Este e-mail já está cadastrado.",
         )
 
     now = datetime.now(UTC)
@@ -175,14 +175,14 @@ async def login(
         logger.warning(f"Failed login attempt for email={body.email}")
         raise HTTPException(
             status_code=status.HTTP_401_UNAUTHORIZED,
-            detail="Invalid credentials",
+            detail="E-mail ou senha incorretos.",
             headers={"WWW-Authenticate": "Bearer"},
         )
 
     if user.status != UserStatus.active:
         raise HTTPException(
             status_code=status.HTTP_403_FORBIDDEN,
-            detail="User account is inactive",
+            detail="Esta conta está inativa. Fale com um administrador.",
         )
 
     access_token = create_access_token(user.id, user.role.value, user.email)
@@ -212,7 +212,7 @@ async def refresh_token(
 ) -> AccessTokenResponse:
     credentials_exc = HTTPException(
         status_code=status.HTTP_401_UNAUTHORIZED,
-        detail="Invalid or expired refresh token",
+        detail="Sua sessão expirou. Entre novamente para continuar.",
         headers={"WWW-Authenticate": "Bearer"},
     )
 

@@ -9,7 +9,7 @@ Permissões:
 
 Regras:
   - Uma pesquisa por ticket (unique constraint no model)
-  - Avaliação de 1 a 5
+  - Avaliação de 1 a 10
   - Não pode ser alterada após envio
 """
 
@@ -58,7 +58,7 @@ async def _get_ticket_or_404(ticket_id: uuid.UUID, db: AsyncSession) -> Ticket:
     result = await db.execute(select(Ticket).where(Ticket.id == ticket_id))
     ticket = result.scalar_one_or_none()
     if not ticket:
-        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Ticket not found")
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Ticket não encontrado. Ele pode ter sido excluído.")
     return ticket
 
 
@@ -82,13 +82,13 @@ async def submit_survey(
 
     # Only the ticket creator can submit the survey
     if ticket.creator_id != actor.id:
-        raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="Access denied")
+        raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="Você não tem permissão para acessar este item.")
 
     # Ticket must be resolved or closed
     if ticket.status not in _ELIGIBLE_STATUSES:
         raise HTTPException(
             status_code=status.HTTP_409_CONFLICT,
-            detail="Survey can only be submitted for resolved or closed tickets",
+            detail="A avaliação só pode ser enviada depois que o ticket for resolvido ou fechado.",
         )
 
     survey = SatisfactionSurvey(
@@ -108,7 +108,7 @@ async def submit_survey(
         await db.rollback()
         raise HTTPException(
             status_code=status.HTTP_409_CONFLICT,
-            detail="Survey already submitted for this ticket",
+            detail="Este ticket já foi avaliado. Não é possível enviar uma nova avaliação.",
         )
 
     await db.refresh(survey)
@@ -125,7 +125,7 @@ async def get_survey(
 
     # Client can only see survey for their own ticket
     if actor.role == UserRole.client and ticket.creator_id != actor.id:
-        raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="Access denied")
+        raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="Você não tem permissão para acessar este item.")
 
     result = await db.execute(
         select(SatisfactionSurvey).where(SatisfactionSurvey.ticket_id == ticket_id)
@@ -133,7 +133,7 @@ async def get_survey(
     survey = result.scalar_one_or_none()
     if not survey:
         raise HTTPException(
-            status_code=status.HTTP_404_NOT_FOUND, detail="No survey found for this ticket"
+            status_code=status.HTTP_404_NOT_FOUND, detail="Este ticket ainda não foi avaliado."
         )
 
     return SurveyResponse.model_validate(survey)

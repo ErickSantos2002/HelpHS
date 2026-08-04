@@ -77,7 +77,7 @@ async def create_product(
     result = await db.execute(select(Product).where(Product.name == body.name))
     if result.scalar_one_or_none():
         raise HTTPException(
-            status_code=status.HTTP_409_CONFLICT, detail="Product name already exists"
+            status_code=status.HTTP_409_CONFLICT, detail="Já existe um produto com esse nome."
         )
 
     ts = datetime.now(UTC)
@@ -148,7 +148,7 @@ async def update_product(
         dup = await db.execute(select(Product).where(Product.name == body.name))
         if dup.scalar_one_or_none():
             raise HTTPException(
-                status_code=status.HTTP_409_CONFLICT, detail="Product name already exists"
+                status_code=status.HTTP_409_CONFLICT, detail="Já existe um produto com esse nome."
             )
 
     for field, value in body.model_dump(exclude_unset=True).items():
@@ -196,7 +196,7 @@ async def create_equipment(
         )
         if dup.scalar_one_or_none():
             raise HTTPException(
-                status_code=status.HTTP_409_CONFLICT, detail="Serial number already in use"
+                status_code=status.HTTP_409_CONFLICT, detail="Este número de série já está cadastrado em outro equipamento."
             )
 
     ts = datetime.now(UTC)
@@ -293,7 +293,7 @@ async def update_equipment(
         )
         if dup.scalar_one_or_none():
             raise HTTPException(
-                status_code=status.HTTP_409_CONFLICT, detail="Serial number already in use"
+                status_code=status.HTTP_409_CONFLICT, detail="Este número de série já está cadastrado em outro equipamento."
             )
 
     for field, value in body.model_dump(exclude_unset=True).items():
@@ -327,7 +327,7 @@ async def create_my_equipment(
         )
         if dup.scalar_one_or_none():
             raise HTTPException(
-                status_code=status.HTTP_409_CONFLICT, detail="Serial number already in use"
+                status_code=status.HTTP_409_CONFLICT, detail="Este número de série já está cadastrado em outro equipamento."
             )
 
     ts = datetime.now(UTC)
@@ -382,7 +382,7 @@ async def update_my_equipment(
 ) -> EquipmentResponse:
     equipment = await get_or_404(db, Equipment, equipment_id, "Equipment not found")
     if equipment.owner_id != actor.id:
-        raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="Not your equipment")
+        raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="Este equipamento não está vinculado ao seu cadastro.")
 
     if body.serial_number and body.serial_number != equipment.serial_number:
         dup = await db.execute(
@@ -390,7 +390,7 @@ async def update_my_equipment(
         )
         if dup.scalar_one_or_none():
             raise HTTPException(
-                status_code=status.HTTP_409_CONFLICT, detail="Serial number already in use"
+                status_code=status.HTTP_409_CONFLICT, detail="Este número de série já está cadastrado em outro equipamento."
             )
 
     for field, value in body.model_dump(exclude_unset=True).items():
@@ -410,7 +410,7 @@ async def delete_my_equipment(
 ) -> None:
     equipment = await get_or_404(db, Equipment, equipment_id, "Equipment not found")
     if equipment.owner_id != actor.id:
-        raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="Not your equipment")
+        raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="Este equipamento não está vinculado ao seu cadastro.")
     equipment.is_active = False
     _audit(db, AuditAction.delete, actor.id, "equipment", equipment.id)
     await db.commit()

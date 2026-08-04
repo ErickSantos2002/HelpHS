@@ -119,12 +119,12 @@ async def _get_ticket_or_403(
     result = await db.execute(select(Ticket).where(Ticket.id == ticket_id))
     ticket = result.scalar_one_or_none()
     if ticket is None:
-        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Ticket not found")
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Ticket não encontrado. Ele pode ter sido excluído.")
 
     is_staff = actor.role in (UserRole.admin, UserRole.technician)
     is_requester = ticket.creator_id == actor.id
     if not is_staff and not is_requester:
-        raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="Access denied")
+        raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="Você não tem permissão para acessar este item.")
 
     return ticket
 
@@ -301,7 +301,7 @@ async def suggest_ticket_reply(
     if suggestion is None:
         raise HTTPException(
             status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
-            detail="LLM service unavailable — check API key configuration",
+            detail="O assistente de IA está indisponível no momento. Tente novamente mais tarde.",
         )
 
     return SuggestReplyResponse(suggestion=suggestion)
@@ -329,7 +329,7 @@ async def improve_ticket_message(
     if result is None:
         raise HTTPException(
             status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
-            detail="LLM service unavailable — check API key configuration",
+            detail="O assistente de IA está indisponível no momento. Tente novamente mais tarde.",
         )
 
     return ImproveMessageResponse(improved=result)
@@ -363,7 +363,7 @@ async def summarize_ticket_conversation(
     if not messages:
         raise HTTPException(
             status_code=status.HTTP_422_UNPROCESSABLE_ENTITY,
-            detail="No messages to summarize",
+            detail="Ainda não há mensagens nesta conversa para resumir.",
         )
 
     history = [
@@ -387,7 +387,7 @@ async def summarize_ticket_conversation(
     if summary is None:
         raise HTTPException(
             status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
-            detail="LLM service unavailable — check API key configuration",
+            detail="O assistente de IA está indisponível no momento. Tente novamente mais tarde.",
         )
 
     # Persist summary in the ticket

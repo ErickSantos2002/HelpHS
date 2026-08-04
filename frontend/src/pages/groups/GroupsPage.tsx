@@ -3,7 +3,7 @@ import { useForm } from "react-hook-form";
 import { zodResolver } from "@hookform/resolvers/zod";
 import { z } from "zod";
 import { toast } from "sonner";
-import { getApiError } from "../../lib/apiError";
+import { toastApiError } from "../../lib/toastError";
 import { cn } from "../../lib/utils";
 import {
   Button,
@@ -146,7 +146,7 @@ function GroupModal({
     defaultValues: { name: initial?.name ?? "", description: initial?.description ?? "" },
   });
   const onSubmit = async (v: GroupFormValues) => {
-    try { await onSave(v); onClose(); } catch (err) { toast.error(getApiError(err, "Erro ao salvar grupo.")); }
+    try { await onSave(v); onClose(); } catch (err) { toastApiError(err, "Erro ao salvar grupo."); }
   };
   return (
     <Modal open onClose={onClose} title={initial ? "Editar Grupo" : "Novo Grupo"}>
@@ -210,7 +210,7 @@ function AddCompanyModal({
       onAdded(newC);
       onClose();
     } catch (err) {
-      toast.error(getApiError(err, "Erro ao adicionar empresa."));
+      toastApiError(err, "Erro ao adicionar empresa.");
     } finally {
       setAdding(null);
     }
@@ -222,7 +222,7 @@ function AddCompanyModal({
       onAdded(newC);
       onClose();
     } catch (err) {
-      toast.error(getApiError(err, "Erro ao criar empresa."));
+      toastApiError(err, "Erro ao criar empresa.");
     }
   };
 
@@ -353,7 +353,7 @@ function EditCompanyModal({
     defaultValues: { name: company.name, cnpj: company.cnpj ?? "", phone: company.phone ?? "", address: company.address ?? "", city: company.city ?? "", state: company.state ?? "", notes: company.notes ?? "" },
   });
   const onSubmit = async (v: CompanyFormValues) => {
-    try { const c = await updateCompany(groupId, company.id, v); onSaved(c); onClose(); } catch (err) { toast.error(getApiError(err, "Erro ao salvar empresa.")); }
+    try { const c = await updateCompany(groupId, company.id, v); onSaved(c); onClose(); } catch (err) { toastApiError(err, "Erro ao salvar empresa."); }
   };
   return (
     <Modal open onClose={onClose} title="Editar Empresa">
@@ -405,7 +405,7 @@ function AssignClientModal({
       onAssigned(client);
       setClients((prev) => prev.filter((c) => c.id !== userId));
       setAssignPage(1);
-    } catch (err) { toast.error(getApiError(err, "Erro ao vincular cliente.")); }
+    } catch (err) { toastApiError(err, "Erro ao vincular cliente."); }
     finally { setAssigning(null); }
   };
 
@@ -457,7 +457,7 @@ function ClientNotesModal({
   const handleSave = async () => {
     setSaving(true);
     try { const u = await updateClientNotes(groupId, companyId, client.id, notes || null); onSaved(u); onClose(); }
-    catch (err) { toast.error(getApiError(err, "Erro ao salvar notas.")); }
+    catch (err) { toastApiError(err, "Erro ao salvar notas."); }
     finally { setSaving(false); }
   };
   return (
@@ -886,7 +886,7 @@ export default function GroupsPage() {
       setGroups((p) => p.filter((g) => g.id !== selectedGroup.id));
       setSelectedGroup(null);
       setGroupDetail(null);
-    } catch (err) { toast.error(getApiError(err, "Erro ao deletar grupo.")); }
+    } catch (err) { toastApiError(err, "Erro ao deletar grupo."); }
   };
 
   const handleDeleteCompany = async (company: CompanyResponse) => {

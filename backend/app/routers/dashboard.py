@@ -934,7 +934,7 @@ async def get_technician_detail_report(
     is_tech = actor.role == UserRole.technician
 
     if not is_admin and not is_tech:
-        raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="Access denied")
+        raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="Você não tem permissão para acessar este item.")
 
     if is_tech:
         tech_id = actor.id
@@ -943,7 +943,7 @@ async def get_technician_detail_report(
         if technician_id is None:
             raise HTTPException(
                 status_code=status.HTTP_400_BAD_REQUEST,
-                detail="technician_id is required for admin",
+                detail="Selecione um técnico para ver o relatório individual.",
             )
         tech_row = (
             await db.execute(
@@ -952,7 +952,7 @@ async def get_technician_detail_report(
         ).scalar_one_or_none()
         if tech_row is None:
             raise HTTPException(
-                status_code=status.HTTP_404_NOT_FOUND, detail="Technician not found"
+                status_code=status.HTTP_404_NOT_FOUND, detail="Técnico não encontrado."
             )
         tech_id = tech_row.id
         tech_name = tech_row.name

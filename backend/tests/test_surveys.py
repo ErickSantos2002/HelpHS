@@ -233,7 +233,7 @@ async def test_submit_survey_ticket_not_resolved(patch_redis):
         )
 
     assert resp.status_code == 409
-    assert "resolved or closed" in resp.json()["detail"]
+    assert "resolvido ou fechado" in resp.json()["detail"]
 
 
 @pytest.mark.asyncio
@@ -279,7 +279,7 @@ async def test_submit_survey_duplicate(patch_redis):
         )
 
     assert resp.status_code == 409
-    assert "already submitted" in resp.json()["detail"]
+    assert "já foi avaliado" in resp.json()["detail"]
 
 
 @pytest.mark.asyncio
