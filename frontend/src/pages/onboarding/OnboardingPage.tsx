@@ -3,6 +3,7 @@ import { useNavigate } from "react-router-dom";
 import { useAuth } from "../../contexts/AuthContext";
 import { Alert, Button, Input, Spinner } from "../../components/ui";
 import { completeOnboarding } from "../../services/userService";
+import { isValidCep, isValidCnpj, onlyDigits } from "../../lib/documents";
 import {
   createMyEquipment,
   getMyEquipment,
@@ -129,13 +130,29 @@ function StepCompany({
       setError("Nome da empresa é obrigatório.");
       return;
     }
+    if (!cnpj.trim()) {
+      setError("Informe o CNPJ da empresa.");
+      return;
+    }
+    if (!isValidCnpj(cnpj)) {
+      setError("CNPJ inválido. Confira os números digitados.");
+      return;
+    }
+    if (!cep.trim()) {
+      setError("Informe o CEP da empresa.");
+      return;
+    }
+    if (!isValidCep(cep)) {
+      setError("CEP inválido. Deve ter 8 dígitos.");
+      return;
+    }
     setSaving(true);
     setError(null);
     try {
       await completeOnboarding({
         company_name: companyName.trim(),
-        cnpj: cnpj.replace(/\D/g, "") || null,
-        company_cep: cep.replace(/\D/g, "") || null,
+        cnpj: onlyDigits(cnpj),
+        company_cep: onlyDigits(cep),
         company_address: address.trim() || null,
         company_city: city.trim() || null,
         company_state: state.trim().toUpperCase().slice(0, 2) || null,
@@ -174,7 +191,9 @@ function StepCompany({
       )}
 
       <div className="space-y-1.5">
-        <label className="text-xs text-slate-400">CNPJ</label>
+        <label className="text-xs text-slate-400">
+          CNPJ <span className="text-danger-400">*</span>
+        </label>
         <div className="relative">
           <input
             value={cnpj}
@@ -200,7 +219,9 @@ function StepCompany({
       />
 
       <div className="space-y-1.5">
-        <label className="text-xs text-slate-400">CEP</label>
+        <label className="text-xs text-slate-400">
+          CEP <span className="text-danger-400">*</span>
+        </label>
         <div className="relative">
           <input
             value={cep}

@@ -645,3 +645,109 @@ async def test_delete_user_has_tickets(patch_redis):
     async with AsyncClient(transport=ASGITransport(app=app), base_url="http://test") as c:
         resp = await c.delete(f"/api/v1/users/{target.id}")
     assert resp.status_code == 409
+
+
+# PATCH /users/me/onboarding — CNPJ e CEP obrigatórios
+
+
+def _onboarding_body(**overrides):
+    body = {
+        "company_name": "Health & Safety LTDA",
+        "cnpj": "08.857.492/0001-48",
+        "company_cep": "50070-000",
+        "company_address": "Rua Viscondessa do Livramento, 54",
+        "company_city": "Recife",
+        "company_state": "PE",
+    }
+    body.update(overrides)
+    return body
+
+
+def _override_client(user):
+    from app.core.security import get_current_user
+
+    async def _current():
+        return user
+
+    app.dependency_overrides[get_current_user] = _current
+
+
+@pytest.mark.asyncio
+async def test_onboarding_completo_salva_dados(patch_redis):
+    from app.core.database import get_db
+
+    client_user = _user(UserRole.client)
+    app.dependency_overrides[get_db] = _simple_db(client_user)
+    _override_client(client_user)
+
+    async with AsyncClient(transport=ASGITransport(app=app), base_url="http://test") as c:
+        resp = await c.patch("/api/v1/users/me/onboarding", json=_onboarding_body())
+
+    assert resp.status_code == 200
+    # A máscara é removida antes de gravar
+    assert client_user.cnpj == "08857492000148"
+    assert client_user.company_cep == "50070000"
+
+
+@pytest.mark.asyncio
+async def test_onboarding_sem_cnpj_e_rejeitado(patch_redis):
+    from app.core.database import get_db
+
+    client_user = _user(UserRole.client)
+    app.dependency_overrides[get_db] = _simple_db(client_user)
+    _override_client(client_user)
+
+    body = _onboarding_body()
+    body.pop("cnpj")
+
+    async with AsyncClient(transport=ASGITransport(app=app), base_url="http://test") as c:
+        resp = await c.patch("/api/v1/users/me/onboarding", json=body)
+
+    assert resp.status_code == 422
+
+
+@pytest.mark.asyncio
+async def test_onboarding_sem_cep_e_rejeitado(patch_redis):
+    from app.core.database import get_db
+
+    client_user = _user(UserRole.client)
+    app.dependency_overrides[get_db] = _simple_db(client_user)
+    _override_client(client_user)
+
+    body = _onboarding_body()
+    body.pop("company_cep")
+
+    async with AsyncClient(transport=ASGITransport(app=app), base_url="http://test") as c:
+        resp = await c.patch("/api/v1/users/me/onboarding", json=body)
+
+    assert resp.status_code == 422
+
+
+@pytest.mark.asyncio
+async def test_onboarding_com_cnpj_incompleto_e_rejeitado(patch_redis):
+    from app.core.database import get_db
+
+    client_user = _user(UserRole.client)
+    app.dependency_overrides[get_db] = _simple_db(client_user)
+    _override_client(client_user)
+
+    async with AsyncClient(transport=ASGITransport(app=app), base_url="http://test") as c:
+        resp = await c.patch("/api/v1/users/me/onboarding", json=_onboarding_body(cnpj="123"))
+
+    assert resp.status_code == 422
+
+
+@pytest.mark.asyncio
+async def test_onboarding_com_cep_incompleto_e_rejeitado(patch_redis):
+    from app.core.database import get_db
+
+    client_user = _user(UserRole.client)
+    app.dependency_overrides[get_db] = _simple_db(client_user)
+    _override_client(client_user)
+
+    async with AsyncClient(transport=ASGITransport(app=app), base_url="http://test") as c:
+        resp = await c.patch(
+            "/api/v1/users/me/onboarding", json=_onboarding_body(company_cep="5007")
+        )
+
+    assert resp.status_code == 422

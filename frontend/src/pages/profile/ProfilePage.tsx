@@ -10,6 +10,7 @@ import {
   type UserSummary,
 } from "../../services/userService";
 import { lookupCnpj, lookupCep } from "../../services/equipmentService";
+import { isValidCep, isValidCnpj, onlyDigits } from "../../lib/documents";
 
 // ── Shared ────────────────────────────────────────────────────
 
@@ -286,6 +287,9 @@ function CompanySection({ profile, onSaved }: { profile: UserSummary; onSaved: (
   const [saving, setSaving] = useState(false);
   const [error, setError] = useState("");
 
+  // Clientes cadastrados antes da regra podem estar sem esses dados
+  const cadastroIncompleto = !profile.cnpj || !profile.company_cep;
+
   function formatCnpj(v: string) {
     const d = v.replace(/\D/g, "").slice(0, 14);
     return d.replace(/^(\d{2})(\d)/, "$1.$2").replace(/^(\d{2})\.(\d{3})(\d)/, "$1.$2.$3").replace(/\.(\d{3})(\d)/, ".$1/$2").replace(/(\d{4})(\d)/, "$1-$2");
@@ -322,13 +326,17 @@ function CompanySection({ profile, onSaved }: { profile: UserSummary; onSaved: (
   async function handleSubmit(e: React.FormEvent) {
     e.preventDefault();
     if (!companyName.trim()) { setError("Nome da empresa é obrigatório"); return; }
+    if (!cnpj.trim()) { setError("Informe o CNPJ da empresa."); return; }
+    if (!isValidCnpj(cnpj)) { setError("CNPJ inválido. Confira os números digitados."); return; }
+    if (!cep.trim()) { setError("Informe o CEP da empresa."); return; }
+    if (!isValidCep(cep)) { setError("CEP inválido. Deve ter 8 dígitos."); return; }
     setSaving(true);
     setError("");
     try {
       const updated = await completeOnboarding({
         company_name: companyName.trim(),
-        cnpj: cnpj.replace(/\D/g, "") || null,
-        company_cep: cep.replace(/\D/g, "") || null,
+        cnpj: onlyDigits(cnpj),
+        company_cep: onlyDigits(cep),
         company_address: address.trim() || null,
         company_city: city.trim() || null,
         company_state: state.trim().toUpperCase().slice(0, 2) || null,
@@ -349,11 +357,19 @@ function CompanySection({ profile, onSaved }: { profile: UserSummary; onSaved: (
         ) : undefined
       }
     >
+      {!editing && cadastroIncompleto && (
+        <div className="mb-4 rounded-lg border border-warning-500/30 bg-warning-500/10 px-3 py-2 text-xs text-warning-700 dark:text-warning-400">
+          Complete o cadastro da sua empresa: CNPJ e CEP são obrigatórios.
+        </div>
+      )}
+
       {editing ? (
         <form onSubmit={handleSubmit} className="space-y-4">
           {error && <ErrorMsg msg={error} />}
           <div className="space-y-1.5">
-            <label className="text-xs font-medium text-slate-500">CNPJ</label>
+            <label className="text-xs font-medium text-slate-500">
+              CNPJ <span className="text-danger-400">*</span>
+            </label>
             <div className="relative">
               <input value={cnpj} onChange={(e) => setCnpj(formatCnpj(e.target.value))} onBlur={handleCnpjBlur} placeholder="00.000.000/0000-00" className={INPUT_CLS} />
               {lookingCnpj && <div className="absolute right-3 top-2.5"><Spinner size="sm" /></div>}
@@ -364,7 +380,9 @@ function CompanySection({ profile, onSaved }: { profile: UserSummary; onSaved: (
             <input value={companyName} onChange={(e) => setCompanyName(e.target.value)} placeholder="Razão social ou nome fantasia" className={INPUT_CLS} required />
           </div>
           <div className="space-y-1.5">
-            <label className="text-xs font-medium text-slate-500">CEP</label>
+            <label className="text-xs font-medium text-slate-500">
+              CEP <span className="text-danger-400">*</span>
+            </label>
             <div className="relative">
               <input value={cep} onChange={(e) => setCep(formatCep(e.target.value))} onBlur={handleCepBlur} placeholder="00000-000" className={INPUT_CLS} />
               {lookingCep && <div className="absolute right-3 top-2.5"><Spinner size="sm" /></div>}
