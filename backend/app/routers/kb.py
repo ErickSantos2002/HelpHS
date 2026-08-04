@@ -8,6 +8,9 @@ Endpoints:
   PATCH  /kb/articles/{id}         — editar (admin/technician)
   DELETE /kb/articles/{id}         — arquivar (admin)
   POST   /kb/articles/{id}/feedback — helpful/not_helpful (todos autenticados)
+  GET    /kb/articles/{id}/comments — listar comentários (todos autenticados)
+  POST   /kb/articles/{id}/comments — comentar (todos autenticados)
+  DELETE /kb/comments/{id}         — excluir (admin/technician qualquer um; cliente só o próprio)
 """
 
 import re
@@ -102,7 +105,7 @@ async def _get_article_or_404(article_id: uuid.UUID, db: AsyncSession) -> KBArti
     )
     article = result.scalar_one_or_none()
     if article is None:
-        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Article not found")
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Artigo não encontrado. Ele pode ter sido excluído ou arquivado.")
     return article
 
 
@@ -127,7 +130,7 @@ async def suggest_articles_for_ticket(
     ticket_result = await db.execute(select(Ticket).where(Ticket.id == ticket_id))
     ticket = ticket_result.scalar_one_or_none()
     if ticket is None:
-        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Ticket not found")
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Ticket não encontrado. Ele pode ter sido excluído.")
 
     # Extract meaningful keywords from title (words > 3 chars)
     words = [w for w in ticket.title.lower().split() if len(w) > 3]
@@ -280,7 +283,7 @@ async def get_article(
     is_staff = actor.role in (UserRole.admin, UserRole.technician)
 
     if not is_staff and article.status != KBArticleStatus.published:
-        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Article not found")
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Artigo não encontrado. Ele pode ter sido excluído ou arquivado.")
 
     await db.execute(
         update(KBArticle)
@@ -366,7 +369,7 @@ async def article_feedback(
     result = await db.execute(select(KBArticle).where(KBArticle.id == article_id))
     article = result.scalar_one_or_none()
     if article is None:
-        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Article not found")
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Artigo não encontrado. Ele pode ter sido excluído ou arquivado.")
 
     if body.helpful:
         await db.execute(
@@ -439,7 +442,7 @@ async def create_comment(
         )
         if parent_result.scalar_one_or_none() is None:
             raise HTTPException(
-                status_code=status.HTTP_404_NOT_FOUND, detail="Parent comment not found"
+                status_code=status.HTTP_404_NOT_FOUND, detail="O comentário que você está respondendo não existe mais."
             )
         # Only allow 1 level of nesting — replies cannot be replied to
         parent_check = await db.execute(select(KBComment).where(KBComment.id == body.parent_id))
@@ -447,7 +450,7 @@ async def create_comment(
         if parent.parent_id is not None:
             raise HTTPException(
                 status_code=status.HTTP_422_UNPROCESSABLE_ENTITY,
-                detail="Replies to replies are not allowed",
+                detail="Não é possível responder a uma resposta. Comente na mensagem original.",
             )
 
     now = datetime.now(UTC)
@@ -478,16 +481,26 @@ async def delete_comment(
     db: Annotated[AsyncSession, Depends(get_db)],
     actor: Annotated[User, Depends(get_current_user)],
 ) -> None:
-    """Delete a comment. Admin can delete any; others can only delete their own."""
+    """Delete a comment.
+
+    Admin and technician moderam a base de conhecimento e podem excluir o
+    comentário de qualquer autor. Cliente só exclui os próprios.
+    """
     result = await db.execute(select(KBComment).where(KBComment.id == comment_id))
     comment = result.scalar_one_or_none()
     if comment is None:
-        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Comment not found")
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail="Comentário não encontrado. Ele pode já ter sido excluído.",
+        )
 
-    is_admin = actor.role == UserRole.admin
+    can_moderate = actor.role in (UserRole.admin, UserRole.technician)
     is_own = comment.author_id == actor.id
-    if not is_admin and not is_own:
-        raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="Access denied")
+    if not can_moderate and not is_own:
+        raise HTTPException(
+            status_code=status.HTTP_403_FORBIDDEN,
+            detail="Você só pode excluir os seus próprios comentários.",
+        )
 
     await db.delete(comment)
     await db.commit()
