@@ -30,3 +30,11 @@ export function cn(...classes: ClassValue[]): string {
 
   return result.join(" ");
 }
+
+/**
+ * Escolhe entre singular e plural conforme a quantidade.
+ * Evita o erro de concatenar só a terminação (`violação` + `ões` = `violaçãoões`).
+ */
+export function plural(n: number, singular: string, pluralForm: string): string {
+  return n === 1 ? singular : pluralForm;
+}

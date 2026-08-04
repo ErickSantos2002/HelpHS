@@ -14,6 +14,7 @@ import {
   YAxis,
 } from "recharts";
 import { FilterSelect, Spinner } from "../../components/ui";
+import { plural } from "../../lib/utils";
 import { useAuth } from "../../contexts/AuthContext";
 import { useTheme } from "../../contexts/ThemeContext";
 import {
@@ -475,7 +476,7 @@ function GlobalReport({ data }: { data: ReportData; period?: number }) {
           delta={<Delta current={data.total_tickets} prev={cmp?.total_tickets ?? null} />} />
         <StatCard label="Média CSAT"
           value={data.csat_average ? `${data.csat_average} / 5` : "—"}
-          sub={`${totalCsat} avaliação${totalCsat !== 1 ? "ões" : ""}`}
+          sub={`${totalCsat} ${plural(totalCsat, "avaliação", "avaliações")}`}
           delta={data.csat_average != null && cmp?.csat_average != null
             ? <Delta current={data.csat_average * 10} prev={cmp.csat_average * 10} />
             : undefined} />
@@ -742,11 +743,11 @@ function TechnicianDetail({ data }: { data: TechnicianDetailReport }) {
           sub={data.total_assigned > 0 ? `${Math.round((data.resolved / data.total_assigned) * 100)}% do total` : "—"}
           colorCls="text-success-700 dark:text-success-400" />
         <StatCard label="Conformidade SLA"  value={`${data.sla_compliance_rate}%`}
-          sub={`${data.sla_breached} violação${data.sla_breached !== 1 ? "ões" : ""}`}
+          sub={`${data.sla_breached} ${plural(data.sla_breached, "violação", "violações")}`}
           colorCls={slaColor(data.sla_compliance_rate)} />
         <StatCard label="CSAT médio"
           value={data.csat_average ? `${data.csat_average} / 5` : "—"}
-          sub={data.csat_count > 0 ? `${data.csat_count} avaliação${data.csat_count !== 1 ? "ões" : ""}` : "sem avaliações"} />
+          sub={data.csat_count > 0 ? `${data.csat_count} ${plural(data.csat_count, "avaliação", "avaliações")}` : "sem avaliações"} />
       </div>
 
       <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-3">

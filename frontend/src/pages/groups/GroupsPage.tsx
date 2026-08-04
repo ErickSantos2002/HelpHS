@@ -1,4 +1,4 @@
-﻿import { useEffect, useState } from "react";
+import { useEffect, useState } from "react";
 import { useForm } from "react-hook-form";
 import { zodResolver } from "@hookform/resolvers/zod";
 import { z } from "zod";
@@ -45,7 +45,7 @@ import {
   type CompanyNote,
 } from "../../services/groupService";
 
-// â"€â"€ Icons â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€
+// ── Icons ─────────────────────────────────────────────────────
 
 function IconPlus() {
   return (
@@ -111,16 +111,16 @@ function IconUsers() {
   );
 }
 
-// â"€â"€ Form schemas â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€
+// ── Form schemas ──────────────────────────────────────────────
 
 const groupSchema = z.object({
-  name: z.string().min(1, "Nome obrigatÃ³rio").max(255),
+  name: z.string().min(1, "Nome obrigatório").max(255),
   description: z.string().optional(),
 });
 type GroupFormValues = z.infer<typeof groupSchema>;
 
 const companySchema = z.object({
-  name: z.string().min(1, "Nome obrigatÃ³rio").max(255),
+  name: z.string().min(1, "Nome obrigatório").max(255),
   cnpj: z.string().optional(),
   phone: z.string().optional(),
   address: z.string().optional(),
@@ -130,7 +130,7 @@ const companySchema = z.object({
 });
 type CompanyFormValues = z.infer<typeof companySchema>;
 
-// â"€â"€ Group modal â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€
+// ── Group modal ───────────────────────────────────────────────
 
 function GroupModal({
   initial,
@@ -152,7 +152,7 @@ function GroupModal({
     <Modal open onClose={onClose} title={initial ? "Editar Grupo" : "Novo Grupo"}>
       <form onSubmit={handleSubmit(onSubmit)} className="space-y-4">
         <Input label="Nome" {...register("name")} error={errors.name?.message} />
-        <Textarea label="DescriÃ§Ã£o" {...register("description")} rows={3} />
+        <Textarea label="Descrição" {...register("description")} rows={3} />
         <ModalFooter>
           <Button variant="ghost" type="button" onClick={onClose}>Cancelar</Button>
           <Button type="submit" loading={isSubmitting}>{initial ? "Salvar" : "Criar Grupo"}</Button>
@@ -162,7 +162,7 @@ function GroupModal({
   );
 }
 
-// â"€â"€ Add company modal (suggestions + manual) â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€
+// ── Add company modal (suggestions + manual) ──────────────────
 
 const SUGG_PAGE_SIZE = 5;
 
@@ -319,7 +319,7 @@ function AddCompanyModal({
             <Input label="CNPJ" {...register("cnpj")} placeholder="00.000.000/0000-00" />
             <Input label="Telefone" {...register("phone")} />
           </div>
-          <Input label="EndereÃ§o" {...register("address")} />
+          <Input label="Endereço" {...register("address")} />
           <div className="grid grid-cols-3 gap-3">
             <div className="col-span-2"><Input label="Cidade" {...register("city")} /></div>
             <Input label="UF" {...register("state")} maxLength={2} placeholder="SP" />
@@ -335,7 +335,7 @@ function AddCompanyModal({
   );
 }
 
-// â"€â"€ Edit company modal â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€
+// ── Edit company modal ────────────────────────────────────────
 
 function EditCompanyModal({
   groupId,
@@ -363,7 +363,7 @@ function EditCompanyModal({
           <Input label="CNPJ" {...register("cnpj")} />
           <Input label="Telefone" {...register("phone")} />
         </div>
-        <Input label="EndereÃ§o" {...register("address")} />
+        <Input label="Endereço" {...register("address")} />
         <div className="grid grid-cols-3 gap-3">
           <div className="col-span-2"><Input label="Cidade" {...register("city")} /></div>
           <Input label="UF" {...register("state")} maxLength={2} />
@@ -378,7 +378,7 @@ function EditCompanyModal({
   );
 }
 
-// â"€â"€ Assign client modal â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€
+// ── Assign client modal ───────────────────────────────────────
 
 const ASSIGN_PAGE_SIZE = 5;
 
@@ -416,7 +416,7 @@ function AssignClientModal({
         {loading ? <div className="flex justify-center py-6"><Spinner /></div>
           : filtered.length === 0 ? (
             <p className="text-sm text-slate-500 text-center py-4">
-              {clients.length === 0 ? "Todos os clientes jÃ¡ estÃ£o vinculados." : "Nenhum resultado."}
+              {clients.length === 0 ? "Todos os clientes já estão vinculados." : "Nenhum resultado."}
             </p>
           ) : (
             <div>
@@ -446,7 +446,7 @@ function AssignClientModal({
   );
 }
 
-// â"€â"€ Client notes modal â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€
+// ── Client notes modal ────────────────────────────────────────
 
 function ClientNotesModal({
   groupId, companyId, client, onSaved, onClose,
@@ -461,9 +461,9 @@ function ClientNotesModal({
     finally { setSaving(false); }
   };
   return (
-    <Modal open onClose={onClose} title={`Notas â€" ${client.name}`}>
+    <Modal open onClose={onClose} title={`Notas — ${client.name}`}>
       <div className="space-y-3">
-        <Textarea label="Notas internas" value={notes} onChange={(e) => setNotes(e.target.value)} rows={5} placeholder="InformaÃ§Ãµes relevantes, histÃ³rico..." />
+        <Textarea label="Notas internas" value={notes} onChange={(e) => setNotes(e.target.value)} rows={5} placeholder="Informações relevantes, histórico..." />
         <ModalFooter>
           <Button variant="ghost" onClick={onClose}>Cancelar</Button>
           <Button onClick={handleSave} loading={saving}>Salvar</Button>
@@ -473,7 +473,7 @@ function ClientNotesModal({
   );
 }
 
-// â"€â"€ Company detail modal â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€
+// ── Company detail modal ──────────────────────────────────────
 
 const CLIENTS_PAGE_SIZE = 5;
 
@@ -765,7 +765,7 @@ function CompanyDetailModal({
   );
 }
 
-// â"€â"€ Group notes list (shared mobile/desktop) â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€
+// ── Group notes list (shared mobile/desktop) ──────────────────
 
 function GroupNotesList({ notes, noteDeleting, onView, onDelete, onAdd }: {
   notes: GroupNote[];
@@ -812,7 +812,7 @@ function GroupNotesList({ notes, noteDeleting, onView, onDelete, onAdd }: {
   );
 }
 
-// â"€â"€ Main page â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€
+// ── Main page ─────────────────────────────────────────────────
 
 export default function GroupsPage() {
   const [sidebarOpen, setSidebarOpen] = useState(true);
@@ -913,7 +913,7 @@ export default function GroupsPage() {
         />
       )}
 
-      {/* â"€â"€ Left: Groups list â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€ */}
+      {/* ── Left: Groups list ──────────────────────────────── */}
       <aside className={cn(
         "shrink-0 flex flex-col w-64 border-r border-slate-200 dark:border-border bg-white dark:bg-background-surface overflow-hidden",
         "transition-transform duration-300 ease-in-out",
@@ -999,10 +999,10 @@ export default function GroupsPage() {
         </div>
       </aside>
 
-      {/* â"€â"€ Center: Group detail + companies â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€ */}
+      {/* ── Center: Group detail + companies ──────────────── */}
       <main className="flex-1 overflow-y-auto overflow-x-hidden p-4 sm:p-6 min-w-0">
 
-        {/* Mobile toggle â€" abrir sidebar */}
+        {/* Mobile toggle — abrir sidebar */}
         <button
           onClick={() => setSidebarOpen(true)}
           className={cn(
@@ -1024,7 +1024,7 @@ export default function GroupsPage() {
               </svg>
             </div>
             <p className="text-slate-500 dark:text-slate-400 font-medium">Selecione um grupo</p>
-            <p className="text-sm text-slate-400 dark:text-slate-500 mt-1">Escolha um grupo Ã  esquerda para ver detalhes</p>
+            <p className="text-sm text-slate-400 dark:text-slate-500 mt-1">Escolha um grupo à esquerda para ver detalhes</p>
           </div>
         ) : (
           <div>
@@ -1092,7 +1092,7 @@ export default function GroupsPage() {
               </div>
             )}
 
-            {/* â"€â"€ Notas â€" mobile only (below companies) â"€â"€ */}
+            {/* ── Notas — mobile only (below companies) ── */}
             <div className="mt-5 xl:hidden rounded-xl border border-amber-200/50 dark:border-amber-800/20 bg-white dark:bg-background-surface overflow-hidden">
               <div className="flex items-center justify-between px-4 py-3 border-b border-amber-200/50 dark:border-amber-800/20">
                 <p className="text-xs font-bold uppercase tracking-widest text-amber-600 dark:text-amber-500/80 flex items-center gap-1.5">
@@ -1119,7 +1119,7 @@ export default function GroupsPage() {
         )}
       </main>
 
-      {/* â"€â"€ Right: Notes panel â€" desktop only â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€ */}
+      {/* ── Right: Notes panel — desktop only ─────────────── */}
       {selectedGroup && (
         <aside className="hidden xl:flex w-72 shrink-0 flex-col border-l border-slate-200 dark:border-border bg-white dark:bg-background-surface overflow-hidden">
           <div className="flex items-center justify-between px-4 py-4 border-b border-slate-200 dark:border-border">
@@ -1147,7 +1147,7 @@ export default function GroupsPage() {
         </aside>
       )}
 
-      {/* â"€â"€ Modals â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€ */}
+      {/* ── Modals ────────────────────────────────────────── */}
       {showNewGroup && (
         <GroupModal
           onSave={async (v) => { const g = await createGroup(v); setGroups((p) => [...p, g]); }}

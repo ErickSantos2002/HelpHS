@@ -130,7 +130,6 @@ export default function KBFormPage() {
   const isEdit = Boolean(id);
 
   const isStaff = user?.role === "admin" || user?.role === "technician";
-  if (!isStaff) { navigate("/403", { replace: true }); return null; }
 
   const [title, setTitle]           = useState("");
   const [content, setContent]       = useState("");
@@ -141,13 +140,21 @@ export default function KBFormPage() {
   const [loadingArticle, setLoadingArticle] = useState(isEdit);
   const [errors, setErrors]         = useState<Record<string, string>>({});
 
+  // Redireciona quem não é staff — depois dos hooks, para não alterar a ordem
+  // deles entre renders (o usuário chega null enquanto a sessão carrega).
   useEffect(() => {
-    if (!id) return;
+    if (user && !isStaff) navigate("/403", { replace: true });
+  }, [user, isStaff, navigate]);
+
+  useEffect(() => {
+    if (!id || !isStaff) return;
     getKBArticle(id)
       .then((a) => { setTitle(a.title); setContent(a.content); setCategory(a.category); setStatus(a.status); setTagsInput(a.tags.join(", ")); })
       .catch(() => navigate("/kb"))
       .finally(() => setLoadingArticle(false));
-  }, [id, navigate]);
+  }, [id, isStaff, navigate]);
+
+  if (!isStaff) return null;
 
   function validate() {
     const errs: Record<string, string> = {};

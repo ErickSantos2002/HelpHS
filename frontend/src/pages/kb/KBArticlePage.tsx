@@ -5,6 +5,7 @@ import { useNavigate, useParams } from "react-router-dom";
 import { toast } from "sonner";
 import { Spinner } from "../../components/ui";
 import { getApiError } from "../../lib/apiError";
+import { plural } from "../../lib/utils";
 import { useAuth } from "../../contexts/AuthContext";
 import {
   createKBComment,
@@ -391,7 +392,7 @@ export default function KBArticlePage() {
               <PropRow icon={IC.Calendar} label="Atualizado em">{formattedDate}</PropRow>
               <PropRow icon={IC.Tag} label="Categoria">{catLabel}</PropRow>
               <PropRow icon={IC.Eye} label="Visualizações">
-                {article.view_count} visualização{article.view_count !== 1 ? "ões" : ""}
+                {article.view_count} {plural(article.view_count, "visualização", "visualizações")}
               </PropRow>
             </div>
           </div>
