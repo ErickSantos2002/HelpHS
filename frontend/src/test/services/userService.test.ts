@@ -152,16 +152,14 @@ describe("updateLGPDConsent", () => {
 });
 
 describe("getTechnicians", () => {
-  it("calls GET /users with role=technician, status=active, limit=100", async () => {
+  it("calls GET /users/technicians", async () => {
     mockGet.mockResolvedValue({
       data: { items: [user], total: 1, limit: 100, offset: 0 },
     });
 
     const result = await getTechnicians();
 
-    expect(mockGet).toHaveBeenCalledWith(
-      "/users?role=technician&status=active&limit=100",
-    );
+    expect(mockGet).toHaveBeenCalledWith("/users/technicians");
     expect(result).toHaveLength(1);
   });
 });
