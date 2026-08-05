@@ -33,6 +33,7 @@ const ProfilePage = lazy(() => import("./pages/profile/ProfilePage"));
 const EquipmentPage = lazy(() => import("./pages/equipment/EquipmentPage"));
 const AuditLogsPage = lazy(() => import("./pages/audit/AuditLogsPage"));
 const SettingsPage = lazy(() => import("./pages/settings/SettingsPage"));
+const QuickRepliesPage = lazy(() => import("./pages/settings/QuickRepliesPage"));
 const ForbiddenPage = lazy(() => import("./pages/errors/ForbiddenPage"));
 const NotFoundPage = lazy(() => import("./pages/errors/NotFoundPage"));
 
@@ -92,6 +93,7 @@ function App() {
                   <Route path="/users" element={<UsersPage />} />
                   <Route path="/products" element={<ProductsPage />} />
                   <Route path="/etiquetas" element={<SettingsPage />} />
+                  <Route path="/respostas-rapidas" element={<QuickRepliesPage />} />
                   <Route path="/grupos" element={<GroupsPage />} />
                 </Route>
 

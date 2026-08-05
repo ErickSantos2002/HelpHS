@@ -87,6 +87,13 @@ function IconTag() {
     </svg>
   );
 }
+function IconChat() {
+  return (
+    <svg className="w-5 h-5 shrink-0" aria-hidden="true" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={1.75}>
+      <path strokeLinecap="round" strokeLinejoin="round" d="M8 12h.01M12 12h.01M16 12h.01M21 12c0 4.418-4.03 8-9 8a9.86 9.86 0 01-4.255-.949L3 20l1.395-3.72C3.512 15.042 3 13.574 3 12c0-4.418 4.03-8 9-8s9 3.582 9 8z" />
+    </svg>
+  );
+}
 function IconCalendar() {
   return (
     <svg className="w-5 h-5 shrink-0" aria-hidden="true" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={1.75}>
@@ -124,6 +131,7 @@ const NAV_GROUPS: NavGroup[] = [
       { label: "Relatórios", path: "/reports", icon: <IconChart />,    roles: ["admin", "technician"] },
       { label: "Agenda",     path: "/agenda",  icon: <IconCalendar />, roles: ["admin", "technician"] },
       { label: "Grupos",     path: "/grupos",  icon: <IconGroups />,   roles: ["admin", "technician"] },
+      { label: "Respostas Rápidas", path: "/respostas-rapidas", icon: <IconChat />, roles: ["admin", "technician"] },
     ],
   },
   {

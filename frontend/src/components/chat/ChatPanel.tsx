@@ -1,5 +1,11 @@
 import { useCallback, useEffect, useRef, useState } from "react";
 import { toast } from "sonner";
+import { QuickReplyPicker } from "./QuickReplyPicker";
+import {
+  listQuickReplies,
+  matchQuickReplies,
+  type QuickReply,
+} from "../../services/quickReplyService";
 import { cn } from "../../lib/utils";
 import {
   buildWsUrl,
@@ -156,6 +162,9 @@ export function ChatPanel({
   const [summarizing, setSummarizing] = useState(false);
   const [summary, setSummary] = useState<string | null>(savedSummary ?? null);
   const [showSummary, setShowSummary] = useState(false);
+  const [quickReplies, setQuickReplies] = useState<QuickReply[]>([]);
+  const [activeReply, setActiveReply] = useState(0);
+  const [pickerDismissed, setPickerDismissed] = useState(false);
 
   const wsRef = useRef<WebSocket | null>(null);
   const bottomRef = useRef<HTMLDivElement>(null);
@@ -181,6 +190,38 @@ export function ChatPanel({
       .then((res) => setMessages(res.items))
       .catch(() => setLoadError(true));
   }, [ticketId]);
+
+  // Respostas rápidas — só a equipe usa o menu "/"
+  useEffect(() => {
+    if (!isStaff) return;
+    listQuickReplies()
+      .then(setQuickReplies)
+      .catch(() => setQuickReplies([]));
+  }, [isStaff]);
+
+  // O menu abre quando a mensagem começa com "/" e ainda não foi dispensado
+  const quickReplyQuery =
+    isStaff && input.startsWith("/") && !pickerDismissed ? input.slice(1) : null;
+  const filteredReplies =
+    quickReplyQuery === null ? [] : matchQuickReplies(quickReplies, quickReplyQuery);
+  const pickerOpen = filteredReplies.length > 0;
+
+  // Volta para o topo da lista a cada tecla digitada
+  useEffect(() => {
+    setActiveReply(0);
+  }, [input]);
+
+  // Digitar "/" de novo reabre o menu depois de um Esc
+  useEffect(() => {
+    if (!input.startsWith("/")) setPickerDismissed(false);
+  }, [input]);
+
+  function applyQuickReply(reply: QuickReply) {
+    setInput(reply.content);
+    setActiveReply(0);
+    setPickerDismissed(true);
+    inputRef.current?.focus();
+  }
 
   // WebSocket lifecycle
   const connect = useCallback(() => {
@@ -253,6 +294,30 @@ export function ChatPanel({
   }
 
   function handleKeyDown(e: React.KeyboardEvent<HTMLTextAreaElement>) {
+    // Com o menu aberto as teclas pertencem a ele — Enter insere em vez de enviar
+    if (pickerOpen) {
+      if (e.key === "ArrowDown") {
+        e.preventDefault();
+        setActiveReply((i) => (i + 1) % filteredReplies.length);
+        return;
+      }
+      if (e.key === "ArrowUp") {
+        e.preventDefault();
+        setActiveReply((i) => (i - 1 + filteredReplies.length) % filteredReplies.length);
+        return;
+      }
+      if (e.key === "Enter" || e.key === "Tab") {
+        e.preventDefault();
+        applyQuickReply(filteredReplies[activeReply]);
+        return;
+      }
+      if (e.key === "Escape") {
+        e.preventDefault();
+        setPickerDismissed(true);
+        return;
+      }
+    }
+
     if (e.key === "Enter" && !e.shiftKey) {
       e.preventDefault();
       send();
@@ -517,7 +582,15 @@ export function ChatPanel({
                 </button>
               </div>
             )}
-            <div className="flex items-center gap-2">
+            <div className="relative flex items-center gap-2">
+              {pickerOpen && (
+                <QuickReplyPicker
+                  replies={filteredReplies}
+                  activeIndex={activeReply}
+                  onSelect={applyQuickReply}
+                  onHover={setActiveReply}
+                />
+              )}
               <textarea
                 ref={inputRef}
                 rows={1}
@@ -527,7 +600,11 @@ export function ChatPanel({
                   "border-border hover:border-slate-500 transition-colors leading-relaxed",
                   "overflow-hidden",
                 )}
-                placeholder="Escreva uma mensagem… (Enter para enviar)"
+                placeholder={
+                  isStaff
+                    ? "Escreva uma mensagem… (/ para respostas rápidas)"
+                    : "Escreva uma mensagem… (Enter para enviar)"
+                }
                 value={input}
                 onChange={(e) => setInput(e.target.value)}
                 onKeyDown={handleKeyDown}
