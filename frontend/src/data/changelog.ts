@@ -1,4 +1,4 @@
-export const APP_VERSION = "v1.1.0";
+export const APP_VERSION = "v1.2.0";
 
 export type EntryType = "novidade" | "corrigido" | "melhoria";
 
@@ -14,6 +14,21 @@ export interface ChangelogVersion {
 }
 
 export const CHANGELOG: ChangelogVersion[] = [
+  {
+    version: "v1.2.0",
+    date: "05/08/2026",
+    entries: [
+      { type: "novidade", text: "Artigos da Base de Conhecimento agora indicam a quais produtos se aplicam." },
+      { type: "novidade", text: "No chamado, os artigos sugeridos consideram o produto e a categoria do ticket." },
+      { type: "novidade", text: "Cliente passa a ver a aba Base de Conhecimento dentro do próprio chamado." },
+      { type: "novidade", text: "Filtro por produto na listagem da Base de Conhecimento." },
+      { type: "melhoria", text: "Qualquer técnico pode concluir e responder qualquer chamado, sem precisar ser o responsável." },
+      { type: "melhoria", text: "Etiquetas do ticket: a selecionada agora fica com a cor cheia, bem mais visível." },
+      { type: "melhoria", text: "Agenda com 16 cores padrão, organizadas em duas linhas." },
+      { type: "corrigido", text: "Etiquetas com nome comprido não estouram mais a lateral do ticket." },
+      { type: "corrigido", text: "Paginação mostrava \"Nenhum registros\" quando a lista estava vazia." },
+    ],
+  },
   {
     version: "v1.1.0",
     date: "04/08/2026",
