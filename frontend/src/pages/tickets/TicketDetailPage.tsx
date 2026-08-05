@@ -1,6 +1,6 @@
 import React, { useCallback, useEffect, useRef, useState } from "react";
 import { toast } from "sonner";
-import { getApiError } from "../../lib/apiError";
+import { toastApiError } from "../../lib/toastError";
 import { useNavigate, useParams } from "react-router-dom";
 import {
   Alert,
@@ -765,7 +765,7 @@ export default function TicketDetailPage() {
       setStatusModal(false); setNewStatus(""); setStatusComment("");
       toast.success("Status atualizado com sucesso.");
     } catch (err) {
-      toast.error(getApiError(err, "Não foi possível alterar o status."));
+      toastApiError(err, "Não foi possível alterar o status.");
     } finally { setStatusLoading(false); }
   }
 
@@ -779,7 +779,7 @@ export default function TicketDetailPage() {
       setResolveModal(false); setResolveNote("");
       toast.success("Ticket concluído com sucesso.");
     } catch (err) {
-      toast.error(getApiError(err, "Não foi possível concluir o ticket."));
+      toastApiError(err, "Não foi possível concluir o ticket.");
     } finally { setResolveLoading(false); }
   }
 
@@ -791,7 +791,7 @@ export default function TicketDetailPage() {
       setAssignModal(false); setNewAssignee("");
       toast.success(assigneeId ? "Ticket atribuído com sucesso." : "Atribuição removida.");
     } catch (err) {
-      toast.error(getApiError(err, "Não foi possível atribuir o ticket."));
+      toastApiError(err, "Não foi possível atribuir o ticket.");
     } finally { setAssignLoading(false); }
   }
 
@@ -804,7 +804,7 @@ export default function TicketDetailPage() {
       setUploadModal(false); setUploadFiles([]);
       toast.success("Anexos enviados com sucesso.");
     } catch (err) {
-      toast.error(getApiError(err, "Falha no upload. Verifique os arquivos e tente novamente."));
+      toastApiError(err, "Falha no upload. Verifique os arquivos e tente novamente.");
     } finally { setUploadLoading(false); }
   }
 
@@ -818,7 +818,7 @@ export default function TicketDetailPage() {
       setShowAddNote(false);
       toast.success("Nota adicionada.");
     } catch (err) {
-      toast.error(getApiError(err, "Não foi possível adicionar a nota."));
+      toastApiError(err, "Não foi possível adicionar a nota.");
     } finally { setNoteSaving(false); }
   }
 
@@ -830,7 +830,7 @@ export default function TicketDetailPage() {
       setTicketNotes((p) => p.filter((n) => n.id !== noteId));
       toast.success("Nota removida.");
     } catch (err) {
-      toast.error(getApiError(err, "Não foi possível remover a nota."));
+      toastApiError(err, "Não foi possível remover a nota.");
     } finally { setNoteDeleting(null); }
   }
 
@@ -842,7 +842,7 @@ export default function TicketDetailPage() {
       setObsEdit(false);
       toast.success("Observação salva.");
     } catch (err) {
-      toast.error(getApiError(err, "Não foi possível salvar a observação."));
+      toastApiError(err, "Não foi possível salvar a observação.");
     } finally { setObsSaving(false); }
   }
 
@@ -859,7 +859,7 @@ export default function TicketDetailPage() {
       setTagsEdit(false);
       toast.success("Etiquetas atualizadas.");
     } catch (err) {
-      toast.error(getApiError(err, "Não foi possível atualizar as etiquetas."));
+      toastApiError(err, "Não foi possível atualizar as etiquetas.");
     } finally { setTagsSaving(false); }
   }
 
@@ -869,7 +869,7 @@ export default function TicketDetailPage() {
       setAttachments((prev) => prev.filter((a) => a.id !== attachmentId));
       toast.success("Anexo removido.");
     } catch (err) {
-      toast.error(getApiError(err, "Não foi possível remover o anexo."));
+      toastApiError(err, "Não foi possível remover o anexo.");
     }
   }
 

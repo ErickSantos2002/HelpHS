@@ -44,13 +44,14 @@ describe("Modal", () => {
 
   it("calls onClose when backdrop is clicked", async () => {
     const onClose = vi.fn();
-    const { container } = render(
+    render(
       <Modal open onClose={onClose} title="Modal">
         <p>body</p>
       </Modal>,
     );
-    // Backdrop is the absolute div inside the fixed container
-    const backdrop = container.querySelector(".absolute.inset-0");
+    // O Modal renderiza via createPortal, então o backdrop fica no body — não no
+    // container devolvido pelo render.
+    const backdrop = document.body.querySelector(".absolute.inset-0");
     expect(backdrop).not.toBeNull();
     await userEvent.click(backdrop!);
     expect(onClose).toHaveBeenCalledTimes(1);

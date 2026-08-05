@@ -381,7 +381,7 @@ export default function AdminDashboard() {
       <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-4">
         <KpiCard
           label="CSAT médio"
-          value={avgRating === "—" ? "—" : `${avgRating} / 5`}
+          value={avgRating === "—" ? "—" : `${avgRating} / 10`}
           sub={`${surveys.total} avaliações`}
           accent="border-l-amber-400"
           iconBg="bg-amber-500/10"

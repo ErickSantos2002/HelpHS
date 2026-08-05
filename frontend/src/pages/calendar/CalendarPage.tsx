@@ -30,6 +30,28 @@ const EVENT_TYPE_COLORS: Record<CalendarEventType, string> = {
   holiday: "#ef4444",
 };
 
+/**
+ * Cores disponíveis para os eventos. As cinco primeiras são as cores padrão
+ * de cada tipo de evento; as demais servem para diferenciar eventos do mesmo tipo.
+ */
+const EVENT_COLOR_PALETTE: { value: string; label: string }[] = [
+  { value: "#6366f1", label: "Índigo" },
+  { value: "#3b82f6", label: "Azul" },
+  { value: "#10b981", label: "Verde" },
+  { value: "#f59e0b", label: "Âmbar" },
+  { value: "#ef4444", label: "Vermelho" },
+  { value: "#8b5cf6", label: "Violeta" },
+  { value: "#0ea5e9", label: "Azul-céu" },
+  { value: "#06b6d4", label: "Ciano" },
+  { value: "#14b8a6", label: "Turquesa" },
+  { value: "#84cc16", label: "Lima" },
+  { value: "#eab308", label: "Amarelo" },
+  { value: "#f97316", label: "Laranja" },
+  { value: "#ec4899", label: "Rosa" },
+  { value: "#a855f7", label: "Púrpura" },
+  { value: "#64748b", label: "Cinza" },
+];
+
 const MONTHS = [
   "Janeiro","Fevereiro","Março","Abril","Maio","Junho",
   "Julho","Agosto","Setembro","Outubro","Novembro","Dezembro",
@@ -175,31 +197,39 @@ function EventDialog({ event, defaultDate, onClose, onSaved }: EventDialogProps)
           autoFocus
         />
 
-        <div className="grid grid-cols-2 gap-3">
-          <div className="space-y-1.5">
-            <label className="text-xs font-medium text-slate-400">Tipo</label>
-            <select
-              value={eventType}
-              onChange={(e) => handleTypeChange(e.target.value as CalendarEventType)}
-              className="w-full rounded-lg border border-border bg-background-elevated px-3 py-2 text-sm text-slate-100 focus:outline-none focus:ring-2 focus:ring-primary focus:border-transparent transition-colors"
-            >
-              {(Object.keys(EVENT_TYPE_LABELS) as CalendarEventType[]).map((t) => (
-                <option key={t} value={t}>{EVENT_TYPE_LABELS[t]}</option>
-              ))}
-            </select>
-          </div>
+        <div className="space-y-1.5">
+          <label className="text-xs font-medium text-slate-400">Tipo</label>
+          <select
+            value={eventType}
+            onChange={(e) => handleTypeChange(e.target.value as CalendarEventType)}
+            className="w-full rounded-lg border border-border bg-background-elevated px-3 py-2 text-sm text-slate-100 focus:outline-none focus:ring-2 focus:ring-primary focus:border-transparent transition-colors"
+          >
+            {(Object.keys(EVENT_TYPE_LABELS) as CalendarEventType[]).map((t) => (
+              <option key={t} value={t}>{EVENT_TYPE_LABELS[t]}</option>
+            ))}
+          </select>
+        </div>
 
-          <div className="space-y-1.5">
-            <label className="text-xs font-medium text-slate-400">Cor</label>
-            <div className="flex items-center gap-2">
-              <input
-                type="color"
-                value={color}
-                onChange={(e) => { setColor(e.target.value); setColorOverride(true); }}
-                className="h-9 w-12 cursor-pointer rounded border border-border bg-transparent"
+        <div className="space-y-1.5">
+          <label className="text-xs font-medium text-slate-400">Cor</label>
+          <div className="grid grid-cols-5 gap-2 sm:grid-cols-8">
+            {EVENT_COLOR_PALETTE.map((c) => (
+              <button
+                key={c.value}
+                type="button"
+                title={c.label}
+                aria-label={c.label}
+                aria-pressed={color === c.value}
+                onClick={() => { setColor(c.value); setColorOverride(true); }}
+                className={cn(
+                  "h-8 w-full rounded-md border-2 transition-transform cursor-pointer",
+                  color === c.value
+                    ? "border-white scale-105 shadow-md"
+                    : "border-transparent hover:scale-105",
+                )}
+                style={{ backgroundColor: c.value }}
               />
-              <span className="text-xs text-slate-500 font-mono">{color}</span>
-            </div>
+            ))}
           </div>
         </div>
 
@@ -612,16 +642,6 @@ export default function CalendarPage() {
               onEventClick={(e) => setDialog({ open: true, event: e })}
             />
           )}
-
-          {/* Legend */}
-          <div className="flex flex-wrap gap-x-4 gap-y-2 pt-1">
-            {(Object.keys(EVENT_TYPE_LABELS) as CalendarEventType[]).map((type) => (
-              <div key={type} className="flex items-center gap-1.5 text-xs text-slate-500">
-                <div className="h-2.5 w-2.5 rounded-full" style={{ backgroundColor: EVENT_TYPE_COLORS[type] }} />
-                {EVENT_TYPE_LABELS[type]}
-              </div>
-            ))}
-          </div>
 
           {/* Day detail */}
           {selectedDate && (

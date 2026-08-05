@@ -284,12 +284,17 @@ async def test_get_article_increments_view_count(patch_redis):
     _override_user(tech)
     from app.core.database import get_db
 
+    # O endpoint executa três queries: busca o artigo, incrementa o view_count e
+    # recarrega o artigo depois do commit (a sessão expira os objetos no commit).
+    reloaded = _make_result(article)
+    reloaded.scalar_one.return_value = article
+
     session = _db_sequence(article)
-    # Also mock the UPDATE for view_count
     session.execute = AsyncMock(
         side_effect=[
             _make_result(article),
-            _make_result(None),  # UPDATE result
+            _make_result(None),  # UPDATE do view_count
+            reloaded,
         ]
     )
 
@@ -517,3 +522,82 @@ async def test_suggestions_returns_articles(patch_redis):
     assert r.status_code == 200
     body = r.json()
     assert len(body["items"]) >= 1
+
+
+# ═══════════════════════════════════════════════════════════════
+# DELETE /kb/comments/{id}
+# ═══════════════════════════════════════════════════════════════
+
+
+def _mock_comment(author_id=None):
+    c = MagicMock()
+    c.id = uuid.uuid4()
+    c.article_id = _ARTICLE_ID
+    c.author_id = author_id or uuid.uuid4()
+    c.content = "Comentário do cliente"
+    c.parent_id = None
+    c.created_at = _NOW
+    c.updated_at = _NOW
+    return c
+
+
+@pytest.mark.asyncio
+async def test_tecnico_exclui_comentario_de_outro_usuario(patch_redis):
+    """Técnico modera a KB: pode excluir comentário de qualquer autor."""
+    tech = _mock_user(UserRole.technician)
+    comment = _mock_comment()  # autor diferente do técnico
+    _override_user(tech)
+    from app.core.database import get_db
+
+    app.dependency_overrides[get_db] = _db_seq_override(comment)
+
+    async with AsyncClient(transport=ASGITransport(app=app), base_url="http://test") as client:
+        r = await client.delete(f"/api/v1/kb/comments/{comment.id}")
+
+    assert r.status_code == 204
+
+
+@pytest.mark.asyncio
+async def test_admin_exclui_comentario_de_outro_usuario(patch_redis):
+    admin = _mock_user(UserRole.admin)
+    comment = _mock_comment()
+    _override_user(admin)
+    from app.core.database import get_db
+
+    app.dependency_overrides[get_db] = _db_seq_override(comment)
+
+    async with AsyncClient(transport=ASGITransport(app=app), base_url="http://test") as client:
+        r = await client.delete(f"/api/v1/kb/comments/{comment.id}")
+
+    assert r.status_code == 204
+
+
+@pytest.mark.asyncio
+async def test_cliente_exclui_o_proprio_comentario(patch_redis):
+    client_user = _mock_user(UserRole.client)
+    comment = _mock_comment(author_id=client_user.id)
+    _override_user(client_user)
+    from app.core.database import get_db
+
+    app.dependency_overrides[get_db] = _db_seq_override(comment)
+
+    async with AsyncClient(transport=ASGITransport(app=app), base_url="http://test") as client:
+        r = await client.delete(f"/api/v1/kb/comments/{comment.id}")
+
+    assert r.status_code == 204
+
+
+@pytest.mark.asyncio
+async def test_cliente_nao_exclui_comentario_de_outro(patch_redis):
+    client_user = _mock_user(UserRole.client)
+    comment = _mock_comment()  # de outra pessoa
+    _override_user(client_user)
+    from app.core.database import get_db
+
+    app.dependency_overrides[get_db] = _db_seq_override(comment)
+
+    async with AsyncClient(transport=ASGITransport(app=app), base_url="http://test") as client:
+        r = await client.delete(f"/api/v1/kb/comments/{comment.id}")
+
+    assert r.status_code == 403
+    assert "próprios comentários" in r.json()["detail"]

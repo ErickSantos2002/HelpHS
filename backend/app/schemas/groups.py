@@ -3,10 +3,7 @@
 import uuid
 from datetime import datetime
 
-from pydantic import field_validator
-
 from app.schemas.base import AppBaseModel
-
 
 # ── Group schemas ─────────────────────────────────────────────
 

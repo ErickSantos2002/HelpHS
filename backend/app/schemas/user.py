@@ -2,6 +2,7 @@
 Pydantic v2 schemas for User endpoints.
 """
 
+import re
 import uuid
 from datetime import datetime
 
@@ -68,11 +69,27 @@ class LGPDConsentUpdate(AppBaseModel):
 
 class OnboardingUpdate(AppBaseModel):
     company_name: str = Field(..., min_length=1, max_length=255)
-    cnpj: str | None = Field(default=None, max_length=18)
-    company_cep: str | None = Field(default=None, max_length=9)
+    cnpj: str = Field(..., max_length=18)
+    company_cep: str = Field(..., max_length=9)
     company_address: str | None = Field(default=None, max_length=255)
     company_city: str | None = Field(default=None, max_length=100)
     company_state: str | None = Field(default=None, max_length=2)
+
+    @field_validator("cnpj")
+    @classmethod
+    def cnpj_deve_ter_14_digitos(cls, v: str) -> str:
+        digits = re.sub(r"\D", "", v)
+        if len(digits) != 14:
+            raise ValueError("O CNPJ deve conter 14 dígitos.")
+        return digits
+
+    @field_validator("company_cep")
+    @classmethod
+    def cep_deve_ter_8_digitos(cls, v: str) -> str:
+        digits = re.sub(r"\D", "", v)
+        if len(digits) != 8:
+            raise ValueError("O CEP deve conter 8 dígitos.")
+        return digits
 
 
 class UserResponse(AppBaseModel):

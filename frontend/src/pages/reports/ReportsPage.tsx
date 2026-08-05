@@ -14,6 +14,7 @@ import {
   YAxis,
 } from "recharts";
 import { FilterSelect, Spinner } from "../../components/ui";
+import { plural } from "../../lib/utils";
 import { useAuth } from "../../contexts/AuthContext";
 import { useTheme } from "../../contexts/ThemeContext";
 import {
@@ -72,7 +73,11 @@ const CATEGORY_LABELS: Record<string, string> = {
   access: "Acesso",   email: "E-mail",       security: "Segurança",
   general: "Geral",   other: "Outro",
 };
-const CSAT_COLORS = ["#ef4444", "#f97316", "#eab308", "#84cc16", "#22c55e"];
+// Uma cor por nota da pesquisa de satisfação (escala de 1 a 10), do pior ao melhor
+const CSAT_COLORS = [
+  "#dc2626", "#ef4444", "#f97316", "#fb923c", "#eab308",
+  "#facc15", "#a3e635", "#84cc16", "#4ade80", "#22c55e",
+];
 
 const WEEKDAY_LABELS: Record<number, string> = {
   1: "Seg", 2: "Ter", 3: "Qua", 4: "Qui", 5: "Sex", 6: "Sáb", 7: "Dom",
@@ -474,8 +479,8 @@ function GlobalReport({ data }: { data: ReportData; period?: number }) {
           sub={`últimos ${data.period_days} dias`}
           delta={<Delta current={data.total_tickets} prev={cmp?.total_tickets ?? null} />} />
         <StatCard label="Média CSAT"
-          value={data.csat_average ? `${data.csat_average} / 5` : "—"}
-          sub={`${totalCsat} avaliação${totalCsat !== 1 ? "ões" : ""}`}
+          value={data.csat_average ? `${data.csat_average} / 10` : "—"}
+          sub={`${totalCsat} ${plural(totalCsat, "avaliação", "avaliações")}`}
           delta={data.csat_average != null && cmp?.csat_average != null
             ? <Delta current={data.csat_average * 10} prev={cmp.csat_average * 10} />
             : undefined} />
@@ -564,19 +569,19 @@ function GlobalReport({ data }: { data: ReportData; period?: number }) {
           </ResponsiveContainer>
         </ChartCard>
 
-        <ChartCard title="Distribuição CSAT (1–5)">
+        <ChartCard title="Distribuição CSAT (1–10)">
           <ResponsiveContainer width="100%" height={240}>
             <BarChart data={data.csat_distribution} margin={{ top: 4, right: 4, left: -20, bottom: 0 }}>
               <CartesianGrid strokeDasharray="3 3" stroke="#2d3748" />
               <XAxis dataKey="rating" tick={{ fontSize: 10, fill: "#94a3b8" }}
-                tickFormatter={(v: number) => `★ ${v}`} />
+                tickFormatter={(v: number) => String(v)} />
               <YAxis tick={{ fontSize: 10, fill: "#94a3b8" }} allowDecimals={false} />
               <Tooltip
                 cursor={{ fill: gridColor }}
                 wrapperStyle={tooltipWrapperStyle}
                 content={({ active, payload, label }) => (
                   <BarTooltip active={active} payload={payload as unknown as { value: number }[]} label={String(label ?? "")}
-                    labelFn={(v) => { const n = Number(v ?? 0); return `${n} estrela${n !== 1 ? "s" : ""}`; }}
+                    labelFn={(v) => `Nota ${Number(v ?? 0)}`}
                     valueFn={(v) => String(v ?? 0)}
                     valueLabel="Avaliações" />
                 )} />
@@ -642,9 +647,9 @@ function GlobalReport({ data }: { data: ReportData; period?: number }) {
               <XAxis dataKey="date" tick={{ fontSize: 10, fill: "#94a3b8" }}
                 tickFormatter={(v: string) => v.slice(5)}
                 interval={Math.max(1, Math.floor(data.csat_by_day.length / 6))} />
-              <YAxis tick={{ fontSize: 10, fill: "#94a3b8" }} domain={[1, 5]} ticks={[1, 2, 3, 4, 5]} />
-              <ReferenceLine y={4} stroke="#10b981" strokeDasharray="4 3"
-                label={{ value: "Meta 4.0", fill: "#10b981", fontSize: 10, position: "insideTopRight" }} />
+              <YAxis tick={{ fontSize: 10, fill: "#94a3b8" }} domain={[1, 10]} ticks={[1, 2, 3, 4, 5, 6, 7, 8, 9, 10]} />
+              <ReferenceLine y={8} stroke="#10b981" strokeDasharray="4 3"
+                label={{ value: "Meta 8.0", fill: "#10b981", fontSize: 10, position: "insideTopRight" }} />
               <Tooltip contentStyle={tooltipStyle} wrapperStyle={tooltipWrapperStyle}
                 labelFormatter={(v) => `Data: ${v}`}
                 formatter={(v, _, props: { payload?: CsatDailyItem }) => [
@@ -742,11 +747,11 @@ function TechnicianDetail({ data }: { data: TechnicianDetailReport }) {
           sub={data.total_assigned > 0 ? `${Math.round((data.resolved / data.total_assigned) * 100)}% do total` : "—"}
           colorCls="text-success-700 dark:text-success-400" />
         <StatCard label="Conformidade SLA"  value={`${data.sla_compliance_rate}%`}
-          sub={`${data.sla_breached} violação${data.sla_breached !== 1 ? "ões" : ""}`}
+          sub={`${data.sla_breached} ${plural(data.sla_breached, "violação", "violações")}`}
           colorCls={slaColor(data.sla_compliance_rate)} />
         <StatCard label="CSAT médio"
-          value={data.csat_average ? `${data.csat_average} / 5` : "—"}
-          sub={data.csat_count > 0 ? `${data.csat_count} avaliação${data.csat_count !== 1 ? "ões" : ""}` : "sem avaliações"} />
+          value={data.csat_average ? `${data.csat_average} / 10` : "—"}
+          sub={data.csat_count > 0 ? `${data.csat_count} ${plural(data.csat_count, "avaliação", "avaliações")}` : "sem avaliações"} />
       </div>
 
       <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-3">

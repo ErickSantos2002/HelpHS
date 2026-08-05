@@ -195,9 +195,22 @@ async def test_get_reports_period_out_of_range(patch_redis):
     _make_client_with_actor(_ADMIN)
 
     async with AsyncClient(transport=ASGITransport(app=app), base_url="http://test") as c:
-        resp = await c.get("/api/v1/dashboard/reports?period=6")  # min is 7
+        resp = await c.get("/api/v1/dashboard/reports?period=366")  # limite é 365
 
     assert resp.status_code == 422
+
+
+@pytest.mark.asyncio
+async def test_csat_distribution_cobre_as_notas_de_1_a_10(patch_redis):
+    """A pesquisa usa escala de 1 a 10 — o relatório precisa listar as 10 notas."""
+    _make_client_with_actor(_ADMIN)
+
+    async with AsyncClient(transport=ASGITransport(app=app), base_url="http://test") as c:
+        resp = await c.get("/api/v1/dashboard/reports")
+
+    assert resp.status_code == 200
+    distribution = resp.json()["csat_distribution"]
+    assert [item["rating"] for item in distribution] == list(range(1, 11))
 
 
 # ── CSV Export ────────────────────────────────────────────────

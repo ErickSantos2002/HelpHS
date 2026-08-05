@@ -25,8 +25,10 @@ export interface UserSummary {
 
 export interface OnboardingPayload {
   company_name: string;
-  cnpj: string | null;
-  company_cep: string | null;
+  /** Obrigatório: 14 dígitos, sem máscara. */
+  cnpj: string;
+  /** Obrigatório: 8 dígitos, sem máscara. */
+  company_cep: string;
   company_address: string | null;
   company_city: string | null;
   company_state: string | null;

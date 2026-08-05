@@ -86,6 +86,9 @@ async def create_user(
         department=body.department,
         lgpd_consent=body.lgpd_consent,
         lgpd_consent_at=ts if body.lgpd_consent else None,
+        # Explícito: o default da coluna só seria aplicado no INSERT, e a resposta
+        # é montada a partir do objeto em memória
+        onboarding_completed=False,
         created_at=ts,
         updated_at=ts,
     )
@@ -183,12 +186,12 @@ async def get_user(
     # Only admin/technician can view any user; others only their own profile
     is_staff = current_user.role in (UserRole.admin, UserRole.technician)
     if not is_staff and current_user.id != user_id:
-        raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="Access denied")
+        raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="Você não tem permissão para acessar este item.")
 
     result = await db.execute(select(User).where(User.id == user_id))
     user = result.scalar_one_or_none()
     if not user:
-        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="User not found")
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Usuário não encontrado.")
 
     return _to_response(user)
 
@@ -205,7 +208,7 @@ async def update_me(
     result = await db.execute(select(User).where(User.id == current_user.id))
     user = result.scalar_one_or_none()
     if not user:
-        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="User not found")
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Usuário não encontrado.")
 
     update_data = body.model_dump(exclude_unset=True, exclude={"role"})
     for field, value in update_data.items():
@@ -228,8 +231,8 @@ async def upload_avatar(
     current_user: Annotated[User, Depends(get_current_user)],
     settings: Annotated[Settings, Depends(get_settings)],
 ) -> UserResponse:
-    ALLOWED = {"image/jpeg", "image/png", "image/gif", "image/webp"}
-    if file.content_type not in ALLOWED:
+    allowed_types = {"image/jpeg", "image/png", "image/gif", "image/webp"}
+    if file.content_type not in allowed_types:
         raise HTTPException(
             status_code=status.HTTP_422_UNPROCESSABLE_ENTITY,
             detail="Formato inválido. Use JPG, PNG, GIF ou WebP.",
@@ -250,7 +253,7 @@ async def upload_avatar(
     result = await db.execute(select(User).where(User.id == current_user.id))
     user = result.scalar_one_or_none()
     if not user:
-        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="User not found")
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Usuário não encontrado.")
 
     user.avatar_url = key
     user.updated_at = datetime.now(UTC)
@@ -275,7 +278,7 @@ async def complete_onboarding(
     result = await db.execute(select(User).where(User.id == current_user.id))
     user = result.scalar_one_or_none()
     if not user:
-        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="User not found")
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Usuário não encontrado.")
 
     user.company_name = body.company_name
     user.cnpj = body.cnpj
@@ -304,7 +307,7 @@ async def change_password(
     result = await db.execute(select(User).where(User.id == current_user.id))
     user = result.scalar_one_or_none()
     if not user:
-        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="User not found")
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Usuário não encontrado.")
 
     if not verify_password(body.current_password, user.password):
         raise HTTPException(
@@ -331,17 +334,17 @@ async def update_user(
     # Admin/technician can edit any user; others only themselves. Only admin can change role.
     is_staff = current_user.role in (UserRole.admin, UserRole.technician)
     if not is_staff and current_user.id != user_id:
-        raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="Access denied")
+        raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="Você não tem permissão para acessar este item.")
     if current_user.role != UserRole.admin and body.role is not None:
         raise HTTPException(
             status_code=status.HTTP_403_FORBIDDEN,
-            detail="Only admins can change roles",
+            detail="Apenas administradores podem alterar o tipo de usuário.",
         )
 
     result = await db.execute(select(User).where(User.id == user_id))
     user = result.scalar_one_or_none()
     if not user:
-        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="User not found")
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Usuário não encontrado.")
 
     update_data = body.model_dump(exclude_unset=True)
     for field, value in update_data.items():
@@ -372,7 +375,7 @@ async def update_user_status(
     result = await db.execute(select(User).where(User.id == user_id))
     user = result.scalar_one_or_none()
     if not user:
-        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="User not found")
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Usuário não encontrado.")
 
     user.status = body.status
     _audit(db, AuditAction.status_change, actor.id, user.id)
@@ -393,7 +396,7 @@ async def update_lgpd_consent(
     result = await db.execute(select(User).where(User.id == current_user.id))
     user = result.scalar_one_or_none()
     if not user:
-        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="User not found")
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Usuário não encontrado.")
 
     user.lgpd_consent = body.lgpd_consent
     user.lgpd_consent_at = datetime.now(UTC) if body.lgpd_consent else None
@@ -423,7 +426,7 @@ async def anonymize_user(
     result = await db.execute(select(User).where(User.id == user_id))
     user = result.scalar_one_or_none()
     if not user:
-        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="User not found")
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Usuário não encontrado.")
 
     if user.status == UserStatus.anonymized:
         raise HTTPException(
@@ -474,7 +477,7 @@ async def delete_user(
     result = await db.execute(select(User).where(User.id == user_id))
     user = result.scalar_one_or_none()
     if not user:
-        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="User not found")
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Usuário não encontrado.")
 
     ticket_count = (
         await db.execute(

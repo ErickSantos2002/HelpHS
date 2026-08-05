@@ -39,6 +39,7 @@ from app.models.models import (
     TicketStatus,
     User,
     UserRole,
+    UserStatus,
     ticket_tags,
 )
 from app.schemas.ticket import (
@@ -418,7 +419,7 @@ async def get_ticket(
     ticket = await get_or_404(db, Ticket, ticket_id, "Ticket not found")
 
     if actor.role == UserRole.client and ticket.creator_id != actor.id:
-        raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="Access denied")
+        raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="Você não tem permissão para acessar este item.")
 
     response = TicketResponse.model_validate(ticket)
     if ticket.assignee_id:
@@ -475,14 +476,14 @@ async def update_client_observation(
 
     if actor.role == UserRole.client:
         if ticket.creator_id != actor.id:
-            raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="Access denied")
+            raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="Você não tem permissão para acessar este item.")
         if ticket.status in (TicketStatus.closed, TicketStatus.cancelled):
             raise HTTPException(
                 status_code=status.HTTP_409_CONFLICT,
                 detail="Cannot edit observation on a closed or cancelled ticket",
             )
     elif actor.role == UserRole.technician:
-        raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="Access denied")
+        raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="Você não tem permissão para acessar este item.")
 
     old = ticket.client_observation
     ticket.client_observation = body.client_observation
@@ -658,14 +659,47 @@ async def assign_ticket(
     actor: Annotated[User, Depends(authorize(UserRole.admin, UserRole.technician))],
     settings: Annotated[Settings, Depends(get_settings)],
 ) -> TicketResponse:
-    ticket = await get_or_404(db, Ticket, ticket_id, "Ticket not found")
+    ticket = await get_or_404(
+        db, Ticket, ticket_id, "Ticket não encontrado. Ele pode ter sido excluído."
+    )
+
+    if ticket.status in (TicketStatus.closed, TicketStatus.cancelled):
+        situacao = "fechado" if ticket.status == TicketStatus.closed else "cancelado"
+        raise HTTPException(
+            status_code=status.HTTP_409_CONFLICT,
+            detail=(
+                f"Este ticket está {situacao} e não pode ser reatribuído. "
+                "Reabra o ticket antes de atribuí-lo a outro técnico."
+            ),
+        )
 
     new_assignee_user: User | None = None
     if body.assignee_id is not None:
         result = await db.execute(select(User).where(User.id == body.assignee_id))
         new_assignee_user = result.scalar_one_or_none()
         if not new_assignee_user:
-            raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Assignee not found")
+            raise HTTPException(
+                status_code=status.HTTP_404_NOT_FOUND,
+                detail="O técnico selecionado não existe mais no sistema.",
+            )
+        if new_assignee_user.role not in (UserRole.admin, UserRole.technician):
+            raise HTTPException(
+                status_code=status.HTTP_422_UNPROCESSABLE_ENTITY,
+                detail="Tickets só podem ser atribuídos a técnicos ou administradores.",
+            )
+        if new_assignee_user.status != UserStatus.active:
+            raise HTTPException(
+                status_code=status.HTTP_422_UNPROCESSABLE_ENTITY,
+                detail=(
+                    f"{new_assignee_user.name} está com o cadastro inativo e não pode "
+                    "receber tickets."
+                ),
+            )
+        if ticket.assignee_id == body.assignee_id:
+            raise HTTPException(
+                status_code=status.HTTP_409_CONFLICT,
+                detail=f"Este ticket já está atribuído a {new_assignee_user.name}.",
+            )
 
     old_assignee = ticket.assignee_id
     ticket.assignee_id = body.assignee_id
@@ -820,7 +854,7 @@ async def get_ticket_history(
     ticket = await get_or_404(db, Ticket, ticket_id, "Ticket not found")
 
     if actor.role == UserRole.client and ticket.creator_id != actor.id:
-        raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="Access denied")
+        raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="Você não tem permissão para acessar este item.")
 
     base = select(TicketHistory).where(TicketHistory.ticket_id == ticket_id)
     total = (await db.execute(select(func.count()).select_from(base.subquery()))).scalar_one()

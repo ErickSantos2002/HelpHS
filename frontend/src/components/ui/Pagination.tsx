@@ -43,7 +43,7 @@ export function Pagination({
       <div className="hidden md:flex items-center justify-between text-sm text-slate-500 dark:text-slate-400">
         <span>
           {total === 0
-            ? `Nenhum ${itemLabel}`
+            ? "Nenhum resultado"
             : `Mostrando ${from} a ${to} de ${total} ${itemLabel}`}
         </span>
 
@@ -70,13 +70,13 @@ export function Pagination({
       <div className="flex flex-col items-center gap-2 text-sm text-slate-500 dark:text-slate-400 md:hidden">
         <span>
           {total === 0
-            ? `Nenhum ${itemLabel}`
+            ? "Nenhum resultado"
             : `${from}–${to} de ${total} ${itemLabel}`}
         </span>
         <div className="flex items-center gap-2">
-          <NavBtn onClick={() => onPageChange(page - 1)} disabled={!hasPrev}>‹</NavBtn>
+          <NavBtn onClick={() => onPageChange(page - 1)} disabled={!hasPrev} ariaLabel="Página anterior">‹</NavBtn>
           <PageBtn active>{page}</PageBtn>
-          <NavBtn onClick={() => onPageChange(page + 1)} disabled={!hasNext}>›</NavBtn>
+          <NavBtn onClick={() => onPageChange(page + 1)} disabled={!hasNext} ariaLabel="Próxima página">›</NavBtn>
         </div>
       </div>
     </div>
@@ -89,15 +89,19 @@ function NavBtn({
   children,
   onClick,
   disabled,
+  ariaLabel,
 }: {
   children: React.ReactNode;
   onClick: () => void;
   disabled?: boolean;
+  /** Necessário nos botões que mostram só o chevron (layout mobile). */
+  ariaLabel?: string;
 }) {
   return (
     <button
       onClick={onClick}
       disabled={disabled}
+      aria-label={ariaLabel}
       className={cn(
         "rounded-lg border border-border bg-background-surface px-3 py-1.5 text-sm font-medium transition-colors cursor-pointer",
         "text-slate-300 hover:bg-background-elevated hover:text-slate-100",

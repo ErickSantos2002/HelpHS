@@ -126,7 +126,11 @@ async def test_login_success(client_ok):
     assert "access_token" in data
     assert "refresh_token" in data
     assert data["token_type"] == "bearer"
-    assert data["expires_in"] == 15 * 60
+    # O TTL vem da configuração; comparar com ela evita quebrar o teste toda vez
+    # que a política de expiração muda
+    from app.core.config import get_settings
+
+    assert data["expires_in"] == get_settings().jwt_access_token_expires_minutes * 60
 
 
 @pytest.mark.asyncio

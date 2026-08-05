@@ -23,6 +23,7 @@ from app.routers import (
     kb,
     notifications,
     products,
+    quick_replies,
     sla,
     surveys,
     tags,
@@ -100,6 +101,7 @@ app.include_router(tags.router, prefix=settings.api_prefix)
 app.include_router(dashboard.router, prefix=settings.api_prefix)
 app.include_router(groups.router, prefix=settings.api_prefix)
 app.include_router(calendar.router, prefix=settings.api_prefix)
+app.include_router(quick_replies.router, prefix=settings.api_prefix)
 
 
 @app.get("/health", tags=["Health"])

@@ -251,7 +251,7 @@ function CreateModal({ onClose, onSaved }: { onClose: () => void; onSaved: (u: U
         <Input
           label="Senha *"
           type="password"
-          placeholder="Mín. 8 chars, 1 maiúscula, 1 número"
+          placeholder="Mín. 8 caracteres, 1 maiúscula, 1 número"
           error={form.formState.errors.password?.message}
           {...form.register("password")}
         />

@@ -233,7 +233,7 @@ async def test_submit_survey_ticket_not_resolved(patch_redis):
         )
 
     assert resp.status_code == 409
-    assert "resolved or closed" in resp.json()["detail"]
+    assert "resolvido ou fechado" in resp.json()["detail"]
 
 
 @pytest.mark.asyncio
@@ -279,7 +279,7 @@ async def test_submit_survey_duplicate(patch_redis):
         )
 
     assert resp.status_code == 409
-    assert "already submitted" in resp.json()["detail"]
+    assert "já foi avaliado" in resp.json()["detail"]
 
 
 @pytest.mark.asyncio
@@ -293,7 +293,7 @@ async def test_submit_survey_invalid_rating(patch_redis):
     async with AsyncClient(transport=ASGITransport(app=app), base_url="http://test") as c:
         resp = await c.post(
             f"/api/v1/tickets/{_TICKET_ID}/survey",
-            json={"rating": 6},  # out of range
+            json={"rating": 11},  # fora da escala (1 a 10)
         )
 
     assert resp.status_code == 422

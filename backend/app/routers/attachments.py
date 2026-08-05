@@ -59,7 +59,7 @@ async def _get_attachment_or_404(attachment_id: uuid.UUID, db: AsyncSession) -> 
 
 def _check_ticket_access(ticket: Ticket, actor: User) -> None:
     if actor.role == UserRole.client and ticket.creator_id != actor.id:
-        raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="Access denied")
+        raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="Você não tem permissão para acessar este item.")
 
 
 def _validate_file(
@@ -105,7 +105,7 @@ async def upload_attachments(
     if ticket.status in _TERMINAL_STATUSES:
         raise HTTPException(
             status_code=status.HTTP_409_CONFLICT,
-            detail="Cannot add attachments to a closed or cancelled ticket",
+            detail="Não é possível anexar arquivos a um ticket fechado ou cancelado.",
         )
 
     # Check total attachment count

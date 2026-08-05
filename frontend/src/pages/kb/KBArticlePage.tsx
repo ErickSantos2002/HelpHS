@@ -3,8 +3,9 @@ import { marked } from "marked";
 import { useEffect, useRef, useState } from "react";
 import { useNavigate, useParams } from "react-router-dom";
 import { toast } from "sonner";
+import { toastApiError } from "../../lib/toastError";
 import { Spinner } from "../../components/ui";
-import { getApiError } from "../../lib/apiError";
+import { plural } from "../../lib/utils";
 import { useAuth } from "../../contexts/AuthContext";
 import {
   createKBComment,
@@ -244,7 +245,7 @@ export default function KBArticlePage() {
       const comment = await createKBComment(id, content);
       setComments((prev) => [comment, ...prev]);
     } catch (err) {
-      toast.error(getApiError(err, "Não foi possível salvar o comentário."));
+      toastApiError(err, "Não foi possível salvar o comentário.");
       throw new Error("comment_failed");
     }
   }
@@ -255,7 +256,7 @@ export default function KBArticlePage() {
       const reply = await createKBComment(id, content, parentId);
       setComments((prev) => prev.map((c) => c.id === parentId ? { ...c, replies: [...c.replies, reply] } : c));
     } catch (err) {
-      toast.error(getApiError(err, "Não foi possível salvar a resposta."));
+      toastApiError(err, "Não foi possível salvar a resposta.");
       throw new Error("reply_failed");
     }
   }
@@ -391,7 +392,7 @@ export default function KBArticlePage() {
               <PropRow icon={IC.Calendar} label="Atualizado em">{formattedDate}</PropRow>
               <PropRow icon={IC.Tag} label="Categoria">{catLabel}</PropRow>
               <PropRow icon={IC.Eye} label="Visualizações">
-                {article.view_count} visualização{article.view_count !== 1 ? "ões" : ""}
+                {article.view_count} {plural(article.view_count, "visualização", "visualizações")}
               </PropRow>
             </div>
           </div>

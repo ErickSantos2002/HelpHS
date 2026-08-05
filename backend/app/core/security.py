@@ -135,7 +135,7 @@ async def get_current_user(
 
     credentials_exc = HTTPException(
         status_code=status.HTTP_401_UNAUTHORIZED,
-        detail="Could not validate credentials",
+        detail="Sua sessão não é mais válida. Entre novamente para continuar.",
         headers={"WWW-Authenticate": "Bearer"},
     )
 
@@ -173,7 +173,7 @@ async def get_current_user(
     if user.status != UserStatus.active:
         raise HTTPException(
             status_code=status.HTTP_403_FORBIDDEN,
-            detail="User account is inactive",
+            detail="Esta conta está inativa. Fale com um administrador.",
         )
 
     return user
@@ -203,7 +203,7 @@ def authorize(*roles):
         if user.role not in allowed:
             raise HTTPException(
                 status_code=status.HTTP_403_FORBIDDEN,
-                detail="You do not have permission to perform this action",
+                detail="Você não tem permissão para realizar esta ação.",
             )
         return user
 

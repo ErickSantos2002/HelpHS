@@ -9,6 +9,7 @@ Permissões:
 """
 
 import uuid
+from datetime import UTC, datetime
 from typing import Annotated
 
 from fastapi import APIRouter, Depends, HTTPException, Query, status
@@ -16,7 +17,7 @@ from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.core.database import get_db
-from app.core.security import authorize, get_current_user
+from app.core.security import authorize
 from app.models.models import CalendarEvent, User, UserRole
 from app.schemas.calendar import (
     CalendarEventCreate,
@@ -48,12 +49,11 @@ async def list_events(
     stmt = select(CalendarEvent).order_by(CalendarEvent.start_date)
 
     if year and month:
-        from datetime import datetime, timezone
-        start = datetime(year, month, 1, tzinfo=timezone.utc)
+        start = datetime(year, month, 1, tzinfo=UTC)
         if month == 12:
-            end = datetime(year + 1, 1, 1, tzinfo=timezone.utc)
+            end = datetime(year + 1, 1, 1, tzinfo=UTC)
         else:
-            end = datetime(year, month + 1, 1, tzinfo=timezone.utc)
+            end = datetime(year, month + 1, 1, tzinfo=UTC)
         stmt = stmt.where(CalendarEvent.start_date < end, CalendarEvent.end_date >= start)
 
     rows = await db.execute(stmt)
@@ -88,9 +88,10 @@ async def create_event(
     if body.end_date < body.start_date:
         raise HTTPException(
             status_code=status.HTTP_422_UNPROCESSABLE_ENTITY,
-            detail="end_date must be >= start_date",
+            detail="A data de fim precisa ser igual ou posterior à data de início.",
         )
 
+    now = datetime.now(UTC)
     event = CalendarEvent(
         id=uuid.uuid4(),
         title=body.title,
@@ -100,6 +101,10 @@ async def create_event(
         start_date=body.start_date,
         end_date=body.end_date,
         created_by=actor.id,
+        # Explícito: o default da coluna só valeria no INSERT e a resposta é
+        # montada a partir do objeto em memória
+        created_at=now,
+        updated_at=now,
     )
     event.creator = actor
     db.add(event)
@@ -122,7 +127,7 @@ async def update_event(
     result = await db.execute(select(CalendarEvent).where(CalendarEvent.id == event_id))
     event = result.scalar_one_or_none()
     if not event:
-        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Event not found")
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Evento não encontrado. Ele pode ter sido removido da agenda.")
 
     if body.title is not None:
         event.title = body.title
@@ -140,7 +145,7 @@ async def update_event(
     if event.end_date < event.start_date:
         raise HTTPException(
             status_code=status.HTTP_422_UNPROCESSABLE_ENTITY,
-            detail="end_date must be >= start_date",
+            detail="A data de fim precisa ser igual ou posterior à data de início.",
         )
 
     await db.commit()
@@ -165,7 +170,7 @@ async def delete_event(
     result = await db.execute(select(CalendarEvent).where(CalendarEvent.id == event_id))
     event = result.scalar_one_or_none()
     if not event:
-        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Event not found")
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Evento não encontrado. Ele pode ter sido removido da agenda.")
 
     await db.delete(event)
     await db.commit()

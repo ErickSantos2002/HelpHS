@@ -631,7 +631,7 @@ class SatisfactionSurvey(Base):
         UUID(as_uuid=True), ForeignKey("tickets.id", ondelete="CASCADE"), unique=True, index=True
     )
     user_id: Mapped[uuid.UUID] = mapped_column(UUID(as_uuid=True), ForeignKey("users.id"))
-    rating: Mapped[int] = mapped_column(SmallInteger, nullable=False)  # 1 a 5
+    rating: Mapped[int] = mapped_column(SmallInteger, nullable=False)  # 1 a 10
     comment: Mapped[str | None] = mapped_column(Text)
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now())
 
@@ -709,6 +709,25 @@ class Tag(Base):
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now())
 
     tickets: Mapped[list["Ticket"]] = relationship(secondary=ticket_tags, back_populates="tags")
+
+
+class QuickReply(Base):
+    """Mensagens prontas que o técnico insere no chat digitando /atalho"""
+
+    __tablename__ = "quick_replies"
+
+    id: Mapped[uuid.UUID] = mapped_column(UUID(as_uuid=True), primary_key=True, default=uuid.uuid4)
+    shortcut: Mapped[str] = mapped_column(String(50), unique=True, nullable=False, index=True)
+    title: Mapped[str] = mapped_column(String(120), nullable=False)
+    content: Mapped[str] = mapped_column(Text, nullable=False)
+    is_active: Mapped[bool] = mapped_column(Boolean, default=True, nullable=False)
+    created_by: Mapped[uuid.UUID | None] = mapped_column(
+        UUID(as_uuid=True), ForeignKey("users.id", ondelete="SET NULL"), nullable=True
+    )
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now())
+    updated_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), server_default=func.now(), onupdate=func.now()
+    )
 
 
 class CalendarEvent(Base):

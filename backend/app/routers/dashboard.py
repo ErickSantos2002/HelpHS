@@ -11,7 +11,8 @@ Permissões:
 import csv
 import io
 import uuid
-from datetime import UTC, date as DateType, datetime, timedelta
+from datetime import UTC, datetime, timedelta
+from datetime import date as date_type
 from typing import Annotated
 
 from fastapi import APIRouter, Depends, HTTPException, Query, status
@@ -38,6 +39,29 @@ from app.models.models import (
     User,
     UserRole,
     UserStatus,
+)
+from app.schemas.dashboard import (
+    AvgFirstResponseItem,
+    AvgResolutionItem,
+    CategoryCount,
+    CsatDailyItem,
+    CSATDistributionItem,
+    DailyCount,
+    DashboardStats,
+    HourlyCount,
+    OldestTicketItem,
+    ProductCount,
+    ReportComparison,
+    ReportData,
+    SLAComplianceItem,
+    SlaStats,
+    SurveyStats,
+    TechnicianDetailReport,
+    TechnicianDistItem,
+    TechnicianListReport,
+    TechnicianSummary,
+    TicketStats,
+    WeekdayCount,
 )
 
 # ── SLA breach expressions (calculadas em tempo real via SQL) ──
@@ -75,30 +99,6 @@ def _response_breached_cond():
         ),
     )
 
-
-from app.schemas.dashboard import (
-    AvgFirstResponseItem,
-    AvgResolutionItem,
-    CategoryCount,
-    CsatDailyItem,
-    CSATDistributionItem,
-    DailyCount,
-    DashboardStats,
-    HourlyCount,
-    OldestTicketItem,
-    ProductCount,
-    ReportComparison,
-    ReportData,
-    SLAComplianceItem,
-    SlaStats,
-    SurveyStats,
-    TechnicianDetailReport,
-    TechnicianDistItem,
-    TechnicianListReport,
-    TechnicianSummary,
-    TicketStats,
-    WeekdayCount,
-)
 
 router = APIRouter(tags=["Dashboard"])
 
@@ -193,8 +193,8 @@ async def _build_report(
     period: int = 30,
     category: TicketCategory | None = None,
     priority: TicketPriority | None = None,
-    start_date: DateType | None = None,
-    end_date: DateType | None = None,
+    start_date: date_type | None = None,
+    end_date: date_type | None = None,
 ) -> ReportData:
     """Shared data collection used by JSON, CSV and PDF endpoints."""
     if start_date and end_date:
@@ -303,8 +303,9 @@ async def _build_report(
         )
     ).all()
     counts_by_rating: dict[int, int] = {r.rating: r.cnt for r in csat_rows}
+    # A pesquisa de satisfação usa escala de 1 a 10 (ver SurveyCreate)
     csat_distribution = [
-        CSATDistributionItem(rating=i, count=counts_by_rating.get(i, 0)) for i in range(1, 6)
+        CSATDistributionItem(rating=i, count=counts_by_rating.get(i, 0)) for i in range(1, 11)
     ]
 
     avg_raw = (
@@ -628,8 +629,8 @@ async def get_reports(
     period: Annotated[int, Query(ge=1, le=365)] = 30,
     category: TicketCategory | None = Query(default=None),
     priority: TicketPriority | None = Query(default=None),
-    start_date: DateType | None = Query(default=None),
-    end_date: DateType | None = Query(default=None),
+    start_date: date_type | None = Query(default=None),
+    end_date: date_type | None = Query(default=None),
 ) -> ReportData:
     return await _build_report(db, period, category, priority, start_date, end_date)
 
@@ -641,8 +642,8 @@ async def export_reports_csv(
     period: Annotated[int, Query(ge=1, le=365)] = 30,
     category: TicketCategory | None = Query(default=None),
     priority: TicketPriority | None = Query(default=None),
-    start_date: DateType | None = Query(default=None),
-    end_date: DateType | None = Query(default=None),
+    start_date: date_type | None = Query(default=None),
+    end_date: date_type | None = Query(default=None),
 ) -> StreamingResponse:
     data = await _build_report(db, period, category, priority, start_date, end_date)
     buf = io.StringIO()
@@ -684,7 +685,7 @@ async def export_reports_csv(
         writer.writerow([s.priority, s.total, s.breached, s.compliance_rate])
     writer.writerow([])
 
-    writer.writerow(["DISTRIBUIÇÃO CSAT"])
+    writer.writerow(["DISTRIBUIÇÃO CSAT (1 a 10)"])
     writer.writerow(["Nota", "Avaliações"])
     for c in data.csat_distribution:
         writer.writerow([c.rating, c.count])
@@ -709,8 +710,8 @@ async def export_reports_pdf(
     period: Annotated[int, Query(ge=1, le=365)] = 30,
     category: TicketCategory | None = Query(default=None),
     priority: TicketPriority | None = Query(default=None),
-    start_date: DateType | None = Query(default=None),
-    end_date: DateType | None = Query(default=None),
+    start_date: date_type | None = Query(default=None),
+    end_date: date_type | None = Query(default=None),
 ) -> StreamingResponse:
     data = await _build_report(db, period, category, priority, start_date, end_date)
     buf = io.BytesIO()
@@ -776,7 +777,10 @@ async def export_reports_pdf(
             ["Métrica", "Valor"],
             [
                 ["Total de tickets no período", str(data.total_tickets)],
-                ["Média CSAT", str(data.csat_average) if data.csat_average else "—"],
+                [
+                    "Média CSAT (1 a 10)",
+                    f"{data.csat_average} / 10" if data.csat_average else "—",
+                ],
             ],
         )
     )
@@ -930,7 +934,7 @@ async def get_technician_detail_report(
     is_tech = actor.role == UserRole.technician
 
     if not is_admin and not is_tech:
-        raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="Access denied")
+        raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="Você não tem permissão para acessar este item.")
 
     if is_tech:
         tech_id = actor.id
@@ -939,7 +943,7 @@ async def get_technician_detail_report(
         if technician_id is None:
             raise HTTPException(
                 status_code=status.HTTP_400_BAD_REQUEST,
-                detail="technician_id is required for admin",
+                detail="Selecione um técnico para ver o relatório individual.",
             )
         tech_row = (
             await db.execute(
@@ -948,7 +952,7 @@ async def get_technician_detail_report(
         ).scalar_one_or_none()
         if tech_row is None:
             raise HTTPException(
-                status_code=status.HTTP_404_NOT_FOUND, detail="Technician not found"
+                status_code=status.HTTP_404_NOT_FOUND, detail="Técnico não encontrado."
             )
         tech_id = tech_row.id
         tech_name = tech_row.name
