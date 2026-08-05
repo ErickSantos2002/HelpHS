@@ -9,6 +9,8 @@ import {
   type Product,
 } from "../../services/productService";
 import { getMyEquipment, type Equipment } from "../../services/equipmentService";
+import { uploadAttachments } from "../../services/attachmentService";
+import { toastApiError } from "../../lib/toastError";
 import {
   createTicket,
   getTicket,
@@ -429,6 +431,20 @@ export default function TicketFormPage() {
       const ticket = isEdit && id
         ? await updateTicket(id, base)
         : await createTicket({ ...base, client_observation: currentValues.client_observation || null });
+
+      // Os anexos só podem subir depois que o chamado existe. Se falharem, o
+      // chamado já foi criado — avisa em vez de fingir que deu tudo certo.
+      if (files.length > 0) {
+        try {
+          await uploadAttachments(ticket.id, files);
+        } catch (err) {
+          toastApiError(
+            err,
+            "O chamado foi criado, mas os anexos não foram enviados. Anexe novamente pelo chamado.",
+          );
+        }
+      }
+
       navigate(`/tickets/${ticket.id}`);
     } catch {
       setSubmitError("Erro ao salvar o chamado. Tente novamente.");
