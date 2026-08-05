@@ -8,6 +8,7 @@ import {
   type KBArticle,
   type KBArticleStatus,
 } from "../../services/kbService";
+import { getProducts, type Product } from "../../services/productService";
 
 // ── Constants ─────────────────────────────────────────────────
 
@@ -54,18 +55,24 @@ export default function KBListPage() {
   const [search, setSearch] = useState("");
   const [category, setCategory] = useState("");
   const [statusFilter, setStatusFilter] = useState("");
+  const [productFilter, setProductFilter] = useState("");
+  const [products, setProducts] = useState<Product[]>([]);
   const [loading, setLoading] = useState(true);
   const [deleteTarget, setDeleteTarget] = useState<KBArticle | null>(null);
   const [deleteLoading, setDeleteLoading] = useState(false);
 
-  useEffect(() => { setOffset(0); }, [search, category, statusFilter]);
+  useEffect(() => { setOffset(0); }, [search, category, productFilter, statusFilter]);
+
+  useEffect(() => {
+    getProducts({ limit: 100 }).then((res) => setProducts(res.items)).catch(() => setProducts([]));
+  }, []);
 
   useEffect(() => {
     setLoading(true);
-    getKBArticles({ search: search || undefined, category: category || undefined, status: (statusFilter as KBArticleStatus) || undefined, offset, limit: PAGE_SIZE })
+    getKBArticles({ search: search || undefined, category: category || undefined, product_id: productFilter || undefined, status: (statusFilter as KBArticleStatus) || undefined, offset, limit: PAGE_SIZE })
       .then((res) => { setArticles(res.items); setTotal(res.total); })
       .finally(() => setLoading(false));
-  }, [search, category, statusFilter, offset]);
+  }, [search, category, productFilter, statusFilter, offset]);
 
   async function handleDelete() {
     if (!deleteTarget) return;
@@ -82,7 +89,7 @@ export default function KBListPage() {
 
   const totalPages = Math.ceil(total / PAGE_SIZE);
   const currentPage = Math.floor(offset / PAGE_SIZE) + 1;
-  const hasFilters = !!(search || category || statusFilter);
+  const hasFilters = !!(search || category || productFilter || statusFilter);
 
   return (
     <div className="space-y-5 pb-10">
@@ -127,6 +134,16 @@ export default function KBListPage() {
             ]}
           />
 
+          {/* Produto */}
+          {products.length > 0 && (
+            <FilterSelect
+              value={productFilter}
+              onChange={setProductFilter}
+              placeholder="Todos os produtos"
+              options={products.map((p) => ({ value: p.id, label: p.name }))}
+            />
+          )}
+
           {/* Status (staff only) */}
           {isStaff && (
             <FilterSelect
@@ -143,7 +160,7 @@ export default function KBListPage() {
 
           {hasFilters && (
             <button
-              onClick={() => { setSearch(""); setCategory(""); setStatusFilter(""); }}
+              onClick={() => { setSearch(""); setCategory(""); setProductFilter(""); setStatusFilter(""); }}
               className="flex items-center gap-1.5 text-xs font-medium text-slate-500 hover:text-danger transition-colors cursor-pointer px-2 py-2 rounded-lg border border-border/40 hover:border-danger/30"
             >
               {IC.X}
@@ -170,7 +187,7 @@ export default function KBListPage() {
         <div className="flex flex-col items-center justify-center rounded-xl border border-border/40 bg-background-surface py-20">
           <div className="mb-4 flex h-14 w-14 items-center justify-center rounded-full bg-background-elevated text-slate-600">{IC.Book}</div>
           <p className="text-sm font-medium text-slate-400">Nenhum artigo encontrado.</p>
-          {hasFilters && <button onClick={() => { setSearch(""); setCategory(""); setStatusFilter(""); }} className="mt-2 text-xs text-primary hover:text-primary/80 cursor-pointer transition-colors">Limpar filtros</button>}
+          {hasFilters && <button onClick={() => { setSearch(""); setCategory(""); setProductFilter(""); setStatusFilter(""); }} className="mt-2 text-xs text-primary hover:text-primary/80 cursor-pointer transition-colors">Limpar filtros</button>}
           {isStaff && !hasFilters && <button onClick={() => navigate("/kb/new")} className="mt-3 text-xs font-medium text-primary hover:text-primary/80 cursor-pointer transition-colors">+ Criar primeiro artigo</button>}
         </div>
       ) : (
@@ -205,6 +222,20 @@ export default function KBListPage() {
                     <span className="ml-0.5 rounded-md border border-border/40 bg-background-elevated px-1.5 py-0.5 text-[10px] font-medium text-slate-500">
                       {catLabel}
                     </span>
+                    {article.products.length === 0 ? (
+                      <span className="rounded-md border border-border/40 px-1.5 py-0.5 text-[10px] font-medium text-slate-600">
+                        Todos os produtos
+                      </span>
+                    ) : (
+                      article.products.map((p) => (
+                        <span
+                          key={p.id}
+                          className="max-w-[10rem] truncate rounded-md border border-primary/30 bg-primary/10 px-1.5 py-0.5 text-[10px] font-medium text-primary"
+                        >
+                          {p.name}
+                        </span>
+                      ))
+                    )}
                   </div>
                   <p className="text-xs text-slate-500 line-clamp-1">{preview}…</p>
                   {article.tags.length > 0 && (

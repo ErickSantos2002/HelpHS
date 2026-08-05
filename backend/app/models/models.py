@@ -264,6 +264,9 @@ class Product(Base):
         back_populates="product", cascade="all, delete-orphan"
     )
     tickets: Mapped[list["Ticket"]] = relationship(back_populates="product")
+    kb_articles: Mapped[list["KBArticle"]] = relationship(
+        secondary="kb_article_products", back_populates="products"
+    )
 
 
 class Equipment(Base):
@@ -295,6 +298,24 @@ class Equipment(Base):
         "User", back_populates="equipments", foreign_keys=[owner_id]
     )
     tickets: Mapped[list["Ticket"]] = relationship(back_populates="equipment")
+
+
+kb_article_products = Table(
+    "kb_article_products",
+    Base.metadata,
+    Column(
+        "article_id",
+        UUID(as_uuid=True),
+        ForeignKey("kb_articles.id", ondelete="CASCADE"),
+        primary_key=True,
+    ),
+    Column(
+        "product_id",
+        UUID(as_uuid=True),
+        ForeignKey("products.id", ondelete="CASCADE"),
+        primary_key=True,
+    ),
+)
 
 
 ticket_tags = Table(
@@ -570,6 +591,10 @@ class KBArticle(Base):
     author: Mapped["User"] = relationship(back_populates="kb_articles")
     comments: Mapped[list["KBComment"]] = relationship(
         back_populates="article", cascade="all, delete-orphan"
+    )
+    # Sem nenhum produto vinculado, o artigo vale para todos os produtos
+    products: Mapped[list["Product"]] = relationship(
+        secondary=kb_article_products, back_populates="kb_articles"
     )
 
     __table_args__ = (Index("ix_kb_articles_category_status", "category", "status"),)

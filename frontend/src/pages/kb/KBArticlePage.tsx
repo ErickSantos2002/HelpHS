@@ -397,6 +397,24 @@ export default function KBArticlePage() {
             </div>
           </div>
 
+          <div className="rounded-xl border border-border/40 bg-background-surface p-4">
+            <p className="mb-3 text-[10px] font-bold uppercase tracking-widest text-slate-500">Produtos</p>
+            {article.products.length === 0 ? (
+              <p className="text-xs text-slate-500">Vale para todos os produtos.</p>
+            ) : (
+              <div className="flex flex-wrap gap-1.5">
+                {article.products.map((p) => (
+                  <span
+                    key={p.id}
+                    className="max-w-full truncate rounded-full border border-primary/30 bg-primary/10 px-2.5 py-1 text-xs font-medium text-primary"
+                  >
+                    {p.name}
+                  </span>
+                ))}
+              </div>
+            )}
+          </div>
+
           {article.tags.length > 0 && (
             <div className="rounded-xl border border-border/40 bg-background-surface p-4">
               <p className="mb-3 text-[10px] font-bold uppercase tracking-widest text-slate-500">Tags</p>

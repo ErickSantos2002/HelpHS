@@ -39,6 +39,7 @@ const article = {
   not_helpful: 1,
   created_at: "2026-01-01T00:00:00Z",
   updated_at: "2026-01-01T00:00:00Z",
+  products: [],
 };
 
 beforeEach(() => {
@@ -73,6 +74,16 @@ describe("getKBArticles", () => {
     expect(url).toContain("category=access");
     expect(url).toContain("status=published");
   });
+
+  it("envia o filtro de produto", async () => {
+    mockGet.mockResolvedValue({
+      data: { items: [], total: 0, limit: 20, offset: 0 },
+    });
+
+    await getKBArticles({ product_id: "p1" });
+
+    expect(mockGet.mock.calls[0][0] as string).toContain("product_id=p1");
+  });
 });
 
 describe("getKBArticle", () => {
@@ -96,6 +107,7 @@ describe("createKBArticle", () => {
       category: "access",
       tags: ["senha"],
       status: "published",
+      product_ids: [],
     });
 
     expect(mockPost).toHaveBeenCalledWith(

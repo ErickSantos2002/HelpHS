@@ -19,23 +19,27 @@ from datetime import UTC, datetime
 from typing import Annotated
 
 from fastapi import APIRouter, Depends, HTTPException, Query, status
-from sqlalchemy import func, or_, select, update
+from sqlalchemy import and_, func, or_, select, update
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.orm import selectinload
 
 from app.core.database import get_db
 from app.core.security import authorize, get_current_user
 from app.models.models import (
+    Equipment,
     KBArticle,
     KBArticleStatus,
     KBComment,
+    Product,
     Ticket,
     User,
     UserRole,
+    kb_article_products,
 )
 from app.schemas.kb import (
     KBArticleCreate,
     KBArticleListResponse,
+    KBArticleProduct,
     KBArticleResponse,
     KBArticleUpdate,
     KBCommentCreate,
@@ -96,12 +100,46 @@ def _to_response(article: KBArticle) -> KBArticleResponse:
         not_helpful=article.not_helpful,
         created_at=article.created_at,
         updated_at=article.updated_at,
+        products=[
+            KBArticleProduct(id=p.id, name=p.name) for p in (article.products or [])
+        ],
     )
+
+
+async def _ticket_product_id(ticket: Ticket, db: AsyncSession) -> uuid.UUID | None:
+    """Produto do ticket — o campo Produto ou, na falta dele, o do equipamento."""
+    if ticket.product_id:
+        return ticket.product_id
+    if ticket.equipment_id:
+        row = await db.execute(
+            select(Equipment.product_id).where(Equipment.id == ticket.equipment_id)
+        )
+        return row.scalar_one_or_none()
+    return None
+
+
+async def _set_article_products(
+    article: KBArticle, product_ids: list[uuid.UUID], db: AsyncSession
+) -> None:
+    """Vincula os produtos ao artigo. Lista vazia = vale para todos os produtos."""
+    if not product_ids:
+        article.products = []
+        return
+
+    unique_ids = list(dict.fromkeys(product_ids))
+    rows = await db.execute(select(Product).where(Product.id.in_(unique_ids)))
+    found = list(rows.scalars().all())
+    if len(found) != len(unique_ids):
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail="Um ou mais produtos selecionados não existem mais.",
+        )
+    article.products = found
 
 
 async def _get_article_or_404(article_id: uuid.UUID, db: AsyncSession) -> KBArticle:
     result = await db.execute(
-        select(KBArticle).options(selectinload(KBArticle.author)).where(KBArticle.id == article_id)
+        select(KBArticle).options(selectinload(KBArticle.author), selectinload(KBArticle.products)).where(KBArticle.id == article_id)
     )
     article = result.scalar_one_or_none()
     if article is None:
@@ -115,24 +153,39 @@ async def _get_article_or_404(article_id: uuid.UUID, db: AsyncSession) -> KBArti
 @router.get("/kb/articles/suggestions", response_model=KBArticleListResponse)
 async def suggest_articles_for_ticket(
     db: Annotated[AsyncSession, Depends(get_db)],
-    actor: Annotated[User, Depends(authorize(UserRole.admin, UserRole.technician))],
+    actor: Annotated[User, Depends(get_current_user)],
     ticket_id: uuid.UUID = Query(...),
     limit: int = Query(default=5, ge=1, le=20),
 ) -> KBArticleListResponse:
     """
-    Return published KB articles relevant to the given ticket.
+    Artigos publicados relevantes para o ticket, do mais específico ao mais amplo.
 
-    Strategy (ordered by priority):
-    1. Same category + keyword match in title
-    2. Same category only
-    3. Keyword match across all categories (fallback)
+    O artigo entra por produto OU por categoria — basta um dos dois casar:
+      1. produto do ticket + mesma categoria
+      2. produto do ticket, em qualquer categoria
+      3. mesma categoria, em qualquer produto (inclui os que valem para todos)
+      4. palavra-chave do título (rede de segurança)
+
+    O produto vem do campo Produto do ticket; se estiver vazio, do equipamento
+    escolhido pelo cliente.
     """
     ticket_result = await db.execute(select(Ticket).where(Ticket.id == ticket_id))
     ticket = ticket_result.scalar_one_or_none()
     if ticket is None:
-        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Ticket não encontrado. Ele pode ter sido excluído.")
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail="Ticket não encontrado. Ele pode ter sido excluído.",
+        )
 
-    # Extract meaningful keywords from title (words > 3 chars)
+    # Cliente só recebe sugestões do próprio chamado
+    if actor.role == UserRole.client and ticket.creator_id != actor.id:
+        raise HTTPException(
+            status_code=status.HTTP_403_FORBIDDEN,
+            detail="Você não tem permissão para acessar este ticket.",
+        )
+
+    product_id = await _ticket_product_id(ticket, db)
+
     words = [w for w in ticket.title.lower().split() if len(w) > 3]
     category_val = (
         ticket.category.value if hasattr(ticket.category, "value") else str(ticket.category)
@@ -140,55 +193,48 @@ async def suggest_articles_for_ticket(
 
     base = (
         select(KBArticle)
-        .options(selectinload(KBArticle.author))
+        .options(selectinload(KBArticle.author), selectinload(KBArticle.products))
         .where(KBArticle.status == KBArticleStatus.published)
     )
 
-    # Build keyword filter
     keyword_filter = None
     if words:
         keyword_filter = or_(*[KBArticle.title.ilike(f"%{w}%") for w in words[:5]])
 
-    # Priority 1: same category + keyword
-    if keyword_filter is not None:
-        q1 = await db.execute(
-            base.where(KBArticle.category == category_val).where(keyword_filter).limit(limit)
-        )
-        results = q1.scalars().all()
-        if len(results) >= limit:
-            return KBArticleListResponse(
-                items=[_to_response(a) for a in results[:limit]],
-                total=len(results),
-                limit=limit,
-                offset=0,
+    same_category = KBArticle.category == category_val
+    same_product = (
+        KBArticle.id.in_(
+            select(kb_article_products.c.article_id).where(
+                kb_article_products.c.product_id == product_id
             )
-    else:
-        results = []
-
-    seen_ids = {a.id for a in results}
-
-    # Priority 2: same category only (fill up to limit)
-    needed = limit - len(results)
-    if needed > 0:
-        q2 = await db.execute(
-            base.where(KBArticle.category == category_val)
-            .where(KBArticle.id.notin_(seen_ids) if seen_ids else True)
-            .limit(needed)
         )
-        extra = q2.scalars().all()
-        results = list(results) + list(extra)
-        seen_ids.update(a.id for a in extra)
+        if product_id
+        else None
+    )
 
-    # Priority 3: keyword match across all categories (fallback)
-    needed = limit - len(results)
-    if needed > 0 and keyword_filter is not None:
-        q3 = await db.execute(
-            base.where(keyword_filter)
-            .where(KBArticle.id.notin_(seen_ids) if seen_ids else True)
-            .limit(needed)
-        )
-        extra = q3.scalars().all()
-        results = list(results) + list(extra)
+    # Camadas em ordem de relevância; cada uma completa o que faltar
+    layers = []
+    if same_product is not None:
+        layers.append(and_(same_product, same_category))
+        layers.append(same_product)
+    layers.append(same_category)
+    if keyword_filter is not None:
+        layers.append(keyword_filter)
+
+    results: list[KBArticle] = []
+    seen_ids: set[uuid.UUID] = set()
+
+    for condition in layers:
+        needed = limit - len(results)
+        if needed <= 0:
+            break
+        query = base.where(condition)
+        if seen_ids:
+            query = query.where(KBArticle.id.notin_(seen_ids))
+        rows = await db.execute(query.limit(needed))
+        found = list(rows.scalars().all())
+        results.extend(found)
+        seen_ids.update(a.id for a in found)
 
     return KBArticleListResponse(
         items=[_to_response(a) for a in results],
@@ -206,11 +252,12 @@ async def list_articles(
     limit: int = Query(default=20, ge=1, le=100),
     search: str | None = Query(default=None, max_length=100),
     category: str | None = Query(default=None),
+    product_id: uuid.UUID | None = Query(default=None),
     status_filter: KBArticleStatus | None = Query(default=None, alias="status"),
 ) -> KBArticleListResponse:
     is_staff = actor.role in (UserRole.admin, UserRole.technician)
 
-    base = select(KBArticle).options(selectinload(KBArticle.author))
+    base = select(KBArticle).options(selectinload(KBArticle.author), selectinload(KBArticle.products))
 
     # Clients can only see published articles
     if not is_staff:
@@ -220,6 +267,19 @@ async def list_articles(
 
     if category:
         base = base.where(KBArticle.category == category)
+
+    if product_id:
+        # Artigos do produto + os que valem para todos (sem produto vinculado)
+        base = base.where(
+            or_(
+                KBArticle.id.in_(
+                    select(kb_article_products.c.article_id).where(
+                        kb_article_products.c.product_id == product_id
+                    )
+                ),
+                ~KBArticle.id.in_(select(kb_article_products.c.article_id)),
+            )
+        )
 
     if search:
         term = f"%{search}%"
@@ -264,10 +324,11 @@ async def create_article(
         updated_at=now,
     )
     db.add(article)
+    await _set_article_products(article, body.product_ids, db)
     await db.commit()
 
     result = await db.execute(
-        select(KBArticle).options(selectinload(KBArticle.author)).where(KBArticle.id == article.id)
+        select(KBArticle).options(selectinload(KBArticle.author), selectinload(KBArticle.products)).where(KBArticle.id == article.id)
     )
     article = result.scalar_one()
     return _to_response(article)
@@ -295,7 +356,7 @@ async def get_article(
     # Reload after commit — session expires all objects on commit, and accessing
     # expired attributes in async context raises MissingGreenlet.
     result = await db.execute(
-        select(KBArticle).options(selectinload(KBArticle.author)).where(KBArticle.id == article_id)
+        select(KBArticle).options(selectinload(KBArticle.author), selectinload(KBArticle.products)).where(KBArticle.id == article_id)
     )
     return _to_response(result.scalar_one())
 
@@ -314,6 +375,11 @@ async def update_article(
         new_slug = await _unique_slug(_slugify(changes["title"]), db, exclude_id=article_id)
         article.slug = new_slug
 
+    # product_ids não é coluna: vira vínculo na tabela de ligação
+    product_ids = changes.pop("product_ids", None)
+    if product_ids is not None:
+        await _set_article_products(article, product_ids, db)
+
     for field, value in changes.items():
         if field == "tags" and isinstance(value, list):
             value = list(dict.fromkeys(value))
@@ -324,7 +390,7 @@ async def update_article(
     await db.refresh(article)
 
     result = await db.execute(
-        select(KBArticle).options(selectinload(KBArticle.author)).where(KBArticle.id == article_id)
+        select(KBArticle).options(selectinload(KBArticle.author), selectinload(KBArticle.products)).where(KBArticle.id == article_id)
     )
     article = result.scalar_one()
     return _to_response(article)

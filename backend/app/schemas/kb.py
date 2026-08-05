@@ -11,12 +11,23 @@ from app.models.models import KBArticleStatus, TicketCategory
 from app.schemas.base import AppBaseModel
 
 
+class KBArticleProduct(AppBaseModel):
+    """Produto vinculado a um artigo."""
+
+    model_config = ConfigDict(from_attributes=True)
+
+    id: uuid.UUID
+    name: str
+
+
 class KBArticleCreate(AppBaseModel):
     title: str = Field(..., min_length=1, max_length=255)
     content: str = Field(..., min_length=1)
     category: TicketCategory = TicketCategory.general
     tags: list[str] = Field(default_factory=list)
     status: KBArticleStatus = KBArticleStatus.draft
+    # Lista vazia = artigo vale para todos os produtos
+    product_ids: list[uuid.UUID] = Field(default_factory=list)
 
 
 class KBArticleUpdate(AppBaseModel):
@@ -25,6 +36,7 @@ class KBArticleUpdate(AppBaseModel):
     category: TicketCategory | None = None
     tags: list[str] | None = None
     status: KBArticleStatus | None = None
+    product_ids: list[uuid.UUID] | None = None
 
 
 class KBArticleResponse(AppBaseModel):
@@ -44,6 +56,8 @@ class KBArticleResponse(AppBaseModel):
     not_helpful: int
     created_at: datetime
     updated_at: datetime
+    products: list[KBArticleProduct] = []
+    """Vazio significa que o artigo vale para todos os produtos."""
 
 
 class KBArticleListResponse(AppBaseModel):

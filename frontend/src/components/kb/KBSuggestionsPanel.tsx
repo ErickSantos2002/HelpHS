@@ -7,12 +7,16 @@ import {
   type KBArticle,
 } from "../../services/kbService";
 import { api } from "../../services/api";
+import { useAuth } from "../../contexts/AuthContext";
 
 interface KBSuggestionsPanelProps {
   ticketId: string;
 }
 
 export function KBSuggestionsPanel({ ticketId }: KBSuggestionsPanelProps) {
+  const { user } = useAuth();
+  // Enviar artigo pelo chat é ação de atendimento — o cliente só consulta
+  const isStaff = user?.role === "admin" || user?.role === "technician";
   const [articles, setArticles] = useState<KBArticle[]>([]);
   const [loading, setLoading] = useState(true);
   const [search, setSearch] = useState("");
@@ -150,6 +154,7 @@ export function KBSuggestionsPanel({ ticketId }: KBSuggestionsPanelProps) {
                     ` · ${article.tags.slice(0, 2).join(", ")}`}
                 </p>
               </div>
+              {isStaff && (
               <button
                 onClick={() => handleSend(article)}
                 disabled={sending === article.id || sentIds.has(article.id)}
@@ -203,6 +208,7 @@ export function KBSuggestionsPanel({ ticketId }: KBSuggestionsPanelProps) {
                   </>
                 )}
               </button>
+              )}
             </div>
           ))}
       </div>

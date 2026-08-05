@@ -46,6 +46,8 @@ _NOW = datetime.now(UTC)
 _ARTICLE_ID = uuid.uuid4()
 _AUTHOR_ID = uuid.uuid4()
 _TICKET_ID = uuid.uuid4()
+_CREATOR_ID = uuid.uuid4()
+_PRODUCT_ID = uuid.uuid4()
 
 
 # ── Mock builders ─────────────────────────────────────────────
@@ -61,10 +63,18 @@ def _mock_user(role=UserRole.technician, user_id=None):
     return u
 
 
+def _mock_product(product_id=None, name="Titan"):
+    p = MagicMock()
+    p.id = product_id or _PRODUCT_ID
+    p.name = name
+    return p
+
+
 def _mock_article(
     status=KBArticleStatus.published,
     category=TicketCategory.hardware,
     article_id=None,
+    products=None,
 ):
     a = MagicMock()
     a.id = article_id or _ARTICLE_ID
@@ -81,14 +91,21 @@ def _mock_article(
     a.not_helpful = 1
     a.created_at = _NOW
     a.updated_at = _NOW
+    # Lista vazia = artigo vale para todos os produtos
+    a.products = products if products is not None else []
     return a
 
 
-def _mock_ticket():
+def _mock_ticket(creator_id=None, product_id=None, equipment_id=None):
     t = MagicMock()
     t.id = _TICKET_ID
     t.title = "Bafômetro com defeito"
     t.category = TicketCategory.hardware
+    t.creator_id = creator_id or _CREATOR_ID
+    # Precisam ser explícitos: o MagicMock devolveria um objeto truthy e a
+    # busca por produto usaria um id inválido
+    t.product_id = product_id
+    t.equipment_id = equipment_id
     return t
 
 
@@ -477,10 +494,31 @@ async def test_feedback_not_helpful(patch_redis):
 
 
 @pytest.mark.asyncio
-async def test_suggestions_requires_staff(patch_redis):
-    """Client cannot access suggestions endpoint (403)."""
-    client_user = _mock_user(UserRole.client)
+async def test_cliente_ve_sugestoes_do_proprio_ticket(patch_redis):
+    client_user = _mock_user(UserRole.client, _CREATOR_ID)
+    ticket = _mock_ticket(creator_id=_CREATOR_ID)
+    article = _mock_article(category=TicketCategory.hardware)
+
     _override_user(client_user)
+    from app.core.database import get_db
+
+    app.dependency_overrides[get_db] = _db_seq_override(ticket, [article], [], [])
+
+    async with AsyncClient(transport=ASGITransport(app=app), base_url="http://test") as client:
+        r = await client.get(f"/api/v1/kb/articles/suggestions?ticket_id={_TICKET_ID}")
+
+    assert r.status_code == 200
+
+
+@pytest.mark.asyncio
+async def test_cliente_nao_ve_sugestoes_de_ticket_alheio(patch_redis):
+    client_user = _mock_user(UserRole.client)  # id diferente do creator
+    ticket = _mock_ticket(creator_id=_CREATOR_ID)
+
+    _override_user(client_user)
+    from app.core.database import get_db
+
+    app.dependency_overrides[get_db] = _db_seq_override(ticket)
 
     async with AsyncClient(transport=ASGITransport(app=app), base_url="http://test") as client:
         r = await client.get(f"/api/v1/kb/articles/suggestions?ticket_id={_TICKET_ID}")
@@ -601,3 +639,133 @@ async def test_cliente_nao_exclui_comentario_de_outro(patch_redis):
 
     assert r.status_code == 403
     assert "próprios comentários" in r.json()["detail"]
+
+
+# ═══════════════════════════════════════════════════════════════
+# PRODUTOS DO ARTIGO
+# ═══════════════════════════════════════════════════════════════
+
+
+@pytest.mark.asyncio
+async def test_artigo_sem_produto_vale_para_todos(patch_redis):
+    """Sem vínculo, o artigo é geral — a resposta traz a lista vazia."""
+    tech = _mock_user(UserRole.technician)
+    article = _mock_article(products=[])
+    _override_user(tech)
+    from app.core.database import get_db
+
+    app.dependency_overrides[get_db] = _db_seq_override(None, article)
+
+    async with AsyncClient(transport=ASGITransport(app=app), base_url="http://test") as client:
+        r = await client.post(
+            "/api/v1/kb/articles",
+            json={"title": "Como abrir um chamado", "content": "Passo a passo.", "product_ids": []},
+        )
+
+    assert r.status_code == 201
+    assert r.json()["products"] == []
+
+
+@pytest.mark.asyncio
+async def test_criar_artigo_com_produtos(patch_redis):
+    tech = _mock_user(UserRole.technician)
+    produto = _mock_product()
+    article = _mock_article(products=[produto])
+    _override_user(tech)
+    from app.core.database import get_db
+
+    # slug livre · produtos encontrados · artigo recarregado
+    app.dependency_overrides[get_db] = _db_seq_override(None, [produto], article)
+
+    async with AsyncClient(transport=ASGITransport(app=app), base_url="http://test") as client:
+        r = await client.post(
+            "/api/v1/kb/articles",
+            json={
+                "title": "Calibração do Titan",
+                "content": "Procedimento de calibração.",
+                "product_ids": [str(_PRODUCT_ID)],
+            },
+        )
+
+    assert r.status_code == 201
+    body = r.json()
+    assert len(body["products"]) == 1
+    assert body["products"][0]["name"] == "Titan"
+
+
+@pytest.mark.asyncio
+async def test_criar_artigo_com_produto_inexistente_retorna_404(patch_redis):
+    tech = _mock_user(UserRole.technician)
+    _override_user(tech)
+    from app.core.database import get_db
+
+    # slug livre · nenhum produto encontrado
+    app.dependency_overrides[get_db] = _db_seq_override(None, [])
+
+    async with AsyncClient(transport=ASGITransport(app=app), base_url="http://test") as client:
+        r = await client.post(
+            "/api/v1/kb/articles",
+            json={
+                "title": "Artigo órfão",
+                "content": "Conteúdo.",
+                "product_ids": [str(uuid.uuid4())],
+            },
+        )
+
+    assert r.status_code == 404
+    assert "produtos selecionados" in r.json()["detail"]
+
+
+@pytest.mark.asyncio
+async def test_listagem_aceita_filtro_de_produto(patch_redis):
+    tech = _mock_user(UserRole.technician)
+    article = _mock_article(products=[_mock_product()])
+    _override_user(tech)
+    from app.core.database import get_db
+
+    app.dependency_overrides[get_db] = _db_seq_override(1, [article])
+
+    async with AsyncClient(transport=ASGITransport(app=app), base_url="http://test") as client:
+        r = await client.get(f"/api/v1/kb/articles?product_id={_PRODUCT_ID}")
+
+    assert r.status_code == 200
+
+
+@pytest.mark.asyncio
+async def test_sugestao_usa_o_produto_do_ticket(patch_redis):
+    """Ticket com produto: a primeira camada de busca é produto + categoria."""
+    tech = _mock_user(UserRole.technician)
+    ticket = _mock_ticket(product_id=_PRODUCT_ID)
+    article = _mock_article(products=[_mock_product()])
+
+    _override_user(tech)
+    from app.core.database import get_db
+
+    app.dependency_overrides[get_db] = _db_seq_override(ticket, [article], [], [], [])
+
+    async with AsyncClient(transport=ASGITransport(app=app), base_url="http://test") as client:
+        r = await client.get(f"/api/v1/kb/articles/suggestions?ticket_id={_TICKET_ID}")
+
+    assert r.status_code == 200
+    body = r.json()
+    assert len(body["items"]) >= 1
+    assert body["items"][0]["products"][0]["name"] == "Titan"
+
+
+@pytest.mark.asyncio
+async def test_sugestao_sem_produto_no_ticket_usa_categoria(patch_redis):
+    """Ticket sem produto nem equipamento: sobra a categoria e a palavra-chave."""
+    tech = _mock_user(UserRole.technician)
+    ticket = _mock_ticket()
+    article = _mock_article(category=TicketCategory.hardware)
+
+    _override_user(tech)
+    from app.core.database import get_db
+
+    app.dependency_overrides[get_db] = _db_seq_override(ticket, [article], [])
+
+    async with AsyncClient(transport=ASGITransport(app=app), base_url="http://test") as client:
+        r = await client.get(f"/api/v1/kb/articles/suggestions?ticket_id={_TICKET_ID}")
+
+    assert r.status_code == 200
+    assert len(r.json()["items"]) >= 1

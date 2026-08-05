@@ -10,6 +10,7 @@ import {
   updateKBArticle,
   type KBArticleStatus,
 } from "../../services/kbService";
+import { getProducts, type Product } from "../../services/productService";
 
 marked.setOptions({ breaks: true });
 
@@ -139,6 +140,20 @@ export default function KBFormPage() {
   const [loadingArticle, setLoadingArticle] = useState(isEdit);
   const [errors, setErrors]         = useState<Record<string, string>>({});
 
+  const [products, setProducts] = useState<Product[]>([]);
+  const [loadingProducts, setLoadingProducts] = useState(true);
+  const [selectedProductIds, setSelectedProductIds] = useState<Set<string>>(new Set());
+  // Artigo novo já nasce como "todos os produtos"; ao editar, quem manda é o artigo
+  const [allProducts, setAllProducts] = useState(true);
+
+  useEffect(() => {
+    if (!isStaff) return;
+    getProducts({ limit: 100 })
+      .then((res) => setProducts(res.items))
+      .catch(() => setProducts([]))
+      .finally(() => setLoadingProducts(false));
+  }, [isStaff]);
+
   // Redireciona quem não é staff — depois dos hooks, para não alterar a ordem
   // deles entre renders (o usuário chega null enquanto a sessão carrega).
   useEffect(() => {
@@ -148,7 +163,12 @@ export default function KBFormPage() {
   useEffect(() => {
     if (!id || !isStaff) return;
     getKBArticle(id)
-      .then((a) => { setTitle(a.title); setContent(a.content); setCategory(a.category); setStatus(a.status); setTagsInput(a.tags.join(", ")); })
+      .then((a) => {
+        setTitle(a.title); setContent(a.content); setCategory(a.category);
+        setStatus(a.status); setTagsInput(a.tags.join(", "));
+        setSelectedProductIds(new Set(a.products.map((p) => p.id)));
+        setAllProducts(a.products.length === 0);
+      })
       .catch(() => navigate("/kb"))
       .finally(() => setLoadingArticle(false));
   }, [id, isStaff, navigate]);
@@ -159,6 +179,9 @@ export default function KBFormPage() {
     const errs: Record<string, string> = {};
     if (!title.trim()) errs.title = "Título é obrigatório";
     if (!content.trim()) errs.content = "Conteúdo é obrigatório";
+    if (!allProducts && selectedProductIds.size === 0) {
+      errs.products = "Selecione ao menos um produto ou marque \"Vale para todos os produtos\".";
+    }
     return errs;
   }
 
@@ -168,13 +191,15 @@ export default function KBFormPage() {
     if (Object.keys(errs).length > 0) { setErrors(errs); return; }
 
     const tags = tagsInput.split(",").map((t) => t.trim()).filter(Boolean);
+    // Lista vazia é como o backend representa "vale para todos os produtos"
+    const product_ids = allProducts ? [] : [...selectedProductIds];
     setLoading(true);
     try {
       if (isEdit && id) {
-        await updateKBArticle(id, { title, content, category, tags, status });
+        await updateKBArticle(id, { title, content, category, tags, status, product_ids });
         navigate(`/kb/${id}`);
       } else {
-        const article = await createKBArticle({ title, content, category, tags, status });
+        const article = await createKBArticle({ title, content, category, tags, status, product_ids });
         navigate(`/kb/${article.id}`);
       }
     } catch (err) {
@@ -247,6 +272,69 @@ export default function KBFormPage() {
                     {STATUS_OPTIONS.map((s) => <option key={s.value} value={s.value}>{s.label}</option>)}
                   </select>
                 </div>
+              </div>
+
+              <div className="space-y-1.5">
+                <label className="text-sm font-medium text-slate-300">
+                  Produtos <span className="text-danger">*</span>
+                </label>
+
+                <label className="flex w-fit cursor-pointer items-center gap-2 text-sm text-slate-300">
+                  <input
+                    type="checkbox"
+                    checked={allProducts}
+                    onChange={(e) => {
+                      setAllProducts(e.target.checked);
+                      if (e.target.checked) setSelectedProductIds(new Set());
+                      setErrors((p) => ({ ...p, products: "" }));
+                    }}
+                    className="h-4 w-4 cursor-pointer accent-primary"
+                  />
+                  Vale para todos os produtos
+                </label>
+
+                {!allProducts && (
+                  loadingProducts ? (
+                    <p className="text-xs text-slate-500">Carregando produtos…</p>
+                  ) : products.length === 0 ? (
+                    <p className="text-xs text-slate-500">Nenhum produto cadastrado.</p>
+                  ) : (
+                    <div className="flex flex-wrap gap-1.5 pt-0.5">
+                      {products.map((p) => {
+                        const sel = selectedProductIds.has(p.id);
+                        return (
+                          <button
+                            key={p.id}
+                            type="button"
+                            aria-pressed={sel}
+                            onClick={() => {
+                              setSelectedProductIds((prev) => {
+                                const n = new Set(prev);
+                                if (n.has(p.id)) n.delete(p.id); else n.add(p.id);
+                                return n;
+                              });
+                              setErrors((prev) => ({ ...prev, products: "" }));
+                            }}
+                            className={`inline-flex max-w-full items-center gap-1 rounded-full border px-2.5 py-1 text-xs font-semibold transition-all cursor-pointer ${
+                              sel
+                                ? "border-primary bg-primary text-white shadow-sm"
+                                : "border-border/60 bg-background-elevated text-slate-400 hover:border-primary/50 hover:text-slate-200"
+                            }`}
+                          >
+                            {sel && <span aria-hidden="true" className="text-[10px] leading-none">✓</span>}
+                            <span className="truncate">{p.name}</span>
+                          </button>
+                        );
+                      })}
+                    </div>
+                  )
+                )}
+
+                {errors.products && <p className="text-xs text-danger">{errors.products}</p>}
+                <p className="text-xs text-slate-500">
+                  O artigo aparece para o cliente quando o produto do chamado bate com um destes
+                  — ou quando a categoria bate.
+                </p>
               </div>
 
               <div className="space-y-1">

@@ -2,6 +2,11 @@ import { api } from "./api";
 
 export type KBArticleStatus = "draft" | "published" | "archived";
 
+export interface KBArticleProduct {
+  id: string;
+  name: string;
+}
+
 export interface KBArticle {
   id: string;
   title: string;
@@ -17,6 +22,8 @@ export interface KBArticle {
   not_helpful: number;
   created_at: string;
   updated_at: string;
+  /** Vazio significa que o artigo vale para todos os produtos. */
+  products: KBArticleProduct[];
 }
 
 export interface KBArticleListResponse {
@@ -29,6 +36,7 @@ export interface KBArticleListResponse {
 export interface KBArticleFilters {
   search?: string;
   category?: string;
+  product_id?: string;
   status?: KBArticleStatus;
   offset?: number;
   limit?: number;
@@ -40,6 +48,8 @@ export interface KBArticleCreatePayload {
   category: string;
   tags: string[];
   status: KBArticleStatus;
+  /** Vazio = vale para todos os produtos. */
+  product_ids: string[];
 }
 
 export interface KBArticleUpdatePayload {
@@ -48,6 +58,7 @@ export interface KBArticleUpdatePayload {
   category?: string;
   tags?: string[];
   status?: KBArticleStatus;
+  product_ids?: string[];
 }
 
 export async function getKBArticles(
@@ -56,6 +67,7 @@ export async function getKBArticles(
   const p = new URLSearchParams();
   if (filters.search) p.set("search", filters.search);
   if (filters.category) p.set("category", filters.category);
+  if (filters.product_id) p.set("product_id", filters.product_id);
   if (filters.status) p.set("status", filters.status);
   if (filters.offset !== undefined) p.set("offset", String(filters.offset));
   if (filters.limit !== undefined) p.set("limit", String(filters.limit));
