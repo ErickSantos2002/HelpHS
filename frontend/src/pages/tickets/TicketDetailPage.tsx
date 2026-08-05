@@ -175,6 +175,16 @@ const IC = {
       <path strokeLinecap="round" strokeLinejoin="round" d="M2.458 12C3.732 7.943 7.523 5 12 5c4.478 0 8.268 2.943 9.542 7-1.274 4.057-5.064 7-9.542 7-4.477 0-8.268-2.943-9.542-7z" />
     </svg>
   ),
+  Box: (
+    <svg className="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={1.75}>
+      <path strokeLinecap="round" strokeLinejoin="round" d="M20 7l-8-4-8 4m16 0l-8 4m8-4v10l-8 4m0-10L4 7m8 4v10M4 7v10l8 4" />
+    </svg>
+  ),
+  Cpu: (
+    <svg className="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={1.75}>
+      <path strokeLinecap="round" strokeLinejoin="round" d="M9 3H7a2 2 0 00-2 2v2M9 3h6M9 3v2m6-2h2a2 2 0 012 2v2M15 3v2M3 9h2m16 0h-2M3 15h2m16 0h-2M9 21H7a2 2 0 01-2-2v-2m4 4h6m-6 0v-2m6 2h2a2 2 0 002-2v-2m-4 4v-2M9 9h6v6H9V9z" />
+    </svg>
+  ),
   X: (
     <svg className="w-3.5 h-3.5" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2.5}>
       <path strokeLinecap="round" strokeLinejoin="round" d="M6 18L18 6M6 6l12 12" />
@@ -430,6 +440,24 @@ function AttachmentItem({
           </button>
         )}
       </div>
+    </div>
+  );
+}
+
+// ── Campo dos detalhes ────────────────────────────────────────
+
+/** Campo do bloco de informações. Sem valor, deixa claro que não foi informado. */
+function DetailField({ label, value }: { label: string; value: string | null | undefined }) {
+  return (
+    <div className="border-b border-border/20 py-2.5 last:border-0 sm:[&:nth-last-child(-n+2)]:border-0">
+      <p className="mb-0.5 text-[10px] font-semibold uppercase tracking-widest text-slate-500">
+        {label}
+      </p>
+      {value ? (
+        <p className="text-sm text-slate-200 break-words">{value}</p>
+      ) : (
+        <p className="text-sm italic text-slate-600">Não informado</p>
+      )}
     </div>
   );
 }
@@ -1025,6 +1053,27 @@ export default function TicketDetailPage() {
             <div className="flex flex-col gap-4">
               <div className="rounded-xl border border-border/40 bg-background-surface">
                 <div className="border-b border-border/40 px-5 py-3.5">
+                  <h2 className="text-sm font-semibold text-slate-200">Informações do chamado</h2>
+                </div>
+                <div className="grid grid-cols-1 gap-x-6 gap-y-1 px-5 py-3 sm:grid-cols-2">
+                  <DetailField label="Categoria" value={CATEGORY_LABEL[ticket.category] ?? ticket.category} />
+                  <DetailField label="Prioridade" value={PRIORITY_LABEL[ticket.priority] ?? ticket.priority} />
+                  <DetailField label="Produto" value={ticket.product_name} />
+                  <DetailField
+                    label="Equipamento"
+                    value={
+                      ticket.equipment_name
+                        ? ticket.equipment_serial
+                          ? `${ticket.equipment_name} — ${ticket.equipment_serial}`
+                          : ticket.equipment_name
+                        : null
+                    }
+                  />
+                </div>
+              </div>
+
+              <div className="rounded-xl border border-border/40 bg-background-surface">
+                <div className="border-b border-border/40 px-5 py-3.5">
                   <h2 className="text-sm font-semibold text-slate-200">Descrição completa</h2>
                 </div>
                 <div className="px-5 py-4">
@@ -1186,6 +1235,25 @@ export default function TicketDetailPage() {
             </PropRow>
             <PropRow icon={IC.Folder} label="Categoria">
               {CATEGORY_LABEL[ticket.category] ?? ticket.category}
+            </PropRow>
+            <PropRow icon={IC.Box} label="Produto">
+              {ticket.product_name ?? (
+                <span className="text-slate-500 font-normal italic text-xs">Não informado</span>
+              )}
+            </PropRow>
+            <PropRow icon={IC.Cpu} label="Equipamento">
+              {ticket.equipment_name ? (
+                <>
+                  <span className="block break-words">{ticket.equipment_name}</span>
+                  {ticket.equipment_serial && (
+                    <span className="block font-mono text-xs text-slate-500">
+                      {ticket.equipment_serial}
+                    </span>
+                  )}
+                </>
+              ) : (
+                <span className="text-slate-500 font-normal italic text-xs">Não informado</span>
+              )}
             </PropRow>
             <PropRow icon={IC.Calendar} label="Criado em">
               {new Date(ticket.created_at).toLocaleString("pt-BR", { day: "2-digit", month: "2-digit", year: "numeric", hour: "2-digit", minute: "2-digit" })}

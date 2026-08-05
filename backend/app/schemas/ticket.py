@@ -71,6 +71,9 @@ class TicketResponse(AppBaseModel):
     created_at: datetime
     updated_at: datetime
     assignee_name: str | None = None
+    product_name: str | None = None
+    equipment_name: str | None = None
+    equipment_serial: str | None = None
     technician_notes: str | None = None
     ai_classification: str | None = None
     ai_confidence: float | None = None

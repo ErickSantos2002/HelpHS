@@ -91,6 +91,9 @@ def _mock_ticket(status=TicketStatus.open, creator_id=None):
     # Campos opcionais do TicketResponse — sem valor explícito o MagicMock
     # devolve um objeto no lugar de None e a validação falha
     t.assignee_name = None
+    t.product_name = None
+    t.equipment_name = None
+    t.equipment_serial = None
     t.client_observation = None
     t.resolution_note = None
     t.tags = []

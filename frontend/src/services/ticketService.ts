@@ -28,6 +28,9 @@ export interface Ticket {
   equipment_id: string | null;
   closed_at: string | null;
   assignee_name: string | null;
+  product_name: string | null;
+  equipment_name: string | null;
+  equipment_serial: string | null;
   technician_notes: string | null;
   ai_classification: string | null;
   ai_confidence: number | null;

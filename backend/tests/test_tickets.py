@@ -96,6 +96,9 @@ def _mock_ticket(
     # Campos opcionais do TicketResponse — sem valor explícito o MagicMock
     # devolve um objeto no lugar de None e a validação falha
     t.assignee_name = None
+    t.product_name = None
+    t.equipment_name = None
+    t.equipment_serial = None
     t.client_observation = None
     t.resolution_note = None
     t.tags = []
@@ -534,6 +537,69 @@ async def test_assign_ticket(patch_redis):
             json={"assignee_id": str(_TECH_ID)},
         )
     assert resp.status_code == 200
+
+
+@pytest.mark.asyncio
+async def test_detalhe_traz_produto_e_equipamento(patch_redis):
+    """O ticket guarda só os ids; a resposta precisa trazer os nomes."""
+    from unittest.mock import MagicMock
+
+    from app.core.database import get_db
+
+    admin = _mock_user(UserRole.admin)
+    ticket = _mock_ticket()
+    ticket.product_id = uuid.uuid4()
+    ticket.equipment_id = uuid.uuid4()
+
+    produto = MagicMock()
+    produto.name = "Phoebus"
+    equipamento = MagicMock()
+    equipamento.name = "Phoebus da recepção"
+    equipamento.serial_number = "WATFR01-12453"
+    equipamento.product_id = None
+
+    session = _db_sequence(ticket)
+
+    async def _get(model, pk):
+        return equipamento if pk == ticket.equipment_id else produto
+
+    session.get = _get
+
+    async def _gen():
+        yield session
+
+    app.dependency_overrides[get_db] = _gen
+    _override_user(admin)
+
+    async with AsyncClient(transport=ASGITransport(app=app), base_url="http://test") as c:
+        resp = await c.get(f"/api/v1/tickets/{_TICKET_ID}")
+
+    assert resp.status_code == 200
+    body = resp.json()
+    assert body["product_name"] == "Phoebus"
+    assert body["equipment_name"] == "Phoebus da recepção"
+    assert body["equipment_serial"] == "WATFR01-12453"
+
+
+@pytest.mark.asyncio
+async def test_ticket_sem_produto_devolve_nulo(patch_redis):
+    from app.core.database import get_db
+
+    admin = _mock_user(UserRole.admin)
+    ticket = _mock_ticket()
+    ticket.product_id = None
+    ticket.equipment_id = None
+
+    app.dependency_overrides[get_db] = _db_override(ticket)
+    _override_user(admin)
+
+    async with AsyncClient(transport=ASGITransport(app=app), base_url="http://test") as c:
+        resp = await c.get(f"/api/v1/tickets/{_TICKET_ID}")
+
+    assert resp.status_code == 200
+    body = resp.json()
+    assert body["product_name"] is None
+    assert body["equipment_name"] is None
 
 
 @pytest.mark.asyncio
