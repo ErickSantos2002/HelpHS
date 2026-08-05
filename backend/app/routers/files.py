@@ -27,10 +27,26 @@ from app.services import storage
 
 router = APIRouter(tags=["Files"])
 
-# Únicos formatos que o navegador pode renderizar direto. SVG fica de fora de
-# propósito: é imagem, mas aceita <script> dentro.
-_INLINE_MIMES = frozenset({"image/png", "image/jpeg", "image/gif", "image/webp"})
-_INLINE_EXTENSIONS = frozenset({".png", ".jpg", ".jpeg", ".gif", ".webp"})
+# Formatos que o navegador pode abrir direto, para o usuário ver o anexo sem
+# baixar. Imagem e PDF renderizam em visualizador próprio; texto puro não
+# executa nada.
+#
+# Ficam de fora de propósito:
+#   - SVG: é imagem, mas aceita <script> dentro
+#   - HTML/XHTML: viraria script rodando no domínio da API
+_INLINE_MIMES = frozenset(
+    {
+        "image/png",
+        "image/jpeg",
+        "image/gif",
+        "image/webp",
+        "application/pdf",
+        "text/plain",
+    }
+)
+_INLINE_EXTENSIONS = frozenset(
+    {".png", ".jpg", ".jpeg", ".gif", ".webp", ".pdf", ".txt"}
+)
 
 _FALLBACK_MIME = "application/octet-stream"
 

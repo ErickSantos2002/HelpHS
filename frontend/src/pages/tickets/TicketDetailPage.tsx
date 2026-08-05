@@ -20,6 +20,7 @@ import { ChatPanel } from "../../components/chat/ChatPanel";
 import { KBSuggestionsPanel } from "../../components/kb/KBSuggestionsPanel";
 import { useAuth } from "../../contexts/AuthContext";
 import {
+  canPreview,
   deleteAttachment,
   getAttachmentUrl,
   getAttachments,
@@ -166,6 +167,12 @@ const IC = {
   Download: (
     <svg className="w-3.5 h-3.5" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
       <path strokeLinecap="round" strokeLinejoin="round" d="M4 16v1a3 3 0 003 3h10a3 3 0 003-3v-1m-4-4l-4 4m0 0l-4-4m4 4V4" />
+    </svg>
+  ),
+  Eye: (
+    <svg className="w-3.5 h-3.5" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
+      <path strokeLinecap="round" strokeLinejoin="round" d="M15 12a3 3 0 11-6 0 3 3 0 016 0z" />
+      <path strokeLinecap="round" strokeLinejoin="round" d="M2.458 12C3.732 7.943 7.523 5 12 5c4.478 0 8.268 2.943 9.542 7-1.274 4.057-5.064 7-9.542 7-4.477 0-8.268-2.943-9.542-7z" />
     </svg>
   ),
   X: (
@@ -368,11 +375,17 @@ function AttachmentItem({
   onDelete: (id: string) => void;
 }) {
   async function download() {
+    const url = await getAttachmentUrl(attachment.id, { download: true });
+    window.open(url, "_blank");
+  }
+  async function preview() {
     const url = await getAttachmentUrl(attachment.id);
     window.open(url, "_blank");
   }
   const ext = attachment.original_name.split(".").pop()?.toUpperCase() ?? "FILE";
   const sizeMb = (attachment.size_bytes / 1024 / 1024).toFixed(1);
+  // Imagem, PDF e texto abrem no navegador; o resto só faz sentido baixar
+  const viewable = canPreview(attachment.original_name);
 
   return (
     <div className="group flex items-center gap-3 rounded-lg border border-border/50 bg-background-elevated/40 px-3 py-2.5 hover:border-primary/30 hover:bg-primary/5 transition-all">
@@ -381,7 +394,7 @@ function AttachmentItem({
       </div>
       <div className="min-w-0 flex-1">
         <button
-          onClick={download}
+          onClick={viewable ? preview : download}
           className="block w-full truncate text-left text-sm font-medium text-slate-200 hover:text-primary transition-colors cursor-pointer"
         >
           {attachment.original_name}
@@ -389,8 +402,19 @@ function AttachmentItem({
         <p className="text-xs text-slate-500">{sizeMb} MB</p>
       </div>
       <div className="flex items-center gap-1 opacity-0 group-hover:opacity-100 transition-opacity">
+        {viewable && (
+          <button
+            onClick={preview}
+            aria-label={`Visualizar ${attachment.original_name}`}
+            className="p-1.5 rounded-md text-slate-500 hover:text-primary hover:bg-primary/10 transition-colors cursor-pointer"
+            title="Visualizar"
+          >
+            {IC.Eye}
+          </button>
+        )}
         <button
           onClick={download}
+          aria-label={`Baixar ${attachment.original_name}`}
           className="p-1.5 rounded-md text-slate-500 hover:text-primary hover:bg-primary/10 transition-colors cursor-pointer"
           title="Baixar"
         >

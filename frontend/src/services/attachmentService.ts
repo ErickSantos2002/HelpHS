@@ -41,10 +41,22 @@ export async function uploadAttachments(
   return data;
 }
 
-export async function getAttachmentUrl(id: string): Promise<string> {
+/** Formatos que o navegador abre sem baixar (o backend valida o mesmo conjunto). */
+const VIEWABLE_EXTENSIONS = ["png", "jpg", "jpeg", "gif", "webp", "pdf", "txt"];
+
+export function canPreview(filename: string): boolean {
+  const ext = filename.split(".").pop()?.toLowerCase() ?? "";
+  return VIEWABLE_EXTENSIONS.includes(ext);
+}
+
+export async function getAttachmentUrl(
+  id: string,
+  options: { download?: boolean } = {},
+): Promise<string> {
   const { data } = await api.get<{ url: string }>(`/attachments/${id}`);
   // A API devolve o caminho; o host vem da configuração do frontend
-  return resolveFileUrl(data.url);
+  const url = resolveFileUrl(data.url);
+  return options.download ? `${url}&download=true` : url;
 }
 
 export async function deleteAttachment(id: string): Promise<void> {

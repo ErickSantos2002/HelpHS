@@ -85,6 +85,47 @@ async def test_imagem_e_exibida_inline(settings_com_upload_dir):
 
 
 @pytest.mark.asyncio
+async def test_pdf_abre_inline_para_visualizacao(settings_com_upload_dir):
+    """O usuário precisa ver o anexo sem baixar."""
+    settings = settings_com_upload_dir
+    await storage.upload_file(b"%PDF-1.4 fake", "tickets/1/laudo.pdf", "application/pdf", settings)
+    token = storage.create_file_token("tickets/1/laudo.pdf", settings)
+
+    async with AsyncClient(transport=ASGITransport(app=app), base_url="http://test") as c:
+        r = await c.get(f"/api/v1/files/{token}")
+
+    assert r.status_code == 200
+    assert r.headers["content-type"].startswith("application/pdf")
+    assert r.headers["content-disposition"].startswith("inline")
+
+
+@pytest.mark.asyncio
+async def test_download_forcado_vira_attachment(settings_com_upload_dir):
+    """Mesmo em PDF, o botão de baixar precisa baixar."""
+    settings = settings_com_upload_dir
+    await storage.upload_file(b"%PDF-1.4 fake", "tickets/1/laudo.pdf", "application/pdf", settings)
+    token = storage.create_file_token("tickets/1/laudo.pdf", settings)
+
+    async with AsyncClient(transport=ASGITransport(app=app), base_url="http://test") as c:
+        r = await c.get(f"/api/v1/files/{token}?download=true")
+
+    assert r.headers["content-disposition"].startswith("attachment")
+
+
+@pytest.mark.asyncio
+async def test_texto_abre_inline(settings_com_upload_dir):
+    settings = settings_com_upload_dir
+    await storage.upload_file(b"log de erro", "tickets/1/log.txt", "text/plain", settings)
+    token = storage.create_file_token("tickets/1/log.txt", settings)
+
+    async with AsyncClient(transport=ASGITransport(app=app), base_url="http://test") as c:
+        r = await c.get(f"/api/v1/files/{token}")
+
+    assert r.headers["content-type"].startswith("text/plain")
+    assert r.headers["content-disposition"].startswith("inline")
+
+
+@pytest.mark.asyncio
 async def test_html_nunca_e_servido_inline(settings_com_upload_dir):
     """
     Arquivo que o navegador executaria precisa descer como download.
