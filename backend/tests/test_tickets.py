@@ -537,6 +537,49 @@ async def test_assign_ticket(patch_redis):
 
 
 @pytest.mark.asyncio
+async def test_qualquer_tecnico_conclui_o_ticket(patch_redis):
+    """Concluir não exige ser o responsável — qualquer técnico atende."""
+    from app.core.database import get_db
+
+    outro_tecnico = uuid.uuid4()
+    tech = _mock_user(UserRole.technician)
+    ticket = _mock_ticket(status=TicketStatus.in_progress)
+    ticket.assignee_id = outro_tecnico
+
+    app.dependency_overrides[get_db] = _db_seq_override(ticket, None)
+    _override_user(tech)
+
+    async with AsyncClient(transport=ASGITransport(app=app), base_url="http://test") as c:
+        resp = await c.post(
+            f"/api/v1/tickets/{_TICKET_ID}/resolve",
+            json={"resolution_note": "Equipamento substituído."},
+        )
+
+    assert resp.status_code == 200
+    assert ticket.status == TicketStatus.resolved
+
+
+@pytest.mark.asyncio
+async def test_tecnico_muda_status_de_ticket_de_outro(patch_redis):
+    from app.core.database import get_db
+
+    tech = _mock_user(UserRole.technician)
+    ticket = _mock_ticket(status=TicketStatus.open)
+    ticket.assignee_id = uuid.uuid4()
+
+    app.dependency_overrides[get_db] = _db_override(ticket)
+    _override_user(tech)
+
+    async with AsyncClient(transport=ASGITransport(app=app), base_url="http://test") as c:
+        resp = await c.patch(
+            f"/api/v1/tickets/{_TICKET_ID}/status",
+            json={"status": "in_progress"},
+        )
+
+    assert resp.status_code == 200
+
+
+@pytest.mark.asyncio
 async def test_assign_ticket_fechado_explica_o_motivo(patch_redis):
     """Reatribuir ticket fechado precisa dizer por que não dá."""
     from app.core.database import get_db

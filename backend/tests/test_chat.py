@@ -187,6 +187,28 @@ async def test_list_messages_returns_history(patch_redis):
 
 
 @pytest.mark.asyncio
+async def test_tecnico_nao_atribuido_envia_mensagem(patch_redis):
+    """Qualquer técnico atende no chat, mesmo sem ser o responsável."""
+    outro_tecnico = uuid.uuid4()
+    tech = _mock_user(UserRole.technician, outro_tecnico)
+    ticket = _mock_ticket()  # assignee_id = _TECH_ID (outra pessoa)
+    msg = _mock_message(sender=tech)
+
+    _override_user(tech)
+    from app.core.database import get_db
+
+    app.dependency_overrides[get_db] = _db_seq_override(ticket, msg, msg)
+
+    async with AsyncClient(transport=ASGITransport(app=app), base_url="http://test") as client:
+        r = await client.post(
+            f"/api/v1/tickets/{_TICKET_ID}/messages",
+            json={"content": "Bom dia, vou dar andamento neste chamado."},
+        )
+
+    assert r.status_code == 201
+
+
+@pytest.mark.asyncio
 async def test_list_messages_client_own_ticket(patch_redis):
     """Client can list messages for their own ticket."""
     client_user = _mock_user(UserRole.client, _CREATOR_ID)
