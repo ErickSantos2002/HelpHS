@@ -58,6 +58,18 @@ describe("getKBArticles", () => {
     expect(result.items).toHaveLength(1);
   });
 
+  it("normaliza products ausente para lista vazia", async () => {
+    const semProdutos = { ...article } as Partial<typeof article>;
+    delete semProdutos.products;
+    mockGet.mockResolvedValue({
+      data: { items: [semProdutos], total: 1, limit: 20, offset: 0 },
+    });
+
+    const result = await getKBArticles();
+
+    expect(result.items[0].products).toEqual([]);
+  });
+
   it("appends search, category and status filters", async () => {
     mockGet.mockResolvedValue({
       data: { items: [], total: 0, limit: 20, offset: 0 },
@@ -94,6 +106,17 @@ describe("getKBArticle", () => {
 
     expect(mockGet).toHaveBeenCalledWith("/kb/articles/a1");
     expect(result.id).toBe("a1");
+  });
+
+  it("devolve products vazio quando a API não manda o campo", async () => {
+    // Backend numa versão anterior à dos produtos na base de conhecimento
+    const semProdutos = { ...article } as Partial<typeof article>;
+    delete semProdutos.products;
+    mockGet.mockResolvedValue({ data: semProdutos });
+
+    const result = await getKBArticle("a1");
+
+    expect(result.products).toEqual([]);
   });
 });
 

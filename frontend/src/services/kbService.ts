@@ -61,6 +61,17 @@ export interface KBArticleUpdatePayload {
   product_ids?: string[];
 }
 
+/**
+ * Garante que `products` sempre exista.
+ *
+ * Sem isso, uma resposta de backend anterior à v1.2.0 (ou um proxy/cache com a
+ * versão antiga) derruba a página inteira num "Cannot read properties of
+ * undefined".
+ */
+function normalizeArticle(article: KBArticle): KBArticle {
+  return { ...article, products: article.products ?? [] };
+}
+
 export async function getKBArticles(
   filters: KBArticleFilters = {},
 ): Promise<KBArticleListResponse> {
@@ -72,19 +83,19 @@ export async function getKBArticles(
   if (filters.offset !== undefined) p.set("offset", String(filters.offset));
   if (filters.limit !== undefined) p.set("limit", String(filters.limit));
   const { data } = await api.get<KBArticleListResponse>(`/kb/articles?${p}`);
-  return data;
+  return { ...data, items: (data.items ?? []).map(normalizeArticle) };
 }
 
 export async function getKBArticle(id: string): Promise<KBArticle> {
   const { data } = await api.get<KBArticle>(`/kb/articles/${id}`);
-  return data;
+  return normalizeArticle(data);
 }
 
 export async function createKBArticle(
   payload: KBArticleCreatePayload,
 ): Promise<KBArticle> {
   const { data } = await api.post<KBArticle>("/kb/articles", payload);
-  return data;
+  return normalizeArticle(data);
 }
 
 export async function updateKBArticle(
@@ -92,7 +103,7 @@ export async function updateKBArticle(
   payload: KBArticleUpdatePayload,
 ): Promise<KBArticle> {
   const { data } = await api.patch<KBArticle>(`/kb/articles/${id}`, payload);
-  return data;
+  return normalizeArticle(data);
 }
 
 export async function deleteKBArticle(id: string): Promise<void> {
@@ -154,5 +165,5 @@ export async function suggestArticlesForTicket(
   const { data } = await api.get<KBArticleListResponse>(
     `/kb/articles/suggestions?ticket_id=${ticketId}&limit=${limit}`,
   );
-  return data.items;
+  return (data.items ?? []).map(normalizeArticle);
 }
