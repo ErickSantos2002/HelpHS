@@ -1,4 +1,5 @@
 import { api } from "./api";
+import { resolveFileUrl } from "../lib/fileUrl";
 
 export interface Attachment {
   id: string;
@@ -42,7 +43,8 @@ export async function uploadAttachments(
 
 export async function getAttachmentUrl(id: string): Promise<string> {
   const { data } = await api.get<{ url: string }>(`/attachments/${id}`);
-  return data.url;
+  // A API devolve o caminho; o host vem da configuração do frontend
+  return resolveFileUrl(data.url);
 }
 
 export async function deleteAttachment(id: string): Promise<void> {

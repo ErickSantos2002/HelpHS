@@ -20,6 +20,7 @@ import os
 import uuid
 from datetime import UTC, datetime
 from typing import Annotated
+from urllib.parse import quote
 
 from fastapi import APIRouter, Depends, File, HTTPException, UploadFile, status
 from sqlalchemy import func, select
@@ -218,6 +219,9 @@ async def get_attachment_url(
     _check_ticket_access(ticket, actor)
 
     url = await storage.get_presigned_url(attachment.s3_key, settings)
+    # Em disco o arquivo tem nome interno (uuid); sem isto o usuário baixaria
+    # "a1b2c3.pdf" em vez de "laudo de calibração.pdf"
+    url = f"{url}?filename={quote(attachment.original_name)}"
     return AttachmentDownloadResponse(url=url)
 
 

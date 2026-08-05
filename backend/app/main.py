@@ -19,6 +19,7 @@ from app.routers import (
     calendar,
     chat,
     dashboard,
+    files,
     groups,
     kb,
     notifications,
@@ -30,6 +31,7 @@ from app.routers import (
     tickets,
     users,
 )
+from app.services import storage
 
 settings = get_settings()
 
@@ -56,6 +58,18 @@ async def lifespan(app: FastAPI):
         logger.info("Redis connection OK")
     except Exception as exc:
         logger.warning(f"Redis connection failed: {exc}")
+
+    # Diretório de uploads — precisa ser um volume, senão os anexos e avatares
+    # somem a cada redeploy. Falhar aqui é melhor do que descobrir no upload.
+    try:
+        await storage.ensure_bucket(settings)
+        logger.info(f"Upload directory OK: {settings.upload_dir}")
+    except OSError as exc:
+        logger.error(
+            f"Upload directory unavailable ({settings.upload_dir}): {exc}. "
+            "Anexos e fotos de perfil não vão funcionar até que o volume esteja "
+            "montado e com permissão de escrita."
+        )
 
     yield
 
@@ -102,6 +116,7 @@ app.include_router(dashboard.router, prefix=settings.api_prefix)
 app.include_router(groups.router, prefix=settings.api_prefix)
 app.include_router(calendar.router, prefix=settings.api_prefix)
 app.include_router(quick_replies.router, prefix=settings.api_prefix)
+app.include_router(files.router, prefix=settings.api_prefix)
 
 
 @app.get("/health", tags=["Health"])

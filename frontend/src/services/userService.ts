@@ -1,4 +1,5 @@
 import { api } from "./api";
+import { resolveFileUrl } from "../lib/fileUrl";
 
 export interface UserSummary {
   id: string;
@@ -131,16 +132,24 @@ export async function getTechnicians(): Promise<UserSummary[]> {
   return data.items;
 }
 
+/**
+ * A foto de perfil vai direto no `<img src>`, então o caminho devolvido pela
+ * API precisa virar URL completa antes de chegar na tela.
+ */
+function withAvatarUrl(user: UserSummary): UserSummary {
+  return { ...user, avatar_url: resolveFileUrl(user.avatar_url) };
+}
+
 export async function getMe(): Promise<UserSummary> {
   const { data } = await api.get<UserSummary>("/users/me");
-  return data;
+  return withAvatarUrl(data);
 }
 
 export async function updateMe(
   payload: Pick<UserUpdatePayload, "name" | "phone" | "department">,
 ): Promise<UserSummary> {
   const { data } = await api.patch<UserSummary>("/users/me", payload);
-  return data;
+  return withAvatarUrl(data);
 }
 
 export async function completeOnboarding(
@@ -169,5 +178,5 @@ export async function uploadAvatar(file: File): Promise<UserSummary> {
   const { data } = await api.post<UserSummary>("/users/me/avatar", form, {
     headers: { "Content-Type": "multipart/form-data" },
   });
-  return data;
+  return withAvatarUrl(data);
 }

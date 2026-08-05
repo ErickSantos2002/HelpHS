@@ -1,58 +1,57 @@
 """
-Unit tests for MinIO storage service.
-boto3 fully mocked — no real S3/MinIO required.
+Testes do armazenamento em disco.
+
+Cada teste usa um diretório temporário próprio como upload_dir — nada toca o
+sistema de arquivos real do projeto.
 """
 
-from unittest.mock import MagicMock, patch
+import uuid
+from pathlib import Path
+from unittest.mock import MagicMock
 
 import pytest
-from botocore.exceptions import ClientError
+from jose import jwt
 
+from app.core.config import get_settings
 from app.services import storage
 
-# ── Helpers ───────────────────────────────────────────────────
+_real = get_settings()
 
 
-def _settings():
+def _settings(tmp_path: Path, expires: int = 3600):
+    """Settings de verdade para as chaves JWT, com upload_dir isolado."""
     s = MagicMock()
-    s.minio_endpoint = "localhost"
-    s.minio_port = 9000
-    s.minio_use_ssl = False
-    s.minio_access_key = "minioadmin"
-    s.minio_secret_key = "minioadmin"
-    s.minio_bucket_name = "helphs"
+    s.upload_dir = str(tmp_path)
+    s.file_url_expires_seconds = expires
+    s.api_prefix = "/api/v1"
+    s.jwt_algorithm = _real.jwt_algorithm
+    s.jwt_issuer = _real.jwt_issuer
+    s.get_private_key = _real.get_private_key
+    s.get_public_key = _real.get_public_key
     return s
 
 
-def _client_error(code="NoSuchBucket"):
-    err = ClientError(
-        {"Error": {"Code": code, "Message": "test"}},
-        "HeadBucket",
-    )
-    return err
-
-
 # ═══════════════════════════════════════════════════════════════
-# _make_client
+# resolve_path — proteção contra caminho malicioso
 # ═══════════════════════════════════════════════════════════════
 
 
-def test_make_client_http():
-    settings = _settings()
-    settings.minio_use_ssl = False
-    with patch("app.services.storage.boto3.client") as mock_boto:
-        storage._make_client(settings)
-        call_kwargs = mock_boto.call_args
-        assert "http://" in call_kwargs.kwargs["endpoint_url"]
+def test_resolve_path_dentro_do_diretorio(tmp_path):
+    settings = _settings(tmp_path)
+    caminho = storage.resolve_path("tickets/abc/arquivo.pdf", settings)
+    assert str(caminho).startswith(str(tmp_path.resolve()))
 
 
-def test_make_client_https():
-    settings = _settings()
-    settings.minio_use_ssl = True
-    with patch("app.services.storage.boto3.client") as mock_boto:
-        storage._make_client(settings)
-        call_kwargs = mock_boto.call_args
-        assert "https://" in call_kwargs.kwargs["endpoint_url"]
+def test_resolve_path_recusa_subir_diretorio(tmp_path):
+    settings = _settings(tmp_path)
+    with pytest.raises(storage.StorageError):
+        storage.resolve_path("../../etc/passwd", settings)
+
+
+def test_resolve_path_recusa_caminho_absoluto(tmp_path):
+    settings = _settings(tmp_path)
+    with pytest.raises(storage.StorageError):
+        storage.resolve_path("/etc/passwd", settings)
 
 
 # ═══════════════════════════════════════════════════════════════
@@ -61,118 +60,128 @@ def test_make_client_https():
 
 
 @pytest.mark.asyncio
-async def test_ensure_bucket_already_exists():
-    settings = _settings()
-    mock_s3 = MagicMock()
-    mock_s3.head_bucket.return_value = {}
+async def test_ensure_bucket_cria_o_diretorio(tmp_path):
+    alvo = tmp_path / "uploads"
+    settings = _settings(alvo)
 
-    with patch("app.services.storage._make_client", return_value=mock_s3):
-        await storage.ensure_bucket(settings)
+    await storage.ensure_bucket(settings)
 
-    mock_s3.head_bucket.assert_called_once_with(Bucket="helphs")
-    mock_s3.create_bucket.assert_not_called()
+    assert alvo.is_dir()
 
 
 @pytest.mark.asyncio
-async def test_ensure_bucket_creates_if_missing():
-    settings = _settings()
-    mock_s3 = MagicMock()
-    mock_s3.head_bucket.side_effect = _client_error("NoSuchBucket")
+async def test_ensure_bucket_e_idempotente(tmp_path):
+    settings = _settings(tmp_path)
 
-    with patch("app.services.storage._make_client", return_value=mock_s3):
-        await storage.ensure_bucket(settings)
+    await storage.ensure_bucket(settings)
+    await storage.ensure_bucket(settings)  # não pode explodir
 
-    mock_s3.create_bucket.assert_called_once_with(Bucket="helphs")
+    assert tmp_path.is_dir()
 
 
 # ═══════════════════════════════════════════════════════════════
-# upload_file
+# upload / delete
 # ═══════════════════════════════════════════════════════════════
 
 
 @pytest.mark.asyncio
-async def test_upload_file_returns_key():
-    settings = _settings()
-    mock_s3 = MagicMock()
+async def test_upload_grava_o_arquivo(tmp_path):
+    settings = _settings(tmp_path)
+    key = f"tickets/{uuid.uuid4()}/laudo.pdf"
 
-    with patch("app.services.storage._make_client", return_value=mock_s3):
-        result = await storage.upload_file(
-            b"hello", "path/to/file.pdf", "application/pdf", settings
-        )
+    devolvido = await storage.upload_file(b"conteudo do laudo", key, "application/pdf", settings)
 
-    assert result == "path/to/file.pdf"
-    mock_s3.upload_fileobj.assert_called_once()
+    assert devolvido == key
+    assert (tmp_path / key).read_bytes() == b"conteudo do laudo"
 
 
 @pytest.mark.asyncio
-async def test_upload_file_passes_content_type():
-    settings = _settings()
-    mock_s3 = MagicMock()
+async def test_upload_cria_subpastas(tmp_path):
+    settings = _settings(tmp_path)
 
-    with patch("app.services.storage._make_client", return_value=mock_s3):
-        await storage.upload_file(b"data", "key.png", "image/png", settings)
+    await storage.upload_file(b"x", "a/b/c/arquivo.txt", "text/plain", settings)
 
-    _, call_kwargs = mock_s3.upload_fileobj.call_args
-    assert call_kwargs["ExtraArgs"]["ContentType"] == "image/png"
+    assert (tmp_path / "a" / "b" / "c" / "arquivo.txt").is_file()
+
+
+@pytest.mark.asyncio
+async def test_upload_recusa_key_maliciosa(tmp_path):
+    settings = _settings(tmp_path)
+
+    with pytest.raises(storage.StorageError):
+        await storage.upload_file(b"x", "../fora.txt", "text/plain", settings)
+
+
+@pytest.mark.asyncio
+async def test_delete_remove_o_arquivo(tmp_path):
+    settings = _settings(tmp_path)
+    await storage.upload_file(b"x", "arquivo.txt", "text/plain", settings)
+
+    await storage.delete_file("arquivo.txt", settings)
+
+    assert not (tmp_path / "arquivo.txt").exists()
+
+
+@pytest.mark.asyncio
+async def test_delete_de_arquivo_inexistente_nao_quebra(tmp_path):
+    settings = _settings(tmp_path)
+    await storage.delete_file("nao-existe.txt", settings)  # silencioso
+
+
+@pytest.mark.asyncio
+async def test_delete_com_key_maliciosa_nao_quebra(tmp_path):
+    settings = _settings(tmp_path)
+    await storage.delete_file("../../algo.txt", settings)  # apenas registra o aviso
 
 
 # ═══════════════════════════════════════════════════════════════
-# delete_file
+# Token do link temporário
 # ═══════════════════════════════════════════════════════════════
 
 
-@pytest.mark.asyncio
-async def test_delete_file_success():
-    settings = _settings()
-    mock_s3 = MagicMock()
+def test_token_de_ida_e_volta(tmp_path):
+    settings = _settings(tmp_path)
+    token = storage.create_file_token("tickets/x/laudo.pdf", settings)
 
-    with patch("app.services.storage._make_client", return_value=mock_s3):
-        await storage.delete_file("some/key.pdf", settings)
-
-    mock_s3.delete_object.assert_called_once_with(Bucket="helphs", Key="some/key.pdf")
+    assert storage.read_file_token(token, settings) == "tickets/x/laudo.pdf"
 
 
-@pytest.mark.asyncio
-async def test_delete_file_handles_client_error():
-    settings = _settings()
-    mock_s3 = MagicMock()
-    mock_s3.delete_object.side_effect = _client_error("NoSuchKey")
+def test_token_vencido_e_recusado(tmp_path):
+    settings = _settings(tmp_path)
+    token = storage.create_file_token("arquivo.pdf", settings, expires=-10)
 
-    with patch("app.services.storage._make_client", return_value=mock_s3):
-        # Should not raise
-        await storage.delete_file("missing.pdf", settings)
+    with pytest.raises(storage.StorageError):
+        storage.read_file_token(token, settings)
 
 
-# ═══════════════════════════════════════════════════════════════
-# get_presigned_url
-# ═══════════════════════════════════════════════════════════════
+def test_token_adulterado_e_recusado(tmp_path):
+    settings = _settings(tmp_path)
+
+    with pytest.raises(storage.StorageError):
+        storage.read_file_token("nao.e.um.token", settings)
 
 
-@pytest.mark.asyncio
-async def test_get_presigned_url_returns_url():
-    settings = _settings()
-    mock_s3 = MagicMock()
-    mock_s3.generate_presigned_url.return_value = "http://localhost:9000/helphs/key?sig=abc"
+def test_token_de_login_nao_serve_para_baixar_arquivo(tmp_path):
+    """Um access token comum não pode virar link de download."""
+    settings = _settings(tmp_path)
+    payload = {
+        "sub": "qualquer-arquivo.pdf",
+        "type": "access",
+        "iss": settings.jwt_issuer,
+        "exp": 9999999999,
+    }
+    token = jwt.encode(payload, settings.get_private_key(), algorithm=settings.jwt_algorithm)
 
-    with patch("app.services.storage._make_client", return_value=mock_s3):
-        url = await storage.get_presigned_url("key.pdf", settings, expires=600)
-
-    assert url == "http://localhost:9000/helphs/key?sig=abc"
-    mock_s3.generate_presigned_url.assert_called_once_with(
-        "get_object",
-        Params={"Bucket": "helphs", "Key": "key.pdf"},
-        ExpiresIn=600,
-    )
+    with pytest.raises(storage.StorageError):
+        storage.read_file_token(token, settings)
 
 
 @pytest.mark.asyncio
-async def test_get_presigned_url_default_expiry():
-    settings = _settings()
-    mock_s3 = MagicMock()
-    mock_s3.generate_presigned_url.return_value = "http://example.com/url"
+async def test_presigned_url_aponta_para_o_endpoint_de_arquivos(tmp_path):
+    settings = _settings(tmp_path)
 
-    with patch("app.services.storage._make_client", return_value=mock_s3):
-        await storage.get_presigned_url("file.txt", settings)
+    url = await storage.get_presigned_url("tickets/x/laudo.pdf", settings)
 
-    _, call_kwargs = mock_s3.generate_presigned_url.call_args
-    assert call_kwargs["ExpiresIn"] == 3600
+    assert url.startswith("/api/v1/files/")
+    token = url.rsplit("/", 1)[1]
+    assert storage.read_file_token(token, settings) == "tickets/x/laudo.pdf"

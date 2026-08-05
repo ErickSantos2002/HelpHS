@@ -37,10 +37,18 @@ COPY . .
 # Usuário não-root por segurança
 RUN addgroup --system appgroup && adduser --system --ingroup appgroup appuser
 
+# Diretório dos uploads (anexos e avatares). Precisa existir na imagem e
+# pertencer ao appuser ANTES do USER: ao montar um volume nomeado vazio aqui,
+# o Docker copia dono e permissão deste diretório. Sem isso o volume sobe como
+# root e o container, que roda sem privilégio, não consegue gravar.
+RUN mkdir -p /app/uploads && chown -R appuser:appgroup /app/uploads
+
 COPY start.sh /app/start.sh
 RUN chmod +x /app/start.sh
 
 USER appuser
+
+VOLUME ["/app/uploads"]
 
 EXPOSE 8000
 

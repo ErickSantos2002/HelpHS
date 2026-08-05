@@ -69,7 +69,15 @@ class Settings(BaseSettings):
         if self.app_env == "production" and len(self.secret_key) < 32:
             raise ValueError("SECRET_KEY must be at least 32 characters in production")
 
-    # MinIO
+    # Armazenamento de arquivos (anexos e avatares) em disco.
+    # No deploy, este caminho precisa ser um volume — sem isso os arquivos
+    # somem a cada redeploy do container.
+    upload_dir: str = "/app/uploads"
+    # Validade do link temporario devolvido para baixar/exibir um arquivo
+    file_url_expires_seconds: int = 3600
+
+    # MinIO — mantido apenas para compatibilidade de configuracao; o
+    # armazenamento passou a ser em disco (ver upload_dir)
     minio_endpoint: str = "localhost"
     minio_port: int = 9000
     minio_access_key: str = ""

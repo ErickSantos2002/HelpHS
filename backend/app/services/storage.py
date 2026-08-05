@@ -1,43 +1,67 @@
 """
-MinIO / S3-compatible storage service.
+Armazenamento de arquivos em disco.
 
-Uses boto3 (sync) executed in the event-loop's default thread-pool so that
-FastAPI async endpoints are not blocked.
+Anexos de chamado e fotos de perfil ficam em `settings.upload_dir`, que no
+deploy precisa apontar para um volume — sem volume, o Docker descarta os
+arquivos a cada redeploy.
+
+A interface e a mesma de quando o armazenamento era MinIO/S3, entao os routers
+nao precisam saber onde o arquivo esta:
+
+    ensure_bucket(settings)                  -> garante o diretorio
+    upload_file(data, key, mime, settings)   -> grava e devolve a key
+    delete_file(key, settings)               -> remove
+    get_presigned_url(key, settings, expires)-> link temporario assinado
+
+O "presigned url" aqui e um JWT curto embutido na URL, validado pelo endpoint
+/files. Mesma ideia do link temporario do S3: quem nao tem o token nao baixa.
 """
 
 import asyncio
-import io
+from datetime import UTC, datetime, timedelta
 from functools import partial
+from pathlib import Path
 
-import boto3
-from botocore.exceptions import BotoCoreError, ClientError
+from jose import JWTError, jwt
 from loguru import logger
 
 from app.core.config import Settings
 
+_TOKEN_TYPE = "file"
 
-def _make_client(settings: Settings):
-    protocol = "https" if settings.minio_use_ssl else "http"
-    return boto3.client(
-        "s3",
-        endpoint_url=f"{protocol}://{settings.minio_endpoint}:{settings.minio_port}",
-        aws_access_key_id=settings.minio_access_key,
-        aws_secret_access_key=settings.minio_secret_key,
-        region_name="us-east-1",  # required by boto3 even for MinIO
-    )
+
+class StorageError(Exception):
+    """Falha ao gravar, ler ou apagar um arquivo."""
+
+
+def _root(settings: Settings) -> Path:
+    return Path(settings.upload_dir).resolve()
+
+
+def resolve_path(key: str, settings: Settings) -> Path:
+    """
+    Converte a key num caminho absoluto dentro de upload_dir.
+
+    Recusa qualquer key que tente escapar do diretorio (../, caminho absoluto,
+    link simbolico) — sem isso, uma key manipulada leria arquivos do servidor.
+    """
+    if not key or key.startswith(("/", "\\")) or Path(key).is_absolute():
+        raise StorageError(f"Caminho de arquivo invalido: {key}")
+
+    root = _root(settings)
+    candidate = (root / key).resolve()
+    if root not in candidate.parents:
+        raise StorageError(f"Caminho de arquivo invalido: {key}")
+    return candidate
 
 
 async def ensure_bucket(settings: Settings) -> None:
-    """Create the attachments bucket if it does not exist (idempotent)."""
+    """Cria o diretorio de uploads se ainda nao existir (idempotente)."""
     loop = asyncio.get_event_loop()
-    s3 = _make_client(settings)
+    root = _root(settings)
 
-    def _create():
-        try:
-            s3.head_bucket(Bucket=settings.minio_bucket_name)
-        except ClientError:
-            s3.create_bucket(Bucket=settings.minio_bucket_name)
-            logger.info(f"Created MinIO bucket: {settings.minio_bucket_name}")
+    def _create() -> None:
+        root.mkdir(parents=True, exist_ok=True)
 
     await loop.run_in_executor(None, _create)
 
@@ -48,51 +72,92 @@ async def upload_file(
     content_type: str,
     settings: Settings,
 ) -> str:
-    """Upload bytes to MinIO. Returns the s3_key on success."""
+    """Grava os bytes em disco e devolve a key."""
     loop = asyncio.get_event_loop()
-    s3 = _make_client(settings)
+    destino = resolve_path(key, settings)
 
-    await loop.run_in_executor(
-        None,
-        partial(
-            s3.upload_fileobj,
-            io.BytesIO(data),
-            settings.minio_bucket_name,
-            key,
-            ExtraArgs={"ContentType": content_type},
-        ),
-    )
-    logger.info(f"Uploaded {key} ({len(data)} bytes) to MinIO")
+    def _write() -> None:
+        destino.parent.mkdir(parents=True, exist_ok=True)
+        destino.write_bytes(data)
+
+    try:
+        await loop.run_in_executor(None, _write)
+    except OSError as exc:
+        # Causa mais comum em producao: o volume nao esta montado ou o
+        # usuario do container nao tem permissao de escrita
+        logger.error(f"Falha ao gravar {key} em {destino.parent}: {exc}")
+        raise StorageError(
+            "Nao foi possivel salvar o arquivo no servidor. "
+            "Verifique se o volume de uploads esta montado e com permissao de escrita."
+        ) from exc
+
+    logger.info(f"Arquivo gravado: {key} ({len(data)} bytes)")
     return key
 
 
 async def delete_file(key: str, settings: Settings) -> None:
-    """Delete an object from MinIO."""
+    """Remove o arquivo. Ausencia do arquivo nao e tratada como erro."""
     loop = asyncio.get_event_loop()
-    s3 = _make_client(settings)
 
     try:
-        await loop.run_in_executor(
-            None,
-            partial(s3.delete_object, Bucket=settings.minio_bucket_name, Key=key),
+        alvo = resolve_path(key, settings)
+    except StorageError as exc:
+        logger.warning(f"Nao foi possivel remover {key}: {exc}")
+        return
+
+    def _remove() -> None:
+        alvo.unlink(missing_ok=True)
+
+    try:
+        await loop.run_in_executor(None, _remove)
+        logger.info(f"Arquivo removido: {key}")
+    except OSError as exc:
+        logger.warning(f"Nao foi possivel remover {key}: {exc}")
+
+
+def create_file_token(key: str, settings: Settings, expires: int | None = None) -> str:
+    """Token curto que autoriza baixar exatamente um arquivo."""
+    now = datetime.now(UTC)
+    ttl = expires if expires is not None else settings.file_url_expires_seconds
+    payload = {
+        "sub": key,
+        "type": _TOKEN_TYPE,
+        "iat": now,
+        "exp": now + timedelta(seconds=ttl),
+        "iss": settings.jwt_issuer,
+    }
+    return jwt.encode(payload, settings.get_private_key(), algorithm=settings.jwt_algorithm)
+
+
+def read_file_token(token: str, settings: Settings) -> str:
+    """Valida o token e devolve a key. Levanta StorageError se nao servir."""
+    try:
+        payload = jwt.decode(
+            token,
+            settings.get_public_key(),
+            algorithms=[settings.jwt_algorithm],
+            issuer=settings.jwt_issuer,
         )
-        logger.info(f"Deleted {key} from MinIO")
-    except (BotoCoreError, ClientError) as exc:
-        logger.warning(f"Could not delete {key} from MinIO: {exc}")
+    except JWTError as exc:
+        raise StorageError("Link expirado ou invalido.") from exc
+
+    if payload.get("type") != _TOKEN_TYPE:
+        raise StorageError("Link invalido para download de arquivo.")
+
+    key = payload.get("sub")
+    if not key:
+        raise StorageError("Link invalido para download de arquivo.")
+    return str(key)
 
 
 async def get_presigned_url(key: str, settings: Settings, expires: int = 3600) -> str:
-    """Return a pre-signed GET URL valid for `expires` seconds."""
-    loop = asyncio.get_event_loop()
-    s3 = _make_client(settings)
+    """
+    Link temporario para baixar o arquivo pela API.
 
-    url: str = await loop.run_in_executor(
-        None,
-        partial(
-            s3.generate_presigned_url,
-            "get_object",
-            Params={"Bucket": settings.minio_bucket_name, "Key": key},
-            ExpiresIn=expires,
-        ),
+    Assinatura mantida por compatibilidade com o codigo que ja existia.
+    """
+    loop = asyncio.get_event_loop()
+    token = await loop.run_in_executor(
+        None, partial(create_file_token, key, settings, expires)
     )
-    return url
+    return f"{settings.api_prefix}/files/{token}"
