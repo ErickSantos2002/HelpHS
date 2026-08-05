@@ -106,6 +106,60 @@ ignorando acentos. Resposta inativa continua cadastrada mas some do menu.
 Fora de escopo por ora: variáveis dinâmicas (`{{nome_do_cliente}}`), anexos e
 categorias de resposta.
 
+## Armazenamento de arquivos
+
+**Anexos de chamado e fotos de perfil ficam em disco**, no caminho de
+`UPLOAD_DIR` (padrão `/app/uploads`). Antes iam para MinIO/S3; a troca foi feita
+em 05/08/2026 porque o ambiente de produção não tem serviço de storage e a
+hospedagem oferece volume.
+
+**No deploy, esse caminho precisa ser um volume.** Sem volume, o Docker descarta
+o conteúdo a cada redeploy e todos os anexos somem. No EasyPanel:
+serviço `helphs-api` › Armazenamento › **Adicionar Montagem de Volume**, com
+`/app/uploads` como caminho no container.
+
+O `Dockerfile` cria `/app/uploads` já pertencente ao `appuser` antes de trocar
+de usuário. Isso é necessário: o container não roda como root, e um volume
+montado sobre um diretório de root ficaria sem permissão de escrita.
+
+### Como o arquivo chega ao navegador
+
+Por **link temporário assinado**, não pela sessão do usuário — a foto de perfil e
+a pré-visualização de anexo são carregadas pelo `<img src>`, que não envia
+cabeçalho de autenticação.
+
+1. A API devolve `/api/v1/files/<token>`, com validade de `FILE_URL_EXPIRES_SECONDS`
+2. O frontend prefixa com o host da API (`resolveFileUrl`), porque em produção
+   frontend e API ficam em domínios diferentes
+3. O endpoint valida a assinatura e o tipo do token antes de servir o arquivo
+
+O token é do tipo `file`: um token de login **não** serve para baixar arquivo, e
+vice-versa. A key é validada contra path traversal — nenhum caminho sai de
+`UPLOAD_DIR`.
+
+### Por que quase tudo desce como download
+
+Os arquivos vêm de upload de cliente. Servi-los inline no domínio da API é o
+mesmo que deixar terceiros publicarem conteúdo naquela origem: um `.html` ou um
+`.svg` com script rodaria **como se fosse do sistema** (XSS armazenado).
+
+Por isso o endpoint `/files`:
+
+- só exibe inline **png, jpeg, gif e webp** — o necessário para foto de perfil e
+  pré-visualização de imagem;
+- **SVG fica de fora de propósito**: é imagem, mas aceita `<script>` dentro;
+- qualquer outro tipo vira `application/octet-stream` com
+  `Content-Disposition: attachment`;
+- toda resposta leva `X-Content-Type-Options: nosniff` e
+  `Content-Security-Policy: default-src 'none'; sandbox`.
+
+Hoje a allowlist de upload (`UPLOAD_ALLOWED_EXTENSIONS`) não aceita `.html` nem
+`.svg`, mas ela é configurável por variável de ambiente — a proteção no download
+existe para que mudar essa variável não abra um buraco.
+
+Como o arquivo em disco tem nome interno (uuid), o backend acrescenta
+`?filename=` na URL do anexo para o download sair com o nome original.
+
 ## LGPD
 
 A anonimização de usuário existe no backend e foi **removida da interface de
@@ -139,6 +193,20 @@ pela interface.
 **Consequência:** o card "Taxa de reabertura" do relatório conta tickets que
 voltaram de `resolved`/`closed` para `open`/`in_progress` — algo que a API não
 permite. A métrica sempre mostrará 0%.
+
+### Antivírus (ClamAV) não está no ambiente
+
+O upload de anexo passa por varredura antivírus antes de gravar
+(`backend/app/services/antivirus.py`). Como o serviço **não existe no EasyPanel**,
+o resultado da varredura vem como `unavailable` e o arquivo é aceito assim mesmo,
+marcado como não escaneado (`virus_scanned = false` na tabela `attachments`).
+
+Ou seja: **nenhum anexo enviado hoje é verificado contra vírus**. Nada trava, mas
+arquivo malicioso enviado por um cliente entra sem checagem.
+
+Decidido em 05/08/2026 manter assim por ora e revisar depois. Para ligar, basta
+subir um serviço `clamav/clamav:latest` e apontar `CLAMAV_HOST`/`CLAMAV_PORT` —
+o código já está pronto, não precisa de alteração.
 
 ### Cobertura de testes desigual
 
