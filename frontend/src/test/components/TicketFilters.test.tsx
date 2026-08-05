@@ -10,7 +10,7 @@ describe("TicketFilters", () => {
   it("renders search input and filter selects", () => {
     render(<TicketFilters value={EMPTY_FILTERS} onChange={vi.fn()} />);
     expect(
-      screen.getByPlaceholderText("Buscar por título ou protocolo…"),
+      screen.getByPlaceholderText("Buscar por título, protocolo ou nº de série…"),
     ).toBeInTheDocument();
     expect(screen.getByText("Status")).toBeInTheDocument();
     expect(screen.getByText("Prioridade")).toBeInTheDocument();

@@ -357,7 +357,8 @@ export default function TicketListPage() {
             </svg>
             <input
               type="text"
-              placeholder="Buscar…"
+              placeholder="Título, protocolo ou nº de série…"
+              title="Busca por título do chamado, protocolo (HS-2026-0001) ou número de série do equipamento"
               value={search}
               onChange={(e) => setSearch(e.target.value)}
               className="pl-9 pr-8 py-2 text-sm w-full sm:w-52 rounded-lg border border-border/60 bg-background-elevated text-slate-200 placeholder-slate-500 focus:outline-none focus:ring-2 focus:ring-primary focus:border-transparent transition-colors"

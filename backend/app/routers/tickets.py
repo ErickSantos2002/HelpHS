@@ -31,7 +31,9 @@ from app.core.security import authorize, get_current_user
 from app.models.models import (
     AuditAction,
     AuditLog,
+    Equipment,
     NotificationType,
+    Product,
     SLAConfig,
     Ticket,
     TicketHistory,
@@ -203,6 +205,25 @@ def _audit(
     )
 
 
+async def _fill_product_and_equipment(
+    response: TicketResponse, ticket: Ticket, db: AsyncSession
+) -> None:
+    """Preenche nome do produto e do equipamento — o ticket só guarda os ids."""
+    if ticket.product_id:
+        produto = await db.get(Product, ticket.product_id)
+        response.product_name = produto.name if produto else None
+
+    if ticket.equipment_id:
+        equipamento = await db.get(Equipment, ticket.equipment_id)
+        if equipamento:
+            response.equipment_name = equipamento.name
+            response.equipment_serial = equipamento.serial_number
+            # Equipamento sem produto informado no chamado: usa o do cadastro
+            if not response.product_name and equipamento.product_id:
+                produto = await db.get(Product, equipamento.product_id)
+                response.product_name = produto.name if produto else None
+
+
 def _record_history(
     db: AsyncSession,
     ticket_id: uuid.UUID,
@@ -363,7 +384,16 @@ async def list_tickets(
             Ticket.id.in_(select(ticket_tags.c.ticket_id).where(ticket_tags.c.tag_id == tag_id))
         )
     if search:
-        base = base.where(Ticket.title.ilike(f"%{search}%") | Ticket.protocol.ilike(f"%{search}%"))
+        # Título, protocolo e número de série do equipamento — as três formas
+        # como as pessoas procuram um chamado
+        termo = f"%{search}%"
+        base = base.where(
+            Ticket.title.ilike(termo)
+            | Ticket.protocol.ilike(termo)
+            | Ticket.equipment_id.in_(
+                select(Equipment.id).where(Equipment.serial_number.ilike(termo))
+            )
+        )
 
     # Build sort expression
     if sort_by == "priority":
@@ -390,9 +420,31 @@ async def list_tickets(
         user_rows = await db.execute(select(User.id, User.name).where(User.id.in_(assignee_ids)))
         name_map = {row.id: row.name for row in user_rows}
 
+    # Produtos e equipamentos em lote — uma consulta cada, não uma por ticket
+    product_ids = {t.product_id for t in tickets if t.product_id}
+    product_map: dict[uuid.UUID, str] = {}
+    if product_ids:
+        product_rows = await db.execute(
+            select(Product.id, Product.name).where(Product.id.in_(product_ids))
+        )
+        product_map = {row.id: row.name for row in product_rows}
+
+    equipment_ids = {t.equipment_id for t in tickets if t.equipment_id}
+    equipment_map: dict[uuid.UUID, tuple[str, str | None]] = {}
+    if equipment_ids:
+        equip_rows = await db.execute(
+            select(Equipment.id, Equipment.name, Equipment.serial_number).where(
+                Equipment.id.in_(equipment_ids)
+            )
+        )
+        equipment_map = {row.id: (row.name, row.serial_number) for row in equip_rows}
+
     def _serialize(t: Ticket) -> TicketResponse:
         r = TicketResponse.model_validate(t)
         r.assignee_name = name_map.get(t.assignee_id) if t.assignee_id else None
+        r.product_name = product_map.get(t.product_id) if t.product_id else None
+        if t.equipment_id and t.equipment_id in equipment_map:
+            r.equipment_name, r.equipment_serial = equipment_map[t.equipment_id]
         if actor.role == UserRole.client:
             r.technician_notes = None
         return r
@@ -425,6 +477,7 @@ async def get_ticket(
     if ticket.assignee_id:
         assignee = await db.get(User, ticket.assignee_id)
         response.assignee_name = assignee.name if assignee else None
+    await _fill_product_and_equipment(response, ticket, db)
     if actor.role == UserRole.client:
         response.technician_notes = None
     return response

@@ -104,7 +104,7 @@ export function TicketFilters({
       <div className="flex-1 min-w-48">
         <Input
           ref={searchRef}
-          placeholder="Buscar por título ou protocolo…"
+          placeholder="Buscar por título, protocolo ou nº de série…"
           defaultValue={value.search}
           onChange={(e) => handleSearch(e.target.value)}
         />
