@@ -50,6 +50,7 @@ const EVENT_COLOR_PALETTE: { value: string; label: string }[] = [
   { value: "#ec4899", label: "Rosa" },
   { value: "#a855f7", label: "Púrpura" },
   { value: "#64748b", label: "Cinza" },
+  { value: "#ffffff", label: "Branco" },
 ];
 
 const MONTHS = [
@@ -212,7 +213,7 @@ function EventDialog({ event, defaultDate, onClose, onSaved }: EventDialogProps)
 
         <div className="space-y-1.5">
           <label className="text-xs font-medium text-slate-400">Cor</label>
-          <div className="grid grid-cols-5 gap-2 sm:grid-cols-8">
+          <div className="grid grid-cols-4 gap-2 sm:grid-cols-8">
             {EVENT_COLOR_PALETTE.map((c) => (
               <button
                 key={c.value}
@@ -223,8 +224,10 @@ function EventDialog({ event, defaultDate, onClose, onSaved }: EventDialogProps)
                 onClick={() => { setColor(c.value); setColorOverride(true); }}
                 className={cn(
                   "h-8 w-full rounded-md border-2 transition-transform cursor-pointer",
+                  // Contorno interno para as cores claras não sumirem no fundo
+                  "ring-1 ring-inset ring-black/15",
                   color === c.value
-                    ? "border-white scale-105 shadow-md"
+                    ? "border-primary scale-105 shadow-md"
                     : "border-transparent hover:scale-105",
                 )}
                 style={{ backgroundColor: c.value }}
