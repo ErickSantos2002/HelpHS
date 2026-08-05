@@ -1,6 +1,8 @@
 import React, { useCallback, useEffect, useRef, useState } from "react";
 import { toast } from "sonner";
 import { toastApiError } from "../../lib/toastError";
+import { readableTextColor } from "../../lib/colors";
+import { cn } from "../../lib/utils";
 import { useNavigate, useParams } from "react-router-dom";
 import {
   Alert,
@@ -944,7 +946,7 @@ export default function TicketDetailPage() {
         active={activeTab}
         setActive={setActiveTab}
         counts={{ historico: visibleHistory.length, anexos: attachments.length }}
-        showKb={isStaff}
+        showKb
       />
 
       <div className="grid grid-cols-1 lg:grid-cols-[1fr_256px] gap-5 lg:flex-1 lg:min-h-0">
@@ -1214,11 +1216,31 @@ export default function TicketDetailPage() {
                         <button
                           key={tag.id}
                           type="button"
+                          title={tag.name}
+                          aria-pressed={sel}
                           onClick={() => setSelectedTagIds((prev) => { const n = new Set(prev); if (n.has(tag.id)) n.delete(tag.id); else n.add(tag.id); return n; })}
-                          className={`rounded-full border px-2.5 py-1 text-xs font-semibold transition-all cursor-pointer ${sel ? "opacity-100" : "opacity-35 hover:opacity-60"}`}
-                          style={{ backgroundColor: `${tag.color}22`, borderColor: `${tag.color}55`, color: tag.color }}
+                          className={cn(
+                            "inline-flex max-w-full items-center gap-1 rounded-full border px-2.5 py-1",
+                            "text-xs font-semibold transition-all cursor-pointer",
+                            sel ? "shadow-sm" : "hover:brightness-125",
+                          )}
+                          // Selecionada usa a cor cheia; o texto acompanha o contraste
+                          style={
+                            sel
+                              ? {
+                                  backgroundColor: tag.color,
+                                  borderColor: tag.color,
+                                  color: readableTextColor(tag.color),
+                                }
+                              : {
+                                  backgroundColor: `${tag.color}1a`,
+                                  borderColor: `${tag.color}66`,
+                                  color: tag.color,
+                                }
+                          }
                         >
-                          {tag.name}
+                          {sel && <span aria-hidden="true" className="text-[10px] leading-none">✓</span>}
+                          <span className="truncate">{tag.name}</span>
                         </button>
                       );
                     })}
