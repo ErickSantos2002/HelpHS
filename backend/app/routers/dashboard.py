@@ -11,7 +11,8 @@ Permissões:
 import csv
 import io
 import uuid
-from datetime import UTC, date as DateType, datetime, timedelta
+from datetime import UTC, datetime, timedelta
+from datetime import date as date_type
 from typing import Annotated
 
 from fastapi import APIRouter, Depends, HTTPException, Query, status
@@ -38,6 +39,29 @@ from app.models.models import (
     User,
     UserRole,
     UserStatus,
+)
+from app.schemas.dashboard import (
+    AvgFirstResponseItem,
+    AvgResolutionItem,
+    CategoryCount,
+    CsatDailyItem,
+    CSATDistributionItem,
+    DailyCount,
+    DashboardStats,
+    HourlyCount,
+    OldestTicketItem,
+    ProductCount,
+    ReportComparison,
+    ReportData,
+    SLAComplianceItem,
+    SlaStats,
+    SurveyStats,
+    TechnicianDetailReport,
+    TechnicianDistItem,
+    TechnicianListReport,
+    TechnicianSummary,
+    TicketStats,
+    WeekdayCount,
 )
 
 # ── SLA breach expressions (calculadas em tempo real via SQL) ──
@@ -75,30 +99,6 @@ def _response_breached_cond():
         ),
     )
 
-
-from app.schemas.dashboard import (
-    AvgFirstResponseItem,
-    AvgResolutionItem,
-    CategoryCount,
-    CsatDailyItem,
-    CSATDistributionItem,
-    DailyCount,
-    DashboardStats,
-    HourlyCount,
-    OldestTicketItem,
-    ProductCount,
-    ReportComparison,
-    ReportData,
-    SLAComplianceItem,
-    SlaStats,
-    SurveyStats,
-    TechnicianDetailReport,
-    TechnicianDistItem,
-    TechnicianListReport,
-    TechnicianSummary,
-    TicketStats,
-    WeekdayCount,
-)
 
 router = APIRouter(tags=["Dashboard"])
 
@@ -193,8 +193,8 @@ async def _build_report(
     period: int = 30,
     category: TicketCategory | None = None,
     priority: TicketPriority | None = None,
-    start_date: DateType | None = None,
-    end_date: DateType | None = None,
+    start_date: date_type | None = None,
+    end_date: date_type | None = None,
 ) -> ReportData:
     """Shared data collection used by JSON, CSV and PDF endpoints."""
     if start_date and end_date:
@@ -629,8 +629,8 @@ async def get_reports(
     period: Annotated[int, Query(ge=1, le=365)] = 30,
     category: TicketCategory | None = Query(default=None),
     priority: TicketPriority | None = Query(default=None),
-    start_date: DateType | None = Query(default=None),
-    end_date: DateType | None = Query(default=None),
+    start_date: date_type | None = Query(default=None),
+    end_date: date_type | None = Query(default=None),
 ) -> ReportData:
     return await _build_report(db, period, category, priority, start_date, end_date)
 
@@ -642,8 +642,8 @@ async def export_reports_csv(
     period: Annotated[int, Query(ge=1, le=365)] = 30,
     category: TicketCategory | None = Query(default=None),
     priority: TicketPriority | None = Query(default=None),
-    start_date: DateType | None = Query(default=None),
-    end_date: DateType | None = Query(default=None),
+    start_date: date_type | None = Query(default=None),
+    end_date: date_type | None = Query(default=None),
 ) -> StreamingResponse:
     data = await _build_report(db, period, category, priority, start_date, end_date)
     buf = io.StringIO()
@@ -710,8 +710,8 @@ async def export_reports_pdf(
     period: Annotated[int, Query(ge=1, le=365)] = 30,
     category: TicketCategory | None = Query(default=None),
     priority: TicketPriority | None = Query(default=None),
-    start_date: DateType | None = Query(default=None),
-    end_date: DateType | None = Query(default=None),
+    start_date: date_type | None = Query(default=None),
+    end_date: date_type | None = Query(default=None),
 ) -> StreamingResponse:
     data = await _build_report(db, period, category, priority, start_date, end_date)
     buf = io.BytesIO()

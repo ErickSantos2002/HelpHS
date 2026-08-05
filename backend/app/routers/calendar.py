@@ -9,6 +9,7 @@ Permissões:
 """
 
 import uuid
+from datetime import UTC, datetime
 from typing import Annotated
 
 from fastapi import APIRouter, Depends, HTTPException, Query, status
@@ -16,7 +17,7 @@ from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.core.database import get_db
-from app.core.security import authorize, get_current_user
+from app.core.security import authorize
 from app.models.models import CalendarEvent, User, UserRole
 from app.schemas.calendar import (
     CalendarEventCreate,
@@ -48,12 +49,11 @@ async def list_events(
     stmt = select(CalendarEvent).order_by(CalendarEvent.start_date)
 
     if year and month:
-        from datetime import datetime, timezone
-        start = datetime(year, month, 1, tzinfo=timezone.utc)
+        start = datetime(year, month, 1, tzinfo=UTC)
         if month == 12:
-            end = datetime(year + 1, 1, 1, tzinfo=timezone.utc)
+            end = datetime(year + 1, 1, 1, tzinfo=UTC)
         else:
-            end = datetime(year, month + 1, 1, tzinfo=timezone.utc)
+            end = datetime(year, month + 1, 1, tzinfo=UTC)
         stmt = stmt.where(CalendarEvent.start_date < end, CalendarEvent.end_date >= start)
 
     rows = await db.execute(stmt)
@@ -91,6 +91,7 @@ async def create_event(
             detail="A data de fim precisa ser igual ou posterior à data de início.",
         )
 
+    now = datetime.now(UTC)
     event = CalendarEvent(
         id=uuid.uuid4(),
         title=body.title,
@@ -100,6 +101,10 @@ async def create_event(
         start_date=body.start_date,
         end_date=body.end_date,
         created_by=actor.id,
+        # Explícito: o default da coluna só valeria no INSERT e a resposta é
+        # montada a partir do objeto em memória
+        created_at=now,
+        updated_at=now,
     )
     event.creator = actor
     db.add(event)
