@@ -2,6 +2,8 @@ import React, { useState } from "react";
 import { useNavigate, useLocation, Link } from "react-router-dom";
 import { Alert, Button, Input } from "../../components/ui";
 import { useAuth } from "../../contexts/AuthContext";
+import { resendVerificationApi } from "../../services/authService";
+import { getApiError } from "../../lib/apiError";
 import logoFull from "../../assets/Logo HelpHS.png";
 
 const FEATURES = [
@@ -52,10 +54,25 @@ export default function LoginPage() {
   const [password, setPassword] = useState("");
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
+  const [precisaConfirmar, setPrecisaConfirmar] = useState(false);
+  const [reenviando, setReenviando] = useState(false);
+  const [reenviado, setReenviado] = useState(false);
 
   const justRegistered =
     (location.state as { registered?: boolean })?.registered === true;
+  const passwordReset =
+    (location.state as { passwordReset?: boolean })?.passwordReset === true;
   const from = (location.state as { from?: string })?.from ?? "/";
+
+  async function handleReenviarConfirmacao() {
+    setReenviando(true);
+    try {
+      await resendVerificationApi(email);
+      setReenviado(true);
+    } finally {
+      setReenviando(false);
+    }
+  }
 
   async function handleSubmit(e: React.FormEvent<HTMLFormElement>) {
     e.preventDefault();
@@ -67,7 +84,13 @@ export default function LoginPage() {
       navigate(from, { replace: true });
     } catch (err: unknown) {
       const status = (err as { response?: { status?: number } })?.response?.status;
-      if (status === 401 || status === 422) {
+      if (status === 403) {
+        // Conta existe e a senha está certa — falta confirmar o e-mail ou a
+        // conta está inativa. A mensagem do servidor diz qual é o caso.
+        const motivo = getApiError(err, "Não foi possível entrar.");
+        setError(motivo);
+        setPrecisaConfirmar(motivo.toLowerCase().includes("confirme seu e-mail"));
+      } else if (status === 401 || status === 422) {
         setError("E-mail ou senha incorretos.");
       } else {
         setError("Erro ao conectar com o servidor. Tente novamente.");
@@ -150,9 +173,28 @@ export default function LoginPage() {
               Conta criada com sucesso! Faça login para continuar.
             </Alert>
           )}
+          {passwordReset && (
+            <Alert variant="success">
+              Senha alterada com sucesso. Entre com a nova senha.
+            </Alert>
+          )}
           {error && (
-            <Alert variant="danger" onDismiss={() => setError(null)}>
+            <Alert variant="danger" onDismiss={() => { setError(null); setPrecisaConfirmar(false); }}>
               {error}
+            </Alert>
+          )}
+          {precisaConfirmar && !reenviado && (
+            <button
+              onClick={handleReenviarConfirmacao}
+              disabled={reenviando}
+              className="w-full rounded-lg border border-primary/30 bg-primary/10 px-4 py-2 text-sm font-medium text-primary transition-colors hover:bg-primary/20 disabled:opacity-50 cursor-pointer"
+            >
+              {reenviando ? "Enviando…" : "Reenviar e-mail de confirmação"}
+            </button>
+          )}
+          {reenviado && (
+            <Alert variant="success">
+              Se este e-mail estiver cadastrado e ainda não confirmado, o link chegará em instantes.
             </Alert>
           )}
 
@@ -178,6 +220,14 @@ export default function LoginPage() {
                 autoComplete="current-password"
                 required
               />
+              <div className="flex justify-end">
+                <Link
+                  to="/esqueci-senha"
+                  className="text-xs font-medium text-primary hover:text-primary/80 transition-colors"
+                >
+                  Esqueci minha senha
+                </Link>
+              </div>
             </div>
 
             <Button

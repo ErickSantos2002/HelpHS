@@ -36,3 +36,38 @@ export async function logoutApi(): Promise<void> {
     // Best-effort: ignore errors on logout
   });
 }
+
+// ── Confirmação de e-mail e recuperação de senha ──────────────
+
+interface MessageResponse {
+  message: string;
+}
+
+/** Confirma o cadastro a partir do link recebido por e-mail. */
+export async function verifyEmailApi(token: string): Promise<string> {
+  const { data } = await api.post<MessageResponse>("/auth/verify-email", { token });
+  return data.message;
+}
+
+/** Reenvia o link de confirmação. */
+export async function resendVerificationApi(email: string): Promise<string> {
+  const { data } = await api.post<MessageResponse>("/auth/resend-verification", { email });
+  return data.message;
+}
+
+/**
+ * Pede o link de redefinição de senha.
+ *
+ * A resposta é sempre a mesma, mesmo para e-mail que não existe — é assim de
+ * propósito, para não revelar quem tem conta no sistema.
+ */
+export async function forgotPasswordApi(email: string): Promise<string> {
+  const { data } = await api.post<MessageResponse>("/auth/forgot-password", { email });
+  return data.message;
+}
+
+/** Grava a nova senha usando o link recebido por e-mail. */
+export async function resetPasswordApi(token: string, password: string): Promise<string> {
+  const { data } = await api.post<MessageResponse>("/auth/reset-password", { token, password });
+  return data.message;
+}

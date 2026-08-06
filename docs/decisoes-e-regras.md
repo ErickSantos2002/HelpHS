@@ -84,6 +84,57 @@ se estiver vazio, do equipamento escolhido pelo cliente.
 Na **listagem** da base (fora do chamado) não há restrição: todos veem a base
 inteira, e produto e categoria são apenas filtros.
 
+## Acesso: confirmação de e-mail e recuperação de senha
+
+### O sistema se adapta ao SMTP
+
+**Enquanto não houver SMTP configurado, o cadastro libera o acesso na hora**, como
+antes. A confirmação só passa a ser exigida quando `SMTP_FROM_EMAIL` ou
+`SMTP_USER` estiverem preenchidos (`Settings.requires_email_verification()`).
+
+Isso existe para que o código possa ser publicado antes das credenciais de
+e-mail: sem essa trava, o cliente criaria conta e ficaria esperando um link que
+o sistema não tem como enviar. Ao preencher as credenciais, a regra passa a
+valer sozinha — não precisa de novo deploy.
+
+### Fluxo
+
+Cadastro completo → conta criada bloqueada → e-mail com link → clique → conta
+ativa → login → onboarding da empresa.
+
+Quem tenta entrar antes de confirmar recebe **o motivo real** ("Confirme seu
+e-mail...") e um botão para reenviar o link — não o genérico "e-mail ou senha
+incorretos", que deixaria a pessoa tentando a senha à toa.
+
+### Links
+
+São JWT assinados, sem tabela e sem limpeza periódica:
+
+| Link | Validade | Observação |
+|---|---|---|
+| Confirmação de cadastro | 24 h | `EMAIL_VERIFICATION_TOKEN_HOURS` |
+| Redefinição de senha | 1 h | **uso único** |
+
+O **uso único** funciona sem guardar estado: o token carrega uma impressão
+digital da senha vigente, conferida contra a senha atual do usuário. Trocada a
+senha, o link morre — inclusive o que acabou de ser usado. Sem isso, um link
+esquecido na caixa de e-mail abriria a conta meses depois.
+
+Cada token tem um tipo (`email_verify` ou `password_reset`) e não serve para
+outra finalidade — um token de login também não vira link de arquivo.
+
+### Por que as mensagens são vagas de propósito
+
+"Esqueci a senha" e "reenviar confirmação" **sempre** respondem *"Se este e-mail
+estiver cadastrado, você receberá..."*, mesmo quando o e-mail não existe.
+
+Parece ruim para o usuário, mas responder "e-mail não encontrado" permitiria
+que qualquer pessoa descobrisse quais e-mails têm conta no sistema, testando
+endereços um a um.
+
+Uma exceção deliberada: **redefinir a senha confirma o e-mail junto**. Quem
+abriu o link provou ser dono da caixa.
+
 ## Cadastro do cliente
 
 **CNPJ e CEP são obrigatórios** no onboarding e ao salvar os dados da empresa no

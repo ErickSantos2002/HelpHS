@@ -12,6 +12,9 @@ import { Spinner } from "./components/ui";
 // Pages (lazy-loaded for code splitting)
 const LoginPage = lazy(() => import("./pages/auth/LoginPage"));
 const RegisterPage = lazy(() => import("./pages/auth/RegisterPage"));
+const VerifyEmailPage = lazy(() => import("./pages/auth/VerifyEmailPage"));
+const ForgotPasswordPage = lazy(() => import("./pages/auth/ForgotPasswordPage"));
+const ResetPasswordPage = lazy(() => import("./pages/auth/ResetPasswordPage"));
 const OnboardingPage = lazy(() => import("./pages/onboarding/OnboardingPage"));
 const HomePage = lazy(() => import("./pages/HomePage"));
 const TicketListPage = lazy(() => import("./pages/tickets/TicketListPage"));
@@ -55,7 +58,13 @@ function App() {
           <Route element={<PublicOnlyRoute />}>
             <Route path="/login" element={<LoginPage />} />
             <Route path="/register" element={<RegisterPage />} />
+            <Route path="/esqueci-senha" element={<ForgotPasswordPage />} />
+            <Route path="/redefinir-senha" element={<ResetPasswordPage />} />
           </Route>
+
+          {/* Confirmação de e-mail — acessível mesmo com sessão aberta, já que
+              o link pode ser clicado em outro navegador */}
+          <Route path="/confirmar-email" element={<VerifyEmailPage />} />
 
           {/* ── Error pages ──────────────────────────────────── */}
           <Route path="/403" element={<ForbiddenPage />} />

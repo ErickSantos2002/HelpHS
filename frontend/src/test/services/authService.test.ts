@@ -1,5 +1,13 @@
 import { describe, it, expect, vi, beforeEach } from "vitest";
-import { loginApi, getMeApi, logoutApi } from "../../services/authService";
+import {
+  loginApi,
+  getMeApi,
+  logoutApi,
+  verifyEmailApi,
+  resendVerificationApi,
+  forgotPasswordApi,
+  resetPasswordApi,
+} from "../../services/authService";
 import { api } from "../../services/api";
 
 vi.mock("../../services/api", () => ({
@@ -76,5 +84,56 @@ describe("logoutApi", () => {
     mockPost.mockRejectedValue(new Error("network error"));
 
     await expect(logoutApi()).resolves.toBeUndefined();
+  });
+});
+
+// ── Confirmação de e-mail e recuperação de senha ──────────────
+
+describe("verifyEmailApi", () => {
+  it("envia o token para /auth/verify-email", async () => {
+    mockPost.mockResolvedValue({ data: { message: "E-mail confirmado." } });
+
+    const msg = await verifyEmailApi("tok123");
+
+    expect(mockPost).toHaveBeenCalledWith("/auth/verify-email", { token: "tok123" });
+    expect(msg).toBe("E-mail confirmado.");
+  });
+});
+
+describe("resendVerificationApi", () => {
+  it("envia o e-mail para /auth/resend-verification", async () => {
+    mockPost.mockResolvedValue({ data: { message: "ok" } });
+
+    await resendVerificationApi("cliente@test.com");
+
+    expect(mockPost).toHaveBeenCalledWith("/auth/resend-verification", {
+      email: "cliente@test.com",
+    });
+  });
+});
+
+describe("forgotPasswordApi", () => {
+  it("envia o e-mail para /auth/forgot-password", async () => {
+    mockPost.mockResolvedValue({ data: { message: "instruções enviadas" } });
+
+    const msg = await forgotPasswordApi("cliente@test.com");
+
+    expect(mockPost).toHaveBeenCalledWith("/auth/forgot-password", {
+      email: "cliente@test.com",
+    });
+    expect(msg).toBe("instruções enviadas");
+  });
+});
+
+describe("resetPasswordApi", () => {
+  it("envia token e nova senha para /auth/reset-password", async () => {
+    mockPost.mockResolvedValue({ data: { message: "Senha alterada." } });
+
+    await resetPasswordApi("tok123", "NovaSenha@1");
+
+    expect(mockPost).toHaveBeenCalledWith("/auth/reset-password", {
+      token: "tok123",
+      password: "NovaSenha@1",
+    });
   });
 });

@@ -3,6 +3,7 @@ import type { FormEvent } from "react";
 import { Link, useNavigate } from "react-router-dom";
 import { Alert, Button, Input } from "../../components/ui";
 import { api } from "../../services/api";
+import { AuthShell } from "./AuthShell";
 import logoFull from "../../assets/Logo HelpHS.png";
 
 interface RegisterPayload {
@@ -14,8 +15,15 @@ interface RegisterPayload {
   lgpd_consent: boolean;
 }
 
-async function registerUser(payload: RegisterPayload) {
-  const { data } = await api.post("/auth/register", payload);
+interface RegisterResponse {
+  id: string;
+  email: string;
+  /** Falso quando a conta ainda depende do link de confirmação. */
+  email_verified: boolean;
+}
+
+async function registerUser(payload: RegisterPayload): Promise<RegisterResponse> {
+  const { data } = await api.post<RegisterResponse>("/auth/register", payload);
   return data;
 }
 
@@ -37,6 +45,8 @@ export default function RegisterPage() {
   const [lgpd, setLgpd] = useState(false);
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
+  // Preenchido quando a conta foi criada e depende da confirmação por e-mail
+  const [cadastradoEmail, setCadastradoEmail] = useState<string | null>(null);
 
   function validate(): string | null {
     if (!name.trim()) return "Nome é obrigatório.";
@@ -59,7 +69,7 @@ export default function RegisterPage() {
     setLoading(true);
     setError(null);
     try {
-      await registerUser({
+      const criado = await registerUser({
         name: name.trim(),
         email: email.trim(),
         password,
@@ -67,6 +77,14 @@ export default function RegisterPage() {
         department: department.trim() || null,
         lgpd_consent: true,
       });
+
+      // Quando a confirmação por e-mail está ativa, a conta nasce pendente:
+      // mandar direto para o login só geraria uma tentativa frustrada
+      if (criado?.email_verified === false) {
+        setCadastradoEmail(email.trim());
+        return;
+      }
+
       navigate("/login", { state: { registered: true }, replace: true });
     } catch (err: unknown) {
       const status = (err as { response?: { status?: number } })?.response?.status;
@@ -81,6 +99,30 @@ export default function RegisterPage() {
     } finally {
       setLoading(false);
     }
+  }
+
+  // Conta criada e aguardando o link — a próxima ação é abrir o e-mail, não o login
+  if (cadastradoEmail) {
+    return (
+      <AuthShell
+        title="Falta um passo"
+        subtitle="Enviamos um link de confirmação para o seu e-mail."
+        footer={
+          <Link to="/login" className="text-primary hover:text-primary/80 transition-colors">
+            Ir para o acesso
+          </Link>
+        }
+      >
+        <Alert variant="success">
+          Confira a caixa de <span className="font-semibold">{cadastradoEmail}</span> e clique no
+          link para ativar sua conta. Ele vale por 24 horas.
+        </Alert>
+        <p className="text-center text-xs text-slate-500">
+          Não chegou? Veja também a caixa de spam. Você pode pedir um novo link na tela de acesso,
+          ao tentar entrar.
+        </p>
+      </AuthShell>
+    );
   }
 
   return (
