@@ -62,6 +62,7 @@ async def send_email(
             recipients=[to_email],
             body=body,
             subtype=MessageType.plain,
+            reply_to=[settings.smtp_reply_to] if settings.smtp_reply_to else None,
         )
         await mail.send_message(message)
         logger.info("Email sent to %s: %s", to_email, subject)
