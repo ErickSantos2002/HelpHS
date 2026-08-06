@@ -200,6 +200,10 @@ class User(Base):
     lgpd_consent: Mapped[bool] = mapped_column(Boolean, default=False)
     lgpd_consent_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
 
+    # Confirmação de e-mail no auto-cadastro
+    email_verified: Mapped[bool] = mapped_column(Boolean, default=False, nullable=False)
+    email_verified_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
+
     # Empresa (onboarding do cliente)
     company_name: Mapped[str | None] = mapped_column(String(255))
     cnpj: Mapped[str | None] = mapped_column(String(18))

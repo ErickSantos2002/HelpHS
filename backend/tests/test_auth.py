@@ -31,6 +31,8 @@ def _make_user(status=UserStatus.active):
     user.role = UserRole.admin
     user.status = status
     user.lgpd_consent = True
+    # Conta antiga, de antes da confirmação de e-mail — o login não deve exigir
+    user.email_verified = True
     return user
 
 

@@ -59,3 +59,36 @@ class AccessTokenResponse(AppBaseModel):
     access_token: str
     token_type: str = "bearer"
     expires_in: int
+
+
+# ── Confirmação de e-mail e recuperação de senha ─────────────
+
+
+class EmailRequest(AppBaseModel):
+    """Usado no reenvio da confirmação e no 'esqueci minha senha'."""
+
+    email: EmailStr
+
+
+class TokenOnlyRequest(AppBaseModel):
+    token: str = Field(..., min_length=10)
+
+
+class PasswordResetRequest(AppBaseModel):
+    token: str = Field(..., min_length=10)
+    password: str = Field(..., min_length=8, max_length=128)
+
+    @field_validator("password")
+    @classmethod
+    def password_strength(cls, v: str) -> str:
+        if not any(c.isupper() for c in v):
+            raise ValueError("A senha deve conter ao menos uma letra maiúscula")
+        if not any(c.isdigit() for c in v):
+            raise ValueError("A senha deve conter ao menos um número")
+        return v
+
+
+class MessageResponse(AppBaseModel):
+    """Resposta neutra: nunca revela se um e-mail existe na base."""
+
+    message: str

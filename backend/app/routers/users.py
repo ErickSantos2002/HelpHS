@@ -89,6 +89,10 @@ async def create_user(
         # Explícito: o default da coluna só seria aplicado no INSERT, e a resposta
         # é montada a partir do objeto em memória
         onboarding_completed=False,
+        # Conta criada pelo admin não passa por confirmação de e-mail: quem
+        # cadastrou já sabe quem é a pessoa, e travar o acesso só atrapalharia
+        email_verified=True,
+        email_verified_at=ts,
         created_at=ts,
         updated_at=ts,
     )

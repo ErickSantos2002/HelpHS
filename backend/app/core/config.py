@@ -110,6 +110,28 @@ class Settings(BaseSettings):
     smtp_password: str = ""
     smtp_from_name: str = "Help Desk Health & Safety"
     smtp_from_email: str = ""
+    # Para onde vão as respostas de quem responder um e-mail automático.
+    # Vazio = as respostas caem na própria caixa de disparo, que ninguém lê.
+    smtp_reply_to: str = ""
+
+    # Endereço público do sistema — usado para montar os links dos e-mails
+    frontend_url: str = "http://localhost:5173"
+
+    # Confirmação de e-mail no cadastro
+    email_verification_token_hours: int = 24
+    password_reset_token_hours: int = 1
+
+    def email_is_configured(self) -> bool:
+        """Só dá para exigir confirmação se houver como enviar o e-mail."""
+        return bool(self.smtp_from_email or self.smtp_user)
+
+    def requires_email_verification(self) -> bool:
+        """
+        Enquanto o SMTP não estiver configurado, o cadastro continua liberando
+        o acesso na hora — senão o cliente criaria conta e ficaria esperando um
+        e-mail que nunca chega.
+        """
+        return self.email_is_configured()
 
     # ClamAV
     clamav_host: str = "clamav"

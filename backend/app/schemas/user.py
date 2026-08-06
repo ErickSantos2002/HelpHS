@@ -106,6 +106,7 @@ class UserResponse(AppBaseModel):
     last_login: datetime | None
     lgpd_consent: bool
     lgpd_consent_at: datetime | None
+    email_verified: bool = True
     company_name: str | None
     cnpj: str | None
     company_cep: str | None

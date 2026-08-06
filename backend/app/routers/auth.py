@@ -32,12 +32,18 @@ from app.core.security import (
 from app.models.models import AuditAction, AuditLog, User, UserRole, UserStatus
 from app.schemas.auth import (
     AccessTokenResponse,
+    EmailRequest,
     LoginRequest,
+    MessageResponse,
+    PasswordResetRequest,
     RefreshRequest,
     RegisterRequest,
+    TokenOnlyRequest,
     TokenResponse,
 )
 from app.schemas.user import UserResponse
+from app.services import account_tokens
+from app.services.account_emails import send_password_reset_email, send_verification_email
 
 router = APIRouter(prefix="/auth", tags=["Auth"])
 settings = get_settings()
@@ -137,6 +143,11 @@ async def register(
         )
 
     now = datetime.now(UTC)
+    # Sem SMTP configurado não há como enviar o link de confirmação; nesse caso
+    # a conta já nasce liberada, senão o cliente ficaria esperando um e-mail
+    # que nunca chega
+    exige_confirmacao = settings.requires_email_verification()
+
     user = User(
         name=body.name,
         email=body.email,
@@ -147,6 +158,8 @@ async def register(
         department=body.department,
         lgpd_consent=True,
         lgpd_consent_at=now,
+        email_verified=not exige_confirmacao,
+        email_verified_at=None if exige_confirmacao else now,
     )
     db.add(user)
     await db.flush()
@@ -155,8 +168,177 @@ async def register(
     await db.commit()
     await db.refresh(user)
 
-    logger.info(f"New client registered: {user.email}")
+    if exige_confirmacao:
+        token = account_tokens.create_email_verification_token(user.id, settings)
+        await send_verification_email(user.email, user.name, token, settings)
+        logger.info(f"New client registered (awaiting confirmation): {user.email}")
+    else:
+        logger.warning(
+            f"New client registered without email confirmation (SMTP not configured): {user.email}"
+        )
+
     return UserResponse.model_validate(user)
+
+
+# ── POST /auth/verify-email ───────────────────────────────────
+
+
+@router.post("/verify-email", response_model=MessageResponse)
+async def verify_email(
+    body: TokenOnlyRequest,
+    db: Annotated[AsyncSession, Depends(get_db)],
+) -> MessageResponse:
+    """Ativa a conta a partir do link enviado no cadastro."""
+    try:
+        user_id = account_tokens.read_email_verification_token(body.token, settings)
+    except account_tokens.InvalidTokenError as exc:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail=(
+                "Este link de confirmação não é mais válido. "
+                "Peça um novo na tela de acesso."
+            ),
+        ) from exc
+
+    user = await db.get(User, user_id)
+    if user is None:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail="Conta não encontrada. Ela pode ter sido removida.",
+        )
+
+    if user.email_verified:
+        return MessageResponse(message="Este e-mail já estava confirmado. Pode entrar normalmente.")
+
+    user.email_verified = True
+    user.email_verified_at = datetime.now(UTC)
+    user.updated_at = datetime.now(UTC)
+    await db.commit()
+
+    logger.info(f"Email confirmed: {user.email}")
+    return MessageResponse(message="E-mail confirmado. Sua conta está ativa.")
+
+
+# ── POST /auth/resend-verification ────────────────────────────
+
+
+@router.post("/resend-verification", response_model=MessageResponse)
+async def resend_verification(
+    body: EmailRequest,
+    db: Annotated[AsyncSession, Depends(get_db)],
+) -> MessageResponse:
+    """
+    Reenvia o link de confirmação.
+
+    A resposta é sempre a mesma, exista ou não a conta: caso contrário qualquer
+    pessoa poderia descobrir quais e-mails estão cadastrados.
+    """
+    neutra = MessageResponse(
+        message="Se este e-mail estiver cadastrado e ainda não confirmado, você receberá o link."
+    )
+
+    result = await db.execute(select(User).where(User.email == body.email))
+    user = result.scalar_one_or_none()
+
+    if user is None or user.email_verified or not settings.requires_email_verification():
+        return neutra
+
+    token = account_tokens.create_email_verification_token(user.id, settings)
+    await send_verification_email(user.email, user.name, token, settings)
+    logger.info(f"Verification email resent: {user.email}")
+    return neutra
+
+
+# ── POST /auth/forgot-password ────────────────────────────────
+
+
+@router.post("/forgot-password", response_model=MessageResponse)
+async def forgot_password(
+    body: EmailRequest,
+    db: Annotated[AsyncSession, Depends(get_db)],
+) -> MessageResponse:
+    """
+    Envia o link de redefinição de senha.
+
+    Também responde igual para e-mail inexistente — a mensagem nunca confirma
+    se alguém tem conta no sistema.
+    """
+    # Sem SMTP, prometer um e-mail que não vai sair só faria a pessoa esperar.
+    # Isto revela configuração do sistema, não dados de usuário.
+    if not settings.email_is_configured():
+        logger.error(
+            "Pedido de recuperação de senha sem SMTP configurado — o e-mail não foi enviado."
+        )
+        raise HTTPException(
+            status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
+            detail=(
+                "A recuperação de senha por e-mail ainda não está disponível. "
+                "Fale com o administrador para redefinir sua senha."
+            ),
+        )
+
+    neutra = MessageResponse(
+        message="Se este e-mail estiver cadastrado, você receberá as instruções em instantes."
+    )
+
+    result = await db.execute(select(User).where(User.email == body.email))
+    user = result.scalar_one_or_none()
+
+    if user is None or user.status != UserStatus.active:
+        return neutra
+
+    token = account_tokens.create_password_reset_token(user.id, user.password, settings)
+    await send_password_reset_email(user.email, user.name, token, settings)
+    logger.info(f"Password reset requested: {user.email}")
+    return neutra
+
+
+# ── POST /auth/reset-password ─────────────────────────────────
+
+
+@router.post("/reset-password", response_model=MessageResponse)
+async def reset_password(
+    body: PasswordResetRequest,
+    request: Request,
+    db: Annotated[AsyncSession, Depends(get_db)],
+) -> MessageResponse:
+    """Grava a nova senha a partir do link recebido por e-mail."""
+    link_invalido = HTTPException(
+        status_code=status.HTTP_400_BAD_REQUEST,
+        detail=(
+            "Este link de redefinição não é mais válido. "
+            "Ele vale por tempo limitado e só pode ser usado uma vez — peça um novo."
+        ),
+    )
+
+    # Duas etapas: primeiro descobre de quem é o link (assinatura e tipo), e só
+    # então confere se ele ainda vale para a senha atual do usuário
+    try:
+        user_id = account_tokens.peek_password_reset_subject(body.token, settings)
+    except account_tokens.InvalidTokenError as exc:
+        raise link_invalido from exc
+
+    user = await db.get(User, user_id)
+    if user is None:
+        raise link_invalido
+
+    try:
+        account_tokens.read_password_reset_token(body.token, user.password, settings)
+    except account_tokens.InvalidTokenError as exc:
+        raise link_invalido from exc
+
+    user.password = hash_password(body.password)
+    user.updated_at = datetime.now(UTC)
+    # Quem redefine a senha pelo e-mail comprova ser dono da caixa
+    if not user.email_verified:
+        user.email_verified = True
+        user.email_verified_at = datetime.now(UTC)
+
+    _audit(db, AuditAction.password_change, user.id, request)
+    await db.commit()
+
+    logger.info(f"Password reset completed: {user.email}")
+    return MessageResponse(message="Senha alterada. Você já pode entrar com a nova senha.")
 
 
 # ── POST /auth/login ──────────────────────────────────────────
@@ -183,6 +365,17 @@ async def login(
         raise HTTPException(
             status_code=status.HTTP_403_FORBIDDEN,
             detail="Esta conta está inativa. Fale com um administrador.",
+        )
+
+    # Senha certa, mas e-mail ainda não confirmado: o motivo precisa ficar
+    # claro, senão a pessoa fica tentando de novo achando que errou a senha
+    if settings.requires_email_verification() and not user.email_verified:
+        raise HTTPException(
+            status_code=status.HTTP_403_FORBIDDEN,
+            detail=(
+                "Confirme seu e-mail para ativar a conta. "
+                "Procure a mensagem que enviamos ao criar o cadastro."
+            ),
         )
 
     access_token = create_access_token(user.id, user.role.value, user.email)
