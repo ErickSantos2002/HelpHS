@@ -1,4 +1,4 @@
-export const APP_VERSION = "v1.2.0";
+export const APP_VERSION = "v1.3.0";
 
 export type EntryType = "novidade" | "corrigido" | "melhoria";
 
@@ -14,6 +14,22 @@ export interface ChangelogVersion {
 }
 
 export const CHANGELOG: ChangelogVersion[] = [
+  {
+    version: "v1.3.0",
+    date: "06/08/2026",
+    entries: [
+      { type: "novidade", text: "Esqueci minha senha: agora dá para criar uma nova senha por um link enviado ao seu e-mail." },
+      { type: "novidade", text: "Novos cadastros confirmam o e-mail por um link, garantindo que o endereço é válido." },
+      { type: "novidade", text: "Anexos e fotos de perfil voltaram a funcionar: os arquivos agora ficam guardados no servidor." },
+      { type: "novidade", text: "Botão de visualizar anexo: imagens, PDF e texto abrem direto no navegador, sem precisar baixar." },
+      { type: "novidade", text: "Produto e equipamento do chamado aparecem na lateral e na aba Detalhes." },
+      { type: "melhoria", text: "A busca de chamados também encontra pelo número de série do equipamento." },
+      { type: "melhoria", text: "Aba Detalhes reúne categoria, prioridade, produto e equipamento, indicando o que não foi informado." },
+      { type: "corrigido", text: "Anexos escolhidos ao abrir o chamado eram descartados e nunca chegavam ao ticket." },
+      { type: "corrigido", text: "Base de Conhecimento abria em branco em algumas situações." },
+      { type: "corrigido", text: "Mensagem de erro ao entrar agora explica quando falta confirmar o e-mail." },
+    ],
+  },
   {
     version: "v1.2.0",
     date: "05/08/2026",
