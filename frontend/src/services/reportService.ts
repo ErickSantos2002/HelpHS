@@ -86,6 +86,8 @@ export interface ReportData {
   sla_compliance: SLAComplianceItem[];
   csat_distribution: CSATDistributionItem[];
   csat_average: number | null;
+  /** Média da nota "o quanto recomendaria a empresa"; null se ninguém respondeu. */
+  recommend_average: number | null;
   avg_resolution_by_priority: AvgResolutionItem[];
   avg_first_response_by_priority: AvgFirstResponseItem[];
   csat_by_day: CsatDailyItem[];

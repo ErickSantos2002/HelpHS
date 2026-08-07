@@ -133,6 +133,29 @@ Quem avalia é só **o cliente que abriu o chamado**, uma vez por chamado, sem
 prazo para responder e sem poder alterar depois. Admin e técnico não veem o
 painel.
 
+### Duas perguntas, um envio
+
+| Pergunta | Campo | Escala |
+|---|---|---|
+| Como você avalia o atendimento? | `rating` | 1 a 10 |
+| O quanto você recomendaria nossa empresa? | `recommend_rating` | 1 a 10 |
+
+As duas são **obrigatórias no formulário** — são dois cliques e o dado só serve
+se vier completo. Na API a segunda é opcional, para não invalidar integrações
+que enviem apenas a nota do atendimento.
+
+`recommend_rating` é **nulo nas avaliações enviadas antes da pergunta existir**,
+e continua assim: não há como recuperar a resposta de quem já avaliou. As médias
+usam `AVG`, que ignora nulos — tratá-los como zero derrubaria o número sem
+ninguém ter dado zero.
+
+A média aparece no relatório, no card **Recomendação**, ao lado da Média CSAT.
+
+> Não é o NPS de mercado. O NPS usa escala 0–10 e um cálculo próprio
+> (% promotores − % detratores); aqui a escala é 1–10 e o que se mostra é a
+> média simples, como foi pedido. Se um dia o número precisar ser comparável
+> com o de fora, a escala precisa começar em 0.
+
 ## Permissões
 
 ### Entre técnicos — sem barreira

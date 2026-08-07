@@ -19,6 +19,7 @@ const survey = {
   ticket_id: "t1",
   user_id: "u1",
   rating: 5,
+  recommend_rating: 9,
   comment: "Excelente atendimento!",
   created_at: "2026-01-01T00:00:00Z",
 };
@@ -49,6 +50,29 @@ describe("submitSurvey", () => {
     await submitSurvey("t1", { rating: 4 });
 
     expect(mockPost).toHaveBeenCalledWith("/tickets/t1/survey", { rating: 4 });
+  });
+
+  it("envia as duas notas: atendimento e recomendação da empresa", async () => {
+    mockPost.mockResolvedValue({ data: { ...survey, rating: 9, recommend_rating: 10 } });
+
+    const result = await submitSurvey("t1", { rating: 9, recommend_rating: 10 });
+
+    expect(mockPost).toHaveBeenCalledWith("/tickets/t1/survey", {
+      rating: 9,
+      recommend_rating: 10,
+    });
+    expect(result.recommend_rating).toBe(10);
+  });
+});
+
+describe("avaliações antigas", () => {
+  it("aceita recommend_rating nulo, de antes da pergunta existir", async () => {
+    mockGet.mockResolvedValue({ data: { ...survey, recommend_rating: null } });
+
+    const result = await getTicketSurvey("t1");
+
+    expect(result?.recommend_rating).toBeNull();
+    expect(result?.rating).toBe(5);
   });
 });
 

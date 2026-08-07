@@ -72,12 +72,13 @@ def _mock_ticket(status=TicketStatus.resolved, creator_id=None):
     return t
 
 
-def _mock_survey(rating=5):
+def _mock_survey(rating=5, recommend_rating=9):
     s = MagicMock()
     s.id = _SURVEY_ID
     s.ticket_id = _TICKET_ID
     s.user_id = _CREATOR_ID
     s.rating = rating
+    s.recommend_rating = recommend_rating
     s.comment = "Ótimo atendimento!"
     s.created_at = _NOW
     return s
@@ -111,7 +112,11 @@ def _db_sequence(*responses):
         resp = responses[idx]
 
         result = MagicMock()
-        if isinstance(resp, int) or isinstance(resp, float):
+        if isinstance(resp, tuple):
+            # Consulta que devolve várias colunas de uma vez (ex.: as duas médias)
+            result.one.return_value = resp
+            result.scalars.return_value.all.return_value = []
+        elif isinstance(resp, int) or isinstance(resp, float):
             result.scalar_one.return_value = resp
             result.scalar_one_or_none.return_value = resp
             result.scalars.return_value.all.return_value = []
@@ -214,6 +219,72 @@ async def test_submit_survey_success(patch_redis):
 
     assert resp.status_code == 201
     assert resp.json()["rating"] == 5
+
+
+@pytest.mark.asyncio
+async def test_guarda_as_duas_notas_da_pesquisa(patch_redis):
+    """Atendimento e recomendação da empresa vão no mesmo envio."""
+    from app.core.database import get_db
+
+    creator = _mock_user(UserRole.client, user_id=_CREATOR_ID)
+    ticket = _mock_ticket(status=TicketStatus.resolved, creator_id=_CREATOR_ID)
+
+    session = _db_sequence(ticket)
+    enviados = {}
+
+    def _add(obj):
+        # A rota também grava um AuditLog na mesma sessão
+        if type(obj).__name__ == "SatisfactionSurvey":
+            enviados["rating"] = obj.rating
+            enviados["recommend_rating"] = obj.recommend_rating
+
+    session.add = _add
+
+    async def _refresh(obj):
+        obj.id = _SURVEY_ID
+        obj.ticket_id = _TICKET_ID
+        obj.user_id = _CREATOR_ID
+        obj.rating = 9
+        obj.recommend_rating = 10
+        obj.comment = None
+        obj.created_at = _NOW
+
+    session.refresh = _refresh
+
+    async def _gen():
+        yield session
+
+    app.dependency_overrides[get_db] = _gen
+    _override_user(creator)
+
+    async with AsyncClient(transport=ASGITransport(app=app), base_url="http://test") as c:
+        resp = await c.post(
+            f"/api/v1/tickets/{_TICKET_ID}/survey",
+            json={"rating": 9, "recommend_rating": 10},
+        )
+
+    assert resp.status_code == 201
+    assert enviados == {"rating": 9, "recommend_rating": 10}
+    assert resp.json()["recommend_rating"] == 10
+
+
+@pytest.mark.asyncio
+async def test_nota_de_recomendacao_fora_da_escala_e_recusada(patch_redis):
+    from app.core.database import get_db
+
+    creator = _mock_user(UserRole.client, user_id=_CREATOR_ID)
+    ticket = _mock_ticket(status=TicketStatus.resolved, creator_id=_CREATOR_ID)
+
+    app.dependency_overrides[get_db] = _db_override(ticket)
+    _override_user(creator)
+
+    async with AsyncClient(transport=ASGITransport(app=app), base_url="http://test") as c:
+        resp = await c.post(
+            f"/api/v1/tickets/{_TICKET_ID}/survey",
+            json={"rating": 8, "recommend_rating": 11},
+        )
+
+    assert resp.status_code == 422
 
 
 @pytest.mark.asyncio
@@ -383,8 +454,8 @@ async def test_list_surveys_admin(patch_redis):
     admin = _mock_user(UserRole.admin)
     survey = _mock_survey()
 
-    # Sequence: count=1, avg=4.5, list=[survey]
-    app.dependency_overrides[get_db] = _db_seq_override(1, 4.5, [survey])
+    # Sequence: count=1, médias=(atendimento, recomendação), list=[survey]
+    app.dependency_overrides[get_db] = _db_seq_override(1, (4.5, 8.2), [survey])
     _override_user(admin)
 
     async with AsyncClient(transport=ASGITransport(app=app), base_url="http://test") as c:
@@ -394,6 +465,30 @@ async def test_list_surveys_admin(patch_redis):
     data = resp.json()
     assert data["total"] == 1
     assert data["average_rating"] == 4.5
+    assert data["average_recommend"] == 8.2
+
+
+@pytest.mark.asyncio
+async def test_media_de_recomendacao_ignora_quem_nao_respondeu(patch_redis):
+    """
+    Avaliações anteriores à pergunta têm recommend_rating nulo. Elas não podem
+    entrar como zero — puxariam a média para baixo sem ninguém ter dado zero.
+    """
+    from app.core.database import get_db
+
+    admin = _mock_user(UserRole.admin)
+    antiga = _mock_survey(recommend_rating=None)
+
+    # AVG do Postgres já ignora NULL; aqui garantimos que a rota repassa o valor
+    app.dependency_overrides[get_db] = _db_seq_override(2, (5.0, 9.0), [antiga])
+    _override_user(admin)
+
+    async with AsyncClient(transport=ASGITransport(app=app), base_url="http://test") as c:
+        resp = await c.get("/api/v1/surveys")
+
+    data = resp.json()
+    assert data["average_recommend"] == 9.0
+    assert data["items"][0]["recommend_rating"] is None
 
 
 @pytest.mark.asyncio

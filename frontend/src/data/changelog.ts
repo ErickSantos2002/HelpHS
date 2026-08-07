@@ -1,4 +1,4 @@
-export const APP_VERSION = "v1.4.0";
+export const APP_VERSION = "v1.5.0";
 
 export type EntryType = "novidade" | "corrigido" | "melhoria";
 
@@ -14,6 +14,14 @@ export interface ChangelogVersion {
 }
 
 export const CHANGELOG: ChangelogVersion[] = [
+  {
+    version: "v1.5.0",
+    date: "07/08/2026",
+    entries: [
+      { type: "novidade", text: "Nova pergunta na pesquisa de satisfação: o quanto o cliente recomendaria a empresa, de 1 a 10." },
+      { type: "novidade", text: "Card Recomendação nos relatórios, com a média das notas de recomendação do período." },
+    ],
+  },
   {
     version: "v1.4.0",
     date: "07/08/2026",

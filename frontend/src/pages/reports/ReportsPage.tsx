@@ -474,7 +474,7 @@ function GlobalReport({ data }: { data: ReportData; period?: number }) {
   return (
     <div className="space-y-4">
       {/* KPIs */}
-      <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-5 gap-3">
+      <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 xl:grid-cols-6 gap-3">
         <StatCard label="Tickets no período" value={data.total_tickets}
           sub={`últimos ${data.period_days} dias`}
           delta={<Delta current={data.total_tickets} prev={cmp?.total_tickets ?? null} />} />
@@ -484,6 +484,9 @@ function GlobalReport({ data }: { data: ReportData; period?: number }) {
           delta={data.csat_average != null && cmp?.csat_average != null
             ? <Delta current={data.csat_average * 10} prev={cmp.csat_average * 10} />
             : undefined} />
+        <StatCard label="Recomendação"
+          value={data.recommend_average ? `${data.recommend_average} / 10` : "—"}
+          sub="o quanto recomendariam a empresa" />
         <StatCard label="SLA Crítico" value={`${criticalSla}%`}
           sub="conformidade resolução" colorCls={slaColor(criticalSla)}
           delta={<Delta current={criticalSla} prev={prevCriticalSla} />} />

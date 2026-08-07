@@ -78,6 +78,10 @@ def _empty_db():
         one.resolve = 0
         one.total = 0
         one.avg = None
+        # Algumas consultas pedem várias médias de uma vez e desempacotam a
+        # linha (ex.: CSAT e recomendação). side_effect recria o iterador a
+        # cada chamada — um iter() fixo se esgotaria na primeira.
+        one.__iter__.side_effect = lambda: iter([None, None])
         result.one.return_value = one
         return result
 

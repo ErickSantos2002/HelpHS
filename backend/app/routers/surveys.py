@@ -9,7 +9,8 @@ Permissões:
 
 Regras:
   - Uma pesquisa por ticket (unique constraint no model)
-  - Avaliação de 1 a 10
+  - Duas notas de 1 a 10: atendimento (rating) e recomendação da empresa
+    (recommend_rating, nulo nas avaliações anteriores à pergunta)
   - Não pode ser alterada após envio
 """
 
@@ -96,6 +97,7 @@ async def submit_survey(
         ticket_id=ticket_id,
         user_id=actor.id,
         rating=body.rating,
+        recommend_rating=body.recommend_rating,
         comment=body.comment,
         created_at=datetime.now(UTC),
     )
@@ -153,11 +155,11 @@ async def list_surveys(
 
     total = (await db.execute(select(func.count()).select_from(base.subquery()))).scalar_one()
 
+    sub = base.subquery()
     avg_result = await db.execute(
-        select(func.avg(SatisfactionSurvey.rating)).select_from(base.subquery())
+        select(func.avg(sub.c.rating), func.avg(sub.c.recommend_rating))
     )
-    avg_raw = avg_result.scalar_one()
-    average_rating = round(float(avg_raw), 2) if avg_raw is not None else None
+    avg_rating_raw, avg_recommend_raw = avg_result.one()
 
     rows = await db.execute(
         base.order_by(SatisfactionSurvey.created_at.desc()).offset(offset).limit(limit)
@@ -167,7 +169,10 @@ async def list_surveys(
     return SurveyListResponse(
         items=[SurveyResponse.model_validate(s) for s in surveys],
         total=total,
-        average_rating=average_rating,
+        average_rating=round(float(avg_rating_raw), 2) if avg_rating_raw is not None else None,
+        average_recommend=(
+            round(float(avg_recommend_raw), 2) if avg_recommend_raw is not None else None
+        ),
         limit=limit,
         offset=offset,
     )

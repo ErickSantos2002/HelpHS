@@ -128,6 +128,9 @@ class ReportData(AppBaseModel):
     sla_compliance: list[SLAComplianceItem]
     csat_distribution: list[CSATDistributionItem]
     csat_average: float | None
+    # Média da pergunta "o quanto recomendaria a empresa". Só entram as
+    # avaliações que responderam — as anteriores à pergunta ficam de fora.
+    recommend_average: float | None = None
     avg_resolution_by_priority: list[AvgResolutionItem] = []
     avg_first_response_by_priority: list[AvgFirstResponseItem] = []
     csat_by_day: list[CsatDailyItem] = []

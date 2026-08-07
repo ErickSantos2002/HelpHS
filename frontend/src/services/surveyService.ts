@@ -5,12 +5,15 @@ export interface Survey {
   ticket_id: string;
   user_id: string;
   rating: number;
+  /** null nas avaliações enviadas antes da pergunta de recomendação existir. */
+  recommend_rating: number | null;
   comment: string | null;
   created_at: string;
 }
 
 export interface SurveyCreate {
   rating: number;
+  recommend_rating?: number;
   comment?: string;
 }
 

@@ -672,6 +672,9 @@ class SatisfactionSurvey(Base):
     )
     user_id: Mapped[uuid.UUID] = mapped_column(UUID(as_uuid=True), ForeignKey("users.id"))
     rating: Mapped[int] = mapped_column(SmallInteger, nullable=False)  # 1 a 10
+    # O quanto recomendaria a empresa, 1 a 10. Nulo nas avaliações enviadas
+    # antes desta pergunta existir — a coleta antiga não tem como ser recuperada.
+    recommend_rating: Mapped[int | None] = mapped_column(SmallInteger)
     comment: Mapped[str | None] = mapped_column(Text)
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now())
 

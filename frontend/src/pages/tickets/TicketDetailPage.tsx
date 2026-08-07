@@ -594,9 +594,16 @@ const RATING_LABELS: Record<number, string> = {
   6: "Satisfatório", 7: "Bom", 8: "Muito bom", 9: "Ótimo", 10: "Excelente",
 };
 
+const RECOMMEND_LABELS: Record<number, string> = {
+  1: "De jeito nenhum", 2: "Muito improvável", 3: "Improvável", 4: "Pouco provável",
+  5: "Talvez", 6: "Provável", 7: "Bem provável", 8: "Recomendaria",
+  9: "Recomendaria com certeza", 10: "Recomendaria a todos",
+};
+
 function SurveyPanel({ ticketId }: { ticketId: string }) {
   const [survey, setSurvey] = useState<Survey | null | undefined>(undefined);
   const [rating, setRating] = useState(0);
+  const [recommend, setRecommend] = useState(0);
   const [comment, setComment] = useState("");
   const [submitting, setSubmitting] = useState(false);
   const [error, setError] = useState<string | null>(null);
@@ -605,11 +612,17 @@ function SurveyPanel({ ticketId }: { ticketId: string }) {
   if (survey === undefined) return null;
 
   async function handleSubmit() {
-    if (rating === 0) return;
+    if (rating === 0 || recommend === 0) return;
     setSubmitting(true);
     setError(null);
     try {
-      setSurvey(await submitSurvey(ticketId, { rating, comment: comment.trim() || undefined }));
+      setSurvey(
+        await submitSurvey(ticketId, {
+          rating,
+          recommend_rating: recommend,
+          comment: comment.trim() || undefined,
+        }),
+      );
     } catch {
       setError("Não foi possível enviar a avaliação.");
     } finally {
@@ -626,11 +639,30 @@ function SurveyPanel({ ticketId }: { ticketId: string }) {
       <div className="px-5 py-4">
         {survey ? (
           <div className="space-y-2">
-            <div className="flex items-center gap-3">
-              <span className="text-3xl font-extrabold text-yellow-400">
-                {survey.rating}<span className="text-base font-normal text-slate-500">/10</span>
-              </span>
-              <span className="text-sm text-slate-400">{RATING_LABELS[survey.rating]}</span>
+            <div className="flex flex-wrap items-center gap-x-6 gap-y-2">
+              <div>
+                <p className="text-xs text-slate-500">Atendimento</p>
+                <div className="flex items-center gap-2">
+                  <span className="text-3xl font-extrabold text-yellow-400">
+                    {survey.rating}<span className="text-base font-normal text-slate-500">/10</span>
+                  </span>
+                  <span className="text-sm text-slate-400">{RATING_LABELS[survey.rating]}</span>
+                </div>
+              </div>
+              {survey.recommend_rating !== null && (
+                <div>
+                  <p className="text-xs text-slate-500">Recomendaria a empresa</p>
+                  <div className="flex items-center gap-2">
+                    <span className="text-3xl font-extrabold text-yellow-400">
+                      {survey.recommend_rating}
+                      <span className="text-base font-normal text-slate-500">/10</span>
+                    </span>
+                    <span className="text-sm text-slate-400">
+                      {RECOMMEND_LABELS[survey.recommend_rating]}
+                    </span>
+                  </div>
+                </div>
+              )}
             </div>
             {survey.comment && (
               <p className="text-sm italic text-slate-400 bg-background-elevated/60 rounded-lg px-3 py-2">
@@ -650,6 +682,17 @@ function SurveyPanel({ ticketId }: { ticketId: string }) {
                 <p className="text-sm font-semibold text-yellow-400">{RATING_LABELS[rating]}</p>
               )}
             </div>
+            <div className="flex flex-wrap items-center gap-x-3 gap-y-2">
+              <p className="text-sm text-slate-400">
+                O quanto você recomendaria nossa empresa?
+              </p>
+              <ScoreRating value={recommend} onChange={setRecommend} />
+              {recommend > 0 && (
+                <p className="text-sm font-semibold text-yellow-400">
+                  {RECOMMEND_LABELS[recommend]}
+                </p>
+              )}
+            </div>
             <div className="flex flex-col gap-2 sm:flex-row sm:items-end">
               <div className="min-w-0 flex-1">
                 <Textarea
@@ -659,7 +702,13 @@ function SurveyPanel({ ticketId }: { ticketId: string }) {
                   onChange={(e) => setComment(e.target.value)}
                 />
               </div>
-              <Button onClick={handleSubmit} loading={submitting} disabled={rating === 0} size="sm" className="shrink-0">
+              <Button
+                onClick={handleSubmit}
+                loading={submitting}
+                disabled={rating === 0 || recommend === 0}
+                size="sm"
+                className="shrink-0"
+              >
                 Enviar avaliação
               </Button>
             </div>

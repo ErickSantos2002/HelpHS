@@ -308,10 +308,20 @@ async def _build_report(
         CSATDistributionItem(rating=i, count=counts_by_rating.get(i, 0)) for i in range(1, 11)
     ]
 
-    avg_raw = (
-        await db.execute(select(func.avg(SatisfactionSurvey.rating)).where(*csat_cond))
-    ).scalar_one()
+    # AVG do Postgres já ignora NULL, então as avaliações anteriores à pergunta
+    # de recomendação não puxam a média para baixo como se fossem zero.
+    avg_raw, avg_recommend_raw = (
+        await db.execute(
+            select(
+                func.avg(SatisfactionSurvey.rating),
+                func.avg(SatisfactionSurvey.recommend_rating),
+            ).where(*csat_cond)
+        )
+    ).one()
     csat_average = round(float(avg_raw), 2) if avg_raw is not None else None
+    recommend_average = (
+        round(float(avg_recommend_raw), 2) if avg_recommend_raw is not None else None
+    )
 
     # ── Tempo médio de resolução por prioridade ───────────────
     # Conta até a RESOLUÇÃO, não até o fechamento: com o fechamento automático
@@ -551,6 +561,7 @@ async def _build_report(
         sla_compliance=sla_compliance,
         csat_distribution=csat_distribution,
         csat_average=csat_average,
+        recommend_average=recommend_average,
         avg_resolution_by_priority=avg_resolution_by_priority,
         avg_first_response_by_priority=avg_first_response_by_priority,
         csat_by_day=csat_by_day,
