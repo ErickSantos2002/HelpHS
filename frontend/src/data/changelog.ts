@@ -1,4 +1,4 @@
-export const APP_VERSION = "v1.3.0";
+export const APP_VERSION = "v1.4.0";
 
 export type EntryType = "novidade" | "corrigido" | "melhoria";
 
@@ -14,6 +14,21 @@ export interface ChangelogVersion {
 }
 
 export const CHANGELOG: ChangelogVersion[] = [
+  {
+    version: "v1.4.0",
+    date: "07/08/2026",
+    entries: [
+      { type: "novidade", text: "Reabrir chamado: se o problema voltar, o cliente reabre o chamado em até 5 dias úteis, sem perder o histórico." },
+      { type: "novidade", text: "Chamados resolvidos passam sozinhos para Fechado depois de 3 dias úteis sem manifestação." },
+      { type: "novidade", text: "O prazo para reabrir aparece dentro do chamado, junto da nota de resolução." },
+      { type: "melhoria", text: "A pesquisa de satisfação deixou de ser enviada por e-mail: agora fica só na notificação e no próprio chamado." },
+      { type: "melhoria", text: "Reabrir um chamado devolve um prazo de atendimento novo, em vez de trazê-lo de volta já vencido." },
+      { type: "melhoria", text: "Histórico do chamado mostra \"Sistema\" no que foi feito automaticamente." },
+      { type: "corrigido", text: "O chat ficava espremido, quase ilegível, quando a pesquisa de satisfação aparecia no chamado." },
+      { type: "corrigido", text: "Tempo médio de resolução nos relatórios passou a contar até a resolução, sem somar os dias de espera até o fechamento." },
+      { type: "corrigido", text: "Ao mudar o status para Resolvido, o cliente recebia o convite de avaliação duas vezes." },
+    ],
+  },
   {
     version: "v1.3.0",
     date: "06/08/2026",

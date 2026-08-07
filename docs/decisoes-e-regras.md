@@ -1,7 +1,7 @@
 # Decisões e regras de negócio — HelpHS
 
 Registro das regras que **não dá para deduzir lendo o código** e das decisões
-tomadas junto ao cliente. Atualizado em 05/08/2026 (v1.2.0).
+tomadas junto ao cliente. Atualizado em 07/08/2026 (v1.4.0).
 
 Para o histórico voltado ao usuário final, veja `frontend/src/data/changelog.ts`.
 Para o detalhe de cada tabela, o `Documentação/Dicionario_Dados_HelpDesk_v1.docx`.
@@ -20,6 +20,92 @@ Requisitos (RN-013) sempre disse 08h–17h, e o cliente confirmou 9h/dia em
 
 Feriados não são modelados nesta versão — só fins de semana.
 
+## Ciclo de encerramento do chamado
+
+Os dois prazos abaixo são contados em **dias úteis** a partir do momento em que
+o chamado foi **resolvido** — não do fechamento. Em dias corridos, quem
+resolvesse na sexta à tarde daria ao cliente praticamente nenhum dia de
+trabalho para se manifestar.
+
+| Evento | Prazo | Configuração |
+|---|---|---|
+| Resolvido → Fechado, sozinho | 3 dias úteis | `TICKET_AUTO_CLOSE_BUSINESS_DAYS` |
+| Cliente ainda pode reabrir | 5 dias úteis | `TICKET_REOPEN_BUSINESS_DAYS` |
+
+A janela de reabertura é **maior** que a de fechamento de propósito: o chamado
+fecha sozinho no 3º dia, mas o cliente continua podendo reabrir por mais dois.
+Sem essa folga, o fechamento automático tiraria dele a única saída.
+
+Definido com o cliente em 07/08/2026. Os requisitos originais previam 5 e 7
+dias; nenhum dos dois estava implementado até então.
+
+### O que acontece em cada status
+
+**Resolvido** — SLA parado, chat bloqueado, convite para avaliar enviado. É a
+janela em que o cliente ainda pode se manifestar.
+
+**Fechado** — arquivamento. Chegar aqui pela rotina automática marca
+`auto_closed = true` no chamado, e a tela avisa que o fechamento não foi
+decisão de ninguém.
+
+### Reabertura
+
+Quem reabre precisa **escrever o motivo** (mínimo 5 caracteres). Ele vai para o
+histórico e é o que o técnico lê para saber por onde retomar — a nota de
+resolução anterior continua no chamado.
+
+O chamado volta para **Em andamento** quando tem responsável, e para **Aberto**
+quando não tem, para ser distribuído como um chamado novo.
+
+O prazo de 5 dias vale para o **cliente**. Admin e técnico reabrem a qualquer
+momento: quando o encerramento foi engano da própria equipe, um prazo vencido
+só obrigaria a abrir chamado novo e perder o histórico.
+
+Reabrir **recalcula o prazo de resolução** e limpa a marca de SLA violado. Sem
+isso o chamado voltaria já vencido, com o cronômetro parado no dia em que foi
+resolvido. A violação original continua registrada no histórico.
+
+### Relação com o SLA
+
+Os dois relógios **não se cruzam**: o SLA conta da abertura até a resolução, e
+os prazos acima só começam depois disso. `check_breaches` ignora os status
+terminais, então nada continua vencendo depois de resolvido, e o fechamento
+automático apenas troca um status terminal por outro.
+
+Dois pontos onde a separação precisou ser feita à mão:
+
+- **Tempo médio de resolução** passou a contar até `resolved_at`, não até
+  `closed_at`. Como o fechamento automático reescreve o `closed_at` três dias
+  úteis depois, a métrica passaria a medir a demora do cliente em responder e
+  não o trabalho da equipe — todo chamado fechado pela rotina apareceria com
+  ~27 h a mais.
+- **Reabrir zera o `sla_total_paused_ms`.** Esse acumulado existe para esticar o
+  prazo do ciclo em que a pausa aconteceu; como a reabertura já dá um prazo novo
+  contado a partir do momento, mantê-lo daria ao ciclo novo horas de bônus que
+  ninguém esperou.
+
+A marca de **primeira resposta vencida** sobrevive à reabertura de propósito:
+ela se refere ao primeiro atendimento, que de fato aconteceu (ou atrasou) uma
+vez só.
+
+### Por que a rotina roda dentro da API
+
+O projeto tem Celery configurado, mas **não existe worker nem beat no ambiente
+de produção** — o `start.sh` sobe apenas o uvicorn. Uma tarefa agendada no
+Celery nunca executaria.
+
+A rotina roda como task do próprio processo da API
+(`backend/app/services/ticket_lifecycle.py`), a cada
+`TICKET_AUTO_CLOSE_INTERVAL_SECONDS` (padrão 1 h). Como o uvicorn sobe com
+`--workers 2`, um **lock no Redis** garante que só um processo trabalha por
+rodada; sem Redis a rodada é pulada, porque fechar o mesmo chamado duas vezes
+duplicaria histórico e notificação. Definir o intervalo como `0` desliga a
+rotina.
+
+O fechamento automático fica no histórico **sem autor** (`user_id` nulo,
+exibido como "Sistema"). Apontá-lo para um administrador qualquer registraria
+uma ação que ninguém praticou.
+
 ## Pesquisa de satisfação (CSAT)
 
 **Escala de 1 a 10.**
@@ -29,6 +115,23 @@ A coleta sempre foi 1–10, mas relatórios, gráficos e o filtro da API assumia
 **toda avaliação de 6 a 10 desaparecia do gráfico**. Unificado na v1.1.0.
 
 A meta exibida no gráfico de tendência é 8.0 (era 4.0 na escala antiga).
+
+### O convite é só no sininho
+
+Disparado automaticamente quando o chamado entra em **Resolvido** — pelos dois
+caminhos, "Concluir ticket" e "Alterar status". Passar para Fechado não dispara
+nada: o convite já foi feito.
+
+**Não sai e-mail** (`_IN_APP_ONLY` em `app/services/notifications.py`). A
+avaliação é respondida no painel abaixo do chat, dentro do chamado; o e-mail
+apenas pedia que a pessoa entrasse no sistema. Decidido em 07/08/2026.
+
+Até então o caminho do "Alterar status" mandava **dois** e-mails — o da
+notificação e outro escrito à mão logo abaixo.
+
+Quem avalia é só **o cliente que abriu o chamado**, uma vez por chamado, sem
+prazo para responder e sem poder alterar depois. Admin e técnico não veem o
+painel.
 
 ## Permissões
 
@@ -224,26 +327,16 @@ Coisas que os documentos de Requisitos preveem e que **não estão implementadas
 Nenhuma delas foi pedida pelo cliente até agora — estão aqui para não se
 perderem.
 
-### RN-005 — fechamento automático de chamado
+### Celery continua sem worker
 
-> "Chamados no status 'Resolvido' são automaticamente movidos para 'Fechado'
-> após 5 dias úteis sem resposta do cliente."
+O `backend/app/worker/tasks.py` tem três tarefas de exemplo, nenhuma
+implementada, e **nada as executa** — não há worker nem beat no EasyPanel. O
+fechamento automático precisou ser resolvido por fora (ver "Ciclo de
+encerramento do chamado").
 
-Não existe rotina que faça isso. O `backend/app/worker/tasks.py` tem apenas
-três tarefas de exemplo, nenhuma implementada de fato. O efeito prático é que os
-chamados se acumulam em "Resolvido" para sempre, a menos que alguém feche na mão.
-
-### RN-006 — reabertura de chamado
-
-> "Chamados 'Fechados' podem ser reabertos pelo cliente dentro de 7 dias."
-
-A tabela de transições (`_TRANSITIONS` em `tickets.py`) não permite sair de
-`resolved` para nada além de `closed`, nem sair de `closed`. Não há como reabrir
-pela interface.
-
-**Consequência:** o card "Taxa de reabertura" do relatório conta tickets que
-voltaram de `resolved`/`closed` para `open`/`in_progress` — algo que a API não
-permite. A métrica sempre mostrará 0%.
+Se um dia aparecer trabalho pesado o bastante para justificar, o caminho é
+subir um serviço `celery -A app.worker.celery_app worker --beat` e mover a
+rotina para lá.
 
 ### Antivírus (ClamAV) não está no ambiente
 

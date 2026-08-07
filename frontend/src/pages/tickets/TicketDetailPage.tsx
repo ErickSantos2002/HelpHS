@@ -34,6 +34,7 @@ import {
   getTicket,
   getTicketHistory,
   listTicketNotes,
+  reopenTicket,
   resolveTicket,
   updateClientObservation,
   updateTicketStatus,
@@ -303,10 +304,10 @@ function ActivityEntry({ entry }: { entry: TicketHistory }) {
           <time className="text-[11px] text-slate-500 shrink-0">{relTime}</time>
         </div>
 
-        {/* Quem fez a ação */}
-        {entry.user_name && (
-          <p className="text-xs text-slate-500 mt-0.5">por {entry.user_name}</p>
-        )}
+        {/* Quem fez a ação — sem autor significa que foi o próprio sistema */}
+        <p className="text-xs text-slate-500 mt-0.5">
+          por {entry.user_name ?? "Sistema"}
+        </p>
 
         {/* Status: de → para */}
         {entry.field === "status" && entry.new_value && (
@@ -618,11 +619,11 @@ function SurveyPanel({ ticketId }: { ticketId: string }) {
 
   return (
     <div className="rounded-xl border border-border/50 bg-background-surface">
-      <div className="flex items-center gap-2 border-b border-border/40 px-5 py-3.5">
+      <div className="flex items-center gap-2 border-b border-border/40 px-5 py-2.5">
         <span className="text-yellow-400">{IC.Star}</span>
         <h2 className="text-sm font-semibold text-slate-200">Pesquisa de satisfação</h2>
       </div>
-      <div className="p-5">
+      <div className="px-5 py-4">
         {survey ? (
           <div className="space-y-2">
             <div className="flex items-center gap-3">
@@ -641,19 +642,28 @@ function SurveyPanel({ ticketId }: { ticketId: string }) {
             </p>
           </div>
         ) : (
-          <div className="space-y-4">
-            <p className="text-sm text-slate-400">Como você avalia o atendimento?</p>
-            <div className="space-y-2">
+          <div className="space-y-3">
+            <div className="flex flex-wrap items-center gap-x-3 gap-y-2">
+              <p className="text-sm text-slate-400">Como você avalia o atendimento?</p>
               <ScoreRating value={rating} onChange={setRating} />
               {rating > 0 && (
                 <p className="text-sm font-semibold text-yellow-400">{RATING_LABELS[rating]}</p>
               )}
             </div>
-            <Textarea placeholder="Comentário opcional…" rows={2} value={comment} onChange={(e) => setComment(e.target.value)} />
+            <div className="flex flex-col gap-2 sm:flex-row sm:items-end">
+              <div className="min-w-0 flex-1">
+                <Textarea
+                  placeholder="Comentário opcional…"
+                  rows={2}
+                  value={comment}
+                  onChange={(e) => setComment(e.target.value)}
+                />
+              </div>
+              <Button onClick={handleSubmit} loading={submitting} disabled={rating === 0} size="sm" className="shrink-0">
+                Enviar avaliação
+              </Button>
+            </div>
             {error && <Alert variant="danger">{error}</Alert>}
-            <Button onClick={handleSubmit} loading={submitting} disabled={rating === 0} size="sm">
-              Enviar avaliação
-            </Button>
           </div>
         )}
       </div>
@@ -753,6 +763,10 @@ export default function TicketDetailPage() {
   const [resolveNote, setResolveNote] = useState("");
   const [resolveLoading, setResolveLoading] = useState(false);
 
+  const [reopenModal, setReopenModal] = useState(false);
+  const [reopenReason, setReopenReason] = useState("");
+  const [reopenLoading, setReopenLoading] = useState(false);
+
   const [newStatus, setNewStatus] = useState("");
   const [statusComment, setStatusComment] = useState("");
   const [statusLoading, setStatusLoading] = useState(false);
@@ -782,6 +796,14 @@ export default function TicketDetailPage() {
 
   const isStaff = user?.role === "admin" || user?.role === "technician";
   const isClosed = ticket?.status === "resolved" || ticket?.status === "closed" || ticket?.status === "cancelled";
+
+  // Reabertura (RN-006). O prazo vem pronto do backend — a conta de dias úteis
+  // mora num lugar só. A equipe reabre sem prazo; o cliente, dentro da janela.
+  const reopenDeadline = ticket?.reopen_deadline ? new Date(ticket.reopen_deadline) : null;
+  const withinReopenWindow = reopenDeadline !== null && reopenDeadline >= new Date();
+  const canReopen =
+    (ticket?.status === "resolved" || ticket?.status === "closed") &&
+    (isStaff || (ticket?.creator_id === user?.id && withinReopenWindow));
 
   const load = useCallback(async () => {
     if (!id) return;
@@ -835,6 +857,20 @@ export default function TicketDetailPage() {
     } catch (err) {
       toastApiError(err, "Não foi possível concluir o ticket.");
     } finally { setResolveLoading(false); }
+  }
+
+  async function handleReopen() {
+    if (!ticket || reopenReason.trim().length < 5) return;
+    setReopenLoading(true);
+    try {
+      const updated = await reopenTicket(ticket.id, reopenReason.trim());
+      setTicket(updated);
+      setHistory((await getTicketHistory(ticket.id)).items);
+      setReopenModal(false); setReopenReason("");
+      toast.success("Chamado reaberto. O atendimento voltou a ficar disponível.");
+    } catch (err) {
+      toastApiError(err, "Não foi possível reabrir o chamado.");
+    } finally { setReopenLoading(false); }
   }
 
   async function handleAssign(assigneeId: string | null) {
@@ -1022,8 +1058,41 @@ export default function TicketDetailPage() {
                 </div>
               )}
 
-              {/* Chat — cresce para preencher o espaço disponível */}
-              <div className="lg:flex-1 lg:min-h-0">
+              {/* Janela de reabertura — o cliente precisa ver o prazo sem
+                  procurar na lateral, já que o chat está bloqueado */}
+              {reopenDeadline && (
+                <div className="shrink-0 flex flex-col gap-3 rounded-xl border border-border/40 bg-background-surface px-5 py-4 sm:flex-row sm:items-center sm:justify-between">
+                  <p className="text-sm text-slate-400">
+                    {ticket.auto_closed && (
+                      <span className="text-slate-500">Fechado automaticamente por falta de manifestação. </span>
+                    )}
+                    {withinReopenWindow ? (
+                      <>
+                        O problema voltou? Este chamado ainda pode ser reaberto até{" "}
+                        <strong className="font-semibold text-slate-200">
+                          {reopenDeadline.toLocaleDateString("pt-BR")}
+                        </strong>.
+                      </>
+                    ) : (
+                      <>
+                        O prazo para reabrir terminou em {reopenDeadline.toLocaleDateString("pt-BR")}.
+                        Se o problema voltar, abra um novo chamado.
+                      </>
+                    )}
+                  </p>
+                  {canReopen && (
+                    <Button size="sm" variant="secondary" onClick={() => setReopenModal(true)}>
+                      Reabrir chamado
+                    </Button>
+                  )}
+                </div>
+              )}
+
+              {/* Chat — cresce para preencher o espaço disponível, mas nunca
+                  encolhe abaixo do que dá para ler. Com a pesquisa de
+                  satisfação aberta, o flex-1 sozinho espremia a conversa a
+                  ponto de caber uma única mensagem. */}
+              <div className="lg:flex-1 lg:min-h-[340px]">
                 <ChatPanel
                   ticketId={ticket.id}
                   currentUserId={user?.id ?? ""}
@@ -1195,17 +1264,22 @@ export default function TicketDetailPage() {
 
         {/* ── Sidebar ───────────────────────────────────────── */}
         <div className="space-y-4 overflow-y-auto min-h-0 pr-1">
-          {/* Actions (staff only) */}
-          {isStaff && (
+          {/* Ações — a equipe sempre vê; o cliente só quando pode reabrir */}
+          {(isStaff || canReopen) && (
             <SidebarSection title="Ações">
               <div className="space-y-2">
-                {!isClosed && (
+                {isStaff && !isClosed && (
                   <SidebarAction icon={IC.Check("w-4 h-4")} label="Concluir ticket" onClick={() => setResolveModal(true)} variant="primary" />
                 )}
-                {transitions.length > 0 && (
+                {canReopen && (
+                  <SidebarAction icon={IC.Refresh} label="Reabrir chamado" onClick={() => setReopenModal(true)} variant={isStaff ? "default" : "primary"} />
+                )}
+                {isStaff && transitions.length > 0 && (
                   <SidebarAction icon={IC.Refresh} label="Alterar status" onClick={() => setStatusModal(true)} variant="default" />
                 )}
-                <SidebarAction icon={IC.UserPlus} label={ticket.assignee_id ? "Reatribuir" : "Atribuir técnico"} onClick={() => setAssignModal(true)} variant="default" />
+                {isStaff && (
+                  <SidebarAction icon={IC.UserPlus} label={ticket.assignee_id ? "Reatribuir" : "Atribuir técnico"} onClick={() => setAssignModal(true)} variant="default" />
+                )}
                 {user?.role === "admin" && (
                   <SidebarAction icon={IC.Edit} label="Editar ticket" onClick={() => navigate(`/tickets/${ticket.id}/edit`)} variant="ghost" />
                 )}
@@ -1516,13 +1590,41 @@ export default function TicketDetailPage() {
       </Modal>
 
       <Modal
+        open={reopenModal}
+        onClose={() => { setReopenModal(false); setReopenReason(""); }}
+        title="Reabrir chamado"
+      >
+        <div className="space-y-4">
+          <p className="text-sm text-slate-400">
+            O chamado volta para atendimento e o chat é liberado de novo. Conte o
+            que continuou errado para o técnico saber por onde retomar.
+          </p>
+          <Textarea
+            label="Motivo da reabertura"
+            placeholder="Ex.: o aparelho voltou a travar depois de dois dias…"
+            rows={4}
+            value={reopenReason}
+            onChange={(e) => setReopenReason(e.target.value)}
+          />
+        </div>
+        <ModalFooter>
+          <Button variant="secondary" onClick={() => setReopenModal(false)} disabled={reopenLoading}>Cancelar</Button>
+          <Button onClick={handleReopen} loading={reopenLoading} disabled={reopenReason.trim().length < 5}>
+            Reabrir chamado
+          </Button>
+        </ModalFooter>
+      </Modal>
+
+      <Modal
         open={resolveModal}
         onClose={() => { setResolveModal(false); setResolveNote(""); }}
         title="Concluir ticket"
       >
         <div className="space-y-4">
           <p className="text-sm text-slate-400">
-            Descreva como o problema foi resolvido. O chat será bloqueado e o cliente receberá uma notificação.
+            Descreva como o problema foi resolvido. O chat será bloqueado e o cliente
+            receberá uma notificação para avaliar o atendimento. Se ninguém se
+            manifestar, o chamado é fechado sozinho depois do prazo.
           </p>
           <Textarea label="Nota de resolução" placeholder="Descreva a solução aplicada…" rows={5} value={resolveNote} onChange={(e) => setResolveNote(e.target.value)} />
         </div>

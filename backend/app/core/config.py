@@ -152,6 +152,16 @@ class Settings(BaseSettings):
     sla_business_days: str = "1,2,3,4,5"
     sla_timezone: str = "America/Sao_Paulo"
 
+    # Encerramento do chamado (RN-005 / RN-006).
+    # Os prazos são contados em DIAS ÚTEIS a partir do momento em que o chamado
+    # foi resolvido — em dias corridos, quem resolvesse na sexta daria ao cliente
+    # praticamente nenhum dia de trabalho para se manifestar.
+    ticket_auto_close_business_days: int = 3
+    ticket_reopen_business_days: int = 5
+    # De quanto em quanto tempo a rotina de fechamento automático roda.
+    # 0 desliga a rotina (útil em testes e em execução local).
+    ticket_auto_close_interval_seconds: int = 3600
+
     # Celery
     celery_broker_url: str = "redis://localhost:6379/1"
     celery_result_backend: str = "redis://localhost:6379/2"

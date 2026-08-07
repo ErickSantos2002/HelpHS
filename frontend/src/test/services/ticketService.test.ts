@@ -7,6 +7,8 @@ import {
   updateTicketStatus,
   assignTicket,
   getTicketHistory,
+  reopenTicket,
+  resolveTicket,
 } from "../../services/ticketService";
 import { api } from "../../services/api";
 
@@ -199,5 +201,40 @@ describe("getTicketHistory", () => {
     await getTicketHistory("t1");
 
     expect(mockGet).toHaveBeenCalledWith("/tickets/t1/history?limit=100");
+  });
+});
+
+describe("resolveTicket", () => {
+  it("exige a nota de resolução no corpo da requisição", async () => {
+    mockPost.mockResolvedValue({ data: { ...ticket, status: "resolved" } });
+
+    await resolveTicket("t1", "Placa substituída.");
+
+    expect(mockPost).toHaveBeenCalledWith("/tickets/t1/resolve", {
+      resolution_note: "Placa substituída.",
+    });
+  });
+});
+
+describe("reopenTicket", () => {
+  it("envia o motivo da reabertura para o endpoint do chamado", async () => {
+    mockPost.mockResolvedValue({ data: { ...ticket, status: "in_progress" } });
+
+    const reaberto = await reopenTicket("t1", "O aparelho voltou a travar.");
+
+    expect(mockPost).toHaveBeenCalledWith("/tickets/t1/reopen", {
+      reason: "O aparelho voltou a travar.",
+    });
+    expect(reaberto.status).toBe("in_progress");
+  });
+
+  it("propaga o erro quando o prazo já venceu, para a tela mostrar o motivo", async () => {
+    mockPost.mockRejectedValue({
+      response: { status: 409, data: { detail: "O prazo de 5 dias úteis..." } },
+    });
+
+    await expect(reopenTicket("t1", "Voltou o problema")).rejects.toMatchObject({
+      response: { status: 409 },
+    });
   });
 });

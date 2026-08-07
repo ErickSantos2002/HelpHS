@@ -49,6 +49,12 @@ class TicketResolve(AppBaseModel):
     resolution_note: str = Field(..., min_length=1, max_length=5000)
 
 
+class TicketReopen(AppBaseModel):
+    # O motivo é obrigatório: quem for atender de novo precisa saber o que
+    # continuou errado, e a nota de resolução original fica no chamado.
+    reason: str = Field(..., min_length=5, max_length=2000)
+
+
 class TicketResponse(AppBaseModel):
     model_config = ConfigDict(from_attributes=True, str_strip_whitespace=True)
 
@@ -68,6 +74,13 @@ class TicketResponse(AppBaseModel):
     sla_response_breach: bool
     sla_resolve_breach: bool
     closed_at: datetime | None
+    resolved_at: datetime | None = None
+    auto_closed: bool = False
+    reopened_at: datetime | None = None
+    reopen_count: int = 0
+    # Até quando este chamado ainda aceita reabertura. Vem calculado do backend
+    # para que o frontend não precise repetir a conta de dias úteis.
+    reopen_deadline: datetime | None = None
     created_at: datetime
     updated_at: datetime
     assignee_name: str | None = None
@@ -96,7 +109,7 @@ class TicketHistoryResponse(AppBaseModel):
 
     id: uuid.UUID
     ticket_id: uuid.UUID
-    user_id: uuid.UUID
+    user_id: uuid.UUID | None = None  # NULL = ação do sistema
     user_name: str | None = None
     field: str
     old_value: str | None

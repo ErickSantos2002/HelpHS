@@ -28,6 +28,13 @@ from app.core.config import Settings
 from app.models.models import Notification, NotificationType, User
 from app.services.email import send_email
 
+# Tipos que ficam SÓ no sininho, mesmo com SMTP configurado.
+#
+# A pesquisa de satisfação é respondida dentro do chamado, no painel abaixo do
+# chat — o e-mail não levava a lugar nenhum, só pedia que a pessoa entrasse no
+# sistema. Decidido com o cliente em 07/08/2026: convite apenas in-app.
+_IN_APP_ONLY = frozenset({NotificationType.satisfaction_survey})
+
 
 async def notify(
     db: AsyncSession,
@@ -57,7 +64,7 @@ async def notify(
     )
     db.add(notif)
 
-    if settings is None:
+    if settings is None or notif_type in _IN_APP_ONLY:
         return  # no email without settings
 
     # Look up user email to send the notification

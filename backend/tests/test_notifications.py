@@ -239,6 +239,39 @@ async def test_notify_no_email_task_without_settings():
         mock_task.assert_not_called()
 
 
+@pytest.mark.asyncio
+async def test_pesquisa_de_satisfacao_nao_vai_por_email():
+    """
+    O convite para avaliar fica só no sininho: a avaliação é respondida dentro
+    do chamado, e o e-mail apenas pedia que a pessoa entrasse no sistema.
+    """
+    from app.core.config import get_settings
+    from app.services.notifications import notify
+
+    db = MagicMock()
+    db.add = MagicMock()
+
+    async def _execute(*a, **kw):
+        r = MagicMock()
+        r.scalar_one_or_none.return_value = "user@test.com"
+        return r
+
+    db.execute = _execute
+
+    with patch("app.services.notifications.asyncio.create_task") as mock_task:
+        await notify(
+            db,
+            _USER_ID,
+            NotificationType.satisfaction_survey,
+            "Como foi o atendimento?",
+            "O ticket HS-2026-0010 foi resolvido.",
+            settings=get_settings(),
+        )
+
+    db.add.assert_called_once()  # a notificação no sininho continua existindo
+    mock_task.assert_not_called()
+
+
 # ═══════════════════════════════════════════════════════════════
 # Email service unit tests
 # ═══════════════════════════════════════════════════════════════

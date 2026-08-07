@@ -314,17 +314,22 @@ async def _build_report(
     csat_average = round(float(avg_raw), 2) if avg_raw is not None else None
 
     # ── Tempo médio de resolução por prioridade ───────────────
+    # Conta até a RESOLUÇÃO, não até o fechamento: com o fechamento automático
+    # (RN-005), usar closed_at somaria os 3 dias úteis de espera pelo cliente ao
+    # tempo de trabalho da equipe. O coalesce cobre chamados antigos, anteriores
+    # à coluna resolved_at.
+    resolvido_em = func.coalesce(Ticket.resolved_at, Ticket.closed_at)
     resolution_rows = (
         await db.execute(
             select(
                 Ticket.priority,
-                func.avg(
-                    extract("epoch", Ticket.closed_at - Ticket.created_at) / 3600
-                ).label("avg_hours"),
+                func.avg(extract("epoch", resolvido_em - Ticket.created_at) / 3600).label(
+                    "avg_hours"
+                ),
             )
             .where(
                 *base,
-                Ticket.closed_at.is_not(None),
+                resolvido_em.is_not(None),
                 Ticket.status.in_([TicketStatus.resolved, TicketStatus.closed]),
             )
             .group_by(Ticket.priority)
@@ -858,8 +863,16 @@ async def _technician_summary(
                 )
                 .label("open_count"),
                 func.count().filter(_resolve_breached_cond()).label("breached"),
-                func.avg(extract("epoch", Ticket.closed_at - Ticket.created_at) / 3600)
-                .filter(Ticket.closed_at.is_not(None))
+                # Até a resolução, não até o fechamento — ver comentário em
+                # get_reports: o fechamento automático mora 3 dias úteis depois.
+                func.avg(
+                    extract(
+                        "epoch",
+                        func.coalesce(Ticket.resolved_at, Ticket.closed_at) - Ticket.created_at,
+                    )
+                    / 3600
+                )
+                .filter(func.coalesce(Ticket.resolved_at, Ticket.closed_at).is_not(None))
                 .label("avg_hours"),
             ).where(Ticket.assignee_id == tech_id, Ticket.created_at >= since)
         )

@@ -86,6 +86,10 @@ def _mock_ticket(
     t.sla_response_breach = False
     t.sla_resolve_breach = False
     t.closed_at = None
+    t.resolved_at = None
+    t.auto_closed = False
+    t.reopened_at = None
+    t.reopen_count = 0
     t.created_at = _NOW
     t.updated_at = _NOW
     t.technician_notes = None

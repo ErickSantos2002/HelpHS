@@ -11,6 +11,7 @@ Permissões:
                                        client (title/description, apenas se status=open)
   PATCH  /tickets/{id}/status        — admin, technician
   PATCH  /tickets/{id}/assign        — admin, technician
+  POST   /tickets/{id}/reopen        — criador (dentro do prazo), admin/technician
   DELETE /tickets/{id}               — admin (cancela o ticket)
 """
 
@@ -53,18 +54,24 @@ from app.schemas.ticket import (
     TicketNoteCreate,
     TicketNoteResponse,
     TicketObservationUpdate,
+    TicketReopen,
     TicketResolve,
     TicketResponse,
     TicketStatusUpdate,
     TicketUpdate,
 )
-from app.services.email import send_email
 from app.services.llm import classify_ticket
 from app.services.notifications import notify
+from app.services.ticket_lifecycle import (
+    can_client_reopen,
+    reopen_deadline,
+    resolution_reference,
+)
 from app.utils.crud import get_or_404
 from app.utils.protocol import MAX_RETRIES, generate_protocol
 from app.utils.sla import (
     _PAUSE_STATUSES,
+    add_business_hours,
     apply_sla_config,
     check_breaches,
     pause_sla,
@@ -159,6 +166,11 @@ async def _auto_transition(
     ticket.status = new_status
     ticket.updated_at = now
 
+    if new_status == TicketStatus.resolved:
+        ticket.resolved_at = now
+    if new_status in (TicketStatus.resolved, TicketStatus.closed, TicketStatus.cancelled):
+        ticket.closed_at = now
+
     if old_status == TicketStatus.open:
         ticket.sla_first_response = now
 
@@ -203,6 +215,16 @@ def _audit(
             entity_id=entity_id,
         )
     )
+
+
+def _serialize_ticket(ticket: Ticket) -> TicketResponse:
+    """TicketResponse com os campos que são calculados, não armazenados."""
+    response = TicketResponse.model_validate(ticket)
+    if ticket.status in (TicketStatus.resolved, TicketStatus.closed):
+        referencia = resolution_reference(ticket)
+        if referencia is not None:
+            response.reopen_deadline = reopen_deadline(referencia, get_settings())
+    return response
 
 
 async def _fill_product_and_equipment(
@@ -292,6 +314,8 @@ async def create_ticket(
             sla_response_breach=False,
             sla_resolve_breach=False,
             sla_total_paused_ms=0,
+            auto_closed=False,
+            reopen_count=0,
             created_at=ts,
             updated_at=ts,
         )
@@ -326,7 +350,7 @@ async def create_ticket(
         _classify_ticket_async(ticket.id, body.title, body.description, body.category.value)
     )
 
-    return TicketResponse.model_validate(ticket)
+    return _serialize_ticket(ticket)
 
 
 _SORT_COLUMNS = {
@@ -440,7 +464,7 @@ async def list_tickets(
         equipment_map = {row.id: (row.name, row.serial_number) for row in equip_rows}
 
     def _serialize(t: Ticket) -> TicketResponse:
-        r = TicketResponse.model_validate(t)
+        r = _serialize_ticket(t)
         r.assignee_name = name_map.get(t.assignee_id) if t.assignee_id else None
         r.product_name = product_map.get(t.product_id) if t.product_id else None
         if t.equipment_id and t.equipment_id in equipment_map:
@@ -473,7 +497,7 @@ async def get_ticket(
     if actor.role == UserRole.client and ticket.creator_id != actor.id:
         raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="Você não tem permissão para acessar este item.")
 
-    response = TicketResponse.model_validate(ticket)
+    response = _serialize_ticket(ticket)
     if ticket.assignee_id:
         assignee = await db.get(User, ticket.assignee_id)
         response.assignee_name = assignee.name if assignee else None
@@ -514,7 +538,7 @@ async def update_ticket(
     _audit(db, AuditAction.update, actor.id, ticket.id)
     await db.commit()
     await db.refresh(ticket)
-    return TicketResponse.model_validate(ticket)
+    return _serialize_ticket(ticket)
 
 
 @router.patch("/tickets/{ticket_id}/observation", response_model=TicketResponse)
@@ -546,7 +570,7 @@ async def update_client_observation(
     _audit(db, AuditAction.update, actor.id, ticket.id)
     await db.commit()
     await db.refresh(ticket)
-    return TicketResponse.model_validate(ticket)
+    return _serialize_ticket(ticket)
 
 
 @router.patch("/tickets/{ticket_id}/status", response_model=TicketResponse)
@@ -602,8 +626,9 @@ async def update_ticket_status(
         },
         settings=settings,
     )
-    # Invite creator to fill CSAT survey when ticket is resolved
+    # Invite creator to fill CSAT survey when ticket is resolved (in-app only)
     if body.status == TicketStatus.resolved:
+        ticket.resolved_at = now
         await notify(
             db,
             ticket.creator_id,
@@ -613,25 +638,9 @@ async def update_ticket_status(
             data={"ticket_id": str(ticket.id), "protocol": ticket.protocol},
             settings=settings,
         )
-        # Send email invitation to the creator
-        creator_result = await db.execute(select(User).where(User.id == ticket.creator_id))
-        creator = creator_result.scalar_one_or_none()
-        if creator:
-            await send_email(
-                to_email=creator.email,
-                subject=f"[HelpHS] Como foi o atendimento? — {ticket.protocol}",
-                body=(
-                    f"Olá, {creator.name}!\n\n"
-                    f"Seu ticket {ticket.protocol} foi resolvido.\n\n"
-                    f"Gostaríamos de saber sua opinião sobre o atendimento. "
-                    f"Acesse o sistema e deixe sua avaliação.\n\n"
-                    f"Obrigado!\nEquipe HelpHS"
-                ),
-                settings=settings,
-            )
     await db.commit()
     await db.refresh(ticket)
-    return TicketResponse.model_validate(ticket)
+    return _serialize_ticket(ticket)
 
 
 @router.post("/tickets/{ticket_id}/resolve", response_model=TicketResponse)
@@ -655,6 +664,7 @@ async def resolve_ticket(
     ticket.status = TicketStatus.resolved
     ticket.resolution_note = body.resolution_note
     ticket.closed_at = now
+    ticket.resolved_at = now
     ticket.updated_at = now
 
     if old_status == TicketStatus.open:
@@ -695,7 +705,117 @@ async def resolve_ticket(
 
     await db.commit()
     await db.refresh(ticket)
-    return TicketResponse.model_validate(ticket)
+    return _serialize_ticket(ticket)
+
+
+@router.post("/tickets/{ticket_id}/reopen", response_model=TicketResponse)
+async def reopen_ticket(
+    ticket_id: uuid.UUID,
+    body: TicketReopen,
+    db: Annotated[AsyncSession, Depends(get_db)],
+    actor: Annotated[User, Depends(get_current_user)],
+    settings: Annotated[Settings, Depends(get_settings)],
+) -> TicketResponse:
+    """
+    Reabre um chamado resolvido ou fechado (RN-006).
+
+    O prazo vale para o cliente. Admin e técnico reabrem a qualquer momento —
+    quando o encerramento foi engano da própria equipe, um prazo vencido só
+    obrigaria a abrir um chamado novo e perder o histórico.
+    """
+    ticket = await get_or_404(db, Ticket, ticket_id, "Ticket not found")
+    is_staff = actor.role in (UserRole.admin, UserRole.technician)
+
+    if not is_staff and ticket.creator_id != actor.id:
+        raise HTTPException(
+            status_code=status.HTTP_403_FORBIDDEN,
+            detail="Você não tem permissão para acessar este item.",
+        )
+
+    if ticket.status not in (TicketStatus.resolved, TicketStatus.closed):
+        raise HTTPException(
+            status_code=status.HTTP_409_CONFLICT,
+            detail="Só é possível reabrir um chamado resolvido ou fechado.",
+        )
+
+    if not is_staff and not can_client_reopen(ticket, settings):
+        raise HTTPException(
+            status_code=status.HTTP_409_CONFLICT,
+            detail=(
+                f"O prazo de {settings.ticket_reopen_business_days} dias úteis para reabrir "
+                "este chamado já passou. Abra um novo chamado descrevendo o problema."
+            ),
+        )
+
+    now = datetime.now(UTC)
+    old_status = ticket.status
+    # Com responsável definido o chamado volta direto para a fila dele; sem
+    # responsável volta para Aberto, para ser distribuído como um chamado novo.
+    new_status = TicketStatus.in_progress if ticket.assignee_id else TicketStatus.open
+
+    ticket.status = new_status
+    ticket.closed_at = None
+    ticket.resolved_at = None
+    ticket.auto_closed = False
+    ticket.reopened_at = now
+    ticket.reopen_count = (ticket.reopen_count or 0) + 1
+    ticket.updated_at = now
+
+    # Prazo de resolução novo. Sem isso o chamado nasceria reaberto já vencido,
+    # com o cronômetro parado no dia em que foi resolvido.
+    sla_result = await db.execute(
+        select(SLAConfig).where(
+            SLAConfig.level == ticket.priority.value,
+            SLAConfig.is_active.is_(True),
+        )
+    )
+    sla_config = sla_result.scalar_one_or_none()
+    if sla_config:
+        ticket.sla_resolve_due_at = add_business_hours(now, sla_config.resolve_time_hours)
+        ticket.sla_resolve_breach = False
+    ticket.sla_paused_at = None
+    # O tempo pausado é acumulado para esticar o prazo do ciclo em que ocorreu.
+    # Como o prazo acima já parte de agora, mantê-lo daria ao ciclo novo um
+    # bônus de horas que ninguém esperou.
+    ticket.sla_total_paused_ms = 0
+
+    _record_history(
+        db,
+        ticket.id,
+        actor.id,
+        "status",
+        old_status.value,
+        new_status.value,
+        f"Chamado reaberto: {body.reason}",
+    )
+    _audit(db, AuditAction.status_change, actor.id, ticket.id)
+
+    # Avisa quem vai precisar agir: o responsável, ou o cliente quando quem
+    # reabriu foi a equipe.
+    if ticket.assignee_id and ticket.assignee_id != actor.id:
+        await notify(
+            db,
+            ticket.assignee_id,
+            NotificationType.ticket_updated,
+            "Chamado reaberto",
+            f"O ticket {ticket.protocol} foi reaberto por {actor.name}.",
+            data={"ticket_id": str(ticket.id), "new_status": new_status.value},
+            settings=settings,
+        )
+    if ticket.creator_id != actor.id:
+        await notify(
+            db,
+            ticket.creator_id,
+            NotificationType.ticket_updated,
+            "Chamado reaberto",
+            f"O ticket {ticket.protocol} foi reaberto e voltou para atendimento.",
+            data={"ticket_id": str(ticket.id), "new_status": new_status.value},
+            settings=settings,
+        )
+
+    await db.commit()
+    await db.refresh(ticket)
+    return _serialize_ticket(ticket)
 
 
 @router.patch("/tickets/{ticket_id}/assign", response_model=TicketResponse)
@@ -777,7 +897,7 @@ async def assign_ticket(
             )
     await db.commit()
     await db.refresh(ticket)
-    return TicketResponse.model_validate(ticket)
+    return _serialize_ticket(ticket)
 
 
 @router.delete("/tickets/{ticket_id}", status_code=status.HTTP_204_NO_CONTENT)

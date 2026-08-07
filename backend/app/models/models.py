@@ -402,6 +402,16 @@ class Ticket(Base):
     ai_conversation_summary: Mapped[str | None] = mapped_column(Text)
 
     closed_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
+
+    # Ciclo de encerramento (RN-005 / RN-006).
+    # `resolved_at` é a referência dos dois prazos — fechamento automático e
+    # reabertura — e por isso não pode ser confundido com `closed_at`, que é
+    # reescrito quando o chamado passa para Fechado.
+    resolved_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), index=True)
+    auto_closed: Mapped[bool] = mapped_column(Boolean, default=False, nullable=False)
+    reopened_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
+    reopen_count: Mapped[int] = mapped_column(Integer, default=0, nullable=False)
+
     created_at: Mapped[datetime] = mapped_column(
         DateTime(timezone=True), server_default=func.now(), index=True
     )
@@ -453,7 +463,8 @@ class TicketHistory(Base):
     ticket_id: Mapped[uuid.UUID] = mapped_column(
         UUID(as_uuid=True), ForeignKey("tickets.id", ondelete="CASCADE"), index=True
     )
-    user_id: Mapped[uuid.UUID] = mapped_column(UUID(as_uuid=True), ForeignKey("users.id"))
+    # NULL = ação do próprio sistema (ex.: fechamento automático da RN-005)
+    user_id: Mapped[uuid.UUID | None] = mapped_column(UUID(as_uuid=True), ForeignKey("users.id"))
     field: Mapped[str] = mapped_column(String(100), nullable=False)
     old_value: Mapped[str | None] = mapped_column(Text)
     new_value: Mapped[str | None] = mapped_column(Text)
@@ -462,7 +473,7 @@ class TicketHistory(Base):
 
     # Relacionamentos
     ticket: Mapped["Ticket"] = relationship(back_populates="histories")
-    user: Mapped["User"] = relationship(back_populates="ticket_histories")
+    user: Mapped["User | None"] = relationship(back_populates="ticket_histories")
 
     __table_args__ = (Index("ix_ticket_history_ticket_created", "ticket_id", "created_at"),)
 

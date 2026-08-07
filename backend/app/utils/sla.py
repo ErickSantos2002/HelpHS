@@ -9,6 +9,9 @@ Public API
 add_business_hours(start, hours)  → datetime
     Adds N working hours to `start`, skipping nights/weekends.
 
+add_business_days(start, days)  → datetime
+    Same thing in units of whole working days (9 h each).
+
 apply_sla_config(ticket, config, now)
     Stamps sla_config_id, sla_response_due_at, sla_resolve_due_at on a ticket.
 
@@ -106,6 +109,17 @@ def add_business_hours(start: datetime, hours: int) -> datetime:
             current = next_day
 
     return current
+
+
+def add_business_days(start: datetime, days: int) -> datetime:
+    """
+    Return a datetime that is exactly `days` business days after `start`.
+
+    A business day is the 9 h journey itself, so this is just a convenience
+    wrapper over add_business_hours — a deadline set on Friday afternoon lands
+    on the middle of the following week, not on Monday morning.
+    """
+    return add_business_hours(start, days * _WORK_HOURS_PER_DAY)
 
 
 def apply_sla_config(ticket: Ticket, config: SLAConfig, now: datetime) -> None:

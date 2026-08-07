@@ -1,4 +1,5 @@
-from contextlib import asynccontextmanager
+import asyncio
+from contextlib import asynccontextmanager, suppress
 
 from fastapi import FastAPI
 from fastapi.exceptions import RequestValidationError
@@ -32,6 +33,7 @@ from app.routers import (
     users,
 )
 from app.services import storage
+from app.services.ticket_lifecycle import start_auto_close_worker
 
 settings = get_settings()
 
@@ -71,9 +73,19 @@ async def lifespan(app: FastAPI):
             "montado e com permissão de escrita."
         )
 
+    # RN-005 — fecha sozinho os chamados resolvidos que ninguém retomou.
+    # Roda aqui, e não no Celery, porque o ambiente não tem worker (ver
+    # app/services/ticket_lifecycle.py).
+    auto_close_task = start_auto_close_worker()
+
     yield
 
     # Shutdown
+    if auto_close_task is not None:
+        auto_close_task.cancel()
+        with suppress(asyncio.CancelledError):
+            await auto_close_task
+
     await close_redis()
     await engine.dispose()
     logger.info("Shutting down HelpHS API")

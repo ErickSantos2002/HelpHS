@@ -27,6 +27,12 @@ export interface Ticket {
   product_id: string | null;
   equipment_id: string | null;
   closed_at: string | null;
+  resolved_at: string | null;
+  auto_closed: boolean;
+  reopened_at: string | null;
+  reopen_count: number;
+  /** Até quando o chamado ainda aceita reabertura (calculado pelo backend). */
+  reopen_deadline: string | null;
   assignee_name: string | null;
   product_name: string | null;
   equipment_name: string | null;
@@ -44,7 +50,8 @@ export interface Ticket {
 export interface TicketHistory {
   id: string;
   ticket_id: string;
-  user_id: string;
+  /** null quando quem agiu foi o próprio sistema (fechamento automático). */
+  user_id: string | null;
   user_name: string | null;
   field: string;
   old_value: string | null;
@@ -171,6 +178,11 @@ export async function resolveTicket(
   const { data } = await api.post<Ticket>(`/tickets/${id}/resolve`, {
     resolution_note,
   });
+  return data;
+}
+
+export async function reopenTicket(id: string, reason: string): Promise<Ticket> {
+  const { data } = await api.post<Ticket>(`/tickets/${id}/reopen`, { reason });
   return data;
 }
 
