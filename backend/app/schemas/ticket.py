@@ -11,6 +11,10 @@ from app.models.models import TicketCategory, TicketPriority, TicketStatus
 from app.schemas.base import AppBaseModel
 from app.schemas.tag import TagResponse
 
+# Um chamado sobre a frota inteira de um cliente ainda é um chamado só; o teto
+# existe para o campo não virar depósito de equipamento sem relação com o caso.
+MAX_EQUIPMENTS_PER_TICKET = 20
+
 
 class TicketCreate(AppBaseModel):
     title: str = Field(..., min_length=1, max_length=255)
@@ -18,7 +22,9 @@ class TicketCreate(AppBaseModel):
     priority: TicketPriority = TicketPriority.medium
     category: TicketCategory = TicketCategory.general
     product_id: uuid.UUID | None = None
-    equipment_id: uuid.UUID | None = None
+    equipment_ids: list[uuid.UUID] = Field(
+        default_factory=list, max_length=MAX_EQUIPMENTS_PER_TICKET
+    )
     client_observation: str | None = Field(default=None, max_length=2000)
 
 
@@ -28,7 +34,10 @@ class TicketUpdate(AppBaseModel):
     priority: TicketPriority | None = None
     category: TicketCategory | None = None
     product_id: uuid.UUID | None = None
-    equipment_id: uuid.UUID | None = None
+    # None = não mexe nos equipamentos; lista vazia = desvincula todos
+    equipment_ids: list[uuid.UUID] | None = Field(
+        default=None, max_length=MAX_EQUIPMENTS_PER_TICKET
+    )
     technician_notes: str | None = None
 
 
@@ -55,6 +64,17 @@ class TicketReopen(AppBaseModel):
     reason: str = Field(..., min_length=5, max_length=2000)
 
 
+class TicketEquipmentBrief(AppBaseModel):
+    """O necessário para exibir o equipamento no chamado, sem a ficha inteira."""
+
+    model_config = ConfigDict(from_attributes=True)
+
+    id: uuid.UUID
+    name: str
+    serial_number: str | None = None
+    product_id: uuid.UUID | None = None
+
+
 class TicketResponse(AppBaseModel):
     model_config = ConfigDict(from_attributes=True, str_strip_whitespace=True)
 
@@ -68,7 +88,7 @@ class TicketResponse(AppBaseModel):
     creator_id: uuid.UUID
     assignee_id: uuid.UUID | None
     product_id: uuid.UUID | None
-    equipment_id: uuid.UUID | None
+    equipments: list[TicketEquipmentBrief] = []
     sla_response_due_at: datetime | None
     sla_resolve_due_at: datetime | None
     sla_response_breach: bool
@@ -85,8 +105,6 @@ class TicketResponse(AppBaseModel):
     updated_at: datetime
     assignee_name: str | None = None
     product_name: str | None = None
-    equipment_name: str | None = None
-    equipment_serial: str | None = None
     technician_notes: str | None = None
     ai_classification: str | None = None
     ai_confidence: float | None = None

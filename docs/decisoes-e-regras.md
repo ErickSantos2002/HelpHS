@@ -261,6 +261,35 @@ endereços um a um.
 Uma exceção deliberada: **redefinir a senha confirma o e-mail junto**. Quem
 abriu o link provou ser dono da caixa.
 
+## Equipamentos do chamado
+
+**Um chamado aceita vários equipamentos** (teto de 20). Antes era um só, e o
+cliente com três aparelhos do mesmo produto com o mesmo defeito precisava abrir
+três chamados ou citar os números de série na descrição — onde a busca não
+alcança.
+
+A coluna `tickets.equipment_id` **deixou de existir**; o vínculo vive na tabela
+`ticket_equipments`. Manter as duas criaria duas verdades sobre a mesma
+informação.
+
+Regras que vieram junto:
+
+- **O cliente só vincula equipamento que é dele.** Sem essa checagem, mandar
+  ids aleatórios para a API devolveria na resposta o nome e o número de série
+  de aparelhos de outras empresas.
+- **Trocar o produto no formulário limpa a seleção** — a lista mostra os
+  aparelhos daquele produto, e manter os antigos deixaria no chamado
+  equipamento que sumiu da tela.
+- **A busca acha o chamado por qualquer um dos seriais**, não só pelo primeiro.
+- **As sugestões da base consideram todos os produtos envolvidos.** Um chamado
+  com aparelhos de produtos diferentes recebe artigos de todos; filtrar por um
+  só esconderia o artigo do segundo produto.
+- Sem produto informado, o chamado herda o do **primeiro equipamento** — é o
+  que o cliente responderia se perguntassem de qual produto é o chamado.
+
+Na edição, omitir `equipment_ids` mantém os equipamentos atuais; mandar lista
+vazia desvincula todos.
+
 ## Cadastro do cliente
 
 **CNPJ e CEP são obrigatórios** no onboarding e ao salvar os dados da empresa no

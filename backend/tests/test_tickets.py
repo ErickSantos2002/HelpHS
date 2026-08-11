@@ -60,6 +60,16 @@ def _mock_user(role=UserRole.client, user_id=None):
     return u
 
 
+def _mock_equipment(name="Phoebus da recepção", serial="WATFR01-001", owner_id=None):
+    e = MagicMock()
+    e.id = uuid.uuid4()
+    e.name = name
+    e.serial_number = serial
+    e.product_id = None
+    e.owner_id = owner_id
+    return e
+
+
 def _mock_ticket(
     ticket_id=None,
     creator_id=None,
@@ -77,7 +87,7 @@ def _mock_ticket(
     t.creator_id = creator_id or _CREATOR_ID
     t.assignee_id = None
     t.product_id = None
-    t.equipment_id = None
+    t.equipments = []
     t.sla_response_due_at = None
     t.sla_resolve_due_at = None
     t.sla_first_response = None
@@ -544,8 +554,8 @@ async def test_assign_ticket(patch_redis):
 
 
 @pytest.mark.asyncio
-async def test_detalhe_traz_produto_e_equipamento(patch_redis):
-    """O ticket guarda só os ids; a resposta precisa trazer os nomes."""
+async def test_detalhe_traz_produto_e_equipamentos(patch_redis):
+    """O ticket guarda só o id do produto; a resposta precisa trazer o nome."""
     from unittest.mock import MagicMock
 
     from app.core.database import get_db
@@ -553,19 +563,15 @@ async def test_detalhe_traz_produto_e_equipamento(patch_redis):
     admin = _mock_user(UserRole.admin)
     ticket = _mock_ticket()
     ticket.product_id = uuid.uuid4()
-    ticket.equipment_id = uuid.uuid4()
+    ticket.equipments = [_mock_equipment("Phoebus da recepção", "WATFR01-12453")]
 
     produto = MagicMock()
     produto.name = "Phoebus"
-    equipamento = MagicMock()
-    equipamento.name = "Phoebus da recepção"
-    equipamento.serial_number = "WATFR01-12453"
-    equipamento.product_id = None
 
     session = _db_sequence(ticket)
 
     async def _get(model, pk):
-        return equipamento if pk == ticket.equipment_id else produto
+        return produto
 
     session.get = _get
 
@@ -581,8 +587,87 @@ async def test_detalhe_traz_produto_e_equipamento(patch_redis):
     assert resp.status_code == 200
     body = resp.json()
     assert body["product_name"] == "Phoebus"
-    assert body["equipment_name"] == "Phoebus da recepção"
-    assert body["equipment_serial"] == "WATFR01-12453"
+    assert len(body["equipments"]) == 1
+    assert body["equipments"][0]["name"] == "Phoebus da recepção"
+    assert body["equipments"][0]["serial_number"] == "WATFR01-12453"
+
+
+@pytest.mark.asyncio
+async def test_chamado_com_varios_equipamentos(patch_redis):
+    """Um problema que atinge três aparelhos continua sendo um chamado só."""
+    from unittest.mock import MagicMock
+
+    from app.core.database import get_db
+
+    admin = _mock_user(UserRole.admin)
+    ticket = _mock_ticket()
+    ticket.product_id = uuid.uuid4()
+    ticket.equipments = [
+        _mock_equipment("Phoebus da recepção", "WATFR01-001"),
+        _mock_equipment("Phoebus da portaria", "WATFR01-002"),
+        _mock_equipment("Phoebus do almoxarifado", "WATFR01-003"),
+    ]
+
+    produto = MagicMock()
+    produto.name = "Phoebus"
+
+    session = _db_sequence(ticket)
+
+    async def _get(model, pk):
+        return produto
+
+    session.get = _get
+
+    async def _gen():
+        yield session
+
+    app.dependency_overrides[get_db] = _gen
+    _override_user(admin)
+
+    async with AsyncClient(transport=ASGITransport(app=app), base_url="http://test") as c:
+        resp = await c.get(f"/api/v1/tickets/{_TICKET_ID}")
+
+    seriais = [e["serial_number"] for e in resp.json()["equipments"]]
+    assert seriais == ["WATFR01-001", "WATFR01-002", "WATFR01-003"]
+
+
+@pytest.mark.asyncio
+async def test_produto_vem_do_equipamento_quando_o_chamado_nao_informou(patch_redis):
+    """
+    O cliente que escolhe o aparelho não precisa repetir o produto — sem essa
+    herança, a aba Base de Conhecimento do chamado ficaria sem sugestões.
+    """
+    from unittest.mock import MagicMock
+
+    from app.core.database import get_db
+
+    admin = _mock_user(UserRole.admin)
+    ticket = _mock_ticket()
+    ticket.product_id = None
+    equipamento = _mock_equipment("Phoebus da recepção", "WATFR01-001")
+    equipamento.product_id = uuid.uuid4()
+    ticket.equipments = [equipamento]
+
+    produto = MagicMock()
+    produto.name = "Phoebus"
+
+    session = _db_sequence(ticket)
+
+    async def _get(model, pk):
+        return produto
+
+    session.get = _get
+
+    async def _gen():
+        yield session
+
+    app.dependency_overrides[get_db] = _gen
+    _override_user(admin)
+
+    async with AsyncClient(transport=ASGITransport(app=app), base_url="http://test") as c:
+        resp = await c.get(f"/api/v1/tickets/{_TICKET_ID}")
+
+    assert resp.json()["product_name"] == "Phoebus"
 
 
 @pytest.mark.asyncio
@@ -592,7 +677,7 @@ async def test_ticket_sem_produto_devolve_nulo(patch_redis):
     admin = _mock_user(UserRole.admin)
     ticket = _mock_ticket()
     ticket.product_id = None
-    ticket.equipment_id = None
+    ticket.equipments = []
 
     app.dependency_overrides[get_db] = _db_override(ticket)
     _override_user(admin)
@@ -603,7 +688,85 @@ async def test_ticket_sem_produto_devolve_nulo(patch_redis):
     assert resp.status_code == 200
     body = resp.json()
     assert body["product_name"] is None
-    assert body["equipment_name"] is None
+    assert body["equipments"] == []
+
+
+@pytest.mark.asyncio
+async def test_cliente_nao_vincula_equipamento_de_outra_empresa(patch_redis):
+    """
+    Sem essa checagem, mandar ids aleatórios devolveria na resposta o nome e o
+    número de série de aparelhos de outros clientes.
+    """
+    from app.core.database import get_db
+
+    cliente = _mock_user(UserRole.client, user_id=_CREATOR_ID)
+    alheio = _mock_equipment("Phoebus de outra empresa", "XXXX-999", owner_id=uuid.uuid4())
+
+    # 1ª consulta: SLAConfig; 2ª: os equipamentos informados
+    app.dependency_overrides[get_db] = _db_seq_override(None, [alheio])
+    _override_user(cliente)
+
+    async with AsyncClient(transport=ASGITransport(app=app), base_url="http://test") as c:
+        resp = await c.post(
+            "/api/v1/tickets",
+            json={
+                "title": "Teste",
+                "description": "Teste",
+                "priority": "medium",
+                "category": "hardware",
+                "equipment_ids": [str(alheio.id)],
+            },
+        )
+
+    assert resp.status_code == 403
+
+
+@pytest.mark.asyncio
+async def test_equipamento_inexistente_e_recusado(patch_redis):
+    from app.core.database import get_db
+
+    cliente = _mock_user(UserRole.client, user_id=_CREATOR_ID)
+
+    app.dependency_overrides[get_db] = _db_seq_override(None, [])
+    _override_user(cliente)
+
+    async with AsyncClient(transport=ASGITransport(app=app), base_url="http://test") as c:
+        resp = await c.post(
+            "/api/v1/tickets",
+            json={
+                "title": "Teste",
+                "description": "Teste",
+                "priority": "medium",
+                "category": "hardware",
+                "equipment_ids": [str(uuid.uuid4())],
+            },
+        )
+
+    assert resp.status_code == 400
+    assert "não existem" in resp.json()["detail"]
+
+
+@pytest.mark.asyncio
+async def test_limite_de_equipamentos_por_chamado(patch_redis):
+    from app.core.database import get_db
+
+    cliente = _mock_user(UserRole.client, user_id=_CREATOR_ID)
+    app.dependency_overrides[get_db] = _db_seq_override(None)
+    _override_user(cliente)
+
+    async with AsyncClient(transport=ASGITransport(app=app), base_url="http://test") as c:
+        resp = await c.post(
+            "/api/v1/tickets",
+            json={
+                "title": "Teste",
+                "description": "Teste",
+                "priority": "medium",
+                "category": "hardware",
+                "equipment_ids": [str(uuid.uuid4()) for _ in range(21)],
+            },
+        )
+
+    assert resp.status_code == 422
 
 
 @pytest.mark.asyncio

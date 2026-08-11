@@ -204,6 +204,34 @@ describe("getTicketHistory", () => {
   });
 });
 
+describe("equipamentos do chamado", () => {
+  it("envia a lista de equipamentos ao abrir o chamado", async () => {
+    mockPost.mockResolvedValue({ data: ticket });
+
+    await createTicket({
+      title: "Três aparelhos sem conexão",
+      description: "Nenhum deles conecta",
+      priority: "high",
+      category: "hardware",
+      product_id: "p1",
+      equipment_ids: ["e1", "e2", "e3"],
+    });
+
+    expect(mockPost).toHaveBeenCalledWith(
+      "/tickets",
+      expect.objectContaining({ equipment_ids: ["e1", "e2", "e3"] }),
+    );
+  });
+
+  it("lista vazia desvincula todos os equipamentos na edição", async () => {
+    mockPatch.mockResolvedValue({ data: ticket });
+
+    await updateTicket("t1", { equipment_ids: [] });
+
+    expect(mockPatch).toHaveBeenCalledWith("/tickets/t1", { equipment_ids: [] });
+  });
+});
+
 describe("resolveTicket", () => {
   it("exige a nota de resolução no corpo da requisição", async () => {
     mockPost.mockResolvedValue({ data: { ...ticket, status: "resolved" } });

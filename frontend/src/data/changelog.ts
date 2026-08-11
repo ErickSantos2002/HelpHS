@@ -1,4 +1,4 @@
-export const APP_VERSION = "v1.5.0";
+export const APP_VERSION = "v1.6.0";
 
 export type EntryType = "novidade" | "corrigido" | "melhoria";
 
@@ -14,6 +14,15 @@ export interface ChangelogVersion {
 }
 
 export const CHANGELOG: ChangelogVersion[] = [
+  {
+    version: "v1.6.0",
+    date: "10/08/2026",
+    entries: [
+      { type: "novidade", text: "Um chamado pode cobrir vários aparelhos: marque todos os equipamentos afetados sem precisar abrir um chamado para cada um." },
+      { type: "melhoria", text: "A busca encontra o chamado pelo número de série de qualquer um dos aparelhos vinculados." },
+      { type: "melhoria", text: "Os artigos sugeridos consideram todos os produtos envolvidos no chamado." },
+    ],
+  },
   {
     version: "v1.5.0",
     date: "07/08/2026",

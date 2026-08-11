@@ -26,7 +26,6 @@ from sqlalchemy.orm import selectinload
 from app.core.database import get_db
 from app.core.security import authorize, get_current_user
 from app.models.models import (
-    Equipment,
     KBArticle,
     KBArticleStatus,
     KBComment,
@@ -106,16 +105,20 @@ def _to_response(article: KBArticle) -> KBArticleResponse:
     )
 
 
-async def _ticket_product_id(ticket: Ticket, db: AsyncSession) -> uuid.UUID | None:
-    """Produto do ticket — o campo Produto ou, na falta dele, o do equipamento."""
+async def _ticket_product_ids(ticket: Ticket, db: AsyncSession) -> list[uuid.UUID]:
+    """
+    Produtos do chamado: o campo Produto e os produtos dos equipamentos.
+
+    Um chamado com aparelhos de produtos diferentes deve sugerir artigos de
+    todos eles — filtrar por um só esconderia o artigo do segundo produto.
+    """
+    ids: list[uuid.UUID] = []
     if ticket.product_id:
-        return ticket.product_id
-    if ticket.equipment_id:
-        row = await db.execute(
-            select(Equipment.product_id).where(Equipment.id == ticket.equipment_id)
-        )
-        return row.scalar_one_or_none()
-    return None
+        ids.append(ticket.product_id)
+    for equipamento in ticket.equipments:
+        if equipamento.product_id:
+            ids.append(equipamento.product_id)
+    return list(dict.fromkeys(ids))
 
 
 async def _set_article_products(
@@ -166,8 +169,8 @@ async def suggest_articles_for_ticket(
       3. mesma categoria, em qualquer produto (inclui os que valem para todos)
       4. palavra-chave do título (rede de segurança)
 
-    O produto vem do campo Produto do ticket; se estiver vazio, do equipamento
-    escolhido pelo cliente.
+    Os produtos vêm do campo Produto do ticket e dos equipamentos vinculados —
+    um chamado com aparelhos de produtos diferentes recebe artigos de todos.
     """
     ticket_result = await db.execute(select(Ticket).where(Ticket.id == ticket_id))
     ticket = ticket_result.scalar_one_or_none()
@@ -184,7 +187,7 @@ async def suggest_articles_for_ticket(
             detail="Você não tem permissão para acessar este ticket.",
         )
 
-    product_id = await _ticket_product_id(ticket, db)
+    product_ids = await _ticket_product_ids(ticket, db)
 
     words = [w for w in ticket.title.lower().split() if len(w) > 3]
     category_val = (
@@ -205,10 +208,10 @@ async def suggest_articles_for_ticket(
     same_product = (
         KBArticle.id.in_(
             select(kb_article_products.c.article_id).where(
-                kb_article_products.c.product_id == product_id
+                kb_article_products.c.product_id.in_(product_ids)
             )
         )
-        if product_id
+        if product_ids
         else None
     )
 

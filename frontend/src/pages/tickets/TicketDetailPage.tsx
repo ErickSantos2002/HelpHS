@@ -1178,12 +1178,12 @@ export default function TicketDetailPage() {
                   <DetailField label="Prioridade" value={PRIORITY_LABEL[ticket.priority] ?? ticket.priority} />
                   <DetailField label="Produto" value={ticket.product_name} />
                   <DetailField
-                    label="Equipamento"
+                    label={plural(ticket.equipments.length, "Equipamento", "Equipamentos")}
                     value={
-                      ticket.equipment_name
-                        ? ticket.equipment_serial
-                          ? `${ticket.equipment_name} — ${ticket.equipment_serial}`
-                          : ticket.equipment_name
+                      ticket.equipments.length > 0
+                        ? ticket.equipments
+                            .map((e) => (e.serial_number ? `${e.name} — ${e.serial_number}` : e.name))
+                            .join(", ")
                         : null
                     }
                   />
@@ -1364,16 +1364,23 @@ export default function TicketDetailPage() {
                 <span className="text-slate-500 font-normal italic text-xs">Não informado</span>
               )}
             </PropRow>
-            <PropRow icon={IC.Cpu} label="Equipamento">
-              {ticket.equipment_name ? (
-                <>
-                  <span className="block break-words">{ticket.equipment_name}</span>
-                  {ticket.equipment_serial && (
-                    <span className="block font-mono text-xs text-slate-500">
-                      {ticket.equipment_serial}
-                    </span>
-                  )}
-                </>
+            <PropRow
+              icon={IC.Cpu}
+              label={plural(ticket.equipments.length, "Equipamento", "Equipamentos")}
+            >
+              {ticket.equipments.length > 0 ? (
+                <div className="space-y-1.5">
+                  {ticket.equipments.map((e) => (
+                    <div key={e.id}>
+                      <span className="block break-words">{e.name}</span>
+                      {e.serial_number && (
+                        <span className="block font-mono text-xs text-slate-500">
+                          {e.serial_number}
+                        </span>
+                      )}
+                    </div>
+                  ))}
+                </div>
               ) : (
                 <span className="text-slate-500 font-normal italic text-xs">Não informado</span>
               )}

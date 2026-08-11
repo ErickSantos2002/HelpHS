@@ -43,6 +43,7 @@ from app.models.models import (
     User,
     UserRole,
     UserStatus,
+    ticket_equipments,
     ticket_tags,
 )
 from app.schemas.ticket import (
@@ -230,20 +231,56 @@ def _serialize_ticket(ticket: Ticket) -> TicketResponse:
 async def _fill_product_and_equipment(
     response: TicketResponse, ticket: Ticket, db: AsyncSession
 ) -> None:
-    """Preenche nome do produto e do equipamento — o ticket só guarda os ids."""
+    """Preenche o nome do produto — o ticket só guarda o id."""
     if ticket.product_id:
         produto = await db.get(Product, ticket.product_id)
         response.product_name = produto.name if produto else None
 
-    if ticket.equipment_id:
-        equipamento = await db.get(Equipment, ticket.equipment_id)
-        if equipamento:
-            response.equipment_name = equipamento.name
-            response.equipment_serial = equipamento.serial_number
-            # Equipamento sem produto informado no chamado: usa o do cadastro
-            if not response.product_name and equipamento.product_id:
-                produto = await db.get(Product, equipamento.product_id)
-                response.product_name = produto.name if produto else None
+    # Sem produto informado no chamado, usa o do primeiro equipamento: é o que
+    # o cliente responderia se perguntassem "de qual produto é esse chamado?".
+    if not response.product_name and ticket.equipments:
+        product_id = ticket.equipments[0].product_id
+        if product_id:
+            produto = await db.get(Product, product_id)
+            response.product_name = produto.name if produto else None
+
+
+async def _set_ticket_equipments(
+    db: AsyncSession,
+    ticket: Ticket,
+    equipment_ids: list[uuid.UUID],
+    actor: User,
+) -> None:
+    """
+    Substitui os equipamentos do chamado, recusando id inexistente.
+
+    Um cliente só vincula equipamento que seja dele — sem isso, informar ids
+    aleatórios revelaria o número de série de aparelhos de outras empresas na
+    resposta da API.
+    """
+    if not equipment_ids:
+        ticket.equipments = []
+        return
+
+    unicos = list(dict.fromkeys(equipment_ids))
+    rows = await db.execute(select(Equipment).where(Equipment.id.in_(unicos)))
+    encontrados = list(rows.scalars().all())
+
+    if len(encontrados) != len(unicos):
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail="Um ou mais equipamentos informados não existem.",
+        )
+
+    if actor.role == UserRole.client:
+        alheios = [e for e in encontrados if e.owner_id != actor.id]
+        if alheios:
+            raise HTTPException(
+                status_code=status.HTTP_403_FORBIDDEN,
+                detail="Só é possível vincular equipamentos que pertencem a você.",
+            )
+
+    ticket.equipments = encontrados
 
 
 def _record_history(
@@ -309,7 +346,6 @@ async def create_ticket(
             status=TicketStatus.open,
             creator_id=actor.id,
             product_id=body.product_id,
-            equipment_id=body.equipment_id,
             client_observation=body.client_observation,
             sla_response_breach=False,
             sla_resolve_breach=False,
@@ -322,6 +358,7 @@ async def create_ticket(
         if sla_config:
             apply_sla_config(ticket, sla_config, ts)
         db.add(ticket)
+        await _set_ticket_equipments(db, ticket, body.equipment_ids, actor)
         _record_history(db, ticket.id, actor.id, "created", None, "open")
         _audit(db, AuditAction.create, actor.id, ticket.id)
         await notify(
@@ -414,8 +451,11 @@ async def list_tickets(
         base = base.where(
             Ticket.title.ilike(termo)
             | Ticket.protocol.ilike(termo)
-            | Ticket.equipment_id.in_(
-                select(Equipment.id).where(Equipment.serial_number.ilike(termo))
+            # Basta um dos equipamentos do chamado bater com o número de série
+            | Ticket.id.in_(
+                select(ticket_equipments.c.ticket_id)
+                .join(Equipment, Equipment.id == ticket_equipments.c.equipment_id)
+                .where(Equipment.serial_number.ilike(termo))
             )
         )
 
@@ -444,8 +484,10 @@ async def list_tickets(
         user_rows = await db.execute(select(User.id, User.name).where(User.id.in_(assignee_ids)))
         name_map = {row.id: row.name for row in user_rows}
 
-    # Produtos e equipamentos em lote — uma consulta cada, não uma por ticket
+    # Produtos em lote — uma consulta só, não uma por ticket. Entram também os
+    # produtos dos equipamentos, usados quando o chamado não informou produto.
     product_ids = {t.product_id for t in tickets if t.product_id}
+    product_ids |= {e.product_id for t in tickets for e in t.equipments if e.product_id}
     product_map: dict[uuid.UUID, str] = {}
     if product_ids:
         product_rows = await db.execute(
@@ -453,22 +495,14 @@ async def list_tickets(
         )
         product_map = {row.id: row.name for row in product_rows}
 
-    equipment_ids = {t.equipment_id for t in tickets if t.equipment_id}
-    equipment_map: dict[uuid.UUID, tuple[str, str | None]] = {}
-    if equipment_ids:
-        equip_rows = await db.execute(
-            select(Equipment.id, Equipment.name, Equipment.serial_number).where(
-                Equipment.id.in_(equipment_ids)
-            )
-        )
-        equipment_map = {row.id: (row.name, row.serial_number) for row in equip_rows}
-
+    # Os equipamentos vêm junto pelo lazy="selectin" do relacionamento: uma
+    # consulta para a página inteira, não uma por chamado.
     def _serialize(t: Ticket) -> TicketResponse:
         r = _serialize_ticket(t)
         r.assignee_name = name_map.get(t.assignee_id) if t.assignee_id else None
         r.product_name = product_map.get(t.product_id) if t.product_id else None
-        if t.equipment_id and t.equipment_id in equipment_map:
-            r.equipment_name, r.equipment_serial = equipment_map[t.equipment_id]
+        if not r.product_name and t.equipments and t.equipments[0].product_id:
+            r.product_name = product_map.get(t.equipments[0].product_id)
         if actor.role == UserRole.client:
             r.technician_notes = None
         return r
@@ -527,6 +561,23 @@ async def update_ticket(
     else:
         # Admin can update any field
         changes = body.model_dump(exclude_unset=True)
+
+    # Os equipamentos vivem numa tabela de ligação, não numa coluna do ticket —
+    # o setattr do laço abaixo não daria conta.
+    novos_equipamentos = changes.pop("equipment_ids", None)
+    if novos_equipamentos is not None:
+        antes = sorted(e.name for e in ticket.equipments)
+        await _set_ticket_equipments(db, ticket, novos_equipamentos, actor)
+        depois = sorted(e.name for e in ticket.equipments)
+        if antes != depois:
+            _record_history(
+                db,
+                ticket.id,
+                actor.id,
+                "equipamentos",
+                ", ".join(antes) or None,
+                ", ".join(depois) or None,
+            )
 
     for field, new_val in changes.items():
         old_val = getattr(ticket, field)

@@ -1,6 +1,14 @@
 import { api } from "./api";
 import type { Tag } from "./tagService";
 
+/** Equipamento como ele aparece dentro do chamado — não é a ficha completa. */
+export interface TicketEquipment {
+  id: string;
+  name: string;
+  serial_number: string | null;
+  product_id: string | null;
+}
+
 export interface Ticket {
   id: string;
   protocol: string;
@@ -25,7 +33,7 @@ export interface Ticket {
   sla_response_breach: boolean;
   sla_resolve_breach: boolean;
   product_id: string | null;
-  equipment_id: string | null;
+  equipments: TicketEquipment[];
   closed_at: string | null;
   resolved_at: string | null;
   auto_closed: boolean;
@@ -35,8 +43,6 @@ export interface Ticket {
   reopen_deadline: string | null;
   assignee_name: string | null;
   product_name: string | null;
-  equipment_name: string | null;
-  equipment_serial: string | null;
   technician_notes: string | null;
   ai_classification: string | null;
   ai_confidence: number | null;
@@ -132,7 +138,7 @@ export interface TicketCreatePayload {
   priority: "critical" | "high" | "medium" | "low";
   category: string;
   product_id?: string | null;
-  equipment_id?: string | null;
+  equipment_ids?: string[];
   client_observation?: string | null;
 }
 
@@ -142,7 +148,8 @@ export interface TicketUpdatePayload {
   priority?: "critical" | "high" | "medium" | "low";
   category?: string;
   product_id?: string | null;
-  equipment_id?: string | null;
+  /** Omitir mantém os equipamentos atuais; lista vazia desvincula todos. */
+  equipment_ids?: string[];
   technician_notes?: string | null;
 }
 

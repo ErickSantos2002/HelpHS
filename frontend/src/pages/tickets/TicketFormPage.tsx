@@ -11,6 +11,7 @@ import {
 import { getMyEquipment, type Equipment } from "../../services/equipmentService";
 import { uploadAttachments } from "../../services/attachmentService";
 import { toastApiError } from "../../lib/toastError";
+import { cn, plural } from "../../lib/utils";
 import {
   createTicket,
   getTicket,
@@ -20,13 +21,19 @@ import {
 
 // ── Schema ────────────────────────────────────────────────────
 
+/** Espelha MAX_EQUIPMENTS_PER_TICKET do backend — passar disso volta 422. */
+const MAX_EQUIPAMENTOS = 20;
+
 const schema = z.object({
   title: z.string().min(5, "Mínimo 5 caracteres").max(200, "Título muito longo"),
   description: z.string().min(10, "Mínimo 10 caracteres").max(5000, "Descrição muito longa"),
   priority: z.enum(["critical", "high", "medium", "low"]),
   category: z.string().min(1, "Selecione uma categoria"),
   product_id: z.string().optional(),
-  equipment_id: z.string().optional(),
+  equipment_ids: z
+    .array(z.string())
+    .max(MAX_EQUIPAMENTOS, `Máximo de ${MAX_EQUIPAMENTOS} equipamentos por chamado`)
+    .default([]),
   client_observation: z.string().max(2000, "Observação muito longa").optional(),
 });
 
@@ -297,8 +304,8 @@ function PreviewRow({ label, children }: { label: string; children: React.ReactN
 
 // ── Preview step ──────────────────────────────────────────────
 
-function PreviewStep({ values, files, productName, equipmentName, onBack, onSubmit, submitting, isEdit }: {
-  values: FormValues; files: File[]; productName?: string; equipmentName?: string;
+function PreviewStep({ values, files, productName, equipmentNames, onBack, onSubmit, submitting, isEdit }: {
+  values: FormValues; files: File[]; productName?: string; equipmentNames: string[];
   onBack: () => void; onSubmit: () => void; submitting: boolean; isEdit: boolean;
 }) {
   const pri = PRIORITY_CONFIG[values.priority];
@@ -319,7 +326,15 @@ function PreviewStep({ values, files, productName, equipmentName, onBack, onSubm
               </span>
             </PreviewRow>
             {productName && <PreviewRow label="Produto">{productName}</PreviewRow>}
-            {equipmentName && <PreviewRow label="Equipamento">{equipmentName}</PreviewRow>}
+            {equipmentNames.length > 0 && (
+              <PreviewRow label={plural(equipmentNames.length, "Equipamento", "Equipamentos")}>
+                <ul className="space-y-0.5">
+                  {equipmentNames.map((nome) => (
+                    <li key={nome} className="text-slate-300">{nome}</li>
+                  ))}
+                </ul>
+              </PreviewRow>
+            )}
             <PreviewRow label="Descrição">
               <p className="whitespace-pre-wrap leading-relaxed text-slate-300">{values.description}</p>
             </PreviewRow>
@@ -376,7 +391,7 @@ export default function TicketFormPage() {
 
   const { register, handleSubmit, watch, setValue, reset, formState: { errors } } = useForm<FormValues>({
     resolver: zodResolver(schema),
-    defaultValues: { priority: "medium", category: "", product_id: "", equipment_id: "" },
+    defaultValues: { priority: "medium", category: "", product_id: "", equipment_ids: [] },
   });
 
   const selectedProductId = watch("product_id");
@@ -391,8 +406,11 @@ export default function TicketFormPage() {
     ]).finally(() => setLoadingProducts(false));
   }, []);
 
+  // Trocar de produto descarta a seleção anterior: os aparelhos listados são
+  // os daquele produto, e manter os antigos deixaria no chamado equipamento
+  // que sumiu da lista.
   useEffect(() => {
-    setValue("equipment_id", "");
+    setValue("equipment_ids", []);
     if (selectedProductId) {
       setEquipments(allMyEquipments.filter((e) => e.product_id === selectedProductId));
     } else {
@@ -405,16 +423,42 @@ export default function TicketFormPage() {
     getTicket(id)
       .then((t) => {
         setExistingTicket(t);
-        reset({ title: t.title, description: "", priority: t.priority, category: t.category, product_id: t.product_id ?? "", equipment_id: t.equipment_id ?? "" });
+        reset({
+          title: t.title,
+          description: "",
+          priority: t.priority,
+          category: t.category,
+          product_id: t.product_id ?? "",
+          equipment_ids: t.equipments.map((e) => e.id),
+        });
       })
       .catch(() => navigate("/tickets"))
       .finally(() => setLoadingTicket(false));
   }, [id, isEdit, navigate, reset]);
 
   const productOptions = products.map((p) => ({ value: p.id, label: p.name }));
-  const equipmentOptions = equipments.map((e) => ({ value: e.id, label: e.serial_number ? `${e.name} — ${e.serial_number}` : e.name }));
   const selectedProduct = products.find((p) => p.id === currentValues.product_id);
-  const selectedEquipment = equipments.find((e) => e.id === currentValues.equipment_id);
+  const selectedEquipmentIds = currentValues.equipment_ids ?? [];
+  const selectedEquipments = equipments.filter((e) => selectedEquipmentIds.includes(e.id));
+  const selecionaveis = equipments.slice(0, MAX_EQUIPAMENTOS);
+  const todosMarcados =
+    selecionaveis.length > 0 && selecionaveis.every((e) => selectedEquipmentIds.includes(e.id));
+  const noLimite = selectedEquipmentIds.length >= MAX_EQUIPAMENTOS;
+
+  function toggleEquipment(equipmentId: string) {
+    const atual = currentValues.equipment_ids ?? [];
+    if (!atual.includes(equipmentId) && atual.length >= MAX_EQUIPAMENTOS) return;
+    const proximo = atual.includes(equipmentId)
+      ? atual.filter((id) => id !== equipmentId)
+      : [...atual, equipmentId];
+    setValue("equipment_ids", proximo, { shouldValidate: true });
+  }
+
+  function toggleAllEquipments() {
+    setValue("equipment_ids", todosMarcados ? [] : selecionaveis.map((e) => e.id), {
+      shouldValidate: true,
+    });
+  }
 
   async function submitForm() {
     setSubmitting(true);
@@ -426,7 +470,7 @@ export default function TicketFormPage() {
         priority: currentValues.priority,
         category: currentValues.category,
         product_id: currentValues.product_id || null,
-        equipment_id: currentValues.equipment_id || null,
+        equipment_ids: currentValues.equipment_ids ?? [],
       };
       const ticket = isEdit && id
         ? await updateTicket(id, base)
@@ -494,7 +538,9 @@ export default function TicketFormPage() {
           values={currentValues}
           files={files}
           productName={selectedProduct?.name}
-          equipmentName={selectedEquipment?.name}
+          equipmentNames={selectedEquipments.map((e) =>
+            e.serial_number ? `${e.name} — ${e.serial_number}` : e.name,
+          )}
           onBack={() => setStep("form")}
           onSubmit={submitForm}
           submitting={submitting}
@@ -528,24 +574,78 @@ export default function TicketFormPage() {
               />
             </FormSection>
 
-            {/* Produto / Equipamento */}
-            <FormSection title="Produto e equipamento (opcional)">
-              <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
-                <FormDropdown
-                  label="Produto"
-                  value={currentValues.product_id ?? ""}
-                  onChange={(v) => setValue("product_id", v, { shouldValidate: true })}
-                  options={productOptions}
-                  placeholder="Nenhum (opcional)"
-                />
-                <FormDropdown
-                  label="Equipamento"
-                  value={currentValues.equipment_id ?? ""}
-                  onChange={(v) => setValue("equipment_id", v, { shouldValidate: true })}
-                  options={equipmentOptions}
-                  placeholder={selectedProductId ? "Nenhum (opcional)" : "Selecione um produto primeiro"}
-                  disabled={!selectedProductId || equipmentOptions.length === 0}
-                />
+            {/* Produto / Equipamentos */}
+            <FormSection title="Produto e equipamentos (opcional)">
+              <FormDropdown
+                label="Produto"
+                value={currentValues.product_id ?? ""}
+                onChange={(v) => setValue("product_id", v, { shouldValidate: true })}
+                options={productOptions}
+                placeholder="Nenhum (opcional)"
+              />
+
+              <div className="space-y-2">
+                <div className="flex items-center justify-between gap-3">
+                  <label className="text-sm font-medium text-slate-300">Equipamentos</label>
+                  {equipments.length > 1 && (
+                    <button
+                      type="button"
+                      onClick={toggleAllEquipments}
+                      className="text-xs font-medium text-primary hover:underline cursor-pointer"
+                    >
+                      {todosMarcados
+                        ? "Limpar seleção"
+                        : `Selecionar todos (${Math.min(equipments.length, MAX_EQUIPAMENTOS)})`}
+                    </button>
+                  )}
+                </div>
+                {!selectedProductId ? (
+                  <p className="text-sm text-slate-500">Selecione um produto primeiro.</p>
+                ) : equipments.length === 0 ? (
+                  <p className="text-sm text-slate-500">
+                    Você não tem equipamentos cadastrados para este produto.
+                  </p>
+                ) : (
+                  <>
+                    <div className="flex flex-wrap gap-2">
+                      {equipments.map((e) => {
+                        const marcado = selectedEquipmentIds.includes(e.id);
+                        const bloqueado = !marcado && noLimite;
+                        return (
+                          <button
+                            key={e.id}
+                            type="button"
+                            onClick={() => toggleEquipment(e.id)}
+                            aria-pressed={marcado}
+                            disabled={bloqueado}
+                            title={bloqueado ? `Máximo de ${MAX_EQUIPAMENTOS} por chamado` : undefined}
+                            className={cn(
+                              "rounded-lg border px-3 py-2 text-left text-sm transition-colors",
+                              bloqueado ? "cursor-not-allowed opacity-40" : "cursor-pointer",
+                              marcado
+                                ? "border-primary bg-primary/15 text-slate-100"
+                                : "border-border text-slate-400 hover:border-slate-500",
+                            )}
+                          >
+                            <span className="font-medium">{e.name}</span>
+                            {e.serial_number && (
+                              <span className="ml-2 font-mono text-xs text-slate-500">
+                                {e.serial_number}
+                              </span>
+                            )}
+                          </button>
+                        );
+                      })}
+                    </div>
+                    <p className="text-xs text-slate-500">
+                      {noLimite
+                        ? `Máximo de ${MAX_EQUIPAMENTOS} aparelhos por chamado. Para os demais, abra um segundo chamado.`
+                        : selectedEquipmentIds.length > 0
+                          ? `${selectedEquipmentIds.length} ${plural(selectedEquipmentIds.length, "aparelho selecionado", "aparelhos selecionados")}. Um mesmo chamado pode cobrir vários.`
+                          : "Se o problema atinge mais de um aparelho, marque todos — não é preciso abrir um chamado para cada."}
+                    </p>
+                  </>
+                )}
               </div>
             </FormSection>
 

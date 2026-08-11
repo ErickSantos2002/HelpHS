@@ -301,7 +301,9 @@ class Equipment(Base):
     owner: Mapped["User | None"] = relationship(
         "User", back_populates="equipments", foreign_keys=[owner_id]
     )
-    tickets: Mapped[list["Ticket"]] = relationship(back_populates="equipment")
+    tickets: Mapped[list["Ticket"]] = relationship(
+        secondary="ticket_equipments", back_populates="equipments"
+    )
 
 
 kb_article_products = Table(
@@ -340,6 +342,27 @@ ticket_tags = Table(
 )
 
 
+# Um chamado pode envolver vários aparelhos do cliente — antes era preciso
+# abrir um chamado por equipamento ou citar os seriais na descrição, onde a
+# busca não alcança.
+ticket_equipments = Table(
+    "ticket_equipments",
+    Base.metadata,
+    Column(
+        "ticket_id",
+        UUID(as_uuid=True),
+        ForeignKey("tickets.id", ondelete="CASCADE"),
+        primary_key=True,
+    ),
+    Column(
+        "equipment_id",
+        UUID(as_uuid=True),
+        ForeignKey("equipments.id", ondelete="CASCADE"),
+        primary_key=True,
+    ),
+)
+
+
 class Ticket(Base):
     """Tickets de suporte (entidade principal)"""
 
@@ -368,9 +391,6 @@ class Ticket(Base):
     )
     product_id: Mapped[uuid.UUID | None] = mapped_column(
         UUID(as_uuid=True), ForeignKey("products.id")
-    )
-    equipment_id: Mapped[uuid.UUID | None] = mapped_column(
-        UUID(as_uuid=True), ForeignKey("equipments.id")
     )
 
     # SLA
@@ -427,7 +447,6 @@ class Ticket(Base):
         back_populates="assigned_tickets", foreign_keys=[assignee_id]
     )
     product: Mapped["Product | None"] = relationship(back_populates="tickets")
-    equipment: Mapped["Equipment | None"] = relationship(back_populates="tickets")
     sla_config: Mapped["SLAConfig | None"] = relationship(back_populates="tickets")
     histories: Mapped[list["TicketHistory"]] = relationship(
         back_populates="ticket", cascade="all, delete-orphan"
@@ -443,6 +462,9 @@ class Ticket(Base):
     )
     tags: Mapped[list["Tag"]] = relationship(
         secondary=ticket_tags, back_populates="tickets", lazy="selectin"
+    )
+    equipments: Mapped[list["Equipment"]] = relationship(
+        secondary=ticket_equipments, back_populates="tickets", lazy="selectin"
     )
     ticket_notes: Mapped[list["TicketNote"]] = relationship(
         back_populates="ticket", cascade="all, delete-orphan"
