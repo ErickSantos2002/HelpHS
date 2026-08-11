@@ -30,10 +30,12 @@ const schema = z.object({
   priority: z.enum(["critical", "high", "medium", "low"]),
   category: z.string().min(1, "Selecione uma categoria"),
   product_id: z.string().optional(),
+  // Sem .default([]): o default faz o zod gerar um tipo de entrada opcional e
+  // um de saída obrigatório, e o resolver do react-hook-form recusa os dois
+  // como incompatíveis. O valor inicial vem de defaultValues.
   equipment_ids: z
     .array(z.string())
-    .max(MAX_EQUIPAMENTOS, `Máximo de ${MAX_EQUIPAMENTOS} equipamentos por chamado`)
-    .default([]),
+    .max(MAX_EQUIPAMENTOS, `Máximo de ${MAX_EQUIPAMENTOS} equipamentos por chamado`),
   client_observation: z.string().max(2000, "Observação muito longa").optional(),
 });
 

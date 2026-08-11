@@ -404,6 +404,16 @@ Decidido em 05/08/2026 manter assim por ora e revisar depois. Para ligar, basta
 subir um serviço `clamav/clamav:latest` e apontar `CLAMAV_HOST`/`CLAMAV_PORT` —
 o código já está pronto, não precisa de alteração.
 
+### `tsc --noEmit` no frontend dá falso verde
+
+O `frontend/tsconfig.json` é um *solution file* (`"files": []` + references), então
+`npx tsc --noEmit` **termina sem saída mesmo com erros de tipo**. Quem confiar
+nele passa direto por erro que derruba o build do EasyPanel.
+
+Para validar de verdade: **`npm run build`** (`tsc -b && vite build`), o mesmo
+comando do Dockerfile. Aconteceu em 11/08/2026 — um deploy quebrou com um
+import faltando e um conflito de tipos que o `--noEmit` não acusou.
+
 ### Cobertura de testes desigual
 
 A suíte do backend está em ~80%, mas concentrada. Os pontos fracos são
