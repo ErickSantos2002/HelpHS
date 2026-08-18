@@ -13,6 +13,7 @@ from jose import JWTError
 from loguru import logger
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
+from starlette.concurrency import run_in_threadpool
 
 from app.core.config import get_settings
 from app.core.database import get_db
@@ -361,24 +362,28 @@ async def login(
     result = await db.execute(select(User).where(User.email == body.email))
     user: User | None = result.scalar_one_or_none()
 
-    credenciais_invalidas = HTTPException(
-        status_code=status.HTTP_401_UNAUTHORIZED,
-        detail="E-mail ou senha incorretos.",
-        headers={"WWW-Authenticate": "Bearer"},
+    # Duas coisas acontecem nesta única verificação:
+    #
+    # 1. E-mail inexistente é conferido contra um hash descartável, para pagar o
+    #    mesmo custo de bcrypt de um e-mail cadastrado — sem isso o tempo de
+    #    resposta denuncia quais contas existem.
+    # 2. O bcrypt roda numa thread separada. Ele é síncrono e custa ~250 ms:
+    #    executado direto aqui, travaria o event loop e, com ele, todas as
+    #    requisições em voo. Mesmo motivo do run_in_executor em
+    #    app/services/storage.py.
+    password_ok = await run_in_threadpool(
+        verify_password,
+        body.password,
+        user.password if user else DUMMY_PASSWORD_HASH,
     )
 
-    if user is None:
-        # Confere a senha contra um hash descartável só para pagar o mesmo custo
-        # de bcrypt de um e-mail que existe. Sem isso o `or` curto-circuitava, a
-        # resposta voltava quase instantânea e o tempo denunciava quais e-mails
-        # têm conta. O resultado é irrelevante e por isso descartado.
-        verify_password(body.password, DUMMY_PASSWORD_HASH)
+    if user is None or not password_ok:
         logger.warning(f"Failed login attempt for email={body.email}")
-        raise credenciais_invalidas
-
-    if not verify_password(body.password, user.password):
-        logger.warning(f"Failed login attempt for email={body.email}")
-        raise credenciais_invalidas
+        raise HTTPException(
+            status_code=status.HTTP_401_UNAUTHORIZED,
+            detail="E-mail ou senha incorretos.",
+            headers={"WWW-Authenticate": "Bearer"},
+        )
 
     if user.status != UserStatus.active:
         raise HTTPException(

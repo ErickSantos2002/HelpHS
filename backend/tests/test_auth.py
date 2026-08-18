@@ -3,6 +3,7 @@ Tests for JWT authentication endpoints.
 All database and Redis calls are mocked — no external dependencies needed.
 """
 
+import threading
 import uuid
 from unittest.mock import AsyncMock, MagicMock, patch
 
@@ -243,6 +244,40 @@ async def test_login_unknown_user_still_verifies_password(client_no_user):
     assert verificacao.called, (
         "com usuário inexistente o bcrypt precisa rodar assim mesmo; sem isso o "
         "tempo de resposta denuncia quais e-mails têm conta"
+    )
+
+
+@pytest.mark.asyncio
+async def test_login_verifies_password_off_the_event_loop(client_no_user):
+    """
+    O bcrypt não pode rodar no event loop.
+
+    `verify_password` é síncrono e custa ~250 ms; executado direto no endpoint
+    async, ele trava o loop e, com ele, todas as outras requisições em voo — o
+    hash de custo igualado (contra enumeração por tempo) estendeu esse bloqueio
+    também ao caminho do e-mail inexistente.
+
+    O teste não mede tempo: compara a thread onde a verificação rodou com a
+    thread do event loop.
+    """
+    thread_do_loop = threading.get_ident()
+    threads_da_verificacao: list[int] = []
+
+    def _verificacao_falsa(*_args, **_kwargs):
+        threads_da_verificacao.append(threading.get_ident())
+        return False
+
+    with patch("app.routers.auth.verify_password", new=_verificacao_falsa):
+        response = await client_no_user.post(
+            "/api/v1/auth/login",
+            json={"email": "nobody@test.com", "password": ADMIN_PASSWORD},
+        )
+
+    assert response.status_code == 401
+    assert threads_da_verificacao, "a verificação de senha nem foi executada"
+    assert thread_do_loop not in threads_da_verificacao, (
+        "o bcrypt rodou na thread do event loop — cada login bloqueia a API "
+        "inteira por ~250 ms"
     )
 
 
