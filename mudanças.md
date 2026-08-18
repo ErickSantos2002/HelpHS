@@ -41,7 +41,9 @@ Varredura estática dos 17 routers do backend:
 
 ### Verificação
 
-- Backend: **373 testes passando**, cobertura **81,02%** (gate de 80% mantido).
+- Backend: **395 testes passando**, cobertura **81,22%** (gate de 80% mantido).
+  `pytest` roda verde **sem variável de ambiente no comando** desde o
+  `e4ec7f2`.
 - Frontend: **192 testes passando**, `tsc` e `ruff` limpos.
 - Todo conserto veio acompanhado do teste que o prova.
 
@@ -92,18 +94,57 @@ para a API, então o navegador fala com outro domínio e o CORS é obrigatório 
 com o default, o front ficaria bloqueado sem nenhum erro no backend.
 
 > ⚠️ **Dependência de ambiente no deploy:** o boot de produção agora depende de
-> **`CORS_ORIGINS`** (com o domínio real do front) e de **`APP_ENV`**. Hoje as
-> duas existem no EasyPanel — confirmado antes da mudança —, mas **recriar o
-> serviço sem elas derruba a API na subida**, com o container reiniciando em
-> loop. Se algum dia o serviço for recriado do zero, configure as duas antes do
-> primeiro boot.
+> **`CORS_ORIGINS`** (com o domínio real do front), de **`FRONTEND_URL`** e de
+> **`APP_ENV`**. Hoje as duas primeiras existem no EasyPanel — confirmado antes
+> da mudança —, mas **recriar o serviço sem elas derruba a API na subida**, com
+> o container reiniciando em loop. Se algum dia o serviço for recriado do zero,
+> configure-as antes do primeiro boot.
+>
+> Vale também para **migração avulsa**: `alembic/env.py` instancia `Settings`,
+> então rodar `alembic upgrade` num shell de produção sem essas variáveis falha
+> do mesmo jeito — não é só o boot da API.
 
 Registrado como possibilidade futura, sem ação nesta rodada: o
 `CORSMiddleware` usa `allow_credentials=True`, dispensável porque a
 autenticação é por Bearer token no header, não por cookie. Remover reduziria
 superfície, mas mexe em comportamento de rede.
 
+### Correções da revisão de código (`e4ec7f2` … `53312aa`)
+
+Um `/code-review` profundo sobre os commits locais confirmou que os fixes
+funcionam como testados, mas achou bordas que valia fechar antes do push,
+enquanto o histórico ainda era local.
+
+| Commit | O que foi corrigido |
+|---|---|
+| `e4ec7f2` | `test:` **suíte dependia do `.env` local** — `pytest` na máquina de quem desenvolve pegava `APP_ENV=development` e subia o rate limiter **ligado**, fazendo os testes de login competirem com o limite de 5/15min. Verde no CI, intermitente local. Agora um `conftest.py` fixa o ambiente antes dos imports, e `pytest` sem env explícito roda verde |
+| `72f31bc` | `fix:` **bcrypt no event loop** — o mais sério: `verify_password` é síncrono (~250 ms) e travava o loop, com todas as requisições em voo; o hash de custo igualado tinha estendido o bloqueio ao caminho do e-mail inexistente. Vai para `run_in_threadpool`, e os dois pontos de verificação viraram um |
+| `ef636fe` | `fix:` **cinco bordas do guard de produção** — lista vazia passava (`any()` sobre lista vazia é falso); `APP_ENV=Production`/`prod` pulava **todas** as validações, inclusive a da `SECRET_KEY`; o formato JSON não fazia strip e estourava `JSONDecodeError` cru; `localhost` como substring barrava domínio legítimo e deixava passar `[::1]`/`0.0.0.0` (agora compara o host via `urlparse`); e `FRONTEND_URL` ganhou o mesmo guard |
+| `9634d7e` | `test:` **paridade de custo do hash descartável** — os 12 rounds batiam por coincidência (`settings.bcrypt_rounds` nunca foi aplicado ao `pwd_context`). Se o dummy ficar mais barato, a enumeração por tempo reabre sem nenhum teste perceber; agora é contrato |
+| `2ad773c` | `refactor:` **recusa de equipamento alheio unificada** — o check de dono estava inline em três endpoints, e o 403 mais novo divergia no texto. Vira `_check_equipment_owner`, no espírito do `_check_ticket_access`, sem ampliar permissão: `/equipment/my` segue estrito até para admin |
+| `53312aa` | `test:` limpeza — harness duplicado que pagava dois bcrypts reais, e mock que decidia o retorno pela ordem das chamadas |
+
 ### Fila para a próxima rodada
+
+Decisões de produto levantadas pela revisão, registradas sem correção:
+
+- **Unicidade global de número de série** — o `409` do `POST`/`PATCH
+  /equipment/my` responde por seriais de qualquer dono, então serve de oráculo:
+  dá para descobrir se um serial existe no sistema. Decidir primeiro a regra de
+  negócio: serial é único global, ou a unicidade deve ser por dono?
+- **Equipamento sem dono fica órfão** — staff cria equipamento sem `owner_id` e
+  nenhum schema permite atribuí-lo depois; com o escopo por dono, ele fica
+  invisível ao cliente real. Precisa de endpoint e tela de atribuição — é
+  feature, não correção.
+- **Oráculo de timing em `forgot-password`/`resend-verification`** — o envio de
+  e-mail é síncrono e só acontece no ramo da conta existente, então o tempo de
+  resposta vai denunciar quais e-mails têm conta **quando o SMTP entrar**.
+  Correção natural: `BackgroundTasks`. Agrupar com a rodada do SMTP/#3.1.
+- **`hash_password` e `verify_password` fora do login** (achado desta rodada,
+  não da revisão) — `register`, `POST /users` e `change-password` ainda chamam
+  bcrypt direto no endpoint async, com o mesmo bloqueio de event loop que o
+  `72f31bc` resolveu no login. Fora do escopo aprovado; mesma correção
+  (`run_in_threadpool`) se aprovado.
 
 - 🟢 **#3.1 Register neutro — aprovado em desenho, aguardando SMTP em
   produção.** O SMTP ainda não está configurado, e sem ele a resposta neutra

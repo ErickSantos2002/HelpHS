@@ -22,7 +22,24 @@ Datas em DD/MM/AAAA.
 - Boot em `APP_ENV=production` passa a exigir `CORS_ORIGINS` com o domínio real
   do front e a recusar `*` (`8ab84c8`) — antes, a ausência da variável fazia a
   API subir em silêncio com origem de desenvolvimento. **Recriar o serviço sem
-  `CORS_ORIGINS` e `APP_ENV` impede o boot.**
+  `CORS_ORIGINS`, `FRONTEND_URL` e `APP_ENV` impede o boot** (vale também para
+  `alembic upgrade` avulso, que instancia as mesmas configurações).
+- Guard de produção endurecido (`ef636fe`): lista de origens vazia passava a
+  valer como configuração válida; `APP_ENV=Production`/`prod` desligava **todas**
+  as validações, inclusive a da `SECRET_KEY`; `[::1]` e `0.0.0.0` escapavam do
+  filtro de loopback enquanto um domínio legítimo contendo "localhost" era
+  barrado; `FRONTEND_URL` — que monta os links dos e-mails — passou a ser
+  validada igual.
+- Paridade de custo do hash descartável do login virou contrato de teste
+  (`9634d7e`): se ele ficar mais barato que os hashes reais, a enumeração por
+  tempo reabre.
+
+### Desempenho
+
+- Login não bloqueia mais o event loop (`72f31bc`): o bcrypt, síncrono e de
+  ~250 ms, passou a rodar em thread separada — antes, cada tentativa de login
+  travava todas as requisições em voo, e a defesa contra enumeração por tempo
+  havia estendido esse custo ao caminho do e-mail inexistente.
 - Equipamentos escopados por dono para o perfil cliente (`724322f`):
   `GET /products/{id}/equipments` passa a filtrar por `owner_id` e
   `GET /equipments/{id}` devolve 403 para equipamento de outro dono — ou sem
@@ -32,6 +49,10 @@ Datas em DD/MM/AAAA.
 ### CI
 - Vitest passou a rodar no job do frontend, entre o typecheck e o build
   (`1583b8b`).
+- Suíte do backend deixou de depender do `.env` local (`e4ec7f2`): um
+  `conftest.py` fixa `APP_ENV=testing` antes dos imports, então `pytest` roda
+  verde sem variável no comando. Antes, quem rodasse localmente subia o rate
+  limiter ligado e via falhas que o CI não tinha.
 
 ### Corrigido
 - Build do frontend quebrado por typecheck que não checava nada (`882662b`).
