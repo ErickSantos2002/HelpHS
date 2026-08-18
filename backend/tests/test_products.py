@@ -377,11 +377,13 @@ async def test_list_equipments(patch_redis):
 
 @pytest.mark.asyncio
 async def test_get_equipment(patch_redis):
+    # Ator staff: equipamento sem dono não é mais visível ao cliente — ver os
+    # testes de escopo por dono no fim do arquivo
     from app.core.database import get_db
 
     equip = _mock_equipment()
     app.dependency_overrides[get_db] = _db_override(equip)
-    _override_user(_CLIENT)
+    _override_user(_ADMIN)
 
     async with AsyncClient(transport=ASGITransport(app=app), base_url="http://test") as c:
         resp = await c.get(f"/api/v1/equipments/{_EQUIP_ID}")
@@ -400,3 +402,148 @@ async def test_delete_equipment_soft(patch_redis):
     async with AsyncClient(transport=ASGITransport(app=app), base_url="http://test") as c:
         resp = await c.delete(f"/api/v1/equipments/{_EQUIP_ID}")
     assert resp.status_code == 204
+
+
+# ═══════════════════════════════════════════════════════════════
+# ESCOPO POR DONO — o cliente só enxerga o próprio equipamento
+# ═══════════════════════════════════════════════════════════════
+#
+# Sem esse escopo, qualquer autenticado lia equipamento (com número de série)
+# de qualquer outro cliente. Staff (admin/técnico) continua vendo tudo, porque
+# precisa para dar suporte.
+
+
+def _db_capturando_queries(product, equipments, count=1):
+    """
+    Mock de sessão que registra as queries emitidas.
+
+    O banco é mockado, então um `.where()` a mais não muda o resultado — para a
+    listagem, a prova do escopo é a query emitida conter o filtro por dono.
+    """
+    queries: list[str] = []
+    idx = 0
+
+    async def _execute(stmt, *args, **kwargs):
+        nonlocal idx
+        queries.append(str(stmt))
+        result = MagicMock()
+        # 1ª chamada: get_or_404 do produto; as seguintes, contagem e linhas
+        result.scalar_one_or_none.return_value = product if idx == 0 else None
+        result.scalar_one.return_value = count
+        result.scalars.return_value.all.return_value = [] if idx == 0 else equipments
+        idx += 1
+        return result
+
+    session = AsyncMock()
+    session.execute = _execute
+
+    async def _gen():
+        yield session
+
+    return _gen, queries
+
+
+@pytest.mark.asyncio
+async def test_client_listing_is_scoped_to_own_equipment(patch_redis):
+    """Cliente listando equipamentos de um produto: a query filtra pelo dono."""
+    from app.core.database import get_db
+
+    gen, queries = _db_capturando_queries(_mock_product(), [_mock_equipment()])
+    app.dependency_overrides[get_db] = gen
+    _override_user(_CLIENT)
+
+    async with AsyncClient(transport=ASGITransport(app=app), base_url="http://test") as c:
+        resp = await c.get(f"/api/v1/products/{_PRODUCT_ID}/equipments")
+
+    assert resp.status_code == 200
+    # `equipments.owner_id` sozinho apareceria na lista de colunas do SELECT;
+    # o que prova o escopo é a comparação no WHERE
+    assert any("equipments.owner_id =" in q for q in queries), (
+        "a listagem do cliente precisa filtrar por owner_id — sem isso ele vê "
+        "equipamento de outros clientes"
+    )
+
+
+@pytest.mark.asyncio
+async def test_staff_listing_is_not_scoped(patch_redis):
+    """Admin e técnico continuam vendo o parque inteiro."""
+    from app.core.database import get_db
+
+    gen, queries = _db_capturando_queries(_mock_product(), [_mock_equipment()])
+    app.dependency_overrides[get_db] = gen
+    _override_user(_ADMIN)
+
+    async with AsyncClient(transport=ASGITransport(app=app), base_url="http://test") as c:
+        resp = await c.get(f"/api/v1/products/{_PRODUCT_ID}/equipments")
+
+    assert resp.status_code == 200
+    assert not any("equipments.owner_id =" in q for q in queries)
+
+
+@pytest.mark.asyncio
+async def test_client_cannot_get_other_owners_equipment(patch_redis):
+    """Equipamento de outro cliente devolve 403, mesmo sabendo o UUID."""
+    from app.core.database import get_db
+
+    equip = _mock_equipment()
+    equip.owner_id = uuid.uuid4()  # de outra pessoa
+    app.dependency_overrides[get_db] = _db_override(equip)
+    _override_user(_CLIENT)
+
+    async with AsyncClient(transport=ASGITransport(app=app), base_url="http://test") as c:
+        resp = await c.get(f"/api/v1/equipments/{_EQUIP_ID}")
+
+    assert resp.status_code == 403
+
+
+@pytest.mark.asyncio
+async def test_client_cannot_get_ownerless_equipment(patch_redis):
+    """
+    Equipamento sem dono também é negado ao cliente (fail closed).
+
+    Mesmo critério do /equipment/my, que só devolve o que é dele.
+    """
+    from app.core.database import get_db
+
+    equip = _mock_equipment()
+    equip.owner_id = None
+    app.dependency_overrides[get_db] = _db_override(equip)
+    _override_user(_CLIENT)
+
+    async with AsyncClient(transport=ASGITransport(app=app), base_url="http://test") as c:
+        resp = await c.get(f"/api/v1/equipments/{_EQUIP_ID}")
+
+    assert resp.status_code == 403
+
+
+@pytest.mark.asyncio
+async def test_client_can_get_own_equipment(patch_redis):
+    """O próprio equipamento continua acessível — a correção não pode atrapalhar."""
+    from app.core.database import get_db
+
+    equip = _mock_equipment()
+    equip.owner_id = _CLIENT.id
+    app.dependency_overrides[get_db] = _db_override(equip)
+    _override_user(_CLIENT)
+
+    async with AsyncClient(transport=ASGITransport(app=app), base_url="http://test") as c:
+        resp = await c.get(f"/api/v1/equipments/{_EQUIP_ID}")
+
+    assert resp.status_code == 200
+    assert resp.json()["serial_number"] == "SN-001"
+
+
+@pytest.mark.asyncio
+async def test_staff_can_get_any_equipment(patch_redis):
+    """Técnico abre equipamento de qualquer cliente — é o trabalho dele."""
+    from app.core.database import get_db
+
+    equip = _mock_equipment()
+    equip.owner_id = uuid.uuid4()
+    app.dependency_overrides[get_db] = _db_override(equip)
+    _override_user(_mock_user(UserRole.technician))
+
+    async with AsyncClient(transport=ASGITransport(app=app), base_url="http://test") as c:
+        resp = await c.get(f"/api/v1/equipments/{_EQUIP_ID}")
+
+    assert resp.status_code == 200

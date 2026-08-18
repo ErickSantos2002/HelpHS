@@ -11,10 +11,14 @@ Permissões:
 
   Equipments (sub-resource de produto):
     POST   /products/{id}/equipments        — admin | technician
-    GET    /products/{id}/equipments        — qualquer autenticado
-    GET    /equipments/{id}                 — qualquer autenticado
+    GET    /products/{id}/equipments        — staff vê tudo; cliente só os próprios
+    GET    /equipments/{id}                 — staff vê tudo; cliente só o próprio (403)
     PATCH  /equipments/{id}                 — admin | technician
     DELETE /equipments/{id}                 — admin | technician (soft-delete)
+
+  O escopo por dono vale para o perfil cliente: equipamento de outro cliente —
+  ou sem dono — é negado, porque o número de série é dado do cliente. Os
+  endpoints /equipment/my* seguem a mesma regra por construção.
 """
 
 import uuid
@@ -223,7 +227,7 @@ async def create_equipment(
 async def list_equipments(
     product_id: uuid.UUID,
     db: Annotated[AsyncSession, Depends(get_db)],
-    _actor: Annotated[User, Depends(get_current_user)],
+    actor: Annotated[User, Depends(get_current_user)],
     offset: int = Query(default=0, ge=0),
     limit: int = Query(default=20, ge=1, le=100),
     is_active: bool | None = Query(default=None),
@@ -232,6 +236,11 @@ async def list_equipments(
     await get_or_404(db, Product, product_id, "Product not found")
 
     base = select(Equipment).where(Equipment.product_id == product_id)
+    # Cliente só enxerga o próprio parque; staff precisa ver tudo para dar
+    # suporte. Sem este filtro a listagem entregava o número de série do
+    # equipamento de qualquer outro cliente.
+    if actor.role == UserRole.client:
+        base = base.where(Equipment.owner_id == actor.id)
     if is_active is not None:
         base = base.where(Equipment.is_active == is_active)
     if search:
@@ -271,11 +280,19 @@ async def list_equipments(
 async def get_equipment(
     equipment_id: uuid.UUID,
     db: Annotated[AsyncSession, Depends(get_db)],
-    _actor: Annotated[User, Depends(get_current_user)],
+    actor: Annotated[User, Depends(get_current_user)],
 ) -> EquipmentResponse:
-    return EquipmentResponse.model_validate(
-        await get_or_404(db, Equipment, equipment_id, "Equipment not found")
-    )
+    equipment = await get_or_404(db, Equipment, equipment_id, "Equipment not found")
+
+    # Equipamento sem dono também é negado ao cliente (fail closed): o mesmo
+    # critério do /equipment/my, que devolve só o que é dele.
+    if actor.role == UserRole.client and equipment.owner_id != actor.id:
+        raise HTTPException(
+            status_code=status.HTTP_403_FORBIDDEN,
+            detail="Você não tem permissão para acessar este item.",
+        )
+
+    return EquipmentResponse.model_validate(equipment)
 
 
 @router.patch("/equipments/{equipment_id}", response_model=EquipmentResponse)
