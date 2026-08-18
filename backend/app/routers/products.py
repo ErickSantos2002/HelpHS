@@ -67,6 +67,25 @@ def _audit(
     )
 
 
+def _check_equipment_owner(equipment: Equipment, actor: User) -> None:
+    """
+    Recusa o equipamento que não pertence ao ator.
+
+    Ponto único da recusa por dono, no espírito do `_check_ticket_access` de
+    tickets e anexos: o mesmo "não é seu" chegava ao usuário com dois textos
+    diferentes, porque a checagem estava copiada inline em três endpoints.
+
+    Não abre exceção para staff — quem decide isso é o endpoint: os endpoints
+    `/equipment/my` são estritos até para admin (é o *meu* equipamento), e o
+    `GET /equipments/{id}` chama esta função só quando o ator é cliente.
+    """
+    if equipment.owner_id != actor.id:
+        raise HTTPException(
+            status_code=status.HTTP_403_FORBIDDEN,
+            detail="Este equipamento não está vinculado ao seu cadastro.",
+        )
+
+
 # ═══════════════════════════════════════════════════════════════
 # PRODUCTS
 # ═══════════════════════════════════════════════════════════════
@@ -284,13 +303,11 @@ async def get_equipment(
 ) -> EquipmentResponse:
     equipment = await get_or_404(db, Equipment, equipment_id, "Equipment not found")
 
-    # Equipamento sem dono também é negado ao cliente (fail closed): o mesmo
-    # critério do /equipment/my, que devolve só o que é dele.
-    if actor.role == UserRole.client and equipment.owner_id != actor.id:
-        raise HTTPException(
-            status_code=status.HTTP_403_FORBIDDEN,
-            detail="Você não tem permissão para acessar este item.",
-        )
+    # Staff precisa ver o parque inteiro para dar suporte. Para o cliente vale a
+    # regra de dono — e equipamento sem dono também é negado (fail closed), o
+    # mesmo critério do /equipment/my, que devolve só o que é dele.
+    if actor.role == UserRole.client:
+        _check_equipment_owner(equipment, actor)
 
     return EquipmentResponse.model_validate(equipment)
 
@@ -398,8 +415,7 @@ async def update_my_equipment(
     actor: Annotated[User, Depends(get_current_user)],
 ) -> EquipmentResponse:
     equipment = await get_or_404(db, Equipment, equipment_id, "Equipment not found")
-    if equipment.owner_id != actor.id:
-        raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="Este equipamento não está vinculado ao seu cadastro.")
+    _check_equipment_owner(equipment, actor)
 
     if body.serial_number and body.serial_number != equipment.serial_number:
         dup = await db.execute(
@@ -426,8 +442,7 @@ async def delete_my_equipment(
     actor: Annotated[User, Depends(get_current_user)],
 ) -> None:
     equipment = await get_or_404(db, Equipment, equipment_id, "Equipment not found")
-    if equipment.owner_id != actor.id:
-        raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="Este equipamento não está vinculado ao seu cadastro.")
+    _check_equipment_owner(equipment, actor)
     equipment.is_active = False
     _audit(db, AuditAction.delete, actor.id, "equipment", equipment.id)
     await db.commit()

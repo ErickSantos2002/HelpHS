@@ -534,6 +534,37 @@ async def test_client_can_get_own_equipment(patch_redis):
 
 
 @pytest.mark.asyncio
+async def test_ownership_refusal_message_is_the_same_everywhere(patch_redis):
+    """
+    Os três pontos que recusam equipamento alheio falam a mesma língua.
+
+    O check de dono estava copiado inline em três lugares do arquivo, e a cópia
+    mais nova respondia com uma mensagem diferente das outras duas — o mesmo
+    "não é seu" chegava ao usuário de dois jeitos.
+    """
+    from app.core.database import get_db
+
+    equip = _mock_equipment()
+    equip.owner_id = uuid.uuid4()  # de outra pessoa
+
+    async def _detalhe(metodo: str, url: str, **kwargs) -> str:
+        app.dependency_overrides[get_db] = _db_override(equip)
+        _override_user(_CLIENT)
+        async with AsyncClient(transport=ASGITransport(app=app), base_url="http://test") as c:
+            resp = await getattr(c, metodo)(url, **kwargs)
+        assert resp.status_code == 403, resp.text
+        return resp.json()["detail"]
+
+    mensagens = {
+        await _detalhe("get", f"/api/v1/equipments/{_EQUIP_ID}"),
+        await _detalhe("patch", f"/api/v1/equipment/my/{_EQUIP_ID}", json={"name": "Outro nome"}),
+        await _detalhe("delete", f"/api/v1/equipment/my/{_EQUIP_ID}"),
+    }
+
+    assert len(mensagens) == 1, f"mensagens divergentes para a mesma recusa: {mensagens}"
+
+
+@pytest.mark.asyncio
 async def test_staff_can_get_any_equipment(patch_redis):
     """Técnico abre equipamento de qualquer cliente — é o trabalho dele."""
     from app.core.database import get_db
