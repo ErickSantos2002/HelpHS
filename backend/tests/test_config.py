@@ -16,9 +16,17 @@ _BASE = {
     "secret_key": "x" * 32,
 }
 
+_DOMINIO_REAL = "https://helpdesk.healthsafetytech.com"
+
 
 def _settings(**overrides) -> Settings:
-    return Settings(**{**_BASE, **overrides})
+    """
+    Settings isolado do ambiente.
+
+    `_env_file=None` ignora o `.env` da máquina; sem isso o teste passaria a
+    depender da configuração local de quem roda — e testaria outra coisa.
+    """
+    return Settings(_env_file=None, **{**_BASE, **overrides})
 
 
 # ── Produção precisa de CORS_ORIGINS explícito ────────────────
@@ -29,14 +37,16 @@ def _settings(**overrides) -> Settings:
 # com "*", origem liberada para qualquer site.
 
 
-def test_production_rejects_default_localhost_origins():
+def test_production_rejects_default_localhost_origins(monkeypatch):
+    """Sem CORS_ORIGINS no ambiente, o default de localhost não pode passar."""
+    monkeypatch.delenv("CORS_ORIGINS", raising=False)
     with pytest.raises(ValueError, match="CORS_ORIGINS"):
         _settings(app_env="production")
 
 
 def test_production_rejects_explicit_localhost_origin():
     with pytest.raises(ValueError, match="CORS_ORIGINS"):
-        _settings(app_env="production", cors_origins="https://helpdesk.tld,http://localhost:5173")
+        _settings(app_env="production", cors_origins=f"{_DOMINIO_REAL},http://localhost:5173")
 
 
 def test_production_rejects_wildcard_origin():
@@ -45,8 +55,8 @@ def test_production_rejects_wildcard_origin():
 
 
 def test_production_accepts_real_domain():
-    s = _settings(app_env="production", cors_origins="https://helpdesk.healthsafetytech.com")
-    assert s.get_cors_origins() == ["https://helpdesk.healthsafetytech.com"]
+    s = _settings(app_env="production", cors_origins=_DOMINIO_REAL)
+    assert s.get_cors_origins() == [_DOMINIO_REAL]
 
 
 def test_development_keeps_localhost_default():
