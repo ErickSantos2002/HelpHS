@@ -1,11 +1,11 @@
 import React from "react";
-import { marked } from "marked";
 import { useEffect, useRef, useState } from "react";
 import { useNavigate, useParams } from "react-router-dom";
 import { toast } from "sonner";
 import { toastApiError } from "../../lib/toastError";
 import { Spinner } from "../../components/ui";
 import { plural } from "../../lib/utils";
+import { renderMarkdown } from "../../lib/markdown";
 import { useAuth } from "../../contexts/AuthContext";
 import {
   createKBComment,
@@ -16,8 +16,6 @@ import {
   type KBArticle,
   type KBComment,
 } from "../../services/kbService";
-
-marked.setOptions({ breaks: true });
 
 // ── Constants ─────────────────────────────────────────────────
 
@@ -46,7 +44,7 @@ const IC = {
 // ── Markdown ──────────────────────────────────────────────────
 
 function MarkdownContent({ content }: { content: string }) {
-  const html = marked.parse(content) as string;
+  const html = renderMarkdown(content);
   return (
     <div
       className="prose prose-invert prose-sm max-w-none [overflow-wrap:anywhere] [word-break:break-word]

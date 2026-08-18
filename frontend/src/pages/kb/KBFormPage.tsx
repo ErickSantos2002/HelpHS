@@ -1,7 +1,7 @@
-import { marked } from "marked";
 import { useEffect, useState } from "react";
 import { useNavigate, useParams } from "react-router-dom";
 import { toastApiError } from "../../lib/toastError";
+import { renderMarkdown } from "../../lib/markdown";
 import { Button, Input, Spinner, Textarea } from "../../components/ui";
 import { useAuth } from "../../contexts/AuthContext";
 import {
@@ -11,8 +11,6 @@ import {
   type KBArticleStatus,
 } from "../../services/kbService";
 import { getProducts, type Product } from "../../services/productService";
-
-marked.setOptions({ breaks: true });
 
 // ── Constants ─────────────────────────────────────────────────
 
@@ -48,7 +46,7 @@ const IC = {
 
 function ContentEditor({ value, onChange, error }: { value: string; onChange: (v: string) => void; error?: string }) {
   const [tab, setTab] = useState<"write" | "preview">("write");
-  const html = marked.parse(value) as string;
+  const html = renderMarkdown(value);
 
   return (
     <div className="space-y-2">
