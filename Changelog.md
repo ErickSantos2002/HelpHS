@@ -16,6 +16,13 @@ Datas em DD/MM/AAAA.
 - Rate limiting com slowapi (5 tentativas / 15 min) nos endpoints de
   autenticação: login, register, forgot-password e resend-confirmation
   (`464d9be`). Desligado por padrão sob `APP_ENV=testing`.
+- Login deixa de vazar, pelo tempo de resposta, quais e-mails têm conta
+  (`f8e6013`): e-mail inexistente passa a ser conferido contra um hash
+  descartável de 12 rounds, igualando o custo dos dois caminhos.
+- Boot em `APP_ENV=production` passa a exigir `CORS_ORIGINS` com o domínio real
+  do front e a recusar `*` (`8ab84c8`) — antes, a ausência da variável fazia a
+  API subir em silêncio com origem de desenvolvimento. **Recriar o serviço sem
+  `CORS_ORIGINS` e `APP_ENV` impede o boot.**
 - Equipamentos escopados por dono para o perfil cliente (`724322f`):
   `GET /products/{id}/equipments` passa a filtrar por `owner_id` e
   `GET /equipments/{id}` devolve 403 para equipamento de outro dono — ou sem
