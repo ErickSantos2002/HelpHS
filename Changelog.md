@@ -40,6 +40,9 @@ Datas em DD/MM/AAAA.
   ~250 ms, passou a rodar em thread separada — antes, cada tentativa de login
   travava todas as requisições em voo, e a defesa contra enumeração por tempo
   havia estendido esse custo ao caminho do e-mail inexistente.
+- Mesma correção nos demais endpoints que mexem com senha (`751bfeb`):
+  cadastro, redefinição de senha por e-mail, criação de usuário pelo staff e
+  troca de senha — nenhum deles trava mais a API enquanto calcula o hash.
 - Equipamentos escopados por dono para o perfil cliente (`724322f`):
   `GET /products/{id}/equipments` passa a filtrar por `owner_id` e
   `GET /equipments/{id}` devolve 403 para equipamento de outro dono — ou sem

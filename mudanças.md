@@ -41,7 +41,7 @@ Varredura estática dos 17 routers do backend:
 
 ### Verificação
 
-- Backend: **395 testes passando**, cobertura **81,22%** (gate de 80% mantido).
+- Backend: **399 testes passando**, cobertura **81,90%** (gate de 80% mantido).
   `pytest` roda verde **sem variável de ambiente no comando** desde o
   `e4ec7f2`.
 - Frontend: **192 testes passando**, `tsc` e `ruff` limpos.
@@ -123,6 +123,12 @@ enquanto o histórico ainda era local.
 | `9634d7e` | `test:` **paridade de custo do hash descartável** — os 12 rounds batiam por coincidência (`settings.bcrypt_rounds` nunca foi aplicado ao `pwd_context`). Se o dummy ficar mais barato, a enumeração por tempo reabre sem nenhum teste perceber; agora é contrato |
 | `2ad773c` | `refactor:` **recusa de equipamento alheio unificada** — o check de dono estava inline em três endpoints, e o 403 mais novo divergia no texto. Vira `_check_equipment_owner`, no espírito do `_check_ticket_access`, sem ampliar permissão: `/equipment/my` segue estrito até para admin |
 | `53312aa` | `test:` limpeza — harness duplicado que pagava dois bcrypts reais, e mock que decidia o retorno pela ordem das chamadas |
+| `751bfeb` | `fix:` **bcrypt no event loop nos endpoints restantes** — o mesmo defeito do `72f31bc` nos pontos que sobraram: `register`, `reset-password`, `POST /users` e `change-password`. Cinco chamadas, quatro endpoints, todas para `run_in_threadpool` |
+
+O `reset-password` não estava na lista da revisão: apareceu ao varrer todos os
+call sites de bcrypt antes de corrigir, e entrou porque é o mesmo defeito. O
+espião de thread virou utilitário no `conftest.py`, agora que três arquivos de
+teste precisam dele.
 
 ### Fila para a próxima rodada
 
@@ -140,11 +146,8 @@ Decisões de produto levantadas pela revisão, registradas sem correção:
   e-mail é síncrono e só acontece no ramo da conta existente, então o tempo de
   resposta vai denunciar quais e-mails têm conta **quando o SMTP entrar**.
   Correção natural: `BackgroundTasks`. Agrupar com a rodada do SMTP/#3.1.
-- **`hash_password` e `verify_password` fora do login** (achado desta rodada,
-  não da revisão) — `register`, `POST /users` e `change-password` ainda chamam
-  bcrypt direto no endpoint async, com o mesmo bloqueio de event loop que o
-  `72f31bc` resolveu no login. Fora do escopo aprovado; mesma correção
-  (`run_in_threadpool`) se aprovado.
+- ~~`hash_password` e `verify_password` fora do login~~ — **resolvido em
+  `751bfeb`** (aprovado depois de registrado aqui).
 
 - 🟢 **#3.1 Register neutro — aprovado em desenho, aguardando SMTP em
   produção.** O SMTP ainda não está configurado, e sem ele a resposta neutra
