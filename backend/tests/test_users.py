@@ -3,6 +3,7 @@ Tests for User CRUD endpoints.
 DB and Redis fully mocked.
 """
 
+import threading
 import uuid
 from datetime import UTC
 from unittest.mock import AsyncMock, MagicMock, patch
@@ -751,3 +752,82 @@ async def test_onboarding_com_cep_incompleto_e_rejeitado(patch_redis):
         )
 
     assert resp.status_code == 422
+
+
+# ═══════════════════════════════════════════════════════════════
+# BCRYPT FORA DO EVENT LOOP
+# ═══════════════════════════════════════════════════════════════
+#
+# hash_password e verify_password são síncronos e custam ~250 ms cada. Rodando
+# direto no endpoint async, travam o event loop e com ele todas as requisições
+# em voo. Os testes comparam a thread do bcrypt com a do event loop — medir
+# tempo seria instável.
+
+
+@pytest.mark.asyncio
+async def test_create_user_hashes_password_off_the_event_loop(patch_redis):
+    from app.core.database import get_db
+    from app.core.security import get_current_user
+    from tests.conftest import EspiaDeThread
+
+    app.dependency_overrides[get_db] = _simple_db(None)  # e-mail livre
+
+    async def _admin():
+        return _ADMIN
+
+    app.dependency_overrides[get_current_user] = _admin
+
+    espia = EspiaDeThread(retorno="hash-falso")
+    thread_do_loop = threading.get_ident()
+
+    with patch("app.routers.users.hash_password", new=espia):
+        async with AsyncClient(transport=ASGITransport(app=app), base_url="http://test") as c:
+            resp = await c.post(
+                "/api/v1/users",
+                json={
+                    "name": "New Client",
+                    "email": "newclient@test.com",
+                    "password": "Secret1234",
+                    "role": "client",
+                    "lgpd_consent": True,
+                },
+            )
+
+    assert resp.status_code == 201, resp.text
+    assert espia.rodou_fora_da_thread(thread_do_loop), (
+        "o hash da senha rodou na thread do event loop — cada cadastro trava a API"
+    )
+
+
+@pytest.mark.asyncio
+async def test_change_password_runs_bcrypt_off_the_event_loop(patch_redis):
+    """Troca de senha faz duas operações de bcrypt: conferir a atual e hashear a nova."""
+    from app.core.database import get_db
+    from app.core.security import get_current_user
+    from tests.conftest import EspiaDeThread
+
+    alvo = _user(UserRole.client)
+    app.dependency_overrides[get_db] = _simple_db(alvo)
+
+    async def _actor():
+        return alvo
+
+    app.dependency_overrides[get_current_user] = _actor
+
+    espia_verify = EspiaDeThread(retorno=True)
+    espia_hash = EspiaDeThread(retorno="hash-novo")
+    thread_do_loop = threading.get_ident()
+
+    with (
+        patch("app.routers.users.verify_password", new=espia_verify),
+        patch("app.routers.users.hash_password", new=espia_hash),
+    ):
+        async with AsyncClient(transport=ASGITransport(app=app), base_url="http://test") as c:
+            resp = await c.post(
+                "/api/v1/users/me/change-password",
+                json={"current_password": "Secret1234", "new_password": "NovaSenha1"},
+            )
+
+    assert resp.status_code == 204, resp.text
+    assert espia_verify.rodou_fora_da_thread(thread_do_loop), "verify_password no event loop"
+    assert espia_hash.rodou_fora_da_thread(thread_do_loop), "hash_password no event loop"

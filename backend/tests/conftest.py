@@ -16,6 +16,39 @@ pelo pydantic-settings.
 """
 
 import os
+import threading
 
 os.environ["APP_ENV"] = "testing"
 os.environ.setdefault("DATABASE_URL", "postgresql+asyncpg://user:pass@localhost/db")
+
+
+class EspiaDeThread:
+    """
+    Substitui uma função síncrona e registra em qual thread ela rodou.
+
+    Serve para provar que o bcrypt (síncrono, ~250 ms) não roda na thread do
+    event loop: ali ele travaria a API inteira a cada chamada. Comparar threads
+    é determinístico — cronometrar seria instável.
+
+    Uso::
+
+        espia = EspiaDeThread(retorno=True)
+        with patch("app.routers.x.verify_password", new=espia):
+            ...
+        assert espia.rodou_fora_da_thread(threading.get_ident())
+    """
+
+    def __init__(self, retorno=None):
+        self.retorno = retorno
+        self.threads: list[int] = []
+
+    def __call__(self, *_args, **_kwargs):
+        self.threads.append(threading.get_ident())
+        return self.retorno
+
+    @property
+    def chamado(self) -> bool:
+        return bool(self.threads)
+
+    def rodou_fora_da_thread(self, thread_id: int) -> bool:
+        return self.chamado and thread_id not in self.threads

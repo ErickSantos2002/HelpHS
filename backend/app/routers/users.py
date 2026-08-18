@@ -21,6 +21,7 @@ from typing import Annotated
 from fastapi import APIRouter, Depends, File, HTTPException, Query, UploadFile, status
 from sqlalchemy import func, select
 from sqlalchemy.ext.asyncio import AsyncSession
+from starlette.concurrency import run_in_threadpool
 
 from app.core.config import Settings, get_settings
 from app.core.database import get_db
@@ -75,11 +76,15 @@ async def create_user(
         raise HTTPException(status_code=status.HTTP_409_CONFLICT, detail="Email already registered")
 
     ts = datetime.now(UTC)
+    # bcrypt é síncrono e custa ~250 ms: na thread do event loop, cada cadastro
+    # travaria todas as requisições em voo (mesmo motivo do login)
+    senha_hash = await run_in_threadpool(hash_password, body.password)
+
     user = User(
         id=uuid.uuid4(),
         name=body.name,
         email=body.email,
-        password=hash_password(body.password),
+        password=senha_hash,
         role=body.role,
         status=UserStatus.active,
         phone=body.phone,
@@ -313,13 +318,15 @@ async def change_password(
     if not user:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Usuário não encontrado.")
 
-    if not verify_password(body.current_password, user.password):
+    # Duas operações de bcrypt aqui — conferir a atual e hashear a nova —, as
+    # duas fora da thread do event loop
+    if not await run_in_threadpool(verify_password, body.current_password, user.password):
         raise HTTPException(
             status_code=status.HTTP_400_BAD_REQUEST,
             detail="Senha atual incorreta",
         )
 
-    user.password = hash_password(body.new_password)
+    user.password = await run_in_threadpool(hash_password, body.new_password)
     user.updated_at = datetime.now(UTC)
     _audit(db, AuditAction.update, current_user.id, user.id)
     await db.commit()

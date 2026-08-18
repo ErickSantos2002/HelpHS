@@ -8,6 +8,7 @@ Dois comportamentos merecem atenção especial aqui:
     ninguém — o cliente ficaria esperando um e-mail que nunca chega.
 """
 
+import threading
 import uuid
 from datetime import UTC, datetime
 from unittest.mock import AsyncMock, MagicMock, patch
@@ -357,3 +358,86 @@ async def test_redefinir_senha_confirma_o_email_junto(smtp_configurado):
     assert isinstance(user.email_verified_at, datetime)
     assert user.email_verified_at.tzinfo is not None
     assert user.email_verified_at <= datetime.now(UTC)
+
+
+# ═══════════════════════════════════════════════════════════════
+# BCRYPT FORA DO EVENT LOOP
+# ═══════════════════════════════════════════════════════════════
+#
+# hash_password custa o mesmo que verify_password (~250 ms): rodando direto no
+# endpoint async, cada cadastro ou troca de senha trava o event loop e, com ele,
+# todas as requisições em voo. Os testes comparam a thread do bcrypt com a do
+# event loop — cronometrar seria instável.
+
+
+@pytest.mark.asyncio
+async def test_cadastro_hasheia_a_senha_fora_do_event_loop(smtp_configurado):
+    from app.core.database import get_db
+    from tests.conftest import EspiaDeThread
+
+    # E-mail ainda não cadastrado. O refresh preenche o que o banco preencheria:
+    # id, onboarding_completed e os timestamps vêm de default/server_default, e
+    # sem eles o UserResponse não valida
+    async def _refresh(obj, *_a, **_k):
+        obj.id = obj.id or uuid.uuid4()
+        if obj.onboarding_completed is None:
+            obj.onboarding_completed = False
+        obj.created_at = datetime.now(UTC)
+        obj.updated_at = datetime.now(UTC)
+
+    result = MagicMock()
+    result.scalar_one_or_none.return_value = None
+    session = AsyncMock()
+    session.execute = AsyncMock(return_value=result)
+    session.add = MagicMock()
+    session.flush = AsyncMock()
+    session.commit = AsyncMock()
+    session.refresh = _refresh
+
+    async def _gen():
+        yield session
+
+    app.dependency_overrides[get_db] = _gen
+
+    espia = EspiaDeThread(retorno=_SENHA_HASH)
+    thread_do_loop = threading.get_ident()
+
+    with patch("app.routers.auth.hash_password", new=espia):
+        async with AsyncClient(transport=ASGITransport(app=app), base_url="http://test") as c:
+            r = await c.post(
+                "/api/v1/auth/register",
+                json={
+                    "name": "Novo Cliente",
+                    "email": "novo@test.com",
+                    "password": "Senha@123456",
+                    "lgpd_consent": True,
+                },
+            )
+
+    assert r.status_code == 201, r.text
+    assert espia.rodou_fora_da_thread(thread_do_loop), (
+        "o hash da senha rodou na thread do event loop — cada cadastro trava a API"
+    )
+
+
+@pytest.mark.asyncio
+async def test_redefinir_senha_hasheia_fora_do_event_loop(smtp_configurado):
+    from app.core.database import get_db
+    from tests.conftest import EspiaDeThread
+
+    user = _mock_user(email_verified=True)
+    app.dependency_overrides[get_db] = _db_with(user)
+    token = account_tokens.create_password_reset_token(_USER_ID, _SENHA_HASH, _settings)
+
+    espia = EspiaDeThread(retorno="hash-novo")
+    thread_do_loop = threading.get_ident()
+
+    with patch("app.routers.auth.hash_password", new=espia):
+        async with AsyncClient(transport=ASGITransport(app=app), base_url="http://test") as c:
+            r = await c.post(
+                "/api/v1/auth/reset-password",
+                json={"token": token, "password": "NovaSenha@123"},
+            )
+
+    assert r.status_code == 200, r.text
+    assert espia.rodou_fora_da_thread(thread_do_loop)

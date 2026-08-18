@@ -152,10 +152,14 @@ async def register(
     # que nunca chega
     exige_confirmacao = settings.requires_email_verification()
 
+    # bcrypt é síncrono e custa ~250 ms: na thread do event loop, cada cadastro
+    # travaria todas as requisições em voo (mesmo motivo do login)
+    senha_hash = await run_in_threadpool(hash_password, body.password)
+
     user = User(
         name=body.name,
         email=body.email,
-        password=hash_password(body.password),
+        password=senha_hash,
         role=UserRole.client,
         status=UserStatus.active,
         phone=body.phone,
@@ -335,7 +339,7 @@ async def reset_password(
     except account_tokens.InvalidTokenError as exc:
         raise link_invalido from exc
 
-    user.password = hash_password(body.password)
+    user.password = await run_in_threadpool(hash_password, body.password)
     user.updated_at = datetime.now(UTC)
     # Quem redefine a senha pelo e-mail comprova ser dono da caixa
     if not user.email_verified:
