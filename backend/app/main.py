@@ -1,10 +1,12 @@
 import asyncio
 from contextlib import asynccontextmanager, suppress
 
-from fastapi import FastAPI
+from fastapi import FastAPI, Request
 from fastapi.exceptions import RequestValidationError
 from fastapi.middleware.cors import CORSMiddleware
+from fastapi.responses import JSONResponse
 from loguru import logger
+from slowapi.errors import RateLimitExceeded
 from sqlalchemy import text
 from starlette.exceptions import HTTPException as StarletteHTTPException
 
@@ -12,6 +14,7 @@ from app.core.config import get_settings
 from app.core.database import engine
 from app.core.exceptions import http_exception_handler, validation_exception_handler
 from app.core.logging import setup_logging
+from app.core.rate_limit import limiter
 from app.core.redis import close_redis, get_redis
 from app.routers import (
     attachments,
@@ -109,6 +112,18 @@ app.add_middleware(
 )
 
 
+app.state.limiter = limiter
+
+
+async def rate_limit_handler(request: Request, exc: RateLimitExceeded) -> JSONResponse:
+    # Mantém o formato de erro do projeto (campo `detail`, mensagem em português)
+    return JSONResponse(
+        status_code=429,
+        content={"detail": "Muitas tentativas. Aguarde alguns minutos e tente novamente."},
+    )
+
+
+app.add_exception_handler(RateLimitExceeded, rate_limit_handler)
 app.add_exception_handler(RequestValidationError, validation_exception_handler)
 app.add_exception_handler(StarletteHTTPException, http_exception_handler)
 

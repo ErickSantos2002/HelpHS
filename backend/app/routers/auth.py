@@ -16,6 +16,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.core.config import get_settings
 from app.core.database import get_db
+from app.core.rate_limit import limiter
 from app.core.security import (
     bearer_scheme,
     blacklist_token,
@@ -130,6 +131,7 @@ async def lookup_cep(
 
 
 @router.post("/register", response_model=UserResponse, status_code=status.HTTP_201_CREATED)
+@limiter.limit(settings.rate_limit_login)
 async def register(
     body: RegisterRequest,
     request: Request,
@@ -223,8 +225,10 @@ async def verify_email(
 
 
 @router.post("/resend-verification", response_model=MessageResponse)
+@limiter.limit(settings.rate_limit_login)
 async def resend_verification(
     body: EmailRequest,
+    request: Request,
     db: Annotated[AsyncSession, Depends(get_db)],
 ) -> MessageResponse:
     """
@@ -253,8 +257,10 @@ async def resend_verification(
 
 
 @router.post("/forgot-password", response_model=MessageResponse)
+@limiter.limit(settings.rate_limit_login)
 async def forgot_password(
     body: EmailRequest,
+    request: Request,
     db: Annotated[AsyncSession, Depends(get_db)],
 ) -> MessageResponse:
     """
@@ -345,6 +351,7 @@ async def reset_password(
 
 
 @router.post("/login", response_model=TokenResponse, status_code=status.HTTP_200_OK)
+@limiter.limit(settings.rate_limit_login)
 async def login(
     body: LoginRequest,
     request: Request,

@@ -18,6 +18,9 @@ passlib[bcrypt]==1.7.4
 bcrypt==3.2.2
 python-multipart==0.0.20
 
+# Rate limiting
+slowapi==0.1.9
+
 # Storage (MinIO)
 boto3==1.38.8
 
