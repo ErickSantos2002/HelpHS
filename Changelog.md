@@ -16,6 +16,11 @@ Datas em DD/MM/AAAA.
 - Rate limiting com slowapi (5 tentativas / 15 min) nos endpoints de
   autenticação: login, register, forgot-password e resend-confirmation
   (`464d9be`). Desligado por padrão sob `APP_ENV=testing`.
+- Equipamentos escopados por dono para o perfil cliente (`724322f`):
+  `GET /products/{id}/equipments` passa a filtrar por `owner_id` e
+  `GET /equipments/{id}` devolve 403 para equipamento de outro dono — ou sem
+  dono (*fail closed*). Antes, qualquer autenticado lia o número de série do
+  equipamento de qualquer cliente. Staff mantém acesso total.
 
 ### CI
 - Vitest passou a rodar no job do frontend, entre o typecheck e o build

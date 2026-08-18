@@ -20,6 +20,8 @@ correção dos dois achados graves e primeira fase do reforço de testes no CI.
 | `0c7164f` | fix | 🟠 Fecha XSS armazenado na Base de Conhecimento — `frontend/src/lib/markdown.ts` sanitiza o HTML renderizado com DOMPurify; 7 testes provam a neutralização |
 | `464d9be` | fix | 🟠 Liga rate limiting (slowapi, 5/15min) nos endpoints de autenticação — login, register, forgot-password e resend-confirmation; teste prova o 429 e que o limiter desligado (padrão em `APP_ENV=testing`) não afeta a suíte |
 | `1583b8b` | ci | Vitest no job do frontend, entre o typecheck e o build (Fase 1 do plano de testes no CI) |
+| `ec3a86b` | docs | Este registro de mudanças e o [Changelog.md](Changelog.md) do repositório |
+| `724322f` | fix | 🟡 Fecha o achado #5 — `GET /products/{id}/equipments` e `GET /equipments/{id}` deixam de vazar equipamento (e número de série) entre clientes: listagem filtrada por dono e 403 no detalhe alheio. Escrito em TDD — os testes falharam antes da correção |
 
 ### Auditoria (Passo 1)
 
@@ -37,9 +39,26 @@ Varredura estática dos 17 routers do backend:
 
 ### Verificação
 
-- Backend: **358 testes passando**, cobertura **80,83%** (gate de 80% mantido).
+- Backend: **364 testes passando**, cobertura **80,94%** (gate de 80% mantido).
 - Frontend: **192 testes passando**, `tsc` e `ruff` limpos.
 - Todo conserto veio acompanhado do teste que o prova.
+
+### Achado #5 — equipamento escopado por dono (`724322f`)
+
+Fechado ainda nesta data, depois da rodada inicial, com o ciclo invertido a
+pedido: **os testes vieram antes da correção e falharam** (`200` onde se
+esperava `403`), provando que exercitavam a lacuna real.
+
+- **Regra**: cliente vê apenas o próprio equipamento; equipamento **sem dono**
+  também é negado (*fail closed*, mesmo critério do `/equipment/my`). Staff
+  (admin e técnico) continua com acesso total, porque precisa para suporte.
+- **403, não 404** — consistência com o `_check_ticket_access` de tickets e
+  anexos. A preocupação de enumeração está registrada no #3 e será tratada lá.
+- **Nenhuma tela mudou**: verificado antes de codificar que o cliente só usa
+  `/equipment/my*`, que a `ProductsPage` (única consumidora da listagem) está
+  sob `RoleGuard` de staff e que o GET singular não é consumido pelo front.
+- `test_get_equipment` foi atualizado para ator staff: como cliente, ele
+  afirmava justamente o acesso que esta correção fecha.
 
 ### Investigado e documentado (sem esconder)
 
@@ -52,12 +71,10 @@ Varredura estática dos 17 routers do backend:
 
 ### Fila para a próxima rodada
 
-- 🟡 **#5 Equipamento sem escopo por dono** — `GET /equipments/{id}` e
-  `/products/{id}/equipments` vazam entre clientes. Decisão já tomada:
-  escopar por dono.
 - 🟡 **#3 Enumeração de usuários** — 409 no register e diferença de timing no
-  login.
-- 🟡 **#4 CORS** — default aponta para localhost.
+  login. **Vetado até aprovação explícita.**
+- 🟡 **#4 CORS** — default aponta para localhost. **Vetado até aprovação
+  explícita.**
 - **CI Fase 2/3** — Playwright em `e2e.yml` separado (workflow_dispatch +
   noturno) e k6 contra staging; proposta escrita, aguardando decisão de
   investir no ambiente.
