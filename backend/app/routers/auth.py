@@ -18,6 +18,7 @@ from app.core.config import get_settings
 from app.core.database import get_db
 from app.core.rate_limit import limiter
 from app.core.security import (
+    DUMMY_PASSWORD_HASH,
     bearer_scheme,
     blacklist_token,
     create_access_token,
@@ -360,13 +361,24 @@ async def login(
     result = await db.execute(select(User).where(User.email == body.email))
     user: User | None = result.scalar_one_or_none()
 
-    if user is None or not verify_password(body.password, user.password):
+    credenciais_invalidas = HTTPException(
+        status_code=status.HTTP_401_UNAUTHORIZED,
+        detail="E-mail ou senha incorretos.",
+        headers={"WWW-Authenticate": "Bearer"},
+    )
+
+    if user is None:
+        # Confere a senha contra um hash descartável só para pagar o mesmo custo
+        # de bcrypt de um e-mail que existe. Sem isso o `or` curto-circuitava, a
+        # resposta voltava quase instantânea e o tempo denunciava quais e-mails
+        # têm conta. O resultado é irrelevante e por isso descartado.
+        verify_password(body.password, DUMMY_PASSWORD_HASH)
         logger.warning(f"Failed login attempt for email={body.email}")
-        raise HTTPException(
-            status_code=status.HTTP_401_UNAUTHORIZED,
-            detail="E-mail ou senha incorretos.",
-            headers={"WWW-Authenticate": "Bearer"},
-        )
+        raise credenciais_invalidas
+
+    if not verify_password(body.password, user.password):
+        logger.warning(f"Failed login attempt for email={body.email}")
+        raise credenciais_invalidas
 
     if user.status != UserStatus.active:
         raise HTTPException(

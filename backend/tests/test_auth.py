@@ -217,3 +217,61 @@ async def test_no_token_returns_401(client_ok):
     """Logout endpoint (protected by get_current_user) should 401 without token."""
     response = await client_ok.post("/api/v1/auth/logout")
     assert response.status_code == 401
+
+
+# ── Enumeração por tempo de resposta ──────────────────────────
+#
+# O login não revela pela mensagem se a conta existe, mas revelava pelo
+# relógio: com `user is None`, o short-circuit pulava o bcrypt e a resposta
+# saía em ~1 ms, contra ~250 ms de um e-mail cadastrado (BCRYPT_ROUNDS=12).
+#
+# O teste não cronometra nada — medir tempo seria instável. Ele afirma que o
+# caminho "usuário inexistente" executa a verificação de senha, que é o que
+# iguala o custo dos dois caminhos.
+
+
+@pytest.mark.asyncio
+async def test_login_unknown_user_still_verifies_password(client_no_user):
+    """E-mail inexistente também paga o custo do bcrypt (contra enumeração por tempo)."""
+    with patch("app.routers.auth.verify_password", return_value=False) as verificacao:
+        response = await client_no_user.post(
+            "/api/v1/auth/login",
+            json={"email": "nobody@test.com", "password": ADMIN_PASSWORD},
+        )
+
+    assert response.status_code == 401
+    assert verificacao.called, (
+        "com usuário inexistente o bcrypt precisa rodar assim mesmo; sem isso o "
+        "tempo de resposta denuncia quais e-mails têm conta"
+    )
+
+
+@pytest.mark.asyncio
+async def test_login_unknown_user_message_is_the_same():
+    """
+    A mensagem de erro não distingue e-mail inexistente de senha errada.
+
+    Os dois cenários rodam em sequência, e não com as duas fixtures de client
+    juntas: ambas escrevem em `app.dependency_overrides`, e a segunda
+    silenciosamente substituiria o banco da primeira.
+    """
+    from app.core.database import get_db
+
+    async def _login(usuario_no_banco, senha):
+        _fake_redis._store.clear()
+        app.dependency_overrides[get_db] = _make_db_mock(usuario_no_banco)
+        with patch("app.core.security.get_redis", new=_get_fake_redis):
+            async with AsyncClient(transport=ASGITransport(app=app), base_url="http://test") as c:
+                return await c.post(
+                    "/api/v1/auth/login",
+                    json={"email": ADMIN_EMAIL, "password": senha},
+                )
+
+    try:
+        inexistente = await _login(None, ADMIN_PASSWORD)
+        senha_errada = await _login(_make_user(), "SenhaErrada1")
+    finally:
+        app.dependency_overrides.clear()
+
+    assert inexistente.status_code == senha_errada.status_code == 401
+    assert inexistente.json()["detail"] == senha_errada.json()["detail"]

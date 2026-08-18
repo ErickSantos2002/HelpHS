@@ -32,6 +32,17 @@ def hash_password(password: str) -> str:
     return pwd_context.hash(password)
 
 
+# Hash descartável, de uma senha aleatória que ninguém conhece, usado quando o
+# e-mail informado no login não existe: sem ele o bcrypt seria pulado e a
+# resposta voltaria em ~1 ms, contra ~250 ms de um e-mail cadastrado — o tempo
+# viraria oráculo de quais contas existem.
+#
+# Fica fixo (12 rounds, o mesmo custo de BCRYPT_ROUNDS) em vez de gerado no
+# import, que somaria centenas de milissegundos a cada boot e a cada processo
+# de teste. Não é segredo: é hash de uma senha jogada fora.
+DUMMY_PASSWORD_HASH = "$2b$12$hC.ULm90gnH9mf/U6suX2ezkP9nmIJr6IvegxxvGTZ1toStl/.WqW"
+
+
 # Redis key prefixes
 _BLACKLIST_PREFIX = "token:blacklist:"
 _REFRESH_PREFIX = "token:refresh:"
