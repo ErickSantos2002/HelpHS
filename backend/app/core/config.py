@@ -1,7 +1,24 @@
 import json
 from functools import lru_cache
+from urllib.parse import urlparse
 
 from pydantic_settings import BaseSettings, SettingsConfigDict
+
+# Nomes e endereços que só existem na máquina de quem desenvolve. Comparar o
+# HOST da URL com este conjunto — e não procurar "localhost" no texto — evita os
+# dois erros: barrar um domínio legítimo que contenha a palavra (ex.:
+# localhost.healthsafetytech.com) e deixar passar [::1] ou 0.0.0.0.
+_HOSTS_LOCAIS = frozenset({"localhost", "127.0.0.1", "::1", "0.0.0.0", ""})
+
+# APP_ENV vem digitado à mão no painel de deploy: "Production" e "prod" precisam
+# valer como produção, senão um detalhe de caixa desliga TODAS as validações.
+_NOMES_DE_PRODUCAO = frozenset({"production", "prod"})
+
+
+def _host_de(url: str) -> str:
+    """Host da URL, em minúsculas. Aceita valor sem esquema (`localhost:5173`)."""
+    referencia = url if "//" in url else f"//{url}"
+    return (urlparse(referencia).hostname or "").lower()
 
 
 class Settings(BaseSettings):
@@ -22,7 +39,13 @@ class Settings(BaseSettings):
     def get_cors_origins(self) -> list[str]:
         v = self.cors_origins.strip()
         if v.startswith("["):
-            return json.loads(v)
+            try:
+                carregado = json.loads(v)
+            except json.JSONDecodeError as exc:
+                # Sem isto o boot morre com um JSONDecodeError que não diz qual
+                # variável está malformada
+                raise ValueError(f"CORS_ORIGINS não é um JSON válido: {exc}") from exc
+            return [str(o).strip() for o in carregado if str(o).strip()]
         return [o.strip() for o in v.split(",") if o.strip()]
 
     # Database
@@ -66,7 +89,7 @@ class Settings(BaseSettings):
     bcrypt_rounds: int = 12
 
     def model_post_init(self, __context) -> None:
-        if self.app_env != "production":
+        if self.app_env.strip().lower() not in _NOMES_DE_PRODUCAO:
             return
 
         if len(self.secret_key) < 32:
@@ -78,12 +101,27 @@ class Settings(BaseSettings):
         # abriria a API para qualquer site. Falhar no boot é melhor do que
         # descobrir isso em produção — mesma escolha feita para a SECRET_KEY.
         origens = self.get_cors_origins()
+        if not origens:
+            raise ValueError(
+                "CORS_ORIGINS está vazio em produção: defina o domínio real do front"
+            )
         if any(o == "*" for o in origens):
             raise ValueError("CORS_ORIGINS não pode ser '*' em produção: use o domínio do front")
-        if any("localhost" in o or "127.0.0.1" in o for o in origens):
+        locais = [o for o in origens if _host_de(o) in _HOSTS_LOCAIS]
+        if locais:
             raise ValueError(
                 "CORS_ORIGINS precisa ser definido com o domínio real do front em produção "
-                "(o valor atual ainda aponta para localhost)"
+                f"(estas origens são locais: {', '.join(locais)})"
+            )
+
+        # Mesma classe de falha, outro efeito: FRONTEND_URL monta os links dos
+        # e-mails de confirmação e de redefinição de senha. Apontando para
+        # localhost em produção, o e-mail sai com um link que não abre para
+        # ninguém — e nada no backend reclama.
+        if _host_de(self.frontend_url) in _HOSTS_LOCAIS:
+            raise ValueError(
+                "FRONTEND_URL precisa ser o endereço público do sistema em produção: "
+                "os links dos e-mails de confirmação e de senha saem a partir dele"
             )
 
     # Armazenamento de arquivos (anexos e avatares) em disco.
