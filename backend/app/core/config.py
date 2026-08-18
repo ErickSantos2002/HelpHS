@@ -66,8 +66,25 @@ class Settings(BaseSettings):
     bcrypt_rounds: int = 12
 
     def model_post_init(self, __context) -> None:
-        if self.app_env == "production" and len(self.secret_key) < 32:
+        if self.app_env != "production":
+            return
+
+        if len(self.secret_key) < 32:
             raise ValueError("SECRET_KEY must be at least 32 characters in production")
+
+        # O default de cors_origins é localhost. Como o nginx do front não faz
+        # proxy para a API, o navegador fala com outro domínio e o CORS é
+        # obrigatório: subir com o default deixaria o front bloqueado, e "*"
+        # abriria a API para qualquer site. Falhar no boot é melhor do que
+        # descobrir isso em produção — mesma escolha feita para a SECRET_KEY.
+        origens = self.get_cors_origins()
+        if any(o == "*" for o in origens):
+            raise ValueError("CORS_ORIGINS não pode ser '*' em produção: use o domínio do front")
+        if any("localhost" in o or "127.0.0.1" in o for o in origens):
+            raise ValueError(
+                "CORS_ORIGINS precisa ser definido com o domínio real do front em produção "
+                "(o valor atual ainda aponta para localhost)"
+            )
 
     # Armazenamento de arquivos (anexos e avatares) em disco.
     # No deploy, este caminho precisa ser um volume — sem isso os arquivos
