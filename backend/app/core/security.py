@@ -37,9 +37,15 @@ def hash_password(password: str) -> str:
 # resposta voltaria em ~1 ms, contra ~250 ms de um e-mail cadastrado — o tempo
 # viraria oráculo de quais contas existem.
 #
-# Fica fixo (12 rounds, o mesmo custo de BCRYPT_ROUNDS) em vez de gerado no
-# import, que somaria centenas de milissegundos a cada boot e a cada processo
-# de teste. Não é segredo: é hash de uma senha jogada fora.
+# Fica fixo (12 rounds) em vez de gerado no import, que somaria centenas de
+# milissegundos a cada boot e a cada processo de teste. Não é segredo: é hash de
+# uma senha jogada fora.
+#
+# O custo tem de acompanhar o dos hashes reais — se o dummy ficar mais barato,
+# o oráculo de tempo reabre. Hoje bate porque o `pwd_context` usa o default do
+# passlib (12) e `settings.bcrypt_rounds` não é aplicado a ele; quem ligar essa
+# configuração precisa regerar este hash. É o que
+# `test_dummy_hash_cost_matches_the_real_one` cobra.
 DUMMY_PASSWORD_HASH = "$2b$12$hC.ULm90gnH9mf/U6suX2ezkP9nmIJr6IvegxxvGTZ1toStl/.WqW"
 
 

@@ -247,6 +247,31 @@ async def test_login_unknown_user_still_verifies_password(client_no_user):
     )
 
 
+def _custo_do_hash(hash_bcrypt: str) -> str:
+    """Cost (número de rounds) declarado no prefixo `$2b$NN$` do hash."""
+    return hash_bcrypt.split("$")[2]
+
+
+def test_dummy_hash_cost_matches_the_real_one():
+    """
+    O hash descartável precisa custar o mesmo que um hash de verdade.
+
+    A defesa contra enumeração por tempo depende disso: se o dummy ficar mais
+    barato que o hash das senhas reais, o e-mail inexistente volta a responder
+    mais rápido e o oráculo reabre — sem que nenhum outro teste perceba.
+
+    Hoje a igualdade é coincidência: `settings.bcrypt_rounds` não alimenta o
+    `pwd_context` (o passlib usa o próprio default, 12), e o dummy foi gerado
+    com 12 na mão. Este teste é o que transforma a coincidência em contrato:
+    mexer em um dos lados sem o outro fica vermelho aqui.
+    """
+    from app.core.security import DUMMY_PASSWORD_HASH, hash_password
+
+    real = hash_password("SenhaDeReferencia1")
+
+    assert _custo_do_hash(DUMMY_PASSWORD_HASH) == _custo_do_hash(real)
+
+
 @pytest.mark.asyncio
 async def test_login_verifies_password_off_the_event_loop(client_no_user):
     """
