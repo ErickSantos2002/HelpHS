@@ -21,6 +21,10 @@ ADMIN_EMAIL = "admin@test.com"
 ADMIN_PASSWORD = "Test@123456"
 _HASHED = _pwd.hash(ADMIN_PASSWORD)
 
+# A mesma resposta para senha errada e para e-mail inexistente: distinguir os
+# dois casos entregaria de graça quais e-mails têm conta
+_DETALHE_CREDENCIAIS = "E-mail ou senha incorretos."
+
 
 def _make_user(status=UserStatus.active):
     """Build a mock User object that satisfies attribute lookups without ORM."""
@@ -143,6 +147,7 @@ async def test_login_wrong_password(client_ok):
         json={"email": ADMIN_EMAIL, "password": "WrongPassword!"},
     )
     assert response.status_code == 401
+    assert response.json()["detail"] == _DETALHE_CREDENCIAIS
 
 
 @pytest.mark.asyncio
@@ -152,6 +157,8 @@ async def test_login_unknown_user(client_no_user):
         json={"email": "nobody@test.com", "password": ADMIN_PASSWORD},
     )
     assert response.status_code == 401
+    # Mesmo detalhe do teste acima: a mensagem não distingue os dois casos
+    assert response.json()["detail"] == _DETALHE_CREDENCIAIS
 
 
 @pytest.mark.asyncio
@@ -306,32 +313,7 @@ async def test_login_verifies_password_off_the_event_loop(client_no_user):
     )
 
 
-@pytest.mark.asyncio
-async def test_login_unknown_user_message_is_the_same():
-    """
-    A mensagem de erro não distingue e-mail inexistente de senha errada.
-
-    Os dois cenários rodam em sequência, e não com as duas fixtures de client
-    juntas: ambas escrevem em `app.dependency_overrides`, e a segunda
-    silenciosamente substituiria o banco da primeira.
-    """
-    from app.core.database import get_db
-
-    async def _login(usuario_no_banco, senha):
-        _fake_redis._store.clear()
-        app.dependency_overrides[get_db] = _make_db_mock(usuario_no_banco)
-        with patch("app.core.security.get_redis", new=_get_fake_redis):
-            async with AsyncClient(transport=ASGITransport(app=app), base_url="http://test") as c:
-                return await c.post(
-                    "/api/v1/auth/login",
-                    json={"email": ADMIN_EMAIL, "password": senha},
-                )
-
-    try:
-        inexistente = await _login(None, ADMIN_PASSWORD)
-        senha_errada = await _login(_make_user(), "SenhaErrada1")
-    finally:
-        app.dependency_overrides.clear()
-
-    assert inexistente.status_code == senha_errada.status_code == 401
-    assert inexistente.json()["detail"] == senha_errada.json()["detail"]
+# A igualdade das mensagens é conferida em test_login_wrong_password e
+# test_login_unknown_user, que já exercitam os dois cenários com as fixtures do
+# arquivo — não vale um terceiro teste reimplementando o harness e pagando dois
+# bcrypts reais para reafirmar o mesmo.

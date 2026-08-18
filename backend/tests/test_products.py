@@ -419,19 +419,21 @@ def _db_capturando_queries(product, equipments, count=1):
 
     O banco é mockado, então um `.where()` a mais não muda o resultado — para a
     listagem, a prova do escopo é a query emitida conter o filtro por dono.
+
+    O resultado é o mesmo para toda chamada: cada consumidor lê só o campo que
+    lhe interessa (`scalar_one_or_none` para o produto, `scalar_one` para a
+    contagem, `scalars().all()` para as linhas), então não é preciso acertar a
+    ordem das chamadas — e o teste não quebra se o endpoint passar a consultar
+    em outra sequência.
     """
     queries: list[str] = []
-    idx = 0
 
     async def _execute(stmt, *args, **kwargs):
-        nonlocal idx
         queries.append(str(stmt))
         result = MagicMock()
-        # 1ª chamada: get_or_404 do produto; as seguintes, contagem e linhas
-        result.scalar_one_or_none.return_value = product if idx == 0 else None
+        result.scalar_one_or_none.return_value = product
         result.scalar_one.return_value = count
-        result.scalars.return_value.all.return_value = [] if idx == 0 else equipments
-        idx += 1
+        result.scalars.return_value.all.return_value = equipments
         return result
 
     session = AsyncMock()
