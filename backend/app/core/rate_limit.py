@@ -20,7 +20,7 @@ from app.core.config import get_settings
 
 settings = get_settings()
 
-_is_testing = settings.app_env == "testing"
+_is_testing = settings.is_testing
 
 limiter = Limiter(
     key_func=get_remote_address,

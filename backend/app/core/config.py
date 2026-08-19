@@ -2,6 +2,7 @@ import json
 from functools import lru_cache
 from urllib.parse import urlparse
 
+from pydantic import field_validator
 from pydantic_settings import BaseSettings, SettingsConfigDict
 
 # Nomes e endereços que só existem na máquina de quem desenvolve. Comparar o
@@ -12,6 +13,11 @@ _HOSTS_LOCAIS = frozenset({"localhost", "127.0.0.1", "::1", "0.0.0.0", ""})
 
 # APP_ENV vem digitado à mão no painel de deploy: "Production" e "prod" precisam
 # valer como produção, senão um detalhe de caixa desliga TODAS as validações.
+#
+# A tolerância mora no próprio campo (ver `_normaliza_app_env`), não em cada
+# leitura: enquanto estava só aqui, `is_development` e o rate limiter
+# comparavam a string crua — `APP_ENV=Testing` num job de CI subia o limiter
+# ligado contra um Redis inexistente, e `Development` desligava o /docs calado.
 _NOMES_DE_PRODUCAO = frozenset({"production", "prod"})
 
 
@@ -31,6 +37,12 @@ class Settings(BaseSettings):
 
     # App
     app_env: str = "development"
+
+    @field_validator("app_env")
+    @classmethod
+    def _normaliza_app_env(cls, valor: str) -> str:
+        """Ponto único onde a caixa e o espaço do APP_ENV deixam de importar."""
+        return valor.strip().lower()
     app_host: str = "0.0.0.0"
     app_port: int = 8000
     api_prefix: str = "/api/v1"
@@ -89,7 +101,7 @@ class Settings(BaseSettings):
     bcrypt_rounds: int = 12
 
     def model_post_init(self, __context) -> None:
-        if self.app_env.strip().lower() not in _NOMES_DE_PRODUCAO:
+        if not self.is_production:
             return
 
         if len(self.secret_key) < 32:
@@ -232,9 +244,20 @@ class Settings(BaseSettings):
     rate_limit_default: str = "100/15minutes"
     rate_limit_login: str = "5/15minutes"
 
+    # As três leituras do ambiente ficam juntas e comparam o valor já
+    # normalizado pelo `_normaliza_app_env` — nenhuma delas repete o strip/lower.
+
+    @property
+    def is_production(self) -> bool:
+        return self.app_env in _NOMES_DE_PRODUCAO
+
     @property
     def is_development(self) -> bool:
         return self.app_env == "development"
+
+    @property
+    def is_testing(self) -> bool:
+        return self.app_env == "testing"
 
     @property
     def allowed_extensions(self) -> list[str]:

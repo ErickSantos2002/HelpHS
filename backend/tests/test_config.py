@@ -176,3 +176,49 @@ def test_testing_keeps_localhost_default():
 def test_production_still_rejects_short_secret_key():
     with pytest.raises(ValueError, match="SECRET_KEY"):
         _producao(secret_key="curta")
+
+
+# ── A normalização vale para TODAS as leituras do APP_ENV ─────
+#
+# A tolerância de caixa e espaço existia só dentro do ramo de produção. As
+# outras duas leituras comparavam a string crua, então `APP_ENV=Testing` num
+# job de CI subia o rate limiter LIGADO apontando para um Redis que não existe,
+# e `APP_ENV=Development` desligava o /docs calado. Normalizar na origem — no
+# próprio campo — faz as três leituras enxergarem o mesmo valor.
+
+
+@pytest.mark.parametrize(
+    ("digitado", "esperado"),
+    [
+        ("Production", "production"),
+        (" testing ", "testing"),
+        ("DEVELOPMENT", "development"),
+        ("  Prod", "prod"),
+    ],
+)
+def test_app_env_is_stored_normalized(digitado, esperado):
+    assert _settings(app_env=digitado, cors_origins=_DOMINIO_REAL, frontend_url=_DOMINIO_REAL).app_env == esperado
+
+
+@pytest.mark.parametrize("valor", ["development", "Development", " DEVELOPMENT "])
+def test_is_development_ignores_case_and_spacing(valor):
+    """`is_development` liga o /docs e o echo de SQL — caixa não pode desligar isso."""
+    assert _settings(app_env=valor).is_development
+
+
+@pytest.mark.parametrize("valor", ["testing", "Testing", " TESTING "])
+def test_is_testing_ignores_case_and_spacing(valor):
+    """
+    É o que o rate limiter consulta para subir desligado e em memória.
+
+    Com a comparação exata, `APP_ENV=Testing` no CI deixava o limiter ligado
+    contra o `redis_url` — a suíte de auth batia num Redis inexistente.
+    """
+    assert _settings(app_env=valor).is_testing
+
+
+def test_production_is_not_development_nor_testing():
+    s = _producao()
+    assert not s.is_development
+    assert not s.is_testing
+    assert s.is_production
