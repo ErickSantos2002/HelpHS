@@ -6,9 +6,17 @@ aplicação se recusa a subir em produção com valor de desenvolvimento, do mes
 jeito que já faz com a SECRET_KEY curta.
 """
 
+import os
+from unittest.mock import patch
+
 import pytest
 
 from app.core.config import Settings
+
+# Variáveis que, exportadas no shell, mudariam o resultado destes testes: são
+# exatamente as que a suíte quer avaliar no default. O conftest já exporta
+# APP_ENV, e os containers de dev e staging exportam CORS_ORIGINS.
+_ENVS_SENSIVEIS = frozenset({"APP_ENV", "CORS_ORIGINS", "SECRET_KEY", "FRONTEND_URL"})
 
 # Valores mínimos para instanciar Settings sem esbarrar em outra validação
 _BASE = {
@@ -23,10 +31,16 @@ def _settings(**overrides) -> Settings:
     """
     Settings isolado do ambiente.
 
-    `_env_file=None` ignora o `.env` da máquina; sem isso o teste passaria a
-    depender da configuração local de quem roda — e testaria outra coisa.
+    `_env_file=None` ignora o `.env` da máquina — mas só ele. Variável
+    exportada no shell vence o default do pydantic-settings, então quem tivesse
+    CORS_ORIGINS no ambiente veria os testes de default quebrarem sem ter
+    mexido em nada. Daí o segundo isolamento: as sensíveis saem do
+    `os.environ` durante a construção e o `patch.dict` devolve tudo ao sair.
     """
-    return Settings(_env_file=None, **{**_BASE, **overrides})
+    with patch.dict(os.environ):
+        for nome in [k for k in os.environ if k.upper() in _ENVS_SENSIVEIS]:
+            os.environ.pop(nome, None)
+        return Settings(_env_file=None, **{**_BASE, **overrides})
 
 
 def _producao(**overrides) -> Settings:
@@ -47,9 +61,8 @@ def _producao(**overrides) -> Settings:
 # com "*", origem liberada para qualquer site.
 
 
-def test_production_rejects_default_localhost_origins(monkeypatch):
+def test_production_rejects_default_localhost_origins():
     """Sem CORS_ORIGINS no ambiente, o default de localhost não pode passar."""
-    monkeypatch.delenv("CORS_ORIGINS", raising=False)
     with pytest.raises(ValueError, match="CORS_ORIGINS"):
         _settings(app_env="production", frontend_url=_DOMINIO_REAL)
 
@@ -222,3 +235,33 @@ def test_production_is_not_development_nor_testing():
     assert not s.is_development
     assert not s.is_testing
     assert s.is_production
+
+
+# ── O helper precisa isolar do ambiente, não só do .env ───────
+#
+# `_env_file=None` cala o `.env` da máquina, mas não as variáveis exportadas no
+# shell — e elas vencem o default do pydantic-settings. Quem tivesse
+# CORS_ORIGINS no ambiente (o caso de dentro dos containers de dev e staging)
+# via os testes de default quebrarem sem ter mexido em nada, exatamente o
+# problema que o conftest foi escrito para resolver.
+
+
+@pytest.mark.parametrize(
+    ("variavel", "valor"),
+    [
+        ("CORS_ORIGINS", "https://exportado.example.com"),
+        ("SECRET_KEY", "y" * 40),
+        ("APP_ENV", "production"),
+        ("FRONTEND_URL", "https://exportado.example.com"),
+    ],
+)
+def test_helper_ignores_exported_environment(monkeypatch, variavel, valor):
+    """Variável sensível exportada no shell não pode mudar o Settings do teste."""
+    monkeypatch.setenv(variavel, valor)
+
+    s = _settings()
+
+    assert "http://localhost:5173" in s.get_cors_origins()
+    assert s.secret_key == _BASE["secret_key"]
+    assert s.app_env == "development"
+    assert s.frontend_url == "http://localhost:5173"
