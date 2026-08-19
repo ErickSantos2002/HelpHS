@@ -41,6 +41,9 @@ export default defineConfig({
       reporter: ["text", "lcov"],
       include: [
         "src/components/ui/**/*.tsx",
+        // Os guards de rota decidem quem vê o quê — sem eles no include, o
+        // relatório dizia 50% sem saber que essa camada existia.
+        "src/components/layout/**/*.tsx",
         "src/lib/**/*.ts",
         "src/services/**/*.ts",
         "src/contexts/**/*.tsx",
