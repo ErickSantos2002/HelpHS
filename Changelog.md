@@ -79,6 +79,10 @@ Datas em DD/MM/AAAA.
 ### CI
 - Vitest passou a rodar no job do frontend, entre o typecheck e o build
   (`1583b8b`).
+- Backend reformatado com o black pinado (`57ca9d9`), devolvendo o CI ao verde:
+  o Black format check reprovava no main desde 06/08 e, por rodar antes do
+  pytest, impedia a suíte do backend de rodar — o gate de testes estava morto
+  sem ninguém perceber. Reformatação mecânica, sem mudança de lógica.
 - Suíte do backend deixou de depender do `.env` local (`e4ec7f2`): um
   `conftest.py` fixa `APP_ENV=testing` antes dos imports, então `pytest` roda
   verde sem variável no comando. Antes, quem rodasse localmente subia o rate

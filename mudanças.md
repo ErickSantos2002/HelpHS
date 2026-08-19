@@ -73,6 +73,13 @@ esperava `403`), provando que exercitavam a lacuna real.
   reformatar tudo de uma vez ou alinhar ruff/black. Os arquivos novos desta
   rodada são black-limpos.
 
+  **Resolvido em 19/08/2026 (`57ca9d9`)**: o primeiro push da frente revelou a
+  gravidade real — **o CI do main estava vermelho desde 06/08** (seis runs
+  seguidos), e como o black roda antes do pytest no job, **a suíte do backend
+  nunca rodava no CI**: o gate de testes estava morto sem ninguém perceber.
+  Decisão do Rickelme: reformatação mecânica com o black pinado — 27 arquivos,
+  zero mudança de lógica, suíte verde (431/82,34%) e ruff limpo depois.
+
 ### Achados #3.2 e #4 — enumeração por tempo e CORS (`f8e6013`, `8ab84c8`)
 
 Mesma disciplina do #5: investigação primeiro, aprovação, testes falhando
