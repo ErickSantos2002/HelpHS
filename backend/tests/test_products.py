@@ -484,7 +484,13 @@ async def test_staff_listing_is_not_scoped(patch_redis):
 
 @pytest.mark.asyncio
 async def test_client_cannot_get_other_owners_equipment(patch_redis):
-    """Equipamento de outro cliente devolve 403, mesmo sabendo o UUID."""
+    """
+    Equipamento de outro cliente devolve 404, mesmo sabendo o UUID.
+
+    404 e não 403: o 403 confirmava que aquele id existe. Como o objetivo da
+    correção era justamente fechar oráculos de existência, distinguir "não é
+    seu" de "não existe" entregava de graça o que o resto da mudança tirou.
+    """
     from app.core.database import get_db
 
     equip = _mock_equipment()
@@ -495,7 +501,7 @@ async def test_client_cannot_get_other_owners_equipment(patch_redis):
     async with AsyncClient(transport=ASGITransport(app=app), base_url="http://test") as c:
         resp = await c.get(f"/api/v1/equipments/{_EQUIP_ID}")
 
-    assert resp.status_code == 403
+    assert resp.status_code == 404
 
 
 @pytest.mark.asyncio
@@ -515,7 +521,7 @@ async def test_client_cannot_get_ownerless_equipment(patch_redis):
     async with AsyncClient(transport=ASGITransport(app=app), base_url="http://test") as c:
         resp = await c.get(f"/api/v1/equipments/{_EQUIP_ID}")
 
-    assert resp.status_code == 403
+    assert resp.status_code == 404
 
 
 @pytest.mark.asyncio
@@ -554,7 +560,7 @@ async def test_ownership_refusal_message_is_the_same_everywhere(patch_redis):
         _override_user(_CLIENT)
         async with AsyncClient(transport=ASGITransport(app=app), base_url="http://test") as c:
             resp = await getattr(c, metodo)(url, **kwargs)
-        assert resp.status_code == 403, resp.text
+        assert resp.status_code == 404, resp.text
         return resp.json()["detail"]
 
     mensagens = {
@@ -802,3 +808,58 @@ async def test_client_cannot_set_owner_on_self_service_update(patch_redis):
     assert equip.owner_id == _CLIENT.id, (
         "o cliente não pode transferir o dono do próprio equipamento pelo /equipment/my"
     )
+
+
+# ── A recusa não pode denunciar o que existe ──────────────────
+#
+# Decisão revista: o par 403/"não é seu" + 404/"não existe" dizia ao cliente
+# quais ids estão em uso. A consistência com o 403 dos chamados era o argumento
+# a favor de manter, e perde — fechar o oráculo aqui não custa nada.
+
+
+@pytest.mark.asyncio
+async def test_refusal_is_indistinguishable_from_not_found(patch_redis):
+    """
+    A resposta para equipamento alheio é igual, byte a byte, à de inexistente.
+
+    Não basta o status bater: se o texto do detalhe diferisse, a mensagem
+    viraria o oráculo que o status deixou de ser.
+    """
+    from app.core.database import get_db
+
+    alheio = _mock_equipment()
+    alheio.owner_id = uuid.uuid4()
+
+    async def _resposta(equipamento):
+        app.dependency_overrides[get_db] = _db_override(equipamento)
+        _override_user(_CLIENT)
+        async with AsyncClient(transport=ASGITransport(app=app), base_url="http://test") as c:
+            return await c.get(f"/api/v1/equipments/{_EQUIP_ID}")
+
+    de_outro = await _resposta(alheio)
+    inexistente = await _resposta(None)
+
+    assert de_outro.status_code == inexistente.status_code == 404
+    assert de_outro.json() == inexistente.json()
+
+
+@pytest.mark.asyncio
+async def test_staff_on_self_service_endpoint_still_gets_403(patch_redis):
+    """
+    Para staff a recusa continua sendo 403, e é o certo.
+
+    Os /equipment/my são estritos até para admin, mas esconder a existência de
+    quem já enxerga o parque inteiro pelo /equipments/{id} não protegeria nada
+    — só transformaria "não é seu" numa resposta enganosa.
+    """
+    from app.core.database import get_db
+
+    equip = _mock_equipment()
+    equip.owner_id = uuid.uuid4()
+    app.dependency_overrides[get_db] = _db_override(equip)
+    _override_user(_mock_user(UserRole.technician))
+
+    async with AsyncClient(transport=ASGITransport(app=app), base_url="http://test") as c:
+        resp = await c.delete(f"/api/v1/equipment/my/{_EQUIP_ID}")
+
+    assert resp.status_code == 403, resp.text

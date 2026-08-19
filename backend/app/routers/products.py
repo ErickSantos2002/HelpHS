@@ -12,13 +12,14 @@ Permissões:
   Equipments (sub-resource de produto):
     POST   /products/{id}/equipments        — admin | technician
     GET    /products/{id}/equipments        — staff vê tudo; cliente só os próprios
-    GET    /equipments/{id}                 — staff vê tudo; cliente só o próprio (403)
+    GET    /equipments/{id}                 — staff vê tudo; cliente só o próprio (404)
     PATCH  /equipments/{id}                 — admin | technician
     DELETE /equipments/{id}                 — admin | technician (soft-delete)
 
   O escopo por dono vale para o perfil cliente: equipamento de outro cliente —
   ou sem dono — é negado, porque o número de série é dado do cliente. Os
-  endpoints /equipment/my* seguem a mesma regra por construção.
+  endpoints /equipment/my* seguem a mesma regra por construção. Para o cliente
+  a recusa sai como 404, indistinguível de um id inexistente; para staff, 403.
 
   Quem atribui o dono é o staff, no POST e no PATCH acima (campo `owner_id`,
   opcional). É o que impede o equipamento cadastrado pela tela de Produtos de
@@ -54,6 +55,12 @@ from app.utils.crud import get_or_404
 
 router = APIRouter(tags=["Products & Equipments"])
 
+# Uma constante só para os dois caminhos que devolvem 404 de equipamento: o id
+# que não existe e o equipamento de outro cliente. Se os textos divergissem, a
+# mensagem voltaria a denunciar qual dos dois casos é — o oráculo que o status
+# igual acabou de fechar.
+_EQUIPAMENTO_NAO_ENCONTRADO = "Equipment not found"
+
 
 # ── Helpers ───────────────────────────────────────────────────
 
@@ -86,12 +93,26 @@ def _check_equipment_owner(equipment: Equipment, actor: User) -> None:
     Não abre exceção para staff — quem decide isso é o endpoint: os endpoints
     `/equipment/my` são estritos até para admin (é o *meu* equipamento), e o
     `GET /equipments/{id}` chama esta função só quando o ator é cliente.
+
+    Para o cliente a recusa sai como 404, idêntica à de um id que não existe.
+    O 403 confirmava que aquele equipamento existe — oráculo de existência
+    justamente na mudança feita para fechar oráculos. Para staff continua 403:
+    quem já enxerga o parque inteiro pelo `GET /equipments/{id}` não ganha
+    informação nenhuma com o 404, que só seria uma resposta enganosa.
     """
-    if equipment.owner_id != actor.id:
+    if equipment.owner_id == actor.id:
+        return
+
+    if actor.role == UserRole.client:
         raise HTTPException(
-            status_code=status.HTTP_403_FORBIDDEN,
-            detail="Este equipamento não está vinculado ao seu cadastro.",
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail=_EQUIPAMENTO_NAO_ENCONTRADO,
         )
+
+    raise HTTPException(
+        status_code=status.HTTP_403_FORBIDDEN,
+        detail="Este equipamento não está vinculado ao seu cadastro.",
+    )
 
 
 async def _valida_dono(db: AsyncSession, owner_id: uuid.UUID) -> None:
@@ -333,7 +354,7 @@ async def get_equipment(
     db: Annotated[AsyncSession, Depends(get_db)],
     actor: Annotated[User, Depends(get_current_user)],
 ) -> EquipmentResponse:
-    equipment = await get_or_404(db, Equipment, equipment_id, "Equipment not found")
+    equipment = await get_or_404(db, Equipment, equipment_id, _EQUIPAMENTO_NAO_ENCONTRADO)
 
     # Staff precisa ver o parque inteiro para dar suporte. Para o cliente vale a
     # regra de dono — e equipamento sem dono também é negado (fail closed), o
@@ -351,7 +372,7 @@ async def update_equipment(
     db: Annotated[AsyncSession, Depends(get_db)],
     actor: Annotated[User, Depends(authorize(UserRole.admin, UserRole.technician))],
 ) -> EquipmentResponse:
-    equipment = await get_or_404(db, Equipment, equipment_id, "Equipment not found")
+    equipment = await get_or_404(db, Equipment, equipment_id, _EQUIPAMENTO_NAO_ENCONTRADO)
 
     # É por aqui que se conserta o equipamento cadastrado sem dono. Enviar
     # `owner_id: null` desvincula de propósito.
@@ -451,7 +472,7 @@ async def update_my_equipment(
     db: Annotated[AsyncSession, Depends(get_db)],
     actor: Annotated[User, Depends(get_current_user)],
 ) -> EquipmentResponse:
-    equipment = await get_or_404(db, Equipment, equipment_id, "Equipment not found")
+    equipment = await get_or_404(db, Equipment, equipment_id, _EQUIPAMENTO_NAO_ENCONTRADO)
     _check_equipment_owner(equipment, actor)
 
     if body.serial_number and body.serial_number != equipment.serial_number:
@@ -478,7 +499,7 @@ async def delete_my_equipment(
     db: Annotated[AsyncSession, Depends(get_db)],
     actor: Annotated[User, Depends(get_current_user)],
 ) -> None:
-    equipment = await get_or_404(db, Equipment, equipment_id, "Equipment not found")
+    equipment = await get_or_404(db, Equipment, equipment_id, _EQUIPAMENTO_NAO_ENCONTRADO)
     _check_equipment_owner(equipment, actor)
     equipment.is_active = False
     _audit(db, AuditAction.delete, actor.id, "equipment", equipment.id)
@@ -491,7 +512,7 @@ async def delete_equipment(
     db: Annotated[AsyncSession, Depends(get_db)],
     actor: Annotated[User, Depends(authorize(UserRole.admin, UserRole.technician))],
 ) -> None:
-    equipment = await get_or_404(db, Equipment, equipment_id, "Equipment not found")
+    equipment = await get_or_404(db, Equipment, equipment_id, _EQUIPAMENTO_NAO_ENCONTRADO)
     equipment.is_active = False
     _audit(db, AuditAction.delete, actor.id, "equipment", equipment.id)
     await db.commit()
