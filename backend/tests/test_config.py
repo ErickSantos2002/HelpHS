@@ -210,7 +210,8 @@ def test_production_still_rejects_short_secret_key():
     ],
 )
 def test_app_env_is_stored_normalized(digitado, esperado):
-    assert _settings(app_env=digitado, cors_origins=_DOMINIO_REAL, frontend_url=_DOMINIO_REAL).app_env == esperado
+    s = _settings(app_env=digitado, cors_origins=_DOMINIO_REAL, frontend_url=_DOMINIO_REAL)
+    assert s.app_env == esperado
 
 
 @pytest.mark.parametrize("valor", ["development", "Development", " DEVELOPMENT "])

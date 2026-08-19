@@ -655,9 +655,8 @@ async def test_staff_can_assign_owner_on_create(patch_redis):
         )
 
     assert resp.status_code == 201, resp.text
-    assert resp.json()["owner_id"] == str(dono.id), (
-        "sem gravar o owner_id o equipamento nasce órfão e fica invisível ao cliente"
-    )
+    # Sem gravar o owner_id o equipamento nasce órfão e fica invisível ao cliente.
+    assert resp.json()["owner_id"] == str(dono.id), "o dono informado não foi gravado"
 
 
 @pytest.mark.asyncio
@@ -783,9 +782,8 @@ async def test_client_cannot_set_owner_on_self_service_create(patch_redis):
         )
 
     assert resp.status_code == 201, resp.text
-    assert resp.json()["owner_id"] == str(_CLIENT.id), (
-        "o dono do equipamento criado em /equipment/my é sempre quem fez a chamada"
-    )
+    # O dono do equipamento criado em /equipment/my é sempre quem fez a chamada.
+    assert resp.json()["owner_id"] == str(_CLIENT.id), "o cliente escolheu o dono"
 
 
 @pytest.mark.asyncio
@@ -805,9 +803,8 @@ async def test_client_cannot_set_owner_on_self_service_update(patch_redis):
         )
 
     assert resp.status_code == 200, resp.text
-    assert equip.owner_id == _CLIENT.id, (
-        "o cliente não pode transferir o dono do próprio equipamento pelo /equipment/my"
-    )
+    # Transferir o dono pelo /equipment/my daria ao cliente o controle do vínculo.
+    assert equip.owner_id == _CLIENT.id, "o owner_id do corpo chegou ao banco"
 
 
 # ── A recusa não pode denunciar o que existe ──────────────────
