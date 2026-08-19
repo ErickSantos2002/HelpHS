@@ -12,6 +12,14 @@ describe("getApiError", () => {
     expect(getApiError(err)).toContain("não encontrado");
   });
 
+  it("traduz o 404 de equipamento — o que o cliente vê para equipamento alheio", () => {
+    // Desde que a recusa por dono virou 404 indistinguível do id inexistente,
+    // "Equipment not found" é a mensagem que chega ao cliente nesse caso.
+    // Sem a tradução, o toast mostrava a string crua em inglês.
+    const err = { response: { status: 404, data: { detail: "Equipment not found" } } };
+    expect(getApiError(err)).toBe("Equipamento não encontrado. Ele pode ter sido excluído.");
+  });
+
   it("extrai a mensagem de erro de validação do FastAPI", () => {
     const err = {
       response: {

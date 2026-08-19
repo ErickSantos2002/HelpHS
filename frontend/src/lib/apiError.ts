@@ -39,6 +39,9 @@ const TRANSLATIONS: Record<string, string> = {
   "Assignee not found": "O técnico selecionado não existe mais no sistema.",
   "User not found": "Usuário não encontrado.",
   "Article not found": "Artigo não encontrado.",
+  // Também é o que o cliente recebe ao tentar equipamento de outro dono: a
+  // recusa sai como 404 indistinguível do id inexistente, de propósito.
+  "Equipment not found": "Equipamento não encontrado. Ele pode ter sido excluído.",
   "Comment not found": "Comentário não encontrado.",
   "Event not found": "Evento não encontrado.",
   "Notification not found": "Notificação não encontrada.",
