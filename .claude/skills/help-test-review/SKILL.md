@@ -43,14 +43,14 @@ Padrões de cada suíte:
 
 ## ⚠️ O que o CI roda — e o que não roda
 
-O `.github/workflows/ci.yml` roda **pytest** (com o gate de 80%) e, no front,
-só **ESLint + tsc + build**. Ou seja:
+O `.github/workflows/ci.yml` roda **pytest** (com o gate de 80%) no backend e,
+no front, **ESLint + tsc + Vitest + build**. Ou seja:
 
-- **Vitest não roda no CI.** Teste de front quebrado não bloqueia merge —
-  rodar `npm test` antes de commitar é disciplina, não automação.
+- **Vitest roda no CI desde `1583b8b`** (entre o typecheck e o build): teste
+  de front quebrado bloqueia o pipeline igual ao pytest.
 - **E2E e k6 nunca rodam sozinhos.** São execução manual e deliberada.
 
-Ao revisar, se um cenário crítico só está coberto por Vitest ou e2e, dizer
+Ao revisar, se um cenário crítico só está coberto por e2e ou k6, dizer
 explicitamente que ele está fora do gate do CI.
 
 ## Em que nível testar
