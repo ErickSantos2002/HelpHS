@@ -10,6 +10,33 @@ Datas em DD/MM/AAAA.
 
 ## [Não publicado]
 
+### Segurança
+- O hash descartável do login passa a acompanhar `BCRYPT_ROUNDS` sozinho
+  (`a1bbd94`). Ligar a variável ao `pwd_context` na v1.7.0 deixou o knob vivo e
+  criou uma armadilha: o dummy seguia fixado em 12 por literal, então
+  `BCRYPT_ROUNDS=14` no painel fazia o e-mail desconhecido custar 486 ms e o
+  cadastrado 1777 ms — o oráculo de tempo reabria **maior** do que era antes de
+  ser fechado. O teste de paridade não pegava porque comparava contra o
+  contexto do processo de teste, que nunca tem a variável no ambiente. Agora o
+  import compara o custo embutido no literal com o do contexto e só regera
+  quando divergem: o caminho normal não paga bcrypt nenhum.
+- `POST`, `PATCH` e `DELETE /equipment/my*` passam a exigir perfil `client`
+  (`b1ab978`). Com qualquer autenticado, staff criava equipamento pertencente a
+  staff — o mesmo estado que os endpoints de staff recusam com `400`, invisível
+  a todo cliente e impossível de vincular a chamado. A **leitura** fica aberta
+  de propósito, para não esconder equipamento legado de quem virou staff depois
+  de ter sido cliente.
+
+### Adicionado
+- Seletor de dono no cadastro de equipamento pela tela de Produtos
+  (`3efb0cf`), fechando o ciclo do `51a9cb8`: o backend aceitava `owner_id`
+  desde então, mas o `productService` omitia o campo e o equipamento continuava
+  nascendo órfão. Novo componente `SearchSelect` com busca no servidor — um
+  dropdown pré-carregado quebraria em silêncio ao passar de 100 clientes, que é
+  o teto de `GET /users`. O campo aparece ao criar **e** ao editar, com
+  "— Sem dono —", o que também conserta os órfãos existentes um a um.
+
+### Documentação
 - Guia de desenvolvimento local (`f27f38c`, `3485092`) e mini-Redis de dev em
   `backend/scripts/` (`5fc7562`); skill de test review atualizada sobre o
   Vitest no CI (`b1f10b7`).

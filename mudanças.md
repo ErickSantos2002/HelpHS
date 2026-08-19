@@ -7,6 +7,89 @@ O changelog do produto (o que o cliente vê) fica em
 
 ---
 
+## 19/08/2026 (noite) — Terceira rodada da revisão
+
+Um `/code-review` sobre 51 arquivos desde `154ec74` verificou token a token que
+a reformatação do black (`57ca9d9`) é semanticamente idêntica e aprovou o
+403→404, o `field_validator` do `APP_ENV`, o guard do
+`EMAIL_VERIFICATION_ENABLED` e os testes novos do front. Sobraram três achados,
+todos fechados aqui.
+
+| Commit | O que foi feito |
+|---|---|
+| `a1bbd94` | `fix:` **o dummy do login dessincronizava de `BCRYPT_ROUNDS`** — a única piora que a rodada anterior introduziu, e ela veio justamente de consertar outra coisa |
+| `b1ab978` | `fix:` **staff criava equipamento pertencente a staff** em `POST /equipment/my` |
+| `3efb0cf` | `feat:` **seletor de dono na ProductsPage**, fechando o ciclo do `51a9cb8` |
+
+### O knob vivo virou armadilha (`a1bbd94`)
+
+Ligar `bcrypt_rounds` ao `pwd_context` (`b06228f`) tirou a configuração morta —
+e criou uma pior: o dummy seguia fixado em 12 por literal. Medido antes de
+corrigir, com `BCRYPT_ROUNDS=14`: **o e-mail desconhecido custava 486 ms e o
+cadastrado 1777 ms**. O oráculo de tempo que o `f8e6013` fechou reabria maior
+do que era originalmente (1 ms contra 250 ms).
+
+O teste de paridade não pegava, e a razão importa: ele comparava o dummy com o
+`pwd_context` **do processo que roda a suíte**, que nunca tem `BCRYPT_ROUNDS`
+no ambiente. Afirmava 12 == 12 e passava verde enquanto produção divergia — um
+teste verdadeiro sobre o ambiente errado.
+
+Agora o import se encarrega: `_dummy_no_custo_do_contexto` compara o custo
+embutido no literal com o do contexto e **só regera quando divergem**. No
+caminho normal não paga bcrypt nenhum, que era o motivo de o hash ser fixo;
+quem sobe os rounds paga um hash por processo, uma vez. O contrato de teste
+passa a ser contra `settings.bcrypt_rounds`, não contra o contexto do processo.
+Depois da correção: **1846 ms contra 1796 ms**.
+
+### `/equipment/my` é do cliente, nos verbos que escrevem (`b1ab978`)
+
+`POST /equipment/my` fazia `owner_id = actor.id` com qualquer perfil, então
+técnico e admin criavam equipamento pertencente a staff — o mesmo estado que o
+`_valida_dono` recusa com 400 nos endpoints de staff. Equipamento assim some da
+listagem escopada e nunca vira chamado.
+
+`POST`, `PATCH` e `DELETE` passam a exigir `authorize(UserRole.client)`. A
+**leitura fica aberta de propósito**: se algum usuário virou staff depois de ter
+sido cliente, o equipamento antigo continua existindo, e negar o `GET`
+esconderia dele o que já era seu. Verificado antes que nenhuma tela quebra —
+`/equipment` não tem `RoleGuard`, mas o link da sidebar é `roles: ["client"]` e
+a `EquipmentPage` não ramifica por perfil; staff só chegava lá digitando a URL.
+
+Efeito colateral saudável: o ramo de 403 para staff no `_check_equipment_owner`
+virou código morto e saiu junto, com o teste que o cobria — ele passava, mas
+por um motivo que deixou de existir.
+
+### Seletor de dono (`3efb0cf`)
+
+O `productService` omitia `owner_id` nos tipos de payload, então o backend
+aceitava o campo desde `51a9cb8` e nenhum caller o enviava.
+
+Entra um `SearchSelect` em `components/ui`, com **busca no servidor**. Um
+dropdown pré-carregado não serve: `GET /users` tem `limit` máximo de 100 e
+ordena por `created_at desc`, então quebraria em silêncio ao passar de 100
+clientes — mostrando os 100 mais recentes, ordem que não ajuda a procurar um
+nome. O componente não conhece a API (recebe `onSearch`), o que mantém `ui/`
+apresentacional.
+
+O campo aparece ao criar **e** ao editar, com "— Sem dono —": é o que conserta
+os órfãos existentes um a um, sem migration. Sem backfill automático — o
+sistema não tem como adivinhar dono.
+
+Detalhe que só aparece implementando: o RED do service foi no **`tsc`**, não no
+Vitest. O runtime já repassava o payload inteiro; quem barrava era o tipo.
+
+### Fila desta rodada
+
+- **Higiene de rota**: `/onboarding` está sob `AuthGuard` mas **fora** do
+  `OnboardingGuard`, então staff consegue abrir a tela de onboarding digitando
+  a URL. O bloqueio no backend (`b1ab978`) já fechou a porta que importava — a
+  `OnboardingPage` chama `createMyEquipment` —, mas a rota em si continua
+  aberta. Higiene, sem urgência.
+- **Filtro "sem dono"** na listagem de equipamentos da ProductsPage, para o
+  staff encontrar os órfãos remanescentes sem varrer página por página.
+
+---
+
 ## 19/08/2026 — Push, ressurreição do CI e destrave do login
 
 O push dos 24 commits da frente de segurança revelou que **o CI do main
