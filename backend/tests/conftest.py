@@ -13,13 +13,44 @@ para o `Settings` validar.
 
 Precedência que faz isto funcionar: variável de ambiente vence o `.env` lido
 pelo pydantic-settings.
+
+As chaves JWT são geradas aqui, efêmeras, a cada sessão: os testes de login e
+de token de arquivo assinam RS256 de verdade, e `backend/keys/` é gitignored —
+sem isto, 54 testes morrem com FileNotFoundError em qualquer máquina sem o par
+(o CI ficou vermelho exatamente assim). Gerar sempre, em vez de usar as chaves
+do dev quando existem, também isola a suíte de material real.
 """
 
 import os
+import tempfile
 import threading
+from pathlib import Path
 
 os.environ["APP_ENV"] = "testing"
 os.environ.setdefault("DATABASE_URL", "postgresql+asyncpg://user:pass@localhost/db")
+
+from cryptography.hazmat.primitives import serialization  # noqa: E402
+from cryptography.hazmat.primitives.asymmetric import rsa  # noqa: E402
+
+_dir_de_chaves = Path(tempfile.mkdtemp(prefix="helphs-test-keys-"))
+_privada = rsa.generate_private_key(public_exponent=65537, key_size=2048)
+
+(_dir_de_chaves / "private.pem").write_bytes(
+    _privada.private_bytes(
+        encoding=serialization.Encoding.PEM,
+        format=serialization.PrivateFormat.PKCS8,
+        encryption_algorithm=serialization.NoEncryption(),
+    )
+)
+(_dir_de_chaves / "public.pem").write_bytes(
+    _privada.public_key().public_bytes(
+        encoding=serialization.Encoding.PEM,
+        format=serialization.PublicFormat.SubjectPublicKeyInfo,
+    )
+)
+
+os.environ["JWT_PRIVATE_KEY_PATH"] = str(_dir_de_chaves / "private.pem")
+os.environ["JWT_PUBLIC_KEY_PATH"] = str(_dir_de_chaves / "public.pem")
 
 
 class EspiaDeThread:
