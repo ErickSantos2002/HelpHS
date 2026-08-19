@@ -1,4 +1,4 @@
-export const APP_VERSION = "v1.6.0";
+export const APP_VERSION = "v1.7.0";
 
 export type EntryType = "novidade" | "corrigido" | "melhoria";
 
@@ -14,6 +14,18 @@ export interface ChangelogVersion {
 }
 
 export const CHANGELOG: ChangelogVersion[] = [
+  {
+    version: "v1.7.0",
+    date: "19/08/2026",
+    entries: [
+      { type: "corrigido", text: "Contas que ficavam presas no aviso \"Confirme seu e-mail para ativar a conta\" voltaram a entrar normalmente: o aviso só aparecerá quando a confirmação por e-mail estiver de fato ativa." },
+      { type: "melhoria", text: "Privacidade dos equipamentos: cada cliente agora vê somente os próprios aparelhos e números de série — equipamentos de outras empresas deixaram de aparecer nas consultas." },
+      { type: "melhoria", text: "Proteção extra no acesso: várias tentativas seguidas de senha incorreta passam a ser bloqueadas temporariamente." },
+      { type: "melhoria", text: "Entrar no sistema deixou de atrasar as demais operações em andamento nos horários de maior movimento." },
+      { type: "melhoria", text: "Reforço de segurança na exibição dos artigos da Base de Conhecimento." },
+      { type: "corrigido", text: "O aviso ao consultar um equipamento indisponível aparecia em inglês; agora está traduzido." },
+    ],
+  },
   {
     version: "v1.6.0",
     date: "10/08/2026",
