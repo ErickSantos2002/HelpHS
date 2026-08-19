@@ -21,7 +21,16 @@ from app.core.redis import get_redis
 settings = get_settings()
 
 bearer_scheme = HTTPBearer(auto_error=False)
-pwd_context = CryptContext(schemes=["bcrypt"], deprecated="auto")
+# `bcrypt__rounds` é o que liga BCRYPT_ROUNDS ao passlib. Sem esse argumento a
+# variável existia no `.env.example` e no `Settings` sem efeito nenhum: o custo
+# era sempre o default da biblioteca, e quem subisse com 14 no painel acharia
+# ter endurecido as senhas sem ter mudado nada.
+#
+# Mudar o valor só afeta hashes NOVOS — o custo vai gravado dentro do próprio
+# hash, então as senhas já cadastradas continuam sendo verificadas normalmente.
+pwd_context = CryptContext(
+    schemes=["bcrypt"], deprecated="auto", bcrypt__rounds=settings.bcrypt_rounds
+)
 
 
 def verify_password(plain: str, hashed: str) -> bool:
@@ -42,10 +51,13 @@ def hash_password(password: str) -> str:
 # uma senha jogada fora.
 #
 # O custo tem de acompanhar o dos hashes reais — se o dummy ficar mais barato,
-# o oráculo de tempo reabre. Hoje bate porque o `pwd_context` usa o default do
-# passlib (12) e `settings.bcrypt_rounds` não é aplicado a ele; quem ligar essa
-# configuração precisa regerar este hash. É o que
-# `test_dummy_hash_cost_matches_the_real_one` cobra.
+# o oráculo de tempo reabre. Quem subir BCRYPT_ROUNDS precisa regerar este hash
+# com o novo custo; `test_dummy_hash_cost_matches_the_real_one` compara o dummy
+# com o que o `pwd_context` produz de fato e fica vermelho até que isso seja
+# feito. Para regerar:
+#
+#     python -c "from app.core.security import hash_password; \
+#                import secrets; print(hash_password(secrets.token_urlsafe(32)))"
 DUMMY_PASSWORD_HASH = "$2b$12$hC.ULm90gnH9mf/U6suX2ezkP9nmIJr6IvegxxvGTZ1toStl/.WqW"
 
 

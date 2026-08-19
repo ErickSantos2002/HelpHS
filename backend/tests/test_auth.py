@@ -259,6 +259,22 @@ def _custo_do_hash(hash_bcrypt: str) -> str:
     return hash_bcrypt.split("$")[2]
 
 
+def test_bcrypt_rounds_setting_reaches_the_context():
+    """
+    `BCRYPT_ROUNDS` precisa chegar ao `pwd_context`.
+
+    A variável estava documentada no `.env.example` e lida pelo `Settings`, mas
+    ninguém a passava para o passlib: o custo real era sempre o default da
+    biblioteca. Quem subisse com `BCRYPT_ROUNDS=14` no painel acharia ter
+    endurecido o hash das senhas e não teria mudado nada — configuração que
+    finge proteger.
+    """
+    from app.core.config import get_settings
+    from app.core.security import pwd_context
+
+    assert pwd_context.to_dict().get("bcrypt__rounds") == get_settings().bcrypt_rounds
+
+
 def test_dummy_hash_cost_matches_the_real_one():
     """
     O hash descartável precisa custar o mesmo que um hash de verdade.
@@ -267,10 +283,9 @@ def test_dummy_hash_cost_matches_the_real_one():
     barato que o hash das senhas reais, o e-mail inexistente volta a responder
     mais rápido e o oráculo reabre — sem que nenhum outro teste perceba.
 
-    Hoje a igualdade é coincidência: `settings.bcrypt_rounds` não alimenta o
-    `pwd_context` (o passlib usa o próprio default, 12), e o dummy foi gerado
-    com 12 na mão. Este teste é o que transforma a coincidência em contrato:
-    mexer em um dos lados sem o outro fica vermelho aqui.
+    O lado direito é gerado pelo `pwd_context` já configurado, então a
+    comparação é contra o custo EFETIVO: subir `BCRYPT_ROUNDS` sem regerar o
+    dummy deixa este teste vermelho, que é exatamente o aviso desejado.
     """
     from app.core.security import DUMMY_PASSWORD_HASH, hash_password
 
