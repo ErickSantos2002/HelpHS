@@ -11,6 +11,7 @@ import pytest
 from httpx import ASGITransport, AsyncClient
 from passlib.context import CryptContext
 
+from app.core.security import _custo_do_hash
 from app.main import app
 from app.models.models import UserRole, UserStatus
 
@@ -254,11 +255,6 @@ async def test_login_unknown_user_still_verifies_password(client_no_user):
     )
 
 
-def _custo_do_hash(hash_bcrypt: str) -> str:
-    """Cost (número de rounds) declarado no prefixo `$2b$NN$` do hash."""
-    return hash_bcrypt.split("$")[2]
-
-
 def test_bcrypt_rounds_setting_reaches_the_context():
     """
     `BCRYPT_ROUNDS` precisa chegar ao `pwd_context`.
@@ -331,3 +327,66 @@ async def test_login_verifies_password_off_the_event_loop(client_no_user):
 # test_login_unknown_user, que já exercitam os dois cenários com as fixtures do
 # arquivo — não vale um terceiro teste reimplementando o harness e pagando dois
 # bcrypts reais para reafirmar o mesmo.
+
+
+# ── O dummy precisa acompanhar BCRYPT_ROUNDS sozinho ──────────
+#
+# Ligar `bcrypt_rounds` ao `pwd_context` deixou o knob vivo — e com ele uma
+# armadilha: o dummy estava fixado em 12 por literal, então `BCRYPT_ROUNDS=14`
+# no painel fazia o e-mail desconhecido custar 12 e o cadastrado custar 14.
+# Medido: 486 ms contra 1777 ms. O oráculo de tempo reabre com folga.
+#
+# O teste de paridade não pegava isso: ele compara contra o `pwd_context` do
+# processo que roda a suíte, que nunca tem BCRYPT_ROUNDS no ambiente — ou seja,
+# afirmava 12 == 12 e passava, enquanto produção divergia.
+
+
+def test_dummy_hash_is_regenerated_when_the_context_costs_differently():
+    """
+    Custo divergente obriga a regerar — é o que fecha o oráculo sozinho.
+
+    Um custo baixo mantém o teste rápido; o que se prova aqui é o mecanismo,
+    não o valor.
+    """
+    from passlib.context import CryptContext
+
+    from app.core.security import _custo_do_hash, _dummy_no_custo_do_contexto
+
+    barato = CryptContext(schemes=["bcrypt"], deprecated="auto", bcrypt__rounds=5)
+    fixo_em_12 = "$2b$12$hC.ULm90gnH9mf/U6suX2ezkP9nmIJr6IvegxxvGTZ1toStl/.WqW"
+
+    gerado = _dummy_no_custo_do_contexto(barato, fixo_em_12)
+
+    assert (
+        _custo_do_hash(gerado) == 5
+    ), "com o contexto custando diferente do literal, o dummy tem de ser refeito"
+    assert gerado != fixo_em_12
+
+
+def test_dummy_hash_is_reused_when_the_cost_already_matches():
+    """
+    Custo igual devolve o literal — o caminho normal não paga bcrypt nenhum.
+
+    É o motivo de o hash ser fixo: gerar no import somaria centenas de
+    milissegundos a cada boot e a cada processo de teste.
+    """
+    from app.core.security import _dummy_no_custo_do_contexto, pwd_context
+
+    fixo = "$2b$12$hC.ULm90gnH9mf/U6suX2ezkP9nmIJr6IvegxxvGTZ1toStl/.WqW"
+
+    assert _dummy_no_custo_do_contexto(pwd_context, fixo) is fixo
+
+
+def test_dummy_hash_cost_follows_the_configured_rounds():
+    """
+    Contrato contra a CONFIGURAÇÃO, não contra o contexto do processo.
+
+    A asserção que existia comparava o dummy com o que o `pwd_context` produz
+    aqui — verdadeira em qualquer ambiente, inclusive num onde ambos estivessem
+    errados juntos. Amarrar em `settings.bcrypt_rounds` é o que faz o teste
+    falar sobre produção.
+    """
+    from app.core.config import get_settings
+    from app.core.security import DUMMY_PASSWORD_HASH, _custo_do_hash
+
+    assert _custo_do_hash(DUMMY_PASSWORD_HASH) == get_settings().bcrypt_rounds

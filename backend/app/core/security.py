@@ -2,6 +2,7 @@
 JWT RS256 token creation, validation, and Redis-based blacklist.
 """
 
+import secrets
 from datetime import UTC, datetime, timedelta
 from typing import Annotated
 from uuid import UUID
@@ -41,24 +42,41 @@ def hash_password(password: str) -> str:
     return pwd_context.hash(password)
 
 
+def _custo_do_hash(hash_bcrypt: str) -> int:
+    """Cost (número de rounds) declarado no prefixo `$2b$NN$` do hash."""
+    return int(hash_bcrypt.split("$")[2])
+
+
+def _dummy_no_custo_do_contexto(contexto: CryptContext, hash_fixo: str) -> str:
+    """
+    Devolve um hash descartável que custa o mesmo que os hashes reais.
+
+    No caminho normal o literal já está no custo certo e sai como está — sem
+    pagar bcrypt nenhum no import. Quando `BCRYPT_ROUNDS` muda, o literal fica
+    defasado e é refeito uma vez por processo.
+    """
+    if _custo_do_hash(hash_fixo) == contexto.to_dict().get("bcrypt__rounds"):
+        return hash_fixo
+    return contexto.hash(secrets.token_urlsafe(32))
+
+
 # Hash descartável, de uma senha aleatória que ninguém conhece, usado quando o
 # e-mail informado no login não existe: sem ele o bcrypt seria pulado e a
 # resposta voltaria em ~1 ms, contra ~250 ms de um e-mail cadastrado — o tempo
 # viraria oráculo de quais contas existem.
 #
-# Fica fixo (12 rounds) em vez de gerado no import, que somaria centenas de
-# milissegundos a cada boot e a cada processo de teste. Não é segredo: é hash de
-# uma senha jogada fora.
+# O literal fica em 12 rounds em vez de ser gerado sempre, que somaria centenas
+# de milissegundos a cada boot e a cada processo de teste. Não é segredo: é
+# hash de uma senha jogada fora.
 #
-# O custo tem de acompanhar o dos hashes reais — se o dummy ficar mais barato,
-# o oráculo de tempo reabre. Quem subir BCRYPT_ROUNDS precisa regerar este hash
-# com o novo custo; `test_dummy_hash_cost_matches_the_real_one` compara o dummy
-# com o que o `pwd_context` produz de fato e fica vermelho até que isso seja
-# feito. Para regerar:
-#
-#     python -c "from app.core.security import hash_password; \
-#                import secrets; print(hash_password(secrets.token_urlsafe(32)))"
-DUMMY_PASSWORD_HASH = "$2b$12$hC.ULm90gnH9mf/U6suX2ezkP9nmIJr6IvegxxvGTZ1toStl/.WqW"
+# O custo TEM de acompanhar o dos hashes reais. Enquanto isso dependia de
+# alguém regerar o literal na mão, `BCRYPT_ROUNDS=14` no painel reabria o
+# oráculo em silêncio — o dummy custava 486 ms contra 1777 ms de um hash real,
+# e nenhum teste pegava, porque a suíte roda sem BCRYPT_ROUNDS no ambiente e
+# comparava 12 com 12. Agora o próprio import se encarrega.
+DUMMY_PASSWORD_HASH = _dummy_no_custo_do_contexto(
+    pwd_context, "$2b$12$hC.ULm90gnH9mf/U6suX2ezkP9nmIJr6IvegxxvGTZ1toStl/.WqW"
+)
 
 
 # Redis key prefixes
