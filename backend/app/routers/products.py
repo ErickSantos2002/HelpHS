@@ -19,6 +19,12 @@ Permissões:
   O escopo por dono vale para o perfil cliente: equipamento de outro cliente —
   ou sem dono — é negado, porque o número de série é dado do cliente. Os
   endpoints /equipment/my* seguem a mesma regra por construção.
+
+  Quem atribui o dono é o staff, no POST e no PATCH acima (campo `owner_id`,
+  opcional). É o que impede o equipamento cadastrado pela tela de Produtos de
+  nascer órfão e ficar assim: sem dono ele não aparece para cliente nenhum, e
+  recadastrar esbarra no número de série já usado. O campo NÃO existe nos
+  corpos aceitos pelos /equipment/my*, senão o cliente escolheria o dono.
 """
 
 import uuid
@@ -36,6 +42,8 @@ from app.schemas.product import (
     EquipmentCreate,
     EquipmentListResponse,
     EquipmentResponse,
+    EquipmentStaffCreate,
+    EquipmentStaffUpdate,
     EquipmentUpdate,
     ProductCreate,
     ProductListResponse,
@@ -83,6 +91,26 @@ def _check_equipment_owner(equipment: Equipment, actor: User) -> None:
         raise HTTPException(
             status_code=status.HTTP_403_FORBIDDEN,
             detail="Este equipamento não está vinculado ao seu cadastro.",
+        )
+
+
+async def _valida_dono(db: AsyncSession, owner_id: uuid.UUID) -> None:
+    """
+    Recusa dono que não existe ou que não é cliente.
+
+    Equipamento é do cliente. Apontar o dono para um técnico ou admin faria o
+    aparelho sumir do parque de todo mundo: a listagem filtra por dono quando
+    quem olha é cliente, e staff nenhum abre a tela de "meus equipamentos".
+
+    As duas recusas têm a mesma resposta porque, para quem preenche o
+    formulário, o problema é o mesmo — o dono escolhido não serve.
+    """
+    result = await db.execute(select(User).where(User.id == owner_id))
+    dono = result.scalar_one_or_none()
+    if dono is None or dono.role != UserRole.client:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail="O dono informado precisa ser um cliente cadastrado.",
         )
 
 
@@ -207,11 +235,14 @@ async def delete_product(
 )
 async def create_equipment(
     product_id: uuid.UUID,
-    body: EquipmentCreate,
+    body: EquipmentStaffCreate,
     db: Annotated[AsyncSession, Depends(get_db)],
     actor: Annotated[User, Depends(authorize(UserRole.admin, UserRole.technician))],
 ) -> EquipmentResponse:
     await get_or_404(db, Product, product_id, "Product not found")
+
+    if body.owner_id:
+        await _valida_dono(db, body.owner_id)
 
     if body.serial_number:
         dup = await db.execute(
@@ -226,6 +257,7 @@ async def create_equipment(
     equipment = Equipment(
         id=uuid.uuid4(),
         product_id=product_id,
+        owner_id=body.owner_id,
         name=body.name,
         serial_number=body.serial_number,
         model=body.model,
@@ -315,11 +347,16 @@ async def get_equipment(
 @router.patch("/equipments/{equipment_id}", response_model=EquipmentResponse)
 async def update_equipment(
     equipment_id: uuid.UUID,
-    body: EquipmentUpdate,
+    body: EquipmentStaffUpdate,
     db: Annotated[AsyncSession, Depends(get_db)],
     actor: Annotated[User, Depends(authorize(UserRole.admin, UserRole.technician))],
 ) -> EquipmentResponse:
     equipment = await get_or_404(db, Equipment, equipment_id, "Equipment not found")
+
+    # É por aqui que se conserta o equipamento cadastrado sem dono. Enviar
+    # `owner_id: null` desvincula de propósito.
+    if body.owner_id:
+        await _valida_dono(db, body.owner_id)
 
     if body.serial_number and body.serial_number != equipment.serial_number:
         dup = await db.execute(

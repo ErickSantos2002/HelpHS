@@ -64,6 +64,23 @@ class EquipmentUpdate(AppBaseModel):
     is_active: bool | None = None
 
 
+# Os endpoints de staff aceitam um campo a mais: o dono do equipamento.
+#
+# Ele fica em schema SEPARADO de propósito. `EquipmentCreate`/`EquipmentUpdate`
+# são os mesmos corpos aceitos pelos `/equipment/my`, onde quem chama é o
+# cliente — `owner_id` ali significaria o cliente escolhendo de quem é o
+# equipamento (o PATCH aplica o corpo com `setattr`). Herdando em vez de
+# repetir, um campo novo de equipamento entra uma vez só e vale para os dois.
+
+
+class EquipmentStaffCreate(EquipmentCreate):
+    owner_id: uuid.UUID | None = None
+
+
+class EquipmentStaffUpdate(EquipmentUpdate):
+    owner_id: uuid.UUID | None = None
+
+
 class EquipmentResponse(AppBaseModel):
     model_config = ConfigDict(from_attributes=True, str_strip_whitespace=True)
 

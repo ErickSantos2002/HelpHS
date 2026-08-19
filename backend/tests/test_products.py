@@ -580,3 +580,225 @@ async def test_staff_can_get_any_equipment(patch_redis):
         resp = await c.get(f"/api/v1/equipments/{_EQUIP_ID}")
 
     assert resp.status_code == 200
+
+
+# ═══════════════════════════════════════════════════════════════
+# ATRIBUIÇÃO DE DONO PELO STAFF
+# ═══════════════════════════════════════════════════════════════
+#
+# Sem isto o equipamento cadastrado pela tela de Produtos nascia órfão e assim
+# ficava: nenhum endpoint atribuía dono depois, então o cliente real não via o
+# aparelho na listagem, era barrado no GET, não conseguia abrir chamado para
+# ele e nem recadastrar (o número de série já estava tomado).
+#
+# O dono só pode ser atribuído pelos endpoints de STAFF. O schema é separado de
+# propósito: se `owner_id` entrasse no `EquipmentCreate`/`EquipmentUpdate`
+# compartilhado, o cliente passaria a mexer no dono pelos `/equipment/my`.
+
+
+def _db_por_entidade(**por_tabela):
+    """
+    Sessão que responde de acordo com a tabela consultada.
+
+    Um mesmo endpoint faz várias consultas (produto, série duplicada, dono), e
+    o mock de valor único devolvia a mesma linha para todas. Despachar pelo
+    nome da tabela no SQL é independente da ordem das chamadas — mock por
+    índice quebra a cada consulta nova.
+    """
+
+    def _para(stmt):
+        texto = str(stmt).lower()
+        for tabela, valor in por_tabela.items():
+            if f"from {tabela}" in texto:
+                return valor
+        return None
+
+    async def _execute(stmt, *args, **kwargs):
+        result = MagicMock()
+        result.scalar_one_or_none.return_value = _para(stmt)
+        result.scalar_one.return_value = 0
+        return result
+
+    session = AsyncMock()
+    session.execute = _execute
+    session.add = MagicMock()
+    session.commit = AsyncMock()
+    session.refresh = AsyncMock()
+
+    async def _gen():
+        yield session
+
+    return _gen
+
+
+@pytest.mark.asyncio
+async def test_staff_can_assign_owner_on_create(patch_redis):
+    """Admin cadastra o equipamento já vinculado ao cliente dono."""
+    from app.core.database import get_db
+
+    dono = _mock_user(UserRole.client)
+    app.dependency_overrides[get_db] = _db_por_entidade(
+        products=_mock_product(), equipments=None, users=dono
+    )
+    _override_user(_ADMIN)
+
+    async with AsyncClient(transport=ASGITransport(app=app), base_url="http://test") as c:
+        resp = await c.post(
+            f"/api/v1/products/{_PRODUCT_ID}/equipments",
+            json={"name": "Titan #002", "owner_id": str(dono.id)},
+        )
+
+    assert resp.status_code == 201, resp.text
+    assert resp.json()["owner_id"] == str(dono.id), (
+        "sem gravar o owner_id o equipamento nasce órfão e fica invisível ao cliente"
+    )
+
+
+@pytest.mark.asyncio
+async def test_staff_create_without_owner_still_works(patch_redis):
+    """`owner_id` é opcional: o cadastro sem dono continua valendo."""
+    from app.core.database import get_db
+
+    app.dependency_overrides[get_db] = _db_por_entidade(products=_mock_product(), equipments=None)
+    _override_user(_ADMIN)
+
+    async with AsyncClient(transport=ASGITransport(app=app), base_url="http://test") as c:
+        resp = await c.post(
+            f"/api/v1/products/{_PRODUCT_ID}/equipments", json={"name": "Titan #003"}
+        )
+
+    assert resp.status_code == 201, resp.text
+    assert resp.json()["owner_id"] is None
+
+
+@pytest.mark.asyncio
+async def test_staff_cannot_assign_owner_that_does_not_exist(patch_redis):
+    """UUID que não é de ninguém não pode virar dono."""
+    from app.core.database import get_db
+
+    app.dependency_overrides[get_db] = _db_por_entidade(
+        products=_mock_product(), equipments=None, users=None
+    )
+    _override_user(_ADMIN)
+
+    async with AsyncClient(transport=ASGITransport(app=app), base_url="http://test") as c:
+        resp = await c.post(
+            f"/api/v1/products/{_PRODUCT_ID}/equipments",
+            json={"name": "Titan #004", "owner_id": str(uuid.uuid4())},
+        )
+
+    assert resp.status_code == 400, resp.text
+
+
+@pytest.mark.asyncio
+async def test_staff_cannot_assign_owner_that_is_not_a_client(patch_redis):
+    """
+    Só cliente é dono de equipamento.
+
+    Apontar o dono para um técnico faria o equipamento sumir do parque de todo
+    mundo: o filtro por dono da listagem só devolve o que é do cliente.
+    """
+    from app.core.database import get_db
+
+    tecnico = _mock_user(UserRole.technician)
+    app.dependency_overrides[get_db] = _db_por_entidade(
+        products=_mock_product(), equipments=None, users=tecnico
+    )
+    _override_user(_ADMIN)
+
+    async with AsyncClient(transport=ASGITransport(app=app), base_url="http://test") as c:
+        resp = await c.post(
+            f"/api/v1/products/{_PRODUCT_ID}/equipments",
+            json={"name": "Titan #005", "owner_id": str(tecnico.id)},
+        )
+
+    assert resp.status_code == 400, resp.text
+
+
+@pytest.mark.asyncio
+async def test_staff_can_assign_owner_on_update(patch_redis):
+    """O equipamento já cadastrado sem dono pode ser corrigido pelo PATCH de staff."""
+    from app.core.database import get_db
+
+    dono = _mock_user(UserRole.client)
+    equip = _mock_equipment()
+    equip.owner_id = None
+    app.dependency_overrides[get_db] = _db_por_entidade(equipments=equip, users=dono)
+    _override_user(_ADMIN)
+
+    async with AsyncClient(transport=ASGITransport(app=app), base_url="http://test") as c:
+        resp = await c.patch(f"/api/v1/equipments/{_EQUIP_ID}", json={"owner_id": str(dono.id)})
+
+    assert resp.status_code == 200, resp.text
+    assert equip.owner_id == dono.id
+
+
+@pytest.mark.asyncio
+async def test_staff_update_rejects_owner_that_is_not_a_client(patch_redis):
+    """A mesma validação do POST vale no PATCH — senão a porta fica aberta do lado."""
+    from app.core.database import get_db
+
+    admin_alvo = _mock_user(UserRole.admin)
+    equip = _mock_equipment()
+    equip.owner_id = None
+    app.dependency_overrides[get_db] = _db_por_entidade(equipments=equip, users=admin_alvo)
+    _override_user(_ADMIN)
+
+    async with AsyncClient(transport=ASGITransport(app=app), base_url="http://test") as c:
+        resp = await c.patch(
+            f"/api/v1/equipments/{_EQUIP_ID}", json={"owner_id": str(admin_alvo.id)}
+        )
+
+    assert resp.status_code == 400, resp.text
+    assert equip.owner_id is None
+
+
+# ── O cliente NÃO alcança o owner_id ───────────────────────────
+#
+# Estes dois são a armadilha do schema compartilhado: se `owner_id` for parar
+# no `EquipmentCreate`/`EquipmentUpdate` que os `/equipment/my` também usam, o
+# cliente passa a escolher o dono do próprio equipamento — e o segundo teste
+# fica vermelho na hora, porque o PATCH aplica o corpo inteiro com `setattr`.
+
+
+@pytest.mark.asyncio
+async def test_client_cannot_set_owner_on_self_service_create(patch_redis):
+    """`owner_id` enviado pelo cliente no cadastro próprio é ignorado."""
+    from app.core.database import get_db
+
+    outro = uuid.uuid4()
+    app.dependency_overrides[get_db] = _db_por_entidade(products=_mock_product(), equipments=None)
+    _override_user(_CLIENT)
+
+    async with AsyncClient(transport=ASGITransport(app=app), base_url="http://test") as c:
+        resp = await c.post(
+            f"/api/v1/equipment/my?product_id={_PRODUCT_ID}",
+            json={"name": "Meu Titan", "owner_id": str(outro)},
+        )
+
+    assert resp.status_code == 201, resp.text
+    assert resp.json()["owner_id"] == str(_CLIENT.id), (
+        "o dono do equipamento criado em /equipment/my é sempre quem fez a chamada"
+    )
+
+
+@pytest.mark.asyncio
+async def test_client_cannot_set_owner_on_self_service_update(patch_redis):
+    """`owner_id` enviado pelo cliente na edição própria não chega ao banco."""
+    from app.core.database import get_db
+
+    equip = _mock_equipment()
+    equip.owner_id = _CLIENT.id
+    app.dependency_overrides[get_db] = _db_por_entidade(equipments=equip)
+    _override_user(_CLIENT)
+
+    async with AsyncClient(transport=ASGITransport(app=app), base_url="http://test") as c:
+        resp = await c.patch(
+            f"/api/v1/equipment/my/{_EQUIP_ID}",
+            json={"name": "Outro nome", "owner_id": str(uuid.uuid4())},
+        )
+
+    assert resp.status_code == 200, resp.text
+    assert equip.owner_id == _CLIENT.id, (
+        "o cliente não pode transferir o dono do próprio equipamento pelo /equipment/my"
+    )
