@@ -83,6 +83,34 @@ Usada quando a máquina não tem Docker nem acesso à senha do PostgreSQL nativo
 - **`curl` no Vite**: o dev server ouve em `localhost` (IPv6 `::1`); teste
   com `http://localhost:5173`, não `http://127.0.0.1:5173`.
 
+## Apontando o localhost para o banco de produção (diagnóstico)
+
+Às vezes é útil rodar o app local **lendo os dados reais** (investigar um
+chamado, reproduzir um bug com dado de verdade). O procedimento:
+
+1. Crie `backend/.env` (é **gitignored** — credencial nunca vai para o repo)
+   com o `DATABASE_URL` de produção (`postgresql+asyncpg://usuario:senha@host:porta/banco`
+   — as credenciais são as mesmas do DBeaver; peça a quem administra).
+   Mantenha `APP_ENV=testing` e o `REDIS_URL` local — os tokens de sessão
+   ficam só na sua máquina.
+2. Suba o backend normalmente (porta 8001). O login passa a ser com as
+   **contas reais**; o admin de seed local não existe lá.
+
+⚠️ **Regras de sobrevivência nesse modo:**
+
+- **Toda escrita é real.** Criar/editar/fechar chamado no localhost aparece
+  para os clientes. Use para *ler e diagnosticar*; para experimentar, volte
+  ao banco local.
+- **Nunca rode `alembic upgrade` nem `python -m app.seeds`** apontando para
+  produção — o seed criaria usuário de teste no banco real, e migration fora
+  do deploy quebra o contrato de que elas rodam no boot do container.
+- **O worker de fechamento automático roda na sua instância também** e
+  escreve no banco (fecha chamados resolvidos há 3+ dias úteis, checando a
+  cada hora). O efeito é idêntico ao do servidor, mas sua máquina passa a
+  executá-lo junto enquanto o backend local estiver no ar.
+- Terminou o diagnóstico? Volte o `DATABASE_URL` do `.env` para o banco
+  local — não deixe o backend apontado para produção sem necessidade.
+
 ## Verificação rápida
 
 ```bash
