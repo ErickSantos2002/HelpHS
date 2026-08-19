@@ -172,36 +172,42 @@ só uma resposta enganosa.
 Os **chamados seguem como estão**. Aplicar o mesmo critério lá é refactor
 maior, com mais call sites e mais perfis envolvidos — fica na fila.
 
-> ⚠️ **VERIFICAÇÃO DE TOPOLOGIA PENDENTE — confirmar no painel do EasyPanel
-> ANTES do próximo deploy:** o `start.sh` sobe o uvicorn sem autorizar proxy
-> nenhum, e o default do uvicorn (`FORWARDED_ALLOW_IPS=127.0.0.1`) faz o
+> ⚠️ **TOPOLOGIA RESPONDIDA — a porta 8000 do backend ESTÁ PUBLICADA na
+> internet** (confirmado pelo Rickelme em 19/08/2026). **Não definir
+> `FORWARDED_ALLOW_IPS` enquanto isso for verdade.**
+>
+> O contexto: o `start.sh` sobe o uvicorn sem autorizar proxy nenhum, e o
+> default do uvicorn (`FORWARDED_ALLOW_IPS=127.0.0.1`) faz o
 > `get_remote_address` do rate limiter enxergar o IP do **proxy**, não o de
-> quem chamou. Na prática, o `RATE_LIMIT_LOGIN=5/15minutes` é hoje **um balde
-> único para o sistema inteiro**: cinco senhas erradas de qualquer pessoa
-> travam o login de todos os usuários.
+> quem chamou. Para o tráfego que entra pelo proxy, o
+> `RATE_LIMIT_LOGIN=5/15minutes` é hoje **um balde único**: cinco senhas
+> erradas de qualquer pessoa travam o login de todos os usuários.
 >
-> O repositório **não decide isso sozinho**: não existe compose de produção (o
-> de staging nem inclui o serviço do backend) e o deploy é manual no painel,
-> então não dá para saber daqui se a porta 8000 do container está publicada ou
-> se só o proxy alcança o backend.
+> Ligar a variável resolveria isso — e, com a porta publicada, abriria coisa
+> pior: quem chamasse a porta direto forjaria o `X-Forwarded-For` e **furaria o
+> rate limit por completo**, uma chave por requisição. Trocar um limite fraco
+> por nenhum limite não é troca.
 >
-> As duas saídas doem, em direções opostas:
+> **Plano, nesta ordem — a ordem é a correção:**
 >
-> - **Deixar como está** (o que foi feito): o rate limit de login continua
->   global. Fraco, mas não permite pular o limite.
-> - **`FORWARDED_ALLOW_IPS=*` com a porta publicada na internet:** qualquer um
->   forja o `X-Forwarded-For` e **fura o rate limit por completo** — pior que o
->   balde global.
+> 1. **Fechar a publicação da porta 8000 no EasyPanel**, deixando só o proxy
+>    alcançar o container. Conferir antes que nada legítimo dependa da porta
+>    direta — o front chama a API pelo domínio, via proxy.
+> 2. **Só então** definir `FORWARDED_ALLOW_IPS=*` no painel. Com a porta
+>    fechada, o único que consegue mandar `X-Forwarded-For` é o próprio proxy,
+>    e o rate limit passa a valer por IP real.
 >
-> Por isso o default ficou conservador e a variável entrou como configuração
-> explícita, com aviso no boot de produção quando está vazia. **Ação do
-> Rickelme:** confirmar no EasyPanel se o container do backend é alcançável
-> apenas pela rede interna do proxy. Se for, definir `FORWARDED_ALLOW_IPS` com
-> a rede do proxy (ou `*`) e o rate limit passa a valer por IP de verdade. Se a
-> porta estiver publicada, **não ligar** — fechar a porta primeiro.
+> Inverter os passos é o cenário ruim descrito acima. Enquanto o passo 1 não
+> acontecer, o balde global fica — é o estado seguro dos dois.
+>
+> O passo 1 vale por si, além do rate limit: com a porta aberta, a API é
+> alcançável passando por fora do proxy, e com ela tudo o que o proxy faz na
+> frente.
 >
 > O `start.sh` de propósito não ganhou flag: o uvicorn já lê essa variável do
-> ambiente, e uma flag criaria duas fontes que podem divergir.
+> ambiente, e uma flag criaria duas fontes que podem divergir. O boot em
+> produção avisa no log enquanto a variável estiver vazia — o aviso é
+> **esperado** até o passo 2, não é regressão.
 
 ### Fila para a próxima rodada
 
