@@ -96,9 +96,20 @@ Datas em DD/MM/AAAA.
   shell (`4d8fbbf`): o `_env_file=None` calava o `.env`, mas não o ambiente —
   quem tivesse `CORS_ORIGINS` exportado, o caso de dentro dos containers de dev
   e staging, via os testes de default quebrarem sem ter mexido em nada.
+- Suíte do front reforçada nos pontos de maior risco (`0cd019a` … `6049181`,
+  192 → 229 testes): o interceptor do axios — refresh no 401, guards anti-loop
+  e fila de chamadas concorrentes — saiu de 0% para 100%, junto com os três
+  guards de rota (`AuthGuard`/`RoleGuard`/`OnboardingGuard`), o
+  `equipmentService`, o `toastError` e os ramos restantes do `cn`.
+  `src/components/layout/` entrou no `include` de cobertura do Vitest, que não
+  enxergava a camada; `frontend/coverage/` entrou no `.gitignore` (`3ae937c`).
 
 ### Corrigido
 - Build do frontend quebrado por typecheck que não checava nada (`882662b`).
+- Toast em inglês para o cliente ao tentar equipamento alheio ou inexistente
+  (`2db8dfa`): com a recusa por dono virando `404` (`637ad0f`), a mensagem que
+  chega é "Equipment not found" — e ela não estava no dicionário de traduções
+  do `apiError.ts`. A entrada antiga cobria o fluxo que deixou de existir.
 - Login travava com "Confirme seu e-mail" sem nenhum e-mail chegar (`1b3d355`):
   a exigência de confirmação era inferida de `SMTP_USER`/`SMTP_FROM_EMAIL`
   preenchidos — e o `.env.example` vem com os dois preenchidos. A adoção agora

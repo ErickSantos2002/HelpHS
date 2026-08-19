@@ -34,6 +34,116 @@ andamento terá conflitos cosméticos ao puxar (resolver com pull +
 reaplicar `black .`). Código novo no backend deve passar pelo black antes
 do commit, senão o CI volta a ficar vermelho.
 
+### Segunda rodada da revisão (`51a9cb8` … `701df8e`)
+
+Um segundo `/code-review`, agora sobre o diff completo contra o upstream (13
+arquivos), confirmou o núcleo dos commits anteriores e trouxe seis achados mais
+um fora do diff. Todos resolvidos nesta rodada.
+
+| Commit | O que foi corrigido |
+|---|---|
+| `51a9cb8` | `feat:` **equipamento órfão** — staff criava equipamento sem `owner_id` e nenhum endpoint atribuía dono depois. Com o escopo por dono, esse equipamento ficava invisível ao cliente real *para sempre*: fora da listagem, barrado no `GET`, recusado no vínculo de chamado, e recadastrar batia no `409` do número de série. `owner_id` opcional entra nos endpoints de **staff**, validando que o dono existe e é cliente |
+| `b06228f` | `fix:` **`BCRYPT_ROUNDS` era knob morto** — documentado no `.env.example`, lido pelo `Settings` e nunca passado ao `pwd_context`. Subir para `14` no painel não mudava nada, e a paridade de custo do hash descartável seguia dependendo de coincidência |
+| `a06daa4` | `refactor:` **normalização do `APP_ENV` só existia em produção** — `is_development` e o rate limiter comparavam a string crua: `APP_ENV=Testing` num job de CI subia o limiter **ligado** contra o `redis_url`, e `Development` desligava o `/docs` calado. Vira `field_validator` no campo, com três propriedades irmãs lendo o valor já normalizado |
+| `4d8fbbf` | `test:` **`_env_file=None` não isola do ambiente** — só do `.env`. Variável exportada vence o default do pydantic-settings, então quem tivesse `CORS_ORIGINS` no shell via os testes de default quebrarem. O helper passa a limpar as quatro sensíveis enquanto constrói |
+| `637ad0f` | `fix:` **oráculo 403/404** — equipamento alheio devolvia `403` e inexistente `404`, o que dizia ao cliente quais ids existem. Ver a decisão revista abaixo |
+| `701df8e` | `feat:` **`FORWARDED_ALLOW_IPS`** — o achado fora do diff. Ver o aviso de topologia abaixo |
+| — | `docs:` este registro e o `Changelog.md`, com a entrada do escopo de equipamento movida de **Desempenho** para **Segurança**: o texto dela descreve vazamento de número de série entre clientes, e quem varresse o changelog atrás de mudanças de segurança antes de um deploy passaria batido |
+
+O `owner_id` ficou em `EquipmentStaffCreate`/`EquipmentStaffUpdate`, herdados
+dos schemas compartilhados, e **não** nos corpos aceitos pelos
+`/equipment/my*`. Colocá-lo no schema comum daria ao cliente o controle do
+dono, porque o `PATCH /equipment/my/{id}` aplica o corpo inteiro com `setattr`
+— há dois testes só para acusar isso se alguém unificar os schemas mais tarde.
+Falta a tela: o seletor de dono na `ProductsPage` não entrou nesta rodada, a
+API veio primeiro.
+
+#### Decisão revista: `404` no lugar do `403` para equipamento alheio
+
+Na rodada anterior o `403` foi mantido por **consistência com o `403` dos
+chamados**. A revisão apontou que isso deixa em pé um oráculo de existência
+dentro da própria mudança feita para fechar oráculos, e o argumento novo vence:
+distinguir "não é seu" de "não existe" não entrega nada ao usuário legítimo e
+custa zero para fechar.
+
+Agora, para o perfil **cliente**, a recusa sai como `404` com o mesmo texto de
+um id inexistente — constante única, porque mensagens diferentes devolveriam
+pelo detalhe o que o status parou de contar. Vale também para os
+`/equipment/my*`. Para **staff** continua `403`: quem já enxerga o parque
+inteiro pelo `GET /equipments/{id}` não ganha nada com o `404`, que ali seria
+só uma resposta enganosa.
+
+Os **chamados seguem como estão**. Aplicar o mesmo critério lá é refactor
+maior, com mais call sites e mais perfis envolvidos — fica na fila.
+
+> ⚠️ **TOPOLOGIA RESPONDIDA — a porta 8000 do backend ESTÁ PUBLICADA na
+> internet** (confirmado pelo Rickelme em 19/08/2026). **Não definir
+> `FORWARDED_ALLOW_IPS` enquanto isso for verdade.**
+>
+> O contexto: o `start.sh` sobe o uvicorn sem autorizar proxy nenhum, e o
+> default do uvicorn (`FORWARDED_ALLOW_IPS=127.0.0.1`) faz o
+> `get_remote_address` do rate limiter enxergar o IP do **proxy**, não o de
+> quem chamou. Para o tráfego que entra pelo proxy, o
+> `RATE_LIMIT_LOGIN=5/15minutes` é hoje **um balde único**: cinco senhas
+> erradas de qualquer pessoa travam o login de todos os usuários.
+>
+> Ligar a variável resolveria isso — e, com a porta publicada, abriria coisa
+> pior: quem chamasse a porta direto forjaria o `X-Forwarded-For` e **furaria o
+> rate limit por completo**, uma chave por requisição. Trocar um limite fraco
+> por nenhum limite não é troca.
+>
+> **Plano, nesta ordem — a ordem é a correção:**
+>
+> 1. **Fechar a publicação da porta 8000 no EasyPanel**, deixando só o proxy
+>    alcançar o container. Conferir antes que nada legítimo dependa da porta
+>    direta — o front chama a API pelo domínio, via proxy.
+> 2. **Só então** definir `FORWARDED_ALLOW_IPS=*` no painel. Com a porta
+>    fechada, o único que consegue mandar `X-Forwarded-For` é o próprio proxy,
+>    e o rate limit passa a valer por IP real.
+>
+> Inverter os passos é o cenário ruim descrito acima. Enquanto o passo 1 não
+> acontecer, o balde global fica — é o estado seguro dos dois.
+>
+> O passo 1 vale por si, além do rate limit: com a porta aberta, a API é
+> alcançável passando por fora do proxy, e com ela tudo o que o proxy faz na
+> frente.
+>
+> O `start.sh` de propósito não ganhou flag: o uvicorn já lê essa variável do
+> ambiente, e uma flag criaria duas fontes que podem divergir. O boot em
+> produção avisa no log enquanto a variável estiver vazia — o aviso é
+> **esperado** até o passo 2, não é regressão.
+
+### Rodada de testes do front (`0cd019a` … `3ae937c`)
+
+Um test review do frontend (skill `help-test-review`) mapeou a suíte Vitest
+contra o código e priorizou os gaps por risco. O review corrigiu de passagem
+uma informação da própria skill: **Vitest RODA no CI** desde `1583b8b` — teste
+de front quebrado bloqueia merge. O que segue fora do CI é só Playwright e k6.
+
+| Commit | O que entrou |
+|---|---|
+| `0cd019a` | `test:` **interceptor do axios** (`api.ts`, era 0%) — o código que governa toda requisição: Bearer, refresh no 401, fila de chamadas concorrentes durante o refresh. 11 casos cobrindo os três guards anti-loop, os dois desfechos de logout forçado e a concorrência (dois 401 → UM refresh). Dois mutantes nos guards confirmaram que a suíte pega regressão |
+| `f51685f` | `test:` **guards de rota** (`AuthGuard`, `RoleGuard`, `OnboardingGuard`, eram 0% e invisíveis) — `src/components/layout/` estava fora do `include` de cobertura do Vitest, então o relatório nem sabia que a camada existia. 10 casos + o include corrigido no `vite.config.ts` |
+| `d792686` | `test:` **equipmentService** (era 0%) — superfície de front da mudança de dono de equipamento. Fixa o `product_id` na query do POST, o desempacote de `items`, o `is_active=false` na query e a limpeza de máscara do CNPJ/CEP |
+| `2db8dfa` | `fix:` **"Equipment not found" sem tradução** — achado do review cruzando a mudança `637ad0f` do backend com o `TRANSLATIONS` do `apiError.ts`: desde o 403→404, essa é a mensagem que o cliente recebe para equipamento alheio, e o toast mostrava a string crua em inglês. A entrada antiga `Not your equipment` cobria o fluxo que deixou de existir |
+| `6049181` | `test:` **toastError** (caminho de erro da aplicação inteira, era 0%) e os ramos de objeto/array do `cn` |
+| `3ae937c` | `chore:` `frontend/coverage/` no `.gitignore` — o relatório do `test:coverage` ficava commitável e o eslint tropeçava nos js gerados |
+
+Suíte do front: **192 → 229 testes** (30 arquivos), tudo verde; lint e
+typecheck limpos (os 3 warnings restantes do eslint pré-existem em
+`ChatPanel`, `ThemeContext` e `GroupsPage`). Cobertura da parte medida:
+50,6% → 54,4% — com `api.ts`, os 3 guards, `equipmentService`, `toastError` e
+`utils` em 100%.
+
+**Deixado de fora de propósito:** os serviços 0% restantes (`groupService`,
+`reportService`, `chatService`, `calendarService`, `auditService`,
+`dashboardService`, `slaService`, `tagService`) são wrappers finos de
+`api.get/post` — testá-los daria cobertura sem dar confiança; cobrir apenas
+quando ganharem transformação (o padrão `withAvatarUrl` do `userService`).
+Componentes de apresentação (`Alert`, `Avatar`, `Card`, `Textarea`) idem. Os
+que têm lógica real e seguem descobertos: `FilterSelect`, `FormDropdown` e
+`ThemeContext` — fila de prioridade baixa.
+
 ---
 
 ## 18/08/2026 — Auditoria de segurança, correções e CI
@@ -165,85 +275,6 @@ O `reset-password` não estava na lista da revisão: apareceu ao varrer todos os
 call sites de bcrypt antes de corrigir, e entrou porque é o mesmo defeito. O
 espião de thread virou utilitário no `conftest.py`, agora que três arquivos de
 teste precisam dele.
-
-### Segunda rodada da revisão (`51a9cb8` … `701df8e`)
-
-Um segundo `/code-review`, agora sobre o diff completo contra o upstream (13
-arquivos), confirmou o núcleo dos commits anteriores e trouxe seis achados mais
-um fora do diff. Todos resolvidos nesta rodada.
-
-| Commit | O que foi corrigido |
-|---|---|
-| `51a9cb8` | `feat:` **equipamento órfão** — staff criava equipamento sem `owner_id` e nenhum endpoint atribuía dono depois. Com o escopo por dono, esse equipamento ficava invisível ao cliente real *para sempre*: fora da listagem, barrado no `GET`, recusado no vínculo de chamado, e recadastrar batia no `409` do número de série. `owner_id` opcional entra nos endpoints de **staff**, validando que o dono existe e é cliente |
-| `b06228f` | `fix:` **`BCRYPT_ROUNDS` era knob morto** — documentado no `.env.example`, lido pelo `Settings` e nunca passado ao `pwd_context`. Subir para `14` no painel não mudava nada, e a paridade de custo do hash descartável seguia dependendo de coincidência |
-| `a06daa4` | `refactor:` **normalização do `APP_ENV` só existia em produção** — `is_development` e o rate limiter comparavam a string crua: `APP_ENV=Testing` num job de CI subia o limiter **ligado** contra o `redis_url`, e `Development` desligava o `/docs` calado. Vira `field_validator` no campo, com três propriedades irmãs lendo o valor já normalizado |
-| `4d8fbbf` | `test:` **`_env_file=None` não isola do ambiente** — só do `.env`. Variável exportada vence o default do pydantic-settings, então quem tivesse `CORS_ORIGINS` no shell via os testes de default quebrarem. O helper passa a limpar as quatro sensíveis enquanto constrói |
-| `637ad0f` | `fix:` **oráculo 403/404** — equipamento alheio devolvia `403` e inexistente `404`, o que dizia ao cliente quais ids existem. Ver a decisão revista abaixo |
-| `701df8e` | `feat:` **`FORWARDED_ALLOW_IPS`** — o achado fora do diff. Ver o aviso de topologia abaixo |
-| — | `docs:` este registro e o `Changelog.md`, com a entrada do escopo de equipamento movida de **Desempenho** para **Segurança**: o texto dela descreve vazamento de número de série entre clientes, e quem varresse o changelog atrás de mudanças de segurança antes de um deploy passaria batido |
-
-O `owner_id` ficou em `EquipmentStaffCreate`/`EquipmentStaffUpdate`, herdados
-dos schemas compartilhados, e **não** nos corpos aceitos pelos
-`/equipment/my*`. Colocá-lo no schema comum daria ao cliente o controle do
-dono, porque o `PATCH /equipment/my/{id}` aplica o corpo inteiro com `setattr`
-— há dois testes só para acusar isso se alguém unificar os schemas mais tarde.
-Falta a tela: o seletor de dono na `ProductsPage` não entrou nesta rodada, a
-API veio primeiro.
-
-#### Decisão revista: `404` no lugar do `403` para equipamento alheio
-
-Na rodada anterior o `403` foi mantido por **consistência com o `403` dos
-chamados**. A revisão apontou que isso deixa em pé um oráculo de existência
-dentro da própria mudança feita para fechar oráculos, e o argumento novo vence:
-distinguir "não é seu" de "não existe" não entrega nada ao usuário legítimo e
-custa zero para fechar.
-
-Agora, para o perfil **cliente**, a recusa sai como `404` com o mesmo texto de
-um id inexistente — constante única, porque mensagens diferentes devolveriam
-pelo detalhe o que o status parou de contar. Vale também para os
-`/equipment/my*`. Para **staff** continua `403`: quem já enxerga o parque
-inteiro pelo `GET /equipments/{id}` não ganha nada com o `404`, que ali seria
-só uma resposta enganosa.
-
-Os **chamados seguem como estão**. Aplicar o mesmo critério lá é refactor
-maior, com mais call sites e mais perfis envolvidos — fica na fila.
-
-> ⚠️ **TOPOLOGIA RESPONDIDA — a porta 8000 do backend ESTÁ PUBLICADA na
-> internet** (confirmado pelo Rickelme em 19/08/2026). **Não definir
-> `FORWARDED_ALLOW_IPS` enquanto isso for verdade.**
->
-> O contexto: o `start.sh` sobe o uvicorn sem autorizar proxy nenhum, e o
-> default do uvicorn (`FORWARDED_ALLOW_IPS=127.0.0.1`) faz o
-> `get_remote_address` do rate limiter enxergar o IP do **proxy**, não o de
-> quem chamou. Para o tráfego que entra pelo proxy, o
-> `RATE_LIMIT_LOGIN=5/15minutes` é hoje **um balde único**: cinco senhas
-> erradas de qualquer pessoa travam o login de todos os usuários.
->
-> Ligar a variável resolveria isso — e, com a porta publicada, abriria coisa
-> pior: quem chamasse a porta direto forjaria o `X-Forwarded-For` e **furaria o
-> rate limit por completo**, uma chave por requisição. Trocar um limite fraco
-> por nenhum limite não é troca.
->
-> **Plano, nesta ordem — a ordem é a correção:**
->
-> 1. **Fechar a publicação da porta 8000 no EasyPanel**, deixando só o proxy
->    alcançar o container. Conferir antes que nada legítimo dependa da porta
->    direta — o front chama a API pelo domínio, via proxy.
-> 2. **Só então** definir `FORWARDED_ALLOW_IPS=*` no painel. Com a porta
->    fechada, o único que consegue mandar `X-Forwarded-For` é o próprio proxy,
->    e o rate limit passa a valer por IP real.
->
-> Inverter os passos é o cenário ruim descrito acima. Enquanto o passo 1 não
-> acontecer, o balde global fica — é o estado seguro dos dois.
->
-> O passo 1 vale por si, além do rate limit: com a porta aberta, a API é
-> alcançável passando por fora do proxy, e com ela tudo o que o proxy faz na
-> frente.
->
-> O `start.sh` de propósito não ganhou flag: o uvicorn já lê essa variável do
-> ambiente, e uma flag criaria duas fontes que podem divergir. O boot em
-> produção avisa no log enquanto a variável estiver vazia — o aviso é
-> **esperado** até o passo 2, não é regressão.
 
 ### Fila para a próxima rodada
 
