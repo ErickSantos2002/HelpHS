@@ -119,12 +119,18 @@ async def _get_ticket_or_403(
     result = await db.execute(select(Ticket).where(Ticket.id == ticket_id))
     ticket = result.scalar_one_or_none()
     if ticket is None:
-        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Ticket não encontrado. Ele pode ter sido excluído.")
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail="Ticket não encontrado. Ele pode ter sido excluído.",
+        )
 
     is_staff = actor.role in (UserRole.admin, UserRole.technician)
     is_requester = ticket.creator_id == actor.id
     if not is_staff and not is_requester:
-        raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="Você não tem permissão para acessar este item.")
+        raise HTTPException(
+            status_code=status.HTTP_403_FORBIDDEN,
+            detail="Você não tem permissão para acessar este item.",
+        )
 
     return ticket
 

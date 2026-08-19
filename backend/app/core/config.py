@@ -43,6 +43,7 @@ class Settings(BaseSettings):
     def _normaliza_app_env(cls, valor: str) -> str:
         """Ponto único onde a caixa e o espaço do APP_ENV deixam de importar."""
         return valor.strip().lower()
+
     app_host: str = "0.0.0.0"
     app_port: int = 8000
     api_prefix: str = "/api/v1"
@@ -114,9 +115,7 @@ class Settings(BaseSettings):
         # descobrir isso em produção — mesma escolha feita para a SECRET_KEY.
         origens = self.get_cors_origins()
         if not origens:
-            raise ValueError(
-                "CORS_ORIGINS está vazio em produção: defina o domínio real do front"
-            )
+            raise ValueError("CORS_ORIGINS está vazio em produção: defina o domínio real do front")
         if any(o == "*" for o in origens):
             raise ValueError("CORS_ORIGINS não pode ser '*' em produção: use o domínio do front")
         locais = [o for o in origens if _host_de(o) in _HOSTS_LOCAIS]

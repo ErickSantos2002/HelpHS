@@ -74,7 +74,9 @@ async def _company_note_count(db: AsyncSession, company_id: uuid.UUID) -> int:
     try:
         return (
             await db.execute(
-                select(func.count()).select_from(CompanyNote).where(CompanyNote.company_id == company_id)
+                select(func.count())
+                .select_from(CompanyNote)
+                .where(CompanyNote.company_id == company_id)
             )
         ).scalar_one()
     except Exception:
@@ -142,8 +144,14 @@ async def create_group(body: GroupCreate, db: _DBDep, _: _AdminDep) -> GroupResp
 async def get_group(group_id: uuid.UUID, db: _DBDep, _: _AdminDep) -> GroupDetail:
     g = await _get_group_or_404(db, group_id)
     companies_rows = (
-        await db.execute(select(Company).where(Company.group_id == group_id).order_by(Company.name))
-    ).scalars().all()
+        (
+            await db.execute(
+                select(Company).where(Company.group_id == group_id).order_by(Company.name)
+            )
+        )
+        .scalars()
+        .all()
+    )
     companies = [await _company_to_response(db, c) for c in companies_rows]
     return GroupDetail(
         id=g.id,
@@ -184,13 +192,17 @@ async def delete_group(group_id: uuid.UUID, db: _DBDep, _: _AdminDep) -> None:
 
 
 @router.get("/groups/{group_id}/companies", response_model=list[CompanyResponse])
-async def list_companies(
-    group_id: uuid.UUID, db: _DBDep, _: _AdminDep
-) -> list[CompanyResponse]:
+async def list_companies(group_id: uuid.UUID, db: _DBDep, _: _AdminDep) -> list[CompanyResponse]:
     await _get_group_or_404(db, group_id)
     rows = (
-        await db.execute(select(Company).where(Company.group_id == group_id).order_by(Company.name))
-    ).scalars().all()
+        (
+            await db.execute(
+                select(Company).where(Company.group_id == group_id).order_by(Company.name)
+            )
+        )
+        .scalars()
+        .all()
+    )
     return [await _company_to_response(db, c) for c in rows]
 
 
@@ -225,8 +237,10 @@ async def get_company(
 ) -> CompanyDetail:
     c = await _get_company_or_404(db, group_id, company_id)
     clients_rows = (
-        await db.execute(select(User).where(User.company_id == company_id).order_by(User.name))
-    ).scalars().all()
+        (await db.execute(select(User).where(User.company_id == company_id).order_by(User.name)))
+        .scalars()
+        .all()
+    )
     clients = [
         ClientInCompany(
             id=u.id,
@@ -273,9 +287,7 @@ async def update_company(
     return await _company_to_response(db, c)
 
 
-@router.delete(
-    "/groups/{group_id}/companies/{company_id}", status_code=status.HTTP_204_NO_CONTENT
-)
+@router.delete("/groups/{group_id}/companies/{company_id}", status_code=status.HTTP_204_NO_CONTENT)
 async def delete_company(
     group_id: uuid.UUID, company_id: uuid.UUID, db: _DBDep, _: _AdminDep
 ) -> None:
@@ -301,14 +313,10 @@ async def assign_client(
 ) -> ClientInCompany:
     await _get_company_or_404(db, group_id, company_id)
     u = (
-        await db.execute(
-            select(User).where(User.id == body.user_id, User.role == UserRole.client)
-        )
+        await db.execute(select(User).where(User.id == body.user_id, User.role == UserRole.client))
     ).scalar_one_or_none()
     if u is None:
-        raise HTTPException(
-            status_code=status.HTTP_404_NOT_FOUND, detail="Cliente não encontrado"
-        )
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Cliente não encontrado")
     u.company_id = company_id
     await db.commit()
     await db.refresh(u)
@@ -330,9 +338,7 @@ async def unassign_client(
 ) -> None:
     await _get_company_or_404(db, group_id, company_id)
     u = (
-        await db.execute(
-            select(User).where(User.id == client_id, User.company_id == company_id)
-        )
+        await db.execute(select(User).where(User.id == client_id, User.company_id == company_id))
     ).scalar_one_or_none()
     if u is None:
         raise HTTPException(
@@ -356,9 +362,7 @@ async def update_client_notes(
 ) -> ClientInCompany:
     await _get_company_or_404(db, group_id, company_id)
     u = (
-        await db.execute(
-            select(User).where(User.id == client_id, User.company_id == company_id)
-        )
+        await db.execute(select(User).where(User.id == client_id, User.company_id == company_id))
     ).scalar_one_or_none()
     if u is None:
         raise HTTPException(
@@ -378,18 +382,24 @@ async def update_client_notes(
 @router.get("/clients/unassigned", response_model=list[ClientInCompany])
 async def list_unassigned_clients(db: _DBDep, _: _AdminDep) -> list[ClientInCompany]:
     rows = (
-        await db.execute(
-            select(User)
-            .where(
-                User.role == UserRole.client,
-                User.status == UserStatus.active,
-                User.company_id.is_(None),
+        (
+            await db.execute(
+                select(User)
+                .where(
+                    User.role == UserRole.client,
+                    User.status == UserStatus.active,
+                    User.company_id.is_(None),
+                )
+                .order_by(User.name)
             )
-            .order_by(User.name)
         )
-    ).scalars().all()
+        .scalars()
+        .all()
+    )
     return [
-        ClientInCompany(id=u.id, name=u.name, email=u.email, phone=u.phone, client_notes=u.client_notes)
+        ClientInCompany(
+            id=u.id, name=u.name, email=u.email, phone=u.phone, client_notes=u.client_notes
+        )
         for u in rows
     ]
 

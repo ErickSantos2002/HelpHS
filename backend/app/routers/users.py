@@ -195,7 +195,10 @@ async def get_user(
     # Only admin/technician can view any user; others only their own profile
     is_staff = current_user.role in (UserRole.admin, UserRole.technician)
     if not is_staff and current_user.id != user_id:
-        raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="Você não tem permissão para acessar este item.")
+        raise HTTPException(
+            status_code=status.HTTP_403_FORBIDDEN,
+            detail="Você não tem permissão para acessar este item.",
+        )
 
     result = await db.execute(select(User).where(User.id == user_id))
     user = result.scalar_one_or_none()
@@ -254,7 +257,12 @@ async def upload_avatar(
             detail="Arquivo muito grande. Máximo: 5 MB.",
         )
 
-    ext_map = {"image/jpeg": ".jpg", "image/png": ".png", "image/gif": ".gif", "image/webp": ".webp"}
+    ext_map = {
+        "image/jpeg": ".jpg",
+        "image/png": ".png",
+        "image/gif": ".gif",
+        "image/webp": ".webp",
+    }
     key = f"avatars/{current_user.id}{ext_map[file.content_type]}"
     await storage.upload_file(data, key, file.content_type, settings)
     url = await storage.get_presigned_url(key, settings, expires=604800)
@@ -345,7 +353,10 @@ async def update_user(
     # Admin/technician can edit any user; others only themselves. Only admin can change role.
     is_staff = current_user.role in (UserRole.admin, UserRole.technician)
     if not is_staff and current_user.id != user_id:
-        raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="Você não tem permissão para acessar este item.")
+        raise HTTPException(
+            status_code=status.HTTP_403_FORBIDDEN,
+            detail="Você não tem permissão para acessar este item.",
+        )
     if current_user.role != UserRole.admin and body.role is not None:
         raise HTTPException(
             status_code=status.HTTP_403_FORBIDDEN,

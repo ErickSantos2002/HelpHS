@@ -151,7 +151,9 @@ async def test_html_nunca_e_servido_inline(settings_com_upload_dir):
 async def test_svg_nao_e_servido_inline(settings_com_upload_dir):
     """SVG é imagem, mas aceita <script> dentro — trata como download."""
     settings = settings_com_upload_dir
-    await storage.upload_file(b"<svg onload=alert(1)>", "tickets/1/x.svg", "image/svg+xml", settings)
+    await storage.upload_file(
+        b"<svg onload=alert(1)>", "tickets/1/x.svg", "image/svg+xml", settings
+    )
     token = storage.create_file_token("tickets/1/x.svg", settings)
 
     async with AsyncClient(transport=ASGITransport(app=app), base_url="http://test") as c:

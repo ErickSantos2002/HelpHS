@@ -215,7 +215,10 @@ class User(Base):
 
     # Vínculo ao grupo (clientes)
     company_id: Mapped[uuid.UUID | None] = mapped_column(
-        UUID(as_uuid=True), ForeignKey("companies.id", ondelete="SET NULL"), nullable=True, index=True
+        UUID(as_uuid=True),
+        ForeignKey("companies.id", ondelete="SET NULL"),
+        nullable=True,
+        index=True,
     )
     client_notes: Mapped[str | None] = mapped_column(Text, nullable=True)
 
@@ -807,7 +810,9 @@ class CalendarEvent(Base):
         Enum(CalendarEventType), default=CalendarEventType.event, nullable=False
     )
     color: Mapped[str] = mapped_column(String(7), nullable=False, default="#6366f1")
-    start_date: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False, index=True)
+    start_date: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), nullable=False, index=True
+    )
     end_date: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False)
     created_by: Mapped[uuid.UUID | None] = mapped_column(
         UUID(as_uuid=True), ForeignKey("users.id", ondelete="SET NULL"), nullable=True

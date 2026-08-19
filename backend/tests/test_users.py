@@ -794,9 +794,9 @@ async def test_create_user_hashes_password_off_the_event_loop(patch_redis):
             )
 
     assert resp.status_code == 201, resp.text
-    assert espia.rodou_fora_da_thread(thread_do_loop), (
-        "o hash da senha rodou na thread do event loop — cada cadastro trava a API"
-    )
+    assert espia.rodou_fora_da_thread(
+        thread_do_loop
+    ), "o hash da senha rodou na thread do event loop — cada cadastro trava a API"
 
 
 @pytest.mark.asyncio

@@ -127,7 +127,10 @@ async def update_event(
     result = await db.execute(select(CalendarEvent).where(CalendarEvent.id == event_id))
     event = result.scalar_one_or_none()
     if not event:
-        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Evento não encontrado. Ele pode ter sido removido da agenda.")
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail="Evento não encontrado. Ele pode ter sido removido da agenda.",
+        )
 
     if body.title is not None:
         event.title = body.title
@@ -170,7 +173,10 @@ async def delete_event(
     result = await db.execute(select(CalendarEvent).where(CalendarEvent.id == event_id))
     event = result.scalar_one_or_none()
     if not event:
-        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Evento não encontrado. Ele pode ter sido removido da agenda.")
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail="Evento não encontrado. Ele pode ter sido removido da agenda.",
+        )
 
     await db.delete(event)
     await db.commit()

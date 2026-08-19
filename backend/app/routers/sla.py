@@ -40,7 +40,10 @@ async def update_sla_config(
     result = await db.execute(select(SLAConfig).where(SLAConfig.id == config_id))
     config = result.scalar_one_or_none()
     if config is None:
-        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Configuração de SLA não encontrada para esta prioridade.")
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail="Configuração de SLA não encontrada para esta prioridade.",
+        )
 
     update_data = payload.model_dump(exclude_unset=True)
     for field, value in update_data.items():

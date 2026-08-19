@@ -203,8 +203,7 @@ async def verify_email(
         raise HTTPException(
             status_code=status.HTTP_400_BAD_REQUEST,
             detail=(
-                "Este link de confirmação não é mais válido. "
-                "Peça um novo na tela de acesso."
+                "Este link de confirmação não é mais válido. " "Peça um novo na tela de acesso."
             ),
         ) from exc
 

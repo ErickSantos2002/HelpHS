@@ -44,9 +44,7 @@ _INLINE_MIMES = frozenset(
         "text/plain",
     }
 )
-_INLINE_EXTENSIONS = frozenset(
-    {".png", ".jpg", ".jpeg", ".gif", ".webp", ".pdf", ".txt"}
-)
+_INLINE_EXTENSIONS = frozenset({".png", ".jpg", ".jpeg", ".gif", ".webp", ".pdf", ".txt"})
 
 _FALLBACK_MIME = "application/octet-stream"
 

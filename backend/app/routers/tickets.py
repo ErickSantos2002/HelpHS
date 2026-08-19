@@ -529,7 +529,10 @@ async def get_ticket(
     ticket = await get_or_404(db, Ticket, ticket_id, "Ticket not found")
 
     if actor.role == UserRole.client and ticket.creator_id != actor.id:
-        raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="Você não tem permissão para acessar este item.")
+        raise HTTPException(
+            status_code=status.HTTP_403_FORBIDDEN,
+            detail="Você não tem permissão para acessar este item.",
+        )
 
     response = _serialize_ticket(ticket)
     if ticket.assignee_id:
@@ -604,14 +607,20 @@ async def update_client_observation(
 
     if actor.role == UserRole.client:
         if ticket.creator_id != actor.id:
-            raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="Você não tem permissão para acessar este item.")
+            raise HTTPException(
+                status_code=status.HTTP_403_FORBIDDEN,
+                detail="Você não tem permissão para acessar este item.",
+            )
         if ticket.status in (TicketStatus.closed, TicketStatus.cancelled):
             raise HTTPException(
                 status_code=status.HTTP_409_CONFLICT,
                 detail="Cannot edit observation on a closed or cancelled ticket",
             )
     elif actor.role == UserRole.technician:
-        raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="Você não tem permissão para acessar este item.")
+        raise HTTPException(
+            status_code=status.HTTP_403_FORBIDDEN,
+            detail="Você não tem permissão para acessar este item.",
+        )
 
     old = ticket.client_observation
     ticket.client_observation = body.client_observation
@@ -923,7 +932,12 @@ async def assign_ticket(
     ticket.assignee_id = body.assignee_id
     ticket.updated_at = datetime.now(UTC)
     _record_history(
-        db, ticket.id, actor.id, "assignee_id", old_assignee, body.assignee_id,
+        db,
+        ticket.id,
+        actor.id,
+        "assignee_id",
+        old_assignee,
+        body.assignee_id,
         comment=new_assignee_user.name if new_assignee_user else None,
     )
     _audit(db, AuditAction.assign, actor.id, ticket.id)
@@ -1056,7 +1070,9 @@ async def delete_ticket_note(
     if note is None:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Nota não encontrada")
     if actor.role != UserRole.admin and note.author_id != actor.id:
-        raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="Sem permissão para deletar esta nota")
+        raise HTTPException(
+            status_code=status.HTTP_403_FORBIDDEN, detail="Sem permissão para deletar esta nota"
+        )
     await db.delete(note)
     await db.commit()
 
@@ -1072,13 +1088,18 @@ async def get_ticket_history(
     ticket = await get_or_404(db, Ticket, ticket_id, "Ticket not found")
 
     if actor.role == UserRole.client and ticket.creator_id != actor.id:
-        raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="Você não tem permissão para acessar este item.")
+        raise HTTPException(
+            status_code=status.HTTP_403_FORBIDDEN,
+            detail="Você não tem permissão para acessar este item.",
+        )
 
     base = select(TicketHistory).where(TicketHistory.ticket_id == ticket_id)
     total = (await db.execute(select(func.count()).select_from(base.subquery()))).scalar_one()
     rows = await db.execute(
         base.options(selectinload(TicketHistory.user))
-        .order_by(TicketHistory.created_at.asc()).offset(offset).limit(limit)
+        .order_by(TicketHistory.created_at.asc())
+        .offset(offset)
+        .limit(limit)
     )
     entries = rows.scalars().all()
 

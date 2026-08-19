@@ -216,9 +216,7 @@ async def _build_report(
 
     base = [*date_cond, *extra]
 
-    total = (
-        await db.execute(select(func.count()).select_from(Ticket).where(*base))
-    ).scalar_one()
+    total = (await db.execute(select(func.count()).select_from(Ticket).where(*base))).scalar_one()
 
     rows = (
         await db.execute(
@@ -371,16 +369,21 @@ async def _build_report(
         )
     ).all()
     csat_day_map: dict[str, tuple[float, int]] = {
-        r.day.strftime("%Y-%m-%d"): (round(float(r.avg_rating), 2), r.cnt)
-        for r in csat_day_rows
+        r.day.strftime("%Y-%m-%d"): (round(float(r.avg_rating), 2), r.cnt) for r in csat_day_rows
     }
     csat_by_day = [
         CsatDailyItem(
             date=(since + timedelta(days=i)).strftime("%Y-%m-%d"),
-            avg_rating=csat_day_map[(since + timedelta(days=i)).strftime("%Y-%m-%d")][0]
-            if (since + timedelta(days=i)).strftime("%Y-%m-%d") in csat_day_map else None,
-            count=csat_day_map[(since + timedelta(days=i)).strftime("%Y-%m-%d")][1]
-            if (since + timedelta(days=i)).strftime("%Y-%m-%d") in csat_day_map else 0,
+            avg_rating=(
+                csat_day_map[(since + timedelta(days=i)).strftime("%Y-%m-%d")][0]
+                if (since + timedelta(days=i)).strftime("%Y-%m-%d") in csat_day_map
+                else None
+            ),
+            count=(
+                csat_day_map[(since + timedelta(days=i)).strftime("%Y-%m-%d")][1]
+                if (since + timedelta(days=i)).strftime("%Y-%m-%d") in csat_day_map
+                else 0
+            ),
         )
         for i in range(actual_period + 1)
     ]
@@ -398,9 +401,7 @@ async def _build_report(
         )
     ).all()
     weekday_map: dict[int, int] = {int(r.dow): r.cnt for r in weekday_rows}
-    tickets_by_weekday = [
-        WeekdayCount(weekday=d, count=weekday_map.get(d, 0)) for d in range(1, 8)
-    ]
+    tickets_by_weekday = [WeekdayCount(weekday=d, count=weekday_map.get(d, 0)) for d in range(1, 8)]
 
     # ── Tempo médio de primeira resposta por prioridade ──────────
     first_resp_rows = (
@@ -614,12 +615,17 @@ async def _build_comparison(
         r.priority.value: (r.total, r.breached) for r in prev_sla_rows
     }
     prev_sla: list[SLAComplianceItem] = []
-    for prio in ([priority] if priority else list(TicketPriority)):
+    for prio in [priority] if priority else list(TicketPriority):
         t, b = prev_sla_map.get(prio.value, (0, 0))
         rate = round((1 - b / t) * 100, 1) if t > 0 else 100.0
-        prev_sla.append(SLAComplianceItem(priority=prio.value, total=t, breached=b, compliance_rate=rate))
+        prev_sla.append(
+            SLAComplianceItem(priority=prio.value, total=t, breached=b, compliance_rate=rate)
+        )
 
-    prev_csat_date = [SatisfactionSurvey.created_at >= prev_since, SatisfactionSurvey.created_at < prev_until]
+    prev_csat_date = [
+        SatisfactionSurvey.created_at >= prev_since,
+        SatisfactionSurvey.created_at < prev_until,
+    ]
     if prev_extra:
         ticket_subq = select(Ticket.id).where(*prev_date, *prev_extra).scalar_subquery()
         prev_csat_cond = [*prev_csat_date, SatisfactionSurvey.ticket_id.in_(ticket_subq)]
@@ -711,7 +717,9 @@ async def export_reports_csv(
     buf.seek(0)
     suffix = f"_{category.value}" if category else ""
     suffix += f"_{priority.value}" if priority else ""
-    filename = f"relatorio_helphs_{datetime.now(UTC).strftime('%Y%m%d')}_{data.period_days}d{suffix}.csv"
+    filename = (
+        f"relatorio_helphs_{datetime.now(UTC).strftime('%Y%m%d')}_{data.period_days}d{suffix}.csv"
+    )
     return StreamingResponse(
         iter([buf.getvalue()]),
         media_type="text/csv",
@@ -839,7 +847,9 @@ async def export_reports_pdf(
     buf.seek(0)
     suffix = f"_{category.value}" if category else ""
     suffix += f"_{priority.value}" if priority else ""
-    filename = f"relatorio_helphs_{datetime.now(UTC).strftime('%Y%m%d')}_{data.period_days}d{suffix}.pdf"
+    filename = (
+        f"relatorio_helphs_{datetime.now(UTC).strftime('%Y%m%d')}_{data.period_days}d{suffix}.pdf"
+    )
     return StreamingResponse(
         buf,
         media_type="application/pdf",
@@ -958,7 +968,10 @@ async def get_technician_detail_report(
     is_tech = actor.role == UserRole.technician
 
     if not is_admin and not is_tech:
-        raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="Você não tem permissão para acessar este item.")
+        raise HTTPException(
+            status_code=status.HTTP_403_FORBIDDEN,
+            detail="Você não tem permissão para acessar este item.",
+        )
 
     if is_tech:
         tech_id = actor.id

@@ -34,9 +34,7 @@ def upgrade() -> None:
     op.add_column("tickets", sa.Column("resolved_at", sa.DateTime(timezone=True), nullable=True))
     op.add_column(
         "tickets",
-        sa.Column(
-            "auto_closed", sa.Boolean(), nullable=False, server_default=sa.text("false")
-        ),
+        sa.Column("auto_closed", sa.Boolean(), nullable=False, server_default=sa.text("false")),
     )
     op.add_column("tickets", sa.Column("reopened_at", sa.DateTime(timezone=True), nullable=True))
     op.add_column(

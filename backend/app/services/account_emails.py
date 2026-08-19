@@ -16,9 +16,7 @@ def _link(settings: Settings, caminho: str, token: str) -> str:
     return f"{base}/{caminho}?token={quote(token)}"
 
 
-async def send_verification_email(
-    to_email: str, name: str, token: str, settings: Settings
-) -> bool:
+async def send_verification_email(to_email: str, name: str, token: str, settings: Settings) -> bool:
     link = _link(settings, "confirmar-email", token)
     horas = settings.email_verification_token_hours
 

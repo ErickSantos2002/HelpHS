@@ -59,7 +59,10 @@ async def _get_ticket_or_404(ticket_id: uuid.UUID, db: AsyncSession) -> Ticket:
     result = await db.execute(select(Ticket).where(Ticket.id == ticket_id))
     ticket = result.scalar_one_or_none()
     if not ticket:
-        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Ticket não encontrado. Ele pode ter sido excluído.")
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail="Ticket não encontrado. Ele pode ter sido excluído.",
+        )
     return ticket
 
 
@@ -83,7 +86,10 @@ async def submit_survey(
 
     # Only the ticket creator can submit the survey
     if ticket.creator_id != actor.id:
-        raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="Você não tem permissão para acessar este item.")
+        raise HTTPException(
+            status_code=status.HTTP_403_FORBIDDEN,
+            detail="Você não tem permissão para acessar este item.",
+        )
 
     # Ticket must be resolved or closed
     if ticket.status not in _ELIGIBLE_STATUSES:
@@ -127,7 +133,10 @@ async def get_survey(
 
     # Client can only see survey for their own ticket
     if actor.role == UserRole.client and ticket.creator_id != actor.id:
-        raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="Você não tem permissão para acessar este item.")
+        raise HTTPException(
+            status_code=status.HTTP_403_FORBIDDEN,
+            detail="Você não tem permissão para acessar este item.",
+        )
 
     result = await db.execute(
         select(SatisfactionSurvey).where(SatisfactionSurvey.ticket_id == ticket_id)
@@ -156,9 +165,7 @@ async def list_surveys(
     total = (await db.execute(select(func.count()).select_from(base.subquery()))).scalar_one()
 
     sub = base.subquery()
-    avg_result = await db.execute(
-        select(func.avg(sub.c.rating), func.avg(sub.c.recommend_rating))
-    )
+    avg_result = await db.execute(select(func.avg(sub.c.rating), func.avg(sub.c.recommend_rating)))
     avg_rating_raw, avg_recommend_raw = avg_result.one()
 
     rows = await db.execute(

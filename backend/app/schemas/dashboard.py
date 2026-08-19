@@ -70,13 +70,13 @@ class AvgResolutionItem(AppBaseModel):
 
 
 class CsatDailyItem(AppBaseModel):
-    date: str        # YYYY-MM-DD
+    date: str  # YYYY-MM-DD
     avg_rating: float | None
     count: int
 
 
 class WeekdayCount(AppBaseModel):
-    weekday: int   # 1 = Segunda … 7 = Domingo (ISO)
+    weekday: int  # 1 = Segunda … 7 = Domingo (ISO)
     count: int
 
 
@@ -91,7 +91,7 @@ class ProductCount(AppBaseModel):
 
 
 class HourlyCount(AppBaseModel):
-    hour: int   # 0–23
+    hour: int  # 0–23
     count: int
 
 

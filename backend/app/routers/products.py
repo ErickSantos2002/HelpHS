@@ -271,7 +271,8 @@ async def create_equipment(
         )
         if dup.scalar_one_or_none():
             raise HTTPException(
-                status_code=status.HTTP_409_CONFLICT, detail="Este número de série já está cadastrado em outro equipamento."
+                status_code=status.HTTP_409_CONFLICT,
+                detail="Este número de série já está cadastrado em outro equipamento.",
             )
 
     ts = datetime.now(UTC)
@@ -385,7 +386,8 @@ async def update_equipment(
         )
         if dup.scalar_one_or_none():
             raise HTTPException(
-                status_code=status.HTTP_409_CONFLICT, detail="Este número de série já está cadastrado em outro equipamento."
+                status_code=status.HTTP_409_CONFLICT,
+                detail="Este número de série já está cadastrado em outro equipamento.",
             )
 
     for field, value in body.model_dump(exclude_unset=True).items():
@@ -419,7 +421,8 @@ async def create_my_equipment(
         )
         if dup.scalar_one_or_none():
             raise HTTPException(
-                status_code=status.HTTP_409_CONFLICT, detail="Este número de série já está cadastrado em outro equipamento."
+                status_code=status.HTTP_409_CONFLICT,
+                detail="Este número de série já está cadastrado em outro equipamento.",
             )
 
     ts = datetime.now(UTC)
@@ -481,7 +484,8 @@ async def update_my_equipment(
         )
         if dup.scalar_one_or_none():
             raise HTTPException(
-                status_code=status.HTTP_409_CONFLICT, detail="Este número de série já está cadastrado em outro equipamento."
+                status_code=status.HTTP_409_CONFLICT,
+                detail="Este número de série já está cadastrado em outro equipamento.",
             )
 
     for field, value in body.model_dump(exclude_unset=True).items():

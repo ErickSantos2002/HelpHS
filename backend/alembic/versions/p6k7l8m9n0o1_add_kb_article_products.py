@@ -37,9 +37,7 @@ def upgrade() -> None:
             primary_key=True,
         ),
     )
-    op.create_index(
-        "ix_kb_article_products_product_id", "kb_article_products", ["product_id"]
-    )
+    op.create_index("ix_kb_article_products_product_id", "kb_article_products", ["product_id"])
 
 
 def downgrade() -> None:

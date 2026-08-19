@@ -323,8 +323,7 @@ async def test_login_verifies_password_off_the_event_loop(client_no_user):
     assert response.status_code == 401
     assert threads_da_verificacao, "a verificação de senha nem foi executada"
     assert thread_do_loop not in threads_da_verificacao, (
-        "o bcrypt rodou na thread do event loop — cada login bloqueia a API "
-        "inteira por ~250 ms"
+        "o bcrypt rodou na thread do event loop — cada login bloqueia a API " "inteira por ~250 ms"
     )
 
 

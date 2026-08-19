@@ -27,7 +27,9 @@ def upgrade() -> None:
         sa.Column("description", sa.Text(), nullable=True),
         sa.Column(
             "event_type",
-            sa.Enum("event", "meeting", "training", "deadline", "holiday", name="calendareventtype"),
+            sa.Enum(
+                "event", "meeting", "training", "deadline", "holiday", name="calendareventtype"
+            ),
             nullable=False,
             server_default="event",
         ),

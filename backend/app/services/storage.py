@@ -157,7 +157,5 @@ async def get_presigned_url(key: str, settings: Settings, expires: int = 3600) -
     Assinatura mantida por compatibilidade com o codigo que ja existia.
     """
     loop = asyncio.get_event_loop()
-    token = await loop.run_in_executor(
-        None, partial(create_file_token, key, settings, expires)
-    )
+    token = await loop.run_in_executor(None, partial(create_file_token, key, settings, expires))
     return f"{settings.api_prefix}/files/{token}"

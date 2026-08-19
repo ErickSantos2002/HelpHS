@@ -38,7 +38,9 @@ async def _get_own_or_404(
     )
     notif = result.scalar_one_or_none()
     if not notif:
-        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Notificação não encontrada.")
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND, detail="Notificação não encontrada."
+        )
     return notif
 
 

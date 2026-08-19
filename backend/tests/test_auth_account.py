@@ -96,8 +96,10 @@ def smtp_configurado():
     """Simula SMTP presente e intercepta o envio."""
     original = _settings.smtp_from_email
     _settings.smtp_from_email = "naoresponda@healthsafety.com"
-    with patch("app.routers.auth.send_verification_email", new=AsyncMock(return_value=True)) as v, \
-         patch("app.routers.auth.send_password_reset_email", new=AsyncMock(return_value=True)) as p:
+    with (
+        patch("app.routers.auth.send_verification_email", new=AsyncMock(return_value=True)) as v,
+        patch("app.routers.auth.send_password_reset_email", new=AsyncMock(return_value=True)) as p,
+    ):
         yield {"verification": v, "reset": p}
     _settings.smtp_from_email = original
 
@@ -415,9 +417,9 @@ async def test_cadastro_hasheia_a_senha_fora_do_event_loop(smtp_configurado):
             )
 
     assert r.status_code == 201, r.text
-    assert espia.rodou_fora_da_thread(thread_do_loop), (
-        "o hash da senha rodou na thread do event loop — cada cadastro trava a API"
-    )
+    assert espia.rodou_fora_da_thread(
+        thread_do_loop
+    ), "o hash da senha rodou na thread do event loop — cada cadastro trava a API"
 
 
 @pytest.mark.asyncio

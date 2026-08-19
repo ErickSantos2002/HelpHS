@@ -99,9 +99,7 @@ def _to_response(article: KBArticle) -> KBArticleResponse:
         not_helpful=article.not_helpful,
         created_at=article.created_at,
         updated_at=article.updated_at,
-        products=[
-            KBArticleProduct(id=p.id, name=p.name) for p in (article.products or [])
-        ],
+        products=[KBArticleProduct(id=p.id, name=p.name) for p in (article.products or [])],
     )
 
 
@@ -142,11 +140,16 @@ async def _set_article_products(
 
 async def _get_article_or_404(article_id: uuid.UUID, db: AsyncSession) -> KBArticle:
     result = await db.execute(
-        select(KBArticle).options(selectinload(KBArticle.author), selectinload(KBArticle.products)).where(KBArticle.id == article_id)
+        select(KBArticle)
+        .options(selectinload(KBArticle.author), selectinload(KBArticle.products))
+        .where(KBArticle.id == article_id)
     )
     article = result.scalar_one_or_none()
     if article is None:
-        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Artigo não encontrado. Ele pode ter sido excluído ou arquivado.")
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail="Artigo não encontrado. Ele pode ter sido excluído ou arquivado.",
+        )
     return article
 
 
@@ -260,7 +263,9 @@ async def list_articles(
 ) -> KBArticleListResponse:
     is_staff = actor.role in (UserRole.admin, UserRole.technician)
 
-    base = select(KBArticle).options(selectinload(KBArticle.author), selectinload(KBArticle.products))
+    base = select(KBArticle).options(
+        selectinload(KBArticle.author), selectinload(KBArticle.products)
+    )
 
     # Clients can only see published articles
     if not is_staff:
@@ -331,7 +336,9 @@ async def create_article(
     await db.commit()
 
     result = await db.execute(
-        select(KBArticle).options(selectinload(KBArticle.author), selectinload(KBArticle.products)).where(KBArticle.id == article.id)
+        select(KBArticle)
+        .options(selectinload(KBArticle.author), selectinload(KBArticle.products))
+        .where(KBArticle.id == article.id)
     )
     article = result.scalar_one()
     return _to_response(article)
@@ -347,7 +354,10 @@ async def get_article(
     is_staff = actor.role in (UserRole.admin, UserRole.technician)
 
     if not is_staff and article.status != KBArticleStatus.published:
-        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Artigo não encontrado. Ele pode ter sido excluído ou arquivado.")
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail="Artigo não encontrado. Ele pode ter sido excluído ou arquivado.",
+        )
 
     await db.execute(
         update(KBArticle)
@@ -359,7 +369,9 @@ async def get_article(
     # Reload after commit — session expires all objects on commit, and accessing
     # expired attributes in async context raises MissingGreenlet.
     result = await db.execute(
-        select(KBArticle).options(selectinload(KBArticle.author), selectinload(KBArticle.products)).where(KBArticle.id == article_id)
+        select(KBArticle)
+        .options(selectinload(KBArticle.author), selectinload(KBArticle.products))
+        .where(KBArticle.id == article_id)
     )
     return _to_response(result.scalar_one())
 
@@ -393,7 +405,9 @@ async def update_article(
     await db.refresh(article)
 
     result = await db.execute(
-        select(KBArticle).options(selectinload(KBArticle.author), selectinload(KBArticle.products)).where(KBArticle.id == article_id)
+        select(KBArticle)
+        .options(selectinload(KBArticle.author), selectinload(KBArticle.products))
+        .where(KBArticle.id == article_id)
     )
     article = result.scalar_one()
     return _to_response(article)
@@ -438,7 +452,10 @@ async def article_feedback(
     result = await db.execute(select(KBArticle).where(KBArticle.id == article_id))
     article = result.scalar_one_or_none()
     if article is None:
-        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Artigo não encontrado. Ele pode ter sido excluído ou arquivado.")
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail="Artigo não encontrado. Ele pode ter sido excluído ou arquivado.",
+        )
 
     if body.helpful:
         await db.execute(
@@ -511,7 +528,8 @@ async def create_comment(
         )
         if parent_result.scalar_one_or_none() is None:
             raise HTTPException(
-                status_code=status.HTTP_404_NOT_FOUND, detail="O comentário que você está respondendo não existe mais."
+                status_code=status.HTTP_404_NOT_FOUND,
+                detail="O comentário que você está respondendo não existe mais.",
             )
         # Only allow 1 level of nesting — replies cannot be replied to
         parent_check = await db.execute(select(KBComment).where(KBComment.id == body.parent_id))
@@ -536,9 +554,7 @@ async def create_comment(
     await db.commit()
 
     result = await db.execute(
-        select(KBComment)
-        .options(selectinload(KBComment.author))
-        .where(KBComment.id == comment.id)
+        select(KBComment).options(selectinload(KBComment.author)).where(KBComment.id == comment.id)
     )
     comment = result.scalar_one()
     return _to_comment_response(comment, replies=[])

@@ -48,7 +48,9 @@ async def create_tag(
 ) -> TagResponse:
     existing = await db.execute(select(Tag).where(Tag.name == body.name))
     if existing.scalar_one_or_none():
-        raise HTTPException(status_code=status.HTTP_409_CONFLICT, detail="Já existe uma etiqueta com esse nome.")
+        raise HTTPException(
+            status_code=status.HTTP_409_CONFLICT, detail="Já existe uma etiqueta com esse nome."
+        )
 
     tag = Tag(id=uuid.uuid4(), name=body.name, color=body.color, created_by=actor.id)
     db.add(tag)
@@ -70,7 +72,9 @@ async def update_tag(
     result = await db.execute(select(Tag).where(Tag.id == tag_id))
     tag = result.scalar_one_or_none()
     if not tag:
-        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Etiqueta não encontrada.")
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND, detail="Etiqueta não encontrada."
+        )
 
     if body.name is not None:
         conflict = await db.execute(select(Tag).where(Tag.name == body.name, Tag.id != tag_id))
@@ -100,7 +104,9 @@ async def delete_tag(
     result = await db.execute(select(Tag).where(Tag.id == tag_id))
     tag = result.scalar_one_or_none()
     if not tag:
-        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Etiqueta não encontrada.")
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND, detail="Etiqueta não encontrada."
+        )
 
     await db.delete(tag)
     await db.commit()
@@ -119,7 +125,10 @@ async def set_ticket_tags(
     result = await db.execute(select(Ticket).where(Ticket.id == ticket_id))
     ticket = result.scalar_one_or_none()
     if not ticket:
-        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Ticket não encontrado. Ele pode ter sido excluído.")
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail="Ticket não encontrado. Ele pode ter sido excluído.",
+        )
 
     # Verify all tag IDs exist
     if body.tag_ids:
