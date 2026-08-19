@@ -244,6 +244,33 @@ class Settings(BaseSettings):
     rate_limit_default: str = "100/15minutes"
     rate_limit_login: str = "5/15minutes"
 
+    # Quem pode falar pelos outros: lista de IPs/redes cujo X-Forwarded-For o
+    # uvicorn aceita como sendo o IP real de quem chamou. O uvicorn lê esta
+    # mesma variável do ambiente por conta própria — por isso o `start.sh` não
+    # passa flag nenhuma, para não existirem duas fontes que podem divergir.
+    #
+    # O default do uvicorn é 127.0.0.1, ou seja, não confia em proxy nenhum.
+    # Atrás do proxy do EasyPanel isso faz `get_remote_address` devolver o IP
+    # do PRÓPRIO proxy, e o rate limit de login (5/15min) vira um balde único
+    # para o sistema inteiro: cinco senhas erradas de qualquer pessoa travam o
+    # login de todo mundo.
+    #
+    # Ligar resolve, MAS só é seguro se a porta do backend não estiver
+    # publicada direto na internet — se estiver, qualquer um forja o
+    # X-Forwarded-For e pula o rate limit por completo, que é pior do que o
+    # balde global. Daí o default conservador: ligar é decisão de quem conhece
+    # a topologia do deploy. Ver o aviso em mudanças.md.
+    forwarded_allow_ips: str = ""
+
+    @property
+    def trusts_proxy_headers(self) -> bool:
+        return bool(self.forwarded_allow_ips.strip())
+
+    @property
+    def rate_limit_por_ip_do_proxy(self) -> bool:
+        """Produção sem proxy autorizado: o rate limit por IP é um balde só."""
+        return self.is_production and not self.trusts_proxy_headers
+
     # As três leituras do ambiente ficam juntas e comparam o valor já
     # normalizado pelo `_normaliza_app_env` — nenhuma delas repete o strip/lower.
 

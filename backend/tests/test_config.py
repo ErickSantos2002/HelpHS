@@ -265,3 +265,47 @@ def test_helper_ignores_exported_environment(monkeypatch, variavel, valor):
     assert s.secret_key == _BASE["secret_key"]
     assert s.app_env == "development"
     assert s.frontend_url == "http://localhost:5173"
+
+
+# ── Confiança nos cabeçalhos do proxy ─────────────────────────
+#
+# O rate limit de login usa o IP visto pelo servidor. Atrás do proxy do
+# EasyPanel esse IP é o do PRÓPRIO proxy, a menos que o uvicorn seja autorizado
+# a ler o X-Forwarded-For — e o default dele é não ler de ninguém além do
+# loopback. Sem autorizar, o balde de 5/15min vira UM balde para o sistema
+# inteiro: cinco senhas erradas de qualquer pessoa travam o login de todos.
+#
+# Autorizar é o passo que fecha isso, mas só é seguro se o container do backend
+# não estiver publicado direto na internet — se estiver, qualquer um forja o
+# X-Forwarded-For e pula o rate limit de vez, que é pior. Por isso o default
+# aqui é o conservador, e ligar é decisão explícita de quem conhece a
+# topologia. Ver o aviso em mudanças.md.
+
+
+def test_proxy_headers_are_not_trusted_by_default():
+    """O default não autoriza ninguém — ligar é decisão explícita."""
+    assert _settings().forwarded_allow_ips == ""
+    assert not _settings().trusts_proxy_headers
+
+
+@pytest.mark.parametrize("valor", ["*", "10.0.0.0/8", " 172.17.0.1 "])
+def test_configured_proxy_is_trusted(valor):
+    assert _settings(forwarded_allow_ips=valor).trusts_proxy_headers
+
+
+def test_blank_value_does_not_count_as_configured():
+    """Só espaço é o mesmo que vazio — não pode passar por 'configurado'."""
+    assert not _settings(forwarded_allow_ips="   ").trusts_proxy_headers
+
+
+def test_production_without_trusted_proxy_is_flagged():
+    """
+    Produção sem proxy autorizado é o estado que precisa gritar no boot.
+
+    Não derruba o processo: derrubar trocaria um rate limit global por uma API
+    que não sobe, e quem tem o backend publicado direto está certo em ficar
+    assim.
+    """
+    assert _producao().rate_limit_por_ip_do_proxy
+    assert not _producao(forwarded_allow_ips="*").rate_limit_por_ip_do_proxy
+    assert not _settings().rate_limit_por_ip_do_proxy  # fora de produção, não interessa

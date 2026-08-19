@@ -47,6 +47,16 @@ async def lifespan(app: FastAPI):
     logger.info(f"Starting HelpHS API — env={settings.app_env}")
     logger.info(f"CORS allowed origins: {settings.get_cors_origins()}")
 
+    # Avisa, não derruba: derrubar trocaria um rate limit fraco por uma API que
+    # não sobe, e quem tem o backend publicado direto na internet está certo em
+    # ficar sem confiar no X-Forwarded-For.
+    if settings.rate_limit_por_ip_do_proxy:
+        logger.warning(
+            "FORWARDED_ALLOW_IPS não configurado: atrás de um proxy o rate limit "
+            "de login enxerga o IP do proxy, virando um limite único para todos "
+            "os usuários. Confirme a topologia antes de ligar — ver mudanças.md."
+        )
+
     # Validate database connection
     try:
         async with engine.connect() as conn:
