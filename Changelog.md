@@ -10,6 +10,15 @@ Datas em DD/MM/AAAA.
 
 ## [Não publicado]
 
+- Guia de desenvolvimento local (`f27f38c`, `3485092`) e mini-Redis de dev em
+  `backend/scripts/` (`5fc7562`); skill de test review atualizada sobre o
+  Vitest no CI (`b1f10b7`).
+
+## [v1.7.0] — 19/08/2026
+
+Fechada com o deploy de 19/08 (backend e frontend). Versão correspondente no
+changelog do produto: `docs: changelog da v1.7.0` (`1c0399d`).
+
 ### Segurança
 - Sanitização com DOMPurify do markdown renderizado da Base de Conhecimento,
   fechando XSS armazenado (`0c7164f`).
