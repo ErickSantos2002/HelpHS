@@ -33,6 +33,38 @@ Datas em DD/MM/AAAA.
 - Paridade de custo do hash descartável do login virou contrato de teste
   (`9634d7e`): se ele ficar mais barato que os hashes reais, a enumeração por
   tempo reabre.
+- Equipamentos escopados por dono para o perfil cliente (`724322f`):
+  `GET /products/{id}/equipments` passa a filtrar por `owner_id` e
+  `GET /equipments/{id}` recusa equipamento de outro dono — ou sem dono
+  (*fail closed*). Antes, qualquer autenticado lia o número de série do
+  equipamento de qualquer cliente. Staff mantém acesso total.
+- A recusa acima deixa de denunciar o que existe (`637ad0f`): para o cliente
+  ela sai como `404`, com o mesmo texto de um id inexistente, em vez do `403`
+  que confirmava a existência do equipamento. Vale também para os
+  `/equipment/my*`. Para staff continua `403`, que já enxerga o parque inteiro.
+- `BCRYPT_ROUNDS` deixou de ser configuração morta (`b06228f`): a variável
+  estava documentada e lida, mas nunca chegava ao `pwd_context` — quem subisse
+  com `14` no painel não mudava nada. O teste de paridade do hash descartável
+  passou a comparar contra o custo efetivo, então subir os rounds sem regerar
+  o dummy fica vermelho na suíte.
+- `FORWARDED_ALLOW_IPS` passa a existir como configuração explícita
+  (`701df8e`), com aviso no boot de produção quando está vazia. Sem ela, atrás
+  de um proxy o rate limit de login enxerga sempre o IP do proxy e vira um
+  limite único para todos os usuários. **Ligar exige confirmar a topologia
+  antes** — ver `mudanças.md`.
+- `APP_ENV` normalizado na origem (`a06daa4`): a tolerância a caixa e espaço
+  valia só no ramo de produção, então `APP_ENV=Testing` num job de CI subia o
+  rate limiter ligado contra o Redis e `Development` desligava o `/docs` em
+  silêncio.
+
+### Adicionado
+- Staff pode atribuir o dono do equipamento (`51a9cb8`): `owner_id` opcional no
+  `POST /products/{id}/equipments` e no `PATCH /equipments/{id}`, recusando com
+  `400` quem não existe ou não é cliente. Sem isso o equipamento cadastrado
+  pela tela de Produtos nascia órfão e ficava assim — invisível ao cliente
+  real, sem poder virar chamado e sem poder ser recadastrado, porque o número
+  de série já estava tomado. O campo **não** existe nos corpos aceitos pelos
+  `/equipment/my*`. Falta a tela (seletor de dono na ProductsPage).
 
 ### Desempenho
 
@@ -43,11 +75,6 @@ Datas em DD/MM/AAAA.
 - Mesma correção nos demais endpoints que mexem com senha (`751bfeb`):
   cadastro, redefinição de senha por e-mail, criação de usuário pelo staff e
   troca de senha — nenhum deles trava mais a API enquanto calcula o hash.
-- Equipamentos escopados por dono para o perfil cliente (`724322f`):
-  `GET /products/{id}/equipments` passa a filtrar por `owner_id` e
-  `GET /equipments/{id}` devolve 403 para equipamento de outro dono — ou sem
-  dono (*fail closed*). Antes, qualquer autenticado lia o número de série do
-  equipamento de qualquer cliente. Staff mantém acesso total.
 
 ### CI
 - Vitest passou a rodar no job do frontend, entre o typecheck e o build
@@ -56,6 +83,10 @@ Datas em DD/MM/AAAA.
   `conftest.py` fixa `APP_ENV=testing` antes dos imports, então `pytest` roda
   verde sem variável no comando. Antes, quem rodasse localmente subia o rate
   limiter ligado e via falhas que o CI não tinha.
+- Testes de configuração deixaram de depender das variáveis exportadas no
+  shell (`4d8fbbf`): o `_env_file=None` calava o `.env`, mas não o ambiente —
+  quem tivesse `CORS_ORIGINS` exportado, o caso de dentro dos containers de dev
+  e staging, via os testes de default quebrarem sem ter mexido em nada.
 
 ### Corrigido
 - Build do frontend quebrado por typecheck que não checava nada (`882662b`).

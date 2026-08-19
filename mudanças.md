@@ -130,6 +130,79 @@ call sites de bcrypt antes de corrigir, e entrou porque é o mesmo defeito. O
 espião de thread virou utilitário no `conftest.py`, agora que três arquivos de
 teste precisam dele.
 
+### Segunda rodada da revisão (`51a9cb8` … `701df8e`)
+
+Um segundo `/code-review`, agora sobre o diff completo contra o upstream (13
+arquivos), confirmou o núcleo dos commits anteriores e trouxe seis achados mais
+um fora do diff. Todos resolvidos nesta rodada.
+
+| Commit | O que foi corrigido |
+|---|---|
+| `51a9cb8` | `feat:` **equipamento órfão** — staff criava equipamento sem `owner_id` e nenhum endpoint atribuía dono depois. Com o escopo por dono, esse equipamento ficava invisível ao cliente real *para sempre*: fora da listagem, barrado no `GET`, recusado no vínculo de chamado, e recadastrar batia no `409` do número de série. `owner_id` opcional entra nos endpoints de **staff**, validando que o dono existe e é cliente |
+| `b06228f` | `fix:` **`BCRYPT_ROUNDS` era knob morto** — documentado no `.env.example`, lido pelo `Settings` e nunca passado ao `pwd_context`. Subir para `14` no painel não mudava nada, e a paridade de custo do hash descartável seguia dependendo de coincidência |
+| `a06daa4` | `refactor:` **normalização do `APP_ENV` só existia em produção** — `is_development` e o rate limiter comparavam a string crua: `APP_ENV=Testing` num job de CI subia o limiter **ligado** contra o `redis_url`, e `Development` desligava o `/docs` calado. Vira `field_validator` no campo, com três propriedades irmãs lendo o valor já normalizado |
+| `4d8fbbf` | `test:` **`_env_file=None` não isola do ambiente** — só do `.env`. Variável exportada vence o default do pydantic-settings, então quem tivesse `CORS_ORIGINS` no shell via os testes de default quebrarem. O helper passa a limpar as quatro sensíveis enquanto constrói |
+| `637ad0f` | `fix:` **oráculo 403/404** — equipamento alheio devolvia `403` e inexistente `404`, o que dizia ao cliente quais ids existem. Ver a decisão revista abaixo |
+| `701df8e` | `feat:` **`FORWARDED_ALLOW_IPS`** — o achado fora do diff. Ver o aviso de topologia abaixo |
+| — | `docs:` este registro e o `Changelog.md`, com a entrada do escopo de equipamento movida de **Desempenho** para **Segurança**: o texto dela descreve vazamento de número de série entre clientes, e quem varresse o changelog atrás de mudanças de segurança antes de um deploy passaria batido |
+
+O `owner_id` ficou em `EquipmentStaffCreate`/`EquipmentStaffUpdate`, herdados
+dos schemas compartilhados, e **não** nos corpos aceitos pelos
+`/equipment/my*`. Colocá-lo no schema comum daria ao cliente o controle do
+dono, porque o `PATCH /equipment/my/{id}` aplica o corpo inteiro com `setattr`
+— há dois testes só para acusar isso se alguém unificar os schemas mais tarde.
+Falta a tela: o seletor de dono na `ProductsPage` não entrou nesta rodada, a
+API veio primeiro.
+
+#### Decisão revista: `404` no lugar do `403` para equipamento alheio
+
+Na rodada anterior o `403` foi mantido por **consistência com o `403` dos
+chamados**. A revisão apontou que isso deixa em pé um oráculo de existência
+dentro da própria mudança feita para fechar oráculos, e o argumento novo vence:
+distinguir "não é seu" de "não existe" não entrega nada ao usuário legítimo e
+custa zero para fechar.
+
+Agora, para o perfil **cliente**, a recusa sai como `404` com o mesmo texto de
+um id inexistente — constante única, porque mensagens diferentes devolveriam
+pelo detalhe o que o status parou de contar. Vale também para os
+`/equipment/my*`. Para **staff** continua `403`: quem já enxerga o parque
+inteiro pelo `GET /equipments/{id}` não ganha nada com o `404`, que ali seria
+só uma resposta enganosa.
+
+Os **chamados seguem como estão**. Aplicar o mesmo critério lá é refactor
+maior, com mais call sites e mais perfis envolvidos — fica na fila.
+
+> ⚠️ **VERIFICAÇÃO DE TOPOLOGIA PENDENTE — confirmar no painel do EasyPanel
+> ANTES do próximo deploy:** o `start.sh` sobe o uvicorn sem autorizar proxy
+> nenhum, e o default do uvicorn (`FORWARDED_ALLOW_IPS=127.0.0.1`) faz o
+> `get_remote_address` do rate limiter enxergar o IP do **proxy**, não o de
+> quem chamou. Na prática, o `RATE_LIMIT_LOGIN=5/15minutes` é hoje **um balde
+> único para o sistema inteiro**: cinco senhas erradas de qualquer pessoa
+> travam o login de todos os usuários.
+>
+> O repositório **não decide isso sozinho**: não existe compose de produção (o
+> de staging nem inclui o serviço do backend) e o deploy é manual no painel,
+> então não dá para saber daqui se a porta 8000 do container está publicada ou
+> se só o proxy alcança o backend.
+>
+> As duas saídas doem, em direções opostas:
+>
+> - **Deixar como está** (o que foi feito): o rate limit de login continua
+>   global. Fraco, mas não permite pular o limite.
+> - **`FORWARDED_ALLOW_IPS=*` com a porta publicada na internet:** qualquer um
+>   forja o `X-Forwarded-For` e **fura o rate limit por completo** — pior que o
+>   balde global.
+>
+> Por isso o default ficou conservador e a variável entrou como configuração
+> explícita, com aviso no boot de produção quando está vazia. **Ação do
+> Rickelme:** confirmar no EasyPanel se o container do backend é alcançável
+> apenas pela rede interna do proxy. Se for, definir `FORWARDED_ALLOW_IPS` com
+> a rede do proxy (ou `*`) e o rate limit passa a valer por IP de verdade. Se a
+> porta estiver publicada, **não ligar** — fechar a porta primeiro.
+>
+> O `start.sh` de propósito não ganhou flag: o uvicorn já lê essa variável do
+> ambiente, e uma flag criaria duas fontes que podem divergir.
+
 ### Fila para a próxima rodada
 
 Decisões de produto levantadas pela revisão, registradas sem correção:
@@ -138,10 +211,9 @@ Decisões de produto levantadas pela revisão, registradas sem correção:
   /equipment/my` responde por seriais de qualquer dono, então serve de oráculo:
   dá para descobrir se um serial existe no sistema. Decidir primeiro a regra de
   negócio: serial é único global, ou a unicidade deve ser por dono?
-- **Equipamento sem dono fica órfão** — staff cria equipamento sem `owner_id` e
-  nenhum schema permite atribuí-lo depois; com o escopo por dono, ele fica
-  invisível ao cliente real. Precisa de endpoint e tela de atribuição — é
-  feature, não correção.
+- ~~**Equipamento sem dono fica órfão**~~ — **API resolvida em `51a9cb8`**
+  (`owner_id` opcional nos endpoints de staff). Falta a **tela**: seletor de
+  dono na `ProductsPage`, para o staff atribuir sem chamar a API na mão.
 - **Oráculo de timing em `forgot-password`/`resend-verification`** — o envio de
   e-mail é síncrono e só acontece no ramo da conta existente, então o tempo de
   resposta vai denunciar quais e-mails têm conta **quando o SMTP entrar**.
@@ -158,6 +230,10 @@ Decisões de produto levantadas pela revisão, registradas sem correção:
   rediscutir UX: resposta `201` neutra + tela "Falta um passo" (que já existe
   em `RegisterPage.tsx`) + e-mail "você já tem conta"; sai o bloco
   `if (status === 409)` do front.
+- **Recusa por dono nos chamados** — o `403` de `_check_ticket_access` tem o
+  mesmo formato de oráculo que o de equipamentos acabou de perder. Aplicar o
+  mesmo critério lá é refactor maior, com mais call sites e mais perfis
+  envolvidos; fica para uma rodada própria.
 - **CI Fase 2/3** — Playwright em `e2e.yml` separado (workflow_dispatch +
   noturno) e k6 contra staging; proposta escrita, aguardando decisão de
   investir no ambiente.
