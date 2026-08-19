@@ -93,15 +93,18 @@ def _limpa():
 
 @pytest.fixture()
 def smtp_configurado():
-    """Simula SMTP presente e intercepta o envio."""
+    """Simula a confirmação ADOTADA: flag ligada + SMTP presente, envio interceptado."""
     original = _settings.smtp_from_email
+    original_flag = _settings.email_verification_enabled
     _settings.smtp_from_email = "naoresponda@healthsafety.com"
+    _settings.email_verification_enabled = True
     with (
         patch("app.routers.auth.send_verification_email", new=AsyncMock(return_value=True)) as v,
         patch("app.routers.auth.send_password_reset_email", new=AsyncMock(return_value=True)) as p,
     ):
         yield {"verification": v, "reset": p}
     _settings.smtp_from_email = original
+    _settings.email_verification_enabled = original_flag
 
 
 @pytest.fixture()
@@ -165,6 +168,35 @@ async def test_sem_smtp_o_login_nao_e_bloqueado(sem_smtp):
             )
 
     assert r.status_code == 200
+
+
+@pytest.mark.asyncio
+async def test_smtp_preenchido_sem_adotar_confirmacao_nao_bloqueia_login():
+    """
+    A armadilha vista em produção: SMTP_USER/SMTP_FROM_EMAIL preenchidos no
+    painel (seed do .env.example) ligavam a exigência de confirmação por
+    inferência, sem SMTP funcional — conta nascia não-verificada, e-mail nunca
+    saía e o login travava. A adoção tem que ser explícita
+    (EMAIL_VERIFICATION_ENABLED), não deduzida de variável preenchida.
+    """
+    from app.core.database import get_db
+
+    original_from = _settings.smtp_from_email
+    original_flag = _settings.email_verification_enabled
+    _settings.smtp_from_email = "helpdesk@healthsafetytech.com"
+    _settings.email_verification_enabled = False
+    try:
+        app.dependency_overrides[get_db] = _db_with(_mock_user(email_verified=False))
+        with patch("app.core.security.get_redis", new=_get_fake_redis):
+            async with AsyncClient(transport=ASGITransport(app=app), base_url="http://test") as c:
+                r = await c.post(
+                    "/api/v1/auth/login", json={"email": _EMAIL, "password": "Senha@123456"}
+                )
+        assert r.status_code == 200, r.text
+    finally:
+        _settings.smtp_from_email = original_from
+        _settings.email_verification_enabled = original_flag
+        app.dependency_overrides.clear()
 
 
 # ═══════════════════════════════════════════════════════════════

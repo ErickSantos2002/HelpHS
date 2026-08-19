@@ -16,7 +16,17 @@ from app.core.config import Settings
 # Variáveis que, exportadas no shell, mudariam o resultado destes testes: são
 # exatamente as que a suíte quer avaliar no default. O conftest já exporta
 # APP_ENV, e os containers de dev e staging exportam CORS_ORIGINS.
-_ENVS_SENSIVEIS = frozenset({"APP_ENV", "CORS_ORIGINS", "SECRET_KEY", "FRONTEND_URL"})
+_ENVS_SENSIVEIS = frozenset(
+    {
+        "APP_ENV",
+        "CORS_ORIGINS",
+        "SECRET_KEY",
+        "FRONTEND_URL",
+        "EMAIL_VERIFICATION_ENABLED",
+        "SMTP_USER",
+        "SMTP_FROM_EMAIL",
+    }
+)
 
 # Valores mínimos para instanciar Settings sem esbarrar em outra validação
 _BASE = {
@@ -310,3 +320,27 @@ def test_production_without_trusted_proxy_is_flagged():
     assert _producao().rate_limit_por_ip_do_proxy
     assert not _producao(forwarded_allow_ips="*").rate_limit_por_ip_do_proxy
     assert not _settings().rate_limit_por_ip_do_proxy  # fora de produção, não interessa
+
+
+# ── Confirmação de e-mail é adotada por flag, não inferida ────
+
+
+def test_confirmacao_desligada_por_padrao_mesmo_com_smtp():
+    """SMTP preenchido (seed do .env.example) não pode ligar a exigência sozinho."""
+    s = _settings(smtp_user="helpdesk@healthsafetytech.com")
+    assert not s.requires_email_verification()
+
+
+def test_confirmacao_exige_flag_e_smtp_juntos():
+    s = _settings(email_verification_enabled=True, smtp_from_email="a@b.c")
+    assert s.requires_email_verification()
+    assert not _settings(email_verification_enabled=True).requires_email_verification()
+
+
+def test_producao_recusa_flag_ligada_sem_smtp():
+    """Adotar a confirmação sem SMTP é a armadilha que trava login — grita no boot."""
+    with pytest.raises(ValueError, match="EMAIL_VERIFICATION_ENABLED"):
+        _producao(email_verification_enabled=True)
+
+    # Com SMTP junto, produção sobe normalmente
+    _producao(email_verification_enabled=True, smtp_from_email="a@b.c")

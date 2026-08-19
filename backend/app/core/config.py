@@ -135,6 +135,16 @@ class Settings(BaseSettings):
                 "os links dos e-mails de confirmação e de senha saem a partir dele"
             )
 
+        # Adotar a confirmação de e-mail sem ter como enviar e-mail é a
+        # armadilha que travou login em produção: conta nasce não-verificada e
+        # a mensagem de confirmação nunca sai.
+        if self.email_verification_enabled and not self.email_is_configured():
+            raise ValueError(
+                "EMAIL_VERIFICATION_ENABLED=true exige SMTP configurado "
+                "(SMTP_USER/SMTP_FROM_EMAIL): sem ele, contas novas ficariam "
+                "presas esperando um e-mail que nunca chega"
+            )
+
     # Armazenamento de arquivos (anexos e avatares) em disco.
     # No deploy, este caminho precisa ser um volume — sem isso os arquivos
     # somem a cada redeploy do container.
@@ -184,6 +194,11 @@ class Settings(BaseSettings):
     frontend_url: str = "http://localhost:5173"
 
     # Confirmação de e-mail no cadastro
+    # A exigência é ADOTADA por esta flag, não deduzida das variáveis de SMTP:
+    # a inferência já travou login em produção — SMTP_USER/SMTP_FROM_EMAIL
+    # preenchidos (seed do .env.example) ligavam a confirmação sem SMTP
+    # funcional, a conta nascia não-verificada e o e-mail nunca saía.
+    email_verification_enabled: bool = False
     email_verification_token_hours: int = 24
     password_reset_token_hours: int = 1
 
@@ -193,11 +208,12 @@ class Settings(BaseSettings):
 
     def requires_email_verification(self) -> bool:
         """
-        Enquanto o SMTP não estiver configurado, o cadastro continua liberando
-        o acesso na hora — senão o cliente criaria conta e ficaria esperando um
-        e-mail que nunca chega.
+        Confirmação de e-mail só quando adotada de propósito E com SMTP
+        presente. Sem a flag, variável de SMTP preenchida não muda nada; sem
+        SMTP, ligar a flag sozinha também não — senão o cliente criaria conta
+        e ficaria esperando um e-mail que nunca chega.
         """
-        return self.email_is_configured()
+        return self.email_verification_enabled and self.email_is_configured()
 
     # ClamAV
     clamav_host: str = "clamav"
