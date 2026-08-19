@@ -60,11 +60,7 @@ async def handle(reader, writer):
                 out = b"+OK\r\n"
             elif name == "GET" and len(cmd) >= 2:
                 v = _get(cmd[1])
-                out = (
-                    b"$-1\r\n"
-                    if v is None
-                    else f"${len(v.encode())}\r\n{v}\r\n".encode()
-                )
+                out = b"$-1\r\n" if v is None else f"${len(v.encode())}\r\n{v}\r\n".encode()
             elif name in ("DEL", "UNLINK"):
                 n = sum(1 for k in cmd[1:] if STORE.pop(k, None) is not None)
                 out = f":{n}\r\n".encode()
