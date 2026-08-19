@@ -16,10 +16,22 @@ Permissões:
     PATCH  /equipments/{id}                 — admin | technician
     DELETE /equipments/{id}                 — admin | technician (soft-delete)
 
+  Equipments do próprio cliente (self-service):
+    POST   /equipment/my              — client
+    GET    /equipment/my              — qualquer autenticado
+    PATCH  /equipment/my/{id}         — client (e só o próprio)
+    DELETE /equipment/my/{id}         — client (e só o próprio)
+
   O escopo por dono vale para o perfil cliente: equipamento de outro cliente —
-  ou sem dono — é negado, porque o número de série é dado do cliente. Os
-  endpoints /equipment/my* seguem a mesma regra por construção. Para o cliente
-  a recusa sai como 404, indistinguível de um id inexistente; para staff, 403.
+  ou sem dono — é negado, porque o número de série é dado do cliente. A recusa
+  sai como 404, indistinguível de um id inexistente.
+
+  Os verbos que ESCREVEM em /equipment/my* exigem perfil client: com qualquer
+  autenticado, staff criava equipamento pertencente a staff — o mesmo estado
+  que o `_valida_dono` recusa com 400 nos endpoints acima, e que não aparece
+  para cliente nenhum nem pode virar chamado. A LEITURA fica aberta de
+  propósito: se alguém virou staff depois de ter sido cliente, o equipamento
+  antigo continua existindo, e negar o GET esconderia dele o que já era seu.
 
   Quem atribui o dono é o staff, no POST e no PATCH acima (campo `owner_id`,
   opcional). É o que impede o equipamento cadastrado pela tela de Produtos de
@@ -90,29 +102,21 @@ def _check_equipment_owner(equipment: Equipment, actor: User) -> None:
     tickets e anexos: o mesmo "não é seu" chegava ao usuário com dois textos
     diferentes, porque a checagem estava copiada inline em três endpoints.
 
-    Não abre exceção para staff — quem decide isso é o endpoint: os endpoints
-    `/equipment/my` são estritos até para admin (é o *meu* equipamento), e o
-    `GET /equipments/{id}` chama esta função só quando o ator é cliente.
+    A recusa sai como 404, idêntica à de um id que não existe. O 403 que havia
+    antes confirmava que aquele equipamento existe — oráculo de existência
+    justamente na mudança feita para fechar oráculos.
 
-    Para o cliente a recusa sai como 404, idêntica à de um id que não existe.
-    O 403 confirmava que aquele equipamento existe — oráculo de existência
-    justamente na mudança feita para fechar oráculos. Para staff continua 403:
-    quem já enxerga o parque inteiro pelo `GET /equipments/{id}` não ganha
-    informação nenhuma com o 404, que só seria uma resposta enganosa.
+    Só chega aqui quem é cliente: os `/equipment/my*` que escrevem exigem o
+    perfil, e o `GET /equipments/{id}` chama esta função apenas nesse caso.
+    Existiu aqui um ramo devolvendo 403 para staff — virou código morto quando
+    os verbos de escrita passaram a exigir perfil client, e ficar mantendo um
+    ramo que nenhum teste consegue alcançar é pior do que não tê-lo.
     """
-    if equipment.owner_id == actor.id:
-        return
-
-    if actor.role == UserRole.client:
+    if equipment.owner_id != actor.id:
         raise HTTPException(
             status_code=status.HTTP_404_NOT_FOUND,
             detail=_EQUIPAMENTO_NAO_ENCONTRADO,
         )
-
-    raise HTTPException(
-        status_code=status.HTTP_403_FORBIDDEN,
-        detail="Este equipamento não está vinculado ao seu cadastro.",
-    )
 
 
 async def _valida_dono(db: AsyncSession, owner_id: uuid.UUID) -> None:
@@ -411,7 +415,7 @@ async def create_my_equipment(
     body: EquipmentCreate,
     product_id: uuid.UUID,
     db: Annotated[AsyncSession, Depends(get_db)],
-    actor: Annotated[User, Depends(get_current_user)],
+    actor: Annotated[User, Depends(authorize(UserRole.client))],
 ) -> EquipmentResponse:
     await get_or_404(db, Product, product_id, "Product not found")
 
@@ -473,7 +477,7 @@ async def update_my_equipment(
     equipment_id: uuid.UUID,
     body: EquipmentUpdate,
     db: Annotated[AsyncSession, Depends(get_db)],
-    actor: Annotated[User, Depends(get_current_user)],
+    actor: Annotated[User, Depends(authorize(UserRole.client))],
 ) -> EquipmentResponse:
     equipment = await get_or_404(db, Equipment, equipment_id, _EQUIPAMENTO_NAO_ENCONTRADO)
     _check_equipment_owner(equipment, actor)
@@ -501,7 +505,7 @@ async def update_my_equipment(
 async def delete_my_equipment(
     equipment_id: uuid.UUID,
     db: Annotated[AsyncSession, Depends(get_db)],
-    actor: Annotated[User, Depends(get_current_user)],
+    actor: Annotated[User, Depends(authorize(UserRole.client))],
 ) -> None:
     equipment = await get_or_404(db, Equipment, equipment_id, _EQUIPAMENTO_NAO_ENCONTRADO)
     _check_equipment_owner(equipment, actor)

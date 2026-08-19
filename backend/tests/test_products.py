@@ -620,9 +620,11 @@ def _db_por_entidade(**por_tabela):
         return None
 
     async def _execute(stmt, *args, **kwargs):
+        encontrado = _para(stmt)
         result = MagicMock()
-        result.scalar_one_or_none.return_value = _para(stmt)
+        result.scalar_one_or_none.return_value = encontrado
         result.scalar_one.return_value = 0
+        result.scalars.return_value.all.return_value = [encontrado] if encontrado else []
         return result
 
     session = AsyncMock()
@@ -840,23 +842,82 @@ async def test_refusal_is_indistinguishable_from_not_found(patch_redis):
     assert de_outro.json() == inexistente.json()
 
 
-@pytest.mark.asyncio
-async def test_staff_on_self_service_endpoint_still_gets_403(patch_redis):
-    """
-    Para staff a recusa continua sendo 403, e é o certo.
+# ═══════════════════════════════════════════════════════════════
+# /equipment/my É DO CLIENTE (nos verbos que escrevem)
+# ═══════════════════════════════════════════════════════════════
+#
+# `POST /equipment/my` fazia `owner_id = actor.id` com qualquer perfil
+# autenticado, então técnico e admin criavam equipamento pertencente a staff —
+# exatamente o estado que o `_valida_dono` recusa com 400 nos endpoints de
+# staff. Equipamento assim some da listagem escopada (nenhum cliente o possui)
+# e nunca pode ser vinculado a chamado: a mesma regra valia num endpoint e não
+# no outro.
+#
+# A leitura continua aberta de propósito: se algum usuário virou staff depois
+# de ter sido cliente, o equipamento antigo dele continua existindo, e negar o
+# GET esconderia o que ele já podia ver. Staff sem equipamento recebe lista
+# vazia, que é o comportamento de hoje.
 
-    Os /equipment/my são estritos até para admin, mas esconder a existência de
-    quem já enxerga o parque inteiro pelo /equipments/{id} não protegeria nada
-    — só transformaria "não é seu" numa resposta enganosa.
-    """
+_VERBOS_DE_ESCRITA = [
+    ("post", f"/api/v1/equipment/my?product_id={_PRODUCT_ID}", {"name": "Titan"}),
+    ("patch", f"/api/v1/equipment/my/{_EQUIP_ID}", {"name": "Outro nome"}),
+    ("delete", f"/api/v1/equipment/my/{_EQUIP_ID}", None),
+]
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize(("metodo", "url", "corpo"), _VERBOS_DE_ESCRITA)
+@pytest.mark.parametrize("perfil", [UserRole.admin, UserRole.technician])
+async def test_staff_cannot_write_through_self_service(patch_redis, metodo, url, corpo, perfil):
+    """Admin e técnico são recusados nos três verbos que escrevem."""
     from app.core.database import get_db
 
     equip = _mock_equipment()
-    equip.owner_id = uuid.uuid4()
-    app.dependency_overrides[get_db] = _db_override(equip)
-    _override_user(_mock_user(UserRole.technician))
+    equip.owner_id = None
+    app.dependency_overrides[get_db] = _db_por_entidade(products=_mock_product(), equipments=equip)
+    _override_user(_mock_user(perfil))
 
+    kwargs = {"json": corpo} if corpo is not None else {}
     async with AsyncClient(transport=ASGITransport(app=app), base_url="http://test") as c:
-        resp = await c.delete(f"/api/v1/equipment/my/{_EQUIP_ID}")
+        resp = await getattr(c, metodo)(url, **kwargs)
 
     assert resp.status_code == 403, resp.text
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize(("metodo", "url", "corpo"), _VERBOS_DE_ESCRITA)
+async def test_client_still_writes_through_self_service(patch_redis, metodo, url, corpo):
+    """O cliente continua cadastrando, editando e removendo o próprio parque."""
+    from app.core.database import get_db
+
+    equip = _mock_equipment()
+    equip.owner_id = _CLIENT.id
+    app.dependency_overrides[get_db] = _db_por_entidade(products=_mock_product(), equipments=equip)
+    _override_user(_CLIENT)
+
+    kwargs = {"json": corpo} if corpo is not None else {}
+    async with AsyncClient(transport=ASGITransport(app=app), base_url="http://test") as c:
+        resp = await getattr(c, metodo)(url, **kwargs)
+
+    assert resp.status_code in (200, 201, 204), resp.text
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("perfil", [UserRole.admin, UserRole.technician, UserRole.client])
+async def test_self_service_listing_stays_open_to_every_role(patch_redis, perfil):
+    """
+    A leitura segue aberta a todos os perfis.
+
+    É o que preserva o acesso de quem virou staff depois de ter sido cliente —
+    o equipamento antigo continua existindo, e negar o GET esconderia dele o
+    que já era seu.
+    """
+    from app.core.database import get_db
+
+    app.dependency_overrides[get_db] = _db_por_entidade(equipments=None)
+    _override_user(_mock_user(perfil))
+
+    async with AsyncClient(transport=ASGITransport(app=app), base_url="http://test") as c:
+        resp = await c.get("/api/v1/equipment/my")
+
+    assert resp.status_code == 200, resp.text
