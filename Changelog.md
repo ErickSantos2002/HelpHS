@@ -83,6 +83,11 @@ Datas em DD/MM/AAAA.
   o Black format check reprovava no main desde 06/08 e, por rodar antes do
   pytest, impedia a suíte do backend de rodar — o gate de testes estava morto
   sem ninguém perceber. Reformatação mecânica, sem mudança de lógica.
+- Chaves JWT efêmeras geradas pelo conftest (`4449ce2`): com o pytest de volta
+  no CI, 54 testes que assinam RS256 morriam com `FileNotFoundError` porque
+  `keys/` é gitignored e nada as gerava. Par RSA por sessão em diretório
+  temporário — `pytest` roda em máquina zerada, e a suíte nunca toca as chaves
+  reais do dev. Primeiro CI verde de ponta a ponta desde antes de 06/08.
 - Suíte do backend deixou de depender do `.env` local (`e4ec7f2`): um
   `conftest.py` fixa `APP_ENV=testing` antes dos imports, então `pytest` roda
   verde sem variável no comando. Antes, quem rodasse localmente subia o rate
@@ -94,6 +99,12 @@ Datas em DD/MM/AAAA.
 
 ### Corrigido
 - Build do frontend quebrado por typecheck que não checava nada (`882662b`).
+- Login travava com "Confirme seu e-mail" sem nenhum e-mail chegar (`1b3d355`):
+  a exigência de confirmação era inferida de `SMTP_USER`/`SMTP_FROM_EMAIL`
+  preenchidos — e o `.env.example` vem com os dois preenchidos. A adoção agora
+  é explícita via `EMAIL_VERIFICATION_ENABLED` (default `false`) junto do SMTP;
+  em produção, flag ligada sem SMTP recusa o boot. Contas criadas presas voltam
+  a entrar sem intervenção no banco.
 
 ### Documentação
 - 11 skills `help-*` de revisão, segurança e deploy em `.claude/skills/`

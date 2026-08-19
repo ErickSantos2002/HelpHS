@@ -7,6 +7,35 @@ O changelog do produto (o que o cliente vê) fica em
 
 ---
 
+## 19/08/2026 — Push, ressurreição do CI e destrave do login
+
+O push dos 24 commits da frente de segurança revelou que **o CI do main
+estava vermelho desde 06/08** — e como o black rodava antes do pytest, **a
+suíte do backend nunca rodava**: o gate de testes estava morto sem ninguém
+perceber. Duas causas empilhadas, corrigidas em sequência, e um bug de
+produção reportado pelo Rickelme no mesmo dia.
+
+| Commit | Tipo | O que foi feito |
+|---|---|---|
+| `57ca9d9` | style | Reformata o backend com o black pinado (27 arquivos, zero lógica) — decisão do Rickelme; era a 1ª causa do CI vermelho |
+| `4449ce2` | test | 2ª causa, revelada quando o pytest voltou a rodar: `keys/` é gitignored e o CI não tinha chaves JWT — 54 testes com `FileNotFoundError`. O conftest agora gera par RSA efêmero por sessão; `pytest` roda em máquina zerada |
+| `1b3d355` | fix | **Login travado em produção** ("Confirme seu e-mail" sem e-mail chegar): a exigência era *inferida* de `SMTP_USER`/`SMTP_FROM_EMAIL` preenchidos — e o `.env.example` vem com os dois preenchidos (senha `CHANGE_ME`). Agora a adoção é explícita: `EMAIL_VERIFICATION_ENABLED` (default `false`) **e** SMTP presente; flag ligada sem SMTP recusa o boot em produção. Contas presas voltam a entrar sem mexer no banco |
+
+Resultado: **CI verde de ponta a ponta no `4449ce2`** — o primeiro do main
+desde antes de 06/08, com a suíte do backend (agora 435 testes, 82,35%)
+rodando como gate de verdade.
+
+**Fica na fila para quando o SMTP for adotado**: ligar
+`EMAIL_VERIFICATION_ENABLED=true` no painel e decidir o que fazer com as
+contas antigas criadas como não-verificadas (backfill ou reenvio de link).
+
+**Aviso ao time**: a reformatação tocou 27 arquivos — trabalho local em
+andamento terá conflitos cosméticos ao puxar (resolver com pull +
+reaplicar `black .`). Código novo no backend deve passar pelo black antes
+do commit, senão o CI volta a ficar vermelho.
+
+---
+
 ## 18/08/2026 — Auditoria de segurança, correções e CI
 
 Primeira rodada com as skills do projeto: auditoria de segurança completa,
