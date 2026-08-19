@@ -173,3 +173,53 @@ describe("setEquipmentActive", () => {
     });
   });
 });
+
+
+// ── owner_id no payload de equipamento ────────────────────────
+//
+// O backend aceita owner_id nos endpoints de staff desde 51a9cb8, mas o
+// service omitia o campo — então equipamento criado pela tela de Produtos
+// nascia órfão e a coluna de dono ficava em "—" sem como preencher.
+
+describe("createEquipment — dono", () => {
+  it("envia o owner_id quando um dono é escolhido", async () => {
+    mockPost.mockResolvedValue({ data: { ...equipment, owner_id: "u1" } });
+
+    await createEquipment("p1", { name: "Servidor A", owner_id: "u1" });
+
+    expect(mockPost).toHaveBeenCalledWith("/products/p1/equipments", {
+      name: "Servidor A",
+      owner_id: "u1",
+    });
+  });
+
+  it("sem dono escolhido, não inventa o campo", async () => {
+    mockPost.mockResolvedValue({ data: equipment });
+
+    await createEquipment("p1", { name: "Servidor A" });
+
+    expect(mockPost).toHaveBeenCalledWith("/products/p1/equipments", {
+      name: "Servidor A",
+    });
+  });
+});
+
+describe("updateEquipment — dono", () => {
+  it("envia o owner_id na edição — é como se conserta um equipamento órfão", async () => {
+    mockPatch.mockResolvedValue({ data: { ...equipment, owner_id: "u1" } });
+
+    await updateEquipment("e1", { owner_id: "u1" });
+
+    expect(mockPatch).toHaveBeenCalledWith("/equipments/e1", { owner_id: "u1" });
+  });
+
+  it("owner_id nulo desvincula de propósito, e precisa chegar ao servidor", async () => {
+    // `null` explícito é diferente de campo ausente: um desvincula, o outro
+    // deixa como está. Um `if (owner_id)` no meio do caminho comeria o null.
+    mockPatch.mockResolvedValue({ data: { ...equipment, owner_id: null } });
+
+    await updateEquipment("e1", { owner_id: null });
+
+    expect(mockPatch).toHaveBeenCalledWith("/equipments/e1", { owner_id: null });
+  });
+});

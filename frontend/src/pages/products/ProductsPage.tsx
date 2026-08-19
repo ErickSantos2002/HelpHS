@@ -12,6 +12,7 @@ import {
   Modal,
   ModalFooter,
   Pagination,
+  SearchSelect,
   Spinner,
   Textarea,
 } from "../../components/ui";
@@ -27,6 +28,8 @@ import {
   type Equipment,
   type Product,
 } from "../../services/productService";
+import { getUsers } from "../../services/userService";
+import { getApiError } from "../../lib/apiError";
 
 // ── Icons ─────────────────────────────────────────────────────
 
@@ -97,6 +100,7 @@ const equipmentSchema = z.object({
   serial_number: z.string().optional(),
   model: z.string().optional(),
   description: z.string().optional(),
+  owner_id: z.string().nullable().optional(),
 });
 
 type ProductValues = z.infer<typeof productSchema>;
@@ -249,9 +253,18 @@ function EquipmentFormModal({
   const form = useForm<EquipmentValues>({
     resolver: zodResolver(equipmentSchema),
     defaultValues: editing
-      ? { name: editing.name, serial_number: editing.serial_number ?? "", model: editing.model ?? "", description: editing.description ?? "" }
-      : { model: productName },
+      ? { name: editing.name, serial_number: editing.serial_number ?? "", model: editing.model ?? "", description: editing.description ?? "", owner_id: editing.owner_id ?? null }
+      : { model: productName, owner_id: null },
   });
+
+  // O nome do dono já vem na listagem; guardá-lo evita uma busca só para
+  // mostrar o que a tela acabou de exibir na tabela.
+  const [donoAtual, setDonoAtual] = useState<string | null>(editing?.owner_name ?? null);
+
+  async function buscarClientes(termo: string) {
+    const { items } = await getUsers({ role: "client", search: termo, limit: 20 });
+    return items.map((u) => ({ value: u.id, label: u.name, hint: u.email }));
+  }
 
   async function onSubmit(values: EquipmentValues) {
     setSubmitError(null);
@@ -261,18 +274,20 @@ function EquipmentFormModal({
         serial_number: values.serial_number || undefined,
         model: values.model || undefined,
         description: values.description || undefined,
+        // `null` explícito desvincula; `|| undefined` aqui comeria o null e
+        // deixaria o dono antigo no lugar.
+        owner_id: values.owner_id ?? null,
       };
       const saved = editing
         ? await updateEquipment(editing.id, payload)
         : await createEquipment(productId, payload);
       onSaved(saved);
     } catch (err: unknown) {
-      const detail = (err as { response?: { data?: { detail?: string } } })?.response?.data?.detail;
-      setSubmitError(
-        detail === "Serial number already in use"
-          ? "Este número de série já está em uso."
-          : "Erro ao salvar. Tente novamente.",
-      );
+      // O seletor de dono trouxe um erro que a mensagem genérica engoliria: o
+      // 400 de "dono precisa ser um cliente cadastrado" já vem pronto e em
+      // português do backend. `getApiError` devolve o motivo real quando
+      // existe e cai no texto genérico quando não.
+      setSubmitError(getApiError(err, "Erro ao salvar. Tente novamente."));
     }
   }
 
@@ -297,6 +312,24 @@ function EquipmentFormModal({
             )}
           />
         </div>
+        <Controller
+          control={form.control}
+          name="owner_id"
+          render={({ field }) => (
+            <SearchSelect
+              label="Dono"
+              value={field.value ?? null}
+              selectedLabel={donoAtual}
+              onChange={(id, nome) => {
+                field.onChange(id);
+                setDonoAtual(nome);
+              }}
+              onSearch={buscarClientes}
+              placeholder="Buscar cliente por nome ou e-mail…"
+              emptyLabel="— Sem dono —"
+            />
+          )}
+        />
         <Textarea label="Descrição" rows={2} {...form.register("description")} />
         <ModalFooter>
           <Button type="button" variant="secondary" onClick={onClose} disabled={form.formState.isSubmitting}>Cancelar</Button>

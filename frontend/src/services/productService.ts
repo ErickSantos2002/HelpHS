@@ -108,6 +108,14 @@ export async function getEquipments(
   return data;
 }
 
+/**
+ * Cadastro de equipamento pela tela de Produtos (staff).
+ *
+ * `owner_id` é o que impede o equipamento de nascer órfão: sem dono ele não
+ * aparece para cliente nenhum, não vira chamado e nem pode ser recadastrado,
+ * porque o número de série já está tomado. O campo é opcional, e só existe
+ * aqui — os `/equipment/my*` do cliente não o aceitam, de propósito.
+ */
 export async function createEquipment(
   productId: string,
   payload: {
@@ -115,6 +123,7 @@ export async function createEquipment(
     serial_number?: string;
     model?: string;
     description?: string;
+    owner_id?: string | null;
   },
 ): Promise<Equipment> {
   const { data } = await api.post<Equipment>(
@@ -124,6 +133,12 @@ export async function createEquipment(
   return data;
 }
 
+/**
+ * Edição pela tela de Produtos (staff).
+ *
+ * É por aqui que se conserta o equipamento cadastrado sem dono. `owner_id`
+ * ausente deixa o vínculo como está; `null` explícito desvincula.
+ */
 export async function updateEquipment(
   id: string,
   payload: {
@@ -131,6 +146,7 @@ export async function updateEquipment(
     serial_number?: string | null;
     model?: string | null;
     description?: string | null;
+    owner_id?: string | null;
   },
 ): Promise<Equipment> {
   const { data } = await api.patch<Equipment>(`/equipments/${id}`, payload);
