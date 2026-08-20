@@ -958,3 +958,118 @@ async def test_cancel_ticket_client_forbidden(patch_redis):
     async with AsyncClient(transport=ASGITransport(app=app), base_url="http://test") as c:
         resp = await c.delete(f"/api/v1/tickets/{_TICKET_ID}")
     assert resp.status_code == 403
+
+
+# ═══════════════════════════════════════════════════════════════
+# PRIMEIRA RESPOSTA DO SLA
+# ═══════════════════════════════════════════════════════════════
+
+
+@pytest.mark.asyncio
+async def test_assumir_chamado_nao_marca_primeira_resposta(patch_redis):
+    """Mudar o status não é falar com o cliente."""
+    from app.core.database import get_db
+
+    tech = _mock_user(UserRole.technician)
+    ticket = _mock_ticket(status=TicketStatus.open)
+
+    app.dependency_overrides[get_db] = _db_override(ticket)
+    _override_user(tech)
+
+    async with AsyncClient(transport=ASGITransport(app=app), base_url="http://test") as c:
+        resp = await c.patch(
+            f"/api/v1/tickets/{_TICKET_ID}/status",
+            json={"status": "in_progress"},
+        )
+
+    assert resp.status_code == 200
+    assert ticket.sla_first_response is None
+
+
+@pytest.mark.asyncio
+async def test_cancelar_pelo_status_nao_marca_primeira_resposta(patch_redis):
+    """Chamado cancelado não pode entrar no tempo médio de resposta."""
+    from app.core.database import get_db
+
+    admin = _mock_user(UserRole.admin)
+    ticket = _mock_ticket(status=TicketStatus.open)
+
+    app.dependency_overrides[get_db] = _db_override(ticket)
+    _override_user(admin)
+
+    async with AsyncClient(transport=ASGITransport(app=app), base_url="http://test") as c:
+        resp = await c.patch(
+            f"/api/v1/tickets/{_TICKET_ID}/status",
+            json={"status": "cancelled"},
+        )
+
+    assert resp.status_code == 200
+    assert ticket.sla_first_response is None
+
+
+@pytest.mark.asyncio
+async def test_atribuir_chamado_nao_marca_primeira_resposta(patch_redis):
+    """Atribuir a um terceiro não é resposta — nem do técnico, nem de quem atribuiu."""
+    from app.core.database import get_db
+
+    admin = _mock_user(UserRole.admin)
+    ticket = _mock_ticket(status=TicketStatus.open)
+    assignee = _mock_user(UserRole.technician, user_id=_TECH_ID)
+
+    app.dependency_overrides[get_db] = _db_seq_override(ticket, assignee)
+    _override_user(admin)
+
+    async with AsyncClient(transport=ASGITransport(app=app), base_url="http://test") as c:
+        resp = await c.patch(
+            f"/api/v1/tickets/{_TICKET_ID}/assign",
+            json={"assignee_id": str(_TECH_ID)},
+        )
+
+    assert resp.status_code == 200
+    assert ticket.sla_first_response is None
+
+
+@pytest.mark.asyncio
+async def test_resolver_marca_primeira_resposta_fora_de_open(patch_redis):
+    """A nota de resolução é texto que o cliente lê — vale como resposta.
+
+    Antes, resolver um chamado que já saíra de `open` não marcava nada: o
+    chamado era atendido e sumia do tempo médio de resposta.
+    """
+    from app.core.database import get_db
+
+    tech = _mock_user(UserRole.technician)
+    ticket = _mock_ticket(status=TicketStatus.awaiting_client)
+
+    app.dependency_overrides[get_db] = _db_seq_override(ticket, None)
+    _override_user(tech)
+
+    async with AsyncClient(transport=ASGITransport(app=app), base_url="http://test") as c:
+        resp = await c.post(
+            f"/api/v1/tickets/{_TICKET_ID}/resolve",
+            json={"resolution_note": "Sensor recalibrado."},
+        )
+
+    assert resp.status_code == 200
+    assert ticket.sla_first_response is not None
+
+
+@pytest.mark.asyncio
+async def test_resolver_o_proprio_chamado_nao_marca_primeira_resposta(patch_redis):
+    """Chamado interno que a mesma pessoa abre e resolve não teve espera."""
+    from app.core.database import get_db
+
+    admin = _mock_user(UserRole.admin)
+    ticket = _mock_ticket(status=TicketStatus.in_progress, creator_id=admin.id)
+
+    app.dependency_overrides[get_db] = _db_seq_override(ticket, None)
+    _override_user(admin)
+
+    async with AsyncClient(transport=ASGITransport(app=app), base_url="http://test") as c:
+        resp = await c.post(
+            f"/api/v1/tickets/{_TICKET_ID}/resolve",
+            json={"resolution_note": "Ajuste feito na hora."},
+        )
+
+    assert resp.status_code == 200
+    assert ticket.sla_first_response is None

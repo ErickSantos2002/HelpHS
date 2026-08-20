@@ -23,8 +23,13 @@ resume_sla(ticket, now)
 
 check_breaches(ticket, now)
     Flips sla_response_breach / sla_resolve_breach if deadlines have passed.
+
+register_first_response(ticket, now, responder_id=..., is_ai=..., is_system=...)
+    Stamps sla_first_response when someone other than the ticket's author
+    speaks to the client for the first time.
 """
 
+import uuid
 from datetime import UTC, datetime, timedelta
 
 import pytz
@@ -167,3 +172,45 @@ def check_breaches(ticket: Ticket, now: datetime) -> None:
         effective = ticket.sla_resolve_due_at + offset
         if now > effective:
             ticket.sla_resolve_breach = True
+
+
+def register_first_response(
+    ticket: Ticket,
+    now: datetime,
+    *,
+    responder_id: uuid.UUID | None,
+    is_ai: bool = False,
+    is_system: bool = False,
+) -> bool:
+    """
+    Carimba a primeira resposta do SLA. Devolve True se carimbou agora.
+
+    Primeira resposta é a primeira fala dirigida ao cliente por alguém que não
+    é o autor do chamado — não é "o chamado saiu do estado inicial". A regra
+    não olha para status nenhum, de propósito: assumir, atribuir ou cancelar
+    um chamado marcava resposta sem uma palavra ter sido dita, e chamado que
+    nasce fora de `open` (a Helô) nunca marcava.
+
+    O critério de "não é o autor" é o mesmo que o chat já usa para decidir a
+    quem notificar (`_notify_other_party`) — mesma pergunta, uma só resposta.
+    Vale também na resolução: quando quem abre e quem resolve são a mesma
+    pessoa, não houve ninguém do outro lado esperando, e um tempo de resposta
+    de zero segundo só sujaria a média de uma conversa que não existiu.
+
+    A violação é avaliada ANTES do carimbo porque `check_breaches` só olha o
+    prazo enquanto `sla_first_response` é nulo — na ordem inversa, a resposta
+    atrasada apagava a própria violação.
+    """
+    if ticket.sla_first_response is not None:
+        return False
+    if is_ai or is_system:
+        return False
+    if responder_id is None or responder_id == ticket.creator_id:
+        return False
+
+    offset = timedelta(milliseconds=ticket.sla_total_paused_ms or 0)
+    if ticket.sla_response_due_at and now > ticket.sla_response_due_at + offset:
+        ticket.sla_response_breach = True
+
+    ticket.sla_first_response = now
+    return True

@@ -5,6 +5,7 @@ All tests use deterministic datetimes in America/Sao_Paulo to ensure
 business-hours logic is verified precisely.
 """
 
+import uuid
 from datetime import timedelta
 from unittest.mock import MagicMock
 
@@ -16,10 +17,14 @@ from app.utils.sla import (
     apply_sla_config,
     check_breaches,
     pause_sla,
+    register_first_response,
     resume_sla,
 )
 
 # ── Helpers ───────────────────────────────────────────────────
+
+_AUTOR_ID = uuid.uuid4()
+_TECNICO_ID = uuid.uuid4()
 
 
 def _sp(year, month, day, hour=0, minute=0):
@@ -29,6 +34,7 @@ def _sp(year, month, day, hour=0, minute=0):
 
 def _mock_ticket(
     status=TicketStatus.open,
+    creator_id=None,
     sla_paused_at=None,
     sla_total_paused_ms=0,
     sla_response_due_at=None,
@@ -39,6 +45,7 @@ def _mock_ticket(
 ):
     t = MagicMock()
     t.status = status
+    t.creator_id = creator_id or _AUTOR_ID
     t.sla_paused_at = sla_paused_at
     t.sla_total_paused_ms = sla_total_paused_ms
     t.sla_response_due_at = sla_response_due_at
@@ -263,3 +270,119 @@ def test_pause_statuses_set():
     assert TicketStatus.awaiting_client in _PAUSE_STATUSES
     assert TicketStatus.awaiting_technical in _PAUSE_STATUSES
     assert TicketStatus.in_progress not in _PAUSE_STATUSES
+
+
+# ═══════════════════════════════════════════════════════════════
+# register_first_response — quem "respondeu" ao cliente
+# ═══════════════════════════════════════════════════════════════
+
+
+def test_first_response_marca_quando_nao_autor_responde():
+    """Técnico falando no chamado é a primeira resposta."""
+    ticket = _mock_ticket()
+    now = _sp(2026, 4, 6, 9, 30)
+
+    marcou = register_first_response(ticket, now, responder_id=_TECNICO_ID)
+
+    assert marcou is True
+    assert ticket.sla_first_response == now
+
+
+def test_first_response_ignora_o_autor_do_chamado():
+    """Cliente escrevendo no próprio chamado não responde a si mesmo."""
+    ticket = _mock_ticket()
+
+    marcou = register_first_response(ticket, _sp(2026, 4, 6, 9, 30), responder_id=_AUTOR_ID)
+
+    assert marcou is False
+    assert ticket.sla_first_response is None
+
+
+def test_first_response_e_idempotente():
+    """A segunda mensagem do técnico não desloca o carimbo da primeira."""
+    primeira = _sp(2026, 4, 6, 9, 30)
+    ticket = _mock_ticket(sla_first_response=primeira)
+
+    marcou = register_first_response(ticket, _sp(2026, 4, 6, 11, 0), responder_id=_TECNICO_ID)
+
+    assert marcou is False
+    assert ticket.sla_first_response == primeira
+
+
+def test_first_response_ignora_mensagem_da_ia():
+    """A Helô não zera o relógio — o SLA espera um humano."""
+    ticket = _mock_ticket()
+
+    marcou = register_first_response(
+        ticket, _sp(2026, 4, 6, 9, 30), responder_id=_TECNICO_ID, is_ai=True
+    )
+
+    assert marcou is False
+    assert ticket.sla_first_response is None
+
+
+def test_first_response_ignora_mensagem_do_sistema():
+    ticket = _mock_ticket()
+
+    marcou = register_first_response(
+        ticket, _sp(2026, 4, 6, 9, 30), responder_id=_TECNICO_ID, is_system=True
+    )
+
+    assert marcou is False
+    assert ticket.sla_first_response is None
+
+
+def test_first_response_ignora_remetente_nulo():
+    """Remetente nulo é ação do sistema — blinda a Helô antes de ela existir."""
+    ticket = _mock_ticket()
+
+    marcou = register_first_response(ticket, _sp(2026, 4, 6, 9, 30), responder_id=None)
+
+    assert marcou is False
+    assert ticket.sla_first_response is None
+
+
+def test_first_response_atrasada_preserva_a_violacao():
+    """Responder depois do prazo carimba a resposta E registra a violação.
+
+    Regressão do bug em que carimbar antes de check_breaches apagava a
+    violação: o chamado atendido com atraso saía do relatório limpo.
+    """
+    due = _sp(2026, 4, 6, 10, 0)
+    ticket = _mock_ticket(sla_response_due_at=due)
+    now = _sp(2026, 4, 6, 12, 0)
+
+    register_first_response(ticket, now, responder_id=_TECNICO_ID)
+
+    assert ticket.sla_first_response == now
+    assert ticket.sla_response_breach is True
+
+
+def test_first_response_dentro_do_prazo_nao_marca_violacao():
+    due = _sp(2026, 4, 6, 10, 0)
+    ticket = _mock_ticket(sla_response_due_at=due)
+
+    register_first_response(ticket, _sp(2026, 4, 6, 9, 0), responder_id=_TECNICO_ID)
+
+    assert ticket.sla_response_breach is False
+
+
+def test_first_response_conta_a_pausa_no_prazo():
+    """2h de pausa esticam o prazo: 11:00 ainda está dentro de um prazo de 10:00."""
+    due = _sp(2026, 4, 6, 10, 0)
+    ticket = _mock_ticket(sla_response_due_at=due, sla_total_paused_ms=2 * 3600 * 1000)
+
+    register_first_response(ticket, _sp(2026, 4, 6, 11, 0), responder_id=_TECNICO_ID)
+
+    assert ticket.sla_response_breach is False
+
+
+def test_first_response_sem_prazo_configurado_apenas_carimba():
+    """Chamado sem SLA aplicado registra a resposta sem inventar violação."""
+    ticket = _mock_ticket(sla_response_due_at=None)
+    now = _sp(2026, 4, 6, 9, 30)
+
+    register_first_response(ticket, now, responder_id=_TECNICO_ID)
+
+    assert ticket.sla_first_response == now
+    assert ticket.sla_response_breach is False

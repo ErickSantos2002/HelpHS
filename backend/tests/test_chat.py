@@ -75,6 +75,12 @@ def _mock_ticket(creator_id=None):
     t.assignee_id = _TECH_ID
     t.ai_conversation_summary = None
     t.updated_at = _NOW
+    t.sla_response_due_at = None
+    t.sla_first_response = None
+    t.sla_paused_at = None
+    t.sla_total_paused_ms = 0
+    t.sla_response_breach = False
+    t.sla_resolve_breach = False
     return t
 
 
@@ -417,3 +423,54 @@ async def test_summarize_client_forbidden(patch_redis):
         r = await client.post(f"/api/v1/tickets/{_TICKET_ID}/summarize")
 
     assert r.status_code == 403
+
+
+# ═══════════════════════════════════════════════════════════════
+# PRIMEIRA RESPOSTA DO SLA
+# ═══════════════════════════════════════════════════════════════
+
+
+@pytest.mark.asyncio
+async def test_mensagem_do_tecnico_marca_primeira_resposta(patch_redis):
+    """Responder pelo chat é o que registra a primeira resposta do SLA."""
+    tech = _mock_user(UserRole.technician, _TECH_ID)
+    ticket = _mock_ticket()
+    msg = _mock_message(sender=tech)
+
+    _override_user(tech)
+    from app.core.database import get_db
+
+    app.dependency_overrides[get_db] = _db_seq_override(ticket, msg)
+
+    with patch("app.routers.chat.notify", new=AsyncMock()):
+        async with AsyncClient(transport=ASGITransport(app=app), base_url="http://test") as client:
+            r = await client.post(
+                f"/api/v1/tickets/{_TICKET_ID}/messages",
+                json={"content": "Bom dia, já estou olhando o equipamento."},
+            )
+
+    assert r.status_code == 201
+    assert ticket.sla_first_response is not None
+
+
+@pytest.mark.asyncio
+async def test_mensagem_do_autor_nao_marca_primeira_resposta(patch_redis):
+    """O cliente escrevendo no próprio chamado não responde a si mesmo."""
+    autor = _mock_user(UserRole.client, _CREATOR_ID)
+    ticket = _mock_ticket(creator_id=_CREATOR_ID)
+    msg = _mock_message(sender=autor)
+
+    _override_user(autor)
+    from app.core.database import get_db
+
+    app.dependency_overrides[get_db] = _db_seq_override(ticket, msg)
+
+    with patch("app.routers.chat.notify", new=AsyncMock()):
+        async with AsyncClient(transport=ASGITransport(app=app), base_url="http://test") as client:
+            r = await client.post(
+                f"/api/v1/tickets/{_TICKET_ID}/messages",
+                json={"content": "O aparelho continua sem ligar."},
+            )
+
+    assert r.status_code == 201
+    assert ticket.sla_first_response is None

@@ -76,6 +76,7 @@ from app.utils.sla import (
     apply_sla_config,
     check_breaches,
     pause_sla,
+    register_first_response,
     resume_sla,
 )
 
@@ -171,9 +172,6 @@ async def _auto_transition(
         ticket.resolved_at = now
     if new_status in (TicketStatus.resolved, TicketStatus.closed, TicketStatus.cancelled):
         ticket.closed_at = now
-
-    if old_status == TicketStatus.open:
-        ticket.sla_first_response = now
 
     if old_status not in _PAUSE_STATUSES and new_status in _PAUSE_STATUSES:
         pause_sla(ticket, now)
@@ -654,9 +652,8 @@ async def update_ticket_status(
     ticket.status = body.status
     ticket.updated_at = now
 
-    # SLA: first response timestamp (when leaving open state)
-    if old_status == TicketStatus.open and body.status != TicketStatus.open:
-        ticket.sla_first_response = now
+    # SLA: mudar o status não marca primeira resposta — quem marca é falar com
+    # o cliente (chat) ou entregar a resolução. Ver register_first_response.
 
     # SLA: pause / resume clock
     if old_status not in _PAUSE_STATUSES and body.status in _PAUSE_STATUSES:
@@ -727,8 +724,9 @@ async def resolve_ticket(
     ticket.resolved_at = now
     ticket.updated_at = now
 
-    if old_status == TicketStatus.open:
-        ticket.sla_first_response = now
+    # A nota de resolução é texto que o cliente lê: vale como primeira
+    # resposta quando ninguém falou antes, venha o chamado de qual status vier.
+    register_first_response(ticket, now, responder_id=actor.id)
     if old_status in _PAUSE_STATUSES:
         resume_sla(ticket, now)
     check_breaches(ticket, now)

@@ -50,6 +50,7 @@ from app.schemas.chat import (
 )
 from app.services.llm import improve_message, suggest_reply, summarize_conversation
 from app.services.notifications import notify
+from app.utils.sla import register_first_response
 
 router = APIRouter(tags=["Chat"])
 settings = get_settings()
@@ -208,6 +209,7 @@ async def create_message(
 ) -> ChatMessageResponse:
     ticket = await _get_ticket_or_403(ticket_id, actor, db)
 
+    now = datetime.now(UTC)
     msg = ChatMessage(
         id=uuid.uuid4(),
         ticket_id=ticket_id,
@@ -215,9 +217,14 @@ async def create_message(
         content=payload.content.strip(),
         is_system=False,
         is_ai=False,
-        created_at=datetime.now(UTC),
+        created_at=now,
     )
     db.add(msg)
+
+    # SLA: falar com o cliente é o que conta como primeira resposta
+    register_first_response(
+        ticket, now, responder_id=actor.id, is_ai=msg.is_ai, is_system=msg.is_system
+    )
 
     # Notify the other party
     await _notify_other_party(db, ticket, actor, msg)
@@ -454,6 +461,7 @@ async def websocket_chat(
                 if ticket is None:
                     break
 
+                now = datetime.now(UTC)
                 msg = ChatMessage(
                     id=uuid.uuid4(),
                     ticket_id=ticket_id,
@@ -461,9 +469,13 @@ async def websocket_chat(
                     content=content,
                     is_system=False,
                     is_ai=False,
-                    created_at=datetime.now(UTC),
+                    created_at=now,
                 )
                 db.add(msg)
+
+                register_first_response(
+                    ticket, now, responder_id=user.id, is_ai=msg.is_ai, is_system=msg.is_system
+                )
 
                 await _notify_other_party(db, ticket, user, msg)
 
