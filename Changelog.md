@@ -27,6 +27,31 @@ Datas em DD/MM/AAAA.
   de propósito, para não esconder equipamento legado de quem virou staff depois
   de ter sido cliente.
 
+### Corrigido
+- **A primeira resposta do SLA passa a exigir uma fala ao cliente** (`230d670`).
+  `sla_first_response` era carimbado sob `old_status == open`, então "primeira
+  resposta" queria dizer "o chamado saiu do estado inicial" — e, como o mapa de
+  transições só permite `open → in_progress` e `open → cancelled`, na prática
+  "alguém assumiu ou cancelou". Duas distorções opostas conviviam: o técnico que
+  respondia pelo chat sem mexer no status não registrava resposta nenhuma
+  (`chat.py` não tocava no SLA), enquanto atribuir, assumir ou **cancelar** um
+  chamado registrava resposta sem uma palavra ter sido dita. O card de violação
+  de resposta e o tempo médio de primeira resposta mediam o tempo até alguém
+  clicar. A regra nova não olha para status nenhum: marca a primeira mensagem de
+  chat de quem **não é o autor** do chamado — o mesmo critério que o
+  `_notify_other_party` já usa para decidir a quem notificar — e a resolução como
+  rede de segurança, já que a nota de resolução é texto que o cliente lê. Sem
+  migration e **sem backfill**: a regra decide quando gravar, não reescreve o que
+  já está gravado. Desenho e levantamento dos 13 caminhos em
+  `docs/superpowers/specs/2026-08-20-primeira-resposta-sla-design.md`.
+  ⚠️ **O indicador piora no dia do deploy, e essa é a intenção.**
+- Violação de primeira resposta que se apagava sozinha (`230d670`). Nos três
+  pontos, o carimbo vinha antes do `check_breaches`, que só avalia o prazo
+  enquanto `sla_first_response` é nulo — o chamado atendido com três dias de
+  atraso saía com `sla_response_breach = False`, e a condição viva do dashboard,
+  que também exige o campo nulo, perdia a violação do outro lado.
+  `register_first_response` avalia antes de carimbar.
+
 ### Adicionado
 - Seletor de dono no cadastro de equipamento pela tela de Produtos
   (`3efb0cf`), fechando o ciclo do `51a9cb8`: o backend aceitava `owner_id`

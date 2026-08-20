@@ -7,6 +7,127 @@ O changelog do produto (o que o cliente vê) fica em
 
 ---
 
+## 20/08/2026 — O SLA passa a medir conversa, não clique
+
+Primeira frente da Helô — e a única que não depende da reunião com o cliente.
+O Welton desenhou o atendimento por IA em
+[`2026-08-11-helo-atendimento-ia-design.md`](docs/superpowers/specs/2026-08-11-helo-atendimento-ia-design.md);
+a revisão contra o código (`87dd05a`) achou um pré-requisito que ninguém tinha
+previsto, porque **já estava quebrado sem a Helô**.
+
+| Commit | O que foi feito |
+|---|---|
+| `230d670` | `fix:` **primeira resposta do SLA passa a exigir uma fala ao cliente** |
+| `docs:` | Desenho da regra nova + fechamento |
+
+### O indicador media o tempo até alguém clicar
+
+`sla_first_response` era gravado em três lugares, sempre sob
+`old_status == TicketStatus.open`. Como o mapa de transições só deixa `open`
+virar `in_progress` ou `cancelled`, "primeira resposta" queria dizer, na
+prática, **"alguém assumiu ou cancelou o chamado"**.
+
+O levantamento dos treze caminhos (tabela completa no
+[desenho](docs/superpowers/specs/2026-08-20-primeira-resposta-sla-design.md))
+achou distorções nas duas direções ao mesmo tempo:
+
+- **Dois falsos negativos, no caminho mais usado.** `chat.py` não tocava no
+  SLA — zero ocorrências. Técnico que responde pelo chat sem mexer no status
+  não registrava nada. Pior: o `_apply_chat_transition` nem transiciona a
+  partir de `open`, então o chamado ficava parado e mudo para o indicador.
+- **Três falsos positivos.** Atribuir marcava. Assumir marcava. E **cancelar
+  pelo `PATCH /status` marcava** — chamado cancelado entrava no tempo médio de
+  resposta com poucos segundos. Cancelar pelo `DELETE`, o outro caminho, não
+  marcava: dois jeitos de cancelar, dois resultados de SLA.
+- **Um buraco.** Resolver um chamado que já saíra de `open` não marcava nada.
+  Atendido, resolvido, e invisível para a métrica.
+
+### O achado que apareceu no meio do caminho
+
+Melhor que o problema original. Nos três pontos a ordem era esta:
+
+```
+ticket.sla_first_response = now
+check_breaches(ticket, now)      # ← já vê o campo preenchido
+```
+
+E `check_breaches` só avalia o prazo **enquanto `sla_first_response` é nulo**.
+Um chamado assumido três dias depois do prazo saía limpo, com
+`sla_response_breach = False`. A condição viva do dashboard também exige o
+campo nulo, então a violação sumia dos dois lados. **Na prática, primeira
+resposta atrasada quase nunca era contada como violação.**
+
+O conserto é a ordem: `register_first_response` avalia o prazo e só então
+carimba. Autocontida, a ordem nos call sites deixou de importar.
+
+### A regra nova não menciona status nenhum
+
+Marca a **primeira mensagem de chat de quem não é o autor do chamado**, mais a
+resolução como rede de segurança — a nota de resolução é texto que o cliente
+lê, e sem ela o buraco continuaria.
+
+"Não é o autor" em vez de "é staff" foi decisão deliberada: é o mesmo critério
+que o `_notify_other_party` já usa para decidir a quem notificar. Mesma
+pergunta — há alguém do outro lado? —, uma só resposta no código. Cobre de
+graça o admin que abre chamado interno e responde a si mesmo.
+
+Mudança de status **não conta**, nem para `awaiting_client` manual. Se a
+equipe atende por telefone, a fala tem que virar mensagem no chamado de
+qualquer jeito — para o SLA e para o próximo técnico que pegar o caso.
+
+Não olhar para status é o que torna a correção pré-requisito da Helô, e não
+consequência dela: o chamado que nasce em `ai_handling` e nunca passa por
+`open` funciona igual. E a mensagem da IA é excluída por dois filtros
+independentes, `is_ai` e remetente nulo — o teste do remetente nulo já está no
+repositório, antes de a Helô existir.
+
+### Sem migration e sem backfill
+
+A regra decide quando gravar; não reescreve o que já está gravado. Chamado
+fechado mantém o valor, relatório antigo não muda, e chamado vivo se corrige
+na próxima mensagem.
+
+O backfill era possível — `chat_messages` tem `sender_id` e `created_at` — e
+foi recusado por dois motivos. Migration roda sozinha no boot do container, e
+um `UPDATE` varrendo `tickets × chat_messages` é a categoria de coisa que
+derruba a API na subida, como o guard de CORS derrubou na véspera. E
+**reescrever números que a equipe já viu em relatório é pior do que ter um
+passado torto e datado**.
+
+### O número vai piorar, e foi combinado antes
+
+O card de violação de resposta sobe e o tempo médio sobe, porque o indicador
+deixa de apagar violação atrasada e deixa de contar clique como conversa. Não
+é regressão — é ele parando de mentir. Como o deploy é manual, a comunicação
+com a equipe acontece no tempo de quem sobe.
+
+### Fica na fila: a reabertura entrega metade do que anunciou
+
+Conferido de passagem, e é contradição de verdade. O changelog do produto da
+v1.4.0 diz que "reabrir um chamado devolve um prazo de atendimento novo, em
+vez de trazê-lo de volta já vencido". O `reopen_ticket` renova só o prazo de
+**resolução** — o de resposta fica no dia da abertura original.
+
+Dá para ver na tela: o `TicketDetailPage` desenha dois chips lado a lado, e o
+chamado reaberto volta com "Resolução" contando de novo e **"Resposta:
+Vencido"**, permanentemente. Metade da promessa.
+
+Não é conserto trivial, e por isso não entrou: renovar o prazo de resposta
+obriga a decidir o que fazer com o `sla_first_response` do ciclo anterior —
+zerá-lo apaga o único registro que existe dele, o que provavelmente pede um
+campo por ciclo em vez de um campo por chamado. Decisão de produto própria.
+
+### Testes
+
+17 novos, nenhum dependendo do relógio: `now` é sempre injetado por parâmetro
+e a função não chama `datetime.now()`. Dez sobre o núcleo puro (incluindo
+resposta atrasada preservando a violação, pausa esticando o prazo e o
+remetente nulo da Helô), dois nas rotas de chat e cinco de regressão — assumir,
+cancelar e atribuir **não** marcam; resolver fora de `open` marca. Suíte
+completa em 466 testes, cobertura 82,65%.
+
+---
+
 ## 19/08/2026 (noite) — Terceira rodada da revisão
 
 Um `/code-review` sobre 51 arquivos desde `154ec74` verificou token a token que
