@@ -28,6 +28,14 @@ Datas em DD/MM/AAAA.
   de ter sido cliente.
 
 ### Corrigido
+- `/onboarding` deixa de abrir para quem não tem onboarding (`77a8e9c`). A rota
+  estava sob o `AuthGuard` e fora do `OnboardingGuard`, então qualquer
+  autenticado abria a tela digitando a URL: o staff, que não tem onboarding
+  nenhum, e o cliente que já completou — para quem refazer significaria
+  sobrescrever dados de cadastro já revisados. Ficar fora do `OnboardingGuard`
+  era proposital (senão o redirecionamento apontaria para si mesmo); o que
+  faltava era o par, `OnboardingOnlyRoute`. Higiene de rota, só no front — a
+  porta que importava, o endpoint, já foi fechada no `b1ab978`.
 - **A primeira resposta do SLA passa a exigir uma fala ao cliente** (`230d670`).
   `sla_first_response` era carimbado sob `old_status == open`, então "primeira
   resposta" queria dizer "o chamado saiu do estado inicial" — e, como o mapa de
@@ -53,6 +61,18 @@ Datas em DD/MM/AAAA.
   `register_first_response` avalia antes de carimbar.
 
 ### Adicionado
+- **Filtro de equipamentos sem dono** na listagem de Produtos (`3f3af90`),
+  fechando o outro lado do `3efb0cf`: atribuir dono já era possível, achar o
+  órfão para atribuir não era. Precisou ser parâmetro novo do endpoint
+  (`without_owner` em `GET /products/{id}/equipments`) e não filtro de tela —
+  a listagem é paginada no servidor, então peneirar o array recebido acharia só
+  o órfão que por acaso caiu na página aberta. A forma é um booleano e não um
+  filtro de dono genérico porque as duas coisas são ortogonais: "sem dono" é a
+  **ausência** de `owner_id` e não caberia num `owner_id=<uuid>` sem inventar um
+  valor sentinela; um filtro por dono específico, se fizer falta, entra ao lado
+  sem renegociar este contrato. O filtro **soma** ao escopo por dono do cliente
+  e nunca o substitui — cliente pedindo `without_owner=true` recebe lista vazia
+  em vez do parque órfão inteiro, e há teste para isso.
 - Seletor de dono no cadastro de equipamento pela tela de Produtos
   (`3efb0cf`), fechando o ciclo do `51a9cb8`: o backend aceitava `owner_id`
   desde então, mas o `productService` omitia o campo e o equipamento continuava
@@ -60,6 +80,18 @@ Datas em DD/MM/AAAA.
   dropdown pré-carregado quebraria em silêncio ao passar de 100 clientes, que é
   o teto de `GET /users`. O campo aparece ao criar **e** ao editar, com
   "— Sem dono —", o que também conserta os órfãos existentes um a um.
+
+### Testes
+- `FilterSelect`, `FormDropdown` e `ThemeContext` saem do descoberto
+  (`f7945e0`). Os três tinham lógica real e nenhum teste; como o Vitest é gate
+  do CI desde `1583b8b`, a ausência não aparecia como risco, aparecia como
+  silêncio. Cobrem o que um `<select>` nativo daria de graça e aqui é código
+  nosso — o painel em portal do `FilterSelect`, que precisa fechar sozinho em
+  clique fora, scroll e resize e reancorar quando abriria fora da janela — e o
+  ciclo escolher/sair/voltar do tema, que é onde a classe `dark` no `<html>` e a
+  chave `helphs-theme` divergiriam. Fica registrado no teste que o padrão é o
+  escuro e **não** `prefers-color-scheme`: o app não lê a preferência do sistema
+  operacional. Cada arquivo foi verificado por mutação.
 
 ### Documentação
 - Guia de desenvolvimento local (`f27f38c`, `3485092`) e mini-Redis de dev em

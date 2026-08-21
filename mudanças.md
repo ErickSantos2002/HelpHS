@@ -7,6 +7,112 @@ O changelog do produto (o que o cliente vê) fica em
 
 ---
 
+## 21/08/2026 — Fila técnica: cobertura, o órfão e uma porta encostada
+
+Dia sem frente de produto. Produção estável, `main` em `5fc10ce`, e as três
+pendências do painel (`CORS_ORIGINS`, porta 8000, SMTP) paradas com o Rickelme
+e o Erick. Sobrou o que estava na fila.
+
+| Commit | O que foi feito |
+|---|---|
+| `f7945e0` | `test:` **FilterSelect, FormDropdown e ThemeContext** saem do descoberto |
+| `3f3af90` | `feat:` **filtro de equipamentos sem dono** na listagem de Produtos |
+| `77a8e9c` | `fix:` **/onboarding** deixa de abrir para quem não tem onboarding |
+| `docs:` | Este fechamento |
+
+### Três componentes que o CI protegia sem saber
+
+O Vitest é gate do CI desde `1583b8b`. Isso significa que tudo que **tem**
+teste está protegido — e que tudo que não tem passa como se estivesse. Os três
+apontados pela rodada de test review não eram casca: são o dropdown de filtro
+das listagens, o dropdown dos formulários e o tema.
+
+O que justifica teste próprio em cada um é o que um `<select>` nativo daria de
+graça e aqui é código nosso:
+
+- **FilterSelect** renderiza o painel em portal no `document.body`, para não
+  ser cortado pelo `overflow` da barra de filtros. O preço é que ele flutua
+  ancorado a uma posição calculada **uma vez** na abertura, e por isso precisa
+  fechar sozinho em clique fora, scroll e resize. Também reancora pela direita
+  quando abriria fora da janela — sem isso, o filtro do fim da barra mostra
+  metade das opções cortadas.
+- **FormDropdown** é o irmão de dentro dos formulários: sem portal (dentro de
+  um modal o portal escaparia da pilha de foco), com rótulo, erro de validação
+  e desabilitado. Nos dois, a linha do placeholder devolve `""` — e esse é o
+  contrato com quem consome.
+- **ThemeContext** guarda a preferência em dois lugares que precisam
+  concordar: a classe `dark` no `<html>`, que é o que o Tailwind lê, e a chave
+  `helphs-theme`. Um sem o outro dá o bug clássico de escolher claro, dar F5 e
+  voltar escuro — então tem um teste que fecha o ciclo escolher/sair/voltar,
+  que é onde a divergência apareceria.
+
+Um achado de escopo, registrado no próprio teste: **o padrão é o escuro, não a
+preferência do sistema operacional**. O `ThemeContext` não lê
+`prefers-color-scheme`; quem chega sem nada salvo — e quem chega com um valor
+estragado — vê o escuro. Isso agora está afirmado por teste em vez de
+subentendido, e se um dia virar decisão mudar, o teste é onde a conversa começa.
+
+Teste escrito depois do código passa na primeira execução, o que não prova
+nada. Cada arquivo foi então verificado por mutação: quebrar o fechamento do
+painel do filtro, o fechamento do dropdown e a gravação da preferência derruba
+exatamente os testes correspondentes, e só eles.
+
+### O órfão que ninguém achava
+
+O `3efb0cf` subiu o seletor de dono. Mas para usar o seletor o staff precisa
+primeiro **achar** o equipamento órfão, e não tinha como: a listagem só
+oferecia busca por nome e situação.
+
+O ponto que decidiu a forma da solução: **`list_equipments` é paginada no
+servidor**. Filtrar no navegador varreria só a página aberta — com 200
+equipamentos e 20 por página, o órfão da página 7 ficaria invisível para
+sempre, que é exatamente o caso que o filtro existe para resolver. Precisava
+ser parâmetro novo do endpoint.
+
+Entre um `without_owner: bool` e um filtro de dono genérico, ficou o booleano.
+Não por ser menor: as duas coisas **não são alternativas**, são ortogonais.
+"Sem dono" é a *ausência* de `owner_id` e não caberia num `owner_id=<uuid>` sem
+inventar um valor sentinela para o nulo — e sentinela em query param é o tipo
+de contrato que ninguém lembra seis meses depois. Um filtro por dono
+específico, se fizer falta, entra ao lado deste sem renegociar nada.
+
+O detalhe que virou teste: o filtro **soma** ao escopo por dono do cliente,
+nunca substitui. Cliente pedindo `without_owner=true` recebe `owner_id = <ele>`
+**E** `owner_id IS NULL`, que não casa com nada — lista vazia. A versão errada
+dessa mesma linha seria uma enumeração do parque órfão inteiro por qualquer
+cliente autenticado, então ela tem teste próprio dizendo isso.
+
+### Uma porta que já estava trancada por dentro
+
+`/onboarding` ficava sob o `AuthGuard` e fora do `OnboardingGuard`. Qualquer
+autenticado abria a tela digitando a URL: o staff, que não tem onboarding
+nenhum, e o cliente que já completou — para quem refazer significaria
+sobrescrever dados de cadastro já revisados.
+
+Ficar fora do `OnboardingGuard` era proposital: ele redireciona *para*
+`/onboarding`, então colocá-la dentro apontaria o redirecionamento para si
+mesmo. O que faltava não era mover a rota, era o **par**: o `OnboardingGuard`
+empurra para a tela quem ainda deve preencher, o `OnboardingOnlyRoute` novo
+tira de lá todo o resto.
+
+Vale dizer o que isto **não** é: não é correção de segurança. A porta que
+importava — o endpoint — já foi fechada no `b1ab978`. Isto é higiene de rota,
+só no front.
+
+### O que fica na mesa
+
+- **`BackgroundTasks` no `forgot-password`.** Escolha do Rickelme priorizar
+  outras frentes hoje, mas com uma data implícita: ele precisa entrar **antes**
+  de o SMTP de produção ser ligado. Enquanto o envio é síncrono, o tempo de
+  resposta do endpoint denuncia quais e-mails têm conta — o mesmo oráculo de
+  timing que o `f8e6013` fechou no login. Hoje não existe em produção só porque
+  não há SMTP configurado; ele nasce no dia em que o Erick configurar.
+- **Oráculo de existência nos chamados.** Investigado hoje, proposta levantada,
+  aguardando decisão. O `403` de chamado alheio é o mesmo formato que os
+  equipamentos perderam no `637ad0f`.
+
+---
+
 ## 20/08/2026 — O SLA passa a medir conversa, não clique
 
 Primeira frente da Helô — e a única que não depende da reunião com o cliente.
