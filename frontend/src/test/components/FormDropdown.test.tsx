@@ -127,6 +127,11 @@ describe("FormDropdown — desabilitado", () => {
   it("não abre e não deixa escolher", async () => {
     // O modal de equipamento desabilita a prioridade enquanto carrega a lista;
     // abrir um painel vazio ali seria pior do que não abrir.
+    //
+    // Quem garante isso é o atributo `disabled` do <button>: o navegador não
+    // dispara clique em controle desabilitado. Havia um `!disabled &&` no
+    // onClick que nunca chegava a rodar — linha morta que este teste continua
+    // cobrindo depois da remoção.
     const { onChange } = renderCampo({ disabled: true });
 
     await userEvent.click(gatilho());

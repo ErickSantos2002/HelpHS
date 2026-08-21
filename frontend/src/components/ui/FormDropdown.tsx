@@ -62,7 +62,7 @@ export function FormDropdown({
       <button
         type="button"
         disabled={disabled}
-        onClick={() => !disabled && setOpen((v) => !v)}
+        onClick={() => setOpen((v) => !v)}
         className={cn(
           "flex w-full items-center justify-between rounded-lg border px-3 py-2 text-sm transition-all select-none",
           "bg-background-elevated focus:outline-none",

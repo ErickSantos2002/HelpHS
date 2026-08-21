@@ -98,8 +98,8 @@ def _check_equipment_owner(equipment: Equipment, actor: User) -> None:
     """
     Recusa o equipamento que não pertence ao ator.
 
-    Ponto único da recusa por dono, no espírito do `_check_ticket_access` de
-    tickets e anexos: o mesmo "não é seu" chegava ao usuário com dois textos
+    Ponto único da recusa por dono, no espírito do `ensure_ticket_visible` de
+    chamados e anexos: o mesmo "não é seu" chegava ao usuário com dois textos
     diferentes, porque a checagem estava copiada inline em três endpoints.
 
     A recusa sai como 404, idêntica à de um id que não existe. O 403 que havia
