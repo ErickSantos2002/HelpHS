@@ -8,6 +8,7 @@ Dois comportamentos merecem atenção especial aqui:
     ninguém — o cliente ficaria esperando um e-mail que nunca chega.
 """
 
+import json
 import threading
 import uuid
 from datetime import UTC, datetime
@@ -475,3 +476,122 @@ async def test_redefinir_senha_hasheia_fora_do_event_loop(smtp_configurado):
 
     assert r.status_code == 200, r.text
     assert espia.rodou_fora_da_thread(thread_do_loop)
+
+
+# ═══════════════════════════════════════════════════════════════
+# O ENVIO NÃO PODE ATRASAR A RESPOSTA
+# ═══════════════════════════════════════════════════════════════
+#
+# O SMTP só é chamado no ramo da conta existente. Enquanto o envio for
+# aguardado dentro do handler, o tempo de resposta separa "tem conta" de "não
+# tem" — o mesmo oráculo de timing que o `f8e6013` fechou no login, renascendo
+# ao lado dele. Hoje não dá para medir em produção só porque não há SMTP
+# configurado; o oráculo nasce no dia em que ligarem.
+#
+# O teste não mede relógio (mock de rede não tem latência real): mede a ORDEM.
+# Chamando a app pelo ASGI cru dá para ver o corpo da resposta sair antes de o
+# envio começar — que é exatamente o que `BackgroundTasks` garante e o `await`
+# inline não.
+
+
+async def _ordem_dos_eventos(caminho: str, email: str, envio_mock) -> list[str]:
+    """Chama a app no ASGI cru e devolve a ordem: resposta e envio."""
+    eventos: list[str] = []
+
+    async def _envio(*args, **kwargs):
+        eventos.append("envio")
+        return True
+
+    envio_mock.side_effect = _envio
+
+    corpo = json.dumps({"email": email}).encode()
+
+    async def receive():
+        return {"type": "http.request", "body": corpo, "more_body": False}
+
+    async def send(message):
+        eventos.append(message["type"])
+
+    scope = {
+        "type": "http",
+        "asgi": {"version": "3.0", "spec_version": "2.1"},
+        "http_version": "1.1",
+        "method": "POST",
+        "scheme": "http",
+        "path": caminho,
+        "raw_path": caminho.encode(),
+        "query_string": b"",
+        "root_path": "",
+        "headers": [
+            (b"host", b"test"),
+            (b"content-type", b"application/json"),
+            (b"content-length", str(len(corpo)).encode()),
+        ],
+        "client": ("127.0.0.1", 12345),
+        "server": ("test", 80),
+    }
+
+    await app(scope, receive, send)
+    return eventos
+
+
+@pytest.mark.asyncio
+async def test_esqueci_senha_responde_antes_de_mandar_o_email(smtp_configurado):
+    from app.core.database import get_db
+
+    app.dependency_overrides[get_db] = _db_with(_mock_user(email_verified=True))
+
+    eventos = await _ordem_dos_eventos(
+        "/api/v1/auth/forgot-password", _EMAIL, smtp_configurado["reset"]
+    )
+
+    assert "envio" in eventos, "o e-mail precisa continuar saindo para a conta existente"
+    assert eventos.index("http.response.body") < eventos.index(
+        "envio"
+    ), f"o envio acontece antes de a resposta sair — o tempo denuncia quem tem conta: {eventos}"
+
+
+@pytest.mark.asyncio
+async def test_reenvio_de_confirmacao_responde_antes_de_mandar_o_email(smtp_configurado):
+    from app.core.database import get_db
+
+    app.dependency_overrides[get_db] = _db_with(_mock_user(email_verified=False))
+
+    eventos = await _ordem_dos_eventos(
+        "/api/v1/auth/resend-verification", _EMAIL, smtp_configurado["verification"]
+    )
+
+    assert "envio" in eventos
+    assert eventos.index("http.response.body") < eventos.index(
+        "envio"
+    ), f"o envio acontece antes de a resposta sair: {eventos}"
+
+
+@pytest.mark.asyncio
+async def test_esqueci_senha_nao_agenda_envio_para_conta_inexistente(smtp_configurado):
+    """O ramo neutro continua sem mandar nada — agendar seria pior que aguardar."""
+    from app.core.database import get_db
+
+    app.dependency_overrides[get_db] = _db_with(None, get_result=None)
+
+    eventos = await _ordem_dos_eventos(
+        "/api/v1/auth/forgot-password", "ninguem@test.com", smtp_configurado["reset"]
+    )
+
+    assert "envio" not in eventos
+    assert "http.response.body" in eventos
+
+
+@pytest.mark.asyncio
+async def test_reenvio_nao_agenda_envio_para_conta_ja_confirmada(smtp_configurado):
+    """Conta já confirmada é o outro ramo neutro do reenvio."""
+    from app.core.database import get_db
+
+    app.dependency_overrides[get_db] = _db_with(_mock_user(email_verified=True))
+
+    eventos = await _ordem_dos_eventos(
+        "/api/v1/auth/resend-verification", _EMAIL, smtp_configurado["verification"]
+    )
+
+    assert "envio" not in eventos
+    assert "http.response.body" in eventos

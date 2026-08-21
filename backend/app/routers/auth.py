@@ -7,7 +7,7 @@ from datetime import UTC, datetime
 from typing import Annotated
 
 import httpx
-from fastapi import APIRouter, Depends, HTTPException, Request, status
+from fastapi import APIRouter, BackgroundTasks, Depends, HTTPException, Request, status
 from fastapi.security import HTTPAuthorizationCredentials
 from jose import JWTError
 from loguru import logger
@@ -234,6 +234,7 @@ async def verify_email(
 async def resend_verification(
     body: EmailRequest,
     request: Request,
+    background: BackgroundTasks,
     db: Annotated[AsyncSession, Depends(get_db)],
 ) -> MessageResponse:
     """
@@ -241,6 +242,10 @@ async def resend_verification(
 
     A resposta é sempre a mesma, exista ou não a conta: caso contrário qualquer
     pessoa poderia descobrir quais e-mails estão cadastrados.
+
+    Mesma mensagem não basta: o envio vai para segundo plano porque só o ramo
+    da conta existente manda e-mail, e aguardá-lo aqui faria o RELÓGIO dizer o
+    que a mensagem cala. Ver `forgot_password`.
     """
     neutra = MessageResponse(
         message="Se este e-mail estiver cadastrado e ainda não confirmado, você receberá o link."
@@ -253,8 +258,8 @@ async def resend_verification(
         return neutra
 
     token = account_tokens.create_email_verification_token(user.id, settings)
-    await send_verification_email(user.email, user.name, token, settings)
-    logger.info(f"Verification email resent: {user.email}")
+    background.add_task(send_verification_email, user.email, user.name, token, settings)
+    logger.info(f"Verification email queued (resend): {user.email}")
     return neutra
 
 
@@ -266,6 +271,7 @@ async def resend_verification(
 async def forgot_password(
     body: EmailRequest,
     request: Request,
+    background: BackgroundTasks,
     db: Annotated[AsyncSession, Depends(get_db)],
 ) -> MessageResponse:
     """
@@ -273,6 +279,15 @@ async def forgot_password(
 
     Também responde igual para e-mail inexistente — a mensagem nunca confirma
     se alguém tem conta no sistema.
+
+    E também não pode confirmar pelo RELÓGIO. O SMTP só é chamado no ramo da
+    conta existente, então enquanto o envio fosse aguardado aqui dentro os dois
+    ramos respondiam em tempos diferentes: o mesmo oráculo de enumeração que o
+    `f8e6013` fechou no login, renascendo ao lado dele. Com `BackgroundTasks` a
+    resposta sai antes de o envio começar e os dois ramos custam o mesmo.
+
+    Hoje isso não é mensurável em produção porque não há SMTP configurado — o
+    oráculo nasceria pronto no dia em que ligassem.
     """
     # Sem SMTP, prometer um e-mail que não vai sair só faria a pessoa esperar.
     # Isto revela configuração do sistema, não dados de usuário.
@@ -299,8 +314,8 @@ async def forgot_password(
         return neutra
 
     token = account_tokens.create_password_reset_token(user.id, user.password, settings)
-    await send_password_reset_email(user.email, user.name, token, settings)
-    logger.info(f"Password reset requested: {user.email}")
+    background.add_task(send_password_reset_email, user.email, user.name, token, settings)
+    logger.info(f"Password reset queued: {user.email}")
     return neutra
 
 
