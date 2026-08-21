@@ -18,6 +18,7 @@ e o Erick. Sobrou o que estava na fila.
 | `f7945e0` | `test:` **FilterSelect, FormDropdown e ThemeContext** saem do descoberto |
 | `3f3af90` | `feat:` **filtro de equipamentos sem dono** na listagem de Produtos |
 | `77a8e9c` | `fix:` **/onboarding** deixa de abrir para quem não tem onboarding |
+| `7371bc7` | `fix:` **chamado alheio deixa de denunciar que existe** |
 | `docs:` | Este fechamento |
 
 ### Três componentes que o CI protegia sem saber
@@ -99,6 +100,69 @@ Vale dizer o que isto **não** é: não é correção de segurança. A porta que
 importava — o endpoint — já foi fechada no `b1ab978`. Isto é higiene de rota,
 só no front.
 
+### Doze cópias de uma regra que dizia demais
+
+Aprovado o levantamento, foi execução. O `403` de chamado alheio dizia
+"existe, mas não é seu" — meia resposta a mais do que quem só tem o id deveria
+conseguir. Com uma lista de UUIDs dava para enumerar o sistema sem ler um
+chamado sequer.
+
+O tamanho real do problema só apareceu no levantamento: a regra estava copiada
+em **quatro arquivos sob três nomes** — `_check_ticket_access` nos anexos,
+`_get_ticket_or_403` no chat e mais quatro cópias inline em tickets e
+avaliações. Doze pontos de entrada. A premissa de que o helper dos anexos era
+compartilhado entre routers não se sustentou: ele nunca saiu do arquivo dele;
+o que viajou foi a *ideia*, recopiada à mão cada vez.
+
+Passa a existir `ensure_ticket_visible` em `app/utils/`. **Ele não abre exceção
+para staff** — quem decide isso é o call site, e essa foi a decisão explícita
+do Rickelme. O motivo tem precedente no `2ad773c`: um helper que "sabe" que
+admin passa vira passe-livre invisível no dia em que alguém o chamar de um
+endpoint novo sem ler o corpo dele. Aqui a regra é só "é seu?", e cada endpoint
+diz em voz alta quem submete a ela.
+
+**Só para cliente.** Técnico e admin já listam o sistema inteiro sem escopo, de
+modo que `404` entre eles não fecharia oráculo nenhum e quebraria
+assumir/atender — escopo entre técnicos seria regra de acesso nova, conversa de
+produto. E onde a recusa é de **papel**, o `403` fica: técnico na observação do
+cliente, staff que não abriu o chamado na avaliação. Trocar por `404` ali não
+esconderia existência de nada e trocaria "seu perfil não faz isso" por uma
+mentira que manda o admin caçar um bug que não há. Os dois casos têm teste
+dizendo isso.
+
+#### Três coisas que uma varredura de status HTTP não acharia
+
+1. **`GET /attachments/{id}` vazava duas vezes** — pelo id do anexo *e* pelo do
+   chamado pai, com três respostas distinguíveis. O cliente agora recebe a
+   mesma nos três casos, e ela fala do **anexo**: responder "chamado não
+   encontrado" a quem pediu o anexo já confirmaria que o anexo existe.
+2. **O WebSocket tinha o mesmo oráculo em código de fechamento** — `4003`
+   contra `4004`. Quem tivesse a lista de ids enumerava o sistema pelo chat sem
+   nunca receber um HTTP `403`. Fecha `4004` nos dois casos, com o mesmo
+   motivo. Não havia teste nenhum de WS no repositório; agora há, com um
+   harness que dispensa o lifespan da app (que abre conexão real com o
+   Postgres).
+3. **`"Attachment not found"` não tinha tradução** em `apiError.ts`. O
+   Rickelme pegou isso conferindo o dicionário antes de aprovar. Sem somar a
+   entrada, a correção de backend entregaria ao cliente um toast cru em inglês
+   — exatamente o bug que o `2db8dfa` consertou para equipamento. Foi no mesmo
+   commit: o texto só passa a chegar ao cliente por causa da mudança do
+   backend, e separar deixaria uma janela com a tela em inglês.
+
+#### O que impede a regra de divergir de novo
+
+O texto da recusa e o do id inexistente saem de **uma constante por recurso**
+em cada router. Não é enfeite: dois `404` com mensagens diferentes continuariam
+separando "não é seu" de "não existe", só que com mais disfarce. Além disso,
+cada arquivo ganhou um teste de paridade no molde do
+`test_ownership_refusal_message_is_the_same_everywhere` que já guardava os
+equipamentos — a versão anterior desta regra divergiu justamente por uma cópia
+esquecida, então o contrato agora é executável.
+
+Cobertura nova nos três ramos que não tinham teste nenhum: `observation`,
+`GET /attachments/{id}` e o WebSocket. Sem migration, sem backfill. **471 → 490
+testes no backend.**
+
 ### O que fica na mesa
 
 - **`BackgroundTasks` no `forgot-password`.** Escolha do Rickelme priorizar
@@ -107,9 +171,8 @@ só no front.
   resposta do endpoint denuncia quais e-mails têm conta — o mesmo oráculo de
   timing que o `f8e6013` fechou no login. Hoje não existe em produção só porque
   não há SMTP configurado; ele nasce no dia em que o Erick configurar.
-- **Oráculo de existência nos chamados.** Investigado hoje, proposta levantada,
-  aguardando decisão. O `403` de chamado alheio é o mesmo formato que os
-  equipamentos perderam no `637ad0f`.
+- **`CORS_ORIGINS`, porta 8000 e SMTP** seguem no painel, com o Rickelme e o
+  Erick.
 
 ---
 

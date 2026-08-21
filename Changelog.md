@@ -11,6 +11,28 @@ Datas em DD/MM/AAAA.
 ## [Não publicado]
 
 ### Segurança
+- **Chamado alheio deixa de denunciar que existe** (`7371bc7`). Para o cliente,
+  o chamado de outra pessoa passa a responder `404`, com o mesmo texto de um id
+  inexistente, em vez do `403` que confirmava a existência — com uma lista de
+  UUIDs dava para enumerar o sistema sem ler um chamado sequer. Mesmo formato
+  que os equipamentos ganharam no `637ad0f`. A regra estava copiada em **quatro
+  arquivos sob três nomes** (`_check_ticket_access` nos anexos,
+  `_get_ticket_or_403` no chat, mais quatro inlines em tickets e avaliações),
+  doze pontos ao todo; passa a existir `ensure_ticket_visible` em `app/utils/`.
+  O helper **não abre exceção para staff** — quem decide isso é o call site,
+  pela mesma razão do `2ad773c`: um helper que "sabe" que admin passa vira
+  passe-livre invisível no dia em que for chamado de um endpoint novo. Vale só
+  para cliente: técnico e admin já listam tudo sem escopo, então `404` entre
+  eles não fecharia nada e quebraria assumir/atender. Onde a recusa é de
+  **papel** o `403` fica — técnico na observação do cliente, staff que não
+  abriu o chamado na avaliação. Três achados que varredura de status HTTP não
+  mostra: `GET /attachments/{id}` vazava **duas vezes** (id do anexo e id do
+  chamado pai, três respostas distinguíveis) e agora responde sempre pelo
+  **anexo**; o **WebSocket** tinha o mesmo oráculo em código de fechamento
+  (`4003` contra `4004`) e passa a fechar `4004` nos dois casos com o mesmo
+  motivo; e `"Attachment not found"` não tinha tradução em `apiError.ts`, o que
+  entregaria ao cliente o toast cru em inglês — o bug que o `2db8dfa` consertou
+  para equipamento. Sem migration, sem backfill. 471 → 490 testes no backend.
 - O hash descartável do login passa a acompanhar `BCRYPT_ROUNDS` sozinho
   (`a1bbd94`). Ligar a variável ao `pwd_context` na v1.7.0 deixou o knob vivo e
   criou uma armadilha: o dummy seguia fixado em 12 por literal, então
