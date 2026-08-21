@@ -45,25 +45,24 @@ from app.schemas.attachment import (
 )
 from app.services import antivirus, storage
 from app.utils.crud import get_or_404
+from app.utils.ticket_access import ensure_ticket_visible
 
 router = APIRouter(tags=["Attachments"])
 
 _TERMINAL_STATUSES = frozenset({TicketStatus.closed, TicketStatus.cancelled})
+
+# Uma constante por recurso: a recusa de item alheio precisa sair com
+# EXATAMENTE o mesmo texto do id inexistente, e dois literais soltos divergem
+# em silêncio.
+_CHAMADO_NAO_ENCONTRADO = "Ticket not found"
+_ANEXO_NAO_ENCONTRADO = "Attachment not found"
 
 
 # ── Helpers ───────────────────────────────────────────────────
 
 
 async def _get_attachment_or_404(attachment_id: uuid.UUID, db: AsyncSession) -> Attachment:
-    return await get_or_404(db, Attachment, attachment_id, "Attachment not found")
-
-
-def _check_ticket_access(ticket: Ticket, actor: User) -> None:
-    if actor.role == UserRole.client and ticket.creator_id != actor.id:
-        raise HTTPException(
-            status_code=status.HTTP_403_FORBIDDEN,
-            detail="Você não tem permissão para acessar este item.",
-        )
+    return await get_or_404(db, Attachment, attachment_id, _ANEXO_NAO_ENCONTRADO)
 
 
 def _validate_file(
@@ -103,8 +102,9 @@ async def upload_attachments(
     actor: Annotated[User, Depends(get_current_user)],
     settings: Annotated[Settings, Depends(get_settings)],
 ) -> list[AttachmentResponse]:
-    ticket = await get_or_404(db, Ticket, ticket_id, "Ticket not found")
-    _check_ticket_access(ticket, actor)
+    ticket = await get_or_404(db, Ticket, ticket_id, _CHAMADO_NAO_ENCONTRADO)
+    if actor.role == UserRole.client:
+        ensure_ticket_visible(ticket, actor, _CHAMADO_NAO_ENCONTRADO)
 
     if ticket.status in _TERMINAL_STATUSES:
         raise HTTPException(
@@ -192,8 +192,9 @@ async def list_attachments(
     db: Annotated[AsyncSession, Depends(get_db)],
     actor: Annotated[User, Depends(get_current_user)],
 ) -> AttachmentListResponse:
-    ticket = await get_or_404(db, Ticket, ticket_id, "Ticket not found")
-    _check_ticket_access(ticket, actor)
+    ticket = await get_or_404(db, Ticket, ticket_id, _CHAMADO_NAO_ENCONTRADO)
+    if actor.role == UserRole.client:
+        ensure_ticket_visible(ticket, actor, _CHAMADO_NAO_ENCONTRADO)
 
     result = await db.execute(
         select(Attachment)
@@ -217,9 +218,13 @@ async def get_attachment_url(
 ) -> AttachmentDownloadResponse:
     attachment = await _get_attachment_or_404(attachment_id, db)
 
-    # Verify the actor has access to the parent ticket
-    ticket = await get_or_404(db, Ticket, attachment.ticket_id, "Ticket not found")
-    _check_ticket_access(ticket, actor)
+    # O acesso é decidido pelo chamado pai, mas a recusa fala do ANEXO: quem
+    # pediu o anexo e ouve "chamado não encontrado" já sabe que o anexo existe.
+    # Para o cliente, os três casos — anexo inexistente, anexo de chamado
+    # alheio e chamado inexistente — têm a mesma resposta.
+    ticket = await get_or_404(db, Ticket, attachment.ticket_id, _ANEXO_NAO_ENCONTRADO)
+    if actor.role == UserRole.client:
+        ensure_ticket_visible(ticket, actor, _ANEXO_NAO_ENCONTRADO)
 
     url = await storage.get_presigned_url(attachment.s3_key, settings)
     # Em disco o arquivo tem nome interno (uuid); sem isto o usuário baixaria

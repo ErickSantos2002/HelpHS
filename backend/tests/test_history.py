@@ -314,7 +314,8 @@ async def test_get_history_client_other_ticket_forbidden(patch_redis):
     async with AsyncClient(transport=ASGITransport(app=app), base_url="http://test") as c:
         resp = await c.get(f"/api/v1/tickets/{_TICKET_ID}/history")
 
-    assert resp.status_code == 403
+    # 404 e não 403: o 403 confirmava que aquele chamado existe
+    assert resp.status_code == 404
 
 
 @pytest.mark.asyncio

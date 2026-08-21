@@ -384,7 +384,8 @@ async def test_cliente_nao_reabre_chamado_de_outra_pessoa():
             json={"reason": "Quero acompanhar este chamado."},
         )
 
-    assert resp.status_code == 403
+    # 404 e não 403: o 403 confirmava que aquele chamado existe
+    assert resp.status_code == 404
 
 
 @pytest.mark.asyncio
@@ -480,3 +481,58 @@ async def test_reabertura_zera_o_tempo_pausado_acumulado():
 
     assert resp.status_code == 200
     assert ticket.sla_total_paused_ms == 0
+
+
+# ═══════════════════════════════════════════════════════════════
+# ORÁCULO DE EXISTÊNCIA NA REABERTURA
+# ═══════════════════════════════════════════════════════════════
+
+
+@pytest.mark.asyncio
+async def test_reabertura_alheia_e_inexistente_respondem_igual():
+    """
+    Reabrir chamado alheio responde como reabrir chamado que não existe.
+
+    A reabertura é um ponto tentador para enumerar: aceita POST com um id só,
+    não precisa de corpo válido para chegar à recusa e o cliente pode chamá-la
+    à vontade.
+    """
+    from app.core.database import get_db
+
+    intruso = _mock_user(UserRole.client)
+
+    async def _resposta(ticket):
+        app.dependency_overrides[get_db] = _db_override(ticket, None)
+        _override_user(intruso)
+        async with AsyncClient(transport=ASGITransport(app=app), base_url="http://test") as c:
+            r = await c.post(
+                f"/api/v1/tickets/{_TICKET_ID}/reopen",
+                json={"reason": "Quero acompanhar este chamado."},
+            )
+        return r.status_code, r.json()["detail"]
+
+    alheio = await _resposta(
+        _mock_ticket(status=TicketStatus.closed, resolved_at=datetime.now(UTC))
+    )
+    inexistente = await _resposta(None)
+
+    assert alheio == inexistente, f"o cliente distingue os dois casos: {alheio} vs {inexistente}"
+
+
+@pytest.mark.asyncio
+async def test_staff_continua_reabrindo_chamado_de_qualquer_um():
+    """Técnico reabre chamado alheio — é o caso de encerramento por engano."""
+    from app.core.database import get_db
+
+    tech = _mock_user(UserRole.technician)
+    ticket = _mock_ticket(status=TicketStatus.closed, resolved_at=datetime.now(UTC))
+    app.dependency_overrides[get_db] = _db_override(ticket, None)
+    _override_user(tech)
+
+    async with AsyncClient(transport=ASGITransport(app=app), base_url="http://test") as c:
+        resp = await c.post(
+            f"/api/v1/tickets/{_TICKET_ID}/reopen",
+            json={"reason": "Fechei por engano, desculpe."},
+        )
+
+    assert resp.status_code == 200

@@ -51,9 +51,14 @@ from app.schemas.chat import (
 from app.services.llm import improve_message, suggest_reply, summarize_conversation
 from app.services.notifications import notify
 from app.utils.sla import register_first_response
+from app.utils.ticket_access import ensure_ticket_visible
 
 router = APIRouter(tags=["Chat"])
 settings = get_settings()
+
+# Mesmo texto do 404 de id inexistente — ver `ensure_ticket_visible`. Vale
+# também para o WebSocket, onde o vazamento sai como código de fechamento.
+_CHAMADO_NAO_ENCONTRADO = "Ticket não encontrado. Ele pode ter sido excluído."
 
 
 # ── ConnectionManager ─────────────────────────────────────────
@@ -111,27 +116,27 @@ def _msg_to_response(msg: ChatMessage) -> ChatMessageResponse:
     )
 
 
-async def _get_ticket_or_403(
+async def _get_ticket_visivel(
     ticket_id: uuid.UUID,
     actor: User,
     db: AsyncSession,
 ) -> Ticket:
-    """Return ticket if the actor may access it, else raise 403/404."""
+    """
+    Devolve o chamado se o ator puder vê-lo; senão, 404.
+
+    Chamado alheio responde igual a id inexistente — o 403 anterior confirmava
+    a existência. Staff passa direto porque já lê o sistema inteiro.
+    """
     result = await db.execute(select(Ticket).where(Ticket.id == ticket_id))
     ticket = result.scalar_one_or_none()
     if ticket is None:
         raise HTTPException(
             status_code=status.HTTP_404_NOT_FOUND,
-            detail="Ticket não encontrado. Ele pode ter sido excluído.",
+            detail=_CHAMADO_NAO_ENCONTRADO,
         )
 
-    is_staff = actor.role in (UserRole.admin, UserRole.technician)
-    is_requester = ticket.creator_id == actor.id
-    if not is_staff and not is_requester:
-        raise HTTPException(
-            status_code=status.HTTP_403_FORBIDDEN,
-            detail="Você não tem permissão para acessar este item.",
-        )
+    if actor.role not in (UserRole.admin, UserRole.technician):
+        ensure_ticket_visible(ticket, actor, _CHAMADO_NAO_ENCONTRADO)
 
     return ticket
 
@@ -173,7 +178,7 @@ async def list_messages(
     limit: int = Query(default=50, ge=1, le=100),
     offset: int = Query(default=0, ge=0),
 ) -> ChatMessageListResponse:
-    await _get_ticket_or_403(ticket_id, actor, db)
+    await _get_ticket_visivel(ticket_id, actor, db)
 
     total_result = await db.execute(select(func.count()).where(ChatMessage.ticket_id == ticket_id))
     total = total_result.scalar_one()
@@ -207,7 +212,7 @@ async def create_message(
     db: Annotated[AsyncSession, Depends(get_db)],
     actor: Annotated[User, Depends(get_current_user)],
 ) -> ChatMessageResponse:
-    ticket = await _get_ticket_or_403(ticket_id, actor, db)
+    ticket = await _get_ticket_visivel(ticket_id, actor, db)
 
     now = datetime.now(UTC)
     msg = ChatMessage(
@@ -270,7 +275,7 @@ async def suggest_ticket_reply(
     actor: Annotated[User, Depends(authorize(UserRole.admin, UserRole.technician))],
 ) -> SuggestReplyResponse:
     """Generate an AI-suggested reply for a technician based on ticket and chat history."""
-    ticket = await _get_ticket_or_403(ticket_id, actor, db)
+    ticket = await _get_ticket_visivel(ticket_id, actor, db)
 
     # Load last 10 messages with sender info
     rows = await db.execute(
@@ -324,7 +329,7 @@ async def improve_ticket_message(
     actor: Annotated[User, Depends(authorize(UserRole.admin, UserRole.technician))],
 ) -> ImproveMessageResponse:
     """Improve a technician's draft message using AI (grammar, clarity, professionalism)."""
-    ticket = await _get_ticket_or_403(ticket_id, actor, db)
+    ticket = await _get_ticket_visivel(ticket_id, actor, db)
 
     result = await improve_message(
         draft=body.draft,
@@ -354,7 +359,7 @@ async def summarize_ticket_conversation(
     Generate an AI summary of the full ticket conversation and persist it in the ticket.
     Returns the summary text. Subsequent calls regenerate and overwrite the stored summary.
     """
-    ticket = await _get_ticket_or_403(ticket_id, actor, db)
+    ticket = await _get_ticket_visivel(ticket_id, actor, db)
 
     # Load all messages (up to 200 to keep context manageable)
     rows = await db.execute(
@@ -425,16 +430,15 @@ async def websocket_chat(
             await websocket.close(code=4001, reason="Unauthorized")
             return
 
+        # Chamado inexistente e chamado alheio fecham IGUAL — mesmo código,
+        # mesmo motivo. O 4003 ("Forbidden") de antes dizia que o chamado
+        # existe, e quem tivesse uma lista de ids enumerava o sistema pelo
+        # WebSocket sem nunca receber um HTTP 403.
         ticket_result = await db.execute(select(Ticket).where(Ticket.id == ticket_id))
         ticket = ticket_result.scalar_one_or_none()
-        if ticket is None:
-            await websocket.close(code=4004, reason="Ticket not found")
-            return
-
         is_staff = user.role in (UserRole.admin, UserRole.technician)
-        is_requester = ticket.creator_id == user.id
-        if not is_staff and not is_requester:
-            await websocket.close(code=4003, reason="Forbidden")
+        if ticket is None or (not is_staff and ticket.creator_id != user.id):
+            await websocket.close(code=4004, reason="Ticket not found")
             return
 
     await websocket.accept()

@@ -79,8 +79,13 @@ from app.utils.sla import (
     register_first_response,
     resume_sla,
 )
+from app.utils.ticket_access import ensure_ticket_visible
 
 router = APIRouter(tags=["Tickets"])
+
+# Uma constante só: a recusa de chamado alheio precisa sair com EXATAMENTE o
+# mesmo texto do id inexistente, e dois literais soltos divergem em silêncio.
+_CHAMADO_NAO_ENCONTRADO = "Ticket not found"
 
 
 # ── LLM background classification ────────────────────────────
@@ -524,13 +529,10 @@ async def get_ticket(
     Clients may only access tickets they created; admins and technicians
     have unrestricted read access.
     """
-    ticket = await get_or_404(db, Ticket, ticket_id, "Ticket not found")
+    ticket = await get_or_404(db, Ticket, ticket_id, _CHAMADO_NAO_ENCONTRADO)
 
-    if actor.role == UserRole.client and ticket.creator_id != actor.id:
-        raise HTTPException(
-            status_code=status.HTTP_403_FORBIDDEN,
-            detail="Você não tem permissão para acessar este item.",
-        )
+    if actor.role == UserRole.client:
+        ensure_ticket_visible(ticket, actor, _CHAMADO_NAO_ENCONTRADO)
 
     response = _serialize_ticket(ticket)
     if ticket.assignee_id:
@@ -554,7 +556,7 @@ async def update_ticket(
     Admin can update all fields. Technician can only update their internal notes.
     Clients have no edit access — ticket content is immutable after creation.
     """
-    ticket = await get_or_404(db, Ticket, ticket_id, "Ticket not found")
+    ticket = await get_or_404(db, Ticket, ticket_id, _CHAMADO_NAO_ENCONTRADO)
 
     if actor.role == UserRole.technician:
         # Technician may only save internal notes
@@ -601,14 +603,10 @@ async def update_client_observation(
     actor: Annotated[User, Depends(get_current_user)],
 ) -> TicketResponse:
     """Client updates their own observation field. Admins may also edit it."""
-    ticket = await get_or_404(db, Ticket, ticket_id, "Ticket not found")
+    ticket = await get_or_404(db, Ticket, ticket_id, _CHAMADO_NAO_ENCONTRADO)
 
     if actor.role == UserRole.client:
-        if ticket.creator_id != actor.id:
-            raise HTTPException(
-                status_code=status.HTTP_403_FORBIDDEN,
-                detail="Você não tem permissão para acessar este item.",
-            )
+        ensure_ticket_visible(ticket, actor, _CHAMADO_NAO_ENCONTRADO)
         if ticket.status in (TicketStatus.closed, TicketStatus.cancelled):
             raise HTTPException(
                 status_code=status.HTTP_409_CONFLICT,
@@ -639,7 +637,7 @@ async def update_ticket_status(
     actor: Annotated[User, Depends(authorize(UserRole.admin, UserRole.technician))],
     settings: Annotated[Settings, Depends(get_settings)],
 ) -> TicketResponse:
-    ticket = await get_or_404(db, Ticket, ticket_id, "Ticket not found")
+    ticket = await get_or_404(db, Ticket, ticket_id, _CHAMADO_NAO_ENCONTRADO)
 
     if body.status not in _TRANSITIONS.get(ticket.status, set()):
         raise HTTPException(
@@ -708,7 +706,7 @@ async def resolve_ticket(
     actor: Annotated[User, Depends(authorize(UserRole.admin, UserRole.technician))],
     settings: Annotated[Settings, Depends(get_settings)],
 ) -> TicketResponse:
-    ticket = await get_or_404(db, Ticket, ticket_id, "Ticket not found")
+    ticket = await get_or_404(db, Ticket, ticket_id, _CHAMADO_NAO_ENCONTRADO)
 
     if ticket.status in (TicketStatus.resolved, TicketStatus.closed, TicketStatus.cancelled):
         raise HTTPException(
@@ -781,14 +779,11 @@ async def reopen_ticket(
     quando o encerramento foi engano da própria equipe, um prazo vencido só
     obrigaria a abrir um chamado novo e perder o histórico.
     """
-    ticket = await get_or_404(db, Ticket, ticket_id, "Ticket not found")
+    ticket = await get_or_404(db, Ticket, ticket_id, _CHAMADO_NAO_ENCONTRADO)
     is_staff = actor.role in (UserRole.admin, UserRole.technician)
 
-    if not is_staff and ticket.creator_id != actor.id:
-        raise HTTPException(
-            status_code=status.HTTP_403_FORBIDDEN,
-            detail="Você não tem permissão para acessar este item.",
-        )
+    if not is_staff:
+        ensure_ticket_visible(ticket, actor, _CHAMADO_NAO_ENCONTRADO)
 
     if ticket.status not in (TicketStatus.resolved, TicketStatus.closed):
         raise HTTPException(
@@ -970,7 +965,7 @@ async def cancel_ticket(
     actor: Annotated[User, Depends(authorize(UserRole.admin))],
     settings: Annotated[Settings, Depends(get_settings)],
 ) -> None:
-    ticket = await get_or_404(db, Ticket, ticket_id, "Ticket not found")
+    ticket = await get_or_404(db, Ticket, ticket_id, _CHAMADO_NAO_ENCONTRADO)
 
     if ticket.status in (TicketStatus.closed, TicketStatus.cancelled):
         raise HTTPException(
@@ -1005,7 +1000,7 @@ async def list_ticket_notes(
     db: Annotated[AsyncSession, Depends(get_db)],
     actor: Annotated[User, Depends(authorize(UserRole.admin, UserRole.technician))],
 ) -> list[TicketNoteResponse]:
-    await get_or_404(db, Ticket, ticket_id, "Ticket not found")
+    await get_or_404(db, Ticket, ticket_id, _CHAMADO_NAO_ENCONTRADO)
     rows = (
         await db.execute(
             select(TicketNote, User.name.label("author_name"))
@@ -1038,7 +1033,7 @@ async def create_ticket_note(
     db: Annotated[AsyncSession, Depends(get_db)],
     actor: Annotated[User, Depends(authorize(UserRole.admin, UserRole.technician))],
 ) -> TicketNoteResponse:
-    await get_or_404(db, Ticket, ticket_id, "Ticket not found")
+    await get_or_404(db, Ticket, ticket_id, _CHAMADO_NAO_ENCONTRADO)
     note = TicketNote(ticket_id=ticket_id, author_id=actor.id, content=body.content)
     db.add(note)
     await db.commit()
@@ -1083,13 +1078,10 @@ async def get_ticket_history(
     offset: int = Query(default=0, ge=0),
     limit: int = Query(default=50, ge=1, le=200),
 ) -> TicketHistoryListResponse:
-    ticket = await get_or_404(db, Ticket, ticket_id, "Ticket not found")
+    ticket = await get_or_404(db, Ticket, ticket_id, _CHAMADO_NAO_ENCONTRADO)
 
-    if actor.role == UserRole.client and ticket.creator_id != actor.id:
-        raise HTTPException(
-            status_code=status.HTTP_403_FORBIDDEN,
-            detail="Você não tem permissão para acessar este item.",
-        )
+    if actor.role == UserRole.client:
+        ensure_ticket_visible(ticket, actor, _CHAMADO_NAO_ENCONTRADO)
 
     base = select(TicketHistory).where(TicketHistory.ticket_id == ticket_id)
     total = (await db.execute(select(func.count()).select_from(base.subquery()))).scalar_one()

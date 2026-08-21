@@ -35,8 +35,12 @@ from app.models.models import (
     UserRole,
 )
 from app.schemas.survey import SurveyCreate, SurveyListResponse, SurveyResponse
+from app.utils.ticket_access import ensure_ticket_visible
 
 router = APIRouter(tags=["Surveys"])
+
+# Mesmo texto do 404 de id inexistente — ver `ensure_ticket_visible`.
+_CHAMADO_NAO_ENCONTRADO = "Ticket não encontrado. Ele pode ter sido excluído."
 
 _ELIGIBLE_STATUSES = frozenset({TicketStatus.resolved, TicketStatus.closed})
 
@@ -61,7 +65,7 @@ async def _get_ticket_or_404(ticket_id: uuid.UUID, db: AsyncSession) -> Ticket:
     if not ticket:
         raise HTTPException(
             status_code=status.HTTP_404_NOT_FOUND,
-            detail="Ticket não encontrado. Ele pode ter sido excluído.",
+            detail=_CHAMADO_NAO_ENCONTRADO,
         )
     return ticket
 
@@ -84,8 +88,13 @@ async def submit_survey(
 ) -> SurveyResponse:
     ticket = await _get_ticket_or_404(ticket_id, db)
 
-    # Only the ticket creator can submit the survey
-    if ticket.creator_id != actor.id:
+    # Quem avalia é quem abriu. Para o cliente a recusa some no 404 do id
+    # inexistente; para o staff continua 403, porque ali a recusa é de papel e
+    # ele já lê o chamado inteiro pela listagem — esconder existência dele não
+    # fecharia nada e trocaria "não é você quem avalia" por uma mentira.
+    if actor.role == UserRole.client:
+        ensure_ticket_visible(ticket, actor, _CHAMADO_NAO_ENCONTRADO)
+    elif ticket.creator_id != actor.id:
         raise HTTPException(
             status_code=status.HTTP_403_FORBIDDEN,
             detail="Você não tem permissão para acessar este item.",
@@ -132,11 +141,8 @@ async def get_survey(
     ticket = await _get_ticket_or_404(ticket_id, db)
 
     # Client can only see survey for their own ticket
-    if actor.role == UserRole.client and ticket.creator_id != actor.id:
-        raise HTTPException(
-            status_code=status.HTTP_403_FORBIDDEN,
-            detail="Você não tem permissão para acessar este item.",
-        )
+    if actor.role == UserRole.client:
+        ensure_ticket_visible(ticket, actor, _CHAMADO_NAO_ENCONTRADO)
 
     result = await db.execute(
         select(SatisfactionSurvey).where(SatisfactionSurvey.ticket_id == ticket_id)

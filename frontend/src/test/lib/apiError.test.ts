@@ -12,6 +12,16 @@ describe("getApiError", () => {
     expect(getApiError(err)).toContain("não encontrado");
   });
 
+  it("traduz o 404 de anexo — o que o cliente vê para anexo alheio", () => {
+    // Desde que a recusa de chamado alheio virou 404 indistinguível do id
+    // inexistente, "Attachment not found" é o que chega ao cliente ao pedir
+    // anexo de chamado que não é dele — e ao pedir anexo que não existe.
+    // Sem a tradução, o toast mostrava a string crua em inglês, que foi
+    // exatamente o bug que o 2db8dfa consertou para equipamento.
+    const err = { response: { status: 404, data: { detail: "Attachment not found" } } };
+    expect(getApiError(err)).toBe("Anexo não encontrado. Ele pode ter sido excluído.");
+  });
+
   it("traduz o 404 de equipamento — o que o cliente vê para equipamento alheio", () => {
     // Desde que a recusa por dono virou 404 indistinguível do id inexistente,
     // "Equipment not found" é a mensagem que chega ao cliente nesse caso.

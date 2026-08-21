@@ -247,7 +247,8 @@ async def test_list_messages_client_other_ticket_forbidden(patch_redis):
     async with AsyncClient(transport=ASGITransport(app=app), base_url="http://test") as client:
         r = await client.get(f"/api/v1/tickets/{_TICKET_ID}/messages")
 
-    assert r.status_code == 403
+    # 404 e não 403: o 403 confirmava que aquele chamado existe
+    assert r.status_code == 404
 
 
 @pytest.mark.asyncio
@@ -474,3 +475,134 @@ async def test_mensagem_do_autor_nao_marca_primeira_resposta(patch_redis):
 
     assert r.status_code == 201
     assert ticket.sla_first_response is None
+
+
+# ═══════════════════════════════════════════════════════════════
+# ORÁCULO DE EXISTÊNCIA — o chat, inclusive no WebSocket
+# ═══════════════════════════════════════════════════════════════
+#
+# O 403 de chamado alheio confirmava que aquele id existe. No REST isso sai
+# como status; no WebSocket sai como CÓDIGO DE FECHAMENTO — 4003 contra 4004 —
+# que é o mesmo vazamento numa roupa que varredura de status HTTP não enxerga.
+
+
+@pytest.mark.asyncio
+async def test_create_message_client_other_ticket_404(patch_redis):
+    """Mandar mensagem em chamado alheio responde como chamado inexistente."""
+    from app.core.database import get_db
+
+    client_user = _mock_user(UserRole.client)
+    ticket = _mock_ticket(creator_id=_CREATOR_ID)
+
+    _override_user(client_user)
+    app.dependency_overrides[get_db] = _db_seq_override(ticket)
+
+    async with AsyncClient(transport=ASGITransport(app=app), base_url="http://test") as client:
+        r = await client.post(
+            f"/api/v1/tickets/{_TICKET_ID}/messages",
+            json={"content": "oi"},
+        )
+
+    assert r.status_code == 404
+
+
+@pytest.mark.asyncio
+async def test_chat_alheio_e_inexistente_respondem_igual(patch_redis):
+    """
+    Alheio e inexistente devolvem status E texto idênticos.
+
+    Só o status não basta: dois 404 com mensagens diferentes continuam
+    separando "não é seu" de "não existe".
+    """
+    from app.core.database import get_db
+
+    client_user = _mock_user(UserRole.client)
+
+    async def _resposta(ticket):
+        _override_user(client_user)
+        app.dependency_overrides[get_db] = _db_seq_override(ticket)
+        async with AsyncClient(transport=ASGITransport(app=app), base_url="http://test") as c:
+            r = await c.get(f"/api/v1/tickets/{_TICKET_ID}/messages")
+        return r.status_code, r.json()["detail"]
+
+    alheio = await _resposta(_mock_ticket(creator_id=_CREATOR_ID))
+    inexistente = await _resposta(None)
+
+    assert alheio == inexistente, f"o cliente distingue os dois casos: {alheio} vs {inexistente}"
+
+
+def _ws_close_code(user, ticket):
+    """
+    Abre o WS com um usuário e um ticket fixos e devolve (código, motivo).
+
+    O handler do WS não usa a dependência `get_db` — abre `AsyncSessionLocal`
+    na mão —, então o mock é do session maker e da autenticação por token.
+    """
+    from starlette.testclient import TestClient
+    from starlette.websockets import WebSocketDisconnect
+
+    session = AsyncMock()
+
+    async def _execute(*args, **kwargs):
+        result = MagicMock()
+        result.scalar_one_or_none.return_value = ticket
+        return result
+
+    session.execute = _execute
+
+    class _Ctx:
+        async def __aenter__(self):
+            return session
+
+        async def __aexit__(self, *args):
+            return False
+
+    async def _auth(token, db):
+        return user
+
+    with (
+        patch("app.routers.chat.AsyncSessionLocal", lambda: _Ctx()),
+        patch("app.routers.chat._authenticate_ws", _auth),
+    ):
+        # Sem `with TestClient(app)`: o lifespan da app abre conexão real com o
+        # Postgres, e o que está sob teste é o handler, não a subida.
+        tc = TestClient(app)
+        try:
+            with tc.websocket_connect(f"/api/v1/ws/tickets/{_TICKET_ID}?token=x"):
+                return None, None
+        except WebSocketDisconnect as exc:
+            return exc.code, exc.reason
+
+
+def test_ws_chamado_alheio_fecha_como_chamado_inexistente():
+    """
+    Cliente em chamado alheio recebe o MESMO fechamento de um id que não existe.
+
+    O 4003 ("Forbidden") dizia que o chamado existe; quem tivesse a lista de
+    ids enumerava o sistema pelo WebSocket sem nunca receber um HTTP 403.
+    """
+    client_user = _mock_user(UserRole.client)
+
+    alheio = _ws_close_code(client_user, _mock_ticket(creator_id=_CREATOR_ID))
+    inexistente = _ws_close_code(client_user, None)
+
+    assert alheio == inexistente, f"o WS distingue os dois casos: {alheio} vs {inexistente}"
+    assert alheio[0] == 4004
+
+
+def test_ws_dono_do_chamado_continua_entrando():
+    """A correção não pode fechar o chat de quem tem direito a ele."""
+    dono = _mock_user(UserRole.client, user_id=_CREATOR_ID)
+
+    codigo, _ = _ws_close_code(dono, _mock_ticket(creator_id=_CREATOR_ID))
+
+    assert codigo is None, "o autor do chamado foi barrado do próprio chat"
+
+
+def test_ws_staff_continua_entrando():
+    """Técnico entra em qualquer chat — é o trabalho dele."""
+    tech = _mock_user(UserRole.technician)
+
+    codigo, _ = _ws_close_code(tech, _mock_ticket(creator_id=_CREATOR_ID))
+
+    assert codigo is None

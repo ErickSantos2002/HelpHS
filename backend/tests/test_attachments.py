@@ -436,7 +436,8 @@ async def test_upload_attachment_client_forbidden_other_ticket(patch_redis):
             files={"files": _pdf_file()},
         )
 
-    assert resp.status_code == 403
+    # 404 e não 403: o 403 confirmava que aquele chamado existe
+    assert resp.status_code == 404
 
 
 # ═══════════════════════════════════════════════════════════════
@@ -508,6 +509,112 @@ async def test_delete_attachment_client_forbidden(patch_redis):
     attachment = _mock_attachment()
 
     app.dependency_overrides[get_db] = _db_override(attachment)
+    _override_user(client)
+
+    async with AsyncClient(transport=ASGITransport(app=app), base_url="http://test") as c:
+        resp = await c.delete(f"/api/v1/attachments/{_ATTACH_ID}")
+
+    assert resp.status_code == 403
+
+
+# ═══════════════════════════════════════════════════════════════
+# ORÁCULO DE EXISTÊNCIA — anexo e chamado alheios
+# ═══════════════════════════════════════════════════════════════
+#
+# GET /attachments/{id} vazava duas vezes: pelo id do anexo e pelo id do
+# chamado pai. Eram três respostas distinguíveis — "Attachment not found",
+# "Ticket not found" e o 403 — e cada diferença entre elas conta um pedaço da
+# verdade a quem só tem o id.
+#
+# O cliente recebe a MESMA resposta nos três casos. "Attachment not found" e
+# não "Ticket not found": o recurso pedido foi o anexo, e responder pelo
+# chamado já confirmaria que o anexo existe.
+
+
+@pytest.mark.asyncio
+async def test_get_attachment_url_client_outro_dono(patch_redis):
+    from app.core.database import get_db
+
+    other_client = _mock_user(UserRole.client)
+    attachment = _mock_attachment()
+    ticket = _mock_ticket(creator_id=_CREATOR_ID)
+
+    app.dependency_overrides[get_db] = _db_seq_override(attachment, ticket)
+    _override_user(other_client)
+
+    async with AsyncClient(transport=ASGITransport(app=app), base_url="http://test") as c:
+        resp = await c.get(f"/api/v1/attachments/{_ATTACH_ID}")
+
+    assert resp.status_code == 404
+    assert resp.json()["detail"] == "Attachment not found"
+
+
+@pytest.mark.asyncio
+async def test_get_attachment_url_as_tres_respostas_viram_uma(patch_redis):
+    """Anexo alheio, anexo inexistente e chamado inexistente: resposta única."""
+    from app.core.database import get_db
+
+    other_client = _mock_user(UserRole.client)
+
+    async def _resposta(*sequencia):
+        app.dependency_overrides[get_db] = _db_seq_override(*sequencia)
+        _override_user(other_client)
+        async with AsyncClient(transport=ASGITransport(app=app), base_url="http://test") as c:
+            r = await c.get(f"/api/v1/attachments/{_ATTACH_ID}")
+        return r.status_code, r.json()["detail"]
+
+    alheio = await _resposta(_mock_attachment(), _mock_ticket(creator_id=_CREATOR_ID))
+    anexo_inexistente = await _resposta(None)
+    chamado_inexistente = await _resposta(_mock_attachment(), None)
+
+    assert (
+        alheio == anexo_inexistente == chamado_inexistente
+    ), f"o cliente separa os casos: {alheio} / {anexo_inexistente} / {chamado_inexistente}"
+
+
+@pytest.mark.asyncio
+async def test_get_attachment_url_dono_continua_baixando(patch_redis):
+    """A correção não pode tirar o anexo de quem abriu o chamado."""
+    from app.core.database import get_db
+
+    dono = _mock_user(UserRole.client, user_id=_CREATOR_ID)
+    app.dependency_overrides[get_db] = _db_seq_override(_mock_attachment(), _mock_ticket())
+    _override_user(dono)
+
+    async with AsyncClient(transport=ASGITransport(app=app), base_url="http://test") as c:
+        resp = await c.get(f"/api/v1/attachments/{_ATTACH_ID}")
+
+    assert resp.status_code == 200
+
+
+@pytest.mark.asyncio
+async def test_list_attachments_client_outro_dono(patch_redis):
+    from app.core.database import get_db
+
+    other_client = _mock_user(UserRole.client)
+    app.dependency_overrides[get_db] = _db_seq_override(_mock_ticket(creator_id=_CREATOR_ID))
+    _override_user(other_client)
+
+    async with AsyncClient(transport=ASGITransport(app=app), base_url="http://test") as c:
+        resp = await c.get(f"/api/v1/tickets/{_TICKET_ID}/attachments")
+
+    assert resp.status_code == 404
+    assert resp.json()["detail"] == "Ticket not found"
+
+
+@pytest.mark.asyncio
+async def test_staff_continua_recebendo_403_onde_a_regra_e_de_papel(patch_redis):
+    """
+    Apagar anexo segue 403 para quem não é staff — e isso está certo.
+
+    O `authorize()` dispara antes de o anexo ser buscado, então a recusa não
+    diz nada sobre existir ou não. Trocar por 404 só apagaria a informação
+    útil de "seu perfil não faz isso".
+    """
+    from app.core.database import get_db
+
+    client = _mock_user(UserRole.client)
+    app.dependency_overrides[get_db] = _db_override(_mock_attachment())
     _override_user(client)
 
     async with AsyncClient(transport=ASGITransport(app=app), base_url="http://test") as c:

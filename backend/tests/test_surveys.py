@@ -323,7 +323,8 @@ async def test_submit_survey_wrong_creator(patch_redis):
             json={"rating": 3},
         )
 
-    assert resp.status_code == 403
+    # 404 e não 403: o 403 confirmava que aquele chamado existe
+    assert resp.status_code == 404
 
 
 @pytest.mark.asyncio
@@ -439,7 +440,8 @@ async def test_get_survey_client_other_ticket_forbidden(patch_redis):
     async with AsyncClient(transport=ASGITransport(app=app), base_url="http://test") as c:
         resp = await c.get(f"/api/v1/tickets/{_TICKET_ID}/survey")
 
-    assert resp.status_code == 403
+    # 404 e não 403: o 403 confirmava que aquele chamado existe
+    assert resp.status_code == 404
 
 
 # ═══════════════════════════════════════════════════════════════
@@ -501,5 +503,59 @@ async def test_list_surveys_client_forbidden(patch_redis):
 
     async with AsyncClient(transport=ASGITransport(app=app), base_url="http://test") as c:
         resp = await c.get("/api/v1/surveys")
+
+    assert resp.status_code == 403
+
+
+# ═══════════════════════════════════════════════════════════════
+# ORÁCULO DE EXISTÊNCIA — avaliação de chamado alheio
+# ═══════════════════════════════════════════════════════════════
+#
+# A avaliação é do autor do chamado. Para o CLIENTE que não é o autor, a
+# recusa passa a ser indistinguível de um id que não existe; para o STAFF, que
+# já enxerga o chamado inteiro, continua sendo 403 — a recusa ali é de papel
+# ("quem avalia é quem abriu"), não de existência.
+
+
+@pytest.mark.asyncio
+async def test_avaliacao_alheia_e_inexistente_respondem_igual(patch_redis):
+    from app.core.database import get_db
+
+    # Atenção: neste arquivo o `user_id` padrão de `_mock_user` é `_CREATOR_ID`.
+    # Sem passar um id próprio, o "intruso" seria o autor do chamado.
+    intruso = _mock_user(UserRole.client, user_id=uuid.uuid4())
+
+    async def _resposta(metodo, ticket, **kwargs):
+        app.dependency_overrides[get_db] = _db_override(ticket)
+        _override_user(intruso)
+        async with AsyncClient(transport=ASGITransport(app=app), base_url="http://test") as c:
+            r = await getattr(c, metodo)(f"/api/v1/tickets/{_TICKET_ID}/survey", **kwargs)
+        return r.status_code, r.json()["detail"]
+
+    for metodo, kwargs in [("get", {}), ("post", {"json": {"rating": 3}})]:
+        alheio = await _resposta(metodo, _mock_ticket(creator_id=_CREATOR_ID), **kwargs)
+        inexistente = await _resposta(metodo, None, **kwargs)
+        assert (
+            alheio == inexistente
+        ), f"{metodo.upper()} /survey separa alheio de inexistente: {alheio} vs {inexistente}"
+
+
+@pytest.mark.asyncio
+async def test_staff_que_nao_abriu_o_chamado_continua_com_403(patch_redis):
+    """
+    Admin não avalia chamado dos outros — e recebe 403, não 404.
+
+    Ele já lê o chamado inteiro pela listagem: esconder a existência aqui não
+    fecharia oráculo nenhum e trocaria "não é você quem avalia" por "não
+    existe", que é falso e manda o admin caçar um bug que não há.
+    """
+    from app.core.database import get_db
+
+    admin = _mock_user(UserRole.admin, user_id=uuid.uuid4())
+    app.dependency_overrides[get_db] = _db_override(_mock_ticket(creator_id=_CREATOR_ID))
+    _override_user(admin)
+
+    async with AsyncClient(transport=ASGITransport(app=app), base_url="http://test") as c:
+        resp = await c.post(f"/api/v1/tickets/{_TICKET_ID}/survey", json={"rating": 5})
 
     assert resp.status_code == 403

@@ -42,6 +42,9 @@ const TRANSLATIONS: Record<string, string> = {
   // Também é o que o cliente recebe ao tentar equipamento de outro dono: a
   // recusa sai como 404 indistinguível do id inexistente, de propósito.
   "Equipment not found": "Equipamento não encontrado. Ele pode ter sido excluído.",
+  // Mesma história para anexo: pedir o anexo de um chamado que não é seu
+  // responde igual a pedir um anexo que não existe.
+  "Attachment not found": "Anexo não encontrado. Ele pode ter sido excluído.",
   "Comment not found": "Comentário não encontrado.",
   "Event not found": "Evento não encontrado.",
   "Notification not found": "Notificação não encontrada.",

@@ -386,7 +386,8 @@ async def test_get_ticket_client_forbidden(patch_redis):
 
     async with AsyncClient(transport=ASGITransport(app=app), base_url="http://test") as c:
         resp = await c.get(f"/api/v1/tickets/{_TICKET_ID}")
-    assert resp.status_code == 403
+    # 404 e não 403: o 403 confirmava que aquele chamado existe
+    assert resp.status_code == 404
 
 
 @pytest.mark.asyncio
@@ -1073,3 +1074,135 @@ async def test_resolver_o_proprio_chamado_nao_marca_primeira_resposta(patch_redi
 
     assert resp.status_code == 200
     assert ticket.sla_first_response is None
+
+
+# ═══════════════════════════════════════════════════════════════
+# ORÁCULO DE EXISTÊNCIA — chamado alheio some, não é negado
+# ═══════════════════════════════════════════════════════════════
+#
+# Mesmo formato que os equipamentos ganharam no 637ad0f: para o CLIENTE, o
+# chamado de outra pessoa responde igual a um id que não existe. O 403 dizia
+# "existe, mas não é seu" — meia resposta a mais do que quem só tem o id
+# deveria conseguir.
+#
+# Só para cliente. Técnico e admin já listam o sistema inteiro sem escopo, de
+# modo que 404 entre eles não fecharia nada e quebraria assumir/atender.
+
+
+@pytest.mark.asyncio
+async def test_observation_cliente_de_outro_chamado(patch_redis):
+    """Editar a observação de chamado alheio responde como inexistente."""
+    from app.core.database import get_db
+
+    intruso = _mock_user(UserRole.client)
+    ticket = _mock_ticket(creator_id=_CREATOR_ID)
+    app.dependency_overrides[get_db] = _db_override(ticket)
+    _override_user(intruso)
+
+    async with AsyncClient(transport=ASGITransport(app=app), base_url="http://test") as c:
+        resp = await c.patch(
+            f"/api/v1/tickets/{_TICKET_ID}/observation",
+            json={"client_observation": "Passei aqui só para ver"},
+        )
+
+    assert resp.status_code == 404
+
+
+@pytest.mark.asyncio
+async def test_observation_dono_continua_editando(patch_redis):
+    """A correção não pode tirar do cliente a própria observação."""
+    from app.core.database import get_db
+
+    dono = _mock_user(UserRole.client, user_id=_CREATOR_ID)
+    ticket = _mock_ticket(creator_id=_CREATOR_ID)
+    app.dependency_overrides[get_db] = _db_override(ticket)
+    _override_user(dono)
+
+    async with AsyncClient(transport=ASGITransport(app=app), base_url="http://test") as c:
+        resp = await c.patch(
+            f"/api/v1/tickets/{_TICKET_ID}/observation",
+            json={"client_observation": "O aparelho voltou a falhar hoje"},
+        )
+
+    assert resp.status_code == 200
+
+
+@pytest.mark.asyncio
+async def test_observation_tecnico_continua_403(patch_redis):
+    """
+    Técnico segue com 403 — e isso está certo.
+
+    A observação é campo do cliente; a recusa ao técnico é de PAPEL, não de
+    posse. Ele já enxerga o chamado inteiro pela listagem, então 404 aqui não
+    esconderia existência nenhuma e trocaria "seu perfil não faz isso" por uma
+    mentira.
+    """
+    from app.core.database import get_db
+
+    tech = _mock_user(UserRole.technician)
+    ticket = _mock_ticket(creator_id=_CREATOR_ID)
+    app.dependency_overrides[get_db] = _db_override(ticket)
+    _override_user(tech)
+
+    async with AsyncClient(transport=ASGITransport(app=app), base_url="http://test") as c:
+        resp = await c.patch(
+            f"/api/v1/tickets/{_TICKET_ID}/observation",
+            json={"client_observation": "nota do técnico"},
+        )
+
+    assert resp.status_code == 403
+
+
+@pytest.mark.asyncio
+async def test_chamado_alheio_e_inexistente_respondem_igual_em_todo_lugar(patch_redis):
+    """
+    Os endpoints de chamado falam a mesma língua nas duas recusas.
+
+    Status E texto: dois 404 com mensagens diferentes continuariam separando
+    "não é seu" de "não existe". É o mesmo contrato que
+    `test_ownership_refusal_message_is_the_same_everywhere` guarda para
+    equipamentos — e o motivo de existir é que a versão anterior desta regra
+    divergiu justamente por uma cópia esquecida.
+    """
+    from app.core.database import get_db
+
+    intruso = _mock_user(UserRole.client)
+
+    async def _resposta(metodo, url, ticket, **kwargs):
+        app.dependency_overrides[get_db] = _db_override(ticket)
+        _override_user(intruso)
+        async with AsyncClient(transport=ASGITransport(app=app), base_url="http://test") as c:
+            r = await getattr(c, metodo)(url, **kwargs)
+        return r.status_code, r.json()["detail"]
+
+    caminhos = [
+        ("get", f"/api/v1/tickets/{_TICKET_ID}", {}),
+        ("get", f"/api/v1/tickets/{_TICKET_ID}/history", {}),
+        (
+            "patch",
+            f"/api/v1/tickets/{_TICKET_ID}/observation",
+            {"json": {"client_observation": "x"}},
+        ),
+    ]
+
+    for metodo, url, kwargs in caminhos:
+        alheio = await _resposta(metodo, url, _mock_ticket(creator_id=_CREATOR_ID), **kwargs)
+        inexistente = await _resposta(metodo, url, None, **kwargs)
+        assert (
+            alheio == inexistente
+        ), f"{metodo.upper()} {url} separa alheio de inexistente: {alheio} vs {inexistente}"
+
+
+@pytest.mark.asyncio
+async def test_staff_continua_lendo_chamado_de_qualquer_um(patch_redis):
+    """Técnico abre chamado de qualquer cliente — é o trabalho dele."""
+    from app.core.database import get_db
+
+    tech = _mock_user(UserRole.technician)
+    app.dependency_overrides[get_db] = _db_override(_mock_ticket(creator_id=_CREATOR_ID))
+    _override_user(tech)
+
+    async with AsyncClient(transport=ASGITransport(app=app), base_url="http://test") as c:
+        resp = await c.get(f"/api/v1/tickets/{_TICKET_ID}")
+
+    assert resp.status_code == 200
