@@ -2,11 +2,21 @@
 <html lang="pt-BR">
   <head>
     <meta charset="UTF-8" />
-    <!-- Prevent flash of wrong theme -->
+    <!--
+      Evita o flash de tema errado: roda antes do bundle e precisa repetir, na
+      mão, a MESMA regra do ThemeContext — escolha salva manda, senão vale a
+      preferência do sistema operacional, e sem matchMedia vale o escuro.
+      Se a regra mudar lá, muda aqui: esta cópia não tem teste que a segure.
+    -->
     <script>
       (function () {
         var t = localStorage.getItem("helphs-theme");
-        if (t !== "light") document.documentElement.classList.add("dark");
+        var claro =
+          t === "light" ||
+          (t !== "dark" &&
+            window.matchMedia &&
+            window.matchMedia("(prefers-color-scheme: light)").matches);
+        if (!claro) document.documentElement.classList.add("dark");
       })();
     </script>
     <link rel="icon" type="image/x-icon" href="/favicon.ico" />
