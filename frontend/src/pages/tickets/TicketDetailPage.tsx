@@ -11,6 +11,7 @@ import {
   ModalFooter,
   PriorityBadge,
   Select,
+  SlaChip,
   Spinner,
   StatusBadge,
   TagBadge,
@@ -135,11 +136,6 @@ const IC = {
       <path strokeLinecap="round" strokeLinejoin="round" d="M15.172 7l-6.586 6.586a2 2 0 102.828 2.828l6.414-6.586a4 4 0 00-5.656-5.656l-6.415 6.585a6 6 0 108.486 8.486L20.5 13" />
     </svg>
   ),
-  Clock: (
-    <svg className="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
-      <path strokeLinecap="round" strokeLinejoin="round" d="M12 8v4l3 3m6-3a9 9 0 11-18 0 9 9 0 0118 0z" />
-    </svg>
-  ),
   Edit: (
     <svg className="w-3.5 h-3.5" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
       <path strokeLinecap="round" strokeLinejoin="round" d="M11 5H6a2 2 0 00-2 2v11a2 2 0 002 2h11a2 2 0 002-2v-5m-1.414-9.414a2 2 0 112.828 2.828L11.828 15H9v-2.828l8.586-8.586z" />
@@ -222,49 +218,6 @@ const IC = {
     </svg>
   ),
 };
-
-// ── SLA Countdown ─────────────────────────────────────────────
-
-function SlaChip({
-  label,
-  dueAt,
-  breached,
-}: {
-  label: string;
-  dueAt: string | null;
-  breached: boolean;
-}) {
-  const [display, setDisplay] = useState("");
-
-  useEffect(() => {
-    if (!dueAt) return;
-    function update() {
-      const diff = new Date(dueAt!).getTime() - Date.now();
-      if (diff <= 0) { setDisplay("Vencido"); return; }
-      const h = Math.floor(diff / 3600000);
-      const m = Math.floor((diff % 3600000) / 60000);
-      setDisplay(h > 0 ? `${h}h ${m}m` : `${m}m`);
-    }
-    update();
-    const t = setInterval(update, 60000);
-    return () => clearInterval(t);
-  }, [dueAt]);
-
-  if (!dueAt) return null;
-
-  return (
-    <span
-      className={`inline-flex items-center gap-1.5 rounded-md px-2 py-1 text-xs font-semibold ${
-        breached
-          ? "bg-red-500/15 text-red-700 dark:text-red-400 ring-1 ring-inset ring-red-500/25"
-          : "bg-amber-500/15 text-amber-700 dark:text-amber-400 ring-1 ring-inset ring-amber-500/25"
-      }`}
-    >
-      {IC.Clock}
-      {label}: <span>{display}</span>
-    </span>
-  );
-}
 
 // ── Activity entry ────────────────────────────────────────────
 
@@ -1060,7 +1013,7 @@ export default function TicketDetailPage() {
                 SLA violado
               </span>
             )}
-            <SlaChip label="Resposta" dueAt={ticket.sla_response_due_at} breached={ticket.sla_response_breach} />
+            <SlaChip label="Resposta" dueAt={ticket.sla_response_due_at} breached={ticket.sla_response_breach} respondedAt={ticket.sla_first_response} />
             <SlaChip label="Resolução" dueAt={ticket.sla_resolve_due_at} breached={ticket.sla_resolve_breach} />
           </div>
         </div>
@@ -1402,7 +1355,7 @@ export default function TicketDetailPage() {
                 {ticket.sla_response_due_at && (
                   <div className="flex items-center justify-between">
                     <span className="text-xs text-slate-500">Resposta</span>
-                    <SlaChip label="" dueAt={ticket.sla_response_due_at} breached={ticket.sla_response_breach} />
+                    <SlaChip label="" dueAt={ticket.sla_response_due_at} breached={ticket.sla_response_breach} respondedAt={ticket.sla_first_response} />
                   </div>
                 )}
                 {ticket.sla_resolve_due_at && (

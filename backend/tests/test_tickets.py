@@ -1206,3 +1206,47 @@ async def test_staff_continua_lendo_chamado_de_qualquer_um(patch_redis):
         resp = await c.get(f"/api/v1/tickets/{_TICKET_ID}")
 
     assert resp.status_code == 200
+
+
+# ═══════════════════════════════════════════════════════════════
+# O CHAMADO DIZ SE A PRIMEIRA RESPOSTA JÁ FOI DADA
+# ═══════════════════════════════════════════════════════════════
+#
+# O chip de prazo do front recebia prazo e flag de violação, e nada sobre a
+# resposta em si. Um chamado respondido no prazo e reaberto dias depois
+# aparecia como "Resposta: Vencido" — o relógio comparava o prazo do primeiro
+# ciclo com o agora, sem saber que a resposta tinha sido dada lá. Expor o
+# carimbo é o que deixa o chip parar o relógio em vez de adivinhar pela flag,
+# que só é recalculada em escrita e por isso é velha por construção.
+
+
+@pytest.mark.asyncio
+async def test_resposta_do_chamado_expoe_quando_a_primeira_resposta_foi_dada(patch_redis):
+    from app.core.database import get_db
+
+    ticket = _mock_ticket()
+    ticket.sla_first_response = datetime(2026, 8, 20, 14, 30, tzinfo=UTC)
+    app.dependency_overrides[get_db] = _db_override(ticket)
+    _override_user(_mock_user(UserRole.admin))
+
+    async with AsyncClient(transport=ASGITransport(app=app), base_url="http://test") as c:
+        resp = await c.get(f"/api/v1/tickets/{_TICKET_ID}")
+
+    assert resp.status_code == 200
+    assert resp.json()["sla_first_response"].startswith("2026-08-20T14:30")
+
+
+@pytest.mark.asyncio
+async def test_chamado_sem_resposta_expoe_o_campo_nulo(patch_redis):
+    """Nulo, e não ausente: o front decide pelo valor, não pela presença da chave."""
+    from app.core.database import get_db
+
+    app.dependency_overrides[get_db] = _db_override(_mock_ticket())
+    _override_user(_mock_user(UserRole.admin))
+
+    async with AsyncClient(transport=ASGITransport(app=app), base_url="http://test") as c:
+        resp = await c.get(f"/api/v1/tickets/{_TICKET_ID}")
+
+    assert resp.status_code == 200
+    assert "sla_first_response" in resp.json()
+    assert resp.json()["sla_first_response"] is None

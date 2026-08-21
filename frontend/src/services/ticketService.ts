@@ -32,6 +32,7 @@ export interface Ticket {
   sla_resolve_due_at: string | null;
   sla_response_breach: boolean;
   sla_resolve_breach: boolean;
+  sla_first_response: string | null;
   product_id: string | null;
   equipments: TicketEquipment[];
   closed_at: string | null;

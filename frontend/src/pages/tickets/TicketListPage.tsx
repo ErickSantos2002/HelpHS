@@ -97,6 +97,28 @@ function SlaIndicator({ ticket, now }: { ticket: Ticket; now: number }) {
 
   if (!dueAt) return null;
 
+  // Resposta já dada: o relógio da 1ª resposta não corre mais. Sem isto, o
+  // chamado respondido pelo chat — que não sai de "open" — virava "SLA
+  // Vencido" assim que o prazo passava, com a resposta dada há horas. Quem
+  // pode calar o "Vencido" é a resposta, nunca a flag `breach`: ela só é
+  // recalculada em escrita, e um chamado vencido e intocado chega com ela
+  // falsa. Ver SlaChip.
+  if (isOpen && ticket.sla_first_response) {
+    return (
+      <div className="mt-2.5 space-y-1">
+        <div className="h-1 w-full overflow-hidden rounded-full bg-slate-100 dark:bg-background-elevated">
+          <div className="h-full w-full rounded-full" style={{ backgroundColor: "#10b981" }} />
+        </div>
+        <div className={cn("flex items-center gap-1 text-[10px] font-bold", breach ? "text-red-500 dark:text-red-400" : "text-emerald-500 dark:text-emerald-400")}>
+          <svg className="w-3 h-3 shrink-0" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
+            <path strokeLinecap="round" strokeLinejoin="round" d="M9 12l2 2 4-4m6 2a9 9 0 11-18 0 9 9 0 0118 0z" />
+          </svg>
+          <span>{breach ? "1ª Resposta: respondida com atraso" : "1ª Resposta: respondida"}</span>
+        </div>
+      </div>
+    );
+  }
+
   const dueMs     = new Date(dueAt).getTime();
   const createdMs = new Date(ticket.created_at).getTime();
   const totalMs   = dueMs - createdMs;

@@ -30,6 +30,9 @@ export type { FormDropdownProps, FormDropdownOption } from "./FormDropdown";
 export { SearchSelect } from "./SearchSelect";
 export type { SearchSelectProps, SearchSelectOption } from "./SearchSelect";
 
+export { SlaChip } from "./SlaChip";
+export type { SlaChipProps } from "./SlaChip";
+
 export { Spinner } from "./Spinner";
 
 export {

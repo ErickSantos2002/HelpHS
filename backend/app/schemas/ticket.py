@@ -93,6 +93,10 @@ class TicketResponse(AppBaseModel):
     sla_resolve_due_at: datetime | None
     sla_response_breach: bool
     sla_resolve_breach: bool
+    # Quando alguém da equipe falou com o cliente pela primeira vez. É o que
+    # deixa o front parar o relógio de resposta em vez de adivinhar pela flag
+    # de violação, que só é recalculada em escrita e por isso é velha.
+    sla_first_response: datetime | None = None
     closed_at: datetime | None
     resolved_at: datetime | None = None
     auto_closed: bool = False
