@@ -22,6 +22,9 @@ e o Erick. Sobrou o que estava na fila.
 | `902d331` | `fix:` **e-mail sai da frente da resposta** no forgot-password |
 | `0e1a917` | `refactor:` duas linhas mortas — comentário e guard do dropdown |
 | `8542183` | `feat:` **tema segue a preferência do sistema operacional** |
+| `d5fa7a6` | `feat:` **número de série único por dono**, com migration |
+| `32fc736` | `fix:` **chip de SLA** para de dizer Vencido para resposta já dada |
+| `d361e78` | `ci:` **Playwright em workflow separado**, acionado à mão |
 | `docs:` | Este fechamento |
 
 ### Três componentes que o CI protegia sem saber
@@ -232,6 +235,118 @@ comentário de `products.py` citando um helper que o `7371bc7` apagou, e o
 rodar — o atributo `disabled` do `<button>` já impede o navegador de disparar o
 clique.
 
+### O serial deixa de ser único no mundo
+
+A unicidade de número de série era global. Duas coisas erradas: empresas
+diferentes podem ter aparelhos de mesmo número — fabricantes repetem séries
+entre lotes e linhas — e o `409` global era um oráculo: contava ao cliente que
+**outra** empresa tinha cadastrado aquele serial.
+
+**Uma correção na minha análise, que precisa constar.** Na proposta eu descrevi
+o custo do escopo por `owner_id` invertido: escrevi que dois usuários da mesma
+empresa *não* poderiam cadastrar o mesmo serial. É o contrário. Com unicidade
+por `owner_id`, cada colega tem o próprio escopo, então **dois usuários da mesma
+empresa podem cadastrar o mesmo aparelho físico, um por cabeça**. Esse é o
+**furo aceito** — o Rickelme decidiu com o trade-off já corrigido: `owner_id`
+agora, porque a migration é segura e sem backfill; a evolução para escopo por
+empresa/CNPJ fica na fila, **condicionada à normalização do campo CNPJ**, que
+hoje é texto livre digitado no onboarding (dois usuários da mesma empresa podem
+ter gravado `12.345.678/0001-90` e `12345678000190`). Rodada própria.
+
+A migration tem **dois índices**, porque em SQL `NULL` não conflita com `NULL`:
+só o composto `(owner_id, serial_number)` deixaria dois equipamentos sem dono
+com o mesmo serial passarem em silêncio — e órfão é estado transitório que
+alguém vai consertar, então o conflito apareceria tarde. O índice parcial
+`WHERE owner_id IS NULL` fecha isso sem depender de `NULLS NOT DISTINCT`
+(Postgres 15). O índice simples por serial fica, não-único: a busca de chamados
+usa a coluna.
+
+O upgrade é seguro por construção: a regra nova é estritamente mais fraca que a
+antiga, então nada que existia viola o índice novo — raciocínio que dispensa
+consultar produção. O **downgrade pode falhar** se, depois do upgrade, dois donos
+cadastrarem o mesmo serial; é a natureza da volta e está no docstring.
+
+**Testado num Postgres efêmero (`pgserver`), não no banco do `.env`** — que
+aponta para produção. Upgrade com os três índices; mesmo dono repetindo
+recusado; donos distintos aceitos; órfão × com-dono aceito; dois órfãos
+recusados; downgrade recusado com duplicado entre donos e OK depois de limpar;
+upgrade de volta. Dois tropeços meus no caminho, ambos antes do commit: escolhi
+o `down_revision` pela data do arquivo e acertei numa revisão que já existia
+(`s9n0…`) — o Alembic acusou "present more than once"; e o detector de erro do
+meu script lia só stdout enquanto o `psql` mandava as violações para stderr, o
+que produziu dois "inesperado" que eram, na verdade, o banco recusando
+corretamente.
+
+No código, as quatro cópias da checagem viram `_recusa_serie_duplicada`. O
+`PATCH` de staff valida o **par final** (dono, serial): mover um equipamento
+para um dono que já tem aquele serial não muda o serial, e um check de "o serial
+mudou?" deixaria passar. A suíte mocka o banco, então o mock **emula a tabela**
+— lê os parâmetros compilados da consulta e só devolve a linha se o par bater.
+É o que permite provar "dois donos com o mesmo serial passa" sem Postgres.
+
+### O chip que dizia Vencido para quem já tinha respondido
+
+A hipótese do Rickelme estava certa, e o mecanismo era mais simples do que ela.
+O `SlaChip` recebia `dueAt` e `breached` e usava cada um para uma coisa: o
+**texto** vinha do relógio, a **cor** vinha do backend. Chamado respondido no
+prazo e reaberto: âmbar (certo) com "Resposta: Vencido" (errado). E sem
+reabertura nenhuma: respondeu às 9h, prazo às 14h, às 15h dizia Vencido.
+
+A causa real: `sla_first_response` **não era enviado ao front**. O chip não
+tinha como saber. Passou a ser exposto (leitura, sem migration), e o chip
+ganhou `respondedAt` — preenchido, diz "Respondido" e para o relógio.
+
+Por que **não** silenciar pelo `breached`, que seria o reflexo: `check_breaches`
+só roda em caminhos de **escrita**, nunca na leitura nem num timer. Um chamado
+que venceu há duas horas e ninguém tocou chega com `breached = false`, e a
+contagem ao vivo é o único lugar que conta a verdade sobre ele. Esconder o
+Vencido pela flag trocaria uma mentira por outra, na direção mais perigosa. Está
+em comentário no chip e em teste.
+
+O chip saiu de dentro da `TicketDetailPage` para `components/ui`, onde dá para
+testar; verificado por mutação. A lista de chamados tinha o mesmo bug em outra
+roupa — a barra de "1ª Resposta" virava "SLA Vencido" por `timeLeft <= 0`, e o
+chamado respondido pelo chat, que desde o `230d670` não sai de `open`, ficava
+vermelho com a resposta dada há horas. Mesmo tratamento.
+
+**O que fica para depois, registrado:** dar ao ciclo reaberto um prazo de
+resposta próprio. Hoje o chip diz "Respondido" com base no ciclo 1 — verdade,
+mas não a medição que a operação vai querer um dia. Campo por ciclo.
+
+### O Playwright ganha um lugar para rodar — com um veto no meio
+
+Ordem combinada: seed do cliente → `e2e.yml` só com `workflow_dispatch` → duas
+execuções manuais verdes → ligar o `schedule`. O arquivo já traz o bloco de
+agendamento comentado com essa instrução.
+
+O **veto do Rickelme** mudou onde o seed mora, e é o ponto mais importante da
+frente: os usuários do e2e **não podem** entrar no `app/seeds.py`. Ele roda no
+boot de produção (`start.sh`), e isso criaria contas de teste com senha em
+texto claro conhecida no banco real. O cliente e2e vive em `app.seeds_e2e`,
+módulo separado que só o workflow chama e que **se recusa a rodar em produção
+antes de abrir sessão** — nem para ler. Dois testes são o contrato: em produção
+levanta e não toca no banco; `app.seeds` rodado num banco vazio não cria conta
+nenhuma com e-mail de teste, e o código-fonte dele não menciona e2e.
+
+O resto do levantamento virou linha do workflow, cada uma com o motivo escrito
+no arquivo: `APP_ENV=testing` porque a suíte faz ~16 logins do mesmo IP contra
+um limite de 5 por 15 minutos; chaves JWT efêmeras geradas no job com `openssl`
+(nenhum segredo do repositório); Redis como service mesmo o boot só avisando,
+porque chat e blacklist de token usam; o cliente nasce com
+`onboarding_completed`, senão o guard o joga em `/onboarding` e o spec que
+espera `/403` morre no primeiro passo.
+
+A credencial de técnico saiu do `helpers.ts` em vez de ganhar usuário: nenhum
+spec loga como técnico. Um teste no backend garante que `helpers.ts` e
+`seeds_e2e` têm os mesmos valores — se um lado mudar e o outro não, o e2e
+falharia no login sem dizer por quê.
+
+**Fase 3 (k6): sem mudança, e de propósito.** Teste de carga contra os
+`services` de um runner do GitHub mede o runner, não a aplicação — Postgres em
+container efêmero, sem volume, sem os dois workers do `start.sh`, sem a rede do
+EasyPanel. O número que saísse teria aparência de medição, e isso é pior que
+nenhum número. Segue aguardando staging.
+
 ### Decisões registradas, sem código
 
 - **Guard de produção: fica como está.** O `fail-fast` do boot quando falta
@@ -246,12 +361,15 @@ clique.
   Erick.
 - **`register` neutro (#3.1)** — quando entrar, o `BackgroundTasks` precisa ir
   junto, senão a neutralidade nasce furada pelo tempo de resposta.
-- **Três propostas levantadas hoje, aguardando decisão:** unicidade de número
-  de série por dono (exige migration e uma escolha entre `owner_id` e CNPJ),
-  o chip de SLA que mente depois da reabertura (o conserto é de exibição), e o
-  Playwright noturno em CI (a Fase 2 do plano de testes).
-- **SLA por ciclo de reabertura** fica como melhoria futura: hoje o prazo de
-  resposta é um campo só, do primeiro ciclo.
+- **Serial único por empresa/CNPJ** — evolução do escopo por `owner_id`, para
+  fechar o furo aceito (colegas da mesma empresa duplicando o mesmo aparelho).
+  Condicionada à normalização do campo CNPJ; rodada própria.
+- **SLA por ciclo de reabertura** — o chip agora diz a verdade sobre o ciclo 1;
+  dar prazo próprio ao ciclo reaberto é outra conversa.
+- **`e2e.yml`: duas execuções manuais verdes e depois ligar o `schedule`** (o
+  bloco está comentado no arquivo). O primeiro run vai dizer se a estimativa de
+  8–12 min por execução bate.
+- **k6 / Fase 3** aguarda staging. Não tocar.
 
 ---
 

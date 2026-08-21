@@ -11,6 +11,21 @@ Datas em DD/MM/AAAA.
 ## [Não publicado]
 
 ### Segurança
+- **Número de série passa a ser único por dono, não no sistema inteiro**
+  (`d5fa7a6`). A unicidade global recusava cadastro legítimo — empresas
+  diferentes têm aparelhos de mesmo número — e era um oráculo: o `409` contava
+  ao cliente que outra empresa tinha aquele serial. ⚠️ **Migration**
+  (`u1p2q3r4s5t6`), roda no boot: troca o índice único global por um composto
+  `(owner_id, serial_number)` mais um parcial `WHERE owner_id IS NULL` — em SQL,
+  `NULL` não conflita com `NULL`, e sem o parcial dois órfãos iguais passariam.
+  Upgrade seguro por construção (regra nova é mais fraca que a antiga), sem
+  backfill; o **downgrade pode falhar** se houver o mesmo serial em donos
+  distintos depois do upgrade. Testada em Postgres efêmero: upgrade, os quatro
+  casos de conflito, downgrade e upgrade de novo. **Furo aceito, por decisão:**
+  dois usuários da mesma empresa podem cadastrar o mesmo aparelho, cada um no
+  próprio escopo; a evolução para CNPJ depende de normalizar o campo. O `PATCH`
+  de staff valida o par final (dono, serial) — mover para um dono que já tem o
+  serial dá `409`.
 - **O envio de e-mail sai da frente da resposta em `forgot-password` e
   `resend-verification`** (`902d331`). O SMTP só é chamado no ramo da conta
   existente; enquanto o envio fosse aguardado dentro do handler, os dois ramos
@@ -63,6 +78,20 @@ Datas em DD/MM/AAAA.
   de ter sido cliente.
 
 ### Corrigido
+- **Chip de SLA deixa de dizer "Vencido" para resposta já dada** (`32fc736`).
+  Chamado respondido no prazo e reaberto dias depois aparecia "Resposta:
+  Vencido" em âmbar — cor certa, letra errada: o chip comparava o prazo do
+  primeiro ciclo com o relógio sem saber que a resposta tinha sido dada, porque
+  `sla_first_response` não era enviado ao front. Passa a ser exposto no
+  `TicketResponse` (leitura, sem migration) e o `SlaChip` ganha `respondedAt`:
+  preenchido, diz "Respondido" e para o relógio. **Não** silencia pelo
+  `breached`: a flag só é recalculada em escrita, e um chamado vencido e
+  intocado chega com ela falsa — a contagem ao vivo é o único lugar que conta a
+  verdade sobre ele. O chip saiu da `TicketDetailPage` para `components/ui`,
+  com testes verificados por mutação. A lista de chamados tinha o mesmo bug na
+  barra de "1ª Resposta" (o chamado respondido pelo chat não sai de `open`) e
+  recebeu o mesmo tratamento. Prazo próprio para o ciclo reaberto fica como
+  melhoria futura.
 - `/onboarding` deixa de abrir para quem não tem onboarding (`77a8e9c`). A rota
   estava sob o `AuthGuard` e fora do `OnboardingGuard`, então qualquer
   autenticado abria a tela digitando a URL: o staff, que não tem onboarding
@@ -133,6 +162,20 @@ Datas em DD/MM/AAAA.
   `_check_ticket_access`, apagado no `7371bc7`, e o `!disabled &&` do
   `FormDropdown` — o atributo `disabled` do `<button>` já impede o navegador de
   disparar o clique, como a verificação por mutação do `f7945e0` mostrou.
+
+### CI
+- **Playwright em workflow separado, `e2e.yml`** (`d361e78`), acionado à mão
+  por enquanto; o agendamento noturno está comentado no arquivo e entra depois
+  de duas execuções manuais verdes. Sobe Postgres e Redis como services, roda
+  migrations e seeds, levanta o backend na 8001 e roda os 46 specs; relatório
+  sempre como artefato, log do backend quando falha. `APP_ENV=testing` porque a
+  suíte faz ~16 logins do mesmo IP contra o rate limit de 5/15 min; chaves JWT
+  efêmeras geradas no job — nenhum segredo do repositório. **As contas do e2e
+  não entram em `app.seeds`**, que roda no boot de produção: vivem em
+  `app.seeds_e2e`, que se recusa a rodar em produção antes de abrir sessão, com
+  teste provando que `app.seeds` não cria conta de teste nenhuma. A credencial
+  de técnico saiu do `helpers.ts` — nenhum spec a usava. k6 (Fase 3) segue
+  aguardando staging.
 
 ### Testes
 - `FilterSelect`, `FormDropdown` e `ThemeContext` saem do descoberto
