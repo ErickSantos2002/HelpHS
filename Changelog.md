@@ -11,6 +11,19 @@ Datas em DD/MM/AAAA.
 ## [Não publicado]
 
 ### Segurança
+- **O envio de e-mail sai da frente da resposta em `forgot-password` e
+  `resend-verification`** (`902d331`). O SMTP só é chamado no ramo da conta
+  existente; enquanto o envio fosse aguardado dentro do handler, os dois ramos
+  respondiam em tempos diferentes e o relógio dizia o que a mensagem cala — o
+  oráculo de enumeração que o `f8e6013` fechou no login, renascendo ao lado.
+  ⚠️ **Hoje isso não é mensurável em produção só porque não há SMTP
+  configurado**: o oráculo nasceria pronto no dia em que ligassem. Com
+  `BackgroundTasks` a resposta sai antes de o envio começar. O teste mede
+  **ordem**, não relógio (mock de rede não tem latência e teste de tempo em CI
+  compartilhado mediria o runner): pelo ASGI cru, o corpo da resposta precisa
+  sair antes do envio. O `register` fica de fora de propósito — lá a resposta
+  já difere por ramo (`409`), mas quando o **#3.1** o tornar neutro este
+  tratamento precisa ir junto.
 - **Chamado alheio deixa de denunciar que existe** (`7371bc7`). Para o cliente,
   o chamado de outra pessoa passa a responder `404`, com o mesmo texto de um id
   inexistente, em vez do `403` que confirmava a existência — com uma lista de
@@ -82,6 +95,18 @@ Datas em DD/MM/AAAA.
   que também exige o campo nulo, perdia a violação do outro lado.
   `register_first_response` avalia antes de carimbar.
 
+### Alterado
+- **O tema segue a preferência do sistema operacional na primeira visita**
+  (`8542183`). Quem nunca escolheu recebia escuro fixo; agora vale
+  `prefers-color-scheme`. Escolha salva continua mandando, contra o sistema
+  inclusive. Duas consequências que a regra arrasta: a gravação saiu do efeito
+  de montagem para o `toggleTheme` — gravar ao montar congelaria o valor do SO
+  daquele dia e "seguir o sistema" valeria por uma visita só; e o script
+  anti-flash do `index.html`, que roda antes do bundle, teve de repetir a regra
+  nova à mão, senão quem usa o SO no claro veria flash escuro em toda visita.
+  Valor salvo estragado deixa de contar como escolha; sem `matchMedia` no
+  ambiente, o escuro segue sendo o padrão.
+
 ### Adicionado
 - **Filtro de equipamentos sem dono** na listagem de Produtos (`3f3af90`),
   fechando o outro lado do `3efb0cf`: atribuir dono já era possível, achar o
@@ -102,6 +127,12 @@ Datas em DD/MM/AAAA.
   dropdown pré-carregado quebraria em silêncio ao passar de 100 clientes, que é
   o teto de `GET /users`. O campo aparece ao criar **e** ao editar, com
   "— Sem dono —", o que também conserta os órfãos existentes um a um.
+
+### Removido
+- Duas linhas mortas (`0e1a917`): o comentário de `products.py` citando
+  `_check_ticket_access`, apagado no `7371bc7`, e o `!disabled &&` do
+  `FormDropdown` — o atributo `disabled` do `<button>` já impede o navegador de
+  disparar o clique, como a verificação por mutação do `f7945e0` mostrou.
 
 ### Testes
 - `FilterSelect`, `FormDropdown` e `ThemeContext` saem do descoberto

@@ -7,7 +7,7 @@ O changelog do produto (o que o cliente vê) fica em
 
 ---
 
-## 21/08/2026 — Fila técnica: cobertura, o órfão e uma porta encostada
+## 21/08/2026 — Fila técnica, oráculos e um tema que passa a perguntar
 
 Dia sem frente de produto. Produção estável, `main` em `5fc10ce`, e as três
 pendências do painel (`CORS_ORIGINS`, porta 8000, SMTP) paradas com o Rickelme
@@ -19,6 +19,9 @@ e o Erick. Sobrou o que estava na fila.
 | `3f3af90` | `feat:` **filtro de equipamentos sem dono** na listagem de Produtos |
 | `77a8e9c` | `fix:` **/onboarding** deixa de abrir para quem não tem onboarding |
 | `7371bc7` | `fix:` **chamado alheio deixa de denunciar que existe** |
+| `902d331` | `fix:` **e-mail sai da frente da resposta** no forgot-password |
+| `0e1a917` | `refactor:` duas linhas mortas — comentário e guard do dropdown |
+| `8542183` | `feat:` **tema segue a preferência do sistema operacional** |
 | `docs:` | Este fechamento |
 
 ### Três componentes que o CI protegia sem saber
@@ -163,16 +166,92 @@ Cobertura nova nos três ramos que não tinham teste nenhum: `observation`,
 `GET /attachments/{id}` e o WebSocket. Sem migration, sem backfill. **471 → 490
 testes no backend.**
 
+### O oráculo que ainda não existe
+
+O envio de e-mail do `forgot-password` era aguardado dentro do handler, e o
+SMTP só é chamado no ramo da conta existente. Enquanto for assim, os dois ramos
+respondem em tempos diferentes e o **relógio diz o que a mensagem cala** — o
+mesmo oráculo de enumeração que o `f8e6013` fechou no login, renascendo ao lado
+dele.
+
+O que torna o caso interessante é que **ele não existe em produção hoje**. Não
+por cuidado nosso: só porque não há SMTP configurado. O oráculo nasceria pronto
+no dia em que o Erick ligasse o SMTP, sem ninguém ter tocado numa linha de
+código. É a diferença entre uma dívida e uma armadilha com data marcada — e o
+motivo de o Rickelme ter mandado entrar antes.
+
+`BackgroundTasks` nos dois endpoints com o mesmo formato — `forgot-password` e
+`resend-verification`. A resposta sai antes de o envio começar.
+
+O teste não mede relógio. Mock de rede não tem latência real, e teste de tempo
+em CI compartilhado é instável por natureza — ele mediria o runner, não o
+código. Mede a **ordem**: chamando a app pelo ASGI cru dá para ver os eventos
+que saem. Antes da correção a sequência era
+`['envio', 'response.start', 'response.body']`; agora o envio vem por último.
+Mais dois testes garantem que os ramos neutros não agendam envio nenhum —
+agendar seria pior que aguardar, porque mandaria e-mail a quem não tem conta.
+
+Ficou de fora, de propósito: o `register` também envia inline. Lá a resposta já
+difere por ramo (`409` de e-mail duplicado), então o relógio não acrescenta
+nada ao que o status já conta. Quando o **#3.1** tornar o register neutro, este
+mesmo tratamento precisa ir junto — senão a neutralidade nasce furada pelo
+tempo.
+
+### O tema passa a perguntar antes de decidir
+
+Ontem o teste do `ThemeContext` registrou que o padrão era escuro fixo e que o
+app não lia `prefers-color-scheme`. Registrar em vez de consertar foi o certo:
+era decisão de produto, não bug. O Rickelme decidiu mudar.
+
+Agora quem nunca escolheu recebe a preferência do sistema operacional; quem já
+escolheu manda, contra o sistema inclusive — o SO é o palpite inicial, não uma
+ordem. Duas consequências que a mudança de regra arrastou junto, e que não eram
+óbvias no enunciado:
+
+1. **A gravação saiu do efeito de montagem.** O código antigo gravava o tema no
+   `localStorage` a cada montagem. Mantendo isso, o valor do SO seria capturado
+   na primeira visita e **congelado ali**: quem trocasse o tema do sistema
+   depois nunca mais veria a mudança refletida, e "seguir o sistema" valeria
+   por uma visita só. A gravação foi para o `toggleTheme` — só escolha de gente
+   é gravada.
+2. **O `index.html` tinha a regra duplicada.** Existe ali um script anti-flash,
+   que roda antes do bundle, com a lógica antiga ("se não for `light`,
+   escurece"). Sem acompanhar, quem usa o SO no claro veria um flash escuro em
+   **toda** visita — exatamente o que aquele script existe para evitar. Ele
+   precisa repetir a regra à mão porque roda antes do JS da aplicação; os dois
+   lados agora apontam um para o outro em comentário, e está escrito no arquivo
+   que essa cópia não tem teste que a segure.
+
+No teste, o ciclo escolher/sair/voltar continua — agora com o SO fingindo o
+tema **oposto** ao escolhido. Sem isso ele passaria pelo motivo errado, caindo
+no padrão do sistema em vez de ler o que foi gravado.
+
+E as duas linhas mortas que ontem ficaram registradas viraram remoção: o
+comentário de `products.py` citando um helper que o `7371bc7` apagou, e o
+`!disabled &&` do `FormDropdown` que a verificação por mutação mostrou nunca
+rodar — o atributo `disabled` do `<button>` já impede o navegador de disparar o
+clique.
+
+### Decisões registradas, sem código
+
+- **Guard de produção: fica como está.** O `fail-fast` do boot quando falta
+  `CORS_ORIGINS` já pegou configuração errada duas vezes. O silêncio custou
+  semanas; o barulho custou minutos. Não vira aviso.
+- **Reunião da Helô** segue com o Rickelme. Fase 1 continua bloqueada por ela,
+  sem ação técnica nossa.
+
 ### O que fica na mesa
 
-- **`BackgroundTasks` no `forgot-password`.** Escolha do Rickelme priorizar
-  outras frentes hoje, mas com uma data implícita: ele precisa entrar **antes**
-  de o SMTP de produção ser ligado. Enquanto o envio é síncrono, o tempo de
-  resposta do endpoint denuncia quais e-mails têm conta — o mesmo oráculo de
-  timing que o `f8e6013` fechou no login. Hoje não existe em produção só porque
-  não há SMTP configurado; ele nasce no dia em que o Erick configurar.
 - **`CORS_ORIGINS`, porta 8000 e SMTP** seguem no painel, com o Rickelme e o
   Erick.
+- **`register` neutro (#3.1)** — quando entrar, o `BackgroundTasks` precisa ir
+  junto, senão a neutralidade nasce furada pelo tempo de resposta.
+- **Três propostas levantadas hoje, aguardando decisão:** unicidade de número
+  de série por dono (exige migration e uma escolha entre `owner_id` e CNPJ),
+  o chip de SLA que mente depois da reabertura (o conserto é de exibição), e o
+  Playwright noturno em CI (a Fase 2 do plano de testes).
+- **SLA por ciclo de reabertura** fica como melhoria futura: hoje o prazo de
+  resposta é um campo só, do primeiro ciclo.
 
 ---
 
