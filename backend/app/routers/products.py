@@ -139,6 +139,51 @@ async def _valida_dono(db: AsyncSession, owner_id: uuid.UUID) -> None:
         )
 
 
+_SERIE_DUPLICADA = "Este número de série já está cadastrado em outro equipamento."
+
+
+async def _recusa_serie_duplicada(
+    db: AsyncSession,
+    serial: str | None,
+    owner_id: uuid.UUID | None,
+    *,
+    ignorando: uuid.UUID | None = None,
+) -> None:
+    """
+    409 se `serial` já existe no escopo de `owner_id`.
+
+    O escopo é o DONO, não o sistema inteiro. Empresas diferentes podem ter
+    aparelhos com o mesmo número de série — fabricantes repetem séries entre
+    lotes e linhas — e a unicidade global, além de recusar cadastro legítimo,
+    era um oráculo: o 409 contava ao cliente que outra empresa tinha aquele
+    serial.
+
+    Sem dono o escopo é "os sem dono". Em SQL, NULL não conflita com NULL, então
+    a consulta pede `IS NULL` explicitamente — e o índice parcial da migration
+    faz o mesmo no banco. Dois órfãos iguais passariam em silêncio e só
+    apareceriam no dia em que alguém fosse atribuir o dono.
+
+    `ignorando` tira o próprio equipamento da busca ao editar: sem isso, trocar
+    o dono mantendo o serial esbarraria nele mesmo.
+
+    Furo aceito, por decisão: dois usuários da MESMA empresa podem cadastrar o
+    mesmo serial, cada um no próprio escopo — o mesmo aparelho físico, um por
+    colega. A evolução para escopo por empresa/CNPJ depende de normalizar o
+    campo CNPJ, que hoje é texto livre digitado no onboarding.
+    """
+    if not serial:
+        return
+    consulta = select(Equipment.id).where(Equipment.serial_number == serial)
+    if owner_id is None:
+        consulta = consulta.where(Equipment.owner_id.is_(None))
+    else:
+        consulta = consulta.where(Equipment.owner_id == owner_id)
+    if ignorando is not None:
+        consulta = consulta.where(Equipment.id != ignorando)
+    if (await db.execute(consulta)).scalar_one_or_none() is not None:
+        raise HTTPException(status_code=status.HTTP_409_CONFLICT, detail=_SERIE_DUPLICADA)
+
+
 # ═══════════════════════════════════════════════════════════════
 # PRODUCTS
 # ═══════════════════════════════════════════════════════════════
@@ -269,15 +314,7 @@ async def create_equipment(
     if body.owner_id:
         await _valida_dono(db, body.owner_id)
 
-    if body.serial_number:
-        dup = await db.execute(
-            select(Equipment).where(Equipment.serial_number == body.serial_number)
-        )
-        if dup.scalar_one_or_none():
-            raise HTTPException(
-                status_code=status.HTTP_409_CONFLICT,
-                detail="Este número de série já está cadastrado em outro equipamento.",
-            )
+    await _recusa_serie_duplicada(db, body.serial_number, body.owner_id)
 
     ts = datetime.now(UTC)
     equipment = Equipment(
@@ -399,15 +436,15 @@ async def update_equipment(
     if body.owner_id:
         await _valida_dono(db, body.owner_id)
 
-    if body.serial_number and body.serial_number != equipment.serial_number:
-        dup = await db.execute(
-            select(Equipment).where(Equipment.serial_number == body.serial_number)
-        )
-        if dup.scalar_one_or_none():
-            raise HTTPException(
-                status_code=status.HTTP_409_CONFLICT,
-                detail="Este número de série já está cadastrado em outro equipamento.",
-            )
+    # O que se valida é o PAR final (dono, serial), não cada campo sozinho.
+    # Mover o equipamento para um dono que já tem este serial não muda o
+    # serial — um check de "o serial mudou?" deixaria passar, e o dono novo
+    # ficaria com dois aparelhos de mesmo número.
+    enviados = body.model_fields_set
+    dono_final = body.owner_id if "owner_id" in enviados else equipment.owner_id
+    serial_final = body.serial_number if "serial_number" in enviados else equipment.serial_number
+    if dono_final != equipment.owner_id or serial_final != equipment.serial_number:
+        await _recusa_serie_duplicada(db, serial_final, dono_final, ignorando=equipment.id)
 
     for field, value in body.model_dump(exclude_unset=True).items():
         setattr(equipment, field, value)
@@ -434,15 +471,7 @@ async def create_my_equipment(
 ) -> EquipmentResponse:
     await get_or_404(db, Product, product_id, "Product not found")
 
-    if body.serial_number:
-        dup = await db.execute(
-            select(Equipment).where(Equipment.serial_number == body.serial_number)
-        )
-        if dup.scalar_one_or_none():
-            raise HTTPException(
-                status_code=status.HTTP_409_CONFLICT,
-                detail="Este número de série já está cadastrado em outro equipamento.",
-            )
+    await _recusa_serie_duplicada(db, body.serial_number, actor.id)
 
     ts = datetime.now(UTC)
     equipment = Equipment(
@@ -498,14 +527,7 @@ async def update_my_equipment(
     _check_equipment_owner(equipment, actor)
 
     if body.serial_number and body.serial_number != equipment.serial_number:
-        dup = await db.execute(
-            select(Equipment).where(Equipment.serial_number == body.serial_number)
-        )
-        if dup.scalar_one_or_none():
-            raise HTTPException(
-                status_code=status.HTTP_409_CONFLICT,
-                detail="Este número de série já está cadastrado em outro equipamento.",
-            )
+        await _recusa_serie_duplicada(db, body.serial_number, actor.id, ignorando=equipment.id)
 
     for field, value in body.model_dump(exclude_unset=True).items():
         setattr(equipment, field, value)

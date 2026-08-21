@@ -730,7 +730,12 @@ async def test_staff_can_assign_owner_on_update(patch_redis):
     dono = _mock_user(UserRole.client)
     equip = _mock_equipment()
     equip.owner_id = None
-    app.dependency_overrides[get_db] = _db_por_entidade(equipments=equip, users=dono)
+    # Tabela emulada, e não o mock por tabela: atribuir dono valida o par
+    # (dono novo, serial) e o mock por tabela devolveria o próprio equipamento
+    # a essa consulta — um 409 falso. Aqui o dono novo não tem nada.
+    app.dependency_overrides[get_db] = _db_tabela_equipamentos(
+        [equip], users={dono.id: dono}, por_id=equip
+    )
     _override_user(_ADMIN)
 
     async with AsyncClient(transport=ASGITransport(app=app), base_url="http://test") as c:
@@ -1033,3 +1038,309 @@ async def test_listing_without_owner_combines_with_the_other_filters(patch_redis
     consulta = next(q for q in queries if "equipments.owner_id IS NULL" in q)
     assert "lower(equipments.name) LIKE" in consulta
     assert "equipments.is_active =" in consulta
+
+
+# ═══════════════════════════════════════════════════════════════
+# NÚMERO DE SÉRIE ÚNICO POR DONO
+# ═══════════════════════════════════════════════════════════════
+#
+# A unicidade era global: um serial só podia existir uma vez no sistema
+# inteiro. Duas coisas erradas nisso. Empresas diferentes podem ter aparelhos
+# com o mesmo número — fabricantes repetem séries entre lotes e linhas — e o
+# 409 global era um oráculo: o cliente descobria que OUTRA empresa tinha
+# cadastrado determinado serial.
+#
+# Agora o escopo é o dono (`owner_id`). Equipamento sem dono tem escopo
+# próprio: dois órfãos com o mesmo serial continuam conflitando, porque órfão é
+# estado transitório que alguém vai consertar — e consertar dois iguais seria
+# descobrir o conflito tarde demais.
+#
+# O banco é mockado, então a sessão abaixo EMULA a tabela: lê os parâmetros
+# compilados da consulta (serial, dono, id ignorado) e só devolve a linha se o
+# par inteiro bater. É o que permite provar "dois donos com o mesmo serial
+# passa" sem Postgres — a prova no banco de verdade é a migration, testada à
+# parte contra um Postgres efêmero.
+
+
+def _db_tabela_equipamentos(linhas, *, product=None, users=None, por_id=None):
+    """
+    Sessão que responde à consulta de série como a tabela responderia.
+
+    `linhas` são os equipamentos existentes. Para consultas em `equipments`
+    com serial, filtra por serial, por dono (ou por `IS NULL` quando a consulta
+    pede órfão) e exclui o id que a consulta mandou ignorar. A consulta por id
+    do `get_or_404` devolve `por_id`. Outras tabelas respondem pelo dicionário.
+    """
+    users = users or {}
+
+    def _param(params, prefixo):
+        return next((v for k, v in params.items() if k.startswith(prefixo)), None)
+
+    def _responde(stmt):
+        texto = str(stmt).lower()
+        if "from products" in texto:
+            return product
+        if "from users" in texto:
+            return users.get(_param(stmt.compile().params, "id"))
+        if "from equipments" not in texto:
+            return None
+        # O SELECT lista todas as colunas, então "serial_number" aparece até na
+        # consulta por id do get_or_404; o que distingue é a COMPARAÇÃO.
+        if "equipments.serial_number =" not in texto:
+            return por_id
+
+        params = stmt.compile().params
+        serial = _param(params, "serial_number")
+        dono = _param(params, "owner_id")
+        ignorar = _param(params, "id")
+        quer_orfao = "owner_id is null" in texto
+
+        for linha in linhas:
+            if linha.serial_number != serial:
+                continue
+            if ignorar is not None and linha.id == ignorar:
+                continue
+            if quer_orfao:
+                if linha.owner_id is not None:
+                    continue
+            elif dono is not None and linha.owner_id != dono:
+                continue
+            return linha
+        return None
+
+    async def _execute(stmt, *args, **kwargs):
+        encontrado = _responde(stmt)
+        result = MagicMock()
+        result.scalar_one_or_none.return_value = encontrado
+        result.scalar_one.return_value = 0
+        result.scalars.return_value.all.return_value = [encontrado] if encontrado else []
+        return result
+
+    session = AsyncMock()
+    session.execute = _execute
+    session.add = MagicMock()
+    session.commit = AsyncMock()
+    session.refresh = AsyncMock()
+
+    async def _gen():
+        yield session
+
+    return _gen
+
+
+def _equipamento_de(dono_id, serial="SN-001", equip_id=None):
+    e = _mock_equipment(serial)
+    e.id = equip_id or uuid.uuid4()
+    e.owner_id = dono_id
+    return e
+
+
+@pytest.mark.asyncio
+async def test_dois_donos_podem_ter_o_mesmo_serial(patch_redis):
+    """Empresas diferentes, mesmo número de série: cadastra."""
+    from app.core.database import get_db
+
+    outra_empresa = _mock_user(UserRole.client)
+    dono_novo = _mock_user(UserRole.client)
+    app.dependency_overrides[get_db] = _db_tabela_equipamentos(
+        [_equipamento_de(outra_empresa.id, "SN-001")],
+        product=_mock_product(),
+        users={dono_novo.id: dono_novo},
+    )
+    _override_user(_ADMIN)
+
+    async with AsyncClient(transport=ASGITransport(app=app), base_url="http://test") as c:
+        resp = await c.post(
+            f"/api/v1/products/{_PRODUCT_ID}/equipments",
+            json={"name": "Titan #002", "serial_number": "SN-001", "owner_id": str(dono_novo.id)},
+        )
+
+    assert resp.status_code == 201, resp.text
+
+
+@pytest.mark.asyncio
+async def test_mesmo_dono_nao_repete_serial(patch_redis):
+    """O mesmo dono com o mesmo serial é o mesmo aparelho duas vezes: 409."""
+    from app.core.database import get_db
+
+    dono = _mock_user(UserRole.client)
+    app.dependency_overrides[get_db] = _db_tabela_equipamentos(
+        [_equipamento_de(dono.id, "SN-001")],
+        product=_mock_product(),
+        users={dono.id: dono},
+    )
+    _override_user(_ADMIN)
+
+    async with AsyncClient(transport=ASGITransport(app=app), base_url="http://test") as c:
+        resp = await c.post(
+            f"/api/v1/products/{_PRODUCT_ID}/equipments",
+            json={"name": "Titan #002", "serial_number": "SN-001", "owner_id": str(dono.id)},
+        )
+
+    assert resp.status_code == 409
+
+
+@pytest.mark.asyncio
+async def test_dois_orfaos_nao_repetem_serial(patch_redis):
+    """
+    Sem dono, o escopo é "os sem dono".
+
+    Em SQL puro, NULL não conflita com NULL — dois órfãos iguais passariam em
+    silêncio e só apareceriam no dia em que alguém fosse atribuir o dono.
+    """
+    from app.core.database import get_db
+
+    app.dependency_overrides[get_db] = _db_tabela_equipamentos(
+        [_equipamento_de(None, "SN-001")], product=_mock_product()
+    )
+    _override_user(_ADMIN)
+
+    async with AsyncClient(transport=ASGITransport(app=app), base_url="http://test") as c:
+        resp = await c.post(
+            f"/api/v1/products/{_PRODUCT_ID}/equipments",
+            json={"name": "Titan #002", "serial_number": "SN-001"},
+        )
+
+    assert resp.status_code == 409
+
+
+@pytest.mark.asyncio
+async def test_orfao_nao_conflita_com_serial_de_quem_tem_dono(patch_redis):
+    """Cadastrar sem dono um serial que só existe COM dono: passa."""
+    from app.core.database import get_db
+
+    alguem = _mock_user(UserRole.client)
+    app.dependency_overrides[get_db] = _db_tabela_equipamentos(
+        [_equipamento_de(alguem.id, "SN-001")], product=_mock_product()
+    )
+    _override_user(_ADMIN)
+
+    async with AsyncClient(transport=ASGITransport(app=app), base_url="http://test") as c:
+        resp = await c.post(
+            f"/api/v1/products/{_PRODUCT_ID}/equipments",
+            json={"name": "Titan #002", "serial_number": "SN-001"},
+        )
+
+    assert resp.status_code == 201, resp.text
+
+
+@pytest.mark.asyncio
+async def test_mover_para_dono_que_ja_tem_o_serial_da_409(patch_redis):
+    """
+    O PATCH valida o PAR final (dono, serial), não os campos isolados.
+
+    Só o dono muda no corpo; o serial fica. Validar apenas "o serial mudou?"
+    deixaria passar, e o dono novo ficaria com dois aparelhos de mesmo número.
+    """
+    from app.core.database import get_db
+
+    dono_atual = _mock_user(UserRole.client)
+    dono_novo = _mock_user(UserRole.client)
+    movido = _equipamento_de(dono_atual.id, "SN-001", equip_id=_EQUIP_ID)
+    ja_tem = _equipamento_de(dono_novo.id, "SN-001")
+
+    app.dependency_overrides[get_db] = _db_tabela_equipamentos(
+        [movido, ja_tem],
+        product=_mock_product(),
+        users={dono_novo.id: dono_novo},
+        por_id=movido,
+    )
+    _override_user(_ADMIN)
+
+    async with AsyncClient(transport=ASGITransport(app=app), base_url="http://test") as c:
+        resp = await c.patch(
+            f"/api/v1/equipments/{_EQUIP_ID}",
+            json={"owner_id": str(dono_novo.id)},
+        )
+
+    assert resp.status_code == 409, resp.text
+
+
+@pytest.mark.asyncio
+async def test_trocar_serial_para_um_que_o_mesmo_dono_ja_tem_da_409(patch_redis):
+    from app.core.database import get_db
+
+    dono = _mock_user(UserRole.client)
+    editado = _equipamento_de(dono.id, "SN-001", equip_id=_EQUIP_ID)
+    irmao = _equipamento_de(dono.id, "SN-002")
+
+    app.dependency_overrides[get_db] = _db_tabela_equipamentos(
+        [editado, irmao], product=_mock_product(), por_id=editado
+    )
+    _override_user(_ADMIN)
+
+    async with AsyncClient(transport=ASGITransport(app=app), base_url="http://test") as c:
+        resp = await c.patch(f"/api/v1/equipments/{_EQUIP_ID}", json={"serial_number": "SN-002"})
+
+    assert resp.status_code == 409
+
+
+@pytest.mark.asyncio
+async def test_editar_so_o_nome_nao_esbarra_no_proprio_serial(patch_redis):
+    """Mudar só o nome não pode conflitar com o serial do próprio equipamento."""
+    from app.core.database import get_db
+
+    dono = _mock_user(UserRole.client)
+    editado = _equipamento_de(dono.id, "SN-001", equip_id=_EQUIP_ID)
+
+    app.dependency_overrides[get_db] = _db_tabela_equipamentos(
+        [editado], product=_mock_product(), por_id=editado
+    )
+    _override_user(_ADMIN)
+
+    async with AsyncClient(transport=ASGITransport(app=app), base_url="http://test") as c:
+        resp = await c.patch(f"/api/v1/equipments/{_EQUIP_ID}", json={"name": "Titan renomeado"})
+
+    assert resp.status_code == 200, resp.text
+
+
+@pytest.mark.asyncio
+async def test_cliente_nao_repete_o_proprio_serial_mas_pode_repetir_o_dos_outros(patch_redis):
+    """Nos /equipment/my o escopo é sempre quem está logado."""
+    from app.core.database import get_db
+
+    outro = _mock_user(UserRole.client)
+    app.dependency_overrides[get_db] = _db_tabela_equipamentos(
+        [_equipamento_de(outro.id, "SN-001"), _equipamento_de(_CLIENT.id, "SN-009")],
+        product=_mock_product(),
+    )
+    _override_user(_CLIENT)
+
+    async with AsyncClient(transport=ASGITransport(app=app), base_url="http://test") as c:
+        de_outro = await c.post(
+            f"/api/v1/equipment/my?product_id={_PRODUCT_ID}",
+            json={"name": "Meu Titan", "serial_number": "SN-001"},
+        )
+        meu_repetido = await c.post(
+            f"/api/v1/equipment/my?product_id={_PRODUCT_ID}",
+            json={"name": "Meu Titan", "serial_number": "SN-009"},
+        )
+
+    assert de_outro.status_code == 201, de_outro.text
+    assert meu_repetido.status_code == 409
+
+
+@pytest.mark.asyncio
+async def test_a_consulta_de_serial_filtra_pelo_dono(patch_redis):
+    """A prova de que o escopo está na QUERY, não num filtro depois."""
+    from app.core.database import get_db
+
+    # Pelo /equipment/my o dono é o próprio ator: não há validação de dono no
+    # meio do caminho para o mock de captura (que devolve a mesma linha a toda
+    # consulta) atrapalhar antes de a consulta de série acontecer.
+    gen, queries = _db_capturando_queries(_mock_product(), [])
+    app.dependency_overrides[get_db] = gen
+    _override_user(_CLIENT)
+
+    async with AsyncClient(transport=ASGITransport(app=app), base_url="http://test") as c:
+        await c.post(
+            f"/api/v1/equipment/my?product_id={_PRODUCT_ID}",
+            json={"name": "Meu Titan", "serial_number": "SN-001"},
+        )
+
+    consulta = next((q for q in queries if "equipments.serial_number =" in q), None)
+    assert consulta is not None, "a consulta de série nem foi feita"
+    assert "equipments.owner_id =" in consulta, (
+        "a consulta de série precisa filtrar pelo dono — sem isso o 409 continua "
+        "global e segue denunciando o serial de outras empresas"
+    )

@@ -21,6 +21,7 @@ from sqlalchemy import (
     String,
     Table,
     Text,
+    text,
 )
 from sqlalchemy.dialects.postgresql import ARRAY, JSONB, UUID
 from sqlalchemy.orm import DeclarativeBase, Mapped, mapped_column, relationship
@@ -286,7 +287,7 @@ class Equipment(Base):
         UUID(as_uuid=True), ForeignKey("products.id", ondelete="CASCADE"), index=True
     )
     name: Mapped[str] = mapped_column(String(255), nullable=False)
-    serial_number: Mapped[str | None] = mapped_column(String(100), unique=True, index=True)
+    serial_number: Mapped[str | None] = mapped_column(String(100), index=True)
     model: Mapped[str | None] = mapped_column(String(100))
     description: Mapped[str | None] = mapped_column(Text)
     is_active: Mapped[bool] = mapped_column(Boolean, default=True)
@@ -306,6 +307,21 @@ class Equipment(Base):
     )
     tickets: Mapped[list["Ticket"]] = relationship(
         secondary="ticket_equipments", back_populates="equipments"
+    )
+
+    # Número de série único POR DONO, não no sistema inteiro: empresas
+    # diferentes podem ter aparelhos de mesmo número, e o 409 global denunciava
+    # o serial de outras empresas. Órfãos (owner_id NULL) têm escopo próprio no
+    # índice parcial — em SQL, NULL não conflita com NULL, e sem ele dois
+    # órfãos iguais passariam. Ver `_recusa_serie_duplicada` em routers/products.
+    __table_args__ = (
+        Index("uq_equipments_owner_serial", "owner_id", "serial_number", unique=True),
+        Index(
+            "uq_equipments_orphan_serial",
+            "serial_number",
+            unique=True,
+            postgresql_where=text("owner_id IS NULL"),
+        ),
     )
 
 
