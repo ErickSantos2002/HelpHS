@@ -1,4 +1,4 @@
-export const APP_VERSION = "v1.7.0";
+export const APP_VERSION = "v1.8.0";
 
 export type EntryType = "novidade" | "corrigido" | "melhoria";
 
@@ -14,6 +14,18 @@ export interface ChangelogVersion {
 }
 
 export const CHANGELOG: ChangelogVersion[] = [
+  {
+    version: "v1.8.0",
+    date: "21/08/2026",
+    entries: [
+      { type: "novidade", text: "O cadastro de equipamento na tela de Produtos agora tem o campo de dono, com busca pelo nome do cliente — e um filtro para encontrar de uma vez os equipamentos que ainda estão sem dono." },
+      { type: "melhoria", text: "O tema claro ou escuro passa a seguir a preferência do seu computador na primeira visita. Se você escolher um tema, a sua escolha continua valendo." },
+      { type: "corrigido", text: "O prazo de primeira resposta não mostra mais \"Vencido\" em chamados que já foram respondidos — inclusive nos reabertos, onde o aviso ficava para sempre." },
+      { type: "corrigido", text: "Não era possível cadastrar um equipamento cujo número de série já tivesse sido usado por outra empresa. Agora o número só precisa ser único dentro do seu próprio cadastro." },
+      { type: "melhoria", text: "Ao tentar abrir um chamado que não é seu, a resposta passou a ser a mesma de um chamado que não existe — assim ninguém descobre, pelo endereço, quais chamados existem no sistema." },
+      { type: "melhoria", text: "O indicador de primeira resposta do SLA passou a considerar apenas o que foi de fato dito ao cliente. Antes, assumir ou cancelar um chamado já contava como resposta, e responder pelo chat não contava — por isso os números de primeira resposta mudam a partir desta versão." },
+    ],
+  },
   {
     version: "v1.7.0",
     date: "19/08/2026",
