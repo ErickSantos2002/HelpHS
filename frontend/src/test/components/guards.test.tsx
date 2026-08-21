@@ -4,6 +4,7 @@ import { MemoryRouter, Route, Routes, useLocation } from "react-router-dom";
 import { AuthGuard } from "../../components/layout/AuthGuard";
 import { RoleGuard } from "../../components/layout/RoleGuard";
 import { OnboardingGuard } from "../../components/layout/OnboardingGuard";
+import { OnboardingOnlyRoute } from "../../components/layout/OnboardingOnlyRoute";
 import type { AuthUser } from "../../types/auth";
 
 /**
@@ -199,5 +200,80 @@ describe("OnboardingGuard", () => {
     renderOnboardingGuard();
 
     expect(screen.getByText("painel")).toBeInTheDocument();
+  });
+});
+
+// ── OnboardingOnlyRoute ───────────────────────────────────────
+//
+// O par que faltava do OnboardingGuard. Um empurra para /onboarding quem
+// ainda deve preencher; o outro tira de lá quem não tem o que preencher.
+// Sem ele, /onboarding ficava sob o AuthGuard e fora do OnboardingGuard —
+// qualquer autenticado abria a tela digitando a URL, inclusive o staff, que
+// não tem onboarding nenhum. A porta que importava já foi fechada no backend
+// (b1ab978); aqui é higiene de rota.
+
+function renderOnboardingOnly() {
+  return render(
+    <MemoryRouter initialEntries={["/onboarding"]}>
+      <Routes>
+        <Route element={<OnboardingOnlyRoute />}>
+          <Route path="/onboarding" element={<div>completar cadastro</div>} />
+        </Route>
+        <Route path="/" element={<div>painel</div>} />
+      </Routes>
+    </MemoryRouter>,
+  );
+}
+
+describe("OnboardingOnlyRoute", () => {
+  it("cliente com onboarding pendente vê a tela", () => {
+    mockUseAuth.mockReturnValue(
+      autenticado(usuario({ role: "client", onboarding_completed: false })),
+    );
+
+    renderOnboardingOnly();
+
+    expect(screen.getByText("completar cadastro")).toBeInTheDocument();
+  });
+
+  it("cliente que já completou é mandado para a home", () => {
+    // Refazer o onboarding sobrescreveria dados de cadastro já revisados.
+    mockUseAuth.mockReturnValue(
+      autenticado(usuario({ role: "client", onboarding_completed: true })),
+    );
+
+    renderOnboardingOnly();
+
+    expect(screen.getByText("painel")).toBeInTheDocument();
+  });
+
+  it("staff não tem onboarding — vai para a home mesmo com a flag falsa", () => {
+    mockUseAuth.mockReturnValue(
+      autenticado(usuario({ role: "technician", onboarding_completed: false })),
+    );
+
+    renderOnboardingOnly();
+
+    expect(screen.getByText("painel")).toBeInTheDocument();
+  });
+
+  it("admin também", () => {
+    mockUseAuth.mockReturnValue(
+      autenticado(usuario({ role: "admin", onboarding_completed: false })),
+    );
+
+    renderOnboardingOnly();
+
+    expect(screen.getByText("painel")).toBeInTheDocument();
+  });
+
+  it("sem usuário, não mostra a tela (fail closed)", () => {
+    // O AuthGuard já teria barrado antes; se um dia deixar de barrar, esta
+    // rota não pode ser a brecha.
+    mockUseAuth.mockReturnValue(autenticado(null));
+
+    renderOnboardingOnly();
+
+    expect(screen.queryByText("completar cadastro")).not.toBeInTheDocument();
   });
 });

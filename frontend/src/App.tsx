@@ -7,6 +7,7 @@ import { AuthGuard } from "./components/layout/AuthGuard";
 import { RoleGuard } from "./components/layout/RoleGuard";
 import { PublicOnlyRoute } from "./components/layout/PublicOnlyRoute";
 import { OnboardingGuard } from "./components/layout/OnboardingGuard";
+import { OnboardingOnlyRoute } from "./components/layout/OnboardingOnlyRoute";
 import { Spinner } from "./components/ui";
 
 // Pages (lazy-loaded for code splitting)
@@ -72,8 +73,12 @@ function App() {
 
           {/* ── Protected ────────────────────────────────────── */}
           <Route element={<AuthGuard />}>
-            {/* Onboarding — outside AppLayout, no nav */}
-            <Route path="/onboarding" element={<OnboardingPage />} />
+            {/* Onboarding — outside AppLayout, no nav. O OnboardingOnlyRoute
+                é o par do OnboardingGuard: um empurra para cá quem ainda deve
+                preencher, o outro tira daqui quem não tem o que preencher. */}
+            <Route element={<OnboardingOnlyRoute />}>
+              <Route path="/onboarding" element={<OnboardingPage />} />
+            </Route>
 
             <Route element={<OnboardingGuard />}>
               <Route element={<AppLayout />}>
