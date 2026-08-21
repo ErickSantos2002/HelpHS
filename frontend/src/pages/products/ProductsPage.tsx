@@ -432,6 +432,10 @@ export default function ProductsPage() {
   const [equipPage, setEquipPage] = useState(1);
   const [equipFilter, setEquipFilter] = useState<FilterTab>("active");
   const [equipSearch, setEquipSearch] = useState("");
+  // Filtro de órfãos: equipamento cadastrado sem dono. É filtro de servidor
+  // (`without_owner`) porque a lista é paginada — peneirar aqui só acharia o
+  // órfão que por acaso caiu na página aberta.
+  const [equipSemDono, setEquipSemDono] = useState(false);
   const [togglingEquip, setTogglingEquip] = useState<string | null>(null);
 
   // Equipment modals
@@ -462,6 +466,7 @@ export default function ProductsPage() {
     getEquipments(productId, {
       search: equipSearch || undefined,
       is_active: equipFilter === "all" ? undefined : equipFilter === "active",
+      without_owner: equipSemDono || undefined,
       limit: EQUIP_PAGE,
       offset: (p - 1) * EQUIP_PAGE,
     })
@@ -473,7 +478,7 @@ export default function ProductsPage() {
   useEffect(() => {
     if (selectedProduct) loadEquipments(selectedProduct.id, equipPage);
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [selectedProduct?.id, equipFilter, equipSearch, equipPage]);
+  }, [selectedProduct?.id, equipFilter, equipSearch, equipSemDono, equipPage]);
 
   async function toggleProduct(product: Product) {
     setTogglingProduct(product.id);
@@ -680,8 +685,8 @@ export default function ProductsPage() {
           </div>
 
           {/* Equipment search */}
-          <div className="px-4 py-2.5 border-b border-border">
-            <div className="relative">
+          <div className="px-4 py-2.5 border-b border-border flex flex-col sm:flex-row sm:items-center gap-2">
+            <div className="relative flex-1">
               <span className="absolute left-3 top-1/2 -translate-y-1/2 text-slate-500 pointer-events-none">{IC.Search}</span>
               <input
                 className="w-full pl-9 pr-3 py-2 rounded-xl border border-border/60 bg-background-elevated text-sm text-slate-700 dark:text-slate-200 placeholder:text-slate-500 focus:outline-none focus:ring-2 focus:ring-primary focus:border-transparent transition-colors"
@@ -690,6 +695,18 @@ export default function ProductsPage() {
                 onChange={(e) => { setEquipSearch(e.target.value); setEquipPage(1); }}
               />
             </div>
+            <button
+              type="button"
+              aria-pressed={equipSemDono}
+              onClick={() => { setEquipSemDono((v) => !v); setEquipPage(1); }}
+              className={`shrink-0 whitespace-nowrap rounded-lg border px-3 py-2 text-sm font-medium transition-colors cursor-pointer ${
+                equipSemDono
+                  ? "border-primary bg-primary/10 text-primary"
+                  : "border-border/60 bg-background-elevated text-slate-600 dark:text-slate-300 hover:border-border hover:text-slate-800 dark:hover:text-slate-100"
+              }`}
+            >
+              Sem dono
+            </button>
           </div>
 
           {equipError && <div className="p-4"><Alert variant="danger">{equipError}</Alert></div>}
@@ -699,10 +716,21 @@ export default function ProductsPage() {
           ) : equipments.length === 0 ? (
             <div className="flex flex-col items-center justify-center py-12 text-center">
               <div className="w-10 h-10 rounded-full bg-background-elevated border border-border flex items-center justify-center text-slate-600 mb-3">{IC.Cpu}</div>
-              <p className="text-sm text-slate-400">Nenhum equipamento para este produto.</p>
-              <button onClick={() => setEquipFormOpen(true)} className="mt-2 text-sm text-primary hover:text-primary/80 transition-colors cursor-pointer">
-                Adicionar equipamento
-              </button>
+              {equipSemDono ? (
+                <>
+                  <p className="text-sm text-slate-400">Nenhum equipamento sem dono para este produto.</p>
+                  <button onClick={() => { setEquipSemDono(false); setEquipPage(1); }} className="mt-2 text-sm text-primary hover:text-primary/80 transition-colors cursor-pointer">
+                    Ver todos
+                  </button>
+                </>
+              ) : (
+                <>
+                  <p className="text-sm text-slate-400">Nenhum equipamento para este produto.</p>
+                  <button onClick={() => setEquipFormOpen(true)} className="mt-2 text-sm text-primary hover:text-primary/80 transition-colors cursor-pointer">
+                    Adicionar equipamento
+                  </button>
+                </>
+              )}
             </div>
           ) : (
             <>

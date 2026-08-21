@@ -921,3 +921,115 @@ async def test_self_service_listing_stays_open_to_every_role(patch_redis, perfil
         resp = await c.get("/api/v1/equipment/my")
 
     assert resp.status_code == 200, resp.text
+
+
+# ═══════════════════════════════════════════════════════════════
+# FILTRO "SEM DONO" — achar os órfãos para atribuir
+# ═══════════════════════════════════════════════════════════════
+#
+# A atribuição de dono existe desde 3efb0cf, mas para usá-la o staff precisa
+# primeiro ACHAR o equipamento órfão — e a listagem é paginada no servidor.
+# Filtrar no navegador só varreria a página aberta: com 200 equipamentos e 20
+# por página, o órfão da página 7 fica invisível para sempre.
+
+
+@pytest.mark.asyncio
+async def test_staff_listing_without_owner_filters_by_null_owner(patch_redis):
+    """`without_owner=true` filtra no banco, não na página."""
+    from app.core.database import get_db
+
+    gen, queries = _db_capturando_queries(_mock_product(), [])
+    app.dependency_overrides[get_db] = gen
+    _override_user(_ADMIN)
+
+    async with AsyncClient(transport=ASGITransport(app=app), base_url="http://test") as c:
+        resp = await c.get(
+            f"/api/v1/products/{_PRODUCT_ID}/equipments", params={"without_owner": "true"}
+        )
+
+    assert resp.status_code == 200
+    assert any("equipments.owner_id IS NULL" in q for q in queries), (
+        "o filtro precisa virar WHERE owner_id IS NULL — filtrar depois de "
+        "paginar esconderia o órfão que está fora da página aberta"
+    )
+
+
+@pytest.mark.asyncio
+async def test_staff_listing_without_the_flag_lists_everyone(patch_redis):
+    """Sem o parâmetro, a listagem continua a mesma — o filtro é opcional."""
+    from app.core.database import get_db
+
+    gen, queries = _db_capturando_queries(_mock_product(), [_mock_equipment()])
+    app.dependency_overrides[get_db] = gen
+    _override_user(_ADMIN)
+
+    async with AsyncClient(transport=ASGITransport(app=app), base_url="http://test") as c:
+        resp = await c.get(f"/api/v1/products/{_PRODUCT_ID}/equipments")
+
+    assert resp.status_code == 200
+    assert not any("equipments.owner_id IS NULL" in q for q in queries)
+
+
+@pytest.mark.asyncio
+async def test_staff_listing_without_owner_false_lists_everyone(patch_redis):
+    """`without_owner=false` é o mesmo que não mandar — e não vira IS NOT NULL."""
+    from app.core.database import get_db
+
+    gen, queries = _db_capturando_queries(_mock_product(), [_mock_equipment()])
+    app.dependency_overrides[get_db] = gen
+    _override_user(_ADMIN)
+
+    async with AsyncClient(transport=ASGITransport(app=app), base_url="http://test") as c:
+        resp = await c.get(
+            f"/api/v1/products/{_PRODUCT_ID}/equipments", params={"without_owner": "false"}
+        )
+
+    assert resp.status_code == 200
+    assert not any("equipments.owner_id IS" in q for q in queries)
+
+
+@pytest.mark.asyncio
+async def test_client_asking_for_ownerless_stays_scoped(patch_redis):
+    """
+    Cliente pedindo `without_owner=true` não fura o escopo dele.
+
+    O filtro é somado ao escopo por dono, nunca o substitui: a query pede
+    owner_id = <cliente> E owner_id IS NULL, que não casa com nada. Se o filtro
+    trocasse o escopo, o cliente passaria a enumerar o parque órfão inteiro.
+    """
+    from app.core.database import get_db
+
+    gen, queries = _db_capturando_queries(_mock_product(), [])
+    app.dependency_overrides[get_db] = gen
+    _override_user(_CLIENT)
+
+    async with AsyncClient(transport=ASGITransport(app=app), base_url="http://test") as c:
+        resp = await c.get(
+            f"/api/v1/products/{_PRODUCT_ID}/equipments", params={"without_owner": "true"}
+        )
+
+    assert resp.status_code == 200
+    assert any(
+        "equipments.owner_id =" in q for q in queries
+    ), "o escopo por dono do cliente não pode sumir quando ele manda o filtro"
+
+
+@pytest.mark.asyncio
+async def test_listing_without_owner_combines_with_the_other_filters(patch_redis):
+    """O filtro novo soma com busca e situação — não os substitui."""
+    from app.core.database import get_db
+
+    gen, queries = _db_capturando_queries(_mock_product(), [])
+    app.dependency_overrides[get_db] = gen
+    _override_user(_ADMIN)
+
+    async with AsyncClient(transport=ASGITransport(app=app), base_url="http://test") as c:
+        resp = await c.get(
+            f"/api/v1/products/{_PRODUCT_ID}/equipments",
+            params={"without_owner": "true", "search": "titan", "is_active": "true"},
+        )
+
+    assert resp.status_code == 200
+    consulta = next(q for q in queries if "equipments.owner_id IS NULL" in q)
+    assert "lower(equipments.name) LIKE" in consulta
+    assert "equipments.is_active =" in consulta

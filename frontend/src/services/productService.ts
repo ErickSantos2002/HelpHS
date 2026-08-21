@@ -92,11 +92,27 @@ export async function setProductActive(
 
 // ── Equipments ────────────────────────────────────────────────
 
+/**
+ * `without_owner` é o filtro de órfãos: equipamento cadastrado sem dono, que
+ * o staff precisa achar para atribuir. Vai como parâmetro porque a listagem é
+ * paginada no servidor — peneirar o array recebido acharia só o órfão que por
+ * acaso caiu na página aberta.
+ *
+ * Só é mandado quando ligado: `false` teria o mesmo efeito, mas apareceria na
+ * URL de toda listagem normal.
+ */
 export async function getEquipments(
   productId: string,
-  params: { search?: string; is_active?: boolean; limit?: number; offset?: number } = {},
+  params: {
+    search?: string;
+    is_active?: boolean;
+    without_owner?: boolean;
+    limit?: number;
+    offset?: number;
+  } = {},
 ): Promise<EquipmentListResponse> {
   const p = new URLSearchParams();
+  if (params.without_owner) p.set("without_owner", "true");
   if (params.search) p.set("search", params.search);
   if (params.is_active !== undefined)
     p.set("is_active", String(params.is_active));

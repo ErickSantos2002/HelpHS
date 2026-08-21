@@ -130,6 +130,45 @@ describe("getEquipments", () => {
     const url = mockGet.mock.calls[0][0] as string;
     expect(url).toContain("is_active=true");
   });
+
+  // O filtro de órfãos precisa viajar até o servidor: a listagem é paginada,
+  // então peneirar no navegador só olharia a página aberta.
+  it("manda without_owner quando o filtro de órfãos está ligado", async () => {
+    mockGet.mockResolvedValue({
+      data: { items: [], total: 0, limit: 20, offset: 0 },
+    });
+
+    await getEquipments("p1", { without_owner: true });
+
+    const url = mockGet.mock.calls[0][0] as string;
+    expect(url).toContain("without_owner=true");
+  });
+
+  it("omite without_owner quando o filtro está desligado", async () => {
+    // Mandar `without_owner=false` funcionaria, mas sujaria a URL de toda
+    // listagem normal — e a diferença some nos logs de acesso.
+    mockGet.mockResolvedValue({
+      data: { items: [], total: 0, limit: 20, offset: 0 },
+    });
+
+    await getEquipments("p1", { without_owner: false });
+
+    const url = mockGet.mock.calls[0][0] as string;
+    expect(url).not.toContain("without_owner");
+  });
+
+  it("soma without_owner aos outros filtros", async () => {
+    mockGet.mockResolvedValue({
+      data: { items: [], total: 0, limit: 20, offset: 0 },
+    });
+
+    await getEquipments("p1", { without_owner: true, search: "titan", is_active: true });
+
+    const url = mockGet.mock.calls[0][0] as string;
+    expect(url).toContain("without_owner=true");
+    expect(url).toContain("search=titan");
+    expect(url).toContain("is_active=true");
+  });
 });
 
 describe("createEquipment", () => {

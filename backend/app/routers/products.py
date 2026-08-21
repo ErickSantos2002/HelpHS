@@ -309,6 +309,7 @@ async def list_equipments(
     limit: int = Query(default=20, ge=1, le=100),
     is_active: bool | None = Query(default=None),
     search: str | None = Query(default=None, max_length=100),
+    without_owner: bool = Query(default=False),
 ) -> EquipmentListResponse:
     await get_or_404(db, Product, product_id, "Product not found")
 
@@ -318,6 +319,20 @@ async def list_equipments(
     # equipamento de qualquer outro cliente.
     if actor.role == UserRole.client:
         base = base.where(Equipment.owner_id == actor.id)
+    # Achar o equipamento órfão para atribuir dono. Precisa ser filtro de
+    # servidor: a listagem é paginada, então filtrar no navegador só varreria a
+    # página aberta e o órfão da página 7 nunca apareceria.
+    #
+    # Um `without_owner` booleano e não um filtro de dono genérico porque as
+    # duas coisas são ortogonais, não alternativas: "sem dono" é a ausência de
+    # owner_id e não caberia num `owner_id=<uuid>` sem inventar um valor
+    # sentinela. Um filtro por dono específico, se um dia fizer falta, entra ao
+    # lado deste sem conflito.
+    #
+    # Somado ao escopo do cliente acima, nunca no lugar dele: para o cliente a
+    # combinação não casa com nada, que é o resultado certo.
+    if without_owner:
+        base = base.where(Equipment.owner_id.is_(None))
     if is_active is not None:
         base = base.where(Equipment.is_active == is_active)
     if search:
