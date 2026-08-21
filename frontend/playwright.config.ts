@@ -6,7 +6,6 @@ import { defineConfig, devices } from "@playwright/test";
  * Requires the dev server (npm run dev) and backend (port 8001) to be running.
  * Override credentials via env vars:
  *   ADMIN_EMAIL / ADMIN_PASSWORD
- *   TECH_EMAIL  / TECH_PASSWORD
  *   CLIENT_EMAIL / CLIENT_PASSWORD
  */
 export default defineConfig({

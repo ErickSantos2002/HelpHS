@@ -1,13 +1,16 @@
 import { Page } from "@playwright/test";
 
+// O admin vem de `app.seeds` (os mesmos seeds do boot). O cliente vem de
+// `app.seeds_e2e`, que só o workflow de e2e roda — e que se recusa a rodar em
+// produção. Há um teste no backend garantindo que os valores daqui e de lá
+// são os mesmos.
+//
+// Não existe técnico: nenhum spec loga como técnico, e manter credencial de
+// uma conta que nenhum seed cria é armadilha para o próximo que usar.
 export const CREDENTIALS = {
   admin: {
     email: process.env.ADMIN_EMAIL ?? "admin@healthsafety.com",
     password: process.env.ADMIN_PASSWORD ?? "Admin@123456",
-  },
-  technician: {
-    email: process.env.TECH_EMAIL ?? "tech.e2e@healthsafety.com",
-    password: process.env.TECH_PASSWORD ?? "TechE2E@123",
   },
   client: {
     email: process.env.CLIENT_EMAIL ?? "client.e2e@healthsafety.com",
