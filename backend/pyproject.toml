@@ -45,6 +45,7 @@ addopts = "--cov=app --cov-report=term-missing --cov-fail-under=80"
 # ── Coverage ─────────────────────────────────────────────────
 [tool.coverage.run]
 source = ["app"]
+concurrency = ["thread", "greenlet"]
 omit = [
     "app/seeds.py",
     "app/worker/*",
