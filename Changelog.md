@@ -78,6 +78,18 @@ Datas em DD/MM/AAAA.
   de ter sido cliente.
 
 ### Corrigido
+- **Limpar um campo da empresa passa a funcionar.** O `PUT` de empresa pulava
+  todo valor `None`, então "enviado vazio" e "não enviado" eram
+  indistinguíveis: o admin apagava o CNPJ na tela, salvava, e o valor velho
+  voltava sem aviso nenhum — e valia para os sete campos, não só o CNPJ. A
+  distinção agora vem do `model_fields_set` do pydantic, que diz o que o
+  cliente **mandou**: ausente não mexe, enviado vazio limpa. `name` é a
+  exceção, por causa do banco — a coluna é `NOT NULL`, então enviá-lo vazio
+  devolve `422` com motivo, em vez do erro de servidor que "enviou, grava"
+  produziria. O comportamento antigo estava preso por teste de caracterização
+  desde o `470d56c`, escrito para que mudá-lo fosse decisão e não efeito
+  colateral; as duas mutações (voltar a guarda antiga, tirar a guarda do nome)
+  derrubam a suíte.
 - **Criar empresa pela sugestão passa a vincular os clientes** (`abdee48`).
   `handleAddFromSuggestion` chamava só `createCompany`, e `create_company`
   nunca tocou em `User`: os clientes que geraram o card seguiam com
