@@ -25,4 +25,11 @@ export default tseslint.config(
       ],
     },
   },
+  {
+    // Arquivos que rodam em Node (usam process.env), não no browser
+    files: ['e2e/**/*.ts', 'playwright.config.ts', 'vite.config.ts'],
+    languageOptions: {
+      globals: globals.node,
+    },
+  },
 )
