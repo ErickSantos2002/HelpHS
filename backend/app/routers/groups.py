@@ -281,10 +281,26 @@ async def update_company(
     _: _AdminDep,
 ) -> CompanyResponse:
     c = await _get_company_or_404(db, group_id, company_id)
+
+    # `model_fields_set` diz o que o cliente **mandou**, e é isso que separa
+    # "limpar" de "não mexer". A guarda antiga era `if val is not None`, com a
+    # qual os dois casos eram indistinguíveis: o admin apagava o CNPJ na tela,
+    # salvava, e o valor velho voltava sem nenhum aviso.
+    enviados = body.model_fields_set
+
+    # `companies.name` é NOT NULL no banco. Recusar aqui devolve 422 com
+    # motivo; deixar passar mandaria NULL para a coluna e o admin veria erro
+    # de servidor por um estado que nunca foi válido.
+    if "name" in enviados and not body.name:
+        raise HTTPException(
+            status_code=status.HTTP_422_UNPROCESSABLE_ENTITY,
+            detail="O nome da empresa não pode ficar vazio.",
+        )
+
     for field in ("name", "cnpj", "phone", "address", "city", "state", "notes"):
-        val = getattr(body, field)
-        if val is not None:
-            setattr(c, field, val)
+        if field in enviados:
+            setattr(c, field, getattr(body, field))
+
     await db.commit()
     await db.refresh(c)
     return await _company_to_response(db, c)

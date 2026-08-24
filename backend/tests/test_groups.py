@@ -225,28 +225,49 @@ async def test_campo_ausente_no_put_nao_apaga_o_valor(db, cliente_http):
 
 
 @pytest.mark.asyncio
-async def test_string_vazia_no_put_nao_limpa_o_campo(db, cliente_http):
+async def test_campo_enviado_vazio_limpa_o_valor(db, cliente_http):
     """
-    **Contrato, não conveniência.** Depois do `62f022e`, `cnpj: ""` vira `None`
-    no schema, e o laço do `update_company` pula `None` — então limpar o CNPJ
-    de uma empresa pela tela deixou de funcionar. Antes gravava a string
-    vazia; nem antes nem agora chegava a `NULL`.
+    Enviado vazio significa **limpar**; ausente significa **não mexer**.
 
-    Este teste existe para que "consertar" isso seja uma decisão consciente:
-    a guarda é `if val is not None` para os **sete** campos, então trocá-la por
-    CNPJ muda junto `name`, `phone`, `address`, `city`, `state` e `notes`. É
-    trabalho do Passo 3, não efeito colateral de quem passar por aqui.
+    O laço antigo era `if val is not None`, e com ele os dois casos eram
+    indistinguíveis: o admin apagava o CNPJ na tela, salvava, e o valor velho
+    voltava sem nenhum aviso. A distinção agora vem do `model_fields_set` do
+    pydantic, que diz o que o cliente **mandou** — não o que chegou nulo.
     """
     g = await _grupo(db)
-    c = await _empresa(db, g, name="Acme", cnpj=CNPJ_DIGITOS)
+    c = await _empresa(db, g, name="Acme", cnpj=CNPJ_DIGITOS, city="Recife")
 
     resp = await cliente_http.put(
-        f"/api/v1/groups/{g.id}/companies/{c.id}", json={"name": "Acme", "cnpj": ""}
+        f"/api/v1/groups/{g.id}/companies/{c.id}",
+        json={"name": "Acme", "cnpj": "", "city": None},
     )
 
     assert resp.status_code == 200
     await db.refresh(c)
-    assert c.cnpj == CNPJ_DIGITOS, "o PUT não limpa campo — ver docstring"
+    assert c.cnpj is None, "campo enviado vazio precisa limpar"
+    assert c.city is None, "null explícito também limpa"
+
+
+@pytest.mark.asyncio
+async def test_nome_enviado_vazio_da_422_e_nao_500(db, cliente_http):
+    """
+    `companies.name` é `NOT NULL` no banco, mas `str | None` no schema.
+
+    Sem guarda, "enviou, grava" mandaria `NULL` para uma coluna obrigatória e
+    o admin veria erro de servidor no lugar de uma mensagem. Empresa sem nome
+    não é estado válido — a recusa é do contrato, não do banco.
+    """
+    g = await _grupo(db)
+    c = await _empresa(db, g, name="Acme")
+
+    for vazio in ("", None):
+        resp = await cliente_http.put(
+            f"/api/v1/groups/{g.id}/companies/{c.id}", json={"name": vazio}
+        )
+        assert resp.status_code == 422, f"name={vazio!r} devia dar 422, veio {resp.status_code}"
+
+    await db.refresh(c)
+    assert c.name == "Acme", "a recusa não pode ter gravado nada"
 
 
 @pytest.mark.asyncio
