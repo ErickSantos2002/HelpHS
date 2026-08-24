@@ -388,6 +388,34 @@ endereços um a um.
 Uma exceção deliberada: **redefinir a senha confirma o e-mail junto**. Quem
 abriu o link provou ser dono da caixa.
 
+### O admin inicial não nasce de seed em produção
+
+`start.sh` roda `python -m app.seeds` **a cada boot do container**, entre a
+migration e o uvicorn — inclusive em produção. Enquanto a senha do admin esteve
+escrita no código, todo deploy criava (ou recriava, se alguém apagasse a linha)
+um administrador ativo com credencial publicada no repositório.
+
+Duas defesas, independentes de propósito:
+
+1. **`APP_ENV` de produção não cria a conta.**
+2. **Sem `SEED_ADMIN_PASSWORD` não cria a conta** — não há literal para cair.
+
+A segunda não é redundância: `app_env` tem default `development`, então a
+primeira falha **aberta** se a variável faltar ou vier digitada errada. Senha
+ausente é o que segura esse caso, e é por isso que ela é a correção — a guarda
+de ambiente é só a defesa.
+
+Nenhuma das duas levanta exceção. Isso separa esta regra da do módulo de seeds
+do Playwright, que **deve** falhar ruidosamente em produção porque nada o chama
+lá: `seed_admin` está no caminho do boot, sob `set -e`, e levantar trocaria um
+vazamento de credencial por uma indisponibilidade. A recusa vai para o log e a
+execução segue — produto e configuração de SLA continuam sendo semeados
+normalmente, porque são catálogo, não credencial.
+
+O seed continua idempotente, e isso protege quem já trocou a senha em produção:
+com a linha presente, nada é tocado. Em contrapartida, **apagar o usuário não é
+uma forma de reiniciá-lo**: sem a variável, ele simplesmente não volta.
+
 ## Equipamentos do chamado
 
 **Um chamado aceita vários equipamentos** (teto de 20). Antes era um só, e o

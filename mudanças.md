@@ -25,6 +25,8 @@ para "por dono" quando a decisão de negócio correta era "por empresa".
 | `e30968e` | `fix:` **cobertura parava de contar** depois do primeiro `await` no banco |
 | `470d56c` | `test:` **domínio de empresa em `groups.py`** sai do descoberto |
 | `abdee48` | `feat:` **criar empresa pela sugestão passa a vincular** os clientes |
+| `3478bae` | `fix:` **admin de seed deixa de nascer com senha do repositório** 🔴 |
+| `b736114` | `test:` as duas defesas do seed de admin |
 | `docs:` | Este fechamento |
 
 ### O levantamento corrigiu a própria premissa
@@ -182,6 +184,51 @@ digitaram nomes diferentes, e o que fazer com quem tem `company_name` mas não
 tem CNPJ — decisões de produto, não de implementação. Mas o estrago acabou: com
 o reaproveitamento por CNPJ, os dois cards caem na mesma empresa. O defeito
 virou cosmético — dois cliques em vez de um — em vez de gerar duplicata.
+
+### O achado do dia: o boot de produção criava um admin com senha pública
+
+Verificação de segurança pedida no fim do dia, e o resultado foi o pior tipo:
+não era hipótese, era cadeia confirmada em três arquivos. `Dockerfile` chama
+`start.sh`; `start.sh` roda `python -m app.seeds` a cada boot; `seed_admin`
+criava `admin@healthsafety.com` com `Admin@123456` — senha escrita no código
+deste repositório — como administrador **ativo**, sem nenhuma guarda de
+ambiente.
+
+O detalhe que mais incomoda é que o projeto **já sabia**. O `app.seeds_e2e`
+tem guarda de produção, tem teste, e a docstring dele diz com todas as letras
+que colocar conta de teste no `app.seeds` criaria "logins com senha em texto
+claro conhecida por qualquer um que leia este repositório". O raciocínio certo
+foi escrito, aplicado à conta de teste, e não à de admin — que é a mais
+poderosa das duas.
+
+A correção tem duas defesas, e elas não são a mesma coisa dita duas vezes.
+`APP_ENV` de produção não cria a conta; **e** sem `SEED_ADMIN_PASSWORD` não
+cria a conta. A segunda existe porque a primeira falha **aberta**: `app_env`
+tem default `development`, então variável ausente ou digitada errada
+desligaria a guarda de ambiente sozinha. Tirar a senha do código é a correção;
+a guarda de ambiente é só a defesa.
+
+E uma decisão que contraria a letra do pedido, de propósito: **nenhuma das
+duas levanta exceção.** O pedido era "mesmo fail-fast do `seeds_e2e`", mas
+`run_seeds` está no caminho do boot, e o `start.sh` roda com `set -e` — um
+`RuntimeError` ali deixaria o container sem subir. Seria trocar um vazamento
+de credencial por uma indisponibilidade. No `seeds_e2e` o `raise` é seguro
+justamente porque nada chama aquele módulo em produção. A recusa vai para o
+log e a execução segue; produto e SLA continuam sendo semeados, porque são
+catálogo e não credencial.
+
+Efeitos colaterais que precisaram vir junto: o workflow de e2e passou a
+definir a variável (senão o Playwright perde o login do admin, contra o banco
+efêmero do job) e a receita de ambiente local ganhou o `export` — com uma
+pegadinha documentada, porque "subiu e o admin não loga" agora é sintoma
+esperado de variável esquecida. Tem teste guardando o acoplamento entre o
+workflow e o `helpers.ts`.
+
+**O incidente não está fechado.** Falta verificar se a conta existe hoje em
+produção e com que senha; a consulta está proposta e nada foi executado contra
+o banco real. E note a assimetria que a idempotência cria: ela protege quem já
+trocou a senha, mas em compensação apagar o usuário deixou de ser forma de
+reiniciá-lo — sem a variável, ele não volta.
 
 ### O que continua na fila
 

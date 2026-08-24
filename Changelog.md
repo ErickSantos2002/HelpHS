@@ -11,6 +11,32 @@ Datas em DD/MM/AAAA.
 ## [Não publicado]
 
 ### Segurança
+- **O admin de seed deixa de nascer com senha do repositório** (`3478bae`,
+  `b736114`). `start.sh` roda `python -m app.seeds` **a cada boot do
+  container**, entre a migration e o uvicorn, **inclusive em produção**. Com a
+  senha `Admin@123456` escrita em `seeds.py` e nenhuma guarda de ambiente, todo
+  deploy criava — ou recriava, se alguém apagasse a linha — um administrador
+  ativo com credencial publicada neste repositório. O `app.seeds_e2e` já tinha
+  essa proteção e a docstring dele já explicava o porquê: o raciocínio tinha
+  sido aplicado à conta de teste e não à de admin, que é a mais poderosa das
+  duas. Passa a haver **duas defesas independentes** — `APP_ENV` de produção
+  não cria a conta, e sem `SEED_ADMIN_PASSWORD` não cria a conta. A segunda não
+  é redundância: `app_env` tem default `development`, então a primeira falha
+  **aberta** se a variável faltar ou vier digitada errada; senha ausente é a
+  correção, guarda de ambiente é só a defesa. **Nenhuma das duas levanta**, e é
+  aí que esta regra difere da do módulo de e2e (que *deve* falhar ruidosamente,
+  porque nada o chama em produção): `seed_admin` está no caminho do boot sob
+  `set -e`, e levantar trocaria um vazamento de credencial por uma
+  indisponibilidade. Produto e configuração de SLA continuam sendo semeados
+  normalmente — são catálogo, não credencial. A idempotência permanece e
+  protege quem já trocou a senha em produção; em contrapartida, **apagar o
+  usuário deixa de ser forma de reiniciá-lo**. ⚠️ O workflow de e2e passa a
+  definir `SEED_ADMIN_PASSWORD` (banco efêmero do job), e **quem sobe o
+  ambiente local precisa exportá-la** — sem ela o seed avisa no log e pula a
+  criação. ⚠️ **Isto não fecha o incidente:** falta verificar se a conta existe
+  hoje no banco de produção e com que senha. Nada foi executado contra
+  produção nesta rodada.
+
 - **Número de série passa a ser único por dono, não no sistema inteiro**
   (`d5fa7a6`). A unicidade global recusava cadastro legítimo — empresas
   diferentes têm aparelhos de mesmo número — e era um oráculo: o `409` contava
