@@ -21,6 +21,10 @@ para "por dono" quando a decisão de negócio correta era "por empresa".
 | `99b0847` | `docs:` **levantamento** das duas fontes de verdade |
 | `f7ddadc` | `docs:` **`companies.id` declarado única autoridade** de escopo por empresa |
 | `62f022e` | `fix:` **CNPJ com pontuação deixa de chegar ao banco**, com script de backfill |
+| `1c414c0` | `fix:` nome de teste que **prometia mais do que provava** |
+| `e30968e` | `fix:` **cobertura parava de contar** depois do primeiro `await` no banco |
+| `470d56c` | `test:` **domínio de empresa em `groups.py`** sai do descoberto |
+| `abdee48` | `feat:` **criar empresa pela sugestão passa a vincular** os clientes |
 | `docs:` | Este fechamento |
 
 ### O levantamento corrigiu a própria premissa
@@ -117,6 +121,76 @@ rodadas em produção. O backfill também não.
 E ficou registrado que o escopo de chamados é provavelmente mais urgente que a
 série: hoje o cliente vê só os próprios chamados, então dois funcionários da
 mesma empresa não enxergam o que o colega abriu.
+
+### Cobrir antes de mexer, e o que a cobertura revelou
+
+O Passo 3 saiu em duas partes, e a ordem não era formalidade: mexer no
+`groups.py` sem teste seria repetir o próprio bug que ele tem — ação que
+promete o que não cumpre.
+
+Escrever os testes trouxe duas descobertas que não estavam no plano.
+
+A primeira: **a suíte inteira media cobertura errado.** O relatório dizia que
+`update_company` tinha a primeira linha coberta e as sete seguintes não — o
+laço inteiro dado como não executado, com teste passando por ele. A mutação
+provou o contrário: quebrar aquelas linhas derrubava o teste, então elas
+executavam. A causa é o greenlet — o SQLAlchemy async atravessa
+`greenlet_spawn` a cada `await` de banco e o coverage perde o rastro na volta.
+Uma linha de configuração resolveu, e `groups.py` foi de 43% para 62% **com os
+mesmos testes**. Todo número de cobertura que este repositório reportou até
+hoje estava abaixo do real.
+
+A segunda: **uma asserção minha não sobreviveu à própria checagem.** Eu tinha
+escrito `assert resp.content == b""` para provar que a exclusão de empresa é
+silenciosa. Ao mutar o endpoint para devolver um corpo, o teste continuou
+passando — o `204` já garante corpo vazio, então a asserção não provava nada.
+Foi trocada pelo status, que cai se a exclusão virar bloqueante (`409`) ou
+informativa. É a mesma armadilha do teste renomeado no `1c414c0`, e desta vez
+quem pegou foi a mutação, não a leitura.
+
+Os testes usam banco de verdade, não mock, e isso foi decisão e não gosto: a
+desvinculação silenciosa **não dá para provar com mock**. Quem desvincula o
+cliente é o SQLAlchemy com a FK `ON DELETE SET NULL` por baixo; um mock
+afirmaria que `db.delete` foi chamado e passaria mesmo que a regra fosse a
+oposta. SQLite em memória reproduz o mesmo resultado do Postgres efêmero do
+levantamento e roda no CI sem subir serviço.
+
+### O laço fechado, e o defeito que virou cosmético
+
+Criar empresa pela sugestão agora vincula quem a gerou. As três decisões:
+
+**Endpoint próprio**, e não parâmetro no `create_company`. Cadastro manual não
+pode ganhar efeito colateral de vínculo em massa — uma empresa criada à mão
+que, por coincidência de CNPJ, arrastasse clientes junto seria o inverso exato
+do defeito consertado aqui: ação que faz **mais** do que diz.
+
+**Reaproveitar em vez de duplicar**, mas só dentro do mesmo grupo. Isso não
+foi preferência: `Company.group_id` é `NOT NULL` e único, então "reusar" uma
+empresa de outro grupo seria *mudá-la de grupo*. A pergunta se dissolveu no
+schema.
+
+**Lista explícita e prévia.** O vínculo vai pelos `client_ids` que a tela
+mostrou, não por uma consulta que o servidor refaz, e o modal ganhou um passo
+de confirmação com nome e e-mail de cada um. Vincular em massa sem ver quem é
+ação que ninguém desfaz. De brinde, some a janela entre a tela e o clique:
+cliente que mudou de estado no meio derruba tudo com `409`, e nada é gravado
+— nem a empresa.
+
+O agrupamento das sugestões pela tupla inteira **ficou como está**. Rechaveá-lo
+no CNPJ exige decidir qual nome vence quando dois clientes da mesma empresa
+digitaram nomes diferentes, e o que fazer com quem tem `company_name` mas não
+tem CNPJ — decisões de produto, não de implementação. Mas o estrago acabou: com
+o reaproveitamento por CNPJ, os dois cards caem na mesma empresa. O defeito
+virou cosmético — dois cliques em vez de um — em vez de gerar duplicata.
+
+### O que continua na fila
+
+O backfill e as cinco consultas de diagnóstico seguem sem rodar em produção.
+O Passo 4 — regras "por empresa" de verdade — continua dependendo de medir
+quantos clientes têm `company_id`. E limpar o CNPJ de uma empresa pela tela
+segue sem funcionar: a guarda `if val is not None` do `update_company` vale
+para os sete campos, então mexer nela é frente própria. Tem teste segurando
+o comportamento atual para que a mudança seja escolha.
 
 ---
 

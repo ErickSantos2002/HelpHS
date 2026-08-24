@@ -78,6 +78,43 @@ Datas em DD/MM/AAAA.
   de ter sido cliente.
 
 ### Corrigido
+- **Criar empresa pela sugestão passa a vincular os clientes** (`abdee48`).
+  `handleAddFromSuggestion` chamava só `createCompany`, e `create_company`
+  nunca tocou em `User`: os clientes que geraram o card seguiam com
+  `company_id` nulo, a sugestão reaparecia na abertura seguinte e clicar de
+  novo criava **empresa duplicada**. O contador "3 clientes" era promessa que
+  a ação não cumpria. Endpoint próprio
+  (`POST /groups/{id}/companies/from-suggestion`) e não parâmetro no
+  `create_company` — cadastro manual não pode ganhar efeito colateral de
+  vínculo em massa; uma empresa criada à mão que, por coincidência de CNPJ,
+  arrastasse clientes junto seria o **inverso** do defeito consertado aqui.
+  Empresa com o mesmo CNPJ **no mesmo grupo** é reaproveitada em vez de
+  duplicada; fora do grupo, cria — não é preferência, é que `Company.group_id`
+  é `NOT NULL` e único, então "reusar" empresa de outro grupo seria mudá-la de
+  grupo. O vínculo vai pela lista **explícita** de `client_ids` que a tela
+  mostrou, com passo de confirmação exibindo nome e e-mail de cada um: vincular
+  em massa sem ver quem é ação que ninguém desfaz. Cliente que mudou de estado
+  entre a tela e o clique derruba tudo com `409` e **nada** é gravado, nem a
+  empresa. O `key={s.company_name}` do React, que colidia quando duas sugestões
+  compartilhavam o nome, passa a ser a tupla inteira. ⚠️ O agrupamento das
+  sugestões **continua** pela tupla (endereço diferente ainda racha em duas):
+  rechavear no CNPJ exige decidir qual nome vence quando os clientes discordam
+  e o que fazer com quem tem `company_name` sem CNPJ — decisões de produto. O
+  estrago acabou mesmo assim: com o reaproveitamento por CNPJ os dois cards
+  caem na mesma empresa, e o defeito virou cosmético em vez de gerar duplicata.
+- **A cobertura parava de contar depois do primeiro `await` no banco**
+  (`e30968e`). O relatório subnotificava **todo** endpoint async que consulta o
+  banco: contava a primeira linha do corpo e perdia o resto — em `groups.py`,
+  `update_company` aparecia com a linha 280 coberta e 281-287 descobertas, o
+  laço inteiro dado como não executado com teste passando por ele. A causa é o
+  greenlet: o SQLAlchemy async atravessa `greenlet_spawn` a cada `await` de
+  banco e o coverage perde o rastro na volta. `concurrency = ["thread",
+  "greenlet"]` resolve. Não é cobertura nova, é a mesma medida direito —
+  `groups.py` sai de 43% para 62% com exatamente os mesmos testes, e a suíte de
+  84,48% para 85,20%. ⚠️ **Números anteriores a este commit estavam abaixo do
+  real.** Descoberto por mutação: as linhas ditas descobertas derrubavam o
+  teste quando mutadas, o que só podia significar que executavam.
+
 - **CNPJ com pontuação deixa de chegar ao banco** (`62f022e`). O validador
   existia só no `OnboardingUpdate`; `UserUpdate`, `CompanyCreate` e
   `CompanyUpdate` aceitavam qualquer string até 18 caracteres, e o
@@ -224,6 +261,26 @@ Datas em DD/MM/AAAA.
   aguardando staging.
 
 ### Testes
+- **O domínio de empresa em `groups.py` sai do descoberto** (`470d56c`).
+  Nenhum teste da suíte referenciava `Company`, `company_id` ou qualquer
+  endpoint `/groups` — os únicos "company" em `tests/` eram `company_name` e
+  `company_cep`, colunas de onboarding do `User`. São testes de
+  **caracterização**: prendem o que o código faz hoje para que a próxima
+  mudança seja decisão e não descoberta. Dois entram justamente porque são
+  silenciosos e ninguém os escolheu — o `PUT` que ignora `None` (limpar CNPJ
+  pela tela não funciona, e trocar a guarda mexe em sete campos de uma vez) e
+  a exclusão de empresa, que desvincula cliente sem avisar. **Banco de
+  verdade, não mock**: a exclusão não dá para provar com mock — quem
+  desvincula é o SQLAlchemy com a FK `ON DELETE SET NULL` por baixo, e um mock
+  afirmaria que `db.delete` foi chamado e passaria mesmo com a regra
+  invertida. SQLite em memória reproduz o mesmo resultado do Postgres efêmero
+  do levantamento e roda no CI sem subir serviço; `create_all` vai só no
+  subconjunto de tabelas porque `kb_articles` tem `ARRAY`, que o SQLite não
+  compila. Como passaram de primeira, foram verificados por **mutação** —
+  e uma asserção não sobreviveu: `resp.content == b""` era tautológica (o
+  `204` já garante corpo vazio) e foi trocada pelo status, que cai se a
+  exclusão virar bloqueante ou informativa.
+
 - `FilterSelect`, `FormDropdown` e `ThemeContext` saem do descoberto
   (`f7945e0`). Os três tinham lógica real e nenhum teste; como o Vitest é gate
   do CI desde `1583b8b`, a ausência não aparecia como risco, aparecia como
