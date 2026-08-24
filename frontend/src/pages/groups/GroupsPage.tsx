@@ -30,6 +30,7 @@ import {
   updateClientNotes,
   listUnassignedClients,
   getCompanySuggestions,
+  createCompanyFromSuggestion,
   listGroupNotes,
   createGroupNote,
   deleteGroupNote,
@@ -167,6 +168,15 @@ function GroupModal({
 
 const SUGG_PAGE_SIZE = 5;
 
+/**
+ * Identidade da sugestão na lista. O nome sozinho colidia: o agrupamento do
+ * backend é pela tupla inteira, então a mesma empresa com endereço digitado
+ * diferente vira duas sugestões — duas `key` iguais, e o React embaralha.
+ */
+function sugKey(s: CompanySuggestion): string {
+  return [s.company_name, s.cnpj, s.city, s.state, s.address].join("|");
+}
+
 function AddCompanyModal({
   groupId,
   onAdded,
@@ -181,7 +191,10 @@ function AddCompanyModal({
   const [loadingSugg, setLoadingSugg] = useState(true);
   const [search, setSearch] = useState("");
   const [suggPage, setSuggPage] = useState(1);
-  const [adding, setAdding] = useState<string | null>(null);
+  const [adding, setAdding] = useState(false);
+  // Sugestão aguardando confirmação. Vincular em massa sem ver quem é ação
+  // que ninguém desfaz — o admin confere a lista antes de gravar.
+  const [confirmando, setConfirmando] = useState<CompanySuggestion | null>(null);
 
   const { register, handleSubmit, setValue, formState: { errors, isSubmitting } } = useForm<CompanyFormValues>({
     resolver: zodResolver(companySchema),
@@ -198,22 +211,26 @@ function AddCompanyModal({
   );
   const pagedSugg = filtered.slice((suggPage - 1) * SUGG_PAGE_SIZE, suggPage * SUGG_PAGE_SIZE);
 
-  const handleAddFromSuggestion = async (s: CompanySuggestion) => {
-    setAdding(s.company_name);
+  const handleConfirmSuggestion = async () => {
+    if (!confirmando) return;
+    setAdding(true);
     try {
-      const newC = await createCompany(groupId, {
-        name: s.company_name,
-        cnpj: s.cnpj ?? undefined,
-        address: s.address ?? undefined,
-        city: s.city ?? undefined,
-        state: s.state ?? undefined,
-      });
-      onAdded(newC);
+      const r = await createCompanyFromSuggestion(
+        groupId,
+        confirmando,
+        confirmando.clients.map((c) => c.id),
+      );
+      toast.success(
+        r.company_created
+          ? `Empresa criada e ${r.linked_clients.length} cliente(s) vinculado(s).`
+          : `${r.linked_clients.length} cliente(s) vinculado(s) a "${r.company.name}", que já existia neste grupo.`,
+      );
+      onAdded(r.company);
       onClose();
     } catch (err) {
       toastApiError(err, "Erro ao adicionar empresa.");
     } finally {
-      setAdding(null);
+      setAdding(false);
     }
   };
 
@@ -259,6 +276,40 @@ function AddCompanyModal({
 
       {tab === "suggestions" && (
         <div className="space-y-3">
+          {confirmando ? (
+            <div className="rounded-lg border border-border p-4 space-y-3">
+              <div>
+                <p className="text-sm font-medium text-slate-100">{confirmando.company_name}</p>
+                {confirmando.cnpj && (
+                  <p className="text-xs text-slate-500 mt-0.5">{formatCnpj(confirmando.cnpj)}</p>
+                )}
+              </div>
+              <div>
+                <p className="text-xs text-slate-400 mb-1.5">
+                  {confirmando.clients.length === 1
+                    ? "Este cliente será vinculado à empresa:"
+                    : `Estes ${confirmando.clients.length} clientes serão vinculados à empresa:`}
+                </p>
+                <ul className="max-h-48 overflow-y-auto divide-y divide-border rounded border border-border">
+                  {confirmando.clients.map((c) => (
+                    <li key={c.id} className="px-3 py-2">
+                      <p className="text-sm text-slate-200 truncate">{c.name}</p>
+                      <p className="text-xs text-slate-500 truncate">{c.email}</p>
+                    </li>
+                  ))}
+                </ul>
+              </div>
+              <div className="flex justify-end gap-2">
+                <Button size="sm" variant="ghost" onClick={() => setConfirmando(null)} disabled={adding}>
+                  Voltar
+                </Button>
+                <Button size="sm" loading={adding} onClick={handleConfirmSuggestion}>
+                  Confirmar vínculo
+                </Button>
+              </div>
+            </div>
+          ) : (
+          <>
           <Input
             placeholder="Buscar por nome ou CNPJ..."
             value={search}
@@ -281,7 +332,7 @@ function AddCompanyModal({
             <div>
               <ul className="divide-y divide-border rounded-lg border border-border overflow-hidden">
                 {pagedSugg.map((s) => (
-                  <li key={s.company_name} className="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-2 px-4 py-3 hover:bg-background-elevated">
+                  <li key={sugKey(s)} className="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-2 px-4 py-3 hover:bg-background-elevated">
                     <div className="min-w-0 flex-1">
                       <p className="text-sm font-medium text-slate-100 truncate">{s.company_name}</p>
                       <div className="flex flex-wrap gap-x-3 gap-y-0.5 text-xs text-slate-500 mt-0.5">
@@ -294,7 +345,7 @@ function AddCompanyModal({
                       <Button size="sm" variant="ghost" onClick={() => prefillManual(s)} title="Editar antes de adicionar">
                         <IconEdit />
                       </Button>
-                      <Button size="sm" loading={adding === s.company_name} onClick={() => handleAddFromSuggestion(s)}>
+                      <Button size="sm" onClick={() => setConfirmando(s)}>
                         <IconPlus /> Adicionar
                       </Button>
                     </div>
@@ -309,6 +360,8 @@ function AddCompanyModal({
                 itemLabel="empresas"
               />
             </div>
+          )}
+          </>
           )}
         </div>
       )}

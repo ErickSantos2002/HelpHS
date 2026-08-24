@@ -3,6 +3,8 @@
 import uuid
 from datetime import datetime
 
+from pydantic import Field
+
 from app.schemas.base import AppBaseModel
 from app.utils.documents import CnpjOpcional
 
@@ -83,6 +85,57 @@ class ClientInCompany(AppBaseModel):
 
 class AssignClientRequest(AppBaseModel):
     user_id: uuid.UUID
+
+
+class CompanySuggestion(AppBaseModel):
+    """
+    Empresa candidata, montada a partir do onboarding de clientes sem vínculo.
+
+    Traz os `clients` e não só a contagem: o admin precisa **ver quem** antes
+    de confirmar um vínculo em massa, que é ação que ninguém desfaz.
+    """
+
+    company_name: str
+    cnpj: str | None
+    city: str | None
+    state: str | None
+    address: str | None
+    client_count: int
+    clients: list[ClientInCompany] = []
+
+
+class CreateCompanyFromSuggestion(AppBaseModel):
+    """
+    Cria (ou reaproveita) a empresa e vincula os clientes que o admin confirmou.
+
+    `client_ids` é a lista **explícita** que a tela mostrou, não um critério
+    que o servidor refaz: o que foi visto é o que é gravado. Refazer a consulta
+    aqui abriria a janela de vincular gente que apareceu entre a tela e o
+    clique.
+    """
+
+    name: str
+    cnpj: CnpjOpcional = None
+    phone: str | None = None
+    address: str | None = None
+    city: str | None = None
+    state: str | None = None
+    notes: str | None = None
+    client_ids: list[uuid.UUID] = Field(..., min_length=1, max_length=200)
+
+
+class CompanyFromSuggestionResponse(AppBaseModel):
+    """
+    `company_created` diz se a empresa é nova ou foi reaproveitada.
+
+    O status é sempre `201` porque a requisição sempre cria alguma coisa — os
+    vínculos. Se a linha de `companies` era nova ou não é **dado**, não
+    protocolo, e mentir `201` sobre uma empresa reaproveitada seria pior.
+    """
+
+    company: CompanyResponse
+    company_created: bool
+    linked_clients: list[ClientInCompany]
 
 
 class UpdateClientNotesRequest(AppBaseModel):

@@ -537,3 +537,180 @@ async def test_data_de_criacao_da_empresa_e_preenchida(db, cliente_http):
     # O SQLite devolve naive; o Postgres, com fuso. O que importa é existir.
     agora = datetime.now(UTC) if criada.tzinfo else datetime.now(UTC).replace(tzinfo=None)
     assert criada <= agora
+
+
+# ═══════════════════════════════════════════════════════════════
+# POST /companies/from-suggestion — o laço que se fecha (Passo 3B)
+# ═══════════════════════════════════════════════════════════════
+#
+# Criar empresa a partir de uma sugestão passava a NÃO vincular ninguém: os
+# clientes que geraram o card seguiam com `company_id` nulo, a sugestão
+# reaparecia e clicar de novo criava empresa duplicada. O contador "3 clientes"
+# era uma promessa que a ação não cumpria.
+#
+# O vínculo é pela lista EXPLÍCITA que o admin confirmou, não por uma consulta
+# que o servidor refaz: o que a tela mostrou é o que é gravado, e ninguém
+# vincula em massa um conjunto que não viu.
+
+
+async def _sugestao_body(clientes, **over):
+    corpo = {
+        "name": "Acme",
+        "cnpj": CNPJ_DIGITOS,
+        "client_ids": [str(u.id) for u in clientes],
+    }
+    corpo.update(over)
+    return corpo
+
+
+@pytest.mark.asyncio
+async def test_criar_da_sugestao_cria_a_empresa_e_vincula_os_clientes(db, cliente_http):
+    g = await _grupo(db)
+    u1 = await _cliente(db, name="Um", company_name="Acme", cnpj=CNPJ_DIGITOS)
+    u2 = await _cliente(db, name="Dois", company_name="Acme", cnpj=CNPJ_DIGITOS)
+
+    resp = await cliente_http.post(
+        f"/api/v1/groups/{g.id}/companies/from-suggestion",
+        json=await _sugestao_body([u1, u2]),
+    )
+
+    assert resp.status_code == 201
+    corpo = resp.json()
+    assert corpo["company_created"] is True
+    assert corpo["company"]["cnpj"] == CNPJ_DIGITOS
+    assert sorted(c["name"] for c in corpo["linked_clients"]) == ["Dois", "Um"]
+
+    for u in (u1, u2):
+        await db.refresh(u)
+        assert u.company_id is not None
+
+
+@pytest.mark.asyncio
+async def test_a_sugestao_some_depois_de_criada(db, cliente_http):
+    """O defeito original: a sugestão reaparecia porque ninguém era vinculado."""
+    g = await _grupo(db)
+    u = await _cliente(db, company_name="Acme", cnpj=CNPJ_DIGITOS)
+
+    await cliente_http.post(
+        f"/api/v1/groups/{g.id}/companies/from-suggestion", json=await _sugestao_body([u])
+    )
+
+    assert (await cliente_http.get("/api/v1/companies/suggestions")).json() == []
+
+
+@pytest.mark.asyncio
+async def test_clicar_de_novo_reusa_a_empresa_em_vez_de_duplicar(db, cliente_http):
+    """
+    O bug da empresa duplicada. `Company.group_id` é **NOT NULL e único**, então
+    reuso é sempre dentro do grupo: reaproveitar empresa de outro grupo seria
+    *mudá-la de grupo*, não reutilizá-la.
+    """
+    g = await _grupo(db)
+    u1 = await _cliente(db, name="Um", company_name="Acme", cnpj=CNPJ_DIGITOS)
+    u2 = await _cliente(db, name="Dois", company_name="Acme", cnpj=CNPJ_DIGITOS)
+
+    r1 = await cliente_http.post(
+        f"/api/v1/groups/{g.id}/companies/from-suggestion", json=await _sugestao_body([u1])
+    )
+    r2 = await cliente_http.post(
+        f"/api/v1/groups/{g.id}/companies/from-suggestion", json=await _sugestao_body([u2])
+    )
+
+    assert r1.json()["company_created"] is True
+    assert r2.json()["company_created"] is False
+    assert r1.json()["company"]["id"] == r2.json()["company"]["id"]
+
+    empresas = (await db.execute(select(Company).where(Company.group_id == g.id))).scalars().all()
+    assert len(empresas) == 1, "clicar duas vezes não pode criar duas empresas"
+
+
+@pytest.mark.asyncio
+async def test_empresa_de_mesmo_cnpj_em_outro_grupo_nao_e_reusada(db, cliente_http):
+    """Reusar cruzando grupo mudaria a empresa de grupo — não é reuso."""
+    g1 = await _grupo(db, "G1")
+    g2 = await _grupo(db, "G2")
+    await _empresa(db, g1, name="Acme", cnpj=CNPJ_DIGITOS)
+    u = await _cliente(db, company_name="Acme", cnpj=CNPJ_DIGITOS)
+
+    resp = await cliente_http.post(
+        f"/api/v1/groups/{g2.id}/companies/from-suggestion", json=await _sugestao_body([u])
+    )
+
+    assert resp.status_code == 201
+    assert resp.json()["company_created"] is True
+    assert resp.json()["company"]["group_id"] == str(g2.id)
+
+
+@pytest.mark.asyncio
+async def test_recusa_vincular_cliente_que_ja_tem_empresa(db, cliente_http):
+    """
+    O caso TOCTOU: o admin viu a lista, outra pessoa vinculou o cliente antes
+    do clique. `409` porque é conflito de estado, não corpo malformado — e
+    **nada** é gravado, nem a empresa.
+    """
+    g = await _grupo(db)
+    outra = await _empresa(db, g, name="Outra")
+    u = await _cliente(db, company_name="Acme", cnpj=CNPJ_DIGITOS, company_id=outra.id)
+
+    resp = await cliente_http.post(
+        f"/api/v1/groups/{g.id}/companies/from-suggestion", json=await _sugestao_body([u])
+    )
+
+    assert resp.status_code == 409
+    await db.refresh(u)
+    assert u.company_id == outra.id, "o vínculo antigo fica intacto"
+    nomes = (await db.execute(select(Company.name).where(Company.group_id == g.id))).scalars().all()
+    assert nomes == ["Outra"], "a empresa nova não pode ter sido criada"
+
+
+@pytest.mark.asyncio
+async def test_recusa_vincular_quem_nao_e_cliente(db, cliente_http):
+    g = await _grupo(db)
+    tecnico = User(
+        name="Tec", email=f"tec-{uuid.uuid4()}@x.com", password="x", role=UserRole.technician
+    )
+    db.add(tecnico)
+    await db.commit()
+    await db.refresh(tecnico)
+
+    resp = await cliente_http.post(
+        f"/api/v1/groups/{g.id}/companies/from-suggestion", json=await _sugestao_body([tecnico])
+    )
+    assert resp.status_code == 409
+
+
+@pytest.mark.asyncio
+async def test_recusa_lista_vazia(db, cliente_http):
+    """O endpoint serve para vincular; sem ninguém, o caminho é o create normal."""
+    g = await _grupo(db)
+    resp = await cliente_http.post(
+        f"/api/v1/groups/{g.id}/companies/from-suggestion",
+        json={"name": "Acme", "cnpj": CNPJ_DIGITOS, "client_ids": []},
+    )
+    assert resp.status_code == 422
+
+
+@pytest.mark.asyncio
+async def test_grupo_inexistente_da_404(db, cliente_http):
+    u = await _cliente(db, company_name="Acme", cnpj=CNPJ_DIGITOS)
+    resp = await cliente_http.post(
+        f"/api/v1/groups/{uuid.uuid4()}/companies/from-suggestion",
+        json=await _sugestao_body([u]),
+    )
+    assert resp.status_code == 404
+
+
+@pytest.mark.asyncio
+async def test_sugestao_traz_os_clientes_para_o_admin_conferir(db, cliente_http):
+    """
+    A prévia. Vincular em massa sem ver quem é a ação que ninguém desfaz, e o
+    `client_count` sozinho é um número sem nomes.
+    """
+    await _cliente(db, name="Um", company_name="Acme", cnpj=CNPJ_DIGITOS)
+    await _cliente(db, name="Dois", company_name="Acme", cnpj=CNPJ_DIGITOS)
+
+    resp = await cliente_http.get("/api/v1/companies/suggestions")
+
+    sugestao = resp.json()[0]
+    assert sugestao["client_count"] == 2
+    assert sorted(c["name"] for c in sugestao["clients"]) == ["Dois", "Um"]

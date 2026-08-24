@@ -20,10 +20,13 @@ from app.schemas.groups import (
     ClientInCompany,
     CompanyCreate,
     CompanyDetail,
+    CompanyFromSuggestionResponse,
     CompanyNoteCreate,
     CompanyNoteResponse,
     CompanyResponse,
+    CompanySuggestion,
     CompanyUpdate,
+    CreateCompanyFromSuggestion,
     GroupCreate,
     GroupDetail,
     GroupNoteCreate,
@@ -407,46 +410,171 @@ async def list_unassigned_clients(db: _DBDep, _: _AdminDep) -> list[ClientInComp
 # ── Company suggestions from client onboarding data ───────────
 
 
-@router.get("/companies/suggestions")
-async def get_company_suggestions(db: _DBDep, _: _AdminDep) -> list[dict]:
-    """Unique companies from client onboarding not yet linked to any group."""
-    rows = (
-        await db.execute(
-            select(
-                User.company_name,
-                User.cnpj,
-                User.company_city,
-                User.company_state,
-                User.company_address,
-                func.count().label("client_count"),
+@router.get("/companies/suggestions", response_model=list[CompanySuggestion])
+async def get_company_suggestions(db: _DBDep, _: _AdminDep) -> list[CompanySuggestion]:
+    """
+    Empresas candidatas, vindas do onboarding de clientes ainda sem vínculo.
+
+    O agrupamento continua sendo pela tupla inteira — nome, CNPJ, cidade, UF e
+    endereço —, então dois funcionários da mesma empresa que digitaram o
+    endereço diferente ainda geram duas sugestões. **É defeito conhecido**
+    (defeito 2 do levantamento de 24/08) e segue aqui de propósito: rechavear
+    no CNPJ exige decidir qual nome vence quando os clientes discordam e o que
+    fazer com quem tem `company_name` mas não tem CNPJ, e as duas são decisões
+    de produto.
+
+    O estrago, porém, deixou de existir: com o reaproveitamento por CNPJ do
+    `from-suggestion`, os dois cards caem na **mesma** empresa. O defeito virou
+    cosmético — dois cliques em vez de um — em vez de gerar duplicata.
+
+    O agrupamento é feito em Python, e não com `GROUP BY`, porque agora a
+    sugestão carrega os clientes: o admin precisa ver **quem** antes de
+    confirmar.
+    """
+    linhas = (
+        (
+            await db.execute(
+                select(User)
+                .where(
+                    User.role == UserRole.client,
+                    User.status == UserStatus.active,
+                    User.company_name.is_not(None),
+                    User.company_id.is_(None),
+                )
+                .order_by(User.company_name, User.name)
             )
-            .where(
-                User.role == UserRole.client,
-                User.status == UserStatus.active,
-                User.company_name.is_not(None),
-                User.company_id.is_(None),
-            )
-            .group_by(
-                User.company_name,
-                User.cnpj,
-                User.company_city,
-                User.company_state,
-                User.company_address,
-            )
-            .order_by(User.company_name)
         )
-    ).all()
-    return [
-        {
-            "company_name": r.company_name,
-            "cnpj": r.cnpj,
-            "city": r.company_city,
-            "state": r.company_state,
-            "address": r.company_address,
-            "client_count": r.client_count,
-        }
-        for r in rows
+        .scalars()
+        .all()
+    )
+
+    agrupadas: dict[tuple, CompanySuggestion] = {}
+    for u in linhas:
+        chave = (u.company_name, u.cnpj, u.company_city, u.company_state, u.company_address)
+        sugestao = agrupadas.get(chave)
+        if sugestao is None:
+            sugestao = CompanySuggestion(
+                company_name=u.company_name,
+                cnpj=u.cnpj,
+                city=u.company_city,
+                state=u.company_state,
+                address=u.company_address,
+                client_count=0,
+                clients=[],
+            )
+            agrupadas[chave] = sugestao
+        sugestao.clients.append(
+            ClientInCompany(
+                id=u.id, name=u.name, email=u.email, phone=u.phone, client_notes=u.client_notes
+            )
+        )
+        sugestao.client_count += 1
+
+    return list(agrupadas.values())
+
+
+# ── Criar empresa a partir de uma sugestão ────────────────────
+
+
+@router.post(
+    "/groups/{group_id}/companies/from-suggestion",
+    response_model=CompanyFromSuggestionResponse,
+    status_code=status.HTTP_201_CREATED,
+)
+async def create_company_from_suggestion(
+    group_id: uuid.UUID,
+    body: CreateCompanyFromSuggestion,
+    db: _DBDep,
+    _: _AdminDep,
+) -> CompanyFromSuggestionResponse:
+    """
+    Cria a empresa e **vincula** os clientes que a sugeriram.
+
+    Existe separado do `create_company` de propósito: o cadastro manual não
+    deveria ganhar efeito colateral de vínculo em massa. Uma empresa criada à
+    mão que, por coincidência de CNPJ, arrastasse clientes junto seria o
+    inverso do defeito que este endpoint conserta — ação que faz **mais** do
+    que diz.
+
+    Antes disso, criar pela sugestão não vinculava ninguém: os clientes
+    seguiam sem empresa, a sugestão reaparecia e o clique seguinte criava
+    duplicata. O contador "3 clientes" prometia o que a ação não cumpria.
+
+    O vínculo é pela lista explícita do corpo, não por uma consulta refeita
+    aqui — o que a tela mostrou é o que é gravado.
+
+    Reaproveita empresa do **mesmo grupo** com o mesmo CNPJ em vez de
+    duplicar. Não cruza grupo: `Company.group_id` é `NOT NULL` e único, então
+    "reusar" uma empresa de outro grupo seria mudá-la de grupo.
+
+    Recusa tudo com `409` se algum cliente já tiver empresa ou não for
+    cliente ativo — conflito de estado, não corpo malformado, e é o caso de
+    alguém ter vinculado entre a tela e o clique. Nada é gravado: nem os
+    vínculos, nem a empresa.
+    """
+    await _get_group_or_404(db, group_id)
+
+    alvos = (await db.execute(select(User).where(User.id.in_(body.client_ids)))).scalars().all()
+    encontrados = {u.id for u in alvos}
+    if faltando := set(body.client_ids) - encontrados:
+        raise HTTPException(
+            status_code=status.HTTP_409_CONFLICT,
+            detail=f"{len(faltando)} cliente(s) não encontrado(s).",
+        )
+
+    indisponiveis = [
+        u
+        for u in alvos
+        if u.role != UserRole.client or u.status != UserStatus.active or u.company_id is not None
     ]
+    if indisponiveis:
+        raise HTTPException(
+            status_code=status.HTTP_409_CONFLICT,
+            detail=(
+                f"{len(indisponiveis)} cliente(s) mudaram desde que a lista foi carregada "
+                "(já têm empresa ou não estão ativos). Recarregue as sugestões."
+            ),
+        )
+
+    empresa = None
+    if body.cnpj:
+        empresa = (
+            await db.execute(
+                select(Company).where(Company.group_id == group_id, Company.cnpj == body.cnpj)
+            )
+        ).scalar_one_or_none()
+
+    criada = empresa is None
+    if empresa is None:
+        empresa = Company(
+            group_id=group_id,
+            name=body.name,
+            cnpj=body.cnpj,
+            phone=body.phone,
+            address=body.address,
+            city=body.city,
+            state=body.state,
+            notes=body.notes,
+        )
+        db.add(empresa)
+        await db.flush()
+
+    for u in alvos:
+        u.company_id = empresa.id
+
+    await db.commit()
+    await db.refresh(empresa)
+
+    return CompanyFromSuggestionResponse(
+        company=await _company_to_response(db, empresa),
+        company_created=criada,
+        linked_clients=[
+            ClientInCompany(
+                id=u.id, name=u.name, email=u.email, phone=u.phone, client_notes=u.client_notes
+            )
+            for u in alvos
+        ],
+    )
 
 
 # ── Group Notes ───────────────────────────────────────────────

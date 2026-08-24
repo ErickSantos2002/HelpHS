@@ -182,10 +182,45 @@ export interface CompanySuggestion {
   state: string | null;
   address: string | null;
   client_count: number;
+  /** Quem será vinculado. O admin confere os nomes antes de confirmar. */
+  clients: ClientInCompany[];
+}
+
+export interface CompanyFromSuggestionResult {
+  company: CompanyResponse;
+  /** `false` quando uma empresa do grupo com o mesmo CNPJ foi reaproveitada. */
+  company_created: boolean;
+  linked_clients: ClientInCompany[];
 }
 
 export async function getCompanySuggestions(): Promise<CompanySuggestion[]> {
   const { data } = await api.get<CompanySuggestion[]>("/companies/suggestions");
+  return data;
+}
+
+/**
+ * Cria (ou reaproveita) a empresa e vincula os clientes escolhidos.
+ *
+ * `clientIds` é a lista que a tela mostrou e o admin confirmou — o servidor
+ * não refaz a consulta. Endpoint próprio, e não o `createCompany`: cadastro
+ * manual não pode ganhar efeito colateral de vínculo em massa.
+ */
+export async function createCompanyFromSuggestion(
+  groupId: string,
+  suggestion: CompanySuggestion,
+  clientIds: string[],
+): Promise<CompanyFromSuggestionResult> {
+  const { data } = await api.post<CompanyFromSuggestionResult>(
+    `/groups/${groupId}/companies/from-suggestion`,
+    {
+      name: suggestion.company_name,
+      ...(suggestion.cnpj ? { cnpj: suggestion.cnpj } : {}),
+      ...(suggestion.address ? { address: suggestion.address } : {}),
+      ...(suggestion.city ? { city: suggestion.city } : {}),
+      ...(suggestion.state ? { state: suggestion.state } : {}),
+      client_ids: clientIds,
+    },
+  );
   return data;
 }
 
