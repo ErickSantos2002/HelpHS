@@ -216,6 +216,41 @@ A média aparece no relatório, no card **Recomendação**, ao lado da Média CS
 
 ## Permissões
 
+### Qual é a autoridade sobre "de qual empresa é este cliente"
+
+> **`companies.id` é a única autoridade.** O vínculo vive em
+> `users.company_id`, e é ele que vale para escopo, permissão e unicidade.
+>
+> **`users.cnpj` nunca serve para isso.** É dado de onboarding autodeclarado:
+> serve para exibir, sugerir e casar candidatos a vínculo — nada além.
+
+A regra existe porque o sistema tem **dois** campos que parecem responder à
+mesma pergunta, e escolher o errado tem consequência de segurança. O
+`users.cnpj` é digitado pelo próprio cliente; o servidor apenas conta 14
+dígitos, e quem confere os dígitos verificadores é o **frontend** — ou seja, é
+validação que o cliente controla. Elegê-lo como chave de escopo deixaria o
+usuário escolher em qual grupo de dados ele cai.
+
+Consequência prática já sentida: a unicidade de número de série ficou **por
+dono** e não por empresa (ver "Equipamentos do chamado"). Com esta regra
+escrita, aquilo deixa de parecer contorno e passa a ser o que é — a decisão
+correta, dado que não existe chave de empresa confiável hoje.
+
+Duas coisas que decorrem disso e valem saber:
+
+- **Cliente sem `company_id` é o caso comum, não a exceção.** Quem se
+  autocadastrou e fez onboarding tem CNPJ preenchido e vínculo nulo. Qualquer
+  regra futura "por empresa" precisa dizer, em voz alta, o que acontece com
+  `company_id IS NULL` — provavelmente cair no escopo individual, nunca num
+  balde comum.
+- **Excluir uma empresa desvincula os clientes em silêncio** (`ON DELETE SET
+  NULL`), sem aviso na tela e sem contagem do que será afetado.
+
+O caminho para reconciliar os dois campos — normalizar as duas pontas, fechar o
+laço das sugestões e só então criar regras por empresa — está levantado em
+`docs/superpowers/specs/2026-08-24-duas-fontes-de-verdade-empresa.md`, com as
+consultas de diagnóstico prontas.
+
 ### Entre técnicos — sem barreira
 
 Qualquer técnico pode **atender, responder e concluir qualquer chamado**, mesmo
@@ -420,11 +455,15 @@ Postgres nulos não conflitam entre si e dois órfãos com o mesmo serial passar
 em silêncio.
 
 **O furo aceito:** dois usuários da *mesma* empresa podem cadastrar o mesmo
-aparelho, cada um no próprio escopo. O escopo certo seria a empresa (CNPJ), mas
-o CNPJ é digitado à mão no onboarding, não é normalizado e não tem constraint —
-`12.345.678/0001-90` e `12345678000190` seriam empresas diferentes para o
-banco. Evoluir para escopo por empresa depende de normalizar esse campo antes,
-e está registrado como trabalho próprio.
+aparelho, cada um no próprio escopo. O escopo certo seria a empresa, e não é
+por falta de vontade que não é — é porque **não existe chave de empresa
+confiável** hoje: `users.cnpj` é autodeclarado e não serve para escopo (ver
+"Permissões"), e `users.company_id` está preenchido só para quem um admin
+vinculou à mão pela tela de Grupos.
+
+Evoluir para escopo por empresa depende de reconciliar esses dois campos
+primeiro — caminho levantado em
+`docs/superpowers/specs/2026-08-24-duas-fontes-de-verdade-empresa.md`.
 
 ## Cadastro do cliente
 
