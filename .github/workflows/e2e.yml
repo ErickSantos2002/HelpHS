@@ -46,6 +46,11 @@ jobs:
       # `testing` desliga o rate limit. A suíte faz ~16 logins do mesmo IP
       # contra um limite de 5 por 15 minutos — sem isto ela morre no sexto.
       APP_ENV: testing
+      # `app.seeds` não cria mais o admin sem esta variável — a senha saiu do
+      # código para não nascer conta conhecida no banco real. Aqui o banco é o
+      # serviço efêmero do job, e o valor tem de bater com o default do
+      # `frontend/e2e/helpers.ts` (há teste guardando os dois lados).
+      SEED_ADMIN_PASSWORD: Admin@123456
       DATABASE_URL: postgresql+asyncpg://postgres:postgres@localhost:5432/helphs
       REDIS_URL: redis://localhost:6379/0
       FRONTEND_URL: http://localhost:5173

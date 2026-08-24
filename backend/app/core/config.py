@@ -44,6 +44,14 @@ class Settings(BaseSettings):
         """Ponto único onde a caixa e o espaço do APP_ENV deixam de importar."""
         return valor.strip().lower()
 
+    # Senha do admin criado por `app.seeds`, que o `start.sh` roda a cada boot.
+    # Sem default de propósito: enquanto havia um literal no código, todo deploy
+    # de produção criava um administrador ativo com senha publicada no
+    # repositório. Ausente, o seed pula a criação em vez de cair num valor
+    # conhecido — e é essa ausência, não o APP_ENV, que segura o caso de a
+    # variável de ambiente estar errada.
+    seed_admin_password: str | None = None
+
     app_host: str = "0.0.0.0"
     app_port: int = 8000
     api_prefix: str = "/api/v1"
