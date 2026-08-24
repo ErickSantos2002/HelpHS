@@ -5,6 +5,7 @@ import { z } from "zod";
 import { toast } from "sonner";
 import { toastApiError } from "../../lib/toastError";
 import { cn } from "../../lib/utils";
+import { formatCnpj, onlyDigits } from "../../lib/documents";
 import {
   Button,
   Input,
@@ -193,7 +194,7 @@ function AddCompanyModal({
 
   const filtered = suggestions.filter((s) =>
     s.company_name.toLowerCase().includes(search.toLowerCase()) ||
-    (s.cnpj ?? "").includes(search),
+    onlyDigits(s.cnpj ?? "").includes(onlyDigits(search)),
   );
   const pagedSugg = filtered.slice((suggPage - 1) * SUGG_PAGE_SIZE, suggPage * SUGG_PAGE_SIZE);
 
@@ -284,7 +285,7 @@ function AddCompanyModal({
                     <div className="min-w-0 flex-1">
                       <p className="text-sm font-medium text-slate-100 truncate">{s.company_name}</p>
                       <div className="flex flex-wrap gap-x-3 gap-y-0.5 text-xs text-slate-500 mt-0.5">
-                        {s.cnpj && <span>{s.cnpj}</span>}
+                        {s.cnpj && <span>{formatCnpj(s.cnpj)}</span>}
                         {s.city && <span>{s.city}{s.state ? ` - ${s.state}` : ""}</span>}
                         <span className="flex items-center gap-1"><IconUsers />{s.client_count} cliente{s.client_count !== 1 ? "s" : ""}</span>
                       </div>
@@ -316,7 +317,7 @@ function AddCompanyModal({
         <form onSubmit={handleSubmit(handleManualSubmit)} className="space-y-4">
           <Input label="Nome da empresa" {...register("name")} error={errors.name?.message} />
           <div className="grid grid-cols-2 gap-3">
-            <Input label="CNPJ" {...register("cnpj")} placeholder="00.000.000/0000-00" />
+            <Input label="CNPJ" {...register("cnpj")} placeholder="00000000000000" />
             <Input label="Telefone" {...register("phone")} />
           </div>
           <Input label="Endereço" {...register("address")} />
@@ -360,7 +361,7 @@ function EditCompanyModal({
       <form onSubmit={handleSubmit(onSubmit)} className="space-y-4">
         <Input label="Nome da empresa" {...register("name")} error={errors.name?.message} />
         <div className="grid grid-cols-2 gap-3">
-          <Input label="CNPJ" {...register("cnpj")} />
+          <Input label="CNPJ" {...register("cnpj")} placeholder="00000000000000" />
           <Input label="Telefone" {...register("phone")} />
         </div>
         <Input label="Endereço" {...register("address")} />
@@ -555,7 +556,7 @@ function CompanyDetailModal({
             <>
               {/* Company info */}
               <div className="flex flex-wrap gap-x-5 gap-y-1 text-sm text-slate-400 mb-4">
-                {detail.cnpj && <span>CNPJ: <span className="text-slate-300">{detail.cnpj}</span></span>}
+                {detail.cnpj && <span>CNPJ: <span className="text-slate-300">{formatCnpj(detail.cnpj)}</span></span>}
                 {detail.phone && <span>Tel: <span className="text-slate-300">{detail.phone}</span></span>}
                 {detail.city && <span>{detail.city}{detail.state ? ` - ${detail.state}` : ""}</span>}
                 {detail.address && <span>{detail.address}</span>}
@@ -1067,7 +1068,7 @@ export default function GroupsPage() {
                         <button onClick={() => setSelectedCompany(c)} className="flex-1 text-left cursor-pointer min-w-0">
                           <p className="font-medium text-slate-800 dark:text-slate-100 truncate">{c.name}</p>
                           <div className="mt-1 flex flex-wrap gap-x-3 gap-y-0.5 text-xs text-slate-500">
-                            {c.cnpj && <span>{c.cnpj}</span>}
+                            {c.cnpj && <span>{formatCnpj(c.cnpj)}</span>}
                             {c.city && <span>{c.city}{c.state ? ` - ${c.state}` : ""}</span>}
                           </div>
                         </button>

@@ -1,4 +1,5 @@
 import { zodResolver } from "@hookform/resolvers/zod";
+import { formatCnpj } from "../../lib/documents";
 import { useEffect, useState } from "react";
 import { useForm, Controller } from "react-hook-form";
 import { z } from "zod";
@@ -385,7 +386,7 @@ function EquipmentDetailModal({ equip, onClose, onEdit }: { equip: Equipment; on
               <div className="flex flex-col gap-0.5">
                 <span className="text-[11px] font-semibold uppercase tracking-wide text-slate-500 dark:text-slate-400">Empresa</span>
                 <span className="text-sm text-slate-800 dark:text-slate-100">{equip.company_name}</span>
-                {equip.company_cnpj && <span className="text-xs text-slate-500">{equip.company_cnpj}</span>}
+                {equip.company_cnpj && <span className="text-xs text-slate-500">{formatCnpj(equip.company_cnpj)}</span>}
               </div>
             )}
           </div>
@@ -769,7 +770,7 @@ export default function ProductsPage() {
                         {e.company_name
                           ? <>
                               {e.company_name}
-                              {e.company_cnpj && <span className="font-mono text-slate-600 ml-1">· {e.company_cnpj}</span>}
+                              {e.company_cnpj && <span className="font-mono text-slate-600 ml-1">· {formatCnpj(e.company_cnpj)}</span>}
                             </>
                           : <span className="text-slate-600">—</span>
                         }

@@ -10,7 +10,7 @@ import {
   type UserSummary,
 } from "../../services/userService";
 import { lookupCnpj, lookupCep } from "../../services/equipmentService";
-import { isValidCep, isValidCnpj, onlyDigits } from "../../lib/documents";
+import { formatCnpj, isValidCep, isValidCnpj, maskCnpjInput, onlyDigits } from "../../lib/documents";
 
 // ── Shared ────────────────────────────────────────────────────
 
@@ -290,10 +290,6 @@ function CompanySection({ profile, onSaved }: { profile: UserSummary; onSaved: (
   // Clientes cadastrados antes da regra podem estar sem esses dados
   const cadastroIncompleto = !profile.cnpj || !profile.company_cep;
 
-  function formatCnpj(v: string) {
-    const d = v.replace(/\D/g, "").slice(0, 14);
-    return d.replace(/^(\d{2})(\d)/, "$1.$2").replace(/^(\d{2})\.(\d{3})(\d)/, "$1.$2.$3").replace(/\.(\d{3})(\d)/, ".$1/$2").replace(/(\d{4})(\d)/, "$1-$2");
-  }
   function formatCep(v: string) {
     const d = v.replace(/\D/g, "").slice(0, 8);
     return d.replace(/^(\d{5})(\d)/, "$1-$2");
@@ -371,7 +367,7 @@ function CompanySection({ profile, onSaved }: { profile: UserSummary; onSaved: (
               CNPJ <span className="text-danger-400">*</span>
             </label>
             <div className="relative">
-              <input value={cnpj} onChange={(e) => setCnpj(formatCnpj(e.target.value))} onBlur={handleCnpjBlur} placeholder="00.000.000/0000-00" className={INPUT_CLS} />
+              <input value={cnpj} onChange={(e) => setCnpj(maskCnpjInput(e.target.value))} onBlur={handleCnpjBlur} placeholder="00.000.000/0000-00" className={INPUT_CLS} />
               {lookingCnpj && <div className="absolute right-3 top-2.5"><Spinner size="sm" /></div>}
             </div>
           </div>
@@ -407,7 +403,7 @@ function CompanySection({ profile, onSaved }: { profile: UserSummary; onSaved: (
       ) : (
         <div className="grid grid-cols-1 sm:grid-cols-2 gap-5">
           <Field label="Nome da empresa" value={profile.company_name ?? ""} />
-          <Field label="CNPJ" value={profile.cnpj ? profile.cnpj.replace(/^(\d{2})(\d{3})(\d{3})(\d{4})(\d{2})$/, "$1.$2.$3/$4-$5") : ""} />
+          <Field label="CNPJ" value={formatCnpj(profile.cnpj)} />
           <Field label="CEP" value={profile.company_cep ? profile.company_cep.replace(/^(\d{5})(\d{3})$/, "$1-$2") : ""} />
           <Field label="Endereço" value={profile.company_address ?? ""} />
           <Field label="Cidade" value={profile.company_city ?? ""} />

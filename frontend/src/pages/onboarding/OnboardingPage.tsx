@@ -3,7 +3,7 @@ import { useNavigate } from "react-router-dom";
 import { useAuth } from "../../contexts/AuthContext";
 import { Alert, Button, Input, Spinner } from "../../components/ui";
 import { completeOnboarding } from "../../services/userService";
-import { isValidCep, isValidCnpj, onlyDigits } from "../../lib/documents";
+import { isValidCep, isValidCnpj, maskCnpjInput, onlyDigits } from "../../lib/documents";
 import {
   createMyEquipment,
   getMyEquipment,
@@ -75,15 +75,6 @@ function StepCompany({
   const [lookingCep, setLookingCep] = useState(false);
   const [saving, setSaving] = useState(false);
   const [error, setError] = useState<string | null>(null);
-
-  function formatCnpj(value: string) {
-    const digits = value.replace(/\D/g, "").slice(0, 14);
-    return digits
-      .replace(/^(\d{2})(\d)/, "$1.$2")
-      .replace(/^(\d{2})\.(\d{3})(\d)/, "$1.$2.$3")
-      .replace(/\.(\d{3})(\d)/, ".$1/$2")
-      .replace(/(\d{4})(\d)/, "$1-$2");
-  }
 
   function formatCep(value: string) {
     const digits = value.replace(/\D/g, "").slice(0, 8);
@@ -197,7 +188,7 @@ function StepCompany({
         <div className="relative">
           <input
             value={cnpj}
-            onChange={(e) => setCnpj(formatCnpj(e.target.value))}
+            onChange={(e) => setCnpj(maskCnpjInput(e.target.value))}
             onBlur={handleCnpjBlur}
             placeholder="00.000.000/0000-00"
             className="w-full rounded-lg border border-border bg-background-elevated px-3 py-2 text-sm text-slate-100 placeholder:text-slate-500 focus:outline-none focus:ring-2 focus:ring-primary focus:border-transparent transition-colors"

@@ -4,6 +4,7 @@ import uuid
 from datetime import datetime
 
 from app.schemas.base import AppBaseModel
+from app.utils.documents import CnpjOpcional
 
 # ── Group schemas ─────────────────────────────────────────────
 
@@ -35,7 +36,7 @@ class GroupResponse(AppBaseModel):
 
 class CompanyCreate(AppBaseModel):
     name: str
-    cnpj: str | None = None
+    cnpj: CnpjOpcional = None
     phone: str | None = None
     address: str | None = None
     city: str | None = None
@@ -45,7 +46,7 @@ class CompanyCreate(AppBaseModel):
 
 class CompanyUpdate(AppBaseModel):
     name: str | None = None
-    cnpj: str | None = None
+    cnpj: CnpjOpcional = None
     phone: str | None = None
     address: str | None = None
     city: str | None = None

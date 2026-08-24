@@ -1,5 +1,5 @@
 import { describe, it, expect } from "vitest";
-import { isValidCnpj, isValidCep, onlyDigits } from "../../lib/documents";
+import { isValidCnpj, isValidCep, onlyDigits, formatCnpj, maskCnpjInput } from "../../lib/documents";
 
 describe("onlyDigits", () => {
   it("remove máscara", () => {
@@ -48,5 +48,45 @@ describe("isValidCep", () => {
 
   it("rejeita string vazia", () => {
     expect(isValidCep("")).toBe(false);
+  });
+});
+
+describe("formatCnpj", () => {
+  it("mascara os 14 dígitos crus que vêm do banco", () => {
+    expect(formatCnpj("08857492000148")).toBe("08.857.492/0001-48");
+  });
+
+  it("mascara valor que ainda chega com pontuação (linha antiga do banco)", () => {
+    expect(formatCnpj("08.857.492/0001-48")).toBe("08.857.492/0001-48");
+  });
+
+  it("devolve vazio para nulo, indefinido ou vazio", () => {
+    expect(formatCnpj(null)).toBe("");
+    expect(formatCnpj(undefined)).toBe("");
+    expect(formatCnpj("")).toBe("");
+  });
+
+  it("devolve o valor original quando não são 14 dígitos, sem inventar máscara", () => {
+    expect(formatCnpj("123")).toBe("123");
+  });
+});
+
+describe("maskCnpjInput", () => {
+  it("mascara progressivamente enquanto se digita", () => {
+    expect(maskCnpjInput("08")).toBe("08");
+    expect(maskCnpjInput("088")).toBe("08.8");
+    expect(maskCnpjInput("08857492000148")).toBe("08.857.492/0001-48");
+  });
+
+  it("para de aceitar depois do 14o digito", () => {
+    expect(maskCnpjInput("088574920001489999")).toBe("08.857.492/0001-48");
+  });
+
+  it("ignora o que nao for digito", () => {
+    expect(maskCnpjInput("08abc857")).toBe("08.857");
+  });
+
+  it("devolve vazio para entrada vazia", () => {
+    expect(maskCnpjInput("")).toBe("");
   });
 });
