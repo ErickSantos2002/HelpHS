@@ -130,8 +130,22 @@ def test_company_update_normaliza_a_pontuacao():
     assert CompanyUpdate(cnpj=CNPJ_MASCARADO).cnpj == CNPJ_DIGITOS
 
 
-def test_company_update_limpa_o_campo_com_string_vazia():
+def test_company_update_aceita_string_vazia_sem_erro():
+    """
+    Vira `None` no schema, e é só isso que este teste afirma. No endpoint o
+    efeito **difere por rota**, e a diferença é anterior a esta mudança:
+    `PATCH /users/me` grava tudo que veio (`exclude_unset`), então `""` limpa
+    o CNPJ de verdade; o `PUT` de empresa pula valor `None`
+    (`groups.py:282`), então ali `""` significa "não mexe" — como já
+    acontecia com `name`, `phone` e os outros cinco campos.
+    """
     assert CompanyUpdate(cnpj="").cnpj is None
+
+
+def test_user_update_com_string_vazia_limpa_o_cnpj():
+    """O outro lado da assimetria acima: aqui `None` é gravado."""
+    body = UserUpdate(cnpj="")
+    assert body.model_dump(exclude_unset=True)["cnpj"] is None
 
 
 def test_company_update_recusa_cnpj_incompleto():

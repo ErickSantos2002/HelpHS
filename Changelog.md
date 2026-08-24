@@ -102,6 +102,13 @@ Datas em DD/MM/AAAA.
   `ProfilePage` para `lib/documents.ts`. A busca por CNPJ na tela de Grupos
   passa a comparar só dígitos — com a coluna normalizada, procurar com máscara
   pararia de achar. **Sem migration:** `String(18)` já comporta 14 dígitos.
+  ⚠️ Um efeito colateral pequeno e assimétrico: campo enviado vazio agora vira
+  `NULL` em vez da string `""`. Em `PATCH /users/*` isso limpa o CNPJ de
+  verdade; no `PUT` de empresa o laço pula valor `None` (`groups.py:282`),
+  então lá "vazio" passa a significar "não mexe" — o mesmo que `name`, `phone`
+  e os outros cinco campos já faziam. Ou seja, limpar o CNPJ de uma empresa
+  pela tela deixa de funcionar; era um caminho que gravava `""`, não `NULL`,
+  e endireitá-lo é do Passo 3, junto com os testes de `groups.py`.
 
 - **Chip de SLA deixa de dizer "Vencido" para resposta já dada** (`32fc736`).
   Chamado respondido no prazo e reaberto dias depois aparecia "Resposta:
