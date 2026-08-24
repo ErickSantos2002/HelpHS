@@ -78,6 +78,31 @@ Datas em DD/MM/AAAA.
   de ter sido cliente.
 
 ### Corrigido
+- **CNPJ com pontuação deixa de chegar ao banco** (`62f022e`). O validador
+  existia só no `OnboardingUpdate`; `UserUpdate`, `CompanyCreate` e
+  `CompanyUpdate` aceitavam qualquer string até 18 caracteres, e o
+  `placeholder` do front ensinava o admin a digitar com máscara. O resultado
+  não era "nenhum lado normaliza", era **pior**: `users.cnpj` guardava 14
+  dígitos crus e `companies.cnpj` guardava `11.222.333/0001-81` — normalizados
+  em direções opostas, então comparar as duas colunas por string nunca dava
+  igual, por construção. Foi esse o motivo real de a unicidade de série ter
+  virado "por dono" em vez de "por empresa" (`d5fa7a6`), e está mapeado em
+  `docs/superpowers/specs/2026-08-24-duas-fontes-de-verdade-empresa.md`.
+  A regra passa a viajar no **tipo** (`CnpjOpcional` / `CnpjObrigatorio`, em
+  `app/utils/documents.py`) e não num validador copiado por modelo: campo de
+  CNPJ novo declarado com o tipo já nasce validado, que é exatamente o defeito
+  que o `CompanyCreate` tinha. É `AfterValidator` e não `Before` para o valor
+  chegar já coagido a `str` — com `Before`, um número viraria `AttributeError`
+  em vez de `422`. **Opcional continua opcional:** `None` e string vazia viram
+  `None`, porque limpar o campo no front manda `""` e não `null`, e recusar
+  isso quebraria criar empresa sem CNPJ; já lixo com conteúdo (`"abc"`) vira
+  erro e não `None` silencioso. No front o `placeholder` de empresa passa a
+  pedir dígitos, a máscara volta só na **exibição** (`formatCnpj`) e a de
+  digitação (`maskCnpjInput`) sai das duas cópias locais de `OnboardingPage` e
+  `ProfilePage` para `lib/documents.ts`. A busca por CNPJ na tela de Grupos
+  passa a comparar só dígitos — com a coluna normalizada, procurar com máscara
+  pararia de achar. **Sem migration:** `String(18)` já comporta 14 dígitos.
+
 - **Chip de SLA deixa de dizer "Vencido" para resposta já dada** (`32fc736`).
   Chamado respondido no prazo e reaberto dias depois aparecia "Resposta:
   Vencido" em âmbar — cor certa, letra errada: o chip comparava o prazo do
@@ -137,6 +162,20 @@ Datas em DD/MM/AAAA.
   ambiente, o escuro segue sendo o padrão.
 
 ### Adicionado
+- **Script de backfill de CNPJ** (`62f022e`, `backend/scripts/normaliza_cnpj.py`).
+  O validador cuida do futuro; este script cuida do passado — sobretudo de
+  `companies.cnpj`, que nasceu texto livre. **Avulso e rodado à mão, nunca em
+  migration**, que é a regra do projeto: dado histórico se corrige em script,
+  regra nova é prospectiva. Dry-run por padrão (`--aplicar` grava), e importa a
+  mesma normalização do validador de propósito — cópia própria da regra
+  gravaria linha que a API recusaria depois. Linha que não soma 14 dígitos é
+  **relatada e deixada como está**, nunca apagada: script de limpeza que
+  descarta o que não entende é pior que o problema que veio consertar.
+  Verificado ponta a ponta em Postgres efêmero — dry-run não grava, `--aplicar`
+  normaliza, linha torta sobrevive, segunda rodada não faz nada. ⚠️ **Ainda não
+  foi rodado em produção**; o `backend/.env` local aponta para o banco real,
+  então quem roda é o Rickelme, quando quiser.
+
 - **Filtro de equipamentos sem dono** na listagem de Produtos (`3f3af90`),
   fechando o outro lado do `3efb0cf`: atribuir dono já era possível, achar o
   órfão para atribuir não era. Precisou ser parâmetro novo do endpoint

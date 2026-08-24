@@ -7,6 +7,119 @@ O changelog do produto (o que o cliente vê) fica em
 
 ---
 
+## 24/08/2026 — Duas fontes de verdade para "empresa", e o começo da reconciliação
+
+Frente nova, aberta pelo próprio trabalho de documentação: escrever a
+atualização do `decisoes-e-regras.md` esbarrou numa dívida que ninguém tinha
+mapeado — existem **duas** fontes de verdade para "de qual empresa é este
+cliente" (`User.cnpj` e `User.company_id`), e elas não conversam. Não é dívida
+teórica: foi ela que, três dias antes, empurrou a unicidade de número de série
+para "por dono" quando a decisão de negócio correta era "por empresa".
+
+| Commit | O que foi feito |
+|---|---|
+| `99b0847` | `docs:` **levantamento** das duas fontes de verdade |
+| `f7ddadc` | `docs:` **`companies.id` declarado única autoridade** de escopo por empresa |
+| `62f022e` | `fix:` **CNPJ com pontuação deixa de chegar ao banco**, com script de backfill |
+| `docs:` | Este fechamento |
+
+### O levantamento corrigiu a própria premissa
+
+A suspeita inicial era que nenhum dos dois campos fosse normalizado. O
+levantamento provou o contrário, e o contrário é pior: `users.cnpj` **é**
+normalizado desde sempre — o `OnboardingUpdate` tira a pontuação, e o front
+ainda confere os dígitos verificadores antes de enviar. Quem não normalizava
+era `companies.cnpj`, texto livre sem validador nenhum, alimentado por um
+`placeholder` que ensinava o admin a digitar `00.000.000/0000-00`.
+
+As duas colunas estavam normalizadas em **direções opostas**. Uma guardava
+`11222333000181`, a outra `11.222.333/0001-81`. Nenhuma comparação por string
+entre elas jamais daria igual. O `e41684c` do dia anterior afirmava o contrário
+e foi corrigido no `f7ddadc`.
+
+Três outras coisas saíram do mapa, e nenhuma era esperada:
+
+- **`company_id` não existe fora da tela de Grupos.** Não está no
+  `UserResponse` — o cliente não recebe o próprio vínculo, e nenhuma outra tela
+  sabe que o campo existe.
+- **Já havia uma ponte**, `GET /groups/companies/suggestions`, que agrupa
+  clientes sem vínculo pelos dados de onboarding. Só que criar a empresa a
+  partir da sugestão **não vincula ninguém**: os clientes seguem com
+  `company_id` nulo, a sugestão reaparece e clicar de novo cria uma empresa
+  duplicada.
+- **Excluir uma empresa desvincula os clientes em silêncio.** Comprovado em
+  Postgres efêmero, rodando o mesmo caminho de código do endpoint: a FK é
+  `ON DELETE SET NULL`, o ORM concorda, as notas da empresa somem junto e nada
+  avisa quantos clientes foram soltos. Não há teste dizendo qual é a regra —
+  **nenhum** teste da suíte referencia `Company`, `company_id` ou qualquer
+  endpoint de `/groups`.
+
+### A recomendação não foi nenhuma das três opções
+
+As opções na mesa eram normalizar o CNPJ e derivar a empresa dele (a), vincular
+a `Company` no onboarding (b), ou só documentar quem manda (c). A recomendação
+foi uma **sequência**, porque (a) sozinha é uma falha de autorização esperando
+acontecer: o CNPJ é autodeclarado e o servidor só conta 14 dígitos — quem
+confere os dígitos verificadores é o front, que é o cliente. Eleger esse campo
+como chave de escopo é deixar o cliente escolher em que escopo ele cai.
+
+Primeiro declarar a fonte de verdade (`f7ddadc`), depois normalizar as duas
+pontas para que casar seja **possível** (`62f022e`), depois fechar o laço das
+sugestões vinculando por CNPJ normalizado — é ali que (a) e (b) se encontram
+sem os defeitos de nenhuma das duas: o casamento usa o CNPJ, a autoridade
+continua sendo o clique do admin.
+
+### A normalização, e a decisão de pôr a regra no tipo
+
+O caminho óbvio era repetir o `@field_validator` nos três schemas que não
+tinham. Não foi o escolhido: um validador copiado por modelo deixa o **próximo**
+campo de CNPJ nascer sem validação nenhuma, que é literalmente o defeito que o
+`CompanyCreate` tinha. A regra passou a viajar no tipo — `CnpjOpcional` e
+`CnpjObrigatorio` — e esquecer dela agora exige contrariar a anotação.
+
+O cuidado que mais custou pensamento foi o campo opcional. `None` e string
+vazia precisam passar e virar `None`, porque limpar o campo no front manda
+`""` e não `null`; um validador estrito ali quebraria criar empresa sem CNPJ,
+que hoje funciona, e todo `PATCH` que não mexe em CNPJ. Mas `"abc"` não é
+campo limpo, é erro de digitação, e virar `None` em silêncio seria perder dado.
+São dois testes separados justamente porque a distinção é fácil de errar.
+
+No front, o `placeholder` de empresa passou a pedir dígitos e a máscara voltou
+só na exibição. Apareceu de brinde uma terceira duplicação: `OnboardingPage` e
+`ProfilePage` tinham a **mesma** máscara de digitação copiada, e foi ela que
+colidiu com o import do helper novo. As duas cópias saíram.
+
+### O script que não apaga o que não entende
+
+O backfill é avulso e roda à mão — regra do projeto, e desta vez com um motivo
+a mais: o `.env` local aponta para produção. Dry-run por padrão, `--aplicar`
+para gravar, e importando a **mesma** normalização do validador, porque uma
+cópia própria da regra gravaria linha que a API recusaria depois.
+
+A decisão que importa é o que fazer com a linha que não soma 14 dígitos:
+ela é **relatada e deixada como está**. Um script de limpeza que descarta o que
+não entende é pior que o problema que veio consertar; quem decide o destino
+dela é quem lê o relatório.
+
+Rodar de verdade num Postgres efêmero pagou o preço na hora: o relatório morria
+com `UnicodeEncodeError` antes da primeira linha, porque o console do Windows
+abre em cp1252 e o script roda na máquina de quem administra, não no container.
+Testar só a função pura nunca teria mostrado isso.
+
+### O que fica
+
+O Passo 3 — fechar o laço das sugestões — depende de `groups.py` ganhar
+testes, e ele não tem nenhum. O Passo 4, regras "por empresa" de verdade, só
+faz sentido depois de medir quantos clientes têm `company_id`; as consultas de
+diagnóstico estão prontas no documento de investigação e ainda não foram
+rodadas em produção. O backfill também não.
+
+E ficou registrado que o escopo de chamados é provavelmente mais urgente que a
+série: hoje o cliente vê só os próprios chamados, então dois funcionários da
+mesma empresa não enxergam o que o colega abriu.
+
+---
+
 ## 21/08/2026 — Fila técnica, oráculos e um tema que passa a perguntar
 
 Dia sem frente de produto. Produção estável, `main` em `5fc10ce`, e as três
