@@ -1,10 +1,12 @@
 # Decisões e regras de negócio — HelpHS
 
 Registro das regras que **não dá para deduzir lendo o código** e das decisões
-tomadas junto ao cliente. Atualizado em 07/08/2026 (v1.4.0).
+tomadas junto ao cliente. Atualizado em 24/08/2026 (v1.8.0, ainda não publicada).
 
 Para o histórico voltado ao usuário final, veja `frontend/src/data/changelog.ts`.
 Para o detalhe de cada tabela, o `Documentação/Dicionario_Dados_HelpDesk_v1.docx`.
+Para o registro do que mudou a cada dia de trabalho, `mudanças.md` e
+`Changelog.md` na raiz.
 
 ---
 
@@ -19,6 +21,43 @@ Requisitos (RN-013) sempre disse 08h–17h, e o cliente confirmou 9h/dia em
 05/08/2026. Documentação e testes foram alinhados ao código.
 
 Feriados não são modelados nesta versão — só fins de semana.
+
+### O que conta como primeira resposta
+
+**A primeira resposta é a primeira fala dirigida ao cliente por alguém que não
+é o autor do chamado.** Vale a primeira mensagem de chat de outra pessoa, e a
+resolução como rede de segurança — a nota de resolução é texto que o cliente
+lê, e sem ela o chamado resolvido sem conversa nenhuma ficaria eternamente sem
+resposta registrada.
+
+Mudança de status **não conta**, nem para "Aguardando cliente". Se o
+atendimento aconteceu por telefone, a fala precisa virar mensagem no chamado
+de qualquer forma — para o indicador e para o próximo técnico que pegar o caso.
+
+Até 20/08/2026 a regra era outra, e media coisa diferente do que o nome dizia:
+o carimbo acontecia quando o chamado **saía de "Aberto"**. Como o mapa de
+transições só permite `open → in_progress` e `open → cancelled`, "primeira
+resposta" queria dizer, na prática, "alguém assumiu ou cancelou". Isso
+distorcia o indicador nas duas direções ao mesmo tempo:
+
+- técnico que respondia pelo chat sem mexer no status **não registrava nada** —
+  e esse é o caminho mais usado;
+- atribuir, assumir ou **cancelar** um chamado registrava resposta sem uma
+  palavra ter sido dita, com poucos segundos de "tempo de resposta".
+
+Havia ainda um efeito que apagava violação: o carimbo vinha **antes** da
+avaliação de prazo, e `check_breaches` só olha o prazo enquanto
+`sla_first_response` é nulo. Chamado atendido três dias depois do prazo saía
+com `sla_response_breach = False`. Hoje `register_first_response`
+(`app/utils/sla.py`) avalia a violação antes de carimbar, e é o único ponto do
+sistema que grava esse campo.
+
+> ⚠️ **Os números de primeira resposta mudaram a partir da v1.8.0.** O card de
+> violação sobe e o tempo médio sobe — não porque o atendimento piorou, mas
+> porque o indicador deixou de contar clique como conversa e deixou de apagar
+> violação atrasada. Comparações com relatórios anteriores a essa data não são
+> justas. O levantamento dos treze caminhos que alimentavam a regra antiga está
+> em `docs/superpowers/specs/2026-08-20-primeira-resposta-sla-design.md`.
 
 ## Ciclo de encerramento do chamado
 
@@ -87,6 +126,25 @@ Dois pontos onde a separação precisou ser feita à mão:
 A marca de **primeira resposta vencida** sobrevive à reabertura de propósito:
 ela se refere ao primeiro atendimento, que de fato aconteceu (ou atrasou) uma
 vez só.
+
+**O prazo de resposta, porém, não é renovado — só o de resolução.** É preciso
+dizer isso em voz alta porque o changelog da v1.4.0 anunciou mais do que o
+código entrega: "reabrir um chamado devolve um prazo de atendimento novo, em
+vez de trazê-lo de volta já vencido". Vale para a resolução; o
+`sla_response_due_at` continua sendo o do ciclo original.
+
+Até a v1.8.0 isso aparecia na tela como mentira: o chamado reaberto exibia
+"Resposta: Vencido" para sempre, mesmo tendo sido respondido dentro do prazo no
+ciclo anterior. O chip lia o relógio para escrever o texto e a flag do backend
+para escolher a cor — daí o resultado contraditório de um selo âmbar (sem
+violação) escrito "Vencido". Hoje o chamado que já teve resposta exibe
+**"Respondido"**, sem contagem, porque aquele relógio não corre mais.
+
+O conserto foi de **exibição**, e é honesto sobre o que não resolve: o ciclo
+novo continua sem prazo de resposta próprio. Dar um exigiria decidir o destino
+da primeira resposta do ciclo anterior, e apagá-la destruiria o único registro
+que existe dela — o desenho provável é um campo por ciclo, não um por chamado.
+Está na fila como melhoria futura, não como bug.
 
 ### Por que a rotina roda dentro da API
 
@@ -172,6 +230,26 @@ alternativo aberto.
 > Se um dia isso virar problema de organização interna, o caminho do meio é a
 > auto-atribuição: quem age num chamado sem responsável vira o responsável.
 
+### A recusa não diz que o recurso existe
+
+Quando um **cliente** pede um chamado, um equipamento ou um anexo que não é
+dele, a resposta é **404 com o mesmo texto de um id que não existe** — nunca
+403. O 403 é meia resposta a mais do que ele deveria conseguir: confirma que
+aquele id existe no sistema, e quem só tem uma sequência de ids consegue mapear
+o que há na base sem nunca ver o conteúdo.
+
+Isso vale hoje em doze pontos — chamados, histórico, observação, reabertura,
+anexos, chat (inclusive no código de fechamento do WebSocket) e avaliação — e
+nos equipamentos. Há teste de paridade em cada arquivo comparando a recusa de
+"alheio" com a de "inexistente": se alguém mudar a mensagem de um lado só, a
+suíte fica vermelha.
+
+**Para a equipe continua 403**, e é deliberado: admin e técnico já listam todos
+os chamados, então esconder existência deles não fecharia nada — só mandaria um
+administrador caçar um bug que não existe. Recusa de *papel* (o que
+`authorize()` faz antes de buscar o recurso) também continua 403, porque
+dispara antes de o id ser consultado e não diz nada sobre existência.
+
 ### Base de conhecimento
 
 - **Admin e técnico** excluem qualquer comentário; cliente exclui só os próprios.
@@ -212,16 +290,30 @@ inteira, e produto e categoria são apenas filtros.
 
 ## Acesso: confirmação de e-mail e recuperação de senha
 
-### O sistema se adapta ao SMTP
+### A confirmação é adotada de propósito, não deduzida
 
-**Enquanto não houver SMTP configurado, o cadastro libera o acesso na hora**, como
-antes. A confirmação só passa a ser exigida quando `SMTP_FROM_EMAIL` ou
-`SMTP_USER` estiverem preenchidos (`Settings.requires_email_verification()`).
+**Exigir confirmação de e-mail depende de duas coisas ao mesmo tempo: a flag
+`EMAIL_VERIFICATION_ENABLED` (padrão `false`) e SMTP configurado.** Preencher
+as variáveis de SMTP sozinho não liga nada; ligar a flag sem SMTP **recusa o
+boot** em produção, ao lado das validações de `CORS_ORIGINS` e `FRONTEND_URL`.
 
-Isso existe para que o código possa ser publicado antes das credenciais de
-e-mail: sem essa trava, o cliente criaria conta e ficaria esperando um link que
-o sistema não tem como enviar. Ao preencher as credenciais, a regra passa a
-valer sozinha — não precisa de novo deploy.
+A regra anterior era inferência — bastava `SMTP_FROM_EMAIL` ou `SMTP_USER`
+estarem preenchidos. A intenção era boa (publicar o código antes das
+credenciais), mas ela quebrou a produção em 19/08/2026: o `.env.example` **vem
+com as duas variáveis preenchidas**, com senha `CHANGE_ME`. Quem semeou o
+painel a partir dele ligou a confirmação sem ter SMTP funcional — as contas
+nasciam não verificadas, o e-mail nunca saía, e **ninguém conseguia entrar**,
+lendo "Confirme seu e-mail para ativar a conta" sem nunca ter recebido e-mail
+nenhum.
+
+A lição que vale além deste caso: **configuração que muda comportamento
+sensível precisa ser afirmada, nunca adivinhada a partir de outro campo estar
+preenchido**. Uma variável preenchida diz que alguém digitou algo ali, não que
+a funcionalidade está pronta para uso.
+
+Quando o SMTP de produção entrar, ligar a confirmação é mudar a flag no painel
+— e é o mesmo gatilho da resposta neutra no cadastro (ver "Pendências
+conhecidas").
 
 ### Fluxo
 
@@ -289,6 +381,50 @@ Regras que vieram junto:
 
 Na edição, omitir `equipment_ids` mantém os equipamentos atuais; mandar lista
 vazia desvincula todos.
+
+### Quem enxerga qual equipamento
+
+**O cliente vê apenas os equipamentos que são dele** — na listagem por produto
+e na consulta por id. Equipamento **sem dono também é negado** a ele (*fail
+closed*), pelo mesmo critério de "Meus equipamentos", que só devolve o que é
+seu. A equipe (admin e técnico) continua vendo o parque inteiro, porque precisa
+para dar suporte.
+
+Antes disso, qualquer pessoa autenticada lia o **número de série** de qualquer
+cliente — dado de cliente exposto entre empresas concorrentes.
+
+### O dono do equipamento
+
+Equipamento cadastrado pela tela de Produtos nascia **órfão**: o formulário não
+tinha o campo, e nenhuma API permitia atribuir dono depois. O resultado era um
+aparelho permanentemente invisível para o cliente real — que não conseguia nem
+recadastrá-lo, porque o número de série já estava tomado.
+
+Hoje o cadastro e a edição têm o seletor de dono, com busca pelo nome do
+cliente, e a listagem tem um **filtro de equipamentos sem dono** para achar os
+órfãos que ficaram. O campo existe só nos endpoints da equipe: nos
+`/equipment/my*` ele não é aceito, senão o cliente escolheria de quem é o
+aparelho.
+
+### Número de série é único por dono, não no sistema inteiro
+
+**Dois clientes diferentes podem ter o mesmo número de série cadastrado.** Até
+a v1.8.0 a unicidade era global, o que produzia dois problemas: um cliente era
+impedido de cadastrar o próprio aparelho porque outra empresa já tinha aquele
+número, e a recusa (`409`) funcionava como oráculo — dava para descobrir quais
+seriais existem na base sondando o cadastro.
+
+No banco são dois índices: `(owner_id, serial_number)` para quem tem dono, e um
+índice parcial sobre `serial_number` `WHERE owner_id IS NULL`, porque no
+Postgres nulos não conflitam entre si e dois órfãos com o mesmo serial passariam
+em silêncio.
+
+**O furo aceito:** dois usuários da *mesma* empresa podem cadastrar o mesmo
+aparelho, cada um no próprio escopo. O escopo certo seria a empresa (CNPJ), mas
+o CNPJ é digitado à mão no onboarding, não é normalizado e não tem constraint —
+`12.345.678/0001-90` e `12345678000190` seriam empresas diferentes para o
+banco. Evoluir para escopo por empresa depende de normalizar esse campo antes,
+e está registrado como trabalho próprio.
 
 ## Cadastro do cliente
 
@@ -414,7 +550,49 @@ Para validar de verdade: **`npm run build`** (`tsc -b && vite build`), o mesmo
 comando do Dockerfile. Aconteceu em 11/08/2026 — um deploy quebrou com um
 import faltando e um conflito de tipos que o `--noEmit` não acusou.
 
+O CI **ainda roda o comando inútil** no passo "TypeScript check"
+(`.github/workflows/ci.yml`), mas o risco está neutralizado: o passo de Build,
+logo depois, roda o `tsc -b` de verdade e reprova o pipeline. Ou seja, o passo
+existe como teatro — trocar por `tsc -b` seria uma linha e evitaria que alguém
+leia o verde dele como garantia.
+
 ### Cobertura de testes desigual
 
-A suíte do backend está em ~80%, mas concentrada. Os pontos fracos são
-`groups.py` (34%) e `chat.py` (53%) — nenhum deles tocado nas últimas rodadas.
+A suíte do backend está em **84%**, mas concentrada. O ponto fraco que
+permanece é o `groups.py` (**34%**); o `chat.py` subiu de 53% para **69%** ao
+longo das rodadas de agosto, sem ter sido alvo direto.
+
+### O prazo de resposta não é renovado na reabertura
+
+Ver "Ciclo de encerramento do chamado". A exibição foi corrigida, mas o ciclo
+novo continua sem prazo de resposta próprio. O desenho provável é um campo por
+ciclo em vez de um por chamado — decisão de produto, não conserto.
+
+### SMTP de produção não está configurado
+
+Sem ele não há confirmação de e-mail nem recuperação de senha em produção.
+Duas coisas esperam por isso:
+
+- **ligar `EMAIL_VERIFICATION_ENABLED`** (ver "Acesso");
+- **resposta neutra no cadastro.** Hoje o cadastro com e-mail já existente
+  devolve `409`, o que permite descobrir quem tem conta. O desenho aprovado é
+  responder `201` neutro e mandar um e-mail de "você já tem conta" — e ele
+  depende do SMTP existir, senão o usuário legítimo fica sem conta e sem aviso.
+
+O envio em `forgot-password` e no reenvio de confirmação **já sai em segundo
+plano**, então o tempo de resposta não vai denunciar quais e-mails existem
+quando o SMTP entrar. O cadastro ainda envia inline; quando a resposta neutra
+for implementada, o envio precisa ir junto para segundo plano, senão a
+neutralidade nasce furada pelo relógio.
+
+### Rate limit de login é um balde único
+
+O `start.sh` sobe o uvicorn sem autorizar proxy nenhum, e o padrão do uvicorn
+faz o contador do rate limit enxergar sempre o **IP do proxy** do EasyPanel. Na
+prática, `RATE_LIMIT_LOGIN=5/15minutes` vale para o sistema inteiro: cinco
+senhas erradas de qualquer pessoa travam o login de todos.
+
+Ligar `FORWARDED_ALLOW_IPS` resolve, **mas só depois de fechar a publicação da
+porta 8000**. Com a porta aberta na internet, autorizar cabeçalhos de proxy
+deixa qualquer um forjar o `X-Forwarded-For` e furar o limite por completo —
+pior do que o balde único. A ordem é: fechar a porta, depois autorizar.
