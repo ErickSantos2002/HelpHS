@@ -104,6 +104,42 @@ Datas em DD/MM/AAAA.
   de ter sido cliente.
 
 ### Corrigido
+- **O log de e-mail deixa de descartar o destinatário e o motivo** (`c615ad7`).
+  Cinco chamadas usavam placeholder de `%`-formatting (`"%s"`), mas o loguru
+  formata com `str.format()`: a linha saía com o literal `%s` e os argumentos
+  eram jogados fora. O caso grave era o log de **falha de entrega**, que não
+  dizia para quem nem por quê — exatamente o dado necessário quando alguém
+  reclama que não recebeu. Passa a usar f-string, o estilo do resto do projeto
+  (49 chamadas contra 1). Os testes capturam a linha já formatada e afirmam que
+  destinatário e motivo aparecem nela.
+- **Nenhum e-mail sairia com `SMTP_REPLY_TO` vazio** (`c53bb80`). Achado pelo
+  teste do commit acima, não pela auditoria. O campo é opcional e nasce vazio;
+  com ele vazio o `send_email` montava a mensagem com `reply_to=None`, e o
+  `MessageSchema` do fastapi-mail recusa `None` ali — exige lista. A exceção
+  estourava na **montagem**, antes de qualquer tentativa de entrega, e o
+  `except` a engolia como se fosse falha de SMTP. ⚠️ Hoje está mascarado porque
+  **não há SMTP em produção** e o `send_email` retorna antes, na guarda de "SMTP
+  não configurado" — a falha apareceria inteira no dia em que o SMTP fosse
+  ligado. O campo passa a receber lista vazia, que é o próprio default do
+  fastapi-mail. O teste que já existia passava por coincidência: afirmava só
+  `result is False`, verdade tanto pela falha simulada quanto por este erro.
+- **As tags do artigo da KB deixam de ser uma lista compartilhada** (`e1985a4`).
+  `default=[]` guarda **uma** lista, criada quando o módulo é importado, e o
+  SQLAlchemy a reusa em toda inserção que não informe tags — quem mutasse o
+  valor vindo dali contaminaria todos os artigos inseridos depois no mesmo
+  processo. Com `default=list` cada linha nasce com a sua. Vale registrar o que
+  o achado **não** era: default de coluna vale na inserção, não na construção
+  (`KBArticle().tags` é `None`, não `[]`) — o risco é o compartilhamento entre
+  inserções, não o clássico default mutável de argumento de função. Sem
+  migration: default de Python não aparece no DDL.
+- **A pesquisa de satisfação passa a cair junto com o ticket no ORM**
+  (`a8de8c6`). Era o único filho de `Ticket` sem cascade no relationship. O
+  banco já cobre pelo `ON DELETE CASCADE` da chave estrangeira, mas o ORM não
+  sabe disso: um `db.delete(ticket)` faria o SQLAlchemy tentar orfanar a
+  pesquisa, escrevendo `NULL` numa coluna `NOT NULL`. Latente — nenhuma rota
+  apaga ticket pelo ORM hoje. O teste afirma a **regra inteira**, não a linha:
+  todo filho `ONETOMANY` de `Ticket` precisa cascatear, então o próximo que
+  alguém adicionar sem cascade também cai ali. Sem migration.
 - **Limpar um campo da empresa passa a funcionar.** O `PUT` de empresa pulava
   todo valor `None`, então "enviado vazio" e "não enviado" eram
   indistinguíveis: o admin apagava o CNPJ na tela, salvava, e o valor velho
@@ -232,6 +268,32 @@ Datas em DD/MM/AAAA.
   `register_first_response` avalia antes de carimbar.
 
 ### Alterado
+- **A versão da API ganha fonte única e sai da resposta pública** (`dcfc25f`).
+  Estava escrita à mão em dois pontos do `main.py`, e as duas cópias
+  congelaram em `"1.0.0"` enquanto o produto seguiu para v1.8.0; agora vive em
+  `app/__init__.py` e um literal novo derruba o teste. E some do
+  `/api/v1/health`, que **responde sem autenticação** — a release exata
+  entregue a qualquer um só ajuda quem quer casar versão com vulnerabilidade
+  conhecida, e quem chama health check quer saber se a API está de pé. A versão
+  continua no metadado do FastAPI, visível no `/docs`, desligado em produção.
+  Nada quebra: o front mostra a versão a partir do próprio `changelog.ts`, e os
+  `HEALTHCHECK` do Dockerfile e dos compose batem em `/health`, intocado. O
+  teste antigo fixava `data["version"] == "1.0.0"` — travava a correção do
+  próprio valor que estava errado.
+- **`tags.py` deixa de anotar usuário como `object` e de mentir na permissão**
+  (`21e8b22`). Os cinco `Depends` estavam anotados como `object`, e o código
+  faz `actor.id` em cima disso — enquanto o mypy não está ligado ninguém
+  reclama; no dia em que ligar, o erro aparece longe dali. O resto do projeto
+  já usa `Annotated[User, ...]`. O docstring dizia que `PATCH` e `DELETE` são
+  "admin", mas o código sempre chamou `authorize(admin, technician)`: corrigido
+  o **docstring**, não o código — técnico mexer em etiqueta é coerente com o
+  resto do sistema, onde ele já cria etiqueta e vincula etiqueta a chamado.
+- **O `.dockerignore` do backend passa a excluir `.coverage` e `uploads/`**
+  (`4e975b7`). Os dois estão no `.gitignore` desde sempre, mas o
+  `.dockerignore` ficou para trás — e o Dockerfile copia com `COPY . .`. O
+  `.coverage` existia na árvore com 69 KB e entrava em toda imagem; `uploads/`
+  é onde os anexos são gravados, e um build a partir de uma cópia local levaria
+  arquivo de chamado para dentro da imagem.
 - **O tema segue a preferência do sistema operacional na primeira visita**
   (`8542183`). Quem nunca escolheu recebia escuro fixo; agora vale
   `prefers-color-scheme`. Escolha salva continua mandando, contra o sistema
@@ -279,6 +341,45 @@ Datas em DD/MM/AAAA.
   "— Sem dono —", o que também conserta os órfãos existentes um a um.
 
 ### Removido
+- **Sete configurações que não alimentavam código nenhum** (`b30f75e`), todas
+  com uso zero fora da própria definição: `llm_primary_provider` e
+  `llm_fallback_provider` (o `llm.py` escolhe provedor por caminho de código
+  explícito), `openai_max_tokens` e `anthropic_max_tokens` (o `llm.py` fixa
+  `max_tokens` por tarefa — 256, 512, 400; um número só não serviria para as
+  três), `llm_max_retries` (não há laço de retry que o leia),
+  `clamav_max_file_size_mb` (quem barra arquivo grande é
+  `upload_max_file_size_mb`) e `rate_limit_default` (o `Limiter` sobe sem
+  `default_limits`; `rate_limit_login` segue em uso). Saem também do
+  `.env.example`, senão a mentira apenas mudaria de arquivo. Remover campo do
+  `Settings` é seguro aqui porque o `model_config` usa `extra="ignore"`: se a
+  variável continuar setada no EasyPanel, o boot ignora em vez de quebrar.
+- **O bloco SLA do `config.py`, que nunca alimentou o motor** (`3cf63d2`). Era o
+  mais perigoso: o `config.py` anunciava `SLA_BUSINESS_HOURS_END=18:00`
+  enquanto o `utils/sla.py` calcula com `_WORK_END = 17` — e o `sla.py` **não
+  importa `Settings`**. O código está certo: 08:00–17:00, 9 h/dia, confirmado
+  com o cliente em 05/08/2026 (RN-013). ⚠️ Quem um dia decidisse "consertar a
+  divergência" ligando a configuração ao motor **mudaria o prazo de todos os
+  chamados de uma vez**. Por isso remover era a única opção segura, e por isso
+  veio em commit separado do de cima: ali a escolha entre remover e ligar era
+  de gosto, aqui não era. Saíram os quatro campos, não só os dois do horário —
+  `sla_business_days` e `sla_timezone` estavam igualmente mortos e são a mesma
+  armadilha. A proteção real ficou no próprio `sla.py`: um comentário nas
+  constantes explica por que são constantes e aponta para o documento de
+  decisões, porque comentário de commit ninguém lê daqui a um ano.
+- **O pacote `app/worker/` e o Celery, que nunca executaram nada** (`3c4b433`).
+  Não havia uma única chamada `.delay(` ou `.apply_async(` no repositório,
+  nenhum processo Celery no `start.sh`, nenhum `beat_schedule`; as duas tarefas
+  de negócio devolviam `{"status": "queued"}` sem fazer coisa alguma. Um
+  esqueleto que responde "queued" é pior que ausência — alguém acaba chamando
+  acreditando que funciona. Havia inclusive uma colisão esperando acontecer:
+  `tasks.classify_ticket` era um stub vazio enquanto o `classify_ticket` do
+  `services/llm.py`, de mesmo nome, é o que de fato roda. Sai junto tudo que só
+  existia por causa dele — `celery` do `requirements.txt` (o **`redis` fica**:
+  cache, blacklist de token e o lock da rotina de fechamento), o bloco
+  `CELERY_*` do `config.py` e do `.env.example`, o omit de cobertura e o
+  override de mypy no `pyproject.toml`. Nos documentos, a rotina periódica
+  dentro da API deixa de aparecer como consequência de uma falta e passa a
+  constar como **decisão**, com o motivo.
 - Duas linhas mortas (`0e1a917`): o comentário de `products.py` citando
   `_check_ticket_access`, apagado no `7371bc7`, e o `!disabled &&` do
   `FormDropdown` — o atributo `disabled` do `<button>` já impede o navegador de

@@ -7,6 +7,124 @@ O changelog do produto (o que o cliente vê) fica em
 
 ---
 
+## 25/08/2026 — A rodada dos achados pequenos, e o que um deles escondia
+
+Os seis achados de severidade baixa da auditoria do backend, em dez commits.
+Nenhum deles é urgente sozinho; juntos são quase todos a mesma doença — **o
+repositório afirmando coisas que o código não faz**. Configuração que promete
+um controle inexistente, pacote que parece implementado, anotação que declara
+um tipo que não é o dele, docstring que descreve uma permissão diferente da que
+o `authorize` aplica, versão congelada em `1.0.0` enquanto o produto ia para
+v1.8.0.
+
+| Commit | O que foi feito |
+|---|---|
+| `c615ad7` | `fix:` **log de e-mail deixa de descartar destinatário e motivo** |
+| `c53bb80` | `fix:` **nenhum e-mail sairia com `SMTP_REPLY_TO` vazio** 🔴 |
+| `b30f75e` | `refactor:` remove **sete configurações** sem uso |
+| `3cf63d2` | `refactor:` remove o **bloco SLA** do `config.py` ⚠️ |
+| `3c4b433` | `refactor:` remove o **pacote `worker/` e o Celery** |
+| `4e975b7` | `chore:` `.dockerignore` passa a excluir `.coverage` e `uploads/` |
+| `21e8b22` | `refactor:` `tags.py` para de anotar usuário como `object` |
+| `e1985a4` | `fix:` **tags do artigo da KB** deixam de ser lista compartilhada |
+| `dcfc25f` | `refactor:` **versão** ganha fonte única e sai da resposta pública |
+| `a8de8c6` | `fix:` **pesquisa de satisfação** cai junto com o ticket no ORM |
+| `docs:` | Este fechamento |
+
+### O achado pequeno que escondia um grande
+
+O item B1 pedia uma coisa modesta: cinco chamadas de log usavam placeholder de
+`%`-formatting, que o loguru não entende — a linha saía com o literal `%s` e os
+argumentos iam para o lixo. O pedido incluía, "se der", um teste que capturasse
+o log e afirmasse que o destinatário aparece na linha.
+
+O teste foi escrito, ficou vermelho pelo motivo certo, e depois da correção
+**continuou vermelho por outro motivo**. A linha registrada não era a falha de
+SMTP que o teste simulava: era um erro de validação do `MessageSchema`. O
+`send_email` monta a mensagem com `reply_to=None` quando `SMTP_REPLY_TO` está
+vazio, e o fastapi-mail recusa `None` nesse campo — exige lista.
+
+Ou seja: **com `SMTP_REPLY_TO` vazio, nenhum e-mail sairia**. A exceção estoura
+na montagem, antes de qualquer tentativa de entrega, e o `except` a engole como
+se fosse falha de rede. E `SMTP_REPLY_TO` nasce vazio — no `config.py` e no
+`.env.example`.
+
+Hoje isso não aparece porque não há SMTP em produção: o `send_email` retorna
+antes, na guarda de "SMTP não configurado". A falha apareceria inteira, e como
+"e-mail simplesmente não funciona", no dia em que o Erick ligasse o SMTP.
+
+O teste que já existia para esse caminho — `test_send_email_handles_smtp_failure`
+— passava. Ele afirmava só `result is False`, e `False` era verdade pelos dois
+motivos: pela falha simulada e pelo erro de montagem que ninguém tinha visto.
+Um teste que afirma pouco demais não é uma rede de segurança, é uma luz verde
+sobre um buraco.
+
+### O bloco de SLA era o inverso: o código certo, a configuração mentindo
+
+O `config.py` anunciava `SLA_BUSINESS_HOURS_END=18:00`. O `utils/sla.py`
+calcula com `_WORK_END = 17`. E não existe uma linha ligando os dois — o
+`sla.py` não importa `Settings`.
+
+O perigo aqui não é o valor errado, é o **conserto** errado. Quem abrisse os
+dois arquivos veria uma divergência óbvia e uma correção óbvia: ligar a
+configuração ao motor. Isso mudaria o prazo de todos os chamados de uma vez,
+sem ninguém perceber, contra uma regra confirmada com o cliente em 05/08 e
+registrada como RN-013.
+
+Por isso este foi o único item em que remover não era preferência e sim a única
+opção segura — e por isso veio em commit separado dos outros sete campos
+mortos, onde a escolha entre remover e ligar era de gosto. Tirei os quatro
+campos do bloco, não só os dois do horário: `sla_business_days` e `sla_timezone`
+estavam igualmente mortos e são a mesma armadilha para o próximo.
+
+A proteção real não é o commit — é um comentário nas constantes do `sla.py`
+explicando por que são constantes e apontando para o documento de decisões.
+Mensagem de commit ninguém lê daqui a um ano; o comentário está onde a pessoa
+vai estar olhando.
+
+### Dois achados que a auditoria descreveu com mais gravidade do que tinham
+
+Registro porque a diferença muda o que se deve fazer com eles.
+
+O default mutável de `KBArticle.tags` **é** um problema, mas não o clássico
+`def f(x=[])`: default de coluna vale na **inserção**, não na construção —
+`KBArticle().tags` é `None`, não `[]`. O estrago real é que o `default=[]`
+guarda um único objeto reusado em toda inserção, então mutar o valor que veio
+dali contamina os artigos inseridos depois no mesmo processo. `default=list`
+resolve, e o teste afirma exatamente essa propriedade: duas avaliações do
+default precisam devolver objetos distintos.
+
+Já as anotações do `routers/sla.py` **não eram um achado**. A auditoria pedia
+para "anotar o tipo real" em `-> list[SLAConfig]` e `-> SLAConfig`, mas esse já
+é o tipo real: as funções devolvem objetos do ORM, e é o `response_model` que
+filtra para a resposta HTTP. Anotar `SLAConfigResponse` ali seria trocar uma
+anotação correta por uma errada. Não mexi. (O `sla.py` usa `= Depends(...)`
+onde o resto do projeto usa `Annotated[...]` — inconsistência de estilo, não
+mentira de tipo; fica para quem quiser uniformizar.)
+
+### O resto
+
+O pacote `app/worker/` saiu inteiro. Não havia uma chamada `.delay(` no
+repositório, nem processo Celery no `start.sh`, e as duas tarefas de negócio
+devolviam `{"status": "queued"}` sem fazer nada — inclusive uma
+`tasks.classify_ticket` que era um stub vazio ao lado do `classify_ticket` de
+verdade, no `services/llm.py`. Nos documentos, a rotina periódica dentro da API
+deixou de aparecer como consequência de uma falta ("o Celery está configurado
+mas não tem worker") e passou a constar como decisão, com o motivo. Os dois
+comentários no código que ainda citavam o Celery como configurado foram
+corrigidos junto — se ficassem, seriam a próxima mentira.
+
+A versão fez as duas coisas que o achado colocava como alternativa, porque
+resolvem problemas diferentes: fonte única em `app/__init__.py`, para não
+congelar de novo; e fora do `/api/v1/health`, que responde sem autenticação e
+não tem por que entregar a release exata a qualquer um.
+
+Suíte: 586 → 594 testes, todos verdes, cobertura 85%. Nenhuma migration —
+`default=list` e cascade de relationship são comportamento do ORM, o DDL não
+muda. Nada foi executado contra produção.
+
+---
+
 ## 24/08/2026 — Duas fontes de verdade para "empresa", e o começo da reconciliação
 
 Frente nova, aberta pelo próprio trabalho de documentação: escrever a
