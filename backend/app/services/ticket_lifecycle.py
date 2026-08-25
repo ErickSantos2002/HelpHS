@@ -10,8 +10,11 @@ serviço só para ela. Um pacote Celery chegou a existir aqui sem nunca executar
 nada; foi removido em 25/08/2026 (ver docs/decisoes-e-regras.md).
 
 A rotina roda então como uma task asyncio do próprio processo da API. Como o
-uvicorn sobe com `--workers 2`, os dois processos acordariam juntos: um lock no
-Redis garante que só um deles trabalha por rodada. Sem Redis a rodada é pulada
+uvicorn pode subir com mais de um worker, os processos acordariam juntos: um
+lock no Redis garante que só um deles trabalha por rodada. Hoje o `start.sh`
+sobe **um** worker e o lock é desnecessário — ele fica porque voltar a dois é
+mudar um número lá, e sem o lock essa volta duplicaria histórico e notificação
+de cada chamado fechado, calada. Sem Redis a rodada é pulada
 — fechar o mesmo chamado duas vezes geraria histórico e notificação duplicados.
 """
 
@@ -150,7 +153,7 @@ async def close_expired_tickets(db: AsyncSession, settings: Settings) -> int:
 
 
 # Instante da última rodada que terminou sem erro. Vive na memória DESTE
-# processo: com `--workers 2` cada worker tem o seu, e o /api/v1/health responde
+# processo: com mais de um worker cada um tem o seu, e o /api/v1/health responde
 # pelo worker que atendeu a requisição. Não é estado compartilhado nem quer ser
 # — a pergunta que ele responde é "o laço deste processo continua girando?".
 _ultima_rodada_sem_erro: datetime | None = None

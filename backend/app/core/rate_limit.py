@@ -7,7 +7,8 @@ autenticação. Antes disto os limites existiam só como configuração
 
 Decisões:
   - Storage em Redis em produção, para o limite valer entre os múltiplos
-    workers do uvicorn (start.sh sobe 2). Em teste usa memória, sem Redis.
+    workers do uvicorn (hoje o start.sh sobe 1, mas o limite não pode depender
+    disso). Em teste usa memória, sem Redis.
   - Desligado por padrão sob APP_ENV=testing, senão as várias chamadas de
     /auth/login da suíte estourariam o limite e falhariam. O teste dedicado
     de rate limit liga explicitamente.
