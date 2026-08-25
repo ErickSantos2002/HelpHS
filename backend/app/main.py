@@ -10,6 +10,7 @@ from slowapi.errors import RateLimitExceeded
 from sqlalchemy import text
 from starlette.exceptions import HTTPException as StarletteHTTPException
 
+from app import __version__
 from app.core.config import get_settings
 from app.core.database import engine
 from app.core.exceptions import http_exception_handler, validation_exception_handler
@@ -107,7 +108,7 @@ async def lifespan(app: FastAPI):
 app = FastAPI(
     title="HelpHS — Help Desk Health & Safety",
     description="API RESTful para gestão de chamados de Saúde & Segurança do Trabalho",
-    version="1.0.0",
+    version=__version__,
     docs_url="/docs" if settings.is_development else None,
     redoc_url="/redoc" if settings.is_development else None,
     lifespan=lifespan,
@@ -163,4 +164,8 @@ async def health_check() -> dict:
 
 @app.get(f"{settings.api_prefix}/health", tags=["Health"])
 async def health_check_versioned() -> dict:
-    return {"status": "ok", "version": "1.0.0", "env": settings.app_env}
+    # Sem a versão de propósito: esta rota responde sem autenticação, e
+    # dizer a release exata a qualquer um só ajuda quem procura uma
+    # vulnerabilidade conhecida. A versão fica no metadado do FastAPI, que
+    # só aparece no /docs — desligado em produção.
+    return {"status": "ok", "env": settings.app_env}
