@@ -7,6 +7,118 @@ O changelog do produto (o que o cliente vê) fica em
 
 ---
 
+## 25/08/2026 (noite) — Os oito médios restantes, em três blocos
+
+Fechamento da auditoria do backend: cinco pequenos sem decisão pendente, os
+dois mecânicos maiores e o preparo do antivírus. Nove commits.
+
+| Commit | O que foi feito |
+|---|---|
+| `6e8f409` | `fix:` **o spec da API** deixa de ser público fora de dev 🔴 |
+| `e3cea9a` | `fix:` **ambiente não-local** para de escapar das validações 🔴 |
+| `52a3b7f` | `fix:` **DELETE de usuário** confere o que o banco recusa |
+| `8e03e05` | `fix:` as duas listagens param de **mentir o `limit`** |
+| `e8c642e` | `fix:` **link de confirmação** vira de uso único 🔴 |
+| `d765587` | `perf:` as três listagens param de **consultar por item** |
+| `846c6c4` | `chore:` **mypy zerado e ligado** no CI |
+| `8ff214c` | `feat:` **revarredura de anexos** e aviso de antivírus fora |
+| `docs:` | Este fechamento |
+
+### O erro que a lista fechada conserta
+
+O M4 parecia blindagem para um staging que ainda não existe, e é — mas o
+desenho mudou de forma no meio. A condição era `if not self.is_production:
+return`, e `is_production` só reconhece `"production"` e `"prod"`.
+
+Trocar por "valide também staging" resolveria o caso citado e deixaria o
+problema de pé, porque o problema não é o nome *staging*: é a **direção do
+default**. Com a lista de quem valida sendo aberta, todo nome novo — e todo
+nome digitado errado — nasce fora da validação. Um typo em `production`
+desligava, de uma vez, a checagem de `SECRET_KEY`, de CORS e de `FRONTEND_URL`.
+
+Com a lista de quem **escapa** sendo fechada (`development`, `testing`), o
+mesmo typo agora *liga* as validações. O erro passou a apontar para o lado
+seguro, que é a única coisa que se pode pedir de um default.
+
+Apertar a validação não promove o ambiente: `is_production` continua False para
+staging, senão ele herdaria decisões que são só de produção — o `/docs`
+desligado, o seed de admin que não roda.
+
+### O achado que não era bug
+
+Ao zerar o mypy, `schemas/tag.py` acusou `strip_whitespace=True` no `Field`.
+Não é parâmetro do `Field` no pydantic v2: chegava como kwarg extra — era a
+deprecation que sujava toda rodada de teste — e não fazia nada.
+
+Antes de mexer, conferi o comportamento em vez de deduzi-lo: `TagCreate(name='
+urgente ')` **estrutura o nome sem espaços**. O strip acontece, só que quem faz
+é o `str_strip_whitespace=True` do `AppBaseModel`, herdado. Ou seja: decoração
+morta, com o comportamento certo chegando por outro caminho. Remover não muda
+nada — e é por isso que dá para remover sem susto.
+
+Vale registrar porque o caminho oposto era plausível: se eu tivesse "consertado"
+o que o mypy apontou passando o parâmetro para onde ele funciona, teria mexido
+num comportamento que já estava correto.
+
+### O DELETE que recusava errado
+
+O M5 tinha um sintoma pequeno (500 em vez de 409) e uma causa que valia
+levantar: a guarda contava `Ticket.creator_id` e o banco tem **onze**
+referências a `users.id` sem `ondelete`. Levantei uma a uma — as outras seis
+têm `SET NULL` ou `CASCADE` e se resolvem sozinhas.
+
+A consequência merece atenção: como auditoria está entre as onze, usuário que
+já fez qualquer coisa no sistema deixa de ser excluível e passa a ser caso de
+anonimização. Isso é o comportamento correto para a LGPD e já era a intenção
+declarada do código (`"Use anonymize instead"`); a diferença é que antes a
+intenção falhava com 500. Quem nunca agiu continua excluível — o log de
+auditoria da criação aponta para o admin que criou, não para a conta criada.
+
+### Números reais, não paginação
+
+No M9 a escolha entre "paginar de verdade" e "devolver os números reais" não é
+de gosto: depende do que a rota é. As duas são listas completas por
+necessidade — o dropdown de responsável e os aparelhos do próprio usuário.
+Paginar esconderia opções atrás de uma página que a tela não sabe pedir,
+trocando uma mentira cosmética por um bug silencioso.
+
+### O que o script de revarredura recusa fazer
+
+O ClamAV vai subir, e o M7 preparou os dois lados. O script é o de sempre —
+dry-run por padrão, `--aplicar` para gravar, no molde do `normaliza_cnpj` — mas
+a decisão que importa está na tradução da resposta do ClamAV.
+
+`unavailable` e `error: ...` **não** viram exame. Marcar como examinado um anexo
+que o ClamAV não conseguiu ler seria inventar resultado, e é exatamente o erro
+que um script apressado comete: contar o que tentou em vez do que conseguiu.
+
+E nada é apagado, nem arquivo infectado. Anexo é prova de um chamado; um script
+de limpeza que descarta o que não entende é pior que o problema que veio
+consertar. Infectado sai em destaque no relatório para quem lê decidir.
+
+O aviso de boot não muda a política — bloquear upload com o antivírus fora
+derrubaria o anexo inteiro por causa de um serviço auxiliar. Só faz o estado
+deixar de ser invisível, e a mensagem já aponta o script.
+
+### Nota sobre o zap-scan
+
+O M3 desliga o `/openapi.json` fora de dev, e o `zap-scan.yml` se alimenta dele
+— por isso o cabeçalho e a descrição do input passaram a dizer que o alvo
+precisa ser um ambiente com o spec exposto.
+
+⚠️ Enquanto mexia ali notei outra coisa, que **não** consertei por não conseguir
+verificar a topologia do deploy: o workflow monta o alvo como
+`${target_url}/openapi.json` com `target_url` terminando em `/api/v1`, mas o
+spec é servido na **raiz** (`/openapi.json`), porque `openapi_url` é
+configuração do FastAPI e não passa pelo prefixo dos routers. Se não houver um
+proxy reescrevendo, esse alvo já estava 404 antes desta mudança. Vale conferir
+na próxima vez que o scan rodar.
+
+Suíte: 632 → 639 testes, verdes, cobertura 85%. mypy limpo em 66 arquivos. Sem
+migration. Nada foi executado contra produção.
+
+---
+
 ## 25/08/2026 (tarde) — Fazer o sistema conseguir dizer que está quebrado
 
 Três achados médios com um tema só: **o sistema não tinha como avisar que

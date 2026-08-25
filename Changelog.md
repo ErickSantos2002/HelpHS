@@ -11,6 +11,40 @@ Datas em DD/MM/AAAA.
 ## [Não publicado]
 
 ### Segurança
+- **O spec da API deixa de ser público fora de desenvolvimento** (`6e8f409`).
+  `docs_url` e `redoc_url` já eram desligados, mas o `openapi_url` ficou no
+  default: o `/openapi.json` seguia público em produção — e o spec é o mapa
+  completo (toda rota, todo parâmetro, todo formato), que é o que alguém
+  precisa para escolher o que atacar. Desligar o `/docs` e deixar o spec de pé
+  fecha a porta e deixa a planta na calçada. **Não** criei flag própria, embora
+  fosse uma opção: o spec *é* a documentação em outro formato, e duas chaves
+  para "expor a API por escrito" seria mais uma configuração para alguém deixar
+  ligada sem querer. ⚠️ O `zap-scan.yml` se alimenta desse endpoint — o
+  cabeçalho e a descrição do input passam a dizer que o alvo precisa ser um
+  ambiente com o spec exposto; apontar para produção agora dá 404 no passo do
+  ZAP.
+- **Ambiente que não é local para de escapar das validações de boot**
+  (`e3cea9a`). O guard começava com `if not self.is_production: return`, e
+  `is_production` só reconhece "production"/"prod" — então um `APP_ENV=staging`
+  aceitava `SECRET_KEY` curta, `CORS_ORIGINS=*` e `FRONTEND_URL` de localhost.
+  Staging exposto na internet com essas três é produção com outro nome, e é
+  onde se testa com dado copiado do real. A lista de quem escapa passa a ser
+  **fechada** — development e testing: um `APP_ENV` desconhecido, ou digitado
+  errado, cai no lado severo. Antes um typo em "production" desligava todas as
+  validações; agora um typo as liga. Apertar não promove: `is_production`
+  continua False para staging, senão ele herdaria o `/docs` desligado e o seed
+  de admin que não roda.
+- **O link de confirmação de e-mail passa a ser de uso único** (`e8c642e`). O
+  token de senha já era: carrega a impressão da senha vigente e morre quando
+  ela muda. O de confirmação não carregava estado nenhum, então valia pelas
+  24 h inteiras — um link vazado (e-mail encaminhado, histórico do navegador,
+  log de proxy) seguia servindo depois de a conta já estar confirmada. Agora
+  carrega o estado de verificação de quando foi emitido. Cuidei de não trocar
+  segurança por atrito: clicar de novo num link já usado continua respondendo
+  a frase amigável "já estava confirmado", e não um erro — a conta já está
+  ativa, não há nada a conceder. Não embuti também a impressão do e-mail
+  (a simetria mais completa) porque **não existe fluxo de troca de e-mail** no
+  sistema: seria amarra que não guarda nada hoje.
 - **O admin de seed deixa de nascer com senha do repositório** (`3478bae`,
   `b736114`). `start.sh` roda `python -m app.seeds` **a cada boot do
   container**, entre a migration e o uvicorn, **inclusive em produção**. Com a
@@ -104,6 +138,28 @@ Datas em DD/MM/AAAA.
   de ter sido cliente.
 
 ### Corrigido
+- **`DELETE /users/{id}` confere o que o banco recusa e explica o 409**
+  (`52a3b7f`). A guarda contava só `Ticket.creator_id`: um técnico que nunca
+  abriu chamado mas tem chamados **atribuídos** passava por ela e ia bater na
+  chave estrangeira — e `assignee_id` não tem `ondelete`. Sem `except`, isso
+  vira **500**, e um 500 num DELETE não diz ao admin o que fazer. Duas camadas:
+  a contagem passa a cobrir as **onze** referências a `users.id` sem `ondelete`
+  (levantadas uma a uma), e o `except IntegrityError` é rede para a tabela nova
+  que nascer fora da lista. A mensagem diz o que fazer (anonimizar, com a rota)
+  e o que segurou, com número e tipo. ⚠️ Como auditoria entra na lista, usuário
+  que já agiu no sistema deixa de ser excluível e passa a ser caso de
+  anonimização — que é o comportamento correto para a LGPD e já era a intenção
+  do código; a diferença é que antes isso falhava com 500. Quem nunca agiu
+  continua excluível.
+- **As duas listagens sem paginação param de mentir o `limit`** (`8e03e05`).
+  `GET /users/technicians` e `GET /products/my-equipment` respondiam
+  `limit=100, offset=0` fixos sobre queries **sem** limit: com mais de 100
+  registros o cliente leria "100 de N" e concluiria que há outra página, que
+  não existe. Escolhi devolver os números reais em vez de paginar, pelo que as
+  rotas **são**: uma alimenta o dropdown de responsável, a outra mostra os
+  aparelhos do próprio usuário — as duas telas precisam do conjunto inteiro, e
+  paginar esconderia opções atrás de uma página que a tela não sabe pedir.
+  Conferido que o front lê só `items`.
 - **O laço do fechamento automático sobrevive ao erro e diz que está vivo**
   (`9146dc2`). O `while True: await _run_once()` não tinha `try/except`: uma
   exceção encerrava a task e o RN-005 parava até o próximo restart, **calado**
@@ -333,6 +389,21 @@ Datas em DD/MM/AAAA.
   ambiente, o escuro segue sendo o padrão.
 
 ### Adicionado
+- **Revarredura de anexos e aviso de antivírus fora do ar** (`8ff214c`),
+  preparando a subida do ClamAV. `scripts/revarre_anexos.py` é avulso, no molde
+  do `normaliza_cnpj`: dry-run por padrão, `--aplicar` para gravar. Varre os
+  anexos com `virus_scanned=False` — os que entraram enquanto o antivírus não
+  existia, já que o upload trata `unavailable` como aprovado. **Não apaga
+  nada**, nem infectado: anexo é prova de um chamado, e script de limpeza que
+  descarta o que não entende é pior que o problema. A recusa que importa está
+  na tradução da resposta: `unavailable` e `error:` **não** viram exame —
+  marcar como examinado o que o ClamAV não conseguiu ler seria inventar
+  resultado. No boot, fora de dev/teste, um `ping` (que exige `PONG`, porque
+  abrir e fechar a conexão faria qualquer porta ocupada passar por antivírus no
+  ar) avisa quando o serviço não responde. ⚠️ A **política não mudou**: o
+  upload continua aceitando sem varrer, porque bloquear derrubaria o anexo
+  inteiro por causa de um serviço auxiliar. O que mudou é o estado deixar de
+  ser invisível.
 - **`/api/v1/health` vira readiness de verdade; `/health` segue intocado**
   (`ec533c4`). A rota respondia `{"status": "ok"}` sem conferir nada — pior que
   rota nenhuma, porque dá a quem observa a certeza de que está tudo bem
@@ -428,7 +499,32 @@ Datas em DD/MM/AAAA.
   `FormDropdown` — o atributo `disabled` do `<button>` já impede o navegador de
   disparar o clique, como a verificação por mutação do `f7945e0` mostrou.
 
+### Desempenho
+- **As três listagens administrativas param de consultar por item** (`d765587`).
+  `/dashboard/reports/technicians` fazia 2 consultas por técnico,
+  `/groups` uma por grupo, e `/groups/{id}` mais `/groups/{id}/companies` duas
+  por empresa. Com 15 técnicos eram 31 consultas numa tela; com 40 empresas,
+  81. Agora são 3 e 3, com o mesmo padrão que o `list_tickets` já usava:
+  agregação com `GROUP BY` para a página inteira. Quem não tem filho nenhum não
+  volta do `GROUP BY` — por isso toda leitura é `.get(id, 0)`. Os caminhos de
+  item único seguem com os helpers individuais, onde não há N+1 a evitar. O
+  teste não prende um número fixo de consultas (esse muda quando alguém
+  acrescenta um campo) e sim a propriedade: **dobrar a lista não pode dobrar as
+  consultas**.
+
 ### CI
+- **mypy zerado e ligado** (`846c6c4`). 28 erros em 12 arquivos viraram zero, e
+  o CI passa a rodar `mypy app` depois do black — a ferramenta já estava no
+  `requirements-dev` desde sempre e nunca tinha sido executada. Nenhum dos
+  erros escondia bug vivo: os dois mais suspeitos são benignos (o
+  `_record_history` faz `str()` antes de gravar; o CSV só reusava o nome `c` em
+  dois laços de tipos diferentes). O resto é anotação faltando, tipo estreito
+  demais e limitação de biblioteca. Um achado saiu do meio disso e **não era
+  bug**: `schemas/tag.py` passava `strip_whitespace=True` ao `Field`, que não é
+  parâmetro do `Field` no pydantic v2 — chegava como kwarg extra e não fazia
+  nada; o strip real vem do `str_strip_whitespace` do `AppBaseModel`, herdado.
+  Decoração morta com o comportamento certo por outro caminho. De quebra sumiu
+  a deprecation que sujava toda rodada de teste.
 - **Playwright em workflow separado, `e2e.yml`** (`d361e78`), acionado à mão
   por enquanto; o agendamento noturno está comentado no arquivo e entra depois
   de duas execuções manuais verdes. Sobe Postgres e Redis como services, roda
