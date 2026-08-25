@@ -20,13 +20,29 @@ from typing import Annotated
 
 from fastapi import APIRouter, Depends, File, HTTPException, Query, UploadFile, status
 from sqlalchemy import func, select
+from sqlalchemy.exc import IntegrityError
 from sqlalchemy.ext.asyncio import AsyncSession
 from starlette.concurrency import run_in_threadpool
 
 from app.core.config import Settings, get_settings
 from app.core.database import get_db
 from app.core.security import authorize, get_current_user, hash_password, verify_password
-from app.models.models import AuditAction, AuditLog, Ticket, User, UserRole, UserStatus
+from app.models.models import (
+    Attachment,
+    AuditAction,
+    AuditLog,
+    ChatMessage,
+    CompanyNote,
+    GroupNote,
+    KBArticle,
+    SatisfactionSurvey,
+    Ticket,
+    TicketHistory,
+    TicketNote,
+    User,
+    UserRole,
+    UserStatus,
+)
 from app.schemas.user import (
     LGPDConsentUpdate,
     OnboardingUpdate,
@@ -480,6 +496,37 @@ async def anonymize_user(
     return _to_response(user)
 
 
+# Toda referência a `users.id` que NÃO tem ondelete no banco — são exatamente
+# estas que fazem o DELETE falhar. As outras seis (SET NULL e CASCADE) se
+# resolvem sozinhas e por isso não entram aqui.
+#
+# A guarda contava só `Ticket.creator_id`, então um técnico sem chamados
+# próprios mas com chamados atribuídos passava e ia bater na chave estrangeira.
+#
+# São 11 COUNTs numa rota que um admin usa raramente: preferi a clareza de uma
+# lista legível — que também alimenta a mensagem de erro — a uma query só,
+# montada com UNION, que ninguém consegue reler depois.
+_REFERENCIAS_QUE_BLOQUEIAM: tuple[tuple[str, object, object], ...] = (
+    ("chamado(s) aberto(s)", Ticket, Ticket.creator_id),
+    ("chamado(s) atribuído(s)", Ticket, Ticket.assignee_id),
+    ("registro(s) de histórico", TicketHistory, TicketHistory.user_id),
+    ("nota(s) em grupo", GroupNote, GroupNote.author_id),
+    ("nota(s) em empresa", CompanyNote, CompanyNote.author_id),
+    ("nota(s) interna(s) em chamado", TicketNote, TicketNote.author_id),
+    ("anexo(s) enviado(s)", Attachment, Attachment.uploaded_by),
+    ("mensagem(ns) de chat", ChatMessage, ChatMessage.sender_id),
+    ("artigo(s) da base de conhecimento", KBArticle, KBArticle.author_id),
+    ("avaliação(ões) de atendimento", SatisfactionSurvey, SatisfactionSurvey.user_id),
+    ("registro(s) de auditoria", AuditLog, AuditLog.user_id),
+)
+
+_COMO_RESOLVER = (
+    "Não é possível excluir: o usuário deixou rastro que o sistema precisa "
+    "manter. Use anonimizar (POST /users/{id}/anonymize), que apaga os dados "
+    "pessoais e preserva o histórico."
+)
+
+
 # ── DELETE /users/{user_id} ───────────────────────────────────
 
 
@@ -501,17 +548,31 @@ async def delete_user(
     if not user:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Usuário não encontrado.")
 
-    ticket_count = (
-        await db.execute(
-            select(func.count()).select_from(Ticket).where(Ticket.creator_id == user_id)
-        )
-    ).scalar_one()
-    if ticket_count > 0:
+    bloqueios: list[str] = []
+    for rotulo, modelo, coluna in _REFERENCIAS_QUE_BLOQUEIAM:
+        quantos = (
+            await db.execute(select(func.count()).select_from(modelo).where(coluna == user_id))
+        ).scalar_one()
+        if quantos:
+            bloqueios.append(f"{quantos} {rotulo}")
+
+    if bloqueios:
         raise HTTPException(
             status_code=status.HTTP_409_CONFLICT,
-            detail="Cannot delete user with existing tickets. Use anonymize instead.",
+            detail=f"{_COMO_RESOLVER} Encontrado: {', '.join(bloqueios)}.",
         )
 
     _audit(db, AuditAction.delete, actor.id, user_id)
     await db.delete(user)
-    await db.commit()
+    try:
+        await db.commit()
+    except IntegrityError:
+        # Rede, não guarda principal: a lista acima é o que se espera cobrir,
+        # mas uma tabela nova com FK para users nasceria fora dela. Sem este
+        # except, essa tabela nova viraria 500 num DELETE — e 500 não diz ao
+        # admin o que fazer.
+        await db.rollback()
+        raise HTTPException(
+            status_code=status.HTTP_409_CONFLICT,
+            detail=_COMO_RESOLVER,
+        ) from None
