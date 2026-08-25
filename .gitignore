@@ -72,3 +72,7 @@ backend/.coverage
 backend/htmlcov/
 frontend/playwright-report/
 frontend/test-results/
+
+# Vite env files do frontend (so VITE_*, mas nada de env versionado)
+frontend/.env.*
+!frontend/.env.example

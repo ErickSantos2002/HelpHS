@@ -32,7 +32,8 @@ async def get_or_404(
     Raises:
         HTTPException: 404 if no row matches ``obj_id``.
     """
-    result = await db.execute(select(model).where(model.id == obj_id))  # type: ignore[union-attr]
+    # O TypeVar nao promete `.id`; quem chama sempre passa um modelo que tem.
+    result = await db.execute(select(model).where(model.id == obj_id))  # type: ignore[attr-defined]
     obj = result.scalar_one_or_none()
     if obj is None:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail=detail)

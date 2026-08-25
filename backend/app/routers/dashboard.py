@@ -22,7 +22,7 @@ from reportlab.lib.pagesizes import A4
 from reportlab.lib.styles import getSampleStyleSheet
 from reportlab.lib.units import cm
 from reportlab.platypus import Paragraph, SimpleDocTemplate, Spacer, Table, TableStyle
-from sqlalchemy import and_, extract, func, or_, select, text
+from sqlalchemy import ColumnElement, and_, extract, func, or_, select, text
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.core.database import get_db
@@ -75,7 +75,7 @@ _ACTIVE_SLA_STATUSES = [
 ]
 
 
-def _resolve_breached_cond():
+def _resolve_breached_cond() -> ColumnElement[bool]:
     """True se SLA de resolução foi violado (flag salva OU prazo já passou)."""
     return or_(
         Ticket.sla_resolve_breach.is_(True),
@@ -87,7 +87,7 @@ def _resolve_breached_cond():
     )
 
 
-def _response_breached_cond():
+def _response_breached_cond() -> ColumnElement[bool]:
     """True se SLA de 1ª resposta foi violado (flag salva OU prazo já passou)."""
     return or_(
         Ticket.sla_response_breach.is_(True),
@@ -709,8 +709,10 @@ async def export_reports_csv(
 
     writer.writerow(["DISTRIBUIÇÃO CSAT (1 a 10)"])
     writer.writerow(["Nota", "Avaliações"])
-    for c in data.csat_distribution:
-        writer.writerow([c.rating, c.count])
+    # Nome próprio: reusar `c` de um laço anterior, com outro tipo de item,
+    # deixa o verificador preso ao primeiro tipo — e o leitor também.
+    for nota in data.csat_distribution:
+        writer.writerow([nota.rating, nota.count])
     if data.csat_average is not None:
         writer.writerow(["Média", data.csat_average])
 
@@ -930,6 +932,97 @@ async def _technician_summary(
     )
 
 
+async def _resumos_de_tecnicos(db: AsyncSession, tech_rows: list, since: datetime) -> list:
+    """
+    Os mesmos números do `_technician_summary`, agregados de uma vez para todos
+    os técnicos com GROUP BY.
+
+    Técnico sem nenhum chamado no período não volta do GROUP BY — daí os
+    defaults nas leituras, que reproduzem o que as agregações devolveriam para
+    um conjunto vazio (zero, e média nula).
+    """
+    tech_ids = [row.id for row in tech_rows]
+    if not tech_ids:
+        return []
+
+    ticket_rows = (
+        await db.execute(
+            select(
+                Ticket.assignee_id.label("tech"),
+                func.count().label("total"),
+                func.count()
+                .filter(Ticket.status.in_([TicketStatus.resolved, TicketStatus.closed]))
+                .label("resolved"),
+                func.count()
+                .filter(
+                    Ticket.status.in_(
+                        [
+                            TicketStatus.open,
+                            TicketStatus.in_progress,
+                            TicketStatus.awaiting_client,
+                            TicketStatus.awaiting_technical,
+                        ]
+                    )
+                )
+                .label("open_count"),
+                func.count().filter(_resolve_breached_cond()).label("breached"),
+                func.avg(
+                    extract(
+                        "epoch",
+                        func.coalesce(Ticket.resolved_at, Ticket.closed_at) - Ticket.created_at,
+                    )
+                    / 3600
+                )
+                .filter(func.coalesce(Ticket.resolved_at, Ticket.closed_at).is_not(None))
+                .label("avg_hours"),
+            )
+            .where(Ticket.assignee_id.in_(tech_ids), Ticket.created_at >= since)
+            .group_by(Ticket.assignee_id)
+        )
+    ).all()
+    por_tecnico = {row.tech: row for row in ticket_rows}
+
+    csat_rows = (
+        await db.execute(
+            select(
+                Ticket.assignee_id.label("tech"),
+                func.avg(SatisfactionSurvey.rating).label("avg"),
+                func.count(SatisfactionSurvey.id).label("cnt"),
+            )
+            .join(Ticket, SatisfactionSurvey.ticket_id == Ticket.id)
+            .where(Ticket.assignee_id.in_(tech_ids), SatisfactionSurvey.created_at >= since)
+            .group_by(Ticket.assignee_id)
+        )
+    ).all()
+    csat_por_tecnico = {row.tech: row for row in csat_rows}
+
+    resumos = []
+    for row in tech_rows:
+        t = por_tecnico.get(row.id)
+        c = csat_por_tecnico.get(row.id)
+        total = (t.total if t else 0) or 0
+        breached = (t.breached if t else 0) or 0
+        avg_hours = t.avg_hours if t else None
+        csat_avg = c.avg if c else None
+        resumos.append(
+            TechnicianSummary(
+                technician_id=str(row.id),
+                technician_name=row.name,
+                total_assigned=total,
+                resolved=(t.resolved if t else 0) or 0,
+                open_count=(t.open_count if t else 0) or 0,
+                sla_breached=breached,
+                sla_compliance_rate=(
+                    round((1 - breached / total) * 100, 1) if total > 0 else 100.0
+                ),
+                avg_resolution_hours=round(float(avg_hours), 1) if avg_hours else None,
+                csat_average=round(float(csat_avg), 2) if csat_avg else None,
+                csat_count=(c.cnt if c else 0) or 0,
+            )
+        )
+    return resumos
+
+
 @router.get("/dashboard/reports/technicians", response_model=TechnicianListReport)
 async def get_technician_list_report(
     db: Annotated[AsyncSession, Depends(get_db)],
@@ -947,7 +1040,10 @@ async def get_technician_list_report(
         )
     ).all()
 
-    summaries = [await _technician_summary(db, row.id, row.name, since) for row in tech_rows]
+    # Duas consultas para a equipe inteira, não duas por técnico. Com 15
+    # técnicos eram 31 consultas; agora são 3. O `_technician_summary` continua
+    # existindo para o relatório de UM técnico, onde não há N+1 a evitar.
+    summaries = await _resumos_de_tecnicos(db, list(tech_rows), since)
 
     return TechnicianListReport(period_days=period, technicians=summaries)
 

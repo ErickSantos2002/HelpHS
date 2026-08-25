@@ -11,6 +11,66 @@ Datas em DD/MM/AAAA.
 ## [Não publicado]
 
 ### Segurança
+- **O spec da API deixa de ser público fora de desenvolvimento** (`6e8f409`).
+  `docs_url` e `redoc_url` já eram desligados, mas o `openapi_url` ficou no
+  default: o `/openapi.json` seguia público em produção — e o spec é o mapa
+  completo (toda rota, todo parâmetro, todo formato), que é o que alguém
+  precisa para escolher o que atacar. Desligar o `/docs` e deixar o spec de pé
+  fecha a porta e deixa a planta na calçada. **Não** criei flag própria, embora
+  fosse uma opção: o spec *é* a documentação em outro formato, e duas chaves
+  para "expor a API por escrito" seria mais uma configuração para alguém deixar
+  ligada sem querer. ⚠️ O `zap-scan.yml` se alimenta desse endpoint — o
+  cabeçalho e a descrição do input passam a dizer que o alvo precisa ser um
+  ambiente com o spec exposto; apontar para produção agora dá 404 no passo do
+  ZAP.
+- **Ambiente que não é local para de escapar das validações de boot**
+  (`e3cea9a`). O guard começava com `if not self.is_production: return`, e
+  `is_production` só reconhece "production"/"prod" — então um `APP_ENV=staging`
+  aceitava `SECRET_KEY` curta, `CORS_ORIGINS=*` e `FRONTEND_URL` de localhost.
+  Staging exposto na internet com essas três é produção com outro nome, e é
+  onde se testa com dado copiado do real. A lista de quem escapa passa a ser
+  **fechada** — development e testing: um `APP_ENV` desconhecido, ou digitado
+  errado, cai no lado severo. Antes um typo em "production" desligava todas as
+  validações; agora um typo as liga. Apertar não promove: `is_production`
+  continua False para staging, senão ele herdaria o `/docs` desligado e o seed
+  de admin que não roda.
+- **O link de confirmação de e-mail passa a ser de uso único** (`e8c642e`). O
+  token de senha já era: carrega a impressão da senha vigente e morre quando
+  ela muda. O de confirmação não carregava estado nenhum, então valia pelas
+  24 h inteiras — um link vazado (e-mail encaminhado, histórico do navegador,
+  log de proxy) seguia servindo depois de a conta já estar confirmada. Agora
+  carrega o estado de verificação de quando foi emitido. Cuidei de não trocar
+  segurança por atrito: clicar de novo num link já usado continua respondendo
+  a frase amigável "já estava confirmado", e não um erro — a conta já está
+  ativa, não há nada a conceder. Não embuti também a impressão do e-mail
+  (a simetria mais completa) porque **não existe fluxo de troca de e-mail** no
+  sistema: seria amarra que não guarda nada hoje.
+- **O admin de seed deixa de nascer com senha do repositório** (`3478bae`,
+  `b736114`). `start.sh` roda `python -m app.seeds` **a cada boot do
+  container**, entre a migration e o uvicorn, **inclusive em produção**. Com a
+  senha `Admin@123456` escrita em `seeds.py` e nenhuma guarda de ambiente, todo
+  deploy criava — ou recriava, se alguém apagasse a linha — um administrador
+  ativo com credencial publicada neste repositório. O `app.seeds_e2e` já tinha
+  essa proteção e a docstring dele já explicava o porquê: o raciocínio tinha
+  sido aplicado à conta de teste e não à de admin, que é a mais poderosa das
+  duas. Passa a haver **duas defesas independentes** — `APP_ENV` de produção
+  não cria a conta, e sem `SEED_ADMIN_PASSWORD` não cria a conta. A segunda não
+  é redundância: `app_env` tem default `development`, então a primeira falha
+  **aberta** se a variável faltar ou vier digitada errada; senha ausente é a
+  correção, guarda de ambiente é só a defesa. **Nenhuma das duas levanta**, e é
+  aí que esta regra difere da do módulo de e2e (que *deve* falhar ruidosamente,
+  porque nada o chama em produção): `seed_admin` está no caminho do boot sob
+  `set -e`, e levantar trocaria um vazamento de credencial por uma
+  indisponibilidade. Produto e configuração de SLA continuam sendo semeados
+  normalmente — são catálogo, não credencial. A idempotência permanece e
+  protege quem já trocou a senha em produção; em contrapartida, **apagar o
+  usuário deixa de ser forma de reiniciá-lo**. ⚠️ O workflow de e2e passa a
+  definir `SEED_ADMIN_PASSWORD` (banco efêmero do job), e **quem sobe o
+  ambiente local precisa exportá-la** — sem ela o seed avisa no log e pula a
+  criação. ⚠️ **Isto não fecha o incidente:** falta verificar se a conta existe
+  hoje no banco de produção e com que senha. Nada foi executado contra
+  produção nesta rodada.
+
 - **Número de série passa a ser único por dono, não no sistema inteiro**
   (`d5fa7a6`). A unicidade global recusava cadastro legítimo — empresas
   diferentes têm aparelhos de mesmo número — e era um oráculo: o `409` contava
@@ -78,6 +138,103 @@ Datas em DD/MM/AAAA.
   de ter sido cliente.
 
 ### Corrigido
+- **`DELETE /users/{id}` confere o que o banco recusa e explica o 409**
+  (`52a3b7f`). A guarda contava só `Ticket.creator_id`: um técnico que nunca
+  abriu chamado mas tem chamados **atribuídos** passava por ela e ia bater na
+  chave estrangeira — e `assignee_id` não tem `ondelete`. Sem `except`, isso
+  vira **500**, e um 500 num DELETE não diz ao admin o que fazer. Duas camadas:
+  a contagem passa a cobrir as **onze** referências a `users.id` sem `ondelete`
+  (levantadas uma a uma), e o `except IntegrityError` é rede para a tabela nova
+  que nascer fora da lista. A mensagem diz o que fazer (anonimizar, com a rota)
+  e o que segurou, com número e tipo. ⚠️ Como auditoria entra na lista, usuário
+  que já agiu no sistema deixa de ser excluível e passa a ser caso de
+  anonimização — que é o comportamento correto para a LGPD e já era a intenção
+  do código; a diferença é que antes isso falhava com 500. Quem nunca agiu
+  continua excluível.
+- **As duas listagens sem paginação param de mentir o `limit`** (`8e03e05`).
+  `GET /users/technicians` e `GET /products/my-equipment` respondiam
+  `limit=100, offset=0` fixos sobre queries **sem** limit: com mais de 100
+  registros o cliente leria "100 de N" e concluiria que há outra página, que
+  não existe. Escolhi devolver os números reais em vez de paginar, pelo que as
+  rotas **são**: uma alimenta o dropdown de responsável, a outra mostra os
+  aparelhos do próprio usuário — as duas telas precisam do conjunto inteiro, e
+  paginar esconderia opções atrás de uma página que a tela não sabe pedir.
+  Conferido que o front lê só `items`.
+- **O laço do fechamento automático sobrevive ao erro e diz que está vivo**
+  (`9146dc2`). O `while True: await _run_once()` não tinha `try/except`: uma
+  exceção encerrava a task e o RN-005 parava até o próximo restart, **calado**
+  — a exceção só reapareceria no shutdown, onde o `suppress` cobre apenas
+  `CancelledError`. E nem todo caminho de `_run_once` estava protegido por
+  dentro: os imports tardios e o `get_settings()` ficam fora dos dois `try` de
+  lá, justamente as linhas que ninguém imagina que levantam. Junto vem o
+  carimbo que o readiness usa: o instante da última rodada sem erro, na memória
+  de cada worker. Ceder a vez para outro worker **conta** (a rotina aconteceu;
+  se não contasse, o worker que quase nunca pega o lock reportaria rotina
+  parada para sempre); rodada pulada por Redis fora ou que levantou **não**
+  conta. ⚠️ O teste de cancelamento prova que o laço termina no `cancel`, e só
+  isso — verifiquei por mutação que trocar o tratamento por `except
+  BaseException` o mantém verde, porque desde o 3.11 o asyncio re-entrega o
+  cancelamento pendente no `await` seguinte.
+- **O e-mail de notificação só sai depois do commit que o torna verdade**
+  (`66f2569`). O `notify()` criava a task de envio na hora, e o docstring
+  mandava chamá-lo **antes** do commit — então qualquer commit que falhasse
+  depois mandava e-mail sobre algo que não aconteceu. O laço de protocolo do
+  `create_ticket` era o caso visível (um e-mail por tentativa descartada, cada
+  um anunciando um protocolo que não passou a existir), mas o furo valia para
+  todo chamador. O `db.add(notif)` continua antes do commit — a notificação faz
+  parte da transação; o que mudou foi o **disparo**. `notify()` registra o
+  e-mail como pendência da sessão e `commit_e_notificar()` dispara depois do
+  commit. ⚠️ Se alguém chamar `db.commit()` direto depois de um `notify()`, o
+  e-mail não sai — é o lado seguro do erro: deixar de mandar um aviso é
+  recuperável, mandar aviso de algo que não aconteceu não é.
+- **O log de e-mail deixa de descartar o destinatário e o motivo** (`c615ad7`).
+  Cinco chamadas usavam placeholder de `%`-formatting (`"%s"`), mas o loguru
+  formata com `str.format()`: a linha saía com o literal `%s` e os argumentos
+  eram jogados fora. O caso grave era o log de **falha de entrega**, que não
+  dizia para quem nem por quê — exatamente o dado necessário quando alguém
+  reclama que não recebeu. Passa a usar f-string, o estilo do resto do projeto
+  (49 chamadas contra 1). Os testes capturam a linha já formatada e afirmam que
+  destinatário e motivo aparecem nela.
+- **Nenhum e-mail sairia com `SMTP_REPLY_TO` vazio** (`c53bb80`). Achado pelo
+  teste do commit acima, não pela auditoria. O campo é opcional e nasce vazio;
+  com ele vazio o `send_email` montava a mensagem com `reply_to=None`, e o
+  `MessageSchema` do fastapi-mail recusa `None` ali — exige lista. A exceção
+  estourava na **montagem**, antes de qualquer tentativa de entrega, e o
+  `except` a engolia como se fosse falha de SMTP. ⚠️ Hoje está mascarado porque
+  **não há SMTP em produção** e o `send_email` retorna antes, na guarda de "SMTP
+  não configurado" — a falha apareceria inteira no dia em que o SMTP fosse
+  ligado. O campo passa a receber lista vazia, que é o próprio default do
+  fastapi-mail. O teste que já existia passava por coincidência: afirmava só
+  `result is False`, verdade tanto pela falha simulada quanto por este erro.
+- **As tags do artigo da KB deixam de ser uma lista compartilhada** (`e1985a4`).
+  `default=[]` guarda **uma** lista, criada quando o módulo é importado, e o
+  SQLAlchemy a reusa em toda inserção que não informe tags — quem mutasse o
+  valor vindo dali contaminaria todos os artigos inseridos depois no mesmo
+  processo. Com `default=list` cada linha nasce com a sua. Vale registrar o que
+  o achado **não** era: default de coluna vale na inserção, não na construção
+  (`KBArticle().tags` é `None`, não `[]`) — o risco é o compartilhamento entre
+  inserções, não o clássico default mutável de argumento de função. Sem
+  migration: default de Python não aparece no DDL.
+- **A pesquisa de satisfação passa a cair junto com o ticket no ORM**
+  (`a8de8c6`). Era o único filho de `Ticket` sem cascade no relationship. O
+  banco já cobre pelo `ON DELETE CASCADE` da chave estrangeira, mas o ORM não
+  sabe disso: um `db.delete(ticket)` faria o SQLAlchemy tentar orfanar a
+  pesquisa, escrevendo `NULL` numa coluna `NOT NULL`. Latente — nenhuma rota
+  apaga ticket pelo ORM hoje. O teste afirma a **regra inteira**, não a linha:
+  todo filho `ONETOMANY` de `Ticket` precisa cascatear, então o próximo que
+  alguém adicionar sem cascade também cai ali. Sem migration.
+- **Limpar um campo da empresa passa a funcionar.** O `PUT` de empresa pulava
+  todo valor `None`, então "enviado vazio" e "não enviado" eram
+  indistinguíveis: o admin apagava o CNPJ na tela, salvava, e o valor velho
+  voltava sem aviso nenhum — e valia para os sete campos, não só o CNPJ. A
+  distinção agora vem do `model_fields_set` do pydantic, que diz o que o
+  cliente **mandou**: ausente não mexe, enviado vazio limpa. `name` é a
+  exceção, por causa do banco — a coluna é `NOT NULL`, então enviá-lo vazio
+  devolve `422` com motivo, em vez do erro de servidor que "enviou, grava"
+  produziria. O comportamento antigo estava preso por teste de caracterização
+  desde o `470d56c`, escrito para que mudá-lo fosse decisão e não efeito
+  colateral; as duas mutações (voltar a guarda antiga, tirar a guarda do nome)
+  derrubam a suíte.
 - **Criar empresa pela sugestão passa a vincular os clientes** (`abdee48`).
   `handleAddFromSuggestion` chamava só `createCompany`, e `create_company`
   nunca tocou em `User`: os clientes que geraram o card seguiam com
@@ -194,6 +351,32 @@ Datas em DD/MM/AAAA.
   `register_first_response` avalia antes de carimbar.
 
 ### Alterado
+- **A versão da API ganha fonte única e sai da resposta pública** (`dcfc25f`).
+  Estava escrita à mão em dois pontos do `main.py`, e as duas cópias
+  congelaram em `"1.0.0"` enquanto o produto seguiu para v1.8.0; agora vive em
+  `app/__init__.py` e um literal novo derruba o teste. E some do
+  `/api/v1/health`, que **responde sem autenticação** — a release exata
+  entregue a qualquer um só ajuda quem quer casar versão com vulnerabilidade
+  conhecida, e quem chama health check quer saber se a API está de pé. A versão
+  continua no metadado do FastAPI, visível no `/docs`, desligado em produção.
+  Nada quebra: o front mostra a versão a partir do próprio `changelog.ts`, e os
+  `HEALTHCHECK` do Dockerfile e dos compose batem em `/health`, intocado. O
+  teste antigo fixava `data["version"] == "1.0.0"` — travava a correção do
+  próprio valor que estava errado.
+- **`tags.py` deixa de anotar usuário como `object` e de mentir na permissão**
+  (`21e8b22`). Os cinco `Depends` estavam anotados como `object`, e o código
+  faz `actor.id` em cima disso — enquanto o mypy não está ligado ninguém
+  reclama; no dia em que ligar, o erro aparece longe dali. O resto do projeto
+  já usa `Annotated[User, ...]`. O docstring dizia que `PATCH` e `DELETE` são
+  "admin", mas o código sempre chamou `authorize(admin, technician)`: corrigido
+  o **docstring**, não o código — técnico mexer em etiqueta é coerente com o
+  resto do sistema, onde ele já cria etiqueta e vincula etiqueta a chamado.
+- **O `.dockerignore` do backend passa a excluir `.coverage` e `uploads/`**
+  (`4e975b7`). Os dois estão no `.gitignore` desde sempre, mas o
+  `.dockerignore` ficou para trás — e o Dockerfile copia com `COPY . .`. O
+  `.coverage` existia na árvore com 69 KB e entrava em toda imagem; `uploads/`
+  é onde os anexos são gravados, e um build a partir de uma cópia local levaria
+  arquivo de chamado para dentro da imagem.
 - **O tema segue a preferência do sistema operacional na primeira visita**
   (`8542183`). Quem nunca escolheu recebia escuro fixo; agora vale
   `prefers-color-scheme`. Escolha salva continua mandando, contra o sistema
@@ -206,6 +389,37 @@ Datas em DD/MM/AAAA.
   ambiente, o escuro segue sendo o padrão.
 
 ### Adicionado
+- **Revarredura de anexos e aviso de antivírus fora do ar** (`8ff214c`),
+  preparando a subida do ClamAV. `scripts/revarre_anexos.py` é avulso, no molde
+  do `normaliza_cnpj`: dry-run por padrão, `--aplicar` para gravar. Varre os
+  anexos com `virus_scanned=False` — os que entraram enquanto o antivírus não
+  existia, já que o upload trata `unavailable` como aprovado. **Não apaga
+  nada**, nem infectado: anexo é prova de um chamado, e script de limpeza que
+  descarta o que não entende é pior que o problema. A recusa que importa está
+  na tradução da resposta: `unavailable` e `error:` **não** viram exame —
+  marcar como examinado o que o ClamAV não conseguiu ler seria inventar
+  resultado. No boot, fora de dev/teste, um `ping` (que exige `PONG`, porque
+  abrir e fechar a conexão faria qualquer porta ocupada passar por antivírus no
+  ar) avisa quando o serviço não responde. ⚠️ A **política não mudou**: o
+  upload continua aceitando sem varrer, porque bloquear derrubaria o anexo
+  inteiro por causa de um serviço auxiliar. O que mudou é o estado deixar de
+  ser invisível.
+- **`/api/v1/health` vira readiness de verdade; `/health` segue intocado**
+  (`ec533c4`). A rota respondia `{"status": "ok"}` sem conferir nada — pior que
+  rota nenhuma, porque dá a quem observa a certeza de que está tudo bem
+  exatamente quando não está. Os dois conceitos ficam separados: `/health`
+  (liveness) **não mudou**, e um teste novo trava isso — é o alvo do
+  `HEALTHCHECK` do Dockerfile e dos compose, e se passasse a depender do banco
+  uma oscilação do Postgres reiniciaria o container da API, trocando uma
+  indisponibilidade parcial por uma total. `/api/v1/health` (readiness) confere
+  banco (`SELECT 1`) e Redis, os dois com timeout de 2 s, em paralelo; alguma
+  faltou responde **503** com `status: degraded` e o culpado em `checks`. Redis
+  conta porque dele dependem a blacklist de token e o lock do fechamento
+  automático. O carimbo do auto-close aparece em `auto_close.last_success`,
+  **reportado e não usado para derrubar**: é `null` nos primeiros 60 s de cada
+  worker, e derrubar por isso daria 503 em todo boot. Deu para mudar o status
+  code porque **nada consome a rota programaticamente** — `HEALTHCHECK`, os
+  dois compose, o k6, o `e2e.yml` e o `zap-scan` batem todos em `/health`.
 - **Script de backfill de CNPJ** (`62f022e`, `backend/scripts/normaliza_cnpj.py`).
   O validador cuida do futuro; este script cuida do passado — sobretudo de
   `companies.cnpj`, que nasceu texto livre. **Avulso e rodado à mão, nunca em
@@ -241,12 +455,76 @@ Datas em DD/MM/AAAA.
   "— Sem dono —", o que também conserta os órfãos existentes um a um.
 
 ### Removido
+- **Sete configurações que não alimentavam código nenhum** (`b30f75e`), todas
+  com uso zero fora da própria definição: `llm_primary_provider` e
+  `llm_fallback_provider` (o `llm.py` escolhe provedor por caminho de código
+  explícito), `openai_max_tokens` e `anthropic_max_tokens` (o `llm.py` fixa
+  `max_tokens` por tarefa — 256, 512, 400; um número só não serviria para as
+  três), `llm_max_retries` (não há laço de retry que o leia),
+  `clamav_max_file_size_mb` (quem barra arquivo grande é
+  `upload_max_file_size_mb`) e `rate_limit_default` (o `Limiter` sobe sem
+  `default_limits`; `rate_limit_login` segue em uso). Saem também do
+  `.env.example`, senão a mentira apenas mudaria de arquivo. Remover campo do
+  `Settings` é seguro aqui porque o `model_config` usa `extra="ignore"`: se a
+  variável continuar setada no EasyPanel, o boot ignora em vez de quebrar.
+- **O bloco SLA do `config.py`, que nunca alimentou o motor** (`3cf63d2`). Era o
+  mais perigoso: o `config.py` anunciava `SLA_BUSINESS_HOURS_END=18:00`
+  enquanto o `utils/sla.py` calcula com `_WORK_END = 17` — e o `sla.py` **não
+  importa `Settings`**. O código está certo: 08:00–17:00, 9 h/dia, confirmado
+  com o cliente em 05/08/2026 (RN-013). ⚠️ Quem um dia decidisse "consertar a
+  divergência" ligando a configuração ao motor **mudaria o prazo de todos os
+  chamados de uma vez**. Por isso remover era a única opção segura, e por isso
+  veio em commit separado do de cima: ali a escolha entre remover e ligar era
+  de gosto, aqui não era. Saíram os quatro campos, não só os dois do horário —
+  `sla_business_days` e `sla_timezone` estavam igualmente mortos e são a mesma
+  armadilha. A proteção real ficou no próprio `sla.py`: um comentário nas
+  constantes explica por que são constantes e aponta para o documento de
+  decisões, porque comentário de commit ninguém lê daqui a um ano.
+- **O pacote `app/worker/` e o Celery, que nunca executaram nada** (`3c4b433`).
+  Não havia uma única chamada `.delay(` ou `.apply_async(` no repositório,
+  nenhum processo Celery no `start.sh`, nenhum `beat_schedule`; as duas tarefas
+  de negócio devolviam `{"status": "queued"}` sem fazer coisa alguma. Um
+  esqueleto que responde "queued" é pior que ausência — alguém acaba chamando
+  acreditando que funciona. Havia inclusive uma colisão esperando acontecer:
+  `tasks.classify_ticket` era um stub vazio enquanto o `classify_ticket` do
+  `services/llm.py`, de mesmo nome, é o que de fato roda. Sai junto tudo que só
+  existia por causa dele — `celery` do `requirements.txt` (o **`redis` fica**:
+  cache, blacklist de token e o lock da rotina de fechamento), o bloco
+  `CELERY_*` do `config.py` e do `.env.example`, o omit de cobertura e o
+  override de mypy no `pyproject.toml`. Nos documentos, a rotina periódica
+  dentro da API deixa de aparecer como consequência de uma falta e passa a
+  constar como **decisão**, com o motivo.
 - Duas linhas mortas (`0e1a917`): o comentário de `products.py` citando
   `_check_ticket_access`, apagado no `7371bc7`, e o `!disabled &&` do
   `FormDropdown` — o atributo `disabled` do `<button>` já impede o navegador de
   disparar o clique, como a verificação por mutação do `f7945e0` mostrou.
 
+### Desempenho
+- **As três listagens administrativas param de consultar por item** (`d765587`).
+  `/dashboard/reports/technicians` fazia 2 consultas por técnico,
+  `/groups` uma por grupo, e `/groups/{id}` mais `/groups/{id}/companies` duas
+  por empresa. Com 15 técnicos eram 31 consultas numa tela; com 40 empresas,
+  81. Agora são 3 e 3, com o mesmo padrão que o `list_tickets` já usava:
+  agregação com `GROUP BY` para a página inteira. Quem não tem filho nenhum não
+  volta do `GROUP BY` — por isso toda leitura é `.get(id, 0)`. Os caminhos de
+  item único seguem com os helpers individuais, onde não há N+1 a evitar. O
+  teste não prende um número fixo de consultas (esse muda quando alguém
+  acrescenta um campo) e sim a propriedade: **dobrar a lista não pode dobrar as
+  consultas**.
+
 ### CI
+- **mypy zerado e ligado** (`846c6c4`). 28 erros em 12 arquivos viraram zero, e
+  o CI passa a rodar `mypy app` depois do black — a ferramenta já estava no
+  `requirements-dev` desde sempre e nunca tinha sido executada. Nenhum dos
+  erros escondia bug vivo: os dois mais suspeitos são benignos (o
+  `_record_history` faz `str()` antes de gravar; o CSV só reusava o nome `c` em
+  dois laços de tipos diferentes). O resto é anotação faltando, tipo estreito
+  demais e limitação de biblioteca. Um achado saiu do meio disso e **não era
+  bug**: `schemas/tag.py` passava `strip_whitespace=True` ao `Field`, que não é
+  parâmetro do `Field` no pydantic v2 — chegava como kwarg extra e não fazia
+  nada; o strip real vem do `str_strip_whitespace` do `AppBaseModel`, herdado.
+  Decoração morta com o comportamento certo por outro caminho. De quebra sumiu
+  a deprecation que sujava toda rodada de teste.
 - **Playwright em workflow separado, `e2e.yml`** (`d361e78`), acionado à mão
   por enquanto; o agendamento noturno está comentado no arquivo e entra depois
   de duas execuções manuais verdes. Sobe Postgres e Redis como services, roda
@@ -293,6 +571,10 @@ Datas em DD/MM/AAAA.
   operacional. Cada arquivo foi verificado por mutação.
 
 ### Documentação
+- O checklist de deploy (`help-deploy-check`) descrevia `GET /api/v1/health`
+  como "versão e env certos" — a versão saíra na rodada anterior e o readiness
+  mudou o contrato de novo. Agora descreve os dois contratos e o que um
+  `auto_close.last_success` parado quer dizer.
 - Guia de desenvolvimento local (`f27f38c`, `3485092`) e mini-Redis de dev em
   `backend/scripts/` (`5fc7562`); skill de test review atualizada sobre o
   Vitest no CI (`b1f10b7`).

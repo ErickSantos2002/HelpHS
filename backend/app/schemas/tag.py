@@ -11,12 +11,12 @@ from app.schemas.base import AppBaseModel
 
 
 class TagCreate(AppBaseModel):
-    name: str = Field(..., min_length=1, max_length=50, strip_whitespace=True)
+    name: str = Field(..., min_length=1, max_length=50)
     color: str = Field(default="#6366f1", pattern=r"^#[0-9a-fA-F]{6}$")
 
 
 class TagUpdate(AppBaseModel):
-    name: str | None = Field(default=None, min_length=1, max_length=50, strip_whitespace=True)
+    name: str | None = Field(default=None, min_length=1, max_length=50)
     color: str | None = Field(default=None, pattern=r"^#[0-9a-fA-F]{6}$")
 
 

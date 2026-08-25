@@ -769,3 +769,36 @@ async def test_sugestao_sem_produto_no_ticket_usa_categoria(patch_redis):
 
     assert r.status_code == 200
     assert len(r.json()["items"]) >= 1
+
+
+# ═══════════════════════════════════════════════════════════════
+# Modelo: o default de tags não pode ser uma lista compartilhada
+# ═══════════════════════════════════════════════════════════════
+
+
+def test_default_de_tags_gera_lista_nova_a_cada_insercao():
+    """
+    `default=[]` guarda UMA lista, construída na importação do módulo e
+    reusada em toda inserção que não informe tags. Quem mutar o valor que veio
+    do default contamina todos os artigos inseridos depois no mesmo processo.
+
+    `default=list` faz o SQLAlchemy chamar `list()` por inserção.
+    """
+    from app.models.models import KBArticle
+
+    default = KBArticle.__table__.c.tags.default
+
+    assert default.is_callable, (
+        "o default de KBArticle.tags precisa ser chamável (default=list); "
+        "um literal [] é um único objeto compartilhado entre inserções"
+    )
+
+    primeira = default.arg({})
+    segunda = default.arg({})
+
+    assert primeira == [] and segunda == []
+    assert primeira is not segunda
+
+    # A prova do estrago: mexer numa não pode aparecer na outra.
+    primeira.append("seguranca-do-trabalho")
+    assert segunda == []

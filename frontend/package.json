@@ -13,11 +13,13 @@
     "test:coverage": "vitest run --coverage",
     "e2e": "playwright test",
     "e2e:ui": "playwright test --ui",
-    "e2e:report": "playwright show-report"
+    "e2e:report": "playwright show-report",
+    "typecheck": "tsc -b",
+    "format": "prettier --write src e2e",
+    "format:check": "prettier --check src e2e"
   },
   "dependencies": {
     "@hookform/resolvers": "^5.2.2",
-    "@types/marked": "^5.0.2",
     "axios": "^1.14.0",
     "dompurify": "^3.4.13",
     "marked": "^18.0.2",
@@ -35,6 +37,7 @@
     "@testing-library/jest-dom": "^6.9.1",
     "@testing-library/react": "^16.3.2",
     "@testing-library/user-event": "^14.6.1",
+    "@types/node": "^25.9.5",
     "@types/react": "^19.1.2",
     "@types/react-dom": "^19.1.2",
     "@vitejs/plugin-react-swc": "^3.9.0",
@@ -54,5 +57,8 @@
     "typescript-eslint": "^8.30.1",
     "vite": "^6.3.5",
     "vitest": "^4.1.2"
+  },
+  "engines": {
+    "node": ">=20"
   }
 }

@@ -1,7 +1,8 @@
 import asyncio
+from collections.abc import AsyncIterator
 from contextlib import asynccontextmanager, suppress
 
-from fastapi import FastAPI, Request
+from fastapi import FastAPI, Request, Response, status
 from fastapi.exceptions import RequestValidationError
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import JSONResponse
@@ -10,6 +11,7 @@ from slowapi.errors import RateLimitExceeded
 from sqlalchemy import text
 from starlette.exceptions import HTTPException as StarletteHTTPException
 
+from app import __version__
 from app.core.config import get_settings
 from app.core.database import engine
 from app.core.exceptions import http_exception_handler, validation_exception_handler
@@ -35,14 +37,14 @@ from app.routers import (
     tickets,
     users,
 )
-from app.services import storage
-from app.services.ticket_lifecycle import start_auto_close_worker
+from app.services import antivirus, storage
+from app.services.ticket_lifecycle import start_auto_close_worker, ultima_rodada_sem_erro
 
 settings = get_settings()
 
 
 @asynccontextmanager
-async def lifespan(app: FastAPI):
+async def lifespan(app: FastAPI) -> AsyncIterator[None]:
     setup_logging()
     logger.info(f"Starting HelpHS API — env={settings.app_env}")
     logger.info(f"CORS allowed origins: {settings.get_cors_origins()}")
@@ -86,8 +88,24 @@ async def lifespan(app: FastAPI):
             "montado e com permissão de escrita."
         )
 
+    # O antivírus fora do ar é um estado SILENCIOSO: o upload trata
+    # "unavailable" como aprovado, e nada no download relê a marca. A política
+    # continua essa de propósito — bloquear upload com o AV fora derrubaria o
+    # anexo inteiro —, mas o boot passa a dizer em que estado o sistema está.
+    # Só fora de dev/teste: quem desenvolve raramente sobe um ClamAV.
+    if not settings.is_development and not settings.is_testing:
+        if await antivirus.ping(settings.clamav_host, settings.clamav_port):
+            logger.info(f"Antivírus OK: {settings.clamav_host}:{settings.clamav_port}")
+        else:
+            logger.warning(
+                f"ANTIVÍRUS INALCANÇÁVEL em {settings.clamav_host}:{settings.clamav_port}. "
+                "Os anexos continuam sendo aceitos, porém SEM varredura, e ficam "
+                "gravados com virus_scanned=False. Depois de subir o ClamAV, rode "
+                "`python -m scripts.revarre_anexos` para varrer o que entrou sem exame."
+            )
+
     # RN-005 — fecha sozinho os chamados resolvidos que ninguém retomou.
-    # Roda aqui, e não no Celery, porque o ambiente não tem worker (ver
+    # Roda dentro da própria API por decisão, não por falta de fila (ver
     # app/services/ticket_lifecycle.py).
     auto_close_task = start_auto_close_worker()
 
@@ -107,9 +125,12 @@ async def lifespan(app: FastAPI):
 app = FastAPI(
     title="HelpHS — Help Desk Health & Safety",
     description="API RESTful para gestão de chamados de Saúde & Segurança do Trabalho",
-    version="1.0.0",
+    version=__version__,
     docs_url="/docs" if settings.is_development else None,
     redoc_url="/redoc" if settings.is_development else None,
+    # Sem isto o spec fica no default e segue público mesmo com /docs
+    # desligado — o mapa completo da API para quem procura o que atacar.
+    openapi_url=settings.openapi_url_efetiva(),
     lifespan=lifespan,
 )
 
@@ -133,9 +154,12 @@ async def rate_limit_handler(request: Request, exc: RateLimitExceeded) -> JSONRe
     )
 
 
-app.add_exception_handler(RateLimitExceeded, rate_limit_handler)
-app.add_exception_handler(RequestValidationError, validation_exception_handler)
-app.add_exception_handler(StarletteHTTPException, http_exception_handler)
+# Cada handler declara a exceção CONCRETA que trata, o que é mais preciso que a
+# assinatura do Starlette (que aceita Exception). Os ignores marcam essa
+# diferença de variância — não um erro nosso.
+app.add_exception_handler(RateLimitExceeded, rate_limit_handler)  # type: ignore[arg-type]
+app.add_exception_handler(RequestValidationError, validation_exception_handler)  # type: ignore[arg-type]
+app.add_exception_handler(StarletteHTTPException, http_exception_handler)  # type: ignore[arg-type]
 
 app.include_router(auth.router, prefix=settings.api_prefix)
 app.include_router(users.router, prefix=settings.api_prefix)
@@ -156,11 +180,84 @@ app.include_router(quick_replies.router, prefix=settings.api_prefix)
 app.include_router(files.router, prefix=settings.api_prefix)
 
 
+# Quanto o readiness espera por cada dependência antes de chamá-la de fora.
+# Curto de propósito: quem pergunta "está pronto?" precisa de resposta rápida,
+# e uma dependência que demora 5 s para responder já é uma dependência com
+# problema. Não virou configuração porque não há o que ajustar por ambiente.
+_READINESS_TIMEOUT_S = 2.0
+
+
+async def _ping_banco() -> None:
+    async with engine.connect() as conn:
+        await conn.execute(text("SELECT 1"))
+
+
+async def _checar_banco() -> bool:
+    try:
+        await asyncio.wait_for(_ping_banco(), timeout=_READINESS_TIMEOUT_S)
+        return True
+    except Exception as exc:  # noqa: BLE001 — readiness reporta, não levanta
+        logger.warning(f"Readiness: banco indisponível: {exc}")
+        return False
+
+
+async def _ping_redis() -> None:
+    redis = await get_redis()
+    await redis.ping()
+
+
+async def _checar_redis() -> bool:
+    try:
+        await asyncio.wait_for(_ping_redis(), timeout=_READINESS_TIMEOUT_S)
+        return True
+    except Exception as exc:  # noqa: BLE001 — readiness reporta, não levanta
+        logger.warning(f"Readiness: Redis indisponível: {exc}")
+        return False
+
+
 @app.get("/health", tags=["Health"])
 async def health_check() -> dict:
+    """
+    Liveness. Responde se o processo está de pé, e nada além disso.
+
+    NÃO confere dependência nenhuma, de propósito: esta é a rota do
+    HEALTHCHECK do Dockerfile e dos compose. Se ela passasse a depender do
+    banco, uma oscilação do Postgres reiniciaria o container da API — trocando
+    uma indisponibilidade parcial por uma total. Quem quer saber se dá para
+    atender pergunta ao readiness, em /api/v1/health.
+    """
     return {"status": "ok"}
 
 
 @app.get(f"{settings.api_prefix}/health", tags=["Health"])
-async def health_check_versioned() -> dict:
-    return {"status": "ok", "version": "1.0.0", "env": settings.app_env}
+async def readiness_check(response: Response) -> dict:
+    """
+    Readiness. Confere as dependências e responde 503 quando alguma faltou.
+
+    Sem a versão de propósito: esta rota responde sem autenticação, e dizer a
+    release exata a qualquer um só ajuda quem procura uma vulnerabilidade
+    conhecida. A versão fica no metadado do FastAPI, no /docs, desligado em
+    produção.
+
+    O carimbo do fechamento automático é REPORTADO, não usado para derrubar: é
+    `None` nos primeiros 60 s de cada worker, porque o laço espera antes da
+    primeira rodada, e derrubar por causa disso daria 503 em todo boot. Quem
+    observa decide o que fazer com um carimbo velho — ver
+    `ultima_rodada_sem_erro` para o que "sem erro" inclui.
+    """
+    banco_ok, redis_ok = await asyncio.gather(_checar_banco(), _checar_redis())
+    pronto = banco_ok and redis_ok
+
+    if not pronto:
+        response.status_code = status.HTTP_503_SERVICE_UNAVAILABLE
+
+    ultima = ultima_rodada_sem_erro()
+    return {
+        "status": "ok" if pronto else "degraded",
+        "env": settings.app_env,
+        "checks": {
+            "database": "ok" if banco_ok else "down",
+            "redis": "ok" if redis_ok else "down",
+        },
+        "auto_close": {"last_success": ultima.isoformat() if ultima else None},
+    }

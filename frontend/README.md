@@ -1,54 +1,57 @@
-# React + TypeScript + Vite
+# HelpHS — Frontend
 
-This template provides a minimal setup to get React working in Vite with HMR and some ESLint rules.
+App React + Vite + TypeScript + Tailwind do HelpHS. O setup geral do projeto
+(backend, banco, variáveis da raiz) está no [README da raiz](../README.md).
 
-Currently, two official plugins are available:
+## Requisitos
 
-- [@vitejs/plugin-react](https://github.com/vitejs/vite-plugin-react/blob/main/packages/plugin-react) uses [Babel](https://babeljs.io/) for Fast Refresh
-- [@vitejs/plugin-react-swc](https://github.com/vitejs/vite-plugin-react/blob/main/packages/plugin-react-swc) uses [SWC](https://swc.rs/) for Fast Refresh
+- Node.js 20 (o CI e o Docker usam 20 — `.nvmrc` na pasta)
 
-## Expanding the ESLint configuration
+## Desenvolvimento
 
-If you are developing a production application, we recommend updating the configuration to enable type-aware lint rules:
-
-```js
-export default tseslint.config({
-  extends: [
-    // Remove ...tseslint.configs.recommended and replace with this
-    ...tseslint.configs.recommendedTypeChecked,
-    // Alternatively, use this for stricter rules
-    ...tseslint.configs.strictTypeChecked,
-    // Optionally, add this for stylistic rules
-    ...tseslint.configs.stylisticTypeChecked,
-  ],
-  languageOptions: {
-    // other options...
-    parserOptions: {
-      project: ['./tsconfig.node.json', './tsconfig.app.json'],
-      tsconfigRootDir: import.meta.dirname,
-    },
-  },
-})
+```bash
+npm ci
+npm run dev        # Vite em http://localhost:5173
 ```
 
-You can also install [eslint-plugin-react-x](https://github.com/Rel1cx/eslint-react/tree/main/packages/plugins/eslint-plugin-react-x) and [eslint-plugin-react-dom](https://github.com/Rel1cx/eslint-react/tree/main/packages/plugins/eslint-plugin-react-dom) for React-specific lint rules:
+O backend local precisa estar de pé em **localhost:8001** — o proxy do Vite
+(`vite.config.ts`) encaminha `/api` e o WebSocket para lá. Não é necessário
+criar `.env` em dev; o fallback `/api/v1` + proxy é o caminho normal.
+Ver `.env.example` para o caso de apontar para outra API.
 
-```js
-// eslint.config.js
-import reactX from 'eslint-plugin-react-x'
-import reactDom from 'eslint-plugin-react-dom'
+## Scripts
 
-export default tseslint.config({
-  plugins: {
-    // Add the react-x and react-dom plugins
-    'react-x': reactX,
-    'react-dom': reactDom,
-  },
-  rules: {
-    // other rules...
-    // Enable its recommended typescript rules
-    ...reactX.configs['recommended-typescript'].rules,
-    ...reactDom.configs.recommended.rules,
-  },
-})
+| Script                               | O que faz                                           |
+| ------------------------------------ | --------------------------------------------------- |
+| `npm run dev`                        | dev server com HMR                                  |
+| `npm run build`                      | typecheck (`tsc -b`) + build de produção em `dist/` |
+| `npm run typecheck`                  | só o typecheck (mesmo comando do CI)                |
+| `npm run lint`                       | ESLint                                              |
+| `npm test` / `npm run test:coverage` | Vitest (unidade/componente)                         |
+| `npm run e2e` / `npm run e2e:ui`     | Playwright (ver pré-requisitos abaixo)              |
+| `npm run format`                     | Prettier em `src/` e `e2e/`                         |
+
+## E2E (Playwright)
+
+**Não roda no CI.** Requer, antes de `npm run e2e`:
+
+1. Backend em `localhost:8001` com banco **local** semeado
+   (`admin@healthsafety.com` / senha do seed — nunca rodar contra produção);
+2. O dev server sobe sozinho via `webServer` do `playwright.config.ts`.
+
+Credenciais podem ser sobrescritas por `ADMIN_EMAIL`/`ADMIN_PASSWORD` e
+`CLIENT_EMAIL`/`CLIENT_PASSWORD`.
+
+## Docker / produção
+
+Multi-stage: Node 20 builda, nginx serve `dist/` na porta 80. O deploy é
+manual via EasyPanel (front e back são serviços separados).
+
+- **Build arg obrigatório:** `VITE_API_URL` (URL pública da API). O Vite
+  embute o valor no bundle em **build-time** — trocar a URL exige _rebuild_
+  do serviço, não restart. Sem o arg, o build falha de propósito.
+- TLS/HSTS terminam no proxy do EasyPanel; o nginx daqui só serve estáticos.
+
+```bash
+docker build -t helphs-frontend --build-arg VITE_API_URL=https://api.exemplo.com/api/v1 .
 ```

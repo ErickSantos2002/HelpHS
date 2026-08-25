@@ -1,5 +1,6 @@
 import json
 from functools import lru_cache
+from typing import Any
 from urllib.parse import urlparse
 
 from pydantic import field_validator
@@ -43,6 +44,14 @@ class Settings(BaseSettings):
     def _normaliza_app_env(cls, valor: str) -> str:
         """Ponto único onde a caixa e o espaço do APP_ENV deixam de importar."""
         return valor.strip().lower()
+
+    # Senha do admin criado por `app.seeds`, que o `start.sh` roda a cada boot.
+    # Sem default de propósito: enquanto havia um literal no código, todo deploy
+    # de produção criava um administrador ativo com senha publicada no
+    # repositório. Ausente, o seed pula a criação em vez de cair num valor
+    # conhecido — e é essa ausência, não o APP_ENV, que segura o caso de a
+    # variável de ambiente estar errada.
+    seed_admin_password: str | None = None
 
     app_host: str = "0.0.0.0"
     app_port: int = 8000
@@ -101,12 +110,23 @@ class Settings(BaseSettings):
     secret_key: str = ""
     bcrypt_rounds: int = 12
 
-    def model_post_init(self, __context) -> None:
-        if not self.is_production:
+    def model_post_init(self, __context: Any) -> None:
+        # A lista do que ESCAPA é fechada, e é essa a diferença. Enquanto a
+        # condição era `if not self.is_production`, qualquer APP_ENV fora de
+        # "production"/"prod" passava batido: um staging publicado na internet
+        # aceitava SECRET_KEY curta, CORS_ORIGINS=* e FRONTEND_URL de
+        # localhost — e staging é justamente onde se testa com dado copiado do
+        # real. Agora só desenvolvimento e teste ficam de fora; um APP_ENV
+        # desconhecido cai no lado severo, que é o lado seguro do erro.
+        #
+        # Apertar a validação não promove o ambiente: `is_production` continua
+        # False para staging, senão ele herdaria decisões que são só de
+        # produção — o /docs desligado, o seed de admin que não roda.
+        if self.is_development or self.is_testing:
             return
 
         if len(self.secret_key) < 32:
-            raise ValueError("SECRET_KEY must be at least 32 characters in production")
+            raise ValueError(f"SECRET_KEY precisa ter ao menos 32 caracteres em '{self.app_env}'")
 
         # O default de cors_origins é localhost. Como o nginx do front não faz
         # proxy para a API, o navegador fala com outro domínio e o CORS é
@@ -115,13 +135,17 @@ class Settings(BaseSettings):
         # descobrir isso em produção — mesma escolha feita para a SECRET_KEY.
         origens = self.get_cors_origins()
         if not origens:
-            raise ValueError("CORS_ORIGINS está vazio em produção: defina o domínio real do front")
+            raise ValueError(
+                f"CORS_ORIGINS está vazio em '{self.app_env}': defina o domínio real do front"
+            )
         if any(o == "*" for o in origens):
-            raise ValueError("CORS_ORIGINS não pode ser '*' em produção: use o domínio do front")
+            raise ValueError(
+                f"CORS_ORIGINS não pode ser '*' em '{self.app_env}': use o domínio do front"
+            )
         locais = [o for o in origens if _host_de(o) in _HOSTS_LOCAIS]
         if locais:
             raise ValueError(
-                "CORS_ORIGINS precisa ser definido com o domínio real do front em produção "
+                "CORS_ORIGINS precisa ser definido com o domínio real do front "
                 f"(estas origens são locais: {', '.join(locais)})"
             )
 
@@ -131,7 +155,7 @@ class Settings(BaseSettings):
         # ninguém — e nada no backend reclama.
         if _host_de(self.frontend_url) in _HOSTS_LOCAIS:
             raise ValueError(
-                "FRONTEND_URL precisa ser o endereço público do sistema em produção: "
+                "FRONTEND_URL precisa ser o endereço público do sistema: "
                 "os links dos e-mails de confirmação e de senha saem a partir dele"
             )
 
@@ -162,19 +186,14 @@ class Settings(BaseSettings):
     minio_use_ssl: bool = False
 
     # LLM
-    llm_primary_provider: str = "openai"
     openai_api_key: str = ""
     openai_model: str = "gpt-4o-mini"
-    openai_max_tokens: int = 1024
     openai_temperature: float = 0.3
 
-    llm_fallback_provider: str = "anthropic"
     anthropic_api_key: str = ""
     anthropic_model: str = "claude-3-5-haiku-20241022"
-    anthropic_max_tokens: int = 1024
 
     llm_fallback_enabled: bool = True
-    llm_max_retries: int = 2
     llm_request_timeout_seconds: int = 30
 
     # Email
@@ -219,7 +238,6 @@ class Settings(BaseSettings):
     clamav_host: str = "clamav"
     clamav_port: int = 3310
     clamav_timeout_seconds: int = 30
-    clamav_max_file_size_mb: int = 25
 
     # Upload
     upload_max_file_size_mb: int = 25
@@ -227,12 +245,6 @@ class Settings(BaseSettings):
     upload_allowed_extensions: str = (
         ".pdf,.doc,.docx,.xls,.xlsx,.png,.jpg,.jpeg,.gif,.txt,.csv,.zip,.rar"
     )
-
-    # SLA
-    sla_business_hours_start: str = "08:00"
-    sla_business_hours_end: str = "18:00"
-    sla_business_days: str = "1,2,3,4,5"
-    sla_timezone: str = "America/Sao_Paulo"
 
     # Encerramento do chamado (RN-005 / RN-006).
     # Os prazos são contados em DIAS ÚTEIS a partir do momento em que o chamado
@@ -244,19 +256,11 @@ class Settings(BaseSettings):
     # 0 desliga a rotina (útil em testes e em execução local).
     ticket_auto_close_interval_seconds: int = 3600
 
-    # Celery
-    celery_broker_url: str = "redis://localhost:6379/1"
-    celery_result_backend: str = "redis://localhost:6379/2"
-    celery_default_max_retries: int = 3
-    celery_task_soft_time_limit: int = 300
-    celery_task_time_limit: int = 600
-
     # Logging
     log_level: str = "INFO"
     log_dir: str = "./logs"
 
     # Rate limiting
-    rate_limit_default: str = "100/15minutes"
     rate_limit_login: str = "5/15minutes"
 
     # Quem pode falar pelos outros: lista de IPs/redes cujo X-Forwarded-For o
@@ -300,6 +304,18 @@ class Settings(BaseSettings):
     @property
     def is_testing(self) -> bool:
         return self.app_env == "testing"
+
+    def openapi_url_efetiva(self) -> str | None:
+        """
+        Onde o spec da API é servido — `None` desliga a rota.
+
+        Mesma condição do /docs e do /redoc de propósito: o spec É a
+        documentação, em outro formato. Ter duas chaves para "expor a API por
+        escrito" seria mais uma configuração para alguém deixar ligada sem
+        querer, e a rodada passada já mostrou o que configuração esquecida
+        custa.
+        """
+        return "/openapi.json" if self.is_development else None
 
     @property
     def allowed_extensions(self) -> list[str]:

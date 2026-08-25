@@ -1,4 +1,4 @@
-import { defineConfig } from "vitest/config";
+import { configDefaults, defineConfig } from "vitest/config";
 import { loadEnv } from "vite";
 import react from "@vitejs/plugin-react-swc";
 
@@ -15,52 +15,52 @@ export default defineConfig(({ mode }) => {
   const wsTarget = apiTarget.replace(/^http/, "ws");
 
   return {
-  plugins: [react()],
-  build: {
-    rollupOptions: {
-      output: {
-        manualChunks: {
-          // Core React runtime — cached across all page loads
-          "vendor-react": ["react", "react-dom", "react-router-dom"],
-          // Form / validation libs
-          "vendor-forms": ["react-hook-form", "@hookform/resolvers", "zod"],
+    plugins: [react()],
+    build: {
+      rollupOptions: {
+        output: {
+          manualChunks: {
+            // Core React runtime — cached across all page loads
+            "vendor-react": ["react", "react-dom", "react-router-dom"],
+            // Form / validation libs
+            "vendor-forms": ["react-hook-form", "@hookform/resolvers", "zod"],
+          },
         },
       },
     },
-  },
-  server: {
-    port: 5173,
-    proxy: {
-      // WebSocket must be matched before the generic /api rule
-      "/api/v1/ws": {
-        target: wsTarget,
-        ws: true,
-        changeOrigin: true,
-      },
-      "/api": {
-        target: apiTarget,
-        changeOrigin: true,
+    server: {
+      port: 5173,
+      proxy: {
+        // WebSocket must be matched before the generic /api rule
+        "/api/v1/ws": {
+          target: wsTarget,
+          ws: true,
+          changeOrigin: true,
+        },
+        "/api": {
+          target: apiTarget,
+          changeOrigin: true,
+        },
       },
     },
-  },
-  test: {
-    environment: "happy-dom",
-    globals: true,
-    setupFiles: ["./src/test/setup.ts"],
-    exclude: ["node_modules", "e2e/**"],
-    coverage: {
-      provider: "v8",
-      reporter: ["text", "lcov"],
-      include: [
-        "src/components/ui/**/*.tsx",
-        // Os guards de rota decidem quem vê o quê — sem eles no include, o
-        // relatório dizia 50% sem saber que essa camada existia.
-        "src/components/layout/**/*.tsx",
-        "src/lib/**/*.ts",
-        "src/services/**/*.ts",
-        "src/contexts/**/*.tsx",
-      ],
+    test: {
+      environment: "happy-dom",
+      globals: true,
+      setupFiles: ["./src/test/setup.ts"],
+      exclude: [...configDefaults.exclude, "e2e/**"],
+      coverage: {
+        provider: "v8",
+        reporter: ["text", "lcov"],
+        include: [
+          "src/components/ui/**/*.tsx",
+          // Os guards de rota decidem quem vê o quê — sem eles no include, o
+          // relatório dizia 50% sem saber que essa camada existia.
+          "src/components/layout/**/*.tsx",
+          "src/lib/**/*.ts",
+          "src/services/**/*.ts",
+          "src/contexts/**/*.tsx",
+        ],
+      },
     },
-  },
   };
 });

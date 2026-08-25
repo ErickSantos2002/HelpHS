@@ -3,8 +3,9 @@ JWT RS256 token creation, validation, and Redis-based blacklist.
 """
 
 import secrets
+from collections.abc import Awaitable, Callable
 from datetime import UTC, datetime, timedelta
-from typing import Annotated
+from typing import Annotated, Any
 from uuid import UUID
 
 from fastapi import Depends, HTTPException, status
@@ -173,9 +174,12 @@ async def delete_refresh_token(user_id: UUID) -> None:
 async def get_current_user(
     credentials: Annotated[HTTPAuthorizationCredentials | None, Depends(bearer_scheme)],
     db: Annotated[AsyncSession, Depends(get_db)],
-):
+) -> Any:
     """
     Validates the Bearer token and returns the User ORM object.
+
+    O retorno é `Any` e não `User` de propósito: o modelo é importado dentro da
+    função para evitar import circular, então o nome não existe aqui em cima.
     Raises 401 if token is missing, invalid, expired, or blacklisted.
     """
     from app.models.models import User, UserStatus  # avoid circular import
@@ -226,7 +230,7 @@ async def get_current_user(
     return user
 
 
-def authorize(*roles):
+def authorize(*roles: Any) -> Callable[..., Awaitable[Any]]:
     """
     Dependency factory for role-based access control.
 
@@ -246,7 +250,7 @@ def authorize(*roles):
 
     allowed = frozenset(roles)
 
-    async def _check(user=Depends(get_current_user)):
+    async def _check(user: Any = Depends(get_current_user)) -> Any:
         if user.role not in allowed:
             raise HTTPException(
                 status_code=status.HTTP_403_FORBIDDEN,
@@ -260,13 +264,13 @@ def authorize(*roles):
 # ── Convenience aliases ───────────────────────────────────────
 
 
-def require_admin():
+def require_admin() -> Callable[..., Awaitable[Any]]:
     from app.models.models import UserRole
 
     return authorize(UserRole.admin)
 
 
-def require_technician_or_admin():
+def require_technician_or_admin() -> Callable[..., Awaitable[Any]]:
     from app.models.models import UserRole
 
     return authorize(UserRole.admin, UserRole.technician)

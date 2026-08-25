@@ -477,7 +477,7 @@ class Ticket(Base):
         back_populates="ticket", cascade="all, delete-orphan"
     )
     satisfaction_survey: Mapped["SatisfactionSurvey | None"] = relationship(
-        back_populates="ticket", uselist=False
+        back_populates="ticket", uselist=False, cascade="all, delete-orphan"
     )
     tags: Mapped[list["Tag"]] = relationship(
         secondary=ticket_tags, back_populates="tickets", lazy="selectin"
@@ -630,7 +630,7 @@ class KBArticle(Base):
     category: Mapped[TicketCategory] = mapped_column(
         Enum(TicketCategory), default=TicketCategory.general
     )
-    tags: Mapped[list[str]] = mapped_column(ARRAY(String(50)), default=[])
+    tags: Mapped[list[str]] = mapped_column(ARRAY(String(50)), default=list)
     status: Mapped[KBArticleStatus] = mapped_column(
         Enum(KBArticleStatus), default=KBArticleStatus.draft, index=True
     )

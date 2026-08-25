@@ -7,6 +7,323 @@ O changelog do produto (o que o cliente vê) fica em
 
 ---
 
+## 25/08/2026 (noite) — Os oito médios restantes, em três blocos
+
+Fechamento da auditoria do backend: cinco pequenos sem decisão pendente, os
+dois mecânicos maiores e o preparo do antivírus. Nove commits.
+
+| Commit | O que foi feito |
+|---|---|
+| `6e8f409` | `fix:` **o spec da API** deixa de ser público fora de dev 🔴 |
+| `e3cea9a` | `fix:` **ambiente não-local** para de escapar das validações 🔴 |
+| `52a3b7f` | `fix:` **DELETE de usuário** confere o que o banco recusa |
+| `8e03e05` | `fix:` as duas listagens param de **mentir o `limit`** |
+| `e8c642e` | `fix:` **link de confirmação** vira de uso único 🔴 |
+| `d765587` | `perf:` as três listagens param de **consultar por item** |
+| `846c6c4` | `chore:` **mypy zerado e ligado** no CI |
+| `8ff214c` | `feat:` **revarredura de anexos** e aviso de antivírus fora |
+| `docs:` | Este fechamento |
+
+### O erro que a lista fechada conserta
+
+O M4 parecia blindagem para um staging que ainda não existe, e é — mas o
+desenho mudou de forma no meio. A condição era `if not self.is_production:
+return`, e `is_production` só reconhece `"production"` e `"prod"`.
+
+Trocar por "valide também staging" resolveria o caso citado e deixaria o
+problema de pé, porque o problema não é o nome *staging*: é a **direção do
+default**. Com a lista de quem valida sendo aberta, todo nome novo — e todo
+nome digitado errado — nasce fora da validação. Um typo em `production`
+desligava, de uma vez, a checagem de `SECRET_KEY`, de CORS e de `FRONTEND_URL`.
+
+Com a lista de quem **escapa** sendo fechada (`development`, `testing`), o
+mesmo typo agora *liga* as validações. O erro passou a apontar para o lado
+seguro, que é a única coisa que se pode pedir de um default.
+
+Apertar a validação não promove o ambiente: `is_production` continua False para
+staging, senão ele herdaria decisões que são só de produção — o `/docs`
+desligado, o seed de admin que não roda.
+
+### O achado que não era bug
+
+Ao zerar o mypy, `schemas/tag.py` acusou `strip_whitespace=True` no `Field`.
+Não é parâmetro do `Field` no pydantic v2: chegava como kwarg extra — era a
+deprecation que sujava toda rodada de teste — e não fazia nada.
+
+Antes de mexer, conferi o comportamento em vez de deduzi-lo: `TagCreate(name='
+urgente ')` **estrutura o nome sem espaços**. O strip acontece, só que quem faz
+é o `str_strip_whitespace=True` do `AppBaseModel`, herdado. Ou seja: decoração
+morta, com o comportamento certo chegando por outro caminho. Remover não muda
+nada — e é por isso que dá para remover sem susto.
+
+Vale registrar porque o caminho oposto era plausível: se eu tivesse "consertado"
+o que o mypy apontou passando o parâmetro para onde ele funciona, teria mexido
+num comportamento que já estava correto.
+
+### O DELETE que recusava errado
+
+O M5 tinha um sintoma pequeno (500 em vez de 409) e uma causa que valia
+levantar: a guarda contava `Ticket.creator_id` e o banco tem **onze**
+referências a `users.id` sem `ondelete`. Levantei uma a uma — as outras seis
+têm `SET NULL` ou `CASCADE` e se resolvem sozinhas.
+
+A consequência merece atenção: como auditoria está entre as onze, usuário que
+já fez qualquer coisa no sistema deixa de ser excluível e passa a ser caso de
+anonimização. Isso é o comportamento correto para a LGPD e já era a intenção
+declarada do código (`"Use anonymize instead"`); a diferença é que antes a
+intenção falhava com 500. Quem nunca agiu continua excluível — o log de
+auditoria da criação aponta para o admin que criou, não para a conta criada.
+
+### Números reais, não paginação
+
+No M9 a escolha entre "paginar de verdade" e "devolver os números reais" não é
+de gosto: depende do que a rota é. As duas são listas completas por
+necessidade — o dropdown de responsável e os aparelhos do próprio usuário.
+Paginar esconderia opções atrás de uma página que a tela não sabe pedir,
+trocando uma mentira cosmética por um bug silencioso.
+
+### O que o script de revarredura recusa fazer
+
+O ClamAV vai subir, e o M7 preparou os dois lados. O script é o de sempre —
+dry-run por padrão, `--aplicar` para gravar, no molde do `normaliza_cnpj` — mas
+a decisão que importa está na tradução da resposta do ClamAV.
+
+`unavailable` e `error: ...` **não** viram exame. Marcar como examinado um anexo
+que o ClamAV não conseguiu ler seria inventar resultado, e é exatamente o erro
+que um script apressado comete: contar o que tentou em vez do que conseguiu.
+
+E nada é apagado, nem arquivo infectado. Anexo é prova de um chamado; um script
+de limpeza que descarta o que não entende é pior que o problema que veio
+consertar. Infectado sai em destaque no relatório para quem lê decidir.
+
+O aviso de boot não muda a política — bloquear upload com o antivírus fora
+derrubaria o anexo inteiro por causa de um serviço auxiliar. Só faz o estado
+deixar de ser invisível, e a mensagem já aponta o script.
+
+### Nota sobre o zap-scan
+
+O M3 desliga o `/openapi.json` fora de dev, e o `zap-scan.yml` se alimenta dele
+— por isso o cabeçalho e a descrição do input passaram a dizer que o alvo
+precisa ser um ambiente com o spec exposto.
+
+⚠️ Enquanto mexia ali notei outra coisa, que **não** consertei por não conseguir
+verificar a topologia do deploy: o workflow monta o alvo como
+`${target_url}/openapi.json` com `target_url` terminando em `/api/v1`, mas o
+spec é servido na **raiz** (`/openapi.json`), porque `openapi_url` é
+configuração do FastAPI e não passa pelo prefixo dos routers. Se não houver um
+proxy reescrevendo, esse alvo já estava 404 antes desta mudança. Vale conferir
+na próxima vez que o scan rodar.
+
+Suíte: 632 → 639 testes, verdes, cobertura 85%. mypy limpo em 66 arquivos. Sem
+migration. Nada foi executado contra produção.
+
+---
+
+## 25/08/2026 (tarde) — Fazer o sistema conseguir dizer que está quebrado
+
+Três achados médios com um tema só: **o sistema não tinha como avisar que
+parou**. A rotina do RN-005 morria em silêncio, o healthcheck respondia "ok"
+sem conferir nada, e o e-mail saía antes de o fato existir — as três formas de
+o software afirmar uma coisa e viver outra.
+
+| Commit | O que foi feito |
+|---|---|
+| `9146dc2` | `fix:` **o laço do fechamento automático** sobrevive ao erro e se carimba |
+| `ec533c4` | `feat:` **`/api/v1/health` vira readiness**; `/health` intocado |
+| `66f2569` | `fix:` **e-mail só sai depois do commit** que o torna verdade |
+| `docs:` | Este fechamento |
+
+### A pergunta que decidiu o M6
+
+O desenho do M6 tinha duas alternativas na mesa e eu fui instruído a escrever o
+argumento antes de tocar nos 13 chamadores. As duas caíram por motivo prático,
+não por gosto:
+
+**BackgroundTasks do FastAPI** só existe onde existe request. O
+`ticket_lifecycle.py:131` notifica de dentro do laço de fechamento automático,
+sem request nenhum — precisaria de um segundo mecanismo só para esse caminho, e
+o `_auto_transition`, que notifica e é chamado de outro handler, teria de
+carregar o parâmetro pela cadeia inteira.
+
+**Listener de `after_commit` do SQLAlchemy** era o desenho elegante: automático,
+invisível, sem tocar em chamador nenhum. Morreu numa linha do `conftest.py` —
+"o banco é mockado em todos os testes". Com `session = AsyncMock()`, o commit
+não é um commit do SQLAlchemy e o evento nunca dispararia: o mecanismo inteiro
+ficaria fora do alcance da suíte. Mecanismo que a suíte não enxerga não entra.
+
+Sobrou o registro de pendências chaveado por sessão. Antes de propor, testei a
+parte que só falha na prática: `WeakKeyDictionary` aceita como chave tanto a
+`AsyncSession` real quanto o `AsyncMock` da suíte, e isola sessões simultâneas.
+
+### O detalhe que resolveu a retentativa de graça
+
+A pendência é **retirada do registro antes** do commit, não depois. Parece
+detalhe de ordem e é o que faz o laço de protocolo funcionar sem que ninguém
+mexa em `rollback`: se o commit levanta, a pendência daquela tentativa já saiu
+e não sobra para a próxima. Cinco tentativas, um e-mail — e os outros dois
+`rollback` do projeto (`groups.py`, `surveys.py`) estão em módulos que nem
+notificam.
+
+Troquei os **15** commits dos três módulos que notificam, não só os que seguem
+um `notify()`. O `_auto_transition` notifica e é chamado de outro handler, então
+qual commit carrega pendência não se decide olhando o site isolado — provar o
+negativo caso a caso seria mais frágil que a uniformidade.
+
+### Dois testes que fixavam o problema como contrato
+
+`test_notify_schedules_email_task_when_settings_provided` afirmava que o
+`notify()` criava a task de envio na hora. Isso **era** o bug do M6: o teste
+travava o envio-antes-do-commit como se fosse a regra. Foi substituído por um
+que prova as duas metades — notify sozinho não envia, o commit envia uma vez só.
+
+No M2, `test_health_check_versioned` afirmava 200 e `status: ok` numa rota que
+não conferia nada; virou redundante com o teste novo de readiness e saiu. O da
+versão passou a valer nos **dois** estados, porque a resposta de degradado é a
+que mais convida a despejar detalhe de diagnóstico — e é a que um curioso
+consegue provocar.
+
+### Um teste meu que prometia demais
+
+O teste de cancelamento do laço do M1 passou de primeira, então verifiquei por
+mutação, como manda a casa. Trocar o `except` por `except BaseException` — que
+engoliria o cancelamento — **manteve o teste verde**. Desde o 3.11 o asyncio
+re-entrega o cancelamento pendente no `await` seguinte, então o teste não
+consegue distinguir. Corrigi o docstring e o comentário para dizerem o que a
+coisa realmente prova: que o laço termina no `cancel`. Quem protege o
+desligamento é o `except Exception` — `CancelledError` é `BaseException` —, não
+o teste.
+
+### O resto
+
+O `/health` não foi tocado de propósito, e agora há teste que trava isso: é o
+alvo do `HEALTHCHECK` do Dockerfile e dos compose, e um liveness que depende do
+banco transforma oscilação de Postgres em restart de container. Antes de mudar
+o status code do `/api/v1/health` conferi quem o consome: ninguém
+programaticamente — todo probe automático do repositório bate em `/health`.
+
+Suíte: 600 → 611 testes, verdes, cobertura 86%. Sem migration. Nada foi
+executado contra produção.
+
+---
+
+## 25/08/2026 — A rodada dos achados pequenos, e o que um deles escondia
+
+Os seis achados de severidade baixa da auditoria do backend, em dez commits.
+Nenhum deles é urgente sozinho; juntos são quase todos a mesma doença — **o
+repositório afirmando coisas que o código não faz**. Configuração que promete
+um controle inexistente, pacote que parece implementado, anotação que declara
+um tipo que não é o dele, docstring que descreve uma permissão diferente da que
+o `authorize` aplica, versão congelada em `1.0.0` enquanto o produto ia para
+v1.8.0.
+
+| Commit | O que foi feito |
+|---|---|
+| `c615ad7` | `fix:` **log de e-mail deixa de descartar destinatário e motivo** |
+| `c53bb80` | `fix:` **nenhum e-mail sairia com `SMTP_REPLY_TO` vazio** 🔴 |
+| `b30f75e` | `refactor:` remove **sete configurações** sem uso |
+| `3cf63d2` | `refactor:` remove o **bloco SLA** do `config.py` ⚠️ |
+| `3c4b433` | `refactor:` remove o **pacote `worker/` e o Celery** |
+| `4e975b7` | `chore:` `.dockerignore` passa a excluir `.coverage` e `uploads/` |
+| `21e8b22` | `refactor:` `tags.py` para de anotar usuário como `object` |
+| `e1985a4` | `fix:` **tags do artigo da KB** deixam de ser lista compartilhada |
+| `dcfc25f` | `refactor:` **versão** ganha fonte única e sai da resposta pública |
+| `a8de8c6` | `fix:` **pesquisa de satisfação** cai junto com o ticket no ORM |
+| `docs:` | Este fechamento |
+
+### O achado pequeno que escondia um grande
+
+O item B1 pedia uma coisa modesta: cinco chamadas de log usavam placeholder de
+`%`-formatting, que o loguru não entende — a linha saía com o literal `%s` e os
+argumentos iam para o lixo. O pedido incluía, "se der", um teste que capturasse
+o log e afirmasse que o destinatário aparece na linha.
+
+O teste foi escrito, ficou vermelho pelo motivo certo, e depois da correção
+**continuou vermelho por outro motivo**. A linha registrada não era a falha de
+SMTP que o teste simulava: era um erro de validação do `MessageSchema`. O
+`send_email` monta a mensagem com `reply_to=None` quando `SMTP_REPLY_TO` está
+vazio, e o fastapi-mail recusa `None` nesse campo — exige lista.
+
+Ou seja: **com `SMTP_REPLY_TO` vazio, nenhum e-mail sairia**. A exceção estoura
+na montagem, antes de qualquer tentativa de entrega, e o `except` a engole como
+se fosse falha de rede. E `SMTP_REPLY_TO` nasce vazio — no `config.py` e no
+`.env.example`.
+
+Hoje isso não aparece porque não há SMTP em produção: o `send_email` retorna
+antes, na guarda de "SMTP não configurado". A falha apareceria inteira, e como
+"e-mail simplesmente não funciona", no dia em que o Erick ligasse o SMTP.
+
+O teste que já existia para esse caminho — `test_send_email_handles_smtp_failure`
+— passava. Ele afirmava só `result is False`, e `False` era verdade pelos dois
+motivos: pela falha simulada e pelo erro de montagem que ninguém tinha visto.
+Um teste que afirma pouco demais não é uma rede de segurança, é uma luz verde
+sobre um buraco.
+
+### O bloco de SLA era o inverso: o código certo, a configuração mentindo
+
+O `config.py` anunciava `SLA_BUSINESS_HOURS_END=18:00`. O `utils/sla.py`
+calcula com `_WORK_END = 17`. E não existe uma linha ligando os dois — o
+`sla.py` não importa `Settings`.
+
+O perigo aqui não é o valor errado, é o **conserto** errado. Quem abrisse os
+dois arquivos veria uma divergência óbvia e uma correção óbvia: ligar a
+configuração ao motor. Isso mudaria o prazo de todos os chamados de uma vez,
+sem ninguém perceber, contra uma regra confirmada com o cliente em 05/08 e
+registrada como RN-013.
+
+Por isso este foi o único item em que remover não era preferência e sim a única
+opção segura — e por isso veio em commit separado dos outros sete campos
+mortos, onde a escolha entre remover e ligar era de gosto. Tirei os quatro
+campos do bloco, não só os dois do horário: `sla_business_days` e `sla_timezone`
+estavam igualmente mortos e são a mesma armadilha para o próximo.
+
+A proteção real não é o commit — é um comentário nas constantes do `sla.py`
+explicando por que são constantes e apontando para o documento de decisões.
+Mensagem de commit ninguém lê daqui a um ano; o comentário está onde a pessoa
+vai estar olhando.
+
+### Dois achados que a auditoria descreveu com mais gravidade do que tinham
+
+Registro porque a diferença muda o que se deve fazer com eles.
+
+O default mutável de `KBArticle.tags` **é** um problema, mas não o clássico
+`def f(x=[])`: default de coluna vale na **inserção**, não na construção —
+`KBArticle().tags` é `None`, não `[]`. O estrago real é que o `default=[]`
+guarda um único objeto reusado em toda inserção, então mutar o valor que veio
+dali contamina os artigos inseridos depois no mesmo processo. `default=list`
+resolve, e o teste afirma exatamente essa propriedade: duas avaliações do
+default precisam devolver objetos distintos.
+
+Já as anotações do `routers/sla.py` **não eram um achado**. A auditoria pedia
+para "anotar o tipo real" em `-> list[SLAConfig]` e `-> SLAConfig`, mas esse já
+é o tipo real: as funções devolvem objetos do ORM, e é o `response_model` que
+filtra para a resposta HTTP. Anotar `SLAConfigResponse` ali seria trocar uma
+anotação correta por uma errada. Não mexi. (O `sla.py` usa `= Depends(...)`
+onde o resto do projeto usa `Annotated[...]` — inconsistência de estilo, não
+mentira de tipo; fica para quem quiser uniformizar.)
+
+### O resto
+
+O pacote `app/worker/` saiu inteiro. Não havia uma chamada `.delay(` no
+repositório, nem processo Celery no `start.sh`, e as duas tarefas de negócio
+devolviam `{"status": "queued"}` sem fazer nada — inclusive uma
+`tasks.classify_ticket` que era um stub vazio ao lado do `classify_ticket` de
+verdade, no `services/llm.py`. Nos documentos, a rotina periódica dentro da API
+deixou de aparecer como consequência de uma falta ("o Celery está configurado
+mas não tem worker") e passou a constar como decisão, com o motivo. Os dois
+comentários no código que ainda citavam o Celery como configurado foram
+corrigidos junto — se ficassem, seriam a próxima mentira.
+
+A versão fez as duas coisas que o achado colocava como alternativa, porque
+resolvem problemas diferentes: fonte única em `app/__init__.py`, para não
+congelar de novo; e fora do `/api/v1/health`, que responde sem autenticação e
+não tem por que entregar a release exata a qualquer um.
+
+Suíte: 586 → 594 testes, todos verdes, cobertura 85%. Nenhuma migration —
+`default=list` e cascade de relationship são comportamento do ORM, o DDL não
+muda. Nada foi executado contra produção.
+
+---
+
 ## 24/08/2026 — Duas fontes de verdade para "empresa", e o começo da reconciliação
 
 Frente nova, aberta pelo próprio trabalho de documentação: escrever a
@@ -25,6 +342,8 @@ para "por dono" quando a decisão de negócio correta era "por empresa".
 | `e30968e` | `fix:` **cobertura parava de contar** depois do primeiro `await` no banco |
 | `470d56c` | `test:` **domínio de empresa em `groups.py`** sai do descoberto |
 | `abdee48` | `feat:` **criar empresa pela sugestão passa a vincular** os clientes |
+| `3478bae` | `fix:` **admin de seed deixa de nascer com senha do repositório** 🔴 |
+| `b736114` | `test:` as duas defesas do seed de admin |
 | `docs:` | Este fechamento |
 
 ### O levantamento corrigiu a própria premissa
@@ -182,6 +501,51 @@ digitaram nomes diferentes, e o que fazer com quem tem `company_name` mas não
 tem CNPJ — decisões de produto, não de implementação. Mas o estrago acabou: com
 o reaproveitamento por CNPJ, os dois cards caem na mesma empresa. O defeito
 virou cosmético — dois cliques em vez de um — em vez de gerar duplicata.
+
+### O achado do dia: o boot de produção criava um admin com senha pública
+
+Verificação de segurança pedida no fim do dia, e o resultado foi o pior tipo:
+não era hipótese, era cadeia confirmada em três arquivos. `Dockerfile` chama
+`start.sh`; `start.sh` roda `python -m app.seeds` a cada boot; `seed_admin`
+criava `admin@healthsafety.com` com `Admin@123456` — senha escrita no código
+deste repositório — como administrador **ativo**, sem nenhuma guarda de
+ambiente.
+
+O detalhe que mais incomoda é que o projeto **já sabia**. O `app.seeds_e2e`
+tem guarda de produção, tem teste, e a docstring dele diz com todas as letras
+que colocar conta de teste no `app.seeds` criaria "logins com senha em texto
+claro conhecida por qualquer um que leia este repositório". O raciocínio certo
+foi escrito, aplicado à conta de teste, e não à de admin — que é a mais
+poderosa das duas.
+
+A correção tem duas defesas, e elas não são a mesma coisa dita duas vezes.
+`APP_ENV` de produção não cria a conta; **e** sem `SEED_ADMIN_PASSWORD` não
+cria a conta. A segunda existe porque a primeira falha **aberta**: `app_env`
+tem default `development`, então variável ausente ou digitada errada
+desligaria a guarda de ambiente sozinha. Tirar a senha do código é a correção;
+a guarda de ambiente é só a defesa.
+
+E uma decisão que contraria a letra do pedido, de propósito: **nenhuma das
+duas levanta exceção.** O pedido era "mesmo fail-fast do `seeds_e2e`", mas
+`run_seeds` está no caminho do boot, e o `start.sh` roda com `set -e` — um
+`RuntimeError` ali deixaria o container sem subir. Seria trocar um vazamento
+de credencial por uma indisponibilidade. No `seeds_e2e` o `raise` é seguro
+justamente porque nada chama aquele módulo em produção. A recusa vai para o
+log e a execução segue; produto e SLA continuam sendo semeados, porque são
+catálogo e não credencial.
+
+Efeitos colaterais que precisaram vir junto: o workflow de e2e passou a
+definir a variável (senão o Playwright perde o login do admin, contra o banco
+efêmero do job) e a receita de ambiente local ganhou o `export` — com uma
+pegadinha documentada, porque "subiu e o admin não loga" agora é sintoma
+esperado de variável esquecida. Tem teste guardando o acoplamento entre o
+workflow e o `helpers.ts`.
+
+**O incidente não está fechado.** Falta verificar se a conta existe hoje em
+produção e com que senha; a consulta está proposta e nada foi executado contra
+o banco real. E note a assimetria que a idempotência cria: ela protege quem já
+trocou a senha, mas em compensação apagar o usuário deixou de ser forma de
+reiniciá-lo — sem a variável, ele não volta.
 
 ### O que continua na fila
 

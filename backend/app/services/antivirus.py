@@ -27,6 +27,41 @@ from loguru import logger
 _CHUNK_SIZE = 2048
 
 
+async def ping(host: str, port: int, timeout: int = 5) -> bool:
+    """
+    Diz se o clamd responde, sem enviar arquivo.
+
+    Serve para o boot avisar que o antivírus está configurado e fora do ar —
+    hoje esse estado é silencioso: o upload trata "unavailable" como aprovado
+    (ver `attachments.py`), e nada no download relê a marca. O aviso não muda
+    a política, só faz o estado deixar de ser invisível.
+
+    Usa o comando PING do próprio protocolo, que responde "PONG": abrir e
+    fechar a conexão provaria menos, porque uma porta aberta por outro serviço
+    passaria por antivírus no ar.
+    """
+    try:
+        reader, writer = await asyncio.wait_for(
+            asyncio.open_connection(host, port), timeout=timeout
+        )
+    except (TimeoutError, ConnectionRefusedError, OSError):
+        return False
+
+    try:
+        writer.write(b"zPING\0")
+        await writer.drain()
+        raw = await asyncio.wait_for(reader.read(64), timeout=timeout)
+        return raw.decode(errors="replace").strip() == "PONG"
+    except (TimeoutError, OSError):
+        return False
+    finally:
+        writer.close()
+        try:
+            await writer.wait_closed()
+        except Exception:  # noqa: BLE001
+            pass
+
+
 async def scan_bytes(
     data: bytes,
     host: str,

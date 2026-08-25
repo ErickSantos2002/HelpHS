@@ -831,3 +831,162 @@ async def test_change_password_runs_bcrypt_off_the_event_loop(patch_redis):
     assert resp.status_code == 204, resp.text
     assert espia_verify.rodou_fora_da_thread(thread_do_loop), "verify_password no event loop"
     assert espia_hash.rodou_fora_da_thread(thread_do_loop), "hash_password no event loop"
+
+
+# ═══════════════════════════════════════════════════════════════
+# DELETE /users/{id} — a guarda precisa cobrir o que o banco recusa
+# ═══════════════════════════════════════════════════════════════
+
+
+def _db_contagens(user, *contagens, erro_no_delete=None):
+    """Sessão que devolve o usuário e depois uma sequência de COUNTs."""
+    valores = iter(contagens)
+
+    async def _execute(*args, **kwargs):
+        result = MagicMock()
+        if not hasattr(_execute, "_deu_usuario"):
+            _execute._deu_usuario = True
+            result.scalar_one_or_none.return_value = user
+            result.scalar_one.return_value = 1
+            return result
+        result.scalar_one_or_none.return_value = None
+        result.scalar_one.return_value = next(valores, 0)
+        return result
+
+    session = AsyncMock()
+    session.execute = _execute
+    session.add = MagicMock()
+    session.commit = AsyncMock()
+    session.delete = AsyncMock()
+    if erro_no_delete is not None:
+        session.commit = AsyncMock(side_effect=erro_no_delete)
+    return session
+
+
+def _override(session):
+    async def _gen():
+        yield session
+
+    return _gen
+
+
+@pytest.mark.asyncio
+async def test_delete_bloqueia_tecnico_com_chamados_atribuidos(patch_redis):
+    """
+    A guarda contava só Ticket.creator_id. Um técnico que nunca abriu chamado,
+    mas tem dez atribuídos, passava pela verificação e ia bater na FK — que não
+    tem ondelete. Sem except, isso vira 500, e um 500 num DELETE não diz ao
+    admin o que fazer.
+    """
+    target = _user(UserRole.technician)
+    from app.core.database import get_db
+    from app.core.security import get_current_user
+
+    # criador: 0 chamados; atribuído: 3
+    app.dependency_overrides[get_db] = _override(_db_contagens(target, 0, 3))
+
+    async def _admin():
+        return _ADMIN
+
+    app.dependency_overrides[get_current_user] = _admin
+
+    async with AsyncClient(transport=ASGITransport(app=app), base_url="http://test") as c:
+        resp = await c.delete(f"/api/v1/users/{target.id}")
+
+    assert resp.status_code == 409
+    detalhe = resp.json()["detail"]
+    assert "anonimiz" in detalhe.lower(), f"a mensagem não diz o que fazer: {detalhe}"
+
+
+@pytest.mark.asyncio
+async def test_delete_devolve_409_legivel_quando_o_banco_recusa(patch_redis):
+    """
+    Rede de segurança: mesmo que a contagem não cubra alguma referência nova,
+    o IntegrityError precisa virar 409 explicado, não 500.
+    """
+    from sqlalchemy.exc import IntegrityError
+
+    target = _user(UserRole.client)
+    from app.core.database import get_db
+    from app.core.security import get_current_user
+
+    erro = IntegrityError("DELETE", {}, Exception("violates foreign key constraint"))
+    app.dependency_overrides[get_db] = _override(
+        _db_contagens(target, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, erro_no_delete=erro)
+    )
+
+    async def _admin():
+        return _ADMIN
+
+    app.dependency_overrides[get_current_user] = _admin
+
+    async with AsyncClient(transport=ASGITransport(app=app), base_url="http://test") as c:
+        resp = await c.delete(f"/api/v1/users/{target.id}")
+
+    assert resp.status_code == 409
+    assert "anonimiz" in resp.json()["detail"].lower()
+
+
+@pytest.mark.asyncio
+async def test_delete_diz_quantos_e_de_que_tipo(patch_redis):
+    """A mensagem tem de servir para agir, não só para recusar."""
+    target = _user(UserRole.technician)
+    from app.core.database import get_db
+    from app.core.security import get_current_user
+
+    app.dependency_overrides[get_db] = _override(_db_contagens(target, 2, 0, 0, 0, 0, 0, 0, 5))
+
+    async def _admin():
+        return _ADMIN
+
+    app.dependency_overrides[get_current_user] = _admin
+
+    async with AsyncClient(transport=ASGITransport(app=app), base_url="http://test") as c:
+        resp = await c.delete(f"/api/v1/users/{target.id}")
+
+    assert resp.status_code == 409
+    detalhe = resp.json()["detail"]
+    assert "2" in detalhe and "5" in detalhe, f"não diz quantos: {detalhe}"
+
+
+@pytest.mark.asyncio
+async def test_lista_de_tecnicos_nao_mente_o_limit(patch_redis):
+    """
+    A resposta trazia limit=100, offset=0 fixos sobre uma query SEM limit.
+    Com mais de 100 técnicos, o cliente leria "100 de N" e concluiria que há
+    outra página — que não existe, porque a rota devolve tudo.
+    """
+    from app.core.database import get_db
+    from app.core.security import get_current_user
+
+    tecnicos = [_user(UserRole.technician) for _ in range(3)]
+
+    async def _execute(*args, **kwargs):
+        result = MagicMock()
+        result.scalars.return_value.all.return_value = tecnicos
+        return result
+
+    session = AsyncMock()
+    session.execute = _execute
+
+    async def _gen():
+        yield session
+
+    app.dependency_overrides[get_db] = _gen
+
+    async def _admin():
+        return _ADMIN
+
+    app.dependency_overrides[get_current_user] = _admin
+
+    async with AsyncClient(transport=ASGITransport(app=app), base_url="http://test") as c:
+        resp = await c.get("/api/v1/users/technicians")
+
+    assert resp.status_code == 200
+    corpo = resp.json()
+    assert corpo["total"] == 3
+    assert corpo["offset"] == 0
+    assert corpo["limit"] == 3, "limit precisa refletir o que a resposta traz"
+    assert (
+        corpo["offset"] + len(corpo["items"]) >= corpo["total"]
+    ), "não pode sugerir próxima página"

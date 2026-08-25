@@ -52,7 +52,7 @@ async def send_email(
     not re-raised so the caller is never blocked by email failures).
     """
     if not settings.smtp_from_email and not settings.smtp_user:
-        logger.debug("SMTP not configured — skipping email to %s", to_email)
+        logger.debug(f"SMTP not configured — skipping email to {to_email}")
         return False
 
     try:
@@ -62,11 +62,13 @@ async def send_email(
             recipients=[to_email],
             body=body,
             subtype=MessageType.plain,
-            reply_to=[settings.smtp_reply_to] if settings.smtp_reply_to else None,
+            # SMTP_REPLY_TO é opcional e nasce vazio. O MessageSchema recusa
+            # None neste campo, e a montagem morreria antes de tentar entregar.
+            reply_to=[settings.smtp_reply_to] if settings.smtp_reply_to else [],
         )
         await mail.send_message(message)
-        logger.info("Email sent to %s: %s", to_email, subject)
+        logger.info(f"Email sent to {to_email}: {subject}")
         return True
     except Exception as exc:  # noqa: BLE001
-        logger.warning("Failed to send email to %s: %s", to_email, exc)
+        logger.warning(f"Failed to send email to {to_email}: {exc}")
         return False

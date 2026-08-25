@@ -1,6 +1,9 @@
 name: OWASP ZAP DAST
 
-# Triggered manually against any live environment (staging, prod, or local tunnel).
+# Triggered manually against an environment that EXPOSES THE OPENAPI SPEC —
+# staging, dev ou um tunel local. NAO serve para producao: la o openapi_url e
+# None (junto com /docs e /redoc) para nao publicar o mapa da API, e o scan
+# nao tem de onde se alimentar.
 # Requires the backend to be running and accessible at the provided URL.
 #
 # Usage:
@@ -17,7 +20,7 @@ on:
   workflow_dispatch:
     inputs:
       target_url:
-        description: "Base API URL to scan (must be reachable from runner)"
+        description: "Base API URL to scan (reachable from runner, com o spec exposto)"
         required: true
         default: "https://staging.helphs.example.com/api/v1"
       fail_on_warn:
@@ -52,7 +55,13 @@ jobs:
       - name: OWASP ZAP API Scan
         uses: zaproxy/action-api-scan@v0.9.0
         with:
-          # FastAPI exposes OpenAPI spec at /openapi.json
+          # O scan se alimenta do spec, e o spec SÓ existe onde APP_ENV é
+          # development — em produção o openapi_url é None, junto com /docs e
+          # /redoc, para não publicar o mapa da API.
+          #
+          # Ou seja: o alvo precisa ser um ambiente com o spec exposto (dev,
+          # staging ou uma instância subida para o scan). Apontar para
+          # produção devolve 404 aqui e o job falha sem ter escaneado nada.
           target: "${{ github.event.inputs.target_url }}/openapi.json"
           format: openapi
           # -l WARN: report warnings and above; remove to report INFO too

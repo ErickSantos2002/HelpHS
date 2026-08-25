@@ -3,12 +3,15 @@ Tests for the Notification service and endpoints.
 DB and Redis are fully mocked.
 """
 
+import asyncio
 import uuid
+from contextlib import contextmanager
 from datetime import UTC, datetime
 from unittest.mock import AsyncMock, MagicMock, patch
 
 import pytest
 from httpx import ASGITransport, AsyncClient
+from loguru import logger
 
 from app.main import app
 from app.models.models import NotificationType, UserRole, UserStatus
@@ -193,23 +196,21 @@ async def test_notify_adds_notification_to_session():
 
 
 @pytest.mark.asyncio
-async def test_notify_schedules_email_task_when_settings_provided():
+async def test_notify_registra_o_email_como_pendencia_da_sessao():
+    """
+    Sucessor de `test_notify_schedules_email_task_when_settings_provided`, que
+    afirmava o contrário: que notify() criava a task de envio na hora. Aquilo
+    ERA o bug do M6 — o teste fixava como contrato o envio antes do commit.
+    Agora notify() registra, e quem dispara é o commit_e_notificar.
+    """
     from app.core.config import get_settings
-    from app.services.notifications import notify
+    from app.services import notifications
 
-    db = MagicMock()
-    db.add = MagicMock()
-
-    async def _execute(*a, **kw):
-        r = MagicMock()
-        r.scalar_one_or_none.return_value = "user@test.com"
-        return r
-
-    db.execute = _execute
+    db = _db_para_notify("user@test.com")
     settings = get_settings()
 
-    with patch("app.services.notifications.asyncio.create_task") as _mock_task:
-        await notify(
+    with patch.object(notifications, "send_email", new=AsyncMock(return_value=True)) as enviar:
+        await notifications.notify(
             db,
             _USER_ID,
             NotificationType.ticket_created,
@@ -217,7 +218,12 @@ async def test_notify_schedules_email_task_when_settings_provided():
             "Protocolo HS-2026-0001",
             settings=settings,
         )
-        _mock_task.assert_called_once()
+        await _deixar_as_tarefas_rodarem()
+        enviar.assert_not_awaited()
+
+        await notifications.commit_e_notificar(db)
+        await _deixar_as_tarefas_rodarem()
+        assert enviar.await_count == 1
 
 
 @pytest.mark.asyncio
@@ -418,3 +424,331 @@ async def test_delete_notification_other_user(patch_redis):
         resp = await c.delete(f"/api/v1/notifications/{_NOTIF_ID}")
 
     assert resp.status_code == 404
+
+
+# ═══════════════════════════════════════════════════════════════
+# Diagnóstico: o log de email precisa dizer PARA QUEM e POR QUÊ
+# ═══════════════════════════════════════════════════════════════
+
+
+@contextmanager
+def _capturar_log():
+    """Coleta as linhas já formatadas que o loguru emite dentro do bloco."""
+    linhas: list[str] = []
+    sink_id = logger.add(linhas.append, format="{message}", level="DEBUG")
+    try:
+        yield linhas
+    finally:
+        logger.remove(sink_id)
+
+
+@pytest.mark.asyncio
+async def test_log_de_falha_de_email_diz_o_destinatario_e_o_motivo():
+    """
+    Quando alguém reclama que não recebeu o email, a linha de log é a única
+    pista que existe. Se ela sair com o placeholder literal, os argumentos são
+    descartados e a linha não serve para nada.
+    """
+    from app.core.config import Settings
+    from app.services.email import send_email
+
+    settings = Settings(
+        database_url="postgresql+asyncpg://u:p@localhost/db",
+        smtp_from_email="from@test.com",
+        smtp_user="from@test.com",
+        smtp_host="localhost",
+        smtp_port=1025,
+        smtp_reply_to="noreply@test.com",
+    )
+
+    with patch("app.services.email._get_mail_client") as mock_client:
+        mock_fm = AsyncMock()
+        mock_fm.send_message = AsyncMock(side_effect=Exception("conexao recusada"))
+        mock_client.return_value = mock_fm
+
+        with _capturar_log() as linhas:
+            enviado = await send_email("quem.reclamou@test.com", "Assunto", "Corpo", settings)
+
+    assert enviado is False
+    falhas = [linha for linha in linhas if "Failed to send email" in linha]
+    assert falhas, f"a falha de entrega não foi registrada: {linhas}"
+    assert "quem.reclamou@test.com" in falhas[0]
+    assert "conexao recusada" in falhas[0]
+
+
+@pytest.mark.asyncio
+async def test_log_de_notificacao_nao_entregue_diz_o_destinatario():
+    """Mesma dívida do lado da notificação: sem destinatário não há rastro."""
+    from app.core.config import Settings
+    from app.services import notifications
+    from app.services.notifications import _send_and_log
+
+    settings = Settings(database_url="postgresql+asyncpg://u:p@localhost/db")
+    notif = MagicMock()
+    notif.id = _NOTIF_ID
+
+    pendente = notifications._EmailPendente(
+        notif_id=notif.id,
+        to_email="destino@test.com",
+        subject="Assunto",
+        body="Corpo",
+        settings=settings,
+    )
+
+    with patch("app.services.notifications.send_email", new=AsyncMock(return_value=False)):
+        with _capturar_log() as linhas:
+            await _send_and_log(pendente)
+
+    nao_entregues = [linha for linha in linhas if "NOT delivered" in linha]
+    assert nao_entregues, f"a não-entrega não foi registrada: {linhas}"
+    assert "destino@test.com" in nao_entregues[0]
+    assert str(_NOTIF_ID) in nao_entregues[0]
+
+
+@pytest.mark.asyncio
+async def test_email_sai_mesmo_sem_reply_to_configurado():
+    """
+    SMTP_REPLY_TO é opcional e nasce vazio. Passar reply_to=None para o
+    MessageSchema derruba a montagem da mensagem ANTES de qualquer tentativa
+    de entrega — todo email falharia no dia em que o SMTP for configurado,
+    e o except engoliria o erro como se fosse falha de entrega.
+    """
+    from app.core.config import Settings
+    from app.services.email import send_email
+
+    settings = Settings(
+        database_url="postgresql+asyncpg://u:p@localhost/db",
+        smtp_from_email="from@test.com",
+        smtp_user="from@test.com",
+        smtp_host="localhost",
+        smtp_port=1025,
+        smtp_reply_to="",
+    )
+
+    with patch("app.services.email._get_mail_client") as mock_client:
+        mock_fm = AsyncMock()
+        mock_client.return_value = mock_fm
+        enviado = await send_email("destino@test.com", "Assunto", "Corpo", settings)
+
+    assert enviado is True
+    mock_fm.send_message.assert_awaited_once()
+
+
+@pytest.mark.asyncio
+async def test_reply_to_configurado_continua_indo_na_mensagem():
+    """A correção acima não pode virar 'apagar o reply_to'."""
+    from app.core.config import Settings
+    from app.services.email import send_email
+
+    settings = Settings(
+        database_url="postgresql+asyncpg://u:p@localhost/db",
+        smtp_from_email="from@test.com",
+        smtp_user="from@test.com",
+        smtp_host="localhost",
+        smtp_port=1025,
+        smtp_reply_to="suporte@test.com",
+    )
+
+    with patch("app.services.email._get_mail_client") as mock_client:
+        mock_fm = AsyncMock()
+        mock_client.return_value = mock_fm
+        enviado = await send_email("destino@test.com", "Assunto", "Corpo", settings)
+
+    assert enviado is True
+    mensagem = mock_fm.send_message.await_args.args[0]
+    assert mensagem.reply_to == ["suporte@test.com"]
+
+
+# ═══════════════════════════════════════════════════════════════
+# O e-mail não pode sair antes de o fato existir
+# ═══════════════════════════════════════════════════════════════
+
+
+def _db_para_notify(email="destino@test.com"):
+    """Sessão mockada que devolve um e-mail na busca do destinatário."""
+
+    async def _execute(*args, **kwargs):
+        result = MagicMock()
+        result.scalar_one_or_none.return_value = email
+        return result
+
+    session = AsyncMock()
+    session.execute = _execute
+    session.add = MagicMock()
+    session.commit = AsyncMock()
+    return session
+
+
+async def _deixar_as_tarefas_rodarem():
+    for _ in range(5):
+        await asyncio.sleep(0)
+
+
+@pytest.mark.asyncio
+async def test_notify_sozinho_nao_dispara_email():
+    """
+    notify() é chamado ANTES do commit, de propósito: a notificação faz parte
+    da transação. Por isso ele não pode disparar nada — só registrar.
+    """
+    from app.core.config import Settings
+    from app.services import notifications
+
+    settings = Settings(database_url="postgresql+asyncpg://u:p@localhost/db")
+    db = _db_para_notify()
+
+    with patch.object(notifications, "send_email", new=AsyncMock(return_value=True)) as enviar:
+        await notifications.notify(
+            db,
+            _USER_ID,
+            NotificationType.ticket_updated,
+            "Assunto",
+            "Corpo",
+            settings=settings,
+        )
+        await _deixar_as_tarefas_rodarem()
+
+    enviar.assert_not_awaited()
+
+
+@pytest.mark.asyncio
+async def test_commit_que_falha_nao_dispara_email():
+    """
+    O ponto do M6: qualquer commit que falhe depois do notify mandava e-mail
+    sobre algo que não aconteceu.
+    """
+    from app.core.config import Settings
+    from app.services import notifications
+
+    settings = Settings(database_url="postgresql+asyncpg://u:p@localhost/db")
+    db = _db_para_notify()
+    db.commit = AsyncMock(side_effect=RuntimeError("deu ruim no commit"))
+
+    with patch.object(notifications, "send_email", new=AsyncMock(return_value=True)) as enviar:
+        await notifications.notify(
+            db,
+            _USER_ID,
+            NotificationType.ticket_updated,
+            "Assunto",
+            "Corpo",
+            settings=settings,
+        )
+        with pytest.raises(RuntimeError):
+            await notifications.commit_e_notificar(db)
+        await _deixar_as_tarefas_rodarem()
+
+    enviar.assert_not_awaited()
+
+
+@pytest.mark.asyncio
+async def test_commit_que_passa_dispara_uma_vez_so():
+    from app.core.config import Settings
+    from app.services import notifications
+
+    settings = Settings(database_url="postgresql+asyncpg://u:p@localhost/db")
+    db = _db_para_notify()
+
+    with patch.object(notifications, "send_email", new=AsyncMock(return_value=True)) as enviar:
+        await notifications.notify(
+            db,
+            _USER_ID,
+            NotificationType.ticket_updated,
+            "Assunto",
+            "Corpo",
+            settings=settings,
+        )
+        await notifications.commit_e_notificar(db)
+        await _deixar_as_tarefas_rodarem()
+
+    assert enviar.await_count == 1
+    assert enviar.await_args.args[0] == "destino@test.com"
+
+
+@pytest.mark.asyncio
+async def test_commit_seguinte_nao_reenvia_o_que_ja_saiu():
+    """A pendência é consumida no primeiro commit, não reaproveitada."""
+    from app.core.config import Settings
+    from app.services import notifications
+
+    settings = Settings(database_url="postgresql+asyncpg://u:p@localhost/db")
+    db = _db_para_notify()
+
+    with patch.object(notifications, "send_email", new=AsyncMock(return_value=True)) as enviar:
+        await notifications.notify(
+            db,
+            _USER_ID,
+            NotificationType.ticket_updated,
+            "Assunto",
+            "Corpo",
+            settings=settings,
+        )
+        await notifications.commit_e_notificar(db)
+        await notifications.commit_e_notificar(db)
+        await _deixar_as_tarefas_rodarem()
+
+    assert enviar.await_count == 1
+
+
+@pytest.mark.asyncio
+async def test_cinco_tentativas_de_protocolo_mandam_um_email_so():
+    """
+    Reproduz o laço de `create_ticket`: até MAX_RETRIES tentativas, cada uma
+    com o seu notify(), commit que falha por IntegrityError e rollback.
+
+    Antes, cada tentativa descartada mandava o seu e-mail — cinco e-mails
+    anunciando protocolos que não passaram a existir.
+    """
+    from sqlalchemy.exc import IntegrityError
+
+    from app.core.config import Settings
+    from app.services import notifications
+    from app.utils.protocol import MAX_RETRIES
+
+    settings = Settings(database_url="postgresql+asyncpg://u:p@localhost/db")
+    db = _db_para_notify()
+
+    falhas = [IntegrityError("insert", {}, Exception("protocolo repetido"))] * (MAX_RETRIES - 1)
+    db.commit = AsyncMock(side_effect=[*falhas, None])
+
+    with patch.object(notifications, "send_email", new=AsyncMock(return_value=True)) as enviar:
+        for tentativa in range(MAX_RETRIES):
+            await notifications.notify(
+                db,
+                _USER_ID,
+                NotificationType.ticket_created,
+                "Ticket aberto",
+                f"Protocolo da tentativa {tentativa}",
+                settings=settings,
+            )
+            try:
+                await notifications.commit_e_notificar(db)
+                break
+            except IntegrityError:
+                await db.rollback()
+        await _deixar_as_tarefas_rodarem()
+
+    assert enviar.await_count == 1, "cada tentativa descartada mandou o seu e-mail"
+    assert "tentativa 4" in enviar.await_args.args[2]
+
+
+@pytest.mark.asyncio
+async def test_pendencias_nao_vazam_entre_sessoes():
+    """Duas requisições simultâneas não podem herdar e-mail uma da outra."""
+    from app.core.config import Settings
+    from app.services import notifications
+
+    settings = Settings(database_url="postgresql+asyncpg://u:p@localhost/db")
+    db_a = _db_para_notify("a@test.com")
+    db_b = _db_para_notify("b@test.com")
+
+    with patch.object(notifications, "send_email", new=AsyncMock(return_value=True)) as enviar:
+        await notifications.notify(
+            db_a, _USER_ID, NotificationType.ticket_updated, "A", "corpo", settings=settings
+        )
+        await notifications.notify(
+            db_b, _USER_ID, NotificationType.ticket_updated, "B", "corpo", settings=settings
+        )
+        await notifications.commit_e_notificar(db_a)
+        await _deixar_as_tarefas_rodarem()
+
+    assert enviar.await_count == 1
+    assert enviar.await_args.args[0] == "a@test.com"

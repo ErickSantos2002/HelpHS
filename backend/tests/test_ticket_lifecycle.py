@@ -10,7 +10,9 @@ O que estes testes protegem:
   - reabrir devolve um prazo de SLA novo — senão o chamado voltaria já vencido.
 """
 
+import asyncio
 import uuid
+from contextlib import suppress
 from datetime import UTC, datetime, timedelta
 from unittest.mock import AsyncMock, MagicMock, patch
 
@@ -536,3 +538,183 @@ async def test_staff_continua_reabrindo_chamado_de_qualquer_um():
         )
 
     assert resp.status_code == 200
+
+
+# ═══════════════════════════════════════════════════════════════
+# O laço: sobreviver ao erro e dizer que está vivo
+# ═══════════════════════════════════════════════════════════════
+
+
+@pytest.mark.asyncio
+async def test_rodada_que_levanta_nao_mata_o_laco():
+    """
+    Sem try/except em volta do `await _run_once()`, uma exceção encerra a task
+    e o RN-005 para até o próximo restart — sem log, porque a exceção só
+    reapareceria no shutdown, onde o `suppress` cobre apenas CancelledError.
+
+    Nem todo caminho de _run_once está protegido: os imports tardios e o
+    get_settings() ficam fora dos dois try internos.
+    """
+    from app.services import ticket_lifecycle as lifecycle
+
+    chamadas: list[int] = []
+    segunda_rodada = asyncio.Event()
+
+    async def _run_once_falso():
+        chamadas.append(len(chamadas))
+        if len(chamadas) == 1:
+            raise RuntimeError("Redis respondeu bobagem no meio da rodada")
+        segunda_rodada.set()
+
+    settings = MagicMock()
+    settings.ticket_auto_close_interval_seconds = 0
+
+    with (
+        patch.object(lifecycle, "_run_once", new=_run_once_falso),
+        patch.object(lifecycle, "get_settings", return_value=settings),
+    ):
+        tarefa = asyncio.create_task(lifecycle.auto_close_loop())
+        try:
+            await asyncio.wait_for(segunda_rodada.wait(), timeout=5)
+        finally:
+            tarefa.cancel()
+            with suppress(asyncio.CancelledError):
+                await tarefa
+
+    assert len(chamadas) >= 2, f"o laço morreu na primeira exceção: {chamadas}"
+
+
+@pytest.mark.asyncio
+async def test_o_laco_ainda_para_quando_cancelado():
+    """
+    O shutdown faz `task.cancel()` e depois `await task`; este teste prova que
+    o laço realmente termina aí, e não segue girando.
+
+    O que ele NÃO prova, e por isso não promete: que o `except` do laço não
+    engole o cancelamento. Verifiquei por mutação — trocar o tratamento por
+    `except BaseException` mantém este teste verde, porque a partir do 3.11 o
+    asyncio re-entrega o cancelamento pendente no `await` seguinte. A proteção
+    contra engolir é o `except Exception` (CancelledError é BaseException),
+    não este teste.
+    """
+    from app.services import ticket_lifecycle as lifecycle
+
+    primeira_rodada = asyncio.Event()
+
+    async def _run_once_falso():
+        primeira_rodada.set()
+
+    settings = MagicMock()
+    settings.ticket_auto_close_interval_seconds = 0
+
+    with (
+        patch.object(lifecycle, "_run_once", new=_run_once_falso),
+        patch.object(lifecycle, "get_settings", return_value=settings),
+    ):
+        tarefa = asyncio.create_task(lifecycle.auto_close_loop())
+        await asyncio.wait_for(primeira_rodada.wait(), timeout=5)
+        tarefa.cancel()
+        with pytest.raises(asyncio.CancelledError):
+            await tarefa
+
+    assert tarefa.cancelled()
+
+
+@pytest.mark.asyncio
+async def test_rodada_sem_erro_carimba_o_instante():
+    """
+    O carimbo é o que o /api/v1/health usa para dizer que o RN-005 continua
+    acontecendo. Sem ele, uma rotina morta é indistinguível de uma viva.
+    """
+    from app.services import ticket_lifecycle as lifecycle
+
+    lifecycle._ultima_rodada_sem_erro = None
+
+    redis = AsyncMock()
+    redis.set = AsyncMock(return_value=True)
+
+    settings = MagicMock()
+    settings.ticket_auto_close_interval_seconds = 3600
+
+    with (
+        patch.object(lifecycle, "get_settings", return_value=settings),
+        patch("app.core.redis.get_redis", new=AsyncMock(return_value=redis)),
+        patch.object(lifecycle, "close_expired_tickets", new=AsyncMock(return_value=0)),
+        patch("app.core.database.AsyncSessionLocal"),
+    ):
+        await lifecycle._run_once()
+
+    assert lifecycle.ultima_rodada_sem_erro() is not None
+
+
+@pytest.mark.asyncio
+async def test_rodada_que_falhou_no_banco_nao_carimba():
+    """Carimbar uma rodada que levantou faria o health mentir que está bem."""
+    from app.services import ticket_lifecycle as lifecycle
+
+    lifecycle._ultima_rodada_sem_erro = None
+
+    redis = AsyncMock()
+    redis.set = AsyncMock(return_value=True)
+
+    settings = MagicMock()
+    settings.ticket_auto_close_interval_seconds = 3600
+
+    with (
+        patch.object(lifecycle, "get_settings", return_value=settings),
+        patch("app.core.redis.get_redis", new=AsyncMock(return_value=redis)),
+        patch.object(
+            lifecycle,
+            "close_expired_tickets",
+            new=AsyncMock(side_effect=RuntimeError("banco fora do ar")),
+        ),
+        patch("app.core.database.AsyncSessionLocal"),
+    ):
+        await lifecycle._run_once()
+
+    assert lifecycle.ultima_rodada_sem_erro() is None
+
+
+@pytest.mark.asyncio
+async def test_rodada_cedida_a_outro_worker_conta_como_sem_erro():
+    """
+    Com `--workers 2` cada processo tem o seu carimbo, e o lock faz só um
+    trabalhar por rodada. Se ceder a vez não contasse, o worker que quase
+    nunca pega o lock reportaria rotina parada para sempre — alarme falso.
+    """
+    from app.services import ticket_lifecycle as lifecycle
+
+    lifecycle._ultima_rodada_sem_erro = None
+
+    redis = AsyncMock()
+    redis.set = AsyncMock(return_value=None)  # outro worker já segurava o lock
+
+    settings = MagicMock()
+    settings.ticket_auto_close_interval_seconds = 3600
+
+    with (
+        patch.object(lifecycle, "get_settings", return_value=settings),
+        patch("app.core.redis.get_redis", new=AsyncMock(return_value=redis)),
+    ):
+        await lifecycle._run_once()
+
+    assert lifecycle.ultima_rodada_sem_erro() is not None
+
+
+@pytest.mark.asyncio
+async def test_rodada_pulada_por_redis_fora_do_ar_nao_carimba():
+    """Redis fora = a rotina não rodou; carimbar seria dizer que rodou."""
+    from app.services import ticket_lifecycle as lifecycle
+
+    lifecycle._ultima_rodada_sem_erro = None
+
+    settings = MagicMock()
+    settings.ticket_auto_close_interval_seconds = 3600
+
+    with (
+        patch.object(lifecycle, "get_settings", return_value=settings),
+        patch("app.core.redis.get_redis", new=AsyncMock(side_effect=OSError("sem Redis"))),
+    ):
+        await lifecycle._run_once()
+
+    assert lifecycle.ultima_rodada_sem_erro() is None

@@ -41,6 +41,13 @@ jobs:
         working-directory: backend
         run: black --check .
 
+      # Roda so em app/: os testes usam mock pesado e anotar tudo la custaria
+      # mais do que protege. Zerado em 25/08/2026 -- se voltar a acusar, e
+      # porque a mudanca introduziu o erro, nao porque a divida voltou.
+      - name: Mypy type check
+        working-directory: backend
+        run: mypy app
+
       - name: Pytest
         working-directory: backend
         run: pytest --tb=short

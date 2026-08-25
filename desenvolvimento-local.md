@@ -53,6 +53,9 @@ Usada quando a máquina não tem Docker nem acesso à senha do PostgreSQL nativo
    cd backend
    export DATABASE_URL='postgresql+asyncpg://postgres:@127.0.0.1:<porta>/helpdesk_db'
    export APP_ENV=testing REDIS_URL='redis://127.0.0.1:6379/0' UPLOAD_DIR="$TMP/helphs-uploads"
+   # Sem esta variável o seed NÃO cria o admin e não há como logar. A senha
+   # saiu do código de propósito (ver decisoes-e-regras.md); escolha a sua.
+   export SEED_ADMIN_PASSWORD='Admin@123456'
    python -m alembic upgrade head && python -m app.seeds
    python -m uvicorn app.main:app --host 127.0.0.1 --port 8001
    ```
@@ -69,6 +72,10 @@ Usada quando a máquina não tem Docker nem acesso à senha do PostgreSQL nativo
   `openssl genrsa -out keys/private.pem 2048 && openssl rsa -in keys/private.pem -pubout -out keys/public.pem`.
   (A **suíte de testes** não precisa disso — o `conftest.py` gera chaves
   efêmeras sozinho; `pytest` roda sem preparo nenhum.)
+- **Subiu e o login do admin não funciona**: provavelmente `SEED_ADMIN_PASSWORD`
+  não estava definida quando você rodou `python -m app.seeds`. O seed avisa no
+  log e **pula** a criação em vez de usar uma senha conhecida. Defina a
+  variável e rode o seed de novo — ele é idempotente.
 - **`APP_ENV=testing` vs `development`**: `testing` desliga o rate limiter
   (essencial na rota B, cujo mini-Redis não suporta os scripts Lua do
   limiter). `development` liga o limiter e o `/docs`, e exige Redis de

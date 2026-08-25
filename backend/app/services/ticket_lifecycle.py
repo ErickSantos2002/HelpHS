@@ -2,12 +2,12 @@
 Encerramento do chamado — fechamento automático (RN-005) e prazo de reabertura
 (RN-006).
 
-Por que roda dentro da API e não no Celery
-------------------------------------------
-O projeto tem um Celery configurado, mas **não há worker nem beat no ambiente
-de produção** — o `start.sh` sobe apenas o uvicorn. Uma tarefa agendada no
-Celery simplesmente nunca executaria, e a regra continuaria no papel como
-esteve até agora.
+Por que roda dentro da API, e não numa fila
+-------------------------------------------
+**É deliberado.** O ambiente sobe um processo só — o `start.sh` executa apenas
+o uvicorn — e uma rodada de hora em hora não paga o custo de operar um segundo
+serviço só para ela. Um pacote Celery chegou a existir aqui sem nunca executar
+nada; foi removido em 25/08/2026 (ver docs/decisoes-e-regras.md).
 
 A rotina roda então como uma task asyncio do próprio processo da API. Como o
 uvicorn sobe com `--workers 2`, os dois processos acordariam juntos: um lock no
@@ -32,7 +32,7 @@ from app.models.models import (
     TicketHistory,
     TicketStatus,
 )
-from app.services.notifications import notify
+from app.services.notifications import commit_e_notificar, notify
 from app.utils.sla import add_business_days
 
 _LOCK_KEY = "helphs:lock:ticket-auto-close"
@@ -143,14 +143,41 @@ async def close_expired_tickets(db: AsyncSession, settings: Settings) -> int:
         closed += 1
 
     if closed:
-        await db.commit()
+        await commit_e_notificar(db)
         logger.info(f"Fechamento automático: {closed} chamado(s) movidos para Fechado")
 
     return closed
 
 
+# Instante da última rodada que terminou sem erro. Vive na memória DESTE
+# processo: com `--workers 2` cada worker tem o seu, e o /api/v1/health responde
+# pelo worker que atendeu a requisição. Não é estado compartilhado nem quer ser
+# — a pergunta que ele responde é "o laço deste processo continua girando?".
+_ultima_rodada_sem_erro: datetime | None = None
+
+
+def ultima_rodada_sem_erro() -> datetime | None:
+    """
+    Quando esta instância concluiu uma rodada de fechamento sem erro.
+
+    `None` significa que nenhuma rodada concluiu desde o boot — o laço espera
+    até 60 s antes da primeira, então `None` é o normal logo depois de subir.
+
+    Conta como concluída a rodada em que OUTRO worker segurava o lock: a rotina
+    aconteceu, este processo apenas cedeu a vez. Se ceder não contasse, o worker
+    que quase nunca pega o lock reportaria rotina parada para sempre.
+
+    NÃO conta rodada pulada por Redis fora do ar nem rodada que levantou — nos
+    dois casos o fechamento não aconteceu, e dizer que aconteceu seria a mentira
+    que este carimbo existe para evitar.
+    """
+    return _ultima_rodada_sem_erro
+
+
 async def _run_once() -> None:
     """Uma rodada, protegida por lock para não repetir entre os workers."""
+    global _ultima_rodada_sem_erro
+
     from app.core.database import AsyncSessionLocal
     from app.core.redis import get_redis
 
@@ -165,11 +192,14 @@ async def _run_once() -> None:
         return
 
     if not got_lock:
-        return  # outro worker já está cuidando desta rodada
+        # Outro worker está cuidando desta rodada — a rotina aconteceu.
+        _ultima_rodada_sem_erro = datetime.now(UTC)
+        return
 
     try:
         async with AsyncSessionLocal() as db:
             await close_expired_tickets(db, settings)
+        _ultima_rodada_sem_erro = datetime.now(UTC)
     except Exception as exc:  # noqa: BLE001
         logger.error(f"Falha na rotina de fechamento automático: {exc}")
 
@@ -182,7 +212,24 @@ async def auto_close_loop() -> None:
     await asyncio.sleep(min(60, interval))
 
     while True:
-        await _run_once()
+        try:
+            await _run_once()
+        except asyncio.CancelledError:
+            # Redundante por construção: CancelledError é BaseException desde o
+            # 3.8, então o `except Exception` abaixo já não a pega. Fica escrito
+            # para que a linha de baixo nunca seja alargada para BaseException
+            # sem que alguém veja o que isso quebraria — o shutdown faz cancel()
+            # e depois await na task, e um laço que engole o cancelamento
+            # travaria o desligamento nesse await.
+            raise
+        except Exception as exc:  # noqa: BLE001
+            # Sem este except a task morre aqui e o RN-005 para até o próximo
+            # restart, calado: a exceção só reapareceria no shutdown, onde o
+            # suppress cobre apenas CancelledError. Nem todo caminho de
+            # _run_once está protegido por dentro — os imports tardios e o
+            # get_settings() ficam fora dos dois try de lá.
+            logger.error(f"Rodada de fechamento automático levantou; o laço segue: {exc}")
+
         await asyncio.sleep(interval)
 
 

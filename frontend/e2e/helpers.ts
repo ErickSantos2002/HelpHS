@@ -1,4 +1,4 @@
-import { Page } from "@playwright/test";
+import type { Page } from "@playwright/test";
 
 // O admin vem de `app.seeds` (os mesmos seeds do boot). O cliente vem de
 // `app.seeds_e2e`, que só o workflow de e2e roda — e que se recusa a rodar em

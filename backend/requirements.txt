@@ -24,8 +24,7 @@ slowapi==0.1.9
 # Storage (MinIO)
 boto3==1.38.8
 
-# Queue (Celery)
-celery==5.5.1
+# Redis (cache, blacklist de token e lock da rotina de fechamento)
 redis==5.2.1
 
 # Email

@@ -5,12 +5,14 @@ Uso: python -m app.seeds
 
 import asyncio
 import uuid
+from typing import Any
 
 from loguru import logger
 from passlib.context import CryptContext
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
+from app.core.config import get_settings
 from app.core.database import AsyncSessionLocal
 from app.models.models import Product, SLAConfig, SLALevel, User, UserRole, UserStatus
 
@@ -19,10 +21,10 @@ pwd_context = CryptContext(schemes=["bcrypt"], deprecated="auto")
 
 # ── Dados de seed ─────────────────────────────────────────────
 
+# Sem senha aqui. Ela vem de `SEED_ADMIN_PASSWORD` — ver `seed_admin`.
 ADMIN_USER = {
     "email": "admin@healthsafety.com",
     "name": "Administrador",
-    "password": "Admin@123456",
     "role": UserRole.admin,
     "status": UserStatus.active,
     "lgpd_consent": True,
@@ -38,7 +40,7 @@ PRODUCTS = [
     {"name": "Titan", "description": "Bafômetro Titan", "version": None},
 ]
 
-SLA_CONFIGS = [
+SLA_CONFIGS: list[dict[str, Any]] = [
     {
         "level": SLALevel.critical,
         "response_time_hours": 1,
@@ -70,6 +72,52 @@ SLA_CONFIGS = [
 
 
 async def seed_admin(session: AsyncSession) -> None:
+    """
+    Cria o administrador inicial — nunca em produção, nunca sem senha vinda do
+    ambiente.
+
+    Este módulo roda no boot do container (`start.sh`, entre a migration e o
+    uvicorn), **também em produção**. Enquanto a senha esteve escrita aqui e
+    não houve guarda de ambiente, todo deploy criava (ou recriava, se alguém
+    apagasse a linha) um administrador ativo com credencial publicada no
+    repositório.
+
+    São duas defesas independentes, e a ordem importa:
+
+    1. `APP_ENV` de produção não cria conta.
+    2. Sem `SEED_ADMIN_PASSWORD` não cria conta.
+
+    A segunda não é redundância: `app_env` tem default ``"development"``, então
+    a guarda de ambiente falha **aberta** se a variável faltar ou vier
+    digitada errada. Senha ausente é o que segura esse caso.
+
+    **Não levanta exceção, de propósito.** O módulo irmão que semeia as contas
+    do Playwright pode levantar em produção porque nada o chama lá. Esta função
+    não: ela está no caminho do boot, sob `set -e`, e levantar deixaria o
+    container sem subir — trocaria um vazamento de credencial por uma
+    indisponibilidade. A recusa é registrada e a execução segue; produto e SLA
+    continuam sendo semeados normalmente.
+
+    A idempotência continua valendo e protege quem já trocou a senha em
+    produção: com a linha presente, nada é tocado.
+    """
+    settings = get_settings()
+
+    if settings.is_production:
+        logger.warning(
+            "Ambiente de produção: criação do usuário admin ignorada. "
+            "Conta de administrador não nasce de seed no banco real."
+        )
+        return
+
+    senha = (settings.seed_admin_password or "").strip()
+    if not senha:
+        logger.warning(
+            "SEED_ADMIN_PASSWORD não definida: criação do usuário admin ignorada. "
+            "Defina a variável para semear o administrador em desenvolvimento."
+        )
+        return
+
     result = await session.execute(select(User).where(User.email == ADMIN_USER["email"]))
     if result.scalar_one_or_none():
         logger.info("Admin user already exists — skipping")
@@ -79,7 +127,7 @@ async def seed_admin(session: AsyncSession) -> None:
         id=uuid.uuid4(),
         email=ADMIN_USER["email"],
         name=ADMIN_USER["name"],
-        password=pwd_context.hash(ADMIN_USER["password"]),
+        password=pwd_context.hash(senha),
         role=ADMIN_USER["role"],
         status=ADMIN_USER["status"],
         lgpd_consent=ADMIN_USER["lgpd_consent"],
