@@ -4,11 +4,13 @@ DB and Redis are fully mocked.
 """
 
 import uuid
+from contextlib import contextmanager
 from datetime import UTC, datetime
 from unittest.mock import AsyncMock, MagicMock, patch
 
 import pytest
 from httpx import ASGITransport, AsyncClient
+from loguru import logger
 
 from app.main import app
 from app.models.models import NotificationType, UserRole, UserStatus
@@ -418,3 +420,73 @@ async def test_delete_notification_other_user(patch_redis):
         resp = await c.delete(f"/api/v1/notifications/{_NOTIF_ID}")
 
     assert resp.status_code == 404
+
+
+# ═══════════════════════════════════════════════════════════════
+# Diagnóstico: o log de email precisa dizer PARA QUEM e POR QUÊ
+# ═══════════════════════════════════════════════════════════════
+
+
+@contextmanager
+def _capturar_log():
+    """Coleta as linhas já formatadas que o loguru emite dentro do bloco."""
+    linhas: list[str] = []
+    sink_id = logger.add(linhas.append, format="{message}", level="DEBUG")
+    try:
+        yield linhas
+    finally:
+        logger.remove(sink_id)
+
+
+@pytest.mark.asyncio
+async def test_log_de_falha_de_email_diz_o_destinatario_e_o_motivo():
+    """
+    Quando alguém reclama que não recebeu o email, a linha de log é a única
+    pista que existe. Se ela sair com o placeholder literal, os argumentos são
+    descartados e a linha não serve para nada.
+    """
+    from app.core.config import Settings
+    from app.services.email import send_email
+
+    settings = Settings(
+        database_url="postgresql+asyncpg://u:p@localhost/db",
+        smtp_from_email="from@test.com",
+        smtp_user="from@test.com",
+        smtp_host="localhost",
+        smtp_port=1025,
+        smtp_reply_to="noreply@test.com",
+    )
+
+    with patch("app.services.email._get_mail_client") as mock_client:
+        mock_fm = AsyncMock()
+        mock_fm.send_message = AsyncMock(side_effect=Exception("conexao recusada"))
+        mock_client.return_value = mock_fm
+
+        with _capturar_log() as linhas:
+            enviado = await send_email("quem.reclamou@test.com", "Assunto", "Corpo", settings)
+
+    assert enviado is False
+    falhas = [linha for linha in linhas if "Failed to send email" in linha]
+    assert falhas, f"a falha de entrega não foi registrada: {linhas}"
+    assert "quem.reclamou@test.com" in falhas[0]
+    assert "conexao recusada" in falhas[0]
+
+
+@pytest.mark.asyncio
+async def test_log_de_notificacao_nao_entregue_diz_o_destinatario():
+    """Mesma dívida do lado da notificação: sem destinatário não há rastro."""
+    from app.core.config import Settings
+    from app.services.notifications import _send_and_log
+
+    settings = Settings(database_url="postgresql+asyncpg://u:p@localhost/db")
+    notif = MagicMock()
+    notif.id = _NOTIF_ID
+
+    with patch("app.services.notifications.send_email", new=AsyncMock(return_value=False)):
+        with _capturar_log() as linhas:
+            await _send_and_log(notif, "destino@test.com", "Assunto", "Corpo", settings)
+
+    nao_entregues = [linha for linha in linhas if "NOT delivered" in linha]
+    assert nao_entregues, f"a não-entrega não foi registrada: {linhas}"
+    assert "destino@test.com" in nao_entregues[0]
+    assert str(_NOTIF_ID) in nao_entregues[0]

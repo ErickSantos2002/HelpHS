@@ -90,6 +90,6 @@ async def _send_and_log(
     if sent:
         # Best-effort flag update — a new session would be needed here;
         # we just log since the notification already exists in DB.
-        logger.debug("Email notification %s delivered to %s", notif.id, to_email)
+        logger.debug(f"Email notification {notif.id} delivered to {to_email}")
     else:
-        logger.warning("Email notification %s NOT delivered to %s", notif.id, to_email)
+        logger.warning(f"Email notification {notif.id} NOT delivered to {to_email}")
