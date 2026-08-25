@@ -211,7 +211,7 @@ async def test_confirma_email_com_link_valido(smtp_configurado):
 
     user = _mock_user(email_verified=False)
     app.dependency_overrides[get_db] = _db_with(user)
-    token = account_tokens.create_email_verification_token(_USER_ID, _settings)
+    token = account_tokens.create_email_verification_token(_USER_ID, False, _settings)
 
     async with AsyncClient(transport=ASGITransport(app=app), base_url="http://test") as c:
         r = await c.post("/api/v1/auth/verify-email", json={"token": token})
@@ -237,7 +237,7 @@ async def test_confirmar_duas_vezes_nao_da_erro(smtp_configurado):
     from app.core.database import get_db
 
     app.dependency_overrides[get_db] = _db_with(_mock_user(email_verified=True))
-    token = account_tokens.create_email_verification_token(_USER_ID, _settings)
+    token = account_tokens.create_email_verification_token(_USER_ID, False, _settings)
 
     async with AsyncClient(transport=ASGITransport(app=app), base_url="http://test") as c:
         r = await c.post("/api/v1/auth/verify-email", json={"token": token})
@@ -595,3 +595,31 @@ async def test_reenvio_nao_agenda_envio_para_conta_ja_confirmada(smtp_configurad
 
     assert "envio" not in eventos
     assert "http.response.body" in eventos
+
+
+@pytest.mark.asyncio
+async def test_link_de_confirmacao_nao_serve_para_outra_conta_depois_de_usado(smtp_configurado):
+    """
+    Fim a fim do uso único: o mesmo link, apresentado quando a conta já está
+    confirmada, não passa mais pela validação de estado. Quem clica de novo vê
+    a frase amigável (a conta já está ativa, não há nada a conceder) — não um
+    erro, e não uma segunda confirmação.
+    """
+    from app.core.database import get_db
+
+    token = account_tokens.create_email_verification_token(_USER_ID, False, _settings)
+
+    # 1ª vez: conta ainda não confirmada → confirma
+    user = _mock_user(email_verified=False)
+    app.dependency_overrides[get_db] = _db_with(user)
+    async with AsyncClient(transport=ASGITransport(app=app), base_url="http://test") as c:
+        primeira = await c.post("/api/v1/auth/verify-email", json={"token": token})
+    assert primeira.status_code == 200
+    assert user.email_verified is True
+
+    # 2ª vez com o MESMO link: o estado mudou, o token não confirma nada
+    app.dependency_overrides[get_db] = _db_with(_mock_user(email_verified=True))
+    async with AsyncClient(transport=ASGITransport(app=app), base_url="http://test") as c:
+        segunda = await c.post("/api/v1/auth/verify-email", json={"token": token})
+    assert segunda.status_code == 200
+    assert "já estava confirmado" in segunda.json()["message"]

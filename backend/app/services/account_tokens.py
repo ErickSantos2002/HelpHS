@@ -5,10 +5,11 @@ de senha.
 São JWT assinados com a mesma chave da aplicação, então não precisam de tabela
 nem de limpeza periódica — vencem sozinhos.
 
-O token de senha é de uso único: ele carrega uma impressão digital da senha
-vigente, e a validação compara com a senha atual do usuário. Assim que a senha
-muda, o link que chegou por e-mail para de funcionar — inclusive o próprio link
-que acabou de ser usado.
+Os dois são de uso único, pelo mesmo mecanismo: carregam o estado que a ação
+vai mudar, e a validação compara com o estado atual do usuário. O de senha
+carrega a impressão digital da senha vigente; o de confirmação, se a conta já
+estava confirmada. Assim que a ação acontece, o estado muda e o link para de
+funcionar — inclusive o próprio link que acabou de ser usado.
 """
 
 import hashlib
@@ -62,12 +63,20 @@ def _subject(payload: dict) -> uuid.UUID:
 # ── Confirmação de e-mail ─────────────────────────────────────
 
 
-def create_email_verification_token(user_id: uuid.UUID, settings: Settings) -> str:
+def create_email_verification_token(
+    user_id: uuid.UUID, email_verified: bool, settings: Settings
+) -> str:
     now = datetime.now(UTC)
     return _encode(
         {
             "sub": str(user_id),
             "type": _VERIFY_TYPE,
+            # Estado de verificação de quando o link foi emitido. É o simétrico
+            # do "pwd" do token de senha: assim que a conta é confirmada, o
+            # estado muda e o link para de valer — inclusive o que acabou de
+            # ser usado. Sem isto o link servia pelas 24 h inteiras, mesmo já
+            # confirmado.
+            "vrf": bool(email_verified),
             "iat": now,
             "exp": now + timedelta(hours=settings.email_verification_token_hours),
             "iss": settings.jwt_issuer,
@@ -76,8 +85,26 @@ def create_email_verification_token(user_id: uuid.UUID, settings: Settings) -> s
     )
 
 
-def read_email_verification_token(token: str, settings: Settings) -> uuid.UUID:
+def peek_email_verification_subject(token: str, settings: Settings) -> uuid.UUID:
+    """
+    De quem é o link, sem ainda checar se continua valendo.
+
+    Mesmo motivo do `peek_password_reset_subject`: a validação de uso único
+    compara com o estado atual do usuário, e para buscá-lo é preciso saber o id
+    primeiro. Assinatura e tipo já são verificados aqui.
+    """
     return _subject(_decode(token, _VERIFY_TYPE, settings))
+
+
+def read_email_verification_token(
+    token: str, email_verified: bool, settings: Settings
+) -> uuid.UUID:
+    payload = _decode(token, _VERIFY_TYPE, settings)
+
+    if bool(payload.get("vrf")) != bool(email_verified):
+        raise InvalidTokenError("Este link de confirmação já foi usado.")
+
+    return _subject(payload)
 
 
 # ── Redefinição de senha ──────────────────────────────────────

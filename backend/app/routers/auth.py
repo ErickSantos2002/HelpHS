@@ -177,7 +177,9 @@ async def register(
     await db.refresh(user)
 
     if exige_confirmacao:
-        token = account_tokens.create_email_verification_token(user.id, settings)
+        token = account_tokens.create_email_verification_token(
+            user.id, user.email_verified, settings
+        )
         await send_verification_email(user.email, user.name, token, settings)
         logger.info(f"New client registered (awaiting confirmation): {user.email}")
     else:
@@ -197,15 +199,18 @@ async def verify_email(
     db: Annotated[AsyncSession, Depends(get_db)],
 ) -> MessageResponse:
     """Ativa a conta a partir do link enviado no cadastro."""
+    link_invalido = HTTPException(
+        status_code=status.HTTP_400_BAD_REQUEST,
+        detail=("Este link de confirmação não é mais válido. Peça um novo na tela de acesso."),
+    )
+
+    # O `peek` confere assinatura, tipo e validade, mas ainda não o uso único:
+    # para isso é preciso o estado atual do usuário, e para buscá-lo é preciso
+    # o id primeiro. Mesmo desenho do fluxo de senha.
     try:
-        user_id = account_tokens.read_email_verification_token(body.token, settings)
+        user_id = account_tokens.peek_email_verification_subject(body.token, settings)
     except account_tokens.InvalidTokenError as exc:
-        raise HTTPException(
-            status_code=status.HTTP_400_BAD_REQUEST,
-            detail=(
-                "Este link de confirmação não é mais válido. " "Peça um novo na tela de acesso."
-            ),
-        ) from exc
+        raise link_invalido from exc
 
     user = await db.get(User, user_id)
     if user is None:
@@ -214,8 +219,17 @@ async def verify_email(
             detail="Conta não encontrada. Ela pode ter sido removida.",
         )
 
+    # Clicar de novo num link já usado continua sendo tratado com uma frase
+    # amigável, e não com erro: a conta já está ativa, não há nada a conceder.
+    # Esta resposta vem ANTES da checagem de uso único de propósito — senão o
+    # segundo clique legítimo viraria "link inválido" sem motivo.
     if user.email_verified:
         return MessageResponse(message="Este e-mail já estava confirmado. Pode entrar normalmente.")
+
+    try:
+        account_tokens.read_email_verification_token(body.token, user.email_verified, settings)
+    except account_tokens.InvalidTokenError as exc:
+        raise link_invalido from exc
 
     user.email_verified = True
     user.email_verified_at = datetime.now(UTC)
@@ -257,7 +271,7 @@ async def resend_verification(
     if user is None or user.email_verified or not settings.requires_email_verification():
         return neutra
 
-    token = account_tokens.create_email_verification_token(user.id, settings)
+    token = account_tokens.create_email_verification_token(user.id, user.email_verified, settings)
     background.add_task(send_verification_email, user.email, user.name, token, settings)
     logger.info(f"Verification email queued (resend): {user.email}")
     return neutra
