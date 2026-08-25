@@ -802,3 +802,118 @@ def test_default_de_tags_gera_lista_nova_a_cada_insercao():
     # A prova do estrago: mexer numa não pode aparecer na outra.
     primeira.append("seguranca-do-trabalho")
     assert segunda == []
+
+
+# ═══════════════════════════════════════════════════════════════
+# Rascunho não existe para quem não é da equipe
+# ═══════════════════════════════════════════════════════════════
+#
+# O GET do artigo fazia a checagem certa (não-staff + não-published → 404) e
+# os três vizinhos não repetiam. Com o UUID de um rascunho na mão, o cliente
+# confirmava que ele existe, lia a discussão interna da equipe nos comentários
+# e ainda comentava nele.
+#
+# A regra passa a viver num lugar só — mesmo desenho do `ensure_ticket_visible`.
+
+
+def _comentario_falso(article_id):
+    c = MagicMock()
+    c.id = uuid.uuid4()
+    c.article_id = article_id
+    c.author_id = _AUTHOR_ID
+    c.author = _mock_user(UserRole.technician, _AUTHOR_ID)
+    c.content = "comentário"
+    c.parent_id = None
+    c.created_at = _NOW
+    c.updated_at = _NOW
+    return c
+
+
+def _rota_feedback(artigo):
+    return ("post", "feedback", {"helpful": True}, (artigo,))
+
+
+def _rota_ler_comentarios(artigo):
+    return ("get", "comments", None, (artigo, []))
+
+
+def _rota_comentar(artigo):
+    return (
+        "post",
+        "comments",
+        {"content": "comentário de fora"},
+        (artigo, _comentario_falso(artigo.id)),
+    )
+
+
+_ROTAS = (_rota_feedback, _rota_ler_comentarios, _rota_comentar)
+_NOMES = ("feedback", "ler-comentarios", "comentar")
+
+
+async def _chama(metodo, sufixo, corpo, article_id):
+    url = f"/api/v1/kb/articles/{article_id}/{sufixo}"
+    async with AsyncClient(transport=ASGITransport(app=app), base_url="http://test") as c:
+        if metodo == "get":
+            return await c.get(url)
+        return await c.post(url, json=corpo)
+
+
+async def _bate(rota_fn, artigo, papel, article_id=None):
+    from app.core.database import get_db
+
+    metodo, sufixo, corpo, respostas = rota_fn(artigo)
+    app.dependency_overrides.clear()
+    _override_user(_mock_user(papel))
+    app.dependency_overrides[get_db] = _db_seq_override(*respostas)
+    return await _chama(metodo, sufixo, corpo, article_id or artigo.id)
+
+
+@pytest.mark.parametrize("rota_fn", _ROTAS, ids=_NOMES)
+@pytest.mark.asyncio
+async def test_cliente_nao_alcanca_rascunho_pelos_vizinhos(patch_redis, rota_fn):
+    rascunho = _mock_article(status=KBArticleStatus.draft)
+    resp = await _bate(rota_fn, rascunho, UserRole.client)
+    assert resp.status_code == 404, "o rascunho foi entregue a quem não é da equipe"
+
+
+@pytest.mark.parametrize("rota_fn", _ROTAS, ids=_NOMES)
+@pytest.mark.asyncio
+async def test_recusa_de_rascunho_e_igual_a_de_id_inexistente(patch_redis, rota_fn):
+    """
+    Paridade: se o texto do 404 de rascunho fosse diferente do de id que não
+    existe, a própria mensagem viraria o oráculo que a guarda veio fechar.
+    """
+    rascunho = _mock_article(status=KBArticleStatus.draft)
+    de_rascunho = await _bate(rota_fn, rascunho, UserRole.client)
+
+    inexistente = _mock_article(status=KBArticleStatus.draft)
+    metodo, sufixo, corpo, _ = rota_fn(inexistente)
+    from app.core.database import get_db
+
+    app.dependency_overrides.clear()
+    _override_user(_mock_user(UserRole.client))
+    app.dependency_overrides[get_db] = _db_seq_override(None)
+    de_inexistente = await _chama(metodo, sufixo, corpo, uuid.uuid4())
+
+    assert de_rascunho.status_code == de_inexistente.status_code == 404
+    assert (
+        de_rascunho.json() == de_inexistente.json()
+    ), "a mensagem distingue rascunho de inexistente e vira o oráculo de novo"
+
+
+@pytest.mark.parametrize("rota_fn", _ROTAS, ids=_NOMES)
+@pytest.mark.asyncio
+async def test_equipe_continua_alcancando_rascunho(patch_redis, rota_fn):
+    """Não-regressão: rascunho existe para quem escreve e revisa."""
+    rascunho = _mock_article(status=KBArticleStatus.draft)
+    resp = await _bate(rota_fn, rascunho, UserRole.technician)
+    assert resp.status_code != 404, "a guarda escondeu o rascunho da própria equipe"
+
+
+@pytest.mark.parametrize("rota_fn", _ROTAS, ids=_NOMES)
+@pytest.mark.asyncio
+async def test_cliente_continua_alcancando_artigo_publicado(patch_redis, rota_fn):
+    """A guarda não pode fechar o uso normal da base de conhecimento."""
+    publicado = _mock_article(status=KBArticleStatus.published)
+    resp = await _bate(rota_fn, publicado, UserRole.client)
+    assert resp.status_code != 404, "artigo publicado sumiu para o cliente"

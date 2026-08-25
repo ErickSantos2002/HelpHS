@@ -138,7 +138,33 @@ async def _set_article_products(
     article.products = found
 
 
-async def _get_article_or_404(article_id: uuid.UUID, db: AsyncSession) -> KBArticle:
+# Uma frase só para as duas recusas — "não existe" e "não é para você". Se
+# fossem diferentes, a própria mensagem diria ao cliente que o rascunho existe,
+# que é justamente o que a guarda veio fechar. Há teste de paridade.
+_ARTIGO_NAO_ENCONTRADO = "Artigo não encontrado. Ele pode ter sido excluído ou arquivado."
+
+
+async def _get_article_or_404(article_id: uuid.UUID, db: AsyncSession, actor: User) -> KBArticle:
+    """
+    Carrega o artigo, recusando como inexistente o que o ator não pode ver.
+
+    O `actor` é obrigatório de propósito. A checagem existia só no GET do
+    artigo, e os três vizinhos — dar feedback, ler comentários e comentar — não
+    a repetiam: com o UUID de um rascunho na mão, o cliente confirmava que ele
+    existe, lia a discussão interna da equipe e ainda comentava nele.
+
+    Exigir o ator no próprio fetch é mais forte do que um segundo helper de
+    checagem: não sobra caminho para carregar um artigo sem passar por aqui, e
+    quem escrever o próximo endpoint não tem como esquecer a linha.
+
+    Ao contrário do `ensure_ticket_visible`, este helper CONHECE o papel — lá a
+    regra é "é seu?" e a exceção de staff é decisão do call site; aqui o papel
+    é a regra inteira: rascunho e arquivado existem para quem escreve e revisa.
+
+    Raises:
+        HTTPException: 404 se o artigo não existe **ou** se o ator não é da
+            equipe e ele ainda não foi publicado.
+    """
     result = await db.execute(
         select(KBArticle)
         .options(selectinload(KBArticle.author), selectinload(KBArticle.products))
@@ -148,8 +174,16 @@ async def _get_article_or_404(article_id: uuid.UUID, db: AsyncSession) -> KBArti
     if article is None:
         raise HTTPException(
             status_code=status.HTTP_404_NOT_FOUND,
-            detail="Artigo não encontrado. Ele pode ter sido excluído ou arquivado.",
+            detail=_ARTIGO_NAO_ENCONTRADO,
         )
+
+    is_staff = actor.role in (UserRole.admin, UserRole.technician)
+    if not is_staff and article.status != KBArticleStatus.published:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail=_ARTIGO_NAO_ENCONTRADO,
+        )
+
     return article
 
 
@@ -350,14 +384,7 @@ async def get_article(
     db: Annotated[AsyncSession, Depends(get_db)],
     actor: Annotated[User, Depends(get_current_user)],
 ) -> KBArticleResponse:
-    article = await _get_article_or_404(article_id, db)
-    is_staff = actor.role in (UserRole.admin, UserRole.technician)
-
-    if not is_staff and article.status != KBArticleStatus.published:
-        raise HTTPException(
-            status_code=status.HTTP_404_NOT_FOUND,
-            detail="Artigo não encontrado. Ele pode ter sido excluído ou arquivado.",
-        )
+    await _get_article_or_404(article_id, db, actor)
 
     await db.execute(
         update(KBArticle)
@@ -383,7 +410,7 @@ async def update_article(
     db: Annotated[AsyncSession, Depends(get_db)],
     actor: Annotated[User, Depends(authorize(UserRole.admin, UserRole.technician))],
 ) -> KBArticleResponse:
-    article = await _get_article_or_404(article_id, db)
+    article = await _get_article_or_404(article_id, db, actor)
     changes = body.model_dump(exclude_unset=True)
 
     if "title" in changes:
@@ -419,7 +446,7 @@ async def delete_article(
     db: Annotated[AsyncSession, Depends(get_db)],
     actor: Annotated[User, Depends(authorize(UserRole.admin))],
 ) -> None:
-    article = await _get_article_or_404(article_id, db)
+    article = await _get_article_or_404(article_id, db, actor)
     article.status = KBArticleStatus.archived
     article.updated_at = datetime.now(UTC)
     await db.commit()
@@ -449,13 +476,7 @@ async def article_feedback(
     db: Annotated[AsyncSession, Depends(get_db)],
     actor: Annotated[User, Depends(get_current_user)],
 ) -> None:
-    result = await db.execute(select(KBArticle).where(KBArticle.id == article_id))
-    article = result.scalar_one_or_none()
-    if article is None:
-        raise HTTPException(
-            status_code=status.HTTP_404_NOT_FOUND,
-            detail="Artigo não encontrado. Ele pode ter sido excluído ou arquivado.",
-        )
+    await _get_article_or_404(article_id, db, actor)
 
     if body.helpful:
         await db.execute(
@@ -482,7 +503,7 @@ async def list_comments(
     actor: Annotated[User, Depends(get_current_user)],
 ) -> KBCommentListResponse:
     """Return all top-level comments (with nested replies) for an article."""
-    await _get_article_or_404(article_id, db)
+    await _get_article_or_404(article_id, db, actor)
 
     rows = await db.execute(
         select(KBComment)
@@ -518,7 +539,7 @@ async def create_comment(
     actor: Annotated[User, Depends(get_current_user)],
 ) -> KBCommentResponse:
     """Create a comment or reply on an article."""
-    await _get_article_or_404(article_id, db)
+    await _get_article_or_404(article_id, db, actor)
 
     if body.parent_id is not None:
         parent_result = await db.execute(
