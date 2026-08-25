@@ -505,10 +505,12 @@ async def list_my_equipment(
         base = base.where(Equipment.is_active == is_active)  # noqa: E712
     rows = await db.execute(base.order_by(Equipment.name))
     equipments = rows.scalars().all()
+    # Mesma escolha da lista de técnicos: são os equipamentos DO próprio
+    # usuário, um conjunto pequeno e fechado que a tela mostra inteiro.
     return EquipmentListResponse(
         items=[EquipmentResponse.model_validate(e) for e in equipments],
         total=len(equipments),
-        limit=100,
+        limit=len(equipments),
         offset=0,
     )
 

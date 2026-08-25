@@ -194,8 +194,16 @@ async def list_technicians(
         .order_by(User.name)
     )
     users = rows.scalars().all()
+    # Rota sem paginação de propósito: alimenta o filtro/dropdown de
+    # responsável, que precisa da lista INTEIRA — paginar aqui esconderia
+    # técnicos atrás de uma página que a tela não sabe pedir. Então limit
+    # reflete o que a resposta traz, em vez do 100 fixo que sugeria uma
+    # próxima página inexistente.
     return UserListResponse(
-        items=[_to_response(u) for u in users], total=len(users), limit=100, offset=0
+        items=[_to_response(u) for u in users],
+        total=len(users),
+        limit=len(users),
+        offset=0,
     )
 
 

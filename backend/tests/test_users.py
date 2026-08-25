@@ -947,3 +947,46 @@ async def test_delete_diz_quantos_e_de_que_tipo(patch_redis):
     assert resp.status_code == 409
     detalhe = resp.json()["detail"]
     assert "2" in detalhe and "5" in detalhe, f"não diz quantos: {detalhe}"
+
+
+@pytest.mark.asyncio
+async def test_lista_de_tecnicos_nao_mente_o_limit(patch_redis):
+    """
+    A resposta trazia limit=100, offset=0 fixos sobre uma query SEM limit.
+    Com mais de 100 técnicos, o cliente leria "100 de N" e concluiria que há
+    outra página — que não existe, porque a rota devolve tudo.
+    """
+    from app.core.database import get_db
+    from app.core.security import get_current_user
+
+    tecnicos = [_user(UserRole.technician) for _ in range(3)]
+
+    async def _execute(*args, **kwargs):
+        result = MagicMock()
+        result.scalars.return_value.all.return_value = tecnicos
+        return result
+
+    session = AsyncMock()
+    session.execute = _execute
+
+    async def _gen():
+        yield session
+
+    app.dependency_overrides[get_db] = _gen
+
+    async def _admin():
+        return _ADMIN
+
+    app.dependency_overrides[get_current_user] = _admin
+
+    async with AsyncClient(transport=ASGITransport(app=app), base_url="http://test") as c:
+        resp = await c.get("/api/v1/users/technicians")
+
+    assert resp.status_code == 200
+    corpo = resp.json()
+    assert corpo["total"] == 3
+    assert corpo["offset"] == 0
+    assert corpo["limit"] == 3, "limit precisa refletir o que a resposta traz"
+    assert (
+        corpo["offset"] + len(corpo["items"]) >= corpo["total"]
+    ), "não pode sugerir próxima página"
