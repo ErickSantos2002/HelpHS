@@ -475,6 +475,20 @@ async def anonymize_user(
     if not user:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Usuário não encontrado.")
 
+    # Anonimizar é o único dos quatro que NÃO tem volta: reescreve nome e
+    # e-mail e não existe caminho de desfazer. Editar e desativar são
+    # reversíveis e fazem parte do dia a dia de uma equipe pequena; excluir já
+    # é barrado pelas chaves estrangeiras. Só este precisa de guarda.
+    #
+    # Guarda de PAPEL, não de identidade: outro admin continua podendo. O que
+    # se fecha é o clique errado do técnico e a conta de técnico comprometida
+    # — não há MFA no sistema para segurar a segunda.
+    if user.role == UserRole.admin and actor.role != UserRole.admin:
+        raise HTTPException(
+            status_code=status.HTTP_403_FORBIDDEN,
+            detail="Apenas um administrador pode anonimizar a conta de outro administrador.",
+        )
+
     if user.status == UserStatus.anonymized:
         raise HTTPException(
             status_code=status.HTTP_409_CONFLICT, detail="User is already anonymized"

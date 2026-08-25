@@ -990,3 +990,76 @@ async def test_lista_de_tecnicos_nao_mente_o_limit(patch_redis):
     assert (
         corpo["offset"] + len(corpo["items"]) >= corpo["total"]
     ), "não pode sugerir próxima página"
+
+
+# ═══════════════════════════════════════════════════════════════
+# Anonimizar admin é privilégio de admin
+# ═══════════════════════════════════════════════════════════════
+
+
+@pytest.mark.asyncio
+async def test_tecnico_nao_anonimiza_admin(patch_redis):
+    """
+    Anonimizar é o único dos quatro que NÃO tem volta: reescreve nome e e-mail
+    e não há caminho de desfazer. Editar e desativar são reversíveis e fazem
+    parte do dia a dia de uma equipe pequena; excluir já é barrado pelas FKs.
+
+    Sem técnico externo na empresa, o que sobra é o clique errado e a conta
+    comprometida — e não há MFA no sistema.
+    """
+    alvo = _user(UserRole.admin)
+    from app.core.database import get_db
+    from app.core.security import get_current_user
+
+    app.dependency_overrides[get_db] = _simple_db(alvo)
+
+    async def _tecnico():
+        return _TECH
+
+    app.dependency_overrides[get_current_user] = _tecnico
+
+    async with AsyncClient(transport=ASGITransport(app=app), base_url="http://test") as c:
+        resp = await c.post(f"/api/v1/users/{alvo.id}/anonymize")
+
+    assert resp.status_code == 403
+    assert alvo.status is not UserStatus.anonymized, "o alvo não pode ter sido tocado"
+
+
+@pytest.mark.asyncio
+async def test_tecnico_continua_anonimizando_cliente(patch_redis):
+    """Não-regressão: este é o uso legítimo e mais comum do endpoint (LGPD)."""
+    alvo = _user(UserRole.client)
+    from app.core.database import get_db
+    from app.core.security import get_current_user
+
+    app.dependency_overrides[get_db] = _simple_db(alvo)
+
+    async def _tecnico():
+        return _TECH
+
+    app.dependency_overrides[get_current_user] = _tecnico
+
+    async with AsyncClient(transport=ASGITransport(app=app), base_url="http://test") as c:
+        resp = await c.post(f"/api/v1/users/{alvo.id}/anonymize")
+
+    assert resp.status_code == 200
+
+
+@pytest.mark.asyncio
+async def test_admin_anonimiza_admin(patch_redis):
+    """A guarda é de papel, não de identidade: outro admin continua podendo."""
+    alvo = _user(UserRole.admin)
+    from app.core.database import get_db
+    from app.core.security import get_current_user
+
+    app.dependency_overrides[get_db] = _simple_db(alvo)
+
+    async def _admin():
+        return _ADMIN
+
+    app.dependency_overrides[get_current_user] = _admin
+
+    async with AsyncClient(transport=ASGITransport(app=app), base_url="http://test") as c:
+        resp = await c.post(f"/api/v1/users/{alvo.id}/anonymize")
+
+    assert resp.status_code == 200
