@@ -11,6 +11,27 @@ Datas em DD/MM/AAAA.
 ## [Não publicado]
 
 ### Segurança
+- **Rascunho da base de conhecimento deixa de existir para quem não é da
+  equipe** (`bdd1418`). O `GET` do artigo fazia a checagem certa — não-staff
+  mais não-publicado vira 404 — e os três vizinhos não repetiam. Com o UUID de
+  um rascunho na mão, o cliente confirmava que ele existe (feedback devolvia
+  **204**), lia a discussão interna da equipe (comentários, **200**) e ainda
+  comentava nele (**201**) — os três números são dos testes antes da correção.
+  Em vez de um segundo helper de checagem, o próprio fetch passou a **exigir o
+  ator**: não sobra caminho para carregar artigo sem passar pela guarda, e quem
+  escrever o próximo endpoint não tem como esquecer a linha. Diferença
+  proposital em relação ao `ensure_ticket_visible`: lá a regra é "é seu?" e a
+  exceção de staff fica no call site; aqui o papel **é** a regra inteira. As
+  duas recusas saem com a mesma frase, com teste de paridade nas três rotas.
+- **Anonimizar conta de admin passa a ser privilégio de admin** (`45a1601`).
+  Anonimizar é o único dos quatro endpoints de gestão de usuário que **não tem
+  volta**: reescreve nome e e-mail, e não existe caminho de desfazer. Qualquer
+  técnico podia fazer isso com a conta de um administrador. Guarda de **papel**,
+  não de identidade — outro admin continua podendo. Mexi só neste: editar e
+  desativar são reversíveis e fazem parte do dia a dia de uma equipe de dois
+  técnicos, e excluir já é barrado pelas chaves estrangeiras. Sem técnico
+  externo na empresa, o que resta é o clique errado e a conta comprometida — a
+  segunda pesa mais aqui porque **não há MFA** no sistema.
 - **O spec da API deixa de ser público fora de desenvolvimento** (`6e8f409`).
   `docs_url` e `redoc_url` já eram desligados, mas o `openapi_url` ficou no
   default: o `/openapi.json` seguia público em produção — e o spec é o mapa
@@ -138,6 +159,19 @@ Datas em DD/MM/AAAA.
   de ter sido cliente.
 
 ### Corrigido
+- **`PATCH /sla-configs/{id}` deixa de devolver 500 em toda chamada**
+  (`43c3238`). A linha de auditoria construía o `AuditLog` com três kwargs que
+  o modelo não tem: `resource_type`, `resource_id` e `new_values`, quando os
+  campos são `entity_type`, `entity_id` (UUID, não string) e `new_data`.
+  Confirmado executando — o construtor levanta `TypeError`. Como isso acontece
+  **depois** de aplicar as mudanças e antes do commit, o PATCH falhava em 100%
+  das chamadas: **configurar prazo de SLA pela interface nunca funcionou**. ⚠️
+  Sobreviveu porque o `test_sla.py` tinha 30 testes do motor de SLA e nenhum
+  que batesse no endpoint — e porque o **mypy não pega**: modelo declarativo do
+  SQLAlchemy não tem `__init__` conferido. A rede que faltava era teste de
+  endpoint, e é o que entra: um afirma 200 e persistência, outro que a linha de
+  auditoria nasce com `entity_type="sla_config"` e `entity_id` UUID, porque só
+  afirmar o 200 deixaria passar um `AuditLog` com qualquer nome.
 - **`DELETE /users/{id}` confere o que o banco recusa e explica o 409**
   (`52a3b7f`). A guarda contava só `Ticket.creator_id`: um técnico que nunca
   abriu chamado mas tem chamados **atribuídos** passava por ela e ia bater na

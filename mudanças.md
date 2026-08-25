@@ -7,6 +7,86 @@ O changelog do produto (o que o cliente vê) fica em
 
 ---
 
+## 25/08/2026 (fim da noite) — Os três altos baratos
+
+Independentes entre si, poucas linhas cada, um commit por item. O mais barato
+dos três era o único que quebrava uma funcionalidade inteira.
+
+| Commit | O que foi feito |
+|---|---|
+| `45a1601` | `fix:` **anonimizar admin** vira privilégio de admin 🔴 |
+| `43c3238` | `fix:` **PATCH de SLA** deixa de dar 500 em toda chamada 🔴 |
+| `bdd1418` | `fix:` **rascunho da KB** some para quem não é da equipe 🔴 |
+| `docs:` | Este fechamento |
+
+### Três kwargs e uma funcionalidade que nunca funcionou
+
+O A1 parecia o menor dos três: trocar `resource_type` por `entity_type` e mais
+dois nomes. O tamanho do diff engana — **configurar prazo de SLA pela interface
+nunca funcionou**. O `AuditLog` é construído depois de aplicar as mudanças e
+antes do commit, então o `TypeError` derrubava a requisição inteira: 500 em
+100% das chamadas, e a alteração nunca chegava ao banco.
+
+O que vale registrar não é o erro, é por que ele durou tanto. Duas redes
+falharam ao mesmo tempo, e nenhuma das duas por acaso:
+
+O `test_sla.py` tinha **30 testes** — todos do motor de SLA, nenhum batendo no
+endpoint. Um arquivo com trinta testes passa a impressão de coberto, e a
+impressão é exatamente o que ele não deveria dar.
+
+E o mypy, que acabou de ser ligado, **não pega isto**: modelo declarativo do
+SQLAlchemy não tem `__init__` conferido — a mesma limitação que já tinha sido
+medida quando se avaliou se ele teria pego o A1 da auditoria. Ligar o
+verificador não substitui o teste de endpoint; ele fecha outra classe.
+
+Por isso o segundo teste afirma os nomes dos campos da linha de auditoria, e
+não só o 200: um `AuditLog` construído com qualquer nome passaria no primeiro.
+
+### Exigir o ator no fetch, em vez de um helper de checagem
+
+No A4 o pedido era extrair um helper e chamá-lo nos quatro pontos, no molde do
+`ensure_ticket_visible`. Fiz um pouco diferente, e o motivo é a classe de erro
+que se quer fechar.
+
+Um helper de checagem separado depende de alguém lembrar de chamá-lo — que é
+exatamente a falha que produziu o achado: a checagem existia no `GET` e os três
+vizinhos não a repetiam. Então em vez de `_get_article_or_404(...)` seguido de
+`ensure_article_visible(...)`, o **próprio fetch** passou a exigir o ator. Não
+sobra caminho para carregar um artigo sem passar pela guarda; quem escrever o
+próximo endpoint não tem como esquecer a linha, porque o parâmetro é
+obrigatório.
+
+Há uma diferença de desenho em relação ao `ensure_ticket_visible` que vale dizer
+em voz alta. Lá o helper **não** conhece papel de propósito: a regra é "é seu?"
+e a exceção de staff é decisão do call site, para não virar passe-livre
+invisível. Aqui o papel não é exceção à regra — é a regra inteira: rascunho e
+arquivado existem para quem escreve e revisa. Um helper que não soubesse disso
+não teria o que checar.
+
+### Guarda só onde não tem volta
+
+No A0 a auditoria agrupava quatro endpoints e o pedido foi fechar um. Concordo,
+e a razão é boa o bastante para ficar escrita: **anonimizar é o único que não
+tem volta**. Editar e desativar são reversíveis e fazem parte do dia a dia de
+uma equipe de dois técnicos — fechar os dois trocaria um risco pequeno por
+atrito diário. Excluir já é barrado pelas chaves estrangeiras.
+
+Sem técnico externo na empresa, o risco que sobra é o clique errado e a conta
+de técnico comprometida. A segunda pesa mais aqui do que pesaria em outro
+sistema, porque não há MFA.
+
+### Achado vizinho, registrado sem corrigir
+
+O `POST /kb/articles/{id}/feedback` incrementa `helpful` **sem registrar quem
+votou**: o mesmo usuário incrementa em laço, e o contador de "este artigo foi
+útil" não significa o que a tela diz que significa. Não é a mesma classe do A4
+(não vaza nada) e não entrou nesta rodada. Fica aqui para não se perder.
+
+Suíte: 644 → 656 testes, verdes, cobertura 86%. mypy limpo. Sem migration. Nada
+foi executado contra produção.
+
+---
+
 ## 25/08/2026 (noite) — Os oito médios restantes, em três blocos
 
 Fechamento da auditoria do backend: cinco pequenos sem decisão pendente, os
