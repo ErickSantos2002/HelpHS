@@ -1,7 +1,7 @@
 import asyncio
 from contextlib import asynccontextmanager, suppress
 
-from fastapi import FastAPI, Request
+from fastapi import FastAPI, Request, Response, status
 from fastapi.exceptions import RequestValidationError
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import JSONResponse
@@ -37,7 +37,7 @@ from app.routers import (
     users,
 )
 from app.services import storage
-from app.services.ticket_lifecycle import start_auto_close_worker
+from app.services.ticket_lifecycle import start_auto_close_worker, ultima_rodada_sem_erro
 
 settings = get_settings()
 
@@ -157,15 +157,84 @@ app.include_router(quick_replies.router, prefix=settings.api_prefix)
 app.include_router(files.router, prefix=settings.api_prefix)
 
 
+# Quanto o readiness espera por cada dependência antes de chamá-la de fora.
+# Curto de propósito: quem pergunta "está pronto?" precisa de resposta rápida,
+# e uma dependência que demora 5 s para responder já é uma dependência com
+# problema. Não virou configuração porque não há o que ajustar por ambiente.
+_READINESS_TIMEOUT_S = 2.0
+
+
+async def _ping_banco() -> None:
+    async with engine.connect() as conn:
+        await conn.execute(text("SELECT 1"))
+
+
+async def _checar_banco() -> bool:
+    try:
+        await asyncio.wait_for(_ping_banco(), timeout=_READINESS_TIMEOUT_S)
+        return True
+    except Exception as exc:  # noqa: BLE001 — readiness reporta, não levanta
+        logger.warning(f"Readiness: banco indisponível: {exc}")
+        return False
+
+
+async def _ping_redis() -> None:
+    redis = await get_redis()
+    await redis.ping()
+
+
+async def _checar_redis() -> bool:
+    try:
+        await asyncio.wait_for(_ping_redis(), timeout=_READINESS_TIMEOUT_S)
+        return True
+    except Exception as exc:  # noqa: BLE001 — readiness reporta, não levanta
+        logger.warning(f"Readiness: Redis indisponível: {exc}")
+        return False
+
+
 @app.get("/health", tags=["Health"])
 async def health_check() -> dict:
+    """
+    Liveness. Responde se o processo está de pé, e nada além disso.
+
+    NÃO confere dependência nenhuma, de propósito: esta é a rota do
+    HEALTHCHECK do Dockerfile e dos compose. Se ela passasse a depender do
+    banco, uma oscilação do Postgres reiniciaria o container da API — trocando
+    uma indisponibilidade parcial por uma total. Quem quer saber se dá para
+    atender pergunta ao readiness, em /api/v1/health.
+    """
     return {"status": "ok"}
 
 
 @app.get(f"{settings.api_prefix}/health", tags=["Health"])
-async def health_check_versioned() -> dict:
-    # Sem a versão de propósito: esta rota responde sem autenticação, e
-    # dizer a release exata a qualquer um só ajuda quem procura uma
-    # vulnerabilidade conhecida. A versão fica no metadado do FastAPI, que
-    # só aparece no /docs — desligado em produção.
-    return {"status": "ok", "env": settings.app_env}
+async def readiness_check(response: Response) -> dict:
+    """
+    Readiness. Confere as dependências e responde 503 quando alguma faltou.
+
+    Sem a versão de propósito: esta rota responde sem autenticação, e dizer a
+    release exata a qualquer um só ajuda quem procura uma vulnerabilidade
+    conhecida. A versão fica no metadado do FastAPI, no /docs, desligado em
+    produção.
+
+    O carimbo do fechamento automático é REPORTADO, não usado para derrubar: é
+    `None` nos primeiros 60 s de cada worker, porque o laço espera antes da
+    primeira rodada, e derrubar por causa disso daria 503 em todo boot. Quem
+    observa decide o que fazer com um carimbo velho — ver
+    `ultima_rodada_sem_erro` para o que "sem erro" inclui.
+    """
+    banco_ok, redis_ok = await asyncio.gather(_checar_banco(), _checar_redis())
+    pronto = banco_ok and redis_ok
+
+    if not pronto:
+        response.status_code = status.HTTP_503_SERVICE_UNAVAILABLE
+
+    ultima = ultima_rodada_sem_erro()
+    return {
+        "status": "ok" if pronto else "degraded",
+        "env": settings.app_env,
+        "checks": {
+            "database": "ok" if banco_ok else "down",
+            "redis": "ok" if redis_ok else "down",
+        },
+        "auto_close": {"last_success": ultima.isoformat() if ultima else None},
+    }

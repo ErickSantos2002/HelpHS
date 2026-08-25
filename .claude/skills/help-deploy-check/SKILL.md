@@ -88,7 +88,14 @@ outro, os dois lados precisam conviver:
 
 ### 6. Verificação pós-deploy (smoke test)
 
-- [ ] `GET /health` → 200; `GET /api/v1/health` → versão e env certos
+- [ ] `GET /health` → 200 `{"status": "ok"}` (liveness: só diz que o
+      processo subiu, não confere dependência nenhuma)
+- [ ] `GET /api/v1/health` → 200 e `status: ok` (readiness: confere banco e
+      Redis; **503 com `status: degraded`** se alguma faltar). Confira o
+      `env` e o `auto_close.last_success` — `null` é o normal no primeiro
+      minuto de cada worker, mas continuar `null` depois disso quer dizer
+      que a rotina do RN-005 não está concluindo rodada. **Não** espere
+      versão aqui: ela não é exposta a quem não está logado.
 - [ ] Login funciona; rota protegida **sem** token → `401`
 - [ ] Listagem de chamados carrega
 - [ ] **Abrir um anexo existente** — prova que o volume sobreviveu ao deploy
