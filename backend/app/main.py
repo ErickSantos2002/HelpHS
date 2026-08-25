@@ -37,7 +37,7 @@ from app.routers import (
     tickets,
     users,
 )
-from app.services import storage
+from app.services import antivirus, storage
 from app.services.ticket_lifecycle import start_auto_close_worker, ultima_rodada_sem_erro
 
 settings = get_settings()
@@ -87,6 +87,22 @@ async def lifespan(app: FastAPI) -> AsyncIterator[None]:
             "Anexos e fotos de perfil não vão funcionar até que o volume esteja "
             "montado e com permissão de escrita."
         )
+
+    # O antivírus fora do ar é um estado SILENCIOSO: o upload trata
+    # "unavailable" como aprovado, e nada no download relê a marca. A política
+    # continua essa de propósito — bloquear upload com o AV fora derrubaria o
+    # anexo inteiro —, mas o boot passa a dizer em que estado o sistema está.
+    # Só fora de dev/teste: quem desenvolve raramente sobe um ClamAV.
+    if not settings.is_development and not settings.is_testing:
+        if await antivirus.ping(settings.clamav_host, settings.clamav_port):
+            logger.info(f"Antivírus OK: {settings.clamav_host}:{settings.clamav_port}")
+        else:
+            logger.warning(
+                f"ANTIVÍRUS INALCANÇÁVEL em {settings.clamav_host}:{settings.clamav_port}. "
+                "Os anexos continuam sendo aceitos, porém SEM varredura, e ficam "
+                "gravados com virus_scanned=False. Depois de subir o ClamAV, rode "
+                "`python -m scripts.revarre_anexos` para varrer o que entrou sem exame."
+            )
 
     # RN-005 — fecha sozinho os chamados resolvidos que ninguém retomou.
     # Roda dentro da própria API por decisão, não por falta de fila (ver
