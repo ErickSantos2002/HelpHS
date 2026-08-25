@@ -230,12 +230,6 @@ class Settings(BaseSettings):
         ".pdf,.doc,.docx,.xls,.xlsx,.png,.jpg,.jpeg,.gif,.txt,.csv,.zip,.rar"
     )
 
-    # SLA
-    sla_business_hours_start: str = "08:00"
-    sla_business_hours_end: str = "18:00"
-    sla_business_days: str = "1,2,3,4,5"
-    sla_timezone: str = "America/Sao_Paulo"
-
     # Encerramento do chamado (RN-005 / RN-006).
     # Os prazos são contados em DIAS ÚTEIS a partir do momento em que o chamado
     # foi resolvido — em dias corridos, quem resolvesse na sexta daria ao cliente

@@ -38,6 +38,15 @@ from app.models.models import SLAConfig, Ticket, TicketStatus
 
 # ── Constants ─────────────────────────────────────────────────
 
+# Jornada e fuso são CONSTANTES de propósito, não configuração.
+#
+# 08:00–17:00 (9 h/dia) foi confirmado com o cliente em 05/08/2026 e é o que o
+# RN-013 sempre disse — ver "SLA" em docs/decisoes-e-regras.md.
+#
+# Existiu um bloco SLA_* no config.py que ninguém lia e que dizia 18:00. Ligar
+# aquilo aqui para "corrigir a divergência" mudaria o prazo de TODOS os chamados
+# de uma vez, sem ninguém perceber. Se o horário precisar mudar um dia, muda
+# aqui — e a decisão vai para o documento antes do código.
 SP_TZ = pytz.timezone("America/Sao_Paulo")
 _WORK_START = 8  # 08:00
 _WORK_END = 17  # 17:00
