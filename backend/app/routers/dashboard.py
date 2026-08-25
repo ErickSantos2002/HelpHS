@@ -22,7 +22,7 @@ from reportlab.lib.pagesizes import A4
 from reportlab.lib.styles import getSampleStyleSheet
 from reportlab.lib.units import cm
 from reportlab.platypus import Paragraph, SimpleDocTemplate, Spacer, Table, TableStyle
-from sqlalchemy import and_, extract, func, or_, select, text
+from sqlalchemy import ColumnElement, and_, extract, func, or_, select, text
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.core.database import get_db
@@ -75,7 +75,7 @@ _ACTIVE_SLA_STATUSES = [
 ]
 
 
-def _resolve_breached_cond():
+def _resolve_breached_cond() -> ColumnElement[bool]:
     """True se SLA de resolução foi violado (flag salva OU prazo já passou)."""
     return or_(
         Ticket.sla_resolve_breach.is_(True),
@@ -87,7 +87,7 @@ def _resolve_breached_cond():
     )
 
 
-def _response_breached_cond():
+def _response_breached_cond() -> ColumnElement[bool]:
     """True se SLA de 1ª resposta foi violado (flag salva OU prazo já passou)."""
     return or_(
         Ticket.sla_response_breach.is_(True),
@@ -709,8 +709,10 @@ async def export_reports_csv(
 
     writer.writerow(["DISTRIBUIÇÃO CSAT (1 a 10)"])
     writer.writerow(["Nota", "Avaliações"])
-    for c in data.csat_distribution:
-        writer.writerow([c.rating, c.count])
+    # Nome próprio: reusar `c` de um laço anterior, com outro tipo de item,
+    # deixa o verificador preso ao primeiro tipo — e o leitor também.
+    for nota in data.csat_distribution:
+        writer.writerow([nota.rating, nota.count])
     if data.csat_average is not None:
         writer.writerow(["Média", data.csat_average])
 

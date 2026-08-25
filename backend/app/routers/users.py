@@ -16,12 +16,13 @@ Permissões:
 
 import uuid
 from datetime import UTC, datetime
-from typing import Annotated
+from typing import Annotated, Any
 
 from fastapi import APIRouter, Depends, File, HTTPException, Query, UploadFile, status
 from sqlalchemy import func, select
 from sqlalchemy.exc import IntegrityError
 from sqlalchemy.ext.asyncio import AsyncSession
+from sqlalchemy.orm import InstrumentedAttribute
 from starlette.concurrency import run_in_threadpool
 
 from app.core.config import Settings, get_settings
@@ -514,7 +515,7 @@ async def anonymize_user(
 # São 11 COUNTs numa rota que um admin usa raramente: preferi a clareza de uma
 # lista legível — que também alimenta a mensagem de erro — a uma query só,
 # montada com UNION, que ninguém consegue reler depois.
-_REFERENCIAS_QUE_BLOQUEIAM: tuple[tuple[str, object, object], ...] = (
+_REFERENCIAS_QUE_BLOQUEIAM: tuple[tuple[str, type[Any], InstrumentedAttribute], ...] = (
     ("chamado(s) aberto(s)", Ticket, Ticket.creator_id),
     ("chamado(s) atribuído(s)", Ticket, Ticket.assignee_id),
     ("registro(s) de histórico", TicketHistory, TicketHistory.user_id),

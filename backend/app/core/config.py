@@ -1,5 +1,6 @@
 import json
 from functools import lru_cache
+from typing import Any
 from urllib.parse import urlparse
 
 from pydantic import field_validator
@@ -109,7 +110,7 @@ class Settings(BaseSettings):
     secret_key: str = ""
     bcrypt_rounds: int = 12
 
-    def model_post_init(self, __context) -> None:
+    def model_post_init(self, __context: Any) -> None:
         # A lista do que ESCAPA é fechada, e é essa a diferença. Enquanto a
         # condição era `if not self.is_production`, qualquer APP_ENV fora de
         # "production"/"prod" passava batido: um staging publicado na internet

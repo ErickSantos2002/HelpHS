@@ -33,7 +33,7 @@ warn_unused_ignores = true
 plugins = ["pydantic.mypy"]
 
 [[tool.mypy.overrides]]
-module = ["redis.*", "passlib.*", "jose.*"]
+module = ["redis.*", "passlib.*", "jose.*", "pytz.*"]
 ignore_missing_imports = true
 
 # ── pytest ───────────────────────────────────────────────────

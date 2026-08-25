@@ -291,8 +291,10 @@ def _record_history(
     ticket_id: uuid.UUID,
     user_id: uuid.UUID,
     field: str,
-    old_value: str | None,
-    new_value: str | None,
+    # Aceita UUID porque varios campos de historico sao id: o corpo faz str()
+    # antes de gravar, entao a anotacao estreita era a unica coisa errada.
+    old_value: str | uuid.UUID | None,
+    new_value: str | uuid.UUID | None,
     comment: str | None = None,
 ) -> None:
     db.add(
@@ -472,7 +474,7 @@ async def list_tickets(
             else_=4,
         )
     else:
-        sort_expr = _SORT_COLUMNS[sort_by]
+        sort_expr = _SORT_COLUMNS[sort_by]  # type: ignore[assignment]
 
     order = asc(sort_expr) if sort_dir == "asc" else desc(sort_expr)
 

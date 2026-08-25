@@ -3,6 +3,7 @@ Endpoints de autenticação: login, refresh, logout.
 """
 
 import re
+import uuid
 from datetime import UTC, datetime
 from typing import Annotated
 
@@ -55,7 +56,7 @@ settings = get_settings()
 def _audit(
     db: AsyncSession,
     action: AuditAction,
-    user_id,
+    user_id: uuid.UUID,
     request: Request,
 ) -> None:
     db.add(

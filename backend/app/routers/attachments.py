@@ -126,7 +126,8 @@ async def upload_attachments(
             f"Max {settings.upload_max_files_per_ticket} per ticket.",
         )
 
-    created: list[AttachmentResponse] = []
+    # Guarda os objetos do ORM; a conversao para resposta acontece no return.
+    created: list[Attachment] = []
 
     for file in files:
         data = await file.read()

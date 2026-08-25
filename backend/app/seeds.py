@@ -5,6 +5,7 @@ Uso: python -m app.seeds
 
 import asyncio
 import uuid
+from typing import Any
 
 from loguru import logger
 from passlib.context import CryptContext
@@ -39,7 +40,7 @@ PRODUCTS = [
     {"name": "Titan", "description": "Bafômetro Titan", "version": None},
 ]
 
-SLA_CONFIGS = [
+SLA_CONFIGS: list[dict[str, Any]] = [
     {
         "level": SLALevel.critical,
         "response_time_hours": 1,
