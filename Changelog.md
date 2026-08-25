@@ -11,6 +11,33 @@ Datas em DD/MM/AAAA.
 ## [Não publicado]
 
 ### Segurança
+- **O SMTP passa a verificar o certificado do servidor** (`36bfc85`).
+  `VALIDATE_CERTS` estava fixo em `False`: qualquer um que conseguisse
+  responder no endereço configurado recebia **usuário e senha do SMTP** — a
+  credencial de envio da empresa inteira. Sem chave de configuração para
+  desligar: uma opção "não verifique o certificado" é o tipo de coisa que
+  alguém liga para destravar um relay interno e nunca mais desliga.
+- **`LLM_ENABLED` permite desligar a IA sem esvaziar as chaves** (`79ef715`).
+  A única forma de parar de mandar conteúdo de chamado para OpenAI e Anthropic
+  era **apagar** as chaves do painel — manobra que destrói a configuração e não
+  tem volta. Padrão `true`, de propósito: desligar por padrão apagaria a
+  classificação automática em produção no deploy seguinte sem ninguém pedir, e
+  mudança silenciosa é o oposto do que uma flag de emergência deve fazer. ⚠️ A
+  guarda ficou nas **quatro** entradas públicas, não só nos dois helpers de
+  chamada: `suggest_reply`, `summarize_conversation` e `improve_message` montam
+  as suas próprias requisições — são oito construções de `httpx.AsyncClient` no
+  arquivo. Por isso o teste conta **construções de cliente HTTP**, não o
+  retorno: é o que separa "não mandou" de "mandou e deu errado".
+- **O upload deixa de materializar o arquivo antes de medir** (`ab791c3`). Os
+  dois endpoints que recebem arquivo faziam `await file.read()` e só então
+  mediam `len(data)`: mandar 2 GB fazia o processo alocar 2 GB **antes** de
+  recusar, e não há middleware de tamanho de corpo na aplicação — o único
+  middleware montado é o CORS. A leitura passa a ser por blocos de 64 KB,
+  abortando no primeiro que cruza o limite, e a extensão é conferida antes de
+  ler qualquer byte. ⚠️ O status muda de 422 para **413** — conferido antes: o
+  `apiError.ts` já tem 413 no mapa de fallback e prefere o `detail`, então a
+  mensagem do anexo passou de inglês (que dependia do mapa de tradução) para
+  português direto.
 - **Rascunho da base de conhecimento deixa de existir para quem não é da
   equipe** (`bdd1418`). O `GET` do artigo fazia a checagem certa — não-staff
   mais não-publicado vira 404 — e os três vizinhos não repetiam. Com o UUID de
@@ -159,6 +186,22 @@ Datas em DD/MM/AAAA.
   de ter sido cliente.
 
 ### Corrigido
+- **O protocolo deixa de travar no 10.000º chamado do ano** (`32f07de`). A
+  consulta do máximo ordenava `Ticket.protocol` como **texto**, e a sequência
+  tem 4 dígitos: `'HS-2026-9999' > 'HS-2026-10000'` é verdade em ordenação de
+  texto. O efeito não é um número fora de ordem — é **parada total**: o máximo
+  volta a ser 9999 para sempre, o gerador propõe 10000 de novo, as cinco
+  tentativas colidem no índice único e nenhum chamado novo pode ser aberto.
+  Conserto mínimo: comprimento primeiro, texto depois — vale nos dois bancos e
+  não levanta em nenhum (um CAST para inteiro seria mais direto de ler, mas
+  estouraria no Postgres se uma linha com sufixo não-numérico entrasse por fora
+  do gerador). A `SEQUENCE`, que resolveria também a corrida, fica registrada
+  no docstring **com gatilho**: se colisão de protocolo aparecer no log, é hora.
+- **O cadastro deixa de ficar pendurado no SMTP** (`36bfc85`). O `/register`
+  era o único dos três fluxos de e-mail que **aguardava** o envio dentro do
+  handler, sem timeout — servidor lento atrasava o cadastro, servidor que não
+  responde o segurava até o timeout do proxy. Passa a `BackgroundTasks`, como
+  os outros dois já faziam. O teste mede **ordem**, não relógio.
 - **`PATCH /sla-configs/{id}` deixa de devolver 500 em toda chamada**
   (`43c3238`). A linha de auditoria construía o `AuditLog` com três kwargs que
   o modelo não tem: `resource_type`, `resource_id` e `new_values`, quando os
@@ -385,6 +428,18 @@ Datas em DD/MM/AAAA.
   `register_first_response` avalia antes de carimbar.
 
 ### Alterado
+- **O uvicorn sobe com um worker enquanto o chat depender da memória do
+  processo** (`9175752`). O `ConnectionManager` guarda as conexões WebSocket
+  num dicionário **do processo**. Com dois workers, duas pessoas no mesmo
+  chamado caem em processos diferentes com probabilidade alta, cada uma numa
+  sala que o outro não enxerga: ficam conectadas, sem erro nenhum, e não
+  recebem a mensagem uma da outra. ⚠️ O **lock no Redis** do fechamento
+  automático **fica**, mesmo sendo desnecessário com um worker só: voltar a
+  dois é mudar um número, e sem o lock essa volta duplicaria histórico e
+  notificação de cada chamado fechado — calada, do mesmo jeito. O backplane
+  (Redis pub/sub reemitindo as mensagens entre workers) fica como dívida **com
+  gatilho**: é o pré-requisito para voltar a mais de um. Três comentários que
+  afirmavam `--workers 2` foram corrigidos para não depender do número.
 - **A versão da API ganha fonte única e sai da resposta pública** (`dcfc25f`).
   Estava escrita à mão em dois pontos do `main.py`, e as duas cópias
   congelaram em `"1.0.0"` enquanto o produto seguiu para v1.8.0; agora vive em

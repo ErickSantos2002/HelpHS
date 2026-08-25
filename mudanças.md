@@ -7,6 +7,121 @@ O changelog do produto (o que o cliente vê) fica em
 
 ---
 
+## 25/08/2026 (madrugada) — Cinco dos seis altos, e um que parei antes de fazer
+
+Cinco entregues, um devolvido com a premissa corrigida. Seis commits.
+
+| Commit | O que foi feito |
+|---|---|
+| `32f07de` | `fix:` **protocolo** deixa de travar no 10.000º chamado 🔴 |
+| `ab791c3` | `fix:` **upload** deixa de materializar antes de medir 🔴 |
+| `36bfc85` | `fix:` **TLS do SMTP** verificado; cadastro não espera o envio 🔴 |
+| `9175752` | `fix:` **um worker** enquanto o chat for memória de processo |
+| `79ef715` | `feat:` **`LLM_ENABLED`** desliga a IA sem apagar as chaves |
+| `docs:` | Este fechamento |
+
+### O A6 eu parei — e o motivo não é o previsto
+
+O pedido era copiar o bloco `services: postgres:16` do `e2e.yml` e esperar
+falhas, porque "os testes rodam em aiosqlite". Fui verificar antes de mexer, e
+a premissa não se sustenta:
+
+**Só o `test_groups.py` usa banco de verdade**, e ele escolhe SQLite em memória
+de propósito, com o porquê escrito no próprio arquivo. É o único
+`create_async_engine` da suíte inteira. Todo o resto mocka.
+
+O `ci.yml` tem a variável `DATABASE_URL` e nenhum serviço — mas **nada se
+conecta a ela**: o engine é criado na importação e nunca abre conexão, porque o
+lifespan não roda sob `ASGITransport`.
+
+Ou seja: subir o Postgres daria **zero falhas e zero cobertura nova**. Um
+container em todo CI para não ser usado por ninguém — exatamente a
+"configuração que mente" que passamos as últimas rodadas removendo.
+
+E o achado de fundo é pior do que o descrito: as 26 construções só-Postgres do
+`dashboard.py` (`date_trunc`, `isodow`, `count().filter()`, JSONB) **não passam
+por tolerância do SQLite — elas não são executadas contra banco nenhum**. O
+`test_dashboard.py` tem 9 testes, todos mockados. O que falta não é o serviço,
+são os testes que executem essas queries.
+
+O segundo obstáculo foi prático: não há Docker nem Postgres nesta máquina. Eu
+escreveria esses testes, mas não conseguiria rodá-los — a primeira execução
+seria no CI, contra a regra da casa de provar rodando. Preferi devolver com o
+diagnóstico a empurrar teste que nunca vi passar.
+
+### O menor conserto do dia impedia abrir chamado
+
+O A2 é uma linha de `order_by`, e o efeito é o sistema parar. A sequência tem
+4 dígitos e a ordenação é de texto, então a partir do 10.000º chamado do ano
+`'HS-2026-9999' > 'HS-2026-10000'`. O máximo volta a 9999 **para sempre**, o
+gerador propõe 10000 de novo, as cinco tentativas colidem no índice único e
+nenhum chamado novo é aberto.
+
+O A6 tinha sido posto antes justamente para tornar isto testável — mas a
+tabela `tickets` compila no SQLite (ao contrário de `kb_articles`, com sua
+coluna ARRAY), e comparação de texto é comparação de texto nos dois bancos. Deu
+para testar em banco de verdade, verificável agora e rodando no CI de hoje.
+
+Escolhi `length` desc antes do texto em vez de um CAST do sufixo para inteiro:
+o CAST é mais direto de ler, mas estouraria no Postgres se uma linha com sufixo
+não-numérico entrasse por fora do gerador. O `length` não tem como levantar.
+
+### Testes que contam o que NÃO aconteceu
+
+Dois itens desta rodada precisaram do mesmo tipo de teste, e vale registrar o
+padrão porque ele se repete.
+
+No A5, um teste que afirmasse só o `413` continuaria **verde** com a versão que
+lê tudo primeiro — o status está certo nas duas. O que separa as duas versões é
+quantos bytes o servidor aceitou antes de recusar, então é isso que o teste
+conta: mandando 2 GB contra um limite de 64 KB, a leitura tem de parar perto do
+limite.
+
+No A8, um teste que afirmasse só `is None` passaria com a requisição sendo
+feita e falhando — as funções já devolvem `None` quando falham. O que separa
+"não mandou" de "mandou e deu errado" é a rede, então o teste conta
+**construções de `httpx.AsyncClient`**: com a flag desligada, zero.
+
+Esse segundo teste pagou na hora. Eu tinha posto a guarda nos dois helpers
+`_call_openai` e `_call_anthropic`, achando que eram o ponto único — e o teste
+mostrou quatro chamadas saindo mesmo assim. O `suggest_reply`, o
+`summarize_conversation` e o `improve_message` montam as suas próprias
+requisições; são oito construções de cliente HTTP no arquivo. A guarda foi para
+as quatro entradas públicas.
+
+### Um worker, e o lock que fica
+
+O A3 é uma linha, e o que importa é o que vai junto. O `ConnectionManager`
+guarda as conexões WebSocket na memória do processo: com dois workers, duas
+pessoas no mesmo chamado caem em processos diferentes e não se ouvem — sem erro
+nenhum, o que é o pior tipo de falha.
+
+O lock no Redis do fechamento automático **fica**, mesmo sendo desnecessário
+com um worker só. Voltar a dois é mudar um número no `start.sh`; sem o lock,
+essa volta duplicaria histórico e notificação de cada chamado fechado, calada,
+do mesmo jeito que a do chat. Remover agora seria trocar custo zero por
+armadilha.
+
+Três comentários no código afirmavam `--workers 2` e virariam mentira com a
+mudança. Foram corrigidos para não depender do número — que é o ponto, porque
+ele muda.
+
+### O que a flag da IA existia para ser
+
+O `LLM_ENABLED` nasce `true`, e a justificativa é a mesma que faz a flag
+existir: desligar por padrão apagaria a classificação automática em produção no
+deploy seguinte, sem ninguém pedir. Uma flag de emergência que muda
+comportamento sozinha é o oposto de uma flag de emergência.
+
+O que faltava não era a capacidade de parar — era parar **de forma
+reversível**. Apagar as chaves do painel funciona e não tem volta sem ter as
+chaves de novo.
+
+Suíte: 668 → 673 testes, verdes, cobertura 86%. mypy limpo. Sem migration. Nada
+foi executado contra produção.
+
+---
+
 ## 25/08/2026 (fim da noite) — Os três altos baratos
 
 Independentes entre si, poucas linhas cada, um commit por item. O mais barato
