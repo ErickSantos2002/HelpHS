@@ -559,3 +559,36 @@ async def test_staff_que_nao_abriu_o_chamado_continua_com_403(patch_redis):
         resp = await c.post(f"/api/v1/tickets/{_TICKET_ID}/survey", json={"rating": 5})
 
     assert resp.status_code == 403
+
+
+# ═══════════════════════════════════════════════════════════════
+# Modelo: filho de ticket some junto com o ticket
+# ═══════════════════════════════════════════════════════════════
+
+
+def test_todo_filho_de_ticket_e_apagado_junto_com_o_ticket():
+    """
+    O banco já cobre pelo ON DELETE CASCADE da chave estrangeira, mas o ORM
+    não sabe disso: sem cascade no relationship, um `db.delete(ticket)` faz o
+    SQLAlchemy tentar deixar o filho órfão — escrevendo NULL numa coluna que é
+    NOT NULL — e a exclusão morre em IntegrityError.
+
+    Hoje nenhuma rota apaga ticket pelo ORM, então a assimetria é latente. A
+    hora de descobrir não é quando a primeira rota aparecer.
+    """
+    from sqlalchemy import inspect
+
+    from app.models.models import Ticket
+
+    sem_cascade = sorted(
+        rel.key
+        for rel in inspect(Ticket).relationships
+        if rel.direction.name == "ONETOMANY"
+        and rel.secondary is None
+        and not rel.cascade.delete_orphan
+    )
+
+    assert sem_cascade == [], (
+        "filhos de Ticket sem cascade no relationship: "
+        f"{sem_cascade} — o banco apaga, mas o ORM tentaria orfanar antes"
+    )

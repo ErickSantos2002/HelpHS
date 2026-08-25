@@ -477,7 +477,7 @@ class Ticket(Base):
         back_populates="ticket", cascade="all, delete-orphan"
     )
     satisfaction_survey: Mapped["SatisfactionSurvey | None"] = relationship(
-        back_populates="ticket", uselist=False
+        back_populates="ticket", uselist=False, cascade="all, delete-orphan"
     )
     tags: Mapped[list["Tag"]] = relationship(
         secondary=ticket_tags, back_populates="tickets", lazy="selectin"
