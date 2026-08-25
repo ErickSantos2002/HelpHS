@@ -95,7 +95,64 @@ async def _group_company_count(db: AsyncSession, group_id: uuid.UUID) -> int:
     ).scalar_one()
 
 
-async def _company_to_response(db: AsyncSession, c: Company) -> CompanyResponse:
+# ── Contagens em lote ─────────────────────────────────────────
+#
+# As listagens montavam a resposta item a item, e cada item disparava os seus
+# COUNTs: um por grupo na lista de grupos, dois por empresa na de empresas. Com
+# 40 empresas isso é 81 consultas para uma tela. As funções abaixo fazem a
+# mesma conta para a página inteira, com GROUP BY — mesmo padrão que o
+# `list_tickets` já usa para nomes de responsável e produtos.
+#
+# Quem aparece na listagem sem nenhum filho não volta do GROUP BY: por isso a
+# leitura é sempre `.get(id, 0)`, e não indexação direta.
+
+
+async def _contagem_de_empresas_por_grupo(
+    db: AsyncSession, group_ids: list[uuid.UUID]
+) -> dict[uuid.UUID, int]:
+    if not group_ids:
+        return {}
+    rows = await db.execute(
+        select(Company.group_id, func.count())
+        .where(Company.group_id.in_(group_ids))
+        .group_by(Company.group_id)
+    )
+    return {gid: total for gid, total in rows}
+
+
+async def _contagem_de_clientes_por_empresa(
+    db: AsyncSession, company_ids: list[uuid.UUID]
+) -> dict[uuid.UUID, int]:
+    if not company_ids:
+        return {}
+    rows = await db.execute(
+        select(User.company_id, func.count())
+        .where(User.company_id.in_(company_ids))
+        .group_by(User.company_id)
+    )
+    return {cid: total for cid, total in rows}
+
+
+async def _contagem_de_notas_por_empresa(
+    db: AsyncSession, company_ids: list[uuid.UUID]
+) -> dict[uuid.UUID, int]:
+    if not company_ids:
+        return {}
+    try:
+        rows = await db.execute(
+            select(CompanyNote.company_id, func.count())
+            .where(CompanyNote.company_id.in_(company_ids))
+            .group_by(CompanyNote.company_id)
+        )
+        return {cid: total for cid, total in rows}
+    except Exception:
+        # Mesma tolerância do contador individual: a tabela de notas pode não
+        # existir num banco antigo, e a listagem não pode cair por causa disso.
+        await db.rollback()
+        return {}
+
+
+def _company_response(c: Company, client_count: int, note_count: int) -> CompanyResponse:
     return CompanyResponse(
         id=c.id,
         group_id=c.group_id,
@@ -106,23 +163,45 @@ async def _company_to_response(db: AsyncSession, c: Company) -> CompanyResponse:
         city=c.city,
         state=c.state,
         notes=c.notes,
-        client_count=await _company_client_count(db, c.id),
-        note_count=await _company_note_count(db, c.id),
+        client_count=client_count,
+        note_count=note_count,
         created_at=c.created_at,
         updated_at=c.updated_at,
     )
 
 
-async def _group_to_response(db: AsyncSession, g: Group) -> GroupResponse:
+def _group_response(g: Group, company_count: int) -> GroupResponse:
     return GroupResponse(
         id=g.id,
         name=g.name,
         description=g.description,
         notes=g.notes,
-        company_count=await _group_company_count(db, g.id),
+        company_count=company_count,
         created_at=g.created_at,
         updated_at=g.updated_at,
     )
+
+
+async def _companies_to_response(db: AsyncSession, rows: list[Company]) -> list[CompanyResponse]:
+    """Uma lista inteira com duas consultas de contagem, não duas por empresa."""
+    ids = [c.id for c in rows]
+    clientes = await _contagem_de_clientes_por_empresa(db, ids)
+    notas = await _contagem_de_notas_por_empresa(db, ids)
+    return [_company_response(c, clientes.get(c.id, 0), notas.get(c.id, 0)) for c in rows]
+
+
+async def _company_to_response(db: AsyncSession, c: Company) -> CompanyResponse:
+    """Caminho de item único (criar/atualizar) — aqui não há N+1 a evitar."""
+    return _company_response(
+        c,
+        await _company_client_count(db, c.id),
+        await _company_note_count(db, c.id),
+    )
+
+
+async def _group_to_response(db: AsyncSession, g: Group) -> GroupResponse:
+    """Caminho de item único (criar/atualizar)."""
+    return _group_response(g, await _group_company_count(db, g.id))
 
 
 # ── Groups CRUD ───────────────────────────────────────────────
@@ -130,8 +209,9 @@ async def _group_to_response(db: AsyncSession, g: Group) -> GroupResponse:
 
 @router.get("/groups", response_model=list[GroupResponse])
 async def list_groups(db: _DBDep, _: _AdminDep) -> list[GroupResponse]:
-    rows = (await db.execute(select(Group).order_by(Group.name))).scalars().all()
-    return [await _group_to_response(db, g) for g in rows]
+    rows = list((await db.execute(select(Group).order_by(Group.name))).scalars().all())
+    contagens = await _contagem_de_empresas_por_grupo(db, [g.id for g in rows])
+    return [_group_response(g, contagens.get(g.id, 0)) for g in rows]
 
 
 @router.post("/groups", response_model=GroupResponse, status_code=status.HTTP_201_CREATED)
@@ -155,7 +235,7 @@ async def get_group(group_id: uuid.UUID, db: _DBDep, _: _AdminDep) -> GroupDetai
         .scalars()
         .all()
     )
-    companies = [await _company_to_response(db, c) for c in companies_rows]
+    companies = await _companies_to_response(db, list(companies_rows))
     return GroupDetail(
         id=g.id,
         name=g.name,
@@ -206,7 +286,7 @@ async def list_companies(group_id: uuid.UUID, db: _DBDep, _: _AdminDep) -> list[
         .scalars()
         .all()
     )
-    return [await _company_to_response(db, c) for c in rows]
+    return await _companies_to_response(db, list(rows))
 
 
 @router.post(
