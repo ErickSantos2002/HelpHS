@@ -55,8 +55,13 @@ from app.schemas.user import (
     UserUpdate,
 )
 from app.services import storage
+from app.utils.uploads import ler_ate_o_limite
 
 router = APIRouter(prefix="/users", tags=["Users"])
+
+# Foto de perfil tem teto próprio, menor que o de anexo: é imagem de tela,
+# não documento de chamado.
+_AVATAR_MAX_BYTES = 5 * 1024 * 1024
 
 
 # ── Helpers ───────────────────────────────────────────────────
@@ -275,12 +280,10 @@ async def upload_avatar(
             detail="Formato inválido. Use JPG, PNG, GIF ou WebP.",
         )
 
-    data = await file.read()
-    if len(data) > 5 * 1024 * 1024:
-        raise HTTPException(
-            status_code=status.HTTP_422_UNPROCESSABLE_ENTITY,
-            detail="Arquivo muito grande. Máximo: 5 MB.",
-        )
+    # Lê por blocos e para no primeiro que cruza o limite: medir `len(data)`
+    # depois de ler tudo aplicava o teto só quando os bytes já estavam na
+    # memória — ver app/utils/uploads.py.
+    data = await ler_ate_o_limite(file, max_bytes=_AVATAR_MAX_BYTES, rotulo="5 MB")
 
     ext_map = {
         "image/jpeg": ".jpg",

@@ -376,8 +376,10 @@ async def test_upload_attachment_file_too_large(patch_redis):
                 files={"files": big_file},
             )
 
-    assert resp.status_code == 422
-    assert "MB" in resp.json()["detail"]
+    # 413 e não 422: o pedido está bem formado, o que não cabe é o tamanho.
+    # O front já traduz 413 sozinho, e o `detail` em português aparece por cima.
+    assert resp.status_code == 413
+    assert "25 MB" in resp.json()["detail"]
 
 
 @pytest.mark.asyncio

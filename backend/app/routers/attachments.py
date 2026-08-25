@@ -46,6 +46,7 @@ from app.schemas.attachment import (
 from app.services import antivirus, storage
 from app.utils.crud import get_or_404
 from app.utils.ticket_access import ensure_ticket_visible
+from app.utils.uploads import ler_ate_o_limite
 
 router = APIRouter(tags=["Attachments"])
 
@@ -65,23 +66,19 @@ async def _get_attachment_or_404(attachment_id: uuid.UUID, db: AsyncSession) -> 
     return await get_or_404(db, Attachment, attachment_id, _ANEXO_NAO_ENCONTRADO)
 
 
-def _validate_file(
-    file: UploadFile,
-    data: bytes,
-    settings: Settings,
-) -> None:
-    """Validate extension and size. Raises 422 on failure."""
+def _validate_extension(file: UploadFile, settings: Settings) -> None:
+    """
+    Confere a extensão ANTES de ler qualquer byte.
+
+    O tamanho saiu daqui: media `len(data)` sobre um arquivo já inteiro na
+    memória, o que aplicava o limite tarde demais. Quem mede agora é o
+    `ler_ate_o_limite`, por blocos — ver app/utils/uploads.py.
+    """
     ext = os.path.splitext(file.filename or "")[1].lower()
     if ext not in settings.allowed_extensions:
         raise HTTPException(
             status_code=status.HTTP_422_UNPROCESSABLE_ENTITY,
-            detail=f"File type '{ext}' is not allowed",
-        )
-    max_bytes = settings.upload_max_file_size_mb * 1024 * 1024
-    if len(data) > max_bytes:
-        raise HTTPException(
-            status_code=status.HTTP_422_UNPROCESSABLE_ENTITY,
-            detail=f"File '{file.filename}' exceeds the {settings.upload_max_file_size_mb} MB limit",
+            detail=f"O tipo de arquivo '{ext}' não é aceito.",
         )
 
 
@@ -130,8 +127,13 @@ async def upload_attachments(
     created: list[Attachment] = []
 
     for file in files:
-        data = await file.read()
-        _validate_file(file, data, settings)
+        # Extensão primeiro: recusar por tipo não precisa ler byte nenhum.
+        _validate_extension(file, settings)
+        data = await ler_ate_o_limite(
+            file,
+            max_bytes=settings.upload_max_file_size_mb * 1024 * 1024,
+            rotulo=f"{settings.upload_max_file_size_mb} MB",
+        )
 
         # ClamAV scan
         is_clean, scan_msg = await antivirus.scan_bytes(
