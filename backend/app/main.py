@@ -111,6 +111,9 @@ app = FastAPI(
     version=__version__,
     docs_url="/docs" if settings.is_development else None,
     redoc_url="/redoc" if settings.is_development else None,
+    # Sem isto o spec fica no default e segue público mesmo com /docs
+    # desligado — o mapa completo da API para quem procura o que atacar.
+    openapi_url=settings.openapi_url_efetiva(),
     lifespan=lifespan,
 )
 

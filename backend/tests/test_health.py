@@ -147,3 +147,33 @@ async def test_liveness_nao_depende_de_banco_nem_de_redis():
 
     assert r.status_code == 200
     assert r.json() == {"status": "ok"}
+
+
+# ═══════════════════════════════════════════════════════════════
+# O spec da API não é público fora de desenvolvimento
+# ═══════════════════════════════════════════════════════════════
+
+
+def test_spec_e_docs_desligados_fora_de_desenvolvimento():
+    """
+    /docs e /redoc já eram desligados, mas o openapi_url ficou no default —
+    o spec inteiro (todas as rotas, parâmetros e formatos) seguia público em
+    produção, que é o mapa que alguém precisa para procurar o que atacar.
+
+    A regra é uma só: onde o /docs aparece, o spec aparece; onde não, nenhum
+    dos dois. Por isso a mesma condição, e não uma flag separada.
+    """
+    from app.core.config import Settings
+
+    prod = Settings(
+        database_url="postgresql+asyncpg://u:p@localhost/db",
+        app_env="production",
+        secret_key="x" * 32,
+        cors_origins="https://helphs.example.com",
+        frontend_url="https://helphs.example.com",
+    )
+    assert prod.is_development is False
+    assert prod.openapi_url_efetiva() is None
+
+    dev = Settings(database_url="postgresql+asyncpg://u:p@localhost/db", app_env="development")
+    assert dev.openapi_url_efetiva() == "/openapi.json"

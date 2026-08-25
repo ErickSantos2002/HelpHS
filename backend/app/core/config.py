@@ -289,6 +289,18 @@ class Settings(BaseSettings):
     def is_testing(self) -> bool:
         return self.app_env == "testing"
 
+    def openapi_url_efetiva(self) -> str | None:
+        """
+        Onde o spec da API é servido — `None` desliga a rota.
+
+        Mesma condição do /docs e do /redoc de propósito: o spec É a
+        documentação, em outro formato. Ter duas chaves para "expor a API por
+        escrito" seria mais uma configuração para alguém deixar ligada sem
+        querer, e a rodada passada já mostrou o que configuração esquecida
+        custa.
+        """
+        return "/openapi.json" if self.is_development else None
+
     @property
     def allowed_extensions(self) -> list[str]:
         return [ext.strip() for ext in self.upload_allowed_extensions.split(",")]
