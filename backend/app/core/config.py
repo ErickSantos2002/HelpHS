@@ -170,19 +170,14 @@ class Settings(BaseSettings):
     minio_use_ssl: bool = False
 
     # LLM
-    llm_primary_provider: str = "openai"
     openai_api_key: str = ""
     openai_model: str = "gpt-4o-mini"
-    openai_max_tokens: int = 1024
     openai_temperature: float = 0.3
 
-    llm_fallback_provider: str = "anthropic"
     anthropic_api_key: str = ""
     anthropic_model: str = "claude-3-5-haiku-20241022"
-    anthropic_max_tokens: int = 1024
 
     llm_fallback_enabled: bool = True
-    llm_max_retries: int = 2
     llm_request_timeout_seconds: int = 30
 
     # Email
@@ -227,7 +222,6 @@ class Settings(BaseSettings):
     clamav_host: str = "clamav"
     clamav_port: int = 3310
     clamav_timeout_seconds: int = 30
-    clamav_max_file_size_mb: int = 25
 
     # Upload
     upload_max_file_size_mb: int = 25
@@ -264,7 +258,6 @@ class Settings(BaseSettings):
     log_dir: str = "./logs"
 
     # Rate limiting
-    rate_limit_default: str = "100/15minutes"
     rate_limit_login: str = "5/15minutes"
 
     # Quem pode falar pelos outros: lista de IPs/redes cujo X-Forwarded-For o
