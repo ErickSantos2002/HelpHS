@@ -32,7 +32,7 @@ from app.models.models import (
     TicketHistory,
     TicketStatus,
 )
-from app.services.notifications import notify
+from app.services.notifications import commit_e_notificar, notify
 from app.utils.sla import add_business_days
 
 _LOCK_KEY = "helphs:lock:ticket-auto-close"
@@ -143,7 +143,7 @@ async def close_expired_tickets(db: AsyncSession, settings: Settings) -> int:
         closed += 1
 
     if closed:
-        await db.commit()
+        await commit_e_notificar(db)
         logger.info(f"Fechamento automático: {closed} chamado(s) movidos para Fechado")
 
     return closed

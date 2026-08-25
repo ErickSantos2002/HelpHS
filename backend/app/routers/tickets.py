@@ -62,7 +62,7 @@ from app.schemas.ticket import (
     TicketUpdate,
 )
 from app.services.llm import classify_ticket
-from app.services.notifications import notify
+from app.services.notifications import commit_e_notificar, notify
 from app.services.ticket_lifecycle import (
     can_client_reopen,
     reopen_deadline,
@@ -114,7 +114,7 @@ async def _classify_ticket_async(
             ticket.ai_confidence = result["confidence"]
             ticket.ai_summary = result["summary"]
             ticket.updated_at = datetime.now(UTC)
-            await db.commit()
+            await commit_e_notificar(db)
     except Exception as exc:  # noqa: BLE001
         from loguru import logger
 
@@ -374,7 +374,7 @@ async def create_ticket(
             settings=settings,
         )
         try:
-            await db.commit()
+            await commit_e_notificar(db)
             break
         except IntegrityError:
             await db.rollback()
@@ -590,7 +590,7 @@ async def update_ticket(
 
     ticket.updated_at = datetime.now(UTC)
     _audit(db, AuditAction.update, actor.id, ticket.id)
-    await db.commit()
+    await commit_e_notificar(db)
     await db.refresh(ticket)
     return _serialize_ticket(ticket)
 
@@ -624,7 +624,7 @@ async def update_client_observation(
     if old != body.client_observation:
         _record_history(db, ticket.id, actor.id, "client_observation", old, body.client_observation)
     _audit(db, AuditAction.update, actor.id, ticket.id)
-    await db.commit()
+    await commit_e_notificar(db)
     await db.refresh(ticket)
     return _serialize_ticket(ticket)
 
@@ -693,7 +693,7 @@ async def update_ticket_status(
             data={"ticket_id": str(ticket.id), "protocol": ticket.protocol},
             settings=settings,
         )
-    await db.commit()
+    await commit_e_notificar(db)
     await db.refresh(ticket)
     return _serialize_ticket(ticket)
 
@@ -759,7 +759,7 @@ async def resolve_ticket(
         settings=settings,
     )
 
-    await db.commit()
+    await commit_e_notificar(db)
     await db.refresh(ticket)
     return _serialize_ticket(ticket)
 
@@ -866,7 +866,7 @@ async def reopen_ticket(
             settings=settings,
         )
 
-    await db.commit()
+    await commit_e_notificar(db)
     await db.refresh(ticket)
     return _serialize_ticket(ticket)
 
@@ -953,7 +953,7 @@ async def assign_ticket(
             await _auto_transition(
                 db, ticket, TicketStatus.in_progress, actor.id, "Atribuído — em andamento"
             )
-    await db.commit()
+    await commit_e_notificar(db)
     await db.refresh(ticket)
     return _serialize_ticket(ticket)
 
@@ -988,7 +988,7 @@ async def cancel_ticket(
         data={"ticket_id": str(ticket.id), "protocol": ticket.protocol},
         settings=settings,
     )
-    await db.commit()
+    await commit_e_notificar(db)
 
 
 # ── Ticket Notes ─────────────────────────────────────────────
@@ -1036,7 +1036,7 @@ async def create_ticket_note(
     await get_or_404(db, Ticket, ticket_id, _CHAMADO_NAO_ENCONTRADO)
     note = TicketNote(ticket_id=ticket_id, author_id=actor.id, content=body.content)
     db.add(note)
-    await db.commit()
+    await commit_e_notificar(db)
     await db.refresh(note)
     return TicketNoteResponse(
         id=note.id,
@@ -1067,7 +1067,7 @@ async def delete_ticket_note(
             status_code=status.HTTP_403_FORBIDDEN, detail="Sem permissão para deletar esta nota"
         )
     await db.delete(note)
-    await db.commit()
+    await commit_e_notificar(db)
 
 
 @router.get("/tickets/{ticket_id}/history", response_model=TicketHistoryListResponse)

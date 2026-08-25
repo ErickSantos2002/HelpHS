@@ -49,7 +49,7 @@ from app.schemas.chat import (
     SuggestReplyResponse,
 )
 from app.services.llm import improve_message, suggest_reply, summarize_conversation
-from app.services.notifications import notify
+from app.services.notifications import commit_e_notificar, notify
 from app.utils.sla import register_first_response
 from app.utils.ticket_access import ensure_ticket_visible
 
@@ -237,7 +237,7 @@ async def create_message(
     # Auto status transition based on who is sending
     new_status_value = await _apply_chat_transition(db, ticket, actor)
 
-    await db.commit()
+    await commit_e_notificar(db)
 
     # Reload with sender using selectinload
     result = await db.execute(
@@ -404,7 +404,7 @@ async def summarize_ticket_conversation(
     # Persist summary in the ticket
     ticket.ai_conversation_summary = summary
     ticket.updated_at = datetime.now(UTC)
-    await db.commit()
+    await commit_e_notificar(db)
 
     return ConversationSummaryResponse(summary=summary)
 
@@ -485,7 +485,7 @@ async def websocket_chat(
 
                 new_status_value = await _apply_chat_transition(db, ticket, user)
 
-                await db.commit()
+                await commit_e_notificar(db)
 
                 result = await db.execute(
                     select(ChatMessage)
