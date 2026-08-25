@@ -110,7 +110,9 @@ Incorporar o resultado na seção correspondente em vez de duplicar a análise.
 Antes de aprovar, lembrar o que o `.github/workflows/ci.yml` roda:
 
 - Back: `ruff check .`, `black --check .`, `pytest` (cobertura ≥ 80%)
-- Front: `npm run lint`, `npx tsc --noEmit`, `npm run build`
+- Front: `npm run lint`, `npm run typecheck` (`tsc -b` — **nunca**
+  `tsc --noEmit`, que com o solution file termina verde sem checar nada),
+  `npm test` (Vitest) e `npm run build`
 
 Sugerir rodar localmente o que for relevante à mudança — o typecheck do front
 já quebrou build por ter ficado sem rodar (commit `882662b`).

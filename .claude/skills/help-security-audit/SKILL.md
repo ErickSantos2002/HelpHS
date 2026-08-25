@@ -57,12 +57,14 @@ e confirmação de e-mail. Qualquer outra rota respondendo sem token é 🔴.
   documentada no topo de `backend/app/routers/tickets.py`). Toda listagem ou
   consulta nova sobre tickets/anexos/notas precisa repetir esse filtro — o
   vazamento clássico aqui é endpoint novo devolvendo dado de outro cliente.
-- **Rate limiting**: `RATE_LIMIT_LOGIN` existe em `app/core/config.py` mas
-  **nada no código aplica** (não há slowapi/Limiter em uso). Brute force no
-  `/auth/login` está livre — gap conhecido 🟠, reavaliar a cada auditoria.
+- **Rate limiting**: aplicado via slowapi em `app/core/rate_limit.py` —
+  `@limiter.limit(settings.rate_limit_login)` nos endpoints de autenticação
+  (`auth.py`), storage no Redis para valer entre os 2 workers do uvicorn,
+  desligado sob `APP_ENV=testing`. Auditar: endpoint sensível **novo** ganhou
+  o decorator? O storage aponta para o Redis certo em produção?
 - **Enumeração**: `/auth/register` devolve `409` "e-mail já cadastrado" —
-  permite enumerar contas. Combinado com a ausência de rate limiting, sobe
-  de severidade.
+  permite enumerar contas. O rate limiting nos endpoints de auth limita a
+  escala, mas a resposta em si continua distinguível.
 
 ### 2. Chaves e segredos
 
@@ -80,11 +82,12 @@ e confirmação de e-mail. Qualquer outra rota respondendo sem token é 🔴.
 - **SQL**: queries via ORM são parametrizadas. `text()` hoje só aparece com
   literal fixo (`date_trunc` em `app/routers/dashboard.py`) — o perigo é
   f-string ou concatenação com input do usuário dentro de `text()`.
-- **XSS via markdown (o ponto quente do front)**: `KBArticlePage.tsx` e
-  `KBFormPage.tsx` injetam `marked.parse(...)` com `dangerouslySetInnerHTML`
-  **sem sanitização** — o `marked` não remove HTML embutido no markdown.
-  Qualquer mudança na KB (artigos, comentários) passa por avaliar quem pode
-  escrever o conteúdo e se ele é sanitizado (ex.: DOMPurify) antes de renderizar.
+- **XSS via markdown**: a renderização é sanitizada com DOMPurify em
+  `src/lib/markdown.ts`, com teste dedicado (`src/test/lib/markdown.test.ts`
+  — roda em jsdom porque sob o happy-dom padrão o sanitize vira no-op).
+  Regra de auditoria: **todo** markdown novo passa por esse módulo;
+  `marked.parse` direto com `dangerouslySetInnerHTML` em componente é 🔴, e
+  mudança no sanitizer exige rodar o teste em jsdom.
 - **Upload**: extensão validada contra allowlist, tamanho máximo e ClamAV
   (`app/routers/attachments.py`, `app/services/antivirus.py`). Nome de arquivo
   do usuário nunca vira caminho no disco diretamente — conferir em mudança no
@@ -128,10 +131,10 @@ e confirmação de e-mail. Qualquer outra rota respondendo sem token é 🔴.
 - **Segredo em `VITE_*`**: embutido no bundle no build, legível no navegador.
   🔴 se houver token ou chave.
 - Tokens em `localStorage` (`helphs_access_token` / `helphs_refresh_token`,
-  em `src/services/api.ts`): vulnerável a XSS. Com o ponto do markdown da
-  seção 3, esse é o encadeamento mais provável do sistema — XSS na KB →
-  roubo de token. `httpOnly cookie` é mudança de arquitetura: 🔵 enquanto não
-  houver XSS real, 🔴 se houver.
+  em `src/services/api.ts`): vulnerável a XSS. O encadeamento clássico (XSS
+  na KB → roubo de token) está mitigado pela sanitização da seção 3 — o que
+  mantém a regra: qualquer XSS novo é 🔴 por causa do token. `httpOnly
+  cookie` é mudança de arquitetura: 🔵 enquanto não houver XSS real.
 - Regra de permissão só no front, sem contrapartida no back.
 
 ### 8. Dependências e ferramentas já disponíveis
@@ -172,7 +175,7 @@ SECURITY AUDIT — HelpHS
    → backend/app/routers/attachments.py — repetir o filtro de escopo de tickets.py
 🟠 ALTO: sem rate limiting em /auth/login — config existe, nada aplica
 🟡 MÉDIO: CORS_ORIGINS não definido no serviço de produção — subiu com localhost
-🔵 INFO: markdown da KB sem sanitização — avaliar DOMPurify antes de abrir escrita a mais perfis
+🔵 INFO: componente novo renderiza markdown sem passar por src/lib/markdown.ts — usar o módulo sanitizado
 ```
 
 ## Observações

@@ -17,7 +17,7 @@ Diferente do ChamadosHS, aqui há suíte real nos dois lados. Quatro níveis:
 
 | Nível | Onde | Como roda |
 |---|---|---|
-| Backend (unidade/rota) | `backend/tests/` (25 arquivos) | `pytest`, a partir de `backend/` |
+| Backend (unidade/rota) | `backend/tests/` | `pytest`, a partir de `backend/` |
 | Front (unidade/componente) | `frontend/src/test/{components,contexts,lib,services}` | `npm test` (Vitest 4 + happy-dom) |
 | E2E | `frontend/e2e/*.spec.ts` | `npm run e2e` (Playwright, chromium) |
 | Carga | `k6/load-test.js`, `k6/stress-test.js` | `k6 run k6/load-test.js`, manual |
@@ -26,8 +26,10 @@ Padrões de cada suíte:
 
 - **Backend**: `httpx.AsyncClient` com `ASGITransport` sobre o `app` real;
   banco e Redis **mockados** via `app.dependency_overrides` + `FakeRedis`
-  (ver `backend/tests/test_auth.py`). Não há `conftest.py` — as fixtures vivem
-  em cada arquivo. `asyncio_mode = "auto"` no `pyproject.toml`.
+  (ver `backend/tests/test_auth.py`). O `conftest.py` fixa o ambiente antes
+  de qualquer import de `app` (`APP_ENV=testing` → rate limiter desligado,
+  chaves JWT efêmeras); as fixtures de app/banco vivem em cada arquivo.
+  `asyncio_mode = "auto"` no `pyproject.toml`.
 - **Cobertura mínima de 80% é gate**: `--cov-fail-under=80` no
   `pyproject.toml`. Código novo sem teste pode derrubar o pytest inteiro no CI
   mesmo com todos os testes passando.
@@ -38,8 +40,9 @@ Padrões de cada suíte:
   páginas inteiras ficam de fora por decisão.
 - **E2E**: roda **sequencial de propósito** (`workers: 1`) porque o banco é
   compartilhado — não paralelizar. Sobe o dev server sozinho, mas exige o
-  backend rodando na porta 8001 e credenciais reais via `ADMIN_EMAIL`/
-  `ADMIN_PASSWORD` etc. (ver `frontend/playwright.config.ts`).
+  backend rodando na porta 8001 **com `SEED_ADMIN_PASSWORD` exportada**
+  (sem ela o seed não cria o admin e todo login falha) e credenciais via
+  `ADMIN_EMAIL`/`ADMIN_PASSWORD` etc. (ver `frontend/playwright.config.ts`).
 
 ## ⚠️ O que o CI roda — e o que não roda
 
@@ -48,7 +51,9 @@ no front, **ESLint + tsc + Vitest + build**. Ou seja:
 
 - **Vitest roda no CI desde `1583b8b`** (entre o typecheck e o build): teste
   de front quebrado bloqueia o pipeline igual ao pytest.
-- **E2E e k6 nunca rodam sozinhos.** São execução manual e deliberada.
+- **E2E e k6 nunca rodam a cada push.** O e2e tem workflow próprio
+  (`e2e.yml`, `workflow_dispatch`, banco efêmero do job com
+  `SEED_ADMIN_PASSWORD` definido); o k6 é execução manual.
 
 Ao revisar, se um cenário crítico só está coberto por e2e ou k6, dizer
 explicitamente que ele está fora do gate do CI.

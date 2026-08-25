@@ -74,7 +74,10 @@ batendo dos dois lados.
 ### 5. Seeds
 
 `app/seeds.py` roda **todo boot**, depois das migrations — qualquer mudança
-nele precisa ser idempotente (rodar duas vezes sem duplicar nem falhar).
+nele precisa ser idempotente (rodar duas vezes sem duplicar nem falhar) e
+**não pode levantar exceção** (o `start.sh` tem `set -e`; levantar derruba o
+boot). O `seed_admin` recusa rodar em produção e exige `SEED_ADMIN_PASSWORD`
+— a recusa logada é esperada; produtos e SLA seguem sendo semeados.
 
 ## Sequência antes de subir migration para produção
 

@@ -21,7 +21,7 @@ banco, container e rollback.
 | Build | Node 20 alpine → `npm run build` | Python 3.13 slim, multi-stage |
 | Runtime | nginx alpine (SPA fallback) | `start.sh`: **alembic upgrade head → seeds → uvicorn** (2 workers) |
 | Porta | 80 | 8000 |
-| Config | **build args** `VITE_API_URL`, `VITE_WS_URL` | env vars em runtime (restart basta) |
+| Config | **build arg** `VITE_API_URL` (obrigatório — o build **falha** sem ele) | env vars em runtime (restart basta) |
 | Healthcheck | não tem — validar abrindo a aplicação | `/health` no Dockerfile |
 | Estado | — | volume em `/app/uploads` (anexos e avatares) |
 | Usuário | — | `appuser` não-root ✅ |
@@ -32,9 +32,9 @@ banco, container e rollback.
 
 - [ ] Branch correta e `git status` limpo
 - [ ] **CI verde no commit que vai subir** (`ci.yml`: ruff, black, pytest com
-      cobertura ≥ 80%, eslint, tsc, build)
-- [ ] O que o CI **não** cobre foi rodado localmente se a mudança tocou nessas
-      áreas: `npm test` (Vitest), `npm run e2e` (ver `help-test-review`)
+      cobertura ≥ 80%, eslint, `tsc -b`, Vitest, build)
+- [ ] O que o CI **não** cobre foi rodado se a mudança tocou no fluxo:
+      `npm run e2e` (manual, ver `help-test-review`)
 - [ ] Nenhum `console.log`/`print()` de debug esquecido
 
 ### 2. Variáveis de ambiente
@@ -44,6 +44,8 @@ banco, container e rollback.
 - [ ] `APP_ENV=production`, `CORS_ORIGINS` sem `localhost`
 - [ ] Chaves JWT via `JWT_PRIVATE_KEY`/`JWT_PUBLIC_KEY` no serviço
 - [ ] `FRONTEND_URL` com o domínio real (links dos e-mails dependem dele)
+- [ ] `SEED_ADMIN_PASSWORD` **não** existe no serviço de produção — a
+      ausência é o que impede o seed de criar admin com senha conhecida
 - [ ] Mudou algo `VITE_*`? Então o front precisa de **rebuild**, não só restart
 
 ### 3. Banco de dados (o ponto de não-retorno)
@@ -80,7 +82,8 @@ outro, os dois lados precisam conviver:
 - [ ] Imagem buildada do commit certo
 - [ ] Back: `/health` respondendo e log de boot limpo — o log mostra as etapas
       do `start.sh` (migrations → seeds → uvicorn); erro em qualquer uma
-      derruba o serviço
+      derruba o serviço. A **recusa do `seed_admin`** em produção é esperada
+      no log — comportamento certo, não erro
 - [ ] **Volume de `/app/uploads` montado** — sem ele os anexos somem no
       próximo redeploy
 - [ ] Front: bundle com a URL certa

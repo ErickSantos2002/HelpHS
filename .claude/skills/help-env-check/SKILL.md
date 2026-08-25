@@ -16,16 +16,18 @@ completo (backend + `VITE_*`); `frontend/.env.example` só as `VITE_*`.
 
 ## O mapa de risco
 
-Só **`DATABASE_URL` é obrigatória** — sem ela a API não sobe, e o erro é
-alto e claro. Todo o resto tem default de desenvolvimento e **sobe errado em
-silêncio**:
+`DATABASE_URL` é obrigatória sempre, e **fora de dev/testing o boot também
+barra** SECRET_KEY curta, CORS de dev e FRONTEND_URL de localhost
+(`model_post_init` em `config.py` — staging incluído no lado severo). O que
+resta perigoso é o que ainda **sobe errado em silêncio**:
 
 | Variável | Default | Risco se esquecida em produção |
 |---|---|---|
 | `APP_ENV` | `development` | liga `/docs` e `/redoc` públicos |
 | `CORS_ORIGINS` | `localhost` | front de produção bloqueado — ou dev liberado |
 | `JWT_PRIVATE_KEY`/`JWT_PUBLIC_KEY` | vazio (usa `keys/*.pem`) | container sem os arquivos não sobe |
-| `SECRET_KEY` | vazio | mínimo de 32 chars **só é validado** com `APP_ENV=production` |
+| `SECRET_KEY` | vazio | validada (≥ 32 chars) fora de dev/testing — **dev** sobe com chave fraca sem reclamar |
+| `SEED_ADMIN_PASSWORD` | ausente | regra invertida: **em produção não deve existir** (a ausência impede o seed de criar admin com senha conhecida); em dev, sem ela o admin local não nasce |
 | `UPLOAD_DIR` | `/app/uploads` | sem **volume** montado, anexos e avatares somem a cada redeploy |
 | `FRONTEND_URL` | `localhost:5173` | links de e-mail (reset de senha, confirmação) apontam para localhost |
 | `SMTP_*` | vazio | **sem SMTP, o cadastro libera acesso sem confirmar e-mail** (`requires_email_verification`) — é comportamento intencional, mas precisa ser decisão, não esquecimento |
@@ -34,14 +36,21 @@ silêncio**:
 
 ### 1. A pegadinha do `VITE_`
 
-`VITE_API_URL` e `VITE_WS_URL` são **build args** no `frontend/Dockerfile` —
-embutidas no bundle durante o `npm run build`:
+`VITE_API_URL` é **build arg** no `frontend/Dockerfile` — embutida no bundle
+durante o `npm run build`, e o build **falha cedo** se ela vier vazia
+(fail-fast proposital). `VITE_WS_URL`, `VITE_APP_NAME` e `VITE_APP_VERSION`
+foram removidas: nada as lê (o WS deriva do `VITE_API_URL` em
+`chatService.ts`):
 
 - Trocar a variável no painel do EasyPanel **não muda nada** sem rebuild da
   imagem — tem que ser build arg, e rebuildar
 - **Nunca segredo em `VITE_*`** — fica legível no navegador
 - Conferir o valor que ficou de fato no bundle:
   `grep -o "https\?://[^\"']*" dist/assets/*.js | sort -u`
+- Em dev existe `VITE_DEV_API_TARGET` (lida só pelo `vite.config.ts`): muda o
+  alvo do proxy do dev server — apontada para outra API, o front local fala
+  com ela sem CORS. Não entra no bundle; conferi-la quando "o dev aponta para
+  o ambiente errado"
 - Os `.dockerignore` de front e back **já excluem `.env`** ✅ — manter assim;
   é a proteção contra o `.env` local disputar com o build arg
 
@@ -76,8 +85,9 @@ embutidas no bundle durante o `npm run build`:
 
 - `MINIO_*`: legado — o storage passou a ser disco (`UPLOAD_DIR`); não
   configurar ambiente novo com base nelas
-- `RATE_LIMIT_*`: existem no config **mas nada as aplica** (ver
-  `help-security-audit`) — não tratar como proteção ativa
+- `RATE_LIMIT_LOGIN`: **aplicada** por `app/core/rate_limit.py` (slowapi,
+  storage no Redis, desligada sob `APP_ENV=testing`) — deixou de ser config
+  morta; ver `help-security-audit`
 
 ### 6. Consistência com o `.env.example`
 

@@ -16,8 +16,8 @@ revisar com confiança e **subir na ordem certa**.
   quando o contrato muda, e a descrição deve tratar os dois lados como uma
   entrega só
 - O CI roda no PR (`ci.yml`, branches `main` e `develop`): ruff, black,
-  pytest com cobertura ≥ 80%, eslint, tsc, build. **Vitest e e2e não rodam**
-  — se a mudança depende deles, o "como testar" precisa cobrir
+  pytest com cobertura ≥ 80%, eslint, `tsc -b`, Vitest, build. **E2E e k6
+  não rodam** — se a mudança depende deles, o "como testar" precisa cobrir
 - Migrations Alembic **rodam sozinhas no boot** do container — merge + deploy
   aplica o schema; isso nunca é nota de rodapé
 - Deploy é **manual via EasyPanel**, front e back em serviços separados
@@ -41,7 +41,7 @@ revisar com confiança e **subir na ordem certa**.
 ## Como testar
 - [ ] Passo 1
 - [ ] Comportamento esperado: ...
-- [ ] O que o CI não cobre e foi testado à mão: npm test / e2e / fluxo manual
+- [ ] O que o CI não cobre e foi testado à mão: e2e / fluxo manual
 
 ## Impacto
 - [ ] Breaking change no contrato da API (front acompanhou no mesmo PR?)
@@ -56,8 +56,8 @@ revisar com confiança e **subir na ordem certa**.
 3. [ex.: rebuild + subir o serviço do front]
 
 ## Checklist
-- [ ] CI verde (inclui cobertura ≥ 80% no back)
-- [ ] `npm test` local passou (fora do CI)
+- [ ] CI verde (inclui cobertura ≥ 80% no back e o Vitest do front)
+- [ ] E2E rodado se o fluxo mudou (manual — fora do CI)
 - [ ] Migration testada com upgrade → downgrade → upgrade
 - [ ] Variáveis novas documentadas no `.env.example`
 - [ ] Changelog (`src/data/changelog.ts`) atualizado, se é entrega visível

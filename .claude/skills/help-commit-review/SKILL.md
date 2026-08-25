@@ -32,8 +32,9 @@ Regras derivadas do histórico:
 - Descrição em **português, minúscula, sem ponto final**, descrevendo
   **o efeito**, não o arquivo mexido
 - Release ganha o número da versão no fim: `(v1.6.0)`
-- O hook do **commitizen** valida o formato no `commit-msg`
-  (`.pre-commit-config.yaml`) — mensagem fora do padrão nem passa
+- O `.pre-commit-config.yaml` traz **commitizen** no `commit-msg`, mas os
+  hooks **não estão instalados** na máquina atual (`pre-commit install`
+  ativa) — não confiar que o hook barra; validar o formato na revisão
 
 > ⚠️ Não sugerir imperativo em inglês ("Add", "Fix", "Update") — contraria a
 > convenção adotada.
@@ -73,8 +74,11 @@ Apontar: mensagem vaga ("ajustes", "wip"), tipo errado (`feat` para correção).
 
 ### 4. Hooks
 
-O pre-commit roda ruff (com `--fix`), black, prettier e checagens gerais —
-se o hook alterou arquivo, o diff staged pode ter ficado para trás.
+O `.pre-commit-config.yaml` define ruff (com `--fix`), black, prettier e
+checagens gerais — **quando instalados** (`pre-commit install`; na máquina
+atual não estão, então nada roda no commit e a formatação é manual). Com
+hooks ativos, se o hook alterou arquivo, o diff staged pode ter ficado para
+trás.
 **Nunca sugerir `--no-verify`** para contornar hook falhando: entender e
 corrigir.
 

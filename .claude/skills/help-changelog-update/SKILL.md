@@ -76,7 +76,8 @@ O leitor é o **cliente da Health & Safety** dentro do sistema, não um dev:
 - **Perguntar o número da versão** antes de criar (o projeto usa minor bump:
   v1.4.0 → v1.5.0 → v1.6.0)
 - `APP_VERSION` e a primeira entrada do array têm que bater — o app exibe os dois
-- O arquivo é TypeScript: rodar `npx tsc --noEmit` (ou confiar no CI) depois
-  de editar — vírgula errada aqui quebra o build do front
+- O arquivo é TypeScript: rodar `npm run typecheck` (`tsc -b`; **não**
+  `tsc --noEmit`, que não checa nada com o solution file) depois de editar —
+  vírgula errada aqui quebra o build do front
 - Ver [[help-commit-review]]: se é commit de release, changelog e versão
   andam juntos
