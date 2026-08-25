@@ -6,8 +6,11 @@ business-hours logic is verified precisely.
 """
 
 import uuid
-from datetime import timedelta
-from unittest.mock import MagicMock
+from datetime import UTC, datetime, timedelta
+from unittest.mock import AsyncMock, MagicMock
+
+import pytest
+from httpx import ASGITransport, AsyncClient
 
 from app.models.models import SLAConfig, TicketStatus
 from app.utils.sla import (
@@ -386,3 +389,118 @@ def test_first_response_sem_prazo_configurado_apenas_carimba():
 
     assert ticket.sla_first_response == now
     assert ticket.sla_response_breach is False
+
+
+# ═══════════════════════════════════════════════════════════════
+# PATCH /sla-configs/{id} — a rede que faltava
+# ═══════════════════════════════════════════════════════════════
+#
+# Este arquivo tinha 30 testes do motor de SLA e NENHUM que batesse no
+# endpoint. Por isso três kwargs errados na linha de auditoria sobreviveram:
+# o PATCH devolvia 500 em 100% das chamadas — configurar prazo de SLA pela
+# interface nunca funcionou — e nada na suíte percebia.
+#
+# O mypy também não pega: modelo declarativo do SQLAlchemy não tem __init__
+# conferido. A rede que faltava era teste de endpoint, e é o que entra aqui.
+
+
+def _config_falsa():
+    c = MagicMock()
+    c.id = uuid.uuid4()
+    c.level = "critical"
+    c.response_time_hours = 1
+    c.resolve_time_hours = 4
+    c.warning_threshold = 80
+    c.is_active = True
+    c.created_at = datetime.now(UTC)
+    c.updated_at = datetime.now(UTC)
+    return c
+
+
+def _db_com(config):
+    """Sessão que devolve `config` e guarda o que foi adicionado."""
+    result = MagicMock()
+    result.scalar_one_or_none.return_value = config
+
+    session = AsyncMock()
+    session.execute = AsyncMock(return_value=result)
+    session.add = MagicMock()
+    session.commit = AsyncMock()
+    session.refresh = AsyncMock()
+
+    async def _gen():
+        yield session
+
+    return session, _gen
+
+
+@pytest.mark.asyncio
+async def test_patch_de_sla_responde_200_e_persiste():
+    from app.core.database import get_db
+    from app.core.security import get_current_user
+    from app.main import app
+    from app.models.models import UserRole
+
+    config = _config_falsa()
+    session, override = _db_com(config)
+
+    admin = MagicMock()
+    admin.id = uuid.uuid4()
+    admin.role = UserRole.admin
+
+    async def _admin():
+        return admin
+
+    app.dependency_overrides[get_db] = override
+    app.dependency_overrides[get_current_user] = _admin
+    try:
+        async with AsyncClient(transport=ASGITransport(app=app), base_url="http://test") as c:
+            resp = await c.patch(
+                f"/api/v1/sla-configs/{config.id}", json={"response_time_hours": 3}
+            )
+    finally:
+        app.dependency_overrides.clear()
+
+    assert resp.status_code == 200, resp.text
+    assert config.response_time_hours == 3, "o valor não chegou no objeto"
+    session.commit.assert_awaited()
+
+
+@pytest.mark.asyncio
+async def test_patch_de_sla_registra_auditoria_com_os_campos_do_modelo():
+    """
+    Os três kwargs errados (resource_type/resource_id/new_values) só aparecem
+    quando alguém constrói o AuditLog de verdade — daí o teste afirmar os
+    nomes que o modelo tem, e não só o 200.
+    """
+    from app.core.database import get_db
+    from app.core.security import get_current_user
+    from app.main import app
+    from app.models.models import AuditLog, UserRole
+
+    config = _config_falsa()
+    session, override = _db_com(config)
+
+    admin = MagicMock()
+    admin.id = uuid.uuid4()
+    admin.role = UserRole.admin
+
+    async def _admin():
+        return admin
+
+    app.dependency_overrides[get_db] = override
+    app.dependency_overrides[get_current_user] = _admin
+    try:
+        async with AsyncClient(transport=ASGITransport(app=app), base_url="http://test") as c:
+            resp = await c.patch(f"/api/v1/sla-configs/{config.id}", json={"resolve_time_hours": 8})
+    finally:
+        app.dependency_overrides.clear()
+
+    assert resp.status_code == 200, resp.text
+
+    logs = [c.args[0] for c in session.add.call_args_list if isinstance(c.args[0], AuditLog)]
+    assert logs, "nenhuma linha de auditoria foi adicionada"
+    log = logs[0]
+    assert log.entity_type == "sla_config"
+    assert log.entity_id == config.id, "entity_id é UUID no modelo, não string"
+    assert log.new_data == {"resolve_time_hours": 8}

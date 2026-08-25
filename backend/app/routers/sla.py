@@ -54,9 +54,9 @@ async def update_sla_config(
         AuditLog(
             user_id=current_user.id,
             action=AuditAction.update,
-            resource_type="sla_config",
-            resource_id=str(config_id),
-            new_values=update_data,
+            entity_type="sla_config",
+            entity_id=config_id,
+            new_data=update_data,
         )
     )
 
