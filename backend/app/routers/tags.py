@@ -4,8 +4,8 @@ CRUD de etiquetas (tags) e vinculação em tickets.
 Permissões:
   GET    /tags                     — qualquer autenticado
   POST   /tags                     — admin | technician
-  PATCH  /tags/{id}                — admin
-  DELETE /tags/{id}                — admin
+  PATCH  /tags/{id}                — admin | technician
+  DELETE /tags/{id}                — admin | technician
   PUT    /tickets/{ticket_id}/tags — admin | technician
 """
 
@@ -18,7 +18,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.core.database import get_db
 from app.core.security import authorize, get_current_user
-from app.models.models import Tag, Ticket, UserRole, ticket_tags
+from app.models.models import Tag, Ticket, User, UserRole, ticket_tags
 from app.schemas.tag import TagCreate, TagListResponse, TagResponse, TagUpdate, TicketTagsUpdate
 
 router = APIRouter(tags=["Tags"])
@@ -30,7 +30,7 @@ router = APIRouter(tags=["Tags"])
 @router.get("/tags", response_model=TagListResponse)
 async def list_tags(
     db: Annotated[AsyncSession, Depends(get_db)],
-    _actor: Annotated[object, Depends(get_current_user)],
+    _actor: Annotated[User, Depends(get_current_user)],
 ) -> TagListResponse:
     rows = await db.execute(select(Tag).order_by(Tag.name))
     tags = rows.scalars().all()
@@ -44,7 +44,7 @@ async def list_tags(
 async def create_tag(
     body: TagCreate,
     db: Annotated[AsyncSession, Depends(get_db)],
-    actor: Annotated[object, Depends(authorize(UserRole.admin, UserRole.technician))],
+    actor: Annotated[User, Depends(authorize(UserRole.admin, UserRole.technician))],
 ) -> TagResponse:
     existing = await db.execute(select(Tag).where(Tag.name == body.name))
     if existing.scalar_one_or_none():
@@ -67,7 +67,7 @@ async def update_tag(
     tag_id: uuid.UUID,
     body: TagUpdate,
     db: Annotated[AsyncSession, Depends(get_db)],
-    _actor: Annotated[object, Depends(authorize(UserRole.admin, UserRole.technician))],
+    _actor: Annotated[User, Depends(authorize(UserRole.admin, UserRole.technician))],
 ) -> TagResponse:
     result = await db.execute(select(Tag).where(Tag.id == tag_id))
     tag = result.scalar_one_or_none()
@@ -99,7 +99,7 @@ async def update_tag(
 async def delete_tag(
     tag_id: uuid.UUID,
     db: Annotated[AsyncSession, Depends(get_db)],
-    _actor: Annotated[object, Depends(authorize(UserRole.admin, UserRole.technician))],
+    _actor: Annotated[User, Depends(authorize(UserRole.admin, UserRole.technician))],
 ) -> None:
     result = await db.execute(select(Tag).where(Tag.id == tag_id))
     tag = result.scalar_one_or_none()
@@ -120,7 +120,7 @@ async def set_ticket_tags(
     ticket_id: uuid.UUID,
     body: TicketTagsUpdate,
     db: Annotated[AsyncSession, Depends(get_db)],
-    actor: Annotated[object, Depends(authorize(UserRole.admin, UserRole.technician))],
+    actor: Annotated[User, Depends(authorize(UserRole.admin, UserRole.technician))],
 ) -> list[TagResponse]:
     result = await db.execute(select(Ticket).where(Ticket.id == ticket_id))
     ticket = result.scalar_one_or_none()
