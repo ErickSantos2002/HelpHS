@@ -138,6 +138,7 @@ async def lookup_cep(
 async def register(
     body: RegisterRequest,
     request: Request,
+    background: BackgroundTasks,
     db: Annotated[AsyncSession, Depends(get_db)],
 ) -> UserResponse:
     existing = await db.execute(select(User).where(User.email == body.email))
@@ -181,7 +182,11 @@ async def register(
         token = account_tokens.create_email_verification_token(
             user.id, user.email_verified, settings
         )
-        await send_verification_email(user.email, user.name, token, settings)
+        # Agendado, não aguardado: era o único dos três fluxos de e-mail que
+        # segurava o handler no SMTP, sem timeout. Servidor lento atrasava o
+        # cadastro; servidor que não responde o segurava até o timeout do
+        # proxy. O `forgot-password` e o `resend-verification` já faziam assim.
+        background.add_task(send_verification_email, user.email, user.name, token, settings)
         logger.info(f"New client registered (awaiting confirmation): {user.email}")
     else:
         logger.warning(

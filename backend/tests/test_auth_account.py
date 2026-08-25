@@ -494,7 +494,7 @@ async def test_redefinir_senha_hasheia_fora_do_event_loop(smtp_configurado):
 # inline não.
 
 
-async def _ordem_dos_eventos(caminho: str, email: str, envio_mock) -> list[str]:
+async def _ordem_dos_eventos(caminho: str, email: str, envio_mock, corpo_dict=None) -> list[str]:
     """Chama a app no ASGI cru e devolve a ordem: resposta e envio."""
     eventos: list[str] = []
 
@@ -504,7 +504,7 @@ async def _ordem_dos_eventos(caminho: str, email: str, envio_mock) -> list[str]:
 
     envio_mock.side_effect = _envio
 
-    corpo = json.dumps({"email": email}).encode()
+    corpo = json.dumps(corpo_dict if corpo_dict is not None else {"email": email}).encode()
 
     async def receive():
         return {"type": "http.request", "body": corpo, "more_body": False}
@@ -623,3 +623,106 @@ async def test_link_de_confirmacao_nao_serve_para_outra_conta_depois_de_usado(sm
         segunda = await c.post("/api/v1/auth/verify-email", json={"token": token})
     assert segunda.status_code == 200
     assert "já estava confirmado" in segunda.json()["message"]
+
+
+# ═══════════════════════════════════════════════════════════════
+# O cadastro não pode ficar pendurado no SMTP
+# ═══════════════════════════════════════════════════════════════
+
+
+@pytest.mark.asyncio
+async def test_cadastro_responde_antes_de_mandar_o_email(smtp_configurado):
+    """
+    O `forgot-password` e o `resend-verification` já respondiam antes de
+    enviar; o `/register` era o único que **aguardava** o SMTP dentro do
+    handler, sem timeout. Um servidor de e-mail lento segurava o cadastro, e um
+    que não responde o segurava até o timeout do proxy.
+
+    Mede ORDEM, não relógio: pelo ASGI cru dá para ver o corpo da resposta sair
+    antes de o envio começar.
+    """
+    from app.core.database import get_db
+    from app.models.models import User as ModeloUser
+
+    # O `register` cria um User de verdade e o serializa no fim. Num flush real
+    # o banco preenche id e os timestamps; aqui o mock precisa fazer o mesmo,
+    # senão a resposta nem chega a ser montada e o teste morre antes de medir
+    # a ordem, que é o que ele existe para medir.
+    def _sessao_que_preenche():
+        adicionados: list = []
+        resultado = MagicMock()
+        resultado.scalar_one_or_none.return_value = None
+
+        sessao = AsyncMock()
+        sessao.execute = AsyncMock(return_value=resultado)
+        sessao.add = MagicMock(side_effect=adicionados.append)
+
+        async def _flush():
+            agora = datetime.now(UTC)
+            for obj in adicionados:
+                if isinstance(obj, ModeloUser):
+                    obj.id = obj.id or uuid.uuid4()
+                    obj.onboarding_completed = bool(obj.onboarding_completed)
+                    obj.created_at = agora
+                    obj.updated_at = agora
+
+        sessao.flush = AsyncMock(side_effect=_flush)
+        sessao.commit = AsyncMock()
+        sessao.refresh = AsyncMock()
+
+        async def _gen():
+            yield sessao
+
+        return _gen
+
+    app.dependency_overrides[get_db] = _sessao_que_preenche()
+
+    eventos = await _ordem_dos_eventos(
+        "/api/v1/auth/register",
+        _EMAIL,
+        smtp_configurado["verification"],
+        corpo_dict={
+            "name": "Cliente Novo",
+            "email": "novo@test.com",
+            "password": "Senha@123456",
+            "lgpd_consent": True,
+        },
+    )
+
+    assert "envio" in eventos, "o e-mail de confirmação precisa continuar saindo"
+    assert eventos.index("http.response.body") < eventos.index(
+        "envio"
+    ), f"o envio acontece antes de a resposta sair: {eventos}"
+
+
+# ═══════════════════════════════════════════════════════════════
+# O certificado do servidor SMTP precisa ser verificado
+# ═══════════════════════════════════════════════════════════════
+
+
+def test_conexao_smtp_verifica_o_certificado():
+    """
+    `VALIDATE_CERTS=False` desliga a verificação do certificado: qualquer um
+    que consiga responder no endereço do servidor recebe usuário e senha do
+    SMTP — e a senha do SMTP é a credencial de envio da empresa inteira.
+    """
+    from app.core.config import Settings
+    from app.services import email as servico_email
+
+    servico_email._mail_instance = None
+    servico_email._mail_settings_hash = None
+
+    settings = Settings(
+        database_url="postgresql+asyncpg://u:p@localhost/db",
+        smtp_host="smtp.exemplo.com",
+        smtp_port=587,
+        smtp_user="envio@exemplo.com",
+        smtp_password="segredo",
+        smtp_from_email="envio@exemplo.com",
+    )
+
+    cliente = servico_email._get_mail_client(settings)
+    assert cliente.config.VALIDATE_CERTS is True
+
+    servico_email._mail_instance = None
+    servico_email._mail_settings_hash = None

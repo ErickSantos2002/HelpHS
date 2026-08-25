@@ -30,7 +30,14 @@ def _get_mail_client(settings: Settings) -> FastMail:
             MAIL_SERVER=settings.smtp_host,
             MAIL_STARTTLS=settings.smtp_tls,
             MAIL_SSL_TLS=settings.smtp_ssl,
-            VALIDATE_CERTS=False,
+            # Verificar o certificado do servidor é o que impede entregar
+            # usuário e senha do SMTP a quem conseguir responder no endereço —
+            # e a senha do SMTP é a credencial de envio da empresa inteira.
+            # Sem chave de configuração para desligar: uma opção "não verifique
+            # o certificado" é o tipo de coisa que alguém liga para destravar um
+            # relay interno e nunca mais desliga. Se um dia houver um servidor
+            # de certificado próprio, isso é decisão para tomar na hora.
+            VALIDATE_CERTS=True,
             USE_CREDENTIALS=bool(settings.smtp_user),
         )
         _mail_instance = FastMail(config)
