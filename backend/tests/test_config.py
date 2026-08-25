@@ -344,3 +344,59 @@ def test_producao_recusa_flag_ligada_sem_smtp():
 
     # Com SMTP junto, produção sobe normalmente
     _producao(email_verification_enabled=True, smtp_from_email="a@b.c")
+
+
+# ═══════════════════════════════════════════════════════════════
+# Ambiente que não é local vale como ambiente de verdade
+# ═══════════════════════════════════════════════════════════════
+
+
+@pytest.mark.parametrize("ambiente", ["staging", "homolog", "qa", "sandbox"])
+def test_ambiente_nao_local_nao_escapa_das_validacoes(ambiente):
+    """
+    O guard começava com `if not self.is_production: return`, então qualquer
+    APP_ENV fora de "production"/"prod" aceitava SECRET_KEY curta,
+    CORS_ORIGINS=* e FRONTEND_URL de localhost.
+
+    Um staging exposto na internet com essas três é um ambiente de produção
+    com outro nome — e é justamente onde se testa com dado copiado do real.
+    """
+    with pytest.raises(ValueError, match="SECRET_KEY"):
+        _settings(app_env=ambiente, secret_key="curta")
+
+
+@pytest.mark.parametrize("ambiente", ["staging", "qa"])
+def test_ambiente_nao_local_recusa_cors_aberto(ambiente):
+    with pytest.raises(ValueError, match="CORS_ORIGINS"):
+        _settings(app_env=ambiente, cors_origins="*", frontend_url=_DOMINIO_REAL)
+
+
+@pytest.mark.parametrize("ambiente", ["staging", "qa"])
+def test_ambiente_nao_local_recusa_frontend_local(ambiente):
+    with pytest.raises(ValueError, match="FRONTEND_URL"):
+        _settings(
+            app_env=ambiente,
+            cors_origins=_DOMINIO_REAL,
+            frontend_url="http://localhost:5173",
+        )
+
+
+@pytest.mark.parametrize("ambiente", ["development", "testing"])
+def test_ambiente_local_continua_liberado(ambiente):
+    """
+    A blindagem não pode atrapalhar quem desenvolve: sem SECRET_KEY longa, com
+    localhost no CORS e no FRONTEND_URL, tem de subir igual.
+    """
+    s = _settings(app_env=ambiente, secret_key="curta")
+    assert s.app_env == ambiente
+
+
+def test_staging_correto_sobe_e_continua_nao_sendo_producao():
+    """
+    A validação aperta, mas não promove: `is_production` segue False, senão
+    staging herdaria decisões que são só de produção (o /docs desligado, o
+    seed de admin que não roda).
+    """
+    s = _settings(app_env="staging", cors_origins=_DOMINIO_REAL, frontend_url=_DOMINIO_REAL)
+    assert s.is_production is False
+    assert s.is_development is False

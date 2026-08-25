@@ -110,11 +110,22 @@ class Settings(BaseSettings):
     bcrypt_rounds: int = 12
 
     def model_post_init(self, __context) -> None:
-        if not self.is_production:
+        # A lista do que ESCAPA é fechada, e é essa a diferença. Enquanto a
+        # condição era `if not self.is_production`, qualquer APP_ENV fora de
+        # "production"/"prod" passava batido: um staging publicado na internet
+        # aceitava SECRET_KEY curta, CORS_ORIGINS=* e FRONTEND_URL de
+        # localhost — e staging é justamente onde se testa com dado copiado do
+        # real. Agora só desenvolvimento e teste ficam de fora; um APP_ENV
+        # desconhecido cai no lado severo, que é o lado seguro do erro.
+        #
+        # Apertar a validação não promove o ambiente: `is_production` continua
+        # False para staging, senão ele herdaria decisões que são só de
+        # produção — o /docs desligado, o seed de admin que não roda.
+        if self.is_development or self.is_testing:
             return
 
         if len(self.secret_key) < 32:
-            raise ValueError("SECRET_KEY must be at least 32 characters in production")
+            raise ValueError(f"SECRET_KEY precisa ter ao menos 32 caracteres em '{self.app_env}'")
 
         # O default de cors_origins é localhost. Como o nginx do front não faz
         # proxy para a API, o navegador fala com outro domínio e o CORS é
@@ -123,13 +134,17 @@ class Settings(BaseSettings):
         # descobrir isso em produção — mesma escolha feita para a SECRET_KEY.
         origens = self.get_cors_origins()
         if not origens:
-            raise ValueError("CORS_ORIGINS está vazio em produção: defina o domínio real do front")
+            raise ValueError(
+                f"CORS_ORIGINS está vazio em '{self.app_env}': defina o domínio real do front"
+            )
         if any(o == "*" for o in origens):
-            raise ValueError("CORS_ORIGINS não pode ser '*' em produção: use o domínio do front")
+            raise ValueError(
+                f"CORS_ORIGINS não pode ser '*' em '{self.app_env}': use o domínio do front"
+            )
         locais = [o for o in origens if _host_de(o) in _HOSTS_LOCAIS]
         if locais:
             raise ValueError(
-                "CORS_ORIGINS precisa ser definido com o domínio real do front em produção "
+                "CORS_ORIGINS precisa ser definido com o domínio real do front "
                 f"(estas origens são locais: {', '.join(locais)})"
             )
 
@@ -139,7 +154,7 @@ class Settings(BaseSettings):
         # ninguém — e nada no backend reclama.
         if _host_de(self.frontend_url) in _HOSTS_LOCAIS:
             raise ValueError(
-                "FRONTEND_URL precisa ser o endereço público do sistema em produção: "
+                "FRONTEND_URL precisa ser o endereço público do sistema: "
                 "os links dos e-mails de confirmação e de senha saem a partir dele"
             )
 
