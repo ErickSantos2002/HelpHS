@@ -630,7 +630,7 @@ class KBArticle(Base):
     category: Mapped[TicketCategory] = mapped_column(
         Enum(TicketCategory), default=TicketCategory.general
     )
-    tags: Mapped[list[str]] = mapped_column(ARRAY(String(50)), default=[])
+    tags: Mapped[list[str]] = mapped_column(ARRAY(String(50)), default=list)
     status: Mapped[KBArticleStatus] = mapped_column(
         Enum(KBArticleStatus), default=KBArticleStatus.draft, index=True
     )
