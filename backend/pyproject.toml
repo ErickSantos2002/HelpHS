@@ -33,7 +33,7 @@ warn_unused_ignores = true
 plugins = ["pydantic.mypy"]
 
 [[tool.mypy.overrides]]
-module = ["celery.*", "redis.*", "passlib.*", "jose.*"]
+module = ["redis.*", "passlib.*", "jose.*"]
 ignore_missing_imports = true
 
 # ── pytest ───────────────────────────────────────────────────
@@ -48,7 +48,6 @@ source = ["app"]
 concurrency = ["thread", "greenlet"]
 omit = [
     "app/seeds.py",
-    "app/worker/*",
     "app/core/logging.py",
 ]
 

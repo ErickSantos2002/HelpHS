@@ -107,11 +107,10 @@ workflow próprio (`e2e.yml`), acionado à mão.
 | IA          | OpenAI GPT-4o-mini + Anthropic (fallback)       |
 | Deploy      | EasyPanel (backend e frontend separados)        |
 
-Duas ressalvas que a tabela não conta: o **Celery está configurado mas não tem
-worker** no ambiente — o que precisa rodar sozinho roda como task da própria
-API; e o **MinIO** sobrevive só como configuração legada, já que os anexos
-passaram a ser gravados em disco. Ambas em "Pendências conhecidas" do
-documento de decisões.
+Duas ressalvas que a tabela não conta: **não existe fila de tarefas** — o que
+precisa rodar sozinho roda como task da própria API, por decisão registrada; e
+o **MinIO** sobrevive só como configuração legada, já que os anexos passaram a
+ser gravados em disco. Ambas no documento de decisões.
 
 ## Documentação
 

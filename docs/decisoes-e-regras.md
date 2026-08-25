@@ -148,9 +148,16 @@ Está na fila como melhoria futura, não como bug.
 
 ### Por que a rotina roda dentro da API
 
-O projeto tem Celery configurado, mas **não existe worker nem beat no ambiente
-de produção** — o `start.sh` sobe apenas o uvicorn. Uma tarefa agendada no
-Celery nunca executaria.
+**É deliberado, não uma etapa que faltou.** O ambiente sobe um processo só — o
+`start.sh` executa apenas o uvicorn — e uma rotina de hora em hora não paga o
+custo de operar um segundo serviço: mais um container no EasyPanel, mais uma
+fila para observar e mais um lugar de onde uma falha silenciosa pode vir.
+
+Até 25/08/2026 o repositório tinha um pacote `app/worker/` com Celery e três
+tarefas de exemplo que **nada executava** — nenhuma chamada `.delay()`, nenhum
+worker, nenhum beat. Foi removido: um esqueleto que devolve `{"status":
+"queued"}` sem fazer nada é pior que ausência, porque alguém acaba chamando
+acreditando que funciona.
 
 A rotina roda como task do próprio processo da API
 (`backend/app/services/ticket_lifecycle.py`), a cada
@@ -582,16 +589,17 @@ Coisas que os documentos de Requisitos preveem e que **não estão implementadas
 Nenhuma delas foi pedida pelo cliente até agora — estão aqui para não se
 perderem.
 
-### Celery continua sem worker
+### Não há fila de tarefas assíncronas
 
-O `backend/app/worker/tasks.py` tem três tarefas de exemplo, nenhuma
-implementada, e **nada as executa** — não há worker nem beat no EasyPanel. O
-fechamento automático precisou ser resolvido por fora (ver "Ciclo de
-encerramento do chamado").
+Deixou de ser pendência em 25/08/2026: o Celery que estava no repositório nunca
+executou nada e foi removido (ver "Por que a rotina roda dentro da API"). O que
+precisa rodar sozinho roda dentro do processo da API.
 
-Se um dia aparecer trabalho pesado o bastante para justificar, o caminho é
-subir um serviço `celery -A app.worker.celery_app worker --beat` e mover a
-rotina para lá.
+Se um dia aparecer trabalho pesado o bastante para justificar — algo que não
+caiba numa rodada de hora em hora, ou que não possa competir com as requisições
+pelo mesmo processo — aí sim vale subir uma fila de verdade. A decisão de qual
+ferramenta fica em aberto de propósito: escolher agora, sem o problema na mão,
+foi exatamente o que produziu o pacote morto.
 
 ### Antivírus (ClamAV) não está no ambiente
 

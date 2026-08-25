@@ -87,7 +87,7 @@ async def lifespan(app: FastAPI):
         )
 
     # RN-005 — fecha sozinho os chamados resolvidos que ninguém retomou.
-    # Roda aqui, e não no Celery, porque o ambiente não tem worker (ver
+    # Roda dentro da própria API por decisão, não por falta de fila (ver
     # app/services/ticket_lifecycle.py).
     auto_close_task = start_auto_close_worker()
 

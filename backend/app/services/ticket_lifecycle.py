@@ -2,12 +2,12 @@
 Encerramento do chamado — fechamento automático (RN-005) e prazo de reabertura
 (RN-006).
 
-Por que roda dentro da API e não no Celery
-------------------------------------------
-O projeto tem um Celery configurado, mas **não há worker nem beat no ambiente
-de produção** — o `start.sh` sobe apenas o uvicorn. Uma tarefa agendada no
-Celery simplesmente nunca executaria, e a regra continuaria no papel como
-esteve até agora.
+Por que roda dentro da API, e não numa fila
+-------------------------------------------
+**É deliberado.** O ambiente sobe um processo só — o `start.sh` executa apenas
+o uvicorn — e uma rodada de hora em hora não paga o custo de operar um segundo
+serviço só para ela. Um pacote Celery chegou a existir aqui sem nunca executar
+nada; foi removido em 25/08/2026 (ver docs/decisoes-e-regras.md).
 
 A rotina roda então como uma task asyncio do próprio processo da API. Como o
 uvicorn sobe com `--workers 2`, os dois processos acordariam juntos: um lock no

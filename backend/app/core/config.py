@@ -240,13 +240,6 @@ class Settings(BaseSettings):
     # 0 desliga a rotina (útil em testes e em execução local).
     ticket_auto_close_interval_seconds: int = 3600
 
-    # Celery
-    celery_broker_url: str = "redis://localhost:6379/1"
-    celery_result_backend: str = "redis://localhost:6379/2"
-    celery_default_max_retries: int = 3
-    celery_task_soft_time_limit: int = 300
-    celery_task_time_limit: int = 600
-
     # Logging
     log_level: str = "INFO"
     log_dir: str = "./logs"
