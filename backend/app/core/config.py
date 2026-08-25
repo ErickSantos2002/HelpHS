@@ -186,6 +186,18 @@ class Settings(BaseSettings):
     minio_use_ssl: bool = False
 
     # LLM
+    #
+    # Interruptor da IA. Ligado por padrão: desligar por padrão apagaria a
+    # classificação automática em produção no deploy seguinte, sem ninguém
+    # pedir — e mudança de comportamento silenciosa é o oposto do que uma flag
+    # de emergência deve fazer.
+    #
+    # Existe porque, até então, a única forma de parar de mandar conteúdo de
+    # chamado para OpenAI e Anthropic era APAGAR as chaves do painel: uma
+    # manobra que também destrói a configuração e que ninguém desfaz sem ter as
+    # chaves de novo. Com a flag, desligar é reversível.
+    llm_enabled: bool = True
+
     openai_api_key: str = ""
     openai_model: str = "gpt-4o-mini"
     openai_temperature: float = 0.3

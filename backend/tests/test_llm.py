@@ -301,3 +301,85 @@ async def test_summarize_conversation_empty_history_returns_none():
     """Returns None immediately with empty history."""
     result = await summarize_conversation(title="x", category="general", status="open", history=[])
     assert result is None
+
+
+# ═══════════════════════════════════════════════════════════════
+# LLM_ENABLED — desligar a IA sem esvaziar chave
+# ═══════════════════════════════════════════════════════════════
+#
+# Até aqui a única forma de parar de mandar conteúdo de chamado para a OpenAI
+# e a Anthropic era apagar as chaves do painel — uma manobra que também apaga
+# a configuração e que ninguém consegue desfazer sem ter as chaves de novo.
+# Com a flag, desligar é reversível e não destrói nada.
+
+
+def _llm_desligado():
+    """Patch da flag no módulo, que lê settings uma vez na importação."""
+    from app.services import llm
+
+    return patch.object(llm.settings, "llm_enabled", False)
+
+
+def _com_chaves():
+    """Chaves válidas nos dois provedores, para isolar o efeito da flag."""
+    from app.services import llm
+
+    return (
+        patch.object(llm.settings, "openai_api_key", "sk-chave-de-teste"),
+        patch.object(llm.settings, "anthropic_api_key", "sk-ant-chave-de-teste"),
+    )
+
+
+@pytest.mark.asyncio
+async def test_com_a_flag_desligada_nenhuma_chamada_externa_acontece():
+    """
+    O que importa não é o retorno, é a rede: o teste falha se qualquer HTTP
+    sair. Um teste que só afirmasse `is None` passaria mesmo com a requisição
+    sendo feita e falhando.
+    """
+    from app.services import llm
+
+    k1, k2 = _com_chaves()
+    with k1, k2, _llm_desligado(), patch("app.services.llm.httpx.AsyncClient") as cliente:
+        assert await llm.classify_ticket("Título", "Descrição", "general") is None
+        assert await llm.suggest_reply("Título", "Descrição", "general", "high", "open", []) is None
+        assert await llm.summarize_conversation("Título", "general", "open", []) is None
+        assert await llm.improve_message("rascunho", "Título", "Descrição") is None
+
+    cliente.assert_not_called()
+
+
+@pytest.mark.asyncio
+async def test_com_a_flag_ligada_a_chamada_continua_acontecendo():
+    """Não-regressão: a flag nasce ligada e não muda o comportamento de hoje."""
+    from app.services import llm
+
+    resposta = MagicMock()
+    resposta.status_code = 200
+    resposta.json.return_value = {
+        "choices": [
+            {"message": {"content": '{"priority": "high", "confidence": 0.9, "summary": "resumo"}'}}
+        ]
+    }
+
+    k1, k2 = _com_chaves()
+    with k1, k2, patch.object(llm.settings, "llm_enabled", True):
+        with patch("app.services.llm.httpx.AsyncClient") as cliente:
+            instancia = cliente.return_value.__aenter__.return_value
+            instancia.post = AsyncMock(return_value=resposta)
+            resultado = await llm.classify_ticket("Sistema fora", "ERP não abre", "software")
+
+    assert resultado is not None
+    assert resultado["priority"] == "high"
+
+
+def test_a_flag_nasce_ligada():
+    """
+    Padrão `True` de propósito: desligar por padrão apagaria a classificação
+    automática em produção no deploy seguinte, sem ninguém pedir. Quem quiser
+    parar o envio agora tem um interruptor — e é isso que faltava.
+    """
+    from app.core.config import Settings
+
+    s = Settings(database_url="postgresql+asyncpg://u:p@localhost/db")
+    assert s.llm_enabled is True

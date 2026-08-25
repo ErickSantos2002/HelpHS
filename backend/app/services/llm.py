@@ -159,6 +159,9 @@ def _parse_json_response(text: str) -> dict[str, Any] | None:
 
 
 async def _call_openai(prompt: str) -> dict[str, Any] | None:
+    if not settings.llm_enabled:
+        return None
+
     key = settings.openai_api_key
     if not key or key.startswith("CHANGE_ME") or key.startswith("sk-CHANGE"):
         return None
@@ -190,6 +193,9 @@ async def _call_openai(prompt: str) -> dict[str, Any] | None:
 
 
 async def _call_anthropic(prompt: str) -> dict[str, Any] | None:
+    if not settings.llm_enabled:
+        return None
+
     key = settings.anthropic_api_key
     if not key or key.startswith("CHANGE_ME") or key.startswith("sk-ant-CHANGE"):
         return None
@@ -231,6 +237,13 @@ async def classify_ticket(
     Returns dict with keys: priority, confidence, summary
     Returns None if all providers fail or keys are not configured.
     """
+    # Interruptor da IA: nada de conteúdo de chamado sai daqui com ela
+    # desligada. A guarda fica em cada entrada pública porque as chamadas HTTP
+    # não passam todas por um ponto só — `suggest_reply`, `summarize_conversation`
+    # e `improve_message` montam as suas próprias.
+    if not settings.llm_enabled:
+        return None
+
     prompt = _CLASSIFICATION_TEMPLATE.format(
         title=title[:500],
         description=description[:2000],
@@ -272,6 +285,13 @@ async def suggest_reply(
     history: list of {"sender": name, "role": role, "content": message}
     Returns the suggestion text, or None if all providers fail.
     """
+    # Interruptor da IA: nada de conteúdo de chamado sai daqui com ela
+    # desligada. A guarda fica em cada entrada pública porque as chamadas HTTP
+    # não passam todas por um ponto só — `suggest_reply`, `summarize_conversation`
+    # e `improve_message` montam as suas próprias.
+    if not settings.llm_enabled:
+        return None
+
     if history:
         history_text = "\n".join(
             f"[{h['role']}] {h['sender']}: {h['content']}" for h in history[-10:]
@@ -376,6 +396,13 @@ async def summarize_conversation(
     history: list of {"sender": name, "role": role, "content": message}
     Returns the summary text, or None if all providers fail.
     """
+    # Interruptor da IA: nada de conteúdo de chamado sai daqui com ela
+    # desligada. A guarda fica em cada entrada pública porque as chamadas HTTP
+    # não passam todas por um ponto só — `suggest_reply`, `summarize_conversation`
+    # e `improve_message` montam as suas próprias.
+    if not settings.llm_enabled:
+        return None
+
     if not history:
         return None
 
@@ -471,6 +498,13 @@ async def improve_message(draft: str, title: str, description: str) -> str | Non
 
     Returns the improved text, or None if all providers fail.
     """
+    # Interruptor da IA: nada de conteúdo de chamado sai daqui com ela
+    # desligada. A guarda fica em cada entrada pública porque as chamadas HTTP
+    # não passam todas por um ponto só — `suggest_reply`, `summarize_conversation`
+    # e `improve_message` montam as suas próprias.
+    if not settings.llm_enabled:
+        return None
+
     prompt = _IMPROVE_MESSAGE_TEMPLATE.format(
         title=title[:500],
         description=description[:500],
