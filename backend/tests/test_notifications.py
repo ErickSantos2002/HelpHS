@@ -490,3 +490,57 @@ async def test_log_de_notificacao_nao_entregue_diz_o_destinatario():
     assert nao_entregues, f"a não-entrega não foi registrada: {linhas}"
     assert "destino@test.com" in nao_entregues[0]
     assert str(_NOTIF_ID) in nao_entregues[0]
+
+
+@pytest.mark.asyncio
+async def test_email_sai_mesmo_sem_reply_to_configurado():
+    """
+    SMTP_REPLY_TO é opcional e nasce vazio. Passar reply_to=None para o
+    MessageSchema derruba a montagem da mensagem ANTES de qualquer tentativa
+    de entrega — todo email falharia no dia em que o SMTP for configurado,
+    e o except engoliria o erro como se fosse falha de entrega.
+    """
+    from app.core.config import Settings
+    from app.services.email import send_email
+
+    settings = Settings(
+        database_url="postgresql+asyncpg://u:p@localhost/db",
+        smtp_from_email="from@test.com",
+        smtp_user="from@test.com",
+        smtp_host="localhost",
+        smtp_port=1025,
+        smtp_reply_to="",
+    )
+
+    with patch("app.services.email._get_mail_client") as mock_client:
+        mock_fm = AsyncMock()
+        mock_client.return_value = mock_fm
+        enviado = await send_email("destino@test.com", "Assunto", "Corpo", settings)
+
+    assert enviado is True
+    mock_fm.send_message.assert_awaited_once()
+
+
+@pytest.mark.asyncio
+async def test_reply_to_configurado_continua_indo_na_mensagem():
+    """A correção acima não pode virar 'apagar o reply_to'."""
+    from app.core.config import Settings
+    from app.services.email import send_email
+
+    settings = Settings(
+        database_url="postgresql+asyncpg://u:p@localhost/db",
+        smtp_from_email="from@test.com",
+        smtp_user="from@test.com",
+        smtp_host="localhost",
+        smtp_port=1025,
+        smtp_reply_to="suporte@test.com",
+    )
+
+    with patch("app.services.email._get_mail_client") as mock_client:
+        mock_fm = AsyncMock()
+        mock_client.return_value = mock_fm
+        enviado = await send_email("destino@test.com", "Assunto", "Corpo", settings)
+
+    assert enviado is True
+    mensagem = mock_fm.send_message.await_args.args[0]
+    assert mensagem.reply_to == ["suporte@test.com"]

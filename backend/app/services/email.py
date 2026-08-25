@@ -62,7 +62,9 @@ async def send_email(
             recipients=[to_email],
             body=body,
             subtype=MessageType.plain,
-            reply_to=[settings.smtp_reply_to] if settings.smtp_reply_to else None,
+            # SMTP_REPLY_TO é opcional e nasce vazio. O MessageSchema recusa
+            # None neste campo, e a montagem morreria antes de tentar entregar.
+            reply_to=[settings.smtp_reply_to] if settings.smtp_reply_to else [],
         )
         await mail.send_message(message)
         logger.info(f"Email sent to {to_email}: {subject}")
