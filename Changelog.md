@@ -104,6 +104,33 @@ Datas em DD/MM/AAAA.
   de ter sido cliente.
 
 ### Corrigido
+- **O laço do fechamento automático sobrevive ao erro e diz que está vivo**
+  (`9146dc2`). O `while True: await _run_once()` não tinha `try/except`: uma
+  exceção encerrava a task e o RN-005 parava até o próximo restart, **calado**
+  — a exceção só reapareceria no shutdown, onde o `suppress` cobre apenas
+  `CancelledError`. E nem todo caminho de `_run_once` estava protegido por
+  dentro: os imports tardios e o `get_settings()` ficam fora dos dois `try` de
+  lá, justamente as linhas que ninguém imagina que levantam. Junto vem o
+  carimbo que o readiness usa: o instante da última rodada sem erro, na memória
+  de cada worker. Ceder a vez para outro worker **conta** (a rotina aconteceu;
+  se não contasse, o worker que quase nunca pega o lock reportaria rotina
+  parada para sempre); rodada pulada por Redis fora ou que levantou **não**
+  conta. ⚠️ O teste de cancelamento prova que o laço termina no `cancel`, e só
+  isso — verifiquei por mutação que trocar o tratamento por `except
+  BaseException` o mantém verde, porque desde o 3.11 o asyncio re-entrega o
+  cancelamento pendente no `await` seguinte.
+- **O e-mail de notificação só sai depois do commit que o torna verdade**
+  (`66f2569`). O `notify()` criava a task de envio na hora, e o docstring
+  mandava chamá-lo **antes** do commit — então qualquer commit que falhasse
+  depois mandava e-mail sobre algo que não aconteceu. O laço de protocolo do
+  `create_ticket` era o caso visível (um e-mail por tentativa descartada, cada
+  um anunciando um protocolo que não passou a existir), mas o furo valia para
+  todo chamador. O `db.add(notif)` continua antes do commit — a notificação faz
+  parte da transação; o que mudou foi o **disparo**. `notify()` registra o
+  e-mail como pendência da sessão e `commit_e_notificar()` dispara depois do
+  commit. ⚠️ Se alguém chamar `db.commit()` direto depois de um `notify()`, o
+  e-mail não sai — é o lado seguro do erro: deixar de mandar um aviso é
+  recuperável, mandar aviso de algo que não aconteceu não é.
 - **O log de e-mail deixa de descartar o destinatário e o motivo** (`c615ad7`).
   Cinco chamadas usavam placeholder de `%`-formatting (`"%s"`), mas o loguru
   formata com `str.format()`: a linha saía com o literal `%s` e os argumentos
@@ -306,6 +333,22 @@ Datas em DD/MM/AAAA.
   ambiente, o escuro segue sendo o padrão.
 
 ### Adicionado
+- **`/api/v1/health` vira readiness de verdade; `/health` segue intocado**
+  (`ec533c4`). A rota respondia `{"status": "ok"}` sem conferir nada — pior que
+  rota nenhuma, porque dá a quem observa a certeza de que está tudo bem
+  exatamente quando não está. Os dois conceitos ficam separados: `/health`
+  (liveness) **não mudou**, e um teste novo trava isso — é o alvo do
+  `HEALTHCHECK` do Dockerfile e dos compose, e se passasse a depender do banco
+  uma oscilação do Postgres reiniciaria o container da API, trocando uma
+  indisponibilidade parcial por uma total. `/api/v1/health` (readiness) confere
+  banco (`SELECT 1`) e Redis, os dois com timeout de 2 s, em paralelo; alguma
+  faltou responde **503** com `status: degraded` e o culpado em `checks`. Redis
+  conta porque dele dependem a blacklist de token e o lock do fechamento
+  automático. O carimbo do auto-close aparece em `auto_close.last_success`,
+  **reportado e não usado para derrubar**: é `null` nos primeiros 60 s de cada
+  worker, e derrubar por isso daria 503 em todo boot. Deu para mudar o status
+  code porque **nada consome a rota programaticamente** — `HEALTHCHECK`, os
+  dois compose, o k6, o `e2e.yml` e o `zap-scan` batem todos em `/health`.
 - **Script de backfill de CNPJ** (`62f022e`, `backend/scripts/normaliza_cnpj.py`).
   O validador cuida do futuro; este script cuida do passado — sobretudo de
   `companies.cnpj`, que nasceu texto livre. **Avulso e rodado à mão, nunca em
@@ -432,6 +475,10 @@ Datas em DD/MM/AAAA.
   operacional. Cada arquivo foi verificado por mutação.
 
 ### Documentação
+- O checklist de deploy (`help-deploy-check`) descrevia `GET /api/v1/health`
+  como "versão e env certos" — a versão saíra na rodada anterior e o readiness
+  mudou o contrato de novo. Agora descreve os dois contratos e o que um
+  `auto_close.last_success` parado quer dizer.
 - Guia de desenvolvimento local (`f27f38c`, `3485092`) e mini-Redis de dev em
   `backend/scripts/` (`5fc7562`); skill de test review atualizada sobre o
   Vitest no CI (`b1f10b7`).

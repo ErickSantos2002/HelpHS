@@ -7,6 +7,93 @@ O changelog do produto (o que o cliente vê) fica em
 
 ---
 
+## 25/08/2026 (tarde) — Fazer o sistema conseguir dizer que está quebrado
+
+Três achados médios com um tema só: **o sistema não tinha como avisar que
+parou**. A rotina do RN-005 morria em silêncio, o healthcheck respondia "ok"
+sem conferir nada, e o e-mail saía antes de o fato existir — as três formas de
+o software afirmar uma coisa e viver outra.
+
+| Commit | O que foi feito |
+|---|---|
+| `9146dc2` | `fix:` **o laço do fechamento automático** sobrevive ao erro e se carimba |
+| `ec533c4` | `feat:` **`/api/v1/health` vira readiness**; `/health` intocado |
+| `66f2569` | `fix:` **e-mail só sai depois do commit** que o torna verdade |
+| `docs:` | Este fechamento |
+
+### A pergunta que decidiu o M6
+
+O desenho do M6 tinha duas alternativas na mesa e eu fui instruído a escrever o
+argumento antes de tocar nos 13 chamadores. As duas caíram por motivo prático,
+não por gosto:
+
+**BackgroundTasks do FastAPI** só existe onde existe request. O
+`ticket_lifecycle.py:131` notifica de dentro do laço de fechamento automático,
+sem request nenhum — precisaria de um segundo mecanismo só para esse caminho, e
+o `_auto_transition`, que notifica e é chamado de outro handler, teria de
+carregar o parâmetro pela cadeia inteira.
+
+**Listener de `after_commit` do SQLAlchemy** era o desenho elegante: automático,
+invisível, sem tocar em chamador nenhum. Morreu numa linha do `conftest.py` —
+"o banco é mockado em todos os testes". Com `session = AsyncMock()`, o commit
+não é um commit do SQLAlchemy e o evento nunca dispararia: o mecanismo inteiro
+ficaria fora do alcance da suíte. Mecanismo que a suíte não enxerga não entra.
+
+Sobrou o registro de pendências chaveado por sessão. Antes de propor, testei a
+parte que só falha na prática: `WeakKeyDictionary` aceita como chave tanto a
+`AsyncSession` real quanto o `AsyncMock` da suíte, e isola sessões simultâneas.
+
+### O detalhe que resolveu a retentativa de graça
+
+A pendência é **retirada do registro antes** do commit, não depois. Parece
+detalhe de ordem e é o que faz o laço de protocolo funcionar sem que ninguém
+mexa em `rollback`: se o commit levanta, a pendência daquela tentativa já saiu
+e não sobra para a próxima. Cinco tentativas, um e-mail — e os outros dois
+`rollback` do projeto (`groups.py`, `surveys.py`) estão em módulos que nem
+notificam.
+
+Troquei os **15** commits dos três módulos que notificam, não só os que seguem
+um `notify()`. O `_auto_transition` notifica e é chamado de outro handler, então
+qual commit carrega pendência não se decide olhando o site isolado — provar o
+negativo caso a caso seria mais frágil que a uniformidade.
+
+### Dois testes que fixavam o problema como contrato
+
+`test_notify_schedules_email_task_when_settings_provided` afirmava que o
+`notify()` criava a task de envio na hora. Isso **era** o bug do M6: o teste
+travava o envio-antes-do-commit como se fosse a regra. Foi substituído por um
+que prova as duas metades — notify sozinho não envia, o commit envia uma vez só.
+
+No M2, `test_health_check_versioned` afirmava 200 e `status: ok` numa rota que
+não conferia nada; virou redundante com o teste novo de readiness e saiu. O da
+versão passou a valer nos **dois** estados, porque a resposta de degradado é a
+que mais convida a despejar detalhe de diagnóstico — e é a que um curioso
+consegue provocar.
+
+### Um teste meu que prometia demais
+
+O teste de cancelamento do laço do M1 passou de primeira, então verifiquei por
+mutação, como manda a casa. Trocar o `except` por `except BaseException` — que
+engoliria o cancelamento — **manteve o teste verde**. Desde o 3.11 o asyncio
+re-entrega o cancelamento pendente no `await` seguinte, então o teste não
+consegue distinguir. Corrigi o docstring e o comentário para dizerem o que a
+coisa realmente prova: que o laço termina no `cancel`. Quem protege o
+desligamento é o `except Exception` — `CancelledError` é `BaseException` —, não
+o teste.
+
+### O resto
+
+O `/health` não foi tocado de propósito, e agora há teste que trava isso: é o
+alvo do `HEALTHCHECK` do Dockerfile e dos compose, e um liveness que depende do
+banco transforma oscilação de Postgres em restart de container. Antes de mudar
+o status code do `/api/v1/health` conferi quem o consome: ninguém
+programaticamente — todo probe automático do repositório bate em `/health`.
+
+Suíte: 600 → 611 testes, verdes, cobertura 86%. Sem migration. Nada foi
+executado contra produção.
+
+---
+
 ## 25/08/2026 — A rodada dos achados pequenos, e o que um deles escondia
 
 Os seis achados de severidade baixa da auditoria do backend, em dez commits.
