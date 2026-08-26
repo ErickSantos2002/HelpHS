@@ -46,11 +46,20 @@ from typing import Annotated
 
 from fastapi import APIRouter, Depends, HTTPException, Query, status
 from sqlalchemy import func, select
+from sqlalchemy.dialects.postgresql import insert as pg_insert
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.core.database import get_db
 from app.core.security import authorize, get_current_user
-from app.models.models import AuditAction, AuditLog, Equipment, Product, User, UserRole
+from app.models.models import (
+    AuditAction,
+    AuditLog,
+    Equipment,
+    Product,
+    User,
+    UserRole,
+    equipment_users,
+)
 from app.schemas.product import (
     EquipmentCreate,
     EquipmentListResponse,
@@ -184,6 +193,53 @@ async def _recusa_serie_duplicada(
         raise HTTPException(status_code=status.HTTP_409_CONFLICT, detail=_SERIE_DUPLICADA)
 
 
+async def _aparelho_do_produto(
+    db: AsyncSession, product_id: uuid.UUID, serial: str | None
+) -> Equipment | None:
+    """
+    O aparelho identificado por `(produto, série)` — de quem quer que seja.
+
+    É a chave nova, decidida com o cliente em 26/08: a mesma série pode se
+    repetir entre produtos diferentes, nunca dentro do mesmo. Duas pessoas que
+    cadastram a mesma série do mesmo produto estão falando do MESMO aparelho
+    físico, não de dois.
+
+    Sem filtro de dono de propósito — é justamente o aparelho do outro que
+    precisa ser encontrado. Quem cuida de não vazar essa informação é o call
+    site: o cliente nunca recebe uma resposta diferente por causa dela.
+    """
+    if not serial:
+        return None
+    consulta = select(Equipment).where(
+        Equipment.product_id == product_id,
+        Equipment.serial_number == serial,
+    )
+    return (await db.execute(consulta)).scalar_one_or_none()
+
+
+async def _anexa_usuario(db: AsyncSession, equipment_id: uuid.UUID, user_id: uuid.UUID) -> None:
+    """
+    Liga a pessoa ao aparelho, sem estourar se ela já estiver ligada.
+
+    `ON CONFLICT DO NOTHING` em vez de consultar antes: o par é a chave
+    primária da tabela, então o banco já sabe responder isso, e a consulta
+    extra só abriria uma janela entre o SELECT e o INSERT.
+    """
+    await db.execute(
+        pg_insert(equipment_users)
+        .values(equipment_id=equipment_id, user_id=user_id)
+        .on_conflict_do_nothing()
+    )
+
+
+async def _ja_usa(db: AsyncSession, equipment_id: uuid.UUID, user_id: uuid.UUID) -> bool:
+    consulta = select(equipment_users.c.user_id).where(
+        equipment_users.c.equipment_id == equipment_id,
+        equipment_users.c.user_id == user_id,
+    )
+    return (await db.execute(consulta)).scalar_one_or_none() is not None
+
+
 # ═══════════════════════════════════════════════════════════════
 # PRODUCTS
 # ═══════════════════════════════════════════════════════════════
@@ -314,7 +370,13 @@ async def create_equipment(
     if body.owner_id:
         await _valida_dono(db, body.owner_id)
 
-    await _recusa_serie_duplicada(db, body.serial_number, body.owner_id)
+    # Pela tela de Produtos quem cadastra é staff, que já enxerga o parque
+    # inteiro: aqui o 409 não conta nada que a listagem não conte, e recusar é
+    # melhor do que anexar em silêncio um aparelho ao dono errado. É o oposto
+    # do /equipment/my — a mesma chave, tratada conforme quem está do outro
+    # lado.
+    if await _aparelho_do_produto(db, product_id, body.serial_number) is not None:
+        raise HTTPException(status_code=status.HTTP_409_CONFLICT, detail=_SERIE_DUPLICADA)
 
     ts = datetime.now(UTC)
     equipment = Equipment(
@@ -331,6 +393,12 @@ async def create_equipment(
         updated_at=ts,
     )
     db.add(equipment)
+    # Cadastro pela tela de Produtos: o dono, quando o staff informa um, entra
+    # na associação junto. Aparelho órfão não gera vínculo nenhum — não há
+    # usuário para vincular, e inventar um seria pior que o buraco.
+    if body.owner_id is not None:
+        await db.flush()
+        await _anexa_usuario(db, equipment.id, body.owner_id)
     _audit(db, AuditAction.create, actor.id, "equipment", equipment.id)
     await db.commit()
     await db.refresh(equipment)
@@ -471,6 +539,33 @@ async def create_my_equipment(
 ) -> EquipmentResponse:
     await get_or_404(db, Product, product_id, "Product not found")
 
+    # O aparelho já existe? Então ele NÃO nasce de novo: a pessoa é anexada ao
+    # que está lá. É o que impede o mesmo aparelho físico de virar duas linhas
+    # quando dois colegas o cadastram.
+    #
+    # E a resposta é a mesma do cadastro comum — 201 com o equipamento. Recusar
+    # com 409 aqui recriaria o oráculo que o `uq_equipments_owner_serial`
+    # existiu para fechar: o cliente saberia, pelo status, que aquela série já
+    # está com outra empresa. Anexando, as duas respostas são indistinguíveis.
+    existente = await _aparelho_do_produto(db, product_id, body.serial_number)
+    if existente is not None:
+        # O próprio cadastro repetido continua sendo 409: aqui a informação já
+        # é dele, e um 201 silencioso faria a tela dizer que cadastrou de novo
+        # o que não cadastrou.
+        if existente.owner_id == actor.id or await _ja_usa(db, existente.id, actor.id):
+            raise HTTPException(status_code=status.HTTP_409_CONFLICT, detail=_SERIE_DUPLICADA)
+
+        await _anexa_usuario(db, existente.id, actor.id)
+        _audit(db, AuditAction.update, actor.id, "equipment", existente.id)
+        await db.commit()
+        await db.refresh(existente)
+        return EquipmentResponse.model_validate(existente)
+
+    # Guarda temporária: o índice `uq_equipments_owner_serial` ainda está no
+    # banco e recusa a mesma série do mesmo dono em produtos DIFERENTES, que a
+    # chave nova permite. Sem esta checagem o caso viraria IntegrityError — um
+    # 500 no lugar de um 409. Sai junto com o índice, na migration que só entra
+    # depois do diagnóstico em produção.
     await _recusa_serie_duplicada(db, body.serial_number, actor.id)
 
     ts = datetime.now(UTC)
@@ -488,6 +583,11 @@ async def create_my_equipment(
         updated_at=ts,
     )
     db.add(equipment)
+    # O cadastrante entra na tabela de usuários como qualquer outro: assim
+    # nenhuma consulta de "quem usa este aparelho" precisa juntar `owner_id`
+    # com a associação num OR e lembrar de tratar os dois casos.
+    await db.flush()
+    await _anexa_usuario(db, equipment.id, actor.id)
     _audit(db, AuditAction.create, actor.id, "equipment", equipment.id)
     await db.commit()
     await db.refresh(equipment)
