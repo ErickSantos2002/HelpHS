@@ -28,7 +28,7 @@ from sqlalchemy.orm import selectinload
 
 from app.core.config import get_settings
 from app.core.database import AsyncSessionLocal, get_db
-from app.core.security import authorize, decode_token, get_current_user
+from app.core.security import _is_blacklisted, authorize, decode_token, get_current_user
 from app.models.models import (
     ChatMessage,
     NotificationType,
@@ -40,6 +40,7 @@ from app.models.models import (
 )
 from app.routers.tickets import _auto_transition
 from app.schemas.chat import (
+    LIMITE_CONTEUDO,
     ChatMessageCreate,
     ChatMessageListResponse,
     ChatMessageResponse,
@@ -142,13 +143,22 @@ async def _get_ticket_visivel(
 
 
 async def _authenticate_ws(token: str, db: AsyncSession) -> User | None:
-    """Validate JWT token from WS query param. Returns User or None."""
+    """Valida o token vindo do query param do WebSocket.
+
+    Confere a blacklist, como o `get_current_user` do caminho HTTP. Sem isso o
+    logout derrubava a sessão HTTP e deixava o WebSocket aberto: o token
+    revogado continuava valendo aqui até vencer sozinho — até oito horas depois
+    de a pessoa ter saído.
+    """
     try:
         payload = decode_token(token)
     except JWTError:
         return None
 
     if payload.get("type") != "access":
+        return None
+
+    if await _is_blacklisted(token):
         return None
 
     user_id_str = payload.get("sub")
@@ -457,6 +467,21 @@ async def websocket_chat(
                 continue
 
             if not content:
+                continue
+
+            # O mesmo teto do schema REST. Aqui é preciso conferir à mão porque
+            # este caminho não passa por Pydantic nenhum — e é justamente por
+            # isso que ele seria o escolhido por quem quisesse abusar.
+            if len(content) > LIMITE_CONTEUDO:
+                await websocket.send_json(
+                    {
+                        "type": "error",
+                        "detail": (
+                            f"Mensagem longa demais (máximo {LIMITE_CONTEUDO} caracteres). "
+                            "Para textos maiores, use um anexo."
+                        ),
+                    }
+                )
                 continue
 
             async with AsyncSessionLocal() as db:
