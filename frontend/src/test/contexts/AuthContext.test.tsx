@@ -24,15 +24,41 @@ vi.mock("../../services/authService", () => ({
   loginApi: vi.fn(),
   getMeApi: vi.fn(),
   logoutApi: vi.fn(),
+  verifyMfaApi: vi.fn(),
+  // Predicado puro, sem I/O: vale a implementação real, senão cada teste teria
+  // de lembrar de devolver `false` e o esquecimento viraria erro obscuro.
+  isMfaChallenge: (r: unknown) => (r as { mfa_required?: boolean })?.mfa_required === true,
 }));
 
+import { useState } from "react";
 import { tokenStorage } from "../../services/api";
-import { loginApi, getMeApi, logoutApi } from "../../services/authService";
+import { loginApi, getMeApi, logoutApi, verifyMfaApi } from "../../services/authService";
 
 const mockTokenStorage = vi.mocked(tokenStorage);
 const mockLoginApi = vi.mocked(loginApi);
 const mockGetMeApi = vi.mocked(getMeApi);
 const mockLogoutApi = vi.mocked(logoutApi);
+const mockVerifyMfaApi = vi.mocked(verifyMfaApi);
+
+/** Consumidor que expõe o resultado do login e o segundo passo. */
+function MfaConsumer() {
+  const { login, verifyMfa } = useAuth();
+  const [resultado, setResultado] = useState("");
+  return (
+    <div>
+      <span data-testid="resultado">{resultado}</span>
+      <button
+        onClick={async () => {
+          const r = await login("suelen@test.com", "pass");
+          setResultado(r.mfaRequired ? `desafio:${r.mfaToken}` : "sessao");
+        }}
+      >
+        Login
+      </button>
+      <button onClick={() => verifyMfa("desafio-1", "123456")}>Verificar</button>
+    </div>
+  );
+}
 
 // Helper: renders a component that consumes useAuth
 function TestConsumer() {
@@ -180,5 +206,63 @@ describe("useAuth", () => {
     );
 
     consoleError.mockRestore();
+  });
+});
+
+
+// ── Segundo fator ─────────────────────────────────────────────
+
+describe("AuthProvider — segundo fator", () => {
+  function renderMfa() {
+    return render(
+      <AuthProvider>
+        <MfaConsumer />
+      </AuthProvider>,
+    );
+  }
+
+  it("devolve o desafio e NAO grava sessao nenhuma", async () => {
+    // A assercao que mais importa: senha certa sem codigo nao e sessao. Gravar
+    // token aqui deixaria a pessoa "logada" sem ter passado pelo segundo fator.
+    mockTokenStorage.getAccess.mockReturnValue(null);
+    mockLoginApi.mockResolvedValue({
+      mfa_required: true,
+      mfa_token: "desafio-1",
+      expires_in: 300,
+    });
+
+    renderMfa();
+    await userEvent.click(screen.getByRole("button", { name: "Login" }));
+
+    await waitFor(() =>
+      expect(screen.getByTestId("resultado")).toHaveTextContent("desafio:desafio-1"),
+    );
+    expect(mockTokenStorage.set).not.toHaveBeenCalled();
+    expect(mockGetMeApi).not.toHaveBeenCalled();
+  });
+
+  it("o segundo passo estabelece a sessao pelo mesmo caminho do login simples", async () => {
+    mockTokenStorage.getAccess.mockReturnValue(null);
+    mockVerifyMfaApi.mockResolvedValue({
+      access_token: "pos-mfa",
+      refresh_token: "refresh-pos-mfa",
+      token_type: "bearer",
+    });
+    mockGetMeApi.mockResolvedValueOnce({
+      id: "u9",
+      name: "Suelen",
+      email: "suelen@test.com",
+      role: "technician",
+      onboarding_completed: true,
+    });
+
+    renderMfa();
+    await userEvent.click(screen.getByRole("button", { name: "Verificar" }));
+
+    await waitFor(() =>
+      expect(mockTokenStorage.set).toHaveBeenCalledWith("pos-mfa", "refresh-pos-mfa"),
+    );
+    expect(mockVerifyMfaApi).toHaveBeenCalledWith("desafio-1", "123456");
+    expect(mockGetMeApi).toHaveBeenCalled();
   });
 });

@@ -1,4 +1,4 @@
-export const APP_VERSION = "v1.8.0";
+export const APP_VERSION = "v1.9.0";
 
 export type EntryType = "novidade" | "corrigido" | "melhoria";
 
@@ -14,6 +14,22 @@ export interface ChangelogVersion {
 }
 
 export const CHANGELOG: ChangelogVersion[] = [
+  {
+    version: "v1.9.0",
+    date: "26/08/2026",
+    entries: [
+      { type: "novidade", text: "Na tela de Grupos, aceitar a sugestão de empresa agora cria o cadastro e já vincula todos os clientes com o mesmo CNPJ — e limpar o campo de empresa, que havia parado de funcionar, voltou a funcionar." },
+      { type: "novidade", text: "Anexos que não puderam ser verificados pelo antivírus ganham um aviso e podem ser verificados de novo depois — e a equipe fica sabendo quando a verificação está fora do ar." },
+      { type: "corrigido", text: "Um defeito na renovação automática da sessão podia desconectar você do nada no meio do uso. Agora a sessão se renova sem encerrar a si mesma." },
+      { type: "corrigido", text: "A tela de configuração de prazos de SLA voltou a salvar as alterações — toda tentativa terminava em erro." },
+      { type: "corrigido", text: "Mensagens do chat e notificações em tempo real podiam se perder dependendo de qual conexão as recebia. Agora chegam sempre." },
+      { type: "corrigido", text: "Na Base de Conhecimento, artigos em rascunho deixaram de aparecer para clientes, e um defeito que podia misturar as tags de artigos criados em sequência foi corrigido." },
+      { type: "melhoria", text: "Depois de uma atualização do sistema, o navegador passa a buscar a versão nova sozinho — sem tela em branco nem precisar recarregar à força — e as páginas ficaram mais leves de carregar." },
+      { type: "melhoria", text: "As listagens administrativas (usuários, grupos, relatórios) carregam mais rápido em contas com muitos registros." },
+      { type: "melhoria", text: "Criar conta ficou mais rápido: a confirmação não espera mais o envio de e-mail terminar. E as notificações por e-mail só saem depois que a ação foi de fato registrada." },
+      { type: "melhoria", text: "O fechamento automático de chamados resolvidos não para mais por causa de um erro isolado, e ao tentar excluir um usuário que não pode ser excluído o sistema agora explica o motivo." },
+    ],
+  },
   {
     version: "v1.8.0",
     date: "21/08/2026",

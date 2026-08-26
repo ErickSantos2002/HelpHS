@@ -8,14 +8,34 @@ import {
 import type { ReactNode } from "react";
 import type { AuthUser } from "../types/auth";
 import { tokenStorage } from "../services/api";
-import { getMeApi, loginApi, logoutApi } from "../services/authService";
+import {
+  getMeApi,
+  isMfaChallenge,
+  loginApi,
+  logoutApi,
+  verifyMfaApi,
+} from "../services/authService";
+import type { TokenResponse } from "../services/authService";
+
+/**
+ * O que o `login` devolve.
+ *
+ * Nunca é `void`: quem chama precisa saber se a sessão existe ou se falta o
+ * segundo fator, e um retorno que não diz isso empurraria a decisão para um
+ * `isAuthenticated` que ainda não mudou.
+ */
+export type ResultadoLogin =
+  | { mfaRequired: false }
+  | { mfaRequired: true; mfaToken: string };
 
 interface AuthContextValue {
   user: AuthUser | null;
   token: string | null;
   isAuthenticated: boolean;
   isLoading: boolean;
-  login: (email: string, password: string) => Promise<void>;
+  login: (email: string, password: string) => Promise<ResultadoLogin>;
+  /** Segundo passo do login: troca o desafio por sessão. */
+  verifyMfa: (mfaToken: string, code: string) => Promise<void>;
   logout: () => Promise<void>;
   markOnboardingComplete: () => void;
   updateAvatarUrl: (url: string | null) => void;
@@ -58,8 +78,14 @@ export function AuthProvider({ children }: { children: ReactNode }) {
     restore();
   }, []);
 
-  const login = useCallback(async (email: string, password: string) => {
-    const tokens = await loginApi({ email, password });
+  /**
+   * Guarda os tokens e carrega o usuário.
+   *
+   * Os dois caminhos do login — com e sem segundo fator — passam por aqui. Duas
+   * cópias divergiriam na primeira mudança, e a que divergisse seria a menos
+   * usada.
+   */
+  const estabelecerSessao = useCallback(async (tokens: TokenResponse) => {
     tokenStorage.set(tokens.access_token, tokens.refresh_token);
     setToken(tokens.access_token);
 
@@ -73,6 +99,29 @@ export function AuthProvider({ children }: { children: ReactNode }) {
       onboarding_completed: me.onboarding_completed,
     });
   }, []);
+
+  const login = useCallback(
+    async (email: string, password: string): Promise<ResultadoLogin> => {
+      const resultado = await loginApi({ email, password });
+
+      if (isMfaChallenge(resultado)) {
+        // Nada é gravado aqui: sem o código não há sessão, e guardar qualquer
+        // coisa agora deixaria estado pela metade se a pessoa fechasse a aba.
+        return { mfaRequired: true, mfaToken: resultado.mfa_token };
+      }
+
+      await estabelecerSessao(resultado);
+      return { mfaRequired: false };
+    },
+    [estabelecerSessao],
+  );
+
+  const verifyMfa = useCallback(
+    async (mfaToken: string, code: string) => {
+      await estabelecerSessao(await verifyMfaApi(mfaToken, code));
+    },
+    [estabelecerSessao],
+  );
 
   const logout = useCallback(async () => {
     await logoutApi();
@@ -97,6 +146,7 @@ export function AuthProvider({ children }: { children: ReactNode }) {
         isAuthenticated: !!user,
         isLoading,
         login,
+        verifyMfa,
         logout,
         markOnboardingComplete,
         updateAvatarUrl,

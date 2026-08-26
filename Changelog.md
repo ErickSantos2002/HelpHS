@@ -11,6 +11,49 @@ Datas em DD/MM/AAAA.
 ## [Não publicado]
 
 ### Segurança
+- **Segundo fator (TOTP) para o staff** (`e0251bc`…`cb61d85`). Sete commits.
+  `admin` e `technician` podem exigir um código de seis dígitos além da senha;
+  cliente não tem acesso ao recurso (403 em todas as rotas).
+  - **O segredo é cifrado, não hasheado** — conferir o código exige recalculá-lo
+    a partir do segredo, então um hash tornaria a verificação impossível. O que
+    protege é a chave morar fora do banco (`MFA_SECRET_ENCRYPTION_KEY`). **Não
+    existe chave default e não há nenhuma no repositório**: uma chave versionada
+    cifraria e decifraria sem erro, o sistema pareceria funcionar, e o segredo
+    estaria protegido contra exatamente ninguém. Sem a variável o recurso se
+    declara indisponível e o login segue intocado — nenhum boot é derrubado.
+  - **O desafio sai como 403, não como 200 com campos opcionais.** Com um 200,
+    um front que fizesse `set(data.access_token, data.refresh_token)` sem
+    conferir gravaria `undefined` — exatamente o defeito corrigido em `b3d629f`
+    logo abaixo. A invariante vira: **2xx no `/auth/login` significa sempre que a
+    sessão existe**.
+  - **Token de desafio opaco, não um sexto tipo de JWT.** Um JWT novo
+    compartilharia a chave RS256 e o `iss` dos outros cinco, e a separação
+    passaria a depender de todo consumidor futuro de `decode_token` lembrar de
+    conferir o claim `type`. A chave no Redis guarda o **sha256** do token, não o
+    token: um `KEYS` num Redis compartilhado com cache de dashboard não entrega
+    material que pula a senha.
+  - **Ativar e desativar apagam o refresh da conta.** `/auth/refresh` confere
+    tipo, correspondência e status — **nunca `mfa_enabled`**. Sem isso, quem já
+    tivesse a senha e uma sessão aberta seguiria renovando access tokens por até
+    sete dias sem jamais ver um código, e o recurso falharia justamente no caso
+    em que alguém liga o segundo fator por desconfiar que foi comprometido.
+    ⚠️ **Resíduo assumido:** os access tokens já emitidos valem até o próprio
+    vencimento. A exposição cai de sete dias para o TTL do access, não para zero.
+  - **Antirreplay por passo de tempo**, marcado **depois** da conferência —
+    marcar antes deixaria alguém queimar os códigos legítimos da vítima só
+    chutando.
+  - **Nada falha para o lado de deixar entrar**: Redis fora do ar, segredo
+    ilegível (chave trocada) e conta desativada entre o login e o código viram
+    recusa, com teste para cada um.
+  - `CHECK (mfa_enabled = false OR mfa_secret IS NOT NULL)` na migration
+    `v2q3r4s5t6u7`: o par proibido é uma conta trancada, e a regra caberia só no
+    código até o dia em que um caminho de escrita novo esquecesse dela.
+  - Sem códigos de recuperação, por decisão de escopo: a saída de emergência é
+    `scripts/desliga_mfa.py`. Sem leitor de QR, por decisão de escopo: o segredo
+    sai agrupado de quatro em quatro e o link `otpauth://` abre o app no celular.
+  - Dependências: `pyotp==2.10.0` (wheel pura, sem transitivas) e `cryptography`
+    sai de transitiva do `python-jose` para **dependência direta e pinada**,
+    porque agora é importada de verdade (Fernet).
 - **O SMTP passa a verificar o certificado do servidor** (`36bfc85`).
   `VALIDATE_CERTS` estava fixo em `False`: qualquer um que conseguisse
   responder no endereço configurado recebia **usuário e senha do SMTP** — a
@@ -186,6 +229,27 @@ Datas em DD/MM/AAAA.
   de ter sido cliente.
 
 ### Corrigido
+- **Renovar o token deixava a sessão morrer em 16 h em vez de 7 dias**
+  (`b3d629f`, `32a09b8`). `/auth/refresh` devolve `AccessTokenResponse` — três
+  campos, **sem `refresh_token`**. O front declarava que havia, no genérico de
+  `axios.post<{...}>`, que é uma **afirmação sobre o runtime e não uma
+  verificação**: o TypeScript não tinha como reprovar. `data.refresh_token` era
+  `undefined`, e `localStorage.setItem` grava isso como a string literal
+  `"undefined"` — truthy, portanto passa pela guarda `if (!refreshToken)` e vai
+  ao backend como se fosse um token.
+  ⚠️ **O efeito não aparecia na renovação, e sim na seguinte**: uma para gravar
+  o lixo, outra para morrer nele. Como o sintoma é "fui deslogado" e a reação do
+  usuário é logar de novo — o que reescreve o localStorage corretamente — isso
+  podia nunca ter chegado como bug reportado.
+  `tokenStorage` ganhou `setAccess`: o problema de fundo era **um método
+  servindo dois contratos** (login recebe dois tokens, renovação recebe um), e
+  agora o call site diz qual dos dois é.
+  ⚠️ **Os três mocks de `api.test.ts` descreviam um servidor que não existe** e
+  por isso defendiam o defeito com o interceptor a 100% de cobertura. O mock de
+  login em `AuthContext.test.tsx` estava certo e ficou como estava — ali os dois
+  tokens existem mesmo. Do lado do backend entrou um teste que fixa o
+  **conjunto** de campos da resposta, não só a presença: foi na folga entre as
+  duas coisas que o front supôs um campo por tempo indeterminado.
 - **O índice de `calendar_events` deixa de ser declarado duas vezes**
   (`205a893`). A coluna `start_date` tinha `index=True` — que já gera
   `ix_calendar_events_start_date` — e o `__table_args__` declarava um `Index()`
@@ -488,6 +552,21 @@ Datas em DD/MM/AAAA.
   ambiente, o escuro segue sendo o padrão.
 
 ### Adicionado
+- **`scripts/desliga_mfa.py` — saída de emergência do segundo fator**
+  (`cb61d85`). Avulso, no molde do `redefine_senha`: dry-run por padrão,
+  `--aplicar` para gravar, rastro em `audit_logs`.
+  Existe porque a API não tem esse caminho **e não deve ter**: `DELETE /auth/mfa`
+  exige a senha *e* uma sessão, e quem está trancado fora não tem nenhuma das
+  duas; um endpoint de admin para desligar o fator de terceiros seria uma forma
+  de remover a proteção de outra pessoa.
+  ⚠️ **O `redefine_senha.py` não resolve esse caso** — com `mfa_enabled = true`,
+  a senha nova não destranca nada, porque o login segue pedindo o código depois
+  dela. O docstring dele passou a dizer isso: descobrir durante a emergência é o
+  pior momento possível.
+  Apaga também o refresh da conta (sem `REDIS_URL`, avisa e segue). Provado
+  rodando contra PostgreSQL real em cinco cenários: dry-run, aplicar,
+  idempotência, conta inexistente e `--por` inexistente abortando antes de
+  escrever.
 - **Revarredura de anexos e aviso de antivírus fora do ar** (`8ff214c`),
   preparando a subida do ClamAV. `scripts/revarre_anexos.py` é avulso, no molde
   do `normaliza_cnpj`: dry-run por padrão, `--aplicar` para gravar. Varre os
@@ -638,6 +717,22 @@ Datas em DD/MM/AAAA.
   aguardando staging.
 
 ### Testes
+- **Uma mutação sobrevivente revelou um teste que provava outra coisa**
+  (`174f45b`). O teste `test_o_mesmo_desafio_nao_serve_duas_vezes` passava, mas
+  mutar `mfa_challenge.consumir` para devolver sempre `True` **não quebrava
+  nada**: ele provava o antirreplay, não o uso único. Sequencialmente a segunda
+  tentativa já morre na leitura do desafio, porque o `DEL` da primeira apagou a
+  chave — **o valor de retorno do `DEL` só importa numa corrida**.
+  A correção exigiu duas coisas: um teste com `asyncio.gather` e dar ao Redis
+  falso um `await asyncio.sleep(0)` em toda operação. Sem ceder o event loop,
+  duas requisições sob `gather` correm sequencialmente e a corrida simplesmente
+  não acontece — o teste passaria pelo motivo errado. Vale como padrão: **mock
+  que não suspende esconde condição de corrida**.
+- **Sete testes de login precisaram declarar `mfa_enabled = False`**
+  (`174f45b`). Eles usam `MagicMock` como usuário, e `MagicMock().mfa_enabled` é
+  **truthy** — o login desviava para o segundo fator e a falha não dizia por
+  quê. Defeito do mock, não do código: em produção a coluna é
+  `NOT NULL DEFAULT false`.
 - **As agregações do dashboard passam a rodar contra PostgreSQL de verdade**
   (`fcd1f86`). As 26 construções só-Postgres do `dashboard.py` — `date_trunc`,
   `extract('isodow')`, `count(...).filter(...)` — não eram executadas contra

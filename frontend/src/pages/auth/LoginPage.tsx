@@ -46,7 +46,7 @@ const FEATURES = [
 ];
 
 export default function LoginPage() {
-  const { login } = useAuth();
+  const { login, verifyMfa } = useAuth();
   const navigate = useNavigate();
   const location = useLocation();
 
@@ -57,6 +57,12 @@ export default function LoginPage() {
   const [precisaConfirmar, setPrecisaConfirmar] = useState(false);
   const [reenviando, setReenviando] = useState(false);
   const [reenviado, setReenviado] = useState(false);
+
+  // Segundo fator: enquanto houver desafio, a tela mostra o campo de código no
+  // lugar das credenciais. A senha sai do estado assim que o desafio nasce —
+  // ela já cumpriu o papel e não precisa continuar em memória.
+  const [desafio, setDesafio] = useState<string | null>(null);
+  const [codigo, setCodigo] = useState("");
 
   const justRegistered =
     (location.state as { registered?: boolean })?.registered === true;
@@ -80,7 +86,12 @@ export default function LoginPage() {
     setLoading(true);
     setError(null);
     try {
-      await login(email, password);
+      const resultado = await login(email, password);
+      if (resultado.mfaRequired) {
+        setDesafio(resultado.mfaToken);
+        setPassword("");
+        return;
+      }
       navigate(from, { replace: true });
     } catch (err: unknown) {
       const status = (err as { response?: { status?: number } })?.response?.status;
@@ -92,6 +103,42 @@ export default function LoginPage() {
         setPrecisaConfirmar(motivo.toLowerCase().includes("confirme seu e-mail"));
       } else if (status === 401 || status === 422) {
         setError("E-mail ou senha incorretos.");
+      } else {
+        setError("Erro ao conectar com o servidor. Tente novamente.");
+      }
+    } finally {
+      setLoading(false);
+    }
+  }
+
+  /** Volta ao passo da senha, descartando o desafio. */
+  function recomecar(motivo: string | null) {
+    setDesafio(null);
+    setCodigo("");
+    setError(motivo);
+  }
+
+  async function handleVerificar(e: React.FormEvent<HTMLFormElement>) {
+    e.preventDefault();
+    if (!desafio || !codigo) return;
+    setLoading(true);
+    setError(null);
+    try {
+      await verifyMfa(desafio, codigo);
+      navigate(from, { replace: true });
+    } catch (err: unknown) {
+      const status = (err as { response?: { status?: number } })?.response?.status;
+      const detalhe = getApiError(err, "Não foi possível verificar o código.");
+
+      if (status === 429) {
+        // O desafio foi queimado por excesso de erros: insistir aqui não leva
+        // a lugar nenhum, então a tela volta sozinha para o começo.
+        recomecar("Muitas tentativas. Entre novamente.");
+      } else if (status === 401 && detalhe.toLowerCase().includes("expirou")) {
+        recomecar(detalhe);
+      } else if (status === 401) {
+        setError(detalhe);
+        setCodigo("");
       } else {
         setError("Erro ao conectar com o servidor. Tente novamente.");
       }
@@ -163,8 +210,14 @@ export default function LoginPage() {
 
           {/* Heading */}
           <div className="space-y-1 text-center lg:text-left">
-            <h2 className="text-2xl font-bold text-slate-100">Bem-vindo de volta</h2>
-            <p className="text-sm text-slate-500">Entre com suas credenciais para continuar</p>
+            <h2 className="text-2xl font-bold text-slate-100">
+              {desafio ? "Verificação em duas etapas" : "Bem-vindo de volta"}
+            </h2>
+            <p className="text-sm text-slate-500">
+              {desafio
+                ? "Digite o código de 6 dígitos do seu aplicativo autenticador"
+                : "Entre com suas credenciais para continuar"}
+            </p>
           </div>
 
           {/* Alerts */}
@@ -198,7 +251,42 @@ export default function LoginPage() {
             </Alert>
           )}
 
-          {/* Form */}
+          {/* Form — código do segundo fator */}
+          {desafio ? (
+            <form onSubmit={handleVerificar} className="space-y-5">
+              <Input
+                label="Código de verificação"
+                type="text"
+                inputMode="numeric"
+                placeholder="000000"
+                value={codigo}
+                onChange={(e) => setCodigo(e.target.value)}
+                // `one-time-code` faz o iOS e o Android oferecerem o código
+                // direto do teclado, sem a pessoa alternar de aplicativo
+                autoComplete="one-time-code"
+                maxLength={7}
+                autoFocus
+                required
+              />
+              <Button
+                type="submit"
+                variant="primary"
+                size="lg"
+                loading={loading}
+                className="w-full"
+              >
+                Verificar
+              </Button>
+              <button
+                type="button"
+                onClick={() => recomecar(null)}
+                className="w-full text-center text-xs font-medium text-slate-500 transition-colors hover:text-slate-300 cursor-pointer"
+              >
+                Entrar com outra conta
+              </button>
+            </form>
+          ) : (
+          /* Form — credenciais */
           <form onSubmit={handleSubmit} className="space-y-5">
             <Input
               label="E-mail"
@@ -240,17 +328,22 @@ export default function LoginPage() {
               Entrar
             </Button>
           </form>
+          )}
 
           {/* Footer links */}
           <div className="space-y-3 text-center">
-            <p className="text-sm text-slate-500">
-              Não tem uma conta?{" "}
-              <Link to="/register" className="text-primary hover:text-primary-400 transition-colors font-medium">
-                Registre-se
-              </Link>
-            </p>
+            {!desafio && (
+              <p className="text-sm text-slate-500">
+                Não tem uma conta?{" "}
+                <Link to="/register" className="text-primary hover:text-primary-400 transition-colors font-medium">
+                  Registre-se
+                </Link>
+              </p>
+            )}
             <p className="text-xs text-slate-600">
-              Problemas para acessar? Contate o administrador.
+              {desafio
+                ? "Perdeu o acesso ao aplicativo? Contate o administrador."
+                : "Problemas para acessar? Contate o administrador."}
             </p>
           </div>
         </div>

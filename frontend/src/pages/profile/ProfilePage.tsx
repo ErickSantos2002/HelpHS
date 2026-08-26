@@ -9,7 +9,16 @@ import {
   uploadAvatar,
   type UserSummary,
 } from "../../services/userService";
+import {
+  activateMfaApi,
+  disableMfaApi,
+  getMfaStatusApi,
+  setupMfaApi,
+  type MfaSetup,
+  type MfaStatus,
+} from "../../services/authService";
 import { lookupCnpj, lookupCep } from "../../services/equipmentService";
+import { getApiError } from "../../lib/apiError";
 import { formatCnpj, isValidCep, isValidCnpj, maskCnpjInput, onlyDigits } from "../../lib/documents";
 
 // ── Shared ────────────────────────────────────────────────────
@@ -154,6 +163,208 @@ function FormActions({
         {saving ? "Salvando…" : (saveLabel ?? "Salvar")}
       </button>
     </div>
+  );
+}
+
+// ── Segundo fator (TOTP) ──────────────────────────────────────
+
+/**
+ * Cadastro e desligamento do segundo fator. Só aparece para o staff.
+ *
+ * Não há leitor de QR aqui de propósito: renderizar o código exigiria uma
+ * dependência nova para uma tela que cada pessoa usa uma vez na vida. O segredo
+ * vem do servidor já agrupado de quatro em quatro, e o link `otpauth://` abre o
+ * aplicativo autenticador direto no celular.
+ */
+function MfaSection() {
+  const [status, setStatus] = useState<MfaStatus | null>(null);
+  const [cadastro, setCadastro] = useState<MfaSetup | null>(null);
+  const [codigo, setCodigo] = useState("");
+  const [senha, setSenha] = useState("");
+  const [desligando, setDesligando] = useState(false);
+  const [erro, setErro] = useState<string | null>(null);
+  const [ocupado, setOcupado] = useState(false);
+
+  useEffect(() => {
+    getMfaStatusApi().then(setStatus).catch(() => setStatus(null));
+  }, []);
+
+  function limpar() {
+    setCadastro(null);
+    setCodigo("");
+    setSenha("");
+    setDesligando(false);
+    setErro(null);
+  }
+
+  async function comErro(acao: () => Promise<void>, padrao: string) {
+    setOcupado(true);
+    setErro(null);
+    try {
+      await acao();
+    } catch (e) {
+      setErro(getApiError(e, padrao));
+    } finally {
+      setOcupado(false);
+    }
+  }
+
+  const iniciar = () =>
+    comErro(async () => {
+      setCadastro(await setupMfaApi());
+    }, "Não foi possível iniciar o cadastro.");
+
+  const ativar = () =>
+    comErro(async () => {
+      await activateMfaApi(codigo);
+      limpar();
+      setStatus(await getMfaStatusApi());
+    }, "Código inválido. Confira o aplicativo e tente de novo.");
+
+  const desativar = () =>
+    comErro(async () => {
+      await disableMfaApi(senha);
+      limpar();
+      setStatus(await getMfaStatusApi());
+    }, "Não foi possível desativar.");
+
+  if (!status) return null;
+
+  return (
+    <SectionCard
+      title="Verificação em duas etapas"
+      action={
+        status.enabled && !desligando ? (
+          <button
+            onClick={() => setDesligando(true)}
+            className="text-xs font-medium text-danger hover:text-danger/80 transition-colors"
+          >
+            Desativar
+          </button>
+        ) : undefined
+      }
+    >
+      <div className="space-y-4">
+        {erro && <ErrorMsg msg={erro} />}
+
+        {!status.available && (
+          <p className="text-sm text-slate-500">
+            A verificação em duas etapas não está disponível neste ambiente. Fale com o
+            administrador do sistema.
+          </p>
+        )}
+
+        {status.available && status.enabled && !desligando && (
+          <div className="flex items-center gap-3">
+            <span className="w-1.5 h-1.5 rounded-full bg-green-500" />
+            <p className="text-sm text-slate-700 dark:text-slate-200">
+              Ativa. Ao entrar, o sistema pedirá o código do seu aplicativo autenticador.
+            </p>
+          </div>
+        )}
+
+        {status.available && status.enabled && desligando && (
+          <div className="space-y-3">
+            <p className="text-sm text-slate-500">
+              Confirme sua senha para desativar. Todas as sessões abertas serão encerradas.
+            </p>
+            <input
+              type="password"
+              className={INPUT_CLS}
+              placeholder="Sua senha atual"
+              value={senha}
+              onChange={(e) => setSenha(e.target.value)}
+              autoComplete="current-password"
+            />
+            <div className="flex gap-2 justify-end">
+              <button
+                onClick={limpar}
+                className="px-4 py-2 text-sm text-slate-500 hover:text-slate-900 dark:hover:text-slate-200 rounded-lg transition-colors"
+              >
+                Cancelar
+              </button>
+              <button
+                onClick={desativar}
+                disabled={ocupado || !senha}
+                className="px-4 py-2 rounded-lg bg-danger text-white text-sm font-medium hover:bg-danger/90 disabled:opacity-50 transition-colors"
+              >
+                {ocupado ? "Desativando…" : "Desativar"}
+              </button>
+            </div>
+          </div>
+        )}
+
+        {status.available && !status.enabled && !cadastro && (
+          <div className="space-y-3">
+            <p className="text-sm text-slate-500">
+              Uma segunda camada além da senha: ao entrar, o sistema pede um código de seis
+              dígitos gerado no seu celular.
+            </p>
+            <button
+              onClick={iniciar}
+              disabled={ocupado}
+              className="px-4 py-2 rounded-lg bg-primary text-white text-sm font-medium hover:bg-primary/90 disabled:opacity-50 transition-colors"
+            >
+              {ocupado ? "Gerando…" : "Ativar"}
+            </button>
+          </div>
+        )}
+
+        {status.available && !status.enabled && cadastro && (
+          <div className="space-y-4">
+            <ol className="text-sm text-slate-600 dark:text-slate-300 space-y-3 list-decimal list-inside">
+              <li>
+                Abra seu aplicativo autenticador (Google Authenticator, Microsoft
+                Authenticator, 1Password…).
+              </li>
+              <li>
+                Adicione uma conta e informe esta chave:
+                <code className="mt-2 block rounded-lg bg-slate-100 dark:bg-background-elevated px-3 py-2 font-mono text-sm tracking-wider text-slate-800 dark:text-slate-100 break-all">
+                  {cadastro.secret}
+                </code>
+                <a
+                  href={cadastro.otpauth_uri}
+                  className="mt-1.5 inline-block text-xs font-medium text-primary hover:text-primary/80"
+                >
+                  Ou toque aqui para abrir no aplicativo
+                </a>
+              </li>
+              <li>Digite abaixo o código que aparecer.</li>
+            </ol>
+
+            <input
+              type="text"
+              inputMode="numeric"
+              className={INPUT_CLS}
+              placeholder="000000"
+              value={codigo}
+              onChange={(e) => setCodigo(e.target.value)}
+              autoComplete="one-time-code"
+              maxLength={7}
+            />
+            <p className="text-xs text-slate-500">
+              A verificação só é ligada depois que o código confere — se o aplicativo não
+              pareou, nada muda e você não fica trancado fora.
+            </p>
+            <div className="flex gap-2 justify-end">
+              <button
+                onClick={limpar}
+                className="px-4 py-2 text-sm text-slate-500 hover:text-slate-900 dark:hover:text-slate-200 rounded-lg transition-colors"
+              >
+                Cancelar
+              </button>
+              <button
+                onClick={ativar}
+                disabled={ocupado || !codigo}
+                className="px-4 py-2 rounded-lg bg-primary text-white text-sm font-medium hover:bg-primary/90 disabled:opacity-50 transition-colors"
+              >
+                {ocupado ? "Verificando…" : "Confirmar"}
+              </button>
+            </div>
+          </div>
+        )}
+      </div>
+    </SectionCard>
   );
 }
 
@@ -562,6 +773,9 @@ export default function ProfilePage() {
           </div>
         )}
       </SectionCard>
+
+      {/* Segundo fator — só staff tem */}
+      {(authUser?.role === "admin" || authUser?.role === "technician") && <MfaSection />}
 
       {/* Account info */}
       <SectionCard title="Conta">

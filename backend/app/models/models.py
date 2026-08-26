@@ -10,6 +10,7 @@ from datetime import datetime
 
 from sqlalchemy import (
     Boolean,
+    CheckConstraint,
     Column,
     DateTime,
     Enum,
@@ -204,6 +205,14 @@ class User(Base):
     email_verified: Mapped[bool] = mapped_column(Boolean, default=False, nullable=False)
     email_verified_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
 
+    # Segundo fator (TOTP), só para staff. O segredo fica CIFRADO, não hasheado:
+    # conferir o código exige recalculá-lo a partir do segredo, então o servidor
+    # precisa recuperá-lo em claro. O que protege é a chave da cifra morar fora
+    # do banco — ver services/mfa.py.
+    mfa_enabled: Mapped[bool] = mapped_column(Boolean, default=False, nullable=False)
+    mfa_secret: Mapped[str | None] = mapped_column(String(255))
+    mfa_confirmed_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
+
     # Empresa (onboarding do cliente)
     company_name: Mapped[str | None] = mapped_column(String(255))
     cnpj: Mapped[str | None] = mapped_column(String(18))
@@ -248,7 +257,16 @@ class User(Base):
         "Company", back_populates="clients", foreign_keys=[company_id]
     )
 
-    __table_args__ = (Index("ix_users_role_status", "role", "status"),)
+    __table_args__ = (
+        Index("ix_users_role_status", "role", "status"),
+        # Segundo fator ligado sem segredo é uma conta trancada: o login exigiria
+        # um código que não há como conferir. O banco recusa esse estado em vez
+        # de confiar que todo caminho de escrita futuro se lembre da regra.
+        CheckConstraint(
+            "mfa_enabled = false OR mfa_secret IS NOT NULL",
+            name="ck_users_mfa_ligado_tem_segredo",
+        ),
+    )
 
 
 class Product(Base):

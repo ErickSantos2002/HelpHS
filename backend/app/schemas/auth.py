@@ -92,3 +92,69 @@ class MessageResponse(AppBaseModel):
     """Resposta neutra: nunca revela se um e-mail existe na base."""
 
     message: str
+
+
+# ── Segundo fator (TOTP) ──────────────────────────────────────
+
+
+class MfaStatusResponse(AppBaseModel):
+    """Estado do segundo fator de quem está pedindo.
+
+    De propósito NÃO é campo do `UserResponse`: aquele schema é devolvido também
+    na listagem de usuários do admin, e quem tem ou não segundo fator não
+    precisa viajar em listagem nenhuma.
+    """
+
+    enabled: bool
+    pending: bool  # segredo cadastrado, mas ainda não confirmado por código
+    available: bool  # se o ambiente tem chave de cifra configurada
+
+
+class MfaSetupResponse(AppBaseModel):
+    """Sai uma vez, na tela de cadastro, e não é guardado em lugar nenhum.
+
+    Carrega o segredo em claro — é o que o aplicativo autenticador precisa ler.
+    Nunca logar, nunca cachear.
+    """
+
+    secret: str  # base32, agrupado de quatro em quatro para quem digita à mão
+    otpauth_uri: str
+
+
+class MfaCodeRequest(AppBaseModel):
+    code: str = Field(..., min_length=6, max_length=9)
+
+
+class MfaChallengeResponse(AppBaseModel):
+    """O corpo do 403 que o login devolve quando falta o segundo fator.
+
+    Sai como 403, e não como 200 com campos opcionais, para manter uma regra
+    simples: **2xx no `/auth/login` significa sempre que a sessão existe**. Com
+    um 200 de desafio, um front que fizesse `set(data.access_token,
+    data.refresh_token)` sem conferir gravaria `undefined` — que é exatamente o
+    defeito que acabamos de corrigir no interceptor. O status diferente torna
+    esse erro impossível em vez de improvável.
+
+    `detail` é irmão dos outros campos, e não o pai deles, para que qualquer
+    tratamento genérico de erro do front continue achando uma mensagem legível.
+    """
+
+    detail: str
+    mfa_required: bool = True
+    mfa_token: str
+    expires_in: int
+
+
+class MfaVerifyRequest(AppBaseModel):
+    mfa_token: str = Field(..., min_length=10)
+    code: str = Field(..., min_length=6, max_length=9)
+
+
+class MfaDisableRequest(AppBaseModel):
+    """Desligar o segundo fator exige a senha atual.
+
+    Sem isso, uma sessão sequestrada removeria a proteção sem nenhum atrito —
+    justamente a proteção que existe para o caso de a sessão ser sequestrada.
+    """
+
+    password: str = Field(..., min_length=1)
