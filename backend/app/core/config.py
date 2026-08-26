@@ -94,6 +94,12 @@ class Settings(BaseSettings):
     jwt_algorithm: str = "RS256"
     jwt_issuer: str = "helpdesk.healthsafetytech.com"
 
+    # Segundo fator (TOTP) — chave da cifra do segredo, 32 bytes em base64
+    # urlsafe. Nasce vazia e NÃO tem default: uma chave embutida no repositório
+    # cifraria sem proteger nada. Vazia, o segundo fator fica indisponível e o
+    # login segue como sempre foi — nenhum boot é derrubado por causa dela.
+    mfa_secret_encryption_key: str = ""
+
     def get_private_key(self) -> str:
         if self.jwt_private_key:
             return self.jwt_private_key.replace("\\n", "\n")

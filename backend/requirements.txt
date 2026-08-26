@@ -17,6 +17,11 @@ python-jose[cryptography]==3.3.0
 passlib[bcrypt]==1.7.4
 bcrypt==3.2.2
 python-multipart==0.0.20
+# Segundo fator (TOTP). Wheel pura, sem dependencia transitiva.
+pyotp==2.10.0
+# Ja vinha como transitiva do python-jose, mas agora e importada direto
+# (Fernet, em services/mfa.py) — dependencia direta se declara e se pina.
+cryptography==50.0.0
 
 # Rate limiting
 slowapi==0.1.9
