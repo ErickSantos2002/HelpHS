@@ -211,6 +211,69 @@ def test_codigo_nao_numerico_e_recusado_sem_levantar(mfa_configurado):
     assert mfa.verificar_codigo(mfa.gerar_segredo(), "abcdef") is False
 
 
+# ── Passo de tempo, para o antirreplay ────────────────────────
+
+
+def test_casar_devolve_o_passo_do_codigo_atual(mfa_configurado):
+    import time
+
+    import pyotp
+
+    segredo = mfa.gerar_segredo()
+
+    passo = mfa.casar_codigo(segredo, pyotp.TOTP(segredo).now())
+
+    assert passo == int(time.time()) // 30
+
+
+def test_casar_distingue_a_janela_anterior_da_atual(mfa_configurado):
+    """É essa distinção que o antirreplay consome.
+
+    Se as duas janelas devolvessem o mesmo passo, marcar uma como usada
+    invalidaria a outra e a tolerância de relógio deixaria de existir na
+    prática.
+    """
+    import time
+
+    import pyotp
+
+    segredo = mfa.gerar_segredo()
+    totp = pyotp.TOTP(segredo)
+    agora = int(time.time())
+
+    passo_atual = mfa.casar_codigo(segredo, totp.now())
+    passo_anterior = mfa.casar_codigo(segredo, totp.at(agora - 30))
+
+    assert passo_atual is not None and passo_anterior is not None
+    assert passo_atual - passo_anterior == 1
+
+
+def test_casar_devolve_none_para_codigo_errado(mfa_configurado):
+    assert mfa.casar_codigo(mfa.gerar_segredo(), "000000") is None
+
+
+def test_casar_devolve_none_sem_levantar_para_lixo(mfa_configurado):
+    segredo = mfa.gerar_segredo()
+
+    assert mfa.casar_codigo(segredo, "") is None
+    assert mfa.casar_codigo(segredo, "abcdef") is None
+    assert mfa.casar_codigo(segredo, "12") is None
+
+
+def test_o_passo_e_estavel_dentro_da_mesma_janela(mfa_configurado):
+    """Duas conferências do mesmo código dão o mesmo passo.
+
+    Sem isso, marcar "usado" não pegaria o replay: a segunda tentativa geraria
+    outra chave e passaria.
+    """
+    import pyotp
+
+    segredo = mfa.gerar_segredo()
+    codigo = pyotp.TOTP(segredo).now()
+
+    assert mfa.casar_codigo(segredo, codigo) == mfa.casar_codigo(segredo, codigo)
+
+
 # ── URI de provisionamento (o QR) ─────────────────────────────
 
 

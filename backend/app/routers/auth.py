@@ -9,6 +9,7 @@ from typing import Annotated
 
 import httpx
 from fastapi import APIRouter, BackgroundTasks, Depends, HTTPException, Request, Response, status
+from fastapi.responses import JSONResponse
 from fastapi.security import HTTPAuthorizationCredentials
 from jose import JWTError
 from loguru import logger
@@ -40,10 +41,12 @@ from app.schemas.auth import (
     EmailRequest,
     LoginRequest,
     MessageResponse,
+    MfaChallengeResponse,
     MfaCodeRequest,
     MfaDisableRequest,
     MfaSetupResponse,
     MfaStatusResponse,
+    MfaVerifyRequest,
     PasswordResetRequest,
     RefreshRequest,
     RegisterRequest,
@@ -51,7 +54,7 @@ from app.schemas.auth import (
     TokenResponse,
 )
 from app.schemas.user import UserResponse
-from app.services import account_tokens, mfa
+from app.services import account_tokens, mfa, mfa_challenge
 from app.services.account_emails import send_password_reset_email, send_verification_email
 
 router = APIRouter(prefix="/auth", tags=["Auth"])
@@ -395,13 +398,18 @@ async def reset_password(
 # ── POST /auth/login ──────────────────────────────────────────
 
 
-@router.post("/login", response_model=TokenResponse, status_code=status.HTTP_200_OK)
+@router.post(
+    "/login",
+    response_model=TokenResponse,
+    status_code=status.HTTP_200_OK,
+    responses={403: {"model": MfaChallengeResponse, "description": "Falta o segundo fator"}},
+)
 @limiter.limit(settings.rate_limit_login)
 async def login(
     body: LoginRequest,
     request: Request,
     db: Annotated[AsyncSession, Depends(get_db)],
-) -> TokenResponse:
+) -> TokenResponse | JSONResponse:
     result = await db.execute(select(User).where(User.email == body.email))
     user: User | None = result.scalar_one_or_none()
 
@@ -445,6 +453,22 @@ async def login(
             ),
         )
 
+    # Daqui para baixo a senha já valeu e nenhuma credencial foi emitida ainda:
+    # nada no Redis, nada no banco, nenhum commit. É por isso que a bifurcação
+    # do segundo fator cabe exatamente aqui — interromper não deixa rastro.
+    if user.mfa_enabled:
+        return await _desafiar_segundo_fator(user)
+
+    return await _emitir_sessao(user, request, db)
+
+
+async def _emitir_sessao(user: User, request: Request, db: AsyncSession) -> TokenResponse:
+    """Emite a sessão e registra o login.
+
+    Extraída para que os dois caminhos — com e sem segundo fator — passem pelo
+    mesmo código. Duas cópias divergiriam na primeira mudança, e a que
+    divergisse seria a menos exercitada.
+    """
     access_token = create_access_token(user.id, user.role.value, user.email)
     refresh_token = create_refresh_token(user.id)
 
@@ -459,6 +483,38 @@ async def login(
         access_token=access_token,
         refresh_token=refresh_token,
         expires_in=settings.jwt_access_token_expires_minutes * 60,
+    )
+
+
+async def _desafiar_segundo_fator(user: User) -> JSONResponse:
+    """Interrompe o login e devolve o desafio, sem emitir credencial nenhuma.
+
+    O `AuditAction.login` NÃO é gravado aqui: para quem tem segundo fator, ele
+    passa a ser gravado no `/auth/mfa/verify`. Senha certa com código nunca
+    digitado deixa de virar linha "login" na auditoria — "login" passa a
+    significar que a sessão existiu de fato.
+    """
+    try:
+        token = await mfa_challenge.abrir(user.id)
+    except mfa_challenge.DesafioIndisponivelError as exc:
+        # Sem onde guardar o desafio, não há como exigir o código. Recusar é a
+        # única saída: emitir a sessão aqui desligaria o segundo fator toda vez
+        # que o Redis piscasse.
+        logger.error(f"MFA challenge unavailable for user_id={user.id}: {exc}")
+        raise HTTPException(
+            status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
+            detail="Não foi possível iniciar a verificação em duas etapas. Tente de novo.",
+        ) from exc
+
+    logger.info(f"MFA challenge issued for user_id={user.id}")
+
+    return JSONResponse(
+        status_code=status.HTTP_403_FORBIDDEN,
+        content=MfaChallengeResponse(
+            detail="Informe o código do seu aplicativo autenticador.",
+            mfa_token=token,
+            expires_in=mfa_challenge.TTL_DESAFIO,
+        ).model_dump(),
     )
 
 
@@ -545,6 +601,101 @@ async def logout(
 # de log destas rotas dizem o que aconteceu e para quem, nunca com o quê.
 
 _StaffDep = Annotated[User, Depends(authorize(UserRole.admin, UserRole.technician))]
+
+# Mensagem única para desafio vencido, já usado e queimado por excesso de erros.
+# Distinguir os três diria a quem tem o token qual deles aconteceu, e nenhum
+# desses fatos ajuda quem é dono da conta — só quem está tentando adivinhar.
+_DESAFIO_MORTO = "Sua verificação expirou. Entre novamente."
+
+
+@router.post("/mfa/verify", response_model=TokenResponse)
+@limiter.limit(settings.rate_limit_login)
+async def mfa_verify(
+    body: MfaVerifyRequest,
+    request: Request,
+    db: Annotated[AsyncSession, Depends(get_db)],
+) -> TokenResponse:
+    """Troca o desafio por uma sessão, se o código conferir.
+
+    A ordem das operações é o desenho todo:
+
+    1. o desafio existe?           (senão, 401 — não diz por quê)
+    2. de quem ele é               (o id vive no Redis, nunca no token)
+    3. a conta ainda pode entrar?  (relida do banco, não confiada ao desafio)
+    4. o código casa?              (erra → conta o erro e devolve 401)
+    5. este passo já foi usado?    (replay → 401)
+    6. reivindica o desafio        (o DEL atômico: só um ganha)
+    7. marca o passo como gasto
+    8. emite a sessão
+    """
+    indisponivel = HTTPException(
+        status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
+        detail="Não foi possível concluir a verificação. Tente de novo.",
+    )
+    morto = HTTPException(status_code=status.HTTP_401_UNAUTHORIZED, detail=_DESAFIO_MORTO)
+
+    try:
+        user_id = await mfa_challenge.dono(body.mfa_token)
+    except mfa_challenge.DesafioIndisponivelError as exc:
+        logger.error(f"MFA verify unavailable: {exc}")
+        raise indisponivel from exc
+
+    if user_id is None:
+        raise morto
+
+    user = await db.get(User, user_id)
+    if user is None or user.status != UserStatus.active or not user.mfa_enabled:
+        # Conta desativada, apagada ou com o segundo fator desligado no meio do
+        # caminho: o desafio perdeu o sentido junto.
+        raise morto
+
+    if not user.mfa_secret:
+        # O CHECK do banco impede este par, mas a checagem custa uma linha e o
+        # alternativo seria decifrar `None`.
+        logger.error(f"MFA enabled without secret for user_id={user.id}")
+        raise indisponivel
+
+    try:
+        passo = mfa.casar_codigo(mfa.decifrar_segredo(user.mfa_secret), body.code)
+    except mfa.SegredoIlegivelError as exc:
+        # Chave de cifra trocada depois do cadastro: ninguém entra até o segredo
+        # ser recadastrado. É o preço de a chave morar fora do banco.
+        logger.error(f"MFA secret unreadable for user_id={user.id}")
+        raise indisponivel from exc
+
+    try:
+        if passo is None:
+            await mfa_challenge.registrar_erro(body.mfa_token)
+            logger.warning(f"MFA code rejected for user_id={user.id}")
+            raise HTTPException(
+                status_code=status.HTTP_401_UNAUTHORIZED,
+                detail="Código inválido. Tente novamente.",
+            )
+
+        if await mfa_challenge.passo_ja_usado(user.id, passo):
+            # O código ainda é matematicamente válido, mas já entregou uma
+            # sessão. Sem isto, quem interceptasse o código teria ~90 s para
+            # usá-lo de novo.
+            logger.warning(f"MFA code replayed for user_id={user.id}")
+            raise morto
+
+        if not await mfa_challenge.consumir(body.mfa_token):
+            # Outra requisição reivindicou o mesmo desafio primeiro.
+            raise morto
+
+        await mfa_challenge.marcar_passo(user.id, passo)
+    except mfa_challenge.TentativasEsgotadasError as exc:
+        logger.warning(f"MFA challenge burned after too many errors for user_id={user.id}")
+        raise HTTPException(
+            status_code=status.HTTP_429_TOO_MANY_REQUESTS,
+            detail="Muitas tentativas. Entre novamente.",
+        ) from exc
+    except mfa_challenge.DesafioIndisponivelError as exc:
+        logger.error(f"MFA verify unavailable: {exc}")
+        raise indisponivel from exc
+
+    logger.info(f"MFA verified for user_id={user.id}")
+    return await _emitir_sessao(user, request, db)
 
 
 async def _despeja_sessoes(user_id: uuid.UUID) -> None:

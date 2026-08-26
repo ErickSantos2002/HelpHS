@@ -39,6 +39,10 @@ def _make_user(status=UserStatus.active):
     user.lgpd_consent = True
     # Conta antiga, de antes da confirmação de e-mail — o login não deve exigir
     user.email_verified = True
+    # Explícito porque MagicMock() devolve um objeto truthy para qualquer
+    # atributo: sem esta linha o login desviaria para o segundo fator, e o
+    # motivo não apareceria em lugar nenhum da falha.
+    user.mfa_enabled = False
     return user
 
 

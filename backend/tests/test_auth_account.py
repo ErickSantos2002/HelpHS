@@ -65,6 +65,10 @@ def _mock_user(email_verified=False, status=UserStatus.active):
     u.status = status
     u.email_verified = email_verified
     u.email_verified_at = None
+    # Explícito porque MagicMock() devolve um objeto truthy para qualquer
+    # atributo: sem esta linha o login desviaria para o segundo fator. Cliente
+    # não tem MFA de todo modo — o falso aqui é o que a coluna diz no banco.
+    u.mfa_enabled = False
     return u
 
 

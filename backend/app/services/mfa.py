@@ -19,6 +19,8 @@ Nada deste módulo deve ser logado: nem segredo, nem código, nem a URI do QR.
 """
 
 import base64
+import hmac
+import time
 
 import pyotp
 from cryptography.fernet import Fernet, InvalidToken
@@ -27,6 +29,10 @@ from app.core.config import get_settings
 
 # Nome que aparece no aplicativo autenticador, junto ao e-mail da pessoa.
 _EMISSOR = "HelpHS"
+
+# Período do TOTP, em segundos. É o default do pyotp e o que os autenticadores
+# assumem; está aqui como nome porque o cálculo do passo de tempo depende dele.
+_PERIODO = 30
 
 # Uma janela de 30 s para cada lado. O relógio do celular e o do servidor
 # divergem, e sem tolerância nenhuma a pessoa erra na virada do período.
@@ -93,16 +99,40 @@ def decifrar_segredo(cifrado: str) -> str:
         ) from exc
 
 
-def verificar_codigo(segredo: str, codigo: str) -> bool:
-    """Confere o código do momento, tolerando uma janela para cada lado.
+def casar_codigo(segredo: str, codigo: str) -> int | None:
+    """Devolve o **passo de tempo** que casou, ou `None` se nenhum casou.
 
-    Entrada suja não levanta: os aplicativos exibem "123 456", e a pessoa cola
+    Saber qual janela casou é o que torna o antirreplay possível: quem consome
+    marca aquele passo como usado, e o mesmo código não vale duas vezes dentro
+    dos ~90 s em que continuaria matematicamente válido. `verify()` do pyotp só
+    devolve um booleano, e com ele não há o que marcar.
+
+    A comparação é em tempo constante. O ganho é pequeno num código de seis
+    dígitos, mas o custo é uma linha.
+
+    Entrada suja não levanta: os aplicativos exibem "123 456" e a pessoa cola
     com o espaço. Qualquer coisa que não seja dígito é recusa, não erro.
     """
     limpo = codigo.replace(" ", "").strip()
     if not limpo.isdigit():
-        return False
-    return pyotp.TOTP(segredo).verify(limpo, valid_window=_JANELA)
+        return None
+
+    totp = pyotp.TOTP(segredo)
+    agora = int(time.time())
+    for deslocamento in range(-_JANELA, _JANELA + 1):
+        instante = agora + deslocamento * _PERIODO
+        if hmac.compare_digest(totp.at(instante), limpo):
+            return instante // _PERIODO
+    return None
+
+
+def verificar_codigo(segredo: str, codigo: str) -> bool:
+    """Só se o código vale, sem dizer qual janela casou.
+
+    Serve o cadastro, onde não há replay a impedir: quem ativa já está dentro de
+    uma sessão autenticada. O caminho do login usa `casar_codigo`.
+    """
+    return casar_codigo(segredo, codigo) is not None
 
 
 def uri_de_provisionamento(segredo: str, email: str) -> str:
