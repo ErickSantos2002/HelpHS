@@ -7,6 +7,69 @@ O changelog do produto (o que o cliente vê) fica em
 
 ---
 
+## 26/08/2026 — Fecho da auditoria do backend
+
+Encerra o ciclo aberto em 24/08 com um code review de sistema inteiro: 17
+routers, 24 modelos, 23 migrations, os serviços, o worker, o Docker e o CI.
+As rodadas individuais estão registradas abaixo, por data; esta entrada é o
+arco.
+
+| | Antes | Depois |
+|---|---|---|
+| Achados abertos | 26 | **0** |
+| Testes de backend | 574 | **679** (cobertura 86,5%) |
+| Redes no CI | ruff, black, pytest | **+ mypy, + PostgreSQL real** |
+
+### O que teria doído, e quando
+
+Três achados não eram dívida — eram data marcada:
+
+- **O protocolo travaria no 10.000º chamado do ano.** A busca do maior número
+  ordenava texto, e `'HS-2026-9999' > 'HS-2026-10000'`. Depois desse chamado,
+  nenhum outro poderia ser aberto até a virada do ano. A ~500/mês, faltavam
+  cerca de vinte meses.
+- **Nenhum e-mail sairia no dia em que o SMTP fosse ligado.** Com
+  `SMTP_REPLY_TO` vazio — como nasce no `.env.example` — a montagem da
+  mensagem levantava antes de qualquer tentativa de entrega, e o `except`
+  registrava como falha de rede. Estava mascarado só porque não há SMTP.
+- **O `PATCH /sla-configs/{id}` já estava quebrado**, em 100% das chamadas,
+  desde que foi escrito: três kwargs que não existem no modelo. Configurar
+  prazo de SLA pela interface nunca funcionou.
+
+### As quatro vezes em que a auditoria errou
+
+Vale mais registrar isto do que os acertos, porque diz como usar o documento:
+em quatro dos vinte e seis achados, **quem foi implementar mediu e derrubou o
+auditor**.
+
+1. As anotações de retorno do `routers/sla.py` estavam corretas — seguir a
+   auditoria teria trocado uma anotação certa por uma errada.
+2. O `default=[]` da coluna não é o clássico argumento mutável: default de
+   coluna vale na inserção, e `KBArticle().tags` é `None`.
+3. O `mypy` **não** teria pegado o endpoint de SLA quebrado — modelo
+   declarativo não tem `__init__` conferido. A rede que faltava era teste de
+   endpoint.
+4. O problema dos testes não era "SQLite tolera e esconde": as agregações do
+   dashboard **não eram executadas contra banco nenhum**. Subir PostgreSQL no
+   CI sem consumidor não acrescentaria nada — os testes vieram primeiro, o
+   serviço depois.
+
+### Dívidas registradas, com o gatilho de quando revisitar
+
+Nenhuma é achado em aberto; são escolhas conscientes com a condição de saída
+escrita:
+
+| Dívida | Revisitar quando |
+|---|---|
+| Chat sem backplane (roda com 1 worker) | For preciso voltar a 2 workers — o backplane vem antes |
+| Protocolo por leitura-e-escrita em vez de sequência | Colisão de protocolo aparecer no log |
+| Prazo de resposta do SLA sem campo por ciclo | A operação precisar medir resposta do ciclo reaberto |
+| Sem MFA para contas de staff | Houver conta de staff fora do time de TI |
+| Contador de "artigo útil" sem registro de quem votou | O número for usado para decidir algo |
+| Antivírus aceita anexo quando está fora do ar | O ClamAV estiver no ambiente e estável |
+
+---
+
 ## 26/08/2026 — O A6, com o obstáculo desfeito
 
 Ontem eu devolvi o A6 dizendo duas coisas. A primeira estava certa e foi

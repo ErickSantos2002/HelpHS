@@ -585,6 +585,22 @@ propósito**. Manter o endpoint para uso futuro.
 
 # Pendências conhecidas
 
+## Dívidas com gatilho — escolhas conscientes, não esquecimentos
+
+Saíram da auditoria de agosto/2026. Cada uma foi decidida com o custo na mão;
+o que está escrito é **quando revisitar**, para que a decisão não vire hábito
+por inércia.
+
+| Dívida | Por que ficou assim | Revisitar quando |
+|---|---|---|
+| **Chat sem backplane** | O `ConnectionManager` é memória do processo, então o uvicorn sobe com **1 worker**. No volume atual um worker assíncrono dá conta — o bcrypt já saiu do event loop. | For preciso voltar a 2 workers. O backplane Redis vem **antes**, e o lock do auto-close já está no lugar esperando. |
+| **Protocolo por leitura-e-escrita** | A ordenação passou a ser numérica, o que remove a trava do 10.000º chamado. A corrida entre dois cadastros simultâneos continua mitigada por retentativa, não eliminada. | Colisão de protocolo começar a aparecer no log. A saída é uma sequência do PostgreSQL por ano — que resolve os dois de uma vez. |
+| **Prazo de resposta sem campo por ciclo** | Reabrir renova só o prazo de resolução. A exibição foi corrigida (o chip diz "Respondido" em vez de mentir "Vencido"), mas o ciclo novo não ganha prazo de resposta próprio. | A operação precisar medir a resposta do ciclo reaberto. Exige um campo por ciclo, não por chamado. |
+| **Sem MFA para contas de staff** | Equipe pequena e conhecida. A guarda que existe hoje impede que técnico anonimize administrador. | Houver conta de staff fora do time de TI — ou o phishing deixar de ser hipótese. |
+| **Contador de artigo útil sem voto identificado** | `POST /kb/articles/{id}/feedback` incrementa sem registrar quem votou; o mesmo usuário incrementa em laço. Não vaza nada. | O número for usado para decidir alguma coisa. |
+| **Antivírus aceita quando está fora do ar** | Bloquear upload com o ClamAV indisponível derrubaria o anexo por falha de infraestrutura. Hoje o estado é reportado, não mais silencioso, e há script de revarredura. | O ClamAV estiver no ambiente e estável — aí bloquear passa a custar pouco. |
+
+
 Coisas que os documentos de Requisitos preveem e que **não estão implementadas**.
 Nenhuma delas foi pedida pelo cliente até agora — estão aqui para não se
 perderem.

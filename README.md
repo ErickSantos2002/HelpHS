@@ -83,13 +83,15 @@ está em [desenvolvimento-local.md](desenvolvimento-local.md).
 ## Testes
 
 ```bash
-cd backend  && pytest                # 574 testes, gate de 80% de cobertura
+cd backend  && pytest                # 679 testes, gate de 80% de cobertura
 cd frontend && npm test              # 305 testes (Vitest)
 cd frontend && npx playwright test   # e2e — exige backend na 8001
 ```
 
 O `pytest` roda sem preparo: o `conftest.py` fixa o ambiente e gera chaves JWT
-efêmeras. Os três primeiros comandos rodam no CI a cada push; o Playwright tem
+efêmeras. Cinco testes exercitam as agregações do dashboard contra **PostgreSQL
+de verdade** — sobem um servidor efêmero via `pgserver`, sem Docker, e são
+pulados limpo em quem não o tiver instalado. Os três primeiros comandos rodam no CI a cada push; o Playwright tem
 workflow próprio (`e2e.yml`), acionado à mão.
 
 ## Stack
@@ -122,4 +124,5 @@ ser gravados em disco. Ambas no documento de decisões.
 | [mudanças.md](mudanças.md) | Registro do trabalho por data, com o porquê de cada decisão |
 | `frontend/src/data/changelog.ts` | O changelog que o **cliente** vê dentro do sistema |
 | [docs/superpowers/specs/](docs/superpowers/specs/) | Desenhos e levantamentos: atendimento por IA, regra de primeira resposta do SLA, as duas fontes de verdade de empresa |
+| [mudanças.md](mudanças.md) | Registro do trabalho por data — inclui a auditoria completa de agosto/2026 e as dívidas que ficaram registradas com o gatilho de quando revisitar |
 | `Documentação/` | Dicionário de dados e requisitos originais (`.docx`, fora do Git) |
