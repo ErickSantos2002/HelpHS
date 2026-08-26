@@ -1,8 +1,71 @@
 # Helô — atendimento por IA no HelpHS
 
 **Data:** 11/08/2026
-**Status:** desenho aprovado, aguardando validação do cliente
+**Status:** validado com o cliente em 26/08/2026 — em construção
 **Fases:** 3 — este documento detalha a Fase 1 e esboça as seguintes
+
+---
+
+## Decisões do cliente — 26/08/2026
+
+As 12 perguntas do fim deste documento foram respondidas. O que ficou:
+
+| Tema | Decisão |
+|---|---|
+| Nome | **Helô** (a pendência de grafia fecha aqui) |
+| Tom | Apresenta-se pelo nome e trata o cliente pelo primeiro nome |
+| Perguntas | Três, como desenhado |
+| Fora do horário | Mantém a promessa do próximo dia útil |
+| Feriado | **Ignorado** — o motor de SLA segue pulando só sábado e domingo |
+| Status | **Nasce em `open`; vai para `in_progress` quando ela fala** |
+| Desligar | Global, por CNPJ, por cliente **e por chamado** |
+| Fase 2 | Cita a fonte; base própria no banco, separada da KB do HelpHS |
+| Certificado, gás, RMA | Ela nunca envia documento — avisa que um atendente vai falar e escala |
+
+### O status novo saiu, e com ele o maior risco da Fase 1
+
+O `ai_handling` **não será criado**. `status` é enum nativo do Postgres, e
+acrescentar valor exige `ALTER TYPE ... ADD VALUE` numa migration que roda
+sozinha no boot do container — mais 8 arquivos do front que referenciam
+status. Era o item 🟠 mais delicado da revisão técnica, e a decisão do cliente
+o dissolveu.
+
+Sobrou um ganho não previsto. O desenho original mandava o chamado para
+**"Aguardando técnico"** depois da triagem — e esse status **pausa o relógio
+do SLA** (`_PAUSE_STATUSES` em `app/utils/sla.py`). O cliente ficaria
+esperando um humano com o cronômetro parado, o oposto do que o indicador deve
+mostrar. Em `in_progress` o relógio corre.
+
+**O preço, registrado para não virar surpresa:** "Em andamento" passa a
+incluir chamado sem técnico atribuído — a Helô conversando, ou a triagem
+encerrada esperando alguém pegar. Se a coluna for usada como "estou cuidando
+disto", ela fica menos confiável. A correção, se incomodar, é um marcador
+visual de IA no card — não um status novo.
+
+### Desligar em três níveis
+
+Por **chamado** (o técnico entra e cala a IA ali), por **cliente** e por
+**CNPJ**. Os dois primeiros são campos; o terceiro depende de a empresa existir
+como entidade confiável — ver
+[empresa e aparelho compartilhado](2026-08-26-empresa-e-aparelho-compartilhado-design.md),
+que por isso vem antes desta fase.
+
+A chave global já existe: `LLM_ENABLED` (`79ef715`), flag explícita e não
+inferida da presença da chave de API — que era exatamente a ressalva 🟡 da
+revisão.
+
+### LGPD
+
+O consentimento entra no **aceite dos termos, no cadastro**, deixando claro
+que há tratamento por IA. Um detalhe que a decisão não cobre e é o que dá
+valor jurídico a ela: **registrar o aceite** — quem, quando e qual versão do
+texto. Sem isso não há como provar depois.
+
+### O que já estava pronto quando a validação chegou
+
+- `register_first_response` ignora `is_ai` (`230d670`) — a fala da Helô não
+  zera o SLA, que era o 🔴 #1 da revisão técnica
+- `LLM_ENABLED` desliga a IA sem esvaziar as chaves
 
 ---
 
@@ -155,7 +218,12 @@ Em vez disso, `sender_id` passa a aceitar nulo, com `is_ai = true` identificando
 a mensagem. É o mesmo padrão já adotado em `ticket_history.user_id` para ações
 automáticas do sistema, onde nulo significa "foi o sistema".
 
-### Status novo: `ai_handling`
+### ~~Status novo: `ai_handling`~~ — descartado em 26/08
+
+> **Superado pela decisão do cliente.** O chamado nasce em `open` e vai para
+> `in_progress` quando a Helô fala. Nenhum valor novo entra no enum, nenhuma
+> migration de `ALTER TYPE`, nenhum dos 8 arquivos do front muda. O texto
+> abaixo fica como registro do que foi desenhado e por quê.
 
 Entra no enum de status, com coluna própria no quadro, entre "Aberto" e "Em
 Andamento". Transições permitidas:

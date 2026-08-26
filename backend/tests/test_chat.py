@@ -606,3 +606,64 @@ def test_ws_staff_continua_entrando():
     codigo, _ = _ws_close_code(tech, _mock_ticket(creator_id=_CREATOR_ID))
 
     assert codigo is None
+
+
+# ── Helô: remetente nulo ──────────────────────────────────────
+
+
+def test_mensagem_da_ia_sem_remetente_vira_resposta_valida():
+    """
+    A fala da Helô não tem gente do outro lado: `sender_id` é nulo.
+
+    Enquanto o campo era obrigatório no `ChatMessageResponse`, a primeira
+    mensagem dela derrubaria o GET de mensagens do chamado com
+    ValidationError — um 500 para todo mundo que abrisse aquele chat, não só
+    para quem falou com ela. Era o 🔴 #2 da revisão técnica da Fase 1.
+    """
+    from app.routers.chat import _msg_to_response
+
+    msg = MagicMock()
+    msg.id = uuid.uuid4()
+    msg.ticket_id = uuid.uuid4()
+    msg.sender_id = None
+    msg.sender = None
+    msg.content = "Olá! Sou a Helô, assistente da Health & Safety."
+    msg.is_system = False
+    msg.is_ai = True
+    msg.read_at = None
+    msg.created_at = datetime.now(UTC)
+
+    resposta = _msg_to_response(msg)
+
+    assert resposta.sender_id is None
+    assert resposta.is_ai is True
+    # Vazio, não "Sistema" nem "Helô": o nome que a bolha mostra é decisão da
+    # tela, e o back inventar um texto aqui tiraria essa escolha dela.
+    assert resposta.sender_name == ""
+    assert resposta.sender_role == ""
+
+
+def test_mensagem_de_gente_continua_trazendo_o_remetente():
+    """O nulo é exceção, não o novo normal — o caminho comum não mudou."""
+    from app.routers.chat import _msg_to_response
+
+    autor = MagicMock()
+    autor.name = "Suelen"
+    autor.role = UserRole.client
+
+    msg = MagicMock()
+    msg.id = uuid.uuid4()
+    msg.ticket_id = uuid.uuid4()
+    msg.sender_id = uuid.uuid4()
+    msg.sender = autor
+    msg.content = "O aparelho não liga."
+    msg.is_system = False
+    msg.is_ai = False
+    msg.read_at = None
+    msg.created_at = datetime.now(UTC)
+
+    resposta = _msg_to_response(msg)
+
+    assert resposta.sender_id == msg.sender_id
+    assert resposta.sender_name == "Suelen"
+    assert resposta.sender_role == "client"

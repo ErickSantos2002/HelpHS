@@ -11,7 +11,7 @@ import pytest
 from httpx import ASGITransport, AsyncClient
 
 from app.main import app
-from app.models.models import UserRole, UserStatus
+from app.models.models import Equipment, UserRole, UserStatus
 
 # ── Fake Redis ────────────────────────────────────────────────
 
@@ -1092,11 +1092,17 @@ def _db_tabela_equipamentos(linhas, *, product=None, users=None, por_id=None):
         params = stmt.compile().params
         serial = _param(params, "serial_number")
         dono = _param(params, "owner_id")
+        produto = _param(params, "product_id")
         ignorar = _param(params, "id")
         quer_orfao = "owner_id is null" in texto
 
         for linha in linhas:
             if linha.serial_number != serial:
+                continue
+            # A consulta da chave nova é por (produto, série) e não menciona
+            # dono; sem este filtro o mock devolveria aparelho de outro produto
+            # e o teste da chave composta passaria por engano.
+            if produto is not None and linha.product_id != produto:
                 continue
             if ignorar is not None and linha.id == ignorar:
                 continue
@@ -1125,6 +1131,10 @@ def _db_tabela_equipamentos(linhas, *, product=None, users=None, por_id=None):
     async def _gen():
         yield session
 
+    # A sessão fica pendurada no gerador para os testes que precisam afirmar o
+    # que NÃO aconteceu — anexar-se a um aparelho existente não pode chamar
+    # `add`, senão a linha nova nasceu do mesmo jeito.
+    _gen.session = session
     return _gen
 
 
@@ -1136,8 +1146,18 @@ def _equipamento_de(dono_id, serial="SN-001", equip_id=None):
 
 
 @pytest.mark.asyncio
-async def test_dois_donos_podem_ter_o_mesmo_serial(patch_redis):
-    """Empresas diferentes, mesmo número de série: cadastra."""
+async def test_staff_nao_cadastra_de_novo_um_aparelho_que_ja_existe(patch_redis):
+    """Mesmo produto e mesma série é o MESMO aparelho: 409 pela tela de staff.
+
+    Substitui `test_dois_donos_podem_ter_o_mesmo_serial`, que guardava a regra
+    de 21/08 — dois donos, duas linhas. Em 26/08 a chave passou a ser
+    `(produto, série)` e as duas linhas viraram uma.
+
+    Aqui o 409 é a resposta certa, e é o oposto do `/equipment/my`: quem
+    cadastra pela tela de Produtos é staff, que já lista o parque inteiro. O
+    status não conta nada de novo, e anexar em silêncio prenderia o aparelho ao
+    dono errado sem ninguém perceber.
+    """
     from app.core.database import get_db
 
     outra_empresa = _mock_user(UserRole.client)
@@ -1155,7 +1175,7 @@ async def test_dois_donos_podem_ter_o_mesmo_serial(patch_redis):
             json={"name": "Titan #002", "serial_number": "SN-001", "owner_id": str(dono_novo.id)},
         )
 
-    assert resp.status_code == 201, resp.text
+    assert resp.status_code == 409, resp.text
 
 
 @pytest.mark.asyncio
@@ -1205,8 +1225,14 @@ async def test_dois_orfaos_nao_repetem_serial(patch_redis):
 
 
 @pytest.mark.asyncio
-async def test_orfao_nao_conflita_com_serial_de_quem_tem_dono(patch_redis):
-    """Cadastrar sem dono um serial que só existe COM dono: passa."""
+async def test_orfao_com_a_serie_de_um_aparelho_que_tem_dono_e_recusado(patch_redis):
+    """Sem dono ou com dono, é o mesmo aparelho: 409.
+
+    Substitui `test_orfao_nao_conflita_com_serial_de_quem_tem_dono`. Enquanto a
+    chave era o dono, "sem dono" era um escopo à parte e o cadastro passava —
+    criando a segunda linha do mesmo aparelho, que era exatamente o defeito. A
+    chave nova não olha para dono nenhum.
+    """
     from app.core.database import get_db
 
     alguem = _mock_user(UserRole.client)
@@ -1221,7 +1247,7 @@ async def test_orfao_nao_conflita_com_serial_de_quem_tem_dono(patch_redis):
             json={"name": "Titan #002", "serial_number": "SN-001"},
         )
 
-    assert resp.status_code == 201, resp.text
+    assert resp.status_code == 409, resp.text
 
 
 @pytest.mark.asyncio
@@ -1295,15 +1321,22 @@ async def test_editar_so_o_nome_nao_esbarra_no_proprio_serial(patch_redis):
 
 
 @pytest.mark.asyncio
-async def test_cliente_nao_repete_o_proprio_serial_mas_pode_repetir_o_dos_outros(patch_redis):
-    """Nos /equipment/my o escopo é sempre quem está logado."""
+async def test_cliente_e_anexado_ao_aparelho_do_outro_e_nao_repete_o_proprio(patch_redis):
+    """As duas metades da regra nova, no mesmo teste porque uma define a outra.
+
+    Série de outra pessoa: **anexa** e responde 201 com o aparelho que já
+    existe — nenhuma linha nova. Série que já é dele: 409, porque um 201
+    silencioso faria a tela dizer que cadastrou o que não cadastrou.
+    """
     from app.core.database import get_db
 
     outro = _mock_user(UserRole.client)
-    app.dependency_overrides[get_db] = _db_tabela_equipamentos(
-        [_equipamento_de(outro.id, "SN-001"), _equipamento_de(_CLIENT.id, "SN-009")],
+    do_outro = _equipamento_de(outro.id, "SN-001")
+    gen = _db_tabela_equipamentos(
+        [do_outro, _equipamento_de(_CLIENT.id, "SN-009")],
         product=_mock_product(),
     )
+    app.dependency_overrides[get_db] = gen
     _override_user(_CLIENT)
 
     async with AsyncClient(transport=ASGITransport(app=app), base_url="http://test") as c:
@@ -1317,17 +1350,56 @@ async def test_cliente_nao_repete_o_proprio_serial_mas_pode_repetir_o_dos_outros
         )
 
     assert de_outro.status_code == 201, de_outro.text
+    assert de_outro.json()["id"] == str(
+        do_outro.id
+    ), "devia ter devolvido o aparelho que já existe, não um recém-criado"
+    criados = [c.args[0] for c in gen.session.add.call_args_list]
+    assert not any(
+        isinstance(o, Equipment) for o in criados
+    ), "anexar não pode criar linha nova — é a duplicata que a mudança veio tirar"
     assert meu_repetido.status_code == 409
 
 
 @pytest.mark.asyncio
-async def test_a_consulta_de_serial_filtra_pelo_dono(patch_redis):
-    """A prova de que o escopo está na QUERY, não num filtro depois."""
+async def test_anexar_e_cadastrar_respondem_a_mesma_coisa(patch_redis):
+    """O oráculo que a anexação fecha.
+
+    Se a série de outra empresa devolvesse 409 e a inédita 201, o cliente
+    saberia pelo status quais aparelhos existem no parque alheio — bastava
+    varrer números de série. Os dois caminhos precisam ser indistinguíveis de
+    fora, e é isso que este teste prende.
+    """
     from app.core.database import get_db
 
-    # Pelo /equipment/my o dono é o próprio ator: não há validação de dono no
-    # meio do caminho para o mock de captura (que devolve a mesma linha a toda
-    # consulta) atrapalhar antes de a consulta de série acontecer.
+    outro = _mock_user(UserRole.client)
+
+    async def _posta(linhas):
+        app.dependency_overrides[get_db] = _db_tabela_equipamentos(linhas, product=_mock_product())
+        _override_user(_CLIENT)
+        async with AsyncClient(transport=ASGITransport(app=app), base_url="http://test") as c:
+            return await c.post(
+                f"/api/v1/equipment/my?product_id={_PRODUCT_ID}",
+                json={"name": "Meu Titan", "serial_number": "SN-001"},
+            )
+
+    serie_de_outra_empresa = await _posta([_equipamento_de(outro.id, "SN-001")])
+    serie_inedita = await _posta([])
+
+    assert serie_de_outra_empresa.status_code == serie_inedita.status_code == 201
+
+
+@pytest.mark.asyncio
+async def test_a_consulta_de_serial_procura_por_produto_e_serie(patch_redis):
+    """A prova de que a chave está na QUERY, não num filtro depois.
+
+    Substitui `test_a_consulta_de_serial_filtra_pelo_dono`, que guardava a
+    regra de 21/08. O dono deixou de ser a chave em 26/08: o aparelho é
+    `(produto, série)`, e é por isso que o cliente que cadastra a série de
+    outro é ANEXADO em vez de recusado — a consulta precisa achar o aparelho
+    alheio para poder anexar.
+    """
+    from app.core.database import get_db
+
     gen, queries = _db_capturando_queries(_mock_product(), [])
     app.dependency_overrides[get_db] = gen
     _override_user(_CLIENT)
@@ -1340,7 +1412,7 @@ async def test_a_consulta_de_serial_filtra_pelo_dono(patch_redis):
 
     consulta = next((q for q in queries if "equipments.serial_number =" in q), None)
     assert consulta is not None, "a consulta de série nem foi feita"
-    assert "equipments.owner_id =" in consulta, (
-        "a consulta de série precisa filtrar pelo dono — sem isso o 409 continua "
-        "global e segue denunciando o serial de outras empresas"
+    assert "equipments.product_id =" in consulta, (
+        "a consulta precisa casar produto E série — sem o produto, a mesma série "
+        "em produtos diferentes viraria o mesmo aparelho"
     )

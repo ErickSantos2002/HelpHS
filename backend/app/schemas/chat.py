@@ -23,7 +23,10 @@ class ChatMessageResponse(AppBaseModel):
 
     id: uuid.UUID
     ticket_id: uuid.UUID
-    sender_id: uuid.UUID
+    # Nulo na fala da Helo. Enquanto era obrigatorio, a primeira mensagem dela
+    # derrubaria o GET de mensagens do chamado com ValidationError -- um 500
+    # para todo mundo que abrisse aquele chat.
+    sender_id: uuid.UUID | None
     content: str
     is_system: bool
     is_ai: bool

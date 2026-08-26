@@ -4,7 +4,10 @@ import { tokenStorage } from "./api";
 export interface ChatMessage {
   id: string;
   ticket_id: string;
-  sender_id: string;
+  // Nulo quando quem falou nao foi gente: a Helo (is_ai) e as mensagens
+  // automaticas do sistema. Comparar com o id do usuario logado continua
+  // valendo — null nunca e igual a um id, entao a bolha nao vira "minha".
+  sender_id: string | null;
   sender_name: string;
   sender_role: string;
   content: string;
@@ -23,39 +26,29 @@ export interface ChatMessageListResponse {
 
 export async function getChatMessages(
   ticketId: string,
-  params: { limit?: number; offset?: number } = {},
+  params: { limit?: number; offset?: number } = {}
 ): Promise<ChatMessageListResponse> {
   const p = new URLSearchParams();
   if (params.limit !== undefined) p.set("limit", String(params.limit));
   if (params.offset !== undefined) p.set("offset", String(params.offset));
-  const { data } = await api.get<ChatMessageListResponse>(
-    `/tickets/${ticketId}/messages?${p}`,
-  );
+  const { data } = await api.get<ChatMessageListResponse>(`/tickets/${ticketId}/messages?${p}`);
   return data;
 }
 
 export async function suggestReply(ticketId: string): Promise<string> {
-  const { data } = await api.post<{ suggestion: string }>(
-    `/tickets/${ticketId}/suggest-reply`,
-  );
+  const { data } = await api.post<{ suggestion: string }>(`/tickets/${ticketId}/suggest-reply`);
   return data.suggestion;
 }
 
 export async function summarizeConversation(ticketId: string): Promise<string> {
-  const { data } = await api.post<{ summary: string }>(
-    `/tickets/${ticketId}/summarize`,
-  );
+  const { data } = await api.post<{ summary: string }>(`/tickets/${ticketId}/summarize`);
   return data.summary;
 }
 
-export async function improveMessage(
-  ticketId: string,
-  draft: string,
-): Promise<string> {
-  const { data } = await api.post<{ improved: string }>(
-    `/tickets/${ticketId}/improve-message`,
-    { draft },
-  );
+export async function improveMessage(ticketId: string, draft: string): Promise<string> {
+  const { data } = await api.post<{ improved: string }>(`/tickets/${ticketId}/improve-message`, {
+    draft,
+  });
   return data.improved;
 }
 
