@@ -21,7 +21,6 @@ from sqlalchemy import (
     String,
     Table,
     Text,
-    text,
 )
 from sqlalchemy.dialects.postgresql import ARRAY, JSONB, UUID
 from sqlalchemy.orm import DeclarativeBase, Mapped, mapped_column, relationship
@@ -313,19 +312,16 @@ class Equipment(Base):
     # relação só faria a tela do cliente mudar de sentido sem ninguém pedir.
     users: Mapped[list["User"]] = relationship(secondary="equipment_users")
 
-    # Número de série único POR DONO, não no sistema inteiro: empresas
-    # diferentes podem ter aparelhos de mesmo número, e o 409 global denunciava
-    # o serial de outras empresas. Órfãos (owner_id NULL) têm escopo próprio no
-    # índice parcial — em SQL, NULL não conflita com NULL, e sem ele dois
-    # órfãos iguais passariam. Ver `_recusa_serie_duplicada` em routers/products.
+    # Número de série único por PRODUTO. O dono saiu da chave em 26/08: duas
+    # pessoas com a mesma série do mesmo produto têm o mesmo aparelho físico, e
+    # quem diz quem usa é a `equipment_users`. Enquanto o escopo era o dono, o
+    # mesmo aparelho virava duas linhas que não se conheciam.
+    #
+    # Série nula não conflita — em SQL, NULL nunca é igual a NULL —, e é o que
+    # se quer: aparelho sem número cadastrado é caso comum, não duplicata.
+    # Ver `_recusa_serie_do_produto` em routers/products.
     __table_args__ = (
-        Index("uq_equipments_owner_serial", "owner_id", "serial_number", unique=True),
-        Index(
-            "uq_equipments_orphan_serial",
-            "serial_number",
-            unique=True,
-            postgresql_where=text("owner_id IS NULL"),
-        ),
+        Index("uq_equipments_product_serial", "product_id", "serial_number", unique=True),
     )
 
 

@@ -1251,22 +1251,23 @@ async def test_orfao_com_a_serie_de_um_aparelho_que_tem_dono_e_recusado(patch_re
 
 
 @pytest.mark.asyncio
-async def test_mover_para_dono_que_ja_tem_o_serial_da_409(patch_redis):
+async def test_trocar_so_o_dono_nao_esbarra_em_serie(patch_redis):
     """
-    O PATCH valida o PAR final (dono, serial), não os campos isolados.
+    Com o dono fora da chave, mover o aparelho de dono não valida série nenhuma.
 
-    Só o dono muda no corpo; o serial fica. Validar apenas "o serial mudou?"
-    deixaria passar, e o dono novo ficaria com dois aparelhos de mesmo número.
+    Substitui `test_mover_para_dono_que_ja_tem_o_serial_da_409`, que guardava a
+    regra de 21/08. O cenário dele — dois equipamentos com a mesma série no
+    mesmo produto, um por dono — deixou de ser possível: é uma linha só, e o
+    `uq_equipments_product_serial` recusa a segunda no banco.
     """
     from app.core.database import get_db
 
     dono_atual = _mock_user(UserRole.client)
     dono_novo = _mock_user(UserRole.client)
     movido = _equipamento_de(dono_atual.id, "SN-001", equip_id=_EQUIP_ID)
-    ja_tem = _equipamento_de(dono_novo.id, "SN-001")
 
     app.dependency_overrides[get_db] = _db_tabela_equipamentos(
-        [movido, ja_tem],
+        [movido],
         product=_mock_product(),
         users={dono_novo.id: dono_novo},
         por_id=movido,
@@ -1279,7 +1280,7 @@ async def test_mover_para_dono_que_ja_tem_o_serial_da_409(patch_redis):
             json={"owner_id": str(dono_novo.id)},
         )
 
-    assert resp.status_code == 409, resp.text
+    assert resp.status_code == 200, resp.text
 
 
 @pytest.mark.asyncio
