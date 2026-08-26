@@ -839,5 +839,3 @@ class CalendarEvent(Base):
     )
 
     creator: Mapped["User | None"] = relationship()
-
-    __table_args__ = (Index("ix_calendar_events_start_date", "start_date"),)
