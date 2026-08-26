@@ -182,6 +182,33 @@ async def test_refresh_token(client_ok):
 
 
 @pytest.mark.asyncio
+async def test_refresh_devolve_exatamente_tres_campos(client_ok):
+    """Fixa o conjunto de chaves, não só a presença delas.
+
+    O teste acima afirma que `access_token` está na resposta, mas nada afirmava
+    o que está FORA dela — e foi nessa folga que o front supôs um
+    `refresh_token` que nunca existiu. Ele gravava o `undefined` resultante por
+    cima do refresh válido e derrubava a sessão na renovação seguinte.
+
+    Comparar o conjunto inteiro faz um campo novo na resposta reprovar aqui, no
+    lado que ele muda, em vez de virar comportamento silencioso no outro.
+    """
+    login_resp = await client_ok.post(
+        "/api/v1/auth/login",
+        json={"email": ADMIN_EMAIL, "password": ADMIN_PASSWORD},
+    )
+    tokens = login_resp.json()
+
+    response = await client_ok.post(
+        "/api/v1/auth/refresh",
+        json={"refresh_token": tokens["refresh_token"]},
+    )
+
+    assert response.status_code == 200
+    assert set(response.json()) == {"access_token", "token_type", "expires_in"}
+
+
+@pytest.mark.asyncio
 async def test_refresh_invalid_token(client_ok):
     response = await client_ok.post(
         "/api/v1/auth/refresh",
