@@ -14,11 +14,13 @@ from starlette.exceptions import HTTPException as StarletteHTTPException
 
 from app import __version__
 from app.core.config import get_settings
+from app.core.contexto import CABECALHO
 from app.core.database import engine
 from app.core.exceptions import http_exception_handler, validation_exception_handler
 from app.core.logging import setup_logging
 from app.core.rate_limit import limiter
 from app.core.redis import close_redis, get_redis
+from app.middleware.correlacao import CorrelacaoMiddleware
 from app.routers import (
     attachments,
     audit,
@@ -141,7 +143,16 @@ app.add_middleware(
     allow_credentials=True,
     allow_methods=["*"],
     allow_headers=["*"],
+    # `allow_headers` vale para o que o navegador MANDA; para ele conseguir LER
+    # um cabecalho de resposta e preciso expo-lo. Sem isto o id existe, viaja e
+    # e invisivel justamente para quem abriria o chamado de suporte citando ele.
+    expose_headers=[CABECALHO],
 )
+
+# Registrado DEPOIS do CORS de proposito: o `add_middleware` empilha por fora,
+# entao este fica sendo o mais externo. O id passa a existir antes de qualquer
+# outra camada, e o cabecalho e carimbado por ultimo, com a resposta ja pronta.
+app.add_middleware(CorrelacaoMiddleware)
 
 
 app.state.limiter = limiter
