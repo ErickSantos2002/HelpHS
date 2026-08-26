@@ -1,12 +1,25 @@
 import { api } from "./api";
 import { resolveFileUrl } from "../lib/fileUrl";
 
+/**
+ * Os estados de conta que o backend reconhece — o enum `UserStatus` de
+ * `backend/app/models/models.py`.
+ *
+ * A lista existe para ser conferida: `userService.test.ts` lê o enum de lá e
+ * compara com esta. "suspended" morou aqui por engano sem nunca ter existido
+ * no banco, e o filtro que oferecia a opção derrubava a lista de usuários
+ * com 422 — o FastAPI recusa na validação do Query, antes do handler.
+ */
+export const USER_STATUSES = ["active", "inactive", "anonymized"] as const;
+
+export type UserStatus = (typeof USER_STATUSES)[number];
+
 export interface UserSummary {
   id: string;
   name: string;
   email: string;
   role: "admin" | "technician" | "client";
-  status: "active" | "inactive" | "suspended" | "anonymized";
+  status: UserStatus;
   phone: string | null;
   department: string | null;
   avatar_url: string | null;
@@ -99,9 +112,11 @@ export async function updateUser(
   return data;
 }
 
+// Os dois estados que a tela alterna. `anonymized` é do endpoint próprio de
+// anonimização (LGPD) e não tem volta — não passa por aqui.
 export async function setUserStatus(
   id: string,
-  status: "active" | "inactive" | "suspended",
+  status: "active" | "inactive",
 ): Promise<UserSummary> {
   const { data } = await api.patch<UserSummary>(`/users/${id}/status`, {
     status,

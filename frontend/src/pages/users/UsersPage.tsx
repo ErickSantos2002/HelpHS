@@ -20,6 +20,7 @@ import {
   getUsers,
   setUserStatus,
   updateUser,
+  type UserStatus,
   type UserSummary,
 } from "../../services/userService";
 
@@ -69,10 +70,11 @@ const ROLE_BADGE: Record<string, string> = {
   client: "bg-slate-100 text-slate-600 border border-slate-300 dark:bg-slate-700/40 dark:text-slate-300 dark:border-slate-600/40",
 };
 
-const STATUS_LABEL: Record<string, string> = {
+// Tipado por `UserStatus` de propósito: se o enum do backend mudar, isto para
+// de compilar em vez de renderizar um rótulo vazio.
+const STATUS_LABEL: Record<UserStatus, string> = {
   active: "Ativo",
   inactive: "Inativo",
-  suspended: "Suspenso",
   anonymized: "Anonimizado",
 };
 
@@ -89,10 +91,11 @@ const FILTER_ROLE_OPTIONS = [
   { value: "client", label: "Cliente" },
 ];
 
-const FILTER_STATUS_OPTIONS = [
-  { value: "active", label: "Ativo" },
-  { value: "inactive", label: "Inativo" },
-  { value: "suspended", label: "Suspenso" },
+// Subconjunto deliberado: filtrar por anonimizado não é uso de tela. Os
+// valores saem de `UserStatus`, então um estado inventado não compila.
+const FILTER_STATUS_OPTIONS: { value: UserStatus; label: string }[] = [
+  { value: "active", label: STATUS_LABEL.active },
+  { value: "inactive", label: STATUS_LABEL.inactive },
 ];
 
 // ── Validation ─────────────────────────────────────────────────
@@ -138,17 +141,15 @@ function UserAvatar({ name }: { name: string }) {
 
 // ── StatusPill ────────────────────────────────────────────────
 
-const STATUS_DOT: Record<string, string> = {
+const STATUS_DOT: Record<UserStatus, string> = {
   active:     "bg-emerald-500",
   inactive:   "bg-slate-400 dark:bg-slate-500",
-  suspended:  "bg-red-400",
   anonymized: "bg-slate-400 dark:bg-slate-600",
 };
 
-const STATUS_PILL: Record<string, string> = {
+const STATUS_PILL: Record<UserStatus, string> = {
   active:     "border-emerald-300 bg-emerald-50 text-emerald-600 hover:bg-emerald-100 dark:border-emerald-700/50 dark:bg-emerald-900/20 dark:text-emerald-300 dark:hover:bg-emerald-900/40",
   inactive:   "border-slate-300 bg-slate-100 text-slate-500 hover:bg-slate-200 dark:border-slate-600/50 dark:bg-slate-800/40 dark:text-slate-400 dark:hover:bg-slate-700/40",
-  suspended:  "border-red-300 bg-red-50 text-red-600 hover:bg-red-100 dark:border-red-700/50 dark:bg-red-900/20 dark:text-red-300 dark:hover:bg-red-900/30",
   anonymized: "border-slate-300 bg-slate-100 text-slate-500 cursor-default dark:border-slate-700/50 dark:bg-slate-800/50 dark:text-slate-600",
 };
 
@@ -156,7 +157,7 @@ function StatusPill({ user, onToggled }: { user: UserSummary; onToggled: (u: Use
   const [loading, setLoading] = useState(false);
 
   async function toggle() {
-    if (user.status === "anonymized" || user.status === "suspended") return;
+    if (user.status === "anonymized") return;
     setLoading(true);
     try {
       const next = user.status === "active" ? "inactive" : "active";
