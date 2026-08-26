@@ -214,6 +214,7 @@ async def test_consultas_do_diagnostico_executam(sessao, banco):
         _CNPJ_DUPLICADO,
         _CNPJ_INVALIDO,
         _COLEGAS_POR_CNPJ,
+        _DETALHE_DAS_DUPLICADAS,
         _PANORAMA_CLIENTES,
         _SERIE_DUPLICADA,
         _SERIE_ENTRE_PRODUTOS,
@@ -221,6 +222,7 @@ async def test_consultas_do_diagnostico_executam(sessao, banco):
 
     for consulta in (
         _CNPJ_DUPLICADO,
+        _DETALHE_DAS_DUPLICADAS,
         _SERIE_DUPLICADA,
         _SERIE_ENTRE_PRODUTOS,
         _PANORAMA_CLIENTES,

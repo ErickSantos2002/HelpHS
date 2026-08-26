@@ -59,6 +59,29 @@ _CNPJ_DUPLICADO = f"""
      ORDER BY 2 DESC
 """
 
+# Para cada empresa duplicada, o que ela carrega. É o dado que decide entre
+# apagar a sobra e fundir: casca vazia se apaga, empresa com cliente ou nota
+# vinculada precisa que alguém diga para onde vai o conteúdo.
+_DETALHE_DAS_DUPLICADAS = f"""
+    WITH duplicadas AS (
+        SELECT {_SO_DIGITOS.format(col="cnpj")} AS doc
+          FROM companies
+         WHERE coalesce(cnpj, '') <> ''
+         GROUP BY 1
+        HAVING count(*) > 1
+    )
+    SELECT {_SO_DIGITOS.format(col="c.cnpj")}                       AS doc,
+           c.id::text                                               AS id,
+           c.name                                                   AS nome,
+           c.created_at                                             AS criada_em,
+           (SELECT count(*) FROM users u WHERE u.company_id = c.id)         AS clientes,
+           (SELECT count(*) FROM company_notes n WHERE n.company_id = c.id) AS notas
+      FROM companies c
+      JOIN duplicadas d ON d.doc = {_SO_DIGITOS.format(col="c.cnpj")}
+     ORDER BY doc, c.created_at
+"""
+
+
 _SERIE_DUPLICADA = """
     SELECT p.name                       AS produto,
            upper(trim(e.serial_number)) AS serie,
@@ -150,6 +173,24 @@ async def _main() -> None:
                 for r in linhas:
                     print(f"    {r.doc}  ({r.quantas}x)  {r.nomes}")
                     print(f"      ids: {r.ids}")
+
+                _titulo("1b. O que cada empresa duplicada carrega")
+                detalhe = (await conn.execute(text(_DETALHE_DAS_DUPLICADAS))).all()
+                doc_atual = None
+                for r in detalhe:
+                    if r.doc != doc_atual:
+                        doc_atual = r.doc
+                        print(f"    {r.doc}")
+                    vazia = r.clientes == 0 and r.notas == 0
+                    marca = "casca vazia" if vazia else "TEM CONTEUDO"
+                    print(
+                        f"      {r.id}  {r.criada_em:%d/%m %H:%M}  "
+                        f"{r.clientes} cliente(s), {r.notas} nota(s)  -> {marca}"
+                    )
+                print()
+                print("  Casca vazia pode ser apagada. A que tem conteúdo é a que")
+                print("  sobrevive — se houver mais de uma, alguém decide para onde")
+                print("  vai o conteúdo antes de qualquer migration.")
             else:
                 print("  nenhum ✅  o UNIQUE(cnpj) sobe limpo")
 
