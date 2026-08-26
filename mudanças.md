@@ -7,6 +7,96 @@ O changelog do produto (o que o cliente vê) fica em
 
 ---
 
+## 26/08/2026 — O A6, com o obstáculo desfeito
+
+Ontem eu devolvi o A6 dizendo duas coisas. A primeira estava certa e foi
+aceita: subir Postgres no CI sem consumidor não gate nada, porque as
+agregações não são executadas contra banco nenhum. A segunda estava **errada**:
+eu disse que não havia Postgres nesta máquina. Há — via `pgserver`, sem Docker,
+na Rota B do `desenvolvimento-local.md`.
+
+| Commit | O que foi feito |
+|---|---|
+| `205a893` | `fix:` **índice de `calendar_events`** declarado duas vezes |
+| `fcd1f86` | `test:` **agregações do dashboard** contra PostgreSQL real |
+| `docs:` | Este fechamento |
+
+### Medir antes de escrever
+
+O pedido foi explícito: o número primeiro, e um "não paga" com o número na mão
+seria aceito. Medi:
+
+| O quê | Custo |
+|---|---|
+| Subir o `pgserver` (uma vez, local) | 12,9 s |
+| `create_all` das 24 tabelas | 1,2 s |
+| Isolamento por transação revertida | **2 ms/teste** |
+| Isolamento por `TRUNCATE` do subconjunto | 729 ms/teste |
+| Funções com construção só-Postgres | 6 |
+| Custo no CI (banco já de pé) | ~11 s |
+
+Duas medições mudaram o desenho. A transação revertida é **365× mais barata**
+que o `TRUNCATE`, então o isolamento por teste deixou de ser um custo a pesar.
+E no Postgres o `create_all` vale para as 24 tabelas — o subconjunto que o
+`test_groups.py` precisou é limitação do SQLite, não da abordagem.
+
+Com 2 ms por teste e ~11 s no CI, contra seis funções sem gate nenhum, o número
+paga. Segui.
+
+### Medir já encontrou um defeito
+
+A primeira tentativa de `create_all` falhou:
+`relation "ix_calendar_events_start_date" already exists`. A coluna tinha
+`index=True`, que já gera esse nome, e o `__table_args__` declarava um `Index()`
+com o mesmo nome — duas definições, dois `CREATE INDEX`.
+
+Não era bug vivo, e vale dizer por quê: em produção quem construiu o schema foi
+o Alembic, e a migration cria o índice uma vez só. O banco está correto. O que
+existia era divergência entre o modelo e a migration, invisível justamente
+porque ninguém pedia `create_all` — e que travaria qualquer fixture montando o
+schema a partir dos modelos.
+
+O teste que fechou isso não prende esta linha: prende que **nenhum** índice
+pode ser declarado duas vezes em toda a metadata. É de metadata, sem conexão,
+então roda sempre.
+
+### Nenhuma agregação falhou — e era o desfecho esperado
+
+As cinco passaram de primeira contra Postgres real. Isso é consistente com o
+que você verificou de fora: as agregações estão no ar e funcionando. O que se
+compra aqui é proteção contra regressão.
+
+Um teste que passa de primeira precisa ser validado por mutação, como manda a
+casa. Troquei `isodow` por um campo inválido e o teste do relatório caiu com
+`ProgrammingError` — a rede pega erro de dialeto, que é exatamente o que ela
+existe para pegar.
+
+A prioridade foi por risco, e o primeiro da fila é código meu: o
+`_resumos_de_tecnicos`, reescrito na rodada do N+1 para agregar com `GROUP BY`,
+era o único SQL novo que nunca tinha tocado um Postgres. Um dos testes afirma
+que ele e a versão individual produzem os **mesmos números** — o contrato
+daquele refatoramento, e se divergirem uma das duas telas mente.
+
+### O que custou medição na fixture
+
+Dois detalhes que só apareceram rodando, e ficaram escritos no arquivo:
+
+A fixture do servidor é **síncrona** de propósito. Em fixture async de escopo
+de módulo o pytest-asyncio dá um laço de evento por teste, e a conexão criada
+no laço do módulo morre no primeiro uso — `transaction already deassociated
+from connection`. Foi o primeiro erro que apareceu, e não tinha nada a ver com
+as agregações.
+
+E o serviço no CI entrou **por último**, depois de existir consumidor. Provei
+os dois caminhos rodando: o do CI, simulando `TEST_POSTGRES_URL` com o banco já
+de pé (5 passaram, 10,6 s), e o do skip, escondendo o `pgserver` para confirmar
+que quem não tem Postgres continua com a suíte verde (5 pulados).
+
+Suíte: 674 → 679 testes, verdes, cobertura 87%. mypy limpo. Sem migration. Nada
+foi executado contra produção.
+
+---
+
 ## 25/08/2026 (madrugada) — Cinco dos seis altos, e um que parei antes de fazer
 
 Cinco entregues, um devolvido com a premissa corrigida. Seis commits.

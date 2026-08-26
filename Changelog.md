@@ -186,6 +186,16 @@ Datas em DD/MM/AAAA.
   de ter sido cliente.
 
 ### Corrigido
+- **O índice de `calendar_events` deixa de ser declarado duas vezes**
+  (`205a893`). A coluna `start_date` tinha `index=True` — que já gera
+  `ix_calendar_events_start_date` — e o `__table_args__` declarava um `Index()`
+  com esse mesmo nome: duas definições, dois `CREATE INDEX`, o segundo estoura.
+  ⚠️ **Não era bug vivo**: em produção o schema foi construído pelo Alembic, e a
+  migration cria o índice uma vez só — o banco está correto e o nome bate. O
+  que existia era divergência entre modelo e migration, invisível porque
+  ninguém pedia `create_all`, e que travava qualquer fixture montando o schema
+  a partir dos modelos. Sem migration: o banco já está como o modelo agora
+  descreve. Achado ao medir o custo da fixture do A6.
 - **O protocolo deixa de travar no 10.000º chamado do ano** (`32f07de`). A
   consulta do máximo ordenava `Ticket.protocol` como **texto**, e a sequência
   tem 4 dígitos: `'HS-2026-9999' > 'HS-2026-10000'` é verdade em ordenação de
@@ -628,6 +638,23 @@ Datas em DD/MM/AAAA.
   aguardando staging.
 
 ### Testes
+- **As agregações do dashboard passam a rodar contra PostgreSQL de verdade**
+  (`fcd1f86`). As 26 construções só-Postgres do `dashboard.py` — `date_trunc`,
+  `extract('isodow')`, `count(...).filter(...)` — não eram executadas contra
+  banco nenhum: os nove testes existentes são inteiramente mockados, e mock não
+  valida SQL. Cinco testes cobrem as seis funções que carregam essas
+  construções, com dado sintético montado no próprio teste, priorizados por
+  risco — o `_resumos_de_tecnicos` primeiro, porque é o SQL reescrito na rodada
+  do N+1 que nunca tinha tocado um Postgres. Um dos testes afirma que a versão
+  em lote e a individual produzem os **mesmos números**, que é o contrato
+  daquele refatoramento. **Nenhuma agregação falhou** — o que se compra é
+  proteção contra regressão, não conserto de bug vivo; verificado por mutação
+  que a rede pega (trocando `isodow` por campo inválido, o teste cai). O banco
+  vem do `TEST_POSTGRES_URL` (CI) ou de um Postgres efêmero via `pgserver`, sem
+  Docker; sem nenhum dos dois os testes se **pulam**, então quem não tem
+  Postgres à mão continua com a suíte verde. ⚠️ O `services: postgres:16` só
+  entrou no `ci.yml` **depois** de existir consumidor — serviço sem consumidor
+  seria a configuração que mente. Custo no CI: ~11 s.
 - **O domínio de empresa em `groups.py` sai do descoberto** (`470d56c`).
   Nenhum teste da suíte referenciava `Company`, `company_id` ou qualquer
   endpoint `/groups` — os únicos "company" em `tests/` eram `company_name` e
