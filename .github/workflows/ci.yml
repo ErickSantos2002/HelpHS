@@ -12,6 +12,25 @@ jobs:
     name: Backend (Python)
     runs-on: ubuntu-latest
 
+    # PostgreSQL de verdade para os testes das agregacoes do dashboard, que
+    # usam date_trunc, extract('isodow') e count(...).filter(...) -- construcoes
+    # que mock nao valida e que o SQLite nem compila. O resto da suite continua
+    # mockando o banco e nao toca neste servico.
+    services:
+      postgres:
+        image: postgres:16
+        env:
+          POSTGRES_USER: postgres
+          POSTGRES_PASSWORD: postgres
+          POSTGRES_DB: helphs_testes
+        ports:
+          - 5432:5432
+        options: >-
+          --health-cmd "pg_isready -U postgres"
+          --health-interval 5s
+          --health-timeout 5s
+          --health-retries 10
+
     steps:
       - name: Checkout
         uses: actions/checkout@v4
@@ -54,6 +73,10 @@ jobs:
         env:
           DATABASE_URL: postgresql+asyncpg://user:pass@localhost/db
           APP_ENV: testing
+          # Sem esta variavel os testes de agregacao se PULAM (localmente eles
+          # sobem um Postgres efemero via pgserver). Aqui apontam para o
+          # servico acima -- e um banco proprio, nao o DATABASE_URL da app.
+          TEST_POSTGRES_URL: postgresql://postgres:postgres@localhost:5432/helphs_testes
 
   # ── Frontend ───────────────────────────────────────────────
   frontend:
