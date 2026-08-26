@@ -9,6 +9,11 @@ Existe porque a aplicação NÃO tem caminho de admin para isso:
 `PATCH /users/{id}` não aceita senha e `POST /users/me/change-password` exige
 a senha atual — que é justamente o que a pessoa perdeu.
 
+**Este script não toca no segundo fator.** Numa conta com `mfa_enabled = true`,
+a senha nova não destranca nada: o login continua pedindo o código depois dela.
+Se o relato for "perdi o celular", o script é o `desliga_mfa.py`. Se for "perdi
+os dois", rode aquele primeiro e este depois.
+
 Importa `hash_password` do próprio app de propósito: se o script tivesse a sua
 própria cópia do bcrypt, gravaria um hash com custo diferente do que a API
 usa. O custo viaja dentro do hash, então o login funciona de qualquer jeito —
