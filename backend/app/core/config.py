@@ -278,8 +278,22 @@ class Settings(BaseSettings):
     log_level: str = "INFO"
     log_dir: str = "./logs"
 
-    # Rate limiting
+    # Rate limiting — três chaves, uma por modelo de ameaça.
+    #
+    # Era uma só, reaproveitada em quatro endpoints de semânticas diferentes:
+    # apertar o login para conter força bruta apertava junto o cadastro e o
+    # "esqueci minha senha", e quem mexesse não teria como saber.
+    #
+    # Tentativa de credencial: alguém adivinhando senha ou código.
     rate_limit_login: str = "5/15minutes"
+    # Ciclo de conta — cadastro, esqueci-a-senha, reenvio de confirmação. Cada
+    # chamada dispara e-mail, então o limite protege a caixa alheia tanto quanto
+    # o sistema.
+    rate_limit_account: str = "5/15minutes"
+    # Resgate de token vindo de link de e-mail. Mais folgado de propósito: quem
+    # chega aqui já tem um token assinado nas mãos, e o caso comum é a pessoa
+    # clicando de novo no link porque a primeira tentativa pareceu não responder.
+    rate_limit_token: str = "10/15minutes"
 
     # Quem pode falar pelos outros: lista de IPs/redes cujo X-Forwarded-For o
     # uvicorn aceita como sendo o IP real de quem chamou. O uvicorn lê esta

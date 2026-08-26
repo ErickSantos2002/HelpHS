@@ -142,7 +142,7 @@ async def lookup_cep(
 
 
 @router.post("/register", response_model=UserResponse, status_code=status.HTTP_201_CREATED)
-@limiter.limit(settings.rate_limit_login)
+@limiter.limit(settings.rate_limit_account)
 async def register(
     body: RegisterRequest,
     request: Request,
@@ -208,8 +208,10 @@ async def register(
 
 
 @router.post("/verify-email", response_model=MessageResponse)
+@limiter.limit(settings.rate_limit_token)
 async def verify_email(
     body: TokenOnlyRequest,
+    request: Request,
     db: Annotated[AsyncSession, Depends(get_db)],
 ) -> MessageResponse:
     """Ativa a conta a partir do link enviado no cadastro."""
@@ -258,7 +260,7 @@ async def verify_email(
 
 
 @router.post("/resend-verification", response_model=MessageResponse)
-@limiter.limit(settings.rate_limit_login)
+@limiter.limit(settings.rate_limit_account)
 async def resend_verification(
     body: EmailRequest,
     request: Request,
@@ -295,7 +297,7 @@ async def resend_verification(
 
 
 @router.post("/forgot-password", response_model=MessageResponse)
-@limiter.limit(settings.rate_limit_login)
+@limiter.limit(settings.rate_limit_account)
 async def forgot_password(
     body: EmailRequest,
     request: Request,
@@ -351,6 +353,7 @@ async def forgot_password(
 
 
 @router.post("/reset-password", response_model=MessageResponse)
+@limiter.limit(settings.rate_limit_token)
 async def reset_password(
     body: PasswordResetRequest,
     request: Request,
