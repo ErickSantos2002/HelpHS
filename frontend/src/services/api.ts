@@ -27,6 +27,14 @@ export const tokenStorage = {
     localStorage.setItem(TOKEN_KEY, access);
     localStorage.setItem(REFRESH_KEY, refresh);
   },
+  /**
+   * Só o access token. A renovação (`/auth/refresh`) não devolve refresh novo,
+   * e passar `undefined` para `set` gravaria a string "undefined" no lugar do
+   * refresh válido — daí os dois caminhos serem métodos separados.
+   */
+  setAccess: (access: string) => {
+    localStorage.setItem(TOKEN_KEY, access);
+  },
   clear: () => {
     localStorage.removeItem(TOKEN_KEY);
     localStorage.removeItem(REFRESH_KEY);
@@ -100,12 +108,16 @@ api.interceptors.response.use(
     }
 
     try {
+      // Espelha `AccessTokenResponse` do backend (app/schemas/auth.py): a
+      // renovação devolve só o access token. O refresh continua o mesmo, válido
+      // até o próprio vencimento — reescrevê-lo aqui é o que destruía a sessão.
       const { data } = await axios.post<{
         access_token: string;
-        refresh_token: string;
+        token_type: string;
+        expires_in: number;
       }>(`${BASE_URL}/auth/refresh`, { refresh_token: refreshToken });
 
-      tokenStorage.set(data.access_token, data.refresh_token);
+      tokenStorage.setAccess(data.access_token);
       api.defaults.headers.common.Authorization = `Bearer ${data.access_token}`;
 
       processQueue(null, data.access_token);

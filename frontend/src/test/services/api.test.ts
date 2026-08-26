@@ -120,7 +120,7 @@ describe("response interceptor — refresh e retry", () => {
     const { axios, api, tokenStorage, respond, adapter } = await freshApi();
     tokenStorage.set("expirado", "refresh-1");
     const postSpy = vi.spyOn(axios, "post").mockResolvedValue({
-      data: { access_token: "novo-acesso", refresh_token: "novo-refresh" },
+      data: { access_token: "novo-acesso", token_type: "bearer", expires_in: 28800 },
     });
     respond(401); // primeira tentativa
     respond(200, { id: "t1" }); // retry pós-refresh
@@ -134,7 +134,27 @@ describe("response interceptor — refresh e retry", () => {
     const retryConfig = adapter.mock.calls[1][0];
     expect(retryConfig.headers.Authorization).toBe("Bearer novo-acesso");
     expect(tokenStorage.getAccess()).toBe("novo-acesso");
-    expect(tokenStorage.getRefresh()).toBe("novo-refresh");
+    expect(tokenStorage.getRefresh()).toBe("refresh-1");
+  });
+
+  it("preserva o refresh token, que a resposta do backend não repete", async () => {
+    // `/auth/refresh` devolve AccessTokenResponse — access_token, token_type e
+    // expires_in, sem refresh_token (backend/app/schemas/auth.py). Gravar um
+    // `data.refresh_token` que não existe escreve a string "undefined" no
+    // localStorage: ela é truthy, passa pela guarda, e é o refresh seguinte que
+    // morre — 401 e sessão perdida sem sintoma no momento do erro.
+    const { axios, api, tokenStorage, respond } = await freshApi();
+    tokenStorage.set("expirado", "refresh-1");
+    vi.spyOn(axios, "post").mockResolvedValue({
+      data: { access_token: "novo-acesso", token_type: "bearer", expires_in: 28800 },
+    });
+    respond(401);
+    respond(200, { id: "t1" });
+
+    await api.get("/tickets/t1");
+
+    expect(tokenStorage.getAccess()).toBe("novo-acesso");
+    expect(tokenStorage.getRefresh()).toBe("refresh-1");
   });
 
   it("sem refresh token, limpa a sessão e manda para /login", async () => {
@@ -170,7 +190,7 @@ describe("response interceptor — refresh e retry", () => {
     const { axios, api, tokenStorage, respond } = await freshApi();
     tokenStorage.set("expirado", "refresh-1");
     const postSpy = vi.spyOn(axios, "post").mockResolvedValue({
-      data: { access_token: "novo-acesso", refresh_token: "novo-refresh" },
+      data: { access_token: "novo-acesso", token_type: "bearer", expires_in: 28800 },
     });
     respond(401); // primeira tentativa
     respond(401); // o retry também falha
@@ -190,10 +210,11 @@ describe("response interceptor — fila durante o refresh", () => {
     tokenStorage.set("expirado", "refresh-1");
 
     // Refresh controlado à mão, para manter a janela de concorrência aberta
-    let liberaRefresh!: (v: { data: { access_token: string; refresh_token: string } }) => void;
-    const refreshPendente = new Promise<{
-      data: { access_token: string; refresh_token: string };
-    }>((resolve) => {
+    type RespostaRefresh = {
+      data: { access_token: string; token_type: string; expires_in: number };
+    };
+    let liberaRefresh!: (v: RespostaRefresh) => void;
+    const refreshPendente = new Promise<RespostaRefresh>((resolve) => {
       liberaRefresh = resolve;
     });
     const postSpy = vi.spyOn(axios, "post").mockReturnValue(refreshPendente as never);
@@ -209,7 +230,7 @@ describe("response interceptor — fila durante o refresh", () => {
     respond(200, { id: "t1" }); // retry da primeira
     respond(200, { id: "n1" }); // retry da segunda
     liberaRefresh({
-      data: { access_token: "novo-acesso", refresh_token: "novo-refresh" },
+      data: { access_token: "novo-acesso", token_type: "bearer", expires_in: 28800 },
     });
 
     const [r1, r2] = await Promise.all([p1, p2]);
