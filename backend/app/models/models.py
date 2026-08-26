@@ -308,6 +308,10 @@ class Equipment(Base):
     tickets: Mapped[list["Ticket"]] = relationship(
         secondary="ticket_equipments", back_populates="equipments"
     )
+    # Quem usa o aparelho. Sem `back_populates`: o lado do usuário continua
+    # sendo `User.equipments` (os que ele cadastrou), e misturar os dois numa
+    # relação só faria a tela do cliente mudar de sentido sem ninguém pedir.
+    users: Mapped[list["User"]] = relationship(secondary="equipment_users")
 
     # Número de série único POR DONO, não no sistema inteiro: empresas
     # diferentes podem ter aparelhos de mesmo número, e o 409 global denunciava
@@ -323,6 +327,36 @@ class Equipment(Base):
             postgresql_where=text("owner_id IS NULL"),
         ),
     )
+
+
+# O mesmo aparelho físico é usado por mais de uma pessoa — dois funcionários da
+# mesma empresa cadastram a mesma série, e hoje isso vira DUAS linhas em
+# `equipments`, cada uma se achando dona. `owner_id` é um campo só e não
+# comporta os dois.
+#
+# Aqui `owner_id` continua significando "quem cadastrou" (e é quem edita); esta
+# tabela diz quem USA o aparelho. Toda pessoa anexada, inclusive o cadastrante,
+# tem linha aqui — sem exceção, para nenhuma consulta precisar juntar as duas
+# fontes com OR.
+#
+# Ver docs/superpowers/specs/2026-08-26-empresa-e-aparelho-compartilhado-design.md
+equipment_users = Table(
+    "equipment_users",
+    Base.metadata,
+    Column(
+        "equipment_id",
+        UUID(as_uuid=True),
+        ForeignKey("equipments.id", ondelete="CASCADE"),
+        primary_key=True,
+    ),
+    Column(
+        "user_id",
+        UUID(as_uuid=True),
+        ForeignKey("users.id", ondelete="CASCADE"),
+        primary_key=True,
+    ),
+    Column("created_at", DateTime(timezone=True), server_default=func.now()),
+)
 
 
 kb_article_products = Table(
