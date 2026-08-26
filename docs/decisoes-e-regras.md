@@ -423,6 +423,93 @@ O seed continua idempotente, e isso protege quem já trocou a senha em produçã
 com a linha presente, nada é tocado. Em contrapartida, **apagar o usuário não é
 uma forma de reiniciá-lo**: sem a variável, ele simplesmente não volta.
 
+## Segundo fator (TOTP)
+
+Vale **só para `admin` e `technician`**. Cliente não tem o recurso, e as rotas
+respondem 403 para ele — não é uma tela escondida, é um caminho que não existe.
+Adesão é individual e voluntária: ninguém é obrigado, e uma conta sem MFA
+continua entrando exatamente como sempre entrou.
+
+### O segredo é cifrado, não hasheado — e a diferença não é estilo
+
+Conferir um código TOTP exige **recalculá-lo a partir do segredo** a cada
+tentativa. Um hash tornaria a verificação impossível: não há o que comparar.
+
+O que protege a coluna, então, é a chave da cifra morar **fora do banco**, em
+`MFA_SECRET_ENCRYPTION_KEY`. Um dump da tabela, sozinho, não gera código nenhum.
+
+**Não existe chave default, e não há nenhuma no repositório.** Uma chave
+versionada cifraria e decifraria sem erro, o sistema pareceria funcionar, e o
+segredo estaria protegido contra exatamente ninguém — o repositório é justamente
+onde ela estaria. Sem a variável, o recurso se declara indisponível e o login
+segue intocado; nenhum boot é derrubado por causa dela.
+
+⚠️ **Trocar a chave torna ilegíveis os segredos já cadastrados.** Quem tiver MFA
+ativo precisa cadastrar de novo — e, até lá, não entra. É o preço de a chave
+morar fora do banco, e é consciente.
+
+### Cadastrar não liga
+
+São dois passos: `/auth/mfa/setup` gera o segredo e o guarda cifrado;
+`/auth/mfa/activate` só liga depois que um código prova que o aplicativo pareou.
+
+Ligar no cadastro trancaria quem lesse o QR errado — e a conta trancada é o
+medo que faz as pessoas não ativarem o recurso.
+
+O banco recusa o par impossível: `CHECK (mfa_enabled = false OR mfa_secret IS
+NOT NULL)`. A regra caberia só no código, e caberia bem até o dia em que um
+caminho de escrita novo esquecesse dela.
+
+### O login vira dois tempos, e 2xx sempre significa sessão
+
+Com o segundo fator ativo, `/auth/login` responde **403** com um desafio, e não
+200 com campos vazios. A regra que isso preserva é: **qualquer 2xx no
+`/auth/login` significa que a sessão existe**.
+
+Não é preciosismo. Com um 200 de desafio, um consumidor que gravasse
+`access_token`/`refresh_token` sem conferir gravaria `undefined` — que foi
+exatamente o defeito corrigido no interceptor do front em 26/08. O status
+diferente torna esse erro **impossível**, em vez de improvável.
+
+O token do desafio é **opaco**, não um sexto tipo de JWT: um JWT novo
+compartilharia a chave RS256 e o `iss` dos outros cinco, e a separação passaria
+a depender de todo consumidor futuro de `decode_token` lembrar de conferir o
+claim `type`.
+
+### Ativar e desligar despejam as sessões abertas
+
+`/auth/refresh` confere tipo, correspondência e status da conta — **nunca
+`mfa_enabled`**. Sem apagar o refresh na ativação, quem já tivesse a senha e uma
+sessão aberta seguiria renovando access tokens por até sete dias sem jamais ver
+um código: o recurso falharia exatamente no caso em que alguém o liga por
+desconfiar que foi comprometido.
+
+⚠️ Isso **não** invalida os access tokens já emitidos — ver a dívida com gatilho
+correspondente.
+
+### Nada falha para o lado de deixar entrar
+
+Redis fora do ar, segredo ilegível, conta desativada entre a senha e o código:
+tudo vira recusa. Um segundo fator que se desliga sozinho quando uma dependência
+cai não é um segundo fator — e a dependência cai justamente quando alguém está
+atacando.
+
+### Perdeu o celular
+
+**Não há códigos de recuperação**, por decisão de escopo: com cinco pessoas de
+staff e o TI dentro de casa, um script operado por nós cobre o caso sem inventar
+mais uma superfície de credencial.
+
+A saída é `backend/scripts/desliga_mfa.py`, rodado à mão, com dry-run por padrão
+e rastro em `audit_logs`. A API **não tem** esse caminho, e não deve ter:
+`DELETE /auth/mfa` exige a senha *e* uma sessão — nenhuma das duas quem está
+trancado fora possui — e um endpoint de admin para desligar o fator de terceiros
+seria uma forma de remover a proteção de outra pessoa.
+
+⚠️ **`redefine_senha.py` não resolve esse caso.** Com `mfa_enabled = true`, a
+senha nova não destranca nada: o login segue pedindo o código depois dela. Para
+"perdi o celular", é o `desliga_mfa`. Para "perdi os dois", os dois, nessa ordem.
+
 ## Equipamentos do chamado
 
 **Um chamado aceita vários equipamentos** (teto de 20). Antes era um só, e o
@@ -596,7 +683,8 @@ por inércia.
 | **Chat sem backplane** | O `ConnectionManager` é memória do processo, então o uvicorn sobe com **1 worker**. No volume atual um worker assíncrono dá conta — o bcrypt já saiu do event loop. | For preciso voltar a 2 workers. O backplane Redis vem **antes**, e o lock do auto-close já está no lugar esperando. |
 | **Protocolo por leitura-e-escrita** | A ordenação passou a ser numérica, o que remove a trava do 10.000º chamado. A corrida entre dois cadastros simultâneos continua mitigada por retentativa, não eliminada. | Colisão de protocolo começar a aparecer no log. A saída é uma sequência do PostgreSQL por ano — que resolve os dois de uma vez. |
 | **Prazo de resposta sem campo por ciclo** | Reabrir renova só o prazo de resolução. A exibição foi corrigida (o chip diz "Respondido" em vez de mentir "Vencido"), mas o ciclo novo não ganha prazo de resposta próprio. | A operação precisar medir a resposta do ciclo reaberto. Exige um campo por ciclo, não por chamado. |
-| **Sem MFA para contas de staff** | Equipe pequena e conhecida. A guarda que existe hoje impede que técnico anonimize administrador. | Houver conta de staff fora do time de TI — ou o phishing deixar de ser hipótese. |
+| ~~**Sem MFA para contas de staff**~~ | **Quitada em 26/08/2026** — ver "Segundo fator" abaixo. | — |
+| **Access token sobrevive à revogação de sessão** | Ativar ou desligar o segundo fator apaga o refresh, despejando as sessões. Os access tokens já emitidos, porém, valem até o próprio vencimento: a exposição cai de 7 dias para 8 h, não para zero. Fechar de verdade pede um `sessions_valid_after` conferido no `get_current_user`. | Houver incidente real de sessão comprometida — ou o TTL do access subir. |
 | **Contador de artigo útil sem voto identificado** | `POST /kb/articles/{id}/feedback` incrementa sem registrar quem votou; o mesmo usuário incrementa em laço. Não vaza nada. | O número for usado para decidir alguma coisa. |
 | **Antivírus aceita quando está fora do ar** | Bloquear upload com o ClamAV indisponível derrubaria o anexo por falha de infraestrutura. Hoje o estado é reportado, não mais silencioso, e há script de revarredura. | O ClamAV estiver no ambiente e estável — aí bloquear passa a custar pouco. |
 

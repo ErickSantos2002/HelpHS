@@ -7,6 +7,118 @@ O changelog do produto (o que o cliente vê) fica em
 
 ---
 
+## 26/08/2026 (tarde) — Segundo fator para o staff, e um bug de sessão que ninguém tinha reportado
+
+Primeira das cinco frentes de endurecimento. Começou por um diagnóstico do
+código atual — não da memória da auditoria — e o diagnóstico achou coisa que
+não estava na lista.
+
+### O bug que apareceu sem ser procurado
+
+Lendo o contrato de autenticação para planejar o MFA: o `/auth/refresh` devolve
+`AccessTokenResponse` — três campos, **sem `refresh_token`**. O front declarava
+que havia. O genérico do axios é uma afirmação sobre o runtime, não uma
+verificação, então o TypeScript não tinha como reprovar: `data.refresh_token`
+era `undefined`, e `localStorage.setItem` grava isso como a **string
+`"undefined"`**, que é truthy e passa pela guarda.
+
+O efeito não aparecia na renovação, e sim na seguinte. O refresh promete sete
+dias; entregava **dezesseis horas** — uma renovação para gravar o lixo, outra
+para morrer nele. Como o sintoma é "fui deslogado" e a reação é logar de novo,
+o que reescreve o localStorage correto, isso podia nunca ter chegado como bug.
+
+Os três mocks de `api.test.ts` descreviam um servidor que não existe, então o
+interceptor tinha 100% de cobertura defendendo o defeito. Corrigidos. Entrou
+também um teste no backend que fixa o **conjunto** de campos da resposta, não só
+a presença — foi na folga entre as duas coisas que o front supôs um campo por
+tempo indeterminado.
+
+Aproveitei para varrer os 18 serviços do front contra os schemas do backend
+procurando a mesma classe de defeito. Achou mais dois, **ainda não corrigidos**:
+
+| onde | o quê |
+|---|---|
+| filtro de usuários | a opção "Suspenso" manda `status=suspended`, que não existe no enum — 422, a lista não carrega |
+| calendário | `description: null` é ignorado no PATCH; não dá para apagar a descrição de um evento |
+
+### O segundo fator
+
+Antes de escrever, submeti o desenho do contrato de login a um painel
+adversarial. **Ele derrubou a minha proposta**, e o motivo é real: o
+`/auth/refresh` confere tipo, correspondência e status da conta — **nunca
+`mfa_enabled`**. Sem apagar o refresh na ativação, quem já tivesse a senha e uma
+sessão aberta seguiria renovando token por sete dias sem nunca ver um código. O
+recurso falharia exatamente no caso em que alguém liga o MFA por desconfiar que
+foi comprometido.
+
+O que entrou, então:
+
+- **Segredo cifrado, não hasheado.** Conferir o código exige recalculá-lo, então
+  o servidor precisa recuperá-lo. O que protege é a chave morar fora do banco.
+  Não existe chave default: uma chave versionada cifraria sem proteger de
+  ninguém. Sem a variável, o recurso se declara indisponível e o login segue
+  igual — nenhum boot é derrubado, ao contrário do que o guard de `CORS_ORIGINS`
+  já custou em deploy.
+- **Desafio em 403, não 200.** Com um 200 de desafio, um front que gravasse os
+  tokens sem conferir reproduziria o bug de cima. O status diferente torna o
+  erro impossível, não improvável.
+- **Token de desafio opaco**, não um sexto tipo de JWT que dependeria de todo
+  consumidor futuro de `decode_token` lembrar de conferir o `type`.
+- **Nada falha para o lado de deixar entrar**: Redis fora, segredo ilegível,
+  conta desativada no meio do caminho — tudo vira recusa, e há teste para cada.
+- **`CHECK` no banco** proibindo `mfa_enabled` ligado sem segredo: esse par é
+  uma conta trancada, e a regra caberia só no código até o dia em que um caminho
+  de escrita novo esquecesse dela.
+
+### O teste que mentia
+
+O melhor retorno do dia veio de uma mutação que **sobreviveu**. Escrevi um teste
+chamado "o mesmo desafio não serve duas vezes" e ele passava — mas mutando o
+`consumir` para devolver sempre `True`, a suíte continuou verde. Ele provava o
+antirreplay, não o uso único: sequencialmente, a segunda tentativa já morre na
+leitura, porque o `DEL` apagou a chave. O retorno do `DEL` só importa numa
+**corrida**.
+
+Corrigir exigiu duas coisas: um teste com `asyncio.gather` e dar ao Redis falso
+um `await asyncio.sleep(0)` em toda operação — sem ceder o event loop, duas
+requisições sob `gather` correm sequencialmente e a corrida não acontece. Sem
+isso eu teria commitado um teste que promete uma coisa e prova outra.
+
+Dezenove mutações ao longo do dia, dezenove pegas depois disso.
+
+### Decisões de escopo, ditas em voz alta
+
+- **Sem códigos de recuperação.** A saída de emergência é o
+  `scripts/desliga_mfa.py`, provado rodando em cinco cenários contra Postgres
+  real. Com cinco pessoas de staff e o TI dentro de casa, um script operado por
+  nós cobre o caso do celular perdido sem inventar mais uma superfície de
+  credencial.
+- **Sem leitor de QR.** Exigiria dependência nova no front para uma tela usada
+  uma vez na vida por cinco pessoas. O segredo sai agrupado de quatro em quatro
+  e o link `otpauth://` abre o app direto no celular.
+- **Resíduo assumido:** apagar o refresh não invalida os access tokens já
+  emitidos. A exposição cai de sete dias para 8 horas, **não para zero**. Fechar
+  de verdade pede algo como `sessions_valid_after` no `get_current_user` — é a
+  correção certa e é arquitetura nova, então fica como proposta separada.
+
+### Antes de subir
+
+1. **`MFA_SECRET_ENCRYPTION_KEY` no EasyPanel**, gerada com
+   `Fernet.generate_key()`. Trocar essa chave depois torna ilegíveis os segredos
+   já cadastrados.
+2. **Front primeiro.** Se o backend subir antes, quem tiver ativado o MFA recebe
+   um 403 que o front antigo não sabe ler.
+
+| | Antes | Depois |
+|---|---|---|
+| Testes backend | 679 | **742** |
+| Testes frontend | 305 | **314** |
+| Cobertura backend | 86,5% | **86,9%** |
+| Migrations | 22 | **23** |
+| Dependências backend | — | `+pyotp`, `cryptography` pinada |
+
+---
+
 ## 26/08/2026 — Fecho da auditoria do backend
 
 Encerra o ciclo aberto em 24/08 com um code review de sistema inteiro: 17
