@@ -638,7 +638,15 @@ class ChatMessage(Base):
     ticket_id: Mapped[uuid.UUID] = mapped_column(
         UUID(as_uuid=True), ForeignKey("tickets.id", ondelete="CASCADE"), index=True
     )
-    sender_id: Mapped[uuid.UUID] = mapped_column(UUID(as_uuid=True), ForeignKey("users.id"))
+    # Nulo quando quem falou nao foi gente: a Helo (`is_ai`) e as mensagens
+    # automaticas do sistema. A alternativa era criar um usuario "Helo" no
+    # banco, e ele apareceria na lista de tecnicos, poderia ser atribuido a
+    # chamado e receberia e-mail de notificacao -- tres problemas novos para
+    # resolver um. Mesmo padrao ja adotado em `ticket_history.user_id`, onde
+    # nulo significa "foi o sistema".
+    sender_id: Mapped[uuid.UUID | None] = mapped_column(
+        UUID(as_uuid=True), ForeignKey("users.id"), nullable=True
+    )
     content: Mapped[str] = mapped_column(Text, nullable=False)
     is_system: Mapped[bool] = mapped_column(Boolean, default=False)
     is_ai: Mapped[bool] = mapped_column(Boolean, default=False)
