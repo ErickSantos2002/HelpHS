@@ -735,3 +735,71 @@ async def test_sugestao_traz_os_clientes_para_o_admin_conferir(db, cliente_http)
     sugestao = resp.json()[0]
     assert sugestao["client_count"] == 2
     assert sorted(c["name"] for c in sugestao["clients"]) == ["Dois", "Um"]
+
+
+# ── Limpar campo opcional do grupo ────────────────────────────
+#
+# Mesmo defeito que a agenda tinha (`f8e9554`): `is not None` não distingue
+# "campo ausente" de "campo enviado como nulo", então o nulo que o front manda
+# ao limpar o campo era ignorado e o texto antigo reaparecia.
+
+
+@pytest.mark.asyncio
+async def test_descricao_nula_apaga_a_descricao_do_grupo(db, cliente_http):
+    g = await _grupo(db)
+    g.description = "texto antigo"
+    await db.commit()
+
+    resposta = await cliente_http.put(f"/api/v1/groups/{g.id}", json={"description": None})
+
+    assert resposta.status_code == 200
+    await db.refresh(g)
+    assert g.description is None
+
+
+@pytest.mark.asyncio
+async def test_notas_nulas_apagam_as_notas_do_grupo(db, cliente_http):
+    g = await _grupo(db)
+    g.notes = "nota antiga"
+    await db.commit()
+
+    resposta = await cliente_http.put(f"/api/v1/groups/{g.id}", json={"notes": None})
+
+    assert resposta.status_code == 200
+    await db.refresh(g)
+    assert g.notes is None
+
+
+@pytest.mark.asyncio
+async def test_campo_ausente_nao_e_apagado(db, cliente_http):
+    """O que separa PATCH de PUT: não enviar não é o mesmo que enviar nulo.
+
+    Sem esta distinção, atualizar só o nome limparia descrição e notas junto.
+    """
+    g = await _grupo(db)
+    g.description = "fica"
+    g.notes = "fica também"
+    await db.commit()
+
+    resposta = await cliente_http.put(f"/api/v1/groups/{g.id}", json={"name": "Nome Novo"})
+
+    assert resposta.status_code == 200
+    await db.refresh(g)
+    assert g.name == "Nome Novo"
+    assert g.description == "fica"
+    assert g.notes == "fica também"
+
+
+@pytest.mark.asyncio
+async def test_nulo_no_nome_continua_ignorado(db, cliente_http):
+    """`name` é NOT NULL: aceitar nulo trocaria o bug por erro de integridade.
+
+    Este teste reprova quem "uniformizar" os três campos com `model_fields_set`.
+    """
+    g = await _grupo(db, nome="Nome Original")
+
+    resposta = await cliente_http.put(f"/api/v1/groups/{g.id}", json={"name": None})
+
+    assert resposta.status_code == 200
+    await db.refresh(g)
+    assert g.name == "Nome Original"
