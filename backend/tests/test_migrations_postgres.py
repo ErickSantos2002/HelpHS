@@ -220,6 +220,10 @@ async def test_consultas_do_diagnostico_executam(sessao, banco):
         _SERIE_ENTRE_PRODUTOS,
     )
 
+    # O levantamento da fusão entra aqui pelo mesmo motivo: ele também roda uma
+    # vez, à mão, contra produção — e ainda por cima antes de um DELETE.
+    from scripts.funde_empresas_duplicadas import _LEVANTAMENTO
+
     for consulta in (
         _CNPJ_DUPLICADO,
         _DETALHE_DAS_DUPLICADAS,
@@ -228,5 +232,6 @@ async def test_consultas_do_diagnostico_executam(sessao, banco):
         _PANORAMA_CLIENTES,
         _COLEGAS_POR_CNPJ,
         _CNPJ_INVALIDO,
+        _LEVANTAMENTO,
     ):
         await sessao.execute(text(consulta))
