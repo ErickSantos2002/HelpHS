@@ -7,6 +7,8 @@ import {
   resendVerificationApi,
   forgotPasswordApi,
   resetPasswordApi,
+  isMfaChallenge,
+  verifyMfaApi,
 } from "../../services/authService";
 import { api } from "../../services/api";
 
@@ -135,5 +137,75 @@ describe("resetPasswordApi", () => {
       token: "tok123",
       password: "NovaSenha@1",
     });
+  });
+});
+
+// ── Segundo fator ─────────────────────────────────────────────
+
+/**
+ * O desafio chega como 403 — mesmo status de "confirme seu e-mail" e de "conta
+ * inativa". Distinguir pelo corpo, e não pelo status, é o que permite que a
+ * tela de login continue tratando os outros dois casos como sempre tratou.
+ */
+describe("loginApi — desafio de segundo fator", () => {
+  function erro403(data: unknown) {
+    return { response: { status: 403, data } };
+  }
+
+  it("converte o desafio em valor de retorno em vez de erro", async () => {
+    mockPost.mockRejectedValue(
+      erro403({ detail: "Informe o código.", mfa_required: true, mfa_token: "abc", expires_in: 300 }),
+    );
+
+    const resultado = await loginApi({ email: "a@b.com", password: "x" });
+
+    expect(isMfaChallenge(resultado)).toBe(true);
+    expect(resultado).toMatchObject({ mfa_token: "abc" });
+  });
+
+  it("não confunde token com sessão", async () => {
+    mockPost.mockResolvedValue({
+      data: { access_token: "a", refresh_token: "r", token_type: "bearer" },
+    });
+
+    expect(isMfaChallenge(await loginApi({ email: "a@b.com", password: "x" }))).toBe(false);
+  });
+
+  it("deixa passar o 403 de e-mail não confirmado", async () => {
+    // Sem `mfa_required` no corpo, o 403 continua sendo erro — senão a tela de
+    // login perderia a mensagem que manda reenviar a confirmação.
+    mockPost.mockRejectedValue(erro403({ detail: "Confirme seu e-mail para ativar a conta." }));
+
+    await expect(loginApi({ email: "a@b.com", password: "x" })).rejects.toBeTruthy();
+  });
+
+  it("deixa passar um 403 que diz precisar de MFA mas não manda o token", async () => {
+    // Corpo pela metade é resposta quebrada, não desafio: tratar como desafio
+    // levaria a tela a um passo que não tem como ser concluído.
+    mockPost.mockRejectedValue(erro403({ mfa_required: true }));
+
+    await expect(loginApi({ email: "a@b.com", password: "x" })).rejects.toBeTruthy();
+  });
+
+  it("deixa passar 401 de senha errada", async () => {
+    mockPost.mockRejectedValue({ response: { status: 401, data: { detail: "E-mail ou senha incorretos." } } });
+
+    await expect(loginApi({ email: "a@b.com", password: "x" })).rejects.toBeTruthy();
+  });
+});
+
+describe("verifyMfaApi", () => {
+  it("troca desafio e código pelos tokens", async () => {
+    mockPost.mockResolvedValue({
+      data: { access_token: "novo", refresh_token: "r", token_type: "bearer" },
+    });
+
+    const tokens = await verifyMfaApi("desafio-1", "123456");
+
+    expect(mockPost).toHaveBeenCalledWith("/auth/mfa/verify", {
+      mfa_token: "desafio-1",
+      code: "123456",
+    });
+    expect(tokens.access_token).toBe("novo");
   });
 });
