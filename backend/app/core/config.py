@@ -204,6 +204,19 @@ class Settings(BaseSettings):
     # chaves de novo. Com a flag, desligar é reversível.
     llm_enabled: bool = True
 
+    # Interruptor SÓ da Helô — o atendimento por IA que fala com o cliente.
+    #
+    # Separado do `llm_enabled` de propósito: desligar a Helô num dia ruim não
+    # pode apagar junto a classificação automática e o "melhorar redação", que
+    # são ferramentas do técnico e ninguém pediu para tirar. Quem quiser cortar
+    # tudo continua tendo o `LLM_ENABLED`.
+    #
+    # DESLIGADA por padrão, ao contrário do `llm_enabled`, e pelo mesmo
+    # raciocínio invertido: aqui a mudança silenciosa seria a IA começar a
+    # FALAR COM O CLIENTE no deploy seguinte, sem ninguém ter pedido. Ligar é
+    # decisão, não default.
+    helo_enabled: bool = False
+
     openai_api_key: str = ""
     openai_model: str = "gpt-4o-mini"
     openai_temperature: float = 0.3

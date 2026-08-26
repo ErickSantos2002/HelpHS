@@ -231,6 +231,13 @@ class User(Base):
     )
     client_notes: Mapped[str | None] = mapped_column(Text, nullable=True)
 
+    # Este cliente aceita ser atendido por IA. Desligado aqui, a Helo nao fala
+    # com ele em chamado nenhum -- ha empresa que nao quer robo, e a alternativa
+    # (pedir para o atendente lembrar de calar a IA em cada chamado) nao e
+    # alternativa. Ligado por padrao: negar atendimento a quem nunca pediu para
+    # ser excluido seria decidir por ele.
+    ai_enabled: Mapped[bool] = mapped_column(Boolean, default=True, nullable=False)
+
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now())
     updated_at: Mapped[datetime] = mapped_column(
         DateTime(timezone=True), server_default=func.now(), onupdate=func.now()
@@ -459,6 +466,16 @@ class Ticket(Base):
     product_id: Mapped[uuid.UUID | None] = mapped_column(
         UUID(as_uuid=True), ForeignKey("products.id")
     )
+
+    # A IA pode atuar NESTE chamado. É o interruptor que o técnico usa quando
+    # entra numa conversa e quer a Helô calada dali em diante — o cliente
+    # demorou a responder, ou o assunto virou algo que ela não deve tocar.
+    #
+    # Vale para a IA inteira, não só para a Helô: desligado aqui, nem a
+    # classificação automática nem a sugestão de resposta olham este chamado.
+    # "Desliga a IA neste chamado" tem que significar isso, senão a promessa
+    # da tela é maior que a do código.
+    ai_enabled: Mapped[bool] = mapped_column(Boolean, default=True, nullable=False)
 
     # SLA
     sla_config_id: Mapped[uuid.UUID | None] = mapped_column(

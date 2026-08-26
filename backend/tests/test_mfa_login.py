@@ -16,8 +16,8 @@ import asyncio
 import uuid
 from unittest.mock import AsyncMock, MagicMock, patch
 
-import pytest
 import pyotp
+import pytest
 from httpx import ASGITransport, AsyncClient
 from passlib.context import CryptContext
 
