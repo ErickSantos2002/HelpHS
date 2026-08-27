@@ -10,11 +10,22 @@ volta. Ver o desenho em
 `docs/superpowers/specs/2026-08-11-helo-atendimento-ia-design.md`.
 """
 
+import uuid
 from collections.abc import Sequence
-from datetime import datetime
+from datetime import UTC, datetime
+
+from sqlalchemy import select
+from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.core.config import get_settings
-from app.models.models import Ticket, User
+from app.models.models import (
+    ChatMessage,
+    Equipment,
+    Product,
+    Ticket,
+    TicketStatus,
+    User,
+)
 
 # O cálculo de horário comercial vem do motor de SLA, inclusive sendo privado.
 # Uma cópia da regra aqui é o defeito que este projeto já pagou caro: doze
@@ -198,3 +209,68 @@ def quer_humano(texto: str) -> bool:
     """
     limpo = texto.strip().lower()
     return any(pedido in limpo for pedido in _PEDIDOS_DE_HUMANO)
+
+
+async def abre_triagem(
+    db: AsyncSession,
+    ticket: Ticket,
+    cliente: User,
+    equipamentos: Sequence[Equipment],
+) -> bool:
+    """
+    A Helô se apresenta no chamado recém-aberto e faz as três perguntas.
+
+    Grava a mensagem e move o chamado para "Em andamento". **Não** dá commit —
+    quem abriu a transação é o `create_ticket`, e a saudação precisa nascer no
+    mesmo commit do chamado: metade das duas coisas gravada é um chamado que
+    diz "Em andamento" sem ninguém ter falado, ou uma fala em chamado que não
+    existe.
+
+    Args:
+        equipamentos: os aparelhos já carregados pelo chamado. Vêm de fora
+            porque acessar `ticket.equipments` aqui dispararia lazy load, que
+            em SQLAlchemy async estoura com MissingGreenlet.
+
+    Returns:
+        True se ela falou. False quando qualquer interruptor está desligado —
+        e aí o chamado segue "Aberto", exatamente como antes dela existir.
+    """
+    if not helo_pode_falar(ticket, cliente):
+        return False
+
+    produto = None
+    if ticket.product_id is not None:
+        # SELECT explícito em vez de `ticket.product`: o relacionamento não foi
+        # carregado, e o lazy load do async estoura em vez de consultar.
+        produto = (
+            await db.execute(select(Product.name).where(Product.id == ticket.product_id))
+        ).scalar_one_or_none()
+
+    db.add(
+        ChatMessage(
+            id=uuid.uuid4(),
+            ticket_id=ticket.id,
+            # Nulo, e não um usuário "Helô" no banco: ele apareceria na lista de
+            # técnicos, poderia ser atribuído a chamado e receberia e-mail.
+            sender_id=None,
+            content=monta_saudacao(
+                cliente_nome=cliente.name,
+                produto=produto,
+                series=[e.serial_number for e in equipamentos if e.serial_number],
+            ),
+            is_system=False,
+            is_ai=True,
+            created_at=datetime.now(UTC),
+        )
+    )
+
+    # "Em andamento" por decisão do cliente em 26/08, em vez de um status novo
+    # `ai_handling`. O efeito colateral está registrado no desenho: a coluna
+    # passa a incluir chamado sem técnico atribuído.
+    #
+    # E NÃO se toca no SLA aqui: `register_first_response` ignora `is_ai`, então
+    # o relógio de primeira resposta continua correndo até um humano falar. Se
+    # a fala dela zerasse o relógio, o indicador viraria 100% permanente e
+    # mediria a velocidade de um robô, que é sempre a mesma.
+    ticket.status = TicketStatus.in_progress
+    return True

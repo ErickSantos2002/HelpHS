@@ -61,6 +61,7 @@ from app.schemas.ticket import (
     TicketStatusUpdate,
     TicketUpdate,
 )
+from app.services.helo import abre_triagem
 from app.services.llm import classify_ticket
 from app.services.notifications import commit_e_notificar, notify
 from app.services.ticket_lifecycle import (
@@ -289,7 +290,10 @@ async def _set_ticket_equipments(
 def _record_history(
     db: AsyncSession,
     ticket_id: uuid.UUID,
-    user_id: uuid.UUID,
+    # Nulo quando quem agiu foi o sistema — a Helô movendo o chamado para "Em
+    # andamento". A coluna já aceitava (`TicketHistory.user_id` é nullable); só
+    # a anotação aqui era estreita demais.
+    user_id: uuid.UUID | None,
     field: str,
     # Aceita UUID porque varios campos de historico sao id: o corpo faz str()
     # antes de gravar, entao a anotacao estreita era a unica coisa errada.
@@ -355,6 +359,11 @@ async def create_ticket(
             sla_response_breach=False,
             sla_resolve_breach=False,
             sla_total_paused_ms=0,
+            # Explícito, e não pelo `default=True` da coluna: o default do ORM
+            # só vale no INSERT, e a Helô é consultada ANTES do flush. Sem esta
+            # linha `ticket.ai_enabled` é None no objeto em memória, `bool(None)`
+            # é falso, e ela nunca falaria — em produção, silenciosamente.
+            ai_enabled=True,
             auto_closed=False,
             reopen_count=0,
             created_at=ts,
@@ -365,6 +374,18 @@ async def create_ticket(
         db.add(ticket)
         await _set_ticket_equipments(db, ticket, body.equipment_ids, actor)
         _record_history(db, ticket.id, actor.id, "created", None, "open")
+
+        # A Helô se apresenta e faz as três perguntas de triagem. Dentro do
+        # mesmo commit do chamado de propósito: metade das duas coisas gravada
+        # seria um chamado "Em andamento" sem ninguém ter falado, ou uma fala
+        # num chamado que não existe.
+        #
+        # Só para cliente. Staff abrindo chamado em nome de alguém não precisa
+        # ser triado por robô, e a saudação chamaria o staff pelo nome errado.
+        if actor.role == UserRole.client and await abre_triagem(
+            db, ticket, actor, list(ticket.equipments)
+        ):
+            _record_history(db, ticket.id, None, "status", "open", "in_progress", "Helô")
         _audit(db, AuditAction.create, actor.id, ticket.id)
         await notify(
             db,

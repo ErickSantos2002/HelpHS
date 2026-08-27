@@ -1250,3 +1250,87 @@ async def test_chamado_sem_resposta_expoe_o_campo_nulo(patch_redis):
     assert resp.status_code == 200
     assert "sla_first_response" in resp.json()
     assert resp.json()["sla_first_response"] is None
+
+
+@pytest.mark.asyncio
+async def test_chamado_de_cliente_nasce_com_a_helo_falando(patch_redis, monkeypatch):
+    """
+    O gancho de verdade: abrir chamado pela API dispara a saudação.
+
+    Os outros testes da Helô exercitam `abre_triagem` direto. Este prova o que
+    nenhum deles prova — que alguém a CHAMA. O módulo ficou dois dias escrito e
+    isolado, sem ninguém importar, e a suíte inteira passava.
+    """
+    from app.core.database import get_db
+    from app.models.models import ChatMessage
+    from app.services import helo
+
+    monkeypatch.setattr(helo, "get_settings", lambda: MagicMock(helo_enabled=True))
+
+    creator = _mock_user(UserRole.client)
+    db_session = _db_sequence(None)
+    db_session.refresh = AsyncMock()
+
+    async def _gen():
+        yield db_session
+
+    app.dependency_overrides[get_db] = _gen
+    _override_user(creator)
+
+    async with AsyncClient(transport=ASGITransport(app=app), base_url="http://test") as c:
+        resp = await c.post(
+            "/api/v1/tickets",
+            json={
+                "title": "Equipamento com falha",
+                "description": "O bafômetro não liga",
+                "category": "hardware",
+            },
+        )
+
+    assert resp.status_code == 201, resp.text
+
+    adicionados = [c.args[0] for c in db_session.add.call_args_list]
+    falas = [o for o in adicionados if isinstance(o, ChatMessage)]
+    assert len(falas) == 1, "a Helô devia ter falado uma vez"
+    assert falas[0].is_ai is True
+    assert falas[0].sender_id is None
+    assert "Sou a Helô" in falas[0].content
+
+
+@pytest.mark.asyncio
+async def test_chamado_aberto_por_staff_nao_e_triado(patch_redis, monkeypatch):
+    """
+    Staff abrindo chamado em nome de alguém não é triado por robô.
+
+    E a saudação chamaria o staff pelo primeiro nome, como se ele fosse o
+    cliente — o tipo de detalhe que só aparece na frente do usuário.
+    """
+    from app.core.database import get_db
+    from app.models.models import ChatMessage
+    from app.services import helo
+
+    monkeypatch.setattr(helo, "get_settings", lambda: MagicMock(helo_enabled=True))
+
+    tecnico = _mock_user(UserRole.technician)
+    db_session = _db_sequence(None)
+    db_session.refresh = AsyncMock()
+
+    async def _gen():
+        yield db_session
+
+    app.dependency_overrides[get_db] = _gen
+    _override_user(tecnico)
+
+    async with AsyncClient(transport=ASGITransport(app=app), base_url="http://test") as c:
+        resp = await c.post(
+            "/api/v1/tickets",
+            json={
+                "title": "Equipamento com falha",
+                "description": "O bafômetro não liga",
+                "category": "hardware",
+            },
+        )
+
+    assert resp.status_code == 201, resp.text
+    adicionados = [c.args[0] for c in db_session.add.call_args_list]
+    assert not [o for o in adicionados if isinstance(o, ChatMessage)]

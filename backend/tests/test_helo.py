@@ -11,13 +11,16 @@ As settings são trocadas por um objeto de mentira em vez de mexer no cache do
 teste que estraga o vizinho é pior que teste que falta.
 """
 
+import uuid
 from datetime import datetime
-from unittest.mock import MagicMock
+from unittest.mock import AsyncMock, MagicMock
 
 import pytest
 
+from app.models.models import TicketStatus
 from app.services import helo
 from app.services.helo import (
+    abre_triagem,
     helo_pode_falar,
     monta_encerramento,
     monta_saudacao,
@@ -229,3 +232,110 @@ def test_pedido_de_humano_e_reconhecido(pedido):
 def test_resposta_normal_nao_escala(resposta):
     """A triagem não pode terminar por engano na primeira resposta útil."""
     assert quer_humano(resposta) is False
+
+
+# ── A triagem que ela abre ────────────────────────────────────
+
+
+def _db_com_produto(nome="Phoebus"):
+    """Sessão que responde ao SELECT do nome do produto e guarda o que foi add."""
+    sessao = AsyncMock()
+    resultado = MagicMock()
+    resultado.scalar_one_or_none.return_value = nome
+    sessao.execute = AsyncMock(return_value=resultado)
+    sessao.add = MagicMock()
+    return sessao
+
+
+def _chamado(**kwargs):
+    t = MagicMock()
+    t.id = uuid.uuid4()
+    t.product_id = uuid.uuid4()
+    t.status = TicketStatus.open
+    t.ai_enabled = True
+    t.sla_first_response = None
+    for k, v in kwargs.items():
+        setattr(t, k, v)
+    return t
+
+
+def _equipamento(serial):
+    e = MagicMock()
+    e.serial_number = serial
+    return e
+
+
+@pytest.mark.asyncio
+async def test_triagem_grava_a_fala_dela_e_move_para_em_andamento(helo_ligada):
+    db = _db_com_produto()
+    ticket = _chamado()
+    cliente = _cliente()
+    cliente.name = "Suelen Fernandes"
+
+    falou = await abre_triagem(db, ticket, cliente, [_equipamento("WATFR01-73041")])
+
+    assert falou is True
+    (mensagem,) = [m for m in (c.args[0] for c in db.add.call_args_list)]
+    assert mensagem.is_ai is True
+    assert mensagem.is_system is False
+    assert mensagem.sender_id is None, "remetente da Helô é nulo, não um usuário no banco"
+    assert "Sou a Helô" in mensagem.content
+    assert "WATFR01-73041" in mensagem.content
+    assert ticket.status is TicketStatus.in_progress
+
+
+@pytest.mark.asyncio
+async def test_a_fala_dela_nao_carimba_primeira_resposta(helo_ligada):
+    """
+    O relógio do SLA continua correndo até um humano falar.
+
+    Se a resposta dela zerasse o relógio, TODO chamado teria primeira resposta
+    em segundos e o indicador viraria 100% permanente — mediria a velocidade de
+    um robô, que é sempre a mesma, em vez do atendimento da equipe.
+    """
+    db = _db_com_produto()
+    ticket = _chamado()
+
+    await abre_triagem(db, ticket, _cliente(), [])
+
+    assert ticket.sla_first_response is None
+
+
+@pytest.mark.asyncio
+async def test_com_a_helo_desligada_o_chamado_segue_aberto(helo_desligada):
+    """Sem ela, tudo se comporta exatamente como antes de ela existir."""
+    db = _db_com_produto()
+    ticket = _chamado()
+
+    falou = await abre_triagem(db, ticket, _cliente(), [])
+
+    assert falou is False
+    db.add.assert_not_called()
+    assert ticket.status is TicketStatus.open
+
+
+@pytest.mark.asyncio
+async def test_chamado_com_a_ia_desligada_nao_recebe_saudacao(helo_ligada):
+    """O interruptor do técnico vale desde a abertura."""
+    db = _db_com_produto()
+    ticket = _chamado(ai_enabled=False)
+
+    assert await abre_triagem(db, ticket, _cliente(), []) is False
+    assert ticket.status is TicketStatus.open
+
+
+@pytest.mark.asyncio
+async def test_chamado_sem_produto_nao_consulta_o_banco(helo_ligada):
+    """
+    Sem `product_id` não há nome de produto para buscar.
+
+    Consultar assim mesmo devolveria None e a saudação sairia igual — o teste
+    existe porque a consulta inútil só apareceria como lentidão, nunca como
+    erro.
+    """
+    db = _db_com_produto()
+    ticket = _chamado(product_id=None)
+
+    await abre_triagem(db, ticket, _cliente(), [])
+
+    db.execute.assert_not_called()
