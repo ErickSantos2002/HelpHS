@@ -202,6 +202,27 @@ async def _authenticate_ws(token: str, db: AsyncSession) -> User | None:
     return user
 
 
+def _exige_ia_ligada() -> None:
+    """Recusa a chamada quando a IA está desligada — antes de tocar no banco.
+
+    A mensagem é **diferente** da de provedor fora do ar, de propósito. Os três
+    endpoints devolviam o mesmo "tente novamente mais tarde" nos dois casos, e
+    com a flag desligada isso manda esperar por algo que não volta sozinho. Quem
+    opera precisa distinguir "o provedor caiu" de "alguém desligou".
+
+    Sendo dependência, roda antes do corpo do handler: com a IA desligada não há
+    por que carregar chamado e mensagens do banco para no fim recusar.
+
+    Lê a configuração na chamada, não no import — o `llm.py` faz o contrário, e
+    por isso lá a flag só tem efeito depois de reiniciar o contêiner.
+    """
+    if not get_settings().llm_enabled:
+        raise HTTPException(
+            status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
+            detail="O assistente de IA está desligado neste ambiente.",
+        )
+
+
 # ── REST endpoints ────────────────────────────────────────────
 
 
@@ -303,6 +324,7 @@ async def create_message(
 @router.post(
     "/tickets/{ticket_id}/suggest-reply",
     response_model=SuggestReplyResponse,
+    dependencies=[Depends(_exige_ia_ligada)],
 )
 async def suggest_ticket_reply(
     ticket_id: uuid.UUID,
@@ -356,6 +378,7 @@ async def suggest_ticket_reply(
 @router.post(
     "/tickets/{ticket_id}/improve-message",
     response_model=ImproveMessageResponse,
+    dependencies=[Depends(_exige_ia_ligada)],
 )
 async def improve_ticket_message(
     ticket_id: uuid.UUID,
@@ -384,6 +407,7 @@ async def improve_ticket_message(
 @router.post(
     "/tickets/{ticket_id}/summarize",
     response_model=ConversationSummaryResponse,
+    dependencies=[Depends(_exige_ia_ligada)],
 )
 async def summarize_ticket_conversation(
     ticket_id: uuid.UUID,

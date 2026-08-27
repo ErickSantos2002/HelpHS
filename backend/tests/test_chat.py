@@ -3,6 +3,7 @@ Tests for Chat REST endpoints (T52 — Sprint 6 integration tests).
 WebSocket is tested at the unit level; REST endpoints are fully mocked.
 """
 
+import contextlib
 import json
 import uuid
 from datetime import UTC, datetime
@@ -799,3 +800,145 @@ def test_o_websocket_recusa_mensagem_grande_sem_gravar():
 
     assert resposta["type"] == "error"
     assert gravadas == [], "a mensagem grande foi gravada mesmo assim"
+
+
+# ── IA desligada responde diferente de IA quebrada ────────────
+#
+# Os tres endpoints devolviam o MESMO 503 "tente novamente mais tarde" nos dois
+# casos. Com a flag desligada, retentar nao ajuda nunca — e quem opera o sistema
+# nao tinha como distinguir "provedor fora do ar" de "alguem desligou".
+#
+# A guarda tambem roda ANTES de qualquer consulta: com a IA desligada, carregar
+# chamado e mensagens do banco e trabalho jogado fora.
+
+
+@contextlib.contextmanager
+def _ia_desligada():
+    from app.core.config import get_settings
+
+    s = get_settings()
+    antes = s.llm_enabled
+    s.llm_enabled = False
+    try:
+        yield
+    finally:
+        s.llm_enabled = antes
+
+
+_ROTAS_DE_IA = [
+    ("suggest-reply", {}),
+    ("improve-message", {"draft": "rascunho qualquer"}),
+    ("summarize", {}),
+]
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("rota,corpo", _ROTAS_DE_IA)
+async def test_com_a_ia_desligada_a_mensagem_diz_que_esta_desligada(patch_redis, rota, corpo):
+    _override_user(_mock_user(UserRole.technician, _TECH_ID))
+    from app.core.database import get_db
+
+    app.dependency_overrides[get_db] = _db_seq_override(_mock_ticket(), [])
+
+    with _ia_desligada():
+        async with AsyncClient(transport=ASGITransport(app=app), base_url="http://test") as client:
+            r = await client.post(f"/api/v1/tickets/{_TICKET_ID}/{rota}", json=corpo)
+
+    assert r.status_code == 503
+    detalhe = r.json()["detail"].lower()
+    assert "desligad" in detalhe, detalhe
+    assert "mais tarde" not in detalhe, "manda esperar por algo que nao volta sozinho"
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("rota,corpo", _ROTAS_DE_IA)
+async def test_com_a_ia_desligada_o_banco_nem_e_consultado(patch_redis, rota, corpo):
+    """A guarda roda antes de tudo — nao ha por que carregar o chamado."""
+    _override_user(_mock_user(UserRole.technician, _TECH_ID))
+    from app.core.database import get_db
+
+    consultas = []
+
+    def _db_espiao():
+        sessao = AsyncMock()
+
+        async def _execute(*a, **k):
+            consultas.append(1)
+            resultado = MagicMock()
+            resultado.scalar_one_or_none.return_value = _mock_ticket()
+            return resultado
+
+        sessao.execute = _execute
+
+        async def _gen():
+            yield sessao
+
+        return _gen
+
+    app.dependency_overrides[get_db] = _db_espiao()
+
+    with _ia_desligada():
+        async with AsyncClient(transport=ASGITransport(app=app), base_url="http://test") as client:
+            await client.post(f"/api/v1/tickets/{_TICKET_ID}/{rota}", json=corpo)
+
+    assert consultas == [], f"{len(consultas)} consultas com a IA desligada"
+
+
+# ── improve-message: o endpoint que nao tinha teste nenhum ────
+#
+# E o unico que manda para fora texto que o tecnico AINDA NAO PUBLICOU.
+
+
+@pytest.mark.asyncio
+async def test_improve_message_devolve_o_texto_melhorado(patch_redis):
+    _override_user(_mock_user(UserRole.technician, _TECH_ID))
+    from app.core.database import get_db
+
+    app.dependency_overrides[get_db] = _db_seq_override(_mock_ticket(), [])
+
+    with patch(
+        "app.routers.chat.improve_message",
+        new=AsyncMock(return_value="Prezado cliente, o equipamento foi calibrado."),
+    ):
+        async with AsyncClient(transport=ASGITransport(app=app), base_url="http://test") as client:
+            r = await client.post(
+                f"/api/v1/tickets/{_TICKET_ID}/improve-message",
+                json={"draft": "calibrei o aparelho"},
+            )
+
+    assert r.status_code == 200
+    assert r.json()["improved"].startswith("Prezado")
+
+
+@pytest.mark.asyncio
+async def test_improve_message_com_provedor_fora_responde_503(patch_redis):
+    _override_user(_mock_user(UserRole.technician, _TECH_ID))
+    from app.core.database import get_db
+
+    app.dependency_overrides[get_db] = _db_seq_override(_mock_ticket(), [])
+
+    with patch("app.routers.chat.improve_message", new=AsyncMock(return_value=None)):
+        async with AsyncClient(transport=ASGITransport(app=app), base_url="http://test") as client:
+            r = await client.post(
+                f"/api/v1/tickets/{_TICKET_ID}/improve-message",
+                json={"draft": "calibrei o aparelho"},
+            )
+
+    assert r.status_code == 503
+    # A mensagem de provedor fora do ar CONTINUA mandando tentar de novo — aqui
+    # tentar de novo e exatamente a coisa certa a fazer.
+    assert "mais tarde" in r.json()["detail"].lower()
+
+
+@pytest.mark.asyncio
+async def test_improve_message_e_do_staff(patch_redis):
+    """Cliente nao usa o assistente de redacao do tecnico."""
+    _override_user(_mock_user(UserRole.client, _CREATOR_ID))
+    from app.core.database import get_db
+
+    app.dependency_overrides[get_db] = _db_seq_override(_mock_ticket(), [])
+
+    async with AsyncClient(transport=ASGITransport(app=app), base_url="http://test") as client:
+        r = await client.post(f"/api/v1/tickets/{_TICKET_ID}/improve-message", json={"draft": "oi"})
+
+    assert r.status_code == 403

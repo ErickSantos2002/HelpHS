@@ -298,6 +298,22 @@ Datas em DD/MM/AAAA.
   de ter sido cliente.
 
 ### Corrigido
+- **O resumo da IA cortava a conversa pelo lado errado** (`40d4209`).
+  `summarize_conversation` fazia `history_text[:6000]`: juntava as mensagens em
+  ordem cronológica e guardava os **primeiros** 6000 caracteres. O endpoint
+  carregava 200 mensagens do banco para descartar as **mais recentes** — e quem
+  abre o resumo está tentando descobrir onde o chamado está, não como começou.
+  O enunciado do problema não dependia disso: título, categoria e status vão
+  para o prompt por fora.
+  O corte passou a guardar o fim e a ser **por mensagem**, não por caractere:
+  fatiar a string produzia linha truncada no meio de uma frase, e o modelo
+  recebia `"o erro é TIMEO"` como conteúdo íntegro. O texto avisa quando cortou.
+- **IA desligada respondia igual a IA quebrada** (`40d4209`). Os três endpoints
+  devolviam o mesmo 503 "tente novamente mais tarde" nos dois casos, e com a
+  flag desligada retentar não ajuda nunca. `_exige_ia_ligada` virou dependência,
+  então a recusa acontece **antes** de carregar chamado e mensagens do banco. A
+  mensagem de provedor fora do ar continua mandando tentar de novo — ali é a
+  coisa certa. A configuração é lida na chamada, não no import.
 - **Colisão de id de migration deixava o container sem subir** (`6aec15d`).
   Duas migrations nasceram com o id `v2q3r4s5t6u7` — duas frentes partiram do
   mesmo head e escolheram o próximo da sequência ao mesmo tempo.
@@ -821,6 +837,9 @@ Datas em DD/MM/AAAA.
   aguardando staging.
 
 ### Testes
+- **`improve-message` ganhou os primeiros testes** (`40d4209`). É o único
+  endpoint que manda para fora texto que o técnico **ainda não publicou**, e não
+  tinha nenhum. Entraram sucesso, provedor fora do ar e recusa para cliente.
 - **Uma mutação sobrevivente revelou um teste que provava outra coisa**
   (`174f45b`). O teste `test_o_mesmo_desafio_nao_serve_duas_vezes` passava, mas
   mutar `mfa_challenge.consumir` para devolver sempre `True` **não quebrava
