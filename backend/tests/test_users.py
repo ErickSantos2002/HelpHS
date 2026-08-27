@@ -67,6 +67,7 @@ def _user(role=UserRole.admin, uid=None, status=UserStatus.active):
     u.company_city = None
     u.company_state = None
     u.onboarding_completed = True
+    u.ai_enabled = True
     from datetime import datetime
 
     u.created_at = datetime.now(UTC)
@@ -1063,3 +1064,51 @@ async def test_admin_anonimiza_admin(patch_redis):
         resp = await c.post(f"/api/v1/users/{alvo.id}/anonymize")
 
     assert resp.status_code == 200
+
+
+@pytest.mark.asyncio
+async def test_admin_desliga_a_ia_para_um_cliente(patch_redis):
+    """
+    Há empresa que não quer robô.
+
+    A alternativa — pedir ao atendente para lembrar de calar a IA em cada
+    chamado daquele cliente — não é alternativa.
+    """
+    from app.core.database import get_db
+    from app.core.security import get_current_user
+
+    cliente = _user(UserRole.client)
+    cliente.ai_enabled = True
+
+    app.dependency_overrides[get_db] = _simple_db(cliente)
+
+    async def _admin():
+        return _ADMIN
+
+    app.dependency_overrides[get_current_user] = _admin
+
+    async with AsyncClient(transport=ASGITransport(app=app), base_url="http://test") as c:
+        resp = await c.patch(f"/api/v1/users/{cliente.id}/ai", json={"enabled": False})
+
+    assert resp.status_code == 200, resp.text
+    assert cliente.ai_enabled is False
+
+
+@pytest.mark.asyncio
+async def test_cliente_nao_desliga_a_ia_de_outro(patch_redis):
+    """Perfil cliente não mexe em preferência de ninguém."""
+    from app.core.database import get_db
+    from app.core.security import get_current_user
+
+    alvo = _user(UserRole.client)
+    app.dependency_overrides[get_db] = _simple_db(alvo)
+
+    async def _cliente():
+        return _user(UserRole.client)
+
+    app.dependency_overrides[get_current_user] = _cliente
+
+    async with AsyncClient(transport=ASGITransport(app=app), base_url="http://test") as c:
+        resp = await c.patch(f"/api/v1/users/{alvo.id}/ai", json={"enabled": False})
+
+    assert resp.status_code == 403

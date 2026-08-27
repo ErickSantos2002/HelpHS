@@ -28,6 +28,9 @@ export interface Ticket {
   assignee_id: string | null;
   created_at: string;
   updated_at: string;
+  // A IA pode atuar neste chamado. Vale para a Helô e para a classificação
+  // automática — desligado, nenhuma delas olha para ele.
+  ai_enabled: boolean;
   sla_response_due_at: string | null;
   sla_resolve_due_at: string | null;
   sla_response_breach: boolean;
@@ -74,19 +77,15 @@ export interface TicketHistoryListResponse {
   offset: number;
 }
 
-export async function getTicketHistory(
-  id: string,
-): Promise<TicketHistoryListResponse> {
-  const { data } = await api.get<TicketHistoryListResponse>(
-    `/tickets/${id}/history?limit=100`,
-  );
+export async function getTicketHistory(id: string): Promise<TicketHistoryListResponse> {
+  const { data } = await api.get<TicketHistoryListResponse>(`/tickets/${id}/history?limit=100`);
   return data;
 }
 
 export async function updateTicketStatus(
   id: string,
   status: string,
-  comment?: string,
+  comment?: string
 ): Promise<Ticket> {
   const { data } = await api.patch<Ticket>(`/tickets/${id}/status`, {
     status,
@@ -95,10 +94,12 @@ export async function updateTicketStatus(
   return data;
 }
 
-export async function assignTicket(
-  id: string,
-  assignee_id: string | null,
-): Promise<Ticket> {
+export async function toggleTicketAi(id: string, enabled: boolean): Promise<Ticket> {
+  const { data } = await api.patch<Ticket>(`/tickets/${id}/ai`, { enabled });
+  return data;
+}
+
+export async function assignTicket(id: string, assignee_id: string | null): Promise<Ticket> {
   const { data } = await api.patch<Ticket>(`/tickets/${id}/assign`, {
     assignee_id,
   });
@@ -112,11 +113,7 @@ export interface TicketListResponse {
   offset: number;
 }
 
-export type SortBy =
-  | "created_at"
-  | "updated_at"
-  | "priority"
-  | "sla_resolve_due_at";
+export type SortBy = "created_at" | "updated_at" | "priority" | "sla_resolve_due_at";
 export type SortDir = "asc" | "desc";
 
 export interface TicketFilters {
@@ -154,24 +151,19 @@ export interface TicketUpdatePayload {
   technician_notes?: string | null;
 }
 
-export async function createTicket(
-  payload: TicketCreatePayload,
-): Promise<Ticket> {
+export async function createTicket(payload: TicketCreatePayload): Promise<Ticket> {
   const { data } = await api.post<Ticket>("/tickets", payload);
   return data;
 }
 
-export async function updateTicket(
-  id: string,
-  payload: TicketUpdatePayload,
-): Promise<Ticket> {
+export async function updateTicket(id: string, payload: TicketUpdatePayload): Promise<Ticket> {
   const { data } = await api.patch<Ticket>(`/tickets/${id}`, payload);
   return data;
 }
 
 export async function updateClientObservation(
   id: string,
-  client_observation: string | null,
+  client_observation: string | null
 ): Promise<Ticket> {
   const { data } = await api.patch<Ticket>(`/tickets/${id}/observation`, {
     client_observation,
@@ -179,10 +171,7 @@ export async function updateClientObservation(
   return data;
 }
 
-export async function resolveTicket(
-  id: string,
-  resolution_note: string,
-): Promise<Ticket> {
+export async function resolveTicket(id: string, resolution_note: string): Promise<Ticket> {
   const { data } = await api.post<Ticket>(`/tickets/${id}/resolve`, {
     resolution_note,
   });
@@ -222,9 +211,7 @@ export async function deleteTicketNote(ticketId: string, noteId: string): Promis
   await api.delete(`/tickets/${ticketId}/notes/${noteId}`);
 }
 
-export async function getTickets(
-  filters: TicketFilters = {},
-): Promise<TicketListResponse> {
+export async function getTickets(filters: TicketFilters = {}): Promise<TicketListResponse> {
   const params = new URLSearchParams();
   if (filters.status) params.set("status", filters.status);
   if (filters.priority) params.set("priority", filters.priority);
@@ -234,13 +221,10 @@ export async function getTickets(
   if (filters.creator_id) params.set("creator_id", filters.creator_id);
   if (filters.search) params.set("search", filters.search);
   if (filters.limit !== undefined) params.set("limit", String(filters.limit));
-  if (filters.offset !== undefined)
-    params.set("offset", String(filters.offset));
+  if (filters.offset !== undefined) params.set("offset", String(filters.offset));
   if (filters.sort_by) params.set("sort_by", filters.sort_by);
   if (filters.sort_dir) params.set("sort_dir", filters.sort_dir);
 
-  const { data } = await api.get<TicketListResponse>(
-    `/tickets?${params.toString()}`,
-  );
+  const { data } = await api.get<TicketListResponse>(`/tickets?${params.toString()}`);
   return data;
 }

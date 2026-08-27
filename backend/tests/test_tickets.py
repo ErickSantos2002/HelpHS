@@ -1334,3 +1334,43 @@ async def test_chamado_aberto_por_staff_nao_e_triado(patch_redis, monkeypatch):
     assert resp.status_code == 201, resp.text
     adicionados = [c.args[0] for c in db_session.add.call_args_list]
     assert not [o for o in adicionados if isinstance(o, ChatMessage)]
+
+
+@pytest.mark.asyncio
+async def test_tecnico_desliga_a_ia_no_chamado(patch_redis):
+    """
+    O botão de quem entra na conversa.
+
+    O PATCH geral de chamado limita o técnico a `technician_notes` — por isso o
+    interruptor tem endpoint próprio: seria estranho o dono do botão não poder
+    apertá-lo.
+    """
+    from app.core.database import get_db
+
+    tech = _mock_user(UserRole.technician)
+    ticket = _mock_ticket()
+    ticket.ai_enabled = True
+
+    app.dependency_overrides[get_db] = _db_override(ticket)
+    _override_user(tech)
+
+    async with AsyncClient(transport=ASGITransport(app=app), base_url="http://test") as c:
+        resp = await c.patch(f"/api/v1/tickets/{_TICKET_ID}/ai", json={"enabled": False})
+
+    assert resp.status_code == 200, resp.text
+    assert ticket.ai_enabled is False
+
+
+@pytest.mark.asyncio
+async def test_cliente_nao_mexe_no_interruptor_do_chamado(patch_redis):
+    """O interruptor é da equipe: o cliente não liga a IA de volta no chamado dele."""
+    from app.core.database import get_db
+
+    ticket = _mock_ticket()
+    app.dependency_overrides[get_db] = _db_override(ticket)
+    _override_user(_mock_user(UserRole.client))
+
+    async with AsyncClient(transport=ASGITransport(app=app), base_url="http://test") as c:
+        resp = await c.patch(f"/api/v1/tickets/{_TICKET_ID}/ai", json={"enabled": False})
+
+    assert resp.status_code == 403

@@ -47,6 +47,7 @@ from app.models.models import (
     ticket_tags,
 )
 from app.schemas.ticket import (
+    InterruptorDaIA,
     TicketAssign,
     TicketCreate,
     TicketHistoryListResponse,
@@ -650,6 +651,50 @@ async def update_client_observation(
     await commit_e_notificar(db)
     await db.refresh(ticket)
     return _serialize_ticket(ticket)
+
+
+@router.patch("/tickets/{ticket_id}/ai", response_model=TicketResponse)
+async def toggle_ticket_ai(
+    ticket_id: uuid.UUID,
+    body: InterruptorDaIA,
+    db: Annotated[AsyncSession, Depends(get_db)],
+    actor: Annotated[User, Depends(authorize(UserRole.admin, UserRole.technician))],
+) -> TicketResponse:
+    """
+    Liga ou desliga a IA neste chamado.
+
+    É o interruptor de quem entra na conversa: o técnico assume, quer a Helô
+    calada dali em diante, e não precisa pedir para ninguém mexer no painel.
+
+    Vale para a IA inteira neste chamado, não só para a Helô — desligado aqui,
+    nem a classificação automática nem a sugestão de resposta olham para ele.
+    "Desliga a IA neste chamado" tem que significar isso.
+
+    Endpoint próprio, e não mais um campo no `PATCH /tickets/{id}`: aquele
+    limita o técnico a `technician_notes`, e este é justamente o botão dele.
+
+    Desligar NÃO apaga o que ela já falou. A conversa é registro do
+    atendimento; sumir com ela deixaria o cliente falando sozinho no histórico.
+    """
+    ticket = await get_or_404(db, Ticket, ticket_id, _CHAMADO_NAO_ENCONTRADO)
+
+    if ticket.ai_enabled != body.enabled:
+        _record_history(
+            db,
+            ticket.id,
+            actor.id,
+            "ai_enabled",
+            str(ticket.ai_enabled),
+            str(body.enabled),
+        )
+        ticket.ai_enabled = body.enabled
+        _audit(db, AuditAction.update, actor.id, ticket.id)
+        await db.commit()
+        await db.refresh(ticket)
+
+    response = _serialize_ticket(ticket)
+    await _fill_product_and_equipment(response, ticket, db)
+    return response
 
 
 @router.patch("/tickets/{ticket_id}/status", response_model=TicketResponse)

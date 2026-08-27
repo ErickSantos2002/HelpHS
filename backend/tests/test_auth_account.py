@@ -421,6 +421,8 @@ async def test_cadastro_hasheia_a_senha_fora_do_event_loop(smtp_configurado):
         obj.id = obj.id or uuid.uuid4()
         if obj.onboarding_completed is None:
             obj.onboarding_completed = False
+        if obj.ai_enabled is None:
+            obj.ai_enabled = True
         obj.created_at = datetime.now(UTC)
         obj.updated_at = datetime.now(UTC)
 
@@ -667,6 +669,7 @@ async def test_cadastro_responde_antes_de_mandar_o_email(smtp_configurado):
                 if isinstance(obj, ModeloUser):
                     obj.id = obj.id or uuid.uuid4()
                     obj.onboarding_completed = bool(obj.onboarding_completed)
+                    obj.ai_enabled = True if obj.ai_enabled is None else obj.ai_enabled
                     obj.created_at = agora
                     obj.updated_at = agora
 

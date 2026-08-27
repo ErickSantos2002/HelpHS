@@ -107,6 +107,9 @@ class UserResponse(AppBaseModel):
     company_city: str | None
     company_state: str | None
     onboarding_completed: bool
+    # Este cliente aceita ser atendido por IA. Default True para o caso do
+    # objeto que ainda não passou pelo banco.
+    ai_enabled: bool = True
     created_at: datetime
     updated_at: datetime
 

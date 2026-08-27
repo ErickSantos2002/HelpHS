@@ -41,6 +41,18 @@ class TicketUpdate(AppBaseModel):
     technician_notes: str | None = None
 
 
+class InterruptorDaIA(AppBaseModel):
+    """Liga ou desliga a IA — num chamado ou num cliente.
+
+    Corpo com um campo só, e um endpoint próprio, em vez de mais um campo no
+    `TicketUpdate`: aquele PATCH deixa o técnico mexer apenas em
+    `technician_notes`, e o interruptor é justamente dele — é quem entra na
+    conversa que quer a Helô calada dali em diante.
+    """
+
+    enabled: bool
+
+
 class TicketStatusUpdate(AppBaseModel):
     status: TicketStatus
     comment: str | None = Field(default=None, max_length=1000)
@@ -83,6 +95,8 @@ class TicketResponse(AppBaseModel):
     title: str
     description: str
     status: TicketStatus
+    # A tela precisa saber o estado para desenhar o botão certo.
+    ai_enabled: bool = True
     priority: TicketPriority
     category: TicketCategory
     creator_id: uuid.UUID

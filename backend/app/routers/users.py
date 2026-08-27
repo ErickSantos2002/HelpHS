@@ -44,6 +44,7 @@ from app.models.models import (
     UserRole,
     UserStatus,
 )
+from app.schemas.ticket import InterruptorDaIA
 from app.schemas.user import (
     LGPDConsentUpdate,
     OnboardingUpdate,
@@ -116,6 +117,10 @@ async def create_user(
         # Explícito: o default da coluna só seria aplicado no INSERT, e a resposta
         # é montada a partir do objeto em memória
         onboarding_completed=False,
+        # Mesmo motivo. E aqui a consequência ia além da resposta: a Helô lê
+        # este campo antes do flush, e `bool(None)` a calaria para o cliente
+        # inteiro — em silêncio, sem erro nenhum.
+        ai_enabled=True,
         # Conta criada pelo admin não passa por confirmação de e-mail: quem
         # cadastrou já sabe quem é a pessoa, e travar o acesso só atrapalharia
         email_verified=True,
@@ -431,6 +436,37 @@ async def update_user_status(
     _audit(db, AuditAction.status_change, actor.id, user.id)
     await db.commit()
     await db.refresh(user)
+    return _to_response(user)
+
+
+@router.patch("/{user_id}/ai", response_model=UserResponse)
+async def toggle_user_ai(
+    user_id: uuid.UUID,
+    body: InterruptorDaIA,
+    db: Annotated[AsyncSession, Depends(get_db)],
+    actor: Annotated[User, Depends(authorize(UserRole.admin, UserRole.technician))],
+) -> UserResponse:
+    """
+    Liga ou desliga a IA para este cliente, em todos os chamados dele.
+
+    Existe porque há empresa que não quer robô. A alternativa — pedir ao
+    atendente para lembrar de calar a IA em cada chamado daquele cliente — não
+    é alternativa.
+
+    Vale daqui para a frente. Chamado que a Helô já triou continua com a fala
+    dela no histórico: desligar não reescreve o passado.
+    """
+    result = await db.execute(select(User).where(User.id == user_id))
+    user = result.scalar_one_or_none()
+    if not user:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Usuário não encontrado.")
+
+    if user.ai_enabled != body.enabled:
+        user.ai_enabled = body.enabled
+        _audit(db, AuditAction.update, actor.id, user.id)
+        await db.commit()
+        await db.refresh(user)
+
     return _to_response(user)
 
 
