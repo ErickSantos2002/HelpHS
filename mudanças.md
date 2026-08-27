@@ -7,6 +7,162 @@ O changelog do produto (o que o cliente vê) fica em
 
 ---
 
+## 27/08/2026 — O chat sobrevive a mais de um worker
+
+Fecha a Fase 3. Cada worker passa a assinar um canal Redis e reemitir para os
+próprios sockets, então duas pessoas no mesmo chamado se enxergam mesmo caindo
+em processos diferentes.
+
+### O painel salvou o desenho
+
+Submeti três propostas a um julgamento por três lentes antes de escrever. Os
+juízes convergiram num defeito que **nenhuma das propostas tinha visto**: duas
+delas punham a origem — o carimbo que impede o worker de entregar a própria
+mensagem duas vezes — como variável de módulo.
+
+Num processo só, dois `ConnectionManager` dividiriam esse carimbo, a supressão
+de eco descartaria a mensagem que deveria atravessar, e **o teste de entrega
+entre processos não teria como ser escrito**. Um desenho intestável exatamente
+na propriedade que justifica a fase.
+
+A origem virou atributo de instância. Mutar de volta para global derruba dois
+testes.
+
+### As decisões, cada uma com o teste que a sustenta
+
+| Decisão | Por quê |
+|---|---|
+| Entrega local **antes** do publish | Publicar antes faria a latência do Redis atrasar o socket do mesmo processo — o caso mais comum. O teste afirma a ordem, não só o resultado |
+| `publicar` nunca levanta | O chat hoje não usa Redis; dependência nova não pode piorar o que já funciona. Teste com o broker quebrado exige que o socket local receba assim mesmo |
+| Canal único, chamado no envelope | Canal por chamado obrigaria rede dentro do `connect`/`disconnect`, que são síncronos |
+| Log só na **transição** | Uma linha por tentativa vira inundação numa queda de Redis. O teste deixa ~20 tentativas correrem e exige no máximo um aviso |
+
+### O `--workers 1` fica, e o comentário mudou de razão
+
+O `start.sh` dizia que não havia backplane. Agora há, e deixar isso escrito
+enganaria a próxima pessoa. O número segue em 1 por **estágio**: com um worker o
+assinante já sobe, publica e descarta o próprio eco, então fica exercitado em
+produção sem risco nenhum. O readiness passou a reportar
+`chat_backplane.assinado`; depois de alguns dias com a assinatura de pé, subir
+vira trocar um número com evidência atrás.
+
+**Resíduo assumido, escrito no código:** pub/sub não guarda nada. Durante uma
+reassinatura, o que os outros publicarem para aquele worker se perde. Fica no
+banco e aparece no F5 — mas ninguém sabe que precisa dar F5. Resolver de verdade
+pede Redis Streams.
+
+---
+
+## 26/08/2026 (noite) — Rate limit, correlação de log, e uma migration que não subia
+
+Três frentes numa tarde, mais um incidente que eu mesmo causei.
+
+### O incidente: duas migrations com o mesmo id
+
+Eu e a frente paralela criamos migrations com o id `v2q3r4s5t6u7` — partimos do
+mesmo head e escolhemos o próximo da sequência ao mesmo tempo. O efeito não é
+teste vermelho: `alembic upgrade head` recusa com "Multiple head revisions" e o
+`start.sh` morre **antes** do uvicorn.
+
+Ficou assim no `origin/main` por algumas horas. Qualquer deploy do backend teria
+falhado — com o EasyPanel mostrando build verde e o container antigo
+continuando a servir, que é o sintoma mais confuso possível.
+
+A primeira tentativa de conserto **colidiu de novo**: a outra frente tinha
+avançado três migrations, não uma.
+
+E no mesmo dia deixei o CI vermelho por outro descuido meu: inseri um import por
+`sed`, o bloco ficou fora de ordem, e eu rodei `black` e `mypy` naquele arquivo
+mas **não o `ruff`** — que é o que o CI roda.
+
+**Duas regras que passam a valer:** rodar `alembic heads` e confirmar um head só
+sempre que criar migration; e rodar `ruff check .` da raiz do `backend/`, não só
+nos arquivos tocados.
+
+### Rate limiting — metade feita, e uma retirada deliberada
+
+`/reset-password` e `/verify-email` não tinham limite nenhum; o primeiro é um
+caminho de **escrita** que troca senha a partir de um token. O knob virou três,
+um por modelo de ameaça, porque um só reaproveitado em quatro endpoints fazia
+apertar o login apertar junto o cadastro.
+
+O `Retry-After` passa a sair da janela real do limiter. Há teste que adianta o
+relógio e exige que o número encolha junto — sem ele, uma constante de 900
+passaria em qualquer asserção de intervalo.
+
+**O `/refresh` ficou de fora, de propósito.** Com `FORWARDED_ALLOW_IPS` vazio o
+rate limit enxerga o IP do proxy — um balde único para o sistema inteiro, como o
+próprio `config.py` documenta. E o `/refresh` é chamado automaticamente pelo
+interceptor de toda sessão ativa: um limite por IP ali deslogaria a empresa
+inteira assim que o volume normal passasse do teto. Trocaria um risco hipotético
+por uma indisponibilidade certa. Está registrado em teste, com o motivo.
+
+### Correlação de log
+
+O backend não tinha **nada**: nem `request_id`, nem `ContextVar`, nem middleware
+que não fosse o CORS. Cada linha era um evento solto.
+
+Agora toda requisição tem um id que atravessa o cabeçalho, o contexto e todas as
+linhas — então o `serialize=True` que já estava ligado passa a produzir JSON
+*com* campo, em vez de JSON sem nada além da mensagem.
+
+Middleware **ASGI puro**, não `BaseHTTPMiddleware`: o do Starlette embrulha a
+requisição em tasks e interfere em streaming, `BackgroundTasks` e propagação de
+exceção — exatamente o que este projeto usa. Há teste de que 422, 404 e os
+cabeçalhos de CORS continuam idênticos.
+
+O `X-Request-ID` de fora é **adotado, mas conferido**: ele entra em toda linha de
+log, então ecoar entrada arbitrária ali é injeção de log — uma quebra de linha
+forja registros inteiros.
+
+E oito linhas de `auth.py` logavam e-mail em claro. A pior registrava o e-mail
+**digitado** numa tentativa falha: de quem não tem conta, e às vezes a senha,
+quando a pessoa erra o campo.
+
+### WebSocket
+
+Duas defesas que o caminho HTTP tinha e o WS não: a **blacklist** (o logout
+derrubava o HTTP e deixava o WebSocket aberto até o token vencer, até oito horas
+depois) e o **teto de tamanho** — que não era só do WS: `ChatMessageCreate`
+validava `min_length=1` e nenhum máximo, com a coluna em `Text`, então os dois
+caminhos aceitavam megabytes.
+
+**Um item do meu próprio plano foi retirado depois de ler o código:** trocar a
+autorização inline do WS pelo `ensure_ticket_visible`. O helper é literalmente
+uma comparação com `raise HTTPException(404)`; reusá-lo ali significaria
+envolver um `raise` num `try/except` só para convertê-lo em close code. Seria
+preferência, não correção.
+
+### A varredura de contrato rendeu três defeitos
+
+Depois do bug do refresh, varri os 18 serviços do front contra os schemas do
+back procurando a mesma classe de defeito. Saíram dois, e a correção de um
+revelou o terceiro:
+
+| onde | o quê |
+|---|---|
+| filtro de usuários | "Suspenso" mandava um valor fora do enum → 422, a lista não carregava |
+| calendário | `description: null` era ignorado → não dava para apagar a descrição |
+| grupos | mesmo defeito, em `description` e `notes` |
+
+Três outras pistas do mesmo formato foram lidas e **não** eram defeito — em
+`tickets.py` e no `updateClientNotes` a atribuição é incondicional.
+
+O console fez os dois primeiros e foi além do pedido: em vez de só remover as
+oito ocorrências de "suspended", tornou `USER_STATUSES` a fonte única e tipou os
+mapas por ela, então um estado inventado **para de compilar** em vez de virar
+422. E trocou o teste que afirmava que gravar "suspended" funcionava por um que
+**lê o enum do `models.py`** e compara — sem repetir a lista, porque lista
+copiada volta a divergir.
+
+| | Antes | Depois |
+|---|---|---|
+| Testes backend | 742 | **800** |
+| Testes frontend | 314 | **315** |
+| Cobertura backend | 86,9% | **87,6%** |
+
+---
+
 ## 26/08/2026 (tarde) — Segundo fator para o staff, e um bug de sessão que ninguém tinha reportado
 
 Primeira das cinco frentes de endurecimento. Começou por um diagnóstico do

@@ -11,6 +11,75 @@ Datas em DD/MM/AAAA.
 ## [Não publicado]
 
 ### Segurança
+- **Backplane do chat, para o tempo real sobreviver a mais de um worker**
+  (`dfaa82f`). Cada worker assina `helphs:chat` no Redis e reemite para os
+  próprios sockets. Sem isso, subir `--workers 2` não estourava nada: as
+  mensagens continuavam sendo gravadas corretamente e duas pessoas no mesmo
+  chamado apenas paravam de se ver — falha invisível para o monitoramento e
+  visível só para o cliente.
+  - ⚠️ **A origem é atributo de INSTÂNCIA, não global de módulo**, e isso é o
+    desenho. Foi o defeito que um painel adversarial achou nas propostas: com
+    origem global, dois `ConnectionManager` do mesmo processo dividem o carimbo,
+    a supressão de eco descarta a mensagem que deveria atravessar, e **o teste
+    de entrega entre processos não tem como ser escrito**. Mutar para global
+    derruba dois testes.
+  - **Entrega local antes do publish**, com teste que afirma a ordem: publicar
+    antes faria a latência do Redis atrasar o socket do mesmo processo.
+  - **Redis fora não piora o que já funciona**: `publicar` engole a falha, e há
+    teste com o broker quebrado exigindo que o socket local receba assim mesmo.
+  - **Log só na transição** — uma linha por tentativa vira inundação numa queda
+    de Redis. Teste deixa ~20 tentativas correrem e exige no máximo um aviso.
+  - `--workers 1` **fica**, por estágio e não por falta: o assinante já sobe,
+    publica e descarta o próprio eco, ficando exercitado em produção sem risco.
+    O readiness passa a reportar `chat_backplane.assinado`.
+  - ⚠️ **Resíduo assumido:** pub/sub não guarda nada. Durante uma reassinatura,
+    o que os outros publicarem para aquele worker se perde. Fica no banco e
+    aparece no F5 — mas ninguém sabe que precisa dar F5.
+- **O WebSocket passa a respeitar o logout e a ter teto de mensagem**
+  (`82552e6`). `_authenticate_ws` conferia assinatura, tipo e status da conta e
+  parava aí: `_is_blacklisted` — onde o logout escreve — nunca era consultada, e
+  um token revogado continuava abrindo chat até vencer sozinho, até oito horas
+  depois de a pessoa sair.
+  O teto **não era só do WS**: `ChatMessageCreate` validava `min_length=1` e
+  nenhum máximo, com a coluna em `Text` — os dois caminhos aceitavam megabytes.
+  `LIMITE_CONTEUDO = 20_000`, generoso de propósito, com teste afirmando
+  `>= 10_000` para que **apertar demais também reprove**.
+- **Rate limit nos endpoints que faltavam** (`5273c30`). `/reset-password` e
+  `/verify-email` não tinham limite algum; o primeiro é um caminho de
+  **escrita** que troca senha a partir de um token. O knob virou três, um por
+  modelo de ameaça — um só reaproveitado em quatro endpoints fazia apertar o
+  login apertar junto o cadastro e o esqueci-a-senha.
+  ⚠️ **O `/refresh` ficou de fora, e o motivo está registrado em teste.** Com
+  `FORWARDED_ALLOW_IPS` vazio o limite enxerga o IP do proxy — um balde único
+  para o sistema inteiro (está escrito no próprio `config.py`). O `/refresh` é
+  chamado automaticamente pelo interceptor de toda sessão ativa: um limite por
+  IP ali deslogaria a empresa inteira assim que o volume normal passasse do
+  teto, trocando um risco hipotético de força bruta por indisponibilidade certa.
+- **Correlação de requisição no log** (`69cb868`). Não havia **nada**:
+  `request_id`, `correlation_id`, `ContextVar` e middleware que não fosse o CORS
+  retornavam zero no grep. Cada linha era um evento solto, e o `serialize=True`
+  produzia JSON sem nenhum campo além da mensagem.
+  - **`ContextVar`, não variável de módulo** — o servidor atende concorrente o
+    tempo todo, e uma variável compartilhada faria duas chamadas simultâneas
+    verem o id da última que escreveu, em silêncio. Teste com `asyncio.gather`.
+  - **Middleware ASGI puro, não `BaseHTTPMiddleware`** — o do Starlette embrulha
+    a requisição em tasks e interfere em streaming, `BackgroundTasks` e
+    propagação de exceção, que é o que este projeto usa. Teste de que 422, 404 e
+    os cabeçalhos de CORS continuam idênticos.
+  - **O `X-Request-ID` de fora é adotado, mas conferido**: ele entra em toda
+    linha da requisição, então ecoar entrada arbitrária ali é injeção de log —
+    quebra de linha forja registros inteiros. Charset fechado, teto de 128.
+  - O patcher é instalado na **importação**, não no `setup_logging`: aquele só
+    roda no lifespan, e os avisos de configuração — os que mais interessa
+    correlacionar quando um boot dá errado — escapariam do carimbo.
+- **E-mail sai de oito linhas de log de `auth.py`** (`69cb868`). A pior
+  registrava o e-mail **digitado** numa tentativa falha: de quem não tem conta
+  (material de enumeração servido pronto) e, de vez em quando, a senha, quando a
+  pessoa erra o campo. Essa perdeu o e-mail por completo; as outras sete
+  trocaram `{user.email}` por `user_id={user.id}`.
+  ⚠️ Os pontos de `email.py` e `notifications.py`, que logam o **destinatário**,
+  ficaram: ali o endereço é o objeto da operação. É decisão de LGPD, não de
+  higiene.
 - **Segundo fator (TOTP) para o staff** (`e0251bc`…`cb61d85`). Sete commits.
   `admin` e `technician` podem exigir um código de seis dígitos além da senha;
   cliente não tem acesso ao recurso (403 em todas as rotas).
@@ -229,6 +298,41 @@ Datas em DD/MM/AAAA.
   de ter sido cliente.
 
 ### Corrigido
+- **Colisão de id de migration deixava o container sem subir** (`6aec15d`).
+  Duas migrations nasceram com o id `v2q3r4s5t6u7` — duas frentes partiram do
+  mesmo head e escolheram o próximo da sequência ao mesmo tempo.
+  ⚠️ **O efeito não é teste vermelho, é o boot**: `alembic upgrade head` recusa
+  com "Multiple head revisions" e o `start.sh` morre **antes** do uvicorn. Ficou
+  assim no `origin/main` por algumas horas; qualquer deploy teria falhado, com o
+  EasyPanel mostrando build verde e o container antigo continuando a servir.
+  A primeira tentativa de conserto **colidiu de novo** — a outra frente tinha
+  avançado três migrations, não uma.
+  **Regra nova:** rodar `alembic heads` e confirmar um head só sempre que criar
+  migration. E rodar `ruff check .` da **raiz** do `backend/`, não só nos
+  arquivos tocados — no mesmo dia um bloco de imports fora de ordem deixou o CI
+  vermelho porque só `black` e `mypy` tinham sido rodados naquele arquivo.
+- **O filtro "Suspenso" derrubava a lista de usuários com 422** (`94c7591`).
+  `UserStatus` tem três valores — `active`, `inactive`, `anonymized` — e
+  `suspended` nunca existiu. O front oferecia a opção, e selecioná-la produzia
+  `GET /users?status=suspended`: 422 antes do handler, e a lista simplesmente
+  não carregava.
+  A correção foi além da remoção: `USER_STATUSES` virou fonte única e os mapas
+  de label, cor e pílula passaram a ser tipados por ela, então um estado
+  inventado **para de compilar** em vez de virar 422 em produção.
+  ⚠️ O teste que afirmava que `setUserStatus("u1", "suspended")` funcionava foi
+  **apagado** — testava contra um servidor que não existe. No lugar, um que **lê
+  o enum de `backend/app/models/models.py`** e compara, sem repetir a lista:
+  lista copiada volta a divergir.
+- **Não dava para apagar descrição de evento nem de grupo** (`f8e9554`,
+  `f86c9d2`). O front manda `null` explícito ao limpar o campo, e os routers
+  testavam `is not None` — que não distingue "campo ausente" de "campo enviado
+  como nulo". O nulo era ignorado, o texto antigo ficava e reaparecia no
+  carregamento seguinte, como se a edição não tivesse acontecido.
+  Passou a ser `body.model_fields_set`, e **só nos campos nullable**: aplicar aos
+  `NOT NULL` trocaria um bug de usabilidade por erro de integridade. Há teste que
+  reprova quem uniformizar.
+  Outras três pistas do mesmo formato foram lidas e **não** eram defeito — em
+  `tickets.py:927` e `groups.py:478` a atribuição é incondicional.
 - **Renovar o token deixava a sessão morrer em 16 h em vez de 7 dias**
   (`b3d629f`, `32a09b8`). `/auth/refresh` devolve `AccessTokenResponse` — três
   campos, **sem `refresh_token`**. O front declarava que havia, no genérico de

@@ -510,6 +510,72 @@ seria uma forma de remover a proteção de outra pessoa.
 senha nova não destranca nada: o login segue pedindo o código depois dela. Para
 "perdi o celular", é o `desliga_mfa`. Para "perdi os dois", os dois, nessa ordem.
 
+## Chat em mais de um worker
+
+O `ConnectionManager` guarda as salas na memória **do processo**: um dicionário
+de `ticket_id` para os WebSockets abertos ali. Isso é rápido e simples, e tem uma
+consequência que não aparece sozinha.
+
+### Por que a falha sem backplane era silenciosa
+
+Com dois workers, duas pessoas no mesmo chamado caem em processos diferentes com
+probabilidade alta. Nenhuma das duas recebe erro: as conexões ficam abertas, as
+mensagens continuam sendo **gravadas corretamente no banco**, e só o tempo real
+some. Elas descobrem ao recarregar a página, e o sintoma se confunde com problema
+de rede do usuário.
+
+É o pior formato de falha que este sistema tem: invisível para o monitoramento,
+visível só para o cliente, e difícil de reproduzir.
+
+### O desenho
+
+Cada worker assina o canal `helphs:chat` no Redis e reemite o que chega para os
+sockets que tem em memória. O `broadcast` entrega **local primeiro** e publica
+depois.
+
+Quatro decisões, e cada uma tem um teste que a sustenta:
+
+**A origem é atributo de instância, não global de módulo.** É o carimbo que
+impede o worker de entregar duas vezes a própria mensagem — o Redis devolve a
+publicação a todos os inscritos, inclusive a quem publicou. Com a origem em
+variável de módulo, dois `ConnectionManager` do mesmo processo dividiriam o
+carimbo, a supressão de eco descartaria a mensagem que deveria atravessar, e **o
+teste de entrega entre processos não teria como ser escrito**. Um desenho
+intestável exatamente na propriedade que o justifica.
+
+**Entrega local antes do publish.** Publicar primeiro faria a latência do Redis
+atrasar o socket que está no mesmo processo — o caso mais comum, ainda mais com
+um worker só. O teste afirma a ordem, não só o resultado.
+
+**`publicar` nunca levanta.** A régua é que o chat hoje não usa Redis nenhum:
+uma dependência nova não pode piorar a disponibilidade do que já funciona. Com o
+Redis fora, a entrega local acontece igual e o chat fica exatamente como é hoje.
+
+**Canal único, com o chamado dentro do envelope.** Canal por chamado obrigaria
+`SUBSCRIBE`/`UNSUBSCRIBE` dentro do `connect`/`disconnect` — que são síncronos —,
+metendo chamada de rede no aperto de mão do WebSocket, que hoje não depende do
+Redis. O custo do canal único é cada worker decodificar um JSON pequeno e
+descartar o que não é seu.
+
+**Log só na transição.** Um aviso quando a assinatura cai, um quando volta. Uma
+linha por tentativa, a cada poucos segundos, transformaria uma queda de Redis
+numa inundação — e o log que deveria denunciar o problema viraria o problema.
+
+### Por que o `--workers 1` continua
+
+Não é mais impedimento técnico, é **estágio**. Com um worker o assinante já sobe,
+publica e recebe as próprias mensagens de volta, descartando-as pelo carimbo: ele
+fica exercitado em produção sem risco nenhum. O readiness reporta
+`chat_backplane.assinado` — reportado, não usado para derrubar, mesma regra do
+carimbo do auto-close.
+
+Depois de alguns dias com a assinatura de pé, subir para dois vira trocar um
+número no `start.sh`, com evidência atrás em vez de esperança.
+
+⚠️ **O que o backplane não resolve** está na tabela de dívidas com gatilho: o
+pub/sub não guarda nada, então mensagem publicada durante uma reassinatura se
+perde para aquele worker.
+
 ## Equipamentos do chamado
 
 **Um chamado aceita vários equipamentos** (teto de 20). Antes era um só, e o
@@ -680,7 +746,8 @@ por inércia.
 
 | Dívida | Por que ficou assim | Revisitar quando |
 |---|---|---|
-| **Chat sem backplane** | O `ConnectionManager` é memória do processo, então o uvicorn sobe com **1 worker**. No volume atual um worker assíncrono dá conta — o bcrypt já saiu do event loop. | For preciso voltar a 2 workers. O backplane Redis vem **antes**, e o lock do auto-close já está no lugar esperando. |
+| ~~**Chat sem backplane**~~ | **Quitada em 27/08/2026** — ver "Chat em mais de um worker" abaixo. O `--workers 1` fica por estágio, não por impedimento. | — |
+| **O backplane perde mensagem durante a reassinatura** | Redis pub/sub não guarda nada: não há replay, confirmação nem cursor. Se a assinatura de um worker cair, o que os outros publicarem naquela janela não chega a ele. A mensagem está no banco e aparece num F5 — mas ninguém sabe que precisa dar F5. | O readiness mostrar reassinatura frequente, ou alguém relatar mensagem que não apareceu. A saída é Redis Streams, que tem posição de consumidor — bem mais complexidade. |
 | **Protocolo por leitura-e-escrita** | A ordenação passou a ser numérica, o que remove a trava do 10.000º chamado. A corrida entre dois cadastros simultâneos continua mitigada por retentativa, não eliminada. | Colisão de protocolo começar a aparecer no log. A saída é uma sequência do PostgreSQL por ano — que resolve os dois de uma vez. |
 | **Prazo de resposta sem campo por ciclo** | Reabrir renova só o prazo de resolução. A exibição foi corrigida (o chip diz "Respondido" em vez de mentir "Vencido"), mas o ciclo novo não ganha prazo de resposta próprio. | A operação precisar medir a resposta do ciclo reaberto. Exige um campo por ciclo, não por chamado. |
 | ~~**Sem MFA para contas de staff**~~ | **Quitada em 26/08/2026** — ver "Segundo fator" abaixo. | — |

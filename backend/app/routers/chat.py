@@ -49,6 +49,7 @@ from app.schemas.chat import (
     ImproveMessageResponse,
     SuggestReplyResponse,
 )
+from app.services import chat_backplane
 from app.services.llm import improve_message, suggest_reply, summarize_conversation
 from app.services.notifications import commit_e_notificar, notify
 from app.utils.sla import register_first_response
@@ -66,11 +67,19 @@ _CHAMADO_NAO_ENCONTRADO = "Ticket não encontrado. Ele pode ter sido excluído."
 
 
 class ConnectionManager:
-    """In-memory WebSocket room manager keyed by ticket_id."""
+    """Salas de WebSocket na memória DESTE processo, por chamado.
+
+    A `origem` identifica este manager no backplane, e é atributo de
+    **instância** — não global de módulo. Com um global, dois managers do mesmo
+    processo dividiriam o carimbo, a supressão de eco descartaria a mensagem que
+    deveria atravessar, e o backplane ficaria intestável exatamente na
+    propriedade que o justifica.
+    """
 
     def __init__(self) -> None:
         # ticket_id (str) → set of active WebSocket connections
         self._rooms: dict[str, set[WebSocket]] = {}
+        self.origem = uuid.uuid4().hex[:12]
 
     def connect(self, ticket_id: str, ws: WebSocket) -> None:
         self._rooms.setdefault(ticket_id, set()).add(ws)
@@ -82,8 +91,13 @@ class ConnectionManager:
             if not room:
                 del self._rooms[ticket_id]
 
-    async def broadcast(self, ticket_id: str, payload: dict) -> None:
-        """Send JSON payload to every connected client in the room."""
+    async def entregar_local(self, ticket_id: str, payload: dict) -> None:
+        """Entrega aos sockets deste processo, e só a eles.
+
+        É também o que o backplane chama ao receber mensagem de outro worker —
+        por isso é público e recebe o `ticket_id` como string: o assinante não
+        sabe o que é uma sala, só repassa o que chegou.
+        """
         room = self._rooms.get(ticket_id, set())
         dead: list[WebSocket] = []
         for ws in list(room):
@@ -93,6 +107,17 @@ class ConnectionManager:
                 dead.append(ws)
         for ws in dead:
             room.discard(ws)
+
+    async def broadcast(self, ticket_id: str, payload: dict) -> None:
+        """Entrega local PRIMEIRO, publica depois.
+
+        A ordem não é estética: publicar antes faria a latência do Redis atrasar
+        o socket que está no mesmo processo — o caso mais comum, ainda mais com
+        um worker só. E `publicar` nunca levanta, então o Redis fora do ar deixa
+        o chat exatamente como ele é hoje, que é sem Redis nenhum.
+        """
+        await self.entregar_local(ticket_id, payload)
+        await chat_backplane.publicar(self.origem, ticket_id, payload)
 
 
 manager = ConnectionManager()
