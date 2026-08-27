@@ -19,10 +19,19 @@ echo "Seeds complete."
 # recebem a mensagem uma da outra. Falha silenciosa, dificil de reproduzir e
 # facil de confundir com problema de rede do usuario.
 #
-# Para voltar a dois (ou mais) e preciso ANTES existir um backplane -- um
-# canal por fora do processo, tipicamente Redis pub/sub, que reemita cada
-# mensagem para os outros workers. Trocar o numero aqui sem isso reintroduz a
-# falha silenciosa.
+# O BACKPLANE JA EXISTE (app/services/chat_backplane.py, Redis pub/sub): cada
+# worker assina um canal e reemite para os proprios sockets, com carimbo de
+# origem para nao entregar duas vezes. Ou seja, o impedimento tecnico acabou.
+#
+# O numero segue em 1 por ESTAGIO, nao por falta: com um worker so, o assinante
+# ja sobe, publica, recebe as proprias mensagens e as descarta pelo carimbo --
+# fica exercitado em producao sem risco nenhum. O readiness reporta
+# `chat_backplane.assinado`; depois de alguns dias mostrando a assinatura de pe,
+# subir para dois vira trocar este numero, com evidencia atras.
+#
+# Uma coisa que o backplane NAO resolve: pub/sub nao guarda nada. Durante uma
+# reassinatura, o que os outros publicarem para este worker se perde -- a
+# mensagem fica no banco e aparece no F5, mas ninguem sabe que precisa dar F5.
 #
 # O lock no Redis do fechamento automatico (app/services/ticket_lifecycle.py)
 # FICA, mesmo sendo desnecessario com um worker so: voltar a dois e mudar um

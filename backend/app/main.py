@@ -41,6 +41,7 @@ from app.routers import (
     users,
 )
 from app.services import antivirus, storage
+from app.services.chat_backplane import assinatura_ativa, start_chat_backplane
 from app.services.ticket_lifecycle import start_auto_close_worker, ultima_rodada_sem_erro
 
 settings = get_settings()
@@ -112,6 +113,12 @@ async def lifespan(app: FastAPI) -> AsyncIterator[None]:
     # app/services/ticket_lifecycle.py).
     auto_close_task = start_auto_close_worker()
 
+    # Backplane do chat: sem ele, dois workers nao se enxergam e o sintoma e
+    # silencioso (ver app/services/chat_backplane.py). Sobe sempre, inclusive
+    # com --workers 1: assim ele fica exercitado em producao antes de o numero
+    # de workers subir, e o readiness mostra se a assinatura se mantem de pe.
+    chat_task = start_chat_backplane(chat.manager.entregar_local, chat.manager.origem)
+
     yield
 
     # Shutdown
@@ -119,6 +126,12 @@ async def lifespan(app: FastAPI) -> AsyncIterator[None]:
         auto_close_task.cancel()
         with suppress(asyncio.CancelledError):
             await auto_close_task
+
+    # Antes do close_redis, de proposito: o laco segura uma conexao de pub/sub
+    # tirada do mesmo cliente singleton.
+    chat_task.cancel()
+    with suppress(asyncio.CancelledError):
+        await chat_task
 
     await close_redis()
     await engine.dispose()
@@ -295,4 +308,9 @@ async def readiness_check(response: Response) -> dict:
             "redis": "ok" if redis_ok else "down",
         },
         "auto_close": {"last_success": ultima.isoformat() if ultima else None},
+        # Reportado, nao usado para derrubar -- mesma regra do carimbo acima. Com
+        # a assinatura caida o chat ainda funciona dentro de cada worker; o que
+        # se perde e o tempo real ENTRE workers, que e justamente a falha que
+        # ninguem percebe sem alguem olhar para aqui.
+        "chat_backplane": {"assinado": assinatura_ativa()},
     }
