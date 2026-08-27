@@ -7,6 +7,7 @@ from unittest.mock import AsyncMock, MagicMock, patch
 
 import pytest
 
+from app.services import llm
 from app.services.llm import (
     _parse_json_response,
     classify_ticket,
@@ -383,3 +384,83 @@ def test_a_flag_nasce_ligada():
 
     s = Settings(database_url="postgresql+asyncpg://u:p@localhost/db")
     assert s.llm_enabled is True
+
+
+# ── O corte do histórico do resumo ────────────────────────────
+#
+# Era `history_text[:6000]`: junta todas as mensagens em ordem cronológica e
+# guarda os 6000 primeiros caracteres. Numa conversa longa isso descarta
+# justamente as mensagens MAIS RECENTES — o técnico que abre o resumo para saber
+# onde o chamado está lê o começo dele.
+#
+# O título, a categoria e o status já vão para o prompt por fora, então o
+# enunciado do problema não depende do começo do chat. O que não pode faltar é o
+# estado atual.
+
+
+def _fala(indice: int, tamanho: int = 200) -> dict[str, str]:
+    return {"role": "client", "sender": "Fulano", "content": f"m{indice} " + "x" * tamanho}
+
+
+def test_o_historico_curto_entra_inteiro():
+    falas = [_fala(i) for i in range(3)]
+
+    texto, cortou = llm.montar_historico(falas)
+
+    assert cortou is False
+    assert "m0" in texto and "m1" in texto and "m2" in texto
+
+
+def test_o_corte_guarda_as_mensagens_mais_recentes():
+    """O conserto: antes guardava as MAIS ANTIGAS, que e o oposto do util."""
+    falas = [_fala(i) for i in range(200)]
+
+    texto, cortou = llm.montar_historico(falas)
+
+    assert cortou is True
+    assert "m199" in texto, "a mensagem mais recente ficou de fora"
+    assert "m0 " not in texto, "a mais antiga sobreviveu — está cortando pelo lado errado"
+
+
+def test_nenhuma_mensagem_e_cortada_ao_meio():
+    """Fatiar por caractere produz linha truncada no meio de uma frase.
+
+    O modelo recebe algo como "[client] Fulano: o erro é TIMEO" e trata como
+    conteúdo íntegro. Montar mensagem a mensagem custa o mesmo e não mente.
+    """
+    falas = [_fala(i) for i in range(200)]
+
+    texto, _ = llm.montar_historico(falas)
+
+    for linha in texto.splitlines():
+        if linha == llm._AVISO_DE_CORTE:
+            continue  # o aviso tambem comeca com "[", e e legitimo
+        assert linha.endswith("x"), f"linha truncada no meio: ...{linha[-40:]}"
+
+
+def test_o_corte_avisa_que_houve_corte():
+    """Quem lê o resumo precisa saber que ele não viu a conversa toda."""
+    falas = [_fala(i) for i in range(200)]
+
+    texto, cortou = llm.montar_historico(falas)
+
+    assert cortou is True
+    assert "anteriores" in texto.lower()
+
+
+def test_o_orcamento_e_respeitado():
+    falas = [_fala(i) for i in range(500)]
+
+    texto, _ = llm.montar_historico(falas)
+
+    assert len(texto) <= llm.LIMITE_HISTORICO_RESUMO * 1.2
+
+
+def test_uma_mensagem_gigante_sozinha_nao_estoura_o_orcamento():
+    """Caso de borda: uma única fala maior que o orçamento inteiro."""
+    falas = [_fala(0, tamanho=llm.LIMITE_HISTORICO_RESUMO * 2)]
+
+    texto, cortou = llm.montar_historico(falas)
+
+    assert len(texto) <= llm.LIMITE_HISTORICO_RESUMO * 1.2
+    assert cortou is True

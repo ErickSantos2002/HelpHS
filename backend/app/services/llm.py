@@ -384,6 +384,53 @@ async def suggest_reply(
     return None
 
 
+# Orçamento do histórico que vai no prompt do resumo, em caracteres.
+LIMITE_HISTORICO_RESUMO = 6000
+
+_AVISO_DE_CORTE = "[... mensagens anteriores omitidas por tamanho ...]"
+
+
+def montar_historico(history: list[dict[str, str]]) -> tuple[str, bool]:
+    """Monta o histórico do resumo guardando as mensagens MAIS RECENTES.
+
+    Devolve o texto e se houve corte.
+
+    Antes isto era `"\n".join(...)[:6000]`: juntava tudo em ordem cronológica e
+    guardava os 6000 **primeiros** caracteres. Numa conversa longa, o resumo
+    perdia justamente o fim — e quem o abre está tentando descobrir onde o
+    chamado está, não como ele começou. O enunciado do problema não depende
+    disso: título, categoria e status vão para o prompt por fora.
+
+    O corte é por MENSAGEM, não por caractere. Fatiar a string produz linha
+    truncada no meio de uma frase — o modelo recebe "o erro é TIMEO" e trata
+    como conteúdo íntegro.
+    """
+    linhas = [f"[{h['role']}] {h['sender']}: {h['content']}" for h in history]
+
+    escolhidas: list[str] = []
+    gasto = 0
+    for linha in reversed(linhas):
+        if escolhidas and gasto + len(linha) + 1 > LIMITE_HISTORICO_RESUMO:
+            break
+        escolhidas.append(linha)
+        gasto += len(linha) + 1
+
+    escolhidas.reverse()
+    cortou = len(escolhidas) < len(linhas)
+
+    # Uma única fala maior que o orçamento inteiro: aí não há como não cortar no
+    # meio, e o corte fica no COMEÇO dela — o fim de uma mensagem costuma ser
+    # onde está a conclusão.
+    if len(escolhidas) == 1 and gasto > LIMITE_HISTORICO_RESUMO:
+        escolhidas[0] = escolhidas[0][-LIMITE_HISTORICO_RESUMO:]
+        cortou = True
+
+    if cortou:
+        escolhidas.insert(0, _AVISO_DE_CORTE)
+
+    return "\n".join(escolhidas), cortou
+
+
 async def summarize_conversation(
     title: str,
     category: str,
@@ -406,13 +453,13 @@ async def summarize_conversation(
     if not history:
         return None
 
-    history_text = "\n".join(f"[{h['role']}] {h['sender']}: {h['content']}" for h in history)
+    history_text, _cortou = montar_historico(history)
 
     prompt = _SUMMARIZE_TEMPLATE.format(
         title=title[:500],
         category=category,
         status=status,
-        history=history_text[:6000],
+        history=history_text,
     )
 
     async def _parse_summary(text: str) -> str | None:
