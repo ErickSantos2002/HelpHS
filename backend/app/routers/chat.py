@@ -615,6 +615,18 @@ async def websocket_chat(
                 )
                 msg = result.scalar_one()
 
+                # O payload dela é montado AQUI DENTRO, com a sessão ainda
+                # aberta. Montá-lo depois do `async with` significa mexer num
+                # objeto desanexado, e `_msg_to_response` toca em `msg.sender`:
+                # a exceção sobe, mata o laço do WebSocket e a fala dela nunca
+                # é transmitida. Ela fica gravada, e só aparece num F5 — que
+                # foi exatamente o sintoma relatado.
+                dados_da_helo = (
+                    _response_to_dict(_msg_to_response(fala_da_helo))
+                    if fala_da_helo is not None
+                    else None
+                )
+
             response = _msg_to_response(msg)
             await manager.broadcast(
                 tid_str,
@@ -623,11 +635,8 @@ async def websocket_chat(
             # A fala dela vai num broadcast proprio, DEPOIS da do cliente: e a
             # ordem em que a conversa aconteceu, e e a ordem em que a tela
             # precisa mostrar.
-            if fala_da_helo is not None:
-                await manager.broadcast(
-                    tid_str,
-                    {"type": "message", "data": _response_to_dict(_msg_to_response(fala_da_helo))},
-                )
+            if dados_da_helo is not None:
+                await manager.broadcast(tid_str, {"type": "message", "data": dados_da_helo})
             if new_status_value:
                 await manager.broadcast(
                     tid_str,

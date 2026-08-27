@@ -38,6 +38,7 @@ import pytest_asyncio
 from sqlalchemy.ext.asyncio import async_sessionmaker, create_async_engine
 
 from app.models.models import (
+    ChatMessage,
     Equipment,
     Product,
     Ticket,
@@ -56,7 +57,14 @@ _AGORA = datetime.now(UTC)
 
 # O subconjunto que este arquivo precisa. Nomear as tabelas é o que permite o
 # SQLite: o `create_all` completo esbarra na coluna ARRAY de `kb_articles`.
-_TABELAS = ("users", "products", "equipments", "tickets", "ticket_equipments")
+_TABELAS = (
+    "users",
+    "products",
+    "equipments",
+    "tickets",
+    "ticket_equipments",
+    "chat_messages",
+)
 
 
 @pytest.fixture(scope="module")
@@ -216,3 +224,46 @@ async def test_a_saudacao_da_helo_le_a_serie_sem_lazy_load(db, monkeypatch):
 
     assert falou is True
     assert ticket.status is TicketStatus.in_progress
+
+
+@pytest.mark.asyncio
+async def test_o_payload_da_fala_dela_leva_remetente_nulo(db):
+    """
+    O que o WebSocket transmite quando quem falou foi a Helô.
+
+    Duas coisas que já quebraram aqui. O `sender_id` precisa sair **nulo**, e
+    não a string "None" — o front compara com o id do usuário logado, e
+    "None" funcionaria por acidente enquanto mente no tipo declarado.
+
+    E a montagem precisa acontecer com a sessão AINDA ABERTA: `_msg_to_response`
+    toca em `msg.sender`, e num objeto desanexado isso é `DetachedInstanceError`.
+    A primeira versão montava depois do `async with`, a exceção matava o laço do
+    WebSocket, e a fala dela ficava gravada sem nunca ser transmitida — aparecia
+    só num F5. Este teste cobre o formato; o momento está preso pelo comentário
+    no `chat.py`, porque reproduzir o desanexo aqui exigiria commit e fechamento
+    de sessão que a fixture não comporta.
+    """
+    from app.routers.chat import _msg_to_response, _response_to_dict
+
+    cliente, _ = await _cliente_com_aparelho(db)
+    ticket = _chamado_novo(cliente)
+    db.add(ticket)
+    await db.flush()
+
+    fala = ChatMessage(
+        id=uuid.uuid4(),
+        ticket_id=ticket.id,
+        sender_id=None,
+        content="Obrigada! Registrei tudo aqui.",
+        is_system=False,
+        is_ai=True,
+        created_at=_AGORA,
+    )
+    db.add(fala)
+    await db.flush()
+
+    payload = _response_to_dict(_msg_to_response(fala))
+
+    assert payload["sender_id"] is None
+    assert payload["is_ai"] is True
+    assert payload["sender_name"] == ""
