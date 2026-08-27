@@ -689,7 +689,19 @@ async def _apply_chat_transition(
         )
         return TicketStatus.awaiting_client.value if changed else None
 
-    if not is_staff and ticket.status in (TicketStatus.in_progress, TicketStatus.awaiting_client):
+    # "Aguardando técnico" só faz sentido quando existe um técnico esperando por
+    # ele. Sem responsável o chamado ainda não é de ninguém, e mandá-lo para lá
+    # anunciava um atendimento que não começou.
+    #
+    # Antes da Helô isso quase nunca aparecia: o cliente raramente escrevia
+    # antes de alguém falar com ele. Agora ele responde a triagem em segundos, e
+    # todo chamado triado caía nesse estado — inclusive pausando o relógio do
+    # SLA, que é o que menos se quer enquanto ele espera um humano.
+    if (
+        not is_staff
+        and ticket.assignee_id is not None
+        and ticket.status in (TicketStatus.in_progress, TicketStatus.awaiting_client)
+    ):
         changed = await _auto_transition(
             db, ticket, TicketStatus.awaiting_technical, sender.id, "Cliente respondeu"
         )

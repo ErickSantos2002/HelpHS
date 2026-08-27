@@ -997,3 +997,65 @@ async def test_ia_desligada_nao_impede_gente_de_conversar(patch_redis):
         )
 
     assert resp.status_code == 201, resp.text
+
+
+@pytest.mark.asyncio
+async def test_cliente_respondendo_chamado_sem_dono_nao_vai_para_ag_tecnico(patch_redis):
+    """
+    "Aguardando técnico" exige um técnico esperando por ele.
+
+    Antes da Helô esse caso quase não existia — o cliente raramente escrevia
+    antes de alguém falar com ele. Agora ele responde a triagem em segundos, e
+    todo chamado triado caía num estado que anuncia um atendimento que não
+    começou. E pior: aquele estado PAUSA o relógio do SLA, justamente enquanto
+    o cliente espera um humano.
+    """
+    from app.core.database import get_db
+
+    cliente = _mock_user(UserRole.client)
+    ticket = _mock_ticket(creator_id=cliente.id)
+    ticket.status = TicketStatus.in_progress
+    ticket.assignee_id = None
+
+    app.dependency_overrides[get_db] = _db_seq_override(ticket, _mock_message())
+    _override_user(cliente)
+
+    async with AsyncClient(transport=ASGITransport(app=app), base_url="http://test") as c:
+        resp = await c.post(
+            f"/api/v1/tickets/{_TICKET_ID}/messages",
+            json={"content": "O aparelho não liga desde ontem"},
+        )
+
+    assert resp.status_code == 201, resp.text
+    assert ticket.status is TicketStatus.in_progress
+
+
+@pytest.mark.asyncio
+async def test_cliente_respondendo_chamado_com_dono_vai_para_ag_tecnico(patch_redis):
+    """Com responsável, a transição continua: há alguém de quem se espera resposta."""
+    from app.core.database import get_db
+
+    cliente = _mock_user(UserRole.client)
+    tecnico = _mock_user(UserRole.technician)
+    ticket = _mock_ticket(creator_id=cliente.id)
+    ticket.status = TicketStatus.in_progress
+    ticket.assignee_id = tecnico.id
+    # A transição passa pelo check_breaches, que compara prazos: com MagicMock
+    # nesses campos a comparação estoura antes de o teste chegar ao que importa.
+    ticket.sla_response_due_at = None
+    ticket.sla_resolve_due_at = None
+    ticket.sla_first_response = None
+    ticket.sla_paused_at = None
+    ticket.sla_total_paused_ms = 0
+
+    app.dependency_overrides[get_db] = _db_seq_override(ticket, _mock_message())
+    _override_user(cliente)
+
+    async with AsyncClient(transport=ASGITransport(app=app), base_url="http://test") as c:
+        resp = await c.post(
+            f"/api/v1/tickets/{_TICKET_ID}/messages",
+            json={"content": "continua sem ligar"},
+        )
+
+    assert resp.status_code == 201, resp.text
+    assert ticket.status is TicketStatus.awaiting_technical
