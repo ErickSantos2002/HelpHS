@@ -56,7 +56,13 @@ _AGORA = datetime.now(UTC)
 
 # O subconjunto que este arquivo precisa. Nomear as tabelas é o que permite o
 # SQLite: o `create_all` completo esbarra na coluna ARRAY de `kb_articles`.
-_TABELAS = ("users", "products", "equipments", "tickets", "ticket_equipments")
+# Sem lista de tabelas: cria o schema INTEIRO.
+#
+# A lista existia porque o `create_all` completo esbarra na coluna ARRAY de
+# `kb_articles` — mas isso e limitacao do SQLite, e este arquivo roda contra
+# PostgreSQL, onde ARRAY e nativo. Enumerar tabelas aqui so reproduzia a cadeia
+# de chave estrangeira a mao: faltou `companies`, depois `sla_configs`, e assim
+# por diante a cada caminho novo que o teste exercitar.
 
 
 @pytest.fixture(scope="module")
@@ -76,12 +82,10 @@ def url_do_banco():
         url = f"sqlite+aiosqlite:///{pasta_sqlite}/t.db"
         recurso = None
 
-    tabelas = [Base.metadata.tables[n] for n in _TABELAS]
-
     async def _monta() -> None:
         motor = create_async_engine(url)
         async with motor.begin() as conn:
-            await conn.run_sync(Base.metadata.create_all, tables=tabelas)
+            await conn.run_sync(Base.metadata.create_all)
         await motor.dispose()
 
     asyncio.run(_monta())
