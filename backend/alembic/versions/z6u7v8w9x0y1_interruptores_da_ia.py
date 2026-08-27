@@ -1,7 +1,7 @@
 """interruptores da IA por cliente e por chamado
 
-Revision ID: y5t6u7v8w9x0
-Revises: x4s5t6u7v8w9
+Revision ID: z6u7v8w9x0y1
+Revises: y5t6u7v8w9x0
 Create Date: 2026-08-26
 
 Segundo tijolo da Helo Fase 1: onde desligar.
@@ -40,8 +40,8 @@ import sqlalchemy as sa
 
 from alembic import op
 
-revision: str = "y5t6u7v8w9x0"
-down_revision: str | None = "x4s5t6u7v8w9"
+revision: str = "z6u7v8w9x0y1"
+down_revision: str | None = "y5t6u7v8w9x0"
 branch_labels: str | Sequence[str] | None = None
 depends_on: str | Sequence[str] | None = None
 
