@@ -83,8 +83,8 @@ está em [desenvolvimento-local.md](desenvolvimento-local.md).
 ## Testes
 
 ```bash
-cd backend  && pytest                # 742 testes, gate de 80% de cobertura
-cd frontend && npm test              # 314 testes (Vitest)
+cd backend  && pytest                # 800 testes, gate de 80% de cobertura
+cd frontend && npm test              # 315 testes (Vitest)
 cd frontend && npx playwright test   # e2e — exige backend na 8001
 ```
 
