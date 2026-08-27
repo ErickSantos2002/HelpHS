@@ -62,3 +62,37 @@ async def send_password_reset_email(
         body=corpo,
         settings=settings,
     )
+
+
+async def send_account_exists_email(to_email: str, settings: Settings) -> bool:
+    """Avisa que já existe conta com este endereço, sem dizer isso a mais ninguém.
+
+    É o que sustenta a resposta neutra do cadastro. Sem esta mensagem, quem
+    esqueceu que já tinha conta recebe um 201, vai para o login, tenta a senha
+    que acabou de escolher e não entra — sem nada explicando por quê.
+
+    O texto NÃO revela nome, data de criação nem qualquer outro dado: quem
+    recebe já sabe que a conta é dele, e quem não é dono não deveria receber
+    nada. É o mesmo cuidado do "esqueci minha senha".
+    """
+    base = settings.frontend_url.rstrip("/")
+
+    corpo = (
+        "Olá!\n\n"
+        "Alguém — provavelmente você — tentou criar uma conta no HelpHS com este "
+        "endereço de e-mail.\n\n"
+        "Você já tem uma conta aqui, então não criamos outra. Para entrar, use:\n\n"
+        f"{base}/login\n\n"
+        'Se você não lembra a senha, use a opção "Esqueci minha senha" na tela de '
+        "acesso.\n\n"
+        "Se não foi você, pode ignorar esta mensagem: nada mudou na sua conta e "
+        "ninguém teve acesso a ela.\n\n"
+        "Equipe Health & Safety"
+    )
+
+    return await send_email(
+        to_email=to_email,
+        subject="[HelpHS] Você já tem uma conta com este e-mail",
+        body=corpo,
+        settings=settings,
+    )

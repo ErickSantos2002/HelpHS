@@ -15,8 +15,13 @@ interface RegisterPayload {
   lgpd_consent: boolean;
 }
 
+/**
+ * A resposta do cadastro é **neutra**: idêntica para e-mail novo e para e-mail
+ * que já tem conta. Por isso ela não traz `id` nem `name` — se trouxesse, os
+ * dois casos teriam como ser distinguidos e o cadastro voltaria a contar quem
+ * é cliente.
+ */
 interface RegisterResponse {
-  id: string;
   email: string;
   /** Falso quando a conta ainda depende do link de confirmação. */
   email_verified: boolean;
@@ -90,6 +95,9 @@ export default function RegisterPage() {
       const status = (err as { response?: { status?: number } })?.response?.status;
       const detail = (err as { response?: { data?: { detail?: string } } })?.response?.data?.detail;
       if (status === 409) {
+        // Só chega aqui em ambiente SEM envio de e-mail. Com e-mail
+        // configurado o backend responde 201 neutro e avisa o dono do
+        // endereço por mensagem — ver #3.1 em app/routers/auth.py.
         setError("Este e-mail já está cadastrado. Tente fazer login.");
       } else if (detail) {
         setError(detail);

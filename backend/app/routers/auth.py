@@ -50,12 +50,16 @@ from app.schemas.auth import (
     PasswordResetRequest,
     RefreshRequest,
     RegisterRequest,
+    RegisterResponse,
     TokenOnlyRequest,
     TokenResponse,
 )
-from app.schemas.user import UserResponse
 from app.services import account_tokens, mfa, mfa_challenge
-from app.services.account_emails import send_password_reset_email, send_verification_email
+from app.services.account_emails import (
+    send_account_exists_email,
+    send_password_reset_email,
+    send_verification_email,
+)
 
 router = APIRouter(prefix="/auth", tags=["Auth"])
 settings = get_settings()
@@ -141,26 +145,41 @@ async def lookup_cep(
 # ── POST /auth/register ───────────────────────────────────────
 
 
-@router.post("/register", response_model=UserResponse, status_code=status.HTTP_201_CREATED)
+@router.post("/register", response_model=RegisterResponse, status_code=status.HTTP_201_CREATED)
 @limiter.limit(settings.rate_limit_account)
 async def register(
     body: RegisterRequest,
     request: Request,
     background: BackgroundTasks,
     db: Annotated[AsyncSession, Depends(get_db)],
-) -> UserResponse:
+) -> RegisterResponse:
     existing = await db.execute(select(User).where(User.email == body.email))
-    if existing.scalar_one_or_none():
-        raise HTTPException(
-            status_code=status.HTTP_409_CONFLICT,
-            detail="Este e-mail já está cadastrado.",
-        )
+    ja_existe = existing.scalar_one_or_none()
 
     now = datetime.now(UTC)
-    # Sem SMTP configurado não há como enviar o link de confirmação; nesse caso
-    # a conta já nasce liberada, senão o cliente ficaria esperando um e-mail
-    # que nunca chega
     exige_confirmacao = settings.requires_email_verification()
+
+    if ja_existe is not None:
+        # #3.1 — a resposta deixa de contar quem tem conta.
+        #
+        # O 409 "Este e-mail já está cadastrado" era um oráculo: com uma lista
+        # de endereços, dava para descobrir quem é cliente sem nunca acertar uma
+        # senha. Agora o caminho devolve exatamente o que um cadastro novo
+        # devolveria, e quem é dono do endereço recebe um e-mail explicando.
+        #
+        # A neutralidade DEPENDE de haver como avisar. Sem e-mail, responder 201
+        # manda a pessoa ao login com uma senha que não vai funcionar e nenhuma
+        # explicação — e aí o 409 volta a ser o mal menor. Foi por isso que este
+        # achado ficou aprovado em agosto e adiado até o Resend existir.
+        if not settings.email_is_configured():
+            raise HTTPException(
+                status_code=status.HTTP_409_CONFLICT,
+                detail="Este e-mail já está cadastrado.",
+            )
+
+        background.add_task(send_account_exists_email, body.email, settings)
+        logger.info("Register attempt on existing account (neutral response)")
+        return RegisterResponse(email=body.email, email_verified=not exige_confirmacao)
 
     # bcrypt é síncrono e custa ~250 ms: na thread do event loop, cada cadastro
     # travaria todas as requisições em voo (mesmo motivo do login)
@@ -201,7 +220,7 @@ async def register(
             f"New client registered without email confirmation (SMTP not configured): {user.email}"
         )
 
-    return UserResponse.model_validate(user)
+    return RegisterResponse(email=user.email, email_verified=user.email_verified)
 
 
 # ── POST /auth/verify-email ───────────────────────────────────
