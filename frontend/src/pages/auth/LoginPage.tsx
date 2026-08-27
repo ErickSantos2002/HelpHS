@@ -103,6 +103,10 @@ export default function LoginPage() {
         setPrecisaConfirmar(motivo.toLowerCase().includes("confirme seu e-mail"));
       } else if (status === 401 || status === 422) {
         setError("E-mail ou senha incorretos.");
+      } else if (status === 429) {
+        // Rate limit do login: o bloqueio é proposital e o backend explica em
+        // português — mostrar "erro ao conectar" aqui faria o usuário insistir.
+        setError(getApiError(err, "Muitas tentativas. Aguarde alguns minutos e tente novamente."));
       } else {
         setError("Erro ao conectar com o servidor. Tente novamente.");
       }
