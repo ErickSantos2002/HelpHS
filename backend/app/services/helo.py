@@ -14,7 +14,7 @@ import uuid
 from collections.abc import Sequence
 from datetime import UTC, datetime
 
-from sqlalchemy import select
+from sqlalchemy import func, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.core.config import get_settings
@@ -274,3 +274,83 @@ async def abre_triagem(
     # mediria a velocidade de um robô, que é sempre a mesma.
     ticket.status = TicketStatus.in_progress
     return True
+
+
+# Ela fala no máximo duas vezes: a saudação e o encerramento. O teto existe
+# para o dia em que a interpretação por LLM entrar e a conversa puder crescer —
+# hoje ele é a garantia de que reprocessar não faz a Helô falar de novo.
+FALAS_MAXIMAS = 2
+
+
+def monta_escalada() -> str:
+    """
+    A saída quando o cliente pede uma pessoa.
+
+    Sem "posso te ajudar com mais alguma coisa?", sem perguntar o motivo, sem
+    pedir para ele confirmar. Um robô que não aceita "não" é pior do que robô
+    nenhum, e insistir aqui é o que transforma um atendimento ruim em uma
+    reclamação.
+    """
+    return (
+        "Sem problema! Já estou passando seu chamado para um atendente. "
+        "Pode escrever aqui o que precisar — a equipe vai ler tudo."
+    )
+
+
+async def _quantas_vezes_ela_falou(db: AsyncSession, ticket_id: uuid.UUID) -> int:
+    consulta = (
+        select(func.count())
+        .select_from(ChatMessage)
+        .where(ChatMessage.ticket_id == ticket_id, ChatMessage.is_ai.is_(True))
+    )
+    return int((await db.execute(consulta)).scalar_one())
+
+
+async def responde_triagem(
+    db: AsyncSession,
+    ticket: Ticket,
+    cliente: User,
+    texto_do_cliente: str,
+) -> ChatMessage | None:
+    """
+    A resposta do cliente encerra a triagem — e a Helô sai de cena.
+
+    Duas saídas, mesmo efeito: se ele pediu uma pessoa, ela escala na hora; se
+    respondeu as perguntas, ela agradece e avisa quando alguém assume. Nos dois
+    casos o chamado fica em "Em andamento" esperando um humano, e ela não fala
+    mais. Se o cliente escrever de novo, silêncio: o chamado é do humano.
+
+    Não dá commit — quem abriu a transação é o `create_message`, e a fala dela
+    precisa nascer no mesmo commit da fala do cliente. Metade gravada seria uma
+    pergunta sem resposta ou uma resposta sem pergunta.
+
+    Returns:
+        A fala dela, para quem precisa transmiti-la (o WebSocket). None quando
+        um interruptor está desligado, a triagem já acabou, ou ela nunca chegou
+        a abrir a conversa.
+    """
+    if not helo_pode_falar(ticket, cliente):
+        return None
+
+    falas = await _quantas_vezes_ela_falou(db, ticket.id)
+    # Zero: ela nunca abriu a triagem neste chamado — foi criado antes dela
+    # existir, ou com ela desligada. Entrar agora seria se apresentar no meio
+    # de uma conversa que já começou sem ela.
+    if falas == 0 or falas >= FALAS_MAXIMAS:
+        return None
+
+    conteudo = (
+        monta_escalada() if quer_humano(texto_do_cliente) else monta_encerramento(datetime.now(UTC))
+    )
+
+    fala = ChatMessage(
+        id=uuid.uuid4(),
+        ticket_id=ticket.id,
+        sender_id=None,
+        content=conteudo,
+        is_system=False,
+        is_ai=True,
+        created_at=datetime.now(UTC),
+    )
+    db.add(fala)
+    return fala

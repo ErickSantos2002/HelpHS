@@ -25,6 +25,7 @@ from app.services.helo import (
     monta_encerramento,
     monta_saudacao,
     quer_humano,
+    responde_triagem,
 )
 from app.utils.sla import SP_TZ
 
@@ -339,3 +340,82 @@ async def test_chamado_sem_produto_nao_consulta_o_banco(helo_ligada):
     await abre_triagem(db, ticket, _cliente(), [])
 
     db.execute.assert_not_called()
+
+
+# ── O segundo turno: ela encerra e sai de cena ────────────────
+
+
+def _db_com_falas(quantas):
+    """Sessão que responde ao COUNT de mensagens dela."""
+    sessao = AsyncMock()
+    resultado = MagicMock()
+    resultado.scalar_one.return_value = quantas
+    sessao.execute = AsyncMock(return_value=resultado)
+    sessao.add = MagicMock()
+    return sessao
+
+
+@pytest.mark.asyncio
+async def test_resposta_do_cliente_encerra_a_triagem(helo_ligada):
+    db = _db_com_falas(1)  # só a saudação até aqui
+    ticket = _chamado()
+
+    fala = await responde_triagem(db, ticket, _cliente(), "O aparelho não liga desde ontem")
+
+    assert fala is not None
+    assert fala.is_ai is True
+    assert fala.sender_id is None
+    assert "Registrei tudo aqui" in fala.content
+
+
+@pytest.mark.asyncio
+async def test_pedido_de_humano_escala_sem_insistir(helo_ligada):
+    """
+    Nem "posso ajudar com mais alguma coisa?", nem perguntar o motivo.
+
+    Insistir aqui é o que transforma um atendimento ruim em reclamação — e o
+    desenho chama o robô que não aceita "não" de pior que robô nenhum.
+    """
+    db = _db_com_falas(1)
+
+    fala = await responde_triagem(db, _chamado(), _cliente(), "quero falar com um humano")
+
+    assert fala is not None
+    assert "passando seu chamado para um atendente" in fala.content
+    assert "?" not in fala.content
+
+
+@pytest.mark.asyncio
+async def test_ela_nao_fala_uma_terceira_vez(helo_ligada):
+    """
+    Depois de encerrar, silêncio: o chamado é do humano.
+
+    Sem este teto, cada mensagem nova do cliente ganharia outra despedida — a
+    Helô se despedindo em loop enquanto ele tenta falar com alguém.
+    """
+    db = _db_com_falas(2)  # saudação + encerramento já ditos
+
+    assert await responde_triagem(db, _chamado(), _cliente(), "e agora?") is None
+    db.add.assert_not_called()
+
+
+@pytest.mark.asyncio
+async def test_ela_nao_entra_em_conversa_que_comecou_sem_ela(helo_ligada):
+    """
+    Chamado aberto antes dela existir, ou com ela desligada.
+
+    Entrar agora seria se apresentar no meio de uma conversa em andamento — e o
+    cliente veria a saudação depois de já ter falado com um técnico.
+    """
+    db = _db_com_falas(0)
+
+    assert await responde_triagem(db, _chamado(), _cliente(), "oi") is None
+    db.add.assert_not_called()
+
+
+@pytest.mark.asyncio
+async def test_com_a_ia_desligada_no_chamado_ela_nao_encerra(helo_ligada):
+    """O técnico calou a IA no meio da triagem: ela não dá a última palavra."""
+    db = _db_com_falas(1)
+
+    assert await responde_triagem(db, _chamado(ai_enabled=False), _cliente(), "oi") is None

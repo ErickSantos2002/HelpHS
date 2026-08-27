@@ -137,7 +137,12 @@ def _relata(fusoes: Sequence[Fusao], recusadas: Sequence[Sequence[Empresa]]) -> 
     for grupo in recusadas:
         print(f"\n⚠️  CNPJ {grupo[0].doc}: empresas em GRUPOS diferentes — não fundidas")
         for e in grupo:
-            print(f"     {e.id}  {e.nome!r}  grupo {e.group_id}")
+            marca = "casca vazia" if not (e.clientes or e.notas) else "TEM CONTEUDO"
+            print(f"     {e.id}  {e.nome!r}")
+            print(
+                f"        grupo {e.group_id}  |  "
+                f"{e.clientes} cliente(s), {e.notas} nota(s)  -> {marca}"
+            )
         print("     Juntar mudaria o grupo dos clientes. Decida à mão.")
 
 

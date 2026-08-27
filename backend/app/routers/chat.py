@@ -50,6 +50,7 @@ from app.schemas.chat import (
     SuggestReplyResponse,
 )
 from app.services import chat_backplane
+from app.services.helo import responde_triagem
 from app.services.llm import improve_message, suggest_reply, summarize_conversation
 from app.services.notifications import commit_e_notificar, notify
 from app.utils.sla import register_first_response
@@ -309,8 +310,19 @@ async def create_message(
         ticket, now, responder_id=actor.id, is_ai=msg.is_ai, is_system=msg.is_system
     )
 
+    # A Helô encerra a triagem quando o cliente responde. ANTES da notificação
+    # de propósito: é ela quem decide se a equipe precisa ser chamada, e a
+    # triagem recém-fechada é justamente o momento em que o chamado passa a ter
+    # conteúdo útil e ainda não tem dono.
+    encerrou_triagem = False
+    if actor.id == ticket.creator_id:
+        encerrou_triagem = await responde_triagem(db, ticket, actor, msg.content) is not None
+
     # Notify the other party
     await _notify_other_party(db, ticket, actor, msg)
+
+    if encerrou_triagem:
+        await _avisa_equipe_da_triagem(db, ticket)
 
     # Auto status transition based on who is sending
     new_status_value = await _apply_chat_transition(db, ticket, actor)
@@ -582,6 +594,16 @@ async def websocket_chat(
 
                 await _notify_other_party(db, ticket, user, msg)
 
+                # O chat do front conversa por WebSocket, entao ESTE e o
+                # caminho pelo qual a resposta do cliente chega de verdade. O
+                # POST existe, mas fica de reserva -- ligar a Helo so la a
+                # deixaria muda na tela onde ela aparece.
+                fala_da_helo = None
+                if user.id == ticket.creator_id:
+                    fala_da_helo = await responde_triagem(db, ticket, user, msg.content)
+                    if fala_da_helo is not None:
+                        await _avisa_equipe_da_triagem(db, ticket)
+
                 new_status_value = await _apply_chat_transition(db, ticket, user)
 
                 await commit_e_notificar(db)
@@ -598,6 +620,14 @@ async def websocket_chat(
                 tid_str,
                 {"type": "message", "data": _response_to_dict(response)},
             )
+            # A fala dela vai num broadcast proprio, DEPOIS da do cliente: e a
+            # ordem em que a conversa aconteceu, e e a ordem em que a tela
+            # precisa mostrar.
+            if fala_da_helo is not None:
+                await manager.broadcast(
+                    tid_str,
+                    {"type": "message", "data": _response_to_dict(_msg_to_response(fala_da_helo))},
+                )
             if new_status_value:
                 await manager.broadcast(
                     tid_str,
@@ -617,7 +647,10 @@ def _response_to_dict(r: ChatMessageResponse) -> dict:
     return {
         "id": str(r.id),
         "ticket_id": str(r.ticket_id),
-        "sender_id": str(r.sender_id),
+        # Nulo quando quem falou foi a Helô. Sem a guarda isto vira a STRING
+        # "None", que o front compara com o id do usuário logado e nunca bate —
+        # funcionaria por acidente, e mentiria no tipo declarado.
+        "sender_id": str(r.sender_id) if r.sender_id else None,
         "sender_name": r.sender_name,
         "sender_role": r.sender_role,
         "content": r.content,
@@ -654,6 +687,42 @@ async def _apply_chat_transition(
         return TicketStatus.awaiting_technical.value if changed else None
 
     return None
+
+
+async def _avisa_equipe_da_triagem(db: AsyncSession, ticket: Ticket) -> None:
+    """
+    Chama a equipe quando a Helô termina de triar.
+
+    Sem isto o chamado fica em "Em andamento" sem dono e sem ninguém avisado: a
+    notificação normal do chat vai para o RESPONSÁVEL, e a essa altura não há
+    responsável nenhum. O chamado dependeria de alguém olhar o quadro.
+
+    Vai para todos os técnicos e admins ativos, e não para um sorteado: sem
+    dono, escolher um seria inventar uma atribuição que ninguém pediu — e o
+    escolhido poderia estar de férias.
+    """
+    equipe = (
+        (
+            await db.execute(
+                select(User).where(
+                    User.role.in_([UserRole.admin, UserRole.technician]),
+                    User.status == UserStatus.active,
+                )
+            )
+        )
+        .scalars()
+        .all()
+    )
+
+    for pessoa in equipe:
+        await notify(
+            db,
+            pessoa.id,
+            NotificationType.ticket_updated,
+            f"Triagem concluída — {ticket.protocol}",
+            "A Helô terminou a triagem e o chamado está esperando atendimento.",
+            data={"ticket_id": str(ticket.id), "protocol": ticket.protocol},
+        )
 
 
 async def _notify_other_party(
