@@ -7,6 +7,59 @@ O changelog do produto (o que o cliente vê) fica em
 
 ---
 
+## 27/08/2026 (noite) — O banco estava na internet, e o cadastro contava quem tem conta
+
+### O achado que não estava em lista nenhuma
+
+Usei o IP do servidor — que está no `.env` local — para responder outra pergunta,
+e sondei as portas vizinhas. O **PostgreSQL de produção atende na internet
+pública**: mandando só o handshake mínimo do protocolo, sem credencial e sem
+consulta, ele responde `SCRAM-SHA-256`.
+
+A senha é a única coisa entre o banco inteiro e o mundo. Não é invasão em curso e
+o SCRAM é forte — é exposição, e é motivo para não seguir por inércia.
+
+O que me incomoda além do fato: o **diagnóstico de segurança de agosto passou por
+autenticação inteira e nunca perguntou "de onde dá para alcançar o banco?"**. O
+mapa olhou o que a aplicação faz, não de onde ela é alcançável.
+
+A receita para fechar sem tirar o acesso de ninguém ficou em
+`docs/fechar-banco-para-a-internet.md`, com o túnel SSH como caminho recomendado
+— o SSH já está lá, atualizado, e usa chave em vez de senha.
+
+### O `#3.1`, parado desde agosto
+
+O `POST /register` respondia 409 *"Este e-mail já está cadastrado"* — um oráculo
+para quem tem uma lista de endereços. O desenho estava aprovado desde agosto e
+adiado por uma razão boa: sem e-mail, a resposta neutra deixa a pessoa legítima
+sem saída. O Resend do Erick destravou hoje.
+
+A neutralidade ficou **por construção**: a resposta virou um schema que não
+carrega dado de conta nenhum. Devolver `id` e `name` obrigaria a inventá-los no
+caminho do e-mail existente, ou a devolver os da conta alheia — que vazaria mais
+que o 409 que veio substituir.
+
+### Três erros meus, e o padrão entre eles
+
+Eu vinha repetindo que a **porta 8000 era pendência do Erick**. Não era: foi
+resolvida em 26/08, e a memória registrava isso. Pior — escrevi um teste
+justificando por que o `/auth/refresh` não tem limite, e o motivo principal que
+dei já era falso quando escrevi.
+
+Antes disso, registrei que os interruptores de IA "não estavam ligados a nada" e
+que o SMTP faltava. As duas coisas mudaram em horas.
+
+**Quatro fatos que registrei envelheceram em três dias**, e todos eram do tipo
+"ainda não está feito" — que numa frente que anda em paralelo é sempre um retrato
+datado. Nenhum foi descoberto por mim: apareceram quando o Rickelme mandou
+conferir.
+
+| | Antes | Depois |
+|---|---|---|
+| Testes backend | 858 | **863** |
+
+---
+
 ## 27/08/2026 (tarde) — O resumo da IA lia o começo da conversa, não o fim
 
 Fecha a Fase 5 na parte que não depende de decisão nenhuma. Três coisas, de

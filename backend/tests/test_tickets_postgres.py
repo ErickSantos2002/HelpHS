@@ -55,9 +55,16 @@ from tests.test_dashboard_postgres import _sobe_postgres
 _AGORA = datetime.now(UTC)
 
 
-# O subconjunto que este arquivo precisa. Nomear as tabelas é o que permite o
-# SQLite: o `create_all` completo esbarra na coluna ARRAY de `kb_articles`.
-_TABELAS = (
+# Contra PostgreSQL o schema sobe INTEIRO. Enumerar tabelas ali reproduzia a
+# cadeia de chave estrangeira à mão — faltou `companies`, depois `sla_configs`,
+# e faltaria a próxima a cada caminho novo que o teste exercitasse. Foi o que
+# deixou o CI vermelho no merge de 27/08.
+#
+# No SQLite a lista continua necessária, e por um motivo que só existe lá: o
+# `create_all` completo esbarra na coluna ARRAY de `kb_articles`. SQLite aceita
+# criar tabela com FK apontando para tabela ausente — Postgres não —, então o
+# subconjunto funciona de um lado e não do outro.
+_TABELAS_NO_SQLITE = (
     "users",
     "products",
     "equipments",
@@ -84,7 +91,8 @@ def url_do_banco():
         url = f"sqlite+aiosqlite:///{pasta_sqlite}/t.db"
         recurso = None
 
-    tabelas = [Base.metadata.tables[n] for n in _TABELAS]
+    no_sqlite = url.startswith("sqlite")
+    tabelas = [Base.metadata.tables[n] for n in _TABELAS_NO_SQLITE] if no_sqlite else None
 
     async def _monta() -> None:
         motor = create_async_engine(url)

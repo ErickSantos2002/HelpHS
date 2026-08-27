@@ -274,22 +274,25 @@ def test_o_inventario_de_endpoints_limitados_e_este():
 
 
 def test_o_refresh_segue_sem_limite_de_proposito():
-    """Decisão registrada, não esquecimento — e o motivo é o balde compartilhado.
+    """Decisão registrada, não esquecimento — mas por UM motivo, não dois.
 
-    Em produção o `FORWARDED_ALLOW_IPS` está vazio (a porta 8000 está publicada,
-    e preenchê-lo antes de fechá-la seria pior). Isso faz o `get_remote_address`
-    devolver o IP do proxy: **um balde único para o sistema inteiro**.
+    ⚠️ **O motivo principal caiu.** Quando esta decisão foi tomada, o
+    `FORWARDED_ALLOW_IPS` estava vazio e o rate limit enxergava o IP do proxy —
+    um balde único para o sistema inteiro. Um limite por IP no `/auth/refresh`,
+    que o interceptor de toda sessão ativa chama sozinho, deslogaria a empresa
+    inteira assim que o volume normal passasse do teto.
 
-    `/auth/refresh` é chamado automaticamente pelo interceptor de toda sessão
-    ativa. Um limite por IP nesse endpoint, sob balde compartilhado, deslogaria a
-    empresa toda assim que o volume normal passasse do teto — trocando um risco
-    hipotético de força bruta por uma indisponibilidade certa.
+    Em **26/08/2026** isso deixou de valer: a porta 8000 foi despublicada e o
+    `FORWARDED_ALLOW_IPS=*` entrou no painel, com prova no Redis (a chave do
+    limiter passou a nascer com o IP real). O balde é por pessoa agora.
 
-    E o ganho seria pequeno: o endpoint exige um JWT RS256 válido **e** que ele
-    bata com o que está no Redis. Não há o que adivinhar.
+    **O que sustenta a decisão hoje é só o segundo motivo, e ele basta:** o
+    endpoint exige um JWT RS256 válido **e** que ele bata com o que está no
+    Redis. Não há o que adivinhar por força bruta, então o limite protegeria
+    contra pouco e teria custo real no caminho mais quente do sistema.
 
-    Revisitar quando a porta 8000 for fechada e o `FORWARDED_ALLOW_IPS` puder
-    ser preenchido.
+    Revisitar se aparecer volume anômalo em `/auth/refresh` no log — que agora
+    dá para investigar, porque cada linha carrega o `request_id`.
     """
     from app.core.rate_limit import limiter
 

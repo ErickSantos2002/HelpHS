@@ -88,6 +88,24 @@ class PasswordResetRequest(AppBaseModel):
         return v
 
 
+class RegisterResponse(AppBaseModel):
+    """A resposta do cadastro, igual para e-mail novo e para e-mail que já existe.
+
+    **Não carrega dado de conta**, e isso é o desenho. Devolver `id` e `name`
+    obrigaria a inventá-los no caminho do e-mail já cadastrado — ou a devolver
+    os da conta alheia, que vazaria mais do que o 409 que isto veio substituir.
+    O jeito de as duas respostas serem idênticas é nenhuma delas ter o que
+    diferir.
+
+    `email` é o que a pessoa acabou de digitar, então não conta nada novo a
+    ninguém; `email_verified` é o que a tela usa para decidir entre "confira seu
+    e-mail" e "vá para o login".
+    """
+
+    email: str
+    email_verified: bool
+
+
 class MessageResponse(AppBaseModel):
     """Resposta neutra: nunca revela se um e-mail existe na base."""
 

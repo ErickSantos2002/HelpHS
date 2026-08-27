@@ -733,3 +733,222 @@ def test_conexao_smtp_verifica_o_certificado():
 
     servico_email._mail_instance = None
     servico_email._mail_settings_hash = None
+
+
+# ═══════════════════════════════════════════════════════════════
+# #3.1 — o cadastro para de dizer quem já tem conta
+# ═══════════════════════════════════════════════════════════════
+#
+# O `POST /register` respondia 409 "Este e-mail já está cadastrado". Para quem
+# só tem uma lista de endereços, isso é um oráculo: dá para descobrir quem é
+# cliente da Health & Safety sem nunca acertar uma senha.
+#
+# O desenho foi aprovado em agosto (201 neutro + tela "Falta um passo" + e-mail
+# "você já tem conta") e ficou adiado porque, SEM e-mail, a resposta neutra
+# deixaria a pessoa legítima sem saída: ela registra de novo, vai para o login e
+# a senha nova não funciona. O Resend destravou isso em 27/08.
+
+
+def _sem_email():
+    """Ambiente sem como enviar: o 409 continua, e é o mal menor."""
+    original = (_settings.smtp_from_email, _settings.smtp_user)
+    _settings.smtp_from_email = ""
+    _settings.smtp_user = ""
+    return original
+
+
+def _restaura_email(original):
+    _settings.smtp_from_email, _settings.smtp_user = original
+
+
+@pytest.mark.asyncio
+async def test_cadastrar_com_email_existente_responde_como_cadastro_novo(smtp_configurado):
+    """A resposta não pode distinguir os dois casos — é o achado inteiro."""
+    from app.core.database import get_db
+
+    novo = _db_with(None)
+    existente = _db_with(_mock_user(email_verified=True))
+
+    async def _cadastra(db_override):
+        app.dependency_overrides[get_db] = db_override
+        with patch("app.routers.auth.send_account_exists_email", new=AsyncMock(return_value=True)):
+            async with AsyncClient(transport=ASGITransport(app=app), base_url="http://test") as c:
+                return await c.post(
+                    "/api/v1/auth/register",
+                    json={
+                        "name": "Fulano",
+                        "email": _EMAIL,
+                        "password": "Senha@123456",
+                        "lgpd_consent": True,
+                    },
+                )
+
+    r_novo = await _cadastra(novo)
+    r_existente = await _cadastra(existente)
+
+    assert r_novo.status_code == r_existente.status_code == 201
+    assert (
+        r_novo.json() == r_existente.json()
+    ), f"as respostas distinguem os casos: {r_novo.json()} vs {r_existente.json()}"
+
+
+@pytest.mark.asyncio
+async def test_a_resposta_do_cadastro_nao_carrega_dado_de_conta(smtp_configurado):
+    """Neutra por construção, não por coincidência.
+
+    Devolver `id` e `name` obrigaria a inventá-los no caminho do e-mail já
+    existente — ou a devolver os da conta alheia, que é vazamento pior que o
+    409. O jeito de as duas respostas serem idênticas é nenhuma delas carregar
+    dado de conta.
+    """
+    from app.core.database import get_db
+
+    app.dependency_overrides[get_db] = _db_with(None)
+    async with AsyncClient(transport=ASGITransport(app=app), base_url="http://test") as c:
+        r = await c.post(
+            "/api/v1/auth/register",
+            json={
+                "name": "Fulano",
+                "email": _EMAIL,
+                "password": "Senha@123456",
+                "lgpd_consent": True,
+            },
+        )
+
+    corpo = r.json()
+    assert "id" not in corpo
+    assert "name" not in corpo
+    assert set(corpo) == {"email", "email_verified"}
+
+
+@pytest.mark.asyncio
+async def test_quem_ja_tem_conta_recebe_e_mail_explicando(smtp_configurado):
+    """Sem isso a neutralidade vira beco: a pessoa vai ao login e a senha nova
+    não funciona, sem nada explicando por quê."""
+    from app.core.database import get_db
+
+    app.dependency_overrides[get_db] = _db_with(_mock_user(email_verified=True))
+
+    with patch(
+        "app.routers.auth.send_account_exists_email", new=AsyncMock(return_value=True)
+    ) as aviso:
+        async with AsyncClient(transport=ASGITransport(app=app), base_url="http://test") as c:
+            await c.post(
+                "/api/v1/auth/register",
+                json={
+                    "name": "Fulano",
+                    "email": _EMAIL,
+                    "password": "Senha@123456",
+                    "lgpd_consent": True,
+                },
+            )
+
+    assert aviso.await_count == 1
+    assert aviso.await_args.args[0] == _EMAIL
+
+
+@pytest.mark.asyncio
+async def test_cadastro_com_email_existente_nao_cria_segunda_conta(smtp_configurado):
+    """Neutro na resposta, não no banco."""
+    from app.core.database import get_db
+    from app.models.models import User
+
+    resultado = MagicMock()
+    resultado.scalar_one_or_none.return_value = _mock_user(email_verified=True)
+    sessao = AsyncMock()
+    sessao.execute = AsyncMock(return_value=resultado)
+    sessao.add = MagicMock()
+    sessao.commit = AsyncMock()
+    sessao.flush = AsyncMock()
+    sessao.refresh = AsyncMock()
+
+    async def _gen():
+        yield sessao
+
+    app.dependency_overrides[get_db] = _gen
+
+    with patch("app.routers.auth.send_account_exists_email", new=AsyncMock(return_value=True)):
+        async with AsyncClient(transport=ASGITransport(app=app), base_url="http://test") as c:
+            r = await c.post(
+                "/api/v1/auth/register",
+                json={
+                    "name": "Fulano",
+                    "email": _EMAIL,
+                    "password": "Senha@123456",
+                    "lgpd_consent": True,
+                },
+            )
+
+    assert r.status_code == 201
+    criados = [ch.args[0] for ch in sessao.add.call_args_list if isinstance(ch.args[0], User)]
+    assert criados == [], "criou uma segunda conta com o mesmo e-mail"
+
+
+@pytest.mark.asyncio
+async def test_sem_e_mail_configurado_o_409_continua():
+    """A neutralidade DEPENDE de haver como avisar.
+
+    Sem e-mail, responder 201 para um endereço que já existe manda a pessoa ao
+    login com uma senha que não vai funcionar e nenhuma explicação. O 409 volta
+    a ser o mal menor — e é por isso que este achado ficou adiado de agosto até
+    o Resend existir.
+    """
+    from app.core.database import get_db
+
+    original = _sem_email()
+    try:
+        app.dependency_overrides[get_db] = _db_with(_mock_user(email_verified=True))
+        async with AsyncClient(transport=ASGITransport(app=app), base_url="http://test") as c:
+            r = await c.post(
+                "/api/v1/auth/register",
+                json={
+                    "name": "Fulano",
+                    "email": _EMAIL,
+                    "password": "Senha@123456",
+                    "lgpd_consent": True,
+                },
+            )
+        assert r.status_code == 409
+    finally:
+        _restaura_email(original)
+
+
+@pytest.mark.asyncio
+async def test_cadastro_responde_antes_de_mandar_o_e_mail_de_conta_existente(smtp_configurado):
+    """O `#3.1` fechou o oráculo de RESPOSTA; este fecha o de TEMPO.
+
+    Sem `BackgroundTasks`, o caminho do e-mail já cadastrado esperaria o envio
+    terminar e o caminho do e-mail novo não — as duas respostas seriam idênticas
+    no corpo e distinguíveis no relógio, que é o mesmo vazamento com outra
+    régua.
+
+    A entrada do `Changelog.md` que documentou o tratamento nos outros fluxos já
+    dizia: *"o register fica de fora de propósito, mas quando o #3.1 o tornar
+    neutro este tratamento precisa ir junto"*. É este teste.
+
+    Mede **ordem**, não relógio: mock de rede não tem latência, e cronometrar em
+    CI compartilhado mediria o runner.
+    """
+    from app.core.database import get_db
+
+    app.dependency_overrides[get_db] = _db_with(_mock_user(email_verified=True))
+
+    with patch(
+        "app.routers.auth.send_account_exists_email", new=AsyncMock(return_value=True)
+    ) as aviso:
+        eventos = await _ordem_dos_eventos(
+            "/api/v1/auth/register",
+            _EMAIL,
+            aviso,
+            corpo_dict={
+                "name": "Fulano",
+                "email": _EMAIL,
+                "password": "Senha@123456",
+                "lgpd_consent": True,
+            },
+        )
+
+    assert "envio" in eventos, "o aviso precisa continuar saindo para quem já tem conta"
+    assert eventos.index("http.response.body") < eventos.index(
+        "envio"
+    ), f"o envio acontece antes de a resposta sair — o tempo denuncia quem tem conta: {eventos}"
