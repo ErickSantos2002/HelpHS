@@ -779,6 +779,35 @@ propósito**. Manter o endpoint para uso futuro.
 
 ---
 
+## Limite de tentativas (rate limiting)
+
+Aplicado com slowapi (`app/core/rate_limit.py`), contadores no Redis — valem
+entre os workers e sobrevivem a restart do backend. Desligado sob
+`APP_ENV=testing`. Três limites, todos por IP e por janela de 15 minutos:
+
+| Variável | Default | Endpoints |
+|---|---|---|
+| `RATE_LIMIT_LOGIN` | 5/15min | login e verificação do segundo fator (tentativa de credencial) |
+| `RATE_LIMIT_ACCOUNT` | 5/15min | registro, reenviar confirmação, esqueci minha senha (disparam e-mail) |
+| `RATE_LIMIT_TOKEN` | 10/15min | confirmar e-mail, redefinir senha (quem chega já tem token assinado) |
+
+Decisões:
+
+- **Por IP real** — exige `FORWARDED_ALLOW_IPS=*` no serviço do backend, o que
+  só é seguro com a porta do backend **despublicada** (feito em 26/08, depois
+  do incidente em que o contador virou um balde único no IP interno do proxy
+  e bloqueou o login de todos os usuários de uma vez).
+- O bloqueio **passa sozinho** ao fim da janela; tentar de novo durante o
+  bloqueio não zera nada. Destravar na mão: console do Redis →
+  `KEYS *LIMITER*` → `DEL` nas chaves listadas.
+- O 429 responde `Retry-After` com o tempo real que falta na janela, e o front
+  converte em "aguarde X minutos" (`src/lib/apiError.ts`). **Não** mostramos
+  "restam X tentativas" de propósito: esse contador ajuda quem está
+  adivinhando senha a saber quando parar.
+- "Por IP" significa por conexão de internet: um escritório atrás do mesmo
+  roteador divide o contador. Se algum cliente sentir o limite, o ajuste é a
+  env var no painel — não é mudança de código.
+
 # Pendências conhecidas
 
 ## Dívidas com gatilho — escolhas conscientes, não esquecimentos
