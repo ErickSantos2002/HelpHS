@@ -1081,15 +1081,20 @@ export default function TicketDetailPage() {
       setObsValue(t.client_observation ?? "");
       setHistory(h.items);
       setAttachments(a.items);
-      listTicketNotes(id)
-        .then(setTicketNotes)
-        .catch(() => {});
+      // Notas internas sao de admin e tecnico. Pedir como cliente devolve 403,
+      // e o catch mudo transformava isso em duas manchas vermelhas no console
+      // de toda tela de chamado — ruido que ja atrapalhou um diagnostico.
+      if (isStaff) {
+        listTicketNotes(id)
+          .then(setTicketNotes)
+          .catch(() => {});
+      }
     } catch {
       setError("Não foi possível carregar o ticket.");
     } finally {
       setLoading(false);
     }
-  }, [id]);
+  }, [id, isStaff]);
 
   useEffect(() => {
     load();
