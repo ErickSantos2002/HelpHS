@@ -1,7 +1,7 @@
 """segundo fator (TOTP) para o staff
 
-Revision ID: v2q3r4s5t6u7
-Revises: u1p2q3r4s5t6
+Revision ID: y5t6u7v8w9x0
+Revises: x4s5t6u7v8w9
 Create Date: 2026-08-26
 
 Três colunas em `users` e uma restrição que impede o único estado quebrado.
@@ -40,8 +40,8 @@ import sqlalchemy as sa
 
 from alembic import op
 
-revision: str = "v2q3r4s5t6u7"
-down_revision: str | None = "u1p2q3r4s5t6"
+revision: str = "y5t6u7v8w9x0"
+down_revision: str | None = "x4s5t6u7v8w9"
 branch_labels: str | Sequence[str] | None = None
 depends_on: str | Sequence[str] | None = None
 

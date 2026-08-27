@@ -1,3 +1,6 @@
+import fs from "node:fs";
+import path from "node:path";
+
 import { describe, it, expect, vi, beforeEach } from "vitest";
 import {
   getUsers,
@@ -8,6 +11,7 @@ import {
   deleteUser,
   updateLGPDConsent,
   getTechnicians,
+  USER_STATUSES,
 } from "../../services/userService";
 import { api } from "../../services/api";
 
@@ -109,13 +113,50 @@ describe("updateUser", () => {
 
 describe("setUserStatus", () => {
   it("patches /users/:id/status", async () => {
-    mockPatch.mockResolvedValue({ data: { ...user, status: "suspended" } });
+    mockPatch.mockResolvedValue({ data: { ...user, status: "inactive" } });
 
-    await setUserStatus("u1", "suspended");
+    await setUserStatus("u1", "inactive");
 
     expect(mockPatch).toHaveBeenCalledWith("/users/u1/status", {
-      status: "suspended",
+      status: "inactive",
     });
+  });
+});
+
+describe("USER_STATUSES", () => {
+  // O caso que existia aqui afirmava que setUserStatus("u1", "suspended")
+  // funcionava. Passava verde contra um servidor que nao existe: "suspended"
+  // nunca esteve no enum do banco, e o filtro que oferecia a opcao devolvia
+  // 422 -- a lista de usuarios simplesmente nao carregava.
+  //
+  // O teste que entra no lugar nao repete a lista a mao: uma lista copiada
+  // volta a divergir do mesmo jeito. Ele le o enum do backend e compara.
+  it("e exatamente o enum UserStatus do backend", () => {
+    // O vitest roda com o cwd em `frontend/` (e o CI tambem, via
+    // working-directory), entao o backend fica um nivel acima.
+    const caminho = path.resolve(
+      process.cwd(),
+      "../backend/app/models/models.py",
+    );
+    expect(fs.existsSync(caminho), `nao encontrei ${caminho}`).toBe(true);
+    const models = fs.readFileSync(caminho, "utf-8");
+
+    const linhas = models.split(/\r?\n/);
+    const inicio = linhas.findIndex((l) => l.startsWith("class UserStatus("));
+    expect(
+      inicio,
+      "nao achei o enum UserStatus em backend/app/models/models.py",
+    ).toBeGreaterThan(-1);
+
+    const doBackend: string[] = [];
+    for (const linha of linhas.slice(inicio + 1)) {
+      const membro = linha.match(/^\s+\w+ = "([^"]+)"/);
+      if (membro) doBackend.push(membro[1]);
+      else if (linha.trim() !== "") break;
+    }
+    expect(doBackend.length).toBeGreaterThan(0);
+
+    expect([...USER_STATUSES].sort()).toEqual([...doBackend].sort());
   });
 });
 

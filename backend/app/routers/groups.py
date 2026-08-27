@@ -255,9 +255,17 @@ async def update_group(
     g = await _get_group_or_404(db, group_id)
     if body.name is not None:
         g.name = body.name
-    if body.description is not None:
+    # `description` e `notes` precisam distinguir "não enviado" de "enviado como
+    # nulo": são os campos nullable do modelo, e é nulo explícito que o front
+    # manda ao limpar o campo. Com `is not None` esse nulo era ignorado e o
+    # texto antigo reaparecia no carregamento seguinte, como se a edição não
+    # tivesse acontecido. Mesmo defeito que a agenda tinha (`f8e9554`).
+    #
+    # `name` fica com `is not None` de propósito: é NOT NULL no modelo, e
+    # aceitar nulo nele trocaria um bug de usabilidade por erro de integridade.
+    if "description" in body.model_fields_set:
         g.description = body.description
-    if body.notes is not None:
+    if "notes" in body.model_fields_set:
         g.notes = body.notes
     await db.commit()
     await db.refresh(g)

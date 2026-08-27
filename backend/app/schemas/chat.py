@@ -45,8 +45,20 @@ class ChatMessageListResponse(AppBaseModel):
     offset: int
 
 
+# Teto do conteúdo de uma mensagem de chat, em caracteres.
+#
+# Antes não havia teto nenhum: o schema validava só `min_length=1` e a coluna é
+# `Text`, então um cliente autenticado gravava megabytes numa mensagem só.
+#
+# O número é generoso de propósito. Técnico cola log e stack trace no chat o
+# tempo todo, e um limite apertado viraria atrito diário para conter um abuso
+# que ninguém cometeu. Vinte mil caracteres são cerca de dez páginas: o que
+# passa disso não é mensagem, é anexo.
+LIMITE_CONTEUDO = 20_000
+
+
 class ChatMessageCreate(AppBaseModel):
-    content: str = Field(..., min_length=1)
+    content: str = Field(..., min_length=1, max_length=LIMITE_CONTEUDO)
 
 
 class SuggestReplyResponse(AppBaseModel):

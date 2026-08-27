@@ -35,8 +35,8 @@ import pytest_asyncio
 from sqlalchemy import select, text
 from sqlalchemy.ext.asyncio import async_sessionmaker, create_async_engine
 
-from app.models.models import Equipment, Product, UserRole, equipment_users
-from tests.test_dashboard_postgres import _sobe_postgres, _usuario
+from app.models.models import Equipment, Product, equipment_users
+from tests.test_dashboard_postgres import _sobe_postgres
 
 _BACKEND = Path(__file__).resolve().parent.parent
 _BANCO = "migracoes_testes"
@@ -143,9 +143,20 @@ async def test_backfill_leva_o_dono_para_equipment_users(banco):
 
     motor = create_async_engine(banco)
     async with async_sessionmaker(bind=motor, expire_on_commit=False)() as s:
-        dono = _usuario(UserRole.client, "Dona do aparelho")
-        dono.id = dono_id
-        s.add(dono)
+        # INSERT explícito, e não pelo modelo ORM. Este teste roda num ponto
+        # INTERMEDIÁRIO da cadeia, onde o schema é mais antigo que o modelo:
+        # semear pelo ORM faz o INSERT carregar toda coluna que o modelo tenha
+        # HOJE, então qualquer coluna nova quebra este teste com um erro que
+        # não diz isso. Aconteceu com `mfa_enabled` em 26/08. Nomear as colunas
+        # prende o seed ao schema daquele momento, que é o que se quer testar.
+        await s.execute(
+            text(
+                "INSERT INTO users (id, name, email, password, role, status, "
+                "lgpd_consent, email_verified, onboarding_completed) "
+                "VALUES (:id, :nome, :email, 'x', 'client', 'active', true, true, true)"
+            ),
+            {"id": dono_id, "nome": "Dona do aparelho", "email": f"{dono_id.hex[:8]}@test.com"},
+        )
         s.add(Product(id=produto_id, name="Phoebus"))
         await s.flush()
         s.add(

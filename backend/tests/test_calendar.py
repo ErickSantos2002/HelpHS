@@ -381,3 +381,80 @@ async def test_cliente_nao_exclui_evento(patch_redis):
         r = await c.delete(f"/api/v1/calendar/events/{_EVENT_ID}")
 
     assert r.status_code == 403
+
+
+# ── Nulo explicito no PATCH ─────────────────────────────────
+
+
+@pytest.mark.asyncio
+async def test_descricao_nula_apaga_a_descricao(patch_redis):
+    """Limpar o campo de descrição precisa apagar o texto.
+
+    O front manda `description.trim() || null` — nulo explícito — quando a
+    pessoa esvazia o campo. O router testava `body.description is not None`,
+    que não distingue "campo ausente" de "campo enviado como nulo": o nulo era
+    ignorado, o texto antigo ficava no banco e reaparecia no próximo
+    carregamento, como se a edição não tivesse acontecido.
+    """
+    from app.core.database import get_db
+
+    _override_user(_mock_user(UserRole.technician))
+    event = _mock_event(created_by=None)
+    app.dependency_overrides[get_db] = _db_override(event)
+
+    async with AsyncClient(transport=ASGITransport(app=app), base_url="http://test") as c:
+        r = await c.patch(f"/api/v1/calendar/events/{_EVENT_ID}", json={"description": None})
+
+    assert r.status_code == 200
+    assert event.description is None
+
+
+@pytest.mark.asyncio
+async def test_descricao_ausente_nao_e_apagada(patch_redis):
+    """A correção não pode transformar PATCH em PUT.
+
+    Quem edita só o título não está pedindo para apagar a descrição — e um
+    `event.description = body.description` incondicional faria exatamente
+    isso, trocando um bug por outro pior.
+    """
+    from app.core.database import get_db
+
+    _override_user(_mock_user(UserRole.technician))
+    event = _mock_event(created_by=None)
+    app.dependency_overrides[get_db] = _db_override(event)
+
+    async with AsyncClient(transport=ASGITransport(app=app), base_url="http://test") as c:
+        r = await c.patch(
+            f"/api/v1/calendar/events/{_EVENT_ID}", json={"title": "Só o título mudou"}
+        )
+
+    assert r.status_code == 200
+    assert event.title == "Só o título mudou"
+    assert event.description == "Sala 201", "a descrição sumiu sem ninguém ter pedido"
+
+
+@pytest.mark.asyncio
+async def test_nulo_em_campo_not_null_continua_ignorado(patch_redis):
+    """Só `description` é nullable no modelo (models.py:873-893).
+
+    `title`, `event_type`, `color`, `start_date` e `end_date` são NOT NULL —
+    para eles, ignorar o nulo está certo. Este teste existe para reprovar quem
+    "uniformizar" os seis campos: aceitar nulo neles trocaria um bug de
+    usabilidade por um erro de integridade no banco.
+    """
+    from app.core.database import get_db
+
+    _override_user(_mock_user(UserRole.technician))
+    event = _mock_event(created_by=None)
+    app.dependency_overrides[get_db] = _db_override(event)
+
+    async with AsyncClient(transport=ASGITransport(app=app), base_url="http://test") as c:
+        r = await c.patch(
+            f"/api/v1/calendar/events/{_EVENT_ID}",
+            json={"title": None, "color": None, "event_type": None},
+        )
+
+    assert r.status_code == 200
+    assert event.title == "Treinamento de bafômetros"
+    assert event.color == "#10b981"
+    assert event.event_type == CalendarEventType.training

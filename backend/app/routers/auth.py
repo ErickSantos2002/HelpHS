@@ -142,7 +142,7 @@ async def lookup_cep(
 
 
 @router.post("/register", response_model=UserResponse, status_code=status.HTTP_201_CREATED)
-@limiter.limit(settings.rate_limit_login)
+@limiter.limit(settings.rate_limit_account)
 async def register(
     body: RegisterRequest,
     request: Request,
@@ -195,7 +195,7 @@ async def register(
         # cadastro; servidor que não responde o segurava até o timeout do
         # proxy. O `forgot-password` e o `resend-verification` já faziam assim.
         background.add_task(send_verification_email, user.email, user.name, token, settings)
-        logger.info(f"New client registered (awaiting confirmation): {user.email}")
+        logger.info(f"New client registered (awaiting confirmation): user_id={user.id}")
     else:
         logger.warning(
             f"New client registered without email confirmation (SMTP not configured): {user.email}"
@@ -208,8 +208,10 @@ async def register(
 
 
 @router.post("/verify-email", response_model=MessageResponse)
+@limiter.limit(settings.rate_limit_token)
 async def verify_email(
     body: TokenOnlyRequest,
+    request: Request,
     db: Annotated[AsyncSession, Depends(get_db)],
 ) -> MessageResponse:
     """Ativa a conta a partir do link enviado no cadastro."""
@@ -250,7 +252,7 @@ async def verify_email(
     user.updated_at = datetime.now(UTC)
     await db.commit()
 
-    logger.info(f"Email confirmed: {user.email}")
+    logger.info(f"Email confirmed: user_id={user.id}")
     return MessageResponse(message="E-mail confirmado. Sua conta está ativa.")
 
 
@@ -258,7 +260,7 @@ async def verify_email(
 
 
 @router.post("/resend-verification", response_model=MessageResponse)
-@limiter.limit(settings.rate_limit_login)
+@limiter.limit(settings.rate_limit_account)
 async def resend_verification(
     body: EmailRequest,
     request: Request,
@@ -287,7 +289,7 @@ async def resend_verification(
 
     token = account_tokens.create_email_verification_token(user.id, user.email_verified, settings)
     background.add_task(send_verification_email, user.email, user.name, token, settings)
-    logger.info(f"Verification email queued (resend): {user.email}")
+    logger.info(f"Verification email queued (resend): user_id={user.id}")
     return neutra
 
 
@@ -295,7 +297,7 @@ async def resend_verification(
 
 
 @router.post("/forgot-password", response_model=MessageResponse)
-@limiter.limit(settings.rate_limit_login)
+@limiter.limit(settings.rate_limit_account)
 async def forgot_password(
     body: EmailRequest,
     request: Request,
@@ -343,7 +345,7 @@ async def forgot_password(
 
     token = account_tokens.create_password_reset_token(user.id, user.password, settings)
     background.add_task(send_password_reset_email, user.email, user.name, token, settings)
-    logger.info(f"Password reset queued: {user.email}")
+    logger.info(f"Password reset queued: user_id={user.id}")
     return neutra
 
 
@@ -351,6 +353,7 @@ async def forgot_password(
 
 
 @router.post("/reset-password", response_model=MessageResponse)
+@limiter.limit(settings.rate_limit_token)
 async def reset_password(
     body: PasswordResetRequest,
     request: Request,
@@ -391,7 +394,7 @@ async def reset_password(
     _audit(db, AuditAction.password_change, user.id, request)
     await db.commit()
 
-    logger.info(f"Password reset completed: {user.email}")
+    logger.info(f"Password reset completed: user_id={user.id}")
     return MessageResponse(message="Senha alterada. Você já pode entrar com a nova senha.")
 
 
@@ -429,7 +432,12 @@ async def login(
     )
 
     if user is None or not password_ok:
-        logger.warning(f"Failed login attempt for email={body.email}")
+        # Sem o e-mail, de proposito. Esta linha registrava o que foi
+        # DIGITADO numa tentativa falha: e-mail de quem nao tem conta, e
+        # ocasionalmente a senha, quando a pessoa erra o campo. O que
+        # importa aqui e a frequencia e a origem, e o request_id ja amarra
+        # a linha ao resto da requisicao.
+        logger.warning("Failed login attempt")
         raise HTTPException(
             status_code=status.HTTP_401_UNAUTHORIZED,
             detail="E-mail ou senha incorretos.",
@@ -477,7 +485,7 @@ async def _emitir_sessao(user: User, request: Request, db: AsyncSession) -> Toke
     _audit(db, AuditAction.login, user.id, request)
     await db.commit()
 
-    logger.info(f"User logged in: {user.email}")
+    logger.info(f"User logged in: user_id={user.id}")
 
     return TokenResponse(
         access_token=access_token,
@@ -592,7 +600,7 @@ async def logout(
     _audit(db, AuditAction.logout, current_user.id, request)
     await db.commit()
 
-    logger.info(f"User logged out: {current_user.email}")
+    logger.info(f"User logged out: user_id={current_user.id}")
 
 
 # ── Segundo fator (TOTP) — adesão ─────────────────────────────

@@ -134,7 +134,16 @@ async def update_event(
 
     if body.title is not None:
         event.title = body.title
-    if body.description is not None:
+    # `description` é o único campo aqui que precisa distinguir "não enviado" de
+    # "enviado como nulo": é o único nullable no modelo, e o front manda nulo
+    # explícito quando a pessoa limpa o campo. Com `is not None` esse nulo era
+    # ignorado e o texto antigo reaparecia no carregamento seguinte.
+    #
+    # NÃO uniformize os outros cinco. `title`, `event_type`, `color`,
+    # `start_date` e `end_date` são NOT NULL no modelo — para eles, ignorar o
+    # nulo está correto, e aceitá-lo trocaria este bug por um erro de
+    # integridade no banco.
+    if "description" in body.model_fields_set:
         event.description = body.description
     if body.event_type is not None:
         event.event_type = body.event_type

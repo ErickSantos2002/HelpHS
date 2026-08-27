@@ -1,4 +1,5 @@
 import asyncio
+import time
 from collections.abc import AsyncIterator
 from contextlib import asynccontextmanager, suppress
 
@@ -13,11 +14,13 @@ from starlette.exceptions import HTTPException as StarletteHTTPException
 
 from app import __version__
 from app.core.config import get_settings
+from app.core.contexto import CABECALHO
 from app.core.database import engine
 from app.core.exceptions import http_exception_handler, validation_exception_handler
 from app.core.logging import setup_logging
 from app.core.rate_limit import limiter
 from app.core.redis import close_redis, get_redis
+from app.middleware.correlacao import CorrelacaoMiddleware
 from app.routers import (
     attachments,
     audit,
@@ -140,17 +143,49 @@ app.add_middleware(
     allow_credentials=True,
     allow_methods=["*"],
     allow_headers=["*"],
+    # `allow_headers` vale para o que o navegador MANDA; para ele conseguir LER
+    # um cabecalho de resposta e preciso expo-lo. Sem isto o id existe, viaja e
+    # e invisivel justamente para quem abriria o chamado de suporte citando ele.
+    expose_headers=[CABECALHO],
 )
+
+# Registrado DEPOIS do CORS de proposito: o `add_middleware` empilha por fora,
+# entao este fica sendo o mais externo. O id passa a existir antes de qualquer
+# outra camada, e o cabecalho e carimbado por ultimo, com a resposta ja pronta.
+app.add_middleware(CorrelacaoMiddleware)
 
 
 app.state.limiter = limiter
 
 
+def _segundos_ate_liberar(request: Request) -> int | None:
+    """Quanto falta para a janela do limiter virar, em segundos.
+
+    Sai do estado real da janela, não de uma constante: um número fixo passaria
+    a mentir no instante em que alguém mudasse `RATE_LIMIT_*`, e mentira em
+    `Retry-After` é pior que silêncio — o cliente confia e volta cedo demais.
+
+    `view_rate_limit` é posto pelo próprio slowapi antes de levantar. Se não
+    estiver lá, ou se o storage não responder, o cabeçalho simplesmente não sai:
+    é melhor não dizer do que chutar.
+    """
+    janela = getattr(request.state, "view_rate_limit", None)
+    if not janela:
+        return None
+    try:
+        vira_em, _restantes = limiter.limiter.get_window_stats(janela[0], *janela[1])
+    except Exception:  # pragma: no cover - depende do storage
+        return None
+    return max(1, int(1 + vira_em - time.time()))
+
+
 async def rate_limit_handler(request: Request, exc: RateLimitExceeded) -> JSONResponse:
     # Mantém o formato de erro do projeto (campo `detail`, mensagem em português)
+    espera = _segundos_ate_liberar(request)
     return JSONResponse(
         status_code=429,
         content={"detail": "Muitas tentativas. Aguarde alguns minutos e tente novamente."},
+        headers={"Retry-After": str(espera)} if espera is not None else None,
     )
 
 
