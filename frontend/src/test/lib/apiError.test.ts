@@ -102,3 +102,37 @@ describe("getApiErrorParts", () => {
     expect(description).toBeUndefined();
   });
 });
+
+/**
+ * O 429 traz o header Retry-After com o tempo real da janela (calculado pelo
+ * backend a partir do estado do limiter). Com ele, a mensagem diz quantos
+ * minutos faltam; sem ele, vale o detail do backend — nunca um chute.
+ */
+describe("getApiError — 429 com Retry-After", () => {
+  it("mostra os minutos exatos quando o header vem", () => {
+    const err = {
+      response: {
+        status: 429,
+        headers: { "retry-after": "720" },
+        data: { detail: "Muitas tentativas. Aguarde alguns minutos e tente novamente." },
+      },
+    };
+    expect(getApiError(err)).toBe("Muitas tentativas. Aguarde 12 minutos e tente novamente.");
+  });
+
+  it("arredonda para cima e usa o singular quando falta menos de um minuto", () => {
+    const err = { response: { status: 429, headers: { "retry-after": "45" }, data: {} } };
+    expect(getApiError(err)).toBe("Muitas tentativas. Aguarde 1 minuto e tente novamente.");
+  });
+
+  it("sem o header, mantém a mensagem do backend", () => {
+    const err = {
+      response: {
+        status: 429,
+        headers: {},
+        data: { detail: "Muitas tentativas. Aguarde alguns minutos e tente novamente." },
+      },
+    };
+    expect(getApiError(err)).toBe("Muitas tentativas. Aguarde alguns minutos e tente novamente.");
+  });
+});

@@ -256,3 +256,148 @@ def test_os_logs_de_auth_identificam_por_id_e_nao_por_email():
     vazando = re.findall(r"logger\.\w+\(f?\"[^\"]*\{[^}]*\.email\}", fonte)
 
     assert vazando == [], f"linha de log com e-mail em claro: {vazando}"
+
+
+# ── A ponte do logging da stdlib para o loguru ────────────────
+#
+# O uvicorn tem os proprios loggers e nao sabe do loguru. Sem ponte, o stdout de
+# producao era um fluxo MISTO: JSON serializado das linhas da aplicacao e texto
+# plano do access log, lado a lado. Pior que o formato: as linhas de access —
+# metodo, caminho, status, que e o que se olha primeiro num incidente — saiam
+# **sem `request_id`**, entao nao havia como juntar a linha "POST /auth/login
+# 200" com a linha da aplicacao que explica o que aconteceu ali.
+#
+# O access log e emitido dentro do `send()` do protocolo do uvicorn, que e
+# chamado PELO app ASGI (h11_impl.py, no tratamento de `http.response.start`).
+# Isso o coloca dentro do escopo do middleware de correlacao, e e por isso que
+# o `ContextVar` ainda esta setado quando ele dispara.
+
+
+@pytest.fixture
+def ponte_instalada():
+    """Instala a ponte e DESFAZ ao final.
+
+    Sem restaurar, o resto da suite roda com a raiz do `logging` capturando
+    tudo — e durante o teardown do pytest, com os sinks ja fechados, cada
+    registro atrasado vira um "Logging error in Loguru Handler" no meio da
+    saida. Mesma classe do `get_settings.cache_clear()` que envenenou o
+    `test_seeds`: teste que muda estado global e nao devolve.
+    """
+    import logging as stdlib
+
+    from app.core.logging import _LOGGERS_DO_UVICORN, instalar_ponte_stdlib
+
+    raiz = stdlib.getLogger()
+    antes_raiz = (list(raiz.handlers), raiz.level)
+    antes_uvicorn = {
+        nome: (list(stdlib.getLogger(nome).handlers), stdlib.getLogger(nome).propagate)
+        for nome in _LOGGERS_DO_UVICORN
+    }
+
+    instalar_ponte_stdlib()
+    yield
+
+    raiz.handlers, raiz.level = antes_raiz
+    for nome, (handlers, propaga) in antes_uvicorn.items():
+        lg = stdlib.getLogger(nome)
+        lg.handlers = handlers
+        lg.propagate = propaga
+
+
+def test_a_linha_da_stdlib_chega_ao_loguru(ponte_instalada):
+    import logging as stdlib
+
+    capturado = []
+    sink = logger.add(lambda m: capturado.append(m.record), level="DEBUG")
+    try:
+        stdlib.getLogger("uvicorn.access").info('127.0.0.1 - "GET /health HTTP/1.1" 200')
+    finally:
+        logger.remove(sink)
+
+    assert capturado, "a linha do uvicorn nao chegou ao loguru"
+    assert "GET /health" in capturado[-1]["message"]
+
+
+def test_a_ponte_preserva_o_nivel(ponte_instalada):
+    import logging as stdlib
+
+    capturado = []
+    sink = logger.add(lambda m: capturado.append(m.record), level="DEBUG")
+    try:
+        stdlib.getLogger("uvicorn.error").warning("porta ja em uso")
+    finally:
+        logger.remove(sink)
+
+    assert capturado[-1]["level"].name == "WARNING"
+
+
+def test_a_linha_de_access_carrega_o_request_id(ponte_instalada):
+    """O ponto do trabalho todo.
+
+    Com o `ContextVar` setado — que e o estado real no momento em que o uvicorn
+    emite —, a linha de access sai carimbada como qualquer outra.
+    """
+    import logging as stdlib
+
+    from app.core.contexto import request_id_var
+
+    capturado = []
+    sink = logger.add(lambda m: capturado.append(dict(m.record["extra"])), level="DEBUG")
+    token = request_id_var.set("linha-de-access-1")
+    try:
+        stdlib.getLogger("uvicorn.access").info('1.2.3.4 - "POST /api/v1/auth/login HTTP/1.1" 200')
+    finally:
+        request_id_var.reset(token)
+        logger.remove(sink)
+
+    assert capturado[-1].get("request_id") == "linha-de-access-1"
+
+
+def test_os_loggers_do_uvicorn_perdem_os_proprios_handlers(ponte_instalada):
+    """Senao a linha sai DUAS vezes: uma em texto plano, outra em JSON.
+
+    O teste SUJA o estado antes de reinstalar, de proposito. Sem isso ele
+    afirmaria que os handlers estao vazios em loggers que nunca tiveram nenhum —
+    e passaria mesmo com a limpeza removida do codigo, que foi exatamente o que
+    uma mutacao mostrou.
+    """
+    import logging as stdlib
+
+    from app.core.logging import instalar_ponte_stdlib
+
+    stdlib.getLogger("uvicorn.access").addHandler(stdlib.StreamHandler())
+    stdlib.getLogger("uvicorn.error").addHandler(stdlib.StreamHandler())
+    instalar_ponte_stdlib()
+
+    for nome in ("uvicorn", "uvicorn.access", "uvicorn.error"):
+        lg = stdlib.getLogger(nome)
+        assert lg.handlers == [], f"{nome} ainda tem handler proprio: {lg.handlers}"
+        assert lg.propagate is True, f"{nome} nao propaga para a raiz"
+
+
+def test_o_access_log_continua_ligado_depois_da_ponte(ponte_instalada):
+    """O uvicorn decide se loga acesso com `access_logger.hasHandlers()`.
+
+    Se a ponte tirasse os handlers SEM deixar a propagacao ligada, o
+    `hasHandlers()` daria falso e o uvicorn simplesmente pararia de logar acesso
+    — trocando "formato misto" por "sem access log nenhum".
+    """
+    import logging as stdlib
+
+    assert stdlib.getLogger("uvicorn.access").hasHandlers()
+
+
+def test_instalar_duas_vezes_nao_duplica(ponte_instalada):
+    import logging as stdlib
+
+    from app.core.logging import instalar_ponte_stdlib
+
+    instalar_ponte_stdlib()
+    capturado = []
+    sink = logger.add(lambda m: capturado.append(m.record), level="DEBUG")
+    try:
+        stdlib.getLogger("uvicorn.access").info("uma linha so")
+    finally:
+        logger.remove(sink)
+
+    assert len(capturado) == 1, f"a linha saiu {len(capturado)} vezes"

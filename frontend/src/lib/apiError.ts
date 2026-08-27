@@ -1,5 +1,7 @@
 import type { AxiosError } from "axios";
 
+import { plural } from "./utils";
+
 /**
  * Traduz o erro da API numa mensagem que o usuário entenda.
  *
@@ -67,6 +69,17 @@ function describeError(err: unknown): string | null {
   // Pedido saiu mas não voltou resposta: rede, DNS, servidor fora do ar ou timeout
   if (axiosErr?.request && !axiosErr?.response) {
     return "Não foi possível falar com o servidor. Verifique sua conexão e tente de novo.";
+  }
+
+  // 429 com Retry-After: o backend calcula o tempo real da janela do rate
+  // limit — quando ele vem, os minutos exatos valem mais que o detail vago.
+  // Sem o header (storage indisponível, por exemplo), o fluxo normal segue.
+  if (axiosErr?.response?.status === 429) {
+    const retryAfter = Number(axiosErr.response.headers?.["retry-after"]);
+    if (Number.isFinite(retryAfter) && retryAfter > 0) {
+      const minutos = Math.ceil(retryAfter / 60);
+      return `Muitas tentativas. Aguarde ${minutos} ${plural(minutos, "minuto", "minutos")} e tente novamente.`;
+    }
   }
 
   const detail = axiosErr?.response?.data?.detail;
