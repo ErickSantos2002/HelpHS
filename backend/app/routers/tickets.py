@@ -268,8 +268,20 @@ async def _set_ticket_equipments(
         return
 
     unicos = list(dict.fromkeys(equipment_ids))
-    rows = await db.execute(select(Equipment).where(Equipment.id.in_(unicos)))
-    encontrados = list(rows.scalars().all())
+    # `no_autoflush` é o que faz este endpoint funcionar, não um detalhe de
+    # performance. Sem ele o SELECT abaixo dispara o autoflush, o chamado
+    # recém-adicionado vira PERSISTENTE, e a atribuição lá embaixo
+    # (`ticket.equipments = ...`) passa a precisar carregar a coleção ANTIGA
+    # para calcular a diferença. Esse carregamento é IO fora do greenlet do
+    # SQLAlchemy async: MissingGreenlet, 500, e o navegador ainda por cima
+    # relata como erro de CORS, porque a resposta de erro sai sem o header.
+    #
+    # Com o chamado ainda pendente, o ORM sabe que não há coleção antiga para
+    # buscar. É também por isso que abrir chamado SEM equipamento sempre
+    # funcionou: aquele ramo atribui antes de qualquer SELECT.
+    with db.no_autoflush:
+        rows = await db.execute(select(Equipment).where(Equipment.id.in_(unicos)))
+        encontrados = list(rows.scalars().all())
 
     if len(encontrados) != len(unicos):
         raise HTTPException(
