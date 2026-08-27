@@ -7,6 +7,66 @@ O changelog do produto (o que o cliente vê) fica em
 
 ---
 
+## 27/08/2026 (tarde) — O resumo da IA lia o começo da conversa, não o fim
+
+Fecha a Fase 5 na parte que não depende de decisão nenhuma. Três coisas, de
+tamanhos bem diferentes.
+
+### O bug de verdade
+
+`summarize_conversation` juntava todas as mensagens em ordem cronológica e
+guardava os **6000 primeiros caracteres**. O endpoint carregava 200 mensagens do
+banco para jogar fora justamente as que importam: numa conversa longa, o resumo
+descrevia como o chamado **começou**, e quem o abre está tentando descobrir onde
+ele **está**.
+
+O enunciado do problema nem dependia disso — título, categoria e status vão para
+o prompt por fora.
+
+Agora o corte guarda o fim e é **por mensagem**, não por caractere. Fatiar a
+string produzia linha truncada no meio da frase, e o modelo recebia `"o erro é
+TIMEO"` como se fosse conteúdo íntegro. O texto também avisa que houve corte,
+porque quem lê precisa saber que não viu tudo.
+
+### IA desligada deixou de responder como IA quebrada
+
+Os três endpoints devolviam o mesmo 503 "tente novamente mais tarde" nos dois
+casos — e com a flag desligada, retentar não ajuda nunca. A recusa virou
+dependência, então acontece **antes** de carregar chamado e mensagens do banco.
+A mensagem de provedor fora do ar continua mandando tentar de novo, porque ali
+tentar de novo é a coisa certa.
+
+### O endpoint sem teste
+
+`improve-message` é o único que manda para fora texto que o técnico **ainda não
+publicou**, e não tinha teste nenhum. Ganhou três: sucesso, provedor fora e
+recusa para cliente.
+
+### O que a frente da Helô já trouxe, e o que ainda não
+
+O Welton subiu `users.ai_enabled` e `tickets.ai_enabled` (`8e9286c`) com o
+helper `helo_pode_falar`, que combina os três níveis em conjunção — e sem
+permitir religar num nível mais específico, que é a semântica certa.
+
+⚠️ **Os interruptores ainda não estão ligados a nada.** `helo_pode_falar` não
+tem chamador nenhum, e `ai_enabled` não é consultado no `chat.py` nem no
+`tickets.py`. Para a Helô isso não muda nada (a conversa dela ainda não existe),
+mas a mensagem do commit diz que desligar no chamado já cala "a classificação
+automática e a sugestão de resposta" — e essas duas **são recursos existentes
+que continuam funcionando** com o interruptor desligado. É sequência de tijolo,
+não erro; só não vale ler como se já valesse.
+
+**E a flag por empresa continua sem existir**: os níveis são por usuário e por
+chamado. O nível por CNPJ depende de a empresa existir como entidade ligada ao
+cliente, que é a frente do `company_id`.
+
+| | Antes | Depois |
+|---|---|---|
+| Testes backend | 800 | **821** |
+| Cobertura | 87,6% | **87,7%** |
+
+---
+
 ## 27/08/2026 — O chat sobrevive a mais de um worker
 
 Fecha a Fase 3. Cada worker passa a assinar um canal Redis e reemitir para os
