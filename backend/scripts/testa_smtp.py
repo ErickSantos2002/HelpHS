@@ -125,7 +125,9 @@ def main() -> None:
     except smtplib.SMTPAuthenticationError as exc:
         sys.exit(f"FALHA na autenticacao: {exc}\n-> credencial errada ou sem permissao de envio.")
     except smtplib.SMTPSenderRefused as exc:
-        sys.exit(f"FALHA — remetente recusado: {exc}\n-> dominio do remetente nao verificado no provedor.")
+        sys.exit(
+            f"FALHA — remetente recusado: {exc}\n-> dominio do remetente nao verificado no provedor."
+        )
     except smtplib.SMTPRecipientsRefused as exc:
         sys.exit(f"FALHA — destinatario recusado: {exc}")
     except OSError as exc:
