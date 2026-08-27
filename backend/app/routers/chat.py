@@ -202,6 +202,28 @@ async def _authenticate_ws(token: str, db: AsyncSession) -> User | None:
     return user
 
 
+def _exige_ia_no_chamado(ticket: Ticket) -> None:
+    """
+    Recusa quando a IA foi desligada NESTE chamado.
+
+    O guard acima é a chave geral; este é o botão do técnico. Sem ele, "Desligar
+    IA neste chamado" calaria só a Helô e deixaria a sugestão de resposta e o
+    resumo funcionando — a promessa da tela maior que a do código, que é
+    exatamente o que o rótulo do botão não pode fazer.
+
+    Não é dependência como o outro porque precisa do chamado carregado: só dá
+    para saber depois de ler o banco, e o 404 de chamado alheio tem precedência.
+
+    409, e não 403: não é falta de permissão, é um estado do chamado que alguém
+    da equipe escolheu e qualquer um deles pode desfazer no mesmo botão.
+    """
+    if not ticket.ai_enabled:
+        raise HTTPException(
+            status_code=status.HTTP_409_CONFLICT,
+            detail="A IA está desligada neste chamado.",
+        )
+
+
 def _exige_ia_ligada() -> None:
     """Recusa a chamada quando a IA está desligada — antes de tocar no banco.
 
@@ -333,6 +355,7 @@ async def suggest_ticket_reply(
 ) -> SuggestReplyResponse:
     """Generate an AI-suggested reply for a technician based on ticket and chat history."""
     ticket = await _get_ticket_visivel(ticket_id, actor, db)
+    _exige_ia_no_chamado(ticket)
 
     # Load last 10 messages with sender info
     rows = await db.execute(
@@ -388,6 +411,7 @@ async def improve_ticket_message(
 ) -> ImproveMessageResponse:
     """Improve a technician's draft message using AI (grammar, clarity, professionalism)."""
     ticket = await _get_ticket_visivel(ticket_id, actor, db)
+    _exige_ia_no_chamado(ticket)
 
     result = await improve_message(
         draft=body.draft,
@@ -419,6 +443,7 @@ async def summarize_ticket_conversation(
     Returns the summary text. Subsequent calls regenerate and overwrite the stored summary.
     """
     ticket = await _get_ticket_visivel(ticket_id, actor, db)
+    _exige_ia_no_chamado(ticket)
 
     # Load all messages (up to 200 to keep context manageable)
     rows = await db.execute(

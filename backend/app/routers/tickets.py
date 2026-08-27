@@ -364,7 +364,13 @@ async def create_ticket(
             # só vale no INSERT, e a Helô é consultada ANTES do flush. Sem esta
             # linha `ticket.ai_enabled` é None no objeto em memória, `bool(None)`
             # é falso, e ela nunca falaria — em produção, silenciosamente.
-            ai_enabled=True,
+            #
+            # O chamado HERDA a preferência de quem o abriu. Materializar aqui
+            # deixa uma pergunta só a ser feita depois — "a IA pode atuar neste
+            # chamado?" —, em vez de todo consumidor ter que lembrar de olhar
+            # também o dono. Quem desligar o cliente depois não muda o passado,
+            # e é o que se quer: chamado em andamento não troca de regra no meio.
+            ai_enabled=bool(actor.ai_enabled),
             auto_closed=False,
             reopen_count=0,
             created_at=ts,
@@ -409,10 +415,15 @@ async def create_ticket(
 
     await db.refresh(ticket)
 
-    # Fire-and-forget LLM classification (non-blocking)
-    asyncio.create_task(
-        _classify_ticket_async(ticket.id, body.title, body.description, body.category.value)
-    )
+    # Fire-and-forget LLM classification (non-blocking).
+    #
+    # O interruptor do chamado vale aqui também: o botão diz "Desligar IA neste
+    # chamado", e classificar assim mesmo mandaria o texto do cliente para a
+    # OpenAI depois de alguém ter pedido para não mandar.
+    if ticket.ai_enabled:
+        asyncio.create_task(
+            _classify_ticket_async(ticket.id, body.title, body.description, body.category.value)
+        )
 
     return _serialize_ticket(ticket)
 

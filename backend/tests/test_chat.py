@@ -942,3 +942,58 @@ async def test_improve_message_e_do_staff(patch_redis):
         r = await client.post(f"/api/v1/tickets/{_TICKET_ID}/improve-message", json={"draft": "oi"})
 
     assert r.status_code == 403
+
+
+@pytest.mark.asyncio
+async def test_ia_desligada_no_chamado_recusa_a_sugestao(patch_redis):
+    """
+    O botão diz "Desligar IA neste chamado" e precisa desligar mesmo.
+
+    Antes disto ele calava só a Helô: sugestão de resposta, resumo e
+    classificação seguiam mandando o texto do cliente para a OpenAI depois de
+    alguém ter pedido para não mandar. A promessa da tela era maior que a do
+    código.
+
+    409 e não 403: não é falta de permissão, é um estado do chamado que a
+    própria equipe escolheu e desfaz no mesmo botão.
+    """
+    from app.core.database import get_db
+
+    tech = _mock_user(UserRole.technician)
+    ticket = _mock_ticket()
+    ticket.ai_enabled = False
+
+    app.dependency_overrides[get_db] = _db_seq_override(ticket)
+    _override_user(tech)
+
+    async with AsyncClient(transport=ASGITransport(app=app), base_url="http://test") as c:
+        resp = await c.post(f"/api/v1/tickets/{_TICKET_ID}/suggest-reply")
+
+    assert resp.status_code == 409, resp.text
+    assert "desligada neste chamado" in resp.json()["detail"]
+
+
+@pytest.mark.asyncio
+async def test_ia_desligada_nao_impede_gente_de_conversar(patch_redis):
+    """
+    O interruptor é da IA, não do chat.
+
+    Desligar a IA num chamado não pode calar o técnico e o cliente — seria
+    transformar um botão de "sem robô" num "sem atendimento".
+    """
+    from app.core.database import get_db
+
+    tech = _mock_user(UserRole.technician)
+    ticket = _mock_ticket()
+    ticket.ai_enabled = False
+
+    app.dependency_overrides[get_db] = _db_seq_override(ticket, _mock_message())
+    _override_user(tech)
+
+    async with AsyncClient(transport=ASGITransport(app=app), base_url="http://test") as c:
+        resp = await c.post(
+            f"/api/v1/tickets/{_TICKET_ID}/messages",
+            json={"content": "Bom dia, já estou olhando seu chamado."},
+        )
+
+    assert resp.status_code == 201, resp.text
