@@ -357,6 +357,49 @@ Quando o SMTP de produção entrar, ligar a confirmação é mudar a flag no pai
 — e é o mesmo gatilho da resposta neutra no cadastro (ver "Pendências
 conhecidas").
 
+### O envio sai pelo Resend, não pelo Microsoft 365 da empresa
+
+A empresa paga Microsoft 365 e a pergunta é inevitável: por que mais um
+fornecedor para mandar e-mail? Porque **o destinatário destes e-mails é o
+cliente, fora do tenant** — e o Exchange Online é feito para e-mail humano,
+não para disparo de aplicação.
+
+O que pesou, em ordem:
+
+- **Visibilidade.** "O cliente diz que não recebeu o link" é a ocorrência
+  número um em recuperação de senha. O Resend responde isso numa tela
+  (`delivered`, `bounced`, `complained`); no Exchange, a investigação é pelo
+  message trace, que dá bem mais trabalho e guarda menos tempo.
+- **Bounce e supressão.** Exchange Online não entrega webhook de bounce nem
+  mantém lista de supressão. Sem isso, endereço morto continua sendo tentado.
+- **Reputação separada.** O disparo automático sai de
+  `mail.healthsafetytech.com`, um subdomínio. Se um cliente marcar o e-mail
+  automático como spam, quem sofre é o subdomínio — não o domínio que a
+  empresa usa para falar com cliente todo dia.
+- **Prazo do Basic Auth.** SMTP AUTH com usuário e senha no Exchange Online
+  passa a vir desabilitado por padrão no fim de dez/2026. Funcionaria hoje,
+  mas viraria manutenção com data marcada.
+
+Duas alternativas foram descartadas por motivo concreto, e vale registrar para
+não serem re-propostas: o **HVE (High Volume Email)** seria o produto certo —
+conta de aplicação, sem consumir licença de caixa — mas **só envia para dentro
+do tenant** desde jun/2025. E o **Azure Communication Services Email** é
+tecnicamente equivalente ao Resend, inclusive com SMTP (`smtp.azurecomm.net`),
+com a vantagem de cair na mesma fatura MCA da Microsoft; perdeu por exigir
+subscription Azure, app registration e IAM para chegar no mesmo lugar. Se um
+dia a exigência for "nada fora da Microsoft", é para ele que se muda — não
+para o Exchange.
+
+**O DNS do domínio não foi tocado.** Os registros do M365 (MX, SPF `-all`,
+DKIM) continuam no domínio raiz exatamente como estavam; tudo do Resend
+(DKIM, SPF e o MX de bounce) vive sob `mail.healthsafetytech.com`, que era
+espaço vazio. Foi decisão de projeto, não acaso: mexer no SPF da raiz para
+acomodar um segundo remetente é o tipo de edição que derruba o e-mail
+corporativo inteiro se sair errada.
+
+Para conferir a configuração sem subir a aplicação, existe
+`backend/scripts/testa_smtp.py`.
+
 ### Fluxo
 
 Cadastro completo → conta criada bloqueada → e-mail com link → clique → conta

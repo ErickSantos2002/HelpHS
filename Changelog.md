@@ -10,6 +10,34 @@ Datas em DD/MM/AAAA.
 
 ## [Não publicado]
 
+### Infraestrutura
+- **O disparo de e-mail passa a existir, pelo Resend em vez do Microsoft 365.**
+  Confirmação de cadastro e redefinição de senha nunca tiveram por onde sair: o
+  `.env.example` semeava `smtp.gmail.com` com senha `CHANGE_ME`. O envio agora
+  sai de `mail.healthsafetytech.com`, subdomínio novo, com DKIM/SPF próprios.
+  - **Nenhum registro do M365 foi tocado.** MX, SPF (`-all`) e DKIM continuam
+    no domínio raiz como estavam — tudo do Resend vive sob o subdomínio, que
+    era espaço vazio. Editar o SPF da raiz para caber um segundo remetente é o
+    tipo de mudança que derruba o e-mail corporativo inteiro se sair errada.
+  - **Por que não o Exchange Online**, que a empresa já paga: o destinatário é
+    o cliente, fora do tenant; não há webhook de bounce nem lista de supressão,
+    a reputação do disparo automático fica colada à do domínio corporativo, e o
+    Basic Auth do SMTP vem desabilitado por padrão no fim de dez/2026. O HVE
+    resolveria, mas só envia para dentro do tenant desde jun/2025. Razões e as
+    alternativas descartadas em `docs/decisoes-e-regras.md`.
+  - `SMTP_USER` agora é a palavra literal `resend`, não um endereço — a senha é
+    a API key. Cada ambiente usa a sua, para revogar uma sem derrubar a outra.
+  - ⚠️ **`EMAIL_VERIFICATION_ENABLED` continua `false`.** A redefinição de senha
+    não depende dela — só a confirmação no cadastro depende. Ligar a flag é
+    decisão à parte, e só depois do envio verificado em produção.
+  - `backend/scripts/testa_smtp.py`: envia pelo `smtplib` da biblioteca padrão,
+    sem passar pelo FastAPI-Mail nem pelo `Settings`. Separa "credencial ou
+    domínio errados" de "defeito na aplicação", que é a dúvida que aparece
+    quando alguém diz que o e-mail não chegou. Não imprime a senha inteira.
+  - O bloco do **mailpit** (SMTP falso do `docker-compose.dev.yml`) ficou
+    comentado no `.env.example`: mexer no fluxo de e-mail em dev não precisa
+    gastar cota nem mandar mensagem de verdade para ninguém.
+
 ### Segurança
 - **Backplane do chat, para o tempo real sobreviver a mais de um worker**
   (`dfaa82f`). Cada worker assina `helphs:chat` no Redis e reemite para os
