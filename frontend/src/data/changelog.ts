@@ -20,6 +20,7 @@ export const CHANGELOG: ChangelogVersion[] = [
     entries: [
       { type: "novidade", text: "A Helô passa a responder no chamado assim que ele é aberto: dá as boas-vindas, acompanha a conversa e chama alguém da equipe quando você pede para falar com uma pessoa." },
       { type: "novidade", text: "A equipe pode desligar a IA em um cliente ou em um chamado específico. Desligada no chamado, ela para de fazer tudo ali — inclusive a classificação automática e a sugestão de resposta — e qualquer pessoa da equipe pode religar no mesmo botão." },
+      { type: "melhoria", text: "Ao criar uma conta com um e-mail que já está cadastrado, o sistema não avisa mais na tela que aquele endereço existe — em vez disso, envia uma mensagem ao dono do e-mail explicando que ele já tem conta e como entrar. Assim ninguém consegue descobrir, de fora, quem é cliente da Health & Safety." },
       { type: "corrigido", text: "Quando o login é bloqueado por tentativas erradas, a tela agora diz que é um bloqueio temporário e quantos minutos faltam. Antes a mensagem culpava a conexão, e não havia como saber quanto esperar." },
       { type: "corrigido", text: "Ao sair do sistema, o chat que estava aberto também é encerrado. Antes aquela conexão continuava valendo até a sessão vencer sozinha." },
       { type: "corrigido", text: "O filtro de situação da lista de usuários oferecia a opção \"Suspenso\", que não existe no sistema — escolhê-la fazia a lista deixar de carregar. A opção foi removida." },

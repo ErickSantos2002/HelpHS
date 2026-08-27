@@ -911,3 +911,44 @@ async def test_sem_e_mail_configurado_o_409_continua():
         assert r.status_code == 409
     finally:
         _restaura_email(original)
+
+
+@pytest.mark.asyncio
+async def test_cadastro_responde_antes_de_mandar_o_e_mail_de_conta_existente(smtp_configurado):
+    """O `#3.1` fechou o oráculo de RESPOSTA; este fecha o de TEMPO.
+
+    Sem `BackgroundTasks`, o caminho do e-mail já cadastrado esperaria o envio
+    terminar e o caminho do e-mail novo não — as duas respostas seriam idênticas
+    no corpo e distinguíveis no relógio, que é o mesmo vazamento com outra
+    régua.
+
+    A entrada do `Changelog.md` que documentou o tratamento nos outros fluxos já
+    dizia: *"o register fica de fora de propósito, mas quando o #3.1 o tornar
+    neutro este tratamento precisa ir junto"*. É este teste.
+
+    Mede **ordem**, não relógio: mock de rede não tem latência, e cronometrar em
+    CI compartilhado mediria o runner.
+    """
+    from app.core.database import get_db
+
+    app.dependency_overrides[get_db] = _db_with(_mock_user(email_verified=True))
+
+    with patch(
+        "app.routers.auth.send_account_exists_email", new=AsyncMock(return_value=True)
+    ) as aviso:
+        eventos = await _ordem_dos_eventos(
+            "/api/v1/auth/register",
+            _EMAIL,
+            aviso,
+            corpo_dict={
+                "name": "Fulano",
+                "email": _EMAIL,
+                "password": "Senha@123456",
+                "lgpd_consent": True,
+            },
+        )
+
+    assert "envio" in eventos, "o aviso precisa continuar saindo para quem já tem conta"
+    assert eventos.index("http.response.body") < eventos.index(
+        "envio"
+    ), f"o envio acontece antes de a resposta sair — o tempo denuncia quem tem conta: {eventos}"

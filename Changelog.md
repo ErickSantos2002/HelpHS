@@ -39,6 +39,30 @@ Datas em DD/MM/AAAA.
     gastar cota nem mandar mensagem de verdade para ninguém.
 
 ### Segurança
+- **O cadastro para de contar quem já tem conta — o `#3.1`** (`9988fe4`). O
+  `POST /register` respondia `409` *"Este e-mail já está cadastrado"*: para quem
+  tem uma lista de endereços, isso é um oráculo — dá para descobrir quem é
+  cliente da Health & Safety sem nunca acertar uma senha.
+  - O desenho estava **aprovado desde agosto** e adiado por uma razão boa: sem
+    e-mail, a resposta neutra deixa a pessoa legítima sem saída — ela registra de
+    novo, vai ao login, a senha nova não funciona e nada explica por quê. O
+    Resend (`5630edc`) destravou.
+  - ⚠️ **A neutralidade é por construção, não por coincidência.** A resposta
+    virou um schema próprio que **não carrega dado de conta**: só o e-mail
+    digitado (que quem pediu já sabe) e o `email_verified` que a tela usa.
+    Devolver `id` e `name` obrigaria a inventá-los no caminho do e-mail
+    existente — ou a devolver os da conta alheia, que vazaria **mais** que o 409
+    que veio substituir. Há mutação provando isso.
+  - **Depende de haver como avisar:** sem SMTP o `409` volta, e o porquê está
+    escrito no código. É o mesmo motivo que segurou o achado por dois meses.
+  - O envio sai por `BackgroundTasks`, fechando também o oráculo de **tempo** —
+    a entrada abaixo, de quando os outros fluxos ganharam esse tratamento, já
+    deixava dito que o register precisaria dele ao virar neutro. Teste de ordem
+    pelo ASGI cru, como os outros.
+  - O front foi alinhado junto: a interface declarava um `id` que o backend
+    deixou de mandar. Mesma classe de defeito que mordeu o projeto duas vezes
+    esta semana — tipo do TypeScript afirmando sobre o runtime em vez de
+    verificar.
 - **Backplane do chat, para o tempo real sobreviver a mais de um worker**
   (`dfaa82f`). Cada worker assina `helphs:chat` no Redis e reemite para os
   próprios sockets. Sem isso, subir `--workers 2` não estourava nada: as
@@ -284,9 +308,10 @@ Datas em DD/MM/AAAA.
   `BackgroundTasks` a resposta sai antes de o envio começar. O teste mede
   **ordem**, não relógio (mock de rede não tem latência e teste de tempo em CI
   compartilhado mediria o runner): pelo ASGI cru, o corpo da resposta precisa
-  sair antes do envio. O `register` fica de fora de propósito — lá a resposta
-  já difere por ramo (`409`), mas quando o **#3.1** o tornar neutro este
-  tratamento precisa ir junto.
+  sair antes do envio. O `register` ficava de fora de propósito — lá a resposta
+  ainda diferia por ramo (`409`). ✅ **Fechado em 27/08 pelo `#3.1`** (`9988fe4`):
+  a resposta virou neutra e o envio ganhou o mesmo `BackgroundTasks`, com teste
+  de ordem próprio.
 - **Chamado alheio deixa de denunciar que existe** (`7371bc7`). Para o cliente,
   o chamado de outra pessoa passa a responder `404`, com o mesmo texto de um id
   inexistente, em vez do `403` que confirmava a existência — com uma lista de
