@@ -63,8 +63,9 @@ texto. Sem isso não há como provar depois.
 
 ### O que já estava pronto quando a validação chegou
 
-- `register_first_response` ignora `is_ai` (`230d670`) — a fala da Helô não
-  zera o SLA, que era o 🔴 #1 da revisão técnica
+- `register_first_response` desacoplado do status (`230d670`) — resolveu o
+  🔴 #1 da revisão técnica. Ele nasceu ignorando `is_ai`; em 28/08 o cliente
+  pediu o contrário e a fala dela passou a carimbar (ver a seção do SLA)
 - `LLM_ENABLED` desliga a IA sem esvaziar as chaves
 
 ---
