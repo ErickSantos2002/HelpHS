@@ -312,16 +312,25 @@ def test_first_response_e_idempotente():
     assert ticket.sla_first_response == primeira
 
 
-def test_first_response_ignora_mensagem_da_ia():
-    """A Helô não zera o relógio — o SLA espera um humano."""
+def test_first_response_conta_a_fala_da_ia():
+    """
+    A Helô carimba — decisão do cliente em 28/08, revertendo o desenho.
+
+    Substitui `test_first_response_ignora_mensagem_da_ia`. Para quem está do
+    outro lado o atendimento começou, e dizer "aguardando primeira resposta" a
+    quem acabou de ser respondido é o indicador mentindo para o outro lado.
+
+    Ela fala com remetente NULO, e por isso o teste passa `responder_id=None`:
+    é assim que a chamada acontece de verdade em `abre_triagem`. Com a checagem
+    de autor valendo para a IA, o carimbo seria recusado justamente no caso que
+    o cliente pediu.
+    """
     ticket = _mock_ticket()
 
-    marcou = register_first_response(
-        ticket, _sp(2026, 4, 6, 9, 30), responder_id=_TECNICO_ID, is_ai=True
-    )
+    marcou = register_first_response(ticket, _sp(2026, 4, 6, 9, 30), responder_id=None, is_ai=True)
 
-    assert marcou is False
-    assert ticket.sla_first_response is None
+    assert marcou is True
+    assert ticket.sla_first_response is not None
 
 
 def test_first_response_ignora_mensagem_do_sistema():

@@ -31,7 +31,7 @@ from app.models.models import (
 # Uma cópia da regra aqui é o defeito que este projeto já pagou caro: doze
 # cópias de "é seu?" espalhadas em quatro arquivos. Se um dia a jornada mudar,
 # ela muda num lugar e a Helô acompanha sozinha.
-from app.utils.sla import _advance_to_business_hours, _to_sp
+from app.utils.sla import _advance_to_business_hours, _to_sp, register_first_response
 
 _DIAS = (
     "segunda-feira",
@@ -267,12 +267,16 @@ async def abre_triagem(
     # "Em andamento" por decisão do cliente em 26/08, em vez de um status novo
     # `ai_handling`. O efeito colateral está registrado no desenho: a coluna
     # passa a incluir chamado sem técnico atribuído.
-    #
-    # E NÃO se toca no SLA aqui: `register_first_response` ignora `is_ai`, então
-    # o relógio de primeira resposta continua correndo até um humano falar. Se
-    # a fala dela zerasse o relógio, o indicador viraria 100% permanente e
-    # mediria a velocidade de um robô, que é sempre a mesma.
     ticket.status = TicketStatus.in_progress
+
+    # A saudação dela CARIMBA a primeira resposta — decisão do cliente em
+    # 28/08, revertendo o desenho. Para quem está do outro lado, o atendimento
+    # começou: dizer "aguardando primeira resposta" a quem acabou de ser
+    # respondido é o indicador mentindo para o outro lado.
+    #
+    # O preço está escrito em `register_first_response`, e é real: este número
+    # vira ~100% permanente e para de medir a equipe.
+    register_first_response(ticket, datetime.now(UTC), responder_id=None, is_ai=True)
     return True
 
 

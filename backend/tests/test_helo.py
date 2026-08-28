@@ -255,6 +255,9 @@ def _chamado(**kwargs):
     t.status = TicketStatus.open
     t.ai_enabled = True
     t.sla_first_response = None
+    t.sla_response_due_at = None
+    t.sla_response_breach = False
+    t.sla_total_paused_ms = 0
     for k, v in kwargs.items():
         setattr(t, k, v)
     return t
@@ -286,20 +289,24 @@ async def test_triagem_grava_a_fala_dela_e_move_para_em_andamento(helo_ligada):
 
 
 @pytest.mark.asyncio
-async def test_a_fala_dela_nao_carimba_primeira_resposta(helo_ligada):
+async def test_a_fala_dela_carimba_primeira_resposta(helo_ligada):
     """
-    O relógio do SLA continua correndo até um humano falar.
+    Decisão do cliente em 28/08, revertendo o desenho original.
 
-    Se a resposta dela zerasse o relógio, TODO chamado teria primeira resposta
-    em segundos e o indicador viraria 100% permanente — mediria a velocidade de
-    um robô, que é sempre a mesma, em vez do atendimento da equipe.
+    O argumento dele: quando ela responde, o atendimento começou de fato, e
+    mostrar "aguardando primeira resposta" a quem acabou de ser respondido é o
+    indicador mentindo para o outro lado.
+
+    Substitui `test_a_fala_dela_nao_carimba_primeira_resposta`, que prendia a
+    regra oposta. O preço da troca está escrito em `register_first_response`:
+    com a Helô ligada este indicador vira ~100% permanente.
     """
     db = _db_com_produto()
     ticket = _chamado()
 
     await abre_triagem(db, ticket, _cliente(), [])
 
-    assert ticket.sla_first_response is None
+    assert ticket.sla_first_response is not None
 
 
 @pytest.mark.asyncio

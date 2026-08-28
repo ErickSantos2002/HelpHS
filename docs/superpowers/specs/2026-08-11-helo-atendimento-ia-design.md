@@ -191,9 +191,23 @@ aceita "não" é pior do que robô nenhum.
 | Fora do horário | Faz a triagem igual; muda só a frase final |
 | Qual dia ela cita fora do horário | O **próximo dia útil**, calculado — nunca "amanhã" fixo |
 | Depois de escalar | Silêncio total — o chamado é do humano |
-| Conta como primeira resposta do SLA | **Não** |
+| Conta como primeira resposta do SLA | **Sim** — revertido em 28/08 (ver abaixo) |
 
-### Por que a Helô não conta para o SLA
+### ~~Por que a Helô não conta para o SLA~~ — revertido em 28/08
+
+> **O cliente pediu o contrário.** Quando ela responde, o atendimento começou
+> de fato, e mostrar "aguardando primeira resposta" a quem acabou de ser
+> respondido é o indicador mentindo para o outro lado. A saudação passa a
+> carimbar `sla_first_response`.
+>
+> O preço, aceito com a decisão: com a Helô ligada, todo chamado tem primeira
+> resposta em segundos e o indicador vira ~100% permanente. Ele deixa de medir
+> a equipe e passa a medir o robô. Se um dia fizer falta saber quanto o cliente
+> esperou por um HUMANO, isso vira coluna nova — não dá para extrair desta.
+>
+> O texto abaixo fica como registro do que foi desenhado e por quê.
+
+### Por que a Helô não contava para o SLA
 
 Se a resposta dela zerasse o relógio, **todo chamado teria primeira resposta em
 segundos** e o indicador de SLA viraria 100% permanente. O número deixaria de

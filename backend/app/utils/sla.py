@@ -206,15 +206,33 @@ def register_first_response(
     pessoa, não houve ninguém do outro lado esperando, e um tempo de resposta
     de zero segundo só sujaria a média de uma conversa que não existiu.
 
+    **A fala da Helô CARIMBA** — decisão do cliente em 28/08/2026, revertendo
+    o desenho original. O argumento dele: quando ela responde, o atendimento
+    começou de fato, e mostrar "aguardando primeira resposta" para um cliente
+    que acabou de ser respondido é o indicador mentindo para o lado contrário.
+
+    O preço está registrado aqui porque ele é real e não aparece sozinho: com
+    a Helô ligada, todo chamado passa a ter primeira resposta em segundos, e
+    este indicador vira ~100% permanente. Ele deixa de medir a equipe e passa
+    a medir o robô, que é sempre rápido. Se um dia fizer falta saber quanto o
+    cliente esperou por um HUMANO, esse número não existe mais — seria uma
+    coluna nova, não um filtro sobre esta.
+
+    `is_system` continua sem carimbar: mensagem automática de mudança de
+    status não é alguém falando com o cliente.
+
     A violação é avaliada ANTES do carimbo porque `check_breaches` só olha o
     prazo enquanto `sla_first_response` é nulo — na ordem inversa, a resposta
     atrasada apagava a própria violação.
     """
     if ticket.sla_first_response is not None:
         return False
-    if is_ai or is_system:
+    if is_system:
         return False
-    if responder_id is None or responder_id == ticket.creator_id:
+    # A Helô não tem `responder_id` — ela fala com remetente nulo. A checagem
+    # de autor abaixo existe para gente, e sem esta saída ela recusaria o
+    # carimbo justamente no caso que o cliente pediu.
+    if not is_ai and (responder_id is None or responder_id == ticket.creator_id):
         return False
 
     offset = timedelta(milliseconds=ticket.sla_total_paused_ms or 0)
