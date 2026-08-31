@@ -351,6 +351,38 @@ Datas em DD/MM/AAAA.
   de ter sido cliente.
 
 ### Corrigido
+- **A versão do backend congelou de novo — 1.8.0 com o produto em v1.11.0**
+  (`e5debd5`). O `dcfc25f` unificou a fonte porque o número vivia escrito à mão
+  em dois pontos do `main.py` e as duas cópias pararam em `"1.0.0"`. Unificar
+  não bastou: a fonte única recongelou **uma versão depois**.
+  - ⚠️ **O silêncio tem causa, e a causa é a lição.** `__version__` só alimenta
+    o construtor do FastAPI, logo só o spec OpenAPI — e o spec está fechado em
+    produção (`/openapi.json` e `/docs` respondem 404). O único espelho que
+    denunciaria a defasagem foi desligado por outra razão, boa. Ninguém vê o
+    número errado, então ninguém corrige. **Fonte única sem ninguém conferindo
+    volta a congelar**: a correção que importa é o teste, não o número.
+  - `test_a_versao_do_backend_acompanha_a_versao_do_produto` compara o
+    `app/__init__.py` com o `APP_VERSION` de `frontend/src/data/changelog.ts`,
+    que é a versão que o cliente vê. **Mutação conferida nos dois sentidos:**
+    mexer só num dos lados derruba a suíte.
+  - **O "v" é traduzido no teste, não alinhado nas pontas.** No front
+    `APP_VERSION` é texto de tela — o Sidebar imprime "HelpHS v1.11.0" e o
+    modal casa com as entradas do `CHANGELOG`, todas com "v". No backend o
+    valor vira o `info.version` do OpenAPI e o dunder de um pacote Python, que
+    pedem o número puro. Cada ponta guarda o formato do seu domínio; a
+    conversão é de quem compara.
+  - **Arquivo do front ausente falha, não pula** — decidido, não herdado. O
+    `.dockerignore` exclui `tests/`, então a imagem do backend não leva a
+    suíte: o checkout só-backend que justificaria o skip não roda `pytest`
+    nenhum. O arquivo sumir significa front movido, renomeado ou checkout pela
+    metade, e nos três casos um skip devolveria verde justamente ao teste cuja
+    única razão de existir é impedir o congelamento silencioso. O ramo foi
+    exercitado de verdade, renomeando o `changelog.ts`.
+  - A raiz do repositório sai de `Path(__file__).resolve().parents[2]`,
+    ancorada no arquivo de teste e não no diretório de onde o `pytest` foi
+    chamado — a suíte roda de `backend/` (CI, README) e também da raiz. Mesmo
+    idioma de `test_seeds.py` e `test_seeds_e2e.py`, que já atravessam para o
+    front.
 - **Chamado sem responsável ia para "Aguardando técnico" e parava o relógio do
   SLA** (`9eeb683`). O estado só faz sentido quando existe um técnico esperando
   por ele — sem `assignee_id` o chamado ainda não é de ninguém, e mandá-lo para
