@@ -7,6 +7,12 @@
 Mas há um pré-requisito não previsto (SLA), uma quebra de contrato da API e
 uma migration delicada. A Fase 1 constrói um pouco mais de infraestrutura do
 que o desenho estima.
+**Emendado em 31/08/2026 (`71f84cb`):** a DeepSeek passou a ser o provedor
+único de LLM. Duas afirmações abaixo envelheceram: a integração **não tem mais
+fallback Anthropic** (continua assíncrona, que era o ponto da linha), e o
+destino do dado do cliente na Fase 1 **não é a OpenAI** — é a DeepSeek. A
+análise de LGPD que este documento faz continua valendo no mérito: muda para
+quem o texto sai, não o fato de sair.
 
 ---
 

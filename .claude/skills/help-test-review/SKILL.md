@@ -91,7 +91,10 @@ Casos de borda reais deste domínio:
 - **Upload**: extensão fora da allowlist, arquivo acima do limite, ClamAV
   indisponível
 - **LLM**: timeout ou 500 do provider **não pode derrubar a criação do
-  chamado**; fallback OpenAI → Anthropic
+  chamado**. **Não há fallback** desde o `71f84cb` — a DeepSeek é provedor
+  único, e uma falha devolve `None` sem segunda tentativa. Sem chave, as
+  quatro funções devolvem `None` em silêncio: sem exceção, sem HTTP e sem log
+  de aviso
 - **E-mail não configurado**: sem SMTP, o cadastro libera acesso na hora
   (`requires_email_verification` em `config.py`) — os dois caminhos precisam
   de teste

@@ -3,6 +3,15 @@
 **Data:** 11/08/2026
 **Status:** validado com o cliente em 26/08/2026 — em construção
 **Fases:** 3 — este documento detalha a Fase 1 e esboça as seguintes
+**Emendado em 31/08/2026 (`71f84cb`):** o provedor de LLM mudou. Onde este
+documento diz **OpenAI (`gpt-4o-mini`) com fallback Anthropic**, leia
+**DeepSeek, provedor único e sem fallback** — decisão do Rickelme. A
+integração continua pronta e assíncrona; o que deixou de existir é a segunda
+tentativa em outro provedor. A estimativa de custo mais abaixo foi calculada
+sobre o preço do `gpt-4o-mini` e **não foi refeita**: o número de chamadas por
+chamado (1 a 2) continua valendo, o preço por chamada não. O endpoint e o nome
+do modelo da DeepSeek ainda não foram conferidos contra a documentação oficial
+— são configuração (`DEEPSEEK_BASE_URL`, `DEEPSEEK_MODEL`), não constante.
 
 ---
 
