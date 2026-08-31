@@ -34,6 +34,18 @@ Mudança de status **não conta**, nem para "Aguardando cliente". Se o
 atendimento aconteceu por telefone, a fala precisa virar mensagem no chamado
 de qualquer forma — para o indicador e para o próximo técnico que pegar o caso.
 
+**A fala da Helô conta** — decisão do cliente em 28/08/2026. Quando ela
+responde, o atendimento começou de fato, e dizer "aguardando primeira resposta"
+a quem acabou de ser respondido é o indicador mentindo para o outro lado. A
+saudação dela carimba `sla_first_response` no mesmo instante em que o chamado
+nasce.
+
+O desenho original dizia o contrário, e o motivo continua verdadeiro — está
+registrado em `docs/superpowers/specs/2026-08-11-helo-atendimento-ia-design.md`
+junto da reversão. Mensagem automática de sistema (`is_system`) segue sem
+carimbar: mudança de status anunciada no chat não é alguém falando com o
+cliente.
+
 Até 20/08/2026 a regra era outra, e media coisa diferente do que o nome dizia:
 o carimbo acontecia quando o chamado **saía de "Aberto"**. Como o mapa de
 transições só permite `open → in_progress` e `open → cancelled`, "primeira
@@ -51,6 +63,14 @@ avaliação de prazo, e `check_breaches` só olha o prazo enquanto
 com `sla_response_breach = False`. Hoje `register_first_response`
 (`app/utils/sla.py`) avalia a violação antes de carimbar, e é o único ponto do
 sistema que grava esse campo.
+
+> ⚠️ **Com a Helô ligada, este indicador tende a 100%.** Todo chamado passa a
+> ter primeira resposta em segundos, porque ela responde na abertura. O número
+> deixa de medir a equipe e passa a medir o robô, que é sempre rápido — a
+> consequência foi dita antes da decisão e aceita com ela. Quem quiser saber
+> quanto o cliente esperou por um **humano** precisa de uma coluna nova: não dá
+> para extrair essa informação desta, porque o carimbo é um só e já foi usado.
+> A flag `HELO_ENABLED` desliga a Helô, e com ela o indicador volta ao que era.
 
 > ⚠️ **Os números de primeira resposta mudaram a partir da v1.8.0.** O card de
 > violação sobe e o tempo médio sobe — não porque o atendimento piorou, mas
