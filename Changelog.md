@@ -351,6 +351,17 @@ Datas em DD/MM/AAAA.
   de ter sido cliente.
 
 ### Corrigido
+- **Chamado sem responsável ia para "Aguardando técnico" e parava o relógio do
+  SLA** (`9eeb683`). O estado só faz sentido quando existe um técnico esperando
+  por ele — sem `assignee_id` o chamado ainda não é de ninguém, e mandá-lo para
+  lá anuncia um atendimento que não começou. Antes da Helô o caso quase não
+  aparecia: o cliente raramente escrevia antes de alguém falar com ele. Com ela
+  respondendo à triagem em segundos, **todo** chamado triado caía nesse estado
+  — que ainda por cima está em `_PAUSE_STATUSES` e **parava a contagem de
+  prazo justamente enquanto o cliente esperava um humano**. O indicador ficaria
+  melhor que a realidade em todo chamado novo. A regra passa a exigir
+  `assignee_id`; depois que um técnico se vincula, tudo volta a funcionar como
+  sempre funcionou.
 - **O resumo da IA cortava a conversa pelo lado errado** (`40d4209`).
   `summarize_conversation` fazia `history_text[:6000]`: juntava as mensagens em
   ordem cronológica e guardava os **primeiros** 6000 caracteres. O endpoint
@@ -675,6 +686,23 @@ Datas em DD/MM/AAAA.
   `register_first_response` avalia antes de carimbar.
 
 ### Alterado
+- **A fala da Helô passa a carimbar a primeira resposta do SLA** (`77237c1`).
+  Decisão do cliente em 28/08/2026, revertendo o desenho de 11/08: quando ela
+  responde, o atendimento começou de fato, e mostrar "aguardando primeira
+  resposta" para quem acabou de ser respondido é o indicador mentindo para o
+  lado contrário. A guarda de "não é o autor" passou a valer **só para gente**
+  — a Helô fala com remetente nulo e, sem uma saída explícita, seria recusada
+  justamente no caso que o cliente pediu. `is_system` continua sem carimbar.
+  - ⚠️ **O preço, dito antes da decisão e aceito junto com ela:** com a Helô
+    ligada todo chamado ganha primeira resposta em segundos, e o indicador vira
+    **~100% permanente**. Ele deixa de medir a equipe e passa a medir o robô,
+    que é sempre rápido. Quanto o cliente esperou por um **humano** não existe
+    mais — seria coluna nova, não filtro sobre esta.
+  - A consequência está registrada nos dois lugares onde alguém a encontraria:
+    como **dívida com gatilho** em `docs/decisoes-e-regras.md`, junto da
+    definição da regra e de um aviso ao lado do que já existia sobre a v1.8.0;
+    e como **nota de emenda** no spec de 20/08, que previa o efeito contrário
+    ("o número vai piorar no dia do deploy") e agora diz por que não piorou.
 - **O uvicorn sobe com um worker enquanto o chat depender da memória do
   processo** (`9175752`). O `ConnectionManager` guarda as conexões WebSocket
   num dicionário **do processo**. Com dois workers, duas pessoas no mesmo

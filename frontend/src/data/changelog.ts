@@ -1,4 +1,4 @@
-export const APP_VERSION = "v1.10.0";
+export const APP_VERSION = "v1.11.0";
 
 export type EntryType = "novidade" | "corrigido" | "melhoria";
 
@@ -14,6 +14,14 @@ export interface ChangelogVersion {
 }
 
 export const CHANGELOG: ChangelogVersion[] = [
+  {
+    version: "v1.11.0",
+    date: "31/08/2026",
+    entries: [
+      { type: "melhoria", text: "A resposta da Helô passou a contar como a primeira resposta do chamado. Como ela responde em segundos, o indicador de primeira resposta dentro do prazo sobe para perto de 100% a partir desta versão: ele passa a medir o atendimento da IA, e não mais quanto tempo o cliente esperou até alguém da equipe falar com ele." },
+      { type: "corrigido", text: "Chamado que ainda não tem responsável deixou de ir para \"Aguardando técnico\" quando o cliente responde. Aquele estado pausa a contagem de prazo — ou seja, o relógio parava justamente enquanto o cliente esperava alguém da equipe assumir. Ele volta a ser usado só depois que um técnico assume o chamado." },
+    ],
+  },
   {
     version: "v1.10.0",
     date: "27/08/2026",

@@ -6,6 +6,12 @@
 [2026-08-20-revisao-helo-fase-1.md](2026-08-20-revisao-helo-fase-1.md) (`87dd05a`),
 que revisa o [desenho da Helô](2026-08-11-helo-atendimento-ia-design.md) (Welton)
 **Status:** aprovado e implementado; sem migration, sem backfill
+**Emendado em 28/08/2026 (`77237c1`):** a regra abaixo continua valendo para
+gente, mas a fala da **Helô** passou a carimbar também — decisão do cliente,
+revertendo o desenho de 11/08. Isso inverte a previsão que este documento faz
+logo abaixo: com a IA atendendo primeiro, o número não piora, ele sobe para
+perto de 100% — e deixa de medir a equipe. O porquê está no docstring de
+`register_first_response` e em `docs/decisoes-e-regras.md`.
 
 Este documento existe para responder **"por que o número mudou?"**. O card de
 violação de resposta e o tempo médio de primeira resposta vão piorar no dia do

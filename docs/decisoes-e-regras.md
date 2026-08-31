@@ -30,9 +30,19 @@ resolução como rede de segurança — a nota de resolução é texto que o cli
 lê, e sem ela o chamado resolvido sem conversa nenhuma ficaria eternamente sem
 resposta registrada.
 
-Mudança de status **não conta**, nem para "Aguardando cliente". Se o
-atendimento aconteceu por telefone, a fala precisa virar mensagem no chamado
-de qualquer forma — para o indicador e para o próximo técnico que pegar o caso.
+**A fala da Helô também carimba** — decisão do cliente em 28/08/2026,
+revertendo o desenho de 11/08. O argumento: quando ela responde, o
+atendimento começou de fato, e mostrar "aguardando primeira resposta" para
+quem acabou de ser respondido é o indicador mentindo para o lado contrário. A
+guarda de "não é o autor" passou a valer **só para gente** — a Helô fala com
+remetente nulo, e sem uma saída explícita para ela a regra a recusaria
+justamente no caso que o cliente pediu.
+
+Mudança de status **não conta**, nem para "Aguardando cliente" — nem a
+mensagem automática que a acompanha, que é o sistema narrando a si mesmo e não
+alguém falando com o cliente. Se o atendimento aconteceu por telefone, a fala
+precisa virar mensagem no chamado de qualquer forma — para o indicador e para
+o próximo técnico que pegar o caso.
 
 Até 20/08/2026 a regra era outra, e media coisa diferente do que o nome dizia:
 o carimbo acontecia quando o chamado **saía de "Aberto"**. Como o mapa de
@@ -58,6 +68,15 @@ sistema que grava esse campo.
 > violação atrasada. Comparações com relatórios anteriores a essa data não são
 > justas. O levantamento dos treze caminhos que alimentavam a regra antiga está
 > em `docs/superpowers/specs/2026-08-20-primeira-resposta-sla-design.md`.
+
+> ⚠️ **E mudaram de novo, na direção oposta, quando a Helô passou a
+> carimbar.** Com ela ligada todo chamado ganha primeira resposta em segundos:
+> o indicador sobe para perto de 100% e o tempo médio despenca. Não é a equipe
+> ficando mais rápida — é o indicador **deixando de medir a equipe e passando
+> a medir o robô**, que é sempre rápido. Enquanto a Helô atender primeiro,
+> este número não serve para avaliar gente, e comparação só é justa entre
+> períodos do mesmo lado de 28/08/2026. O preço foi dito antes da decisão e
+> aceito junto com ela.
 
 ## Ciclo de encerramento do chamado
 
@@ -824,6 +843,7 @@ por inércia.
 | **Prazo de resposta sem campo por ciclo** | Reabrir renova só o prazo de resolução. A exibição foi corrigida (o chip diz "Respondido" em vez de mentir "Vencido"), mas o ciclo novo não ganha prazo de resposta próprio. | A operação precisar medir a resposta do ciclo reaberto. Exige um campo por ciclo, não por chamado. |
 | ~~**Sem MFA para contas de staff**~~ | **Quitada em 26/08/2026** — ver "Segundo fator" abaixo. | — |
 | **Access token sobrevive à revogação de sessão** | Ativar ou desligar o segundo fator apaga o refresh, despejando as sessões. Os access tokens já emitidos, porém, valem até o próprio vencimento: a exposição cai de 7 dias para 8 h, não para zero. Fechar de verdade pede um `sessions_valid_after` conferido no `get_current_user`. | Houver incidente real de sessão comprometida — ou o TTL do access subir. |
+| **Não existe mais o tempo de espera por um HUMANO** | Consequência aceita da decisão de 28/08/2026 (ver "O que conta como primeira resposta"): com a Helô carimbando, o único tempo gravado é o dela. Quanto o cliente esperou até alguém de carne e osso responder deixou de entrar no banco — e por isso **não volta por filtro nem por relatório**, só por coluna nova. | A operação precisar cobrar prazo da equipe, ou alguém estranhar o indicador vivendo em 100%. A saída é um campo próprio (`sla_first_human_response`), carimbado no mesmo ponto e com a guarda de autor que valia antes. |
 | **Contador de artigo útil sem voto identificado** | `POST /kb/articles/{id}/feedback` incrementa sem registrar quem votou; o mesmo usuário incrementa em laço. Não vaza nada. | O número for usado para decidir alguma coisa. |
 | **Antivírus aceita quando está fora do ar** | Bloquear upload com o ClamAV indisponível derrubaria o anexo por falha de infraestrutura. Hoje o estado é reportado, não mais silencioso, e há script de revarredura. | O ClamAV estiver no ambiente e estável — aí bloquear passa a custar pouco. |
 
