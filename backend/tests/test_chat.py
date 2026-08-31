@@ -950,9 +950,9 @@ async def test_ia_desligada_no_chamado_recusa_a_sugestao(patch_redis):
     O botão diz "Desligar IA neste chamado" e precisa desligar mesmo.
 
     Antes disto ele calava só a Helô: sugestão de resposta, resumo e
-    classificação seguiam mandando o texto do cliente para a OpenAI depois de
-    alguém ter pedido para não mandar. A promessa da tela era maior que a do
-    código.
+    classificação seguiam mandando o texto do cliente para o provedor de LLM
+    depois de alguém ter pedido para não mandar. A promessa da tela era maior
+    que a do código.
 
     409 e não 403: não é falta de permissão, é um estado do chamado que a
     própria equipe escolheu e desfaz no mesmo botão.

@@ -430,8 +430,8 @@ async def create_ticket(
     # Fire-and-forget LLM classification (non-blocking).
     #
     # O interruptor do chamado vale aqui também: o botão diz "Desligar IA neste
-    # chamado", e classificar assim mesmo mandaria o texto do cliente para a
-    # OpenAI depois de alguém ter pedido para não mandar.
+    # chamado", e classificar assim mesmo mandaria o texto do cliente para o
+    # provedor de LLM depois de alguém ter pedido para não mandar.
     if ticket.ai_enabled:
         asyncio.create_task(
             _classify_ticket_async(ticket.id, body.title, body.description, body.category.value)
