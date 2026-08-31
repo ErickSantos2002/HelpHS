@@ -45,6 +45,17 @@ do SLA** (`_PAUSE_STATUSES` em `app/utils/sla.py`). O cliente ficaria
 esperando um humano com o cronômetro parado, o oposto do que o indicador deve
 mostrar. Em `in_progress` o relógio corre.
 
+> ⚠️ **Emendado em 28/08/2026 — o ganho valeu, mas o perigo voltou por outra
+> porta.** Tirar o `ai_handling` resolveu a transição da *triagem*, e só ela.
+> Em 28/08 foi preciso o `9eeb683` para o mesmo perigo chegando por outro
+> caminho: o **cliente responde**, o chamado ainda não tem responsável, e a
+> regra o mandava para "Aguardando técnico" do mesmo jeito — parando o
+> relógio justamente enquanto ele esperava um humano. Antes da Helô o caso
+> quase não aparecia; com ela triando em segundos, passou a atingir **todo**
+> chamado novo. A regra passou a exigir `assignee_id`. Quem ler o parágrafo
+> acima e concluir que "Aguardando técnico" está resolvido por desenho vai
+> deixar de procurar a terceira porta, se houver.
+
 **O preço, registrado para não virar surpresa:** "Em andamento" passa a
 incluir chamado sem técnico atribuído — a Helô conversando, ou a triagem
 encerrada esperando alguém pegar. Se a coluna for usada como "estou cuidando
@@ -413,7 +424,7 @@ sozinha amanhã.
 | Cliente se irrita por falar com robô | Alta | Ela escala na hora se pedirem humano, sem insistir |
 | Instrução técnica errada (Fase 2) | Alta | Só responde o que está na base; não achou, escala |
 | Chamado preso se o LLM falhar | Média | Escala automática em qualquer erro |
-| Métrica de SLA distorcida | Média | Resposta da IA não conta como primeira resposta |
+| Métrica de SLA distorcida | **Aceito** (era Média) | ⚠️ **A mitigação caiu em 28/08.** A fala da Helô **passou a carimbar** a primeira resposta, por decisão do cliente. O risco não foi mitigado: foi **aceito**, com o preço declarado antes e junto da decisão — o indicador vira ~100% permanente e deixa de medir a equipe. Ver a seção do SLA acima e a dívida com gatilho em `docs/decisoes-e-regras.md`. |
 | Custo de API | Baixa | Teto de mensagens; saudação sem LLM |
 
 ---
