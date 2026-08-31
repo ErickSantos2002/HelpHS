@@ -1,19 +1,68 @@
 """
 Unit tests for the LLM service (T52 — Sprint 6).
 All HTTP calls are mocked; no real API keys required.
+
+O DeepSeek e o unico provedor. Os testes que existiam mockavam OpenAI e
+Anthropic; os que sobreviveram foram reescritos para provar a MESMA coisa
+contra o provedor unico, e os que so existiam por causa do fallback foram
+trocados por um que prova o oposto: que nao ha segunda tentativa.
 """
 
+from contextlib import contextmanager
 from unittest.mock import AsyncMock, MagicMock, patch
 
 import pytest
+from loguru import logger
 
 from app.services import llm
 from app.services.llm import (
     _parse_json_response,
     classify_ticket,
+    improve_message,
     suggest_reply,
     summarize_conversation,
 )
+
+# ═══════════════════════════════════════════════════════════════
+# Ferramentas dos testes
+# ═══════════════════════════════════════════════════════════════
+
+
+def _resposta_deepseek(conteudo: str) -> MagicMock:
+    """Envelope de chat-completions que o DeepSeek devolve."""
+    resposta = MagicMock()
+    resposta.json.return_value = {"choices": [{"message": {"content": conteudo}}]}
+    resposta.raise_for_status = MagicMock()
+    return resposta
+
+
+def _cliente_http(*, resposta: MagicMock | None = None, erro: Exception | None = None) -> AsyncMock:
+    cliente = AsyncMock()
+    cliente.__aenter__ = AsyncMock(return_value=cliente)
+    cliente.__aexit__ = AsyncMock(return_value=False)
+    cliente.post = AsyncMock(side_effect=erro) if erro else AsyncMock(return_value=resposta)
+    return cliente
+
+
+def _configura(s: MagicMock) -> None:
+    """Configuracao valida. Cada teste sobrescreve o que quiser isolar."""
+    s.deepseek_api_key = "sk-chave-valida"
+    s.deepseek_model = "deepseek-chat"
+    s.deepseek_base_url = "https://api.deepseek.com/v1"
+    s.llm_temperature = 0.3
+    s.llm_request_timeout_seconds = 30
+
+
+@contextmanager
+def _capturando_avisos():
+    """Coleta tudo que o loguru emitir em WARNING ou acima."""
+    registros: list[str] = []
+    sink = logger.add(lambda mensagem: registros.append(str(mensagem)), level="WARNING")
+    try:
+        yield registros
+    finally:
+        logger.remove(sink)
+
 
 # ═══════════════════════════════════════════════════════════════
 # _parse_json_response
@@ -68,170 +117,210 @@ def test_parse_json_completely_invalid_returns_none():
 
 
 # ═══════════════════════════════════════════════════════════════
-# classify_ticket
+# A chamada: URL, modelo e temperature vem da configuracao
 # ═══════════════════════════════════════════════════════════════
 
 
 @pytest.mark.asyncio
-async def test_classify_ticket_openai_success():
-    """classify_ticket returns result when OpenAI succeeds."""
-    mock_response = MagicMock()
-    mock_response.json.return_value = {
-        "choices": [
-            {
-                "message": {
-                    "content": '{"priority": "high", "confidence": 0.85, "summary": "Falha crítica"}'
-                }
-            }
-        ]
-    }
-    mock_response.raise_for_status = MagicMock()
-
-    mock_client = AsyncMock()
-    mock_client.__aenter__ = AsyncMock(return_value=mock_client)
-    mock_client.__aexit__ = AsyncMock(return_value=False)
-    mock_client.post = AsyncMock(return_value=mock_response)
+async def test_a_url_o_modelo_e_a_temperature_vem_da_configuracao():
+    """
+    O trabalho de hoje foi tirar a URL do codigo. Este teste prende isso: se
+    alguem voltar a fixar a URL do provedor numa string literal, a URL de teste
+    abaixo nao aparece na chamada e o teste cai.
+    """
+    cliente = _cliente_http(
+        resposta=_resposta_deepseek('{"priority": "high", "confidence": 0.9, "summary": "x"}')
+    )
 
     with (
-        patch("app.services.llm.settings") as mock_settings,
-        patch("app.services.llm.httpx.AsyncClient", return_value=mock_client),
+        patch("app.services.llm.settings") as s,
+        patch("app.services.llm.httpx.AsyncClient", return_value=cliente),
     ):
-        mock_settings.openai_api_key = "sk-valid-key"
-        mock_settings.openai_model = "gpt-4o-mini"
-        mock_settings.openai_temperature = 0.3
-        mock_settings.llm_request_timeout_seconds = 30
-        mock_settings.llm_fallback_enabled = True
+        _configura(s)
+        s.deepseek_base_url = "https://exemplo.invalido/v9"
+        s.deepseek_model = "modelo-de-teste"
+        s.llm_temperature = 0.11
 
-        result = await classify_ticket("Sistema fora do ar", "ERP não inicia", "software")
+        await classify_ticket("Titulo", "Descricao", "geral")
+
+    url = cliente.post.await_args.args[0]
+    corpo = cliente.post.await_args.kwargs["json"]
+    assert url == "https://exemplo.invalido/v9/chat/completions"
+    assert corpo["model"] == "modelo-de-teste"
+    assert corpo["temperature"] == 0.11
+
+
+@pytest.mark.asyncio
+async def test_a_barra_sobrando_na_base_url_nao_duplica_no_caminho():
+    """Quem digita a URL no painel do EasyPanel termina com barra metade das vezes."""
+    cliente = _cliente_http(
+        resposta=_resposta_deepseek('{"priority": "low", "confidence": 0.1, "summary": "x"}')
+    )
+
+    with (
+        patch("app.services.llm.settings") as s,
+        patch("app.services.llm.httpx.AsyncClient", return_value=cliente),
+    ):
+        _configura(s)
+        s.deepseek_base_url = "https://exemplo.invalido/v9/"
+
+        await classify_ticket("Titulo", "Descricao", "geral")
+
+    assert cliente.post.await_args.args[0] == "https://exemplo.invalido/v9/chat/completions"
+
+
+@pytest.mark.asyncio
+async def test_uma_falha_nao_dispara_uma_segunda_tentativa():
+    """
+    Substitui o antigo `test_classify_ticket_falls_back_to_anthropic`.
+
+    Aquele provava que a falha do primeiro provedor levava ao segundo. Com um
+    provedor so, o que precisa ficar preso e o contrario: falhou, acabou. Um
+    segundo POST aqui seria fallback ressuscitado por engano.
+    """
+    cliente = _cliente_http(erro=Exception("timeout"))
+
+    with (
+        patch("app.services.llm.settings") as s,
+        patch("app.services.llm.httpx.AsyncClient", return_value=cliente),
+    ):
+        _configura(s)
+        resultado = await classify_ticket("Titulo", "Descricao", "geral")
+
+    assert resultado is None
+    assert cliente.post.await_count == 1
+
+
+# ═══════════════════════════════════════════════════════════════
+# O caminho sem chave: None em silencio
+# ═══════════════════════════════════════════════════════════════
+
+
+@pytest.mark.asyncio
+async def test_sem_chave_as_quatro_devolvem_none_sem_excecao_e_sem_log_de_erro():
+    """
+    E o estado de producao hoje: a IA esta desligada e a chave nao existe. O
+    sistema nao pode nem estourar, nem sujar o log com aviso a cada chamado
+    aberto. `is None` sozinho nao provaria isso — passaria com a requisicao
+    saindo e falhando. Por isso o teste tambem olha a rede e o log.
+    """
+    historico = [{"sender": "Joao", "role": "client", "content": "oi"}]
+
+    with (
+        patch.object(llm.settings, "deepseek_api_key", ""),
+        patch("app.services.llm.httpx.AsyncClient") as cliente,
+        _capturando_avisos() as avisos,
+    ):
+        assert await classify_ticket("Titulo", "Descricao", "geral") is None
+        assert await suggest_reply("T", "D", "geral", "high", "open", historico) is None
+        assert await summarize_conversation("T", "geral", "open", historico) is None
+        assert await improve_message("rascunho", "T", "D") is None
+
+    cliente.assert_not_called()
+    assert avisos == [], f"log sujo com a IA sem chave: {avisos}"
+
+
+@pytest.mark.asyncio
+async def test_chave_de_placeholder_conta_como_ausente():
+    """`CHANGE_ME` no painel e o mesmo que chave nenhuma."""
+    with (
+        patch.object(llm.settings, "deepseek_api_key", "CHANGE_ME_DEEPSEEK"),
+        patch("app.services.llm.httpx.AsyncClient") as cliente,
+    ):
+        assert await classify_ticket("Titulo", "Descricao", "geral") is None
+
+    cliente.assert_not_called()
+
+
+# ═══════════════════════════════════════════════════════════════
+# classify_ticket — JSON estruturado
+# ═══════════════════════════════════════════════════════════════
+
+
+@pytest.mark.asyncio
+async def test_classify_ticket_devolve_prioridade_e_confianca():
+    cliente = _cliente_http(
+        resposta=_resposta_deepseek(
+            '{"priority": "high", "confidence": 0.85, "summary": "Falha critica"}'
+        )
+    )
+
+    with (
+        patch("app.services.llm.settings") as s,
+        patch("app.services.llm.httpx.AsyncClient", return_value=cliente),
+    ):
+        _configura(s)
+        result = await classify_ticket("Sistema fora do ar", "ERP nao inicia", "software")
 
     assert result is not None
     assert result["priority"] == "high"
     assert result["confidence"] == 0.85
+    assert result["summary"] == "Falha critica"
 
 
 @pytest.mark.asyncio
-async def test_classify_ticket_placeholder_key_returns_none():
-    """Returns None immediately when key is placeholder."""
-    with patch("app.services.llm.settings") as mock_settings:
-        mock_settings.openai_api_key = "sk-CHANGE_ME"
-        mock_settings.anthropic_api_key = "sk-ant-CHANGE_ME"
-        mock_settings.llm_fallback_enabled = True
-
-        result = await classify_ticket("Título", "Descrição", "general")
-
-    assert result is None
-
-
-@pytest.mark.asyncio
-async def test_classify_ticket_falls_back_to_anthropic():
-    """Falls back to Anthropic when OpenAI fails."""
-    anthropic_response = MagicMock()
-    anthropic_response.json.return_value = {
-        "content": [{"text": '{"priority": "medium", "confidence": 0.7, "summary": "Moderado"}'}]
-    }
-    anthropic_response.raise_for_status = MagicMock()
-
-    mock_client = AsyncMock()
-    mock_client.__aenter__ = AsyncMock(return_value=mock_client)
-    mock_client.__aexit__ = AsyncMock(return_value=False)
-    # First call (OpenAI) raises, second call (Anthropic) succeeds
-    mock_client.post = AsyncMock(side_effect=[Exception("timeout"), anthropic_response])
+async def test_classify_ticket_com_json_ilegivel_devolve_none():
+    """A resposta chegou, mas nao e o contrato. Nao inventa prioridade."""
+    cliente = _cliente_http(resposta=_resposta_deepseek("desculpe, nao posso ajudar"))
 
     with (
-        patch("app.services.llm.settings") as mock_settings,
-        patch("app.services.llm.httpx.AsyncClient", return_value=mock_client),
+        patch("app.services.llm.settings") as s,
+        patch("app.services.llm.httpx.AsyncClient", return_value=cliente),
     ):
-        mock_settings.openai_api_key = "sk-valid"
-        mock_settings.anthropic_api_key = "sk-ant-valid"
-        mock_settings.openai_model = "gpt-4o-mini"
-        mock_settings.anthropic_model = "claude-3-5-haiku-20241022"
-        mock_settings.openai_temperature = 0.3
-        mock_settings.llm_request_timeout_seconds = 30
-        mock_settings.llm_fallback_enabled = True
-
-        result = await classify_ticket("Problema de acesso", "VPN não conecta", "access")
-
-    assert result is not None
-    assert result["priority"] == "medium"
+        _configura(s)
+        assert await classify_ticket("Titulo", "Descricao", "geral") is None
 
 
 @pytest.mark.asyncio
-async def test_classify_ticket_all_providers_fail_returns_none():
-    """Returns None when all providers fail."""
-    mock_client = AsyncMock()
-    mock_client.__aenter__ = AsyncMock(return_value=mock_client)
-    mock_client.__aexit__ = AsyncMock(return_value=False)
-    mock_client.post = AsyncMock(side_effect=Exception("network error"))
+async def test_classify_ticket_falha_de_rede_devolve_none():
+    cliente = _cliente_http(erro=Exception("network error"))
 
     with (
-        patch("app.services.llm.settings") as mock_settings,
-        patch("app.services.llm.httpx.AsyncClient", return_value=mock_client),
+        patch("app.services.llm.settings") as s,
+        patch("app.services.llm.httpx.AsyncClient", return_value=cliente),
     ):
-        mock_settings.openai_api_key = "sk-valid"
-        mock_settings.anthropic_api_key = "sk-ant-valid"
-        mock_settings.openai_model = "gpt-4o-mini"
-        mock_settings.anthropic_model = "claude-3-5-haiku-20241022"
-        mock_settings.openai_temperature = 0.3
-        mock_settings.llm_request_timeout_seconds = 30
-        mock_settings.llm_fallback_enabled = True
-
-        result = await classify_ticket("Título", "Descrição", "general")
-
-    assert result is None
+        _configura(s)
+        assert await classify_ticket("Titulo", "Descricao", "geral") is None
 
 
 # ═══════════════════════════════════════════════════════════════
-# suggest_reply
+# suggest_reply — texto
 # ═══════════════════════════════════════════════════════════════
 
 
 @pytest.mark.asyncio
-async def test_suggest_reply_returns_text():
-    """suggest_reply returns suggestion text on success."""
-    mock_response = MagicMock()
-    mock_response.json.return_value = {
-        "choices": [
-            {"message": {"content": '{"suggestion": "Prezado usuário, já estamos analisando."}'}}
-        ]
-    }
-    mock_response.raise_for_status = MagicMock()
-
-    mock_client = AsyncMock()
-    mock_client.__aenter__ = AsyncMock(return_value=mock_client)
-    mock_client.__aexit__ = AsyncMock(return_value=False)
-    mock_client.post = AsyncMock(return_value=mock_response)
+async def test_suggest_reply_devolve_o_campo_suggestion():
+    cliente = _cliente_http(
+        resposta=_resposta_deepseek('{"suggestion": "Prezado usuario, ja estamos analisando."}')
+    )
 
     with (
-        patch("app.services.llm.settings") as mock_settings,
-        patch("app.services.llm.httpx.AsyncClient", return_value=mock_client),
+        patch("app.services.llm.settings") as s,
+        patch("app.services.llm.httpx.AsyncClient", return_value=cliente),
     ):
-        mock_settings.openai_api_key = "sk-valid"
-        mock_settings.openai_model = "gpt-4o-mini"
-        mock_settings.openai_temperature = 0.3
-        mock_settings.llm_request_timeout_seconds = 30
-        mock_settings.llm_fallback_enabled = False
-
+        _configura(s)
         result = await suggest_reply(
             title="VPN lenta",
             description="Dificuldade de acesso remoto",
             category="network",
             priority="medium",
             status="open",
-            history=[{"sender": "João", "role": "client", "content": "A VPN está muito lenta"}],
+            history=[{"sender": "Joao", "role": "client", "content": "A VPN esta muito lenta"}],
         )
 
-    assert result is not None
-    assert "analisando" in result
+    assert result == "Prezado usuario, ja estamos analisando."
 
 
 @pytest.mark.asyncio
-async def test_suggest_reply_placeholder_key_returns_none():
-    """Returns None when key is placeholder."""
-    with patch("app.services.llm.settings") as mock_settings:
-        mock_settings.openai_api_key = "CHANGE_ME"
-        mock_settings.anthropic_api_key = "CHANGE_ME"
-        mock_settings.llm_fallback_enabled = True
+async def test_suggest_reply_ignora_resposta_sem_o_campo():
+    """Campo errado no JSON e resposta invalida — nao vira texto solto."""
+    cliente = _cliente_http(resposta=_resposta_deepseek('{"resposta": "texto no campo errado"}'))
 
+    with (
+        patch("app.services.llm.settings") as s,
+        patch("app.services.llm.httpx.AsyncClient", return_value=cliente),
+    ):
+        _configura(s)
         result = await suggest_reply(
             title="x",
             description="y",
@@ -245,56 +334,36 @@ async def test_suggest_reply_placeholder_key_returns_none():
 
 
 # ═══════════════════════════════════════════════════════════════
-# summarize_conversation
+# summarize_conversation — texto
 # ═══════════════════════════════════════════════════════════════
 
 
 @pytest.mark.asyncio
-async def test_summarize_conversation_returns_text():
-    """summarize_conversation returns summary text on success."""
-    mock_response = MagicMock()
-    mock_response.json.return_value = {
-        "choices": [
-            {
-                "message": {
-                    "content": '{"summary": "Usuário relatou problema com bafômetro. Técnico identificou falha de hardware."}'
-                }
-            }
-        ]
-    }
-    mock_response.raise_for_status = MagicMock()
-
-    mock_client = AsyncMock()
-    mock_client.__aenter__ = AsyncMock(return_value=mock_client)
-    mock_client.__aexit__ = AsyncMock(return_value=False)
-    mock_client.post = AsyncMock(return_value=mock_response)
+async def test_summarize_conversation_devolve_o_campo_summary():
+    cliente = _cliente_http(
+        resposta=_resposta_deepseek('{"summary": "Bafometro com falha de hardware."}')
+    )
 
     with (
-        patch("app.services.llm.settings") as mock_settings,
-        patch("app.services.llm.httpx.AsyncClient", return_value=mock_client),
+        patch("app.services.llm.settings") as s,
+        patch("app.services.llm.httpx.AsyncClient", return_value=cliente),
     ):
-        mock_settings.openai_api_key = "sk-valid"
-        mock_settings.openai_model = "gpt-4o-mini"
-        mock_settings.openai_temperature = 0.3
-        mock_settings.llm_request_timeout_seconds = 30
-        mock_settings.llm_fallback_enabled = False
-
+        _configura(s)
         result = await summarize_conversation(
-            title="Bafômetro com falha",
+            title="Bafometro com falha",
             category="hardware",
             status="resolved",
             history=[
-                {"sender": "João", "role": "client", "content": "O bafômetro não liga"},
+                {"sender": "Joao", "role": "client", "content": "O bafometro nao liga"},
                 {
-                    "sender": "Técnico",
+                    "sender": "Tecnico",
                     "role": "technician",
                     "content": "Identificamos falha de hardware",
                 },
             ],
         )
 
-    assert result is not None
-    assert len(result) > 0
+    assert result == "Bafometro com falha de hardware."
 
 
 @pytest.mark.asyncio
@@ -305,70 +374,129 @@ async def test_summarize_conversation_empty_history_returns_none():
 
 
 # ═══════════════════════════════════════════════════════════════
+# improve_message — texto
+# ═══════════════════════════════════════════════════════════════
+
+
+@pytest.mark.asyncio
+async def test_improve_message_devolve_o_campo_improved():
+    """
+    Nao existia teste proprio desta funcao. Ela so aparecia no teste da flag
+    desligada, que passa com a funcao inteira quebrada — basta devolver None.
+    """
+    cliente = _cliente_http(
+        resposta=_resposta_deepseek('{"improved": "Prezado cliente, seguem as orientacoes."}')
+    )
+
+    with (
+        patch("app.services.llm.settings") as s,
+        patch("app.services.llm.httpx.AsyncClient", return_value=cliente),
+    ):
+        _configura(s)
+        result = await improve_message("segue ai as orientacao", "Titulo", "Descricao")
+
+    assert result == "Prezado cliente, seguem as orientacoes."
+
+
+@pytest.mark.asyncio
+async def test_improve_message_ignora_resposta_sem_o_campo():
+    cliente = _cliente_http(resposta=_resposta_deepseek('{"texto": "campo errado"}'))
+
+    with (
+        patch("app.services.llm.settings") as s,
+        patch("app.services.llm.httpx.AsyncClient", return_value=cliente),
+    ):
+        _configura(s)
+        assert await improve_message("rascunho", "Titulo", "Descricao") is None
+
+
+# ═══════════════════════════════════════════════════════════════
+# Cada funcao le o SEU campo
+# ═══════════════════════════════════════════════════════════════
+
+
+@pytest.mark.asyncio
+async def test_cada_funcao_le_o_seu_proprio_campo():
+    """
+    A unificacao juntou o TRANSPORTE, nao a leitura. Uma resposta que traz os
+    tres campos de uma vez prova que cada funcao pega o seu: se o parsing
+    tivesse colapsado num campo so, duas das tres devolveriam o texto errado.
+    """
+    conteudo = (
+        '{"suggestion": "sou a sugestao", "summary": "sou o resumo", "improved": "sou o melhorado"}'
+    )
+
+    async def _roda(chamada):
+        cliente = _cliente_http(resposta=_resposta_deepseek(conteudo))
+        with (
+            patch("app.services.llm.settings") as s,
+            patch("app.services.llm.httpx.AsyncClient", return_value=cliente),
+        ):
+            _configura(s)
+            return await chamada()
+
+    historico = [{"sender": "Joao", "role": "client", "content": "oi"}]
+
+    assert (
+        await _roda(lambda: suggest_reply("T", "D", "geral", "high", "open", historico))
+        == "sou a sugestao"
+    )
+    assert await _roda(lambda: summarize_conversation("T", "geral", "open", historico)) == (
+        "sou o resumo"
+    )
+    assert await _roda(lambda: improve_message("rascunho", "T", "D")) == "sou o melhorado"
+
+
+# ═══════════════════════════════════════════════════════════════
 # LLM_ENABLED — desligar a IA sem esvaziar chave
 # ═══════════════════════════════════════════════════════════════
 #
-# Até aqui a única forma de parar de mandar conteúdo de chamado para a OpenAI
-# e a Anthropic era apagar as chaves do painel — uma manobra que também apaga
-# a configuração e que ninguém consegue desfazer sem ter as chaves de novo.
-# Com a flag, desligar é reversível e não destrói nada.
+# Ate aqui a unica forma de parar de mandar conteudo de chamado para fora era
+# apagar a chave do painel — uma manobra que tambem apaga a configuracao e que
+# ninguem consegue desfazer sem ter a chave de novo. Com a flag, desligar e
+# reversivel e nao destroi nada.
 
 
 def _llm_desligado():
-    """Patch da flag no módulo, que lê settings uma vez na importação."""
-    from app.services import llm
-
+    """Patch da flag no modulo, que le settings uma vez na importacao."""
     return patch.object(llm.settings, "llm_enabled", False)
 
 
-def _com_chaves():
-    """Chaves válidas nos dois provedores, para isolar o efeito da flag."""
-    from app.services import llm
-
-    return (
-        patch.object(llm.settings, "openai_api_key", "sk-chave-de-teste"),
-        patch.object(llm.settings, "anthropic_api_key", "sk-ant-chave-de-teste"),
-    )
+def _com_chave():
+    """Chave valida, para isolar o efeito da flag."""
+    return patch.object(llm.settings, "deepseek_api_key", "sk-chave-de-teste")
 
 
 @pytest.mark.asyncio
 async def test_com_a_flag_desligada_nenhuma_chamada_externa_acontece():
     """
-    O que importa não é o retorno, é a rede: o teste falha se qualquer HTTP
-    sair. Um teste que só afirmasse `is None` passaria mesmo com a requisição
+    O que importa nao e o retorno, e a rede: o teste falha se qualquer HTTP
+    sair. Um teste que so afirmasse `is None` passaria mesmo com a requisicao
     sendo feita e falhando.
     """
-    from app.services import llm
-
-    k1, k2 = _com_chaves()
-    with k1, k2, _llm_desligado(), patch("app.services.llm.httpx.AsyncClient") as cliente:
-        assert await llm.classify_ticket("Título", "Descrição", "general") is None
-        assert await llm.suggest_reply("Título", "Descrição", "general", "high", "open", []) is None
-        assert await llm.summarize_conversation("Título", "general", "open", []) is None
-        assert await llm.improve_message("rascunho", "Título", "Descrição") is None
+    with (
+        _com_chave(),
+        _llm_desligado(),
+        patch("app.services.llm.httpx.AsyncClient") as cliente,
+    ):
+        assert await llm.classify_ticket("Titulo", "Descricao", "general") is None
+        assert await llm.suggest_reply("Titulo", "Descricao", "general", "high", "open", []) is None
+        assert await llm.summarize_conversation("Titulo", "general", "open", []) is None
+        assert await llm.improve_message("rascunho", "Titulo", "Descricao") is None
 
     cliente.assert_not_called()
 
 
 @pytest.mark.asyncio
 async def test_com_a_flag_ligada_a_chamada_continua_acontecendo():
-    """Não-regressão: a flag nasce ligada e não muda o comportamento de hoje."""
-    from app.services import llm
+    """Nao-regressao: a flag nasce ligada e nao muda o comportamento de hoje."""
+    resposta = _resposta_deepseek('{"priority": "high", "confidence": 0.9, "summary": "resumo"}')
 
-    resposta = MagicMock()
-    resposta.status_code = 200
-    resposta.json.return_value = {
-        "choices": [
-            {"message": {"content": '{"priority": "high", "confidence": 0.9, "summary": "resumo"}'}}
-        ]
-    }
-
-    k1, k2 = _com_chaves()
-    with k1, k2, patch.object(llm.settings, "llm_enabled", True):
+    with _com_chave(), patch.object(llm.settings, "llm_enabled", True):
         with patch("app.services.llm.httpx.AsyncClient") as cliente:
             instancia = cliente.return_value.__aenter__.return_value
             instancia.post = AsyncMock(return_value=resposta)
-            resultado = await llm.classify_ticket("Sistema fora", "ERP não abre", "software")
+            resultado = await llm.classify_ticket("Sistema fora", "ERP nao abre", "software")
 
     assert resultado is not None
     assert resultado["priority"] == "high"
@@ -376,9 +504,9 @@ async def test_com_a_flag_ligada_a_chamada_continua_acontecendo():
 
 def test_a_flag_nasce_ligada():
     """
-    Padrão `True` de propósito: desligar por padrão apagaria a classificação
-    automática em produção no deploy seguinte, sem ninguém pedir. Quem quiser
-    parar o envio agora tem um interruptor — e é isso que faltava.
+    Padrao `True` de proposito: desligar por padrao apagaria a classificacao
+    automatica em producao no deploy seguinte, sem ninguem pedir. Quem quiser
+    parar o envio agora tem um interruptor — e e isso que faltava.
     """
     from app.core.config import Settings
 
@@ -386,15 +514,28 @@ def test_a_flag_nasce_ligada():
     assert s.llm_enabled is True
 
 
-# ── O corte do histórico do resumo ────────────────────────────
+def test_a_chave_do_deepseek_nasce_vazia():
+    """
+    A chave vai para o painel do EasyPanel, nunca para o repositorio, e a IA so
+    e ligada depois do documento de LGPD publicado. Default vazio e o que faz o
+    caminho silencioso acima ser o comportamento padrao de quem sobe o projeto.
+    """
+    from app.core.config import Settings
+
+    s = Settings(database_url="postgresql+asyncpg://u:p@localhost/db")
+    assert s.deepseek_api_key == ""
+    assert s.deepseek_base_url.startswith("https://")
+
+
+# ── O corte do historico do resumo ────────────────────────────
 #
-# Era `history_text[:6000]`: junta todas as mensagens em ordem cronológica e
+# Era `history_text[:6000]`: junta todas as mensagens em ordem cronologica e
 # guarda os 6000 primeiros caracteres. Numa conversa longa isso descarta
-# justamente as mensagens MAIS RECENTES — o técnico que abre o resumo para saber
-# onde o chamado está lê o começo dele.
+# justamente as mensagens MAIS RECENTES — o tecnico que abre o resumo para saber
+# onde o chamado esta le o comeco dele.
 #
-# O título, a categoria e o status já vão para o prompt por fora, então o
-# enunciado do problema não depende do começo do chat. O que não pode faltar é o
+# O titulo, a categoria e o status ja vao para o prompt por fora, entao o
+# enunciado do problema nao depende do comeco do chat. O que nao pode faltar e o
 # estado atual.
 
 

@@ -1,5 +1,5 @@
 """
-LLM Service — OpenAI primary + Anthropic fallback.
+LLM Service — DeepSeek, provedor único.
 
 Usage
 -----
@@ -9,6 +9,24 @@ if result:
 
 All functions return None on failure (missing key, timeout, parse error),
 so callers should treat None as "classification unavailable".
+
+Desenho
+-------
+Havia oito cópias da mesma requisição HTTP: quatro funções públicas × dois
+provedores, com a URL escrita à mão em cada uma. Com um provedor só, quatro
+blocos viraram código morto e os outros quatro, a mesma função repetida.
+
+Sobrou UM transporte — `_chamar_deepseek` — e o parsing ficou de fora dele, de
+propósito: as quatro não esperam a mesma coisa. `classify_ticket` quer JSON
+estruturado (prioridade, confiança, resumo) e recusa a resposta se o contrato
+não vier; as outras três querem um campo de texto, cada uma com o SEU nome
+(`suggestion`, `summary`, `improved`). Colapsar isso junto com a chamada
+quebraria uma das quatro.
+
+⚠️ O endpoint e o nome do modelo NÃO foram conferidos contra a documentação
+oficial da DeepSeek. Por isso `DEEPSEEK_BASE_URL` e `DEEPSEEK_MODEL` são
+configuração com padrão, e não constante: o ajuste, quando o serviço real
+disser outra coisa, é no painel.
 """
 
 import json
@@ -120,7 +138,57 @@ Responda com este JSON exato (sem markdown):
 }}"""
 
 
-# ── Internal helpers ──────────────────────────────────────────
+# ── Transporte ────────────────────────────────────────────────
+
+
+def _sem_chave_utilizavel() -> bool:
+    """Chave ausente ou placeholder do `.env.example` contam como ausente."""
+    key = settings.deepseek_api_key
+    return not key or key.startswith("CHANGE_ME") or key.startswith("sk-CHANGE")
+
+
+async def _chamar_deepseek(
+    *,
+    system: str,
+    prompt: str,
+    max_tokens: int,
+    operacao: str,
+) -> str | None:
+    """Faz a chamada e devolve o TEXTO cru da resposta. Não interpreta nada.
+
+    Sem chave, devolve None em SILÊNCIO — sem exceção e sem log de aviso. É o
+    estado de produção com a IA desligada, e não é anormalidade que mereça
+    poluir o log a cada chamado aberto. Log de aviso fica só para falha de
+    verdade: rede, timeout, HTTP de erro.
+    """
+    if not settings.llm_enabled or _sem_chave_utilizavel():
+        return None
+
+    url = f"{settings.deepseek_base_url.rstrip('/')}/chat/completions"
+
+    try:
+        async with httpx.AsyncClient(timeout=settings.llm_request_timeout_seconds) as client:
+            resp = await client.post(
+                url,
+                headers={"Authorization": f"Bearer {settings.deepseek_api_key}"},
+                json={
+                    "model": settings.deepseek_model,
+                    "messages": [
+                        {"role": "system", "content": system},
+                        {"role": "user", "content": prompt},
+                    ],
+                    "max_tokens": max_tokens,
+                    "temperature": settings.llm_temperature,
+                },
+            )
+        resp.raise_for_status()
+        return str(resp.json()["choices"][0]["message"]["content"])
+    except Exception as exc:
+        logger.warning(f"DeepSeek {operacao} falhou: {exc}")
+        return None
+
+
+# ── Leitura da resposta ───────────────────────────────────────
 
 
 def _parse_json_response(text: str) -> dict[str, Any] | None:
@@ -155,75 +223,31 @@ def _parse_json_response(text: str) -> dict[str, Any] | None:
     return {"priority": priority, "confidence": confidence, "summary": summary}
 
 
-# ── OpenAI ────────────────────────────────────────────────────
+def _parse_campo_texto(text: str, campo: str) -> str | None:
+    """Lê UM campo de texto do JSON da resposta.
 
-
-async def _call_openai(prompt: str) -> dict[str, Any] | None:
-    if not settings.llm_enabled:
-        return None
-
-    key = settings.openai_api_key
-    if not key or key.startswith("CHANGE_ME") or key.startswith("sk-CHANGE"):
-        return None
-
+    O `campo` é o que distingue as três funções de texto entre si — quem chama
+    diz qual quer. Sem isso, `suggest_reply` aceitaria o resumo de outra
+    chamada como se fosse a sugestão.
+    """
+    text = re.sub(r"```(?:json)?", "", text).strip()
     try:
-        async with httpx.AsyncClient(timeout=settings.llm_request_timeout_seconds) as client:
-            resp = await client.post(
-                "https://api.openai.com/v1/chat/completions",
-                headers={"Authorization": f"Bearer {key}"},
-                json={
-                    "model": settings.openai_model,
-                    "messages": [
-                        {"role": "system", "content": _CLASSIFICATION_SYSTEM},
-                        {"role": "user", "content": prompt},
-                    ],
-                    "max_tokens": 256,
-                    "temperature": settings.openai_temperature,
-                },
-            )
-        resp.raise_for_status()
-        content = resp.json()["choices"][0]["message"]["content"]
-        return _parse_json_response(content)
-    except Exception as exc:
-        logger.warning(f"OpenAI classification failed: {exc}")
+        data = json.loads(text)
+    except json.JSONDecodeError:
+        padrao = rf'\{{"{campo}"\s*:\s*"((?:[^"\\]|\\.)*)"\}}'
+        match = re.search(padrao, text, re.DOTALL)
+        if match:
+            return match.group(1).replace("\\n", "\n")
         return None
-
-
-# ── Anthropic ─────────────────────────────────────────────────
-
-
-async def _call_anthropic(prompt: str) -> dict[str, Any] | None:
-    if not settings.llm_enabled:
-        return None
-
-    key = settings.anthropic_api_key
-    if not key or key.startswith("CHANGE_ME") or key.startswith("sk-ant-CHANGE"):
-        return None
-
-    try:
-        async with httpx.AsyncClient(timeout=settings.llm_request_timeout_seconds) as client:
-            resp = await client.post(
-                "https://api.anthropic.com/v1/messages",
-                headers={
-                    "x-api-key": key,
-                    "anthropic-version": "2023-06-01",
-                },
-                json={
-                    "model": settings.anthropic_model,
-                    "max_tokens": 256,
-                    "system": _CLASSIFICATION_SYSTEM,
-                    "messages": [{"role": "user", "content": prompt}],
-                },
-            )
-        resp.raise_for_status()
-        content = resp.json()["content"][0]["text"]
-        return _parse_json_response(content)
-    except Exception as exc:
-        logger.warning(f"Anthropic classification failed: {exc}")
-        return None
+    valor = data.get(campo, "")
+    return str(valor).strip() if valor else None
 
 
 # ── Public API ────────────────────────────────────────────────
+#
+# O `llm_enabled` é conferido na entrada de cada função pública, e não só no
+# transporte: com a IA desligada nem o prompt chega a ser montado, e o teste
+# prende isso olhando a rede — nenhum `httpx.AsyncClient` é sequer construído.
 
 
 async def classify_ticket(
@@ -232,15 +256,11 @@ async def classify_ticket(
     category: str,
 ) -> dict[str, Any] | None:
     """
-    Classify a ticket using the configured LLM provider.
+    Classify a ticket using DeepSeek.
 
     Returns dict with keys: priority, confidence, summary
-    Returns None if all providers fail or keys are not configured.
+    Returns None if the call fails or the key is not configured.
     """
-    # Interruptor da IA: nada de conteúdo de chamado sai daqui com ela
-    # desligada. A guarda fica em cada entrada pública porque as chamadas HTTP
-    # não passam todas por um ponto só — `suggest_reply`, `summarize_conversation`
-    # e `improve_message` montam as suas próprias.
     if not settings.llm_enabled:
         return None
 
@@ -250,25 +270,26 @@ async def classify_ticket(
         category=category,
     )
 
-    # Try primary provider (OpenAI)
-    result = await _call_openai(prompt)
-    if result:
-        logger.info(
-            f"Ticket classified via OpenAI: priority={result['priority']} confidence={result['confidence']:.2f}"
-        )
-        return result
+    conteudo = await _chamar_deepseek(
+        system=_CLASSIFICATION_SYSTEM,
+        prompt=prompt,
+        max_tokens=256,
+        operacao="classify_ticket",
+    )
+    if conteudo is None:
+        logger.debug("LLM classification unavailable — no valid API key configured")
+        return None
 
-    # Try fallback (Anthropic)
-    if settings.llm_fallback_enabled:
-        result = await _call_anthropic(prompt)
-        if result:
-            logger.info(
-                f"Ticket classified via Anthropic: priority={result['priority']} confidence={result['confidence']:.2f}"
-            )
-            return result
+    result = _parse_json_response(conteudo)
+    if result is None:
+        logger.debug("LLM classification discarded — response did not match the contract")
+        return None
 
-    logger.debug("LLM classification unavailable — no valid API keys configured")
-    return None
+    logger.info(
+        f"Ticket classified via DeepSeek: "
+        f"priority={result['priority']} confidence={result['confidence']:.2f}"
+    )
+    return result
 
 
 async def suggest_reply(
@@ -283,12 +304,8 @@ async def suggest_reply(
     Generate a suggested reply for a technician based on ticket context and chat history.
 
     history: list of {"sender": name, "role": role, "content": message}
-    Returns the suggestion text, or None if all providers fail.
+    Returns the suggestion text, or None if the call fails.
     """
-    # Interruptor da IA: nada de conteúdo de chamado sai daqui com ela
-    # desligada. A guarda fica em cada entrada pública porque as chamadas HTTP
-    # não passam todas por um ponto só — `suggest_reply`, `summarize_conversation`
-    # e `improve_message` montam as suas próprias.
     if not settings.llm_enabled:
         return None
 
@@ -308,80 +325,23 @@ async def suggest_reply(
         history=history_text,
     )
 
-    async def _parse_suggestion(text: str) -> str | None:
-        text = re.sub(r"```(?:json)?", "", text).strip()
-        try:
-            data = json.loads(text)
-        except json.JSONDecodeError:
-            match = re.search(r'\{"suggestion"\s*:\s*"((?:[^"\\]|\\.)*)"\}', text, re.DOTALL)
-            if match:
-                return match.group(1).replace("\\n", "\n")
-            return None
-        suggestion = data.get("suggestion", "")
-        return str(suggestion).strip() if suggestion else None
+    conteudo = await _chamar_deepseek(
+        system=_SUGGEST_REPLY_SYSTEM,
+        prompt=prompt,
+        max_tokens=512,
+        operacao="suggest_reply",
+    )
+    if conteudo is None:
+        logger.debug("LLM suggest_reply unavailable — no valid API key configured")
+        return None
 
-    async def _call_openai_suggest(prompt: str) -> str | None:
-        key = settings.openai_api_key
-        if not key or key.startswith("CHANGE_ME") or key.startswith("sk-CHANGE"):
-            return None
-        try:
-            async with httpx.AsyncClient(timeout=settings.llm_request_timeout_seconds) as client:
-                resp = await client.post(
-                    "https://api.openai.com/v1/chat/completions",
-                    headers={"Authorization": f"Bearer {key}"},
-                    json={
-                        "model": settings.openai_model,
-                        "messages": [
-                            {"role": "system", "content": _SUGGEST_REPLY_SYSTEM},
-                            {"role": "user", "content": prompt},
-                        ],
-                        "max_tokens": 512,
-                        "temperature": 0.7,
-                    },
-                )
-            resp.raise_for_status()
-            content = resp.json()["choices"][0]["message"]["content"]
-            return await _parse_suggestion(content)
-        except Exception as exc:
-            logger.warning(f"OpenAI suggest_reply failed: {exc}")
-            return None
+    sugestao = _parse_campo_texto(conteudo, "suggestion")
+    if sugestao is None:
+        logger.debug("LLM suggest_reply discarded — response had no suggestion field")
+        return None
 
-    async def _call_anthropic_suggest(prompt: str) -> str | None:
-        key = settings.anthropic_api_key
-        if not key or key.startswith("CHANGE_ME") or key.startswith("sk-ant-CHANGE"):
-            return None
-        try:
-            async with httpx.AsyncClient(timeout=settings.llm_request_timeout_seconds) as client:
-                resp = await client.post(
-                    "https://api.anthropic.com/v1/messages",
-                    headers={"x-api-key": key, "anthropic-version": "2023-06-01"},
-                    json={
-                        "model": settings.anthropic_model,
-                        "max_tokens": 512,
-                        "system": _SUGGEST_REPLY_SYSTEM,
-                        "messages": [{"role": "user", "content": prompt}],
-                    },
-                )
-            resp.raise_for_status()
-            content = resp.json()["content"][0]["text"]
-            return await _parse_suggestion(content)
-        except Exception as exc:
-            logger.warning(f"Anthropic suggest_reply failed: {exc}")
-            return None
-
-    result = await _call_openai_suggest(prompt)
-    if result:
-        logger.info("Reply suggestion generated via OpenAI")
-        return result
-
-    if settings.llm_fallback_enabled:
-        result = await _call_anthropic_suggest(prompt)
-        if result:
-            logger.info("Reply suggestion generated via Anthropic")
-            return result
-
-    logger.debug("LLM suggest_reply unavailable — no valid API keys configured")
-    return None
+    logger.info("Reply suggestion generated via DeepSeek")
+    return sugestao
 
 
 # Orçamento do histórico que vai no prompt do resumo, em caracteres.
@@ -441,12 +401,8 @@ async def summarize_conversation(
     Generate a concise summary of the full ticket conversation.
 
     history: list of {"sender": name, "role": role, "content": message}
-    Returns the summary text, or None if all providers fail.
+    Returns the summary text, or None if the call fails.
     """
-    # Interruptor da IA: nada de conteúdo de chamado sai daqui com ela
-    # desligada. A guarda fica em cada entrada pública porque as chamadas HTTP
-    # não passam todas por um ponto só — `suggest_reply`, `summarize_conversation`
-    # e `improve_message` montam as suas próprias.
     if not settings.llm_enabled:
         return None
 
@@ -462,80 +418,23 @@ async def summarize_conversation(
         history=history_text,
     )
 
-    async def _parse_summary(text: str) -> str | None:
-        text = re.sub(r"```(?:json)?", "", text).strip()
-        try:
-            data = json.loads(text)
-        except json.JSONDecodeError:
-            match = re.search(r'\{"summary"\s*:\s*"((?:[^"\\]|\\.)*)"\}', text, re.DOTALL)
-            if match:
-                return match.group(1).replace("\\n", "\n")
-            return None
-        summary = data.get("summary", "")
-        return str(summary).strip() if summary else None
+    conteudo = await _chamar_deepseek(
+        system=_SUMMARIZE_SYSTEM,
+        prompt=prompt,
+        max_tokens=400,
+        operacao="summarize_conversation",
+    )
+    if conteudo is None:
+        logger.debug("LLM summarize_conversation unavailable — no valid API key configured")
+        return None
 
-    async def _call_openai_summarize(prompt: str) -> str | None:
-        key = settings.openai_api_key
-        if not key or key.startswith("CHANGE_ME") or key.startswith("sk-CHANGE"):
-            return None
-        try:
-            async with httpx.AsyncClient(timeout=settings.llm_request_timeout_seconds) as client:
-                resp = await client.post(
-                    "https://api.openai.com/v1/chat/completions",
-                    headers={"Authorization": f"Bearer {key}"},
-                    json={
-                        "model": settings.openai_model,
-                        "messages": [
-                            {"role": "system", "content": _SUMMARIZE_SYSTEM},
-                            {"role": "user", "content": prompt},
-                        ],
-                        "max_tokens": 400,
-                        "temperature": 0.3,
-                    },
-                )
-            resp.raise_for_status()
-            content = resp.json()["choices"][0]["message"]["content"]
-            return await _parse_summary(content)
-        except Exception as exc:
-            logger.warning(f"OpenAI summarize_conversation failed: {exc}")
-            return None
+    resumo = _parse_campo_texto(conteudo, "summary")
+    if resumo is None:
+        logger.debug("LLM summarize_conversation discarded — response had no summary field")
+        return None
 
-    async def _call_anthropic_summarize(prompt: str) -> str | None:
-        key = settings.anthropic_api_key
-        if not key or key.startswith("CHANGE_ME") or key.startswith("sk-ant-CHANGE"):
-            return None
-        try:
-            async with httpx.AsyncClient(timeout=settings.llm_request_timeout_seconds) as client:
-                resp = await client.post(
-                    "https://api.anthropic.com/v1/messages",
-                    headers={"x-api-key": key, "anthropic-version": "2023-06-01"},
-                    json={
-                        "model": settings.anthropic_model,
-                        "max_tokens": 400,
-                        "system": _SUMMARIZE_SYSTEM,
-                        "messages": [{"role": "user", "content": prompt}],
-                    },
-                )
-            resp.raise_for_status()
-            content = resp.json()["content"][0]["text"]
-            return await _parse_summary(content)
-        except Exception as exc:
-            logger.warning(f"Anthropic summarize_conversation failed: {exc}")
-            return None
-
-    result = await _call_openai_summarize(prompt)
-    if result:
-        logger.info(f"Conversation summarized via OpenAI for ticket: {title[:50]}")
-        return result
-
-    if settings.llm_fallback_enabled:
-        result = await _call_anthropic_summarize(prompt)
-        if result:
-            logger.info(f"Conversation summarized via Anthropic for ticket: {title[:50]}")
-            return result
-
-    logger.debug("LLM summarize_conversation unavailable — no valid API keys configured")
-    return None
+    logger.info(f"Conversation summarized via DeepSeek for ticket: {title[:50]}")
+    return resumo
 
 
 async def improve_message(draft: str, title: str, description: str) -> str | None:
@@ -543,12 +442,8 @@ async def improve_message(draft: str, title: str, description: str) -> str | Non
     Improve a technician's draft message: fix grammar, clarity and professionalism
     while preserving original intent.
 
-    Returns the improved text, or None if all providers fail.
+    Returns the improved text, or None if the call fails.
     """
-    # Interruptor da IA: nada de conteúdo de chamado sai daqui com ela
-    # desligada. A guarda fica em cada entrada pública porque as chamadas HTTP
-    # não passam todas por um ponto só — `suggest_reply`, `summarize_conversation`
-    # e `improve_message` montam as suas próprias.
     if not settings.llm_enabled:
         return None
 
@@ -558,77 +453,20 @@ async def improve_message(draft: str, title: str, description: str) -> str | Non
         draft=draft[:2000],
     )
 
-    async def _parse_improved(text: str) -> str | None:
-        text = re.sub(r"```(?:json)?", "", text).strip()
-        try:
-            data = json.loads(text)
-        except json.JSONDecodeError:
-            match = re.search(r'\{"improved"\s*:\s*"((?:[^"\\]|\\.)*)"\}', text, re.DOTALL)
-            if match:
-                return match.group(1).replace("\\n", "\n")
-            return None
-        improved = data.get("improved", "")
-        return str(improved).strip() if improved else None
+    conteudo = await _chamar_deepseek(
+        system=_IMPROVE_MESSAGE_SYSTEM,
+        prompt=prompt,
+        max_tokens=512,
+        operacao="improve_message",
+    )
+    if conteudo is None:
+        logger.debug("LLM improve_message unavailable — no valid API key configured")
+        return None
 
-    async def _call_openai_improve(prompt: str) -> str | None:
-        key = settings.openai_api_key
-        if not key or key.startswith("CHANGE_ME") or key.startswith("sk-CHANGE"):
-            return None
-        try:
-            async with httpx.AsyncClient(timeout=settings.llm_request_timeout_seconds) as client:
-                resp = await client.post(
-                    "https://api.openai.com/v1/chat/completions",
-                    headers={"Authorization": f"Bearer {key}"},
-                    json={
-                        "model": settings.openai_model,
-                        "messages": [
-                            {"role": "system", "content": _IMPROVE_MESSAGE_SYSTEM},
-                            {"role": "user", "content": prompt},
-                        ],
-                        "max_tokens": 512,
-                        "temperature": 0.3,
-                    },
-                )
-            resp.raise_for_status()
-            content = resp.json()["choices"][0]["message"]["content"]
-            return await _parse_improved(content)
-        except Exception as exc:
-            logger.warning(f"OpenAI improve_message failed: {exc}")
-            return None
+    melhorado = _parse_campo_texto(conteudo, "improved")
+    if melhorado is None:
+        logger.debug("LLM improve_message discarded — response had no improved field")
+        return None
 
-    async def _call_anthropic_improve(prompt: str) -> str | None:
-        key = settings.anthropic_api_key
-        if not key or key.startswith("CHANGE_ME") or key.startswith("sk-ant-CHANGE"):
-            return None
-        try:
-            async with httpx.AsyncClient(timeout=settings.llm_request_timeout_seconds) as client:
-                resp = await client.post(
-                    "https://api.anthropic.com/v1/messages",
-                    headers={"x-api-key": key, "anthropic-version": "2023-06-01"},
-                    json={
-                        "model": settings.anthropic_model,
-                        "max_tokens": 512,
-                        "system": _IMPROVE_MESSAGE_SYSTEM,
-                        "messages": [{"role": "user", "content": prompt}],
-                    },
-                )
-            resp.raise_for_status()
-            content = resp.json()["content"][0]["text"]
-            return await _parse_improved(content)
-        except Exception as exc:
-            logger.warning(f"Anthropic improve_message failed: {exc}")
-            return None
-
-    result = await _call_openai_improve(prompt)
-    if result:
-        logger.info("Message improved via OpenAI")
-        return result
-
-    if settings.llm_fallback_enabled:
-        result = await _call_anthropic_improve(prompt)
-        if result:
-            logger.info("Message improved via Anthropic")
-            return result
-
-    logger.debug("LLM improve_message unavailable — no valid API keys configured")
-    return None
+    logger.info("Message improved via DeepSeek")
+    return melhorado

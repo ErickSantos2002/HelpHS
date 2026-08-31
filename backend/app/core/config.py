@@ -199,9 +199,9 @@ class Settings(BaseSettings):
     # de emergência deve fazer.
     #
     # Existe porque, até então, a única forma de parar de mandar conteúdo de
-    # chamado para OpenAI e Anthropic era APAGAR as chaves do painel: uma
-    # manobra que também destrói a configuração e que ninguém desfaz sem ter as
-    # chaves de novo. Com a flag, desligar é reversível.
+    # chamado para fora era APAGAR a chave do painel: uma manobra que também
+    # destrói a configuração e que ninguém desfaz sem ter a chave de novo. Com
+    # a flag, desligar é reversível.
     llm_enabled: bool = True
 
     # Interruptor SÓ da Helô — o atendimento por IA que fala com o cliente.
@@ -217,14 +217,24 @@ class Settings(BaseSettings):
     # decisão, não default.
     helo_enabled: bool = False
 
-    openai_api_key: str = ""
-    openai_model: str = "gpt-4o-mini"
-    openai_temperature: float = 0.3
+    # DeepSeek — o único provedor de LLM.
+    #
+    # Nasce VAZIA: a chave vive no painel do EasyPanel, nunca no repositório, e
+    # a IA só é ligada depois do documento de LGPD publicado no cadastro. Sem
+    # chave, o `llm.py` devolve None em silêncio — é o comportamento de hoje em
+    # produção e é o que segura o sistema com a IA desligada.
+    deepseek_api_key: str = ""
 
-    anthropic_api_key: str = ""
-    anthropic_model: str = "claude-3-5-haiku-20241022"
+    # ⚠️ O endpoint e o nome do modelo abaixo NÃO foram conferidos contra a
+    # documentação oficial da DeepSeek. São CONFIGURAÇÃO com padrão, e não
+    # constante no código, justamente por isso: quando a chave chegar e o teste
+    # contra o serviço real disser outra coisa, o conserto é no painel, sem
+    # tocar em código e sem deploy.
+    deepseek_model: str = "deepseek-chat"
+    deepseek_base_url: str = "https://api.deepseek.com/v1"
 
-    llm_fallback_enabled: bool = True
+    # Vale para as quatro chamadas. Era `openai_temperature`, com o mesmo 0.3.
+    llm_temperature: float = 0.3
     llm_request_timeout_seconds: int = 30
 
     # Email
