@@ -106,7 +106,7 @@ workflow próprio (`e2e.yml`), acionado à mão.
 | Storage     | Disco, em volume (`UPLOAD_DIR`)                 |
 | Antivírus   | ClamAV                                          |
 | Auth        | JWT RS256 (python-jose)                         |
-| IA          | OpenAI GPT-4o-mini + Anthropic (fallback)       |
+| IA          | DeepSeek (provedor único, desligado)            |
 | Deploy      | EasyPanel (backend e frontend separados)        |
 
 Duas ressalvas que a tabela não conta: **não existe fila de tarefas** — o que

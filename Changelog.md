@@ -718,6 +718,47 @@ Datas em DD/MM/AAAA.
   `register_first_response` avalia antes de carimbar.
 
 ### Alterado
+- **O DeepSeek passa a ser o ÚNICO provedor de LLM; OpenAI e Anthropic saem.**
+  Decisão do Rickelme em 31/08/2026. O `llm.py` tinha a mesma requisição HTTP
+  escrita **oito vezes** — quatro funções públicas × dois provedores — com a URL
+  fixa em oito linhas. Com um provedor só, quatro blocos viraram código morto e
+  os outros quatro, a mesma função repetida: apagar e unificar é consequência
+  direta da decisão, não refatoração por preferência. O arquivo caiu de 634 para
+  472 linhas.
+  - **A fronteira ficou entre "fazer a chamada" e "interpretar a resposta"**,
+    porque as quatro não esperam a mesma coisa. `classify_ticket` quer JSON
+    estruturado e recusa a resposta que não cumpre o contrato; `suggest_reply`,
+    `summarize_conversation` e `improve_message` querem um campo de texto, cada
+    uma com o **seu** nome (`suggestion`, `summary`, `improved`). Sobrou um
+    transporte, `_chamar_deepseek`, que devolve o texto cru e não interpreta
+    nada; o parsing ficou por função. Colapsar os dois juntos quebraria uma das
+    quatro em silêncio.
+  - **Não foi criada camada de abstração de provedores.** Existe um.
+  - Configuração nova: `DEEPSEEK_API_KEY`, `DEEPSEEK_MODEL` e
+    `DEEPSEEK_BASE_URL` — a última com padrão e configurável, para a URL não
+    voltar para dentro do código. Metade do trabalho foi tirá-la de lá.
+  - ⚠️ **O endpoint e o nome do modelo NÃO foram conferidos contra a
+    documentação oficial da DeepSeek.** É por isso que os dois são configuração
+    com padrão e não constante: quando a chave chegar, o teste contra o serviço
+    real corrige no painel, sem tocar em código e sem deploy. Nenhum docstring
+    afirma que foram verificados, porque não foram.
+  - ⚠️ **A `temperature` do `suggest_reply` mudou de valor.** Era `0.7` fixo no
+    código e agora aponta para `LLM_TEMPERATURE` (`0.3`), a mesma configuração
+    das outras três — que era o `OPENAI_TEMPERATURE`, com o mesmo `0.3`. As
+    sugestões de resposta ficam mais conservadoras. Quem quiser o `0.7` de volta
+    muda no painel; antes precisava de deploy.
+  - **A IA continua desligada.** `LLM_ENABLED` não foi tocado e o
+    `DEEPSEEK_API_KEY` nasce **vazio** no `.env.example`. A chave vai para o
+    EasyPanel, nunca para o repositório, e ligar depende do documento de LGPD
+    publicado no cadastro — decisão de conformidade, não de configuração.
+  - Os testes mockavam os dois provedores. Não bastou apagar os da Anthropic: os
+    quatro que provavam sucesso foram reescritos contra o envelope do DeepSeek,
+    e o `test_classify_ticket_falls_back_to_anthropic` — que provava que a falha
+    do primeiro levava ao segundo — deu lugar a um que prova o oposto, contando
+    os POSTs: falhou, acabou. Entraram um teste de que a URL, o modelo e a
+    `temperature` vêm da configuração (fixar a URL de novo o derruba), o
+    primeiro teste próprio do `improve_message`, e um que manda os três campos
+    de texto na mesma resposta para provar que cada função lê o seu.
 - **A fala da Helô passa a carimbar a primeira resposta do SLA** (`77237c1`).
   Decisão do cliente em 28/08/2026, revertendo o desenho de 11/08: quando ela
   responde, o atendimento começou de fato, e mostrar "aguardando primeira
@@ -866,6 +907,21 @@ Datas em DD/MM/AAAA.
   "— Sem dono —", o que também conserta os órfãos existentes um a um.
 
 ### Removido
+- **`LLM_FALLBACK_ENABLED`, `OPENAI_*` e `ANTHROPIC_*` saíram da configuração.**
+  Com provedor único o `llm_fallback_enabled` não tem para onde cair. **Foi
+  removido, não mantido:** uma flag chamada "fallback" que não alterna nada é
+  configuração que mente — quem a vê no painel do EasyPanel e a põe em `false`
+  acredita ter restringido alguma coisa, e não restringiu. Guardar o lugar para
+  um segundo provedor que não existe é a mesma arquitetura que este projeto
+  recusa em outros pontos; se um dia voltar, a flag volta junto com o código que
+  a lê. Os interruptores honestos continuam de pé: `LLM_ENABLED` e
+  `HELO_ENABLED`.
+  - ⚠️ **Sobra no painel do EasyPanel.** `Settings` roda com `extra="ignore"`,
+    então `OPENAI_API_KEY`, `ANTHROPIC_API_KEY` e `LLM_FALLBACK_ENABLED` que
+    ainda estejam lá **não derrubam o boot** — são só variáveis mortas. Vale
+    apagar, para não parecer que existe um segundo provedor. Quem tiver
+    `OPENAI_TEMPERATURE` com valor diferente de `0.3` precisa recriá-la como
+    `LLM_TEMPERATURE`: o nome antigo deixou de ser lido.
 - **Sete configurações que não alimentavam código nenhum** (`b30f75e`), todas
   com uso zero fora da própria definição: `llm_primary_provider` e
   `llm_fallback_provider` (o `llm.py` escolhe provedor por caminho de código
