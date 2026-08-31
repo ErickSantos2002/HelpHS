@@ -1,12 +1,18 @@
 # Registro da revisão aceita — consentimento LGPD
 
 **Data:** 31/08/2026
-**Status:** PROPOSTA — aguardando OK do Rickelme, nada implementado
+**Status:** **APROVADA pelo Rickelme em 31/08/2026** — opção B (histórico
+append-only). Ainda não implementada. A aprovação trouxe uma decisão que
+**aumenta o escopo**: ver "Re-aceite" na parte 5.
 **Origem:** a Política de Privacidade entregue pela qualidade em 31/08/2026
-(`Politica_De_Privacidade_HelpHS.pdf`, revisão 00) lista, na tabela de
-retenção, o item *"Registro de aceite dos Termos e desta política"* com a
-justificativa **"comprovação da revisão aceita pelo titular"**. O sistema não
-grava qual revisão foi aceita.
+(revisão 00, redigida pelo Hyago e pelo Gustavo) lista, na tabela de retenção,
+o item *"Registro de aceite dos Termos e desta política"* com a justificativa
+**"comprovação da revisão aceita pelo titular"**. O sistema não grava qual
+revisão foi aceita.
+
+O arquivo circulou em três formatos no mesmo dia — PDF, `.docx` e uma segunda
+`.docx` com a correção da seção 13. Não vale citar nome de arquivo aqui: eles
+se substituem. O que importa é a **revisão 00**, e o que ela promete.
 
 **Prazo real:** o campo precisa existir **antes** de a revisão 01 ser
 publicada — é ela que ativa a IA. Publicada a 01 sem o campo, não há como
@@ -76,9 +82,11 @@ passa a valer também para a revisão. Com histórico, revogar é **escrever
 `revogado_em`**, não apagar linha.
 
 ⚠️ **O preço, dito antes:** é tabela nova, migration e um lugar a mais para
-escrever em cinco caminhos. É mais trabalho que uma coluna. Se você preferir a
-coluna, ela atende ao pé da letra o que a política pede hoje e eu implemento —
-mas ficaria registrado que a comprovação vale só para a revisão vigente.
+escrever em cinco caminhos. É mais trabalho que uma coluna. A alternativa era a
+coluna, que atende ao pé da letra o que a política pede hoje, com a
+comprovação valendo só para a revisão vigente.
+
+✅ **Decidido em 31/08/2026: histórico.** O Rickelme escolheu pagar o preço.
 
 ### Duas revisões ou uma
 
@@ -120,11 +128,14 @@ fazer.
 Regra da casa aplicada: regra nova é prospectiva, não reescreve o passado, e
 backfill nunca vai dentro de migration.
 
-**Consequência que a qualidade precisa saber:** quando a revisão 01 for
-publicada, todos os cadastros anteriores estarão sem revisão registrada. Se o
-jurídico exigir aceite explícito da 01 para continuar o tratamento por IA, isso
-vira uma tela de re-aceite no próximo login — trabalho de front que **não está
-nesta proposta** e precisa de decisão antes de virar escopo.
+**Consequência, e ela se confirmou:** quando a revisão 01 for publicada, todos
+os cadastros anteriores estarão sem revisão registrada. Perguntei se isso
+exigiria aceite explícito da 01, e a resposta do Rickelme em 31/08 foi **sim**
+— quem já tem conta precisa aceitar a versão nova. Isso vira tela de re-aceite,
+e está detalhado na parte 5.
+
+O `NULL` continua sendo a verdade para o passado: ele é o que **dispara** o
+re-aceite, em vez de mascarar a ausência de registro.
 
 ---
 
@@ -164,6 +175,32 @@ precisam usar o mesmo identificador de revisão.
 do histórico **fica**, sem dado pessoal além do `user_id` que já está anonimizado
 — é registro de que houve consentimento, que é o que a política manda guardar.
 
+### Re-aceite — escopo novo, aprovado em 31/08/2026
+
+Decisão do Rickelme: **quem já tem conta precisa aceitar a revisão nova.** Isso
+não estava na proposta original e acrescenta trabalho de front.
+
+O desenho em uma frase: se a última linha de consentimento do usuário não
+casar com a revisão vigente — inclusive quando não há linha nenhuma —, ele
+passa por uma tela de aceite antes de usar o sistema.
+
+Três coisas que precisam ser decididas antes de escrever esse código, e que
+**não decido sozinho**:
+
+1. **Recusar é possível?** Se a pessoa não aceitar, ela perde acesso, fica em
+   modo limitado, ou continua entrando com um aviso? Consentimento que não
+   admite recusa não é consentimento — mas negar acesso a um cliente com
+   chamado aberto tem custo de operação real.
+2. **Vale para o staff?** Técnicos e administradores usam o sistema para
+   trabalhar. Bloquear a equipe inteira no dia da publicação é risco
+   operacional que precisa ser escolhido, não descoberto.
+3. **Quando dispara?** No próximo login, ou também para quem já está com sessão
+   aberta? A política promete 15 dias de aviso prévio, o que dá tempo de fazer
+   pelo login e não interromper ninguém no meio do trabalho.
+
+⚠️ Isto merece proposta própria antes do código. Está registrado aqui para não
+se perder, não para ser implementado junto.
+
 **O caminho 2, em aberto.** Esta proposta faz o registro dizer a verdade sobre
 ele (`origem = criado_por_terceiro`), mas não decide se um terceiro **pode**
 consentir por outra pessoa. É pergunta jurídica, vai junto com o retorno à
@@ -173,6 +210,10 @@ qualidade, e não bloqueia o campo.
 
 ## O que eu NÃO verifiquei
 
-Se o jurídico aceita `NULL` como "consentiu antes de haver documento" ou se
-exige re-aceite de todos. A resposta muda a parte 3 e pode acrescentar uma tela
-inteira ao escopo.
+~~Se o jurídico aceita `NULL` como "consentiu antes de haver documento" ou se
+exige re-aceite de todos.~~ **Respondido em 31/08 pelo Rickelme:** haverá
+re-aceite. A tela entrou no escopo, com desenho próprio pendente (parte 5).
+
+Fica em aberto se o **jurídico** confirma essa leitura — a decisão veio do
+produto, e a pergunta seguiu para o Hyago e o Gustavo junto com o retorno da
+revisão 00. Se eles discordarem, quem muda é a parte 5, não o resto.
