@@ -314,10 +314,17 @@ export default function RegisterPage() {
                 className="mt-0.5 h-4 w-4 rounded border-border bg-background-elevated accent-primary cursor-pointer"
               />
               <span className="text-xs text-slate-400 leading-relaxed">
-                Li e aceito os{" "}
-                <span className="text-primary">termos de uso</span> e a{" "}
-                <span className="text-primary">política de privacidade</span>,
-                incluindo o tratamento dos meus dados conforme a LGPD.
+                Li e aceito os termos de uso e a{" "}
+                <Link
+                  to="/privacidade"
+                  target="_blank"
+                  rel="noopener noreferrer"
+                  className="text-primary hover:underline"
+                  onClick={(e) => e.stopPropagation()}
+                >
+                  política de privacidade
+                </Link>
+                , incluindo o tratamento dos meus dados conforme a LGPD.
               </span>
             </label>
 
