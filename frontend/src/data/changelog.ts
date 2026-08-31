@@ -1,4 +1,4 @@
-export const APP_VERSION = "v1.11.0";
+export const APP_VERSION = "v1.12.0";
 
 export type EntryType = "novidade" | "corrigido" | "melhoria";
 
@@ -14,6 +14,13 @@ export interface ChangelogVersion {
 }
 
 export const CHANGELOG: ChangelogVersion[] = [
+  {
+    version: "v1.12.0",
+    date: "31/08/2026",
+    entries: [
+      { type: "novidade", text: "A Política de Privacidade agora pode ser lida dentro do sistema. Na tela de cadastro, o texto \"política de privacidade\" virou um link que abre o documento completo — antes ele tinha aparência de link mas não abria nada, e a pessoa marcava a caixa dizendo ter lido algo que não tinha como ler." },
+    ],
+  },
   {
     version: "v1.11.0",
     date: "31/08/2026",

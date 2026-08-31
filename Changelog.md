@@ -826,6 +826,29 @@ Datas em DD/MM/AAAA.
   ambiente, o escuro segue sendo o padrão.
 
 ### Adicionado
+- **A Política de Privacidade vira página, e o cadastro para de mentir**
+  (`721248b`, `5c123ee`). A caixa de aceite pedia *"Li e aceito os termos de uso
+  e a política de privacidade"* com as duas expressões em
+  `<span class="text-primary">` — cor de link, sem serem link. Não havia rota,
+  não havia documento, não havia nada para abrir: pedia-se que a pessoa
+  declarasse ter **lido** o que ela não tinha como ler.
+  - O texto entra como **markdown versionado** (`src/content/`), não embutido
+    no componente. Cada revisão vira um diff, e é assim que se prova depois o
+    que a revisão 00 dizia — que é exatamente o que o registro de aceite
+    promete comprovar. O `.docx` da qualidade fica fora do repositório: ele se
+    substitui, o git não.
+  - **"Termos de uso" continua sem link, de propósito** — esse documento ainda
+    não existe. Um link que funciona vale mais que dois que fingem.
+  - **Guarda de rascunho:** enquanto o texto tiver marcador em aberto
+    (`[validar prazos de retenção]` e outros onze), a página avisa que é
+    documento em elaboração. A detecção olha o conteúdo, não uma flag — flag
+    alguém esquece de virar; o marcador some sozinho quando o texto fecha.
+  - ⚠️ **Achado de lado, não consertado:** o `@tailwindcss/typography` **nunca
+    esteve instalado** (`plugins: []`). As classes `prose-*` do
+    `KBArticlePage` são inertes, e a Base de Conhecimento renderiza markdown
+    sem estilo nenhum. Instalar o plugin consertaria a KB por acidente,
+    mudando uma tela que não era o alvo deste trabalho. Esta página se
+    estiliza sozinha; a KB fica registrada aqui.
 - **`scripts/desliga_mfa.py` — saída de emergência do segundo fator**
   (`cb61d85`). Avulso, no molde do `redefine_senha`: dry-run por padrão,
   `--aplicar` para gravar, rastro em `audit_logs`.
