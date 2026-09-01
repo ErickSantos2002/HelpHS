@@ -7,6 +7,135 @@ O changelog do produto (o que o cliente vê) fica em
 
 ---
 
+## 01/09/2026 — Auditoria nova, e o dia em que produção recebeu quatro correções de segurança
+
+Auditoria independente do repositório inteiro, pedida do zero e não como
+continuação da de agosto. O relatório completo está no artefato; aqui fica o que
+mudou em produção e **o que olhar se algo quebrar**.
+
+### ⚠️ Se algo quebrar hoje ou nos próximos dias, comece por aqui
+
+O deploy de hoje trouxe quatro mudanças que tocam caminhos diferentes. Esta
+tabela existe para encurtar o diagnóstico:
+
+| Sintoma | Causa provável | Onde olhar |
+|---|---|---|
+| **Backend não sobe**, log fala em STARTTLS | `SMTP_TLS=true` voltou no EasyPanel | `app/core/config.py`, guarda do CVE-2026-55558. A mensagem diz a saída: porta 465, `SMTP_SSL=true` |
+| **Backend não sobe**, log fala em SMTP_TLS e SMTP_SSL juntos | as duas variáveis ligadas ao mesmo tempo | mesma guarda; escolha uma |
+| **E-mail parou de sair** | porta/TLS trocados no painel | `SMTP_PORT=465`, `SMTP_TLS=false`, `SMTP_SSL=true`. Diagnóstico: `python -m scripts.testa_smtp destino@x.com` de dentro do contêiner |
+| **Download de anexo com múltiplas faixas dá 416** | é o esperado agora | `app/routers/files.py`, `_recusa_range_perigoso`. Multi-range foi recusado de propósito — ele já estava quebrado no starlette |
+| **Download dá 431** | cabeçalho `Range` acima de 128 bytes | mesma guarda. Cliente legítimo não chega perto disso |
+| **Consulta de CEP/CNPJ dá 429** | teto de 30/hora **por usuário** | `rate_limit_consulta_externa`. Conta CEP e CNPJ juntos, e cache **não** poupa cota |
+| **CEP/CNPJ dá 503** | provedor externo fora do ar | antes isto era **500**. O 503 é a melhoria: o defeito não é nosso |
+| **CEP devolve endereço antigo** | cache de 30 dias | `app/services/consulta_externa.py`. Não há invalidação manual |
+| **Erro estranho de validação, formato diferente** | upgrade de FastAPI 0.115 → 0.141 | os 925 testes não cobrem formato de erro nem shape do OpenAPI |
+
+### O upgrade que não corrigiu o que dizia corrigir
+
+Subi FastAPI 0.115.12 → 0.141.1 e starlette 0.46.2 → 0.51.0 por causa do
+**PYSEC-2026-1942**: DoS quadrático por cabeçalho `Range` no `FileResponse`. O
+`/files/{token}` usa `FileResponse` e é o único do projeto.
+
+O `pip-audit` parou de reportar o aviso depois do upgrade. **Fui medir e o
+comportamento continuava lá.** O laço de mesclagem do `_parse_range_header`
+segue aninhado na 0.51.0, e `_parse_ranges` não tem teto de quantidade:
+
+```
+    500 faixas ->    10 ms
+   1000 faixas ->    43 ms   (4,3x)
+   4000 faixas ->   821 ms
+  16000 faixas -> 11874 ms
+```
+
+Dobrar a quantidade quadruplica o tempo. Ponta a ponta contra uvicorn real, um
+cabeçalho de **626 KB com 50 mil faixas foi aceito e ocupou o processo por 151
+segundos**. Como o parsing é CPU síncrona no event loop e o deploy roda
+`--workers 1`, uma requisição congela a API para todos.
+
+Minha primeira medição deu linear e estava **errada**: usei faixas decrescentes,
+que entram na posição zero e saem do laço interno na primeira iteração. O pior
+caso é crescente, que força varrer a lista inteira antes do `append`.
+
+A mitigação ficou na nossa camada — guarda O(1) antes do `FileResponse`, que
+mede o comprimento e procura uma vírgula, sem fazer parsing. **151 segundos
+viraram 0,01.** Multi-range é recusado inteiro porque já estava quebrado no
+starlette, conferido contra a 0.46.2 isolada.
+
+**A lição, que vale além deste caso:** "o advisory sumiu do `pip-audit`" e "a
+vulnerabilidade foi corrigida" são afirmações diferentes. A primeira é sobre um
+banco de dados; a segunda, sobre comportamento. Só a medição separa as duas —
+e eu emendei a mensagem do commit para não gravar no histórico uma alegação de
+segurança falsa.
+
+### O teto de CNPJ/CEP, e o balde que era por URL
+
+Os dois endpoints saíam para `brasilapi` e `viacep` sem cache e sem teto. O
+risco não é derrubar o HelpHS: é o **IP público do servidor levar bloqueio do
+provedor**, e aí a funcionalidade morre para todo mundo sem aparecer em log
+nenhum nosso.
+
+Entrou cache no Redis — que já existia, não é infraestrutura nova — com TTL de
+30 dias para CEP, 7 para CNPJ e **1 hora para "não encontrado"**. O negativo
+importa: sem ele, varrer CEPs inválidos passaria inteiro por fora do cache, que
+é o padrão de quem abusa, não de quem preenche formulário.
+
+O teto é 30/hora **por usuário**, e o número tem origem: o gatilho no front é
+`onBlur` com o campo completo, e os dois únicos chamadores são o onboarding e a
+edição de perfil. Não existe entrada em massa.
+
+**E aqui apareceu o achado que quase deixou o teto decorativo.** O slowapi usa
+`key_style="url"` por padrão — o balde é o **caminho**. Como estes endpoints
+levam o dado na URL, `/cep/01001000` e `/cep/01001001` contariam separado:
+bastava variar o CEP para contornar. Corrigido com `key_style="endpoint"`. Os
+limites antigos não mudam, porque têm caminho constante.
+
+Descobri porque o teste falhou e fui ler o código do slowapi, em vez de ajustar
+o teste até ficar verde.
+
+Terceiro defeito que não estava no achado: **não havia `try/except` nenhum** nas
+chamadas externas. Timeout do provedor virava **500** para o nosso usuário.
+
+### STARTTLS, e uma mitigação que não precisou de upgrade
+
+O `CVE-2026-55558` era o único aviso da auditoria **alcançável e sem
+mitigação**: o `aiosmtplib` abaixo da 5.1.2 não descarta o buffer de recepção
+antes do handshake do STARTTLS, e bytes lidos em texto claro sobrevivem à
+fronteira. A correção pelo pacote exige subir `fastapi-mail` junto.
+
+Mas o aviso afeta **só** quem faz o upgrade por STARTTLS. Com TLS implícito na
+465 não existe perna em claro. Testei a porta contra o provedor sem enviar
+e-mail e sem credencial — `smtp.resend.com:465` aceitou TLSv1.3 e anunciou
+`AUTH`, com as mesmas extensões da 587.
+
+Produção passou a `SMTP_PORT=465`, `SMTP_TLS=false`, `SMTP_SSL=true`, e o e-mail
+de teste **chegou na caixa** — entrega real, não só "servidor aceitou".
+
+E entrou uma **guarda de boot**, porque configuração não se defende sozinha: a
+variável mora no painel, fora do repositório e de qualquer revisão de código.
+Em produção e staging o backend agora **não sobe** com STARTTLS enquanto o
+`aiosmtplib` instalado for vulnerável. A guarda lê a versão real do ambiente, e
+é sobre a versão — não sobre STARTTLS em si: quando o pacote subir, a 587 volta
+a ser escolha legítima sem ninguém precisar lembrar de mexer lá.
+
+A ordem importou: **painel primeiro, deploy depois.** Invertido, o backend não
+subiria.
+
+### O que ficou em aberto
+
+O **gate de auditoria de dependências no CI** — não existe ainda, e é por isso
+que ninguém sabia que havia 24 avisos no backend. Vai nascer com baseline
+justificado item a item: 13 IDs no backend e 14 no front, todos verificados por
+comando, todos `NÃO APLICÁVEL` menos o CVE-2026-55558, que entra como
+`MITIGATED_BY_CONFIG`.
+
+Riscos residuais aceitos: CEP pode ficar até 30 dias desatualizado, cache hit
+consome cota do teto, o timeout de 10s ainda segura uma requisição, e o
+`_parse_range_header` do starlette continua quadrático — fechamos o caminho, não
+o buraco. `FileResponse` novo em outro endpoint nasce vulnerável de novo, e hoje
+isso é convenção, não trava.
+
+---
+
 ## 27/08/2026 (noite) — O banco estava na internet, e o cadastro contava quem tem conta
 
 ### O achado que não estava em lista nenhuma
