@@ -21,4 +21,4 @@ tests/test_health.py, confere os dois lados: subir um sem o outro derruba a
 suíte.
 """
 
-__version__ = "1.11.0"
+__version__ = "1.12.0"
