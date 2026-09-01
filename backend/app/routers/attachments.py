@@ -77,7 +77,7 @@ def _validate_extension(file: UploadFile, settings: Settings) -> None:
     ext = os.path.splitext(file.filename or "")[1].lower()
     if ext not in settings.allowed_extensions:
         raise HTTPException(
-            status_code=status.HTTP_422_UNPROCESSABLE_ENTITY,
+            status_code=status.HTTP_422_UNPROCESSABLE_CONTENT,
             detail=f"O tipo de arquivo '{ext}' não é aceito.",
         )
 
@@ -118,7 +118,7 @@ async def upload_attachments(
     existing_count = count_result.scalar_one()
     if existing_count + len(files) > settings.upload_max_files_per_ticket:
         raise HTTPException(
-            status_code=status.HTTP_422_UNPROCESSABLE_ENTITY,
+            status_code=status.HTTP_422_UNPROCESSABLE_CONTENT,
             detail=f"Ticket already has {existing_count} attachment(s). "
             f"Max {settings.upload_max_files_per_ticket} per ticket.",
         )
@@ -144,7 +144,7 @@ async def upload_attachments(
         )
         if scan_msg not in ("clean", "unavailable"):
             raise HTTPException(
-                status_code=status.HTTP_422_UNPROCESSABLE_ENTITY,
+                status_code=status.HTTP_422_UNPROCESSABLE_CONTENT,
                 detail=f"File '{file.filename}' rejected: {scan_msg}",
             )
 

@@ -87,7 +87,7 @@ async def create_event(
 ) -> CalendarEventResponse:
     if body.end_date < body.start_date:
         raise HTTPException(
-            status_code=status.HTTP_422_UNPROCESSABLE_ENTITY,
+            status_code=status.HTTP_422_UNPROCESSABLE_CONTENT,
             detail="A data de fim precisa ser igual ou posterior à data de início.",
         )
 
@@ -156,7 +156,7 @@ async def update_event(
 
     if event.end_date < event.start_date:
         raise HTTPException(
-            status_code=status.HTTP_422_UNPROCESSABLE_ENTITY,
+            status_code=status.HTTP_422_UNPROCESSABLE_CONTENT,
             detail="A data de fim precisa ser igual ou posterior à data de início.",
         )
 

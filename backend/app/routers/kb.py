@@ -557,7 +557,7 @@ async def create_comment(
         parent = parent_check.scalar_one()
         if parent.parent_id is not None:
             raise HTTPException(
-                status_code=status.HTTP_422_UNPROCESSABLE_ENTITY,
+                status_code=status.HTTP_422_UNPROCESSABLE_CONTENT,
                 detail="Não é possível responder a uma resposta. Comente na mensagem original.",
             )
 

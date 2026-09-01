@@ -381,7 +381,7 @@ async def update_company(
     # de servidor por um estado que nunca foi válido.
     if "name" in enviados and not body.name:
         raise HTTPException(
-            status_code=status.HTTP_422_UNPROCESSABLE_ENTITY,
+            status_code=status.HTTP_422_UNPROCESSABLE_CONTENT,
             detail="O nome da empresa não pode ficar vazio.",
         )
 

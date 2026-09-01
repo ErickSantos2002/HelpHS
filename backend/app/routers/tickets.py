@@ -995,12 +995,12 @@ async def assign_ticket(
             )
         if new_assignee_user.role not in (UserRole.admin, UserRole.technician):
             raise HTTPException(
-                status_code=status.HTTP_422_UNPROCESSABLE_ENTITY,
+                status_code=status.HTTP_422_UNPROCESSABLE_CONTENT,
                 detail="Tickets só podem ser atribuídos a técnicos ou administradores.",
             )
         if new_assignee_user.status != UserStatus.active:
             raise HTTPException(
-                status_code=status.HTTP_422_UNPROCESSABLE_ENTITY,
+                status_code=status.HTTP_422_UNPROCESSABLE_CONTENT,
                 detail=(
                     f"{new_assignee_user.name} está com o cadastro inativo e não pode "
                     "receber tickets."

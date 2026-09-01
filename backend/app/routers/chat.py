@@ -469,7 +469,7 @@ async def summarize_ticket_conversation(
 
     if not messages:
         raise HTTPException(
-            status_code=status.HTTP_422_UNPROCESSABLE_ENTITY,
+            status_code=status.HTTP_422_UNPROCESSABLE_CONTENT,
             detail="Ainda não há mensagens nesta conversa para resumir.",
         )
 

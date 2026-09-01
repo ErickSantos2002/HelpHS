@@ -45,6 +45,14 @@ def _captura() -> tuple[list[str], int]:
 
 def test_a_linha_de_acesso_do_uvicorn_nao_leva_o_token():
     """O caso que motivou tudo: WebSocket aceito, com o JWT na query."""
+    # A ponte troca os handlers da raiz do `logging`. Sem devolver o estado, ela
+    # sobrevive ao teste e, no encerramento do interpretador, o `logging` emite
+    # sua última linha por um sink do loguru que o pytest já fechou — o que
+    # enche a saída da suíte de "I/O operation on closed file".
+    raiz = logging.getLogger()
+    handlers_originais = list(raiz.handlers)
+    nivel_original = raiz.level
+
     instalar_ponte_stdlib()
     linhas, sink = _captura()
     try:
@@ -54,6 +62,8 @@ def test_a_linha_de_acesso_do_uvicorn_nao_leva_o_token():
         )
     finally:
         logger.remove(sink)
+        raiz.handlers = handlers_originais
+        raiz.setLevel(nivel_original)
 
     assert linhas, "a ponte parou de encaminhar as linhas do uvicorn"
     texto = "\n".join(linhas)
