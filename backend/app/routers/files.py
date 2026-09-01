@@ -19,7 +19,7 @@ from pathlib import Path
 from typing import Annotated
 from urllib.parse import quote
 
-from fastapi import APIRouter, Depends, HTTPException, Query, status
+from fastapi import APIRouter, Depends, HTTPException, Query, Request, status
 from fastapi.responses import FileResponse
 
 from app.core.config import Settings, get_settings
@@ -56,6 +56,55 @@ _SECURITY_HEADERS = {
 }
 
 
+# ── Guarda do cabeçalho Range ─────────────────────────────────
+#
+# O `FileResponse` do starlette mescla as faixas do `Range` em laço aninhado,
+# sem teto de quantidade. Medido na 0.51.0, com faixas crescentes e disjuntas
+# (o pior caso, porque cada nova precisa varrer a lista inteira antes do
+# `append`): 1000 faixas custam 43 ms, 4000 custam 821 ms, 16000 custam 11,9 s.
+# Dobrar a quantidade quadruplica o tempo. Ponta a ponta, um cabeçalho de 625 KB
+# com 50 mil faixas foi aceito e ocupou o processo por 180 segundos.
+#
+# Isso é CPU síncrona dentro do event loop, e o deploy roda `--workers 1`: uma
+# requisição congela a API para todos. É o PYSEC-2026-1942, que o pip-audit
+# deixou de reportar mas que continua no comportamento.
+#
+# A guarda abaixo é O(1) — mede o comprimento e procura uma vírgula. Não faz
+# parsing, de propósito: parsing na nossa camada só moveria o custo de lugar.
+_RANGE_TAMANHO_MAXIMO = 128
+"""Bytes. `bytes=` mais duas casas de 20 dígitos cabem de sobra em 128."""
+
+
+def _recusa_range_perigoso(range_bruto: str | None) -> None:
+    """Barra o `Range` que sairia caro, ANTES de ele chegar ao `FileResponse`.
+
+    Multi-range é recusado inteiro, e não apenas limitado a um número pequeno de
+    faixas. Dois motivos: ele **já está quebrado** no starlette — `bytes=0-99,
+    200-299` estoura `Response content longer than Content-Length` e derruba a
+    conexão, tanto na 0.51.0 quanto na 0.46.2 anterior, então não há
+    funcionalidade a preservar; e recusar por vírgula é uma checagem que não
+    depende de contar nada.
+
+    O uso legítimo continua inteiro: navegador e gerenciador de download pedem
+    uma faixa por requisição (`bytes=0-`, `bytes=1024-2047`), que é o que
+    sustenta retomada de download e busca em vídeo.
+    """
+    if not range_bruto:
+        return
+
+    if len(range_bruto) > _RANGE_TAMANHO_MAXIMO:
+        raise HTTPException(
+            status_code=status.HTTP_431_REQUEST_HEADER_FIELDS_TOO_LARGE,
+            detail="Cabeçalho Range grande demais.",
+        )
+
+    if "," in range_bruto:
+        raise HTTPException(
+            status_code=status.HTTP_416_RANGE_NOT_SATISFIABLE,
+            detail="Este servidor atende uma faixa por requisição.",
+        )
+
+
 def _safe_media_type(caminho: Path) -> tuple[str, bool]:
     """
     Devolve (media_type, pode_exibir_inline).
@@ -78,6 +127,7 @@ def _safe_media_type(caminho: Path) -> tuple[str, bool]:
 @router.get("/files/{token}")
 async def download_file(
     token: str,
+    request: Request,
     settings: Annotated[Settings, Depends(get_settings)],
     download: bool = Query(default=False, description="Força o download mesmo sendo imagem"),
     filename: str | None = Query(default=None, max_length=255),
@@ -87,6 +137,11 @@ async def download_file(
         caminho = storage.resolve_path(key, settings)
     except storage.StorageError as exc:
         raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail=str(exc)) from exc
+
+    # Depois do token, de propósito: quem não tem link válido continua levando
+    # 403 antes de qualquer outra coisa, e a recusa do Range não vira um oráculo
+    # sobre a existência do arquivo.
+    _recusa_range_perigoso(request.headers.get("range"))
 
     if not caminho.is_file():
         raise HTTPException(
