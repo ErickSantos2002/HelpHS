@@ -1,4 +1,5 @@
 import logging
+import re
 import sys
 from typing import Any
 
@@ -7,9 +8,21 @@ from loguru import logger
 from app.core.config import get_settings
 from app.core.contexto import id_atual
 
+# Segredo que viaja na QUERY STRING. O caso que motivou isto: o navegador nao
+# deixa mandar cabecalho no WebSocket, entao o JWT vai na URL -- e o uvicorn
+# registra a linha de acesso com a URL inteira.
+#
+# `[^&\s"']+` para o valor: para no proximo parametro, no espaco ou na aspa que
+# fecha. Apagar ate o fim da linha levaria junto o resto da query, que e o que
+# se usa para diagnosticar.
+_SEGREDO_NA_QUERY = re.compile(
+    r"([?&](?:access_token|refresh_token|token)=)[^&\s\"']+",
+    re.IGNORECASE,
+)
+
 
 def _carimba(record: Any) -> None:
-    """Poe o id da requisicao no `extra` de toda linha.
+    """Poe o id da requisicao no `extra` de toda linha, e apaga segredo da URL.
 
     Fica em `extra`, e nao no texto, porque em producao o sink serializa em JSON
     e campo estruturado e o que se filtra sem regex. Ate aqui o `extra` saia
@@ -17,6 +30,12 @@ def _carimba(record: Any) -> None:
     o `serialize=True` produzia JSON sem nenhum campo alem da mensagem.
     """
     record["extra"]["request_id"] = id_atual()
+
+    # A redacao mora AQUI, e nao na `_PonteStdlib`, de proposito: o patcher roda
+    # em toda linha -- as nossas e as que a ponte traz do uvicorn. Consertar so
+    # a ponte deixaria a porta aberta para o dia em que alguem escrevesse
+    # `logger.info(f"... {url}")` com uma URL assinada dentro.
+    record["message"] = _SEGREDO_NA_QUERY.sub(r"\1[REDIGIDO]", record["message"])
 
 
 # Instalado na IMPORTACAO, nao dentro do `setup_logging`. O `setup_logging` so
