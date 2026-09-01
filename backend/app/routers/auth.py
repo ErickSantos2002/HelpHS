@@ -7,7 +7,6 @@ import uuid
 from datetime import UTC, datetime
 from typing import Annotated
 
-import httpx
 from fastapi import APIRouter, BackgroundTasks, Depends, HTTPException, Request, Response, status
 from fastapi.responses import JSONResponse
 from fastapi.security import HTTPAuthorizationCredentials
@@ -19,7 +18,7 @@ from starlette.concurrency import run_in_threadpool
 
 from app.core.config import get_settings
 from app.core.database import get_db
-from app.core.rate_limit import limiter
+from app.core.rate_limit import chave_por_usuario, limiter
 from app.core.security import (
     DUMMY_PASSWORD_HASH,
     authorize,
@@ -54,7 +53,7 @@ from app.schemas.auth import (
     TokenOnlyRequest,
     TokenResponse,
 )
-from app.services import account_tokens, mfa, mfa_challenge
+from app.services import account_tokens, consulta_externa, mfa, mfa_challenge
 from app.services.account_emails import (
     send_account_exists_email,
     send_password_reset_email,
@@ -87,59 +86,50 @@ def _audit(
 
 
 @router.get("/cnpj/{cnpj}")
+@limiter.limit(settings.rate_limit_consulta_externa, key_func=chave_por_usuario)
 async def lookup_cnpj(
     cnpj: str,
+    request: Request,
     _: Annotated[User, Depends(get_current_user)],
 ) -> dict:
     cnpj_clean = re.sub(r"\D", "", cnpj)
     if len(cnpj_clean) != 14:
         raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="CNPJ inválido")
 
-    async with httpx.AsyncClient(timeout=10) as client:
-        resp = await client.get(f"https://brasilapi.com.br/api/cnpj/v1/{cnpj_clean}")
-
-    if resp.status_code != 200:
+    try:
+        return await consulta_externa.consulta_cnpj(cnpj_clean)
+    except consulta_externa.ConsultaNaoEncontradaError:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="CNPJ não encontrado")
-
-    data = resp.json()
-    return {
-        "cnpj": cnpj_clean,
-        "company_name": data.get("razao_social") or "",
-        "trade_name": data.get("nome_fantasia") or "",
-        "city": data.get("municipio") or "",
-        "state": data.get("uf") or "",
-    }
+    except consulta_externa.ConsultaIndisponivelError:
+        raise HTTPException(
+            status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
+            detail="A consulta de CNPJ está indisponível agora. Preencha os dados manualmente.",
+        )
 
 
 # ── GET /auth/cep/{cep} ──────────────────────────────────────
 
 
 @router.get("/cep/{cep}")
+@limiter.limit(settings.rate_limit_consulta_externa, key_func=chave_por_usuario)
 async def lookup_cep(
     cep: str,
+    request: Request,
     _: Annotated[User, Depends(get_current_user)],
 ) -> dict:
     cep_clean = re.sub(r"\D", "", cep)
     if len(cep_clean) != 8:
         raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="CEP inválido")
 
-    async with httpx.AsyncClient(timeout=10) as client:
-        resp = await client.get(f"https://viacep.com.br/ws/{cep_clean}/json/")
-
-    if resp.status_code != 200:
+    try:
+        return await consulta_externa.consulta_cep(cep_clean)
+    except consulta_externa.ConsultaNaoEncontradaError:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="CEP não encontrado")
-
-    data = resp.json()
-    if data.get("erro"):
-        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="CEP não encontrado")
-
-    return {
-        "cep": f"{cep_clean[:5]}-{cep_clean[5:]}",
-        "address": data.get("logradouro") or "",
-        "neighborhood": data.get("bairro") or "",
-        "city": data.get("localidade") or "",
-        "state": data.get("uf") or "",
-    }
+    except consulta_externa.ConsultaIndisponivelError:
+        raise HTTPException(
+            status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
+            detail="A consulta de CEP está indisponível agora. Preencha os dados manualmente.",
+        )
 
 
 # ── POST /auth/register ───────────────────────────────────────

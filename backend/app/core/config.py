@@ -317,6 +317,18 @@ class Settings(BaseSettings):
     # chega aqui já tem um token assinado nas mãos, e o caso comum é a pessoa
     # clicando de novo no link porque a primeira tentativa pareceu não responder.
     rate_limit_token: str = "10/15minutes"
+    # Consulta de CNPJ e CEP em provedor externo. Chaveado por USUÁRIO, não por
+    # IP (ver `chave_por_usuario`), porque o endpoint exige sessão.
+    #
+    # 30/hora é generoso de propósito. O gatilho no front é `onBlur` com o campo
+    # completo — 14 dígitos de CNPJ, 8 de CEP —, então cada consulta custa um
+    # ciclo de foco humano, e os dois únicos chamadores são formulários:
+    # onboarding, que a pessoa faz uma vez, e edição de perfil. Uma sessão real
+    # gasta 1 a 3 consultas; quem estiver corrigindo o número várias vezes chega
+    # talvez a 10. O teto é umas dez vezes a sessão mais pesada que consigo
+    # imaginar, e mesmo assim limita cada conta a 30 chamadas externas por hora
+    # — antes do cache, que derruba esse número de novo.
+    rate_limit_consulta_externa: str = "30/hour"
 
     # Quem pode falar pelos outros: lista de IPs/redes cujo X-Forwarded-For o
     # uvicorn aceita como sendo o IP real de quem chamou. O uvicorn lê esta
