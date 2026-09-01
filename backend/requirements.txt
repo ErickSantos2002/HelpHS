@@ -27,7 +27,6 @@ cryptography==50.0.0
 slowapi==0.1.9
 
 # Storage (MinIO)
-boto3==1.38.8
 
 # Redis (cache, blacklist de token e lock da rotina de fechamento)
 redis==5.2.1

@@ -69,6 +69,9 @@ k6/results/
 
 # Test artifacts (generated locally)
 backend/.coverage
+# O pytest com concurrency grava .coverage.<host>.<pid>.<hash> — o padrao
+# exato acima nao pega esses, e eles apareciam soltos no git status.
+backend/.coverage.*
 backend/htmlcov/
 frontend/playwright-report/
 frontend/test-results/

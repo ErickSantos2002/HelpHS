@@ -83,8 +83,8 @@ está em [desenvolvimento-local.md](desenvolvimento-local.md).
 ## Testes
 
 ```bash
-cd backend  && pytest                # 863 testes, gate de 80% de cobertura
-cd frontend && npm test              # 315 testes (Vitest)
+cd backend  && pytest                # 884 testes, gate de 80% de cobertura
+cd frontend && npm test              # 333 testes (Vitest)
 cd frontend && npx playwright test   # e2e — exige backend na 8001
 ```
 
@@ -101,7 +101,7 @@ workflow próprio (`e2e.yml`), acionado à mão.
 | Backend     | Python 3.13, FastAPI, SQLAlchemy 2.0, Alembic   |
 | Banco       | PostgreSQL 15                                   |
 | Cache       | Redis 7                                         |
-| WebSocket   | python-socketio                                 |
+| WebSocket   | Nativo do FastAPI (`starlette`), sem biblioteca |
 | Frontend    | React, Vite, TypeScript, Tailwind CSS           |
 | Storage     | Disco, em volume (`UPLOAD_DIR`)                 |
 | Antivírus   | ClamAV                                          |
