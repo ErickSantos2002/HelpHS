@@ -270,6 +270,27 @@ export function ChatPanel({
     ws.onerror = () => {
       setWsStatus("disconnected");
     };
+    // `onStatusChange` fica FORA das deps de propósito, e não por esquecimento.
+    //
+    // O pai (TicketDetailPage) passa uma arrow inline, então a prop ganha
+    // identidade nova a cada render dele. Se ela entrar aqui, `connect` muda de
+    // identidade junto, o efeito abaixo reexecuta, o cleanup fecha o socket e
+    // ele reconecta: tempestade de reconexão no chat a cada tecla digitada na
+    // página do chamado.
+    //
+    // A closure velha é inofensiva porque o único uso da prop é chamar
+    // `setTicket` com atualização funcional: o setter do `useState` tem
+    // identidade estável por garantia do React, e o updater recebe `prev`
+    // fresco. Não há dado velho a capturar.
+    //
+    // ⚠️ Esta isenção vale enquanto essa condição valer. Se algum dia o
+    // `onStatusChange` do pai passar a LER uma variável do render (props,
+    // estado, contexto) em vez de só chamar um setter estável, a closure velha
+    // passa a mentir e o certo aí é o padrão de ref para o callback mais
+    // recente — não incluir a dep. `ChatPanel.test.tsx` prende as duas metades:
+    // que o socket é construído uma vez só, e que a mudança de status ainda
+    // chega ao pai depois de vários re-renders.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [ticketId]);
 
   useEffect(() => {
