@@ -1,4 +1,4 @@
-import { useEffect, useState } from "react";
+import { useCallback, useEffect, useState } from "react";
 import { useForm } from "react-hook-form";
 import { zodResolver } from "@hookform/resolvers/zod";
 import { z } from "zod";
@@ -531,7 +531,10 @@ function ClientNotesModal({
 
 const CLIENTS_PAGE_SIZE = 5;
 
-function CompanyDetailModal({
+// Exportado só para o teste: `GroupsPage.test.tsx` precisa montar este modal
+// direto para contar as chamadas do efeito. Continua sendo renderizado apenas
+// por este arquivo.
+export function CompanyDetailModal({
   groupId, company, onClose, onUpdated,
 }: { groupId: string; company: CompanyResponse; onClose: () => void; onUpdated: () => void; }) {
   const [detail, setDetail] = useState<CompanyDetail | null>(null);
@@ -551,16 +554,22 @@ function CompanyDetailModal({
   const [companyNoteDeleting, setCompanyNoteDeleting] = useState<string | null>(null);
   const [activeTab, setActiveTab] = useState<"clients" | "notes">("clients");
 
-  const load = async () => {
+  // `load` era redefinido a cada render e o efeito dependia só de `company.id`,
+  // o que deixava `groupId` de fora: se ele mudasse sozinho, o modal seguiria
+  // mostrando a empresa carregada pelo grupo anterior. Hoje isso não acontece
+  // — o backdrop do Modal cobre a tela e intercepta o clique, então trocar de
+  // grupo com o modal aberto fecha o modal antes — mas a dependência que falta
+  // é dívida esperando alguém tornar o modal não-bloqueante.
+  const load = useCallback(async () => {
     setLoading(true);
     try {
       const d = await getCompany(groupId, company.id);
       setDetail(d);
       listCompanyNotes(groupId, company.id).then(setCompanyNotes).catch(() => {});
     } finally { setLoading(false); }
-  };
+  }, [groupId, company.id]);
 
-  useEffect(() => { load(); }, [company.id]);
+  useEffect(() => { load(); }, [load]);
 
   const handleUnassign = async (clientId: string) => {
     if (!confirm("Desvincular este cliente?")) return;
