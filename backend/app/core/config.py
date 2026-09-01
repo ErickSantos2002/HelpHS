@@ -12,6 +12,45 @@ from pydantic_settings import BaseSettings, SettingsConfigDict
 # localhost.healthsafetytech.com) e deixar passar [::1] ou 0.0.0.0.
 _HOSTS_LOCAIS = frozenset({"localhost", "127.0.0.1", "::1", "0.0.0.0", ""})
 
+# ── STARTTLS e o CVE-2026-55558 ───────────────────────────────
+#
+# O `aiosmtplib` abaixo da 5.1.2 não descarta o que ficou no buffer de recepção
+# antes do handshake do STARTTLS. Bytes lidos do socket em TEXTO CLARO
+# sobrevivem à fronteira e são interpretados como se tivessem chegado dentro do
+# TLS — um atacante ativo na perna em claro injeta respostas na sessão.
+#
+# O aviso afeta SÓ quem faz o upgrade por STARTTLS. Com TLS implícito (porta
+# 465) não existe perna em claro, e o caminho vulnerável nunca é percorrido.
+#
+# A correção pelo pacote exige `aiosmtplib >= 5.1.2`, hoje travado pelo
+# `fastapi-mail <4.0.0`. Até isso destravar, a mitigação é de configuração — e
+# a guarda em `_valida_producao` existe para que ela não dependa de alguém
+# lembrar de manter a variável certa no painel.
+_AIOSMTPLIB_CORRIGIDO = (5, 1, 2)
+
+
+def _aiosmtplib_vulneravel() -> bool:
+    """True se a versão instalada estiver abaixo da que corrige o CVE.
+
+    Lê a versão real do ambiente em vez de olhar o `requirements.txt`: o que
+    importa é o que está rodando, não o que está escrito.
+    """
+    try:
+        from importlib.metadata import version
+
+        bruta = version("aiosmtplib")
+    except Exception:  # noqa: BLE001 — pacote ausente: sem envio, sem risco
+        return False
+
+    numeros = []
+    for parte in bruta.split(".")[:3]:
+        digitos = "".join(c for c in parte if c.isdigit())
+        numeros.append(int(digitos) if digitos else 0)
+    while len(numeros) < 3:
+        numeros.append(0)
+    return tuple(numeros) < _AIOSMTPLIB_CORRIGIDO
+
+
 # APP_ENV vem digitado à mão no painel de deploy: "Production" e "prod" precisam
 # valer como produção, senão um detalhe de caixa desliga TODAS as validações.
 #
@@ -175,6 +214,28 @@ class Settings(BaseSettings):
                 "presas esperando um e-mail que nunca chega"
             )
 
+        # ── STARTTLS vulnerável (CVE-2026-55558) ──────────────────
+        #
+        # Só vale quando há envio configurado: SMTP desligado não tem risco de
+        # transporte e não pode travar o boot por causa disso.
+        if self.email_is_configured():
+            if self.smtp_tls and self.smtp_ssl:
+                raise ValueError(
+                    "SMTP_TLS e SMTP_SSL não podem estar ligados ao mesmo tempo: "
+                    "STARTTLS (587) e TLS implícito (465) são caminhos "
+                    "excludentes, e ligar os dois esconde qual está em uso"
+                )
+            if self.smtp_tls and not self.smtp_ssl and _aiosmtplib_vulneravel():
+                raise ValueError(
+                    "STARTTLS com aiosmtplib vulnerável não é permitido em "
+                    "produção. Use TLS implícito na porta 465 "
+                    "(SMTP_SSL=true, SMTP_TLS=false, SMTP_PORT=465) ou "
+                    "atualize aiosmtplib para versão corrigida (>= 5.1.2). "
+                    "Motivo: CVE-2026-55558 — bytes lidos em texto claro "
+                    "sobrevivem ao handshake do STARTTLS e são interpretados "
+                    "como se tivessem chegado dentro do TLS."
+                )
+
     # Armazenamento de arquivos (anexos e avatares) em disco.
     # No deploy, este caminho precisa ser um volume — sem isso os arquivos
     # somem a cada redeploy do container.
@@ -239,9 +300,13 @@ class Settings(BaseSettings):
 
     # Email
     smtp_host: str = "smtp.gmail.com"
-    smtp_port: int = 587
-    smtp_tls: bool = True
-    smtp_ssl: bool = False
+    # TLS implícito (465), e não STARTTLS (587) — ver `_aiosmtplib_vulneravel`
+    # e o CVE-2026-55558 no topo deste arquivo. O padrão precisa ser o caminho
+    # seguro: quem herdar a configuração sem ler nada não deve cair no
+    # vulnerável por omissão.
+    smtp_port: int = 465
+    smtp_tls: bool = False
+    smtp_ssl: bool = True
     smtp_user: str = ""
     smtp_password: str = ""
     smtp_from_name: str = "Help Desk Health & Safety"
