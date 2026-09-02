@@ -136,10 +136,23 @@ WCAG 2.x, valores lidos de `tokens/colors.css`. Conferido à mão e por teste.
 |---|---|---:|---:|
 | `muted` | claro | 4,34:1 ❌ | **6,92:1** ✅ |
 | `muted` | escuro | **2,85:1** ❌ | **5,29:1** ✅ |
-| `warning` | claro | 4,32:1 ❌ | **6,10:1** ✅ |
-| `warning` | escuro | 7,01:1 ✅ | 7,01:1 ✅ |
+| `warning` | claro | 4,31:1 ❌ | **6,08:1** ✅ |
+| `warning` | escuro | 6,68:1 ✅ | 6,68:1 ✅ |
 | `secondary` | claro | 9,45:1 ✅ | **6,92:1** ✅ ↓ |
 | `secondary` | escuro | 9,13:1 ✅ | **5,29:1** ✅ ↓ |
+
+> **Correção de 02/09, depois de publicados os commits.** Quatro números do
+> `warning` saíram errados da primeira medição: eu usei `#0f1e2e` como
+> `--surface` do tema escuro, valor **chutado** em vez de lido — o real é
+> `#132238` —, e compus a tinta arredondando para inteiro em vez de manter
+> ponto flutuante. Os corretos são os da tabela acima: **4,31 → 6,08** no claro
+> e **6,68** nos dois lados do escuro (e **6,32 / 7,41** para a tinta do pacote
+> a 15%). Nenhum veredito muda: o que reprovava segue reprovando, o que aprovava
+> segue aprovando. **O corpo do commit `3554323` carrega os números antigos**
+> (4,32 · 6,10 · 7,01), e não foi reescrito para não mexer em histórico já
+> gravado — valem os daqui. Os **testes nunca estiveram errados**: eles medem
+> pelo `helpers/contraste.ts`, que lê o token e compõe em ponto flutuante. Foi a
+> prosa que errou, não o código.
 
 **Card — título sobre `--surface`**
 
@@ -281,12 +294,72 @@ pesos de cor, provando a herança de `currentColor`.
 - **`Card` sem `clickable` e sem `CardBody`.** O pacote tem os dois; o HelpHS
   não. Fora do escopo desta fase.
 - **`Badge` pinta a tinta a 20%, o pacote usa 15%** (`--tint-*`). Medido: o
-  `warning` claro dá 6,10:1 a 20% contra 6,31:1 a 15%; os dois aprovam. A troca
+  `warning` claro dá 6,08:1 a 20% contra 6,32:1 a 15%; os dois aprovam. A troca
   do fundo espera as outras variantes saírem do `bg-*/20`.
 - **`Badge secondary` e `muted` seguem em `bg-background-elevated` e
   `border-border`**, os alias do D2. Só o `Card` saiu deles nesta fase.
 - **`--text-muted` continua vivo e correto** onde é degrau de texto sobre
   `--surface`; o que mudou é só o uso dele como par de tinta.
+
+## 10-A. Achado novo: as tintas semânticas reprovam fora do `--surface`
+
+Levantado pela sessão do **ChamadosHS** e **conferido aqui de forma
+independente**, recalculando dos tokens. Não é consequência desta fase — é
+anterior a ela, e só apareceu porque alguém mediu.
+
+O par `--tint-*` / `--on-tint-*` só foi medido, na E2, sobre uma superfície. Nas
+outras duas ele cai. Com a tinta a **20%**, que é o que o HelpHS pinta
+(`bg-*/20`), composição em ponto flutuante:
+
+| | claro / `--surface` | claro / `--bg-base` | claro / `--surface-elevated` |
+|---|---:|---:|---:|
+| info | 5,32 | 5,11 | 4,91 |
+| sucesso | 4,54 | **4,37** ❌ | **4,20** ❌ |
+| alerta | 6,08 | 5,86 | 5,64 |
+| perigo | 4,99 | 4,78 | 4,60 |
+
+| | escuro / `--surface` | escuro / `--bg-base` | escuro / `--surface-elevated` |
+|---|---:|---:|---:|
+| info | 4,81 | 5,22 | **4,10** ❌ |
+| sucesso | 5,90 | 6,40 | 5,02 |
+| alerta | 6,67 | 7,31 | 5,77 |
+| perigo | 4,78 | 5,19 | **4,16** ❌ |
+
+São **quatro** reprovações no HelpHS, contra as três que o ChamadosHS mede — a
+diferença é o alfa: eles pintam a tinta do pacote, a 15%; aqui é 20%, e os 5
+pontos a mais saturam o fundo e derrubam também o `sucesso` sobre `--bg-base`.
+
+**E é alcançável, não teórico.** As duas listas de chamado do painel envolvem os
+selos num `<button>` que pinta `elevated` no hover, com o selo dentro:
+
+- `pages/dashboard/ClientDashboard.tsx:51` — `hover:bg-background-elevated`,
+  **sem prefixo de tema**, com `PriorityBadge` e `StatusBadge` nas linhas 67–68.
+- `pages/dashboard/TechnicianDashboard.tsx:99` —
+  `hover:bg-slate-50 dark:hover:bg-background-elevated`, com `StatusBadge` na
+  linha 114. No claro o hover é `slate-50`, que **é** o `--bg-base`.
+
+Ou seja: passar o mouse numa linha de chamado põe "Resolvido" (sucesso) em
+**4,20:1** no claro, e "Aberto"/"Médio" (info) e "Cancelado"/"Crítico" (perigo)
+em **4,10** e **4,16** no escuro. Na tela mais usada do sistema.
+
+O caminho do `Table.tsx:75` (`clickable && "hover:bg-background-elevated"`)
+existe mas **está dormente**: nenhuma página passa `clickable` hoje.
+
+**Não consertei local, de propósito.** Escurecer o texto no `Badge.tsx` do
+HelpHS recriaria exatamente o desvio que a E2 acabou de eliminar na raiz. É a
+mesma forma da E2 — ela mediu `--on-tint-warning` nas três superfícies e por
+isso o levou ao 800; `success`, `info` e `danger` não receberam a mesma medição.
+**O pacote está consertado só onde alguém olhou.** Candidato a emenda própria
+(E5), com decisão própria, e as duas sessões já chegaram aos mesmos números por
+caminhos separados.
+
+Duas questões que a emenda precisaria responder, e que não são minhas:
+
+1. o degrau novo sai para os três (`success`, `info`, `danger`) ou só onde
+   reprova? A E2 mexeu só no que reprovava;
+2. o HelpHS deveria abandonar o `bg-*/20` e adotar o `--tint-*` a 15% do pacote?
+   Isso sozinho já tira `sucesso`/`--bg-base` da reprovação (4,37 → 4,57), mas
+   não salva as três de `elevated`.
 
 ## 11. Risco de regressão
 
@@ -314,6 +387,8 @@ local.
       `navigation/` marcadas feito/pendente
 - [ ] **Galeria estendida** aos primitivos dessas três fases, e recaptura
 - [ ] **Mapa de status do ChamadosHS** (seção 16) — é da outra sessão, não desta
+- [ ] **Decisão sobre a E5** (seção 10-A): as tintas semânticas reprovam
+      sobre `--bg-base` e `--surface-elevated`, e o hover do painel alcança isso
 - [ ] **Decisão sobre a E4**: quem aplicou, e se o registro entra com hash
       reconstruído e declarado como tal
 
