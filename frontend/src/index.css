@@ -1,5 +1,3 @@
-@import url("https://fonts.googleapis.com/css2?family=Plus+Jakarta+Sans:wght@300;400;500;600;700;800&display=swap");
-
 /* Tokens do Design System da Health & Safety.
  *
  * Vêm antes das diretivas do Tailwind de propósito (guidelines/adocao.md,
@@ -7,6 +5,11 @@
  * consomem forem resolvidas. Os arquivos em design-system/ são cópia byte a
  * byte do pacote — não edite lá; veja design-system/VERSION.md. */
 @import "./design-system/styles.css";
+
+/* A Plus Jakarta Sans é carregada uma única vez, pelo próprio token
+ * (design-system/tokens/typography.css), nos pesos 300–800 com display=swap.
+ * O @import que existia aqui era o mesmo endereço e saiu na Fase 2 — não
+ * reintroduza um <link> no index.html: seriam dois carregamentos. */
 
 @tailwind base;
 @tailwind components;
