@@ -28,6 +28,7 @@ import shutil
 import subprocess
 import sys
 import uuid
+from datetime import UTC, datetime
 from pathlib import Path
 
 import pytest
@@ -45,6 +46,58 @@ _BANCO = "migracoes_testes"
 # backfill para aqui, planta dado e só então sobe para head — é a única forma
 # de exercitar um backfill: num banco vazio ele não tem o que copiar.
 _ANTES_DO_BACKFILL = "u1p2q3r4s5t6"
+
+# Cada par é (revisão sob teste, revisão imediatamente anterior). Subir só até a
+# revisão alvo e descer um passo isola o `downgrade` daquela migration — descer
+# a partir de `head` executaria a cadeia inteira e um `raise` de outra revisão
+# mascararia o que se quer medir.
+_A1_AUDITORIA = ("r8m9n0o1p2q3", "q7l8m9n0o1p2")
+_A2_UNICIDADE = ("x4s5t6u7v8w9", "w3r4s5t6u7v8")
+_A3_EQUIPAMENTOS = ("t0o1p2q3r4s5", "s9n0o1p2q3r4")
+_A4_IA = ("z6u7v8w9x0y1", "y5t6u7v8w9x0")
+
+
+async def _semeia_usuario(sessao, nome: str = "Fulana") -> uuid.UUID:
+    """Um usuário mínimo, por SQL explícito.
+
+    Pelo ORM não serve: estes testes rodam em pontos INTERMEDIÁRIOS da cadeia,
+    onde o schema é mais antigo que o modelo, e o INSERT do ORM carregaria toda
+    coluna que o modelo tem hoje. Já quebrou assim com `mfa_enabled` em 26/08.
+    """
+    identificador = uuid.uuid4()
+    await sessao.execute(
+        text(
+            "INSERT INTO users (id, name, email, password, role, status, "
+            "lgpd_consent, email_verified, onboarding_completed) "
+            "VALUES (:id, :nome, :email, 'x', 'client', 'active', true, true, true)"
+        ),
+        {"id": identificador, "nome": nome, "email": f"{identificador.hex[:8]}@test.com"},
+    )
+    return identificador
+
+
+async def _semeia_chamado(sessao, criador: uuid.UUID) -> uuid.UUID:
+    identificador = uuid.uuid4()
+    await sessao.execute(
+        text(
+            "INSERT INTO tickets (id, protocol, title, description, status, priority, "
+            "category, creator_id, sla_response_breach, sla_resolve_breach, "
+            "sla_total_paused_ms) "
+            "VALUES (:id, :protocolo, 'Chamado de teste', 'corpo', 'open', 'medium', "
+            "'general', :criador, false, false, 0)"
+        ),
+        {"id": identificador, "protocolo": identificador.hex[:12], "criador": criador},
+    )
+    return identificador
+
+
+async def _semeia_produto(sessao) -> uuid.UUID:
+    identificador = uuid.uuid4()
+    await sessao.execute(
+        text("INSERT INTO products (id, name, is_active) VALUES (:id, :nome, true)"),
+        {"id": identificador, "nome": f"Produto {identificador.hex[:6]}"},
+    )
+    return identificador
 
 
 def _alembic(url: str, *comando: str) -> subprocess.CompletedProcess[str]:
@@ -341,3 +394,80 @@ async def test_consultas_do_diagnostico_executam(sessao, banco):
         _LEVANTAMENTO,
     ):
         await sessao.execute(text(consulta))
+
+
+# ══ Fase 4.1 — downgrades que precisam ABORTAR em vez de destruir ═══════════
+#
+# A política escrita em docs/decisoes-e-regras.md diz: o downgrade pode ser
+# impossível em certos estados reais, e quando for, precisa falhar ANTES de
+# destruir dado. Os testes abaixo exercem exatamente essa fronteira, cada um
+# subindo só até a revisão em questão e descendo um passo.
+
+
+@pytest.mark.asyncio
+async def test_a1_downgrade_passa_quando_todo_historico_tem_autor(banco):
+    """Histórico com autor humano não bloqueia o rollback — o caminho normal."""
+    assert _alembic(banco, "upgrade", _A1_AUDITORIA[0]).returncode == 0
+
+    motor = create_async_engine(banco)
+    async with async_sessionmaker(bind=motor, expire_on_commit=False)() as s:
+        autor = await _semeia_usuario(s)
+        chamado = await _semeia_chamado(s, autor)
+        await s.execute(
+            text(
+                "INSERT INTO ticket_history (id, ticket_id, user_id, field, new_value) "
+                "VALUES (:id, :chamado, :autor, 'status', 'in_progress')"
+            ),
+            {"id": uuid.uuid4(), "chamado": chamado, "autor": autor},
+        )
+        await s.commit()
+    await motor.dispose()
+
+    volta = _alembic(banco, "downgrade", _A1_AUDITORIA[1])
+
+    assert volta.returncode == 0, f"{volta.stdout}\n{volta.stderr}"
+
+
+@pytest.mark.asyncio
+async def test_a1_downgrade_aborta_e_preserva_a_trilha_do_sistema(banco):
+    """O rollback não pode apagar o que o sistema fez para caber no schema antigo.
+
+    As linhas com `user_id` nulo são ação do sistema — fechamento automático
+    (`ticket_lifecycle.py:115`) e a Helô. Elas não foram criadas por esta
+    migration: foram gravadas pela aplicação depois do deploy. Apagá-las para
+    poder repor o `NOT NULL` destrói a prova do que o sistema fez, sem aviso e
+    sem volta.
+    """
+    assert _alembic(banco, "upgrade", _A1_AUDITORIA[0]).returncode == 0
+
+    motor = create_async_engine(banco)
+    async with async_sessionmaker(bind=motor, expire_on_commit=False)() as s:
+        autor = await _semeia_usuario(s)
+        chamado = await _semeia_chamado(s, autor)
+        for campo in ("status", "closed_at"):
+            await s.execute(
+                text(
+                    "INSERT INTO ticket_history (id, ticket_id, user_id, field, new_value) "
+                    "VALUES (:id, :chamado, NULL, :campo, 'x')"
+                ),
+                {"id": uuid.uuid4(), "chamado": chamado, "campo": campo},
+            )
+        await s.commit()
+    await motor.dispose()
+
+    volta = _alembic(banco, "downgrade", _A1_AUDITORIA[1])
+    saida = volta.stdout + volta.stderr
+
+    assert volta.returncode != 0, "o downgrade passou e apagou a trilha"
+    assert "2" in saida, f"a mensagem precisa dizer quantas linhas bloqueiam:\n{saida}"
+    assert "ticket_history" in saida
+    assert "manual" in saida.lower(), "a mensagem precisa dizer que exige decisão humana"
+
+    motor = create_async_engine(banco)
+    async with async_sessionmaker(bind=motor, expire_on_commit=False)() as s:
+        sobreviventes = (
+            await s.execute(text("SELECT count(*) FROM ticket_history WHERE user_id IS NULL"))
+        ).scalar_one()
+    await motor.dispose()
+
+    assert sobreviventes == 2, "as linhas do sistema tinham que continuar lá"
