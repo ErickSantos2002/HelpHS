@@ -12,6 +12,11 @@ A coluna tickets.equipment_id sai de cena para nao existirem duas verdades
 sobre a mesma informacao. O backfill leva o vinculo atual para a tabela nova
 antes de remove-la, e o downgrade refaz o caminho inverso escolhendo o
 equipamento mais antigo de cada chamado.
+
+"Mais antigo" e por `equipments.created_at`, com `id` de desempate. Nao ha data
+na `ticket_equipments`, entao o criterio e a idade do APARELHO, e nao a do
+vinculo com o chamado -- a distincao importa para quem for ler o resultado de
+um rollback.
 """
 
 from collections.abc import Sequence
@@ -61,15 +66,29 @@ def downgrade() -> None:
         "tickets_equipment_id_fkey", "tickets", "equipments", ["equipment_id"], ["id"]
     )
     # Um chamado com varios equipamentos nao cabe na coluna unica: fica com o
-    # de menor id, e os demais vinculos se perdem.
+    # MAIS ANTIGO, e os demais vinculos se perdem.
+    #
+    # Ate 02/09/2026 isto ordenava por `te.equipment_id`. O comentario dizia
+    # "menor id" e o docstring dizia "mais antigo" -- e nenhuma das duas coisas
+    # acontecia, porque `Equipment.id` e UUID v4: nao carrega cronologia
+    # nenhuma. A escolha era aleatoria, com cara de criterio.
+    #
+    # `equipments.created_at` e o unico campo temporal disponivel aqui: a
+    # `ticket_equipments` guarda so o par (ticket_id, equipment_id), sem data.
+    # Entao "mais antigo" quer dizer o aparelho CADASTRADO ha mais tempo, e nao
+    # o vinculado ao chamado ha mais tempo -- que e o que o docstring sempre
+    # disse, e o que o SQL agora faz. O `, e.id` e desempate deterministico:
+    # dois aparelhos cadastrados no mesmo instante nao podem devolver resultado
+    # diferente a cada execucao.
     op.execute(
         """
         UPDATE tickets t
            SET equipment_id = (
                SELECT te.equipment_id
                  FROM ticket_equipments te
+                 JOIN equipments e ON e.id = te.equipment_id
                 WHERE te.ticket_id = t.id
-                ORDER BY te.equipment_id
+                ORDER BY e.created_at, e.id
                 LIMIT 1
            )
         """

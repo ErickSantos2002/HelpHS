@@ -537,3 +537,61 @@ async def test_a2_downgrade_aborta_com_serie_que_a_chave_nova_permite(banco):
     await motor.dispose()
 
     assert quantos == 2, "nenhum aparelho podia ter sido apagado"
+
+
+@pytest.mark.asyncio
+async def test_a3_downgrade_escolhe_o_equipamento_mais_antigo_e_nao_o_uuid_menor(banco):
+    """ "Mais antigo" tem que ser tempo, não ordem lexical de UUID.
+
+    O UUID é v4: não carrega cronologia nenhuma. Este teste monta o caso que
+    separa as duas leituras — o aparelho MAIS ANTIGO recebe o UUID MAIOR. Se a
+    escolha voltar a ser por id, o resultado inverte e o teste acusa.
+    """
+    assert _alembic(banco, "upgrade", _A3_EQUIPAMENTOS[0]).returncode == 0
+
+    antigo = uuid.UUID(int=2**127)  # maior lexicalmente
+    novo = uuid.UUID(int=1)  # menor lexicalmente
+
+    motor = create_async_engine(banco)
+    async with async_sessionmaker(bind=motor, expire_on_commit=False)() as s:
+        criador = await _semeia_usuario(s)
+        produto = await _semeia_produto(s)
+        chamado = await _semeia_chamado(s, criador)
+        for identificador, serie, quando in (
+            (antigo, "SERIE-ANTIGA", datetime(2020, 1, 1, tzinfo=UTC)),
+            (novo, "SERIE-NOVA", datetime(2026, 1, 1, tzinfo=UTC)),
+        ):
+            await s.execute(
+                text(
+                    "INSERT INTO equipments (id, product_id, name, serial_number, "
+                    "is_active, created_at) "
+                    "VALUES (:id, :produto, 'Phoebus', :serie, true, :quando)"
+                ),
+                {"id": identificador, "produto": produto, "serie": serie, "quando": quando},
+            )
+            await s.execute(
+                text(
+                    "INSERT INTO ticket_equipments (ticket_id, equipment_id) "
+                    "VALUES (:chamado, :equipamento)"
+                ),
+                {"chamado": chamado, "equipamento": identificador},
+            )
+        await s.commit()
+    await motor.dispose()
+
+    volta = _alembic(banco, "downgrade", _A3_EQUIPAMENTOS[1])
+    assert volta.returncode == 0, f"{volta.stdout}\n{volta.stderr}"
+
+    motor = create_async_engine(banco)
+    async with async_sessionmaker(bind=motor, expire_on_commit=False)() as s:
+        escolhido = (
+            await s.execute(
+                text("SELECT equipment_id FROM tickets WHERE id = :id"), {"id": chamado}
+            )
+        ).scalar_one()
+    await motor.dispose()
+
+    assert escolhido == antigo, (
+        "o downgrade escolheu por UUID, não por data: ficou com o aparelho de 2026 "
+        "em vez do de 2020"
+    )
