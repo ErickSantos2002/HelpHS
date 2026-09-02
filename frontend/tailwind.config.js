@@ -54,6 +54,12 @@ export default {
           faint: tk("--text-faint"),
         },
 
+        // Texto sobre o fundo `--action`. Fica fora de `conteudo` porque não é
+        // um degrau da escada de texto: é o par de uma cor de fundo, como
+        // `on-tint-*` é o par das tintas. Branco no claro, navy no escuro —
+        // `text-white` cravado dá 2,69:1 no escuro (emenda E1 do pacote).
+        "on-primary": tk("--text-on-primary"),
+
         // As rampas semânticas continuam completas porque as páginas usam os
         // degraus (text-success-700, dark:text-danger-400, bg-warning-500/10).
         // O `adocao.md` declara só o 500; aqui é mesclagem, não substituição
