@@ -1,7 +1,9 @@
+import type { HTMLAttributes, ImgHTMLAttributes } from "react";
 import { cn } from "../../lib/utils";
 
 type Size = "xs" | "sm" | "md" | "lg";
 
+/** 24 / 32 / 40 / 48px, de `DS/components/core/Avatar.jsx` (SIZES e FONT). */
 const sizeClasses: Record<Size, string> = {
   xs: "w-6 h-6 text-xs",
   sm: "w-8 h-8 text-xs",
@@ -18,14 +20,25 @@ function getInitials(name: string): string {
     .join("");
 }
 
-// Deterministic color based on name
+/**
+ * Os seis pares de `Avatar.jsx` (COLORS): fundo no degrau claro da rampa e
+ * texto no 700, mais o par neutro de superfície.
+ *
+ * Os pares translúcidos de antes (`bg-primary/30 text-primary`) reprovavam AA
+ * nos dois temas — 6 de 6 no claro, 5 de 6 no escuro, o pior deles em 1,33:1.
+ * Estes passam em 5 de 6 no claro e 6 de 6 no escuro; o único que fica abaixo
+ * é o neutro, em 4,34:1 no claro, e é valor do pacote.
+ *
+ * Dois dos pares antigos vinham de `purple` e `pink`, da paleta padrão do
+ * Tailwind: não existe `--color-purple-*` nem `--color-pink-*` no pacote.
+ */
 const COLORS = [
-  "bg-primary/30 text-primary",
-  "bg-info/30 text-info-400",
-  "bg-warning/30 text-warning-400",
-  "bg-danger/30 text-danger-400",
-  "bg-purple-500/30 text-purple-400",
-  "bg-pink-500/30 text-pink-400",
+  "bg-primary-100 text-primary-700",
+  "bg-info-50 text-info-700",
+  "bg-warning-50 text-warning-700",
+  "bg-danger-50 text-danger-700",
+  "bg-success-50 text-success-700",
+  "bg-surface-elevated text-conteudo-muted",
 ];
 
 function colorFromName(name: string): string {
@@ -33,14 +46,20 @@ function colorFromName(name: string): string {
   return COLORS[sum % COLORS.length];
 }
 
-export interface AvatarProps {
+export interface AvatarProps
+  extends Omit<HTMLAttributes<HTMLElement>, "children"> {
   name: string;
   src?: string;
   size?: Size;
-  className?: string;
 }
 
-export function Avatar({ name, src, size = "md", className }: AvatarProps) {
+export function Avatar({
+  name,
+  src,
+  size = "md",
+  className,
+  ...props
+}: AvatarProps) {
   if (src) {
     return (
       <img
@@ -51,6 +70,7 @@ export function Avatar({ name, src, size = "md", className }: AvatarProps) {
           sizeClasses[size],
           className,
         )}
+        {...(props as ImgHTMLAttributes<HTMLImageElement>)}
       />
     );
   }
@@ -58,12 +78,13 @@ export function Avatar({ name, src, size = "md", className }: AvatarProps) {
   return (
     <span
       className={cn(
-        "inline-flex items-center justify-center rounded-full font-medium select-none",
+        "inline-flex items-center justify-center rounded-full font-semibold select-none",
         sizeClasses[size],
         colorFromName(name),
         className,
       )}
       title={name}
+      {...props}
     >
       {getInitials(name)}
     </span>
