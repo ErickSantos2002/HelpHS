@@ -53,6 +53,11 @@ const GaleriaCasca = import.meta.env.DEV
   ? lazy(() => import("./dev/GaleriaCasca"))
   : null;
 
+/* Galeria dos primitivos — mesma regra, mesmo guarda, mesma saida na Fase 20. */
+const GaleriaPrimitivos = import.meta.env.DEV
+  ? lazy(() => import("./dev/GaleriaPrimitivos"))
+  : null;
+
 function Loading() {
   return (
     <div className="flex h-screen items-center justify-center bg-background">
@@ -87,6 +92,9 @@ function App() {
           {/* Galeria da casca — nao existe no bundle de producao. */}
           {GaleriaCasca && (
             <Route path="/galeria-ds" element={<GaleriaCasca />} />
+          )}
+          {GaleriaPrimitivos && (
+            <Route path="/galeria-primitivos" element={<GaleriaPrimitivos />} />
           )}
 
           {/* ── Error pages ──────────────────────────────────── */}
