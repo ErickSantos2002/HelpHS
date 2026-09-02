@@ -595,3 +595,59 @@ async def test_a3_downgrade_escolhe_o_equipamento_mais_antigo_e_nao_o_uuid_menor
         "o downgrade escolheu por UUID, não por data: ficou com o aparelho de 2026 "
         "em vez do de 2020"
     )
+
+
+@pytest.mark.asyncio
+async def test_a4_downgrade_passa_quando_ninguem_desligou_a_ia(banco):
+    assert _alembic(banco, "upgrade", _A4_IA[0]).returncode == 0
+
+    motor = create_async_engine(banco)
+    async with async_sessionmaker(bind=motor, expire_on_commit=False)() as s:
+        await _semeia_usuario(s)  # nasce com ai_enabled = true
+        await s.commit()
+    await motor.dispose()
+
+    volta = _alembic(banco, "downgrade", _A4_IA[1])
+
+    assert volta.returncode == 0, f"{volta.stdout}\n{volta.stderr}"
+
+
+@pytest.mark.asyncio
+async def test_a4_downgrade_aborta_quando_alguem_desligou_a_ia(banco):
+    """Descer e subir de novo RELIGA a IA de quem a tinha desligado.
+
+    O `server_default` do re-upgrade é TRUE, e não existe de onde reconstruir o
+    valor: `_audit()` em `users.py:75` grava o AuditLog sem `old_data`/`new_data`.
+    Como não há fonte confiável, o downgrade não tenta restaurar nada — ele para
+    e exige decisão humana, que é melhor do que religar em silêncio uma coisa
+    que o cliente desligou de propósito.
+    """
+    assert _alembic(banco, "upgrade", _A4_IA[0]).returncode == 0
+
+    motor = create_async_engine(banco)
+    async with async_sessionmaker(bind=motor, expire_on_commit=False)() as s:
+        quem_desligou = await _semeia_usuario(s, "Empresa sem robô")
+        await s.execute(
+            text("UPDATE users SET ai_enabled = false WHERE id = :id"),
+            {"id": quem_desligou},
+        )
+        await s.commit()
+    await motor.dispose()
+
+    volta = _alembic(banco, "downgrade", _A4_IA[1])
+    saida = volta.stdout + volta.stderr
+
+    assert volta.returncode != 0, "o downgrade passou e o re-upgrade religaria a IA"
+    assert "1" in saida, "a mensagem precisa dizer quantos opt-outs bloqueiam"
+    assert "ai_enabled" in saida
+
+    motor = create_async_engine(banco)
+    async with async_sessionmaker(bind=motor, expire_on_commit=False)() as s:
+        ainda_desligado = (
+            await s.execute(
+                text("SELECT ai_enabled FROM users WHERE id = :id"), {"id": quem_desligou}
+            )
+        ).scalar_one()
+    await motor.dispose()
+
+    assert ainda_desligado is False, "o opt-out tinha que continuar valendo"
