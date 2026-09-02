@@ -27,6 +27,16 @@ export interface ButtonProps extends ButtonHTMLAttributes<HTMLButtonElement> {
  * sobre o `--action` do escuro); `danger` e `success` usam `--text-on-danger` e
  * `--text-on-success`, que valem branco nos dois temas porque o fundo delas é
  * degrau absoluto da rampa e não inverte.
+ *
+ * ⚠️ **Consertar este componente não conserta o sistema.** Há **21 botões
+ * escritos à mão em 15 arquivos** que não passam por aqui e seguem pintando a
+ * cor cheia da rampa com branco por cima: `bg-primary text-white` dá **3,83:1**
+ * (nos dois temas — o degrau 500 é absoluto) e `bg-danger text-white` dá
+ * **3,76:1**, exatamente o número que a E2 tirou daqui. Um deles está em
+ * `ui/Pagination.tsx:132`, que é primitivo e não página. A troca é das
+ * Fases 11–16; até lá, "botão semântico corrigido" vale para este arquivo e
+ * não para as telas. Lista e medições em
+ * `docs/design-system-migration/fase-7/RELATORIO.md`, seção 10-B.
  */
 const variantClasses: Record<Variant, string> = {
   primary:

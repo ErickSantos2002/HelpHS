@@ -361,6 +361,44 @@ Duas questões que a emenda precisaria responder, e que não são minhas:
    Isso sozinho já tira `sucesso`/`--bg-base` da reprovação (4,37 → 4,57), mas
    não salva as três de `elevated`.
 
+## 10-B. Achado novo: consertar o primitivo não alcança quem não o usa
+
+Pista da sessão do **ChamadosHS**, que achou seis botões à mão do lado dela e
+mandou eu contar os meus. **São 21, em 15 arquivos.**
+
+O `Button` foi corrigido em `9837be4` (E2): as variantes preenchidas passaram a
+usar o par `--action-*` / `--text-on-*` em vez da cor cheia com branco por cima.
+Quem não passa pelo componente não recebeu nada disso:
+
+| Padrão escrito à mão | Contraste | |
+|---|---:|---|
+| `bg-primary text-white` | **3,83:1** | ❌ nos **dois** temas — `--color-primary-500` é degrau absoluto e não inverte |
+| `bg-danger text-white` | **3,76:1** | ❌ o número exato que a E2 tirou do `Button` |
+| (`Button` hoje, para comparar) | 5,29:1 claro · 5,11:1 escuro | ✅ |
+
+**Onde estão:**
+
+```
+4  pages/profile/ProfilePage.tsx        (um deles `bg-danger` — desativar a conta)
+2  pages/tickets/TicketFormPage.tsx     2  pages/calendar/CalendarPage.tsx
+2  components/layout/Topbar.tsx         1  pages/tickets/TicketListPage.tsx
+1  pages/reports/ReportsPage.tsx        1  pages/onboarding/OnboardingPage.tsx
+1  pages/notifications/NotificationsPage.tsx
+1  pages/kb/KBListPage.tsx              1  pages/kb/KBFormPage.tsx
+1  pages/kb/KBArticlePage.tsx           1  pages/dashboard/ClientDashboard.tsx
+1  pages/dashboard/AdminDashboard.tsx   1  components/chat/ChatPanel.tsx
+1  components/ui/Pagination.tsx  ← primitivo, não página
+```
+
+**Um deles não é código de página.** `ui/Pagination.tsx:132` pinta
+`bg-primary text-white` na página ativa da paginação. É primitivo, cai na
+**Fase 9**, e já entra medido e reprovando.
+
+Os outros 20 são código de tela, das Fases 11–16 — não entram nesta fase. Mas
+mudam a conta do que o Checkpoint 2 pode afirmar: o **primitivo** está corrigido;
+o **sistema**, não. Ficou escrito no cabeçalho do próprio `Button.tsx`, para que
+ninguém leia "botão semântico corrigido" e conclua o que não está.
+
 ## 11. Risco de regressão
 
 **Baixo**, com uma ressalva.
@@ -387,6 +425,8 @@ local.
       `navigation/` marcadas feito/pendente
 - [ ] **Galeria estendida** aos primitivos dessas três fases, e recaptura
 - [ ] **Mapa de status do ChamadosHS** (seção 16) — é da outra sessão, não desta
+- [ ] **21 botões à mão** (seção 10-B) — 20 são das Fases 11–16, mas o de
+      `ui/Pagination.tsx:132` é primitivo e cai na Fase 9
 - [ ] **Decisão sobre a E5** (seção 10-A): as tintas semânticas reprovam
       sobre `--bg-base` e `--surface-elevated`, e o hover do painel alcança isso
 - [ ] **Decisão sobre a E4**: quem aplicou, e se o registro entra com hash
