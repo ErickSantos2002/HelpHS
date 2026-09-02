@@ -44,6 +44,15 @@ const QuickRepliesPage = lazy(() => import("./pages/settings/QuickRepliesPage"))
 const ForbiddenPage = lazy(() => import("./pages/errors/ForbiddenPage"));
 const NotFoundPage = lazy(() => import("./pages/errors/NotFoundPage"));
 
+/* Galeria da casca — SO EM DESENVOLVIMENTO (src/dev/GaleriaCasca.tsx).
+ * O ternario e o guarda: no build `import.meta.env.DEV` vira `false`, o ramo
+ * com o import dinamico fica inalcancavel e o Rollup nao emite o chunk. Por
+ * isso o `lazy()` mora dentro da condicao, e nao fora dela — se ficasse fora,
+ * o chunk seria gerado mesmo sem rota que o use. Sai na Fase 20. */
+const GaleriaCasca = import.meta.env.DEV
+  ? lazy(() => import("./dev/GaleriaCasca"))
+  : null;
+
 function Loading() {
   return (
     <div className="flex h-screen items-center justify-center bg-background">
@@ -74,6 +83,11 @@ function App() {
               lida por quem está se cadastrando (sem sessão) e por quem já usa
               o sistema (com sessão). */}
           <Route path="/privacidade" element={<PoliticaPrivacidadePage />} />
+
+          {/* Galeria da casca — nao existe no bundle de producao. */}
+          {GaleriaCasca && (
+            <Route path="/galeria-ds" element={<GaleriaCasca />} />
+          )}
 
           {/* ── Error pages ──────────────────────────────────── */}
           <Route path="/403" element={<ForbiddenPage />} />
