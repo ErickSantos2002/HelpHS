@@ -60,7 +60,62 @@ def upgrade() -> None:
     )
 
 
+_CONFLITO_POR_DONO = """
+    SELECT count(*) FROM (
+        SELECT owner_id, serial_number
+          FROM equipments
+         WHERE owner_id IS NOT NULL AND serial_number IS NOT NULL
+         GROUP BY owner_id, serial_number
+        HAVING count(*) > 1
+    ) g
+"""
+
+_CONFLITO_ENTRE_ORFAOS = """
+    SELECT count(*) FROM (
+        SELECT serial_number
+          FROM equipments
+         WHERE owner_id IS NULL AND serial_number IS NOT NULL
+         GROUP BY serial_number
+        HAVING count(*) > 1
+    ) g
+"""
+
+
 def downgrade() -> None:
+    # Pré-validação acrescentada em 02/09/2026. Os dois indices abaixo são
+    # UNIQUE e podem não caber no dado de hoje — o docstring já previa isso
+    # ("quem precisar voltar resolve os casos antes"), mas o `CREATE UNIQUE
+    # INDEX` estourando sozinho dá um erro que não diz quantos casos existem,
+    # não diz o que fazer, e AINDA POR CIMA imprime o número de série do
+    # aparelho conflitante na mensagem de erro do PostgreSQL.
+    #
+    # NULL não conflita em nenhum dos dois: em SQL, NULL nunca é igual a NULL.
+    # Por isso as duas consultas filtram explicitamente — contar os nulos daria
+    # falso positivo e bloquearia rollback legítimo.
+    bind = op.get_bind()
+    por_dono = bind.execute(text(_CONFLITO_POR_DONO)).scalar_one()
+    entre_orfaos = bind.execute(text(_CONFLITO_ENTRE_ORFAOS)).scalar_one()
+
+    if por_dono or entre_orfaos:
+        raise RuntimeError(
+            "ROLLBACK BLOQUEADO: o dado de hoje não cabe na chave antiga.\n"
+            "\n"
+            f"    uq_equipments_owner_serial   (owner_id, serial_number): {por_dono} grupo(s)\n"
+            f"    uq_equipments_orphan_serial  (serial_number, só órfãos): {entre_orfaos} grupo(s)\n"
+            "\n"
+            "A chave de hoje é (product_id, serial_number). A antiga era por dono, e\n"
+            "proíbe o mesmo dono ter a mesma série em produtos diferentes — que a\n"
+            "chave atual permite de propósito.\n"
+            "\n"
+            "Nada foi apagado nem deduplicado: reconciliar é decisão humana. Os casos\n"
+            "saem daqui, e o dado NÃO é despejado nesta mensagem por ser série de\n"
+            "aparelho de cliente:\n"
+            "\n"
+            "    SELECT owner_id, serial_number, count(*) FROM equipments\n"
+            "     WHERE owner_id IS NOT NULL AND serial_number IS NOT NULL\n"
+            "     GROUP BY 1, 2 HAVING count(*) > 1;\n"
+        )
+
     op.drop_index("uq_equipments_product_serial", table_name="equipments")
     op.create_index(
         "uq_equipments_owner_serial",

@@ -471,3 +471,69 @@ async def test_a1_downgrade_aborta_e_preserva_a_trilha_do_sistema(banco):
     await motor.dispose()
 
     assert sobreviventes == 2, "as linhas do sistema tinham que continuar lá"
+
+
+@pytest.mark.asyncio
+async def test_a2_downgrade_passa_sem_serie_repetida(banco):
+    assert _alembic(banco, "upgrade", _A2_UNICIDADE[0]).returncode == 0
+
+    motor = create_async_engine(banco)
+    async with async_sessionmaker(bind=motor, expire_on_commit=False)() as s:
+        dono = await _semeia_usuario(s)
+        produto = await _semeia_produto(s)
+        await s.execute(
+            text(
+                "INSERT INTO equipments (id, product_id, owner_id, name, serial_number, "
+                "is_active) VALUES (:id, :produto, :dono, 'Phoebus', 'SERIE-A', true)"
+            ),
+            {"id": uuid.uuid4(), "produto": produto, "dono": dono},
+        )
+        await s.commit()
+    await motor.dispose()
+
+    volta = _alembic(banco, "downgrade", _A2_UNICIDADE[1])
+
+    assert volta.returncode == 0, f"{volta.stdout}\n{volta.stderr}"
+
+
+@pytest.mark.asyncio
+async def test_a2_downgrade_aborta_com_serie_que_a_chave_nova_permite(banco):
+    """A chave nova é (produto, série); a antiga era (dono, série).
+
+    Mesmo dono, mesma série, produtos diferentes: legítimo sob a chave de hoje e
+    proibido sob a de ontem. O downgrade precisa dizer isso antes de tentar criar
+    o índice — `CREATE UNIQUE INDEX` estourando sozinho dá um erro opaco que não
+    diz quantos casos existem nem o que fazer.
+    """
+    assert _alembic(banco, "upgrade", _A2_UNICIDADE[0]).returncode == 0
+
+    motor = create_async_engine(banco)
+    async with async_sessionmaker(bind=motor, expire_on_commit=False)() as s:
+        dono = await _semeia_usuario(s)
+        for _ in range(2):
+            produto = await _semeia_produto(s)
+            await s.execute(
+                text(
+                    "INSERT INTO equipments (id, product_id, owner_id, name, "
+                    "serial_number, is_active) "
+                    "VALUES (:id, :produto, :dono, 'Phoebus', 'SERIE-REPETIDA', true)"
+                ),
+                {"id": uuid.uuid4(), "produto": produto, "dono": dono},
+            )
+        await s.commit()
+    await motor.dispose()
+
+    volta = _alembic(banco, "downgrade", _A2_UNICIDADE[1])
+    saida = volta.stdout + volta.stderr
+
+    assert volta.returncode != 0, "o downgrade passou com dado que a chave antiga proíbe"
+    assert "1" in saida, "a mensagem precisa dizer quantos grupos conflitam"
+    assert "serial_number" in saida
+    assert "SERIE-REPETIDA" not in saida, "a mensagem não deve despejar o dado em si"
+
+    motor = create_async_engine(banco)
+    async with async_sessionmaker(bind=motor, expire_on_commit=False)() as s:
+        quantos = (await s.execute(text("SELECT count(*) FROM equipments"))).scalar_one()
+    await motor.dispose()
+
+    assert quantos == 2, "nenhum aparelho podia ter sido apagado"
