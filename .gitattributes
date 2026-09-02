@@ -6,3 +6,8 @@
 # LF -> CRLF e os sete hashes mudam sem que ninguem tenha editado nada.
 # D7-a em COMPARTILHADO/DECISOES.md.
 frontend/src/design-system/** text eol=lf
+
+# Os .woff2 do pacote (E3) sao BINARIOS. A regra acima e `text` explicito e
+# vence a deteccao automatica do `text=auto`: sem esta linha o git normaliza
+# fim de linha DENTRO da fonte e corrompe o arquivo. Conferido com check-attr.
+frontend/src/design-system/fonts/*.woff2 -text

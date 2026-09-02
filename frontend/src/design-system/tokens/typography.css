@@ -5,8 +5,9 @@
  * mesma tela (guidelines/fonte-*.html). Já era a fonte do HelpHS em
  * produção, o que torna a adoção nos outros sistemas uma troca de token.
  *
- * A fonte licenciada anterior da marca se perdeu. Esta a substitui: é servida
- * pelo Google Fonts nos pesos 300–800, sem arquivo local.
+ * A fonte licenciada anterior da marca se perdeu. Esta a substitui: seis pesos
+ * (300–800), auto-hospedados no próprio pacote, em `fonts/` — ver o bloco de
+ * auto-hospedagem logo abaixo.
  *
  * A monoespaçada é a pilha padrão do sistema — é o que `font-mono` do
  * Tailwind resolve nos quatro repositórios. Ela carrega DADO DE MÁQUINA:
@@ -14,7 +15,164 @@
  * Título, descrição e comentário ficam em sans.
  */
 
-@import url("https://fonts.googleapis.com/css2?family=Plus+Jakarta+Sans:wght@300;400;500;600;700;800&display=swap");
+/* ── Auto-hospedagem da fonte ─────────────────────────────────────────
+ *
+ * Os seis pesos vêm de arquivos do próprio pacote, em `../fonts/`, e não de
+ * um CDN. O original desta linha era:
+ *
+ *   @import url("https://fonts.googleapis.com/css2?family=Plus+Jakarta+Sans:wght@300;400;500;600;700;800&display=swap");
+ *
+ * POR QUE MUDOU. Um dos sistemas que consomem este pacote (ChamadosHS) roda
+ * na rede interna da HS e não pode depender de servidor de terceiro para a
+ * tipografia: se o Google cair ou o IP da empresa for bloqueado, a fonte some
+ * — e o `display=swap` garante que some EM SILÊNCIO, caindo na fonte do
+ * sistema, sem erro em lugar nenhum e sem ninguém ter tocado em código.
+ *
+ * Enquanto isto morava só no consumidor, era um desvio local que cada
+ * repositório tinha de repetir e justificar (decisão D1-a). Resolvido aqui,
+ * na raiz, some dos dois: os arquivos passam a fazer parte do pacote e o
+ * `sha256` de `typography.css` volta a bater em toda cópia.
+ *
+ * O QUE NÃO MUDOU: a família, a pilha de reserva, os seis pesos (300–800) e o
+ * `font-display: swap`. É a MESMA fonte, do mesmo projeto (Plus Jakarta Sans,
+ * SIL Open Font License 1.1) — só a origem do arquivo muda. `--font-sans`
+ * abaixo está intacto.
+ *
+ * SUBCONJUNTOS. `latin` e `latin-ext`, cada um com o seu `unicode-range`,
+ * exatamente como o Google Fonts serve. O browser só baixa o subconjunto que
+ * a página realmente usa: para português, que cabe todo em Latin-1, isso são
+ * os ~72 KB de `latin`, e o `latin-ext` fica sem ser pedido. Os dois juntos
+ * somam ~134 KB, mas ninguém paga os dois de uma vez.
+ *
+ * A ORDEM É A DO GOOGLE — `latin-ext` antes de `latin`. Três pontos de código
+ * aparecem nos dois intervalos (U+0304, U+0308, U+0329, que são acentos
+ * combinantes); em empate de `unicode-range`, vence a última regra declarada.
+ * Manter a ordem mantém o mesmo desempate do CDN.
+ *
+ * Arquivos: `fonts/plus-jakarta-sans-<subconjunto>-<peso>-normal.woff2`,
+ * extraídos de `@fontsource/plus-jakarta-sans` 5.3.0 (OFL-1.1). São só os
+ * pesos normais: o `@import` que isto substitui também não pedia itálico.
+ */
+
+/* 300 — Light */
+
+@font-face {
+  font-family: "Plus Jakarta Sans";
+  font-style: normal;
+  font-weight: 300;
+  font-display: swap;
+  src: url("../fonts/plus-jakarta-sans-latin-ext-300-normal.woff2") format("woff2");
+  unicode-range: U+0100-02BA, U+02BD-02C5, U+02C7-02CC, U+02CE-02D7, U+02DD-02FF, U+0304, U+0308, U+0329, U+1D00-1DBF, U+1E00-1E9F, U+1EF2-1EFF, U+2020, U+20A0-20AB, U+20AD-20C0, U+2113, U+2C60-2C7F, U+A720-A7FF;
+}
+
+@font-face {
+  font-family: "Plus Jakarta Sans";
+  font-style: normal;
+  font-weight: 300;
+  font-display: swap;
+  src: url("../fonts/plus-jakarta-sans-latin-300-normal.woff2") format("woff2");
+  unicode-range: U+0000-00FF, U+0131, U+0152-0153, U+02BB-02BC, U+02C6, U+02DA, U+02DC, U+0304, U+0308, U+0329, U+2000-206F, U+20AC, U+2122, U+2191, U+2193, U+2212, U+2215, U+FEFF, U+FFFD;
+}
+
+/* 400 — Regular */
+
+@font-face {
+  font-family: "Plus Jakarta Sans";
+  font-style: normal;
+  font-weight: 400;
+  font-display: swap;
+  src: url("../fonts/plus-jakarta-sans-latin-ext-400-normal.woff2") format("woff2");
+  unicode-range: U+0100-02BA, U+02BD-02C5, U+02C7-02CC, U+02CE-02D7, U+02DD-02FF, U+0304, U+0308, U+0329, U+1D00-1DBF, U+1E00-1E9F, U+1EF2-1EFF, U+2020, U+20A0-20AB, U+20AD-20C0, U+2113, U+2C60-2C7F, U+A720-A7FF;
+}
+
+@font-face {
+  font-family: "Plus Jakarta Sans";
+  font-style: normal;
+  font-weight: 400;
+  font-display: swap;
+  src: url("../fonts/plus-jakarta-sans-latin-400-normal.woff2") format("woff2");
+  unicode-range: U+0000-00FF, U+0131, U+0152-0153, U+02BB-02BC, U+02C6, U+02DA, U+02DC, U+0304, U+0308, U+0329, U+2000-206F, U+20AC, U+2122, U+2191, U+2193, U+2212, U+2215, U+FEFF, U+FFFD;
+}
+
+/* 500 — Medium */
+
+@font-face {
+  font-family: "Plus Jakarta Sans";
+  font-style: normal;
+  font-weight: 500;
+  font-display: swap;
+  src: url("../fonts/plus-jakarta-sans-latin-ext-500-normal.woff2") format("woff2");
+  unicode-range: U+0100-02BA, U+02BD-02C5, U+02C7-02CC, U+02CE-02D7, U+02DD-02FF, U+0304, U+0308, U+0329, U+1D00-1DBF, U+1E00-1E9F, U+1EF2-1EFF, U+2020, U+20A0-20AB, U+20AD-20C0, U+2113, U+2C60-2C7F, U+A720-A7FF;
+}
+
+@font-face {
+  font-family: "Plus Jakarta Sans";
+  font-style: normal;
+  font-weight: 500;
+  font-display: swap;
+  src: url("../fonts/plus-jakarta-sans-latin-500-normal.woff2") format("woff2");
+  unicode-range: U+0000-00FF, U+0131, U+0152-0153, U+02BB-02BC, U+02C6, U+02DA, U+02DC, U+0304, U+0308, U+0329, U+2000-206F, U+20AC, U+2122, U+2191, U+2193, U+2212, U+2215, U+FEFF, U+FFFD;
+}
+
+/* 600 — SemiBold */
+
+@font-face {
+  font-family: "Plus Jakarta Sans";
+  font-style: normal;
+  font-weight: 600;
+  font-display: swap;
+  src: url("../fonts/plus-jakarta-sans-latin-ext-600-normal.woff2") format("woff2");
+  unicode-range: U+0100-02BA, U+02BD-02C5, U+02C7-02CC, U+02CE-02D7, U+02DD-02FF, U+0304, U+0308, U+0329, U+1D00-1DBF, U+1E00-1E9F, U+1EF2-1EFF, U+2020, U+20A0-20AB, U+20AD-20C0, U+2113, U+2C60-2C7F, U+A720-A7FF;
+}
+
+@font-face {
+  font-family: "Plus Jakarta Sans";
+  font-style: normal;
+  font-weight: 600;
+  font-display: swap;
+  src: url("../fonts/plus-jakarta-sans-latin-600-normal.woff2") format("woff2");
+  unicode-range: U+0000-00FF, U+0131, U+0152-0153, U+02BB-02BC, U+02C6, U+02DA, U+02DC, U+0304, U+0308, U+0329, U+2000-206F, U+20AC, U+2122, U+2191, U+2193, U+2212, U+2215, U+FEFF, U+FFFD;
+}
+
+/* 700 — Bold */
+
+@font-face {
+  font-family: "Plus Jakarta Sans";
+  font-style: normal;
+  font-weight: 700;
+  font-display: swap;
+  src: url("../fonts/plus-jakarta-sans-latin-ext-700-normal.woff2") format("woff2");
+  unicode-range: U+0100-02BA, U+02BD-02C5, U+02C7-02CC, U+02CE-02D7, U+02DD-02FF, U+0304, U+0308, U+0329, U+1D00-1DBF, U+1E00-1E9F, U+1EF2-1EFF, U+2020, U+20A0-20AB, U+20AD-20C0, U+2113, U+2C60-2C7F, U+A720-A7FF;
+}
+
+@font-face {
+  font-family: "Plus Jakarta Sans";
+  font-style: normal;
+  font-weight: 700;
+  font-display: swap;
+  src: url("../fonts/plus-jakarta-sans-latin-700-normal.woff2") format("woff2");
+  unicode-range: U+0000-00FF, U+0131, U+0152-0153, U+02BB-02BC, U+02C6, U+02DA, U+02DC, U+0304, U+0308, U+0329, U+2000-206F, U+20AC, U+2122, U+2191, U+2193, U+2212, U+2215, U+FEFF, U+FFFD;
+}
+
+/* 800 — ExtraBold */
+
+@font-face {
+  font-family: "Plus Jakarta Sans";
+  font-style: normal;
+  font-weight: 800;
+  font-display: swap;
+  src: url("../fonts/plus-jakarta-sans-latin-ext-800-normal.woff2") format("woff2");
+  unicode-range: U+0100-02BA, U+02BD-02C5, U+02C7-02CC, U+02CE-02D7, U+02DD-02FF, U+0304, U+0308, U+0329, U+1D00-1DBF, U+1E00-1E9F, U+1EF2-1EFF, U+2020, U+20A0-20AB, U+20AD-20C0, U+2113, U+2C60-2C7F, U+A720-A7FF;
+}
+
+@font-face {
+  font-family: "Plus Jakarta Sans";
+  font-style: normal;
+  font-weight: 800;
+  font-display: swap;
+  src: url("../fonts/plus-jakarta-sans-latin-800-normal.woff2") format("woff2");
+  unicode-range: U+0000-00FF, U+0131, U+0152-0153, U+02BB-02BC, U+02C6, U+02DA, U+02DC, U+0304, U+0308, U+0329, U+2000-206F, U+20AC, U+2122, U+2191, U+2193, U+2212, U+2215, U+FEFF, U+FFFD;
+}
 
 :root {
   --font-sans: "Plus Jakarta Sans", ui-sans-serif, system-ui, sans-serif;
