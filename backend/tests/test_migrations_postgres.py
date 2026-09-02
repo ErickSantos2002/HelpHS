@@ -47,9 +47,13 @@ _BANCO = "migracoes_testes"
 _ANTES_DO_BACKFILL = "u1p2q3r4s5t6"
 
 
-def _alembic(url: str, alvo: str) -> subprocess.CompletedProcess[str]:
+def _alembic(url: str, *comando: str) -> subprocess.CompletedProcess[str]:
     """
     Roda o alembic como SUBPROCESSO, igual ao `start.sh`.
+
+    Recebe o comando inteiro (`"upgrade", "head"` ou `"downgrade", "base"`) e
+    não só o alvo: a volta precisa do mesmo caminho de execução da ida, senão o
+    teste de ciclo estaria medindo dois mecanismos diferentes.
 
     Não é preciosismo: o `alembic/env.py` chama `asyncio.run()` por dentro, e
     invocá-lo de dentro de um teste async estouraria com "cannot be called from
@@ -62,13 +66,42 @@ def _alembic(url: str, alvo: str) -> subprocess.CompletedProcess[str]:
         "APP_ENV": "testing",
     }
     return subprocess.run(  # noqa: S603
-        [sys.executable, "-m", "alembic", "upgrade", alvo],
+        [sys.executable, "-m", "alembic", *comando],
         cwd=_BACKEND,
         env=ambiente,
         capture_output=True,
         text=True,
         check=False,
     )
+
+
+_INVENTARIO = {
+    "tabelas": "SELECT tablename FROM pg_tables WHERE schemaname='public'",
+    "enums": (
+        "SELECT t.typname FROM pg_type t JOIN pg_namespace n ON n.oid = t.typnamespace "
+        "WHERE n.nspname='public' AND t.typtype='e'"
+    ),
+    "indices": "SELECT indexname FROM pg_indexes WHERE schemaname='public'",
+}
+
+
+async def _fotografa(url: str) -> dict[str, set[str]]:
+    """O que existe no banco agora, por categoria.
+
+    A `alembic_version` fica de fora: ela é a contabilidade do próprio Alembic e
+    sobrevive ao `downgrade base` por desenho, não por defeito.
+    """
+    motor = create_async_engine(url)
+    foto: dict[str, set[str]] = {}
+    async with motor.connect() as conn:
+        for nome, sql in _INVENTARIO.items():
+            foto[nome] = {
+                str(x)
+                for x in (await conn.execute(text(sql))).scalars().all()
+                if not str(x).startswith("alembic_version")
+            }
+    await motor.dispose()
+    return foto
 
 
 @pytest.fixture(scope="module")
@@ -120,11 +153,73 @@ def test_upgrade_head_sobe_do_zero(banco):
     É o que o container faz a cada boot. Se este teste passar a falhar, o
     próximo deploy não sobe — e o aviso chega no CI em vez de no EasyPanel.
     """
-    resultado = _alembic(banco, "head")
+    resultado = _alembic(banco, "upgrade", "head")
 
     assert (
         resultado.returncode == 0
     ), f"alembic upgrade head falhou:\n{resultado.stdout}\n{resultado.stderr}"
+
+
+@pytest.mark.asyncio
+async def test_downgrade_base_nao_deixa_tipo_para_tras(banco):
+    """
+    `downgrade base` tem que devolver o banco ao zero — e sair com 0 não prova isso.
+
+    Medido em 02/09/2026: o comando saía com código **0** e deixava **nove**
+    tipos ENUM no schema. `create_table` cria o tipo junto; `drop_table` não o
+    remove. O sintoma não aparece na volta — aparece no `upgrade head` seguinte,
+    com `DuplicateObjectError: type "slalevel" already exists`. Ou seja: no boot
+    do container, depois de um rollback, com a API não subindo.
+
+    A asserção é sobre o RESÍDUO, e não sobre o código de saída, de propósito:
+    era justamente o código de saída que estava mentindo.
+    """
+    assert _alembic(banco, "upgrade", "head").returncode == 0
+
+    volta = _alembic(banco, "downgrade", "base")
+    assert volta.returncode == 0, f"{volta.stdout}\n{volta.stderr}"
+
+    sobrou = await _fotografa(banco)
+
+    assert not sobrou["enums"], (
+        "tipos ENUM sobreviveram ao downgrade: "
+        + ", ".join(sorted(sobrou["enums"]))
+        + ". Toda migration que cria um tipo precisa derrubá-lo no downgrade; o"
+        " modelo é o `DROP TYPE IF EXISTS` da n4i5j6k7l8m9."
+    )
+    assert not sobrou["tabelas"], f"tabelas de sobra: {sorted(sobrou['tabelas'])}"
+
+
+@pytest.mark.asyncio
+async def test_ciclo_upgrade_downgrade_upgrade_devolve_o_mesmo_schema(banco):
+    """
+    O caminho de volta do deploy, exercitado de ponta a ponta.
+
+    O checklist de deploy do próprio projeto pede "upgrade → downgrade →
+    upgrade" como item **manual**, e nada automatizava isso. E não basta o ciclo
+    não estourar: o schema depois dele tem que ser o MESMO da subida limpa.
+    Ficar diferente é pior do que falhar, porque não faz barulho — o banco passa
+    a divergir do que o código espera, e o defeito reaparece numa consulta
+    qualquer, dias depois, longe da causa.
+    """
+    assert _alembic(banco, "upgrade", "head").returncode == 0
+    primeira = await _fotografa(banco)
+
+    assert _alembic(banco, "downgrade", "base").returncode == 0
+
+    subida = _alembic(banco, "upgrade", "head")
+    assert subida.returncode == 0, (
+        "o segundo `upgrade head` falhou — o downgrade não devolveu o banco ao"
+        f" estado inicial:\n{subida.stdout}\n{subida.stderr}"
+    )
+
+    segunda = await _fotografa(banco)
+    for categoria in _INVENTARIO:
+        assert segunda[categoria] == primeira[categoria], (
+            f"{categoria} diferente depois do ciclo. sumiram: "
+            f"{sorted(primeira[categoria] - segunda[categoria])} · sobraram: "
+            f"{sorted(segunda[categoria] - primeira[categoria])}"
+        )
 
 
 @pytest.mark.asyncio
@@ -135,7 +230,7 @@ async def test_backfill_leva_o_dono_para_equipment_users(banco):
     Sem ele, todo aparelho já cadastrado nasceria sem usuário nenhum e a tela
     do cliente ficaria vazia no dia do deploy.
     """
-    assert _alembic(banco, _ANTES_DO_BACKFILL).returncode == 0
+    assert _alembic(banco, "upgrade", _ANTES_DO_BACKFILL).returncode == 0
 
     dono_id = uuid.uuid4()
     equipamento_id = uuid.uuid4()
@@ -183,7 +278,7 @@ async def test_backfill_leva_o_dono_para_equipment_users(banco):
         await s.commit()
     await motor.dispose()
 
-    assert _alembic(banco, "head").returncode == 0
+    assert _alembic(banco, "upgrade", "head").returncode == 0
 
     motor = create_async_engine(banco)
     async with async_sessionmaker(bind=motor, expire_on_commit=False)() as s:
@@ -203,8 +298,8 @@ def test_upgrade_head_e_idempotente_apos_o_backfill(banco):
     encontra revision pendente, mas se o `ON CONFLICT DO NOTHING` do backfill
     tivesse sido esquecido, um reprocessamento manual quebraria na PK composta.
     """
-    assert _alembic(banco, "head").returncode == 0
-    segunda = _alembic(banco, "head")
+    assert _alembic(banco, "upgrade", "head").returncode == 0
+    segunda = _alembic(banco, "upgrade", "head")
 
     assert segunda.returncode == 0, f"{segunda.stdout}\n{segunda.stderr}"
 
@@ -219,7 +314,7 @@ async def test_consultas_do_diagnostico_executam(sessao, banco):
     importadas do próprio script: uma cópia aqui validaria a cópia, não o que
     vai rodar.
     """
-    assert _alembic(banco, "head").returncode == 0
+    assert _alembic(banco, "upgrade", "head").returncode == 0
 
     from scripts.diagnostico_empresa_aparelho import (
         _CNPJ_DUPLICADO,
