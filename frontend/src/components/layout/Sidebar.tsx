@@ -172,7 +172,7 @@ export function Sidebar({ collapsed, mobileOpen, onMobileClose }: SidebarProps) 
           role="button"
           tabIndex={0}
           aria-label="Fechar menu"
-          className="fixed inset-0 z-[35] bg-black/50 md:hidden"
+          className="fixed inset-0 z-[35] bg-[color:var(--overlay)] md:hidden"
           onClick={onMobileClose}
           onKeyDown={(e) => { if (e.key === "Enter" || e.key === " ") onMobileClose(); }}
         />
@@ -183,8 +183,8 @@ export function Sidebar({ collapsed, mobileOpen, onMobileClose }: SidebarProps) 
         id="sidebar-nav"
         className={cn(
           "fixed inset-y-0 left-0 z-[40] flex flex-col",
-          "bg-white dark:bg-background-surface",
-          "border-r border-slate-200 dark:border-border",
+          "bg-background-surface",
+          "border-r border-border",
           "transition-[width] duration-300 ease-in-out overflow-hidden",
           // Desktop: width driven by collapsed state
           collapsed ? "md:w-[72px]" : "md:w-64",
@@ -200,11 +200,11 @@ export function Sidebar({ collapsed, mobileOpen, onMobileClose }: SidebarProps) 
           collapsed ? "justify-center px-0" : "px-5",
         )}>
           {collapsed ? (
-            <div className="flex items-center justify-center w-9 h-9 rounded-lg bg-primary/10 dark:bg-primary/15">
-              <span className="text-sm font-bold text-primary">H</span>
+            <div className="flex items-center justify-center w-9 h-9 rounded-lg bg-action-tint">
+              <span className="text-sm font-bold text-action">H</span>
             </div>
           ) : (
-            <img src={logoFull} alt="HelpHS" className="h-8 w-auto object-contain" />
+            <img src={logoFull} alt="HelpHS" className="h-7 w-auto object-contain" />
           )}
         </div>
 
@@ -214,13 +214,13 @@ export function Sidebar({ collapsed, mobileOpen, onMobileClose }: SidebarProps) 
             <div key={group.label}>
               {/* Section label — só no modo expandido */}
               {!collapsed && (
-                <p className="mb-1 px-3 text-[10px] font-semibold uppercase tracking-widest text-slate-400 dark:text-slate-600">
+                <p className="mb-1 px-3 text-[10px] font-semibold uppercase tracking-widest text-conteudo-muted">
                   {group.label}
                 </p>
               )}
               {/* Separador no modo colapsado */}
               {collapsed && (
-                <div className="mx-auto w-6 border-t border-slate-200 dark:border-border mb-1" />
+                <div className="mx-auto w-6 border-t border-border mb-1" />
               )}
 
               <div className="space-y-0.5">
@@ -232,17 +232,17 @@ export function Sidebar({ collapsed, mobileOpen, onMobileClose }: SidebarProps) 
                     onClick={() => onMobileClose()}
                     className={({ isActive }) =>
                       cn(
-                        "relative group flex items-center rounded-lg text-sm font-medium transition-all duration-150",
+                        "relative group flex items-center rounded-lg text-sm font-medium transition-colors duration-150",
                         collapsed ? "justify-center px-0 py-2.5 mx-1" : "gap-3 px-3 py-2",
                         isActive
                           ? [
-                              "bg-primary/10 dark:bg-primary/15 text-primary",
-                              !collapsed && "border-l-2 border-primary pl-[calc(0.75rem-2px)]",
+                              "bg-action-tint text-action",
+                              !collapsed && "border-l-2 border-action pl-[calc(0.75rem-2px)]",
                             ]
                           : [
                               !collapsed && "border-l-2 border-transparent pl-[calc(0.75rem-2px)]",
                               "text-slate-500 dark:text-slate-400",
-                              "hover:bg-slate-100 dark:hover:bg-background-elevated",
+                              "hover:bg-background-elevated",
                               "hover:text-slate-900 dark:hover:text-slate-100",
                             ],
                       )
@@ -268,11 +268,11 @@ export function Sidebar({ collapsed, mobileOpen, onMobileClose }: SidebarProps) 
 
         {/* Footer */}
         {!collapsed && (
-          <div className="shrink-0 border-t border-slate-200 dark:border-border px-5 py-4 space-y-0.5 flex flex-col items-center">
+          <div className="shrink-0 border-t border-border px-5 py-4 space-y-0.5 flex flex-col items-center">
             <div className="relative group">
               <button
                 onClick={() => setChangelogOpen(true)}
-                className="text-xs font-medium text-slate-500 dark:text-slate-400 hover:text-primary dark:hover:text-primary transition-colors cursor-pointer"
+                className="text-xs font-medium text-slate-500 dark:text-slate-400 hover:text-action transition-colors cursor-pointer"
               >
                 HelpHS {APP_VERSION}
               </button>
