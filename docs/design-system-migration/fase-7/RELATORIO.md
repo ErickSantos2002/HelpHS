@@ -363,41 +363,47 @@ Duas questões que a emenda precisaria responder, e que não são minhas:
 
 ## 10-B. Achado novo: consertar o primitivo não alcança quem não o usa
 
-Pista da sessão do **ChamadosHS**, que achou seis botões à mão do lado dela e
-mandou eu contar os meus. **São 21, em 15 arquivos.**
+Pista da sessão do **ChamadosHS**, que achou o mesmo padrão do lado dela e
+mandou eu contar os meus.
 
-O `Button` foi corrigido em `9837be4` (E2): as variantes preenchidas passaram a
-usar o par `--action-*` / `--text-on-*` em vez da cor cheia com branco por cima.
-Quem não passa pelo componente não recebeu nada disso:
+**A primeira contagem que publiquei — "21 botões" — estava errada nas duas
+pontas.** Ela vinha de um `grep` que casava `bg-primary text-white` na mesma
+linha, e por isso: perdia todo par quebrado em várias linhas, perdia todo par
+com prefixo de estado (`focus:`, `hover:`), e chamava de "botão" três coisas que
+não são. Refeita com uma varredura que junta o atributo `className` inteiro e
+pareia pelo mesmo prefixo, o número é **20 lugares em 16 arquivos** — e o pior
+deles era invisível para o `grep` anterior.
 
-| Padrão escrito à mão | Contraste | |
-|---|---:|---|
-| `bg-primary text-white` | **3,83:1** | ❌ nos **dois** temas — `--color-primary-500` é degrau absoluto e não inverte |
-| `bg-danger text-white` | **3,76:1** | ❌ o número exato que a E2 tirou do `Button` |
-| (`Button` hoje, para comparar) | 5,29:1 claro · 5,11:1 escuro | ✅ |
+**O pior era o link de pular para o conteúdo**, `AppLayout.tsx:15`, com
+`focus:bg-action focus:text-white`: **2,69:1 no escuro**. Consertado agora, e não
+adiado para as Fases 11–16, porque é casca e não página, é o primeiro foco de
+toda página, e existe exclusivamente para quem navega por teclado — a única
+pessoa que chega a vê-lo era justamente a que não conseguia lê-lo. Passa a
+`focus:text-on-primary`, o token da **E1**: **5,09:1**. Preso por teste.
 
-**Onde estão:**
+**Sobram 19**, nenhum da Fase 7, nenhum tocado. Um deles é primitivo
+(`ui/Pagination.tsx:129`, Fase 9); dois não são botões (os contadores de não
+lidas do `Topbar`); os outros 16 são botões de tela, das Fases 11–16.
 
-```
-4  pages/profile/ProfilePage.tsx        (um deles `bg-danger` — desativar a conta)
-2  pages/tickets/TicketFormPage.tsx     2  pages/calendar/CalendarPage.tsx
-2  components/layout/Topbar.tsx         1  pages/tickets/TicketListPage.tsx
-1  pages/reports/ReportsPage.tsx        1  pages/onboarding/OnboardingPage.tsx
-1  pages/notifications/NotificationsPage.tsx
-1  pages/kb/KBListPage.tsx              1  pages/kb/KBFormPage.tsx
-1  pages/kb/KBArticlePage.tsx           1  pages/dashboard/ClientDashboard.tsx
-1  pages/dashboard/AdminDashboard.tsx   1  components/chat/ChatPanel.tsx
-1  components/ui/Pagination.tsx  ← primitivo, não página
-```
+| Par escrito à mão | claro | escuro |
+|---|---:|---:|
+| `bg-primary` + `text-white` | 3,83 ❌ | 3,83 ❌ |
+| `bg-danger` + `text-white` | 3,76 ❌ | 3,76 ❌ |
+| `bg-action` + `text-white` | 5,29 ✅ | **2,69** ❌ |
+| `Button` hoje | 5,29 ✅ | 5,11 ✅ |
 
-**Um deles não é código de página.** `ui/Pagination.tsx:132` pinta
-`bg-primary text-white` na página ativa da paginação. É primitivo, cai na
-**Fase 9**, e já entra medido e reprovando.
+O `bg-primary text-white` reprova nos **dois** temas: `--color-primary-500` é
+degrau absoluto e não inverte.
 
-Os outros 20 são código de tela, das Fases 11–16 — não entram nesta fase. Mas
-mudam a conta do que o Checkpoint 2 pode afirmar: o **primitivo** está corrigido;
-o **sistema**, não. Ficou escrito no cabeçalho do próprio `Button.tsx`, para que
-ninguém leia "botão semântico corrigido" e conclua o que não está.
+**A lição de método, que vale mais que a lista:** a conferência do Checkpoint 1
+mediu os **tokens** — `--action` contra as superfícies — e deu a casca por
+conforme. As telas não escrevem token: escrevem classe por cima dele, e
+`text-white` não é token nenhum. Varredura de contraste parte do **JSX**.
+
+Lista completa, as quatro armadilhas do método e o padrão do degrau 500 em
+`contraste-fundo-cheio.md`, nesta mesma pasta. O aviso ficou também no cabeçalho
+do `Button.tsx`, para ninguém ler "botão semântico corrigido" e concluir o que
+não está.
 
 ## 11. Risco de regressão
 
@@ -425,8 +431,9 @@ local.
       `navigation/` marcadas feito/pendente
 - [ ] **Galeria estendida** aos primitivos dessas três fases, e recaptura
 - [ ] **Mapa de status do ChamadosHS** (seção 16) — é da outra sessão, não desta
-- [ ] **21 botões à mão** (seção 10-B) — 20 são das Fases 11–16, mas o de
-      `ui/Pagination.tsx:132` é primitivo e cai na Fase 9
+- [ ] **19 pares de fundo cheio** (seção 10-B) — 16 são botões de tela das
+      Fases 11–16; `ui/Pagination.tsx:129` é primitivo e cai na Fase 9; dois são
+      contadores do `Topbar`
 - [ ] **Decisão sobre a E5** (seção 10-A): as tintas semânticas reprovam
       sobre `--bg-base` e `--surface-elevated`, e o hover do painel alcança isso
 - [ ] **Decisão sobre a E4**: quem aplicou, e se o registro entra com hash

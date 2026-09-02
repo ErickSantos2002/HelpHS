@@ -28,15 +28,14 @@ export interface ButtonProps extends ButtonHTMLAttributes<HTMLButtonElement> {
  * `--text-on-success`, que valem branco nos dois temas porque o fundo delas é
  * degrau absoluto da rampa e não inverte.
  *
- * ⚠️ **Consertar este componente não conserta o sistema.** Há **21 botões
- * escritos à mão em 15 arquivos** que não passam por aqui e seguem pintando a
- * cor cheia da rampa com branco por cima: `bg-primary text-white` dá **3,83:1**
- * (nos dois temas — o degrau 500 é absoluto) e `bg-danger text-white` dá
- * **3,76:1**, exatamente o número que a E2 tirou daqui. Um deles está em
- * `ui/Pagination.tsx:132`, que é primitivo e não página. A troca é das
- * Fases 11–16; até lá, "botão semântico corrigido" vale para este arquivo e
- * não para as telas. Lista e medições em
- * `docs/design-system-migration/fase-7/RELATORIO.md`, seção 10-B.
+ * ⚠️ **Consertar este componente não conserta o sistema.** Restam **19 pares de
+ * fundo cheio com texto por cima** que não passam por aqui: `bg-primary
+ * text-white` dá **3,83:1** (nos dois temas — o degrau 500 é absoluto) e
+ * `bg-danger text-white` dá **3,76:1**, o número exato que a E2 tirou daqui.
+ * Nem todos são botão, e um está em `ui/Pagination.tsx:129`, que é primitivo.
+ * A troca é das Fases 11–16; até lá, "botão semântico corrigido" vale para este
+ * arquivo e não para as telas. Lista, medições e as quatro armadilhas da
+ * varredura em `docs/design-system-migration/fase-7/contraste-fundo-cheio.md`.
  */
 const variantClasses: Record<Variant, string> = {
   primary:
