@@ -1,0 +1,187 @@
+/* Health & Safety — cor
+ *
+ * Origem dos valores:
+ *   --hs-brand-*        medido do arquivo assets/logo-hs.png
+ *   --color-primary-*   HelpHS/frontend/tailwind.config.js (rampa `primary`)
+ *   --color-success/danger/warning/info-*  idem
+ *   --color-slate-*     escala neutra usada nas telas (Tailwind slate)
+ *   superfícies/bordas  HelpHS/frontend/src/index.css (:root e .dark)
+ *
+ * Nada aqui foi inventado: cada hexadecimal existe hoje em produção num dos
+ * quatro repositórios lidos. Ver readme.md → "Divergências entre sistemas".
+ */
+
+:root {
+  /* ── Marca ────────────────────────────────────────────────
+   * O azul do logo, medido do arquivo. É o primário oficial do sistema. */
+  --hs-brand-blue: #1f89ca;
+  --hs-brand-gray: #7a7677;
+  --hs-brand-gray-light: #9f999a;
+
+  /* ── Primária (azul da marca) ─────────────────────────────
+   * Rampa construída sobre #1F89CA — matiz 203°, saturação 73%. Os degraus
+   * 400 e 600 não foram derivados: são os dois valores que o ChamadosHS já
+   * usava como cor de sinal (#47A6E1 no escuro, #1A71A8 no claro), medidos
+   * lá contra a superfície. Os demais seguem a mesma família.
+   *
+   * CONTRASTE — a regra que decide qual degrau usar:
+   *   500 (#1F89CA) → 3,83:1 no branco. LOGO, superfície de marca, borda,
+   *                   preenchimento de gráfico, ícone grande. Nunca texto.
+   *   600 (#1A71A8) → 5,30:1 no branco. AÇÃO: fundo de botão primário, link,
+   *                   texto azul, item ativo. É o padrão interativo.
+   *   700+          → texto azul sobre fundo azul tênue (50/100). */
+  --color-primary-50: #f1f9fe;
+  --color-primary-100: #dbeefa;
+  --color-primary-200: #b8ddf5;
+  --color-primary-300: #7bc0ea;
+  --color-primary-400: #47a6e1;
+  --color-primary-500: #1f89ca;
+  --color-primary-600: #1a71a8;
+  --color-primary-700: #155984;
+  --color-primary-800: #104565;
+  --color-primary-900: #0b3047;
+  --color-primary: var(--color-primary-500);
+
+  /* ── Neutros ────────────────────────────────────────────── */
+  --color-white: #ffffff;
+  --color-slate-50: #f8fafc;
+  --color-slate-100: #f1f5f9;
+  --color-slate-200: #e2e8f0;
+  --color-slate-300: #cbd5e1;
+  --color-slate-400: #94a3b8;
+  --color-slate-500: #64748b;
+  --color-slate-600: #475569;
+  --color-slate-700: #334155;
+  --color-slate-800: #1e293b;
+  --color-slate-900: #0f172a;
+
+  /* ── Semânticas ─────────────────────────────────────────── */
+  --color-success-50: #ecfdf5;
+  --color-success-100: #d1fae5;
+  --color-success-400: #34d399;
+  --color-success-500: #10b981;
+  --color-success-600: #059669;
+  --color-success-700: #047857;
+  --color-success: var(--color-success-500);
+
+  --color-danger-50: #fef2f2;
+  --color-danger-100: #fee2e2;
+  --color-danger-400: #f87171;
+  --color-danger-500: #ef4444;
+  --color-danger-600: #dc2626;
+  --color-danger-700: #b91c1c;
+  --color-danger: var(--color-danger-500);
+
+  --color-warning-50: #fffbeb;
+  --color-warning-100: #fef3c7;
+  --color-warning-400: #fbbf24;
+  --color-warning-500: #f59e0b;
+  --color-warning-600: #d97706;
+  --color-warning-700: #b45309;
+  --color-warning: var(--color-warning-500);
+
+  --color-info-50: #eff6ff;
+  --color-info-100: #dbeafe;
+  --color-info-400: #60a5fa;
+  --color-info-500: #3b82f6;
+  --color-info-600: #2563eb;
+  --color-info-700: #1d4ed8;
+  --color-info: var(--color-info-500);
+
+  /* ── Aliases semânticos — tema claro (padrão) ───────────── */
+  --bg-base: var(--color-slate-50);          /* fundo da página        */
+  --surface: var(--color-white);             /* card, painel, topbar   */
+  --surface-elevated: var(--color-slate-100);/* hover, cabeçalho tabela*/
+
+  --border-color: var(--color-slate-200);
+  --border-muted: var(--color-slate-100);
+  --border-strong: var(--color-slate-300);
+
+  --text-heading: var(--color-slate-900);
+  --text-body: var(--color-slate-800);
+  --text-muted: var(--color-slate-500);
+  --text-faint: var(--color-slate-400);
+  --text-on-primary: var(--color-white);
+  --text-link: var(--color-primary-600);
+  --text-link-hover: var(--color-primary-700);
+
+  /* Ação: o degrau interativo, separado do degrau de marca. Botão primário,
+   * item ativo, foco e link saem daqui — nunca de --color-primary-500. */
+  --action: var(--color-primary-600);
+  --action-hover: var(--color-primary-700);
+  --action-tint: var(--color-primary-50);
+  --action-tint-border: var(--color-primary-100);
+  --brand-surface: var(--color-primary-500);
+
+  --focus-ring: var(--color-primary-600);
+  --overlay: rgb(0 0 0 / 0.6);
+
+  /* Toast — consumidos em JS pela biblioteca (react-hot-toast no ChamadosHS,
+   * sonner no HelpHS), que recebe um objeto de estilo e não enxerga classe. */
+  --toast-bg: var(--color-white);
+  --toast-color: var(--text-heading);
+  --toast-border: var(--border-strong);
+
+  /* ── Tintas semânticas ───────────────────────────────────
+   * Fundo de badge, aviso e chip. São a cor de significado com 15% de
+   * opacidade, NÃO o degrau 50 da rampa: o fundo translúcido pega o tom da
+   * superfície embaixo e por isso funciona nos dois temas sem regra separada.
+   * Foi assim que os dois repositórios com biblioteca fizeram, e é a
+   * diferença entre um selo que acompanha o tema e um retângulo branco no
+   * meio do navy.
+   *
+   * O par de cada tinta é `--on-*`: o texto que vai por cima. Esse sim troca
+   * por tema — escuro no claro, claro no escuro. */
+  --tint-primary: rgb(31 137 202 / 0.15);
+  --tint-success: rgb(16 185 129 / 0.15);
+  --tint-danger: rgb(239 68 68 / 0.15);
+  --tint-warning: rgb(245 158 11 / 0.15);
+  --tint-info: rgb(59 130 246 / 0.15);
+  --tint-neutral: var(--surface-elevated);
+
+  --on-tint-primary: var(--color-primary-700);
+  --on-tint-success: var(--color-success-700);
+  --on-tint-danger: var(--color-danger-700);
+  --on-tint-warning: var(--color-warning-700);
+  --on-tint-info: var(--color-info-700);
+  --on-tint-neutral: var(--text-muted);
+}
+
+/* ── Tema escuro ──────────────────────────────────────────────
+ * Navy profundo, de HelpHS/frontend/src/index.css (.dark). Aplicado por
+ * classe `dark` no <html>, como nos quatro sistemas. */
+.dark {
+  --bg-base: #0d1b2a;
+  --surface: #132238;
+  --surface-elevated: #1a2f4a;
+
+  --border-color: #1e3a5f;
+  --border-muted: #132238;
+  --border-strong: #315d81;
+
+  --text-heading: var(--color-slate-100);
+  --text-body: var(--color-slate-200);
+  --text-muted: var(--color-slate-400);
+  --text-faint: var(--color-slate-500);
+  --text-link: var(--color-primary-400);
+  --text-link-hover: var(--color-primary-300);
+
+  /* No escuro a escada inverte: o tom claro é que passa no contraste. */
+  --action: var(--color-primary-400);
+  --action-hover: var(--color-primary-300);
+  --action-tint: rgb(31 137 202 / 0.15);
+  --action-tint-border: rgb(31 137 202 / 0.3);
+  --focus-ring: var(--color-primary-400);
+
+  --toast-bg: #192938;
+  --toast-color: #dae7f1;
+  --toast-border: #253e56;
+
+  /* As tintas não mudam — a opacidade já resolve. O texto por cima, sim. */
+  --on-tint-primary: var(--color-primary-300);
+  --on-tint-success: var(--color-success-400);
+  --on-tint-danger: var(--color-danger-400);
+  --on-tint-warning: var(--color-warning-400);
+  --on-tint-info: var(--color-info-400);
+  --on-tint-neutral: var(--text-muted);
+}

@@ -172,8 +172,8 @@ export default function LoginPage() {
       {/* ── Left panel 60% — branding ───────────────────────── */}
       <div className="hidden lg:flex lg:w-3/5 relative flex-col justify-between overflow-hidden bg-[#080F1A] px-14 py-12">
         {/* Decorative blobs */}
-        <div className="pointer-events-none absolute -top-32 -right-32 w-[500px] h-[500px] rounded-full blur-[120px]" style={{ backgroundColor: "rgba(14,165,233,0.18)" }} />
-        <div className="pointer-events-none absolute -bottom-40 -left-20 w-[400px] h-[400px] rounded-full blur-[100px]" style={{ backgroundColor: "rgba(14,165,233,0.09)" }} />
+        <div className="pointer-events-none absolute -top-32 -right-32 w-[500px] h-[500px] rounded-full blur-[120px] bg-primary/[0.18]" />
+        <div className="pointer-events-none absolute -bottom-40 -left-20 w-[400px] h-[400px] rounded-full blur-[100px] bg-primary/[0.09]" />
 
         {/* Logo */}
         <div className="relative z-10">
@@ -183,7 +183,7 @@ export default function LoginPage() {
         {/* Main copy */}
         <div className="relative z-10 space-y-10">
           <div className="space-y-4">
-            <div className="inline-flex items-center gap-2 rounded-full px-3 py-1" style={{ border: "1px solid rgba(14,165,233,0.3)", backgroundColor: "rgba(14,165,233,0.1)" }}>
+            <div className="inline-flex items-center gap-2 rounded-full border border-primary/30 bg-primary/10 px-3 py-1">
               <span className="w-1.5 h-1.5 rounded-full bg-primary animate-pulse" />
               <span className="text-xs font-medium text-primary">Help Desk — Saúde &amp; Segurança</span>
             </div>
@@ -200,7 +200,7 @@ export default function LoginPage() {
           <div className="grid grid-cols-1 gap-5">
             {FEATURES.map((f) => (
               <div key={f.title} className="flex items-start gap-4">
-                <div className="shrink-0 flex items-center justify-center w-9 h-9 rounded-lg text-[#0ea5e9]" style={{ backgroundColor: "rgba(14,165,233,0.12)" }}>
+                <div className="shrink-0 flex items-center justify-center w-9 h-9 rounded-lg bg-primary/[0.12] text-primary">
                   {f.icon}
                 </div>
                 <div>

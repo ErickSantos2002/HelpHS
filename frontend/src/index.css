@@ -1,40 +1,30 @@
 @import url("https://fonts.googleapis.com/css2?family=Plus+Jakarta+Sans:wght@300;400;500;600;700;800&display=swap");
 
+/* Tokens do Design System da Health & Safety.
+ *
+ * Vêm antes das diretivas do Tailwind de propósito (guidelines/adocao.md,
+ * Passo 1): as custom properties precisam existir quando as utilidades que as
+ * consomem forem resolvidas. Os arquivos em design-system/ são cópia byte a
+ * byte do pacote — não edite lá; veja design-system/VERSION.md. */
+@import "./design-system/styles.css";
+
 @tailwind base;
 @tailwind components;
 @tailwind utilities;
 
-/* ── Design tokens ──────────────────────────────────────────── */
+/* Os tokens de superfície e borda que moravam aqui como tripla RGB agora vêm
+ * de design-system/tokens/colors.css, com os mesmos dez valores: --bg-base,
+ * --surface, --surface-elevated, --border-color e --border-muted, nos dois
+ * temas. Quem aplicava opacidade sobre eles (bg-background-elevated/40 e
+ * companhia) continua funcionando porque o tailwind.config.js passou a
+ * declará-los com color-mix. */
+/* O `body` não é mais pintado aqui. Fundo, cor, família, suavização e a
+ * transição de tema saem de design-system/tokens/base.css, que roda antes do
+ * `@tailwind base` e sobrevive ao preflight (ele só mexe em margin e
+ * line-height). A cor do texto passou de slate-900/slate-100 para
+ * --text-body (slate-800 no claro, slate-200 no escuro), como o design system
+ * define — é a única mudança de valor desta fase. */
 @layer base {
-  /* Light mode (default) */
-  :root {
-    --bg-base:     248 250 252;       /* #F8FAFC */
-    --bg-surface:  255 255 255;       /* #FFFFFF */
-    --bg-elevated: 241 245 249;       /* #F1F5F9 */
-
-    --border-color: 226 232 240;      /* #E2E8F0 */
-    --border-muted: 241 245 249;      /* #F1F5F9 */
-  }
-
-  /* Dark mode */
-  .dark {
-    --bg-base:     13 27 42;          /* #0D1B2A deep navy */
-    --bg-surface:  19 34 56;          /* #132238 */
-    --bg-elevated: 26 47 74;          /* #1A2F4A */
-
-    --border-color: 30 58 95;         /* #1E3A5F */
-    --border-muted: 19 34 56;         /* #132238 */
-  }
-
-  body {
-    @apply bg-background font-sans antialiased;
-    color: rgb(15 23 42);             /* slate-900 — light mode default */
-  }
-
-  .dark body {
-    color: rgb(241 245 249);          /* slate-100 — dark mode */
-  }
-
   /* ── Text color inversion for light mode ─────────────────── */
   /* Components use text-slate-* hardcoded for dark; invert in light */
   html:not(.dark) .text-slate-100 { color: rgb(15 23 42);   }   /* slate-900 */

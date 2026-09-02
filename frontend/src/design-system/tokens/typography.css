@@ -1,0 +1,52 @@
+/* Health & Safety — tipografia
+ *
+ * Plus Jakarta Sans é a fonte oficial da Health & Safety — escolhida em
+ * 23/08/2026, comparada lado a lado com IBM Plex Sans e Source Sans 3 na
+ * mesma tela (guidelines/fonte-*.html). Já era a fonte do HelpHS em
+ * produção, o que torna a adoção nos outros sistemas uma troca de token.
+ *
+ * A fonte licenciada anterior da marca se perdeu. Esta a substitui: é servida
+ * pelo Google Fonts nos pesos 300–800, sem arquivo local.
+ *
+ * A monoespaçada é a pilha padrão do sistema — é o que `font-mono` do
+ * Tailwind resolve nos quatro repositórios. Ela carrega DADO DE MÁQUINA:
+ * protocolo, data, contador, rótulo estrutural (ver componente Rotulo).
+ * Título, descrição e comentário ficam em sans.
+ */
+
+@import url("https://fonts.googleapis.com/css2?family=Plus+Jakarta+Sans:wght@300;400;500;600;700;800&display=swap");
+
+:root {
+  --font-sans: "Plus Jakarta Sans", ui-sans-serif, system-ui, sans-serif;
+  --font-mono: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas,
+    "Liberation Mono", "Courier New", monospace;
+
+  /* Escala — a do Tailwind, que é a usada nas telas */
+  --text-2xs: 0.625rem;  /* 10px — rótulo de grupo na sidebar          */
+  --text-xs: 0.75rem;    /* 12px — badge, rótulo de tabela, hint       */
+  --text-sm: 0.875rem;   /* 14px — corpo padrão de interface           */
+  --text-base: 1rem;     /* 16px — card title                          */
+  --text-lg: 1.125rem;   /* 18px                                       */
+  --text-xl: 1.25rem;    /* 20px — h1 de página                        */
+  --text-2xl: 1.5rem;    /* 24px — h1 de tela de conta                 */
+  --text-3xl: 1.875rem;  /* 30px — número de KPI                       */
+  --text-4xl: 2.25rem;
+
+  --leading-none: 1;
+  --leading-tight: 1.25;
+  --leading-snug: 1.375;
+  --leading-normal: 1.5;
+  --leading-relaxed: 1.625;
+
+  --weight-light: 300;
+  --weight-regular: 400;
+  --weight-medium: 500;
+  --weight-semibold: 600;
+  --weight-bold: 700;
+  --weight-extrabold: 800;
+
+  /* Rótulo estrutural: mono, caixa alta, entrelinha larga */
+  --tracking-label: 0.1em;
+  --tracking-wider: 0.05em;
+  --tracking-tight: -0.01em;
+}

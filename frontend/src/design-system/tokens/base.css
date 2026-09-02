@@ -1,0 +1,33 @@
+/* Health & Safety — reset mínimo e padrões de documento.
+ * Só o que os quatro sistemas assumem: fonte, cor de fundo, cor de link e a
+ * barra de rolagem fina. */
+
+html { -webkit-text-size-adjust: 100%; }
+
+body {
+  margin: 0;
+  background: var(--bg-base);
+  color: var(--text-body);
+  font-family: var(--font-sans);
+  font-size: var(--text-sm);
+  line-height: var(--leading-normal);
+  -webkit-font-smoothing: antialiased;
+  transition: var(--transition-colors);
+}
+
+h1, h2, h3, h4 {
+  color: var(--text-heading);
+  letter-spacing: var(--tracking-tight);
+  margin: 0;
+}
+
+a { color: var(--text-link); text-decoration: none; }
+a:hover { color: var(--text-link-hover); text-decoration: underline; }
+
+::-webkit-scrollbar { width: 6px; height: 6px; }
+::-webkit-scrollbar-track { background: transparent; }
+::-webkit-scrollbar-thumb {
+  border-radius: var(--radius-full);
+  background: rgb(148 163 184 / 0.5);
+}
+::-webkit-scrollbar-thumb:hover { background: rgb(100 116 139 / 0.8); }
