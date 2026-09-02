@@ -29,14 +29,19 @@
 #    justificativa acabava escrita para UM advisory e herdada por todos os
 #    outros do pacote. O `react-router` tinha um `motivo` sobre RSC/turbo-stream
 #    e, debaixo dele, dois open redirects de <Link>/useNavigate que o argumento
-#    de RSC não explica. Ao separar por advisory os dois apareceram, e estão
-#    aqui como `aceito_com_prazo` — não como "não aplicável".
+#    de RSC não explica.
+#
+#    Esse é o registro de que a troca de chave pagou: os dois só apareceram
+#    porque a lista passou a ser por advisory, entraram como `aceito_com_prazo`,
+#    e em 02/09 foram fechados subindo o react-router 7.13.2 -> 7.18.3. As dez
+#    linhas do pacote saíram daqui — o gate acusou as dez como ENTRADA OBSOLETA,
+#    que é o outro lado da mesma regra.
 #
 # 5. Pacote sinalizado só por HERANÇA não entra. Quando o `via` do npm é apenas
-#    o nome de outro pacote (`react-router-dom` -> `react-router`,
-#    `@vitest/coverage-v8` -> `@vitest/browser`), o aviso é o do pacote de
-#    baixo, que já tem entrada própria. O verificador imprime esses nomes a
-#    cada rodada, para ninguém achar que deixaram de ser vigiados.
+#    o nome de outro pacote (hoje `@vitest/coverage-v8` -> `@vitest/browser`),
+#    o aviso é o do pacote de baixo, que já tem entrada própria. O verificador
+#    imprime esses nomes a cada rodada, para ninguém achar que deixaram de ser
+#    vigiados.
 #
 # ── COMO RODAR LOCALMENTE ────────────────────────────────────────────────────
 #
@@ -60,7 +65,8 @@
 # Quem aprova ignore novo: TI/Dev, no code review do PR que mexer neste arquivo.
 #
 # ─────────────────────────────────────────────────────────────────────────────
-# Levantamento de 01/09/2026. Cada `motivo` abaixo cita o comando que o provou.
+# Levantamento de 01/09/2026, revisto em 02/09 (chave por advisory e subida do
+# react-router). Cada `motivo` abaixo cita o comando que o provou.
 
 
 # ══ BACKEND — pip-audit ══════════════════════════════════════════════════════
@@ -573,116 +579,6 @@ faixa = ">=6.1.0 <6.1.3"
 classe = "nao_aplicavel"
 motivo = "DoS por recursao de AST sem controle. `npm ls --omit=dev postcss-selector-parser` -> ausente: transitiva do postcss, tempo de build."
 remover_quando = "junto com o postcss"
-responsavel = "TI/Dev"
-data = "2026-09-02"
-
-[[frontend]]
-pacote = "react-router"
-advisory = "GHSA-2j2x-hqr9-3h42"
-severidade = "moderate"
-faixa = ">=7.0.0 <7.14.1"
-classe = "aceito_com_prazo"
-motivo = "Redirect de mesma origem com caminho iniciado por // vira open redirect. ALCANCA o SPA, ao contrario dos outros oito deste pacote. O sink existe: AuthGuard.tsx:22 grava `location.pathname` em `state.from` e LoginPage.tsx:86,111,148 faz `navigate(from)`. O que fecha hoje e o casamento de rota: caminho iniciado por // ou \\\\ nao casa com nenhuma rota sob o AuthGuard e cai no `path=\"*\"` (App.tsx:80), que nao grava `from`. Os outros destinos dinamicos sao internos (`/kb/${id}` em KBFormPage.tsx:223,360 e `item.path` em Sidebar.tsx:230), e nenhum redirect vem de query string (`grep -rnE \"searchParams.get\\('(next|redirect|returnUrl|from)\" src/` -> vazio). Provado em src/test/components/guards.test.tsx. O argumento depende da tabela de rotas continuar sem curinga sob o AuthGuard: por isso `aceito_com_prazo`, e nao `nao_aplicavel`."
-remover_quando = "na subida do react-router para >= 7.18.2, que fecha os dez avisos de uma vez; antes disso, se surgir rota curinga sob o AuthGuard ou destino de redirect vindo de query string"
-responsavel = "TI/Dev"
-data = "2026-09-02"
-
-[[frontend]]
-pacote = "react-router"
-advisory = "GHSA-337j-9hxr-rhxg"
-severidade = "moderate"
-faixa = ">=6.4.0 <7.18.0"
-classe = "nao_aplicavel"
-motivo = "Injecao de construtor arbitrario em deserializeErrors(), que so roda no data router com single fetch. `main.tsx:3,9` monta BrowserRouter + <Routes>; `grep -rnE 'createBrowserRouter|RouterProvider|useFetcher|useLoaderData|loader:' src/` -> sem data router. Nao existe servidor de react-router: producao e nginx servindo o dist/."
-remover_quando = "o projeto migrar para createBrowserRouter com loaders/actions, ou adotar RSC"
-responsavel = "TI/Dev"
-data = "2026-09-02"
-
-[[frontend]]
-pacote = "react-router"
-advisory = "GHSA-49rj-9fvp-4h2h"
-severidade = "high"
-faixa = ">=7.0.0 <=7.14.1"
-classe = "nao_aplicavel"
-motivo = "turbo-stream vendorizado permite invocacao arbitraria de construtor; so e usado no modo framework. `main.tsx:3,9` monta BrowserRouter + <Routes>; `grep -rnE 'createBrowserRouter|RouterProvider|useFetcher|useLoaderData|loader:' src/` -> sem data router. Nao existe servidor de react-router: producao e nginx servindo o dist/."
-remover_quando = "o projeto migrar para createBrowserRouter com loaders/actions, ou adotar RSC"
-responsavel = "TI/Dev"
-data = "2026-09-02"
-
-[[frontend]]
-pacote = "react-router"
-advisory = "GHSA-84g9-w2xq-vcv6"
-severidade = "low"
-faixa = ">=7.12.0 <7.15.1"
-classe = "nao_aplicavel"
-motivo = "CSRF por requisicao de documento PUT/PATCH/DELETE -- requisicao de documento so existe no modo framework. `main.tsx:3,9` monta BrowserRouter + <Routes>; `grep -rnE 'createBrowserRouter|RouterProvider|useFetcher|useLoaderData|loader:' src/` -> sem data router. Nao existe servidor de react-router: producao e nginx servindo o dist/."
-remover_quando = "o projeto migrar para createBrowserRouter com loaders/actions, ou adotar RSC"
-responsavel = "TI/Dev"
-data = "2026-09-02"
-
-[[frontend]]
-pacote = "react-router"
-advisory = "GHSA-8x6r-g9mw-2r78"
-severidade = "high"
-faixa = ">=7.0.0 <7.15.0"
-classe = "nao_aplicavel"
-motivo = "DoS por expansao de caminho sem limite no endpoint __manifest, servido pelo modo framework. `main.tsx:3,9` monta BrowserRouter + <Routes>; `grep -rnE 'createBrowserRouter|RouterProvider|useFetcher|useLoaderData|loader:' src/` -> sem data router. Nao existe servidor de react-router: producao e nginx servindo o dist/."
-remover_quando = "o projeto migrar para createBrowserRouter com loaders/actions, ou adotar RSC"
-responsavel = "TI/Dev"
-data = "2026-09-02"
-
-[[frontend]]
-pacote = "react-router"
-advisory = "GHSA-chx6-hx7r-mcp5"
-severidade = "high"
-faixa = ">=7.0.0 <7.18.0"
-classe = "nao_aplicavel"
-motivo = "DoS nao autenticado por casamento de rota ineficiente NO SERVIDOR do modo framework. `main.tsx:3,9` monta BrowserRouter + <Routes>; `grep -rnE 'createBrowserRouter|RouterProvider|useFetcher|useLoaderData|loader:' src/` -> sem data router. Nao existe servidor de react-router: producao e nginx servindo o dist/."
-remover_quando = "o projeto migrar para createBrowserRouter com loaders/actions, ou adotar RSC"
-responsavel = "TI/Dev"
-data = "2026-09-02"
-
-[[frontend]]
-pacote = "react-router"
-advisory = "GHSA-h8fp-f39c-q6mh"
-severidade = "moderate"
-faixa = ">=7.11.0 <7.18.0"
-classe = "nao_aplicavel"
-motivo = "XSS no RSCErrorHandler por falta de validacao de protocolo -- codigo de RSC. `main.tsx:3,9` monta BrowserRouter + <Routes>; `grep -rnE 'createBrowserRouter|RouterProvider|useFetcher|useLoaderData|loader:' src/` -> sem data router. Nao existe servidor de react-router: producao e nginx servindo o dist/."
-remover_quando = "o projeto migrar para createBrowserRouter com loaders/actions, ou adotar RSC"
-responsavel = "TI/Dev"
-data = "2026-09-02"
-
-[[frontend]]
-pacote = "react-router"
-advisory = "GHSA-qwww-vcr4-c8h2"
-severidade = "high"
-faixa = ">=7.12.0 <7.18.2"
-classe = "nao_aplicavel"
-motivo = "CSRF no modo RSC executa action antes da resposta 400. `main.tsx:3,9` monta BrowserRouter + <Routes>; `grep -rnE 'createBrowserRouter|RouterProvider|useFetcher|useLoaderData|loader:' src/` -> sem data router. Nao existe servidor de react-router: producao e nginx servindo o dist/."
-remover_quando = "o projeto migrar para createBrowserRouter com loaders/actions, ou adotar RSC"
-responsavel = "TI/Dev"
-data = "2026-09-02"
-
-[[frontend]]
-pacote = "react-router"
-advisory = "GHSA-rxv8-25v2-qmq8"
-severidade = "high"
-faixa = ">=7.0.0 <7.14.0"
-classe = "nao_aplicavel"
-motivo = "DoS por entrada refletida no single fetch, que e do modo framework. `main.tsx:3,9` monta BrowserRouter + <Routes>; `grep -rnE 'createBrowserRouter|RouterProvider|useFetcher|useLoaderData|loader:' src/` -> sem data router. Nao existe servidor de react-router: producao e nginx servindo o dist/."
-remover_quando = "o projeto migrar para createBrowserRouter com loaders/actions, ou adotar RSC"
-responsavel = "TI/Dev"
-data = "2026-09-02"
-
-[[frontend]]
-pacote = "react-router"
-advisory = "GHSA-wrjc-x8rr-h8h6"
-severidade = "moderate"
-faixa = ">=6.0.0 <7.18.0"
-classe = "aceito_com_prazo"
-motivo = "Open redirect por barra invertida em <Link> e useNavigate. ALCANCA o SPA, ao contrario dos outros oito deste pacote. O sink existe: AuthGuard.tsx:22 grava `location.pathname` em `state.from` e LoginPage.tsx:86,111,148 faz `navigate(from)`. O que fecha hoje e o casamento de rota: caminho iniciado por // ou \\\\ nao casa com nenhuma rota sob o AuthGuard e cai no `path=\"*\"` (App.tsx:80), que nao grava `from`. Os outros destinos dinamicos sao internos (`/kb/${id}` em KBFormPage.tsx:223,360 e `item.path` em Sidebar.tsx:230), e nenhum redirect vem de query string (`grep -rnE \"searchParams.get\\('(next|redirect|returnUrl|from)\" src/` -> vazio). Provado em src/test/components/guards.test.tsx. O argumento depende da tabela de rotas continuar sem curinga sob o AuthGuard: por isso `aceito_com_prazo`, e nao `nao_aplicavel`."
-remover_quando = "na subida do react-router para >= 7.18.2, que fecha os dez avisos de uma vez; antes disso, se surgir rota curinga sob o AuthGuard ou destino de redirect vindo de query string"
 responsavel = "TI/Dev"
 data = "2026-09-02"
 

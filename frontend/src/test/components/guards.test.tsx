@@ -1,4 +1,7 @@
+import { existsSync, readFileSync } from "node:fs";
+import { resolve } from "node:path";
 import { render, screen } from "@testing-library/react";
+import userEvent from "@testing-library/user-event";
 import { describe, it, expect, vi, beforeEach } from "vitest";
 import { MemoryRouter, Route, Routes, useLocation } from "react-router-dom";
 import { AuthGuard } from "../../components/layout/AuthGuard";
@@ -21,6 +24,7 @@ vi.mock("../../contexts/AuthContext", () => ({
 }));
 
 import { useAuth } from "../../contexts/AuthContext";
+import LoginPage from "../../pages/auth/LoginPage";
 
 const mockUseAuth = vi.mocked(useAuth);
 
@@ -118,21 +122,21 @@ describe("AuthGuard", () => {
 // ── Destino do redirect pós-login ─────────────────────────────
 
 /**
- * Evidência das entradas GHSA-wrjc-x8rr-h8h6 e GHSA-2j2x-hqr9-3h42 do
- * `.github/dependencias-conhecidas.toml` — os dois open redirects do
- * react-router que ALCANÇAM um SPA clássico. O sink existe aqui:
- * `AuthGuard` grava `location.pathname` em `state.from`, e o login faz
+ * O `AuthGuard` grava `location.pathname` em `state.from`, e o login faz
  * `navigate(from)`. Um `from` começando com `//` vira URL
  * protocolo-relativa e leva o usuário para outro domínio.
  *
- * O que fecha hoje é o casamento de rota: caminho hostil não casa com
- * rota nenhuma sob o guard e cai no `path="*"`, que não grava `from`.
- * Isso depende da tabela de rotas — daí o teste. Se alguém puser uma
- * rota curinga sob o AuthGuard, é aqui que quebra.
+ * Estes testes nasceram dos dois open redirects do react-router
+ * (GHSA-wrjc-x8rr-h8h6 e GHSA-2j2x-hqr9-3h42), fechados na subida para
+ * 7.18.3. Continuam aqui porque a biblioteca era a segunda barreira, não
+ * a primeira: o que impede um caminho hostil de virar `from` é a tabela
+ * de rotas do App, e essa é nossa. Um curinga sob o AuthGuard reabre o
+ * buraco mesmo com o react-router corrigido.
  *
- * Limite honesto: o `MemoryRouter` não passa pela normalização de URL do
- * navegador. A barra invertida é testada crua e na forma que o navegador
- * entregaria (já convertida para `//`).
+ * Limite honesto: o `MemoryRouter` não navega de verdade. Ele prova o que
+ * chega a `state.from`; não prova o que o navegador faria com um `from`
+ * ruim. Essa outra metade é da biblioteca, e a evidência dela é a versão
+ * instalada mais o `npm audit` limpo para o pacote.
  */
 describe("AuthGuard: destino do retorno pós-login", () => {
   function destinoDeRetorno(rotaInicial: string) {
@@ -168,18 +172,167 @@ describe("AuthGuard: destino do retorno pós-login", () => {
     expect(destinoDeRetorno("/tickets/abc")).toBe("/tickets/abc");
   });
 
-  // Só formas que chegam ao router começando de fato com `//` ou `/\` — as
-  // que a mutação (mover o curinga para dentro do guard) derruba. Caminho
-  // com `..` ficou de fora de propósito: ele passa nesta asserção por
-  // começar com `/t`, e afirmar segurança ali seria afirmar o que este
-  // teste não prova.
-  it.each(["//evil.com", "//evil.com/tickets", "/\\evil.com", "///evil.com"])(
+  // Formas que CHEGAM ao router já começando por `//`. São estas que a
+  // mutação derruba: movendo o curinga para dentro do AuthGuard, todas
+  // falham. Caminho com `..` ficou de fora de propósito — passaria a
+  // asserção por começar com `/t`, e afirmar segurança ali seria afirmar
+  // o que este teste não prova.
+  it.each(["//evil.com", "//evil.com/tickets", "///evil.com", "/\\evil.com"])(
     "não devolve %s como destino — seria redirect externo",
     (hostil) => {
       // Um só `/`, e o próximo caractere não pode ser `/` nem `\`.
       expect(destinoDeRetorno(hostil)).toMatch(/^\/(?![/\\])/);
     },
   );
+
+  // Estas nem chegam ao casamento de rota, então passam sem depender da
+  // tabela — e por isso SOBREVIVEM à mutação acima. Medido, não suposto:
+  //   "\\evil.com"       não casa com rota nenhuma, nem com o curinga
+  //   "/%2F%2Fevil.com"  segue percent-encoded — uma barra só
+  //   "/%5Cevil.com"     idem
+  // Ficam como registro do que já não é ameaça. Se alguma delas voltar a
+  // chegar como `//`, quem acusa é o grupo de cima.
+  it.each(["\\\\evil.com", "/%2F%2Fevil.com", "/%5Cevil.com"])(
+    "%s não chega ao guard como caminho protocolo-relativo",
+    (forma) => {
+      expect(destinoDeRetorno(forma)).toMatch(/^\/(?![/\\])/);
+    },
+  );
+});
+
+// ── A tabela de rotas de verdade ──────────────────────────────
+
+/**
+ * Os testes acima usam um harness que IMITA o App. Estes leem o
+ * `App.tsx` de verdade, porque a proteção mora ali: o curinga precisa
+ * ficar fora do bloco protegido, e nenhuma rota sob o `AuthGuard` pode
+ * casar com caminho iniciado por `//`.
+ *
+ * O bloco do `AuthGuard` é o último filho de `<Routes>`, então "daqui
+ * até o fim" é o bloco protegido. Se alguém puser rota pública depois
+ * dele, este teste passa a cobrar demais — erro para o lado seguro, e
+ * que obriga a olhar.
+ */
+describe("App.tsx: a posição do curinga", () => {
+  const MARCA_GUARD = "<Route element={<AuthGuard />}>";
+  // O vitest roda com a raiz do front como cwd, aqui e no CI
+  // (`working-directory: frontend`). Se isso mudar, o teste morre dizendo
+  // por quê, em vez de ler string vazia e passar sem medir nada.
+  const CAMINHO_APP = resolve(process.cwd(), "src/App.tsx");
+  if (!existsSync(CAMINHO_APP)) {
+    throw new Error(`Não achei o App.tsx em ${CAMINHO_APP} (cwd=${process.cwd()})`);
+  }
+  const FONTE = readFileSync(CAMINHO_APP, "utf8");
+
+  it("declara o catch-all uma vez só, e antes do bloco protegido", () => {
+    expect(FONTE.match(/path="\*"/g)).toHaveLength(1);
+    expect(FONTE.indexOf('path="*"')).toBeLessThan(FONTE.indexOf(MARCA_GUARD));
+  });
+
+  it("nenhuma rota sob o AuthGuard casa com caminho iniciado por // ou \\", () => {
+    const inicio = FONTE.indexOf(MARCA_GUARD);
+    expect(inicio).toBeGreaterThan(-1);
+
+    const protegidas = [...FONTE.slice(inicio).matchAll(/path="([^"]*)"/g)].map(
+      (m) => m[1],
+    );
+
+    // Guarda contra o regex deixar de casar e o teste virar vácuo.
+    expect(protegidas.length).toBeGreaterThan(10);
+    for (const rota of protegidas) {
+      expect(rota).toMatch(/^\/(?![/\\])/);
+    }
+  });
+});
+
+// ── Fluxo inteiro, com o LoginPage de verdade ─────────────────
+
+/**
+ * Os testes acima param no `state.from`. Este vai até o fim: rota
+ * protegida sem sessão, tela de login real, submissão, e o
+ * `navigate(from)` do `LoginPage`. É onde as duas metades se encontram.
+ */
+describe("Fluxo: rota protegida -> login -> volta para a rota", () => {
+  function monta(rotaInicial: string, comSessao = false) {
+    const trilha: string[] = [];
+    const login = vi.fn(async () => {
+      // Depois do login o contexto passa a devolver sessão, como na app.
+      mockUseAuth.mockReturnValue({
+        ...autenticado(usuario()),
+        login,
+        verifyMfa: vi.fn(),
+      } as unknown as Auth);
+      return { mfaRequired: false };
+    });
+
+    mockUseAuth.mockReturnValue({
+      ...autenticado(comSessao ? usuario() : null),
+      login,
+      verifyMfa: vi.fn(),
+    } as unknown as Auth);
+
+    function Rastro() {
+      const atual = useLocation().pathname;
+      if (trilha[trilha.length - 1] !== atual) trilha.push(atual);
+      return null;
+    }
+
+    render(
+      <MemoryRouter initialEntries={[rotaInicial]}>
+        <Rastro />
+        <Routes>
+          <Route path="/login" element={<LoginPage />} />
+          <Route path="*" element={<div>não encontrado</div>} />
+          <Route element={<AuthGuard />}>
+            <Route path="/" element={<div>início</div>} />
+            <Route path="/tickets/:id" element={<div>detalhe do chamado</div>} />
+          </Route>
+        </Routes>
+      </MemoryRouter>,
+    );
+
+    return trilha;
+  }
+
+  async function entra() {
+    await userEvent.type(screen.getByLabelText("E-mail"), "alguem@exemplo.com");
+    await userEvent.type(screen.getByLabelText("Senha"), "SenhaQualquer1");
+    await userEvent.click(screen.getByRole("button", { name: "Entrar" }));
+  }
+
+  it("devolve o usuário à rota que ele tentou abrir", async () => {
+    const trilha = monta("/tickets/abc");
+    expect(screen.getByLabelText("E-mail")).toBeInTheDocument();
+
+    await entra();
+
+    expect(await screen.findByText("detalhe do chamado")).toBeInTheDocument();
+    expect(trilha).toContain("/login");
+    expect(trilha[trilha.length - 1]).toBe("/tickets/abc");
+  });
+
+  it("sem rota de origem, o login cai na raiz — nunca fora do domínio", async () => {
+    const trilha = monta("/login");
+
+    await entra();
+
+    expect(await screen.findByText("início")).toBeInTheDocument();
+    expect(trilha[trilha.length - 1]).toBe("/");
+  });
+
+  it("usuário já autenticado abre a rota sem passar pelo login", () => {
+    const trilha = monta("/tickets/abc", true);
+
+    expect(screen.getByText("detalhe do chamado")).toBeInTheDocument();
+    expect(trilha).not.toContain("/login");
+  });
+
+  it("rota inexistente cai no NotFound, sem acionar o guard", () => {
+    const trilha = monta("/rota-que-nao-existe");
+
+    expect(screen.getByText("não encontrado")).toBeInTheDocument();
+    expect(trilha).not.toContain("/login");
+  });
 });
 
 // ── RoleGuard ─────────────────────────────────────────────────
