@@ -1,0 +1,731 @@
+# Vulnerabilidades conhecidas e aceitas — baseline da auditoria de dependências
+#
+# O CI falha quando aparece vulnerabilidade que NÃO está aqui. Este arquivo é a
+# linha entre "dívida que a equipe examinou e aceitou" e "surpresa que ninguém
+# viu chegar" — e a segunda é a única que o gate precisa barrar.
+#
+# ── REGRAS ───────────────────────────────────────────────────────────────────
+#
+# 1. Toda entrada precisa de `motivo` preenchido. O verificador RECUSA entrada
+#    sem justificativa: ignorar sem escrever por quê é o mesmo que não ignorar,
+#    só que sem deixar rastro.
+#
+# 2. Toda entrada precisa de `remover_quando`. Baseline sem condição de saída
+#    vira lista que só cresce, e lista que só cresce ninguém lê.
+#
+# 3. Entrada OBSOLETA — cuja vulnerabilidade não aparece mais — também derruba
+#    o CI. É chato de propósito: a mensagem diz qual linha apagar, é conserto de
+#    dez segundos, e sem isso o arquivo apodrece.
+#
+# 4. Nada de wildcard, nada de ignorar pacote inteiro. UMA LINHA POR ADVISORY.
+#
+#    A chave do backend é `id` (o pip-audit já devolve identificador global). A
+#    do front é `pacote` + `advisory`, e não só o pacote — a primeira versão
+#    deste arquivo indexava por pacote e tinha um buraco que anulava o gate:
+#    advisory NOVO num pacote já listado passava calado. Era exatamente o que
+#    este arquivo existe para pegar.
+#
+#    O buraco vinha acompanhado de um segundo defeito, pior de enxergar: a
+#    justificativa acabava escrita para UM advisory e herdada por todos os
+#    outros do pacote. O `react-router` tinha um `motivo` sobre RSC/turbo-stream
+#    e, debaixo dele, dois open redirects de <Link>/useNavigate que o argumento
+#    de RSC não explica. Ao separar por advisory os dois apareceram, e estão
+#    aqui como `aceito_com_prazo` — não como "não aplicável".
+#
+# 5. Pacote sinalizado só por HERANÇA não entra. Quando o `via` do npm é apenas
+#    o nome de outro pacote (`react-router-dom` -> `react-router`,
+#    `@vitest/coverage-v8` -> `@vitest/browser`), o aviso é o do pacote de
+#    baixo, que já tem entrada própria. O verificador imprime esses nomes a
+#    cada rodada, para ninguém achar que deixaram de ser vigiados.
+#
+# ── COMO RODAR LOCALMENTE ────────────────────────────────────────────────────
+#
+#     cd backend  && pip install pip-audit && python ../.github/scripts/verifica_dependencias.py
+#     cd frontend && npm ci && python ../.github/scripts/verifica_dependencias.py
+#
+# O script aceita `--lado backend`, `--lado frontend` ou nenhum (faz os dois).
+#
+# ── COMO ATUALIZAR ───────────────────────────────────────────────────────────
+#
+# Vulnerabilidade nova quebrou o CI? A pergunta NÃO é "como faço passar". É:
+#
+#     esse código é alcançável no HelpHS?
+#
+#   • alcançável  -> conserte. Suba o pacote, ou mitigue na aplicação. Só entra
+#                    aqui depois, e como `mitigado_na_aplicacao` ou
+#                    `mitigado_por_configuracao`, com a evidência.
+#   • inalcançável -> entra como `nao_aplicavel`, e o `motivo` precisa dizer o
+#                    COMANDO que provou isso. "Parece não usado" não serve.
+#
+# Quem aprova ignore novo: TI/Dev, no code review do PR que mexer neste arquivo.
+#
+# ─────────────────────────────────────────────────────────────────────────────
+# Levantamento de 01/09/2026. Cada `motivo` abaixo cita o comando que o provou.
+
+
+# ══ BACKEND — pip-audit ══════════════════════════════════════════════════════
+
+[[backend]]
+id = "CVE-2026-55558"
+pacote = "aiosmtplib"
+versao_atual = "3.0.2"
+versao_corrigida = "5.1.2"
+classe = "mitigado_por_configuracao"
+motivo = """
+O aviso afeta SÓ quem faz o upgrade por STARTTLS: bytes lidos em texto claro
+sobrevivem ao handshake. Produção usa TLS IMPLÍCITO na 465, onde não existe
+perna em claro. Testado contra o provedor sem enviar e-mail e sem credencial —
+smtp.resend.com:465 aceitou TLSv1.3 e anunciou AUTH. Depois, e-mail real ENTREGUE
+na caixa em 01/09. E a config não depende de memória: `app/core/config.py` derruba
+o boot em produção/staging se SMTP_TLS=true com aiosmtplib vulnerável, com 13
+testes prendendo a guarda.
+"""
+remover_quando = "aiosmtplib >= 5.1.2 for possível — hoje travado por fastapi-mail <4.0.0"
+responsavel = "TI/Dev"
+data = "2026-09-01"
+
+[[backend]]
+id = "PYSEC-2026-2338"
+pacote = "aiosmtplib"
+versao_atual = "3.0.2"
+versao_corrigida = "5.1.1"
+classe = "nao_aplicavel"
+motivo = """
+Injeção de comando SMTP por CR/LF em endereço passado a mail()/rcpt(). TESTADO,
+não deduzido: `EmailStr` do pydantic recusou 'a@b.com\\r\\nRCPT TO: <x>',
+'...%0d%0aDATA' e '...\\nMAIL FROM: <x>', e aceitou o endereço limpo. Endereço com
+CR/LF não chega ao aiosmtplib.
+"""
+remover_quando = "aiosmtplib >= 5.1.1, ou se algum endereço passar a vir sem validação de EmailStr"
+responsavel = "TI/Dev"
+data = "2026-09-01"
+
+[[backend]]
+id = "PYSEC-2026-1325"
+pacote = "ecdsa"
+versao_atual = "0.19.2"
+versao_corrigida = ""
+classe = "nao_aplicavel"
+motivo = """
+Minerva, ataque de tempo na curva P-256 via ecdsa.SigningKey.sign_digest.
+`grep -rn "ecdsa|SigningKey|sign_digest" app/ scripts/` → vazio: não importamos.
+Entra como transitiva do python-jose, e `jwk.get_key(RS256)` resolve para
+jose.backends.cryptography_backend.CryptographyRSAKey — o backend do `cryptography`,
+não o que usa ecdsa. O algoritmo do projeto é RS256.
+"""
+remover_quando = "o projeto passar a usar algoritmo ES* (ECDSA), ou sair correção do pacote"
+responsavel = "TI/Dev"
+data = "2026-09-01"
+
+[[backend]]
+id = "PYSEC-2026-2263"
+pacote = "pyasn1"
+versao_atual = "0.4.8"
+versao_corrigida = "0.6.3"
+classe = "nao_aplicavel"
+motivo = """
+DoS por recursão ao DECODIFICAR ASN.1 vindo de fora. Não importamos pyasn1
+(`grep -rn pyasn1 app/ scripts/` → vazio). Dentro do jose, só
+`backends/rsa_backend.py` e `backends/_asn1.py` o usam — e RS256 resolve para
+CryptographyRSAKey, que não passa por lá. O único ASN.1 processado são as NOSSAS
+chaves PEM, lidas no boot: entrada confiável.
+"""
+remover_quando = "python-jose liberar pyasn1 >= 0.6.3 — hoje o pin é pyasn1<0.5.0"
+responsavel = "TI/Dev"
+data = "2026-09-01"
+
+[[backend]]
+id = "PYSEC-2026-3455"
+pacote = "pyasn1"
+versao_atual = "0.4.8"
+versao_corrigida = "0.6.4"
+classe = "nao_aplicavel"
+motivo = "Decoder BER, tags de forma longa. Mesma análise do PYSEC-2026-2263: o ASN.1 decodificado são as nossas próprias chaves PEM, e o caminho do jose que usa pyasn1 não é exercitado com RS256."
+remover_quando = "python-jose liberar pyasn1 >= 0.6.4"
+responsavel = "TI/Dev"
+data = "2026-09-01"
+
+[[backend]]
+id = "PYSEC-2026-3456"
+pacote = "pyasn1"
+versao_atual = "0.4.8"
+versao_corrigida = "0.6.4"
+classe = "nao_aplicavel"
+motivo = "Decoder BER/CER/DER, OBJECT IDENTIFIER. Mesma análise do PYSEC-2026-2263."
+remover_quando = "python-jose liberar pyasn1 >= 0.6.4"
+responsavel = "TI/Dev"
+data = "2026-09-01"
+
+[[backend]]
+id = "PYSEC-2026-3457"
+pacote = "pyasn1"
+versao_atual = "0.4.8"
+versao_corrigida = "0.6.4"
+classe = "nao_aplicavel"
+motivo = "univ.Real, conversão de mantissa/base/expoente. Mesma análise do PYSEC-2026-2263."
+remover_quando = "python-jose liberar pyasn1 >= 0.6.4"
+responsavel = "TI/Dev"
+data = "2026-09-01"
+
+[[backend]]
+id = "PYSEC-2026-2270"
+pacote = "python-dotenv"
+versao_atual = "1.1.0"
+versao_corrigida = "1.2.2"
+classe = "nao_aplicavel"
+motivo = """
+O furo é em set_key()/unset_key(), que ESCREVEM no .env.
+`grep -rn "set_key|unset_key|dotenv" app/ scripts/ tests/` → vazio. O HelpHS só
+LÊ, e de forma declarativa: SettingsConfigDict(env_file=".env") em config.py:33.
+"""
+remover_quando = "o projeto passar a escrever no .env em runtime, ou o pacote subir para >= 1.2.2"
+responsavel = "TI/Dev"
+data = "2026-09-01"
+
+[[backend]]
+id = "PYSEC-2026-161"
+pacote = "starlette"
+versao_atual = "0.51.0"
+versao_corrigida = "1.0.1"
+classe = "nao_aplicavel"
+motivo = """
+Host header não validado ao reconstruir request.url; o risco é "authentication
+depends on the reconstructed URL's path".
+`grep -rn "request\\.url|request\\.base_url|url_for" app/` → vazio: não
+reconstruímos URL a partir da requisição. Os links de e-mail saem de
+settings.frontend_url (account_emails.py:15 e :78), que é configuração.
+"""
+remover_quando = "starlette >= 1.0.1 (exige FastAPI compatível), ou se algum código passar a ler request.url"
+responsavel = "TI/Dev"
+data = "2026-09-01"
+
+[[backend]]
+id = "PYSEC-2026-248"
+pacote = "starlette"
+versao_atual = "0.51.0"
+versao_corrigida = "1.3.0"
+classe = "nao_aplicavel"
+motivo = "Path não validado antes de reconstruir request.url; o aviso nomeia 'code that reads request.url.hostname'. Mesmo grep do PYSEC-2026-161: não existe no projeto."
+remover_quando = "starlette >= 1.3.0, ou se algum código passar a ler request.url.hostname"
+responsavel = "TI/Dev"
+data = "2026-09-01"
+
+[[backend]]
+id = "PYSEC-2026-249"
+pacote = "starlette"
+versao_atual = "0.51.0"
+versao_corrigida = "1.3.1"
+classe = "nao_aplicavel"
+motivo = """
+Os limites max_fields/max_part_size do request.form() SÃO aplicados em
+multipart/form-data e ignorados apenas em application/x-www-form-urlencoded.
+`grep -rn "Form\\(" app/routers app/schemas` → vazio: nenhum endpoint urlencoded.
+Upload usa UploadFile/File() (attachments.py:97), que é multipart — o caminho onde
+os limites valem.
+"""
+remover_quando = "starlette >= 1.3.1, ou se algum endpoint passar a aceitar x-www-form-urlencoded"
+responsavel = "TI/Dev"
+data = "2026-09-01"
+
+[[backend]]
+id = "PYSEC-2026-2280"
+pacote = "starlette"
+versao_atual = "0.51.0"
+versao_corrigida = "1.1.0"
+classe = "nao_aplicavel"
+motivo = "HTTPEndpoint escolhe handler por método em minúsculas. `grep -rn HTTPEndpoint app/` → vazio: o projeto usa APIRouter com decorador, que é o padrão do FastAPI."
+remover_quando = "starlette >= 1.1.0, ou se o projeto passar a usar HTTPEndpoint"
+responsavel = "TI/Dev"
+data = "2026-09-01"
+
+[[backend]]
+id = "PYSEC-2026-2281"
+pacote = "starlette"
+versao_atual = "0.51.0"
+versao_corrigida = "1.1.0"
+classe = "nao_aplicavel"
+motivo = "SSRF por caminho UNC no StaticFiles, e só no Windows. `grep -rn StaticFiles app/` → vazio, e o container roda python:3.13-slim (Linux)."
+remover_quando = "starlette >= 1.1.0, ou se o projeto passar a montar StaticFiles"
+responsavel = "TI/Dev"
+data = "2026-09-01"
+
+
+# ══ FRONTEND — npm audit ═════════════════════════════════════════════════════
+#
+# Aqui a chave é o PACOTE, e não o ID: o `npm audit` reporta por pacote afetado,
+# e o mesmo pacote acumula avisos ao longo do tempo. A pergunta que decide é a
+# mesma — o código vulnerável é alcançável? — e para o front ela tem uma segunda
+# metade: isso chega ao navegador, ou morre no build?
+
+[[frontend]]
+pacote = "@vitest/browser"
+advisory = "GHSA-2h32-95rg-cppp"
+severidade = "critical"
+faixa = ">=4.0.17 <4.1.6"
+classe = "nao_aplicavel"
+motivo = "Query param otelCarrier servido sem sanitizar como script inline (XSS no runner). `npm ls --omit=dev @vitest/browser` -> ausente da arvore de producao: e devDependency de teste, nunca publicada, e o modo browser nao roda no CI."
+remover_quando = "o pacote sair do projeto, ou o modo browser passar a rodar em CI com conteudo de terceiro"
+responsavel = "TI/Dev"
+data = "2026-09-02"
+
+[[frontend]]
+pacote = "@vitest/browser"
+advisory = "GHSA-g8mr-85jm-7xhm"
+severidade = "critical"
+faixa = ">=4.0.0 <=4.1.7"
+classe = "nao_aplicavel"
+motivo = "API do Browser Mode exposta permite proxy de CDP e sobrescrita do arquivo de configuracao. `npm ls --omit=dev @vitest/browser` -> ausente da arvore de producao: e devDependency de teste, nunca publicada, e o modo browser nao roda no CI."
+remover_quando = "o pacote sair do projeto, ou o modo browser passar a rodar em CI com conteudo de terceiro"
+responsavel = "TI/Dev"
+data = "2026-09-02"
+
+[[frontend]]
+pacote = "@vitest/browser"
+advisory = "GHSA-p63j-vcc4-9vmv"
+severidade = "critical"
+faixa = ">=4.0.0 <4.1.10"
+classe = "nao_aplicavel"
+motivo = "Comandos do provider do Browser Mode furam a checagem de permissao de acesso a arquivo. `npm ls --omit=dev @vitest/browser` -> ausente da arvore de producao: e devDependency de teste, nunca publicada, e o modo browser nao roda no CI."
+remover_quando = "o pacote sair do projeto, ou o modo browser passar a rodar em CI com conteudo de terceiro"
+responsavel = "TI/Dev"
+data = "2026-09-02"
+
+[[frontend]]
+pacote = "axios"
+advisory = "GHSA-42h9-826w-cgv3"
+severidade = "moderate"
+faixa = ">=1.0.0 <1.18.0"
+classe = "nao_aplicavel"
+motivo = "Recursao excessiva em formDataToJSON. Sink e a transformacao de RESPOSTA com content-type de formulario. `grep -rn 'transformResponse|responseType' src/` -> vazio, e a API nunca devolve multipart; o 'multipart/form-data' do codigo e Content-Type de REQUISICAO (attachmentService.ts:39, userService.ts:194). Alcance por USO: grep em bundle minificado nao prova nada."
+remover_quando = "o front definir transformResponse, ou a API passar a devolver multipart"
+responsavel = "TI/Dev"
+data = "2026-09-02"
+
+[[frontend]]
+pacote = "axios"
+advisory = "GHSA-7q8q-rj6j-mhjq"
+severidade = "moderate"
+faixa = ">=1.0.0 <1.18.0"
+classe = "nao_aplicavel"
+motivo = "Objetos de opcao aninhados consomem valores de prototype poluido. Exige prototype pollution ja existente para ter efeito. Ha uma instancia so (`services/api.ts:13`), com config literal; nada vindo da rede e mesclado na config do axios."
+remover_quando = "o front passar a mesclar dados da rede na config do axios"
+responsavel = "TI/Dev"
+data = "2026-09-02"
+
+[[frontend]]
+pacote = "axios"
+advisory = "GHSA-f4gw-2p7v-4548"
+severidade = "moderate"
+faixa = ">=1.15.0 <1.18.0"
+classe = "nao_aplicavel"
+motivo = "Bypass de NO_PROXY para enderecos locais 0.0.0.0. So o adaptador HTTP do Node faz isso, e ele nao entra no bundle: o campo `browser` do axios mapeia `./lib/adapters/http.js` -> `./lib/helpers/null.js` (`node -e \"console.log(require('./node_modules/axios/package.json').browser)\"`)."
+remover_quando = "o axios passar a rodar em Node dentro deste projeto (SSR, script de build)"
+responsavel = "TI/Dev"
+data = "2026-09-02"
+
+[[frontend]]
+pacote = "axios"
+advisory = "GHSA-gcfj-64vw-6mp9"
+severidade = "high"
+faixa = ">=1.15.2 <1.18.0"
+classe = "nao_aplicavel"
+motivo = "Adaptador HTTP do Node reusa proxy herdado apos limpeza de config no interceptor. So o adaptador HTTP do Node faz isso, e ele nao entra no bundle: o campo `browser` do axios mapeia `./lib/adapters/http.js` -> `./lib/helpers/null.js` (`node -e \"console.log(require('./node_modules/axios/package.json').browser)\"`)."
+remover_quando = "o axios passar a rodar em Node dentro deste projeto (SSR, script de build)"
+responsavel = "TI/Dev"
+data = "2026-09-02"
+
+[[frontend]]
+pacote = "axios"
+advisory = "GHSA-hcpx-6fm6-wx23"
+severidade = "moderate"
+faixa = ">=1.15.1 <1.18.0"
+classe = "nao_aplicavel"
+motivo = "Burla do maxDepth do serializador de formulario via metatoken {}. E lado da REQUISICAO, sobre objeto que o proprio front monta: os dois envios usam FormData nativo montado a mao (attachmentService.ts:34, userService.ts:191), sem objeto aninhado de terceiro."
+remover_quando = "o front passar a serializar objeto vindo da rede em corpo de formulario"
+responsavel = "TI/Dev"
+data = "2026-09-02"
+
+[[frontend]]
+pacote = "axios"
+advisory = "GHSA-jqh4-m9w3-8hp9"
+severidade = "moderate"
+faixa = ">=1.7.0 <1.18.0"
+classe = "nao_aplicavel"
+motivo = "Upload de ReadableStream pelo adaptador fetch fura maxBodyLength. `grep -rn 'maxBodyLength|maxContentLength' src/` -> vazio: nao ha limite configurado, logo nao ha limite a burlar. Quem limita tamanho de upload e o backend."
+remover_quando = "o front passar a configurar maxBodyLength como limite de seguranca"
+responsavel = "TI/Dev"
+data = "2026-09-02"
+
+[[frontend]]
+pacote = "axios"
+advisory = "GHSA-mmx7-hfxf-jppx"
+severidade = "moderate"
+faixa = ">=1.0.0 <1.18.0"
+classe = "nao_aplicavel"
+motivo = "Gadgets de prototype pollution alteram a construcao da requisicao. Exige prototype pollution ja existente para ter efeito. Ha uma instancia so (`services/api.ts:13`), com config literal; nada vindo da rede e mesclado na config do axios."
+remover_quando = "o front passar a mesclar dados da rede na config do axios"
+responsavel = "TI/Dev"
+data = "2026-09-02"
+
+[[frontend]]
+pacote = "axios"
+advisory = "GHSA-mwf2-3pr3-8698"
+severidade = "moderate"
+faixa = ">=1.13.0 <1.18.0"
+classe = "nao_aplicavel"
+motivo = "Upload por stream em HTTP/2 fura maxBodyLength. HTTP/2 e do adaptador Node, anulado no bundle pelo campo `browser`; e `grep -rn 'maxBodyLength|maxContentLength' src/` -> vazio: o limite nem chega a ser configurado."
+remover_quando = "o front passar a configurar maxBodyLength como limite de seguranca"
+responsavel = "TI/Dev"
+data = "2026-09-02"
+
+[[frontend]]
+pacote = "axios"
+advisory = "GHSA-pmv8-rq9r-6j72"
+severidade = "moderate"
+faixa = ">=1.0.0 <1.18.0"
+classe = "nao_aplicavel"
+motivo = "Recursao profunda de chaves em formToJSON -- mesmo sink da GHSA-42h9-826w-cgv3. Sink e a transformacao de RESPOSTA com content-type de formulario. `grep -rn 'transformResponse|responseType' src/` -> vazio, e a API nunca devolve multipart; o 'multipart/form-data' do codigo e Content-Type de REQUISICAO (attachmentService.ts:39, userService.ts:194). Alcance por USO: grep em bundle minificado nao prova nada."
+remover_quando = "o front definir transformResponse, ou a API passar a devolver multipart"
+responsavel = "TI/Dev"
+data = "2026-09-02"
+
+[[frontend]]
+pacote = "axios"
+advisory = "GHSA-xj6q-8x83-jv6g"
+severidade = "moderate"
+faixa = ">=1.15.2 <1.18.0"
+classe = "nao_aplicavel"
+motivo = "Subcampos poluidos de `auth` injetam Basic auth. Alem da precondicao de poluicao, `grep -rn 'auth:' src/` -> so um comentario em ProfilePage.tsx:176; o front autentica por header Bearer (services/api.ts), nunca por Basic."
+remover_quando = "o front passar a usar a opcao `auth` do axios"
+responsavel = "TI/Dev"
+data = "2026-09-02"
+
+[[frontend]]
+pacote = "brace-expansion"
+advisory = "GHSA-3jxr-9vmj-r5cp"
+severidade = "high"
+faixa = ">=3.0.0 <5.0.7"
+classe = "nao_aplicavel"
+motivo = "DoS por expansao de tempo exponencial em nao-expansiveis consecutivos. `npm ls --omit=dev brace-expansion` -> ausente: transitiva de ferramenta de build. Nao roda em producao nem no navegador."
+remover_quando = "brace-expansion entrar na arvore de producao"
+responsavel = "TI/Dev"
+data = "2026-09-02"
+
+[[frontend]]
+pacote = "brace-expansion"
+advisory = "GHSA-jxxr-4gwj-5jf2"
+severidade = "moderate"
+faixa = ">=5.0.0 <5.0.6"
+classe = "nao_aplicavel"
+motivo = "Range numerico grande derrota a protecao documentada de `max`. `npm ls --omit=dev brace-expansion` -> ausente: transitiva de ferramenta de build. Nao roda em producao nem no navegador."
+remover_quando = "brace-expansion entrar na arvore de producao"
+responsavel = "TI/Dev"
+data = "2026-09-02"
+
+[[frontend]]
+pacote = "brace-expansion"
+advisory = "GHSA-mh99-v99m-4gvg"
+severidade = "high"
+faixa = ">=4.0.0 <5.0.8"
+classe = "nao_aplicavel"
+motivo = "DoS por expansao sem limite de tamanho, ate estourar memoria. `npm ls --omit=dev brace-expansion` -> ausente: transitiva de ferramenta de build. Nao roda em producao nem no navegador."
+remover_quando = "brace-expansion entrar na arvore de producao"
+responsavel = "TI/Dev"
+data = "2026-09-02"
+
+[[frontend]]
+pacote = "brace-expansion"
+advisory = "GHSA-rgw5-rvv9-x895"
+severidade = "high"
+faixa = "<1.1.18"
+classe = "nao_aplicavel"
+motivo = "DoS por arrays intermediarios sem limite, furando a correcao anterior. `npm ls --omit=dev brace-expansion` -> ausente: transitiva de ferramenta de build. Nao roda em producao nem no navegador."
+remover_quando = "brace-expansion entrar na arvore de producao"
+responsavel = "TI/Dev"
+data = "2026-09-02"
+
+[[frontend]]
+pacote = "browserslist"
+advisory = "GHSA-73wf-gq98-2v4g"
+severidade = "high"
+faixa = "<=4.28.6"
+classe = "nao_aplicavel"
+motivo = "Crash e escrita em prototype a partir de browserslist-stats nao confiavel. `npm ls --omit=dev browserslist` -> ausente; `grep -rn browserslist src/` -> vazio. So no build."
+remover_quando = "browserslist passar a ser dependencia de producao"
+responsavel = "TI/Dev"
+data = "2026-09-02"
+
+[[frontend]]
+pacote = "browserslist"
+advisory = "GHSA-c83g-rgw3-j3cx"
+severidade = "high"
+faixa = "<=4.28.6"
+classe = "nao_aplicavel"
+motivo = "Crescimento de memoria sem limite: o cache de consultas nunca e esvaziado. `npm ls --omit=dev browserslist` -> ausente; `grep -rn browserslist src/` -> vazio. So no build."
+remover_quando = "browserslist passar a ser dependencia de producao"
+responsavel = "TI/Dev"
+data = "2026-09-02"
+
+[[frontend]]
+pacote = "form-data"
+advisory = "GHSA-hmw2-7cc7-3qxx"
+severidade = "high"
+faixa = ">=4.0.0 <4.0.6"
+classe = "nao_aplicavel"
+motivo = "Injecao CRLF por nomes de campo multipart sem escape. CORRIGE A JUSTIFICATIVA ANTERIOR: `npm ls --omit=dev form-data` NAO devolve ausente -- o pacote esta sim na arvore de producao, sob o axios. O que o tira do bundle e outra coisa: o campo `browser` do axios mapeia `./lib/platform/node/classes/FormData.js` -> `./lib/helpers/null.js`. O navegador usa o FormData NATIVO (attachmentService.ts:34, userService.ts:191)."
+remover_quando = "o axios passar a rodar em Node dentro deste projeto"
+responsavel = "TI/Dev"
+data = "2026-09-02"
+
+[[frontend]]
+pacote = "js-yaml"
+advisory = "GHSA-52cp-r559-cp3m"
+severidade = "high"
+faixa = ">=4.0.0 <4.3.0"
+classe = "nao_aplicavel"
+motivo = "Cadeia de merge keys forca consumo quadratico de CPU. `npm ls --omit=dev js-yaml` -> ausente: transitiva de ferramenta de build. O front nao faz parse de YAML em runtime."
+remover_quando = "o front passar a processar YAML no navegador"
+responsavel = "TI/Dev"
+data = "2026-09-02"
+
+[[frontend]]
+pacote = "js-yaml"
+advisory = "GHSA-5p4m-2wfm-xmqj"
+severidade = "high"
+faixa = ">=4.0.0 <4.3.1"
+classe = "nao_aplicavel"
+motivo = "Consumo quadratico de CPU na resolucao de !!omap. `npm ls --omit=dev js-yaml` -> ausente: transitiva de ferramenta de build. O front nao faz parse de YAML em runtime."
+remover_quando = "o front passar a processar YAML no navegador"
+responsavel = "TI/Dev"
+data = "2026-09-02"
+
+[[frontend]]
+pacote = "js-yaml"
+advisory = "GHSA-h67p-54hq-rp68"
+severidade = "moderate"
+faixa = ">=4.0.0 <=4.1.1"
+classe = "nao_aplicavel"
+motivo = "DoS quadratico em merge key com aliases repetidos. `npm ls --omit=dev js-yaml` -> ausente: transitiva de ferramenta de build. O front nao faz parse de YAML em runtime."
+remover_quando = "o front passar a processar YAML no navegador"
+responsavel = "TI/Dev"
+data = "2026-09-02"
+
+[[frontend]]
+pacote = "nanoid"
+advisory = "GHSA-28wg-ghj8-5hjv"
+severidade = "high"
+faixa = "<3.3.16"
+classe = "nao_aplicavel"
+motivo = "Geradores nao seguros entram em laco infinito com tamanho negativo. `npm ls --omit=dev nanoid` -> ausente: entra pelo postcss, em tempo de build."
+remover_quando = "o front passar a usar nanoid diretamente"
+responsavel = "TI/Dev"
+data = "2026-09-02"
+
+[[frontend]]
+pacote = "nanoid"
+advisory = "GHSA-2v37-7h3g-55p8"
+severidade = "high"
+faixa = "<3.3.18"
+classe = "nao_aplicavel"
+motivo = "Geradores customizados entram em laco infinito quando o tamanho e zero. `npm ls --omit=dev nanoid` -> ausente: entra pelo postcss, em tempo de build."
+remover_quando = "o front passar a usar nanoid diretamente"
+responsavel = "TI/Dev"
+data = "2026-09-02"
+
+[[frontend]]
+pacote = "nanoid"
+advisory = "GHSA-xwg4-73v4-xw9w"
+severidade = "high"
+faixa = "<3.3.12"
+classe = "nao_aplicavel"
+motivo = "Integer overflow / wraparound. `npm ls --omit=dev nanoid` -> ausente: entra pelo postcss, em tempo de build."
+remover_quando = "o front passar a usar nanoid diretamente"
+responsavel = "TI/Dev"
+data = "2026-09-02"
+
+[[frontend]]
+pacote = "postcss"
+advisory = "GHSA-fxqj-rqcc-2cmp"
+severidade = "moderate"
+faixa = "<=8.5.22"
+classe = "nao_aplicavel"
+motivo = "Correcao incompleta da anterior: sourceMappingURL controlado pelo atacante. `npm ls --omit=dev postcss` -> ausente: tailwind/autoprefixer, tempo de build."
+remover_quando = "postcss passar a rodar em runtime no navegador"
+responsavel = "TI/Dev"
+data = "2026-09-02"
+
+[[frontend]]
+pacote = "postcss"
+advisory = "GHSA-r28c-9q8g-f849"
+severidade = "high"
+faixa = "<=8.5.17"
+classe = "nao_aplicavel"
+motivo = "Path traversal no auto-carregamento de source map anterior (sourceMappingURL). `npm ls --omit=dev postcss` -> ausente: tailwind/autoprefixer, tempo de build."
+remover_quando = "postcss passar a rodar em runtime no navegador"
+responsavel = "TI/Dev"
+data = "2026-09-02"
+
+[[frontend]]
+pacote = "postcss-selector-parser"
+advisory = "GHSA-w9m9-85wc-3x92"
+severidade = "low"
+faixa = ">=6.1.0 <6.1.3"
+classe = "nao_aplicavel"
+motivo = "DoS por recursao de AST sem controle. `npm ls --omit=dev postcss-selector-parser` -> ausente: transitiva do postcss, tempo de build."
+remover_quando = "junto com o postcss"
+responsavel = "TI/Dev"
+data = "2026-09-02"
+
+[[frontend]]
+pacote = "react-router"
+advisory = "GHSA-2j2x-hqr9-3h42"
+severidade = "moderate"
+faixa = ">=7.0.0 <7.14.1"
+classe = "aceito_com_prazo"
+motivo = "Redirect de mesma origem com caminho iniciado por // vira open redirect. ALCANCA o SPA, ao contrario dos outros oito deste pacote. O sink existe: AuthGuard.tsx:22 grava `location.pathname` em `state.from` e LoginPage.tsx:86,111,148 faz `navigate(from)`. O que fecha hoje e o casamento de rota: caminho iniciado por // ou \\\\ nao casa com nenhuma rota sob o AuthGuard e cai no `path=\"*\"` (App.tsx:80), que nao grava `from`. Os outros destinos dinamicos sao internos (`/kb/${id}` em KBFormPage.tsx:223,360 e `item.path` em Sidebar.tsx:230), e nenhum redirect vem de query string (`grep -rnE \"searchParams.get\\('(next|redirect|returnUrl|from)\" src/` -> vazio). Provado em src/test/components/guards.test.tsx. O argumento depende da tabela de rotas continuar sem curinga sob o AuthGuard: por isso `aceito_com_prazo`, e nao `nao_aplicavel`."
+remover_quando = "na subida do react-router para >= 7.18.2, que fecha os dez avisos de uma vez; antes disso, se surgir rota curinga sob o AuthGuard ou destino de redirect vindo de query string"
+responsavel = "TI/Dev"
+data = "2026-09-02"
+
+[[frontend]]
+pacote = "react-router"
+advisory = "GHSA-337j-9hxr-rhxg"
+severidade = "moderate"
+faixa = ">=6.4.0 <7.18.0"
+classe = "nao_aplicavel"
+motivo = "Injecao de construtor arbitrario em deserializeErrors(), que so roda no data router com single fetch. `main.tsx:3,9` monta BrowserRouter + <Routes>; `grep -rnE 'createBrowserRouter|RouterProvider|useFetcher|useLoaderData|loader:' src/` -> sem data router. Nao existe servidor de react-router: producao e nginx servindo o dist/."
+remover_quando = "o projeto migrar para createBrowserRouter com loaders/actions, ou adotar RSC"
+responsavel = "TI/Dev"
+data = "2026-09-02"
+
+[[frontend]]
+pacote = "react-router"
+advisory = "GHSA-49rj-9fvp-4h2h"
+severidade = "high"
+faixa = ">=7.0.0 <=7.14.1"
+classe = "nao_aplicavel"
+motivo = "turbo-stream vendorizado permite invocacao arbitraria de construtor; so e usado no modo framework. `main.tsx:3,9` monta BrowserRouter + <Routes>; `grep -rnE 'createBrowserRouter|RouterProvider|useFetcher|useLoaderData|loader:' src/` -> sem data router. Nao existe servidor de react-router: producao e nginx servindo o dist/."
+remover_quando = "o projeto migrar para createBrowserRouter com loaders/actions, ou adotar RSC"
+responsavel = "TI/Dev"
+data = "2026-09-02"
+
+[[frontend]]
+pacote = "react-router"
+advisory = "GHSA-84g9-w2xq-vcv6"
+severidade = "low"
+faixa = ">=7.12.0 <7.15.1"
+classe = "nao_aplicavel"
+motivo = "CSRF por requisicao de documento PUT/PATCH/DELETE -- requisicao de documento so existe no modo framework. `main.tsx:3,9` monta BrowserRouter + <Routes>; `grep -rnE 'createBrowserRouter|RouterProvider|useFetcher|useLoaderData|loader:' src/` -> sem data router. Nao existe servidor de react-router: producao e nginx servindo o dist/."
+remover_quando = "o projeto migrar para createBrowserRouter com loaders/actions, ou adotar RSC"
+responsavel = "TI/Dev"
+data = "2026-09-02"
+
+[[frontend]]
+pacote = "react-router"
+advisory = "GHSA-8x6r-g9mw-2r78"
+severidade = "high"
+faixa = ">=7.0.0 <7.15.0"
+classe = "nao_aplicavel"
+motivo = "DoS por expansao de caminho sem limite no endpoint __manifest, servido pelo modo framework. `main.tsx:3,9` monta BrowserRouter + <Routes>; `grep -rnE 'createBrowserRouter|RouterProvider|useFetcher|useLoaderData|loader:' src/` -> sem data router. Nao existe servidor de react-router: producao e nginx servindo o dist/."
+remover_quando = "o projeto migrar para createBrowserRouter com loaders/actions, ou adotar RSC"
+responsavel = "TI/Dev"
+data = "2026-09-02"
+
+[[frontend]]
+pacote = "react-router"
+advisory = "GHSA-chx6-hx7r-mcp5"
+severidade = "high"
+faixa = ">=7.0.0 <7.18.0"
+classe = "nao_aplicavel"
+motivo = "DoS nao autenticado por casamento de rota ineficiente NO SERVIDOR do modo framework. `main.tsx:3,9` monta BrowserRouter + <Routes>; `grep -rnE 'createBrowserRouter|RouterProvider|useFetcher|useLoaderData|loader:' src/` -> sem data router. Nao existe servidor de react-router: producao e nginx servindo o dist/."
+remover_quando = "o projeto migrar para createBrowserRouter com loaders/actions, ou adotar RSC"
+responsavel = "TI/Dev"
+data = "2026-09-02"
+
+[[frontend]]
+pacote = "react-router"
+advisory = "GHSA-h8fp-f39c-q6mh"
+severidade = "moderate"
+faixa = ">=7.11.0 <7.18.0"
+classe = "nao_aplicavel"
+motivo = "XSS no RSCErrorHandler por falta de validacao de protocolo -- codigo de RSC. `main.tsx:3,9` monta BrowserRouter + <Routes>; `grep -rnE 'createBrowserRouter|RouterProvider|useFetcher|useLoaderData|loader:' src/` -> sem data router. Nao existe servidor de react-router: producao e nginx servindo o dist/."
+remover_quando = "o projeto migrar para createBrowserRouter com loaders/actions, ou adotar RSC"
+responsavel = "TI/Dev"
+data = "2026-09-02"
+
+[[frontend]]
+pacote = "react-router"
+advisory = "GHSA-qwww-vcr4-c8h2"
+severidade = "high"
+faixa = ">=7.12.0 <7.18.2"
+classe = "nao_aplicavel"
+motivo = "CSRF no modo RSC executa action antes da resposta 400. `main.tsx:3,9` monta BrowserRouter + <Routes>; `grep -rnE 'createBrowserRouter|RouterProvider|useFetcher|useLoaderData|loader:' src/` -> sem data router. Nao existe servidor de react-router: producao e nginx servindo o dist/."
+remover_quando = "o projeto migrar para createBrowserRouter com loaders/actions, ou adotar RSC"
+responsavel = "TI/Dev"
+data = "2026-09-02"
+
+[[frontend]]
+pacote = "react-router"
+advisory = "GHSA-rxv8-25v2-qmq8"
+severidade = "high"
+faixa = ">=7.0.0 <7.14.0"
+classe = "nao_aplicavel"
+motivo = "DoS por entrada refletida no single fetch, que e do modo framework. `main.tsx:3,9` monta BrowserRouter + <Routes>; `grep -rnE 'createBrowserRouter|RouterProvider|useFetcher|useLoaderData|loader:' src/` -> sem data router. Nao existe servidor de react-router: producao e nginx servindo o dist/."
+remover_quando = "o projeto migrar para createBrowserRouter com loaders/actions, ou adotar RSC"
+responsavel = "TI/Dev"
+data = "2026-09-02"
+
+[[frontend]]
+pacote = "react-router"
+advisory = "GHSA-wrjc-x8rr-h8h6"
+severidade = "moderate"
+faixa = ">=6.0.0 <7.18.0"
+classe = "aceito_com_prazo"
+motivo = "Open redirect por barra invertida em <Link> e useNavigate. ALCANCA o SPA, ao contrario dos outros oito deste pacote. O sink existe: AuthGuard.tsx:22 grava `location.pathname` em `state.from` e LoginPage.tsx:86,111,148 faz `navigate(from)`. O que fecha hoje e o casamento de rota: caminho iniciado por // ou \\\\ nao casa com nenhuma rota sob o AuthGuard e cai no `path=\"*\"` (App.tsx:80), que nao grava `from`. Os outros destinos dinamicos sao internos (`/kb/${id}` em KBFormPage.tsx:223,360 e `item.path` em Sidebar.tsx:230), e nenhum redirect vem de query string (`grep -rnE \"searchParams.get\\('(next|redirect|returnUrl|from)\" src/` -> vazio). Provado em src/test/components/guards.test.tsx. O argumento depende da tabela de rotas continuar sem curinga sob o AuthGuard: por isso `aceito_com_prazo`, e nao `nao_aplicavel`."
+remover_quando = "na subida do react-router para >= 7.18.2, que fecha os dez avisos de uma vez; antes disso, se surgir rota curinga sob o AuthGuard ou destino de redirect vindo de query string"
+responsavel = "TI/Dev"
+data = "2026-09-02"
+
+[[frontend]]
+pacote = "vite"
+advisory = "GHSA-fx2h-pf6j-xcff"
+severidade = "high"
+faixa = "<=6.4.2"
+classe = "aceito_com_prazo"
+motivo = "Bypass do `server.fs.deny` por caminho alternativo do Windows. Servidor de DESENVOLVIMENTO, e so no Windows. Producao e nginx servindo o dist/ -- o vite nao roda la (`npm ls --omit=dev vite` -> ausente). ATENCAO: afeta quem roda `npm run dev` no Windows, que e o caso desta equipe. Nao e 'nao aplicavel': e risco aceito na maquina de desenvolvimento."
+remover_quando = "vite > 6.4.2 com a correcao; enquanto isso, nao expor o dev server na rede (o host padrao segue localhost, sem --host)"
+responsavel = "TI/Dev"
+data = "2026-09-02"
+
+[[frontend]]
+pacote = "vite"
+advisory = "GHSA-v6wh-96g9-6wx3"
+severidade = "moderate"
+faixa = "<=6.4.2"
+classe = "aceito_com_prazo"
+motivo = "Vazamento de hash NTLMv2 pelo launch-editor via caminho UNC no Windows; exige clique no overlay de erro. Servidor de DESENVOLVIMENTO, e so no Windows. Producao e nginx servindo o dist/ -- o vite nao roda la (`npm ls --omit=dev vite` -> ausente). ATENCAO: afeta quem roda `npm run dev` no Windows, que e o caso desta equipe. Nao e 'nao aplicavel': e risco aceito na maquina de desenvolvimento."
+remover_quando = "vite > 6.4.2 com a correcao; enquanto isso, nao expor o dev server na rede (o host padrao segue localhost, sem --host)"
+responsavel = "TI/Dev"
+data = "2026-09-02"
+
+[[frontend]]
+pacote = "ws"
+advisory = "GHSA-58qx-3vcg-4xpx"
+severidade = "moderate"
+faixa = ">=8.0.0 <8.20.1"
+classe = "nao_aplicavel"
+motivo = "Disclosure de memoria nao inicializada. `npm ls --omit=dev ws` -> ausente: entra pelo HMR do vite. O chat usa o WebSocket NATIVO do navegador (ChatPanel.tsx:231), nao este pacote."
+remover_quando = "o front passar a depender de ws em runtime"
+responsavel = "TI/Dev"
+data = "2026-09-02"
+
+[[frontend]]
+pacote = "ws"
+advisory = "GHSA-96hv-2xvq-fx4p"
+severidade = "high"
+faixa = ">=8.0.0 <8.21.0"
+classe = "nao_aplicavel"
+motivo = "DoS por exaustao de memoria com fragmentos e chunks minusculos. `npm ls --omit=dev ws` -> ausente: entra pelo HMR do vite. O chat usa o WebSocket NATIVO do navegador (ChatPanel.tsx:231), nao este pacote."
+remover_quando = "o front passar a depender de ws em runtime"
+responsavel = "TI/Dev"
+data = "2026-09-02"

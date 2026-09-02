@@ -78,6 +78,19 @@ jobs:
           # servico acima -- e um banco proprio, nao o DATABASE_URL da app.
           TEST_POSTGRES_URL: postgresql://postgres:postgres@localhost:5432/helphs_testes
 
+      # Falha para vulnerabilidade NOVA, fora do baseline. Nao usa
+      # continue-on-error de proposito: gate que nao barra nada e teatro, e este
+      # projeto ja gastou um dia inteiro caçando verde decorativo.
+      #
+      # O baseline vive em .github/dependencias-conhecidas.toml, com o motivo e
+      # a condicao de remocao de cada item. O script recusa entrada sem
+      # justificativa -- ignorar sem escrever por que e o que ele existe para
+      # impedir.
+      #
+      # Roda por ultimo: se cair, o resultado de lint e teste ja apareceu.
+      - name: Auditoria de dependencias
+        run: python .github/scripts/verifica_dependencias.py --lado backend
+
   # ── Frontend ───────────────────────────────────────────────
   frontend:
     name: Frontend (Node)
@@ -118,3 +131,11 @@ jobs:
       - name: Build
         working-directory: frontend
         run: npm run build
+
+      # Mesmo gate, outro lado. Reaproveita o node_modules que o `npm ci` acima
+      # ja instalou -- nao ha segundo install.
+      #
+      # `python3` sem setup-python: o runner ubuntu ja traz 3.12, e o script so
+      # precisa de tomllib, que e stdlib desde o 3.11.
+      - name: Auditoria de dependencias
+        run: python3 .github/scripts/verifica_dependencias.py --lado frontend

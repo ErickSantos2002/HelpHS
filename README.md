@@ -83,10 +83,43 @@ está em [desenvolvimento-local.md](desenvolvimento-local.md).
 ## Testes
 
 ```bash
-cd backend  && pytest                # 884 testes, gate de 80% de cobertura
-cd frontend && npm test              # 333 testes (Vitest)
+cd backend  && pytest                # gate de 80% de cobertura
+cd frontend && npm test              # Vitest
 cd frontend && npx playwright test   # e2e — exige backend na 8001
+
+python .github/scripts/verifica_dependencias.py   # auditoria de dependências
 ```
+
+> As contagens de teste não ficam mais escritas aqui de propósito: número
+> mantido à mão envelhece a cada teste novo. Duas vezes em 24 horas este README
+> ficou desatualizado. Quem quiser o número corrente, roda o comando.
+
+### Auditoria de dependências
+
+O gate falha quando aparece vulnerabilidade **nova**, fora do baseline em
+`.github/dependencias-conhecidas.toml`. Ele roda nos dois jobs do CI, sem
+`continue-on-error`.
+
+Quebrou o CI? A pergunta **não** é como fazer passar. É: *esse código é
+alcançável no HelpHS?*
+
+- **Alcançável** → conserte. Suba o pacote, ou mitigue na aplicação. Só entra no
+  baseline depois, com a evidência.
+- **Inalcançável** → acrescente ao baseline, e o `motivo` precisa citar o
+  **comando** que provou. "Parece não usado" não passa — o script recusa entrada
+  sem justificativa, e entrada obsoleta também derruba o CI, para o arquivo não
+  virar lista que só cresce.
+
+**Uma linha por advisory, não por pacote.** No backend a chave é o `id` do
+pip-audit; no front é `pacote` + `advisory` (o GHSA). Indexar por pacote deixava
+passar advisory **novo** num pacote já listado — justo o que o gate existe para
+pegar — e fazia uma justificativa escrita para um aviso ser herdada por todos os
+outros do mesmo pacote. Pacote sinalizado só por herança (`react-router-dom` →
+`react-router`) não entra: o aviso é o do pacote de baixo, e o script imprime
+esses nomes a cada rodada.
+
+Ignore novo é aprovado no code review do PR que mexer no baseline. Os testes do
+gate estão em `backend/tests/test_gate_dependencias.py` e rodam no `pytest`.
 
 O `pytest` roda sem preparo: o `conftest.py` fixa o ambiente e gera chaves JWT
 efêmeras. Cinco testes exercitam as agregações do dashboard contra **PostgreSQL

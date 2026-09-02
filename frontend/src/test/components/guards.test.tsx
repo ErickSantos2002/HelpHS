@@ -115,6 +115,73 @@ describe("AuthGuard", () => {
   });
 });
 
+// ── Destino do redirect pós-login ─────────────────────────────
+
+/**
+ * Evidência das entradas GHSA-wrjc-x8rr-h8h6 e GHSA-2j2x-hqr9-3h42 do
+ * `.github/dependencias-conhecidas.toml` — os dois open redirects do
+ * react-router que ALCANÇAM um SPA clássico. O sink existe aqui:
+ * `AuthGuard` grava `location.pathname` em `state.from`, e o login faz
+ * `navigate(from)`. Um `from` começando com `//` vira URL
+ * protocolo-relativa e leva o usuário para outro domínio.
+ *
+ * O que fecha hoje é o casamento de rota: caminho hostil não casa com
+ * rota nenhuma sob o guard e cai no `path="*"`, que não grava `from`.
+ * Isso depende da tabela de rotas — daí o teste. Se alguém puser uma
+ * rota curinga sob o AuthGuard, é aqui que quebra.
+ *
+ * Limite honesto: o `MemoryRouter` não passa pela normalização de URL do
+ * navegador. A barra invertida é testada crua e na forma que o navegador
+ * entregaria (já convertida para `//`).
+ */
+describe("AuthGuard: destino do retorno pós-login", () => {
+  function destinoDeRetorno(rotaInicial: string) {
+    mockUseAuth.mockReturnValue(autenticado(null));
+    let capturado: string | undefined;
+
+    function EspiaLogin() {
+      capturado = (useLocation().state as { from?: string })?.from;
+      return <div>tela de login</div>;
+    }
+
+    render(
+      <MemoryRouter initialEntries={[rotaInicial]}>
+        <Routes>
+          <Route path="/login" element={<EspiaLogin />} />
+          <Route path="*" element={<div>não encontrado</div>} />
+          <Route element={<AuthGuard />}>
+            <Route path="/tickets" element={<div>lista</div>} />
+            <Route path="/tickets/:id" element={<div>detalhe</div>} />
+          </Route>
+        </Routes>
+      </MemoryRouter>,
+    );
+
+    // O `?? "/"` é o mesmo default de LoginPage.tsx:86 — o teste afirma
+    // sobre o valor que o `navigate()` receberia de fato.
+    return capturado ?? "/";
+  }
+
+  it("captura o caminho interno quando a rota é legítima", () => {
+    // Controle positivo: sem ele, os casos abaixo passariam mesmo se o
+    // helper nunca capturasse nada.
+    expect(destinoDeRetorno("/tickets/abc")).toBe("/tickets/abc");
+  });
+
+  // Só formas que chegam ao router começando de fato com `//` ou `/\` — as
+  // que a mutação (mover o curinga para dentro do guard) derruba. Caminho
+  // com `..` ficou de fora de propósito: ele passa nesta asserção por
+  // começar com `/t`, e afirmar segurança ali seria afirmar o que este
+  // teste não prova.
+  it.each(["//evil.com", "//evil.com/tickets", "/\\evil.com", "///evil.com"])(
+    "não devolve %s como destino — seria redirect externo",
+    (hostil) => {
+      // Um só `/`, e o próximo caractere não pode ser `/` nem `\`.
+      expect(destinoDeRetorno(hostil)).toMatch(/^\/(?![/\\])/);
+    },
+  );
+});
+
 // ── RoleGuard ─────────────────────────────────────────────────
 
 function renderRoleGuard(roles: AuthUser["role"][]) {
