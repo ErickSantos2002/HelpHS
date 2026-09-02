@@ -13,20 +13,30 @@
 | Origem | `C:\Users\ti_rickelme\Documents\GitHub\design-system` |
 | Tokens | 180 custom properties em 6 arquivos |
 | Copiado em | 02/09/2026 — Fase 1 da adoção |
-| Pacote emendado em | **02/09/2026 — E1: `.dark` ganha `--text-on-primary`.** Registro em `design-system/EMENDAS.md`; decisão em `COMPARTILHADO/DECISOES.md` (D10). Recopiados os sete arquivos na mesma data. |
+| Pacote emendado em | **02/09/2026 — E1** (`.dark` ganha `--text-on-primary`) e **E2** (botões semânticos ganham degrau próprio; `--on-tint-neutral` e `--on-tint-warning` passam a AA). Registro em `design-system/EMENDAS.md`; decisões em `COMPARTILHADO/DECISOES.md` (D10 e E2). Recopiados os sete arquivos a cada emenda. |
 
 ## Hashes (SHA256)
 
 Conferidos com `Get-FileHash` contra o pacote no momento da cópia. Os sete
 arquivos são **idênticos ao original** — sem cabeçalho de origem, sem
-reformatação, sem uma vírgula de diferença. Foi decisão explícita
+reformatação, sem uma vírgula de diferença.
+
+> ⚠️ **Neste commit, seis dos sete.** O `typography.css` do pacote mudou no
+> mesmo dia (auto-hospedagem da fonte, `D1-a`), por outra sessão e por outro
+> motivo. Não entra junto da E2: vem no commit seguinte, com os doze `.woff2`
+> que ele passa a exigir. Até lá o `Compare-Object` acusa **uma** divergência,
+> nesse arquivo, e ela é conhecida — o hash acima é o da cópia local de hoje,
+> não o do pacote. Sem os arquivos de fonte, adotá-lo sozinho derruba a
+> tipografia em produção **em silêncio**: o `dist` sai sem nenhum `.woff2`,
+> o `url(../fonts/…)` chega literal ao bundle e o `font-display: swap` esconde
+> o 404. Medido, não suposto. Foi decisão explícita
 (D3 em `COMPARTILHADO/DECISOES.md`): a seção 5.2 do prompt mestre pede um
 comentário de origem no topo de cada arquivo, mas a seção 33 e o operador pedem
 conferência por hash — e as duas coisas não cabem juntas. O aviso mora aqui.
 
 ```
 base.css         BDD047CE432E74B33FA7F752DA08CF025419E83EA18485BD947C889C0AC1C221
-colors.css       7EC44E9A06430507007468468E0A254C770BE3F8C9FF4B9432484F07CE430860
+colors.css       696ABC6D1C468B17D4510B106517AEF37704663E06E008C38FC109FEEC2A5618
 motion.css       C70D51A982AE0B91BD53ECE150D8D16E0E70BEF9CA59586541A9A7177228478E
 shape.css        7BCFBBC585D3EA8C7F689A27EEB3AE13DE0C2A9DCC3C6CC0C8F41D440D193F7D
 spacing.css      C093B261C6893A893A418CDF64798555326D4586A8ADB37CC7ECA457FABAE420

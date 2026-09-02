@@ -116,6 +116,16 @@
   --focus-ring: var(--color-primary-600);
   --overlay: rgb(0 0 0 / 0.6);
 
+  /* E2 — botões semânticos: rampa emerald/amber do Tailwind, mesma fonte dos degraus existentes */
+  --color-success-800: #065f46;
+  --color-warning-800: #92400e;
+  --action-danger: var(--color-danger-600);           /* branco: 4,83:1 */
+  --action-danger-hover: var(--color-danger-700);     /* branco: 6,47:1 */
+  --action-success: var(--color-success-700);         /* branco: 5,48:1 */
+  --action-success-hover: var(--color-success-800);   /* branco: ~7,7:1 */
+  --text-on-danger: var(--color-white);
+  --text-on-success: var(--color-white);
+
   /* Toast — consumidos em JS pela biblioteca (react-hot-toast no ChamadosHS,
    * sonner no HelpHS), que recebe um objeto de estilo e não enxerga classe. */
   --toast-bg: var(--color-white);
@@ -142,9 +152,9 @@
   --on-tint-primary: var(--color-primary-700);
   --on-tint-success: var(--color-success-700);
   --on-tint-danger: var(--color-danger-700);
-  --on-tint-warning: var(--color-warning-700);
+  --on-tint-warning: var(--color-warning-800);        /* sobre a tinta âmbar: 6,3:1 (era 4,47) */
   --on-tint-info: var(--color-info-700);
-  --on-tint-neutral: var(--text-muted);
+  --on-tint-neutral: var(--color-slate-600);          /* sobre slate-100: 6,9:1 (era 4,34) */
 }
 
 /* ── Tema escuro ──────────────────────────────────────────────
