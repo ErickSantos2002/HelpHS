@@ -829,6 +829,88 @@ Decisões:
 
 # Pendências conhecidas
 
+## Migrations: a política do caminho de volta
+
+As migrations rodam **sozinhas no boot do container** (`start.sh`: `alembic
+upgrade head` → seeds → uvicorn). Migration quebrada não é teste vermelho: é a
+API que não sobe, em produção, no meio de um deploy. Por isso o `downgrade`
+importa mesmo que quase nunca seja usado — no dia em que for, será sob pressão.
+
+Estas regras vieram de uma medição de 02/09/2026, não de livro. Até aquele dia
+nenhum teste tinha exercitado um `downgrade`.
+
+**1. Tipo criado no upgrade é derrubado no downgrade.** `sa.Enum` dentro de
+`create_table` emite `CREATE TYPE`; `drop_table` **não** emite `DROP TYPE`.
+Índice e constraint somem em cascata com a tabela — tipo nomeado não some. Foi
+assim que a `75ec9d264ccb` deixou nove tipos órfãos por cinco meses. O modelo é
+a `n4i5j6k7l8m9`: `op.execute("DROP TYPE IF EXISTS calendareventtype")`.
+
+**2. `alembic downgrade` sair com código 0 não prova que o banco voltou.** Foi
+exatamente o que aconteceu: exit 0, banco sujo, e o erro só aparecendo no
+`upgrade head` seguinte com `DuplicateObjectError: type "slalevel" already
+exists` — ou seja, no boot do container, depois de um rollback, longe da causa.
+Quem prova é `tests/test_migrations_postgres.py`, comparando o schema depois do
+ciclo com o da subida limpa.
+
+**3. Downgrade não apaga dado que a migration não criou.** A `r8m9n0o1p2q3`
+começa o `downgrade` com `DELETE FROM ticket_history WHERE user_id IS NULL` para
+poder repor o `NOT NULL` da coluna. Só que essas linhas não são dela: são a
+trilha de auditoria que a aplicação grava para ação do sistema
+(`ticket_lifecycle.py:115`, o fechamento automático e a Helô). Um rollback de
+emergência apaga a prova do que o sistema fez, sem avisar, e o re-upgrade não
+traz nada de volta. Diante desse caso, **aborte o downgrade com mensagem** em
+vez de apagar calado — a limpeza é decisão humana. E vale a regra que já existe
+no projeto: correção de dado histórico vai em **script avulso**, nunca em
+migration.
+
+**4. Downgrade vazio precisa de motivo escrito, e o motivo tem que ser uma
+impossibilidade.** O caso aceito é a `b2c3d4e5f6a7`: o PostgreSQL não remove
+valor de enum, ponto. "Não vale a pena" e "ninguém vai usar" não são motivo — se
+o caminho de volta não existe, quem for reverter precisa ler isso **antes**, no
+arquivo, e não descobrir no meio do incidente.
+
+**5. Migration com `server_default` diz o que acontece no re-upgrade.** A
+`z6u7v8w9x0y1` apaga a coluna dos interruptores da IA no downgrade; o re-upgrade
+recria tudo com `TRUE`. O estado não volta neutro — volta **ligado**. Com a IA
+desligada por decisão de LGPD, um ciclo de rollback e resubida religaria a IA
+para quem a tinha desativado. Quem escrever `server_default` responde essa
+pergunta na docstring.
+
+**6. Constraint recriada no downgrade pode não caber no dado de hoje.** A
+`x4s5t6u7v8w9` recria um índice UNIQUE parcial sobre dado que a chave nova
+permite duplicar. O downgrade que funciona no banco vazio do teste falha no
+banco cheio da produção — que é o único que importa nesse momento.
+
+**7. A docstring não promete o que o SQL não faz.** A `t0o1p2q3r4s5` diz
+"escolhendo o equipamento mais antigo de cada chamado" e o SQL ordena por
+`equipment_id`, que é UUID v4 e não carrega cronologia nenhuma. Quem ler a
+docstring para decidir um rollback decide sobre uma promessa falsa.
+
+**8. Antes de rodar rollback em produção, backup.** `downgrade` é rollback de
+**estrutura**. De dado, só o backup — e 19 das 27 migrations destroem dado ao
+descer.
+
+### O que se perde ao descer — consultar antes de um rollback
+
+| Migration | O que some |
+|---|---|
+| `75ec9d264ccb` | tudo: o banco inteiro |
+| `j0e1f2g3h4i5` | hierarquia grupo → empresa → cliente, com CNPJ e endereço |
+| `v2q3r4s5t6u7` | vínculos aparelho↔usuário que não vêm de `owner_id` |
+| `y5t6u7v8w9x0` | segredo TOTP de todo mundo que aderiu ao segundo fator |
+| `g7b8c9d0e1f2` | o que o cliente digitou no onboarding, e o flag de concluído |
+| `d4e5f6a7b8c9` | cadastro de etiquetas e todo vínculo etiqueta↔chamado |
+| `f6a7b8c9d0e1` | árvore de comentários dos artigos da base de conhecimento |
+| `k1f2g3h4i5j6` · `c3d4e5f6a7b8` | notas internas de chamado e de técnico |
+| `i9d0e1f2g3h4` | `resolution_note`: como cada chamado foi resolvido |
+| `e5f6a7b8c9d0` | observações escritas pelos clientes |
+| `o5j6k7l8m9n0` | respostas rápidas, com o texto inteiro |
+| `p6k7l8m9n0o1` | vínculo artigo↔produto — e a ausência de linha **significa** "vale para todos" |
+| `q7l8m9n0o1p2` | quem confirmou e-mail e quando |
+| `a1b2c3d4e5f6` | resumos de conversa gerados pela IA |
+| `h8c9d0e1f2g3` | CEP e endereço da empresa |
+| `r8m9n0o1p2q3` | ⚠️ trilha de auditoria de ação do sistema (ver regra 3) |
+
 ## Dívidas com gatilho — escolhas conscientes, não esquecimentos
 
 Saíram da auditoria de agosto/2026. Cada uma foi decidida com o custo na mão;
