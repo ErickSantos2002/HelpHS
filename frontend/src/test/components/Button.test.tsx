@@ -2,6 +2,7 @@ import { render, screen } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { describe, expect, it, vi } from "vitest";
 import { Button } from "../../components/ui/Button";
+import { AA, contraste } from "../helpers/contraste";
 
 describe("Button", () => {
   it("renders children", () => {
@@ -42,7 +43,7 @@ describe("Button", () => {
 
   it("applies danger variant class", () => {
     render(<Button variant="danger">Excluir</Button>);
-    expect(screen.getByRole("button")).toHaveClass("bg-danger");
+    expect(screen.getByRole("button")).toHaveClass("bg-action-danger");
   });
 
   // ── Fase 7 — alinhamento com DS/components/core/Button ────────────────
@@ -73,25 +74,101 @@ describe("Button", () => {
       expect(btn).toHaveClass("text-conteudo-muted");
     });
 
-    it("danger fica como estava: fundo --color-danger-500 com texto branco", () => {
-      // Nao e endosso — e 3,76:1, reprova a §21. Esta linha existe para que a
-      // troca do par danger/success seja uma decisao registrada, e nao uma
-      // mudanca que passa despercebida junto de outra coisa. A variante
-      // `success` do pacote esta fora do tipo pelo mesmo motivo (2,54:1).
+    it("danger sai do degrau de acao da E2, nao da cor cheia com branco fixo", () => {
+      // Era `bg-danger text-white` — 3,76:1, reprovando a §21. A E2 criou o
+      // par `--action-danger` / `--text-on-danger`, como o primario ja tinha.
       render(<Button variant="danger">Excluir</Button>);
       const btn = screen.getByRole("button");
-      expect(btn).toHaveClass("bg-danger");
-      expect(btn).toHaveClass("text-white");
+      expect(btn).toHaveClass("bg-action-danger");
+      expect(btn).toHaveClass("text-on-danger");
+      expect(btn).toHaveClass("hover:bg-action-danger-hover");
+      expect(btn).not.toHaveClass("text-white");
+      expect(btn).not.toHaveClass("bg-danger");
+    });
+
+    it("success entrou com a E2, no par dela", () => {
+      // Ficou de fora em a5f43d0 porque o pacote mandava `--color-success-500`
+      // com branco: 2,54:1, e a rampa acabava no 700 — o hover nao tinha para
+      // onde escurecer. A E2 estendeu a rampa ate o 800.
+      render(<Button variant="success">Aprovar</Button>);
+      const btn = screen.getByRole("button");
+      expect(btn).toHaveClass("bg-action-success");
+      expect(btn).toHaveClass("text-on-success");
+      expect(btn).toHaveClass("hover:bg-action-success-hover");
+      expect(btn).not.toHaveClass("text-white");
     });
 
     it("toda variante tem borda de 1px, inclusive a ghost", () => {
       // O pacote pinta borda em todas — na ghost ela e transparente. Sem isso,
       // ghost e secondary lado a lado nao tem a mesma altura.
-      for (const variant of ["primary", "secondary", "danger", "ghost"] as const) {
+      for (const variant of ["primary", "secondary", "danger", "success", "ghost"] as const) {
         const { unmount } = render(<Button variant={variant}>x</Button>);
         expect(screen.getByRole("button")).toHaveClass("border");
         unmount();
       }
+    });
+  });
+
+  // ── Contraste, medido nos tokens de verdade ───────────────────────────
+  //
+  // Estes nao olham classe: leem `src/design-system/tokens/colors.css`,
+  // resolvem o `var()` encadeado e calculam a razao da WCAG 2.x. Se alguem
+  // trocar o valor no token, o teste cai — que e o acidente que a §21 pede
+  // para impedir. Os testes de classe acima e este aqui se seguram: um prende
+  // qual token o botao consome, o outro prende quanto aquele token vale.
+  describe("contraste dos botoes preenchidos", () => {
+    const ESTADOS = [
+      ["repouso", "--action-danger"],
+      ["hover", "--action-danger-hover"],
+    ] as const;
+    const TEMAS = ["claro", "escuro"] as const;
+
+    for (const tema of TEMAS) {
+      for (const [estado, fundo] of ESTADOS) {
+        it(`danger no ${estado}, tema ${tema}, aprova em AA`, () => {
+          expect(contraste(fundo, "--text-on-danger", tema)).toBeGreaterThanOrEqual(AA);
+        });
+      }
+    }
+
+    it("danger sai dos 3,76:1 de antes nos quatro casos", () => {
+      // O valor antigo era a cor cheia da rampa com branco. Fica aqui para que
+      // a melhora seja verificavel, e nao so afirmada no commit.
+      for (const tema of TEMAS) {
+        expect(contraste("--color-danger-500", "--color-white", tema)).toBeLessThan(AA);
+        for (const [, fundo] of ESTADOS) {
+          expect(contraste(fundo, "--text-on-danger", tema)).toBeGreaterThan(
+            contraste("--color-danger-500", "--color-white", tema),
+          );
+        }
+      }
+    });
+
+    it("success aprova em AA nos dois estados e nos dois temas", () => {
+      for (const tema of TEMAS) {
+        expect(contraste("--action-success", "--text-on-success", tema))
+          .toBeGreaterThanOrEqual(AA);
+        expect(contraste("--action-success-hover", "--text-on-success", tema))
+          .toBeGreaterThanOrEqual(AA);
+      }
+    });
+
+    it("primary tambem, e e o unico dos tres cujo par inverte por tema", () => {
+      for (const tema of TEMAS) {
+        expect(contraste("--action", "--text-on-primary", tema)).toBeGreaterThanOrEqual(AA);
+        expect(contraste("--action-hover", "--text-on-primary", tema))
+          .toBeGreaterThanOrEqual(AA);
+      }
+      // `danger` e `success` sao degraus absolutos: mesmo numero nos dois
+      // temas. O primario nao — e por isso precisou da emenda E1.
+      expect(contraste("--action-danger", "--text-on-danger", "claro")).toBeCloseTo(
+        contraste("--action-danger", "--text-on-danger", "escuro"),
+        10,
+      );
+      expect(contraste("--action", "--text-on-primary", "claro")).not.toBeCloseTo(
+        contraste("--action", "--text-on-primary", "escuro"),
+        1,
+      );
     });
   });
 

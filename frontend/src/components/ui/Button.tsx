@@ -1,12 +1,10 @@
 import type { ButtonHTMLAttributes, ReactNode } from "react";
 import { cn } from "../../lib/utils";
 
-// `success` é a quinta variante do pacote e está de fora de propósito: com o
-// texto branco que o pacote manda, `--color-success-500` dá 2,54:1 e o hover
-// 600 dá 3,77:1 — reprova a §21 nos dois temas. É a mesma classe de lacuna do
-// pacote que a emenda E1 corrigiu no `--text-on-primary`, e entra quando a
-// decisão for tomada. Hoje `success` não é usada em nenhum botão do HelpHS.
-type Variant = "primary" | "secondary" | "danger" | "ghost";
+// As cinco variantes do pacote. `success` entrou com a emenda E2, que criou o
+// degrau de ação que faltava: enquanto o pacote mandava pintá-la com
+// `--color-success-500`, o texto branco dava 2,54:1 e o hover 600 dava 3,77:1.
+type Variant = "primary" | "secondary" | "danger" | "success" | "ghost";
 type Size = "sm" | "md" | "lg";
 
 export interface ButtonProps extends ButtonHTMLAttributes<HTMLButtonElement> {
@@ -22,8 +20,13 @@ export interface ButtonProps extends ButtonHTMLAttributes<HTMLButtonElement> {
 
 /**
  * Fundo, texto e borda saem dos tokens do pacote — nunca de cor cravada.
- * O primário usa `--text-on-primary`, que vale branco no tema claro e navy no
- * escuro: `text-white` fixo devolveria 2,69:1 sobre o `--action` do escuro.
+ *
+ * As três variantes preenchidas usam o par `--action-*` / `--text-on-*`, e não
+ * a cor cheia da rampa com branco por cima. O primário usa `--text-on-primary`,
+ * que vale branco no claro e navy no escuro (`text-white` fixo daria 2,69:1
+ * sobre o `--action` do escuro); `danger` e `success` usam `--text-on-danger` e
+ * `--text-on-success`, que valem branco nos dois temas porque o fundo delas é
+ * degrau absoluto da rampa e não inverte.
  */
 const variantClasses: Record<Variant, string> = {
   primary:
@@ -31,7 +34,9 @@ const variantClasses: Record<Variant, string> = {
   secondary:
     "bg-surface text-conteudo border-borda hover:bg-surface-elevated focus-visible:ring-action",
   danger:
-    "bg-danger text-white border-danger hover:bg-danger-600 focus-visible:ring-danger",
+    "bg-action-danger text-on-danger border-action-danger hover:bg-action-danger-hover focus-visible:ring-danger",
+  success:
+    "bg-action-success text-on-success border-action-success hover:bg-action-success-hover focus-visible:ring-success",
   ghost:
     "bg-transparent text-conteudo-muted border-transparent hover:bg-surface-elevated focus-visible:ring-action",
 };

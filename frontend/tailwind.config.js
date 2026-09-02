@@ -36,6 +36,14 @@ export default {
           DEFAULT: tk("--action"),
           hover: tk("--action-hover"),
           tint: tk("--action-tint"),
+
+          // Emenda E2 do pacote: `danger` e `success` ganham degrau de ação
+          // próprio, como o primário já tinha. A cor cheia da rampa (o 500)
+          // reprova com texto branco — 3,76:1 e 2,54:1.
+          danger: tk("--action-danger"),
+          "danger-hover": tk("--action-danger-hover"),
+          success: tk("--action-success"),
+          "success-hover": tk("--action-success-hover"),
         },
         surface: {
           DEFAULT: tk("--surface"),
@@ -60,13 +68,22 @@ export default {
         // `text-white` cravado dá 2,69:1 no escuro (emenda E1 do pacote).
         "on-primary": tk("--text-on-primary"),
 
+        // Os pares das duas cores de ação da E2. Como o `on-primary`, são par
+        // de fundo e não degrau de texto — por isso ficam fora de `conteudo`.
+        // Diferente do `on-primary`, não invertem por tema: o fundo deles é um
+        // degrau absoluto da rampa, igual nos dois.
+        "on-danger": tk("--text-on-danger"),
+        "on-success": tk("--text-on-success"),
+
         // As rampas semânticas continuam completas porque as páginas usam os
         // degraus (text-success-700, dark:text-danger-400, bg-warning-500/10).
         // O `adocao.md` declara só o 500; aqui é mesclagem, não substituição
         // (seção 5.3 do prompt mestre).
-        success: { DEFAULT: tk("--color-success-500"), ...rampa("--color-success-", [50, 100, 400, 500, 600, 700]) },
+        // O 800 de `success` e `warning` veio com a E2 (emerald-800 e
+        // amber-800), e por isso essas duas rampas vão um degrau além.
+        success: { DEFAULT: tk("--color-success-500"), ...rampa("--color-success-", [50, 100, 400, 500, 600, 700, 800]) },
         danger:  { DEFAULT: tk("--color-danger-500"),  ...rampa("--color-danger-",  [50, 100, 400, 500, 600, 700]) },
-        warning: { DEFAULT: tk("--color-warning-500"), ...rampa("--color-warning-", [50, 100, 400, 500, 600, 700]) },
+        warning: { DEFAULT: tk("--color-warning-500"), ...rampa("--color-warning-", [50, 100, 400, 500, 600, 700, 800]) },
         info:    { DEFAULT: tk("--color-info-500"),    ...rampa("--color-info-",    [50, 100, 400, 500, 600, 700]) },
 
         // ── Alias de compatibilidade (decisão D2) ──────────────
