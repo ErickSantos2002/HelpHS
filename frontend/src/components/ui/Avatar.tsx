@@ -26,8 +26,11 @@ function getInitials(name: string): string {
  *
  * Os pares translúcidos de antes (`bg-primary/30 text-primary`) reprovavam AA
  * nos dois temas — 6 de 6 no claro, 5 de 6 no escuro, o pior deles em 1,33:1.
- * Estes passam em 5 de 6 no claro e 6 de 6 no escuro; o único que fica abaixo
- * é o neutro, em 4,34:1 no claro, e é valor do pacote.
+ * Estes passam em 6 de 6 nos dois temas. O neutro era o único que faltava,
+ * em 4,34:1 no claro; a emenda E4 do pacote troca `--text-muted` por
+ * `--on-tint-neutral` no sexto par e leva os mesmos pixels a 6,92:1, sem
+ * mexer no fundo. No escuro nada muda: lá `--on-tint-neutral` é o próprio
+ * `--text-muted`, e os 5,29:1 seguem iguais.
  *
  * Dois dos pares antigos vinham de `purple` e `pink`, da paleta padrão do
  * Tailwind: não existe `--color-purple-*` nem `--color-pink-*` no pacote.
@@ -38,7 +41,7 @@ const COLORS = [
   "bg-warning-50 text-warning-700",
   "bg-danger-50 text-danger-700",
   "bg-success-50 text-success-700",
-  "bg-surface-elevated text-conteudo-muted",
+  "bg-surface-elevated text-on-tint-neutral",
 ];
 
 function colorFromName(name: string): string {

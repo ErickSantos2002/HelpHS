@@ -75,6 +75,12 @@ export default {
         "on-danger": tk("--text-on-danger"),
         "on-success": tk("--text-on-success"),
 
+        // Par da tinta neutra (emenda E4 do pacote). Fica aqui pelo mesmo
+        // motivo dos de cima: é par de fundo, não degrau de texto. O avatar
+        // neutro e o selo neutro pintam a mesma superfície e agora falam a
+        // mesma cor — 6,92:1 no claro, contra os 4,34:1 de --text-muted.
+        "on-tint-neutral": tk("--on-tint-neutral"),
+
         // As rampas semânticas continuam completas porque as páginas usam os
         // degraus (text-success-700, dark:text-danger-400, bg-warning-500/10).
         // O `adocao.md` declara só o 500; aqui é mesclagem, não substituição

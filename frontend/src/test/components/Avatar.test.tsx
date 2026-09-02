@@ -1,6 +1,7 @@
 import { render, screen } from "@testing-library/react";
 import { describe, expect, it } from "vitest";
 import { Avatar } from "../../components/ui/Avatar";
+import { AA, contraste } from "../helpers/contraste";
 
 describe("Avatar", () => {
   it("tira as iniciais das duas primeiras palavras", () => {
@@ -59,7 +60,7 @@ describe("Avatar", () => {
       ["bg-warning-50", "text-warning-700"],
       ["bg-danger-50", "text-danger-700"],
       ["bg-success-50", "text-success-700"],
-      ["bg-surface-elevated", "text-conteudo-muted"],
+      ["bg-surface-elevated", "text-on-tint-neutral"],
     ];
     const vistos = new Set<string>();
     // A cor sai da soma dos char codes % 6, entao seis nomes de uma letra
@@ -85,5 +86,39 @@ describe("Avatar", () => {
   it("repassa o que o pacote repassa por ...rest", () => {
     render(<Avatar name="Ana Ferreira" data-testid="disco" />);
     expect(screen.getByTestId("disco")).toBeInTheDocument();
+  });
+
+  // ── Emenda E4 ─────────────────────────────────────────────────────────
+
+  describe("contraste do par neutro", () => {
+    // O teste de cima prende **qual** token o sexto par consome; estes prendem
+    // **quanto** ele vale. Sem isto, trocar o valor do token no pacote passaria
+    // verde — que foi a lacuna do Checkpoint 1.
+
+    it.each(["claro", "escuro"] as const)(
+      "o par neutro aprova em AA no tema %s",
+      (tema) => {
+        expect(
+          contraste("--surface-elevated", "--on-tint-neutral", tema),
+        ).toBeGreaterThanOrEqual(AA);
+      },
+    );
+
+    it("no claro, e a E4 que tira o par da reprovação", () => {
+      // --text-muted sobre --surface-elevated dá 4,34:1. O fundo não muda.
+      expect(
+        contraste("--surface-elevated", "--text-muted", "claro"),
+      ).toBeLessThan(AA);
+      expect(
+        contraste("--surface-elevated", "--on-tint-neutral", "claro"),
+      ).toBeGreaterThan(contraste("--surface-elevated", "--text-muted", "claro"));
+    });
+
+    it("no escuro a E4 não mexe um pixel", () => {
+      // Lá --on-tint-neutral é declarado como o próprio --text-muted.
+      expect(contraste("--surface-elevated", "--on-tint-neutral", "escuro")).toBe(
+        contraste("--surface-elevated", "--text-muted", "escuro"),
+      );
+    });
   });
 });
