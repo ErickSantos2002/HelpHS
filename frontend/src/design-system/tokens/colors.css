@@ -163,6 +163,8 @@
   --text-body: var(--color-slate-200);
   --text-muted: var(--color-slate-400);
   --text-faint: var(--color-slate-500);
+  /* Branco sobre --action no escuro dá 2,69:1 — reprova AA; este navy dá 5,11:1. */
+  --text-on-primary: var(--color-primary-900);
   --text-link: var(--color-primary-400);
   --text-link-hover: var(--color-primary-300);
 

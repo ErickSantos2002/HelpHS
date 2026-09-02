@@ -1,2 +1,8 @@
 # Auto detect text files and perform LF normalization
 * text=auto
+
+# Copia local do design system: os sete arquivos sao conferidos por SHA256
+# contra o pacote (VERSION.md). Sem eol=lf, o checkout em Windows converte
+# LF -> CRLF e os sete hashes mudam sem que ninguem tenha editado nada.
+# D7-a em COMPARTILHADO/DECISOES.md.
+frontend/src/design-system/** text eol=lf

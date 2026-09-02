@@ -11,8 +11,9 @@
 | Namespace | `HealthAmpSafetyDesignSystem_ef9f35` |
 | Data do export | 02/09/2026 |
 | Origem | `C:\Users\ti_rickelme\Documents\GitHub\design-system` |
-| Tokens | 179 custom properties em 6 arquivos |
+| Tokens | 180 custom properties em 6 arquivos |
 | Copiado em | 02/09/2026 — Fase 1 da adoção |
+| Pacote emendado em | **02/09/2026 — E1: `.dark` ganha `--text-on-primary`.** Registro em `design-system/EMENDAS.md`; decisão em `COMPARTILHADO/DECISOES.md` (D10). Recopiados os sete arquivos na mesma data. |
 
 ## Hashes (SHA256)
 
@@ -25,7 +26,7 @@ conferência por hash — e as duas coisas não cabem juntas. O aviso mora aqui.
 
 ```
 base.css         BDD047CE432E74B33FA7F752DA08CF025419E83EA18485BD947C889C0AC1C221
-colors.css       63D960841590A2CB4DF3819E2CB4A55439C893578ABFE68C00927A7ABA0F307D
+colors.css       7EC44E9A06430507007468468E0A254C770BE3F8C9FF4B9432484F07CE430860
 motion.css       C70D51A982AE0B91BD53ECE150D8D16E0E70BEF9CA59586541A9A7177228478E
 shape.css        7BCFBBC585D3EA8C7F689A27EEB3AE13DE0C2A9DCC3C6CC0C8F41D440D193F7D
 spacing.css      C093B261C6893A893A418CDF64798555326D4586A8ADB37CC7ECA457FABAE420
