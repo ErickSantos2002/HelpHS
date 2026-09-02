@@ -96,7 +96,7 @@ export function FilterSelect({ value, onChange, options, placeholder = "Todos", 
             minWidth: DROPDOWN_MIN_W,
             zIndex: 9999,
           }}
-          className="rounded-xl border border-border/60 bg-white dark:bg-background-surface shadow-lg shadow-black/10 dark:shadow-black/20 overflow-hidden"
+          className="rounded-xl border border-border/60 bg-background-surface shadow-lg shadow-black/10 dark:shadow-black/20 overflow-hidden"
         >
           {/* Placeholder option */}
           <button

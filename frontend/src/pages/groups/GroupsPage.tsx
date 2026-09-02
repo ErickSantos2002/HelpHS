@@ -978,13 +978,13 @@ export default function GroupsPage() {
 
       {/* ── Left: Groups list ──────────────────────────────── */}
       <aside className={cn(
-        "shrink-0 flex flex-col w-64 border-r border-slate-200 dark:border-border bg-white dark:bg-background-surface overflow-hidden",
+        "shrink-0 flex flex-col w-64 border-r border-border bg-background-surface overflow-hidden",
         "transition-transform duration-300 ease-in-out",
         "absolute inset-y-0 left-0 z-30",
         sidebarOpen ? "translate-x-0" : "-translate-x-full",
         "xl:relative xl:inset-auto xl:z-auto xl:translate-x-0",
       )}>
-        <div className="flex items-center justify-between px-4 py-4 border-b border-slate-200 dark:border-border">
+        <div className="flex items-center justify-between px-4 py-4 border-b border-border">
           <h1 className="text-sm font-semibold text-slate-700 dark:text-slate-300">Grupos</h1>
           <div className="flex items-center gap-1">
             <button
@@ -997,7 +997,7 @@ export default function GroupsPage() {
             {selectedGroup && (
               <button
                 onClick={() => setSidebarOpen(false)}
-                className="xl:hidden p-1.5 rounded-lg text-slate-400 hover:text-slate-600 dark:hover:text-slate-200 hover:bg-slate-100 dark:hover:bg-background-elevated transition-colors cursor-pointer"
+                className="xl:hidden p-1.5 rounded-lg text-slate-400 hover:text-slate-600 dark:hover:text-slate-200 hover:bg-background-elevated transition-colors cursor-pointer"
                 title="Fechar"
               >
                 <IconX />
@@ -1006,7 +1006,7 @@ export default function GroupsPage() {
           </div>
         </div>
 
-        <div className="px-3 py-2 border-b border-slate-200 dark:border-border">
+        <div className="px-3 py-2 border-b border-border">
           <div className="relative">
             <svg className="absolute left-2.5 top-1/2 -translate-y-1/2 w-3.5 h-3.5 text-slate-400 pointer-events-none" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
               <path strokeLinecap="round" strokeLinejoin="round" d="M21 21l-4.35-4.35M17 11A6 6 0 111 11a6 6 0 0116 0z" />
@@ -1016,7 +1016,7 @@ export default function GroupsPage() {
               placeholder="Pesquisar grupos..."
               value={groupSearch}
               onChange={(e) => setGroupSearch(e.target.value)}
-              className="w-full pl-8 pr-3 py-1.5 text-xs rounded-md bg-slate-100 dark:bg-background-elevated border border-transparent focus:border-primary focus:outline-none text-slate-700 dark:text-slate-300 placeholder-slate-400"
+              className="w-full pl-8 pr-3 py-1.5 text-xs rounded-md bg-background-elevated border border-transparent focus:border-primary focus:outline-none text-slate-700 dark:text-slate-300 placeholder-slate-400"
             />
           </div>
         </div>
@@ -1116,7 +1116,7 @@ export default function GroupsPage() {
             {loadingDetail ? (
               <div className="flex justify-center py-12"><Spinner /></div>
             ) : !groupDetail || groupDetail.companies.length === 0 ? (
-              <div className="text-center py-14 rounded-xl border border-dashed border-slate-200 dark:border-border">
+              <div className="text-center py-14 rounded-xl border border-dashed border-border">
                 <div className="flex justify-center mb-2 text-slate-300 dark:text-slate-700"><IconBuilding /></div>
                 <p className="text-sm text-slate-500 dark:text-slate-400">Nenhuma empresa neste grupo</p>
                 <Button size="sm" className="mt-3" onClick={() => setShowAddCompany(true)}><IconPlus />Adicionar empresa</Button>
@@ -1124,7 +1124,7 @@ export default function GroupsPage() {
             ) : (
               <div className="grid gap-3 sm:grid-cols-2 xl:grid-cols-3">
                 {groupDetail.companies.map((c) => (
-                  <div key={c.id} className="rounded-xl border border-slate-200 dark:border-border bg-white dark:bg-background-surface hover:border-primary/40 transition-colors">
+                  <div key={c.id} className="rounded-xl border border-border bg-background-surface hover:border-primary/40 transition-colors">
                     <div className="p-4">
                       <div className="flex items-start justify-between gap-2">
                         <button onClick={() => setSelectedCompany(c)} className="flex-1 text-left cursor-pointer min-w-0">
@@ -1156,7 +1156,7 @@ export default function GroupsPage() {
             )}
 
             {/* ── Notas — mobile only (below companies) ── */}
-            <div className="mt-5 xl:hidden rounded-xl border border-amber-200/50 dark:border-amber-800/20 bg-white dark:bg-background-surface overflow-hidden">
+            <div className="mt-5 xl:hidden rounded-xl border border-amber-200/50 dark:border-amber-800/20 bg-background-surface overflow-hidden">
               <div className="flex items-center justify-between px-4 py-3 border-b border-amber-200/50 dark:border-amber-800/20">
                 <p className="text-xs font-bold uppercase tracking-widest text-amber-600 dark:text-amber-500/80 flex items-center gap-1.5">
                   <IconNote />Notas do grupo
@@ -1184,8 +1184,8 @@ export default function GroupsPage() {
 
       {/* ── Right: Notes panel — desktop only ─────────────── */}
       {selectedGroup && (
-        <aside className="hidden xl:flex w-72 shrink-0 flex-col border-l border-slate-200 dark:border-border bg-white dark:bg-background-surface overflow-hidden">
-          <div className="flex items-center justify-between px-4 py-4 border-b border-slate-200 dark:border-border">
+        <aside className="hidden xl:flex w-72 shrink-0 flex-col border-l border-border bg-background-surface overflow-hidden">
+          <div className="flex items-center justify-between px-4 py-4 border-b border-border">
             <p className="text-xs font-bold uppercase tracking-widest text-amber-600 dark:text-amber-500/80 flex items-center gap-1.5">
               <IconNote />
               Notas do grupo

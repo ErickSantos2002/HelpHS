@@ -28,8 +28,14 @@
  * --text-body (slate-800 no claro, slate-200 no escuro), como o design system
  * define — é a única mudança de valor desta fase. */
 @layer base {
-  /* ── Text color inversion for light mode ─────────────────── */
-  /* Components use text-slate-* hardcoded for dark; invert in light */
+  /* ── Inversão de cor de texto no tema claro ───────────────
+   * Os componentes escrevem a cor do tema ESCURO (text-slate-100 e afins) e
+   * este bloco espelha em torno do degrau 500 quando o tema é claro. É o
+   * segundo mecanismo de tema do HelpHS, ao lado das classes `dark:`.
+   *
+   * Fica de propósito (decisão D5 em COMPARTILHADO/DECISOES.md): é o que
+   * segura o tema claro hoje. Sai na Fase 20, quando a última das ~1.158
+   * classes text-slate-* tiver virado token semântico. */
   html:not(.dark) .text-slate-100 { color: rgb(15 23 42);   }   /* slate-900 */
   html:not(.dark) .text-slate-200 { color: rgb(30 41 59);   }   /* slate-800 */
   html:not(.dark) .text-slate-300 { color: rgb(51 65 85);   }   /* slate-700 */

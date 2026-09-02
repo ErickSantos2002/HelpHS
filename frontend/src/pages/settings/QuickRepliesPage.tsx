@@ -273,7 +273,7 @@ export default function QuickRepliesPage() {
 
       <Card padding="none">
         {/* Busca */}
-        <div className="border-b border-slate-200 p-3 dark:border-border">
+        <div className="border-b border-border p-3">
           <input
             value={search}
             onChange={(e) => {
@@ -296,7 +296,7 @@ export default function QuickRepliesPage() {
               : "Nenhuma resposta encontrada para esta busca."}
           </div>
         ) : (
-          <ul className="divide-y divide-slate-200 dark:divide-border">
+          <ul className="divide-y divide-border">
             {paged.map((reply) => (
               <li
                 key={reply.id}

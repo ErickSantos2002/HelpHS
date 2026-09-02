@@ -224,7 +224,7 @@ export default function NotificationsPage() {
               "px-3 py-1.5 text-sm rounded-lg font-medium transition-colors",
               unreadOnly === tab.value
                 ? "bg-primary text-white"
-                : "text-slate-500 dark:text-slate-400 hover:bg-slate-100 dark:hover:bg-background-elevated hover:text-slate-900 dark:hover:text-slate-100",
+                : "text-slate-500 dark:text-slate-400 hover:bg-background-elevated hover:text-slate-900 dark:hover:text-slate-100",
             )}
           >
             {tab.label}
@@ -245,8 +245,8 @@ export default function NotificationsPage() {
           <Spinner size="lg" />
         </div>
       ) : items.length === 0 ? (
-        <div className="rounded-xl bg-white dark:bg-background-surface border border-slate-200 dark:border-border py-16 flex flex-col items-center gap-3">
-          <div className="w-12 h-12 rounded-full bg-slate-100 dark:bg-background-elevated flex items-center justify-center">
+        <div className="rounded-xl bg-background-surface border border-border py-16 flex flex-col items-center gap-3">
+          <div className="w-12 h-12 rounded-full bg-background-elevated flex items-center justify-center">
             <svg className="w-6 h-6 text-slate-400" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={1.5}>
               <path strokeLinecap="round" strokeLinejoin="round" d="M15 17h5l-1.405-1.405A2.032 2.032 0 0118 14.158V11a6.002 6.002 0 00-4-5.659V5a2 2 0 10-4 0v.341C7.67 6.165 6 8.388 6 11v3.159c0 .538-.214 1.055-.595 1.436L4 17h5m6 0v1a3 3 0 11-6 0v-1m6 0H9" />
             </svg>
@@ -261,7 +261,7 @@ export default function NotificationsPage() {
           </div>
         </div>
       ) : (
-        <div className="rounded-xl bg-white dark:bg-background-surface border border-slate-200 dark:border-border overflow-hidden divide-y divide-slate-100 dark:divide-border/60">
+        <div className="rounded-xl bg-background-surface border border-border overflow-hidden divide-y divide-slate-100 dark:divide-border/60">
           {items.map((n) => {
             const meta = TYPE_META[n.type] ?? DEFAULT_META;
             return (

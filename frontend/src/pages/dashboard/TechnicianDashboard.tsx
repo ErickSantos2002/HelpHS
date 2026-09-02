@@ -74,7 +74,7 @@ interface KpiCardProps {
 
 function KpiCard({ label, value, sub, icon, iconBg, accent, valueCls = "text-slate-900 dark:text-slate-100" }: KpiCardProps) {
   return (
-    <div className={cn("relative rounded-xl bg-white dark:bg-background-surface border border-slate-200 dark:border-border p-5 overflow-hidden border-l-4", accent)}>
+    <div className={cn("relative rounded-xl bg-background-surface border border-border p-5 overflow-hidden border-l-4", accent)}>
       <div className="flex items-start justify-between gap-3">
         <div className="min-w-0">
           <p className="text-xs font-semibold uppercase tracking-wider text-slate-500">{label}</p>
@@ -122,14 +122,14 @@ function TicketListCard({
   title: string; count: number; tickets: Ticket[]; emptyMsg: string; showTech?: boolean;
 }) {
   return (
-    <div className="rounded-xl bg-white dark:bg-background-surface border border-slate-200 dark:border-border overflow-hidden flex flex-col">
+    <div className="rounded-xl bg-background-surface border border-border overflow-hidden flex flex-col">
       <div className="flex items-center justify-between px-4 py-3.5 border-b border-slate-100 dark:border-border/60 shrink-0">
         <p className="text-sm font-semibold text-slate-700 dark:text-slate-200">{title}</p>
-        <span className="text-xs font-medium text-slate-500 bg-slate-100 dark:bg-background-elevated px-2 py-0.5 rounded-full">{count}</span>
+        <span className="text-xs font-medium text-slate-500 bg-background-elevated px-2 py-0.5 rounded-full">{count}</span>
       </div>
       {tickets.length === 0 ? (
         <div className="flex flex-col items-center justify-center py-10 gap-2">
-          <div className="w-8 h-8 rounded-full bg-slate-100 dark:bg-background-elevated flex items-center justify-center">
+          <div className="w-8 h-8 rounded-full bg-background-elevated flex items-center justify-center">
             <svg className="w-4 h-4 text-slate-400" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={1.5}>
               <path strokeLinecap="round" strokeLinejoin="round" d="M9 12l2 2 4-4m6 2a9 9 0 11-18 0 9 9 0 0118 0z" />
             </svg>
@@ -293,7 +293,7 @@ export default function TechnicianDashboard() {
           value={myActiveCount}
           sub="Abertos + em andamento"
           accent={myActiveCount > 0 ? "border-l-sky-500" : "border-l-slate-300 dark:border-l-slate-600"}
-          iconBg={myActiveCount > 0 ? "bg-sky-500/10" : "bg-slate-100 dark:bg-background-elevated"}
+          iconBg={myActiveCount > 0 ? "bg-sky-500/10" : "bg-background-elevated"}
           valueCls={myActiveCount > 0 ? "text-sky-600 dark:text-sky-400" : "text-slate-900 dark:text-slate-100"}
           icon={<svg className={cn("w-5 h-5", myActiveCount > 0 ? "text-sky-500" : "text-slate-400")} fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={1.75}><path strokeLinecap="round" strokeLinejoin="round" d="M9 5H7a2 2 0 00-2 2v12a2 2 0 002 2h10a2 2 0 002-2V7a2 2 0 00-2-2h-2M9 5a2 2 0 002 2h2a2 2 0 002-2M9 5a2 2 0 012-2h2a2 2 0 012 2" /></svg>}
         />
@@ -302,7 +302,7 @@ export default function TechnicianDashboard() {
           value={openCount}
           sub="Aguardando atendimento"
           accent="border-l-slate-300 dark:border-l-slate-600"
-          iconBg="bg-slate-100 dark:bg-background-elevated"
+          iconBg="bg-background-elevated"
           icon={<svg className="w-5 h-5 text-slate-400" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={1.75}><path strokeLinecap="round" strokeLinejoin="round" d="M20 13V6a2 2 0 00-2-2H6a2 2 0 00-2 2v7m16 0v5a2 2 0 01-2 2H6a2 2 0 01-2-2v-5m16 0h-2.586a1 1 0 00-.707.293l-2.414 2.414a1 1 0 01-.707.293h-3.172a1 1 0 01-.707-.293l-2.414-2.414A1 1 0 006.586 13H4" /></svg>}
         />
         <KpiCard
@@ -310,7 +310,7 @@ export default function TechnicianDashboard() {
           value={myBreachCount}
           sub="Nos meus tickets"
           accent={myBreachCount > 0 ? "border-l-red-500" : "border-l-slate-300 dark:border-l-slate-600"}
-          iconBg={myBreachCount > 0 ? "bg-red-500/10" : "bg-slate-100 dark:bg-background-elevated"}
+          iconBg={myBreachCount > 0 ? "bg-red-500/10" : "bg-background-elevated"}
           valueCls={myBreachCount > 0 ? "text-red-600 dark:text-red-400" : "text-slate-900 dark:text-slate-100"}
           icon={<svg className={cn("w-5 h-5", myBreachCount > 0 ? "text-red-500" : "text-slate-400")} fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={1.75}><path strokeLinecap="round" strokeLinejoin="round" d="M12 9v2m0 4h.01m-6.938 4h13.856c1.54 0 2.502-1.667 1.732-3L13.732 4c-.77-1.333-2.694-1.333-3.464 0L3.34 16c-.77 1.333.192 3 1.732 3z" /></svg>}
         />
@@ -328,7 +328,7 @@ export default function TechnicianDashboard() {
       {/* ── Charts + stats ───────────────────────────────────── */}
       <div className="grid grid-cols-1 lg:grid-cols-3 gap-4">
         {/* Area chart */}
-        <div className="lg:col-span-2 rounded-xl bg-white dark:bg-background-surface border border-slate-200 dark:border-border overflow-hidden">
+        <div className="lg:col-span-2 rounded-xl bg-background-surface border border-border overflow-hidden">
           <div className="px-5 py-4 border-b border-slate-100 dark:border-border/60">
             <p className="text-sm font-semibold text-slate-700 dark:text-slate-200">
               Meus atendimentos por dia — {periodLabel}
@@ -357,7 +357,7 @@ export default function TechnicianDashboard() {
         </div>
 
         {/* Personal stats summary */}
-        <div className="rounded-xl bg-white dark:bg-background-surface border border-slate-200 dark:border-border overflow-hidden">
+        <div className="rounded-xl bg-background-surface border border-border overflow-hidden">
           <div className="px-5 py-4 border-b border-slate-100 dark:border-border/60">
             <p className="text-sm font-semibold text-slate-700 dark:text-slate-200">
               Meu desempenho — {periodLabel}

@@ -35,7 +35,7 @@ const PRIORITY_CFG: Record<string, {
     label: "Baixo",
     borderCls: "border-l-slate-300 dark:border-l-slate-600",
     dotColor: "#94a3b8",
-    badgeCls: "bg-slate-100 dark:bg-background-elevated text-slate-500",
+    badgeCls: "bg-background-elevated text-slate-500",
   },
 };
 
@@ -106,7 +106,7 @@ function SlaIndicator({ ticket, now }: { ticket: Ticket; now: number }) {
   if (isOpen && ticket.sla_first_response) {
     return (
       <div className="mt-2.5 space-y-1">
-        <div className="h-1 w-full overflow-hidden rounded-full bg-slate-100 dark:bg-background-elevated">
+        <div className="h-1 w-full overflow-hidden rounded-full bg-background-elevated">
           <div className="h-full w-full rounded-full" style={{ backgroundColor: "#10b981" }} />
         </div>
         <div className={cn("flex items-center gap-1 text-[10px] font-bold", breach ? "text-red-500 dark:text-red-400" : "text-emerald-500 dark:text-emerald-400")}>
@@ -146,7 +146,7 @@ function SlaIndicator({ ticket, now }: { ticket: Ticket; now: number }) {
 
   return (
     <div className="mt-2.5 space-y-1">
-      <div className="h-1 w-full overflow-hidden rounded-full bg-slate-100 dark:bg-background-elevated">
+      <div className="h-1 w-full overflow-hidden rounded-full bg-background-elevated">
         <div
           className="h-full rounded-full transition-all duration-700"
           style={{ width: `${pct}%`, backgroundColor: barColor }}
@@ -177,8 +177,8 @@ function TicketCard({ ticket, now }: { ticket: Ticket; now: number }) {
       onClick={() => navigate(`/tickets/${ticket.id}`)}
       className={cn(
         "w-full text-left rounded-lg",
-        "bg-white dark:bg-background-surface",
-        "border border-slate-200 dark:border-border border-l-4",
+        "bg-background-surface",
+        "border border-border border-l-4",
         "p-3 shadow-sm hover:shadow-md hover:-translate-y-0.5 active:translate-y-0",
         "transition-all duration-150 cursor-pointer group",
         pCfg.borderCls,
@@ -209,7 +209,7 @@ function TicketCard({ ticket, now }: { ticket: Ticket; now: number }) {
       {/* Footer */}
       <div className="flex items-center justify-between gap-2">
         <div className="flex items-center gap-1.5 min-w-0 flex-1 overflow-hidden">
-          <span className="text-[11px] text-slate-500 bg-slate-100 dark:bg-background-elevated px-2 py-0.5 rounded truncate max-w-[100px]">
+          <span className="text-[11px] text-slate-500 bg-background-elevated px-2 py-0.5 rounded truncate max-w-[100px]">
             {ticket.category}
           </span>
           <span className={cn("text-[10px] font-bold px-1.5 py-0.5 rounded shrink-0", pCfg.badgeCls)}>
@@ -224,7 +224,7 @@ function TicketCard({ ticket, now }: { ticket: Ticket; now: number }) {
             <span className="text-[9px] font-bold text-primary leading-none">{initials}</span>
           </div>
         ) : (
-          <div className="w-6 h-6 rounded-full bg-slate-100 dark:bg-background-elevated border border-slate-200 dark:border-border flex items-center justify-center shrink-0">
+          <div className="w-6 h-6 rounded-full bg-background-elevated border border-border flex items-center justify-center shrink-0">
             <svg className="w-3 h-3 text-slate-400" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
               <path strokeLinecap="round" strokeLinejoin="round" d="M16 7a4 4 0 11-8 0 4 4 0 018 0zM12 14a7 7 0 00-7 7h14a7 7 0 00-7-7z" />
             </svg>
@@ -242,7 +242,7 @@ function TicketCard({ ticket, now }: { ticket: Ticket; now: number }) {
 
 function KanbanColumn({ col, tickets, now }: { col: typeof COLUMNS[0]; tickets: Ticket[]; now: number }) {
   return (
-    <div className="flex flex-col w-[268px] min-w-[268px] rounded-xl bg-slate-100 dark:bg-background-elevated border border-slate-200 dark:border-border overflow-hidden">
+    <div className="flex flex-col w-[268px] min-w-[268px] rounded-xl bg-background-elevated border border-border overflow-hidden">
       {/* Header */}
       <div className={cn("px-3 py-3 shrink-0", col.headerBg)}>
         <div className="flex items-center justify-between">
@@ -440,7 +440,7 @@ export default function TicketListPage() {
 
       {/* ── Kanban Board ─────────────────────────────────────── */}
       {/* flex-1 min-h-0 = preenche o restante sem overflow vertical */}
-      <div className="flex-1 min-h-0 rounded-2xl bg-slate-200/60 dark:bg-slate-900/50 border border-slate-200 dark:border-border overflow-hidden">
+      <div className="flex-1 min-h-0 rounded-2xl bg-slate-200/60 dark:bg-slate-900/50 border border-border overflow-hidden">
         {/* overflow-x-auto = scroll horizontal quando colunas não cabem */}
         <div
           ref={scrollRef}
