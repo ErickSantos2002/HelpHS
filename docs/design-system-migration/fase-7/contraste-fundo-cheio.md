@@ -44,11 +44,35 @@ E2 reconheceu ao criar `--action-danger` e `--action-success`, e a razão de
 | `bg-primary` + `text-white` | 3,83 ❌ | 3,83 ❌ |
 | `bg-danger` + `text-white` | 3,76 ❌ | 3,76 ❌ |
 | `bg-action` + `text-white` | 5,29 ✅ | **2,69** ❌ |
-| `bg-action` + `text-on-primary` (E1) | 5,29 ✅ | **5,09** ✅ |
+| `bg-action` + `text-on-primary` (E1) | 5,29 ✅ | **5,11** ✅ |
 | `Button` hoje | 5,29 ✅ | 5,11 ✅ |
 
 O `bg-primary text-white` reprova nos **dois** temas: `--color-primary-500` é
 degrau absoluto e não inverte. Não há tema em que ele se salve.
+
+## A regra que estes documentos compraram com erro
+
+**Valor de cor se lê do `colors.css`; não se digita de cabeça.** Três vezes
+nesta fase eu publiquei número calculado sobre um hexadecimal que eu havia
+digitado em vez de lido:
+
+| O que digitei | O real | Efeito |
+|---|---|---|
+| `--surface` escuro `#0f1e2e` | `#132238` | quatro contrastes do `warning` errados |
+| `--color-primary-900` `#0b3049` | `#0b3047` | 5,09 no lugar de **5,11** |
+
+O corpo do commit `adbf7a0` carrega o 5,09; não foi reescrito para não mexer em
+histórico já gravado. Vale o 5,11 daqui — que é também o que o `EMENDAS.md`
+registra para a E1.
+
+O segundo é o mais constrangedor: **5,11:1 já estava registrado** no commit da E1
+e no `EMENDAS.md`, quatro vezes. Publiquei um número que contradizia o próprio
+projeto porque recalculei em vez de consultar.
+
+Os **testes nunca erraram** — eles medem pelo `helpers/contraste.ts`, que resolve
+o `var()` a partir do arquivo. Errou a prosa escrita ao lado deles. Daí a regra:
+número que vai para documento sai da varredura ou do helper, copiado da saída, e
+não da conta feita à parte.
 
 ## Consertado agora: o link de pular
 
@@ -61,7 +85,7 @@ quem navega por teclado** — ou seja, a única pessoa que chega a vê-lo era
 justamente a que não conseguia lê-lo.
 
 A troca é para `focus:text-on-primary`, o token que a **E1** criou: branco no
-claro, `primary-900` no escuro. **5,09:1** onde havia 2,69. Preso por teste em
+claro, `primary-900` no escuro. **5,11:1** onde havia 2,69. Preso por teste em
 `test/components/AppLayout.test.tsx`, que lê o arquivo — montar o `AppLayout`
 arrastaria roteador e sessão para prender uma linha de classe.
 

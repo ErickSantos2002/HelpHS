@@ -379,7 +379,7 @@ deles era invisível para o `grep` anterior.
 adiado para as Fases 11–16, porque é casca e não página, é o primeiro foco de
 toda página, e existe exclusivamente para quem navega por teclado — a única
 pessoa que chega a vê-lo era justamente a que não conseguia lê-lo. Passa a
-`focus:text-on-primary`, o token da **E1**: **5,09:1**. Preso por teste.
+`focus:text-on-primary`, o token da **E1**: **5,11:1**. Preso por teste.
 
 **Sobram 19**, nenhum da Fase 7, nenhum tocado. Um deles é primitivo
 (`ui/Pagination.tsx:129`, Fase 9); dois não são botões (os contadores de não
