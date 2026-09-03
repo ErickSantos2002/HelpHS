@@ -658,9 +658,10 @@ function provar() {
  *
  * -- A linha de base ---------------------------------------------------
  *
- * 51 pares em 35 chaves. Eram 52 ate o botao de sair do `Topbar` sair do degrau
- * 500 cru (`f9d67aa`); a catraca nasce um abaixo do numero que o relatorio da
- * Fase 7 publica, e e assim que ela deve nascer.
+ * **50 pares em 34 chaves.** Nasceu em 51; desceu um quando o `Select` largou o
+ * `bg-background-surface text-slate-500` da opcao de placeholder (Fase 8). Foi a
+ * catraca que exigiu a atualizacao: ela reprovou no sentido "melhorou", que e o
+ * que a separa de um carimbo de linha de base.
  *
  * Trinta deles sao `text-slate-*` sobre superficie, vivos por causa do desvio
  * D5, e saem tela a tela nas Fases 11-16 — cada pagina migrada zera os seus.
@@ -671,7 +672,6 @@ const PARES_CONHECIDOS = new Map([
   ['components/chat/QuickReplyPicker.tsx  bg-background-surface  repouso', 2],
   ['components/layout/Topbar.tsx  bg-danger  repouso', 2],
   ['components/ui/Pagination.tsx  bg-primary  repouso', 1],
-  ['components/ui/Select.tsx  bg-background-surface  repouso', 1],
   ['pages/audit/AuditLogsPage.tsx  bg-background-elevated  repouso', 2],
   ['pages/audit/AuditLogsPage.tsx  hover:bg-background-elevated  hover:', 1],
   ['pages/calendar/CalendarPage.tsx  bg-primary  repouso', 2],
