@@ -27,18 +27,19 @@ import { cn } from "../../lib/utils";
  *    tela ouve "não marcado", que é a informação errada. Aqui a propriedade do
  *    DOM é marcada e o estado vira `mixed` na árvore de acessibilidade.
  *
- * ── Um desvio do pacote, medido, e o mesmo do `Switch` ─────────────────
+ * ── Um desvio que durou uma tarde ─────────────────────────────────────
  *
  * O `Checkbox.jsx` pinta o visto e o traço com `--color-white` cravado. Sobre o
  * `--action` do tema escuro isso dá **2,69:1**, abaixo do piso de **3:1** que a
  * WCAG 1.4.11 pede para limite gráfico. Aqui os dois usam
  * `--text-on-primary`: 5,29:1 no claro e **5,11:1** no escuro.
  *
- * A emenda **E7** corrigiu a bolinha do `Switch` e **não** alcançou estes dois,
- * porque o escopo dela nomeou o interruptor. É a **sexta** aparição da mesma
- * família — branco cravado sobre um token que inverte por tema —, e o
- * `Checkbox.jsx` é o último lugar do pacote onde ela sobrou: conferido, não há
- * outro `--color-white` em `components/forms/`.
+ * A emenda **E7** corrigiu a bolinha do `Switch` e não alcançou estes dois,
+ * porque o escopo dela nomeou o interruptor; a **E7-b** os corrigiu na origem no
+ * mesmo dia, e com ela a família fechou em **seis** — E1, link de pular, `ghost`
+ * do `Button`, botão de sair do `Topbar`, bolinha do `Switch`, e estes. Está
+ * exaurida, e isso foi conferido: não há mais nenhum `--color-white` em
+ * `components/forms/`. Este arquivo e a referência voltaram a dizer o mesmo.
  */
 export interface CheckboxProps
   extends Omit<

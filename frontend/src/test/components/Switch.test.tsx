@@ -44,6 +44,26 @@ describe("Switch", () => {
     expect(aoTrocar).not.toHaveBeenCalled();
   });
 
+  it("o foco é visível — o input escondido não pode ser o único indicador", () => {
+    // **Defeito do pacote que este componente não tem.** No `Switch.jsx` de
+    // referência o input é `position:absolute; width:1; height:1; opacity:0` e
+    // **nada** reage ao foco dele: quem navega por teclado chega no controle e
+    // não vê onde está. Não é anel fraco, é anel nenhum.
+    //
+    // Aqui o input é `peer` e o trilho desenha o anel. O jsdom não aplica
+    // CSS, então o que se prende é a estrutura: as duas metades precisam
+    // existir, e perder qualquer uma apaga o foco sem quebrar nada visível.
+    const { container } = render(<Switch checked={false} label="X" onChange={() => {}} />);
+    const input = container.querySelector("input")!;
+    expect(input.className).toContain("peer");
+
+    const alvo = container.querySelector('[class*="peer-focus-visible"]');
+    expect(alvo).not.toBeNull();
+    expect(alvo!.className).toContain("peer-focus-visible:ring-2");
+    // E o anel sai do degrau de AÇÃO, como o do Button e o dos campos.
+    expect(alvo!.className).toContain("peer-focus-visible:ring-action");
+  });
+
   it("não usa cor cravada", () => {
     const { container } = render(<Switch checked label="X" onChange={() => {}} />);
     expect(container.innerHTML).not.toMatch(/slate-\d/);

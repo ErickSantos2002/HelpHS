@@ -52,6 +52,26 @@ describe("Checkbox", () => {
     expect(caixa).toHaveAttribute("aria-checked", "mixed");
   });
 
+  it("o foco é visível — o input escondido não pode ser o único indicador", () => {
+    // **Defeito do pacote que este componente não tem.** No `Checkbox.jsx` de
+    // referência o input é `position:absolute; width:1; height:1; opacity:0` e
+    // **nada** reage ao foco dele: quem navega por teclado chega no controle e
+    // não vê onde está. Não é anel fraco, é anel nenhum.
+    //
+    // Aqui o input é `peer` e a caixa desenha o anel. O jsdom não aplica
+    // CSS, então o que se prende é a estrutura: as duas metades precisam
+    // existir, e perder qualquer uma apaga o foco sem quebrar nada visível.
+    const { container } = render(<Checkbox checked={false} label="X" onChange={() => {}} />);
+    const input = container.querySelector("input")!;
+    expect(input.className).toContain("peer");
+
+    const alvo = container.querySelector('[class*="peer-focus-visible"]');
+    expect(alvo).not.toBeNull();
+    expect(alvo!.className).toContain("peer-focus-visible:ring-2");
+    // E o anel sai do degrau de AÇÃO, como o do Button e o dos campos.
+    expect(alvo!.className).toContain("peer-focus-visible:ring-action");
+  });
+
   it("não usa cor cravada", () => {
     const { container } = render(<Checkbox checked label="X" onChange={() => {}} />);
     expect(container.innerHTML).not.toMatch(/slate-\d/);
@@ -83,18 +103,18 @@ describe("Checkbox", () => {
     it.each(["claro", "escuro"] as const)(
       "o visto se distingue da caixa marcada, tema %s",
       (tema) => {
-        // **Desvio medido do pacote, o mesmo do `Switch`.** O `Checkbox.jsx`
-        // pinta o visto e o traço indeterminado com `--color-white` cravado.
-        // Sobre o `--action` do escuro isso dá **2,69:1** — abaixo do piso de
-        // 3:1. A emenda E7 corrigiu a bolinha do `Switch` e **não** alcançou
-        // estes dois, porque o escopo dela nomeou só o interruptor.
+        // O visto e o traço usam `--text-on-primary`. O `Checkbox.jsx` do
+        // pacote pintava os dois com `--color-white` cravado — 2,69:1 sobre o
+        // `--action` do escuro —, e a emenda **E7-b** o corrigiu na origem no
+        // mesmo dia. O desvio local durou de uma tarde: hoje este arquivo e a
+        // referência dizem a mesma coisa.
         expect(
           contraste("--action", "--text-on-primary", tema),
         ).toBeGreaterThanOrEqual(NAO_TEXTO);
       },
     );
 
-    it("o branco cravado reprovaria no escuro — é o que o pacote ainda tem", () => {
+    it("o branco cravado reprovaria no escuro, e é por isso que a E7-b existe", () => {
       expect(contraste("--action", "--color-white", "escuro")).toBeLessThan(
         NAO_TEXTO,
       );
