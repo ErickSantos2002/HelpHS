@@ -1,0 +1,113 @@
+# Fase 8 — Formulários — HelpHS
+
+Relatório no formato da seção 32. **Em andamento** — este arquivo cresce a cada
+componente e fecha com a fase.
+
+## ⛔ Correção de uma afirmação publicada errada
+
+**O commit `32a3bb2` (`Textarea`) contém uma explicação falsa, e ela não foi
+reescrita de propósito.** A correção mora aqui.
+
+### O que eu publiquei
+
+> O espelho do desvio D5 no `index.css` é `html:not(.dark) .text-slate-500`, e a
+> classe aqui era `placeholder:text-slate-500` — **token de classe diferente, o
+> seletor não casa**. Ao contrário do rótulo e do valor, o placeholder **não**
+> era reescrito no tema claro.
+
+### O que é verdade
+
+**O espelho alcança as classes com prefixo.** O bloco vive em `@layer base`, e o
+`@layer base` passa pela máquina de variantes do Tailwind. Conferido compilando
+uma sonda com os três casos e lendo o CSS gerado:
+
+```css
+html:not(.dark) .placeholder\:text-slate-500::placeholder { color: rgb(100 116 139); }
+html:not(.dark) .hover\:text-slate-500:hover             { color: rgb(100 116 139); }
+```
+
+A especificidade do espelho com prefixo — `(0,3,1)` — vence a do utilitário,
+`(0,2,0)`. Ele vale.
+
+### O que sobrevive
+
+**Os números.** O placeholder era `#64748b` nos dois temas de qualquer forma,
+porque o espelho é uma **reflexão em torno do 500** e o próprio `slate-500` é
+**ponto fixo**: mapeia em si mesmo. Então 4,76:1 no claro e **3,36:1 no escuro**,
+reprovando — e a troca por `--text-muted` continua certa, com o teste válido.
+
+**Errou a explicação, não a medição.** Mas explicação errada em documento de
+decisão contamina as fases seguintes, e é por isso que esta correção existe em
+vez de uma emenda ao commit.
+
+### Como o erro entrou
+
+O mapeamento da fase concluiu "o seletor não casa" **lendo o seletor**, sem
+compilar. Eu repassei sem conferir. E o pior: a passagem adversarial da própria
+varredura **já havia refutado esse mesmo candidato**, com esta mesma explicação,
+dias antes. A resposta certa estava em mãos e a errada foi publicada.
+
+É exatamente o modo de falhar que a sessão do ChamadosHS relatou no mesmo dia —
+um agente dela concluiu sobre uma função tendo lido outra, e ela repassou antes
+de abrir o arquivo. **A passagem adversarial reduz o falso positivo; não o
+elimina.** O que elimina é conferir antes de publicar.
+
+### A regra que ficou
+
+Registrada em `COMPARTILHADO/DECISOES.md`, com a consequência prática:
+
+> Nas Fases 11–16, os usos de **`text-slate-500`** são os **primeiros a sair em
+> cada tela**, porque são os únicos que reprovam com certeza — em qualquer
+> prefixo e em qualquer superfície escura. Os outros degraus do espelho invertem
+> e podem estar aprovando; o 500 não inverte, e não está.
+
+---
+
+## 1. Componentes fechados até aqui
+
+| Componente | Commit | O que mudou |
+|---|---|---|
+| `Switch` | `d4f9d45` | **novo** — extraído do alternador de tema |
+| `Checkbox` | `2ba8d81` | **novo** — extraído de 3 usos inline |
+| `FileUpload` | `7c36642` | **novo** — extraído do `DropZone` do `TicketFormPage` |
+| `Input` | `17baed9` | 7 trocas de token, 2 não-mudanças deliberadas |
+| `Textarea` | `32a3bb2` | idem, e ganhou o teste que não tinha |
+
+Faltam **`Select`** e a **unificação dos três seletores**.
+
+## 2. As emendas que a fase gerou
+
+Três, e nenhuma estava prevista:
+
+| Emenda | O que faltava no pacote |
+|---|---|
+| **E7** | `--border-control` — nenhum token de borda alcançava 3:1 como contorno de controle |
+| **E7-b** | o visto do `Checkbox` em `--color-white` sobre `--action`: 2,69:1 no escuro |
+| **E9** | `Checkbox` e `Switch` não mostravam **foco nenhum** |
+
+E uma pendência aberta: o vocabulário de estado do `FileUpload.d.ts`
+(`scanning`/`rejected` não descrevem varredura síncrona).
+
+**A E8 é do ChamadosHS e ainda não foi escrita** — os pares `tint`/`on-tint` de
+`success`, `info` e `danger` sobre `--surface-elevated`. Quando o hash sair, este
+repositório recopia os sete arquivos.
+
+## 3. Desvio com prazo
+
+O foco dos campos usa `ring` do Tailwind (`box-shadow` por fora) e o pacote usa
+`outline` por dentro. **Não é exceção: é dívida com prazo**, registrada no
+`VERSION.md` como desvio **F1**, e expira no **Checkpoint 4**. Cada uma das telas
+alinha quando for migrada nas Fases 11–16, junto da captura antes e depois.
+
+## 4. Acréscimo à checklist da §29
+
+Entrou uma linha na conferência por tela, e ela nasceu deste caso:
+
+```text
+[ ] nenhum campo depende do placeholder para ser entendido
+```
+
+Placeholder some ao digitar, tem contraste menor por desenho, e em vários
+navegadores não é lido como nome acessível. Campo cujo único identificador é o
+placeholder fica sem nome para quem usa leitor de tela e sem referência para quem
+já começou a digitar.

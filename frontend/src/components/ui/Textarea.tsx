@@ -20,11 +20,17 @@ export interface TextareaProps extends TextareaHTMLAttributes<HTMLTextAreaElemen
  * `--border-control`, que é slate-500 — exatamente onde o `hover:border-slate-500`
  * chegava. O campo está sempre na força que antes dependia do ponteiro.
  *
- * **Uma diferença de forma que fica como está.** O pacote desenha o foco com a
- * borda pintada de `--action` mais um `outline` de 2px com `outlineOffset: -1`,
- * ou seja, indicador **por dentro** da caixa. Aqui é `ring` do Tailwind, que é
- * `box-shadow` por **fora**. Alinhar mudaria a geometria do foco em 18 usos sem
- * ganho de contraste — o anel de fora já dá 5,29:1 contra a superfície.
+ * **Uma diferença de forma que EXPIRA no Checkpoint 4.** O pacote desenha o foco
+ * com a borda pintada de `--action` mais um `outline` de 2px com
+ * `outlineOffset: -1` — indicador por **dentro** da caixa. Aqui é `ring` do
+ * Tailwind, que é `box-shadow` por **fora**.
+ *
+ * Não é exceção, é **dívida com prazo** (`VERSION.md`, desvio F1): cada uma das
+ * sete telas que usam este componente alinha ao `outline` interno **quando for
+ * migrada** nas Fases 11–16, junto da captura antes e depois. Não foi alinhado
+ * agora porque mudaria a geometria do foco em todas de uma vez, numa fase de
+ * componente, sem ganho de contraste — o anel de fora já dá 5,29:1 e o piso da
+ * 1.4.11 é 3:1.
  */
 export const Textarea = forwardRef<HTMLTextAreaElement, TextareaProps>(
   ({ label, error, hint, className, id, ...props }, ref) => {

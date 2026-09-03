@@ -125,6 +125,29 @@ camada, não um controle.
 A bolinha do `Switch` saiu de `--color-white` para `--text-on-primary`: branco
 cravado sobre o `--action` do escuro dava **2,69:1**, o mesmo número da E1.
 
+## Desvios com prazo — expiram no Checkpoint 4
+
+Diferente da tabela de desvios acima, que são de **método** e ficam, estes são
+de **forma** e têm data para sair. Não são exceção visual: são dívida.
+
+| # | Desvio | Onde | Expira |
+|---|---|---|---|
+| F1 | O foco dos campos é `ring` do Tailwind — `box-shadow` por **fora** da caixa. O `Input.jsx` e o `Textarea.jsx` do pacote desenham a borda em `--action` mais um `outline` de 2px com `outlineOffset: -1`, ou seja, indicador por **dentro**. | `ui/Input.tsx`, `ui/Textarea.tsx` — **7 telas** usam `Textarea`, 66 usam `Input` | **Checkpoint 4** |
+
+**Por que não foi alinhado agora:** mudaria a geometria do foco em todas as telas
+de uma vez, numa fase de componente, sem ganho de contraste — o anel de fora já
+dá 5,29:1 contra a superfície, e o piso da 1.4.11 é 3:1.
+
+**Como sai:** cada tela alinha ao `outline` interno **quando for migrada** nas
+Fases 11–16, junto da captura antes e depois que a §25 já exige. Não é um commit
+de sete telas no fim; é uma linha por tela, no momento em que a tela já está
+sendo olhada.
+
+**O que acontece se sobrar:** o Checkpoint 4 é onde isto é conferido. Um desvio
+de forma que atravessa a migração inteira deixa de ser dívida e vira o desenho —
+e aí a decisão é registrar como exceção ou pagar. O prazo existe para forçar essa
+escolha a ser feita, e não a ser esquecida.
+
 ## Como isto entra na aplicação
 
 `src/index.css` importa `design-system/styles.css` **antes** das diretivas

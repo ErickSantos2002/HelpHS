@@ -33,6 +33,10 @@ export interface InputProps extends InputHTMLAttributes<HTMLInputElement> {
  * que é slate-500 — exatamente onde o hover chegava. O campo agora está
  * **sempre** na força que antes dependia do ponteiro, e o hover virou no-op.
  * O `Input.jsx` do pacote também não tem hover nenhum.
+ *
+ * **O foco é desvio com prazo.** O `ring` do Tailwind é `box-shadow` por fora;
+ * o pacote desenha `outline` por dentro. Sai tela a tela nas Fases 11–16 e é
+ * conferido no **Checkpoint 4** (`VERSION.md`, desvio F1).
  */
 export const Input = forwardRef<HTMLInputElement, InputProps>(
   ({ label, error, hint, className, id, ...props }, ref) => {
