@@ -14,7 +14,7 @@
 | Origem | `C:\Users\ti_rickelme\Documents\GitHub\design-system` |
 | Tokens | 180 custom properties em 6 arquivos |
 | Copiado em | 02/09/2026 — Fase 1 da adoção |
-| Pacote emendado em | **02/09/2026 — E1** (`.dark` ganha `--text-on-primary`) e **E2** (botões semânticos ganham degrau próprio; `--on-tint-neutral` e `--on-tint-warning` passam a AA). Registro em `design-system/EMENDAS.md`; decisões em `COMPARTILHADO/DECISOES.md` (D10 e E2). **E3** (a fonte passa a ser servida pelo pacote), escrita pela sessão do ChamadosHS a partir do `D1-a`. **E5** (03/09/2026 — `--text-muted` vai de slate-500 a slate-600 e `--on-tint-neutral` volta a ser o alias `var(--text-muted)`), escrita pela sessão do ChamadosHS. **E7** (03/09/2026 — nasce o `--border-control`, e sete componentes de `forms/` passam a delimitar controle com ele), escrita pela sessão do HelpHS. Recopiados os sete arquivos a cada emenda; a E3 traz também o diretório `fonts/`. |
+| Pacote emendado em | **02/09/2026 — E1** (`.dark` ganha `--text-on-primary`) e **E2** (botões semânticos ganham degrau próprio; `--on-tint-neutral` e `--on-tint-warning` passam a AA). Registro em `design-system/EMENDAS.md`; decisões em `COMPARTILHADO/DECISOES.md` (D10 e E2). **E3** (a fonte passa a ser servida pelo pacote), escrita pela sessão do ChamadosHS a partir do `D1-a`. **E5** (03/09/2026 — `--text-muted` vai de slate-500 a slate-600 e `--on-tint-neutral` volta a ser o alias `var(--text-muted)`), escrita pela sessão do ChamadosHS. **E7** (03/09/2026 — nasce o `--border-control`, e sete componentes de `forms/` passam a delimitar controle com ele), escrita pela sessão do HelpHS. **E8** (03/09/2026 — os pares de `success`, `info` e `danger` saem da reprovação sobre `--surface-elevated`) e **E9** (`Checkbox` e `Switch` passam a mostrar foco), a primeira do ChamadosHS e a segunda do HelpHS. Recopiados os sete arquivos a cada emenda; a E3 traz também o diretório `fonts/`. |
 
 ## Hashes (SHA256)
 
@@ -27,7 +27,7 @@ conferência por hash — e as duas coisas não cabem juntas. O aviso mora aqui.
 
 ```
 base.css         BDD047CE432E74B33FA7F752DA08CF025419E83EA18485BD947C889C0AC1C221
-colors.css       539388386F7D92789A8F036AAAED638AE43FC3EA3ECE38D64629E29676B520F1
+colors.css       73550E08F6F951571068EEC741278FC2A7EDB5CEEC9CDDFC997111BC0F741139
 motion.css       C70D51A982AE0B91BD53ECE150D8D16E0E70BEF9CA59586541A9A7177228478E
 shape.css        7BCFBBC585D3EA8C7F689A27EEB3AE13DE0C2A9DCC3C6CC0C8F41D440D193F7D
 spacing.css      C093B261C6893A893A418CDF64798555326D4586A8ADB37CC7ECA457FABAE420
@@ -147,6 +147,41 @@ sendo olhada.
 de forma que atravessa a migração inteira deixa de ser dívida e vira o desenho —
 e aí a decisão é registrar como exceção ou pagar. O prazo existe para forçar essa
 escolha a ser feita, e não a ser esquecida.
+
+## A E8, e o que ela ensinou sobre medir
+
+A **E8** foi escrita pela sessão do ChamadosHS e corrige os pares
+`--tint-*` / `--on-tint-*` que reprovavam sobre `--surface-elevated`. Cinco
+linhas: dois degraus novos na rampa (`--color-danger-300`, `--color-info-300`) e
+três reatribuições.
+
+**A direção não é a mesma nos dois temas**, e essa é a parte contraintuitiva. No
+claro os pares são degraus 700 — texto escuro sobre tinta clara — e a correção é
+**subir** para o 800. No escuro são degraus 400 — texto claro sobre tinta escura
+— e ali o 800 seria quase preto sobre quase preto: a correção é **descer** para o
+300, clareando. É o mesmo que a **E1** fixou para `--action`: o degrau que
+carrega um papel inverte com o tema.
+
+| | antes | depois |
+|---|---:|---:|
+| `on-tint-success`, claro, elevada | 4,39 ❌ | **6,15** ✅ |
+| `on-tint-danger`, escuro, elevada | 4,38 ❌ | **6,38** ✅ |
+| `on-tint-info`, escuro, elevada | 4,40 ❌ | **6,21** ✅ |
+
+### Ela não alcançou o HelpHS sozinha
+
+O `Badge` daqui não lia nenhum dos três tokens: pintava `bg-<cor>/20` e escrevia
+`text-<cor>-700 dark:text-<cor>-400` à mão. **A emenda passou por cima do
+componente sem tocá-lo.**
+
+Medido nos tokens depois da recópia: **zero reprovações**. Medido no
+**componente**: **sete**, em 42 combinações, a pior em 2,77:1. O componente só
+entrou na conta quando passou a consumir as tintas e seus pares (`a1e9559`).
+
+**A regra que fica**, registrada em `COMPARTILHADO/DECISOES.md`: evidência de
+contraste se mede no **componente renderizado**, nunca no token. Token medido
+prova que a paleta é sólida — a mesma frase que abriu a varredura de contraste,
+agora provada uma segunda vez, por dentro.
 
 ## Como isto entra na aplicação
 

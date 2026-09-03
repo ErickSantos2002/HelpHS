@@ -66,6 +66,7 @@
 
   --color-danger-50: #fef2f2;
   --color-danger-100: #fee2e2;
+  --color-danger-300: #fca5a5;                       /* E8 */
   --color-danger-400: #f87171;
   --color-danger-500: #ef4444;
   --color-danger-600: #dc2626;
@@ -82,6 +83,7 @@
 
   --color-info-50: #eff6ff;
   --color-info-100: #dbeafe;
+  --color-info-300: #93c5fd;                         /* E8 */
   --color-info-400: #60a5fa;
   --color-info-500: #3b82f6;
   --color-info-600: #2563eb;
@@ -155,7 +157,7 @@
   --tint-neutral: var(--surface-elevated);
 
   --on-tint-primary: var(--color-primary-700);
-  --on-tint-success: var(--color-success-700);
+  --on-tint-success: var(--color-success-800);        /* E8 — claro: elevada 6,15 / surface 6,67 / base 6,41 */
   --on-tint-danger: var(--color-danger-700);
   --on-tint-warning: var(--color-warning-800);        /* sobre a tinta âmbar: 6,3:1 (era 4,47) */
   --on-tint-info: var(--color-info-700);
@@ -198,8 +200,8 @@
   /* As tintas não mudam — a opacidade já resolve. O texto por cima, sim. */
   --on-tint-primary: var(--color-primary-300);
   --on-tint-success: var(--color-success-400);
-  --on-tint-danger: var(--color-danger-400);
+  --on-tint-danger: var(--color-danger-300);          /* E8 — escuro: elevada 6,38 / surface 7,39 / base 8,02 */
   --on-tint-warning: var(--color-warning-400);
-  --on-tint-info: var(--color-info-400);
+  --on-tint-info: var(--color-info-300);              /* E8 — escuro: elevada 6,21 / surface 7,28 / base 7,96 */
   --on-tint-neutral: var(--text-muted);
 }
