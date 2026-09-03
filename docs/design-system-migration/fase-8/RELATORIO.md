@@ -111,3 +111,33 @@ Placeholder some ao digitar, tem contraste menor por desenho, e em vários
 navegadores não é lido como nome acessível. Campo cujo único identificador é o
 placeholder fica sem nome para quem usa leitor de tela e sem referência para quem
 já começou a digitar.
+
+## 5. As quatro barras que ficam para as Fases 11–16
+
+O `Progress.jsx` do pacote tem `role="progressbar"` e nasceu do `SlaProgresso` do
+ChamadosHS — **o pacote melhorou o que copiou, e a melhoria nunca voltou**. A
+barra de prazo da lista de chamados foi corrigida agora (`fc0162c`), por estar
+na tela mais usada e haver uma por chamado. As outras quatro entram tela a tela,
+e **duas delas não levam papel de progresso**:
+
+| Onde | O que mostra | Papel | Por quê |
+|---|---|---|---|
+| `AdminDashboard.tsx:566` | taxa de conformidade por prioridade | **`meter`** | é medida de um valor num intervalo, sem alvo a atingir |
+| `SlaConfigPage.tsx:256` | razão de resposta | **`meter`** | idem |
+| `AdminDashboard.tsx:511` | contagem por categoria | **nenhum** | vai de zero ao **maior valor da lista**, não a 100 — não há escala de porcentagem |
+| `AdminDashboard.tsx:129` | distribuição empilhada por status | **nenhum** | é gráfico de partes de um todo, não progresso |
+
+Para as duas últimas, o desenho registrado é: barra `aria-hidden` com o valor em
+texto ao lado, ou `role="img"` com `aria-label` no grupo inteiro.
+
+**Por que isso importa mais que o conserto:** `role="progressbar"` numa barra de
+comparação anuncia um número numa escala que não existe. É a terceira aparição
+de "token certo, propósito errado" nesta migração — depois do `--border-strong`
+como contorno de controle (E7) e da paleta categórica carregando texto no
+ChamadosHS. O conserto por analogia é o modo de falhar desta família.
+
+Um teste guarda isso: `test/pages/barra-de-sla.test.ts` exige que o
+`AdminDashboard` **não** ganhe `role="progressbar"`.
+
+A §29 ganhou o item correspondente, para valer em toda tela migrada daqui em
+diante.
