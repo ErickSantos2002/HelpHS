@@ -292,7 +292,7 @@ function literaisDe(texto) {
         conteudo += texto[j];
         j++;
       }
-      if (texto[j] === c) saida.push(conteudo);
+      if (texto[j] === c) saida.push({ texto: conteudo, indice: i });
       i = j + 1;
       continue;
     }
@@ -331,8 +331,10 @@ function literaisDe(texto) {
       }
       // O template sem as interpolações é um literal; o conteúdo de cada
       // interpolação é código, e volta pelo scanner (armadilha 4).
-      saida.push(estatico);
-      for (const dentro of interpolacoes) saida.push(...literaisDe(dentro));
+      saida.push({ texto: estatico, indice: i });
+      for (const dentro of interpolacoes) {
+        for (const l of literaisDe(dentro)) saida.push({ ...l, indice: i });
+      }
       i = j + 1;
       continue;
     }
@@ -453,17 +455,22 @@ export function varrer(raiz) {
     const texto = readFileSync(arquivo, "utf-8");
     const rel = path.relative(raiz, arquivo).split(path.sep).join("/");
     for (const literal of literaisDe(texto)) {
-      const classes = literal.split(/\s+/).filter(Boolean);
+      const classes = literal.texto.split(/\s+/).filter(Boolean);
       if (classes.length === 0) continue;
+      // A linha serve ao leitor, não à identidade do achado: uma edição acima
+      // move todas, e catraca que grita por linha em branco é catraca que
+      // alguém desliga na primeira semana. Por isso a chave de deduplicação
+      // (abaixo) não a inclui, mas o relatório a mostra.
+      const linha = texto.slice(0, literal.indice).split("\n").length;
       for (const p of paresDoLiteral(classes)) {
-        achados.push({ arquivo: rel, ...p });
+        achados.push({ arquivo: rel, linha, ...p });
       }
     }
   }
   const vistos = new Set();
   return achados
     .filter((a) => {
-      const ch = `${a.arquivo}|${a.fundo}|${a.texto}|${a.tema}`;
+      const ch = `${a.arquivo}|${a.linha}|${a.fundo}|${a.texto}|${a.tema}`;
       if (vistos.has(ch)) return false;
       vistos.add(ch);
       return true;
@@ -619,10 +626,10 @@ if (ehPrincipal) {
   } else {
     console.log("Pares abaixo de AA (4,5:1), lidos do JSX:\n");
     for (const a of achados) {
-      console.log(`  ${a.razao.toFixed(2).padStart(5)}:1  ${a.tema.padEnd(6)}  ${a.arquivo}`);
+      console.log(`  ${a.razao.toFixed(2).padStart(5)}:1  ${a.tema.padEnd(6)}  ${a.arquivo}:${a.linha}`);
       console.log(`           ${a.estado.padEnd(16)} ${a.fundo}  +  ${a.texto}`);
     }
-    const lugares = new Set(achados.map((a) => `${a.arquivo}|${a.fundo}|${a.texto}`));
+    const lugares = new Set(achados.map((a) => `${a.arquivo}|${a.linha}|${a.fundo}|${a.texto}`));
     const arquivos = new Set(achados.map((a) => a.arquivo));
     console.log(
       `\n${achados.length} pares (${lugares.size} lugares distintos) em ${arquivos.size} arquivos`,
