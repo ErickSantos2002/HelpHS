@@ -83,12 +83,18 @@ Estava em 4,34:1 no claro — achado na Fase 7, e **não** corrigido localmente 
 propósito, para não recriar o desvio que a E2 tinha acabado de eliminar. A E5
 o levou a **6,92:1** na origem. Nenhuma linha do `Button.tsx` mudou.
 
-**A E4 não está no `EMENDAS.md`.** A mudança do sexto par do `Avatar.jsx` é de
-origem que nenhuma das duas sessões reconheceu, e a pergunta de quem editou
-segue aberta com o operador. Com a E5 o alias e o token passam a valer o mesmo,
-então o avatar neutro fica correto por qualquer um dos dois caminhos — mas isso
-não fecha a pergunta da origem, e nem este arquivo nem o `EMENDAS.md` fingem que
-fecha.
+**A E4 está no `EMENDAS.md` como "não aplicada".** Em 03/09/2026 o operador
+decidiu: a emenda não entra, porque a E5 a torna desnecessária — depois dela
+`--text-muted` e `--on-tint-neutral` resolvem para o mesmo `#475569`, e adotar a
+E4 seria trocar um token pelo seu próprio alias. A alteração de origem
+desconhecida que o `Avatar.jsx` do pacote carregava desde 02/09 **foi
+revertida**; o arquivo voltou ao valor do export, com hash
+`7CF223928607A3ADBA0E67CEA8C0B74ACD6269D01FFDB86ECCCF7E99092DB2C9`.
+
+O número **E4 fica gasto** no registro em vez de ser reaproveitado: uma sequência
+sem buracos daria a entender que toda mudança no pacote passou por decisão
+registrada, e uma não passou. **A pergunta de quem editou continua aberta** — a
+reversão devolve o conteúdo, não responde a autoria.
 
 ## Como isto entra na aplicação
 

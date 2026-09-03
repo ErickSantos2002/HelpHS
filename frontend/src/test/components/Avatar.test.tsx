@@ -60,7 +60,7 @@ describe("Avatar", () => {
       ["bg-warning-50", "text-warning-700"],
       ["bg-danger-50", "text-danger-700"],
       ["bg-success-50", "text-success-700"],
-      ["bg-surface-elevated", "text-on-tint-neutral"],
+      ["bg-surface-elevated", "text-conteudo-muted"],
     ];
     const vistos = new Set<string>();
     // A cor sai da soma dos char codes % 6, entao seis nomes de uma letra
@@ -115,7 +115,7 @@ describe("Avatar", () => {
       for (const superficie of SUPERFICIES) {
         it(`o par neutro aprova em AA sobre ${superficie}, tema ${tema}`, () => {
           expect(
-            contraste(superficie, "--on-tint-neutral", tema),
+            contraste(superficie, "--text-muted", tema),
           ).toBeGreaterThanOrEqual(AA);
         });
       }
