@@ -106,7 +106,15 @@ function SlaIndicator({ ticket, now }: { ticket: Ticket; now: number }) {
   if (isOpen && ticket.sla_first_response) {
     return (
       <div className="mt-2.5 space-y-1">
-        <div className="h-1 w-full overflow-hidden rounded-full bg-background-elevated">
+        <div
+          role="progressbar"
+          aria-label={`Prazo de ${phase}`}
+          aria-valuemin={0}
+          aria-valuemax={100}
+          aria-valuenow={100}
+          aria-valuetext={breach ? "respondida com atraso" : "respondida"}
+          className="h-1 w-full overflow-hidden rounded-full bg-background-elevated"
+        >
           <div className="h-full w-full rounded-full" style={{ backgroundColor: "#10b981" }} />
         </div>
         <div className={cn("flex items-center gap-1 text-[10px] font-bold", breach ? "text-red-500 dark:text-red-400" : "text-emerald-500 dark:text-emerald-400")}>
@@ -146,7 +154,21 @@ function SlaIndicator({ ticket, now }: { ticket: Ticket; now: number }) {
 
   return (
     <div className="mt-2.5 space-y-1">
-      <div className="h-1 w-full overflow-hidden rounded-full bg-background-elevated">
+      {/* A barra é `progressbar` de verdade, e não uma div colorida: tem escala
+          de 0 a 100 e um alvo. O `aria-valuetext` troca o anúncio de "65%" —
+          que não diz nada a quem ouve — pelo tempo que sobra, que é o que a
+          pessoa precisa saber. O `Progress.jsx` do pacote já nasceu com essa
+          semântica, copiada do ChamadosHS; ela nunca tinha voltado para cá. */}
+      <div
+        role="progressbar"
+        aria-label={`Prazo de ${phase}`}
+        aria-valuemin={0}
+        aria-valuemax={100}
+        aria-valuenow={Math.round(pct)}
+        aria-valuetext={breached ? "prazo vencido" : `${display} restantes`}
+        
+        className="h-1 w-full overflow-hidden rounded-full bg-background-elevated"
+      >
         <div
           className="h-full rounded-full transition-all duration-700"
           style={{ width: `${pct}%`, backgroundColor: barColor }}
