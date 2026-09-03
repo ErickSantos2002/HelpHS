@@ -72,25 +72,41 @@ Registrada em `COMPARTILHADO/DECISOES.md`, com a consequência prática:
 | `FileUpload` | `7c36642` | **novo** — extraído do `DropZone` do `TicketFormPage` |
 | `Input` | `17baed9` | 7 trocas de token, 2 não-mudanças deliberadas |
 | `Textarea` | `32a3bb2` | idem, e ganhou o teste que não tinha |
+| `Select` | `7b8e72a` | os mesmos tokens, e a seta deixou de ser um data URI cravado |
 
-Faltam **`Select`** e a **unificação dos três seletores**.
+Falta a **unificação dos três seletores**.
 
 ## 2. As emendas que a fase gerou
 
-Três, e nenhuma estava prevista:
+Quatro, e nenhuma estava prevista:
 
 | Emenda | O que faltava no pacote |
 |---|---|
 | **E7** | `--border-control` — nenhum token de borda alcançava 3:1 como contorno de controle |
 | **E7-b** | o visto do `Checkbox` em `--color-white` sobre `--action`: 2,69:1 no escuro |
 | **E9** | `Checkbox` e `Switch` não mostravam **foco nenhum** |
+| **E10** | a seta do `Select` era um data URI com `stroke='%2394a3b8'` — data URI não aceita `var()`, então ela nunca seguiu o tema |
 
 E uma pendência aberta: o vocabulário de estado do `FileUpload.d.ts`
 (`scanning`/`rejected` não descrevem varredura síncrona).
 
-**A E8 é do ChamadosHS e ainda não foi escrita** — os pares `tint`/`on-tint` de
-`success`, `info` e `danger` sobre `--surface-elevated`. Quando o hash sair, este
-repositório recopia os sete arquivos.
+**A E8 é do ChamadosHS**, e desde então foi escrita e adotada — os pares
+`tint`/`on-tint` de `success`, `info` e `danger` sobre `--surface-elevated`. O
+`colors.css` foi recopiado e o `Badge` foi o componente que a fez valer.
+
+## 2.1 A catraca desceu pela primeira vez
+
+O `Select` produziu o **primeiro disparo da catraca no sentido que importa**:
+**51 → 50**. Os disparos anteriores foram todos de subida — código novo trazendo
+par novo abaixo de 4,5:1, e a catraca barrando. Este foi o inverso: um par
+reprovado deixou de existir, e a linha de base **desceu junto**, porque a catraca
+falha nos **dois** sentidos.
+
+A descida é o ponto: uma catraca que só sobe vira teto. Ao baixar a base quando o
+número melhora, ela transforma cada conserto em piso novo — o par consertado não
+pode voltar sem que a varredura acuse.
+
+Hoje: `catraca: 50 par(es) abaixo de 4,5:1, linha de base 50 — ok, em dia.`
 
 ## 3. Desvio com prazo
 
