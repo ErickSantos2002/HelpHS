@@ -270,17 +270,25 @@ pesos de cor, provando a herança de `currentColor`.
 
 **Desvio deliberado, com decisão a registrar:**
 
-- **`Badge muted` não usa `--text-faint`.** O pacote pinta `muted` com
-  `--text-faint` sobre `--tint-neutral`: **2,34:1** no claro — pior que o valor
-  que o HelpHS já tinha. Seguir o pacote seria trocar uma reprovação por uma
-  maior. `muted` recebeu `--on-tint-neutral`, e um teste prende o motivo: se o
-  pacote corrigir o `--text-faint`, o teste cai e o desvio se revê.
+- ~~**`Badge muted` não usa `--text-faint`.**~~ **Deixou de ser desvio em
+  03/09**: a emenda **E6** levou o `muted` do `Badge.jsx` do pacote a
+  `--on-tint-neutral`, que é o que o HelpHS já fazia. O pacote pintava com
+  `--text-faint` sobre `--tint-neutral` — **2,34:1** no claro, pior que o valor
+  que o HelpHS tinha antes —, e o `D9` já proibia `--text-faint` em texto
+  informativo. "Fechado" e "Baixo" são informativos: quem não lê não sabe o
+  estado do chamado. Era o mesmo par ruim da E2 e da E5, num quarto lugar.
+  **Nada muda no código daqui** — o que muda é que a implementação local virou a
+  especificação, e quem implementar `muted` com `--text-faint` está seguindo
+  versão revogada.
 - **Consequência: `secondary` e `muted` ficaram idênticos.** Mesma classe, mesmo
   pixel — visível nos dois screenshots. `muted` veste `StatusBadge closed` e
   `PriorityBadge low`, que deixam de se distinguir do selo neutro comum. O
   pacote separava os dois pelo tom do texto, e é essa separação que se perde.
-  Recuperá-la exige um degrau que não existe (um `--on-tint-neutral-muted`), e
-  isso é emenda de pacote com decisão própria. **Não foi feito.**
+  Recuperá-la exigiria um degrau que o pacote não tem. **A E6 registrou a
+  colisão como a decisão**, e não como efeito colateral: a alternativa seria
+  inventar um degrau intermediário para preservar uma distinção que nunca foi
+  legível — 2,34:1 não é "mais discreto", é ilegível. O que separa as duas
+  variantes passa a ser o rótulo, que a §16 exige de todo jeito.
 - **`secondary` perdeu contraste**: 9,45 → 6,92 no claro, 9,13 → 5,29 no escuro.
   Os dois seguem acima de AA. A troca compra um par único, com um nome só, igual
   ao do avatar neutro.
@@ -404,6 +412,50 @@ Lista completa, as quatro armadilhas do método e o padrão do degrau 500 em
 `contraste-fundo-cheio.md`, nesta mesma pasta. O aviso ficou também no cabeçalho
 do `Button.tsx`, para ninguém ler "botão semântico corrigido" e concluir o que
 não está.
+
+### O que um painel adversarial achou depois
+
+A varredura foi entregue a cinco agentes com lentes distintas, instruídos a
+achar uma nona armadilha. Levantaram nove candidatas; a fase de refutação
+derrubou cinco e confirmou três — cada uma com fixture executado, não com
+argumento. **Uma delas escondia reprovação viva em produção.**
+
+- **9. Perguntar "este estado tem texto próprio?" em vez de resolver
+  precedência.** `dark:hover:bg-X` com `text-Y` sem prefixo nunca era medido no
+  escuro: a busca procurava `dark:text-`, não achava e desistia. Escondia o
+  **botão de sair do `Topbar`** (`Topbar.tsx:407`) — `text-danger` sobre
+  `dark:hover:bg-background-elevated`, **3,60:1**, em código publicado. O modelo
+  passou a ser precedência: no escuro em hover, `dark:hover:` > `hover:` >
+  `dark:` > sem prefixo.
+- **10. Ignorar o prefixo important.** `dark:hover:!text-slate-100` deixava de
+  contar como sobrescrita e ressuscitava o fantasma de 1,32:1. O verificador
+  compilou o caso com o Tailwind instalado para provar dos dois lados.
+- **11. Recortar interpolação com regex cega a profundidade.** `cn({ ativo }, …)`
+  costurava ramos exclusivos num literal só — inventando par de 1,47:1 e
+  apagando par real.
+
+E a armadilha 5 voltou pela porta do conserto da 9: a busca por precedência
+devolvia a primeira classe que casava o prefixo, e `text-sm` vinha antes de
+`text-danger`. Custou 15 pares e o próprio achado do `Topbar` — a varredura caiu
+de 72 para 57, e só foi notado porque o número tinha de **subir**.
+
+**Nenhuma das onze armadilhas foi achada lendo o código.** Oito apareceram no
+uso ou por acidente, três por alguém procurando de propósito. Três delas
+transformavam reprovação em aprovação.
+
+### A conta, com a varredura corrigida
+
+**52 lugares em 25 arquivos**, contando por `arquivo:linha`:
+
+| Família | Lugares |
+|---|---:|
+| `text-slate-*` sobre superfície (caminho do D5) | 30 |
+| fundo cheio + `text-white` | 21 |
+| token sobre token | 1 — o `Topbar.tsx:407` |
+
+O pior é **1,79:1**: ícones de estado vazio (`text-slate-600` sobre `elevated`)
+no tema escuro, em cinco telas. Os 30 do caminho D5 saem tela a tela nas Fases
+11–16 — cada página migrada zera os seus, e não numa fase final de limpeza.
 
 ## 10-C. O furo do 4,76 — medir uma superfície onde existem três
 

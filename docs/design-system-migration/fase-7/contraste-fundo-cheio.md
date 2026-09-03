@@ -11,7 +11,20 @@ Checkpoint 1 mediu `--action` contra as superfícies e deu a casca por conforme.
 Origem: pista da sessão do **ChamadosHS**, que achou o mesmo padrão do lado
 dela. As duas varreduras trocaram método antes de qualquer conserto.
 
-## As quatro armadilhas do método
+> **Atualizado em 03/09.** Esta lista foi levantada por uma versão da varredura
+> que tinha três defeitos, achados depois por um painel adversarial: ela não
+> resolvia precedência de variante (`dark:hover:bg-X` com texto sem prefixo
+> nunca era medido no escuro), ignorava o prefixo `!` e recortava interpolação
+> com regex cega a profundidade. A lista corrigida tem **52 lugares em 25
+> arquivos** — 30 do caminho `text-slate-*`, 21 de fundo cheio com `text-white`,
+> e **1 de token sobre token que a versão antiga não via**: o botão de sair do
+> `Topbar` (`Topbar.tsx:407`), `text-danger` sobre
+> `dark:hover:bg-background-elevated`, **3,60:1**, em código publicado.
+>
+> A lista viva sai de `node scripts/varredura-contraste.mjs`. As tabelas abaixo
+> ficam como o registro do que se sabia no dia, e não como inventário corrente.
+
+## As armadilhas do método (quatro aqui; onze no script)
 
 As três primeiras vieram de lá, já com a correção; a quarta apareceu aqui.
 
