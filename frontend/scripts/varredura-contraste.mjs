@@ -658,10 +658,12 @@ function provar() {
  *
  * -- A linha de base ---------------------------------------------------
  *
- * **50 pares em 34 chaves.** Nasceu em 51; desceu um quando o `Select` largou o
- * `bg-background-surface text-slate-500` da opcao de placeholder (Fase 8). Foi a
- * catraca que exigiu a atualizacao: ela reprovou no sentido "melhorou", que e o
- * que a separa de um carimbo de linha de base.
+ * **49 pares em 33 chaves.** Nasceu em 51 e ja desceu duas vezes,
+ * as duas exigidas pela propria catraca no sentido "melhorou": uma quando o
+ * `Select` largou o `bg-background-surface text-slate-500` da opcao de
+ * placeholder (Fase 8), outra quando o `Pagination` trocou o `bg-primary
+ * text-white` da pagina atual — 3,83:1 — pelo par `bg-action text-on-primary`
+ * (Fase 9). E o que a separa de um carimbo de linha de base.
  *
  * Trinta deles sao `text-slate-*` sobre superficie, vivos por causa do desvio
  * D5, e saem tela a tela nas Fases 11-16 — cada pagina migrada zera os seus.
@@ -671,7 +673,6 @@ const PARES_CONHECIDOS = new Map([
   ['components/chat/ChatPanel.tsx  bg-primary  repouso', 1],
   ['components/chat/QuickReplyPicker.tsx  bg-background-surface  repouso', 2],
   ['components/layout/Topbar.tsx  bg-danger  repouso', 2],
-  ['components/ui/Pagination.tsx  bg-primary  repouso', 1],
   ['pages/audit/AuditLogsPage.tsx  bg-background-elevated  repouso', 2],
   ['pages/audit/AuditLogsPage.tsx  hover:bg-background-elevated  hover:', 1],
   ['pages/calendar/CalendarPage.tsx  bg-primary  repouso', 2],
