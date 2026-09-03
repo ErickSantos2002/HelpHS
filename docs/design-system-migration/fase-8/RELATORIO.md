@@ -73,8 +73,67 @@ Registrada em `COMPARTILHADO/DECISOES.md`, com a consequência prática:
 | `Input` | `17baed9` | 7 trocas de token, 2 não-mudanças deliberadas |
 | `Textarea` | `32a3bb2` | idem, e ganhou o teste que não tinha |
 | `Select` | `7b8e72a` | os mesmos tokens, e a seta deixou de ser um data URI cravado |
+| `Selector` | `35cdba0` | **novo** — unifica os três seletores; os nomes viram invólucros |
 
-Falta a **unificação dos três seletores**.
+**A fase está fechada.** `Radio` não entrou por decisão do operador ("Radio:
+nada"), e o `Toast` é da Fase 10.
+
+## 1.1 A unificação dos três seletores
+
+`FilterSelect` (17 chamadas), `FormDropdown` (2) e `SearchSelect` (1) faziam a
+mesma coisa com três desenhos. Viraram um `Selector` com dois eixos, e os três
+nomes continuam como invólucros finos `@deprecated`. **Nenhuma das 20 chamadas
+mudou** — os testes de contrato que já existiam passam, inclusive os de portal,
+scroll, resize e ancoragem pela borda, que eram o comportamento mais frágil.
+
+Os eixos são dois porque medem coisas independentes: `variant` decide **onde o
+painel é ancorado** (o `"filter"` precisa de portal porque vive dentro de
+contêiner com `overflow`; o `"form"` é `absolute` sob o campo), e `searchable`
+decide **de onde vêm as opções**. Um filtro pode ser buscável e um formulário
+pode não ser.
+
+### Quatro defeitos que só apareceram ao unificar
+
+| | O que era |
+|---|---|
+| **Tokens** | nenhum dos três usava um token do pacote — **45 cores `slate` cravadas**, hoje zero |
+| **Tema** | `FormDropdown` e `SearchSelect` eram escritos **só para o escuro**: `text-slate-300` no rótulo, sem um único `dark:` |
+| **Foco** | os dois traziam `focus:outline-none` **e nada no lugar** — o defeito da E9, foco ausente e não fraco |
+| **Teclado** | **nenhum dos três tinha** — e o `SearchSelect` ainda declarava `role="listbox"` e `role="option"` sem honrar o contrato |
+
+O último é o mais grave, e não por ser o mais visível: declarar o papel
+**promete** o contrato do widget a quem usa leitor de tela — setas andam, `Enter`
+escolhe, `Escape` fecha. Prometer e não cumprir é pior que não declarar nada,
+porque a pessoa espera um comportamento que nunca vem.
+
+### O que a catraca não via, e por quê
+
+**45 cores cravadas saíram e o número da catraca não mudou** — 50, linha de base
+50. Isso não é a catraca falhando: é a prova de que ela nunca as viu. Ela casa
+`bg-*` com `text-*` **na mesma string**, e nestes componentes o fundo vinha do
+elemento pai. A varredura achava 7 pares nos três arquivos, todos aprovados.
+
+Fica registrado como limite conhecido da ferramenta: **cor de texto sem fundo
+co-locado é invisível para a catraca**. Nas Fases 11–16 isso vale para toda tela
+cujo fundo esteja no contêiner e o texto no filho.
+
+### Uma mudança de papel, deliberada
+
+As linhas de opção eram `<button>` sem papel e hoje são `role="option"`. O papel
+explícito **substitui** o implícito, então sete consultas dos testes de contrato
+acompanharam — sem que nenhuma asserção enfraquecesse. Para o mouse, nada mudou.
+
+### O que não foi unificado
+
+`dot` e `hint` continuam dois campos. Um é amostra de cor, o outro é linha de
+texto secundária; juntá-los num "campo secundário" seria a armadilha de **token
+certo, propósito errado** — a terceira aparição dela nesta migração, depois do
+`--border-strong` como contorno (E7) e das barras de comparação como `progressbar`.
+
+### Pendência que a fase abre
+
+Os **20 `dot:` das telas são hex cru** (`#f59e0b`, `#10b981`), fora do sistema de
+tokens. Não mexi: é decisão de desenho, e entra nas Fases 11–16 com cada tela.
 
 ## 2. As emendas que a fase gerou
 
