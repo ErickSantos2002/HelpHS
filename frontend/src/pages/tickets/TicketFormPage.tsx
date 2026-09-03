@@ -1,9 +1,17 @@
 import { zodResolver } from "@hookform/resolvers/zod";
-import { useCallback, useEffect, useRef, useState } from "react";
+import { useEffect, useState } from "react";
 import { useForm } from "react-hook-form";
 import { useNavigate, useParams } from "react-router-dom";
 import { z } from "zod";
-import { Alert, Button, FormDropdown, Input, Spinner, Textarea } from "../../components/ui";
+import {
+  Alert,
+  Button,
+  FileUpload,
+  FormDropdown,
+  Input,
+  Spinner,
+  Textarea,
+} from "../../components/ui";
 import {
   getProducts,
   type Product,
@@ -166,64 +174,6 @@ function PrioritySelector({ value, onChange }: { value: string; onChange: (v: st
           );
         })}
       </div>
-    </div>
-  );
-}
-
-// ── Drop zone ─────────────────────────────────────────────────
-
-function DropZone({ files, onChange }: { files: File[]; onChange: (files: File[]) => void }) {
-  const inputRef = useRef<HTMLInputElement>(null);
-  const [dragOver, setDragOver] = useState(false);
-  const [fileError, setFileError] = useState<string | null>(null);
-
-  const validateAndAdd = useCallback((incoming: File[]) => {
-    setFileError(null);
-    const valid: File[] = [];
-    for (const f of incoming) {
-      const ext = "." + f.name.split(".").pop()?.toLowerCase();
-      if (!ALLOWED_EXTENSIONS.includes(ext)) { setFileError(`Tipo não permitido: ${f.name}`); continue; }
-      if (f.size > MAX_FILE_SIZE_MB * 1024 * 1024) { setFileError(`Arquivo muito grande (máx ${MAX_FILE_SIZE_MB} MB): ${f.name}`); continue; }
-      if (!files.find((x) => x.name === f.name && x.size === f.size)) valid.push(f);
-    }
-    onChange([...files, ...valid].slice(0, MAX_FILES));
-  }, [files, onChange]);
-
-  return (
-    <div className="space-y-3">
-      <div
-        onDragOver={(e) => { e.preventDefault(); setDragOver(true); }}
-        onDragLeave={() => setDragOver(false)}
-        onDrop={(e) => { e.preventDefault(); setDragOver(false); validateAndAdd(Array.from(e.dataTransfer.files)); }}
-        onClick={() => inputRef.current?.click()}
-        className={`flex flex-col items-center gap-2 rounded-xl border-2 border-dashed px-6 py-8 text-center cursor-pointer transition-all ${
-          dragOver ? "border-primary bg-primary/5" : "border-border/50 hover:border-primary/40 hover:bg-primary/5"
-        }`}
-      >
-        <span className="text-slate-500">{IC.Clip}</span>
-        <div>
-          <p className="text-sm text-slate-400">Arraste arquivos aqui ou <span className="text-primary font-medium">clique para selecionar</span></p>
-          <p className="text-xs text-slate-600 mt-0.5">Máx {MAX_FILES} arquivos · {MAX_FILE_SIZE_MB} MB cada</p>
-        </div>
-        <input ref={inputRef} type="file" multiple accept={ALLOWED_EXTENSIONS.join(",")} className="hidden"
-          onChange={(e) => { if (e.target.files) validateAndAdd(Array.from(e.target.files)); e.target.value = ""; }} />
-      </div>
-      {fileError && <p className="text-xs text-danger">{fileError}</p>}
-      {files.length > 0 && (
-        <ul className="space-y-1.5">
-          {files.map((f, i) => (
-            <li key={i} className="flex items-center gap-3 rounded-lg border border-border/40 bg-background-elevated/40 px-3 py-2">
-              <div className="flex h-8 w-8 shrink-0 items-center justify-center rounded-lg bg-primary/10 text-[9px] font-bold text-primary">
-                {(f.name.split(".").pop() ?? "?").toUpperCase().slice(0, 4)}
-              </div>
-              <span className="flex-1 truncate text-sm text-slate-300">{f.name}</span>
-              <span className="text-xs text-slate-500 shrink-0">{(f.size / 1024 / 1024).toFixed(1)} MB</span>
-              <button type="button" onClick={() => onChange(files.filter((_, j) => j !== i))}
-                className="shrink-0 text-slate-500 hover:text-danger transition-colors cursor-pointer">{IC.X}</button>
-            </li>
-          ))}
-        </ul>
-      )}
     </div>
   );
 }
@@ -680,7 +630,13 @@ export default function TicketFormPage() {
 
             {/* Anexos */}
             <FormSection title="Anexos (opcional)">
-              <DropZone files={files} onChange={setFiles} />
+              <FileUpload
+                files={files}
+                onChange={setFiles}
+                accept={ALLOWED_EXTENSIONS}
+                maxFiles={MAX_FILES}
+                maxSizeMb={MAX_FILE_SIZE_MB}
+              />
               <p className="text-xs text-slate-500">
                 Prints, fotos ou documentos ajudam o técnico a resolver mais rapidamente.
               </p>

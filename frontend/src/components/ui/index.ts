@@ -31,6 +31,9 @@ export type { SwitchProps } from "./Switch";
 export { Select } from "./Select";
 export type { SelectProps, SelectOption } from "./Select";
 
+export { FileUpload } from "./FileUpload";
+export type { FileUploadProps } from "./FileUpload";
+
 export { FilterSelect } from "./FilterSelect";
 export type { FilterSelectProps, FilterSelectOption } from "./FilterSelect";
 

@@ -6,6 +6,7 @@ import { cn, plural } from "../../lib/utils";
 import { useNavigate, useParams } from "react-router-dom";
 import {
   Alert,
+  Badge,
   Button,
   Modal,
   ModalFooter,
@@ -526,7 +527,29 @@ function AttachmentItem({
         >
           {attachment.original_name}
         </button>
-        <p className="text-xs text-slate-500">{sizeMb} MB</p>
+        <p className="flex items-center gap-1.5 text-xs text-conteudo-muted">
+          {sizeMb} MB
+          {/* O estado do antivírus, que até aqui era invisível. O backend
+              devolve `virus_scanned` desde sempre e nenhuma tela o lia.
+
+              São três estados, e só dois viram linha no banco:
+
+              · verificado  — `virus_scanned = true`
+              · NÃO verificado — o ClamAV estava fora, e `attachments.py` grava
+                assim mesmo (`virus_scanned = false`). O arquivo está lá, e
+                ninguém o examinou.
+              · rejeitado — nunca chega aqui: o antivírus barra ANTES de
+                persistir, e volta 422 com `detail: "File 'X' rejected: …"`.
+                Quem mostra o motivo é o `toastApiError` do envio.
+
+              O selo só aparece no estado que precisa de atenção. Carimbar
+              "verificado" em todo anexo viraria ruído e ensinaria a ignorar. */}
+          {!attachment.virus_scanned && (
+            <Badge variant="warning" title="O antivírus estava indisponível quando este arquivo foi enviado, e ele foi gravado sem verificação.">
+              não verificado
+            </Badge>
+          )}
+        </p>
       </div>
       <div className="flex items-center gap-1 opacity-0 group-hover:opacity-100 transition-opacity">
         {viewable && (

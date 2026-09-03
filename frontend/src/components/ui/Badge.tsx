@@ -9,10 +9,10 @@ type BadgeVariant =
   | "success"
   | "muted";
 
-export interface BadgeProps {
+export interface BadgeProps
+  extends Omit<React.HTMLAttributes<HTMLSpanElement>, "children"> {
   variant?: BadgeVariant;
   children: React.ReactNode;
-  className?: string;
 }
 
 const variantClasses: Record<BadgeVariant, string> = {
@@ -29,6 +29,7 @@ export function Badge({
   variant = "secondary",
   children,
   className,
+  ...props
 }: BadgeProps) {
   return (
     <span
@@ -37,6 +38,7 @@ export function Badge({
         variantClasses[variant],
         className,
       )}
+      {...props}
     >
       {children}
     </span>
