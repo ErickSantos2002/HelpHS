@@ -99,7 +99,8 @@
 
   --text-heading: var(--color-slate-900);
   --text-body: var(--color-slate-800);
-  --text-muted: var(--color-slate-500);
+  /* E5 — slate-600 e nao 500: sobre --surface-elevated o 500 da 4,34:1. */
+  --text-muted: var(--color-slate-600);
   --text-faint: var(--color-slate-400);
   --text-on-primary: var(--color-white);
   --text-link: var(--color-primary-600);
@@ -154,7 +155,7 @@
   --on-tint-danger: var(--color-danger-700);
   --on-tint-warning: var(--color-warning-800);        /* sobre a tinta âmbar: 6,3:1 (era 4,47) */
   --on-tint-info: var(--color-info-700);
-  --on-tint-neutral: var(--color-slate-600);          /* sobre slate-100: 6,9:1 (era 4,34) */
+  --on-tint-neutral: var(--text-muted);               /* E5: volta ao alias; o valor e o mesmo */
 }
 
 /* ── Tema escuro ──────────────────────────────────────────────

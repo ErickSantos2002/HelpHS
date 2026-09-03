@@ -88,37 +88,58 @@ describe("Avatar", () => {
     expect(screen.getByTestId("disco")).toBeInTheDocument();
   });
 
-  // ── Emenda E4 ─────────────────────────────────────────────────────────
+  // ── Emendas E4 e E5 ───────────────────────────────────────────────────
 
   describe("contraste do par neutro", () => {
     // O teste de cima prende **qual** token o sexto par consome; estes prendem
     // **quanto** ele vale. Sem isto, trocar o valor do token no pacote passaria
     // verde — que foi a lacuna do Checkpoint 1.
+    //
+    // A **E5** mudou a premissa destes testes. A E4 trocou o par por
+    // `--on-tint-neutral` porque `--text-muted` dava 4,34:1 sobre
+    // `--surface-elevated`; a E5 corrigiu o `--text-muted` na raiz (slate-500 →
+    // slate-600) e devolveu `--on-tint-neutral` à condição de alias. Hoje os
+    // dois são o mesmo token, e o par estaria correto por qualquer um dos dois
+    // caminhos. O que se prende aqui deixou de ser "o alias salva o par" e
+    // passou a ser "os dois valem, nas três superfícies".
 
-    it.each(["claro", "escuro"] as const)(
-      "o par neutro aprova em AA no tema %s",
-      (tema) => {
-        expect(
-          contraste("--surface-elevated", "--on-tint-neutral", tema),
-        ).toBeGreaterThanOrEqual(AA);
-      },
-    );
+    const SUPERFICIES = ["--surface", "--bg-base", "--surface-elevated"] as const;
+    const TEMAS = ["claro", "escuro"] as const;
 
-    it("no claro, e a E4 que tira o par da reprovação", () => {
-      // --text-muted sobre --surface-elevated dá 4,34:1. O fundo não muda.
-      expect(
-        contraste("--surface-elevated", "--text-muted", "claro"),
-      ).toBeLessThan(AA);
-      expect(
-        contraste("--surface-elevated", "--on-tint-neutral", "claro"),
-      ).toBeGreaterThan(contraste("--surface-elevated", "--text-muted", "claro"));
+    // Regra escrita no `EMENDAS.md` depois da E5, e comprada com duas emendas:
+    // contraste de token de texto se mede contra **as três** superfícies onde
+    // ele pode assentar, e nos **dois** temas — não contra a mais clara. Medir
+    // só o `--surface` foi o que deixou o `--on-tint-warning` passar por "caso
+    // de fronteira" na E2 e o `ghost` do Button passar por conforme aqui.
+    for (const tema of TEMAS) {
+      for (const superficie of SUPERFICIES) {
+        it(`o par neutro aprova em AA sobre ${superficie}, tema ${tema}`, () => {
+          expect(
+            contraste(superficie, "--on-tint-neutral", tema),
+          ).toBeGreaterThanOrEqual(AA);
+        });
+      }
+    }
+
+    it("o alias e o token valem a mesma coisa, nos dois temas", () => {
+      // Depois da E5, `--on-tint-neutral` é `var(--text-muted)` em `:root` e no
+      // `.dark`. Se algum dia divergirem de novo, é sinal de que alguém cravou
+      // um degrau em vez de corrigir a origem — foi o que a E2 precisou fazer,
+      // e o que a E5 desfez.
+      for (const tema of TEMAS) {
+        for (const superficie of SUPERFICIES) {
+          expect(contraste(superficie, "--on-tint-neutral", tema)).toBe(
+            contraste(superficie, "--text-muted", tema),
+          );
+        }
+      }
     });
 
-    it("no escuro a E4 não mexe um pixel", () => {
-      // Lá --on-tint-neutral é declarado como o próprio --text-muted.
-      expect(contraste("--surface-elevated", "--on-tint-neutral", "escuro")).toBe(
-        contraste("--surface-elevated", "--text-muted", "escuro"),
-      );
+    it("o --text-faint segue reprovando, e é por isso que não serve de par", () => {
+      // Não é regressão: `--text-faint` é reservado a placeholder e ícone
+      // decorativo. O teste existe para que ninguém o promova a par de tinta
+      // achando que a E5 o consertou junto — ela não o tocou.
+      expect(contraste("--surface-elevated", "--text-faint", "claro")).toBeLessThan(AA);
     });
   });
 });

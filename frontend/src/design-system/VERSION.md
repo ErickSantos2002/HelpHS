@@ -14,7 +14,7 @@
 | Origem | `C:\Users\ti_rickelme\Documents\GitHub\design-system` |
 | Tokens | 180 custom properties em 6 arquivos |
 | Copiado em | 02/09/2026 — Fase 1 da adoção |
-| Pacote emendado em | **02/09/2026 — E1** (`.dark` ganha `--text-on-primary`) e **E2** (botões semânticos ganham degrau próprio; `--on-tint-neutral` e `--on-tint-warning` passam a AA). Registro em `design-system/EMENDAS.md`; decisões em `COMPARTILHADO/DECISOES.md` (D10 e E2). **E3** (a fonte passa a ser servida pelo pacote), escrita pela sessão do ChamadosHS a partir do `D1-a`. Recopiados os sete arquivos a cada emenda; a E3 traz também o diretório `fonts/`. |
+| Pacote emendado em | **02/09/2026 — E1** (`.dark` ganha `--text-on-primary`) e **E2** (botões semânticos ganham degrau próprio; `--on-tint-neutral` e `--on-tint-warning` passam a AA). Registro em `design-system/EMENDAS.md`; decisões em `COMPARTILHADO/DECISOES.md` (D10 e E2). **E3** (a fonte passa a ser servida pelo pacote), escrita pela sessão do ChamadosHS a partir do `D1-a`. **E5** (03/09/2026 — `--text-muted` vai de slate-500 a slate-600 e `--on-tint-neutral` volta a ser o alias `var(--text-muted)`), escrita pela sessão do ChamadosHS. Recopiados os sete arquivos a cada emenda; a E3 traz também o diretório `fonts/`. |
 
 ## Hashes (SHA256)
 
@@ -27,7 +27,7 @@ conferência por hash — e as duas coisas não cabem juntas. O aviso mora aqui.
 
 ```
 base.css         BDD047CE432E74B33FA7F752DA08CF025419E83EA18485BD947C889C0AC1C221
-colors.css       696ABC6D1C468B17D4510B106517AEF37704663E06E008C38FC109FEEC2A5618
+colors.css       66BE0CD316F79902177E0558B21833B545E9939549F55095939DFC97CE80D89B
 motion.css       C70D51A982AE0B91BD53ECE150D8D16E0E70BEF9CA59586541A9A7177228478E
 shape.css        7BCFBBC585D3EA8C7F689A27EEB3AE13DE0C2A9DCC3C6CC0C8F41D440D193F7D
 spacing.css      C093B261C6893A893A418CDF64798555326D4586A8ADB37CC7ECA457FABAE420
@@ -54,6 +54,41 @@ Compare-Object `
   (Get-ChildItem "$ds\fonts\*.woff2" | Sort Name | % { (Get-FileHash $_).Hash }) `
   (Get-ChildItem "$lo\fonts\*.woff2" | Sort Name | % { (Get-FileHash $_).Hash })
 ```
+
+## A E5, e o que ela desfez aqui
+
+A **E5** corrigiu `--text-muted` na raiz: era `slate-500`, que sobre
+`--surface-elevated` dava **4,34:1**. Passa a `slate-600`, e
+`--on-tint-neutral` volta à condição de **alias** (`var(--text-muted)`) — o
+valor resolvido é o mesmo `#475569` de antes, mas a expressão volta a dizer o
+que significa. A E2 precisara cravar o degrau porque o alias apontava para o
+valor errado; corrigido o alias, o desvio deixou de ser necessário.
+
+Medido aqui depois da recópia, contra **as três superfícies** e nos **dois
+temas** — que é a regra que a E5 deixou escrita no `EMENDAS.md`:
+
+| Token | Tema | `--surface` | `--bg-base` | `--surface-elevated` |
+|---|---|---:|---:|---:|
+| `--text-muted` | claro | 4,76 → **7,58** | 4,55 → **7,24** | 4,34 → **6,92** |
+| `--text-muted` | escuro | 6,23 | 6,78 | 5,29 — inalterado |
+| `--on-tint-neutral` | ambos | idêntico a `--text-muted` | | |
+
+O `.dark` não mudou por decisão, e não por esquecimento: lá o token é slate-400
+e já aprovava nas três; escurecer pioraria, porque no escuro o contraste vem de
+clarear.
+
+**O que isso consertou no HelpHS sem tocar em componente:** o `ghost` do
+`Button` consome `--text-muted` direto e pinta `--surface-elevated` no hover.
+Estava em 4,34:1 no claro — achado na Fase 7, e **não** corrigido localmente de
+propósito, para não recriar o desvio que a E2 tinha acabado de eliminar. A E5
+o levou a **6,92:1** na origem. Nenhuma linha do `Button.tsx` mudou.
+
+**A E4 não está no `EMENDAS.md`.** A mudança do sexto par do `Avatar.jsx` é de
+origem que nenhuma das duas sessões reconheceu, e a pergunta de quem editou
+segue aberta com o operador. Com a E5 o alias e o token passam a valer o mesmo,
+então o avatar neutro fica correto por qualquer um dos dois caminhos — mas isso
+não fecha a pergunta da origem, e nem este arquivo nem o `EMENDAS.md` fingem que
+fecha.
 
 ## Como isto entra na aplicação
 
