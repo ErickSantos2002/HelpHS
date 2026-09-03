@@ -135,17 +135,65 @@ async function capturar() {
           );
         }
 
-        const classes = await page.evaluate(
-          () => document.documentElement.className,
+        // ── Três provas antes de disparar, e nenhuma delas é o atributo ──
+        //
+        // Vindas da sessão do ChamadosHS, que descobriu as duas primeiras
+        // fotografando o que não tinha confirmado. A regra é: nunca fotografar
+        // o que não se conferiu, e conferir o PIXEL, não a promessa.
+
+        const estado = await page.evaluate(() => {
+          const html = document.documentElement;
+          const corpo = document.body;
+          const cor = getComputedStyle(corpo).backgroundColor;
+          // `scrollHeight > clientHeight` com overflow travado significa que há
+          // conteúdo inalcançável — não só fora do enquadramento, mas sem como
+          // rolar até ele. O `fullPage` não salva disso.
+          const estilo = getComputedStyle(corpo);
+          return {
+            classes: html.className,
+            corDeFundo: cor,
+            alturaTotal: html.scrollHeight,
+            alturaVisivel: html.clientHeight,
+            overflowTravado:
+              estilo.overflowY === "hidden" ||
+              getComputedStyle(html).overflowY === "hidden",
+          };
+        });
+
+        // 1. O tema pedido é o tema aplicado.
+        if (estado.classes.includes("dark") !== (tema === "escuro")) {
+          throw new Error(
+            `tema errado em ${tema}: <html class="${estado.classes}">`,
+          );
+        }
+
+        // 2. O pixel concorda com o atributo. Atributo é promessa; a cor
+        //    computada do corpo é o que a foto vai mostrar. No claro o fundo é
+        //    slate-50; no escuro, o navy do `--bg-base`.
+        const claroNoPixel = /^rgba?\(2[0-9]{2}, 2[0-9]{2}, 2[0-9]{2}/.test(
+          estado.corDeFundo,
         );
-        if (classes.includes("dark") !== (tema === "escuro")) {
-          throw new Error(`tema errado em ${tema}: <html class="${classes}">`);
+        if (claroNoPixel !== (tema === "claro")) {
+          throw new Error(
+            `o atributo diz ${tema} e o pixel diz outra coisa: ` +
+              `background-color computado = ${estado.corDeFundo}`,
+          );
+        }
+
+        // 3. Nada de conteúdo trancado fora do alcance.
+        if (estado.overflowTravado && estado.alturaTotal > estado.alturaVisivel) {
+          throw new Error(
+            `há ${estado.alturaTotal - estado.alturaVisivel}px de galeria ` +
+              `inalcançáveis: overflow travado com scrollHeight ` +
+              `${estado.alturaTotal} > clientHeight ${estado.alturaVisivel}`,
+          );
         }
 
         const arquivo = path.join(SAIDA, `helphs-${tela}-${tema}-${largura}.png`);
         await page.screenshot({ path: arquivo, fullPage: true });
         console.log(
-          `  ✔ ${path.basename(arquivo)}  (${contagens.svg} ícones, ${contagens.selos} selos)`,
+          `  ✔ ${path.basename(arquivo)}  (${contagens.svg} ícones, ${contagens.selos} selos, ` +
+            `${estado.alturaTotal}px de altura, fundo ${estado.corDeFundo})`,
         );
 
         await context.close();
