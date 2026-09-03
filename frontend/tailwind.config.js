@@ -54,6 +54,12 @@ export default {
           DEFAULT: tk("--border-color"),
           muted: tk("--border-muted"),
           strong: tk("--border-strong"),
+
+          // Emenda E7. Contorno de CONTROLE — campo, caixa, seletor,
+          // interruptor. Os três de cima são separadores de superfície e ficam
+          // entre 1,13:1 e 1,48:1 contra as três superfícies; a WCAG 1.4.11
+          // pede 3:1 para o limite de um componente. Este dá 4,34 no pior caso.
+          control: tk("--border-control"),
         },
         conteudo: {
           DEFAULT: tk("--text-body"),

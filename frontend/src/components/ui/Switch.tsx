@@ -32,14 +32,15 @@ import { cn } from "../../lib/utils";
  *   **E1** corrigiu no botão primário, e que o link de pular carregava até
  *   ontem. Aqui ela usa `--text-on-primary`, o token que a E1 criou: 5,29:1 no
  *   claro e 5,11:1 no escuro.
- * - **O limite do desligado.** O pacote o delimita com `--border-color`, que dá
- *   **1,23:1**. E **nenhum** token de borda do pacote alcança 3:1 contra
- *   `--surface`: o mais forte, `--border-strong`, para em 1,48:1. Eles são
- *   separadores de superfície — hairlines entre um card e o fundo —, não
- *   limites de controle. Aqui o limite é `--text-muted`: 7,58:1 e 6,23:1.
+ * - **O limite do desligado.** O pacote o delimitava com `--border-color`, que
+ *   dá 1,23:1 — e nenhum dos três tokens de borda alcançava 3:1 contra
+ *   `--surface`. Isso virou a emenda **E7**: nasceu o `--border-control`
+ *   (slate-500 no claro, slate-400 no escuro), que mede **4,76 · 4,55 · 4,34**
+ *   e **6,23 · 6,78 · 5,29** contra as três superfícies. O trilho desligado usa
+ *   ele, e o pacote também — o desvio durou um commit.
  *
- * O segundo é candidato a emenda do pacote: falta um degrau de borda que sirva
- * de contorno de controle. Não foi consertado lá porque é decisão própria.
+ * A E7 levou a bolinha do `Switch.jsx` do pacote a `--text-on-primary` junto,
+ * então este arquivo e a referência voltaram a dizer a mesma coisa.
  */
 export interface SwitchProps
   extends Omit<
@@ -115,7 +116,7 @@ export function Switch({
             "peer-focus-visible:ring-2 peer-focus-visible:ring-action peer-focus-visible:ring-offset-2",
             checked
               ? "bg-action border-action"
-              : "bg-surface-elevated border-conteudo-muted",
+              : "bg-surface-elevated border-borda-control",
           )}
         />
 

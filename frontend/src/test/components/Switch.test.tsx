@@ -81,13 +81,11 @@ describe("Switch", () => {
     it.each(["claro", "escuro"] as const)(
       "o trilho desligado tem limite perceptível, tema %s",
       (tema) => {
-        // **Segundo desvio medido.** O pacote delimita o trilho desligado com
-        // `--border-color`: 1,23:1 no claro e 1,39:1 no escuro. Nenhum token de
-        // borda do pacote alcança 3:1 contra `--surface` — o mais forte,
-        // `--border-strong`, para em 1,48:1. Eles são separadores de superfície,
-        // não limites de controle.
+        // O trilho desligado usa `--border-control`, o token que a emenda
+        // **E7** criou. Antes dela o pacote o delimitava com `--border-color`,
+        // que dá 1,23:1 — e nenhum dos três tokens de borda alcançava 3:1.
         expect(
-          contraste("--surface", "--text-muted", tema),
+          contraste("--surface", "--border-control", tema),
         ).toBeGreaterThanOrEqual(NAO_TEXTO);
       },
     );
@@ -98,13 +96,30 @@ describe("Switch", () => {
       );
     });
 
-    it("nenhum token de borda do pacote serviria de limite", () => {
+    it("os separadores de superfície não serviriam de limite, e é por isso que a E7 existe", () => {
+      // Não é regressão: `--border-color` e `--border-strong` são a linha de
+      // cabelo entre um card e o fundo, e para isso 1,2:1 é o desenho certo. O
+      // erro era usá-los para dizer "aqui começa um controle". Este teste é o
+      // que impede alguém de "simplificar" o trilho de volta para eles.
       for (const borda of ["--border-color", "--border-muted", "--border-strong"]) {
         for (const tema of ["claro", "escuro"] as const) {
           expect(contraste("--surface", borda, tema)).toBeLessThan(NAO_TEXTO);
         }
       }
     });
+
+    it.each(["--surface", "--bg-base", "--surface-elevated"] as const)(
+      "o --border-control passa sobre %s, nos dois temas",
+      (superficie) => {
+        // A regra da E5, aplicada à E7: token de traço se mede contra as três
+        // superfícies onde ele pode assentar, e não contra a mais clara.
+        for (const tema of ["claro", "escuro"] as const) {
+          expect(
+            contraste(superficie, "--border-control", tema),
+          ).toBeGreaterThanOrEqual(NAO_TEXTO);
+        }
+      },
+    );
 
     it("o rótulo ao lado é texto, e segue no piso de texto", () => {
       expect(contraste("--surface", "--text-body", "claro")).toBeGreaterThanOrEqual(AA);

@@ -14,7 +14,7 @@
 | Origem | `C:\Users\ti_rickelme\Documents\GitHub\design-system` |
 | Tokens | 180 custom properties em 6 arquivos |
 | Copiado em | 02/09/2026 — Fase 1 da adoção |
-| Pacote emendado em | **02/09/2026 — E1** (`.dark` ganha `--text-on-primary`) e **E2** (botões semânticos ganham degrau próprio; `--on-tint-neutral` e `--on-tint-warning` passam a AA). Registro em `design-system/EMENDAS.md`; decisões em `COMPARTILHADO/DECISOES.md` (D10 e E2). **E3** (a fonte passa a ser servida pelo pacote), escrita pela sessão do ChamadosHS a partir do `D1-a`. **E5** (03/09/2026 — `--text-muted` vai de slate-500 a slate-600 e `--on-tint-neutral` volta a ser o alias `var(--text-muted)`), escrita pela sessão do ChamadosHS. Recopiados os sete arquivos a cada emenda; a E3 traz também o diretório `fonts/`. |
+| Pacote emendado em | **02/09/2026 — E1** (`.dark` ganha `--text-on-primary`) e **E2** (botões semânticos ganham degrau próprio; `--on-tint-neutral` e `--on-tint-warning` passam a AA). Registro em `design-system/EMENDAS.md`; decisões em `COMPARTILHADO/DECISOES.md` (D10 e E2). **E3** (a fonte passa a ser servida pelo pacote), escrita pela sessão do ChamadosHS a partir do `D1-a`. **E5** (03/09/2026 — `--text-muted` vai de slate-500 a slate-600 e `--on-tint-neutral` volta a ser o alias `var(--text-muted)`), escrita pela sessão do ChamadosHS. **E7** (03/09/2026 — nasce o `--border-control`, e sete componentes de `forms/` passam a delimitar controle com ele), escrita pela sessão do HelpHS. Recopiados os sete arquivos a cada emenda; a E3 traz também o diretório `fonts/`. |
 
 ## Hashes (SHA256)
 
@@ -27,7 +27,7 @@ conferência por hash — e as duas coisas não cabem juntas. O aviso mora aqui.
 
 ```
 base.css         BDD047CE432E74B33FA7F752DA08CF025419E83EA18485BD947C889C0AC1C221
-colors.css       66BE0CD316F79902177E0558B21833B545E9939549F55095939DFC97CE80D89B
+colors.css       539388386F7D92789A8F036AAAED638AE43FC3EA3ECE38D64629E29676B520F1
 motion.css       C70D51A982AE0B91BD53ECE150D8D16E0E70BEF9CA59586541A9A7177228478E
 shape.css        7BCFBBC585D3EA8C7F689A27EEB3AE13DE0C2A9DCC3C6CC0C8F41D440D193F7D
 spacing.css      C093B261C6893A893A418CDF64798555326D4586A8ADB37CC7ECA457FABAE420
@@ -95,6 +95,35 @@ O número **E4 fica gasto** no registro em vez de ser reaproveitado: uma sequên
 sem buracos daria a entender que toda mudança no pacote passou por decisão
 registrada, e uma não passou. **A pergunta de quem editou continua aberta** — a
 reversão devolve o conteúdo, não responde a autoria.
+
+## A E7 e o token que faltava
+
+Nenhum dos três tokens de borda do pacote servia de **contorno de controle**.
+Medido contra as três superfícies, nos dois temas, com o piso de **3:1** da
+**WCAG 1.4.11** — que é o que vale para limite de componente, e não os 4,5:1 de
+texto:
+
+| Token | claro | escuro |
+|---|---|---|
+| `--border-color` | 1,23 · 1,18 · 1,13 ❌ | 1,39 · 1,51 · 1,18 ❌ |
+| `--border-strong` | 1,48 · 1,42 · 1,36 ❌ | 2,29 · 2,50 · 1,94 ❌ |
+| **`--border-control`** | **4,76 · 4,55 · 4,34** ✅ | **6,23 · 6,78 · 5,29** ✅ |
+
+Seis de seis reprovavam no mais forte dos existentes. Eles são separadores de
+superfície — a linha de cabelo entre um card e o fundo — e para isso 1,2:1 é o
+desenho certo. O erro era usar o mesmo token para dizer "aqui começa um campo".
+
+**A regra, que entra junto do token:** contorno de controle usa
+`--border-control`; `--border-color` e `--border-strong` são separadores.
+
+Sete componentes de `forms/` passaram a usá-lo na borda de repouso — `Input`,
+`Textarea`, `Select`, `SearchSelect` (o controle e o campo de busca de dentro),
+`Checkbox`, `Radio` e o trilho desligado do `Switch`. Foco e erro não mudaram.
+O painel flutuante do `SearchSelect` também não: a borda dele delimita uma
+camada, não um controle.
+
+A bolinha do `Switch` saiu de `--color-white` para `--text-on-primary`: branco
+cravado sobre o `--action` do escuro dava **2,69:1**, o mesmo número da E1.
 
 ## Como isto entra na aplicação
 
