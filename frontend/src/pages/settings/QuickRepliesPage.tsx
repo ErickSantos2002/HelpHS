@@ -3,6 +3,7 @@ import { toast } from "sonner";
 import {
   Alert,
   Button,
+  Checkbox,
   Card,
   Input,
   Modal,
@@ -166,15 +167,12 @@ function QuickReplyModal({
           maxLength={4000}
         />
 
-        <label className="flex cursor-pointer items-center gap-2 text-sm text-slate-300">
-          <input
-            type="checkbox"
-            checked={form.isActive}
-            onChange={(e) => setForm((f) => ({ ...f, isActive: e.target.checked }))}
-            className="h-4 w-4 cursor-pointer accent-primary"
-          />
-          Disponível no chat
-        </label>
+        <Checkbox
+          checked={form.isActive}
+          onChange={(ativo) => setForm((f) => ({ ...f, isActive: ativo }))}
+          label="Disponível no chat"
+          className="items-center"
+        />
       </div>
 
       <ModalFooter>

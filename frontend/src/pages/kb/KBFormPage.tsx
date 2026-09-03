@@ -2,7 +2,7 @@ import { useEffect, useState } from "react";
 import { useNavigate, useParams } from "react-router-dom";
 import { toastApiError } from "../../lib/toastError";
 import { renderMarkdown } from "../../lib/markdown";
-import { Button, Input, Spinner, Textarea } from "../../components/ui";
+import { Button, Checkbox, Input, Spinner, Textarea } from "../../components/ui";
 import { useAuth } from "../../contexts/AuthContext";
 import {
   createKBArticle,
@@ -277,19 +277,16 @@ export default function KBFormPage() {
                   Produtos <span className="text-danger">*</span>
                 </label>
 
-                <label className="flex w-fit cursor-pointer items-center gap-2 text-sm text-slate-300">
-                  <input
-                    type="checkbox"
-                    checked={allProducts}
-                    onChange={(e) => {
-                      setAllProducts(e.target.checked);
-                      if (e.target.checked) setSelectedProductIds(new Set());
-                      setErrors((p) => ({ ...p, products: "" }));
-                    }}
-                    className="h-4 w-4 cursor-pointer accent-primary"
-                  />
-                  Vale para todos os produtos
-                </label>
+                <Checkbox
+                  checked={allProducts}
+                  onChange={(todos) => {
+                    setAllProducts(todos);
+                    if (todos) setSelectedProductIds(new Set());
+                    setErrors((p) => ({ ...p, products: "" }));
+                  }}
+                  label="Vale para todos os produtos"
+                  className="w-fit items-center"
+                />
 
                 {!allProducts && (
                   loadingProducts ? (

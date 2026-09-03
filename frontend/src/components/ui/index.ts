@@ -13,6 +13,9 @@ export type { ButtonProps } from "./Button";
 export { Card, CardHeader, CardTitle } from "./Card";
 export type { CardProps } from "./Card";
 
+export { Checkbox } from "./Checkbox";
+export type { CheckboxProps } from "./Checkbox";
+
 export { Icon, ICON_PATHS } from "./Icon";
 export type { IconProps, IconName } from "./Icon";
 

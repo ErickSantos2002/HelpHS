@@ -66,6 +66,13 @@ export default {
           heading: tk("--text-heading"),
           muted: tk("--text-muted"),
           faint: tk("--text-faint"),
+
+          // O degrau de LINK, que o pacote declara e este config não mapeava.
+          // Sem ele as telas escreviam `text-primary` — o degrau de marca —, e
+          // sobre `--bg-base` isso dá 3,66:1: reprova AA, e link é texto.
+          // `--text-link` dá 5,05:1 no claro e 6,47:1 no escuro.
+          link: tk("--text-link"),
+          "link-hover": tk("--text-link-hover"),
         },
 
         // Texto sobre o fundo `--action`. Fica fora de `conteudo` porque não é

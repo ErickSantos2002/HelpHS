@@ -1,7 +1,7 @@
 import { useState } from "react";
 import type { FormEvent } from "react";
 import { Link, useNavigate } from "react-router-dom";
-import { Alert, Button, Input } from "../../components/ui";
+import { Alert, Button, Checkbox, Input } from "../../components/ui";
 import { api } from "../../services/api";
 import { AuthShell } from "./AuthShell";
 import logoFull from "../../assets/Logo HelpHS.png";
@@ -306,27 +306,28 @@ export default function RegisterPage() {
             </div>
 
             {/* LGPD */}
-            <label className="flex items-start gap-3 cursor-pointer">
-              <input
-                type="checkbox"
-                checked={lgpd}
-                onChange={(e) => setLgpd(e.target.checked)}
-                className="mt-0.5 h-4 w-4 rounded border-border bg-background-elevated accent-primary cursor-pointer"
-              />
-              <span className="text-xs text-slate-400 leading-relaxed">
-                Li e aceito os termos de uso e a{" "}
-                <Link
-                  to="/privacidade"
-                  target="_blank"
-                  rel="noopener noreferrer"
-                  className="text-primary hover:underline"
-                  onClick={(e) => e.stopPropagation()}
-                >
-                  política de privacidade
-                </Link>
-                , incluindo o tratamento dos meus dados conforme a LGPD.
-              </span>
-            </label>
+            <Checkbox
+              checked={lgpd}
+              onChange={setLgpd}
+              className="gap-3"
+              label={
+                <span className="text-xs leading-relaxed text-conteudo-muted">
+                  Li e aceito os termos de uso e a{" "}
+                  <Link
+                    to="/privacidade"
+                    target="_blank"
+                    rel="noopener noreferrer"
+                    className="text-conteudo-link hover:underline"
+                    /* Sem isto, clicar no link marcaria a caixa: ele vive dentro
+                       do <label>, e o clique borbulharia até o input. */
+                    onClick={(e) => e.stopPropagation()}
+                  >
+                    política de privacidade
+                  </Link>
+                  , incluindo o tratamento dos meus dados conforme a LGPD.
+                </span>
+              }
+            />
 
             <Button
               type="submit"
