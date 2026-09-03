@@ -81,6 +81,7 @@ export default {
         // mesma cor — 6,92:1 no claro, contra os 4,34:1 de --text-muted.
         "on-tint-neutral": tk("--on-tint-neutral"),
         "on-tint-warning": tk("--on-tint-warning"),
+        "on-tint-danger": tk("--on-tint-danger"),
 
         // As rampas semânticas continuam completas porque as páginas usam os
         // degraus (text-success-700, dark:text-danger-400, bg-warning-500/10).

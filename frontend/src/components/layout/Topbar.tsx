@@ -404,7 +404,7 @@ export function Topbar({ onMobileMenuClick, onToggleCollapsed, sidebarCollapsed,
 
               <div className="border-t border-border mt-1 pt-1">
               <button
-                className="flex w-full items-center gap-2.5 px-3 py-2 text-sm text-danger hover:bg-slate-50 dark:hover:bg-background-elevated transition-colors"
+                className="flex w-full items-center gap-2.5 px-3 py-2 text-sm text-on-tint-danger hover:bg-slate-50 dark:hover:bg-background-elevated transition-colors"
                 onClick={handleLogout}
               >
                 <svg className="w-4 h-4 shrink-0" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
