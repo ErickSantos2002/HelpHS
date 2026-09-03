@@ -15,14 +15,46 @@ export interface BadgeProps
   children: React.ReactNode;
 }
 
+/**
+ * As sete variantes, como o `Badge.jsx` do pacote as define: fundo na **tinta**,
+ * texto no **par da tinta**, borda de 1px na cor semântica a 30%.
+ *
+ * ── O que estava errado, e não era pouco ──────────────────────────────
+ *
+ * Seis das sete pintavam `bg-<cor>/20` — a cor cheia da rampa com opacidade — e
+ * quatro escreviam o degrau de texto à mão, com `dark:` para inverter. Medido
+ * nas três superfícies e nos dois temas, **7 das 42 combinações reprovavam**, e
+ * a pior era o `primary` no escuro: `dark:text-primary` é o degrau 500 sobre a
+ * própria tinta, **2,77:1** sobre `--surface-elevated`.
+ *
+ * O `warning` era o único correto de ponta a ponta — e por isso foi o único que
+ * a emenda **E8** alcançou. Ela levou `--on-tint-success` ao 800 e
+ * `--on-tint-danger`/`--on-tint-info` ao 300 no escuro; nenhum desses tokens era
+ * lido aqui, então a emenda passou por cima do componente sem tocá-lo.
+ *
+ * **Corrigir o token não alcança quem não o usa.** É a quarta aparição da mesma
+ * regra nesta migração, e a primeira em que ela quase virou um relatório errado:
+ * a medição dos **tokens** dava zero reprovações e a do **componente** dava
+ * sete. O número estava certo e respondia outra pergunta.
+ *
+ * ── Sem modificador de opacidade nas tintas ───────────────────────────
+ *
+ * Regra (a) do D8-a: os cinco `--tint-*` já carregam alfa de 15% no token.
+ * `bg-tint-danger/20` multiplicaria 0,15 × 0,20 e daria fundo quase invisível —
+ * e o conserto intuitivo (subir para /30, /50) continua multiplicando e nunca
+ * chega nos 15% do pacote.
+ *
+ * A borda continua com o modificador porque ela **não** é token com alfa: é a
+ * cor cheia da rampa a 30%, exatamente como o pacote a escreve.
+ */
 const variantClasses: Record<BadgeVariant, string> = {
-  primary: "bg-primary/20 text-primary-700 dark:text-primary border-primary/30",
-  secondary: "bg-background-elevated text-on-tint-neutral border-border",
-  danger: "bg-danger/20 text-danger-700 dark:text-danger-400 border-danger/30",
-  warning: "bg-warning/20 text-on-tint-warning border-warning/30",
-  info: "bg-info/20 text-info-700 dark:text-info-400 border-info/30",
-  success: "bg-success/20 text-success-700 dark:text-success-400 border-success/30",
-  muted: "bg-background-elevated text-on-tint-neutral border-border",
+  primary: "bg-tint-primary text-on-tint-primary border-primary/30",
+  secondary: "bg-tint-neutral text-on-tint-neutral border-borda",
+  danger: "bg-tint-danger text-on-tint-danger border-danger/30",
+  warning: "bg-tint-warning text-on-tint-warning border-warning/30",
+  info: "bg-tint-info text-on-tint-info border-info/30",
+  success: "bg-tint-success text-on-tint-success border-success/30",
+  muted: "bg-tint-neutral text-on-tint-neutral border-borda",
 };
 
 export function Badge({

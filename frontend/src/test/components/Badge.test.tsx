@@ -105,4 +105,63 @@ describe("PriorityBadge", () => {
       expect(contraste("--tint-neutral", "--text-faint", "claro")).toBeLessThan(AA);
     });
   });
+
+  // ── As sete variantes, nas três superfícies, nos dois temas ───────────
+  //
+  // 42 medições. A versão anterior deste arquivo cobria só `neutral` e
+  // `warning` — que eram, por coincidência, as duas únicas variantes corretas.
+  // Os testes passavam com **sete reprovações** no componente, e a pior delas
+  // era 2,77:1.
+
+  describe("contraste das sete variantes", () => {
+    const TINTAS = {
+      primary: ["--tint-primary", "--on-tint-primary"],
+      secondary: ["--tint-neutral", "--on-tint-neutral"],
+      muted: ["--tint-neutral", "--on-tint-neutral"],
+      info: ["--tint-info", "--on-tint-info"],
+      success: ["--tint-success", "--on-tint-success"],
+      warning: ["--tint-warning", "--on-tint-warning"],
+      danger: ["--tint-danger", "--on-tint-danger"],
+    } as const;
+
+    const SUPERFICIES = ["--surface", "--bg-base", "--surface-elevated"] as const;
+
+    for (const [variante, [tinta, par]] of Object.entries(TINTAS)) {
+      for (const superficie of SUPERFICIES) {
+        for (const tema of ["claro", "escuro"] as const) {
+          it(`${variante} sobre ${superficie}, tema ${tema}`, () => {
+            expect(
+              contraste(tinta, par, tema, superficie),
+            ).toBeGreaterThanOrEqual(AA);
+          });
+        }
+      }
+    }
+  });
+
+  it("nenhuma variante usa cor cheia com opacidade no fundo", () => {
+    // Regra (a) do D8-a: os cinco `--tint-*` já trazem alfa de 15% no token.
+    // `bg-danger/20` era a cor CHEIA a 20% — outra cor, não a tinta. E
+    // `bg-tint-danger/20` seria pior: 0,15 × 0,20.
+    for (const v of ["primary", "info", "success", "danger", "warning"] as const) {
+      const { container, unmount } = render(<Badge variant={v}>selo</Badge>);
+      const classe = container.firstElementChild?.className ?? "";
+      expect(classe, v).toContain(`bg-tint-${v === "primary" ? "primary" : v}`);
+      expect(classe, v).not.toMatch(/bg-(primary|info|success|danger|warning)\/\d/);
+      expect(classe, v).not.toMatch(/bg-tint-\w+\/\d/);
+      unmount();
+    }
+  });
+
+  it("toda variante consome o PAR da tinta, e nenhuma escreve degrau à mão", () => {
+    // Era isto que deixava a emenda E8 sem efeito: quatro variantes escreviam
+    // `text-<cor>-700 dark:text-<cor>-400` e não liam `--on-tint-*`.
+    for (const v of ["primary", "secondary", "muted", "info", "success", "warning", "danger"] as const) {
+      const { container, unmount } = render(<Badge variant={v}>selo</Badge>);
+      const classe = container.firstElementChild?.className ?? "";
+      expect(classe, v).toMatch(/text-on-tint-\w+/);
+      expect(classe, v).not.toMatch(/dark:text-/);
+      unmount();
+    }
+  });
 });

@@ -92,9 +92,27 @@ export default {
         // motivo dos de cima: é par de fundo, não degrau de texto. O avatar
         // neutro e o selo neutro pintam a mesma superfície e agora falam a
         // mesma cor — 6,92:1 no claro, contra os 4,34:1 de --text-muted.
+        "on-tint-primary": tk("--on-tint-primary"),
         "on-tint-neutral": tk("--on-tint-neutral"),
         "on-tint-warning": tk("--on-tint-warning"),
         "on-tint-danger": tk("--on-tint-danger"),
+        "on-tint-success": tk("--on-tint-success"),
+        "on-tint-info": tk("--on-tint-info"),
+
+        // As TINTAS. Cinco delas já carregam alfa de 15% no próprio token
+        // (`rgb(… / 0.15)`), e a `neutral` é alias de `--surface-elevated`.
+        //
+        // Por isso elas entram como `tk()` e **nunca** recebem o modificador de
+        // opacidade — regra (a) do D8-a: `bg-tint-danger/20` multiplicaria
+        // 0,15 × 0,20 e daria um selo de fundo praticamente invisível, e o
+        // conserto intuitivo (subir para /30, /50) continua multiplicando e
+        // nunca chega nos 15% do pacote.
+        "tint-primary": tk("--tint-primary"),
+        "tint-neutral": tk("--tint-neutral"),
+        "tint-success": tk("--tint-success"),
+        "tint-danger": tk("--tint-danger"),
+        "tint-warning": tk("--tint-warning"),
+        "tint-info": tk("--tint-info"),
 
         // As rampas semânticas continuam completas porque as páginas usam os
         // degraus (text-success-700, dark:text-danger-400, bg-warning-500/10).
