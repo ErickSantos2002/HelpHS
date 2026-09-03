@@ -111,6 +111,14 @@
  *   esquecida, um número inventado é uma tarefa que não existe.
  * - **Opacidade.** `bg-danger/20` não é medido; a composição da tinta está nos
  *   testes de componente, pelo `helpers/contraste.ts`.
+ * - **Só texto sobre fundo.** Ela mede o par `bg-*` + `text-*`, e por isso não
+ *   enxerga nada do que a **WCAG 1.4.11** cobre: componente de interface e
+ *   limite gráfico, cujo piso é **3:1** e não 4,5:1. O trilho de um interruptor
+ *   contra o painel, a bolinha contra o trilho, a borda de um campo contra o
+ *   fundo — nada disso passa por aqui. Achado na Fase 8: o alternador de tema
+ *   tinha o trilho desligado em **1,48:1** e a bolinha em **1,10:1**, e a
+ *   varredura marcava zero. `bg-slate-*` e `bg-white` sequer estão no mapa de
+ *   fundos, porque o mapa foi feito para o caso de texto.
  */
 import { readFileSync, readdirSync, statSync, mkdtempSync, writeFileSync, rmSync } from "node:fs";
 import { fileURLToPath } from "node:url";

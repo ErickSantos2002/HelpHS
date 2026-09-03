@@ -22,6 +22,9 @@ export type { InputProps } from "./Input";
 export { Modal, ModalFooter } from "./Modal";
 export type { ModalProps } from "./Modal";
 
+export { Switch } from "./Switch";
+export type { SwitchProps } from "./Switch";
+
 export { Select } from "./Select";
 export type { SelectProps, SelectOption } from "./Select";
 

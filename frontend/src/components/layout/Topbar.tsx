@@ -1,6 +1,6 @@
 import { useCallback, useEffect, useRef, useState } from "react";
 import { useNavigate } from "react-router-dom";
-import { Avatar } from "../ui";
+import { Avatar, Switch } from "../ui";
 import { cn } from "../../lib/utils";
 import { useAuth } from "../../contexts/AuthContext";
 import { useTheme } from "../../contexts/ThemeContext";
@@ -387,20 +387,22 @@ export function Topbar({ onMobileMenuClick, onToggleCollapsed, sidebarCollapsed,
                 Meu perfil
               </button>
 
-              {/* Tema */}
-              <button
-                className="flex w-full items-center gap-2.5 px-3 py-2 text-sm text-slate-600 dark:text-slate-300 hover:bg-slate-50 dark:hover:bg-background-elevated hover:text-slate-900 dark:hover:text-slate-100 transition-colors"
-                onClick={toggleTheme}
-              >
-                <svg className="w-4 h-4 shrink-0" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
-                  <path strokeLinecap="round" strokeLinejoin="round" d="M21 12.79A9 9 0 1111.21 3 7 7 0 0021 12.79z" />
-                </svg>
-                <span className="flex-1 text-left">Modo escuro</span>
-                {/* Toggle switch */}
-                <div className={`relative w-9 h-5 rounded-full transition-colors duration-200 ${theme === "dark" ? "bg-primary" : "bg-slate-300 dark:bg-slate-600"}`}>
-                  <div className={`absolute top-0.5 w-4 h-4 rounded-full bg-white shadow transition-transform duration-200 ${theme === "dark" ? "translate-x-4" : "translate-x-0.5"}`} />
-                </div>
-              </button>
+              {/* Tema — o interruptor e o primitivo `Switch`, e nao um botao
+                  com um trilho desenhado dentro: o estado agora e anunciado. */}
+              <Switch
+                checked={theme === "dark"}
+                onChange={() => toggleTheme()}
+                size="sm"
+                className="w-full flex-row-reverse justify-between px-3 py-2 text-conteudo-muted transition-colors hover:bg-surface-elevated hover:text-conteudo"
+                label={
+                  <span className="flex flex-1 items-center gap-2.5">
+                    <svg className="w-4 h-4 shrink-0" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
+                      <path strokeLinecap="round" strokeLinejoin="round" d="M21 12.79A9 9 0 1111.21 3 7 7 0 0021 12.79z" />
+                    </svg>
+                    <span className="flex-1 text-left">Modo escuro</span>
+                  </span>
+                }
+              />
 
               <div className="border-t border-border mt-1 pt-1">
               <button
