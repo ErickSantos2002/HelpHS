@@ -29,7 +29,7 @@ export function TableHead({
 }) {
   return (
     <thead
-      className={cn("border-b border-border text-xs text-slate-400", className)}
+      className={cn("border-b border-borda text-xs text-conteudo-muted", className)}
     >
       {children}
     </thead>
@@ -46,7 +46,7 @@ export function TableBody({
   className?: string;
 }) {
   return (
-    <tbody className={cn("divide-y divide-border", className)}>
+    <tbody className={cn("divide-y divide-borda", className)}>
       {children}
     </tbody>
   );
@@ -67,12 +67,33 @@ export function TableRow({
   onClick,
   clickable,
 }: TableRowProps) {
+  // Linha clicavel precisava de mouse: `<tr onClick>` nao entra na ordem de
+  // tabulacao e nao responde a tecla. `tabIndex` e o `onKeyDown` a tornam
+  // alcancavel sem trocar o papel de linha — pôr `role="button"` num `<tr>`
+  // quebraria a semantica da tabela, que e o que faz um leitor de tela
+  // anunciar "linha 3 de 40".
+  //
+  // O desenho plenamente correto poe um elemento acionavel DENTRO da linha
+  // (o link do registro na primeira celula). Isso muda a marcacao das telas
+  // e entra nas Fases 11-16, tela a tela.
   return (
     <tr
       onClick={onClick}
+      tabIndex={clickable ? 0 : undefined}
+      onKeyDown={
+        clickable
+          ? (e) => {
+              if (e.key === "Enter" || e.key === " ") {
+                e.preventDefault();
+                onClick?.();
+              }
+            }
+          : undefined
+      }
       className={cn(
         "transition-colors",
-        clickable && "cursor-pointer hover:bg-background-elevated",
+        clickable &&
+          "cursor-pointer hover:bg-surface-elevated focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-inset focus-visible:ring-action",
         className,
       )}
     >
@@ -100,21 +121,35 @@ export function TableHeaderCell({
 }: TableHeaderCellProps) {
   return (
     <th
-      className={cn(
-        "px-4 py-3 font-medium uppercase tracking-wider",
-        sortable && "cursor-pointer select-none hover:text-slate-200",
-        className,
-      )}
-      onClick={sortable ? onSort : undefined}
+      // `aria-sort` no `<th>` e o que anuncia a ordem: sem ele, a seta e
+      // decoracao que so quem enxerga entende.
+      aria-sort={
+        !sortable
+          ? undefined
+          : sorted === "asc"
+            ? "ascending"
+            : sorted === "desc"
+              ? "descending"
+              : "none"
+      }
+      className={cn("px-4 py-3 font-medium uppercase tracking-wider", className)}
     >
-      <span className="inline-flex items-center gap-1">
-        {children}
-        {sortable && (
-          <span className="text-slate-600">
+      {sortable ? (
+        // Botao de verdade, e nao um `<th onClick>`: ordenar era acao so de
+        // mouse — fora da ordem de tabulacao e sem tecla.
+        <button
+          type="button"
+          onClick={onSort}
+          className="inline-flex cursor-pointer select-none items-center gap-1 uppercase tracking-wider hover:text-conteudo-heading focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-action"
+        >
+          {children}
+          <span aria-hidden="true" className="text-conteudo-muted">
             {sorted === "asc" ? "↑" : sorted === "desc" ? "↓" : "↕"}
           </span>
-        )}
-      </span>
+        </button>
+      ) : (
+        <span className="inline-flex items-center gap-1">{children}</span>
+      )}
     </th>
   );
 }
@@ -139,7 +174,7 @@ export function TableCell({
       onClick={onClick}
       className={cn(
         "px-4 py-3",
-        muted ? "text-slate-500" : "text-slate-200",
+        muted ? "text-conteudo-muted" : "text-conteudo",
         className,
       )}
     >
@@ -161,7 +196,7 @@ export function TableEmpty({
     <tr>
       <td
         colSpan={colSpan}
-        className="px-4 py-12 text-center text-sm text-slate-500"
+        className="px-4 py-12 text-center text-sm text-conteudo-muted"
       >
         {message}
       </td>
