@@ -14,6 +14,15 @@ import { FilterSelect } from "../../components/ui/FilterSelect";
  *
  * A linha do placeholder é o "limpar filtro": devolve `""`, que é o valor que
  * as páginas traduzem para "não mandar o parâmetro".
+ *
+ * ── Uma mudanca de papel, na unificacao ───────────────────────────────
+ *
+ * As linhas de opcao eram `<button>` sem papel declarado, e hoje sao
+ * `role="option"` dentro de um `role="listbox"` — o papel explicito SUBSTITUI o
+ * implicito, entao `getByRole("button")` nao as acha mais. A troca e
+ * deliberada: um listbox cujas opcoes se anunciam como "botao" nao entrega o
+ * contrato que o widget promete. Nada mudou para o mouse; as assercoes abaixo
+ * sao as mesmas, so a consulta acompanhou o papel.
  */
 
 const SITUACOES = [
@@ -83,15 +92,15 @@ describe("FilterSelect — abrir e escolher", () => {
     await userEvent.click(gatilho());
 
     expect(painel()).not.toBeNull();
-    expect(screen.getByRole("button", { name: "Aberto" })).toBeInTheDocument();
-    expect(screen.getByRole("button", { name: "Fechado" })).toBeInTheDocument();
+    expect(screen.getByRole("option", { name: "Aberto" })).toBeInTheDocument();
+    expect(screen.getByRole("option", { name: "Fechado" })).toBeInTheDocument();
   });
 
   it("escolher uma opção devolve o valor e fecha o painel", async () => {
     const { onChange } = renderFiltro();
 
     await userEvent.click(gatilho());
-    await userEvent.click(screen.getByRole("button", { name: "Fechado" }));
+    await userEvent.click(screen.getByRole("option", { name: "Fechado" }));
 
     expect(onChange).toHaveBeenCalledWith("closed");
     expect(painel()).toBeNull();
@@ -102,7 +111,7 @@ describe("FilterSelect — abrir e escolher", () => {
     const { onChange } = renderFiltro({ value: "open" });
 
     await userEvent.click(gatilho());
-    await userEvent.click(screen.getByRole("button", { name: "Todos" }));
+    await userEvent.click(screen.getByRole("option", { name: "Todos" }));
 
     expect(onChange).toHaveBeenCalledWith("");
   });
