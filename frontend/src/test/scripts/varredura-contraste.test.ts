@@ -28,7 +28,7 @@ describe("varredura de contraste", () => {
       const e = erro as { stdout?: string };
       throw new Error(`casos de prova falharam:\n${e.stdout ?? erro}`);
     }
-    expect(saida).toMatch(/✔ os \d+ casos passam\./);
+    expect(saida).toMatch(/✔ os \d+ casos e os 3 controles da catraca passam\./);
   });
 
   it("a varredura roda sobre o src/ sem estourar", () => {
@@ -45,5 +45,21 @@ describe("varredura de contraste", () => {
       expect(a.razao).toBeLessThan(4.5);
       expect(a.razao).toBeGreaterThan(1);
     }
+  });
+
+  it("a catraca está em dia", () => {
+    // Falha nos DOIS sentidos: par novo entra aqui, e par consertado também —
+    // este último é o que impede a linha de base de fossilizar em permissão.
+    // Quando falhar por conserto, a saída traz a lista nova pronta para colar.
+    let saida: string;
+    try {
+      saida = execFileSync("node", [SCRIPT, "--catraca"], { encoding: "utf-8" });
+    } catch (erro) {
+      const e = erro as { stdout?: string; stderr?: string };
+      throw new Error(
+        `a catraca acusou:\n${e.stdout ?? ""}\n${e.stderr ?? erro}`,
+      );
+    }
+    expect(saida).toMatch(/em dia/);
   });
 });

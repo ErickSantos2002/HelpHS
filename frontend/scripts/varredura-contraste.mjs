@@ -12,11 +12,11 @@
  *   node scripts/varredura-contraste.mjs            varre src/ e lista
  *   node scripts/varredura-contraste.mjs --provar   roda os casos de prova
  *   node scripts/varredura-contraste.mjs --json     saída para outra ferramenta
+ *   node scripts/varredura-contraste.mjs --catraca  compara com a linha de base
  *
- * Sai com código 0 sempre no modo normal: isto **relata**, não reprova. A
- * catraca (falhar em par novo *e* em par que sumiu sem atualizar a lista) é
- * outro arquivo, e cabe na fase que começar a derrubar os pares conhecidos —
- * com 19 em aberto ela nasceria como carimbo de linha de base.
+ * O modo normal **relata** e sai 0 sempre. Quem reprova é o `--catraca`, que
+ * falha em par novo **e** em par que sumiu sem a lista ser atualizada — é o que
+ * a separa de um carimbo de linha de base. Desenho da sessão do ChamadosHS.
  *
  * ── AS ONZE ARMADILHAS ──────────────────────────────────────────────────
  *
@@ -602,7 +602,210 @@ function provar() {
   return falhas;
 }
 
+
+// ──────────────────────────────────────────────────────────────────────
+// Catraca
+// ──────────────────────────────────────────────────────────────────────
+
+/**
+ * Os pares que reprovam hoje, e um mecanismo para eles so diminuirem.
+ *
+ * Desenho copiado da sessao do **ChamadosHS**, que o escreveu primeiro e
+ * respondeu com ele a uma objecao minha — eu tinha recusado o guarda por achar
+ * que lista de excecao vira permissao. Adaptados os caminhos e a chave; a
+ * mecanica, as mensagens e os casos de controle sao dela. Registrado em
+ * `COMPARTILHADO/DECISOES.md` como decisao que vale para os dois repositorios.
+ *
+ * -- Por que uma catraca, e nao uma lista de excecao --------------------
+ *
+ * Lista de excecao sobrevive ao problema que a criou: nasce como "os que ja
+ * existiam" e em seis meses e uma permissao. Esta nao consegue, porque reprova
+ * nos **dois** sentidos:
+ *
+ *   apareceu par novo   -> falha, e nomeia o arquivo
+ *   sumiu par da lista  -> **tambem** falha, e entrega a lista nova pronta
+ *
+ * O segundo e o que impede o apodrecimento: consertar uma tela **obriga** a
+ * mexer aqui, e o numero so anda para baixo. Quando chegar a zero, o bloco sai
+ * e sobra a varredura, que ai reprova qualquer par.
+ *
+ * -- A chave e arquivo + fundo + estado, sem numero de linha ------------
+ *
+ * Linha muda a cada edicao acima dela, e catraca que grita por causa de uma
+ * linha em branco e catraca que alguem desliga na primeira semana.
+ *
+ * A chave **nao** inclui a classe de texto, e isso e deliberado: medido no
+ * corpus, ela colide em 4 das 35 chaves — sempre `text-slate-500` contra
+ * `text-slate-600` no mesmo fundo e arquivo. A colisao nao atrapalha, porque o
+ * que a catraca compara e a **contagem**: consertar um dos dois faz o numero
+ * daquela chave cair de 2 para 1. A classe exata sai no relatorio da varredura,
+ * que e onde ela serve.
+ *
+ * -- E quando alguem precisa subir uma tela com par novo, e tem prazo ---
+ *
+ * Acrescenta a linha aqui. Uma linha, num arquivo versionado, que aparece no
+ * diff e alguem revisa. A catraca nao bloqueia o trabalho — forca a divida a
+ * ser **declarada** em vez de entrar calada. O que ela impede e o caso comum:
+ * ninguem sabia que estava adicionando um.
+ *
+ * -- A linha de base ---------------------------------------------------
+ *
+ * 51 pares em 35 chaves. Eram 52 ate o botao de sair do `Topbar` sair do degrau
+ * 500 cru (`f9d67aa`); a catraca nasce um abaixo do numero que o relatorio da
+ * Fase 7 publica, e e assim que ela deve nascer.
+ *
+ * Trinta deles sao `text-slate-*` sobre superficie, vivos por causa do desvio
+ * D5, e saem tela a tela nas Fases 11-16 — cada pagina migrada zera os seus.
+ */
+const PARES_CONHECIDOS = new Map([
+  ['components/chat/ChatPanel.tsx  bg-background-elevated  repouso', 1],
+  ['components/chat/ChatPanel.tsx  bg-primary  repouso', 1],
+  ['components/chat/QuickReplyPicker.tsx  bg-background-surface  repouso', 2],
+  ['components/layout/Topbar.tsx  bg-danger  repouso', 2],
+  ['components/ui/Pagination.tsx  bg-primary  repouso', 1],
+  ['components/ui/Select.tsx  bg-background-surface  repouso', 1],
+  ['pages/audit/AuditLogsPage.tsx  bg-background-elevated  repouso', 2],
+  ['pages/audit/AuditLogsPage.tsx  hover:bg-background-elevated  hover:', 1],
+  ['pages/calendar/CalendarPage.tsx  bg-primary  repouso', 2],
+  ['pages/dashboard/AdminDashboard.tsx  bg-primary  repouso', 1],
+  ['pages/dashboard/ClientDashboard.tsx  bg-primary  repouso', 1],
+  ['pages/dashboard/TechnicianDashboard.tsx  bg-background-elevated  repouso', 1],
+  ['pages/equipment/EquipmentPage.tsx  bg-background-elevated  repouso', 1],
+  ['pages/equipment/EquipmentPage.tsx  bg-background-surface  repouso', 1],
+  ['pages/groups/GroupsPage.tsx  hover:bg-background-elevated  hover:', 1],
+  ['pages/kb/KBArticlePage.tsx  bg-background-elevated  repouso', 1],
+  ['pages/kb/KBArticlePage.tsx  bg-primary  repouso', 1],
+  ['pages/kb/KBFormPage.tsx  bg-background-elevated  repouso', 1],
+  ['pages/kb/KBFormPage.tsx  bg-primary  repouso', 1],
+  ['pages/kb/KBListPage.tsx  bg-background-elevated  repouso', 4],
+  ['pages/kb/KBListPage.tsx  bg-primary  repouso', 1],
+  ['pages/notifications/NotificationsPage.tsx  bg-primary  repouso', 1],
+  ['pages/onboarding/OnboardingPage.tsx  bg-background-elevated  repouso', 1],
+  ['pages/onboarding/OnboardingPage.tsx  bg-primary  repouso', 1],
+  ['pages/products/ProductsPage.tsx  bg-background-elevated  repouso', 3],
+  ['pages/profile/ProfilePage.tsx  bg-danger  repouso', 1],
+  ['pages/profile/ProfilePage.tsx  bg-primary  repouso', 3],
+  ['pages/reports/ReportsPage.tsx  bg-primary  repouso', 1],
+  ['pages/settings/QuickRepliesPage.tsx  dark:bg-background-elevated  repouso', 1],
+  ['pages/tickets/TicketDetailPage.tsx  bg-background-elevated  repouso', 3],
+  ['pages/tickets/TicketFormPage.tsx  bg-background-elevated  repouso', 1],
+  ['pages/tickets/TicketFormPage.tsx  bg-primary  repouso', 2],
+  ['pages/tickets/TicketListPage.tsx  bg-background-elevated  repouso', 2],
+  ['pages/tickets/TicketListPage.tsx  bg-primary  repouso', 1],
+  ['pages/users/UsersPage.tsx  bg-background-elevated  repouso', 2],
+]);
+
+/** A chave da catraca a partir de um achado da varredura. */
+function chaveDe(a) {
+  return `${a.arquivo}  ${a.fundo}  ${a.estado}`;
+}
+
+/**
+ * Conta lugares por chave. Um "lugar" e `arquivo:linha` com um par — o mesmo
+ * par nos dois temas e **um** lugar, porque e um conserto so.
+ */
+export function contarPorChave(achados) {
+  const lugares = new Map();
+  for (const a of achados) {
+    const lugar = `${a.arquivo}|${a.linha}|${a.fundo}|${a.texto}`;
+    if (!lugares.has(lugar)) lugares.set(lugar, chaveDe(a));
+  }
+  const contagem = new Map();
+  for (const chave of lugares.values()) {
+    contagem.set(chave, (contagem.get(chave) ?? 0) + 1);
+  }
+  return contagem;
+}
+
+export function catraca(raiz, base = PARES_CONHECIDOS) {
+  const agora = contarPorChave(varrer(raiz));
+  const chaves = [...new Set([...agora.keys(), ...base.keys()])].sort();
+
+  const novos = [];
+  const consertados = [];
+  for (const k of chaves) {
+    const a = agora.get(k) ?? 0;
+    const b = base.get(k) ?? 0;
+    if (a > b) novos.push(`${k}  ->  ${b} na linha de base, ${a} agora`);
+    else if (a < b) consertados.push(k);
+  }
+
+  const listaNova = chaves
+    .map((k) => ({ k, n: agora.get(k) ?? 0 }))
+    .filter((x) => x.n > 0)
+    .map((x) => `  ['${x.k}', ${x.n}],`);
+
+  return {
+    novos,
+    consertados,
+    listaNova,
+    total: [...agora.values()].reduce((s, n) => s + n, 0),
+    totalBase: [...base.values()].reduce((s, n) => s + n, 0),
+  };
+}
+
+
+/**
+ * Os tres controles da catraca, do roteiro da sessao do ChamadosHS.
+ *
+ * O terceiro e o que a diferencia de um carimbo de linha de base: um guarda
+ * comum falha em par novo; este falha tambem quando um par e CONSERTADO e a
+ * lista nao desce junto. Sem ele a lista fossiliza e vira permissao.
+ */
+function provarCatraca() {
+  const base = mkdtempSync(path.join(tmpdir(), "catraca-"));
+  let falhas = 0;
+  const conferir = (nome, ok, detalhe) => {
+    if (!ok) falhas++;
+    console.log(`  ${ok ? "OK " : "X  "} ${nome}`);
+    if (!ok && detalhe) console.log(`      ${detalhe}`);
+  };
+
+  try {
+    const um = mkdtempSync(path.join(base, "um-"));
+    writeFileSync(
+      path.join(um, "Caso.tsx"),
+      'export const C = () => (<b className="bg-danger text-white">x</b>);',
+      "utf-8",
+    );
+    const chave = "Caso.tsx  bg-danger  repouso";
+
+    const emDia = catraca(um, new Map([[chave, 1]]));
+    conferir(
+      "1. limpo - nao acusa nada, e o total bate com a linha de base",
+      emDia.novos.length === 0 && emDia.consertados.length === 0 && emDia.total === 1,
+      JSON.stringify(emDia),
+    );
+
+    const comNovo = catraca(um, new Map());
+    conferir(
+      "2. par novo - acusa e nomeia o arquivo",
+      comNovo.novos.length === 1 && comNovo.novos[0].includes("Caso.tsx"),
+      JSON.stringify(comNovo.novos),
+    );
+
+    const vazio = mkdtempSync(path.join(base, "vazio-"));
+    writeFileSync(
+      path.join(vazio, "Caso.tsx"),
+      'export const C = () => (<b className="bg-surface-elevated text-conteudo-heading">x</b>);',
+      "utf-8",
+    );
+    const desceu = catraca(vazio, new Map([[chave, 1]]));
+    conferir(
+      "3. CONTROLE - par consertado tambem falha, e entrega a lista nova",
+      desceu.consertados.length === 1 && desceu.listaNova.length === 0 && desceu.total === 0,
+      JSON.stringify(desceu),
+    );
+  } finally {
+    rmSync(base, { recursive: true, force: true });
+  }
+  return falhas;
+}
+
 // ── execução ──────────────────────────────────────────────────────────
+//
+// Fica no fim do arquivo de propósito: a linha de base é um `const`, e um
+// bloco de execução acima dela cairia na zona morta temporal.
 
 const ehPrincipal = process.argv[1] &&
   path.resolve(process.argv[1]) === path.resolve(fileURLToPath(import.meta.url));
@@ -610,13 +813,45 @@ const ehPrincipal = process.argv[1] &&
 if (ehPrincipal) {
   if (process.argv.includes("--provar")) {
     console.log("Casos de prova da varredura:\n");
-    const falhas = provar();
+    console.log("");
+    const falhas = provar() + provarCatraca();
     console.log(
       falhas === 0
-        ? `\n✔ os ${PROVAS.length} casos passam.`
+        ? `\n✔ os ${PROVAS.length} casos e os 3 controles da catraca passam.`
         : `\n✖ ${falhas} de ${PROVAS.length} caso(s) falharam.`,
     );
     process.exit(falhas === 0 ? 0 : 1);
+  }
+
+  if (process.argv.includes("--catraca")) {
+    const r = catraca(path.join(RAIZ, "src"));
+    const problemas = [];
+
+    if (r.novos.length) {
+      problemas.push(
+        "PAR NOVO abaixo de 4,5:1 (fundo com texto por cima):\n      " +
+          r.novos.join("\n      ") +
+          "\n      Use o token do par (--on-tint-*, --text-on-*) ou o degrau de acao," +
+          "\n      nunca o degrau 500 da rampa com uma cor cravada por cima.",
+      );
+    }
+
+    if (r.consertados.length) {
+      problemas.push(
+        "a catraca precisa descer - par(es) consertado(s), atualize PARES_CONHECIDOS em\n" +
+          "      scripts/varredura-contraste.mjs. A lista inteira, ja pronta:\n" +
+          (r.listaNova.length
+            ? r.listaNova.join("\n")
+            : "  (vazia - apague o bloco inteiro e faca a varredura reprovar sempre)"),
+      );
+    }
+
+    console.log(
+      `catraca: ${r.total} par(es) abaixo de 4,5:1, linha de base ${r.totalBase}`,
+    );
+    for (const problema of problemas) console.error(`\n  x ${problema}`);
+    if (problemas.length === 0) console.log("  ok - em dia.");
+    process.exit(problemas.length ? 1 : 0);
   }
 
   const achados = varrer(path.join(RAIZ, "src"));
