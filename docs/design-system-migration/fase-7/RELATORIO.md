@@ -405,6 +405,72 @@ Lista completa, as quatro armadilhas do método e o padrão do degrau 500 em
 do `Button.tsx`, para ninguém ler "botão semântico corrigido" e concluir o que
 não está.
 
+## 10-C. O furo do 4,76 — medir uma superfície onde existem três
+
+O **Checkpoint 1** adotou `--text-muted` para o rótulo de grupo da sidebar e
+publicou **4,76:1** como prova. O número está certo. A conclusão que se tirou
+dele, não.
+
+O 4,76 é contra **`--surface`**, que é branco. O mesmo token, nas outras duas
+superfícies do pacote:
+
+| `--text-muted` (antes da E5) | `--surface` | `--bg-base` | `--surface-elevated` |
+|---|---:|---:|---:|
+| claro | **4,76** ✅ | 4,55 ✅ | **4,34** ❌ |
+| escuro | 6,23 ✅ | 6,78 ✅ | 5,29 ✅ |
+
+A tabela do Checkpoint 1 mediu a coluna mais clara. O rótulo da sidebar assenta
+mesmo em `--surface` — conferido, o `Sidebar.tsx` pinta `bg-background-surface`
+—, então a medição estava correta **para aquele elemento**. O erro foi o
+leitor: o 4,76 passou a valer como "o token aprova", e o token não aprovava na
+terceira coluna.
+
+**É por isso que o `ghost` do `Button` nunca apareceu.** Ele consome
+`--text-muted` direto e pinta `--surface-elevated` no hover — a única coluna
+que ninguém tinha medido. Ficou em 4,34:1 num primitivo dado por revisado, e
+sobreviveu ao Checkpoint 1, à Fase 7 e a uma varredura de contraste inteira.
+
+**Não é a primeira vez, e a repetição é o argumento.** A mesma forma já tinha
+produzido a **E2**: o `D4-a` registrou `--on-tint-warning` como "caso de
+fronteira, 0,02 abaixo do piso" medindo só sobre branco, e sobre a tinta âmbar
+ele estava em 4,47. E produziu a **E5**, que é este mesmo caso corrigido na
+raiz. Três emendas, uma causa.
+
+### A regra
+
+Ficou escrita no `EMENDAS.md` depois da E5, em duas metades — uma de cada
+sessão:
+
+> Contraste de token de texto se mede contra **as três** superfícies onde ele
+> pode assentar (`--surface`, `--bg-base`, `--surface-elevated`), e nos **dois**
+> temas. Não contra a mais clara.
+>
+> E corrigir um token não é corrigir o defeito: depois de mexer num token,
+> **varra quem usa aquele par**.
+
+A ausência da primeira produziu a E2 e a E5. A ausência da segunda produziu
+quatro descobertas independentes do mesmo defeito: a E2, o sexto par do Avatar,
+o `ghost` do `Button` e os sete pares de tela do ChamadosHS.
+
+### Onde a regra passa a ser cobrada
+
+Não em prosa. O `Avatar.test.tsx` mede o par neutro contra **as três
+superfícies nos dois temas** — seis asserções, uma por combinação, para que a
+falha diga qual coluna caiu. Validadas por mutação: desfazer a E5 no
+`colors.css` derruba exatamente a de `--surface-elevated` no claro, e nenhuma
+outra.
+
+O mesmo formato cabe em qualquer par de tinta das Fases 8–10. O que **não**
+cabe é a linha única contra `--surface`, que foi como as três emendas nasceram.
+
+### O que a E5 mudou nos números desta fase
+
+`--text-muted` no claro passa a **7,58 · 7,24 · 6,92**; o escuro não se move.
+As tabelas das seções 5 e 10-A registram o estado do dia em que cada mudança
+foi feita e **não** foram reescritas — mas os "antes" de `--text-muted` que
+aparecem lá (4,34 e 2,85) deixaram de ser o valor corrente do token. O `ghost`
+saiu da varredura por conta disso, sem uma linha de componente alterada.
+
 ## 11. Risco de regressão
 
 **Baixo**, com uma ressalva.
@@ -434,8 +500,9 @@ local.
 - [ ] **19 pares de fundo cheio** (seção 10-B) — 16 são botões de tela das
       Fases 11–16; `ui/Pagination.tsx:129` é primitivo e cai na Fase 9; dois são
       contadores do `Topbar`
-- [ ] **Decisão sobre a E5** (seção 10-A): as tintas semânticas reprovam
-      sobre `--bg-base` e `--surface-elevated`, e o hover do painel alcança isso
+- [x] ~~**Decisão sobre a E5**~~ — aprovada e recopiada em 03/09 (`84e24ea`).
+      Conserta o `ghost` do `Button` na origem; as tintas semânticas da seção
+      10-A **seguem abertas**, porque a E5 mexeu no cinza e não nelas
 - [ ] **Decisão sobre a E4**: quem aplicou, e se o registro entra com hash
       reconstruído e declarado como tal
 
