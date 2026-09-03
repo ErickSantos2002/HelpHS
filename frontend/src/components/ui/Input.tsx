@@ -1,4 +1,4 @@
-import { forwardRef } from "react";
+import { forwardRef, useId } from "react";
 import type { InputHTMLAttributes } from "react";
 import { cn } from "../../lib/utils";
 
@@ -34,13 +34,34 @@ export interface InputProps extends InputHTMLAttributes<HTMLInputElement> {
  * **sempre** na força que antes dependia do ponteiro, e o hover virou no-op.
  * O `Input.jsx` do pacote também não tem hover nenhum.
  *
+ * ── O erro precisava chegar a quem não o vê ───────────────────────────
+ *
+ * O erro e a dica eram `<p>` soltos ao lado do campo. Visualmente ficam
+ * juntos; para um leitor de tela **não existe relação nenhuma** entre eles e
+ * o `input`. A pessoa ouvia o nome do campo, digitava, e nunca ouvia por que
+ * o formulário recusou.
+ *
+ * `aria-describedby` cria a relação, e `aria-invalid` marca o campo como
+ * recusado. `aria-required` NÃO entra: o atributo `required` nativo já diz
+ * isso, e chega aqui pelo espalhamento das props — repetir seria declarar
+ * duas vezes a mesma coisa.
+ *
+ * O `id` também mudou. Ele saía do rótulo (`label.toLowerCase()`), então
+ * dois campos com o mesmo rótulo na mesma tela geravam o **mesmo id** — e
+ * sem rótulo ficava `undefined`, quebrando o `htmlFor`. Agora vem do
+ * `useId`, e o `id` passado por quem chama continua ganhando.
+ *
  * **O foco é desvio com prazo.** O `ring` do Tailwind é `box-shadow` por fora;
  * o pacote desenha `outline` por dentro. Sai tela a tela nas Fases 11–16 e é
  * conferido no **Checkpoint 4** (`VERSION.md`, desvio F1).
  */
 export const Input = forwardRef<HTMLInputElement, InputProps>(
   ({ label, error, hint, className, id, ...props }, ref) => {
-    const inputId = id ?? label?.toLowerCase().replace(/\s+/g, "-");
+    const gerado = useId();
+    const inputId = id ?? gerado;
+    const idErro = inputId + "-erro";
+    const idDica = inputId + "-dica";
+    const descrito = error ? idErro : hint ? idDica : undefined;
 
     return (
       <div className="flex flex-col gap-1.5">
@@ -55,6 +76,8 @@ export const Input = forwardRef<HTMLInputElement, InputProps>(
         <input
           ref={ref}
           id={inputId}
+          aria-invalid={error ? true : undefined}
+          aria-describedby={descrito}
           className={cn(
             "w-full rounded-lg border bg-surface px-3 py-2 text-sm text-conteudo",
             "placeholder:text-conteudo-muted",
@@ -68,8 +91,16 @@ export const Input = forwardRef<HTMLInputElement, InputProps>(
           )}
           {...props}
         />
-        {error && <p className="text-xs text-on-tint-danger">{error}</p>}
-        {hint && !error && <p className="text-xs text-conteudo-muted">{hint}</p>}
+        {error && (
+          <p id={idErro} className="text-xs text-on-tint-danger">
+            {error}
+          </p>
+        )}
+        {hint && !error && (
+          <p id={idDica} className="text-xs text-conteudo-muted">
+            {hint}
+          </p>
+        )}
       </div>
     );
   },

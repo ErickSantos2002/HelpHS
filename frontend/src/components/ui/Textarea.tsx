@@ -1,4 +1,4 @@
-import { forwardRef } from "react";
+import { forwardRef, useId } from "react";
 import type { TextareaHTMLAttributes } from "react";
 import { cn } from "../../lib/utils";
 
@@ -15,6 +15,23 @@ export interface TextareaProps extends TextareaHTMLAttributes<HTMLTextAreaElemen
  * **não-mudanças**: a borda de erro fica no degrau cheio `danger` (trocar por
  * `action-danger` regride o escuro de 4,25:1 para 3,31:1, porque o token só
  * existe no `:root`), e o `forwardRef` fica.
+ *
+ * ── O erro precisava chegar a quem não o vê ───────────────────────────
+ *
+ * O erro e a dica eram `<p>` soltos ao lado do campo. Visualmente ficam
+ * juntos; para um leitor de tela **não existe relação nenhuma** entre eles e
+ * o `input`. A pessoa ouvia o nome do campo, digitava, e nunca ouvia por que
+ * o formulário recusou.
+ *
+ * `aria-describedby` cria a relação, e `aria-invalid` marca o campo como
+ * recusado. `aria-required` NÃO entra: o atributo `required` nativo já diz
+ * isso, e chega aqui pelo espalhamento das props — repetir seria declarar
+ * duas vezes a mesma coisa.
+ *
+ * O `id` também mudou. Ele saía do rótulo (`label.toLowerCase()`), então
+ * dois campos com o mesmo rótulo na mesma tela geravam o **mesmo id** — e
+ * sem rótulo ficava `undefined`, quebrando o `htmlFor`. Agora vem do
+ * `useId`, e o `id` passado por quem chama continua ganhando.
  *
  * O hover da borda saiu pelo mesmo motivo: a **E7** levou a borda de repouso a
  * `--border-control`, que é slate-500 — exatamente onde o `hover:border-slate-500`
@@ -34,7 +51,11 @@ export interface TextareaProps extends TextareaHTMLAttributes<HTMLTextAreaElemen
  */
 export const Textarea = forwardRef<HTMLTextAreaElement, TextareaProps>(
   ({ label, error, hint, className, id, ...props }, ref) => {
-    const inputId = id ?? label?.toLowerCase().replace(/\s+/g, "-");
+    const gerado = useId();
+    const inputId = id ?? gerado;
+    const idErro = inputId + "-erro";
+    const idDica = inputId + "-dica";
+    const descrito = error ? idErro : hint ? idDica : undefined;
 
     return (
       <div className="flex flex-col gap-1.5">
@@ -49,6 +70,8 @@ export const Textarea = forwardRef<HTMLTextAreaElement, TextareaProps>(
         <textarea
           ref={ref}
           id={inputId}
+          aria-invalid={error ? true : undefined}
+          aria-describedby={descrito}
           rows={4}
           className={cn(
             "w-full rounded-lg border bg-surface px-3 py-2 text-sm text-conteudo",
@@ -63,8 +86,16 @@ export const Textarea = forwardRef<HTMLTextAreaElement, TextareaProps>(
           )}
           {...props}
         />
-        {error && <p className="text-xs text-on-tint-danger">{error}</p>}
-        {hint && !error && <p className="text-xs text-conteudo-muted">{hint}</p>}
+        {error && (
+          <p id={idErro} className="text-xs text-on-tint-danger">
+            {error}
+          </p>
+        )}
+        {hint && !error && (
+          <p id={idDica} className="text-xs text-conteudo-muted">
+            {hint}
+          </p>
+        )}
       </div>
     );
   },

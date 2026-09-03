@@ -132,6 +132,9 @@ export function Selector({
 
   const idBase = useId();
   const idPainel = idBase + "-painel";
+  // O erro era um `<p>` solto ao lado do gatilho: visualmente junto, e sem
+  // relação nenhuma com ele para um leitor de tela.
+  const idErro = idBase + "-erro";
   const idOpcao = (i: number) => idBase + "-op-" + String(i);
 
   // `""` e `null` são a mesma coisa aqui: o `FilterSelect` limpava com string
@@ -447,6 +450,8 @@ export function Selector({
         disabled={disabled}
         onClick={alternar}
         onKeyDown={aoTeclar}
+        aria-invalid={error ? true : undefined}
+        aria-describedby={error ? idErro : undefined}
         aria-haspopup="listbox"
         aria-expanded={aberto}
         aria-controls={aberto ? idPainel : undefined}
@@ -491,7 +496,11 @@ export function Selector({
         />
       </button>
 
-      {error && !filtro && <p className="text-xs text-on-tint-danger">{error}</p>}
+      {error && !filtro && (
+        <p id={idErro} className="text-xs text-on-tint-danger">
+          {error}
+        </p>
+      )}
 
       {painel}
     </div>
