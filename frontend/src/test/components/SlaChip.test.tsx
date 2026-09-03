@@ -1,6 +1,7 @@
 import { render, screen } from "@testing-library/react";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { SlaChip } from "../../components/ui/SlaChip";
+import { AA, contraste } from "../helpers/contraste";
 
 /**
  * Chip de prazo de SLA da página do chamado.
@@ -103,6 +104,65 @@ describe("SlaChip — resposta já dada", () => {
     );
 
     expect(screen.getByText("Respondido")).toBeInTheDocument();
-    expect(screen.getByText("Respondido").closest("span[class]")).toHaveClass(/red/);
+    // Fase 9: a asserção mira o TOKEN e não a paleta. Era /red/, da paleta crua
+    // do Tailwind; hoje a tinta de violação é `tint-danger`/`on-tint-danger`, o
+    // par que a E2 e a E8 mediram. A intenção do teste não mudou — a cor de
+    // violação continua sendo exigida.
+    expect(screen.getByText("Respondido").closest("span[class]")).toHaveClass(
+      /danger/,
+    );
   });
+});
+
+describe("SlaChip — Fase 9: as tintas saem da paleta crua", () => {
+  it.each([
+    ["violação", { breached: true }, "danger"],
+    ["respondido", { breached: false, respondedAt: emHoras(-1) }, "success"],
+    ["em andamento", { breached: false }, "warning"],
+  ])("o estado de %s usa o par medido da tinta", (_nome, props, tinta) => {
+    // Eram `bg-red-500/15 text-red-700 dark:text-red-400` e as irmãs: paleta
+    // crua do Tailwind, fora do sistema de tokens, com a razão de contraste
+    // nunca medida. Hoje são os pares `tint`/`on-tint` da E2 e da E8.
+    const { container } = render(
+      <SlaChip label="Resposta" dueAt={emHoras(3)} breached={false} {...props} />,
+    );
+
+    const chip = container.querySelector("span[class]")!;
+    expect(chip.className).toContain("bg-tint-" + tinta);
+    expect(chip.className).toContain("text-on-tint-" + tinta);
+  });
+
+  it("não sobra nenhuma cor da paleta crua", () => {
+    const { container } = render(
+      <SlaChip label="Resposta" dueAt={emHoras(3)} breached={true} />,
+    );
+
+    expect(container.innerHTML).not.toMatch(/red-\d|emerald-\d|amber-\d|slate-\d/);
+  });
+
+  it("o relógio não entra no nome acessível do chip", () => {
+    // O ícone é decoração: a informação está no texto. Sem `aria-hidden` ele
+    // vira parte do que o leitor de tela anuncia.
+    //
+    // A garantia mora no `Icon`, não aqui — este teste a prende no ponto de
+    // uso. Validado por mutação NO `Icon`: tirar o atributo de lá derruba
+    // este teste. Mutar o `SlaChip` não derrubava, e foi assim que se
+    // descobriu que o `aria-hidden` repetido aqui era redundante.
+    const { container } = render(
+      <SlaChip label="Resposta" dueAt={emHoras(3)} breached={false} />,
+    );
+
+    expect(container.querySelector('svg[aria-hidden="true"]')).not.toBeNull();
+  });
+
+  it.each(["claro", "escuro"] as const)(
+    "as três tintas passam o piso de texto, tema %s",
+    (tema) => {
+      for (const tinta of ["danger", "success", "warning"] as const) {
+        expect(
+          contraste("--tint-" + tinta, "--on-tint-" + tinta, tema),
+        ).toBeGreaterThanOrEqual(AA);
+      }
+    },
+  );
 });
