@@ -193,8 +193,8 @@ async def _auto_transition(
         db,
         ticket.creator_id,
         NotificationType.ticket_updated,
-        "Status do ticket atualizado",
-        f"O status do ticket {ticket.protocol} foi atualizado para '{new_status.value}'.",
+        "Status do chamado atualizado",
+        f"O status do chamado {ticket.protocol} foi atualizado para '{new_status.value}'.",
         data={
             "ticket_id": str(ticket.id),
             "old_status": old_status.value,
@@ -410,8 +410,8 @@ async def create_ticket(
             db,
             actor.id,
             NotificationType.ticket_created,
-            "Ticket aberto",
-            f"Seu ticket foi registrado com o protocolo {protocol}.",
+            "Chamado aberto",
+            f"Seu chamado foi registrado com o protocolo {protocol}.",
             data={"ticket_id": str(ticket.id), "protocol": protocol},
             settings=settings,
         )
@@ -763,8 +763,8 @@ async def update_ticket_status(
         db,
         ticket.creator_id,
         NotificationType.ticket_updated,
-        "Status do ticket alterado",
-        f"O status do ticket {ticket.protocol} foi alterado para '{body.status.value}'.",
+        "Status do chamado alterado",
+        f"O status do chamado {ticket.protocol} foi alterado para '{body.status.value}'.",
         data={
             "ticket_id": str(ticket.id),
             "old_status": old_status.value,
@@ -780,7 +780,7 @@ async def update_ticket_status(
             ticket.creator_id,
             NotificationType.satisfaction_survey,
             "Como foi o atendimento?",
-            f"O ticket {ticket.protocol} foi resolvido. Deixe sua avaliação!",
+            f"O chamado {ticket.protocol} foi resolvido. Deixe sua avaliação!",
             data={"ticket_id": str(ticket.id), "protocol": ticket.protocol},
             settings=settings,
         )
@@ -835,9 +835,9 @@ async def resolve_ticket(
         db,
         ticket.creator_id,
         NotificationType.ticket_updated,
-        "Ticket resolvido",
-        f"O ticket {ticket.protocol} foi marcado como resolvido.",
-        data={"ticket_id": str(ticket.id), "new_status": "resolved"},
+        "Chamado resolvido",
+        f"O chamado {ticket.protocol} foi marcado como resolvido.",
+        data={"ticket_id": str(ticket.id), "protocol": ticket.protocol, "new_status": "resolved"},
         settings=settings,
     )
     await notify(
@@ -845,7 +845,7 @@ async def resolve_ticket(
         ticket.creator_id,
         NotificationType.satisfaction_survey,
         "Como foi o atendimento?",
-        f"O ticket {ticket.protocol} foi resolvido. Deixe sua avaliação!",
+        f"O chamado {ticket.protocol} foi resolvido. Deixe sua avaliação!",
         data={"ticket_id": str(ticket.id), "protocol": ticket.protocol},
         settings=settings,
     )
@@ -942,8 +942,12 @@ async def reopen_ticket(
             ticket.assignee_id,
             NotificationType.ticket_updated,
             "Chamado reaberto",
-            f"O ticket {ticket.protocol} foi reaberto por {actor.name}.",
-            data={"ticket_id": str(ticket.id), "new_status": new_status.value},
+            f"O chamado {ticket.protocol} foi reaberto por {actor.name}.",
+            data={
+                "ticket_id": str(ticket.id),
+                "protocol": ticket.protocol,
+                "new_status": new_status.value,
+            },
             settings=settings,
         )
     if ticket.creator_id != actor.id:
@@ -952,8 +956,12 @@ async def reopen_ticket(
             ticket.creator_id,
             NotificationType.ticket_updated,
             "Chamado reaberto",
-            f"O ticket {ticket.protocol} foi reaberto e voltou para atendimento.",
-            data={"ticket_id": str(ticket.id), "new_status": new_status.value},
+            f"O chamado {ticket.protocol} foi reaberto e voltou para atendimento.",
+            data={
+                "ticket_id": str(ticket.id),
+                "protocol": ticket.protocol,
+                "new_status": new_status.value,
+            },
             settings=settings,
         )
 
@@ -1030,8 +1038,8 @@ async def assign_ticket(
             db,
             body.assignee_id,
             NotificationType.ticket_assigned,
-            "Ticket atribuído a você",
-            f"O ticket {ticket.protocol} foi atribuído a você.",
+            "Chamado atribuído a você",
+            f"O chamado {ticket.protocol} foi atribuído a você.",
             data={"ticket_id": str(ticket.id), "protocol": ticket.protocol},
             settings=settings,
         )
@@ -1074,8 +1082,8 @@ async def cancel_ticket(
         db,
         ticket.creator_id,
         NotificationType.ticket_closed,
-        "Ticket cancelado",
-        f"O ticket {ticket.protocol} foi cancelado.",
+        "Chamado cancelado",
+        f"O chamado {ticket.protocol} foi cancelado.",
         data={"ticket_id": str(ticket.id), "protocol": ticket.protocol},
         settings=settings,
     )

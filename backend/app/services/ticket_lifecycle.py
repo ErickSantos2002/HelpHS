@@ -137,7 +137,7 @@ async def close_expired_tickets(db: AsyncSession, settings: Settings) -> int:
             NotificationType.ticket_closed,
             "Chamado fechado automaticamente",
             (
-                f"O ticket {ticket.protocol} foi fechado por falta de manifestação. "
+                f"O chamado {ticket.protocol} foi fechado por falta de manifestação. "
                 f"Se o problema voltar, você ainda pode reabri-lo."
             ),
             data={"ticket_id": str(ticket.id), "protocol": ticket.protocol},
