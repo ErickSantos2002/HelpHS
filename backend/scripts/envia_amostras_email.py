@@ -42,11 +42,21 @@ Uso:
     python -m scripts.envia_amostras_email eu@empresa.com
     python -m scripts.envia_amostras_email eu@empresa.com outro@gmail.com
     python -m scripts.envia_amostras_email eu@empresa.com --so confirmacao,chamado
-    python -m scripts.envia_amostras_email eu@empresa.com --env ../.env.dev
+    python -m scripts.envia_amostras_email eu@empresa.com --env .env.local
 
 Lê SMTP_* do `.env` do backend, ou das variáveis de ambiente quando não houver
 arquivo. **Recusa rodar com APP_ENV=production**: as amostras têm texto de teste
 e não devem sair pelo remetente de produção.
+
+O nome do arquivo importa. Este exemplo já sugeriu `../.env.dev`, e esse nome
+**não era pego pelo .gitignore** — a credencial de envio entrava no `git status`
+como arquivo novo, esperando alguém dar `git add .`. Hoje o `.gitignore` cobre
+`backend/.env.*` (com exceção do `.env.example`), mas prefira `.env.local`:
+funciona nas duas regras e é o nome que o resto do projeto já usa.
+
+Rodar numa worktree é o caso em que a variável de ambiente ganha do arquivo:
+worktree não carrega arquivo ignorado, então não há `backend/.env` aqui, e
+exportar as SMTP_* só na janela do terminal não deixa credencial em disco.
 
 Nunca imprime a senha inteira — o terminal costuma virar print no chat, e a
 credencial é a da empresa.

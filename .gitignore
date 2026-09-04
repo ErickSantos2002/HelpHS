@@ -79,3 +79,10 @@ frontend/test-results/
 # Vite env files do frontend (so VITE_*, mas nada de env versionado)
 frontend/.env.*
 !frontend/.env.example
+
+# Env files do backend. O `.env` da linha 6 ja pega o arquivo principal; este
+# bloco fecha os VARIANTES, que e por onde a credencial escapava: `.env.local`
+# estava coberto, mas `.env.dev` e `.env.staging` nao — e `.env.dev` e
+# justamente o nome que o docstring do envia_amostras_email.py sugeria.
+backend/.env.*
+!backend/.env.example
