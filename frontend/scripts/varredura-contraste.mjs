@@ -781,7 +781,7 @@ function provar() {
  * D5, e saem tela a tela nas Fases 11-16 — cada pagina migrada zera os seus.
  */
 const PARES_CONHECIDOS = new Map([
-['components/chat/ChatPanel.tsx  bg-primary  repouso', 1],
+  ['components/chat/ChatPanel.tsx  bg-primary  repouso', 1],
   ['components/chat/ChatPanel.tsx  bg-surface-elevated  repouso', 1],
   ['components/chat/QuickReplyPicker.tsx  bg-surface  repouso', 2],
   ['components/layout/Topbar.tsx  bg-danger  repouso', 2],
@@ -808,8 +808,7 @@ const PARES_CONHECIDOS = new Map([
   ['pages/reports/ReportsPage.tsx  bg-primary  repouso', 1],
   ['pages/settings/QuickRepliesPage.tsx  dark:bg-surface-elevated  repouso', 1],
   ['pages/tickets/TicketDetailPage.tsx  bg-surface-elevated  repouso', 3],
-  ['pages/tickets/TicketFormPage.tsx  bg-primary  repouso', 2],
-  ['pages/tickets/TicketFormPage.tsx  bg-surface-elevated  repouso', 1],
+  ['pages/tickets/TicketFormPage.tsx  bg-primary  repouso', 1],
   ['pages/tickets/TicketListPage.tsx  bg-primary  repouso', 1],
   ['pages/tickets/TicketListPage.tsx  bg-surface-elevated  repouso', 2],
   ['pages/users/UsersPage.tsx  bg-surface-elevated  repouso', 2],
@@ -916,7 +915,7 @@ export function contarCheiasPorArquivo(achados) {
  * restantes saem na Fase 16.
  */
 const CHEIAS_CONHECIDAS = new Map([
-['components/chat/ChatPanel.tsx', 2],
+  ['components/chat/ChatPanel.tsx', 2],
   ['pages/calendar/CalendarPage.tsx', 2],
   ['pages/dashboard/AdminDashboard.tsx', 2],
   ['pages/dashboard/TechnicianDashboard.tsx', 2],
@@ -927,7 +926,6 @@ const CHEIAS_CONHECIDAS = new Map([
   ['pages/kb/KBListPage.tsx', 1],
   ['pages/notifications/NotificationsPage.tsx', 5],
   ['pages/profile/ProfilePage.tsx', 5],
-  ['pages/tickets/TicketFormPage.tsx', 2],
   ['pages/tickets/TicketListPage.tsx', 1],
 ]);
 

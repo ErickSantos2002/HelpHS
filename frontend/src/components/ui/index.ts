@@ -36,6 +36,9 @@ export type { SwitchProps } from "./Switch";
 export { Selector } from "./Selector";
 export type { SelectorProps, SelectorOption } from "./Selector";
 
+export { RadioCards } from "./RadioCards";
+export type { RadioCardsProps, RadioOption, RadioTone } from "./RadioCards";
+
 export { Select } from "./Select";
 export type { SelectProps, SelectOption } from "./Select";
 

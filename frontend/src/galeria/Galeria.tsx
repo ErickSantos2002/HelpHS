@@ -9,6 +9,7 @@ import { Checkbox } from "../components/ui/Checkbox";
 import { Input } from "../components/ui/Input";
 import { KpiCard } from "../components/ui/KpiCard";
 import { Pagination } from "../components/ui/Pagination";
+import { RadioCards } from "../components/ui/RadioCards";
 import { Select } from "../components/ui/Select";
 import { Selector } from "../components/ui/Selector";
 import { SlaChip } from "../components/ui/SlaChip";
@@ -74,7 +75,7 @@ const AVISOS = ["info", "success", "warning", "danger"] as const;
  *
  * Ao acrescentar um `Bloco`, ajuste este número — a suíte cobra.
  */
-export const AMOSTRAS = 13;
+export const AMOSTRAS = 14;
 
 /** `texto` cobra 4,5:1; `grafico` cobra 3:1 (WCAG 1.4.11). */
 function Bloco({
@@ -216,6 +217,37 @@ export function Galeria() {
           onChange={() => {}}
           options={[{ value: "aberto", label: "Aberto" }]}
         />
+      </Bloco>
+
+      {/*
+        As seis tonalidades ESCOLHIDAS, uma por cartão.
+
+        A galeria é o único lugar onde estas classes se provam: `peer-checked:`
+        e a variante descendente `[&_[data-ponto]]` não existem em jsdom, e uma
+        delas que o Tailwind não gere deixa o cartão escolhido idêntico ao não
+        escolhido — sem erro e sem aviso.
+
+        Cada grupo mostra a opção escolhida primeiro, porque é o par
+        tinta/`on-tint` dela que precisa ser medido.
+      */}
+      <Bloco nome="RadioCards">
+        {(["primary", "info", "success", "warning", "danger", "muted"] as const).map(
+          (tone) => (
+            <div key={tone} className="w-40">
+              <RadioCards
+                name={"galeria-" + tone}
+                label={tone}
+                layout="linha"
+                value="sim"
+                onChange={() => {}}
+                options={[
+                  { value: "sim", label: "Escolhido", tone },
+                  { value: "nao", label: "Livre", tone },
+                ]}
+              />
+            </div>
+          ),
+        )}
       </Bloco>
 
       <Bloco nome="Checkbox e Switch" piso="grafico">

@@ -6,14 +6,20 @@ import { cn } from "../../lib/utils";
  *
  * Os traçados do pacote saíram do próprio HelpHS — `layout/Sidebar.tsx`,
  * `ui/Alert.tsx`, `ui/Modal.tsx` e `ui/SlaChip.tsx`. Este arquivo fecha a
- * volta: traz o conjunto de lá para cá como componente único, com os mesmos
- * 25 nomes, e é o destino das 229 tags `<svg>` que ainda estão soltas pelas
- * telas — a troca é das Fases 11–16, uma tela por vez.
+ * volta: traz o conjunto de lá para cá como componente único, e é o destino das
+ * 229 tags `<svg>` que ainda estão soltas pelas telas — a troca é das Fases
+ * 11–16, uma tela por vez.
  *
- * Os traçados vieram por extração do pacote, não digitados: 25 de 25 conferem
- * caractere a caractere.
+ * Os **25 primeiros** vieram por extração do pacote, não digitados: 25 de 25
+ * conferem caractere a caractere. Os que vêm depois deles não são do pacote, e
+ * o bloco onde começam diz de onde vieram. A distinção importa: um dia o
+ * pacote pode ganhar um nome igual com traçado diferente, e é preciso saber
+ * qual dos dois é a cópia.
  */
-export const ICON_PATHS = {
+/**
+ * Os 25 do pacote. **Não editar à mão** — é cópia, e o hash prende.
+ */
+export const ICON_PATHS_PACOTE = {
   dashboard:
     "M3 12l2-2m0 0l7-7 7 7M5 10v10a1 1 0 001 1h3m10-11l2 2m-2-2v10a1 1 0 01-1 1h-3m-6 0a1 1 0 001-1v-4a1 1 0 011-1h2a1 1 0 011 1v4a1 1 0 001 1m-6 0h6",
   ticket:
@@ -66,32 +72,60 @@ export const ICON_PATHS = {
     "M3 4a1 1 0 011-1h16a1 1 0 011 1v2.586a1 1 0 01-.293.707l-6.414 6.414a1 1 0 00-.293.707V17l-4 4v-6.586a1 1 0 00-.293-.707L3.293 7.293A1 1 0 013 6.586V4z",
 } as const;
 
-export type IconName =
-  | "dashboard"
-  | "ticket"
-  | "users"
-  | "groups"
-  | "box"
-  | "chart"
-  | "shield"
-  | "clock"
-  | "cpu"
-  | "book"
-  | "tag"
-  | "chat"
-  | "calendar"
-  | "info"
-  | "check"
-  | "warning"
-  | "error"
-  | "close"
-  | "plus"
-  | "menu"
-  | "search"
-  | "bell"
-  | "chevronDown"
-  | "logout"
-  | "filter";
+/**
+ * Os que **não** vêm do pacote.
+ *
+ * A procedência é tabela separada, e não comentário, porque é ela que dá
+ * sentido ao hash de cima: o teste prende os 25 do pacote a um número tirado do
+ * `Icon.jsx` no dia da cópia, e um acréscimo local misturado ali derrubaria
+ * essa conferência para sempre — o conserto seria trocar o número, e trocar o
+ * número é justamente o que o teste existe para impedir.
+ *
+ * Estes nove estavam soltos dentro do `TicketFormPage`, e vieram para cá
+ * **verbatim**. Verbatim de propósito: trocar `server` pelo `cpu` que já
+ * existia, ou `help` pelo `info`, mudaria o desenho da tela dentro de um commit
+ * que promete não mudar pixel. Troca de ícone é decisão de produto, não efeito
+ * colateral de migração.
+ *
+ * Se um destes nomes aparecer no pacote um dia, o traçado de lá ganha e este
+ * sai — e o hash de cima passa a cobri-lo.
+ */
+export const ICON_PATHS_LOCAIS = {
+  server:
+    "M9 3H5a2 2 0 00-2 2v4m6-6h10a2 2 0 012 2v4M9 3v18m0 0h10a2 2 0 002-2V9M9 21H5a2 2 0 01-2-2V9m0 0h18",
+  code:
+    "M10 20l4-16m4 4l4 4-4 4M6 16l-4-4 4-4",
+  network:
+    "M3.055 11H5a2 2 0 012 2v1a2 2 0 002 2 2 2 0 012 2v2.945M8 3.935V5.5A2.5 2.5 0 0010.5 8h.5a2 2 0 012 2 2 2 0 104 0 2 2 0 012-2h1.064M15 20.488V18a2 2 0 012-2h3.064",
+  key:
+    "M15 7a2 2 0 012 2m4 0a6 6 0 01-7.743 5.743L11 17H9v2H7v2H4a1 1 0 01-1-1v-2.586a1 1 0 01.293-.707l5.964-5.964A6 6 0 1121 9z",
+  mail:
+    "M3 8l7.89 5.26a2 2 0 002.22 0L21 8M5 19h14a2 2 0 002-2V7a2 2 0 00-2-2H5a2 2 0 00-2 2v10a2 2 0 002 2z",
+  help:
+    "M8.228 9c.549-1.165 2.03-2 3.772-2 2.21 0 4 1.343 4 3 0 1.4-1.278 2.575-3.006 2.907-.542.104-.994.54-.994 1.093m0 3h.01M21 12a9 9 0 11-18 0 9 9 0 0118 0z",
+  ellipsis:
+    "M5 12h.01M12 12h.01M19 12h.01M6 12a1 1 0 11-2 0 1 1 0 012 0zm7 0a1 1 0 11-2 0 1 1 0 012 0zm7 0a1 1 0 11-2 0 1 1 0 012 0z",
+  arrowLeft:
+    "M10 19l-7-7m0 0l7-7m-7 7h18",
+  paperclip:
+    "M15.172 7l-6.586 6.586a2 2 0 102.828 2.828l6.414-6.586a4 4 0 00-5.656-5.656l-6.415 6.585a6 6 0 108.486 8.486L20.5 13",
+} as const;
+
+/** O conjunto que o `Icon` desenha: os do pacote mais os locais. */
+export const ICON_PATHS = {
+  ...ICON_PATHS_PACOTE,
+  ...ICON_PATHS_LOCAIS,
+} as const;
+
+/**
+ * Derivado do próprio mapa, e não repetido à mão.
+ *
+ * A lista existia escrita duas vezes. Acrescentar traçado sem acrescentar nome
+ * dava um ícone que o TypeScript recusa; o contrário dava um nome que devolve
+ * `null` em silêncio, porque o `Icon` sai fora quando não acha o traçado. As
+ * duas metades agora não têm como divergir.
+ */
+export type IconName = keyof typeof ICON_PATHS;
 
 export interface IconProps extends Omit<SVGAttributes<SVGSVGElement>, "name"> {
   name: IconName;

@@ -8,7 +8,7 @@ com os primitivos. Os candidatos, escolhidos pela síntese do mapeamento:
 | tipo | tela | estado |
 |---|---|---|
 | painel | `ClientDashboard` | **fechada** |
-| formulário | `TicketFormPage` | a seguir |
+| formulário | `TicketFormPage` | **fechada** |
 | listagem | `TicketListPage` | a seguir |
 
 ---
@@ -129,3 +129,146 @@ tela mostra três números que não fecham, sem nenhum sinal de truncamento.
 
 Está registrado no próprio arquivo. Entra na Fase 16, com o serviço — não viaja
 num commit de token.
+
+---
+
+## Etapa 3 — `TicketFormPage`
+
+É a tela de **formulário** que a §25 pede. 662 linhas, e o defeito principal
+aparecia duas vezes na mesma página.
+
+### Ficha da §29
+
+```text
+Página: /tickets/new e /tickets/:id/edit — src/pages/tickets/TicketFormPage.tsx
+
+FUNCIONALIDADE
+[x] carrega dados   — `getProducts` + `getMyEquipment`, e `getTicket` na edição
+[–] filtra  [–] busca  [–] pagina  [–] ordena
+[x] cria            — `createTicket`, mesmo corpo, mesma ordem
+[x] edita           — `updateTicket`; `client_observation` segue só na criação
+[–] exclui
+[x] abre detalhes   — navega para o chamado criado
+[x] anexa/remove arquivo — `FileUpload`, mesmos limites (10 arquivos, 25 MB)
+[x] respeita permissões  — a tela é do cliente; nada de papel mudou
+[x] mostra erro     — `Alert variant="danger"` dispensável, `live` implícito
+[x] mostra estado vazio  — "Selecione um produto primeiro"
+[x] mostra loading  — `Spinner` na carga de produtos e do chamado
+[x] funciona no mobile   — grade de 4 colunas no telefone, 8 no desktop
+[x] funciona no tema escuro — zero classe de cor crua no código
+[x] nenhum campo depende do placeholder — todos com `label`
+[–] barras desenhadas
+
+ACRESCENTADOS PELAS DECISÕES
+[x] o que a interface MOSTRA é o que a árvore DIZ, por estado
+    repouso     12 rádios em 2 grupos nomeados, era 12 botões sem grupo
+    escolhido   `checked` na árvore, era só cor
+    foco        anel no cartão, vindo do foco do rádio nativo
+    erro        `aria-describedby` do grupo + `aria-invalid` nos rádios
+    etapa atual `aria-current="step"`, era só cor
+    concluída   texto "(concluída)", era só o ✓ e a cor
+[x] nenhuma ação só de mouse — o grupo inteiro é 1 parada de tabulação e as
+    setas andam nele, tudo nativo
+[x] nenhum `text-slate-*` sem `dark:` — 36 trocas, zero restante no código
+[x] nenhuma cor fora do sistema — `bg-red-500`, `bg-amber-500`, `bg-emerald-600`
+    e `text-white` saíram
+[x] `Alert` montado por ação leva `live` ligado
+[ ] desvio F1 — não se aplica
+[x] nenhum primitivo reinventado — dois grupos falsos viraram `RadioCards`
+[x] a catraca desceu — 48 → 46 pares, 28 → 26 cheias
+```
+
+### Contagem do que resta à mão
+
+```text
+src/pages/tickets/TicketFormPage.tsx: 2
+```
+
+Os dois são **justificados**, e a regra manda contar, não julgar:
+
+| controle | por que fica |
+|---|---|
+| "Selecionar todos / Limpar seleção" | é ação, não navegação; `<button>` é o certo |
+| fichas de equipamento | seleção **múltipla** com `aria-pressed`, que é o que a especificação manda para alternância |
+
+SVG solto no código: **0**. Eram treze.
+
+### O defeito principal: dois grupos falsos na mesma tela
+
+Categoria (oito cartões) e prioridade (quatro fichas) eram **pilhas de
+`<button>`**. Quem enxerga vê um deles aceso; quem usa leitor de tela ouvia
+doze botões chamados "Hardware", "Software", "Rede"… — sem "escolhido", sem
+"1 de 8", e sem nenhuma relação com as palavras "Categoria" e "Prioridade"
+escritas logo acima. **A escolha existia só na cor.**
+
+Virou o primitivo `RadioCards`, com `<input type="radio">` de verdade dentro de
+`fieldset`/`legend`. A alternativa — `role="radiogroup"` com `aria-checked` e
+`tabindex` móvel — seria reimplementar em JavaScript quatro comportamentos que
+o navegador já tem, e a `Tabs` do pacote precisou de emenda (E12) exatamente
+nesse terreno.
+
+O ganho é medido: o grupo inteiro passou a ser **uma** parada de tabulação. Eram
+oito.
+
+### O sexto mapa de prioridade, e o que ele dizia de errado
+
+Além dos cinco já conhecidos, esta tela tinha o seu — e discordava em duas
+frentes ao mesmo tempo: pintava `bg-red-500` e `bg-amber-500` **crus**, fora do
+sistema, e dizia "Crítico", "Alto", "Médio", "Baixo" no **masculino**, contra o
+feminino que a E17 fixou no pacote. No mesmo sistema, a mesma prioridade tinha
+dois nomes.
+
+Junto saiu a linha mais frágil do arquivo:
+
+```tsx
+pri.active.split(" ").filter(c => c.startsWith("text-")).join(" ")
+```
+
+Uma string de classes **fatiada em tempo de execução** para extrair a cor do
+texto. Hoje é `PriorityBadge`, que é o primitivo.
+
+### Três defeitos que só apareceram porque a ferramenta olhou
+
+1. **A catraca acusou `bg-success text-on-success`.** O par de `text-on-success`
+   é o degrau de **ação** da E2; sobre a cor cheia da rampa esse mesmo texto dá
+   2,54:1. Era eu cometendo o defeito que a E2 existe para tornar impossível.
+
+2. **O `<legend>` não estava no primeiro lugar.** Eu havia trocado o `<label>`
+   pendurado por `fieldset`/`legend`, mas deixei o `legend` dentro de um `div`
+   de layout — e ali ele **deixa de nomear o grupo**. O caso de teste caiu e
+   nomeou.
+
+3. **A galeria não veria a classe montada por concatenação.** `"peer-checked:" +
+   tom` é invisível para a varredura do Tailwind: a regra não nasce e o cartão
+   escolhido fica idêntico ao livre, sem erro nenhum. A medição de contraste
+   **continua verde** nesse estado, porque medir duas vezes a mesma cor legítima
+   não reprova nada. Só a comparação entre os dois estados distingue "aplicou"
+   de "não gerou" — virou caso permanente na galeria, e a mutação confirmou que
+   ele cai sozinho enquanto os outros três seguem verdes.
+
+### O que entrou no pacote de primitivos
+
+| | |
+|---|---|
+| `RadioCards` | escolha única em cartão ou ficha, com rádio nativo |
+| `Icon` | nove traçados locais, em tabela **separada** da do pacote |
+
+A separação em `ICON_PATHS_PACOTE` e `ICON_PATHS_LOCAIS` não é organização: o
+teste prende os 25 do pacote a um hash tirado do `Icon.jsx` no dia da cópia, e
+um acréscimo local misturado ali derrubaria essa conferência para sempre — o
+conserto seria trocar o número, que é justamente o que o teste impede.
+
+Os nove vieram **verbatim** dos SVGs que estavam soltos na página. Trocar
+`server` pelo `cpu` que já existia, ou `help` pelo `info`, mudaria o desenho da
+tela dentro de um commit que promete não mudar pixel.
+
+### A trilha, e por que ela deixou de voltar no histórico
+
+Era um `<button onClick={navigate(-1)}>` com a linha inteira dentro, então o
+nome acessível do controle era **"Tickets / Novo chamado"** — a página de onde
+se vem e a página onde se está, num controle só.
+
+Agora é `<nav>` com um link para `/tickets` e a página atual em
+`aria-current="page"`. A volta deixou de ser `navigate(-1)` de propósito: de um
+formulário, o histórico pode ter vindo do detalhe, da lista ou do painel, e
+"para trás" não é um lugar.

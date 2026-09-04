@@ -224,6 +224,37 @@ const CANARIO = `(() => {
  * A rota inexistente cai na SPA — que é literalmente o que foi servido em
  * `/galeria.html` no dia em que a medição rodou contra outro produto.
  */
+/**
+ * A opção escolhida do `RadioCards` PINTA diferente da livre.
+ *
+ * O estado escolhido sai de `peer-checked:` e da variante descendente
+ * `[&_[data-ponto]]`, e as duas só existem se o Tailwind as tiver gerado. Se
+ * não gerar — porque alguém montou a classe por concatenação, que é invisível
+ * para a varredura dele —, o cartão escolhido fica **idêntico** ao livre: sem
+ * erro de compilação, sem aviso, e a medição de contraste continua passando,
+ * porque medir duas vezes a mesma cor legítima não reprova nada.
+ *
+ * Só a comparação entre os dois estados distingue "aplicou" de "não gerou".
+ */
+test("no RadioCards, a opção escolhida pinta diferente da livre", async ({ page }) => {
+  await page.goto("/galeria.html");
+  await page.waitForSelector("[data-galeria]");
+
+  const bloco = page.locator('[data-bloco="RadioCards"]');
+  await expect(bloco).toBeVisible();
+
+  const escolhido = bloco.getByText("Escolhido").first();
+  const livre = bloco.getByText("Livre").first();
+
+  const cor = (l: typeof escolhido) =>
+    l.evaluate((el) => {
+      const s = getComputedStyle(el as HTMLElement);
+      return s.backgroundColor + " | " + s.color + " | " + s.borderColor;
+    });
+
+  expect(await cor(escolhido)).not.toBe(await cor(livre));
+});
+
 test("o marcador da galeria não existe fora dela", async ({ page }) => {
   await page.goto("/uma-rota-que-nao-existe");
   await expect(page.locator("[data-galeria]")).toHaveCount(0);

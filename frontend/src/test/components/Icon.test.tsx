@@ -1,7 +1,12 @@
 import { createHash } from "node:crypto";
 import { render } from "@testing-library/react";
 import { describe, expect, it } from "vitest";
-import { Icon, ICON_PATHS } from "../../components/ui/Icon";
+import {
+  Icon,
+  ICON_PATHS,
+  ICON_PATHS_LOCAIS,
+  ICON_PATHS_PACOTE,
+} from "../../components/ui/Icon";
 import type { IconName } from "../../components/ui/Icon";
 
 /** Renderiza e devolve o `<svg>`, que é o primeiro filho. */
@@ -12,7 +17,23 @@ function svg(elemento: React.ReactElement): SVGSVGElement | null {
 
 describe("Icon", () => {
   it("traz os 25 nomes do pacote, nem um a mais", () => {
-    expect(Object.keys(ICON_PATHS)).toHaveLength(25);
+    expect(Object.keys(ICON_PATHS_PACOTE)).toHaveLength(25);
+  });
+
+  it("nenhum acréscimo local reescreve um nome do pacote", () => {
+    // As duas tabelas se juntam por espalhamento, e a de baixo ganha. Um nome
+    // repetido trocaria o desenho de um ícone do pacote em silêncio — e o hash
+    // NÃO pegaria, porque ele confere a tabela de cima, que continuaria
+    // intacta. É a única costura entre as duas, e é aqui que ela se confere.
+    const doPacote = new Set(Object.keys(ICON_PATHS_PACOTE));
+    const repetidos = Object.keys(ICON_PATHS_LOCAIS).filter((n) => doPacote.has(n));
+    expect(repetidos).toEqual([]);
+  });
+
+  it("o conjunto que se desenha é a soma dos dois", () => {
+    expect(Object.keys(ICON_PATHS)).toHaveLength(
+      Object.keys(ICON_PATHS_PACOTE).length + Object.keys(ICON_PATHS_LOCAIS).length,
+    );
   });
 
   it("desenha na grade de 24 do pacote e herda a cor de quem o contém", () => {
@@ -49,7 +70,7 @@ describe("Icon", () => {
       expect(d, nome).toBe(ICON_PATHS[nome]);
       vistos.add(d);
     }
-    expect(vistos.size).toBe(25);
+    expect(vistos.size).toBe(Object.keys(ICON_PATHS).length);
   });
 
   it("os 25 traçados continuam idênticos aos do pacote", () => {
@@ -60,7 +81,7 @@ describe("Icon", () => {
     //
     // Se este teste cair, ou alguém editou um traçado à mão, ou o pacote mudou.
     // No segundo caso o conserto é recopiar e trocar o hash, com registro.
-    const serial = Object.entries(ICON_PATHS)
+    const serial = Object.entries(ICON_PATHS_PACOTE)
       .map(([nome, d]) => `${nome}:${d}`)
       .join("\n");
     const hash = createHash("sha256").update(serial, "utf-8").digest("hex");
