@@ -3,7 +3,7 @@ import { useNavigate } from "react-router-dom";
 import {
   Area, AreaChart, ResponsiveContainer, Tooltip, XAxis, YAxis,
 } from "recharts";
-import { Alert, FilterSelect, Spinner, StatusBadge } from "../../components/ui";
+import { Alert, FilterSelect, KpiCard, Spinner, StatusBadge } from "../../components/ui";
 import { cn } from "../../lib/utils";
 import { useAuth } from "../../contexts/AuthContext";
 import { useTheme } from "../../contexts/ThemeContext";
@@ -62,32 +62,7 @@ const PRIORITY_DOT: Record<string, string> = {
 
 // ── Sub-components ────────────────────────────────────────────
 
-interface KpiCardProps {
-  label: string;
-  value: number | string;
-  sub?: string;
-  icon: React.ReactNode;
-  iconBg: string;
-  accent: string;
-  valueCls?: string;
-}
 
-function KpiCard({ label, value, sub, icon, iconBg, accent, valueCls = "text-slate-900 dark:text-slate-100" }: KpiCardProps) {
-  return (
-    <div className={cn("relative rounded-xl bg-surface border border-borda p-5 overflow-hidden border-l-4", accent)}>
-      <div className="flex items-start justify-between gap-3">
-        <div className="min-w-0">
-          <p className="text-xs font-semibold uppercase tracking-wider text-slate-500">{label}</p>
-          <p className={cn("text-3xl font-bold mt-2 tabular-nums", valueCls)}>{value}</p>
-          {sub && <p className="text-xs text-slate-500 mt-1.5">{sub}</p>}
-        </div>
-        <div className={cn("w-11 h-11 rounded-xl flex items-center justify-center shrink-0", iconBg)}>
-          {icon}
-        </div>
-      </div>
-    </div>
-  );
-}
 
 function TicketRow({ ticket, showTech }: { ticket: Ticket; showTech?: boolean }) {
   const navigate = useNavigate();
@@ -292,36 +267,29 @@ export default function TechnicianDashboard() {
           label="Meus tickets ativos"
           value={myActiveCount}
           sub="Abertos + em andamento"
-          accent={myActiveCount > 0 ? "border-l-sky-500" : "border-l-slate-300 dark:border-l-slate-600"}
-          iconBg={myActiveCount > 0 ? "bg-sky-500/10" : "bg-surface-elevated"}
-          valueCls={myActiveCount > 0 ? "text-sky-600 dark:text-sky-400" : "text-slate-900 dark:text-slate-100"}
-          icon={<svg className={cn("w-5 h-5", myActiveCount > 0 ? "text-sky-500" : "text-slate-400")} fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={1.75}><path strokeLinecap="round" strokeLinejoin="round" d="M9 5H7a2 2 0 00-2 2v12a2 2 0 002 2h10a2 2 0 002-2V7a2 2 0 00-2-2h-2M9 5a2 2 0 002 2h2a2 2 0 002-2M9 5a2 2 0 012-2h2a2 2 0 012 2" /></svg>}
+          tone={myActiveCount > 0 ? "info" : "neutral"}
+          icon={<svg className="w-5 h-5" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={1.75}><path strokeLinecap="round" strokeLinejoin="round" d="M9 5H7a2 2 0 00-2 2v12a2 2 0 002 2h10a2 2 0 002-2V7a2 2 0 00-2-2h-2M9 5a2 2 0 002 2h2a2 2 0 002-2M9 5a2 2 0 012-2h2a2 2 0 012 2" /></svg>}
         />
         <KpiCard
           label="Fila geral aberta"
           value={openCount}
           sub="Aguardando atendimento"
-          accent="border-l-slate-300 dark:border-l-slate-600"
-          iconBg="bg-surface-elevated"
-          icon={<svg className="w-5 h-5 text-slate-400" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={1.75}><path strokeLinecap="round" strokeLinejoin="round" d="M20 13V6a2 2 0 00-2-2H6a2 2 0 00-2 2v7m16 0v5a2 2 0 01-2 2H6a2 2 0 01-2-2v-5m16 0h-2.586a1 1 0 00-.707.293l-2.414 2.414a1 1 0 01-.707.293h-3.172a1 1 0 01-.707-.293l-2.414-2.414A1 1 0 006.586 13H4" /></svg>}
+          tone="neutral"
+          icon={<svg className="w-5 h-5" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={1.75}><path strokeLinecap="round" strokeLinejoin="round" d="M20 13V6a2 2 0 00-2-2H6a2 2 0 00-2 2v7m16 0v5a2 2 0 01-2 2H6a2 2 0 01-2-2v-5m16 0h-2.586a1 1 0 00-.707.293l-2.414 2.414a1 1 0 01-.707.293h-3.172a1 1 0 01-.707-.293l-2.414-2.414A1 1 0 006.586 13H4" /></svg>}
         />
         <KpiCard
           label="SLA em risco"
           value={myBreachCount}
           sub="Nos meus tickets"
-          accent={myBreachCount > 0 ? "border-l-red-500" : "border-l-slate-300 dark:border-l-slate-600"}
-          iconBg={myBreachCount > 0 ? "bg-red-500/10" : "bg-surface-elevated"}
-          valueCls={myBreachCount > 0 ? "text-red-600 dark:text-red-400" : "text-slate-900 dark:text-slate-100"}
-          icon={<svg className={cn("w-5 h-5", myBreachCount > 0 ? "text-red-500" : "text-slate-400")} fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={1.75}><path strokeLinecap="round" strokeLinejoin="round" d="M12 9v2m0 4h.01m-6.938 4h13.856c1.54 0 2.502-1.667 1.732-3L13.732 4c-.77-1.333-2.694-1.333-3.464 0L3.34 16c-.77 1.333.192 3 1.732 3z" /></svg>}
+          tone={myBreachCount > 0 ? "danger" : "neutral"}
+          icon={<svg className="w-5 h-5" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={1.75}><path strokeLinecap="round" strokeLinejoin="round" d="M12 9v2m0 4h.01m-6.938 4h13.856c1.54 0 2.502-1.667 1.732-3L13.732 4c-.77-1.333-2.694-1.333-3.464 0L3.34 16c-.77 1.333.192 3 1.732 3z" /></svg>}
         />
         <KpiCard
           label="Meu CSAT"
           value={detail.csat_average != null ? `${detail.csat_average.toFixed(1)} / 10` : "—"}
           sub={`${detail.csat_count} avaliações · ${periodLabel}`}
-          accent="border-l-amber-400"
-          iconBg="bg-amber-500/10"
-          valueCls="text-amber-600 dark:text-amber-400"
-          icon={<svg className="w-5 h-5 text-amber-500" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={1.75}><path strokeLinecap="round" strokeLinejoin="round" d="M11.049 2.927c.3-.921 1.603-.921 1.902 0l1.519 4.674a1 1 0 00.95.69h4.915c.969 0 1.371 1.24.588 1.81l-3.976 2.888a1 1 0 00-.363 1.118l1.518 4.674c.3.922-.755 1.688-1.538 1.118l-3.976-2.888a1 1 0 00-1.176 0l-3.976 2.888c-.783.57-1.838-.197-1.538-1.118l1.518-4.674a1 1 0 00-.363-1.118l-3.976-2.888c-.784-.57-.38-1.81.588-1.81h4.914a1 1 0 00.951-.69l1.519-4.674z" /></svg>}
+          tone="warning"
+          icon={<svg className="w-5 h-5" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={1.75}><path strokeLinecap="round" strokeLinejoin="round" d="M11.049 2.927c.3-.921 1.603-.921 1.902 0l1.519 4.674a1 1 0 00.95.69h4.915c.969 0 1.371 1.24.588 1.81l-3.976 2.888a1 1 0 00-.363 1.118l1.518 4.674c.3.922-.755 1.688-1.538 1.118l-3.976-2.888a1 1 0 00-1.176 0l-3.976 2.888c-.783.57-1.838-.197-1.538-1.118l1.518-4.674a1 1 0 00-.363-1.118l-3.976-2.888c-.784-.57-.38-1.81.588-1.81h4.914a1 1 0 00.951-.69l1.519-4.674z" /></svg>}
         />
       </div>
 

@@ -909,7 +909,7 @@ export function contarCheiasPorArquivo(achados) {
 /**
  * Linha de base das cores cheias de significado usadas como texto.
  *
- * **29 ocorrencias em 14 arquivos**, medidas em 04/09/2026 — ANTES de qualquer
+ * **28 ocorrencias em 13 arquivos**, medidas em 04/09/2026 — ANTES de qualquer
  * conserto, por instrucao do operador: a chave entra primeiro, para que cada
  * tela migrada tenha de faze-la descer.
  *
@@ -917,10 +917,9 @@ export function contarCheiasPorArquivo(achados) {
  * restantes saem na Fase 16.
  */
 const CHEIAS_CONHECIDAS = new Map([
-  ['components/chat/ChatPanel.tsx', 2],
+['components/chat/ChatPanel.tsx', 2],
   ['pages/calendar/CalendarPage.tsx', 2],
   ['pages/dashboard/AdminDashboard.tsx', 2],
-  ['pages/dashboard/ClientDashboard.tsx', 1],
   ['pages/dashboard/TechnicianDashboard.tsx', 2],
   ['pages/equipment/EquipmentPage.tsx', 1],
   ['pages/errors/ForbiddenPage.tsx', 1],

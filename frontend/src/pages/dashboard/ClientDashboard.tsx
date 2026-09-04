@@ -9,6 +9,7 @@ import {
   PriorityBadge,
   Spinner,
   StatusBadge,
+  KpiCard,
 } from "../../components/ui";
 import { useAuth } from "../../contexts/AuthContext";
 import { getTickets, type Ticket } from "../../services/ticketService";
@@ -17,29 +18,7 @@ const PAGE_SIZE = 10;
 
 // ── KPI Card ──────────────────────────────────────────────────
 
-interface KpiCardProps {
-  label: string;
-  value: number | string;
-  sub?: string;
-  color?: string;
-}
 
-function KpiCard({
-  label,
-  value,
-  sub,
-  color = "text-slate-100",
-}: KpiCardProps) {
-  return (
-    <Card>
-      <p className="text-xs font-medium text-slate-500 uppercase tracking-wider mb-1">
-        {label}
-      </p>
-      <p className={`text-3xl font-bold ${color}`}>{value}</p>
-      {sub && <p className="text-xs text-slate-500 mt-1">{sub}</p>}
-    </Card>
-  );
-}
 
 // ── Ticket Row ────────────────────────────────────────────────
 
@@ -155,13 +134,13 @@ export default function ClientDashboard() {
           label="Em andamento"
           value={kpiOpen}
           sub="Abertos + em progresso"
-          color={kpiOpen > 0 ? "text-info" : "text-slate-100"}
+          tone={kpiOpen > 0 ? "info" : "neutral"}
         />
         <KpiCard
           label="Resolvidos"
           value={kpiResolved}
           sub="Resolvidos + fechados"
-          color={kpiResolved > 0 ? "text-primary" : "text-slate-100"}
+          tone={kpiResolved > 0 ? "primary" : "neutral"}
         />
       </div>
 

@@ -4,8 +4,10 @@ import { Avatar } from "../components/ui/Avatar";
 import { Badge } from "../components/ui/Badge";
 import { Button } from "../components/ui/Button";
 import { Card, CardHeader, CardTitle } from "../components/ui/Card";
+import { Icon } from "../components/ui/Icon";
 import { Checkbox } from "../components/ui/Checkbox";
 import { Input } from "../components/ui/Input";
+import { KpiCard } from "../components/ui/KpiCard";
 import { Pagination } from "../components/ui/Pagination";
 import { Select } from "../components/ui/Select";
 import { Selector } from "../components/ui/Selector";
@@ -134,6 +136,22 @@ export function Galeria() {
           breached={false}
           respondedAt={new Date().toISOString()}
         />
+      </Bloco>
+
+      <Bloco nome="KpiCard">
+        {(["neutral", "primary", "info", "success", "warning", "danger"] as const).map(
+          (tone) => (
+            <div key={tone} className="w-56">
+              <KpiCard
+                label={tone}
+                value={42}
+                sub="últimos 7 dias"
+                tone={tone}
+                icon={<Icon name="ticket" size={20} />}
+              />
+            </div>
+          ),
+        )}
       </Bloco>
 
       <Bloco nome="Campos">

@@ -3,7 +3,7 @@ import {
   Area, AreaChart, Bar, BarChart, Cell,
   Pie, PieChart, ResponsiveContainer, Tooltip, XAxis, YAxis,
 } from "recharts";
-import { Alert, FilterSelect, Spinner } from "../../components/ui";
+import { Alert, FilterSelect, KpiCard, Spinner } from "../../components/ui";
 import { cn } from "../../lib/utils";
 import { useTheme } from "../../contexts/ThemeContext";
 import { getDashboardStats, type DashboardStats } from "../../services/dashboardService";
@@ -79,32 +79,7 @@ function fmtDate(iso: string) {
 
 // ── KPI Card ──────────────────────────────────────────────────
 
-interface KpiCardProps {
-  label: string;
-  value: number | string;
-  sub?: string;
-  icon: React.ReactNode;
-  accent: string;  // border-l color class
-  iconBg: string;
-  valueCls?: string;
-}
 
-function KpiCard({ label, value, sub, icon, accent, iconBg, valueCls = "text-slate-900 dark:text-slate-100" }: KpiCardProps) {
-  return (
-    <div className={cn("relative rounded-xl bg-surface border border-borda p-5 overflow-hidden border-l-4", accent)}>
-      <div className="flex items-start justify-between gap-3">
-        <div className="min-w-0">
-          <p className="text-xs font-semibold uppercase tracking-wider text-slate-500">{label}</p>
-          <p className={cn("text-3xl font-bold mt-2 tabular-nums", valueCls)}>{value}</p>
-          {sub && <p className="text-xs text-slate-500 mt-1.5">{sub}</p>}
-        </div>
-        <div className={cn("w-11 h-11 rounded-xl flex items-center justify-center shrink-0", iconBg)}>
-          {icon}
-        </div>
-      </div>
-    </div>
-  );
-}
 
 // ── Status distribution bar ───────────────────────────────────
 
@@ -323,54 +298,43 @@ export default function AdminDashboard() {
           label="Total de tickets"
           value={tickets.total}
           sub="Todos os status"
-          accent="border-l-slate-300 dark:border-l-slate-600"
-          iconBg="bg-surface-elevated"
-          icon={<svg className="w-5 h-5 text-slate-500" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={1.75}><path strokeLinecap="round" strokeLinejoin="round" d="M15 5v2m0 4v2m0 4v2M5 5a2 2 0 00-2 2v3a2 2 0 110 4v3a2 2 0 002 2h14a2 2 0 002-2v-3a2 2 0 110-4V7a2 2 0 00-2-2H5z" /></svg>}
+          tone="neutral"
+          icon={<svg className="w-5 h-5" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={1.75}><path strokeLinecap="round" strokeLinejoin="round" d="M15 5v2m0 4v2m0 4v2M5 5a2 2 0 00-2 2v3a2 2 0 110 4v3a2 2 0 002 2h14a2 2 0 002-2v-3a2 2 0 110-4V7a2 2 0 00-2-2H5z" /></svg>}
         />
         <KpiCard
           label="Abertos"
           value={tickets.open}
           sub="Aguardando atendimento"
-          accent="border-l-sky-500"
-          iconBg="bg-sky-500/10"
-          valueCls="text-sky-600 dark:text-sky-400"
-          icon={<svg className="w-5 h-5 text-sky-500" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={1.75}><path strokeLinecap="round" strokeLinejoin="round" d="M20 13V6a2 2 0 00-2-2H6a2 2 0 00-2 2v7m16 0v5a2 2 0 01-2 2H6a2 2 0 01-2-2v-5m16 0h-2.586a1 1 0 00-.707.293l-2.414 2.414a1 1 0 01-.707.293h-3.172a1 1 0 01-.707-.293l-2.414-2.414A1 1 0 006.586 13H4" /></svg>}
+          tone="info"
+          icon={<svg className="w-5 h-5" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={1.75}><path strokeLinecap="round" strokeLinejoin="round" d="M20 13V6a2 2 0 00-2-2H6a2 2 0 00-2 2v7m16 0v5a2 2 0 01-2 2H6a2 2 0 01-2-2v-5m16 0h-2.586a1 1 0 00-.707.293l-2.414 2.414a1 1 0 01-.707.293h-3.172a1 1 0 01-.707-.293l-2.414-2.414A1 1 0 006.586 13H4" /></svg>}
         />
         <KpiCard
           label="Em andamento"
           value={tickets.in_progress}
           sub="Sendo atendidos"
-          accent="border-l-indigo-500"
-          iconBg="bg-indigo-500/10"
-          valueCls="text-indigo-600 dark:text-indigo-400"
-          icon={<svg className="w-5 h-5 text-indigo-500" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={1.75}><path strokeLinecap="round" strokeLinejoin="round" d="M4 4v5h.582m15.356 2A8.001 8.001 0 004.582 9m0 0H9m11 11v-5h-.581m0 0a8.003 8.003 0 01-15.357-2m15.357 2H15" /></svg>}
+          tone="primary"
+          icon={<svg className="w-5 h-5" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={1.75}><path strokeLinecap="round" strokeLinejoin="round" d="M4 4v5h.582m15.356 2A8.001 8.001 0 004.582 9m0 0H9m11 11v-5h-.581m0 0a8.003 8.003 0 01-15.357-2m15.357 2H15" /></svg>}
         />
         <KpiCard
           label="Aguardando"
           value={tickets.awaiting}
           sub="Resp. do cliente"
-          accent="border-l-amber-500"
-          iconBg="bg-amber-500/10"
-          valueCls="text-amber-600 dark:text-amber-400"
-          icon={<svg className="w-5 h-5 text-amber-500" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={1.75}><path strokeLinecap="round" strokeLinejoin="round" d="M12 8v4l3 3m6-3a9 9 0 11-18 0 9 9 0 0118 0z" /></svg>}
+          tone="warning"
+          icon={<svg className="w-5 h-5" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={1.75}><path strokeLinecap="round" strokeLinejoin="round" d="M12 8v4l3 3m6-3a9 9 0 11-18 0 9 9 0 0118 0z" /></svg>}
         />
         <KpiCard
           label="Resolvidos"
           value={tickets.resolved}
           sub={`+ ${tickets.closed} fechados`}
-          accent="border-l-emerald-500"
-          iconBg="bg-emerald-500/10"
-          valueCls="text-emerald-600 dark:text-emerald-400"
-          icon={<svg className="w-5 h-5 text-emerald-500" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={1.75}><path strokeLinecap="round" strokeLinejoin="round" d="M9 12l2 2 4-4m6 2a9 9 0 11-18 0 9 9 0 0118 0z" /></svg>}
+          tone="success"
+          icon={<svg className="w-5 h-5" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={1.75}><path strokeLinecap="round" strokeLinejoin="round" d="M9 12l2 2 4-4m6 2a9 9 0 11-18 0 9 9 0 0118 0z" /></svg>}
         />
         <KpiCard
           label="SLA violado"
           value={sla.resolve_breached}
           sub={`${sla.response_breached} resposta · ${sla.resolve_breached} resolução`}
-          accent={sla.resolve_breached > 0 ? "border-l-red-500" : "border-l-slate-300 dark:border-l-slate-600"}
-          iconBg={sla.resolve_breached > 0 ? "bg-red-500/10" : "bg-surface-elevated"}
-          valueCls={sla.resolve_breached > 0 ? "text-red-600 dark:text-red-400" : "text-slate-900 dark:text-slate-100"}
-          icon={<svg className={cn("w-5 h-5", sla.resolve_breached > 0 ? "text-red-500" : "text-slate-400")} fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={1.75}><path strokeLinecap="round" strokeLinejoin="round" d="M12 9v2m0 4h.01m-6.938 4h13.856c1.54 0 2.502-1.667 1.732-3L13.732 4c-.77-1.333-2.694-1.333-3.464 0L3.34 16c-.77 1.333.192 3 1.732 3z" /></svg>}
+          tone={sla.resolve_breached > 0 ? "danger" : "neutral"}
+          icon={<svg className="w-5 h-5" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={1.75}><path strokeLinecap="round" strokeLinejoin="round" d="M12 9v2m0 4h.01m-6.938 4h13.856c1.54 0 2.502-1.667 1.732-3L13.732 4c-.77-1.333-2.694-1.333-3.464 0L3.34 16c-.77 1.333.192 3 1.732 3z" /></svg>}
         />
       </div>
 
@@ -383,37 +347,29 @@ export default function AdminDashboard() {
           label="CSAT médio"
           value={avgRating === "—" ? "—" : `${avgRating} / 10`}
           sub={`${surveys.total} avaliações`}
-          accent="border-l-amber-400"
-          iconBg="bg-amber-500/10"
-          valueCls="text-amber-600 dark:text-amber-400"
-          icon={<svg className="w-5 h-5 text-amber-500" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={1.75}><path strokeLinecap="round" strokeLinejoin="round" d="M11.049 2.927c.3-.921 1.603-.921 1.902 0l1.519 4.674a1 1 0 00.95.69h4.915c.969 0 1.371 1.24.588 1.81l-3.976 2.888a1 1 0 00-.363 1.118l1.518 4.674c.3.922-.755 1.688-1.538 1.118l-3.976-2.888a1 1 0 00-1.176 0l-3.976 2.888c-.783.57-1.838-.197-1.538-1.118l1.518-4.674a1 1 0 00-.363-1.118l-3.976-2.888c-.784-.57-.38-1.81.588-1.81h4.914a1 1 0 00.951-.69l1.519-4.674z" /></svg>}
+          tone="warning"
+          icon={<svg className="w-5 h-5" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={1.75}><path strokeLinecap="round" strokeLinejoin="round" d="M11.049 2.927c.3-.921 1.603-.921 1.902 0l1.519 4.674a1 1 0 00.95.69h4.915c.969 0 1.371 1.24.588 1.81l-3.976 2.888a1 1 0 00-.363 1.118l1.518 4.674c.3.922-.755 1.688-1.538 1.118l-3.976-2.888a1 1 0 00-1.176 0l-3.976 2.888c-.783.57-1.838-.197-1.538-1.118l1.518-4.674a1 1 0 00-.363-1.118l-3.976-2.888c-.784-.57-.38-1.81.588-1.81h4.914a1 1 0 00.951-.69l1.519-4.674z" /></svg>}
         />
         <KpiCard
           label="Tempo médio resolução"
           value={fmtHours(avgResolutionHours)}
           sub={avgResolutionHours != null ? "Média da equipe" : "Sem dados"}
-          accent="border-l-violet-500"
-          iconBg="bg-violet-500/10"
-          valueCls="text-violet-600 dark:text-violet-400"
-          icon={<svg className="w-5 h-5 text-violet-500" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={1.75}><path strokeLinecap="round" strokeLinejoin="round" d="M9 19v-6a2 2 0 00-2-2H5a2 2 0 00-2 2v6a2 2 0 002 2h2a2 2 0 002-2zm0 0V9a2 2 0 012-2h2a2 2 0 012 2v10m-6 0a2 2 0 002 2h2a2 2 0 002-2m0 0V5a2 2 0 012-2h2a2 2 0 012 2v14a2 2 0 01-2 2h-2a2 2 0 01-2-2z" /></svg>}
+          tone="primary"
+          icon={<svg className="w-5 h-5" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={1.75}><path strokeLinecap="round" strokeLinejoin="round" d="M9 19v-6a2 2 0 00-2-2H5a2 2 0 00-2 2v6a2 2 0 002 2h2a2 2 0 002-2zm0 0V9a2 2 0 012-2h2a2 2 0 012 2v10m-6 0a2 2 0 002 2h2a2 2 0 002-2m0 0V5a2 2 0 012-2h2a2 2 0 012 2v14a2 2 0 01-2 2h-2a2 2 0 01-2-2z" /></svg>}
         />
         <KpiCard
           label="SLA Resposta violado"
           value={sla.response_breached}
           sub="1º atendimento fora do prazo"
-          accent={sla.response_breached > 0 ? "border-l-amber-500" : "border-l-slate-300 dark:border-l-slate-600"}
-          iconBg={sla.response_breached > 0 ? "bg-amber-500/10" : "bg-surface-elevated"}
-          valueCls={sla.response_breached > 0 ? "text-amber-600 dark:text-amber-400" : "text-slate-900 dark:text-slate-100"}
-          icon={<svg className={cn("w-5 h-5", sla.response_breached > 0 ? "text-amber-500" : "text-slate-400")} fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={1.75}><path strokeLinecap="round" strokeLinejoin="round" d="M12 8v4l3 3m6-3a9 9 0 11-18 0 9 9 0 0118 0z" /></svg>}
+          tone={sla.response_breached > 0 ? "warning" : "neutral"}
+          icon={<svg className="w-5 h-5" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={1.75}><path strokeLinecap="round" strokeLinejoin="round" d="M12 8v4l3 3m6-3a9 9 0 11-18 0 9 9 0 0118 0z" /></svg>}
         />
         <KpiCard
           label="SLA Resolução violado"
           value={sla.resolve_breached}
           sub="Resolução fora do prazo"
-          accent={sla.resolve_breached > 0 ? "border-l-red-500" : "border-l-slate-300 dark:border-l-slate-600"}
-          iconBg={sla.resolve_breached > 0 ? "bg-red-500/10" : "bg-surface-elevated"}
-          valueCls={sla.resolve_breached > 0 ? "text-red-600 dark:text-red-400" : "text-slate-900 dark:text-slate-100"}
-          icon={<svg className={cn("w-5 h-5", sla.resolve_breached > 0 ? "text-red-500" : "text-slate-400")} fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={1.75}><path strokeLinecap="round" strokeLinejoin="round" d="M12 9v2m0 4h.01m-6.938 4h13.856c1.54 0 2.502-1.667 1.732-3L13.732 4c-.77-1.333-2.694-1.333-3.464 0L3.34 16c-.77 1.333.192 3 1.732 3z" /></svg>}
+          tone={sla.resolve_breached > 0 ? "danger" : "neutral"}
+          icon={<svg className="w-5 h-5" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={1.75}><path strokeLinecap="round" strokeLinejoin="round" d="M12 9v2m0 4h.01m-6.938 4h13.856c1.54 0 2.502-1.667 1.732-3L13.732 4c-.77-1.333-2.694-1.333-3.464 0L3.34 16c-.77 1.333.192 3 1.732 3z" /></svg>}
         />
       </div>
 

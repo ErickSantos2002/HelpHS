@@ -19,6 +19,9 @@ export type { CheckboxProps } from "./Checkbox";
 export { Icon, ICON_PATHS } from "./Icon";
 export type { IconProps, IconName } from "./Icon";
 
+export { KpiCard } from "./KpiCard";
+export type { KpiCardProps, KpiTone } from "./KpiCard";
+
 export { Input } from "./Input";
 export type { InputProps } from "./Input";
 
