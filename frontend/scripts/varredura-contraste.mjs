@@ -838,6 +838,110 @@ export function contarPorChave(achados) {
   return contagem;
 }
 
+/**
+ * As quatro cores CHEIAS de significado, usadas como cor de TEXTO.
+ *
+ * Regra registrada no `COMPARTILHADO/DECISOES.md`, valida para os dois
+ * repositorios: **texto semantico usa `--on-tint-*`, nunca `text-<cor>-500`**.
+ *
+ * Por que isto e uma chave PROPRIA e nao um par da varredura: `text-danger`
+ * quase nunca tem `bg-*` co-locado na mesma string — o fundo vem do elemento
+ * pai —, entao o pareamento nao o ve. Foi assim que 45 cores cravadas nos
+ * seletores e 14 no `Table` e no `Pagination` atravessaram a migracao inteira
+ * sem aparecer no numero.
+ *
+ * Aqui nao se mede contraste: conta-se ocorrencia. O contraste ja foi medido, e
+ * o resultado e o motivo da regra existir — as quatro sao declaradas so no
+ * `:root`, sem bloco `.dark` que as redefina:
+ *
+ *   token                  claro (surface/base/elevada)   escuro
+ *   --color-danger-500     3,76  3,60  3,44                4,25  4,62  3,60
+ *   --color-warning-500    2,15  2,05  1,96                7,44  8,10  6,31
+ *   --color-success-500    2,54  2,42  2,32                6,30  6,86  5,34
+ *   --color-info-500       3,68  3,52  3,36                4,35  4,73  3,69
+ *
+ * **16 das 24 combinacoes reprovam o piso de texto; 6 reprovam ate o de forma**
+ * — `alerta` e `sucesso` nas tres superficies claras nao passam nem como icone.
+ * O substituto `--on-tint-*` troca de degrau com o tema e tem pior caso 5,91:1.
+ *
+ * O degrau da rampa (`text-danger-700`) NAO entra: e outro token, medido, e o
+ * `Avatar` o usa corretamente. So a cor cheia, sem sufixo.
+ */
+const CHEIA_SEMANTICA = /(?<![\w:-])text-(danger|warning|success|info)(?![\w-])/g;
+
+export function cheiasSemanticas(raiz) {
+  const achados = [];
+  for (const arquivo of arquivosTsx(raiz)) {
+    const texto = readFileSync(arquivo, "utf-8");
+    const rel = path.relative(raiz, arquivo).split(path.sep).join("/");
+    const linhas = texto.split("\n");
+    for (let i = 0; i < linhas.length; i++) {
+      for (const m of linhas[i].matchAll(CHEIA_SEMANTICA)) {
+        achados.push({ arquivo: rel, linha: i + 1, classe: m[0] });
+      }
+    }
+  }
+  return achados;
+}
+
+export function contarCheiasPorArquivo(achados) {
+  const conta = new Map();
+  for (const a of achados) conta.set(a.arquivo, (conta.get(a.arquivo) ?? 0) + 1);
+  return conta;
+}
+
+/**
+ * Linha de base das cores cheias de significado usadas como texto.
+ *
+ * **24 ocorrencias em 11 arquivos**, medidas em 04/09/2026 — ANTES de qualquer
+ * conserto, por instrucao do operador: a chave entra primeiro, para que cada
+ * tela migrada tenha de faze-la descer.
+ *
+ * Sete estao nas seis telas das Fases 11, 12 e 14 e saem agora; as dezessete
+ * restantes saem na Fase 16.
+ */
+const CHEIAS_CONHECIDAS = new Map([
+  ['components/chat/ChatPanel.tsx', 2],
+  ['pages/calendar/CalendarPage.tsx', 2],
+  ['pages/dashboard/AdminDashboard.tsx', 2],
+  ['pages/dashboard/ClientDashboard.tsx', 1],
+  ['pages/dashboard/TechnicianDashboard.tsx', 2],
+  ['pages/equipment/EquipmentPage.tsx', 1],
+  ['pages/errors/ForbiddenPage.tsx', 1],
+  ['pages/kb/KBFormPage.tsx', 3],
+  ['pages/notifications/NotificationsPage.tsx', 4],
+  ['pages/profile/ProfilePage.tsx', 4],
+  ['pages/tickets/TicketFormPage.tsx', 2],
+]);
+
+/** A catraca das cores cheias, com a mesma disciplina da outra: falha nos dois sentidos. */
+export function catracaCheias(raiz, base = CHEIAS_CONHECIDAS) {
+  const agora = contarCheiasPorArquivo(cheiasSemanticas(raiz));
+  const chaves = [...new Set([...agora.keys(), ...base.keys()])].sort();
+
+  const novos = [];
+  const consertados = [];
+  for (const k of chaves) {
+    const a = agora.get(k) ?? 0;
+    const b = base.get(k) ?? 0;
+    if (a > b) novos.push(`${k}  ->  ${b} na linha de base, ${a} agora`);
+    else if (a < b) consertados.push(k);
+  }
+
+  const listaNova = chaves
+    .map((k) => ({ k, n: agora.get(k) ?? 0 }))
+    .filter((x) => x.n > 0)
+    .map((x) => `  ['${x.k}', ${x.n}],`);
+
+  return {
+    novos,
+    consertados,
+    listaNova,
+    total: [...agora.values()].reduce((s, n) => s + n, 0),
+    totalBase: [...base.values()].reduce((s, n) => s + n, 0),
+  };
+}
+
 export function catraca(raiz, base = PARES_CONHECIDOS) {
   const agora = contarPorChave(varrer(raiz));
   const chaves = [...new Set([...agora.keys(), ...base.keys()])].sort();
@@ -967,8 +1071,33 @@ if (ehPrincipal) {
       );
     }
 
+    const c = catracaCheias(path.join(RAIZ, "src"));
+
+    if (c.novos.length) {
+      problemas.push(
+        "COR CHEIA DE SIGNIFICADO usada como texto (regra: --on-tint-*):\n      " +
+          c.novos.join("\n      ") +
+          "\n      As quatro sao declaradas so no :root, sem bloco .dark que as" +
+          "\n      redefina: 16 das 24 combinacoes reprovam o piso de texto, e 6" +
+          "\n      reprovam ate o de forma. Use text-on-tint-<cor>.",
+      );
+    }
+
+    if (c.consertados.length) {
+      problemas.push(
+        "a catraca das cores cheias precisa descer, atualize CHEIAS_CONHECIDAS.\n" +
+          "      A lista inteira, ja pronta:\n" +
+          (c.listaNova.length
+            ? c.listaNova.join("\n")
+            : "  (vazia - apague o bloco inteiro e faca a varredura reprovar sempre)"),
+      );
+    }
+
     console.log(
       `catraca: ${r.total} par(es) abaixo de 4,5:1, linha de base ${r.totalBase}`,
+    );
+    console.log(
+      `         ${c.total} cor(es) cheia(s) de significado como texto, linha de base ${c.totalBase}`,
     );
     for (const problema of problemas) console.error(`\n  x ${problema}`);
     if (problemas.length === 0) console.log("  ok - em dia.");
