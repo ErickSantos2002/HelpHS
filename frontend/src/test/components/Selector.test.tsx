@@ -218,3 +218,84 @@ describe("Selector — contraste", () => {
     },
   );
 });
+
+describe("Selector — o nome acessível do gatilho", () => {
+  const OPCOES = [{ value: "open", label: "Aberto" }];
+
+  function gatilhoDe(variant: "filter" | "form", value: string | null) {
+    render(
+      <Selector
+        variant={variant}
+        label="Situação"
+        value={value}
+        onChange={vi.fn()}
+        options={OPCOES}
+      />,
+    );
+    return screen.getAllByRole("button")[0];
+  }
+
+  it.each(["filter", "form"] as const)(
+    "%s: o nome contém o RÓTULO e o VALOR escolhido",
+    (variant) => {
+      // `aria-label` **não soma** ao conteúdo do elemento: substitui. Uma versão
+      // deste componente punha `aria-label={label}` no gatilho, e com isso ele
+      // mostrava "Aberto" na tela e anunciava só "Situação" — a escolha atual,
+      // que é a única informação que o gatilho carrega, sumia do canal não
+      // visual. Numa barra com quatro filtros, os quatro se anunciavam igual.
+      const gatilho = gatilhoDe(variant, "open");
+
+      expect(gatilho).toHaveAccessibleName(/Situação/);
+      expect(gatilho).toHaveAccessibleName(/Aberto/);
+    },
+  );
+
+  it.each(["filter", "form"] as const)(
+    "%s: sem escolha, o nome contém o texto do estado vazio",
+    (variant) => {
+      const gatilho = gatilhoDe(variant, null);
+
+      expect(gatilho).toHaveAccessibleName(/Situação/);
+      expect(gatilho).toHaveAccessibleName(
+        variant === "filter" ? /Todos/ : /Selecione/,
+      );
+    },
+  );
+
+  it("não usa aria-label no gatilho", () => {
+    // A guarda contra a regressão: `aria-label` substituiria tudo isto.
+    render(
+      <Selector label="Situação" value="open" onChange={vi.fn()} options={OPCOES} />,
+    );
+
+    expect(screen.getAllByRole("button")[0]).not.toHaveAttribute("aria-label");
+  });
+
+  it("nenhum dos dois ids é o do próprio gatilho", () => {
+    // O padrão do APG usa `aria-labelledby="rotulo gatilho"`, com auto-
+    // referência. Medido aqui, isso dá resultado DIFERENTE conforme exista ou
+    // não um `<label for>` associado — "Situação Aberto" no filtro e só
+    // "Situação" no formulário. A auto-referência é ambígua na especificação, e
+    // um padrão que depende de como cada implementação a resolve não garante
+    // nada.
+    render(
+      <Selector label="Situação" value="open" onChange={vi.fn()} options={OPCOES} />,
+    );
+    const gatilho = screen.getAllByRole("button")[0];
+    const ids = (gatilho.getAttribute("aria-labelledby") ?? "").split(" ");
+
+    expect(ids).toHaveLength(2);
+    expect(ids).not.toContain(gatilho.id);
+    // O rótulo é IRMÃO do gatilho e o valor é FILHO dele; o que importa é que
+    // nenhum dos dois seja o próprio gatilho, e que os dois existam.
+    for (const id of ids) {
+      expect(document.getElementById(id)).not.toBeNull();
+    }
+  });
+
+  it("sem rótulo, não inventa apontamento", () => {
+    render(<Selector value="open" onChange={vi.fn()} options={OPCOES} />);
+
+    expect(screen.getAllByRole("button")[0]).not.toHaveAttribute("aria-labelledby");
+  });
+});

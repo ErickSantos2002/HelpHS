@@ -24,6 +24,25 @@ h1, h2, h3, h4 {
 a { color: var(--text-link); text-decoration: none; }
 a:hover { color: var(--text-link-hover); text-decoration: underline; }
 
+/* E15 — o piso de foco do sistema.
+
+   Sem esta regra, cada componente precisa lembrar de desenhar o proprio
+   foco, e o que se ve na pratica e o contrario: telas escrevem
+   `focus:outline-none` e nao poem nada no lugar. Um levantamento no HelpHS
+   achou ~50 controles feitos a mao sem foco visivel nenhum.
+
+   Aqui o contorno vem por padrao para TUDO que recebe foco por teclado.
+   `:focus-visible` e nao `:focus`: um clique de mouse tambem foca, e o
+   anel so serve a quem navega por teclado.
+
+   `--focus-ring` inverte por tema (primary-600 no claro, primary-400 no
+   escuro) e da 5,29:1 e 5,52:1 contra `--surface` — acima do piso de 3:1
+   da WCAG 1.4.11 para indicador nao textual. */
+:focus-visible {
+  outline: 2px solid var(--focus-ring);
+  outline-offset: var(--ring-offset);
+}
+
 ::-webkit-scrollbar { width: 6px; height: 6px; }
 ::-webkit-scrollbar-track { background: transparent; }
 ::-webkit-scrollbar-thumb {

@@ -135,6 +135,31 @@ export function Selector({
   // O erro era um `<p>` solto ao lado do gatilho: visualmente junto, e sem
   // relação nenhuma com ele para um leitor de tela.
   const idErro = idBase + "-erro";
+  const idRotulo = idBase + "-rotulo";
+  const idGatilho = idBase + "-gatilho";
+  const idValor = idBase + "-valor";
+  // O nome do gatilho é o RÓTULO MAIS O VALOR, nesta ordem — e por isso são
+  // dois ids, e não um `aria-label`.
+  //
+  // Os dois ids apontam para ELEMENTOS FILHOS, e nenhum deles é o próprio
+  // gatilho. O padrão do APG usa `aria-labelledby="rotulo gatilho"`, com o
+  // segundo id apontando para o próprio botão — e medido aqui, isso dá
+  // resultado DIFERENTE conforme exista ou não um `<label for>` associado:
+  // "Situação Aberto" na variante de filtro e só "Situação" na de formulário.
+  // A auto-referência é ambígua na especificação do nome acessível, e um padrão
+  // que depende de como cada implementação a resolve não serve de garantia.
+  // Apontar para o `<span>` do valor remove a ambiguidade.
+  //
+  // `aria-label` **não soma** ao conteúdo do elemento: substitui. A primeira
+  // versão deste conserto punha `aria-label={label}` no gatilho do filtro, e
+  // com isso o controle mostrava "Aberto" na tela e anunciava só "Situação" —
+  // **a escolha atual, que é a única informação que o gatilho carrega,** sumia
+  // do canal não visual. Apontar para o `<span>` do valor a traz de volta para
+  // dentro do nome, e satisfaz o 2.5.3 (rótulo no nome): o nome acessível
+  // contém o texto visível.
+  //
+  // Achado pela sessão do ChamadosHS, que tinha o mesmo defeito em onze telas.
+  const rotulado = label ? idRotulo + " " + idValor : undefined;
   const idOpcao = (i: number) => idBase + "-op-" + String(i);
 
   // `""` e `null` são a mesma coisa aqui: o `FilterSelect` limpava com string
@@ -440,25 +465,44 @@ export function Selector({
       ref={raizRef}
       className={cn(filtro ? "relative" : "relative flex flex-col gap-1.5", className)}
     >
-      {label && !filtro && (
-        <label className="text-sm font-medium text-conteudo">{label}</label>
-      )}
+      {label &&
+        (filtro ? (
+          // No filtro nao ha espaco para rotulo visivel, mas o nome precisa
+          // existir: numa barra com quatro filtros, os quatro se anunciariam
+          // pelo valor escolhido sem dizer de que filtro sao.
+          <span id={idRotulo} className="sr-only">
+            {label}
+          </span>
+        ) : (
+          <label
+            id={idRotulo}
+            htmlFor={idGatilho}
+            className="text-sm font-medium text-conteudo"
+          >
+            {label}
+          </label>
+        ))}
 
       <button
         ref={gatilhoRef}
+        id={idGatilho}
         type="button"
         disabled={disabled}
         onClick={alternar}
         onKeyDown={aoTeclar}
         aria-invalid={error ? true : undefined}
         aria-describedby={error ? idErro : undefined}
-        // No `variant="filter"` o <label> NAO e renderizado (ver o fim deste
-        // arquivo): a barra de filtros nao tem espaco para rotulo visivel. Sem
-        // isto, passar `label` a um filtro nao dava nome a nada — o gatilho era
-        // anunciado so pelo proprio conteudo, e numa barra com quatro filtros os
-        // quatro se anunciavam pelo valor escolhido, sem dizer de que filtro se
-        // trata. No `variant="form"` o <label> existe e o `htmlFor` ja liga.
-        aria-label={filtro ? label : undefined}
+        aria-labelledby={rotulado}
+        // Duas correções moram neste atributo, e a segunda desfez a primeira.
+        //
+        // Antes não havia nome nenhum no filtro: o `<label>` só era renderizado
+        // na variante de formulário, e numa barra com quatro filtros os quatro
+        // se anunciavam pelo valor escolhido, sem dizer de que filtro eram.
+        //
+        // A primeira tentativa foi `aria-label={label}`, e ela trocou um defeito
+        // por outro — ver o comentário do `rotulado` acima. Hoje o rótulo existe
+        // nas duas variantes (`sr-only` no filtro, `<label htmlFor>` no
+        // formulário) e o nome soma rótulo e valor.
         aria-haspopup="listbox"
         aria-expanded={aberto}
         aria-controls={aberto ? idPainel : undefined}
@@ -489,7 +533,9 @@ export function Selector({
               style={{ backgroundColor: escolhida.dot }}
             />
           )}
-          <span className="truncate">{rotuloGatilho}</span>
+          <span id={idValor} className="truncate">
+            {rotuloGatilho}
+          </span>
         </span>
         <Icon
           name="chevronDown"

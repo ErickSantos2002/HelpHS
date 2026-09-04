@@ -133,6 +133,29 @@
   --text-on-danger: var(--color-white);
   --text-on-success: var(--color-white);
 
+  /* E16 — a paleta de grafico.
+
+     Existe porque grafico nao e interface: as series precisam ser
+     DISTINGUIVEIS entre si, e nao legiveis sobre uma superficie. Mapear
+     duas series para o mesmo azul do sistema destroi a funcao do grafico,
+     e foi o que aconteceu ao tentar migrar a rosca e a barra empilhada do
+     painel administrativo com os tokens de interface.
+
+     Os quatro primeiros seguem a semantica da secao 16 — marca, sucesso,
+     alerta, perigo. O quinto e um degrau escuro da marca, para a segunda
+     serie de mesma semantica; o sexto e o neutro, para "outros".
+
+     Serie e PREENCHIMENTO, nao texto: o piso aqui e o de 3:1 da WCAG
+     1.4.11, e a distincao entre series importa mais que o contraste de
+     cada uma contra o fundo. Rotulo de grafico continua saindo dos tokens
+     de texto. */
+  --chart-1: var(--color-primary-500);
+  --chart-2: var(--color-success-500);
+  --chart-3: var(--color-warning-500);
+  --chart-4: var(--color-danger-500);
+  --chart-5: var(--color-primary-800);
+  --chart-6: var(--color-slate-400);
+
   /* Toast — consumidos em JS pela biblioteca (react-hot-toast no ChamadosHS,
    * sonner no HelpHS), que recebe um objeto de estilo e não enxerga classe. */
   --toast-bg: var(--color-white);
@@ -172,8 +195,24 @@
   --surface: #132238;
   --surface-elevated: #1a2f4a;
 
-  --border-color: #1e3a5f;
-  --border-muted: #132238;
+  /* E14 — a rampa de borda do escuro sobe um degrau, com a hierarquia
+     preservada. O `--border-muted` era #132238, o MESMO valor de
+     `--surface`: contraste 1,00 contra ela, ou seja, divisor invisivel
+     dentro de qualquer Card. O `--border-color` cede o proprio valor ao
+     muted e sobe para #2a4463; o `--border-strong` fica onde estava.
+
+     Medido contra as tres superficies do escuro:
+                       bg-base  surface  elevada
+       muted   antes      1,09     1,00     1,18
+       muted   depois     1,51     1,39     1,18
+       color   antes      1,51     1,39     1,18
+       color   depois     1,74     1,60     1,36
+       strong  (igual)    2,50     2,29     1,94
+
+     Nada piora: o muted na elevada fica em 1,18, que e exatamente onde o
+     `--border-color` ja estava. */
+  --border-color: #2a4463;
+  --border-muted: #1e3a5f;
   --border-strong: #315d81;
   --border-control: var(--color-slate-400);   /* E7: 6,23 / 6,78 / 5,29 */
 
