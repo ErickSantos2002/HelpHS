@@ -1,4 +1,5 @@
 import type { ButtonHTMLAttributes, ReactNode } from "react";
+import { Link } from "react-router-dom";
 import { cn } from "../../lib/utils";
 
 // As cinco variantes do pacote. `success` entrou com a emenda E2, que criou o
@@ -16,6 +17,11 @@ export interface ButtonProps extends ButtonHTMLAttributes<HTMLButtonElement> {
   /** Ícone à esquerda do rótulo (16px, stroke 1.75). Cede o lugar ao anel enquanto carrega. */
   icon?: ReactNode;
   fullWidth?: boolean;
+  /**
+   * Destino. Presente, o botão vira um `Link` com a mesma aparência —
+   * navegação é link, ação é botão.
+   */
+  to?: string;
 }
 
 /**
@@ -62,25 +68,26 @@ export function Button({
   loading = false,
   icon,
   fullWidth = false,
+  to,
   className,
   disabled,
   children,
   ...props
 }: ButtonProps) {
-  return (
-    <button
-      className={cn(
-        "inline-flex items-center justify-center gap-2 rounded-lg border font-medium leading-tight transition-colors",
-        "focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-offset-2 focus-visible:ring-offset-background",
-        "disabled:opacity-50 disabled:cursor-not-allowed",
-        variantClasses[variant],
-        sizeClasses[size],
-        fullWidth && "w-full",
-        className,
-      )}
-      disabled={disabled || loading}
-      {...props}
-    >
+  const classes = cn(
+    "inline-flex items-center justify-center gap-2 rounded-lg border font-medium leading-tight transition-colors",
+    // `ring-offset-background` era alias do D2 e escapou da varredura da Etapa 1:
+    // o utilitário ali é `ring-offset-`, e o padrão só previa `ring-`.
+    "focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-offset-2 focus-visible:ring-offset-surface-base",
+    "disabled:opacity-50 disabled:cursor-not-allowed",
+    variantClasses[variant],
+    sizeClasses[size],
+    fullWidth && "w-full",
+    className,
+  );
+
+  const conteudo = (
+    <>
       {loading ? (
         // Decorativo: o rótulo do botão já diz o que está acontecendo, e um
         // aria-label aqui entraria no nome acessível do botão.
@@ -92,6 +99,34 @@ export function Button({
         icon
       )}
       {children}
+    </>
+  );
+
+  // NAVEGAÇÃO É LINK, AÇÃO É BOTÃO — regra registrada no `DECISOES.md`.
+  //
+  // Um botão que chama `navigate()` anuncia "botão", não avisa que a página vai
+  // mudar, e leva junto tudo o que um link dá de graça: abrir em nova aba, menu
+  // do botão direito, arrastar para os favoritos, ver o destino na barra de
+  // status, e o histórico se comportar como a pessoa espera.
+  //
+  // A prop mora AQUI e não em cada tela porque a regra vale em dezesseis
+  // lugares: escrever as classes do botão à mão num `Link` seria reinventar o
+  // primitivo dezesseis vezes, e as dezesseis divergiriam — que foi exatamente
+  // o que aconteceu com o `KpiCard` e com os cinco mapas de prioridade.
+  //
+  // `disabled` não vai para o link: link não tem estado desabilitado. Quem
+  // precisa desabilitar navegação não renderiza o link.
+  if (to) {
+    return (
+      <Link to={to} className={classes} {...(props as Record<string, unknown>)}>
+        {conteudo}
+      </Link>
+    );
+  }
+
+  return (
+    <button className={classes} disabled={disabled || loading} {...props}>
+      {conteudo}
     </button>
   );
 }

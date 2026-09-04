@@ -1,59 +1,86 @@
 import { useEffect, useState } from "react";
-import { useNavigate } from "react-router-dom";
+import { Link } from "react-router-dom";
 import {
   Alert,
   Button,
   Card,
   CardTitle,
+  Icon,
+  KpiCard,
   Pagination,
   PriorityBadge,
   Spinner,
   StatusBadge,
-  KpiCard,
+  Table,
+  TableBody,
+  TableCell,
+  TableHead,
+  TableHeaderCell,
+  TableRow,
 } from "../../components/ui";
 import { useAuth } from "../../contexts/AuthContext";
 import { getTickets, type Ticket } from "../../services/ticketService";
 
 const PAGE_SIZE = 10;
 
-// ── KPI Card ──────────────────────────────────────────────────
-
-
-
-// ── Ticket Row ────────────────────────────────────────────────
-
-function TicketRow({ ticket }: { ticket: Ticket }) {
-  const navigate = useNavigate();
-
+/**
+ * Uma linha da lista de chamados.
+ *
+ * ── O que era, e por que mudou ────────────────────────────────────────
+ *
+ * A lista **parecia** uma tabela e não era nenhuma: o cabeçalho eram quatro
+ * `<span>` numa grade CSS e cada linha era um `<button>`. Quem enxerga lê
+ * "Protocolo | Título | Prioridade | Status" no topo e alinha a coluna com o
+ * olho; quem usa leitor de tela ouvia **dez botões** cujo nome era a costura de
+ * tudo — "HS-2024-0031 Impressora não imprime Alta Aberto" —, sem "linha 3 de
+ * 10", sem nome de coluna e sem saber quantas colunas existem.
+ *
+ * ── O link esticado, e por que a área de clique não se perdeu ─────────
+ *
+ * Navegação é link (regra registrada no `DECISOES.md`), e um `<tr>` não pode
+ * ser um link. O acionável vai **dentro** da linha — aqui o título — e um
+ * pseudo-elemento `after:absolute after:inset-0` o estica sobre a linha inteira.
+ *
+ * Medido no navegador antes de escolher: o pseudo-elemento cobre o `<tr>`
+ * exatamente (400×61 contra 400×61), porque a linha é `relative`. Onde isso
+ * falhar, o link continua funcionando — só cobre a própria célula. Degradação
+ * limpa, não quebra.
+ *
+ * O nome do link é o **título do chamado**, e não "Ver detalhes": dez links
+ * chamados "Ver detalhes" produzem uma lista em que nenhum diz para onde vai.
+ */
+function LinhaDeChamado({ ticket }: { ticket: Ticket }) {
   return (
-    <button
-      className="w-full grid grid-cols-[1fr_auto_auto] sm:grid-cols-[7rem_1fr_auto_auto] items-center gap-3 px-4 py-3 text-left hover:bg-surface-elevated transition-colors"
-      onClick={() => navigate(`/tickets/${ticket.id}`)}
-    >
-      {/* Protocol — hidden on mobile, shown sm+ */}
-      <span className="hidden sm:block text-xs font-mono text-slate-500 truncate">
+    <TableRow className="relative">
+      <TableCell className="hidden font-mono text-xs text-conteudo-muted sm:table-cell">
         {ticket.protocol}
-      </span>
+      </TableCell>
 
-      {/* Title + protocol (mobile only) */}
-      <div className="min-w-0">
-        <span className="sm:hidden text-xs font-mono text-slate-500 block mb-0.5">
+      <TableCell>
+        {/* O protocolo reaparece aqui no telefone, onde a coluna própria some. */}
+        <span className="mb-0.5 block font-mono text-xs text-conteudo-muted sm:hidden">
           {ticket.protocol}
         </span>
-        <p className="text-sm text-slate-200 truncate">{ticket.title}</p>
-      </div>
+        <Link
+          to={`/tickets/${ticket.id}`}
+          className="truncate text-conteudo after:absolute after:inset-0 hover:text-conteudo-link hover:underline"
+        >
+          {ticket.title}
+        </Link>
+      </TableCell>
 
-      <PriorityBadge priority={ticket.priority} />
-      <StatusBadge status={ticket.status} />
-    </button>
+      <TableCell>
+        <PriorityBadge priority={ticket.priority} />
+      </TableCell>
+      <TableCell>
+        <StatusBadge status={ticket.status} />
+      </TableCell>
+    </TableRow>
   );
 }
 
-// ── Client Dashboard ──────────────────────────────────────────
-
 export default function ClientDashboard() {
   const { user } = useAuth();
-  const navigate = useNavigate();
 
   const [tickets, setTickets] = useState<Ticket[]>([]);
   const [total, setTotal] = useState(0);
@@ -62,29 +89,43 @@ export default function ClientDashboard() {
   const [listLoading, setListLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
 
-  // Initial load — also computes KPI totals
-  const [kpiOpen, setKpiOpen]     = useState(0);
+  const [kpiOpen, setKpiOpen] = useState(0);
   const [kpiResolved, setKpiResolved] = useState(0);
-  const [kpiTotal, setKpiTotal]   = useState(0);
+  const [kpiTotal, setKpiTotal] = useState(0);
 
-  // Load KPIs once (all tickets, no pagination)
+  // Os três indicadores, numa chamada só.
+  //
+  // PENDÊNCIA REGISTRADA, e ela não é do sistema de design: só o "Total" vem do
+  // servidor (`data.total`); os outros dois são contados no cliente sobre os
+  // 500 itens trazidos. Passando de 500 chamados a tela mostra três números que
+  // não fecham, sem nenhum sinal de truncamento. Entra na Fase 16 com o
+  // serviço, não aqui.
   useEffect(() => {
     if (!user) return;
     getTickets({ creator_id: user.id, limit: 500 })
       .then((data) => {
         setKpiTotal(data.total);
-        setKpiOpen(data.items.filter((t) => t.status === "open" || t.status === "in_progress").length);
-        setKpiResolved(data.items.filter((t) => t.status === "resolved" || t.status === "closed").length);
+        setKpiOpen(
+          data.items.filter((t) => t.status === "open" || t.status === "in_progress")
+            .length,
+        );
+        setKpiResolved(
+          data.items.filter((t) => t.status === "resolved" || t.status === "closed")
+            .length,
+        );
       })
       .catch(() => {})
       .finally(() => setLoading(false));
   }, [user]);
 
-  // Load paginated list
   useEffect(() => {
     if (!user) return;
     setListLoading(true);
-    getTickets({ creator_id: user.id, limit: PAGE_SIZE, offset: (page - 1) * PAGE_SIZE })
+    getTickets({
+      creator_id: user.id,
+      limit: PAGE_SIZE,
+      offset: (page - 1) * PAGE_SIZE,
+    })
       .then((data) => {
         setTickets(data.items);
         setTotal(data.total);
@@ -102,33 +143,35 @@ export default function ClientDashboard() {
   }
 
   if (error) {
+    // `live` fica ligado: este aviso aparece por FALHA de uma ação, não faz
+    // parte da página desde o início. Emenda E12.
     return <Alert variant="danger">{error}</Alert>;
   }
 
   return (
     <div className="space-y-5 pb-10">
-
-      {/* ── Header ──────────────────────────────────────────── */}
-      <div className="flex flex-col sm:flex-row sm:flex-wrap sm:items-center sm:justify-between gap-4 rounded-2xl border border-borda/40 bg-surface px-5 py-4">
+      <div className="flex flex-col gap-4 rounded-2xl border border-borda/40 bg-surface px-5 py-4 sm:flex-row sm:flex-wrap sm:items-center sm:justify-between">
         <div className="text-center sm:text-left">
-          <h1 className="text-xl font-extrabold text-slate-100">Meus Tickets</h1>
-          <p className="mt-0.5 text-sm text-slate-500">
-            Olá, <span className="font-semibold text-slate-300">{user?.name?.split(" ")[0]}</span>! Acompanhe seus chamados abaixo.
+          <h1 className="text-xl font-extrabold text-conteudo-heading">Meus Tickets</h1>
+          <p className="mt-0.5 text-sm text-conteudo-muted">
+            Olá,{" "}
+            <span className="font-semibold text-conteudo">
+              {user?.name?.split(" ")[0]}
+            </span>
+            ! Acompanhe seus chamados abaixo.
           </p>
         </div>
         <div className="flex justify-center sm:justify-end">
-          <button
-            onClick={() => navigate("/tickets/new")}
-            className="flex items-center gap-2 px-4 py-2 text-sm font-semibold rounded-lg bg-primary text-white hover:bg-primary/90 transition-all cursor-pointer"
-          >
-            <svg className="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2.5}><path strokeLinecap="round" strokeLinejoin="round" d="M12 4v16m8-8H4" /></svg>
+          {/* Era `<button onClick={() => navigate(...)}>` com `bg-primary
+              text-white` — 3,83:1, a família da emenda E1. O primitivo resolve
+              as duas coisas: a cor sai do par medido e o `to` faz dele um link. */}
+          <Button to="/tickets/new" icon={<Icon name="plus" size={16} strokeWidth={2.5} />}>
             Abrir chamado
-          </button>
+          </Button>
         </div>
       </div>
 
-      {/* ── KPIs ────────────────────────────────────────────── */}
-      <div className="grid grid-cols-1 sm:grid-cols-3 gap-4">
+      <div className="grid grid-cols-1 gap-4 sm:grid-cols-3">
         <KpiCard label="Total de chamados" value={kpiTotal} sub="Todos os status" />
         <KpiCard
           label="Em andamento"
@@ -144,9 +187,8 @@ export default function ClientDashboard() {
         />
       </div>
 
-      {/* ── Ticket table ────────────────────────────────────── */}
       <Card padding="none">
-        <div className="px-4 py-3 border-b border-borda">
+        <div className="border-b border-borda px-4 py-3">
           <CardTitle>Chamados recentes</CardTitle>
         </div>
 
@@ -155,28 +197,34 @@ export default function ClientDashboard() {
             <Spinner size="md" />
           </div>
         ) : tickets.length === 0 ? (
-          <div className="px-4 py-12 text-center space-y-3">
-            <p className="text-slate-500 text-sm">Você ainda não abriu nenhum chamado.</p>
-            <Button variant="secondary" onClick={() => navigate("/tickets/new")}>
+          <div className="space-y-3 px-4 py-12 text-center">
+            <p className="text-sm text-conteudo-muted">
+              Você ainda não abriu nenhum chamado.
+            </p>
+            <Button variant="secondary" to="/tickets/new">
               Abrir primeiro chamado
             </Button>
           </div>
         ) : (
           <>
-            {/* Table header */}
-            <div className="hidden sm:grid grid-cols-[7rem_1fr_auto_auto] gap-3 px-4 py-2 border-b border-borda/60 bg-surface-elevated/40">
-              <span className="text-xs font-semibold text-slate-500 uppercase tracking-wider">Protocolo</span>
-              <span className="text-xs font-semibold text-slate-500 uppercase tracking-wider">Título</span>
-              <span className="text-xs font-semibold text-slate-500 uppercase tracking-wider">Prioridade</span>
-              <span className="text-xs font-semibold text-slate-500 uppercase tracking-wider">Status</span>
-            </div>
+            <Table>
+              <TableHead>
+                <TableRow>
+                  <TableHeaderCell className="hidden sm:table-cell">
+                    Protocolo
+                  </TableHeaderCell>
+                  <TableHeaderCell>Título</TableHeaderCell>
+                  <TableHeaderCell>Prioridade</TableHeaderCell>
+                  <TableHeaderCell>Status</TableHeaderCell>
+                </TableRow>
+              </TableHead>
+              <TableBody>
+                {tickets.map((t) => (
+                  <LinhaDeChamado key={t.id} ticket={t} />
+                ))}
+              </TableBody>
+            </Table>
 
-            {/* Rows */}
-            <div className="divide-y divide-borda/60">
-              {tickets.map((t) => <TicketRow key={t.id} ticket={t} />)}
-            </div>
-
-            {/* Pagination */}
             <div className="px-4 pb-4">
               <Pagination
                 page={page}

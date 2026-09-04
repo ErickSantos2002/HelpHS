@@ -1,5 +1,6 @@
 import { render, screen } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
+import { MemoryRouter } from "react-router-dom";
 import { describe, expect, it, vi } from "vitest";
 import { Button } from "../../components/ui/Button";
 import { AA, contraste } from "../helpers/contraste";
@@ -231,5 +232,70 @@ describe("Button", () => {
       expect(anel).not.toBeNull();
       expect(anel).toHaveClass("border-current");
     });
+  });
+});
+
+describe("Button — navegação é link, ação é botão", () => {
+  function comRota(ui: React.ReactElement) {
+    return render(<MemoryRouter>{ui}</MemoryRouter>);
+  }
+
+  it("com `to`, é um link de verdade e não um botão", () => {
+    // Um botão que chama `navigate()` anuncia "botão", não avisa que a página
+    // vai mudar, e leva junto o abrir em nova aba, o menu do botão direito e o
+    // destino na barra de status.
+    comRota(<Button to="/tickets/new">Abrir chamado</Button>);
+
+    expect(screen.getByRole("link", { name: "Abrir chamado" })).toHaveAttribute(
+      "href",
+      "/tickets/new",
+    );
+    expect(screen.queryByRole("button")).not.toBeInTheDocument();
+  });
+
+  it("sem `to`, continua botão", () => {
+    render(<Button onClick={() => {}}>Salvar</Button>);
+
+    expect(screen.getByRole("button", { name: "Salvar" })).toBeInTheDocument();
+    expect(screen.queryByRole("link")).not.toBeInTheDocument();
+  });
+
+  it("o link tem a MESMA aparência do botão", () => {
+    // É o ponto da prop: se as classes divergirem, cada tela reinventa o
+    // botão-link à mão e as dezesseis divergem entre si.
+    const { unmount } = render(<Button variant="primary">X</Button>);
+    const classeBotao = screen.getByRole("button").className;
+    unmount();
+
+    comRota(
+      <Button to="/x" variant="primary">
+        X
+      </Button>,
+    );
+
+    expect(screen.getByRole("link").className).toBe(classeBotao);
+  });
+
+  it("o link não recebe `disabled`", () => {
+    // Link não tem estado desabilitado. Quem precisa impedir a navegação não
+    // renderiza o link.
+    comRota(
+      <Button to="/x" disabled>
+        X
+      </Button>,
+    );
+
+    expect(screen.getByRole("link")).not.toHaveAttribute("disabled");
+  });
+
+  it("o ícone e o rótulo continuam valendo no link", () => {
+    comRota(
+      <Button to="/x" icon={<span data-testid="ic" />}>
+        Abrir
+      </Button>,
+    );
+
+    expect(screen.getByTestId("ic")).toBeInTheDocument();
+    expect(screen.getByRole("link", { name: "Abrir" })).toBeInTheDocument();
   });
 });

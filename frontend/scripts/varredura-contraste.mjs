@@ -781,7 +781,7 @@ function provar() {
  * D5, e saem tela a tela nas Fases 11-16 — cada pagina migrada zera os seus.
  */
 const PARES_CONHECIDOS = new Map([
-  ['components/chat/ChatPanel.tsx  bg-primary  repouso', 1],
+['components/chat/ChatPanel.tsx  bg-primary  repouso', 1],
   ['components/chat/ChatPanel.tsx  bg-surface-elevated  repouso', 1],
   ['components/chat/QuickReplyPicker.tsx  bg-surface  repouso', 2],
   ['components/layout/Topbar.tsx  bg-danger  repouso', 2],
@@ -789,7 +789,6 @@ const PARES_CONHECIDOS = new Map([
   ['pages/audit/AuditLogsPage.tsx  hover:bg-surface-elevated  hover:', 1],
   ['pages/calendar/CalendarPage.tsx  bg-primary  repouso', 2],
   ['pages/dashboard/AdminDashboard.tsx  bg-primary  repouso', 1],
-  ['pages/dashboard/ClientDashboard.tsx  bg-primary  repouso', 1],
   ['pages/dashboard/TechnicianDashboard.tsx  bg-surface-elevated  repouso', 1],
   ['pages/equipment/EquipmentPage.tsx  bg-surface  repouso', 1],
   ['pages/equipment/EquipmentPage.tsx  bg-surface-elevated  repouso', 1],
