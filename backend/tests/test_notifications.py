@@ -492,6 +492,7 @@ async def test_log_de_notificacao_nao_entregue_diz_o_destinatario():
         to_email="destino@test.com",
         subject="Assunto",
         body="Corpo",
+        html="<html><body>Corpo</body></html>",
         settings=settings,
     )
 
@@ -564,7 +565,7 @@ async def test_reply_to_configurado_continua_indo_na_mensagem():
 # ═══════════════════════════════════════════════════════════════
 
 
-def _db_para_notify(email="destino@test.com", papel=UserRole.client):
+def _db_para_notify(email="destino@test.com", papel=UserRole.client, nome="Welton Silva"):
     """Sessão mockada que devolve o destinatário na busca do notify().
 
     Passou a carregar o PAPEL junto do e-mail em 04/09/2026: quem decide o
@@ -574,7 +575,7 @@ def _db_para_notify(email="destino@test.com", papel=UserRole.client):
 
     async def _execute(*args, **kwargs):
         result = MagicMock()
-        result.one_or_none.return_value = (email, papel)
+        result.one_or_none.return_value = (email, papel, nome)
         result.scalar_one_or_none.return_value = email
         return result
 
@@ -1014,8 +1015,8 @@ async def test_notificacao_sem_chamado_nao_inventa_link():
 
     _, _, corpo = _pega_email(enviar)
 
-    assert corpo.strip() == "Manutenção programada para sábado."
-    assert "/tickets/" not in corpo
+    assert "Manutenção programada para sábado." in corpo
+    assert "/tickets/" not in corpo, "sem ticket_id, não pode inventar link"
 
 
 @pytest.mark.asyncio

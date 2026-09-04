@@ -65,6 +65,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from app.core.config import Settings
 from app.models.models import Notification, NotificationType, User, UserRole
 from app.services.email import send_email
+from app.services.email_layout import Mensagem, em_html, em_texto
 
 # Tipos que ficam SÓ no sininho, mesmo com SMTP configurado.
 #
@@ -106,6 +107,7 @@ class _EmailPendente:
     to_email: str
     subject: str
     body: str
+    html: str
     settings: Settings
 
 
@@ -132,7 +134,34 @@ def _assunto_do_email(title: str, data: dict[str, Any] | None) -> str:
     return f"[HelpHS] {title} · {protocolo}" if protocolo else f"[HelpHS] {title}"
 
 
-def _corpo_do_email(message: str, data: dict[str, Any] | None, settings: Settings) -> str:
+def _mensagem_do_email(
+    title: str,
+    message: str,
+    data: dict[str, Any] | None,
+    nome: str | None,
+    settings: Settings,
+) -> Mensagem:
+    """A notificação virando e-mail — a mesma fonte para o texto e para o HTML.
+
+    O `rotulo` distingue o que tem chamado do que não tem: hoje as catorze
+    chamadas carregam `ticket_id`, mas o `notify` é genérico e um aviso de
+    sistema não pode ganhar um cartão de protocolo que não existe.
+    """
+    ticket_id = (data or {}).get("ticket_id")
+    protocolo = (data or {}).get("protocol")
+    link = _link_do_chamado(ticket_id, settings)
+
+    return Mensagem(
+        rotulo="seu chamado" if link else "aviso do sistema",
+        titulo=title,
+        saudacao=f"Olá, {nome.split()[0]}." if nome else None,
+        paragrafos=(message,),
+        acao=("Ver o chamado", link) if link else None,
+        dados=(("protocolo", str(protocolo)),) if protocolo else (),
+    )
+
+
+def _link_do_chamado(ticket_id: Any, settings: Settings) -> str | None:
     """A mensagem, e o caminho de volta para o chamado.
 
     Levantado em 04/09/2026: DOZE dos catorze e-mails de notificação chegavam
@@ -143,12 +172,9 @@ def _corpo_do_email(message: str, data: dict[str, Any] | None, settings: Setting
     Sem `ticket_id` ou sem `FRONTEND_URL`, devolve a mensagem intacta: link
     inventado é pior que link ausente.
     """
-    ticket_id = (data or {}).get("ticket_id")
     if not ticket_id or not settings.frontend_url:
-        return message
-
-    base = settings.frontend_url.rstrip("/")
-    return f"{message}\n\nVeja o chamado:\n{base}/tickets/{ticket_id}"
+        return None
+    return f"{settings.frontend_url.rstrip('/')}/tickets/{ticket_id}"
 
 
 async def notify(
@@ -185,7 +211,7 @@ async def notify(
     # A busca traz o PAPEL junto do e-mail: desde 04/09/2026 quem decide o
     # envio não é só o tipo da notificação, é também quem recebe. Uma consulta
     # só — a coluna a mais não custa nada e evita uma segunda ida ao banco.
-    result = await db.execute(select(User.email, User.role).where(User.id == user_id))
+    result = await db.execute(select(User.email, User.role, User.name).where(User.id == user_id))
     destinatario = result.one_or_none()
 
     # Destinatário que sumiu entre a ação e a notificação não pode virar
@@ -193,15 +219,17 @@ async def notify(
     if destinatario is None:
         return
 
-    email_addr, papel = destinatario
+    email_addr, papel, nome = destinatario
 
     if email_addr and papel not in _SEM_EMAIL_POR_PAPEL:
+        conteudo = _mensagem_do_email(title, message, data, nome, settings)
         _PENDENTES.setdefault(db, []).append(
             _EmailPendente(
                 notif_id=notif.id,
                 to_email=email_addr,
                 subject=_assunto_do_email(title, data),
-                body=_corpo_do_email(message, data, settings),
+                body=em_texto(conteudo),
+                html=em_html(conteudo),
                 settings=settings,
             )
         )
@@ -232,7 +260,13 @@ def _disparar(pendente: _EmailPendente) -> None:
 
 
 async def _send_and_log(pendente: _EmailPendente) -> None:
-    sent = await send_email(pendente.to_email, pendente.subject, pendente.body, pendente.settings)
+    sent = await send_email(
+        pendente.to_email,
+        pendente.subject,
+        pendente.body,
+        pendente.settings,
+        html=pendente.html,
+    )
     if sent:
         logger.debug(f"Email notification {pendente.notif_id} delivered to {pendente.to_email}")
     else:
