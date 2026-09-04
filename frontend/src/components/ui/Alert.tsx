@@ -55,18 +55,30 @@ const iconNames: Record<AlertVariant, IconName> = {
 };
 
 /**
- * `alert` interrompe; `status` espera a próxima pausa. Erro e aviso valem a
- * interrupção — confirmação e informação não.
+ * `alert` interrompe; `status` espera a próxima pausa.
+ *
+ * **Só `danger` interrompe.** A primeira versão daqui punha `warning` em
+ * `alert` também, e a emenda **E12** fixou o contrário para os dois
+ * repositórios: aviso de atenção quase nunca é urgente a ponto de justificar
+ * cortar a fala do leitor de tela, e quando for, a tela usa `danger`.
  */
 const papeis: Record<AlertVariant, "alert" | "status"> = {
   info: "status",
   success: "status",
-  warning: "alert",
+  warning: "status",
   danger: "alert",
 };
 
 export interface AlertProps {
   variant?: AlertVariant;
+  /**
+   * `false` remove o papel de região viva. Para o aviso que **já está** na tela
+   * quando a página carrega: região viva anuncia MUDANÇA, e conteúdo que sempre
+   * esteve ali não mudou. Anunciá-lo faz o leitor ler o aviso fora de ordem,
+   * antes do conteúdo que lhe dá contexto — a pessoa ouve a consequência antes
+   * da causa. Emenda E12.
+   */
+  live?: boolean;
   title?: string;
   children: ReactNode;
   className?: string;
@@ -79,10 +91,11 @@ export function Alert({
   children,
   className,
   onDismiss,
+  live = true,
 }: AlertProps) {
   return (
     <div
-      role={papeis[variant]}
+      role={live ? papeis[variant] : undefined}
       className={cn(
         "flex gap-3 rounded-lg border p-4 text-sm",
         variantClasses[variant],

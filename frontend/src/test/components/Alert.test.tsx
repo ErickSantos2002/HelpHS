@@ -59,18 +59,20 @@ describe("Alert — as tintas", () => {
 });
 
 describe("Alert — o papel depende da variante", () => {
-  it.each([
-    ["danger", "alert"],
-    ["warning", "alert"],
-  ] as const)("%s interrompe: role=%s", (v, papel) => {
-    render(<Alert variant={v}>Mensagem</Alert>);
+  it("só danger interrompe", () => {
+    // A primeira versão daqui punha `warning` em `alert` também. A emenda E12
+    // fixou o contrário para os dois repositórios: aviso de atenção quase nunca
+    // é urgente a ponto de justificar cortar a fala do leitor de tela, e quando
+    // for, a tela usa `danger`.
+    render(<Alert variant="danger">Mensagem</Alert>);
 
-    expect(screen.getByRole(papel)).toBeInTheDocument();
+    expect(screen.getByRole("alert")).toBeInTheDocument();
   });
 
   it.each([
     ["info", "status"],
     ["success", "status"],
+    ["warning", "status"],
   ] as const)("%s espera a pausa: role=%s", (v, papel) => {
     // `role="alert"` é região viva ASSERTIVA: interrompe o que o leitor de tela
     // estiver dizendo. Para um erro é o certo; para um "salvo com sucesso" é
@@ -80,10 +82,34 @@ describe("Alert — o papel depende da variante", () => {
     expect(screen.getByRole(papel)).toBeInTheDocument();
   });
 
-  it("sucesso não se anuncia como alerta", () => {
-    render(<Alert variant="success">Salvo</Alert>);
+  it.each(["info", "success", "warning"] as const)(
+    "%s não se anuncia como alerta",
+    (v) => {
+      render(<Alert variant={v}>Mensagem</Alert>);
+
+      expect(screen.queryByRole("alert")).not.toBeInTheDocument();
+    },
+  );
+
+  it("live=false tira o papel de região viva", () => {
+    // Para o aviso que JÁ ESTÁ na tela quando a página carrega. Região viva
+    // anuncia MUDANÇA; conteúdo que sempre esteve ali não mudou, e anunciá-lo
+    // faz o leitor lê-lo fora de ordem — antes do conteúdo que lhe dá contexto.
+    render(
+      <Alert variant="danger" live={false}>
+        Esta empresa está inativa.
+      </Alert>,
+    );
 
     expect(screen.queryByRole("alert")).not.toBeInTheDocument();
+    expect(screen.queryByRole("status")).not.toBeInTheDocument();
+    expect(screen.getByText("Esta empresa está inativa.")).toBeInTheDocument();
+  });
+
+  it("live é ligado por padrão", () => {
+    render(<Alert variant="danger">Falhou</Alert>);
+
+    expect(screen.getByRole("alert")).toBeInTheDocument();
   });
 });
 
