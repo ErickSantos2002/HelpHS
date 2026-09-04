@@ -883,3 +883,165 @@ async def test_destinatario_que_nao_existe_mais_nao_derruba_o_notify():
         await _deixar_as_tarefas_rodarem()
 
     enviar.assert_not_awaited()
+
+
+# ═══════════════════════════════════════════════════════════════
+# O e-mail leva ao chamado, e o assunto diz qual é
+# ═══════════════════════════════════════════════════════════════
+#
+# Levantado em 04/09/2026: doze dos catorze e-mails de notificação chegavam
+# sem link. O `data` da notificação sempre carregou o `ticket_id` — as catorze
+# chamadas passam —, mas ele não chegava ao e-mail. A pessoa lia que o chamado
+# andou e tinha de entrar no sistema e procurar.
+#
+# O assunto tinha o mesmo defeito na lista da caixa: "Ticket resolvido" não diz
+# QUAL. Com cinco chamados abertos, cinco e-mails idênticos.
+#
+# Nada disto muda o sininho: `title` e `message` continuam sendo gravados na
+# Notification como sempre foram. O que muda é só o que sai por e-mail.
+
+
+def _pega_email(enviar):
+    """(destino, assunto, corpo) da única chamada de send_email."""
+    args = enviar.await_args.args
+    return args[0], args[1], args[2]
+
+
+@pytest.mark.asyncio
+async def test_o_email_leva_o_link_do_chamado():
+    from app.core.config import get_settings
+    from app.services import notifications
+
+    db = _db_para_notify("cliente@test.com")
+    settings = get_settings()
+    ticket_id = str(uuid.uuid4())
+
+    with patch.object(notifications, "send_email", new=AsyncMock(return_value=True)) as enviar:
+        await notifications.notify(
+            db,
+            _USER_ID,
+            NotificationType.ticket_updated,
+            "Chamado resolvido",
+            "O chamado HS-2026-0042 foi marcado como resolvido.",
+            data={"ticket_id": ticket_id, "protocol": "HS-2026-0042"},
+            settings=settings,
+        )
+        await notifications.commit_e_notificar(db)
+        await _deixar_as_tarefas_rodarem()
+
+    _, _, corpo = _pega_email(enviar)
+
+    assert f"{settings.frontend_url.rstrip('/')}/tickets/{ticket_id}" in corpo
+    assert (
+        "O chamado HS-2026-0042 foi marcado como resolvido." in corpo
+    ), "a mensagem original tem que continuar no corpo"
+
+
+@pytest.mark.asyncio
+async def test_o_assunto_diz_de_qual_chamado_se_trata():
+    from app.core.config import get_settings
+    from app.services import notifications
+
+    db = _db_para_notify("cliente@test.com")
+
+    with patch.object(notifications, "send_email", new=AsyncMock(return_value=True)) as enviar:
+        await notifications.notify(
+            db,
+            _USER_ID,
+            NotificationType.ticket_updated,
+            "Chamado resolvido",
+            "corpo qualquer",
+            data={"ticket_id": str(uuid.uuid4()), "protocol": "HS-2026-0042"},
+            settings=get_settings(),
+        )
+        await notifications.commit_e_notificar(db)
+        await _deixar_as_tarefas_rodarem()
+
+    _, assunto, _ = _pega_email(enviar)
+
+    assert assunto.startswith("[HelpHS]"), f"sem o prefixo da casa: {assunto}"
+    assert "HS-2026-0042" in assunto, f"o assunto não diz qual chamado: {assunto}"
+    assert "Chamado resolvido" in assunto
+
+
+@pytest.mark.asyncio
+async def test_sem_protocolo_o_assunto_ainda_sai_util():
+    """Cinco chamadas não carregam `protocol` no data — não podem quebrar."""
+    from app.core.config import get_settings
+    from app.services import notifications
+
+    db = _db_para_notify("cliente@test.com")
+
+    with patch.object(notifications, "send_email", new=AsyncMock(return_value=True)) as enviar:
+        await notifications.notify(
+            db,
+            _USER_ID,
+            NotificationType.ticket_updated,
+            "Chamado reaberto",
+            "corpo qualquer",
+            data={"ticket_id": str(uuid.uuid4()), "new_status": "in_progress"},
+            settings=get_settings(),
+        )
+        await notifications.commit_e_notificar(db)
+        await _deixar_as_tarefas_rodarem()
+
+    _, assunto, corpo = _pega_email(enviar)
+
+    assert assunto == "[HelpHS] Chamado reaberto"
+    assert "/tickets/" in corpo, "sem protocolo, o link ainda tem que sair"
+
+
+@pytest.mark.asyncio
+async def test_notificacao_sem_chamado_nao_inventa_link():
+    """Contraprova: sem `ticket_id` no data, o corpo é a mensagem e nada mais."""
+    from app.core.config import get_settings
+    from app.services import notifications
+
+    db = _db_para_notify("cliente@test.com")
+
+    with patch.object(notifications, "send_email", new=AsyncMock(return_value=True)) as enviar:
+        await notifications.notify(
+            db,
+            _USER_ID,
+            NotificationType.system,
+            "Aviso do sistema",
+            "Manutenção programada para sábado.",
+            data=None,
+            settings=get_settings(),
+        )
+        await notifications.commit_e_notificar(db)
+        await _deixar_as_tarefas_rodarem()
+
+    _, _, corpo = _pega_email(enviar)
+
+    assert corpo.strip() == "Manutenção programada para sábado."
+    assert "/tickets/" not in corpo
+
+
+@pytest.mark.asyncio
+async def test_o_sininho_nao_muda():
+    """O que a Notification grava continua sendo o título e a mensagem crus.
+
+    O prefixo `[HelpHS]` e o link são coisa de e-mail. Se vazarem para a
+    Notification, o sininho passa a mostrar "[HelpHS] Chamado resolvido" e uma
+    URL no meio do texto.
+    """
+    from app.core.config import get_settings
+    from app.services import notifications
+
+    db = _db_para_notify("cliente@test.com")
+
+    with patch.object(notifications, "send_email", new=AsyncMock(return_value=True)):
+        await notifications.notify(
+            db,
+            _USER_ID,
+            NotificationType.ticket_updated,
+            "Chamado resolvido",
+            "O chamado HS-2026-0042 foi marcado como resolvido.",
+            data={"ticket_id": str(uuid.uuid4()), "protocol": "HS-2026-0042"},
+            settings=get_settings(),
+        )
+
+    gravada = db.add.call_args.args[0]
+    assert gravada.title == "Chamado resolvido"
+    assert gravada.message == "O chamado HS-2026-0042 foi marcado como resolvido."
