@@ -127,6 +127,9 @@ def _db(lookup=None, count=0):
 
     async def _execute(*args, **kwargs):
         result = MagicMock()
+        # O notify() busca (email, papel) do destinatário com .one_or_none().
+        # Cliente de propósito: mantém o caminho de e-mail exercido como antes.
+        result.one_or_none.return_value = ("dest@test.com", UserRole.client)
         result.scalar_one_or_none.return_value = lookup
         result.scalar_one.return_value = count
         result.scalars.return_value.all.return_value = [lookup] if lookup else []
@@ -150,6 +153,7 @@ def _db_sequence(*responses):
         resp = responses[idx]
 
         result = MagicMock()
+        result.one_or_none.return_value = ("dest@test.com", UserRole.client)
         if isinstance(resp, int):
             result.scalar_one.return_value = resp
             result.scalar_one_or_none.return_value = None

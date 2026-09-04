@@ -107,6 +107,9 @@ def _db(*lookups):
         item = lookups[idx]
 
         result = MagicMock()
+        # O notify() busca (email, papel) do destinatário com .one_or_none().
+        # Cliente de propósito: mantém o caminho de e-mail exercido como antes.
+        result.one_or_none.return_value = ("dest@test.com", UserRole.client)
         if isinstance(item, list):
             result.scalars.return_value.all.return_value = item
             result.scalar_one_or_none.return_value = None
