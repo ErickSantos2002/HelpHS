@@ -2,6 +2,7 @@ import { useEffect, useId, useRef } from "react";
 import { createPortal } from "react-dom";
 import type { ReactNode } from "react";
 import { cn } from "../../lib/utils";
+import { Icon } from "./Icon";
 
 type ModalSize = "sm" | "md" | "lg" | "xl" | "2xl";
 
@@ -34,6 +35,10 @@ export function Modal({
   className,
 }: ModalProps) {
   const panelRef = useRef<HTMLDivElement>(null);
+  // Quem tinha o foco quando o modal abriu. Sem guardar, fechar deixa o
+  // foco no `body`: quem navega por teclado volta ao topo da pagina e
+  // precisa percorrer tudo de novo ate onde estava.
+  const focoAnterior = useRef<HTMLElement | null>(null);
   const titleId = useId();
   const onCloseRef = useRef(onClose);
   useEffect(() => {
@@ -44,6 +49,8 @@ export function Modal({
   // so typing inside modal inputs never re-triggers the focus logic.
   useEffect(() => {
     if (!open) return;
+
+    focoAnterior.current = document.activeElement as HTMLElement | null;
 
     // Move focus into the modal only when it first opens
     const firstFocusable =
@@ -79,7 +86,12 @@ export function Modal({
     }
 
     document.addEventListener("keydown", handleKeyDown);
-    return () => document.removeEventListener("keydown", handleKeyDown);
+    return () => {
+      document.removeEventListener("keydown", handleKeyDown);
+      // A devolucao vai na limpeza, e nao num `onClose`: o modal tambem
+      // fecha por Escape, por clique no fundo e por desmontagem da tela.
+      focoAnterior.current?.focus();
+    };
   }, [open]);
 
   // Prevent body scroll
@@ -109,7 +121,7 @@ export function Modal({
       <div
         ref={panelRef}
         className={cn(
-          "relative z-10 w-full flex flex-col rounded-xl border border-border bg-background-surface shadow-xl",
+          "relative z-10 w-full flex flex-col rounded-xl border border-borda bg-surface shadow-xl",
           "animate-in fade-in zoom-in-95 duration-150",
           "max-h-[92vh]",
           sizeClasses[size],
@@ -117,29 +129,26 @@ export function Modal({
         )}
       >
         {title && (
-          <div className="flex items-center justify-between border-b border-border px-4 py-3 sm:px-6 sm:py-4 shrink-0">
-            <h2 id={titleId} className="text-base font-semibold text-slate-800 dark:text-slate-100">
+          <div className="flex items-center justify-between border-b border-borda px-4 py-3 sm:px-6 sm:py-4 shrink-0">
+            <h2 id={titleId} className="text-base font-semibold text-conteudo-heading">
               {title}
             </h2>
             <button
+              // Hoje isto NAO muda comportamento: o modal vai para um portal em
+              // `document.body`, entao o botao nunca e descendente do `<form>`
+              // no DOM e nao teria como submeter. Fica porque a garantia e do
+              // portal, nao do botao — se o portal sair um dia, o padrao do HTML
+              // dentro de `<form>` volta a ser `submit`.
+              type="button"
               onClick={onClose}
-              className="rounded-lg p-1 text-slate-500 dark:text-slate-400 hover:bg-background-elevated hover:text-slate-700 dark:hover:text-slate-200 transition-colors"
+              className={cn(
+                "rounded-lg p-1 text-conteudo-muted transition-colors",
+                "hover:bg-surface-elevated hover:text-conteudo-heading",
+                "focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-action",
+              )}
               aria-label="Fechar"
             >
-              <svg
-                className="w-5 h-5"
-                aria-hidden="true"
-                fill="none"
-                viewBox="0 0 24 24"
-                stroke="currentColor"
-                strokeWidth={2}
-              >
-                <path
-                  strokeLinecap="round"
-                  strokeLinejoin="round"
-                  d="M6 18L18 6M6 6l12 12"
-                />
-              </svg>
+              <Icon name="close" size={20} strokeWidth={2} />
             </button>
           </div>
         )}
@@ -159,7 +168,7 @@ export function ModalFooter({ children, className }: ModalFooterProps) {
   return (
     <div
       className={cn(
-        "flex items-center justify-end gap-3 border-t border-border px-4 sm:px-6 py-4 -mx-4 sm:-mx-6 mt-4",
+        "flex items-center justify-end gap-3 border-t border-borda px-4 sm:px-6 py-4 -mx-4 sm:-mx-6 mt-4",
         className,
       )}
     >
