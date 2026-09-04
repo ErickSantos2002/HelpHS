@@ -183,6 +183,49 @@ contraste se mede no **componente renderizado**, nunca no token. Token medido
 prova que a paleta é sólida — a mesma frase que abriu a varredura de contraste,
 agora provada uma segunda vez, por dentro.
 
+## As emendas E11, E11-b e E12 — e por que os hashes acima não mudaram
+
+Três emendas foram gravadas no pacote em 03 e 04/09/2026 e **nenhuma delas
+altera um único byte dos sete arquivos** listados na tabela de hashes. Isso não é
+esquecimento: é a fronteira do pacote funcionando.
+
+| | |
+|---|---|
+| **E11** | `Input.jsx` `Textarea.jsx` `Select.jsx` `SearchSelect.jsx` — o erro do formulário ligado ao controle por `aria-describedby`; `aria-invalid`; `id` por `useId` |
+| **E11-b** | `SearchSelect.jsx` — o `<label>` ganha `htmlFor` e o gatilho ganha `id` |
+| **E12** | `Alert.jsx` `Tabs.jsx` `Modal.jsx` — papel de widget passa a vir com o comportamento que ele promete |
+
+As três tocam **`components/`**, e componente é **referência, não dependência**:
+este repositório copia os sete arquivos de token e as fontes, e reescreve os
+componentes em TypeScript no seu próprio `ui/`. Token muda hash aqui; componente
+não. É a mesma razão pela qual a E7-b, a E9 e a E10 também não pediram recópia.
+
+**O que muda aqui é o alvo da comparação.** Quando uma tela ou um primitivo
+diverge do pacote, é contra a versão emendada que se compara — e as três
+emendas acima já estão adotadas em `ui/`.
+
+### Uma divergência que a E12 desfez
+
+A Fase 10 implementou o `Alert` local com `warning` em `role="alert"`. A **E12**
+fixou, para os dois repositórios, que **só `danger` interrompe**: aviso de
+atenção quase nunca é urgente a ponto de cortar a fala do leitor de tela, e
+quando for, a tela usa `danger`.
+
+O local foi alinhado no mesmo dia. **A regra do pacote é posterior e mais
+específica que a minha escolha, e o pacote é a referência** — a divergência não
+sobreviveu a um commit.
+
+### O que a E12 trouxe de novo para as telas
+
+A prop `live` do `Alert`. `live={false}` remove o papel de região viva, e serve
+para o aviso que **já está** na tela quando a página carrega: região viva anuncia
+**mudança**, e conteúdo que sempre esteve ali não mudou. Anunciá-lo faz o leitor
+de tela lê-lo **fora de ordem** — antes do conteúdo que lhe dá contexto, de modo
+que a pessoa ouve a consequência antes da causa.
+
+Isto vale como item de conferência nas Fases 11–16: **todo `Alert` que a tela
+renderiza já montado, e não em resposta a uma ação, leva `live={false}`.**
+
 ## Como isto entra na aplicação
 
 `src/index.css` importa `design-system/styles.css` **antes** das diretivas
