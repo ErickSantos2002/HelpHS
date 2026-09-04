@@ -13,7 +13,9 @@ Registrado em 19/08/2026 a partir de uma montagem real numa máquina Windows
 | PostgreSQL | `localhost:5432` (Docker) ou embutido | ver as duas rotas abaixo |
 | Redis | `localhost:6379` | Docker, ou o mini-servidor em `backend/scripts/mini_redis.py` |
 
-Login após os seeds: **`admin@healthsafety.com` / `Admin@123456`**.
+Login após os seeds: **`admin@healthsafety.com`**, com a senha que você mesmo
+definiu em `SEED_ADMIN_PASSWORD` — veja abaixo. Não há senha padrão: sem a
+variável o seed não cria admin nenhum, e é assim de propósito.
 
 ## Rota A — com Docker (a padrão)
 
@@ -54,8 +56,17 @@ Usada quando a máquina não tem Docker nem acesso à senha do PostgreSQL nativo
    export DATABASE_URL='postgresql+asyncpg://postgres:@127.0.0.1:<porta>/helpdesk_db'
    export APP_ENV=testing REDIS_URL='redis://127.0.0.1:6379/0' UPLOAD_DIR="$TMP/helphs-uploads"
    # Sem esta variável o seed NÃO cria o admin e não há como logar. A senha
-   # saiu do código de propósito (ver decisoes-e-regras.md); escolha a sua.
-   export SEED_ADMIN_PASSWORD='Admin@123456'
+   # saiu do código de propósito (ver decisoes-e-regras.md), e não há valor
+   # padrão para cair: ESCOLHA A SUA. Mínimo 8 caracteres, com maiúscula e
+   # número.
+   #
+   # Guarde-a em `backend/.env.local`, que o .gitignore cobre, e carregue a
+   # cada sessão do terminal com a linha abaixo. Não use `backend/.env` para
+   # isto: aquele arquivo é lido sozinho pelo app e pode estar apontando para o
+   # banco de produção (ver a seção de diagnóstico no fim deste documento).
+   #
+   #     echo "SEED_ADMIN_PASSWORD=<a sua senha>" >> .env.local
+   set -a; . ./.env.local; set +a
    python -m alembic upgrade head && python -m app.seeds
    python -m uvicorn app.main:app --host 127.0.0.1 --port 8001
    ```
@@ -123,8 +134,11 @@ chamado, reproduzir um bug com dado de verdade). O procedimento:
 ```bash
 curl http://localhost:8001/api/v1/health
 # {"status":"ok",...}
+# A senha vem da variável, nunca escrita aqui — aspas DUPLAS no -d para o
+# shell expandir. Se der "senha inválida", confira se a variável está no
+# terminal: `echo "${SEED_ADMIN_PASSWORD:?nao definida}"`.
 curl -X POST http://localhost:5173/api/v1/auth/login \
   -H "Content-Type: application/json" \
-  -d '{"email":"admin@healthsafety.com","password":"Admin@123456"}'
+  -d "{\"email\":\"admin@healthsafety.com\",\"password\":\"$SEED_ADMIN_PASSWORD\"}"
 # deve devolver access_token — prova o caminho front → proxy → API → banco
 ```
