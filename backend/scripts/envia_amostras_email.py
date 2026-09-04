@@ -45,7 +45,8 @@ Uso:
     python -m scripts.envia_amostras_email eu@empresa.com --env .env.local
 
 Lê SMTP_* do `.env` do backend, ou das variáveis de ambiente quando não houver
-arquivo. **Recusa rodar com APP_ENV=production**: as amostras têm texto de teste
+arquivo. **Recusa rodar em produção** — e reconhece `production` e `prod`, em
+qualquer caixa, do mesmo jeito que o app reconhece: as amostras têm texto de teste
 e não devem sair pelo remetente de produção.
 
 O nome do arquivo importa. Este exemplo já sugeriu `../.env.dev`, e esse nome
@@ -72,7 +73,7 @@ from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
 
-from app.core.config import Settings  # noqa: E402
+from app.core.config import _NOMES_DE_PRODUCAO, Settings  # noqa: E402
 from app.services.email import send_email  # noqa: E402
 from app.services.email_layout import Mensagem, em_html, em_texto  # noqa: E402
 
@@ -269,10 +270,19 @@ def main() -> None:
 
     env, origem = ler_env(args.env or PADRAO_ENV, exigido=args.env is not None)
 
-    ambiente = env.get("APP_ENV", os.environ.get("APP_ENV", "development"))
-    if ambiente == "production":
+    # `.strip().lower()` e a comparacao contra o conjunto do app, e nao contra o
+    # literal "production": o app aceita "prod" tambem e ignora caixa e espaco
+    # (`_normaliza_app_env`, em app/core/config.py), entao a comparacao crua que
+    # estava aqui deixava passar APP_ENV=prod, PROD e " production ". A guarda
+    # prometia mais do que entregava justamente no unico caso que ela existe para
+    # impedir.
+    #
+    # A constante e importada de la, e nao repetida aqui, porque duas listas de
+    # nomes de producao mantidas a mao sao duas listas que voltam a divergir.
+    ambiente = env.get("APP_ENV", os.environ.get("APP_ENV", "development")).strip().lower()
+    if ambiente in _NOMES_DE_PRODUCAO:
         sys.exit(
-            "ERRO: APP_ENV=production. Este script manda texto de AMOSTRA e nao deve\n"
+            f"ERRO: APP_ENV={ambiente}. Este script manda texto de AMOSTRA e nao deve\n"
             "sair pelo remetente de producao. Aponte --env para um arquivo de\n"
             "desenvolvimento, ou rode com APP_ENV=development."
         )
