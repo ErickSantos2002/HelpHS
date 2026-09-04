@@ -1,6 +1,6 @@
 import { useState } from "react";
 import { Outlet } from "react-router-dom";
-import { Toaster } from "sonner";
+import { AppToaster } from "../ui/AppToaster";
 import { Sidebar } from "./Sidebar";
 import { Topbar } from "./Topbar";
 
@@ -34,13 +34,7 @@ export function AppLayout() {
         </main>
       </div>
 
-      <Toaster
-        theme="dark"
-        position="top-right"
-        richColors
-        closeButton
-        toastOptions={{ duration: 4000 }}
-      />
+      <AppToaster />
     </div>
   );
 }
