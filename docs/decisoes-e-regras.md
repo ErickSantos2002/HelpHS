@@ -301,6 +301,35 @@ teste prendendo essa separação.
 O vocabulário das notificações passou a ser **"chamado"**, não "ticket", para
 bater com o que a interface sempre disse.
 
+### O e-mail tem a cara da empresa
+
+Desde 04/09/2026 todo e-mail sai em **texto e HTML na mesma mensagem**
+(`multipart/alternative`). A parte de texto não é rascunho: filtro de spam
+penaliza HTML sem alternativa, e gateway corporativo às vezes entrega só ela.
+As duas saem da mesma `Mensagem`, em `app/services/email_layout.py`, justamente
+para não divergirem.
+
+Três decisões desse layout não são estéticas e não devem ser "corrigidas":
+
+- **O botão não usa o azul da marca.** Branco sobre `#1f89ca` dá 3,83:1 e
+  reprova o AA. O botão usa `#1a71a8` (5,29:1). A faixa do topo fica com o azul
+  da marca porque ali o texto é grande e negrito, onde o limiar é 3:1 — e por
+  isso mesmo não cabe rótulo pequeno sobre ela.
+- **Marca tipográfica, não imagem.** O logo do projeto é PNG com transparência e
+  tinta escura: onde o cliente inverte cores à força, o fundo escurece e os
+  pixels não, e a marca some. E 75 KB viram ~100 KB em base64, estourando
+  sozinhos o corte de ~102 KB do Gmail, que esconde tudo abaixo — inclusive o
+  botão.
+- **Tabela, estilo inline e botão em célula.** O Outlook renderiza com o motor
+  do Word: não conhece flex, grid nem `max-width`, e no `<a>` ignora padding e
+  background. Nenhuma dessas quebras aparece abrindo o arquivo no navegador.
+
+**Risco conhecido:** a `fastapi-mail` declara `Content-Transfer-Encoding:
+base64` nos contêineres `multipart`, o que a RFC 2045 §6.4 não permite. Na
+prática os clientes ignoram, mas é o primeiro suspeito se alguma caixa mostrar
+o e-mail como código-fonte. O conserto seria trocar a camada de envio, e não
+vale sem evidência de quebra real.
+
 ### O que isto NÃO desligou
 
 Os e-mails de conta continuam saindo para todo mundo, inclusive técnico e admin:
