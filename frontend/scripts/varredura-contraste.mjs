@@ -27,6 +27,31 @@
  * deste arquivo — e os casos de controle existem porque, sem eles, "não conta"
  * e "não vê" são indistinguíveis.
  *
+ *
+ * DIVIDA CONHECIDA, e ela nao tem caso de prova porque nao e observavel hoje:
+ * quando um ramo tem DUAS classes de cor de texto de mesma especificidade, o
+ * `vigente()` usa `find()` e mede a PRIMEIRA da lista. A varredura irma, do
+ * ChamadosHS, mede a ULTIMA. **Nenhum dos dois criterios e o do Tailwind**: ali
+ * vence a utilidade que sai depois no CSS GERADO, cuja ordem e interna ao
+ * Tailwind e nao tem relacao com a ordem no atributo `class`.
+ *
+ * Agravante desta implementacao: o modelo de ramos monta `estatico + " " +
+ * alternativa`, sempre acrescentando no fim. Isso PERDE a ordem original do
+ * template — se a interpolacao vinha antes do estatico, o ramo inverte a ordem
+ * e o `find()` mede a classe errada.
+ *
+ * O contraexemplo veio do ChamadosHS, onde a regra e a inversa:
+ *
+ *   bg-danger text-white ${cond && "text-conteudo"}
+ *
+ * Com "ultima vence", o ramo cheio nao tem par e so o ramo VAZIO expoe o
+ * `text-white` sobre `bg-danger` a 3,76:1 — par que a tela renderiza quando a
+ * condicao e falsa. Por isso a alternativa vazia e necessaria LA e inerte AQUI.
+ *
+ * Procurado no HelpHS: **zero** templates com cor de texto no estatico E em
+ * interpolacao. Divida documentada, nao defeito vivo — mas quem mexer nisto
+ * precisa saber que os dois criterios sao chute.
+ *
  * A lição de método, custe o que custar repetir: **as doze foram achadas por
  * acidente ou por alguém procurando de propósito, nenhuma por leitura do
  * código**. Três delas transformavam reprovação em aprovação.
