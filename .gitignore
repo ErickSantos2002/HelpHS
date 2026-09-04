@@ -3,9 +3,20 @@ CLAUDE.md
 .claude/
 
 # Environment
+#
+# `.env.*` nao tem barra, entao vale em QUALQUER pasta: pega `.env.dev`,
+# `.env.staging`, `.env.producao` na raiz e em qualquer subdiretorio. A excecao
+# logo abaixo devolve o `.env.example`, que e o unico que deve ser versionado.
+#
+# Antes daqui so `.env` e `.env.local` estavam cobertos, e a RAIZ era o buraco:
+# o docstring do envia_amostras_email.py chegou a sugerir `--env ../.env.dev`,
+# que a partir de backend/ aponta exatamente para ela. Quem seguisse o exemplo
+# ficava com a credencial de envio no `git status`, esperando um `git add .`.
 .env
 .env.local
 .env.*.local
+.env.*
+!.env.example
 
 # JWT Keys
 keys/
