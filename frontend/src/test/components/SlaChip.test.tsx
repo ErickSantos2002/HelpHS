@@ -124,7 +124,7 @@ describe("SlaChip — Fase 9: as tintas saem da paleta crua", () => {
     // crua do Tailwind, fora do sistema de tokens, com a razão de contraste
     // nunca medida. Hoje são os pares `tint`/`on-tint` da E2 e da E8.
     const { container } = render(
-      <SlaChip label="Resposta" dueAt={emHoras(3)} breached={false} {...props} />,
+      <SlaChip label="Resposta" dueAt={emHoras(3)} {...props} />,
     );
 
     const chip = container.querySelector("span[class]")!;
