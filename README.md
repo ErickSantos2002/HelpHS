@@ -74,8 +74,9 @@ cd frontend && npm ci && npm run dev     # http://localhost:5173
 
 Login dos seeds: `admin@healthsafety.com`, com a senha vinda de
 `SEED_ADMIN_PASSWORD` — exporte a variável **antes** de subir o backend, senão
-o seed pula a criação do admin (em dev usa-se `Admin@123456`, que é o default
-dos testes e2e). Em produção a variável não deve existir.
+o seed pula a criação do admin. Escolha a sua (mínimo 8 caracteres, com
+maiúscula e número): os testes e2e não têm mais valor fixo, o workflow gera uma
+senha por execução. Em produção a variável não deve existir.
 
 Sem Docker na máquina? A receita alternativa (Postgres embutido, mini-Redis)
 está em [desenvolvimento-local.md](desenvolvimento-local.md).

@@ -46,11 +46,11 @@ jobs:
       # `testing` desliga o rate limit. A suíte faz ~16 logins do mesmo IP
       # contra um limite de 5 por 15 minutos — sem isto ela morre no sexto.
       APP_ENV: testing
-      # `app.seeds` não cria mais o admin sem esta variável — a senha saiu do
-      # código para não nascer conta conhecida no banco real. Aqui o banco é o
-      # serviço efêmero do job, e o valor tem de bater com o default do
-      # `frontend/e2e/helpers.ts` (há teste guardando os dois lados).
-      SEED_ADMIN_PASSWORD: Admin@123456
+      # SEED_ADMIN_PASSWORD não mora aqui: é gerada por execução no primeiro
+      # passo e exportada via $GITHUB_ENV, junto com a ADMIN_PASSWORD que o
+      # Playwright usa. Enquanto era literal, a senha do admin de teste ficava
+      # escrita em repositório público — e escrita DUAS vezes, porque o
+      # `frontend/e2e/helpers.ts` tinha de repetir o mesmo valor.
       DATABASE_URL: postgresql+asyncpg://postgres:postgres@localhost:5432/helphs
       REDIS_URL: redis://localhost:6379/0
       FRONTEND_URL: http://localhost:5173
@@ -62,6 +62,26 @@ jobs:
     steps:
       - name: Checkout
         uses: actions/checkout@v4
+
+      # Uma senha por execução, nunca um literal no repositório. Os dois lados
+      # saem do MESMO valor: `SEED_ADMIN_PASSWORD` é o que o `app.seeds` grava
+      # no banco efêmero, e `ADMIN_PASSWORD` é o que o Playwright digita no
+      # login — antes eles batiam por serem o mesmo texto escrito em dois
+      # arquivos, que é o defeito que isto remove.
+      #
+      # O sufixo `A1` não é enfeite: a política de senha exige ao menos uma
+      # maiúscula e um dígito (`app/schemas/user.py`, `password_strength`), e o
+      # hex do openssl é só minúscula e número. Sem ele, o seed falharia em
+      # metade das execuções por validação, não por defeito de teste.
+      #
+      # `add-mask` para o valor nunca aparecer no log, nem se algum passo
+      # resolver imprimir o ambiente.
+      - name: Senha do admin de teste, gerada por execução
+        run: |
+          SENHA="E2E-$(openssl rand -hex 16)-A1"
+          echo "::add-mask::$SENHA"
+          echo "SEED_ADMIN_PASSWORD=$SENHA" >> "$GITHUB_ENV"
+          echo "ADMIN_PASSWORD=$SENHA" >> "$GITHUB_ENV"
 
       # ── Backend ──────────────────────────────────────────────
       - name: Setup Python 3.13

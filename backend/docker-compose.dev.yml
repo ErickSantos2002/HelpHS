@@ -53,8 +53,15 @@ services:
     restart: unless-stopped
     command: server /data --console-address ":9001"
     environment:
-      MINIO_ROOT_USER: ${MINIO_ACCESS_KEY:-minioadmin}
-      MINIO_ROOT_PASSWORD: ${MINIO_SECRET_KEY:-minioadmin123}
+      # Sem valor de reserva, e o `:?` faz o compose recusar a subir com a
+      # mensagem abaixo. Os defaults antigos (`minioadmin` / `minioadmin123`)
+      # eram pior que inuteis: alem de credencial conhecida escrita em
+      # repositorio publico, eles nem funcionavam junto com o app — o backend
+      # le MINIO_ACCESS_KEY/MINIO_SECRET_KEY do proprio .env, entao quem nao
+      # definisse as variaveis subia um MinIO com uma senha e um backend
+      # tentando entrar com outra. Falhar no `up` diz isso na hora.
+      MINIO_ROOT_USER: "${MINIO_ACCESS_KEY:?defina MINIO_ACCESS_KEY no backend/.env — veja .env.example}"
+      MINIO_ROOT_PASSWORD: "${MINIO_SECRET_KEY:?defina MINIO_SECRET_KEY no backend/.env — veja .env.example}"
     ports:
       - "9000:9000"   # API S3
       - "9001:9001"   # Console Web

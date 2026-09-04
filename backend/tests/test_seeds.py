@@ -226,23 +226,69 @@ def test_o_codigo_dos_seeds_nao_carrega_senha_nenhuma():
     assert "password" not in seeds.ADMIN_USER
 
 
-def test_o_workflow_de_e2e_define_a_senha_que_o_playwright_espera():
+def test_o_workflow_gera_a_senha_do_admin_e_exporta_para_os_dois_lados():
     """
-    Acoplamento novo, criado por esta correção: sem `SEED_ADMIN_PASSWORD`, o
-    `app.seeds` não cria admin — e o Playwright faz login com ele.
+    Substitui o acoplamento antigo, em que o literal do workflow tinha de bater
+    com o default escrito no `helpers.ts`.
 
-    O valor no workflow tem de bater com o default do `helpers.ts`. Se um lado
-    mudar sozinho, o e2e quebra no login sem dizer por quê; este teste diz.
-    Espelha o `test_as_credenciais_batem_com_o_helpers_do_playwright`.
+    Aquele desenho fechava o buraco do banco real e deixava outro aberto: a
+    senha do admin de teste seguia escrita neste repositório — e escrita DUAS
+    vezes, em arquivos que só um teste mantinha iguais. O repositório era
+    público.
+
+    A invariante de hoje é outra. O workflow gera **um** valor por execução e o
+    exporta com os dois nomes que os dois lados leem: `SEED_ADMIN_PASSWORD`,
+    que o `app.seeds` usa para criar o admin, e `ADMIN_PASSWORD`, que o
+    Playwright digita no login. Exportar só um quebra o e2e no login sem dizer
+    por quê; este teste diz.
     """
+    import re
     from pathlib import Path
 
     raiz = Path(__file__).resolve().parents[2]
     workflow = (raiz / ".github" / "workflows" / "e2e.yml").read_text(encoding="utf-8")
+
+    # 1. Nenhum literal voltou. `SEED_ADMIN_PASSWORD: <valor>` em bloco `env:`
+    #    é exatamente a forma que saiu daqui.
+    assert not re.search(r"^\s*SEED_ADMIN_PASSWORD:\s*\S", workflow, re.M), (
+        "SEED_ADMIN_PASSWORD voltou a ser valor fixo no workflow — "
+        "ela precisa ser gerada por execução"
+    )
+
+    # 2. Os dois nomes saem da MESMA variável de shell. Sem isto, o seed grava
+    #    uma senha e o Playwright digita outra.
+    exportados = dict(re.findall(r'echo\s+"(\w+)=\$(\w+)"\s*>>\s*"\$GITHUB_ENV"', workflow))
+    for nome in ("SEED_ADMIN_PASSWORD", "ADMIN_PASSWORD"):
+        assert nome in exportados, f"o workflow não exporta {nome} para o $GITHUB_ENV"
+    assert exportados["SEED_ADMIN_PASSWORD"] == exportados["ADMIN_PASSWORD"], (
+        "os dois lados têm de sair do mesmo valor gerado, e estão saindo de "
+        f"variáveis diferentes: {exportados['SEED_ADMIN_PASSWORD']} e "
+        f"{exportados['ADMIN_PASSWORD']}"
+    )
+
+
+def test_o_helpers_do_playwright_nao_tem_senha_de_reserva():
+    """
+    A senha do admin de teste tem de vir do ambiente, sem valor de reserva.
+
+    Um `?? "algo"` aqui traz de volta o defeito inteiro: além de reescrever a
+    credencial no repositório, ele faz o e2e falhar como "credencial inválida"
+    quando a variável não chega — escondendo a causa real atrás de um sintoma
+    que parece outra coisa.
+    """
+    import re
+    from pathlib import Path
+
+    raiz = Path(__file__).resolve().parents[2]
     helpers = (raiz / "frontend" / "e2e" / "helpers.ts").read_text(encoding="utf-8")
 
-    linha = next(x for x in workflow.splitlines() if "SEED_ADMIN_PASSWORD:" in x)
-    senha = linha.split(":", 1)[1].strip()
+    assert "Admin@123456" not in helpers
 
-    assert senha, "o workflow precisa definir a senha, senão não há admin para logar"
-    assert senha in helpers, "a senha do workflow não bate com o default do helpers.ts"
+    bloco = re.search(r"admin:\s*\{(.*?)\}", helpers, re.S)
+    assert bloco, "não achei o bloco `admin` em helpers.ts"
+    linha = next(x for x in bloco.group(1).splitlines() if "password" in x)
+
+    assert "ADMIN_PASSWORD" in linha, f"a senha do admin deixou de vir do ambiente: {linha.strip()}"
+    assert (
+        "??" not in linha
+    ), f"a senha do admin voltou a ter valor de reserva escrito no arquivo: {linha.strip()}"
