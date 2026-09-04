@@ -37,6 +37,19 @@ provavelmente falha em vários.
 como código, o `Content-Transfer-Encoding` deixou de ser risco teórico e virou
 defeito com evidência — anote em qual cliente.
 
+Quem pode receber
+-----------------
+`AMOSTRAS_DOMINIOS_PERMITIDOS` é **obrigatória**: uma lista de domínios separada
+por vírgula. Endereço fora dela recusa a rodada inteira, antes de mandar
+qualquer coisa. Sem a variável o script não roda — allowlist que aceita tudo
+quando está vazia não é allowlist.
+
+    $env:AMOSTRAS_DOMINIOS_PERMITIDOS = "gmail.com,healthsafetytech.com"
+
+O risco que ela fecha é o do endereço digitado errado: as amostras têm botão,
+saudação e texto de conta, e saem de um domínio da empresa. Para quem recebe sem
+esperar, isso se parece com phishing.
+
 Uso:
 
     python -m scripts.envia_amostras_email eu@empresa.com
@@ -90,6 +103,7 @@ _CHAVES = (
     "SMTP_FROM_EMAIL",
     "SMTP_REPLY_TO",
     "FRONTEND_URL",
+    "AMOSTRAS_DOMINIOS_PERMITIDOS",
 )
 
 _TOKEN = "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.AMOSTRA.naoUseIsto"
@@ -131,6 +145,58 @@ def mascarar(segredo: str) -> str:
     if len(segredo) <= 12:
         return f"({len(segredo)} chars)"
     return f"{segredo[:6]}…{segredo[-4:]} ({len(segredo)} chars)"
+
+
+def dominios_permitidos(env: dict[str, str]) -> frozenset[str]:
+    """Os domínios que podem receber amostra, em minúsculas.
+
+    **Fecha por padrão**: sem a variável, o script não roda. Uma allowlist que
+    aceita tudo quando está vazia não é allowlist, é um comentário — e o modo de
+    falha que ela existe para impedir é justamente o silencioso, o endereço
+    digitado errado numa linha de comando que ninguém revisa.
+    """
+    bruto = env.get(
+        "AMOSTRAS_DOMINIOS_PERMITIDOS",
+        os.environ.get("AMOSTRAS_DOMINIOS_PERMITIDOS", ""),
+    )
+    dominios = frozenset(d.strip().lower().lstrip("@") for d in bruto.split(",") if d.strip())
+    if not dominios:
+        sys.exit(
+            "ERRO: AMOSTRAS_DOMINIOS_PERMITIDOS nao definida.\n\n"
+            "Este script manda e-mail DE VERDADE. Um endereco digitado errado recebe\n"
+            "cinco amostras com botao, saudacao e texto de conta, saindo de um dominio\n"
+            "da empresa -- para quem recebe, isso se parece com phishing. Diga quais\n"
+            "dominios podem receber:\n\n"
+            '    PowerShell:  $env:AMOSTRAS_DOMINIOS_PERMITIDOS = "gmail.com,healthsafetytech.com"\n'
+            "    bash:        export AMOSTRAS_DOMINIOS_PERMITIDOS=gmail.com,healthsafetytech.com\n"
+        )
+    return dominios
+
+
+def confere_destinos(destinos: list[str], permitidos: frozenset[str]) -> None:
+    """Recusa a rodada INTEIRA se algum destino estiver fora da allowlist.
+
+    Tudo ou nada de propósito: mandar para os válidos e reclamar do inválido
+    depois deixaria a pessoa achando que a rodada foi a que ela pediu, e é a
+    conferência em cliente que dependeria dessa suposição errada.
+    """
+    recusados: list[tuple[str, str]] = []
+    for destino in destinos:
+        _, arroba, dominio = destino.rpartition("@")
+        dominio = dominio.strip().lower()
+        if not arroba or not dominio:
+            recusados.append((destino, "nao parece um endereco de e-mail"))
+        elif dominio not in permitidos:
+            recusados.append((destino, f"dominio '{dominio}' fora da lista"))
+
+    if recusados:
+        linhas = "\n".join(f"    {d:<38} {motivo}" for d, motivo in recusados)
+        sys.exit(
+            "ERRO: destino fora da allowlist. NADA foi enviado.\n\n"
+            f"{linhas}\n\n"
+            f"Permitidos agora: {', '.join(sorted(permitidos))}\n"
+            "Se o dominio for legitimo, acrescente-o a AMOSTRAS_DOMINIOS_PERMITIDOS."
+        )
 
 
 def _amostras(base: str) -> dict[str, tuple[str, Mensagem]]:
@@ -287,6 +353,13 @@ def main() -> None:
             "desenvolvimento, ou rode com APP_ENV=development."
         )
 
+    # Antes de qualquer coisa cara: os dois portoes que decidem SE pode enviar.
+    # A allowlist vem depois da guarda de producao porque um .env de producao e
+    # erro mais grave do que um destino errado, e o erro mais grave deve aparecer
+    # primeiro.
+    permitidos = dominios_permitidos(env)
+    confere_destinos(args.destinos, permitidos)
+
     quais = [q.strip() for q in args.so.split(",") if q.strip()] or list(amostras)
     desconhecidas = [q for q in quais if q not in amostras]
     if desconhecidas:
@@ -317,6 +390,7 @@ def main() -> None:
     print(f"senha     : {mascarar(settings.smtp_password)}")
     print(f"remetente : {settings.smtp_from_name} <{settings.smtp_from_email}>")
     print(f"links para: {settings.frontend_url}")
+    print(f"dominios  : {', '.join(sorted(permitidos))}")
     print(f"amostras  : {', '.join(quais)}")
 
     if not settings.smtp_host:
