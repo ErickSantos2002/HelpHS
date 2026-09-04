@@ -27,9 +27,16 @@
  * deste arquivo — e os casos de controle existem porque, sem eles, "não conta"
  * e "não vê" são indistinguíveis.
  *
- * A lição de método, custe o que custar repetir: **as onze foram achadas por
+ * A lição de método, custe o que custar repetir: **as doze foram achadas por
  * acidente ou por alguém procurando de propósito, nenhuma por leitura do
  * código**. Três delas transformavam reprovação em aprovação.
+ *
+ * A décima segunda é a mais instrutiva das doze, e veio da sessão do
+ * ChamadosHS: **fechar a armadilha 4 abriu o buraco inverso**. As duas puxam
+ * para lados opostos — uma inventa par entre ramos exclusivos, a outra apaga
+ * par entre o estático e o ramo —, e uma correção que só resolva a que está
+ * doendo hoje reabre a outra na próxima passagem. Por isso as duas direções
+ * vivem em prova, lado a lado, e nenhuma pode ser removida sozinha.
  *
  * 1. FILTRAR DIRETÓRIO. Olhar só `pages/` perde o que mora em primitivo e em
  *    casca — e é justamente o que aparece em toda tela. Os três piores achados
@@ -260,6 +267,9 @@ function corDe(alvo, tema) {
 
 // ── leitura do JSX ────────────────────────────────────────────────────
 
+/** Teto de combinações antes de cair no modo linear (armadilha 12). */
+const LIMITE_RAMOS = 64;
+
 /**
  * Todo literal de string do arquivo — não só os de `className=` (armadilha 7).
  * Cada literal é uma unidade de pareamento (armadilha 4): classes que estão em
@@ -337,11 +347,69 @@ function literaisDe(texto) {
         estatico += texto[j];
         j++;
       }
-      // O template sem as interpolações é um literal; o conteúdo de cada
-      // interpolação é código, e volta pelo scanner (armadilha 4).
-      saida.push({ texto: estatico, indice: i });
-      for (const dentro of interpolacoes) {
-        for (const l of literaisDe(dentro)) saida.push({ ...l, indice: i });
+      // ARMADILHA 12: o falso NEGATIVO que fechar a armadilha 4 abriu.
+      //
+      // A versão anterior emitia o estático como um literal e cada interpolação
+      // como outro. Isso fecha o falso positivo — dois ramos de um ternário não
+      // coexistem em pixel nenhum — e abre o inverso: uma classe do estático
+      // NUNCA encontrava uma classe de ramo, embora o estático valha em TODOS
+      // os ramos. O caso real:
+      //
+      //   `... text-white ... ${ok ? "bg-primary ..." : "bg-danger ..."}`
+      //
+      // O `text-white` é do estático, o `bg-primary` é de um ramo, e o par
+      // existe na tela. Achado pela sessão do ChamadosHS, cuja catraca chegou a
+      // ZERO com um defeito destes vivo — encontrado por leitura, não por
+      // varredura.
+      //
+      // O modelo certo é por RAMO: um ramo é o estático inteiro mais UMA
+      // alternativa de cada interpolação. Pareia dentro do ramo; nunca entre
+      // alternativas da mesma interpolação.
+      //
+      // Três detalhes que o modelo precisa acertar:
+      //
+      // 1. Interpolações DIFERENTES não são ramos uma da outra — `cn(a && "x",
+      //    b && "y")` aplica as duas quando as duas condições valem. Entre
+      //    interpolações é produto cartesiano; só dentro de uma é exclusão.
+      // 2. A alternativa VAZIA de `cond && "classe"` foi considerada e ficou de
+      //    fora: acrescentar um ramo só adiciona pares, nunca remove o ramo que
+      //    já tem o par, então para detecção ela é inerte. Descoberto por
+      //    mutação — a prova que a defendia passava com a lógica removida.
+      // 3. Acima de LIMITE_RAMOS combinações, cai para o modo LINEAR — o
+      //    estático mais uma alternativa por vez. Pode PERDER par; nunca
+      //    inventa. Numa catraca, acusar o que não existe é pior que deixar
+      //    passar: destrói a confiança na ferramenta.
+      const alternativas = interpolacoes.map((dentro) => {
+        const dentroLiterais = literaisDe(dentro).map((l) => l.texto);
+        if (dentroLiterais.length === 0) return [""];
+        // Uma string só é `cond && "classe"`, e a classe pode não aparecer.
+        // A alternativa VAZIA correspondente foi considerada e NÃO entra:
+        // acrescentar um ramo só pode ADICIONAR pares, nunca remover o ramo
+        // que já tem o par. Para detecção ela é inerte, e nenhuma prova
+        // consegue distingui-la — lógica que um teste não prende é passivo.
+        return dentroLiterais;
+      });
+
+      if (alternativas.length === 0) {
+        saida.push({ texto: estatico, indice: i });
+      } else {
+        const combinacoes = alternativas.reduce((acc, alt) => acc * alt.length, 1);
+        if (combinacoes <= LIMITE_RAMOS) {
+          let ramos = [estatico];
+          for (const alt of alternativas) {
+            const proximos = [];
+            for (const r of ramos) for (const a of alt) proximos.push(r + " " + a);
+            ramos = proximos;
+          }
+          for (const r of ramos) saida.push({ texto: r, indice: i });
+        } else {
+          saida.push({ texto: estatico, indice: i });
+          for (const alt of alternativas) {
+            for (const a of alt) {
+              if (a) saida.push({ texto: estatico + " " + a, indice: i });
+            }
+          }
+        }
       }
       i = j + 1;
       continue;
@@ -582,6 +650,25 @@ const _ = (`,
   {
     nome: "12. CONTROLE — par real dentro de interpolação com chave é achado",
     jsx: `<b className={\`p-1 \${cn({ a }, "bg-danger text-white")}\`}>x</b>`,
+    espera: 2,
+  },
+  {
+    // ARMADILHA 12 — os três casos da direção "tem de acusar". O caso 3 acima é
+    // o controle da direção oposta, e os dois lados precisam viver juntos:
+    // fechar um abre o outro, e foi o que aconteceu entre a Fase 7 e a 15 do
+    // ChamadosHS, de onde este defeito veio.
+    nome: "14. estático + ramo — a classe de fora vale DENTRO de cada ramo",
+    jsx: `<b className={\`text-white \${a ? "bg-primary" : "px-2"}\`}>x</b>`,
+    espera: 2,
+  },
+  {
+    nome: "15. o produto é cartesiano — o par pode estar em qualquer combinação",
+    jsx: `<b className={\`px-2 \${a ? "px-1" : "bg-primary"} \${b ? "text-white" : "px-3"}\`}>x</b>`,
+    espera: 2,
+  },
+  {
+    nome: "16. `cond && classe` — o conteúdo da interpolação segue pareando entre si",
+    jsx: `<b className={\`px-2 \${a && "bg-primary text-white"}\`}>x</b>`,
     espera: 2,
   },
 ];
