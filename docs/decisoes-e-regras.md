@@ -278,6 +278,29 @@ lado do `_IN_APP_ONLY` que já silenciava a pesquisa de satisfação para todos.
 São dois filtros independentes: um olha o **tipo** da notificação, o outro olha
 **quem recebe**.
 
+### O e-mail leva ao chamado
+
+Levantado em 04/09/2026: **doze dos catorze** e-mails de notificação chegavam
+sem link. O `ticket_id` sempre esteve no `data` da notificação — as catorze
+chamadas o passam — e simplesmente não era usado. A pessoa lia que o chamado
+andou e tinha de entrar no sistema e procurar.
+
+Hoje o `notify()` monta o corpo com a mensagem **e** o endereço do chamado, e o
+assunto com o prefixo da casa e o protocolo:
+
+    [HelpHS] Chamado resolvido · HS-2026-0042
+
+O protocolo entra quando existe no `data`. Sem `ticket_id` ou sem
+`FRONTEND_URL`, o corpo sai só com a mensagem: **link inventado é pior que link
+ausente**.
+
+Nada disso vaza para o sininho. `title` e `message` continuam sendo gravados na
+`Notification` como sempre foram — o prefixo e o link são coisa de e-mail, e há
+teste prendendo essa separação.
+
+O vocabulário das notificações passou a ser **"chamado"**, não "ticket", para
+bater com o que a interface sempre disse.
+
 ### O que isto NÃO desligou
 
 Os e-mails de conta continuam saindo para todo mundo, inclusive técnico e admin:
