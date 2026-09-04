@@ -240,6 +240,56 @@ A média aparece no relatório, no card **Recomendação**, ao lado da Média CS
 > média simples, como foi pedido. Se um dia o número precisar ser comparável
 > com o de fora, a escala precisa começar em 0.
 
+## Notificações: quem recebe por e-mail
+
+Toda notificação aparece **no sininho, para todo mundo**. O que muda por papel é
+só o e-mail.
+
+| Quem recebe | Sininho | E-mail |
+|---|---|---|
+| Cliente | sim | **sim** — como sempre foi |
+| Técnico | sim | **não** |
+| Admin | sim | **não** |
+
+Decidido em 04/09/2026, a pedido da equipe. Técnico e admin passam o dia dentro
+do sistema e o sininho já os avisa; o e-mail virava ruído.
+
+Antes da mudança, o que chegava a staff eram **dois** eventos: ser designado a
+um chamado (`ticket_assigned`) e um cliente reabrir chamado sob sua
+responsabilidade (`ticket_updated`).
+
+As demais notificações dirigidas a staff — as duas do chat e a "Triagem
+concluída", que percorre **todos** os técnicos e admins ativos — nunca viraram
+e-mail, **mas por acidente**: elas não passam `settings` ao `notify()`, e sem
+esse argumento a função retorna antes de registrar qualquer envio. O filtro por
+papel também fecha essa armadilha. Hoje staff não recebe **por desenho**, e não
+porque alguém esqueceu um argumento que um dia pode ser "corrigido" — o que
+transformaria a triagem em um e-mail para a equipe inteira a cada chamado
+triado.
+
+**Para o cliente nada mudou, e isso foi decisão e não descuido.** Ele é
+justamente quem *não* vive aqui dentro: o e-mail é como fica sabendo que o
+chamado andou, e o aviso de encerramento é o que dá início ao prazo de
+reabertura de 5 dias úteis. Silenciá-lo trocaria um incômodo da equipe por um
+cliente sem resposta.
+
+A regra mora em `_SEM_EMAIL_POR_PAPEL`, em `app/services/notifications.py`, ao
+lado do `_IN_APP_ONLY` que já silenciava a pesquisa de satisfação para todos.
+São dois filtros independentes: um olha o **tipo** da notificação, o outro olha
+**quem recebe**.
+
+### O que isto NÃO desligou
+
+Os e-mails de conta continuam saindo para todo mundo, inclusive técnico e admin:
+
+- confirmação de e-mail no cadastro;
+- redefinição de senha;
+- aviso de "você já tem uma conta" (do cadastro neutro, quando ele entrar).
+
+Eles saem por `app/services/account_emails.py`, que não passa pelo `notify()` —
+são os únicos dois caminhos de envio do sistema inteiro, e mexer num não afeta o
+outro.
+
 ## Permissões
 
 ### Qual é a autoridade sobre "de qual empresa é este cliente"
