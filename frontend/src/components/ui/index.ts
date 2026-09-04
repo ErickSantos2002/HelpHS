@@ -28,6 +28,11 @@ export type { ModalProps } from "./Modal";
 export { Switch } from "./Switch";
 export type { SwitchProps } from "./Switch";
 
+// O seletor unico da Fase 8. FilterSelect, FormDropdown e SearchSelect
+// continuam exportados como involucros @deprecated; chamada nova usa este.
+export { Selector } from "./Selector";
+export type { SelectorProps, SelectorOption } from "./Selector";
+
 export { Select } from "./Select";
 export type { SelectProps, SelectOption } from "./Select";
 

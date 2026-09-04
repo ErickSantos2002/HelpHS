@@ -867,7 +867,23 @@ export function contarPorChave(achados) {
  * O degrau da rampa (`text-danger-700`) NAO entra: e outro token, medido, e o
  * `Avatar` o usa corretamente. So a cor cheia, sem sufixo.
  */
-const CHEIA_SEMANTICA = /(?<![\w:-])text-(danger|warning|success|info)(?![\w-])/g;
+/*
+ * O PREFIXO DE VARIANTE CONTA. A primeira versao desta chave tinha `:` no
+ * lookbehind e por isso NAO via `hover:text-danger` — cinco ocorrencias reais,
+ * uma delas no `TicketListPage`, que e tela desta fase. Contradizia a regra ja
+ * registrada na Fase 8: classe com prefixo de variante e chave PROPRIA, nao
+ * nota de rodape da classe sem prefixo. O hover tem o mesmo problema de
+ * contraste que o repouso.
+ *
+ * `fill-` e `stroke-` entram pelo mesmo motivo: um SVG pintado com a cor cheia
+ * de significado tem exatamente o defeito que a regra descreve.
+ *
+ * Achado pela sessao do ChamadosHS, que refez a propria contagem com fronteira
+ * dos dois lados e encontrou os DOIS erros possiveis: sobrando (ocorrencias em
+ * comentario, que aqui sao zero) e faltando (variantes com prefixo, cinco).
+ */
+const CHEIA_SEMANTICA =
+  /(?<![\w-])(?:[a-z-]+:)*(?:text|fill|stroke)-(danger|warning|success|info)(?![-\w])/g;
 
 export function cheiasSemanticas(raiz) {
   const achados = [];
@@ -893,11 +909,11 @@ export function contarCheiasPorArquivo(achados) {
 /**
  * Linha de base das cores cheias de significado usadas como texto.
  *
- * **24 ocorrencias em 11 arquivos**, medidas em 04/09/2026 — ANTES de qualquer
+ * **29 ocorrencias em 14 arquivos**, medidas em 04/09/2026 — ANTES de qualquer
  * conserto, por instrucao do operador: a chave entra primeiro, para que cada
  * tela migrada tenha de faze-la descer.
  *
- * Sete estao nas seis telas das Fases 11, 12 e 14 e saem agora; as dezessete
+ * Oito estao nas seis telas das Fases 11, 12 e 14 e saem agora; as vinte e uma
  * restantes saem na Fase 16.
  */
 const CHEIAS_CONHECIDAS = new Map([
@@ -908,10 +924,13 @@ const CHEIAS_CONHECIDAS = new Map([
   ['pages/dashboard/TechnicianDashboard.tsx', 2],
   ['pages/equipment/EquipmentPage.tsx', 1],
   ['pages/errors/ForbiddenPage.tsx', 1],
+  ['pages/kb/KBArticlePage.tsx', 1],
   ['pages/kb/KBFormPage.tsx', 3],
-  ['pages/notifications/NotificationsPage.tsx', 4],
-  ['pages/profile/ProfilePage.tsx', 4],
+  ['pages/kb/KBListPage.tsx', 1],
+  ['pages/notifications/NotificationsPage.tsx', 5],
+  ['pages/profile/ProfilePage.tsx', 5],
   ['pages/tickets/TicketFormPage.tsx', 2],
+  ['pages/tickets/TicketListPage.tsx', 1],
 ]);
 
 /** A catraca das cores cheias, com a mesma disciplina da outra: falha nos dois sentidos. */

@@ -121,6 +121,10 @@ export function TableHeaderCell({
 }: TableHeaderCellProps) {
   return (
     <th
+      // `scope="col"` amarra a celula a coluna inteira. Sem ele, um leitor de
+      // tela em tabela larga anuncia o valor sem dizer de que coluna ele e — e
+      // e a associacao cabecalho-celula que faz a tabela ser tabela.
+      scope="col"
       // `aria-sort` no `<th>` e o que anuncia a ordem: sem ele, a seta e
       // decoracao que so quem enxerga entende.
       aria-sort={

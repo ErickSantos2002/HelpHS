@@ -452,6 +452,13 @@ export function Selector({
         onKeyDown={aoTeclar}
         aria-invalid={error ? true : undefined}
         aria-describedby={error ? idErro : undefined}
+        // No `variant="filter"` o <label> NAO e renderizado (ver o fim deste
+        // arquivo): a barra de filtros nao tem espaco para rotulo visivel. Sem
+        // isto, passar `label` a um filtro nao dava nome a nada — o gatilho era
+        // anunciado so pelo proprio conteudo, e numa barra com quatro filtros os
+        // quatro se anunciavam pelo valor escolhido, sem dizer de que filtro se
+        // trata. No `variant="form"` o <label> existe e o `htmlFor` ja liga.
+        aria-label={filtro ? label : undefined}
         aria-haspopup="listbox"
         aria-expanded={aberto}
         aria-controls={aberto ? idPainel : undefined}
