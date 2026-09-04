@@ -6,7 +6,13 @@ The FastMail instance is created lazily so that missing SMTP config
 in development does not crash startup.
 """
 
-from fastapi_mail import ConnectionConfig, FastMail, MessageSchema, MessageType
+from fastapi_mail import (
+    ConnectionConfig,
+    FastMail,
+    MessageSchema,
+    MessageType,
+    MultipartSubtypeEnum,
+)
 from loguru import logger
 
 from app.core.config import Settings
@@ -51,12 +57,18 @@ async def send_email(
     subject: str,
     body: str,
     settings: Settings,
+    html: str | None = None,
 ) -> bool:
-    """
-    Send a plain-text email notification.
+    """Envia o e-mail; com `html`, manda texto e HTML na mesma mensagem.
 
-    Returns True on success, False if delivery failed (error is logged but
-    not re-raised so the caller is never blocked by email failures).
+    A parte de texto NÃO é rascunho da de HTML: filtro de spam penaliza HTML sem
+    alternativa, e gateway corporativo às vezes entrega só ela. Quem monta as
+    duas é o `email_layout`, a partir da mesma `Mensagem`, para não divergirem.
+
+    Sem `html`, sai só o texto — que é o caminho de quem ainda não migrou.
+
+    Devolve True quando o servidor aceitou. Falha é registrada e NÃO
+    re-levantada: quem chamou já fez o trabalho, e o e-mail é o acessório.
     """
     if not settings.smtp_from_email and not settings.smtp_user:
         logger.debug(f"SMTP not configured — skipping email to {to_email}")
@@ -64,6 +76,17 @@ async def send_email(
 
     try:
         mail = _get_mail_client(settings)
+        # `body` vira text/plain e `alternative_body` vira text/html, nessa
+        # ordem dentro do multipart/alternative — conferido na árvore MIME que a
+        # biblioteca monta, não deduzido da documentação.
+        duas_partes = (
+            {
+                "alternative_body": html,
+                "multipart_subtype": MultipartSubtypeEnum.alternative,
+            }
+            if html
+            else {}
+        )
         message = MessageSchema(
             subject=subject,
             recipients=[to_email],
@@ -72,6 +95,7 @@ async def send_email(
             # SMTP_REPLY_TO é opcional e nasce vazio. O MessageSchema recusa
             # None neste campo, e a montagem morreria antes de tentar entregar.
             reply_to=[settings.smtp_reply_to] if settings.smtp_reply_to else [],
+            **duas_partes,
         )
         await mail.send_message(message)
         logger.info(f"Email sent to {to_email}: {subject}")
