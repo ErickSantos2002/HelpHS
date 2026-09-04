@@ -53,6 +53,29 @@ const SELOS = [
 ] as const;
 const AVISOS = ["info", "success", "warning", "danger"] as const;
 
+/**
+ * Quantos blocos esta galeria mostra.
+ *
+ * É o **marcador de identidade** da página, publicado no DOM como
+ * `data-galeria`. Serve a duas checagens que a medição faz antes de capturar
+ * qualquer pixel, e que existem por dois incidentes distintos do mesmo dia:
+ *
+ * 1. **A página é a galeria?** O `galeria.html` é servido pelo mesmo servidor
+ *    de desenvolvimento que serve a aplicação, e um servidor subido ANTES do
+ *    arquivo existir devolve a 404 da SPA — com o mesmo CSS, o que faz o
+ *    canário de classes passar. Aquela vez só a espera pelo seletor caiu, por
+ *    tempo esgotado, e "tempo esgotado" não diz o que houve.
+ *
+ * 2. **É a galeria DESTE código?** A medição compara este número, lido do
+ *    navegador, com a constante lida do repositório. Servidor servindo pacote
+ *    velho mostra a galeria de antes, com os blocos de antes, e os dois
+ *    números divergem. Contar apenas os blocos do próprio DOM não pegaria
+ *    nada: pacote velho é coerente consigo mesmo.
+ *
+ * Ao acrescentar um `Bloco`, ajuste este número — a suíte cobra.
+ */
+export const AMOSTRAS = 13;
+
 /** `texto` cobra 4,5:1; `grafico` cobra 3:1 (WCAG 1.4.11). */
 function Bloco({
   nome,
@@ -86,7 +109,7 @@ export function Galeria() {
   }
 
   return (
-    <div className="min-h-screen bg-surface-base p-6">
+    <div className="min-h-screen bg-surface-base p-6" data-galeria={AMOSTRAS}>
       <header className="mb-8 flex items-center justify-between">
         <h1 className="text-lg font-semibold text-conteudo-heading">
           Galeria de componentes — Checkpoint 2

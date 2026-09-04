@@ -1,4 +1,33 @@
+import { readFileSync } from "node:fs";
+import { dirname, resolve } from "node:path";
+import { fileURLToPath } from "node:url";
+
 import { expect, test } from "@playwright/test";
+
+/**
+ * Quantos blocos a galeria DESTE código declara, lido do repositório.
+ *
+ * Lido do texto da fonte, e não importado: importar o componente arrastaria
+ * React e a árvore inteira para dentro do processo do Playwright, sem ganho —
+ * o que se quer aqui é um número, e ele tem de vir do disco, não do navegador.
+ * É essa origem que faz a comparação valer: o navegador diz o que está
+ * servindo, o disco diz o que deveria estar.
+ */
+const AMOSTRAS = (() => {
+  const fonte = readFileSync(
+    resolve(dirname(fileURLToPath(import.meta.url)), "../src/galeria/Galeria.tsx"),
+    "utf-8",
+  );
+  const m = fonte.match(/export const AMOSTRAS = (\d+);/);
+  if (!m) {
+    throw new Error(
+      "AMOSTRAS não encontrada em src/galeria/Galeria.tsx — o marcador da " +
+        "galeria saiu ou mudou de forma. Sem ele não há como distinguir a " +
+        "galeria de uma 404, e a medição não pode rodar.",
+    );
+  }
+  return Number(m[1]);
+})();
 
 /**
  * A galeria, medida no navegador de verdade.
@@ -187,12 +216,70 @@ const CANARIO = `(() => {
   return Array.from(alvo).filter((c) => !achadas.has(c));
 })()`;
 
+/**
+ * Controle negativo do marcador.
+ *
+ * Sem ele, "o marcador identifica a galeria" e "o marcador aparece em qualquer
+ * página" são indistinguíveis, e um seletor largo demais passaria por conserto.
+ * A rota inexistente cai na SPA — que é literalmente o que foi servido em
+ * `/galeria.html` no dia em que a medição rodou contra outro produto.
+ */
+test("o marcador da galeria não existe fora dela", async ({ page }) => {
+  await page.goto("/uma-rota-que-nao-existe");
+  await expect(page.locator("[data-galeria]")).toHaveCount(0);
+});
+
 for (const tema of ["claro", "escuro"] as const) {
   test("galeria — nenhum componente reprova o contraste, tema " + tema, async ({
     page,
   }) => {
     await page.goto("/galeria.html");
-    await page.waitForSelector("[data-bloco]");
+
+    // ── Canário de página, ANTES de qualquer captura ────────────────────
+    //
+    // O `galeria.html` sai do mesmo servidor que serve a aplicação, e um
+    // servidor subido antes do arquivo existir devolve a 404 da SPA. Ela vem
+    // com o MESMO CSS, então o canário de classes lá embaixo passa tranquilo;
+    // só a espera pelo seletor caía, por tempo esgotado, e tempo esgotado não
+    // diz o que houve. Foi o segundo servidor obsoleto do mesmo dia.
+    const marcador = page.locator("[data-galeria]");
+    await marcador
+      .waitFor({ timeout: 15_000 })
+      .catch(async () => {
+        const titulo = await page.title();
+        const h1 = await page
+          .locator("h1")
+          .first()
+          .textContent()
+          .catch(() => null);
+        throw new Error(
+          `a página em /galeria.html não é a galeria: sem [data-galeria] ` +
+            `(título "${titulo}", h1 "${h1 ?? "—"}").\n` +
+            `  O título é o que separa as duas causas:\n` +
+            `  - diz "HelpHS" → servidor de desenvolvimento anterior ao ` +
+            `arquivo; reinicie o 'npm run dev'.\n` +
+            `  - diz outra coisa → o servidor NÃO é o do HelpHS. Foi assim que ` +
+            `a suíte apontou para o ChamadosHS: o Vite escorregava de porta em ` +
+            `silêncio e o Playwright abraçava o servidor do outro projeto. ` +
+            `O HelpHS mora na 5190 com 'strictPort'; confira quem está lá.`,
+        );
+      });
+
+    // A galeria é a galeria — mas é a DESTE código? Servidor servindo pacote
+    // velho mostra a galeria de antes, coerente consigo mesma. Só a comparação
+    // contra a fonte no disco separa as duas.
+    await expect(
+      marcador,
+      "a galeria servida declara um número de amostras diferente do que a " +
+        "fonte declara. O servidor está servindo pacote antigo: reinicie o " +
+        "'npm run dev' antes de acreditar em qualquer número desta galeria.",
+    ).toHaveAttribute("data-galeria", String(AMOSTRAS));
+
+    // E renderizou inteira? Um bloco que estourou some sem barulho.
+    await expect(
+      page.locator("[data-bloco]"),
+      "a galeria não renderizou todos os blocos que declara",
+    ).toHaveCount(AMOSTRAS);
 
     // A galeria começa no claro; o botão alterna a classe `dark` na raiz.
     if (tema === "escuro") {
