@@ -266,3 +266,411 @@ describe("AuthProvider — segundo fator", () => {
     expect(mockGetMeApi).toHaveBeenCalled();
   });
 });
+
+// ── Perfil em memoria, token exposto e caminhos de erro ────────
+//
+// Ramos que faltavam: os dois `?? null` do avatar, os dois
+// `prev ? ... : prev` de markOnboardingComplete/updateAvatarUrl e o
+// `setToken(null)` do catch da restauracao.
+
+/** Consumidor do perfil: le avatar/onboarding/token e deixa muta-los. */
+function PerfilConsumer() {
+  const {
+    user,
+    token,
+    isAuthenticated,
+    isLoading,
+    login,
+    logout,
+    markOnboardingComplete,
+    updateAvatarUrl,
+  } = useAuth();
+  return (
+    <div>
+      <span data-testid="loading">{isLoading ? "loading" : "ready"}</span>
+      <span data-testid="auth">{isAuthenticated ? "yes" : "no"}</span>
+      <span data-testid="token">{token ?? "sem-token"}</span>
+      <span data-testid="nome">{user ? user.name : "nenhum"}</span>
+      {/* String() de proposito: distingue `null` normalizado de `undefined`. */}
+      <span data-testid="avatar">{user ? String(user.avatar_url) : "nenhum"}</span>
+      <span data-testid="onboarding">
+        {user ? String(user.onboarding_completed) : "nenhum"}
+      </span>
+      <button onClick={() => markOnboardingComplete()}>Concluir</button>
+      <button onClick={() => updateAvatarUrl("/media/novo.png")}>Trocar avatar</button>
+      <button onClick={() => updateAvatarUrl(null)}>Remover avatar</button>
+      <button onClick={() => login("admin@test.com", "pass")}>Entrar</button>
+      <button onClick={() => logout()}>Sair</button>
+    </div>
+  );
+}
+
+function renderPerfil() {
+  return render(
+    <AuthProvider>
+      <PerfilConsumer />
+    </AuthProvider>,
+  );
+}
+
+/** Consumidor que captura o erro em vez de deixar a promessa estourar. */
+function ErroConsumer() {
+  const { login, verifyMfa, isAuthenticated, token } = useAuth();
+  const [erro, setErro] = useState("");
+  return (
+    <div>
+      <span data-testid="erro">{erro || "sem-erro"}</span>
+      <span data-testid="auth">{isAuthenticated ? "yes" : "no"}</span>
+      <span data-testid="token">{token ?? "sem-token"}</span>
+      <button
+        onClick={async () => {
+          try {
+            await login("admin@test.com", "pass");
+            setErro("passou");
+          } catch (e) {
+            setErro((e as Error).message);
+          }
+        }}
+      >
+        Login
+      </button>
+      <button
+        onClick={async () => {
+          try {
+            await verifyMfa("desafio-1", "000000");
+            setErro("passou");
+          } catch (e) {
+            setErro((e as Error).message);
+          }
+        }}
+      >
+        Verificar
+      </button>
+    </div>
+  );
+}
+
+function renderErro() {
+  return render(
+    <AuthProvider>
+      <ErroConsumer />
+    </AuthProvider>,
+  );
+}
+
+describe("AuthProvider — restauracao: avatar e token expostos", () => {
+  it("preserva o avatar que o servidor manda ao restaurar a sessao", async () => {
+    mockTokenStorage.getAccess.mockReturnValue("stored-token");
+    mockGetMeApi.mockResolvedValue({
+      id: "u1",
+      name: "Admin",
+      email: "admin@test.com",
+      role: "admin",
+      avatar_url: "/media/avatars/u1.png",
+      onboarding_completed: true,
+    });
+
+    renderPerfil();
+
+    await waitFor(() =>
+      expect(screen.getByTestId("loading")).toHaveTextContent("ready"),
+    );
+    expect(screen.getByTestId("avatar")).toHaveTextContent("/media/avatars/u1.png");
+  });
+
+  it("normaliza avatar ausente para null, e nao para undefined", async () => {
+    // O tipo AuthUser promete `string | null`. Sem o `?? null` o campo viraria
+    // `undefined` e quem compara com null erraria em silencio.
+    mockTokenStorage.getAccess.mockReturnValue("stored-token");
+    mockGetMeApi.mockResolvedValue({
+      id: "u1",
+      name: "Admin",
+      email: "admin@test.com",
+      role: "admin",
+      onboarding_completed: false,
+    });
+
+    renderPerfil();
+
+    await waitFor(() =>
+      expect(screen.getByTestId("loading")).toHaveTextContent("ready"),
+    );
+    expect(screen.getByTestId("avatar")).toHaveTextContent("null");
+    expect(screen.getByTestId("onboarding")).toHaveTextContent("false");
+  });
+
+  it("expoe no contexto o token que veio do storage", async () => {
+    mockTokenStorage.getAccess.mockReturnValue("stored-token");
+    mockGetMeApi.mockResolvedValue({
+      id: "u1",
+      name: "Admin",
+      email: "admin@test.com",
+      role: "admin",
+      onboarding_completed: true,
+    });
+
+    renderPerfil();
+
+    await waitFor(() =>
+      expect(screen.getByTestId("token")).toHaveTextContent("stored-token"),
+    );
+  });
+
+  it("zera o token em memoria quando a restauracao falha", async () => {
+    // O token chega a entrar no estado antes do getMe. Se o setToken(null) do
+    // catch sumisse, o contexto seguiria entregando um token ja invalido.
+    mockTokenStorage.getAccess.mockReturnValue("expired-token");
+    mockGetMeApi.mockRejectedValue(new Error("401 Unauthorized"));
+
+    renderPerfil();
+
+    await waitFor(() =>
+      expect(screen.getByTestId("loading")).toHaveTextContent("ready"),
+    );
+    expect(screen.getByTestId("token")).toHaveTextContent("sem-token");
+    expect(screen.getByTestId("nome")).toHaveTextContent("nenhum");
+  });
+});
+
+describe("AuthProvider — avatar no login", () => {
+  it("preserva o avatar que o servidor manda ao estabelecer a sessao", async () => {
+    mockTokenStorage.getAccess.mockReturnValue(null);
+    mockLoginApi.mockResolvedValue({
+      access_token: "new-access",
+      refresh_token: "new-refresh",
+      token_type: "bearer",
+    });
+    mockGetMeApi.mockResolvedValueOnce({
+      id: "u1",
+      name: "Admin",
+      email: "admin@test.com",
+      role: "admin",
+      avatar_url: "/media/avatars/u1.png",
+      onboarding_completed: true,
+    });
+
+    renderPerfil();
+    await waitFor(() =>
+      expect(screen.getByTestId("loading")).toHaveTextContent("ready"),
+    );
+
+    await userEvent.click(screen.getByRole("button", { name: "Entrar" }));
+
+    await waitFor(() =>
+      expect(screen.getByTestId("avatar")).toHaveTextContent("/media/avatars/u1.png"),
+    );
+    expect(screen.getByTestId("token")).toHaveTextContent("new-access");
+  });
+
+  it("normaliza para null o avatar ausente na resposta do login", async () => {
+    mockTokenStorage.getAccess.mockReturnValue(null);
+    mockLoginApi.mockResolvedValue({
+      access_token: "new-access",
+      refresh_token: "new-refresh",
+      token_type: "bearer",
+    });
+    mockGetMeApi.mockResolvedValueOnce({
+      id: "u1",
+      name: "Admin",
+      email: "admin@test.com",
+      role: "admin",
+      onboarding_completed: true,
+    });
+
+    renderPerfil();
+    await waitFor(() =>
+      expect(screen.getByTestId("loading")).toHaveTextContent("ready"),
+    );
+
+    await userEvent.click(screen.getByRole("button", { name: "Entrar" }));
+
+    await waitFor(() => expect(screen.getByTestId("auth")).toHaveTextContent("yes"));
+    expect(screen.getByTestId("avatar")).toHaveTextContent("null");
+  });
+});
+
+describe("AuthProvider — markOnboardingComplete", () => {
+  it("marca o onboarding do usuario atual sem tocar nos outros campos", async () => {
+    mockTokenStorage.getAccess.mockReturnValue("stored-token");
+    mockGetMeApi.mockResolvedValue({
+      id: "u1",
+      name: "Admin",
+      email: "admin@test.com",
+      role: "admin",
+      avatar_url: "/media/avatars/u1.png",
+      onboarding_completed: false,
+    });
+
+    renderPerfil();
+    await waitFor(() =>
+      expect(screen.getByTestId("onboarding")).toHaveTextContent("false"),
+    );
+
+    await userEvent.click(screen.getByRole("button", { name: "Concluir" }));
+
+    expect(screen.getByTestId("onboarding")).toHaveTextContent("true");
+    expect(screen.getByTestId("nome")).toHaveTextContent("Admin");
+    expect(screen.getByTestId("avatar")).toHaveTextContent("/media/avatars/u1.png");
+  });
+
+  it("nao inventa usuario quando nao ha sessao", async () => {
+    // Sem o guarda `prev ? ... : prev`, espalhar null criaria um objeto so com
+    // onboarding_completed e o isAuthenticated (!!user) viraria true.
+    mockTokenStorage.getAccess.mockReturnValue(null);
+
+    renderPerfil();
+    await waitFor(() =>
+      expect(screen.getByTestId("loading")).toHaveTextContent("ready"),
+    );
+
+    await userEvent.click(screen.getByRole("button", { name: "Concluir" }));
+
+    expect(screen.getByTestId("auth")).toHaveTextContent("no");
+    expect(screen.getByTestId("nome")).toHaveTextContent("nenhum");
+    expect(screen.getByTestId("onboarding")).toHaveTextContent("nenhum");
+  });
+});
+
+describe("AuthProvider — updateAvatarUrl", () => {
+  it("troca o avatar preservando o resto do usuario", async () => {
+    mockTokenStorage.getAccess.mockReturnValue("stored-token");
+    mockGetMeApi.mockResolvedValue({
+      id: "u1",
+      name: "Admin",
+      email: "admin@test.com",
+      role: "admin",
+      avatar_url: "/media/avatars/antigo.png",
+      onboarding_completed: true,
+    });
+
+    renderPerfil();
+    await waitFor(() =>
+      expect(screen.getByTestId("avatar")).toHaveTextContent("/media/avatars/antigo.png"),
+    );
+
+    await userEvent.click(screen.getByRole("button", { name: "Trocar avatar" }));
+
+    expect(screen.getByTestId("avatar")).toHaveTextContent("/media/novo.png");
+    expect(screen.getByTestId("nome")).toHaveTextContent("Admin");
+    expect(screen.getByTestId("onboarding")).toHaveTextContent("true");
+  });
+
+  it("aceita null para remover o avatar sem derrubar a sessao", async () => {
+    mockTokenStorage.getAccess.mockReturnValue("stored-token");
+    mockGetMeApi.mockResolvedValue({
+      id: "u1",
+      name: "Admin",
+      email: "admin@test.com",
+      role: "admin",
+      avatar_url: "/media/avatars/antigo.png",
+      onboarding_completed: true,
+    });
+
+    renderPerfil();
+    await waitFor(() =>
+      expect(screen.getByTestId("avatar")).toHaveTextContent("/media/avatars/antigo.png"),
+    );
+
+    await userEvent.click(screen.getByRole("button", { name: "Remover avatar" }));
+
+    expect(screen.getByTestId("avatar")).toHaveTextContent("null");
+    expect(screen.getByTestId("auth")).toHaveTextContent("yes");
+  });
+
+  it("nao inventa usuario quando nao ha sessao", async () => {
+    mockTokenStorage.getAccess.mockReturnValue(null);
+
+    renderPerfil();
+    await waitFor(() =>
+      expect(screen.getByTestId("loading")).toHaveTextContent("ready"),
+    );
+
+    await userEvent.click(screen.getByRole("button", { name: "Trocar avatar" }));
+
+    expect(screen.getByTestId("auth")).toHaveTextContent("no");
+    expect(screen.getByTestId("avatar")).toHaveTextContent("nenhum");
+  });
+});
+
+describe("AuthProvider — caminhos de erro do login", () => {
+  it("propaga a falha de credencial e nao grava sessao nenhuma", async () => {
+    mockTokenStorage.getAccess.mockReturnValue(null);
+    mockLoginApi.mockRejectedValue(new Error("Credenciais invalidas"));
+
+    renderErro();
+    await userEvent.click(screen.getByRole("button", { name: "Login" }));
+
+    await waitFor(() =>
+      expect(screen.getByTestId("erro")).toHaveTextContent("Credenciais invalidas"),
+    );
+    expect(mockTokenStorage.set).not.toHaveBeenCalled();
+    expect(mockGetMeApi).not.toHaveBeenCalled();
+    expect(screen.getByTestId("auth")).toHaveTextContent("no");
+  });
+
+  it("com o /users/me falhando, deixa token gravado e sessao sem usuario", async () => {
+    // Fixa o comportamento de HOJE, que nao e o desejavel: estabelecerSessao
+    // grava os tokens ANTES do getMe e nao tem catch, entao a falha do
+    // /users/me deixa token no storage sem usuario -- e ninguem limpa.
+    mockTokenStorage.getAccess.mockReturnValue(null);
+    mockLoginApi.mockResolvedValue({
+      access_token: "meio-access",
+      refresh_token: "meio-refresh",
+      token_type: "bearer",
+    });
+    mockGetMeApi.mockRejectedValue(new Error("500 Internal Server Error"));
+
+    renderErro();
+    await userEvent.click(screen.getByRole("button", { name: "Login" }));
+
+    await waitFor(() =>
+      expect(screen.getByTestId("erro")).toHaveTextContent("500 Internal Server Error"),
+    );
+    expect(mockTokenStorage.set).toHaveBeenCalledWith("meio-access", "meio-refresh");
+    expect(mockTokenStorage.clear).not.toHaveBeenCalled();
+    expect(screen.getByTestId("auth")).toHaveTextContent("no");
+    expect(screen.getByTestId("token")).toHaveTextContent("meio-access");
+  });
+
+  it("propaga o codigo de segundo fator errado sem gravar sessao", async () => {
+    mockTokenStorage.getAccess.mockReturnValue(null);
+    mockVerifyMfaApi.mockRejectedValue(new Error("Codigo invalido"));
+
+    renderErro();
+    await userEvent.click(screen.getByRole("button", { name: "Verificar" }));
+
+    await waitFor(() =>
+      expect(screen.getByTestId("erro")).toHaveTextContent("Codigo invalido"),
+    );
+    expect(mockTokenStorage.set).not.toHaveBeenCalled();
+    expect(mockGetMeApi).not.toHaveBeenCalled();
+    expect(screen.getByTestId("auth")).toHaveTextContent("no");
+  });
+});
+
+describe("AuthProvider — logout limpa o token em memoria", () => {
+  it("zera o token do contexto, e nao so o do storage", async () => {
+    mockTokenStorage.getAccess.mockReturnValue("stored-token");
+    mockGetMeApi.mockResolvedValue({
+      id: "u1",
+      name: "Admin",
+      email: "admin@test.com",
+      role: "admin",
+      onboarding_completed: true,
+    });
+    mockLogoutApi.mockResolvedValue(undefined);
+
+    renderPerfil();
+    await waitFor(() =>
+      expect(screen.getByTestId("token")).toHaveTextContent("stored-token"),
+    );
+
+    await userEvent.click(screen.getByRole("button", { name: "Sair" }));
+
+    await waitFor(() =>
+      expect(screen.getByTestId("token")).toHaveTextContent("sem-token"),
+    );
+    expect(screen.getByTestId("nome")).toHaveTextContent("nenhum");
+    expect(screen.getByTestId("avatar")).toHaveTextContent("nenhum");
+  });
+});
