@@ -117,6 +117,40 @@ _PENDENTES: WeakKeyDictionary = WeakKeyDictionary()
 _EM_VOO: set[asyncio.Task] = set()
 
 
+def _assunto_do_email(title: str, data: dict[str, Any] | None) -> str:
+    """`[HelpHS] Chamado resolvido · HS-2026-0042`.
+
+    O assunto era o título cru da notificação, e na lista da caixa isso é
+    ilegível: cinco chamados abertos rendiam cinco "Ticket resolvido" idênticos,
+    sem dizer qual. O protocolo entra quando existe — cinco das catorze chamadas
+    não o carregam no `data`, e para elas o prefixo sozinho já é melhor do que
+    nada.
+
+    Não mexe no `title`: o sininho continua mostrando o texto cru.
+    """
+    protocolo = (data or {}).get("protocol")
+    return f"[HelpHS] {title} · {protocolo}" if protocolo else f"[HelpHS] {title}"
+
+
+def _corpo_do_email(message: str, data: dict[str, Any] | None, settings: Settings) -> str:
+    """A mensagem, e o caminho de volta para o chamado.
+
+    Levantado em 04/09/2026: DOZE dos catorze e-mails de notificação chegavam
+    sem link. O `ticket_id` sempre esteve no `data` — as catorze chamadas o
+    passam — e simplesmente não era usado. Avisar que o chamado andou sem dizer
+    onde ele está obriga a pessoa a entrar no sistema e procurar.
+
+    Sem `ticket_id` ou sem `FRONTEND_URL`, devolve a mensagem intacta: link
+    inventado é pior que link ausente.
+    """
+    ticket_id = (data or {}).get("ticket_id")
+    if not ticket_id or not settings.frontend_url:
+        return message
+
+    base = settings.frontend_url.rstrip("/")
+    return f"{message}\n\nVeja o chamado:\n{base}/tickets/{ticket_id}"
+
+
 async def notify(
     db: AsyncSession,
     user_id: uuid.UUID,
@@ -166,8 +200,8 @@ async def notify(
             _EmailPendente(
                 notif_id=notif.id,
                 to_email=email_addr,
-                subject=title,
-                body=message,
+                subject=_assunto_do_email(title, data),
+                body=_corpo_do_email(message, data, settings),
                 settings=settings,
             )
         )
