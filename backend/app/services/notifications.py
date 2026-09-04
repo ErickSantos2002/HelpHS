@@ -63,7 +63,7 @@ from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.core.config import Settings
-from app.models.models import Notification, NotificationType, User
+from app.models.models import Notification, NotificationType, User, UserRole
 from app.services.email import send_email
 
 # Tipos que ficam SÓ no sininho, mesmo com SMTP configurado.
@@ -72,6 +72,30 @@ from app.services.email import send_email
 # chat — o e-mail não levava a lugar nenhum, só pedia que a pessoa entrasse no
 # sistema. Decidido com o cliente em 07/08/2026: convite apenas in-app.
 _IN_APP_ONLY = frozenset({NotificationType.satisfaction_survey})
+
+# Papéis que NÃO recebem notificação por e-mail — só pelo sininho.
+#
+# Decidido em 04/09/2026, a pedido da equipe: quem passa o dia dentro do
+# sistema já é avisado pelo sininho, e o e-mail virava ruído.
+#
+# O que de fato chegava a staff eram DOIS eventos: `ticket_assigned`
+# (routers/tickets.py:1029, ao ser designado) e `ticket_updated` na reabertura
+# (routers/tickets.py:940, ao responsável).
+#
+# As outras notificações que apontam para staff — as duas do chat e a "Triagem
+# concluída", que percorre TODOS os técnicos e admins ativos — nunca viraram
+# e-mail, mas por acidente: elas não passam `settings` ao notify, e sem isso a
+# função retorna antes de registrar envio. Este filtro por papel também fecha
+# essa armadilha: hoje staff não recebe POR DESENHO, e não porque alguém
+# esqueceu um argumento que um dia pode ser "consertado".
+#
+# O CLIENTE continua recebendo tudo o que recebia. Ele é justamente quem NÃO
+# vive aqui dentro: para ele o e-mail é como fica sabendo que o chamado andou,
+# e o aviso de encerramento é o que dispara o prazo de reabertura.
+#
+# Isto não toca os e-mails de conta — confirmação de cadastro e redefinição de
+# senha saem por `services/account_emails.py`, que não passa por aqui.
+_SEM_EMAIL_POR_PAPEL = frozenset({UserRole.admin, UserRole.technician})
 
 
 @dataclass(frozen=True)
@@ -124,11 +148,20 @@ async def notify(
     if settings is None or notif_type in _IN_APP_ONLY:
         return  # no email without settings
 
-    # Look up user email to send the notification
-    result = await db.execute(select(User.email).where(User.id == user_id))
-    email_addr = result.scalar_one_or_none()
+    # A busca traz o PAPEL junto do e-mail: desde 04/09/2026 quem decide o
+    # envio não é só o tipo da notificação, é também quem recebe. Uma consulta
+    # só — a coluna a mais não custa nada e evita uma segunda ida ao banco.
+    result = await db.execute(select(User.email, User.role).where(User.id == user_id))
+    destinatario = result.one_or_none()
 
-    if email_addr:
+    # Destinatário que sumiu entre a ação e a notificação não pode virar
+    # exceção: quem chamou já fez o trabalho, e o e-mail é o acessório.
+    if destinatario is None:
+        return
+
+    email_addr, papel = destinatario
+
+    if email_addr and papel not in _SEM_EMAIL_POR_PAPEL:
         _PENDENTES.setdefault(db, []).append(
             _EmailPendente(
                 notif_id=notif.id,

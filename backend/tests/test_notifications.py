@@ -564,11 +564,17 @@ async def test_reply_to_configurado_continua_indo_na_mensagem():
 # ═══════════════════════════════════════════════════════════════
 
 
-def _db_para_notify(email="destino@test.com"):
-    """Sessão mockada que devolve um e-mail na busca do destinatário."""
+def _db_para_notify(email="destino@test.com", papel=UserRole.client):
+    """Sessão mockada que devolve o destinatário na busca do notify().
+
+    Passou a carregar o PAPEL junto do e-mail em 04/09/2026: quem decide o
+    envio deixou de ser só o tipo da notificação e passou a ser também quem
+    recebe. O padrão é `client` porque é o único que continua recebendo.
+    """
 
     async def _execute(*args, **kwargs):
         result = MagicMock()
+        result.one_or_none.return_value = (email, papel)
         result.scalar_one_or_none.return_value = email
         return result
 
@@ -752,3 +758,128 @@ async def test_pendencias_nao_vazam_entre_sessoes():
 
     assert enviar.await_count == 1
     assert enviar.await_args.args[0] == "a@test.com"
+
+
+# ═══════════════════════════════════════════════════════════════
+# Quem recebe e-mail, e quem só recebe no sininho
+# ═══════════════════════════════════════════════════════════════
+#
+# Decidido em 04/09/2026. Técnico e admin vivem dentro do sistema o dia
+# inteiro; o sininho já os avisa, e o e-mail virava ruído. O que chegava a
+# eles eram dois eventos: ser designado a um chamado, e um cliente reabrir
+# chamado sob sua responsabilidade.
+#
+# Para o CLIENTE nada muda, e o teste do cliente existe para prender isso.
+# Sem ele, um engano que silenciasse TODO mundo passaria despercebido — e o
+# cliente é justamente quem não vive aqui dentro e depende do e-mail para
+# saber que o chamado andou.
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("papel", [UserRole.technician, UserRole.admin])
+async def test_staff_nao_recebe_notificacao_por_email(papel):
+    """A notificação continua existindo no sininho; só o e-mail para de sair."""
+    from app.core.config import get_settings
+    from app.services import notifications
+
+    db = _db_para_notify("tecnico@test.com", papel=papel)
+
+    with patch.object(notifications, "send_email", new=AsyncMock(return_value=True)) as enviar:
+        await notifications.notify(
+            db,
+            _USER_ID,
+            NotificationType.ticket_updated,
+            "Ticket atualizado",
+            "O chamado HS-2026-0001 mudou de status.",
+            settings=get_settings(),
+        )
+        await notifications.commit_e_notificar(db)
+        await _deixar_as_tarefas_rodarem()
+
+    db.add.assert_called_once()
+    enviar.assert_not_awaited()
+
+
+@pytest.mark.asyncio
+async def test_cliente_continua_recebendo_notificacao_por_email():
+    """Contraprova do teste acima: o que silencia é o PAPEL, e não o tipo.
+
+    Se este par cair junto com o de cima, a mudança silenciou todo mundo em
+    vez de silenciar só a equipe.
+    """
+    from app.core.config import get_settings
+    from app.services import notifications
+
+    db = _db_para_notify("cliente@test.com", papel=UserRole.client)
+
+    with patch.object(notifications, "send_email", new=AsyncMock(return_value=True)) as enviar:
+        await notifications.notify(
+            db,
+            _USER_ID,
+            NotificationType.ticket_updated,
+            "Ticket atualizado",
+            "O chamado HS-2026-0001 mudou de status.",
+            settings=get_settings(),
+        )
+        await notifications.commit_e_notificar(db)
+        await _deixar_as_tarefas_rodarem()
+
+    assert enviar.await_count == 1
+    assert enviar.await_args.args[0] == "cliente@test.com"
+
+
+@pytest.mark.asyncio
+async def test_o_chat_para_de_encher_a_caixa_do_tecnico():
+    """O caso que motivou a mudança: dez mensagens do cliente eram dez e-mails."""
+    from app.core.config import get_settings
+    from app.services import notifications
+
+    db = _db_para_notify("tecnico@test.com", papel=UserRole.technician)
+
+    with patch.object(notifications, "send_email", new=AsyncMock(return_value=True)) as enviar:
+        for i in range(10):
+            await notifications.notify(
+                db,
+                _USER_ID,
+                NotificationType.chat_message,
+                "Nova mensagem",
+                f"mensagem {i}",
+                settings=get_settings(),
+            )
+        await notifications.commit_e_notificar(db)
+        await _deixar_as_tarefas_rodarem()
+
+    assert db.add.call_count == 10, "as dez continuam no sininho"
+    enviar.assert_not_awaited()
+
+
+@pytest.mark.asyncio
+async def test_destinatario_que_nao_existe_mais_nao_derruba_o_notify():
+    """Usuário apagado entre a ação e a notificação: não pode virar exceção."""
+    from app.core.config import get_settings
+    from app.services import notifications
+
+    db = MagicMock()
+    db.add = MagicMock()
+    db.commit = AsyncMock()
+
+    async def _execute(*args, **kwargs):
+        result = MagicMock()
+        result.one_or_none.return_value = None
+        return result
+
+    db.execute = _execute
+
+    with patch.object(notifications, "send_email", new=AsyncMock(return_value=True)) as enviar:
+        await notifications.notify(
+            db,
+            _USER_ID,
+            NotificationType.ticket_updated,
+            "Ticket atualizado",
+            "corpo",
+            settings=get_settings(),
+        )
+        await notifications.commit_e_notificar(db)
+        await _deixar_as_tarefas_rodarem()
+
+    enviar.assert_not_awaited()
