@@ -37,25 +37,28 @@ describe("StatusBadge", () => {
   });
 });
 
+// Os rotulos estao no FEMININO desde a emenda E17: concordam com
+// "prioridade". O ChamadosHS ja usava esta forma, e o HelpHS tinha as duas ao
+// mesmo tempo — o Badge dizia "Alto" e o detalhe do chamado dizia "Alta".
 describe("PriorityBadge", () => {
   it("renders label for critical priority", () => {
     render(<PriorityBadge priority="critical" />);
-    expect(screen.getByText("Crítico")).toBeInTheDocument();
+    expect(screen.getByText("Crítica")).toBeInTheDocument();
   });
 
   it("renders label for high priority", () => {
     render(<PriorityBadge priority="high" />);
-    expect(screen.getByText("Alto")).toBeInTheDocument();
+    expect(screen.getByText("Alta")).toBeInTheDocument();
   });
 
   it("renders label for medium priority", () => {
     render(<PriorityBadge priority="medium" />);
-    expect(screen.getByText("Médio")).toBeInTheDocument();
+    expect(screen.getByText("Média")).toBeInTheDocument();
   });
 
   it("renders label for low priority", () => {
     render(<PriorityBadge priority="low" />);
-    expect(screen.getByText("Baixo")).toBeInTheDocument();
+    expect(screen.getByText("Baixa")).toBeInTheDocument();
   });
 
   // ── Tintas e seus pares ───────────────────────────────────────────────

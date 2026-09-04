@@ -1,3 +1,5 @@
+import { PRIORIDADE } from "../../lib/prioridade";
+import type { TicketPriority } from "../../lib/prioridade";
 import { cn } from "../../lib/utils";
 
 type BadgeVariant =
@@ -114,26 +116,14 @@ export function StatusBadge({ status }: { status: TicketStatus }) {
 
 // ── Ticket priority badge ─────────────────────────────────────
 
-type TicketPriority = "critical" | "high" | "medium" | "low";
-
-const priorityVariant: Record<TicketPriority, BadgeVariant> = {
-  critical: "danger",
-  high: "warning",
-  medium: "info",
-  low: "muted",
-};
-
-const priorityLabel: Record<TicketPriority, string> = {
-  critical: "Crítico",
-  high: "Alto",
-  medium: "Médio",
-  low: "Baixo",
-};
+// O mapa de prioridade saiu daqui: mora em `lib/prioridade.ts`, que e a fonte
+// unica consumida tambem pelo ponto da lista, pelo grafico, pelo seletor e
+// pelo historico. Existiam CINCO mapas divergentes nas telas mais este; o
+// rotulo tambem divergia, e a emenda E17 fixou o feminino no pacote.
 
 export function PriorityBadge({ priority }: { priority: TicketPriority }) {
-  return (
-    <Badge variant={priorityVariant[priority]}>{priorityLabel[priority]}</Badge>
-  );
+  const p = PRIORIDADE[priority];
+  return <Badge variant={p.variante}>{p.rotulo}</Badge>;
 }
 
 // ── Tag badge ─────────────────────────────────────────────────
