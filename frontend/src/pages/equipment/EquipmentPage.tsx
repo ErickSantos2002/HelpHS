@@ -103,7 +103,7 @@ function ActivePill({ active }: { active: boolean }) {
 
 function KpiCard({ label, value, accent }: { label: string; value: number; accent?: string }) {
   return (
-    <div className="rounded-xl bg-background-surface border border-border p-4 flex flex-col gap-1">
+    <div className="rounded-xl bg-surface border border-borda p-4 flex flex-col gap-1">
       <p className="text-xs text-slate-500 font-medium uppercase tracking-wide">{label}</p>
       <p className={`text-2xl font-bold ${accent ?? "text-slate-700 dark:text-slate-100"}`}>{value}</p>
     </div>
@@ -145,7 +145,7 @@ function AddModal({ products, onClose, onAdded }: {
         <div className="space-y-1.5">
           <label className="text-xs font-medium text-slate-600 dark:text-slate-400">Produto *</label>
           <select
-            className="w-full rounded-xl border border-border/60 bg-background-elevated px-3 py-2 text-sm text-slate-700 dark:text-slate-200 focus:outline-none focus:ring-2 focus:ring-primary focus:border-transparent transition-colors"
+            className="w-full rounded-xl border border-borda/60 bg-surface-elevated px-3 py-2 text-sm text-slate-700 dark:text-slate-200 focus:outline-none focus:ring-2 focus:ring-primary focus:border-transparent transition-colors"
             {...form.register("product_id")}
           >
             {products.map((p) => (
@@ -267,8 +267,8 @@ function DeleteModal({ equipment, onClose, onDeleted }: {
             <p className="text-xs text-red-500/80 dark:text-red-400/80 mt-0.5">Este equipamento será removido permanentemente.</p>
           </div>
         </div>
-        <div className="flex items-center gap-3 rounded-xl border border-border bg-background-elevated px-4 py-3">
-          <div className="w-9 h-9 rounded-lg bg-background-surface border border-border flex items-center justify-center text-slate-500">{IC.Cpu}</div>
+        <div className="flex items-center gap-3 rounded-xl border border-borda bg-surface-elevated px-4 py-3">
+          <div className="w-9 h-9 rounded-lg bg-surface border border-borda flex items-center justify-center text-slate-500">{IC.Cpu}</div>
           <div className="flex-1 min-w-0">
             <p className="text-sm font-medium text-slate-800 dark:text-slate-100 truncate">{equipment.name}</p>
             {equipment.serial_number && <p className="text-xs font-mono text-slate-500">{equipment.serial_number}</p>}
@@ -367,7 +367,7 @@ export default function EquipmentPage() {
       {/* Card */}
       <Card padding="none">
         {/* Filter tabs */}
-        <div className="flex gap-0 border-b border-border">
+        <div className="flex gap-0 border-b border-borda">
           {([ { key: "all", label: `Todos (${total})` }, { key: "active", label: `Ativos (${active})` }, { key: "inactive", label: `Inativos (${inactive})` } ] as { key: typeof filter; label: string }[]).map(({ key, label }) => (
             <button
               key={key}
@@ -383,7 +383,7 @@ export default function EquipmentPage() {
 
         {filtered.length === 0 ? (
           <div className="flex flex-col items-center justify-center py-16 text-center">
-            <div className="w-12 h-12 rounded-full bg-background-elevated border border-border flex items-center justify-center text-slate-600 mb-3">{IC.Cpu}</div>
+            <div className="w-12 h-12 rounded-full bg-surface-elevated border border-borda flex items-center justify-center text-slate-600 mb-3">{IC.Cpu}</div>
             <p className="text-sm text-slate-400">
               {total === 0
                 ? "Nenhum equipamento cadastrado ainda."
@@ -400,13 +400,13 @@ export default function EquipmentPage() {
           </div>
         ) : (
           <>
-            <div className="divide-y divide-border">
+            <div className="divide-y divide-borda">
               {paginated.map((e) => {
                 const prod = productMap[e.product_id];
                 return (
-                  <div key={e.id} className="flex items-center gap-4 px-4 py-3 hover:bg-background-elevated/40 transition-colors">
+                  <div key={e.id} className="flex items-center gap-4 px-4 py-3 hover:bg-surface-elevated/40 transition-colors">
                     {/* Icon */}
-                    <div className="w-9 h-9 rounded-lg bg-background-elevated border border-border/60 flex items-center justify-center shrink-0 text-slate-400">
+                    <div className="w-9 h-9 rounded-lg bg-surface-elevated border border-borda/60 flex items-center justify-center shrink-0 text-slate-400">
                       {IC.Cpu}
                     </div>
 
@@ -459,7 +459,7 @@ export default function EquipmentPage() {
               })}
             </div>
 
-            <div className="px-4 py-2 border-t border-border">
+            <div className="px-4 py-2 border-t border-borda">
               <Pagination page={page} pageSize={PAGE_SIZE} total={filtered.length} onPageChange={setPage} itemLabel="equipamentos" />
             </div>
           </>

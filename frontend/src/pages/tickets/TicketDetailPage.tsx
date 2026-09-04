@@ -387,7 +387,7 @@ function ActivityEntry({ entry }: { entry: TicketHistory }) {
     <div className="flex gap-3 group">
       <div className="flex flex-col items-center pt-1 shrink-0">
         <span className={`w-2 h-2 rounded-full shrink-0 ${dotColor}`} />
-        <span className="w-px flex-1 bg-border/40 mt-1.5" />
+        <span className="w-px flex-1 bg-borda/40 mt-1.5" />
       </div>
       <div className="pb-4 min-w-0 flex-1">
         <div className="flex items-baseline justify-between gap-2">
@@ -482,7 +482,7 @@ function ActivityEntry({ entry }: { entry: TicketHistory }) {
 
         {/* Comentário geral (status manual com observação, resolução, etc.) */}
         {entry.comment && entry.field !== "assignee_id" && (
-          <p className="mt-1.5 text-xs text-slate-400 italic bg-background-elevated/60 rounded-lg px-3 py-2 border border-border/30">
+          <p className="mt-1.5 text-xs text-slate-400 italic bg-surface-elevated/60 rounded-lg px-3 py-2 border border-borda/30">
             "{entry.comment}"
           </p>
         )}
@@ -516,7 +516,7 @@ function AttachmentItem({
   const viewable = canPreview(attachment.original_name);
 
   return (
-    <div className="group flex items-center gap-3 rounded-lg border border-border/50 bg-background-elevated/40 px-3 py-2.5 hover:border-primary/30 hover:bg-primary/5 transition-all">
+    <div className="group flex items-center gap-3 rounded-lg border border-borda/50 bg-surface-elevated/40 px-3 py-2.5 hover:border-primary/30 hover:bg-primary/5 transition-all">
       <div className="flex h-9 w-9 shrink-0 items-center justify-center rounded-lg bg-primary/10 text-[10px] font-bold text-primary">
         {ext.slice(0, 4)}
       </div>
@@ -589,7 +589,7 @@ function AttachmentItem({
 /** Campo do bloco de informações. Sem valor, deixa claro que não foi informado. */
 function DetailField({ label, value }: { label: string; value: string | null | undefined }) {
   return (
-    <div className="border-b border-border/20 py-2.5 last:border-0 sm:[&:nth-last-child(-n+2)]:border-0">
+    <div className="border-b border-borda/20 py-2.5 last:border-0 sm:[&:nth-last-child(-n+2)]:border-0">
       <p className="mb-0.5 text-[10px] font-semibold uppercase tracking-widest text-slate-500">
         {label}
       </p>
@@ -614,7 +614,7 @@ function PropRow({
   children: React.ReactNode;
 }) {
   return (
-    <div className="flex items-start gap-3 py-2.5 border-b border-border/30 last:border-0">
+    <div className="flex items-start gap-3 py-2.5 border-b border-borda/30 last:border-0">
       <span className="mt-0.5 shrink-0 text-slate-500">{icon}</span>
       <div className="min-w-0 flex-1">
         <p className="mb-0.5 text-[10px] font-semibold uppercase tracking-widest text-slate-500">
@@ -647,10 +647,10 @@ function SidebarSection({
   const isAmber = accent === "amber";
   return (
     <div
-      className={`rounded-xl border ${isAmber ? "border-amber-700/25 bg-amber-950/15" : "border-border/40 bg-background-surface"}`}
+      className={`rounded-xl border ${isAmber ? "border-amber-700/25 bg-amber-950/15" : "border-borda/40 bg-surface"}`}
     >
       <div
-        className={`flex w-full items-center justify-between px-4 py-3 rounded-xl ${isAmber ? "hover:bg-amber-900/10" : "hover:bg-background-elevated/40"} transition-colors`}
+        className={`flex w-full items-center justify-between px-4 py-3 rounded-xl ${isAmber ? "hover:bg-amber-900/10" : "hover:bg-surface-elevated/40"} transition-colors`}
       >
         <button
           type="button"
@@ -700,9 +700,9 @@ function SidebarAction({
   const cls = {
     primary: "bg-emerald-600 hover:bg-emerald-500 text-white border-emerald-600",
     default:
-      "bg-background-elevated hover:bg-background-elevated/80 text-slate-200 border-border/50 hover:border-border",
+      "bg-surface-elevated hover:bg-surface-elevated/80 text-slate-200 border-borda/50 hover:border-borda",
     ghost:
-      "bg-transparent hover:bg-background-elevated text-slate-400 hover:text-slate-200 border-border/30",
+      "bg-transparent hover:bg-surface-elevated text-slate-400 hover:text-slate-200 border-borda/30",
   }[variant];
 
   return (
@@ -735,7 +735,7 @@ function ScoreRating({ value, onChange }: { value: number; onChange: (v: number)
             className={`h-9 w-9 rounded-lg text-sm font-bold transition-all border cursor-pointer ${
               active
                 ? "bg-yellow-400 border-yellow-400 text-slate-900 shadow-sm"
-                : "border-border/60 text-slate-400 hover:border-yellow-400/60 hover:text-yellow-400"
+                : "border-borda/60 text-slate-400 hover:border-yellow-400/60 hover:text-yellow-400"
             }`}
           >
             {n}
@@ -805,8 +805,8 @@ function SurveyPanel({ ticketId }: { ticketId: string }) {
   }
 
   return (
-    <div className="rounded-xl border border-border/50 bg-background-surface">
-      <div className="flex items-center gap-2 border-b border-border/40 px-5 py-2.5">
+    <div className="rounded-xl border border-borda/50 bg-surface">
+      <div className="flex items-center gap-2 border-b border-borda/40 px-5 py-2.5">
         <span className="text-yellow-400">{IC.Star}</span>
         <h2 className="text-sm font-semibold text-slate-200">Pesquisa de satisfação</h2>
       </div>
@@ -840,7 +840,7 @@ function SurveyPanel({ ticketId }: { ticketId: string }) {
               )}
             </div>
             {survey.comment && (
-              <p className="text-sm italic text-slate-400 bg-background-elevated/60 rounded-lg px-3 py-2">
+              <p className="text-sm italic text-slate-400 bg-surface-elevated/60 rounded-lg px-3 py-2">
                 "{survey.comment}"
               </p>
             )}
@@ -995,14 +995,14 @@ function TabBar({
   ];
   return (
     <div className="shrink-0">
-      <div className="flex gap-0.5 rounded-xl bg-background-elevated/50 p-1">
+      <div className="flex gap-0.5 rounded-xl bg-surface-elevated/50 p-1">
         {tabs.map((tab) => (
           <button
             key={tab.id}
             onClick={() => setActive(tab.id)}
             className={`flex flex-1 items-center justify-center gap-1.5 rounded-lg px-3 py-2 text-sm font-semibold transition-all cursor-pointer ${
               active === tab.id
-                ? "bg-background-surface text-slate-100 shadow-sm"
+                ? "bg-surface text-slate-100 shadow-sm"
                 : "text-slate-500 hover:text-slate-300"
             }`}
           >
@@ -1013,7 +1013,7 @@ function TabBar({
                 className={`rounded-full px-1.5 py-0.5 text-[10px] font-bold leading-none ${
                   active === tab.id
                     ? "bg-primary/20 text-primary"
-                    : "bg-background-elevated text-slate-500"
+                    : "bg-surface-elevated text-slate-500"
                 }`}
               >
                 {counts[tab.id]}
@@ -1330,7 +1330,7 @@ export default function TicketDetailPage() {
   return (
     <div className="flex flex-col gap-4 lg:h-full">
       {/* ── Page Header ──────────────────────────────────────── */}
-      <div className="shrink-0 flex flex-col sm:flex-row sm:items-start sm:justify-between gap-4 rounded-2xl border border-border/40 bg-background-surface px-5 py-4">
+      <div className="shrink-0 flex flex-col sm:flex-row sm:items-start sm:justify-between gap-4 rounded-2xl border border-borda/40 bg-surface px-5 py-4">
         {/* Breadcrumb + title */}
         <div className="min-w-0">
           <button
@@ -1415,7 +1415,7 @@ export default function TicketDetailPage() {
                 {/* Janela de reabertura — o cliente precisa ver o prazo sem
                   procurar na lateral, já que o chat está bloqueado */}
                 {reopenDeadline && (
-                  <div className="shrink-0 flex flex-col gap-3 rounded-xl border border-border/40 bg-background-surface px-5 py-4 sm:flex-row sm:items-center sm:justify-between">
+                  <div className="shrink-0 flex flex-col gap-3 rounded-xl border border-borda/40 bg-surface px-5 py-4 sm:flex-row sm:items-center sm:justify-between">
                     <p className="text-sm text-slate-400">
                       {ticket.auto_closed && (
                         <span className="text-slate-500">
@@ -1481,8 +1481,8 @@ export default function TicketDetailPage() {
             {/* ── TAB: Detalhes ────────────────────────────────── */}
             {activeTab === "detalhes" && (
               <div className="flex flex-col gap-4">
-                <div className="rounded-xl border border-border/40 bg-background-surface">
-                  <div className="border-b border-border/40 px-5 py-3.5">
+                <div className="rounded-xl border border-borda/40 bg-surface">
+                  <div className="border-b border-borda/40 px-5 py-3.5">
                     <h2 className="text-sm font-semibold text-slate-200">Informações do chamado</h2>
                   </div>
                   <div className="grid grid-cols-1 gap-x-6 gap-y-1 px-5 py-3 sm:grid-cols-2">
@@ -1510,8 +1510,8 @@ export default function TicketDetailPage() {
                   </div>
                 </div>
 
-                <div className="rounded-xl border border-border/40 bg-background-surface">
-                  <div className="border-b border-border/40 px-5 py-3.5">
+                <div className="rounded-xl border border-borda/40 bg-surface">
+                  <div className="border-b border-borda/40 px-5 py-3.5">
                     <h2 className="text-sm font-semibold text-slate-200">Descrição completa</h2>
                   </div>
                   <div className="px-5 py-4">
@@ -1523,8 +1523,8 @@ export default function TicketDetailPage() {
 
                 {/* Observações do solicitante */}
                 {(ticket.client_observation || user?.role === "client") && (
-                  <div className="rounded-xl border border-border/40 bg-background-surface">
-                    <div className="flex items-center justify-between border-b border-border/40 px-5 py-3.5">
+                  <div className="rounded-xl border border-borda/40 bg-surface">
+                    <div className="flex items-center justify-between border-b border-borda/40 px-5 py-3.5">
                       <div className="flex items-center gap-2">
                         <span className="text-slate-500">{IC.User}</span>
                         <h2 className="text-sm font-semibold text-slate-200">
@@ -1584,15 +1584,15 @@ export default function TicketDetailPage() {
 
             {/* ── TAB: Atividade ───────────────────────────────── */}
             {activeTab === "historico" && (
-              <div className="rounded-xl border border-border/40 bg-background-surface">
-                <div className="flex items-center gap-2 border-b border-border/40 px-5 py-3.5">
+              <div className="rounded-xl border border-borda/40 bg-surface">
+                <div className="flex items-center gap-2 border-b border-borda/40 px-5 py-3.5">
                   <span className="text-slate-500">{IC.Activity}</span>
                   <h2 className="text-sm font-semibold text-slate-200">Histórico de atividades</h2>
                 </div>
                 <div className="px-5 py-5">
                   {visibleHistory.length === 0 ? (
                     <div className="py-10 text-center">
-                      <div className="mx-auto mb-3 flex h-12 w-12 items-center justify-center rounded-full bg-background-elevated text-slate-600">
+                      <div className="mx-auto mb-3 flex h-12 w-12 items-center justify-center rounded-full bg-surface-elevated text-slate-600">
                         {IC.Activity}
                       </div>
                       <p className="text-sm text-slate-500">Sem histórico de atividades.</p>
@@ -1610,8 +1610,8 @@ export default function TicketDetailPage() {
 
             {/* ── TAB: Anexos ──────────────────────────────────── */}
             {activeTab === "anexos" && (
-              <div className="rounded-xl border border-border/40 bg-background-surface">
-                <div className="flex items-center justify-between border-b border-border/40 px-5 py-3.5">
+              <div className="rounded-xl border border-borda/40 bg-surface">
+                <div className="flex items-center justify-between border-b border-borda/40 px-5 py-3.5">
                   <div className="flex items-center gap-2">
                     <span className="text-slate-500">{IC.Clip}</span>
                     <h2 className="text-sm font-semibold text-slate-200">
@@ -1631,7 +1631,7 @@ export default function TicketDetailPage() {
                 <div className="p-5">
                   {attachments.length === 0 ? (
                     <div className="py-10 text-center">
-                      <div className="mx-auto mb-3 flex h-12 w-12 items-center justify-center rounded-full bg-background-elevated text-slate-600">
+                      <div className="mx-auto mb-3 flex h-12 w-12 items-center justify-center rounded-full bg-surface-elevated text-slate-600">
                         {IC.Clip}
                       </div>
                       <p className="text-sm text-slate-500">Nenhum anexo adicionado.</p>
@@ -2142,7 +2142,7 @@ export default function TicketDetailPage() {
           />
           <button
             onClick={() => fileInputRef.current?.click()}
-            className="flex w-full flex-col items-center gap-2 rounded-xl border-2 border-dashed border-border/60 bg-background-elevated/30 py-10 text-sm text-slate-400 hover:border-primary/40 hover:bg-primary/5 hover:text-primary transition-all cursor-pointer"
+            className="flex w-full flex-col items-center gap-2 rounded-xl border-2 border-dashed border-borda/60 bg-surface-elevated/30 py-10 text-sm text-slate-400 hover:border-primary/40 hover:bg-primary/5 hover:text-primary transition-all cursor-pointer"
           >
             {IC.Clip}
             <span>Clique para selecionar arquivos</span>
@@ -2152,7 +2152,7 @@ export default function TicketDetailPage() {
               {uploadFiles.map((f, i) => (
                 <li
                   key={i}
-                  className="flex items-center gap-2 rounded-lg bg-background-elevated px-3 py-2 text-sm text-slate-300"
+                  className="flex items-center gap-2 rounded-lg bg-surface-elevated px-3 py-2 text-sm text-slate-300"
                 >
                   <span className="text-slate-500">{IC.Clip}</span>
                   {f.name}

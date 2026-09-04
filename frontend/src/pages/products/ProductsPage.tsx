@@ -118,7 +118,7 @@ function FilterTabs({ value, onChange }: { value: FilterTab; onChange: (v: Filte
     { key: "inactive", label: "Inativos" },
   ];
   return (
-    <div className="flex items-center gap-0.5 bg-background-elevated border border-border/60 rounded-lg p-0.5">
+    <div className="flex items-center gap-0.5 bg-surface-elevated border border-borda/60 rounded-lg p-0.5">
       {tabs.map((t) => (
         <button
           key={t.key}
@@ -360,13 +360,13 @@ function EquipmentDetailModal({ equip, onClose, onEdit }: { equip: Equipment; on
         <div className="flex items-center gap-2">
           <ActivePill active={equip.is_active} />
           {equip.model && (
-            <span className="text-xs px-2 py-0.5 rounded-full bg-background-elevated border border-border/50 text-slate-400">
+            <span className="text-xs px-2 py-0.5 rounded-full bg-surface-elevated border border-borda/50 text-slate-400">
               {equip.model}
             </span>
           )}
         </div>
 
-        <div className="grid grid-cols-1 sm:grid-cols-2 gap-3 rounded-xl border border-border bg-background-elevated p-4">
+        <div className="grid grid-cols-1 sm:grid-cols-2 gap-3 rounded-xl border border-borda bg-surface-elevated p-4">
           {row("Número de série", equip.serial_number)}
           {row("Modelo", equip.model)}
           {row("Localização", equip.location)}
@@ -374,7 +374,7 @@ function EquipmentDetailModal({ equip, onClose, onEdit }: { equip: Equipment; on
         </div>
 
         {(equip.owner_name || equip.company_name) && (
-          <div className="grid grid-cols-1 sm:grid-cols-2 gap-3 rounded-xl border border-border bg-background-elevated p-4">
+          <div className="grid grid-cols-1 sm:grid-cols-2 gap-3 rounded-xl border border-borda bg-surface-elevated p-4">
             {equip.owner_name && (
               <div className="flex flex-col gap-0.5">
                 <span className="text-[11px] font-semibold uppercase tracking-wide text-slate-500 dark:text-slate-400">Responsável</span>
@@ -555,7 +555,7 @@ export default function ProductsPage() {
         <div className="relative md:flex-1">
           <span className="absolute left-3 top-1/2 -translate-y-1/2 text-slate-500 pointer-events-none">{IC.Search}</span>
           <input
-            className="w-full pl-9 pr-3 py-2 rounded-xl border border-border/60 bg-background-surface text-sm text-slate-700 dark:text-slate-200 placeholder:text-slate-500 focus:outline-none focus:ring-2 focus:ring-primary focus:border-transparent transition-colors"
+            className="w-full pl-9 pr-3 py-2 rounded-xl border border-borda/60 bg-surface text-sm text-slate-700 dark:text-slate-200 placeholder:text-slate-500 focus:outline-none focus:ring-2 focus:ring-primary focus:border-transparent transition-colors"
             placeholder="Buscar produto…"
             value={productSearch}
             onChange={(e) => { setProductSearch(e.target.value); setProductPage(1); }}
@@ -575,7 +575,7 @@ export default function ProductsPage() {
           {(productSearch || productFilter !== "active") && (
             <button
               onClick={() => { setProductSearch(""); setProductFilter("active"); setProductPage(1); }}
-              className="text-xs text-slate-500 hover:text-slate-300 transition-colors px-2 py-1.5 rounded-lg hover:bg-background-elevated cursor-pointer"
+              className="text-xs text-slate-500 hover:text-slate-300 transition-colors px-2 py-1.5 rounded-lg hover:bg-surface-elevated cursor-pointer"
             >
               Limpar filtros
             </button>
@@ -594,23 +594,23 @@ export default function ProductsPage() {
           <div className="flex h-32 items-center justify-center"><Spinner /></div>
         ) : products.length === 0 ? (
           <div className="flex flex-col items-center justify-center py-12 text-center">
-            <div className="w-10 h-10 rounded-full bg-background-elevated border border-border flex items-center justify-center text-slate-600 mb-3">{IC.Box}</div>
+            <div className="w-10 h-10 rounded-full bg-surface-elevated border border-borda flex items-center justify-center text-slate-600 mb-3">{IC.Box}</div>
             <p className="text-sm text-slate-400">Nenhum produto encontrado.</p>
             <button onClick={() => setProductFormOpen(true)} className="mt-2 text-sm text-primary hover:text-primary/80 transition-colors cursor-pointer">Criar o primeiro produto</button>
           </div>
         ) : (
           <>
-            <div className="divide-y divide-border">
+            <div className="divide-y divide-borda">
               {products.map((p) => (
                 <div
                   key={p.id}
                   onClick={() => selectProduct(p)}
-                  className={`flex items-center gap-4 px-4 py-3 hover:bg-background-elevated/40 transition-colors cursor-pointer ${
+                  className={`flex items-center gap-4 px-4 py-3 hover:bg-surface-elevated/40 transition-colors cursor-pointer ${
                     selectedProduct?.id === p.id ? "bg-primary/5 border-l-2 border-primary" : ""
                   }`}
                 >
                   {/* Icon */}
-                  <div className="w-9 h-9 rounded-lg bg-background-elevated border border-border/60 flex items-center justify-center shrink-0 text-slate-400">
+                  <div className="w-9 h-9 rounded-lg bg-surface-elevated border border-borda/60 flex items-center justify-center shrink-0 text-slate-400">
                     {IC.Box}
                   </div>
 
@@ -626,7 +626,7 @@ export default function ProductsPage() {
 
                   {/* Version badge */}
                   {p.version && (
-                    <span className="hidden sm:inline-flex shrink-0 text-xs font-mono px-2 py-0.5 rounded-full bg-background-elevated border border-border/50 text-slate-400">
+                    <span className="hidden sm:inline-flex shrink-0 text-xs font-mono px-2 py-0.5 rounded-full bg-surface-elevated border border-borda/50 text-slate-400">
                       v{p.version}
                     </span>
                   )}
@@ -657,7 +657,7 @@ export default function ProductsPage() {
               ))}
             </div>
 
-            <div className="px-4 py-2 border-t border-border">
+            <div className="px-4 py-2 border-t border-borda">
               <Pagination page={productPage} pageSize={PROD_PAGE} total={totalProducts} onPageChange={setProductPage} itemLabel="produtos" />
             </div>
           </>
@@ -667,7 +667,7 @@ export default function ProductsPage() {
       {/* Equipments card */}
       {selectedProduct && (
         <Card padding="none">
-          <div className="px-4 py-3 border-b border-border flex flex-col gap-2 sm:flex-row sm:flex-wrap sm:items-center sm:justify-between">
+          <div className="px-4 py-3 border-b border-borda flex flex-col gap-2 sm:flex-row sm:flex-wrap sm:items-center sm:justify-between">
             <div>
               <p className="text-sm font-semibold text-slate-700 dark:text-slate-200">
                 Equipamentos
@@ -686,11 +686,11 @@ export default function ProductsPage() {
           </div>
 
           {/* Equipment search */}
-          <div className="px-4 py-2.5 border-b border-border flex flex-col sm:flex-row sm:items-center gap-2">
+          <div className="px-4 py-2.5 border-b border-borda flex flex-col sm:flex-row sm:items-center gap-2">
             <div className="relative flex-1">
               <span className="absolute left-3 top-1/2 -translate-y-1/2 text-slate-500 pointer-events-none">{IC.Search}</span>
               <input
-                className="w-full pl-9 pr-3 py-2 rounded-xl border border-border/60 bg-background-elevated text-sm text-slate-700 dark:text-slate-200 placeholder:text-slate-500 focus:outline-none focus:ring-2 focus:ring-primary focus:border-transparent transition-colors"
+                className="w-full pl-9 pr-3 py-2 rounded-xl border border-borda/60 bg-surface-elevated text-sm text-slate-700 dark:text-slate-200 placeholder:text-slate-500 focus:outline-none focus:ring-2 focus:ring-primary focus:border-transparent transition-colors"
                 placeholder="Buscar equipamento…"
                 value={equipSearch}
                 onChange={(e) => { setEquipSearch(e.target.value); setEquipPage(1); }}
@@ -703,7 +703,7 @@ export default function ProductsPage() {
               className={`shrink-0 whitespace-nowrap rounded-lg border px-3 py-2 text-sm font-medium transition-colors cursor-pointer ${
                 equipSemDono
                   ? "border-primary bg-primary/10 text-primary"
-                  : "border-border/60 bg-background-elevated text-slate-600 dark:text-slate-300 hover:border-border hover:text-slate-800 dark:hover:text-slate-100"
+                  : "border-borda/60 bg-surface-elevated text-slate-600 dark:text-slate-300 hover:border-borda hover:text-slate-800 dark:hover:text-slate-100"
               }`}
             >
               Sem dono
@@ -716,7 +716,7 @@ export default function ProductsPage() {
             <div className="flex h-32 items-center justify-center"><Spinner /></div>
           ) : equipments.length === 0 ? (
             <div className="flex flex-col items-center justify-center py-12 text-center">
-              <div className="w-10 h-10 rounded-full bg-background-elevated border border-border flex items-center justify-center text-slate-600 mb-3">{IC.Cpu}</div>
+              <div className="w-10 h-10 rounded-full bg-surface-elevated border border-borda flex items-center justify-center text-slate-600 mb-3">{IC.Cpu}</div>
               {equipSemDono ? (
                 <>
                   <p className="text-sm text-slate-400">Nenhum equipamento sem dono para este produto.</p>
@@ -735,11 +735,11 @@ export default function ProductsPage() {
             </div>
           ) : (
             <>
-              <div className="divide-y divide-border">
+              <div className="divide-y divide-borda">
                 {equipments.map((e) => (
-                  <div key={e.id} className="flex items-center gap-4 px-4 py-3 hover:bg-background-elevated/40 transition-colors cursor-pointer" onClick={() => setViewEquip(e)}>
+                  <div key={e.id} className="flex items-center gap-4 px-4 py-3 hover:bg-surface-elevated/40 transition-colors cursor-pointer" onClick={() => setViewEquip(e)}>
                     {/* Icon */}
-                    <div className="w-9 h-9 rounded-lg bg-background-elevated border border-border/60 flex items-center justify-center shrink-0 text-slate-400">
+                    <div className="w-9 h-9 rounded-lg bg-surface-elevated border border-borda/60 flex items-center justify-center shrink-0 text-slate-400">
                       {IC.Cpu}
                     </div>
 
@@ -755,7 +755,7 @@ export default function ProductsPage() {
 
                     {/* Model */}
                     {e.model && (
-                      <span className="hidden md:inline-flex shrink-0 text-xs px-2 py-0.5 rounded-full bg-background-elevated border border-border/50 text-slate-400">
+                      <span className="hidden md:inline-flex shrink-0 text-xs px-2 py-0.5 rounded-full bg-surface-elevated border border-borda/50 text-slate-400">
                         {e.model}
                       </span>
                     )}
@@ -808,7 +808,7 @@ export default function ProductsPage() {
                 ))}
               </div>
 
-              <div className="px-4 py-2 border-t border-border">
+              <div className="px-4 py-2 border-t border-borda">
                 <Pagination page={equipPage} pageSize={EQUIP_PAGE} total={totalEquip} onPageChange={setEquipPage} itemLabel="equipamentos" />
               </div>
             </>

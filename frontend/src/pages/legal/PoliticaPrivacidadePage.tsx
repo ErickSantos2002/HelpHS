@@ -29,7 +29,7 @@ const ESTILO_DOCUMENTO = [
   "[&_li]:my-1 [&_li]:marker:text-slate-500",
   "[&_strong]:text-slate-100 [&_strong]:font-semibold",
   "[&_a]:text-primary [&_a]:no-underline hover:[&_a]:underline",
-  "[&_hr]:my-8 [&_hr]:border-border",
+  "[&_hr]:my-8 [&_hr]:border-borda",
   // As tabelas são a parte que quebra em telas estreitas: cada uma rola
   // sozinha, sem empurrar a página inteira para o lado.
   // `block` + `overflow-x-auto` faz cada tabela rolar dentro da própria caixa.
@@ -37,9 +37,9 @@ const ESTILO_DOCUMENTO = [
   // página inteira para o lado no celular.
   "[&_table]:block [&_table]:overflow-x-auto [&_table]:w-full",
   "[&_table]:my-5 [&_table]:text-sm [&_table]:border-collapse",
-  "[&_thead]:bg-background-elevated",
-  "[&_th]:border [&_th]:border-border [&_th]:p-2 [&_th]:text-left [&_th]:text-slate-100 [&_th]:font-semibold",
-  "[&_td]:border [&_td]:border-border [&_td]:p-2 [&_td]:align-top",
+  "[&_thead]:bg-surface-elevated",
+  "[&_th]:border [&_th]:border-borda [&_th]:p-2 [&_th]:text-left [&_th]:text-slate-100 [&_th]:font-semibold",
+  "[&_td]:border [&_td]:border-borda [&_td]:p-2 [&_td]:align-top",
 ].join(" ");
 
 export default function PoliticaPrivacidadePage() {
@@ -48,7 +48,7 @@ export default function PoliticaPrivacidadePage() {
   const emElaboracao = contemMarcadorPendente(conteudo);
 
   return (
-    <div className="min-h-screen bg-background">
+    <div className="min-h-screen bg-surface-base">
       <div className="mx-auto max-w-3xl px-4 py-8 sm:px-6 sm:py-12">
         <img src={logoFull} alt="HelpHS" className="mb-8 h-8" />
 
@@ -72,7 +72,7 @@ export default function PoliticaPrivacidadePage() {
           dangerouslySetInnerHTML={{ __html: html }}
         />
 
-        <div className="mt-12 border-t border-border pt-6">
+        <div className="mt-12 border-t border-borda pt-6">
           <Button variant="secondary" onClick={() => navigate(-1)}>
             Voltar
           </Button>

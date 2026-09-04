@@ -256,7 +256,7 @@ function AddCompanyModal({
   return (
     <Modal open onClose={onClose} title="Adicionar Empresa" size="2xl">
       {/* Tabs */}
-      <div className="flex border-b border-border mb-4 -mt-1">
+      <div className="flex border-b border-borda mb-4 -mt-1">
         {(["suggestions", "manual"] as const).map((t) => (
           <button
             key={t}
@@ -277,7 +277,7 @@ function AddCompanyModal({
       {tab === "suggestions" && (
         <div className="space-y-3">
           {confirmando ? (
-            <div className="rounded-lg border border-border p-4 space-y-3">
+            <div className="rounded-lg border border-borda p-4 space-y-3">
               <div>
                 <p className="text-sm font-medium text-slate-100">{confirmando.company_name}</p>
                 {confirmando.cnpj && (
@@ -290,7 +290,7 @@ function AddCompanyModal({
                     ? "Este cliente será vinculado à empresa:"
                     : `Estes ${confirmando.clients.length} clientes serão vinculados à empresa:`}
                 </p>
-                <ul className="max-h-48 overflow-y-auto divide-y divide-border rounded border border-border">
+                <ul className="max-h-48 overflow-y-auto divide-y divide-borda rounded border border-borda">
                   {confirmando.clients.map((c) => (
                     <li key={c.id} className="px-3 py-2">
                       <p className="text-sm text-slate-200 truncate">{c.name}</p>
@@ -330,9 +330,9 @@ function AddCompanyModal({
             </div>
           ) : (
             <div>
-              <ul className="divide-y divide-border rounded-lg border border-border overflow-hidden">
+              <ul className="divide-y divide-borda rounded-lg border border-borda overflow-hidden">
                 {pagedSugg.map((s) => (
-                  <li key={sugKey(s)} className="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-2 px-4 py-3 hover:bg-background-elevated">
+                  <li key={sugKey(s)} className="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-2 px-4 py-3 hover:bg-surface-elevated">
                     <div className="min-w-0 flex-1">
                       <p className="text-sm font-medium text-slate-100 truncate">{s.company_name}</p>
                       <div className="flex flex-wrap gap-x-3 gap-y-0.5 text-xs text-slate-500 mt-0.5">
@@ -474,9 +474,9 @@ function AssignClientModal({
             </p>
           ) : (
             <div>
-              <ul className="divide-y divide-border rounded-lg border border-border">
+              <ul className="divide-y divide-borda rounded-lg border border-borda">
                 {pagedClients.map((c) => (
-                  <li key={c.id} className="flex items-center justify-between px-3 py-2.5 hover:bg-background-elevated">
+                  <li key={c.id} className="flex items-center justify-between px-3 py-2.5 hover:bg-surface-elevated">
                     <div className="min-w-0">
                       <p className="text-sm font-medium text-slate-100 truncate">{c.name}</p>
                       <p className="text-xs text-slate-500 truncate">{c.email}</p>
@@ -625,7 +625,7 @@ export function CompanyDetailModal({
               </div>
 
               {/* Tabs */}
-              <div className="flex border-b border-border mb-4 -mt-1">
+              <div className="flex border-b border-borda mb-4 -mt-1">
                 <button
                   onClick={() => setActiveTab("clients")}
                   className={cn(
@@ -660,15 +660,15 @@ export function CompanyDetailModal({
                   </div>
 
                   {detail.clients.length === 0 ? (
-                    <div className="flex-1 flex flex-col items-center justify-center text-center py-6 rounded-lg border border-dashed border-border text-sm text-slate-500">
+                    <div className="flex-1 flex flex-col items-center justify-center text-center py-6 rounded-lg border border-dashed border-borda text-sm text-slate-500">
                       Nenhum cliente vinculado.
                       <div className="mt-2"><Button size="sm" onClick={() => setShowAssign(true)}><IconPlus />Vincular cliente</Button></div>
                     </div>
                   ) : (
                     <div className="flex-1 flex flex-col min-h-0">
-                      <ul className="divide-y divide-border rounded-lg border border-border overflow-y-auto flex-1">
+                      <ul className="divide-y divide-borda rounded-lg border border-borda overflow-y-auto flex-1">
                         {pagedClients.map((c) => (
-                          <li key={c.id} className="flex items-center justify-between px-3 py-2.5 hover:bg-background-elevated">
+                          <li key={c.id} className="flex items-center justify-between px-3 py-2.5 hover:bg-surface-elevated">
                             <div className="min-w-0 flex-1">
                               <p className="text-sm font-medium text-slate-100 truncate">{c.name}</p>
                               <p className="text-xs text-slate-500 truncate">{c.email}</p>
@@ -978,13 +978,13 @@ export default function GroupsPage() {
 
       {/* ── Left: Groups list ──────────────────────────────── */}
       <aside className={cn(
-        "shrink-0 flex flex-col w-64 border-r border-border bg-background-surface overflow-hidden",
+        "shrink-0 flex flex-col w-64 border-r border-borda bg-surface overflow-hidden",
         "transition-transform duration-300 ease-in-out",
         "absolute inset-y-0 left-0 z-30",
         sidebarOpen ? "translate-x-0" : "-translate-x-full",
         "xl:relative xl:inset-auto xl:z-auto xl:translate-x-0",
       )}>
-        <div className="flex items-center justify-between px-4 py-4 border-b border-border">
+        <div className="flex items-center justify-between px-4 py-4 border-b border-borda">
           <h1 className="text-sm font-semibold text-slate-700 dark:text-slate-300">Grupos</h1>
           <div className="flex items-center gap-1">
             <button
@@ -997,7 +997,7 @@ export default function GroupsPage() {
             {selectedGroup && (
               <button
                 onClick={() => setSidebarOpen(false)}
-                className="xl:hidden p-1.5 rounded-lg text-slate-400 hover:text-slate-600 dark:hover:text-slate-200 hover:bg-background-elevated transition-colors cursor-pointer"
+                className="xl:hidden p-1.5 rounded-lg text-slate-400 hover:text-slate-600 dark:hover:text-slate-200 hover:bg-surface-elevated transition-colors cursor-pointer"
                 title="Fechar"
               >
                 <IconX />
@@ -1006,7 +1006,7 @@ export default function GroupsPage() {
           </div>
         </div>
 
-        <div className="px-3 py-2 border-b border-border">
+        <div className="px-3 py-2 border-b border-borda">
           <div className="relative">
             <svg className="absolute left-2.5 top-1/2 -translate-y-1/2 w-3.5 h-3.5 text-slate-400 pointer-events-none" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
               <path strokeLinecap="round" strokeLinejoin="round" d="M21 21l-4.35-4.35M17 11A6 6 0 111 11a6 6 0 0116 0z" />
@@ -1016,7 +1016,7 @@ export default function GroupsPage() {
               placeholder="Pesquisar grupos..."
               value={groupSearch}
               onChange={(e) => setGroupSearch(e.target.value)}
-              className="w-full pl-8 pr-3 py-1.5 text-xs rounded-md bg-background-elevated border border-transparent focus:border-primary focus:outline-none text-slate-700 dark:text-slate-300 placeholder-slate-400"
+              className="w-full pl-8 pr-3 py-1.5 text-xs rounded-md bg-surface-elevated border border-transparent focus:border-primary focus:outline-none text-slate-700 dark:text-slate-300 placeholder-slate-400"
             />
           </div>
         </div>
@@ -1048,7 +1048,7 @@ export default function GroupsPage() {
                   "w-full text-left px-4 py-3 flex items-center justify-between gap-2 transition-colors cursor-pointer",
                   selectedGroup?.id === g.id
                     ? "bg-primary/10 text-primary border-l-2 border-primary"
-                    : "text-slate-600 dark:text-slate-400 hover:bg-slate-50 dark:hover:bg-background-elevated",
+                    : "text-slate-600 dark:text-slate-400 hover:bg-slate-50 dark:hover:bg-surface-elevated",
                 )}
               >
                 <div className="min-w-0">
@@ -1072,7 +1072,7 @@ export default function GroupsPage() {
             "xl:hidden mb-4 flex items-center gap-1.5 text-xs font-medium border rounded-lg px-3 py-1.5 transition-colors cursor-pointer",
             selectedGroup
               ? "text-primary border-primary/30 bg-primary/10 hover:bg-primary/20"
-              : "text-slate-400 border-border/50 bg-background-elevated hover:bg-background-surface",
+              : "text-slate-400 border-borda/50 bg-surface-elevated hover:bg-surface",
           )}
         >
           <IconChevronLeft />
@@ -1116,7 +1116,7 @@ export default function GroupsPage() {
             {loadingDetail ? (
               <div className="flex justify-center py-12"><Spinner /></div>
             ) : !groupDetail || groupDetail.companies.length === 0 ? (
-              <div className="text-center py-14 rounded-xl border border-dashed border-border">
+              <div className="text-center py-14 rounded-xl border border-dashed border-borda">
                 <div className="flex justify-center mb-2 text-slate-300 dark:text-slate-700"><IconBuilding /></div>
                 <p className="text-sm text-slate-500 dark:text-slate-400">Nenhuma empresa neste grupo</p>
                 <Button size="sm" className="mt-3" onClick={() => setShowAddCompany(true)}><IconPlus />Adicionar empresa</Button>
@@ -1124,7 +1124,7 @@ export default function GroupsPage() {
             ) : (
               <div className="grid gap-3 sm:grid-cols-2 xl:grid-cols-3">
                 {groupDetail.companies.map((c) => (
-                  <div key={c.id} className="rounded-xl border border-border bg-background-surface hover:border-primary/40 transition-colors">
+                  <div key={c.id} className="rounded-xl border border-borda bg-surface hover:border-primary/40 transition-colors">
                     <div className="p-4">
                       <div className="flex items-start justify-between gap-2">
                         <button onClick={() => setSelectedCompany(c)} className="flex-1 text-left cursor-pointer min-w-0">
@@ -1156,7 +1156,7 @@ export default function GroupsPage() {
             )}
 
             {/* ── Notas — mobile only (below companies) ── */}
-            <div className="mt-5 xl:hidden rounded-xl border border-amber-200/50 dark:border-amber-800/20 bg-background-surface overflow-hidden">
+            <div className="mt-5 xl:hidden rounded-xl border border-amber-200/50 dark:border-amber-800/20 bg-surface overflow-hidden">
               <div className="flex items-center justify-between px-4 py-3 border-b border-amber-200/50 dark:border-amber-800/20">
                 <p className="text-xs font-bold uppercase tracking-widest text-amber-600 dark:text-amber-500/80 flex items-center gap-1.5">
                   <IconNote />Notas do grupo
@@ -1184,8 +1184,8 @@ export default function GroupsPage() {
 
       {/* ── Right: Notes panel — desktop only ─────────────── */}
       {selectedGroup && (
-        <aside className="hidden xl:flex w-72 shrink-0 flex-col border-l border-border bg-background-surface overflow-hidden">
-          <div className="flex items-center justify-between px-4 py-4 border-b border-border">
+        <aside className="hidden xl:flex w-72 shrink-0 flex-col border-l border-borda bg-surface overflow-hidden">
+          <div className="flex items-center justify-between px-4 py-4 border-b border-borda">
             <p className="text-xs font-bold uppercase tracking-widest text-amber-600 dark:text-amber-500/80 flex items-center gap-1.5">
               <IconNote />
               Notas do grupo

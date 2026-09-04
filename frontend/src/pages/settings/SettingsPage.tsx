@@ -235,7 +235,7 @@ function TagsSection({
           </p>
         ) : (
           <div>
-            <div className="divide-y divide-border" style={{ minHeight: 520 }}>
+            <div className="divide-y divide-borda" style={{ minHeight: 520 }}>
               {tags.slice((page - 1) * PAGE_SIZE, page * PAGE_SIZE).map((tag) => (
                 <div
                   key={tag.id}
@@ -263,7 +263,7 @@ function TagsSection({
                 </div>
               ))}
             </div>
-            <div className="px-4 py-2 border-t border-border">
+            <div className="px-4 py-2 border-t border-borda">
               <Pagination
                 page={page}
                 pageSize={PAGE_SIZE}
@@ -298,7 +298,7 @@ function TagsSection({
           <ColorPicker value={newColor} onChange={setNewColor} />
 
           {/* Preview */}
-          <div className="rounded-xl border border-border bg-background-elevated p-4">
+          <div className="rounded-xl border border-borda bg-surface-elevated p-4">
             <p className="text-[11px] font-semibold uppercase tracking-widest text-slate-500 mb-3">Prévia</p>
             <div className="flex items-center gap-3">
               <div
@@ -343,7 +343,7 @@ function TagsSection({
           <ColorPicker value={editColor} onChange={setEditColor} />
 
           {/* Preview */}
-          <div className="rounded-xl border border-border bg-background-elevated p-4">
+          <div className="rounded-xl border border-borda bg-surface-elevated p-4">
             <p className="text-[11px] font-semibold uppercase tracking-widest text-slate-500 mb-3">Prévia</p>
             <div className="flex items-center gap-3">
               <div
@@ -389,7 +389,7 @@ function TagsSection({
 
           {/* Tag being deleted */}
           {deleteTarget && (
-            <div className="flex items-center gap-3 rounded-xl border border-border bg-background-elevated px-4 py-3">
+            <div className="flex items-center gap-3 rounded-xl border border-borda bg-surface-elevated px-4 py-3">
               <div className="w-8 h-8 rounded-lg shrink-0" style={{ backgroundColor: deleteTarget.color }} />
               <div>
                 <p className="text-sm font-medium text-slate-100">{deleteTarget.name}</p>

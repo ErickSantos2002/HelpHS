@@ -227,7 +227,7 @@ export default function RegisterPage() {
       </div>
 
       {/* ── Right panel 40% — form ──────────────────────────── */}
-      <div className="flex flex-1 lg:w-2/5 flex-col items-center justify-center bg-background px-6 py-12 overflow-y-auto">
+      <div className="flex flex-1 lg:w-2/5 flex-col items-center justify-center bg-surface-base px-6 py-12 overflow-y-auto">
         <div className="w-full max-w-sm space-y-7">
           {/* Mobile logo */}
           <div className="flex lg:hidden items-center justify-center gap-2.5">

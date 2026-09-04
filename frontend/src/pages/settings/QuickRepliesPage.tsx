@@ -142,7 +142,7 @@ function QuickReplyModal({
               placeholder="bomdia"
               maxLength={50}
               autoFocus
-              className="w-full rounded-lg border border-border bg-background-elevated px-3 py-2 text-sm text-slate-100 placeholder:text-slate-500 focus:outline-none focus:ring-2 focus:ring-primary focus:border-transparent transition-colors"
+              className="w-full rounded-lg border border-borda bg-surface-elevated px-3 py-2 text-sm text-slate-100 placeholder:text-slate-500 focus:outline-none focus:ring-2 focus:ring-primary focus:border-transparent transition-colors"
             />
           </div>
           <p className="text-xs text-slate-500">
@@ -271,7 +271,7 @@ export default function QuickRepliesPage() {
 
       <Card padding="none">
         {/* Busca */}
-        <div className="border-b border-border p-3">
+        <div className="border-b border-borda p-3">
           <input
             value={search}
             onChange={(e) => {
@@ -279,7 +279,7 @@ export default function QuickRepliesPage() {
               setPage(1);
             }}
             placeholder="Buscar por atalho, título ou conteúdo…"
-            className="w-full rounded-lg border border-border bg-background-elevated px-3 py-2 text-sm text-slate-100 placeholder:text-slate-500 focus:outline-none focus:ring-2 focus:ring-primary focus:border-transparent transition-colors"
+            className="w-full rounded-lg border border-borda bg-surface-elevated px-3 py-2 text-sm text-slate-100 placeholder:text-slate-500 focus:outline-none focus:ring-2 focus:ring-primary focus:border-transparent transition-colors"
           />
         </div>
 
@@ -294,11 +294,11 @@ export default function QuickRepliesPage() {
               : "Nenhuma resposta encontrada para esta busca."}
           </div>
         ) : (
-          <ul className="divide-y divide-border">
+          <ul className="divide-y divide-borda">
             {paged.map((reply) => (
               <li
                 key={reply.id}
-                className="flex items-start gap-3 px-4 py-3 transition-colors hover:bg-slate-50 dark:hover:bg-background-elevated"
+                className="flex items-start gap-3 px-4 py-3 transition-colors hover:bg-slate-50 dark:hover:bg-surface-elevated"
               >
                 <div className="min-w-0 flex-1">
                   <div className="flex flex-wrap items-center gap-2">
@@ -313,7 +313,7 @@ export default function QuickRepliesPage() {
                         "rounded-md px-1.5 py-0.5 text-[10px] font-medium",
                         reply.is_active
                           ? "bg-success/10 text-success-700 dark:text-success-400"
-                          : "bg-slate-200 text-slate-600 dark:bg-background-elevated dark:text-slate-500",
+                          : "bg-slate-200 text-slate-600 dark:bg-surface-elevated dark:text-slate-500",
                       )}
                     >
                       {reply.is_active ? "Ativa" : "Inativa"}

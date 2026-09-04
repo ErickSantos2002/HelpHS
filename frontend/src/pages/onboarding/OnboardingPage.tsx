@@ -35,14 +35,14 @@ function StepIndicator({ current, total }: { current: number; total: number }) {
                 ? "bg-primary text-white"
                 : i === current
                   ? "bg-primary/20 border-2 border-primary text-primary"
-                  : "bg-background-elevated border border-border text-slate-500"
+                  : "bg-surface-elevated border border-borda text-slate-500"
             }`}
           >
             {i < current ? "✓" : i + 1}
           </div>
           {i < total - 1 && (
             <div
-              className={`w-12 h-0.5 ${i < current ? "bg-primary" : "bg-border"}`}
+              className={`w-12 h-0.5 ${i < current ? "bg-primary" : "bg-borda"}`}
             />
           )}
         </div>
@@ -191,7 +191,7 @@ function StepCompany({
             onChange={(e) => setCnpj(maskCnpjInput(e.target.value))}
             onBlur={handleCnpjBlur}
             placeholder="00.000.000/0000-00"
-            className="w-full rounded-lg border border-border bg-background-elevated px-3 py-2 text-sm text-slate-100 placeholder:text-slate-500 focus:outline-none focus:ring-2 focus:ring-primary focus:border-transparent transition-colors"
+            className="w-full rounded-lg border border-borda bg-surface-elevated px-3 py-2 text-sm text-slate-100 placeholder:text-slate-500 focus:outline-none focus:ring-2 focus:ring-primary focus:border-transparent transition-colors"
           />
           {lookingCnpj && (
             <div className="absolute right-3 top-2.5">
@@ -219,7 +219,7 @@ function StepCompany({
             onChange={(e) => setCep(formatCep(e.target.value))}
             onBlur={handleCepBlur}
             placeholder="00000-000"
-            className="w-full rounded-lg border border-border bg-background-elevated px-3 py-2 text-sm text-slate-100 placeholder:text-slate-500 focus:outline-none focus:ring-2 focus:ring-primary focus:border-transparent transition-colors"
+            className="w-full rounded-lg border border-borda bg-surface-elevated px-3 py-2 text-sm text-slate-100 placeholder:text-slate-500 focus:outline-none focus:ring-2 focus:ring-primary focus:border-transparent transition-colors"
           />
           {lookingCep && (
             <div className="absolute right-3 top-2.5">
@@ -250,7 +250,7 @@ function StepCompany({
             onChange={(e) => setState(e.target.value.toUpperCase().slice(0, 2))}
             placeholder="PE"
             maxLength={2}
-            className="w-full rounded-lg border border-border bg-background-elevated px-3 py-2 text-sm text-slate-100 placeholder:text-slate-500 focus:outline-none focus:ring-2 focus:ring-primary focus:border-transparent transition-colors"
+            className="w-full rounded-lg border border-borda bg-surface-elevated px-3 py-2 text-sm text-slate-100 placeholder:text-slate-500 focus:outline-none focus:ring-2 focus:ring-primary focus:border-transparent transition-colors"
           />
         </div>
       </div>
@@ -348,7 +348,7 @@ function StepEquipment({ onNext }: { onNext: () => void }) {
       </div>
 
       {products.length === 0 ? (
-        <div className="rounded-lg border border-border bg-background-elevated p-4 text-sm text-slate-400 text-center">
+        <div className="rounded-lg border border-borda bg-surface-elevated p-4 text-sm text-slate-400 text-center">
           Nenhum produto cadastrado ainda. Você poderá adicionar equipamentos
           depois.
         </div>
@@ -365,7 +365,7 @@ function StepEquipment({ onNext }: { onNext: () => void }) {
             <select
               value={productId}
               onChange={(e) => setProductId(e.target.value)}
-              className="w-full rounded-lg border border-border bg-background-elevated px-3 py-2 text-sm text-slate-100 focus:outline-none focus:ring-2 focus:ring-primary focus:border-transparent transition-colors"
+              className="w-full rounded-lg border border-borda bg-surface-elevated px-3 py-2 text-sm text-slate-100 focus:outline-none focus:ring-2 focus:ring-primary focus:border-transparent transition-colors"
             >
               {products.map((p) => (
                 <option key={p.id} value={p.id}>
@@ -418,7 +418,7 @@ function StepEquipment({ onNext }: { onNext: () => void }) {
           {myEquipments.map((eq) => (
             <div
               key={eq.id}
-              className="flex items-center gap-3 rounded-lg border border-border bg-background-elevated px-4 py-3"
+              className="flex items-center gap-3 rounded-lg border border-borda bg-surface-elevated px-4 py-3"
             >
               <div className="w-2 h-2 rounded-full bg-primary shrink-0" />
               <div className="min-w-0">
@@ -495,7 +495,7 @@ export default function OnboardingPage() {
   const { logout } = useAuth();
 
   return (
-    <div className="min-h-screen flex items-center justify-center bg-background px-4 py-8">
+    <div className="min-h-screen flex items-center justify-center bg-surface-base px-4 py-8">
       <div className="w-full max-w-md space-y-6">
         {/* Header */}
         <div className="text-center space-y-1">
@@ -513,7 +513,7 @@ export default function OnboardingPage() {
         <StepIndicator current={step} total={STEPS.length} />
 
         {/* Card */}
-        <div className="rounded-xl border border-border bg-background-surface p-6 shadow-xl">
+        <div className="rounded-xl border border-borda bg-surface p-6 shadow-xl">
           {step === 0 && <StepCompany onNext={() => setStep(1)} />}
           {step === 1 && <StepEquipment onNext={() => setStep(2)} />}
           {step === 2 && <StepDone />}

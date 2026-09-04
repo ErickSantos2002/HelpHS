@@ -183,8 +183,8 @@ export function Sidebar({ collapsed, mobileOpen, onMobileClose }: SidebarProps) 
         id="sidebar-nav"
         className={cn(
           "fixed inset-y-0 left-0 z-[40] flex flex-col",
-          "bg-background-surface",
-          "border-r border-border",
+          "bg-surface",
+          "border-r border-borda",
           "transition-[width] duration-300 ease-in-out overflow-hidden",
           // Desktop: width driven by collapsed state
           collapsed ? "md:w-[72px]" : "md:w-64",
@@ -220,7 +220,7 @@ export function Sidebar({ collapsed, mobileOpen, onMobileClose }: SidebarProps) 
               )}
               {/* Separador no modo colapsado */}
               {collapsed && (
-                <div className="mx-auto w-6 border-t border-border mb-1" />
+                <div className="mx-auto w-6 border-t border-borda mb-1" />
               )}
 
               <div className="space-y-0.5">
@@ -242,7 +242,7 @@ export function Sidebar({ collapsed, mobileOpen, onMobileClose }: SidebarProps) 
                           : [
                               !collapsed && "border-l-2 border-transparent pl-[calc(0.75rem-2px)]",
                               "text-slate-500 dark:text-slate-400",
-                              "hover:bg-background-elevated",
+                              "hover:bg-surface-elevated",
                               "hover:text-slate-900 dark:hover:text-slate-100",
                             ],
                       )
@@ -268,7 +268,7 @@ export function Sidebar({ collapsed, mobileOpen, onMobileClose }: SidebarProps) 
 
         {/* Footer */}
         {!collapsed && (
-          <div className="shrink-0 border-t border-border px-5 py-4 space-y-0.5 flex flex-col items-center">
+          <div className="shrink-0 border-t border-borda px-5 py-4 space-y-0.5 flex flex-col items-center">
             <div className="relative group">
               <button
                 onClick={() => setChangelogOpen(true)}

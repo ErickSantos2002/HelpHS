@@ -99,20 +99,20 @@ function DetailModal({ log, onClose }: { log: AuditLog; onClose: () => void }) {
 
         {/* Info grid */}
         <div className="grid grid-cols-2 gap-3">
-          <div className="rounded-lg bg-background-elevated border border-border/40 p-3 space-y-0.5">
+          <div className="rounded-lg bg-surface-elevated border border-borda/40 p-3 space-y-0.5">
             <p className="text-[10px] text-slate-500 uppercase tracking-wide">Data / Hora</p>
             <p className="text-slate-700 dark:text-slate-200 text-xs font-mono">{formatDate(log.created_at)}</p>
           </div>
-          <div className="rounded-lg bg-background-elevated border border-border/40 p-3 space-y-0.5">
+          <div className="rounded-lg bg-surface-elevated border border-borda/40 p-3 space-y-0.5">
             <p className="text-[10px] text-slate-500 uppercase tracking-wide">IP</p>
             <p className="text-slate-700 dark:text-slate-200 text-xs font-mono">{log.ip_address ?? "—"}</p>
           </div>
-          <div className="rounded-lg bg-background-elevated border border-border/40 p-3 space-y-0.5">
+          <div className="rounded-lg bg-surface-elevated border border-borda/40 p-3 space-y-0.5">
             <p className="text-[10px] text-slate-500 uppercase tracking-wide">Usuário</p>
             <p className="text-slate-700 dark:text-slate-200 text-xs">{log.user_name ?? "—"}</p>
             {log.user_id && <p className="text-slate-400 dark:text-slate-600 text-[10px] font-mono">{log.user_id}</p>}
           </div>
-          <div className="rounded-lg bg-background-elevated border border-border/40 p-3 space-y-0.5">
+          <div className="rounded-lg bg-surface-elevated border border-borda/40 p-3 space-y-0.5">
             <p className="text-[10px] text-slate-500 uppercase tracking-wide">ID Entidade</p>
             <p className="text-slate-700 dark:text-slate-200 text-[10px] font-mono break-all">{log.entity_id ?? "—"}</p>
           </div>
@@ -120,7 +120,7 @@ function DetailModal({ log, onClose }: { log: AuditLog; onClose: () => void }) {
 
         {/* User agent */}
         {log.user_agent && (
-          <div className="rounded-lg bg-background-elevated border border-border/40 p-3 space-y-0.5">
+          <div className="rounded-lg bg-surface-elevated border border-borda/40 p-3 space-y-0.5">
             <p className="text-[10px] text-slate-500 uppercase tracking-wide">User Agent</p>
             <p className="text-slate-500 dark:text-slate-400 text-xs break-all">{log.user_agent}</p>
           </div>
@@ -191,7 +191,7 @@ export default function AuditLogsPage() {
     setDateFrom(""); setDateTo("");
   }
 
-  const dateInputCls = "rounded-lg border border-border/60 bg-background-elevated px-3 py-[7px] text-sm text-slate-700 dark:text-slate-200 focus:outline-none focus:ring-2 focus:ring-primary transition-colors [color-scheme:light] dark:[color-scheme:dark]";
+  const dateInputCls = "rounded-lg border border-borda/60 bg-surface-elevated px-3 py-[7px] text-sm text-slate-700 dark:text-slate-200 focus:outline-none focus:ring-2 focus:ring-primary transition-colors [color-scheme:light] dark:[color-scheme:dark]";
 
   return (
     <div className="space-y-5">
@@ -202,7 +202,7 @@ export default function AuditLogsPage() {
           <p className="text-slate-500 dark:text-slate-400 text-sm mt-0.5">Registro completo de operações — conformidade LGPD</p>
         </div>
         {!loading && (
-          <span className="self-center sm:self-auto text-xs text-slate-500 bg-background-elevated border border-border/60 px-3 py-1.5 rounded-full">
+          <span className="self-center sm:self-auto text-xs text-slate-500 bg-surface-elevated border border-borda/60 px-3 py-1.5 rounded-full">
             {total} {total === 1 ? "registro" : "registros"}
           </span>
         )}
@@ -210,7 +210,7 @@ export default function AuditLogsPage() {
 
       {/* Filters */}
       <Card padding="none">
-        <div className="px-4 py-3 border-b border-border flex items-center gap-2">
+        <div className="px-4 py-3 border-b border-borda flex items-center gap-2">
           <span className="text-slate-500">{IC.Filter}</span>
           <p className="text-sm font-semibold text-slate-700 dark:text-slate-200">Filtros</p>
           {hasFilters && (
@@ -248,7 +248,7 @@ export default function AuditLogsPage() {
       {/* Logs list */}
       <Card padding="none">
         {/* Column headers — desktop only */}
-        <div className="hidden lg:grid grid-cols-[1fr_110px_110px_160px_100px_44px] px-4 py-2.5 border-b border-border bg-background-elevated/30">
+        <div className="hidden lg:grid grid-cols-[1fr_110px_110px_160px_100px_44px] px-4 py-2.5 border-b border-borda bg-surface-elevated/30">
           {["Evento", "Entidade", "Ação", "Usuário", "IP", ""].map((h, i) => (
             <span key={i} className="text-[11px] font-medium text-slate-500 uppercase tracking-wide">{h}</span>
           ))}
@@ -258,14 +258,14 @@ export default function AuditLogsPage() {
           <div className="flex h-48 items-center justify-center"><Spinner /></div>
         ) : logs.length === 0 ? (
           <div className="flex flex-col items-center justify-center py-16 text-center">
-            <div className="w-10 h-10 rounded-full bg-background-elevated border border-border flex items-center justify-center text-slate-600 mb-3">{IC.Filter}</div>
+            <div className="w-10 h-10 rounded-full bg-surface-elevated border border-borda flex items-center justify-center text-slate-600 mb-3">{IC.Filter}</div>
             <p className="text-sm text-slate-400">Nenhum registro encontrado.</p>
             {hasFilters && (
               <button onClick={clearFilters} className="mt-2 text-sm text-primary hover:text-primary/80 transition-colors cursor-pointer">Limpar filtros</button>
             )}
           </div>
         ) : (
-          <div className="divide-y divide-border">
+          <div className="divide-y divide-borda">
             {logs.map((log) => {
               const badge = ACTION_BADGE[log.action] ?? { label: log.action, cls: "bg-slate-100 text-slate-500 border border-slate-300 dark:bg-slate-800/60 dark:text-slate-400 dark:border-slate-600/40" };
               const hasData = (log.old_data && Object.keys(log.old_data).length > 0) || (log.new_data && Object.keys(log.new_data).length > 0);
@@ -273,7 +273,7 @@ export default function AuditLogsPage() {
                 <div key={log.id}>
                   {/* Mobile layout */}
                   <div
-                    className="lg:hidden flex items-start justify-between gap-3 px-4 py-3 hover:bg-background-elevated/40 transition-colors cursor-pointer"
+                    className="lg:hidden flex items-start justify-between gap-3 px-4 py-3 hover:bg-surface-elevated/40 transition-colors cursor-pointer"
                     onClick={() => setDetail(log)}
                   >
                     <div className="flex-1 min-w-0 space-y-1">
@@ -293,7 +293,7 @@ export default function AuditLogsPage() {
                     </div>
                     <button
                       title="Ver detalhes"
-                      className={`shrink-0 p-1.5 rounded-lg transition-colors cursor-pointer ${hasData ? "text-primary hover:bg-primary/10" : "text-slate-400 hover:bg-background-elevated"}`}
+                      className={`shrink-0 p-1.5 rounded-lg transition-colors cursor-pointer ${hasData ? "text-primary hover:bg-primary/10" : "text-slate-400 hover:bg-surface-elevated"}`}
                       onClick={(e) => { e.stopPropagation(); setDetail(log); }}
                     >
                       {IC.Eye}
@@ -301,7 +301,7 @@ export default function AuditLogsPage() {
                   </div>
 
                   {/* Desktop layout */}
-                  <div className="hidden lg:grid grid-cols-[1fr_110px_110px_160px_100px_44px] items-center px-4 py-3 hover:bg-background-elevated/40 transition-colors">
+                  <div className="hidden lg:grid grid-cols-[1fr_110px_110px_160px_100px_44px] items-center px-4 py-3 hover:bg-surface-elevated/40 transition-colors">
                     <div className="min-w-0">
                       <div className="flex items-center gap-1.5 text-xs text-slate-500 dark:text-slate-400">
                         <span className="text-slate-400 dark:text-slate-600 shrink-0">{IC.Clock}</span>
@@ -326,7 +326,7 @@ export default function AuditLogsPage() {
                     <button
                       onClick={() => setDetail(log)}
                       title="Ver detalhes"
-                      className={`p-1.5 rounded-lg transition-colors cursor-pointer ${hasData ? "text-primary hover:bg-primary/10" : "text-slate-400 dark:text-slate-600 hover:text-slate-600 dark:hover:text-slate-400 hover:bg-background-elevated"}`}
+                      className={`p-1.5 rounded-lg transition-colors cursor-pointer ${hasData ? "text-primary hover:bg-primary/10" : "text-slate-400 dark:text-slate-600 hover:text-slate-600 dark:hover:text-slate-400 hover:bg-surface-elevated"}`}
                     >
                       {IC.Eye}
                     </button>
@@ -338,7 +338,7 @@ export default function AuditLogsPage() {
         )}
 
         {!loading && total > 0 && (
-          <div className="px-4 py-2 border-t border-border">
+          <div className="px-4 py-2 border-t border-borda">
             <Pagination page={page} pageSize={PAGE_SIZE} total={total} onPageChange={setPage} itemLabel="registros" />
           </div>
         )}

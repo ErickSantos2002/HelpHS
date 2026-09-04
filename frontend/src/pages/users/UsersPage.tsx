@@ -133,7 +133,7 @@ function UserAvatar({ name }: { name: string }) {
     .join("")
     .toUpperCase();
   return (
-    <div className="w-9 h-9 rounded-full bg-background-elevated border border-border/60 flex items-center justify-center shrink-0 text-sm font-semibold text-slate-600 dark:text-slate-200 select-none">
+    <div className="w-9 h-9 rounded-full bg-surface-elevated border border-borda/60 flex items-center justify-center shrink-0 text-sm font-semibold text-slate-600 dark:text-slate-200 select-none">
       {initials || "?"}
     </div>
   );
@@ -191,7 +191,7 @@ function StatusPill({ user, onToggled }: { user: UserSummary; onToggled: (u: Use
 
 function UserPreviewCard({ user }: { user: UserSummary }) {
   return (
-    <div className="flex items-center gap-3 rounded-xl border border-border bg-background-elevated px-4 py-3">
+    <div className="flex items-center gap-3 rounded-xl border border-borda bg-surface-elevated px-4 py-3">
       <UserAvatar name={user.name} />
       <div className="flex-1 min-w-0">
         <p className="text-sm font-medium text-slate-800 dark:text-slate-100 truncate">{user.name}</p>
@@ -477,7 +477,7 @@ export default function UsersPage() {
             {IC.Search}
           </span>
           <input
-            className="w-full pl-9 pr-3 py-2 rounded-xl border border-border/60 bg-background-surface text-sm text-slate-700 dark:text-slate-200 placeholder:text-slate-500 focus:outline-none focus:ring-2 focus:ring-primary focus:border-transparent transition-colors"
+            className="w-full pl-9 pr-3 py-2 rounded-xl border border-borda/60 bg-surface text-sm text-slate-700 dark:text-slate-200 placeholder:text-slate-500 focus:outline-none focus:ring-2 focus:ring-primary focus:border-transparent transition-colors"
             placeholder="Buscar por nome ou e-mail…"
             value={search}
             onChange={(e) => { setSearch(e.target.value); setPage(1); }}
@@ -499,7 +499,7 @@ export default function UsersPage() {
           {hasFilters && (
             <button
               onClick={() => { setSearch(""); setRoleFilter(""); setStatusFilter(""); setPage(1); }}
-              className="text-xs text-slate-500 hover:text-slate-300 transition-colors px-2 py-1.5 rounded-lg hover:bg-background-elevated cursor-pointer"
+              className="text-xs text-slate-500 hover:text-slate-300 transition-colors px-2 py-1.5 rounded-lg hover:bg-surface-elevated cursor-pointer"
             >
               Limpar filtros
             </button>
@@ -511,7 +511,7 @@ export default function UsersPage() {
 
       {/* Card */}
       <Card padding="none">
-        <div className="px-4 py-3 border-b border-border flex items-center justify-between">
+        <div className="px-4 py-3 border-b border-borda flex items-center justify-between">
           <div>
             <p className="text-sm font-semibold text-slate-700 dark:text-slate-200">Lista de usuários</p>
             <p className="text-xs text-slate-500 mt-0.5">
@@ -526,7 +526,7 @@ export default function UsersPage() {
           </div>
         ) : users.length === 0 ? (
           <div className="flex flex-col items-center justify-center py-16 text-center">
-            <div className="w-12 h-12 rounded-full bg-background-elevated border border-border flex items-center justify-center text-slate-600 mb-3">
+            <div className="w-12 h-12 rounded-full bg-surface-elevated border border-borda flex items-center justify-center text-slate-600 mb-3">
               {IC.User}
             </div>
             <p className="text-sm text-slate-400">
@@ -543,11 +543,11 @@ export default function UsersPage() {
           </div>
         ) : (
           <>
-            <div className="divide-y divide-border" style={{ minHeight: 520 }}>
+            <div className="divide-y divide-borda" style={{ minHeight: 520 }}>
               {users.map((u) => (
                 <div
                   key={u.id}
-                  className="flex items-center gap-4 px-4 py-3 hover:bg-background-elevated/40 transition-colors"
+                  className="flex items-center gap-4 px-4 py-3 hover:bg-surface-elevated/40 transition-colors"
                 >
                   {/* Avatar */}
                   <UserAvatar name={u.name} />
@@ -597,7 +597,7 @@ export default function UsersPage() {
               ))}
             </div>
 
-            <div className="px-4 py-2 border-t border-border">
+            <div className="px-4 py-2 border-t border-borda">
               <Pagination
                 page={page}
                 pageSize={PAGE_SIZE}

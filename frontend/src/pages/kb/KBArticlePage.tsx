@@ -52,12 +52,12 @@ function MarkdownContent({ content }: { content: string }) {
         prose-p:text-slate-300 prose-p:leading-relaxed
         prose-a:text-primary prose-a:no-underline hover:prose-a:underline
         prose-strong:text-slate-100
-        prose-code:text-primary prose-code:bg-background-elevated prose-code:px-1 prose-code:rounded
-        prose-pre:bg-background-elevated prose-pre:border prose-pre:border-border prose-pre:overflow-x-auto
+        prose-code:text-primary prose-code:bg-surface-elevated prose-code:px-1 prose-code:rounded
+        prose-pre:bg-surface-elevated prose-pre:border prose-pre:border-borda prose-pre:overflow-x-auto
         prose-ul:text-slate-300 prose-ol:text-slate-300
         prose-li:marker:text-slate-500
         prose-blockquote:border-l-primary prose-blockquote:text-slate-400
-        prose-hr:border-border"
+        prose-hr:border-borda"
       dangerouslySetInnerHTML={{ __html: html }}
     />
   );
@@ -94,7 +94,7 @@ function CommentForm({ onSubmit, placeholder = "Deixe um comentário…", autoFo
           value={content}
           onChange={(e) => setContent(e.target.value)}
           placeholder={placeholder}
-          className="flex-1 resize-none rounded-lg border border-border/60 bg-background-elevated px-3 py-2 text-sm text-slate-200 placeholder:text-slate-500 focus:outline-none focus:ring-2 focus:ring-primary focus:border-transparent transition-colors max-h-24 overflow-y-auto leading-relaxed break-words"
+          className="flex-1 resize-none rounded-lg border border-borda/60 bg-surface-elevated px-3 py-2 text-sm text-slate-200 placeholder:text-slate-500 focus:outline-none focus:ring-2 focus:ring-primary focus:border-transparent transition-colors max-h-24 overflow-y-auto leading-relaxed break-words"
           onKeyDown={(e) => { if (e.key === "Enter" && !e.shiftKey) { e.preventDefault(); handleSubmit(e as unknown as React.FormEvent); } }}
         />
         <button
@@ -131,7 +131,7 @@ function CommentItem({ comment, currentUserId, isStaff, onReply, onDelete }: {
   return (
     <div className="space-y-3">
       <div className="flex gap-3">
-        <div className="w-8 h-8 rounded-full bg-background-elevated border border-border/50 flex items-center justify-center shrink-0 text-xs font-semibold text-slate-300">
+        <div className="w-8 h-8 rounded-full bg-surface-elevated border border-borda/50 flex items-center justify-center shrink-0 text-xs font-semibold text-slate-300">
           {comment.author_name.charAt(0).toUpperCase()}
         </div>
         <div className="flex-1 min-w-0">
@@ -185,7 +185,7 @@ function CommentItem({ comment, currentUserId, isStaff, onReply, onDelete }: {
       )}
 
       {showReplies && replyCount > 0 && (
-        <div className="ml-11 space-y-4 border-l-2 border-border/40 pl-4">
+        <div className="ml-11 space-y-4 border-l-2 border-borda/40 pl-4">
           {comment.replies.map((reply) => (
             <CommentItem key={reply.id} comment={reply} currentUserId={currentUserId} isStaff={isStaff} onReply={onReply} onDelete={onDelete} />
           ))}
@@ -199,7 +199,7 @@ function CommentItem({ comment, currentUserId, isStaff, onReply, onDelete }: {
 
 function PropRow({ icon, label, children }: { icon: React.JSX.Element; label: string; children: React.ReactNode }) {
   return (
-    <div className="flex items-start gap-3 py-2.5 border-b border-border/30 last:border-0">
+    <div className="flex items-start gap-3 py-2.5 border-b border-borda/30 last:border-0">
       <span className="mt-0.5 shrink-0 text-slate-500">{icon}</span>
       <div className="min-w-0 flex-1">
         <p className="mb-0.5 text-[10px] font-semibold uppercase tracking-widest text-slate-500">{label}</p>
@@ -283,7 +283,7 @@ export default function KBArticlePage() {
   return (
     <div className="space-y-5 pb-10">
       {/* ── Header ───────────────────────────────────────────── */}
-      <div className="flex flex-col sm:flex-row sm:items-start sm:justify-between gap-4 rounded-2xl border border-border/40 bg-background-surface px-5 py-4">
+      <div className="flex flex-col sm:flex-row sm:items-start sm:justify-between gap-4 rounded-2xl border border-borda/40 bg-surface px-5 py-4">
         <div className="min-w-0 text-center sm:text-left">
           <button
             onClick={() => navigate("/kb")}
@@ -300,7 +300,7 @@ export default function KBArticlePage() {
           <div className="flex justify-center sm:justify-end">
             <button
               onClick={() => navigate(`/kb/${article.id}/edit`)}
-              className="flex items-center gap-2 rounded-xl border border-border/50 bg-background-elevated px-4 py-2 text-sm font-semibold text-slate-200 hover:border-border hover:bg-background-elevated/80 transition-colors cursor-pointer"
+              className="flex items-center gap-2 rounded-xl border border-borda/50 bg-surface-elevated px-4 py-2 text-sm font-semibold text-slate-200 hover:border-borda hover:bg-surface-elevated/80 transition-colors cursor-pointer"
             >
               {IC.Edit}
               Editar artigo
@@ -314,7 +314,7 @@ export default function KBArticlePage() {
         {/* ── Main column ───────────────────────────────────── */}
         <div className="flex flex-col gap-5 min-w-0">
           {/* Article content */}
-          <div className="rounded-xl border border-border/40 bg-background-surface overflow-hidden">
+          <div className="rounded-xl border border-borda/40 bg-surface overflow-hidden">
             <div className="px-6 pt-5 pb-0">
               <div className="max-h-[15rem] overflow-y-auto pb-5 pr-1">
                 <MarkdownContent content={article.content} />
@@ -322,7 +322,7 @@ export default function KBArticlePage() {
             </div>
 
             {/* Feedback */}
-            <div className="border-t border-border/40 px-6 py-5 flex flex-col items-center gap-3 text-center">
+            <div className="border-t border-borda/40 px-6 py-5 flex flex-col items-center gap-3 text-center">
               <span className="text-sm text-slate-400">Este artigo foi útil?</span>
               <div className="flex items-center gap-3">
                 <button
@@ -331,7 +331,7 @@ export default function KBArticlePage() {
                   className={`flex items-center gap-1.5 text-sm px-4 py-2 rounded-lg border transition-colors cursor-pointer disabled:cursor-not-allowed ${
                     feedbackGiven === true
                       ? "border-success/50 text-success-700 dark:text-success-400 bg-success/10"
-                      : "border-border/50 text-slate-400 hover:border-success/50 hover:text-success-700 dark:hover:text-success-400 disabled:opacity-50"
+                      : "border-borda/50 text-slate-400 hover:border-success/50 hover:text-success-700 dark:hover:text-success-400 disabled:opacity-50"
                   }`}
                 >
                   {IC.ThumbUp} Sim ({article.helpful})
@@ -342,7 +342,7 @@ export default function KBArticlePage() {
                   className={`flex items-center gap-1.5 text-sm px-4 py-2 rounded-lg border transition-colors cursor-pointer disabled:cursor-not-allowed ${
                     feedbackGiven === false
                       ? "border-danger/50 text-danger-700 dark:text-danger-400 bg-danger/10"
-                      : "border-border/50 text-slate-400 hover:border-danger/50 hover:text-danger-700 dark:hover:text-danger-400 disabled:opacity-50"
+                      : "border-borda/50 text-slate-400 hover:border-danger/50 hover:text-danger-700 dark:hover:text-danger-400 disabled:opacity-50"
                   }`}
                 >
                   {IC.ThumbDown} Não ({article.not_helpful})
@@ -353,8 +353,8 @@ export default function KBArticlePage() {
           </div>
 
           {/* Comments */}
-          <div className="rounded-xl border border-border/40 bg-background-surface">
-            <div className="flex items-center gap-2 border-b border-border/40 px-5 py-3.5">
+          <div className="rounded-xl border border-borda/40 bg-surface">
+            <div className="flex items-center gap-2 border-b border-borda/40 px-5 py-3.5">
               <span className="text-slate-500">{IC.Chat}</span>
               <h2 className="text-sm font-semibold text-slate-200">Comentários ({totalComments})</h2>
             </div>
@@ -365,11 +365,11 @@ export default function KBArticlePage() {
                 <div className="flex justify-center py-4"><Spinner size="sm" /></div>
               ) : comments.length === 0 ? (
                 <div className="py-10 text-center">
-                  <div className="mx-auto mb-3 flex h-10 w-10 items-center justify-center rounded-full bg-background-elevated text-slate-600">{IC.Chat}</div>
+                  <div className="mx-auto mb-3 flex h-10 w-10 items-center justify-center rounded-full bg-surface-elevated text-slate-600">{IC.Chat}</div>
                   <p className="text-sm text-slate-500">Nenhum comentário ainda. Seja o primeiro!</p>
                 </div>
               ) : (
-                <div className="overflow-y-auto max-h-[280px] pr-1 space-y-5 divide-y divide-border/40">
+                <div className="overflow-y-auto max-h-[280px] pr-1 space-y-5 divide-y divide-borda/40">
                   {comments.map((comment) => (
                     <div key={comment.id} className="pt-5 first:pt-0">
                       <CommentItem comment={comment} currentUserId={user?.id} currentUserRole={user?.role} isStaff={isStaff} onReply={handleReply} onDelete={handleDeleteComment} />
@@ -383,7 +383,7 @@ export default function KBArticlePage() {
 
         {/* ── Sidebar ───────────────────────────────────────── */}
         <div className="space-y-4">
-          <div className="rounded-xl border border-border/40 bg-background-surface p-4">
+          <div className="rounded-xl border border-borda/40 bg-surface p-4">
             <p className="mb-1 text-[10px] font-bold uppercase tracking-widest text-slate-500">Sobre o artigo</p>
             <div>
               <PropRow icon={IC.User} label="Autor">{article.author_name}</PropRow>
@@ -395,7 +395,7 @@ export default function KBArticlePage() {
             </div>
           </div>
 
-          <div className="rounded-xl border border-border/40 bg-background-surface p-4">
+          <div className="rounded-xl border border-borda/40 bg-surface p-4">
             <p className="mb-3 text-[10px] font-bold uppercase tracking-widest text-slate-500">Produtos</p>
             {article.products.length === 0 ? (
               <p className="text-xs text-slate-500">Vale para todos os produtos.</p>
@@ -414,17 +414,17 @@ export default function KBArticlePage() {
           </div>
 
           {article.tags.length > 0 && (
-            <div className="rounded-xl border border-border/40 bg-background-surface p-4">
+            <div className="rounded-xl border border-borda/40 bg-surface p-4">
               <p className="mb-3 text-[10px] font-bold uppercase tracking-widest text-slate-500">Tags</p>
               <div className="flex flex-wrap gap-1.5">
                 {[...new Set(article.tags)].map((tag) => (
-                  <span key={tag} className="rounded-full border border-border/50 bg-background-elevated px-2.5 py-1 text-xs text-slate-400">{tag}</span>
+                  <span key={tag} className="rounded-full border border-borda/50 bg-surface-elevated px-2.5 py-1 text-xs text-slate-400">{tag}</span>
                 ))}
               </div>
             </div>
           )}
 
-          <div className="rounded-xl border border-border/40 bg-background-surface p-4">
+          <div className="rounded-xl border border-borda/40 bg-surface p-4">
             <p className="mb-3 text-[10px] font-bold uppercase tracking-widest text-slate-500">Feedback</p>
             <div className="flex items-center gap-4">
               <div className="flex items-center gap-1.5 text-success-700 dark:text-success-400">

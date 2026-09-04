@@ -119,7 +119,7 @@ function StatCard({ label, value, sub, colorCls = "text-slate-100", delta }: {
   delta?: React.ReactNode;
 }) {
   return (
-    <div className="rounded-xl border border-border/40 bg-background-surface p-4">
+    <div className="rounded-xl border border-borda/40 bg-surface p-4">
       <p className="mb-2 text-xs font-medium text-slate-500">{label}</p>
       <p className={`text-2xl font-bold leading-none ${colorCls}`}>{value}</p>
       <div className="mt-1.5 flex items-center gap-2 flex-wrap">
@@ -132,8 +132,8 @@ function StatCard({ label, value, sub, colorCls = "text-slate-100", delta }: {
 
 function ChartCard({ title, children }: { title: string; children: React.ReactNode }) {
   return (
-    <div className="rounded-xl border border-border/40 bg-background-surface">
-      <div className="border-b border-border/40 px-5 py-3.5">
+    <div className="rounded-xl border border-borda/40 bg-surface">
+      <div className="border-b border-borda/40 px-5 py-3.5">
         <h2 className="text-sm font-semibold text-slate-200">{title}</h2>
       </div>
       <div className="p-5">{children}</div>
@@ -336,8 +336,8 @@ function OldestOpenTable({ tickets }: { tickets: OldestTicketItem[] }) {
   const paged = tickets.slice(page * OLDEST_PAGE_SIZE, (page + 1) * OLDEST_PAGE_SIZE);
 
   return (
-    <div className="rounded-xl border border-border/40 bg-background-surface overflow-hidden">
-      <div className="border-b border-border/40 px-5 py-3.5 flex items-center gap-2">
+    <div className="rounded-xl border border-borda/40 bg-surface overflow-hidden">
+      <div className="border-b border-borda/40 px-5 py-3.5 flex items-center gap-2">
         <h2 className="text-sm font-semibold text-slate-200">Tickets em aberto há mais tempo</h2>
         <span className="rounded-full bg-danger-500/15 px-2 py-0.5 text-[10px] font-semibold text-danger-400">
           {tickets.length} ticket{tickets.length !== 1 ? "s" : ""}
@@ -346,15 +346,15 @@ function OldestOpenTable({ tickets }: { tickets: OldestTicketItem[] }) {
       <div className="overflow-x-auto">
         <table className="w-full text-sm">
           <thead>
-            <tr className="border-b border-border/40">
+            <tr className="border-b border-borda/40">
               {["Protocolo", "Título", "Prioridade", "Categoria", "Status", "Técnico", "Tempo em aberto"].map((h) => (
                 <th key={h} className="px-4 py-3 text-left text-[11px] font-semibold uppercase tracking-wider text-slate-500">{h}</th>
               ))}
             </tr>
           </thead>
-          <tbody className="divide-y divide-border/30">
+          <tbody className="divide-y divide-borda/30">
             {paged.map((t) => (
-              <tr key={t.ticket_id} className="hover:bg-background-elevated/50 transition-colors">
+              <tr key={t.ticket_id} className="hover:bg-surface-elevated/50 transition-colors">
                 <td className="px-4 py-3 font-mono text-xs text-primary">{t.protocol}</td>
                 <td className="px-4 py-3 text-slate-300 max-w-[220px] truncate" title={t.title}>{t.title}</td>
                 <td className="px-4 py-3">
@@ -379,7 +379,7 @@ function OldestOpenTable({ tickets }: { tickets: OldestTicketItem[] }) {
       </div>
 
       {/* Paginação */}
-      <div className="flex items-center justify-between border-t border-border/40 px-5 py-3">
+      <div className="flex items-center justify-between border-t border-borda/40 px-5 py-3">
         <span className="text-xs text-slate-500">
           {page * OLDEST_PAGE_SIZE + 1}–{Math.min((page + 1) * OLDEST_PAGE_SIZE, tickets.length)} de {tickets.length}
         </span>
@@ -387,7 +387,7 @@ function OldestOpenTable({ tickets }: { tickets: OldestTicketItem[] }) {
           <button
             onClick={() => setPage((p) => Math.max(0, p - 1))}
             disabled={page === 0}
-            className="rounded-lg border border-border/40 px-2.5 py-1.5 text-xs text-slate-400 hover:bg-background-elevated disabled:opacity-30 disabled:cursor-not-allowed transition-colors cursor-pointer"
+            className="rounded-lg border border-borda/40 px-2.5 py-1.5 text-xs text-slate-400 hover:bg-surface-elevated disabled:opacity-30 disabled:cursor-not-allowed transition-colors cursor-pointer"
           >
             ‹
           </button>
@@ -398,7 +398,7 @@ function OldestOpenTable({ tickets }: { tickets: OldestTicketItem[] }) {
               className={`rounded-lg border px-2.5 py-1.5 text-xs transition-colors cursor-pointer ${
                 i === page
                   ? "border-primary bg-primary/20 text-primary font-semibold"
-                  : "border-border/40 text-slate-400 hover:bg-background-elevated"
+                  : "border-borda/40 text-slate-400 hover:bg-surface-elevated"
               }`}
             >
               {i + 1}
@@ -407,7 +407,7 @@ function OldestOpenTable({ tickets }: { tickets: OldestTicketItem[] }) {
           <button
             onClick={() => setPage((p) => Math.min(totalPages - 1, p + 1))}
             disabled={page >= totalPages - 1}
-            className="rounded-lg border border-border/40 px-2.5 py-1.5 text-xs text-slate-400 hover:bg-background-elevated disabled:opacity-30 disabled:cursor-not-allowed transition-colors cursor-pointer"
+            className="rounded-lg border border-borda/40 px-2.5 py-1.5 text-xs text-slate-400 hover:bg-surface-elevated disabled:opacity-30 disabled:cursor-not-allowed transition-colors cursor-pointer"
           >
             ›
           </button>
@@ -801,22 +801,22 @@ function TechnicianRanking({ data, onSelect }: { data: TechnicianListReport; onS
   }
 
   return (
-    <div className="rounded-xl border border-border/40 bg-background-surface overflow-hidden">
-      <div className="border-b border-border/40 px-5 py-3.5">
+    <div className="rounded-xl border border-borda/40 bg-surface overflow-hidden">
+      <div className="border-b border-borda/40 px-5 py-3.5">
         <h2 className="text-sm font-semibold text-slate-200">Desempenho por técnico</h2>
       </div>
       <div className="overflow-x-auto">
         <table className="w-full text-sm">
           <thead>
-            <tr className="border-b border-border/40">
+            <tr className="border-b border-borda/40">
               {["Técnico", "Atribuídos", "Resolvidos", "Em aberto", "SLA", "Tempo médio", "CSAT", ""].map((h) => (
                 <th key={h} className="px-4 py-3 text-left text-[11px] font-semibold uppercase tracking-wider text-slate-500">{h}</th>
               ))}
             </tr>
           </thead>
-          <tbody className="divide-y divide-border/30">
+          <tbody className="divide-y divide-borda/30">
             {data.technicians.map((t) => (
-              <tr key={t.technician_id} className="hover:bg-background-elevated/50 transition-colors">
+              <tr key={t.technician_id} className="hover:bg-surface-elevated/50 transition-colors">
                 <td className="px-4 py-3 font-medium text-slate-200">{t.technician_name}</td>
                 <td className="px-4 py-3 text-slate-400">{t.total_assigned}</td>
                 <td className={`px-4 py-3 font-medium text-success-700 dark:text-success-400`}>{t.resolved}</td>
@@ -860,15 +860,15 @@ function TechnicianDetailPanel({ techDetail, techDetailLoading, onClose }: {
   onClose: () => void;
 }) {
   return (
-    <div className="rounded-xl border border-border/40 bg-background-surface">
-      <div className="flex items-center justify-between border-b border-border/40 px-5 py-3.5">
+    <div className="rounded-xl border border-borda/40 bg-surface">
+      <div className="flex items-center justify-between border-b border-borda/40 px-5 py-3.5">
         <div className="flex items-center gap-2">
           <span className="text-sm font-semibold text-slate-200">
             {techDetail ? `Detalhes — ${techDetail.technician_name}` : "Carregando detalhes…"}
           </span>
         </div>
         <button onClick={onClose}
-          className="rounded-lg border border-border/40 px-3 py-1 text-xs font-medium text-slate-400 hover:bg-background-elevated hover:text-slate-200 transition-colors cursor-pointer">
+          className="rounded-lg border border-borda/40 px-3 py-1 text-xs font-medium text-slate-400 hover:bg-surface-elevated hover:text-slate-200 transition-colors cursor-pointer">
           {IC.ChevLeft} Fechar
         </button>
       </div>
@@ -900,7 +900,7 @@ function ExportDropdown({ filters }: { filters: ReportFilters }) {
     <div ref={ref} className="relative">
       <button
         onClick={() => setOpen((v) => !v)}
-        className="flex h-9 items-center gap-1.5 rounded-lg border border-border/40 bg-background-elevated px-3 text-xs font-medium text-slate-400 hover:bg-background-surface hover:text-slate-200 transition-colors cursor-pointer"
+        className="flex h-9 items-center gap-1.5 rounded-lg border border-borda/40 bg-surface-elevated px-3 text-xs font-medium text-slate-400 hover:bg-surface hover:text-slate-200 transition-colors cursor-pointer"
       >
         {IC.Download}
         Exportar
@@ -910,12 +910,12 @@ function ExportDropdown({ filters }: { filters: ReportFilters }) {
       </button>
 
       {open && (
-        <div className="absolute right-0 top-full mt-1 z-20 min-w-[140px] rounded-xl border border-border/40 bg-background-surface shadow-lg overflow-hidden">
+        <div className="absolute right-0 top-full mt-1 z-20 min-w-[140px] rounded-xl border border-borda/40 bg-surface shadow-lg overflow-hidden">
           <a
             href={exportReportsUrl("csv", filters)}
             download
             onClick={() => setOpen(false)}
-            className="flex items-center gap-2 px-4 py-2.5 text-xs font-medium text-slate-300 hover:bg-background-elevated transition-colors"
+            className="flex items-center gap-2 px-4 py-2.5 text-xs font-medium text-slate-300 hover:bg-surface-elevated transition-colors"
           >
             {IC.Download} Exportar CSV
           </a>
@@ -923,7 +923,7 @@ function ExportDropdown({ filters }: { filters: ReportFilters }) {
             href={exportReportsUrl("pdf", filters)}
             download
             onClick={() => setOpen(false)}
-            className="flex items-center gap-2 px-4 py-2.5 text-xs font-medium text-slate-300 hover:bg-background-elevated transition-colors border-t border-border/30"
+            className="flex items-center gap-2 px-4 py-2.5 text-xs font-medium text-slate-300 hover:bg-surface-elevated transition-colors border-t border-borda/30"
           >
             {IC.Download} Exportar PDF
           </a>
@@ -1009,7 +1009,7 @@ export default function ReportsPage() {
   return (
     <div className="space-y-5 pb-10">
       {/* ── Header ───────────────────────────────────────────── */}
-      <div className="flex flex-col sm:flex-row sm:flex-wrap sm:items-center sm:justify-between gap-4 rounded-2xl border border-border/40 bg-background-surface px-5 py-4">
+      <div className="flex flex-col sm:flex-row sm:flex-wrap sm:items-center sm:justify-between gap-4 rounded-2xl border border-borda/40 bg-surface px-5 py-4">
         <div className="text-center sm:text-left">
           <h1 className="text-xl font-extrabold text-slate-100">Relatórios</h1>
           <p className="mt-0.5 text-sm text-slate-500">
@@ -1025,7 +1025,7 @@ export default function ReportsPage() {
         <div className="flex flex-wrap items-center justify-center sm:justify-end gap-2">
           {/* Tabs inline (admin only) */}
           {isAdmin && (
-            <div className="flex h-9 items-center gap-0.5 rounded-xl border border-border/40 bg-background-elevated px-1">
+            <div className="flex h-9 items-center gap-0.5 rounded-xl border border-borda/40 bg-surface-elevated px-1">
               {tabs.map((t) => (
                 <button
                   key={t.key}
@@ -1033,7 +1033,7 @@ export default function ReportsPage() {
                   className={`flex h-7 items-center gap-2 rounded-lg px-4 text-sm font-medium transition-all cursor-pointer ${
                     tab === t.key
                       ? "bg-primary text-white shadow-sm"
-                      : "text-slate-400 hover:text-slate-200 hover:bg-background-surface"
+                      : "text-slate-400 hover:text-slate-200 hover:bg-surface"
                   }`}
                 >
                   {t.icon}
@@ -1046,7 +1046,7 @@ export default function ReportsPage() {
           <FilterSelect value={period} onChange={setPeriod} options={PERIOD_OPTIONS} placeholder="Período" />
 
           {period === "personalizado" && (
-            <div className="flex h-9 items-center gap-1.5 rounded-lg border border-border/60 bg-background-elevated px-3 text-sm">
+            <div className="flex h-9 items-center gap-1.5 rounded-lg border border-borda/60 bg-surface-elevated px-3 text-sm">
               <span className="shrink-0 text-slate-400">{IC.Calendar}</span>
               <input type="date" value={customStart} max={customEnd || undefined}
                 onChange={(e) => setCustomStart(e.target.value)}
@@ -1084,7 +1084,7 @@ export default function ReportsPage() {
         <div className="space-y-4">
           {/* Seletor rápido de técnico */}
           {techList && techList.technicians.length > 0 && (
-            <div className="flex items-center gap-3 rounded-xl border border-border/40 bg-background-surface px-4 py-3">
+            <div className="flex items-center gap-3 rounded-xl border border-borda/40 bg-surface px-4 py-3">
               <span className="text-xs font-medium text-slate-500 shrink-0">Ver detalhes de:</span>
               <FilterSelect
                 value={selectedTechId ?? ""}

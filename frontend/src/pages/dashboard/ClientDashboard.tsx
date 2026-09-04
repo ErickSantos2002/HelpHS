@@ -48,7 +48,7 @@ function TicketRow({ ticket }: { ticket: Ticket }) {
 
   return (
     <button
-      className="w-full grid grid-cols-[1fr_auto_auto] sm:grid-cols-[7rem_1fr_auto_auto] items-center gap-3 px-4 py-3 text-left hover:bg-background-elevated transition-colors"
+      className="w-full grid grid-cols-[1fr_auto_auto] sm:grid-cols-[7rem_1fr_auto_auto] items-center gap-3 px-4 py-3 text-left hover:bg-surface-elevated transition-colors"
       onClick={() => navigate(`/tickets/${ticket.id}`)}
     >
       {/* Protocol — hidden on mobile, shown sm+ */}
@@ -130,7 +130,7 @@ export default function ClientDashboard() {
     <div className="space-y-5 pb-10">
 
       {/* ── Header ──────────────────────────────────────────── */}
-      <div className="flex flex-col sm:flex-row sm:flex-wrap sm:items-center sm:justify-between gap-4 rounded-2xl border border-border/40 bg-background-surface px-5 py-4">
+      <div className="flex flex-col sm:flex-row sm:flex-wrap sm:items-center sm:justify-between gap-4 rounded-2xl border border-borda/40 bg-surface px-5 py-4">
         <div className="text-center sm:text-left">
           <h1 className="text-xl font-extrabold text-slate-100">Meus Tickets</h1>
           <p className="mt-0.5 text-sm text-slate-500">
@@ -167,7 +167,7 @@ export default function ClientDashboard() {
 
       {/* ── Ticket table ────────────────────────────────────── */}
       <Card padding="none">
-        <div className="px-4 py-3 border-b border-border">
+        <div className="px-4 py-3 border-b border-borda">
           <CardTitle>Chamados recentes</CardTitle>
         </div>
 
@@ -185,7 +185,7 @@ export default function ClientDashboard() {
         ) : (
           <>
             {/* Table header */}
-            <div className="hidden sm:grid grid-cols-[7rem_1fr_auto_auto] gap-3 px-4 py-2 border-b border-border/60 bg-background-elevated/40">
+            <div className="hidden sm:grid grid-cols-[7rem_1fr_auto_auto] gap-3 px-4 py-2 border-b border-borda/60 bg-surface-elevated/40">
               <span className="text-xs font-semibold text-slate-500 uppercase tracking-wider">Protocolo</span>
               <span className="text-xs font-semibold text-slate-500 uppercase tracking-wider">Título</span>
               <span className="text-xs font-semibold text-slate-500 uppercase tracking-wider">Prioridade</span>
@@ -193,7 +193,7 @@ export default function ClientDashboard() {
             </div>
 
             {/* Rows */}
-            <div className="divide-y divide-border/60">
+            <div className="divide-y divide-borda/60">
               {tickets.map((t) => <TicketRow key={t.id} ticket={t} />)}
             </div>
 

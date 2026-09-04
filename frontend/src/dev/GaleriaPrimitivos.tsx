@@ -61,7 +61,7 @@ function Secao({
 export default function GaleriaPrimitivos() {
   return (
     <div
-      className="min-h-screen bg-background p-6"
+      className="min-h-screen bg-surface-base p-6"
       data-galeria="primitivos"
     >
       <h1 className="mb-1 text-xl font-semibold text-conteudo-heading">

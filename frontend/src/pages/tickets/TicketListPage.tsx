@@ -35,7 +35,7 @@ const PRIORITY_CFG: Record<string, {
     label: "Baixo",
     borderCls: "border-l-slate-300 dark:border-l-slate-600",
     dotColor: "#94a3b8",
-    badgeCls: "bg-background-elevated text-slate-500",
+    badgeCls: "bg-surface-elevated text-slate-500",
   },
 };
 
@@ -113,7 +113,7 @@ function SlaIndicator({ ticket, now }: { ticket: Ticket; now: number }) {
           aria-valuemax={100}
           aria-valuenow={100}
           aria-valuetext={breach ? "respondida com atraso" : "respondida"}
-          className="h-1 w-full overflow-hidden rounded-full bg-background-elevated"
+          className="h-1 w-full overflow-hidden rounded-full bg-surface-elevated"
         >
           <div className="h-full w-full rounded-full" style={{ backgroundColor: "#10b981" }} />
         </div>
@@ -167,7 +167,7 @@ function SlaIndicator({ ticket, now }: { ticket: Ticket; now: number }) {
         aria-valuenow={Math.round(pct)}
         aria-valuetext={breached ? "prazo vencido" : `${display} restantes`}
         
-        className="h-1 w-full overflow-hidden rounded-full bg-background-elevated"
+        className="h-1 w-full overflow-hidden rounded-full bg-surface-elevated"
       >
         <div
           className="h-full rounded-full transition-all duration-700"
@@ -199,8 +199,8 @@ function TicketCard({ ticket, now }: { ticket: Ticket; now: number }) {
       onClick={() => navigate(`/tickets/${ticket.id}`)}
       className={cn(
         "w-full text-left rounded-lg",
-        "bg-background-surface",
-        "border border-border border-l-4",
+        "bg-surface",
+        "border border-borda border-l-4",
         "p-3 shadow-sm hover:shadow-md hover:-translate-y-0.5 active:translate-y-0",
         "transition-all duration-150 cursor-pointer group",
         pCfg.borderCls,
@@ -231,7 +231,7 @@ function TicketCard({ ticket, now }: { ticket: Ticket; now: number }) {
       {/* Footer */}
       <div className="flex items-center justify-between gap-2">
         <div className="flex items-center gap-1.5 min-w-0 flex-1 overflow-hidden">
-          <span className="text-[11px] text-slate-500 bg-background-elevated px-2 py-0.5 rounded truncate max-w-[100px]">
+          <span className="text-[11px] text-slate-500 bg-surface-elevated px-2 py-0.5 rounded truncate max-w-[100px]">
             {ticket.category}
           </span>
           <span className={cn("text-[10px] font-bold px-1.5 py-0.5 rounded shrink-0", pCfg.badgeCls)}>
@@ -246,7 +246,7 @@ function TicketCard({ ticket, now }: { ticket: Ticket; now: number }) {
             <span className="text-[9px] font-bold text-primary leading-none">{initials}</span>
           </div>
         ) : (
-          <div className="w-6 h-6 rounded-full bg-background-elevated border border-border flex items-center justify-center shrink-0">
+          <div className="w-6 h-6 rounded-full bg-surface-elevated border border-borda flex items-center justify-center shrink-0">
             <svg className="w-3 h-3 text-slate-400" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
               <path strokeLinecap="round" strokeLinejoin="round" d="M16 7a4 4 0 11-8 0 4 4 0 018 0zM12 14a7 7 0 00-7 7h14a7 7 0 00-7-7z" />
             </svg>
@@ -264,7 +264,7 @@ function TicketCard({ ticket, now }: { ticket: Ticket; now: number }) {
 
 function KanbanColumn({ col, tickets, now }: { col: typeof COLUMNS[0]; tickets: Ticket[]; now: number }) {
   return (
-    <div className="flex flex-col w-[268px] min-w-[268px] rounded-xl bg-background-elevated border border-border overflow-hidden">
+    <div className="flex flex-col w-[268px] min-w-[268px] rounded-xl bg-surface-elevated border border-borda overflow-hidden">
       {/* Header */}
       <div className={cn("px-3 py-3 shrink-0", col.headerBg)}>
         <div className="flex items-center justify-between">
@@ -285,7 +285,7 @@ function KanbanColumn({ col, tickets, now }: { col: typeof COLUMNS[0]; tickets: 
       {/* Cards — scrolls independently */}
       <div className="flex-1 min-h-0 overflow-y-auto p-2 space-y-2">
         {tickets.length === 0 ? (
-          <div className="flex flex-col items-center justify-center py-10 mx-1 rounded-lg border-2 border-dashed border-slate-200 dark:border-border/40 mt-1">
+          <div className="flex flex-col items-center justify-center py-10 mx-1 rounded-lg border-2 border-dashed border-slate-200 dark:border-borda/40 mt-1">
             <svg className="w-6 h-6 text-slate-300 dark:text-slate-600 mb-1.5" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={1.25}>
               <path strokeLinecap="round" strokeLinejoin="round" d="M9 12l2 2 4-4m6 2a9 9 0 11-18 0 9 9 0 0118 0z" />
             </svg>
@@ -384,7 +384,7 @@ export default function TicketListPage() {
     <div className="h-full flex flex-col gap-4 min-h-0">
 
       {/* ── Top bar ─────────────────────────────────────────── */}
-      <div className="flex flex-col sm:flex-row sm:flex-wrap sm:items-center sm:justify-between gap-4 rounded-2xl border border-border/40 bg-background-surface px-5 py-4 shrink-0">
+      <div className="flex flex-col sm:flex-row sm:flex-wrap sm:items-center sm:justify-between gap-4 rounded-2xl border border-borda/40 bg-surface px-5 py-4 shrink-0">
         <div className="text-center sm:text-left">
           <h1 className="text-xl font-extrabold text-slate-100">Tickets</h1>
           <p className="mt-0.5 text-sm text-slate-500">
@@ -405,7 +405,7 @@ export default function TicketListPage() {
               title="Busca por título do chamado, protocolo (HS-2026-0001) ou número de série do equipamento"
               value={search}
               onChange={(e) => setSearch(e.target.value)}
-              className="pl-9 pr-8 py-2 text-sm w-full sm:w-52 rounded-lg border border-border/60 bg-background-elevated text-slate-200 placeholder-slate-500 focus:outline-none focus:ring-2 focus:ring-primary focus:border-transparent transition-colors"
+              className="pl-9 pr-8 py-2 text-sm w-full sm:w-52 rounded-lg border border-borda/60 bg-surface-elevated text-slate-200 placeholder-slate-500 focus:outline-none focus:ring-2 focus:ring-primary focus:border-transparent transition-colors"
             />
             {search && (
               <button onClick={() => setSearch("")} className="absolute right-2.5 top-1/2 -translate-y-1/2 text-slate-400 hover:text-slate-200 cursor-pointer">
@@ -442,7 +442,7 @@ export default function TicketListPage() {
           {hasFilters && (
             <button
               onClick={() => { setSearch(""); setFilterPriority(""); setFilterAssignee("all"); }}
-              className="flex items-center gap-1.5 text-xs font-medium text-slate-500 hover:text-danger transition-colors cursor-pointer px-2 py-2 rounded-lg border border-border/40 hover:border-danger/30"
+              className="flex items-center gap-1.5 text-xs font-medium text-slate-500 hover:text-danger transition-colors cursor-pointer px-2 py-2 rounded-lg border border-borda/40 hover:border-danger/30"
             >
               <svg className="w-3.5 h-3.5" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2.5}><path strokeLinecap="round" strokeLinejoin="round" d="M6 18L18 6M6 6l12 12" /></svg>
               Limpar
@@ -462,7 +462,7 @@ export default function TicketListPage() {
 
       {/* ── Kanban Board ─────────────────────────────────────── */}
       {/* flex-1 min-h-0 = preenche o restante sem overflow vertical */}
-      <div className="flex-1 min-h-0 rounded-2xl bg-slate-200/60 dark:bg-slate-900/50 border border-border overflow-hidden">
+      <div className="flex-1 min-h-0 rounded-2xl bg-slate-200/60 dark:bg-slate-900/50 border border-borda overflow-hidden">
         {/* overflow-x-auto = scroll horizontal quando colunas não cabem */}
         <div
           ref={scrollRef}

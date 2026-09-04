@@ -203,7 +203,7 @@ function EventDialog({ event, defaultDate, onClose, onSaved }: EventDialogProps)
           <select
             value={eventType}
             onChange={(e) => handleTypeChange(e.target.value as CalendarEventType)}
-            className="w-full rounded-lg border border-border bg-background-elevated px-3 py-2 text-sm text-slate-100 focus:outline-none focus:ring-2 focus:ring-primary focus:border-transparent transition-colors"
+            className="w-full rounded-lg border border-borda bg-surface-elevated px-3 py-2 text-sm text-slate-100 focus:outline-none focus:ring-2 focus:ring-primary focus:border-transparent transition-colors"
           >
             {(Object.keys(EVENT_TYPE_LABELS) as CalendarEventType[]).map((t) => (
               <option key={t} value={t}>{EVENT_TYPE_LABELS[t]}</option>
@@ -309,9 +309,9 @@ function CalendarGrid({ year, month, events, canEdit, selectedDay, onSelectDay, 
         ))}
       </div>
 
-      <div className="grid grid-cols-7 gap-px bg-border rounded-xl overflow-hidden border border-border">
+      <div className="grid grid-cols-7 gap-px bg-borda rounded-xl overflow-hidden border border-borda">
         {cells.map((day, i) => {
-          if (!day) return <div key={i} className="bg-background-surface/40 min-h-[88px]" />;
+          if (!day) return <div key={i} className="bg-surface/40 min-h-[88px]" />;
 
           const isToday = today.getFullYear() === year && today.getMonth() === month && today.getDate() === day;
           const isSelected = selectedDay === day;
@@ -327,8 +327,8 @@ function CalendarGrid({ year, month, events, canEdit, selectedDay, onSelectDay, 
                 isSelected
                   ? "bg-primary/8 ring-1 ring-inset ring-primary/30"
                   : isWeekend
-                    ? "bg-background-elevated/30 hover:bg-background-elevated/60"
-                    : "bg-background-surface hover:bg-background-elevated/40",
+                    ? "bg-surface-elevated/30 hover:bg-surface-elevated/60"
+                    : "bg-surface hover:bg-surface-elevated/40",
               )}
             >
               <div className={cn(
@@ -382,7 +382,7 @@ interface DayDetailProps {
 
 function DayDetail({ date, events, canEdit, onAdd, onEdit, onDelete, onClose }: DayDetailProps) {
   return (
-    <div className="rounded-xl border border-border bg-background-surface p-4 space-y-3">
+    <div className="rounded-xl border border-borda bg-surface p-4 space-y-3">
       <div className="flex items-center justify-between">
         <div>
           <p className="text-xs text-slate-500 font-medium uppercase tracking-wide">
@@ -404,7 +404,7 @@ function DayDetail({ date, events, canEdit, onAdd, onEdit, onDelete, onClose }: 
           )}
           <button
             onClick={onClose}
-            className="flex h-8 w-8 items-center justify-center rounded-lg bg-background-elevated text-slate-400 hover:text-slate-200 transition-colors text-sm cursor-pointer"
+            className="flex h-8 w-8 items-center justify-center rounded-lg bg-surface-elevated text-slate-400 hover:text-slate-200 transition-colors text-sm cursor-pointer"
           >
             ✕
           </button>
@@ -416,7 +416,7 @@ function DayDetail({ date, events, canEdit, onAdd, onEdit, onDelete, onClose }: 
       ) : (
         <div className="space-y-2">
           {events.map((e) => (
-            <div key={e.id} className="flex items-center gap-2.5 rounded-lg border border-border bg-background-elevated px-3 py-2">
+            <div key={e.id} className="flex items-center gap-2.5 rounded-lg border border-borda bg-surface-elevated px-3 py-2">
               <div className="h-2.5 w-2.5 shrink-0 rounded-full" style={{ backgroundColor: e.color }} />
               <div className="flex-1 min-w-0">
                 <p className="text-sm text-slate-200 font-medium truncate">{e.title}</p>
@@ -466,7 +466,7 @@ function UpcomingList({ events }: { events: CalendarEvent[] }) {
   return (
     <div className="space-y-2 max-h-[168px] overflow-y-auto pr-0.5">
       {upcoming.map((e) => (
-        <div key={e.id} className="flex items-start gap-2.5 rounded-lg bg-background-elevated/40 px-3 py-2">
+        <div key={e.id} className="flex items-start gap-2.5 rounded-lg bg-surface-elevated/40 px-3 py-2">
           <div className="mt-1 h-2.5 w-2.5 shrink-0 rounded-full" style={{ backgroundColor: e.color }} />
           <div className="min-w-0 flex-1">
             <p className="text-xs font-medium text-slate-200 truncate">{e.title}</p>
@@ -562,7 +562,7 @@ export default function CalendarPage() {
       )}
 
       {/* Header */}
-      <div className="flex flex-wrap items-center justify-between gap-3 rounded-2xl border border-border/40 bg-background-surface px-5 py-4">
+      <div className="flex flex-wrap items-center justify-between gap-3 rounded-2xl border border-borda/40 bg-surface px-5 py-4">
         <div className="flex items-center gap-3">
           <div className="flex h-9 w-9 items-center justify-center rounded-lg bg-primary/10 text-primary">
             <IconCalendar />
@@ -586,7 +586,7 @@ export default function CalendarPage() {
       <div className="flex flex-wrap items-center gap-2">
         <button
           onClick={prevMonth}
-          className="flex h-8 w-8 items-center justify-center rounded-lg border border-border bg-background-surface text-slate-400 hover:bg-background-elevated hover:text-slate-200 transition-colors cursor-pointer"
+          className="flex h-8 w-8 items-center justify-center rounded-lg border border-borda bg-surface text-slate-400 hover:bg-surface-elevated hover:text-slate-200 transition-colors cursor-pointer"
         >
           <IconChevronLeft />
         </button>
@@ -594,7 +594,7 @@ export default function CalendarPage() {
         <select
           value={month}
           onChange={(e) => { setMonth(Number(e.target.value)); setSelectedDay(null); }}
-          className="h-8 rounded-lg border border-border bg-background-surface px-3 text-sm font-semibold text-slate-200 focus:outline-none focus:ring-2 focus:ring-primary transition-colors cursor-pointer"
+          className="h-8 rounded-lg border border-borda bg-surface px-3 text-sm font-semibold text-slate-200 focus:outline-none focus:ring-2 focus:ring-primary transition-colors cursor-pointer"
         >
           {MONTHS.map((m, i) => (
             <option key={i} value={i}>{m}</option>
@@ -604,7 +604,7 @@ export default function CalendarPage() {
         <select
           value={year}
           onChange={(e) => { setYear(Number(e.target.value)); setSelectedDay(null); }}
-          className="h-8 rounded-lg border border-border bg-background-surface px-3 text-sm font-semibold text-slate-200 focus:outline-none focus:ring-2 focus:ring-primary transition-colors cursor-pointer"
+          className="h-8 rounded-lg border border-borda bg-surface px-3 text-sm font-semibold text-slate-200 focus:outline-none focus:ring-2 focus:ring-primary transition-colors cursor-pointer"
         >
           {YEARS.map((y) => (
             <option key={y} value={y}>{y}</option>
@@ -613,7 +613,7 @@ export default function CalendarPage() {
 
         <button
           onClick={nextMonth}
-          className="flex h-8 w-8 items-center justify-center rounded-lg border border-border bg-background-surface text-slate-400 hover:bg-background-elevated hover:text-slate-200 transition-colors cursor-pointer"
+          className="flex h-8 w-8 items-center justify-center rounded-lg border border-borda bg-surface text-slate-400 hover:bg-surface-elevated hover:text-slate-200 transition-colors cursor-pointer"
         >
           <IconChevronRight />
         </button>
@@ -663,13 +663,13 @@ export default function CalendarPage() {
         {/* Sidebar */}
         <div className="space-y-4">
           {/* Upcoming */}
-          <div className="rounded-xl border border-border bg-background-surface p-4 space-y-3">
+          <div className="rounded-xl border border-borda bg-surface p-4 space-y-3">
             <h3 className="text-sm font-semibold text-slate-200">Próximos eventos</h3>
             <UpcomingList events={events} />
           </div>
 
           {/* Mini month map */}
-          <div className="rounded-xl border border-border bg-background-surface p-4 space-y-3">
+          <div className="rounded-xl border border-borda bg-surface p-4 space-y-3">
             <h3 className="text-sm font-semibold text-slate-200">Meses do ano</h3>
             <div className="grid grid-cols-3 gap-1.5">
               {MONTHS_SHORT.map((m, i) => {
@@ -691,7 +691,7 @@ export default function CalendarPage() {
                       "relative rounded-lg py-1.5 text-xs font-medium transition-colors cursor-pointer",
                       isCurrent
                         ? "bg-primary text-white"
-                        : "bg-background-elevated/50 text-slate-400 hover:bg-background-elevated hover:text-slate-200",
+                        : "bg-surface-elevated/50 text-slate-400 hover:bg-surface-elevated hover:text-slate-200",
                     )}
                   >
                     {m}
@@ -721,13 +721,13 @@ export default function CalendarPage() {
             });
             if (monthEvents.length === 0) return null;
             return (
-            <div className="rounded-xl border border-border bg-background-surface p-4 space-y-3">
+            <div className="rounded-xl border border-borda bg-surface p-4 space-y-3">
               <h3 className="text-sm font-semibold text-slate-200">
                 Gerenciar eventos — {MONTHS_SHORT[month]}
               </h3>
               <div className="space-y-1.5 max-h-[168px] overflow-y-auto pr-0.5">
                 {monthEvents.slice(0, 4).map((e) => (
-                  <div key={e.id} className="flex items-center gap-2 rounded-lg bg-background-elevated/30 px-2.5 py-1.5">
+                  <div key={e.id} className="flex items-center gap-2 rounded-lg bg-surface-elevated/30 px-2.5 py-1.5">
                     <div className="h-2 w-2 shrink-0 rounded-full" style={{ backgroundColor: e.color }} />
                     <span className="flex-1 text-xs text-slate-300 truncate">{e.title}</span>
                     <div className="flex gap-1 shrink-0">

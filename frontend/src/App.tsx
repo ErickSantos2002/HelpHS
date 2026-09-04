@@ -60,7 +60,7 @@ const GaleriaPrimitivos = import.meta.env.DEV
 
 function Loading() {
   return (
-    <div className="flex h-screen items-center justify-center bg-background">
+    <div className="flex h-screen items-center justify-center bg-surface-base">
       <Spinner size="lg" />
     </div>
   );

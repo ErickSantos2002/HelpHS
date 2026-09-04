@@ -67,7 +67,7 @@ export function ChangelogModal({ open, onClose }: ChangelogModalProps) {
                 {v.entries.map((entry, i) => {
                   const cfg = ENTRY_CONFIG[entry.type];
                   return (
-                    <div key={i} className="flex items-start gap-3 rounded-xl border border-border bg-background-elevated px-3.5 py-2.5">
+                    <div key={i} className="flex items-start gap-3 rounded-xl border border-borda bg-surface-elevated px-3.5 py-2.5">
                       <span className={cn(
                         "inline-flex items-center gap-1 rounded-full px-2 py-0.5 text-[10px] font-semibold shrink-0 mt-0.5",
                         cfg.className,
@@ -82,7 +82,7 @@ export function ChangelogModal({ open, onClose }: ChangelogModalProps) {
               </div>
 
               {idx < CHANGELOG.length - 1 && (
-                <div className="mt-6 border-b border-border" />
+                <div className="mt-6 border-b border-borda" />
               )}
             </div>
           );

@@ -105,9 +105,9 @@ function NotificationDropdown({ onClose }: NotificationDropdownProps) {
   }
 
   return (
-    <div className="absolute right-0 top-[calc(100%+0.5rem)] w-80 max-w-[calc(100vw-1rem)] rounded-xl border border-border bg-background-surface shadow-xl z-50 overflow-hidden">
+    <div className="absolute right-0 top-[calc(100%+0.5rem)] w-80 max-w-[calc(100vw-1rem)] rounded-xl border border-borda bg-surface shadow-xl z-50 overflow-hidden">
       {/* Header */}
-      <div className="flex items-center justify-between px-4 py-3 border-b border-border">
+      <div className="flex items-center justify-between px-4 py-3 border-b border-borda">
         <div className="flex items-center gap-2">
           <span className="text-sm font-semibold text-slate-100">
             Notificações
@@ -144,8 +144,8 @@ function NotificationDropdown({ onClose }: NotificationDropdownProps) {
             <button
               key={n.id}
               className={cn(
-                "w-full text-left px-4 py-3 border-b border-slate-100 dark:border-border/50 hover:bg-slate-50 dark:hover:bg-background-elevated transition-colors",
-                !n.read && "bg-slate-50 dark:bg-background-elevated/40",
+                "w-full text-left px-4 py-3 border-b border-slate-100 dark:border-borda/50 hover:bg-slate-50 dark:hover:bg-surface-elevated transition-colors",
+                !n.read && "bg-slate-50 dark:bg-surface-elevated/40",
               )}
               onClick={() => handleMarkRead(n)}
             >
@@ -176,7 +176,7 @@ function NotificationDropdown({ onClose }: NotificationDropdownProps) {
       </div>
 
       {/* Footer */}
-      <div className="px-4 py-2.5 border-t border-border">
+      <div className="px-4 py-2.5 border-t border-borda">
         <button
           className="w-full text-center text-xs text-primary hover:text-primary/80 transition-colors"
           onClick={() => {
@@ -241,12 +241,12 @@ export function Topbar({ onMobileMenuClick, onToggleCollapsed, sidebarCollapsed,
   }
 
   return (
-    <header className="flex h-16 shrink-0 items-center justify-between border-b border-border bg-background-surface px-4 md:px-6">
+    <header className="flex h-16 shrink-0 items-center justify-between border-b border-borda bg-surface px-4 md:px-6">
       {/* Left: hamburger desktop (colapsa sidebar) + mobile (abre drawer) */}
       <div className="flex items-center gap-1">
         {/* Desktop toggle */}
         <button
-          className="hidden md:flex rounded-lg p-2 text-slate-500 dark:text-slate-400 hover:bg-background-elevated hover:text-slate-900 dark:hover:text-slate-100 transition-colors"
+          className="hidden md:flex rounded-lg p-2 text-slate-500 dark:text-slate-400 hover:bg-surface-elevated hover:text-slate-900 dark:hover:text-slate-100 transition-colors"
           onClick={onToggleCollapsed}
           aria-label={sidebarCollapsed ? "Expandir menu" : "Recolher menu"}
           aria-expanded={!sidebarCollapsed}
@@ -259,7 +259,7 @@ export function Topbar({ onMobileMenuClick, onToggleCollapsed, sidebarCollapsed,
 
         {/* Mobile toggle */}
         <button
-          className="md:hidden rounded-lg p-2 text-slate-500 dark:text-slate-400 hover:bg-background-elevated hover:text-slate-900 dark:hover:text-slate-100 transition-colors"
+          className="md:hidden rounded-lg p-2 text-slate-500 dark:text-slate-400 hover:bg-surface-elevated hover:text-slate-900 dark:hover:text-slate-100 transition-colors"
           onClick={onMobileMenuClick}
           aria-label="Abrir menu de navegação"
           aria-controls="sidebar-nav"
@@ -289,8 +289,8 @@ export function Topbar({ onMobileMenuClick, onToggleCollapsed, sidebarCollapsed,
           <button
             className={cn(
               "relative rounded-lg p-2 text-slate-500 dark:text-slate-400 transition-colors",
-              "hover:bg-background-elevated hover:text-slate-900 dark:hover:text-slate-100",
-              notifOpen && "bg-background-elevated text-slate-900 dark:text-slate-100",
+              "hover:bg-surface-elevated hover:text-slate-900 dark:hover:text-slate-100",
+              notifOpen && "bg-surface-elevated text-slate-900 dark:text-slate-100",
             )}
             aria-label={
               unreadCount > 0
@@ -332,8 +332,8 @@ export function Topbar({ onMobileMenuClick, onToggleCollapsed, sidebarCollapsed,
           <button
             className={cn(
               "flex items-center gap-2.5 rounded-lg px-2 py-1.5 transition-colors",
-              "hover:bg-background-elevated",
-              userMenuOpen && "bg-background-elevated",
+              "hover:bg-surface-elevated",
+              userMenuOpen && "bg-surface-elevated",
             )}
             onClick={() => setUserMenuOpen((v) => !v)}
             aria-label={`Menu do usuário — ${user?.name ?? ""}`}
@@ -367,9 +367,9 @@ export function Topbar({ onMobileMenuClick, onToggleCollapsed, sidebarCollapsed,
 
           {/* Dropdown menu */}
           {userMenuOpen && (
-            <div className="absolute right-0 top-[calc(100%+0.5rem)] w-56 rounded-xl border border-border bg-background-surface shadow-xl z-50 py-1">
+            <div className="absolute right-0 top-[calc(100%+0.5rem)] w-56 rounded-xl border border-borda bg-surface shadow-xl z-50 py-1">
               {/* User info */}
-              <div className="px-3 py-2.5 border-b border-border">
+              <div className="px-3 py-2.5 border-b border-borda">
                 <p className="text-sm font-semibold text-slate-900 dark:text-slate-100 truncate">
                   {user?.name}
                 </p>
@@ -378,7 +378,7 @@ export function Topbar({ onMobileMenuClick, onToggleCollapsed, sidebarCollapsed,
 
               {/* Meu perfil */}
               <button
-                className="flex w-full items-center gap-2.5 px-3 py-2 text-sm text-slate-600 dark:text-slate-300 hover:bg-slate-50 dark:hover:bg-background-elevated hover:text-slate-900 dark:hover:text-slate-100 transition-colors"
+                className="flex w-full items-center gap-2.5 px-3 py-2 text-sm text-slate-600 dark:text-slate-300 hover:bg-slate-50 dark:hover:bg-surface-elevated hover:text-slate-900 dark:hover:text-slate-100 transition-colors"
                 onClick={() => { setUserMenuOpen(false); navigate("/profile"); }}
               >
                 <svg className="w-4 h-4 shrink-0" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
@@ -404,9 +404,9 @@ export function Topbar({ onMobileMenuClick, onToggleCollapsed, sidebarCollapsed,
                 }
               />
 
-              <div className="border-t border-border mt-1 pt-1">
+              <div className="border-t border-borda mt-1 pt-1">
               <button
-                className="flex w-full items-center gap-2.5 px-3 py-2 text-sm text-on-tint-danger hover:bg-slate-50 dark:hover:bg-background-elevated transition-colors"
+                className="flex w-full items-center gap-2.5 px-3 py-2 text-sm text-on-tint-danger hover:bg-slate-50 dark:hover:bg-surface-elevated transition-colors"
                 onClick={handleLogout}
               >
                 <svg className="w-4 h-4 shrink-0" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>

@@ -21,7 +21,7 @@ const CATEGORY_LABEL: Record<string, string> = {
 const STATUS_CONFIG: Record<KBArticleStatus, { label: string; cls: string }> = {
   published: { label: "Publicado", cls: "bg-success/10 text-success-700 dark:text-success-400 border-success/30" },
   draft:     { label: "Rascunho",  cls: "bg-warning/10 text-warning-700 dark:text-warning-400 border-warning/30"  },
-  archived:  { label: "Arquivado", cls: "bg-background-elevated text-slate-500 border-border/50"                  },
+  archived:  { label: "Arquivado", cls: "bg-surface-elevated text-slate-500 border-borda/50"                  },
 };
 
 const PAGE_SIZE = 20;
@@ -94,7 +94,7 @@ export default function KBListPage() {
   return (
     <div className="space-y-5 pb-10">
       {/* ── Header ───────────────────────────────────────────── */}
-      <div className="flex flex-col sm:flex-row sm:flex-wrap sm:items-center sm:justify-between gap-4 rounded-2xl border border-border/40 bg-background-surface px-5 py-4">
+      <div className="flex flex-col sm:flex-row sm:flex-wrap sm:items-center sm:justify-between gap-4 rounded-2xl border border-borda/40 bg-surface px-5 py-4">
         <div className="text-center sm:text-left">
           <h1 className="text-xl font-extrabold text-slate-100">Base de Conhecimento</h1>
           <p className="mt-0.5 text-sm text-slate-500">
@@ -110,7 +110,7 @@ export default function KBListPage() {
               placeholder="Buscar artigos…"
               value={search}
               onChange={(e) => setSearch(e.target.value)}
-              className="pl-9 pr-8 py-2 text-sm w-full sm:w-52 rounded-lg border border-border/60 bg-background-elevated text-slate-200 placeholder-slate-500 focus:outline-none focus:ring-2 focus:ring-primary focus:border-transparent transition-colors"
+              className="pl-9 pr-8 py-2 text-sm w-full sm:w-52 rounded-lg border border-borda/60 bg-surface-elevated text-slate-200 placeholder-slate-500 focus:outline-none focus:ring-2 focus:ring-primary focus:border-transparent transition-colors"
             />
             {search && (
               <button onClick={() => setSearch("")} className="absolute right-2.5 top-1/2 -translate-y-1/2 text-slate-400 hover:text-slate-200 cursor-pointer">{IC.X}</button>
@@ -161,7 +161,7 @@ export default function KBListPage() {
           {hasFilters && (
             <button
               onClick={() => { setSearch(""); setCategory(""); setProductFilter(""); setStatusFilter(""); }}
-              className="flex items-center gap-1.5 text-xs font-medium text-slate-500 hover:text-danger transition-colors cursor-pointer px-2 py-2 rounded-lg border border-border/40 hover:border-danger/30"
+              className="flex items-center gap-1.5 text-xs font-medium text-slate-500 hover:text-danger transition-colors cursor-pointer px-2 py-2 rounded-lg border border-borda/40 hover:border-danger/30"
             >
               {IC.X}
               Limpar
@@ -184,8 +184,8 @@ export default function KBListPage() {
       {loading ? (
         <div className="flex h-48 items-center justify-center"><Spinner size="lg" /></div>
       ) : articles.length === 0 ? (
-        <div className="flex flex-col items-center justify-center rounded-xl border border-border/40 bg-background-surface py-20">
-          <div className="mb-4 flex h-14 w-14 items-center justify-center rounded-full bg-background-elevated text-slate-600">{IC.Book}</div>
+        <div className="flex flex-col items-center justify-center rounded-xl border border-borda/40 bg-surface py-20">
+          <div className="mb-4 flex h-14 w-14 items-center justify-center rounded-full bg-surface-elevated text-slate-600">{IC.Book}</div>
           <p className="text-sm font-medium text-slate-400">Nenhum artigo encontrado.</p>
           {hasFilters && <button onClick={() => { setSearch(""); setCategory(""); setProductFilter(""); setStatusFilter(""); }} className="mt-2 text-xs text-primary hover:text-primary/80 cursor-pointer transition-colors">Limpar filtros</button>}
           {isStaff && !hasFilters && <button onClick={() => navigate("/kb/new")} className="mt-3 text-xs font-medium text-primary hover:text-primary/80 cursor-pointer transition-colors">+ Criar primeiro artigo</button>}
@@ -200,7 +200,7 @@ export default function KBListPage() {
             return (
               <div
                 key={article.id}
-                className="flex items-start gap-4 rounded-xl border border-border/40 bg-background-surface px-5 py-4 hover:border-primary/30 hover:bg-primary/[0.02] transition-all cursor-pointer"
+                className="flex items-start gap-4 rounded-xl border border-borda/40 bg-surface px-5 py-4 hover:border-primary/30 hover:bg-primary/[0.02] transition-all cursor-pointer"
                 onClick={() => navigate(`/kb/${article.id}`)}
               >
                 {/* Icon */}
@@ -219,11 +219,11 @@ export default function KBListPage() {
                         {stCfg.label}
                       </span>
                     )}
-                    <span className="ml-0.5 rounded-md border border-border/40 bg-background-elevated px-1.5 py-0.5 text-[10px] font-medium text-slate-500">
+                    <span className="ml-0.5 rounded-md border border-borda/40 bg-surface-elevated px-1.5 py-0.5 text-[10px] font-medium text-slate-500">
                       {catLabel}
                     </span>
                     {article.products.length === 0 ? (
-                      <span className="rounded-md border border-border/40 px-1.5 py-0.5 text-[10px] font-medium text-slate-600">
+                      <span className="rounded-md border border-borda/40 px-1.5 py-0.5 text-[10px] font-medium text-slate-600">
                         Todos os produtos
                       </span>
                     ) : (
@@ -241,7 +241,7 @@ export default function KBListPage() {
                   {article.tags.length > 0 && (
                     <div className="mt-2 flex flex-wrap items-center gap-2">
                       {[...new Set(article.tags)].map((tag) => (
-                        <span key={tag} className="rounded-md bg-background-elevated px-1.5 py-0.5 text-[10px] text-slate-500">{tag}</span>
+                        <span key={tag} className="rounded-md bg-surface-elevated px-1.5 py-0.5 text-[10px] text-slate-500">{tag}</span>
                       ))}
                     </div>
                   )}
@@ -288,13 +288,13 @@ export default function KBListPage() {
 
       {/* ── Pagination ────────────────────────────────────────── */}
       {totalPages > 1 && (
-        <div className="flex items-center justify-between rounded-xl border border-border/40 bg-background-surface px-5 py-3">
+        <div className="flex items-center justify-between rounded-xl border border-borda/40 bg-surface px-5 py-3">
           <span className="text-sm text-slate-500">{total} artigo{total !== 1 ? "s" : ""}</span>
           <div className="flex items-center gap-2">
             <button
               onClick={() => setOffset((o) => Math.max(0, o - PAGE_SIZE))}
               disabled={currentPage === 1}
-              className="flex items-center gap-1 px-3 py-1.5 rounded-lg border border-border/40 text-sm text-slate-400 hover:bg-background-elevated hover:text-slate-200 disabled:opacity-40 disabled:cursor-not-allowed transition-colors cursor-pointer"
+              className="flex items-center gap-1 px-3 py-1.5 rounded-lg border border-borda/40 text-sm text-slate-400 hover:bg-surface-elevated hover:text-slate-200 disabled:opacity-40 disabled:cursor-not-allowed transition-colors cursor-pointer"
             >
               {IC.ChevLeft} Anterior
             </button>
@@ -302,7 +302,7 @@ export default function KBListPage() {
             <button
               onClick={() => setOffset((o) => o + PAGE_SIZE)}
               disabled={currentPage === totalPages}
-              className="flex items-center gap-1 px-3 py-1.5 rounded-lg border border-border/40 text-sm text-slate-400 hover:bg-background-elevated hover:text-slate-200 disabled:opacity-40 disabled:cursor-not-allowed transition-colors cursor-pointer"
+              className="flex items-center gap-1 px-3 py-1.5 rounded-lg border border-borda/40 text-sm text-slate-400 hover:bg-surface-elevated hover:text-slate-200 disabled:opacity-40 disabled:cursor-not-allowed transition-colors cursor-pointer"
             >
               Próxima {IC.ChevRight}
             </button>
@@ -332,7 +332,7 @@ export default function KBListPage() {
 
           {/* Article preview */}
           {deleteTarget && (
-            <div className="flex items-center gap-3 rounded-xl border border-border bg-background-elevated px-4 py-3">
+            <div className="flex items-center gap-3 rounded-xl border border-borda bg-surface-elevated px-4 py-3">
               <div className="flex h-9 w-9 shrink-0 items-center justify-center rounded-lg bg-primary/10 text-primary">
                 {IC.Book}
               </div>

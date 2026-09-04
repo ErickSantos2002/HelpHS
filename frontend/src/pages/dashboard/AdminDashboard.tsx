@@ -91,7 +91,7 @@ interface KpiCardProps {
 
 function KpiCard({ label, value, sub, icon, accent, iconBg, valueCls = "text-slate-900 dark:text-slate-100" }: KpiCardProps) {
   return (
-    <div className={cn("relative rounded-xl bg-background-surface border border-border p-5 overflow-hidden border-l-4", accent)}>
+    <div className={cn("relative rounded-xl bg-surface border border-borda p-5 overflow-hidden border-l-4", accent)}>
       <div className="flex items-start justify-between gap-3">
         <div className="min-w-0">
           <p className="text-xs font-semibold uppercase tracking-wider text-slate-500">{label}</p>
@@ -120,7 +120,7 @@ function StatusBar({ t }: { t: DashboardStats["tickets"] }) {
   ].filter((s) => s.value > 0);
 
   return (
-    <div className="rounded-xl bg-background-surface border border-border p-5">
+    <div className="rounded-xl bg-surface border border-borda p-5">
       <p className="text-xs font-semibold uppercase tracking-wider text-slate-500 mb-3">Distribuição de status</p>
       <div className="flex h-3 rounded-full overflow-hidden gap-px">
         {segs.map((s) => (
@@ -149,8 +149,8 @@ function StatusBar({ t }: { t: DashboardStats["tickets"] }) {
 
 function SectionCard({ title, action, children }: { title: string; action?: React.ReactNode; children: React.ReactNode }) {
   return (
-    <div className="rounded-xl bg-background-surface border border-border overflow-hidden">
-      <div className="flex items-center justify-between px-5 py-4 border-b border-slate-100 dark:border-border/60">
+    <div className="rounded-xl bg-surface border border-borda overflow-hidden">
+      <div className="flex items-center justify-between px-5 py-4 border-b border-slate-100 dark:border-borda/60">
         <p className="text-sm font-semibold text-slate-700 dark:text-slate-200">{title}</p>
         {action}
       </div>
@@ -264,7 +264,7 @@ export default function AdminDashboard() {
     <div className="space-y-5">
 
       {/* ── Header ──────────────────────────────────────────── */}
-      <div className="flex flex-col sm:flex-row sm:flex-wrap sm:items-center sm:justify-between gap-4 rounded-2xl border border-border/40 bg-background-surface px-5 py-4">
+      <div className="flex flex-col sm:flex-row sm:flex-wrap sm:items-center sm:justify-between gap-4 rounded-2xl border border-borda/40 bg-surface px-5 py-4">
         <div className="text-center sm:text-left">
           <h1 className="text-xl font-extrabold text-slate-100">Dashboard</h1>
           <p className="mt-0.5 text-sm text-slate-500">Visão geral do sistema de atendimento</p>
@@ -294,7 +294,7 @@ export default function AdminDashboard() {
 
           {/* Custom date range */}
           {periodKey === "custom" && (
-            <div className="flex h-9 items-center gap-1.5 rounded-lg border border-border/60 bg-background-elevated px-3 text-sm">
+            <div className="flex h-9 items-center gap-1.5 rounded-lg border border-borda/60 bg-surface-elevated px-3 text-sm">
               <svg className="w-3.5 h-3.5 shrink-0 text-slate-500" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}><path strokeLinecap="round" strokeLinejoin="round" d="M8 7V3m8 4V3m-9 8h10M5 21h14a2 2 0 002-2V7a2 2 0 00-2-2H5a2 2 0 00-2 2v12a2 2 0 002 2z" /></svg>
               <input
                 type="date"
@@ -324,7 +324,7 @@ export default function AdminDashboard() {
           value={tickets.total}
           sub="Todos os status"
           accent="border-l-slate-300 dark:border-l-slate-600"
-          iconBg="bg-background-elevated"
+          iconBg="bg-surface-elevated"
           icon={<svg className="w-5 h-5 text-slate-500" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={1.75}><path strokeLinecap="round" strokeLinejoin="round" d="M15 5v2m0 4v2m0 4v2M5 5a2 2 0 00-2 2v3a2 2 0 110 4v3a2 2 0 002 2h14a2 2 0 002-2v-3a2 2 0 110-4V7a2 2 0 00-2-2H5z" /></svg>}
         />
         <KpiCard
@@ -368,7 +368,7 @@ export default function AdminDashboard() {
           value={sla.resolve_breached}
           sub={`${sla.response_breached} resposta · ${sla.resolve_breached} resolução`}
           accent={sla.resolve_breached > 0 ? "border-l-red-500" : "border-l-slate-300 dark:border-l-slate-600"}
-          iconBg={sla.resolve_breached > 0 ? "bg-red-500/10" : "bg-background-elevated"}
+          iconBg={sla.resolve_breached > 0 ? "bg-red-500/10" : "bg-surface-elevated"}
           valueCls={sla.resolve_breached > 0 ? "text-red-600 dark:text-red-400" : "text-slate-900 dark:text-slate-100"}
           icon={<svg className={cn("w-5 h-5", sla.resolve_breached > 0 ? "text-red-500" : "text-slate-400")} fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={1.75}><path strokeLinecap="round" strokeLinejoin="round" d="M12 9v2m0 4h.01m-6.938 4h13.856c1.54 0 2.502-1.667 1.732-3L13.732 4c-.77-1.333-2.694-1.333-3.464 0L3.34 16c-.77 1.333.192 3 1.732 3z" /></svg>}
         />
@@ -402,7 +402,7 @@ export default function AdminDashboard() {
           value={sla.response_breached}
           sub="1º atendimento fora do prazo"
           accent={sla.response_breached > 0 ? "border-l-amber-500" : "border-l-slate-300 dark:border-l-slate-600"}
-          iconBg={sla.response_breached > 0 ? "bg-amber-500/10" : "bg-background-elevated"}
+          iconBg={sla.response_breached > 0 ? "bg-amber-500/10" : "bg-surface-elevated"}
           valueCls={sla.response_breached > 0 ? "text-amber-600 dark:text-amber-400" : "text-slate-900 dark:text-slate-100"}
           icon={<svg className={cn("w-5 h-5", sla.response_breached > 0 ? "text-amber-500" : "text-slate-400")} fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={1.75}><path strokeLinecap="round" strokeLinejoin="round" d="M12 8v4l3 3m6-3a9 9 0 11-18 0 9 9 0 0118 0z" /></svg>}
         />
@@ -411,7 +411,7 @@ export default function AdminDashboard() {
           value={sla.resolve_breached}
           sub="Resolução fora do prazo"
           accent={sla.resolve_breached > 0 ? "border-l-red-500" : "border-l-slate-300 dark:border-l-slate-600"}
-          iconBg={sla.resolve_breached > 0 ? "bg-red-500/10" : "bg-background-elevated"}
+          iconBg={sla.resolve_breached > 0 ? "bg-red-500/10" : "bg-surface-elevated"}
           valueCls={sla.resolve_breached > 0 ? "text-red-600 dark:text-red-400" : "text-slate-900 dark:text-slate-100"}
           icon={<svg className={cn("w-5 h-5", sla.resolve_breached > 0 ? "text-red-500" : "text-slate-400")} fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={1.75}><path strokeLinecap="round" strokeLinejoin="round" d="M12 9v2m0 4h.01m-6.938 4h13.856c1.54 0 2.502-1.667 1.732-3L13.732 4c-.77-1.333-2.694-1.333-3.464 0L3.34 16c-.77 1.333.192 3 1.732 3z" /></svg>}
         />
@@ -420,8 +420,8 @@ export default function AdminDashboard() {
       {/* ── Charts row 1 ────────────────────────────────────── */}
       <div className="grid grid-cols-1 lg:grid-cols-2 gap-4">
         {/* Area chart */}
-        <div className="rounded-xl bg-background-surface border border-border overflow-hidden">
-          <div className="px-5 py-4 border-b border-slate-100 dark:border-border/60">
+        <div className="rounded-xl bg-surface border border-borda overflow-hidden">
+          <div className="px-5 py-4 border-b border-slate-100 dark:border-borda/60">
             <p className="text-sm font-semibold text-slate-700 dark:text-slate-200">
               {selectedTechId !== "all" && techDetail
                 ? `Atendimentos de ${techDetail.technician_name} — ${periodLabel}`
@@ -451,8 +451,8 @@ export default function AdminDashboard() {
         </div>
 
         {/* Donut */}
-        <div className="rounded-xl bg-background-surface border border-border overflow-hidden">
-          <div className="px-5 py-4 border-b border-slate-100 dark:border-border/60">
+        <div className="rounded-xl bg-surface border border-borda overflow-hidden">
+          <div className="px-5 py-4 border-b border-slate-100 dark:border-borda/60">
             <p className="text-sm font-semibold text-slate-700 dark:text-slate-200">Tickets por Status</p>
           </div>
           <div className="p-5">
@@ -505,7 +505,7 @@ export default function AdminDashboard() {
                     <span className="text-xs text-slate-600 dark:text-slate-300 truncate max-w-[70%]">{cat.category}</span>
                     <span className="text-xs font-bold tabular-nums text-slate-700 dark:text-slate-200">{cat.count}</span>
                   </div>
-                  <div className="h-1.5 rounded-full bg-background-elevated overflow-hidden">
+                  <div className="h-1.5 rounded-full bg-surface-elevated overflow-hidden">
                     <div
                       className="h-full rounded-full bg-primary transition-all duration-700"
                       style={{ width: `${(cat.count / categoryMax) * 100}%` }}
@@ -562,7 +562,7 @@ export default function AdminDashboard() {
                       <span className="text-xs text-slate-400 ml-2">({item.breached} violados)</span>
                     </div>
                   </div>
-                  <div className="h-2 rounded-full bg-background-elevated overflow-hidden">
+                  <div className="h-2 rounded-full bg-surface-elevated overflow-hidden">
                     <div className={cn("h-full rounded-full transition-all duration-700", slaBg(item.compliance_rate))} style={{ width: `${item.compliance_rate}%` }} />
                   </div>
                 </div>
@@ -578,13 +578,13 @@ export default function AdminDashboard() {
           <div className="overflow-x-auto -mx-5 px-5">
             <table className="w-full text-sm min-w-[640px]">
               <thead>
-                <tr className="border-b border-slate-100 dark:border-border/60">
+                <tr className="border-b border-slate-100 dark:border-borda/60">
                   {["Técnico", "Atribuídos", "Resolvidos", "Em aberto", "Conformidade SLA", "Tempo médio", "CSAT"].map((h) => (
                     <th key={h} className="text-left text-xs font-semibold uppercase tracking-wider text-slate-400 pb-3 pr-4 last:pr-0">{h}</th>
                   ))}
                 </tr>
               </thead>
-              <tbody className="divide-y divide-slate-50 dark:divide-border/30">
+              <tbody className="divide-y divide-slate-50 dark:divide-borda/30">
                 {techList.technicians.map((t) => {
                   const initials = t.technician_name.split(" ").slice(0, 2).map((w) => w[0]).join("").toUpperCase();
                   const isSelected = selectedTechId === t.technician_id;
@@ -596,7 +596,7 @@ export default function AdminDashboard() {
                         "transition-colors cursor-pointer",
                         isSelected
                           ? "bg-primary/5 dark:bg-primary/10"
-                          : "hover:bg-slate-50 dark:hover:bg-background-elevated",
+                          : "hover:bg-slate-50 dark:hover:bg-surface-elevated",
                       )}
                     >
                       <td className="py-3 pr-4">
@@ -613,7 +613,7 @@ export default function AdminDashboard() {
                       <td className="py-3 pr-4 tabular-nums text-sky-600 dark:text-sky-400">{t.open_count}</td>
                       <td className="py-3 pr-4">
                         <div className="flex items-center gap-2">
-                          <div className="w-20 h-1.5 rounded-full bg-background-elevated overflow-hidden">
+                          <div className="w-20 h-1.5 rounded-full bg-surface-elevated overflow-hidden">
                             <div className={cn("h-full rounded-full", slaBg(t.sla_compliance_rate))} style={{ width: `${t.sla_compliance_rate}%` }} />
                           </div>
                           <span className={cn("text-xs font-bold tabular-nums", slaColor(t.sla_compliance_rate))}>

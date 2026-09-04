@@ -65,7 +65,7 @@ const PRIORITY_CONFIG = {
   critical: { label: "Crítico",  dot: "bg-red-500",    active: "border-red-500/50 bg-red-500/10 text-red-700 dark:text-red-400"    },
   high:     { label: "Alto",     dot: "bg-amber-500",  active: "border-amber-500/50 bg-amber-500/10 text-amber-700 dark:text-amber-400" },
   medium:   { label: "Médio",    dot: "bg-info",       active: "border-info/50 bg-info/10 text-info-700 dark:text-info-400"           },
-  low:      { label: "Baixo",    dot: "bg-slate-400",  active: "border-border bg-background-elevated text-slate-400"                 },
+  low:      { label: "Baixo",    dot: "bg-slate-400",  active: "border-borda bg-surface-elevated text-slate-400"                 },
 } as const;
 
 const CATEGORY_CONFIG = [
@@ -99,7 +99,7 @@ function StepIndicator({ current }: { current: 1 | 2 }) {
       </span>
       <span className={`font-medium ${current === 1 ? "text-slate-200" : "text-emerald-400"}`}>Formulário</span>
       <span className="text-slate-600">/</span>
-      <span className={`flex h-6 w-6 items-center justify-center rounded-full text-xs font-bold ${current === 2 ? "bg-primary text-white" : "bg-background-elevated text-slate-500"}`}>2</span>
+      <span className={`flex h-6 w-6 items-center justify-center rounded-full text-xs font-bold ${current === 2 ? "bg-primary text-white" : "bg-surface-elevated text-slate-500"}`}>2</span>
       <span className={`font-medium ${current === 2 ? "text-slate-200" : "text-slate-500"}`}>Revisão</span>
     </div>
   );
@@ -109,8 +109,8 @@ function StepIndicator({ current }: { current: 1 | 2 }) {
 
 function FormSection({ title, children }: { title: string; children: React.ReactNode }) {
   return (
-    <div className="rounded-xl border border-border/40 bg-background-surface">
-      <div className="border-b border-border/40 px-5 py-3.5">
+    <div className="rounded-xl border border-borda/40 bg-surface">
+      <div className="border-b border-borda/40 px-5 py-3.5">
         <h2 className="text-sm font-semibold text-slate-200">{title}</h2>
       </div>
       <div className="p-5 space-y-4">{children}</div>
@@ -135,7 +135,7 @@ function CategoryGrid({ value, onChange, error }: { value: string; onChange: (v:
               className={`flex flex-col items-center gap-1.5 rounded-lg border px-2 py-3 text-center transition-all cursor-pointer ${
                 selected
                   ? "border-primary bg-primary/10 text-primary"
-                  : "border-border/50 bg-background-elevated/40 text-slate-400 hover:border-border hover:text-slate-300 hover:bg-background-elevated"
+                  : "border-borda/50 bg-surface-elevated/40 text-slate-400 hover:border-borda hover:text-slate-300 hover:bg-surface-elevated"
               }`}
             >
               {cat.icon}
@@ -165,7 +165,7 @@ function PrioritySelector({ value, onChange }: { value: string; onChange: (v: st
               type="button"
               onClick={() => onChange(p)}
               className={`flex flex-1 items-center justify-center gap-1.5 rounded-lg border px-3 py-2 text-xs font-semibold transition-all cursor-pointer ${
-                selected ? cfg.active : "border-border/40 bg-background-elevated/40 text-slate-500 hover:border-border hover:text-slate-400"
+                selected ? cfg.active : "border-borda/40 bg-surface-elevated/40 text-slate-500 hover:border-borda hover:text-slate-400"
               }`}
             >
               <span className={`w-2 h-2 rounded-full shrink-0 ${selected ? cfg.dot : "bg-slate-600"}`} />
@@ -186,7 +186,7 @@ function SidebarSummary({ values, files, productName }: { values: Partial<FormVa
 
   return (
     <div className="space-y-4">
-      <div className="rounded-xl border border-border/40 bg-background-surface p-4">
+      <div className="rounded-xl border border-borda/40 bg-surface p-4">
         <p className="mb-3 text-[10px] font-bold uppercase tracking-widest text-slate-500">Resumo</p>
         <div className="space-y-3">
           <SummaryRow label="Título" empty="Não preenchido">
@@ -218,7 +218,7 @@ function SidebarSummary({ values, files, productName }: { values: Partial<FormVa
         </div>
       </div>
 
-      <div className="rounded-xl border border-border/40 bg-background-surface p-4">
+      <div className="rounded-xl border border-borda/40 bg-surface p-4">
         <p className="mb-3 flex items-center gap-1.5 text-[10px] font-bold uppercase tracking-widest text-slate-500">
           {IC.Info}
           Dicas
@@ -247,7 +247,7 @@ function SummaryRow({ label, children, empty }: { label: string; children: React
 
 function PreviewRow({ label, children }: { label: string; children: React.ReactNode }) {
   return (
-    <div className="flex gap-4 py-3 border-b border-border/30 last:border-0">
+    <div className="flex gap-4 py-3 border-b border-borda/30 last:border-0">
       <p className="w-28 shrink-0 text-[11px] font-semibold uppercase tracking-widest text-slate-500 pt-0.5">{label}</p>
       <div className="flex-1 text-sm text-slate-200">{children}</div>
     </div>
@@ -264,8 +264,8 @@ function PreviewStep({ values, files, productName, equipmentNames, onBack, onSub
   return (
     <div className="grid grid-cols-1 gap-5 lg:grid-cols-[1fr_300px]">
       <div className="space-y-5">
-        <div className="rounded-xl border border-border/40 bg-background-surface">
-          <div className="border-b border-border/40 px-5 py-3.5">
+        <div className="rounded-xl border border-borda/40 bg-surface">
+          <div className="border-b border-borda/40 px-5 py-3.5">
             <h2 className="text-sm font-semibold text-slate-200">Confirme os dados antes de enviar</h2>
           </div>
           <div className="px-5 py-2">
@@ -310,7 +310,7 @@ function PreviewStep({ values, files, productName, equipmentNames, onBack, onSub
       </div>
 
       <div>
-        <div className="rounded-xl border border-border/40 bg-background-surface p-4">
+        <div className="rounded-xl border border-borda/40 bg-surface p-4">
           <p className="mb-3 text-[10px] font-bold uppercase tracking-widest text-slate-500">Resumo</p>
           <div className="space-y-2.5 text-xs text-slate-500">
             <p>Revise todas as informações antes de confirmar. Após o envio, o chamado será registrado e encaminhado para a equipe técnica.</p>
@@ -457,7 +457,7 @@ export default function TicketFormPage() {
   return (
     <div className="space-y-5 pb-10">
       {/* ── Header ───────────────────────────────────────────── */}
-      <div className="flex flex-wrap items-start justify-between gap-4 rounded-2xl border border-border/40 bg-background-surface px-5 py-4">
+      <div className="flex flex-wrap items-start justify-between gap-4 rounded-2xl border border-borda/40 bg-surface px-5 py-4">
         <div className="min-w-0">
           <button
             onClick={() => navigate(-1)}
@@ -576,7 +576,7 @@ export default function TicketFormPage() {
                               bloqueado ? "cursor-not-allowed opacity-40" : "cursor-pointer",
                               marcado
                                 ? "border-primary bg-primary/15 text-slate-100"
-                                : "border-border text-slate-400 hover:border-slate-500",
+                                : "border-borda text-slate-400 hover:border-slate-500",
                             )}
                           >
                             <span className="font-medium">{e.name}</span>

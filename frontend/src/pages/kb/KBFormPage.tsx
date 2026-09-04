@@ -30,7 +30,7 @@ const STATUS_OPTIONS: { value: KBArticleStatus; label: string; dot: string }[] =
 const STATUS_CONFIG: Record<KBArticleStatus, { cls: string }> = {
   published: { cls: "bg-success/10 text-success-700 dark:text-success-400 border-success/30" },
   draft:     { cls: "bg-warning/10 text-warning-700 dark:text-warning-400 border-warning/30" },
-  archived:  { cls: "bg-background-elevated text-slate-500 border-border/50"                  },
+  archived:  { cls: "bg-surface-elevated text-slate-500 border-borda/50"                  },
 };
 
 // ── Icons ─────────────────────────────────────────────────────
@@ -52,18 +52,18 @@ function ContentEditor({ value, onChange, error }: { value: string; onChange: (v
     <div className="space-y-2">
       <div className="flex items-center justify-between">
         <label className="text-sm font-medium text-slate-300">Conteúdo <span className="text-danger">*</span></label>
-        <div className="flex rounded-lg border border-border/50 overflow-hidden text-xs">
+        <div className="flex rounded-lg border border-borda/50 overflow-hidden text-xs">
           <button
             type="button"
             onClick={() => setTab("write")}
-            className={`flex items-center gap-1.5 px-3 py-1.5 transition-colors cursor-pointer ${tab === "write" ? "bg-background-elevated text-slate-200" : "text-slate-500 hover:text-slate-300"}`}
+            className={`flex items-center gap-1.5 px-3 py-1.5 transition-colors cursor-pointer ${tab === "write" ? "bg-surface-elevated text-slate-200" : "text-slate-500 hover:text-slate-300"}`}
           >
             {IC.Edit} Editar
           </button>
           <button
             type="button"
             onClick={() => setTab("preview")}
-            className={`flex items-center gap-1.5 px-3 py-1.5 border-l border-border/50 transition-colors cursor-pointer ${tab === "preview" ? "bg-background-elevated text-slate-200" : "text-slate-500 hover:text-slate-300"}`}
+            className={`flex items-center gap-1.5 px-3 py-1.5 border-l border-borda/50 transition-colors cursor-pointer ${tab === "preview" ? "bg-surface-elevated text-slate-200" : "text-slate-500 hover:text-slate-300"}`}
           >
             {IC.Eye} Preview
           </button>
@@ -82,7 +82,7 @@ function ContentEditor({ value, onChange, error }: { value: string; onChange: (v
           <p className="text-xs text-slate-600">Suporta Markdown: **negrito**, *itálico*, ## títulos, listas, `código`, links</p>
         </>
       ) : (
-        <div className="min-h-[460px] rounded-xl border border-border/40 bg-background-elevated/60 px-5 py-4">
+        <div className="min-h-[460px] rounded-xl border border-borda/40 bg-surface-elevated/60 px-5 py-4">
           {value.trim() ? (
             <div
               className="prose prose-invert prose-sm max-w-none
@@ -90,11 +90,11 @@ function ContentEditor({ value, onChange, error }: { value: string; onChange: (v
                 prose-p:text-slate-300 prose-p:leading-relaxed
                 prose-a:text-primary prose-a:no-underline hover:prose-a:underline
                 prose-strong:text-slate-100
-                prose-code:text-primary prose-code:bg-background prose-code:px-1 prose-code:rounded
-                prose-pre:bg-background prose-pre:border prose-pre:border-border
+                prose-code:text-primary prose-code:bg-surface-base prose-code:px-1 prose-code:rounded
+                prose-pre:bg-surface-base prose-pre:border prose-pre:border-borda
                 prose-ul:text-slate-300 prose-ol:text-slate-300
                 prose-blockquote:border-l-primary prose-blockquote:text-slate-400
-                prose-hr:border-border"
+                prose-hr:border-borda"
               dangerouslySetInnerHTML={{ __html: html }}
             />
           ) : (
@@ -110,8 +110,8 @@ function ContentEditor({ value, onChange, error }: { value: string; onChange: (v
 
 function FormSection({ title, children }: { title: string; children: React.ReactNode }) {
   return (
-    <div className="rounded-xl border border-border/40 bg-background-surface">
-      <div className="border-b border-border/40 px-5 py-3.5">
+    <div className="rounded-xl border border-borda/40 bg-surface">
+      <div className="border-b border-borda/40 px-5 py-3.5">
         <h2 className="text-sm font-semibold text-slate-200">{title}</h2>
       </div>
       <div className="p-5 space-y-4">{children}</div>
@@ -217,7 +217,7 @@ export default function KBFormPage() {
   return (
     <div className="space-y-5 pb-10">
       {/* ── Header ───────────────────────────────────────────── */}
-      <div className="flex flex-wrap items-start justify-between gap-4 rounded-2xl border border-border/40 bg-background-surface px-5 py-4">
+      <div className="flex flex-wrap items-start justify-between gap-4 rounded-2xl border border-borda/40 bg-surface px-5 py-4">
         <div className="min-w-0">
           <button
             onClick={() => navigate(id ? `/kb/${id}` : "/kb")}
@@ -255,7 +255,7 @@ export default function KBFormPage() {
                   <select
                     value={category}
                     onChange={(e) => setCategory(e.target.value)}
-                    className="w-full rounded-lg border border-border/60 bg-background-elevated px-3 py-2 text-sm text-slate-200 focus:outline-none focus:ring-2 focus:ring-primary focus:border-transparent transition-colors hover:border-border cursor-pointer"
+                    className="w-full rounded-lg border border-borda/60 bg-surface-elevated px-3 py-2 text-sm text-slate-200 focus:outline-none focus:ring-2 focus:ring-primary focus:border-transparent transition-colors hover:border-borda cursor-pointer"
                   >
                     {CATEGORIES.map((c) => <option key={c.value} value={c.value}>{c.label}</option>)}
                   </select>
@@ -265,7 +265,7 @@ export default function KBFormPage() {
                   <select
                     value={status}
                     onChange={(e) => setStatus(e.target.value as KBArticleStatus)}
-                    className="w-full rounded-lg border border-border/60 bg-background-elevated px-3 py-2 text-sm text-slate-200 focus:outline-none focus:ring-2 focus:ring-primary focus:border-transparent transition-colors hover:border-border cursor-pointer"
+                    className="w-full rounded-lg border border-borda/60 bg-surface-elevated px-3 py-2 text-sm text-slate-200 focus:outline-none focus:ring-2 focus:ring-primary focus:border-transparent transition-colors hover:border-borda cursor-pointer"
                   >
                     {STATUS_OPTIONS.map((s) => <option key={s.value} value={s.value}>{s.label}</option>)}
                   </select>
@@ -313,7 +313,7 @@ export default function KBFormPage() {
                             className={`inline-flex max-w-full items-center gap-1 rounded-full border px-2.5 py-1 text-xs font-semibold transition-all cursor-pointer ${
                               sel
                                 ? "border-primary bg-primary text-white shadow-sm"
-                                : "border-border/60 bg-background-elevated text-slate-400 hover:border-primary/50 hover:text-slate-200"
+                                : "border-borda/60 bg-surface-elevated text-slate-400 hover:border-primary/50 hover:text-slate-200"
                             }`}
                           >
                             {sel && <span aria-hidden="true" className="text-[10px] leading-none">✓</span>}
@@ -361,7 +361,7 @@ export default function KBFormPage() {
 
           {/* ── Sidebar ─────────────────────────────────────── */}
           <div className="space-y-4">
-            <div className="rounded-xl border border-border/40 bg-background-surface p-4">
+            <div className="rounded-xl border border-borda/40 bg-surface p-4">
               <p className="mb-3 text-[10px] font-bold uppercase tracking-widest text-slate-500">Resumo</p>
               <div className="space-y-3">
                 <div>
@@ -384,7 +384,7 @@ export default function KBFormPage() {
                     <p className="text-[10px] font-semibold uppercase tracking-widest text-slate-500 mb-1">Tags</p>
                     <div className="flex flex-wrap gap-1">
                       {tagsInput.split(",").map((t) => t.trim()).filter(Boolean).map((tag) => (
-                        <span key={tag} className="rounded-md bg-background-elevated px-2 py-0.5 text-[11px] text-slate-400">{tag}</span>
+                        <span key={tag} className="rounded-md bg-surface-elevated px-2 py-0.5 text-[11px] text-slate-400">{tag}</span>
                       ))}
                     </div>
                   </div>
@@ -392,7 +392,7 @@ export default function KBFormPage() {
               </div>
             </div>
 
-            <div className="rounded-xl border border-border/40 bg-background-surface p-4">
+            <div className="rounded-xl border border-borda/40 bg-surface p-4">
               <p className="mb-3 flex items-center gap-1.5 text-[10px] font-bold uppercase tracking-widest text-slate-500">
                 {IC.Info} Dicas
               </p>

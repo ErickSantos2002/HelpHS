@@ -228,17 +228,17 @@ export default function SlaConfigPage() {
         <>
           <Card padding="none">
             {/* Card header */}
-            <div className="px-4 py-3 border-b border-border">
+            <div className="px-4 py-3 border-b border-borda">
               <p className="text-sm font-semibold text-slate-700 dark:text-slate-200">Níveis de SLA</p>
               <p className="text-xs text-slate-500 mt-0.5">Clique em editar para ajustar os tempos de cada nível.</p>
             </div>
 
-            <div className="divide-y divide-border">
+            <div className="divide-y divide-borda">
               {configs.map((c) => {
                 const style = LEVEL_STYLE[c.level];
                 const responseRatio = Math.min((c.response_time_hours / c.resolve_time_hours) * 100, 100);
                 return (
-                  <div key={c.id} className="flex items-center gap-4 px-4 py-4 hover:bg-background-elevated/40 transition-colors">
+                  <div key={c.id} className="flex items-center gap-4 px-4 py-4 hover:bg-surface-elevated/40 transition-colors">
 
                     {/* Level badge */}
                     <div className={`shrink-0 inline-flex items-center gap-1.5 px-2.5 py-1 rounded-full text-xs font-semibold ${style.badge}`}>
@@ -250,7 +250,7 @@ export default function SlaConfigPage() {
                     <div className="flex-1 min-w-0">
                       {/* Progress bar — mostra resposta vs resolução */}
                       <div className="flex items-center gap-3 mb-2">
-                        <div className="flex-1 h-1.5 rounded-full bg-background-elevated overflow-hidden">
+                        <div className="flex-1 h-1.5 rounded-full bg-surface-elevated overflow-hidden">
                           <div
                             className={`h-full rounded-full ${style.bar} opacity-60`}
                             style={{ width: `${responseRatio}%` }}
@@ -308,7 +308,7 @@ export default function SlaConfigPage() {
           </Card>
 
           {/* Info card */}
-          <div className="rounded-xl border border-border/60 bg-background-surface/50 p-4">
+          <div className="rounded-xl border border-borda/60 bg-surface/50 p-4">
             <div className="flex items-center gap-2 mb-2 text-slate-600 dark:text-slate-300">
               <span className="text-slate-500">{IC.Info}</span>
               <p className="text-sm font-medium">Como funciona</p>

@@ -41,7 +41,7 @@ function ChatBubble({ msg, isOwn }: { msg: ChatMessage; isOwn: boolean }) {
   if (msg.is_system) {
     return (
       <div className="flex justify-center my-2">
-        <span className="text-xs text-slate-500 bg-background-elevated px-3 py-1 rounded-full italic">
+        <span className="text-xs text-slate-500 bg-surface-elevated px-3 py-1 rounded-full italic">
           {msg.content}
         </span>
       </div>
@@ -81,7 +81,7 @@ function ChatBubble({ msg, isOwn }: { msg: ChatMessage; isOwn: boolean }) {
   return (
     <div className="flex gap-2 mb-3">
       {/* Avatar initial */}
-      <div className="w-7 h-7 rounded-full bg-background-elevated border border-border flex items-center justify-center shrink-0 text-xs font-medium text-slate-300">
+      <div className="w-7 h-7 rounded-full bg-surface-elevated border border-borda flex items-center justify-center shrink-0 text-xs font-medium text-slate-300">
         {msg.sender_name.charAt(0).toUpperCase()}
       </div>
       <div className="max-w-[75%]">
@@ -98,7 +98,7 @@ function ChatBubble({ msg, isOwn }: { msg: ChatMessage; isOwn: boolean }) {
             </span>
           )}
         </p>
-        <div className="rounded-xl rounded-tl-none bg-background-elevated border border-border px-3 py-2 text-sm text-slate-200 leading-relaxed break-words whitespace-pre-wrap">
+        <div className="rounded-xl rounded-tl-none bg-surface-elevated border border-borda px-3 py-2 text-sm text-slate-200 leading-relaxed break-words whitespace-pre-wrap">
           {msg.content}
         </div>
         <p className="text-xs text-slate-600 mt-0.5">{time}</p>
@@ -387,9 +387,9 @@ export function ChatPanel({
   }
 
   return (
-    <div className="rounded-xl bg-background-surface border border-border flex flex-col lg:h-full">
+    <div className="rounded-xl bg-surface border border-borda flex flex-col lg:h-full">
       {/* Header */}
-      <div className="flex items-center justify-between px-4 py-3 border-b border-border shrink-0">
+      <div className="flex items-center justify-between px-4 py-3 border-b border-borda shrink-0">
         <h2 className="text-sm font-semibold text-slate-300">Chat</h2>
         <div className="flex items-center gap-3">
           {isStaff && (
@@ -400,7 +400,7 @@ export function ChatPanel({
               disabled={summarizing}
               className={cn(
                 "flex items-center gap-1 text-xs px-2 py-1 rounded-md transition-colors",
-                "border border-slate-700 text-slate-400 hover:bg-background-elevated hover:text-slate-300",
+                "border border-slate-700 text-slate-400 hover:bg-surface-elevated hover:text-slate-300",
                 "disabled:opacity-40 disabled:cursor-not-allowed",
               )}
               title={
@@ -444,7 +444,7 @@ export function ChatPanel({
 
       {/* Summary panel */}
       {isStaff && showSummary && summary && (
-        <div className="border-b border-border bg-background-elevated/50 px-4 py-3 shrink-0">
+        <div className="border-b border-borda bg-surface-elevated/50 px-4 py-3 shrink-0">
           <div className="flex items-start justify-between gap-2">
             <div className="flex-1">
               <p className="text-xs font-medium text-slate-400 mb-1">
@@ -522,7 +522,7 @@ export function ChatPanel({
       </div>
 
       {/* Input */}
-      <div className="border-t border-border px-3 py-2.5 shrink-0">
+      <div className="border-t border-borda px-3 py-2.5 shrink-0">
         {locked ? (
           <p className="text-xs text-slate-500 text-center py-2 italic">
             Este ticket foi encerrado — o chat está bloqueado.
@@ -572,7 +572,7 @@ export function ChatPanel({
                   }
                   className={cn(
                     "flex items-center gap-1.5 text-xs px-2.5 py-1 rounded-md transition-colors",
-                    "border border-slate-600 text-slate-400 hover:bg-background-elevated hover:text-slate-300",
+                    "border border-slate-600 text-slate-400 hover:bg-surface-elevated hover:text-slate-300",
                     "disabled:opacity-40 disabled:cursor-not-allowed",
                   )}
                   title="Melhorar gramática e clareza do texto digitado"
@@ -616,9 +616,9 @@ export function ChatPanel({
                 ref={inputRef}
                 rows={1}
                 className={cn(
-                  "flex-1 resize-none rounded-lg border bg-background-elevated px-3 py-2 text-sm text-slate-100",
+                  "flex-1 resize-none rounded-lg border bg-surface-elevated px-3 py-2 text-sm text-slate-100",
                   "placeholder:text-slate-500 focus:outline-none focus:ring-2 focus:ring-primary focus:border-transparent",
-                  "border-border hover:border-slate-500 transition-colors leading-relaxed",
+                  "border-borda hover:border-slate-500 transition-colors leading-relaxed",
                   "overflow-hidden",
                 )}
                 placeholder={

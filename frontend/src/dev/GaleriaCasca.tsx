@@ -82,7 +82,7 @@ export default function GaleriaCasca() {
   return (
     <AuthContext.Provider value={auth}>
       <div
-        className="flex h-screen overflow-hidden bg-background"
+        className="flex h-screen overflow-hidden bg-surface-base"
         data-galeria={estado}
       >
         <Sidebar
@@ -107,7 +107,7 @@ export default function GaleriaCasca() {
                 página. O cartão existe só para provar superfície, borda e
                 raio contra o fundo — se ele sumir no tema claro, é bug de
                 token, não de conteúdo. */}
-            <div className="rounded-xl border border-border bg-background-surface p-5">
+            <div className="rounded-xl border border-borda bg-surface p-5">
               <h2 className="text-sm font-semibold text-conteudo-heading">
                 Galeria da casca — {estado}
               </h2>

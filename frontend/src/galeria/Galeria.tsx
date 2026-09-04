@@ -84,7 +84,7 @@ export function Galeria() {
   }
 
   return (
-    <div className="min-h-screen bg-background p-6">
+    <div className="min-h-screen bg-surface-base p-6">
       <header className="mb-8 flex items-center justify-between">
         <h1 className="text-lg font-semibold text-conteudo-heading">
           Galeria de componentes — Checkpoint 2
