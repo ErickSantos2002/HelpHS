@@ -70,27 +70,6 @@ export const ICON_PATHS_PACOTE = {
     "M17 16l4-4m0 0l-4-4m4 4H7m6 4v1a3 3 0 01-3 3H6a3 3 0 01-3-3V7a3 3 0 013-3h4a3 3 0 013 3v1",
   filter:
     "M3 4a1 1 0 011-1h16a1 1 0 011 1v2.586a1 1 0 01-.293.707l-6.414 6.414a1 1 0 00-.293.707V17l-4 4v-6.586a1 1 0 00-.293-.707L3.293 7.293A1 1 0 013 6.586V4z",
-} as const;
-
-/**
- * Os que **não** vêm do pacote.
- *
- * A procedência é tabela separada, e não comentário, porque é ela que dá
- * sentido ao hash de cima: o teste prende os 25 do pacote a um número tirado do
- * `Icon.jsx` no dia da cópia, e um acréscimo local misturado ali derrubaria
- * essa conferência para sempre — o conserto seria trocar o número, e trocar o
- * número é justamente o que o teste existe para impedir.
- *
- * Estes nove estavam soltos dentro do `TicketFormPage`, e vieram para cá
- * **verbatim**. Verbatim de propósito: trocar `server` pelo `cpu` que já
- * existia, ou `help` pelo `info`, mudaria o desenho da tela dentro de um commit
- * que promete não mudar pixel. Troca de ícone é decisão de produto, não efeito
- * colateral de migração.
- *
- * Se um destes nomes aparecer no pacote um dia, o traçado de lá ganha e este
- * sai — e o hash de cima passa a cobri-lo.
- */
-export const ICON_PATHS_LOCAIS = {
   server:
     "M9 3H5a2 2 0 00-2 2v4m6-6h10a2 2 0 012 2v4M9 3v18m0 0h10a2 2 0 002-2V9M9 21H5a2 2 0 01-2-2V9m0 0h18",
   code:
@@ -109,21 +88,8 @@ export const ICON_PATHS_LOCAIS = {
     "M10 19l-7-7m0 0l7-7m-7 7h18",
   paperclip:
     "M15.172 7l-6.586 6.586a2 2 0 102.828 2.828l6.414-6.586a4 4 0 00-5.656-5.656l-6.415 6.585a6 6 0 108.486 8.486L20.5 13",
-  // Nao ha `checkCircle` aqui: o `check` do pacote JA e o visto dentro do
-  // circulo, com o mesmo tracado. O caso "cada nome desenha um tracado
-  // diferente" pegou a duplicata antes de ela existir.
   user:
     "M16 7a4 4 0 11-8 0 4 4 0 018 0zM12 14a7 7 0 00-7 7h14a7 7 0 00-7-7z",
-
-  // ── Do `TicketDetailPage`, movidos verbatim ────────────────────
-  //
-  // Varios sao PARENTES de icones do pacote com tracado diferente:
-  // `checkMark` contra `check` (o do pacote e dentro do circulo),
-  // `alert` contra `warning` (outro triangulo), `tagOutline` contra
-  // `tag`. Ficam separados de proposito — unificar muda o desenho da
-  // tela, e isso e decisao de produto. Anotado para o operador.
-  checkMark:
-    "M5 13l4 4L19 7",
   folder:
     "M3 7a2 2 0 012-2h3.586a1 1 0 01.707.293l1.414 1.414A1 1 0 0011.414 7H19a2 2 0 012 2v9a2 2 0 01-2 2H5a2 2 0 01-2-2V7z",
   edit:
@@ -142,21 +108,32 @@ export const ICON_PATHS_LOCAIS = {
     "M15 12a3 3 0 11-6 0 3 3 0 016 0z",
     "M2.458 12C3.732 7.943 7.523 5 12 5c4.478 0 8.268 2.943 9.542 7-1.274 4.057-5.064 7-9.542 7-4.477 0-8.268-2.943-9.542-7z",
   ],
-  alert:
-    "M12 9v2m0 4h.01m-6.938 4h13.856c1.54 0 2.502-1.667 1.732-3L13.732 4c-.77-1.333-2.694-1.333-3.464 0L3.34 16c-.77 1.333.192 3 1.732 3z",
-  tagOutline:
-    "M7 7h.01M7 3h5c.512 0 1.024.195 1.414.586l7 7a2 2 0 010 2.828l-7 7a2 2 0 01-2.828 0l-7-7A1.994 1.994 0 013 12V7a4 4 0 014-4z",
-  text:
-    "M4 6h16M4 12h16M4 18h7",
   activity:
     "M13 10V3L4 14h7v7l9-11h-7z",
   star:
     "M11.049 2.927c.3-.921 1.603-.921 1.902 0l1.519 4.674a1 1 0 00.95.69h4.915c.969 0 1.371 1.24.588 1.81l-3.976 2.888a1 1 0 00-.363 1.118l1.518 4.674c.3.922-.755 1.688-1.538 1.118l-3.976-2.888a1 1 0 00-1.176 0l-3.976 2.888c-.783.57-1.838-.197-1.538-1.118l1.518-4.674a1 1 0 00-.363-1.118l-3.976-2.888c-.784-.57-.38-1.81.588-1.81h4.914a1 1 0 00.951-.69l1.519-4.674z",
-  chatBubble:
-    "M8 10h.01M12 10h.01M16 10h.01M9 16H5a2 2 0 01-2-2V6a2 2 0 012-2h14a2 2 0 012 2v8a2 2 0 01-2 2h-5l-5 5v-5z",
   document:
     "M9 12h6m-6 4h6m2 5H7a2 2 0 01-2-2V5a2 2 0 012-2h5.586a1 1 0 01.707.293l5.414 5.414a1 1 0 01.293.707V19a2 2 0 01-2 2z",
 } as const;
+
+/**
+ * Os que **não** vêm do pacote — hoje, nenhum.
+ *
+ * A tabela existiu entre 04/09 e 08/09/2026, com acréscimos locais. O operador
+ * decidiu que **variante local não existe**: ou o desenho já significa o mesmo
+ * que um do pacote, e aí se unifica, ou ele entra no pacote com nome próprio,
+ * como emenda.
+ *
+ * Quatro foram unificados por significado — `checkMark` → `check`,
+ * `alert` → `warning`, `tagOutline` → `tag`, `chatBubble` → `chat` —, um saiu
+ * por nunca ter tido uso (`text`), e os outros 21 subiram para o pacote na
+ * **E20**.
+ *
+ * Fica declarada e vazia de propósito: é o lugar onde um acréscimo local
+ * apareceria, e o teste que confere que ela não reescreve nome do pacote
+ * continua valendo. Uma tabela ausente não tem onde ser conferida.
+ */
+export const ICON_PATHS_LOCAIS = {} as const;
 
 /** O conjunto que o `Icon` desenha: os do pacote mais os locais. */
 export const ICON_PATHS = {

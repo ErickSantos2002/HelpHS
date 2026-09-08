@@ -16,8 +16,18 @@ function svg(elemento: React.ReactElement): SVGSVGElement | null {
 }
 
 describe("Icon", () => {
-  it("traz os 25 nomes do pacote, nem um a mais", () => {
-    expect(Object.keys(ICON_PATHS_PACOTE)).toHaveLength(25);
+  it("traz os 46 nomes do pacote, nem um a mais", () => {
+    // Eram 25 até a **E20**, que subiu para o pacote os 21 que viviam numa
+    // tabela local do HelpHS. O número muda quando o pacote muda, e só então.
+    expect(Object.keys(ICON_PATHS_PACOTE)).toHaveLength(46);
+  });
+
+  it("a tabela local está vazia — variante local não existe", () => {
+    // Decisão do operador em 08/09/2026: ou o desenho já significa o mesmo que
+    // um do pacote e se unifica, ou ele entra no pacote com nome próprio, como
+    // emenda. A tabela fica declarada e vazia de propósito: é onde um
+    // acréscimo apareceria, e uma tabela ausente não tem onde ser conferida.
+    expect(Object.keys(ICON_PATHS_LOCAIS)).toEqual([]);
   });
 
   it("nenhum acréscimo local reescreve um nome do pacote", () => {
@@ -80,7 +90,7 @@ describe("Icon", () => {
     expect(vistos.size).toBe(Object.keys(ICON_PATHS).length);
   });
 
-  it("os 25 traçados continuam idênticos aos do pacote", () => {
+  it("os 46 traçados continuam idênticos aos do pacote", () => {
     // O teste acima compara a tabela consigo mesma: trocar um traçado aqui e no
     // componente passaria verde. Este prende a tabela a um número calculado do
     // `Icon.jsx` do pacote no dia da cópia — a mesma conferência por hash que o
@@ -93,7 +103,10 @@ describe("Icon", () => {
       .join("\n");
     const hash = createHash("sha256").update(serial, "utf-8").digest("hex");
     expect(hash.toUpperCase()).toBe(
-      "1B07BB04C2632522334663D75DC172FE634F97A33727339CB9183EF97A439C3B",
+      // Trocado na E20, que mudou o pacote — o segundo dos dois casos que o
+      // comentário acima prevê. O primeiro (alguém editou à mão) continua
+      // sendo motivo para investigar, não para trocar o número.
+      "ABD592217C89F0C391B7073A5073FE237A09463B78AC73397FAFF60D259BD574",
     );
   });
 

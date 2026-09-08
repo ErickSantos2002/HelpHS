@@ -640,7 +640,7 @@ type Tab = "conversa" | "kb" | "detalhes" | "historico" | "anexos";
 
 const TAB_ICONS: Record<string, React.JSX.Element> = {
   conversa: (
-    <Icon name="chatBubble" size={16} strokeWidth={2} />
+    <Icon name="chat" size={16} strokeWidth={2} />
   ),
   detalhes: (
     <Icon name="document" size={16} strokeWidth={2} />
@@ -1045,7 +1045,7 @@ export default function TicketDetailPage() {
             ))}
             {slaBreach && (
               <span className="inline-flex items-center gap-1 rounded-full bg-tint-danger px-2.5 py-0.5 text-xs font-semibold text-on-tint-danger ring-1 ring-inset ring-danger/25">
-                <Icon name="alert" size={12} strokeWidth={2} />
+                <Icon name="warning" size={12} strokeWidth={2} />
                 SLA violado
               </span>
             )}
@@ -1096,7 +1096,7 @@ export default function TicketDetailPage() {
                 {ticket.resolution_note && (
                   <div className="shrink-0 rounded-xl border border-success/30 bg-tint-success">
                     <div className="flex items-center gap-2 border-b border-success/20 px-5 py-3.5">
-                      <span className="text-on-tint-success">{<Icon name="checkMark" size={16} strokeWidth={2.5} />}</span>
+                      <span className="text-on-tint-success">{<Icon name="check" size={16} strokeWidth={2.5} />}</span>
                       <h2 className="text-sm font-semibold text-on-tint-success">Resolução</h2>
                     </div>
                     <div className="px-5 py-4">
@@ -1366,7 +1366,7 @@ export default function TicketDetailPage() {
               <div className="space-y-2">
                 {isStaff && !isClosed && (
                   <SidebarAction
-                    icon={<Icon name="checkMark" size={16} strokeWidth={2.5} />}
+                    icon={<Icon name="check" size={16} strokeWidth={2.5} />}
                     label="Concluir ticket"
                     onClick={() => setResolveModal(true)}
                     variant="primary"
@@ -1398,7 +1398,7 @@ export default function TicketDetailPage() {
                 )}
                 {isStaff && (
                   <SidebarAction
-                    icon=<Icon name="alert" size={12} strokeWidth={2} />
+                    icon=<Icon name="warning" size={12} strokeWidth={2} />
                     label={
                       ticket.ai_enabled ? "Desligar IA neste chamado" : "Religar IA neste chamado"
                     }
@@ -1423,7 +1423,7 @@ export default function TicketDetailPage() {
             <PropRow icon=<Icon name="activity" size={16} strokeWidth={2} /> label="Status">
               <StatusBadge status={ticket.status} />
             </PropRow>
-            <PropRow icon=<Icon name="alert" size={12} strokeWidth={2} /> label="Prioridade">
+            <PropRow icon=<Icon name="warning" size={12} strokeWidth={2} /> label="Prioridade">
               <PriorityBadge priority={ticket.priority} />
             </PropRow>
             <PropRow icon=<Icon name="user" size={16} strokeWidth={2} /> label="Responsável">
@@ -1477,7 +1477,7 @@ export default function TicketDetailPage() {
               })}
             </PropRow>
             {ticket.closed_at && (
-              <PropRow icon={<Icon name="checkMark" size={16} strokeWidth={2.5} />} label="Fechado em">
+              <PropRow icon={<Icon name="check" size={16} strokeWidth={2.5} />} label="Fechado em">
                 {new Date(ticket.closed_at).toLocaleString("pt-BR")}
               </PropRow>
             )}
@@ -1516,7 +1516,7 @@ export default function TicketDetailPage() {
           {(ticket.tags.length > 0 || isStaff) && (
             <SidebarSection
               title="Etiquetas"
-              icon=<Icon name="tagOutline" size={12} strokeWidth={2} />
+              icon=<Icon name="tag" size={12} strokeWidth={2} />
               action={
                 isStaff && !tagsEdit ? (
                   <button
