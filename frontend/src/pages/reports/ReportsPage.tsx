@@ -13,11 +13,37 @@ import {
   XAxis,
   YAxis,
 } from "recharts";
-import { FilterSelect, PriorityBadge, Spinner } from "../../components/ui";
-import { graficoDePrioridade, rotuloDePrioridade } from "../../lib/prioridade";
+import {
+  FilterSelect,
+  Icon,
+  Pagination,
+  PriorityBadge,
+  Spinner,
+  Table,
+  TableBody,
+  TableCell,
+  TableEmpty,
+  TableHead,
+  TableHeaderCell,
+  TableRow,
+} from "../../components/ui";
+import { CATEGORIAS, rotuloDeCategoria } from "../../lib/categoria";
+import {
+  COR_SERIE_TEMPORAL,
+  CROMO,
+  ENVOLTORIO_DICA,
+  ESTILO_DICA,
+  preenchimentoCsat,
+  slotCategorico,
+} from "../../lib/grafico";
+import {
+  PRIORIDADES,
+  graficoDePrioridade,
+  rotuloDePrioridade,
+} from "../../lib/prioridade";
+import { rotuloDeStatus, slotDeStatus } from "../../lib/status";
 import { plural } from "../../lib/utils";
 import { useAuth } from "../../contexts/AuthContext";
-import { useTheme } from "../../contexts/ThemeContext";
 import {
   exportReportsUrl,
   getReports,
@@ -45,43 +71,23 @@ const PERIOD_OPTIONS = [
   { value: "personalizado", label: "Personalizado"  },
 ];
 
-const CATEGORY_OPTIONS = [
-  { value: "hardware", label: "Hardware"  },
-  { value: "software", label: "Software"  },
-  { value: "network",  label: "Rede"      },
-  { value: "access",   label: "Acesso"    },
-  { value: "email",    label: "E-mail"    },
-  { value: "security", label: "Segurança" },
-  { value: "general",  label: "Geral"     },
-  { value: "other",    label: "Outro"     },
-];
-
-const PRIORITY_OPTIONS = [
-  { value: "critical", label: "Crítica" },
-  { value: "high",     label: "Alta"    },
-  { value: "medium",   label: "Média"   },
-  { value: "low",      label: "Baixa"   },
-];
-
 /*
- * As cores e os rótulos de prioridade vinham daqui, e este era o mapa mais
- * divergente dos seis: pintava `high` de laranja e `low` de VERDE — a mesma
- * tinta de sucesso —, dizendo que prioridade baixa é uma coisa boa.
+ * As opções dos dois filtros saem dos módulos, e não de uma lista paralela.
  *
- * Agora sai tudo de `lib/prioridade.ts`. O preenchimento de lá é medido: as
- * quatro cores passam 3:1 nas três superfícies dos dois temas, e a galeria
- * confere a cada execução.
+ * Eram duas cópias — oito categorias e quatro prioridades — que já não tinham
+ * como divergir por acidente: divergiriam por edição. `lib/categoria.ts` e
+ * `lib/prioridade.ts` são as fontes, e a segunda ainda dá a ORDEM de urgência,
+ * que a lista à mão repetia de cor.
  */
-const CATEGORY_LABELS: Record<string, string> = {
-  hardware: "Hardware", software: "Software", network: "Rede",
-  access: "Acesso",   email: "E-mail",       security: "Segurança",
-  general: "Geral",   other: "Outro",
-};
-// Uma cor por nota da pesquisa de satisfação (escala de 1 a 10), do pior ao melhor
-const CSAT_COLORS = [
-  "#dc2626", "#ef4444", "#f97316", "#fb923c", "#eab308",
-  "#facc15", "#a3e635", "#84cc16", "#4ade80", "#22c55e",
-];
+const CATEGORY_OPTIONS = CATEGORIAS.map((c) => ({
+  value: c.value,
+  label: c.label,
+}));
+
+const PRIORITY_OPTIONS = PRIORIDADES.map((p) => ({
+  value: p,
+  label: rotuloDePrioridade(p),
+}));
 
 const WEEKDAY_LABELS: Record<number, string> = {
   1: "Seg", 2: "Ter", 3: "Qua", 4: "Qui", 5: "Sex", 6: "Sáb", 7: "Dom",
@@ -91,25 +97,58 @@ const WEEKDAY_FULL: Record<number, string> = {
   4: "Quinta-feira", 5: "Sexta-feira", 6: "Sábado", 7: "Domingo",
 };
 
-const tooltipWrapperStyle = { outline: "none", border: "none" };
+/**
+ * Os dois grupos do gráfico de dia da semana, e os quatro do de hora do dia.
+ *
+ * São séries **categóricas**: "fim de semana" não é melhor nem pior que "dia
+ * útil", e "madrugada" não é um alerta. Por isso pegam slot pela posição, e
+ * quem diz o que cada cor é são a legenda e a marca do eixo — não a cor.
+ *
+ * O que saiu daqui: `#f59e0b` para o fim de semana (âmbar, a tinta de aviso —
+ * dizia que sábado é um problema) e `#475569` para a madrugada (cinza de
+ * apagado, sobre fundo escuro).
+ */
+const SLOT_DIA_UTIL = slotCategorico(0);
+const SLOT_FIM_DE_SEMANA = slotCategorico(1);
 
-// ── Icons ─────────────────────────────────────────────────────
+/** Os quatro períodos, na ordem em que pegam slot. */
+const PERIODOS_DO_DIA = ["manhã", "tarde", "noite", "madrugada"] as const;
 
-const IC = {
-  Download:  <svg className="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}><path strokeLinecap="round" strokeLinejoin="round" d="M4 16v1a3 3 0 003 3h10a3 3 0 003-3v-1m-4-4l-4 4m0 0l-4-4m4 4V4" /></svg>,
-  ChevLeft:  <svg className="w-3.5 h-3.5" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2.5}><path strokeLinecap="round" strokeLinejoin="round" d="M15 19l-7-7 7-7" /></svg>,
-  ChevDown:  <svg className="w-3.5 h-3.5" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2.5}><path strokeLinecap="round" strokeLinejoin="round" d="M19 9l-7 7-7-7" /></svg>,
-  Chart:     <svg className="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}><path strokeLinecap="round" strokeLinejoin="round" d="M9 19v-6a2 2 0 00-2-2H5a2 2 0 00-2 2v6a2 2 0 002 2h2a2 2 0 002-2zm0 0V9a2 2 0 012-2h2a2 2 0 012 2v10m-6 0a2 2 0 002 2h2a2 2 0 002-2m0 0V5a2 2 0 012-2h2a2 2 0 012 2v14a2 2 0 01-2 2h-2a2 2 0 01-2-2z" /></svg>,
-  Users:     <svg className="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}><path strokeLinecap="round" strokeLinejoin="round" d="M17 20h5v-2a3 3 0 00-5.356-1.857M17 20H7m10 0v-2c0-.656-.126-1.283-.356-1.857M7 20H2v-2a3 3 0 015.356-1.857M7 20v-2c0-.656.126-1.283.356-1.857m0 0a5.002 5.002 0 019.288 0M15 7a3 3 0 11-6 0 3 3 0 016 0z" /></svg>,
-  Calendar:  <svg className="w-3.5 h-3.5" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}><path strokeLinecap="round" strokeLinejoin="round" d="M8 7V3m8 4V3m-9 8h10M5 21h14a2 2 0 002-2V7a2 2 0 00-2-2H5a2 2 0 00-2 2v12a2 2 0 002 2z" /></svg>,
-};
+/** O índice do período de uma hora cheia. A madrugada dá a volta no dia. */
+function periodoDaHora(h: number): number {
+  if (h >= 6 && h < 12) return 0;
+  if (h >= 12 && h < 18) return 1;
+  if (h >= 18 && h < 22) return 2;
+  return 3;
+}
 
 // ── Shared sub-components ─────────────────────────────────────
+
+/**
+ * O miolo da dica, sem caixa própria.
+ *
+ * A caixa passou a ser do `wrapperStyle` (`ENVOLTORIO_DICA`) — era esta a
+ * duplicação: seis dicas escreviam o mesmo `backgroundColor`/`border`/`radius`
+ * à mão, cada uma com o hexadecimal escolhido por tema em JavaScript. Aqui
+ * sobra o que é geometria, e a cor do texto vem do token do papel.
+ */
+function CorpoDaDica({ children }: { children: React.ReactNode }) {
+  return (
+    <div style={{ padding: "8px 12px", fontSize: 12, color: CROMO.dicaTexto }}>
+      {children}
+    </div>
+  );
+}
+
+/** O título da dica — o nome da fatia sobre a qual o ponteiro está. */
+function TituloDaDica({ children }: { children: React.ReactNode }) {
+  return <p style={{ fontWeight: 600, marginBottom: 4 }}>{children}</p>;
+}
 
 function Delta({ current, prev }: { current: number; prev: number | null }) {
   if (prev === null || prev === 0) return null;
   const pct = Math.round(((current - prev) / prev) * 100);
-  if (pct === 0) return <span className="text-[10px] font-semibold text-slate-500">= igual</span>;
+  if (pct === 0) return <span className="text-[10px] font-semibold text-conteudo-muted">= igual</span>;
   const up = pct > 0;
   return (
     <span className={`flex items-center gap-0.5 text-[10px] font-semibold ${up ? "text-success-700 dark:text-success-400" : "text-danger-700 dark:text-danger-400"}`}>
@@ -118,16 +157,16 @@ function Delta({ current, prev }: { current: number; prev: number | null }) {
   );
 }
 
-function StatCard({ label, value, sub, colorCls = "text-slate-100", delta }: {
+function StatCard({ label, value, sub, colorCls = "text-conteudo-heading", delta }: {
   label: string; value: string | number; sub?: string; colorCls?: string;
   delta?: React.ReactNode;
 }) {
   return (
     <div className="rounded-xl border border-borda/40 bg-surface p-4">
-      <p className="mb-2 text-xs font-medium text-slate-500">{label}</p>
+      <p className="mb-2 text-xs font-medium text-conteudo-muted">{label}</p>
       <p className={`text-2xl font-bold leading-none ${colorCls}`}>{value}</p>
       <div className="mt-1.5 flex items-center gap-2 flex-wrap">
-        {sub && <p className="text-xs text-slate-500">{sub}</p>}
+        {sub && <p className="text-xs text-conteudo-muted">{sub}</p>}
         {delta}
       </div>
     </div>
@@ -138,7 +177,7 @@ function ChartCard({ title, children }: { title: string; children: React.ReactNo
   return (
     <div className="rounded-xl border border-borda/40 bg-surface">
       <div className="border-b border-borda/40 px-5 py-3.5">
-        <h2 className="text-sm font-semibold text-slate-200">{title}</h2>
+        <h2 className="text-sm font-semibold text-conteudo">{title}</h2>
       </div>
       <div className="p-5">{children}</div>
     </div>
@@ -147,9 +186,8 @@ function ChartCard({ title, children }: { title: string; children: React.ReactNo
 
 // ── Avg first response chart ──────────────────────────────────
 
-function FirstResponseChart({ data, gridColor, tooltipBg, tooltipBorder, tooltipColor, fmtHours }: {
-  data: AvgFirstResponseItem[]; gridColor: string;
-  tooltipBg: string; tooltipBorder: string; tooltipColor: string;
+function FirstResponseChart({ data, fmtHours }: {
+  data: AvgFirstResponseItem[];
   fmtHours: (h: number | null) => string;
 }) {
   const chartData = data.filter((r) => r.avg_hours != null).map((r) => ({ priority: r.priority, avg_hours: r.avg_hours ?? 0 }));
@@ -158,19 +196,19 @@ function FirstResponseChart({ data, gridColor, tooltipBg, tooltipBorder, tooltip
     <ChartCard title="Tempo médio de 1ª resposta por prioridade">
       <ResponsiveContainer width="100%" height={220}>
         <BarChart data={chartData} margin={{ top: 4, right: 4, left: 0, bottom: 0 }} barSize={48}>
-          <CartesianGrid strokeDasharray="3 3" stroke="#2d3748" />
-          <XAxis dataKey="priority" tick={{ fontSize: 10, fill: "#94a3b8" }}
+          <CartesianGrid strokeDasharray="3 3" stroke={CROMO.grade} />
+          <XAxis dataKey="priority" stroke={CROMO.eixo} tick={{ fontSize: 10, fill: CROMO.eixo }}
             tickFormatter={(v: string) => rotuloDePrioridade(v)} />
-          <YAxis tick={{ fontSize: 10, fill: "#94a3b8" }}
+          <YAxis stroke={CROMO.eixo} tick={{ fontSize: 10, fill: CROMO.eixo }}
             tickFormatter={(v: number) => v >= 24 ? `${(v / 24).toFixed(0)}d` : `${v}h`} />
-          <Tooltip cursor={{ fill: gridColor }} wrapperStyle={{ outline: "none", border: "none" }}
+          <Tooltip cursor={{ fill: CROMO.grade }} wrapperStyle={ENVOLTORIO_DICA}
             content={({ active, payload, label }) => {
               if (!active || !payload?.length) return null;
               return (
-                <div style={{ backgroundColor: tooltipBg, border: `1px solid ${tooltipBorder}`, borderRadius: 8, padding: "8px 12px", fontSize: 12, color: tooltipColor, outline: "none" }}>
-                  <p style={{ fontWeight: 600, marginBottom: 4 }}>{rotuloDePrioridade(String(label))}</p>
-                  <p style={{ color: "#6366f1" }}>Tempo médio: {fmtHours(payload[0].value as number)}</p>
-                </div>
+                <CorpoDaDica>
+                  <TituloDaDica>{rotuloDePrioridade(String(label))}</TituloDaDica>
+                  <p>Tempo médio: {fmtHours(payload[0].value as number)}</p>
+                </CorpoDaDica>
               );
             }} />
           <Bar dataKey="avg_hours" radius={[4, 4, 0, 0]}>
@@ -184,30 +222,33 @@ function FirstResponseChart({ data, gridColor, tooltipBg, tooltipBorder, tooltip
 
 // ── Tickets by product chart ──────────────────────────────────
 
-function ProductChart({ data, gridColor, tooltipBg, tooltipBorder, tooltipColor }: {
-  data: ProductCount[]; gridColor: string;
-  tooltipBg: string; tooltipBorder: string; tooltipColor: string;
-}) {
+function ProductChart({ data }: { data: ProductCount[] }) {
   if (data.length === 0) return null;
   return (
     <ChartCard title="Tickets por produto">
       <ResponsiveContainer width="100%" height={220}>
         <BarChart data={data} layout="vertical" margin={{ top: 0, right: 8, left: 4, bottom: 0 }}>
-          <CartesianGrid strokeDasharray="3 3" stroke="#2d3748" horizontal={false} />
-          <XAxis type="number" tick={{ fontSize: 10, fill: "#94a3b8" }} allowDecimals={false} />
-          <YAxis dataKey="product_name" type="category" tick={{ fontSize: 10, fill: "#94a3b8" }} width={80}
+          <CartesianGrid strokeDasharray="3 3" stroke={CROMO.grade} horizontal={false} />
+          <XAxis type="number" stroke={CROMO.eixo} tick={{ fontSize: 10, fill: CROMO.eixo }} allowDecimals={false} />
+          <YAxis dataKey="product_name" type="category" stroke={CROMO.eixo} tick={{ fontSize: 10, fill: CROMO.eixo }} width={80}
             tickFormatter={(v: string) => v.length > 12 ? `${v.slice(0, 12)}…` : v} />
-          <Tooltip cursor={{ fill: gridColor }} wrapperStyle={{ outline: "none", border: "none" }}
+          <Tooltip cursor={{ fill: CROMO.grade }} wrapperStyle={ENVOLTORIO_DICA}
             content={({ active, payload, label }) => {
               if (!active || !payload?.length) return null;
               return (
-                <div style={{ backgroundColor: tooltipBg, border: `1px solid ${tooltipBorder}`, borderRadius: 8, padding: "8px 12px", fontSize: 12, color: tooltipColor, outline: "none" }}>
-                  <p style={{ fontWeight: 600, marginBottom: 4 }}>{label}</p>
-                  <p style={{ color: "#6366f1" }}>Tickets: {payload[0].value ?? 0}</p>
-                </div>
+                <CorpoDaDica>
+                  <TituloDaDica>{label}</TituloDaDica>
+                  <p>Tickets: {payload[0].value ?? 0}</p>
+                </CorpoDaDica>
               );
             }} />
-          <Bar dataKey="count" fill="#6366f1" radius={[0, 4, 4, 0]} />
+          {/*
+            UMA cor para a série inteira, e não um slot por barra: são sete
+            slots e o produto é lista aberta — da oitava barra em diante duas
+            pintariam igual, e a cor não diria nada que o nome ao lado já não
+            diga. O mesmo vale para o gráfico de categoria, que tem oito.
+          */}
+          <Bar dataKey="count" fill={slotCategorico(0)} radius={[0, 4, 4, 0]} />
         </BarChart>
       </ResponsiveContainer>
     </ChartCard>
@@ -216,50 +257,49 @@ function ProductChart({ data, gridColor, tooltipBg, tooltipBorder, tooltipColor 
 
 // ── Hourly distribution chart ─────────────────────────────────
 
-function HourlyChart({ data, gridColor, tooltipBg, tooltipBorder, tooltipColor }: {
-  data: HourlyCount[]; gridColor: string;
-  tooltipBg: string; tooltipBorder: string; tooltipColor: string;
-}) {
+function HourlyChart({ data }: { data: HourlyCount[] }) {
   const hasData = data.some((d) => d.count > 0);
   if (!hasData) return null;
-
-  function hourColor(h: number): string {
-    if (h >= 6 && h < 12)  return "#6366f1";  // manhã
-    if (h >= 12 && h < 18) return "#8b5cf6";  // tarde
-    if (h >= 18 && h < 22) return "#a78bfa";  // noite
-    return "#475569";                           // madrugada
-  }
 
   return (
     <ChartCard title="Tickets por hora do dia">
       <ResponsiveContainer width="100%" height={220}>
         <BarChart data={data} margin={{ top: 4, right: 4, left: -20, bottom: 0 }}>
-          <CartesianGrid strokeDasharray="3 3" stroke="#2d3748" />
-          <XAxis dataKey="hour" tick={{ fontSize: 10, fill: "#94a3b8" }}
+          <CartesianGrid strokeDasharray="3 3" stroke={CROMO.grade} />
+          <XAxis dataKey="hour" stroke={CROMO.eixo} tick={{ fontSize: 10, fill: CROMO.eixo }}
             tickFormatter={(v: number) => v % 3 === 0 ? `${v}h` : ""} />
-          <YAxis tick={{ fontSize: 10, fill: "#94a3b8" }} allowDecimals={false} />
-          <Tooltip cursor={{ fill: gridColor }} wrapperStyle={{ outline: "none", border: "none" }}
+          <YAxis stroke={CROMO.eixo} tick={{ fontSize: 10, fill: CROMO.eixo }} allowDecimals={false} />
+          <Tooltip cursor={{ fill: CROMO.grade }} wrapperStyle={ENVOLTORIO_DICA}
             content={({ active, payload, label }) => {
               if (!active || !payload?.length) return null;
               const h = Number(label ?? 0);
-              const period = h >= 6 && h < 12 ? "Manhã" : h >= 12 && h < 18 ? "Tarde" : h >= 18 && h < 22 ? "Noite" : "Madrugada";
               return (
-                <div style={{ backgroundColor: tooltipBg, border: `1px solid ${tooltipBorder}`, borderRadius: 8, padding: "8px 12px", fontSize: 12, color: tooltipColor, outline: "none" }}>
-                  <p style={{ fontWeight: 600, marginBottom: 4 }}>{h}h — {period}</p>
-                  <p style={{ color: hourColor(h) }}>Tickets: {payload[0].value ?? 0}</p>
-                </div>
+                <CorpoDaDica>
+                  <TituloDaDica>{h}h — {PERIODOS_DO_DIA[periodoDaHora(h)]}</TituloDaDica>
+                  <p>Tickets: {payload[0].value ?? 0}</p>
+                </CorpoDaDica>
               );
             }} />
           <Bar dataKey="count" radius={[4, 4, 0, 0]}>
-            {data.map((e) => <Cell key={e.hour} fill={hourColor(e.hour)} />)}
+            {data.map((e) => (
+              <Cell key={e.hour} fill={slotCategorico(periodoDaHora(e.hour))} />
+            ))}
           </Bar>
         </BarChart>
       </ResponsiveContainer>
-      <p className="mt-2 text-center text-[10px] text-slate-500">
-        <span style={{ color: "#6366f1" }}>■</span> manhã &nbsp;
-        <span style={{ color: "#8b5cf6" }}>■</span> tarde &nbsp;
-        <span style={{ color: "#a78bfa" }}>■</span> noite &nbsp;
-        <span style={{ color: "#475569" }}>■</span> madrugada
+      {/*
+        A legenda nomeia os quatro períodos. Sem ela a cor seria a única fonte
+        de "isto é madrugada" — e as quatro do slot categórico são medidas para
+        forma (3:1), não para dizer o que dizem.
+      */}
+      <p className="mt-2 text-center text-[10px] text-conteudo-muted">
+        {PERIODOS_DO_DIA.map((nome, i) => (
+          <span key={nome}>
+            <span aria-hidden="true" style={{ color: slotCategorico(i) }}>■</span>{" "}
+            {nome}
+            {i < PERIODOS_DO_DIA.length - 1 ? <>&nbsp;&nbsp;</> : null}
+          </span>
+        ))}
       </p>
     </ChartCard>
   );
@@ -267,15 +307,30 @@ function HourlyChart({ data, gridColor, tooltipBg, tooltipBorder, tooltipColor }
 
 // ── Technician distribution chart ────────────────────────────
 
-function TechnicianDistChart({ data, gridColor, tooltipBg, tooltipBorder, tooltipColor }: {
-  data: TechnicianDistItem[];
-  gridColor: string;
-  tooltipBg: string;
-  tooltipBorder: string;
-  tooltipColor: string;
-}) {
+/**
+ * As duas séries deste gráfico **são status**, e por isso ele é o caso da E18.
+ *
+ * Pintavam `#22c55e` e `#f59e0b` — o verde de sucesso e o âmbar de aviso —, que
+ * é a §16 aplicada a gráfico. Não cabe: a E18 mediu que sete séries dentro das
+ * rampas semânticas não têm solução no tema claro, e o par que trava é
+ * justamente verde × vermelho em protanopia. A tabela fixa resolve, e o preço
+ * dela é que a cor deixa de significar — `resolvido` é o quinto slot da paleta
+ * e o quinto slot não diz "resolvido" a ninguém.
+ *
+ * **Por isso a legenda é obrigatória, e não conveniência.** Enquanto o verde
+ * era o verde, quem conhecia o sistema lia a cor. Agora quem diz o que cada
+ * série é são estas duas palavras.
+ */
+const SERIES_DE_STATUS = [
+  { chave: "resolved", status: "resolved", rotulo: "Resolvidos" },
+  { chave: "open_count", status: "open", rotulo: "Em aberto" },
+] as const;
+
+function TechnicianDistChart({ data }: { data: TechnicianDistItem[] }) {
   const chartData = [...data].reverse();
   const chartHeight = Math.max(200, chartData.length * 40);
+  const rotuloDaSerie = (chave: string) =>
+    SERIES_DE_STATUS.find((s) => s.chave === chave)?.rotulo ?? chave;
 
   return (
     <ChartCard title="Distribuição de tickets por técnico">
@@ -285,33 +340,41 @@ function TechnicianDistChart({ data, gridColor, tooltipBg, tooltipBorder, toolti
           layout="vertical"
           margin={{ top: 0, right: 8, left: 4, bottom: 0 }}
         >
-          <CartesianGrid strokeDasharray="3 3" stroke="#2d3748" horizontal={false} />
-          <XAxis type="number" tick={{ fontSize: 10, fill: "#94a3b8" }} allowDecimals={false} />
-          <YAxis dataKey="technician_name" type="category" tick={{ fontSize: 10, fill: "#94a3b8" }}
+          <CartesianGrid strokeDasharray="3 3" stroke={CROMO.grade} horizontal={false} />
+          <XAxis type="number" stroke={CROMO.eixo} tick={{ fontSize: 10, fill: CROMO.eixo }} allowDecimals={false} />
+          <YAxis dataKey="technician_name" type="category" stroke={CROMO.eixo} tick={{ fontSize: 10, fill: CROMO.eixo }}
             width={90} tickFormatter={(v: string) => v.length > 12 ? `${v.slice(0, 12)}…` : v} />
           <Tooltip
-            cursor={{ fill: gridColor }}
-            wrapperStyle={{ outline: "none", border: "none" }}
+            cursor={{ fill: CROMO.grade }}
+            wrapperStyle={ENVOLTORIO_DICA}
             content={({ active, payload, label }) => {
               if (!active || !payload?.length) return null;
               const resolved = (payload.find((p) => p.dataKey === "resolved")?.value as number) ?? 0;
               const open = (payload.find((p) => p.dataKey === "open_count")?.value as number) ?? 0;
               return (
-                <div style={{ backgroundColor: tooltipBg, border: `1px solid ${tooltipBorder}`, borderRadius: 8, padding: "8px 12px", fontSize: 12, color: tooltipColor, outline: "none" }}>
-                  <p style={{ fontWeight: 600, marginBottom: 4 }}>{label}</p>
-                  <p style={{ color: "#22c55e" }}>Resolvidos: {resolved}</p>
-                  <p style={{ color: "#f59e0b" }}>Em aberto: {open}</p>
-                  <p style={{ color: "#94a3b8", marginTop: 2 }}>Total: {resolved + open}</p>
-                </div>
+                <CorpoDaDica>
+                  <TituloDaDica>{label}</TituloDaDica>
+                  <p>Resolvidos: {resolved}</p>
+                  <p>Em aberto: {open}</p>
+                  <p style={{ color: CROMO.eixo, marginTop: 2 }}>Total: {resolved + open}</p>
+                </CorpoDaDica>
               );
             }}
           />
           <Legend
-            formatter={(v) => v === "resolved" ? "Resolvidos" : "Em aberto"}
-            wrapperStyle={{ fontSize: 11, color: "#94a3b8", paddingTop: 8 }}
+            formatter={(v) => rotuloDaSerie(String(v))}
+            wrapperStyle={{ fontSize: 11, color: CROMO.eixo, paddingTop: 8 }}
           />
-          <Bar dataKey="resolved" stackId="a" fill="#22c55e" radius={[0, 0, 0, 0]} name="resolved" />
-          <Bar dataKey="open_count" stackId="a" fill="#f59e0b" radius={[0, 4, 4, 0]} name="open_count" />
+          {SERIES_DE_STATUS.map((s, i) => (
+            <Bar
+              key={s.chave}
+              dataKey={s.chave}
+              stackId="a"
+              fill={slotDeStatus(s.status)}
+              radius={i === SERIES_DE_STATUS.length - 1 ? [0, 4, 4, 0] : [0, 0, 0, 0]}
+              name={s.chave}
+            />
+          ))}
         </BarChart>
       </ResponsiveContainer>
     </ChartCard>
@@ -320,10 +383,12 @@ function TechnicianDistChart({ data, gridColor, tooltipBg, tooltipBorder, toolti
 
 // ── Oldest open tickets table ─────────────────────────────────
 
-const STATUS_LABELS: Record<string, string> = {
-  open: "Aberto", in_progress: "Em andamento",
-  awaiting_client: "Aguard. cliente", awaiting_technical: "Aguard. técnico",
-};
+/*
+ * O `STATUS_LABELS` local saiu daqui. Era a quarta cópia do rótulo de status, e
+ * já divergia: dizia "Aguard. cliente" onde o resto do sistema diz "Aguardando
+ * cliente". `lib/status.ts` tem as duas formas — a longa e a `curto`, que
+ * existe para a coluna de 268px do quadro —, e numa tabela cabe a longa.
+ */
 
 function fmtAge(hours: number): string {
   if (hours < 1)   return `${Math.round(hours * 60)} min`;
@@ -335,90 +400,85 @@ function fmtAge(hours: number): string {
 const OLDEST_PAGE_SIZE = 10;
 
 function OldestOpenTable({ tickets }: { tickets: OldestTicketItem[] }) {
-  const [page, setPage] = useState(0);
-  const totalPages = Math.ceil(tickets.length / OLDEST_PAGE_SIZE);
-  const paged = tickets.slice(page * OLDEST_PAGE_SIZE, (page + 1) * OLDEST_PAGE_SIZE);
+  // O `Pagination` do pacote conta a partir de 1; este estado contava de 0.
+  // Guardar 1-based evita o `page - 1` espalhado por três lugares, que é
+  // exatamente onde um erro de um some sem barulho.
+  const [page, setPage] = useState(1);
+  const paged = tickets.slice((page - 1) * OLDEST_PAGE_SIZE, page * OLDEST_PAGE_SIZE);
+  const colunas = [
+    "Protocolo", "Título", "Prioridade", "Categoria",
+    "Status", "Técnico", "Tempo em aberto",
+  ];
 
   return (
     <div className="rounded-xl border border-borda/40 bg-surface overflow-hidden">
       <div className="border-b border-borda/40 px-5 py-3.5 flex items-center gap-2">
-        <h2 className="text-sm font-semibold text-slate-200">Tickets em aberto há mais tempo</h2>
-        <span className="rounded-full bg-danger-500/15 px-2 py-0.5 text-[10px] font-semibold text-danger-400">
-          {tickets.length} ticket{tickets.length !== 1 ? "s" : ""}
+        <h2 className="text-sm font-semibold text-conteudo">Tickets em aberto há mais tempo</h2>
+        <span className="rounded-full bg-tint-danger px-2 py-0.5 text-[10px] font-semibold text-on-tint-danger">
+          {tickets.length} {plural(tickets.length, "ticket", "tickets")}
         </span>
       </div>
-      <div className="overflow-x-auto">
-        <table className="w-full text-sm">
-          <thead>
-            <tr className="border-b border-borda/40">
-              {["Protocolo", "Título", "Prioridade", "Categoria", "Status", "Técnico", "Tempo em aberto"].map((h) => (
-                <th key={h} className="px-4 py-3 text-left text-[11px] font-semibold uppercase tracking-wider text-slate-500">{h}</th>
-              ))}
-            </tr>
-          </thead>
-          <tbody className="divide-y divide-borda/30">
-            {paged.map((t) => (
-              <tr key={t.ticket_id} className="hover:bg-surface-elevated/50 transition-colors">
-                <td className="px-4 py-3 font-mono text-xs text-primary">{t.protocol}</td>
-                <td className="px-4 py-3 text-slate-300 max-w-[220px] truncate" title={t.title}>{t.title}</td>
-                <td className="px-4 py-3">
-                  {/*
-                    Era um selo à mão: a mesma cor como fundo a 13% de alfa e
-                    como texto. Tinta com o texto no degrau cheio é o par que a
-                    E2 e a E8 mediram e reprovaram — e aqui nem era medido, era
-                    um sufixo `22` no hexadecimal.
-                  */}
-                  <PriorityBadge priority={t.priority} />
-                </td>
-                <td className="px-4 py-3 text-slate-400 text-xs">{CATEGORY_LABELS[t.category] ?? t.category}</td>
-                <td className="px-4 py-3 text-slate-400 text-xs">{STATUS_LABELS[t.status] ?? t.status}</td>
-                <td className="px-4 py-3 text-slate-400 text-xs">{t.assignee_name ?? <span className="text-slate-600">—</span>}</td>
-                <td className="px-4 py-3">
-                  <span className={`font-semibold text-xs ${t.sla_breached ? "text-danger-400" : "text-slate-300"}`}>
-                    {fmtAge(t.age_hours)}
-                    {t.sla_breached && <span className="ml-1.5 rounded bg-danger-500/20 px-1 py-0.5 text-[9px] font-bold text-danger-400">SLA</span>}
-                  </span>
-                </td>
-              </tr>
+      <Table>
+        <TableHead>
+          <TableRow>
+            {colunas.map((h) => (
+              <TableHeaderCell key={h} className="text-[11px] font-semibold">
+                {h}
+              </TableHeaderCell>
             ))}
-          </tbody>
-        </table>
-      </div>
-
-      {/* Paginação */}
-      <div className="flex items-center justify-between border-t border-borda/40 px-5 py-3">
-        <span className="text-xs text-slate-500">
-          {page * OLDEST_PAGE_SIZE + 1}–{Math.min((page + 1) * OLDEST_PAGE_SIZE, tickets.length)} de {tickets.length}
-        </span>
-        <div className="flex items-center gap-1">
-          <button
-            onClick={() => setPage((p) => Math.max(0, p - 1))}
-            disabled={page === 0}
-            className="rounded-lg border border-borda/40 px-2.5 py-1.5 text-xs text-slate-400 hover:bg-surface-elevated disabled:opacity-30 disabled:cursor-not-allowed transition-colors cursor-pointer"
-          >
-            ‹
-          </button>
-          {Array.from({ length: totalPages }, (_, i) => (
-            <button
-              key={i}
-              onClick={() => setPage(i)}
-              className={`rounded-lg border px-2.5 py-1.5 text-xs transition-colors cursor-pointer ${
-                i === page
-                  ? "border-primary bg-primary/20 text-primary font-semibold"
-                  : "border-borda/40 text-slate-400 hover:bg-surface-elevated"
-              }`}
-            >
-              {i + 1}
-            </button>
+          </TableRow>
+        </TableHead>
+        <TableBody>
+          {paged.map((t) => (
+            <TableRow key={t.ticket_id} className="hover:bg-surface-elevated/50">
+              <TableCell className="font-mono text-xs text-conteudo-link">{t.protocol}</TableCell>
+              <TableCell className="max-w-[220px]">
+                <span className="block truncate" title={t.title}>{t.title}</span>
+              </TableCell>
+              <TableCell>
+                {/*
+                  Era um selo à mão: a mesma cor como fundo a 13% de alfa e
+                  como texto. Tinta com o texto no degrau cheio é o par que a
+                  E2 e a E8 mediram e reprovaram — e aqui nem era medido, era
+                  um sufixo `22` no hexadecimal.
+                */}
+                <PriorityBadge priority={t.priority} />
+              </TableCell>
+              <TableCell muted className="text-xs">{rotuloDeCategoria(t.category)}</TableCell>
+              <TableCell muted className="text-xs">{rotuloDeStatus(t.status)}</TableCell>
+              <TableCell muted className="text-xs">
+                {t.assignee_name ?? <span className="text-conteudo-muted">—</span>}
+              </TableCell>
+              <TableCell>
+                <span className={`font-semibold text-xs ${t.sla_breached ? "text-danger-700 dark:text-danger-400" : "text-conteudo"}`}>
+                  {fmtAge(t.age_hours)}
+                  {t.sla_breached && <span className="ml-1.5 rounded bg-tint-danger px-1 py-0.5 text-[9px] font-bold text-on-tint-danger">SLA</span>}
+                </span>
+              </TableCell>
+            </TableRow>
           ))}
-          <button
-            onClick={() => setPage((p) => Math.min(totalPages - 1, p + 1))}
-            disabled={page >= totalPages - 1}
-            className="rounded-lg border border-borda/40 px-2.5 py-1.5 text-xs text-slate-400 hover:bg-surface-elevated disabled:opacity-30 disabled:cursor-not-allowed transition-colors cursor-pointer"
-          >
-            ›
-          </button>
-        </div>
+          {paged.length === 0 && (
+            <TableEmpty colSpan={colunas.length} message="Nenhum ticket em aberto." />
+          )}
+        </TableBody>
+      </Table>
+
+      {/*
+        A paginação à mão saiu inteira. Ela desenhava um botão por página —
+        com 40 tickets em aberto isso é uma fileira de quatro, mas a lista não
+        tem teto — e a página atual era um `<button>` sem `aria-current`, então
+        quem não vê a cor não sabia em qual estava. O primitivo tem janela de
+        cinco e o par medido do degrau de ação.
+      */}
+      <div className="px-5 py-3">
+        <Pagination
+          page={page}
+          pageSize={OLDEST_PAGE_SIZE}
+          total={tickets.length}
+          onPageChange={setPage}
+          itemLabel="tickets"
+          className="border-t-0 pt-0"
+        />
       </div>
     </div>
   );
@@ -426,20 +486,33 @@ function OldestOpenTable({ tickets }: { tickets: OldestTicketItem[] }) {
 
 // ── Global report (admin) ─────────────────────────────────────
 
+/*
+ * ── O `useTheme()` saiu daqui, e é o coração desta migração ──────────────
+ *
+ * Este bloco escolhia cinco hexadecimais no JavaScript pelo tema — fundo,
+ * borda e texto da dica, mais o `gridColor` — e era a terceira cópia dele no
+ * projeto, nenhuma concordando com as outras. `var(--surface)` já é branco no
+ * claro e `#132238` no escuro: ler o tema em JS para escolher a cor é
+ * reimplementar o seletor `.dark`, com o agravante de a versão em JS não
+ * acompanhar a paleta quando ela muda.
+ *
+ * ── E um defeito real que sai junto ──────────────────────────────────────
+ *
+ * O `gridColor` era `theme === "dark" ? "#132238" : "#ffffff"` — os mesmos
+ * valores do FUNDO da dica, por cópia. Ele não pinta a grade: pinta o `cursor`
+ * do Recharts, o realce atrás da barra sob o ponteiro. No tema claro isso
+ * pintava realce branco sobre cartão branco: **o realce não existia**. Passa a
+ * `CROMO.grade`, e aparece pela primeira vez no claro.
+ *
+ * A grade de verdade era `stroke={CROMO.grade}`, doze vezes escrito à mão — um
+ * cinza de tema escuro que no claro desenhava linha quase preta sobre branco.
+ * As outras duas telas de gráfico usam `#f1f5f9`, que é o valor de
+ * `--border-muted` no claro.
+ */
 function GlobalReport({ data }: { data: ReportData; period?: number }) {
-  const { theme } = useTheme();
   const totalCsat = data.csat_distribution.reduce((s, d) => s + d.count, 0);
   const criticalSla = data.sla_compliance.find((s) => s.priority === "critical")?.compliance_rate ?? 100;
   const highSla     = data.sla_compliance.find((s) => s.priority === "high")?.compliance_rate ?? 100;
-
-  const tooltipBg     = theme === "dark" ? "#132238" : "#ffffff";
-  const tooltipBorder = theme === "dark" ? "#1E3A5F" : "#e2e8f0";
-  const tooltipColor  = theme === "dark" ? "#f1f5f9" : "#0f172a";
-  const tooltipStyle = {
-    backgroundColor: tooltipBg, border: `1px solid ${tooltipBorder}`,
-    borderRadius: "8px", fontSize: "12px", color: tooltipColor,
-  };
-  const gridColor = theme === "dark" ? "#132238" : "#ffffff";
 
   function BarTooltip({ active, payload, label, labelFn, valueFn, valueLabel }: {
     active?: boolean; payload?: { value: number }[]; label?: string;
@@ -447,10 +520,10 @@ function GlobalReport({ data }: { data: ReportData; period?: number }) {
   }) {
     if (!active || !payload?.length) return null;
     return (
-      <div style={{ backgroundColor: tooltipBg, border: `1px solid ${tooltipBorder}`, borderRadius: 8, padding: "8px 12px", fontSize: 12, color: tooltipColor, outline: "none" }}>
-        <p style={{ fontWeight: 600, marginBottom: 4 }}>{labelFn(String(label ?? ""))}</p>
-        <p style={{ color: "#6366f1" }}>{valueLabel}: {valueFn(payload[0].value)}</p>
-      </div>
+      <CorpoDaDica>
+        <TituloDaDica>{labelFn(String(label ?? ""))}</TituloDaDica>
+        <p>{valueLabel}: {valueFn(payload[0].value)}</p>
+      </CorpoDaDica>
     );
   }
 
@@ -503,7 +576,7 @@ function GlobalReport({ data }: { data: ReportData; period?: number }) {
         <StatCard label="Taxa de reabertura"
           value={`${data.reopen_rate ?? 0}%`}
           sub={`${data.reopened_count ?? 0} ticket${(data.reopened_count ?? 0) !== 1 ? "s" : ""} reaberto${(data.reopened_count ?? 0) !== 1 ? "s" : ""}`}
-          colorCls={(data.reopen_rate ?? 0) === 0 ? "text-success-700 dark:text-success-400" : (data.reopen_rate ?? 0) <= 5 ? "text-slate-100" : (data.reopen_rate ?? 0) <= 15 ? "text-warning-700 dark:text-warning-400" : "text-danger-700 dark:text-danger-400"} />
+          colorCls={(data.reopen_rate ?? 0) === 0 ? "text-success-700 dark:text-success-400" : (data.reopen_rate ?? 0) <= 5 ? "text-conteudo-heading" : (data.reopen_rate ?? 0) <= 15 ? "text-warning-700 dark:text-warning-400" : "text-danger-700 dark:text-danger-400"} />
       </div>
 
       {/* Tickets por dia */}
@@ -512,18 +585,18 @@ function GlobalReport({ data }: { data: ReportData; period?: number }) {
           <AreaChart data={data.tickets_by_day} margin={{ top: 4, right: 4, left: -20, bottom: 0 }}>
             <defs>
               <linearGradient id="ticketGradient" x1="0" y1="0" x2="0" y2="1">
-                <stop offset="5%"  stopColor="#6366f1" stopOpacity={0.3} />
-                <stop offset="95%" stopColor="#6366f1" stopOpacity={0}   />
+                <stop offset="5%"  stopColor={COR_SERIE_TEMPORAL} stopOpacity={0.3} />
+                <stop offset="95%" stopColor={COR_SERIE_TEMPORAL} stopOpacity={0}   />
               </linearGradient>
             </defs>
-            <CartesianGrid strokeDasharray="3 3" stroke="#2d3748" />
-            <XAxis dataKey="date" tick={{ fontSize: 10, fill: "#94a3b8" }}
+            <CartesianGrid strokeDasharray="3 3" stroke={CROMO.grade} />
+            <XAxis dataKey="date" stroke={CROMO.eixo} tick={{ fontSize: 10, fill: CROMO.eixo }}
               tickFormatter={(v: string) => v.slice(5)}
               interval={Math.max(1, Math.floor(data.tickets_by_day.length / 6))} />
-            <YAxis tick={{ fontSize: 10, fill: "#94a3b8" }} allowDecimals={false} />
-            <Tooltip contentStyle={tooltipStyle} wrapperStyle={tooltipWrapperStyle}
+            <YAxis stroke={CROMO.eixo} tick={{ fontSize: 10, fill: CROMO.eixo }} allowDecimals={false} />
+            <Tooltip contentStyle={ESTILO_DICA} wrapperStyle={{ outline: "none" }}
               labelFormatter={(v) => `Data: ${v}`} formatter={(v) => [v ?? 0, "Tickets"]} />
-            <Area type="monotone" dataKey="count" stroke="#6366f1" strokeWidth={2}
+            <Area type="monotone" dataKey="count" stroke={COR_SERIE_TEMPORAL} strokeWidth={2}
               fill="url(#ticketGradient)" dot={false} />
           </AreaChart>
         </ResponsiveContainer>
@@ -535,20 +608,21 @@ function GlobalReport({ data }: { data: ReportData; period?: number }) {
           <ResponsiveContainer width="100%" height={240}>
             <BarChart data={data.tickets_by_category.filter((c) => c.count > 0)}
               layout="vertical" margin={{ top: 0, right: 8, left: 4, bottom: 0 }}>
-              <CartesianGrid strokeDasharray="3 3" stroke="#2d3748" horizontal={false} />
-              <XAxis type="number" tick={{ fontSize: 10, fill: "#94a3b8" }} allowDecimals={false} />
-              <YAxis dataKey="category" type="category" tick={{ fontSize: 10, fill: "#94a3b8" }}
-                tickFormatter={(v: string) => CATEGORY_LABELS[v] ?? v} width={60} />
+              <CartesianGrid strokeDasharray="3 3" stroke={CROMO.grade} horizontal={false} />
+              <XAxis type="number" stroke={CROMO.eixo} tick={{ fontSize: 10, fill: CROMO.eixo }} allowDecimals={false} />
+              <YAxis dataKey="category" type="category" stroke={CROMO.eixo} tick={{ fontSize: 10, fill: CROMO.eixo }}
+                tickFormatter={rotuloDeCategoria} width={60} />
               <Tooltip
-                cursor={{ fill: gridColor }}
-                wrapperStyle={tooltipWrapperStyle}
+                cursor={{ fill: CROMO.grade }}
+                wrapperStyle={ENVOLTORIO_DICA}
                 content={({ active, payload, label }) => (
                   <BarTooltip active={active} payload={payload as unknown as { value: number }[]} label={String(label ?? "")}
-                    labelFn={(v) => CATEGORY_LABELS[v] ?? v}
+                    labelFn={rotuloDeCategoria}
                     valueFn={(v) => String(v ?? 0)}
                     valueLabel="Tickets" />
                 )} />
-              <Bar dataKey="count" fill="#6366f1" radius={[0, 4, 4, 0]} />
+              {/* Uma cor para a série — são oito categorias e sete slots. */}
+              <Bar dataKey="count" fill={slotCategorico(0)} radius={[0, 4, 4, 0]} />
             </BarChart>
           </ResponsiveContainer>
         </ChartCard>
@@ -556,14 +630,14 @@ function GlobalReport({ data }: { data: ReportData; period?: number }) {
         <ChartCard title="Conformidade SLA por prioridade">
           <ResponsiveContainer width="100%" height={240}>
             <BarChart data={data.sla_compliance} margin={{ top: 4, right: 4, left: -20, bottom: 0 }}>
-              <CartesianGrid strokeDasharray="3 3" stroke="#2d3748" />
-              <XAxis dataKey="priority" tick={{ fontSize: 10, fill: "#94a3b8" }}
+              <CartesianGrid strokeDasharray="3 3" stroke={CROMO.grade} />
+              <XAxis dataKey="priority" stroke={CROMO.eixo} tick={{ fontSize: 10, fill: CROMO.eixo }}
                 tickFormatter={(v: string) => rotuloDePrioridade(v)} />
-              <YAxis tick={{ fontSize: 10, fill: "#94a3b8" }} domain={[0, 100]}
+              <YAxis stroke={CROMO.eixo} tick={{ fontSize: 10, fill: CROMO.eixo }} domain={[0, 100]}
                 tickFormatter={(v: number) => `${v}%`} />
               <Tooltip
-                cursor={{ fill: gridColor }}
-                wrapperStyle={tooltipWrapperStyle}
+                cursor={{ fill: CROMO.grade }}
+                wrapperStyle={ENVOLTORIO_DICA}
                 content={({ active, payload, label }) => (
                   <BarTooltip active={active} payload={payload as unknown as { value: number }[]} label={String(label ?? "")}
                     labelFn={(v) => rotuloDePrioridade(v)}
@@ -579,16 +653,33 @@ function GlobalReport({ data }: { data: ReportData; period?: number }) {
           </ResponsiveContainer>
         </ChartCard>
 
+        {/*
+          ── A escala de satisfação, e por que ela tem TRÊS cores e não dez ──
+
+          Saiu a rampa de dez hexadecimais cravados (`#dc2626` … `#22c55e`). Ela
+          falhava a separação **por construção**: degraus vizinhos são próximos
+          de propósito — é o que faz uma rampa ser rampa —, e o eixo
+          vermelho-verde é justamente o que colapsa em protanopia e
+          deuteranopia. Dez notas viravam duas manchas.
+
+          Entram as três faixas que o operador decidiu — 1–4, 5–7, 8–10 —, de
+          `preenchimentoCsat`. Três faixas não satisfazem 1.4.1 sozinhas: só têm
+          menos passos que dez. **O que resolve é o número estar escrito**, e é
+          por isso que o `interval={0}` está aqui e não é enfeite — sem ele o
+          Recharts esconde as marcas que se sobrepõem quando o cartão estreita,
+          e o portador redundante some justamente na largura em que a cor já
+          estava difícil.
+        */}
         <ChartCard title="Distribuição CSAT (1–10)">
           <ResponsiveContainer width="100%" height={240}>
             <BarChart data={data.csat_distribution} margin={{ top: 4, right: 4, left: -20, bottom: 0 }}>
-              <CartesianGrid strokeDasharray="3 3" stroke="#2d3748" />
-              <XAxis dataKey="rating" tick={{ fontSize: 10, fill: "#94a3b8" }}
-                tickFormatter={(v: number) => String(v)} />
-              <YAxis tick={{ fontSize: 10, fill: "#94a3b8" }} allowDecimals={false} />
+              <CartesianGrid strokeDasharray="3 3" stroke={CROMO.grade} />
+              <XAxis dataKey="rating" stroke={CROMO.eixo} tick={{ fontSize: 10, fill: CROMO.eixo }}
+                interval={0} tickFormatter={(v: number) => String(v)} />
+              <YAxis stroke={CROMO.eixo} tick={{ fontSize: 10, fill: CROMO.eixo }} allowDecimals={false} />
               <Tooltip
-                cursor={{ fill: gridColor }}
-                wrapperStyle={tooltipWrapperStyle}
+                cursor={{ fill: CROMO.grade }}
+                wrapperStyle={ENVOLTORIO_DICA}
                 content={({ active, payload, label }) => (
                   <BarTooltip active={active} payload={payload as unknown as { value: number }[]} label={String(label ?? "")}
                     labelFn={(v) => `Nota ${Number(v ?? 0)}`}
@@ -597,7 +688,7 @@ function GlobalReport({ data }: { data: ReportData; period?: number }) {
                 )} />
               <Bar dataKey="count" radius={[4, 4, 0, 0]}>
                 {data.csat_distribution.map((entry) => (
-                  <Cell key={entry.rating} fill={CSAT_COLORS[entry.rating - 1]} />
+                  <Cell key={entry.rating} fill={preenchimentoCsat(entry.rating)} />
                 ))}
               </Bar>
             </BarChart>
@@ -612,19 +703,19 @@ function GlobalReport({ data }: { data: ReportData; period?: number }) {
             <ChartCard title="Tempo médio de resolução por prioridade">
               <ResponsiveContainer width="100%" height={220}>
                 <BarChart data={resolutionChartData} margin={{ top: 4, right: 4, left: 0, bottom: 0 }} barSize={36}>
-                  <CartesianGrid strokeDasharray="3 3" stroke="#2d3748" />
-                  <XAxis dataKey="priority" tick={{ fontSize: 10, fill: "#94a3b8" }}
+                  <CartesianGrid strokeDasharray="3 3" stroke={CROMO.grade} />
+                  <XAxis dataKey="priority" stroke={CROMO.eixo} tick={{ fontSize: 10, fill: CROMO.eixo }}
                     tickFormatter={(v: string) => rotuloDePrioridade(v)} />
-                  <YAxis tick={{ fontSize: 10, fill: "#94a3b8" }}
+                  <YAxis stroke={CROMO.eixo} tick={{ fontSize: 10, fill: CROMO.eixo }}
                     tickFormatter={(v: number) => v >= 24 ? `${(v / 24).toFixed(0)}d` : `${v}h`} />
-                  <Tooltip cursor={{ fill: gridColor }} wrapperStyle={tooltipWrapperStyle}
+                  <Tooltip cursor={{ fill: CROMO.grade }} wrapperStyle={ENVOLTORIO_DICA}
                     content={({ active, payload, label }) => {
                       if (!active || !payload?.length) return null;
                       return (
-                        <div style={{ backgroundColor: tooltipBg, border: `1px solid ${tooltipBorder}`, borderRadius: 8, padding: "8px 12px", fontSize: 12, color: tooltipColor, outline: "none" }}>
-                          <p style={{ fontWeight: 600, marginBottom: 4 }}>{rotuloDePrioridade(String(label))}</p>
-                          <p style={{ color: "#6366f1" }}>Tempo médio: {fmtHours(payload[0].value as number)}</p>
-                        </div>
+                        <CorpoDaDica>
+                          <TituloDaDica>{rotuloDePrioridade(String(label))}</TituloDaDica>
+                          <p>Tempo médio: {fmtHours(payload[0].value as number)}</p>
+                        </CorpoDaDica>
                       );
                     }} />
                   <Bar dataKey="avg_hours" radius={[4, 4, 0, 0]}>
@@ -634,11 +725,8 @@ function GlobalReport({ data }: { data: ReportData; period?: number }) {
               </ResponsiveContainer>
             </ChartCard>
           )}
-          <FirstResponseChart data={data.avg_first_response_by_priority ?? []}
-            gridColor={gridColor} tooltipBg={tooltipBg} tooltipBorder={tooltipBorder}
-            tooltipColor={tooltipColor} fmtHours={fmtHours} />
-          <ProductChart data={data.tickets_by_product ?? []}
-            gridColor={gridColor} tooltipBg={tooltipBg} tooltipBorder={tooltipBorder} tooltipColor={tooltipColor} />
+          <FirstResponseChart data={data.avg_first_response_by_priority ?? []} fmtHours={fmtHours} />
+          <ProductChart data={data.tickets_by_product ?? []} />
         </div>
       )}
 
@@ -649,24 +737,32 @@ function GlobalReport({ data }: { data: ReportData; period?: number }) {
             <AreaChart data={data.csat_by_day} margin={{ top: 8, right: 4, left: -20, bottom: 0 }}>
               <defs>
                 <linearGradient id="csatGradient" x1="0" y1="0" x2="0" y2="1">
-                  <stop offset="5%"  stopColor="#f59e0b" stopOpacity={0.3} />
-                  <stop offset="95%" stopColor="#f59e0b" stopOpacity={0}   />
+                  <stop offset="5%"  stopColor={COR_SERIE_TEMPORAL} stopOpacity={0.3} />
+                  <stop offset="95%" stopColor={COR_SERIE_TEMPORAL} stopOpacity={0}   />
                 </linearGradient>
               </defs>
-              <CartesianGrid strokeDasharray="3 3" stroke="#2d3748" />
-              <XAxis dataKey="date" tick={{ fontSize: 10, fill: "#94a3b8" }}
+              <CartesianGrid strokeDasharray="3 3" stroke={CROMO.grade} />
+              <XAxis dataKey="date" stroke={CROMO.eixo} tick={{ fontSize: 10, fill: CROMO.eixo }}
                 tickFormatter={(v: string) => v.slice(5)}
                 interval={Math.max(1, Math.floor(data.csat_by_day.length / 6))} />
-              <YAxis tick={{ fontSize: 10, fill: "#94a3b8" }} domain={[1, 10]} ticks={[1, 2, 3, 4, 5, 6, 7, 8, 9, 10]} />
-              <ReferenceLine y={8} stroke="#10b981" strokeDasharray="4 3"
-                label={{ value: "Meta 8.0", fill: "#10b981", fontSize: 10, position: "insideTopRight" }} />
-              <Tooltip contentStyle={tooltipStyle} wrapperStyle={tooltipWrapperStyle}
+              <YAxis stroke={CROMO.eixo} tick={{ fontSize: 10, fill: CROMO.eixo }} domain={[1, 10]} ticks={[1, 2, 3, 4, 5, 6, 7, 8, 9, 10]} />
+              {/*
+                A linha de meta é ANOTAÇÃO, não série: ela não mostra dado
+                nenhum, marca onde fica o alvo. Por isso pega o token do cromo e
+                não um slot de série — e o `#10b981` que estava aqui pintava
+                também o texto "Meta 8.0", a 2,5:1 sobre o cartão claro. O
+                `--text-muted` é o degrau já medido para texto de gráfico:
+                7,24 / 7,58 / 6,92 no claro.
+              */}
+              <ReferenceLine y={8} stroke={CROMO.eixo} strokeDasharray="4 3"
+                label={{ value: "Meta 8.0", fill: CROMO.eixo, fontSize: 10, position: "insideTopRight" }} />
+              <Tooltip contentStyle={ESTILO_DICA} wrapperStyle={{ outline: "none" }}
                 labelFormatter={(v) => `Data: ${v}`}
                 formatter={(v, _, props: { payload?: CsatDailyItem }) => [
                   v != null ? `${Number(v).toFixed(2)} ★ (${props.payload?.count ?? 0} avaliações)` : "—",
                   "CSAT",
                 ]} />
-              <Area type="monotone" dataKey="avg_rating" stroke="#f59e0b" strokeWidth={2}
+              <Area type="monotone" dataKey="avg_rating" stroke={COR_SERIE_TEMPORAL} strokeWidth={2}
                 fill="url(#csatGradient)" dot={false} connectNulls={false} />
             </AreaChart>
           </ResponsiveContainer>
@@ -685,40 +781,40 @@ function GlobalReport({ data }: { data: ReportData; period?: number }) {
             <ChartCard title="Volume por dia da semana">
               <ResponsiveContainer width="100%" height={220}>
                 <BarChart data={data.tickets_by_weekday} margin={{ top: 4, right: 4, left: -20, bottom: 0 }} barSize={40}>
-                  <CartesianGrid strokeDasharray="3 3" stroke="#2d3748" />
-                  <XAxis dataKey="weekday" tick={{ fontSize: 10, fill: "#94a3b8" }}
+                  <CartesianGrid strokeDasharray="3 3" stroke={CROMO.grade} />
+                  <XAxis dataKey="weekday" stroke={CROMO.eixo} tick={{ fontSize: 10, fill: CROMO.eixo }}
                     tickFormatter={(v: number) => WEEKDAY_LABELS[v] ?? v} />
-                  <YAxis tick={{ fontSize: 10, fill: "#94a3b8" }} allowDecimals={false} />
-                  <Tooltip cursor={{ fill: gridColor }} wrapperStyle={tooltipWrapperStyle}
+                  <YAxis stroke={CROMO.eixo} tick={{ fontSize: 10, fill: CROMO.eixo }} allowDecimals={false} />
+                  <Tooltip cursor={{ fill: CROMO.grade }} wrapperStyle={ENVOLTORIO_DICA}
                     content={({ active, payload, label }) => {
                       if (!active || !payload?.length) return null;
                       const wd = Number(label ?? 0);
                       return (
-                        <div style={{ backgroundColor: tooltipBg, border: `1px solid ${tooltipBorder}`, borderRadius: 8, padding: "8px 12px", fontSize: 12, color: tooltipColor, outline: "none" }}>
-                          <p style={{ fontWeight: 600, marginBottom: 4 }}>{WEEKDAY_FULL[wd] ?? label}</p>
-                          <p style={{ color: wd >= 6 ? "#f59e0b" : "#6366f1" }}>Tickets: {payload[0].value ?? 0}</p>
-                        </div>
+                        <CorpoDaDica>
+                          <TituloDaDica>{WEEKDAY_FULL[wd] ?? label}</TituloDaDica>
+                          <p>Tickets: {payload[0].value ?? 0}</p>
+                        </CorpoDaDica>
                       );
                     }} />
                   <Bar dataKey="count" radius={[4, 4, 0, 0]}>
-                    {data.tickets_by_weekday.map((e) => <Cell key={e.weekday} fill={e.weekday >= 6 ? "#f59e0b" : "#6366f1"} />)}
+                    {data.tickets_by_weekday.map((e) => (
+                      <Cell key={e.weekday} fill={e.weekday >= 6 ? SLOT_FIM_DE_SEMANA : SLOT_DIA_UTIL} />
+                    ))}
                   </Bar>
                 </BarChart>
               </ResponsiveContainer>
-              <p className="mt-2 text-center text-[10px] text-slate-500">
-                <span style={{ color: "#f59e0b" }}>■</span> fim de semana
+              <p className="mt-2 text-center text-[10px] text-conteudo-muted">
+                <span aria-hidden="true" style={{ color: SLOT_FIM_DE_SEMANA }}>■</span> fim de semana
               </p>
             </ChartCard>
           )}
-          <HourlyChart data={data.tickets_by_hour ?? []}
-            gridColor={gridColor} tooltipBg={tooltipBg} tooltipBorder={tooltipBorder} tooltipColor={tooltipColor} />
+          <HourlyChart data={data.tickets_by_hour ?? []} />
         </div>
       )}
 
       {/* Distribuição de tickets por técnico */}
       {(data.technicians_dist?.length ?? 0) > 0 && (
-        <TechnicianDistChart data={data.technicians_dist} gridColor={gridColor}
-          tooltipBg={tooltipBg} tooltipBorder={tooltipBorder} tooltipColor={tooltipColor} />
+        <TechnicianDistChart data={data.technicians_dist} />
       )}
 
     </div>
@@ -728,15 +824,6 @@ function GlobalReport({ data }: { data: ReportData; period?: number }) {
 // ── Technician detail ─────────────────────────────────────────
 
 function TechnicianDetail({ data }: { data: TechnicianDetailReport }) {
-  const { theme } = useTheme();
-  const tooltipBg     = theme === "dark" ? "#132238" : "#ffffff";
-  const tooltipBorder = theme === "dark" ? "#1E3A5F" : "#e2e8f0";
-  const tooltipColor  = theme === "dark" ? "#f1f5f9" : "#0f172a";
-  const tooltipStyle = {
-    backgroundColor: tooltipBg, border: `1px solid ${tooltipBorder}`,
-    borderRadius: "8px", fontSize: "12px", color: tooltipColor,
-  };
-
   function slaColor(rate: number) {
     if (rate >= 90) return "text-success-700 dark:text-success-400";
     if (rate >= 70) return "text-warning-700 dark:text-warning-400";
@@ -778,18 +865,25 @@ function TechnicianDetail({ data }: { data: TechnicianDetailReport }) {
           <AreaChart data={data.tickets_by_day} margin={{ top: 4, right: 4, left: -20, bottom: 0 }}>
             <defs>
               <linearGradient id="techGradient" x1="0" y1="0" x2="0" y2="1">
-                <stop offset="5%"  stopColor="#22c55e" stopOpacity={0.3} />
-                <stop offset="95%" stopColor="#22c55e" stopOpacity={0}   />
+                <stop offset="5%"  stopColor={COR_SERIE_TEMPORAL} stopOpacity={0.3} />
+                <stop offset="95%" stopColor={COR_SERIE_TEMPORAL} stopOpacity={0}   />
               </linearGradient>
             </defs>
-            <CartesianGrid strokeDasharray="3 3" stroke="#2d3748" />
-            <XAxis dataKey="date" tick={{ fontSize: 10, fill: "#94a3b8" }}
+            <CartesianGrid strokeDasharray="3 3" stroke={CROMO.grade} />
+            <XAxis dataKey="date" stroke={CROMO.eixo} tick={{ fontSize: 10, fill: CROMO.eixo }}
               tickFormatter={(v: string) => v.slice(5)}
               interval={Math.max(1, Math.floor(data.tickets_by_day.length / 6))} />
-            <YAxis tick={{ fontSize: 10, fill: "#94a3b8" }} allowDecimals={false} />
-            <Tooltip contentStyle={tooltipStyle} wrapperStyle={tooltipWrapperStyle}
+            <YAxis stroke={CROMO.eixo} tick={{ fontSize: 10, fill: CROMO.eixo }} allowDecimals={false} />
+            <Tooltip contentStyle={ESTILO_DICA} wrapperStyle={{ outline: "none" }}
               labelFormatter={(v) => `Data: ${v}`} formatter={(v) => [v ?? 0, "Tickets"]} />
-            <Area type="monotone" dataKey="count" stroke="#22c55e" strokeWidth={2}
+            {/*
+              A terceira série temporal da tela, e a terceira cor: era `#22c55e`
+              aqui, `#6366f1` no "criados por dia" e `#f59e0b` na tendência
+              CSAT. Três gráficos da mesma natureza — contagem ao longo do tempo
+              — em três cores, e a diferença não afirmava nada. Regra do
+              operador: mesma medida, uma cor só.
+            */}
+            <Area type="monotone" dataKey="count" stroke={COR_SERIE_TEMPORAL} strokeWidth={2}
               fill="url(#techGradient)" dot={false} />
           </AreaChart>
         </ResponsiveContainer>
@@ -810,51 +904,51 @@ function TechnicianRanking({ data, onSelect }: { data: TechnicianListReport; onS
   return (
     <div className="rounded-xl border border-borda/40 bg-surface overflow-hidden">
       <div className="border-b border-borda/40 px-5 py-3.5">
-        <h2 className="text-sm font-semibold text-slate-200">Desempenho por técnico</h2>
+        <h2 className="text-sm font-semibold text-conteudo">Desempenho por técnico</h2>
       </div>
-      <div className="overflow-x-auto">
-        <table className="w-full text-sm">
-          <thead>
-            <tr className="border-b border-borda/40">
-              {["Técnico", "Atribuídos", "Resolvidos", "Em aberto", "SLA", "Tempo médio", "CSAT", ""].map((h) => (
-                <th key={h} className="px-4 py-3 text-left text-[11px] font-semibold uppercase tracking-wider text-slate-500">{h}</th>
-              ))}
-            </tr>
-          </thead>
-          <tbody className="divide-y divide-borda/30">
-            {data.technicians.map((t) => (
-              <tr key={t.technician_id} className="hover:bg-surface-elevated/50 transition-colors">
-                <td className="px-4 py-3 font-medium text-slate-200">{t.technician_name}</td>
-                <td className="px-4 py-3 text-slate-400">{t.total_assigned}</td>
-                <td className={`px-4 py-3 font-medium text-success-700 dark:text-success-400`}>{t.resolved}</td>
-                <td className="px-4 py-3 text-slate-400">{t.open_count}</td>
-                <td className={`px-4 py-3 font-semibold ${slaColor(t.sla_compliance_rate)}`}>{t.sla_compliance_rate}%</td>
-                <td className="px-4 py-3 text-slate-400">
-                  {t.avg_resolution_hours != null
-                    ? t.avg_resolution_hours >= 24
-                      ? `${(t.avg_resolution_hours / 24).toFixed(1)}d`
-                      : `${t.avg_resolution_hours.toFixed(1)}h`
-                    : "—"}
-                </td>
-                <td className="px-4 py-3 text-slate-400">{t.csat_average != null ? `${t.csat_average} ★` : "—"}</td>
-                <td className="px-4 py-3">
-                  <button onClick={() => onSelect(t.technician_id)}
-                    className="rounded-lg border border-primary/30 bg-primary/10 px-2.5 py-1 text-xs font-medium text-primary hover:bg-primary/20 transition-colors cursor-pointer">
-                    Detalhes
-                  </button>
-                </td>
-              </tr>
+      <Table>
+        <TableHead>
+          <TableRow>
+            {["Técnico", "Atribuídos", "Resolvidos", "Em aberto", "SLA", "Tempo médio", "CSAT", ""].map((h) => (
+              <TableHeaderCell key={h} className="text-[11px] font-semibold">{h}</TableHeaderCell>
             ))}
-            {data.technicians.length === 0 && (
-              <tr>
-                <td colSpan={8} className="px-4 py-12 text-center text-sm text-slate-500">
-                  Nenhum técnico ativo encontrado.
-                </td>
-              </tr>
-            )}
-          </tbody>
-        </table>
-      </div>
+          </TableRow>
+        </TableHead>
+        <TableBody>
+          {data.technicians.map((t) => (
+            <TableRow key={t.technician_id} className="hover:bg-surface-elevated/50">
+              <TableCell className="font-medium">{t.technician_name}</TableCell>
+              <TableCell muted>{t.total_assigned}</TableCell>
+              <TableCell className="font-medium text-success-700 dark:text-success-400">{t.resolved}</TableCell>
+              <TableCell muted>{t.open_count}</TableCell>
+              <TableCell className={`font-semibold ${slaColor(t.sla_compliance_rate)}`}>{t.sla_compliance_rate}%</TableCell>
+              <TableCell muted>
+                {t.avg_resolution_hours != null
+                  ? t.avg_resolution_hours >= 24
+                    ? `${(t.avg_resolution_hours / 24).toFixed(1)}d`
+                    : `${t.avg_resolution_hours.toFixed(1)}h`
+                  : "—"}
+              </TableCell>
+              <TableCell muted>{t.csat_average != null ? `${t.csat_average} ★` : "—"}</TableCell>
+              <TableCell>
+                {/*
+                  O nome acessível era só "Detalhes", oito vezes seguidas na
+                  mesma tabela. Quem navega pela lista de controles ouvia oito
+                  botões idênticos e nenhum dizia de quem.
+                */}
+                <button onClick={() => onSelect(t.technician_id)}
+                  aria-label={`Detalhes de ${t.technician_name}`}
+                  className="rounded-lg border border-action/30 bg-action-tint px-2.5 py-1 text-xs font-medium text-conteudo-link hover:bg-action/20 transition-colors cursor-pointer">
+                  Detalhes
+                </button>
+              </TableCell>
+            </TableRow>
+          ))}
+          {data.technicians.length === 0 && (
+            <TableEmpty colSpan={8} message="Nenhum técnico ativo encontrado." />
+          )}
+        </TableBody>
+      </Table>
     </div>
   );
 }
@@ -870,13 +964,13 @@ function TechnicianDetailPanel({ techDetail, techDetailLoading, onClose }: {
     <div className="rounded-xl border border-borda/40 bg-surface">
       <div className="flex items-center justify-between border-b border-borda/40 px-5 py-3.5">
         <div className="flex items-center gap-2">
-          <span className="text-sm font-semibold text-slate-200">
+          <span className="text-sm font-semibold text-conteudo">
             {techDetail ? `Detalhes — ${techDetail.technician_name}` : "Carregando detalhes…"}
           </span>
         </div>
         <button onClick={onClose}
-          className="rounded-lg border border-borda/40 px-3 py-1 text-xs font-medium text-slate-400 hover:bg-surface-elevated hover:text-slate-200 transition-colors cursor-pointer">
-          {IC.ChevLeft} Fechar
+          className="rounded-lg border border-borda/40 px-3 py-1 text-xs font-medium text-conteudo-muted hover:bg-surface-elevated hover:text-conteudo transition-colors cursor-pointer">
+          <Icon name="chevronLeft" size={14} strokeWidth={2.5} /> Fechar
         </button>
       </div>
       <div className="p-5">
@@ -907,12 +1001,12 @@ function ExportDropdown({ filters }: { filters: ReportFilters }) {
     <div ref={ref} className="relative">
       <button
         onClick={() => setOpen((v) => !v)}
-        className="flex h-9 items-center gap-1.5 rounded-lg border border-borda/40 bg-surface-elevated px-3 text-xs font-medium text-slate-400 hover:bg-surface hover:text-slate-200 transition-colors cursor-pointer"
+        className="flex h-9 items-center gap-1.5 rounded-lg border border-borda/40 bg-surface-elevated px-3 text-xs font-medium text-conteudo-muted hover:bg-surface hover:text-conteudo transition-colors cursor-pointer"
       >
-        {IC.Download}
+        <Icon name="download" size={16} strokeWidth={2} />
         Exportar
         <span className={`transition-transform duration-200 ${open ? "rotate-180" : ""}`}>
-          {IC.ChevDown}
+          <Icon name="chevronDown" size={14} strokeWidth={2.5} />
         </span>
       </button>
 
@@ -922,17 +1016,17 @@ function ExportDropdown({ filters }: { filters: ReportFilters }) {
             href={exportReportsUrl("csv", filters)}
             download
             onClick={() => setOpen(false)}
-            className="flex items-center gap-2 px-4 py-2.5 text-xs font-medium text-slate-300 hover:bg-surface-elevated transition-colors"
+            className="flex items-center gap-2 px-4 py-2.5 text-xs font-medium text-conteudo hover:bg-surface-elevated transition-colors"
           >
-            {IC.Download} Exportar CSV
+            <Icon name="download" size={16} strokeWidth={2} /> Exportar CSV
           </a>
           <a
             href={exportReportsUrl("pdf", filters)}
             download
             onClick={() => setOpen(false)}
-            className="flex items-center gap-2 px-4 py-2.5 text-xs font-medium text-slate-300 hover:bg-surface-elevated transition-colors border-t border-borda/30"
+            className="flex items-center gap-2 px-4 py-2.5 text-xs font-medium text-conteudo hover:bg-surface-elevated transition-colors border-t border-borda/30"
           >
-            {IC.Download} Exportar PDF
+            <Icon name="download" size={16} strokeWidth={2} /> Exportar PDF
           </a>
         </div>
       )}
@@ -1009,8 +1103,8 @@ export default function ReportsPage() {
   const activeFiltersCount = (category ? 1 : 0) + (priority ? 1 : 0);
 
   const tabs: { key: Tab; label: string; icon: React.ReactNode }[] = [
-    { key: "global",       label: "Visão geral", icon: IC.Chart  },
-    { key: "technicians",  label: "Por técnico", icon: IC.Users  },
+    { key: "global",       label: "Visão geral", icon: <Icon name="chart" size={16} strokeWidth={2} /> },
+    { key: "technicians",  label: "Por técnico", icon: <Icon name="users" size={16} strokeWidth={2} /> },
   ];
 
   return (
@@ -1018,11 +1112,11 @@ export default function ReportsPage() {
       {/* ── Header ───────────────────────────────────────────── */}
       <div className="flex flex-col sm:flex-row sm:flex-wrap sm:items-center sm:justify-between gap-4 rounded-2xl border border-borda/40 bg-surface px-5 py-4">
         <div className="text-center sm:text-left">
-          <h1 className="text-xl font-extrabold text-slate-100">Relatórios</h1>
-          <p className="mt-0.5 text-sm text-slate-500">
+          <h1 className="text-xl font-extrabold text-conteudo-heading">Relatórios</h1>
+          <p className="mt-0.5 text-sm text-conteudo-muted">
             {isTechnician ? "Suas métricas de desempenho" : "Visão geral e desempenho da equipe"}
             {activeFiltersCount > 0 && (
-              <span className="ml-2 rounded-full bg-primary/20 px-2 py-0.5 text-[10px] font-semibold text-primary">
+              <span className="ml-2 rounded-full bg-tint-primary px-2 py-0.5 text-[10px] font-semibold text-on-tint-primary">
                 {activeFiltersCount} filtro{activeFiltersCount > 1 ? "s" : ""} ativo{activeFiltersCount > 1 ? "s" : ""}
               </span>
             )}
@@ -1037,10 +1131,16 @@ export default function ReportsPage() {
                 <button
                   key={t.key}
                   onClick={() => setTab(t.key)}
+                  // A aba ativa era `bg-primary text-white`: 3,83:1, o par que
+                  // a catraca cobrava nesta tela. O degrau de AÇÃO é outro
+                  // token que não o de marca, e o par dele é `text-on-primary`
+                  // — branco no claro, navy no escuro, porque `text-white`
+                  // cravado dá 2,69:1 sobre o degrau de ação do tema escuro.
+                  aria-pressed={tab === t.key}
                   className={`flex h-7 items-center gap-2 rounded-lg px-4 text-sm font-medium transition-all cursor-pointer ${
                     tab === t.key
-                      ? "bg-primary text-white shadow-sm"
-                      : "text-slate-400 hover:text-slate-200 hover:bg-surface"
+                      ? "bg-action text-on-primary shadow-sm"
+                      : "text-conteudo-muted hover:text-conteudo hover:bg-surface"
                   }`}
                 >
                   {t.icon}
@@ -1054,14 +1154,14 @@ export default function ReportsPage() {
 
           {period === "personalizado" && (
             <div className="flex h-9 items-center gap-1.5 rounded-lg border border-borda/60 bg-surface-elevated px-3 text-sm">
-              <span className="shrink-0 text-slate-400">{IC.Calendar}</span>
+              <span className="shrink-0 text-conteudo-muted"><Icon name="calendar" size={14} strokeWidth={2} /></span>
               <input type="date" value={customStart} max={customEnd || undefined}
                 onChange={(e) => setCustomStart(e.target.value)}
-                className="bg-transparent text-slate-300 text-xs outline-none cursor-pointer w-28 [color-scheme:dark]" />
-              <span className="text-slate-500 text-xs">até</span>
+                className="bg-transparent text-conteudo text-xs outline-none cursor-pointer w-28 [color-scheme:light] dark:[color-scheme:dark]" />
+              <span className="text-conteudo-muted text-xs">até</span>
               <input type="date" value={customEnd} min={customStart || undefined}
                 onChange={(e) => setCustomEnd(e.target.value)}
-                className="bg-transparent text-slate-300 text-xs outline-none cursor-pointer w-28 [color-scheme:dark]" />
+                className="bg-transparent text-conteudo text-xs outline-none cursor-pointer w-28 [color-scheme:light] dark:[color-scheme:dark]" />
             </div>
           )}
 
@@ -1092,7 +1192,7 @@ export default function ReportsPage() {
           {/* Seletor rápido de técnico */}
           {techList && techList.technicians.length > 0 && (
             <div className="flex items-center gap-3 rounded-xl border border-borda/40 bg-surface px-4 py-3">
-              <span className="text-xs font-medium text-slate-500 shrink-0">Ver detalhes de:</span>
+              <span className="text-xs font-medium text-conteudo-muted shrink-0">Ver detalhes de:</span>
               <FilterSelect
                 value={selectedTechId ?? ""}
                 onChange={(v) => v ? handleSelectTechnician(v) : (setSelectedTechId(undefined), setTechDetail(null))}
@@ -1102,7 +1202,7 @@ export default function ReportsPage() {
               {selectedTechId && (
                 <button
                   onClick={() => { setSelectedTechId(undefined); setTechDetail(null); }}
-                  className="text-xs text-slate-500 hover:text-slate-200 transition-colors cursor-pointer shrink-0"
+                  className="text-xs text-conteudo-muted hover:text-conteudo transition-colors cursor-pointer shrink-0"
                 >
                   Limpar
                 </button>
