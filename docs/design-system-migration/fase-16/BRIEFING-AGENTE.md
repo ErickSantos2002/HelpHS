@@ -62,6 +62,37 @@ Escolher o hexadecimal no JavaScript pelo tema é reimplementar o seletor
 da migração o `theme` não for mais usado na tela, **remova o import** — variável
 morta que lê contexto continua re-renderizando.
 
+### Os ícones: o pacote tem 62, e é quase certo que o seu já está lá
+
+A **E21** subiu o conjunto de 46 para 62, feita a partir do inventário das 33
+telas: dos 151 `<svg>` soltos, **105 usos já desenhavam traçado que existe**, e
+dos 27 desenhos que faltavam, **10 eram o mesmo significado com outro traço** —
+um "certo" sem círculo, outro triângulo de aviso, outra lupa. Foram unificados.
+
+Então, ao encontrar um `<svg>`:
+
+1. **Case pelo traçado `d`, não pela aparência.** Compare com `ICON_PATHS` em
+   `components/ui/Icon.tsx`. Caractere a caractere.
+2. **Se não bater, procure pelo SIGNIFICADO.** Um "certo" é `check`, mesmo com
+   outro desenho. Um aviso é `warning`. Uma lupa é `search`. Quase sempre é isso.
+3. **Só se o significado não existir** é ícone novo — e aí ele **não é seu**:
+   pare, deixe o `<svg>` onde está e relate. Entrar no pacote é emenda, e emenda
+   não se faz de dentro de uma tela.
+
+⚠️ **Antes de trocar, confira o `viewBox` e o `fill` do `<svg>`.** O `Icon` é
+24×24 com `fill="none"` e `stroke="currentColor"`. Um ícone `viewBox="0 0 20 20"`
+ou com `fill="currentColor"` é de **outra família**: trocá-lo pelo `Icon`
+renderiza na escala errada e sem preenchimento, e **nada no `tsc` ou em teste de
+componente acusa** — `ICON_PATHS` é mapa de texto, e todo texto cabe. Foi assim
+que a estrela sólida do `AdminDashboard` foi barrada. Achou um? Deixe, e relate.
+
+### Paleta crua É escopo desta fase
+
+Não é só cor de gráfico. As classes `slate-*`, `sky-*`, `amber-*` e companhia
+saem todas, na mesma passada — os dois primeiros agentes divergiram nisto
+porque o prompt de um pedia a tela inteira e o do outro não, e a divergência era
+minha. A tela fecha com **zero** paleta crua fora de comentário.
+
 ### A legenda de gráfico de status é obrigatória
 
 Regra da E18. Enquanto o status pintava com a cor da §16, quem conhecia o
