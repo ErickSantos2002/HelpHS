@@ -1,7 +1,11 @@
 import { expect, test } from "@playwright/test";
 
-// @ts-expect-error — módulo de build em .mjs, sem tipos.
-import { conferirPixel, corDeFundoEsperada } from "../scripts/sonda-captura.mjs";
+import {
+  conferirPixel,
+  corDeFundoEsperada,
+  lerCorEfetiva,
+  // @ts-expect-error — módulo de build em .mjs, sem tipos.
+} from "../scripts/sonda-captura.mjs";
 
 /**
  * A trava de PIXEL das sondas de captura, provada **sozinha**.
@@ -57,16 +61,15 @@ test.describe("sonda de captura — a trava de pixel", () => {
     //
     // A checagem antiga comparava com a expressão `rgb(2xx, 2xx, 2xx)`. Uma
     // mutação que a trouxesse de volta passava em TODOS os outros casos daqui:
-    // o vermelho `rgb(255, 0, 0)` não casa a faixa, o escuro não casa, o
-    // transparente não casa. A faixa e o token davam a mesma resposta em toda
-    // a bateria, e a bateria não provava nada sobre qual dos dois estava
-    // sendo usado.
+    // o vermelho não casa a faixa, o escuro não casa, o transparente não casa.
+    // A faixa e o token davam a mesma resposta na bateria inteira, e a bateria
+    // não provava nada sobre qual dos dois estava sendo usado.
     //
     // `rgb(240, 240, 240)` separa os dois: é claro, casa a faixa, e **não é**
     // `--bg-base`. Só a comparação com o token acusa.
     await page.goto("/galeria.html");
     await page.addStyleTag({
-      content: "html { background: rgb(240, 240, 240) !important; }",
+      content: ".min-h-screen { background: rgb(240, 240, 240) !important; }",
     });
     const erro = await conferirPixel(page, "claro").catch((e: Error) => e);
     expect(
@@ -77,37 +80,81 @@ test.describe("sonda de captura — a trava de pixel", () => {
     expect((erro as Error).message).toContain("rgb(248, 250, 252)");
   });
 
-  test("BLOQUEIA quando nada pinta o viewport", async ({ page }) => {
-    // O modo de falhar que medir `body` às cegas esconde: com os dois fundos
-    // transparentes, a foto sai com o branco do navegador. Uma checagem que
-    // lesse só o `body` veria `rgba(0, 0, 0, 0)` e teria de adivinhar o que
-    // fazer com isso.
+  test("BLOQUEIA com o BODY certo e o elemento de cima errado", async ({
+    page,
+  }) => {
+    // O caso que a sessão do ChamadosHS pediu, e que refuta a primeira versão
+    // desta trava.
+    //
+    // Ela seguia a cascata do canvas — html, e se transparente o body. Lá o
+    // `body` fica claro enquanto uma div do app pinta o viewport de escuro, e a
+    // cascata leria o body: valor opaco, legítimo, e do tema errado.
+    //
+    // Aqui o `body` continua com `--bg-base` e só a div que cobre é trocada.
+    // Uma sonda que lê o body libera; esta tem de bloquear.
     await page.goto("/galeria.html");
     await page.addStyleTag({
-      content: "html, body { background: transparent !important; }",
+      content: ".min-h-screen { background: rgb(13, 27, 42) !important; }",
+    });
+    const corpo = await page.evaluate(
+      () => getComputedStyle(document.body).backgroundColor,
+    );
+    expect(corpo, "o body continua com a cor certa do tema claro").toBe(
+      "rgb(248, 250, 252)",
+    );
+    const erro = await conferirPixel(page, "claro").catch((e: Error) => e);
+    expect(
+      erro,
+      "uma sonda que lê o body veria a cor certa e liberaria",
+    ).toBeInstanceOf(Error);
+    expect((erro as Error).message).toContain("rgb(13, 27, 42)");
+  });
+
+  test("BLOQUEIA quando nada pinta o viewport", async ({ page }) => {
+    // O modo de falhar que medir às cegas esconde: sem nada opaco cobrindo e
+    // com os dois fundos transparentes, a foto sai com o branco do navegador.
+    await page.goto("/galeria.html");
+    await page.addStyleTag({
+      content:
+        "html, body, .min-h-screen { background: transparent !important; }",
     });
     const erro = await conferirPixel(page, "claro").catch((e: Error) => e);
     expect(erro).toBeInstanceOf(Error);
     expect((erro as Error).message).toContain("nada pinta o viewport");
   });
 
-  test("mede o CANVAS, e não o body — o html ganha quando pinta", async ({
+  test("normaliza `color(srgb …)`, que é como o token chega", async ({
     page,
   }) => {
-    // Regra do CSS: o fundo do canvas vem do `html`; só se ele for
-    // transparente é que se propaga o do `body`. Hoje o pacote pinta o `body`
-    // e o `html` fica sem fundo, então medir o `body` acerta POR ACIDENTE DE
-    // CONFIGURAÇÃO. Aqui o acidente é desfeito: o `html` passa a pintar uma cor
-    // errada, o `body` continua com a certa, e a trava tem de acusar.
+    // A div que cobre o viewport usa classe de token, e o Chromium devolve
+    // `color(srgb …)` para tudo que sai de `color-mix()`. Comparar strings
+    // faria a sonda NUNCA casar — e a versão anterior, que lia o body, escapava
+    // disso por acidente, porque o `base.css` pinta com valor literal.
+    //
+    // A primeira versão deste caso só checava que `conferirPixel` resolvia — e
+    // resolvia mesmo SEM a normalização, porque o elemento em `color(srgb …)`
+    // era descartado, a sonda caía no recuo do `body`, e o `body` está certo.
+    // O RECUO MASCARAVA A PERDA. A mutação pegou.
+    //
+    // Agora o caso prova de ONDE veio a medição.
     await page.goto("/galeria.html");
-    await page.addStyleTag({
-      content: "html { background: rgb(255, 0, 0) !important; }",
-    });
-    const erro = await conferirPixel(page, "claro").catch((e: Error) => e);
+    const cobre = await page.evaluate(
+      () =>
+        getComputedStyle(document.querySelector(".min-h-screen")!)
+          .backgroundColor,
+    );
+    expect(cobre, "o elemento que cobre chega no formato color(srgb …)").toContain(
+      "color(srgb",
+    );
+
+    const lido = await lerCorEfetiva(page);
     expect(
-      erro,
-      "uma checagem que lesse o body veria a cor certa e liberaria",
-    ).toBeInstanceOf(Error);
-    expect((erro as Error).message).toContain("rgb(255, 0, 0)");
+      lido.cobrindo.length,
+      "sem normalizar, o elemento em color(srgb) seria descartado e a lista ficaria vazia",
+    ).toBeGreaterThan(0);
+    expect(lido.cobrindo[lido.cobrindo.length - 1].quem).toContain("min-h-screen");
+    expect(lido.canvas).toBe(lido.cobrindo[lido.cobrindo.length - 1].cor);
+
+    await expect(conferirPixel(page, "claro")).resolves.toBeUndefined();
   });
 });

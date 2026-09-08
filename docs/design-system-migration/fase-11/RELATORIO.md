@@ -385,8 +385,13 @@ preenchimento com hexadecimal cravado, e o âmbar dando 1,96 no claro. Passou ao
 ### Pendência que a tela abre, e não é do sistema de design
 
 **O status `cancelled` não tem coluna.** O quadro mostra seis dos sete, e um
-chamado cancelado simplesmente **desaparece** da lista — sem coluna e sem aviso
-de que ele existe. É anterior a esta migração e não foi mexido: acrescentar uma
-sétima coluna é decisão de produto.
+chamado cancelado simplesmente **desaparece** da lista — sem coluna, sem aviso, e
+sem aparecer na busca por protocolo. É anterior a esta migração e não foi
+mexido: acrescentar uma sétima coluna é decisão de produto.
 
-Entra no escopo da Fase 16.
+Foi para `COMPARTILHADO/achados-helphs-frontend.md`, e **não** para a Fase 16 —
+é defeito de produto, não de sistema de design, e sai com o frontend depois do
+Checkpoint 3. Lá está registrada a consequência que só apareceu ao escrever: os
+cancelados **consomem o limite de 500** da carga e depois são descartados, então
+chamados ativos podem ficar de fora do quadro por causa de chamados que o quadro
+não mostra.

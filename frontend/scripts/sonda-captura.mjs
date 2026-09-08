@@ -33,9 +33,11 @@ import { fileURLToPath } from "node:url";
  * circular — se o token não carregasse, os dois lados ficariam vazios e
  * concordariam.
  *
- * E o que se mede é a **cor do canvas**, pela regra do CSS: o fundo do `html`
- * se não for transparente; senão, o do `body`. Se os dois forem transparentes,
- * bloqueia — nada pinta, e a foto sairia com o branco do navegador.
+ * E o que se mede é **o último elemento opaco que cobre o viewport** — não a
+ * cascata do canvas. Ver a nota longa sobre isso em `COR_EFETIVA`: a cascata
+ * responde "que cor o navegador pinta atrás de tudo", e a pergunta é "que cor a
+ * FOTO mostra". Quando nada cobre, a cascata volta a valer; quando nada pinta,
+ * bloqueia.
  */
 
 const RAIZ = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "..");
@@ -94,20 +96,94 @@ export function corDeFundoEsperada(tema, texto = readFileSync(TOKENS, "utf-8")) 
   return valor("--bg-base");
 }
 
-/** Lido no navegador: a cor que de fato pinta o viewport. */
-const COR_DO_CANVAS = `(() => {
-  const html = getComputedStyle(document.documentElement).backgroundColor;
-  const corpo = getComputedStyle(document.body).backgroundColor;
-  const transparente = (c) =>
-    !c || c === "transparent" || /rgba\\(\\s*0,\\s*0,\\s*0,\\s*0\\s*\\)/.test(c);
+/**
+ * Lido no navegador: a cor que de fato pinta o viewport.
+ *
+ * ── Por que NÃO é a cascata do canvas ─────────────────────────────────
+ *
+ * A primeira versão seguia a regra do CSS — fundo do `html`, e se ele for
+ * transparente propaga-se o do `body`. Está certa **para o canvas**, e é a
+ * pergunta errada: o que importa não é qual cor o navegador pinta atrás de
+ * tudo, é qual cor a FOTO mostra. Se um elemento opaco cobre o viewport, é ele
+ * que aparece, e a cor do canvas fica embaixo dele sem ser vista.
+ *
+ * A refutação veio da sessão do ChamadosHS, medida na tela dela:
+ *
+ *     html         rgba(0, 0, 0, 0)      transparente
+ *     body         rgb(248, 250, 252)    CLARO, com a página escura
+ *     div do app   rgb(13, 27, 42)       o que de fato pinta
+ *
+ * A cascata leria o `body`, encontraria um valor opaco e legítimo, e liberaria
+ * a captura com a cor do tema errado.
+ *
+ * O HelpHS tem a mesma estrutura — `div.min-h-screen.bg-surface-base` cobre o
+ * viewport — e hoje ela pinta a MESMA cor do `body`. Ou seja: aqui a cascata
+ * acerta por coincidência de valor, não por garantia. Trocar essa div para
+ * outra superfície faria a sonda aprovar a cor errada, e nada avisaria.
+ *
+ * Então a regra passa a ser: **o último elemento opaco que cobre o viewport**,
+ * com a cascata do canvas como recuo quando não há nenhum.
+ *
+ * ── E por que a cor é normalizada ─────────────────────────────────────
+ *
+ * O Chromium devolve `rgb(...)` para cor literal e `color(srgb …)` para o que
+ * saiu de um `color-mix()` — que é como os tokens deste projeto chegam. A div
+ * que cobre o viewport usa token, então vem no segundo formato, e comparar
+ * strings faria a sonda **nunca** casar. Os dois viram `rgb(r, g, b)` antes de
+ * qualquer comparação.
+ */
+const COR_EFETIVA = `(() => {
+  function normalizar(c) {
+    if (!c) return null;
+    const rgb = c.match(/rgba?\\(([^)]+)\\)/);
+    if (rgb) {
+      const p = rgb[1].split(/[,\\s/]+/).filter(Boolean).map(Number);
+      if (p.length > 3 && p[3] === 0) return null;   // transparente
+      return "rgb(" + Math.round(p[0]) + ", " + Math.round(p[1]) + ", " + Math.round(p[2]) + ")";
+    }
+    const srgb = c.match(/color\\(srgb([^)]+)\\)/);
+    if (srgb) {
+      const partes = srgb[1].split("/");
+      const p = partes[0].trim().split(/\\s+/).map(Number);
+      if (p.length < 3 || p.some(Number.isNaN)) return null;
+      if (partes.length > 1 && Number(partes[1]) === 0) return null;
+      return "rgb(" + Math.round(p[0] * 255) + ", " + Math.round(p[1] * 255) + ", " + Math.round(p[2] * 255) + ")";
+    }
+    if (c === "transparent") return null;
+    return null;
+  }
+
+  const vw = window.innerWidth, vh = window.innerHeight;
+  const cobrindo = [];
+  for (const el of document.querySelectorAll("*")) {
+    const r = el.getBoundingClientRect();
+    if (r.width < vw - 1 || r.height < vh - 1 || r.top > 1 || r.left > 1) continue;
+    const cor = normalizar(getComputedStyle(el).backgroundColor);
+    if (!cor) continue;
+    cobrindo.push({
+      quem: el.tagName + (el.className ? "." + String(el.className).split(" ").slice(0, 2).join(".") : ""),
+      cor,
+    });
+  }
+
+  const html = normalizar(getComputedStyle(document.documentElement).backgroundColor);
+  const corpo = normalizar(getComputedStyle(document.body).backgroundColor);
+
   return {
-    html,
-    corpo,
-    // Regra do CSS: o fundo do canvas vem do html; se ele for transparente,
-    // propaga-se o do body.
-    canvas: transparente(html) ? (transparente(corpo) ? null : corpo) : html,
+    html: getComputedStyle(document.documentElement).backgroundColor,
+    corpo: getComputedStyle(document.body).backgroundColor,
+    cobrindo,
+    // O ULTIMO que cobre e o que aparece. Sem nenhum, cai na cascata do canvas.
+    canvas: cobrindo.length
+      ? cobrindo[cobrindo.length - 1].cor
+      : (html ?? corpo ?? null),
   };
 })()`;
+
+/** O que a sonda vê: a cor efetiva e de onde ela veio. Exportado para a prova. */
+export async function lerCorEfetiva(page) {
+  return page.evaluate(COR_EFETIVA);
+}
 
 /**
  * A trava de PIXEL. Bloqueia sozinha, sem depender de marcador nem de classe.
@@ -132,11 +208,11 @@ const COR_DO_CANVAS = `(() => {
 export async function conferirPixel(page, tema, onde = "") {
   const esperado = corDeFundoEsperada(tema);
 
-  let lido = await page.evaluate(COR_DO_CANVAS);
+  let lido = await page.evaluate(COR_EFETIVA);
   let assentou = false;
   for (let i = 0; i < 5 && !assentou; i++) {
     await page.waitForTimeout(200); // > --duration-fast (150ms)
-    const denovo = await page.evaluate(COR_DO_CANVAS);
+    const denovo = await page.evaluate(COR_EFETIVA);
     assentou = denovo.canvas === lido.canvas;
     lido = denovo;
   }
