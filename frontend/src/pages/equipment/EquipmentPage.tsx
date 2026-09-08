@@ -4,14 +4,20 @@ import { useForm } from "react-hook-form";
 import { z } from "zod";
 import {
   Alert,
+  Badge,
   Button,
   Card,
+  Icon,
   Input,
+  KpiCard,
   Modal,
   ModalFooter,
   Pagination,
+  Select,
   Spinner,
 } from "../../components/ui";
+import type { BadgeProps } from "../../components/ui";
+import { cn } from "../../lib/utils";
 import { api } from "../../services/api";
 import {
   createMyEquipment,
@@ -30,39 +36,82 @@ interface Product {
   is_active: boolean;
 }
 
-// ── Icons ─────────────────────────────────────────────────────
-
-const IC = {
-  Cpu: (
-    <svg className="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
-      <rect x="4" y="4" width="16" height="16" rx="2" /><path strokeLinecap="round" strokeLinejoin="round" d="M9 9h6v6H9zM9 1v3M15 1v3M9 20v3M15 20v3M1 9h3M1 15h3M20 9h3M20 15h3" />
-    </svg>
-  ),
-  Edit: (
-    <svg className="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
-      <path strokeLinecap="round" strokeLinejoin="round" d="M11 5H6a2 2 0 00-2 2v11a2 2 0 002 2h11a2 2 0 002-2v-5m-1.414-9.414a2 2 0 112.828 2.828L11.828 15H9v-2.828l8.586-8.586z" />
-    </svg>
-  ),
-  Trash: (
-    <svg className="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
-      <path strokeLinecap="round" strokeLinejoin="round" d="M19 7l-.867 12.142A2 2 0 0116.138 21H7.862a2 2 0 01-1.995-1.858L5 7m5 4v6m4-6v6m1-10V4a1 1 0 00-1-1h-4a1 1 0 00-1 1v3M4 7h16" />
-    </svg>
-  ),
-  Plus: (
-    <svg className="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
-      <path strokeLinecap="round" strokeLinejoin="round" d="M12 4v16m8-8H4" />
-    </svg>
-  ),
-  MapPin: (
-    <svg className="w-3.5 h-3.5" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
-      <path strokeLinecap="round" strokeLinejoin="round" d="M17.657 16.657L13.414 20.9a1.998 1.998 0 01-2.827 0l-4.244-4.243a8 8 0 1111.314 0z" /><path strokeLinecap="round" strokeLinejoin="round" d="M15 11a3 3 0 11-6 0 3 3 0 016 0z" />
-    </svg>
-  ),
-};
-
 // ── Constants ─────────────────────────────────────────────────
 
 const PAGE_SIZE = 10;
+
+// ── O estado do equipamento ───────────────────────────────────
+
+/**
+ * Ativo e inativo, numa tabela só desta tela.
+ *
+ * ── Por que ela é local, e não um módulo de `src/lib` ─────────────────
+ *
+ * Porque `is_active` não é status de chamado, prioridade nem categoria: é um
+ * booleano de equipamento, e nenhum outro arquivo do front precisa saber como
+ * ele se chama. `src/lib/**` está fora do escopo desta passagem, e o módulo
+ * teria um consumidor só — a mesma conclusão que a `AuditLogsPage` registrou
+ * para a tabela de ação de auditoria.
+ *
+ * O que ela ganhou foi a **disciplina** dos módulos: rótulo singular e plural
+ * declarados lado a lado (o selo diz "Ativo", a aba diz "Ativos" — antes as
+ * duas palavras estavam escritas em lugares diferentes, sem regra ligando-as),
+ * variante do `Badge` em vez de classe de cor, e as abas de filtro derivadas
+ * daqui em vez de reescritas.
+ *
+ * ── Este selo é uma de TRÊS cópias divergentes ────────────────────────
+ *
+ * O mesmo componente existe na `ProductsPage` (como botão que alterna) e na
+ * `UsersPage` (como `StatusPill`, com três estados e mapa de rótulo próprio).
+ * A daqui trazia um `dark:bg-emerald-400` no ponto que a da `ProductsPage` não
+ * tinha — divergiram em silêncio, porque nada obriga três cópias a concordar.
+ *
+ * O componente compartilhado **não nasce aqui**: `components/ui` está fora do
+ * escopo, e três agentes inventando três abstrações é o defeito que esta
+ * migração existe para eliminar. Fica registrado na ficha.
+ *
+ * ── Sem modificador de opacidade nas tintas ───────────────────────────
+ *
+ * Regra (a) do D8-a: as tintas já carregam 15% de alfa no próprio token, e
+ * `bg-tint-success/20` multiplicaria os dois. As classes abaixo estão escritas
+ * por extenso pelo mesmo motivo de sempre — o Tailwind gera utilitário varrendo
+ * o TEXTO do arquivo, e `"bg-fill-" + algo` some da varredura sem erro nem
+ * aviso.
+ */
+const ESTADO = {
+  ativo: {
+    rotulo: "Ativo",
+    plural: "Ativos",
+    variante: "success",
+    // O ponto é FORMA, não texto: `--fill-*` da E19 existe porque o degrau 500
+    // da rampa reprova o piso de 3:1 no tema claro.
+    ponto: "bg-fill-success",
+  },
+  inativo: {
+    rotulo: "Inativo",
+    plural: "Inativos",
+    variante: "muted",
+    // O único que inverte por tema — é contorno de controle, e o par neutro do
+    // `Badge` não tem preenchimento próprio.
+    ponto: "bg-borda-control",
+  },
+} as const satisfies Record<
+  string,
+  { rotulo: string; plural: string; variante: BadgeProps["variant"]; ponto: string }
+>;
+
+function estadoDe(ativo: boolean) {
+  return ativo ? ESTADO.ativo : ESTADO.inativo;
+}
+
+/** As três abas, derivadas da tabela — antes eram três literais soltos. */
+type Filtro = "all" | "active" | "inactive";
+
+const FILTROS: { chave: Filtro; rotulo: string }[] = [
+  { chave: "all", rotulo: "Todos" },
+  { chave: "active", rotulo: ESTADO.ativo.plural },
+  { chave: "inactive", rotulo: ESTADO.inativo.plural },
+];
 
 // ── Schema ────────────────────────────────────────────────────
 
@@ -82,31 +131,20 @@ const editSchema = z.object({
 type EquipValues = z.infer<typeof equipSchema>;
 type EditValues = z.infer<typeof editSchema>;
 
-// ── ActivePill ────────────────────────────────────────────────
+// ── SeloDeEstado ──────────────────────────────────────────────
 
-function ActivePill({ active }: { active: boolean }) {
+function SeloDeEstado({ ativo }: { ativo: boolean }) {
+  const estado = estadoDe(ativo);
   return (
-    <span
-      className={`inline-flex items-center gap-1.5 px-2.5 py-1 rounded-full border text-xs font-medium shrink-0 ${
-        active
-          ? "border-emerald-300 bg-emerald-50 text-emerald-600 dark:border-emerald-700/50 dark:bg-emerald-900/20 dark:text-emerald-300"
-          : "border-slate-300 bg-slate-100 text-slate-500 dark:border-slate-600/50 dark:bg-slate-800/40 dark:text-slate-400"
-      }`}
-    >
-      <span className={`w-1.5 h-1.5 rounded-full shrink-0 ${active ? "bg-emerald-500 dark:bg-emerald-400" : "bg-slate-400 dark:bg-slate-500"}`} />
-      {active ? "Ativo" : "Inativo"}
-    </span>
-  );
-}
-
-// ── KpiCard ───────────────────────────────────────────────────
-
-function KpiCard({ label, value, accent }: { label: string; value: number; accent?: string }) {
-  return (
-    <div className="rounded-xl bg-surface border border-borda p-4 flex flex-col gap-1">
-      <p className="text-xs text-slate-500 font-medium uppercase tracking-wide">{label}</p>
-      <p className={`text-2xl font-bold ${accent ?? "text-slate-700 dark:text-slate-100"}`}>{value}</p>
-    </div>
+    <Badge variant={estado.variante} className="shrink-0 gap-1.5">
+      {/* O ponto é decorativo: a palavra ao lado já diz o estado, e é ela que
+          sobra para quem não enxerga a cor. */}
+      <span
+        aria-hidden="true"
+        className={cn("h-1.5 w-1.5 shrink-0 rounded-full", estado.ponto)}
+      />
+      {estado.rotulo}
+    </Badge>
   );
 }
 
@@ -142,22 +180,19 @@ function AddModal({ products, onClose, onAdded }: {
     <Modal open onClose={onClose} title="Novo equipamento">
       <form onSubmit={form.handleSubmit(handleSubmit)} className="space-y-4">
         {submitError && <Alert variant="danger">{submitError}</Alert>}
-        <div className="space-y-1.5">
-          <label className="text-xs font-medium text-slate-600 dark:text-slate-400">Produto *</label>
-          <select
-            className="w-full rounded-xl border border-borda/60 bg-surface-elevated px-3 py-2 text-sm text-slate-700 dark:text-slate-200 focus:outline-none focus:ring-2 focus:ring-primary focus:border-transparent transition-colors"
-            {...form.register("product_id")}
-          >
-            {products.map((p) => (
-              <option key={p.id} value={p.id}>
-                {p.name}{p.version ? ` (${p.version})` : ""}
-              </option>
-            ))}
-          </select>
-          {form.formState.errors.product_id && (
-            <p className="text-xs text-danger">{form.formState.errors.product_id.message}</p>
-          )}
-        </div>
+        {/* Era um `<select>` com classe à mão e um `<label>` sem `htmlFor` —
+            campo sem nome acessível. O primitivo amarra os dois e traz o anel
+            de foco do degrau de AÇÃO, o mesmo dos `Input` logo abaixo. */}
+        <Select
+          id="equipamento-produto"
+          label="Produto *"
+          options={products.map((p) => ({
+            value: p.id,
+            label: p.name + (p.version ? ` (${p.version})` : ""),
+          }))}
+          error={form.formState.errors.product_id?.message}
+          {...form.register("product_id")}
+        />
         <Input
           label="Nome do equipamento *"
           placeholder="ex: Notebook Welton"
@@ -260,22 +295,24 @@ function DeleteModal({ equipment, onClose, onDeleted }: {
     <Modal open onClose={onClose} title="Excluir equipamento">
       <div className="space-y-4">
         {error && <Alert variant="danger">{error}</Alert>}
-        <div className="flex gap-3 rounded-xl bg-red-50 border border-red-200 dark:bg-red-900/20 dark:border-red-800/40 p-4">
-          <div className="shrink-0 w-9 h-9 rounded-full bg-red-100 dark:bg-red-900/40 flex items-center justify-center text-red-500 dark:text-red-400">{IC.Trash}</div>
-          <div>
-            <p className="text-sm font-semibold text-red-600 dark:text-red-300">Ação irreversível</p>
-            <p className="text-xs text-red-500/80 dark:text-red-400/80 mt-0.5">Este equipamento será removido permanentemente.</p>
-          </div>
-        </div>
+        {/* `live={false}` pela E12: este aviso já está na tela quando o modal
+            abre. Região viva anuncia MUDANÇA — anunciá-lo aqui atropelaria o
+            anúncio do próprio diálogo, e o `Alert` acima, esse sim, é o que
+            muda. */}
+        <Alert variant="danger" live={false} title="Ação irreversível">
+          Este equipamento será removido permanentemente.
+        </Alert>
         <div className="flex items-center gap-3 rounded-xl border border-borda bg-surface-elevated px-4 py-3">
-          <div className="w-9 h-9 rounded-lg bg-surface border border-borda flex items-center justify-center text-slate-500">{IC.Cpu}</div>
+          <div className="w-9 h-9 rounded-lg bg-surface border border-borda flex items-center justify-center text-conteudo-muted">
+            <Icon name="cpu" size={16} strokeWidth={2} />
+          </div>
           <div className="flex-1 min-w-0">
-            <p className="text-sm font-medium text-slate-800 dark:text-slate-100 truncate">{equipment.name}</p>
-            {equipment.serial_number && <p className="text-xs font-mono text-slate-500">{equipment.serial_number}</p>}
+            <p className="text-sm font-medium text-conteudo-heading truncate">{equipment.name}</p>
+            {equipment.serial_number && <p className="text-xs font-mono text-conteudo-muted">{equipment.serial_number}</p>}
           </div>
         </div>
-        <p className="text-sm text-slate-500 dark:text-slate-400">
-          Tem certeza que deseja excluir <span className="font-medium text-slate-700 dark:text-slate-200">{equipment.name}</span>?
+        <p className="text-sm text-conteudo-muted">
+          Tem certeza que deseja excluir <span className="font-medium text-conteudo">{equipment.name}</span>?
         </p>
       </div>
       <ModalFooter>
@@ -293,7 +330,7 @@ export default function EquipmentPage() {
   const [products, setProducts] = useState<Product[]>([]);
   const [loading, setLoading] = useState(true);
   const [page, setPage] = useState(1);
-  const [filter, setFilter] = useState<"all" | "active" | "inactive">("all");
+  const [filter, setFilter] = useState<Filtro>("all");
 
   const [addOpen, setAddOpen] = useState(false);
   const [editTarget, setEditTarget] = useState<Equipment | null>(null);
@@ -320,6 +357,7 @@ export default function EquipmentPage() {
   const total = allEquipments.length;
   const active = allEquipments.filter((e) => e.is_active).length;
   const inactive = total - active;
+  const contagem: Record<Filtro, number> = { all: total, active, inactive };
 
   const paginated = filtered.slice((page - 1) * PAGE_SIZE, page * PAGE_SIZE);
 
@@ -347,55 +385,74 @@ export default function EquipmentPage() {
       {/* Header */}
       <div className="flex items-center justify-between gap-4 flex-wrap">
         <div>
-          <h1 className="text-2xl font-bold text-slate-800 dark:text-slate-100">Meus equipamentos</h1>
-          <p className="text-slate-500 dark:text-slate-400 text-sm mt-0.5">
+          <h1 className="text-2xl font-bold text-conteudo-heading">Meus equipamentos</h1>
+          <p className="text-conteudo-muted text-sm mt-0.5">
             Gerencie os equipamentos sob sua responsabilidade.
           </p>
         </div>
         {products.length > 0 && (
-          <Button onClick={() => setAddOpen(true)}>{IC.Plus} Adicionar equipamento</Button>
+          <Button onClick={() => setAddOpen(true)} icon={<Icon name="plus" size={16} strokeWidth={2} />}>
+            Adicionar equipamento
+          </Button>
         )}
       </div>
 
       {/* KPIs */}
       <div className="grid grid-cols-3 gap-3">
+        {/* O cartão local tinha uma prop `accent` de CLASSE CRUA — a mesma
+            porta pela qual `text-emerald-600` entrou sem revisão, e a razão de
+            o primitivo existir. O tom é união fechada. */}
         <KpiCard label="Total" value={total} />
-        <KpiCard label="Ativos" value={active} accent="text-emerald-600 dark:text-emerald-400" />
-        <KpiCard label="Inativos" value={inactive} accent="text-slate-500" />
+        <KpiCard label={ESTADO.ativo.plural} value={active} tone="success" />
+        <KpiCard label={ESTADO.inativo.plural} value={inactive} />
       </div>
 
       {/* Card */}
       <Card padding="none">
         {/* Filter tabs */}
         <div className="flex gap-0 border-b border-borda">
-          {([ { key: "all", label: `Todos (${total})` }, { key: "active", label: `Ativos (${active})` }, { key: "inactive", label: `Inativos (${inactive})` } ] as { key: typeof filter; label: string }[]).map(({ key, label }) => (
+          {FILTROS.map(({ chave, rotulo }) => (
             <button
-              key={key}
-              onClick={() => { setFilter(key); setPage(1); }}
-              className={`px-4 py-2.5 text-sm font-medium border-b-2 transition-colors cursor-pointer -mb-px ${
-                filter === key ? "border-primary text-primary" : "border-transparent text-slate-500 hover:text-slate-700 dark:hover:text-slate-300"
-              }`}
+              key={chave}
+              type="button"
+              // O selecionado só se via na cor e na linha de baixo. Como
+              // botão que alterna, ele passa a DIZER que está ligado — é o
+              // item "visual = árvore" da §29, e não muda pixel nenhum.
+              aria-pressed={filter === chave}
+              onClick={() => { setFilter(chave); setPage(1); }}
+              className={cn(
+                "px-4 py-2.5 text-sm font-medium border-b-2 transition-colors cursor-pointer -mb-px",
+                filter === chave
+                  ? "border-action text-conteudo-link"
+                  : "border-transparent text-conteudo-muted hover:text-conteudo",
+              )}
             >
-              {label}
+              {rotulo} ({contagem[chave]})
             </button>
           ))}
         </div>
 
         {filtered.length === 0 ? (
           <div className="flex flex-col items-center justify-center py-16 text-center">
-            <div className="w-12 h-12 rounded-full bg-surface-elevated border border-borda flex items-center justify-center text-slate-600 mb-3">{IC.Cpu}</div>
-            <p className="text-sm text-slate-400">
+            <div className="w-12 h-12 rounded-full bg-surface-elevated border border-borda flex items-center justify-center text-conteudo-muted mb-3">
+              <Icon name="cpu" size={16} strokeWidth={2} />
+            </div>
+            <p className="text-sm text-conteudo-muted">
               {total === 0
                 ? "Nenhum equipamento cadastrado ainda."
                 : "Nenhum equipamento neste filtro."}
             </p>
             {total === 0 && products.length > 0 && (
-              <button onClick={() => setAddOpen(true)} className="mt-2 text-sm text-primary hover:text-primary/80 transition-colors cursor-pointer">
+              <button
+                type="button"
+                onClick={() => setAddOpen(true)}
+                className="mt-2 text-sm text-conteudo-link hover:text-conteudo-link-hover transition-colors cursor-pointer"
+              >
                 Adicionar primeiro equipamento
               </button>
             )}
             {total === 0 && products.length === 0 && (
-              <p className="mt-1 text-xs text-slate-600">Nenhum produto disponível no sistema ainda.</p>
+              <p className="mt-1 text-xs text-conteudo-muted">Nenhum produto disponível no sistema ainda.</p>
             )}
           </div>
         ) : (
@@ -406,22 +463,25 @@ export default function EquipmentPage() {
                 return (
                   <div key={e.id} className="flex items-center gap-4 px-4 py-3 hover:bg-surface-elevated/40 transition-colors">
                     {/* Icon */}
-                    <div className="w-9 h-9 rounded-lg bg-surface-elevated border border-borda/60 flex items-center justify-center shrink-0 text-slate-400">
-                      {IC.Cpu}
+                    <div className="w-9 h-9 rounded-lg bg-surface-elevated border border-borda/60 flex items-center justify-center shrink-0 text-conteudo-muted">
+                      <Icon name="cpu" size={16} strokeWidth={2} />
                     </div>
 
                     {/* Name + details */}
                     <div className="flex-1 min-w-0">
-                      <p className={`text-sm font-medium truncate ${e.is_active ? "text-slate-800 dark:text-slate-200" : "text-slate-400 line-through"}`}>
+                      <p className={cn(
+                        "text-sm font-medium truncate",
+                        e.is_active ? "text-conteudo" : "text-conteudo-muted line-through",
+                      )}>
                         {e.name}
                       </p>
                       <div className="flex items-center gap-2 flex-wrap mt-0.5">
                         {e.serial_number && (
-                          <span className="text-xs font-mono text-slate-500">{e.serial_number}</span>
+                          <span className="text-xs font-mono text-conteudo-muted">{e.serial_number}</span>
                         )}
                         {e.location && (
-                          <span className="flex items-center gap-0.5 text-xs text-slate-600">
-                            {IC.MapPin} {e.location}
+                          <span className="flex items-center gap-0.5 text-xs text-conteudo-muted">
+                            <Icon name="mapPin" size={14} strokeWidth={2} /> {e.location}
                           </span>
                         )}
                       </div>
@@ -429,29 +489,37 @@ export default function EquipmentPage() {
 
                     {/* Product badge */}
                     {prod && (
-                      <span className="hidden sm:inline-flex shrink-0 text-xs px-2.5 py-1 rounded-full bg-primary/10 border border-primary/20 text-primary/80 truncate max-w-[120px]">
+                      <Badge variant="primary" className="hidden sm:inline-flex shrink-0 truncate max-w-[120px]">
                         {prod.name}
-                      </span>
+                      </Badge>
                     )}
 
                     {/* Status */}
-                    <ActivePill active={e.is_active} />
+                    <SeloDeEstado ativo={e.is_active} />
 
                     {/* Actions */}
                     <div className="flex items-center gap-1 shrink-0">
+                      {/* O nome acessível diz QUAL equipamento: dez linhas na
+                          página davam dez botões chamados "Editar", e o `title`
+                          sozinho não resolve isso para quem navega por lista de
+                          controles. */}
                       <button
+                        type="button"
                         onClick={() => setEditTarget(e)}
                         title="Editar"
-                        className="p-1.5 rounded-lg text-slate-400 hover:text-primary hover:bg-primary/10 transition-colors cursor-pointer"
+                        aria-label={`Editar ${e.name}`}
+                        className="p-1.5 rounded-lg text-conteudo-muted hover:text-conteudo-link hover:bg-surface-elevated transition-colors cursor-pointer"
                       >
-                        {IC.Edit}
+                        <Icon name="edit" size={16} strokeWidth={2} />
                       </button>
                       <button
+                        type="button"
                         onClick={() => setDeleteTarget(e)}
                         title="Excluir"
-                        className="p-1.5 rounded-lg text-slate-400 hover:text-red-400 hover:bg-red-900/20 transition-colors cursor-pointer"
+                        aria-label={`Excluir ${e.name}`}
+                        className="p-1.5 rounded-lg text-conteudo-muted hover:text-on-tint-danger hover:bg-tint-danger transition-colors cursor-pointer"
                       >
-                        {IC.Trash}
+                        <Icon name="trash" size={16} strokeWidth={2} />
                       </button>
                     </div>
                   </div>

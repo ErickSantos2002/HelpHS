@@ -213,6 +213,22 @@ try {
 O `finally` não é estilo: a primeira versão do roteiro de mutação deste projeto
 quebrou ao decodificar a saída do vitest e **deixou a mutação no disco**.
 
+⚠️ **O roteiro precisa de um controle SEM mutação, e aqui está o porquê.** Um
+agente rodou doze mutações com `execFileSync("npx.cmd", …)` e as doze
+"sobreviveram" — em zero segundo. `npx.cmd` é um script de shell: sem `shell:
+true`, o `execFileSync` não o executa no Windows, **o vitest nunca rodou**, e o
+roteiro leu "não falhou" como "o mutante passou". Ele pegou sozinho e refez.
+
+Duas defesas, e use as duas:
+
+1. **Rode a suíte sem mutação nenhuma antes da primeira**, e exija que ela
+   **passe**. Se o controle não passa, o seu medidor está quebrado e nenhum
+   resultado depois dele vale.
+2. **Chame o vitest sem passar por `.cmd`**: `process.execPath` com
+   `node_modules/vitest/vitest.mjs`, ou `execSync` (que usa shell).
+
+Um roteiro de mutação é uma régua, e régua não medida mente com confiança.
+
 ---
 
 ## 6. A ficha da §29
