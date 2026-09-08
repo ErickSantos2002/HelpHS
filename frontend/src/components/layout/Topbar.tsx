@@ -4,6 +4,7 @@ import { Avatar, Switch } from "../ui";
 import { cn } from "../../lib/utils";
 import { useAuth } from "../../contexts/AuthContext";
 import { useTheme } from "../../contexts/ThemeContext";
+import { rotuloDePapel } from "../../lib/papel";
 import {
   getNotifications,
   markAllRead,
@@ -11,11 +12,7 @@ import {
   type Notification,
 } from "../../services/notificationService";
 
-const roleLabel: Record<string, string> = {
-  admin: "Administrador",
-  technician: "Técnico",
-  client: "Cliente",
-};
+/* O rótulo do papel vem de `lib/papel.ts`. Esta era uma das cinco cópias. */
 
 const NOTIF_TYPE_LABEL: Record<string, string> = {
   ticket_created: "Chamado criado",
@@ -346,7 +343,7 @@ export function Topbar({ onMobileMenuClick, onToggleCollapsed, sidebarCollapsed,
                 {user?.name}
               </p>
               <p className="text-xs text-conteudo-muted leading-tight">
-                {roleLabel[user?.role ?? "client"]}
+                {rotuloDePapel(user?.role ?? "client")}
               </p>
             </div>
             <svg

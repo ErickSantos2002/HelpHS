@@ -19,6 +19,11 @@ import {
 } from "../../components/ui";
 import { cn } from "../../lib/utils";
 import {
+  OPCOES_DE_PAPEL,
+  rotuloDePapel,
+  varianteDePapel,
+} from "../../lib/papel";
+import {
   createUser,
   deleteUser,
   getUsers,
@@ -51,32 +56,11 @@ const PAGE_SIZE = 10;
  * O `as const` faz `variante` inferir os literais do `Badge` em vez de
  * `string`: acrescentar um papel com variante que não existe para de compilar.
  */
-const PAPEIS = [
-  { valor: "admin", rotulo: "Administrador", variante: "primary" },
-  { valor: "technician", rotulo: "Técnico", variante: "info" },
-  { valor: "client", rotulo: "Cliente", variante: "muted" },
-] as const;
+/* O módulo existe agora: `lib/papel.ts`. Este agente reduziu quatro cópias a
+ * uma e relatou em vez de criar a quinta — e foi o relato dele que produziu o
+ * módulo. A tabela, as opções e os dois acessores vêm de lá. */
 
-/** As opções dos seletores — do filtro e dos dois formulários. */
-const OPCOES_DE_PAPEL = PAPEIS.map((p) => ({
-  value: p.valor,
-  label: p.rotulo,
-}));
 
-/**
- * Rótulo e variante recuam para o dado cru, e não estouram.
- *
- * Mesma razão dos acessores de `lib/status.ts`: `role` vem da REDE. Um papel
- * novo no backend que o front ainda não conheça mostra o valor cru num selo
- * neutro — em vez de derrubar a lista inteira.
- */
-function rotuloDePapel(papel: string): string {
-  return PAPEIS.find((p) => p.valor === papel)?.rotulo ?? papel;
-}
-
-function varianteDePapel(papel: string) {
-  return PAPEIS.find((p) => p.valor === papel)?.variante ?? "muted";
-}
 
 /**
  * O estado da CONTA — que não é o status do chamado.

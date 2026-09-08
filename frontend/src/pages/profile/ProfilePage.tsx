@@ -8,7 +8,6 @@ import {
   Icon,
   Input,
   Spinner,
-  type BadgeProps,
 } from "../../components/ui";
 import {
   changePassword,
@@ -28,6 +27,7 @@ import {
 } from "../../services/authService";
 import { lookupCnpj, lookupCep } from "../../services/equipmentService";
 import { getApiError } from "../../lib/apiError";
+import { rotuloDePapel, varianteDePapel } from "../../lib/papel";
 import { formatCnpj, isValidCep, isValidCnpj, maskCnpjInput, onlyDigits } from "../../lib/documents";
 
 // ── Shared ────────────────────────────────────────────────────
@@ -42,16 +42,15 @@ import { formatCnpj, isValidCep, isValidCnpj, maskCnpjInput, onlyDigits } from "
  * que um papel novo entra numa e não na outra; foi assim que prioridade virou
  * dez mapas.
  *
- * Ele continua **local** de propósito. As mesmas três linhas existem no
- * `Topbar` e no `UsersPage`, o que faz delas fonte única **faltando** — e
- * `lib/` está fora do escopo desta tela. Inventar aqui um quarto lugar seria o
- * defeito, não o conserto.
+ * Era local, e o agente que migrou esta tela registrou por quê: as mesmas
+ * três linhas existiam no `Topbar`, no `UsersPage` e na `KBArticlePage`, e
+ * `src/lib` estava fora do escopo de quem migra UMA tela. Ele relatou em vez de
+ * inventar um quinto lugar, que é o comportamento certo.
+ *
+ * O módulo existe agora — `lib/papel.ts` —, e esta tela consome dele. A cópia
+ * daqui dizia `secondary` onde a do `UsersPage` dizia `muted`; as duas pintam
+ * igual no `Badge`, e é justamente por isso que a divergência sobreviveu.
  */
-const PAPEL: Record<string, { rotulo: string; variante: BadgeProps["variant"] }> = {
-  admin: { rotulo: "Administrador", variante: "primary" },
-  technician: { rotulo: "Técnico", variante: "info" },
-  client: { rotulo: "Cliente", variante: "secondary" },
-};
 
 /**
  * Ação de texto no cabeçalho de uma seção — "Editar", "Alterar senha".
@@ -734,7 +733,8 @@ export default function ProfilePage() {
       </div>
     );
 
-  const papel = PAPEL[profile.role];
+  const papelRotulo = rotuloDePapel(profile.role);
+  const papelVariante = varianteDePapel(profile.role);
   const joinedAt = new Date(profile.created_at).toLocaleDateString("pt-BR", { day: "2-digit", month: "long", year: "numeric" });
   const lastLogin = profile.last_login
     ? new Date(profile.last_login).toLocaleString("pt-BR", { day: "2-digit", month: "2-digit", year: "numeric", hour: "2-digit", minute: "2-digit" })
@@ -765,9 +765,7 @@ export default function ProfilePage() {
             <p className="text-sm text-conteudo-muted truncate">{profile.email}</p>
             {/* Papel desconhecido cai no neutro e mostra o valor cru: o dado vem
                 da REDE, e um papel novo no backend não pode derrubar a tela. */}
-            <Badge variant={papel?.variante ?? "secondary"}>
-              {papel?.rotulo ?? profile.role}
-            </Badge>
+            <Badge variant={papelVariante}>{papelRotulo}</Badge>
           </div>
           <div className="hidden sm:flex flex-col gap-3 text-right shrink-0">
             <div>
