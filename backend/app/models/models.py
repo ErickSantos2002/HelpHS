@@ -762,8 +762,11 @@ class SLAConfig(Base):
 
     id: Mapped[uuid.UUID] = mapped_column(UUID(as_uuid=True), primary_key=True, default=uuid.uuid4)
     level: Mapped[SLALevel] = mapped_column(Enum(SLALevel), unique=True, nullable=False)
-    response_time_hours: Mapped[int] = mapped_column(Integer, nullable=False)
-    resolve_time_hours: Mapped[int] = mapped_column(Integer, nullable=False)
+    # MINUTOS, nao horas. Metade da resposta do nivel critico e 30 min, e isso
+    # nao cabe numa coluna de horas inteiras -- foi o que forcou a troca de
+    # unidade. Ver a migration a7b8c9d0e1f2.
+    response_time_minutes: Mapped[int] = mapped_column(Integer, nullable=False)
+    resolve_time_minutes: Mapped[int] = mapped_column(Integer, nullable=False)
     warning_threshold: Mapped[int] = mapped_column(Integer, default=80)
     is_active: Mapped[bool] = mapped_column(Boolean, default=True)
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now())

@@ -138,8 +138,8 @@ def test_apply_sla_config_sets_deadlines():
     ticket = _mock_ticket()
     config = MagicMock(spec=SLAConfig)
     config.id = __import__("uuid").uuid4()
-    config.response_time_hours = 2
-    config.resolve_time_hours = 8
+    config.response_time_minutes = 120
+    config.resolve_time_minutes = 480
 
     now = _sp(2026, 4, 6, 9, 0)  # Monday 09:00
     apply_sla_config(ticket, config, now)
@@ -417,8 +417,8 @@ def _config_falsa():
     c = MagicMock()
     c.id = uuid.uuid4()
     c.level = "critical"
-    c.response_time_hours = 1
-    c.resolve_time_hours = 4
+    c.response_time_minutes = 60
+    c.resolve_time_minutes = 240
     c.warning_threshold = 80
     c.is_active = True
     c.created_at = datetime.now(UTC)
@@ -471,7 +471,8 @@ async def test_patch_de_sla_responde_200_e_persiste():
         app.dependency_overrides.clear()
 
     assert resp.status_code == 200, resp.text
-    assert config.response_time_hours == 3, "o valor não chegou no objeto"
+    # Mandou 3 h e gravou 180 min: é a ponte convertendo, não o valor cru.
+    assert config.response_time_minutes == 180, "a ponte de horas não converteu"
     session.commit.assert_awaited()
 
 
@@ -512,4 +513,6 @@ async def test_patch_de_sla_registra_auditoria_com_os_campos_do_modelo():
     log = logs[0]
     assert log.entity_type == "sla_config"
     assert log.entity_id == config.id, "entity_id é UUID no modelo, não string"
-    assert log.new_data == {"resolve_time_hours": 8}
+    # A auditoria registra o que foi gravado — minutos —, e não o que veio
+    # na requisição. Quem lê o log precisa ver o valor que passou a valer.
+    assert log.new_data == {"resolve_time_minutes": 480}

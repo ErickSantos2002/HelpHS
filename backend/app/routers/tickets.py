@@ -74,7 +74,7 @@ from app.utils.crud import get_or_404
 from app.utils.protocol import MAX_RETRIES, generate_protocol
 from app.utils.sla import (
     _PAUSE_STATUSES,
-    add_business_hours,
+    add_business_minutes,
     apply_sla_config,
     check_breaches,
     pause_sla,
@@ -915,7 +915,13 @@ async def reopen_ticket(
     )
     sla_config = sla_result.scalar_one_or_none()
     if sla_config:
-        ticket.sla_resolve_due_at = add_business_hours(now, sla_config.resolve_time_hours)
+        # Usa a configuração VIGENTE, não a que valia quando o chamado nasceu.
+        # É exceção consciente à regra de transição dos prazos aprovados pelo
+        # SGI: chamado antigo mantém o prazo de origem, mas quem é REABERTO
+        # começa um ciclo novo e ele segue a regra de hoje. Congelar exigiria
+        # versionar `sla_configs`, porque `sla_config_id` aponta para a linha
+        # atual, já editada.
+        ticket.sla_resolve_due_at = add_business_minutes(now, sla_config.resolve_time_minutes)
         ticket.sla_resolve_breach = False
     ticket.sla_paused_at = None
     # O tempo pausado é acumulado para esticar o prazo do ciclo em que ocorreu.

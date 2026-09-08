@@ -95,10 +95,26 @@ def _advance_to_business_hours(dt: datetime) -> datetime:
 # ── Public API ────────────────────────────────────────────────
 
 
-def add_business_hours(start: datetime, hours: int) -> datetime:
+def add_business_minutes(start: datetime, minutes: int) -> datetime:
+    """
+    Devolve o instante que fica `minutes` minutos ÚTEIS depois de `start`.
+
+    É a entrada canônica desde que os prazos de SLA passaram a ser guardados em
+    minutos. Delega para `add_business_hours`, que já trabalhava em ponto
+    flutuante internamente — meia hora não exigiu tocar na aritmética, só parar
+    de arredondá-la na borda.
+    """
+    return add_business_hours(start, minutes / 60)
+
+
+def add_business_hours(start: datetime, hours: float) -> datetime:
     """
     Return a datetime that is exactly `hours` business hours after `start`.
     Result is in America/Sao_Paulo timezone.
+
+    Aceita fração: `0.5` são 30 minutos úteis. A anotação dizia `int` enquanto
+    todo prazo era hora cheia, mas o laço abaixo sempre foi float — a mudança é
+    de contrato declarado, não de comportamento.
     """
     current = _advance_to_business_hours(start)
     remaining: float = hours
@@ -139,8 +155,8 @@ def add_business_days(start: datetime, days: int) -> datetime:
 def apply_sla_config(ticket: Ticket, config: SLAConfig, now: datetime) -> None:
     """Stamp SLA deadlines on a ticket at creation time."""
     ticket.sla_config_id = config.id
-    ticket.sla_response_due_at = add_business_hours(now, config.response_time_hours)
-    ticket.sla_resolve_due_at = add_business_hours(now, config.resolve_time_hours)
+    ticket.sla_response_due_at = add_business_minutes(now, config.response_time_minutes)
+    ticket.sla_resolve_due_at = add_business_minutes(now, config.resolve_time_minutes)
 
 
 def pause_sla(ticket: Ticket, now: datetime) -> None:
