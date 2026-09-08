@@ -75,7 +75,7 @@ const AVISOS = ["info", "success", "warning", "danger"] as const;
  *
  * Ao acrescentar um `Bloco`, ajuste este número — a suíte cobra.
  */
-export const AMOSTRAS = 14;
+export const AMOSTRAS = 15;
 
 /** `texto` cobra 4,5:1; `grafico` cobra 3:1 (WCAG 1.4.11). */
 function Bloco({
@@ -217,6 +217,44 @@ export function Galeria() {
           onChange={() => {}}
           options={[{ value: "aberto", label: "Aberto" }]}
         />
+      </Bloco>
+
+      {/*
+        As 36 células da E16-b: seis séries sobre as TRÊS superfícies, e o
+        arquivo se visita nos dois temas — 6 × 3 × 2.
+
+        O preenchimento sai de `var(--chart-N)` e não de um hexadecimal escrito
+        aqui, de propósito: o que precisa ser medido é o que o TOKEN entrega na
+        tela, não o valor que a emenda diz ter. Se a recópia do `colors.css`
+        não tivesse chegado, um hexadecimal cravado aqui mediria a paleta certa
+        sobre um sistema que ainda serve a antiga.
+
+        O piso é 3:1 (WCAG 1.4.11): série é forma, não texto.
+      */}
+      <Bloco nome="Gráfico E16-b">
+        {(
+          [
+            ["base", "bg-surface-base"],
+            ["surface", "bg-surface"],
+            ["elevada", "bg-surface-elevated"],
+          ] as const
+        ).map(([nome, classe]) => (
+          <div
+            key={nome}
+            data-superficie={nome}
+            className={"flex items-center gap-2 rounded-lg p-3 " + classe}
+          >
+            <span className="w-16 text-xs text-conteudo">{nome}</span>
+            {[1, 2, 3, 4, 5, 6].map((n) => (
+              <span
+                key={n}
+                data-chart={n}
+                className="block h-8 w-8 rounded"
+                style={{ background: "var(--chart-" + n + ")" }}
+              />
+            ))}
+          </div>
+        ))}
       </Bloco>
 
       {/*

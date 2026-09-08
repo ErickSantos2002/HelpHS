@@ -141,20 +141,40 @@
      e foi o que aconteceu ao tentar migrar a rosca e a barra empilhada do
      painel administrativo com os tokens de interface.
 
-     Os quatro primeiros seguem a semantica da secao 16 — marca, sucesso,
-     alerta, perigo. O quinto e um degrau escuro da marca, para a segunda
-     serie de mesma semantica; o sexto e o neutro, para "outros".
+     E16-b — a E16 escolhia seis degraus absolutos da rampa, e QUATRO DELES
+     REPROVAM o piso de 3:1 que ela mesma declara. A causa tem nome nesta
+     serie: degrau fixo nao inverte por tema. E a familia da E1, da E8 e do
+     `perigo-forte` que o ChamadosHS descartou.
 
-     Serie e PREENCHIMENTO, nao texto: o piso aqui e o de 3:1 da WCAG
-     1.4.11, e a distincao entre series importa mais que o contraste de
-     cada uma contra o fundo. Rotulo de grafico continua saindo dos tokens
-     de texto. */
-  --chart-1: var(--color-primary-500);
-  --chart-2: var(--color-success-500);
-  --chart-3: var(--color-warning-500);
-  --chart-4: var(--color-danger-500);
-  --chart-5: var(--color-primary-800);
-  --chart-6: var(--color-slate-400);
+     Estas seis foram escolhidas por BUSCA, sob dois criterios obrigatorios:
+
+       contraste  >= 3:1 contra as TRES superficies do tema (WCAG 1.4.11 —
+                  barra e ponto sao forma). Pior das 36 celulas: 3,22.
+       separacao  >= 20 de DeltaE*ab entre QUALQUER par, simulado para visao
+                  normal, deuteranopia, protanopia e tritanopia. Pior: 26,1.
+
+     "Qualquer par", e nao vizinhos: num grafico de seis series as seis estao
+     na tela ao mesmo tempo. Uma paleta anterior passou so entre vizinhos e
+     tinha quatro colisoes par a par, todas em deuteranopia.
+
+     Os --chart-* existem nos DOIS blocos, ao contrario dos degraus da rampa.
+     Nao sao degraus: sao papeis, e papel inverte com o tema.
+
+     O sexto NAO e "outros". Esse papel nao e realizavel no claro sob os dois
+     criterios: das 5.615 cores que passam, NENHUMA e quase-neutra e cabe na
+     faixa de luminancia das outras cinco. "Outros" e hachura sobre neutro
+     mais rotulo — nunca opacidade, que recompoe a cor e invalida a medicao.
+
+     Serie e PREENCHIMENTO, nao texto: o piso aqui e o de 3:1, e a distincao
+     entre series importa mais que o contraste de cada uma contra o fundo.
+     Rotulo de grafico continua saindo dos tokens de texto — piso 4,5:1, e
+     nenhuma destas foi medida para carregar texto. */
+  --chart-1: #174e8c;   /* azul profundo  */
+  --chart-2: #91633b;   /* ambar queimado */
+  --chart-3: #1493a3;   /* turquesa       */
+  --chart-4: #981652;   /* vinho          */
+  --chart-5: #8f4ade;   /* violeta        */
+  --chart-6: #e15a05;   /* laranja        */
 
   /* Toast — consumidos em JS pela biblioteca (react-hot-toast no ChamadosHS,
    * sonner no HelpHS), que recebe um objeto de estilo e não enxerga classe. */
@@ -243,4 +263,17 @@
   --on-tint-warning: var(--color-warning-400);
   --on-tint-info: var(--color-info-300);              /* E8 — escuro: elevada 6,21 / surface 7,28 / base 7,96 */
   --on-tint-neutral: var(--text-muted);
+
+  /* E16-b — a paleta de grafico no escuro. Bloco NOVO: a E16 declarava os
+     --chart-* so no :root, e por isso quatro deles reprovavam de um dos dois
+     lados. Ver a nota no :root.
+
+     Nao sao as mesmas cores clareadas: cada tema foi buscado contra as SUAS
+     tres superficies, e o que passa num nao passa no outro. */
+  --chart-1: #4e86c6;   /* azul    */
+  --chart-2: #bc7638;   /* ambar   */
+  --chart-3: #2ed0e5;   /* ciano   */
+  --chart-4: #ee1178;   /* rosa    */
+  --chart-5: #9e53f3;   /* violeta */
+  --chart-6: #c8c300;   /* oliva   */
 }

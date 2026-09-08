@@ -255,6 +255,122 @@ test("no RadioCards, a opção escolhida pinta diferente da livre", async ({ pag
   expect(await cor(escolhido)).not.toBe(await cor(livre));
 });
 
+/**
+ * As 36 células da E16-b, medidas por estilo COMPUTADO.
+ *
+ * Seis séries × três superfícies × dois temas. O piso é 3:1 — WCAG 1.4.11,
+ * elemento não textual: barra e ponto são forma, não texto.
+ *
+ * Por que aqui e não numa conta sobre os hexadecimais da emenda: a conta
+ * responde "estes doze valores passam?", e a pergunta que importa é "o que o
+ * TOKEN entrega na tela passa?". São perguntas diferentes sempre que a recópia
+ * do `colors.css` não chega — e foi assim que a E16 anterior entrou com quatro
+ * valores reprovando um piso que ela mesma declarava.
+ *
+ * As amostras não têm texto, então a medição comum da galeria as ignora: ela
+ * só olha elemento com texto próprio. Este caso existe para elas.
+ */
+const MEDIR_GRAFICO = `(() => {
+  // Duas formas, e a segunda NAO e opcional: o Chromium devolve
+  // \`color(srgb ...)\`, com componentes de 0 a 1, para tudo que sai de um
+  // \`color-mix()\` — que e como as superficies do pacote chegam. Um analisador
+  // que so entende \`rgb()\` devolve nulo para elas e todas as razoes viram 0.
+  // Foi o que aconteceu na primeira execucao deste caso, e e a MESMA
+  // armadilha que fez a galeria medir 28 de 85 elementos e passar verde.
+  function parse(c) {
+    const rgb = c.match(/rgba?\\(([^)]+)\\)/);
+    if (rgb) {
+      const p = rgb[1].split(",").map((x) => parseFloat(x.trim()));
+      return { r: p[0], g: p[1], b: p[2], a: p.length > 3 ? p[3] : 1 };
+    }
+    const srgb = c.match(/color\\(srgb([^)]+)\\)/);
+    if (srgb) {
+      const partes = srgb[1].split("/");
+      const p = partes[0].trim().split(/\\s+/).map(parseFloat);
+      if (p.length < 3 || p.some(Number.isNaN)) return null;
+      const a = partes.length > 1 ? parseFloat(partes[1]) : 1;
+      return { r: p[0] * 255, g: p[1] * 255, b: p[2] * 255, a: Number.isNaN(a) ? 1 : a };
+    }
+    return null;
+  }
+  function lum(c) {
+    const f = [c.r, c.g, c.b].map((v) => {
+      const s = v / 255;
+      return s <= 0.03928 ? s / 12.92 : Math.pow((s + 0.055) / 1.055, 2.4);
+    });
+    return 0.2126 * f[0] + 0.7152 * f[1] + 0.0722 * f[2];
+  }
+  function razao(a, b) {
+    const [x, y] = [lum(a), lum(b)].sort((p, q) => q - p);
+    return (x + 0.05) / (y + 0.05);
+  }
+  const linhas = [];
+  for (const caixa of document.querySelectorAll("[data-superficie]")) {
+    const fundo = parse(getComputedStyle(caixa).backgroundColor);
+    for (const am of caixa.querySelectorAll("[data-chart]")) {
+      const cor = parse(getComputedStyle(am).backgroundColor);
+      linhas.push({
+        superficie: caixa.getAttribute("data-superficie"),
+        serie: Number(am.getAttribute("data-chart")),
+        cor: getComputedStyle(am).backgroundColor,
+        fundo: getComputedStyle(caixa).backgroundColor,
+        lido: Boolean(cor && fundo),
+        razao: cor && fundo ? razao(cor, fundo) : 0,
+      });
+    }
+  }
+  return linhas;
+})()`;
+
+type Celula = {
+  superficie: string;
+  serie: number;
+  cor: string;
+  fundo: string;
+  lido: boolean;
+  razao: number;
+};
+
+for (const tema of ["claro", "escuro"] as const) {
+  test("E16-b — as 18 células do tema " + tema + " passam 3:1", async ({ page }) => {
+    await page.goto("/galeria.html");
+    await page.waitForSelector("[data-galeria]");
+    if (tema === "escuro") {
+      await page.getByTestId("alternar-tema").click();
+      await expect(page.locator("html")).toHaveClass(/dark/);
+    }
+
+    const celulas = (await page.evaluate(MEDIR_GRAFICO)) as Celula[];
+
+    // Piso de cobertura: 6 séries × 3 superfícies. Zero medido passaria verde.
+    expect(celulas).toHaveLength(18);
+
+    const tabela = celulas
+      .map(
+        (c) =>
+          `  chart-${c.serie}  ${c.superficie.padEnd(9)}  ${c.razao
+            .toFixed(2)
+            .padStart(6)}   ${c.cor} sobre ${c.fundo}`,
+      )
+      .join("\n");
+    console.log(`\nE16-b — tema ${tema}\n${tabela}`);
+
+    // Separado de propósito da reprovação: cor que o analisador não entendeu
+    // devolve razão 0, e 0 se lê como "reprovou" quando na verdade é "não
+    // mediu". As duas coisas exigem consertos opostos.
+    expect(
+      celulas.filter((c) => !c.lido).map((c) => `chart-${c.serie} em ${c.superficie}`),
+      "células cuja cor o analisador não entendeu — isto é falha de LEITURA, não de contraste",
+    ).toEqual([]);
+
+    const reprovadas = celulas.filter((c) => c.razao < 3);
+    expect(
+      reprovadas.map((c) => `chart-${c.serie} em ${c.superficie}: ${c.razao.toFixed(2)}`),
+      "séries abaixo de 3:1 (WCAG 1.4.11)",
+    ).toEqual([]);
+  });
+}
+
 test("o marcador da galeria não existe fora dela", async ({ page }) => {
   await page.goto("/uma-rota-que-nao-existe");
   await expect(page.locator("[data-galeria]")).toHaveCount(0);
