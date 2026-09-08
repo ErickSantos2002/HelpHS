@@ -254,6 +254,11 @@ def _chamado(**kwargs):
     t.product_id = uuid.uuid4()
     t.status = TicketStatus.open
     t.ai_enabled = True
+    # Explícito, e não deixado por conta do MagicMock: sem esta linha o
+    # atributo nasce como um filho auto-criado — truthy e diferente de None.
+    # Todo cenário de "chamado sem dono" ficaria verde por acidente, e trocar
+    # `is None` por `is not None` no código não derrubaria teste nenhum.
+    t.assignee_id = None
     t.sla_first_response = None
     t.sla_response_due_at = None
     t.sla_response_breach = False
@@ -352,12 +357,26 @@ async def test_chamado_sem_produto_nao_consulta_o_banco(helo_ligada):
 # ── O segundo turno: ela encerra e sai de cena ────────────────
 
 
-def _db_com_falas(quantas):
-    """Sessão que responde ao COUNT de mensagens dela."""
+def _db_com_falas(quantas, equipe_ja_falou=False):
+    """
+    Sessão que responde às duas consultas de `responde_triagem`.
+
+    Despacha pela CONSULTA, e não pela ordem das chamadas: a ordem é detalhe
+    de implementação — hoje o EXISTS da equipe vem antes do COUNT, e ela muda
+    no dia em que alguém inverter as guardas. Um mock preso à ordem quebraria
+    ali sem que nada tivesse quebrado de verdade.
+    """
     sessao = AsyncMock()
-    resultado = MagicMock()
-    resultado.scalar_one.return_value = quantas
-    sessao.execute = AsyncMock(return_value=resultado)
+
+    def responde(consulta, *args, **kwargs):
+        resultado = MagicMock()
+        if "EXISTS" in str(consulta).upper():
+            resultado.scalar.return_value = equipe_ja_falou
+        else:
+            resultado.scalar_one.return_value = quantas
+        return resultado
+
+    sessao.execute = AsyncMock(side_effect=responde)
     sessao.add = MagicMock()
     return sessao
 
@@ -370,9 +389,10 @@ async def test_resposta_do_cliente_encerra_a_triagem(helo_ligada):
     fala = await responde_triagem(db, ticket, _cliente(), "O aparelho não liga desde ontem")
 
     assert fala is not None
-    assert fala.is_ai is True
-    assert fala.sender_id is None
-    assert "Registrei tudo aqui" in fala.content
+    assert fala.escalou is False, "responder as perguntas é o encerramento, não a escalada"
+    assert fala.mensagem.is_ai is True
+    assert fala.mensagem.sender_id is None
+    assert "Registrei tudo aqui" in fala.mensagem.content
 
 
 @pytest.mark.asyncio
@@ -388,8 +408,9 @@ async def test_pedido_de_humano_escala_sem_insistir(helo_ligada):
     fala = await responde_triagem(db, _chamado(), _cliente(), "quero falar com um humano")
 
     assert fala is not None
-    assert "passando seu chamado para um atendente" in fala.content
-    assert "?" not in fala.content
+    assert fala.escalou is True, "é o que faz a equipe ser chamada com o aviso certo"
+    assert "passando seu chamado para um atendente" in fala.mensagem.content
+    assert "?" not in fala.mensagem.content
 
 
 @pytest.mark.asyncio
@@ -418,6 +439,91 @@ async def test_ela_nao_entra_em_conversa_que_comecou_sem_ela(helo_ligada):
 
     assert await responde_triagem(db, _chamado(), _cliente(), "oi") is None
     db.add.assert_not_called()
+
+
+# ── Quando um humano já está na conversa ──────────────────────
+
+
+@pytest.mark.asyncio
+async def test_tecnico_falou_e_o_cliente_respondeu_ela_fica_calada(helo_ligada):
+    """
+    O caso que motivou a correção, hora a hora.
+
+    Cliente abre às 3h e ela saúda (1ª fala). Técnico assume às 8h e escreve.
+    Cliente responde às 9h. Pela contagem ela ainda tem uma fala de crédito —
+    e gastaria dizendo "um atendente já vai assumir seu chamado" num chamado
+    que já está sendo atendido.
+    """
+    db = _db_com_falas(1, equipe_ja_falou=True)
+
+    fala = await responde_triagem(db, _chamado(), _cliente(), "consegui o número de série")
+
+    assert fala is None
+    db.add.assert_not_called()
+
+
+@pytest.mark.asyncio
+async def test_ela_cala_em_chamado_que_ja_tem_dono(helo_ligada):
+    """
+    Assumir não grava mensagem nenhuma no chat.
+
+    O técnico que pega o chamado às 8h e ainda não digitou não aparece no
+    histórico — só em `TicketHistory`. Sem olhar o responsável ela anunciaria
+    que "um atendente já vai assumir" um chamado que já tem nome.
+    """
+    db = _db_com_falas(1, equipe_ja_falou=False)
+
+    fala = await responde_triagem(
+        db, _chamado(assignee_id=uuid.uuid4()), _cliente(), "o aparelho apitou"
+    )
+
+    assert fala is None
+    db.add.assert_not_called()
+
+
+@pytest.mark.asyncio
+async def test_chamado_com_dono_nem_pergunta_pela_equipe(helo_ligada):
+    """
+    O responsável está na memória; a fala da equipe custa uma consulta.
+
+    Perguntar as duas coisas sempre seria uma consulta a cada mensagem de
+    cliente — e na Fase 2, em que ela fala muitas vezes por chamado, isso vira
+    consulta por turno de conversa.
+    """
+    db = _db_com_falas(1)
+
+    await responde_triagem(db, _chamado(assignee_id=uuid.uuid4()), _cliente(), "oi")
+
+    db.execute.assert_not_called()
+
+
+@pytest.mark.asyncio
+async def test_sem_dono_e_sem_a_equipe_ela_ainda_encerra(helo_ligada):
+    """
+    A guarda oposta: calar de mais é tão defeito quanto falar de mais.
+
+    Chamado triado de madrugada, sem responsável e sem ninguém da equipe
+    tendo falado, é exatamente o caso em que a despedida dela é verdadeira.
+    """
+    db = _db_com_falas(1, equipe_ja_falou=False)
+
+    fala = await responde_triagem(db, _chamado(), _cliente(), "não liga desde ontem")
+
+    assert fala is not None
+    assert "Registrei tudo aqui" in fala.mensagem.content
+
+
+@pytest.mark.asyncio
+async def test_nem_o_pedido_de_humano_fala_por_cima_do_tecnico(helo_ligada):
+    """
+    Pedir uma pessoa quando a pessoa já está ali não escala nada.
+
+    "Já estou passando seu chamado para um atendente" para quem acabou de ser
+    respondido por um atendente é a mesma mentira, com a urgência trocada.
+    """
+    db = _db_com_falas(1, equipe_ja_falou=True)
+
+    assert await responde_triagem(db, _chamado(), _cliente(), "quero falar com um humano") is None
 
 
 @pytest.mark.asyncio

@@ -150,12 +150,32 @@ duplo. No HelpHS isso produziria asteriscos literais na tela.
 ### 3. "Vou te transferir" vira uma ação de verdade
 
 No WhatsApp, escalar era uma frase — alguém do outro lado precisava perceber.
-No HelpHS a escalação **muda o status, notifica a equipe e desliga a IA**. Sem
-isso, o cliente lê "já vou te transferir" e ninguém é avisado.
+No HelpHS a escalação **notifica a equipe**, com um aviso próprio que diz que o
+cliente pediu uma pessoa. Sem isso, o cliente lê "já vou te transferir" e
+ninguém é avisado.
+
+⚠️ O desenho original prometia três efeitos aqui — mudar o status, notificar a
+equipe e **desligar a IA**. Só a notificação existe. O status não muda, e
+`ticket.ai_enabled` continua `True`: o silêncio dela vem do teto de falas e da
+guarda de humano na conversa, não de a IA ter sido desligada. Hoje isso é
+inofensivo, e na Fase 2 não é — está registrado como dívida com gatilho em
+`docs/decisoes-e-regras.md`, com a Fase 2 como gatilho.
 
 ---
 
 ## Fase 1 — triagem e entrega
+
+> **Esta seção foi reescrita em 08/09/2026 para bater com o código.** O
+> fluxograma e as tabelas descreviam o desenho de 11/08, e três rodadas de
+> emenda passaram por cima delas sem corrigi-las: quem lia o fluxograma
+> primeiro acreditava num status que nunca existiu, num destino que o
+> `9eeb683` já tinha removido e num teto de conversa com o número errado.
+> Emendar de novo já tinha falhado três vezes; o texto errado saiu.
+>
+> As duas seções riscadas mais abaixo — a do SLA e a do `ai_handling` — ficam
+> como estão: elas guardam o **porquê** de decisões revertidas, e o próprio
+> documento diz que ficam como registro. O que saiu foram conclusões erradas
+> sem raciocínio junto. O histórico completo está no git.
 
 ### Fluxo
 
@@ -163,7 +183,7 @@ isso, o cliente lê "já vou te transferir" e ninguém é avisado.
 Cliente termina o formulário (produto: Phoebus, equipamento: WATFR01-73041)
         │
         ▼
-Chamado nasce em "Atendimento IA"
+Chamado nasce em "Aberto"
         │
         ▼
 🤖 Helô: Olá, Suelen! Sou a Helô, assistente da Health & Safety.
@@ -174,41 +194,94 @@ Chamado nasce em "Atendimento IA"
         3. Você já tentou alguma coisa?
         │
         ▼
+Status → "Em andamento" (a fala dela é o que move)
+A fala dela CARIMBA a primeira resposta do SLA (decisão de 28/08)
+        │
+        ▼
 Cliente responde
         │
-        ▼
-🤖 Helô: Obrigada! Registrei tudo aqui.
-        ├── dentro do horário → "Um atendente já vai assumir seu chamado."
-        └── fora do horário   → "Nossa equipe atende de segunda a sexta, das
-                                 8h às 17h. Na segunda-feira pela manhã um
-                                 atendente entra em contato."
+        ├── um humano já está na conversa? ──► SIM: ela não fala. Fim.
+        │                                      (responsável definido, OU alguém
+        │                                       da equipe já escreveu no chamado)
+        ▼ NÃO
+🤖 Helô: ├── pediu uma pessoa  → "Sem problema! Já estou passando seu chamado
+        │                         para um atendente."
+        ├── dentro do horário → "Obrigada! Registrei tudo aqui. Um atendente
+        │                        já vai assumir seu chamado."
+        └── fora do horário   → "Obrigada! Registrei tudo aqui. Nossa equipe
+                                 atende de segunda a sexta, das 8h às 17h.
+                                 Na segunda-feira pela manhã um atendente
+                                 entra em contato."
         │
         ▼
-Status → Aguardando técnico
-Resumo da triagem gravado no chamado
+A equipe é notificada — com aviso DIFERENTE conforme a saída:
+        ├── pediu uma pessoa → "Cliente pediu atendimento humano"
+        └── triagem fechada  → "Triagem concluída"
+Status continua "Em andamento". Não vai para "Aguardando técnico":
+esse status pausa o relógio do SLA, e o cliente está esperando um humano.
         │
         ▼
 Helô sai de cena. Se o cliente escrever de novo, ela fica calada.
 ```
 
-### Atalho: o cliente pode pular a fila da IA
+**O resumo da triagem para o técnico ainda não existe** — é o último item da
+Fase 1 e depende da chave da DeepSeek.
 
-Se em qualquer momento o cliente disser que quer falar com uma pessoa — *"quero
-falar com um humano"*, *"me passa pro atendente"* — a Helô **pula a triagem e
-escala na hora**, sem insistir.
+### Atalho: o cliente interrompe a triagem
+
+Se o cliente disser que quer falar com uma pessoa — *"quero falar com um
+humano"*, *"me passa pro atendente"* — a Helô **para a triagem na hora** e
+escala, sem insistir e sem perguntar o motivo.
 
 Essa é a regra mais importante do ponto de vista de experiência. Um robô que não
 aceita "não" é pior do que robô nenhum.
+
+Ela **interrompe**, não pula: a saudação com as três perguntas já foi gravada na
+criação do chamado, antes de o cliente escrever qualquer coisa. Ele lê as
+perguntas de qualquer jeito, e o pedido de humano é reconhecido na resposta
+seguinte.
+
+### Ela cala quando um humano já está na conversa
+
+Acrescentado em 08/09/2026 (`12a5536`). Não estava no desenho original, e o
+defeito que ele deixou passar era este: a Helô só olhava os interruptores, o
+número de falas que já tinha dado e o pedido de humano — nenhum deles enxerga o
+atendimento que já começou. Cliente abre às 3h e ela saúda; técnico assume às
+8h e escreve; cliente responde às 9h; e ela gastava a segunda fala dizendo "um
+atendente já vai assumir seu chamado" num chamado que já tinha dono. Junto ia o
+aviso à equipe inteira dizendo que o chamado espera atendimento.
+
+**São duas condições, em disjunção** — qualquer uma cala a Helô:
+
+| Condição | Por que sozinha não basta |
+|---|---|
+| O chamado tem **responsável** (`assignee_id`) | Assumir não grava mensagem nenhuma no chat — só histórico e notificação. Quem pegou o chamado e ainda não digitou é invisível para qualquer varredura de conversa. |
+| **Alguém da equipe já escreveu** no chamado | Técnico e admin escrevem em qualquer chamado sem serem os responsáveis, e responder antes de assumir é o caminho normal da triagem da manhã. Além disso `assignee_id` é revogável: se só ele valesse, desatribuir ressuscitaria a Helô no meio de uma conversa que um humano já começou. Mensagem é append-only; atribuição não é. |
+
+A frase que ela diria é mentira nos dois mundos. A guarda é a união deles.
+
+A conferência de "alguém da equipe" é pelo **papel** de quem falou, e não pelo
+atalho "remetente que não é o autor do chamado": o atalho só funciona porque
+hoje a visibilidade do chamado é um "é seu?" cru, e calaria a Helô pelo motivo
+errado quando a frente de empresa/CNPJ deixar colegas da mesma empresa
+entrarem no chamado.
+
+Isso ganha peso na Fase 2. Hoje o teto de duas falas já limitava o estrago; com
+ela falando muitas vezes por chamado, esta guarda passa a ser o que impede a IA
+de falar por cima do atendimento humano.
 
 ### Decisões de comportamento
 
 | Pergunta | Decisão |
 |---|---|
-| Quando ela entra | Assim que o chamado é aberto, sempre |
-| Quais chamados | Todos, sem exceção |
+| Quando ela entra | Na abertura, **quando o autor é o cliente** e os três interruptores estão ligados |
+| Quais chamados | Os que têm a IA ligada nos três níveis. `HELO_ENABLED` **nasce desligada** — o padrão é ela não falar |
 | Quantas perguntas | Três, genéricas de suporte |
-| Status enquanto atende | Novo status **"Atendimento IA"**, com coluna própria no quadro |
-| Para onde vai depois | Aguardando técnico |
+| Status enquanto atende | **"Em andamento"** — sem status novo; a fala dela é o que move o chamado para lá |
+| Para onde vai depois | Continua em "Em andamento", sem responsável. Quem chama a equipe é uma **notificação**, não um status |
+| Quantas vezes ela fala | **No máximo duas** (`FALAS_MAXIMAS = 2`): a saudação e o encerramento |
+| Ao atingir o teto | **Silêncio** — ela não escala nem avisa nada |
+| Se um humano já está na conversa | **Silêncio**, mesmo com fala sobrando (ver acima) |
 | Fora do horário | Faz a triagem igual; muda só a frase final |
 | Qual dia ela cita fora do horário | O **próximo dia útil**, calculado — nunca "amanhã" fixo |
 | Depois de escalar | Silêncio total — o chamado é do humano |
@@ -286,10 +359,18 @@ O LLM entra só depois, para interpretar a resposta do cliente e gerar o resumo.
 
 | Risco | Proteção |
 |---|---|
-| LLM fora do ar, timeout, chave inválida | Escala direto para Aguardando técnico com mensagem neutra. **Nenhum chamado fica preso** |
-| Cliente entra num vai-e-vem sem fim | Teto de 3 trocas, depois escala |
-| Helô começa a falar besteira com cliente | Variável de ambiente desliga tudo, sem deploy |
-| Custo de API descontrolado | Teto de mensagens + saudação sem LLM |
+| Helô começa a falar besteira com cliente | `HELO_ENABLED` desliga tudo sem deploy, e há desligamento por chamado e por cliente. Os três níveis são conjunção: qualquer um desligado a cala, e não existe religar num nível mais específico |
+| Cliente entra num vai-e-vem sem fim | Teto de **2 falas dela** (`FALAS_MAXIMAS`), contadas por `is_ai` no chamado. Atingido o teto ela **cala** — não escala |
+| Ela fala por cima do atendimento humano | Silêncio quando o chamado tem responsável ou quando alguém da equipe já escreveu (ver "Ela cala quando um humano já está na conversa") |
+| Custo de API descontrolado | Teto de falas + saudação e encerramento montados **sem LLM** |
+| Reprocessar faz ela falar de novo | A contagem é do que está gravado no banco, não de estado em memória |
+
+⚠️ **A proteção contra falha de LLM não existe, e não tem gatilho hoje.** O
+desenho previa "escala direto com mensagem neutra se o LLM cair". A Fase 1
+inteira roda **sem chamar LLM nenhum**: a saudação e o encerramento são
+montados com dado do cadastro e com o motor de SLA. `helo.py` não importa
+`services/llm.py`. Quando a Fase 2 ligar o LLM, esta proteção precisa ser
+construída — ela nunca foi.
 
 ### Custo estimado
 
@@ -423,7 +504,8 @@ sozinha amanhã.
 |---|---|---|
 | Cliente se irrita por falar com robô | Alta | Ela escala na hora se pedirem humano, sem insistir |
 | Instrução técnica errada (Fase 2) | Alta | Só responde o que está na base; não achou, escala |
-| Chamado preso se o LLM falhar | Média | Escala automática em qualquer erro |
+| Chamado preso se o LLM falhar | **Sem gatilho na Fase 1** | ⚠️ **A mitigação não existe.** A Fase 1 não chama LLM nenhum — saudação e encerramento são montados sem API, então não há falha para tratar. A "escala automática em qualquer erro" nunca foi construída, e passa a ser necessária **quando a Fase 2 ligar o LLM**. |
+| IA fala por cima do atendimento humano | Média | Silêncio quando há responsável ou fala da equipe no chamado (`12a5536`) |
 | Métrica de SLA distorcida | **Aceito** (era Média) | ⚠️ **A mitigação caiu em 28/08.** A fala da Helô **passou a carimbar** a primeira resposta, por decisão do cliente. O risco não foi mitigado: foi **aceito**, com o preço declarado antes e junto da decisão — o indicador vira ~100% permanente e deixa de medir a equipe. Ver a seção do SLA acima e a dívida com gatilho em `docs/decisoes-e-regras.md`. |
 | Custo de API | Baixa | Teto de mensagens; saudação sem LLM |
 
