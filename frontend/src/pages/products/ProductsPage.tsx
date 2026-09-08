@@ -9,6 +9,7 @@ import {
   Card,
   FilterSelect,
   FormDropdown,
+  Icon,
   Input,
   Modal,
   ModalFooter,
@@ -32,58 +33,15 @@ import {
 import { getUsers } from "../../services/userService";
 import { getApiError } from "../../lib/apiError";
 
-// ── Icons ─────────────────────────────────────────────────────
-
-const IC = {
-  Box: (
-    <svg className="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
-      <path strokeLinecap="round" strokeLinejoin="round" d="M20 7l-8-4-8 4m16 0l-8 4m8-4v10l-8 4m0-10L4 7m8 4v10M4 7v10l8 4" />
-    </svg>
-  ),
-  Cpu: (
-    <svg className="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
-      <rect x="4" y="4" width="16" height="16" rx="2" /><path strokeLinecap="round" strokeLinejoin="round" d="M9 9h6v6H9zM9 1v3M15 1v3M9 20v3M15 20v3M1 9h3M1 15h3M20 9h3M20 15h3" />
-    </svg>
-  ),
-  Edit: (
-    <svg className="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
-      <path strokeLinecap="round" strokeLinejoin="round" d="M11 5H6a2 2 0 00-2 2v11a2 2 0 002 2h11a2 2 0 002-2v-5m-1.414-9.414a2 2 0 112.828 2.828L11.828 15H9v-2.828l8.586-8.586z" />
-    </svg>
-  ),
-  Plus: (
-    <svg className="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
-      <path strokeLinecap="round" strokeLinejoin="round" d="M12 4v16m8-8H4" />
-    </svg>
-  ),
-  Search: (
-    <svg className="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
-      <path strokeLinecap="round" strokeLinejoin="round" d="M21 21l-6-6m2-5a7 7 0 11-14 0 7 7 0 0114 0z" />
-    </svg>
-  ),
-  ChevronRight: (
-    <svg className="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
-      <path strokeLinecap="round" strokeLinejoin="round" d="M9 5l7 7-7 7" />
-    </svg>
-  ),
-  Eye: (
-    <svg className="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
-      <path strokeLinecap="round" strokeLinejoin="round" d="M15 12a3 3 0 11-6 0 3 3 0 016 0z" />
-      <path strokeLinecap="round" strokeLinejoin="round" d="M2.458 12C3.732 7.943 7.523 5 12 5c4.478 0 8.268 2.943 9.542 7-1.274 4.057-5.064 7-9.542 7-4.477 0-8.268-2.943-9.542-7z" />
-    </svg>
-  ),
-  User: (
-    <svg className="w-3.5 h-3.5" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
-      <path strokeLinecap="round" strokeLinejoin="round" d="M16 7a4 4 0 11-8 0 4 4 0 018 0zM12 14a7 7 0 00-7 7h14a7 7 0 00-7-7z" />
-    </svg>
-  ),
-  Building: (
-    <svg className="w-3.5 h-3.5" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
-      <path strokeLinecap="round" strokeLinejoin="round" d="M19 21V5a2 2 0 00-2-2H7a2 2 0 00-2 2v16m14 0h2m-2 0h-5m-9 0H3m2 0h5M9 7h1m-1 4h1m4-4h1m-1 4h1m-5 10v-5a1 1 0 011-1h2a1 1 0 011 1v5m-4 0h4" />
-    </svg>
-  ),
-};
-
 // ── Constants ─────────────────────────────────────────────────
+//
+// A tabela `IC` que morava aqui tinha nove `<svg>` desenhados à mão. Oito
+// batiam caractere a caractere com um traçado do pacote (`box`, `edit`,
+// `plus`, `search`, `chevronRight`, `eye`, `user`, `building`); o nono era um
+// segundo desenho de chip — retângulo com pinos — que **significa** o mesmo
+// que `cpu` e por isso se unificou com ele, em vez de virar ícone novo.
+// Desenho local é o defeito que esta migração existe para tirar: dois chips
+// diferentes na mesma família são dois sistemas de desenho, não um.
 
 const PROD_PAGE = 10;
 const EQUIP_PAGE = 10;
@@ -111,22 +69,37 @@ type EquipmentValues = z.infer<typeof equipmentSchema>;
 
 type FilterTab = "all" | "active" | "inactive";
 
+/**
+ * As três opções, escritas **uma vez**.
+ *
+ * Estavam duas: aqui, como `{ key, label }`, e vinte linhas abaixo no
+ * `FilterSelect` dos produtos, como `{ value, label }`. Diziam o mesmo hoje —
+ * e é exatamente assim que prioridade começou antes de virar dez mapas
+ * divergentes. Renomear "Inativos" num lugar só é o modo de falhar que isto
+ * fecha.
+ */
+const FILTROS: { value: FilterTab; label: string }[] = [
+  { value: "all", label: "Todos" },
+  { value: "active", label: "Ativos" },
+  { value: "inactive", label: "Inativos" },
+];
+
 function FilterTabs({ value, onChange }: { value: FilterTab; onChange: (v: FilterTab) => void }) {
-  const tabs: { key: FilterTab; label: string }[] = [
-    { key: "all", label: "Todos" },
-    { key: "active", label: "Ativos" },
-    { key: "inactive", label: "Inativos" },
-  ];
   return (
     <div className="flex items-center gap-0.5 bg-surface-elevated border border-borda/60 rounded-lg p-0.5">
-      {tabs.map((t) => (
+      {FILTROS.map((t) => (
         <button
-          key={t.key}
-          onClick={() => onChange(t.key)}
+          key={t.value}
+          type="button"
+          aria-pressed={value === t.value}
+          onClick={() => onChange(t.value)}
+          // O par da tinta, e não `bg-primary/20 text-primary`: o degrau de
+          // marca como cor de TEXTO sobre a própria tinta é o caso que a E8
+          // mediu em 2,77:1. `on-tint-primary` é o par medido dessa tinta.
           className={`px-3 py-1 rounded-md text-xs font-medium transition-colors cursor-pointer ${
-            value === t.key
-              ? "bg-primary/20 text-primary"
-              : "text-slate-500 dark:text-slate-400 hover:text-slate-700 dark:hover:text-slate-200"
+            value === t.value
+              ? "bg-tint-primary text-on-tint-primary"
+              : "text-conteudo-muted hover:text-conteudo"
           }`}
         >
           {t.label}
@@ -138,6 +111,29 @@ function FilterTabs({ value, onChange }: { value: FilterTab; onChange: (v: Filte
 
 // ── ActivePill ────────────────────────────────────────────────
 
+/**
+ * O selo de ativo/inativo, agora sobre as tintas medidas.
+ *
+ * Era paleta crua dos dois lados — `emerald-300/50/100/500` no ativo,
+ * `slate-100/200/300/400/500` no inativo —, com oito classes `dark:` para
+ * inverter à mão o que o token já inverte sozinho. As duas receitas passaram
+ * a ser as mesmas do `Badge`: tinta no fundo, o par da tinta no texto, e a
+ * cor cheia da rampa a 30% na borda.
+ *
+ * **O hover mudou de lugar, e é de propósito.** A regra (a) do D8-a proíbe
+ * modificador de opacidade sobre as tintas — elas já carregam 15% no token, e
+ * `bg-tint-success/20` multiplicaria os dois. Sem `bg-tint-*` mais escuro
+ * para onde ir, a resposta ao ponteiro passou para a borda, que é cor cheia e
+ * aceita o modificador.
+ *
+ * O ponto não usa o degrau 500: a E19 mediu `--color-success-500` em 2,54:1
+ * como preenchimento no tema claro, abaixo do piso de 3:1 da WCAG 1.4.11. O
+ * neutro é `--border-control`, o único que **inverte por tema** — é o mesmo
+ * raciocínio que `lib/prioridade.ts` registra para a prioridade baixa.
+ *
+ * O ponto nunca informa sozinho: o rótulo "Ativo"/"Inativo" vai ao lado, em
+ * texto, e é ele que carrega o estado.
+ */
 function ActivePill({
   active,
   loading,
@@ -149,19 +145,20 @@ function ActivePill({
 }) {
   return (
     <button
+      type="button"
       onClick={onToggle}
       disabled={!onToggle || loading}
       title={active ? "Clique para desativar" : "Clique para ativar"}
       className={`inline-flex items-center gap-1.5 px-2.5 py-1 rounded-full border text-xs font-medium transition-colors shrink-0 ${
         active
-          ? "border-emerald-300 bg-emerald-50 text-emerald-600 hover:bg-emerald-100 dark:border-emerald-700/50 dark:bg-emerald-900/20 dark:text-emerald-300 dark:hover:bg-emerald-900/40 cursor-pointer"
-          : "border-slate-300 bg-slate-100 text-slate-500 hover:bg-slate-200 dark:border-slate-600/50 dark:bg-slate-800/40 dark:text-slate-400 dark:hover:bg-slate-700/40 cursor-pointer"
+          ? "border-success/30 bg-tint-success text-on-tint-success hover:border-success/60 cursor-pointer"
+          : "border-borda bg-tint-neutral text-on-tint-neutral hover:border-borda-strong cursor-pointer"
       } disabled:cursor-default`}
     >
       {loading ? (
         <span className="w-1.5 h-1.5 rounded-full bg-current animate-pulse" />
       ) : (
-        <span className={`w-1.5 h-1.5 rounded-full shrink-0 ${active ? "bg-emerald-500" : "bg-slate-400 dark:bg-slate-500"}`} />
+        <span className={`w-1.5 h-1.5 rounded-full shrink-0 ${active ? "bg-fill-success" : "bg-borda-control"}`} />
       )}
       {active ? "Ativo" : "Inativo"}
     </button>
@@ -348,8 +345,8 @@ function EquipmentDetailModal({ equip, onClose, onEdit }: { equip: Equipment; on
     if (!value) return null;
     return (
       <div className="flex flex-col gap-0.5">
-        <span className="text-[11px] font-semibold uppercase tracking-wide text-slate-500 dark:text-slate-400">{label}</span>
-        <span className="text-sm text-slate-800 dark:text-slate-100 break-words">{value}</span>
+        <span className="text-[11px] font-semibold uppercase tracking-wide text-conteudo-muted">{label}</span>
+        <span className="text-sm text-conteudo break-words">{value}</span>
       </div>
     );
   }
@@ -360,7 +357,7 @@ function EquipmentDetailModal({ equip, onClose, onEdit }: { equip: Equipment; on
         <div className="flex items-center gap-2">
           <ActivePill active={equip.is_active} />
           {equip.model && (
-            <span className="text-xs px-2 py-0.5 rounded-full bg-surface-elevated border border-borda/50 text-slate-400">
+            <span className="text-xs px-2 py-0.5 rounded-full bg-surface-elevated border border-borda/50 text-conteudo-muted">
               {equip.model}
             </span>
           )}
@@ -377,23 +374,23 @@ function EquipmentDetailModal({ equip, onClose, onEdit }: { equip: Equipment; on
           <div className="grid grid-cols-1 sm:grid-cols-2 gap-3 rounded-xl border border-borda bg-surface-elevated p-4">
             {equip.owner_name && (
               <div className="flex flex-col gap-0.5">
-                <span className="text-[11px] font-semibold uppercase tracking-wide text-slate-500 dark:text-slate-400">Responsável</span>
-                <span className="text-sm text-slate-800 dark:text-slate-100">{equip.owner_name}</span>
-                {equip.owner_email && <span className="text-xs text-slate-500">{equip.owner_email}</span>}
+                <span className="text-[11px] font-semibold uppercase tracking-wide text-conteudo-muted">Responsável</span>
+                <span className="text-sm text-conteudo">{equip.owner_name}</span>
+                {equip.owner_email && <span className="text-xs text-conteudo-muted">{equip.owner_email}</span>}
               </div>
             )}
             {equip.company_name && (
               <div className="flex flex-col gap-0.5">
-                <span className="text-[11px] font-semibold uppercase tracking-wide text-slate-500 dark:text-slate-400">Empresa</span>
-                <span className="text-sm text-slate-800 dark:text-slate-100">{equip.company_name}</span>
-                {equip.company_cnpj && <span className="text-xs text-slate-500">{formatCnpj(equip.company_cnpj)}</span>}
+                <span className="text-[11px] font-semibold uppercase tracking-wide text-conteudo-muted">Empresa</span>
+                <span className="text-sm text-conteudo">{equip.company_name}</span>
+                {equip.company_cnpj && <span className="text-xs text-conteudo-muted">{formatCnpj(equip.company_cnpj)}</span>}
               </div>
             )}
           </div>
         )}
 
         {(equip.created_at || equip.updated_at) && (
-          <div className="flex flex-wrap gap-x-5 gap-y-1 text-xs text-slate-500">
+          <div className="flex flex-wrap gap-x-5 gap-y-1 text-xs text-conteudo-muted">
             {equip.created_at && <span>Criado em {new Date(equip.created_at).toLocaleDateString("pt-BR")}</span>}
             {equip.updated_at && <span>Atualizado em {new Date(equip.updated_at).toLocaleDateString("pt-BR")}</span>}
           </div>
@@ -401,7 +398,7 @@ function EquipmentDetailModal({ equip, onClose, onEdit }: { equip: Equipment; on
       </div>
       <ModalFooter>
         <Button variant="secondary" onClick={onClose}>Fechar</Button>
-        <Button onClick={() => { onClose(); onEdit(); }}>{IC.Edit} Editar</Button>
+        <Button onClick={() => { onClose(); onEdit(); }}><Icon name="edit" size={16} strokeWidth={2} /> Editar</Button>
       </ModalFooter>
     </Modal>
   );
@@ -540,22 +537,23 @@ export default function ProductsPage() {
       {/* Header */}
       <div className="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-3">
         <div className="text-center sm:text-left">
-          <h1 className="text-2xl font-bold text-slate-800 dark:text-slate-100">Produtos</h1>
-          <p className="text-slate-500 dark:text-slate-400 text-sm mt-0.5">
+          <h1 className="text-2xl font-bold text-conteudo-heading">Produtos</h1>
+          <p className="text-conteudo-muted text-sm mt-0.5">
             {totalProducts} {totalProducts === 1 ? "produto cadastrado" : "produtos cadastrados"}
           </p>
         </div>
         <Button className="w-full sm:w-auto" onClick={() => { setEditingProduct(null); setProductFormOpen(true); }}>
-          {IC.Plus} Novo produto
+          <Icon name="plus" size={16} strokeWidth={2} /> Novo produto
         </Button>
       </div>
 
       {/* Filters */}
       <div className="flex flex-col md:flex-row md:items-center gap-2">
         <div className="relative md:flex-1">
-          <span className="absolute left-3 top-1/2 -translate-y-1/2 text-slate-500 pointer-events-none">{IC.Search}</span>
+          <span className="absolute left-3 top-1/2 -translate-y-1/2 text-conteudo-muted pointer-events-none"><Icon name="search" size={16} strokeWidth={2} /></span>
           <input
-            className="w-full pl-9 pr-3 py-2 rounded-xl border border-borda/60 bg-surface text-sm text-slate-700 dark:text-slate-200 placeholder:text-slate-500 focus:outline-none focus:ring-2 focus:ring-primary focus:border-transparent transition-colors"
+            className="w-full pl-9 pr-3 py-2 rounded-xl border border-borda/60 bg-surface text-sm text-conteudo placeholder:text-conteudo-muted focus:outline-none focus:ring-2 focus:ring-primary focus:border-transparent transition-colors"
+            aria-label="Buscar produto"
             placeholder="Buscar produto…"
             value={productSearch}
             onChange={(e) => { setProductSearch(e.target.value); setProductPage(1); }}
@@ -563,11 +561,7 @@ export default function ProductsPage() {
         </div>
         <div className="flex flex-wrap gap-2 items-center justify-center sm:justify-start">
           <FilterSelect
-            options={[
-              { value: "all", label: "Todos" },
-              { value: "active", label: "Ativos" },
-              { value: "inactive", label: "Inativos" },
-            ]}
+            options={FILTROS}
             placeholder="Status"
             value={productFilter}
             onChange={(v) => { setProductFilter(v as FilterTab); setProductPage(1); }}
@@ -575,7 +569,7 @@ export default function ProductsPage() {
           {(productSearch || productFilter !== "active") && (
             <button
               onClick={() => { setProductSearch(""); setProductFilter("active"); setProductPage(1); }}
-              className="text-xs text-slate-500 hover:text-slate-300 transition-colors px-2 py-1.5 rounded-lg hover:bg-surface-elevated cursor-pointer"
+              className="text-xs text-conteudo-muted hover:text-conteudo transition-colors px-2 py-1.5 rounded-lg hover:bg-surface-elevated cursor-pointer"
             >
               Limpar filtros
             </button>
@@ -594,9 +588,9 @@ export default function ProductsPage() {
           <div className="flex h-32 items-center justify-center"><Spinner /></div>
         ) : products.length === 0 ? (
           <div className="flex flex-col items-center justify-center py-12 text-center">
-            <div className="w-10 h-10 rounded-full bg-surface-elevated border border-borda flex items-center justify-center text-slate-600 mb-3">{IC.Box}</div>
-            <p className="text-sm text-slate-400">Nenhum produto encontrado.</p>
-            <button onClick={() => setProductFormOpen(true)} className="mt-2 text-sm text-primary hover:text-primary/80 transition-colors cursor-pointer">Criar o primeiro produto</button>
+            <div className="w-10 h-10 rounded-full bg-surface-elevated border border-borda flex items-center justify-center text-conteudo-muted mb-3"><Icon name="box" size={16} strokeWidth={2} /></div>
+            <p className="text-sm text-conteudo-muted">Nenhum produto encontrado.</p>
+            <button onClick={() => setProductFormOpen(true)} className="mt-2 text-sm text-conteudo-link hover:text-conteudo-link-hover transition-colors cursor-pointer">Criar o primeiro produto</button>
           </div>
         ) : (
           <>
@@ -610,23 +604,23 @@ export default function ProductsPage() {
                   }`}
                 >
                   {/* Icon */}
-                  <div className="w-9 h-9 rounded-lg bg-surface-elevated border border-borda/60 flex items-center justify-center shrink-0 text-slate-400">
-                    {IC.Box}
+                  <div className="w-9 h-9 rounded-lg bg-surface-elevated border border-borda/60 flex items-center justify-center shrink-0 text-conteudo-muted">
+                    <Icon name="box" size={16} strokeWidth={2} />
                   </div>
 
                   {/* Name + description */}
                   <div className="flex-1 min-w-0">
-                    <p className={`text-sm font-medium truncate ${p.is_active ? "text-slate-800 dark:text-slate-200" : "text-slate-400 line-through"}`}>
+                    <p className={`text-sm font-medium truncate ${p.is_active ? "text-conteudo" : "text-conteudo-muted line-through"}`}>
                       {p.name}
                     </p>
                     {p.description && (
-                      <p className="text-xs text-slate-500 truncate">{p.description}</p>
+                      <p className="text-xs text-conteudo-muted truncate">{p.description}</p>
                     )}
                   </div>
 
                   {/* Version badge */}
                   {p.version && (
-                    <span className="hidden sm:inline-flex shrink-0 text-xs font-mono px-2 py-0.5 rounded-full bg-surface-elevated border border-borda/50 text-slate-400">
+                    <span className="hidden sm:inline-flex shrink-0 text-xs font-mono px-2 py-0.5 rounded-full bg-surface-elevated border border-borda/50 text-conteudo-muted">
                       v{p.version}
                     </span>
                   )}
@@ -644,14 +638,14 @@ export default function ProductsPage() {
                   <button
                     onClick={(e) => { e.stopPropagation(); setEditingProduct(p); setProductFormOpen(true); }}
                     title="Editar"
-                    className="p-1.5 rounded-lg text-slate-400 hover:text-primary hover:bg-primary/10 transition-colors cursor-pointer"
+                    className="p-1.5 rounded-lg text-conteudo-muted hover:text-primary hover:bg-primary/10 transition-colors cursor-pointer"
                   >
-                    {IC.Edit}
+                    <Icon name="edit" size={16} strokeWidth={2} />
                   </button>
 
                   {/* Chevron */}
-                  <span className={`text-slate-400 dark:text-slate-600 transition-transform ${selectedProduct?.id === p.id ? "rotate-90" : ""}`}>
-                    {IC.ChevronRight}
+                  <span className={`text-conteudo-muted transition-transform ${selectedProduct?.id === p.id ? "rotate-90" : ""}`}>
+                    <Icon name="chevronRight" size={16} strokeWidth={2} />
                   </span>
                 </div>
               ))}
@@ -669,18 +663,18 @@ export default function ProductsPage() {
         <Card padding="none">
           <div className="px-4 py-3 border-b border-borda flex flex-col gap-2 sm:flex-row sm:flex-wrap sm:items-center sm:justify-between">
             <div>
-              <p className="text-sm font-semibold text-slate-700 dark:text-slate-200">
+              <p className="text-sm font-semibold text-conteudo">
                 Equipamentos
-                <span className="font-normal text-slate-500 dark:text-slate-400 ml-2">— {selectedProduct.name}</span>
+                <span className="font-normal text-conteudo-muted ml-2">— {selectedProduct.name}</span>
               </p>
-              <p className="text-xs text-slate-500 mt-0.5">
+              <p className="text-xs text-conteudo-muted mt-0.5">
                 {totalEquip} {totalEquip === 1 ? "equipamento" : "equipamentos"}
               </p>
             </div>
             <div className="flex items-center justify-between sm:justify-end gap-3">
               <FilterTabs value={equipFilter} onChange={(v) => { setEquipFilter(v); setEquipPage(1); }} />
               <Button size="sm" onClick={() => { setEditingEquip(null); setEquipFormOpen(true); }}>
-                {IC.Plus} <span className="hidden xs:inline">Novo </span>Equipamento
+                <Icon name="plus" size={16} strokeWidth={2} /> <span className="hidden xs:inline">Novo </span>Equipamento
               </Button>
             </div>
           </div>
@@ -688,9 +682,10 @@ export default function ProductsPage() {
           {/* Equipment search */}
           <div className="px-4 py-2.5 border-b border-borda flex flex-col sm:flex-row sm:items-center gap-2">
             <div className="relative flex-1">
-              <span className="absolute left-3 top-1/2 -translate-y-1/2 text-slate-500 pointer-events-none">{IC.Search}</span>
+              <span className="absolute left-3 top-1/2 -translate-y-1/2 text-conteudo-muted pointer-events-none"><Icon name="search" size={16} strokeWidth={2} /></span>
               <input
-                className="w-full pl-9 pr-3 py-2 rounded-xl border border-borda/60 bg-surface-elevated text-sm text-slate-700 dark:text-slate-200 placeholder:text-slate-500 focus:outline-none focus:ring-2 focus:ring-primary focus:border-transparent transition-colors"
+                className="w-full pl-9 pr-3 py-2 rounded-xl border border-borda/60 bg-surface-elevated text-sm text-conteudo placeholder:text-conteudo-muted focus:outline-none focus:ring-2 focus:ring-primary focus:border-transparent transition-colors"
+                aria-label="Buscar equipamento"
                 placeholder="Buscar equipamento…"
                 value={equipSearch}
                 onChange={(e) => { setEquipSearch(e.target.value); setEquipPage(1); }}
@@ -702,8 +697,8 @@ export default function ProductsPage() {
               onClick={() => { setEquipSemDono((v) => !v); setEquipPage(1); }}
               className={`shrink-0 whitespace-nowrap rounded-lg border px-3 py-2 text-sm font-medium transition-colors cursor-pointer ${
                 equipSemDono
-                  ? "border-primary bg-primary/10 text-primary"
-                  : "border-borda/60 bg-surface-elevated text-slate-600 dark:text-slate-300 hover:border-borda hover:text-slate-800 dark:hover:text-slate-100"
+                  ? "border-primary bg-tint-primary text-on-tint-primary"
+                  : "border-borda/60 bg-surface-elevated text-conteudo-muted hover:border-borda hover:text-conteudo"
               }`}
             >
               Sem dono
@@ -716,18 +711,18 @@ export default function ProductsPage() {
             <div className="flex h-32 items-center justify-center"><Spinner /></div>
           ) : equipments.length === 0 ? (
             <div className="flex flex-col items-center justify-center py-12 text-center">
-              <div className="w-10 h-10 rounded-full bg-surface-elevated border border-borda flex items-center justify-center text-slate-600 mb-3">{IC.Cpu}</div>
+              <div className="w-10 h-10 rounded-full bg-surface-elevated border border-borda flex items-center justify-center text-conteudo-muted mb-3"><Icon name="cpu" size={16} strokeWidth={2} /></div>
               {equipSemDono ? (
                 <>
-                  <p className="text-sm text-slate-400">Nenhum equipamento sem dono para este produto.</p>
-                  <button onClick={() => { setEquipSemDono(false); setEquipPage(1); }} className="mt-2 text-sm text-primary hover:text-primary/80 transition-colors cursor-pointer">
+                  <p className="text-sm text-conteudo-muted">Nenhum equipamento sem dono para este produto.</p>
+                  <button onClick={() => { setEquipSemDono(false); setEquipPage(1); }} className="mt-2 text-sm text-conteudo-link hover:text-conteudo-link-hover transition-colors cursor-pointer">
                     Ver todos
                   </button>
                 </>
               ) : (
                 <>
-                  <p className="text-sm text-slate-400">Nenhum equipamento para este produto.</p>
-                  <button onClick={() => setEquipFormOpen(true)} className="mt-2 text-sm text-primary hover:text-primary/80 transition-colors cursor-pointer">
+                  <p className="text-sm text-conteudo-muted">Nenhum equipamento para este produto.</p>
+                  <button onClick={() => setEquipFormOpen(true)} className="mt-2 text-sm text-conteudo-link hover:text-conteudo-link-hover transition-colors cursor-pointer">
                     Adicionar equipamento
                   </button>
                 </>
@@ -739,42 +734,42 @@ export default function ProductsPage() {
                 {equipments.map((e) => (
                   <div key={e.id} className="flex items-center gap-4 px-4 py-3 hover:bg-surface-elevated/40 transition-colors cursor-pointer" onClick={() => setViewEquip(e)}>
                     {/* Icon */}
-                    <div className="w-9 h-9 rounded-lg bg-surface-elevated border border-borda/60 flex items-center justify-center shrink-0 text-slate-400">
-                      {IC.Cpu}
+                    <div className="w-9 h-9 rounded-lg bg-surface-elevated border border-borda/60 flex items-center justify-center shrink-0 text-conteudo-muted">
+                      <Icon name="cpu" size={16} strokeWidth={2} />
                     </div>
 
                     {/* Name + serial */}
                     <div className="flex-1 min-w-0">
-                      <p className={`text-sm font-medium truncate ${e.is_active ? "text-slate-800 dark:text-slate-200" : "text-slate-400 line-through"}`}>
+                      <p className={`text-sm font-medium truncate ${e.is_active ? "text-conteudo" : "text-conteudo-muted line-through"}`}>
                         {e.name}
                       </p>
                       {e.serial_number && (
-                        <p className="text-xs font-mono text-slate-500 truncate">{e.serial_number}</p>
+                        <p className="text-xs font-mono text-conteudo-muted truncate">{e.serial_number}</p>
                       )}
                     </div>
 
                     {/* Model */}
                     {e.model && (
-                      <span className="hidden md:inline-flex shrink-0 text-xs px-2 py-0.5 rounded-full bg-surface-elevated border border-borda/50 text-slate-400">
+                      <span className="hidden md:inline-flex shrink-0 text-xs px-2 py-0.5 rounded-full bg-surface-elevated border border-borda/50 text-conteudo-muted">
                         {e.model}
                       </span>
                     )}
 
                     {/* Owner + company */}
                     <div className="hidden sm:flex flex-col items-end shrink-0 max-w-[180px]">
-                      <span className="flex items-center gap-1 text-xs text-slate-600 dark:text-slate-300 truncate">
-                        {e.owner_name ?? <span className="text-slate-600">—</span>}
-                        {IC.User}
+                      <span className="flex items-center gap-1 text-xs text-conteudo truncate">
+                        {e.owner_name ?? <span className="text-conteudo-muted">—</span>}
+                        <Icon name="user" size={14} strokeWidth={2} />
                       </span>
-                      <span className="flex items-center gap-1 text-xs text-slate-500 truncate mt-0.5">
+                      <span className="flex items-center gap-1 text-xs text-conteudo-muted truncate mt-0.5">
                         {e.company_name
                           ? <>
                               {e.company_name}
-                              {e.company_cnpj && <span className="font-mono text-slate-600 ml-1">· {formatCnpj(e.company_cnpj)}</span>}
+                              {e.company_cnpj && <span className="font-mono text-conteudo-muted ml-1">· {formatCnpj(e.company_cnpj)}</span>}
                             </>
-                          : <span className="text-slate-600">—</span>
+                          : <span className="text-conteudo-muted">—</span>
                         }
-                        {IC.Building}
+                        <Icon name="building" size={14} strokeWidth={2} />
                       </span>
                     </div>
 
@@ -792,16 +787,16 @@ export default function ProductsPage() {
                       <button
                         onClick={() => setViewEquip(e)}
                         title="Visualizar"
-                        className="p-1.5 rounded-lg text-slate-400 hover:text-primary hover:bg-primary/10 transition-colors cursor-pointer"
+                        className="p-1.5 rounded-lg text-conteudo-muted hover:text-primary hover:bg-primary/10 transition-colors cursor-pointer"
                       >
-                        {IC.Eye}
+                        <Icon name="eye" size={16} strokeWidth={2} />
                       </button>
                       <button
                         onClick={() => { setEditingEquip(e); setEquipFormOpen(true); }}
                         title="Editar"
-                        className="p-1.5 rounded-lg text-slate-400 hover:text-primary hover:bg-primary/10 transition-colors cursor-pointer"
+                        className="p-1.5 rounded-lg text-conteudo-muted hover:text-primary hover:bg-primary/10 transition-colors cursor-pointer"
                       >
-                        {IC.Edit}
+                        <Icon name="edit" size={16} strokeWidth={2} />
                       </button>
                     </div>
                   </div>
