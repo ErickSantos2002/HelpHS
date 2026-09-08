@@ -10,6 +10,10 @@ uvicorn[standard]==0.34.0
 sqlalchemy[asyncio]==2.0.40
 alembic==1.15.2
 asyncpg==0.30.0
+# Tipo de coluna vetorial para a base da Helo (Fase 2). E so o adaptador
+# SQLAlchemy/asyncpg do pgvector -- nao traz modelo, nao traz torch, e o que
+# roda no servidor e a extensao do Postgres, nao este pacote.
+pgvector==0.4.1
 
 # Validation & Settings
 pydantic==2.11.3

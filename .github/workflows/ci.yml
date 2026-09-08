@@ -18,7 +18,7 @@ jobs:
     # mockando o banco e nao toca neste servico.
     services:
       postgres:
-        image: postgres:16
+        image: pgvector/pgvector:pg16
         env:
           POSTGRES_USER: postgres
           POSTGRES_PASSWORD: postgres

@@ -32,6 +32,7 @@ from unittest.mock import MagicMock
 
 import pytest
 import pytest_asyncio
+from sqlalchemy import text
 from sqlalchemy.ext.asyncio import async_sessionmaker, create_async_engine
 
 from app.models.models import (
@@ -83,6 +84,12 @@ def url_do_banco():
     async def _monta() -> None:
         motor = create_async_engine(url)
         async with motor.begin() as conn:
+            # A extensão vem ANTES do create_all: `helo_chunks.embedding` é
+            # `vector(1024)`, e num banco sem a extensão o create_all morre com
+            # `type "vector" does not exist` — derrubando este módulo inteiro
+            # por causa de uma tabela que ele nem usa. Em produção quem cria é
+            # a migration; aqui não roda migration nenhuma.
+            await conn.execute(text("CREATE EXTENSION IF NOT EXISTS vector"))
             await conn.run_sync(Base.metadata.create_all)
         await motor.dispose()
 
