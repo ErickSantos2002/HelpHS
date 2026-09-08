@@ -1,6 +1,18 @@
 import { useEffect, useState } from "react";
-import { useNavigate } from "react-router-dom";
-import { Button, FilterSelect, Modal, ModalFooter, Spinner } from "../../components/ui";
+import { Link, useNavigate } from "react-router-dom";
+import {
+  Alert,
+  Badge,
+  Button,
+  FilterSelect,
+  Icon,
+  Modal,
+  ModalFooter,
+  Pagination,
+  Spinner,
+} from "../../components/ui";
+import type { BadgeProps } from "../../components/ui";
+import { CATEGORIAS, rotuloDeCategoria } from "../../lib/categoria";
 import { useAuth } from "../../contexts/AuthContext";
 import {
   deleteKBArticle,
@@ -12,35 +24,96 @@ import { getProducts, type Product } from "../../services/productService";
 
 // ── Constants ─────────────────────────────────────────────────
 
-const CATEGORY_LABEL: Record<string, string> = {
-  hardware: "Hardware", software: "Software", network: "Rede",
-  access: "Acesso", email: "E-mail", security: "Segurança",
-  general: "Geral", other: "Outro",
+/**
+ * O status do ARTIGO, que não é o status do chamado.
+ *
+ * `lib/status.ts` é a fonte única dos **sete status de chamado** — aberto, em
+ * andamento, resolvido, cancelado. Estes três são outro domínio: o ciclo
+ * editorial de um artigo. Emprestar aquele módulo aqui faria dois vocabulários
+ * caberem numa tabela só, que é o começo exato da divergência que esta fase
+ * está desfazendo.
+ *
+ * Fica local, mas com a disciplina dos módulos de `lib/`: rótulo, variante do
+ * `Badge` e amostra de cor saem **daqui**, e as opções do filtro são
+ * DERIVADAS da tabela em vez de escritas ao lado dela. Antes eram duas listas
+ * paralelas mantidas à mão — o mesmo modo de falha que deu três cópias do mapa
+ * de papel dentro do `UsersPage`.
+ *
+ * ⚠️ **Ela já tem um segundo consumidor**: `pages/kb/KBFormPage.tsx` repete os
+ * três rótulos e os três hexadecimais. Pela regra registrada no `lib/papel.ts`
+ * — tabela com **um** consumidor fica local, tabela com **vários** sobe —, esta
+ * devia virar `src/lib/kbStatus.ts`. `src/lib/**` está fora do escopo desta
+ * tela; relatado ao operador.
+ */
+interface StatusDoArtigo {
+  /** O nome por extenso. É o que o selo e o filtro mostram. */
+  rotulo: string;
+  /** Variante do `Badge` — o mesmo vocabulário de `lib/status.ts`. */
+  variante: BadgeProps["variant"];
+  /**
+   * A amostra de cor do seletor, que é `style` e não classe.
+   *
+   * O `Selector` pinta o ponto com `backgroundColor` embutido, então aqui entra
+   * **valor CSS**, não utilitário do Tailwind. Os três eram hexadecimal cravado
+   * (`#10b981`, `#f59e0b`, `#64748b`): decisão de desenho escrita à mão, que
+   * não acompanha o tema nem a rampa e não tem como ser conferida por nenhuma
+   * varredura.
+   *
+   * Passam a apontar para os tokens de PREENCHIMENTO, que é o caminho que o
+   * `graficoDePrioridade()` de `lib/prioridade.ts` já fazia — inclusive o
+   * neutro, que lá também é `--border-control`, porque `--fill-muted` não
+   * existe: o pacote resolve o neutro com o contorno de controle.
+   */
+  amostra: string;
+}
+
+const STATUS_DO_ARTIGO: Record<KBArticleStatus, StatusDoArtigo> = {
+  published: {
+    rotulo: "Publicado",
+    variante: "success",
+    amostra: "var(--fill-success)",
+  },
+  draft: {
+    rotulo: "Rascunho",
+    variante: "warning",
+    amostra: "var(--fill-warning)",
+  },
+  archived: {
+    rotulo: "Arquivado",
+    variante: "muted",
+    amostra: "var(--border-control)",
+  },
 };
 
-const STATUS_CONFIG: Record<KBArticleStatus, { label: string; cls: string }> = {
-  published: { label: "Publicado", cls: "bg-success/10 text-success-700 dark:text-success-400 border-success/30" },
-  draft:     { label: "Rascunho",  cls: "bg-warning/10 text-warning-700 dark:text-warning-400 border-warning/30"  },
-  archived:  { label: "Arquivado", cls: "bg-surface-elevated text-slate-500 border-borda/50"                  },
-};
+/**
+ * As opções do filtro de status, derivadas da tabela.
+ *
+ * A ordem é a de publicação — publicado, rascunho, arquivado —, que é a que o
+ * filtro sempre teve. Trocá-la é decisão de desenho e não se decide aqui.
+ */
+const OPCOES_DE_STATUS = (
+  Object.keys(STATUS_DO_ARTIGO) as KBArticleStatus[]
+).map((s) => ({
+  value: s,
+  label: STATUS_DO_ARTIGO[s].rotulo,
+  dot: STATUS_DO_ARTIGO[s].amostra,
+}));
+
+/**
+ * As opções do filtro de categoria, de `lib/categoria.ts`.
+ *
+ * A lista estava escrita à mão dentro do JSX, com os oito pares repetidos —
+ * era a quinta cópia das categorias no projeto, e a segunda **dentro desta
+ * tela** (a outra era o `CATEGORY_LABEL`, que traduzia o valor cru de volta
+ * para o rótulo). As duas saem, e o `ReportsPage` e o `TicketFormPage` já
+ * derivam a lista do mesmo módulo.
+ */
+const OPCOES_DE_CATEGORIA = CATEGORIAS.map((c) => ({
+  value: c.value,
+  label: c.label,
+}));
 
 const PAGE_SIZE = 20;
-
-// ── Icons ─────────────────────────────────────────────────────
-
-const IC = {
-  Plus:       <svg className="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2.5}><path strokeLinecap="round" strokeLinejoin="round" d="M12 4v16m8-8H4" /></svg>,
-  Search:     <svg className="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}><path strokeLinecap="round" strokeLinejoin="round" d="M21 21l-6-6m2-5a7 7 0 11-14 0 7 7 0 0114 0z" /></svg>,
-  Book:       <svg className="w-5 h-5" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={1.5}><path strokeLinecap="round" strokeLinejoin="round" d="M12 6.253v13m0-13C10.832 5.477 9.246 5 7.5 5S4.168 5.477 3 6.253v13C4.168 18.477 5.754 18 7.5 18s3.332.477 4.5 1.253m0-13C13.168 5.477 14.754 5 16.5 5c1.747 0 3.332.477 4.5 1.253v13C19.832 18.477 18.247 18 16.5 18c-1.746 0-3.332.477-4.5 1.253" /></svg>,
-  Edit:       <svg className="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}><path strokeLinecap="round" strokeLinejoin="round" d="M11 5H6a2 2 0 00-2 2v11a2 2 0 002 2h11a2 2 0 002-2v-5m-1.414-9.414a2 2 0 112.828 2.828L11.828 15H9v-2.828l8.586-8.586z" /></svg>,
-  Trash:      <svg className="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}><path strokeLinecap="round" strokeLinejoin="round" d="M19 7l-.867 12.142A2 2 0 0116.138 21H7.862a2 2 0 01-1.995-1.858L5 7m5 4v6m4-6v6m1-10V4a1 1 0 00-1-1h-4a1 1 0 00-1 1v3M4 7h16" /></svg>,
-  TrashSm:    <svg className="w-3.5 h-3.5" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}><path strokeLinecap="round" strokeLinejoin="round" d="M19 7l-.867 12.142A2 2 0 0116.138 21H7.862a2 2 0 01-1.995-1.858L5 7m5 4v6m4-6v6m1-10V4a1 1 0 00-1-1h-4a1 1 0 00-1 1v3M4 7h16" /></svg>,
-  Eye:        <svg className="w-3.5 h-3.5" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}><path strokeLinecap="round" strokeLinejoin="round" d="M15 12a3 3 0 11-6 0 3 3 0 016 0z" /><path strokeLinecap="round" strokeLinejoin="round" d="M2.458 12C3.732 7.943 7.523 5 12 5c4.478 0 8.268 2.943 9.542 7-1.274 4.057-5.064 7-9.542 7-4.477 0-8.268-2.943-9.542-7z" /></svg>,
-  ThumbUp:    <svg className="w-3.5 h-3.5" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}><path strokeLinecap="round" strokeLinejoin="round" d="M14 10h4.764a2 2 0 011.789 2.894l-3.5 7A2 2 0 0115.263 21h-4.017c-.163 0-.326-.02-.485-.06L7 20m7-10V5a2 2 0 00-2-2h-.095c-.5 0-.905.405-.905.905 0 .714-.211 1.412-.608 2.006L7 11v9m7-10h-2M7 20H5a2 2 0 01-2-2v-6a2 2 0 012-2h2.5" /></svg>,
-  ChevLeft:   <svg className="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}><path strokeLinecap="round" strokeLinejoin="round" d="M15 19l-7-7 7-7" /></svg>,
-  ChevRight:  <svg className="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}><path strokeLinecap="round" strokeLinejoin="round" d="M9 5l7 7-7 7" /></svg>,
-  X:          <svg className="w-3.5 h-3.5" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2.5}><path strokeLinecap="round" strokeLinejoin="round" d="M6 18L18 6M6 6l12 12" /></svg>,
-};
 
 // ── Main ──────────────────────────────────────────────────────
 
@@ -87,33 +160,73 @@ export default function KBListPage() {
     }
   }
 
-  const totalPages = Math.ceil(total / PAGE_SIZE);
+  // Estava escrito duas vezes, idêntico, no botão "Limpar" e no estado vazio.
+  // Duas cópias de uma limpeza de quatro campos é onde um quinto filtro futuro
+  // entra em uma delas e não na outra.
+  function limparFiltros() {
+    setSearch("");
+    setCategory("");
+    setProductFilter("");
+    setStatusFilter("");
+  }
+
   const currentPage = Math.floor(offset / PAGE_SIZE) + 1;
   const hasFilters = !!(search || category || productFilter || statusFilter);
 
   return (
     <div className="space-y-5 pb-10">
       {/* ── Header ───────────────────────────────────────────── */}
+      {/*
+        A casca fica desenhada à mão, e não vira `Card`: o cabeçalho é
+        `rounded-2xl` e o `Card` é `rounded-xl`. O `cn()` deste projeto é
+        concatenação simples, **não** `tailwind-merge` — mandar `rounded-2xl`
+        por `className` deixaria as duas classes no atributo e quem vence
+        sairia da ordem do CSS gerado. Raio diferente é decisão de desenho.
+        Os tokens são os mesmos do `Card`.
+      */}
       <div className="flex flex-col sm:flex-row sm:flex-wrap sm:items-center sm:justify-between gap-4 rounded-2xl border border-borda/40 bg-surface px-5 py-4">
         <div className="text-center sm:text-left">
-          <h1 className="text-xl font-extrabold text-slate-100">Base de Conhecimento</h1>
-          <p className="mt-0.5 text-sm text-slate-500">
+          <h1 className="text-xl font-extrabold text-conteudo-heading">Base de Conhecimento</h1>
+          <p className="mt-0.5 text-sm text-conteudo-muted">
             Artigos e guias de suporte{total > 0 && ` · ${total} artigo${total !== 1 ? "s" : ""}`}
           </p>
         </div>
         <div className="flex flex-wrap items-center justify-center sm:justify-end gap-2">
           {/* Search */}
           <div className="relative w-full sm:w-auto">
-            <span className="absolute left-3 top-1/2 -translate-y-1/2 text-slate-400">{IC.Search}</span>
+            {/*
+              `pointer-events-none` no ícone: ele fica por cima do campo, e sem
+              isso o clique em cima da lupa não põe o cursor no campo.
+            */}
+            <span className="pointer-events-none absolute left-3 top-1/2 -translate-y-1/2 text-conteudo-muted">
+              <Icon name="search" size={16} strokeWidth={2} />
+            </span>
+            {/*
+              O campo se identificava só pelo `placeholder` — o texto que some
+              exatamente quando a pessoa começa a digitar, e que em leitor de
+              tela vale como dica, não como nome. Item fixo do CHECKLIST-29, e
+              o mesmo conserto que a `KBArticlePage` fez no campo de comentário.
+
+              A borda vem de `--border-control` (E7) e não do `borda/60` de
+              antes: o contorno de um CONTROLE pede 3:1 pela 1.4.11, e o
+              separador de superfície a 60% dava perto de 1,2:1.
+            */}
             <input
               type="text"
+              aria-label="Buscar artigos"
               placeholder="Buscar artigos…"
               value={search}
               onChange={(e) => setSearch(e.target.value)}
-              className="pl-9 pr-8 py-2 text-sm w-full sm:w-52 rounded-lg border border-borda/60 bg-surface-elevated text-slate-200 placeholder-slate-500 focus:outline-none focus:ring-2 focus:ring-primary focus:border-transparent transition-colors"
+              className="pl-9 pr-8 py-2 text-sm w-full sm:w-52 rounded-lg border border-borda-control bg-surface-elevated text-conteudo placeholder:text-conteudo-muted focus:outline-none focus:ring-2 focus:ring-action focus:border-transparent transition-colors"
             />
             {search && (
-              <button onClick={() => setSearch("")} className="absolute right-2.5 top-1/2 -translate-y-1/2 text-slate-400 hover:text-slate-200 cursor-pointer">{IC.X}</button>
+              <button
+                onClick={() => setSearch("")}
+                aria-label="Limpar busca"
+                className="absolute right-2.5 top-1/2 -translate-y-1/2 text-conteudo-muted hover:text-conteudo cursor-pointer"
+              >
+                <Icon name="close" size={14} strokeWidth={2.5} />
+              </button>
             )}
           </div>
 
@@ -122,16 +235,7 @@ export default function KBListPage() {
             value={category}
             onChange={setCategory}
             placeholder="Todas as categorias"
-            options={[
-              { value: "hardware", label: "Hardware" },
-              { value: "software", label: "Software" },
-              { value: "network",  label: "Rede"      },
-              { value: "access",   label: "Acesso"    },
-              { value: "email",    label: "E-mail"    },
-              { value: "security", label: "Segurança" },
-              { value: "general",  label: "Geral"     },
-              { value: "other",    label: "Outro"     },
-            ]}
+            options={OPCOES_DE_CATEGORIA}
           />
 
           {/* Produto */}
@@ -150,32 +254,40 @@ export default function KBListPage() {
               value={statusFilter}
               onChange={setStatusFilter}
               placeholder="Todos os status"
-              options={[
-                { value: "published", label: "Publicado", dot: "#10b981" },
-                { value: "draft",     label: "Rascunho",  dot: "#f59e0b" },
-                { value: "archived",  label: "Arquivado", dot: "#64748b" },
-              ]}
+              options={OPCOES_DE_STATUS}
             />
           )}
 
           {hasFilters && (
+            /*
+              `hover:text-on-tint-danger` e não `hover:text-danger`: a cor cheia
+              da rampa como cor de TEXTO reprova o piso — 16 das 24 combinações
+              medidas. A borda continua na cor cheia a 30%, que é forma e não
+              texto, e é como o `Badge` a escreve desde a E8.
+            */
             <button
-              onClick={() => { setSearch(""); setCategory(""); setProductFilter(""); setStatusFilter(""); }}
-              className="flex items-center gap-1.5 text-xs font-medium text-slate-500 hover:text-danger transition-colors cursor-pointer px-2 py-2 rounded-lg border border-borda/40 hover:border-danger/30"
+              onClick={limparFiltros}
+              className="flex items-center gap-1.5 text-xs font-medium text-conteudo-muted hover:text-on-tint-danger transition-colors cursor-pointer px-2 py-2 rounded-lg border border-borda/40 hover:border-danger/30"
             >
-              {IC.X}
+              <Icon name="close" size={14} strokeWidth={2.5} />
               Limpar
             </button>
           )}
 
+          {/*
+            Era `bg-primary` com `text-white`: **3,83:1 nos dois temas**, porque
+            o degrau 500 é absoluto e não inverte. E era um `<button>` que
+            chamava `navigate()` — navegação é link. O `Button to=` resolve os
+            dois: par `--action` / `--text-on-primary` da E2, e um `<a>` de
+            verdade.
+          */}
           {isStaff && (
-            <button
-              onClick={() => navigate("/kb/new")}
-              className="flex items-center gap-2 px-4 py-2 text-sm font-semibold rounded-lg bg-primary text-white hover:bg-primary/90 transition-all cursor-pointer"
+            <Button
+              to="/kb/new"
+              icon={<Icon name="plus" size={16} strokeWidth={2.5} />}
             >
-              {IC.Plus}
               Novo artigo
-            </button>
+            </Button>
           )}
         </div>
       </div>
@@ -185,63 +297,109 @@ export default function KBListPage() {
         <div className="flex h-48 items-center justify-center"><Spinner size="lg" /></div>
       ) : articles.length === 0 ? (
         <div className="flex flex-col items-center justify-center rounded-xl border border-borda/40 bg-surface py-20">
-          <div className="mb-4 flex h-14 w-14 items-center justify-center rounded-full bg-surface-elevated text-slate-600">{IC.Book}</div>
-          <p className="text-sm font-medium text-slate-400">Nenhum artigo encontrado.</p>
-          {hasFilters && <button onClick={() => { setSearch(""); setCategory(""); setProductFilter(""); setStatusFilter(""); }} className="mt-2 text-xs text-primary hover:text-primary/80 cursor-pointer transition-colors">Limpar filtros</button>}
-          {isStaff && !hasFilters && <button onClick={() => navigate("/kb/new")} className="mt-3 text-xs font-medium text-primary hover:text-primary/80 cursor-pointer transition-colors">+ Criar primeiro artigo</button>}
+          {/*
+            `conteudo-muted` e não `faint`: o círculo é `bg-surface-elevated` e
+            o texto está no MESMO elemento — o par que a varredura media em
+            2,34:1 no claro e 1,79:1 no escuro. A E5 levou `--text-muted` a
+            `slate-600` no claro justamente para dar 6,92:1 sobre a superfície
+            elevada.
+          */}
+          <div className="mb-4 flex h-14 w-14 items-center justify-center rounded-full bg-surface-elevated text-conteudo-muted">
+            <Icon name="book" size={20} strokeWidth={1.5} />
+          </div>
+          <p className="text-sm font-medium text-conteudo-muted">Nenhum artigo encontrado.</p>
+          {hasFilters && (
+            <button
+              onClick={limparFiltros}
+              className="mt-2 text-xs text-conteudo-link hover:text-conteudo-link-hover cursor-pointer transition-colors"
+            >
+              Limpar filtros
+            </button>
+          )}
+          {/*
+            Este NÃO é botão: ele leva para outra página. `text-conteudo-link` e
+            não `text-primary` — o degrau de marca sobre `--bg-base` dá 3,66:1,
+            e link é texto.
+          */}
+          {isStaff && !hasFilters && (
+            <Link
+              to="/kb/new"
+              className="mt-3 text-xs font-medium text-conteudo-link hover:text-conteudo-link-hover cursor-pointer transition-colors"
+            >
+              + Criar primeiro artigo
+            </Link>
+          )}
         </div>
       ) : (
         <div className="space-y-2">
           {articles.map((article) => {
-            const stCfg = STATUS_CONFIG[article.status];
-            const catLabel = CATEGORY_LABEL[article.category] ?? article.category;
+            const st = STATUS_DO_ARTIGO[article.status];
+            const catLabel = rotuloDeCategoria(article.category);
             const preview = article.content.replace(/#+\s/g, "").replace(/\*\*/g, "").slice(0, 160);
 
             return (
+              /*
+                O `onClick` da linha inteira continua, como conveniência de
+                mouse — mas ele nunca foi alcançável por teclado nem anunciado
+                como controle: um `<div>` com `cursor-pointer` não entra na
+                ordem de tabulação e um leitor de tela não diz que ele leva a
+                lugar nenhum. Quem navega sem mouse não tinha como abrir artigo
+                nenhum a partir desta lista.
+
+                O título passa a ser um `Link` de verdade — o mesmo conserto da
+                trilha da `KBArticlePage`. Ele é o alvo acessível; a linha
+                continua clicável para quem usa mouse, e o `stopPropagation`
+                impede que o clique no título navegue duas vezes.
+              */
               <div
                 key={article.id}
                 className="flex items-start gap-4 rounded-xl border border-borda/40 bg-surface px-5 py-4 hover:border-primary/30 hover:bg-primary/[0.02] transition-all cursor-pointer"
                 onClick={() => navigate(`/kb/${article.id}`)}
               >
                 {/* Icon */}
-                <div className="mt-0.5 flex h-9 w-9 shrink-0 items-center justify-center rounded-lg bg-primary/10 text-primary">
-                  {IC.Book}
+                {/*
+                  `bg-tint-primary` com `text-on-tint-primary`: o par medido da
+                  E8, o mesmo que o `Badge` usa. O `bg-primary/10` com
+                  `text-primary` de antes era a rampa a 10% com o degrau de
+                  marca por cima — 2,77:1 sobre a superfície elevada no escuro.
+                */}
+                <div className="mt-0.5 flex h-9 w-9 shrink-0 items-center justify-center rounded-lg bg-tint-primary text-on-tint-primary">
+                  <Icon name="book" size={20} strokeWidth={1.5} />
                 </div>
 
                 {/* Content */}
                 <div className="flex-1 min-w-0">
                   <div className="flex flex-wrap items-center gap-2 mb-1">
-                    <span className="text-sm font-semibold text-slate-100 hover:text-primary transition-colors truncate">
+                    <Link
+                      to={`/kb/${article.id}`}
+                      onClick={(e) => e.stopPropagation()}
+                      className="text-sm font-semibold text-conteudo-heading hover:text-conteudo-link transition-colors truncate"
+                    >
                       {article.title}
-                    </span>
+                    </Link>
                     {isStaff && (
-                      <span className={`inline-flex items-center rounded-full border px-2 py-0.5 text-[10px] font-semibold ${stCfg.cls}`}>
-                        {stCfg.label}
-                      </span>
+                      <Badge variant={st.variante}>{st.rotulo}</Badge>
                     )}
-                    <span className="ml-0.5 rounded-md border border-borda/40 bg-surface-elevated px-1.5 py-0.5 text-[10px] font-medium text-slate-500">
-                      {catLabel}
-                    </span>
+                    <Badge variant="secondary">{catLabel}</Badge>
                     {article.products.length === 0 ? (
-                      <span className="rounded-md border border-borda/40 px-1.5 py-0.5 text-[10px] font-medium text-slate-600">
-                        Todos os produtos
-                      </span>
+                      <Badge variant="secondary">Todos os produtos</Badge>
                     ) : (
                       article.products.map((p) => (
-                        <span
+                        <Badge
                           key={p.id}
-                          className="max-w-[10rem] truncate rounded-md border border-primary/30 bg-primary/10 px-1.5 py-0.5 text-[10px] font-medium text-primary"
+                          variant="primary"
+                          className="max-w-[10rem] truncate"
                         >
                           {p.name}
-                        </span>
+                        </Badge>
                       ))
                     )}
                   </div>
-                  <p className="text-xs text-slate-500 line-clamp-1">{preview}…</p>
+                  <p className="text-xs text-conteudo-muted line-clamp-1">{preview}…</p>
                   {article.tags.length > 0 && (
                     <div className="mt-2 flex flex-wrap items-center gap-2">
                       {[...new Set(article.tags)].map((tag) => (
-                        <span key={tag} className="rounded-md bg-surface-elevated px-1.5 py-0.5 text-[10px] text-slate-500">{tag}</span>
+                        <Badge key={tag} variant="secondary">{tag}</Badge>
                       ))}
                     </div>
                   )}
@@ -253,28 +411,49 @@ export default function KBListPage() {
                   onClick={(e) => e.stopPropagation()}
                 >
                   {/* Stats */}
+                  {/*
+                    Os dois números eram só número: o `Icon` é `aria-hidden`, e
+                    quem usa leitor de tela ouvia "12" e "3", sem saber do quê.
+                    O texto invisível diz a unidade — e é texto, não `title`,
+                    porque `title` em `<span>` não vira nome de nada.
+                  */}
                   <div className="flex items-center gap-3">
-                    <span className="flex items-center gap-1 text-[11px] text-slate-500">{IC.Eye}{article.view_count}</span>
-                    <span className="flex items-center gap-1 text-[11px] text-success-700 dark:text-success-400">{IC.ThumbUp}{article.helpful}</span>
+                    <span className="flex items-center gap-1 text-[11px] text-conteudo-muted">
+                      <Icon name="eye" size={14} strokeWidth={2} />
+                      {article.view_count}
+                      <span className="sr-only">visualizações</span>
+                    </span>
+                    <span className="flex items-center gap-1 text-[11px] text-on-tint-success">
+                      <Icon name="thumbsUp" size={14} strokeWidth={2} />
+                      {article.helpful}
+                      <span className="sr-only">votos de útil</span>
+                    </span>
                   </div>
 
                   {/* Action buttons — sempre visíveis */}
                   {isStaff && (
                     <div className="flex items-center gap-1">
-                      <button
-                        onClick={() => navigate(`/kb/${article.id}/edit`)}
+                      {/*
+                        Editar navega, então é link. E o nome acessível carrega
+                        o TÍTULO do artigo: numa lista de vinte linhas, vinte
+                        controles chamados "Editar" não dizem qual dos vinte.
+                      */}
+                      <Link
+                        to={`/kb/${article.id}/edit`}
                         title="Editar"
-                        className="p-1.5 rounded-lg text-slate-400 hover:text-primary hover:bg-primary/10 transition-colors cursor-pointer"
+                        aria-label={`Editar ${article.title}`}
+                        className="p-1.5 rounded-lg text-conteudo-muted hover:text-conteudo-link hover:bg-primary/10 transition-colors cursor-pointer"
                       >
-                        {IC.Edit}
-                      </button>
+                        <Icon name="edit" size={16} strokeWidth={2} />
+                      </Link>
                       {user?.role === "admin" && (
                         <button
                           onClick={() => setDeleteTarget(article)}
                           title="Excluir"
-                          className="p-1.5 rounded-lg text-slate-400 hover:text-red-400 hover:bg-red-900/20 transition-colors cursor-pointer"
+                          aria-label={`Excluir ${article.title}`}
+                          className="p-1.5 rounded-lg text-conteudo-muted hover:text-on-tint-danger hover:bg-tint-danger transition-colors cursor-pointer"
                         >
-                          {IC.Trash}
+                          <Icon name="trash" size={16} strokeWidth={2} />
                         </button>
                       )}
                     </div>
@@ -287,27 +466,24 @@ export default function KBListPage() {
       )}
 
       {/* ── Pagination ────────────────────────────────────────── */}
-      {totalPages > 1 && (
-        <div className="flex items-center justify-between rounded-xl border border-borda/40 bg-surface px-5 py-3">
-          <span className="text-sm text-slate-500">{total} artigo{total !== 1 ? "s" : ""}</span>
-          <div className="flex items-center gap-2">
-            <button
-              onClick={() => setOffset((o) => Math.max(0, o - PAGE_SIZE))}
-              disabled={currentPage === 1}
-              className="flex items-center gap-1 px-3 py-1.5 rounded-lg border border-borda/40 text-sm text-slate-400 hover:bg-surface-elevated hover:text-slate-200 disabled:opacity-40 disabled:cursor-not-allowed transition-colors cursor-pointer"
-            >
-              {IC.ChevLeft} Anterior
-            </button>
-            <span className="text-sm text-slate-500 px-2">{currentPage} / {totalPages}</span>
-            <button
-              onClick={() => setOffset((o) => o + PAGE_SIZE)}
-              disabled={currentPage === totalPages}
-              className="flex items-center gap-1 px-3 py-1.5 rounded-lg border border-borda/40 text-sm text-slate-400 hover:bg-surface-elevated hover:text-slate-200 disabled:opacity-40 disabled:cursor-not-allowed transition-colors cursor-pointer"
-            >
-              Próxima {IC.ChevRight}
-            </button>
-          </div>
-        </div>
+      {/*
+        Era um par "Anterior / Próxima" desenhado à mão, sem `nav`, sem nome de
+        região e sem como pular para uma página distante — numa base com 200
+        artigos, chegar à página 9 custava oito cliques. O `Pagination` do
+        pacote traz o `nav aria-label="Paginação"`, os números da janela e o
+        `aria-current="page"` na atual.
+
+        Ele conta a partir de 1 e este estado guarda `offset`; a conversão fica
+        num lugar só, aqui.
+      */}
+      {total > PAGE_SIZE && (
+        <Pagination
+          page={currentPage}
+          pageSize={PAGE_SIZE}
+          total={total}
+          onPageChange={(p) => setOffset((p - 1) * PAGE_SIZE)}
+          itemLabel="artigos"
+        />
       )}
 
       {/* ── Delete modal ─────────────────────────────────────── */}
@@ -317,39 +493,41 @@ export default function KBListPage() {
         title="Excluir artigo"
       >
         <div className="space-y-4">
-          {/* Warning banner */}
-          <div className="flex gap-3 rounded-xl bg-red-900/20 border border-red-800/40 p-4">
-            <div className="shrink-0 w-9 h-9 rounded-full bg-red-900/40 flex items-center justify-center text-red-400">
-              {IC.TrashSm}
-            </div>
-            <div>
-              <p className="text-sm font-semibold text-red-300">Ação irreversível</p>
-              <p className="text-xs text-red-400/80 mt-0.5">
-                Este artigo será removido permanentemente da base de conhecimento.
-              </p>
-            </div>
-          </div>
+          {/*
+            O aviso era um bloco à mão em `red-900/20` sobre `red-800/40` com
+            texto `red-300` — sete classes da paleta crua, escritas só para o
+            tema escuro: no claro o fundo vermelho quase preto ficava sobre a
+            superfície branca. Vira `Alert variant="danger"`, que é o par
+            `tint`/`on-tint` medido e inverte sozinho.
+
+            `live={false}` pela E12: este aviso já está na tela quando o modal
+            abre. Região viva anuncia MUDANÇA — anunciá-lo aqui atropelaria o
+            anúncio do próprio diálogo.
+          */}
+          <Alert variant="danger" live={false} title="Ação irreversível">
+            Este artigo será removido permanentemente da base de conhecimento.
+          </Alert>
 
           {/* Article preview */}
           {deleteTarget && (
             <div className="flex items-center gap-3 rounded-xl border border-borda bg-surface-elevated px-4 py-3">
-              <div className="flex h-9 w-9 shrink-0 items-center justify-center rounded-lg bg-primary/10 text-primary">
-                {IC.Book}
+              <div className="flex h-9 w-9 shrink-0 items-center justify-center rounded-lg bg-tint-primary text-on-tint-primary">
+                <Icon name="book" size={20} strokeWidth={1.5} />
               </div>
               <div className="min-w-0">
-                <p className="text-sm font-medium text-slate-100 truncate">{deleteTarget.title}</p>
-                <p className="text-xs text-slate-500">
-                  {CATEGORY_LABEL[deleteTarget.category] ?? deleteTarget.category}
+                <p className="text-sm font-medium text-conteudo-heading truncate">{deleteTarget.title}</p>
+                <p className="text-xs text-conteudo-muted">
+                  {rotuloDeCategoria(deleteTarget.category)}
                   {" · "}
-                  {STATUS_CONFIG[deleteTarget.status].label}
+                  {STATUS_DO_ARTIGO[deleteTarget.status].rotulo}
                 </p>
               </div>
             </div>
           )}
 
-          <p className="text-sm text-slate-400">
+          <p className="text-sm text-conteudo-muted">
             Tem certeza que deseja excluir{" "}
-            <span className="text-slate-200 font-medium">"{deleteTarget?.title}"</span>?
+            <span className="text-conteudo-heading font-medium">"{deleteTarget?.title}"</span>?
           </p>
         </div>
         <ModalFooter>
