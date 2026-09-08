@@ -939,9 +939,13 @@ leia o verde dele como garantia.
 
 ### Cobertura de testes desigual
 
-A suíte do backend está em **84%**, mas concentrada. O ponto fraco que
-permanece é o `groups.py` (**34%**); o `chat.py` subiu de 53% para **69%** ao
-longo das rodadas de agosto, sem ter sido alvo direto.
+A cobertura do backend é **concentrada**: alta na média e baixa em módulos
+específicos, sendo o `groups.py` o ponto fraco persistente.
+
+O número atual **não fica escrito aqui** — um percentual em documento nasce
+certo e vira mentira sozinho, sem ninguém mexer nele. O valor por arquivo sai
+do `term-missing` a cada execução (`pytest` a partir de `backend/`), e o CI
+reprova abaixo de 80% (`--cov-fail-under=80` no `backend/pyproject.toml`).
 
 ### O prazo de resposta não é renovado na reabertura
 
