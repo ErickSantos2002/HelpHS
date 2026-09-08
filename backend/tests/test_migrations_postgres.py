@@ -139,9 +139,9 @@ def test_upgrade_head_sobe_do_zero(banco):
     """
     resultado = _alembic(banco, "head")
 
-    assert resultado.returncode == 0, (
-        f"alembic upgrade head falhou:\n{resultado.stdout}\n{resultado.stderr}"
-    )
+    assert (
+        resultado.returncode == 0
+    ), f"alembic upgrade head falhou:\n{resultado.stdout}\n{resultado.stderr}"
 
 
 @pytest.mark.asyncio
