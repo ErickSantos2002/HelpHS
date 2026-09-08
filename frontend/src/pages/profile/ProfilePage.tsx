@@ -1,6 +1,15 @@
 import { useEffect, useRef, useState } from "react";
 import { useAuth } from "../../contexts/AuthContext";
-import { Spinner } from "../../components/ui";
+import {
+  Alert,
+  Badge,
+  Button,
+  Card,
+  Icon,
+  Input,
+  Spinner,
+  type BadgeProps,
+} from "../../components/ui";
 import {
   changePassword,
   completeOnboarding,
@@ -23,23 +32,77 @@ import { formatCnpj, isValidCep, isValidCnpj, maskCnpjInput, onlyDigits } from "
 
 // ── Shared ────────────────────────────────────────────────────
 
-const ROLE_LABEL: Record<string, string> = {
-  admin: "Administrador",
-  technician: "Técnico",
-  client: "Cliente",
+/**
+ * Rótulo e selo do papel, numa entrada só.
+ *
+ * Eram duas tabelas paralelas indexadas pela mesma chave — `ROLE_LABEL` e
+ * `ROLE_BADGE` —, e a segunda escrevia classe crua
+ * (`bg-slate-100 dark:bg-slate-700/50 text-slate-600 …`) para dizer o que uma
+ * variante de `Badge` já diz. Duas tabelas com a mesma chave divergem no dia em
+ * que um papel novo entra numa e não na outra; foi assim que prioridade virou
+ * dez mapas.
+ *
+ * Ele continua **local** de propósito. As mesmas três linhas existem no
+ * `Topbar` e no `UsersPage`, o que faz delas fonte única **faltando** — e
+ * `lib/` está fora do escopo desta tela. Inventar aqui um quarto lugar seria o
+ * defeito, não o conserto.
+ */
+const PAPEL: Record<string, { rotulo: string; variante: BadgeProps["variant"] }> = {
+  admin: { rotulo: "Administrador", variante: "primary" },
+  technician: { rotulo: "Técnico", variante: "info" },
+  client: { rotulo: "Cliente", variante: "secondary" },
 };
 
-const ROLE_BADGE: Record<string, string> = {
-  admin:      "bg-primary/10 text-primary border border-primary/20",
-  technician: "bg-info/10 text-info border border-info/20",
-  client:     "bg-slate-100 dark:bg-slate-700/50 text-slate-600 dark:text-slate-300 border border-slate-200 dark:border-slate-600",
-};
-
-const INPUT_CLS =
-  "w-full rounded-lg border border-borda bg-white dark:bg-surface-elevated px-3 py-2 text-sm text-slate-900 dark:text-slate-100 placeholder:text-slate-400 dark:placeholder:text-slate-500 focus:outline-none focus:ring-2 focus:ring-primary focus:border-transparent transition-colors";
+/**
+ * Ação de texto no cabeçalho de uma seção — "Editar", "Alterar senha".
+ *
+ * Fica como `<button>` e não como `Button`: o primitivo traz borda, altura e
+ * preenchimento de botão, e estas três moram na mesma linha do título. O que a
+ * migração troca é a cor — `text-primary` é o degrau de MARCA, e sobre
+ * `--bg-base` dá 3,66:1; `--text-link` existe justamente para isto e dá 5,05:1
+ * no claro e 6,47:1 no escuro.
+ */
+function SectionAction({
+  onClick,
+  children,
+  tone = "link",
+}: {
+  onClick: () => void;
+  children: React.ReactNode;
+  /** `danger` é a saída destrutiva — hoje só o "Desativar" do segundo fator. */
+  tone?: "link" | "danger";
+}) {
+  return (
+    <button
+      type="button"
+      onClick={onClick}
+      className={`text-xs font-medium transition-colors cursor-pointer rounded ${
+        tone === "danger"
+          ? "text-on-tint-danger hover:bg-tint-danger px-1.5 py-0.5"
+          : "text-conteudo-link hover:text-conteudo-link-hover"
+      }`}
+    >
+      {children}
+    </button>
+  );
+}
 
 // ── Sub-components ────────────────────────────────────────────
 
+/**
+ * O retrato de 80px com o botão de trocar a foto.
+ *
+ * Segue desenhado aqui, e não com o primitivo `Avatar`: ele para em 48px
+ * (`lg`), e o `cn()` do projeto é concatenação simples — mandar `w-20` por
+ * `className` deixaria duas larguras na mesma classe e quem vencesse sairia da
+ * ordem do CSS gerado, não do código. Relatado como falta do primitivo.
+ *
+ * O que mudou foi a cor. `text-primary` sobre `bg-primary/15` é exatamente o
+ * par que a emenda E8 mediu em **2,77:1** no escuro: o degrau de marca como
+ * cor de TEXTO sobre a própria tinta. `on-tint-primary` é o par medido dessa
+ * tinta, e a tinta entra pelo token — sem modificador de opacidade, porque ela
+ * já carrega 15% (regra (a) do D8-a).
+ */
 function ProfileAvatar({
   name,
   avatarUrl,
@@ -61,11 +124,11 @@ function ProfileAvatar({
 
   return (
     <div className="relative shrink-0">
-      <div className="w-20 h-20 rounded-full bg-primary/15 border-2 border-primary/30 overflow-hidden flex items-center justify-center">
+      <div className="w-20 h-20 rounded-full bg-tint-primary border-2 border-primary/30 overflow-hidden flex items-center justify-center">
         {avatarUrl ? (
           <img src={avatarUrl} alt={name} className="w-full h-full object-cover" />
         ) : (
-          <span className="text-2xl font-bold text-primary">{initials}</span>
+          <span className="text-2xl font-bold text-on-tint-primary">{initials}</span>
         )}
         {uploading && (
           <div className="absolute inset-0 bg-black/40 flex items-center justify-center rounded-full">
@@ -78,12 +141,12 @@ function ProfileAvatar({
         aria-label="Alterar foto"
         onClick={() => inputRef.current?.click()}
         disabled={uploading}
-        className="absolute bottom-0 right-0 w-7 h-7 rounded-full bg-white dark:bg-surface-elevated border border-borda flex items-center justify-center shadow-sm hover:bg-slate-50 dark:hover:bg-surface transition-colors cursor-pointer disabled:opacity-50"
+        className="absolute bottom-0 right-0 w-7 h-7 rounded-full bg-surface border border-borda flex items-center justify-center shadow-sm hover:bg-surface-elevated transition-colors cursor-pointer disabled:opacity-50"
       >
-        <svg className="w-3.5 h-3.5 text-slate-500 dark:text-slate-400" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
-          <path strokeLinecap="round" strokeLinejoin="round" d="M3 9a2 2 0 012-2h.93a2 2 0 001.664-.89l.812-1.22A2 2 0 0110.07 4h3.86a2 2 0 011.664.89l.812 1.22A2 2 0 0018.07 7H19a2 2 0 012 2v9a2 2 0 01-2 2H5a2 2 0 01-2-2V9z" />
-          <path strokeLinecap="round" strokeLinejoin="round" d="M15 13a3 3 0 11-6 0 3 3 0 016 0z" />
-        </svg>
+        {/* Os dois traçados da máquina fotográfica batiam caractere a caractere
+            com o `camera` que a E21 subiu para o pacote — mesma família, 24×24,
+            `fill="none"` e traço em `currentColor`. */}
+        <Icon name="camera" size={14} strokeWidth={2} className="text-conteudo-muted" />
       </button>
       <input
         ref={inputRef}
@@ -103,12 +166,18 @@ function ProfileAvatar({
 function Field({ label, value }: { label: string; value: string }) {
   return (
     <div className="space-y-0.5">
-      <p className="text-xs font-medium text-slate-500 dark:text-slate-500">{label}</p>
-      <p className="text-sm text-slate-700 dark:text-slate-200">{value || "—"}</p>
+      <p className="text-xs font-medium text-conteudo-muted">{label}</p>
+      <p className="text-sm text-conteudo">{value || "—"}</p>
     </div>
   );
 }
 
+/**
+ * A casca vem do `Card`, com `padding="none"` porque o cabeçalho é sangrado:
+ * o divisor atravessa o cartão de ponta a ponta, e o `p-6` do primitivo o
+ * encolheria. O que o `Card` dá aqui é o que a tela repetia — canto, borda e
+ * superfície — e é o que deixa de divergir quando o token mudar.
+ */
 function SectionCard({
   title,
   action,
@@ -119,24 +188,23 @@ function SectionCard({
   children: React.ReactNode;
 }) {
   return (
-    <div className="rounded-xl bg-surface border border-borda overflow-hidden">
-      <div className="flex items-center justify-between px-6 py-4 border-b border-slate-100 dark:border-borda/60">
-        <h2 className="text-sm font-semibold text-slate-700 dark:text-slate-200">{title}</h2>
+    <Card padding="none" className="overflow-hidden">
+      <div className="flex items-center justify-between px-6 py-4 border-b border-borda-muted">
+        <h2 className="text-sm font-semibold text-conteudo">{title}</h2>
         {action}
       </div>
       <div className="px-6 py-5">{children}</div>
-    </div>
+    </Card>
   );
 }
 
-function ErrorMsg({ msg }: { msg: string }) {
-  return (
-    <p className="text-sm text-danger bg-danger/10 border border-danger/20 rounded-lg px-3 py-2">
-      {msg}
-    </p>
-  );
-}
-
+/**
+ * O par Cancelar/Salvar de um formulário.
+ *
+ * `bg-primary text-white` dava **3,83:1** nos dois temas — o degrau 500 é
+ * absoluto e não inverte. O `Button` primário resolve pelo par certo,
+ * `--action` com `--text-on-primary`, que é branco no claro e navy no escuro.
+ */
 function FormActions({
   saving,
   saveLabel,
@@ -148,20 +216,12 @@ function FormActions({
 }) {
   return (
     <div className="flex gap-2 justify-end pt-2">
-      <button
-        type="button"
-        onClick={onCancel}
-        className="px-4 py-2 text-sm text-slate-500 dark:text-slate-400 hover:text-slate-900 dark:hover:text-slate-200 transition-colors rounded-lg hover:bg-surface-elevated"
-      >
+      <Button type="button" variant="ghost" onClick={onCancel}>
         Cancelar
-      </button>
-      <button
-        type="submit"
-        disabled={saving}
-        className="px-4 py-2 rounded-lg bg-primary text-white text-sm font-medium hover:bg-primary/90 disabled:opacity-50 transition-colors"
-      >
+      </Button>
+      <Button type="submit" disabled={saving}>
         {saving ? "Salvando…" : (saveLabel ?? "Salvar")}
-      </button>
+      </Button>
     </div>
   );
 }
@@ -235,20 +295,19 @@ function MfaSection() {
       title="Verificação em duas etapas"
       action={
         status.enabled && !desligando ? (
-          <button
-            onClick={() => setDesligando(true)}
-            className="text-xs font-medium text-danger hover:text-danger/80 transition-colors"
-          >
+          <SectionAction tone="danger" onClick={() => setDesligando(true)}>
             Desativar
-          </button>
+          </SectionAction>
         ) : undefined
       }
     >
       <div className="space-y-4">
-        {erro && <ErrorMsg msg={erro} />}
+        {/* Aparece em resposta a uma ação, então a região viva é o certo: é
+            mudança, e o `Alert` de perigo interrompe a leitura de propósito. */}
+        {erro && <Alert variant="danger">{erro}</Alert>}
 
         {!status.available && (
-          <p className="text-sm text-slate-500">
+          <p className="text-sm text-conteudo-muted">
             A verificação em duas etapas não está disponível neste ambiente. Fale com o
             administrador do sistema.
           </p>
@@ -256,8 +315,12 @@ function MfaSection() {
 
         {status.available && status.enabled && !desligando && (
           <div className="flex items-center gap-3">
-            <span className="w-1.5 h-1.5 rounded-full bg-green-500" />
-            <p className="text-sm text-slate-700 dark:text-slate-200">
+            {/* O ponto nunca informa sozinho — o texto ao lado diz "Ativa". A
+                cor sai de `--fill-success` e não do degrau 500, que a E19 mediu
+                em 2,54:1 como preenchimento no tema claro, abaixo do piso de
+                3:1 da WCAG 1.4.11. */}
+            <span className="w-1.5 h-1.5 rounded-full bg-fill-success" />
+            <p className="text-sm text-conteudo">
               Ativa. Ao entrar, o sistema pedirá o código do seu aplicativo autenticador.
             </p>
           </div>
@@ -265,66 +328,59 @@ function MfaSection() {
 
         {status.available && status.enabled && desligando && (
           <div className="space-y-3">
-            <p className="text-sm text-slate-500">
+            <p className="text-sm text-conteudo-muted">
               Confirme sua senha para desativar. Todas as sessões abertas serão encerradas.
             </p>
-            <input
+            <Input
+              label="Sua senha atual"
               type="password"
-              className={INPUT_CLS}
-              placeholder="Sua senha atual"
               value={senha}
               onChange={(e) => setSenha(e.target.value)}
               autoComplete="current-password"
             />
             <div className="flex gap-2 justify-end">
-              <button
-                onClick={limpar}
-                className="px-4 py-2 text-sm text-slate-500 hover:text-slate-900 dark:hover:text-slate-200 rounded-lg transition-colors"
-              >
+              <Button type="button" variant="ghost" onClick={limpar}>
                 Cancelar
-              </button>
-              <button
+              </Button>
+              <Button
+                type="button"
+                variant="danger"
                 onClick={desativar}
                 disabled={ocupado || !senha}
-                className="px-4 py-2 rounded-lg bg-danger text-white text-sm font-medium hover:bg-danger/90 disabled:opacity-50 transition-colors"
               >
                 {ocupado ? "Desativando…" : "Desativar"}
-              </button>
+              </Button>
             </div>
           </div>
         )}
 
         {status.available && !status.enabled && !cadastro && (
           <div className="space-y-3">
-            <p className="text-sm text-slate-500">
+            <p className="text-sm text-conteudo-muted">
               Uma segunda camada além da senha: ao entrar, o sistema pede um código de seis
               dígitos gerado no seu celular.
             </p>
-            <button
-              onClick={iniciar}
-              disabled={ocupado}
-              className="px-4 py-2 rounded-lg bg-primary text-white text-sm font-medium hover:bg-primary/90 disabled:opacity-50 transition-colors"
-            >
+            <Button type="button" onClick={iniciar} disabled={ocupado}>
               {ocupado ? "Gerando…" : "Ativar"}
-            </button>
+            </Button>
           </div>
         )}
 
         {status.available && !status.enabled && cadastro && (
           <div className="space-y-4">
-            <ol className="text-sm text-slate-600 dark:text-slate-300 space-y-3 list-decimal list-inside">
+            <ol className="text-sm text-conteudo space-y-3 list-decimal list-inside">
               <li>
                 Abra seu aplicativo autenticador (Google Authenticator, Microsoft
                 Authenticator, 1Password…).
               </li>
               <li>
                 Adicione uma conta e informe esta chave:
-                <code className="mt-2 block rounded-lg bg-surface-elevated px-3 py-2 font-mono text-sm tracking-wider text-slate-800 dark:text-slate-100 break-all">
+                <code className="mt-2 block rounded-lg bg-surface-elevated px-3 py-2 font-mono text-sm tracking-wider text-conteudo break-all">
                   {cadastro.secret}
                 </code>
                 <a
                   href={cadastro.otpauth_uri}
-                  className="mt-1.5 inline-block text-xs font-medium text-primary hover:text-primary/80"
+                  className="mt-1.5 inline-block text-xs font-medium text-conteudo-link hover:text-conteudo-link-hover"
                 >
                   Ou toque aqui para abrir no aplicativo
                 </a>
@@ -332,34 +388,28 @@ function MfaSection() {
               <li>Digite abaixo o código que aparecer.</li>
             </ol>
 
-            <input
+            <Input
+              label="Código do aplicativo"
               type="text"
               inputMode="numeric"
-              className={INPUT_CLS}
               placeholder="000000"
               value={codigo}
               onChange={(e) => setCodigo(e.target.value)}
               autoComplete="one-time-code"
               maxLength={7}
+              hint="A verificação só é ligada depois que o código confere — se o aplicativo não pareou, nada muda e você não fica trancado fora."
             />
-            <p className="text-xs text-slate-500">
-              A verificação só é ligada depois que o código confere — se o aplicativo não
-              pareou, nada muda e você não fica trancado fora.
-            </p>
             <div className="flex gap-2 justify-end">
-              <button
-                onClick={limpar}
-                className="px-4 py-2 text-sm text-slate-500 hover:text-slate-900 dark:hover:text-slate-200 rounded-lg transition-colors"
-              >
+              <Button type="button" variant="ghost" onClick={limpar}>
                 Cancelar
-              </button>
-              <button
+              </Button>
+              <Button
+                type="button"
                 onClick={ativar}
                 disabled={ocupado || !codigo}
-                className="px-4 py-2 rounded-lg bg-primary text-white text-sm font-medium hover:bg-primary/90 disabled:opacity-50 transition-colors"
               >
                 {ocupado ? "Verificando…" : "Confirmar"}
-              </button>
+              </Button>
             </div>
           </div>
         )}
@@ -401,20 +451,13 @@ function EditProfileForm({
 
   return (
     <form onSubmit={handleSubmit} className="space-y-4">
-      {error && <ErrorMsg msg={error} />}
+      {error && <Alert variant="danger">{error}</Alert>}
       <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
-        <div className="space-y-1.5 sm:col-span-2">
-          <label className="text-xs font-medium text-slate-500">Nome completo</label>
-          <input value={name} onChange={(e) => setName(e.target.value)} className={INPUT_CLS} />
+        <div className="sm:col-span-2">
+          <Input label="Nome completo" value={name} onChange={(e) => setName(e.target.value)} />
         </div>
-        <div className="space-y-1.5">
-          <label className="text-xs font-medium text-slate-500">Telefone</label>
-          <input value={phone} onChange={(e) => setPhone(e.target.value)} placeholder="(11) 99999-9999" className={INPUT_CLS} />
-        </div>
-        <div className="space-y-1.5">
-          <label className="text-xs font-medium text-slate-500">Departamento</label>
-          <input value={department} onChange={(e) => setDepartment(e.target.value)} placeholder="Ex: TI, RH" className={INPUT_CLS} />
-        </div>
+        <Input label="Telefone" value={phone} onChange={(e) => setPhone(e.target.value)} placeholder="(11) 99999-9999" />
+        <Input label="Departamento" value={department} onChange={(e) => setDepartment(e.target.value)} placeholder="Ex: TI, RH" />
       </div>
       <FormActions saving={saving} onCancel={onCancel} />
     </form>
@@ -453,19 +496,18 @@ function ChangePasswordForm({ onDone }: { onDone: () => void }) {
     }
   }
 
+  // O "certo" desenhado à mão aqui era, caractere a caractere, o `check` do
+  // pacote — e é o mesmo traçado que o `Alert` de sucesso já desenha. Trocar o
+  // parágrafo verde pelo primitivo tira o `<svg>` solto E o par
+  // `text-green-600`/`dark:text-green-400`, e ainda faz a confirmação virar
+  // região viva polida: quem não vê a tela passava a trocar de senha sem
+  // ouvir que deu certo.
   if (success)
-    return (
-      <div className="flex items-center gap-2 py-2 text-sm text-green-600 dark:text-green-400">
-        <svg className="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
-          <path strokeLinecap="round" strokeLinejoin="round" d="M9 12l2 2 4-4m6 2a9 9 0 11-18 0 9 9 0 0118 0z" />
-        </svg>
-        Senha alterada com sucesso!
-      </div>
-    );
+    return <Alert variant="success">Senha alterada com sucesso!</Alert>;
 
   return (
     <form onSubmit={handleSubmit} className="space-y-4">
-      {error && <ErrorMsg msg={error} />}
+      {error && <Alert variant="danger">{error}</Alert>}
       {(
         [
           ["Senha atual", current, setCurrent],
@@ -473,10 +515,14 @@ function ChangePasswordForm({ onDone }: { onDone: () => void }) {
           ["Confirmar nova senha", confirm, setConfirm],
         ] as [string, string, (v: string) => void][]
       ).map(([label, val, setter]) => (
-        <div key={label} className="space-y-1.5">
-          <label className="text-xs font-medium text-slate-500">{label}</label>
-          <input type="password" value={val} onChange={(e) => setter(e.target.value)} autoComplete="off" className={INPUT_CLS} />
-        </div>
+        <Input
+          key={label}
+          label={label}
+          type="password"
+          value={val}
+          onChange={(e) => setter(e.target.value)}
+          autoComplete="off"
+        />
       ))}
       <FormActions saving={saving} saveLabel="Alterar senha" onCancel={onDone} />
     </form>
@@ -558,56 +604,75 @@ function CompanySection({ profile, onSaved }: { profile: UserSummary; onSaved: (
       title="Empresa"
       action={
         !editing ? (
-          <button onClick={() => setEditing(true)} className="text-xs font-medium text-primary hover:text-primary/80 transition-colors">
-            Editar
-          </button>
+          <SectionAction onClick={() => setEditing(true)}>Editar</SectionAction>
         ) : undefined
       }
     >
+      {/* `live={false}`: este aviso já está na tela quando ela termina de
+          carregar, e não responde a ação nenhuma. Região viva anuncia MUDANÇA —
+          anunciá-lo faria o leitor de tela ler a consequência antes da causa
+          (emenda E12). */}
       {!editing && cadastroIncompleto && (
-        <div className="mb-4 rounded-lg border border-warning-500/30 bg-warning-500/10 px-3 py-2 text-xs text-warning-700 dark:text-warning-400">
+        <Alert variant="warning" live={false} className="mb-4">
           Complete o cadastro da sua empresa: CNPJ e CEP são obrigatórios.
-        </div>
+        </Alert>
       )}
 
       {editing ? (
         <form onSubmit={handleSubmit} className="space-y-4">
-          {error && <ErrorMsg msg={error} />}
-          <div className="space-y-1.5">
-            <label className="text-xs font-medium text-slate-500">
-              CNPJ <span className="text-danger-400">*</span>
-            </label>
-            <div className="relative">
-              <input value={cnpj} onChange={(e) => setCnpj(maskCnpjInput(e.target.value))} onBlur={handleCnpjBlur} placeholder="00.000.000/0000-00" className={INPUT_CLS} />
-              {lookingCnpj && <div className="absolute right-3 top-2.5"><Spinner size="sm" /></div>}
-            </div>
+          {error && <Alert variant="danger">{error}</Alert>}
+          {/* O asterisco de obrigatório era `text-danger-400` — um vermelho
+              claro sobre superfície clara. Agora ele mora no texto do rótulo,
+              como no `ProductsPage`: quem lê com leitor de tela ouve o
+              asterisco junto do nome do campo, em vez de um `<span>` sem
+              ligação nenhuma com o `<input>`. */}
+          <div className="relative">
+            <Input
+              label="CNPJ *"
+              value={cnpj}
+              onChange={(e) => setCnpj(maskCnpjInput(e.target.value))}
+              onBlur={handleCnpjBlur}
+              placeholder="00.000.000/0000-00"
+            />
+            {lookingCnpj && <div className="absolute right-3 bottom-2.5"><Spinner size="sm" /></div>}
           </div>
-          <div className="space-y-1.5">
-            <label className="text-xs font-medium text-slate-500">Nome da empresa</label>
-            <input value={companyName} onChange={(e) => setCompanyName(e.target.value)} placeholder="Razão social ou nome fantasia" className={INPUT_CLS} required />
+          <Input
+            label="Nome da empresa"
+            value={companyName}
+            onChange={(e) => setCompanyName(e.target.value)}
+            placeholder="Razão social ou nome fantasia"
+            required
+          />
+          <div className="relative">
+            <Input
+              label="CEP *"
+              value={cep}
+              onChange={(e) => setCep(formatCep(e.target.value))}
+              onBlur={handleCepBlur}
+              placeholder="00000-000"
+            />
+            {lookingCep && <div className="absolute right-3 bottom-2.5"><Spinner size="sm" /></div>}
           </div>
-          <div className="space-y-1.5">
-            <label className="text-xs font-medium text-slate-500">
-              CEP <span className="text-danger-400">*</span>
-            </label>
-            <div className="relative">
-              <input value={cep} onChange={(e) => setCep(formatCep(e.target.value))} onBlur={handleCepBlur} placeholder="00000-000" className={INPUT_CLS} />
-              {lookingCep && <div className="absolute right-3 top-2.5"><Spinner size="sm" /></div>}
-            </div>
-          </div>
-          <div className="space-y-1.5">
-            <label className="text-xs font-medium text-slate-500">Endereço</label>
-            <input value={address} onChange={(e) => setAddress(e.target.value)} placeholder="Ex: Rua das Flores, 123" className={INPUT_CLS} />
-          </div>
+          <Input
+            label="Endereço"
+            value={address}
+            onChange={(e) => setAddress(e.target.value)}
+            placeholder="Ex: Rua das Flores, 123"
+          />
           <div className="grid grid-cols-2 gap-3">
-            <div className="space-y-1.5">
-              <label className="text-xs font-medium text-slate-500">Cidade</label>
-              <input value={city} onChange={(e) => setCity(e.target.value)} placeholder="Ex: Recife" className={INPUT_CLS} />
-            </div>
-            <div className="space-y-1.5">
-              <label className="text-xs font-medium text-slate-500">Estado (UF)</label>
-              <input value={state} onChange={(e) => setState(e.target.value.toUpperCase().slice(0, 2))} placeholder="PE" maxLength={2} className={INPUT_CLS} />
-            </div>
+            <Input
+              label="Cidade"
+              value={city}
+              onChange={(e) => setCity(e.target.value)}
+              placeholder="Ex: Recife"
+            />
+            <Input
+              label="Estado (UF)"
+              value={state}
+              onChange={(e) => setState(e.target.value.toUpperCase().slice(0, 2))}
+              placeholder="PE"
+              maxLength={2}
+            />
           </div>
           <FormActions saving={saving} onCancel={() => setEditing(false)} />
         </form>
@@ -664,11 +729,12 @@ export default function ProfilePage() {
 
   if (!profile)
     return (
-      <div className="max-w-2xl mx-auto px-4 py-10 text-center text-slate-500 text-sm">
+      <div className="max-w-2xl mx-auto px-4 py-10 text-center text-conteudo-muted text-sm">
         Não foi possível carregar o perfil.
       </div>
     );
 
+  const papel = PAPEL[profile.role];
   const joinedAt = new Date(profile.created_at).toLocaleDateString("pt-BR", { day: "2-digit", month: "long", year: "numeric" });
   const lastLogin = profile.last_login
     ? new Date(profile.last_login).toLocaleString("pt-BR", { day: "2-digit", month: "2-digit", year: "numeric", hour: "2-digit", minute: "2-digit" })
@@ -678,14 +744,14 @@ export default function ProfilePage() {
     <div className="space-y-5">
       {/* Page header */}
       <div>
-        <h1 className="text-xl font-semibold text-slate-900 dark:text-slate-100">Meu perfil</h1>
-        <p className="text-sm text-slate-500 mt-0.5">Gerencie suas informações pessoais e segurança</p>
+        <h1 className="text-xl font-semibold text-conteudo-heading">Meu perfil</h1>
+        <p className="text-sm text-conteudo-muted mt-0.5">Gerencie suas informações pessoais e segurança</p>
       </div>
 
       {/* Identity card */}
-      <div className="rounded-xl bg-surface border border-borda p-6">
+      <Card padding="lg">
         {avatarError && (
-          <p className="mb-3 text-xs text-danger bg-danger/10 border border-danger/20 rounded-lg px-3 py-2">{avatarError}</p>
+          <Alert variant="danger" className="mb-3">{avatarError}</Alert>
         )}
         <div className="flex items-center gap-5">
           <ProfileAvatar
@@ -695,33 +761,33 @@ export default function ProfilePage() {
             onFileSelect={handleAvatarFile}
           />
           <div className="min-w-0 flex-1 space-y-1.5">
-            <h2 className="text-lg font-semibold text-slate-900 dark:text-slate-100 truncate">{profile.name}</h2>
-            <p className="text-sm text-slate-500 truncate">{profile.email}</p>
-            <span className={`inline-block text-xs px-2.5 py-0.5 rounded-full font-medium ${ROLE_BADGE[profile.role] ?? ""}`}>
-              {ROLE_LABEL[profile.role] ?? profile.role}
-            </span>
+            <h2 className="text-lg font-semibold text-conteudo-heading truncate">{profile.name}</h2>
+            <p className="text-sm text-conteudo-muted truncate">{profile.email}</p>
+            {/* Papel desconhecido cai no neutro e mostra o valor cru: o dado vem
+                da REDE, e um papel novo no backend não pode derrubar a tela. */}
+            <Badge variant={papel?.variante ?? "secondary"}>
+              {papel?.rotulo ?? profile.role}
+            </Badge>
           </div>
           <div className="hidden sm:flex flex-col gap-3 text-right shrink-0">
             <div>
-              <p className="text-xs font-medium text-slate-500">Membro desde</p>
-              <p className="text-sm text-slate-700 dark:text-slate-200 mt-0.5">{joinedAt}</p>
+              <p className="text-xs font-medium text-conteudo-muted">Membro desde</p>
+              <p className="text-sm text-conteudo mt-0.5">{joinedAt}</p>
             </div>
             <div>
-              <p className="text-xs font-medium text-slate-500">Último acesso</p>
-              <p className="text-sm text-slate-700 dark:text-slate-200 mt-0.5">{lastLogin}</p>
+              <p className="text-xs font-medium text-conteudo-muted">Último acesso</p>
+              <p className="text-sm text-conteudo mt-0.5">{lastLogin}</p>
             </div>
           </div>
         </div>
-      </div>
+      </Card>
 
       {/* Personal info */}
       <SectionCard
         title="Informações pessoais"
         action={
           !editingInfo ? (
-            <button onClick={() => setEditingInfo(true)} className="text-xs font-medium text-primary hover:text-primary/80 transition-colors">
-              Editar
-            </button>
+            <SectionAction onClick={() => setEditingInfo(true)}>Editar</SectionAction>
           ) : undefined
         }
       >
@@ -751,9 +817,7 @@ export default function ProfilePage() {
         title="Segurança"
         action={
           !editingPassword ? (
-            <button onClick={() => setEditingPassword(true)} className="text-xs font-medium text-primary hover:text-primary/80 transition-colors">
-              Alterar senha
-            </button>
+            <SectionAction onClick={() => setEditingPassword(true)}>Alterar senha</SectionAction>
           ) : undefined
         }
       >
@@ -762,13 +826,13 @@ export default function ProfilePage() {
         ) : (
           <div className="flex items-center gap-4">
             <div className="w-9 h-9 rounded-lg bg-surface-elevated flex items-center justify-center shrink-0">
-              <svg className="w-4.5 h-4.5 text-slate-500" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
-                <path strokeLinecap="round" strokeLinejoin="round" d="M12 15v2m-6 4h12a2 2 0 002-2v-6a2 2 0 00-2-2H6a2 2 0 00-2 2v6a2 2 0 002 2zm10-10V7a4 4 0 00-8 0v4h8z" />
-              </svg>
+              {/* Traçado idêntico ao `lock` do pacote, conferido caractere a
+                  caractere — e mesma família: 24×24, sem preenchimento. */}
+              <Icon name="lock" size={18} strokeWidth={2} className="text-conteudo-muted" />
             </div>
             <div>
-              <p className="text-sm font-medium text-slate-700 dark:text-slate-200">Senha</p>
-              <p className="text-xs text-slate-500 mt-0.5">Recomendamos trocar sua senha periodicamente</p>
+              <p className="text-sm font-medium text-conteudo">Senha</p>
+              <p className="text-xs text-conteudo-muted mt-0.5">Recomendamos trocar sua senha periodicamente</p>
             </div>
           </div>
         )}
@@ -781,10 +845,13 @@ export default function ProfilePage() {
       <SectionCard title="Conta">
         <div className="grid grid-cols-1 sm:grid-cols-2 gap-5">
           <div className="space-y-0.5">
-            <p className="text-xs font-medium text-slate-500">Status</p>
+            <p className="text-xs font-medium text-conteudo-muted">Status</p>
             <div className="flex items-center gap-1.5 mt-1">
-              <span className={`w-1.5 h-1.5 rounded-full ${profile.status === "active" ? "bg-green-500" : "bg-slate-400"}`} />
-              <p className="text-sm text-slate-700 dark:text-slate-200">
+              {/* O neutro é `--border-control`, o único que inverte por tema —
+                  mesmo raciocínio do selo de ativo/inativo do `ProductsPage`. E
+                  o estado nunca fica só na cor: o texto ao lado o carrega. */}
+              <span className={`w-1.5 h-1.5 rounded-full ${profile.status === "active" ? "bg-fill-success" : "bg-borda-control"}`} />
+              <p className="text-sm text-conteudo">
                 {profile.status === "active" ? "Ativo" : profile.status}
               </p>
             </div>
