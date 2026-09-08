@@ -59,7 +59,20 @@ export interface Prioridade {
   variante: Variante;
   /** Classe de fundo do ponto: a cor cheia 500 da mesma variante. */
   ponto: string;
-  /** Preenchimento de série num gráfico DE PRIORIDADE. Não é `--chart-*`. */
+  /**
+   * Preenchimento de série num gráfico DE PRIORIDADE. Não é `--chart-*`.
+   *
+   * Os quatro apontam para um token de **papel de preenchimento** — os
+   * `--fill-*` da E19, ou o `--border-control` para o neutro, que é o único que
+   * inverte com o tema. Nenhum aponta para degrau cru da rampa.
+   *
+   * `--fill-danger` e `--fill-info` têm hoje exatamente o valor dos degraus 500
+   * que estavam escritos aqui antes: a troca não muda pixel nenhum. É a regra
+   * que o @chamadoshs registrou — cor de preenchimento aponta para o token do
+   * papel mesmo quando é só higiene —, e o que se ganha é que o dia em que a
+   * rampa mudar, o degrau que passa 3:1 continua sendo escolhido por medição e
+   * não por acaso.
+   */
   grafico: string;
   /** Ordem de urgência, do mais crítico ao menos. Serve à ordenação. */
   ordem: number;
@@ -70,7 +83,7 @@ export const PRIORIDADE: Record<TicketPriority, Prioridade> = {
     rotulo: "Crítica",
     variante: "danger",
     ponto: "bg-danger",
-    grafico: "var(--color-danger-500)",
+    grafico: "var(--fill-danger)",
     ordem: 0,
   },
   high: {
@@ -89,7 +102,7 @@ export const PRIORIDADE: Record<TicketPriority, Prioridade> = {
     rotulo: "Média",
     variante: "info",
     ponto: "bg-info",
-    grafico: "var(--color-info-500)",
+    grafico: "var(--fill-info)",
     ordem: 2,
   },
   low: {

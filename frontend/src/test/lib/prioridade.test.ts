@@ -62,6 +62,16 @@ describe("prioridade — o gráfico não usa a paleta categórica", () => {
     expect(PRIORIDADE[p].grafico).not.toMatch(/--chart-/);
     expect(PRIORIDADE[p].grafico).toMatch(/^var\(--/);
   });
+
+  it.each(TODAS)("%s aponta para o token do PAPEL, não para degrau da rampa", (p) => {
+    // Regra do @chamadoshs: cor de preenchimento aponta para o token do papel
+    // mesmo quando é só higiene. `--fill-danger` e `--fill-info` valem hoje
+    // exatamente o que os degraus 500 valiam — a troca não muda pixel. O que
+    // muda é o dia em que a rampa andar: o degrau que passa 3:1 volta a ser
+    // escolhido por medição, e não por o 500 estar escrito aqui.
+    expect(PRIORIDADE[p].grafico).toMatch(/^var\(--(fill-\w+|border-control)\)$/);
+    expect(PRIORIDADE[p].grafico).not.toMatch(/--color-\w+-\d00/);
+  });
 });
 
 describe("prioridade — o ponto", () => {
