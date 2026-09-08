@@ -1038,3 +1038,26 @@ Ligar `FORWARDED_ALLOW_IPS` resolve, **mas só depois de fechar a publicação d
 porta 8000**. Com a porta aberta na internet, autorizar cabeçalhos de proxy
 deixa qualquer um forjar o `X-Forwarded-For` e furar o limite por completo —
 pior do que o balde único. A ordem é: fechar a porta, depois autorizar.
+
+### Duas contradições nos manuais esperam decisão do suporte técnico
+
+Levantadas em 08/09/2026, ao preparar a base da Helô (Fase 2). **Não são
+decisão de código:** ninguém no desenvolvimento sabe qual dos números está
+certo, e escolher no chute seria escolher por ela.
+
+Por que importa: busca vetorial não resolve contradição. Ela traz os dois
+trechos e o modelo escolhe um, ou mistura — e a Helô responde **com a fonte
+citada**, que é pior do que responder sem fonte, porque parece conferível.
+
+| Contradição | O que a documentação diz |
+|---|---|
+| **Titan: memória e autonomia** | "Memória: até 8.000 testes" e "Autonomia: até 8.000 testes por carga", num aparelho com bateria Ni-MH de 400 mAh. O segundo número parece cópia do primeiro — uma bateria dessas dificilmente sustenta 8.000 sopros por carga. Enquanto não houver resposta, a Helô pode prometer autonomia que o aparelho não tem. |
+| **Canal de contato oficial** | Três telefones — (11) 4007-1507, (81) 9 9118-9612, (81) 98177-1177 — e dois e-mails, `cs@` e `sac@`. Não há como saber qual é o canal para o cliente sem perguntar. |
+
+**As outras contradições do corpus não precisam de decisão**, e vale registrar
+por quê para ninguém reabrir: todas elas são ficha comercial contra manual
+técnico — o aplicativo do iBlow10 Pro (Health App na ficha, i-SOBER no
+manual), os dois aplicativos do Deimos, o tempo de análise do iBlow10 Pro
+(5 s na ficha, 2 s no manual). Como as fichas comerciais ficam **fora da busca
+técnica** por decisão da Fase 2, esses pares nunca chegam juntos à Helô. Se um
+dia existir uma Helô comercial, elas voltam a valer.
