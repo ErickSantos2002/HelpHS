@@ -11,7 +11,7 @@
  *
  * O bloqueio é por lista de permissão, não por lista de bloqueio:
  *
- *   - `localhost:5173`      → passa (é o Vite servindo o próprio app)
+ *   - `localhost:5190`      → passa (é o Vite servindo o próprio app)
  *   - `data:` e `blob:`     → passam (não saem da máquina)
  *   - fonts.googleapis.com  → NEGADO, com fallback local de fonte
  *   - fonts.gstatic.com     → NEGADO, idem
@@ -42,13 +42,18 @@ import { chromium } from "@playwright/test";
 import { mkdir, readdir } from "node:fs/promises";
 import { fileURLToPath } from "node:url";
 import path from "node:path";
+import {
+  BASE,
+  conferirPixel,
+  conferirProduto,
+} from "./sonda-captura.mjs";
 
 const RAIZ = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "..");
 const SAIDA = path.resolve(
   RAIZ,
   "../docs/design-system-migration/fase-0/screenshots",
 );
-const BASE = process.env.GALERIA_URL ?? "http://localhost:5173";
+
 
 /** Resposta falsa para o contador de não lidas da Topbar. É a única chamada
  *  que a casca faz por conta própria; o 3 é para o badge aparecer no
@@ -164,13 +169,25 @@ async function capturar() {
         });
         await page.waitForSelector("#sidebar-nav", { timeout: 10_000 });
 
+        // ── As travas, antes de disparar ────────────────────────────
+        //
+        // Este script NAO TINHA checagem de pixel. Conferia so a classe do
+        // <html>, que e promessa: uma pagina com `class="dark"` e o CSS do
+        // tema claro passava e virava evidencia.
+        //
+        // A ordem importa: produto, depois pixel. Cada uma bloqueia sozinha.
+        await conferirProduto(page, `${tela}/${tema}: `);
+        await conferirPixel(page, tema, `${tela}/${tema}: `);
+
+        // A classe fica como diagnostico, DEPOIS do pixel: quando as duas
+        // discordam, saber qual delas mentiu economiza a investigacao.
         const classes = await page.evaluate(
           () => document.documentElement.className,
         );
-        const escuroNoDom = classes.includes("dark");
-        if (escuroNoDom !== (tema === "escuro")) {
+        if (classes.includes("dark") !== (tema === "escuro")) {
           throw new Error(
-            `tema errado em ${tela}/${tema}: <html class="${classes}">`,
+            `o PIXEL esta certo e a CLASSE nao, em ${tela}/${tema}: ` +
+              `<html class="${classes}">`,
           );
         }
 

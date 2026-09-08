@@ -7,7 +7,7 @@
  *
  * Toda requisição é interceptada por uma rota única, com lista de permissão:
  *
- *   - localhost:5173, data:, blob:  → passam
+ *   - localhost:5190, data:, blob:  → passam
  *   - fonts.googleapis / gstatic    → negadas de propósito (a fonte é local
  *                                     desde a E3; se aparecer aqui, é regressão)
  *   - QUALQUER outra coisa          → abortada E registrada como fuga
@@ -30,13 +30,18 @@ import { chromium } from "@playwright/test";
 import { mkdir, readdir } from "node:fs/promises";
 import { fileURLToPath } from "node:url";
 import path from "node:path";
+import {
+  BASE,
+  conferirPixel,
+  conferirProduto,
+} from "./sonda-captura.mjs";
 
 const RAIZ = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "..");
 const SAIDA = path.resolve(
   RAIZ,
   "../docs/design-system-migration/fase-7/screenshots",
 );
-const BASE = process.env.GALERIA_URL ?? "http://localhost:5173";
+
 
 /** nome do arquivo, largura, altura. A página é uma só e rola: a altura aqui é
  *  só a da janela; o screenshot é de página inteira. */
@@ -141,17 +146,33 @@ async function capturar() {
         // fotografando o que não tinha confirmado. A regra é: nunca fotografar
         // o que não se conferiu, e conferir o PIXEL, não a promessa.
 
+        // ── As travas, antes de disparar ────────────────────────────
+        //
+        // A checagem de pixel que havia aqui tinha dois defeitos, e os dois
+        // deixavam passar:
+        //
+        //   media `document.body` direto — correto HOJE, porque o `base.css`
+        //   pinta o body e o html nao tem fundo; errado no dia em que alguem
+        //   pintar o html, quando a regra do CSS inverte e o canvas passa a
+        //   vir de la;
+        //
+        //   comparava com a expressao `rgb(2xx, 2xx, 2xx)`, que aprova
+        //   QUALQUER cor clara e nao a cor certa.
+        //
+        // Agora o valor esperado vem do `colors.css` EM DISCO, resolvido pela
+        // cadeia de var(), e o que se mede e a cor do CANVAS pela regra do
+        // CSS. Cada trava bloqueia sozinha.
+        await conferirProduto(page, `${tema}: `);
+        await conferirPixel(page, tema, `${tema}: `);
+
         const estado = await page.evaluate(() => {
           const html = document.documentElement;
-          const corpo = document.body;
-          const cor = getComputedStyle(corpo).backgroundColor;
           // `scrollHeight > clientHeight` com overflow travado significa que há
           // conteúdo inalcançável — não só fora do enquadramento, mas sem como
           // rolar até ele. O `fullPage` não salva disso.
-          const estilo = getComputedStyle(corpo);
+          const estilo = getComputedStyle(document.body);
           return {
             classes: html.className,
-            corDeFundo: cor,
             alturaTotal: html.scrollHeight,
             alturaVisivel: html.clientHeight,
             overflowTravado:
@@ -160,23 +181,12 @@ async function capturar() {
           };
         });
 
-        // 1. O tema pedido é o tema aplicado.
+        // A classe fica como diagnostico, DEPOIS do pixel: quando as duas
+        // discordam, saber qual delas mentiu economiza a investigacao.
         if (estado.classes.includes("dark") !== (tema === "escuro")) {
           throw new Error(
-            `tema errado em ${tema}: <html class="${estado.classes}">`,
-          );
-        }
-
-        // 2. O pixel concorda com o atributo. Atributo é promessa; a cor
-        //    computada do corpo é o que a foto vai mostrar. No claro o fundo é
-        //    slate-50; no escuro, o navy do `--bg-base`.
-        const claroNoPixel = /^rgba?\(2[0-9]{2}, 2[0-9]{2}, 2[0-9]{2}/.test(
-          estado.corDeFundo,
-        );
-        if (claroNoPixel !== (tema === "claro")) {
-          throw new Error(
-            `o atributo diz ${tema} e o pixel diz outra coisa: ` +
-              `background-color computado = ${estado.corDeFundo}`,
+            `o PIXEL esta certo e a CLASSE nao, em ${tema}: ` +
+              `<html class="${estado.classes}">`,
           );
         }
 
