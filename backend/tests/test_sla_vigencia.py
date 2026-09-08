@@ -268,3 +268,44 @@ def test_a_leitura_devolve_hora_so_quando_e_hora_cheia():
     quebrada = _resposta(30, 240)
     assert quebrada.response_time_hours is None
     assert quebrada.resolve_time_hours == 4
+
+
+def test_o_script_avulso_e_a_semente_carregam_os_mesmos_valores():
+    """
+    `scripts/aplica_sla_aprovado.py` repete a tabela de prazos em vez de
+    importar `app.seeds`, para rodar contra produção sem arrastar o app
+    inteiro. A repetição é deliberada; a divergência não seria.
+
+    Sem este teste, mexer num lado deixaria o outro aplicando o valor antigo em
+    produção — e o script é justamente o caminho do único valor que a tela não
+    alcança, então ninguém veria o erro pela interface.
+    """
+    from app.seeds import SLA_CONFIGS
+    from scripts.aplica_sla_aprovado import APROVADOS
+
+    da_semente = {
+        c["level"].value: {
+            "response_time_minutes": c["response_time_minutes"],
+            "resolve_time_minutes": c["resolve_time_minutes"],
+        }
+        for c in SLA_CONFIGS
+    }
+
+    assert APROVADOS == da_semente
+
+
+def test_o_script_avulso_nao_escreve_em_chamado():
+    """
+    A garantia que o docstring dele promete: ele mexe em `sla_configs` e em
+    `audit_logs`, e em mais nada. Um UPDATE em `tickets` ali dentro moveria o
+    prazo de chamado já aberto — exatamente o que a regra de transição proíbe.
+    """
+    import re
+    from pathlib import Path
+
+    fonte = (
+        Path(__file__).resolve().parent.parent / "scripts" / "aplica_sla_aprovado.py"
+    ).read_text(encoding="utf-8")
+    alvos = set(re.findall(r"(?:UPDATE|INSERT INTO|DELETE FROM)\s+(\w+)", fonte))
+
+    assert alvos == {"sla_configs", "audit_logs"}, f"o script passou a escrever em: {alvos}"
