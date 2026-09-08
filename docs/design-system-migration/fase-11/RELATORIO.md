@@ -395,3 +395,122 @@ Checkpoint 3. Lá está registrada a consequência que só apareceu ao escrever:
 cancelados **consomem o limite de 500** da carga e depois são descartados, então
 chamados ativos podem ficar de fora do quadro por causa de chamados que o quadro
 não mostra.
+
+---
+
+## Etapa 7 — `TicketDetailPage`
+
+A maior tela do sistema: **2.258 linhas**. É a tela de **detalhe**, e fecha as
+três que a §25 pede.
+
+### Ficha da §29
+
+```text
+Página: /tickets/:id — src/pages/tickets/TicketDetailPage.tsx
+
+FUNCIONALIDADE
+[x] carrega dados   — `getTicket`, `getTicketHistory`, `getAttachments`,
+                      `listTicketNotes` (só staff), `getTicketSurvey`,
+                      `getTechnicians`, `getTags`
+[–] filtra  [–] busca  [–] pagina  [–] ordena
+[–] cria            — a criação é do formulário
+[x] edita           — observação do cliente, notas internas, etiquetas, status,
+                      responsável, e o link para o formulário de edição
+[x] exclui          — nota interna, com confirmação
+[x] abre detalhes   — é o detalhe
+[x] anexa/remove arquivo — `uploadAttachments`, mesmos limites
+[x] respeita permissões — notas internas só para staff; "Editar ticket" só admin
+[x] mostra erro     — `Alert variant="danger"` com `role="alert"`
+[x] mostra estado vazio — por aba, com texto
+[x] mostra loading  — `Spinner` na carga e por ação
+[x] funciona no mobile — abas roláveis, coluna única
+[x] funciona no tema escuro — zero cor crua no código
+[x] nenhum campo depende do placeholder
+[x] barras desenhadas — o SLA usa `SlaChip`, que é primitivo
+
+ACRESCENTADOS PELAS DECISÕES
+[x] o que a interface MOSTRA é o que a árvore DIZ, por estado
+    trilha        `<nav>` + `aria-current="page"`, era um botão só
+    editar        link com destino, era `onClick={navigate}`
+    prioridade    `PriorityBadge` no histórico, era texto colorido
+    abas          `Tabs` do pacote, com o contrato da E12
+[x] nenhuma ação só de mouse
+[x] nenhum `text-slate-*` sem `dark:` — 108 trocas, zero restante
+[x] nenhuma cor fora do sistema — zero
+[x] `Alert` montado por ação leva `live` ligado
+[x] nenhum primitivo reinventado — 22 ícones do bloco `IC` viraram `Icon`
+[x] a catraca desceu — 43 → 42 pares
+```
+
+### Contagem do que resta à mão
+
+```text
+src/pages/tickets/TicketDetailPage.tsx: 18
+```
+
+**Os dezoito são ação**, e nenhum ficou sem nome acessível — auditados um a um.
+São: enviar nota, excluir nota, editar observação, salvar, cancelar, alternar
+seção, alternar aba, baixar anexo, pré-visualizar, resolver, reabrir, atribuir,
+avaliar, e as confirmações de modal.
+
+SVG solto: **0**. Eram 31. Cor crua no código: **0**. Eram ~110.
+
+### Quatro mapas locais, e o nono e o décimo da prioridade
+
+| mapa | o que era |
+|---|---|
+| `STATUS_LABEL` | duplicava `lib/status.ts` |
+| `PRIORITY_LABEL` | o **nono** mapa de prioridade |
+| `PRIORITY_COLOR` | o **décimo**, e um quarto esquema: sky, yellow, orange, red |
+| `CATEGORY_LABEL` | a **terceira** cópia das oito categorias |
+
+O `PRIORITY_LABEL` daqui **já dizia o feminino certo** — foi este mapa que a
+emenda E17 citou como o lado correto da divergência. O que saiu foi a
+duplicação, não o texto.
+
+Nasceu `lib/categoria.ts`, e o `TicketFormPage` passou a consumi-lo também. As
+três cópias de categoria **concordavam** — e é exatamente assim que prioridade
+começou, antes de virar dez mapas divergentes.
+
+### Os 22 ícones, mapeados por traçado
+
+O bloco `IC` foi migrado **por desenho, não por nome**: cada traçado foi
+comparado com o `ICON_PATHS`, e **oito já existiam** — `arrowLeft`, `user`,
+`calendar`, `paperclip`, `box`, `cpu`, `close`, `plus`. Reusar o nome de lá em
+vez de criar um novo é o que o teste do `Icon` exige, porque ele proíbe traçado
+duplicado.
+
+Os outros catorze entraram em `ICON_PATHS_LOCAIS`, verbatim. E o `Icon` passou a
+aceitar **traçado múltiplo**: o olho é pupila mais contorno, e o conjunto do
+pacote é todo de traçado único, então isto é acréscimo local que não muda nada
+do que já existia.
+
+**Vários são parentes de ícones do pacote com traçado diferente** —
+`checkMark` contra `check` (o do pacote é o visto dentro do círculo), `alert`
+contra `warning` (outro triângulo), `tagOutline` contra `tag`. Ficam separados
+de propósito: unificar muda o desenho da tela, e isso é decisão de produto.
+**Fica anotado para o operador.**
+
+### As duas navegações vestidas de botão
+
+A trilha era um `<button onClick={navigate(-1)}>` com a linha inteira dentro, e
+o nome acessível do controle era **"Tickets / HS-2026-0001"** — a página de onde
+se vem e a página onde se está, num controle só. Mesma correção do
+`TicketFormPage`.
+
+E o "Editar ticket" navegava por `onClick`. O `SidebarAction` ganhou `to`, do
+mesmo jeito que o `Button` do pacote ganhou.
+
+### A linha do tempo era o caso mais claro de série categórica
+
+O ponto pintava por **tipo de campo** — criação, status, responsável,
+prioridade — com `sky`, `violet`, `emerald` e `orange` crus. Tipo de campo não
+significa nada em si, então foi para `--chart-1..4`, que é a paleta medida para
+série sem significado próprio. A cor é reforço: o rótulo do campo está ao lado.
+
+### O que ficou de propósito
+
+**A escala CSAT** foi tokenizada mas **não** ganhou as três faixas decididas
+(1–4 `danger`, 5–7 `warning`, 8–10 `success`). Ela tem Etapa marcada na Fase 16,
+e antecipá-la aqui seria mudar o desenho fora do lugar combinado. O amarelo cru
+virou o par `tint`/`on-tint` de warning, e nada mais.

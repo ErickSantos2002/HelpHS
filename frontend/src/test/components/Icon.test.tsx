@@ -63,12 +63,19 @@ describe("Icon", () => {
   });
 
   it("cada nome desenha um traçado diferente, e é o que está na tabela", () => {
+    // Alguns desenhos têm mais de um traçado — o olho é pupila mais contorno.
+    // A comparação é sobre a LISTA, e a unicidade sobre a lista inteira: dois
+    // ícones que só coincidam no primeiro traçado continuam sendo dois.
     const vistos = new Set<string>();
     for (const nome of Object.keys(ICON_PATHS) as IconName[]) {
       const el = svg(<Icon name={nome} />);
-      const d = el?.querySelector("path")?.getAttribute("d") ?? "";
-      expect(d, nome).toBe(ICON_PATHS[nome]);
-      vistos.add(d);
+      const desenhados = Array.from(el?.querySelectorAll("path") ?? []).map(
+        (p) => p.getAttribute("d") ?? "",
+      );
+      const naTabela = ICON_PATHS[nome];
+      const esperados = typeof naTabela === "string" ? [naTabela] : [...naTabela];
+      expect(desenhados, nome).toEqual(esperados);
+      vistos.add(esperados.join("|"));
     }
     expect(vistos.size).toBe(Object.keys(ICON_PATHS).length);
   });

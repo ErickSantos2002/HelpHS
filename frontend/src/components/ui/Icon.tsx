@@ -114,6 +114,48 @@ export const ICON_PATHS_LOCAIS = {
   // diferente" pegou a duplicata antes de ela existir.
   user:
     "M16 7a4 4 0 11-8 0 4 4 0 018 0zM12 14a7 7 0 00-7 7h14a7 7 0 00-7-7z",
+
+  // ── Do `TicketDetailPage`, movidos verbatim ────────────────────
+  //
+  // Varios sao PARENTES de icones do pacote com tracado diferente:
+  // `checkMark` contra `check` (o do pacote e dentro do circulo),
+  // `alert` contra `warning` (outro triangulo), `tagOutline` contra
+  // `tag`. Ficam separados de proposito — unificar muda o desenho da
+  // tela, e isso e decisao de produto. Anotado para o operador.
+  checkMark:
+    "M5 13l4 4L19 7",
+  folder:
+    "M3 7a2 2 0 012-2h3.586a1 1 0 01.707.293l1.414 1.414A1 1 0 0011.414 7H19a2 2 0 012 2v9a2 2 0 01-2 2H5a2 2 0 01-2-2V7z",
+  edit:
+    "M11 5H6a2 2 0 00-2 2v11a2 2 0 002 2h11a2 2 0 002-2v-5m-1.414-9.414a2 2 0 112.828 2.828L11.828 15H9v-2.828l8.586-8.586z",
+  lock:
+    "M12 15v2m-6 4h12a2 2 0 002-2v-6a2 2 0 00-2-2H6a2 2 0 00-2 2v6a2 2 0 002 2zm10-10V7a4 4 0 00-8 0v4h8z",
+  trash:
+    "M19 7l-.867 12.142A2 2 0 0116.138 21H7.862a2 2 0 01-1.995-1.858L5 7m5 4v6m4-6v6m1-10V4a1 1 0 00-1-1h-4a1 1 0 00-1 1v3M4 7h16",
+  refresh:
+    "M4 4v5h.582m15.356 2A8.001 8.001 0 004.582 9m0 0H9m11 11v-5h-.581m0 0a8.003 8.003 0 01-15.357-2m15.357 2H15",
+  userPlus:
+    "M18 9v3m0 0v3m0-3h3m-3 0h-3m-2-5a4 4 0 11-8 0 4 4 0 018 0zM3 20a6 6 0 0112 0v1H3v-1z",
+  download:
+    "M4 16v1a3 3 0 003 3h10a3 3 0 003-3v-1m-4-4l-4 4m0 0l-4-4m4 4V4",
+  eye: [
+    "M15 12a3 3 0 11-6 0 3 3 0 016 0z",
+    "M2.458 12C3.732 7.943 7.523 5 12 5c4.478 0 8.268 2.943 9.542 7-1.274 4.057-5.064 7-9.542 7-4.477 0-8.268-2.943-9.542-7z",
+  ],
+  alert:
+    "M12 9v2m0 4h.01m-6.938 4h13.856c1.54 0 2.502-1.667 1.732-3L13.732 4c-.77-1.333-2.694-1.333-3.464 0L3.34 16c-.77 1.333.192 3 1.732 3z",
+  tagOutline:
+    "M7 7h.01M7 3h5c.512 0 1.024.195 1.414.586l7 7a2 2 0 010 2.828l-7 7a2 2 0 01-2.828 0l-7-7A1.994 1.994 0 013 12V7a4 4 0 014-4z",
+  text:
+    "M4 6h16M4 12h16M4 18h7",
+  activity:
+    "M13 10V3L4 14h7v7l9-11h-7z",
+  star:
+    "M11.049 2.927c.3-.921 1.603-.921 1.902 0l1.519 4.674a1 1 0 00.95.69h4.915c.969 0 1.371 1.24.588 1.81l-3.976 2.888a1 1 0 00-.363 1.118l1.518 4.674c.3.922-.755 1.688-1.538 1.118l-3.976-2.888a1 1 0 00-1.176 0l-3.976 2.888c-.783.57-1.838-.197-1.538-1.118l1.518-4.674a1 1 0 00-.363-1.118l-3.976-2.888c-.784-.57-.38-1.81.588-1.81h4.914a1 1 0 00.951-.69l1.519-4.674z",
+  chatBubble:
+    "M8 10h.01M12 10h.01M16 10h.01M9 16H5a2 2 0 01-2-2V6a2 2 0 012-2h14a2 2 0 012 2v8a2 2 0 01-2 2h-5l-5 5v-5z",
+  document:
+    "M9 12h6m-6 4h6m2 5H7a2 2 0 01-2-2V5a2 2 0 012-2h5.586a1 1 0 01.707.293l5.414 5.414a1 1 0 01.293.707V19a2 2 0 01-2 2z",
 } as const;
 
 /** O conjunto que o `Icon` desenha: os do pacote mais os locais. */
@@ -149,6 +191,10 @@ export function Icon({
 }: IconProps) {
   const d = ICON_PATHS[name];
   if (!d) return null;
+  // Alguns desenhos precisam de mais de um traçado — o olho é pupila mais
+  // contorno. O conjunto do pacote é todo de traçado único, então isto é
+  // acréscimo local e não muda nada do que já existia.
+  const tracos: readonly string[] = typeof d === "string" ? [d] : d;
 
   return (
     <svg
@@ -164,7 +210,9 @@ export function Icon({
       className={cn("shrink-0", className)}
       {...props}
     >
-      <path d={d} />
+      {tracos.map((t) => (
+        <path key={t} d={t} />
+      ))}
     </svg>
   );
 }
