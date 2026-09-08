@@ -77,7 +77,12 @@ export const PRIORIDADE: Record<TicketPriority, Prioridade> = {
     rotulo: "Alta",
     variante: "warning",
     ponto: "bg-warning",
-    grafico: "var(--color-warning-500)",
+    // `--fill-warning`, e NAO `--color-warning-500`: o 500 reprova como
+    // preenchimento no tema claro, com 1,96:1 contra a superficie elevada
+    // (piso 3:1, WCAG 1.4.11). E o mesmo numero que a E16 registrou, e a mesma
+    // causa: amarelo e claro por natureza e degrau fixo nao inverte por tema.
+    // O token local resolve como `--border-control` resolve para o neutro.
+    grafico: "var(--fill-warning)",
     ordem: 1,
   },
   medium: {
@@ -107,4 +112,20 @@ export const PRIORIDADES = (
 /** O rótulo, com recuo para o valor cru quando o backend manda algo novo. */
 export function rotuloDePrioridade(p: string): string {
   return PRIORIDADE[p as TicketPriority]?.rotulo ?? p;
+}
+
+/** A variante do selo, com recuo para o neutro. */
+export function varianteDePrioridade(p: string): Variante {
+  return PRIORIDADE[p as TicketPriority]?.variante ?? "muted";
+}
+
+/**
+ * O preenchimento de série, com recuo para o neutro.
+ *
+ * O recuo é `--border-control` e não uma cor de aviso: prioridade desconhecida
+ * é ausência de informação, e pintá-la de vermelho ou âmbar afirmaria algo que
+ * não se sabe. O neutro já é medido nas três superfícies dos dois temas.
+ */
+export function graficoDePrioridade(p: string): string {
+  return PRIORIDADE[p as TicketPriority]?.grafico ?? "var(--border-control)";
 }

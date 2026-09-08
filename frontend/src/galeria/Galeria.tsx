@@ -10,6 +10,7 @@ import { Input } from "../components/ui/Input";
 import { KpiCard } from "../components/ui/KpiCard";
 import { Pagination } from "../components/ui/Pagination";
 import { RadioCards } from "../components/ui/RadioCards";
+import { PRIORIDADE, PRIORIDADES } from "../lib/prioridade";
 import { Select } from "../components/ui/Select";
 import { Selector } from "../components/ui/Selector";
 import { SlaChip } from "../components/ui/SlaChip";
@@ -75,7 +76,7 @@ const AVISOS = ["info", "success", "warning", "danger"] as const;
  *
  * Ao acrescentar um `Bloco`, ajuste este número — a suíte cobra.
  */
-export const AMOSTRAS = 15;
+export const AMOSTRAS = 16;
 
 /** `texto` cobra 4,5:1; `grafico` cobra 3:1 (WCAG 1.4.11). */
 function Bloco({
@@ -217,6 +218,45 @@ export function Galeria() {
           onChange={() => {}}
           options={[{ value: "aberto", label: "Aberto" }]}
         />
+      </Bloco>
+
+      {/*
+        As quatro cores de PRIORIDADE em gráfico, sobre as três superfícies.
+
+        Elas não saem da `--chart-*`: prioridade tem significado próprio, já
+        pintado na interface inteira, e um gráfico de prioridade com cores de
+        categoria obrigaria a consultar a legenda para algo que o resto do
+        sistema ensina pela cor.
+
+        Mas por serem preenchimento elas devem 3:1, e é aqui que isso se prova.
+        Foi assim que apareceu que `--color-warning-500` dava 1,96 no claro — e
+        o módulo passou a apontar para `--fill-warning`, que inverte por tema.
+      */}
+      <Bloco nome="Prioridade em gráfico">
+        {(
+          [
+            ["base", "bg-surface-base"],
+            ["surface", "bg-surface"],
+            ["elevada", "bg-surface-elevated"],
+          ] as const
+        ).map(([nome, classe]) => (
+          <div
+            key={nome}
+            data-superficie={"prio-" + nome}
+            className={"flex items-center gap-2 rounded-lg p-3 " + classe}
+          >
+            <span className="w-16 text-xs text-conteudo">{nome}</span>
+            {PRIORIDADES.map((p) => (
+              <span
+                key={p}
+                data-chart={p}
+                title={PRIORIDADE[p].rotulo}
+                className="block h-8 w-8 rounded"
+                style={{ background: PRIORIDADE[p].grafico }}
+              />
+            ))}
+          </div>
+        ))}
       </Bloco>
 
       {/*

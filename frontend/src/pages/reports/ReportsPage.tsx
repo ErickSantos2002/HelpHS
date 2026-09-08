@@ -13,7 +13,8 @@ import {
   XAxis,
   YAxis,
 } from "recharts";
-import { FilterSelect, Spinner } from "../../components/ui";
+import { FilterSelect, PriorityBadge, Spinner } from "../../components/ui";
+import { graficoDePrioridade, rotuloDePrioridade } from "../../lib/prioridade";
 import { plural } from "../../lib/utils";
 import { useAuth } from "../../contexts/AuthContext";
 import { useTheme } from "../../contexts/ThemeContext";
@@ -62,12 +63,15 @@ const PRIORITY_OPTIONS = [
   { value: "low",      label: "Baixa"   },
 ];
 
-const PRIORITY_COLORS: Record<string, string> = {
-  critical: "#ef4444", high: "#f97316", medium: "#eab308", low: "#22c55e",
-};
-const PRIORITY_LABELS: Record<string, string> = {
-  critical: "Crítica", high: "Alta", medium: "Média", low: "Baixa",
-};
+/*
+ * As cores e os rótulos de prioridade vinham daqui, e este era o mapa mais
+ * divergente dos seis: pintava `high` de laranja e `low` de VERDE — a mesma
+ * tinta de sucesso —, dizendo que prioridade baixa é uma coisa boa.
+ *
+ * Agora sai tudo de `lib/prioridade.ts`. O preenchimento de lá é medido: as
+ * quatro cores passam 3:1 nas três superfícies dos dois temas, e a galeria
+ * confere a cada execução.
+ */
 const CATEGORY_LABELS: Record<string, string> = {
   hardware: "Hardware", software: "Software", network: "Rede",
   access: "Acesso",   email: "E-mail",       security: "Segurança",
@@ -156,7 +160,7 @@ function FirstResponseChart({ data, gridColor, tooltipBg, tooltipBorder, tooltip
         <BarChart data={chartData} margin={{ top: 4, right: 4, left: 0, bottom: 0 }} barSize={48}>
           <CartesianGrid strokeDasharray="3 3" stroke="#2d3748" />
           <XAxis dataKey="priority" tick={{ fontSize: 10, fill: "#94a3b8" }}
-            tickFormatter={(v: string) => PRIORITY_LABELS[v] ?? v} />
+            tickFormatter={(v: string) => rotuloDePrioridade(v)} />
           <YAxis tick={{ fontSize: 10, fill: "#94a3b8" }}
             tickFormatter={(v: number) => v >= 24 ? `${(v / 24).toFixed(0)}d` : `${v}h`} />
           <Tooltip cursor={{ fill: gridColor }} wrapperStyle={{ outline: "none", border: "none" }}
@@ -164,13 +168,13 @@ function FirstResponseChart({ data, gridColor, tooltipBg, tooltipBorder, tooltip
               if (!active || !payload?.length) return null;
               return (
                 <div style={{ backgroundColor: tooltipBg, border: `1px solid ${tooltipBorder}`, borderRadius: 8, padding: "8px 12px", fontSize: 12, color: tooltipColor, outline: "none" }}>
-                  <p style={{ fontWeight: 600, marginBottom: 4 }}>{PRIORITY_LABELS[String(label)] ?? label}</p>
+                  <p style={{ fontWeight: 600, marginBottom: 4 }}>{rotuloDePrioridade(String(label))}</p>
                   <p style={{ color: "#6366f1" }}>Tempo médio: {fmtHours(payload[0].value as number)}</p>
                 </div>
               );
             }} />
           <Bar dataKey="avg_hours" radius={[4, 4, 0, 0]}>
-            {chartData.map((e) => <Cell key={e.priority} fill={PRIORITY_COLORS[e.priority] ?? "#6366f1"} />)}
+            {chartData.map((e) => <Cell key={e.priority} fill={graficoDePrioridade(e.priority)} />)}
           </Bar>
         </BarChart>
       </ResponsiveContainer>
@@ -358,10 +362,13 @@ function OldestOpenTable({ tickets }: { tickets: OldestTicketItem[] }) {
                 <td className="px-4 py-3 font-mono text-xs text-primary">{t.protocol}</td>
                 <td className="px-4 py-3 text-slate-300 max-w-[220px] truncate" title={t.title}>{t.title}</td>
                 <td className="px-4 py-3">
-                  <span className="rounded-full px-2 py-0.5 text-[10px] font-semibold"
-                    style={{ backgroundColor: `${PRIORITY_COLORS[t.priority]}22`, color: PRIORITY_COLORS[t.priority] }}>
-                    {PRIORITY_LABELS[t.priority] ?? t.priority}
-                  </span>
+                  {/*
+                    Era um selo à mão: a mesma cor como fundo a 13% de alfa e
+                    como texto. Tinta com o texto no degrau cheio é o par que a
+                    E2 e a E8 mediram e reprovaram — e aqui nem era medido, era
+                    um sufixo `22` no hexadecimal.
+                  */}
+                  <PriorityBadge priority={t.priority} />
                 </td>
                 <td className="px-4 py-3 text-slate-400 text-xs">{CATEGORY_LABELS[t.category] ?? t.category}</td>
                 <td className="px-4 py-3 text-slate-400 text-xs">{STATUS_LABELS[t.status] ?? t.status}</td>
@@ -551,7 +558,7 @@ function GlobalReport({ data }: { data: ReportData; period?: number }) {
             <BarChart data={data.sla_compliance} margin={{ top: 4, right: 4, left: -20, bottom: 0 }}>
               <CartesianGrid strokeDasharray="3 3" stroke="#2d3748" />
               <XAxis dataKey="priority" tick={{ fontSize: 10, fill: "#94a3b8" }}
-                tickFormatter={(v: string) => PRIORITY_LABELS[v] ?? v} />
+                tickFormatter={(v: string) => rotuloDePrioridade(v)} />
               <YAxis tick={{ fontSize: 10, fill: "#94a3b8" }} domain={[0, 100]}
                 tickFormatter={(v: number) => `${v}%`} />
               <Tooltip
@@ -559,13 +566,13 @@ function GlobalReport({ data }: { data: ReportData; period?: number }) {
                 wrapperStyle={tooltipWrapperStyle}
                 content={({ active, payload, label }) => (
                   <BarTooltip active={active} payload={payload as unknown as { value: number }[]} label={String(label ?? "")}
-                    labelFn={(v) => PRIORITY_LABELS[v] ?? v}
+                    labelFn={(v) => rotuloDePrioridade(v)}
                     valueFn={(v) => `${v ?? 0}%`}
                     valueLabel="Conformidade" />
                 )} />
               <Bar dataKey="compliance_rate" radius={[4, 4, 0, 0]}>
                 {data.sla_compliance.map((entry) => (
-                  <Cell key={entry.priority} fill={PRIORITY_COLORS[entry.priority] ?? "#6366f1"} />
+                  <Cell key={entry.priority} fill={graficoDePrioridade(entry.priority)} />
                 ))}
               </Bar>
             </BarChart>
@@ -607,7 +614,7 @@ function GlobalReport({ data }: { data: ReportData; period?: number }) {
                 <BarChart data={resolutionChartData} margin={{ top: 4, right: 4, left: 0, bottom: 0 }} barSize={36}>
                   <CartesianGrid strokeDasharray="3 3" stroke="#2d3748" />
                   <XAxis dataKey="priority" tick={{ fontSize: 10, fill: "#94a3b8" }}
-                    tickFormatter={(v: string) => PRIORITY_LABELS[v] ?? v} />
+                    tickFormatter={(v: string) => rotuloDePrioridade(v)} />
                   <YAxis tick={{ fontSize: 10, fill: "#94a3b8" }}
                     tickFormatter={(v: number) => v >= 24 ? `${(v / 24).toFixed(0)}d` : `${v}h`} />
                   <Tooltip cursor={{ fill: gridColor }} wrapperStyle={tooltipWrapperStyle}
@@ -615,13 +622,13 @@ function GlobalReport({ data }: { data: ReportData; period?: number }) {
                       if (!active || !payload?.length) return null;
                       return (
                         <div style={{ backgroundColor: tooltipBg, border: `1px solid ${tooltipBorder}`, borderRadius: 8, padding: "8px 12px", fontSize: 12, color: tooltipColor, outline: "none" }}>
-                          <p style={{ fontWeight: 600, marginBottom: 4 }}>{PRIORITY_LABELS[String(label)] ?? label}</p>
+                          <p style={{ fontWeight: 600, marginBottom: 4 }}>{rotuloDePrioridade(String(label))}</p>
                           <p style={{ color: "#6366f1" }}>Tempo médio: {fmtHours(payload[0].value as number)}</p>
                         </div>
                       );
                     }} />
                   <Bar dataKey="avg_hours" radius={[4, 4, 0, 0]}>
-                    {resolutionChartData.map((e) => <Cell key={e.priority} fill={PRIORITY_COLORS[e.priority] ?? "#6366f1"} />)}
+                    {resolutionChartData.map((e) => <Cell key={e.priority} fill={graficoDePrioridade(e.priority)} />)}
                   </Bar>
                 </BarChart>
               </ResponsiveContainer>

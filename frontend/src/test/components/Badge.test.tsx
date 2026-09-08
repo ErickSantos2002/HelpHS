@@ -41,6 +41,23 @@ describe("StatusBadge", () => {
 // "prioridade". O ChamadosHS ja usava esta forma, e o HelpHS tinha as duas ao
 // mesmo tempo — o Badge dizia "Alto" e o detalhe do chamado dizia "Alta".
 describe("PriorityBadge", () => {
+  it("prioridade desconhecida não derruba a tela", () => {
+    // A versão anterior fazia `PRIORIDADE[priority].variante` direto, com o
+    // tipo estreito `TicketPriority` dando a impressão de proteger. O dado vem
+    // da REDE: um valor novo no backend produzia "cannot read properties of
+    // undefined" e levava a página junto.
+    expect(() =>
+      render(<PriorityBadge priority="blocker" />),
+    ).not.toThrow();
+  });
+
+  it("prioridade desconhecida mostra o valor cru, em neutro", () => {
+    // Neutro, e não vermelho: prioridade desconhecida é AUSÊNCIA de
+    // informação, e pintá-la de perigo afirmaria algo que não se sabe.
+    render(<PriorityBadge priority="blocker" />);
+    expect(screen.getByText("blocker")).toBeInTheDocument();
+  });
+
   it("renders label for critical priority", () => {
     render(<PriorityBadge priority="critical" />);
     expect(screen.getByText("Crítica")).toBeInTheDocument();

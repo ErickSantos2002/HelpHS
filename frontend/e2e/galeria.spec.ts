@@ -357,7 +357,7 @@ const MEDIR_GRAFICO = `(() => {
       const cor = parse(getComputedStyle(am).backgroundColor);
       linhas.push({
         superficie: caixa.getAttribute("data-superficie"),
-        serie: Number(am.getAttribute("data-chart")),
+        serie: am.getAttribute("data-chart"),
         cor: getComputedStyle(am).backgroundColor,
         fundo: getComputedStyle(caixa).backgroundColor,
         lido: Boolean(cor && fundo),
@@ -370,7 +370,7 @@ const MEDIR_GRAFICO = `(() => {
 
 type Celula = {
   superficie: string;
-  serie: number;
+  serie: string;
   cor: string;
   fundo: string;
   lido: boolean;
@@ -378,7 +378,7 @@ type Celula = {
 };
 
 for (const tema of ["claro", "escuro"] as const) {
-  test("E16-b — as 18 células do tema " + tema + " passam 3:1", async ({ page }) => {
+  test("preenchimento de gráfico — as 30 células do tema " + tema + " passam 3:1", async ({ page }) => {
     await page.goto("/galeria.html");
     await conferirProduto(page);
     await page.waitForSelector("[data-galeria]");
@@ -389,8 +389,13 @@ for (const tema of ["claro", "escuro"] as const) {
 
     const celulas = (await page.evaluate(MEDIR_GRAFICO)) as Celula[];
 
-    // Piso de cobertura: 6 séries × 3 superfícies. Zero medido passaria verde.
-    expect(celulas).toHaveLength(18);
+    // Dois pisos de cobertura, separados por família. Um número só não serve:
+    // se um dos dois blocos sumisse do DOM, o total ainda poderia bater por
+    // acaso — e "mediu tudo" e "mediu metade duas vezes" se leem iguais.
+    const daPaleta = celulas.filter((c) => !c.superficie.startsWith("prio-"));
+    const daPrioridade = celulas.filter((c) => c.superficie.startsWith("prio-"));
+    expect(daPaleta, "6 séries × 3 superfícies").toHaveLength(18);
+    expect(daPrioridade, "4 prioridades × 3 superfícies").toHaveLength(12);
 
     const tabela = celulas
       .map(

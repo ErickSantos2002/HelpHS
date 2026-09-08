@@ -1,5 +1,4 @@
-import { PRIORIDADE } from "../../lib/prioridade";
-import type { TicketPriority } from "../../lib/prioridade";
+import { rotuloDePrioridade, varianteDePrioridade } from "../../lib/prioridade";
 import { cn } from "../../lib/utils";
 
 type BadgeVariant =
@@ -121,9 +120,26 @@ export function StatusBadge({ status }: { status: TicketStatus }) {
 // pelo historico. Existiam CINCO mapas divergentes nas telas mais este; o
 // rotulo tambem divergia, e a emenda E17 fixou o feminino no pacote.
 
-export function PriorityBadge({ priority }: { priority: TicketPriority }) {
-  const p = PRIORIDADE[priority];
-  return <Badge variant={p.variante}>{p.rotulo}</Badge>;
+/**
+ * Aceita `string`, e nao apenas `TicketPriority`, de proposito.
+ *
+ * A versao anterior fazia `PRIORIDADE[priority].variante` direto: uma
+ * prioridade que o backend passasse a mandar e o front ainda nao conhecesse
+ * derrubava a TELA, com "cannot read properties of undefined". O tipo estreito
+ * dava a impressao de proteger, mas o dado vem da rede — e a rede nao respeita
+ * tipo de TypeScript.
+ *
+ * Os outros dois acessores do modulo (`rotuloDePrioridade`,
+ * `graficoDePrioridade`) ja recuavam. Este era o que faltava, e o recuo e o
+ * mesmo: neutro, porque prioridade desconhecida e ausencia de informacao — e
+ * pintar de vermelho afirmaria algo que nao se sabe.
+ */
+export function PriorityBadge({ priority }: { priority: string }) {
+  return (
+    <Badge variant={varianteDePrioridade(priority)}>
+      {rotuloDePrioridade(priority)}
+    </Badge>
+  );
 }
 
 // ── Tag badge ─────────────────────────────────────────────────
