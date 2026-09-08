@@ -176,6 +176,55 @@
   --chart-5: #8f4ade;   /* violeta        */
   --chart-6: #e15a05;   /* laranja        */
 
+  /* E18 — o setimo slot, para o grafico de STATUS.
+     Buscado na mesma regua da E16-b: >= 3:1 contra as tres superficies e
+     DeltaE >= 20 contra as seis, nas quatro visoes. Pior par: 21,7 float /
+     21,9 arredondado, contra --chart-1 em protanopia. Publica-se o 21,7.
+     Contraste 3,53 / 3,69 / 3,37.
+
+     A margem e ESTREITA. De 140.608 candidatos em grade de 5, passam 4.326 —
+     mas so NOVE ficam dentro da faixa de luminancia E de croma das seis. As
+     demais leem como texto (quase-pretas) ou como fundo. Nao ha folga para uma
+     oitava serie, e mudar qualquer uma das seis exige refazer esta busca. */
+  --chart-7: #7d7dcd;   /* pervinca       */
+
+  /* E19 — as semanticas na forca de PREENCHIMENTO.
+     O pacote tinha token para a semantica como texto (--on-tint-*), como acao
+     (--action-danger/success) e como tinta (--tint-*). Nao tinha para
+     preenchimento — barra, ponto, fatia, anel — e o degrau canonico nao serve:
+     contra as tres superficies do CLARO, warning-500 da 1,96 e success-500 da
+     2,54, contra um piso de 3:1 (WCAG 1.4.11). Duas das quatro reprovam, e a
+     causa e a de sempre: degrau fixo nao inverte por tema.
+
+     O pacote ja resolve esse caso para o NEUTRO com --border-control, e e por
+     isso que a prioridade "baixa" sempre passou. Estes quatro fazem o mesmo
+     para as semanticas.
+
+     Criterio: o degrau mais proximo do 500 que passa 3:1 nas tres superficies
+     do tema. Perto do 500 de proposito — a cor tem de continuar lendo como a
+     semantica que representa, e a busca sem esse desempate vai aos extremos.
+
+     Medido, base / surface / elevada:
+       --fill-info      3,52 / 3,68 / 3,36
+       --fill-success   3,60 / 3,77 / 3,44
+       --fill-warning   4,80 / 5,02 / 4,58
+       --fill-danger    3,60 / 3,76 / 3,44
+
+     `info` e `danger` levam o mesmo degrau nos dois temas, e mesmo assim estao
+     declarados dos dois lados: token e papel, e papel existe nos dois temas.
+     Declarar so aqui funciona por heranca ate o dia em que a rampa mudar de um
+     lado so, e ai quem for consertar precisa primeiro descobrir que falta um
+     bloco.
+
+     NAO ha --fill-primary: o papel de acao ja e do --action. NAO ha
+     --fill-muted: o --border-control ja e o neutro que inverte. E texto sobre
+     estas quatro e outra pergunta, com piso 4,5:1 — nenhuma foi medida
+     para isso. */
+  --fill-info: var(--color-info-500);
+  --fill-success: var(--color-success-600);
+  --fill-warning: var(--color-warning-700);
+  --fill-danger: var(--color-danger-500);
+
   /* Toast — consumidos em JS pela biblioteca (react-hot-toast no ChamadosHS,
    * sonner no HelpHS), que recebe um objeto de estilo e não enxerga classe. */
   --toast-bg: var(--color-white);
@@ -276,4 +325,18 @@
   --chart-4: #ee1178;   /* rosa    */
   --chart-5: #9e53f3;   /* violeta */
   --chart-6: #c8c300;   /* oliva   */
+
+  /* E18 — ver a nota no :root. Pior par 24,6 (float e arredondado), contra
+     --chart-2 em deuteranopia. Contraste 9,33 / 8,57 / 7,27. */
+  --chart-7: #91cd82;   /* salvia  */
+
+  /* E19 — ver a nota no :root. Medido, base / surface / elevada:
+       --fill-info      4,73 / 4,35 / 3,69
+       --fill-success   6,86 / 6,30 / 5,34
+       --fill-warning   8,10 / 7,44 / 6,31
+       --fill-danger    4,62 / 4,25 / 3,60 */
+  --fill-info: var(--color-info-500);
+  --fill-success: var(--color-success-500);
+  --fill-warning: var(--color-warning-500);
+  --fill-danger: var(--color-danger-500);
 }
