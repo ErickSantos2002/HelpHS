@@ -133,6 +133,19 @@ migração, e nenhum por leitura do código.
 Escreva casos sobre **o que a tela promete**, não sobre a implementação:
 o rótulo que o usuário lê, o papel acessível do controle, a legenda existir.
 
+### Mutação por CLASSE não vale, e isso já enganou o orquestrador
+
+O jsdom **não aplica CSS nenhum**. Trocar `sr-only` por `hidden` não esconde
+coisa alguma de um `getByText` — o elemento continua na árvore, o teste continua
+passando, e o mutante sobrevive por um motivo que não tem nada a ver com o que o
+caso mede. Um teste de acessibilidade que afirmasse `toHaveClass("sr-only")`
+teria o mesmo defeito na direção oposta: passaria com a classe presente e o
+elemento invisível de verdade.
+
+Mute **o elemento**, não a classe dele: apague o `<span>`, inverta a condição,
+troque o texto. E teste pelo que o usuário alcança — `getByRole`, `getByText`,
+nome acessível —, nunca pela classe.
+
 ---
 
 ## 6. A ficha da §29
