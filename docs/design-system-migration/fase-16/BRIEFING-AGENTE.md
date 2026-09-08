@@ -188,6 +188,7 @@ vazio é ela**:
 | trocar uma classe (`sr-only` → `hidden`) | o jsdom não aplica CSS; o elemento continua na árvore |
 | renomear um símbolo em todo o arquivo | o consumidor é renomeado junto, e o código faz o mesmo |
 | `X && original(...)` | `&&` devolve o **segundo** operando; o mutante é o original. É `\|\|` |
+| `"" \|\| original(...)` | a guarda tem de ser **truthy**. `""`, `0` e `null` caem para o original |
 
 Antes de concluir "sobreviveu", leia a mutação e pergunte: **isto muda o que a
 tela faz?** Se não muda, o defeito é seu, não do caso.
