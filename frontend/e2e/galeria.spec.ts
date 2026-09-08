@@ -30,6 +30,51 @@ const AMOSTRAS = (() => {
 })();
 
 /**
+ * A trava de PRODUTO, antes da trava de página.
+ *
+ * São coisas diferentes e nenhuma substitui a outra: esta responde "estou no
+ * HelpHS?", e a de `data-galeria` responde "esta página é a galeria deste
+ * código?". O incidente que as comprou mostrou por quê — a suíte inteira do
+ * HelpHS rodou contra o **ChamadosHS**, que respondia 404 nas rotas dela.
+ *
+ * A porta exclusiva protege por **acordo**; a identidade protege quando o
+ * acordo falha — um checkout antigo ainda de pé, uma porta reaproveitada num
+ * túnel, um endereço colado de outro contexto. Combinação se quebra sem avisar.
+ *
+ * O critério é o marcador de estrutura, **nunca o título**. Título muda por
+ * rota, então uma trava baseada nele reprovaria telas legítimas. O título entra
+ * no relatório como contexto, para quem lê entender o que foi abraçado.
+ *
+ * **Falha fechada:** marcador ausente BLOQUEIA. Liberar por omissão é
+ * exatamente o modo de falhar que ela existe para não ter. O par disso é o caso
+ * que confere que os `.html` declaram o marcador — um garante que a ausência
+ * bloqueia, o outro que a presença existe onde precisa.
+ *
+ * Decisão registrada no `DECISOES.md`, escopo "vale para os dois":
+ * HelpHS na 5190, ChamadosHS na 5191, ambas com `strictPort`.
+ */
+const PRODUTO = "helphs";
+
+async function conferirProduto(page: import("@playwright/test").Page) {
+  const marcador = await page.evaluate(() =>
+    document.documentElement.getAttribute("data-app"),
+  );
+  if (marcador === PRODUTO) return;
+
+  const titulo = await page.title();
+  const onde = page.url();
+  throw new Error(
+    marcador === null
+      ? `sem marcador de produto em ${onde} (título "${titulo}"). Falha fechada: ` +
+        `sem data-app no <html> não há como saber de quem é a página, e liberar ` +
+        `por omissão é o modo de falhar que esta trava existe para não ter.`
+      : `a página em ${onde} é do produto "${marcador}", e não do "${PRODUTO}" ` +
+        `(título "${titulo}"). Servidor do outro produto: confira quem está na ` +
+        `porta 5190 — o HelpHS mora nela com strictPort.`,
+  );
+}
+
+/**
  * A galeria, medida no navegador de verdade.
  *
  * Por que este arquivo existe, com o caso que o comprou: na Fase 7 a medição de
@@ -238,6 +283,7 @@ const CANARIO = `(() => {
  */
 test("no RadioCards, a opção escolhida pinta diferente da livre", async ({ page }) => {
   await page.goto("/galeria.html");
+  await conferirProduto(page);
   await page.waitForSelector("[data-galeria]");
 
   const bloco = page.locator('[data-bloco="RadioCards"]');
@@ -334,6 +380,7 @@ type Celula = {
 for (const tema of ["claro", "escuro"] as const) {
   test("E16-b — as 18 células do tema " + tema + " passam 3:1", async ({ page }) => {
     await page.goto("/galeria.html");
+    await conferirProduto(page);
     await page.waitForSelector("[data-galeria]");
     if (tema === "escuro") {
       await page.getByTestId("alternar-tema").click();
@@ -371,8 +418,31 @@ for (const tema of ["claro", "escuro"] as const) {
   });
 }
 
+/**
+ * O par da falha fechada.
+ *
+ * A trava de produto bloqueia quando o marcador falta — e é isso que se quer.
+ * Sem este caso, alguém tirando o `data-app` do `index.html` faria **toda**
+ * captura parar, e o relatório diria "sem marcador de produto" sem que ninguém
+ * soubesse que o conserto é uma linha de HTML.
+ *
+ * Um garante que a ausência bloqueia; este garante que a presença existe onde
+ * precisa existir. Lido do disco, não do navegador: é o arquivo que declara.
+ */
+test("as entradas HTML declaram o produto", () => {
+  const raiz = dirname(fileURLToPath(import.meta.url));
+  for (const arquivo of ["index.html", "galeria.html"]) {
+    const html = readFileSync(resolve(raiz, "..", arquivo), "utf-8");
+    expect(html, `${arquivo} precisa declarar data-app="${PRODUTO}" no <html>`).toContain(
+      `data-app="${PRODUTO}"`,
+    );
+  }
+});
+
 test("o marcador da galeria não existe fora dela", async ({ page }) => {
   await page.goto("/uma-rota-que-nao-existe");
+  // A 404 da SPA e do HelpHS: o marcador de PRODUTO libera; o de PAGINA, nao.
+  await conferirProduto(page);
   await expect(page.locator("[data-galeria]")).toHaveCount(0);
 });
 
@@ -381,6 +451,7 @@ for (const tema of ["claro", "escuro"] as const) {
     page,
   }) => {
     await page.goto("/galeria.html");
+    await conferirProduto(page);
 
     // ── Canário de página, ANTES de qualquer captura ────────────────────
     //
