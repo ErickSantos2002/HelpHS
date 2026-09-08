@@ -105,14 +105,46 @@ describe("Icon", () => {
       .join("\n");
     const hash = createHash("sha256").update(serial, "utf-8").digest("hex");
     expect(hash.toUpperCase()).toBe(
-      // Trocado na E20 e de novo na E21 — as duas vezes pelo segundo dos dois
+      // Trocado na E20, na E21 e na E21-b — as três vezes pelo segundo dos dois
       // casos que o comentário acima prevê: o pacote mudou, e a tabela foi
       // REGERADA a partir dele por extração, com os 62 traçados conferidos
       // caractere a caractere dos dois lados antes de o número ser trocado.
       // O primeiro caso (alguém editou à mão) continua sendo motivo para
       // investigar, não para trocar o número.
-      "9A646DC83EB4976B89B391BF17BA51ACDE4EAE7B483A993DDA8FBC5B4844B725",
+      //
+      // ⚠️ E a E21-b ensinou o limite deste caso: ele passou verde com os dois
+      // polegares TROCADOS DE NOME, porque o hash foi calculado sobre a tabela
+      // errada. Hash prova que ninguém mexeu depois; não prova que estava certo
+      // antes. É por isso que existe o caso da geometria, logo abaixo.
+      "42F3A276E0477FFF5DB82069E251117CE1ECAD44575093C07E42B449545650B6",
     );
+  });
+
+  it("o polegar de `thumbsUp` aponta para CIMA, e o de `thumbsDown` para baixo", () => {
+    // O caso que a **E21-b** comprou com um defeito. Na E21 os dois nasceram
+    // com os nomes trocados, e NADA acusou: a contagem estava certa (16 nomes
+    // novos), a unicidade estava certa (os traçados eram distintos), e o hash
+    // estava certo — porque foi calculado sobre a tabela errada.
+    //
+    // `ICON_PATHS` é mapa de texto. Nome e desenho não têm relação nenhuma que
+    // o TypeScript, o `tsc` ou uma revisão de diff consigam conferir. A troca
+    // só produziu sintoma na tela que usa os dois lado a lado, num botão "Sim"
+    // e num "Não" — e foi lá que apareceu.
+    //
+    // O que se mede aqui é a GEOMETRIA, e ela é legível no traçado: o punho é
+    // o retângulo do pulso, e o lado da figura em que ele está diz para onde o
+    // polegar aponta.
+    //
+    //   punho ancorado em y=20 (embaixo)  → a mão está acima  → polegar SOBE
+    //   punho começando em y≈4 (no alto)  → a mão está abaixo → polegar DESCE
+    //
+    // Este caso reprova o conserto ingênuo — trocar os nomes de volta "porque
+    // parecia errado" —, que é exatamente o risco de um defeito assim.
+    expect(ICON_PATHS.thumbsUp).toMatch(/M7 20H5a2 2 0 01-2-2v-6a2 2 0 012-2h2\.5$/);
+    expect(ICON_PATHS.thumbsDown).toMatch(/m5-10h2a2 2 0 012 2v6a2 2 0 01-2 2h-2\.5$/);
+
+    // E os dois não podem ser o mesmo desenho, que é o outro jeito de errar.
+    expect(ICON_PATHS.thumbsUp).not.toBe(ICON_PATHS.thumbsDown);
   });
 
   it("nome desconhecido não desenha nada, em vez de um quadrado vazio", () => {
