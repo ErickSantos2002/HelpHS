@@ -37,6 +37,13 @@ export default {
           hover: tk("--action-hover"),
           tint: tk("--action-tint"),
 
+          // O par de borda do `--action-tint`. Existia no `colors.css` desde
+          // sempre e nunca foi mapeado aqui — então quem precisava da borda do
+          // realce de ação escrevia `border-action/30`, que é OUTRA cor: no
+          // tema claro o token é `--color-primary-100` e o atalho é o `--action`
+          // a 30%. Achado pelo agente do `ReportsPage`, que precisou dele.
+          "tint-border": tk("--action-tint-border"),
+
           // Emenda E2 do pacote: `danger` e `success` ganham degrau de ação
           // próprio, como o primário já tinha. A cor cheia da rampa (o 500)
           // reprova com texto branco — 3,76:1 e 2,54:1.

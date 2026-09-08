@@ -938,7 +938,7 @@ function TechnicianRanking({ data, onSelect }: { data: TechnicianListReport; onS
                 */}
                 <button onClick={() => onSelect(t.technician_id)}
                   aria-label={`Detalhes de ${t.technician_name}`}
-                  className="rounded-lg border border-action/30 bg-action-tint px-2.5 py-1 text-xs font-medium text-conteudo-link hover:bg-action/20 transition-colors cursor-pointer">
+                  className="rounded-lg border border-action-tint-border bg-action-tint px-2.5 py-1 text-xs font-medium text-conteudo-link hover:bg-action/20 transition-colors cursor-pointer">
                   Detalhes
                 </button>
               </TableCell>
