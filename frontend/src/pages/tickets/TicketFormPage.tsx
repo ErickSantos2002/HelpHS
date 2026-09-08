@@ -129,7 +129,13 @@ function StepIndicator({ current }: { current: 1 | 2 }) {
                   // existe para tornar impossível.
                   ? "bg-action-success text-on-success"
                   : atual
-                    ? "bg-primary text-on-primary"
+                    // `bg-action`, e NAO `bg-primary`: o par de
+                    // `text-on-primary` e o degrau de ACAO, e o comentario do
+                    // tailwind.config diz isso com todas as letras. Sobre o
+                    // degrau de MARCA o mesmo texto da 3,83 no claro e 3,59 no
+                    // escuro. Mesma familia do `bg-success` que a catraca pegou
+                    // duas telas atras — o par certo com o fundo errado.
+                    ? "bg-action text-on-primary"
                     : "bg-surface-elevated text-conteudo-muted",
               )}
               aria-hidden="true"

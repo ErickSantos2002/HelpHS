@@ -526,7 +526,7 @@ export default function TicketListPage() {
             <button
               type="button"
               onClick={() => { setSearch(""); setFilterPriority(""); setFilterAssignee("all"); }}
-              className="flex items-center gap-1.5 text-xs font-medium text-conteudo-muted hover:text-danger transition-colors cursor-pointer px-2 py-2 rounded-lg border border-borda/40 hover:border-danger/30"
+              className="flex items-center gap-1.5 text-xs font-medium text-conteudo-muted hover:text-on-tint-danger transition-colors cursor-pointer px-2 py-2 rounded-lg border border-borda/40 hover:border-danger/30"
             >
               <Icon name="close" size={14} strokeWidth={2.5} />
               Limpar

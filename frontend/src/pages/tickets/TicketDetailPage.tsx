@@ -1287,7 +1287,7 @@ export default function TicketDetailPage() {
                 <div className="px-5 py-5">
                   {visibleHistory.length === 0 ? (
                     <div className="py-10 text-center">
-                      <div className="mx-auto mb-3 flex h-12 w-12 items-center justify-center rounded-full bg-surface-elevated text-conteudo-faint">
+                      <div className="mx-auto mb-3 flex h-12 w-12 items-center justify-center rounded-full bg-surface-elevated text-conteudo-muted">
                         <Icon name="activity" size={16} strokeWidth={2} />
                       </div>
                       <p className="text-sm text-conteudo-muted">Sem histórico de atividades.</p>
@@ -1326,7 +1326,7 @@ export default function TicketDetailPage() {
                 <div className="p-5">
                   {attachments.length === 0 ? (
                     <div className="py-10 text-center">
-                      <div className="mx-auto mb-3 flex h-12 w-12 items-center justify-center rounded-full bg-surface-elevated text-conteudo-faint">
+                      <div className="mx-auto mb-3 flex h-12 w-12 items-center justify-center rounded-full bg-surface-elevated text-conteudo-muted">
                         <Icon name="paperclip" size={16} strokeWidth={2} />
                       </div>
                       <p className="text-sm text-conteudo-muted">Nenhum anexo adicionado.</p>
