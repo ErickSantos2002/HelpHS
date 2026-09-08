@@ -827,6 +827,48 @@ Decisões:
   roteador divide o contador. Se algum cliente sentir o limite, o ajuste é a
   env var no painel — não é mudança de código.
 
+## Testes
+
+### Teste cuja garantia É uma cláusula `WHERE` não vai em mock
+
+Regra nascida de um defeito medido, não de preferência.
+
+A suíte do backend mocka a sessão do banco. O mock devolve o resultado que o
+teste combinou de antemão — ele **não olha a consulta**. Isso isola bem quem
+depende do banco, e não prova nada sobre quem depende do `WHERE`.
+
+Como isso apareceu: a guarda de silêncio da Helô (`_humano_ja_esta_na_conversa`)
+pergunta se alguém da equipe já falou no chamado, com três condições no
+`WHERE` — o chamado, a junção com o autor e o papel dele. **Removendo o filtro
+por papel, os 39 testes de `test_helo.py` continuavam verdes.** Sem esse filtro
+a consulta casaria a mensagem do próprio cliente, que está sempre presente
+quando a Helô vai responder: ela ficaria muda em todo chamado, para sempre. Um
+defeito de comportamento total, invisível para a suíte inteira.
+
+**A regra:** quando o que o teste promete garantir é o conteúdo de um `WHERE` —
+um filtro por papel, por dono, por escopo de empresa, um `EXISTS`, um `JOIN`
+que decide inclusão — o teste vai para um arquivo `*_postgres.py`, que executa
+a consulta contra PostgreSQL de verdade. Mock continua certo para o resto:
+ramificação, contrato de rota, texto, erro de provedor.
+
+Os arquivos `*_postgres.py` (`test_helo_postgres.py`,
+`test_dashboard_postgres.py`, `test_tickets_postgres.py`,
+`test_migrations_postgres.py`) leem `TEST_POSTGRES_URL` quando existe — o CI
+passa a variável (`.github/workflows/ci.yml`), então **eles rodam no gate** —
+e senão sobem um Postgres efêmero via `pgserver`. Sem nenhum dos dois, pulam
+em vez de falhar: quem não tem Postgres à mão continua rodando a suíte inteira.
+
+⚠️ **O alcance disto é maior do que a Helô.** Se o mock responde sem olhar a
+consulta, então **toda** cláusula `WHERE` coberta apenas por mock está sem
+cobertura de fato — inclusive as de escopo por cliente e por empresa, que são
+as mais valiosas do sistema. O que existe hoje em `*_postgres.py` é um começo,
+não um inventário. Ao mexer numa consulta cuja correção é o filtro, presuma
+que ela não está coberta e confira.
+
+**Como conferir se um teste prova o que diz:** apague a cláusula do código e
+rode. Se nenhum teste cair, o teste não cobre a cláusula — cobre o caminho até
+ela.
+
 # Pendências conhecidas
 
 ## Dívidas com gatilho — escolhas conscientes, não esquecimentos
@@ -844,6 +886,7 @@ por inércia.
 | ~~**Sem MFA para contas de staff**~~ | **Quitada em 26/08/2026** — ver "Segundo fator" abaixo. | — |
 | **Access token sobrevive à revogação de sessão** | Ativar ou desligar o segundo fator apaga o refresh, despejando as sessões. Os access tokens já emitidos, porém, valem até o próprio vencimento: a exposição cai de 7 dias para 8 h, não para zero. Fechar de verdade pede um `sessions_valid_after` conferido no `get_current_user`. | Houver incidente real de sessão comprometida — ou o TTL do access subir. |
 | **Não existe mais o tempo de espera por um HUMANO** | Consequência aceita da decisão de 28/08/2026 (ver "O que conta como primeira resposta"): com a Helô carimbando, o único tempo gravado é o dela. Quanto o cliente esperou até alguém de carne e osso responder deixou de entrar no banco — e por isso **não volta por filtro nem por relatório**, só por coluna nova. | A operação precisar cobrar prazo da equipe, ou alguém estranhar o indicador vivendo em 100%. A saída é um campo próprio (`sla_first_human_response`), carimbado no mesmo ponto e com a guarda de autor que valia antes. |
+| **Escalar não desliga a IA no chamado** | O desenho da Helô diz que a escalação "muda o status, notifica a equipe e desliga a IA". Só a segunda existe: quando o cliente pede uma pessoa, `ticket.ai_enabled` continua `True`. O silêncio dela vem do teto de falas (`FALAS_MAXIMAS = 2`) e da guarda de humano na conversa — não de a IA ter sido desligada. Hoje o efeito é pequeno: ela já não tem fala sobrando, e o que sobra ligado é a IA de apoio ao técnico (`suggest-reply`, `summarize`), que o cliente não vê. | **A Fase 2.** Com ela resolvendo, o teto sobe de 2 para muitas falas por chamado, e o teto deixa de ser o que a cala. Aí "pedi para falar com uma pessoa" precisa desligar a IA de verdade naquele chamado, senão o robô volta a falar depois de ter aceitado o "não" — que o desenho chama de pior que robô nenhum. O conserto é uma linha (`ticket.ai_enabled = False` no caminho de escalada); o que não pode é descobrir isso depois de subir a Fase 2. |
 | **Contador de artigo útil sem voto identificado** | `POST /kb/articles/{id}/feedback` incrementa sem registrar quem votou; o mesmo usuário incrementa em laço. Não vaza nada. | O número for usado para decidir alguma coisa. |
 | **Antivírus aceita quando está fora do ar** | Bloquear upload com o ClamAV indisponível derrubaria o anexo por falha de infraestrutura. Hoje o estado é reportado, não mais silencioso, e há script de revarredura. | O ClamAV estiver no ambiente e estável — aí bloquear passa a custar pouco. |
 
