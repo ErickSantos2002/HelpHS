@@ -1,8 +1,20 @@
-import { useEffect, useState } from "react";
-import { useNavigate, useParams } from "react-router-dom";
+import { useEffect, useId, useState } from "react";
+import { Link, useNavigate, useParams } from "react-router-dom";
 import { toastApiError } from "../../lib/toastError";
 import { renderMarkdown } from "../../lib/markdown";
-import { Button, Checkbox, Input, Spinner, Textarea } from "../../components/ui";
+import {
+  Badge,
+  Button,
+  Card,
+  Checkbox,
+  Icon,
+  Input,
+  Select,
+  Spinner,
+  Textarea,
+  type BadgeProps,
+} from "../../components/ui";
+import { CATEGORIAS, rotuloDeCategoria } from "../../lib/categoria";
 import { useAuth } from "../../contexts/AuthContext";
 import {
   createKBArticle,
@@ -14,91 +26,184 @@ import { getProducts, type Product } from "../../services/productService";
 
 // ── Constants ─────────────────────────────────────────────────
 
-const CATEGORIES = [
-  { value: "hardware", label: "Hardware" }, { value: "software", label: "Software" },
-  { value: "network",  label: "Rede"      }, { value: "access",   label: "Acesso"    },
-  { value: "email",    label: "E-mail"    }, { value: "security", label: "Segurança" },
-  { value: "general",  label: "Geral"     }, { value: "other",    label: "Outro"     },
+/**
+ * As categorias saem de `lib/categoria.ts`, e não da quinta cópia.
+ *
+ * O mapa local desta tela repetia, valor a valor, o que a `TicketFormPage`, a
+ * `TicketDetailPage`, a `ReportsPage` e a `KBArticlePage` já liam do módulo.
+ * As cinco diziam a mesma coisa hoje — e é exatamente por isso que valia
+ * unificar antes de divergirem, que foi o que aconteceu com prioridade em dez
+ * mapas e com status em três.
+ *
+ * A lista de opções nasce no módulo e é derivada uma vez, fora do componente:
+ * derivá-la a cada render criaria um array novo por render sem nenhum ganho.
+ */
+const OPCOES_DE_CATEGORIA = CATEGORIAS.map((c) => ({
+  value: c.value,
+  label: c.label,
+}));
+
+/**
+ * Os três estados de um artigo da base — e este mapa continua LOCAL de
+ * propósito.
+ *
+ * `lib/status.ts` é a fonte única do status de CHAMADO: sete valores, outro
+ * vocabulário, outro ciclo de vida. Estado de ARTIGO
+ * (rascunho/publicado/arquivado) não tem módulo nenhum, e criar um significa
+ * escrever em `src/lib/`, que está fora do escopo desta tela. Fica aqui, e o
+ * operador foi avisado — a `KBListPage` tem a segunda cópia, com os mesmos
+ * três hexadecimais que saíram daqui.
+ *
+ * ── O que os três hexadecimais eram ───────────────────────────────────
+ *
+ * `#f59e0b`, `#10b981` e `#64748b` são amber-500, emerald-500 e slate-500: os
+ * três eram **decisão de desenho** cravada em `style`, nenhum era dado vindo
+ * da rede. Viraram token, na força de PREENCHIMENTO da E19 — o degrau 500 cheio
+ * reprova o piso de 3:1 da WCAG 1.4.11 no tema claro (warning 1,96; success
+ * 2,54) e degrau fixo não inverte por tema. O neutro do "Arquivado" virou
+ * `--border-control`, que **é** slate-500 desde a E7: mesmo valor, agora com
+ * nome.
+ *
+ * ── As classes vão por EXTENSO, e isso não é estilo ───────────────────
+ *
+ * O Tailwind gera utilitário varrendo o texto do arquivo. `"bg-fill-" + tom`
+ * some da varredura, a regra não nasce, o ponto fica sem cor — e não há erro
+ * nem aviso.
+ */
+interface EstadoDoArtigo {
+  value: KBArticleStatus;
+  label: string;
+  /** A variante do `Badge`: o vocabulário do primitivo, não um segundo. */
+  variante: NonNullable<BadgeProps["variant"]>;
+  /** Classe de fundo do ponto, escrita por extenso. */
+  ponto: string;
+}
+
+const ESTADOS_DO_ARTIGO: readonly EstadoDoArtigo[] = [
+  { value: "draft", label: "Rascunho", variante: "warning", ponto: "bg-fill-warning" },
+  { value: "published", label: "Publicado", variante: "success", ponto: "bg-fill-success" },
+  { value: "archived", label: "Arquivado", variante: "secondary", ponto: "bg-borda-control" },
 ];
 
-const STATUS_OPTIONS: { value: KBArticleStatus; label: string; dot: string }[] = [
-  { value: "draft",     label: "Rascunho",  dot: "#f59e0b" },
-  { value: "published", label: "Publicado", dot: "#10b981" },
-  { value: "archived",  label: "Arquivado", dot: "#64748b" },
-];
+const OPCOES_DE_ESTADO = ESTADOS_DO_ARTIGO.map((e) => ({
+  value: e.value,
+  label: e.label,
+}));
 
-const STATUS_CONFIG: Record<KBArticleStatus, { cls: string }> = {
-  published: { cls: "bg-success/10 text-success-700 dark:text-success-400 border-success/30" },
-  draft:     { cls: "bg-warning/10 text-warning-700 dark:text-warning-400 border-warning/30" },
-  archived:  { cls: "bg-surface-elevated text-slate-500 border-borda/50"                  },
-};
-
-// ── Icons ─────────────────────────────────────────────────────
-
-const IC = {
-  ArrowLeft: <svg className="w-3.5 h-3.5" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2.5}><path strokeLinecap="round" strokeLinejoin="round" d="M10 19l-7-7m0 0l7-7m-7 7h18" /></svg>,
-  Eye: <svg className="w-3.5 h-3.5" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}><path strokeLinecap="round" strokeLinejoin="round" d="M15 12a3 3 0 11-6 0 3 3 0 016 0z" /><path strokeLinecap="round" strokeLinejoin="round" d="M2.458 12C3.732 7.943 7.523 5 12 5c4.478 0 8.268 2.943 9.542 7-1.274 4.057-5.064 7-9.542 7-4.477 0-8.268-2.943-9.542-7z" /></svg>,
-  Edit: <svg className="w-3.5 h-3.5" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}><path strokeLinecap="round" strokeLinejoin="round" d="M11 5H6a2 2 0 00-2 2v11a2 2 0 002 2h11a2 2 0 002-2v-5m-1.414-9.414a2 2 0 112.828 2.828L11.828 15H9v-2.828l8.586-8.586z" /></svg>,
-  Info: <svg className="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}><path strokeLinecap="round" strokeLinejoin="round" d="M13 16h-1v-4h-1m1-4h.01M21 12a9 9 0 11-18 0 9 9 0 0118 0z" /></svg>,
-};
+/**
+ * O estado com recuo para neutro, pelo mesmo motivo do `PriorityBadge`: o dado
+ * vem da REDE, e um estado novo no backend não pode derrubar a tela nem pintar
+ * de verde algo que não se sabe o que é.
+ */
+function estadoDoArtigo(valor: string): EstadoDoArtigo {
+  return (
+    ESTADOS_DO_ARTIGO.find((e) => e.value === valor) ?? {
+      value: "draft",
+      label: valor,
+      variante: "secondary",
+      ponto: "bg-borda-control",
+    }
+  );
+}
 
 // ── Content editor ────────────────────────────────────────────
 
 function ContentEditor({ value, onChange, error }: { value: string; onChange: (v: string) => void; error?: string }) {
   const [tab, setTab] = useState<"write" | "preview">("write");
+  // O rótulo era um `<label>` sem `htmlFor` sobre um `Textarea` que gera o
+  // próprio `id` internamente: visualmente colados, sem relação nenhuma para
+  // um leitor de tela. O `id` nasce aqui e vai para os dois.
+  const idConteudo = useId();
   const html = renderMarkdown(value);
 
   return (
     <div className="space-y-2">
       <div className="flex items-center justify-between">
-        <label className="text-sm font-medium text-slate-300">Conteúdo <span className="text-danger">*</span></label>
+        {/*
+          Enquanto a aba de pré-visualização está aberta o campo não existe no
+          DOM, e o `htmlFor` fica apontando para nada — inerte, sem efeito
+          colateral. O rótulo volta a nomear o campo junto com a aba "Editar",
+          que é onde se digita.
+        */}
+        <label htmlFor={idConteudo} className="text-sm font-medium text-conteudo">
+          Conteúdo <span className="text-on-tint-danger">*</span>
+        </label>
         <div className="flex rounded-lg border border-borda/50 overflow-hidden text-xs">
+          {/*
+            As duas abas são um alternador de dois estados, e o estado só era
+            dito pela tinta. `aria-pressed` diz qual está aberta a quem não vê
+            a tinta — mesma correção dos botões de voto da `KBArticlePage`.
+          */}
           <button
             type="button"
             onClick={() => setTab("write")}
-            className={`flex items-center gap-1.5 px-3 py-1.5 transition-colors cursor-pointer ${tab === "write" ? "bg-surface-elevated text-slate-200" : "text-slate-500 hover:text-slate-300"}`}
+            aria-pressed={tab === "write"}
+            className={`flex items-center gap-1.5 px-3 py-1.5 transition-colors cursor-pointer ${tab === "write" ? "bg-surface-elevated text-conteudo-heading" : "text-conteudo-muted hover:text-conteudo"}`}
           >
-            {IC.Edit} Editar
+            <Icon name="edit" size={14} strokeWidth={2} /> Editar
           </button>
           <button
             type="button"
             onClick={() => setTab("preview")}
-            className={`flex items-center gap-1.5 px-3 py-1.5 border-l border-borda/50 transition-colors cursor-pointer ${tab === "preview" ? "bg-surface-elevated text-slate-200" : "text-slate-500 hover:text-slate-300"}`}
+            aria-pressed={tab === "preview"}
+            className={`flex items-center gap-1.5 px-3 py-1.5 border-l border-borda/50 transition-colors cursor-pointer ${tab === "preview" ? "bg-surface-elevated text-conteudo-heading" : "text-conteudo-muted hover:text-conteudo"}`}
           >
-            {IC.Eye} Preview
+            <Icon name="eye" size={14} strokeWidth={2} /> Preview
           </button>
         </div>
       </div>
 
       {tab === "write" ? (
-        <>
-          <Textarea
-            value={value}
-            onChange={(e) => onChange(e.target.value)}
-            placeholder={"## Título\n\nDescrição do problema...\n\n### Solução\n\n1. Passo um\n2. Passo dois\n\n**Nota:** informação importante"}
-            rows={18}
-            error={error}
-          />
-          <p className="text-xs text-slate-600">Suporta Markdown: **negrito**, *itálico*, ## títulos, listas, `código`, links</p>
-        </>
+        // A ajuda de Markdown era um `<p>` solto ao lado do campo: junto na
+        // tela, sem relação nenhuma na árvore de acessibilidade. Como `hint`
+        // ela entra no `aria-describedby` do primitivo — e cede a vez ao erro
+        // quando há erro, que é a regra do `Input`/`Textarea` do pacote.
+        <Textarea
+          id={idConteudo}
+          value={value}
+          onChange={(e) => onChange(e.target.value)}
+          placeholder={"## Título\n\nDescrição do problema...\n\n### Solução\n\n1. Passo um\n2. Passo dois\n\n**Nota:** informação importante"}
+          rows={18}
+          error={error}
+          hint="Suporta Markdown: **negrito**, *itálico*, ## títulos, listas, `código`, links"
+        />
       ) : (
         <div className="min-h-[460px] rounded-xl border border-borda/40 bg-surface-elevated/60 px-5 py-4">
           {value.trim() ? (
+            /*
+              ⚠️ Nenhuma das classes `prose-*` abaixo gera CSS neste projeto.
+
+              O `@tailwindcss/typography` não está no `package.json` nem em
+              `plugins: []` do `tailwind.config.js`, e não existe regra `.prose`
+              em `index.css` nem no pacote. A pré-visualização é renderizada
+              **sem estilo nenhum** desde sempre — e ela mente por isso: mostra
+              ao autor uma aparência que não é a que o artigo terá.
+
+              É o mesmo achado da `KBArticlePage`, que exibe o corpo do artigo
+              com este mesmo bloco. As classes ficam, traduzidas para os mesmos
+              tokens que ela usa, por dois motivos: são a única declaração
+              escrita de como o corpo deveria parecer, e é o que fecha a tela em
+              zero paleta crua. Instalar o plugin mexe em `package.json` e em
+              `tailwind.config.js`, os dois fora do escopo desta tela.
+
+              O aviso de lá vale aqui: `prose-invert` está cravado **sem**
+              `dark:`, o que inverteria o corpo no tema CLARO.
+            */
             <div
               className="prose prose-invert prose-sm max-w-none
-                prose-headings:text-slate-100 prose-headings:font-semibold
-                prose-p:text-slate-300 prose-p:leading-relaxed
-                prose-a:text-primary prose-a:no-underline hover:prose-a:underline
-                prose-strong:text-slate-100
-                prose-code:text-primary prose-code:bg-surface-base prose-code:px-1 prose-code:rounded
-                prose-pre:bg-surface-base prose-pre:border prose-pre:border-borda
-                prose-ul:text-slate-300 prose-ol:text-slate-300
-                prose-blockquote:border-l-primary prose-blockquote:text-slate-400
+                prose-headings:text-conteudo-heading prose-headings:font-semibold
+                prose-p:text-conteudo prose-p:leading-relaxed
+                prose-a:text-conteudo-link prose-a:no-underline hover:prose-a:underline
+                prose-strong:text-conteudo-heading
+                prose-code:text-conteudo-link prose-code:bg-surface-elevated prose-code:px-1 prose-code:rounded
+                prose-pre:bg-surface-elevated prose-pre:border prose-pre:border-borda
+                prose-ul:text-conteudo prose-ol:text-conteudo
+                prose-blockquote:border-l-action prose-blockquote:text-conteudo-muted
                 prose-hr:border-borda"
               dangerouslySetInnerHTML={{ __html: html }}
             />
           ) : (
-            <p className="text-sm italic text-slate-500">Nada para pré-visualizar ainda…</p>
+            <p className="text-sm italic text-conteudo-muted">Nada para pré-visualizar ainda…</p>
           )}
         </div>
       )}
@@ -108,14 +213,20 @@ function ContentEditor({ value, onChange, error }: { value: string; onChange: (v
 
 // ── FormSection ───────────────────────────────────────────────
 
+/**
+ * A casca é `Card padding="none"`, com o cabeçalho e o corpo por dentro — a
+ * mesma composição que a `KBArticlePage` usa nos dois cartões da coluna
+ * principal. A borda passa de `borda/40` para `borda` cheia, que é o que o
+ * `Card` desenha.
+ */
 function FormSection({ title, children }: { title: string; children: React.ReactNode }) {
   return (
-    <div className="rounded-xl border border-borda/40 bg-surface">
+    <Card padding="none">
       <div className="border-b border-borda/40 px-5 py-3.5">
-        <h2 className="text-sm font-semibold text-slate-200">{title}</h2>
+        <h2 className="text-sm font-semibold text-conteudo">{title}</h2>
       </div>
       <div className="p-5 space-y-4">{children}</div>
-    </div>
+    </Card>
   );
 }
 
@@ -143,6 +254,14 @@ export default function KBFormPage() {
   const [selectedProductIds, setSelectedProductIds] = useState<Set<string>>(new Set());
   // Artigo novo já nasce como "todos os produtos"; ao editar, quem manda é o artigo
   const [allProducts, setAllProducts] = useState(true);
+
+  // O grupo de produtos não é um campo: é um conjunto de controles. Ele se
+  // identifica por `<legend>` e se descreve por estes dois ids — o erro e a
+  // regra de exibição —, que é o que o `Input`/`Textarea` fazem sozinhos e um
+  // `<fieldset>` precisa que alguém faça.
+  const idErroProdutos = useId();
+  const idAjudaProdutos = useId();
+  const idTags = useId();
 
   useEffect(() => {
     if (!isStaff) return;
@@ -211,24 +330,50 @@ export default function KBFormPage() {
     return <div className="flex h-48 items-center justify-center"><Spinner size="lg" /></div>;
   }
 
-  const stCfg = STATUS_CONFIG[status];
-  const catLabel = CATEGORIES.find((c) => c.value === category)?.label ?? category;
+  const estado = estadoDoArtigo(status);
+  const catLabel = rotuloDeCategoria(category);
+  const destinoDeSaida = id ? `/kb/${id}` : "/kb";
 
   return (
     <div className="space-y-5 pb-10">
       {/* ── Header ───────────────────────────────────────────── */}
       <div className="flex flex-wrap items-start justify-between gap-4 rounded-2xl border border-borda/40 bg-surface px-5 py-4">
         <div className="min-w-0">
-          <button
-            onClick={() => navigate(id ? `/kb/${id}` : "/kb")}
-            className="mb-2 flex items-center gap-1.5 text-xs font-medium text-slate-500 hover:text-primary transition-colors cursor-pointer"
+          {/*
+            A trilha era UM botão com a linha inteira dentro: o nome acessível
+            do controle era "Base de Conhecimento / <título>", duas páginas num
+            controle só, e ele levava as duas para o MESMO destino. Mesma
+            correção da `KBArticlePage` e do `TicketDetailPage` — o que navega é
+            link, e cada link leva só o nome do seu destino. Aqui os dois
+            destinos são páginas de verdade e diferentes: a lista e o artigo. A
+            página onde se está ("Editar artigo") é o `h1`, e não entra na
+            trilha.
+          */}
+          <nav
+            aria-label="Trilha"
+            className="mb-2 flex items-center gap-1.5 text-xs font-medium"
           >
-            {IC.ArrowLeft}
-            <span>Base de Conhecimento</span>
-            {id && <><span className="text-slate-600">/</span><span className="text-slate-500 truncate max-w-xs">{title || "Artigo"}</span></>}
-          </button>
-          <h1 className="text-xl font-extrabold text-slate-100">{isEdit ? "Editar artigo" : "Novo artigo"}</h1>
-          <p className="mt-1 text-sm text-slate-500">{isEdit ? "Atualize o conteúdo do artigo." : "Preencha as informações para criar um novo artigo."}</p>
+            <Link
+              to="/kb"
+              className="inline-flex items-center gap-1.5 text-conteudo-muted hover:text-conteudo-link transition-colors"
+            >
+              <Icon name="arrowLeft" size={14} strokeWidth={2.5} />
+              <span>Base de Conhecimento</span>
+            </Link>
+            {id && (
+              <>
+                <span aria-hidden="true" className="text-conteudo-faint">/</span>
+                <Link
+                  to={`/kb/${id}`}
+                  className="truncate max-w-xs text-conteudo-muted hover:text-conteudo-link transition-colors"
+                >
+                  {title || "Artigo"}
+                </Link>
+              </>
+            )}
+          </nav>
+          <h1 className="text-xl font-extrabold text-conteudo-heading">{isEdit ? "Editar artigo" : "Novo artigo"}</h1>
+          <p className="mt-1 text-sm text-conteudo-muted">{isEdit ? "Atualize o conteúdo do artigo." : "Preencha as informações para criar um novo artigo."}</p>
         </div>
       </div>
 
@@ -249,33 +394,49 @@ export default function KBFormPage() {
                 />
               </div>
 
+              {/*
+                Os dois `<select>` à mão viraram o primitivo `Select`. Cada um
+                tinha um `<label>` SEM `htmlFor` e um campo SEM `id`: os dois
+                rótulos não pertenciam a campo nenhum, e quem navega por leitor
+                de tela ouvia "caixa de combinação" sem saber de quê. O
+                primitivo amarra os dois, e ainda traz a seta pelo `Icon` — a
+                anterior era um data URI com `stroke='%2394a3b8'` cravado, que
+                não segue o tema.
+              */}
               <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
-                <div className="space-y-1">
-                  <label className="text-sm font-medium text-slate-300">Categoria</label>
-                  <select
-                    value={category}
-                    onChange={(e) => setCategory(e.target.value)}
-                    className="w-full rounded-lg border border-borda/60 bg-surface-elevated px-3 py-2 text-sm text-slate-200 focus:outline-none focus:ring-2 focus:ring-primary focus:border-transparent transition-colors hover:border-borda cursor-pointer"
-                  >
-                    {CATEGORIES.map((c) => <option key={c.value} value={c.value}>{c.label}</option>)}
-                  </select>
-                </div>
-                <div className="space-y-1">
-                  <label className="text-sm font-medium text-slate-300">Status</label>
-                  <select
-                    value={status}
-                    onChange={(e) => setStatus(e.target.value as KBArticleStatus)}
-                    className="w-full rounded-lg border border-borda/60 bg-surface-elevated px-3 py-2 text-sm text-slate-200 focus:outline-none focus:ring-2 focus:ring-primary focus:border-transparent transition-colors hover:border-borda cursor-pointer"
-                  >
-                    {STATUS_OPTIONS.map((s) => <option key={s.value} value={s.value}>{s.label}</option>)}
-                  </select>
-                </div>
+                <Select
+                  id="kb-categoria"
+                  label="Categoria"
+                  value={category}
+                  onChange={(e) => setCategory(e.target.value)}
+                  options={OPCOES_DE_CATEGORIA}
+                />
+                <Select
+                  id="kb-status"
+                  label="Status"
+                  value={status}
+                  onChange={(e) => setStatus(e.target.value as KBArticleStatus)}
+                  options={OPCOES_DE_ESTADO}
+                />
               </div>
 
-              <div className="space-y-1.5">
-                <label className="text-sm font-medium text-slate-300">
-                  Produtos <span className="text-danger">*</span>
-                </label>
+              {/*
+                Era um `<label>` sobre um GRUPO de controles — uma caixa de
+                seleção mais N botões. `<label>` nomeia UM campo; o que nomeia
+                um conjunto é `<legend>` dentro de `<fieldset>`, e é o que o
+                navegador anuncia ao entrar no grupo.
+              */}
+              <fieldset
+                className="space-y-1.5"
+                aria-describedby={
+                  errors.products
+                    ? `${idErroProdutos} ${idAjudaProdutos}`
+                    : idAjudaProdutos
+                }
+              >
+                <legend className="text-sm font-medium text-conteudo">
+                  Produtos <span className="text-on-tint-danger">*</span>
+                </legend>
 
                 <Checkbox
                   checked={allProducts}
@@ -290,9 +451,9 @@ export default function KBFormPage() {
 
                 {!allProducts && (
                   loadingProducts ? (
-                    <p className="text-xs text-slate-500">Carregando produtos…</p>
+                    <p className="text-xs text-conteudo-muted">Carregando produtos…</p>
                   ) : products.length === 0 ? (
-                    <p className="text-xs text-slate-500">Nenhum produto cadastrado.</p>
+                    <p className="text-xs text-conteudo-muted">Nenhum produto cadastrado.</p>
                   ) : (
                     <div className="flex flex-wrap gap-1.5 pt-0.5">
                       {products.map((p) => {
@@ -310,13 +471,26 @@ export default function KBFormPage() {
                               });
                               setErrors((prev) => ({ ...prev, products: "" }));
                             }}
+                            /*
+                              Marcado era `bg-primary` com `text-white`: 3,83:1
+                              nos DOIS temas, porque o degrau 500 é absoluto e
+                              não inverte. É o par que a catraca cobrava nesta
+                              tela. Passou para o degrau de AÇÃO com o par dele
+                              (`--action` / `--text-on-primary`), que é branco
+                              no claro e navy no escuro.
+
+                              Não marcado, a borda saiu de `borda/60` — um
+                              separador de superfície, ~1,2:1 — para
+                              `--border-control` da E7, que é o contorno de
+                              CONTROLE e cumpre os 3:1 da WCAG 1.4.11.
+                            */
                             className={`inline-flex max-w-full items-center gap-1 rounded-full border px-2.5 py-1 text-xs font-semibold transition-all cursor-pointer ${
                               sel
-                                ? "border-primary bg-primary text-white shadow-sm"
-                                : "border-borda/60 bg-surface-elevated text-slate-400 hover:border-primary/50 hover:text-slate-200"
+                                ? "border-action bg-action text-on-primary shadow-sm"
+                                : "border-borda-control bg-surface-elevated text-conteudo-muted hover:border-action hover:text-conteudo"
                             }`}
                           >
-                            {sel && <span aria-hidden="true" className="text-[10px] leading-none">✓</span>}
+                            {sel && <Icon name="check" size={12} strokeWidth={2.5} />}
                             <span className="truncate">{p.name}</span>
                           </button>
                         );
@@ -325,23 +499,35 @@ export default function KBFormPage() {
                   )
                 )}
 
-                {errors.products && <p className="text-xs text-danger">{errors.products}</p>}
-                <p className="text-xs text-slate-500">
+                {errors.products && (
+                  <p id={idErroProdutos} className="text-xs text-on-tint-danger">
+                    {errors.products}
+                  </p>
+                )}
+                <p id={idAjudaProdutos} className="text-xs text-conteudo-muted">
                   O artigo aparece para o cliente quando o produto do chamado bate com um destes
                   — ou quando a categoria bate.
                 </p>
-              </div>
+              </fieldset>
 
               <div className="space-y-1">
-                <label className="text-sm font-medium text-slate-300">
-                  Tags <span className="font-normal text-slate-500">(separadas por vírgula)</span>
+                {/*
+                  O rótulo fica à mão porque tem marcação por dentro — o
+                  "(separadas por vírgula)" em peso normal — e a prop `label`
+                  do primitivo é `string`. O que faltava era o `htmlFor`, e ele
+                  agora aponta para o `id` que o campo recebe. A segunda linha
+                  virou `hint`, que o primitivo liga por `aria-describedby`.
+                */}
+                <label htmlFor={idTags} className="text-sm font-medium text-conteudo">
+                  Tags <span className="font-normal text-conteudo-muted">(separadas por vírgula)</span>
                 </label>
                 <Input
+                  id={idTags}
                   value={tagsInput}
                   onChange={(e) => setTagsInput(e.target.value)}
                   placeholder="ex: acesso, vpn, senha"
+                  hint="Tags ajudam os usuários a encontrar o artigo nas buscas."
                 />
-                <p className="text-xs text-slate-500">Tags ajudam os usuários a encontrar o artigo nas buscas.</p>
               </div>
             </FormSection>
 
@@ -354,55 +540,71 @@ export default function KBFormPage() {
             </FormSection>
 
             <div className="flex justify-end gap-3 pt-1">
-              <Button type="button" variant="secondary" onClick={() => navigate(id ? `/kb/${id}` : "/kb")}>Cancelar</Button>
+              {/* Cancelar sai da tela: navegação é link, ação é botão. */}
+              <Button to={destinoDeSaida} variant="secondary">Cancelar</Button>
               <Button type="submit" loading={loading}>{isEdit ? "Salvar alterações" : "Criar artigo"}</Button>
             </div>
           </div>
 
           {/* ── Sidebar ─────────────────────────────────────── */}
           <div className="space-y-4">
-            <div className="rounded-xl border border-borda/40 bg-surface p-4">
-              <p className="mb-3 text-[10px] font-bold uppercase tracking-widest text-slate-500">Resumo</p>
+            <Card>
+              <p className="mb-3 text-[10px] font-bold uppercase tracking-widest text-conteudo-muted">Resumo</p>
               <div className="space-y-3">
                 <div>
-                  <p className="text-[10px] font-semibold uppercase tracking-widest text-slate-500 mb-0.5">Título</p>
-                  <p className="text-sm text-slate-200 line-clamp-2">{title || <span className="italic text-slate-600">Não preenchido</span>}</p>
+                  <p className="text-[10px] font-semibold uppercase tracking-widest text-conteudo-muted mb-0.5">Título</p>
+                  <p className="text-sm text-conteudo line-clamp-2">{title || <span className="italic text-conteudo-muted">Não preenchido</span>}</p>
                 </div>
                 <div>
-                  <p className="text-[10px] font-semibold uppercase tracking-widest text-slate-500 mb-0.5">Categoria</p>
-                  <p className="text-sm text-slate-200">{catLabel}</p>
+                  <p className="text-[10px] font-semibold uppercase tracking-widest text-conteudo-muted mb-0.5">Categoria</p>
+                  <p className="text-sm text-conteudo">{catLabel}</p>
                 </div>
                 <div>
-                  <p className="text-[10px] font-semibold uppercase tracking-widest text-slate-500 mb-1">Status</p>
-                  <span className={`inline-flex items-center gap-1.5 rounded-full border px-2.5 py-0.5 text-xs font-semibold ${stCfg.cls}`}>
-                    <span className="w-1.5 h-1.5 rounded-full" style={{ backgroundColor: STATUS_OPTIONS.find((s) => s.value === status)?.dot }} />
-                    {STATUS_OPTIONS.find((s) => s.value === status)?.label}
-                  </span>
+                  <p className="text-[10px] font-semibold uppercase tracking-widest text-conteudo-muted mb-1">Status</p>
+                  {/*
+                    O selo era desenhado à mão com `bg-success/10` mais
+                    `text-success-700 dark:text-success-400` — a rampa a 10% com
+                    a inversão de tema escrita à mão. O `Badge` já faz isso com
+                    o par medido da E8 (`--tint-*` com `--on-tint-*`), e o
+                    "Arquivado" era o segundo par da catraca: `text-slate-500`
+                    sobre `bg-surface-elevated`, 2,85:1 no escuro.
+                  */}
+                  <Badge variant={estado.variante} className="gap-1.5">
+                    <span aria-hidden="true" className={`h-1.5 w-1.5 rounded-full ${estado.ponto}`} />
+                    {estado.label}
+                  </Badge>
                 </div>
                 {tagsInput.trim() && (
                   <div>
-                    <p className="text-[10px] font-semibold uppercase tracking-widest text-slate-500 mb-1">Tags</p>
+                    <p className="text-[10px] font-semibold uppercase tracking-widest text-conteudo-muted mb-1">Tags</p>
                     <div className="flex flex-wrap gap-1">
                       {tagsInput.split(",").map((t) => t.trim()).filter(Boolean).map((tag) => (
-                        <span key={tag} className="rounded-md bg-surface-elevated px-2 py-0.5 text-[11px] text-slate-400">{tag}</span>
+                        <Badge key={tag} variant="secondary">{tag}</Badge>
                       ))}
                     </div>
                   </div>
                 )}
               </div>
-            </div>
+            </Card>
 
-            <div className="rounded-xl border border-borda/40 bg-surface p-4">
-              <p className="mb-3 flex items-center gap-1.5 text-[10px] font-bold uppercase tracking-widest text-slate-500">
-                {IC.Info} Dicas
+            <Card>
+              <p className="mb-3 flex items-center gap-1.5 text-[10px] font-bold uppercase tracking-widest text-conteudo-muted">
+                <Icon name="info" size={16} strokeWidth={2} /> Dicas
               </p>
-              <ul className="space-y-2 text-xs text-slate-500">
-                <li className="flex gap-2"><span className="text-primary shrink-0 mt-0.5">•</span>Use títulos claros e objetivos.</li>
-                <li className="flex gap-2"><span className="text-primary shrink-0 mt-0.5">•</span>Estruture o conteúdo com títulos (##) e listas para facilitar a leitura.</li>
-                <li className="flex gap-2"><span className="text-primary shrink-0 mt-0.5">•</span>Salve como Rascunho para revisar antes de publicar.</li>
-                <li className="flex gap-2"><span className="text-primary shrink-0 mt-0.5">•</span>Tags ajudam os usuários a encontrar o artigo.</li>
+              {/*
+                O marcador é desenho, não informação — o texto do item já diz
+                tudo —, então ele sai da leitura por `aria-hidden`. A cor era
+                `text-primary`, o degrau de MARCA, que sobre a superfície dá
+                3,66:1 e reprova AA para texto; `--text-link` é o degrau
+                legível da mesma família (5,05:1 no claro, 6,47:1 no escuro).
+              */}
+              <ul className="space-y-2 text-xs text-conteudo-muted">
+                <li className="flex gap-2"><span aria-hidden="true" className="text-conteudo-link shrink-0 mt-0.5">•</span>Use títulos claros e objetivos.</li>
+                <li className="flex gap-2"><span aria-hidden="true" className="text-conteudo-link shrink-0 mt-0.5">•</span>Estruture o conteúdo com títulos (##) e listas para facilitar a leitura.</li>
+                <li className="flex gap-2"><span aria-hidden="true" className="text-conteudo-link shrink-0 mt-0.5">•</span>Salve como Rascunho para revisar antes de publicar.</li>
+                <li className="flex gap-2"><span aria-hidden="true" className="text-conteudo-link shrink-0 mt-0.5">•</span>Tags ajudam os usuários a encontrar o artigo.</li>
               </ul>
-            </div>
+            </Card>
           </div>
         </div>
       </form>
