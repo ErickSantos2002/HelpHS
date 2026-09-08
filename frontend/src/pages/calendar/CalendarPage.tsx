@@ -1,7 +1,15 @@
 import { useCallback, useEffect, useState } from "react";
 import { toast } from "sonner";
 import { useAuth } from "../../contexts/AuthContext";
-import { Button, Input, Modal, ModalFooter, Textarea } from "../../components/ui";
+import {
+  Button,
+  Icon,
+  Input,
+  Modal,
+  ModalFooter,
+  Textarea,
+} from "../../components/ui";
+import { readableTextColor } from "../../lib/colors";
 import { cn } from "../../lib/utils";
 import {
   getCalendarEvents,
@@ -22,6 +30,24 @@ const EVENT_TYPE_LABELS: Record<CalendarEventType, string> = {
   holiday: "Feriado",
 };
 
+/**
+ * Os 21 hexadecimais desta tela são **dado**, e é por isso que continuam aqui.
+ *
+ * A migração troca cor que é decisão de desenho — o azul de "hoje", o cinza do
+ * fim de semana — por token. Estas não são: o backend guarda `color` como texto
+ * na linha do evento, o usuário escolhe qual é, e a tela só repinta o que veio
+ * do banco. Um `var(--chart-3)` gravado nessa coluna não é cor de gráfico: é uma
+ * string que vaza para o relatório, para a exportação e para quem ler a tabela.
+ *
+ * O que o sistema de design resolve aqui não é a cor de fundo — é o **texto por
+ * cima dela**, que era `text-white` cravado. Sobre `#ffffff` e `#eab308`, dois
+ * dos dezesseis valores oferecidos, branco sobre branco não se lê. Quem decide
+ * é `readableTextColor`, por luminância WCAG, uma cor de cada vez.
+ *
+ * Estes cinco são o **padrão por tipo**: o valor que vai para o banco quando a
+ * pessoa escolhe o tipo e não mexe na cor. Os cinco são membros da paleta
+ * abaixo, e é ela que manda.
+ */
 const EVENT_TYPE_COLORS: Record<CalendarEventType, string> = {
   event: "#6366f1",
   meeting: "#3b82f6",
@@ -33,6 +59,10 @@ const EVENT_TYPE_COLORS: Record<CalendarEventType, string> = {
 /**
  * Cores disponíveis para os eventos. As cinco primeiras são as cores padrão
  * de cada tipo de evento; as demais servem para diferenciar eventos do mesmo tipo.
+ *
+ * Continua com hexadecimal por ser a lista de opções de um campo de dado — não
+ * a paleta da interface. Qual conjunto de cores se oferece a quem cria evento é
+ * decisão de desenho de produto, e ela não se toma de dentro de uma tela.
  */
 const EVENT_COLOR_PALETTE: { value: string; label: string }[] = [
   { value: "#6366f1", label: "Índigo" },
@@ -86,51 +116,6 @@ function isEventOnDay(event: CalendarEvent, year: number, month: number, day: nu
   return target >= startDay && target <= endDay;
 }
 
-// ── SVG Icons ─────────────────────────────────────────────────
-
-function IconCalendar() {
-  return (
-    <svg className="w-5 h-5 shrink-0" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={1.75}>
-      <path strokeLinecap="round" strokeLinejoin="round" d="M8 7V3m8 4V3m-9 8h10M5 21h14a2 2 0 002-2V7a2 2 0 00-2-2H5a2 2 0 00-2 2v12a2 2 0 002 2z" />
-    </svg>
-  );
-}
-function IconChevronLeft() {
-  return (
-    <svg className="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2.5}>
-      <path strokeLinecap="round" strokeLinejoin="round" d="M15 19l-7-7 7-7" />
-    </svg>
-  );
-}
-function IconChevronRight() {
-  return (
-    <svg className="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2.5}>
-      <path strokeLinecap="round" strokeLinejoin="round" d="M9 5l7 7-7 7" />
-    </svg>
-  );
-}
-function IconPlus() {
-  return (
-    <svg className="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2.5}>
-      <path strokeLinecap="round" strokeLinejoin="round" d="M12 4v16m8-8H4" />
-    </svg>
-  );
-}
-function IconPencil() {
-  return (
-    <svg className="w-3 h-3" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2.5}>
-      <path strokeLinecap="round" strokeLinejoin="round" d="M11 5H6a2 2 0 00-2 2v11a2 2 0 002 2h11a2 2 0 002-2v-5m-1.414-9.414a2 2 0 112.828 2.828L11.828 15H9v-2.828l8.586-8.586z" />
-    </svg>
-  );
-}
-function IconTrash() {
-  return (
-    <svg className="w-3 h-3" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2.5}>
-      <path strokeLinecap="round" strokeLinejoin="round" d="M19 7l-.867 12.142A2 2 0 0116.138 21H7.862a2 2 0 01-1.995-1.858L5 7m5 4v6m4-6v6m1-10V4a1 1 0 00-1-1h-4a1 1 0 00-1 1v3M4 7h16" />
-    </svg>
-  );
-}
-
 // ── Event Dialog ──────────────────────────────────────────────
 
 interface EventDialogProps {
@@ -144,7 +129,10 @@ function EventDialog({ event, defaultDate, onClose, onSaved }: EventDialogProps)
   const [title, setTitle] = useState(event?.title ?? "");
   const [description, setDescription] = useState(event?.description ?? "");
   const [eventType, setEventType] = useState<CalendarEventType>(event?.event_type ?? "event");
-  const [color, setColor] = useState(event?.color ?? "#6366f1");
+  // O padrão sai da tabela por tipo, e não de um sexto hexadecimal repetido:
+  // a cor inicial de um evento novo era `#6366f1` escrito de novo aqui, que
+  // podia divergir de `EVENT_TYPE_COLORS.event` sem ninguém perceber.
+  const [color, setColor] = useState(event?.color ?? EVENT_TYPE_COLORS.event);
   const [colorOverride, setColorOverride] = useState(!!event?.color);
   const [startDate, setStartDate] = useState(
     event ? event.start_date.slice(0, 10) : (defaultDate ?? ""),
@@ -199,11 +187,15 @@ function EventDialog({ event, defaultDate, onClose, onSaved }: EventDialogProps)
         />
 
         <div className="space-y-1.5">
-          <label className="text-xs font-medium text-slate-400">Tipo</label>
+          {/* `htmlFor` e `id`: sem o par, o rótulo fica só POR CIMA do campo —
+              quem usa leitor de tela ouve "caixa de combinação" sem saber de
+              quê. Item fixo do CHECKLIST-29. */}
+          <label htmlFor="evento-tipo" className="text-xs font-medium text-conteudo-muted">Tipo</label>
           <select
+            id="evento-tipo"
             value={eventType}
             onChange={(e) => handleTypeChange(e.target.value as CalendarEventType)}
-            className="w-full rounded-lg border border-borda bg-surface-elevated px-3 py-2 text-sm text-slate-100 focus:outline-none focus:ring-2 focus:ring-primary focus:border-transparent transition-colors"
+            className="w-full rounded-lg border border-borda bg-surface-elevated px-3 py-2 text-sm text-conteudo focus:outline-none focus:ring-2 focus:ring-primary focus:border-transparent transition-colors"
           >
             {(Object.keys(EVENT_TYPE_LABELS) as CalendarEventType[]).map((t) => (
               <option key={t} value={t}>{EVENT_TYPE_LABELS[t]}</option>
@@ -212,8 +204,11 @@ function EventDialog({ event, defaultDate, onClose, onSaved }: EventDialogProps)
         </div>
 
         <div className="space-y-1.5">
-          <label className="text-xs font-medium text-slate-400">Cor</label>
-          <div className="grid grid-cols-4 gap-2 sm:grid-cols-8">
+          {/* `<label>` sem `htmlFor` não rotula nada, e aqui não há um campo
+              para apontar: são dezesseis botões. Vira nome do GRUPO, que é o
+              que o leitor de tela anuncia antes de percorrer as opções. */}
+          <span id="evento-cor" className="block text-xs font-medium text-conteudo-muted">Cor</span>
+          <div role="group" aria-labelledby="evento-cor" className="grid grid-cols-4 gap-2 sm:grid-cols-8">
             {EVENT_COLOR_PALETTE.map((c) => (
               <button
                 key={c.value}
@@ -224,10 +219,15 @@ function EventDialog({ event, defaultDate, onClose, onSaved }: EventDialogProps)
                 onClick={() => { setColor(c.value); setColorOverride(true); }}
                 className={cn(
                   "h-8 w-full rounded-md border-2 transition-transform cursor-pointer",
-                  // Contorno interno para as cores claras não sumirem no fundo
-                  "ring-1 ring-inset ring-black/15",
+                  // Contorno interno para as cores claras não sumirem no fundo.
+                  // Era `ring-black/15`, que sobre a superfície branca do tema
+                  // claro dá ~1,3:1 — o limite do controle desaparece
+                  // exatamente onde ele mais fazia falta. `--border-control` é
+                  // o token da E7 para isto, medido em 4,76 / 4,55 / 4,34 no
+                  // claro e 6,23 / 6,78 / 5,29 no escuro.
+                  "ring-1 ring-inset ring-borda-control",
                   color === c.value
-                    ? "border-primary scale-105 shadow-md"
+                    ? "border-action scale-105 shadow-md"
                     : "border-transparent hover:scale-105",
                 )}
                 style={{ backgroundColor: c.value }}
@@ -303,7 +303,7 @@ function CalendarGrid({ year, month, events, canEdit, selectedDay, onSelectDay, 
     <div>
       <div className="grid grid-cols-7 mb-1">
         {WEEKDAYS.map((d) => (
-          <div key={d} className="py-2 text-center text-xs font-semibold text-slate-500 uppercase tracking-wide">
+          <div key={d} className="py-2 text-center text-xs font-semibold text-conteudo-muted uppercase tracking-wide">
             {d}
           </div>
         ))}
@@ -324,8 +324,14 @@ function CalendarGrid({ year, month, events, canEdit, selectedDay, onSelectDay, 
               onClick={() => onSelectDay(day)}
               className={cn(
                 "min-h-[88px] p-2 cursor-pointer transition-colors group",
+                // `bg-primary/8` NÃO existia: a escala de opacidade do Tailwind
+                // v3 vai de 5 em 5, o 8 não está nela, e a regra nunca foi
+                // gerada — sem erro e sem aviso. O dia escolhido vinha só com o
+                // anel, e o fundo que o autor escreveu nunca chegou a pintar.
+                // `bg-tint-primary` é o token da tinta (15%), e não leva
+                // modificador de opacidade: ela já carrega o alfa (regra D8-a).
                 isSelected
-                  ? "bg-primary/8 ring-1 ring-inset ring-primary/30"
+                  ? "bg-tint-primary ring-1 ring-inset ring-primary/30"
                   : isWeekend
                     ? "bg-surface-elevated/30 hover:bg-surface-elevated/60"
                     : "bg-surface hover:bg-surface-elevated/40",
@@ -333,13 +339,23 @@ function CalendarGrid({ year, month, events, canEdit, selectedDay, onSelectDay, 
             >
               <div className={cn(
                 "text-xs font-semibold mb-1.5 h-6 w-6 flex items-center justify-center rounded-full transition-colors",
+                // `bg-primary` + `text-white` dá 3,83:1, nos dois temas — o
+                // degrau 500 é absoluto e não inverte. O par do degrau de AÇÃO
+                // é `--action` com `--text-on-primary`, que é branco no claro e
+                // navy no escuro (emenda E1).
                 isToday
-                  ? "bg-primary text-white shadow-sm"
+                  ? "bg-action text-on-primary shadow-sm"
                   : isSelected
-                    ? "text-primary font-bold"
-                    : "text-slate-400 group-hover:text-slate-200",
+                    // Sobre `bg-tint-primary`, o degrau de marca como cor de
+                    // texto dá 2,77:1 (emenda E8). O par da tinta é o
+                    // `--on-tint-primary`.
+                    ? "text-on-tint-primary font-bold"
+                    : "text-conteudo-muted group-hover:text-conteudo",
               )}>
                 {day}
+                {/* "Hoje" e "dia escolhido" eram ditos só pela cor e pela
+                    forma do disco. Quem não vê a tela não tinha a informação. */}
+                {isToday && <span className="sr-only"> (hoje)</span>}
               </div>
 
               <div className="space-y-0.5">
@@ -347,15 +363,22 @@ function CalendarGrid({ year, month, events, canEdit, selectedDay, onSelectDay, 
                   <div
                     key={e.id}
                     onClick={(ev) => { ev.stopPropagation(); if (canEdit) onEventClick(e); }}
-                    className="flex items-center gap-1 text-[10px] leading-tight rounded-md px-1.5 py-0.5 text-white truncate cursor-pointer hover:opacity-80 transition-opacity"
-                    style={{ backgroundColor: e.color }}
+                    className="flex items-center gap-1 text-[10px] leading-tight rounded-md px-1.5 py-0.5 truncate cursor-pointer hover:opacity-80 transition-opacity"
+                    // O fundo é cor escolhida pelo usuário — dado, não token —,
+                    // então o texto por cima não pode ser fixo: `text-white`
+                    // sobre o "#ffffff" e o "#eab308" da paleta some. Quem
+                    // escolhe é a luminância WCAG, uma cor de cada vez.
+                    style={{
+                      backgroundColor: e.color,
+                      color: readableTextColor(e.color),
+                    }}
                     title={e.title}
                   >
                     {e.title}
                   </div>
                 ))}
                 {dayEvents.length > 3 && (
-                  <div className="text-[10px] text-slate-500 px-1 font-medium">
+                  <div className="text-[10px] text-conteudo-muted px-1 font-medium">
                     +{dayEvents.length - 3}
                   </div>
                 )}
@@ -385,10 +408,10 @@ function DayDetail({ date, events, canEdit, onAdd, onEdit, onDelete, onClose }: 
     <div className="rounded-xl border border-borda bg-surface p-4 space-y-3">
       <div className="flex items-center justify-between">
         <div>
-          <p className="text-xs text-slate-500 font-medium uppercase tracking-wide">
+          <p className="text-xs text-conteudo-muted font-medium uppercase tracking-wide">
             {WEEKDAYS_FULL[date.getDay()]}
           </p>
-          <p className="text-lg font-bold text-slate-100">
+          <p className="text-lg font-bold text-conteudo-heading">
             {date.getDate()} de {MONTHS[date.getMonth()]}
           </p>
         </div>
@@ -396,15 +419,16 @@ function DayDetail({ date, events, canEdit, onAdd, onEdit, onDelete, onClose }: 
           {canEdit && (
             <button
               onClick={onAdd}
-              className="flex h-8 w-8 items-center justify-center rounded-lg bg-primary/10 text-primary hover:bg-primary/20 transition-colors cursor-pointer"
+              className="flex h-8 w-8 items-center justify-center rounded-lg bg-tint-primary text-on-tint-primary hover:bg-primary/20 transition-colors cursor-pointer"
               title="Adicionar evento"
             >
-              <IconPlus />
+              <Icon name="plus" size={16} strokeWidth={2.5} />
             </button>
           )}
           <button
             onClick={onClose}
-            className="flex h-8 w-8 items-center justify-center rounded-lg bg-surface-elevated text-slate-400 hover:text-slate-200 transition-colors text-sm cursor-pointer"
+            aria-label="Fechar o dia"
+            className="flex h-8 w-8 items-center justify-center rounded-lg bg-surface-elevated text-conteudo-muted hover:text-conteudo transition-colors text-sm cursor-pointer"
           >
             ✕
           </button>
@@ -412,34 +436,42 @@ function DayDetail({ date, events, canEdit, onAdd, onEdit, onDelete, onClose }: 
       </div>
 
       {events.length === 0 ? (
-        <p className="text-sm text-slate-500 py-2">Nenhum evento neste dia.</p>
+        <p className="text-sm text-conteudo-muted py-2">Nenhum evento neste dia.</p>
       ) : (
         <div className="space-y-2">
           {events.map((e) => (
             <div key={e.id} className="flex items-center gap-2.5 rounded-lg border border-borda bg-surface-elevated px-3 py-2">
               <div className="h-2.5 w-2.5 shrink-0 rounded-full" style={{ backgroundColor: e.color }} />
               <div className="flex-1 min-w-0">
-                <p className="text-sm text-slate-200 font-medium truncate">{e.title}</p>
+                <p className="text-sm text-conteudo font-medium truncate">{e.title}</p>
                 {e.description && (
-                  <p className="text-xs text-slate-500 truncate mt-0.5">{e.description}</p>
+                  <p className="text-xs text-conteudo-muted truncate mt-0.5">{e.description}</p>
                 )}
               </div>
-              <span className="text-[10px] text-slate-500 shrink-0">
+              <span className="text-[10px] text-conteudo-muted shrink-0">
                 {EVENT_TYPE_LABELS[e.event_type]}
               </span>
+              {/* Os dois botões não tinham texto, nem `title`, nem
+                  `aria-label`: o nome acessível de cada um era vazio, e a lista
+                  de eventos do dia terminava em dois controles que o leitor de
+                  tela anuncia como "botão", sem dizer de quê nem para quê. */}
               {canEdit && (
                 <div className="flex gap-1 shrink-0">
                   <button
                     onClick={() => onEdit(e)}
-                    className="flex h-6 w-6 items-center justify-center rounded-md bg-amber-500/15 text-amber-400 hover:bg-amber-500/25 transition-colors cursor-pointer"
+                    title={`Editar ${e.title}`}
+                    aria-label={`Editar ${e.title}`}
+                    className="flex h-6 w-6 items-center justify-center rounded-md bg-tint-warning text-on-tint-warning hover:bg-warning/25 transition-colors cursor-pointer"
                   >
-                    <IconPencil />
+                    <Icon name="edit" size={12} strokeWidth={2.5} />
                   </button>
                   <button
                     onClick={() => onDelete(e.id)}
-                    className="flex h-6 w-6 items-center justify-center rounded-md bg-danger/15 text-danger hover:bg-danger/25 transition-colors cursor-pointer"
+                    title={`Remover ${e.title}`}
+                    aria-label={`Remover ${e.title}`}
+                    className="flex h-6 w-6 items-center justify-center rounded-md bg-tint-danger text-on-tint-danger hover:bg-danger/25 transition-colors cursor-pointer"
                   >
-                    <IconTrash />
+                    <Icon name="trash" size={12} strokeWidth={2.5} />
                   </button>
                 </div>
               )}
@@ -460,7 +492,7 @@ function UpcomingList({ events }: { events: CalendarEvent[] }) {
     .slice(0, 4);
 
   if (upcoming.length === 0) {
-    return <p className="text-xs text-slate-500 py-2">Nenhum evento próximo.</p>;
+    return <p className="text-xs text-conteudo-muted py-2">Nenhum evento próximo.</p>;
   }
 
   return (
@@ -469,8 +501,8 @@ function UpcomingList({ events }: { events: CalendarEvent[] }) {
         <div key={e.id} className="flex items-start gap-2.5 rounded-lg bg-surface-elevated/40 px-3 py-2">
           <div className="mt-1 h-2.5 w-2.5 shrink-0 rounded-full" style={{ backgroundColor: e.color }} />
           <div className="min-w-0 flex-1">
-            <p className="text-xs font-medium text-slate-200 truncate">{e.title}</p>
-            <p className="text-[10px] text-slate-500 mt-0.5">
+            <p className="text-xs font-medium text-conteudo truncate">{e.title}</p>
+            <p className="text-[10px] text-conteudo-muted mt-0.5">
               {new Date(e.start_date).toLocaleDateString("pt-BR", { day: "2-digit", month: "short", timeZone: "UTC" })}
               {e.start_date.slice(0, 10) !== e.end_date.slice(0, 10) && (
                 <> → {new Date(e.end_date).toLocaleDateString("pt-BR", { day: "2-digit", month: "short", timeZone: "UTC" })}</>
@@ -564,18 +596,18 @@ export default function CalendarPage() {
       {/* Header */}
       <div className="flex flex-wrap items-center justify-between gap-3 rounded-2xl border border-borda/40 bg-surface px-5 py-4">
         <div className="flex items-center gap-3">
-          <div className="flex h-9 w-9 items-center justify-center rounded-lg bg-primary/10 text-primary">
-            <IconCalendar />
+          <div className="flex h-9 w-9 items-center justify-center rounded-lg bg-tint-primary text-on-tint-primary">
+            <Icon name="calendar" size={20} />
           </div>
           <div>
-            <h1 className="text-xl font-extrabold text-slate-100">Agenda</h1>
-            <p className="text-sm text-slate-500">Calendário da equipe</p>
+            <h1 className="text-xl font-extrabold text-conteudo-heading">Agenda</h1>
+            <p className="text-sm text-conteudo-muted">Calendário da equipe</p>
           </div>
         </div>
         {canEdit && (
           <Button variant="primary" onClick={() => setDialog({ open: true })}>
             <span className="flex items-center gap-1.5">
-              <IconPlus />
+              <Icon name="plus" size={16} strokeWidth={2.5} />
               Novo evento
             </span>
           </Button>
@@ -584,17 +616,21 @@ export default function CalendarPage() {
 
       {/* Navigation */}
       <div className="flex flex-wrap items-center gap-2">
+        {/* Os dois eram setas mudas: o `<svg>` não tem nome, então o controle
+            também não tinha. */}
         <button
           onClick={prevMonth}
-          className="flex h-8 w-8 items-center justify-center rounded-lg border border-borda bg-surface text-slate-400 hover:bg-surface-elevated hover:text-slate-200 transition-colors cursor-pointer"
+          aria-label="Mês anterior"
+          className="flex h-8 w-8 items-center justify-center rounded-lg border border-borda bg-surface text-conteudo-muted hover:bg-surface-elevated hover:text-conteudo transition-colors cursor-pointer"
         >
-          <IconChevronLeft />
+          <Icon name="chevronLeft" size={16} strokeWidth={2.5} />
         </button>
 
         <select
           value={month}
+          aria-label="Mês"
           onChange={(e) => { setMonth(Number(e.target.value)); setSelectedDay(null); }}
-          className="h-8 rounded-lg border border-borda bg-surface px-3 text-sm font-semibold text-slate-200 focus:outline-none focus:ring-2 focus:ring-primary transition-colors cursor-pointer"
+          className="h-8 rounded-lg border border-borda bg-surface px-3 text-sm font-semibold text-conteudo focus:outline-none focus:ring-2 focus:ring-primary transition-colors cursor-pointer"
         >
           {MONTHS.map((m, i) => (
             <option key={i} value={i}>{m}</option>
@@ -603,8 +639,9 @@ export default function CalendarPage() {
 
         <select
           value={year}
+          aria-label="Ano"
           onChange={(e) => { setYear(Number(e.target.value)); setSelectedDay(null); }}
-          className="h-8 rounded-lg border border-borda bg-surface px-3 text-sm font-semibold text-slate-200 focus:outline-none focus:ring-2 focus:ring-primary transition-colors cursor-pointer"
+          className="h-8 rounded-lg border border-borda bg-surface px-3 text-sm font-semibold text-conteudo focus:outline-none focus:ring-2 focus:ring-primary transition-colors cursor-pointer"
         >
           {YEARS.map((y) => (
             <option key={y} value={y}>{y}</option>
@@ -613,14 +650,15 @@ export default function CalendarPage() {
 
         <button
           onClick={nextMonth}
-          className="flex h-8 w-8 items-center justify-center rounded-lg border border-borda bg-surface text-slate-400 hover:bg-surface-elevated hover:text-slate-200 transition-colors cursor-pointer"
+          aria-label="Próximo mês"
+          className="flex h-8 w-8 items-center justify-center rounded-lg border border-borda bg-surface text-conteudo-muted hover:bg-surface-elevated hover:text-conteudo transition-colors cursor-pointer"
         >
-          <IconChevronRight />
+          <Icon name="chevronRight" size={16} strokeWidth={2.5} />
         </button>
 
         <button
           onClick={goToToday}
-          className="h-8 rounded-lg border border-primary/30 bg-primary/10 px-3 text-sm font-medium text-primary hover:bg-primary/20 transition-colors cursor-pointer"
+          className="h-8 rounded-lg border border-primary/30 bg-tint-primary px-3 text-sm font-medium text-on-tint-primary hover:bg-primary/20 transition-colors cursor-pointer"
         >
           Hoje
         </button>
@@ -631,7 +669,7 @@ export default function CalendarPage() {
         {/* Calendar */}
         <div className="lg:col-span-3 space-y-4">
           {loading ? (
-            <div className="flex h-64 items-center justify-center text-slate-500 text-sm">
+            <div className="flex h-64 items-center justify-center text-conteudo-muted text-sm">
               Carregando eventos...
             </div>
           ) : (
@@ -664,13 +702,13 @@ export default function CalendarPage() {
         <div className="space-y-4">
           {/* Upcoming */}
           <div className="rounded-xl border border-borda bg-surface p-4 space-y-3">
-            <h3 className="text-sm font-semibold text-slate-200">Próximos eventos</h3>
+            <h3 className="text-sm font-semibold text-conteudo">Próximos eventos</h3>
             <UpcomingList events={events} />
           </div>
 
           {/* Mini month map */}
           <div className="rounded-xl border border-borda bg-surface p-4 space-y-3">
-            <h3 className="text-sm font-semibold text-slate-200">Meses do ano</h3>
+            <h3 className="text-sm font-semibold text-conteudo">Meses do ano</h3>
             <div className="grid grid-cols-3 gap-1.5">
               {MONTHS_SHORT.map((m, i) => {
                 const hasEvents = events.some((e) => {
@@ -689,17 +727,32 @@ export default function CalendarPage() {
                     onClick={() => { setMonth(i); setSelectedDay(null); }}
                     className={cn(
                       "relative rounded-lg py-1.5 text-xs font-medium transition-colors cursor-pointer",
+                      // O mesmo par de 3,83:1 do disco de "hoje", pelo mesmo
+                      // motivo: `bg-primary` é o degrau de MARCA, e quem veste
+                      // o item ativo é `--action`.
                       isCurrent
-                        ? "bg-primary text-white"
-                        : "bg-surface-elevated/50 text-slate-400 hover:bg-surface-elevated hover:text-slate-200",
+                        ? "bg-action text-on-primary"
+                        : "bg-surface-elevated/50 text-conteudo-muted hover:bg-surface-elevated hover:text-conteudo",
                     )}
                   >
                     {m}
+                    {/* Os dois pontos eram a única fonte da informação que
+                        carregam — a mesma armadilha que o `lib/prioridade.ts`
+                        descreve para o ponto de prioridade. Com o texto ao
+                        lado, a cor vira reforço e o piso de 3:1 deixa de se
+                        aplicar; sem ele, quem não distingue a cor não tem o
+                        dado de forma alguma. */}
                     {hasEvents && !isCurrent && (
-                      <span className="absolute top-0.5 right-1 h-1.5 w-1.5 rounded-full bg-primary/60" />
+                      <>
+                        <span className="absolute top-0.5 right-1 h-1.5 w-1.5 rounded-full bg-primary/60" />
+                        <span className="sr-only"> — com eventos</span>
+                      </>
                     )}
                     {isCurrentMonth && !isCurrent && (
-                      <span className="absolute bottom-0.5 left-1/2 -translate-x-1/2 h-0.5 w-3 rounded-full bg-primary/40" />
+                      <>
+                        <span className="absolute bottom-0.5 left-1/2 -translate-x-1/2 h-0.5 w-3 rounded-full bg-primary/40" />
+                        <span className="sr-only"> — mês atual</span>
+                      </>
                     )}
                   </button>
                 );
@@ -722,26 +775,30 @@ export default function CalendarPage() {
             if (monthEvents.length === 0) return null;
             return (
             <div className="rounded-xl border border-borda bg-surface p-4 space-y-3">
-              <h3 className="text-sm font-semibold text-slate-200">
+              <h3 className="text-sm font-semibold text-conteudo">
                 Gerenciar eventos — {MONTHS_SHORT[month]}
               </h3>
               <div className="space-y-1.5 max-h-[168px] overflow-y-auto pr-0.5">
                 {monthEvents.slice(0, 4).map((e) => (
                   <div key={e.id} className="flex items-center gap-2 rounded-lg bg-surface-elevated/30 px-2.5 py-1.5">
                     <div className="h-2 w-2 shrink-0 rounded-full" style={{ backgroundColor: e.color }} />
-                    <span className="flex-1 text-xs text-slate-300 truncate">{e.title}</span>
+                    <span className="flex-1 text-xs text-conteudo truncate">{e.title}</span>
                     <div className="flex gap-1 shrink-0">
                       <button
                         onClick={() => setDialog({ open: true, event: e })}
-                        className="flex h-6 w-6 items-center justify-center rounded-md bg-amber-500/15 text-amber-400 hover:bg-amber-500/25 transition-colors cursor-pointer"
+                        title={`Editar ${e.title}`}
+                        aria-label={`Editar ${e.title}`}
+                        className="flex h-6 w-6 items-center justify-center rounded-md bg-tint-warning text-on-tint-warning hover:bg-warning/25 transition-colors cursor-pointer"
                       >
-                        <IconPencil />
+                        <Icon name="edit" size={12} strokeWidth={2.5} />
                       </button>
                       <button
                         onClick={() => handleDelete(e.id)}
-                        className="flex h-6 w-6 items-center justify-center rounded-md bg-danger/15 text-danger hover:bg-danger/25 transition-colors cursor-pointer"
+                        title={`Remover ${e.title}`}
+                        aria-label={`Remover ${e.title}`}
+                        className="flex h-6 w-6 items-center justify-center rounded-md bg-tint-danger text-on-tint-danger hover:bg-danger/25 transition-colors cursor-pointer"
                       >
-                        <IconTrash />
+                        <Icon name="trash" size={12} strokeWidth={2.5} />
                       </button>
                     </div>
                   </div>
