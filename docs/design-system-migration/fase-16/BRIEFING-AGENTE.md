@@ -177,6 +177,42 @@ Mute **o elemento**, não a classe dele: apague o `<span>`, inverta a condição
 troque o texto. E teste pelo que o usuário alcança — `getByRole`, `getByText`,
 nome acessível —, nunca pela classe.
 
+### As três mutações que NÃO são mutações
+
+O orquestrador escreveu as três hoje e as três "sobreviveram" por motivo
+nenhum. Uma mutação que não muda comportamento **acusa o teste de vazio quando o
+vazio é ela**:
+
+| o que parece mutação | por que é no-op |
+|---|---|
+| trocar uma classe (`sr-only` → `hidden`) | o jsdom não aplica CSS; o elemento continua na árvore |
+| renomear um símbolo em todo o arquivo | o consumidor é renomeado junto, e o código faz o mesmo |
+| `X && original(...)` | `&&` devolve o **segundo** operando; o mutante é o original. É `\|\|` |
+
+Antes de concluir "sobreviveu", leia a mutação e pergunte: **isto muda o que a
+tela faz?** Se não muda, o defeito é seu, não do caso.
+
+### Como desfazer a mutação, e por que não é com git
+
+Cópia do arquivo antes, restauração em `finally`. Nunca `git checkout`, nem
+mesmo restrito ao caminho da sua tela: a árvore tem outros agentes e duas
+sessões vizinhas, e um comando de escrita que "só toca o meu arquivo" já é um
+comando de escrita que você não precisava. Se o processo morrer no meio, o
+`finally` devolve o arquivo; o `git checkout` devolve outra coisa.
+
+```js
+const orig = readFileSync(A, "utf-8");
+try {
+  writeFileSync(A, orig.replace(de, para), "utf-8");
+  // rode o teste; se ele PASSA, o mutante sobreviveu
+} finally {
+  writeFileSync(A, orig, "utf-8");
+}
+```
+
+O `finally` não é estilo: a primeira versão do roteiro de mutação deste projeto
+quebrou ao decodificar a saída do vitest e **deixou a mutação no disco**.
+
 ---
 
 ## 6. A ficha da §29
