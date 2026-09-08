@@ -9,7 +9,7 @@ com os primitivos. Os candidatos, escolhidos pela síntese do mapeamento:
 |---|---|---|
 | painel | `ClientDashboard` | **fechada** |
 | formulário | `TicketFormPage` | **fechada** |
-| listagem | `TicketListPage` | a seguir |
+| listagem | `TicketListPage` | **fechada** |
 
 ---
 
@@ -272,3 +272,121 @@ Agora é `<nav>` com um link para `/tickets` e a página atual em
 `aria-current="page"`. A volta deixou de ser `navigate(-1)` de propósito: de um
 formulário, o histórico pode ter vindo do detalhe, da lista ou do painel, e
 "para trás" não é um lugar.
+
+---
+
+## Etapa 4 — `TicketListPage`
+
+É a tela de **listagem** que a §25 pede, e ela é um quadro kanban de seis
+colunas. 489 linhas.
+
+### Ficha da §29
+
+```text
+Página: /tickets — src/pages/tickets/TicketListPage.tsx
+
+FUNCIONALIDADE
+[x] carrega dados   — `getTickets`, mesmos params
+[x] filtra          — prioridade e responsável, mesmos valores
+[x] busca           — título, protocolo e nº de série; mesmo campo
+[–] pagina          — o quadro traz tudo e rola por coluna
+[x] ordena          — por urgência dentro da coluna; a ordem passou a vir do
+                      módulo (`PRIORIDADE[p].ordem`) em vez de um mapa local
+[–] cria            — o "Abrir chamado" leva ao formulário
+[–] edita  [–] exclui
+[x] abre detalhes   — agora por LINK; ver abaixo
+[–] anexa/remove arquivo
+[x] respeita permissões — sem mudança de papel
+[x] mostra erro     — `Alert variant="danger"`
+[x] mostra estado vazio — por coluna, com texto
+[x] mostra loading  — `Spinner`
+[x] funciona no mobile — colunas de 268px com rolagem horizontal
+[x] funciona no tema escuro — zero cor crua no código
+[x] nenhum campo depende do placeholder — a busca tem `title`; ver pendência
+[x] barras desenhadas — a do SLA já era `progressbar` com `aria-valuetext`
+
+ACRESCENTADOS PELAS DECISÕES
+[x] o que a interface MOSTRA é o que a árvore DIZ, por estado
+    repouso     6 regiões com `<h2>`, eram 6 parágrafos
+    cartão      link com o título como nome, era botão
+    contagem    "1 chamado", era "1"
+    prioridade  selo em texto; o ponto saiu da árvore
+    sem técnico texto em `sr-only`, era só um ícone
+[x] nenhuma ação só de mouse
+[x] nenhum `text-slate-*` sem `dark:` — zero cor crua no código
+[x] nenhuma cor fora do sistema — 6 hexadecimais de status, 4 de prioridade,
+    3 de limiar de SLA e a paleta crua do Tailwind saíram
+[x] `Alert` montado por ação leva `live` ligado
+[x] nenhum primitivo reinventado — `Avatar`, `Button to=`, `PriorityBadge`
+[x] a catraca desceu — 46 → 43 pares
+```
+
+### Contagem do que resta à mão
+
+```text
+src/pages/tickets/TicketListPage.tsx: 3
+```
+
+Os três são **ação**, não navegação: limpar busca, limpar filtros e o arrasto
+do quadro. SVG solto: **0**. Eram nove.
+
+### Dois mapas divergentes, e eles eram os piores
+
+**`PRIORITY_CFG` era o sétimo mapa de prioridade do sistema**, e o
+`FilterSelect` da barra trazia o **oitavo** — quatro deles só nesta tela,
+contando o do quadro e o do filtro. Diziam "Crítico", "Alto", "Médio", "Baixo"
+no masculino, contra o feminino da E17, e pintavam `medium` de **índigo**
+(`#818cf8`), que não é a variante `info` de nenhum dos outros seis.
+
+**`COLUMNS` mapeava os seis status com a paleta crua do Tailwind** — sky,
+indigo, amber, violet, emerald, slate — mais seis hexadecimais cravados, e com
+rótulos próprios: "Ag. Técnico" onde o `Badge` dizia "Aguardando técnico".
+
+Nasceu `lib/status.ts`, no mesmo molde de `lib/prioridade.ts`, e o `Badge`
+passou a consumi-lo também.
+
+### A consequência visível, e por que ela fica
+
+`awaiting_technical` e `awaiting_client` passam a **compartilhar o âmbar**, onde
+antes eram âmbar e violeta.
+
+Isso é a §16, não descuido: os dois **são** o mesmo estado para quem olha o
+quadro — o chamado está parado esperando alguém — e o que os separa é quem está
+devendo resposta, que é informação de texto e está no título da coluna.
+
+E a medição da E18 mostrou que nem daria para mantê-los distintos com rigor: no
+tema claro, dois degraus de `warning` que passem 3:1 nas três superfícies ficam
+a **12,2** de ΔE, contra um piso de 20. A cor não consegue carregar essa
+distinção.
+
+### O cartão era um botão
+
+Navegação é link, e o botão tirava do cartão tudo o que um link tem: não abre em
+aba nova com Ctrl, não aparece no menu de contexto, não mostra o destino na
+barra de status, e o leitor de tela anuncia "botão" para algo que muda de
+página.
+
+### Três defeitos menores que a migração encontrou
+
+1. **O botão de limpar busca não tinha nome.** Só o `<svg>` dentro, e o `Icon` é
+   `aria-hidden`: quem usa leitor de tela ouvia "botão".
+2. **A contagem da coluna era um número solto.** "Aberto … 1" não diz o quê.
+3. **O ponto de prioridade usava `title`** como único portador do rótulo, e
+   `title` não é nome acessível confiável. O selo do rodapé já mostra em texto,
+   então o ponto virou o que sempre foi na prática: decoração.
+
+### O `--fill-*` completou-se aqui
+
+A barra de SLA pintava por limiar com `#ef4444`, `#f59e0b` e `#10b981` —
+preenchimento com hexadecimal cravado, e o âmbar dando 1,96 no claro. Passou aos
+`--fill-*`, e o conjunto local ganhou `info`, `success` e `danger` ao lado do
+`warning` que já existia. Continuam candidatos à **E19**.
+
+### Pendência que a tela abre, e não é do sistema de design
+
+**O status `cancelled` não tem coluna.** O quadro mostra seis dos sete, e um
+chamado cancelado simplesmente **desaparece** da lista — sem coluna e sem aviso
+de que ele existe. É anterior a esta migração e não foi mexido: acrescentar uma
+sétima coluna é decisão de produto.
+
+Entra no escopo da Fase 16.

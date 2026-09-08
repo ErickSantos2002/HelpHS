@@ -114,6 +114,24 @@ export function rotuloDePrioridade(p: string): string {
   return PRIORIDADE[p as TicketPriority]?.rotulo ?? p;
 }
 
+/**
+ * As classes de cada variante, **escritas por extenso**.
+ *
+ * Por extenso porque o Tailwind gera utilitário varrendo o TEXTO dos arquivos:
+ * `"bg-fill-" + variante` some da varredura, a regra não nasce, o elemento fica
+ * sem cor, e não há erro nem aviso.
+ *
+ * Usam os `--fill-*` e não os degraus 500 da rampa. O 500 de `warning` reprova
+ * 1,96:1 como preenchimento no tema claro, e a faixa da esquerda do cartão é
+ * preenchimento — 4px de cor, sem texto por cima.
+ */
+export const TOM_PRIORIDADE: Record<Variante, { borda: string; ponto: string }> = {
+  danger: { borda: "border-l-fill-danger", ponto: "bg-fill-danger" },
+  warning: { borda: "border-l-fill-warning", ponto: "bg-fill-warning" },
+  info: { borda: "border-l-fill-info", ponto: "bg-fill-info" },
+  muted: { borda: "border-l-borda-control", ponto: "bg-borda-control" },
+};
+
 /** A variante do selo, com recuo para o neutro. */
 export function varianteDePrioridade(p: string): Variante {
   return PRIORIDADE[p as TicketPriority]?.variante ?? "muted";

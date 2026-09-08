@@ -15,20 +15,21 @@
 @tailwind components;
 @tailwind utilities;
 
-/* ── `--fill-warning`: warning na força de PREENCHIMENTO ────────────────
+/* ── `--fill-*`: as semânticas na força de PREENCHIMENTO ─────────────────
  *
  * CANDIDATO A EMENDA DO PACOTE. Vive aqui porque o pacote ainda não tem, e o
  * ChamadosHS vai esbarrar no mesmo buraco.
  *
- * O problema: `--color-warning-500` reprova como preenchimento no tema claro —
- * **1,96:1** contra a superfície elevada, contra um piso de 3:1 (WCAG 1.4.11).
- * É o mesmo número que a E16 já tinha registrado, e a causa é conhecida:
+ * O problema: contra as três superfícies do tema CLARO, `--color-warning-500`
+ * dá **1,96:1** e `--color-success-500` dá **2,54:1**, contra um piso de 3:1
+ * (WCAG 1.4.11). Duas das quatro reprovam.
+ * O 1,96 é o mesmo número que a E16 já tinha registrado, e a causa é conhecida:
  * amarelo é claro por natureza, e um degrau fixo não inverte por tema.
  *
- * O pacote resolve esse caso para o neutro com `--border-control`
- * (slate-500 no claro, slate-400 no escuro). Para `warning` não existe
- * equivalente: `--on-tint-warning` inverte, mas é cor de TEXTO sobre a tinta —
- * outro papel, outro piso.
+ * O pacote resolve esse caso para o NEUTRO com `--border-control` (slate-500 no
+ * claro, slate-400 no escuro) — e é por isso que a prioridade "baixa" sempre
+ * passou. Para as quatro semânticas não existe equivalente: os `--on-tint-*`
+ * invertem, mas são cor de TEXTO sobre a tinta, outro papel e outro piso.
  *
  * Aqui não há valor cravado: os dois lados apontam para degraus do pacote.
  * Se o `colors.css` mudar a rampa, este token acompanha sozinho — que é
@@ -36,15 +37,33 @@
  * catraca e este token não.
  *
  * Medido, base / surface / elevada:
- *   claro  (warning-700, #b45309)   4,80 / 5,02 / 4,58
- *   escuro (warning-500, #f59e0b)   8,10 / 7,44 / 6,31
- * A galeria confere a cada execução, no bloco "Prioridade". */
+ *
+ *   token            claro                        escuro
+ *   --fill-info      3,52 / 3,68 / 3,36           4,73 / 4,35 / 3,69
+ *   --fill-success   3,60 / 3,77 / 3,44           6,86 / 6,30 / 5,34
+ *   --fill-warning   4,80 / 5,02 / 4,58           8,10 / 7,44 / 6,31
+ *   --fill-danger    3,60 / 3,76 / 3,44           4,62 / 4,25 / 3,60
+ *
+ * Critério do degrau: o mais próximo do 500 que passa 3:1 nas três superfícies
+ * daquele tema. Perto do 500 de propósito — a cor tem de continuar lendo como a
+ * semântica que representa, e a busca sem esse desempate vai para os extremos.
+ *
+ * `info` e `danger` levam o mesmo degrau nos dois temas, e mesmo assim estão
+ * declarados dos dois lados: token é papel, e papel existe nos dois temas.
+ *
+ * A galeria confere a cada execução, no bloco "Prioridade em gráfico". */
 :root {
+  --fill-info: var(--color-info-500);
+  --fill-success: var(--color-success-600);
   --fill-warning: var(--color-warning-700);
+  --fill-danger: var(--color-danger-500);
 }
 
 .dark {
+  --fill-info: var(--color-info-500);
+  --fill-success: var(--color-success-500);
   --fill-warning: var(--color-warning-500);
+  --fill-danger: var(--color-danger-500);
 }
 
 /* Os tokens de superfície e borda que moravam aqui como tripla RGB agora vêm

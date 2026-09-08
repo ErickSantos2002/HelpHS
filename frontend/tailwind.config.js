@@ -107,6 +107,16 @@ export default {
         // 0,15 × 0,20 e daria um selo de fundo praticamente invisível, e o
         // conserto intuitivo (subir para /30, /50) continua multiplicando e
         // nunca chega nos 15% do pacote.
+        // As quatro semanticas na forca de PREENCHIMENTO — candidatas a emenda
+        // E19. Existem porque o degrau 500 reprova o piso de 3:1 no tema claro
+        // em duas delas (warning 1,96; success 2,54), e degrau fixo nao inverte
+        // por tema. Os valores vivem em `index.css`, apontando para degraus do
+        // pacote — sem hexadecimal cravado, entao acompanham a rampa sozinhos.
+        "fill-info": tk("--fill-info"),
+        "fill-success": tk("--fill-success"),
+        "fill-warning": tk("--fill-warning"),
+        "fill-danger": tk("--fill-danger"),
+
         "tint-primary": tk("--tint-primary"),
         "tint-neutral": tk("--tint-neutral"),
         "tint-success": tk("--tint-success"),

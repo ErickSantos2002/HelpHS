@@ -1,4 +1,5 @@
 import { rotuloDePrioridade, varianteDePrioridade } from "../../lib/prioridade";
+import { rotuloDeStatus, varianteDeStatus } from "../../lib/status";
 import { cn } from "../../lib/utils";
 
 type BadgeVariant =
@@ -80,37 +81,20 @@ export function Badge({
 
 // ── Ticket status badge ───────────────────────────────────────
 
-type TicketStatus =
-  | "open"
-  | "in_progress"
-  | "awaiting_client"
-  | "awaiting_technical"
-  | "resolved"
-  | "closed"
-  | "cancelled";
+// O mapa de status saiu daqui: mora em `lib/status.ts`, que e a fonte unica
+// consumida tambem pelo quadro kanban da lista. O quadro tinha o seu proprio,
+// com a paleta CRUA do Tailwind — sky, indigo, amber, violet, emerald, slate,
+// mais seis hexadecimais cravados — e ate o rotulo divergia ("Ag. Tecnico"
+// contra "Aguardando tecnico").
 
-const statusVariant: Record<TicketStatus, BadgeVariant> = {
-  open: "info",
-  in_progress: "primary",
-  awaiting_client: "warning",
-  awaiting_technical: "warning",
-  resolved: "success",
-  closed: "muted",
-  cancelled: "danger",
-};
-
-const statusLabel: Record<TicketStatus, string> = {
-  open: "Aberto",
-  in_progress: "Em andamento",
-  awaiting_client: "Aguardando cliente",
-  awaiting_technical: "Aguardando técnico",
-  resolved: "Resolvido",
-  closed: "Fechado",
-  cancelled: "Cancelado",
-};
-
-export function StatusBadge({ status }: { status: TicketStatus }) {
-  return <Badge variant={statusVariant[status]}>{statusLabel[status]}</Badge>;
+/**
+ * Aceita `string` pelo mesmo motivo do `PriorityBadge`: o dado vem da REDE, e
+ * um status novo no backend nao pode derrubar a tela. Recua para neutro.
+ */
+export function StatusBadge({ status }: { status: string }) {
+  return (
+    <Badge variant={varianteDeStatus(status)}>{rotuloDeStatus(status)}</Badge>
+  );
 }
 
 // ── Ticket priority badge ─────────────────────────────────────

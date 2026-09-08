@@ -109,6 +109,11 @@ export const ICON_PATHS_LOCAIS = {
     "M10 19l-7-7m0 0l7-7m-7 7h18",
   paperclip:
     "M15.172 7l-6.586 6.586a2 2 0 102.828 2.828l6.414-6.586a4 4 0 00-5.656-5.656l-6.415 6.585a6 6 0 108.486 8.486L20.5 13",
+  // Nao ha `checkCircle` aqui: o `check` do pacote JA e o visto dentro do
+  // circulo, com o mesmo tracado. O caso "cada nome desenha um tracado
+  // diferente" pegou a duplicata antes de ela existir.
+  user:
+    "M16 7a4 4 0 11-8 0 4 4 0 018 0zM12 14a7 7 0 00-7 7h14a7 7 0 00-7-7z",
 } as const;
 
 /** O conjunto que o `Icon` desenha: os do pacote mais os locais. */
