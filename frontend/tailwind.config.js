@@ -107,6 +107,20 @@ export default {
         // 0,15 × 0,20 e daria um selo de fundo praticamente invisível, e o
         // conserto intuitivo (subir para /30, /50) continua multiplicando e
         // nunca chega nos 15% do pacote.
+        // A paleta de GRAFICO da E16-b, mapeada como classe. Serie sem
+        // significado proprio — categoria, produto, mes, tipo de campo — usa
+        // estas seis; status e prioridade NAO, porque tem significado que o
+        // resto da interface ja ensina.
+        //
+        // Medidas: 3:1 contra as tres superficies nos dois temas (pior 3,22) e
+        // DeltaE >= 20 entre todos os pares nas quatro visoes (pior 25,8).
+        "chart-1": tk("--chart-1"),
+        "chart-2": tk("--chart-2"),
+        "chart-3": tk("--chart-3"),
+        "chart-4": tk("--chart-4"),
+        "chart-5": tk("--chart-5"),
+        "chart-6": tk("--chart-6"),
+
         // As quatro semanticas na forca de PREENCHIMENTO — candidatas a emenda
         // E19. Existem porque o degrau 500 reprova o piso de 3:1 no tema claro
         // em duas delas (warning 1,96; success 2,54), e degrau fixo nao inverte

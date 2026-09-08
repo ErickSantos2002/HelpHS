@@ -15,6 +15,7 @@ import {
   Spinner,
   Textarea,
 } from "../../components/ui";
+import { CATEGORIAS, rotuloDeCategoria } from "../../lib/categoria";
 import { PRIORIDADE, PRIORIDADES, type TicketPriority } from "../../lib/prioridade";
 import {
   getProducts,
@@ -59,31 +60,12 @@ const ALLOWED_EXTENSIONS = [".pdf",".doc",".docx",".xls",".xlsx",".png",".jpg","
 const MAX_FILE_SIZE_MB = 25;
 const MAX_FILES = 10;
 
-/**
- * As oito categorias, como opções do `RadioCards`.
- *
- * Os oito `<svg>` que estavam soltos aqui viraram nomes do `Icon`, com os
- * traçados movidos para `ICON_PATHS_LOCAIS` **verbatim** — o desenho é o mesmo.
- *
- * Esta lista também é a fonte do rótulo no resumo e na revisão. Havia um
- * segundo mapa (`CATEGORY_LABEL`) com os mesmos oito pares, e dois mapas do
- * mesmo dado divergem: era o defeito que a prioridade tinha em cinco cópias.
+/*
+ * As oito categorias saíram daqui: moram em `lib/categoria.ts`, que é a fonte
+ * única consumida também pelo detalhe do chamado e pelo relatório. Eram TRÊS
+ * cópias, todas concordando — e foi exatamente assim que prioridade começou,
+ * antes de virar dez mapas divergentes.
  */
-const CATEGORIAS = [
-  { value: "hardware", label: "Hardware", icon: "server" },
-  { value: "software", label: "Software", icon: "code" },
-  { value: "network", label: "Rede", icon: "network" },
-  { value: "access", label: "Acesso", icon: "key" },
-  { value: "email", label: "E-mail", icon: "mail" },
-  { value: "security", label: "Segurança", icon: "shield" },
-  { value: "general", label: "Geral", icon: "help" },
-  { value: "other", label: "Outro", icon: "ellipsis" },
-] as const;
-
-/** O rótulo de uma categoria, com recuo para o valor cru. */
-function rotuloDeCategoria(valor: string): string {
-  return CATEGORIAS.find((c) => c.value === valor)?.label ?? valor;
-}
 
 /**
  * As quatro prioridades, como opções do `RadioCards`.

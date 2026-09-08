@@ -2,12 +2,16 @@ import React, { useCallback, useEffect, useRef, useState } from "react";
 import { toast } from "sonner";
 import { toastApiError } from "../../lib/toastError";
 import { readableTextColor } from "../../lib/colors";
+import { rotuloDeCategoria } from "../../lib/categoria";
+import { rotuloDePrioridade } from "../../lib/prioridade";
+import { rotuloDeStatus } from "../../lib/status";
 import { cn, plural } from "../../lib/utils";
 import { useNavigate, useParams } from "react-router-dom";
 import {
   Alert,
   Badge,
   Button,
+  Icon,
   Modal,
   ModalFooter,
   PriorityBadge,
@@ -52,16 +56,6 @@ import { TICKET_TRANSITIONS } from "../../lib/ticketConstants";
 
 // ── Constants ─────────────────────────────────────────────────
 
-const STATUS_LABEL: Record<string, string> = {
-  open: "Aberto",
-  in_progress: "Em andamento",
-  awaiting_client: "Aguardando cliente",
-  awaiting_technical: "Aguardando técnico",
-  resolved: "Resolvido",
-  closed: "Fechado",
-  cancelled: "Cancelado",
-};
-
 const FIELD_LABEL: Record<string, string> = {
   created: "Ticket aberto",
   status: "Status alterado",
@@ -76,30 +70,19 @@ const FIELD_LABEL: Record<string, string> = {
   client_observation: "Observação atualizada",
 };
 
-const PRIORITY_LABEL: Record<string, string> = {
-  low: "Baixa",
-  medium: "Média",
-  high: "Alta",
-  critical: "Crítica",
-};
-
-const PRIORITY_COLOR: Record<string, string> = {
-  low: "text-sky-400",
-  medium: "text-yellow-400",
-  high: "text-orange-400",
-  critical: "text-red-400",
-};
-
-const CATEGORY_LABEL: Record<string, string> = {
-  hardware: "Hardware",
-  software: "Software",
-  network: "Rede",
-  access: "Acesso",
-  email: "E-mail",
-  security: "Segurança",
-  general: "Geral",
-  other: "Outro",
-};
+/*
+ * Saíram daqui três mapas, e nenhum concordava com o resto do sistema:
+ *
+ *   STATUS_LABEL   duplicava `lib/status.ts`;
+ *   PRIORITY_LABEL era o NONO mapa de prioridade — este dizia o feminino certo,
+ *                  e foi ele que a emenda E17 citou como o lado correto da
+ *                  divergência;
+ *   PRIORITY_COLOR era o DÉCIMO, e um quarto esquema de cor: sky, yellow,
+ *                  orange, red — nenhuma delas a variante do módulo;
+ *   CATEGORY_LABEL era a terceira cópia das oito categorias.
+ *
+ * Agora saem de `lib/status.ts`, `lib/prioridade.ts` e `lib/categoria.ts`.
+ */
 
 // ── SVG Icons ─────────────────────────────────────────────────
 
@@ -372,14 +355,19 @@ function ActivityEntry({ entry }: { entry: TicketHistory }) {
 
   const dotColor =
     entry.field === "created"
-      ? "bg-sky-500"
+      // A cor do ponto distingue TIPO DE CAMPO, que é série categórica sem
+      // significado próprio — então sai da paleta `--chart-*` da E16-b, e não
+      // das rampas semânticas. Era sky/violet/emerald/orange cru.
+      //
+      // A cor é reforço: o rótulo do campo está ao lado, em texto.
+      ? "bg-chart-1"
       : entry.field === "status"
-        ? "bg-violet-500"
+        ? "bg-chart-2"
         : entry.field === "assignee_id"
-          ? "bg-emerald-500"
+          ? "bg-chart-3"
           : entry.field === "priority"
-            ? "bg-orange-500"
-            : "bg-slate-500";
+            ? "bg-chart-4"
+            : "bg-borda-control";
 
   const isUnassign = entry.field === "assignee_id" && !entry.new_value;
 
@@ -391,14 +379,14 @@ function ActivityEntry({ entry }: { entry: TicketHistory }) {
       </div>
       <div className="pb-4 min-w-0 flex-1">
         <div className="flex items-baseline justify-between gap-2">
-          <p className="text-sm font-medium text-slate-200">
+          <p className="text-sm font-medium text-conteudo">
             {isUnassign ? "Responsável removido" : label}
           </p>
-          <time className="text-[11px] text-slate-500 shrink-0">{relTime}</time>
+          <time className="text-[11px] text-conteudo-muted shrink-0">{relTime}</time>
         </div>
 
         {/* Quem fez a ação — sem autor significa que foi o próprio sistema */}
-        <p className="text-xs text-slate-500 mt-0.5">por {entry.user_name ?? "Sistema"}</p>
+        <p className="text-xs text-conteudo-muted mt-0.5">por {entry.user_name ?? "Sistema"}</p>
 
         {/* Status: de → para */}
         {entry.field === "status" && entry.new_value && (
@@ -407,7 +395,7 @@ function ActivityEntry({ entry }: { entry: TicketHistory }) {
               <>
                 <StatusBadge status={entry.old_value as never} />
                 <svg
-                  className="w-3 h-3 text-slate-600"
+                  className="w-3 h-3 text-conteudo-faint"
                   fill="none"
                   viewBox="0 0 24 24"
                   stroke="currentColor"
@@ -423,35 +411,28 @@ function ActivityEntry({ entry }: { entry: TicketHistory }) {
 
         {/* Técnico atribuído */}
         {entry.field === "assignee_id" && entry.comment && !isUnassign && (
-          <p className="mt-1 text-xs text-emerald-400 font-medium">{entry.comment}</p>
+          <p className="mt-1 text-xs font-medium text-on-tint-success">{entry.comment}</p>
         )}
 
         {/* Prioridade: de → para */}
         {entry.field === "priority" && entry.new_value && (
           <div className="flex items-center gap-1.5 mt-1">
+            {/* O selo, e não texto colorido: o `PRIORITY_COLOR` daqui era um
+                quarto esquema (sky, yellow, orange, red) e nenhuma das quatro
+                era a variante do módulo. E texto colorido sozinho é cor como
+                único portador; o selo traz o rótulo junto. */}
             {entry.old_value && (
               <>
-                <span
-                  className={`text-xs font-medium ${PRIORITY_COLOR[entry.old_value] ?? "text-slate-400"}`}
-                >
-                  {PRIORITY_LABEL[entry.old_value] ?? entry.old_value}
-                </span>
-                <svg
-                  className="w-3 h-3 text-slate-600"
-                  fill="none"
-                  viewBox="0 0 24 24"
-                  stroke="currentColor"
+                <PriorityBadge priority={entry.old_value} />
+                <Icon
+                  name="chevronDown"
+                  size={12}
                   strokeWidth={2}
-                >
-                  <path strokeLinecap="round" strokeLinejoin="round" d="M9 5l7 7-7 7" />
-                </svg>
+                  className="-rotate-90 text-conteudo-faint"
+                />
               </>
             )}
-            <span
-              className={`text-xs font-medium ${PRIORITY_COLOR[entry.new_value] ?? "text-slate-400"}`}
-            >
-              {PRIORITY_LABEL[entry.new_value] ?? entry.new_value}
-            </span>
+            <PriorityBadge priority={entry.new_value} />
           </div>
         )}
 
@@ -460,11 +441,11 @@ function ActivityEntry({ entry }: { entry: TicketHistory }) {
           <div className="flex items-center gap-1.5 mt-1">
             {entry.old_value && (
               <>
-                <span className="text-xs text-slate-500">
-                  {CATEGORY_LABEL[entry.old_value] ?? entry.old_value}
+                <span className="text-xs text-conteudo-muted">
+                  {rotuloDeCategoria(entry.old_value)}
                 </span>
                 <svg
-                  className="w-3 h-3 text-slate-600"
+                  className="w-3 h-3 text-conteudo-faint"
                   fill="none"
                   viewBox="0 0 24 24"
                   stroke="currentColor"
@@ -474,15 +455,15 @@ function ActivityEntry({ entry }: { entry: TicketHistory }) {
                 </svg>
               </>
             )}
-            <span className="text-xs text-slate-300">
-              {CATEGORY_LABEL[entry.new_value] ?? entry.new_value}
+            <span className="text-xs text-conteudo">
+              {rotuloDeCategoria(entry.new_value)}
             </span>
           </div>
         )}
 
         {/* Comentário geral (status manual com observação, resolução, etc.) */}
         {entry.comment && entry.field !== "assignee_id" && (
-          <p className="mt-1.5 text-xs text-slate-400 italic bg-surface-elevated/60 rounded-lg px-3 py-2 border border-borda/30">
+          <p className="mt-1.5 text-xs text-conteudo-muted italic bg-surface-elevated/60 rounded-lg px-3 py-2 border border-borda/30">
             "{entry.comment}"
           </p>
         )}
@@ -523,7 +504,7 @@ function AttachmentItem({
       <div className="min-w-0 flex-1">
         <button
           onClick={viewable ? preview : download}
-          className="block w-full truncate text-left text-sm font-medium text-slate-200 hover:text-primary transition-colors cursor-pointer"
+          className="block w-full truncate text-left text-sm font-medium text-conteudo hover:text-primary transition-colors cursor-pointer"
         >
           {attachment.original_name}
         </button>
@@ -556,7 +537,7 @@ function AttachmentItem({
           <button
             onClick={preview}
             aria-label={`Visualizar ${attachment.original_name}`}
-            className="p-1.5 rounded-md text-slate-500 hover:text-primary hover:bg-primary/10 transition-colors cursor-pointer"
+            className="p-1.5 rounded-md text-conteudo-muted hover:text-primary hover:bg-primary/10 transition-colors cursor-pointer"
             title="Visualizar"
           >
             {IC.Eye}
@@ -565,7 +546,7 @@ function AttachmentItem({
         <button
           onClick={download}
           aria-label={`Baixar ${attachment.original_name}`}
-          className="p-1.5 rounded-md text-slate-500 hover:text-primary hover:bg-primary/10 transition-colors cursor-pointer"
+          className="p-1.5 rounded-md text-conteudo-muted hover:text-primary hover:bg-primary/10 transition-colors cursor-pointer"
           title="Baixar"
         >
           {IC.Download}
@@ -573,7 +554,7 @@ function AttachmentItem({
         {canDelete && (
           <button
             onClick={() => onDelete(attachment.id)}
-            className="p-1.5 rounded-md text-slate-500 hover:text-red-400 hover:bg-red-500/10 transition-colors cursor-pointer"
+            className="p-1.5 rounded-md text-conteudo-muted hover:text-on-tint-danger hover:bg-tint-danger transition-colors cursor-pointer"
             title="Excluir"
           >
             {IC.X}
@@ -590,13 +571,13 @@ function AttachmentItem({
 function DetailField({ label, value }: { label: string; value: string | null | undefined }) {
   return (
     <div className="border-b border-borda/20 py-2.5 last:border-0 sm:[&:nth-last-child(-n+2)]:border-0">
-      <p className="mb-0.5 text-[10px] font-semibold uppercase tracking-widest text-slate-500">
+      <p className="mb-0.5 text-[10px] font-semibold uppercase tracking-widest text-conteudo-muted">
         {label}
       </p>
       {value ? (
-        <p className="text-sm text-slate-200 break-words">{value}</p>
+        <p className="text-sm text-conteudo break-words">{value}</p>
       ) : (
-        <p className="text-sm italic text-slate-600">Não informado</p>
+        <p className="text-sm italic text-conteudo-faint">Não informado</p>
       )}
     </div>
   );
@@ -615,12 +596,12 @@ function PropRow({
 }) {
   return (
     <div className="flex items-start gap-3 py-2.5 border-b border-borda/30 last:border-0">
-      <span className="mt-0.5 shrink-0 text-slate-500">{icon}</span>
+      <span className="mt-0.5 shrink-0 text-conteudo-muted">{icon}</span>
       <div className="min-w-0 flex-1">
-        <p className="mb-0.5 text-[10px] font-semibold uppercase tracking-widest text-slate-500">
+        <p className="mb-0.5 text-[10px] font-semibold uppercase tracking-widest text-conteudo-muted">
           {label}
         </p>
-        <div className="text-sm font-medium text-slate-200">{children}</div>
+        <div className="text-sm font-medium text-conteudo">{children}</div>
       </div>
     </div>
   );
@@ -647,10 +628,10 @@ function SidebarSection({
   const isAmber = accent === "amber";
   return (
     <div
-      className={`rounded-xl border ${isAmber ? "border-amber-700/25 bg-amber-950/15" : "border-borda/40 bg-surface"}`}
+      className={`rounded-xl border ${isAmber ? "border-warning/25 bg-tint-warning" : "border-borda/40 bg-surface"}`}
     >
       <div
-        className={`flex w-full items-center justify-between px-4 py-3 rounded-xl ${isAmber ? "hover:bg-amber-900/10" : "hover:bg-surface-elevated/40"} transition-colors`}
+        className={`flex w-full items-center justify-between px-4 py-3 rounded-xl ${isAmber ? "hover:bg-tint-warning" : "hover:bg-surface-elevated/40"} transition-colors`}
       >
         <button
           type="button"
@@ -658,7 +639,7 @@ function SidebarSection({
           className="flex flex-1 items-center gap-1.5 cursor-pointer text-left"
         >
           <span
-            className={`text-[10px] font-bold uppercase tracking-widest flex items-center gap-1.5 ${isAmber ? "text-amber-500/80" : "text-slate-500"}`}
+            className={`text-[10px] font-bold uppercase tracking-widest flex items-center gap-1.5 ${isAmber ? "text-on-tint-warning" : "text-conteudo-muted"}`}
           >
             {icon}
             {title}
@@ -668,7 +649,7 @@ function SidebarSection({
           {action}
           <button type="button" onClick={() => setOpen((v) => !v)} className="cursor-pointer">
             <svg
-              className={`w-3 h-3 shrink-0 transition-transform duration-200 ${open ? "rotate-180" : ""} ${isAmber ? "text-amber-600/60" : "text-slate-600"}`}
+              className={`w-3 h-3 shrink-0 transition-transform duration-200 ${open ? "rotate-180" : ""} ${isAmber ? "text-on-tint-warning" : "text-conteudo-faint"}`}
               fill="none"
               viewBox="0 0 24 24"
               stroke="currentColor"
@@ -698,11 +679,14 @@ function SidebarAction({
   variant?: "primary" | "default" | "ghost";
 }) {
   const cls = {
-    primary: "bg-emerald-600 hover:bg-emerald-500 text-white border-emerald-600",
+    // `action-success` e `on-success` da emenda E2, e nao o verde cru: o
+    // degrau 500 da rampa com texto branco por cima da 2,54:1.
+    primary:
+      "bg-action-success hover:bg-action-success-hover text-on-success border-action-success",
     default:
-      "bg-surface-elevated hover:bg-surface-elevated/80 text-slate-200 border-borda/50 hover:border-borda",
+      "bg-surface-elevated hover:bg-surface-elevated/80 text-conteudo border-borda/50 hover:border-borda",
     ghost:
-      "bg-transparent hover:bg-surface-elevated text-slate-400 hover:text-slate-200 border-borda/30",
+      "bg-transparent hover:bg-surface-elevated text-conteudo-muted hover:text-conteudo border-borda/30",
   }[variant];
 
   return (
@@ -734,8 +718,8 @@ function ScoreRating({ value, onChange }: { value: number; onChange: (v: number)
             aria-label={`Nota ${n}`}
             className={`h-9 w-9 rounded-lg text-sm font-bold transition-all border cursor-pointer ${
               active
-                ? "bg-yellow-400 border-yellow-400 text-slate-900 shadow-sm"
-                : "border-borda/60 text-slate-400 hover:border-yellow-400/60 hover:text-yellow-400"
+                ? "bg-tint-warning border-warning text-on-tint-warning shadow-sm"
+                : "border-borda/60 text-conteudo-muted hover:border-warning/60 hover:text-on-tint-warning"
             }`}
           >
             {n}
@@ -807,32 +791,32 @@ function SurveyPanel({ ticketId }: { ticketId: string }) {
   return (
     <div className="rounded-xl border border-borda/50 bg-surface">
       <div className="flex items-center gap-2 border-b border-borda/40 px-5 py-2.5">
-        <span className="text-yellow-400">{IC.Star}</span>
-        <h2 className="text-sm font-semibold text-slate-200">Pesquisa de satisfação</h2>
+        <span className="text-on-tint-warning">{IC.Star}</span>
+        <h2 className="text-sm font-semibold text-conteudo">Pesquisa de satisfação</h2>
       </div>
       <div className="px-5 py-4">
         {survey ? (
           <div className="space-y-2">
             <div className="flex flex-wrap items-center gap-x-6 gap-y-2">
               <div>
-                <p className="text-xs text-slate-500">Atendimento</p>
+                <p className="text-xs text-conteudo-muted">Atendimento</p>
                 <div className="flex items-center gap-2">
-                  <span className="text-3xl font-extrabold text-yellow-400">
+                  <span className="text-3xl font-extrabold text-on-tint-warning">
                     {survey.rating}
-                    <span className="text-base font-normal text-slate-500">/10</span>
+                    <span className="text-base font-normal text-conteudo-muted">/10</span>
                   </span>
-                  <span className="text-sm text-slate-400">{RATING_LABELS[survey.rating]}</span>
+                  <span className="text-sm text-conteudo-muted">{RATING_LABELS[survey.rating]}</span>
                 </div>
               </div>
               {survey.recommend_rating !== null && (
                 <div>
-                  <p className="text-xs text-slate-500">Recomendaria a empresa</p>
+                  <p className="text-xs text-conteudo-muted">Recomendaria a empresa</p>
                   <div className="flex items-center gap-2">
-                    <span className="text-3xl font-extrabold text-yellow-400">
+                    <span className="text-3xl font-extrabold text-on-tint-warning">
                       {survey.recommend_rating}
-                      <span className="text-base font-normal text-slate-500">/10</span>
+                      <span className="text-base font-normal text-conteudo-muted">/10</span>
                     </span>
-                    <span className="text-sm text-slate-400">
+                    <span className="text-sm text-conteudo-muted">
                       {RECOMMEND_LABELS[survey.recommend_rating]}
                     </span>
                   </div>
@@ -840,28 +824,28 @@ function SurveyPanel({ ticketId }: { ticketId: string }) {
               )}
             </div>
             {survey.comment && (
-              <p className="text-sm italic text-slate-400 bg-surface-elevated/60 rounded-lg px-3 py-2">
+              <p className="text-sm italic text-conteudo-muted bg-surface-elevated/60 rounded-lg px-3 py-2">
                 "{survey.comment}"
               </p>
             )}
-            <p className="text-xs text-slate-600">
+            <p className="text-xs text-conteudo-faint">
               Enviado em {new Date(survey.created_at).toLocaleString("pt-BR")}
             </p>
           </div>
         ) : (
           <div className="space-y-3">
             <div className="flex flex-wrap items-center gap-x-3 gap-y-2">
-              <p className="text-sm text-slate-400">Como você avalia o atendimento?</p>
+              <p className="text-sm text-conteudo-muted">Como você avalia o atendimento?</p>
               <ScoreRating value={rating} onChange={setRating} />
               {rating > 0 && (
-                <p className="text-sm font-semibold text-yellow-400">{RATING_LABELS[rating]}</p>
+                <p className="text-sm font-semibold text-on-tint-warning">{RATING_LABELS[rating]}</p>
               )}
             </div>
             <div className="flex flex-wrap items-center gap-x-3 gap-y-2">
-              <p className="text-sm text-slate-400">O quanto você recomendaria nossa empresa?</p>
+              <p className="text-sm text-conteudo-muted">O quanto você recomendaria nossa empresa?</p>
               <ScoreRating value={recommend} onChange={setRecommend} />
               {recommend > 0 && (
-                <p className="text-sm font-semibold text-yellow-400">
+                <p className="text-sm font-semibold text-on-tint-warning">
                   {RECOMMEND_LABELS[recommend]}
                 </p>
               )}
@@ -1002,8 +986,8 @@ function TabBar({
             onClick={() => setActive(tab.id)}
             className={`flex flex-1 items-center justify-center gap-1.5 rounded-lg px-3 py-2 text-sm font-semibold transition-all cursor-pointer ${
               active === tab.id
-                ? "bg-surface text-slate-100 shadow-sm"
-                : "text-slate-500 hover:text-slate-300"
+                ? "bg-surface text-conteudo-heading shadow-sm"
+                : "text-conteudo-muted hover:text-conteudo"
             }`}
           >
             <span className="sm:hidden">{TAB_ICONS[tab.id]}</span>
@@ -1013,7 +997,7 @@ function TabBar({
                 className={`rounded-full px-1.5 py-0.5 text-[10px] font-bold leading-none ${
                   active === tab.id
                     ? "bg-primary/20 text-primary"
-                    : "bg-surface-elevated text-slate-500"
+                    : "bg-surface-elevated text-conteudo-muted"
                 }`}
               >
                 {counts[tab.id]}
@@ -1318,7 +1302,7 @@ export default function TicketDetailPage() {
   }
 
   const transitions = TICKET_TRANSITIONS[ticket.status] ?? [];
-  const transitionOptions = transitions.map((s) => ({ value: s, label: STATUS_LABEL[s] ?? s }));
+  const transitionOptions = transitions.map((s) => ({ value: s, label: rotuloDeStatus(s) }));
   const assignedTech = ticket.assignee_name ?? (ticket.assignee_id ? "Técnico" : null);
   const slaBreach = ticket.sla_response_breach || ticket.sla_resolve_breach;
 
@@ -1335,14 +1319,14 @@ export default function TicketDetailPage() {
         <div className="min-w-0">
           <button
             onClick={() => navigate(-1)}
-            className="mb-2 flex items-center gap-1.5 text-xs font-medium text-slate-500 hover:text-primary transition-colors cursor-pointer"
+            className="mb-2 flex items-center gap-1.5 text-xs font-medium text-conteudo-muted hover:text-primary transition-colors cursor-pointer"
           >
             {IC.ArrowLeft}
             <span>Tickets</span>
-            <span className="text-slate-600">/</span>
-            <span className="font-mono text-slate-500">{ticket.protocol}</span>
+            <span className="text-conteudo-faint">/</span>
+            <span className="font-mono text-conteudo-muted">{ticket.protocol}</span>
           </button>
-          <h1 className="text-xl font-extrabold leading-tight text-slate-100">{ticket.title}</h1>
+          <h1 className="text-xl font-extrabold leading-tight text-conteudo-heading">{ticket.title}</h1>
           <div className="mt-2 flex flex-wrap items-center gap-2">
             <StatusBadge status={ticket.status} />
             <PriorityBadge priority={ticket.priority} />
@@ -1350,7 +1334,7 @@ export default function TicketDetailPage() {
               <TagBadge key={tag.id} name={tag.name} color={tag.color} />
             ))}
             {slaBreach && (
-              <span className="inline-flex items-center gap-1 rounded-full bg-red-500/15 px-2.5 py-0.5 text-xs font-semibold text-red-700 dark:text-red-400 ring-1 ring-inset ring-red-500/25">
+              <span className="inline-flex items-center gap-1 rounded-full bg-tint-danger px-2.5 py-0.5 text-xs font-semibold text-on-tint-danger ring-1 ring-inset ring-danger/25">
                 {IC.Alert}
                 SLA violado
               </span>
@@ -1371,13 +1355,14 @@ export default function TicketDetailPage() {
 
         {/* Quick resolve button in header */}
         {isStaff && !isClosed && (
-          <button
+          <Button
+            variant="success"
             onClick={() => setResolveModal(true)}
-            className="flex w-full sm:w-auto shrink-0 items-center justify-center gap-2 rounded-xl bg-emerald-600 px-5 py-2.5 text-sm font-bold text-white shadow-sm hover:bg-emerald-500 transition-colors cursor-pointer"
+            icon={<Icon name="check" size={16} strokeWidth={2.5} />}
+            className="w-full sm:w-auto"
           >
-            {IC.Check("w-4 h-4")}
             Concluir ticket
-          </button>
+          </Button>
         )}
       </div>
 
@@ -1399,13 +1384,13 @@ export default function TicketDetailPage() {
               <div className="flex flex-col gap-4 lg:h-full">
                 {/* Resolution note */}
                 {ticket.resolution_note && (
-                  <div className="shrink-0 rounded-xl border border-emerald-700/30 bg-emerald-950/20">
-                    <div className="flex items-center gap-2 border-b border-emerald-700/20 px-5 py-3.5">
-                      <span className="text-emerald-400">{IC.Check("w-4 h-4")}</span>
-                      <h2 className="text-sm font-semibold text-emerald-400">Resolução</h2>
+                  <div className="shrink-0 rounded-xl border border-success/30 bg-tint-success">
+                    <div className="flex items-center gap-2 border-b border-success/20 px-5 py-3.5">
+                      <span className="text-on-tint-success">{IC.Check("w-4 h-4")}</span>
+                      <h2 className="text-sm font-semibold text-on-tint-success">Resolução</h2>
                     </div>
                     <div className="px-5 py-4">
-                      <p className="text-sm leading-relaxed text-slate-300 whitespace-pre-wrap">
+                      <p className="text-sm leading-relaxed text-conteudo whitespace-pre-wrap">
                         {ticket.resolution_note}
                       </p>
                     </div>
@@ -1416,16 +1401,16 @@ export default function TicketDetailPage() {
                   procurar na lateral, já que o chat está bloqueado */}
                 {reopenDeadline && (
                   <div className="shrink-0 flex flex-col gap-3 rounded-xl border border-borda/40 bg-surface px-5 py-4 sm:flex-row sm:items-center sm:justify-between">
-                    <p className="text-sm text-slate-400">
+                    <p className="text-sm text-conteudo-muted">
                       {ticket.auto_closed && (
-                        <span className="text-slate-500">
+                        <span className="text-conteudo-muted">
                           Fechado automaticamente por falta de manifestação.{" "}
                         </span>
                       )}
                       {withinReopenWindow ? (
                         <>
                           O problema voltou? Este chamado ainda pode ser reaberto até{" "}
-                          <strong className="font-semibold text-slate-200">
+                          <strong className="font-semibold text-conteudo">
                             {reopenDeadline.toLocaleDateString("pt-BR")}
                           </strong>
                           .
@@ -1483,16 +1468,16 @@ export default function TicketDetailPage() {
               <div className="flex flex-col gap-4">
                 <div className="rounded-xl border border-borda/40 bg-surface">
                   <div className="border-b border-borda/40 px-5 py-3.5">
-                    <h2 className="text-sm font-semibold text-slate-200">Informações do chamado</h2>
+                    <h2 className="text-sm font-semibold text-conteudo">Informações do chamado</h2>
                   </div>
                   <div className="grid grid-cols-1 gap-x-6 gap-y-1 px-5 py-3 sm:grid-cols-2">
                     <DetailField
                       label="Categoria"
-                      value={CATEGORY_LABEL[ticket.category] ?? ticket.category}
+                      value={rotuloDeCategoria(ticket.category)}
                     />
                     <DetailField
                       label="Prioridade"
-                      value={PRIORITY_LABEL[ticket.priority] ?? ticket.priority}
+                      value={rotuloDePrioridade(ticket.priority)}
                     />
                     <DetailField label="Produto" value={ticket.product_name} />
                     <DetailField
@@ -1512,10 +1497,10 @@ export default function TicketDetailPage() {
 
                 <div className="rounded-xl border border-borda/40 bg-surface">
                   <div className="border-b border-borda/40 px-5 py-3.5">
-                    <h2 className="text-sm font-semibold text-slate-200">Descrição completa</h2>
+                    <h2 className="text-sm font-semibold text-conteudo">Descrição completa</h2>
                   </div>
                   <div className="px-5 py-4">
-                    <p className="text-sm leading-relaxed text-slate-300 whitespace-pre-wrap">
+                    <p className="text-sm leading-relaxed text-conteudo whitespace-pre-wrap">
                       {ticket.description}
                     </p>
                   </div>
@@ -1526,8 +1511,8 @@ export default function TicketDetailPage() {
                   <div className="rounded-xl border border-borda/40 bg-surface">
                     <div className="flex items-center justify-between border-b border-borda/40 px-5 py-3.5">
                       <div className="flex items-center gap-2">
-                        <span className="text-slate-500">{IC.User}</span>
-                        <h2 className="text-sm font-semibold text-slate-200">
+                        <span className="text-conteudo-muted">{IC.User}</span>
+                        <h2 className="text-sm font-semibold text-conteudo">
                           Observações do solicitante
                         </h2>
                       </div>
@@ -1568,11 +1553,11 @@ export default function TicketDetailPage() {
                           </div>
                         </div>
                       ) : ticket.client_observation ? (
-                        <p className="text-sm leading-relaxed text-slate-300 whitespace-pre-wrap">
+                        <p className="text-sm leading-relaxed text-conteudo whitespace-pre-wrap">
                           {ticket.client_observation}
                         </p>
                       ) : (
-                        <p className="text-xs italic text-slate-500">
+                        <p className="text-xs italic text-conteudo-muted">
                           Nenhuma observação registrada.
                         </p>
                       )}
@@ -1586,16 +1571,16 @@ export default function TicketDetailPage() {
             {activeTab === "historico" && (
               <div className="rounded-xl border border-borda/40 bg-surface">
                 <div className="flex items-center gap-2 border-b border-borda/40 px-5 py-3.5">
-                  <span className="text-slate-500">{IC.Activity}</span>
-                  <h2 className="text-sm font-semibold text-slate-200">Histórico de atividades</h2>
+                  <span className="text-conteudo-muted">{IC.Activity}</span>
+                  <h2 className="text-sm font-semibold text-conteudo">Histórico de atividades</h2>
                 </div>
                 <div className="px-5 py-5">
                   {visibleHistory.length === 0 ? (
                     <div className="py-10 text-center">
-                      <div className="mx-auto mb-3 flex h-12 w-12 items-center justify-center rounded-full bg-surface-elevated text-slate-600">
+                      <div className="mx-auto mb-3 flex h-12 w-12 items-center justify-center rounded-full bg-surface-elevated text-conteudo-faint">
                         {IC.Activity}
                       </div>
-                      <p className="text-sm text-slate-500">Sem histórico de atividades.</p>
+                      <p className="text-sm text-conteudo-muted">Sem histórico de atividades.</p>
                     </div>
                   ) : (
                     <div>
@@ -1613,8 +1598,8 @@ export default function TicketDetailPage() {
               <div className="rounded-xl border border-borda/40 bg-surface">
                 <div className="flex items-center justify-between border-b border-borda/40 px-5 py-3.5">
                   <div className="flex items-center gap-2">
-                    <span className="text-slate-500">{IC.Clip}</span>
-                    <h2 className="text-sm font-semibold text-slate-200">
+                    <span className="text-conteudo-muted">{IC.Clip}</span>
+                    <h2 className="text-sm font-semibold text-conteudo">
                       Anexos ({attachments.length})
                     </h2>
                   </div>
@@ -1631,10 +1616,10 @@ export default function TicketDetailPage() {
                 <div className="p-5">
                   {attachments.length === 0 ? (
                     <div className="py-10 text-center">
-                      <div className="mx-auto mb-3 flex h-12 w-12 items-center justify-center rounded-full bg-surface-elevated text-slate-600">
+                      <div className="mx-auto mb-3 flex h-12 w-12 items-center justify-center rounded-full bg-surface-elevated text-conteudo-faint">
                         {IC.Clip}
                       </div>
-                      <p className="text-sm text-slate-500">Nenhum anexo adicionado.</p>
+                      <p className="text-sm text-conteudo-muted">Nenhum anexo adicionado.</p>
                       {!isClosed && (
                         <button
                           onClick={() => setUploadModal(true)}
@@ -1740,15 +1725,15 @@ export default function TicketDetailPage() {
                   {assignedTech}
                 </span>
               ) : (
-                <span className="text-slate-500 font-normal italic text-xs">Não atribuído</span>
+                <span className="text-conteudo-muted font-normal italic text-xs">Não atribuído</span>
               )}
             </PropRow>
             <PropRow icon={IC.Folder} label="Categoria">
-              {CATEGORY_LABEL[ticket.category] ?? ticket.category}
+              {rotuloDeCategoria(ticket.category)}
             </PropRow>
             <PropRow icon={IC.Box} label="Produto">
               {ticket.product_name ?? (
-                <span className="text-slate-500 font-normal italic text-xs">Não informado</span>
+                <span className="text-conteudo-muted font-normal italic text-xs">Não informado</span>
               )}
             </PropRow>
             <PropRow
@@ -1761,7 +1746,7 @@ export default function TicketDetailPage() {
                     <div key={e.id}>
                       <span className="block break-words">{e.name}</span>
                       {e.serial_number && (
-                        <span className="block font-mono text-xs text-slate-500">
+                        <span className="block font-mono text-xs text-conteudo-muted">
                           {e.serial_number}
                         </span>
                       )}
@@ -1769,7 +1754,7 @@ export default function TicketDetailPage() {
                   ))}
                 </div>
               ) : (
-                <span className="text-slate-500 font-normal italic text-xs">Não informado</span>
+                <span className="text-conteudo-muted font-normal italic text-xs">Não informado</span>
               )}
             </PropRow>
             <PropRow icon={IC.Calendar} label="Criado em">
@@ -1794,7 +1779,7 @@ export default function TicketDetailPage() {
               <div className="space-y-2">
                 {ticket.sla_response_due_at && (
                   <div className="flex items-center justify-between">
-                    <span className="text-xs text-slate-500">Resposta</span>
+                    <span className="text-xs text-conteudo-muted">Resposta</span>
                     <SlaChip
                       label=""
                       dueAt={ticket.sla_response_due_at}
@@ -1805,7 +1790,7 @@ export default function TicketDetailPage() {
                 )}
                 {ticket.sla_resolve_due_at && (
                   <div className="flex items-center justify-between">
-                    <span className="text-xs text-slate-500">Resolução</span>
+                    <span className="text-xs text-conteudo-muted">Resolução</span>
                     <SlaChip
                       label=""
                       dueAt={ticket.sla_resolve_due_at}
@@ -1883,7 +1868,7 @@ export default function TicketDetailPage() {
                       );
                     })}
                     {allTags.length === 0 && (
-                      <p className="text-xs text-slate-500">Nenhuma etiqueta cadastrada.</p>
+                      <p className="text-xs text-conteudo-muted">Nenhuma etiqueta cadastrada.</p>
                     )}
                   </div>
                   <div className="flex justify-end gap-2">
@@ -1907,7 +1892,7 @@ export default function TicketDetailPage() {
                   ))}
                 </div>
               ) : (
-                <p className="text-xs italic text-slate-500">Nenhuma etiqueta.</p>
+                <p className="text-xs italic text-conteudo-muted">Nenhuma etiqueta.</p>
               )}
             </SidebarSection>
           )}
@@ -1921,7 +1906,7 @@ export default function TicketDetailPage() {
               action={
                 <button
                   onClick={() => setShowAddNote(true)}
-                  className="flex items-center gap-1 text-[10px] font-semibold text-amber-500/70 hover:text-amber-400 cursor-pointer transition-colors"
+                  className="flex items-center gap-1 text-[10px] font-semibold text-on-tint-warning hover:text-on-tint-warning cursor-pointer transition-colors"
                 >
                   {IC.Edit}
                   Adicionar
@@ -1929,21 +1914,21 @@ export default function TicketDetailPage() {
               }
             >
               {ticketNotes.length === 0 ? (
-                <p className="text-xs italic text-amber-700/50">Nenhuma nota registrada.</p>
+                <p className="text-xs italic text-on-tint-warning">Nenhuma nota registrada.</p>
               ) : (
                 <ul className="space-y-2">
                   {ticketNotes.map((n) => (
                     <li
                       key={n.id}
-                      className="group relative rounded-lg border border-amber-700/20 bg-amber-950/20 p-3 cursor-pointer hover:border-amber-600/40 transition-colors"
+                      className="group relative rounded-lg border border-warning/20 bg-tint-warning p-3 cursor-pointer hover:border-warning/40 transition-colors"
                       onClick={() => setViewNote(n)}
                     >
                       <div className="flex items-center justify-between gap-2 mb-1">
-                        <span className="text-[10px] font-semibold text-amber-500/70 truncate">
+                        <span className="text-[10px] font-semibold text-on-tint-warning truncate">
                           {n.author_name}
                         </span>
                         <div className="flex items-center gap-1 shrink-0">
-                          <span className="text-[10px] text-amber-700/50">
+                          <span className="text-[10px] text-on-tint-warning">
                             {new Date(n.created_at).toLocaleDateString("pt-BR", {
                               day: "2-digit",
                               month: "2-digit",
@@ -1956,13 +1941,13 @@ export default function TicketDetailPage() {
                               handleDeleteNote(n.id);
                             }}
                             disabled={noteDeleting === n.id}
-                            className="opacity-0 group-hover:opacity-100 p-0.5 rounded text-amber-700/60 hover:text-red-400 transition-all cursor-pointer"
+                            className="opacity-0 group-hover:opacity-100 p-0.5 rounded text-on-tint-warning hover:text-on-tint-danger transition-all cursor-pointer"
                           >
                             {noteDeleting === n.id ? <Spinner size="sm" /> : IC.Trash}
                           </button>
                         </div>
                       </div>
-                      <p className="text-xs text-amber-200/60 line-clamp-2 whitespace-pre-wrap">
+                      <p className="text-xs text-on-tint-warning line-clamp-2 whitespace-pre-wrap">
                         {n.content}
                       </p>
                     </li>
@@ -2013,18 +1998,18 @@ export default function TicketDetailPage() {
       {viewNote && (
         <Modal open onClose={() => setViewNote(null)} title="Nota interna" size="lg">
           <div className="space-y-3">
-            <div className="flex items-center justify-between text-xs text-amber-500/70">
+            <div className="flex items-center justify-between text-xs text-on-tint-warning">
               <span className="font-semibold">{viewNote.author_name}</span>
               <span>{new Date(viewNote.created_at).toLocaleString("pt-BR")}</span>
             </div>
-            <p className="text-sm text-amber-200/80 whitespace-pre-wrap leading-relaxed min-h-[80px]">
+            <p className="text-sm text-on-tint-warning whitespace-pre-wrap leading-relaxed min-h-[80px]">
               {viewNote.content}
             </p>
             <ModalFooter>
               <Button
                 variant="ghost"
                 size="sm"
-                className="text-red-500 hover:bg-red-900/20"
+                className="text-on-tint-danger hover:bg-tint-danger"
                 loading={noteDeleting === viewNote.id}
                 onClick={() => {
                   handleDeleteNote(viewNote.id);
@@ -2095,7 +2080,7 @@ export default function TicketDetailPage() {
               onChange={(e) => setNewAssignee(e.target.value)}
             />
           ) : (
-            <p className="text-sm text-slate-300">Deseja assumir este ticket para você?</p>
+            <p className="text-sm text-conteudo">Deseja assumir este ticket para você?</p>
           )}
         </div>
         <ModalFooter>
@@ -2142,7 +2127,7 @@ export default function TicketDetailPage() {
           />
           <button
             onClick={() => fileInputRef.current?.click()}
-            className="flex w-full flex-col items-center gap-2 rounded-xl border-2 border-dashed border-borda/60 bg-surface-elevated/30 py-10 text-sm text-slate-400 hover:border-primary/40 hover:bg-primary/5 hover:text-primary transition-all cursor-pointer"
+            className="flex w-full flex-col items-center gap-2 rounded-xl border-2 border-dashed border-borda/60 bg-surface-elevated/30 py-10 text-sm text-conteudo-muted hover:border-primary/40 hover:bg-primary/5 hover:text-primary transition-all cursor-pointer"
           >
             {IC.Clip}
             <span>Clique para selecionar arquivos</span>
@@ -2152,9 +2137,9 @@ export default function TicketDetailPage() {
               {uploadFiles.map((f, i) => (
                 <li
                   key={i}
-                  className="flex items-center gap-2 rounded-lg bg-surface-elevated px-3 py-2 text-sm text-slate-300"
+                  className="flex items-center gap-2 rounded-lg bg-surface-elevated px-3 py-2 text-sm text-conteudo"
                 >
-                  <span className="text-slate-500">{IC.Clip}</span>
+                  <span className="text-conteudo-muted">{IC.Clip}</span>
                   {f.name}
                 </li>
               ))}
@@ -2188,7 +2173,7 @@ export default function TicketDetailPage() {
         title="Reabrir chamado"
       >
         <div className="space-y-4">
-          <p className="text-sm text-slate-400">
+          <p className="text-sm text-conteudo-muted">
             O chamado volta para atendimento e o chat é liberado de novo. Conte o que continuou
             errado para o técnico saber por onde retomar.
           </p>
@@ -2227,7 +2212,7 @@ export default function TicketDetailPage() {
         title="Concluir ticket"
       >
         <div className="space-y-4">
-          <p className="text-sm text-slate-400">
+          <p className="text-sm text-conteudo-muted">
             Descreva como o problema foi resolvido. O chat será bloqueado e o cliente receberá uma
             notificação para avaliar o atendimento. Se ninguém se manifestar, o chamado é fechado
             sozinho depois do prazo.

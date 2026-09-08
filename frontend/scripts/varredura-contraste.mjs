@@ -807,7 +807,7 @@ const PARES_CONHECIDOS = new Map([
   ['pages/profile/ProfilePage.tsx  bg-primary  repouso', 3],
   ['pages/reports/ReportsPage.tsx  bg-primary  repouso', 1],
   ['pages/settings/QuickRepliesPage.tsx  dark:bg-surface-elevated  repouso', 1],
-  ['pages/tickets/TicketDetailPage.tsx  bg-surface-elevated  repouso', 3],
+  ['pages/tickets/TicketDetailPage.tsx  bg-surface-elevated  repouso', 2],
   ['pages/tickets/TicketFormPage.tsx  bg-primary  repouso', 1],
   ['pages/users/UsersPage.tsx  bg-surface-elevated  repouso', 2],
 ]);
