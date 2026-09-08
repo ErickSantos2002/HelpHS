@@ -869,6 +869,62 @@ que ela não está coberta e confira.
 rode. Se nenhum teste cair, o teste não cobre a cláusula — cobre o caminho até
 ela.
 
+## ⚠️ O `.env` de desenvolvimento aponta para produção
+
+**O que está protegido: a suíte de testes, e só ela.** O
+`backend/tests/conftest.py` **atribui** `DATABASE_URL` para um localhost falso
+no topo do módulo, antes de qualquer import de `app` — atribuição e não
+`setdefault`, com o comentário dizendo exatamente por quê. `pytest` é seguro.
+
+**O que não está protegido: todo o resto.** Tudo que lê a configuração de
+verdade pega a URL de produção:
+
+- **`alembic upgrade head` na máquina local.** O `alembic/env.py` monta a URL
+  com `get_settings().database_url`, que lê o `.env`. Migration aplicada por
+  engano em produção não tem desfazer barato.
+- os scripts avulsos de `backend/scripts/` (`redefine_senha.py`,
+  `funde_empresas_duplicadas.py`, `normaliza_cnpj.py`, ...);
+- `python -c` e shell interativo que importem `app.core.config`;
+- `psql` com a URL copiada do `.env`.
+
+**Por que isso vira risco agora.** A primeira coisa que a Fase 2 da Helô roda é
+uma migration criando extensão no banco (`pgvector`). O gesto natural de testar
+isso é exatamente `alembic upgrade head` — e hoje esse comando, dessa máquina,
+aplica em produção sem perguntar nada. O erro é silencioso: sem confirmação,
+sem aviso, e o sucesso é indistinguível do sucesso local.
+
+### Mitigação
+
+**O conserto de verdade é o `.env` não guardar credencial de produção.** A URL
+de produção vive no painel do EasyPanel; a da máquina aponta para um Postgres
+local. Isso remove a arma em vez de travá-la. Custa subir um banco local —
+`pgserver` já está instalado e as migrations montam o schema sozinhas (ver a
+Rota B em `desenvolvimento-local.md`, na raiz).
+
+**Enquanto isso não acontece, a trava que custa um commit:** uma guarda no
+`alembic/env.py` que recusa host remoto, nomeando o host antes de abortar.
+
+O ponto delicado do desenho é que ela **não pode quebrar o boot do container**,
+onde rodar migration contra produção é o comportamento certo — o `start.sh`
+faz `alembic upgrade head` na linha 5. A saída que não depende de ninguém
+lembrar de nada: **o próprio `start.sh` exporta a variável de liberação** antes
+de chamar o alembic. Ele está no repositório e sempre roda no container, então
+produção passa por construção, e um laptop nunca tem a variável. Uma variável
+que precisasse ser configurada no painel seria pior: esquecer de configurar
+derruba o deploy, e o modo de falha do deploy é sempre pior que o do laptop.
+
+**O hábito que vale desde já e não custa nada** — antes de migration ou script,
+imprimir para onde se está apontando:
+
+```
+cd backend && python -c "from app.core.config import get_settings; print(get_settings().database_url.rsplit('@', 1)[-1])"
+```
+
+Se sair host que não é `localhost`, o próximo comando fala com produção.
+
+Ver `desenvolvimento-local.md` e `docs/fechar-banco-para-a-internet.md` — o
+banco estar alcançável da máquina do desenvolvedor é a outra metade disto.
+
 # Pendências conhecidas
 
 ## Dívidas com gatilho — escolhas conscientes, não esquecimentos
@@ -887,6 +943,7 @@ por inércia.
 | **Access token sobrevive à revogação de sessão** | Ativar ou desligar o segundo fator apaga o refresh, despejando as sessões. Os access tokens já emitidos, porém, valem até o próprio vencimento: a exposição cai de 7 dias para 8 h, não para zero. Fechar de verdade pede um `sessions_valid_after` conferido no `get_current_user`. | Houver incidente real de sessão comprometida — ou o TTL do access subir. |
 | **Não existe mais o tempo de espera por um HUMANO** | Consequência aceita da decisão de 28/08/2026 (ver "O que conta como primeira resposta"): com a Helô carimbando, o único tempo gravado é o dela. Quanto o cliente esperou até alguém de carne e osso responder deixou de entrar no banco — e por isso **não volta por filtro nem por relatório**, só por coluna nova. | A operação precisar cobrar prazo da equipe, ou alguém estranhar o indicador vivendo em 100%. A saída é um campo próprio (`sla_first_human_response`), carimbado no mesmo ponto e com a guarda de autor que valia antes. |
 | **Escalar não desliga a IA no chamado** | O desenho da Helô diz que a escalação "muda o status, notifica a equipe e desliga a IA". Só a segunda existe: quando o cliente pede uma pessoa, `ticket.ai_enabled` continua `True`. O silêncio dela vem do teto de falas (`FALAS_MAXIMAS = 2`) e da guarda de humano na conversa — não de a IA ter sido desligada. Hoje o efeito é pequeno: ela já não tem fala sobrando, e o que sobra ligado é a IA de apoio ao técnico (`suggest-reply`, `summarize`), que o cliente não vê. | **A Fase 2.** Com ela resolvendo, o teto sobe de 2 para muitas falas por chamado, e o teto deixa de ser o que a cala. Aí "pedi para falar com uma pessoa" precisa desligar a IA de verdade naquele chamado, senão o robô volta a falar depois de ter aceitado o "não" — que o desenho chama de pior que robô nenhum. O conserto é uma linha (`ticket.ai_enabled = False` no caminho de escalada); o que não pode é descobrir isso depois de subir a Fase 2. |
+| **O `.env` de desenvolvimento aponta para produção** | Só a suíte de testes está blindada (o `conftest.py` força uma URL falsa). Migration, script avulso e shell na máquina do desenvolvedor falam com o banco real. Ver a seção própria acima. | **Antes da primeira migration da Fase 2**, que cria extensão no banco. É quando o risco deixa de ser teórico. |
 | **Contador de artigo útil sem voto identificado** | `POST /kb/articles/{id}/feedback` incrementa sem registrar quem votou; o mesmo usuário incrementa em laço. Não vaza nada. | O número for usado para decidir alguma coisa. |
 | **Antivírus aceita quando está fora do ar** | Bloquear upload com o ClamAV indisponível derrubaria o anexo por falha de infraestrutura. Hoje o estado é reportado, não mais silencioso, e há script de revarredura. | O ClamAV estiver no ambiente e estável — aí bloquear passa a custar pouco. |
 
