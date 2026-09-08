@@ -20,21 +20,36 @@ O VÍNCULO É DO TRECHO, e não do documento, de propósito. O que a busca devol
 para descobrir de quem o trecho é, e impediria o caso real de uma seção que
 serve a mais de um aparelho.
 
-PRIMEIRO `CREATE EXTENSION` DO REPOSITÓRIO, e é a parte arriscada. Nenhuma das
-27 migrations anteriores criou extensão nenhuma, então não há precedente que
-prove que o usuário da aplicação em produção pode criar uma. O `pgvector` não
-é extensão *trusted*: criar exige superusuário, e não CREATE no banco como as
-trusted (pgcrypto, pg_trgm, unaccent). As migrations rodam sozinhas no boot do
-container pelo `start.sh` — migration que falha não é teste vermelho, é a API
-que não sobe, e já aconteceu em 19/08 com o guard de CORS.
+ESTA MIGRATION NÃO CRIA A EXTENSÃO — ela EXIGE que já exista, e é a decisão
+mais importante do arquivo.
 
-Por isso o `CREATE EXTENSION` está embrulhado numa mensagem própria. O erro
-cru do Postgres nesse caso é `could not open extension control file` ou
-`permission denied to create extension`, e nenhum dos dois diz o que fazer.
-Falhar dizendo o que fazer transforma quinze minutos de confusão no meio de um
-deploy em uma linha de log acionável.
+Criar extensão é ato administrativo de uma vez, não trabalho de migration. O
+`pgvector` não é extensão *trusted*: criá-la pede superusuário, e não apenas
+CREATE no banco como as trusted (pgcrypto, pg_trgm, unaccent). Se a migration
+tentasse criar, o usuário da aplicação precisaria ser superusuário — e as
+migrations rodam sozinhas no boot do container pelo `start.sh`, então isso
+colocaria privilégio de superusuário no caminho do boot, permanentemente, por
+causa de um comando que roda uma vez na vida do banco.
 
-SEM ÍNDICE VETORIAL, e não é esquecimento. A base inteira são nove arquivos e
+Verificar em vez de criar tira o superusuário do caminho do boot de vez. O
+preço é um passo manual antes do primeiro deploy desta versão:
+
+    CREATE EXTENSION vector;      -- uma vez, com superusuário, no banco alvo
+
+E é um preço que se paga uma vez. A verificação continua no boot para sempre,
+mas ela é uma consulta a `pg_extension` que qualquer usuário faz.
+
+A mensagem de falha é o resto do desenho. Migration que falha não é teste
+vermelho: é a API que não sobe, no meio de um deploy — já aconteceu em 19/08
+com o guard de CORS. Um erro cru de `type "vector" does not exist` na terceira
+tabela não diz o que fazer; a mensagem daqui diz, nomeia o banco (sem a senha)
+e cabe numa linha de log.
+
+Vale notar que a extensão é POR BANCO, não por servidor: instalar o pacote no
+servidor, ou usar a imagem `pgvector/pgvector`, coloca os arquivos lá, mas o
+`CREATE EXTENSION` ainda precisa rodar dentro de cada banco que for usá-la.
+
+SEM ÍNDICE VETORIAL, e não é esquecimento. A base inteira são oito manuais e
 cerca de 80 trechos. `ivfflat` e `hnsw` são estruturas APROXIMADAS, desenhadas
 para dezenas de milhares de vetores: nessa escala elas trocam um pouco de
 precisão por muito tempo. Com 80 linhas a conta inverte — a varredura completa
@@ -47,7 +62,7 @@ migrada; até lá, índice aqui seria perda de recall comprada com trabalho.
 A coluna `embedding` nasce NULA porque recortar e embutir são duas passagens.
 Recortar é barato e determinístico; embutir custa e depende do modelo local
 estar carregado. Separadas, trocar o modelo de embedding é re-embutir o que já
-está recortado, e não reler e recortar os nove arquivos de novo.
+está recortado, e não reler e recortar os oito manuais de novo.
 
 A DIMENSÃO 1024 é a do `bge-m3` e da `multilingual-e5-large`, os dois modelos
 locais em avaliação. Ela é tipo de coluna, não configuração: um modelo de
@@ -60,14 +75,12 @@ roda à mão e lê os manuais de uma pasta FORA do repositório.
 
 O DOWNGRADE derruba as três tabelas e leva junto os trechos e os embeddings.
 Não há como preservar: as tabelas somem. Reconstruir é rodar a ingestão de
-novo, que é barata (nove arquivos) desde que a pasta de manuais ainda exista —
-ela não está no repositório e não volta com o código.
+novo, que é barata (oito manuais) desde que a pasta ainda exista — ela não
+está no repositório e não volta com o código.
 
-O downgrade **não remove a extensão**, de propósito. O `IF NOT EXISTS` do
-upgrade torna impossível saber se foi esta migration que criou o `vector` ou
-se ele já estava lá; remover no caminho de volta apagaria uma extensão que
-outra coisa pode estar usando. Extensão sobrando é inerte; extensão removida
-por engano derruba quem depende dela.
+O downgrade **não remove a extensão**, e agora por um motivo mais simples do
+que antes: esta migration não a criou. Desfazer o que não se fez é apagar
+trabalho de outra pessoa.
 """
 
 from collections.abc import Sequence
@@ -90,31 +103,35 @@ depends_on: str | Sequence[str] | None = None
 EMBEDDING_DIM = 1024
 
 _SEM_EXTENSAO = (
-    "A migration a7v8w9x0y1z2 não conseguiu criar a extensão `vector` (pgvector) "
-    "no banco {alvo}.\n"
+    "A migration a7v8w9x0y1z2 exige a extensão `vector` (pgvector), que NÃO "
+    "está criada no banco {alvo}.\n"
     "\n"
-    "O `pgvector` não é uma extensão trusted do PostgreSQL: criá-la exige "
-    "superusuário, e o usuário da aplicação normalmente não é.\n"
+    "Esta migration não cria a extensão de propósito: criá-la exige "
+    "superusuário, e as migrations rodam no boot do container — criar aqui "
+    "colocaria privilégio de superusuário no caminho do boot para sempre, por "
+    "causa de um comando que roda uma vez na vida do banco.\n"
     "\n"
-    "O que fazer, com um superusuário do banco:\n"
+    "O que fazer, UMA VEZ, com um superusuário, conectado a este banco:\n"
     "    CREATE EXTENSION vector;\n"
-    "Depois disso esta migration passa, porque ela usa IF NOT EXISTS.\n"
     "\n"
-    "Se o servidor não tiver o pgvector instalado, o erro é sobre "
-    "`extension control file` e a solução é do lado da infraestrutura: a "
-    "imagem `pgvector/pgvector:pg16` é o postgres oficial com a extensão.\n"
+    "A extensão é POR BANCO, não por servidor: ter o pgvector instalado na "
+    "máquina (ou usar a imagem `pgvector/pgvector:pg16`) põe os arquivos no "
+    "lugar, mas o CREATE EXTENSION ainda precisa rodar dentro deste banco.\n"
     "\n"
-    "Erro original: {erro}"
+    "Se o CREATE EXTENSION falhar com `could not open extension control "
+    "file`, o pgvector não está instalado no servidor e o conserto é de "
+    "infraestrutura, não de banco."
 )
 
 
 def upgrade() -> None:
     conexao = op.get_bind()
-    try:
-        conexao.execute(text("CREATE EXTENSION IF NOT EXISTS vector"))
-    except Exception as erro:  # noqa: BLE001
+    # Verificar, e não criar. A consulta é a `pg_extension`, que qualquer
+    # usuário lê — nenhum privilégio especial fica exigido no boot.
+    presente = conexao.execute(text("SELECT 1 FROM pg_extension WHERE extname = 'vector'")).scalar()
+    if not presente:
         alvo = conexao.engine.url.render_as_string(hide_password=True)
-        raise RuntimeError(_SEM_EXTENSAO.format(alvo=alvo, erro=erro)) from erro
+        raise RuntimeError(_SEM_EXTENSAO.format(alvo=alvo))
 
     op.create_table(
         "helo_documents",

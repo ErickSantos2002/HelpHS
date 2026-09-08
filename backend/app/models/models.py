@@ -121,7 +121,7 @@ class HeloDocType(str, enum.Enum):
     """
     O que o documento é — e o que a Helô pode fazer com ele.
 
-    Cinco dos nove arquivos da base são fichas de venda, com preço de aparelho
+    Cinco dos oito manuais da base são fichas de venda, com preço de aparelho
     e de calibração. A Helô cotando equipamento para quem abriu chamado técnico
     é o pior resultado possível desta fase, e separar na hora de INGERIR é o
     único jeito de a busca poder recusar depois: uma vez misturados, os dois
@@ -1013,7 +1013,7 @@ class HeloChunk(Base):
     document_id: Mapped[uuid.UUID] = mapped_column(
         UUID(as_uuid=True), ForeignKey("helo_documents.id", ondelete="CASCADE"), index=True
     )
-    # Texto, e não número: só três dos nove arquivos têm seção numerada. Nas
+    # Texto, e não número: só três dos oito manuais têm seção numerada. Nas
     # cinco fichas comerciais o título é uma linha com emoji, e um inteiro não
     # teria o que guardar. Aqui cabe tanto "8.2 Alterar Idioma" quanto
     # "Argumentos de Venda" — e é esta string que a resposta cita como fonte.

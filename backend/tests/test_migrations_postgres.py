@@ -91,8 +91,20 @@ def servidor():
 
 @pytest.fixture
 def banco(servidor):
-    """Banco vazio a cada teste. CREATE DATABASE exige autocommit."""
+    """
+    Banco vazio a cada teste. CREATE DATABASE exige autocommit.
+
+    A extensão `vector` é criada AQUI, e não pela migration, porque é assim
+    que acontece em produção: a `a7v8w9x0y1z2` exige a extensão e recusa
+    criá-la, para não pedir superusuário no boot do container. Quem cria é o
+    administrador, uma vez, antes do deploy — e este passo é a encenação
+    disso. Criar aqui é o que mantém o teste fiel ao que roda lá.
+
+    A extensão é por BANCO: o `CREATE DATABASE` acima nasce sem ela mesmo com
+    o pgvector instalado no servidor, então isto tem de rodar a cada recriação.
+    """
     base, _, _ = servidor.rpartition("/")
+    url_do_banco = f"{base}/{_BANCO}"
 
     async def _recria() -> None:
         motor = create_async_engine(servidor, isolation_level="AUTOCOMMIT")
@@ -101,8 +113,13 @@ def banco(servidor):
             await conn.execute(text(f"CREATE DATABASE {_BANCO}"))
         await motor.dispose()
 
+        novo = create_async_engine(url_do_banco, isolation_level="AUTOCOMMIT")
+        async with novo.connect() as conn:
+            await conn.execute(text("CREATE EXTENSION IF NOT EXISTS vector"))
+        await novo.dispose()
+
     asyncio.run(_recria())
-    return f"{base}/{_BANCO}"
+    return url_do_banco
 
 
 @pytest_asyncio.fixture
@@ -122,9 +139,9 @@ def test_upgrade_head_sobe_do_zero(banco):
     """
     resultado = _alembic(banco, "head")
 
-    assert (
-        resultado.returncode == 0
-    ), f"alembic upgrade head falhou:\n{resultado.stdout}\n{resultado.stderr}"
+    assert resultado.returncode == 0, (
+        f"alembic upgrade head falhou:\n{resultado.stdout}\n{resultado.stderr}"
+    )
 
 
 @pytest.mark.asyncio
