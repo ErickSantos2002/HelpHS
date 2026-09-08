@@ -444,6 +444,76 @@ function literaisDe(texto) {
   return saida;
 }
 
+/**
+ * Apaga o conteudo dos comentarios **preservando as linhas**.
+ *
+ * Existe porque a catraca das cores cheias contava comentario. O proprio
+ * comentario da chave dizia "ocorrencias em comentario, que aqui sao zero" — e
+ * era verdade no dia em que foi escrito. Depois a Fase 16 migrou 19 telas, e
+ * cada uma ganhou um comentario explicando qual cor CHEIA saiu de la. A regua
+ * passou a contar a explicacao do conserto como se fosse o defeito.
+ *
+ * Isso e pior que um numero errado: cria pressao para NAO explicar o que foi
+ * removido, que e exatamente o contrario do que estes arquivos existem para
+ * fazer.
+ *
+ * Duas armadilhas, as duas ja pagas em outro lugar desta sessao:
+ *
+ * 1. **CRLF, e este varredor e imune a ele POR CONSTRUCAO.** Dentro de um
+ *    comentario de linha so o `\n` fecha o estado; o `\r` vira espaco como
+ *    qualquer outro caractere. Isto nao e sorte, e a diferenca entre varrer
+ *    caractere a caractere e casar `//.*` ate o fim da linha — em JavaScript
+ *    o `.` nao casa `\r`, e a versao por expressao regular deste mesmo corte
+ *    ja falhou de verdade na regua irma desta sessao, num arquivo CRLF.
+ *
+ *    Havia aqui uma normalizacao de CRLF, e a MUTACAO PROVOU QUE ELA ERA
+ *    INERTE: tirando-a, o caso C4 continuava passando. Linha morta com cara
+ *    de load-bearing e pior que linha nenhuma — alguem simplifica o varredor
+ *    um dia e acha que ela o protege. Saiu; o caso C4 fica, prendendo a
+ *    imunidade de verdade.
+ *
+ * 2. **String nao e comentario.** A classe mora DENTRO de uma string
+ *    (`className="text-danger"`), entao apagar strings apagaria o que se quer
+ *    medir. Este varredor rastreia string so para nao confundir um `//` de
+ *    dentro dela com inicio de comentario. O conteudo da string fica.
+ *
+ * Apaga com espaco em vez de remover: o numero da linha do achado continua
+ * apontando para o lugar certo do arquivo.
+ */
+export function semComentariosJs(texto) {
+  const s = texto;
+  let fora = "";
+  let i = 0;
+  let estado = "codigo"; // codigo | linha | bloco | aspas | apostrofo | crase
+  while (i < s.length) {
+    const c = s[i];
+    const d = s[i + 1];
+    if (estado === "codigo") {
+      if (c === "/" && d === "/") { estado = "linha"; fora += "  "; i += 2; continue; }
+      if (c === "/" && d === "*") { estado = "bloco"; fora += "  "; i += 2; continue; }
+      if (c === '"') estado = "aspas";
+      else if (c === "'") estado = "apostrofo";
+      else if (c === "`") estado = "crase";
+      fora += c; i++; continue;
+    }
+    if (estado === "linha") {
+      if (c === "\n") { estado = "codigo"; fora += "\n"; } else fora += " ";
+      i++; continue;
+    }
+    if (estado === "bloco") {
+      if (c === "*" && d === "/") { estado = "codigo"; fora += "  "; i += 2; continue; }
+      fora += c === "\n" ? "\n" : " ";
+      i++; continue;
+    }
+    // dentro de string: o conteudo FICA, so acompanhamos ate o fim dela
+    if (c === "\\") { fora += s.slice(i, i + 2); i += 2; continue; }
+    if ((estado === "aspas" && c === '"') || (estado === "apostrofo" && c === "'") ||
+        (estado === "crase" && c === "`")) estado = "codigo";
+    fora += c; i++;
+  }
+  return fora;
+}
+
 function arquivosTsx(dir) {
   const saida = [];
   for (const nome of readdirSync(dir)) {
@@ -553,7 +623,7 @@ function paresDoLiteral(classes) {
 export function varrer(raiz) {
   const achados = [];
   for (const arquivo of arquivosTsx(raiz)) {
-    const texto = readFileSync(arquivo, "utf-8");
+    const texto = semComentariosJs(readFileSync(arquivo, "utf-8"));
     const rel = path.relative(raiz, arquivo).split(path.sep).join("/");
     for (const literal of literaisDe(texto)) {
       const classes = literal.texto.split(/\s+/).filter(Boolean);
@@ -698,6 +768,80 @@ const _ = (`,
   },
 ];
 
+/**
+ * Os seis casos do corte de comentario, e o quinto e o que importa.
+ *
+ * Os quatro primeiros provam que a regua NAO conta comentario. O quinto e o
+ * controle negativo: prova que ela tambem nao APAGA DEMAIS -- a classe mora
+ * dentro de uma string, e um varredor que apagasse strings mediria zero em
+ * tudo e pareceria consertado. Sem esse caso, 'nao conta' e 'nao ve' sao
+ * indistinguiveis, que e a licao que os controles desta varredura ja
+ * registram em outro lugar.
+ *
+ * O quarto e a armadilha do CRLF: em JavaScript o ponto nao casa o retorno de
+ * carro, entao um corte de comentario de linha escrito sem normalizar nunca
+ * chega ao fim da linha num arquivo CRLF -- e os arquivos que os agentes
+ * escrevem vem em CRLF. Este caso ja falhou de verdade, na regua irma.
+ */
+const PROVAS_COMENTARIO = [
+  {
+    nome: "C1. cor cheia em comentario de LINHA nao conta",
+    arquivo: 'const a = 1; // era text-danger antes da migracao\n',
+    cheias: 0,
+  },
+  {
+    nome: "C2. cor cheia em comentario de BLOCO nao conta",
+    arquivo: '/* saiu daqui:\n * text-warning e text-success\n */\nconst a = 1;\n',
+    cheias: 0,
+  },
+  {
+    nome: "C3. cor cheia em CODIGO continua contando",
+    arquivo: 'const c = "text-danger";\n',
+    cheias: 1,
+  },
+  {
+    nome: "C4. comentario em arquivo CRLF tambem nao conta",
+    arquivo: 'const a = 1; // text-danger\r\nconst b = 2;\r\n',
+    cheias: 0,
+  },
+  {
+    nome: "C5. CONTROLE - string nao e comentario, e o conteudo dela FICA",
+    arquivo: 'const c = "http://x/y text-danger";\n',
+    cheias: 1,
+  },
+  {
+    nome: "C6. par reprovado dentro de comentario nao vira achado",
+    arquivo: '// <b className="bg-danger text-white">x</b>\n',
+    cheias: 0,
+    pares: 0,
+  },
+];
+
+function provarComentarios() {
+  const base = mkdtempSync(path.join(tmpdir(), "comentario-"));
+  let falhas = 0;
+  try {
+    for (const p of PROVAS_COMENTARIO) {
+      const dir = mkdtempSync(path.join(base, "caso-"));
+      writeFileSync(path.join(dir, "Caso.tsx"), p.arquivo, "utf-8");
+      const c = cheiasSemanticas(dir).length;
+      let ok = c === p.cheias;
+      let detalhe = ok ? null : `esperava ${p.cheias} cheia(s), veio ${c}`;
+      if (ok && p.pares !== undefined) {
+        const n = varrer(dir).length;
+        ok = n === p.pares;
+        if (!ok) detalhe = `esperava ${p.pares} par(es), veio ${n}`;
+      }
+      if (!ok) falhas++;
+      console.log(`  ${ok ? "OK " : "X  "} ${p.nome}`);
+      if (detalhe) console.log(`      ${detalhe}`);
+    }
+  } finally {
+    rmSync(base, { recursive: true, force: true });
+  }
+  return falhas;
+}
+
 function provar() {
   const base = mkdtempSync(path.join(tmpdir(), "varredura-"));
   let falhas = 0;
@@ -780,34 +924,19 @@ function provar() {
  * Trinta deles sao `text-slate-*` sobre superficie, vivos por causa do desvio
  * D5, e saem tela a tela nas Fases 11-16 — cada pagina migrada zera os seus.
  */
+/*
+ * FASE 16 -- de 39 para 7.
+ *
+ * As dezenove telas migradas zeraram os seus. Os sete que restam estao em
+ * cinco arquivos que a fase ainda nao alcancou; nenhum deles e residuo de tela
+ * migrada.
+ */
 const PARES_CONHECIDOS = new Map([
-  ['components/chat/ChatPanel.tsx  bg-primary  repouso', 1],
-  ['components/chat/ChatPanel.tsx  bg-surface-elevated  repouso', 1],
   ['components/chat/QuickReplyPicker.tsx  bg-surface  repouso', 2],
   ['components/layout/Topbar.tsx  bg-danger  repouso', 2],
-  ['pages/audit/AuditLogsPage.tsx  bg-surface-elevated  repouso', 2],
-  ['pages/audit/AuditLogsPage.tsx  hover:bg-surface-elevated  hover:', 1],
-  ['pages/calendar/CalendarPage.tsx  bg-primary  repouso', 2],
-  ['pages/dashboard/AdminDashboard.tsx  bg-primary  repouso', 1],
-  ['pages/dashboard/TechnicianDashboard.tsx  bg-surface-elevated  repouso', 1],
-  ['pages/equipment/EquipmentPage.tsx  bg-surface  repouso', 1],
-  ['pages/equipment/EquipmentPage.tsx  bg-surface-elevated  repouso', 1],
-  ['pages/groups/GroupsPage.tsx  hover:bg-surface-elevated  hover:', 1],
-  ['pages/kb/KBArticlePage.tsx  bg-primary  repouso', 1],
-  ['pages/kb/KBArticlePage.tsx  bg-surface-elevated  repouso', 1],
-  ['pages/kb/KBFormPage.tsx  bg-primary  repouso', 1],
-  ['pages/kb/KBFormPage.tsx  bg-surface-elevated  repouso', 1],
-  ['pages/kb/KBListPage.tsx  bg-primary  repouso', 1],
-  ['pages/kb/KBListPage.tsx  bg-surface-elevated  repouso', 4],
-  ['pages/notifications/NotificationsPage.tsx  bg-primary  repouso', 1],
   ['pages/onboarding/OnboardingPage.tsx  bg-primary  repouso', 1],
   ['pages/onboarding/OnboardingPage.tsx  bg-surface-elevated  repouso', 1],
-  ['pages/products/ProductsPage.tsx  bg-surface-elevated  repouso', 3],
-  ['pages/profile/ProfilePage.tsx  bg-danger  repouso', 1],
-  ['pages/profile/ProfilePage.tsx  bg-primary  repouso', 3],
-  ['pages/reports/ReportsPage.tsx  bg-primary  repouso', 1],
   ['pages/settings/QuickRepliesPage.tsx  dark:bg-surface-elevated  repouso', 1],
-  ['pages/users/UsersPage.tsx  bg-surface-elevated  repouso', 2],
 ]);
 
 /** A chave da catraca a partir de um achado da varredura. */
@@ -882,7 +1011,7 @@ const CHEIA_SEMANTICA =
 export function cheiasSemanticas(raiz) {
   const achados = [];
   for (const arquivo of arquivosTsx(raiz)) {
-    const texto = readFileSync(arquivo, "utf-8");
+    const texto = semComentariosJs(readFileSync(arquivo, "utf-8"));
     const rel = path.relative(raiz, arquivo).split(path.sep).join("/");
     const linhas = texto.split("\n");
     for (let i = 0; i < linhas.length; i++) {
@@ -910,18 +1039,26 @@ export function contarCheiasPorArquivo(achados) {
  * Oito estao nas seis telas das Fases 11, 12 e 14 e saem agora; as vinte e uma
  * restantes saem na Fase 16.
  */
+/*
+ * FASE 16 -- de 25 para 1, e a queda tem DUAS causas que vale separar.
+ *
+ * A maior parte saiu de verdade: as telas migradas trocaram `text-danger` e
+ * companhia por `--on-tint-*`. Mas parte da queda foi CONSERTO DA REGUA -- ate
+ * agora esta chave contava ocorrencia em COMENTARIO, e cada tela migrada ganhou
+ * um comentario explicando qual cor cheia saiu de la. A regua contava a
+ * explicacao do conserto como se fosse o defeito, e isso cria pressao para nao
+ * explicar o que foi removido.
+ *
+ * O comentario original desta chave dizia "ocorrencias em comentario, que aqui
+ * sao zero". Era verdade no dia em que foi escrito, e deixou de ser sem que
+ * ninguem mexesse na chave. Numero medido tem data.
+ *
+ * O corte de comentario tem seis casos de prova, e o quinto e o controle
+ * negativo: string NAO e comentario, e o conteudo dela fica -- senao a regua
+ * mediria zero em tudo e pareceria consertada.
+ */
 const CHEIAS_CONHECIDAS = new Map([
-  ['components/chat/ChatPanel.tsx', 2],
-  ['pages/calendar/CalendarPage.tsx', 2],
-  ['pages/dashboard/AdminDashboard.tsx', 2],
-  ['pages/dashboard/TechnicianDashboard.tsx', 2],
-  ['pages/equipment/EquipmentPage.tsx', 1],
   ['pages/errors/ForbiddenPage.tsx', 1],
-  ['pages/kb/KBArticlePage.tsx', 1],
-  ['pages/kb/KBFormPage.tsx', 3],
-  ['pages/kb/KBListPage.tsx', 1],
-  ['pages/notifications/NotificationsPage.tsx', 5],
-  ['pages/profile/ProfilePage.tsx', 5],
 ]);
 
 /** A catraca das cores cheias, com a mesma disciplina da outra: falha nos dois sentidos. */
@@ -1049,10 +1186,10 @@ if (ehPrincipal) {
   if (process.argv.includes("--provar")) {
     console.log("Casos de prova da varredura:\n");
     console.log("");
-    const falhas = provar() + provarCatraca();
+    const falhas = provar() + provarComentarios() + provarCatraca();
     console.log(
       falhas === 0
-        ? `\n✔ os ${PROVAS.length} casos e os 3 controles da catraca passam.`
+        ? `\n✔ os ${PROVAS.length} casos, os ${PROVAS_COMENTARIO.length} de comentário e os 3 controles da catraca passam.`
         : `\n✖ ${falhas} de ${PROVAS.length} caso(s) falharam.`,
     );
     process.exit(falhas === 0 ? 0 : 1);

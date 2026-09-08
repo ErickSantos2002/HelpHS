@@ -28,7 +28,13 @@ describe("varredura de contraste", () => {
       const e = erro as { stdout?: string };
       throw new Error(`casos de prova falharam:\n${e.stdout ?? erro}`);
     }
-    expect(saida).toMatch(/✔ os \d+ casos e os 3 controles da catraca passam\./);
+    // Duas afirmações, e a segunda é a que importa: **nenhum caso individual
+    // marcou falha**. Só a linha final seria frágil — ela mudou de redação
+    // quando os seis casos de comentário entraram, e o caso caiu por isso, não
+    // por defeito. Pior seria o inverso: uma linha final que continuasse
+    // dizendo "passam" enquanto casos falhavam acima dela.
+    expect(saida).not.toMatch(/^\s*(?:✖|X )/m);
+    expect(saida).toMatch(/✔ os \d+ casos.*passam\./);
   });
 
   it("a varredura roda sobre o src/ sem estourar", () => {
