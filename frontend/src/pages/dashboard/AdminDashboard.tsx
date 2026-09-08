@@ -5,7 +5,11 @@ import {
 } from "recharts";
 import { Alert, FilterSelect, KpiCard, Spinner } from "../../components/ui";
 import { cn } from "../../lib/utils";
-import { useTheme } from "../../contexts/ThemeContext";
+import {
+  CROMO, ESTILO_DICA, ENVOLTORIO_DICA, COR_SERIE_TEMPORAL,
+} from "../../lib/grafico";
+import { rotuloDeStatus, slotDeStatus, type TicketStatus } from "../../lib/status";
+import { rotuloDePrioridade, graficoDePrioridade, type TicketPriority } from "../../lib/prioridade";
 import { getDashboardStats, type DashboardStats } from "../../services/dashboardService";
 import {
   getReports, getTechnicianListReport, getTechnicianDetailReport,
@@ -42,30 +46,46 @@ function customDays(start: string, end: string) {
 }
 
 // ── Colors ────────────────────────────────────────────────────
+//
+// Os hexadecimais cravados por status/prioridade que viviam aqui
+// (`STATUS_COLORS`, `PRIORITY_COLORS`) saíram: eram exatamente o mapa local
+// que a E18 e o `lib/prioridade.ts` existem para substituir, e a rosca e a
+// barra empilhada ficaram travadas até a E18 gravar `SLOT_DE_STATUS` — ver
+// `lib/status.ts`. Cor de série por status vem de `slotDeStatus()`, por
+// prioridade de `graficoDePrioridade()`; nenhuma das duas é reimplementada
+// nesta tela.
+//
+// O `DashboardStats` funde `awaiting_client` e `awaiting_technical` num só
+// número (`tickets.awaiting`) — fusão do backend, anterior a esta migração e
+// fora do alcance dela consertar. Sem um `TicketStatus` próprio para o bloco
+// fundido, ele usa o slot e o rótulo genérico "Aguardando" como aproximação;
+// qual dos dois pesa mais aqui é decisão de desenho que este agente não toma
+// (ver relato final).
+type BlocoDeStatus = "open" | "in_progress" | "awaiting" | "resolved" | "closed" | "cancelled";
 
-const STATUS_COLORS: Record<string, string> = {
-  Abertos:      "#0ea5e9",
-  "Em andamento": "#6366f1",
-  Aguardando:   "#f59e0b",
-  Resolvidos:   "#10b981",
-  Fechados:     "#64748b",
-  Cancelados:   "#ef4444",
-};
+/** Os seis blocos que o `DashboardStats` expõe, na ordem do ciclo de vida. */
+const BLOCOS_DE_STATUS: BlocoDeStatus[] = [
+  "open", "in_progress", "awaiting", "resolved", "closed", "cancelled",
+];
 
-const PRIORITY_COLORS: Record<string, string> = {
-  Crítico: "#ef4444",
-  Alto:    "#f59e0b",
-  Médio:   "#6366f1",
-  Baixo:   "#64748b",
-};
+function corDoBlocoDeStatus(chave: TicketStatus | "awaiting"): string {
+  return slotDeStatus(chave === "awaiting" ? "awaiting_client" : chave);
+}
+function rotuloDoBlocoDeStatus(chave: TicketStatus | "awaiting"): string {
+  return chave === "awaiting" ? "Aguardando" : rotuloDeStatus(chave);
+}
 
 // ── Helpers ───────────────────────────────────────────────────
 
+// `text-on-tint-*` e `bg-fill-*` no lugar da cor cheia de significado usada
+// como texto (a reprovação da regra 2 — "danger"/"warning" sem sufixo de
+// tinta) e de `bg-emerald-500` (paleta crua do Tailwind, regra 1, por cima de
+// um caso que já tem token semântico próprio).
 function slaColor(r: number) {
-  return r >= 90 ? "text-emerald-600 dark:text-emerald-400" : r >= 70 ? "text-warning" : "text-danger";
+  return r >= 90 ? "text-on-tint-success" : r >= 70 ? "text-on-tint-warning" : "text-on-tint-danger";
 }
 function slaBg(r: number) {
-  return r >= 90 ? "bg-emerald-500" : r >= 70 ? "bg-warning" : "bg-danger";
+  return r >= 90 ? "bg-fill-success" : r >= 70 ? "bg-fill-warning" : "bg-fill-danger";
 }
 function fmtHours(h: number | null) {
   if (h == null) return "—";
@@ -85,14 +105,13 @@ function fmtDate(iso: string) {
 
 function StatusBar({ t }: { t: DashboardStats["tickets"] }) {
   const total = t.total || 1;
-  const segs = [
-    { label: "Abertos",       value: t.open,        color: "#0ea5e9" },
-    { label: "Em andamento",  value: t.in_progress,  color: "#6366f1" },
-    { label: "Aguardando",    value: t.awaiting,    color: "#f59e0b" },
-    { label: "Resolvidos",    value: t.resolved,    color: "#10b981" },
-    { label: "Fechados",      value: t.closed,      color: "#64748b" },
-    { label: "Cancelados",    value: t.cancelled,   color: "#ef4444" },
-  ].filter((s) => s.value > 0);
+  const segs = BLOCOS_DE_STATUS
+    .map((chave) => ({
+      label: rotuloDoBlocoDeStatus(chave),
+      value: t[chave],
+      color: corDoBlocoDeStatus(chave),
+    }))
+    .filter((s) => s.value > 0);
 
   return (
     <div className="rounded-xl bg-surface border border-borda p-5">
@@ -137,8 +156,6 @@ function SectionCard({ title, action, children }: { title: string; action?: Reac
 // ── AdminDashboard ────────────────────────────────────────────
 
 export default function AdminDashboard() {
-  const { theme } = useTheme();
-
   // Period state
   const [periodKey, setPeriodKey] = useState<PeriodKey>("mes");
   const [customDates, setCustomDates] = useState(getDefaultCustomDates);
@@ -177,25 +194,11 @@ export default function AdminDashboard() {
       .catch(() => setTechDetail(null));
   }, [selectedTechId, activePeriod]);
 
-
-  const tooltipBg     = theme === "dark" ? "#132238" : "#ffffff";
-  const tooltipBorder = theme === "dark" ? "#1E3A5F" : "#e2e8f0";
-  const tooltipColor  = theme === "dark" ? "#f1f5f9" : "#0f172a";
-  const tooltipStyle = {
-    backgroundColor: tooltipBg,
-    border: `1px solid ${tooltipBorder}`,
-    borderRadius: "8px",
-    color: tooltipColor,
-    fontSize: "12px",
-  };
-  const tooltipWrapper = {
-    backgroundColor: tooltipBg,
-    border: `1px solid ${tooltipBorder}`,
-    borderRadius: "8px",
-    outline: "none",
-  };
-  const axisColor = theme === "dark" ? "#475569" : "#94a3b8";
-  const gridColor = theme === "dark" ? "#1E3A5F" : "#f1f5f9";
+  // O cromo (eixo, grade, dica) e a cor da série temporal única vêm de
+  // `lib/grafico.ts` — não mais de `theme === "dark" ? A : B` escrito à mão.
+  // `var(--text-muted)` etc. já resolvem sozinhos por tema no CSS; escolher o
+  // hexadecimal aqui em JS era reimplementar o seletor `.dark`, e sem essa
+  // escolha o `useTheme()` desta tela deixou de ter uso.
 
   if (loading) return <div className="flex h-64 items-center justify-center"><Spinner size="lg" /></div>;
   if (error || !stats || !report) return <Alert variant="danger">{error ?? "Erro desconhecido."}</Alert>;
@@ -215,21 +218,33 @@ export default function AdminDashboard() {
     .slice(0, 8);
   const categoryMax = categoryData[0]?.count || 1;
 
-  const statusData = [
-    { name: "Abertos",       value: tickets.open         },
-    { name: "Em andamento",  value: tickets.in_progress  },
-    { name: "Aguardando",    value: tickets.awaiting     },
-    { name: "Resolvidos",    value: tickets.resolved     },
-    { name: "Fechados",      value: tickets.closed       },
-    { name: "Cancelados",    value: tickets.cancelled    },
-  ].filter((d) => d.value > 0);
+  // Rótulo e cor por `lib/status.ts` / `SLOT_DE_STATUS` (E18) — nunca mapa
+  // local. `name` é o que a legenda mostra: obrigatória num gráfico de status,
+  // porque `--chart-*` é categórico e não diz sozinho "cancelado" a quem olha.
+  const statusData = BLOCOS_DE_STATUS
+    .map((chave) => ({
+      chave,
+      name: rotuloDoBlocoDeStatus(chave),
+      value: tickets[chave],
+      cor: corDoBlocoDeStatus(chave),
+    }))
+    .filter((d) => d.value > 0);
 
-  const priorityData = [
-    { name: "Crítico", value: tickets.by_priority_critical },
-    { name: "Alto",    value: tickets.by_priority_high     },
-    { name: "Médio",   value: tickets.by_priority_medium   },
-    { name: "Baixo",   value: tickets.by_priority_low      },
-  ];
+  // Rótulo e preenchimento por `lib/prioridade.ts` — a mesma fonte que o selo
+  // e o ponto da lista usam. O rótulo passa a sair no feminino (E17: "Alta",
+  // não "Alto"), que é a mesma palavra que o resto do sistema já usa.
+  const priorityData = (
+    [
+      ["critical", tickets.by_priority_critical],
+      ["high",     tickets.by_priority_high],
+      ["medium",   tickets.by_priority_medium],
+      ["low",      tickets.by_priority_low],
+    ] as [TicketPriority, number][]
+  ).map(([chave, value]) => ({
+    name: rotuloDePrioridade(chave),
+    value,
+    cor: graficoDePrioridade(chave),
+  }));
 
   const chartData      = techDetail ? techDetail.tickets_by_day  : report.tickets_by_day;
   const slaCompliance  = report.sla_compliance;
@@ -389,17 +404,20 @@ export default function AdminDashboard() {
               <div className="flex h-48 items-center justify-center text-slate-400 text-sm">Sem dados para o período</div>
             ) : (
               <ResponsiveContainer width="100%" height={220}>
+                {/* Série temporal ÚNICA (chamados por dia): uma cor só, por
+                    `COR_SERIE_TEMPORAL` — regra do operador, para os cinco
+                    gráficos desta mesma natureza pararem de divergir em cor. */}
                 <AreaChart data={chartData} margin={{ top: 4, right: 4, left: -24, bottom: 0 }}>
                   <defs>
                     <linearGradient id="aGrad" x1="0" y1="0" x2="0" y2="1">
-                      <stop offset="5%"  stopColor="#0ea5e9" stopOpacity={0.25} />
-                      <stop offset="95%" stopColor="#0ea5e9" stopOpacity={0}    />
+                      <stop offset="5%"  stopColor={COR_SERIE_TEMPORAL} stopOpacity={0.25} />
+                      <stop offset="95%" stopColor={COR_SERIE_TEMPORAL} stopOpacity={0}    />
                     </linearGradient>
                   </defs>
-                  <XAxis dataKey="date" tickFormatter={fmtDate} tick={{ fill: axisColor, fontSize: 11 }} axisLine={false} tickLine={false} interval="preserveStartEnd" />
-                  <YAxis tick={{ fill: axisColor, fontSize: 11 }} axisLine={false} tickLine={false} allowDecimals={false} />
-                  <Tooltip contentStyle={tooltipStyle} wrapperStyle={tooltipWrapper} labelFormatter={(v) => fmtDate(String(v))} formatter={(v) => [v, "Tickets"]} />
-                  <Area type="monotone" dataKey="count" stroke="#0ea5e9" strokeWidth={2.5} fill="url(#aGrad)" dot={false} activeDot={{ r: 4, fill: "#0ea5e9", strokeWidth: 0 }} />
+                  <XAxis dataKey="date" tickFormatter={fmtDate} tick={{ fill: CROMO.eixo, fontSize: 11 }} axisLine={false} tickLine={false} interval="preserveStartEnd" />
+                  <YAxis tick={{ fill: CROMO.eixo, fontSize: 11 }} axisLine={false} tickLine={false} allowDecimals={false} />
+                  <Tooltip contentStyle={ESTILO_DICA} wrapperStyle={ENVOLTORIO_DICA} labelFormatter={(v) => fmtDate(String(v))} formatter={(v) => [v, "Tickets"]} />
+                  <Area type="monotone" dataKey="count" stroke={COR_SERIE_TEMPORAL} strokeWidth={2.5} fill="url(#aGrad)" dot={false} activeDot={{ r: 4, fill: COR_SERIE_TEMPORAL, strokeWidth: 0 }} />
                 </AreaChart>
               </ResponsiveContainer>
             )}
@@ -420,9 +438,9 @@ export default function AdminDashboard() {
                   <ResponsiveContainer width="100%" height={180}>
                     <PieChart>
                       <Pie data={statusData} cx="50%" cy="50%" innerRadius={55} outerRadius={82} paddingAngle={3} dataKey="value">
-                        {statusData.map((e) => <Cell key={e.name} fill={STATUS_COLORS[e.name] ?? "#475569"} />)}
+                        {statusData.map((e) => <Cell key={e.chave} fill={e.cor} />)}
                       </Pie>
-                      <Tooltip contentStyle={tooltipStyle} wrapperStyle={tooltipWrapper} />
+                      <Tooltip contentStyle={ESTILO_DICA} wrapperStyle={ENVOLTORIO_DICA} />
                     </PieChart>
                   </ResponsiveContainer>
                   <div className="absolute inset-0 flex flex-col items-center justify-center pointer-events-none">
@@ -430,11 +448,14 @@ export default function AdminDashboard() {
                     <p className="text-xs text-slate-500">total</p>
                   </div>
                 </div>
+                {/* Legenda obrigatória (E18): com `--chart-*` a cor deixou de
+                    significar por si só — é este nome, ao lado da cor, que diz
+                    "cancelado". */}
                 <div className="flex flex-col gap-1.5 mt-2">
                   {statusData.map((d) => (
-                    <div key={d.name} className="flex items-center justify-between">
+                    <div key={d.chave} className="flex items-center justify-between">
                       <div className="flex items-center gap-2">
-                        <span className="w-2.5 h-2.5 rounded-sm shrink-0" style={{ backgroundColor: STATUS_COLORS[d.name] ?? "#475569" }} />
+                        <span className="w-2.5 h-2.5 rounded-sm shrink-0" style={{ backgroundColor: d.cor }} />
                         <span className="text-xs text-slate-500">{d.name}</span>
                       </div>
                       <span className="text-xs font-semibold text-slate-700 dark:text-slate-200 tabular-nums">{d.value}</span>
@@ -475,24 +496,31 @@ export default function AdminDashboard() {
 
         {/* Priority */}
         <SectionCard title="Tickets por Prioridade">
+          {/* Prioridade TEM significado próprio — não é série categórica —,
+              então usa `graficoDePrioridade()` e não `--chart-*` (E16-b). O
+              eixo já rotula cada barra; sem legenda separada. */}
           <ResponsiveContainer width="100%" height={200}>
             <BarChart data={priorityData} margin={{ top: 4, right: 4, left: -24, bottom: 0 }} barSize={36}>
-              <XAxis dataKey="name" tick={{ fill: axisColor, fontSize: 12 }} axisLine={false} tickLine={false} />
-              <YAxis tick={{ fill: axisColor, fontSize: 12 }} axisLine={false} tickLine={false} allowDecimals={false} />
+              <XAxis dataKey="name" tick={{ fill: CROMO.eixo, fontSize: 12 }} axisLine={false} tickLine={false} />
+              <YAxis tick={{ fill: CROMO.eixo, fontSize: 12 }} axisLine={false} tickLine={false} allowDecimals={false} />
               <Tooltip
-                cursor={{ fill: gridColor }}
+                cursor={{ fill: CROMO.grade }}
                 content={({ active, payload, label }) => {
                   if (!active || !payload?.length) return null;
+                  // A cor do texto acompanha a barra sob o cursor (`cor`, do
+                  // próprio dado) — antes era um azul cravado sem relação
+                  // nenhuma com a cor da barra.
+                  const cor = (payload[0].payload as { cor: string }).cor;
                   return (
-                    <div style={{ backgroundColor: tooltipBg, border: `1px solid ${tooltipBorder}`, borderRadius: 8, padding: "8px 12px", fontSize: 12, color: tooltipColor }}>
+                    <div style={{ backgroundColor: CROMO.dicaFundo, border: `1px solid ${CROMO.dicaBorda}`, borderRadius: 8, padding: "8px 12px", fontSize: 12, color: CROMO.dicaTexto }}>
                       <p style={{ fontWeight: 600, marginBottom: 4 }}>{label}</p>
-                      <p style={{ color: "#0ea5e9" }}>Tickets : {payload[0].value}</p>
+                      <p style={{ color: cor }}>Tickets : {payload[0].value}</p>
                     </div>
                   );
                 }}
               />
               <Bar dataKey="value" radius={[6, 6, 0, 0]} name="Tickets">
-                {priorityData.map((e) => <Cell key={e.name} fill={PRIORITY_COLORS[e.name] ?? "#475569"} />)}
+                {priorityData.map((e) => <Cell key={e.name} fill={e.cor} />)}
               </Bar>
             </BarChart>
           </ResponsiveContainer>
@@ -557,7 +585,10 @@ export default function AdminDashboard() {
                     >
                       <td className="py-3 pr-4">
                         <div className="flex items-center gap-2.5">
-                          <div className={cn("w-8 h-8 rounded-full flex items-center justify-center shrink-0 text-xs font-bold", isSelected ? "bg-primary text-white" : "bg-primary/10 text-primary border border-primary/20")}>
+                          {/* `bg-primary` + `text-white` dava 3,83:1. O par do
+                              degrau de ação é `bg-action` + `text-on-primary`
+                              (tailwind.config.js). */}
+                          <div className={cn("w-8 h-8 rounded-full flex items-center justify-center shrink-0 text-xs font-bold", isSelected ? "bg-action text-on-primary" : "bg-primary/10 text-primary border border-primary/20")}>
                             {initials}
                           </div>
                           <span className="font-medium text-slate-700 dark:text-slate-200 truncate">{t.technician_name}</span>
