@@ -314,15 +314,15 @@ async def create_message(
     # de propósito: é ela quem decide se a equipe precisa ser chamada, e a
     # triagem recém-fechada é justamente o momento em que o chamado passa a ter
     # conteúdo útil e ainda não tem dono.
-    encerrou_triagem = False
+    fala_da_helo = None
     if actor.id == ticket.creator_id:
-        encerrou_triagem = await responde_triagem(db, ticket, actor, msg.content) is not None
+        fala_da_helo = await responde_triagem(db, ticket, actor, msg.content)
 
     # Notify the other party
     await _notify_other_party(db, ticket, actor, msg)
 
-    if encerrou_triagem:
-        await _avisa_equipe_da_triagem(db, ticket)
+    if fala_da_helo is not None:
+        await _avisa_equipe_da_helo(db, ticket, escalou=fala_da_helo.escalou)
 
     # Auto status transition based on who is sending
     new_status_value = await _apply_chat_transition(db, ticket, actor)
@@ -602,7 +602,7 @@ async def websocket_chat(
                 if user.id == ticket.creator_id:
                     fala_da_helo = await responde_triagem(db, ticket, user, msg.content)
                     if fala_da_helo is not None:
-                        await _avisa_equipe_da_triagem(db, ticket)
+                        await _avisa_equipe_da_helo(db, ticket, escalou=fala_da_helo.escalou)
 
                 new_status_value = await _apply_chat_transition(db, ticket, user)
 
@@ -622,7 +622,7 @@ async def websocket_chat(
                 # é transmitida. Ela fica gravada, e só aparece num F5 — que
                 # foi exatamente o sintoma relatado.
                 dados_da_helo = (
-                    _response_to_dict(_msg_to_response(fala_da_helo))
+                    _response_to_dict(_msg_to_response(fala_da_helo.mensagem))
                     if fala_da_helo is not None
                     else None
                 )
@@ -710,9 +710,9 @@ async def _apply_chat_transition(
     return None
 
 
-async def _avisa_equipe_da_triagem(db: AsyncSession, ticket: Ticket) -> None:
+async def _avisa_equipe_da_helo(db: AsyncSession, ticket: Ticket, *, escalou: bool) -> None:
     """
-    Chama a equipe quando a Helô termina de triar.
+    Chama a equipe quando a Helô sai de cena — dizendo qual das duas saídas foi.
 
     Sem isto o chamado fica em "Em andamento" sem dono e sem ninguém avisado: a
     notificação normal do chat vai para o RESPONSÁVEL, e a essa altura não há
@@ -721,6 +721,19 @@ async def _avisa_equipe_da_triagem(db: AsyncSession, ticket: Ticket) -> None:
     Vai para todos os técnicos e admins ativos, e não para um sorteado: sem
     dono, escolher um seria inventar uma atribuição que ninguém pediu — e o
     escolhido poderia estar de férias.
+
+    **As duas saídas mandavam o mesmo texto, e uma delas era falsa.** Quando o
+    cliente pede uma pessoa, a triagem não terminou: ela foi interrompida, com
+    as perguntas ainda sem resposta. Dizer "a Helô terminou a triagem" ali
+    manda a equipe procurar um resumo que não existe, e apaga a única
+    informação que muda a ordem da fila — que tem alguém do outro lado
+    esperando gente, não esperando atendimento.
+
+    O tipo continua `ticket_updated` nos dois casos: `NotificationType` é enum
+    nativo do Postgres, e um valor novo custa um `ALTER TYPE` em migration que
+    roda sozinha no boot — o preço que o desenho já recusou pagar pelo
+    `ai_handling`. A distinção vive no título e no texto, que é onde a equipe
+    de fato lê.
     """
     equipe = (
         (
@@ -735,13 +748,20 @@ async def _avisa_equipe_da_triagem(db: AsyncSession, ticket: Ticket) -> None:
         .all()
     )
 
+    if escalou:
+        titulo = f"Cliente pediu atendimento humano — {ticket.protocol}"
+        texto = "O cliente pediu para falar com uma pessoa. A Helô parou a triagem na hora."
+    else:
+        titulo = f"Triagem concluída — {ticket.protocol}"
+        texto = "A Helô terminou a triagem e o chamado está esperando atendimento."
+
     for pessoa in equipe:
         await notify(
             db,
             pessoa.id,
             NotificationType.ticket_updated,
-            f"Triagem concluída — {ticket.protocol}",
-            "A Helô terminou a triagem e o chamado está esperando atendimento.",
+            titulo,
+            texto,
             data={"ticket_id": str(ticket.id), "protocol": ticket.protocol},
         )
 

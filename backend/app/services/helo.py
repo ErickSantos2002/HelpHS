@@ -13,8 +13,9 @@ volta. Ver o desenho em
 import uuid
 from collections.abc import Sequence
 from datetime import UTC, datetime
+from typing import NamedTuple
 
-from sqlalchemy import func, select
+from sqlalchemy import exists, func, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.core.config import get_settings
@@ -25,6 +26,7 @@ from app.models.models import (
     Ticket,
     TicketStatus,
     User,
+    UserRole,
 )
 
 # O cálculo de horário comercial vem do motor de SLA, inclusive sendo privado.
@@ -286,6 +288,21 @@ async def abre_triagem(
 FALAS_MAXIMAS = 2
 
 
+class FalaDaHelo(NamedTuple):
+    """
+    O que ela falou, e por qual das duas saídas.
+
+    `escalou` viaja junto porque não dá para recuperá-lo depois: quem precisa
+    dele é a notificação da equipe, e deduzi-lo relendo o texto do cliente no
+    router seria uma segunda cópia da decisão que `quer_humano` já toma aqui.
+    As duas cópias concordam hoje e deixariam de concordar na Fase 2, quando
+    for o LLM a dizer se o cliente quer gente.
+    """
+
+    mensagem: ChatMessage
+    escalou: bool
+
+
 def monta_escalada() -> str:
     """
     A saída quando o cliente pede uma pessoa.
@@ -310,12 +327,54 @@ async def _quantas_vezes_ela_falou(db: AsyncSession, ticket_id: uuid.UUID) -> in
     return int((await db.execute(consulta)).scalar_one())
 
 
+async def _humano_ja_esta_na_conversa(db: AsyncSession, ticket: Ticket) -> bool:
+    """
+    Duas condições, porque cada uma sozinha cala a Helô tarde demais.
+
+    O **responsável** não passa pelo chat: assumir o chamado grava histórico e
+    notificação, nunca uma mensagem. Quem pegou o chamado às 8h e ainda não
+    digitou é invisível para qualquer varredura de conversa — e ela anunciaria
+    que "um atendente já vai assumir" um chamado que já tem nome.
+
+    A **fala da equipe** não passa pela atribuição: técnico e admin escrevem em
+    qualquer chamado sem serem os responsáveis (`_get_ticket_visivel` só
+    submete o não-staff à regra de dono), e responder antes de assumir é o
+    caminho normal da triagem da manhã. Pior: `assignee_id` é revogável — o
+    endpoint de atribuição aceita nulo e desatribui. Se só ele valesse, tirar o
+    responsável de um chamado ressuscitaria a Helô no meio de uma conversa que
+    um humano já começou. Mensagem é append-only; atribuição não é.
+
+    A frase que ela diria — *"um atendente já vai assumir seu chamado"* — é
+    mentira nas duas situações. A guarda é a união delas.
+
+    O responsável vem primeiro por ser de graça: já está carregado no chamado,
+    e a consulta só acontece em chamado sem dono.
+
+    A conferência é pelo PAPEL de quem falou, e não pelo atalho "remetente que
+    não é o autor do chamado". O atalho só funciona porque hoje a visibilidade
+    é um "é seu?" cru; quando a frente de empresa/CNPJ deixar colegas da mesma
+    empresa entrarem no chamado, ele calaria a Helô pelo motivo errado e sem
+    avisar.
+    """
+    if ticket.assignee_id is not None:
+        return True
+
+    consulta = select(
+        exists().where(
+            ChatMessage.ticket_id == ticket.id,
+            ChatMessage.sender_id == User.id,
+            User.role.in_((UserRole.admin, UserRole.technician)),
+        )
+    )
+    return bool((await db.execute(consulta)).scalar())
+
+
 async def responde_triagem(
     db: AsyncSession,
     ticket: Ticket,
     cliente: User,
     texto_do_cliente: str,
-) -> ChatMessage | None:
+) -> FalaDaHelo | None:
     """
     A resposta do cliente encerra a triagem — e a Helô sai de cena.
 
@@ -329,11 +388,17 @@ async def responde_triagem(
     pergunta sem resposta ou uma resposta sem pergunta.
 
     Returns:
-        A fala dela, para quem precisa transmiti-la (o WebSocket). None quando
-        um interruptor está desligado, a triagem já acabou, ou ela nunca chegou
-        a abrir a conversa.
+        A fala dela e por qual saída, para quem precisa transmiti-la (o
+        WebSocket) e para quem precisa avisar a equipe. None quando um
+        interruptor está desligado, **um humano já está na conversa**, a
+        triagem já acabou, ou ela nunca chegou a abrir a conversa.
     """
     if not helo_pode_falar(ticket, cliente):
+        return None
+
+    # Antes da contagem: um chamado que já tem gente não precisa nem saber
+    # quantas falas ela ainda teria de crédito.
+    if await _humano_ja_esta_na_conversa(db, ticket):
         return None
 
     falas = await _quantas_vezes_ela_falou(db, ticket.id)
@@ -343,9 +408,8 @@ async def responde_triagem(
     if falas == 0 or falas >= FALAS_MAXIMAS:
         return None
 
-    conteudo = (
-        monta_escalada() if quer_humano(texto_do_cliente) else monta_encerramento(datetime.now(UTC))
-    )
+    escalou = quer_humano(texto_do_cliente)
+    conteudo = monta_escalada() if escalou else monta_encerramento(datetime.now(UTC))
 
     fala = ChatMessage(
         id=uuid.uuid4(),
@@ -357,4 +421,4 @@ async def responde_triagem(
         created_at=datetime.now(UTC),
     )
     db.add(fala)
-    return fala
+    return FalaDaHelo(mensagem=fala, escalou=escalou)

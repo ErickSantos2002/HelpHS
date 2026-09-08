@@ -1059,3 +1059,69 @@ async def test_cliente_respondendo_chamado_com_dono_vai_para_ag_tecnico(patch_re
 
     assert resp.status_code == 201, resp.text
     assert ticket.status is TicketStatus.awaiting_technical
+
+
+# ── O aviso que a equipe recebe quando a Helô sai de cena ──────
+
+
+def _db_com_equipe(*pessoas):
+    """Sessão que responde ao SELECT dos técnicos e admins ativos."""
+    sessao = AsyncMock()
+    resultado = MagicMock()
+    resultado.scalars.return_value.all.return_value = list(pessoas)
+    sessao.execute = AsyncMock(return_value=resultado)
+    return sessao
+
+
+async def _avisos(*, escalou):
+    """Roda o aviso da equipe e devolve os (título, texto) notificados."""
+    from app.routers.chat import _avisa_equipe_da_helo
+
+    db = _db_com_equipe(_mock_user(UserRole.technician), _mock_user(UserRole.admin))
+
+    with patch("app.routers.chat.notify", new=AsyncMock()) as notificou:
+        await _avisa_equipe_da_helo(db, _mock_ticket(), escalou=escalou)
+
+    return [(c.args[3], c.args[4]) for c in notificou.await_args_list]
+
+
+@pytest.mark.asyncio
+async def test_triagem_concluida_avisa_que_o_chamado_espera_atendimento():
+    """A saída normal: ela perguntou, o cliente respondeu, e há o que ler."""
+    avisos = await _avisos(escalou=False)
+
+    assert len(avisos) == 2, "todo técnico e admin ativo é chamado, não um sorteado"
+    for titulo, texto in avisos:
+        assert "Triagem concluída" in titulo
+        assert "terminou a triagem" in texto
+
+
+@pytest.mark.asyncio
+async def test_escalada_nao_diz_que_a_helo_terminou_a_triagem():
+    """
+    Quando o cliente pede uma pessoa, a triagem NÃO terminou — foi interrompida.
+
+    O texto antigo era o mesmo nos dois casos, e neste mandava a equipe
+    procurar um resumo que não existe. Some também a informação que muda a
+    ordem da fila: tem gente esperando gente.
+    """
+    avisos = await _avisos(escalou=True)
+
+    assert len(avisos) == 2
+    for titulo, texto in avisos:
+        assert "pediu atendimento humano" in titulo
+        assert "falar com uma pessoa" in texto
+        assert "terminou a triagem" not in texto
+        assert "Triagem concluída" not in titulo
+
+
+@pytest.mark.asyncio
+async def test_as_duas_saidas_nao_mandam_o_mesmo_texto():
+    """
+    A regressão que a separação existe para impedir.
+
+    Sem esta comparação, alguém "unifica" os dois textos de novo numa
+    refatoração e os testes acima continuam verdes se o texto unificado
+    contiver as duas frases.
+    """
+    assert await _avisos(escalou=True) != await _avisos(escalou=False)
