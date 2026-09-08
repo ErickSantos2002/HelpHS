@@ -230,6 +230,17 @@ Duas defesas, e use as duas:
 
 Um roteiro de mutação é uma régua, e régua não medida mente com confiança.
 
+⚠️ **E o `finally` não basta sozinho.** Um agente viu a gravação da restauração
+falhar com `UNKNOWN` (errno **-4094**) — no Windows o arquivo fica preso por
+outro processo por instantes, e é uma árvore com três worktrees. O `finally`
+protege contra o **processo morrer**; não protege contra a **gravação em si
+falhar**. Naquela vez o arquivo escapou íntegro por ordem de execução, não por
+desenho — e um roteiro que não consegue gravar deixa o mutante no disco de outra
+pessoa.
+
+Grave com repetição (tente de novo, e **releia para confirmar o conteúdo**), e
+confira o arquivo no fim. Restaurar não é escrever: é escrever **e provar**.
+
 ---
 
 ## 6. A ficha da §29
