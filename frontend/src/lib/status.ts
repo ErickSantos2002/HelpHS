@@ -53,7 +53,22 @@ export interface Status {
   /** O que o estado significa, para quem não conhece o fluxo. */
   descricao: string;
   variante: VarianteStatus;
-  /** Ordem do ciclo de vida. É a ordem das colunas e a da tabela da E18. */
+  /**
+   * A ordem das COLUNAS do quadro, e só dela.
+   *
+   * **Não é a ordem da tabela da E18**, e a diferença é real: aqui
+   * `awaiting_technical` vem antes de `awaiting_client`, porque é a ordem que o
+   * quadro sempre teve; a E18 segue o `STATUS` do `Badge.jsx` do pacote, que
+   * lista o cliente primeiro.
+   *
+   * As duas são legítimas e servem a coisas diferentes — uma é leitura de
+   * quadro, a outra é contrato compartilhado com o outro produto. Derivar uma
+   * da outra faria a cor de um status mudar entre os dois repositórios, que é
+   * exatamente o que a tabela fixa existe para impedir.
+   *
+   * O comentário anterior dizia que esta ordem era "a das colunas E a da
+   * tabela da E18". Era falso, e o caso de teste da tabela pegou.
+   */
   ordem: number;
   /** Estado final: o chamado não anda mais a partir daqui. */
   terminal: boolean;
@@ -165,6 +180,57 @@ export const TOM_STATUS: Record<
     ponto: "bg-fill-danger",
   },
 };
+
+/**
+ * O slot da paleta de gráfico, por status — a tabela da emenda **E18**.
+ *
+ * Fixa, e igual nos dois repositórios. Fixa porque as cores deixaram de
+ * significar: com `--chart-*`, o sétimo é pervinca no claro e sálvia no escuro,
+ * e nenhuma das duas diz "cancelado". Sem uma ordem combinada, "Resolvidos"
+ * mudaria de cor entre o painel e o relatório.
+ *
+ * A ordem é a do `STATUS` do `Badge.jsx` do PACOTE, que é o que a emenda cita.
+ * Ela **não** é a mesma do campo `ordem` acima: lá `awaiting_technical` vem
+ * antes, porque é a ordem do quadro. Escrita à mão, e não derivada, justamente
+ * por isso — e o caso de teste a compara literal.
+ *
+ * ── Por que gráfico de status NÃO usa a §16 ───────────────────────────
+ *
+ * Porque não cabe. Medido na E18: escolher dentro das rampas semânticas, com
+ * 3:1 nas três superfícies e ΔE ≥ 20 entre todos os pares nas quatro visões,
+ * **não tem solução no tema claro** — sete séries param em 12,16 e seis em
+ * 15,67, contra um piso de 20. A capacidade do claro é de cinco matizes.
+ *
+ * O par que trava não são as duas azuis: é `success` × `danger` em protanopia,
+ * verde e vermelho, com os dois obrigados a escurecer para passar 3:1 no
+ * branco.
+ *
+ * ── A legenda deixa de ser conveniência ───────────────────────────────
+ *
+ * Enquanto o status pintava com a cor da §16, quem conhecia o sistema lia
+ * "vermelho = cancelado" sem consultar nada. Com `--chart-*` isso acabou:
+ * **gráfico de status leva legenda com o nome de cada série, sempre.**
+ */
+export const SLOT_DE_STATUS: Record<TicketStatus, string> = {
+  open: "var(--chart-1)",
+  in_progress: "var(--chart-2)",
+  awaiting_client: "var(--chart-3)",
+  awaiting_technical: "var(--chart-4)",
+  resolved: "var(--chart-5)",
+  closed: "var(--chart-6)",
+  cancelled: "var(--chart-7)",
+};
+
+/**
+ * O preenchimento de série para um status, com recuo para o neutro.
+ *
+ * Recuo neutro, e não uma das sete: status desconhecido é ausência de
+ * informação, e emprestar o slot de outro faria duas séries diferentes
+ * pintarem igual — que é exatamente o que a paleta existe para impedir.
+ */
+export function slotDeStatus(s: string): string {
+  return SLOT_DE_STATUS[s as TicketStatus] ?? "var(--border-control)";
+}
 
 /** O rótulo, com recuo para o valor cru quando o backend manda algo novo. */
 export function rotuloDeStatus(s: string): string {

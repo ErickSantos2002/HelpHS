@@ -120,6 +120,10 @@ export default {
         "chart-4": tk("--chart-4"),
         "chart-5": tk("--chart-5"),
         "chart-6": tk("--chart-6"),
+        // O setimo veio com a E18, para o grafico de STATUS: sao sete status e
+        // seis slots nao bastavam. Ficou de fora quando mapeei os seis, e sem
+        // ele a tabela status -> slot nao tem como ser escrita.
+        "chart-7": tk("--chart-7"),
 
         // As quatro semanticas na forca de PREENCHIMENTO — candidatas a emenda
         // E19. Existem porque o degrau 500 reprova o piso de 3:1 no tema claro
