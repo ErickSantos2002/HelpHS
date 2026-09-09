@@ -4,12 +4,17 @@
 Página: /dashboard (perfil admin) — frontend/src/pages/dashboard/AdminDashboard.tsx
 ```
 
-Escopo desta ficha: **só** o que o briefing da Fase 16 atribuiu a este agente —
-a cor dos três gráficos Recharts (`AreaChart`, `PieChart`/rosca,
+Esta tela foi migrada em **duas passadas**, e a ficha guarda as duas.
+
+A **primeira** (seções 1 a 6) tratou só o que o briefing daquele agente
+atribuía: a cor dos três gráficos Recharts (`AreaChart`, `PieChart`/rosca,
 `BarChart`/prioridade), o cromo à mão, e as duas listas da catraca de
-contraste nomeadas no briefing. `AdminDashboard` já tinha uma Etapa própria
-anterior (Etapa 6, citada em `ESCOPO.md`) que tratou o resto da tela — esta
-ficha não reabre nem reaudita aquele trabalho.
+contraste. Ela deixou de fora 57 classes de paleta crua e 12 `<svg>` soltos,
+por uma divergência de escopo entre os prompts de dois agentes.
+
+A **segunda** (seções 7 a 13, de 09/09/2026) fecha exatamente esse resto.
+Os números da seção 4 são os de antes dela; a contagem válida hoje está na
+**seção 10**.
 
 ---
 
@@ -36,30 +41,35 @@ FUNCIONALIDADE (§29 do prompt mestre)
     `--text-muted`, `--on-tint-*`) resolvem por tema sozinhos no CSS. Não há
     mais como o cromo do gráfico e o tema divergirem.
 [ ] nenhum campo depende do placeholder — não se aplica (sem formulário).
-[ ] toda barra desenhada tem papel declarado (`progressbar`/`meter`) — NÃO
-    verificado nesta passagem: a tela não tem `role=` nem `aria-*` em lugar
-    nenhum (zero ocorrências), incluindo as barras de categoria, SLA e
-    `StatusBar`. Pré-existente, fora do escopo de cor desta fase — contado
-    abaixo, não corrigido.
+[x] toda barra desenhada tem papel declarado (`progressbar`/`meter`) — FEITO
+    na segunda passada: categoria, conformidade de SLA por prioridade e a
+    barra da linha de cada técnico declaram `role="progressbar"` com
+    `aria-valuenow`/`min`/`max` e nome. Fica de fora a faixa da `StatusBar`,
+    que é distribuição empilhada e não progresso — ver seção 9.
 
 ACRESCENTADOS PELAS DECISÕES REGISTRADAS
 [ ] estado interativo (visual = árvore) — não reverificado nesta passagem;
     nenhum estado novo foi introduzido.
-[ ] nenhuma ação só por mouse — NÃO verificado como aprovação: há um
-    `<tr onClick>` (linha ~578, filtro por técnico) sem `tabIndex` nem
-    `onKeyDown`. Pré-existente, fora do escopo de cor — contado abaixo.
-[x] nenhuma classe `text-slate-*` sem `dark:` correspondente — não mexi em
-    nenhuma; as que restam já tinham par (`text-slate-700 dark:text-slate-200`
-    etc.), conferido por leitura.
-[x] nenhuma cor fora do sistema — ZERADO para os dois alvos que a varredura
-    mede nesta tela (pares de contraste e cor cheia semântica como texto).
-    Continua havendo paleta crua do Tailwind fora desses dois alvos — contada
-    abaixo, não é o que a varredura mede, e está fora do escopo desta fase.
+[ ] nenhuma ação só por mouse — CONTINUA reprovando: o `<tr onClick>` do
+    filtro por técnico segue sem `tabIndex` nem `onKeyDown`. Defeito de
+    produto, não se conserta aqui. A segunda passada deu à linha um NOME
+    acessível que diz o que o clique faz (seção 9) — o que não é a mesma
+    coisa que dar-lhe teclado.
+[x] nenhuma classe `text-slate-*` sem `dark:` correspondente — na segunda
+    passada não sobrou `text-slate-*` NENHUMA, com ou sem par. Duas das que
+    havia estavam abaixo do piso de contraste e a varredura não as via
+    (seção 8).
+[x] nenhuma cor fora do sistema — ZERADO por inteiro depois da segunda
+    passada: os dois alvos da varredura (pares de contraste e cor cheia
+    semântica como texto) e também as 57 classes de paleta crua que ela não
+    mede. Sobra uma ocorrência dentro de um comentário — ver seção 10.
 [ ] `Alert` com `live={false}` — não se aplica (o `Alert` de erro já existia
     e não foi tocado).
 [ ] foco alinhado ao outline do pacote — não reverificado.
 [x] nenhum primitivo reinventado — a cor não usa mapa local nenhum: vem de
-    `lib/grafico.ts`, `lib/status.ts` (E18) e `lib/prioridade.ts` (E17).
+    `lib/grafico.ts`, `lib/status.ts` (E18) e `lib/prioridade.ts` (E17). Na
+    segunda passada, os 12 ícones passaram a vir de `Icon`/`ICON_PATHS`, sem
+    nenhum traçado novo e sem tabela local.
 [x] a catraca desceu — as duas listas nomeadas no briefing foram a zero
     (números abaixo).
 ```
@@ -152,7 +162,11 @@ lê:
 
 ---
 
-## 4. A contagem do que resta à mão
+## 4. A contagem do que resta à mão (números da PRIMEIRA passada)
+
+> Superada pela **seção 10**. Fica como registro do que a divergência de
+> escopo tinha deixado para trás.
+
 
 Contar, não julgar — um número maior que zero pede olhar, não é
 necessariamente pendência desta fase:
@@ -223,3 +237,264 @@ já existiam antes da Etapa 6 sem terem sido corrigidos nela.
 
 `npx tsc --noEmit -p tsconfig.app.json` e `npx eslint` não relatam nada para
 `AdminDashboard.tsx` nem para o teste novo.
+
+---
+
+# Segunda passada — 09/09/2026
+
+A primeira passada (commit `cbf8990`) migrou a **cor dos gráficos** e parou
+aí, por uma divergência de escopo do prompt: o de um agente pedia a tela
+inteira, o do outro só os gráficos. Ficaram de fora **57** classes de paleta
+crua do Tailwind (fora de comentário) e **12** `<svg>` soltos, contados na
+seção 4 acima. Esta passada fecha os dois, mais a decisão D9.1 sobre a
+estrela sólida.
+
+Tudo o que a seção 4 contava agora está em zero, com uma exceção que segue
+contada e não corrigida: o `<tr onClick>` sem teclado, que é defeito de
+produto.
+
+---
+
+## 7. Os 12 `<svg>` soltos
+
+Casados pelo traçado `d`, caractere a caractere, contra `ICON_PATHS` em
+`components/ui/Icon.tsx`. **Dez** bateram exatamente e não precisaram de
+nada novo:
+
+| onde | virou |
+|---|---|
+| `KpiCard` "Total de tickets" | `Icon name="ticket"` |
+| `KpiCard` "Abertos" | `Icon name="inbox"` (do pacote desde a E21) |
+| `KpiCard` "Em andamento" | `Icon name="refresh"` |
+| `KpiCard` "Aguardando" | `Icon name="clock"` |
+| `KpiCard` "Resolvidos" | `Icon name="check"` |
+| `KpiCard` "CSAT médio" | `Icon name="star"` (o contorno) |
+| `KpiCard` "Tempo médio resolução" | `Icon name="chart"` |
+| `KpiCard` "SLA Resposta violado" | `Icon name="clock"` |
+| intervalo personalizado | `Icon name="calendar"` |
+
+**Dois** não bateram caractere a caractere, e são o mesmo significado
+desenhado de outro jeito — o triângulo de aviso dos cartões "SLA violado" e
+"SLA Resolução violado":
+
+```
+tela    M12 9v2m0 4h.01m-6.938 4h13.856c1.54 0 2.502-1.667 1.732-3L13.732 4…
+pacote  M12 9v2m0 4h.01M10.29 3.86L1.82 18a2 2 0 001.71 3h16.94a2 2 0 001.71-3…
+```
+
+Unificados em `warning`, que é exatamente o que a E21 fez com dez casos
+assim (um "certo" sem círculo, outra lupa, outro aviso). Nenhum ícone novo
+foi criado, e nada fora de `AdminDashboard.tsx` foi escrito.
+
+### O décimo segundo: a estrela sólida, e a decisão D9.1
+
+O `<svg>` da média de satisfação por técnico era de **outra família**:
+
+```jsx
+<svg className="w-3.5 h-3.5 text-amber-400" viewBox="0 0 20 20" fill="currentColor">
+```
+
+`viewBox` de 20 e preenchimento cheio, contra os 24×24 `fill="none"
+stroke="currentColor"` do `Icon`. A E21 **barrou** a troca automática — e
+barrou pelo motivo certo: `ICON_PATHS` é mapa de texto, todo texto cabe, e
+nem `tsc` nem teste de componente acusam a escala errada.
+
+O operador decidiu (D9.1) no sentido inverso do que a E21 sugeria:
+
+> **Ícone é só contorno.** A estrela preenchida vive dentro do `Rating` do
+> pacote. Se um lugar precisar de estrela **como ícone**, é o contorno 24×24
+> que já está no `ICON_PATHS`.
+
+Então este caso virou `Icon name="star"`, e **a aparência muda**: a estrela
+deixa de ser preenchida e passa a ser de traço. Mudança **prescrita**, não
+decidida aqui — registrada tanto neste arquivo quanto no ponto de uso.
+
+O `Rating` do pacote **não** foi portado, e a razão está verificada: ele é
+de **cinco** estrelas e a pesquisa do HelpHS é de **1 a 10 com rótulo por
+nota**. São instrumentos diferentes; portá-lo seria forçar outra escala
+sobre um dado que não a tem.
+
+O `text-amber-600 dark:text-amber-400` do número ao lado e o
+`text-amber-400` da própria estrela saíram junto, para `text-on-tint-warning`.
+
+---
+
+## 8. As 57 classes de paleta crua
+
+Zero fora de comentário. O mapeamento não foi por semelhança de nome — foi
+pelo **pixel que o D5 realmente pinta**. O desvio D5 (em `index.css`, vale
+só no tema claro) **inverte** a escada:
+
+```
+html:not(.dark) .text-slate-100 → slate-900     .text-slate-400 → slate-600
+html:not(.dark) .text-slate-200 → slate-800     .text-slate-500 → slate-500
+html:not(.dark) .text-slate-300 → slate-700     .text-slate-600 → slate-400
+```
+
+| classe crua | ×  | token | por quê |
+|---|---:|---|---|
+| `text-slate-700 dark:text-slate-200` | 10 | `text-conteudo` | `--text-body` é slate-800/slate-200 |
+| `text-slate-500` | 6 | `text-conteudo-muted` | ver nota do colapso, abaixo |
+| `text-slate-400` | 8 | `text-conteudo-muted` | **1:1 exato**: com o D5 é slate-600 no claro e slate-400 no escuro, que é `--text-muted` nos dois |
+| `text-slate-600 dark:text-slate-300` | 3 | `text-conteudo-muted` | ver "o que ficou melhor", abaixo |
+| `text-slate-900 dark:text-slate-100` | 1 | `text-conteudo-heading` | **1:1 exato** |
+| `text-slate-100` (h1 "Dashboard") | 1 | `text-conteudo-heading` | ver "o que ficou melhor", abaixo |
+| `border-slate-100 dark:border-borda/60` | 4 | `border-borda-muted` | `--border-muted` é slate-100 no claro, o mesmo valor cravado |
+| `divide-slate-50 dark:divide-borda/30` | 1 | `divide-borda-muted` | o degrau mais suave que o pacote tem |
+| `hover:bg-slate-50 dark:hover:bg-surface-elevated` | 1 | `hover:bg-surface-elevated` | o token já é branco-acinzentado no claro |
+| `text-emerald-600 dark:text-emerald-400` | 1 | `text-on-tint-success` | regra 2: cor cheia como texto reprova |
+| `text-sky-600 dark:text-sky-400` | 1 | `text-on-tint-info` | idem |
+| `text-amber-600 dark:text-amber-400` + `text-amber-400` | 2 | `text-on-tint-warning` | idem |
+
+### Dois casos em que a troca CONSERTOU contraste, e não só nome
+
+Os dois estavam abaixo do piso e a varredura não os via — ela pareia cor de
+texto e cor de fundo **dentro do mesmo literal de classe**, e nenhum destes
+dois elementos declara fundo no mesmo literal (herdam de um ancestral):
+
+1. **`text-slate-600 dark:text-slate-300`** (nome da categoria, "Atribuídos"
+   e "Tempo médio" da tabela de equipe). No tema claro o D5 pinta isso de
+   **slate-400**, que sobre `--surface` branca dá **2,85:1**. Agora é
+   `--text-muted`: **7,58:1**.
+2. **`text-slate-100` no `<h1>` "Dashboard"**, sem par `dark:` nenhum. Ele é
+   legível hoje **só** porque o D5 o repinta de slate-900 no claro — sem o
+   desvio, é texto quase branco sobre superfície branca. Como
+   `--text-heading` (slate-900/slate-100), o pixel é o mesmo nos dois temas
+   por token, e não por remendo de fase.
+
+### O que se perdeu: dois degraus de cinza colapsaram num só
+
+`text-slate-400` e `text-slate-500` viraram os dois `text-conteudo-muted`.
+Antes eles diferiam (slate-600 vs slate-500 no claro; slate-400 vs slate-500
+no escuro) e marcavam uma hierarquia fraca entre "rótulo secundário" e
+"número entre parênteses".
+
+A escada de texto do pacote tem quatro degraus, e o degrau abaixo do `muted`
+— `--text-faint` — dá **3,07:1** sobre `--surface` no tema claro, abaixo do
+piso de texto (e a própria regra 4 do briefing já registra que ele reprova
+sobre `--surface-elevated`, com 2,34:1). Escurecer é o único lado seguro. O
+resultado é uma tela com **menos** variação de cinza do que tinha; é perda
+decorativa, e nenhuma informação dependia da diferença.
+
+---
+
+## 9. Nome acessível e papel — o que deu para fazer sem redesenhar
+
+O `<tr onClick>` **não** foi consertado: dar teclado a ele é redesenhar o
+controle, e o defeito é de produto, já registrado. O que dava para fazer sem
+tocar no desenho foi feito:
+
+- **A linha da tabela de equipe passou a ter nome.** Antes ela se anunciava
+  pela colagem das sete células ("Ana Silva 5 3 2 80% 4.0h 9.0 (2)") e não
+  dizia em lugar nenhum que era clicável nem o que o clique faria. Agora o
+  `aria-label` diz, e acompanha o estado: *"Ana Silva — clique para filtrar o
+  painel por este técnico"* / *"Ana Silva — filtro ativo, clique para
+  remover"*. **Isso não conserta o acesso por teclado** — quem navega por
+  teclado continua sem alcançar a linha.
+- **As barras desenhadas ganharam papel** (`role="progressbar"`,
+  `aria-valuenow`/`min`/`max` e `aria-label`): as de categoria, as de
+  conformidade de SLA por prioridade e a da linha de cada técnico. São **4**
+  no cenário do teste. Zero mudança visual. Isto fecha o item
+  "toda barra desenhada tem papel declarado" da §29, que a primeira passada
+  deixou em `[ ]`.
+
+Continua **sem** papel a faixa da `StatusBar` (a barra empilhada de
+distribuição). Ela não é uma barra de progresso, e a legenda logo abaixo já
+lista nome e valor de cada bloco em texto — o desenho é redundante, e que
+papel dar a ele (`img` com resumo, ou `aria-hidden`) é decisão de desenho.
+Vai no relato, não foi decidida aqui.
+
+---
+
+## 10. A contagem, revisada
+
+| medida | 1ª passada | agora |
+|---|---:|---:|
+| classes de paleta crua do Tailwind, fora de comentário | 57 | **0** |
+| `<svg>` soltos | 12 | **0** |
+| hexadecimais cravados | 0 | 0 |
+| `theme === "dark" ? A : B` | 0 | 0 |
+| mapas locais de cor | 0 | 0 |
+| linhas da `varredura-contraste.mjs` para esta tela | 0 | **0** |
+| barras desenhadas sem papel declarado | 4 | **1** (a faixa da `StatusBar`) |
+| controles alcançáveis só por mouse | 1 | **1** (o `<tr onClick>`) |
+| casos em `AdminDashboard.test.tsx` | 5 | **10** |
+
+Sobra **uma** ocorrência de paleta crua no arquivo, `bg-emerald-500` na
+linha 82 — **dentro de um comentário**, o que explica de qual classe
+`slaBg()` saiu. A varredura ignora comentário de propósito (o `--catraca`
+chegou a contar a explicação do conserto como se fosse o defeito, e isso
+cria pressão para não explicar o que foi removido). Fica.
+
+---
+
+## 11. Testes
+
+Cinco casos **acrescentados**, os cinco antigos intocados. Nenhum deles lê
+classe: o jsdom não aplica CSS, então afirmação sobre classe passa com o
+elemento invisível e reprova com ele visível. O que estes leem é o que
+sobrevive sem CSS — o traçado do desenho, a escala, o papel declarado e o
+nome acessível.
+
+| caso | mutação que o matou |
+|---|---|
+| a estrela do CSAT é o contorno do pacote | `name="star"` → `name="check"` na linha do técnico |
+| todo ícone desenha na escala do pacote | devolve o `<svg>` sólido `viewBox="0 0 20 20"` ao cartão de CSAT |
+| o calendário do intervalo personalizado também | `name="calendar"` → `name="clock"` |
+| a linha do técnico diz o que o clique faz | apaga o `aria-label` da `<tr>` |
+| cada barra declara papel e valor | apaga o `role="progressbar"` das barras de SLA |
+
+**Controle antes da primeira mutação**: a suíte rodou sem mutação nenhuma e
+passou (10 de 10) — sem isso, um roteiro que não executa o vitest lê "não
+falhou" como "o mutante sobreviveu". O vitest foi chamado por
+`process.execPath` + `node_modules/vitest/vitest.mjs`, nunca por `npx.cmd`.
+
+**5 de 5 mutações morreram**, nenhuma com falha colateral (cada mutação
+derrubou só o seu caso — isolamento limpo). A restauração grava, **relê para
+conferir** e repete até oito vezes; a igualdade byte a byte com o original
+foi confirmada no fim.
+
+`npx tsc --noEmit -p tsconfig.app.json` e `npx eslint` não relatam nada para
+`AdminDashboard.tsx` nem para o teste.
+
+---
+
+## 12. O que NÃO foi feito nesta passada, e por quê
+
+- **O `<tr onClick>` continua sem teclado.** Defeito de produto já
+  registrado; consertá-lo é redesenhar o controle.
+- **A faixa da `StatusBar` continua sem papel declarado** — que papel dar a
+  uma barra empilhada de distribuição cuja legenda já está escrita embaixo é
+  decisão de desenho.
+- **A cor do bloco "Aguardando"** continua sendo o slot de `awaiting_client`,
+  pela fusão que o backend faz em `tickets.awaiting`. Inalterado desde a
+  primeira passada; segue no relato ao operador.
+- **Nada fora de `AdminDashboard.tsx` e do seu teste foi escrito.** Nenhum
+  ícone novo entrou no pacote, nenhum token novo foi criado, nenhum
+  `ICON_PATHS` local nasceu.
+- **Nenhuma captura de tela.** A verificação foi por leitura, `tsc`,
+  `eslint`, o teste e a varredura — sem sessão de navegador nesta passagem.
+  A mudança da estrela (preenchida → contorno) e o colapso dos dois degraus
+  de cinza são visuais e **não** foram vistos em pixel.
+
+---
+
+## 13. Colisão na árvore compartilhada, durante esta passada
+
+Registrado porque muda a leitura de qualquer `git diff` desta tela.
+
+Enquanto esta passada corria, **outra sessão editou o mesmo arquivo**: a
+decisão **D9.2** (o `FilterSelect` se parte em `Select` nativo para lista
+curta e `Selector variant="filter"` para lista longa) chegou em
+`AdminDashboard.tsx` às 08:13, sem commit. O primeiro roteiro desta passada
+falhou por isso — a linha de `import` que ele esperava já não existia — e,
+como a gravação só acontece no fim, **nada foi escrito pela metade**.
+
+O trabalho da D9.2 foi **preservado inteiro**; esta passada foi refeita
+sobre o arquivo já com ele. Os dois conjuntos de mudança são ortogonais
+(controles de filtro de um lado, classes de cor e ícones do outro) e o
+`git diff` desta tela hoje contém **os dois**.
+
+Um efeito colateral bom: o `<select>` nativo que a D9.2 trouxe é o que
+permitiu ao novo caso do calendário alcançar o ramo `periodKey === "custom"`,
+que nenhum teste alcançava.

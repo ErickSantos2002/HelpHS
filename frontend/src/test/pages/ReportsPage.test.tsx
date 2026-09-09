@@ -1,4 +1,5 @@
 import { render, screen, waitFor, within } from "@testing-library/react";
+import userEvent from "@testing-library/user-event";
 import { describe, expect, it, vi } from "vitest";
 
 /**
@@ -285,6 +286,101 @@ describe("ReportsPage — as séries temporais", () => {
 
     expect(new Set(tracos).size).toBe(1);
     expect(tracos[0]).toBe("var(--chart-1)");
+  });
+});
+
+describe("ReportsPage — os filtros da barra", () => {
+  /**
+   * O defeito que a D9.2 fecha: o `FilterSelect` não repassava `label`, e os
+   * três filtros desta barra se anunciavam pelo VALOR escolhido — "Últimos 30
+   * dias", "Hardware", "Alta" — sem dizer de que filtro cada um era. São três
+   * `<select>` nativos porque as três listas são fixas no código (cinco
+   * períodos, oito categorias, quatro prioridades) e nenhuma cresce com o
+   * banco.
+   */
+  it("os três filtros têm nome próprio, e não se anunciam pelo valor", async () => {
+    await montar();
+
+    expect(screen.getByRole("combobox", { name: "Período" })).toBeInTheDocument();
+    expect(
+      screen.getByRole("combobox", { name: "Categoria" }),
+    ).toBeInTheDocument();
+    expect(
+      screen.getByRole("combobox", { name: "Prioridade" }),
+    ).toBeInTheDocument();
+  });
+
+  it("o período não oferece linha vazia: escolher um é obrigatório", async () => {
+    // A linha de limpar do `FilterSelect` devolvia `""`, que `Number(period)
+    // || 30` traduzia de volta para trinta dias enquanto o gatilho anunciava
+    // "Período" — a tela mostrava um número e dizia outro.
+    await montar();
+
+    const rotulos = within(screen.getByRole("combobox", { name: "Período" }))
+      .getAllByRole("option")
+      .map((o) => o.textContent);
+    expect(rotulos).toEqual([
+      "Últimos 7 dias",
+      "Últimos 14 dias",
+      "Últimos 30 dias",
+      "Últimos 90 dias",
+      "Personalizado",
+    ]);
+  });
+
+  it("o seletor de técnico é o de LISTA LONGA, e leva rótulo mais valor no nome", async () => {
+    // Os técnicos vêm da rede e crescem com a equipe: pela D9.2 este é o
+    // `Selector variant="filter"`, e não o `<select>` nativo. O nome acessível
+    // dele soma o rótulo ao valor visível — "Técnico" mais o que o gatilho
+    // mostra —, e é por isso que ele NÃO se lê por `combobox`.
+    //
+    // O "Ver detalhes de:" ao lado é texto solto e nunca foi `<label>` de
+    // nada: sem o `label` do `Selector`, este controle não tinha nome nenhum.
+    const user = userEvent.setup();
+    await montar();
+
+    // A lista de técnicos só é buscada ao entrar na aba, e `montar` já deixou
+    // o dublê devolvendo lista vazia — por isso a troca vem DEPOIS dele.
+    vi.mocked(reportService.getTechnicianListReport).mockResolvedValue({
+      period_days: 30,
+      technicians: [
+        {
+          technician_id: "t1",
+          technician_name: "Ana Silva",
+          total_tickets: 3,
+          resolved_tickets: 2,
+          avg_resolution_hours: 4,
+          avg_rating: 4.5,
+        },
+      ],
+    } as never);
+
+    await user.click(screen.getByRole("button", { name: "Por técnico" }));
+
+    expect(
+      await screen.findByRole("button", {
+        name: "Técnico Selecione um técnico",
+      }),
+    ).toBeInTheDocument();
+  });
+
+  it("categoria e prioridade oferecem, sim, a linha de «todas»", async () => {
+    // Aqui o vazio SIGNIFICA algo — "todas" — e é o estado inicial dos dois.
+    await montar();
+
+    expect(screen.getByRole("combobox", { name: "Categoria" })).toHaveValue("");
+    expect(
+      within(screen.getByRole("combobox", { name: "Categoria" })).getByRole(
+        "option",
+        { name: "Todas as categorias" },
+      ),
+    ).toBeInTheDocument();
+    expect(
+      within(screen.getByRole("combobox", { name: "Prioridade" })).getByRole(
+        "option",
+        { name: "Todas as prioridades" },
+      ),
+    ).toBeInTheDocument();
   });
 });
 

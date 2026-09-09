@@ -1,4 +1,10 @@
-import { render, screen, waitFor, within } from "@testing-library/react";
+import {
+  fireEvent,
+  render,
+  screen,
+  waitFor,
+  within,
+} from "@testing-library/react";
 import { describe, expect, it, vi } from "vitest";
 
 vi.mock("../../contexts/AuthContext", () => ({
@@ -133,12 +139,13 @@ async function montar() {
   vi.mocked(reportService.getTechnicianDetailReport).mockResolvedValue(DETAIL as never);
   configurarTickets();
 
-  render(
+  const r = render(
     <MemoryRouter>
       <TechnicianDashboard />
     </MemoryRouter>,
   );
   await waitFor(() => expect(screen.getByText("Dashboard")).toBeInTheDocument());
+  return r;
 }
 
 describe("TechnicianDashboard", () => {
@@ -146,6 +153,55 @@ describe("TechnicianDashboard", () => {
     await montar();
     expect(screen.getByText("Ana")).toBeInTheDocument();
     expect(screen.queryByText("Ana Silva")).not.toBeInTheDocument();
+  });
+
+  it("o filtro de período tem nome próprio, e não se anuncia pelo valor", async () => {
+    // O defeito que a D9.2 fecha: o `FilterSelect` não repassava `label`, e o
+    // único filtro do cabeçalho se anunciava "Este Mês" — o valor, não o
+    // filtro. É `<select>` nativo porque os oito períodos são fixos no código.
+    await montar();
+
+    expect(screen.getByRole("combobox", { name: "Período" })).toBeInTheDocument();
+  });
+
+  it("o período não oferece linha vazia — e isso é o que impede a queda", async () => {
+    // A linha de limpar do `FilterSelect` devolvia `""`, e
+    // `PERIOD_OPTIONS.find((p) => p.key === "")!.days` lia `days` de
+    // `undefined`: a tela caía. O `<select>` nativo não tem essa linha.
+    await montar();
+
+    const rotulos = within(screen.getByRole("combobox", { name: "Período" }))
+      .getAllByRole("option")
+      .map((o) => o.textContent);
+    expect(rotulos).toEqual([
+      "Hoje",
+      "Ontem",
+      "Esta Semana",
+      "Este Mês",
+      "Mês Passado",
+      "Este Trimestre",
+      "Este Ano",
+      "Personalizado",
+    ]);
+  });
+
+  it("escolher «Personalizado» abre as duas pontas do intervalo", async () => {
+    const { container } = await montar();
+
+    // Antes: nenhuma. É o "antes" que faz o "depois" significar algo.
+    expect(container.querySelectorAll('input[type="date"]')).toHaveLength(0);
+
+    // `fireEvent.change` e não `userEvent`: a troca de período dispara três
+    // buscas, e o `waitFor` abaixo é quem espera o novo desenho. Com
+    // `userEvent` o caso ficava à mercê da carga da máquina — a árvore é
+    // compartilhada com outras sessões.
+    fireEvent.change(screen.getByRole("combobox", { name: "Período" }), {
+      target: { value: "custom" },
+    });
+
+    await waitFor(() =>
+      expect(container.querySelectorAll('input[type="date"]')).toHaveLength(2),
+    );
   });
 
   it("cada lista mostra só os tickets que lhe cabem, com a contagem certa", async () => {

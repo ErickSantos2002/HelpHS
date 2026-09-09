@@ -3,7 +3,7 @@ import { useNavigate } from "react-router-dom";
 import {
   Area, AreaChart, ResponsiveContainer, Tooltip, XAxis, YAxis,
 } from "recharts";
-import { Alert, FilterSelect, Icon, KpiCard, Spinner, StatusBadge } from "../../components/ui";
+import { Alert, Icon, KpiCard, Select, Spinner, StatusBadge } from "../../components/ui";
 import { cn } from "../../lib/utils";
 import { CROMO, COR_SERIE_TEMPORAL, ENVOLTORIO_DICA, ESTILO_DICA } from "../../lib/grafico";
 import { PRIORIDADE } from "../../lib/prioridade";
@@ -133,9 +133,19 @@ export default function TechnicianDashboard() {
   const [periodKey, setPeriodKey] = useState<PeriodKey>("mes");
   const [customDates, setCustomDates] = useState(getDefaultCustomDates);
 
+  // O recuo existe porque `find` devolve `undefined` para chave desconhecida,
+  // e o `!` que estava aqui lia `days` dela — a tela quebrava inteira. O
+  // caminho conhecido era a opção de limpar do filtro antigo, que devolvia
+  // `""`; ela saiu na D9.2, mas o estouro nunca dependeu dela.
+  //
+  // Recuo para 30 e não para o primeiro da lista: 30 é o padrão declarado no
+  // backend (`period: Annotated[int, Query(ge=1, le=365)] = 30`), ou seja, o
+  // que o servidor faria sozinho se o parâmetro não fosse mandado. E é por
+  // esse mesmo `ge=1` que **não existe "todo o período"**: a opção de limpar
+  // não tem para onde apontar, e por isso saiu em vez de virar estado válido.
   const activePeriod = periodKey === "custom"
     ? customDays(customDates.start, customDates.end)
-    : PERIOD_OPTIONS.find((p) => p.key === periodKey)!.days;
+    : (PERIOD_OPTIONS.find((p) => p.key === periodKey)?.days ?? 30);
 
   const periodLabel = PERIOD_OPTIONS.find((p) => p.key === periodKey)?.label ?? "";
 
@@ -213,11 +223,25 @@ export default function TechnicianDashboard() {
 
         <div className="flex flex-wrap items-center justify-center sm:justify-end gap-2">
           {/* Period filter */}
-          <FilterSelect
+          {/* D9.2 — oito períodos fixos no código: lista curta e conhecida,
+              logo `<select>` nativo.
+
+              Sem `placeholder`, e isso conserta uma queda. A linha de limpar do
+              `FilterSelect` devolvia `""`, e logo abaixo
+              `PERIOD_OPTIONS.find((p) => p.key === periodKey)!.days` lia `days`
+              de `undefined`. O `<select>` nativo não tem linha de limpar, e o
+              período passa a ser o que sempre foi: uma escolha obrigatória.
+
+              O rótulo é `sr-only`: sem ele o filtro se anunciava "Este Mês". */}
+          <span id="rotulo-filtro-periodo" className="sr-only">
+            Período
+          </span>
+          <Select
+            id="filtro-periodo"
+            aria-labelledby="rotulo-filtro-periodo"
             value={periodKey}
-            onChange={(v) => setPeriodKey(v as PeriodKey)}
+            onChange={(e) => setPeriodKey(e.target.value as PeriodKey)}
             options={PERIOD_OPTIONS.map((p) => ({ value: p.key, label: p.label }))}
-            placeholder="Período"
           />
 
           {/* Custom date range */}

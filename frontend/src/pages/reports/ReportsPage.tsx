@@ -14,10 +14,11 @@ import {
   YAxis,
 } from "recharts";
 import {
-  FilterSelect,
   Icon,
   Pagination,
   PriorityBadge,
+  Select,
+  Selector,
   Spinner,
   Table,
   TableBody,
@@ -1150,7 +1151,25 @@ export default function ReportsPage() {
             </div>
           )}
 
-          <FilterSelect value={period} onChange={setPeriod} options={PERIOD_OPTIONS} placeholder="Período" />
+          {/* D9.2 — cinco períodos fixos no código: lista curta e conhecida,
+              logo `<select>` nativo. Sem `placeholder`: a opção vazia que ele
+              desenha devolveria `""`, que `Number(period) || 30` traduz de volta
+              para trinta dias enquanto o gatilho anuncia "Período" — um estado
+              que mostra um número e diz outro. Escolher o período é obrigatório
+              e sempre foi.
+
+              O rótulo é `sr-only` porque a barra não tem espaço para ele: sem
+              rótulo o filtro se anunciava "Últimos 30 dias", sem dizer de quê. */}
+          <span id="rotulo-filtro-periodo" className="sr-only">
+            Período
+          </span>
+          <Select
+            id="filtro-periodo"
+            aria-labelledby="rotulo-filtro-periodo"
+            value={period}
+            onChange={(e) => setPeriod(e.target.value)}
+            options={PERIOD_OPTIONS}
+          />
 
           {period === "personalizado" && (
             <div className="flex h-9 items-center gap-1.5 rounded-lg border border-borda/60 bg-surface-elevated px-3 text-sm">
@@ -1168,8 +1187,33 @@ export default function ReportsPage() {
           {/* Filtros de categoria e prioridade (visão geral apenas) */}
           {(isAdmin && tab === "global") || isTechnician ? (
             <>
-              <FilterSelect value={category} onChange={setCategory} options={CATEGORY_OPTIONS} placeholder="Todas as categorias" />
-              <FilterSelect value={priority} onChange={setPriority} options={PRIORITY_OPTIONS} placeholder="Todas as prioridades" />
+              {/* D9.2 — oito categorias e quatro prioridades, ambas vindas de
+                  `lib/categoria.ts` e `lib/prioridade.ts` e nenhuma da rede:
+                  listas curtas e conhecidas, logo `<select>` nativo. Aqui o
+                  `placeholder` FICA — o vazio significa "todas", e é o estado
+                  inicial dos dois. */}
+              <span id="rotulo-filtro-categoria" className="sr-only">
+                Categoria
+              </span>
+              <Select
+                id="filtro-categoria"
+                aria-labelledby="rotulo-filtro-categoria"
+                value={category}
+                onChange={(e) => setCategory(e.target.value)}
+                options={CATEGORY_OPTIONS}
+                placeholder="Todas as categorias"
+              />
+              <span id="rotulo-filtro-prioridade" className="sr-only">
+                Prioridade
+              </span>
+              <Select
+                id="filtro-prioridade"
+                aria-labelledby="rotulo-filtro-prioridade"
+                value={priority}
+                onChange={(e) => setPriority(e.target.value)}
+                options={PRIORITY_OPTIONS}
+                placeholder="Todas as prioridades"
+              />
             </>
           ) : null}
 
@@ -1193,7 +1237,15 @@ export default function ReportsPage() {
           {techList && techList.technicians.length > 0 && (
             <div className="flex items-center gap-3 rounded-xl border border-borda/40 bg-surface px-4 py-3">
               <span className="text-xs font-medium text-conteudo-muted shrink-0">Ver detalhes de:</span>
-              <FilterSelect
+              {/* D9.2 — lista LONGA: os técnicos vêm da rede e crescem com a
+                  equipe, então o controle é o `Selector variant="filter"`.
+
+                  O "Ver detalhes de:" ao lado é texto solto, nunca foi
+                  `<label>` de nada; o `label` do `Selector` é que dá nome ao
+                  controle. */}
+              <Selector
+                variant="filter"
+                label="Técnico"
                 value={selectedTechId ?? ""}
                 onChange={(v) => v ? handleSelectTechnician(v) : (setSelectedTechId(undefined), setTechDetail(null))}
                 options={techList.technicians.map((t) => ({ value: t.technician_id, label: t.technician_name }))}

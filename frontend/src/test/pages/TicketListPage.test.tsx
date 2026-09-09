@@ -1,4 +1,5 @@
-import { render, screen, waitFor } from "@testing-library/react";
+import { render, screen, waitFor, within } from "@testing-library/react";
+import userEvent from "@testing-library/user-event";
 import { describe, expect, it, vi } from "vitest";
 
 vi.mock("../../services/ticketService", () => ({ getTickets: vi.fn() }));
@@ -24,6 +25,15 @@ import { getTickets, type Ticket } from "../../services/ticketService";
  * menu de contexto, sem destino na barra de status, e anunciado como "botão"
  * para algo que muda de página.
  */
+/**
+ * O `<select>` nativo dos filtros (D9.2) desenha TODAS as opções na árvore, o
+ * tempo todo — o painel do `FilterSelect` só existia enquanto aberto. "Alta"
+ * passa a estar em dois lugares: o selo do cartão e a opção do filtro. Os
+ * casos abaixo falam do CARTÃO, então a opção sai da busca por `ignore` — e
+ * não por `getAllByText(...)[0]`, que continuaria passando com o selo apagado.
+ */
+const FORA_DO_FILTRO = { ignore: "script, style, option" } as const;
+
 const BASE: Ticket = {
   id: "t1",
   protocol: "HS-2026-0001",
@@ -76,7 +86,9 @@ describe("TicketListPage", () => {
   it("a prioridade fala a língua do módulo", async () => {
     // Feminino, da emenda E17. O mapa daqui dizia "Alto".
     await montar();
-    expect(screen.getByText("Alta")).toBeInTheDocument();
+    expect(screen.getByText("Alta", FORA_DO_FILTRO)).toBeInTheDocument();
+    expect(screen.queryByText("Alto", FORA_DO_FILTRO)).not.toBeInTheDocument();
+    // E nem no filtro: o módulo é a fonte dos dois.
     expect(screen.queryByText("Alto")).not.toBeInTheDocument();
   });
 
@@ -84,8 +96,57 @@ describe("TicketListPage", () => {
     // Ele tinha `title` com o rótulo, e `title` não é nome acessível confiável.
     // A informação não se perdeu: o selo do rodapé mostra em texto.
     await montar();
-    const selo = screen.getByText("Alta");
-    expect(selo).toBeVisible();
+    const cartao = screen.getByRole("link", { name: /Impressora não imprime/ });
+    expect(within(cartao).getByText("Alta")).toBeVisible();
+  });
+
+  it("cada filtro tem nome próprio, e não se anuncia pelo valor escolhido", async () => {
+    // O defeito que a D9.2 fecha: o `FilterSelect` não repassava `label`, e os
+    // dois filtros desta barra se anunciavam pelo VALOR — "Alta", "Sem
+    // técnico" — sem dizer de que filtro eram.
+    await montar();
+
+    expect(
+      screen.getByRole("combobox", { name: "Prioridade" }),
+    ).toBeInTheDocument();
+    expect(
+      screen.getByRole("combobox", { name: "Atribuição" }),
+    ).toBeInTheDocument();
+  });
+
+  it("o filtro de prioridade oferece as quatro do módulo, no feminino", async () => {
+    await montar();
+
+    const filtro = screen.getByRole("combobox", { name: "Prioridade" });
+    const rotulos = within(filtro)
+      .getAllByRole("option")
+      .map((o) => o.textContent);
+    expect(rotulos).toEqual([
+      "Todas prioridades",
+      "Crítica",
+      "Alta",
+      "Média",
+      "Baixa",
+    ]);
+  });
+
+  it("escolher a prioridade filtra o quadro por ela", async () => {
+    await montar([
+      BASE,
+      { ...BASE, id: "t2", protocol: "HS-2026-0002", title: "Mouse quebrado", priority: "low" } as Ticket,
+    ]);
+
+    await userEvent.selectOptions(
+      screen.getByRole("combobox", { name: "Prioridade" }),
+      "high",
+    );
+
+    expect(
+      screen.getByRole("link", { name: /Impressora não imprime/ }),
+    ).toBeInTheDocument();
+    expect(
+      screen.queryByRole("link", { name: /Mouse quebrado/ }),
+    ).not.toBeInTheDocument();
   });
 
   it("o botão de limpar busca tem nome", async () => {

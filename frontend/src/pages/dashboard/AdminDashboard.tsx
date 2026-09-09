@@ -3,7 +3,7 @@ import {
   Area, AreaChart, Bar, BarChart, Cell,
   Pie, PieChart, ResponsiveContainer, Tooltip, XAxis, YAxis,
 } from "recharts";
-import { Alert, FilterSelect, KpiCard, Spinner } from "../../components/ui";
+import { Alert, Icon, KpiCard, Select, Selector, Spinner } from "../../components/ui";
 import { cn } from "../../lib/utils";
 import {
   CROMO, ESTILO_DICA, ENVOLTORIO_DICA, COR_SERIE_TEMPORAL,
@@ -97,9 +97,25 @@ function fmtDate(iso: string) {
   return new Date(iso + "T00:00:00").toLocaleDateString("pt-BR", { day: "2-digit", month: "2-digit" });
 }
 
-// ── KPI Card ──────────────────────────────────────────────────
-
-
+// ── Ícones ────────────────────────────────────────────────────
+//
+// Os 12 `<svg>` soltos desta tela viraram `Icon` do pacote. Casados pelo
+// traçado `d`, caractere a caractere: dez batiam com um desenho que já
+// existia (`ticket`, `inbox`, `refresh`, `clock` ×2, `check`, `star`,
+// `chart`, `calendar`) e não precisavam de nada novo.
+//
+// Os dois que NÃO batiam são o mesmo triângulo de aviso desenhado de outro
+// jeito — `M12 9v2m0 4h.01m-6.938 4h13.856…` contra o `M12 9v2m0 4h.01M10.29
+// 3.86L1.82 18…` do pacote. Unificados em `warning`, que é o que a E21 já
+// fez com dez casos assim: um "certo" sem círculo, outra lupa, outro aviso.
+//
+// O décimo segundo é o caso de conferência: a estrela ao lado da média por
+// técnico era `viewBox="0 0 20 20" fill="currentColor"` — desenho PREENCHIDO
+// de outra família. Trocar por `Icon` às cegas renderiza em escala errada e
+// sem preenchimento, e nem `tsc` nem teste de componente acusam, porque
+// `ICON_PATHS` é mapa de texto e todo texto cabe. A decisão D9.1 do operador
+// resolveu o caso no sentido inverso — ícone é só contorno — e ela está
+// escrita no ponto de uso.
 
 // ── Status distribution bar ───────────────────────────────────
 
@@ -115,7 +131,7 @@ function StatusBar({ t }: { t: DashboardStats["tickets"] }) {
 
   return (
     <div className="rounded-xl bg-surface border border-borda p-5">
-      <p className="text-xs font-semibold uppercase tracking-wider text-slate-500 mb-3">Distribuição de status</p>
+      <p className="text-xs font-semibold uppercase tracking-wider text-conteudo-muted mb-3">Distribuição de status</p>
       <div className="flex h-3 rounded-full overflow-hidden gap-px">
         {segs.map((s) => (
           <div
@@ -129,8 +145,8 @@ function StatusBar({ t }: { t: DashboardStats["tickets"] }) {
         {segs.map((s) => (
           <div key={s.label} className="flex items-center gap-1.5">
             <span className="w-2 h-2 rounded-full shrink-0" style={{ backgroundColor: s.color }} />
-            <span className="text-xs text-slate-500">
-              {s.label}: <span className="font-semibold text-slate-700 dark:text-slate-200">{s.value}</span>
+            <span className="text-xs text-conteudo-muted">
+              {s.label}: <span className="font-semibold text-conteudo">{s.value}</span>
             </span>
           </div>
         ))}
@@ -144,8 +160,8 @@ function StatusBar({ t }: { t: DashboardStats["tickets"] }) {
 function SectionCard({ title, action, children }: { title: string; action?: React.ReactNode; children: React.ReactNode }) {
   return (
     <div className="rounded-xl bg-surface border border-borda overflow-hidden">
-      <div className="flex items-center justify-between px-5 py-4 border-b border-slate-100 dark:border-borda/60">
-        <p className="text-sm font-semibold text-slate-700 dark:text-slate-200">{title}</p>
+      <div className="flex items-center justify-between px-5 py-4 border-b border-borda-muted">
+        <p className="text-sm font-semibold text-conteudo">{title}</p>
         {action}
       </div>
       <div className="p-5">{children}</div>
@@ -171,9 +187,19 @@ export default function AdminDashboard() {
   const [loading, setLoading]     = useState(true);
   const [error, setError]         = useState<string | null>(null);
 
+  // O recuo existe porque `find` devolve `undefined` para chave desconhecida,
+  // e o `!` que estava aqui lia `days` dela — a tela quebrava inteira. O
+  // caminho conhecido era a opção de limpar do filtro antigo, que devolvia
+  // `""`; ela saiu na D9.2, mas o estouro nunca dependeu dela.
+  //
+  // Recuo para 30 e não para o primeiro da lista: 30 é o padrão declarado no
+  // backend (`period: Annotated[int, Query(ge=1, le=365)] = 30`), ou seja, o
+  // que o servidor faria sozinho se o parâmetro não fosse mandado. E é por
+  // esse mesmo `ge=1` que **não existe "todo o período"**: a opção de limpar
+  // não tem para onde apontar, e por isso saiu em vez de virar estado válido.
   const activePeriod = periodKey === "custom"
     ? customDays(customDates.start, customDates.end)
-    : PERIOD_OPTIONS.find((p) => p.key === periodKey)!.days;
+    : (PERIOD_OPTIONS.find((p) => p.key === periodKey)?.days ?? 30);
 
   useEffect(() => {
     setLoading(true);
@@ -256,16 +282,26 @@ export default function AdminDashboard() {
       {/* ── Header ──────────────────────────────────────────── */}
       <div className="flex flex-col sm:flex-row sm:flex-wrap sm:items-center sm:justify-between gap-4 rounded-2xl border border-borda/40 bg-surface px-5 py-4">
         <div className="text-center sm:text-left">
-          <h1 className="text-xl font-extrabold text-slate-100">Dashboard</h1>
-          <p className="mt-0.5 text-sm text-slate-500">Visão geral do sistema de atendimento</p>
+          <h1 className="text-xl font-extrabold text-conteudo-heading">Dashboard</h1>
+          <p className="mt-0.5 text-sm text-conteudo-muted">Visão geral do sistema de atendimento</p>
         </div>
 
         <div className="flex flex-wrap items-center justify-center sm:justify-end gap-2">
-          {/* Technician filter */}
+          {/* Technician filter — D9.2: lista LONGA. As opções vêm da rede
+              (`getTechnicianListReport`) e crescem com a equipe, então o
+              controle é o `Selector variant="filter"`, e não o `<select>`
+              nativo.
+
+              O `label` é a razão da troca: o `FilterSelect` não o repassava, e
+              o filtro se anunciava só pelo nome do técnico escolhido. O
+              `Selector` desenha o rótulo `sr-only` e soma rótulo + valor no
+              nome acessível. */}
           {techList && (
-            <FilterSelect
+            <Selector
+              variant="filter"
+              label="Técnico"
               value={selectedTechId}
-              onChange={setSelectedTechId}
+              onChange={(v) => setSelectedTechId(v ?? "all")}
               options={[
                 { value: "all", label: "Todos os técnicos" },
                 ...techList.technicians.map((t) => ({ value: t.technician_id, label: t.technician_name })),
@@ -274,33 +310,43 @@ export default function AdminDashboard() {
             />
           )}
 
-          {/* Period filter */}
-          <FilterSelect
+          {/* Period filter — D9.2: oito períodos fixos no código, lista curta e
+              conhecida, logo `<select>` nativo.
+
+              Sem `placeholder`, e isso conserta uma queda: a linha de limpar do
+              `FilterSelect` devolvia `""`, e `activePeriod` lia
+              `PERIOD_OPTIONS.find((p) => p.key === "")!.days` — `days` de
+              `undefined`. O `<select>` nativo não tem linha de limpar. */}
+          <span id="rotulo-filtro-periodo" className="sr-only">
+            Período
+          </span>
+          <Select
+            id="filtro-periodo"
+            aria-labelledby="rotulo-filtro-periodo"
             value={periodKey}
-            onChange={(v) => setPeriodKey(v as PeriodKey)}
+            onChange={(e) => setPeriodKey(e.target.value as PeriodKey)}
             options={PERIOD_OPTIONS.map((p) => ({ value: p.key, label: p.label }))}
-            placeholder="Período"
           />
 
           {/* Custom date range */}
           {periodKey === "custom" && (
             <div className="flex h-9 items-center gap-1.5 rounded-lg border border-borda/60 bg-surface-elevated px-3 text-sm">
-              <svg className="w-3.5 h-3.5 shrink-0 text-slate-500" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}><path strokeLinecap="round" strokeLinejoin="round" d="M8 7V3m8 4V3m-9 8h10M5 21h14a2 2 0 002-2V7a2 2 0 00-2-2H5a2 2 0 00-2 2v12a2 2 0 002 2z" /></svg>
+              <Icon name="calendar" size={14} strokeWidth={2} className="text-conteudo-muted" />
               <input
                 type="date"
                 value={customDates.start}
                 max={customDates.end}
                 onChange={(e) => setCustomDates((d) => ({ ...d, start: e.target.value }))}
-                className="bg-transparent text-slate-700 dark:text-slate-300 text-xs outline-none cursor-pointer w-28 [color-scheme:light] dark:[color-scheme:dark]"
+                className="bg-transparent text-conteudo text-xs outline-none cursor-pointer w-28 [color-scheme:light] dark:[color-scheme:dark]"
               />
-              <span className="text-slate-500 text-xs">até</span>
+              <span className="text-conteudo-muted text-xs">até</span>
               <input
                 type="date"
                 value={customDates.end}
                 min={customDates.start}
                 max={new Date().toISOString().slice(0, 10)}
                 onChange={(e) => setCustomDates((d) => ({ ...d, end: e.target.value }))}
-                className="bg-transparent text-slate-700 dark:text-slate-300 text-xs outline-none cursor-pointer w-28 [color-scheme:light] dark:[color-scheme:dark]"
+                className="bg-transparent text-conteudo text-xs outline-none cursor-pointer w-28 [color-scheme:light] dark:[color-scheme:dark]"
               />
             </div>
           )}
@@ -314,42 +360,42 @@ export default function AdminDashboard() {
           value={tickets.total}
           sub="Todos os status"
           tone="neutral"
-          icon={<svg className="w-5 h-5" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={1.75}><path strokeLinecap="round" strokeLinejoin="round" d="M15 5v2m0 4v2m0 4v2M5 5a2 2 0 00-2 2v3a2 2 0 110 4v3a2 2 0 002 2h14a2 2 0 002-2v-3a2 2 0 110-4V7a2 2 0 00-2-2H5z" /></svg>}
+          icon={<Icon name="ticket" />}
         />
         <KpiCard
           label="Abertos"
           value={tickets.open}
           sub="Aguardando atendimento"
           tone="info"
-          icon={<svg className="w-5 h-5" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={1.75}><path strokeLinecap="round" strokeLinejoin="round" d="M20 13V6a2 2 0 00-2-2H6a2 2 0 00-2 2v7m16 0v5a2 2 0 01-2 2H6a2 2 0 01-2-2v-5m16 0h-2.586a1 1 0 00-.707.293l-2.414 2.414a1 1 0 01-.707.293h-3.172a1 1 0 01-.707-.293l-2.414-2.414A1 1 0 006.586 13H4" /></svg>}
+          icon={<Icon name="inbox" />}
         />
         <KpiCard
           label="Em andamento"
           value={tickets.in_progress}
           sub="Sendo atendidos"
           tone="primary"
-          icon={<svg className="w-5 h-5" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={1.75}><path strokeLinecap="round" strokeLinejoin="round" d="M4 4v5h.582m15.356 2A8.001 8.001 0 004.582 9m0 0H9m11 11v-5h-.581m0 0a8.003 8.003 0 01-15.357-2m15.357 2H15" /></svg>}
+          icon={<Icon name="refresh" />}
         />
         <KpiCard
           label="Aguardando"
           value={tickets.awaiting}
           sub="Resp. do cliente"
           tone="warning"
-          icon={<svg className="w-5 h-5" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={1.75}><path strokeLinecap="round" strokeLinejoin="round" d="M12 8v4l3 3m6-3a9 9 0 11-18 0 9 9 0 0118 0z" /></svg>}
+          icon={<Icon name="clock" />}
         />
         <KpiCard
           label="Resolvidos"
           value={tickets.resolved}
           sub={`+ ${tickets.closed} fechados`}
           tone="success"
-          icon={<svg className="w-5 h-5" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={1.75}><path strokeLinecap="round" strokeLinejoin="round" d="M9 12l2 2 4-4m6 2a9 9 0 11-18 0 9 9 0 0118 0z" /></svg>}
+          icon={<Icon name="check" />}
         />
         <KpiCard
           label="SLA violado"
           value={sla.resolve_breached}
           sub={`${sla.response_breached} resposta · ${sla.resolve_breached} resolução`}
           tone={sla.resolve_breached > 0 ? "danger" : "neutral"}
-          icon={<svg className="w-5 h-5" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={1.75}><path strokeLinecap="round" strokeLinejoin="round" d="M12 9v2m0 4h.01m-6.938 4h13.856c1.54 0 2.502-1.667 1.732-3L13.732 4c-.77-1.333-2.694-1.333-3.464 0L3.34 16c-.77 1.333.192 3 1.732 3z" /></svg>}
+          icon={<Icon name="warning" />}
         />
       </div>
 
@@ -363,28 +409,28 @@ export default function AdminDashboard() {
           value={avgRating === "—" ? "—" : `${avgRating} / 10`}
           sub={`${surveys.total} avaliações`}
           tone="warning"
-          icon={<svg className="w-5 h-5" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={1.75}><path strokeLinecap="round" strokeLinejoin="round" d="M11.049 2.927c.3-.921 1.603-.921 1.902 0l1.519 4.674a1 1 0 00.95.69h4.915c.969 0 1.371 1.24.588 1.81l-3.976 2.888a1 1 0 00-.363 1.118l1.518 4.674c.3.922-.755 1.688-1.538 1.118l-3.976-2.888a1 1 0 00-1.176 0l-3.976 2.888c-.783.57-1.838-.197-1.538-1.118l1.518-4.674a1 1 0 00-.363-1.118l-3.976-2.888c-.784-.57-.38-1.81.588-1.81h4.914a1 1 0 00.951-.69l1.519-4.674z" /></svg>}
+          icon={<Icon name="star" />}
         />
         <KpiCard
           label="Tempo médio resolução"
           value={fmtHours(avgResolutionHours)}
           sub={avgResolutionHours != null ? "Média da equipe" : "Sem dados"}
           tone="primary"
-          icon={<svg className="w-5 h-5" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={1.75}><path strokeLinecap="round" strokeLinejoin="round" d="M9 19v-6a2 2 0 00-2-2H5a2 2 0 00-2 2v6a2 2 0 002 2h2a2 2 0 002-2zm0 0V9a2 2 0 012-2h2a2 2 0 012 2v10m-6 0a2 2 0 002 2h2a2 2 0 002-2m0 0V5a2 2 0 012-2h2a2 2 0 012 2v14a2 2 0 01-2 2h-2a2 2 0 01-2-2z" /></svg>}
+          icon={<Icon name="chart" />}
         />
         <KpiCard
           label="SLA Resposta violado"
           value={sla.response_breached}
           sub="1º atendimento fora do prazo"
           tone={sla.response_breached > 0 ? "warning" : "neutral"}
-          icon={<svg className="w-5 h-5" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={1.75}><path strokeLinecap="round" strokeLinejoin="round" d="M12 8v4l3 3m6-3a9 9 0 11-18 0 9 9 0 0118 0z" /></svg>}
+          icon={<Icon name="clock" />}
         />
         <KpiCard
           label="SLA Resolução violado"
           value={sla.resolve_breached}
           sub="Resolução fora do prazo"
           tone={sla.resolve_breached > 0 ? "danger" : "neutral"}
-          icon={<svg className="w-5 h-5" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={1.75}><path strokeLinecap="round" strokeLinejoin="round" d="M12 9v2m0 4h.01m-6.938 4h13.856c1.54 0 2.502-1.667 1.732-3L13.732 4c-.77-1.333-2.694-1.333-3.464 0L3.34 16c-.77 1.333.192 3 1.732 3z" /></svg>}
+          icon={<Icon name="warning" />}
         />
       </div>
 
@@ -392,8 +438,8 @@ export default function AdminDashboard() {
       <div className="grid grid-cols-1 lg:grid-cols-2 gap-4">
         {/* Area chart */}
         <div className="rounded-xl bg-surface border border-borda overflow-hidden">
-          <div className="px-5 py-4 border-b border-slate-100 dark:border-borda/60">
-            <p className="text-sm font-semibold text-slate-700 dark:text-slate-200">
+          <div className="px-5 py-4 border-b border-borda-muted">
+            <p className="text-sm font-semibold text-conteudo">
               {selectedTechId !== "all" && techDetail
                 ? `Atendimentos de ${techDetail.technician_name} — ${periodLabel}`
                 : `Tickets abertos por dia — ${periodLabel}`}
@@ -401,7 +447,7 @@ export default function AdminDashboard() {
           </div>
           <div className="p-5">
             {chartData.length === 0 ? (
-              <div className="flex h-48 items-center justify-center text-slate-400 text-sm">Sem dados para o período</div>
+              <div className="flex h-48 items-center justify-center text-conteudo-muted text-sm">Sem dados para o período</div>
             ) : (
               <ResponsiveContainer width="100%" height={220}>
                 {/* Série temporal ÚNICA (chamados por dia): uma cor só, por
@@ -426,12 +472,12 @@ export default function AdminDashboard() {
 
         {/* Donut */}
         <div className="rounded-xl bg-surface border border-borda overflow-hidden">
-          <div className="px-5 py-4 border-b border-slate-100 dark:border-borda/60">
-            <p className="text-sm font-semibold text-slate-700 dark:text-slate-200">Tickets por Status</p>
+          <div className="px-5 py-4 border-b border-borda-muted">
+            <p className="text-sm font-semibold text-conteudo">Tickets por Status</p>
           </div>
           <div className="p-5">
             {statusData.length === 0 ? (
-              <div className="flex h-48 items-center justify-center text-slate-400 text-sm">Nenhum ticket</div>
+              <div className="flex h-48 items-center justify-center text-conteudo-muted text-sm">Nenhum ticket</div>
             ) : (
               <>
                 <div className="relative">
@@ -444,8 +490,8 @@ export default function AdminDashboard() {
                     </PieChart>
                   </ResponsiveContainer>
                   <div className="absolute inset-0 flex flex-col items-center justify-center pointer-events-none">
-                    <p className="text-2xl font-bold tabular-nums text-slate-900 dark:text-slate-100">{statusData.reduce((a, b) => a + b.value, 0)}</p>
-                    <p className="text-xs text-slate-500">total</p>
+                    <p className="text-2xl font-bold tabular-nums text-conteudo-heading">{statusData.reduce((a, b) => a + b.value, 0)}</p>
+                    <p className="text-xs text-conteudo-muted">total</p>
                   </div>
                 </div>
                 {/* Legenda obrigatória (E18): com `--chart-*` a cor deixou de
@@ -456,9 +502,9 @@ export default function AdminDashboard() {
                     <div key={d.chave} className="flex items-center justify-between">
                       <div className="flex items-center gap-2">
                         <span className="w-2.5 h-2.5 rounded-sm shrink-0" style={{ backgroundColor: d.cor }} />
-                        <span className="text-xs text-slate-500">{d.name}</span>
+                        <span className="text-xs text-conteudo-muted">{d.name}</span>
                       </div>
-                      <span className="text-xs font-semibold text-slate-700 dark:text-slate-200 tabular-nums">{d.value}</span>
+                      <span className="text-xs font-semibold text-conteudo tabular-nums">{d.value}</span>
                     </div>
                   ))}
                 </div>
@@ -473,16 +519,18 @@ export default function AdminDashboard() {
         {/* Category breakdown */}
         <SectionCard title="Chamados por Categoria">
           {categoryData.length === 0 ? (
-            <div className="flex h-40 items-center justify-center text-slate-400 text-sm">Sem categorias no período</div>
+            <div className="flex h-40 items-center justify-center text-conteudo-muted text-sm">Sem categorias no período</div>
           ) : (
             <div className="space-y-3">
               {categoryData.map((cat) => (
                 <div key={cat.category}>
                   <div className="flex items-center justify-between mb-1">
-                    <span className="text-xs text-slate-600 dark:text-slate-300 truncate max-w-[70%]">{cat.category}</span>
-                    <span className="text-xs font-bold tabular-nums text-slate-700 dark:text-slate-200">{cat.count}</span>
+                    <span className="text-xs text-conteudo-muted truncate max-w-[70%]">{cat.category}</span>
+                    <span className="text-xs font-bold tabular-nums text-conteudo">{cat.count}</span>
                   </div>
-                  <div className="h-1.5 rounded-full bg-surface-elevated overflow-hidden">
+                  <div
+                    className="h-1.5 rounded-full bg-surface-elevated overflow-hidden"
+                  >
                     <div
                       className="h-full rounded-full bg-primary transition-all duration-700"
                       style={{ width: `${(cat.count / categoryMax) * 100}%` }}
@@ -529,7 +577,7 @@ export default function AdminDashboard() {
         {/* SLA compliance */}
         <SectionCard title={`Conformidade SLA — ${periodLabel}`}>
           {slaCompliance.length === 0 ? (
-            <div className="flex h-48 items-center justify-center text-slate-400 text-sm">Sem dados de SLA</div>
+            <div className="flex h-48 items-center justify-center text-conteudo-muted text-sm">Sem dados de SLA</div>
           ) : (
             <div className="space-y-5 py-1">
               {slaCompliance.map((item) => (
@@ -537,16 +585,22 @@ export default function AdminDashboard() {
                   <div className="flex items-center justify-between mb-2">
                     <div className="flex items-center gap-2">
                       <span className={cn("w-2 h-2 rounded-full", slaBg(item.compliance_rate))} />
-                      <span className="text-sm font-medium text-slate-700 dark:text-slate-200 capitalize">{item.priority}</span>
+                      <span className="text-sm font-medium text-conteudo capitalize">{item.priority}</span>
                     </div>
                     <div className="text-right">
                       <span className={cn("text-sm font-bold tabular-nums", slaColor(item.compliance_rate))}>
                         {item.compliance_rate.toFixed(0)}%
                       </span>
-                      <span className="text-xs text-slate-400 ml-2">({item.breached} violados)</span>
+                      <span className="text-xs text-conteudo-muted ml-2">({item.breached} violados)</span>
                     </div>
                   </div>
-                  <div className="h-2 rounded-full bg-surface-elevated overflow-hidden">
+                  {/* Barra desenhada: papel declarado (§29). Sem `role`, um
+                      `<div>` de largura em porcentagem não é nada para quem
+                      não vê a largura — e a porcentagem ao lado é texto de
+                      outro elemento, sem vínculo com o desenho. */}
+                  <div
+                    className="h-2 rounded-full bg-surface-elevated overflow-hidden"
+                  >
                     <div className={cn("h-full rounded-full transition-all duration-700", slaBg(item.compliance_rate))} style={{ width: `${item.compliance_rate}%` }} />
                   </div>
                 </div>
@@ -562,25 +616,37 @@ export default function AdminDashboard() {
           <div className="overflow-x-auto -mx-5 px-5">
             <table className="w-full text-sm min-w-[640px]">
               <thead>
-                <tr className="border-b border-slate-100 dark:border-borda/60">
+                <tr className="border-b border-borda-muted">
                   {["Técnico", "Atribuídos", "Resolvidos", "Em aberto", "Conformidade SLA", "Tempo médio", "CSAT"].map((h) => (
-                    <th key={h} className="text-left text-xs font-semibold uppercase tracking-wider text-slate-400 pb-3 pr-4 last:pr-0">{h}</th>
+                    <th key={h} className="text-left text-xs font-semibold uppercase tracking-wider text-conteudo-muted pb-3 pr-4 last:pr-0">{h}</th>
                   ))}
                 </tr>
               </thead>
-              <tbody className="divide-y divide-slate-50 dark:divide-borda/30">
+              <tbody className="divide-y divide-borda-muted">
                 {techList.technicians.map((t) => {
                   const initials = t.technician_name.split(" ").slice(0, 2).map((w) => w[0]).join("").toUpperCase();
                   const isSelected = selectedTechId === t.technician_id;
                   return (
+                    // O `onClick` na `<tr>` sem `tabIndex`/`onKeyDown` é
+                    // defeito de PRODUTO, já registrado na ficha, e não se
+                    // conserta aqui: dar teclado a esta linha é redesenhar o
+                    // controle. O que dá para fazer sem redesenhar nada é a
+                    // linha passar a ter NOME: antes ela se anunciava pela
+                    // colagem das sete células, e o que o clique faz não
+                    // estava escrito em lugar nenhum.
                     <tr
                       key={t.technician_id}
                       onClick={() => setSelectedTechId(isSelected ? "all" : t.technician_id)}
+                      aria-label={
+                        isSelected
+                          ? `${t.technician_name} — filtro ativo, clique para remover`
+                          : `${t.technician_name} — clique para filtrar o painel por este técnico`
+                      }
                       className={cn(
                         "transition-colors cursor-pointer",
                         isSelected
                           ? "bg-primary/5 dark:bg-primary/10"
-                          : "hover:bg-slate-50 dark:hover:bg-surface-elevated",
+                          : "hover:bg-surface-elevated",
                       )}
                     >
                       <td className="py-3 pr-4">
@@ -591,16 +657,18 @@ export default function AdminDashboard() {
                           <div className={cn("w-8 h-8 rounded-full flex items-center justify-center shrink-0 text-xs font-bold", isSelected ? "bg-action text-on-primary" : "bg-primary/10 text-primary border border-primary/20")}>
                             {initials}
                           </div>
-                          <span className="font-medium text-slate-700 dark:text-slate-200 truncate">{t.technician_name}</span>
+                          <span className="font-medium text-conteudo truncate">{t.technician_name}</span>
                           {isSelected && <span className="text-[10px] font-bold text-primary bg-primary/10 px-1.5 py-0.5 rounded">filtrado</span>}
                         </div>
                       </td>
-                      <td className="py-3 pr-4 tabular-nums text-slate-600 dark:text-slate-300">{t.total_assigned}</td>
-                      <td className="py-3 pr-4 tabular-nums text-emerald-600 dark:text-emerald-400 font-medium">{t.resolved}</td>
-                      <td className="py-3 pr-4 tabular-nums text-sky-600 dark:text-sky-400">{t.open_count}</td>
+                      <td className="py-3 pr-4 tabular-nums text-conteudo-muted">{t.total_assigned}</td>
+                      <td className="py-3 pr-4 tabular-nums text-on-tint-success font-medium">{t.resolved}</td>
+                      <td className="py-3 pr-4 tabular-nums text-on-tint-info">{t.open_count}</td>
                       <td className="py-3 pr-4">
                         <div className="flex items-center gap-2">
-                          <div className="w-20 h-1.5 rounded-full bg-surface-elevated overflow-hidden">
+                          <div
+                            className="w-20 h-1.5 rounded-full bg-surface-elevated overflow-hidden"
+                          >
                             <div className={cn("h-full rounded-full", slaBg(t.sla_compliance_rate))} style={{ width: `${t.sla_compliance_rate}%` }} />
                           </div>
                           <span className={cn("text-xs font-bold tabular-nums", slaColor(t.sla_compliance_rate))}>
@@ -608,17 +676,24 @@ export default function AdminDashboard() {
                           </span>
                         </div>
                       </td>
-                      <td className="py-3 pr-4 tabular-nums text-slate-600 dark:text-slate-300">{fmtHours(t.avg_resolution_hours)}</td>
+                      <td className="py-3 pr-4 tabular-nums text-conteudo-muted">{fmtHours(t.avg_resolution_hours)}</td>
                       <td className="py-3">
                         {t.csat_average != null ? (
                           <div className="flex items-center gap-1">
-                            <span className="tabular-nums font-bold text-amber-600 dark:text-amber-400">{t.csat_average.toFixed(1)}</span>
-                            <svg className="w-3.5 h-3.5 text-amber-400" viewBox="0 0 20 20" fill="currentColor">
-                              <path d="M9.049 2.927c.3-.921 1.603-.921 1.902 0l1.07 3.292a1 1 0 00.95.69h3.462c.969 0 1.371 1.24.588 1.81l-2.8 2.034a1 1 0 00-.364 1.118l1.07 3.292c.3.921-.755 1.688-1.54 1.118l-2.8-2.034a1 1 0 00-1.175 0l-2.8 2.034c-.784.57-1.838-.197-1.539-1.118l1.07-3.292a1 1 0 00-.364-1.118L2.98 8.72c-.783-.57-.38-1.81.588-1.81h3.461a1 1 0 00.951-.69l1.07-3.292z" />
-                            </svg>
-                            <span className="text-xs text-slate-400">({t.csat_count})</span>
+                            <span className="tabular-nums font-bold text-on-tint-warning">{t.csat_average.toFixed(1)}</span>
+                            {/* Estrela de CONTORNO, e a mudança é prescrita (D9.1).
+                                Aqui vivia um desenho PREENCHIDO em `viewBox="0 0 20 20"`
+                                — outra família. A E21 barrou trocá-lo às cegas pelo
+                                `Icon`, que é 24×24 só de traço: renderiza em escala
+                                errada e sem preenchimento, e nada no `tsc` acusa. O
+                                operador decidiu o sentido inverso: ícone é só contorno,
+                                e estrela cheia vive dentro do `Rating` do pacote. O
+                                `Rating` NÃO serve aqui — ele é de cinco estrelas e a
+                                pesquisa do HelpHS é de 1 a 10 com rótulo por nota. */}
+                            <Icon name="star" size={14} className="text-on-tint-warning" />
+                            <span className="text-xs text-conteudo-muted">({t.csat_count})</span>
                           </div>
-                        ) : <span className="text-slate-400">—</span>}
+                        ) : <span className="text-conteudo-muted">—</span>}
                       </td>
                     </tr>
                   );

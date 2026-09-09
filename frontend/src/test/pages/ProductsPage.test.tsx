@@ -136,6 +136,39 @@ describe("ProductsPage", () => {
     );
   });
 
+  it("o filtro de status dos produtos tem nome próprio, e não se anuncia pelo valor", async () => {
+    // O defeito que a D9.2 fecha: o `FilterSelect` não repassava `label`, e o
+    // controle se anunciava "Ativos" — que é o valor, não o filtro. Ele é
+    // `<select>` nativo porque as três opções são fixas no código e não
+    // crescem com o banco.
+    await montar();
+
+    const filtro = screen.getByRole("combobox", { name: "Status do produto" });
+    expect(
+      within(filtro)
+        .getAllByRole("option")
+        .map((o) => o.textContent),
+    ).toEqual(["Todos", "Ativos", "Inativos"]);
+    // Sem linha vazia: `""` não é um `FilterTab`, e "Todos" já é o que zera.
+    expect(filtro).toHaveValue("active");
+  });
+
+  it("o status escolhido peneira no SERVIDOR, e não na página aberta", async () => {
+    const user = userEvent.setup();
+    await montar();
+
+    await user.selectOptions(
+      screen.getByRole("combobox", { name: "Status do produto" }),
+      "inactive",
+    );
+
+    await waitFor(() =>
+      expect(productService.getProducts).toHaveBeenLastCalledWith(
+        expect.objectContaining({ is_active: false }),
+      ),
+    );
+  });
+
   it("escolher um produto carrega os equipamentos DELE", async () => {
     const user = userEvent.setup();
     await montar();

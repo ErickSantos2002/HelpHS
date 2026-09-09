@@ -4,9 +4,9 @@ import {
   Alert,
   Avatar,
   Button,
-  FilterSelect,
   Icon,
   PriorityBadge,
+  Select,
   Spinner,
 } from "../../components/ui";
 import {
@@ -495,25 +495,41 @@ export default function TicketListPage() {
             )}
           </div>
 
-          {/* Priority */}
-          <FilterSelect
+          {/* Priority — D9.2: quatro prioridades, fixas em `lib/prioridade.ts` e
+              nenhuma vinda da rede. Lista curta e conhecida, logo `<select>`
+              nativo.
+
+              O ponto de cor sai junto: o `<option>` nativo não aceita marcador,
+              e a cor nunca foi o que distinguia as quatro — o rótulo escrito é.
+              O selo da própria linha do chamado continua pintando pela mesma
+              fonte.
+
+              O rótulo é `sr-only`: sem ele o filtro se anunciava "Alta". */}
+          <span id="rotulo-filtro-prioridade" className="sr-only">
+            Prioridade
+          </span>
+          <Select
+            id="filtro-prioridade"
+            aria-labelledby="rotulo-filtro-prioridade"
             value={filterPriority}
-            onChange={setFilterPriority}
+            onChange={(e) => setFilterPriority(e.target.value)}
             placeholder="Todas prioridades"
-            // OITAVO mapa de prioridade do sistema, e o quarto so nesta tela:
-            // rotulo no masculino e quatro hexadecimais cravados, entre eles um
-            // azul (#3b82f6) que nao era o `info` de nenhum outro mapa.
             options={PRIORIDADES.map((p) => ({
               value: p,
               label: PRIORIDADE[p].rotulo,
-              dot: PRIORIDADE[p].grafico,
             }))}
           />
 
-          {/* Assignee */}
-          <FilterSelect
+          {/* Assignee — D9.2: duas opções escritas aqui mesmo. Não há lista
+              mais curta nem mais conhecida que esta. */}
+          <span id="rotulo-filtro-tecnico" className="sr-only">
+            Atribuição
+          </span>
+          <Select
+            id="filtro-tecnico"
+            aria-labelledby="rotulo-filtro-tecnico"
             value={filterAssignee === "all" ? "" : filterAssignee}
-            onChange={(v) => setFilterAssignee((v || "all") as typeof filterAssignee)}
+            onChange={(e) => setFilterAssignee((e.target.value || "all") as typeof filterAssignee)}
             placeholder="Todos"
             options={[
               { value: "unassigned", label: "Sem técnico" },

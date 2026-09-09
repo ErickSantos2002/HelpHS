@@ -2,11 +2,11 @@ import { useEffect, useState } from "react";
 import {
   Badge,
   Card,
-  FilterSelect,
   Icon,
   Input,
   Modal,
   Pagination,
+  Select,
   Spinner,
   type BadgeProps,
 } from "../../components/ui";
@@ -320,8 +320,39 @@ export default function AuditLogsPage() {
         <div className="px-4 py-3 flex flex-col gap-3">
           {/* Dropdowns */}
           <div className="flex flex-wrap gap-3 items-center justify-center sm:justify-start">
-            <FilterSelect value={actionFilter} onChange={setActionFilter} options={ACTION_OPTIONS} placeholder="Todas as ações" />
-            <FilterSelect value={entityFilter} onChange={setEntityFilter} options={ENTITY_OPTIONS} placeholder="Todas as entidades" />
+            {/* D9.2 — as duas listas são curtas e conhecidas (dez ações, seis
+                entidades, ambas fixas no código e nenhuma vinda da rede), então
+                o controle é o `<select>` nativo: teclado de graça e papel
+                anunciado sem JavaScript nenhum.
+
+                O `<span>` de rótulo não é enfeite. O `FilterSelect` não
+                repassava `label`, e numa barra com dois filtros os dois se
+                anunciavam pelo VALOR escolhido — "Criação", "Ticket" — sem
+                dizer de QUE filtro eram. O rótulo é `sr-only` porque a barra
+                não tem espaço para ele visível; o nome acessível existe do
+                mesmo jeito. */}
+            <span id="rotulo-filtro-acao" className="sr-only">
+              Ação
+            </span>
+            <Select
+              id="filtro-acao"
+              aria-labelledby="rotulo-filtro-acao"
+              value={actionFilter}
+              onChange={(e) => setActionFilter(e.target.value)}
+              options={ACTION_OPTIONS}
+              placeholder="Todas as ações"
+            />
+            <span id="rotulo-filtro-entidade" className="sr-only">
+              Entidade
+            </span>
+            <Select
+              id="filtro-entidade"
+              aria-labelledby="rotulo-filtro-entidade"
+              value={entityFilter}
+              onChange={(e) => setEntityFilter(e.target.value)}
+              options={ENTITY_OPTIONS}
+              placeholder="Todas as entidades"
+            />
           </div>
           {/* Date range */}
           <div className="flex flex-wrap items-center gap-2">

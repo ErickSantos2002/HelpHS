@@ -32,6 +32,18 @@ import type { AuditLog } from "../../services/auditService";
  * acessível de cada campo, o que o modal abre.
  */
 
+/**
+ * O `<select>` nativo dos dois filtros (D9.2) desenha TODAS as opções na
+ * árvore, o tempo todo — ao contrário do painel do `FilterSelect`, que só
+ * existia enquanto aberto. Como as opções de ação carregam o rótulo LONGO,
+ * um `queryByText("Mudança de status")` passa a achá-lo dentro do filtro.
+ *
+ * Estes casos falam do que a pessoa lê **na lista**, então a opção sai da
+ * busca — e sai por `ignore`, e não por `getAllByText(...)[0]`, que continuaria
+ * passando se o texto da lista sumisse.
+ */
+const FORA_DO_FILTRO = { ignore: "script, style, option" } as const;
+
 const AGORA = "2026-09-08T13:45:00Z";
 
 function log(over: Partial<AuditLog> = {}): AuditLog {
@@ -112,13 +124,58 @@ describe("AuditLogsPage", () => {
     // exatamente aqui que elas divergiam.
     await montar([log({ action: "status_change", new_data: { status: "closed" } })]);
 
-    expect(screen.getAllByText("Status").length).toBeGreaterThan(0);
-    expect(screen.queryByText("Mudança de status")).not.toBeInTheDocument();
+    expect(screen.getAllByText("Status", FORA_DO_FILTRO).length).toBeGreaterThan(0);
+    expect(
+      screen.queryByText("Mudança de status", FORA_DO_FILTRO),
+    ).not.toBeInTheDocument();
 
     await userEvent.click(screen.getAllByRole("button", { name: "Ver detalhes" })[0]);
 
     const modal = await screen.findByRole("dialog");
     expect(within(modal).getByText("Mudança de status")).toBeInTheDocument();
+  });
+
+  it("cada filtro tem nome próprio, e não se anuncia pelo valor escolhido", async () => {
+    // O defeito que a D9.2 fecha. O `FilterSelect` não repassava `label`, e os
+    // dois filtros desta barra se anunciavam pelo VALOR — numa barra com dois,
+    // quem usa leitor de tela ouvia "Criação" e "Ticket" sem saber de que
+    // filtro cada um era.
+    await montar([log()]);
+
+    expect(screen.getByRole("combobox", { name: "Ação" })).toBeInTheDocument();
+    expect(
+      screen.getByRole("combobox", { name: "Entidade" }),
+    ).toBeInTheDocument();
+  });
+
+  it("o filtro de ação lista as dez ações da tabela, e o filtro de entidade as seis", async () => {
+    // As opções saem de `ACAO` e de `ENTIDADE`, e não de uma lista paralela —
+    // é a mesma afirmação de antes, agora lida do `<select>` nativo.
+    await montar([log()]);
+
+    const acao = screen.getByRole("combobox", { name: "Ação" });
+    const rotulos = within(acao)
+      .getAllByRole("option")
+      .map((o) => o.textContent);
+    expect(rotulos).toContain("Todas as ações");
+    expect(rotulos).toContain("Mudança de status");
+    expect(rotulos).toContain("Anonimização");
+    expect(rotulos).toHaveLength(Object.keys(ACAO).length + 1);
+  });
+
+  it("escolher no filtro pede ao serviço aquele filtro, e não outro", async () => {
+    await montar([log()]);
+
+    await userEvent.selectOptions(
+      screen.getByRole("combobox", { name: "Entidade" }),
+      "kb_article",
+    );
+
+    await waitFor(() =>
+      expect(auditService.getAuditLogs).toHaveBeenLastCalledWith(
+        expect.objectContaining({ entity_type: "kb_article" }),
+      ),
+    );
   });
 
   it("cada campo de data tem nome acessível próprio", async () => {
@@ -239,8 +296,8 @@ describe("AuditLogsPage", () => {
       await montar([log({ action: acao, new_data: { x: 1 } })]);
 
       // Na lista, só a curta.
-      expect(screen.getAllByText(curto).length).toBeGreaterThan(0);
-      expect(screen.queryByText(rotulo)).not.toBeInTheDocument();
+      expect(screen.getAllByText(curto, FORA_DO_FILTRO).length).toBeGreaterThan(0);
+      expect(screen.queryByText(rotulo, FORA_DO_FILTRO)).not.toBeInTheDocument();
 
       // No modal, só a completa.
       await userEvent.click(

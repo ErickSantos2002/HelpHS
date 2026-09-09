@@ -7,7 +7,6 @@ import {
   Alert,
   Button,
   Card,
-  FilterSelect,
   FormDropdown,
   Icon,
   Input,
@@ -15,6 +14,7 @@ import {
   ModalFooter,
   Pagination,
   SearchSelect,
+  Select,
   Spinner,
   Textarea,
 } from "../../components/ui";
@@ -560,11 +560,25 @@ export default function ProductsPage() {
           />
         </div>
         <div className="flex flex-wrap gap-2 items-center justify-center sm:justify-start">
-          <FilterSelect
+          {/* D9.2 — três opções fixas no código, que não crescem com o banco:
+              lista curta e conhecida, logo `<select>` nativo.
+
+              Sem `placeholder`: o `FilterTab` só admite "all", "active" e
+              "inactive", e a opção vazia que o `placeholder` desenha devolveria
+              `""` para `setProductFilter` — um estado que o tipo não tem. O
+              "Todos" já está na lista, e é ele que zera o filtro.
+
+              O rótulo é `sr-only` porque a barra não tem espaço: sem ele o
+              controle se anunciava "Ativos", sem dizer de que filtro. */}
+          <span id="rotulo-filtro-produto-status" className="sr-only">
+            Status do produto
+          </span>
+          <Select
+            id="filtro-produto-status"
+            aria-labelledby="rotulo-filtro-produto-status"
             options={FILTROS}
-            placeholder="Status"
             value={productFilter}
-            onChange={(v) => { setProductFilter(v as FilterTab); setProductPage(1); }}
+            onChange={(e) => { setProductFilter(e.target.value as FilterTab); setProductPage(1); }}
           />
           {(productSearch || productFilter !== "active") && (
             <button
