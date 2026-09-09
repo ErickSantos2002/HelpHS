@@ -81,8 +81,11 @@ tintas carregam alfa de 15% — sem a superfície por baixo o número é fantasi
 | selo | claro | escuro |
 |---|---:|---:|
 | Novidade — `tint-info` + `on-tint-info` | 5,20 | 6,21 |
-| Corrigido — `tint-warning` + `on-tint-warning` | 5,83 | 6,33 |
+| Corrigido — `tint-success` + `on-tint-success` | 6,15 | 5,51 |
 | Melhoria — `tint-success` + `on-tint-success` | 6,15 | 5,51 |
+
+A lista que o teste mede sai do **próprio arquivo**, e não escrita à mão: se
+alguém trocar a variante de um tipo, é a tinta nova que passa a ser medida.
 
 E a pastilha da versão:
 
@@ -91,11 +94,57 @@ E a pastilha da versão:
 | `bg-emerald-500` + `text-white` (antes) | 2,54 | 2,54 |
 | `bg-action-success` + `text-on-success` (depois) | **5,48** | **5,48** |
 
-### O `laranja` virou `âmbar`, e isso é visível
+### Segunda passada — a variante sai do SIGNIFICADO, não da cor que estava aqui
 
-`orange-500` não tem token equivalente no pacote. A tinta semântica de aviso é
-âmbar (`--tint-warning`, que aponta para a rampa `warning`). O selo "Corrigido"
-muda de matiz — pouco, mas muda. Está no relatório para o operador.
+A primeira passada traduziu **cor por cor**: azul→`info`, laranja→`warning`,
+verde→`success`. Isso preserva a aparência e **não é o critério do pacote** — a
+cor antiga não tinha sido decisão de ninguém, era o que estava lá. O operador
+corrigiu o critério e decidiu `corrigido` → `success`.
+
+| tipo | antes (por cor) | agora (por significado) | por quê |
+|---|---|---|---|
+| `novidade` | `info` | **`info`** | é um **anúncio**: algo passou a existir. Não é resultado bom nem ruim — é informação, que é o que `info` significa em toda a interface (o `Alert`, o papel "Técnico"). Mesma variante, motivo diferente. |
+| `corrigido` | `warning` | **`success`** | um defeito foi **resolvido**. Decisão do operador, e é a leitura certa: o laranja dizia "atenção", e não há a que atentar num defeito que já saiu. |
+| `melhoria` | `success` | **`success`** — e isto está **em aberto** | ver abaixo |
+
+### `melhoria` está sem casa, e o motivo é medido
+
+"Algo que já existia ficou melhor" não é nenhuma das seis tintas. E o problema
+não é de gosto: sobre o cartão desta janela (`--surface-elevated`) as seis só
+oferecem **quatro** aparências distintas.
+
+| candidata | por que não serve | medida |
+|---|---|---|
+| `success` | é de `corrigido` agora | — |
+| `primary` | é o **mesmo azul** de `info` | ΔE76 **4,5** claro / **5,7** escuro; razão **1,01:1**. O piso do próprio pacote para série distinguível (E16-b) é ΔE ≥ 20 |
+| `neutral` | é **alias de `--surface-elevated`**, que é o fundo do cartão: o selo perderia a forma | ΔE76 **0,0**; razão **1,00:1** |
+| `warning` | diz "atenção"; não há a que atentar numa melhoria | — |
+| `danger` | tom errado | — |
+
+Então `melhoria` fica em `success` e passa a ser **gêmea de `corrigido`**. O que
+se perde é a cor *acrescentar* uma distinção entre as duas; o que **não** se
+perde é a informação, porque o rótulo é escrito ao lado do ícone. **1.4.1
+continua satisfeito — a cor nunca foi o único portador**, e há caso de teste que
+prende os dois rótulos na tela justamente por causa da gêmea.
+
+Sair disto é decisão de quem desenha o pacote: ou se aceita a gêmea, ou entra
+uma sexta tinta distinguível por emenda. Está no relatório para o operador.
+
+O caso de teste que trava `melhoria` em `success` é **trava deliberada, não
+aprovação**: quem der casa própria a ela troca aquele número de propósito, e
+não por acidente.
+
+### A expressão do teste exige o trio INTEIRO, e isso não é detalhe
+
+O caso lê `bg-tint-X text-on-tint-X border border-X/30` com retrovisão: fundo,
+texto e borda têm de vir da **mesma** tinta. Meia troca — fundo novo com texto
+velho — é exatamente o modo de falha que a **E8** documentou no `Badge`, e
+passaria por uma verificação que olhasse só o fundo.
+
+A mutação que provou isso também achou um defeito no próprio teste: a primeira
+versão do leitor fatiava do tipo até o **fim do arquivo**, então uma entrada
+mutada para um trio inconsistente devolvia em silêncio a variante da entrada
+**seguinte**. O recorte agora termina no `icon:` da própria entrada.
 
 ### As opacidades: nenhuma fora da escala
 

@@ -109,18 +109,58 @@ rótulo (`Atalho *`), como no `ProfilePage`.
 | hexadecimal cravado | **0** |
 | linhas da varredura de contraste | **0** |
 | **controles à mão** | **4** |
-| **rótulo sem `htmlFor`** | **1** |
+| **rótulos sem `htmlFor`** | **0** |
+| **campos sem rótulo nenhum** | **1** — a busca da lista |
 
-Os quatro: dois `<input>` crus (o campo de atalho, que tem o `/` desenhado ao
-lado, e a busca da lista) e dois `<button>` de ícone (editar e excluir). Os dois
-botões têm `aria-label` com o atalho dentro, então são alcançáveis; o que falta
-neles é o `Button` do pacote, que não tem variante de ícone-só nesta escala.
+Os quatro: dois `<input>` crus (o campo de atalho e a busca da lista) e dois
+`<button>` de ícone (editar e excluir). Os dois botões têm `aria-label` com o
+atalho dentro, então são alcançáveis; o que falta neles é o `Button` do pacote,
+que não tem variante de ícone-só nesta escala.
 
-O `<label>` do campo de atalho não tem `htmlFor` e o `<input>` não tem `id`.
-Anterior à Fase 16, e vai no relatório.
+A **busca** não tem `<label>` nenhum — o nome acessível dela vem do
+`placeholder`, que é um recuo, não um rótulo: some quando a pessoa digita. Isso
+é diferente do defeito de rótulo solto que o operador mandou consertar, e vai no
+relatório.
 
 O restante da tela já era do pacote: `Card`, `Modal`, `ModalFooter`, `Button`,
 `Input`, `Textarea`, `Checkbox`, `Alert`, `Spinner` e `Pagination`.
+
+---
+
+## Segunda passada — o rótulo do atalho, ligado à mão
+
+Aprovado pelo operador. 382 linhas antes, 411 depois.
+
+O `<label>` do atalho não tinha `htmlFor` e o `<input>` não tinha `id`. **Este é
+o único campo das duas telas que não foi para o primitivo**, e a regra que o
+operador deu era essa: se o primitivo couber, use-o; se não couber, ligue à mão
+e diga por quê.
+
+### Por que o `Input` não cabe aqui
+
+O `/` à esquerda é **irmão do campo** dentro de uma linha `flex`, e o `Input`
+não tem slot de prefixo: ele desenha `div.flex-col > label + input + p`, então a
+barra ficaria ao lado do **bloco inteiro** (rótulo, campo e dica), centrada
+verticalmente contra os três.
+
+A saída de posicionar a barra por cima do campo — como o `ProfilePage` faz com o
+`Spinner` — também não serve: lá o `bottom-2.5` acerta o campo porque **não há
+dica embaixo**; aqui há, e o mesmo deslocamento cairia sobre o texto da dica.
+
+### O que a ligação manual repôs
+
+| do primitivo | reposto? |
+|---|---|
+| `htmlFor` + `id` do `useId` | sim |
+| `aria-describedby` amarrando a dica ao campo | sim |
+| `aria-invalid` | **não**, e não teria uso: o erro deste formulário é um `Alert` no topo, não uma mensagem por campo |
+
+Há caso próprio para os três — e ele existe justamente por ser manual: a ligação
+do primitivo é conferida no teste do primitivo, esta não seria conferida em
+lugar nenhum.
+
+O caso que clica no rótulo **tira o foco do campo antes**: ele nasce com
+`autoFocus`, e sem esse passo o caso passaria com o `htmlFor` apagado.
 
 ---
 
@@ -128,9 +168,8 @@ O restante da tela já era do pacote: `Card`, `Modal`, `ModalFooter`, `Button`,
 
 - **Não usei o `Badge` nos selos.** Geometria diferente e `cn` sem
   `tailwind-merge`; motivo detalhado na ficha do `ChangelogModal`.
-- **Não troquei os dois `<input>` crus pelos primitivos.** Mudança de estrutura,
-  não de cor; o campo de atalho tem o `/` como prefixo visual e o `Input` do
-  pacote não tem slot de prefixo — isso é emenda, não tela.
-- **Não liguei rótulo e campo.** Vai no relatório.
+- **Não troquei os dois `<input>` crus pelos primitivos.** O de atalho não cabe
+  (motivo acima); o da busca não tem rótulo para ligar — dar um a ele é decisão
+  de desenho (rótulo visível? `aria-label`?) e vai no relatório.
 - **Não mexi no `sanitizeShortcut` nem no `quickReplyService`.** Fora do escopo
   e nada neles é cor.

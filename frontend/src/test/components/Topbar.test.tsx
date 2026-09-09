@@ -1,7 +1,7 @@
 import { readFileSync } from "node:fs";
 import { resolve } from "node:path";
 import type { ComponentProps } from "react";
-import { render, screen, waitFor } from "@testing-library/react";
+import { fireEvent, render, screen, waitFor } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { beforeEach, describe, expect, it, vi } from "vitest";
 import { AA, contraste } from "../helpers/contraste";
@@ -276,5 +276,110 @@ describe("Topbar — o que o usuário alcança", () => {
     montar({ pageTitle: "Respostas Rápidas" });
     const titulos = await screen.findAllByRole("heading", { level: 1 });
     expect(titulos.map((h) => h.textContent)).toEqual(["Respostas Rápidas"]);
+  });
+});
+
+/**
+ * Fechar os painéis, e para onde vai o foco depois.
+ *
+ * As duas metades são um caso só. Um painel que fecha sem devolver o foco
+ * deixa quem navega por teclado no `<body>`: o elemento focado saiu da árvore,
+ * o navegador recua para o início do documento, e o próximo `Tab` recomeça do
+ * "pular para o conteúdo". Testar só o fechamento aprovaria essa metade.
+ *
+ * Por isso todo caso aqui **move o foco para dentro do painel antes de
+ * fechar**. Sem esse passo o foco já estaria no gatilho (o clique que abriu o
+ * painel o focou), e a devolução seria indistinguível de não fazer nada — o
+ * caso passaria com o `focus()` apagado.
+ */
+describe("Topbar — Escape fecha, e o foco volta ao gatilho", () => {
+  beforeEach(() => {
+    vi.clearAllMocks();
+    SESSAO.usuario = {
+      name: "Rita Andrade",
+      email: "rita@exemplo.com",
+      role: "technician",
+      avatar_url: null,
+    };
+    SESSAO.tema = "claro";
+    vi.mocked(notificationService.getNotifications).mockResolvedValue({
+      items: [NAO_LIDA],
+      unread: 3,
+      total: 1,
+    } as never);
+  });
+
+  it("o painel de notificações fecha com Escape e devolve o foco ao sino", async () => {
+    montar();
+    const sino = await screen.findByRole("button", { name: /^Notificações/ });
+    await userEvent.click(sino);
+
+    const dentro = await screen.findByRole("button", {
+      name: "Ver todas as notificações",
+    });
+    dentro.focus();
+    expect(dentro).toHaveFocus();
+
+    await userEvent.keyboard("{Escape}");
+
+    expect(screen.queryByText("Ver todas as notificações")).toBeNull();
+    expect(sino).toHaveFocus();
+  });
+
+  it("o menu do usuário fecha com Escape e devolve o foco ao seu gatilho", async () => {
+    montar();
+    const gatilho = await screen.findByRole("button", { name: /^Menu do usuário/ });
+    await userEvent.click(gatilho);
+
+    const dentro = await screen.findByRole("button", { name: "Meu perfil" });
+    dentro.focus();
+    expect(dentro).toHaveFocus();
+
+    await userEvent.keyboard("{Escape}");
+
+    expect(screen.queryByRole("button", { name: "Meu perfil" })).toBeNull();
+    expect(gatilho).toHaveFocus();
+  });
+
+  it("o clique fora também fecha e também devolve o foco", async () => {
+    // `fireEvent.mouseDown` e não `userEvent.click`: o ouvinte de produção é
+    // de `mousedown`, e disparar só ele mede o ouvinte em vez de medir a
+    // sequência inteira que o `userEvent` monta por cima.
+    montar();
+    const gatilho = await screen.findByRole("button", { name: /^Menu do usuário/ });
+    await userEvent.click(gatilho);
+
+    const dentro = await screen.findByRole("button", { name: "Meu perfil" });
+    dentro.focus();
+
+    fireEvent.mouseDown(document.body);
+
+    await waitFor(() =>
+      expect(screen.queryByRole("button", { name: "Meu perfil" })).toBeNull(),
+    );
+    expect(gatilho).toHaveFocus();
+  });
+
+  it("Escape com tudo fechado não rouba o foco de ninguém", async () => {
+    // Sem a guarda pelo estado ABERTO, o ouvinte chamaria `focus()` no gatilho
+    // a cada Escape da aplicação inteira — inclusive com o cursor dentro de um
+    // campo de outra tela.
+    montar();
+    const alvo = await screen.findByRole("button", { name: /^Menu do usuário/ });
+    const outro = await screen.findByRole("button", { name: "Recolher menu" });
+    outro.focus();
+    expect(outro).toHaveFocus();
+
+    await userEvent.keyboard("{Escape}");
+
+    expect(outro).toHaveFocus();
+    expect(alvo).not.toHaveFocus();
+  });
+
+  it("o painel aberto NÃO prende o foco — e isso é deliberado", () => {
+    // A decisão pediu Escape e devolução do foco, e disse para não prender.
+    // Armadilha de foco muda mais do que a decisão diz, e um painel que não
+    // prende continua utilizável; um que prende e erra, não.
+    expect(CODIGO).not.toMatch(/inert|focus-?trap|FocusTrap/i);
   });
 });

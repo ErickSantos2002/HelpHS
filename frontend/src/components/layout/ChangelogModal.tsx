@@ -17,6 +17,41 @@ import { APP_VERSION, CHANGELOG, type EntryType } from "../../data/changelog";
  * cima do `px-2.5 text-xs` do primitivo deixaria as duas regras vivas e a
  * vencedora seria a ordem do CSS gerado, que não é nossa. Copiar as três
  * classes de cor mantém a geometria e não inventa cor local.
+ *
+ * ── A variante sai do SIGNIFICADO, não da cor que estava aqui ─────────
+ *
+ * A primeira passada traduziu cor por cor: azul→`info`, laranja→`warning`,
+ * verde→`success`. Isso preserva a aparência e **não** é o critério do
+ * pacote — a cor antiga não era decisão de ninguém, era o que estava lá.
+ *
+ * | tipo | variante | por quê |
+ * |---|---|---|
+ * | `novidade` | `info` | é um **anúncio**: algo passou a existir. Não é resultado bom nem ruim, é informação — que é o que `info` significa em toda a interface (o `Alert`, o papel "Técnico", o selo de aviso neutro). |
+ * | `corrigido` | `success` | um defeito foi **resolvido**. Decisão do operador, e é a leitura certa: o laranja de antes dizia "atenção", e não há nada a que atentar num defeito que já saiu. |
+ * | `melhoria` | `success` | **NÃO É DECISÃO MINHA — ver o bloco abaixo.** |
+ *
+ * ── `melhoria` está sem casa, e o motivo é medido ─────────────────────
+ *
+ * "Algo que já existia ficou melhor" não é nenhuma das seis tintas. E o
+ * problema não é de gosto: sobre o cartão desta janela (`--surface-elevated`)
+ * as seis só oferecem **quatro** aparências distintas.
+ *
+ * | candidata | por que não serve | medida |
+ * |---|---|---|
+ * | `success` | é de `corrigido` agora | — |
+ * | `primary` | é o **mesmo azul** de `info` | ΔE76 **4,5** claro / **5,7** escuro; razão 1,01:1. O piso do próprio pacote para série distinguível (E16-b) é ΔE ≥ 20 |
+ * | `neutral` | é **alias de `--surface-elevated`**, que é o fundo do cartão: o selo perderia a forma | ΔE76 **0,0**; razão **1,00:1** |
+ * | `warning` | diz "atenção"; não há a que atentar numa melhoria | — |
+ * | `danger` | tom errado | — |
+ *
+ * Então `melhoria` fica onde estava (`success`) e passa a ser **gêmea de
+ * `corrigido`**. O que se perde é a cor *acrescentar* uma distinção entre as
+ * duas; o que **não** se perde é a informação, porque o rótulo ("Corrigido" /
+ * "Melhoria") é escrito ao lado do ícone e há caso de teste que o prende.
+ * 1.4.1 continua satisfeito — a cor nunca foi o único portador.
+ *
+ * Sair disto é decisão de quem desenha o pacote, não desta tela: ou se aceita
+ * a gêmea, ou entra uma sexta tinta distinguível por emenda.
  */
 const ENTRY_CONFIG: Record<EntryType, { label: string; className: string; icon: ReactNode }> = {
   novidade: {
@@ -26,7 +61,7 @@ const ENTRY_CONFIG: Record<EntryType, { label: string; className: string; icon: 
   },
   corrigido: {
     label: "Corrigido",
-    className: "bg-tint-warning text-on-tint-warning border border-warning/30",
+    className: "bg-tint-success text-on-tint-success border border-success/30",
     icon: <Icon name="edit" size={12} strokeWidth={2.5} />,
   },
   melhoria: {

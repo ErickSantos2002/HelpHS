@@ -114,19 +114,81 @@ describe("ChangelogModal — o que a Fase 16 tirou daqui", () => {
   });
 });
 
-describe("ChangelogModal — as cores medidas nos tokens", () => {
-  it.each([
-    ["info", "--tint-info", "--on-tint-info"],
-    ["warning", "--tint-warning", "--on-tint-warning"],
-    ["success", "--tint-success", "--on-tint-success"],
-  ] as const)("o selo de %s aprova em AA nos dois temas", (_nome, tinta, par) => {
-    // As tintas carregam alfa de 15% e assentam sobre `--surface-elevated`,
-    // que é o fundo do cartão de cada entrada.
-    for (const tema of ["claro", "escuro"] as const) {
-      expect(contraste(tinta, par, tema, "--surface-elevated"), tema)
-        .toBeGreaterThanOrEqual(AA);
-    }
+/**
+ * A variante de cada tipo, que sai do SIGNIFICADO e não da cor que estava lá.
+ *
+ * Este é o único caso da suíte que lê o arquivo em vez de olhar a tela, e o
+ * motivo é o de sempre: o happy-dom não aplica CSS, então a variante escolhida
+ * não é observável na árvore. Ler a fonte é o que o teste da `Sidebar` e o do
+ * botão de sair da `Topbar` já fazem pelo mesmo motivo.
+ *
+ * A expressão exige que fundo, texto e borda venham da **mesma** tinta (a
+ * retrovisão `\1`): meia troca — fundo novo com texto velho — é o modo de
+ * falha que a E8 documentou no `Badge`, e ele passaria por uma verificação
+ * que olhasse só o fundo.
+ */
+function varianteDe(tipo: string): string {
+  const inicio = CODIGO.indexOf(`${tipo}: {`);
+  if (inicio === -1) return "(tipo ausente)";
+  // O recorte TERMINA no `icon:` da própria entrada, e isso não é detalhe.
+  // A primeira versão fatiava daqui até o fim do arquivo: com a entrada
+  // mutada de propósito para um trio inconsistente, a expressão não casava
+  // ali, seguia adiante e devolvia a variante da entrada SEGUINTE — o caso
+  // passava lendo o bloco errado. Foi a mutação "meia troca" que mostrou.
+  const fim = CODIGO.indexOf("icon:", inicio);
+  const bloco = CODIGO.slice(inicio, fim === -1 ? undefined : fim);
+  const m = bloco.match(/bg-tint-([a-z]+) text-on-tint-\1 border border-\1\/30/);
+  return m ? m[1] : "(nenhuma)";
+}
+
+describe("ChangelogModal — a variante sai do significado", () => {
+  it("`novidade` é um anúncio, e anúncio é `info`", () => {
+    expect(varianteDe("novidade")).toBe("info");
   });
+
+  it("`corrigido` é um defeito resolvido, e resolvido é `success`", () => {
+    // Era `warning` — herança do laranja que estava aqui, não decisão de
+    // ninguém. Não há nada a que atentar num defeito que já saiu.
+    expect(varianteDe("corrigido")).toBe("success");
+  });
+
+  it("`melhoria` ficou GÊMEA de `corrigido`, e isso está em aberto", () => {
+    // Trava deliberada, não aprovação: nenhuma das seis tintas significa
+    // "melhoria", e as duas que sobravam foram descartadas por medida —
+    // `primary` é o mesmo azul de `info` (ΔE76 4,5) e `neutral` é alias do
+    // fundo do próprio cartão (ΔE76 0,0). Quem der casa própria a `melhoria`
+    // troca este número de propósito, e não por acidente.
+    expect(varianteDe("melhoria")).toBe("success");
+    expect(varianteDe("melhoria")).toBe(varianteDe("corrigido"));
+  });
+
+  it("com duas variantes gêmeas, o rótulo é o que distingue — e ele está lá", () => {
+    // É o que mantém 1.4.1 de pé apesar da gêmea: a cor deixou de acrescentar
+    // a distinção, o texto nunca deixou de carregá-la.
+    abrir();
+    expect(screen.getAllByText("Corrigido").length).toBeGreaterThan(0);
+    expect(screen.getAllByText("Melhoria").length).toBeGreaterThan(0);
+  });
+});
+
+describe("ChangelogModal — as cores medidas nos tokens", () => {
+  it.each([...new Set(["novidade", "corrigido", "melhoria"].map(varianteDe))])(
+    "a tinta `%s`, que algum tipo usa, aprova em AA nos dois temas",
+    (variante) => {
+      // A lista sai do próprio arquivo: se alguém trocar a variante de um
+      // tipo, é a tinta NOVA que passa a ser medida — e não a que este teste
+      // teria cravado à mão.
+      //
+      // As tintas carregam alfa de 15% e assentam sobre `--surface-elevated`,
+      // que é o fundo do cartão de cada entrada.
+      for (const tema of ["claro", "escuro"] as const) {
+        expect(
+          contraste(`--tint-${variante}`, `--on-tint-${variante}`, tema, "--surface-elevated"),
+          `${variante}, ${tema}`,
+        ).toBeGreaterThanOrEqual(AA);
+      }
+    },
+  );
 
   it("a pastilha da versão vigente deixou de ser a cor cheia com branco", () => {
     for (const tema of ["claro", "escuro"] as const) {

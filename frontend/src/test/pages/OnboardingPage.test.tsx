@@ -225,6 +225,61 @@ describe("OnboardingPage — o passo dos equipamentos", () => {
   });
 });
 
+/**
+ * Rótulo ligado ao campo.
+ *
+ * Os quatro rótulos desta tela eram `<label>` sem `htmlFor` sobre `<input>`
+ * sem `id`: ficavam um em cima do outro na tela e não tinham relação nenhuma
+ * na árvore de acessibilidade. Quem usa leitor de tela ouvia "edição, em
+ * branco" e nada mais; quem clica no rótulo não focava o campo.
+ *
+ * `getByLabelText` consulta exatamente essa relação — é a consulta que falha
+ * com o rótulo solto e passa com ele ligado, sem olhar classe nenhuma.
+ */
+describe("OnboardingPage — cada campo é alcançável pelo próprio rótulo", () => {
+  beforeEach(() => {
+    vi.clearAllMocks();
+    vi.mocked(equipmentService.getMyEquipment).mockResolvedValue([]);
+    vi.mocked(api.get).mockResolvedValue({ data: { items: [] } } as never);
+  });
+
+  it.each([
+    "CNPJ *",
+    "Nome da empresa",
+    "CEP *",
+    "Endereço",
+    "Cidade",
+    "Estado (UF)",
+  ])("o passo da empresa liga o rótulo %s ao seu campo", (rotulo) => {
+    render(<OnboardingPage />);
+    const campo = screen.getByLabelText(rotulo);
+    expect(campo.tagName, rotulo).toBe("INPUT");
+  });
+
+  it("o seletor de produto do passo 2 também", async () => {
+    vi.mocked(userService.completeOnboarding).mockResolvedValue({} as never);
+    vi.mocked(api.get).mockResolvedValue({
+      data: { items: [{ id: "p1", name: "Detector", version: "2.1", is_active: true }] },
+    } as never);
+    render(<OnboardingPage />);
+    await preencherEmpresa();
+    await userEvent.click(screen.getByRole("button", { name: "Continuar" }));
+
+    const seletor = await screen.findByLabelText("Produto");
+    expect(seletor.tagName).toBe("SELECT");
+    // O rótulo do produto é montado pelo `Select` a partir de nome + versão.
+    expect(screen.getByRole("option", { name: "Detector (2.1)" })).toBeTruthy();
+  });
+
+  it("clicar no rótulo foca o campo — que é o que o `htmlFor` compra", async () => {
+    render(<OnboardingPage />);
+    // Consulta pelo texto do rótulo, não pelo campo: se o `htmlFor` sumir, o
+    // clique deixa de mover o foco e este caso cai.
+    await userEvent.click(screen.getByText("CNPJ *"));
+    expect(screen.getByLabelText("CNPJ *")).toHaveFocus();
+  });
+});
+
 describe("OnboardingPage — o que a Fase 16 tirou daqui", () => {
   it("não sobrou classe da paleta crua", () => {
     expect(CODIGO).not.toMatch(

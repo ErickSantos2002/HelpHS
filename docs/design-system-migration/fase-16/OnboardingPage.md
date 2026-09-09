@@ -104,33 +104,56 @@ anotado no arquivo.
 | classe de paleta crua fora de comentário | **0** |
 | hexadecimal cravado | **0** |
 | linhas da varredura de contraste | **0** |
-| **controles à mão** | **4** |
-| **rótulos sem `htmlFor`** | **4** |
+| **controles à mão** | **1** |
+| **rótulos sem `htmlFor`** | **0** |
 
-Os quatro controles: três `<input>` crus (CNPJ, CEP, Estado/UF) e um `<select>`
-cru (Produto). Os dois primeiros ficaram porque têm um `Spinner` sobreposto
-durante a consulta de CNPJ/CEP; o `ProfilePage` resolveu o mesmo caso
-embrulhando o `Input` num `div.relative`, e a receita cabe aqui — é troca de
-estrutura, não de cor, e vai no relatório em vez de entrar de carona.
+O único controle à mão é o "Deslogar" do rodapé, um `<button>` estilizado como
+link. O `Button` do pacote não tem variante de link, e criar uma é emenda.
 
-Os quatro `<label>` **não têm `htmlFor`** e os campos não têm `id`: hoje nenhum
-dos quatro rótulos está ligado ao seu campo. Isso é anterior à Fase 16 e não é
-defeito de sistema de design — vai no relatório.
+---
 
-O `<button>` cru é o "Deslogar" do rodapé, estilizado como link. O `Button` do
-pacote não tem variante de link, e criar uma é emenda.
+## Segunda passada — os quatro rótulos soltos
+
+Aprovado pelo operador depois do relatório da primeira passada. 553 linhas
+antes, 550 depois: os quatro blocos de campo escritos à mão encolheram para
+quatro chamadas de primitivo.
+
+O defeito era o mesmo nos quatro: `<label>` sem `htmlFor` sobre um controle sem
+`id`. Ficavam um em cima do outro na tela e **não tinham relação nenhuma na
+árvore de acessibilidade** — quem usa leitor de tela ouvia "edição, em branco"
+e nada mais, e quem clica no rótulo não focava o campo.
+
+| campo | virou | o que resolveu |
+|---|---|---|
+| CNPJ | `Input` dentro de `div.relative` | rótulo ligado + `Spinner` por cima, receita do `ProfilePage` |
+| CEP | `Input` dentro de `div.relative` | idem |
+| Estado (UF) | `Input` | direto, sem envoltório |
+| Produto | `Select` | com `id` explícito — ver abaixo |
+
+O `Input` do pacote resolve três coisas de uma vez: o `id` vem do `useId`, o
+`htmlFor` sai ligado, e vêm de brinde o `aria-invalid` e o `aria-describedby`.
+
+**O `id` do `Select` vai explícito de propósito.** O primitivo, sem ele, deriva
+o id do rótulo em minúsculas — e dois seletores de mesmo rótulo na mesma tela
+gerariam o **mesmo** `id`. É o defeito que o `Input` já corrigiu com `useId` e
+que o `Select` ainda tem. Aqui há um seletor só, mas o defeito nasce silencioso
+e fechá-lo não custa nada. Vai no relatório como candidato a emenda no
+primitivo.
+
+### O efeito visível: a tela deixou de ter dois estilos de campo
+
+Antes, "Nome da empresa", "Endereço" e "Cidade" já vinham do `Input` (rótulo de
+14px, fundo `--surface`) e os quatro à mão tinham rótulo de 12px sobre fundo
+`--surface-elevated`. Os dois estilos apareciam lado a lado na mesma coluna.
+Agora são um só. Está no relatório para o operador.
 
 ---
 
 ## O que NÃO fiz, e por quê
 
-- **Não troquei os quatro controles crus pelos primitivos.** É mudança de
-  estrutura com efeito em foco, `id`, mensagem de erro e ordem de tabulação; o
-  briefing manda contar, e a §7 manda relatar mudança funcional em vez de
-  decidi-la.
-- **Não liguei rótulo e campo.** Mesmo motivo, e o ganho seria real — está no
-  relatório com essa recomendação.
 - **Não mexi na assinatura da marca.** Decisão de desenho.
+- **Não removi o ramo morto** da mensagem `"Nome da empresa é obrigatório."`
+  (ver abaixo).
 - **Achei um ramo morto e não o removi**: a mensagem `"Nome da empresa é
   obrigatório."` nunca aparece, porque o campo é um `Input` com `required` e o
   navegador barra o envio antes de o `handleSubmit` rodar. Removê-la seria

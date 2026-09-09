@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useState } from "react";
+import { useEffect, useId, useMemo, useState } from "react";
 import { toast } from "sonner";
 import {
   Alert,
@@ -69,6 +69,10 @@ function QuickReplyModal({
   const [saving, setSaving] = useState(false);
   const [error, setError] = useState<string | null>(null);
 
+  // Ligam o rotulo e a dica ao campo de atalho, que nao passa pelo `Input`.
+  const idAtalho = useId();
+  const idDicaAtalho = idAtalho + "-dica";
+
   async function handleSave() {
     if (form.shortcut.length < 2) {
       setError("O atalho precisa de pelo menos 2 caracteres.");
@@ -115,14 +119,39 @@ function QuickReplyModal({
       <div className="space-y-4">
         {error && <Alert variant="warning">{error}</Alert>}
 
+        {/* O asterisco era `text-danger-400` — a rampa semântica pintada como
+            cor de TEXTO, que a §3.2 reprova. Passa para dentro do rótulo, como
+            no `ProfilePage`.
+
+            ── Por que este campo NÃO usa o primitivo `Input` ────────────
+            O `/` à esquerda é irmão do campo dentro de uma linha `flex`, e o
+            `Input` não tem slot de prefixo: ele desenha
+            `div.flex-col > label + input + p`, então a barra ficaria ao lado
+            do BLOCO inteiro (rótulo, campo e dica), centrada verticalmente
+            contra os três.
+
+            A saída de posicionar a barra por cima do campo, como o
+            `ProfilePage` faz com o `Spinner`, não serve aqui: lá o
+            `bottom-2.5` acerta o campo porque não há dica embaixo; aqui há, e
+            o mesmo deslocamento cairia sobre o texto da dica.
+
+            Então a ligação vai à mão — `htmlFor` + `id` do `useId`, mais o
+            `aria-describedby` que amarra a dica ao campo, que é o outro
+            brinde do primitivo. O que o campo perde é o `aria-invalid`, e ele
+            não teria uso: o erro deste formulário é um `Alert` no topo, não
+            uma mensagem por campo. */}
         <div className="space-y-1.5">
-          {/* O asterisco era `text-danger-400` — a rampa semântica pintada
-              como cor de TEXTO, que a §3.2 reprova. Passa para dentro do
-              rótulo, como no `ProfilePage`. */}
-          <label className="text-xs font-medium text-conteudo-muted">Atalho *</label>
+          <label
+            htmlFor={idAtalho}
+            className="text-xs font-medium text-conteudo-muted"
+          >
+            Atalho *
+          </label>
           <div className="flex items-center gap-2">
             <span className="text-sm font-semibold text-conteudo-muted">/</span>
             <input
+              id={idAtalho}
+              aria-describedby={idDicaAtalho}
               value={form.shortcut}
               onChange={(e) =>
                 setForm((f) => ({ ...f, shortcut: sanitizeShortcut(e.target.value) }))
@@ -133,7 +162,7 @@ function QuickReplyModal({
               className="w-full rounded-lg border border-borda-control bg-surface-elevated px-3 py-2 text-sm text-conteudo placeholder:text-conteudo-muted focus:outline-none focus:ring-2 focus:ring-action focus:border-transparent transition-colors"
             />
           </div>
-          <p className="text-xs text-conteudo-muted">
+          <p id={idDicaAtalho} className="text-xs text-conteudo-muted">
             É o que o técnico digita depois da barra no chat. Sem espaços nem acentos.
           </p>
         </div>

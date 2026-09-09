@@ -161,6 +161,65 @@ describe("QuickRepliesPage — o que a tela promete", () => {
   });
 });
 
+/**
+ * O rótulo do atalho, e por que ele é o único desta tela ligado à mão.
+ *
+ * Era um `<label>` sem `htmlFor` sobre um `<input>` sem `id`. Os outros campos
+ * do formulário já vinham dos primitivos (`Input`, `Textarea`), que ligam
+ * sozinhos; este não cabe no `Input` porque tem a barra `/` como irmã dentro
+ * de uma linha `flex`, e o primitivo não tem slot de prefixo. Então a ligação
+ * é manual — e é justamente por ser manual que ela precisa de caso próprio:
+ * a do primitivo é conferida no teste do primitivo, esta não é conferida em
+ * lugar nenhum.
+ */
+describe("QuickRepliesPage — o formulário liga rótulo e campo", () => {
+  beforeEach(() => {
+    vi.clearAllMocks();
+    comLista();
+  });
+
+  async function abrirFormulario() {
+    render(<QuickRepliesPage />);
+    await userEvent.click(
+      await screen.findByRole("button", { name: "Nova resposta" }),
+    );
+    return screen.findByRole("dialog", { name: "Nova resposta rápida" });
+  }
+
+  it("o campo de atalho é alcançável pelo próprio rótulo", async () => {
+    await abrirFormulario();
+    const campo = await screen.findByLabelText("Atalho *");
+    expect(campo.tagName).toBe("INPUT");
+  });
+
+  it("os outros três campos também", async () => {
+    await abrirFormulario();
+    expect(screen.getByLabelText("Título *").tagName).toBe("INPUT");
+    expect(screen.getByLabelText("Mensagem *").tagName).toBe("TEXTAREA");
+    expect(screen.getByLabelText("Disponível no chat")).toBeTruthy();
+  });
+
+  it("clicar no rótulo do atalho foca o campo", async () => {
+    await abrirFormulario();
+    // O campo nasce com `autoFocus`, então o foco JÁ está nele: sem tirá-lo
+    // daqui primeiro, o caso passaria com o `htmlFor` apagado.
+    screen.getByLabelText("Título *").focus();
+    expect(screen.getByLabelText("Atalho *")).not.toHaveFocus();
+
+    await userEvent.click(screen.getByText("Atalho *"));
+    expect(screen.getByLabelText("Atalho *")).toHaveFocus();
+  });
+
+  it("a dica do atalho é lida junto do campo, e não solta ao lado dele", async () => {
+    // `aria-describedby` é o outro brinde do primitivo que a ligação manual
+    // teve de repor. Sem ele a dica existe na tela e não existe para quem ouve.
+    await abrirFormulario();
+    expect(await screen.findByLabelText("Atalho *")).toHaveAccessibleDescription(
+      /depois da barra no chat/,
+    );
+  });
+});
+
 describe("QuickRepliesPage — o que a Fase 16 tirou daqui", () => {
   it("não sobrou `<svg>` solto nem componente local de ícone", () => {
     expect(CODIGO).not.toContain("<svg");

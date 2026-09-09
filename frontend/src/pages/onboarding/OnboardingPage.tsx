@@ -1,7 +1,7 @@
 import { useEffect, useState } from "react";
 import { useNavigate } from "react-router-dom";
 import { useAuth } from "../../contexts/AuthContext";
-import { Alert, Button, Input, Spinner } from "../../components/ui";
+import { Alert, Button, Input, Select, Spinner } from "../../components/ui";
 import { completeOnboarding } from "../../services/userService";
 import { isValidCep, isValidCnpj, maskCnpjInput, onlyDigits } from "../../lib/documents";
 import {
@@ -189,28 +189,32 @@ function StepCompany({
         </Alert>
       )}
 
-      <div className="space-y-1.5">
-        {/* O asterisco de obrigatório era `text-danger-400` — um vermelho
-            claro pintado como cor de TEXTO, que é a reprovação da §3.2. Ele
-            passa a viver no texto do rótulo, como no `ProfilePage` e no
-            `ProductsPage`: quem lê com leitor de tela ouve o asterisco junto
-            do nome do campo, em vez de um `<span>` colorido sem ligação
-            nenhuma com o campo. */}
-        <label className="text-xs text-conteudo-muted">CNPJ *</label>
-        <div className="relative">
-          <input
-            value={cnpj}
-            onChange={(e) => setCnpj(maskCnpjInput(e.target.value))}
-            onBlur={handleCnpjBlur}
-            placeholder="00.000.000/0000-00"
-            className="w-full rounded-lg border border-borda-control bg-surface-elevated px-3 py-2 text-sm text-conteudo placeholder:text-conteudo-muted focus:outline-none focus:ring-2 focus:ring-action focus:border-transparent transition-colors"
-          />
-          {lookingCnpj && (
-            <div className="absolute right-3 top-2.5">
-              <Spinner size="sm" />
-            </div>
-          )}
-        </div>
+      {/* O asterisco de obrigatório era `text-danger-400` — um vermelho claro
+          pintado como cor de TEXTO, que é a reprovação da §3.2 — e o rótulo
+          era um `<label>` SEM `htmlFor`, sobre um `<input>` sem `id`: os dois
+          ficavam um em cima do outro na tela e não tinham relação nenhuma na
+          árvore de acessibilidade.
+
+          O campo passa ao primitivo `Input`, que resolve os dois de uma vez:
+          o `id` vem do `useId` (e não do rótulo em minúsculas, que dava o
+          MESMO id para dois campos de mesmo nome), o `htmlFor` sai ligado, e
+          vêm de brinde o `aria-invalid` e o `aria-describedby`. Mesma receita
+          do `ProfilePage`, inclusive o `div.relative` com o `Spinner` por
+          cima — que é o motivo de este campo não ter migrado na primeira
+          passada. */}
+      <div className="relative">
+        <Input
+          label="CNPJ *"
+          value={cnpj}
+          onChange={(e) => setCnpj(maskCnpjInput(e.target.value))}
+          onBlur={handleCnpjBlur}
+          placeholder="00.000.000/0000-00"
+        />
+        {lookingCnpj && (
+          <div className="absolute right-3 bottom-2.5">
+            <Spinner size="sm" />
+          </div>
+        )}
       </div>
 
       <Input
@@ -221,22 +225,19 @@ function StepCompany({
         required
       />
 
-      <div className="space-y-1.5">
-        <label className="text-xs text-conteudo-muted">CEP *</label>
-        <div className="relative">
-          <input
-            value={cep}
-            onChange={(e) => setCep(formatCep(e.target.value))}
-            onBlur={handleCepBlur}
-            placeholder="00000-000"
-            className="w-full rounded-lg border border-borda-control bg-surface-elevated px-3 py-2 text-sm text-conteudo placeholder:text-conteudo-muted focus:outline-none focus:ring-2 focus:ring-action focus:border-transparent transition-colors"
-          />
-          {lookingCep && (
-            <div className="absolute right-3 top-2.5">
-              <Spinner size="sm" />
-            </div>
-          )}
-        </div>
+      <div className="relative">
+        <Input
+          label="CEP *"
+          value={cep}
+          onChange={(e) => setCep(formatCep(e.target.value))}
+          onBlur={handleCepBlur}
+          placeholder="00000-000"
+        />
+        {lookingCep && (
+          <div className="absolute right-3 bottom-2.5">
+            <Spinner size="sm" />
+          </div>
+        )}
       </div>
 
       <Input
@@ -253,16 +254,13 @@ function StepCompany({
           onChange={(e) => setCity(e.target.value)}
           placeholder="Ex: Recife"
         />
-        <div className="space-y-1.5">
-          <label className="text-xs text-conteudo-muted">Estado (UF)</label>
-          <input
-            value={state}
-            onChange={(e) => setState(e.target.value.toUpperCase().slice(0, 2))}
-            placeholder="PE"
-            maxLength={2}
-            className="w-full rounded-lg border border-borda-control bg-surface-elevated px-3 py-2 text-sm text-conteudo placeholder:text-conteudo-muted focus:outline-none focus:ring-2 focus:ring-action focus:border-transparent transition-colors"
-          />
-        </div>
+        <Input
+          label="Estado (UF)"
+          value={state}
+          onChange={(e) => setState(e.target.value.toUpperCase().slice(0, 2))}
+          placeholder="PE"
+          maxLength={2}
+        />
       </div>
 
       <Button
@@ -370,21 +368,20 @@ function StepEquipment({ onNext }: { onNext: () => void }) {
             </Alert>
           )}
 
-          <div className="space-y-1.5">
-            <label className="text-xs text-conteudo-muted">Produto</label>
-            <select
-              value={productId}
-              onChange={(e) => setProductId(e.target.value)}
-              className="w-full rounded-lg border border-borda-control bg-surface-elevated px-3 py-2 text-sm text-conteudo focus:outline-none focus:ring-2 focus:ring-action focus:border-transparent transition-colors"
-            >
-              {products.map((p) => (
-                <option key={p.id} value={p.id}>
-                  {p.name}
-                  {p.version ? ` (${p.version})` : ""}
-                </option>
-              ))}
-            </select>
-          </div>
+          {/* O `id` vai explícito: o `Select` do pacote, sem ele, deriva o id
+              do rótulo em minúsculas — e dois seletores de mesmo rótulo na
+              mesma tela gerariam o mesmo `id`. Aqui há um só, mas o defeito
+              nasce silencioso e não custa nada fechar. */}
+          <Select
+            id="onboarding-produto"
+            label="Produto"
+            value={productId}
+            onChange={(e) => setProductId(e.target.value)}
+            options={products.map((p) => ({
+              value: p.id,
+              label: p.name + (p.version ? ` (${p.version})` : ""),
+            }))}
+          />
 
           <Input
             label="Nome do equipamento"

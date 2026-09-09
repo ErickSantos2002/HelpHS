@@ -152,14 +152,60 @@ de acessibilidade.
 
 ---
 
+## Segunda passada — `Escape` fecha, e o foco volta ao gatilho
+
+Aprovado pelo operador depois do relatório da primeira passada. 404 linhas
+antes, 464 depois.
+
+O que existia: os painéis fechavam **só** por clique fora, num ouvinte de
+`mousedown`. Quem navega por teclado abria o menu, entrava nele com `Tab` e não
+tinha como sair sem atravessar todo o resto do painel.
+
+O que passou a existir, e são **duas** metades de uma coisa só:
+
+| metade | por quê |
+|---|---|
+| `Escape` fecha | é a tecla que todo painel suspenso responde |
+| o foco **volta ao gatilho** | sem isto o elemento focado sai da árvore, o navegador recua para o `<body>`, e o próximo `Tab` recomeça do "pular para o conteúdo" — o painel some sem dizer para onde ir |
+
+A devolução vale também para o **clique fora**, que antes fechava e deixava o
+foco onde estivesse.
+
+### As duas guardas, e por que existem
+
+**A guarda pelo estado ABERTO no clique fora.** Sem ela, todo `mousedown` em
+qualquer canto do sistema chamaria `focus()` no gatilho de um painel já
+fechado — o cursor saltaria para a casca no meio de qualquer digitação.
+
+**A guarda que só ATIVA o ouvinte de `Escape` com algum painel aberto.** É a
+que impede o mesmo roubo pela tecla. Há caso de teste para ela, e a mutação que
+o mata precisa derrubar as **duas** guardas ao mesmo tempo: mutar só a interna
+(`if (notifOpen) fecharNotif()` → `fecharNotif()`) **sobrevive por ser no-op**,
+porque `fecharMenu()` roda depois e o foco dela vence em todo caminho
+alcançável. Está anotado no roteiro de mutação, com essa explicação — é uma das
+"mutações que não são mutações" do briefing, e não um ponto cego do caso.
+
+### O que NÃO entrou: armadilha de foco
+
+A decisão pediu `Escape` e devolução do foco, e disse explicitamente para
+**não** prender o `Tab` dentro do painel. Um painel que não prende o foco
+continua utilizável; um que prende e erra, não. Há um caso que confere que
+nenhum `inert` / `focus-trap` apareceu no arquivo, para que isso não entre de
+carona numa passagem futura.
+
+### O `onClose` do painel de notificações fecha SEM devolver o foco
+
+De propósito, e está anotado no arquivo: as duas chamadas de `onClose` são
+seguidas de `navigate(...)`. Devolver o foco ao sino de uma página que já saiu
+de baixo do pé não ajuda ninguém.
+
+---
+
 ## O que NÃO fiz, e por quê
 
 - **Não criei um primitivo de menu suspenso.** Fora do escopo (`src/components/ui/**`);
-  vai no relatório para o operador.
+  segue no relatório para o operador.
 - **Não mexi no `NOTIF_TYPE_LABEL`.** Um consumidor só; subir para `lib/` seria
   decidir por outra tela que não é minha.
-- **Não liguei os painéis ao teclado além do que já existe.** As linhas de
-  notificação e os itens do menu são `<button>` de verdade, então `Tab` e
-  `Enter` funcionam; o que falta é `Escape` fechar e o foco ficar preso dentro
-  do painel. Isso é comportamento, não cor, e é o tipo de mudança que o briefing
-  manda relatar em vez de decidir.
+- **Não prendi o foco dentro do painel.** Não foi pedido, e a decisão disse para
+  não fazer.

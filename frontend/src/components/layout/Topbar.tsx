@@ -211,6 +211,22 @@ export function Topbar({ onMobileMenuClick, onToggleCollapsed, sidebarCollapsed,
   const userMenuRef = useRef<HTMLDivElement>(null);
   const notifRef = useRef<HTMLDivElement>(null);
 
+  /**
+   * Os dois gatilhos, guardados para devolver o foco.
+   *
+   * Fechar um painel sem devolver o foco deixa quem navega por teclado no
+   * **início do documento**: o elemento focado saiu da árvore, o navegador
+   * recua para o `<body>`, e o próximo `Tab` recomeça do "pular para o
+   * conteúdo". O painel some sem dizer para onde ir.
+   *
+   * O que NÃO existe aqui, de propósito: armadilha de foco enquanto o painel
+   * está aberto. Prender o `Tab` dentro dele muda mais do que a decisão pede,
+   * e um painel que não prende o foco continua utilizável — um que prende e
+   * erra, não.
+   */
+  const notifBotaoRef = useRef<HTMLButtonElement>(null);
+  const userBotaoRef = useRef<HTMLButtonElement>(null);
+
   // Fetch unread count on mount + every 30s
   const fetchUnread = useCallback(() => {
     getNotifications({ limit: 1 })
@@ -224,22 +240,59 @@ export function Topbar({ onMobileMenuClick, onToggleCollapsed, sidebarCollapsed,
     return () => clearInterval(interval);
   }, [fetchUnread]);
 
+  /**
+   * Fecha o painel de notificações e devolve o foco ao sino.
+   *
+   * As duas metades andam juntas: fechar é o que a tecla pede, devolver o foco
+   * é o que faz o teclado continuar de onde parou.
+   */
+  const fecharNotif = useCallback(() => {
+    setNotifOpen(false);
+    notifBotaoRef.current?.focus();
+  }, []);
+
+  /** O mesmo para o menu do usuário. */
+  const fecharMenu = useCallback(() => {
+    setUserMenuOpen(false);
+    userBotaoRef.current?.focus();
+  }, []);
+
   // Close dropdowns on outside click
   useEffect(() => {
     function handler(e: MouseEvent) {
+      // A guarda pelo estado ABERTO é o que impede o efeito de roubar o foco:
+      // sem ela o `mousedown` em qualquer canto da tela chamaria `focus()` no
+      // gatilho de um painel que já estava fechado.
       if (
+        userMenuOpen &&
         userMenuRef.current &&
         !userMenuRef.current.contains(e.target as Node)
       ) {
-        setUserMenuOpen(false);
+        fecharMenu();
       }
-      if (notifRef.current && !notifRef.current.contains(e.target as Node)) {
-        setNotifOpen(false);
+      if (
+        notifOpen &&
+        notifRef.current &&
+        !notifRef.current.contains(e.target as Node)
+      ) {
+        fecharNotif();
       }
     }
     document.addEventListener("mousedown", handler);
     return () => document.removeEventListener("mousedown", handler);
-  }, []);
+  }, [userMenuOpen, notifOpen, fecharMenu, fecharNotif]);
+
+  // Escape fecha o painel aberto — e o foco volta ao gatilho.
+  useEffect(() => {
+    if (!userMenuOpen && !notifOpen) return;
+    function handler(e: KeyboardEvent) {
+      if (e.key !== "Escape") return;
+      if (notifOpen) fecharNotif();
+      if (userMenuOpen) fecharMenu();
+    }
+    document.addEventListener("keydown", handler);
+    return () => document.removeEventListener("keydown", handler);
+  }, [userMenuOpen, notifOpen, fecharMenu, fecharNotif]);
 
   function handleLogout() {
     logout();
@@ -289,6 +342,7 @@ export function Topbar({ onMobileMenuClick, onToggleCollapsed, sidebarCollapsed,
         {/* Notification bell */}
         <div ref={notifRef}>
           <button
+            ref={notifBotaoRef}
             className={cn(
               "relative rounded-lg p-2 text-conteudo-muted transition-colors",
               "hover:bg-surface-elevated hover:text-conteudo-heading",
@@ -314,6 +368,11 @@ export function Topbar({ onMobileMenuClick, onToggleCollapsed, sidebarCollapsed,
           </button>
 
           {notifOpen && (
+            /* Aqui o fechamento é SEM devolver foco de propósito: as duas
+               chamadas de `onClose` do painel são seguidas de `navigate(...)`,
+               e devolver o foco ao sino de uma página que já saiu de baixo do
+               pé não ajuda ninguém. Quem devolve o foco é o fechamento por
+               `Escape` e por clique fora, que deixam o usuário nesta tela. */
             <NotificationDropdown onClose={() => setNotifOpen(false)} />
           )}
         </div>
@@ -321,6 +380,7 @@ export function Topbar({ onMobileMenuClick, onToggleCollapsed, sidebarCollapsed,
         {/* User dropdown */}
         <div ref={userMenuRef}>
           <button
+            ref={userBotaoRef}
             className={cn(
               "flex items-center gap-2.5 rounded-lg px-2 py-1.5 transition-colors",
               "hover:bg-surface-elevated",
