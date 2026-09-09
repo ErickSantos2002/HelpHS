@@ -1,4 +1,4 @@
-export const APP_VERSION = "v1.12.0";
+export const APP_VERSION = "v1.13.0";
 
 export type EntryType = "novidade" | "corrigido" | "melhoria";
 
@@ -14,6 +14,13 @@ export interface ChangelogVersion {
 }
 
 export const CHANGELOG: ChangelogVersion[] = [
+  {
+    version: "v1.13.0",
+    date: "09/09/2026",
+    entries: [
+      { type: "novidade", text: "Interface alinhada ao design system da Health & Safety: cores, tipografia, contraste e tema escuro." },
+    ],
+  },
   {
     version: "v1.12.0",
     date: "31/08/2026",
