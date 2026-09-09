@@ -24,6 +24,14 @@ interface Product {
 
 // ── Step indicator ─────────────────────────────────────────────
 
+/**
+ * Os três degraus do passo a passo.
+ *
+ * As três bolas concentravam os três pares que a catraca cobrava desta tela:
+ * o passo CUMPRIDO era `bg-primary` + `text-white` (3,83:1 — o par errado do
+ * degrau de ação), e o passo FUTURO era `text-slate-500` sobre
+ * `bg-surface-elevated` (4,34:1 no claro, 2,85:1 no escuro).
+ */
 function StepIndicator({ current, total }: { current: number; total: number }) {
   return (
     <div className="flex items-center gap-2 justify-center mb-8">
@@ -32,17 +40,17 @@ function StepIndicator({ current, total }: { current: number; total: number }) {
           <div
             className={`w-8 h-8 rounded-full flex items-center justify-center text-sm font-semibold transition-colors ${
               i < current
-                ? "bg-primary text-white"
+                ? "bg-action text-on-primary"
                 : i === current
-                  ? "bg-primary/20 border-2 border-primary text-primary"
-                  : "bg-surface-elevated border border-borda text-slate-500"
+                  ? "bg-action-tint border-2 border-action text-on-tint-primary"
+                  : "bg-surface-elevated border border-borda text-conteudo-muted"
             }`}
           >
             {i < current ? "✓" : i + 1}
           </div>
           {i < total - 1 && (
             <div
-              className={`w-12 h-0.5 ${i < current ? "bg-primary" : "bg-borda"}`}
+              className={`w-12 h-0.5 ${i < current ? "bg-action" : "bg-borda"}`}
             />
           )}
         </div>
@@ -166,10 +174,10 @@ function StepCompany({
   return (
     <form onSubmit={handleSubmit} className="space-y-5">
       <div>
-        <h2 className="text-lg font-semibold text-slate-100">
+        <h2 className="text-lg font-semibold text-conteudo-heading">
           Sobre sua empresa
         </h2>
-        <p className="text-sm text-slate-500 mt-1">
+        <p className="text-sm text-conteudo-muted mt-1">
           Digite o CNPJ para preenchermos automaticamente, ou preencha
           manualmente.
         </p>
@@ -182,16 +190,20 @@ function StepCompany({
       )}
 
       <div className="space-y-1.5">
-        <label className="text-xs text-slate-400">
-          CNPJ <span className="text-danger-400">*</span>
-        </label>
+        {/* O asterisco de obrigatório era `text-danger-400` — um vermelho
+            claro pintado como cor de TEXTO, que é a reprovação da §3.2. Ele
+            passa a viver no texto do rótulo, como no `ProfilePage` e no
+            `ProductsPage`: quem lê com leitor de tela ouve o asterisco junto
+            do nome do campo, em vez de um `<span>` colorido sem ligação
+            nenhuma com o campo. */}
+        <label className="text-xs text-conteudo-muted">CNPJ *</label>
         <div className="relative">
           <input
             value={cnpj}
             onChange={(e) => setCnpj(maskCnpjInput(e.target.value))}
             onBlur={handleCnpjBlur}
             placeholder="00.000.000/0000-00"
-            className="w-full rounded-lg border border-borda bg-surface-elevated px-3 py-2 text-sm text-slate-100 placeholder:text-slate-500 focus:outline-none focus:ring-2 focus:ring-primary focus:border-transparent transition-colors"
+            className="w-full rounded-lg border border-borda-control bg-surface-elevated px-3 py-2 text-sm text-conteudo placeholder:text-conteudo-muted focus:outline-none focus:ring-2 focus:ring-action focus:border-transparent transition-colors"
           />
           {lookingCnpj && (
             <div className="absolute right-3 top-2.5">
@@ -210,16 +222,14 @@ function StepCompany({
       />
 
       <div className="space-y-1.5">
-        <label className="text-xs text-slate-400">
-          CEP <span className="text-danger-400">*</span>
-        </label>
+        <label className="text-xs text-conteudo-muted">CEP *</label>
         <div className="relative">
           <input
             value={cep}
             onChange={(e) => setCep(formatCep(e.target.value))}
             onBlur={handleCepBlur}
             placeholder="00000-000"
-            className="w-full rounded-lg border border-borda bg-surface-elevated px-3 py-2 text-sm text-slate-100 placeholder:text-slate-500 focus:outline-none focus:ring-2 focus:ring-primary focus:border-transparent transition-colors"
+            className="w-full rounded-lg border border-borda-control bg-surface-elevated px-3 py-2 text-sm text-conteudo placeholder:text-conteudo-muted focus:outline-none focus:ring-2 focus:ring-action focus:border-transparent transition-colors"
           />
           {lookingCep && (
             <div className="absolute right-3 top-2.5">
@@ -244,13 +254,13 @@ function StepCompany({
           placeholder="Ex: Recife"
         />
         <div className="space-y-1.5">
-          <label className="text-xs text-slate-400">Estado (UF)</label>
+          <label className="text-xs text-conteudo-muted">Estado (UF)</label>
           <input
             value={state}
             onChange={(e) => setState(e.target.value.toUpperCase().slice(0, 2))}
             placeholder="PE"
             maxLength={2}
-            className="w-full rounded-lg border border-borda bg-surface-elevated px-3 py-2 text-sm text-slate-100 placeholder:text-slate-500 focus:outline-none focus:ring-2 focus:ring-primary focus:border-transparent transition-colors"
+            className="w-full rounded-lg border border-borda-control bg-surface-elevated px-3 py-2 text-sm text-conteudo placeholder:text-conteudo-muted focus:outline-none focus:ring-2 focus:ring-action focus:border-transparent transition-colors"
           />
         </div>
       </div>
@@ -338,17 +348,17 @@ function StepEquipment({ onNext }: { onNext: () => void }) {
   return (
     <div className="space-y-6">
       <div>
-        <h2 className="text-lg font-semibold text-slate-100">
+        <h2 className="text-lg font-semibold text-conteudo-heading">
           Seus equipamentos
         </h2>
-        <p className="text-sm text-slate-500 mt-1">
+        <p className="text-sm text-conteudo-muted mt-1">
           Cadastre os equipamentos que você é responsável. Você pode adicionar
           mais depois.
         </p>
       </div>
 
       {products.length === 0 ? (
-        <div className="rounded-lg border border-borda bg-surface-elevated p-4 text-sm text-slate-400 text-center">
+        <div className="rounded-lg border border-borda bg-surface-elevated p-4 text-sm text-conteudo-muted text-center">
           Nenhum produto cadastrado ainda. Você poderá adicionar equipamentos
           depois.
         </div>
@@ -361,11 +371,11 @@ function StepEquipment({ onNext }: { onNext: () => void }) {
           )}
 
           <div className="space-y-1.5">
-            <label className="text-xs text-slate-400">Produto</label>
+            <label className="text-xs text-conteudo-muted">Produto</label>
             <select
               value={productId}
               onChange={(e) => setProductId(e.target.value)}
-              className="w-full rounded-lg border border-borda bg-surface-elevated px-3 py-2 text-sm text-slate-100 focus:outline-none focus:ring-2 focus:ring-primary focus:border-transparent transition-colors"
+              className="w-full rounded-lg border border-borda-control bg-surface-elevated px-3 py-2 text-sm text-conteudo focus:outline-none focus:ring-2 focus:ring-action focus:border-transparent transition-colors"
             >
               {products.map((p) => (
                 <option key={p.id} value={p.id}>
@@ -412,7 +422,7 @@ function StepEquipment({ onNext }: { onNext: () => void }) {
 
       {myEquipments.length > 0 && (
         <div className="space-y-2">
-          <p className="text-xs text-slate-500 font-medium uppercase tracking-wide">
+          <p className="text-xs text-conteudo-muted font-medium uppercase tracking-wide">
             Adicionados ({myEquipments.length})
           </p>
           {myEquipments.map((eq) => (
@@ -420,12 +430,12 @@ function StepEquipment({ onNext }: { onNext: () => void }) {
               key={eq.id}
               className="flex items-center gap-3 rounded-lg border border-borda bg-surface-elevated px-4 py-3"
             >
-              <div className="w-2 h-2 rounded-full bg-primary shrink-0" />
+              <div className="w-2 h-2 rounded-full bg-action shrink-0" />
               <div className="min-w-0">
-                <p className="text-sm text-slate-200 font-medium truncate">
+                <p className="text-sm text-conteudo font-medium truncate">
                   {eq.name}
                 </p>
-                <p className="text-xs text-slate-500">
+                <p className="text-xs text-conteudo-muted">
                   {[eq.serial_number, eq.location].filter(Boolean).join(" · ")}
                 </p>
               </div>
@@ -459,12 +469,12 @@ function StepDone() {
 
   return (
     <div className="text-center space-y-6">
-      <div className="w-16 h-16 rounded-full bg-primary/20 border-2 border-primary/40 flex items-center justify-center mx-auto text-3xl">
+      <div className="w-16 h-16 rounded-full bg-action-tint border-2 border-action-tint-border flex items-center justify-center mx-auto text-3xl text-on-tint-primary">
         ✓
       </div>
       <div>
-        <h2 className="text-lg font-semibold text-slate-100">Tudo pronto!</h2>
-        <p className="text-sm text-slate-500 mt-2 max-w-xs mx-auto">
+        <h2 className="text-lg font-semibold text-conteudo-heading">Tudo pronto!</h2>
+        <p className="text-sm text-conteudo-muted mt-2 max-w-xs mx-auto">
           Seu perfil está configurado. Agora você pode abrir chamados sempre que
           precisar de suporte.
         </p>
@@ -501,11 +511,16 @@ export default function OnboardingPage() {
         <div className="text-center space-y-1">
           <div className="flex items-center justify-center gap-2.5 mb-4">
             <span className="w-3 h-3 rounded-full bg-primary" />
-            <span className="text-2xl font-bold text-slate-100 tracking-tight">
+            {/* `text-primary` no "HS" é a cor de MARCA, e continua sendo: a
+                assinatura fica em 24px negrito, que a WCAG conta como texto
+                grande (piso 3:1), e o degrau dá 3,66:1 sobre `--bg-base`.
+                Trocar por `--text-link` mudaria a assinatura do produto, e
+                isso não se decide dentro de uma tela. */}
+            <span className="text-2xl font-bold text-conteudo-heading tracking-tight">
               Help<span className="text-primary">HS</span>
             </span>
           </div>
-          <p className="text-slate-400 text-sm">
+          <p className="text-conteudo-muted text-sm">
             Vamos configurar seu perfil — leva menos de 2 minutos
           </p>
         </div>
@@ -519,15 +534,15 @@ export default function OnboardingPage() {
           {step === 2 && <StepDone />}
         </div>
 
-        <p className="text-center text-xs text-slate-600">
+        <p className="text-center text-xs text-conteudo-muted">
           Passo {step + 1} de {STEPS.length} — {STEPS[step]}
         </p>
 
-        <p className="text-center text-xs text-slate-600">
+        <p className="text-center text-xs text-conteudo-muted">
           Quer sair?{" "}
           <button
             onClick={() => logout()}
-            className="text-slate-500 hover:text-slate-300 transition-colors underline underline-offset-2"
+            className="text-conteudo-link hover:text-conteudo-link-hover transition-colors underline underline-offset-2"
           >
             Deslogar
           </button>
