@@ -27,18 +27,27 @@ dois trechos contraditórios e o modelo escolhe um ou mistura, e a Helô respond
 COM A FONTE CITADA, que é pior do que errar sem fonte porque parece conferível.
 Quem decide qual número está certo é o suporte técnico.
 
-POR QUE UM MAPA EXPLÍCITO DE ARQUIVOS
--------------------------------------
-Nada aqui é inferido do nome do arquivo, e não é preguiça: `MarkX.txt` é o
-produto "Mark X" e `iblow10pro.txt` é "iBlow 10 Pro" — os nomes não batem, e
-adivinhar por normalização daria certo hoje e erraria no primeiro arquivo
-novo. Errar o produto é pior do que não indexar: manda o procedimento do
-aparelho errado para quem está com um instrumento de medição legal na mão.
+DE ONDE VEM O PRODUTO
+---------------------
+Da tabela `products`, que é a autoridade sobre quais aparelhos existem — não
+de uma lista escrita aqui. Cada arquivo é casado contra os produtos do banco
+comparando os nomes normalizados dos DOIS lados: minúsculas, sem acento, sem
+espaço, sem underscore, sem hífen. É o que faz `MarkX.txt` encontrar "Mark X"
+e `Manual_Tecnico_iBlow10Pro.txt` encontrar "iBlow 10 Pro" sem ninguém tabelar
+a exceção.
 
-O corte também é declarado por arquivo. Uma regex só não serve: nos três
-manuais numerados ela casa 26, 19 e 59 linhas contra 16, 11 e 12 títulos
-reais, porque passo de procedimento e pergunta de FAQ têm a mesma forma
-"N. texto" no começo da linha.
+O casamento é por CONTENÇÃO, nunca por aproximação difusa, e documento técnico
+precisa casar com **exatamente um** produto: zero ou dois interrompem a
+ingestão inteira. Errar o produto é pior do que não indexar — manda o
+procedimento do aparelho errado para quem está com um instrumento de medição
+legal na mão.
+
+O QUE CONTINUA DECLARADO
+------------------------
+O corte, o tipo e o título, por arquivo. Uma regex só não serve para o corte:
+nos três manuais numerados ela casa 26, 19 e 59 linhas contra 16, 11 e 12
+títulos reais, porque passo de procedimento e pergunta de FAQ têm a mesma
+forma "N. texto" no começo da linha.
 """
 
 import argparse
@@ -71,8 +80,22 @@ from app.models.models import (  # noqa: E402
 
 @dataclass(frozen=True)
 class Fonte:
+    """
+    O que este script sabe sobre um arquivo — e repare no que NÃO está aqui.
+
+    O produto não é declarado. Ele é resolvido contra a tabela `products` do
+    banco, que é a autoridade sobre quais aparelhos existem. Declarar aqui
+    duplicaria o seed em texto solto: no dia em que alguém renomeasse um
+    produto, esta lista continuaria dizendo o nome antigo e a busca passaria a
+    devolver nada, em silêncio.
+
+    A inversão também é o que torna "casou com mais de um produto" um caso
+    POSSÍVEL, e portanto detectável. Com o nome escrito à mão, sempre haveria
+    exatamente um por construção — e a ambiguidade só apareceria como resposta
+    errada na tela do cliente.
+    """
+
     arquivo: str
-    produto: str
     tipo: HeloDocType
     corte: str
     titulo: str
@@ -85,39 +108,91 @@ class Fonte:
 FONTES = (
     Fonte(
         "manual_phoebus_completo.txt",
-        "Phoebus",
         HeloDocType.tecnico,
         "numerada",
         "Manual Técnico do Phoebus",
     ),
     Fonte(
         "Manual Tecnico Titan.txt",
-        "Titan",
         HeloDocType.tecnico,
         "numerada",
         "Manual Técnico do Titan",
     ),
     Fonte(
         "Manual_Tecnico_iBlow10Pro.txt",
-        "iBlow 10 Pro",
         HeloDocType.tecnico,
         "numerada",
         "Manual Técnico do iBlow 10 Pro",
     ),
-    Fonte("Deimos.txt", "Deimos", HeloDocType.comercial, "regua", "Ficha Comercial do Deimos"),
-    Fonte(
-        "EBS-010.txt", "EBS-010", HeloDocType.comercial, "markdown", "Ficha Comercial do EBS-010"
-    ),
+    Fonte("Deimos.txt", HeloDocType.comercial, "regua", "Ficha Comercial do Deimos"),
+    Fonte("EBS-010.txt", HeloDocType.comercial, "markdown", "Ficha Comercial do EBS-010"),
     Fonte(
         "iblow10pro.txt",
-        "iBlow 10 Pro",
         HeloDocType.comercial,
         "regua",
         "Ficha Comercial do iBlow 10 Pro",
     ),
-    Fonte("MarkX.txt", "Mark X", HeloDocType.comercial, "regua", "Ficha Comercial do Mark X"),
-    Fonte("Mercury.txt", "Mercury", HeloDocType.comercial, "emoji", "Ficha Comercial do Mercury"),
+    Fonte("MarkX.txt", HeloDocType.comercial, "regua", "Ficha Comercial do Mark X"),
+    Fonte("Mercury.txt", HeloDocType.comercial, "emoji", "Ficha Comercial do Mercury"),
 )
+
+# ── Casar arquivo com produto ─────────────────────────────────
+
+
+def chave(texto: str) -> str:
+    """
+    A forma comparável de um nome, dos DOIS lados.
+
+    O seed grava "iBlow 10 Pro" e "Mark X"; os arquivos são
+    `Manual_Tecnico_iBlow10Pro.txt` e `MarkX.txt`. Comparação literal falha nos
+    dois, e tabelar a exceção à mão só adia o problema para o próximo arquivo.
+
+    Minúsculas, sem acento, sem espaço, sem underscore e sem hífen. O acento
+    entra porque nome de produto com acento é questão de tempo, e é barato
+    resolver antes.
+    """
+    s = unicodedata.normalize("NFKD", texto.lower())
+    s = "".join(c for c in s if not unicodedata.combining(c))
+    return re.sub(r"[\s_\-]+", "", s)
+
+
+class CorpusInconsistenteError(RuntimeError):
+    """O mapa entre arquivo e produto não fecha. Não há palpite bom aqui."""
+
+
+def casa_produtos(fonte: Fonte, produtos: dict[str, uuid.UUID]) -> list[uuid.UUID]:
+    """
+    Quais produtos este documento cobre, decidido por CONTENÇÃO do nome.
+
+    Nada de aproximação difusa. Distância de edição acertaria "Mark X" em
+    "MarkX.txt" e também acertaria "Mercury" em "MarkX.txt" se o limiar
+    escorregasse — e o erro sairia como procedimento do aparelho errado na mão
+    de quem opera um instrumento de medição legal. Contenção é binária: ou o
+    nome normalizado do produto está no nome normalizado do arquivo, ou não
+    está.
+
+    **Documento técnico precisa casar com exatamente um.** Zero ou dois é
+    defeito do mapa, e defeito de mapa para quando é barato — aqui — e não
+    depois, na resposta ao cliente.
+
+    Ficha comercial é mais frouxa de propósito, e a assimetria tem motivo: uma
+    ficha sem produto nenhum pode ser um catálogo que vale para todos, e
+    trecho sem vínculo é exatamente isso. Um procedimento técnico sem produto,
+    não: é o passo do Phoebus aparecendo para quem tem um Titan na mão.
+    """
+    base = chave(Path(fonte.arquivo).stem)
+    achados = [pid for nome, pid in produtos.items() if chave(nome) in base]
+
+    if fonte.tipo is HeloDocType.tecnico and len(achados) != 1:
+        nomes = sorted(n for n in produtos if chave(n) in base)
+        raise CorpusInconsistenteError(
+            f"{fonte.arquivo}: documento técnico casou com {len(achados)} produtos "
+            f"({', '.join(nomes) or 'nenhum'}). Técnico precisa de exatamente um — "
+            "zero manda o procedimento para todos os aparelhos, e dois mandam o "
+            "procedimento errado. Corrija o nome do arquivo ou o cadastro do produto."
+        )
+    return achados
+
 
 # ── Redação: o que sai do texto antes de virar trecho ─────────
 
@@ -333,6 +408,16 @@ class Documento:
     trechos: list[Trecho] = field(default_factory=list)
 
 
+@dataclass
+class Passo:
+    """Um documento e o que a gravação faria com ele."""
+
+    doc: Documento
+    acao: str  # "novo" | "refaz" | "inalterado"
+    produtos: list[str]
+    produto_ids: list[uuid.UUID]
+
+
 def recorta(fonte: Fonte, caminho: Path) -> Documento:
     bruto = caminho.read_text(encoding="utf-8")
     digest = hashlib.sha256(bruto.encode("utf-8")).hexdigest()
@@ -405,18 +490,22 @@ _CONHECIDOS = (
 )
 
 
-def relatorio_de_conflitos(docs: list[Documento]) -> list[str]:
+def relatorio_de_conflitos(plano: list[Passo]) -> list[str]:
     linhas: list[str] = []
 
     # 1. Aplicativo citado por produto
     por_produto: dict[str, dict[str, set[str]]] = {}
-    for d in docs:
-        for t in d.trechos:
+    for passo in plano:
+        # Um documento sem produto resolvido entra como "(sem produto)": some
+        # do agrupamento por aparelho, mas não some do relatório.
+        rotulos = passo.produtos or ["(sem produto)"]
+        for t in passo.doc.trechos:
             for app in _APPS:
                 if app.lower() in t.conteudo.lower():
-                    por_produto.setdefault(d.fonte.produto, {}).setdefault(app, set()).add(
-                        d.fonte.arquivo
-                    )
+                    for rotulo in rotulos:
+                        por_produto.setdefault(rotulo, {}).setdefault(app, set()).add(
+                            passo.doc.fonte.arquivo
+                        )
     for produto, apps in sorted(por_produto.items()):
         if len(apps) > 1:
             linhas.append(f"APLICATIVO — {produto}: {len(apps)} nomes diferentes na documentação")
@@ -425,8 +514,8 @@ def relatorio_de_conflitos(docs: list[Documento]) -> list[str]:
 
     # 2. Canal de contato, no corpus inteiro
     telefones, emails = set(), set()
-    for d in docs:
-        for t in d.trechos:
+    for passo in plano:
+        for t in passo.doc.trechos:
             telefones.update(x.strip() for x in _TELEFONE.findall(t.conteudo))
             emails.update(x.lower() for x in _EMAIL.findall(t.conteudo))
     if len(telefones) > 1 or len(emails) > 1:
@@ -438,13 +527,16 @@ def relatorio_de_conflitos(docs: list[Documento]) -> list[str]:
 
     # 3. Mesmo rótulo de especificação com valores diferentes, no mesmo produto
     especs: dict[tuple[str, str], dict[str, set[str]]] = {}
-    for d in docs:
-        for t in d.trechos:
-            for rotulo, valor in _ESPEC.findall(t.conteudo):
-                chave = (d.fonte.produto, _normaliza(rotulo))
-                if not chave[1] or len(chave[1]) < 4:
-                    continue
-                especs.setdefault(chave, {}).setdefault(valor.strip(), set()).add(d.fonte.arquivo)
+    for passo in plano:
+        for rotulo_produto in passo.produtos or ["(sem produto)"]:
+            for t in passo.doc.trechos:
+                for rotulo, valor in _ESPEC.findall(t.conteudo):
+                    ch = (rotulo_produto, _normaliza(rotulo))
+                    if not ch[1] or len(ch[1]) < 4:
+                        continue
+                    especs.setdefault(ch, {}).setdefault(valor.strip(), set()).add(
+                        passo.doc.fonte.arquivo
+                    )
     for (produto, rotulo), valores in sorted(especs.items()):
         if len(valores) > 1 and len({a for s in valores.values() for a in s}) > 1:
             linhas.append(f"ESPECIFICAÇÃO — {produto} / '{rotulo}': {len(valores)} valores")
@@ -454,25 +546,75 @@ def relatorio_de_conflitos(docs: list[Documento]) -> list[str]:
     return linhas
 
 
-# ── Gravação ──────────────────────────────────────────────────
+# ── O plano: o que a gravação FARIA ───────────────────────────
 
 
-async def aplica(docs: list[Documento]) -> list[str]:
-    settings = get_settings()
-    motor = create_async_engine(settings.database_url)
-    avisos: list[str] = []
+async def planeja(docs: list[Documento]) -> list[Passo]:
+    """
+    Resolve produto e decide a ação, SEM escrever nada.
+
+    Existe separado da gravação para o `--aplicar` poder ser conferido antes de
+    rodar: a mesma função monta o que se vê no relatório e o que a gravação
+    executa, então o relatório não é uma descrição do plano — é o plano.
+
+    A inconsistência de corpus estoura AQUI, antes de qualquer INSERT: um
+    documento técnico sem produto, ou com dois, para a ingestão inteira em vez
+    de gravar sete arquivos certos e um errado.
+    """
+    motor = create_async_engine(get_settings().database_url)
+    plano: list[Passo] = []
     async with async_sessionmaker(bind=motor, expire_on_commit=False)() as s:
         produtos = {
             nome: pid for pid, nome in (await s.execute(select(Product.id, Product.name))).all()
         }
+        if not produtos:
+            raise CorpusInconsistenteError(
+                "A tabela `products` está vazia. Sem produto, todo trecho ficaria sem "
+                "vínculo — e trecho sem vínculo vale para TODOS os aparelhos, que é o "
+                "oposto do que a busca precisa. Rode os seeds antes."
+            )
+
         for doc in docs:
+            ids = casa_produtos(doc.fonte, produtos)
+            nomes = sorted(n for n, pid in produtos.items() if pid in set(ids))
+
+            existente = (
+                await s.execute(
+                    select(HeloDocument.content_hash).where(
+                        HeloDocument.filename == doc.fonte.arquivo
+                    )
+                )
+            ).scalar_one_or_none()
+
+            if existente is None:
+                acao = "novo"
+            elif existente == doc.hash:
+                acao = "inalterado"
+            else:
+                acao = "refaz"
+
+            plano.append(Passo(doc=doc, acao=acao, produtos=nomes, produto_ids=ids))
+    await motor.dispose()
+    return plano
+
+
+# ── Gravação ──────────────────────────────────────────────────
+
+
+async def aplica(plano: list[Passo]) -> list[str]:
+    settings = get_settings()
+    motor = create_async_engine(settings.database_url)
+    avisos: list[str] = []
+    async with async_sessionmaker(bind=motor, expire_on_commit=False)() as s:
+        for passo in plano:
+            doc = passo.doc
             existente = (
                 await s.execute(
                     select(HeloDocument).where(HeloDocument.filename == doc.fonte.arquivo)
                 )
             ).scalar_one_or_none()
 
-            if existente is not None and existente.content_hash == doc.hash:
+            if passo.acao == "inalterado":
                 avisos.append(f"  = {doc.fonte.arquivo}: inalterado, nada a fazer")
                 continue
 
@@ -499,12 +641,11 @@ async def aplica(docs: list[Documento]) -> list[str]:
                 avisos.append(f"  + {doc.fonte.arquivo}: {len(doc.trechos)} trechos novos")
             await s.flush()
 
-            produto_id = produtos.get(doc.fonte.produto)
-            if produto_id is None:
+            if not passo.produto_ids:
                 avisos.append(
-                    f"  ! {doc.fonte.arquivo}: produto '{doc.fonte.produto}' não existe no banco — "
-                    "trechos ficam SEM vínculo, e trecho sem produto vale para TODOS. "
-                    "Rode os seeds antes."
+                    f"  ! {doc.fonte.arquivo}: sem produto vinculado — os trechos valem "
+                    "para TODOS os aparelhos. É o comportamento certo para catálogo, "
+                    "e só chega aqui porque é ficha comercial (técnico sem produto é erro fatal)."
                 )
 
             for t in doc.trechos:
@@ -518,11 +659,9 @@ async def aplica(docs: list[Documento]) -> list[str]:
                 )
                 s.add(chunk)
                 await s.flush()
-                if produto_id is not None:
+                for pid in passo.produto_ids:
                     await s.execute(
-                        helo_chunk_products.insert().values(
-                            chunk_id=chunk.id, product_id=produto_id
-                        )
+                        helo_chunk_products.insert().values(chunk_id=chunk.id, product_id=pid)
                     )
         await s.commit()
     await motor.dispose()
@@ -571,6 +710,12 @@ def main() -> int:
     if faltando:
         print(f"AUSENTES: {', '.join(faltando)}\n", file=sys.stderr)
 
+    try:
+        plano = asyncio.run(planeja(docs))
+    except CorpusInconsistenteError as erro:
+        print(f"\nCORPUS INCONSISTENTE — nada foi gravado.\n\n{erro}\n", file=sys.stderr)
+        return 1
+
     print("=" * 72)
     print("RECORTE")
     print("=" * 72)
@@ -589,9 +734,24 @@ def main() -> int:
 
     print()
     print("=" * 72)
+    print("O QUE O --aplicar FARIA")
+    print("=" * 72)
+    rotulo_da_acao = {"novo": "CRIA  ", "refaz": "REFAZ ", "inalterado": "pula  "}
+    for passo in plano:
+        vinculo = ", ".join(passo.produtos) if passo.produtos else "SEM PRODUTO (vale para todos)"
+        print(
+            f"  {rotulo_da_acao[passo.acao]} {passo.doc.fonte.arquivo:32} "
+            f"{len(passo.doc.trechos):3} trechos → {vinculo}"
+        )
+    novos = sum(len(p.doc.trechos) for p in plano if p.acao != "inalterado")
+    vinculos = sum(len(p.doc.trechos) * len(p.produto_ids) for p in plano if p.acao != "inalterado")
+    print(f"\n  {novos} trechos gravados, {vinculos} vínculos trecho→produto")
+
+    print()
+    print("=" * 72)
     print("CONFLITOS ENCONTRADOS — não resolvidos aqui, por decisão")
     print("=" * 72)
-    conflitos = relatorio_de_conflitos(docs)
+    conflitos = relatorio_de_conflitos(plano)
     if conflitos:
         for linha in conflitos:
             print(linha)
@@ -620,7 +780,7 @@ def main() -> int:
     print("=" * 72)
     print("GRAVANDO")
     print("=" * 72)
-    for linha in asyncio.run(aplica(docs)):
+    for linha in asyncio.run(aplica(plano)):
         print(linha)
     return 0
 

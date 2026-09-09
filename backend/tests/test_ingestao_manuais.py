@@ -11,16 +11,41 @@ caminho e não é exercitada aqui: o que pode dar errado nela é a idempotência
 que depende de Postgres de verdade.
 """
 
+import uuid
+
 import pytest
 
+from app.models.models import HeloDocType
 from scripts.ingere_manuais import (
     _MINIMO,
     FONTES,
+    CorpusInconsistenteError,
     Fonte,
     _corta_numerada,
+    casa_produtos,
+    chave,
     recorta,
     redige,
 )
+
+# Os sete produtos que o `app/seeds.py` grava, com a grafia exata dele. Repetir
+# aqui é de propósito: se alguém renomear um produto no seed, este teste cai e
+# a pessoa descobre que a base da Helô depende daquele nome — em vez de a
+# ingestão passar a não casar nada, em silêncio.
+_PRODUTOS_DO_SEED = (
+    "Deimos",
+    "EBS-010",
+    "iBlow 10 Pro",
+    "Mark X",
+    "Mercury",
+    "Phoebus",
+    "Titan",
+)
+
+
+def _catalogo(*nomes: str) -> dict[str, uuid.UUID]:
+    return {nome: uuid.uuid4() for nome in (nomes or _PRODUTOS_DO_SEED)}
+
 
 # ── O contador crescente ──────────────────────────────────────
 
@@ -185,12 +210,25 @@ def test_o_prompt_da_helo_nao_entra_na_base():
     assert len(FONTES) == 8
 
 
-def test_todo_arquivo_tem_produto_e_tipo_declarados():
-    """Errar o produto manda o procedimento do aparelho errado para o cliente."""
+def test_o_corpus_nao_declara_produto():
+    """
+    O produto vem da tabela `products`, não desta lista.
+
+    Declarar aqui duplicaria o seed em texto solto: no dia em que alguém
+    renomeasse um produto, a lista continuaria dizendo o nome antigo e a busca
+    passaria a devolver nada, em silêncio. E, escrito à mão, "casou com dois
+    produtos" seria impossível por construção — a ambiguidade só apareceria
+    como resposta errada na tela do cliente.
+    """
+    assert not hasattr(FONTES[0], "produto")
+
+
+def test_todo_arquivo_tem_tipo_e_corte_declarados():
+    """O que continua declarado: tipo e estratégia de corte, por arquivo."""
     for f in FONTES:
-        assert f.produto, f.arquivo
         assert f.tipo is not None, f.arquivo
         assert f.corte in {"numerada", "regua", "markdown", "emoji"}, f.arquivo
+        assert f.titulo, f.arquivo
 
 
 def test_as_cinco_fichas_comerciais_estao_marcadas_como_comerciais():
@@ -221,7 +259,7 @@ def test_trecho_curto_demais_nao_vira_trecho(tmp_path):
         "1. Curta\nnada\n2. Longa\n" + ("conteúdo de verdade " * 20),
         encoding="utf-8",
     )
-    fonte = Fonte("Fake.txt", "Titan", FONTES[0].tipo, "numerada", "Falso")
+    fonte = Fonte("Fake.txt", FONTES[0].tipo, "numerada", "Falso")
 
     doc = recorta(fonte, arquivo)
 
@@ -234,7 +272,7 @@ def test_a_ordem_do_arquivo_vira_a_ordem_do_trecho(tmp_path):
     arquivo = tmp_path / "Fake.txt"
     corpo = "conteúdo de verdade " * 10
     arquivo.write_text(f"1. Um\n{corpo}\n2. Dois\n{corpo}\n3. Três\n{corpo}", encoding="utf-8")
-    fonte = Fonte("Fake.txt", "Titan", FONTES[0].tipo, "numerada", "Falso")
+    fonte = Fonte("Fake.txt", FONTES[0].tipo, "numerada", "Falso")
 
     doc = recorta(fonte, arquivo)
 
@@ -246,7 +284,7 @@ def test_o_hash_muda_quando_o_arquivo_muda(tmp_path):
     """É o que torna a ingestão idempotente sem comparar trecho a trecho."""
     arquivo = tmp_path / "Fake.txt"
     corpo = "conteúdo de verdade " * 10
-    fonte = Fonte("Fake.txt", "Titan", FONTES[0].tipo, "numerada", "Falso")
+    fonte = Fonte("Fake.txt", FONTES[0].tipo, "numerada", "Falso")
 
     arquivo.write_text(f"1. Um\n{corpo}", encoding="utf-8")
     primeiro = recorta(fonte, arquivo).hash
@@ -256,3 +294,115 @@ def test_o_hash_muda_quando_o_arquivo_muda(tmp_path):
 
     assert primeiro != segundo
     assert len(primeiro) == 64
+
+
+# ── Casar arquivo com produto ─────────────────────────────────
+
+
+def test_a_chave_normaliza_os_dois_lados():
+    """
+    Os dois casos que a comparação literal erra, e que motivaram a regra.
+
+    O seed grava "iBlow 10 Pro" e "Mark X"; os arquivos são
+    `Manual_Tecnico_iBlow10Pro.txt` e `MarkX.txt`.
+    """
+    assert chave("iBlow 10 Pro") == "iblow10pro"
+    assert chave("Mark X") == "markx"
+    assert chave("EBS-010") == "ebs010"
+    assert chave("Manual_Tecnico_iBlow10Pro") == "manualtecnicoiblow10pro"
+    assert chave("Manual Tecnico Titan") == "manualtecnicotitan"
+
+
+def test_a_chave_tira_acento():
+    """Nome de produto com acento é questão de tempo, e sai barato agora."""
+    assert chave("Phoebus Ácido") == "phoebusacido"
+
+
+@pytest.mark.parametrize("fonte", FONTES, ids=lambda f: f.arquivo)
+def test_todo_arquivo_do_corpus_casa_com_exatamente_um_produto(fonte):
+    """
+    O corpus de hoje, contra os produtos que o seed grava.
+
+    É o teste que prende a promessa: nenhum dos oito fica sem produto e
+    nenhum casa com dois. Se alguém acrescentar um manual cujo nome não
+    contenha o produto, este teste cai antes de a ingestão rodar.
+    """
+    assert len(casa_produtos(fonte, _catalogo())) == 1
+
+
+def test_nenhum_produto_do_seed_e_pedaco_de_outro():
+    """
+    A propriedade que faz a contenção ser segura.
+
+    Se "Mercury" fosse pedaço de "Mercury Plus", todo arquivo do Plus casaria
+    com os dois — e um documento técnico pararia a ingestão. Melhor descobrir
+    aqui do que no dia do cadastro do produto novo.
+    """
+    chaves = [chave(n) for n in _PRODUTOS_DO_SEED]
+
+    for uma in chaves:
+        outras = [c for c in chaves if c != uma]
+        assert not any(uma in outra for outra in outras), uma
+
+
+def test_tecnico_sem_produto_nenhum_e_erro_fatal():
+    """
+    Zero produto num procedimento técnico é o passo do Phoebus valendo para todos.
+
+    Trecho sem vínculo vale para TODOS os aparelhos — o oposto do que a busca
+    precisa. Parar é a única resposta certa.
+    """
+    fonte = Fonte("Manual_Tecnico_Aparelho_Novo.txt", HeloDocType.tecnico, "numerada", "Novo")
+
+    with pytest.raises(CorpusInconsistenteError, match="casou com 0 produtos"):
+        casa_produtos(fonte, _catalogo())
+
+
+def test_tecnico_com_dois_produtos_e_erro_fatal():
+    """
+    Dois produtos mandam o procedimento errado, e não há palpite bom entre eles.
+
+    Escolher o "mais parecido" resolveria o sintoma e mandaria o passo do
+    aparelho errado para quem opera um instrumento de medição legal.
+    """
+    fonte = Fonte("Manual_Titan_e_Phoebus.txt", HeloDocType.tecnico, "numerada", "Dois")
+
+    with pytest.raises(CorpusInconsistenteError, match="casou com 2 produtos"):
+        casa_produtos(fonte, _catalogo())
+
+
+def test_o_erro_nomeia_os_produtos_que_casaram():
+    """Mensagem que não diz QUAIS casaram deixa o conserto para a adivinhação."""
+    fonte = Fonte("Manual_Titan_e_Phoebus.txt", HeloDocType.tecnico, "numerada", "Dois")
+
+    with pytest.raises(CorpusInconsistenteError) as erro:
+        casa_produtos(fonte, _catalogo())
+
+    assert "Phoebus" in str(erro.value)
+    assert "Titan" in str(erro.value)
+
+
+def test_ficha_comercial_sem_produto_e_permitida():
+    """
+    A assimetria é deliberada, e o motivo está no dano.
+
+    Ficha sem produto pode ser catálogo, e catálogo vale para todos mesmo —
+    trecho sem vínculo é exatamente isso. Procedimento técnico sem produto é
+    outra coisa: é o passo do Phoebus aparecendo para quem tem um Titan.
+    """
+    fonte = Fonte("Catalogo Geral.txt", HeloDocType.comercial, "regua", "Catálogo")
+
+    assert casa_produtos(fonte, _catalogo()) == []
+
+
+def test_nao_casa_por_aproximacao():
+    """
+    Contenção é binária. `Marc X` não é `Mark X`, e não vira por semelhança.
+
+    Distância de edição acertaria este caso e erraria o próximo, e o erro sai
+    como procedimento do aparelho errado — não como exceção.
+    """
+    fonte = Fonte("Manual_Tecnico_Marc_X.txt", HeloDocType.tecnico, "numerada", "Quase")
+
+    with pytest.raises(CorpusInconsistenteError):
+        casa_produtos(fonte, _catalogo())
