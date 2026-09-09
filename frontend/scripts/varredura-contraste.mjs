@@ -931,12 +931,15 @@ function provar() {
  * cinco arquivos que a fase ainda nao alcancou; nenhum deles e residuo de tela
  * migrada.
  */
+/*
+ * FASE 16 -- de 7 para 2, e os dois que restam nunca estiveram em escopo.
+ *
+ * As decisoes de frota D9.2 (filtros) e D9.3 (forma de exclusao) fecharam os
+ * cinco que sobravam. O QuickReplyPicker e o menu que o chat abre com "/", e
+ * ele nao foi migrado por nenhuma passada -- entra na proxima.
+ */
 const PARES_CONHECIDOS = new Map([
   ['components/chat/QuickReplyPicker.tsx  bg-surface  repouso', 2],
-  ['components/layout/Topbar.tsx  bg-danger  repouso', 2],
-  ['pages/onboarding/OnboardingPage.tsx  bg-primary  repouso', 1],
-  ['pages/onboarding/OnboardingPage.tsx  bg-surface-elevated  repouso', 1],
-  ['pages/settings/QuickRepliesPage.tsx  dark:bg-surface-elevated  repouso', 1],
 ]);
 
 /** A chave da catraca a partir de um achado da varredura. */
