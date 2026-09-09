@@ -16,10 +16,13 @@ from datetime import datetime
 from unittest.mock import AsyncMock, MagicMock
 
 import pytest
+from sqlalchemy.exc import OperationalError
 
 from app.models.models import TicketStatus
 from app.services import helo
 from app.services.helo import (
+    FALAS_MAXIMAS,
+    TROCAS_MAXIMAS,
     abre_triagem,
     helo_pode_falar,
     monta_encerramento,
@@ -27,6 +30,7 @@ from app.services.helo import (
     quer_humano,
     responde_triagem,
 )
+from app.services.helo_base import NADA_ENCONTRADO
 from app.utils.sla import SP_TZ
 
 
@@ -38,6 +42,54 @@ def helo_ligada(monkeypatch):
 @pytest.fixture
 def helo_desligada(monkeypatch):
     monkeypatch.setattr(helo, "get_settings", lambda: MagicMock(helo_enabled=False))
+
+
+@pytest.fixture(autouse=True)
+def sem_rede(monkeypatch):
+    """
+    A rede fica cortada no arquivo inteiro, e o modelo nasce mudo.
+
+    Duas coisas de uma vez. A primeira é impedir que a suíte saia chamando a
+    DeepSeek de verdade: bastaria uma guarda a menos no código para isso
+    acontecer, e o sintoma seria lentidão, não erro. A segunda é dar nome à
+    falha — quem chegar ao modelo sem ter dito o que ele responde lê a frase
+    abaixo, e não um timeout.
+
+    Isso também é o que faz "ela NÃO chamou o modelo" ser afirmado de graça em
+    todo teste que não pede a fixture `modelo_diz`.
+
+    Os três blocos de contexto saem daqui prontos. O que estes testes decidem é
+    POR QUAL SAÍDA ela vai; o que vai escrito dentro dos blocos se prova onde
+    pode ser provado — contra Postgres, em `test_helo_postgres.py`.
+    """
+
+    async def _nao_devia_chegar_aqui(*_args, **_kwargs):
+        raise AssertionError(
+            "o teste chegou ao modelo sem dizer o que ele responde: use a fixture modelo_diz"
+        )
+
+    monkeypatch.setattr(helo, "responde_como_helo", _nao_devia_chegar_aqui)
+    monkeypatch.setattr(helo, "embute_um", AsyncMock(return_value=[0.1] * 8))
+    monkeypatch.setattr(helo, "busca_trechos", AsyncMock(return_value=[]))
+    monkeypatch.setattr(helo, "monta_cadastro", AsyncMock(return_value="[CADASTRO]"))
+    monkeypatch.setattr(helo, "monta_conversa", AsyncMock(return_value="[CONVERSA]"))
+
+
+@pytest.fixture
+def modelo_diz(monkeypatch):
+    """
+    Põe uma fala na boca do modelo e devolve o espião da chamada.
+
+    O espião importa tanto quanto a fala: metade do desenho da Fase 2 é sobre
+    QUANDO não chamar o LLM, e sobre o que exatamente é entregue a ele.
+    """
+
+    def _diz(texto):
+        espiao = AsyncMock(return_value=texto)
+        monkeypatch.setattr(helo, "responde_como_helo", espiao)
+        return espiao
+
+    return _diz
 
 
 def _ticket(ai_enabled=True):
@@ -378,21 +430,43 @@ def _db_com_falas(quantas, equipe_ja_falou=False):
 
     sessao.execute = AsyncMock(side_effect=responde)
     sessao.add = MagicMock()
+    # `begin_nested` do AsyncSession é SÍNCRONO e devolve um gerenciador de
+    # contexto assíncrono. No AsyncMock todo método vira corrotina, e o
+    # `async with` do SAVEPOINT quebraria por defeito do mock, não do código.
+    sessao.begin_nested = MagicMock(return_value=_SavepointDeMentira())
     return sessao
 
 
-@pytest.mark.asyncio
-async def test_resposta_do_cliente_encerra_a_triagem(helo_ligada):
-    db = _db_com_falas(1)  # só a saudação até aqui
-    ticket = _chamado()
+class _SavepointDeMentira:
+    """O bastante para o `async with`: quem prova o SAVEPOINT de verdade é o Postgres."""
 
-    fala = await responde_triagem(db, ticket, _cliente(), "O aparelho não liga desde ontem")
+    async def __aenter__(self):
+        return self
+
+    async def __aexit__(self, *_excecao):
+        return False
+
+
+@pytest.mark.asyncio
+async def test_a_resposta_do_cliente_agora_e_respondida(helo_ligada, modelo_diz):
+    """
+    A mudança central da Fase 2: a resposta do cliente deixou de ENCERRAR.
+
+    Na Fase 1 ela agradecia e saía — a triagem tinha acabado. Agora ela busca
+    na base e responde o que está documentado. O encerramento fixo virou uma
+    das saídas possíveis, não a única.
+    """
+    modelo_diz("1. Segure o botão por três segundos.\n\nFonte: Manual do Titan, seção 6.")
+    db = _db_com_falas(1)  # só a saudação até aqui
+
+    fala = await responde_triagem(db, _chamado(), _cliente(), "O aparelho não liga desde ontem")
 
     assert fala is not None
-    assert fala.escalou is False, "responder as perguntas é o encerramento, não a escalada"
+    assert fala.escalou is False
     assert fala.mensagem.is_ai is True
     assert fala.mensagem.sender_id is None
-    assert "Registrei tudo aqui" in fala.mensagem.content
+    assert "Segure o botão" in fala.mensagem.content
+    assert "Fonte:" in fala.mensagem.content, "a resposta cita, e a citação viaja para o cliente"
 
 
 @pytest.mark.asyncio
@@ -402,6 +476,11 @@ async def test_pedido_de_humano_escala_sem_insistir(helo_ligada):
 
     Insistir aqui é o que transforma um atendimento ruim em reclamação — e o
     desenho chama o robô que não aceita "não" de pior que robô nenhum.
+
+    E escala SEM chamar o modelo. A regra mais importante do desenho do ponto
+    de vista de experiência não pode depender de um serviço externo estar de
+    pé; quem afirma isso aqui é a fixture `sem_rede`, que faz de chegar ao LLM
+    uma falha deste teste.
     """
     db = _db_com_falas(1)
 
@@ -414,17 +493,211 @@ async def test_pedido_de_humano_escala_sem_insistir(helo_ligada):
 
 
 @pytest.mark.asyncio
-async def test_ela_nao_fala_uma_terceira_vez(helo_ligada):
+async def test_no_teto_de_trocas_ela_escala_em_vez_de_continuar(helo_ligada):
     """
-    Depois de encerrar, silêncio: o chamado é do humano.
+    O teto deixou de ser de FALAS e virou de TROCAS — e ele escala, não emudece.
 
-    Sem este teto, cada mensagem nova do cliente ganharia outra despedida — a
-    Helô se despedindo em loop enquanto ele tenta falar com alguém.
+    Na Fase 1 eram duas falas e silêncio depois, porque a conversa não existia.
+    Agora o prompt promete "se a conversa passar de seis trocas sem sair do
+    lugar: escale", e o teto é a rede embaixo disso: modelo que não obedece é o
+    caso comum, não a exceção.
     """
-    db = _db_com_falas(2)  # saudação + encerramento já ditos
+    db = _db_com_falas(TROCAS_MAXIMAS)
+
+    fala = await responde_triagem(db, _chamado(), _cliente(), "e agora?")
+
+    assert fala is not None
+    assert fala.escalou is True
+    assert "passando seu chamado para um atendente" in fala.mensagem.content
+
+
+@pytest.mark.asyncio
+async def test_depois_do_teto_ela_emudece(helo_ligada):
+    """
+    Passado o teto, silêncio: a despedida já foi dita e o chamado é do humano.
+
+    Sem isto, cada mensagem nova ganharia outra despedida — a Helô se
+    despedindo em loop enquanto o cliente tenta falar com alguém.
+    """
+    db = _db_com_falas(FALAS_MAXIMAS)
 
     assert await responde_triagem(db, _chamado(), _cliente(), "e agora?") is None
     db.add.assert_not_called()
+
+
+@pytest.mark.asyncio
+async def test_uma_troca_antes_do_teto_ela_ainda_tenta(helo_ligada, modelo_diz):
+    """
+    A borda de baixo do teto, e o motivo de ela existir como teste.
+
+    Sem isto, adiantar o teto em uma troca não derrubaria nada: ela se
+    despediria com crédito na mão, e o defeito apareceria como "a Helô desiste
+    cedo demais" — reclamação de percepção, das mais difíceis de rastrear.
+    """
+    modelo_diz("Confere se o cabo está firme e me conta.")
+    db = _db_com_falas(TROCAS_MAXIMAS - 1)
+
+    fala = await responde_triagem(db, _chamado(), _cliente(), "continua igual")
+
+    assert fala is not None
+    assert fala.escalou is False
+
+
+@pytest.mark.asyncio
+async def test_a_linha_de_escalada_nao_vai_para_o_cliente(helo_ligada, modelo_diz):
+    """
+    `ESCALAR:` é para o sistema, e o cliente não vê a mecânica.
+
+    Deixar a linha passar mostraria o funcionamento interno na tela de quem
+    está com um aparelho quebrado na mão — e ainda pareceria erro do sistema
+    justo no momento em que ele foi transferido.
+    """
+    modelo_diz("Isso precisa de um técnico olhando.\nESCALAR: dano físico no visor")
+
+    fala = await responde_triagem(_db_com_falas(1), _chamado(), _cliente(), "a tela quebrou")
+
+    assert fala.escalou is True
+    assert "Isso precisa de um técnico olhando." in fala.mensagem.content
+    assert "ESCALAR" not in fala.mensagem.content
+
+
+@pytest.mark.asyncio
+async def test_escalar_desliga_a_ia_no_chamado(helo_ligada, modelo_diz):
+    """
+    A promessa que o desenho fazia desde a Fase 1 e o código não cumpria.
+
+    Ali não fez falta: o teto de duas falas a calava de qualquer jeito. Com
+    seis trocas de crédito, quem pediu um humano continuaria recebendo robô até
+    o teto estourar — exatamente o que o desenho inteiro existe para evitar.
+    """
+    ticket = _chamado()
+    modelo_diz("Vou passar para o time comercial.\nESCALAR: pergunta de garantia")
+
+    await responde_triagem(_db_com_falas(1), ticket, _cliente(), "e a garantia?")
+
+    assert ticket.ai_enabled is False
+
+
+@pytest.mark.asyncio
+async def test_resposta_comum_nao_desliga_a_ia(helo_ligada, modelo_diz):
+    """
+    A guarda oposta, e a mais cara das duas.
+
+    Desligar por engano cala a Helô naquele chamado para sempre: `ai_enabled`
+    não volta sozinho, e ninguém vai à tela religar o que não sabe que
+    desligou.
+    """
+    ticket = _chamado()
+    modelo_diz("Segure o botão por três segundos.")
+
+    await responde_triagem(_db_com_falas(1), ticket, _cliente(), "não liga")
+
+    assert ticket.ai_enabled is True
+
+
+@pytest.mark.parametrize("bruto", [None, "", "   \n  "])
+@pytest.mark.asyncio
+async def test_modelo_que_nao_responde_escala(helo_ligada, monkeypatch, bruto):
+    """
+    Timeout, chave inválida, serviço fora, resposta vazia — indistinguíveis daqui.
+
+    O que não pode acontecer é o chamado ficar parado porque uma IA não
+    respondeu. O cliente não precisa saber que ela caiu; ele precisa de um
+    humano, e é isso que a escalada entrega.
+    """
+    monkeypatch.setattr(helo, "responde_como_helo", AsyncMock(return_value=bruto))
+    ticket = _chamado()
+
+    fala = await responde_triagem(_db_com_falas(1), ticket, _cliente(), "não liga")
+
+    assert fala is not None
+    assert fala.escalou is True
+    assert "passando seu chamado para um atendente" in fala.mensagem.content
+    assert ticket.ai_enabled is False
+
+
+@pytest.mark.asyncio
+async def test_modelo_que_so_pede_escalada_ainda_se_despede(helo_ligada, modelo_diz):
+    """
+    A linha some do texto; se ela era o texto inteiro, sobra vazio.
+
+    Gravar mensagem vazia seria a Helô publicando um balão em branco na tela do
+    cliente no exato instante em que ele foi transferido.
+    """
+    modelo_diz("ESCALAR: assunto fora da base técnica")
+
+    fala = await responde_triagem(_db_com_falas(1), _chamado(), _cliente(), "quanto custa?")
+
+    assert fala.escalou is True
+    assert "passando seu chamado para um atendente" in fala.mensagem.content
+
+
+@pytest.mark.asyncio
+async def test_sem_embedding_ela_nao_busca_e_o_modelo_fica_sabendo(
+    helo_ligada, monkeypatch, modelo_diz
+):
+    """
+    Serviço de embedding fora: a busca nem é tentada, e a base vai vazia.
+
+    Buscar com vetor nulo devolveria os quatro trechos mais próximos de coisa
+    nenhuma — pior do que não buscar, porque o modelo os leria como
+    pertinentes. Ele recebe NADA ENCONTRADO, e o prompt diz que dali a única
+    saída é escalar.
+    """
+    monkeypatch.setattr(helo, "embute_um", AsyncMock(return_value=None))
+    espiao = modelo_diz("Vou chamar um colega.\nESCALAR: sem base técnica")
+
+    await responde_triagem(_db_com_falas(1), _chamado(), _cliente(), "não liga")
+
+    helo.busca_trechos.assert_not_awaited()
+    _sistema, contexto = espiao.await_args.args
+    assert NADA_ENCONTRADO in contexto
+
+
+@pytest.mark.asyncio
+async def test_busca_quebrada_nao_impede_a_resposta(helo_ligada, monkeypatch, modelo_diz):
+    """
+    Extensão ausente, tabela não migrada, índice corrompido: base vazia.
+
+    O que ela NÃO pode fazer é deixar de responder. A consequência mais grave
+    dessa falha — a mensagem do próprio cliente ir junto — só aparece contra
+    banco de verdade, e está em `test_helo_postgres.py`; aqui se afirma a parte
+    barata: a exceção não sobe e o modelo é chamado sem base.
+    """
+    monkeypatch.setattr(
+        helo,
+        "busca_trechos",
+        AsyncMock(side_effect=OperationalError("SELECT ...", {}, Exception("sem extensão"))),
+    )
+    espiao = modelo_diz("Vou chamar um colega.\nESCALAR: sem base técnica")
+
+    fala = await responde_triagem(_db_com_falas(1), _chamado(), _cliente(), "não liga")
+
+    assert fala is not None
+    assert fala.escalou is True
+    _sistema, contexto = espiao.await_args.args
+    assert NADA_ENCONTRADO in contexto
+
+
+@pytest.mark.asyncio
+async def test_o_modelo_recebe_o_prompt_de_sistema_e_os_tres_blocos(helo_ligada, modelo_diz):
+    """
+    A fiação, afirmada uma vez: as regras como sistema, o caso como contexto.
+
+    Trocar os dois argumentos de lugar mandaria o cadastro do cliente no lugar
+    das regras — e o modelo responderia alguma coisa assim mesmo, sem erro
+    nenhum no log. É o tipo de defeito que só aparece como "ela anda
+    inventando procedimento", semanas depois.
+    """
+    espiao = modelo_diz("Testa aí e me conta se resolveu.")
+
+    await responde_triagem(_db_com_falas(1), _chamado(), _cliente(), "não liga")
+
+    sistema, contexto = espiao.await_args.args
+    assert "Você é a Helô" in sistema
+    assert "[CADASTRO]" in contexto
+    assert "[BASE TÉCNICA]" in contexto
+    assert "[CONVERSA]" in contexto
 
 
 @pytest.mark.asyncio
@@ -498,19 +771,20 @@ async def test_chamado_com_dono_nem_pergunta_pela_equipe(helo_ligada):
 
 
 @pytest.mark.asyncio
-async def test_sem_dono_e_sem_a_equipe_ela_ainda_encerra(helo_ligada):
+async def test_sem_dono_e_sem_a_equipe_ela_ainda_responde(helo_ligada, modelo_diz):
     """
     A guarda oposta: calar de mais é tão defeito quanto falar de mais.
 
-    Chamado triado de madrugada, sem responsável e sem ninguém da equipe
-    tendo falado, é exatamente o caso em que a despedida dela é verdadeira.
+    Chamado triado de madrugada, sem responsável e sem ninguém da equipe tendo
+    falado, é exatamente o caso em que ela deve atender.
     """
+    modelo_diz("Vamos conferir a bateria primeiro.")
     db = _db_com_falas(1, equipe_ja_falou=False)
 
     fala = await responde_triagem(db, _chamado(), _cliente(), "não liga desde ontem")
 
     assert fala is not None
-    assert "Registrei tudo aqui" in fala.mensagem.content
+    assert "bateria" in fala.mensagem.content
 
 
 @pytest.mark.asyncio

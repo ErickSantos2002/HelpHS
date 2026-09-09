@@ -310,10 +310,10 @@ async def create_message(
         ticket, now, responder_id=actor.id, is_ai=msg.is_ai, is_system=msg.is_system
     )
 
-    # A Helô encerra a triagem quando o cliente responde. ANTES da notificação
-    # de propósito: é ela quem decide se a equipe precisa ser chamada, e a
-    # triagem recém-fechada é justamente o momento em que o chamado passa a ter
-    # conteúdo útil e ainda não tem dono.
+    # A Helô responde quando o cliente escreve. ANTES da notificação de
+    # propósito: é ela quem decide se a equipe precisa ser chamada, e um
+    # chamado que ela acabou de escalar é justamente o que precisa chegar à
+    # equipe com o aviso certo — e ainda não tem dono.
     fala_da_helo = None
     if actor.id == ticket.creator_id:
         fala_da_helo = await responde_triagem(db, ticket, actor, msg.content)

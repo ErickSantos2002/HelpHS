@@ -1,8 +1,15 @@
 """
 Helô — o atendimento por IA que fala com o cliente.
 
-Fase 1: acolher e triar. Ela não resolve problema técnico, não promete prazo e
-não continua a conversa depois de entregar o chamado para um humano.
+Ela acolhe, tria e — desde a Fase 2 — **resolve o que está documentado**,
+consultando os manuais por busca vetorial. O que ela continua não fazendo:
+inventar procedimento, prometer prazo, falar de preço, e continuar a conversa
+depois de entregar o chamado para um humano.
+
+A SAUDAÇÃO NÃO USA LLM, e isso é decisão, não sobra da Fase 1. Ela é montada
+com dado do cadastro: previsível (a primeira coisa que o cliente lê nunca sai
+errada), instantânea (não espera API) e grátis. O modelo entra a partir do
+SEGUNDO turno, para interpretar o que o cliente responder.
 
 Este módulo começa pelo interruptor, e não pela conversa, de propósito: uma IA
 que fala com cliente sem ter como ser calada é a única parte disto que não tem
@@ -15,7 +22,9 @@ from collections.abc import Sequence
 from datetime import UTC, datetime
 from typing import NamedTuple
 
+from loguru import logger
 from sqlalchemy import exists, func, select
+from sqlalchemy.exc import SQLAlchemyError
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.core.config import get_settings
@@ -28,6 +37,16 @@ from app.models.models import (
     User,
     UserRole,
 )
+from app.services.helo_base import TrechoRecuperado, busca_trechos, monta_base_tecnica
+from app.services.helo_embedding import embute_um
+from app.services.helo_prompt import (
+    SISTEMA,
+    le_resposta,
+    monta_cadastro,
+    monta_conversa,
+    monta_prompt,
+)
+from app.services.llm import responde_como_helo
 
 # O cálculo de horário comercial vem do motor de SLA, inclusive sendo privado.
 # Uma cópia da regra aqui é o defeito que este projeto já pagou caro: doze
@@ -282,10 +301,23 @@ async def abre_triagem(
     return True
 
 
-# Ela fala no máximo duas vezes: a saudação e o encerramento. O teto existe
-# para o dia em que a interpretação por LLM entrar e a conversa puder crescer —
-# hoje ele é a garantia de que reprocessar não faz a Helô falar de novo.
-FALAS_MAXIMAS = 2
+# Quantas vezes ela responde DEPOIS da saudação.
+#
+# Na Fase 1 o teto era de duas FALAS — a saudação e o encerramento — porque a
+# conversa não existia: ela dizia uma coisa e saía. Com o LLM, a conversa
+# cresce, e o teto passa a ser de TROCAS, que é o que o prompt dela promete:
+# "se a conversa passar de seis trocas sem sair do lugar: escale".
+#
+# O teto é a rede embaixo do modelo, não o mecanismo principal. O prompt manda
+# escalar sozinho quando não resolve em duas tentativas; isto aqui é o que
+# acontece quando ele não obedece — e modelo que não obedece é o caso comum,
+# não a exceção. Sem o teto, o cliente conversaria para sempre com alguém que
+# não vai resolver.
+TROCAS_MAXIMAS = 6
+
+# Mantido: reprocessar não pode fazer a saudação sair duas vezes. Um chamado
+# onde ela nunca falou é um chamado em que ela não entra no meio.
+FALAS_MAXIMAS = TROCAS_MAXIMAS + 1
 
 
 class FalaDaHelo(NamedTuple):
@@ -376,22 +408,33 @@ async def responde_triagem(
     texto_do_cliente: str,
 ) -> FalaDaHelo | None:
     """
-    A resposta do cliente encerra a triagem — e a Helô sai de cena.
+    O turno da Helô: ela busca na base, responde, ou escala.
 
-    Duas saídas, mesmo efeito: se ele pediu uma pessoa, ela escala na hora; se
-    respondeu as perguntas, ela agradece e avisa quando alguém assume. Nos dois
-    casos o chamado fica em "Em andamento" esperando um humano, e ela não fala
-    mais. Se o cliente escrever de novo, silêncio: o chamado é do humano.
+    A ORDEM DAS GUARDAS É O DESENHO. As quatro primeiras não dependem do modelo
+    e vêm antes dele, de propósito — cada uma resolve um caso em que chamar o
+    LLM seria errado, caro, ou os dois:
+
+    1. Os três interruptores. Desligada é desligada, e não existe religar num
+       nível mais específico.
+    2. Um humano já está na conversa. O chamado é dele.
+    3. A saudação nunca aconteceu, ou o teto de trocas estourou.
+    4. **O cliente pediu uma pessoa.** Esta roda ANTES do LLM e não dentro
+       dele: se o modelo estiver fora do ar, o pedido de humano precisa
+       funcionar do mesmo jeito. É a regra que o desenho chama de mais
+       importante do ponto de vista de experiência, e ela não pode depender de
+       um serviço externo estar de pé.
+
+    Só depois disso o modelo entra. E se ele falhar de qualquer maneira —
+    serviço fora, timeout, resposta vazia — ela escala com mensagem neutra.
+    Nenhum chamado fica preso porque uma IA não respondeu.
 
     Não dá commit — quem abriu a transação é o `create_message`, e a fala dela
     precisa nascer no mesmo commit da fala do cliente. Metade gravada seria uma
     pergunta sem resposta ou uma resposta sem pergunta.
 
     Returns:
-        A fala dela e por qual saída, para quem precisa transmiti-la (o
-        WebSocket) e para quem precisa avisar a equipe. None quando um
-        interruptor está desligado, **um humano já está na conversa**, a
-        triagem já acabou, ou ela nunca chegou a abrir a conversa.
+        A fala dela e se escalou, para quem precisa transmiti-la (o WebSocket)
+        e para quem precisa avisar a equipe. None quando ela não deve falar.
     """
     if not helo_pode_falar(ticket, cliente):
         return None
@@ -408,8 +451,7 @@ async def responde_triagem(
     if falas == 0 or falas >= FALAS_MAXIMAS:
         return None
 
-    escalou = quer_humano(texto_do_cliente)
-    conteudo = monta_escalada() if escalou else monta_encerramento(datetime.now(UTC))
+    conteudo, escalou = await _o_que_ela_diz(db, ticket, cliente, texto_do_cliente, falas)
 
     fala = ChatMessage(
         id=uuid.uuid4(),
@@ -421,4 +463,106 @@ async def responde_triagem(
         created_at=datetime.now(UTC),
     )
     db.add(fala)
+
+    if escalou:
+        # ESCALAR DESLIGA A IA NO CHAMADO, e isto é novo na Fase 2.
+        #
+        # O desenho sempre prometeu que escalar "muda o status, notifica a
+        # equipe e desliga a IA", e só a notificação existia. Na Fase 1 não
+        # fez falta: o teto de duas falas a calava de qualquer jeito. Com teto
+        # de seis trocas, o cliente que pediu um humano continuaria recebendo
+        # robô até o teto estourar — que é exatamente o "robô que não aceita
+        # não" que o desenho inteiro existe para evitar.
+        #
+        # Desligar aqui também fecha a `suggest-reply` e o `summarize` neste
+        # chamado, e isso é consequência aceita: quem pediu para sair da IA
+        # não deveria ter a conversa dele resumida por uma.
+        ticket.ai_enabled = False
+
     return FalaDaHelo(mensagem=fala, escalou=escalou)
+
+
+async def _busca_sem_derrubar(
+    db: AsyncSession, ticket: Ticket, vetor: Sequence[float]
+) -> list[TrechoRecuperado]:
+    """
+    A busca vetorial dentro de um SAVEPOINT, e o SAVEPOINT é o ponto.
+
+    O que está em jogo é a mensagem DO CLIENTE. Ela ainda não foi commitada
+    quando isto roda — nasce no mesmo commit da resposta da Helô —, e uma falha
+    de infraestrutura da IA que apagasse o que o cliente acabou de escrever
+    seria o pior defeito que este módulo pode ter.
+
+    Só `except` não resolve isso em PostgreSQL. O erro aborta a transação
+    INTEIRA: o `db.add(fala)` seguinte ainda parece funcionar e o commit morre
+    com "current transaction is aborted", levando junto a mensagem do cliente.
+    O SAVEPOINT é o que devolve a sessão utilizável.
+
+    Vale para extensão `vector` ausente, tabela ainda não migrada e índice
+    corrompido — todos indistinguíveis daqui, e todos com o mesmo destino: base
+    vazia, e a Helô escala.
+    """
+    try:
+        async with db.begin_nested():
+            return await busca_trechos(db, ticket, vetor)
+    except SQLAlchemyError as exc:
+        logger.warning(f"busca vetorial da Helô falhou; seguindo sem base técnica: {exc}")
+        return []
+
+
+async def _o_que_ela_diz(
+    db: AsyncSession,
+    ticket: Ticket,
+    cliente: User,
+    texto_do_cliente: str,
+    falas: int,
+) -> tuple[str, bool]:
+    """
+    O texto da vez e se é escalada. Devolve SEMPRE alguma coisa.
+
+    Nenhuma falha de infraestrutura daqui sobe, e nenhum caminho devolve vazio:
+    o chamador já decidiu que ela vai falar, e "ela ia falar mas o serviço
+    caiu" não é uma resposta que o cliente possa ver. Embedding fora, busca
+    quebrada e modelo mudo têm todos o mesmo destino — escalada.
+
+    Defeito de programação continua subindo, de propósito: engolir `TypeError`
+    aqui transformaria bug em silêncio, e a Helô escalaria para sempre sem
+    ninguém descobrir por quê.
+    """
+    # O pedido de humano vem ANTES do modelo, e por dois motivos que se somam:
+    # ele funciona com o LLM fora do ar, e não se gasta uma chamada para
+    # descobrir o que uma lista de substrings já disse.
+    if quer_humano(texto_do_cliente):
+        return monta_escalada(), True
+
+    # Teto de trocas: a última fala dela é uma despedida, não uma tentativa.
+    if falas >= TROCAS_MAXIMAS:
+        return monta_escalada(), True
+
+    vetor = await embute_um(texto_do_cliente)
+    trechos = await _busca_sem_derrubar(db, ticket, vetor) if vetor else []
+    base = monta_base_tecnica(trechos)
+
+    contexto = monta_prompt(
+        await monta_cadastro(db, ticket, cliente),
+        base,
+        await monta_conversa(db, ticket, texto_do_cliente),
+    )
+
+    bruto = await responde_como_helo(SISTEMA, contexto)
+    if not bruto or not bruto.strip():
+        # Falha do LLM escala com mensagem neutra. O cliente não precisa saber
+        # que uma IA caiu; ele precisa de um humano, e é isso que a escalada
+        # entrega. Vale para timeout, chave inválida, serviço fora e resposta
+        # vazia — todos indistinguíveis daqui, e todos com o mesmo destino.
+        return monta_escalada(), True
+
+    resposta = le_resposta(bruto)
+    if resposta.escalou:
+        # O modelo pediu para escalar. O texto DELE vai para o cliente — ele
+        # sabe por que está escalando e a frase já está no contexto da
+        # conversa; trocar por `monta_escalada()` genérica soaria como se
+        # ninguém tivesse lido o que o cliente escreveu.
+        return resposta.texto or monta_escalada(), True
+
+    return resposta.texto, False
