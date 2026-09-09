@@ -29,7 +29,20 @@ export default defineConfig(({ mode }) => {
       },
     },
     server: {
-      port: 5173,
+      // Porta própria do HelpHS, e `strictPort` para ele MORRER em vez de
+      // escorregar.
+      //
+      // Era 5173 sem `strictPort`. Quando outro projeto ocupava a 5173, o Vite
+      // andava calado para a 5174/5175 e subia — enquanto o Playwright, cravado
+      // na 5173 com `reuseExistingServer`, abraçava o servidor do OUTRO
+      // projeto. Foi o que aconteceu: a suíte e2e do HelpHS apontando para o
+      // ChamadosHS, que respondia `<title>ChamadosHS</title>` e 404 em
+      // `/galeria.html`.
+      //
+      // A 5190 fica fora da faixa por onde o Vite escorrega (5173→5174→5175…),
+      // que é justamente onde as colisões caem.
+      port: 5190,
+      strictPort: true,
       proxy: {
         // WebSocket must be matched before the generic /api rule
         "/api/v1/ws": {

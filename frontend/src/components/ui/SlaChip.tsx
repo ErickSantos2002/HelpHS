@@ -1,5 +1,6 @@
 import { useEffect, useState } from "react";
 import { cn } from "../../lib/utils";
+import { Icon } from "./Icon";
 
 export interface SlaChipProps {
   label: string;
@@ -14,12 +15,6 @@ export interface SlaChipProps {
    */
   respondedAt?: string | null;
 }
-
-const Clock = (
-  <svg className="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
-    <path strokeLinecap="round" strokeLinejoin="round" d="M12 8v4l3 3m6-3a9 9 0 11-18 0 9 9 0 0118 0z" />
-  </svg>
-);
 
 function restante(dueAt: string): string {
   const diff = new Date(dueAt).getTime() - Date.now();
@@ -60,11 +55,16 @@ export function SlaChip({ label, dueAt, breached, respondedAt }: SlaChipProps) {
 
   if (!dueAt) return null;
 
+  // As tres tintas vinham da paleta CRUA do Tailwind — `bg-red-500/15` com
+  // `text-red-700 dark:text-red-400` —, fora do sistema de tokens e com a
+  // razao de contraste nunca medida. Passam a usar os pares `tint`/`on-tint`,
+  // que sao os que a E2 e a E8 mediram contra as tres superficies nos dois
+  // temas. E o mesmo par que o `Badge` adotou na Fase 7.
   const tom = breached
-    ? "bg-red-500/15 text-red-700 dark:text-red-400 ring-red-500/25"
+    ? "bg-tint-danger text-on-tint-danger ring-danger/30"
     : respondido
-      ? "bg-emerald-500/15 text-emerald-700 dark:text-emerald-400 ring-emerald-500/25"
-      : "bg-amber-500/15 text-amber-700 dark:text-amber-400 ring-amber-500/25";
+      ? "bg-tint-success text-on-tint-success ring-success/30"
+      : "bg-tint-warning text-on-tint-warning ring-warning/30";
 
   return (
     <span
@@ -73,7 +73,9 @@ export function SlaChip({ label, dueAt, breached, respondedAt }: SlaChipProps) {
         tom,
       )}
     >
-      {Clock}
+      {/* O `Icon` ja marca `aria-hidden`; repetir aqui sugeriria que a garantia
+          mora neste arquivo, e ela mora la. */}
+      <Icon name="clock" size={16} strokeWidth={2} />
       {label ? `${label}: ` : ""}
       <span>{respondido ? "Respondido" : display}</span>
     </span>

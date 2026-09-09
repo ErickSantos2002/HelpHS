@@ -1,3 +1,23 @@
+/**
+ * Tema apontando para os tokens do Design System da Health & Safety.
+ * Base: DS/guidelines/adocao.md, Passo 2 — com uma diferença deliberada.
+ *
+ * O bloco do `adocao.md` declara as cores como `var(--token)` puro. No
+ * Tailwind v3 isso faz o utilitário com opacidade **deixar de ser gerado**:
+ * `bg-action` sai, `bg-action/10` não sai — sem erro, sem aviso. Aqui isso
+ * apagaria 398 usos (`bg-primary/10`, `border-border/40`, `text-primary/80`…).
+ *
+ * `color-mix` resolve os dois lados: lê o token do design system direto, sem
+ * duplicar valor nenhum, e ainda aceita o modificador de opacidade. Decisão
+ * D1 em COMPARTILHADO/DECISOES.md. Exige Chrome 111+, Safari 16.2+, Firefox 113+.
+ */
+const tk = (token) =>
+  `color-mix(in srgb, var(${token}) calc(<alpha-value> * 100%), transparent)`;
+
+/** Rampa completa a partir do prefixo do token (`--color-danger-` → 50…700). */
+const rampa = (prefixo, degraus) =>
+  Object.fromEntries(degraus.map((d) => [d, tk(`${prefixo}${d}`)]));
+
 /** @type {import('tailwindcss').Config} */
 export default {
   content: ["./index.html", "./src/**/*.{js,ts,jsx,tsx}"],
@@ -6,68 +26,172 @@ export default {
     extend: {
       colors: {
         primary: {
-          DEFAULT: "#0ea5e9",
-          50: "#f0f9ff",
-          100: "#e0f2fe",
-          200: "#bae6fd",
-          300: "#7dd3fc",
-          400: "#38bdf8",
-          500: "#0ea5e9",
-          600: "#0284c7",
-          700: "#0369a1",
-          800: "#075985",
-          900: "#0c4a6e",
+          DEFAULT: tk("--color-primary-500"),
+          ...rampa("--color-primary-", [50, 100, 200, 300, 400, 500, 600, 700, 800, 900]),
         },
+
+        // O degrau interativo, separado do degrau de marca: botão primário,
+        // item ativo, foco e link saem daqui — nunca de primary-500.
+        action: {
+          DEFAULT: tk("--action"),
+          hover: tk("--action-hover"),
+          tint: tk("--action-tint"),
+
+          // O par de borda do `--action-tint`. Existia no `colors.css` desde
+          // sempre e nunca foi mapeado aqui — então quem precisava da borda do
+          // realce de ação escrevia `border-action/30`, que é OUTRA cor: no
+          // tema claro o token é `--color-primary-100` e o atalho é o `--action`
+          // a 30%. Achado pelo agente do `ReportsPage`, que precisou dele.
+          "tint-border": tk("--action-tint-border"),
+
+          // Emenda E2 do pacote: `danger` e `success` ganham degrau de ação
+          // próprio, como o primário já tinha. A cor cheia da rampa (o 500)
+          // reprova com texto branco — 3,76:1 e 2,54:1.
+          danger: tk("--action-danger"),
+          "danger-hover": tk("--action-danger-hover"),
+          success: tk("--action-success"),
+          "success-hover": tk("--action-success-hover"),
+        },
+        surface: {
+          DEFAULT: tk("--surface"),
+          base: tk("--bg-base"),
+          elevated: tk("--surface-elevated"),
+        },
+        borda: {
+          DEFAULT: tk("--border-color"),
+          muted: tk("--border-muted"),
+          strong: tk("--border-strong"),
+
+          // Emenda E7. Contorno de CONTROLE — campo, caixa, seletor,
+          // interruptor. Os três de cima são separadores de superfície e ficam
+          // entre 1,13:1 e 1,48:1 contra as três superfícies; a WCAG 1.4.11
+          // pede 3:1 para o limite de um componente. Este dá 4,34 no pior caso.
+          control: tk("--border-control"),
+        },
+        conteudo: {
+          DEFAULT: tk("--text-body"),
+          heading: tk("--text-heading"),
+          muted: tk("--text-muted"),
+          faint: tk("--text-faint"),
+
+          // O degrau de LINK, que o pacote declara e este config não mapeava.
+          // Sem ele as telas escreviam `text-primary` — o degrau de marca —, e
+          // sobre `--bg-base` isso dá 3,66:1: reprova AA, e link é texto.
+          // `--text-link` dá 5,05:1 no claro e 6,47:1 no escuro.
+          link: tk("--text-link"),
+          "link-hover": tk("--text-link-hover"),
+        },
+
+        // Texto sobre o fundo `--action`. Fica fora de `conteudo` porque não é
+        // um degrau da escada de texto: é o par de uma cor de fundo, como
+        // `on-tint-*` é o par das tintas. Branco no claro, navy no escuro —
+        // `text-white` cravado dá 2,69:1 no escuro (emenda E1 do pacote).
+        "on-primary": tk("--text-on-primary"),
+
+        // Os pares das duas cores de ação da E2. Como o `on-primary`, são par
+        // de fundo e não degrau de texto — por isso ficam fora de `conteudo`.
+        // Diferente do `on-primary`, não invertem por tema: o fundo deles é um
+        // degrau absoluto da rampa, igual nos dois.
+        "on-danger": tk("--text-on-danger"),
+        "on-success": tk("--text-on-success"),
+
+        // Par da tinta neutra (emenda E4 do pacote). Fica aqui pelo mesmo
+        // motivo dos de cima: é par de fundo, não degrau de texto. O avatar
+        // neutro e o selo neutro pintam a mesma superfície e agora falam a
+        // mesma cor — 6,92:1 no claro, contra os 4,34:1 de --text-muted.
+        "on-tint-primary": tk("--on-tint-primary"),
+        "on-tint-neutral": tk("--on-tint-neutral"),
+        "on-tint-warning": tk("--on-tint-warning"),
+        "on-tint-danger": tk("--on-tint-danger"),
+        "on-tint-success": tk("--on-tint-success"),
+        "on-tint-info": tk("--on-tint-info"),
+
+        // As TINTAS. Cinco delas já carregam alfa de 15% no próprio token
+        // (`rgb(… / 0.15)`). A `neutral` ERA alias de `--surface-elevated`,
+        // ou seja, o próprio fundo do cartão — ΔE 0,0, um selo invisível. A
+        // emenda **E23** a trocou por `rgb(100 116 139 / 0.15)`, e agora as
+        // seis são tinta de verdade. A frase antiga ficou aqui depois de o
+        // token mudar, que é o mesmo modo de falha da tabela de hashes do
+        // `VERSION.md`: o texto que descreve o valor não anda com ele.
+        //
+        // Por isso elas entram como `tk()` e **nunca** recebem o modificador de
+        // opacidade — regra (a) do D8-a: `bg-tint-danger/20` multiplicaria
+        // 0,15 × 0,20 e daria um selo de fundo praticamente invisível, e o
+        // conserto intuitivo (subir para /30, /50) continua multiplicando e
+        // nunca chega nos 15% do pacote.
+        // A paleta de GRAFICO da E16-b, mapeada como classe. Serie sem
+        // significado proprio — categoria, produto, mes, tipo de campo — usa
+        // estas seis; status e prioridade NAO, porque tem significado que o
+        // resto da interface ja ensina.
+        //
+        // Medidas: 3:1 contra as tres superficies nos dois temas (pior 3,22) e
+        // DeltaE >= 20 entre todos os pares nas quatro visoes (pior 25,8).
+        "chart-1": tk("--chart-1"),
+        "chart-2": tk("--chart-2"),
+        "chart-3": tk("--chart-3"),
+        "chart-4": tk("--chart-4"),
+        "chart-5": tk("--chart-5"),
+        "chart-6": tk("--chart-6"),
+        // O setimo veio com a E18, para o grafico de STATUS: sao sete status e
+        // seis slots nao bastavam. Ficou de fora quando mapeei os seis, e sem
+        // ele a tabela status -> slot nao tem como ser escrita.
+        "chart-7": tk("--chart-7"),
+
+        // As quatro semanticas na forca de PREENCHIMENTO — candidatas a emenda
+        // E19. Existem porque o degrau 500 reprova o piso de 3:1 no tema claro
+        // em duas delas (warning 1,96; success 2,54), e degrau fixo nao inverte
+        // por tema. Os valores vivem em `index.css`, apontando para degraus do
+        // pacote — sem hexadecimal cravado, entao acompanham a rampa sozinhos.
+        "fill-info": tk("--fill-info"),
+        "fill-success": tk("--fill-success"),
+        "fill-warning": tk("--fill-warning"),
+        "fill-danger": tk("--fill-danger"),
+
+        "tint-primary": tk("--tint-primary"),
+        "tint-neutral": tk("--tint-neutral"),
+        "tint-success": tk("--tint-success"),
+        "tint-danger": tk("--tint-danger"),
+        "tint-warning": tk("--tint-warning"),
+        "tint-info": tk("--tint-info"),
+
+        // As rampas semânticas continuam completas porque as páginas usam os
+        // degraus (text-success-700, dark:text-danger-400, bg-warning-500/10).
+        // O `adocao.md` declara só o 500; aqui é mesclagem, não substituição
+        // (seção 5.3 do prompt mestre).
+        // O 800 de `success` e `warning` veio com a E2 (emerald-800 e
+        // amber-800), e por isso essas duas rampas vão um degrau além.
+        success: { DEFAULT: tk("--color-success-500"), ...rampa("--color-success-", [50, 100, 400, 500, 600, 700, 800]) },
+        danger:  { DEFAULT: tk("--color-danger-500"),  ...rampa("--color-danger-",  [50, 100, 400, 500, 600, 700]) },
+        warning: { DEFAULT: tk("--color-warning-500"), ...rampa("--color-warning-", [50, 100, 400, 500, 600, 700, 800]) },
+        info:    { DEFAULT: tk("--color-info-500"),    ...rampa("--color-info-",    [50, 100, 400, 500, 600, 700]) },
+
+        // ── Alias de compatibilidade (decisão D2) ──────────────
+        // `background-*` e `border-*` são os nomes antigos do HelpHS, com ~700
+        // usos. Apontam para os mesmos tokens que `surface-*` e `borda-*`, e
+        // saem na Fase 20, quando a última tela tiver migrado.
         background: {
-          DEFAULT: "rgb(var(--bg-base) / <alpha-value>)",
-          surface: "rgb(var(--bg-surface) / <alpha-value>)",
-          elevated: "rgb(var(--bg-elevated) / <alpha-value>)",
-        },
-        success: {
-          DEFAULT: "#10b981",
-          50: "#ecfdf5",
-          100: "#d1fae5",
-          400: "#34d399",
-          500: "#10b981",
-          600: "#059669",
-          700: "#047857",
-        },
-        danger: {
-          DEFAULT: "#EF4444",
-          50: "#fef2f2",
-          100: "#fee2e2",
-          400: "#f87171",
-          500: "#EF4444",
-          600: "#dc2626",
-          700: "#b91c1c",
-        },
-        warning: {
-          DEFAULT: "#F59E0B",
-          50: "#fffbeb",
-          100: "#fef3c7",
-          400: "#fbbf24",
-          500: "#F59E0B",
-          600: "#d97706",
-          700: "#b45309",
-        },
-        info: {
-          DEFAULT: "#3B82F6",
-          50: "#eff6ff",
-          100: "#dbeafe",
-          400: "#60a5fa",
-          500: "#3B82F6",
-          600: "#2563eb",
-          700: "#1d4ed8",
+          DEFAULT: tk("--bg-base"),
+          surface: tk("--surface"),
+          elevated: tk("--surface-elevated"),
         },
         border: {
-          DEFAULT: "rgb(var(--border-color) / <alpha-value>)",
-          muted: "rgb(var(--border-muted) / <alpha-value>)",
+          DEFAULT: tk("--border-color"),
+          muted: tk("--border-muted"),
         },
       },
       fontFamily: {
-        sans: ["Plus Jakarta Sans", "ui-sans-serif", "system-ui", "sans-serif"],
+        sans: ["var(--font-sans)"],
+        mono: ["var(--font-mono)"],
+      },
+      borderRadius: {
+        lg: "var(--radius-lg)",
+        xl: "var(--radius-xl)",
+        "2xl": "var(--radius-2xl)",
       },
       keyframes: {
+        // Herdado. O `tokens/motion.css` registra este keyframe como vindo
+        // daqui, inclusive o drop-shadow em rgb(14 165 233) — o azul antigo.
+        // O prompt mestre manda manter como está e anotar (seção 4.2).
         "logo-pulse": {
           "0%, 100%": { transform: "scale(1)", filter: "drop-shadow(0 0 0px rgba(14,165,233,0))" },
           "50%": { transform: "scale(1.06)", filter: "drop-shadow(0 0 10px rgba(14,165,233,0.55))" },

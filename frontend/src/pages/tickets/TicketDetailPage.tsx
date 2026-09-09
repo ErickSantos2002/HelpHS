@@ -2,11 +2,16 @@ import React, { useCallback, useEffect, useRef, useState } from "react";
 import { toast } from "sonner";
 import { toastApiError } from "../../lib/toastError";
 import { readableTextColor } from "../../lib/colors";
+import { rotuloDeCategoria } from "../../lib/categoria";
+import { rotuloDePrioridade } from "../../lib/prioridade";
+import { rotuloDeStatus } from "../../lib/status";
 import { cn, plural } from "../../lib/utils";
-import { useNavigate, useParams } from "react-router-dom";
+import { Link, useParams } from "react-router-dom";
 import {
   Alert,
+  Badge,
   Button,
+  Icon,
   Modal,
   ModalFooter,
   PriorityBadge,
@@ -51,16 +56,6 @@ import { TICKET_TRANSITIONS } from "../../lib/ticketConstants";
 
 // ── Constants ─────────────────────────────────────────────────
 
-const STATUS_LABEL: Record<string, string> = {
-  open: "Aberto",
-  in_progress: "Em andamento",
-  awaiting_client: "Aguardando cliente",
-  awaiting_technical: "Aguardando técnico",
-  resolved: "Resolvido",
-  closed: "Fechado",
-  cancelled: "Cancelado",
-};
-
 const FIELD_LABEL: Record<string, string> = {
   created: "Ticket aberto",
   status: "Status alterado",
@@ -75,282 +70,21 @@ const FIELD_LABEL: Record<string, string> = {
   client_observation: "Observação atualizada",
 };
 
-const PRIORITY_LABEL: Record<string, string> = {
-  low: "Baixa",
-  medium: "Média",
-  high: "Alta",
-  critical: "Crítica",
-};
+/*
+ * Saíram daqui três mapas, e nenhum concordava com o resto do sistema:
+ *
+ *   STATUS_LABEL   duplicava `lib/status.ts`;
+ *   PRIORITY_LABEL era o NONO mapa de prioridade — este dizia o feminino certo,
+ *                  e foi ele que a emenda E17 citou como o lado correto da
+ *                  divergência;
+ *   PRIORITY_COLOR era o DÉCIMO, e um quarto esquema de cor: sky, yellow,
+ *                  orange, red — nenhuma delas a variante do módulo;
+ *   CATEGORY_LABEL era a terceira cópia das oito categorias.
+ *
+ * Agora saem de `lib/status.ts`, `lib/prioridade.ts` e `lib/categoria.ts`.
+ */
 
-const PRIORITY_COLOR: Record<string, string> = {
-  low: "text-sky-400",
-  medium: "text-yellow-400",
-  high: "text-orange-400",
-  critical: "text-red-400",
-};
 
-const CATEGORY_LABEL: Record<string, string> = {
-  hardware: "Hardware",
-  software: "Software",
-  network: "Rede",
-  access: "Acesso",
-  email: "E-mail",
-  security: "Segurança",
-  general: "Geral",
-  other: "Outro",
-};
-
-// ── SVG Icons ─────────────────────────────────────────────────
-
-const IC = {
-  ArrowLeft: (
-    <svg
-      className="w-3.5 h-3.5"
-      fill="none"
-      viewBox="0 0 24 24"
-      stroke="currentColor"
-      strokeWidth={2.5}
-    >
-      <path strokeLinecap="round" strokeLinejoin="round" d="M10 19l-7-7m0 0l7-7m-7 7h18" />
-    </svg>
-  ),
-  Check: (cls = "w-4 h-4") => (
-    <svg className={cls} fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2.5}>
-      <path strokeLinecap="round" strokeLinejoin="round" d="M5 13l4 4L19 7" />
-    </svg>
-  ),
-  User: (
-    <svg className="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
-      <path
-        strokeLinecap="round"
-        strokeLinejoin="round"
-        d="M16 7a4 4 0 11-8 0 4 4 0 018 0zM12 14a7 7 0 00-7 7h14a7 7 0 00-7-7z"
-      />
-    </svg>
-  ),
-  Calendar: (
-    <svg className="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
-      <path
-        strokeLinecap="round"
-        strokeLinejoin="round"
-        d="M8 7V3m8 4V3m-9 8h10M5 21h14a2 2 0 002-2V7a2 2 0 00-2-2H5a2 2 0 00-2 2v12a2 2 0 002 2z"
-      />
-    </svg>
-  ),
-  Folder: (
-    <svg className="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
-      <path
-        strokeLinecap="round"
-        strokeLinejoin="round"
-        d="M3 7a2 2 0 012-2h3.586a1 1 0 01.707.293l1.414 1.414A1 1 0 0011.414 7H19a2 2 0 012 2v9a2 2 0 01-2 2H5a2 2 0 01-2-2V7z"
-      />
-    </svg>
-  ),
-  Clip: (
-    <svg className="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
-      <path
-        strokeLinecap="round"
-        strokeLinejoin="round"
-        d="M15.172 7l-6.586 6.586a2 2 0 102.828 2.828l6.414-6.586a4 4 0 00-5.656-5.656l-6.415 6.585a6 6 0 108.486 8.486L20.5 13"
-      />
-    </svg>
-  ),
-  Edit: (
-    <svg
-      className="w-3.5 h-3.5"
-      fill="none"
-      viewBox="0 0 24 24"
-      stroke="currentColor"
-      strokeWidth={2}
-    >
-      <path
-        strokeLinecap="round"
-        strokeLinejoin="round"
-        d="M11 5H6a2 2 0 00-2 2v11a2 2 0 002 2h11a2 2 0 002-2v-5m-1.414-9.414a2 2 0 112.828 2.828L11.828 15H9v-2.828l8.586-8.586z"
-      />
-    </svg>
-  ),
-  Lock: (
-    <svg
-      className="w-3.5 h-3.5"
-      fill="none"
-      viewBox="0 0 24 24"
-      stroke="currentColor"
-      strokeWidth={2}
-    >
-      <path
-        strokeLinecap="round"
-        strokeLinejoin="round"
-        d="M12 15v2m-6 4h12a2 2 0 002-2v-6a2 2 0 00-2-2H6a2 2 0 00-2 2v6a2 2 0 002 2zm10-10V7a4 4 0 00-8 0v4h8z"
-      />
-    </svg>
-  ),
-  Trash: (
-    <svg
-      className="w-3.5 h-3.5"
-      fill="none"
-      viewBox="0 0 24 24"
-      stroke="currentColor"
-      strokeWidth={2}
-    >
-      <path
-        strokeLinecap="round"
-        strokeLinejoin="round"
-        d="M19 7l-.867 12.142A2 2 0 0116.138 21H7.862a2 2 0 01-1.995-1.858L5 7m5 4v6m4-6v6m1-10V4a1 1 0 00-1-1h-4a1 1 0 00-1 1v3M4 7h16"
-      />
-    </svg>
-  ),
-  Refresh: (
-    <svg className="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
-      <path
-        strokeLinecap="round"
-        strokeLinejoin="round"
-        d="M4 4v5h.582m15.356 2A8.001 8.001 0 004.582 9m0 0H9m11 11v-5h-.581m0 0a8.003 8.003 0 01-15.357-2m15.357 2H15"
-      />
-    </svg>
-  ),
-  UserPlus: (
-    <svg className="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
-      <path
-        strokeLinecap="round"
-        strokeLinejoin="round"
-        d="M18 9v3m0 0v3m0-3h3m-3 0h-3m-2-5a4 4 0 11-8 0 4 4 0 018 0zM3 20a6 6 0 0112 0v1H3v-1z"
-      />
-    </svg>
-  ),
-  Download: (
-    <svg
-      className="w-3.5 h-3.5"
-      fill="none"
-      viewBox="0 0 24 24"
-      stroke="currentColor"
-      strokeWidth={2}
-    >
-      <path
-        strokeLinecap="round"
-        strokeLinejoin="round"
-        d="M4 16v1a3 3 0 003 3h10a3 3 0 003-3v-1m-4-4l-4 4m0 0l-4-4m4 4V4"
-      />
-    </svg>
-  ),
-  Eye: (
-    <svg
-      className="w-3.5 h-3.5"
-      fill="none"
-      viewBox="0 0 24 24"
-      stroke="currentColor"
-      strokeWidth={2}
-    >
-      <path strokeLinecap="round" strokeLinejoin="round" d="M15 12a3 3 0 11-6 0 3 3 0 016 0z" />
-      <path
-        strokeLinecap="round"
-        strokeLinejoin="round"
-        d="M2.458 12C3.732 7.943 7.523 5 12 5c4.478 0 8.268 2.943 9.542 7-1.274 4.057-5.064 7-9.542 7-4.477 0-8.268-2.943-9.542-7z"
-      />
-    </svg>
-  ),
-  Box: (
-    <svg
-      className="w-4 h-4"
-      fill="none"
-      viewBox="0 0 24 24"
-      stroke="currentColor"
-      strokeWidth={1.75}
-    >
-      <path
-        strokeLinecap="round"
-        strokeLinejoin="round"
-        d="M20 7l-8-4-8 4m16 0l-8 4m8-4v10l-8 4m0-10L4 7m8 4v10M4 7v10l8 4"
-      />
-    </svg>
-  ),
-  Cpu: (
-    <svg
-      className="w-4 h-4"
-      fill="none"
-      viewBox="0 0 24 24"
-      stroke="currentColor"
-      strokeWidth={1.75}
-    >
-      <path
-        strokeLinecap="round"
-        strokeLinejoin="round"
-        d="M9 3H7a2 2 0 00-2 2v2M9 3h6M9 3v2m6-2h2a2 2 0 012 2v2M15 3v2M3 9h2m16 0h-2M3 15h2m16 0h-2M9 21H7a2 2 0 01-2-2v-2m4 4h6m-6 0v-2m6 2h2a2 2 0 002-2v-2m-4 4v-2M9 9h6v6H9V9z"
-      />
-    </svg>
-  ),
-  X: (
-    <svg
-      className="w-3.5 h-3.5"
-      fill="none"
-      viewBox="0 0 24 24"
-      stroke="currentColor"
-      strokeWidth={2.5}
-    >
-      <path strokeLinecap="round" strokeLinejoin="round" d="M6 18L18 6M6 6l12 12" />
-    </svg>
-  ),
-  Alert: (
-    <svg
-      className="w-3.5 h-3.5"
-      fill="none"
-      viewBox="0 0 24 24"
-      stroke="currentColor"
-      strokeWidth={2}
-    >
-      <path
-        strokeLinecap="round"
-        strokeLinejoin="round"
-        d="M12 9v2m0 4h.01m-6.938 4h13.856c1.54 0 2.502-1.667 1.732-3L13.732 4c-.77-1.333-2.694-1.333-3.464 0L3.34 16c-.77 1.333.192 3 1.732 3z"
-      />
-    </svg>
-  ),
-  Tag: (
-    <svg
-      className="w-3.5 h-3.5"
-      fill="none"
-      viewBox="0 0 24 24"
-      stroke="currentColor"
-      strokeWidth={2}
-    >
-      <path
-        strokeLinecap="round"
-        strokeLinejoin="round"
-        d="M7 7h.01M7 3h5c.512 0 1.024.195 1.414.586l7 7a2 2 0 010 2.828l-7 7a2 2 0 01-2.828 0l-7-7A1.994 1.994 0 013 12V7a4 4 0 014-4z"
-      />
-    </svg>
-  ),
-  Text: (
-    <svg className="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
-      <path strokeLinecap="round" strokeLinejoin="round" d="M4 6h16M4 12h16M4 18h7" />
-    </svg>
-  ),
-  Activity: (
-    <svg className="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
-      <path strokeLinecap="round" strokeLinejoin="round" d="M13 10V3L4 14h7v7l9-11h-7z" />
-    </svg>
-  ),
-  Star: (
-    <svg className="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
-      <path
-        strokeLinecap="round"
-        strokeLinejoin="round"
-        d="M11.049 2.927c.3-.921 1.603-.921 1.902 0l1.519 4.674a1 1 0 00.95.69h4.915c.969 0 1.371 1.24.588 1.81l-3.976 2.888a1 1 0 00-.363 1.118l1.518 4.674c.3.922-.755 1.688-1.538 1.118l-3.976-2.888a1 1 0 00-1.176 0l-3.976 2.888c-.783.57-1.838-.197-1.538-1.118l1.518-4.674a1 1 0 00-.363-1.118l-3.976-2.888c-.784-.57-.38-1.81.588-1.81h4.914a1 1 0 00.951-.69l1.519-4.674z"
-      />
-    </svg>
-  ),
-  Plus: (
-    <svg
-      className="w-3.5 h-3.5"
-      fill="none"
-      viewBox="0 0 24 24"
-      stroke="currentColor"
-      strokeWidth={2.5}
-    >
-      <path strokeLinecap="round" strokeLinejoin="round" d="M12 4v16m8-8H4" />
-    </svg>
-  ),
-};
 
 // ── Activity entry ────────────────────────────────────────────
 
@@ -371,14 +105,19 @@ function ActivityEntry({ entry }: { entry: TicketHistory }) {
 
   const dotColor =
     entry.field === "created"
-      ? "bg-sky-500"
+      // A cor do ponto distingue TIPO DE CAMPO, que é série categórica sem
+      // significado próprio — então sai da paleta `--chart-*` da E16-b, e não
+      // das rampas semânticas. Era sky/violet/emerald/orange cru.
+      //
+      // A cor é reforço: o rótulo do campo está ao lado, em texto.
+      ? "bg-chart-1"
       : entry.field === "status"
-        ? "bg-violet-500"
+        ? "bg-chart-2"
         : entry.field === "assignee_id"
-          ? "bg-emerald-500"
+          ? "bg-chart-3"
           : entry.field === "priority"
-            ? "bg-orange-500"
-            : "bg-slate-500";
+            ? "bg-chart-4"
+            : "bg-borda-control";
 
   const isUnassign = entry.field === "assignee_id" && !entry.new_value;
 
@@ -386,18 +125,18 @@ function ActivityEntry({ entry }: { entry: TicketHistory }) {
     <div className="flex gap-3 group">
       <div className="flex flex-col items-center pt-1 shrink-0">
         <span className={`w-2 h-2 rounded-full shrink-0 ${dotColor}`} />
-        <span className="w-px flex-1 bg-border/40 mt-1.5" />
+        <span className="w-px flex-1 bg-borda/40 mt-1.5" />
       </div>
       <div className="pb-4 min-w-0 flex-1">
         <div className="flex items-baseline justify-between gap-2">
-          <p className="text-sm font-medium text-slate-200">
+          <p className="text-sm font-medium text-conteudo">
             {isUnassign ? "Responsável removido" : label}
           </p>
-          <time className="text-[11px] text-slate-500 shrink-0">{relTime}</time>
+          <time className="text-[11px] text-conteudo-muted shrink-0">{relTime}</time>
         </div>
 
         {/* Quem fez a ação — sem autor significa que foi o próprio sistema */}
-        <p className="text-xs text-slate-500 mt-0.5">por {entry.user_name ?? "Sistema"}</p>
+        <p className="text-xs text-conteudo-muted mt-0.5">por {entry.user_name ?? "Sistema"}</p>
 
         {/* Status: de → para */}
         {entry.field === "status" && entry.new_value && (
@@ -405,15 +144,12 @@ function ActivityEntry({ entry }: { entry: TicketHistory }) {
             {entry.old_value && (
               <>
                 <StatusBadge status={entry.old_value as never} />
-                <svg
-                  className="w-3 h-3 text-slate-600"
-                  fill="none"
-                  viewBox="0 0 24 24"
-                  stroke="currentColor"
+                <Icon
+                  name="chevronDown"
+                  size={12}
                   strokeWidth={2}
-                >
-                  <path strokeLinecap="round" strokeLinejoin="round" d="M9 5l7 7-7 7" />
-                </svg>
+                  className="-rotate-90 text-conteudo-faint"
+                />
               </>
             )}
             <StatusBadge status={entry.new_value as never} />
@@ -422,35 +158,28 @@ function ActivityEntry({ entry }: { entry: TicketHistory }) {
 
         {/* Técnico atribuído */}
         {entry.field === "assignee_id" && entry.comment && !isUnassign && (
-          <p className="mt-1 text-xs text-emerald-400 font-medium">{entry.comment}</p>
+          <p className="mt-1 text-xs font-medium text-on-tint-success">{entry.comment}</p>
         )}
 
         {/* Prioridade: de → para */}
         {entry.field === "priority" && entry.new_value && (
           <div className="flex items-center gap-1.5 mt-1">
+            {/* O selo, e não texto colorido: o `PRIORITY_COLOR` daqui era um
+                quarto esquema (sky, yellow, orange, red) e nenhuma das quatro
+                era a variante do módulo. E texto colorido sozinho é cor como
+                único portador; o selo traz o rótulo junto. */}
             {entry.old_value && (
               <>
-                <span
-                  className={`text-xs font-medium ${PRIORITY_COLOR[entry.old_value] ?? "text-slate-400"}`}
-                >
-                  {PRIORITY_LABEL[entry.old_value] ?? entry.old_value}
-                </span>
-                <svg
-                  className="w-3 h-3 text-slate-600"
-                  fill="none"
-                  viewBox="0 0 24 24"
-                  stroke="currentColor"
+                <PriorityBadge priority={entry.old_value} />
+                <Icon
+                  name="chevronDown"
+                  size={12}
                   strokeWidth={2}
-                >
-                  <path strokeLinecap="round" strokeLinejoin="round" d="M9 5l7 7-7 7" />
-                </svg>
+                  className="-rotate-90 text-conteudo-faint"
+                />
               </>
             )}
-            <span
-              className={`text-xs font-medium ${PRIORITY_COLOR[entry.new_value] ?? "text-slate-400"}`}
-            >
-              {PRIORITY_LABEL[entry.new_value] ?? entry.new_value}
-            </span>
+            <PriorityBadge priority={entry.new_value} />
           </div>
         )}
 
@@ -459,29 +188,26 @@ function ActivityEntry({ entry }: { entry: TicketHistory }) {
           <div className="flex items-center gap-1.5 mt-1">
             {entry.old_value && (
               <>
-                <span className="text-xs text-slate-500">
-                  {CATEGORY_LABEL[entry.old_value] ?? entry.old_value}
+                <span className="text-xs text-conteudo-muted">
+                  {rotuloDeCategoria(entry.old_value)}
                 </span>
-                <svg
-                  className="w-3 h-3 text-slate-600"
-                  fill="none"
-                  viewBox="0 0 24 24"
-                  stroke="currentColor"
+                <Icon
+                  name="chevronDown"
+                  size={12}
                   strokeWidth={2}
-                >
-                  <path strokeLinecap="round" strokeLinejoin="round" d="M9 5l7 7-7 7" />
-                </svg>
+                  className="-rotate-90 text-conteudo-faint"
+                />
               </>
             )}
-            <span className="text-xs text-slate-300">
-              {CATEGORY_LABEL[entry.new_value] ?? entry.new_value}
+            <span className="text-xs text-conteudo">
+              {rotuloDeCategoria(entry.new_value)}
             </span>
           </div>
         )}
 
         {/* Comentário geral (status manual com observação, resolução, etc.) */}
         {entry.comment && entry.field !== "assignee_id" && (
-          <p className="mt-1.5 text-xs text-slate-400 italic bg-background-elevated/60 rounded-lg px-3 py-2 border border-border/30">
+          <p className="mt-1.5 text-xs text-conteudo-muted italic bg-surface-elevated/60 rounded-lg px-3 py-2 border border-borda/30">
             "{entry.comment}"
           </p>
         )}
@@ -515,45 +241,67 @@ function AttachmentItem({
   const viewable = canPreview(attachment.original_name);
 
   return (
-    <div className="group flex items-center gap-3 rounded-lg border border-border/50 bg-background-elevated/40 px-3 py-2.5 hover:border-primary/30 hover:bg-primary/5 transition-all">
+    <div className="group flex items-center gap-3 rounded-lg border border-borda/50 bg-surface-elevated/40 px-3 py-2.5 hover:border-primary/30 hover:bg-primary/5 transition-all">
       <div className="flex h-9 w-9 shrink-0 items-center justify-center rounded-lg bg-primary/10 text-[10px] font-bold text-primary">
         {ext.slice(0, 4)}
       </div>
       <div className="min-w-0 flex-1">
         <button
           onClick={viewable ? preview : download}
-          className="block w-full truncate text-left text-sm font-medium text-slate-200 hover:text-primary transition-colors cursor-pointer"
+          className="block w-full truncate text-left text-sm font-medium text-conteudo hover:text-primary transition-colors cursor-pointer"
         >
           {attachment.original_name}
         </button>
-        <p className="text-xs text-slate-500">{sizeMb} MB</p>
+        <p className="flex items-center gap-1.5 text-xs text-conteudo-muted">
+          {sizeMb} MB
+          {/* O estado do antivírus, que até aqui era invisível. O backend
+              devolve `virus_scanned` desde sempre e nenhuma tela o lia.
+
+              São três estados, e só dois viram linha no banco:
+
+              · verificado  — `virus_scanned = true`
+              · NÃO verificado — o ClamAV estava fora, e `attachments.py` grava
+                assim mesmo (`virus_scanned = false`). O arquivo está lá, e
+                ninguém o examinou.
+              · rejeitado — nunca chega aqui: o antivírus barra ANTES de
+                persistir, e volta 422 com `detail: "File 'X' rejected: …"`.
+                Quem mostra o motivo é o `toastApiError` do envio.
+
+              O selo só aparece no estado que precisa de atenção. Carimbar
+              "verificado" em todo anexo viraria ruído e ensinaria a ignorar. */}
+          {!attachment.virus_scanned && (
+            <Badge variant="warning" title="O antivírus estava indisponível quando este arquivo foi enviado, e ele foi gravado sem verificação.">
+              não verificado
+            </Badge>
+          )}
+        </p>
       </div>
       <div className="flex items-center gap-1 opacity-0 group-hover:opacity-100 transition-opacity">
         {viewable && (
           <button
             onClick={preview}
             aria-label={`Visualizar ${attachment.original_name}`}
-            className="p-1.5 rounded-md text-slate-500 hover:text-primary hover:bg-primary/10 transition-colors cursor-pointer"
+            className="p-1.5 rounded-md text-conteudo-muted hover:text-primary hover:bg-primary/10 transition-colors cursor-pointer"
             title="Visualizar"
           >
-            {IC.Eye}
+            <Icon name="eye" size={12} strokeWidth={2} />
           </button>
         )}
         <button
           onClick={download}
           aria-label={`Baixar ${attachment.original_name}`}
-          className="p-1.5 rounded-md text-slate-500 hover:text-primary hover:bg-primary/10 transition-colors cursor-pointer"
+          className="p-1.5 rounded-md text-conteudo-muted hover:text-primary hover:bg-primary/10 transition-colors cursor-pointer"
           title="Baixar"
         >
-          {IC.Download}
+          <Icon name="download" size={12} strokeWidth={2} />
         </button>
         {canDelete && (
           <button
             onClick={() => onDelete(attachment.id)}
-            className="p-1.5 rounded-md text-slate-500 hover:text-red-400 hover:bg-red-500/10 transition-colors cursor-pointer"
+            className="p-1.5 rounded-md text-conteudo-muted hover:text-on-tint-danger hover:bg-tint-danger transition-colors cursor-pointer"
             title="Excluir"
           >
-            {IC.X}
+            <Icon name="close" size={12} strokeWidth={2.5} />
           </button>
         )}
       </div>
@@ -566,14 +314,14 @@ function AttachmentItem({
 /** Campo do bloco de informações. Sem valor, deixa claro que não foi informado. */
 function DetailField({ label, value }: { label: string; value: string | null | undefined }) {
   return (
-    <div className="border-b border-border/20 py-2.5 last:border-0 sm:[&:nth-last-child(-n+2)]:border-0">
-      <p className="mb-0.5 text-[10px] font-semibold uppercase tracking-widest text-slate-500">
+    <div className="border-b border-borda/20 py-2.5 last:border-0 sm:[&:nth-last-child(-n+2)]:border-0">
+      <p className="mb-0.5 text-[10px] font-semibold uppercase tracking-widest text-conteudo-muted">
         {label}
       </p>
       {value ? (
-        <p className="text-sm text-slate-200 break-words">{value}</p>
+        <p className="text-sm text-conteudo break-words">{value}</p>
       ) : (
-        <p className="text-sm italic text-slate-600">Não informado</p>
+        <p className="text-sm italic text-conteudo-faint">Não informado</p>
       )}
     </div>
   );
@@ -591,13 +339,13 @@ function PropRow({
   children: React.ReactNode;
 }) {
   return (
-    <div className="flex items-start gap-3 py-2.5 border-b border-border/30 last:border-0">
-      <span className="mt-0.5 shrink-0 text-slate-500">{icon}</span>
+    <div className="flex items-start gap-3 py-2.5 border-b border-borda/30 last:border-0">
+      <span className="mt-0.5 shrink-0 text-conteudo-muted">{icon}</span>
       <div className="min-w-0 flex-1">
-        <p className="mb-0.5 text-[10px] font-semibold uppercase tracking-widest text-slate-500">
+        <p className="mb-0.5 text-[10px] font-semibold uppercase tracking-widest text-conteudo-muted">
           {label}
         </p>
-        <div className="text-sm font-medium text-slate-200">{children}</div>
+        <div className="text-sm font-medium text-conteudo">{children}</div>
       </div>
     </div>
   );
@@ -624,10 +372,10 @@ function SidebarSection({
   const isAmber = accent === "amber";
   return (
     <div
-      className={`rounded-xl border ${isAmber ? "border-amber-700/25 bg-amber-950/15" : "border-border/40 bg-background-surface"}`}
+      className={`rounded-xl border ${isAmber ? "border-warning/25 bg-tint-warning" : "border-borda/40 bg-surface"}`}
     >
       <div
-        className={`flex w-full items-center justify-between px-4 py-3 rounded-xl ${isAmber ? "hover:bg-amber-900/10" : "hover:bg-background-elevated/40"} transition-colors`}
+        className={`flex w-full items-center justify-between px-4 py-3 rounded-xl ${isAmber ? "hover:bg-tint-warning" : "hover:bg-surface-elevated/40"} transition-colors`}
       >
         <button
           type="button"
@@ -635,7 +383,7 @@ function SidebarSection({
           className="flex flex-1 items-center gap-1.5 cursor-pointer text-left"
         >
           <span
-            className={`text-[10px] font-bold uppercase tracking-widest flex items-center gap-1.5 ${isAmber ? "text-amber-500/80" : "text-slate-500"}`}
+            className={`text-[10px] font-bold uppercase tracking-widest flex items-center gap-1.5 ${isAmber ? "text-on-tint-warning" : "text-conteudo-muted"}`}
           >
             {icon}
             {title}
@@ -644,15 +392,12 @@ function SidebarSection({
         <div className="flex items-center gap-2">
           {action}
           <button type="button" onClick={() => setOpen((v) => !v)} className="cursor-pointer">
-            <svg
-              className={`w-3 h-3 shrink-0 transition-transform duration-200 ${open ? "rotate-180" : ""} ${isAmber ? "text-amber-600/60" : "text-slate-600"}`}
-              fill="none"
-              viewBox="0 0 24 24"
-              stroke="currentColor"
-              strokeWidth={2.5}
-            >
-              <path strokeLinecap="round" strokeLinejoin="round" d="M19 9l-7 7-7-7" />
-            </svg>
+            <Icon
+              name="chevronDown"
+              size={12}
+              strokeWidth={2}
+              className={`transition-transform duration-200 ${open ? "rotate-180" : ""} ${isAmber ? "text-on-tint-warning" : "text-conteudo-faint"}`}
+            />
           </button>
         </div>
       </div>
@@ -667,26 +412,45 @@ function SidebarAction({
   icon,
   label,
   onClick,
+  to,
   variant = "default",
 }: {
   icon: React.JSX.Element;
   label: string;
-  onClick: () => void;
+  /** Ação. Use `to` quando for navegação — os dois são exclusivos. */
+  onClick?: () => void;
+  /** Destino. Vira um `<Link>` com aparência de botão. */
+  to?: string;
   variant?: "primary" | "default" | "ghost";
 }) {
   const cls = {
-    primary: "bg-emerald-600 hover:bg-emerald-500 text-white border-emerald-600",
+    // `action-success` e `on-success` da emenda E2, e nao o verde cru: o
+    // degrau 500 da rampa com texto branco por cima da 2,54:1.
+    primary:
+      "bg-action-success hover:bg-action-success-hover text-on-success border-action-success",
     default:
-      "bg-background-elevated hover:bg-background-elevated/80 text-slate-200 border-border/50 hover:border-border",
+      "bg-surface-elevated hover:bg-surface-elevated/80 text-conteudo border-borda/50 hover:border-borda",
     ghost:
-      "bg-transparent hover:bg-background-elevated text-slate-400 hover:text-slate-200 border-border/30",
+      "bg-transparent hover:bg-surface-elevated text-conteudo-muted hover:text-conteudo border-borda/30",
   }[variant];
 
+  const classes = `flex w-full items-center justify-center gap-2 rounded-lg border px-4 py-2 text-sm font-semibold transition-all cursor-pointer ${cls}`;
+
+  // Navegação é link, ação é botão — a regra registrada no `DECISOES.md`. O
+  // "Editar ticket" navegava por `onClick={navigate(...)}`, e o botão tirava
+  // dele tudo o que um link tem: abrir em aba nova, menu de contexto, destino
+  // na barra de status, e o anúncio certo no leitor de tela.
+  if (to) {
+    return (
+      <Link to={to} className={classes}>
+        {icon}
+        {label}
+      </Link>
+    );
+  }
+
   return (
-    <button
-      onClick={onClick}
-      className={`flex w-full items-center justify-center gap-2 rounded-lg border px-4 py-2 text-sm font-semibold transition-all cursor-pointer ${cls}`}
-    >
+    <button type="button" onClick={onClick} className={classes}>
       {icon}
       {label}
     </button>
@@ -711,8 +475,8 @@ function ScoreRating({ value, onChange }: { value: number; onChange: (v: number)
             aria-label={`Nota ${n}`}
             className={`h-9 w-9 rounded-lg text-sm font-bold transition-all border cursor-pointer ${
               active
-                ? "bg-yellow-400 border-yellow-400 text-slate-900 shadow-sm"
-                : "border-border/60 text-slate-400 hover:border-yellow-400/60 hover:text-yellow-400"
+                ? "bg-tint-warning border-warning text-on-tint-warning shadow-sm"
+                : "border-borda/60 text-conteudo-muted hover:border-warning/60 hover:text-on-tint-warning"
             }`}
           >
             {n}
@@ -782,34 +546,34 @@ function SurveyPanel({ ticketId }: { ticketId: string }) {
   }
 
   return (
-    <div className="rounded-xl border border-border/50 bg-background-surface">
-      <div className="flex items-center gap-2 border-b border-border/40 px-5 py-2.5">
-        <span className="text-yellow-400">{IC.Star}</span>
-        <h2 className="text-sm font-semibold text-slate-200">Pesquisa de satisfação</h2>
+    <div className="rounded-xl border border-borda/50 bg-surface">
+      <div className="flex items-center gap-2 border-b border-borda/40 px-5 py-2.5">
+        <span className="text-on-tint-warning"><Icon name="star" size={16} strokeWidth={2} /></span>
+        <h2 className="text-sm font-semibold text-conteudo">Pesquisa de satisfação</h2>
       </div>
       <div className="px-5 py-4">
         {survey ? (
           <div className="space-y-2">
             <div className="flex flex-wrap items-center gap-x-6 gap-y-2">
               <div>
-                <p className="text-xs text-slate-500">Atendimento</p>
+                <p className="text-xs text-conteudo-muted">Atendimento</p>
                 <div className="flex items-center gap-2">
-                  <span className="text-3xl font-extrabold text-yellow-400">
+                  <span className="text-3xl font-extrabold text-on-tint-warning">
                     {survey.rating}
-                    <span className="text-base font-normal text-slate-500">/10</span>
+                    <span className="text-base font-normal text-conteudo-muted">/10</span>
                   </span>
-                  <span className="text-sm text-slate-400">{RATING_LABELS[survey.rating]}</span>
+                  <span className="text-sm text-conteudo-muted">{RATING_LABELS[survey.rating]}</span>
                 </div>
               </div>
               {survey.recommend_rating !== null && (
                 <div>
-                  <p className="text-xs text-slate-500">Recomendaria a empresa</p>
+                  <p className="text-xs text-conteudo-muted">Recomendaria a empresa</p>
                   <div className="flex items-center gap-2">
-                    <span className="text-3xl font-extrabold text-yellow-400">
+                    <span className="text-3xl font-extrabold text-on-tint-warning">
                       {survey.recommend_rating}
-                      <span className="text-base font-normal text-slate-500">/10</span>
+                      <span className="text-base font-normal text-conteudo-muted">/10</span>
                     </span>
-                    <span className="text-sm text-slate-400">
+                    <span className="text-sm text-conteudo-muted">
                       {RECOMMEND_LABELS[survey.recommend_rating]}
                     </span>
                   </div>
@@ -817,28 +581,28 @@ function SurveyPanel({ ticketId }: { ticketId: string }) {
               )}
             </div>
             {survey.comment && (
-              <p className="text-sm italic text-slate-400 bg-background-elevated/60 rounded-lg px-3 py-2">
+              <p className="text-sm italic text-conteudo-muted bg-surface-elevated/60 rounded-lg px-3 py-2">
                 "{survey.comment}"
               </p>
             )}
-            <p className="text-xs text-slate-600">
+            <p className="text-xs text-conteudo-faint">
               Enviado em {new Date(survey.created_at).toLocaleString("pt-BR")}
             </p>
           </div>
         ) : (
           <div className="space-y-3">
             <div className="flex flex-wrap items-center gap-x-3 gap-y-2">
-              <p className="text-sm text-slate-400">Como você avalia o atendimento?</p>
+              <p className="text-sm text-conteudo-muted">Como você avalia o atendimento?</p>
               <ScoreRating value={rating} onChange={setRating} />
               {rating > 0 && (
-                <p className="text-sm font-semibold text-yellow-400">{RATING_LABELS[rating]}</p>
+                <p className="text-sm font-semibold text-on-tint-warning">{RATING_LABELS[rating]}</p>
               )}
             </div>
             <div className="flex flex-wrap items-center gap-x-3 gap-y-2">
-              <p className="text-sm text-slate-400">O quanto você recomendaria nossa empresa?</p>
+              <p className="text-sm text-conteudo-muted">O quanto você recomendaria nossa empresa?</p>
               <ScoreRating value={recommend} onChange={setRecommend} />
               {recommend > 0 && (
-                <p className="text-sm font-semibold text-yellow-400">
+                <p className="text-sm font-semibold text-on-tint-warning">
                   {RECOMMEND_LABELS[recommend]}
                 </p>
               )}
@@ -876,79 +640,19 @@ type Tab = "conversa" | "kb" | "detalhes" | "historico" | "anexos";
 
 const TAB_ICONS: Record<string, React.JSX.Element> = {
   conversa: (
-    <svg
-      className="w-4 h-4 shrink-0"
-      fill="none"
-      viewBox="0 0 24 24"
-      stroke="currentColor"
-      strokeWidth={2}
-    >
-      <path
-        strokeLinecap="round"
-        strokeLinejoin="round"
-        d="M8 10h.01M12 10h.01M16 10h.01M9 16H5a2 2 0 01-2-2V6a2 2 0 012-2h14a2 2 0 012 2v8a2 2 0 01-2 2h-5l-5 5v-5z"
-      />
-    </svg>
+    <Icon name="chat" size={16} strokeWidth={2} />
   ),
   detalhes: (
-    <svg
-      className="w-4 h-4 shrink-0"
-      fill="none"
-      viewBox="0 0 24 24"
-      stroke="currentColor"
-      strokeWidth={2}
-    >
-      <path
-        strokeLinecap="round"
-        strokeLinejoin="round"
-        d="M9 12h6m-6 4h6m2 5H7a2 2 0 01-2-2V5a2 2 0 012-2h5.586a1 1 0 01.707.293l5.414 5.414a1 1 0 01.293.707V19a2 2 0 01-2 2z"
-      />
-    </svg>
+    <Icon name="document" size={16} strokeWidth={2} />
   ),
   kb: (
-    <svg
-      className="w-4 h-4 shrink-0"
-      fill="none"
-      viewBox="0 0 24 24"
-      stroke="currentColor"
-      strokeWidth={2}
-    >
-      <path
-        strokeLinecap="round"
-        strokeLinejoin="round"
-        d="M12 6.253v13m0-13C10.832 5.477 9.246 5 7.5 5S4.168 5.477 3 6.253v13C4.168 18.477 5.754 18 7.5 18s3.332.477 4.5 1.253m0-13C13.168 5.477 14.754 5 16.5 5c1.747 0 3.332.477 4.5 1.253v13C19.832 18.477 18.247 18 16.5 18c-1.746 0-3.332.477-4.5 1.253"
-      />
-    </svg>
+    <Icon name="book" size={16} strokeWidth={2} />
   ),
   historico: (
-    <svg
-      className="w-4 h-4 shrink-0"
-      fill="none"
-      viewBox="0 0 24 24"
-      stroke="currentColor"
-      strokeWidth={2}
-    >
-      <path
-        strokeLinecap="round"
-        strokeLinejoin="round"
-        d="M12 8v4l3 3m6-3a9 9 0 11-18 0 9 9 0 0118 0z"
-      />
-    </svg>
+    <Icon name="clock" size={16} strokeWidth={2} />
   ),
   anexos: (
-    <svg
-      className="w-4 h-4 shrink-0"
-      fill="none"
-      viewBox="0 0 24 24"
-      stroke="currentColor"
-      strokeWidth={2}
-    >
-      <path
-        strokeLinecap="round"
-        strokeLinejoin="round"
-        d="M15.172 7l-6.586 6.586a2 2 0 102.828 2.828l6.414-6.586a4 4 0 00-5.656-5.656l-6.415 6.585a6 6 0 108.486 8.486L20.5 13"
-      />
-    </svg>
+    <Icon name="paperclip" size={16} strokeWidth={2} />
   ),
 };
 
@@ -972,15 +676,15 @@ function TabBar({
   ];
   return (
     <div className="shrink-0">
-      <div className="flex gap-0.5 rounded-xl bg-background-elevated/50 p-1">
+      <div className="flex gap-0.5 rounded-xl bg-surface-elevated/50 p-1">
         {tabs.map((tab) => (
           <button
             key={tab.id}
             onClick={() => setActive(tab.id)}
             className={`flex flex-1 items-center justify-center gap-1.5 rounded-lg px-3 py-2 text-sm font-semibold transition-all cursor-pointer ${
               active === tab.id
-                ? "bg-background-surface text-slate-100 shadow-sm"
-                : "text-slate-500 hover:text-slate-300"
+                ? "bg-surface text-conteudo-heading shadow-sm"
+                : "text-conteudo-muted hover:text-conteudo"
             }`}
           >
             <span className="sm:hidden">{TAB_ICONS[tab.id]}</span>
@@ -990,7 +694,7 @@ function TabBar({
                 className={`rounded-full px-1.5 py-0.5 text-[10px] font-bold leading-none ${
                   active === tab.id
                     ? "bg-primary/20 text-primary"
-                    : "bg-background-elevated text-slate-500"
+                    : "bg-surface-elevated text-conteudo-muted"
                 }`}
               >
                 {counts[tab.id]}
@@ -1007,7 +711,6 @@ function TabBar({
 
 export default function TicketDetailPage() {
   const { id } = useParams<{ id: string }>();
-  const navigate = useNavigate();
   const { user } = useAuth();
   const [activeTab, setActiveTab] = useState<Tab>("conversa");
 
@@ -1044,6 +747,9 @@ export default function TicketDetailPage() {
   const [ticketNotes, setTicketNotes] = useState<TicketNote[]>([]);
   const [showAddNote, setShowAddNote] = useState(false);
   const [viewNote, setViewNote] = useState<TicketNote | null>(null);
+  const [deleteNoteTarget, setDeleteNoteTarget] = useState<TicketNote | null>(
+    null,
+  );
   const [newNoteContent, setNewNoteContent] = useState("");
   const [noteSaving, setNoteSaving] = useState(false);
   const [noteDeleting, setNoteDeleting] = useState<string | null>(null);
@@ -1226,12 +932,15 @@ export default function TicketDetailPage() {
     }
   }
 
-  async function handleDeleteNote(noteId: string) {
-    if (!ticket || !confirm("Deletar esta nota?")) return;
-    setNoteDeleting(noteId);
+  // O `confirm()` nativo saiu pela D9.3. Ele não nomeava a nota — "Deletar esta
+  // nota?" servia para qualquer uma da coluna — e não dizia que não volta.
+  async function handleDeleteNote(note: TicketNote) {
+    if (!ticket) return;
+    setNoteDeleting(note.id);
     try {
-      await deleteTicketNote(ticket.id, noteId);
-      setTicketNotes((p) => p.filter((n) => n.id !== noteId));
+      await deleteTicketNote(ticket.id, note.id);
+      setTicketNotes((p) => p.filter((n) => n.id !== note.id));
+      setDeleteNoteTarget(null);
       toast.success("Nota removida.");
     } catch (err) {
       toastApiError(err, "Não foi possível remover a nota.");
@@ -1295,7 +1004,7 @@ export default function TicketDetailPage() {
   }
 
   const transitions = TICKET_TRANSITIONS[ticket.status] ?? [];
-  const transitionOptions = transitions.map((s) => ({ value: s, label: STATUS_LABEL[s] ?? s }));
+  const transitionOptions = transitions.map((s) => ({ value: s, label: rotuloDeStatus(s) }));
   const assignedTech = ticket.assignee_name ?? (ticket.assignee_id ? "Técnico" : null);
   const slaBreach = ticket.sla_response_breach || ticket.sla_resolve_breach;
 
@@ -1307,19 +1016,33 @@ export default function TicketDetailPage() {
   return (
     <div className="flex flex-col gap-4 lg:h-full">
       {/* ── Page Header ──────────────────────────────────────── */}
-      <div className="shrink-0 flex flex-col sm:flex-row sm:items-start sm:justify-between gap-4 rounded-2xl border border-border/40 bg-background-surface px-5 py-4">
+      <div className="shrink-0 flex flex-col sm:flex-row sm:items-start sm:justify-between gap-4 rounded-2xl border border-borda/40 bg-surface px-5 py-4">
         {/* Breadcrumb + title */}
         <div className="min-w-0">
-          <button
-            onClick={() => navigate(-1)}
-            className="mb-2 flex items-center gap-1.5 text-xs font-medium text-slate-500 hover:text-primary transition-colors cursor-pointer"
-          >
-            {IC.ArrowLeft}
-            <span>Tickets</span>
-            <span className="text-slate-600">/</span>
-            <span className="font-mono text-slate-500">{ticket.protocol}</span>
-          </button>
-          <h1 className="text-xl font-extrabold leading-tight text-slate-100">{ticket.title}</h1>
+          {/* Era um `<button onClick={navigate(-1)}>` com a linha inteira
+              dentro, então o nome acessível do controle era "Tickets /
+              HS-2026-0001" — a página de onde se vem E a página onde se está,
+              num controle só. Mesma correção do `TicketFormPage`. */}
+          <nav aria-label="Trilha" className="mb-2">
+            <ol className="flex items-center gap-1.5 text-xs font-medium">
+              <li>
+                <Link
+                  to="/tickets"
+                  className="flex items-center gap-1.5 text-conteudo-muted transition-colors hover:text-conteudo-link"
+                >
+                  <Icon name="arrowLeft" size={12} strokeWidth={2.5} />
+                  Tickets
+                </Link>
+              </li>
+              <li aria-hidden="true" className="text-conteudo-faint">
+                /
+              </li>
+              <li aria-current="page" className="font-mono text-conteudo-muted">
+                {ticket.protocol}
+              </li>
+            </ol>
+          </nav>
+          <h1 className="text-xl font-extrabold leading-tight text-conteudo-heading">{ticket.title}</h1>
           <div className="mt-2 flex flex-wrap items-center gap-2">
             <StatusBadge status={ticket.status} />
             <PriorityBadge priority={ticket.priority} />
@@ -1327,8 +1050,8 @@ export default function TicketDetailPage() {
               <TagBadge key={tag.id} name={tag.name} color={tag.color} />
             ))}
             {slaBreach && (
-              <span className="inline-flex items-center gap-1 rounded-full bg-red-500/15 px-2.5 py-0.5 text-xs font-semibold text-red-700 dark:text-red-400 ring-1 ring-inset ring-red-500/25">
-                {IC.Alert}
+              <span className="inline-flex items-center gap-1 rounded-full bg-tint-danger px-2.5 py-0.5 text-xs font-semibold text-on-tint-danger ring-1 ring-inset ring-danger/25">
+                <Icon name="warning" size={12} strokeWidth={2} />
                 SLA violado
               </span>
             )}
@@ -1348,13 +1071,14 @@ export default function TicketDetailPage() {
 
         {/* Quick resolve button in header */}
         {isStaff && !isClosed && (
-          <button
+          <Button
+            variant="success"
             onClick={() => setResolveModal(true)}
-            className="flex w-full sm:w-auto shrink-0 items-center justify-center gap-2 rounded-xl bg-emerald-600 px-5 py-2.5 text-sm font-bold text-white shadow-sm hover:bg-emerald-500 transition-colors cursor-pointer"
+            icon={<Icon name="check" size={16} strokeWidth={2.5} />}
+            className="w-full sm:w-auto"
           >
-            {IC.Check("w-4 h-4")}
             Concluir ticket
-          </button>
+          </Button>
         )}
       </div>
 
@@ -1376,13 +1100,13 @@ export default function TicketDetailPage() {
               <div className="flex flex-col gap-4 lg:h-full">
                 {/* Resolution note */}
                 {ticket.resolution_note && (
-                  <div className="shrink-0 rounded-xl border border-emerald-700/30 bg-emerald-950/20">
-                    <div className="flex items-center gap-2 border-b border-emerald-700/20 px-5 py-3.5">
-                      <span className="text-emerald-400">{IC.Check("w-4 h-4")}</span>
-                      <h2 className="text-sm font-semibold text-emerald-400">Resolução</h2>
+                  <div className="shrink-0 rounded-xl border border-success/30 bg-tint-success">
+                    <div className="flex items-center gap-2 border-b border-success/20 px-5 py-3.5">
+                      <span className="text-on-tint-success">{<Icon name="check" size={16} strokeWidth={2.5} />}</span>
+                      <h2 className="text-sm font-semibold text-on-tint-success">Resolução</h2>
                     </div>
                     <div className="px-5 py-4">
-                      <p className="text-sm leading-relaxed text-slate-300 whitespace-pre-wrap">
+                      <p className="text-sm leading-relaxed text-conteudo whitespace-pre-wrap">
                         {ticket.resolution_note}
                       </p>
                     </div>
@@ -1392,17 +1116,17 @@ export default function TicketDetailPage() {
                 {/* Janela de reabertura — o cliente precisa ver o prazo sem
                   procurar na lateral, já que o chat está bloqueado */}
                 {reopenDeadline && (
-                  <div className="shrink-0 flex flex-col gap-3 rounded-xl border border-border/40 bg-background-surface px-5 py-4 sm:flex-row sm:items-center sm:justify-between">
-                    <p className="text-sm text-slate-400">
+                  <div className="shrink-0 flex flex-col gap-3 rounded-xl border border-borda/40 bg-surface px-5 py-4 sm:flex-row sm:items-center sm:justify-between">
+                    <p className="text-sm text-conteudo-muted">
                       {ticket.auto_closed && (
-                        <span className="text-slate-500">
+                        <span className="text-conteudo-muted">
                           Fechado automaticamente por falta de manifestação.{" "}
                         </span>
                       )}
                       {withinReopenWindow ? (
                         <>
                           O problema voltou? Este chamado ainda pode ser reaberto até{" "}
-                          <strong className="font-semibold text-slate-200">
+                          <strong className="font-semibold text-conteudo">
                             {reopenDeadline.toLocaleDateString("pt-BR")}
                           </strong>
                           .
@@ -1458,18 +1182,18 @@ export default function TicketDetailPage() {
             {/* ── TAB: Detalhes ────────────────────────────────── */}
             {activeTab === "detalhes" && (
               <div className="flex flex-col gap-4">
-                <div className="rounded-xl border border-border/40 bg-background-surface">
-                  <div className="border-b border-border/40 px-5 py-3.5">
-                    <h2 className="text-sm font-semibold text-slate-200">Informações do chamado</h2>
+                <div className="rounded-xl border border-borda/40 bg-surface">
+                  <div className="border-b border-borda/40 px-5 py-3.5">
+                    <h2 className="text-sm font-semibold text-conteudo">Informações do chamado</h2>
                   </div>
                   <div className="grid grid-cols-1 gap-x-6 gap-y-1 px-5 py-3 sm:grid-cols-2">
                     <DetailField
                       label="Categoria"
-                      value={CATEGORY_LABEL[ticket.category] ?? ticket.category}
+                      value={rotuloDeCategoria(ticket.category)}
                     />
                     <DetailField
                       label="Prioridade"
-                      value={PRIORITY_LABEL[ticket.priority] ?? ticket.priority}
+                      value={rotuloDePrioridade(ticket.priority)}
                     />
                     <DetailField label="Produto" value={ticket.product_name} />
                     <DetailField
@@ -1487,12 +1211,12 @@ export default function TicketDetailPage() {
                   </div>
                 </div>
 
-                <div className="rounded-xl border border-border/40 bg-background-surface">
-                  <div className="border-b border-border/40 px-5 py-3.5">
-                    <h2 className="text-sm font-semibold text-slate-200">Descrição completa</h2>
+                <div className="rounded-xl border border-borda/40 bg-surface">
+                  <div className="border-b border-borda/40 px-5 py-3.5">
+                    <h2 className="text-sm font-semibold text-conteudo">Descrição completa</h2>
                   </div>
                   <div className="px-5 py-4">
-                    <p className="text-sm leading-relaxed text-slate-300 whitespace-pre-wrap">
+                    <p className="text-sm leading-relaxed text-conteudo whitespace-pre-wrap">
                       {ticket.description}
                     </p>
                   </div>
@@ -1500,11 +1224,11 @@ export default function TicketDetailPage() {
 
                 {/* Observações do solicitante */}
                 {(ticket.client_observation || user?.role === "client") && (
-                  <div className="rounded-xl border border-border/40 bg-background-surface">
-                    <div className="flex items-center justify-between border-b border-border/40 px-5 py-3.5">
+                  <div className="rounded-xl border border-borda/40 bg-surface">
+                    <div className="flex items-center justify-between border-b border-borda/40 px-5 py-3.5">
                       <div className="flex items-center gap-2">
-                        <span className="text-slate-500">{IC.User}</span>
-                        <h2 className="text-sm font-semibold text-slate-200">
+                        <span className="text-conteudo-muted"><Icon name="user" size={16} strokeWidth={2} /></span>
+                        <h2 className="text-sm font-semibold text-conteudo">
                           Observações do solicitante
                         </h2>
                       </div>
@@ -1513,7 +1237,7 @@ export default function TicketDetailPage() {
                           onClick={() => setObsEdit(true)}
                           className="flex items-center gap-1 text-xs font-medium text-primary hover:text-primary/80 transition-colors cursor-pointer"
                         >
-                          {IC.Edit}
+                          <Icon name="edit" size={12} strokeWidth={2} />
                           {ticket.client_observation ? "Editar" : "Adicionar"}
                         </button>
                       )}
@@ -1545,11 +1269,11 @@ export default function TicketDetailPage() {
                           </div>
                         </div>
                       ) : ticket.client_observation ? (
-                        <p className="text-sm leading-relaxed text-slate-300 whitespace-pre-wrap">
+                        <p className="text-sm leading-relaxed text-conteudo whitespace-pre-wrap">
                           {ticket.client_observation}
                         </p>
                       ) : (
-                        <p className="text-xs italic text-slate-500">
+                        <p className="text-xs italic text-conteudo-muted">
                           Nenhuma observação registrada.
                         </p>
                       )}
@@ -1561,18 +1285,18 @@ export default function TicketDetailPage() {
 
             {/* ── TAB: Atividade ───────────────────────────────── */}
             {activeTab === "historico" && (
-              <div className="rounded-xl border border-border/40 bg-background-surface">
-                <div className="flex items-center gap-2 border-b border-border/40 px-5 py-3.5">
-                  <span className="text-slate-500">{IC.Activity}</span>
-                  <h2 className="text-sm font-semibold text-slate-200">Histórico de atividades</h2>
+              <div className="rounded-xl border border-borda/40 bg-surface">
+                <div className="flex items-center gap-2 border-b border-borda/40 px-5 py-3.5">
+                  <span className="text-conteudo-muted"><Icon name="activity" size={16} strokeWidth={2} /></span>
+                  <h2 className="text-sm font-semibold text-conteudo">Histórico de atividades</h2>
                 </div>
                 <div className="px-5 py-5">
                   {visibleHistory.length === 0 ? (
                     <div className="py-10 text-center">
-                      <div className="mx-auto mb-3 flex h-12 w-12 items-center justify-center rounded-full bg-background-elevated text-slate-600">
-                        {IC.Activity}
+                      <div className="mx-auto mb-3 flex h-12 w-12 items-center justify-center rounded-full bg-surface-elevated text-conteudo-muted">
+                        <Icon name="activity" size={16} strokeWidth={2} />
                       </div>
-                      <p className="text-sm text-slate-500">Sem histórico de atividades.</p>
+                      <p className="text-sm text-conteudo-muted">Sem histórico de atividades.</p>
                     </div>
                   ) : (
                     <div>
@@ -1587,11 +1311,11 @@ export default function TicketDetailPage() {
 
             {/* ── TAB: Anexos ──────────────────────────────────── */}
             {activeTab === "anexos" && (
-              <div className="rounded-xl border border-border/40 bg-background-surface">
-                <div className="flex items-center justify-between border-b border-border/40 px-5 py-3.5">
+              <div className="rounded-xl border border-borda/40 bg-surface">
+                <div className="flex items-center justify-between border-b border-borda/40 px-5 py-3.5">
                   <div className="flex items-center gap-2">
-                    <span className="text-slate-500">{IC.Clip}</span>
-                    <h2 className="text-sm font-semibold text-slate-200">
+                    <span className="text-conteudo-muted"><Icon name="paperclip" size={16} strokeWidth={2} /></span>
+                    <h2 className="text-sm font-semibold text-conteudo">
                       Anexos ({attachments.length})
                     </h2>
                   </div>
@@ -1600,7 +1324,7 @@ export default function TicketDetailPage() {
                       onClick={() => setUploadModal(true)}
                       className="flex items-center gap-1 text-xs font-medium text-primary hover:text-primary/80 transition-colors cursor-pointer"
                     >
-                      {IC.Plus}
+                      <Icon name="plus" size={12} strokeWidth={2.5} />
                       Adicionar
                     </button>
                   )}
@@ -1608,10 +1332,10 @@ export default function TicketDetailPage() {
                 <div className="p-5">
                   {attachments.length === 0 ? (
                     <div className="py-10 text-center">
-                      <div className="mx-auto mb-3 flex h-12 w-12 items-center justify-center rounded-full bg-background-elevated text-slate-600">
-                        {IC.Clip}
+                      <div className="mx-auto mb-3 flex h-12 w-12 items-center justify-center rounded-full bg-surface-elevated text-conteudo-muted">
+                        <Icon name="paperclip" size={16} strokeWidth={2} />
                       </div>
-                      <p className="text-sm text-slate-500">Nenhum anexo adicionado.</p>
+                      <p className="text-sm text-conteudo-muted">Nenhum anexo adicionado.</p>
                       {!isClosed && (
                         <button
                           onClick={() => setUploadModal(true)}
@@ -1648,7 +1372,7 @@ export default function TicketDetailPage() {
               <div className="space-y-2">
                 {isStaff && !isClosed && (
                   <SidebarAction
-                    icon={IC.Check("w-4 h-4")}
+                    icon={<Icon name="check" size={16} strokeWidth={2.5} />}
                     label="Concluir ticket"
                     onClick={() => setResolveModal(true)}
                     variant="primary"
@@ -1656,7 +1380,7 @@ export default function TicketDetailPage() {
                 )}
                 {canReopen && (
                   <SidebarAction
-                    icon={IC.Refresh}
+                    icon=<Icon name="refresh" size={16} strokeWidth={2} />
                     label="Reabrir chamado"
                     onClick={() => setReopenModal(true)}
                     variant={isStaff ? "default" : "primary"}
@@ -1664,7 +1388,7 @@ export default function TicketDetailPage() {
                 )}
                 {isStaff && transitions.length > 0 && (
                   <SidebarAction
-                    icon={IC.Refresh}
+                    icon=<Icon name="refresh" size={16} strokeWidth={2} />
                     label="Alterar status"
                     onClick={() => setStatusModal(true)}
                     variant="default"
@@ -1672,7 +1396,7 @@ export default function TicketDetailPage() {
                 )}
                 {isStaff && (
                   <SidebarAction
-                    icon={IC.UserPlus}
+                    icon=<Icon name="userPlus" size={16} strokeWidth={2} />
                     label={ticket.assignee_id ? "Reatribuir" : "Atribuir técnico"}
                     onClick={() => setAssignModal(true)}
                     variant="default"
@@ -1680,7 +1404,7 @@ export default function TicketDetailPage() {
                 )}
                 {isStaff && (
                   <SidebarAction
-                    icon={IC.Alert}
+                    icon=<Icon name="warning" size={12} strokeWidth={2} />
                     label={
                       ticket.ai_enabled ? "Desligar IA neste chamado" : "Religar IA neste chamado"
                     }
@@ -1690,9 +1414,9 @@ export default function TicketDetailPage() {
                 )}
                 {user?.role === "admin" && (
                   <SidebarAction
-                    icon={IC.Edit}
+                    icon=<Icon name="edit" size={12} strokeWidth={2} />
                     label="Editar ticket"
-                    onClick={() => navigate(`/tickets/${ticket.id}/edit`)}
+                    to={`/tickets/${ticket.id}/edit`}
                     variant="ghost"
                   />
                 )}
@@ -1702,13 +1426,13 @@ export default function TicketDetailPage() {
 
           {/* Properties */}
           <SidebarSection title="Propriedades">
-            <PropRow icon={IC.Activity} label="Status">
+            <PropRow icon=<Icon name="activity" size={16} strokeWidth={2} /> label="Status">
               <StatusBadge status={ticket.status} />
             </PropRow>
-            <PropRow icon={IC.Alert} label="Prioridade">
+            <PropRow icon=<Icon name="warning" size={12} strokeWidth={2} /> label="Prioridade">
               <PriorityBadge priority={ticket.priority} />
             </PropRow>
-            <PropRow icon={IC.User} label="Responsável">
+            <PropRow icon=<Icon name="user" size={16} strokeWidth={2} /> label="Responsável">
               {assignedTech ? (
                 <span className="flex items-center gap-2">
                   <span className="flex h-5 w-5 items-center justify-center rounded-full bg-primary/20 text-[10px] font-bold text-primary">
@@ -1717,19 +1441,19 @@ export default function TicketDetailPage() {
                   {assignedTech}
                 </span>
               ) : (
-                <span className="text-slate-500 font-normal italic text-xs">Não atribuído</span>
+                <span className="text-conteudo-muted font-normal italic text-xs">Não atribuído</span>
               )}
             </PropRow>
-            <PropRow icon={IC.Folder} label="Categoria">
-              {CATEGORY_LABEL[ticket.category] ?? ticket.category}
+            <PropRow icon=<Icon name="folder" size={16} strokeWidth={2} /> label="Categoria">
+              {rotuloDeCategoria(ticket.category)}
             </PropRow>
-            <PropRow icon={IC.Box} label="Produto">
+            <PropRow icon=<Icon name="box" size={16} strokeWidth={1.75} /> label="Produto">
               {ticket.product_name ?? (
-                <span className="text-slate-500 font-normal italic text-xs">Não informado</span>
+                <span className="text-conteudo-muted font-normal italic text-xs">Não informado</span>
               )}
             </PropRow>
             <PropRow
-              icon={IC.Cpu}
+              icon=<Icon name="cpu" size={16} strokeWidth={1.75} />
               label={plural(ticket.equipments.length, "Equipamento", "Equipamentos")}
             >
               {ticket.equipments.length > 0 ? (
@@ -1738,7 +1462,7 @@ export default function TicketDetailPage() {
                     <div key={e.id}>
                       <span className="block break-words">{e.name}</span>
                       {e.serial_number && (
-                        <span className="block font-mono text-xs text-slate-500">
+                        <span className="block font-mono text-xs text-conteudo-muted">
                           {e.serial_number}
                         </span>
                       )}
@@ -1746,10 +1470,10 @@ export default function TicketDetailPage() {
                   ))}
                 </div>
               ) : (
-                <span className="text-slate-500 font-normal italic text-xs">Não informado</span>
+                <span className="text-conteudo-muted font-normal italic text-xs">Não informado</span>
               )}
             </PropRow>
-            <PropRow icon={IC.Calendar} label="Criado em">
+            <PropRow icon=<Icon name="calendar" size={16} strokeWidth={2} /> label="Criado em">
               {new Date(ticket.created_at).toLocaleString("pt-BR", {
                 day: "2-digit",
                 month: "2-digit",
@@ -1759,7 +1483,7 @@ export default function TicketDetailPage() {
               })}
             </PropRow>
             {ticket.closed_at && (
-              <PropRow icon={IC.Check("w-4 h-4")} label="Fechado em">
+              <PropRow icon={<Icon name="check" size={16} strokeWidth={2.5} />} label="Fechado em">
                 {new Date(ticket.closed_at).toLocaleString("pt-BR")}
               </PropRow>
             )}
@@ -1771,7 +1495,7 @@ export default function TicketDetailPage() {
               <div className="space-y-2">
                 {ticket.sla_response_due_at && (
                   <div className="flex items-center justify-between">
-                    <span className="text-xs text-slate-500">Resposta</span>
+                    <span className="text-xs text-conteudo-muted">Resposta</span>
                     <SlaChip
                       label=""
                       dueAt={ticket.sla_response_due_at}
@@ -1782,7 +1506,7 @@ export default function TicketDetailPage() {
                 )}
                 {ticket.sla_resolve_due_at && (
                   <div className="flex items-center justify-between">
-                    <span className="text-xs text-slate-500">Resolução</span>
+                    <span className="text-xs text-conteudo-muted">Resolução</span>
                     <SlaChip
                       label=""
                       dueAt={ticket.sla_resolve_due_at}
@@ -1798,14 +1522,14 @@ export default function TicketDetailPage() {
           {(ticket.tags.length > 0 || isStaff) && (
             <SidebarSection
               title="Etiquetas"
-              icon={IC.Tag}
+              icon=<Icon name="tag" size={12} strokeWidth={2} />
               action={
                 isStaff && !tagsEdit ? (
                   <button
                     onClick={openTagsEdit}
                     className="flex items-center gap-1 text-[10px] font-semibold text-primary hover:text-primary/80 cursor-pointer transition-colors"
                   >
-                    {IC.Edit}
+                    <Icon name="edit" size={12} strokeWidth={2} />
                     {ticket.tags.length > 0 ? "Editar" : "Adicionar"}
                   </button>
                 ) : undefined
@@ -1860,7 +1584,7 @@ export default function TicketDetailPage() {
                       );
                     })}
                     {allTags.length === 0 && (
-                      <p className="text-xs text-slate-500">Nenhuma etiqueta cadastrada.</p>
+                      <p className="text-xs text-conteudo-muted">Nenhuma etiqueta cadastrada.</p>
                     )}
                   </div>
                   <div className="flex justify-end gap-2">
@@ -1884,7 +1608,7 @@ export default function TicketDetailPage() {
                   ))}
                 </div>
               ) : (
-                <p className="text-xs italic text-slate-500">Nenhuma etiqueta.</p>
+                <p className="text-xs italic text-conteudo-muted">Nenhuma etiqueta.</p>
               )}
             </SidebarSection>
           )}
@@ -1893,34 +1617,34 @@ export default function TicketDetailPage() {
           {isStaff && (
             <SidebarSection
               title="Notas internas"
-              icon={IC.Lock}
+              icon=<Icon name="lock" size={12} strokeWidth={2} />
               accent="amber"
               action={
                 <button
                   onClick={() => setShowAddNote(true)}
-                  className="flex items-center gap-1 text-[10px] font-semibold text-amber-500/70 hover:text-amber-400 cursor-pointer transition-colors"
+                  className="flex items-center gap-1 text-[10px] font-semibold text-on-tint-warning hover:text-on-tint-warning cursor-pointer transition-colors"
                 >
-                  {IC.Edit}
+                  <Icon name="edit" size={12} strokeWidth={2} />
                   Adicionar
                 </button>
               }
             >
               {ticketNotes.length === 0 ? (
-                <p className="text-xs italic text-amber-700/50">Nenhuma nota registrada.</p>
+                <p className="text-xs italic text-on-tint-warning">Nenhuma nota registrada.</p>
               ) : (
                 <ul className="space-y-2">
                   {ticketNotes.map((n) => (
                     <li
                       key={n.id}
-                      className="group relative rounded-lg border border-amber-700/20 bg-amber-950/20 p-3 cursor-pointer hover:border-amber-600/40 transition-colors"
+                      className="group relative rounded-lg border border-warning/20 bg-tint-warning p-3 cursor-pointer hover:border-warning/40 transition-colors"
                       onClick={() => setViewNote(n)}
                     >
                       <div className="flex items-center justify-between gap-2 mb-1">
-                        <span className="text-[10px] font-semibold text-amber-500/70 truncate">
+                        <span className="text-[10px] font-semibold text-on-tint-warning truncate">
                           {n.author_name}
                         </span>
                         <div className="flex items-center gap-1 shrink-0">
-                          <span className="text-[10px] text-amber-700/50">
+                          <span className="text-[10px] text-on-tint-warning">
                             {new Date(n.created_at).toLocaleDateString("pt-BR", {
                               day: "2-digit",
                               month: "2-digit",
@@ -1930,16 +1654,20 @@ export default function TicketDetailPage() {
                           <button
                             onClick={(e) => {
                               e.stopPropagation();
-                              handleDeleteNote(n.id);
+                              setDeleteNoteTarget(n);
                             }}
                             disabled={noteDeleting === n.id}
-                            className="opacity-0 group-hover:opacity-100 p-0.5 rounded text-amber-700/60 hover:text-red-400 transition-all cursor-pointer"
+                            className="opacity-0 group-hover:opacity-100 p-0.5 rounded text-on-tint-warning hover:text-on-tint-danger transition-all cursor-pointer"
                           >
-                            {noteDeleting === n.id ? <Spinner size="sm" /> : IC.Trash}
+                            {noteDeleting === n.id ? (
+                              <Spinner size="sm" />
+                            ) : (
+                              <Icon name="trash" size={14} strokeWidth={2} />
+                            )}
                           </button>
                         </div>
                       </div>
-                      <p className="text-xs text-amber-200/60 line-clamp-2 whitespace-pre-wrap">
+                      <p className="text-xs text-on-tint-warning line-clamp-2 whitespace-pre-wrap">
                         {n.content}
                       </p>
                     </li>
@@ -1990,21 +1718,21 @@ export default function TicketDetailPage() {
       {viewNote && (
         <Modal open onClose={() => setViewNote(null)} title="Nota interna" size="lg">
           <div className="space-y-3">
-            <div className="flex items-center justify-between text-xs text-amber-500/70">
+            <div className="flex items-center justify-between text-xs text-on-tint-warning">
               <span className="font-semibold">{viewNote.author_name}</span>
               <span>{new Date(viewNote.created_at).toLocaleString("pt-BR")}</span>
             </div>
-            <p className="text-sm text-amber-200/80 whitespace-pre-wrap leading-relaxed min-h-[80px]">
+            <p className="text-sm text-on-tint-warning whitespace-pre-wrap leading-relaxed min-h-[80px]">
               {viewNote.content}
             </p>
             <ModalFooter>
               <Button
                 variant="ghost"
                 size="sm"
-                className="text-red-500 hover:bg-red-900/20"
+                className="text-on-tint-danger hover:bg-tint-danger"
                 loading={noteDeleting === viewNote.id}
                 onClick={() => {
-                  handleDeleteNote(viewNote.id);
+                  setDeleteNoteTarget(viewNote);
                   setViewNote(null);
                 }}
               >
@@ -2013,6 +1741,40 @@ export default function TicketDetailPage() {
               <Button onClick={() => setViewNote(null)}>Fechar</Button>
             </ModalFooter>
           </div>
+        </Modal>
+      )}
+
+      {/* Confirmação de exclusão da nota — forma da frota (D9.3). */}
+      {deleteNoteTarget && (
+        <Modal
+          open
+          onClose={() => setDeleteNoteTarget(null)}
+          size="sm"
+          title="Excluir nota interna"
+        >
+          <p className="text-sm text-conteudo-muted">
+            Tem certeza que deseja excluir a nota de{" "}
+            <span className="font-medium text-conteudo">
+              {deleteNoteTarget.author_name}
+            </span>
+            ? A nota será removida do chamado, e esta ação não pode ser desfeita.
+          </p>
+          <ModalFooter>
+            <Button
+              variant="secondary"
+              onClick={() => setDeleteNoteTarget(null)}
+              disabled={noteDeleting === deleteNoteTarget.id}
+            >
+              Cancelar
+            </Button>
+            <Button
+              variant="danger"
+              onClick={() => handleDeleteNote(deleteNoteTarget)}
+              loading={noteDeleting === deleteNoteTarget.id}
+            >
+              Excluir
+            </Button>
+          </ModalFooter>
         </Modal>
       )}
 
@@ -2072,7 +1834,7 @@ export default function TicketDetailPage() {
               onChange={(e) => setNewAssignee(e.target.value)}
             />
           ) : (
-            <p className="text-sm text-slate-300">Deseja assumir este ticket para você?</p>
+            <p className="text-sm text-conteudo">Deseja assumir este ticket para você?</p>
           )}
         </div>
         <ModalFooter>
@@ -2119,9 +1881,9 @@ export default function TicketDetailPage() {
           />
           <button
             onClick={() => fileInputRef.current?.click()}
-            className="flex w-full flex-col items-center gap-2 rounded-xl border-2 border-dashed border-border/60 bg-background-elevated/30 py-10 text-sm text-slate-400 hover:border-primary/40 hover:bg-primary/5 hover:text-primary transition-all cursor-pointer"
+            className="flex w-full flex-col items-center gap-2 rounded-xl border-2 border-dashed border-borda/60 bg-surface-elevated/30 py-10 text-sm text-conteudo-muted hover:border-primary/40 hover:bg-primary/5 hover:text-primary transition-all cursor-pointer"
           >
-            {IC.Clip}
+            <Icon name="paperclip" size={16} strokeWidth={2} />
             <span>Clique para selecionar arquivos</span>
           </button>
           {uploadFiles.length > 0 && (
@@ -2129,9 +1891,9 @@ export default function TicketDetailPage() {
               {uploadFiles.map((f, i) => (
                 <li
                   key={i}
-                  className="flex items-center gap-2 rounded-lg bg-background-elevated px-3 py-2 text-sm text-slate-300"
+                  className="flex items-center gap-2 rounded-lg bg-surface-elevated px-3 py-2 text-sm text-conteudo"
                 >
-                  <span className="text-slate-500">{IC.Clip}</span>
+                  <span className="text-conteudo-muted"><Icon name="paperclip" size={16} strokeWidth={2} /></span>
                   {f.name}
                 </li>
               ))}
@@ -2165,7 +1927,7 @@ export default function TicketDetailPage() {
         title="Reabrir chamado"
       >
         <div className="space-y-4">
-          <p className="text-sm text-slate-400">
+          <p className="text-sm text-conteudo-muted">
             O chamado volta para atendimento e o chat é liberado de novo. Conte o que continuou
             errado para o técnico saber por onde retomar.
           </p>
@@ -2204,7 +1966,7 @@ export default function TicketDetailPage() {
         title="Concluir ticket"
       >
         <div className="space-y-4">
-          <p className="text-sm text-slate-400">
+          <p className="text-sm text-conteudo-muted">
             Descreva como o problema foi resolvido. O chat será bloqueado e o cliente receberá uma
             notificação para avaliar o atendimento. Se ninguém se manifestar, o chamado é fechado
             sozinho depois do prazo.
