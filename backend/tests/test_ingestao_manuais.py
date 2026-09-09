@@ -17,13 +17,16 @@ import pytest
 
 from app.models.models import HeloDocType
 from scripts.ingere_manuais import (
-    _MINIMO,
     FONTES,
     CorpusInconsistenteError,
     Fonte,
+    _corta_emoji,
     _corta_numerada,
+    _corta_regua,
     casa_produtos,
     chave,
+    descarta,
+    exige_produtos_distinguiveis,
     recorta,
     redige,
 )
@@ -249,10 +252,10 @@ def test_as_cinco_fichas_comerciais_estao_marcadas_como_comerciais():
 
 def test_trecho_curto_demais_nao_vira_trecho(tmp_path):
     """
-    Cabeçalho e rodapé de contato casam com qualquer pergunta curta.
+    Bloco que é só título não vira trecho — e o descarte é ANUNCIADO.
 
-    São dezenas de caracteres sem procedimento nenhum: no ranking vetorial
-    competem com o trecho certo e às vezes ganham.
+    O piso por tamanho descartava procedimento de verdade em silêncio. O que
+    desqualifica um bloco é não ter corpo, não ser curto.
     """
     arquivo = tmp_path / "Fake.txt"
     arquivo.write_text(
@@ -264,7 +267,8 @@ def test_trecho_curto_demais_nao_vira_trecho(tmp_path):
     doc = recorta(fonte, arquivo)
 
     assert [t.secao for t in doc.trechos] == ["2. Longa"]
-    assert all(len(t.conteudo) >= _MINIMO for t in doc.trechos)
+    assert [titulo for titulo, _, _ in doc.descartes] == ["1. Curta"]
+    assert doc.descartes[0][2], "todo descarte precisa dizer o motivo"
 
 
 def test_a_ordem_do_arquivo_vira_a_ordem_do_trecho(tmp_path):
@@ -382,17 +386,19 @@ def test_o_erro_nomeia_os_produtos_que_casaram():
     assert "Titan" in str(erro.value)
 
 
-def test_ficha_comercial_sem_produto_e_permitida():
+def test_ficha_comercial_sem_produto_tambem_e_erro_fatal():
     """
-    A assimetria é deliberada, e o motivo está no dano.
+    Zero é fatal para todo tipo, e a tentação de abrir exceção tem nome.
 
-    Ficha sem produto pode ser catálogo, e catálogo vale para todos mesmo —
-    trecho sem vínculo é exatamente isso. Procedimento técnico sem produto é
-    outra coisa: é o passo do Phoebus aparecendo para quem tem um Titan.
+    "Catálogo vale para todos" soa razoável e é o default que foi REMOVIDO do
+    desenho: readmiti-lo pela porta do casamento frustrado recoloca o mesmo
+    defeito com outro nome. Conteúdo genérico passa a existir no dia em que
+    alguém o marcar de propósito, nunca porque o nome do arquivo não bateu.
     """
     fonte = Fonte("Catalogo Geral.txt", HeloDocType.comercial, "regua", "Catálogo")
 
-    assert casa_produtos(fonte, _catalogo()) == []
+    with pytest.raises(CorpusInconsistenteError, match="casou com 0 produtos"):
+        casa_produtos(fonte, _catalogo())
 
 
 def test_nao_casa_por_aproximacao():
@@ -406,3 +412,159 @@ def test_nao_casa_por_aproximacao():
 
     with pytest.raises(CorpusInconsistenteError):
         casa_produtos(fonte, _catalogo())
+
+
+# ── Os cinco consertos ────────────────────────────────────────
+
+
+def test_bloco_curto_com_corpo_fica():
+    """
+    O conserto do piso: 8.2 e 8.3 do Titan tinham 104 e 112 caracteres.
+
+    O piso por tamanho descartava os dois com os vizinhos 8.1 (130) e 8.4
+    (137) indexados. A base respondia "como ajusto a data" e ficava muda em
+    "como coloco em português" — buraco parcial, e por isso invisível. O que
+    desqualifica um bloco é não ter corpo, não ser curto.
+    """
+    # Corpo do tamanho do 8.2 de verdade — o trecho inteiro tinha 104
+    # caracteres, dos quais uns 18 eram o título.
+    curto_mas_com_corpo = (
+        "8.2 Alterar Idioma\n"
+        "Acesse Menu > Sistema > Idioma e escolha Português do Brasil.\n"
+        "Confirme com OK."
+    )
+
+    assert descarta("8.2 Alterar Idioma", curto_mas_com_corpo) is None
+
+
+def test_bloco_que_e_so_titulo_e_descartado_com_motivo():
+    """O descarte mudo era o defeito de verdade: todo descarte diz o porquê."""
+    assert descarta("8. Configurações", "8. Configurações") == "só o título, sem corpo"
+    assert "abaixo de" in descarta("💸 Preço", "💸 Preço\nR$ 1,00")
+
+
+def test_a_regua_como_sublinhado_nao_desloca_o_titulo():
+    """
+    O iblow10pro usa hifens SOB o cabeçalho; Deimos e MarkX usam ENTRE blocos.
+
+    Tratados iguais, todo título do iblow10pro ficava deslocado em uma seção:
+    o trecho se chamava "- Capacidade de realizar até 12 testes por minuto" e
+    o cabeçalho real viajava no fim do trecho anterior. `secao` é o rótulo que
+    a Helô cita como fonte.
+    """
+    setext = [
+        "📍 Informações Comerciais",
+        "-------------------------",
+        "- doze testes por minuto",
+        "🎯 Argumentos de Venda",
+        "----------------------",
+        "- bocal descartável",
+    ]
+
+    cortes = _corta_regua(setext)
+
+    assert [t for t, _ in cortes] == ["📍 Informações Comerciais", "🎯 Argumentos de Venda"]
+    assert "doze testes por minuto" in "\n".join(cortes[0][1])
+
+
+def test_a_regua_como_separador_continua_separando():
+    """Deimos e MarkX não podem quebrar com o conserto do iblow10pro."""
+    separado = ["Bloco Um", "corpo um", "", "---", "Bloco Dois", "corpo dois"]
+
+    assert [t for t, _ in _corta_regua(separado)] == ["Bloco Um", "Bloco Dois"]
+
+
+def test_a_seta_nao_abre_trecho():
+    """
+    `→` é categoria Sm, e as respostas do FAQ do Mercury começam com ela.
+
+    Aceitando Sm, as cinco respostas viravam títulos e o único trecho que
+    sobrava se chamava "→ Não. O aparelho mostra os dados no visor" — uma
+    RESPOSTA como rótulo de fonte, colada na pergunta seguinte. Citar fonte
+    errada é pior do que não citar.
+    """
+    texto = [
+        "✅ FAQ do Mercury",
+        "1. Usa bocal descartável?",
+        "→ Sim, o Mercury utiliza bocal descartável.",
+        "2. Precisa de computador?",
+        "→ Não. O aparelho mostra os dados no visor.",
+    ]
+
+    assert [t for t, _ in _corta_emoji(texto)] == ["✅ FAQ do Mercury"]
+
+
+def test_o_preambulo_antes_do_primeiro_titulo_nao_some(tmp_path):
+    """
+    No EBS-010 o primeiro `##` está na linha 8, e o preço vinha antes.
+
+    O preâmbulo era jogado fora sem passar por filtro nenhum: a ficha
+    comercial ficava sem o preço, que é o que uma ficha comercial existe para
+    responder.
+    """
+    arquivo = tmp_path / "Ficha.txt"
+    arquivo.write_text(
+        "EBS-010 — Ficha\nPreço do Aparelho: R$ 7.250,00\nPreço da Calibração: R$ 690,00\n"
+        "## Destaques\n" + ("conteúdo de verdade " * 8),
+        encoding="utf-8",
+    )
+    fonte = Fonte("Ficha.txt", HeloDocType.comercial, "markdown", "Ficha")
+
+    doc = recorta(fonte, arquivo)
+
+    assert "7.250,00" in doc.trechos[0].conteudo
+    assert [t.secao for t in doc.trechos] == ["EBS-010 — Ficha", "Destaques"]
+
+
+def test_o_hash_muda_quando_a_receita_muda_mesmo_com_o_arquivo_igual(tmp_path, monkeypatch):
+    """
+    O conserto que destrava todos os outros.
+
+    Com o hash do arquivo bruto, melhorar o corte e rodar `--aplicar` de novo
+    imprimia "inalterado, nada a fazer" nos oito documentos e o banco ficava
+    com o corte velho — e, se uma senha tivesse escapado, com a senha velha.
+    Este script existe para rodar várias vezes até o corte ficar bom.
+    """
+    arquivo = tmp_path / "Fake.txt"
+    corpo = "conteúdo de verdade " * 10
+    arquivo.write_text(f"1. Um\n{corpo}\n2. Dois\n{corpo}", encoding="utf-8")
+
+    antes = recorta(Fonte("Fake.txt", HeloDocType.tecnico, "numerada", "Título A"), arquivo).hash
+    depois = recorta(Fonte("Fake.txt", HeloDocType.tecnico, "numerada", "Título B"), arquivo).hash
+
+    assert antes != depois, "mudar o título declarado precisa chegar ao banco"
+
+
+# ── Produtos indistinguíveis ──────────────────────────────────
+
+
+def test_produtos_com_a_mesma_chave_sao_erro_fatal():
+    """
+    `products.name` não tem unique no banco, e a checagem do endpoint é literal.
+
+    "Titan" e "TITAN" entram os dois; pela chave normalizada são o mesmo
+    produto. Um dicionário por nome guardaria só o último id, e os chamados do
+    outro registro não recuperariam trecho nenhum — sem erro na tela.
+    """
+    um, outro = uuid.uuid4(), uuid.uuid4()
+
+    with pytest.raises(CorpusInconsistenteError, match="mesma chave 'titan'"):
+        exige_produtos_distinguiveis([(um, "Titan"), (outro, "TITAN")])
+
+
+def test_o_erro_de_produto_duplicado_nomeia_os_dois_ids():
+    """Sem os ids, a limpeza do cadastro vira caça ao tesouro."""
+    um, outro = uuid.uuid4(), uuid.uuid4()
+
+    with pytest.raises(CorpusInconsistenteError) as erro:
+        exige_produtos_distinguiveis([(um, "Mark X"), (outro, "Mark-X")])
+
+    assert str(um) in str(erro.value)
+    assert str(outro) in str(erro.value)
+
+
+def test_produtos_distinguiveis_passam():
+    """Os sete do seed convivem sem colisão de chave."""
+    catalogo = exige_produtos_distinguiveis([(uuid.uuid4(), n) for n in _PRODUTOS_DO_SEED])
+
+    assert len(catalogo) == 7

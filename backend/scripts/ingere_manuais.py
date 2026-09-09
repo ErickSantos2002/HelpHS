@@ -36,11 +36,11 @@ espaço, sem underscore, sem hífen. É o que faz `MarkX.txt` encontrar "Mark X"
 e `Manual_Tecnico_iBlow10Pro.txt` encontrar "iBlow 10 Pro" sem ninguém tabelar
 a exceção.
 
-O casamento é por CONTENÇÃO, nunca por aproximação difusa, e documento técnico
-precisa casar com **exatamente um** produto: zero ou dois interrompem a
-ingestão inteira. Errar o produto é pior do que não indexar — manda o
-procedimento do aparelho errado para quem está com um instrumento de medição
-legal na mão.
+O casamento é por CONTENÇÃO, nunca por aproximação difusa, e TODO documento —
+técnico ou comercial — precisa casar com **exatamente um** produto: zero ou
+dois interrompem a ingestão inteira. Errar o produto é pior do que não indexar:
+manda o conteúdo do aparelho errado para quem está com um instrumento de
+medição legal na mão, e a Helô responde citando a fonte.
 
 O QUE CONTINUA DECLARADO
 ------------------------
@@ -171,27 +171,71 @@ def casa_produtos(fonte: Fonte, produtos: dict[str, uuid.UUID]) -> list[uuid.UUI
     nome normalizado do produto está no nome normalizado do arquivo, ou não
     está.
 
-    **Documento técnico precisa casar com exatamente um.** Zero ou dois é
-    defeito do mapa, e defeito de mapa para quando é barato — aqui — e não
-    depois, na resposta ao cliente.
+    **Todo documento precisa casar com exatamente um produto**, técnico ou
+    comercial. Zero e dois são modos de falha opostos, e nenhum dos dois é
+    aceitável:
 
-    Ficha comercial é mais frouxa de propósito, e a assimetria tem motivo: uma
-    ficha sem produto nenhum pode ser um catálogo que vale para todos, e
-    trecho sem vínculo é exatamente isso. Um procedimento técnico sem produto,
-    não: é o passo do Phoebus aparecendo para quem tem um Titan na mão.
+    - **Zero** diria "não sei de qual aparelho é". A tentação é deixar passar,
+      porque trecho sem vínculo vale para todos e isso soa como catálogo. Mas
+      "vale para todos" é justamente o default que foi removido: readmiti-lo
+      pela porta do casamento frustrado recoloca o mesmo defeito com outro
+      nome. Conteúdo genérico passa a existir no dia em que alguém o marcar de
+      propósito — nunca porque o nome do arquivo não bateu.
+    - **Dois** diria "sei que é destes dois exatamente" — afirmação forte,
+      feita sem evidência, nascida de coincidência de nome. Basta cadastrarem
+      um produto chamado "Pro" para `iblow10pro.txt` casar com dois.
+
+    Nos dois casos o dano é o mesmo: a Helô responde CITANDO A FONTE, e fonte
+    errada é pior do que fonte nenhuma, porque parece conferível.
     """
     base = chave(Path(fonte.arquivo).stem)
     achados = [pid for nome, pid in produtos.items() if chave(nome) in base]
 
-    if fonte.tipo is HeloDocType.tecnico and len(achados) != 1:
+    if len(achados) != 1:
         nomes = sorted(n for n in produtos if chave(n) in base)
         raise CorpusInconsistenteError(
-            f"{fonte.arquivo}: documento técnico casou com {len(achados)} produtos "
-            f"({', '.join(nomes) or 'nenhum'}). Técnico precisa de exatamente um — "
-            "zero manda o procedimento para todos os aparelhos, e dois mandam o "
-            "procedimento errado. Corrija o nome do arquivo ou o cadastro do produto."
+            f"{fonte.arquivo}: casou com {len(achados)} produtos "
+            f"({', '.join(nomes) or 'nenhum'}). Cada documento precisa de exatamente "
+            "um — zero espalha o conteúdo por todos os aparelhos, e dois o mandam "
+            "para um aparelho que não é o dele. Corrija o nome do arquivo ou o "
+            "cadastro do produto."
         )
     return achados
+
+
+def exige_produtos_distinguiveis(produtos: list[tuple[uuid.UUID, str]]) -> dict[str, uuid.UUID]:
+    """
+    Recusa cadastro em que dois produtos não se distinguem pela chave.
+
+    `products.name` **não** tem restrição de unicidade no banco, e a checagem
+    do endpoint compara texto literal: "Titan" e "TITAN" entram os dois, e
+    "Mark-X" convive com "Mark X". Pela chave normalizada os dois pares são o
+    mesmo produto — e um dicionário por nome esconderia isso, guardando só o
+    último id. Os chamados abertos no outro registro não recuperariam trecho
+    nenhum, em silêncio.
+
+    A trava é aqui, e não numa migration com `unique=True`, de propósito:
+    migration roda sozinha no boot do container contra um banco de produção
+    que pode já ter duplicatas — seria a segunda vez que esta fase quase
+    derruba a API pelo mesmo caminho. Limpar o cadastro é outro assunto, e é
+    do dono da frente.
+    """
+    por_chave: dict[str, list[tuple[uuid.UUID, str]]] = {}
+    for pid, nome in produtos:
+        por_chave.setdefault(chave(nome), []).append((pid, nome))
+
+    for k, iguais in sorted(por_chave.items()):
+        if len(iguais) > 1:
+            detalhe = "; ".join(
+                f"{nome} ({pid})" for pid, nome in sorted(iguais, key=lambda x: x[1])
+            )
+            raise CorpusInconsistenteError(
+                f"Dois ou mais produtos se reduzem à mesma chave '{k}': {detalhe}. "
+                "Enquanto existirem, o vínculo iria para um só deles e os chamados do "
+                "outro não recuperariam nada — sem erro nenhum na tela. Limpe o "
+                "cadastro antes de ingerir."
+            )
+    return {nome: pid for pid, nome in produtos}
 
 
 # ── Redação: o que sai do texto antes de virar trecho ─────────
@@ -298,27 +342,55 @@ def _subdivide(titulo: str, bloco: list[str]) -> list[tuple[str, list[str]]]:
     if len(inicios) < 2:
         return [(titulo, bloco)]
 
-    partes: list[tuple[str, list[str]]] = []
-    # O que vem antes da primeira subseção é o preâmbulo da seção, e vale como
-    # trecho próprio quando tem corpo — nele costuma estar o para que serve.
-    if inicios[0][0] > 0:
-        partes.append((titulo, bloco[: inicios[0][0]]))
-    partes.extend(_fatia(bloco, inicios))
-    return partes
+    # O preâmbulo (o que vem antes da primeira subseção) sai pelo `_fatia`,
+    # que trata isso uniformemente para todos os cortes.
+    return _fatia(bloco, inicios, titulo_do_preambulo=titulo)
+
+
+_REGUA = re.compile(r"^-{3,}\s*$")
 
 
 def _corta_regua(linhas: list[str]) -> list[tuple[str, list[str]]]:
-    """Blocos separados por uma linha de três ou mais hifens."""
-    regua = re.compile(r"^-{3,}\s*$")
-    inicios: list[tuple[int, str]] = []
-    comeco = 0
+    """
+    Uma linha de hifens, com DOIS significados no corpus.
+
+    No Deimos e no MarkX ela separa blocos e vem sempre depois de uma linha
+    vazia. No iblow10pro ela SUBLINHA o cabeçalho, no estilo setext, e vem
+    sempre logo abaixo dele. Tratar as duas iguais deslocava todos os títulos
+    do iblow10pro em uma seção: o trecho passava a se chamar
+    "- Capacidade de realizar até 12 testes por minuto" e o cabeçalho de
+    verdade viajava pendurado no fim do trecho anterior.
+
+    Isso não é feiura de nome. `secao` é o rótulo que a Helô cita como fonte —
+    e citar fonte errada é pior do que não citar, porque parece conferível.
+
+    O que distingue os dois é a linha ANTERIOR à régua: vazia, é separador;
+    com texto, é sublinhado. Confere nos três arquivos, sem exceção.
+    """
+    # Duas passagens de propósito. A primeira só descobre ONDE cada trecho
+    # começa; a segunda dá nome. Misturar as duas foi o que me fez errar da
+    # primeira vez: eu abria o trecho no cabeçalho e, três linhas depois,
+    # abria OUTRO logo abaixo da régua — o cabeçalho ficava num trecho de duas
+    # linhas e o corpo dele ia para o trecho seguinte, sem título.
+    aberturas: dict[int, str | None] = {}
     for i, linha in enumerate(linhas):
-        if regua.match(linha):
-            if i > comeco:
-                inicios.append((comeco, _primeiro_titulo(linhas[comeco:i])))
-            comeco = i + 1
-    if comeco < len(linhas):
-        inicios.append((comeco, _primeiro_titulo(linhas[comeco:])))
+        if not _REGUA.match(linha):
+            continue
+        if i > 0 and linhas[i - 1].strip():
+            # Sublinhado: o cabeçalho é a linha de cima, e o trecho é ele mais
+            # tudo que vier até o próximo cabeçalho.
+            aberturas[i - 1] = _titulo_limpo(linhas[i - 1])
+        elif i + 1 < len(linhas):
+            # Separador: o trecho novo começa depois da régua, e o título é a
+            # primeira linha útil dele.
+            aberturas.setdefault(i + 1, None)
+
+    inicios: list[tuple[int, str]] = []
+    posicoes = sorted(aberturas)
+    for pos, comeco in enumerate(posicoes):
+        fim = posicoes[pos + 1] if pos + 1 < len(posicoes) else len(linhas)
+        titulo = aberturas[comeco] or _primeiro_titulo(linhas[comeco:fim])
+        inicios.append((comeco, titulo))
     return _fatia(linhas, inicios)
 
 
@@ -333,14 +405,30 @@ def _corta_markdown(linhas: list[str]) -> list[tuple[str, list[str]]]:
 
 
 def _corta_emoji(linhas: list[str]) -> list[tuple[str, list[str]]]:
-    """Título é linha que começa com símbolo — o Mercury não usa régua nem ##."""
+    """
+    Título é linha que abre com PICTOGRAMA — o Mercury não usa régua nem `##`.
+
+    Só a categoria `So` (símbolo de outro tipo: ✅ 📌 💼 🛠️ ❓). `Sm` está
+    fora, e a exclusão é o conserto: `→` é `Sm`, e as respostas do FAQ do
+    Mercury começam com `→`. Aceitando `Sm`, as cinco respostas viravam
+    títulos, nove das dez linhas do FAQ caíam pelo filtro de forma, e o único
+    trecho que sobrava se chamava "→ Não. O aparelho mostra os dados no
+    visor" — uma RESPOSTA como rótulo de fonte, emparelhada com a pergunta
+    seguinte.
+
+    `Sk` sai junto: não há um só título `Sk` nos oito arquivos, e ele
+    carregaria acentos soltos (´ ˜ ^) para dentro da regra sem pagar nada.
+
+    Conferido no Mercury: os cinco títulos verdadeiros são todos `So`, os
+    cinco falsos são todos `Sm`. A separação é limpa.
+    """
     inicios: list[tuple[int, str]] = []
     for i, linha in enumerate(linhas):
         t = linha.strip()
         if not t or len(t) < 4:
             continue
-        if unicodedata.category(t[0]) in {"So", "Sk", "Sm"}:
-            inicios.append((i, t))
+        if unicodedata.category(t[0]) == "So":
+            inicios.append((i, _titulo_limpo(t)))
     return _fatia(linhas, inicios)
 
 
@@ -370,14 +458,55 @@ def _primeiro_titulo(bloco: list[str]) -> str:
     return "(sem título)"
 
 
-def _fatia(linhas: list[str], inicios: list[tuple[int, str]]) -> list[tuple[str, list[str]]]:
+def _fatia(
+    linhas: list[str],
+    inicios: list[tuple[int, str]],
+    titulo_do_preambulo: str | None = None,
+) -> list[tuple[str, list[str]]]:
+    """
+    Corta em trechos, e **não joga fora o que vem antes do primeiro título**.
+
+    O descarte silencioso do preâmbulo custava caro no EBS-010: o primeiro
+    `##` está na linha 8, então o título do documento e o bloco de preço
+    sumiam sem passar por filtro nenhum — a ficha comercial ficava sem o preço,
+    que é justamente o que uma ficha comercial existe para responder.
+    """
     if not inicios:
         return []
-    saida = []
+
+    saida: list[tuple[str, list[str]]] = []
+    if inicios[0][0] > 0:
+        cabeca = linhas[: inicios[0][0]]
+        saida.append((titulo_do_preambulo or _primeiro_titulo(cabeca), cabeca))
+
     for pos, (i, titulo) in enumerate(inicios):
         fim = inicios[pos + 1][0] if pos + 1 < len(inicios) else len(linhas)
         saida.append((titulo, linhas[i:fim]))
     return saida
+
+
+# O que desqualifica um trecho é ser CABEÇALHO, não ser curto.
+#
+# O piso por tamanho descartava "8.2 Alterar Idioma" (104 caracteres) e
+# "8.3 Verificar Contador de Testes" (112) do Titan, com os vizinhos 8.1 (130)
+# e 8.4 (137) indexados. A base respondia "como ajusto a data" e ficava muda em
+# "como coloco em português" — buraco parcial, e por isso invisível.
+#
+# O que aqueles dois têm e um cabeçalho não tem é CORPO: linha de conteúdo além
+# do título. É isso que se mede agora.
+_CORPO_MINIMO = 40
+
+
+def descarta(titulo: str, conteudo: str) -> str | None:
+    """Devolve o motivo do descarte, ou None quando o trecho fica."""
+    linhas = [x for x in conteudo.splitlines() if x.strip()]
+    corpo = "\n".join(linhas[1:]).strip() if linhas else ""
+
+    if not corpo:
+        return "só o título, sem corpo"
+    if len(corpo) < _CORPO_MINIMO:
+        return f"corpo de {len(corpo)} caracteres, abaixo de {_CORPO_MINIMO}"
+    return None
 
 
 _CORTES = {
@@ -386,11 +515,6 @@ _CORTES = {
     "markdown": _corta_markdown,
     "emoji": _corta_emoji,
 }
-
-# Um trecho menor que isto não carrega procedimento nenhum: é cabeçalho,
-# rodapé de contato ou linha de preço solta. Vira ruído no ranking vetorial,
-# porque casa com qualquer pergunta curta.
-_MINIMO = 120
 
 
 @dataclass
@@ -406,6 +530,7 @@ class Documento:
     fonte: Fonte
     hash: str
     trechos: list[Trecho] = field(default_factory=list)
+    descartes: list[tuple[str, int, str]] = field(default_factory=list)
 
 
 @dataclass
@@ -419,14 +544,34 @@ class Passo:
 
 
 def recorta(fonte: Fonte, caminho: Path) -> Documento:
+    """
+    Do arquivo para os trechos — e o hash é do RESULTADO, não da entrada.
+
+    Hashear o arquivo bruto parecia natural e era um defeito de fluxo. O que
+    vai para o banco não depende só dos bytes lidos: depende do cortador, do
+    filtro de forma, das regras de redação, do título e do tipo declarados.
+    Com o hash da entrada, consertar o corte e rodar `--aplicar` de novo
+    imprimia "inalterado, nada a fazer" nos oito documentos e o banco ficava
+    com o corte velho — e, no caso de uma senha que tivesse escapado, com a
+    senha velha.
+
+    Este script existe para rodar várias vezes até o corte ficar bom. Hashear
+    o resultado é o que faz isso funcionar, e funciona sozinho: qualquer
+    mudança de receita muda o hash sem ninguém precisar lembrar de nada. Um
+    número de versão à mão dependeria de disciplina, e disciplina é exatamente
+    o que falha na terceira rodada de ajuste fino.
+    """
     bruto = caminho.read_text(encoding="utf-8")
-    digest = hashlib.sha256(bruto.encode("utf-8")).hexdigest()
-    doc = Documento(fonte=fonte, hash=digest)
+    doc = Documento(fonte=fonte, hash="")
 
     ordem = 0
     for titulo, bloco in _CORTES[fonte.corte](bruto.splitlines()):
-        conteudo = "\n".join(bloco).strip()
-        if len(conteudo) < _MINIMO:
+        # A régua é marca de formatação, não conteúdo. Deixá-la no texto
+        # colocaria uma linha de hifens dentro do que vai virar vetor.
+        conteudo = "\n".join(x for x in bloco if not _REGUA.match(x)).strip()
+        motivo = descarta(titulo, conteudo)
+        if motivo:
+            doc.descartes.append((titulo, len(conteudo), motivo))
             continue
         conteudo, exigia = redige(conteudo)
         doc.trechos.append(
@@ -438,7 +583,18 @@ def recorta(fonte: Fonte, caminho: Path) -> Documento:
             )
         )
         ordem += 1
+
+    doc.hash = _hash_do_resultado(fonte, doc.trechos)
     return doc
+
+
+def _hash_do_resultado(fonte: Fonte, trechos: list[Trecho]) -> str:
+    """SHA-256 do que seria gravado, incluindo título e tipo declarados."""
+    h = hashlib.sha256()
+    h.update(f"{fonte.titulo}\x00{fonte.tipo.value}\x00".encode())
+    for t in trechos:
+        h.update(f"{t.ordem}\x00{t.secao}\x00{t.exige_credencial}\x00{t.conteudo}\x00".encode())
+    return h.hexdigest()
 
 
 # ── Relatório de contradições ─────────────────────────────────
@@ -564,9 +720,9 @@ async def planeja(docs: list[Documento]) -> list[Passo]:
     motor = create_async_engine(get_settings().database_url)
     plano: list[Passo] = []
     async with async_sessionmaker(bind=motor, expire_on_commit=False)() as s:
-        produtos = {
-            nome: pid for pid, nome in (await s.execute(select(Product.id, Product.name))).all()
-        }
+        produtos = exige_produtos_distinguiveis(
+            [(pid, nome) for pid, nome in (await s.execute(select(Product.id, Product.name))).all()]
+        )
         if not produtos:
             raise CorpusInconsistenteError(
                 "A tabela `products` está vazia. Sem produto, todo trecho ficaria sem "
@@ -640,13 +796,6 @@ async def aplica(plano: list[Passo]) -> list[str]:
                 s.add(alvo)
                 avisos.append(f"  + {doc.fonte.arquivo}: {len(doc.trechos)} trechos novos")
             await s.flush()
-
-            if not passo.produto_ids:
-                avisos.append(
-                    f"  ! {doc.fonte.arquivo}: sem produto vinculado — os trechos valem "
-                    "para TODOS os aparelhos. É o comportamento certo para catálogo, "
-                    "e só chega aqui porque é ficha comercial (técnico sem produto é erro fatal)."
-                )
 
             for t in doc.trechos:
                 chunk = HeloChunk(
@@ -731,6 +880,21 @@ def main() -> int:
             f"credencial={marca}  hash={d.hash[:8]}"
         )
     print(f"\n  TOTAL: {total} trechos, {marcados} exigindo credencial de administrador")
+
+    # O descarte MUDO era o defeito de verdade: "8.2 Alterar Idioma" e "8.3
+    # Verificar Contador de Testes" sumiram da base do Titan com os vizinhos
+    # 8.1 e 8.4 presentes, e ninguém viu. O que se joga fora aparece.
+    descartados = [(d.fonte.arquivo, x) for d in docs for x in d.descartes]
+    print()
+    print("-" * 72)
+    print(f"DESCARTADOS — {len(descartados)} blocos que não viraram trecho")
+    print("-" * 72)
+    if descartados:
+        for arquivo, (titulo, tamanho, motivo) in descartados:
+            print(f"  {arquivo:30} {tamanho:5}  {motivo}")
+            print(f"  {'':30}        {titulo[:58]}")
+    else:
+        print("  (nenhum)")
 
     print()
     print("=" * 72)
