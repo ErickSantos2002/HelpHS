@@ -107,7 +107,12 @@ export default {
         "on-tint-info": tk("--on-tint-info"),
 
         // As TINTAS. Cinco delas já carregam alfa de 15% no próprio token
-        // (`rgb(… / 0.15)`), e a `neutral` é alias de `--surface-elevated`.
+        // (`rgb(… / 0.15)`). A `neutral` ERA alias de `--surface-elevated`,
+        // ou seja, o próprio fundo do cartão — ΔE 0,0, um selo invisível. A
+        // emenda **E23** a trocou por `rgb(100 116 139 / 0.15)`, e agora as
+        // seis são tinta de verdade. A frase antiga ficou aqui depois de o
+        // token mudar, que é o mesmo modo de falha da tabela de hashes do
+        // `VERSION.md`: o texto que descreve o valor não anda com ele.
         //
         // Por isso elas entram como `tk()` e **nunca** recebem o modificador de
         // opacidade — regra (a) do D8-a: `bg-tint-danger/20` multiplicaria

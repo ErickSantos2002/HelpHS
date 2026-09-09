@@ -28,30 +28,37 @@ import { APP_VERSION, CHANGELOG, type EntryType } from "../../data/changelog";
  * |---|---|---|
  * | `novidade` | `info` | é um **anúncio**: algo passou a existir. Não é resultado bom nem ruim, é informação — que é o que `info` significa em toda a interface (o `Alert`, o papel "Técnico", o selo de aviso neutro). |
  * | `corrigido` | `success` | um defeito foi **resolvido**. Decisão do operador, e é a leitura certa: o laranja de antes dizia "atenção", e não há nada a que atentar num defeito que já saiu. |
- * | `melhoria` | `success` | **NÃO É DECISÃO MINHA — ver o bloco abaixo.** |
+ * | `melhoria` | `secondary` | "algo que já existia ficou melhor" não é anúncio, nem resultado bom, nem alerta: é a **ausência** de carga semântica — que é o que a variante neutra do `Badge` carrega. Decisão do operador, e ela só passou a ser possível com a E23 (abaixo). |
  *
- * ── `melhoria` está sem casa, e o motivo é medido ─────────────────────
+ * ── `melhoria` esteve sem casa até a E23, e o motivo era medido ────────
  *
- * "Algo que já existia ficou melhor" não é nenhuma das seis tintas. E o
- * problema não é de gosto: sobre o cartão desta janela (`--surface-elevated`)
- * as seis só oferecem **quatro** aparências distintas.
+ * A primeira passada prendeu `melhoria` em `success`, **gêmea de
+ * `corrigido`**, e não por gosto: sobre o cartão desta janela
+ * (`--surface-elevated`) as seis tintas ofereciam só **quatro** aparências
+ * distintas. `--tint-neutral` era literalmente `var(--surface-elevated)` — o
+ * selo seria o próprio fundo do cartão, ΔE76 **0,0**, razão **1,00:1** — e
+ * `primary` é o **mesmo azul** de `info` (ΔE76 4,5 claro / 5,7 escuro).
  *
- * | candidata | por que não serve | medida |
+ * A **E23** trocou a tinta neutra por `rgb(100 116 139 / 0.15)` (slate-500 a
+ * 15%), declarada nos **dois** blocos do `colors.css`. Medida contra as três
+ * superfícies:
+ *
+ * | | claro | escuro |
  * |---|---|---|
- * | `success` | é de `corrigido` agora | — |
- * | `primary` | é o **mesmo azul** de `info` | ΔE76 **4,5** claro / **5,7** escuro; razão 1,01:1. O piso do próprio pacote para série distinguível (E16-b) é ΔE ≥ 20 |
- * | `neutral` | é **alias de `--surface-elevated`**, que é o fundo do cartão: o selo perderia a forma | ΔE76 **0,0**; razão **1,00:1** |
- * | `warning` | diz "atenção"; não há a que atentar numa melhoria | — |
- * | `danger` | tom errado | — |
+ * | ΔE76 da tinta × superfície | 7,3 / 7,6 / 7,0 (era 0,0) | 6,5 / 5,8 / 4,8 (era 0,0) |
+ * | `--on-tint-neutral` por cima | 6,04 / 6,29 / 5,79 | 5,81 / 5,32 / 4,55 |
  *
- * Então `melhoria` fica onde estava (`success`) e passa a ser **gêmea de
- * `corrigido`**. O que se perde é a cor *acrescentar* uma distinção entre as
- * duas; o que **não** se perde é a informação, porque o rótulo ("Corrigido" /
- * "Melhoria") é escrito ao lado do ícone e há caso de teste que o prende.
- * 1.4.1 continua satisfeito — a cor nunca foi o único portador.
+ * Com aparência própria, a neutra virou casa, e os três tipos passam a ter
+ * **três** aparências distintas — era isso que faltava. O rótulo continua
+ * escrito ao lado do ícone: 1.4.1 nunca dependeu da cor, e agora a cor
+ * acrescenta em vez de só não atrapalhar.
  *
- * Sair disto é decisão de quem desenha o pacote, não desta tela: ou se aceita
- * a gêmea, ou entra uma sexta tinta distinguível por emenda.
+ * ⚠️ A variante se chama **`secondary`**. No `Badge` ela e `muted` têm classes
+ * idênticas (`bg-tint-neutral text-on-tint-neutral border-borda`) — as duas
+ * apontam para a tinta que a E23 consertou, então não há ambiguidade de
+ * aparência; `secondary` é o nome que a decisão usa. A borda aqui é
+ * `border-borda`, e não `border-<cor>/30` como nas outras duas, porque a tinta
+ * neutra não tem cor cheia de rampa a que recorrer — é assim no primitivo.
  */
 const ENTRY_CONFIG: Record<EntryType, { label: string; className: string; icon: ReactNode }> = {
   novidade: {
@@ -66,7 +73,7 @@ const ENTRY_CONFIG: Record<EntryType, { label: string; className: string; icon: 
   },
   melhoria: {
     label: "Melhoria",
-    className: "bg-tint-success text-on-tint-success border border-success/30",
+    className: "bg-tint-neutral text-on-tint-neutral border border-borda",
     icon: <Icon name="trendingUp" size={12} strokeWidth={2.5} />,
   },
 };

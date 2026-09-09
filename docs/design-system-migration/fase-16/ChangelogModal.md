@@ -105,9 +105,21 @@ corrigiu o critério e decidiu `corrigido` → `success`.
 |---|---|---|---|
 | `novidade` | `info` | **`info`** | é um **anúncio**: algo passou a existir. Não é resultado bom nem ruim — é informação, que é o que `info` significa em toda a interface (o `Alert`, o papel "Técnico"). Mesma variante, motivo diferente. |
 | `corrigido` | `warning` | **`success`** | um defeito foi **resolvido**. Decisão do operador, e é a leitura certa: o laranja dizia "atenção", e não há a que atentar num defeito que já saiu. |
-| `melhoria` | `success` | **`success`** — e isto está **em aberto** | ver abaixo |
+| `melhoria` | `success` | **`secondary`** — resolvido pela **E23** | ver abaixo |
 
-### `melhoria` está sem casa, e o motivo é medido
+### `melhoria` esteve sem casa, e o motivo era medido — a E23 resolveu
+
+> **Atualizado em 09/09/2026.** O que segue descreve o estado de ANTES da
+> emenda **E23**, e fica porque é o raciocínio que a produziu: foi ao
+> procurar uma sexta aparência que se descobriu que só havia quatro.
+>
+> **Depois da E23**, `--tint-neutral` é `rgb(100 116 139 / 0.15)` e separa
+> 7,3 / 7,6 / 7,0 do fundo no claro e 6,5 / 5,8 / 4,8 no escuro. `melhoria`
+> passou a `secondary`, e os três tipos têm três aparências distintas.
+>
+> ⚠️ A margem do escuro é de **0,05**: `--on-tint-neutral` sobre a tinta na
+> superfície elevada dá 4,55:1 contra o piso de 4,5. Quem escurecer o
+> `--text-muted` do escuro quebra este selo.
 
 "Algo que já existia ficou melhor" não é nenhuma das seis tintas. E o problema
 não é de gosto: sobre o cartão desta janela (`--surface-elevated`) as seis só
