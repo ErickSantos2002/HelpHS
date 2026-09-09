@@ -226,3 +226,79 @@ async def test_embute_um_devolve_none_quando_o_servico_cai(monkeypatch, servico_
     _transporte(monkeypatch, erro=httpx.ConnectError("caiu"))
 
     assert await embute_um("oi") is None
+
+
+# ── O teto de lote ────────────────────────────────────────────
+
+
+@pytest.mark.asyncio
+async def test_lote_grande_e_fatiado_no_teto(monkeypatch, servico_ligado):
+    """
+    O número saiu de medição, não de gosto.
+
+    Com o bge-m3 quantizado e trechos do tamanho dos manuais reais, o pico do
+    serviço foi medido em 905 MB com 1 trecho, 1,2 GB com 8, 1,9 GB com 24 e
+    3,7 GB com os 74 da base inteira. O servidor tem ~5,1 GB livres e é o mesmo
+    que compila a própria imagem no deploy. Mandar tudo de uma vez comeria
+    quase toda a folga para economizar 73 viagens de rede.
+    """
+    cliente = _transporte(monkeypatch, resposta=_resposta({"vetores": [_vetor()] * 4}))
+
+    await embute(["t"] * 10)
+
+    # 10 textos em lotes de 4 = 3 chamadas (4, 4, 2)
+    assert cliente.post.await_count == 3
+    tamanhos = [len(c.kwargs["json"]["textos"]) for c in cliente.post.await_args_list]
+    assert tamanhos == [4, 4, 2]
+    assert max(tamanhos) <= helo_embedding.TETO_DO_LOTE
+
+
+@pytest.mark.asyncio
+async def test_o_fatiamento_preserva_a_ordem(monkeypatch, servico_ligado):
+    """
+    O chamador casa vetor com trecho por POSIÇÃO.
+
+    Fatiar e remontar fora de ordem gravaria o embedding de um trecho em cima
+    de outro, e nada acusaria — a busca simplesmente passaria a devolver o
+    trecho errado, com a fonte errada.
+    """
+    lotes = [
+        _resposta({"vetores": [_vetor(0.1), _vetor(0.2), _vetor(0.3), _vetor(0.4)]}),
+        _resposta({"vetores": [_vetor(0.5), _vetor(0.6)]}),
+    ]
+    cliente = _transporte(monkeypatch, resposta=None)
+    cliente.post = AsyncMock(side_effect=lotes)
+
+    vetores = await embute(["a", "b", "c", "d", "e", "f"])
+
+    assert [v[0] for v in vetores] == pytest.approx([0.1, 0.2, 0.3, 0.4, 0.5, 0.6])
+
+
+@pytest.mark.asyncio
+async def test_um_lote_que_falha_derruba_a_chamada_inteira(monkeypatch, servico_ligado):
+    """
+    Meia lista de vetores é pior do que nenhuma.
+
+    O chamador casa por posição: devolver os quatro primeiros e faltar os dois
+    últimos desalinharia tudo silenciosamente. `None` faz a ingestão parar e a
+    Helô escalar, que são as duas respostas certas.
+    """
+    cliente = _transporte(monkeypatch, resposta=None)
+    cliente.post = AsyncMock(
+        side_effect=[
+            _resposta({"vetores": [_vetor()] * 4}),
+            httpx.ConnectError("caiu no segundo lote"),
+        ]
+    )
+
+    assert await embute(["a", "b", "c", "d", "e"]) is None
+
+
+@pytest.mark.asyncio
+async def test_lote_menor_que_o_teto_vai_numa_chamada_so(monkeypatch, servico_ligado):
+    """O caminho do chat é um texto só: não pode ganhar viagem de rede extra."""
+    cliente = _transporte(monkeypatch, resposta=_resposta({"vetores": [_vetor()]}))
+
+    await embute_um("como troco o idioma?")
+
+    assert cliente.post.await_count == 1

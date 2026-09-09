@@ -1,0 +1,6 @@
+{
+  "pergunta_idioma": "como coloco o aparelho em portugues",
+  "titan_idioma": "Alterar Idioma. Acesse o menu Sistema, escolha a opcao Idioma e selecione Portugues do Brasil. Confirme com OK.",
+  "phoebus_facial": "Ajustar Nivel de Confianca Facial. Configure o percentual minimo de similaridade exigido no reconhecimento facial do operador antes do teste.",
+  "phoebus_impressora": "Impressora opcional. Conecte a impressora termica por Bluetooth e imprima o comprovante do teste ao final de cada medicao. O papel termico e trocado abrindo a tampa lateral do compartimento."
+}
