@@ -19,16 +19,20 @@ from app.models.models import HeloDocType
 from scripts.ingere_manuais import (
     FONTES,
     CorpusInconsistenteError,
+    CredencialNaoRedigidaError,
     Fonte,
+    Trecho,
     _corta_emoji,
     _corta_numerada,
     _corta_regua,
     casa_produtos,
     chave,
+    confere_redacao,
     descarta,
     exige_produtos_distinguiveis,
     recorta,
     redige,
+    suspeitas,
 )
 
 # Os sete produtos que o `app/seeds.py` grava, com a grafia exata dele. Repetir
@@ -568,3 +572,63 @@ def test_produtos_distinguiveis_passam():
     catalogo = exige_produtos_distinguiveis([(uuid.uuid4(), n) for n in _PRODUTOS_DO_SEED])
 
     assert len(catalogo) == 7
+
+
+# ── Detector largo, redator preciso ───────────────────────────
+
+
+def test_o_detector_pega_a_forma_que_o_redator_perde():
+    """
+    A razão de detector e redator serem funções diferentes.
+
+    O redator é preciso: conhece a forma exata do manual do Phoebus. Padrão
+    preciso erra por omissão, e a omissão aqui é MUDA — senha que escapa não é
+    redigida e também não marca o trecho, então o resultado fica
+    indistinguível de "não havia senha".
+    """
+    sem_dois_pontos = "3. Digite a senha 987654 e confirme."
+
+    assert redige(sem_dois_pontos)[1] is False, "o redator perde esta forma, e é esperado"
+    assert suspeitas(sem_dois_pontos), "o detector NÃO pode perder"
+
+
+def test_o_detector_nao_dispara_em_numero_formatado():
+    """
+    Largo não é indiscriminado — falso positivo aqui PARA a ingestão.
+
+    "8.000 testes" e "R$ 4.900,00" aparecem no corpus inteiro. Senha vem crua;
+    número de catálogo vem com separador.
+    """
+    assert not suspeitas("Memória: até 8.000 testes por carga")
+    assert not suspeitas("Preço do Aparelho: R$ 4.900,00")
+    assert not suspeitas("Calibração a cada 12 meses ou 5.000 testes")
+
+
+def test_detector_disparou_e_redator_nao_redigiu_e_erro_fatal():
+    """
+    O contrato entre os dois: discordância PARA a ingestão.
+
+    É o controle de segurança do pior conteúdo do corpus. Ele não pode falhar
+    em silêncio — falso positivo custa alguém olhar uma linha; falso negativo
+    custa uma senha de administrador publicada na base que responde cliente.
+    """
+    fonte = Fonte("Fake.txt", HeloDocType.tecnico, "numerada", "Falso")
+    bruto = "1. Menu\nDigite a senha 987654 para entrar."
+    # O trecho vai para o banco com os dígitos intactos: é o cenário do defeito.
+    trechos = [Trecho(secao="1. Menu", conteudo=bruto, exige_credencial=False, ordem=0)]
+
+    with pytest.raises(CredencialNaoRedigidaError) as erro:
+        confere_redacao(fonte, bruto, trechos)
+
+    assert "Fake.txt:2" in str(erro.value), "a mensagem precisa dizer arquivo e LINHA"
+    assert "987654" not in str(erro.value), "a mensagem não transcreve a senha"
+
+
+def test_quando_o_redator_fez_o_trabalho_nao_ha_erro():
+    """A conferência é sobre os dígitos sobreviverem, não sobre quem rodou."""
+    fonte = Fonte("Fake.txt", HeloDocType.tecnico, "numerada", "Falso")
+    bruto = "1. Menu\nSenha: 987654"
+    limpo, _ = redige(bruto)
+    trechos = [Trecho(secao="1. Menu", conteudo=limpo, exige_credencial=True, ordem=0)]
+
+    confere_redacao(fonte, bruto, trechos)  # não levanta

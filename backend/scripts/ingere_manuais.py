@@ -262,6 +262,87 @@ def redige(texto: str) -> tuple[str, bool]:
     return limpo, quantas > 0
 
 
+# ── Detecção: larga de propósito, e separada da redação ───────
+#
+# O `_SENHA` acima é PRECISO: ele conhece a forma exata que o manual do Phoebus
+# usa e substitui exatamente aquilo. Um padrão preciso erra por omissão, e a
+# omissão aqui é muda — senha que escapa não é redigida E não marca o trecho,
+# então o resultado fica indistinguível de "não havia senha nenhuma". É o
+# controle de segurança do pior conteúdo do corpus falhando sem ruído.
+#
+# Por isso a detecção é outra função, e é exagerada de propósito. Ela não
+# redige nada: ela só levanta a mão. Quando ela levanta a mão e a redação não
+# fez nada, a ingestão PARA, dizendo arquivo e linha.
+#
+# A assimetria é o ponto. Falso positivo custa alguém olhar uma linha e ou
+# ajustar o redator ou estreitar o detector — barato e visível. Falso negativo
+# custa uma senha de administrador publicada na base que responde cliente.
+
+_PALAVRA_DE_CREDENCIAL = re.compile(
+    r"senha|senhas|c[óo]digo|pin\b|password|chave\s+de\s+acesso|credencial",
+    re.IGNORECASE,
+)
+_DIGITOS = re.compile(r"\d{3,}")
+# Número com separador de milhar, de decimal ou de moeda não é credencial: é
+# "8.000 testes", "R$ 4.900,00", "12 meses". Senha vem crua.
+_NUMERO_FORMATADO = re.compile(r"\d[.,]\d|R\$")
+
+
+def suspeitas(bruto: str) -> list[tuple[int, str]]:
+    """
+    Linhas que PARECEM carregar credencial, com o número da linha no arquivo.
+
+    Larga por desenho: basta a linha falar de senha/código/PIN e trazer três
+    dígitos seguidos que não sejam número formatado. Não tenta entender a
+    frase, não exige dois-pontos, não exige posição.
+    """
+    achadas: list[tuple[int, str]] = []
+    for numero, linha in enumerate(bruto.splitlines(), start=1):
+        if not _PALAVRA_DE_CREDENCIAL.search(linha):
+            continue
+        cruzinhos = [d for d in _DIGITOS.findall(linha) if not _NUMERO_FORMATADO.search(linha)]
+        if cruzinhos:
+            achadas.append((numero, linha.strip()))
+    return achadas
+
+
+class CredencialNaoRedigidaError(RuntimeError):
+    """O detector viu e o redator não redigiu. Não se grava assim."""
+
+
+def confere_redacao(fonte: Fonte, bruto: str, trechos: list["Trecho"]) -> None:
+    """
+    Cruza o que o detector viu com o que sobrou no texto que iria para o banco.
+
+    O teste não é "o redator rodou": é se os DÍGITOS da linha suspeita ainda
+    existem no conteúdo final. É a única pergunta que importa, e ela não
+    depende de o detector e o redator concordarem sobre a forma.
+    """
+    if not (achadas := suspeitas(bruto)):
+        return
+
+    final = "\n".join(t.conteudo for t in trechos)
+    sobreviventes: list[str] = []
+    for numero, linha in achadas:
+        for digitos in _DIGITOS.findall(linha):
+            if digitos in final:
+                # A linha NÃO é transcrita: ela contém a senha.
+                sobreviventes.append(f"    {fonte.arquivo}:{numero} — {len(digitos)} dígitos")
+                break
+
+    if sobreviventes:
+        raise CredencialNaoRedigidaError(
+            f"{fonte.arquivo}: o detector encontrou {len(achadas)} linha(s) com aparência de "
+            f"credencial, e {len(sobreviventes)} continua(m) com os dígitos no texto que iria "
+            "para o banco:\n" + "\n".join(sobreviventes) + "\n\n"
+            "Isto para a ingestão de propósito. Ou o redator precisa aprender essa forma "
+            "(`_SENHA`), ou a linha não é credencial e o detector precisa estreitar "
+            "(`_PALAVRA_DE_CREDENCIAL`). O que não pode é a base receber o texto e ninguém "
+            "ficar sabendo — senha que escapa também não marca o trecho, e o resultado fica "
+            "igual a 'não havia senha'."
+        )
+
+
 # ── Os cortes ─────────────────────────────────────────────────
 
 
@@ -584,6 +665,10 @@ def recorta(fonte: Fonte, caminho: Path) -> Documento:
         )
         ordem += 1
 
+    # A conferência vem DEPOIS do recorte e da redação, sobre o texto que
+    # realmente iria para o banco. Antes seria opinião; aqui é medição.
+    confere_redacao(fonte, bruto, doc.trechos)
+
     doc.hash = _hash_do_resultado(fonte, doc.trechos)
     return doc
 
@@ -705,7 +790,7 @@ def relatorio_de_conflitos(plano: list[Passo]) -> list[str]:
 # ── O plano: o que a gravação FARIA ───────────────────────────
 
 
-async def planeja(docs: list[Documento]) -> list[Passo]:
+async def planeja(docs: list[Documento]) -> tuple[list[Passo], list[str]]:
     """
     Resolve produto e decide a ação, SEM escrever nada.
 
@@ -750,8 +835,15 @@ async def planeja(docs: list[Documento]) -> list[Passo]:
                 acao = "refaz"
 
             plano.append(Passo(doc=doc, acao=acao, produtos=nomes, produto_ids=ids))
+
+        # O que está no banco e não está mais no corpus. Só a lista: apagar é
+        # decisão de quem olha, não de uma flag. Documento retirado da pasta
+        # (ou do FONTES) continua indexado e continua sendo CITADO pela Helô —
+        # inclusive um manual retirado por estar errado, ou por conter senha.
+        no_banco = set((await s.execute(select(HeloDocument.filename))).scalars().all())
+        sobras = sorted(no_banco - {f.arquivo for f in FONTES})
     await motor.dispose()
-    return plano
+    return plano, sobras
 
 
 # ── Gravação ──────────────────────────────────────────────────
@@ -849,18 +941,41 @@ def main() -> int:
         return 2
 
     docs, faltando = [], []
-    for fonte in FONTES:
-        caminho = pasta / fonte.arquivo
-        if not caminho.is_file():
-            faltando.append(fonte.arquivo)
-            continue
-        docs.append(recorta(fonte, caminho))
+    try:
+        for fonte in FONTES:
+            caminho = pasta / fonte.arquivo
+            if not caminho.is_file():
+                faltando.append(fonte.arquivo)
+                continue
+            docs.append(recorta(fonte, caminho))
+    except CredencialNaoRedigidaError as erro:
+        print(f"\nCREDENCIAL NÃO REDIGIDA — nada foi gravado.\n\n{erro}\n", file=sys.stderr)
+        return 1
 
     if faltando:
-        print(f"AUSENTES: {', '.join(faltando)}\n", file=sys.stderr)
+        # Fatal com `--aplicar`, e não um aviso no stderr. A pasta vem de cópia
+        # de unidade de rede: cópia parcial é cenário real, e o resultado seria
+        # gravar o subconjunto encontrado e deixar o resto do banco com a
+        # ingestão anterior — uma base de duas épocas, sem nada na tela
+        # dizendo isso. O relatório sozinho continua rodando com o que houver,
+        # porque relatório não estraga nada.
+        recado = (
+            f"AUSENTES ({len(faltando)} de {len(FONTES)}): {', '.join(faltando)}\n"
+            f"Procurados em {pasta}"
+        )
+        if args.aplicar:
+            print(
+                f"\nCORPUS INCOMPLETO — nada foi gravado.\n\n{recado}\n\n"
+                "Gravar só o que foi achado deixaria os ausentes no banco com o conteúdo da "
+                "execução anterior, misturando duas épocas do corpus sem aviso. Confira se a "
+                "pasta terminou de sincronizar e rode de novo.\n",
+                file=sys.stderr,
+            )
+            return 1
+        print(f"{recado}\n", file=sys.stderr)
 
     try:
-        plano = asyncio.run(planeja(docs))
+        plano, sobras = asyncio.run(planeja(docs))
     except CorpusInconsistenteError as erro:
         print(f"\nCORPUS INCONSISTENTE — nada foi gravado.\n\n{erro}\n", file=sys.stderr)
         return 1
@@ -910,6 +1025,19 @@ def main() -> int:
     novos = sum(len(p.doc.trechos) for p in plano if p.acao != "inalterado")
     vinculos = sum(len(p.doc.trechos) * len(p.produto_ids) for p in plano if p.acao != "inalterado")
     print(f"\n  {novos} trechos gravados, {vinculos} vínculos trecho→produto")
+
+    if sobras:
+        print()
+        print("-" * 72)
+        print(f"SOBRA NO BANCO — {len(sobras)} documento(s) que não estão mais no corpus")
+        print("-" * 72)
+        for nome in sobras:
+            print(f"  {nome}")
+        print()
+        print("  Estes continuam indexados e continuam sendo CITADOS pela Helô, mesmo")
+        print("  tendo saído da pasta ou da lista de fontes — inclusive um manual que")
+        print("  tenha sido retirado por estar errado. O script NÃO apaga: a lista é")
+        print("  para você decidir olhando, não para uma flag decidir sozinha.")
 
     print()
     print("=" * 72)
