@@ -373,3 +373,61 @@ describe("Selector — a peneira local", () => {
     expect(screen.queryByRole("option", { name: "Ana Silva" })).not.toBeInTheDocument();
   });
 });
+
+describe("Selector — o erro no modo filtro", () => {
+  const OPCOES = [{ value: "1", label: "Ana" }];
+
+  it("no FORMULÁRIO, o erro é desenhado e apontado", () => {
+    // A metade que já funcionava. Ela fica no mesmo caso que a outra porque
+    // sozinha ela não distingue nada: um `aria-describedby` incondicional
+    // passa aqui exatamente como o condicional.
+    render(
+      <Selector
+        label="Técnico"
+        variant="form"
+        error="Escolha um técnico"
+        options={OPCOES}
+        value={null}
+        onChange={() => {}}
+      />,
+    );
+    const gatilho = screen.getByRole("button");
+    const id = gatilho.getAttribute("aria-describedby");
+    expect(id).toBeTruthy();
+    expect(document.getElementById(id!)).toHaveTextContent("Escolha um técnico");
+  });
+
+  it("no FILTRO, não aponta para um id que não existe", () => {
+    // O defeito, e ele estava ARMADO e não ativo: o `<p id={idErro}>` só sai
+    // com `!filtro`, e o `aria-describedby` era incondicional. Nenhuma das
+    // quatro chamadas com `variant="filter"` passa `error` hoje — a primeira
+    // que passasse teria um apontamento órfão.
+    //
+    // E órfão não dá erro em lugar nenhum: nem JavaScript, nem HTML, nem
+    // `tsc`. O leitor de tela apenas não anuncia nada, e a mensagem some para
+    // quem depende dela.
+    render(
+      <Selector
+        label="Técnico"
+        variant="filter"
+        error="Escolha um técnico"
+        options={OPCOES}
+        value={null}
+        onChange={() => {}}
+      />,
+    );
+    const gatilho = screen.getByRole("button");
+    const id = gatilho.getAttribute("aria-describedby");
+
+    // Ou não aponta, ou aponta para algo que existe. As duas afirmações
+    // juntas: a primeira sozinha proibiria uma solução legítima (desenhar o
+    // erro no filtro um dia), e a segunda sozinha passaria com `null`.
+    if (id !== null) {
+      expect(document.getElementById(id)).not.toBeNull();
+    } else {
+      expect(id).toBeNull();
+    }
+    // E o invariante que vale nos dois desenhos: nunca um id órfão.
+    expect(id === null || document.getElementById(id) !== null).toBe(true);
+  });
+});

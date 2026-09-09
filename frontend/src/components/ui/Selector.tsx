@@ -522,7 +522,24 @@ export function Selector({
         onClick={alternar}
         onKeyDown={aoTeclar}
         aria-invalid={error ? true : undefined}
-        aria-describedby={error ? idErro : undefined}
+        // A condição é a MESMA que renderiza o `<p id={idErro}>` lá embaixo, e
+        // isso não é zelo: ela era `error ? idErro : undefined`, incondicional,
+        // enquanto o parágrafo só sai com `!filtro`. Um
+        // `<Selector variant="filter" error="…" />` apontava para um `id` que
+        // não existe no documento — e `aria-describedby` órfão não é erro de
+        // JavaScript nem de HTML: o leitor de tela simplesmente não anuncia
+        // nada, e a mensagem de erro some para quem depende dela.
+        //
+        // Não era alcançável quando foi achado: as quatro chamadas com
+        // `variant="filter"` não passam `error`. Estava **armado**, esperando a
+        // primeira que passasse. O caso que o prende passa exatamente essa
+        // combinação, que é a única que expõe o defeito.
+        //
+        // O erro no filtro continua sem ser DESENHADO, e isso é outra decisão:
+        // a barra de filtros não tem lugar para uma linha de mensagem. O que
+        // este conserto garante é que o atributo não prometa um texto que a
+        // tela não põe.
+        aria-describedby={error && !filtro ? idErro : undefined}
         aria-labelledby={rotulado}
         // Duas correções moram neste atributo, e a segunda desfez a primeira.
         //
