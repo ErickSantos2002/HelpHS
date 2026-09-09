@@ -94,6 +94,9 @@ def _mock_message(sender=None):
     msg.content = "Olá, vou analisar o problema."
     msg.is_system = False
     msg.is_ai = False
+    # Sem anexo da biblioteca. MagicMock devolveria um mock truthy aqui,
+    # e a serializacao tentaria montar um UUID a partir dele.
+    msg.library_file_id = None
     msg.read_at = None
     msg.created_at = _NOW
     msg.sender = sender or _mock_user()
@@ -632,6 +635,9 @@ def test_mensagem_da_ia_sem_remetente_vira_resposta_valida():
     msg.content = "Olá! Sou a Helô, assistente da Health & Safety."
     msg.is_system = False
     msg.is_ai = True
+    # Sem anexo da biblioteca. MagicMock devolveria um mock truthy aqui,
+    # e a serializacao tentaria montar um UUID a partir dele.
+    msg.library_file_id = None
     msg.read_at = None
     msg.created_at = datetime.now(UTC)
 
@@ -661,6 +667,9 @@ def test_mensagem_de_gente_continua_trazendo_o_remetente():
     msg.content = "O aparelho não liga."
     msg.is_system = False
     msg.is_ai = False
+    # Sem anexo da biblioteca. MagicMock devolveria um mock truthy aqui,
+    # e a serializacao tentaria montar um UUID a partir dele.
+    msg.library_file_id = None
     msg.read_at = None
     msg.created_at = datetime.now(UTC)
 
