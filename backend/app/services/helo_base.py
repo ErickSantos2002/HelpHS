@@ -82,6 +82,15 @@ K_TRECHOS = 4
 #    trecho genérico.
 # 3. O número vale para o bge-m3 e para estes textos. Trocar de modelo de
 #    embedding invalida a medição inteira, sem que nada quebre visivelmente.
+# 3b. **A população "tem resposta" está enviesada para o fácil.** As 27
+#    perguntas foram escritas por quem já tinha lido os manuais, então elas
+#    usam as palavras do manual. Cliente de verdade escreve "não sai nada no
+#    visor", não "como interpreto os resultados" — e distância só cresce com
+#    essa diferença. Quem revisitar o 0,25 precisa saber que os 27 não
+#    representam cliente nenhum: representam o melhor caso. O número real de
+#    acertos preservados em produção é MENOR que os 81% medidos aqui, e a
+#    forma de descobrir quanto é medir com pergunta de cliente de verdade,
+#    quando houver conversa gravada para isso.
 # 4. As 5 perguntas com resposta que o corte derruba viram escalada. É o lado
 #    barato de errar: um humano responde. O outro lado é a Helô ditar
 #    procedimento de instrumento de medição legal a partir do trecho errado.

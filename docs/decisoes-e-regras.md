@@ -871,6 +871,16 @@ uma lei, e vale para o **bge-m3 com estes textos**: trocar o modelo de
 embedding invalida a medição sem que nada quebre visivelmente. Remedir quando
 houver manual para mais produtos — mesmo gatilho da dívida da hipótese B.
 
+⚠️ **A população "tem resposta" está enviesada para o fácil, e isso é limite
+conhecido da medição.** As 27 perguntas foram escritas por quem já tinha lido
+os manuais, e por isso usam as palavras do manual. Cliente escreve *"não sai
+nada no visor"*, não *"como interpreto os resultados"* — e a distância só
+cresce com essa diferença. Os 81% de acertos preservados são o **melhor caso**,
+não a expectativa: em produção o número é menor, e quanto menor só se descobre
+medindo com pergunta de cliente de verdade, quando houver conversa gravada para
+isso. Quem for revisitar o 0,25 começa por refazer a medição com perguntas
+reais — não por mexer no número.
+
 ⚠️ **E o "barra 100%" é do conjunto de perguntas, não do mundo.** As perguntas
 foram escritas por quem já sabia a resposta, e saíram mais gentis que as de um
 cliente. A prova está no `test_helo_pooling_postgres.py`, com embedding real:
