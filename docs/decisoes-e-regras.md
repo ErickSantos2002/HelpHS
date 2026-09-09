@@ -847,36 +847,81 @@ o CI não checa formato. Lá, rodar `--write` polui o commit.
 
 ## Base da Helô
 
-### Duas hipóteses em aberto sobre a qualidade da recuperação
+### O teto de distância da busca foi medido, não escolhido
 
-Observado em 09/09/2026, com os 74 trechos já embutidos. A pergunta *"como
-coloco o aparelho em português"* num chamado de Titan devolveu:
+Ordenar não é filtrar: sem teto, `busca_trechos` sempre devolve os quatro
+trechos mais próximos, por mais longe que estejam — e o modelo os recebe num
+bloco que o prompt chama de "sua única fonte de verdade técnica".
 
-    0.2420  6. Passo a Passo para Utilização
-    0.2592  8. Configurações Detalhadas → 8.2 Alterar Idioma
+Medido em 09/09/2026 com 40 perguntas rotuladas contra o corpus real:
 
-O trecho certo é recuperado — com `k=4` ele entra no contexto do modelo —, mas
-não ganha. Isso é qualidade de recuperação, não defeito de encanamento, e
-**não foi investigado de propósito**: uma observação não sustenta conserto.
+| grupo | n | mediana do 1º | extremo |
+|---|---|---|---|
+| tem resposta na base | 27 | 0,2185 | máximo 0,2850 |
+| não tem resposta na base | 13 | 0,2789 | **mínimo 0,2590** |
 
-As duas leituras possíveis pedem consertos OPOSTOS, e por isso ficam separadas:
+`TETO_DE_DISTANCIA = 0.25` é o maior corte que ainda barra **100%** das
+perguntas sem resposta, preservando 22 das 27 com resposta. De quebra, corta o
+enchimento das que passam: nessas 40 perguntas chegavam 160 trechos ao modelo,
+passam a chegar 25 — e em 74% das que têm resposta sobra exatamente UM trecho,
+o certo, no lugar de um mais três de ruído.
 
-**Hipótese A — é o comprimento.** O `8.2` tem 104 caracteres; trecho curto tem
-menos sinal e perde para trecho longo que fala do assunto de raspão. Se for
-isso, o problema é **sistemático**: atinge todo trecho curto da base, e o
-conserto é do lado do corte — juntar subseção curta com a vizinha, ou dar peso
-ao título na hora de embutir.
+⚠️ **A margem é de 0,009** (0,25 contra 0,2590). É um ajuste a 40 pontos, não
+uma lei, e vale para o **bge-m3 com estes textos**: trocar o modelo de
+embedding invalida a medição sem que nada quebre visivelmente. Remedir quando
+houver manual para mais produtos — mesmo gatilho da dívida da hipótese B.
 
-**Hipótese B — o `6. Passo a Passo` é um aspirador.** Ele fala de operação em
-geral e casaria com qualquer pergunta que comece com "como faço". Se for isso,
-o problema é de **um trecho específico**, e o conserto é o contrário: cortar
-aquele trecho mais fino, ou tirá-lo da base. Consertar o corte de todo mundo
-por causa dele seria estragar o que está bom.
+⚠️ **E o "barra 100%" é do conjunto de perguntas, não do mundo.** As perguntas
+foram escritas por quem já sabia a resposta, e saíram mais gentis que as de um
+cliente. A prova está no `test_helo_pooling_postgres.py`, com embedding real:
+*"como coloco o aparelho em português"* casa a seção certa a **0,2533** — um
+acerto DENTRO da faixa que a medição tratou como território de quem não tem
+resposta. Ou seja: as duas populações se sobrepõem entre 0,25 e 0,26, e o corte
+não separa duas nuvens, ele **escolhe um lado da sobreposição**.
 
-**O sintoma que separa as duas é fácil e barato:** se for a B, o mesmo trecho
-reaparece no topo de perguntas de assuntos DIFERENTES. Se for a A, cada
-pergunta traz um vizinho longo diferente. Basta reparar nisso ao longo das
-buscas de verdade — não precisa de experimento montado.
+A escolha é de apetite de risco, e é a do desenho: passar trecho errado faz a
+Helô ditar procedimento de instrumento de medição legal a partir dele; cortar
+acerto faz um humano responder. Os dois erros terminam em escalada; só um deles
+pode terminar em instrução errada. Por isso o corte fica no lado apertado.
+
+**Quando o teto corta tudo, o resultado é o mesmo `NADA ENCONTRADO` de quando a
+busca não devolve nada.** Não existe estado novo para "achei, mas está longe":
+seria só mais uma coisa para o modelo interpretar errado.
+
+
+### As duas hipóteses foram medidas: a A caiu, a B se confirmou
+
+Levantadas em 09/09/2026 a partir de UMA observação — *"como coloco o aparelho
+em português"* num Titan devolvia `6. Passo a Passo` (0,2420) à frente de
+`8.2 Alterar Idioma` (0,2592). As duas leituras pediam consertos opostos, e por
+isso ficaram separadas em vez de virar conserto na hora.
+
+Medidas no mesmo dia, com 40 perguntas rotuladas à mão contra o corpus real —
+27 com resposta conhecida no manual do produto e 13 sem resposta nenhuma.
+
+**Hipótese A — "trecho curto perde por ter menos sinal" — CAIU.** É o oposto:
+os trechos mais curtos da base são os que mais acertam. As quatro subseções
+`8.x` do Titan têm de 104 a 137 caracteres, e são os melhores resultados do
+corpus inteiro — `8.1 Ajustar Data e Hora` a 0,1527, `8.3` a 0,1753, `8.2` a
+0,2028, `8.4` a 0,2184. O que a observação original pegou foi sensibilidade à
+FORMA da pergunta, não ao tamanho do trecho: *"como mudo o idioma para
+português"* traz o `8.2` em primeiro, *"como coloco o aparelho em português"*
+não. **Não juntar subseção curta com a vizinha** — seria estragar o que está
+melhor.
+
+**Hipótese B — "o `6. Passo a Passo` é um aspirador" — CONFIRMOU.** Ele ficou
+em primeiro lugar em 4 de 8 perguntas de assuntos diferentes num sondagem
+livre, incluindo *"como conecto na impressora"* num aparelho que não tem
+impressora. O equivalente do iBlow (`5. Passo a Passo`) fez o mesmo em 3 de 8.
+Virou dívida com gatilho — ver a tabela de dívidas.
+
+**O teto de distância tira a maior parte do dano, e agrava um caso.** Com
+0,25, as duas perguntas em que o aspirador vencia sem concorrência (0,2789 e
+0,2710) passam a não devolver nada, que é o certo. Mas a pergunta original
+desta seção fica PIOR: `6. Passo a Passo` (0,2420) sobrevive ao corte e o
+`8.2` (0,2592) não, então o modelo passa a receber só o trecho errado onde
+antes recebia os dois. É o contraexemplo conhecido do teto, e é a melhor razão
+para a dívida da hipótese B existir.
 
 ## Testes
 
@@ -996,6 +1041,7 @@ por inércia.
 | ~~**Escalar não desliga a IA no chamado**~~ | **Quitada em 09/09/2026**, na Etapa 4 da Fase 2 — no mesmo commit em que o teto deixou de ser de falas e virou de trocas, que era o gatilho registrado. `ticket.ai_enabled = False` no caminho de escalada, e vale para os dois jeitos de escalar: o pedido explícito de humano, reconhecido antes do modelo, e a escalada que o próprio modelo pede com a linha `ESCALAR:`. Consequência aceita: desliga junto o `suggest-reply` e o `summarize` daquele chamado — quem pediu para sair da IA não deveria ter a conversa dele resumida por uma. | — |
 | **Reingerir um manual apaga o embedding de trecho que não mudou** | O `--aplicar` do `ingere_manuais.py`, quando o documento mudou, apaga TODOS os trechos dele e recria com ids novos e `embedding` nulo. Corrigir uma linha de contato no manual do Phoebus invalida os 18 trechos, inclusive os 17 idênticos. Hoje não custa nada: embedding ainda não é calculado, e nada fora do próprio script referencia `helo_chunks`. | **A Etapa 3**, quando o embedding passar a ser calculado e a custar. A saída é casar trecho a trecho por hash do conteúdo antes de apagar — os iguais mantêm id e embedding, e só `ordem`/`secao` são atualizados. Vira urgente de vez quando a resposta da Helô registrar a citação por `chunk_id`: aí o refaz não custa só CPU, deixa citação apontando para trecho que não existe mais. |
 | **O `.env` de desenvolvimento aponta para produção** | Só a suíte de testes está blindada (o `conftest.py` força uma URL falsa). Migration, script avulso e shell na máquina do desenvolvedor falam com o banco real. Ver a seção própria acima. | **Antes da primeira migration da Fase 2**, que cria extensão no banco. É quando o risco deixa de ser teórico. |
+| **O trecho genérico domina a busca (hipótese B)** | `6. Passo a Passo para Utilização` do Titan — e o `5.` equivalente do iBlow — fala de operação em geral e vence perguntas de assunto diferente: 4 de 8 numa sondagem livre, incluindo impressora num aparelho sem impressora. O teto de 0,25 tira a maior parte do dano hoje, e num caso conhecido agrava: para *"como coloco o aparelho em português"*, o aspirador sobrevive ao corte e o `8.2 Alterar Idioma` não. Com três manuais dói pouco — quase toda pergunta fora do manual já não devolve nada. | **Quando houver manual técnico para mais de três produtos.** Aí o aspirador passa a competir com candidatos legítimos dentro do teto, e o dano deixa de ser contornado por ele. O conserto é do lado do trecho — cortar aquele mais fino, ou tirá-lo da base —, e NÃO do corte de todo mundo: a hipótese A foi medida e caiu, os trechos curtos são os que mais acertam. |
 | **Contador de artigo útil sem voto identificado** | `POST /kb/articles/{id}/feedback` incrementa sem registrar quem votou; o mesmo usuário incrementa em laço. Não vaza nada. | O número for usado para decidir alguma coisa. |
 | **Antivírus aceita quando está fora do ar** | Bloquear upload com o ClamAV indisponível derrubaria o anexo por falha de infraestrutura. Hoje o estado é reportado, não mais silencioso, e há script de revarredura. | O ClamAV estiver no ambiente e estável — aí bloquear passa a custar pouco. |
 
@@ -1090,6 +1136,28 @@ Ligar `FORWARDED_ALLOW_IPS` resolve, **mas só depois de fechar a publicação d
 porta 8000**. Com a porta aberta na internet, autorizar cabeçalhos de proxy
 deixa qualquer um forjar o `X-Forwarded-For` e furar o limite por completo —
 pior do que o balde único. A ordem é: fechar a porta, depois autorizar.
+
+### Quatro dos sete produtos não têm manual técnico
+
+Constatado em 09/09/2026, ao rodar as primeiras buscas de verdade. **É decisão
+de escopo do cliente, não pendência de código** — fica registrado para ninguém
+tratar como defeito nem "consertar" afrouxando o filtro de tipo.
+
+| Produto | Manual técnico | Ficha comercial |
+|---|---|---|
+| Titan | 15 trechos | — |
+| Phoebus | 18 trechos | — |
+| iBlow 10 Pro | 12 trechos | 8 trechos |
+| Deimos | **nenhum** | 6 trechos |
+| EBS-010 | **nenhum** | 5 trechos |
+| Mark X | **nenhum** | 6 trechos |
+| Mercury | **nenhum** | 4 trechos |
+
+A busca filtra `doc_type = tecnico`, então para um chamado dos quatro últimos a
+base vem vazia **em todo turno**: ela saúda, o cliente responde, ela escala. É
+o comportamento correto — ficha comercial tem preço e promessa de venda, e é
+justamente o que não pode virar procedimento técnico. O efeito prático é que a
+Helô só ajuda de fato em três dos sete aparelhos até existir manual dos outros.
 
 ### Duas contradições nos manuais esperam decisão do suporte técnico
 
