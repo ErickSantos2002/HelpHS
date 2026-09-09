@@ -35,6 +35,27 @@ export interface SelectProps extends SelectHTMLAttributes<HTMLSelectElement> {
  * chama continua ganhando** — as quatorze telas que passaram a filtrar por
  * este primitivo depois da D9.2 mandam o seu (`filtro-periodo`,
  * `filtro-status`, `kb-categoria`…), e elas não mudam.
+ *
+ * ── E o erro também não chegava a quem não o vê (E11) ─────────────────
+ *
+ * O erro e a dica eram `<p>` soltos ao lado do campo. Visualmente ficam
+ * juntos; na árvore de acessibilidade **não havia relação nenhuma** entre eles
+ * e o `select`. A pessoa ouvia o nome do campo, escolhia, o formulário
+ * recusava — e ela nunca ouvia por quê.
+ *
+ * `aria-describedby` cria a relação, e `aria-invalid` marca o campo como
+ * recusado. **Aponta para o erro OU para a dica, nunca para os dois**: quando
+ * há erro a dica nem é renderizada, e apontar para ela seria apontar para um
+ * `id` que não existe. É o mesmo desenho do `Input`.
+ *
+ * `aria-required` NÃO entra: o `required` nativo chega aqui pelo espalhamento
+ * das props e já informa a árvore de acessibilidade — repetir declararia duas
+ * vezes a mesma coisa, e as duas podem divergir.
+ *
+ * O `Select` era o consumidor que ficou para trás: o contrato da E11 já
+ * existia e a tabela de `campos-aria.test.tsx` cobria `Input`, `Textarea` e
+ * `Selector` — só este primitivo nunca entrou nela. Tabela de contrato que não
+ * cobre todos os implementadores dá a impressão de contrato e não é.
  */
 export const Select = forwardRef<HTMLSelectElement, SelectProps>(
   (
@@ -43,6 +64,9 @@ export const Select = forwardRef<HTMLSelectElement, SelectProps>(
   ) => {
     const gerado = useId();
     const inputId = id ?? gerado;
+    const idErro = inputId + "-erro";
+    const idDica = inputId + "-dica";
+    const descrito = error ? idErro : hint ? idDica : undefined;
 
     return (
       <div className="flex flex-col gap-1.5">
@@ -68,6 +92,8 @@ export const Select = forwardRef<HTMLSelectElement, SelectProps>(
         <select
           ref={ref}
           id={inputId}
+          aria-invalid={error ? true : undefined}
+          aria-describedby={descrito}
           className={cn(
             "w-full rounded-lg border bg-surface px-3 py-2 pr-9 text-sm text-conteudo",
             "focus:outline-none focus:ring-2 focus:ring-action focus:border-transparent",
@@ -102,8 +128,16 @@ export const Select = forwardRef<HTMLSelectElement, SelectProps>(
           className="pointer-events-none absolute right-3 top-1/2 -translate-y-1/2 text-conteudo-muted"
         />
         </div>
-        {error && <p className="text-xs text-on-tint-danger">{error}</p>}
-        {hint && !error && <p className="text-xs text-conteudo-muted">{hint}</p>}
+        {error && (
+          <p id={idErro} className="text-xs text-on-tint-danger">
+            {error}
+          </p>
+        )}
+        {hint && !error && (
+          <p id={idDica} className="text-xs text-conteudo-muted">
+            {hint}
+          </p>
+        )}
       </div>
     );
   },

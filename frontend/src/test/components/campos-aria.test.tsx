@@ -1,13 +1,14 @@
 import { render, screen } from "@testing-library/react";
 import { describe, expect, it, vi } from "vitest";
 import { Input } from "../../components/ui/Input";
+import { Select } from "../../components/ui/Select";
 import { Selector } from "../../components/ui/Selector";
 import { Textarea } from "../../components/ui/Textarea";
 
 /**
  * O erro do formulário chegando a quem não o vê.
  *
- * Os três campos renderizavam o erro e a dica como `<p>` soltos ao lado do
+ * Os campos renderizavam o erro e a dica como `<p>` soltos ao lado do
  * controle. Visualmente ficam juntos; na árvore de acessibilidade **não havia
  * relação nenhuma**. A pessoa ouvia o nome do campo, digitava, o formulário
  * recusava — e ela nunca ouvia por quê.
@@ -20,16 +21,37 @@ import { Textarea } from "../../components/ui/Textarea";
  *
  * ── Por que `aria-required` não aparece aqui ──────────────────────────
  *
- * O `Input` e o `Textarea` recebem `required` nativo pelo espalhamento das
- * props, e o atributo nativo já informa a árvore de acessibilidade. Repetir com
- * `aria-required` declararia duas vezes a mesma coisa — e as duas podem
- * divergir. O `Selector` não tem controle nativo, e por isso é o único que
- * precisaria; hoje ele não tem prop de obrigatoriedade, então não finge ter.
+ * O `Input`, o `Textarea` e o `Select` recebem `required` nativo pelo
+ * espalhamento das props, e o atributo nativo já informa a árvore de
+ * acessibilidade. Repetir com `aria-required` declararia duas vezes a mesma
+ * coisa — e as duas podem divergir. O `Selector` não tem controle nativo, e por
+ * isso é o único que precisaria; hoje ele não tem prop de obrigatoriedade,
+ * então não finge ter.
+ *
+ * ── O `Select` entrou tarde na tabela, e é o achado ───────────────────
+ *
+ * A tabela nasceu com `Input` e `Textarea`, e o `Selector` ganhou bloco
+ * próprio logo abaixo. O `Select` — o seletor nativo, usado por dezoito
+ * chamadas depois da D9.2, quatorze delas filtros — **nunca entrou**. O
+ * contrato compartilhado existia e um implementador ficava de fora dele: erro e
+ * dica seguiam `<p>` soltos, sem `aria-describedby`, e o campo recusado sem
+ * `aria-invalid`. Nada acusava, porque a única coisa que cobraria era esta
+ * tabela. Uma tabela de contrato que não cobre todos os implementadores dá a
+ * impressão de contrato e não é — por isso o campo novo entra **aqui**, e não
+ * num arquivo só dele.
  */
+
+const OPCOES = [{ value: "a", label: "Aberto" }];
 
 const CAMPOS = [
   ["Input", (p: Record<string, unknown>) => <Input label="Título" {...p} />],
   ["Textarea", (p: Record<string, unknown>) => <Textarea label="Título" {...p} />],
+  [
+    "Select",
+    (p: Record<string, unknown>) => (
+      <Select label="Título" options={OPCOES} {...p} />
+    ),
+  ],
 ] as const;
 
 describe("campos — o erro é ligado ao controle", () => {

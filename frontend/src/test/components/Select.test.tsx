@@ -218,3 +218,61 @@ describe("Select — o id não sai mais do rótulo", () => {
     expect(container.querySelector("select")!.id).toBeTruthy();
   });
 });
+
+// ── Fase 16: o motivo da recusa chegando a quem não o vê ──────────────
+
+/**
+ * O contrato de erro/dica é medido para todos os campos de uma vez na tabela
+ * de `campos-aria.test.tsx` — e o `Select` acabou de entrar nela. O que fica
+ * aqui é o que é **deste** primitivo e a tabela não cobre: a ausência de
+ * apontamento quando não há nada a apontar, e o "erro OU dica, **nunca os
+ * dois**" medido pela contagem de ids.
+ */
+describe("Select — o erro é ligado ao campo", () => {
+  const OPCOES_ARIA = [{ value: "aberto", label: "Aberto" }];
+
+  function montar(props: { error?: string; hint?: string }) {
+    render(<Select label="Situação" options={OPCOES_ARIA} {...props} />);
+    return screen.getByLabelText("Situação");
+  }
+
+  it("sem erro e sem dica, não aponta para nada", () => {
+    expect(montar({})).not.toHaveAttribute("aria-describedby");
+  });
+
+  it("com erro E dica, aponta para UM id só — o do erro", () => {
+    // O "nunca os dois" é deliberado: com erro a dica nem é renderizada, e
+    // apontar para ela seria apontar para um id que não existe. Contar os ids
+    // é o que separa "aponta para o erro" de "aponta para os dois e o erro
+    // vem primeiro".
+    const campo = montar({
+      error: "Escolha uma situação",
+      hint: "Use a lista",
+    });
+    const alvos = campo.getAttribute("aria-describedby")!.split(/\s+/);
+
+    expect(alvos).toHaveLength(1);
+    expect(document.getElementById(alvos[0])).toHaveTextContent(
+      "Escolha uma situação",
+    );
+    expect(screen.queryByText("Use a lista")).not.toBeInTheDocument();
+  });
+
+  it("o id do erro sai do id do campo, e não colide entre dois seletores", () => {
+    // Os `<p>` ganharam id. Dois seletores com o mesmo rótulo e o mesmo erro
+    // na mesma tela não podem gerar o mesmo id de parágrafo — seria a colisão
+    // do `htmlFor` outra vez, um degrau abaixo.
+    render(
+      <>
+        <Select label="Situação" options={OPCOES_ARIA} error="Escolha" />
+        <Select label="Situação" options={OPCOES_ARIA} error="Escolha" />
+      </>,
+    );
+    const [a, b] = screen
+      .getAllByLabelText("Situação")
+      .map((c) => c.getAttribute("aria-describedby"));
+
+    expect(a).toBeTruthy();
+    expect(a).not.toBe(b);
+  });
+});
