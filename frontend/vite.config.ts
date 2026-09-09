@@ -59,6 +59,12 @@ export default defineConfig(({ mode }) => {
           "src/lib/**/*.ts",
           "src/services/**/*.ts",
           "src/contexts/**/*.tsx",
+          // O changelog é o único conteúdo de src/data, e é texto que o
+          // usuário final lê dentro do app. Está aqui porque tem invariante
+          // de verdade a guardar — versão publicada não se reescreve, a
+          // ordem é decrescente, a data existe — e fora do include essas
+          // regras não apareceriam no relatório nem quando quebrassem.
+          "src/data/**/*.ts",
         ],
       },
     },
