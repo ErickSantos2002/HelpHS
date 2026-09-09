@@ -1,4 +1,4 @@
-import { render, screen, waitFor } from "@testing-library/react";
+import { render, screen, waitFor, within } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { describe, expect, it, vi, beforeEach } from "vitest";
 
@@ -36,6 +36,9 @@ vi.mock("../../services/kbService", () => ({
   getKBArticles: vi.fn(),
   deleteKBArticle: vi.fn(),
 }));
+vi.mock("sonner", () => ({
+  toast: { error: vi.fn(), success: vi.fn() },
+}));
 vi.mock("../../services/productService", () => ({
   getProducts: vi.fn(),
 }));
@@ -44,6 +47,20 @@ import { MemoryRouter } from "react-router-dom";
 import KBListPage from "../../pages/kb/KBListPage";
 import * as kbService from "../../services/kbService";
 import * as productService from "../../services/productService";
+import { toast } from "sonner";
+import { CATEGORIAS } from "../../lib/categoria";
+
+/**
+ * Dois dos três filtros da barra viraram `<select>` nativo pela D9.2, e o
+ * `<select>` desenha TODAS as opções na árvore o tempo todo — o painel do
+ * `FilterSelect` só existia enquanto aberto. "Rede" e "Rascunho" passam a
+ * estar em dois lugares: a linha do artigo e a opção do filtro.
+ *
+ * Os casos que falam da LINHA tiram a opção da busca por `ignore`, e não por
+ * `getAllByText(...)[0]` — este continuaria passando com o texto da linha
+ * apagado, que é o que eles existem para reprovar.
+ */
+const FORA_DO_FILTRO = { ignore: "script, style, option" } as const;
 
 const ARTIGO = {
   id: "a1",
@@ -116,36 +133,81 @@ describe("KBListPage", () => {
   it("a categoria do artigo sai do módulo: «Rede», e não «network»", async () => {
     await montar();
 
-    expect(await screen.findByText("Rede")).toBeInTheDocument();
+    expect(await screen.findByText("Rede", FORA_DO_FILTRO)).toBeInTheDocument();
+    // Nem na linha nem dentro do filtro: no `<option>` o valor cru é o
+    // `value`, e nunca o texto.
     expect(screen.queryByText("network")).not.toBeInTheDocument();
   });
 
   it("as opções do filtro de categoria saem do módulo, e não da cópia do JSX", async () => {
-    const user = userEvent.setup();
     await montar();
 
-    await user.click(
-      screen.getByRole("button", { name: "Todas as categorias" }),
-    );
+    const filtro = screen.getByRole("combobox", { name: "Categoria" });
+    const rotulos = within(filtro)
+      .getAllByRole("option")
+      .map((o) => o.textContent);
 
-    // As oito de `CATEGORIAS`, conferidas nas pontas da lista.
-    expect(screen.getByRole("option", { name: /Hardware/ })).toBeInTheDocument();
-    expect(screen.getByRole("option", { name: /Segurança/ })).toBeInTheDocument();
-    expect(screen.getByRole("option", { name: /Outro/ })).toBeInTheDocument();
+    // As oito de `CATEGORIAS`, mais a linha de "todas".
+    expect(rotulos).toContain("Hardware");
+    expect(rotulos).toContain("Segurança");
+    expect(rotulos).toContain("Outro");
+    expect(rotulos).toHaveLength(CATEGORIAS.length + 1);
   });
 
   it("o selo de status diz o rótulo da tabela, e o filtro repete os mesmos três", async () => {
-    const user = userEvent.setup();
     await montar();
 
     // Na linha do artigo.
-    expect(await screen.findByText("Rascunho")).toBeInTheDocument();
+    expect(
+      await screen.findByText("Rascunho", FORA_DO_FILTRO),
+    ).toBeInTheDocument();
 
     // E no filtro, DERIVADO da mesma tabela — não escrito ao lado dela.
-    await user.click(screen.getByRole("button", { name: "Todos os status" }));
-    expect(screen.getByRole("option", { name: /Publicado/ })).toBeInTheDocument();
-    expect(screen.getByRole("option", { name: /Rascunho/ })).toBeInTheDocument();
-    expect(screen.getByRole("option", { name: /Arquivado/ })).toBeInTheDocument();
+    const filtro = screen.getByRole("combobox", { name: "Status do artigo" });
+    const rotulos = within(filtro)
+      .getAllByRole("option")
+      .map((o) => o.textContent);
+    expect(rotulos).toEqual([
+      "Todos os status",
+      "Publicado",
+      "Rascunho",
+      "Arquivado",
+    ]);
+  });
+
+  it("cada um dos três filtros tem nome próprio, e não se anuncia pelo valor", async () => {
+    // O defeito que a D9.2 fecha. O `FilterSelect` não repassava `label`, e
+    // numa barra com TRÊS filtros os três se anunciavam pelo valor escolhido —
+    // "Hardware", "Impressora HS-1", "Publicado" — sem dizer de que filtro
+    // cada um era.
+    //
+    // Os dois curtos são `<select>` nativo e se leem por `combobox`; o de
+    // produto é o `Selector`, cujo nome soma o rótulo ao valor visível, e por
+    // isso é "Produto Todos os produtos" e não só "Produto".
+    await montar();
+
+    expect(screen.getByRole("combobox", { name: "Categoria" })).toBeInTheDocument();
+    expect(
+      screen.getByRole("combobox", { name: "Status do artigo" }),
+    ).toBeInTheDocument();
+    expect(
+      await screen.findByRole("button", { name: "Produto Todos os produtos" }),
+    ).toBeInTheDocument();
+  });
+
+  it("escolher a categoria no filtro pede ao serviço aquela categoria", async () => {
+    await montar();
+
+    await userEvent.selectOptions(
+      screen.getByRole("combobox", { name: "Categoria" }),
+      "network",
+    );
+
+    await waitFor(() =>
+      expect(kbService.getKBArticles).toHaveBeenLastCalledWith(
+        expect.objectContaining({ category: "network" }),
+      ),
+    );
   });
 
   // ── O que cada papel vê ─────────────────────────────────────
@@ -153,10 +215,10 @@ describe("KBListPage", () => {
   it("cliente não vê status, nem filtro de status, nem «Novo artigo»", async () => {
     await montar({ papel: "client" });
 
-    expect(await screen.findByText("Rede")).toBeInTheDocument();
+    expect(await screen.findByText("Rede", FORA_DO_FILTRO)).toBeInTheDocument();
     expect(screen.queryByText("Rascunho")).not.toBeInTheDocument();
     expect(
-      screen.queryByRole("button", { name: "Todos os status" }),
+      screen.queryByRole("combobox", { name: "Status do artigo" }),
     ).not.toBeInTheDocument();
     expect(
       screen.queryByRole("link", { name: /Novo artigo/ }),
@@ -263,8 +325,10 @@ describe("KBListPage", () => {
       screen.getByRole("textbox", { name: "Buscar artigos" }),
       "toner",
     );
-    await user.click(screen.getByRole("button", { name: "Todos os status" }));
-    await user.click(screen.getByRole("option", { name: /Publicado/ }));
+    await user.selectOptions(
+      screen.getByRole("combobox", { name: "Status do artigo" }),
+      "published",
+    );
 
     await waitFor(() =>
       expect(kbService.getKBArticles).toHaveBeenLastCalledWith(
@@ -331,11 +395,16 @@ describe("KBListPage", () => {
       }),
     );
 
-    expect(await screen.findByText("Ação irreversível")).toBeInTheDocument();
+    const dialogo = await screen.findByRole("dialog");
+    // Pela D9.3 o `Alert` de aviso saiu e o "não volta" virou prosa. As duas
+    // afirmações caem NO MESMO parágrafo: a prévia do artigo também escreve o
+    // título, e contar ocorrências na tela deixaria passar uma frase muda.
+    const frase = within(dialogo).getByText(/não pode ser desfeita/);
+    expect(frase).toHaveTextContent("Como trocar o toner");
     // A prévia fala pelos módulos: categoria pelo rótulo, status pela tabela.
-    expect(screen.getByText(/Rede · Rascunho/)).toBeInTheDocument();
+    expect(within(dialogo).getByText(/Rede · Rascunho/)).toBeInTheDocument();
 
-    await user.click(screen.getByRole("button", { name: "Sim, excluir" }));
+    await user.click(within(dialogo).getByRole("button", { name: "Excluir" }));
 
     expect(kbService.deleteKBArticle).toHaveBeenCalledWith("a1");
     await waitFor(() =>
@@ -343,5 +412,77 @@ describe("KBListPage", () => {
         screen.queryByRole("link", { name: "Como trocar o toner" }),
       ).not.toBeInTheDocument(),
     );
+  });
+
+  it("exclusão que FALHA mostra o erro, e não some com a linha", async () => {
+    // O caminho de falha desta tela nunca teve dono: `handleDelete` só tinha
+    // `try/finally`, então uma exclusão recusada fazia o botão parar de girar
+    // e mais nada — nem toast, nem `Alert`, e o artigo seguia na lista sem
+    // explicação. O caso prende as duas metades: o erro APARECE, e a lista
+    // NÃO finge que a exclusão deu certo.
+    const user = userEvent.setup();
+    vi.mocked(kbService.deleteKBArticle).mockRejectedValue({
+      response: { data: { detail: "Artigo vinculado a um chamado." } },
+    });
+    await montar();
+
+    await user.click(
+      await screen.findByRole("button", {
+        name: "Excluir Como trocar o toner",
+      }),
+    );
+    const dialogo = await screen.findByRole("dialog", { name: "Excluir artigo" });
+    await user.click(within(dialogo).getByRole("button", { name: "Excluir" }));
+
+    await waitFor(() =>
+      expect(toast.error).toHaveBeenCalledWith(
+        "Não foi possível excluir o artigo.",
+        { description: "Artigo vinculado a um chamado." },
+      ),
+    );
+    expect(
+      screen.getByRole("link", { name: "Como trocar o toner" }),
+    ).toBeInTheDocument();
+  });
+
+  it("o diálogo se anuncia nomeando o que será excluído", async () => {
+    // O título do `Modal` é o NOME ACESSÍVEL do diálogo: o componente põe
+    // `role="dialog"` com `aria-labelledby` apontando para o `<h2>` do título.
+    // É a primeira coisa que o leitor de tela anuncia — e um título "Excluir"
+    // seco deixaria quem não vê a tela sem saber o quê. O corpo também nomeia,
+    // mas o corpo vem DEPOIS do nome, e só se a pessoa continuar.
+    const user = userEvent.setup();
+    await montar();
+
+    await user.click(
+      await screen.findByRole("button", {
+        name: "Excluir Como trocar o toner",
+      }),
+    );
+
+    expect(
+      await screen.findByRole("dialog", { name: "Excluir artigo" }),
+    ).toBeInTheDocument();
+  });
+
+  it("cancelar fecha o diálogo e o artigo continua na lista", async () => {
+    const user = userEvent.setup();
+    await montar();
+
+    await user.click(
+      await screen.findByRole("button", {
+        name: "Excluir Como trocar o toner",
+      }),
+    );
+    const dialogo = await screen.findByRole("dialog");
+    await user.click(within(dialogo).getByRole("button", { name: "Cancelar" }));
+
+    await waitFor(() =>
+      expect(screen.queryByRole("dialog")).not.toBeInTheDocument(),
+    );
+    expect(kbService.deleteKBArticle).not.toHaveBeenCalled();
+    expect(
+      screen.getByRole("link", { name: "Como trocar o toner" }),
+    ).toBeInTheDocument();
   });
 });

@@ -402,20 +402,14 @@ function TagsSection({
       <Modal
         open={!!deleteTarget}
         onClose={() => setDeleteTarget(null)}
+        size="sm"
         title="Excluir etiqueta"
       >
         <div className="space-y-4">
-          {/* O banner era desenhado à mão — tinta de `red-900/20`, borda de
-              `red-800/40` e o texto em `red-300`/`red-400/80`, quatro degraus
-              da paleta crua que só existem no tema escuro. O `Alert` já é esse
-              bloco, com o par de tinta medido nos dois temas.
-
-              `live={false}` pela E12: o aviso já está na tela quando o modal
-              abre, e região viva anuncia MUDANÇA — anunciá-lo atropelaria o
-              anúncio do próprio diálogo. */}
-          <Alert variant="danger" live={false} title="Ação irreversível">
-            Esta etiqueta será removida de todos os tickets que a utilizam.
-          </Alert>
+          {/* O aviso de "não volta" era um banner à mão em `red-900/20`, virou
+              `Alert variant="danger" live={false}`, e pela D9.3 virou PROSA: a
+              forma de exclusão da frota é modal `sm` com a frase que nomeia o
+              que some, sem bloco com casca em volta. */}
 
           {/* Tag being deleted */}
           {deleteTarget && (
@@ -431,15 +425,18 @@ function TagsSection({
           )}
 
           <p className="text-sm text-conteudo-muted">
-            Tem certeza que deseja excluir <span className="text-conteudo font-medium">"{deleteTarget?.name}"</span>?
+            Tem certeza que deseja excluir{" "}
+            <span className="text-conteudo font-medium">"{deleteTarget?.name}"</span>? A
+            etiqueta será removida de todos os tickets que a utilizam, e esta
+            ação não pode ser desfeita.
           </p>
         </div>
         <ModalFooter>
-          <Button variant="ghost" onClick={() => setDeleteTarget(null)} disabled={deleteLoading}>
+          <Button variant="secondary" onClick={() => setDeleteTarget(null)} disabled={deleteLoading}>
             Cancelar
           </Button>
           <Button variant="danger" onClick={handleDelete} loading={deleteLoading}>
-            Sim, excluir
+            Excluir
           </Button>
         </ModalFooter>
       </Modal>

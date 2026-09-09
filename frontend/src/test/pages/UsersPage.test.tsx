@@ -36,6 +36,18 @@ import type { UserSummary } from "../../services/userService";
  * valor que o backend não conhecia.
  */
 
+/**
+ * Os dois filtros da barra viraram `<select>` nativo pela D9.2, e o `<select>`
+ * desenha TODAS as opções na árvore o tempo todo — o painel do `FilterSelect`
+ * só existia enquanto aberto. "Administrador" e "Inativo" passam a estar em
+ * dois lugares: o selo da linha e a opção do filtro.
+ *
+ * Os casos que falam da LINHA tiram a opção da busca por `ignore`, e não por
+ * `getAllByText(...)[0]` — este continuaria passando com o selo apagado, que é
+ * exatamente o que eles existem para reprovar.
+ */
+const FORA_DO_FILTRO = { ignore: "script, style, option" } as const;
+
 const BASE: Omit<UserSummary, "id" | "name" | "email" | "role" | "status"> = {
   phone: null,
   department: null,
@@ -107,9 +119,13 @@ describe("UsersPage", () => {
     // O que não pode ter mudado é o que sobra para quem não enxerga a cor: a
     // PALAVRA — e que ela seja a palavra do rótulo, e não o valor do backend.
     await montar();
-    expect(await screen.findByText("Administrador")).toBeInTheDocument();
-    expect(screen.getByText("Técnico")).toBeInTheDocument();
-    expect(screen.getByText("Cliente")).toBeInTheDocument();
+    expect(
+      await screen.findByText("Administrador", FORA_DO_FILTRO),
+    ).toBeInTheDocument();
+    expect(screen.getByText("Técnico", FORA_DO_FILTRO)).toBeInTheDocument();
+    expect(screen.getByText("Cliente", FORA_DO_FILTRO)).toBeInTheDocument();
+    // O valor cru do backend não aparece em lugar nenhum — nem na linha, nem
+    // dentro do filtro, onde ele é o `value` e nunca o texto.
     expect(screen.queryByText("admin")).not.toBeInTheDocument();
     expect(screen.queryByText("technician")).not.toBeInTheDocument();
   });
@@ -122,7 +138,9 @@ describe("UsersPage", () => {
     });
     await montar();
 
-    expect(await screen.findByText("Inativo")).toBeInTheDocument();
+    expect(
+      await screen.findByText("Inativo", FORA_DO_FILTRO),
+    ).toBeInTheDocument();
     await user.click(screen.getByRole("button", { name: "Ativo" }));
 
     expect(userService.setUserStatus).toHaveBeenCalledWith("u1", "inactive");
@@ -196,6 +214,34 @@ describe("UsersPage", () => {
     ).not.toBeInTheDocument();
   });
 
+  it("cada filtro tem nome próprio, e não se anuncia pelo valor escolhido", async () => {
+    // O defeito que a D9.2 fecha. O `FilterSelect` não repassava `label`: com
+    // um valor escolhido, os dois filtros desta barra viravam "Técnico" e
+    // "Ativo" para quem usa leitor de tela, sem dizer de que filtro eram — e
+    // "Ativo" é também a palavra do selo de cada linha.
+    await montar();
+
+    expect(screen.getByRole("combobox", { name: "Perfil" })).toBeInTheDocument();
+    expect(
+      screen.getByRole("combobox", { name: "Status da conta" }),
+    ).toBeInTheDocument();
+  });
+
+  it("escolher o perfil no filtro pede ao serviço aquele papel", async () => {
+    await montar();
+
+    await userEvent.selectOptions(
+      screen.getByRole("combobox", { name: "Perfil" }),
+      "technician",
+    );
+
+    await waitFor(() =>
+      expect(userService.getUsers).toHaveBeenLastCalledWith(
+        expect.objectContaining({ role: "technician" }),
+      ),
+    );
+  });
+
   it("o contador do cabeçalho concorda com o número", async () => {
     comUsuarios([ANA], 1);
     const { unmount } = render(<UsersPage />);
@@ -215,20 +261,62 @@ describe("UsersPage", () => {
     await user.click(await screen.findByRole("button", { name: "Excluir Ana Souza" }));
 
     const dialogo = await screen.findByRole("dialog");
-    expect(within(dialogo).getByText("Ação irreversível")).toBeInTheDocument();
+    // Pela D9.3 o aviso deixou de ser bloco com casca e virou prosa. O caso
+    // mede a FRASE — e mede as duas coisas NO MESMO parágrafo, porque é ali
+    // que o nome tem de estar: o cartão de pré-visualização também escreve
+    // "Ana Souza", e um caso que só contasse ocorrências na tela continuaria
+    // passando com a frase sem nome nenhum.
+    const frase = within(dialogo).getByText(/não pode ser desfeita/);
+    expect(frase).toHaveTextContent("Ana Souza");
     // O e-mail é o que desambigua homônimos, e ele vem do cartão de
     // pré-visualização — o bloco que confirma QUEM vai ser apagado.
     expect(within(dialogo).getByText("ana@exemplo.com")).toBeInTheDocument();
     expect(userService.deleteUser).not.toHaveBeenCalled();
 
-    await user.click(
-      within(dialogo).getByRole("button", { name: "Excluir permanentemente" }),
-    );
+    await user.click(within(dialogo).getByRole("button", { name: "Excluir" }));
 
     await waitFor(() => expect(userService.deleteUser).toHaveBeenCalledWith("u1"));
     await waitFor(() =>
       expect(screen.queryByText("ana@exemplo.com")).not.toBeInTheDocument(),
     );
+  });
+
+  it("o diálogo se anuncia nomeando o que será excluído", async () => {
+    // O título do `Modal` é o NOME ACESSÍVEL do diálogo: o componente põe
+    // `role="dialog"` com `aria-labelledby` apontando para o `<h2>` do título.
+    // É a primeira coisa que o leitor de tela anuncia — e um título "Excluir"
+    // seco deixaria quem não vê a tela sem saber o quê. O corpo também nomeia,
+    // mas o corpo vem DEPOIS do nome, e só se a pessoa continuar.
+    const user = userEvent.setup();
+    await montar();
+
+    await user.click(
+      await screen.findByRole("button", { name: "Excluir Ana Souza" }),
+    );
+
+    expect(
+      await screen.findByRole("dialog", { name: "Excluir usuário" }),
+    ).toBeInTheDocument();
+  });
+
+  it("cancelar fecha o diálogo e não exclui ninguém", async () => {
+    // A outra metade da D9.3: o diálogo é a única barreira entre o clique e a
+    // exclusão. Se "Cancelar" chamasse o serviço — ou se o diálogo continuasse
+    // aberto —, a barreira não existe.
+    const user = userEvent.setup();
+    await montar();
+
+    await user.click(
+      await screen.findByRole("button", { name: "Excluir Ana Souza" }),
+    );
+    const dialogo = await screen.findByRole("dialog");
+    await user.click(within(dialogo).getByRole("button", { name: "Cancelar" }));
+
+    await waitFor(() =>
+      expect(screen.queryByRole("dialog")).not.toBeInTheDocument(),
+    );
+    expect(userService.deleteUser).not.toHaveBeenCalled();
+    expect(screen.getByText("ana@exemplo.com")).toBeInTheDocument();
   });
 
   it("editar abre com o usuário já dentro", async () => {
@@ -247,14 +335,12 @@ describe("UsersPage", () => {
     // a opção que ele gerava derrubava a lista com 422 — o FastAPI recusa na
     // validação do Query, antes do handler. Anonimizado é real, mas filtrar
     // por ele não é uso de tela.
-    const user = userEvent.setup();
     await montar();
 
-    await user.click(screen.getByRole("button", { name: "Status" }));
-
-    const opcoes = (await screen.findAllByRole("option")).map((o) => o.textContent);
-    expect(opcoes).toContain("Ativo");
-    expect(opcoes).toContain("Inativo");
-    expect(opcoes).not.toContain("Anonimizado");
+    const filtro = screen.getByRole("combobox", { name: "Status da conta" });
+    const opcoes = within(filtro)
+      .getAllByRole("option")
+      .map((o) => o.textContent);
+    expect(opcoes).toEqual(["Status", "Ativo", "Inativo"]);
   });
 });

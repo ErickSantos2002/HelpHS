@@ -8,7 +8,6 @@ import {
   Badge,
   Button,
   Card,
-  FilterSelect,
   Icon,
   Input,
   Modal,
@@ -398,29 +397,30 @@ function DeleteModal({ user, onClose, onDeleted }: { user: UserSummary; onClose:
   }
 
   return (
-    <Modal open onClose={onClose} title="Excluir usuário">
+    // `md`, e não `sm`, por UM motivo medido: o cartão de prévia põe
+    // Avatar + (nome, e-mail) + Badge em três colunas, e em 384px sobram
+    // ~150px para o bloco de texto. O nome e o e-mail são `truncate`, e o
+    // e-mail é o ÚNICO dado do diálogo que não se repete na frase abaixo —
+    // clipado, some justamente o que desambigua homônimos. As outras telas
+    // ficam em `sm`: nelas o que a prévia clipa a frase repete inteiro.
+    <Modal open onClose={onClose} size="md" title="Excluir usuário">
       <div className="space-y-4">
+        {/* Este `Alert` NÃO é o aviso da D9.3, e por isso fica: ele reporta a
+            falha de uma exclusão JÁ TENTADA. O que saiu foi o painel de aviso
+            desenhado à mão — disco, lixeira e "Ação irreversível" —, que pela
+            D9.3 vira PROSA: modal `sm` com a frase que nomeia quem some. */}
         {error && <Alert variant="danger">{error}</Alert>}
-        {/* O disco por cima do painel repete `bg-tint-danger` de propósito: a
-            tinta tem 15% de alfa, então a segunda camada soma sobre a primeira
-            e dá o degrau mais forte que o `red-100` sobre `red-50` dava — sem
-            modificador de opacidade, que nas tintas multiplicaria em vez de
-            somar. */}
-        <div className="flex gap-3 rounded-xl bg-tint-danger border border-danger/30 p-4">
-          <div className="shrink-0 w-9 h-9 rounded-full bg-tint-danger flex items-center justify-center text-on-tint-danger">
-            <Icon name="trash" size={16} strokeWidth={2} />
-          </div>
-          <div>
-            <p className="text-sm font-semibold text-on-tint-danger">Ação irreversível</p>
-            <p className="text-xs text-on-tint-danger mt-0.5">
-              Só é possível excluir usuários sem tickets. Se houver tickets vinculados, use "Anonimizar".
-            </p>
-          </div>
-        </div>
         <UserPreviewCard user={user} />
         <p className="text-sm text-conteudo-muted">
           Tem certeza que deseja excluir permanentemente{" "}
           <span className="font-medium text-conteudo-heading">{user.name}</span>?
+          Esta ação não pode ser desfeita.
+        </p>
+        {/* Regra de produto, não aviso de severidade: diz QUANDO a exclusão é
+            possível, e qual é a saída quando não é. */}
+        <p className="text-sm text-conteudo-muted">
+          Só é possível excluir usuários sem tickets. Se houver tickets
+          vinculados, use "Anonimizar".
         </p>
       </div>
       <ModalFooter>
@@ -428,7 +428,7 @@ function DeleteModal({ user, onClose, onDeleted }: { user: UserSummary; onClose:
           Cancelar
         </Button>
         <Button variant="danger" onClick={handleDelete} loading={loading}>
-          Excluir permanentemente
+          Excluir
         </Button>
       </ModalFooter>
     </Modal>
@@ -535,17 +535,34 @@ export default function UsersPage() {
           />
         </div>
         <div className="flex flex-wrap gap-2 items-center justify-center sm:justify-start">
-          <FilterSelect
+          {/* D9.2 — três papéis e dois estados, ambos fixos no código: listas
+              curtas e conhecidas, logo `<select>` nativo nos dois.
+
+              O rótulo `sr-only` é o conserto: o `FilterSelect` não repassava
+              `label`, e os dois filtros lado a lado se anunciavam "Perfil" e
+              "Status" só enquanto vazios — escolhido um valor, viravam
+              "Técnico" e "Ativo", sem dizer de que filtro eram. */}
+          <span id="rotulo-filtro-papel" className="sr-only">
+            Perfil
+          </span>
+          <Select
+            id="filtro-papel"
+            aria-labelledby="rotulo-filtro-papel"
             options={OPCOES_DE_PAPEL}
             placeholder="Perfil"
             value={roleFilter}
-            onChange={(v) => { setRoleFilter(v); setPage(1); }}
+            onChange={(e) => { setRoleFilter(e.target.value); setPage(1); }}
           />
-          <FilterSelect
+          <span id="rotulo-filtro-status" className="sr-only">
+            Status da conta
+          </span>
+          <Select
+            id="filtro-status"
+            aria-labelledby="rotulo-filtro-status"
             options={FILTER_STATUS_OPTIONS}
             placeholder="Status"
             value={statusFilter}
-            onChange={(v) => { setStatusFilter(v); setPage(1); }}
+            onChange={(e) => { setStatusFilter(e.target.value); setPage(1); }}
           />
           {hasFilters && (
             <button

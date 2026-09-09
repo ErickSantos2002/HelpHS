@@ -1,4 +1,4 @@
-import { fireEvent, render, screen, waitFor } from "@testing-library/react";
+import { fireEvent, render, screen, waitFor, within } from "@testing-library/react";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
 vi.mock("../../contexts/AuthContext", () => ({
@@ -215,20 +215,65 @@ describe("CalendarPage", () => {
     ).toHaveLength(2);
   });
 
-  it("remover pede confirmação antes de chamar o serviço", async () => {
-    vi.stubGlobal("confirm", vi.fn().mockReturnValue(false));
+  it("remover abre um diálogo que NOMEIA o evento, e não o `confirm()` mudo", async () => {
+    // O `confirm()` nativo saiu pela D9.3. Ele dizia "Remover este evento?" —
+    // a mesma frase para os dois eventos do mês —, então quem clicasse no
+    // botão errado lia uma pergunta que não desmentia o engano.
     await montar();
 
     fireEvent.click(
       screen.getByRole("button", { name: "Remover Feriado municipal" }),
     );
-    expect(calendarService.deleteCalendarEvent).not.toHaveBeenCalled();
 
-    vi.stubGlobal("confirm", vi.fn().mockReturnValue(true));
-    vi.mocked(calendarService.deleteCalendarEvent).mockResolvedValue(undefined);
+    const dialogo = await screen.findByRole("dialog");
+    const frase = within(dialogo).getByText(/não pode ser desfeita/);
+    expect(frase).toHaveTextContent("Feriado municipal");
+    expect(calendarService.deleteCalendarEvent).not.toHaveBeenCalled();
+  });
+
+  it("o diálogo se anuncia nomeando o que será excluído", async () => {
+    // O título do `Modal` é o NOME ACESSÍVEL do diálogo: o componente põe
+    // `role="dialog"` com `aria-labelledby` apontando para o `<h2>` do título.
+    // É a primeira coisa que o leitor de tela anuncia — e um título "Excluir"
+    // seco deixaria quem não vê a tela sem saber o quê. O corpo também nomeia,
+    // mas o corpo vem DEPOIS do nome, e só se a pessoa continuar.
+    await montar();
+
     fireEvent.click(
       screen.getByRole("button", { name: "Remover Feriado municipal" }),
     );
+
+    expect(
+      await screen.findByRole("dialog", { name: "Excluir evento" }),
+    ).toBeInTheDocument();
+  });
+
+  it("cancelar fecha o diálogo e não remove o evento", async () => {
+    await montar();
+
+    fireEvent.click(
+      screen.getByRole("button", { name: "Remover Feriado municipal" }),
+    );
+    const dialogo = await screen.findByRole("dialog");
+    fireEvent.click(within(dialogo).getByRole("button", { name: "Cancelar" }));
+
+    await waitFor(() =>
+      expect(screen.queryByRole("dialog")).not.toBeInTheDocument(),
+    );
+    expect(calendarService.deleteCalendarEvent).not.toHaveBeenCalled();
+    expect(screen.getByTitle("Feriado municipal")).toBeInTheDocument();
+  });
+
+  it("só o «Excluir» do diálogo chama o serviço, e com o evento clicado", async () => {
+    vi.mocked(calendarService.deleteCalendarEvent).mockResolvedValue(undefined);
+    await montar();
+
+    fireEvent.click(
+      screen.getByRole("button", { name: "Remover Feriado municipal" }),
+    );
+    const dialogo = await screen.findByRole("dialog");
+    fireEvent.click(within(dialogo).getByRole("button", { name: "Excluir" }));
+
     await waitFor(() =>
       expect(calendarService.deleteCalendarEvent).toHaveBeenCalledWith("branco"),
     );

@@ -285,17 +285,14 @@ describe("SettingsPage", () => {
     await user.click(screen.getByRole("button", { name: "Excluir Urgente" }));
 
     const dialogo = await screen.findByRole("dialog");
-    expect(within(dialogo).getByText("Ação irreversível")).toBeInTheDocument();
+    // Pela D9.3 o `Alert` de aviso saiu e o "não volta" virou prosa. As duas
+    // afirmações caem NO MESMO parágrafo: a prévia da etiqueta também escreve
+    // "Urgente", e contar ocorrências na tela deixaria passar uma frase que
+    // não nomeia nada.
+    const frase = within(dialogo).getByText(/não pode ser desfeita/);
+    expect(frase).toHaveTextContent("Urgente");
     expect(
-      within(dialogo).getByText(
-        "Esta etiqueta será removida de todos os tickets que a utilizam.",
-      ),
-    ).toBeInTheDocument();
-    expect(
-      within(dialogo).getAllByText(/Urgente/).length,
-    ).toBeGreaterThan(0);
-    expect(
-      within(dialogo).getByRole("button", { name: "Sim, excluir" }),
+      within(dialogo).getByRole("button", { name: "Excluir" }),
     ).toBeInTheDocument();
   });
 
@@ -306,9 +303,7 @@ describe("SettingsPage", () => {
 
     await user.click(screen.getByRole("button", { name: "Excluir Urgente" }));
     const dialogo = await screen.findByRole("dialog");
-    await user.click(
-      within(dialogo).getByRole("button", { name: "Sim, excluir" }),
-    );
+    await user.click(within(dialogo).getByRole("button", { name: "Excluir" }));
 
     await waitFor(() =>
       expect(tagService.deleteTag).toHaveBeenCalledWith("t1"),
@@ -316,5 +311,36 @@ describe("SettingsPage", () => {
     await waitFor(() =>
       expect(screen.queryByText("Urgente")).not.toBeInTheDocument(),
     );
+  });
+
+  it("o diálogo se anuncia nomeando o que será excluído", async () => {
+    // O título do `Modal` é o NOME ACESSÍVEL do diálogo: o componente põe
+    // `role="dialog"` com `aria-labelledby` apontando para o `<h2>` do título.
+    // É a primeira coisa que o leitor de tela anuncia — e um título "Excluir"
+    // seco deixaria quem não vê a tela sem saber o quê. O corpo também nomeia,
+    // mas o corpo vem DEPOIS do nome, e só se a pessoa continuar.
+    const user = userEvent.setup();
+    await montar();
+
+    await user.click(screen.getByRole("button", { name: "Excluir Urgente" }));
+
+    expect(
+      await screen.findByRole("dialog", { name: "Excluir etiqueta" }),
+    ).toBeInTheDocument();
+  });
+
+  it("cancelar fecha o diálogo e a etiqueta continua na lista", async () => {
+    const user = userEvent.setup();
+    await montar();
+
+    await user.click(screen.getByRole("button", { name: "Excluir Urgente" }));
+    const dialogo = await screen.findByRole("dialog");
+    await user.click(within(dialogo).getByRole("button", { name: "Cancelar" }));
+
+    await waitFor(() =>
+      expect(screen.queryByRole("dialog")).not.toBeInTheDocument(),
+    );
+    expect(tagService.deleteTag).not.toHaveBeenCalled();
+    expect(screen.getByText("Urgente")).toBeInTheDocument();
   });
 });

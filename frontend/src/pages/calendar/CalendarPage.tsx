@@ -399,7 +399,7 @@ interface DayDetailProps {
   canEdit: boolean;
   onAdd: () => void;
   onEdit: (event: CalendarEvent) => void;
-  onDelete: (id: string) => void;
+  onDelete: (event: CalendarEvent) => void;
   onClose: () => void;
 }
 
@@ -466,7 +466,7 @@ function DayDetail({ date, events, canEdit, onAdd, onEdit, onDelete, onClose }: 
                     <Icon name="edit" size={12} strokeWidth={2.5} />
                   </button>
                   <button
-                    onClick={() => onDelete(e.id)}
+                    onClick={() => onDelete(e)}
                     title={`Remover ${e.title}`}
                     aria-label={`Remover ${e.title}`}
                     className="flex h-6 w-6 items-center justify-center rounded-md bg-tint-danger text-on-tint-danger hover:bg-danger/25 transition-colors cursor-pointer"
@@ -534,6 +534,8 @@ export default function CalendarPage() {
   const [events, setEvents] = useState<CalendarEvent[]>([]);
   const [loading, setLoading] = useState(true);
   const [dialog, setDialog] = useState<DialogState>({ open: false });
+  const [deleteTarget, setDeleteTarget] = useState<CalendarEvent | null>(null);
+  const [deleting, setDeleting] = useState(false);
 
   const loadEvents = useCallback(async () => {
     setLoading(true);
@@ -565,15 +567,26 @@ export default function CalendarPage() {
     setSelectedDay(today.getDate());
   }
 
-  async function handleDelete(id: string) {
-    if (!confirm("Remover este evento?")) return;
+  // O `confirm()` nativo saiu pela D9.3: ele não nomeia o evento — "Remover
+  // este evento?" servia para qualquer um dos vinte da lista —, não diz que não
+  // volta, e é a única caixa da frota que o tema não alcança.
+  function handleDelete(event: CalendarEvent) {
+    setDeleteTarget(event);
+  }
+
+  async function confirmDelete() {
+    if (!deleteTarget) return;
+    setDeleting(true);
     try {
-      await deleteCalendarEvent(id);
+      await deleteCalendarEvent(deleteTarget.id);
       toast.success("Evento removido.");
+      setDeleteTarget(null);
       loadEvents();
       setSelectedDay(null);
     } catch {
       toast.error("Erro ao remover evento.");
+    } finally {
+      setDeleting(false);
     }
   }
 
@@ -591,6 +604,37 @@ export default function CalendarPage() {
           onClose={() => setDialog({ open: false })}
           onSaved={loadEvents}
         />
+      )}
+
+      {/* Confirmação de exclusão — forma da frota (D9.3). */}
+      {deleteTarget && (
+        <Modal
+          open
+          onClose={() => setDeleteTarget(null)}
+          size="sm"
+          title="Excluir evento"
+        >
+          <p className="text-sm text-conteudo-muted">
+            Tem certeza que deseja excluir{" "}
+            <span className="font-medium text-conteudo">
+              {deleteTarget.title}
+            </span>
+            ? O evento será removido do calendário, e esta ação não pode ser
+            desfeita.
+          </p>
+          <ModalFooter>
+            <Button
+              variant="secondary"
+              onClick={() => setDeleteTarget(null)}
+              disabled={deleting}
+            >
+              Cancelar
+            </Button>
+            <Button variant="danger" onClick={confirmDelete} loading={deleting}>
+              Excluir
+            </Button>
+          </ModalFooter>
+        </Modal>
       )}
 
       {/* Header */}
@@ -793,7 +837,7 @@ export default function CalendarPage() {
                         <Icon name="edit" size={12} strokeWidth={2.5} />
                       </button>
                       <button
-                        onClick={() => handleDelete(e.id)}
+                        onClick={() => handleDelete(e)}
                         title={`Remover ${e.title}`}
                         aria-label={`Remover ${e.title}`}
                         className="flex h-6 w-6 items-center justify-center rounded-md bg-tint-danger text-on-tint-danger hover:bg-danger/25 transition-colors cursor-pointer"

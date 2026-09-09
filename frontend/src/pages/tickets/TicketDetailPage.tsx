@@ -747,6 +747,9 @@ export default function TicketDetailPage() {
   const [ticketNotes, setTicketNotes] = useState<TicketNote[]>([]);
   const [showAddNote, setShowAddNote] = useState(false);
   const [viewNote, setViewNote] = useState<TicketNote | null>(null);
+  const [deleteNoteTarget, setDeleteNoteTarget] = useState<TicketNote | null>(
+    null,
+  );
   const [newNoteContent, setNewNoteContent] = useState("");
   const [noteSaving, setNoteSaving] = useState(false);
   const [noteDeleting, setNoteDeleting] = useState<string | null>(null);
@@ -929,12 +932,15 @@ export default function TicketDetailPage() {
     }
   }
 
-  async function handleDeleteNote(noteId: string) {
-    if (!ticket || !confirm("Deletar esta nota?")) return;
-    setNoteDeleting(noteId);
+  // O `confirm()` nativo saiu pela D9.3. Ele não nomeava a nota — "Deletar esta
+  // nota?" servia para qualquer uma da coluna — e não dizia que não volta.
+  async function handleDeleteNote(note: TicketNote) {
+    if (!ticket) return;
+    setNoteDeleting(note.id);
     try {
-      await deleteTicketNote(ticket.id, noteId);
-      setTicketNotes((p) => p.filter((n) => n.id !== noteId));
+      await deleteTicketNote(ticket.id, note.id);
+      setTicketNotes((p) => p.filter((n) => n.id !== note.id));
+      setDeleteNoteTarget(null);
       toast.success("Nota removida.");
     } catch (err) {
       toastApiError(err, "Não foi possível remover a nota.");
@@ -1648,7 +1654,7 @@ export default function TicketDetailPage() {
                           <button
                             onClick={(e) => {
                               e.stopPropagation();
-                              handleDeleteNote(n.id);
+                              setDeleteNoteTarget(n);
                             }}
                             disabled={noteDeleting === n.id}
                             className="opacity-0 group-hover:opacity-100 p-0.5 rounded text-on-tint-warning hover:text-on-tint-danger transition-all cursor-pointer"
@@ -1726,7 +1732,7 @@ export default function TicketDetailPage() {
                 className="text-on-tint-danger hover:bg-tint-danger"
                 loading={noteDeleting === viewNote.id}
                 onClick={() => {
-                  handleDeleteNote(viewNote.id);
+                  setDeleteNoteTarget(viewNote);
                   setViewNote(null);
                 }}
               >
@@ -1735,6 +1741,40 @@ export default function TicketDetailPage() {
               <Button onClick={() => setViewNote(null)}>Fechar</Button>
             </ModalFooter>
           </div>
+        </Modal>
+      )}
+
+      {/* Confirmação de exclusão da nota — forma da frota (D9.3). */}
+      {deleteNoteTarget && (
+        <Modal
+          open
+          onClose={() => setDeleteNoteTarget(null)}
+          size="sm"
+          title="Excluir nota interna"
+        >
+          <p className="text-sm text-conteudo-muted">
+            Tem certeza que deseja excluir a nota de{" "}
+            <span className="font-medium text-conteudo">
+              {deleteNoteTarget.author_name}
+            </span>
+            ? A nota será removida do chamado, e esta ação não pode ser desfeita.
+          </p>
+          <ModalFooter>
+            <Button
+              variant="secondary"
+              onClick={() => setDeleteNoteTarget(null)}
+              disabled={noteDeleting === deleteNoteTarget.id}
+            >
+              Cancelar
+            </Button>
+            <Button
+              variant="danger"
+              onClick={() => handleDeleteNote(deleteNoteTarget)}
+              loading={noteDeleting === deleteNoteTarget.id}
+            >
+              Excluir
+            </Button>
+          </ModalFooter>
         </Modal>
       )}
 

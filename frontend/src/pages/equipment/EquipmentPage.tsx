@@ -292,16 +292,13 @@ function DeleteModal({ equipment, onClose, onDeleted }: {
   }
 
   return (
-    <Modal open onClose={onClose} title="Excluir equipamento">
+    <Modal open onClose={onClose} size="sm" title="Excluir equipamento">
       <div className="space-y-4">
+        {/* Este `Alert` NÃO é o aviso da D9.3, e por isso fica: ele reporta a
+            falha de uma exclusão JÁ TENTADA — rede, permissão, vínculo. Tirá-lo
+            recriaria o defeito de engolir o erro. O aviso que saiu é o outro: o
+            que avisava ANTES, sobre a ação não voltar, e que agora é prosa. */}
         {error && <Alert variant="danger">{error}</Alert>}
-        {/* `live={false}` pela E12: este aviso já está na tela quando o modal
-            abre. Região viva anuncia MUDANÇA — anunciá-lo aqui atropelaria o
-            anúncio do próprio diálogo, e o `Alert` acima, esse sim, é o que
-            muda. */}
-        <Alert variant="danger" live={false} title="Ação irreversível">
-          Este equipamento será removido permanentemente.
-        </Alert>
         <div className="flex items-center gap-3 rounded-xl border border-borda bg-surface-elevated px-4 py-3">
           <div className="w-9 h-9 rounded-lg bg-surface border border-borda flex items-center justify-center text-conteudo-muted">
             <Icon name="cpu" size={16} strokeWidth={2} />
@@ -312,12 +309,15 @@ function DeleteModal({ equipment, onClose, onDeleted }: {
           </div>
         </div>
         <p className="text-sm text-conteudo-muted">
-          Tem certeza que deseja excluir <span className="font-medium text-conteudo">{equipment.name}</span>?
+          Tem certeza que deseja excluir{" "}
+          <span className="font-medium text-conteudo">{equipment.name}</span>? O
+          equipamento será removido permanentemente, e esta ação não pode ser
+          desfeita.
         </p>
       </div>
       <ModalFooter>
         <Button variant="secondary" onClick={onClose} disabled={loading}>Cancelar</Button>
-        <Button variant="danger" onClick={handleDelete} loading={loading}>Excluir permanentemente</Button>
+        <Button variant="danger" onClick={handleDelete} loading={loading}>Excluir</Button>
       </ModalFooter>
     </Modal>
   );

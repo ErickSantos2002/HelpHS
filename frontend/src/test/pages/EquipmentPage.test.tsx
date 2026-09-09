@@ -190,16 +190,67 @@ describe("EquipmentPage", () => {
     );
 
     const dialogo = await screen.findByRole("dialog");
-    expect(within(dialogo).getByText("Ação irreversível")).toBeInTheDocument();
+    // Pela D9.3 o `Alert` de aviso saiu e o "não volta" virou prosa. As duas
+    // afirmações caem NO MESMO parágrafo de propósito: o cartão de
+    // pré-visualização também escreve "Detector 04", e contar ocorrências na
+    // tela deixaria a frase sem nome passar.
+    const frase = within(dialogo).getByText(/não pode ser desfeita/);
+    expect(frase).toHaveTextContent("Detector 04");
     expect(
-      within(dialogo).getByText("Este equipamento será removido permanentemente."),
+      within(dialogo).getByRole("button", { name: "Excluir" }),
     ).toBeInTheDocument();
+  });
+
+  it("o diálogo se anuncia nomeando o que será excluído", async () => {
+    // O título do `Modal` é o NOME ACESSÍVEL do diálogo: o componente põe
+    // `role="dialog"` com `aria-labelledby` apontando para o `<h2>` do título.
+    // É a primeira coisa que o leitor de tela anuncia — e um título "Excluir"
+    // seco deixaria quem não vê a tela sem saber o quê. O corpo também nomeia,
+    // mas o corpo vem DEPOIS do nome, e só se a pessoa continuar.
+    const user = userEvent.setup();
+    await montar();
+
+    await user.click(
+      screen.getByRole("button", { name: "Excluir Detector 04" }),
+    );
+
     expect(
-      within(dialogo).getAllByText("Detector 04").length,
-    ).toBeGreaterThan(0);
-    expect(
-      within(dialogo).getByRole("button", { name: "Excluir permanentemente" }),
+      await screen.findByRole("dialog", { name: "Excluir equipamento" }),
     ).toBeInTheDocument();
+  });
+
+  it("cancelar fecha o diálogo e não exclui o equipamento", async () => {
+    const user = userEvent.setup();
+    await montar();
+
+    await user.click(
+      screen.getByRole("button", { name: "Excluir Detector 04" }),
+    );
+    const dialogo = await screen.findByRole("dialog");
+    await user.click(within(dialogo).getByRole("button", { name: "Cancelar" }));
+
+    await waitFor(() =>
+      expect(screen.queryByRole("dialog")).not.toBeInTheDocument(),
+    );
+    expect(equipmentService.deleteMyEquipment).not.toHaveBeenCalled();
+  });
+
+  it("confirmar chama o serviço e tira o equipamento da lista", async () => {
+    const user = userEvent.setup();
+    vi.mocked(equipmentService.deleteMyEquipment).mockResolvedValue(
+      undefined as never,
+    );
+    await montar();
+
+    await user.click(
+      screen.getByRole("button", { name: "Excluir Detector 04" }),
+    );
+    const dialogo = await screen.findByRole("dialog");
+    await user.click(within(dialogo).getByRole("button", { name: "Excluir" }));
+
+    await waitFor(() =>
+      expect(equipmentService.deleteMyEquipment).toHaveBeenCalledWith("e1"),
+    );
   });
 
   it("o campo de produto tem nome, e só oferece produto ativo", async () => {

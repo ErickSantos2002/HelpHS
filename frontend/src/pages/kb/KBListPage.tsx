@@ -1,18 +1,19 @@
 import { useEffect, useState } from "react";
 import { Link, useNavigate } from "react-router-dom";
 import {
-  Alert,
   Badge,
   Button,
-  FilterSelect,
   Icon,
   Modal,
   ModalFooter,
   Pagination,
+  Select,
+  Selector,
   Spinner,
 } from "../../components/ui";
 import type { BadgeProps } from "../../components/ui";
 import { CATEGORIAS, rotuloDeCategoria } from "../../lib/categoria";
+import { toastApiError } from "../../lib/toastError";
 import { useAuth } from "../../contexts/AuthContext";
 import {
   deleteKBArticle,
@@ -155,6 +156,14 @@ export default function KBListPage() {
       setArticles((prev) => prev.filter((a) => a.id !== deleteTarget.id));
       setTotal((t) => t - 1);
       setDeleteTarget(null);
+    } catch (err) {
+      // Sem este `catch` a exclusão que falha só fazia o botão parar de
+      // girar: o modal seguia aberto, o artigo seguia na lista e NADA
+      // dizia por quê. A tela sabia mostrar erro — o import de `Alert`
+      // ficou órfão quando o aviso virou prosa, e essa órfã é a prova de
+      // que o caminho de falha nunca teve dono. `toastApiError` mostra o
+      // título da ação e a razão que o servidor devolveu.
+      toastApiError(err, "Não foi possível excluir o artigo.");
     } finally {
       setDeleteLoading(false);
     }
@@ -230,32 +239,58 @@ export default function KBListPage() {
             )}
           </div>
 
-          {/* Category */}
-          <FilterSelect
+          {/* Category — D9.2: oito categorias, de `lib/categoria.ts`, nenhuma
+              vinda da rede. Lista curta e conhecida, logo `<select>` nativo.
+
+              O rótulo é `sr-only` porque a barra não tem espaço para ele: sem
+              rótulo, os três filtros desta barra se anunciavam pelo valor
+              escolhido — "Hardware", "Publicado" — sem dizer de que filtro
+              eram. */}
+          <span id="rotulo-filtro-categoria" className="sr-only">
+            Categoria
+          </span>
+          <Select
+            id="filtro-categoria"
+            aria-labelledby="rotulo-filtro-categoria"
             value={category}
-            onChange={setCategory}
+            onChange={(e) => setCategory(e.target.value)}
             placeholder="Todas as categorias"
             options={OPCOES_DE_CATEGORIA}
           />
 
-          {/* Produto */}
+          {/* Produto — D9.2: lista LONGA. As opções vêm de `getProducts` e
+              crescem com o cadastro, então o controle é o
+              `Selector variant="filter"`, que também traz o rótulo. */}
           {products.length > 0 && (
-            <FilterSelect
+            <Selector
+              variant="filter"
+              label="Produto"
               value={productFilter}
-              onChange={setProductFilter}
+              onChange={(v) => setProductFilter(v ?? "")}
               placeholder="Todos os produtos"
               options={products.map((p) => ({ value: p.id, label: p.name }))}
             />
           )}
 
-          {/* Status (staff only) */}
+          {/* Status (staff only) — D9.2: três estados de publicação, de
+              `STATUS_DO_ARTIGO`. Lista curta e conhecida, logo `<select>`
+              nativo — e o ponto de cor sai com ele, porque o `<option>` não
+              aceita marcador. O selo de cada linha da lista continua pintando
+              pela mesma fonte, então a cor não some da tela. */}
           {isStaff && (
-            <FilterSelect
-              value={statusFilter}
-              onChange={setStatusFilter}
-              placeholder="Todos os status"
-              options={OPCOES_DE_STATUS}
-            />
+            <>
+              <span id="rotulo-filtro-status" className="sr-only">
+                Status do artigo
+              </span>
+              <Select
+                id="filtro-status"
+                aria-labelledby="rotulo-filtro-status"
+                value={statusFilter}
+                onChange={(e) => setStatusFilter(e.target.value)}
+                placeholder="Todos os status"
+                options={OPCOES_DE_STATUS}
+              />
+            </>
           )}
 
           {hasFilters && (
@@ -490,23 +525,16 @@ export default function KBListPage() {
       <Modal
         open={!!deleteTarget}
         onClose={() => setDeleteTarget(null)}
+        size="sm"
         title="Excluir artigo"
       >
         <div className="space-y-4">
           {/*
             O aviso era um bloco à mão em `red-900/20` sobre `red-800/40` com
-            texto `red-300` — sete classes da paleta crua, escritas só para o
-            tema escuro: no claro o fundo vermelho quase preto ficava sobre a
-            superfície branca. Vira `Alert variant="danger"`, que é o par
-            `tint`/`on-tint` medido e inverte sozinho.
-
-            `live={false}` pela E12: este aviso já está na tela quando o modal
-            abre. Região viva anuncia MUDANÇA — anunciá-lo aqui atropelaria o
-            anúncio do próprio diálogo.
+            texto `red-300`, virou `Alert variant="danger" live={false}`, e pela
+            D9.3 virou PROSA: a forma de exclusão da frota é modal `sm` com a
+            frase que nomeia o que some, sem bloco com casca em volta.
           */}
-          <Alert variant="danger" live={false} title="Ação irreversível">
-            Este artigo será removido permanentemente da base de conhecimento.
-          </Alert>
 
           {/* Article preview */}
           {deleteTarget && (
@@ -527,15 +555,17 @@ export default function KBListPage() {
 
           <p className="text-sm text-conteudo-muted">
             Tem certeza que deseja excluir{" "}
-            <span className="text-conteudo-heading font-medium">"{deleteTarget?.title}"</span>?
+            <span className="text-conteudo-heading font-medium">"{deleteTarget?.title}"</span>? O
+            artigo será removido permanentemente da base de conhecimento, e esta
+            ação não pode ser desfeita.
           </p>
         </div>
         <ModalFooter>
-          <Button variant="ghost" onClick={() => setDeleteTarget(null)} disabled={deleteLoading}>
+          <Button variant="secondary" onClick={() => setDeleteTarget(null)} disabled={deleteLoading}>
             Cancelar
           </Button>
           <Button variant="danger" onClick={handleDelete} loading={deleteLoading}>
-            Sim, excluir
+            Excluir
           </Button>
         </ModalFooter>
       </Modal>

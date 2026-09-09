@@ -482,6 +482,7 @@ export function CompanyDetailModal({
   const [showAssign, setShowAssign] = useState(false);
   const [noteClient, setNoteClient] = useState<ClientInCompany | null>(null);
   const [removingId, setRemovingId] = useState<string | null>(null);
+  const [unassignTarget, setUnassignTarget] = useState<ClientInCompany | null>(null);
   const [clientsPage, setClientsPage] = useState(1);
 
   // Company notes
@@ -491,6 +492,7 @@ export function CompanyDetailModal({
   const [newCompanyNoteContent, setNewCompanyNoteContent] = useState("");
   const [companyNoteSaving, setCompanyNoteSaving] = useState(false);
   const [companyNoteDeleting, setCompanyNoteDeleting] = useState<string | null>(null);
+  const [deleteCompanyNoteTarget, setDeleteCompanyNoteTarget] = useState<CompanyNote | null>(null);
   const [activeTab, setActiveTab] = useState<"clients" | "notes">("clients");
 
   // `load` era redefinido a cada render e o efeito dependia só de `company.id`,
@@ -510,12 +512,16 @@ export function CompanyDetailModal({
 
   useEffect(() => { load(); }, [load]);
 
-  const handleUnassign = async (clientId: string) => {
-    if (!confirm("Desvincular este cliente?")) return;
-    setRemovingId(clientId);
+  // O ultimo `confirm()` nativo de `src/pages/**` sai aqui (D9.3). Ele
+  // perguntava "Desvincular este cliente?" — a mesma frase para os cinco
+  // da pagina —, sem dizer qual cliente, de que empresa, nem o que
+  // acontece com ele depois.
+  const handleUnassign = async (client: ClientInCompany) => {
+    setRemovingId(client.id);
     try {
-      await unassignClient(groupId, company.id, clientId);
-      setDetail((p) => p ? { ...p, clients: p.clients.filter((c) => c.id !== clientId), client_count: p.client_count - 1 } : p);
+      await unassignClient(groupId, company.id, client.id);
+      setDetail((p) => p ? { ...p, clients: p.clients.filter((c) => c.id !== client.id), client_count: p.client_count - 1 } : p);
+      setUnassignTarget(null);
       onUpdated();
     } finally { setRemovingId(null); }
   };
@@ -532,13 +538,15 @@ export function CompanyDetailModal({
     } finally { setCompanyNoteSaving(false); }
   };
 
-  const handleDeleteCompanyNote = async (noteId: string) => {
-    if (!confirm("Deletar esta nota?")) return;
-    setCompanyNoteDeleting(noteId);
+  // O `confirm()` nativo saiu pela D9.3: "Deletar esta nota?" servia para
+  // qualquer nota da coluna e não dizia que não volta.
+  const handleDeleteCompanyNote = async (note: CompanyNote) => {
+    setCompanyNoteDeleting(note.id);
     try {
-      await deleteCompanyNote(groupId, company.id, noteId);
-      setCompanyNotes((p) => p.filter((n) => n.id !== noteId));
-      if (viewCompanyNote?.id === noteId) setViewCompanyNote(null);
+      await deleteCompanyNote(groupId, company.id, note.id);
+      setCompanyNotes((p) => p.filter((n) => n.id !== note.id));
+      if (viewCompanyNote?.id === note.id) setViewCompanyNote(null);
+      setDeleteCompanyNoteTarget(null);
       onUpdated();
     } finally { setCompanyNoteDeleting(null); }
   };
@@ -615,7 +623,7 @@ export function CompanyDetailModal({
                             </div>
                             <div className="flex gap-1 ml-2 shrink-0">
                               <button title="Notas" onClick={() => setNoteClient(c)} className="p-1.5 rounded text-conteudo-muted hover:text-on-tint-warning hover:bg-tint-warning transition-colors cursor-pointer"><Icon name="document" size={16} strokeWidth={2} /></button>
-                              <button title="Desvincular" onClick={() => handleUnassign(c.id)} disabled={removingId === c.id} className="p-1.5 rounded text-conteudo-muted hover:text-on-tint-danger hover:bg-tint-danger transition-colors cursor-pointer disabled:opacity-50">
+                              <button title="Desvincular" aria-label={`Desvincular ${c.name}`} onClick={() => setUnassignTarget(c)} disabled={removingId === c.id} className="p-1.5 rounded text-conteudo-muted hover:text-on-tint-danger hover:bg-tint-danger transition-colors cursor-pointer disabled:opacity-50">
                                 {removingId === c.id ? <Spinner size="sm" /> : <Icon name="close" size={16} strokeWidth={2} />}
                               </button>
                             </div>
@@ -673,7 +681,7 @@ export function CompanyDetailModal({
                                 // `aria-hidden`: sem isto o leitor de tela
                                 // anuncia "botão" e mais nada.
                                 aria-label="Deletar nota"
-                                onClick={(e) => { e.stopPropagation(); handleDeleteCompanyNote(n.id); }}
+                                onClick={(e) => { e.stopPropagation(); setDeleteCompanyNoteTarget(n); }}
                                 disabled={companyNoteDeleting === n.id}
                                 className="opacity-0 group-hover:opacity-100 p-0.5 rounded text-on-tint-warning hover:text-on-tint-danger transition-all cursor-pointer"
                               >
@@ -758,13 +766,82 @@ export function CompanyDetailModal({
                 size="sm"
                 className="text-on-tint-danger hover:bg-tint-danger"
                 loading={companyNoteDeleting === viewCompanyNote.id}
-                onClick={() => handleDeleteCompanyNote(viewCompanyNote.id)}
+                onClick={() => { setDeleteCompanyNoteTarget(viewCompanyNote); setViewCompanyNote(null); }}
               >
                 Deletar
               </Button>
               <Button onClick={() => setViewCompanyNote(null)}>Fechar</Button>
             </ModalFooter>
           </div>
+        </Modal>
+      )}
+
+      {/* Desvinculacao — forma da frota (D9.3), com UMA diferenca deliberada:
+          o botao de acao e `primary`, e nao `danger`. Desvincular nao destroi
+          o cliente, tira o vinculo dele com esta empresa; a tinta de perigo
+          afirmaria uma perda que nao acontece. */}
+      {unassignTarget && (
+        <Modal
+          open
+          onClose={() => setUnassignTarget(null)}
+          size="sm"
+          title="Desvincular cliente"
+        >
+          <p className="text-sm text-conteudo-muted">
+            Tem certeza que deseja desvincular{" "}
+            <span className="font-medium text-conteudo">{unassignTarget.name}</span> de{" "}
+            <span className="font-medium text-conteudo">{company.name}</span>? A conta
+            continua cadastrada — ela só deixa de pertencer a esta empresa, e pode
+            ser vinculada de novo depois.
+          </p>
+          <ModalFooter>
+            <Button
+              variant="secondary"
+              onClick={() => setUnassignTarget(null)}
+              disabled={removingId === unassignTarget.id}
+            >
+              Cancelar
+            </Button>
+            <Button
+              variant="primary"
+              onClick={() => handleUnassign(unassignTarget)}
+              loading={removingId === unassignTarget.id}
+            >
+              Desvincular
+            </Button>
+          </ModalFooter>
+        </Modal>
+      )}
+      {/* Confirmação de exclusão da nota da empresa — forma da frota (D9.3). */}
+      {deleteCompanyNoteTarget && (
+        <Modal
+          open
+          onClose={() => setDeleteCompanyNoteTarget(null)}
+          size="sm"
+          title="Excluir nota da empresa"
+        >
+          <p className="text-sm text-conteudo-muted">
+            Tem certeza que deseja excluir a nota de{" "}
+            <span className="font-medium text-conteudo">{deleteCompanyNoteTarget.author_name}</span>
+            ? A nota será removida de {company.name}, e esta ação não pode ser
+            desfeita.
+          </p>
+          <ModalFooter>
+            <Button
+              variant="secondary"
+              onClick={() => setDeleteCompanyNoteTarget(null)}
+              disabled={companyNoteDeleting === deleteCompanyNoteTarget.id}
+            >
+              Cancelar
+            </Button>
+            <Button
+              variant="danger"
+              onClick={() => handleDeleteCompanyNote(deleteCompanyNoteTarget)}
+              loading={companyNoteDeleting === deleteCompanyNoteTarget.id}
+            >
+              Excluir
+            </Button>
+          </ModalFooter>
         </Modal>
       )}
     </>
@@ -777,7 +854,7 @@ function GroupNotesList({ notes, noteDeleting, onView, onDelete, onAdd }: {
   notes: GroupNote[];
   noteDeleting: string | null;
   onView: (n: GroupNote) => void;
-  onDelete: (id: string) => void;
+  onDelete: (note: GroupNote) => void;
   onAdd: () => void;
 }) {
   if (notes.length === 0) return (
@@ -804,7 +881,7 @@ function GroupNotesList({ notes, noteDeleting, onView, onDelete, onAdd }: {
               </span>
               <button
                 aria-label="Deletar nota"
-                onClick={(e) => { e.stopPropagation(); onDelete(n.id); }}
+                onClick={(e) => { e.stopPropagation(); onDelete(n); }}
                 disabled={noteDeleting === n.id}
                 className="opacity-0 group-hover:opacity-100 p-0.5 rounded text-on-tint-warning hover:text-on-tint-danger transition-all cursor-pointer"
               >
@@ -842,6 +919,9 @@ export default function GroupsPage() {
   const [newNoteContent, setNewNoteContent] = useState("");
   const [noteSaving, setNoteSaving] = useState(false);
   const [noteDeleting, setNoteDeleting] = useState<string | null>(null);
+  const [deleteNoteTarget, setDeleteNoteTarget] = useState<GroupNote | null>(null);
+  const [confirmDeleteGroup, setConfirmDeleteGroup] = useState(false);
+  const [deleteCompanyTarget, setDeleteCompanyTarget] = useState<CompanyResponse | null>(null);
 
   const loadGroups = async () => {
     setLoading(true);
@@ -875,35 +955,36 @@ export default function GroupsPage() {
     } finally { setNoteSaving(false); }
   };
 
-  const handleDeleteNote = async (noteId: string) => {
-    if (!selectedGroup || !confirm("Deletar esta nota?")) return;
-    setNoteDeleting(noteId);
+  const handleDeleteNote = async (note: GroupNote) => {
+    if (!selectedGroup) return;
+    setNoteDeleting(note.id);
     try {
-      await deleteGroupNote(selectedGroup.id, noteId);
-      setGroupNotes((p) => p.filter((n) => n.id !== noteId));
-      if (viewNote?.id === noteId) setViewNote(null);
+      await deleteGroupNote(selectedGroup.id, note.id);
+      setGroupNotes((p) => p.filter((n) => n.id !== note.id));
+      if (viewNote?.id === note.id) setViewNote(null);
+      setDeleteNoteTarget(null);
     } finally { setNoteDeleting(null); }
   };
 
   const handleDeleteGroup = async () => {
     if (!selectedGroup) return;
-    if (!confirm(`Deletar o grupo "${selectedGroup.name}"?`)) return;
     try {
       await deleteGroup(selectedGroup.id);
       setGroups((p) => p.filter((g) => g.id !== selectedGroup.id));
       setSelectedGroup(null);
       setGroupDetail(null);
+      setConfirmDeleteGroup(false);
     } catch (err) { toastApiError(err, "Erro ao deletar grupo."); }
   };
 
   const handleDeleteCompany = async (company: CompanyResponse) => {
     if (!selectedGroup) return;
-    if (!confirm(`Deletar a empresa "${company.name}"?`)) return;
     setDeletingCompanyId(company.id);
     try {
       await deleteCompany(selectedGroup.id, company.id);
       setGroupDetail((p) => p ? { ...p, companies: p.companies.filter((c) => c.id !== company.id), company_count: p.company_count - 1 } : p);
       setGroups((p) => p.map((g) => g.id === selectedGroup.id ? { ...g, company_count: g.company_count - 1 } : g));
+      setDeleteCompanyTarget(null);
     } finally { setDeletingCompanyId(null); }
   };
 
@@ -1051,7 +1132,7 @@ export default function GroupsPage() {
               </div>
               <div className="flex gap-2 shrink-0">
                 <Button size="sm" variant="ghost" onClick={() => setShowEditGroup(true)}><Icon name="edit" size={16} strokeWidth={2} />Editar</Button>
-                <Button size="sm" variant="ghost" className="text-on-tint-danger hover:bg-tint-danger" onClick={handleDeleteGroup}><Icon name="trash" size={16} strokeWidth={2} /></Button>
+                <Button size="sm" variant="ghost" className="text-on-tint-danger hover:bg-tint-danger" aria-label={`Excluir grupo ${selectedGroup.name}`} onClick={() => setConfirmDeleteGroup(true)}><Icon name="trash" size={16} strokeWidth={2} /></Button>
               </div>
             </div>
 
@@ -1086,7 +1167,7 @@ export default function GroupsPage() {
                         </button>
                         <div className="flex gap-1 shrink-0">
                           <button onClick={() => setSelectedCompany(c)} title="Ver detalhes" className="p-1.5 rounded text-conteudo-muted hover:text-conteudo-link hover:bg-action-tint transition-colors cursor-pointer"><Icon name="chevronRight" size={16} strokeWidth={2} /></button>
-                          <button onClick={() => handleDeleteCompany(c)} disabled={deletingCompanyId === c.id} title="Deletar" className="p-1.5 rounded text-conteudo-muted hover:text-on-tint-danger hover:bg-tint-danger transition-colors cursor-pointer disabled:opacity-50">
+                          <button onClick={() => setDeleteCompanyTarget(c)} disabled={deletingCompanyId === c.id} title="Deletar" aria-label={`Excluir empresa ${c.name}`} className="p-1.5 rounded text-conteudo-muted hover:text-on-tint-danger hover:bg-tint-danger transition-colors cursor-pointer disabled:opacity-50">
                             {deletingCompanyId === c.id ? <Spinner size="sm" /> : <Icon name="trash" size={16} strokeWidth={2} />}
                           </button>
                         </div>
@@ -1124,7 +1205,7 @@ export default function GroupsPage() {
                   notes={groupNotes}
                   noteDeleting={noteDeleting}
                   onView={setViewNote}
-                  onDelete={handleDeleteNote}
+                  onDelete={setDeleteNoteTarget}
                   onAdd={() => setShowAddNote(true)}
                 />
               </div>
@@ -1154,7 +1235,7 @@ export default function GroupsPage() {
               notes={groupNotes}
               noteDeleting={noteDeleting}
               onView={setViewNote}
-              onDelete={handleDeleteNote}
+              onDelete={setDeleteNoteTarget}
               onAdd={() => setShowAddNote(true)}
             />
           </div>
@@ -1230,13 +1311,88 @@ export default function GroupsPage() {
                 size="sm"
                 className="text-on-tint-danger hover:bg-tint-danger"
                 loading={noteDeleting === viewNote.id}
-                onClick={() => handleDeleteNote(viewNote.id)}
+                onClick={() => { setDeleteNoteTarget(viewNote); setViewNote(null); }}
               >
                 Deletar
               </Button>
               <Button onClick={() => setViewNote(null)}>Fechar</Button>
             </ModalFooter>
           </div>
+        </Modal>
+      )}
+
+      {/* Confirmação de exclusão da nota do grupo — forma da frota (D9.3). */}
+      {deleteNoteTarget && (
+        <Modal open onClose={() => setDeleteNoteTarget(null)} size="sm" title="Excluir nota">
+          <p className="text-sm text-conteudo-muted">
+            Tem certeza que deseja excluir a nota de{" "}
+            <span className="font-medium text-conteudo">{deleteNoteTarget.author_name}</span>
+            ? A nota será removida do grupo, e esta ação não pode ser desfeita.
+          </p>
+          <ModalFooter>
+            <Button
+              variant="secondary"
+              onClick={() => setDeleteNoteTarget(null)}
+              disabled={noteDeleting === deleteNoteTarget.id}
+            >
+              Cancelar
+            </Button>
+            <Button
+              variant="danger"
+              onClick={() => handleDeleteNote(deleteNoteTarget)}
+              loading={noteDeleting === deleteNoteTarget.id}
+            >
+              Excluir
+            </Button>
+          </ModalFooter>
+        </Modal>
+      )}
+
+      {/* Confirmação de exclusão do grupo — forma da frota (D9.3). */}
+      {confirmDeleteGroup && selectedGroup && (
+        <Modal open onClose={() => setConfirmDeleteGroup(false)} size="sm" title="Excluir grupo">
+          <p className="text-sm text-conteudo-muted">
+            Tem certeza que deseja excluir o grupo{" "}
+            <span className="font-medium text-conteudo">{selectedGroup.name}</span>? Ele
+            será removido com as empresas e as notas que carrega, e esta ação não
+            pode ser desfeita.
+          </p>
+          <ModalFooter>
+            <Button variant="secondary" onClick={() => setConfirmDeleteGroup(false)}>
+              Cancelar
+            </Button>
+            <Button variant="danger" onClick={handleDeleteGroup}>
+              Excluir
+            </Button>
+          </ModalFooter>
+        </Modal>
+      )}
+
+      {/* Confirmação de exclusão da empresa — forma da frota (D9.3). */}
+      {deleteCompanyTarget && (
+        <Modal open onClose={() => setDeleteCompanyTarget(null)} size="sm" title="Excluir empresa">
+          <p className="text-sm text-conteudo-muted">
+            Tem certeza que deseja excluir a empresa{" "}
+            <span className="font-medium text-conteudo">{deleteCompanyTarget.name}</span>? Ela
+            será removida do grupo com os clientes vinculados, e esta ação não pode
+            ser desfeita.
+          </p>
+          <ModalFooter>
+            <Button
+              variant="secondary"
+              onClick={() => setDeleteCompanyTarget(null)}
+              disabled={deletingCompanyId === deleteCompanyTarget.id}
+            >
+              Cancelar
+            </Button>
+            <Button
+              variant="danger"
+              onClick={() => handleDeleteCompany(deleteCompanyTarget)}
+              loading={deletingCompanyId === deleteCompanyTarget.id}
+            >
+              Excluir
+            </Button>
+          </ModalFooter>
         </Modal>
       )}
     </div>

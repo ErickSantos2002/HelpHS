@@ -1,4 +1,4 @@
-import { render, screen, waitFor } from "@testing-library/react";
+import { fireEvent, render, screen, waitFor } from "@testing-library/react";
 import { describe, expect, it, vi } from "vitest";
 
 vi.mock("../../components/chat/ChatPanel", () => ({ ChatPanel: () => null }));
@@ -75,10 +75,22 @@ const TICKET = {
   creator_name: "Cliente",
 } as unknown as Awaited<ReturnType<typeof ticketService.getTicket>>;
 
-async function montar() {
+/** Uma nota interna, para os casos do diálogo de exclusão. */
+const NOTA = {
+  id: "n1",
+  ticket_id: "t1",
+  author_id: "u9",
+  author_name: "Bruno Lima",
+  content: "Cliente ligou de novo.",
+  created_at: new Date().toISOString(),
+} as unknown as Awaited<
+  ReturnType<typeof ticketService.listTicketNotes>
+>[number];
+
+async function montar(notas: (typeof NOTA)[] = []) {
   vi.mocked(ticketService.getTicket).mockResolvedValue(TICKET as never);
   vi.mocked(ticketService.getTicketHistory).mockResolvedValue({ items: [] } as never);
-  vi.mocked(ticketService.listTicketNotes).mockResolvedValue([] as never);
+  vi.mocked(ticketService.listTicketNotes).mockResolvedValue(notas as never);
   vi.mocked(attachmentService.getAttachments).mockResolvedValue({ items: [] } as never);
   vi.mocked(surveyService.getTicketSurvey).mockResolvedValue(null as never);
   vi.mocked(userService.getTechnicians).mockResolvedValue([] as never);
@@ -133,5 +145,61 @@ describe("TicketDetailPage", () => {
   it("a categoria sai do módulo, e não da terceira cópia", async () => {
     await montar();
     expect(screen.getAllByText("Hardware").length).toBeGreaterThan(0);
+  });
+
+  /**
+   * O `confirm()` nativo desta tela saiu pela D9.3. Ele perguntava "Deletar
+   * esta nota?" — a mesma frase para todas as notas da coluna —, e o
+   * `confirm()` do jsdom devolve `undefined`: o caminho de exclusão da nota
+   * NUNCA foi exercido por caso nenhum até aqui.
+   *
+   * O caso mede a FRASE do diálogo, e cobra o nome NO MESMO parágrafo — o
+   * autor já está escrito na lista atrás, então contar ocorrências na tela
+   * deixaria passar uma frase que não nomeia nada.
+   */
+  it("o diálogo se anuncia nomeando o que será excluído", async () => {
+    // O título do `Modal` é o NOME ACESSÍVEL do diálogo: o componente põe
+    // `role="dialog"` com `aria-labelledby` apontando para o `<h2>` do título.
+    // É a primeira coisa que o leitor de tela anuncia — e um título "Excluir"
+    // seco deixaria quem não vê a tela sem saber o quê. O corpo também nomeia,
+    // mas o corpo vem DEPOIS do nome, e só se a pessoa continuar.
+    await montar([NOTA]);
+
+    fireEvent.click(await screen.findByText("Cliente ligou de novo."));
+    fireEvent.click(await screen.findByRole("button", { name: "Deletar" }));
+
+    expect(
+      await screen.findByRole("dialog", { name: "Excluir nota interna" }),
+    ).toBeInTheDocument();
+  });
+
+  it("excluir nota interna nomeia a nota, e só apaga ao confirmar", async () => {
+    vi.mocked(ticketService.deleteTicketNote).mockClear();
+    vi.mocked(ticketService.deleteTicketNote).mockResolvedValue(
+      undefined as never,
+    );
+    await montar([NOTA]);
+
+    fireEvent.click(await screen.findByText("Cliente ligou de novo."));
+    fireEvent.click(await screen.findByRole("button", { name: "Deletar" }));
+
+    const frase = await screen.findByText(/não pode ser desfeita/);
+    expect(frase).toHaveTextContent("Bruno Lima");
+    expect(ticketService.deleteTicketNote).not.toHaveBeenCalled();
+
+    fireEvent.click(screen.getByRole("button", { name: "Cancelar" }));
+    await waitFor(() =>
+      expect(screen.queryByText(/não pode ser desfeita/)).not.toBeInTheDocument(),
+    );
+    expect(ticketService.deleteTicketNote).not.toHaveBeenCalled();
+
+    fireEvent.click(await screen.findByText("Cliente ligou de novo."));
+    fireEvent.click(await screen.findByRole("button", { name: "Deletar" }));
+    await screen.findByText(/não pode ser desfeita/);
+    fireEvent.click(screen.getByRole("button", { name: "Excluir" }));
+
+    await waitFor(() =>
+      expect(ticketService.deleteTicketNote).toHaveBeenCalledWith("t1", "n1"),
+    );
   });
 });
