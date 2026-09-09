@@ -92,6 +92,17 @@ export interface SelectorProps {
 
 const LARGURA_MIN = 160;
 
+/**
+ * Tira acento e caixa para comparar. Em portugues isto nao e refinamento:
+ * sem ele, quem digita `tecnico` nao acha `Técnico`, e a busca parece
+ * quebrada exatamente para quem digita rapido.
+ */
+function achatar(s: string): string {
+  return s
+    .normalize("NFD")
+    .replace(/\p{Diacritic}/gu, "")
+    .toLowerCase();
+}
 export function Selector({
   value,
   onChange,
@@ -165,7 +176,27 @@ export function Selector({
   // `""` e `null` são a mesma coisa aqui: o `FilterSelect` limpava com string
   // vazia e o `SearchSelect` com `null`.
   const vazio = value === null || value === undefined || value === "";
-  const lista = searchable ? achados : (options ?? []);
+  // ── De onde vem a lista, e sao TRES casos, nao dois ─────────────────
+  //
+  // `searchable` com `onSearch` busca no servidor. `searchable` SEM
+  // `onSearch` peneira as proprias `options` aqui — e este terceiro caso
+  // faltava: sem ele, `searchable` sozinho devolvia lista vazia enquanto o
+  // termo estivesse em branco, ou seja, **abrir o filtro nao mostrava nada**.
+  //
+  // Foi o que impediu a D9.2 de fechar: os tres filtros longos ficaram com
+  // `variant="filter"` e sem busca, porque liga-la teria trocado "abre e ve
+  // os tecnicos" por "abre e nao ve nada ate digitar".
+  //
+  // Termo em branco devolve a lista INTEIRA, de proposito: a busca peneira o
+  // que ja estava visivel, nao substitui a navegacao por ele.
+  const peneiraLocal = searchable && !onSearch;
+  const lista = useMemo(() => {
+    if (!searchable) return options ?? [];
+    if (!peneiraLocal) return achados;
+    const alvo = achatar(termo.trim());
+    const todas = options ?? [];
+    return alvo ? todas.filter((o) => achatar(o.label).includes(alvo)) : todas;
+  }, [searchable, peneiraLocal, achados, options, termo]);
   const escolhida = (options ?? []).find((o) => o.value === value) ?? null;
 
   // A linha que limpa a escolha ocupa o índice 0; as opções vêm depois.

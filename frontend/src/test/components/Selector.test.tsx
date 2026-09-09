@@ -1,4 +1,4 @@
-import { render, screen } from "@testing-library/react";
+import { fireEvent, render, screen } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { describe, expect, it, vi } from "vitest";
 import { Selector } from "../../components/ui/Selector";
@@ -297,5 +297,79 @@ describe("Selector — o nome acessível do gatilho", () => {
     render(<Selector value="open" onChange={vi.fn()} options={OPCOES} />);
 
     expect(screen.getAllByRole("button")[0]).not.toHaveAttribute("aria-labelledby");
+  });
+});
+
+describe("Selector — a peneira local", () => {
+  const TECNICOS = [
+    { value: "1", label: "Ana Silva" },
+    { value: "2", label: "Técnico Noturno" },
+    { value: "3", label: "Bruno Costa" },
+  ];
+
+  function abrir(props = {}) {
+    render(
+      <Selector
+        label="Técnico"
+        variant="filter"
+        searchable
+        options={TECNICOS}
+        value={null}
+        onChange={() => {}}
+        {...props}
+      />,
+    );
+    fireEvent.click(screen.getByRole("button"));
+  }
+
+  it("termo em branco mostra a lista INTEIRA", () => {
+    // A regressão que impediu a D9.2 de fechar: `searchable` sem `onSearch`
+    // devolvia lista vazia enquanto nada fosse digitado, então abrir o filtro
+    // não mostrava nada. A busca peneira o que já estava visível — ela não
+    // substitui a navegação por ele.
+    abrir();
+    for (const t of TECNICOS) {
+      expect(screen.getByRole("option", { name: t.label })).toBeInTheDocument();
+    }
+  });
+
+  it("peneira pelo termo, e ACHA SEM ACENTO", () => {
+    // Em português isto não é refinamento: sem achatar, quem digita `tecnico`
+    // não acha `Técnico`, e a busca parece quebrada justamente para quem
+    // digita rápido.
+    abrir();
+    fireEvent.change(screen.getByRole("combobox"), {
+      target: { value: "tecnico" },
+    });
+    expect(screen.getByRole("option", { name: "Técnico Noturno" })).toBeInTheDocument();
+    expect(screen.queryByRole("option", { name: "Ana Silva" })).not.toBeInTheDocument();
+  });
+
+  it("termo sem resultado esvazia — e não devolve a lista toda", () => {
+    // O recuo errado seria "não achei nada, então mostro tudo": quem digitou
+    // leria a lista inteira como se fosse o resultado da busca.
+    abrir();
+    fireEvent.change(screen.getByRole("combobox"), {
+      target: { value: "zzz" },
+    });
+    expect(screen.queryByRole("option", { name: "Ana Silva" })).not.toBeInTheDocument();
+  });
+
+  it("com `onSearch`, quem manda é o servidor — a peneira local NÃO entra", async () => {
+    // Os dois modos convivem, e confundi-los faria a lista local esconder o
+    // que o servidor acabou de devolver.
+    const onSearch = vi.fn().mockResolvedValue([
+      { value: "9", label: "Resposta do servidor" },
+    ]);
+    abrir({ onSearch });
+    fireEvent.change(screen.getByRole("combobox"), {
+      target: { value: "ana" },
+    });
+    // A assercao tem de ser POSITIVA sobre o servidor. A negativa sobre a
+    // lista local passava de graca: durante a busca o painel mostra carregando
+    // e nao renderiza opcao nenhuma, entao "Ana Silva nao esta na tela" era
+    // verdade sem que a peneira tivesse sido consultada.
+    expect(await screen.findByRole("option", { name: "Resposta do servidor" })).toBeInTheDocument();
+    expect(screen.queryByRole("option", { name: "Ana Silva" })).not.toBeInTheDocument();
   });
 });
