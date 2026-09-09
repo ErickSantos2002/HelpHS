@@ -80,6 +80,8 @@ export type { PaginationProps } from "./Pagination";
 export { TicketFilters, EMPTY_FILTERS } from "./TicketFilters";
 export type { TicketFilterState, TicketFiltersProps } from "./TicketFilters";
 
+export { Tooltip } from "./Tooltip";
+export type { TooltipProps } from "./Tooltip";
 export { Tabs, TabsList, TabsTrigger, TabsContent } from "./Tabs";
 export type { TabsProps, TabsTriggerProps, TabsContentProps } from "./Tabs";
 
