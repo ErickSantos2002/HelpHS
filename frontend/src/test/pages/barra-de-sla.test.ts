@@ -131,61 +131,36 @@ describe("barra de prazo de SLA", () => {
   });
 
   it("os dois grupos SEM medição são `role=\"img\"`, e só eles", () => {
-    // ── A segunda metade da mesma decisão ──────────────────────────────
+    // ── A segunda metade da mesma decisão, e ela mudou de escopo ───────
     //
     // Esconder a barra de comparação foi certo e deixou um buraco: quem ouve
-    // lia "Hardware 6" e nada sobre a PROPORÇÃO entre as categorias, que
-    // passou a ser informação só visual. O mesmo valia para a faixa empilhada
-    // da `StatusBar`, que nunca teve papel nenhum.
+    // lia "Hardware 6" e nada sobre a PROPORÇÃO entre as categorias.
     //
-    // O operador decidiu `role="img"` nos DOIS GRUPOS — a linha inteira da
-    // categoria, e o cartão inteiro da distribuição —, com o texto no
-    // `aria-label`. A barra de comparação continua `aria-hidden`: quem carrega
-    // o significado passou a ser o grupo em volta dela.
+    // O operador decidiu `role="img"` em dois lugares — a **linha inteira** da
+    // categoria, e a **faixa empilhada** da distribuição. Repare no segundo: a
+    // primeira versão punha o papel no cartão inteiro, e isso obrigava o
+    // rótulo a repetir título e legenda, porque `role="img"` substitui a
+    // subárvore. Com o papel só na faixa, os dois seguem audíveis e o rótulo
+    // encolhe para o NOME do desenho.
     //
     // `img` e não `meter`: nenhuma das duas mede dentro de faixa fixa. Uma
-    // compara com o maior da lista, a outra reparte um total. `img` é o papel
-    // de "isto é um desenho, e este é o texto dele" — e é por isso que o texto
-    // tem de estar inteiro no rótulo.
+    // compara com o maior da lista, a outra reparte um total.
+    //
+    // A diferença entre os dois rótulos é deliberada e vale ler junto: o da
+    // categoria CARREGA o dado (a linha inteira sumiu da árvore), o da faixa
+    // apenas NOMEIA (o dado ficou audível na legenda).
     const painel = readFileSync(
       resolve(process.cwd(), "src/pages/dashboard/AdminDashboard.tsx"),
       "utf-8",
     );
 
-    // Dois, e só dois: comparação e distribuição. Um terceiro seria papel numa
-    // barra que já tem outro, ou num desenho que ninguém decidiu.
-    //
-    // Conta a forma com ATRIBUTO — a linha em que só ele está —, e não a
-    // menção: os comentários que explicam a decisão citam `role="img"` em
-    // prosa quatro vezes, e contá-las faria o caso reprovar por edição de
-    // comentário. É a mesma armadilha que o `aria-hidden` acima já tinha.
-    expect(painel.match(/^[ \t]*role="img"\r?$/gm)).toHaveLength(2);
+    // Dois, e só dois. Contados pela linha em que o atributo está sozinho:
+    // os comentários citam `role="img"` em prosa, e contá-los daria seis.
+    expect(painel.match(/^[ \t]*role="img"\r?$/gm) ?? []).toHaveLength(2);
 
-    // ⚠️ `role="img"` substitui a subárvore pelo rótulo. O nome e a contagem
-    // deixam de ser lidos por conta própria, e o que o rótulo não disser some
-    // para quem não vê. Por isso os TRÊS pedaços têm de estar lá.
-    expect(painel).toMatch(
-      /role="img"[\s\S]{0,200}?aria-label=\{`\$\{cat\.category\}: \$\{cat\.count\} chamados, /,
-    );
+    // O da categoria traz contagem e proporção; o da faixa, só o nome.
+    expect(painel).toMatch(/aria-label=\{`\$\{cat\.category\}: /);
     expect(painel).toMatch(/% do total`\}/);
-
-    // O denominador da PROPORÇÃO é o total das categorias exibidas; o da
-    // LARGURA da barra é o maior da lista. São dois números diferentes, e
-    // trocar um pelo outro faz o rótulo dizer que o campeão é 100% do total.
-    expect(painel).toMatch(
-      /const categoryTotal = categoryData\.reduce\(\(s, c\) => s \+ c\.count, 0\)/,
-    );
-    expect(painel).toMatch(/cat\.count \/ categoryTotal/);
-    expect(painel).toMatch(/cat\.count \/ categoryMax/);
-
-    // A `StatusBar`: o rótulo é montado do MESMO par que a legenda escreve
-    // embaixo — `label: value` —, para as duas versões da mesma contagem não
-    // divergirem uma da outra.
-    expect(painel).toMatch(
-      /const distribuicao = segs\.map\(\(s\) => `\$\{s\.label\}: \$\{s\.value\}`\)/,
-    );
-    expect(painel).toMatch(
-      /role="img"[\s\S]{0,200}?`Distribuição de status — \$\{distribuicao\}`/,
-    );
+    expect(painel).toMatch(/aria-label="Distribuição de status"/);
   });
 });

@@ -129,32 +129,30 @@ function StatusBar({ t }: { t: DashboardStats["tickets"] }) {
     }))
     .filter((s) => s.value > 0);
 
-  // O grupo inteiro é `role="img"`, e a distribuição vai escrita no rótulo.
+  // O `role="img"` fica SÓ NA FAIXA, e não no cartão. Decisão do operador,
+  // e ela troca o que o rótulo precisa dizer.
   //
-  // A faixa empilhada é a única portadora da PROPORÇÃO entre os blocos —
-  // largura, e nada mais. Sem papel nenhum ela some para quem não vê, e com
-  // `aria-hidden` sumiria de propósito. `img` é o papel de "isto é um desenho,
-  // e este é o texto dele".
+  // A primeira versão punha o papel no cartão inteiro. Isso funcionava, e
+  // custava caro: `role="img"` **substitui a subárvore pelo rótulo**, então o
+  // título e a legenda deixavam de ser lidos por conta própria, e o rótulo
+  // tinha de repetir os dois — duas versões da mesma contagem, mantidas à mão.
   //
-  // O rótulo repete a legenda de baixo PALAVRA POR PALAVRA (`Aberto: 3`),
-  // porque `role="img"` substitui a subárvore inteira: o título e a legenda
-  // deixam de ser lidos, e o que o rótulo não disser deixa de existir para
-  // quem ouve. Dizer o mesmo de outro jeito criaria duas versões da mesma
-  // contagem.
-  const distribuicao = segs.map((s) => `${s.label}: ${s.value}`).join(", ");
+  // Com o papel só na faixa, o título e a legenda continuam audíveis onde
+  // estão, e a faixa passa a ser o que ela de fato é: **um desenho, com nome**.
+  // Quem ouve recebe o título, depois "gráfico, Distribuição de status", e
+  // depois a legenda com nome e valor de cada bloco — sem repetição.
+  //
+  // O rótulo encolheu para o NOME do gráfico justamente por isso. Repetir a
+  // distribuição aqui faria a mesma contagem ser dita duas vezes seguidas.
 
   return (
-    <div
-      role="img"
-      aria-label={
-        distribuicao
-          ? `Distribuição de status — ${distribuicao}`
-          : "Distribuição de status"
-      }
-      className="rounded-xl bg-surface border border-borda p-5"
-    >
+    <div className="rounded-xl bg-surface border border-borda p-5">
       <p className="text-xs font-semibold uppercase tracking-wider text-conteudo-muted mb-3">Distribuição de status</p>
-      <div className="flex h-3 rounded-full overflow-hidden gap-px">
+      <div
+        role="img"
+        aria-label="Distribuição de status"
+        className="flex h-3 rounded-full overflow-hidden gap-px"
+      >
         {segs.map((s) => (
           <div
             key={s.label}
@@ -565,6 +563,14 @@ export default function AdminDashboard() {
                 // categorias, que passou a ser informação só visual. `img` é o
                 // papel de "isto é um desenho, e este é o texto dele".
                 //
+                // ⚠️ As proporções são `Math.round` independentes, e entre as oito
+                // categorias elas podem somar 99% ou 101%. **Fica assim, por
+                // decisão do operador.** Arredondar por maior resto faria os
+                // números fecharem em 100 e passariam a divergir do DESENHO — a
+                // largura de cada barra é a proporção real, sem correção. Um
+                // número lido que não bate com a barra ao lado é pior que uma
+                // soma que não fecha.
+                //
                 // ⚠️ `role="img"` substitui a subárvore pelo rótulo: o nome e a
                 // contagem em texto deixam de ser lidos por conta própria. Por
                 // isso o `aria-label` repete os DOIS — omitir qualquer um
@@ -577,9 +583,9 @@ export default function AdminDashboard() {
                 <div
                   key={cat.category}
                   role="img"
-                  aria-label={`${cat.category}: ${cat.count} chamados, ${Math.round(
-                    (cat.count / categoryTotal) * 100,
-                  )}% do total`}
+                  aria-label={`${cat.category}: ${cat.count} ${
+                    cat.count === 1 ? "chamado" : "chamados"
+                  }, ${Math.round((cat.count / categoryTotal) * 100)}% do total`}
                 >
                   <div className="flex items-center justify-between mb-1">
                     <span className="text-xs text-conteudo-muted truncate max-w-[70%]">{cat.category}</span>

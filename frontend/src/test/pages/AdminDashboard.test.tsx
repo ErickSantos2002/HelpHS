@@ -454,49 +454,50 @@ describe("AdminDashboard — ícones e nome acessível", () => {
     expect(bloco.querySelectorAll('[aria-hidden="true"]')).toHaveLength(3);
   });
 
-  it("a faixa de distribuição é um role=img, e o rótulo repete a legenda", async () => {
-    // Palavra por palavra: o rótulo diz de cada bloco exatamente o que a
-    // legenda escreve embaixo do desenho (`Aberto: 3`), na mesma ordem. Se as
-    // duas versões da mesma contagem divergissem, o desenho e o texto estariam
-    // contando histórias diferentes — e só uma delas seria lida.
+  it("a faixa é um role=img com NOME, e o título e a legenda seguem audíveis", async () => {
+    // A decisão do operador trocou o escopo do papel, e com ele o que o caso
+    // tem de afirmar.
+    //
+    // Antes o `role="img"` estava no cartão inteiro, e por isso o rótulo
+    // precisava repetir a legenda palavra por palavra: `role="img"` substitui
+    // a subárvore, e o que o rótulo não dissesse deixava de existir para quem
+    // ouve. Eram duas versões da mesma contagem, mantidas à mão.
+    //
+    // Agora o papel está SÓ NA FAIXA. O título e a legenda continuam audíveis
+    // onde estão, e a faixa é o que ela é: um desenho, com nome. Este caso
+    // afirma as duas metades — e a segunda é a que a decisão comprou.
     await montar();
 
-    const faixa = screen.getByRole("img", {
-      name:
-        "Distribuição de status — Aberto: 3, Em andamento: 2, Aguardando: 1, " +
-        "Resolvido: 4, Fechado: 5, Cancelado: 1",
-    });
+    // 1. A faixa tem papel e nome, e o nome NÃO repete a contagem.
+    const faixa = screen.getByRole("img", { name: "Distribuição de status" });
+    expect(faixa).toBeInTheDocument();
+    expect(faixa.getAttribute("aria-label")).not.toMatch(/\d/);
 
-    // E a concordância não é conferida contra uma constante escrita aqui: os
-    // seis pares são LIDOS da legenda no DOM e remontados. Mudar o formato de
-    // um dos dois lados — "Aberto: 3" virar "Aberto (3)" na legenda, ou o
-    // rótulo passar a dizer "3 Aberto" — reprova, que é o ponto.
-    const pares = [
-      "Aberto",
-      "Em andamento",
-      "Aguardando",
-      "Resolvido",
-      "Fechado",
-      "Cancelado",
-    ].map((nome) =>
-      within(faixa)
-        .getByText(new RegExp(`^${nome}:`))
-        .textContent!.replace(/\s+/g, " ")
-        .trim(),
-    );
-
-    expect(pares).toEqual([
+    // 2. A legenda continua alcançável FORA da faixa — é isto que se perdia
+    //    com o papel no cartão. Se alguém devolver o `role` para o cartão,
+    //    estes seis somem da árvore e o caso reprova.
+    for (const par of [
       "Aberto: 3",
       "Em andamento: 2",
       "Aguardando: 1",
       "Resolvido: 4",
       "Fechado: 5",
       "Cancelado: 1",
-    ]);
-    expect(faixa).toHaveAttribute(
-      "aria-label",
-      `Distribuição de status — ${pares.join(", ")}`,
-    );
+    ]) {
+      // O par está partido em dois elementos — `Aberto: ` num `<span>` e o
+      // número em outro, aninhado. Um matcher que exigisse folha não acha
+      // nenhum; um que não exigisse nada acharia também o cartão inteiro. O
+      // recorte é o elemento cujo texto é EXATAMENTE o par: o `<span>` de fora.
+      const achados = screen.getAllByText(
+        (_, el) => el?.textContent?.replace(/\s+/g, " ").trim() === par,
+      );
+      const legenda = achados[achados.length - 1];
+      expect(legenda).toBeInTheDocument();
+      expect(faixa.contains(legenda)).toBe(false);
+    }
+
+    // 3. E o título também, pelo mesmo motivo.
+    expect(screen.getByText("Distribuição de status", { selector: "p" })).toBeInTheDocument();
   });
 
   it("a conformidade de SLA rotula a prioridade em português — na tela e no nome da barra", async () => {
@@ -523,5 +524,35 @@ describe("AdminDashboard — ícones e nome acessível", () => {
     expect(
       screen.getByRole("meter", { name: "Conformidade de SLA — Baixa" }),
     ).toHaveAttribute("aria-valuenow", "95");
+  });
+  it("com UM chamado o rótulo fala no singular", async () => {
+    // A mutação que tirava o singular sobreviveu à primeira rodada, e o
+    // culpado era o DADO: nenhuma categoria dos mocks tinha contagem 1, então
+    // "chamados" fixo dava o mesmo resultado em todas.
+    //
+    // O plural fixo lê "1 chamados", e é o tipo de erro que passa despercebido
+    // por quem vê a tela — o rótulo não é desenhado, só falado.
+    vi.mocked(dashboardService.getDashboardStats).mockResolvedValue(STATS as never);
+    vi.mocked(reportService.getReports).mockResolvedValue({
+      ...REPORT,
+      tickets_by_category: [
+        { category: "Hardware", count: 3 },
+        { category: "Rede", count: 1 },
+      ],
+    } as never);
+    vi.mocked(reportService.getTechnicianListReport).mockResolvedValue(TECH_LIST as never);
+
+    render(
+      <MemoryRouter>
+        <AdminDashboard />
+      </MemoryRouter>,
+    );
+    await waitFor(() => expect(screen.getByText("Dashboard")).toBeInTheDocument());
+
+    const bloco = blocoDe("Chamados por Categoria");
+    // Singular no de um, plural no de três — os dois no mesmo caso, senão
+    // trocar o ternário por "chamado" fixo passaria igual.
+    expect(within(bloco).getByRole("img", { name: "Rede: 1 chamado, 25% do total" })).toBeInTheDocument();
+    expect(within(bloco).getByRole("img", { name: "Hardware: 3 chamados, 75% do total" })).toBeInTheDocument();
   });
 });
