@@ -16,12 +16,17 @@ em texto aberto, e este repositório é público. Nenhum .txt de manual é
 copiado, movido ou gravado para dentro da árvore — nem temporariamente. O
 relatório sai por stdout pelo mesmo motivo.
 
+EMBEDDING
+---------
+Os vetores vêm do SERVIÇO de embedding, por HTTP — este script não carrega
+modelo nenhum. Sem o serviço de pé, ele NÃO grava: trecho com embedding nulo
+entraria no banco e ficaria invisível para a busca (que filtra
+`embedding IS NOT NULL`), e o hash marcaria o arquivo como já ingerido, então a
+próxima execução diria "inalterado, nada a fazer". Um documento presente,
+contado e inútil é pior do que documento nenhum.
+
 O QUE ESTE SCRIPT NÃO FAZ
 -------------------------
-Não calcula embedding. A coluna nasce nula de propósito: recortar é barato e
-determinístico, embutir custa e depende do modelo local. Separadas, trocar de
-modelo é re-embutir o que já está recortado, sem reler arquivo nenhum.
-
 Não resolve contradição. Ele lista o que achou e para — busca vetorial traz os
 dois trechos contraditórios e o modelo escolhe um ou mistura, e a Helô responde
 COM A FONTE CITADA, que é pior do que errar sem fonte porque parece conferível.
@@ -74,6 +79,7 @@ from app.models.models import (  # noqa: E402
     Product,
     helo_chunk_products,
 )
+from app.services.helo_embedding import embute  # noqa: E402
 
 # ── O corpus, declarado ───────────────────────────────────────
 
@@ -158,6 +164,17 @@ def chave(texto: str) -> str:
 
 class CorpusInconsistenteError(RuntimeError):
     """O mapa entre arquivo e produto não fecha. Não há palpite bom aqui."""
+
+
+class ServicoDeEmbeddingIndisponivelError(RuntimeError):
+    """Sem vetor não se grava. Trecho sem embedding é invisível para a busca."""
+
+
+# Bem maior que os 10 s do chat. Aqui são 74 trechos em lotes de 4, e cada
+# lote de trechos longos leva segundos: medido, um trecho de 459 tokens custa
+# 5,8 s com um núcleo. O que é impaciência no chat é pressa desnecessária num
+# script que roda à mão.
+_ESPERA_DA_INGESTAO = 300.0
 
 
 def casa_produtos(fonte: Fonte, produtos: dict[str, uuid.UUID]) -> list[uuid.UUID]:
@@ -889,7 +906,23 @@ async def aplica(plano: list[Passo]) -> list[str]:
                 avisos.append(f"  + {doc.fonte.arquivo}: {len(doc.trechos)} trechos novos")
             await s.flush()
 
-            for t in doc.trechos:
+            # Embutir ANTES de gravar o documento, e parar tudo se falhar.
+            #
+            # Gravar trecho com embedding nulo parece inofensivo e não é: a
+            # busca filtra `embedding IS NOT NULL`, então o documento entraria
+            # no banco e ficaria invisível para a Helô — presente, contado,
+            # inútil. E o hash marcaria o arquivo como já ingerido, então a
+            # próxima execução diria "inalterado, nada a fazer".
+            vetores = await embute([t.conteudo for t in doc.trechos], timeout=_ESPERA_DA_INGESTAO)
+            if vetores is None:
+                raise ServicoDeEmbeddingIndisponivelError(
+                    f"{doc.fonte.arquivo}: o serviço de embedding não respondeu. Nada foi "
+                    "gravado — trecho sem vetor entra no banco e fica invisível para a busca, "
+                    "e o hash marcaria o arquivo como ingerido. Confira "
+                    "HELO_EMBEDDING_URL e o /health do serviço."
+                )
+
+            for t, vetor in zip(doc.trechos, vetores, strict=True):
                 chunk = HeloChunk(
                     id=uuid.uuid4(),
                     document_id=alvo.id,
@@ -897,6 +930,7 @@ async def aplica(plano: list[Passo]) -> list[str]:
                     ordem=t.ordem,
                     conteudo=t.conteudo,
                     exige_credencial_admin=t.exige_credencial,
+                    embedding=vetor,
                 )
                 s.add(chunk)
                 await s.flush()
@@ -1072,8 +1106,15 @@ def main() -> int:
     print("=" * 72)
     print("GRAVANDO")
     print("=" * 72)
-    for linha in asyncio.run(aplica(plano)):
-        print(linha)
+    try:
+        for linha in asyncio.run(aplica(plano)):
+            print(linha)
+    except ServicoDeEmbeddingIndisponivelError as erro:
+        # O `aplica` commita uma vez só, no fim: estourar aqui reverte tudo.
+        # Nenhum documento fica gravado sem vetor, e nenhum hash marca arquivo
+        # como ingerido quando ele não foi.
+        print(f"\nSERVIÇO DE EMBEDDING FORA — nada foi gravado.\n\n{erro}\n", file=sys.stderr)
+        return 1
     return 0
 
 
