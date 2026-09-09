@@ -246,7 +246,36 @@
   --tint-danger: rgb(239 68 68 / 0.15);
   --tint-warning: rgb(245 158 11 / 0.15);
   --tint-info: rgb(59 130 246 / 0.15);
-  --tint-neutral: var(--surface-elevated);
+  /* E23 — a neutra deixa de ser alias da superficie elevada.
+
+     `var(--surface-elevated)` fazia dela a PROPRIA superficie do cartao: um
+     selo neutro sobre uma tabela, um cartao ou um bloco em hover ficava com
+     DeltaE 0,0 contra o fundo -- invisivel, e nao por pouco. So a borda do
+     `Badge` dizia que havia um selo ali.
+
+     Achado no changelog do HelpHS, procurando variante para um terceiro tipo
+     de entrada: das seis tintas, sobre aquele cartao, so QUATRO tinham
+     aparencia distinta -- a neutra sumia no fundo e a `primary` e o mesmo
+     azul da `info` (DeltaE 4,6 claro / 6,8 escuro, contra o piso 20 do
+     proprio pacote para serie).
+
+     Slate-500 a 15%, medido nas tres superficies dos dois temas:
+
+       DeltaE tinta x superficie   claro  7,3 / 7,6 / 7,0   (era 0,0)
+                                   escuro 6,5 / 5,8 / 4,8   (era 0,0)
+       --on-tint-neutral por cima  claro  6,04 / 6,29 / 5,79
+                                   escuro 5,81 / 5,32 / 4,55
+
+     O pior caso de TEXTO e 4,55:1 na elevada do escuro — passa o piso de
+     4,5 com 0,05 de margem. Quem escurecer o `--text-muted` do escuro um dia
+     quebra este par, e por isso o numero esta escrito aqui.
+
+     A separacao das outras cinco tintas e de 4,8 no pior caso (contra a
+     `primary`). NAO se aplica o piso 20 da E16-b: aquele e para serie de
+     grafico, que se distingue sozinha e sem rotulo. Uma tinta e fundo de selo
+     ROTULADO, com borda propria — ela precisa dizer "ha um selo aqui", nao
+     "qual selo". Quem diz qual e a palavra escrita dentro. */
+  --tint-neutral: rgb(100 116 139 / 0.15);
 
   --on-tint-primary: var(--color-primary-700);
   --on-tint-success: var(--color-success-800);        /* E8 — claro: elevada 6,15 / surface 6,67 / base 6,41 */
@@ -312,6 +341,16 @@
   --on-tint-warning: var(--color-warning-400);
   --on-tint-info: var(--color-info-300);              /* E8 — escuro: elevada 6,21 / surface 7,28 / base 7,96 */
   --on-tint-neutral: var(--text-muted);
+
+  /* E23 — declarada tambem aqui, e nao por simetria decorativa.
+
+     O comentario acima diz que as tintas nao mudam porque a opacidade
+     resolve. Isso e verdade para as cinco que sao `rgb(... / 0.15)` e era
+     FALSO para a neutra, que era `var(--surface-elevated)` — sem alfa, ela
+     virava a superficie escura e sumia do mesmo jeito. Declarar dos dois
+     lados e o que impede a proxima leitura daquela frase de recriar o
+     defeito. */
+  --tint-neutral: rgb(100 116 139 / 0.15);
 
   /* E16-b — a paleta de grafico no escuro. Bloco NOVO: a E16 declarava os
      --chart-* so no :root, e por isso quatro deles reprovavam de um dos dois

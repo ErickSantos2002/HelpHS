@@ -27,13 +27,31 @@ conferência por hash — e as duas coisas não cabem juntas. O aviso mora aqui.
 
 ```
 base.css         DE714476FA019334CC3DD096E84BD7EF29BFA7B3E2DACF071F3DA5FB68D98410
-colors.css       E17CFDE67277A38721EC9415B0EE3DC7CCD85A6D6A37990BD53E1331703C076D
+colors.css       CB709BBF4BC1987849C21C96BB4B16BF6C8709953BCBE7F3C97F3B13765FAFFD
 motion.css       C70D51A982AE0B91BD53ECE150D8D16E0E70BEF9CA59586541A9A7177228478E
 shape.css        7BCFBBC585D3EA8C7F689A27EEB3AE13DE0C2A9DCC3C6CC0C8F41D440D193F7D
 spacing.css      C093B261C6893A893A418CDF64798555326D4586A8ADB37CC7ECA457FABAE420
 styles.css       1EF6324844AA066488F0D8A015B39E3CA0756C629512FCE4E1BD95CA8B93B9B2
 typography.css   1DD9B29E47D31005DA89BBE96F1C7883A89371173E0FA8862D868480EEE839C9
 ```
+
+
+> ⚠️ **O hash do `colors.css` ficou DESATUALIZADO por quatro emendas, e a
+> tabela não acusou porque ninguém a reconferiu.**
+>
+> O arquivo mudou na **E16-b** (paleta de gráfico), na **E18** (`--chart-7`),
+> na **E19** (`--fill-*`) e na **E23** (tinta neutra). O espelho foi recopiado
+> byte a byte nas quatro — conferido: ele estava idêntico ao pacote antes desta
+> correção. O que não foi atualizado foi **esta linha**.
+>
+> O risco não é teórico e tem duas pontas. Quem reconferisse veria um falso
+> alarme no `colors.css`; e quem "consertasse" o espelho para bater com o hash
+> registrado **reverteria quatro emendas** — sem erro, sem aviso, e com a
+> tabela dizendo que agora está certo.
+>
+> **A tabela é uma régua, e régua não medida mente com confiança.** Recopiar um
+> dos sete e não mexer aqui é deixar a régua para trás; a conferência do fim de
+> cada emenda passa a incluir esta linha.
 
 Para reconferir:
 
