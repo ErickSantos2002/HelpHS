@@ -80,6 +80,7 @@ from app.utils.sla import (
     pause_sla,
     register_first_response,
     resume_sla,
+    violacao_ao_resolver,
 )
 from app.utils.ticket_access import ensure_ticket_visible
 
@@ -298,6 +299,45 @@ async def _set_ticket_equipments(
             )
 
     ticket.equipments = encontrados
+
+
+def _justificativa_de_sla(ticket: Ticket, now: datetime, enviada: str | None) -> str | None:
+    """
+    Recusa resolver chamado fora do prazo sem justificativa escrita.
+
+    Roda ANTES de qualquer mutação, de propósito: uma recusa depois de o status
+    já ter mudado deixaria o chamado resolvido e o pedido rejeitado ao mesmo
+    tempo, e o cliente da API não teria como saber em que estado ficou.
+
+    A violação é calculada da DATA, não das marcas `sla_*_breach` — ver
+    `violacao_ao_resolver`, que explica por que as marcas não servem aqui. Se
+    servissem, um chamado vencido e esquecido passaria batido, e é exatamente
+    ele que a exigência existe para pegar.
+
+    Justificativa enviada sem haver violação é gravada mesmo assim: quem
+    explicou não perde o texto por ter entregado no prazo.
+    """
+    resposta_violada, resolucao_violada = violacao_ao_resolver(ticket, now)
+    limpa = (enviada or "").strip()
+
+    if not (resposta_violada or resolucao_violada):
+        return limpa or None
+
+    if not limpa:
+        quais = []
+        if resposta_violada:
+            quais.append("o de primeira resposta")
+        if resolucao_violada:
+            quais.append("o de resolução")
+        raise HTTPException(
+            status_code=status.HTTP_422_UNPROCESSABLE_CONTENT,
+            detail=(
+                f"Este chamado passou do prazo ({' e '.join(quais)}). "
+                "Informe 'sla_breach_justification' com o motivo do atraso para resolvê-lo."
+            ),
+        )
+
+    return limpa
 
 
 def _record_history(
@@ -737,9 +777,27 @@ async def update_ticket_status(
         )
 
     now = datetime.now(UTC)
+    # Antes de mudar qualquer coisa: fora do prazo sem justificativa, recusa.
+    justificativa = (
+        _justificativa_de_sla(ticket, now, body.sla_breach_justification)
+        if body.status == TicketStatus.resolved
+        else None
+    )
     old_status = ticket.status
     ticket.status = body.status
     ticket.updated_at = now
+
+    if justificativa:
+        ticket.sla_breach_justification = justificativa
+        _record_history(
+            db,
+            ticket.id,
+            actor.id,
+            "sla_breach_justification",
+            None,
+            justificativa,
+            "Justificativa do SLA violado",
+        )
 
     # SLA: mudar o status não marca primeira resposta — quem marca é falar com
     # o cliente (chat) ou entregar a resolução. Ver register_first_response.
@@ -806,9 +864,23 @@ async def resolve_ticket(
         )
 
     now = datetime.now(UTC)
+    # Antes de mudar qualquer coisa: fora do prazo sem justificativa, recusa.
+    justificativa = _justificativa_de_sla(ticket, now, body.sla_breach_justification)
     old_status = ticket.status
     ticket.status = TicketStatus.resolved
     ticket.resolution_note = body.resolution_note
+
+    if justificativa:
+        ticket.sla_breach_justification = justificativa
+        _record_history(
+            db,
+            ticket.id,
+            actor.id,
+            "sla_breach_justification",
+            None,
+            justificativa,
+            "Justificativa do SLA violado",
+        )
     ticket.closed_at = now
     ticket.resolved_at = now
     ticket.updated_at = now

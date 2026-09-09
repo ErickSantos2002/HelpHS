@@ -489,6 +489,12 @@ class Ticket(Base):
     sla_resolve_breach: Mapped[bool] = mapped_column(Boolean, default=False)
     sla_paused_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
     sla_total_paused_ms: Mapped[int] = mapped_column(Integer, default=0)
+    # Escrita por quem resolve, quando resolve fora do prazo. Nulo significa
+    # DUAS coisas legitimas e permanentes: resolvido dentro do prazo, ou
+    # resolvido antes de a exigencia existir. Nao ha default nem NOT NULL de
+    # proposito -- vazio apagaria a diferenca entre "nao precisou" e "nao
+    # preencheu".
+    sla_breach_justification: Mapped[str | None] = mapped_column(Text)
 
     # Notas internas (visível apenas para admin/técnico)
     technician_notes: Mapped[str | None] = mapped_column(Text, nullable=True)

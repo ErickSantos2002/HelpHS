@@ -2,6 +2,8 @@
 Schemas for dashboard statistics endpoint.
 """
 
+from datetime import datetime
+
 from pydantic import ConfigDict
 
 from app.schemas.base import AppBaseModel
@@ -120,6 +122,23 @@ class ReportComparison(AppBaseModel):
     sla_compliance: list[SLAComplianceItem]
 
 
+class SlaJustificationItem(AppBaseModel):
+    """Chamado resolvido fora do prazo, com o motivo que quem resolveu escreveu.
+
+    Existe porque o relatorio de SLA so tinha numero agregado: sabia-se QUANTOS
+    estouraram, nunca POR QUE. A contagem responde a auditoria; o motivo e o
+    que permite corrigir a causa.
+    """
+
+    ticket_id: str
+    protocol: str
+    title: str
+    priority: str
+    resolved_at: datetime | None
+    assignee_name: str | None
+    justification: str
+
+
 class ReportData(AppBaseModel):
     period_days: int
     total_tickets: int
@@ -141,6 +160,7 @@ class ReportData(AppBaseModel):
     technicians_dist: list[TechnicianDistItem] = []
     reopened_count: int = 0
     reopen_rate: float = 0.0
+    sla_justifications: list[SlaJustificationItem] = []
     comparison: ReportComparison | None = None
 
 

@@ -180,6 +180,48 @@ def resume_sla(ticket: Ticket, now: datetime) -> None:
         ticket.sla_paused_at = None
 
 
+def violacao_ao_resolver(ticket: Ticket, now: datetime) -> tuple[bool, bool]:
+    """
+    Diz se o SLA está violado NO INSTANTE em que alguém vai resolver o chamado.
+
+    Devolve `(resposta_violada, resolucao_violada)`.
+
+    Por que não basta ler `sla_response_breach` / `sla_resolve_breach`
+    ---------------------------------------------------------------------
+    As duas marcas são gravadas por outros caminhos, e nenhuma delas está
+    garantidamente em dia no momento da resolução:
+
+    **A de resolução não é marcada ao resolver.** `check_breaches` pula o teste
+    quando o chamado está em estado terminal, e os dois caminhos que resolvem
+    já colocaram o status em `resolved` quando o chamam. Um chamado que passou
+    do prazo e ficou quieto até ser resolvido chega aqui com a marca em `False`
+    — que são justamente os casos que uma exigência de justificativa existe
+    para pegar.
+
+    **A de resposta pode estar prestes a mudar.** Quando a própria nota de
+    resolução é a primeira resposta, quem marca é o `register_first_response`,
+    que roda depois desta verificação. Ler a marca aqui veria o passado.
+
+    Por isso as duas são calculadas da DATA, com o mesmo deslocamento de pausa
+    que o `check_breaches` usa — e a marca existente é respeitada quando já
+    estiver ligada, para não desfazer o que outro caminho já concluiu.
+
+    Esta função NÃO escreve nada. Ela é consultada antes de qualquer mutação,
+    para que a recusa não deixe rastro pela metade.
+    """
+    offset = timedelta(milliseconds=ticket.sla_total_paused_ms or 0)
+
+    resposta = bool(ticket.sla_response_breach)
+    if not resposta and ticket.sla_response_due_at and ticket.sla_first_response is None:
+        resposta = now > ticket.sla_response_due_at + offset
+
+    resolucao = bool(ticket.sla_resolve_breach)
+    if not resolucao and ticket.sla_resolve_due_at:
+        resolucao = now > ticket.sla_resolve_due_at + offset
+
+    return resposta, resolucao
+
+
 def check_breaches(ticket: Ticket, now: datetime) -> None:
     """
     Update sla_response_breach and sla_resolve_breach.
