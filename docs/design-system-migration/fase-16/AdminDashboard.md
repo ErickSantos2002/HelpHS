@@ -41,11 +41,13 @@ FUNCIONALIDADE (§29 do prompt mestre)
     `--text-muted`, `--on-tint-*`) resolvem por tema sozinhos no CSS. Não há
     mais como o cromo do gráfico e o tema divergirem.
 [ ] nenhum campo depende do placeholder — não se aplica (sem formulário).
-[x] toda barra desenhada tem papel declarado (`progressbar`/`meter`) — FEITO
-    na segunda passada: categoria, conformidade de SLA por prioridade e a
-    barra da linha de cada técnico declaram `role="progressbar"` com
-    `aria-valuenow`/`min`/`max` e nome. Fica de fora a faixa da `StatusBar`,
-    que é distribuição empilhada e não progresso — ver seção 9.
+[x] toda barra desenhada tem papel declarado (`progressbar`/`meter`) — a
+    segunda passada declarou `progressbar` nas três, a suíte reprovou e a
+    mudança foi REVERTIDA; a TERCEIRA passada aplicou a decisão do operador
+    (seção 14): `meter` nas duas de conformidade de SLA, papel NENHUM e
+    `aria-hidden` na de comparação por categoria, cujo máximo é o maior da
+    lista. Fica de fora a faixa da `StatusBar`, que é distribuição empilhada
+    — ver seção 9.
 
 ACRESCENTADOS PELAS DECISÕES REGISTRADAS
 [ ] estado interativo (visual = árvore) — não reverificado nesta passagem;
@@ -391,12 +393,12 @@ tocar no desenho foi feito:
   painel por este técnico"* / *"Ana Silva — filtro ativo, clique para
   remover"*. **Isso não conserta o acesso por teclado** — quem navega por
   teclado continua sem alcançar a linha.
-- **As barras desenhadas ganharam papel** (`role="progressbar"`,
-  `aria-valuenow`/`min`/`max` e `aria-label`): as de categoria, as de
-  conformidade de SLA por prioridade e a da linha de cada técnico. São **4**
-  no cenário do teste. Zero mudança visual. Isto fecha o item
-  "toda barra desenhada tem papel declarado" da §29, que a primeira passada
-  deixou em `[ ]`.
+- **As barras desenhadas ganharam papel** — mas **não este**. Esta passada
+  declarou `role="progressbar"` nas três (categoria, conformidade por
+  prioridade, linha do técnico) e **quebrou a suíte**: `barra-de-sla.test.ts`
+  já proibia esse papel neste arquivo, com o motivo escrito. Foi revertida.
+  O papel certo de cada uma está na **seção 14**, e foi decidido pelo
+  operador, não aqui.
 
 Continua **sem** papel a faixa da `StatusBar` (a barra empilhada de
 distribuição). Ela não é uma barra de progresso, e a legenda logo abaixo já
@@ -416,9 +418,9 @@ Vai no relato, não foi decidida aqui.
 | `theme === "dark" ? A : B` | 0 | 0 |
 | mapas locais de cor | 0 | 0 |
 | linhas da `varredura-contraste.mjs` para esta tela | 0 | **0** |
-| barras desenhadas sem papel declarado | 4 | **1** (a faixa da `StatusBar`) |
+| barras desenhadas sem papel declarado | 4 | **1** (a faixa da `StatusBar`) — ver seção 14 |
 | controles alcançáveis só por mouse | 1 | **1** (o `<tr onClick>`) |
-| casos em `AdminDashboard.test.tsx` | 5 | **10** |
+| casos em `AdminDashboard.test.tsx` | 5 | **11** (**14** depois da seção 14) |
 
 Sobra **uma** ocorrência de paleta crua no arquivo, `bg-emerald-500` na
 linha 82 — **dentro de um comentário**, o que explica de qual classe
@@ -442,7 +444,7 @@ nome acessível.
 | todo ícone desenha na escala do pacote | devolve o `<svg>` sólido `viewBox="0 0 20 20"` ao cartão de CSAT |
 | o calendário do intervalo personalizado também | `name="calendar"` → `name="clock"` |
 | a linha do técnico diz o que o clique faz | apaga o `aria-label` da `<tr>` |
-| cada barra declara papel e valor | apaga o `role="progressbar"` das barras de SLA |
+| ~~cada barra declara papel e valor~~ | **removido junto com a reversão** — ver seção 14 |
 
 **Controle antes da primeira mutação**: a suíte rodou sem mutação nenhuma e
 passou (10 de 10) — sem isso, um roteiro que não executa o vitest lê "não
@@ -453,6 +455,12 @@ falhou" como "o mutante sobreviveu". O vitest foi chamado por
 derrubou só o seu caso — isolamento limpo). A restauração grava, **relê para
 conferir** e repete até oito vezes; a igualdade byte a byte com o original
 foi confirmada no fim.
+
+Uma dessas cinco (a do `role="progressbar"`) morria contra um caso que **não
+existe mais**: ele foi retirado com a reversão. Uma mutação que mata um caso
+errado é uma mutação bem-sucedida contra a régua errada — o que ela media
+não era a acessibilidade da barra, era a existência do papel que a suíte
+proibia. Ver seção 14.
 
 `npx tsc --noEmit -p tsconfig.app.json` e `npx eslint` não relatam nada para
 `AdminDashboard.tsx` nem para o teste.
@@ -546,3 +554,125 @@ reordenar `PERIOD_OPTIONS`, o recuo continua sendo o mesmo número.
 A tela abre com um período escolhido e não há como voltar a "nenhum". Isso é
 perda real de reversibilidade, e é o preço de a API não ter o estado — a
 alternativa seria a tela oferecer algo que o servidor recusa.
+
+---
+
+## 14. `meter` não é `progressbar` — a decisão, e o que ela custou
+
+**Decidida pelo operador em 09/09/2026, e aplicada numa terceira passada.**
+Ela é o motivo de as seções 9 e 11 estarem corrigidas acima.
+
+### O que aconteceu
+
+A segunda passada declarou `role="progressbar"` nas **três** barras
+desenhadas da tela citando a §29 ("toda barra desenhada tem papel
+declarado"). Isso **quebrou a suíte**: `barra-de-sla.test.ts` — mais antigo —
+proíbe esse papel neste arquivo, e o motivo está escrito lá desde que foi
+criado. As três foram revertidas e a distinção subiu ao operador.
+
+### A decisão
+
+| barra | papel | por quê |
+|---|---|---|
+| **conformidade de SLA** (por prioridade, e a da linha do técnico) | `role="meter"` com `aria-valuenow`/`aria-valuemin`/`aria-valuemax` e **nome** | é medição dentro de faixa **conhecida e fixa**, 0 a 100 |
+| **comparação** (contagem por categoria) | **sem papel**, `aria-hidden`, com o valor **em texto** | o máximo é `categoryMax` — o maior da lista —, não é progresso nem medição de faixa fixa |
+| **distribuição** (a faixa da `StatusBar`) | continua sem papel, e continua **pendente de decisão** | seção 12, inalterada |
+
+`meter` é o papel de **medição**; `progressbar` é o de **tarefa avançando**.
+A distinção não é sutileza de vocabulário: um leitor de tela anuncia "60 por
+cento **concluído**" para `progressbar`, e a conformidade de SLA não está
+concluindo nada. Uma barra que vai a "o maior que aparecer hoje" não tem
+escala nenhuma para anunciar, e declarar qualquer um dos dois papéis nela
+poria um número numa escala que não existe.
+
+### O que entrou no código
+
+```
+role="meter"  aria-valuenow={Math.round(item.compliance_rate)}
+              aria-valuemin={0}  aria-valuemax={100}
+              aria-label={`Conformidade de SLA — ${item.priority}`}
+
+role="meter"  aria-valuenow={Math.round(t.sla_compliance_rate)}
+              aria-valuemin={0}  aria-valuemax={100}
+              aria-label={`Conformidade de SLA de ${t.technician_name}`}
+```
+
+E na de comparação, só `aria-hidden="true"`. **A contagem já estava escrita**
+em texto ao lado do nome da categoria (`{cat.count}`, na linha de cima), e
+foi conferida antes de esconder o desenho: `aria-hidden` numa barra só é
+honesto se o número estiver em algum lugar que o leitor de tela alcance. Não
+foi preciso escrever nada — mas o caso de teste passou a **prender** esse
+par, para que esconder o desenho nunca vire esconder o dado.
+
+Zero mudança visual nas três.
+
+### Onde a decisão ficou gravada
+
+Nos dois lados, porque a próxima pessoa pode chegar por qualquer um:
+
+- **`barra-de-sla.test.ts`**, no caso *"as barras de comparação NÃO viraram
+  progressbar"* — que **fica**, e passou a prender a decisão inteira em vez
+  de só a proibição: `progressbar` segue proibido no `AdminDashboard` inteiro
+  (para as duas coisas), a de comparação não tem papel e é `aria-hidden`, e
+  as duas de conformidade são `meter` com valor, escala e nome. O comentário
+  do caso explica **por que** os papéis são diferentes, que é o que faltava:
+  quem lia só a proibição não tinha como saber que `meter` era permitido, e
+  foi isso que custou a reversão.
+- **`AdminDashboard.test.tsx`**, em três casos novos que provam o mesmo pelo
+  **DOM** (o outro arquivo prova pelo texto do `.tsx`), e no comentário que
+  substituiu a nota "não existe aqui um caso de `progressbar`".
+- **No próprio `.tsx`**, num comentário acima de cada uma das três barras.
+
+### Testes e mutação
+
+14 casos em `AdminDashboard.test.tsx` (11 → 14) e 5 em `barra-de-sla.test.ts`
+(o mesmo número; o quinto cresceu). **19 de 19 passam.**
+
+**Controle sem mutação nenhuma antes da primeira**, e ele passou — sem isso,
+um roteiro que não executa o vitest lê "não falhou" como "o mutante
+sobreviveu". Chamada por `process.execPath` + `node_modules/vitest/vitest.mjs`.
+
+**9 de 9 mutações morreram.** Nenhuma é de classe — o jsdom não aplica CSS, e
+trocar classe não muda o que o caso mede:
+
+| # | mutação | o que ela quebra |
+|---|---|---|
+| M1 | a conformidade vira `progressbar` | papel |
+| M2 | a barra do técnico perde o `role` | papel |
+| M3 | a barra de comparação ganha um `role` | papel |
+| M4 | `aria-valuenow` da conformidade passa a anunciar `item.breached` | valor |
+| M5 | `aria-valuenow` do técnico passa a anunciar `t.total_assigned` | valor |
+| M6 | some o `aria-valuemax={100}` da conformidade | escala |
+| M7 | o `aria-label` da conformidade deixa de dizer a prioridade | nome |
+| M8 | some o `aria-hidden` da comparação | elemento |
+| M9 | some o `<span>` com `{cat.count}` | elemento |
+
+M9 é a que importa mais: ela prova que o par *"esconder o desenho"* + *"o
+número em texto"* é medido junto, e não só metade dele.
+
+O roteiro de M6 **abortou na primeira tentativa, de propósito**: o padrão
+`aria-valuemax={100}` com recuo de 20 espaços é **substring** do de 28
+espaços da linha do técnico, e casava com os dois. A contagem de ocorrências
+antes de gravar pegou; o padrão foi ancorado no `aria-valuemin` de cima e a
+mutação passou a atingir uma barra só. Sem essa contagem, uma "mutação" que
+muda dois lugares mede outra coisa.
+
+Restauração com repetição (até oito vezes), releitura para conferir e
+igualdade byte a byte confirmada no fim — o `finally` protege contra o
+processo morrer, não contra a gravação falhar.
+
+`tsc --noEmit`, `eslint` nos três arquivos e `varredura-contraste.mjs` (zero
+linhas para esta tela) ficaram limpos.
+
+### O que esta passada NÃO fez
+
+- **Não tocou na faixa da `StatusBar`.** Ela segue sem papel e segue pendente
+  de decisão (seção 12); a decisão do operador cobriu comparação e
+  conformidade, não distribuição.
+- **Não mexeu no rótulo visível da prioridade.** A seção "Conformidade SLA"
+  escreve `{item.priority}` cru — `critical`, `low` —, com `capitalize` no
+  CSS, e não `rotuloDePrioridade()`. O `aria-label` da barra repete esse
+  mesmo texto **de propósito**, para o nome acessível não divergir do que
+  está na tela. Trocar o rótulo visível é mudança funcional, e vai no relato
+  ao operador.
+- **Nada fora dos três arquivos do escopo.**

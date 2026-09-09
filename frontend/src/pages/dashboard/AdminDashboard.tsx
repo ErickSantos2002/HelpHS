@@ -528,8 +528,19 @@ export default function AdminDashboard() {
                     <span className="text-xs text-conteudo-muted truncate max-w-[70%]">{cat.category}</span>
                     <span className="text-xs font-bold tabular-nums text-conteudo">{cat.count}</span>
                   </div>
+                  {/* Barra de COMPARAÇÃO, e por isso sem papel nenhum. Ela vai
+                      de zero ao MAIOR VALOR DA LISTA (`categoryMax`), não a um
+                      teto conhecido: uma barra cujo máximo é "o maior que
+                      aparecer hoje" mede tamanho relativo. Não é progresso
+                      (`progressbar` anuncia tarefa avançando) nem medição
+                      dentro de faixa fixa (`meter`) — declarar qualquer um dos
+                      dois poria um número numa escala que não existe.
+                      `aria-hidden` só é honesto aqui porque a contagem está
+                      escrita logo acima, em texto: quem ouve lê "Hardware 6" e
+                      não perde nada com o desenho fora da árvore. */}
                   <div
                     className="h-1.5 rounded-full bg-surface-elevated overflow-hidden"
+                    aria-hidden="true"
                   >
                     <div
                       className="h-full rounded-full bg-primary transition-all duration-700"
@@ -594,11 +605,23 @@ export default function AdminDashboard() {
                       <span className="text-xs text-conteudo-muted ml-2">({item.breached} violados)</span>
                     </div>
                   </div>
-                  {/* Barra desenhada: papel declarado (§29). Sem `role`, um
-                      `<div>` de largura em porcentagem não é nada para quem
-                      não vê a largura — e a porcentagem ao lado é texto de
-                      outro elemento, sem vínculo com o desenho. */}
+                  {/* Barra de MEDIÇÃO, e o papel de medição é `meter`. A
+                      conformidade vai de 0 a 100 — faixa conhecida e FIXA, ao
+                      contrário da barra de categoria, cujo máximo é o maior da
+                      lista. Não é `progressbar`: esse é o papel de tarefa
+                      avançando, e o leitor de tela anuncia "60 por cento
+                      concluído" para ele — a conformidade de SLA não está
+                      concluindo nada. A distinção custou uma reversão e está
+                      presa em `barra-de-sla.test.ts`. Sem `role`, um `<div>` de
+                      largura em porcentagem não é nada para quem não vê a
+                      largura, e a porcentagem ao lado é texto de outro
+                      elemento, sem vínculo com o desenho. */}
                   <div
+                    role="meter"
+                    aria-valuenow={Math.round(item.compliance_rate)}
+                    aria-valuemin={0}
+                    aria-valuemax={100}
+                    aria-label={`Conformidade de SLA — ${item.priority}`}
                     className="h-2 rounded-full bg-surface-elevated overflow-hidden"
                   >
                     <div className={cn("h-full rounded-full transition-all duration-700", slaBg(item.compliance_rate))} style={{ width: `${item.compliance_rate}%` }} />
@@ -666,7 +689,17 @@ export default function AdminDashboard() {
                       <td className="py-3 pr-4 tabular-nums text-on-tint-info">{t.open_count}</td>
                       <td className="py-3 pr-4">
                         <div className="flex items-center gap-2">
+                          {/* A mesma medição da seção "Conformidade SLA", uma
+                              por técnico: 0 a 100, faixa fixa, `meter`. O nome
+                              traz o técnico porque há uma barra por linha e
+                              "Conformidade de SLA" repetido sete vezes não
+                              distingue nada. */}
                           <div
+                            role="meter"
+                            aria-valuenow={Math.round(t.sla_compliance_rate)}
+                            aria-valuemin={0}
+                            aria-valuemax={100}
+                            aria-label={`Conformidade de SLA de ${t.technician_name}`}
                             className="w-20 h-1.5 rounded-full bg-surface-elevated overflow-hidden"
                           >
                             <div className={cn("h-full rounded-full", slaBg(t.sla_compliance_rate))} style={{ width: `${t.sla_compliance_rate}%` }} />

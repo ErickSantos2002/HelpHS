@@ -68,13 +68,63 @@ describe("barra de prazo de SLA", () => {
   });
 
   it("as barras de comparação NÃO viraram progressbar", () => {
-    // Guarda contra o conserto por analogia: o `AdminDashboard` tem barras que
-    // vão de zero ao maior valor da lista, e a `SlaConfigPage` tem uma razão.
-    // Nenhuma é progresso, e as três entram nas Fases 11–16 com o papel certo.
+    // ── A decisão inteira, para ninguém ter de redescobri-la ────────────
+    //
+    // Uma passada do `AdminDashboard` declarou `role="progressbar"` nas TRÊS
+    // barras desenhadas da tela citando a §29, e quebrou este arquivo. Foi
+    // revertida, a distinção subiu ao operador, e ele decidiu assim:
+    //
+    //   comparação (contagem por categoria) → SEM papel, `aria-hidden`,
+    //     valor em texto. O máximo é o MAIOR VALOR DA LISTA, não um teto:
+    //     a barra mede tamanho relativo, e nenhuma escala existe para
+    //     anunciar. `aria-hidden` é honesto porque a contagem está escrita.
+    //   conformidade de SLA (por prioridade, e a da linha do técnico) →
+    //     `role="meter"` com `aria-valuenow`/`min`/`max` e NOME. É medição
+    //     dentro de faixa conhecida e fixa, 0 a 100.
+    //
+    // `meter` é o papel de MEDIÇÃO; `progressbar` é o de TAREFA AVANÇANDO —
+    // o leitor de tela anuncia "60 por cento concluído" para ele, e a
+    // conformidade de SLA não está concluindo nada. Por isso `progressbar`
+    // segue proibido no `AdminDashboard` INTEIRO, para as duas coisas, e é o
+    // que a primeira asserção guarda. As outras prendem o que entrou no
+    // lugar, para que apagá-lo também reprove.
+    //
+    // (A `SlaConfigPage` tem uma razão, e entra na mesma fase pelo mesmo
+    // caminho: medição, não progresso.)
     const painel = readFileSync(
       resolve(process.cwd(), "src/pages/dashboard/AdminDashboard.tsx"),
       "utf-8",
     );
     expect(painel).not.toMatch(/role="progressbar"/);
+
+    // Duas barras de conformidade, e só elas: a da seção por prioridade e a
+    // da linha de cada técnico. Uma terceira aqui seria a de comparação
+    // voltando a declarar papel.
+    expect(painel.match(/role="meter"/g)).toHaveLength(2);
+    expect(painel).toMatch(
+      /role="meter"[\s\S]{0,320}?aria-valuenow=\{Math\.round\(item\.compliance_rate\)\}/,
+    );
+    expect(painel).toMatch(
+      /role="meter"[\s\S]{0,320}?aria-valuenow=\{Math\.round\(t\.sla_compliance_rate\)\}/,
+    );
+    // A escala completa, e não só o valor — mesma exigência das barras de
+    // prazo acima: sem `min` e `max` o número não vem de escala nenhuma.
+    expect(painel.match(/aria-valuemin=\{0\}/g)).toHaveLength(2);
+    expect(painel.match(/aria-valuemax=\{100\}/g)).toHaveLength(2);
+    // E o nome: são duas medições diferentes, e uma delas se repete por linha.
+    expect(painel).toMatch(/aria-label=\{`Conformidade de SLA — \$\{item\.priority\}`\}/);
+    expect(painel).toMatch(
+      /aria-label=\{`Conformidade de SLA de \$\{t\.technician_name\}`\}/,
+    );
+
+    // A de comparação: nenhum papel e fora da árvore. O único `aria-hidden`
+    // declarado no arquivo é o dela — os ícones herdam o seu do `Icon` do
+    // pacote. Conta a forma com atributo, e não a menção: o comentário logo
+    // acima da barra cita `aria-hidden` em prosa, e contá-lo faria o caso
+    // reprovar por edição de comentário.
+    expect(painel.match(/aria-hidden="true"/g)).toHaveLength(1);
+    expect(painel).toMatch(
+      /aria-hidden="true"[\s\S]{0,320}?cat\.count \/ categoryMax/,
+    );
   });
 });

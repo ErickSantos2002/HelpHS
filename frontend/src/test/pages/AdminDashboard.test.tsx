@@ -338,22 +338,64 @@ describe("AdminDashboard — ícones e nome acessível", () => {
   });
 
   /*
-   * NÃO existe aqui um caso de `role="progressbar"`, e a ausência é
-   * deliberada — havia um, e ele saiu.
+   * ── As barras desenhadas, e a distinção que custou uma reversão ──
    *
-   * O agente que fez a segunda passada desta tela declarou papel nas três
-   * barras desenhadas, citando a §29, e escreveu o caso que o prendia. Isso
-   * atropelou uma regra já fixada em `barra-de-sla.test.ts`, que proíbe
-   * `role="progressbar"` neste arquivo com o motivo escrito: **as barras de
-   * categoria vão de zero ao MAIOR VALOR DA LISTA**, e uma barra cujo máximo
-   * é “o maior que aparecer hoje” não mede progresso — mede tamanho relativo.
+   * Uma passada desta tela declarou `role="progressbar"` nas TRÊS barras
+   * citando a §29, e quebrou `barra-de-sla.test.ts`, que proíbe esse papel
+   * neste arquivo. Reverteu-se, e o operador decidiu: `meter` para a
+   * conformidade de SLA (0 a 100, faixa conhecida e fixa) e papel NENHUM
+   * para a de comparação (o máximo é o maior valor da lista). `meter` é o
+   * papel de MEDIÇÃO; `progressbar` é o de TAREFA AVANÇANDO — ele faz o
+   * leitor de tela anunciar "60 por cento concluído", e a conformidade de
+   * SLA não conclui nada.
    *
-   * Os outros dois casos (conformidade de SLA, 0 a 100) são discutíveis: uma
-   * porcentagem dentro de faixa conhecida é medição, e o papel de medição é
-   * `meter`, não `progressbar`. A distinção foi levada ao operador; até ela
-   * voltar, vale a regra antiga, que é a mais restritiva.
-   *
-   * Dois testes em conflito: ganha o que registra uma decisão, não o que
-   * registra uma melhoria.
+   * `barra-de-sla.test.ts` prende a decisão pelo texto do arquivo; os três
+   * casos abaixo a prendem pelo DOM, que é onde ela é verdade ou mentira.
    */
+
+  it("as barras de conformidade de SLA são meter, com valor, escala e nome", async () => {
+    // Três no cenário: duas prioridades (`critical` 60, `low` 95) e a linha
+    // da Ana Silva (80). O valor tem de vir do dado — trocar 60 por qualquer
+    // outro número reprova aqui.
+    await montar();
+
+    expect(screen.getAllByRole("meter")).toHaveLength(3);
+
+    const critica = screen.getByRole("meter", {
+      name: "Conformidade de SLA — critical",
+    });
+    expect(critica).toHaveAttribute("aria-valuenow", "60");
+    expect(critica).toHaveAttribute("aria-valuemin", "0");
+    expect(critica).toHaveAttribute("aria-valuemax", "100");
+
+    const daAna = screen.getByRole("meter", {
+      name: "Conformidade de SLA de Ana Silva",
+    });
+    expect(daAna).toHaveAttribute("aria-valuenow", "80");
+    expect(daAna).toHaveAttribute("aria-valuemin", "0");
+    expect(daAna).toHaveAttribute("aria-valuemax", "100");
+  });
+
+  it("a barra de comparação não tem papel, e a contagem está escrita", async () => {
+    // O par indivisível: a barra sai da árvore com `aria-hidden`, e isso só é
+    // honesto porque o número está em texto ao lado do nome da categoria.
+    // Apagar o `<span>` da contagem reprova este caso — é o que impede que
+    // "esconder o desenho" vire "esconder o dado".
+    await montar();
+    const bloco = blocoDe("Chamados por Categoria");
+
+    expect(within(bloco).queryAllByRole("meter")).toHaveLength(0);
+    expect(within(bloco).queryAllByRole("progressbar")).toHaveLength(0);
+    expect(bloco.querySelector('[aria-hidden="true"]')).not.toBeNull();
+
+    expect(within(bloco).getByText("Hardware")).toBeInTheDocument();
+    expect(within(bloco).getByText("6")).toBeInTheDocument();
+  });
+
+  it("nenhuma barra da tela se anuncia como progressbar", async () => {
+    // A rede ampla, e a que a reversão deixou: vale para as três barras e
+    // para qualquer uma que alguém acrescente amanhã.
+    await montar();
+    expect(screen.queryAllByRole("progressbar")).toHaveLength(0);
+  });
 });
