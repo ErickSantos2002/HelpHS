@@ -54,7 +54,33 @@ const RAIZ = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "..");
 const saidaDaFase = (fase) =>
   path.resolve(RAIZ, `../docs/design-system-migration/fase-${fase}/screenshots`);
 
-const AGORA = Date.now();
+/**
+ * A data-base é CRAVADA, e tudo deriva dela.
+ *
+ * Era `Date.now()`, e por isso **as fotos mudavam a cada execução**: todo
+ * horário relativo — "há 2 horas", "vence amanhã", a grade do mês da agenda —
+ * saía diferente, e o `git status` acusava as dez da Fase 11 como modificadas
+ * sem que nada no código tivesse mudado.
+ *
+ * **Evidência que muda entre execuções não é evidência.** Um checkpoint que
+ * aponta para uma foto está afirmando algo sobre aquela imagem; se refotografar
+ * produz outra, a afirmação não é verificável — e pior, o diff fica cheio de
+ * ruído que esconde a mudança real quando ela vier.
+ *
+ * A escolha da data importa em três detalhes, e nenhum é arbitrário:
+ *
+ * - **quarta-feira**, para a grade do mês da agenda cair sempre igual e não
+ *   depender do dia da semana em que se roda;
+ * - **meio do mês**, para `emDias(-15)` e `emDias(+15)` não atravessarem a
+ *   virada e mudarem o mês exibido;
+ * - **meio-dia UTC**, para o fuso de quem roda não empurrar a data um dia para
+ *   trás ou para a frente.
+ *
+ * Ela é passada com `Z` explícito: sem isso o `new Date("2026-06-17T12:00:00")`
+ * seria interpretado no fuso LOCAL, e a data-base voltaria a depender da
+ * máquina — que é exatamente o que este bloco existe para impedir.
+ */
+const AGORA = Date.parse("2026-06-17T12:00:00Z");
 const emHoras = (h) => new Date(AGORA + h * 3_600_000).toISOString();
 const emDias = (d) => new Date(AGORA + d * 86_400_000).toISOString();
 const diaDoMes = (d) => emDias(d).slice(0, 10);
@@ -648,6 +674,15 @@ const TELAS = [
   ["16", "kb-lista", "/kb", "admin", 'h1:text-is("Base de Conhecimento")'],
   ["16", "kb-artigo", "/kb/kb-1", "admin", 'h1:text-is("Como abrir um chamado")'],
   ["16", "kb-novo", "/kb/new", "admin", 'h1:text-is("Novo artigo")'],
+  // As duas telas de EDICAO reusam os componentes de criacao, com o h1
+  // trocado. Sao fotos diferentes porque o que interessa nelas e o estado
+  // PREENCHIDO: o formulario vazio ja esta fotografado, e um campo com valor
+  // tem borda, rotulo e botao habilitado que o vazio nao tem.
+  //
+  // Nao precisaram de mock novo -- /kb/articles/<id> e /tickets/<id> ja
+  // respondem com o primeiro item de cada lista, entao os dois vem cheios.
+  ["16", "kb-editar", "/kb/kb-1/edit", "admin", 'h1:text-is("Editar artigo")'],
+  ["16", "chamado-editar", "/tickets/t-1/edit", "admin", 'h1:text-is("Editar chamado")'],
   // As duas do CLIENTE. `/equipment` é de todos os papéis, mas a tela se
   // chama "Meus equipamentos" e é do cliente que ela fala.
   ["16", "perfil", "/profile", "client", 'h1:text-is("Meu perfil")'],
@@ -657,6 +692,144 @@ const TELAS = [
   ["16", "onboarding", "/onboarding", "client-novo", 'h2:text-is("Sobre sua empresa")'],
 ];
 
+/**
+ * Espera o gráfico parar de se mexer.
+ *
+ * A data cravada deixou 40 das 46 fotos idênticas byte a byte entre duas
+ * execuções. As 6 que sobraram são as telas com Recharts — e a causa não é
+ * data nenhuma: ele **anima na montagem**, e o disparo pegava um quadro
+ * diferente a cada vez.
+ *
+ * Duas fontes de instabilidade, e a segunda só apareceu depois de a primeira
+ * ser eliminada. É por isso que a prova é **refotografar e comparar bytes**, e
+ * não "a sonda passou": passar diz que a foto saiu, não que ela é a mesma.
+ *
+ * A técnica é a da trava de pixel: ler, esperar, reler, e só seguir quando
+ * duas leituras seguidas coincidirem. O que se lê é o conjunto dos traçados
+ * do SVG — se um ponto ainda está subindo, o `d` muda.
+ *
+ * Tela sem gráfico sai na primeira leitura, sem custo.
+ */
+async function assentarGrafico(page, onde) {
+  // ⚠️ Lê TODAS as formas, e não só `path` — a primeira versão lia só ele.
+  //
+  // A medição que fechou isto: no `painel-tecnico` sobravam **2.948 pixels**
+  // diferentes numa região de 14×69 px, com variação de cor de **232** num
+  // canal. Antialias move centenas de pixels com variação de poucas unidades;
+  // 232 é algo que **aparece ou se move**.
+  //
+  // Era o ponto da série — o Recharts desenha ponto como `<circle>`, e a trava
+  // olhava só `<path>`. Os traçados assentavam, a trava dava por encerrado, e o
+  // ponto ainda estava a caminho.
+  //
+  // A lição é a mesma de sempre, uma camada acima: a régua estava certa **no
+  // que media** e incompleta **no que incluía**. Aqui a lista de elementos era
+  // o buraco, como antes foi a lista de implementadores da tabela de contrato.
+  const ler = () =>
+    page.evaluate(() =>
+      Array.from(
+        document.querySelectorAll(
+          ".recharts-surface path, .recharts-surface circle, " +
+            ".recharts-surface rect, .recharts-surface line",
+        ),
+      )
+        .map((el) =>
+          ["d", "cx", "cy", "r", "x", "y", "width", "height", "x1", "y1", "x2", "y2"]
+            .map((a) => el.getAttribute(a) ?? "")
+            .join(","),
+        )
+        .join("|"),
+    );
+
+  // ⚠️ Leitura vazia significa DUAS coisas, e a primeira versão desta trava as
+  // colapsava numa só — o defeito que a sessão inteira vinha achando, cometido
+  // aqui dentro:
+  //
+  //   a) a tela não tem gráfico nenhum        → sair é o certo
+  //   b) o gráfico ainda não renderizou nada  → sair é o defeito
+  //
+  // Com `if (!anterior) return`, o caso (b) saía na hora e a tela era
+  // fotografada no meio da animação. Foi por isso que `painel-tecnico` e
+  // `relatorios` continuaram mudando entre execuções mesmo com a trava posta:
+  // ela não estava errada, estava **desligando sozinha**.
+  //
+  // Quem separa os dois é o CONTÊINER: o Recharts monta o
+  // `.recharts-responsive-container` antes de ter traçado. Se ele existe, há
+  // gráfico e é preciso esperar; se não existe, não há nada a esperar.
+  // ── Antes de tudo: a FONTE ──────────────────────────────────────────
+  //
+  // O `ResponsiveContainer` do Recharts mede o contêiner e desenha em cima
+  // dessa largura. Se a Plus Jakarta Sans ainda não carregou, o texto ao redor
+  // tem outras métricas, o leiaute assenta em outro lugar por FRAÇÃO de pixel,
+  // e a linha do gráfico cai num antialias diferente.
+  //
+  // Foi o que sobrou depois da data e da animação: quatro fotos com **458
+  // pixels** de diferença, com variação de 3 a 6 unidades de cor — assinatura
+  // de antialias, não de quadro de animação. Medido decodificando os dois PNG
+  // e comparando linha a linha, em vez de supor.
+  //
+  // `document.fonts.ready` resolve quando todas as faces em uso terminaram de
+  // carregar. É barato e vale para qualquer tela, com gráfico ou sem.
+  // `.then(() => undefined)` porque `document.fonts.ready` resolve com o
+  // FontFaceSet, e o Playwright tenta SERIALIZAR o valor de volta. Devolver
+  // undefined mantém a espera e não carrega objeto nenhum pela ponte.
+  await page.evaluate(() => document.fonts.ready.then(() => undefined));
+
+  const temGrafico = await page
+    .locator(".recharts-responsive-container")
+    .count();
+  if (!temGrafico) return;
+
+  // O contêiner existe, então esperamos o primeiro traçado APARECER antes de
+  // começar a medir se ele parou de mudar. Sem isso, a comparação começaria
+  // entre dois vazios e daria "assentado" de imediato — a mesma armadilha, um
+  // passo adiante.
+  // ⚠️ Contêiner sem forma dentro NÃO é erro, e eu tratei como se fosse.
+  //
+  // A primeira versão desta espera lançava exceção quando o contêiner existia e
+  // nenhuma forma aparecia em 10s. Ela derrubou o `painel-tecnico`, que
+  // capturava bem antes — e a razão é que **as duas situações são
+  // indistinguíveis daqui**:
+  //
+  //   · o gráfico está vazio POR DESENHO (a tela mostra "sem dados"), e o
+  //     contêiner do `ResponsiveContainer` fica lá, medindo espaço;
+  //   · o gráfico quebrou.
+  //
+  // Errei o mesmo erro que esta trava existe para consertar, no sentido
+  // contrário: antes eu colapsava dois estados em "seguir", e passei a
+  // colapsá-los em "falhar". Um estado sem sinal próprio não vira erro só
+  // porque a alternativa incomoda.
+  //
+  // Enquanto não houver como separá-los — um marcador na tela de vazio
+  // resolveria —, a espera é limitada e o silêncio é aceito: se nenhuma forma
+  // aparecer, não há animação a esperar, e a foto sai. Fica registrado no
+  // CHECKPOINT-4 como lacuna conhecida.
+  const temForma = await page
+    .waitForSelector(
+      ".recharts-surface path, .recharts-surface circle, .recharts-surface rect",
+      { timeout: 5_000 },
+    )
+    .then(() => true)
+    .catch(() => false);
+  if (!temForma) return;
+
+  let anterior = await ler();
+
+  // O padrão do Recharts é 1500ms de animação. Doze tentativas de 250ms dão
+  // folga de sobra, e o laço sai assim que assentar — o custo real é o tempo
+  // que a animação leva, não o teto.
+  for (let i = 0; i < 12; i++) {
+    await page.waitForTimeout(250);
+    const agora = await ler();
+    if (agora === anterior) return;
+    anterior = agora;
+  }
+  throw new Error(
+    `${onde}o gráfico não assentou em 3s: o traçado do SVG ainda muda entre ` +
+      `leituras. Fotografar agora daria uma imagem que a próxima execução não ` +
+      `reproduz — e evidência que muda entre execuções não é evidência.`,
+  );
+}
 const fugas = [];
 const barradas = [];
 
@@ -775,6 +948,7 @@ async function fotografar(browser, tela, tema) {
       );
     });
     await conferirPixel(page, tema, onde);
+    await assentarGrafico(page, onde);
 
     if (erros.length > 0) {
       throw new Error(
