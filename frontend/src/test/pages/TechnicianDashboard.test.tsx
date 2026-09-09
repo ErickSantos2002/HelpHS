@@ -1,3 +1,5 @@
+import { readFileSync } from "node:fs";
+import { resolve } from "node:path";
 import {
   fireEvent,
   render,
@@ -279,5 +281,26 @@ describe("TechnicianDashboard", () => {
     await waitFor(() => expect(screen.getByText("Dashboard")).toBeInTheDocument());
 
     expect(screen.getByText("Sem dados para o período")).toBeInTheDocument();
+  });
+});
+
+describe("TechnicianDashboard — os ícones", () => {
+  it("não há nenhum <svg> solto: os três indicadores usam o Icon", () => {
+    // Os três ficaram soltos na primeira passada desta tela porque nenhum
+    // tinha par no pacote — e aquela passada foi ANTES da E21. Hoje
+    // `clipboard` e `inbox` existem (foi esta tela, entre outras, que os
+    // pediu) e o triângulo unifica com `warning` pelo significado.
+    //
+    // O caso mede o TEXTO do arquivo, como o `barra-de-sla.test.ts` faz: o
+    // `Icon` é `aria-hidden`, então não há papel para alcançar pelo DOM, e
+    // um caso que só olhasse o DOM não veria a volta do `<svg>`.
+    const tela = readFileSync(
+      resolve(process.cwd(), "src/pages/dashboard/TechnicianDashboard.tsx"),
+      "utf-8",
+    ).replace(/\/\*[\s\S]*?\*\//g, "");
+    expect(tela).not.toMatch(/<svg[\s>]/);
+    for (const nome of ["clipboard", "inbox", "warning"]) {
+      expect(tela).toContain(`<Icon name="${nome}"`);
+    }
   });
 });

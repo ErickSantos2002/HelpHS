@@ -209,6 +209,20 @@ export default function TechnicianDashboard() {
   const myBreachCount = myTickets.filter((t) => t.sla_response_breach || t.sla_resolve_breach).length;
   const teamAllTickets = teamGroups.flatMap((g) => g.tickets);
 
+  /*
+   * Os tres icones dos indicadores ficaram como `<svg>` solto na primeira
+   * passada desta tela, porque nenhum deles tinha par no pacote — e aquela
+   * passada foi ANTES da **E21**.
+   *
+   * Hoje `clipboard` e `inbox` existem e batem caractere a caractere; foi
+   * esta tela, entre outras, que os pediu. O terceiro e o triangulo de aviso,
+   * unificado com `warning` pelo significado — o mesmo caso que a E21 nomeia
+   * dez vezes.
+   *
+   * Fica a licao de ordem: tela migrada antes de uma emenda de icone precisa
+   * de uma segunda olhada depois dela, senao o `<svg>` solto vira permanente
+   * por motivo que ja deixou de existir.
+   */
   return (
     <div className="space-y-5">
 
@@ -276,21 +290,21 @@ export default function TechnicianDashboard() {
           value={myActiveCount}
           sub="Abertos + em andamento"
           tone={myActiveCount > 0 ? "info" : "neutral"}
-          icon={<svg className="w-5 h-5" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={1.75}><path strokeLinecap="round" strokeLinejoin="round" d="M9 5H7a2 2 0 00-2 2v12a2 2 0 002 2h10a2 2 0 002-2V7a2 2 0 00-2-2h-2M9 5a2 2 0 002 2h2a2 2 0 002-2M9 5a2 2 0 012-2h2a2 2 0 012 2" /></svg>}
+          icon={<Icon name="clipboard" size={20} />}
         />
         <KpiCard
           label="Fila geral aberta"
           value={openCount}
           sub="Aguardando atendimento"
           tone="neutral"
-          icon={<svg className="w-5 h-5" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={1.75}><path strokeLinecap="round" strokeLinejoin="round" d="M20 13V6a2 2 0 00-2-2H6a2 2 0 00-2 2v7m16 0v5a2 2 0 01-2 2H6a2 2 0 01-2-2v-5m16 0h-2.586a1 1 0 00-.707.293l-2.414 2.414a1 1 0 01-.707.293h-3.172a1 1 0 01-.707-.293l-2.414-2.414A1 1 0 006.586 13H4" /></svg>}
+          icon={<Icon name="inbox" size={20} />}
         />
         <KpiCard
           label="SLA em risco"
           value={myBreachCount}
           sub="Nos meus tickets"
           tone={myBreachCount > 0 ? "danger" : "neutral"}
-          icon={<svg className="w-5 h-5" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={1.75}><path strokeLinecap="round" strokeLinejoin="round" d="M12 9v2m0 4h.01m-6.938 4h13.856c1.54 0 2.502-1.667 1.732-3L13.732 4c-.77-1.333-2.694-1.333-3.464 0L3.34 16c-.77 1.333.192 3 1.732 3z" /></svg>}
+          icon={<Icon name="warning" size={20} />}
         />
         <KpiCard
           label="Meu CSAT"
