@@ -40,6 +40,27 @@ import { cn } from "../../lib/utils";
  * do `Button`, botão de sair do `Topbar`, bolinha do `Switch`, e estes. Está
  * exaurida, e isso foi conferido: não há mais nenhum `--color-white` em
  * `components/forms/`. Este arquivo e a referência voltaram a dizer o mesmo.
+ *
+ * ── A dica precisava chegar a quem não a vê ───────────────────────────
+ *
+ * A `hint` era um `<span>` solto dentro do rótulo. Visualmente é a segunda
+ * linha do texto que a pessoa lê; na árvore de acessibilidade **não havia
+ * relação nenhuma** entre ela e a caixa. Quem usa leitor de tela ouvia só o
+ * `label` — e a `hint` existe justamente para dizer a **consequência de
+ * marcar**, que é o que faz a escolha ser informada.
+ *
+ * É o mesmo defeito que o `Select` tinha (E11), na metade da dica, e pela mesma
+ * razão: o `Checkbox` nunca entrou na tabela de `campos-aria.test.tsx`. O
+ * contrato existia, ele estava de fora, e nada cobrava.
+ *
+ * `aria-describedby` cria a relação. **`aria-invalid` não entra**: este
+ * componente não tem prop de erro, e inventar uma para espelhar o `Input` seria
+ * mudar o contrato do controle por simetria.
+ *
+ * O apontamento exige `label` porque a dica só é **renderizada** dentro dele —
+ * sem rótulo não há `<span>` na tela, e apontar seria apontar para um `id` que
+ * não existe. É a mesma regra do `Input`, que aponta para o erro OU para a
+ * dica, nunca para o que não está desenhado.
  */
 export interface CheckboxProps
   extends Omit<
@@ -71,6 +92,11 @@ export function Checkbox({
 }: CheckboxProps) {
   const gerado = useId();
   const inputId = id ?? gerado;
+  const idDica = inputId + "-dica";
+  // Só aponta quando a dica está de fato na tela: ela mora DENTRO do rótulo, e
+  // sem `label` não é renderizada. Apontar mesmo assim seria `aria-describedby`
+  // para um `id` inexistente — que o leitor de tela ignora em silêncio.
+  const descrito = hint && label ? idDica : undefined;
   const ref = useRef<HTMLInputElement>(null);
 
   // A propriedade `indeterminate` não existe como atributo HTML: só se marca
@@ -96,6 +122,7 @@ export function Checkbox({
         checked={checked}
         disabled={disabled}
         aria-checked={indeterminate ? "mixed" : checked}
+        aria-describedby={descrito}
         onChange={(e) => onChange(e.target.checked)}
         className="peer absolute h-px w-px opacity-0"
         {...props}
@@ -136,7 +163,12 @@ export function Checkbox({
         <span>
           {label}
           {hint ? (
-            <span className="mt-0.5 block text-xs text-conteudo-muted">{hint}</span>
+            <span
+              id={idDica}
+              className="mt-0.5 block text-xs text-conteudo-muted"
+            >
+              {hint}
+            </span>
           ) : null}
         </span>
       ) : null}
