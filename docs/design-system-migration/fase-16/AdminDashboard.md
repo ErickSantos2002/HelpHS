@@ -498,3 +498,51 @@ sobre o arquivo já com ele. Os dois conjuntos de mudança são ortogonais
 Um efeito colateral bom: o `<select>` nativo que a D9.2 trouxe é o que
 permitiu ao novo caso do calendário alcançar o ramo `periodKey === "custom"`,
 que nenhum teste alcançava.
+
+## Mudança funcional: escolher período deixou de ser desfazível
+
+**Registrada por decisão do operador em 09/09/2026.** O filtro de período
+tinha uma linha de limpar, e ela **saiu**.
+
+### O que quebrava
+
+```ts
+PERIOD_OPTIONS.find((p) => p.key === periodKey)!.days
+```
+
+Limpar devolvia `""`, que não é chave de nenhuma opção. O `find` devolvia
+`undefined`, o `!` lia `days` dele, e **a tela inteira quebrava** — não
+degradava, não mostrava erro: quebrava.
+
+### Por que a saída foi tirar a opção, e não tratá-la
+
+Porque o servidor não tem esse estado. O parâmetro é declarado assim:
+
+```python
+period: Annotated[int, Query(ge=1, le=365)] = 30
+```
+
+**`ge=1`.** Não existe "todo o período" — o mínimo é um dia, o máximo é um
+ano. A linha de limpar não tinha para onde apontar: ela oferecia um estado que
+a API recusa.
+
+A regra do operador é essa: *tratar `""` como estado válido (sem recorte) ou
+cair para o padrão — nunca ler `days` de `undefined`; a opção de limpar só sai
+se "todo o período" não existir no backend.* **Este é o segundo caso.**
+
+### E o `!` saiu junto, que era o defeito de verdade
+
+Tirar a opção fecha o caminho **conhecido** até o estouro. O `!` estourava com
+**qualquer** chave desconhecida — um valor guardado de uma versão anterior, um
+link com parâmetro na URL, um estado restaurado. Agora recua para `30`, que é
+o padrão declarado no backend: o que o servidor faria sozinho se o parâmetro
+não fosse mandado.
+
+Recuo para 30 e **não** para o primeiro da lista, de propósito: se alguém
+reordenar `PERIOD_OPTIONS`, o recuo continua sendo o mesmo número.
+
+### O que o usuário perde
+
+A tela abre com um período escolhido e não há como voltar a "nenhum". Isso é
+perda real de reversibilidade, e é o preço de a API não ter o estado — a
+alternativa seria a tela oferecer algo que o servidor recusa.
