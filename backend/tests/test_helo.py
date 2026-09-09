@@ -784,6 +784,86 @@ async def test_resposta_comum_nao_tem_motivo_nenhum(helo_ligada, modelo_diz):
     assert fala.escalou is False
 
 
+# ── Caminhos de falha ─────────────────────────────────────────
+#
+# A promessa do modulo, escrita como teste: nenhum chamado fica preso porque
+# uma IA nao respondeu. Cada servico externo cai de um jeito diferente e todos
+# terminam no mesmo lugar -- ela fala, escala, e a equipe e chamada com o
+# motivo certo.
+
+
+@pytest.mark.asyncio
+async def test_pedido_de_humano_funciona_com_o_llm_fora_do_ar(helo_ligada, monkeypatch):
+    """
+    A regra mais importante do desenho não pode depender de serviço externo.
+
+    Aqui o modelo não só está mudo: ele EXPLODE. Se a guarda de `quer_humano`
+    estivesse depois da chamada — ou dentro do prompt, confiada ao modelo —,
+    "quero falar com uma pessoa" viraria uma escalada genérica no melhor caso e
+    um 500 no pior, justamente para o cliente que já disse que não quer robô.
+    """
+
+    async def _servico_fora(*_a, **_k):
+        raise ConnectionError("DeepSeek fora do ar")
+
+    monkeypatch.setattr(helo, "responde_como_helo", _servico_fora)
+    monkeypatch.setattr(helo, "embute_um", _servico_fora)
+
+    fala = await responde_triagem(
+        _db_com_falas(1), _chamado(), _cliente(), "quero falar com um humano"
+    )
+
+    assert fala.motivo == helo.MOTIVO_PEDIU_HUMANO
+    assert "passando seu chamado para um atendente" in fala.mensagem.content
+
+
+@pytest.mark.asyncio
+async def test_com_embedding_e_llm_fora_ela_escala_em_vez_de_prender(helo_ligada, monkeypatch):
+    """
+    Os dois serviços da Fase 2 fora ao mesmo tempo — o cenário de um deploy ruim.
+
+    Sem embedding não há vetor, sem vetor não há busca, e sem modelo não há
+    resposta. O que NÃO pode acontecer é o chamado ficar parado: o cliente
+    escreveu e precisa de alguém, e a escalada é o que entrega isso.
+    """
+    monkeypatch.setattr(helo, "embute_um", AsyncMock(return_value=None))
+    monkeypatch.setattr(helo, "responde_como_helo", AsyncMock(return_value=None))
+    ticket = _chamado()
+
+    fala = await responde_triagem(_db_com_falas(1), ticket, _cliente(), "não liga desde ontem")
+
+    assert fala is not None
+    assert fala.motivo == helo.MOTIVO_IA_MUDA
+    assert ticket.ai_enabled is False
+    helo.busca_trechos.assert_not_awaited()
+
+
+@pytest.mark.asyncio
+async def test_base_vazia_nao_escala_sozinha_e_isso_e_decisao(helo_ligada, modelo_diz):
+    """
+    `NADA ENCONTRADO` chega ao modelo, e é o PROMPT que manda escalar dali.
+
+    O backend poderia escalar sozinho ao ver a base vazia, e não escala de
+    propósito: "obrigada, resolveu!" e "era isso mesmo, valeu" também chegam com
+    base vazia, e escalar ali mandaria para um humano uma conversa que acabou
+    bem. O preço dessa escolha é que a regra "base vazia, única saída é
+    escalar" vive no texto do prompt, não no código — por isso existe o teste
+    que prende `NADA ENCONTRADO` dentro do `SISTEMA`, em `test_helo_prompt.py`.
+
+    Este teste fixa a decisão: com base vazia, uma resposta comum do modelo
+    PASSA. Se um dia o backend passar a escalar sozinho, ele quebra, e a
+    conversa sobre o custo acontece de novo em vez de a mudança entrar calada.
+    """
+    espiao = modelo_diz("Que bom que resolveu! Precisando, é só chamar.")
+
+    fala = await responde_triagem(_db_com_falas(3), _chamado(), _cliente(), "resolveu, obrigada!")
+
+    assert fala.motivo is None
+    assert "Que bom que resolveu" in fala.mensagem.content
+    _sistema, contexto = espiao.await_args.args
+    assert NADA_ENCONTRADO in contexto
+
+
 @pytest.mark.asyncio
 async def test_ela_nao_entra_em_conversa_que_comecou_sem_ela(helo_ligada):
     """

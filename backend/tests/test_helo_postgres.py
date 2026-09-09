@@ -32,7 +32,7 @@ from unittest.mock import AsyncMock, MagicMock
 
 import pytest
 import pytest_asyncio
-from sqlalchemy import text
+from sqlalchemy import select, text
 from sqlalchemy.ext.asyncio import async_sessionmaker, create_async_engine
 
 from app.models.models import (
@@ -584,6 +584,53 @@ async def test_o_cadastro_diz_se_o_chamado_nasceu_dentro_do_expediente(db, abert
     bloco = await monta_cadastro(db, chamado, cliente)
 
     assert esperado in bloco
+
+
+@pytest.mark.asyncio
+async def test_falha_de_banco_dentro_dela_nao_leva_a_mensagem_do_cliente(
+    db, helo_ligada, modelo_diz, monkeypatch
+):
+    """
+    A guarda do router, e a razão de ela não ser só um `except`.
+
+    A busca vetorial já tem SAVEPOINT próprio. Esta é a outra metade: qualquer
+    OUTRA consulta dela — montar o cadastro, montar a conversa, contar as falas
+    — pode falhar do mesmo jeito, e em PostgreSQL isso aborta a transação
+    inteira. Um `except` que só engole a exceção deixa a sessão em pedaços, e o
+    `commit` seguinte morre levando junto a mensagem do cliente. Ficaria
+    idêntico a não ter guarda, com o agravante de parecer protegido.
+
+    O `flush` no fim é a prova. Sem o SAVEPOINT ele morre com "current
+    transaction is aborted", e a mutação que tira o `begin_nested` derruba
+    exatamente este teste.
+    """
+    from app.routers.chat import _fala_da_helo_sem_derrubar
+
+    modelo_diz("não deveria chegar ao modelo")
+
+    async def _cadastro_que_estoura(sessao, chamado, quem):
+        await sessao.execute(text("SELECT * FROM tabela_que_nunca_existiu"))
+
+    monkeypatch.setattr(helo, "monta_cadastro", _cadastro_que_estoura)
+    cliente, chamado = await _cenario(db)
+
+    # Na ordem do router: a mensagem do cliente vai para o banco ANTES de ela
+    # falar (o `_notify_other_party` consulta e o autoflush a empurra), e só
+    # então a Helô roda. É isso que a deixa fora do SAVEPOINT dela.
+    do_cliente = _mensagem(chamado, cliente, "não liga desde ontem")
+    db.add(do_cliente)
+    await db.flush()
+
+    fala = await _fala_da_helo_sem_derrubar(db, chamado, cliente, "não liga desde ontem")
+
+    assert fala is None, "sem fala dela, mas o chamado segue"
+    # A prova é uma CONSULTA, e não um `flush` vazio: `flush` sem nada pendente
+    # não toca no banco e passaria com a transação em pedaços. Sem o SAVEPOINT
+    # este `execute` morre com "current transaction is aborted".
+    ainda_la = (
+        await db.execute(select(ChatMessage).where(ChatMessage.id == do_cliente.id))
+    ).scalar_one_or_none()
+    assert ainda_la is not None, "a mensagem do cliente sobreviveu à falha dela"
 
 
 @pytest.mark.asyncio
