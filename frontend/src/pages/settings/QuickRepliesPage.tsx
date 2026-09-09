@@ -287,7 +287,18 @@ export default function QuickRepliesPage() {
       {loadError && <Alert variant="danger">{loadError}</Alert>}
 
       <Card padding="none">
-        {/* Busca */}
+        {/* Busca
+
+            O nome acessível do campo saía do `placeholder`, e o placeholder
+            **some assim que a pessoa digita**: um campo cujo nome desaparece
+            ao ser usado não tem nome. Quem volta ao campo com leitor de tela
+            ouve "caixa de edição" e o que já digitou — nunca de que busca se
+            trata.
+
+            `aria-label` fixo resolve sem tocar no leiaute da barra, que é a
+            razão de não haver rótulo visível aqui: a busca ocupa a largura
+            inteira do topo do `Card`. É a mesma forma do `KBListPage`, do
+            `UsersPage` e do `ProductsPage`. */}
         <div className="border-b border-borda p-3">
           <input
             value={search}
@@ -295,6 +306,7 @@ export default function QuickRepliesPage() {
               setSearch(e.target.value);
               setPage(1);
             }}
+            aria-label="Buscar respostas rápidas"
             placeholder="Buscar por atalho, título ou conteúdo…"
             className="w-full rounded-lg border border-borda-control bg-surface-elevated px-3 py-2 text-sm text-conteudo placeholder:text-conteudo-muted focus:outline-none focus:ring-2 focus:ring-action focus:border-transparent transition-colors"
           />

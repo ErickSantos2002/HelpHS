@@ -138,3 +138,83 @@ describe("Select — tokens", () => {
     );
   });
 });
+
+// ── Fase 16: o id que saía do rótulo, e colidia em silêncio ───────────
+
+/**
+ * O `Select` era o consumidor que ficou para trás na **E11**.
+ *
+ * O `id` do campo vinha de `label.toLowerCase()`. Dois seletores com o mesmo
+ * rótulo na mesma tela geram o **mesmo id**, e um `id` repetido não é erro de
+ * HTML: o `htmlFor` do segundo rótulo resolve para o campo do primeiro, e nada
+ * acusa — nem `tsc`, nem `eslint`, nem os casos acima, que só montam um
+ * seletor de cada vez. É exatamente o ponto cego que o caso da colisão fecha.
+ */
+describe("Select — o id não sai mais do rótulo", () => {
+  const SITUACAO = [
+    { value: "aberto", label: "Aberto" },
+    { value: "fechado", label: "Fechado" },
+  ];
+
+  function doisIguais() {
+    return render(
+      <>
+        <Select label="Situação" options={SITUACAO} />
+        <Select label="Situação" options={SITUACAO} />
+      </>,
+    );
+  }
+
+  it("dois seletores com o MESMO rótulo não compartilham id", () => {
+    const { container } = doisIguais();
+    const [a, b] = [...container.querySelectorAll("select")];
+
+    expect(a.id).toBeTruthy();
+    expect(b.id).toBeTruthy();
+    expect(a.id).not.toBe(b.id);
+  });
+
+  it("cada rótulo alcança o SEU campo, e não o de cima", async () => {
+    // É o que a pessoa faz: clicar no rótulo para cair no campo. Com o id
+    // derivado, clicar no segundo rótulo focava o primeiro seletor.
+    const { container } = doisIguais();
+    const [primeiro, segundo] = [...container.querySelectorAll("select")];
+    const [rotuloDeCima, rotuloDeBaixo] = screen.getAllByText("Situação");
+
+    await userEvent.click(rotuloDeBaixo);
+    expect(segundo).toHaveFocus();
+    expect(primeiro).not.toHaveFocus();
+
+    await userEvent.click(rotuloDeCima);
+    expect(primeiro).toHaveFocus();
+    expect(segundo).not.toHaveFocus();
+  });
+
+  it("cada rótulo aponta para um campo que existe", () => {
+    // A outra metade da colisão: os dois `htmlFor` resolviam para o mesmo
+    // elemento. Aqui cada um tem de resolver para o seu.
+    const { container } = doisIguais();
+    const campos = [...container.querySelectorAll("select")];
+    const alvos = [...container.querySelectorAll("label")].map((l) =>
+      document.getElementById(l.getAttribute("for")!),
+    );
+
+    expect(alvos).toEqual(campos);
+  });
+
+  it("o id passado por quem chama continua ganhando", () => {
+    // As telas que filtram por este primitivo depois da D9.2 mandam o seu.
+    render(<Select label="Período" options={SITUACAO} id="filtro-periodo" />);
+
+    expect(screen.getByLabelText("Período").id).toBe("filtro-periodo");
+  });
+
+  it("seletor sem rótulo ainda recebe id", () => {
+    // Antes ficava `undefined` — o caso dos filtros que só têm placeholder.
+    const { container } = render(
+      <Select options={SITUACAO} placeholder="Status" />,
+    );
+
+    expect(container.querySelector("select")!.id).toBeTruthy();
+  });
+});

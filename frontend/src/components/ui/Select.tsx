@@ -1,4 +1,4 @@
-import { forwardRef } from "react";
+import { forwardRef, useId } from "react";
 import type { SelectHTMLAttributes } from "react";
 import { cn } from "../../lib/utils";
 import { Icon } from "./Icon";
@@ -16,12 +16,33 @@ export interface SelectProps extends SelectHTMLAttributes<HTMLSelectElement> {
   placeholder?: string;
 }
 
+/**
+ * Seletor nativo, de `DS/components/forms/Select.jsx`.
+ *
+ * ── O `id` deixou de sair do rótulo (E11) ─────────────────────────────
+ *
+ * Ele era `label.toLowerCase()`. **Dois seletores com o mesmo rótulo na mesma
+ * tela geravam o mesmo `id`** — e aí o `<label htmlFor>` do segundo apontava
+ * para o campo do PRIMEIRO: clicar no rótulo de baixo focava o de cima, e o
+ * leitor de tela lia o nome errado. HTML com `id` repetido não é erro, então
+ * nada acusava — nem `tsc`, nem `eslint`, nem teste de componente.
+ *
+ * E sem rótulo o `id` ficava `undefined`, que é o `htmlFor` quebrado do outro
+ * lado — o caso dos cinco filtros do `TicketFilters`, que só têm placeholder.
+ *
+ * Agora vem do `useId`, como no `Input`: um por instância, estável entre
+ * renderizações e igual no servidor e no cliente. **O `id` passado por quem
+ * chama continua ganhando** — as quatorze telas que passaram a filtrar por
+ * este primitivo depois da D9.2 mandam o seu (`filtro-periodo`,
+ * `filtro-status`, `kb-categoria`…), e elas não mudam.
+ */
 export const Select = forwardRef<HTMLSelectElement, SelectProps>(
   (
     { label, error, hint, options, placeholder, className, id, ...props },
     ref,
   ) => {
-    const inputId = id ?? label?.toLowerCase().replace(/\s+/g, "-");
+    const gerado = useId();
+    const inputId = id ?? gerado;
 
     return (
       <div className="flex flex-col gap-1.5">

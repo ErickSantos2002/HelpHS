@@ -100,11 +100,28 @@ describe("QuickRepliesPage — o que a tela promete", () => {
     expect(screen.getByRole("button", { name: "Editar ferias" })).toBeTruthy();
   });
 
+  it("a busca tem nome próprio, e ele NÃO é o placeholder", async () => {
+    // O nome acessível vinha do `placeholder`, que some assim que a pessoa
+    // digita: um campo cujo nome desaparece ao ser usado não tem nome. O
+    // `aria-label` é fixo, então o nome continua de pé com o campo cheio.
+    render(<QuickRepliesPage />);
+    await screen.findByText("/bomdia");
+
+    const busca = screen.getByRole("textbox", {
+      name: "Buscar respostas rápidas",
+    });
+    expect(busca).toHaveAttribute("placeholder");
+    expect(busca).not.toHaveAccessibleName(/atalho, título ou conteúdo/);
+
+    await userEvent.type(busca, "feri");
+    expect(busca).toHaveAccessibleName("Buscar respostas rápidas");
+  });
+
   it("a busca filtra por atalho", async () => {
     render(<QuickRepliesPage />);
     await screen.findByText("/bomdia");
     await userEvent.type(
-      screen.getByPlaceholderText(/Buscar por atalho/),
+      screen.getByRole("textbox", { name: "Buscar respostas rápidas" }),
       "feri",
     );
     expect(screen.getByText("/ferias")).toBeTruthy();
@@ -123,7 +140,7 @@ describe("QuickRepliesPage — o que a tela promete", () => {
     render(<QuickRepliesPage />);
     await screen.findByText("/bomdia");
     await userEvent.type(
-      screen.getByPlaceholderText(/Buscar por atalho/),
+      screen.getByRole("textbox", { name: "Buscar respostas rápidas" }),
       "zzzz",
     );
     expect(
