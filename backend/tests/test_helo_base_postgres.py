@@ -24,6 +24,7 @@ honesto, só mais lento e menos determinístico.
 """
 
 import asyncio
+import math
 import shutil
 import uuid
 
@@ -49,6 +50,7 @@ from app.models.models import (
 )
 from app.services.helo_base import (
     NADA_ENCONTRADO,
+    TETO_DE_DISTANCIA,
     busca_trechos,
     monta_base_tecnica,
 )
@@ -68,6 +70,18 @@ def _vetor(marca: float) -> list[float]:
     v[0] = 1.0
     v[1] = marca
     return v
+
+
+def _marca_para_distancia(distancia: float) -> float:
+    """
+    A marca que fica exatamente a `distancia` de `_vetor(0.0)`.
+
+    Entre [1, 0, ...] e [1, m, 0, ...] o cosseno é 1/√(1+m²), então a distância
+    é 1 − 1/√(1+m²) e a inversa é √((1/(1−d))² − 1). Existe para o teste dizer
+    "um trecho a 0,30 de distância" em vez de plantar um 0,92 sem explicação —
+    e para continuar legível se o teto mudar de valor.
+    """
+    return math.sqrt((1 / (1 - distancia)) ** 2 - 1)
 
 
 @pytest.fixture(scope="module")
@@ -371,6 +385,108 @@ async def test_o_bloco_avisa_quando_o_procedimento_exige_senha(db):
 
     assert "exige senha de administrador" in bloco
     assert "NÃO possui" in bloco
+
+
+# ── O teto de distância ───────────────────────────────────────
+
+
+@pytest.mark.asyncio
+async def test_trecho_longe_demais_nao_chega_ao_modelo(db):
+    """
+    O defeito que o teto existe para fechar, medido no corpus real.
+
+    "Como conecto na impressora" num Titan — que não tem impressora — devolvia
+    "6. Passo a Passo para Utilização" a 0,2789, e o modelo recebia isso num
+    bloco que o prompt chama de "sua única fonte de verdade técnica". Sem teto
+    a busca SEMPRE devolve os quatro mais próximos, por mais longe que estejam:
+    ordenar não é o mesmo que filtrar.
+    """
+    cliente, iblow, titan = await _monta_corpus(db)
+    await _trecho(
+        db,
+        produto=titan.id,
+        tipo=HeloDocType.tecnico,
+        documento="Manual Tecnico Titan.txt",
+        secao="99. Assunto sem relação",
+        conteudo="Texto que nada tem a ver com a pergunta.",
+        marca=_marca_para_distancia(0.40),
+    )
+    await db.flush()
+
+    achados = await busca_trechos(db, _chamado(cliente, titan.id), _vetor(0.0))
+
+    assert all(t.distancia <= TETO_DE_DISTANCIA for t in achados)
+    assert not any("sem relação" in t.secao for t in achados)
+
+
+@pytest.mark.asyncio
+async def test_o_teto_e_este_e_nao_outro(db):
+    """
+    Prende o VALOR, e não só a existência do corte.
+
+    Os dois trechos ficam de lados opostos de 0,25 por dez milésimos cada. Um
+    teto mais frouxo (0,30) deixaria o de fora entrar; um mais apertado (0,20)
+    mataria o de dentro. O número saiu de medição contra o corpus real — ver o
+    comentário em `helo_base.py` —, e um número medido que ninguém prende volta
+    a ser chute na primeira refatoração.
+    """
+    cliente, _, titan = await _monta_corpus(db)
+    for secao, distancia in (("Dentro por pouco", 0.24), ("Fora por pouco", 0.26)):
+        await _trecho(
+            db,
+            produto=titan.id,
+            tipo=HeloDocType.tecnico,
+            documento="Manual Tecnico Titan.txt",
+            secao=secao,
+            conteudo="corpo",
+            marca=_marca_para_distancia(distancia),
+        )
+    await db.flush()
+
+    secoes = [t.secao for t in await busca_trechos(db, _chamado(cliente, titan.id), _vetor(0.0))]
+
+    assert "Dentro por pouco" in secoes
+    assert "Fora por pouco" not in secoes
+
+
+@pytest.mark.asyncio
+async def test_tudo_longe_cai_no_mesmo_nada_encontrado(db):
+    """
+    Não existe estado novo para "achei, mas está longe".
+
+    Um terceiro estado só daria ao modelo mais uma coisa para interpretar
+    errado. Busca vazia e busca toda cortada desembocam no mesmo literal, que é
+    o que o prompt reconhece e o que produz escalada.
+    """
+    cliente = User(
+        id=uuid.uuid4(),
+        name="Suelen",
+        email=f"{uuid.uuid4().hex[:8]}@t.com",
+        password="x",
+        role=UserRole.client,
+        status=UserStatus.active,
+        lgpd_consent=True,
+        email_verified=True,
+        onboarding_completed=True,
+    )
+    produto = Product(id=uuid.uuid4(), name="Só longe")
+    db.add_all([cliente, produto])
+    await db.flush()
+    await _trecho(
+        db,
+        produto=produto.id,
+        tipo=HeloDocType.tecnico,
+        documento="Manual.txt",
+        secao="1. Único trecho, e longe",
+        conteudo="corpo",
+        marca=_marca_para_distancia(0.45),
+    )
+    await db.flush()
+
+    achados = await busca_trechos(db, _chamado(cliente, produto.id), _vetor(0.0))
+
+    assert achados == []
+    assert monta_base_tecnica(achados) == NADA_ENCONTRADO
 
 
 @pytest.mark.asyncio

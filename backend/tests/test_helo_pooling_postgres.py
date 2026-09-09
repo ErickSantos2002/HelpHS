@@ -46,7 +46,7 @@ from pathlib import Path
 import numpy as np
 import pytest
 import pytest_asyncio
-from sqlalchemy import text
+from sqlalchemy import select, text
 from sqlalchemy.ext.asyncio import async_sessionmaker, create_async_engine
 
 from app.models.models import (
@@ -64,7 +64,7 @@ from app.models.models import (
     UserStatus,
     helo_chunk_products,
 )
-from app.services.helo_base import busca_trechos
+from app.services.helo_base import TETO_DE_DISTANCIA, busca_trechos
 from servico_embedding.pooling import agrupa
 from tests.test_dashboard_postgres import _sobe_postgres
 
@@ -312,16 +312,42 @@ async def test_a_busca_devolve_o_trecho_de_idioma_e_nao_o_de_reconhecimento_faci
         reopen_count=0,
     )
 
-    achados = await busca_trechos(db, chamado, vetores[indice["pergunta_idioma"]].tolist())
+    # A ORDEM e a PROXIMIDADE são a propriedade do pooling, e são medidas com a
+    # consulta crua — sem o `busca_trechos`, que aplica o teto de distância.
+    #
+    # Ligar as duas coisas foi o defeito de desenho deste teste: ele quebrou
+    # quando o teto entrou, e o que quebrou não tinha nada a ver com pooling.
+    # Um teste que falha por causa de uma regra de negócio vizinha para de
+    # dizer o que o nome dele promete.
+    pergunta = vetores[indice["pergunta_idioma"]].tolist()
+    distancias = (
+        await db.execute(
+            select(HeloChunk.secao, HeloChunk.embedding.cosine_distance(pergunta).label("d"))
+            .where(HeloChunk.document_id == documento.id)
+            .order_by("d")
+        )
+    ).all()
 
-    assert [t.secao for t in achados][
-        0
-    ] == "titan_idioma", "a seção de idioma tinha que vir primeiro para a pergunta sobre idioma"
-    assert achados[0].distancia < _LIMIAR_DE_PROXIMIDADE, (
-        f"distância {achados[0].distancia:.4f} acima do limiar {_LIMIAR_DE_PROXIMIDADE} — "
+    assert (
+        distancias[0][0] == "titan_idioma"
+    ), "a seção de idioma tinha que vir primeiro para a pergunta sobre idioma"
+    assert float(distancias[0][1]) < _LIMIAR_DE_PROXIMIDADE, (
+        f"distância {float(distancias[0][1]):.4f} acima do limiar {_LIMIAR_DE_PROXIMIDADE} — "
         "o pooling está degradando o vetor (máscara ignorada dá 0,41; só CLS dá 0,45)"
     )
-    assert achados[1].distancia > achados[0].distancia
+    assert float(distancias[1][1]) > float(distancias[0][1])
+
+    # E o preço do teto, medido no mesmo dado em vez de suposto: a 0,2533 o
+    # acerto fica FORA do corte de 0,25, e esta pergunta passa a não devolver
+    # nada. É o contraexemplo conhecido do teto — o mesmo par que abriu as duas
+    # hipóteses sobre a qualidade da recuperação, e a razão de a hipótese B
+    # estar registrada como dívida com gatilho em `docs/decisoes-e-regras.md`.
+    #
+    # Fica como teste, e não como comentário, porque é o número que decide se a
+    # dívida ainda existe: no dia em que o teto ou o modelo mudarem, este teste
+    # é quem avisa que o contraexemplo mudou de lado.
+    assert float(distancias[0][1]) > TETO_DE_DISTANCIA
+    assert await busca_trechos(db, chamado, pergunta) == []
 
 
 # ── As guardas de forma ───────────────────────────────────────

@@ -50,6 +50,48 @@ from app.models.models import (
 # com o próprio enunciado do cliente pela atenção do modelo.
 K_TRECHOS = 4
 
+# Distância máxima de cosseno para um trecho ser considerado pertinente.
+#
+# ESTE NÚMERO FOI MEDIDO, não escolhido. Em 09/09/2026, contra o corpus real
+# (74 trechos, 3 manuais técnicos), com 40 perguntas rotuladas à mão: 27 com
+# resposta conhecida no manual do produto e 13 sem resposta nenhuma lá dentro
+# (preço, certificado RBC, dano físico, nota fiscal, e função que aquele
+# aparelho não tem). As duas populações medidas no 1º colocado:
+#
+#     com resposta   n=27  mediana 0,2185   máximo 0,2850
+#     sem resposta   n=13  mínimo   0,2590  mediana 0,2789
+#
+# 0,25 é o maior corte que ainda barra 100% das perguntas sem resposta.
+# Preserva 22 das 27 com resposta (81%), e derruba os trechos de enchimento
+# das que ficam: dos 160 trechos que hoje chegam ao modelo nessas 40
+# perguntas, passam a chegar 25. Em 74% das perguntas com resposta sobra
+# exatamente UM trecho — o certo — no lugar de um mais três de ruído.
+#
+# ONDE ISTO É FRÁGIL, e por que está escrito aqui e não só no commit:
+#
+# 1. A margem é de 0,009 (0,25 contra 0,2590, que é "quanto custa a calibração
+#    do titan" casando com "2. Composição Física"). É um ajuste a 40 pontos,
+#    não uma lei — e as perguntas foram escritas por quem já sabia a resposta.
+#    O `test_helo_pooling_postgres.py` mostra, com embedding real, um ACERTO a
+#    0,2533: as duas populações se sobrepõem entre 0,25 e 0,26. Este corte não
+#    separa duas nuvens, escolhe um lado da sobreposição — o apertado, porque
+#    cortar acerto custa uma escalada e passar trecho errado custa uma
+#    instrução errada.
+# 2. Foi medido com TRÊS manuais. Espaço mais denso encurta distância; quando
+#    houver manual para mais produtos, isto se remede junto com a dívida do
+#    trecho genérico.
+# 3. O número vale para o bge-m3 e para estes textos. Trocar de modelo de
+#    embedding invalida a medição inteira, sem que nada quebre visivelmente.
+# 4. As 5 perguntas com resposta que o corte derruba viram escalada. É o lado
+#    barato de errar: um humano responde. O outro lado é a Helô ditar
+#    procedimento de instrumento de medição legal a partir do trecho errado.
+#
+# A borda em si (`<=` contra `<`) NÃO está presa por teste, e de propósito: a
+# distância vem em ponto flutuante do pgvector e nunca cai exatamente em 0,25.
+# Um teste da igualdade exata seria instável, e a mutação que troca o operador
+# sobrevive — medido, não suposto.
+TETO_DE_DISTANCIA = 0.25
+
 # A string que o bloco de contexto recebe quando a busca não achou nada.
 #
 # Literal, e nunca um bloco vazio. Bloco vazio o modelo interpreta como "não
@@ -86,8 +128,12 @@ async def busca_trechos(
         vetor: o embedding da pergunta do cliente.
 
     Returns:
-        Até `k` trechos, do mais próximo ao mais distante. Lista VAZIA quando o
-        chamado não tem produto — ver abaixo.
+        Até `k` trechos, do mais próximo ao mais distante, e nenhum além de
+        `TETO_DE_DISTANCIA`. Lista VAZIA quando o chamado não tem produto, e
+        também quando tudo ficou longe demais — os dois casos desembocam no
+        mesmo `NADA ENCONTRADO`, de propósito: um estado novo para "achei mas
+        está longe" só daria ao modelo uma terceira coisa para interpretar
+        errado.
     """
     # Chamado sem produto devolve nada, e isso é resposta, não omissão.
     #
@@ -117,6 +163,13 @@ async def busca_trechos(
             # Trecho ainda não embutido não tem como ser ordenado por
             # distância — e ordenar por NULL colocaria lixo no topo.
             HeloChunk.embedding.is_not(None),
+            # O teto de distância. Sem ele a busca SEMPRE devolve os quatro
+            # mais próximos, por mais longe que estejam: "como conecto na
+            # impressora" num Titan, que não tem impressora, devolvia o passo
+            # a passo de ligar o aparelho como se fosse resposta. O modelo
+            # recebe esse trecho num bloco que o prompt chama de "sua única
+            # fonte de verdade técnica".
+            HeloChunk.embedding.cosine_distance(vetor) <= TETO_DE_DISTANCIA,
         )
         .order_by("distancia")
         .limit(k)
