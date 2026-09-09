@@ -129,8 +129,30 @@ function StatusBar({ t }: { t: DashboardStats["tickets"] }) {
     }))
     .filter((s) => s.value > 0);
 
+  // O grupo inteiro é `role="img"`, e a distribuição vai escrita no rótulo.
+  //
+  // A faixa empilhada é a única portadora da PROPORÇÃO entre os blocos —
+  // largura, e nada mais. Sem papel nenhum ela some para quem não vê, e com
+  // `aria-hidden` sumiria de propósito. `img` é o papel de "isto é um desenho,
+  // e este é o texto dele".
+  //
+  // O rótulo repete a legenda de baixo PALAVRA POR PALAVRA (`Aberto: 3`),
+  // porque `role="img"` substitui a subárvore inteira: o título e a legenda
+  // deixam de ser lidos, e o que o rótulo não disser deixa de existir para
+  // quem ouve. Dizer o mesmo de outro jeito criaria duas versões da mesma
+  // contagem.
+  const distribuicao = segs.map((s) => `${s.label}: ${s.value}`).join(", ");
+
   return (
-    <div className="rounded-xl bg-surface border border-borda p-5">
+    <div
+      role="img"
+      aria-label={
+        distribuicao
+          ? `Distribuição de status — ${distribuicao}`
+          : "Distribuição de status"
+      }
+      className="rounded-xl bg-surface border border-borda p-5"
+    >
       <p className="text-xs font-semibold uppercase tracking-wider text-conteudo-muted mb-3">Distribuição de status</p>
       <div className="flex h-3 rounded-full overflow-hidden gap-px">
         {segs.map((s) => (
@@ -242,7 +264,19 @@ export default function AdminDashboard() {
   const categoryData = [...(report.tickets_by_category ?? [])]
     .sort((a, b) => b.count - a.count)
     .slice(0, 8);
+  // Dois denominadores DIFERENTES, e a diferença é o ponto:
+  //
+  //   `categoryMax`   — o maior da lista. É o que a BARRA desenha: largura
+  //                     relativa, tamanho comparado ao campeão.
+  //   `categoryTotal` — a soma das categorias EXIBIDAS. É o que o RÓTULO diz:
+  //                     "25% do total", que é a fatia do bolo.
+  //
+  // Exibidas, e não todas as do período: a lista é cortada em oito
+  // (`slice(0, 8)`), e uma porcentagem sobre um total que inclui categorias
+  // fora da tela não fecharia com nada que se possa ler ali. O denominador é
+  // o que está à vista.
   const categoryMax = categoryData[0]?.count || 1;
+  const categoryTotal = categoryData.reduce((s, c) => s + c.count, 0) || 1;
 
   // Rótulo e cor por `lib/status.ts` / `SLOT_DE_STATUS` (E18) — nunca mapa
   // local. `name` é o que a legenda mostra: obrigatória num gráfico de status,
@@ -523,7 +557,30 @@ export default function AdminDashboard() {
           ) : (
             <div className="space-y-3">
               {categoryData.map((cat) => (
-                <div key={cat.category}>
+                // A LINHA INTEIRA é `role="img"`, e o rótulo traz nome,
+                // contagem e proporção.
+                //
+                // Esconder a barra (abaixo) foi certo, e deixou um buraco:
+                // quem ouve lia "Hardware 6" e nada sobre a PROPORÇÃO entre as
+                // categorias, que passou a ser informação só visual. `img` é o
+                // papel de "isto é um desenho, e este é o texto dele".
+                //
+                // ⚠️ `role="img"` substitui a subárvore pelo rótulo: o nome e a
+                // contagem em texto deixam de ser lidos por conta própria. Por
+                // isso o `aria-label` repete os DOIS — omitir qualquer um
+                // apagaria da árvore algo que está escrito na tela.
+                //
+                // A porcentagem é sobre `categoryTotal` (a soma das exibidas),
+                // não sobre `categoryMax`: a barra desenha a segunda, e são
+                // coisas diferentes — a fatia do bolo contra o tamanho relativo
+                // ao campeão.
+                <div
+                  key={cat.category}
+                  role="img"
+                  aria-label={`${cat.category}: ${cat.count} chamados, ${Math.round(
+                    (cat.count / categoryTotal) * 100,
+                  )}% do total`}
+                >
                   <div className="flex items-center justify-between mb-1">
                     <span className="text-xs text-conteudo-muted truncate max-w-[70%]">{cat.category}</span>
                     <span className="text-xs font-bold tabular-nums text-conteudo">{cat.count}</span>
@@ -535,9 +592,11 @@ export default function AdminDashboard() {
                       (`progressbar` anuncia tarefa avançando) nem medição
                       dentro de faixa fixa (`meter`) — declarar qualquer um dos
                       dois poria um número numa escala que não existe.
-                      `aria-hidden` só é honesto aqui porque a contagem está
-                      escrita logo acima, em texto: quem ouve lê "Hardware 6" e
-                      não perde nada com o desenho fora da árvore. */}
+                      `aria-hidden` continua na BARRA, e agora é honesto por
+                      inteiro: a contagem está escrita logo acima em texto, e a
+                      proporção que só a barra desenhava está no `aria-label` do
+                      grupo. Sem esse rótulo, esconder o desenho escondia a
+                      comparação junto. */}
                   <div
                     className="h-1.5 rounded-full bg-surface-elevated overflow-hidden"
                     aria-hidden="true"
@@ -596,7 +655,15 @@ export default function AdminDashboard() {
                   <div className="flex items-center justify-between mb-2">
                     <div className="flex items-center gap-2">
                       <span className={cn("w-2 h-2 rounded-full", slaBg(item.compliance_rate))} />
-                      <span className="text-sm font-medium text-conteudo capitalize">{item.priority}</span>
+                      {/* O rótulo sai de `lib/prioridade.ts`, e não da chave
+                          crua da API com `capitalize` por cima. `critical` e
+                          `low` são nomes de campo, não texto de interface: o
+                          `capitalize` só os deixava com maiúscula, em inglês,
+                          divergindo do "Crítica"/"Baixa" (feminino da E17) que
+                          o selo, a lista e o gráfico desta mesma tela já usam.
+                          A classe saiu junto — ela existia só para maquiar a
+                          chave. */}
+                      <span className="text-sm font-medium text-conteudo">{rotuloDePrioridade(item.priority)}</span>
                     </div>
                     <div className="text-right">
                       <span className={cn("text-sm font-bold tabular-nums", slaColor(item.compliance_rate))}>
@@ -615,13 +682,19 @@ export default function AdminDashboard() {
                       presa em `barra-de-sla.test.ts`. Sem `role`, um `<div>` de
                       largura em porcentagem não é nada para quem não vê a
                       largura, e a porcentagem ao lado é texto de outro
-                      elemento, sem vínculo com o desenho. */}
+                      elemento, sem vínculo com o desenho.
+
+                      O nome repete o rótulo VISÍVEL de propósito, para o nome
+                      acessível não divergir da tela — e por isso acompanhou a
+                      troca da chave crua por `rotuloDePrioridade()`: deixá-lo
+                      em `critical` criaria exatamente a divergência que ele
+                      existe para evitar. */}
                   <div
                     role="meter"
                     aria-valuenow={Math.round(item.compliance_rate)}
                     aria-valuemin={0}
                     aria-valuemax={100}
-                    aria-label={`Conformidade de SLA — ${item.priority}`}
+                    aria-label={`Conformidade de SLA — ${rotuloDePrioridade(item.priority)}`}
                     className="h-2 rounded-full bg-surface-elevated overflow-hidden"
                   >
                     <div className={cn("h-full rounded-full transition-all duration-700", slaBg(item.compliance_rate))} style={{ width: `${item.compliance_rate}%` }} />

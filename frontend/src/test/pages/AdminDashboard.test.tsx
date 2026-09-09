@@ -362,7 +362,7 @@ describe("AdminDashboard — ícones e nome acessível", () => {
     expect(screen.getAllByRole("meter")).toHaveLength(3);
 
     const critica = screen.getByRole("meter", {
-      name: "Conformidade de SLA — critical",
+      name: "Conformidade de SLA — Crítica",
     });
     expect(critica).toHaveAttribute("aria-valuenow", "60");
     expect(critica).toHaveAttribute("aria-valuemin", "0");
@@ -397,5 +397,131 @@ describe("AdminDashboard — ícones e nome acessível", () => {
     // para qualquer uma que alguém acrescente amanhã.
     await montar();
     expect(screen.queryAllByRole("progressbar")).toHaveLength(0);
+  });
+
+  /*
+   * ── O buraco que esconder a barra abriu, e o `role="img"` que o fecha ──
+   *
+   * `aria-hidden` na barra de comparação tirou o DESENHO da árvore, e com ele
+   * a única coisa que ele carregava: a PROPORÇÃO entre as categorias. Quem
+   * ouve passou a ler "Hardware 6" e nada mais — a comparação virou informação
+   * só visual. A faixa empilhada da `StatusBar` nunca teve papel nenhum, pelo
+   * mesmo motivo e com o mesmo efeito.
+   *
+   * O operador decidiu `role="img"` nos dois GRUPOS, com o texto no
+   * `aria-label`. E `role="img"` substitui a subárvore pelo rótulo: o que ele
+   * não disser deixa de existir para quem não vê. É isso que os casos abaixo
+   * medem — não que o atributo está lá, mas que o NOME diz tudo o que a tela
+   * escreve.
+   */
+
+  it("cada linha de categoria é um role=img que diz nome, contagem e proporção", async () => {
+    // Três categorias de propósito, e os números escolhidos para separar os
+    // dois denominadores: o total exibido é 12 e o maior da lista é 6. Sobre
+    // o TOTAL, Hardware é 50%; sobre o MAIOR — que é o que a barra desenha —
+    // seria 100%, e Software seria 50% em vez de 25%. Com uma categoria só,
+    // os dois dariam 100% e o caso não distinguiria nada.
+    vi.mocked(dashboardService.getDashboardStats).mockResolvedValue(STATS as never);
+    vi.mocked(reportService.getReports).mockResolvedValue({
+      ...REPORT,
+      tickets_by_category: [
+        { category: "Hardware", count: 6 },
+        { category: "Software", count: 3 },
+        { category: "Rede", count: 3 },
+      ],
+    } as never);
+    vi.mocked(reportService.getTechnicianListReport).mockResolvedValue(TECH_LIST as never);
+
+    render(
+      <MemoryRouter>
+        <AdminDashboard />
+      </MemoryRouter>,
+    );
+    await waitFor(() => expect(screen.getByText("Dashboard")).toBeInTheDocument());
+
+    const bloco = blocoDe("Chamados por Categoria");
+    for (const nome of [
+      "Hardware: 6 chamados, 50% do total",
+      "Software: 3 chamados, 25% do total",
+      "Rede: 3 chamados, 25% do total",
+    ]) {
+      expect(within(bloco).getByRole("img", { name: nome })).toBeInTheDocument();
+    }
+
+    // E a barra continua fora da árvore: o grupo é que fala por ela.
+    expect(within(bloco).queryAllByRole("progressbar")).toHaveLength(0);
+    expect(within(bloco).queryAllByRole("meter")).toHaveLength(0);
+    expect(bloco.querySelectorAll('[aria-hidden="true"]')).toHaveLength(3);
+  });
+
+  it("a faixa de distribuição é um role=img, e o rótulo repete a legenda", async () => {
+    // Palavra por palavra: o rótulo diz de cada bloco exatamente o que a
+    // legenda escreve embaixo do desenho (`Aberto: 3`), na mesma ordem. Se as
+    // duas versões da mesma contagem divergissem, o desenho e o texto estariam
+    // contando histórias diferentes — e só uma delas seria lida.
+    await montar();
+
+    const faixa = screen.getByRole("img", {
+      name:
+        "Distribuição de status — Aberto: 3, Em andamento: 2, Aguardando: 1, " +
+        "Resolvido: 4, Fechado: 5, Cancelado: 1",
+    });
+
+    // E a concordância não é conferida contra uma constante escrita aqui: os
+    // seis pares são LIDOS da legenda no DOM e remontados. Mudar o formato de
+    // um dos dois lados — "Aberto: 3" virar "Aberto (3)" na legenda, ou o
+    // rótulo passar a dizer "3 Aberto" — reprova, que é o ponto.
+    const pares = [
+      "Aberto",
+      "Em andamento",
+      "Aguardando",
+      "Resolvido",
+      "Fechado",
+      "Cancelado",
+    ].map((nome) =>
+      within(faixa)
+        .getByText(new RegExp(`^${nome}:`))
+        .textContent!.replace(/\s+/g, " ")
+        .trim(),
+    );
+
+    expect(pares).toEqual([
+      "Aberto: 3",
+      "Em andamento: 2",
+      "Aguardando: 1",
+      "Resolvido: 4",
+      "Fechado: 5",
+      "Cancelado: 1",
+    ]);
+    expect(faixa).toHaveAttribute(
+      "aria-label",
+      `Distribuição de status — ${pares.join(", ")}`,
+    );
+  });
+
+  it("a conformidade de SLA rotula a prioridade em português — na tela e no nome da barra", async () => {
+    // Antes o rótulo visível era a CHAVE DA API (`critical`, `low`) com
+    // `capitalize` no CSS por cima. Agora vem de `rotuloDePrioridade()`: o
+    // feminino da E17, a mesma palavra que o selo, a lista e o gráfico desta
+    // tela já usam.
+    //
+    // O nome acessível da barra repete o rótulo visível DE PROPÓSITO, para o
+    // que se ouve não divergir do que se lê — e por isso mudou junto. Deixá-lo
+    // em `critical` criaria exatamente a divergência que ele existe para
+    // evitar, e é esse par que este caso prende.
+    await montar();
+    const bloco = blocoDe("Conformidade SLA — Este Mês");
+
+    expect(within(bloco).getByText("Crítica")).toBeInTheDocument();
+    expect(within(bloco).getByText("Baixa")).toBeInTheDocument();
+    expect(within(bloco).queryByText("critical")).toBeNull();
+    expect(within(bloco).queryByText("low")).toBeNull();
+
+    expect(
+      screen.getByRole("meter", { name: "Conformidade de SLA — Crítica" }),
+    ).toHaveAttribute("aria-valuenow", "60");
+    expect(
+      screen.getByRole("meter", { name: "Conformidade de SLA — Baixa" }),
+    ).toHaveAttribute("aria-valuenow", "95");
   });
 });

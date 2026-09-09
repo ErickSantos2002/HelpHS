@@ -112,7 +112,9 @@ describe("barra de prazo de SLA", () => {
     expect(painel.match(/aria-valuemin=\{0\}/g)).toHaveLength(2);
     expect(painel.match(/aria-valuemax=\{100\}/g)).toHaveLength(2);
     // E o nome: são duas medições diferentes, e uma delas se repete por linha.
-    expect(painel).toMatch(/aria-label=\{`Conformidade de SLA — \$\{item\.priority\}`\}/);
+    expect(painel).toMatch(
+      /aria-label=\{`Conformidade de SLA — \$\{rotuloDePrioridade\(item\.priority\)\}`\}/,
+    );
     expect(painel).toMatch(
       /aria-label=\{`Conformidade de SLA de \$\{t\.technician_name\}`\}/,
     );
@@ -125,6 +127,65 @@ describe("barra de prazo de SLA", () => {
     expect(painel.match(/aria-hidden="true"/g)).toHaveLength(1);
     expect(painel).toMatch(
       /aria-hidden="true"[\s\S]{0,320}?cat\.count \/ categoryMax/,
+    );
+  });
+
+  it("os dois grupos SEM medição são `role=\"img\"`, e só eles", () => {
+    // ── A segunda metade da mesma decisão ──────────────────────────────
+    //
+    // Esconder a barra de comparação foi certo e deixou um buraco: quem ouve
+    // lia "Hardware 6" e nada sobre a PROPORÇÃO entre as categorias, que
+    // passou a ser informação só visual. O mesmo valia para a faixa empilhada
+    // da `StatusBar`, que nunca teve papel nenhum.
+    //
+    // O operador decidiu `role="img"` nos DOIS GRUPOS — a linha inteira da
+    // categoria, e o cartão inteiro da distribuição —, com o texto no
+    // `aria-label`. A barra de comparação continua `aria-hidden`: quem carrega
+    // o significado passou a ser o grupo em volta dela.
+    //
+    // `img` e não `meter`: nenhuma das duas mede dentro de faixa fixa. Uma
+    // compara com o maior da lista, a outra reparte um total. `img` é o papel
+    // de "isto é um desenho, e este é o texto dele" — e é por isso que o texto
+    // tem de estar inteiro no rótulo.
+    const painel = readFileSync(
+      resolve(process.cwd(), "src/pages/dashboard/AdminDashboard.tsx"),
+      "utf-8",
+    );
+
+    // Dois, e só dois: comparação e distribuição. Um terceiro seria papel numa
+    // barra que já tem outro, ou num desenho que ninguém decidiu.
+    //
+    // Conta a forma com ATRIBUTO — a linha em que só ele está —, e não a
+    // menção: os comentários que explicam a decisão citam `role="img"` em
+    // prosa quatro vezes, e contá-las faria o caso reprovar por edição de
+    // comentário. É a mesma armadilha que o `aria-hidden` acima já tinha.
+    expect(painel.match(/^[ \t]*role="img"\r?$/gm)).toHaveLength(2);
+
+    // ⚠️ `role="img"` substitui a subárvore pelo rótulo. O nome e a contagem
+    // deixam de ser lidos por conta própria, e o que o rótulo não disser some
+    // para quem não vê. Por isso os TRÊS pedaços têm de estar lá.
+    expect(painel).toMatch(
+      /role="img"[\s\S]{0,200}?aria-label=\{`\$\{cat\.category\}: \$\{cat\.count\} chamados, /,
+    );
+    expect(painel).toMatch(/% do total`\}/);
+
+    // O denominador da PROPORÇÃO é o total das categorias exibidas; o da
+    // LARGURA da barra é o maior da lista. São dois números diferentes, e
+    // trocar um pelo outro faz o rótulo dizer que o campeão é 100% do total.
+    expect(painel).toMatch(
+      /const categoryTotal = categoryData\.reduce\(\(s, c\) => s \+ c\.count, 0\)/,
+    );
+    expect(painel).toMatch(/cat\.count \/ categoryTotal/);
+    expect(painel).toMatch(/cat\.count \/ categoryMax/);
+
+    // A `StatusBar`: o rótulo é montado do MESMO par que a legenda escreve
+    // embaixo — `label: value` —, para as duas versões da mesma contagem não
+    // divergirem uma da outra.
+    expect(painel).toMatch(
+      /const distribuicao = segs\.map\(\(s\) => `\$\{s\.label\}: \$\{s\.value\}`\)/,
+    );
+    expect(painel).toMatch(
+      /role="img"[\s\S]{0,200}?`Distribuição de status — \$\{distribuicao\}`/,
     );
   });
 });

@@ -46,8 +46,9 @@ FUNCIONALIDADE (§29 do prompt mestre)
     mudança foi REVERTIDA; a TERCEIRA passada aplicou a decisão do operador
     (seção 14): `meter` nas duas de conformidade de SLA, papel NENHUM e
     `aria-hidden` na de comparação por categoria, cujo máximo é o maior da
-    lista. Fica de fora a faixa da `StatusBar`, que é distribuição empilhada
-    — ver seção 9.
+    lista. A QUARTA passada (seção 15) fechou o que sobrava: os GRUPOS da
+    comparação e da distribuição empilhada são `role="img"`, com o texto no
+    `aria-label`. Nenhuma barra desenhada da tela ficou sem tratamento.
 
 ACRESCENTADOS PELAS DECISÕES REGISTRADAS
 [ ] estado interativo (visual = árvore) — não reverificado nesta passagem;
@@ -418,9 +419,9 @@ Vai no relato, não foi decidida aqui.
 | `theme === "dark" ? A : B` | 0 | 0 |
 | mapas locais de cor | 0 | 0 |
 | linhas da `varredura-contraste.mjs` para esta tela | 0 | **0** |
-| barras desenhadas sem papel declarado | 4 | **1** (a faixa da `StatusBar`) — ver seção 14 |
+| barras desenhadas sem papel declarado | 4 | **1** (a faixa da `StatusBar`) — ver seção 14, e **0** depois da seção 15 |
 | controles alcançáveis só por mouse | 1 | **1** (o `<tr onClick>`) |
-| casos em `AdminDashboard.test.tsx` | 5 | **11** (**14** depois da seção 14) |
+| casos em `AdminDashboard.test.tsx` | 5 | **11** (**14** depois da seção 14, **17** depois da 15) |
 
 Sobra **uma** ocorrência de paleta crua no arquivo, `bg-emerald-500` na
 linha 82 — **dentro de um comentário**, o que explica de qual classe
@@ -473,7 +474,8 @@ proibia. Ver seção 14.
   registrado; consertá-lo é redesenhar o controle.
 - **A faixa da `StatusBar` continua sem papel declarado** — que papel dar a
   uma barra empilhada de distribuição cuja legenda já está escrita embaixo é
-  decisão de desenho.
+  decisão de desenho. *(Decidida depois, na seção 15: `role="img"` no grupo,
+  com a distribuição no `aria-label`.)*
 - **A cor do bloco "Aguardando"** continua sendo o slot de `awaiting_client`,
   pela fusão que o backend faz em `tickets.awaiting`. Inalterado desde a
   primeira passada; segue no relato ao operador.
@@ -675,4 +677,189 @@ linhas para esta tela) ficaram limpos.
   mesmo texto **de propósito**, para o nome acessível não divergir do que
   está na tela. Trocar o rótulo visível é mudança funcional, e vai no relato
   ao operador.
+- **Nada fora dos três arquivos do escopo.**
+
+---
+
+## 15. O que esconder a barra custou, e as três decisões que vieram depois
+
+**Decididas pelo operador em 09/09/2026, ao ver a consequência da seção 14, e
+aplicadas numa quarta passada.** São a continuação direta dela: a seção 14
+acertou o PAPEL de cada barra, e ao acertá-lo abriu um buraco que só ficou
+visível depois.
+
+### 15.1 A barra de comparação: o grupo vira `role="img"`
+
+`aria-hidden` tirou o DESENHO da árvore — e com ele a única coisa que o
+desenho carregava. A contagem estava escrita (`{cat.count}`), e por isso
+esconder a barra foi certo; mas a **proporção entre as categorias** não estava
+escrita em lugar nenhum. Ela era largura, e só largura. Quem ouve passou a ler
+*"Hardware 6"* e a perder a comparação inteira.
+
+A decisão:
+
+> **O grupo** — a linha inteira: nome + contagem + barra — ganha `role="img"`
+> com `aria-label` trazendo **contagem e proporção**. A **barra continua
+> `aria-hidden`**.
+
+Forma do texto, dada pelo operador: `"Hardware: 6 chamados, 25% do total"`.
+
+**O denominador é `categoryTotal`: a soma das categorias EXIBIDAS.** A tela
+passou a ter dois denominadores, e a diferença entre eles é o ponto:
+
+| quem | denominador | o que significa |
+|---|---|---|
+| a **barra** (largura) | `categoryMax` — o maior da lista | tamanho relativo ao campeão |
+| o **rótulo** (proporção) | `categoryTotal` — a soma das exibidas | a fatia do bolo |
+
+Exibidas, e não todas as do período: a lista é cortada em oito
+(`.slice(0, 8)`), e uma porcentagem sobre um total que inclui categorias fora
+da tela não fecharia com nada que se possa ler ali. Trocar um denominador pelo
+outro faz o rótulo dizer que o campeão é **100% do total** — é a mutação M3, e
+ela morre.
+
+⚠️ `role="img"` **substitui a subárvore pelo rótulo**: o nome e a contagem em
+texto deixam de ser lidos por conta própria. Por isso o `aria-label` repete os
+três pedaços. Omitir qualquer um apagaria da árvore algo que está escrito na
+tela — é o que as mutações M4 e M1 medem.
+
+### 15.2 A `StatusBar`: mesma forma, e o rótulo concorda com a legenda
+
+Mesma decisão para a faixa empilhada, que era o item pendente da seção 12:
+`role="img"` no grupo (o cartão inteiro), com a distribuição no `aria-label`.
+
+O rótulo é montado do **mesmo par** que a legenda escreve embaixo do desenho,
+`label: value`, na mesma ordem:
+
+```
+Distribuição de status — Aberto: 3, Em andamento: 2, Aguardando: 1,
+Resolvido: 4, Fechado: 5, Cancelado: 1
+```
+
+Não é enfeite de redação. Como `role="img"` engole a subárvore, a legenda
+**deixa de ser lida**: o rótulo é a única versão que sobra. Se ele dissesse a
+mesma contagem de outro jeito ("3 abertos", "Aberto (3)"), a tela e o que se
+ouve estariam contando a mesma coisa em duas línguas, e só uma seria auditável.
+O caso de teste **lê os seis pares do DOM** e remonta o rótulo esperado a
+partir deles — mudar o formato de qualquer um dos dois lados reprova.
+
+Com zero chamados (`segs` vazio) o rótulo cai para `"Distribuição de status"`
+sozinho, sem o travessão pendurado.
+
+### 15.3 O rótulo de prioridade sai da chave crua — e o nome do `meter` junto
+
+Era o item que a seção 14 deixou explicitamente no relato ao operador, e ele
+decidiu:
+
+| onde | antes | agora |
+|---|---|---|
+| rótulo visível da seção "Conformidade SLA" | `{item.priority}` + `capitalize` no CSS | `{rotuloDePrioridade(item.priority)}` |
+| `aria-label` do `meter` daquela barra | `Conformidade de SLA — ${item.priority}` | `Conformidade de SLA — ${rotuloDePrioridade(item.priority)}` |
+
+`critical`, `high`, `low` são **nomes de campo da API**, não texto de
+interface; o `capitalize` só os deixava com maiúscula, em inglês. Agora saem
+como **Crítica / Alta / Média / Baixa** — o feminino da E17, a mesma palavra
+que o selo, a lista e o gráfico de prioridade **desta mesma tela** já usavam.
+A classe `capitalize` saiu junto: ela existia só para maquiar a chave.
+
+**Os dois mudam juntos, e isso é o ponto.** O `aria-label` do `meter` repete o
+rótulo visível **de propósito**, para o nome acessível não divergir da tela.
+Deixá-lo em `critical` enquanto a tela diz "Crítica" criaria exatamente a
+divergência que ele existe para evitar — e é o par que as mutações M6 e M7
+prendem, uma de cada lado.
+
+**Isto muda o que o usuário lê**, e é prescrito (E17). É a segunda mudança
+funcional desta tela, ao lado da linha de limpar que saiu do filtro de período.
+
+### 15.4 Números
+
+| medida | antes da 15 | agora |
+|---|---:|---:|
+| barras/grupos desenhados sem tratamento acessível | 1 (a faixa da `StatusBar`) | **0** |
+| `role="img"` (atributo, não menção em comentário) | 0 | **2** |
+| `role="progressbar"` | 0 | **0** (segue proibido, e preso) |
+| `role="meter"` | 2 | **2** |
+| `aria-hidden="true"` (atributo) | 1 | **1** (a barra de comparação) |
+| chave crua de prioridade lida pelo usuário | 2 (tela + nome do `meter`) | **0** |
+| linhas da `varredura-contraste.mjs` para esta tela | 0 | **0** |
+| hexadecimais / paleta crua fora de comentário | 0 | **0** |
+| casos em `AdminDashboard.test.tsx` | 14 | **17** |
+| casos em `barra-de-sla.test.ts` | 5 | **6** |
+
+**23 de 23 passam.** `tsc --noEmit -p tsconfig.app.json` e `eslint` nos três
+arquivos, limpos.
+
+### 15.5 Testes e mutação
+
+Os casos que a seção 14 deixou **não afrouxaram**: a proibição de
+`progressbar` no arquivo inteiro, a contagem de `role="meter"` em 2, a escala
+completa das duas, o `aria-hidden` único da comparação e o par
+*"esconder o desenho" + "o número em texto"* continuam todos lá, com as mesmas
+asserções. O único caso existente que **mudou de texto** foi o nome do `meter`
+de prioridade — porque o nome mudou —, nos dois arquivos.
+
+Acrescentados: **três** casos em `AdminDashboard.test.tsx` (pelo DOM) e **um**
+em `barra-de-sla.test.ts` (pelo texto do `.tsx`).
+
+O caso da categoria monta um cenário de **três** categorias de propósito —
+Hardware 6, Software 3, Rede 3. Total exibido 12, maior da lista 6: sobre o
+total Hardware é 50%, sobre o maior seria 100%, e Software seria 50% em vez de
+25%. Com **uma** categoria só, os dois denominadores dariam 100% e o caso não
+distinguiria nada — a fixture antiga não serviria.
+
+**Controle sem mutação nenhuma antes da primeira**, e ele passou; sem isso um
+roteiro que não executa o vitest lê "não falhou" como "o mutante sobreviveu".
+Chamada por `process.execPath` + `node_modules/vitest/vitest.mjs`, nunca por
+`npx.cmd`.
+
+**7 de 7 mutações morreram.** Nenhuma é de classe — elemento e valor:
+
+| # | mutação | o que ela quebra |
+|---|---|---|
+| M1 | a linha da categoria perde o `role="img"` | elemento |
+| M2 | a faixa de distribuição perde o `role="img"` | elemento |
+| M3 | a proporção passa a dividir por `categoryMax` | valor (o denominador) |
+| M4 | o rótulo da categoria deixa de dizer a contagem | valor |
+| M5 | o rótulo da distribuição deixa de dizer o valor dos blocos | valor |
+| M6 | o rótulo **visível** da prioridade volta à chave crua | valor |
+| M7 | o **nome** do `meter` volta à chave crua | valor |
+
+M2 **abortou na primeira tentativa, de propósito, pelo mesmo motivo que M6 da
+seção 14**: o padrão `      role="img"` com recuo de 6 espaços é **substring**
+do de 18 espaços da linha da categoria, e casava com os dois. A contagem de
+ocorrências antes de gravar pegou; o padrão foi ancorado nas linhas de cima e
+de baixo e a mutação passou a atingir um grupo só. É a segunda vez que esta
+tela cobra isso — os blocos quase idênticos com recuos diferentes são a forma
+dela.
+
+E a mesma armadilha apareceu **do lado do teste**: contar `/role="img"/g` no
+texto do `.tsx` dava **6**, porque os comentários que explicam a decisão citam
+`role="img"` em prosa quatro vezes. O caso conta a forma com **atributo** — a
+linha em que só ele está —, como o `aria-hidden` já fazia desde a seção 14.
+Contar a menção faria o caso reprovar por edição de comentário.
+
+Restauração com repetição (até oito vezes), releitura para conferir e
+igualdade **byte a byte** confirmada no fim, nas duas rodadas.
+
+**Colisão na árvore compartilhada, de novo.** Enquanto esta passada corria,
+outra sessão commitou `ui/Select.tsx` (`6d06af5`, "alinhado a E11") — o
+componente do filtro de período **desta tela**. O `Select.tsx` não é escopo
+deste agente e não foi tocado; a suíte passou contra a versão anterior e contra
+a commitada, e a verificação final rodou já sobre ela. Registrado porque o
+`git diff` desta tela e o daquele componente correm em paralelo, como na
+seção 13.
+
+### 15.6 O que esta passada NÃO fez
+
+- **Não deu teclado ao `<tr onClick>`.** Continua sendo o único controle
+  alcançável só por mouse, e continua sendo defeito de produto.
+- **Não mexeu na cor do bloco "Aguardando"**, que segue sendo o slot de
+  `awaiting_client` pela fusão que o backend faz em `tickets.awaiting`.
+- **Não tratou o singular.** O rótulo diz `"{n} chamados"` na forma que o
+  operador deu; com `n = 1` ele lê *"1 chamados"*. Um `${n === 1 ? "chamado" :
+  "chamados"}` resolveria, mas alteraria a forma prescrita — vai no relato, não
+  foi decidido aqui.
+- **Nenhuma captura de tela.** A única mudança visível — o rótulo de prioridade
+  em português — foi verificada por teste de DOM, não em pixel. As outras duas
+  não mudam pixel nenhum: `role` e `aria-label` não desenham.
 - **Nada fora dos três arquivos do escopo.**
