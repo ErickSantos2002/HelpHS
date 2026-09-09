@@ -73,8 +73,11 @@ significa que alguém tem de olhar, não que há trabalho pendente.
 
 ## 3. Capturas
 
-`scripts/capturar-fase11.mjs` — **dez fotos**, quatro telas nos dois temas mais
-o quadro largo.
+`scripts/capturar-telas.mjs` — **dez fotos**, quatro telas nos dois temas mais
+o quadro largo. (O script chamava-se `capturar-fase11.mjs`; ao cobrir também as
+18 telas da Fase 16 o nome deixou de descrevê-lo. As fotos da Fase 11 seguem
+onde estavam: cada tela declara a sua fase, e a saída é a pasta daquela fase.
+Para refazer só estas dez: `node scripts/capturar-telas.mjs 11/`.)
 
 ```
 ✔ helphs-painel-{claro,escuro}-1366.png
