@@ -24,6 +24,27 @@ Datas em DD/MM/AAAA.
   | Variável opcional na API | `HELO_EMBEDDING_TIMEOUT_SECONDS` (padrão 10) |
   | Variável opcional no serviço | `HELO_THREADS` (padrão 1) |
 
+  E o interruptor dela, que é de outra natureza e não está na tabela acima
+  porque não é do serviço de embedding — é da API:
+
+  | | |
+  |---|---|
+  | Variável NA API | `HELO_ENABLED` — **ausente ou `false` = ela não fala** |
+  | Estado hoje | **não configurada, de propósito.** Ela sobe desligada |
+  | Para ligar | `HELO_ENABLED=true` **e** `DEEPSEEK_API_KEY` preenchida |
+
+  - ⚠️ **Ligar é decisão, e está travada por fora do código.** A Política de
+    Privacidade ainda tem marcador em aberto e os Termos de Uso não existem;
+    enquanto isso, uma IA falando com cliente não pode ser ligada. O padrão
+    `false` no `config.py` é a rede: sem ele, o deploy seguinte faria a IA
+    começar a falar com o cliente sem ninguém ter pedido.
+  - **Ligada sem chave da DeepSeek ela não fica pela metade.** A saudação sai
+    igual (é montada sem IA), e do segundo turno em diante toda pergunta cai
+    na escalada com mensagem neutra — o chamado vai para a equipe, com o
+    motivo `a IA não respondeu` na notificação. Nada trava, mas ela também não
+    resolve nada: é o pior dos dois mundos, e é por isso que as duas variáveis
+    andam juntas.
+
   - ⚠️ **O build baixa 543 MB de modelo** e leva o tempo disso. É de propósito:
     baixar no start faria cada reinício depender da rede do servidor e do
     Hugging Face estarem de pé. Se o download falhar, o build falha — que é o
@@ -45,9 +66,15 @@ Datas em DD/MM/AAAA.
     exigiria superusuário no boot do contêiner, para sempre, por causa de um
     comando que roda uma vez. Sem a extensão, a migration falha com mensagem
     dizendo exatamente isto, e a API não sobe.
-  - **Ordem de subida:** extensão no banco → serviço de embedding → API. A API
-    com a variável apontando para um serviço que não existe funciona (escala em
+  - **Ordem de subida:** extensão no banco → serviço de embedding → API →
+    (depois, e só depois do documento de LGPD) `HELO_ENABLED=true`. A API com a
+    variável apontando para um serviço que não existe funciona (escala em
     tudo), mas não responde nada de útil.
+  - **Como conferir que subiu certo, sem ligar a Helô:** `GET /health` do
+    serviço de embedding respondendo 200 com `{"dimensao": 1024}`, e no banco
+    `SELECT count(*) FROM helo_chunks WHERE embedding IS NOT NULL` devolvendo
+    **74**. Os dois verdes e `HELO_ENABLED` ausente é exatamente o estado
+    pretendido: tudo pronto, ela calada.
 
 - **O disparo de e-mail passa a existir, pelo Resend em vez do Microsoft 365.**
   Confirmação de cadastro e redefinição de senha nunca tiveram por onde sair: o
@@ -389,6 +416,27 @@ Datas em DD/MM/AAAA.
   de ter sido cliente.
 
 ### Corrigido
+- **A equipe era chamada a cada fala da Helô, e o aviso mentia o motivo.** Com
+  ela falando uma vez por chamado, um aviso por chamado. Com seis trocas, todo
+  técnico e todo admin passaria a receber até seis notificações por chamado —
+  cinco delas dizendo "Triagem concluída" com a conversa em andamento. Agora a
+  equipe só é chamada quando ela **sai de cena**, e o aviso diz por quê: o
+  pedido de humano continua sendo o único que muda a ordem da fila, e os
+  outros três motivos (o modelo decidiu, o teto estourou, a IA não respondeu)
+  chegam com o motivo escrito — inclusive o que o próprio modelo redigiu.
+- **Falha da Helô não custa mais a mensagem do cliente.** A fala dela nasce no
+  mesmo commit da fala do cliente, e em PostgreSQL um erro de consulta aborta a
+  transação inteira: um defeito dentro dela derrubava o `POST` e apagava junto o
+  que o cliente tinha acabado de escrever — ele digitava, enviava e via um erro.
+  A Helô agora roda dentro de um SAVEPOINT, e o que falha é só ela. O defeito
+  vai para o log com o traço; engolir é para proteger o cliente, não para
+  esconder o defeito.
+- **A sugestão de resposta ao técnico perdia o começo da conversa.** A janela
+  era de 10 mensagens, e bastava enquanto um chamado triado tinha três. Com
+  seis trocas a conversa chega a 13, e a janela cortava justamente a resposta
+  do cliente às perguntas da triagem — a mensagem mais útil que existe para
+  sugerir uma resposta. A janela passa a sair do teto de trocas, e as duas
+  coisas se movem juntas.
 - **A versão do backend congelou de novo — 1.8.0 com o produto em v1.11.0**
   (`e5debd5`). O `dcfc25f` unificou a fonte porque o número vivia escrito à mão
   em dois pontos do `main.py` e as duas cópias pararam em `"1.0.0"`. Unificar
@@ -864,6 +912,28 @@ Datas em DD/MM/AAAA.
   ambiente, o escuro segue sendo o padrão.
 
 ### Adicionado
+- **A Helô passa a resolver o que está documentado (Fase 2).** Ela deixou de
+  ser recepcionista: busca nos manuais por similaridade, responde em passos
+  numerados citando a fonte, e escala o que não está na base. **A saudação
+  continua sem LLM** — previsível, instantânea e grátis, e é a primeira coisa
+  que o cliente lê; o modelo entra a partir do segundo turno.
+  - O teto deixou de ser de duas falas e virou de **seis trocas**, e ele
+    **escala** em vez de emudecer.
+  - **Escalar desliga a IA naquele chamado**, o que a Fase 1 prometia e não
+    fazia. Vale para o pedido explícito de humano e para a escalada que o
+    próprio modelo pede.
+  - A base é de **oito manuais** (74 trechos), e a busca só enxerga documento
+    **técnico** do **produto daquele chamado** — ficha comercial, com preço e
+    promessa de venda, nunca vira procedimento técnico.
+  - ⚠️ **Só três dos sete produtos têm manual técnico** (Titan, Phoebus,
+    iBlow 10 Pro). Para Deimos, EBS-010, Mark X e Mercury a base vem vazia em
+    todo turno e ela sempre escala. É decisão de escopo, não defeito.
+- **A busca para de entregar trecho longe demais.** Ordenar não é filtrar:
+  sem teto, ela devolvia sempre os quatro trechos mais próximos por mais longe
+  que estivessem — "como conecto na impressora" num aparelho sem impressora
+  entregava o passo a passo de ligar. O corte de **0,25** saiu de medição com
+  40 perguntas rotuladas contra o corpus real, não de palpite; nas mesmas 40,
+  os trechos entregues ao modelo caem de 160 para 25.
 - **A Política de Privacidade vira página, e o cadastro para de mentir**
   (`721248b`, `5c123ee`). A caixa de aceite pedia *"Li e aceito os termos de uso
   e a política de privacidade"* com as duas expressões em
