@@ -827,6 +827,24 @@ Decisões:
   roteador divide o contador. Se algum cliente sentir o limite, o ajuste é a
   env var no painel — não é mudança de código.
 
+## Formato do código
+
+### O formatador do backend é o `black`. O `ruff` é linter, nunca formatador.
+
+O CI roda os dois (`.github/workflows/ci.yml`): `ruff check .` e
+`black --check .`. Eles **discordam** de formatação, e quem manda é o `black`,
+rodado de dentro de `backend/`.
+
+**Nunca rode `ruff format` num arquivo do backend.** Ele reformata o arquivo
+inteiro no estilo dele, inclusive linhas que você não escreveu, e o
+`black --check` reprova o resultado. Em 08/09/2026 isso derrubou o CI de um
+commit de migration por causa de um `assert` de outra pessoa, num arquivo de
+teste que só tinha sido tocado numa fixture.
+
+No frontend a regra é diferente e igualmente contraintuitiva — ver o Prettier
+em `mudanças.md`: os arquivos estão em 80 colunas, o `.prettierrc` diz 100, e
+o CI não checa formato. Lá, rodar `--write` polui o commit.
+
 ## Testes
 
 ### Teste cuja garantia É uma cláusula `WHERE` não vai em mock

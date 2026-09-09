@@ -1023,6 +1023,13 @@ class HeloChunk(Base):
     # "8.9", e ordenar por `secao` como string colocaria "8.10" antes de "8.2".
     ordem: Mapped[int] = mapped_column(Integer, nullable=False)
     conteudo: Mapped[str] = mapped_column(Text, nullable=False)
+    # O trecho ensina um procedimento que só roda com senha de administrador.
+    # O valor da senha é REDIGIDO na ingestão e o procedimento fica — as duas
+    # metades da mesma decisão. Excluir o trecho pareceria mais seguro e é
+    # pior: a busca não acharia nada, a Helô escalaria por NADA ENCONTRADO, e
+    # nem ela nem o técnico saberiam o motivo. Com a marca ela escala dizendo
+    # o motivo exato.
+    exige_credencial_admin: Mapped[bool] = mapped_column(Boolean, default=False, nullable=False)
     # Nulo até a ingestão calcular. São duas passagens de propósito: recortar é
     # barato e determinístico, embutir custa e depende do modelo estar
     # carregado. Separadas, trocar de modelo de embedding é re-embutir o que já

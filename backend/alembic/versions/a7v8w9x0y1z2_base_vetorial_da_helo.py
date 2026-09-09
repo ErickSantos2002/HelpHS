@@ -59,6 +59,22 @@ trecho certo. O gatilho para criar o índice é a base crescer uma ordem de
 grandeza, que é o que acontece no dia em que a base da Helô antiga for
 migrada; até lá, índice aqui seria perda de recall comprada com trabalho.
 
+`exige_credencial_admin` existe por causa de duas senhas. O manual do Phoebus
+traz, em texto aberto, as senhas de dois menus de configuração avançada — e um
+deles ativa "nenhum resultado de teste e aviso exibido", ou seja, desliga a
+exibição do resultado num equipamento de medição legal usado em controle de
+acesso. A Helô não pode entregar isso a quem perguntar.
+
+A saída não é excluir o trecho. Excluir joga fora o procedimento inteiro e
+produz uma **escalada cega**: a busca não acha nada, a Helô escala por NADA
+ENCONTRADO e ninguém — nem ela, nem o técnico que receber — sabe por quê. Com
+a marca, a busca acha o trecho, a Helô lê a marca e escala dizendo o motivo
+exato: essa configuração exige senha de administrador.
+
+O valor da senha é redigido na ingestão; o procedimento fica. Marca e redação
+são as duas metades da mesma decisão: a marca sem a redação entregaria a senha
+mesmo assim, e a redação sem a marca produziria a escalada cega.
+
 A coluna `embedding` nasce NULA porque recortar e embutir são duas passagens.
 Recortar é barato e determinístico; embutir custa e depende do modelo local
 estar carregado. Separadas, trocar o modelo de embedding é re-embutir o que já
@@ -165,6 +181,12 @@ def upgrade() -> None:
         sa.Column("secao", sa.String(length=255), nullable=False),
         sa.Column("ordem", sa.Integer(), nullable=False),
         sa.Column("conteudo", sa.Text(), nullable=False),
+        sa.Column(
+            "exige_credencial_admin",
+            sa.Boolean(),
+            nullable=False,
+            server_default=sa.false(),
+        ),
         sa.Column("embedding", Vector(EMBEDDING_DIM), nullable=True),
         sa.Column(
             "created_at", sa.DateTime(timezone=True), server_default=sa.func.now(), nullable=False
