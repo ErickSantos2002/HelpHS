@@ -11,6 +11,44 @@ Datas em DD/MM/AAAA.
 ## [Não publicado]
 
 ### Infraestrutura
+- **A Helô ganha um QUINTO SERVIÇO no EasyPanel: o embedding.** É o que o
+  painel vai precisar, e nada disto sobe sozinho.
+
+  | | |
+  |---|---|
+  | Serviço | `helphs-embedding` (nome sugerido; o que vale é a URL bater com a variável) |
+  | Fonte | mesmo repositório, **contexto `backend/`**, Dockerfile em `backend/servico_embedding/Dockerfile` |
+  | Porta interna | **8080** — não publicar na internet: só a API precisa alcançá-la |
+  | Healthcheck | `GET /health` — responde **503 enquanto o modelo não carregou**, 200 com `{"dimensao": 1024}` |
+  | Variável NA API | `HELO_EMBEDDING_URL=http://helphs-embedding:8080` |
+  | Variável opcional na API | `HELO_EMBEDDING_TIMEOUT_SECONDS` (padrão 10) |
+  | Variável opcional no serviço | `HELO_THREADS` (padrão 1) |
+
+  - ⚠️ **O build baixa 543 MB de modelo** e leva o tempo disso. É de propósito:
+    baixar no start faria cada reinício depender da rede do servidor e do
+    Hugging Face estarem de pé. Se o download falhar, o build falha — que é o
+    lugar certo para descobrir. A imagem pronta sobe sem rede nenhuma.
+  - **Memória: piso de 864 MB residentes**, medido, com o modelo carregado e
+    sem calcular nada. O pico numa pergunta de cliente é 866 MB. Cold start de
+    2,9 s. Um worker, e o Dockerfile fixa isso: dois seriam 1,7 GB para atender
+    uma fila que hoje é de uma pergunta por vez.
+  - **A API não quebra sem ele.** Sem `HELO_EMBEDDING_URL`, o cliente devolve
+    `None` em silêncio — é o estado de hoje, com a Helô desligada. Com a URL
+    configurada e o serviço fora do ar, qualquer falha (timeout, conexão
+    recusada, 503, resposta fora do contrato) também devolve `None`: a busca
+    não acontece, o bloco de contexto recebe a string `NADA ENCONTRADO` e a
+    Helô **escala com mensagem neutra**. Nenhum chamado fica preso, e nenhuma
+    dessas falhas aparece como erro na tela do cliente.
+  - ⚠️ **Antes do primeiro deploy da API com esta versão**, alguém com
+    superusuário precisa rodar `CREATE EXTENSION vector;` no banco de produção.
+    A migration `a7v8w9x0y1z2` EXIGE a extensão e recusa criá-la — criar
+    exigiria superusuário no boot do contêiner, para sempre, por causa de um
+    comando que roda uma vez. Sem a extensão, a migration falha com mensagem
+    dizendo exatamente isto, e a API não sobe.
+  - **Ordem de subida:** extensão no banco → serviço de embedding → API. A API
+    com a variável apontando para um serviço que não existe funciona (escala em
+    tudo), mas não responde nada de útil.
+
 - **O disparo de e-mail passa a existir, pelo Resend em vez do Microsoft 365.**
   Confirmação de cadastro e redefinição de senha nunca tiveram por onde sair: o
   `.env.example` semeava `smtp.gmail.com` com senha `CHANGE_ME`. O envio agora

@@ -845,6 +845,39 @@ No frontend a regra é diferente e igualmente contraintuitiva — ver o Prettier
 em `mudanças.md`: os arquivos estão em 80 colunas, o `.prettierrc` diz 100, e
 o CI não checa formato. Lá, rodar `--write` polui o commit.
 
+## Base da Helô
+
+### Duas hipóteses em aberto sobre a qualidade da recuperação
+
+Observado em 09/09/2026, com os 74 trechos já embutidos. A pergunta *"como
+coloco o aparelho em português"* num chamado de Titan devolveu:
+
+    0.2420  6. Passo a Passo para Utilização
+    0.2592  8. Configurações Detalhadas → 8.2 Alterar Idioma
+
+O trecho certo é recuperado — com `k=4` ele entra no contexto do modelo —, mas
+não ganha. Isso é qualidade de recuperação, não defeito de encanamento, e
+**não foi investigado de propósito**: uma observação não sustenta conserto.
+
+As duas leituras possíveis pedem consertos OPOSTOS, e por isso ficam separadas:
+
+**Hipótese A — é o comprimento.** O `8.2` tem 104 caracteres; trecho curto tem
+menos sinal e perde para trecho longo que fala do assunto de raspão. Se for
+isso, o problema é **sistemático**: atinge todo trecho curto da base, e o
+conserto é do lado do corte — juntar subseção curta com a vizinha, ou dar peso
+ao título na hora de embutir.
+
+**Hipótese B — o `6. Passo a Passo` é um aspirador.** Ele fala de operação em
+geral e casaria com qualquer pergunta que comece com "como faço". Se for isso,
+o problema é de **um trecho específico**, e o conserto é o contrário: cortar
+aquele trecho mais fino, ou tirá-lo da base. Consertar o corte de todo mundo
+por causa dele seria estragar o que está bom.
+
+**O sintoma que separa as duas é fácil e barato:** se for a B, o mesmo trecho
+reaparece no topo de perguntas de assuntos DIFERENTES. Se for a A, cada
+pergunta traz um vizinho longo diferente. Basta reparar nisso ao longo das
+buscas de verdade — não precisa de experimento montado.
+
 ## Testes
 
 ### Teste cuja garantia É uma cláusula `WHERE` não vai em mock
