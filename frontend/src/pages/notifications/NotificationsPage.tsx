@@ -9,6 +9,7 @@ import {
   Spinner,
   type IconName,
 } from "../../components/ui";
+import { toastApiError } from "../../lib/toastError";
 import { TOM_STATUS, type VarianteStatus } from "../../lib/status";
 import { cn } from "../../lib/utils";
 import {
@@ -216,10 +217,26 @@ export default function NotificationsPage() {
     if (notif.data?.ticket_id) navigate(`/tickets/${notif.data.ticket_id}`);
   }
 
+  /**
+   * Remove a notificacao, e so entao a tira da lista.
+   *
+   * Mesmo defeito e mesmo conserto do `handleDeleteComment` da
+   * `KBArticlePage`: o `await` estava solto, e a lista era filtrada antes de a
+   * rede confirmar. Falha silenciosa que AFIRMA remocao — o contrario do
+   * defeito da tela de auditoria, que afirma ausencia.
+   *
+   * A contagem do cabecalho continua descontando de `total` e nao de `unread`,
+   * que e outro defeito, registrado a parte: apagar uma notificacao POR LER
+   * deixa o cabecalho com um numero a mais. Nao se conserta aqui.
+   */
   async function handleDelete(id: string) {
-    await deleteNotification(id);
-    setItems((prev) => prev.filter((n) => n.id !== id));
-    setTotal((t) => t - 1);
+    try {
+      await deleteNotification(id);
+      setItems((prev) => prev.filter((n) => n.id !== id));
+      setTotal((t) => t - 1);
+    } catch (err) {
+      toastApiError(err, "Não foi possível remover a notificação.");
+    }
   }
 
   async function handleMarkAllRead() {

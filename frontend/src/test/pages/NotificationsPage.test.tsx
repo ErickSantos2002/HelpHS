@@ -2,6 +2,8 @@ import { render, screen, waitFor } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { describe, expect, it, vi, beforeEach } from "vitest";
 
+vi.mock("sonner", () => ({ toast: { error: vi.fn(), success: vi.fn() } }));
+
 vi.mock("../../services/notificationService", () => ({
   getNotifications: vi.fn(),
   markRead: vi.fn(),
@@ -12,6 +14,7 @@ vi.mock("../../services/notificationService", () => ({
 import { MemoryRouter, Route, Routes } from "react-router-dom";
 import NotificationsPage, { TIPO } from "../../pages/notifications/NotificationsPage";
 import * as notificationService from "../../services/notificationService";
+import { toast } from "sonner";
 import type {
   Notification,
   NotificationType,
@@ -235,6 +238,27 @@ describe("NotificationsPage", () => {
       expect(screen.queryByText("Impressora do 2º andar")).not.toBeInTheDocument(),
     );
     expect(screen.queryByText("detalhe do chamado")).not.toBeInTheDocument();
+  });
+
+  it("remover que FALHA nao tira a linha, e diz que falhou", async () => {
+    // O `await` estava solto aqui: a lista era filtrada logo depois da
+    // chamada, sem saber se ela tinha dado certo. Falha de rede deixava a
+    // notificacao no servidor e sumida da tela — o usuario so descobria ao
+    // recarregar.
+    //
+    // As DUAS metades importam. Um caso que so checasse o toast passaria com
+    // a lista filtrada antes da hora, que e o proprio defeito.
+    await montar([notif({ id: "a", data: { ticket_id: "t1" } })]);
+    vi.mocked(notificationService.deleteNotification).mockRejectedValueOnce(
+      new Error("rede"),
+    );
+
+    await userEvent.click(
+      screen.getByRole("button", { name: "Remover notificação" }),
+    );
+
+    await waitFor(() => expect(toast.error).toHaveBeenCalled());
+    expect(screen.getByText("Impressora do 2º andar")).toBeInTheDocument();
   });
 
   it("o estado vazio diz qual vazio é — e muda com o filtro", async () => {

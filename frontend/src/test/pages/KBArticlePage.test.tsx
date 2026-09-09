@@ -17,6 +17,7 @@ vi.mock("sonner", () => ({ toast: { error: vi.fn(), success: vi.fn() } }));
 import { MemoryRouter, Route, Routes } from "react-router-dom";
 import KBArticlePage from "../../pages/kb/KBArticlePage";
 import * as kbService from "../../services/kbService";
+import { toast } from "sonner";
 
 /**
  * O que esta tela tinha, e o que estes casos prendem.
@@ -238,5 +239,22 @@ describe("KBArticlePage", () => {
     expect(
       screen.getByRole("heading", { name: "Comentários (0)" }),
     ).toBeInTheDocument();
+  });
+  it("excluir comentário que FALHA não tira o comentário, e diz que falhou", async () => {
+    // Mesmo defeito e mesmo conserto do `handleDelete` da NotificationsPage:
+    // o `await` estava solto, e a lista era filtrada antes de a rede
+    // confirmar. As irmas deste mesmo arquivo (`handleAddComment`,
+    // `handleReply`) ja faziam certo — o estado muda DENTRO do try.
+    //
+    // As duas metades: o erro aparece, E o comentario continua na tela.
+    await montar();
+    vi.mocked(kbService.deleteKBComment).mockRejectedValueOnce(
+      new Error("rede"),
+    );
+
+    await userEvent.click(screen.getByRole("button", { name: "Excluir" }));
+
+    await waitFor(() => expect(toast.error).toHaveBeenCalled());
+    expect(screen.getByText(COMENTARIO.content)).toBeInTheDocument();
   });
 });

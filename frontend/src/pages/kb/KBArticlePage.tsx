@@ -361,9 +361,29 @@ export default function KBArticlePage() {
     }
   }
 
+  /**
+   * Exclui o comentario, e so entao o tira da lista.
+   *
+   * O `await` estava SOLTO aqui, e a ordem era a inversa da segura: a lista era
+   * filtrada logo depois da chamada, sem saber se ela tinha dado certo. Uma
+   * falha de rede rejeitava a promessa sem tratamento, o comentario continuava
+   * no servidor, **e a tela mostrava removido o que continuava la** — o usuario
+   * so descobria ao recarregar.
+   *
+   * A forma e a das irmas deste mesmo arquivo (`handleAddComment`,
+   * `handleReply`): o estado local muda DENTRO do `try`, depois do `await`.
+   *
+   * Nao relanca, ao contrario das irmas: elas relancam para o formulario saber
+   * que nao deve limpar o campo. Aqui nao ha campo — o que a lixeira precisa e
+   * que a lista NAO mude, e isso o `catch` ja garante.
+   */
   async function handleDeleteComment(commentId: string) {
-    await deleteKBComment(commentId);
-    setComments((prev) => prev.filter((c) => c.id !== commentId).map((c) => ({ ...c, replies: c.replies.filter((r) => r.id !== commentId) })));
+    try {
+      await deleteKBComment(commentId);
+      setComments((prev) => prev.filter((c) => c.id !== commentId).map((c) => ({ ...c, replies: c.replies.filter((r) => r.id !== commentId) })));
+    } catch (err) {
+      toastApiError(err, "Não foi possível excluir o comentário.");
+    }
   }
 
   const totalComments = comments.reduce((acc, c) => acc + 1 + c.replies.length, 0);
