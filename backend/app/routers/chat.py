@@ -50,7 +50,7 @@ from app.schemas.chat import (
     SuggestReplyResponse,
 )
 from app.services import chat_backplane
-from app.services.helo import responde_triagem
+from app.services.helo import MOTIVO_PEDIU_HUMANO, responde_triagem
 from app.services.llm import improve_message, suggest_reply, summarize_conversation
 from app.services.notifications import commit_e_notificar, notify
 from app.utils.sla import register_first_response
@@ -321,8 +321,12 @@ async def create_message(
     # Notify the other party
     await _notify_other_party(db, ticket, actor, msg)
 
-    if fala_da_helo is not None:
-        await _avisa_equipe_da_helo(db, ticket, escalou=fala_da_helo.escalou)
+    # SÓ na escalada. Ela fala a cada turno agora, e avisar a equipe a cada
+    # fala mandaria seis notificações por chamado para todo técnico e
+    # todo admin — cinco delas dizendo que a triagem acabou enquanto a
+    # conversa seguia. Notificação que chega sempre deixa de ser lida.
+    if fala_da_helo is not None and fala_da_helo.escalou:
+        await _avisa_equipe_da_helo(db, ticket, motivo=fala_da_helo.motivo)
 
     # Auto status transition based on who is sending
     new_status_value = await _apply_chat_transition(db, ticket, actor)
@@ -601,8 +605,9 @@ async def websocket_chat(
                 fala_da_helo = None
                 if user.id == ticket.creator_id:
                     fala_da_helo = await responde_triagem(db, ticket, user, msg.content)
-                    if fala_da_helo is not None:
-                        await _avisa_equipe_da_helo(db, ticket, escalou=fala_da_helo.escalou)
+                    # Só na escalada — ver o mesmo trecho no caminho do POST.
+                    if fala_da_helo is not None and fala_da_helo.escalou:
+                        await _avisa_equipe_da_helo(db, ticket, motivo=fala_da_helo.motivo)
 
                 new_status_value = await _apply_chat_transition(db, ticket, user)
 
@@ -710,9 +715,9 @@ async def _apply_chat_transition(
     return None
 
 
-async def _avisa_equipe_da_helo(db: AsyncSession, ticket: Ticket, *, escalou: bool) -> None:
+async def _avisa_equipe_da_helo(db: AsyncSession, ticket: Ticket, *, motivo: str) -> None:
     """
-    Chama a equipe quando a Helô sai de cena — dizendo qual das duas saídas foi.
+    Chama a equipe quando a Helô sai de cena — dizendo por quê.
 
     Sem isto o chamado fica em "Em andamento" sem dono e sem ninguém avisado: a
     notificação normal do chat vai para o RESPONSÁVEL, e a essa altura não há
@@ -728,6 +733,12 @@ async def _avisa_equipe_da_helo(db: AsyncSession, ticket: Ticket, *, escalou: bo
     manda a equipe procurar um resumo que não existe, e apaga a única
     informação que muda a ordem da fila — que tem alguém do outro lado
     esperando gente, não esperando atendimento.
+
+    Na Fase 2 o mesmo defeito voltou por outro lado: as saídas viraram quatro,
+    e três delas — modelo escalou, teto de trocas, IA muda — continuavam
+    chegando à equipe como "o cliente pediu para falar com uma pessoa". O
+    motivo agora vem pronto de `responde_triagem` e é escrito no texto; o
+    título separa só o caso que muda a prioridade da fila.
 
     O tipo continua `ticket_updated` nos dois casos: `NotificationType` é enum
     nativo do Postgres, e um valor novo custa um `ALTER TYPE` em migration que
@@ -748,12 +759,12 @@ async def _avisa_equipe_da_helo(db: AsyncSession, ticket: Ticket, *, escalou: bo
         .all()
     )
 
-    if escalou:
+    if motivo == MOTIVO_PEDIU_HUMANO:
         titulo = f"Cliente pediu atendimento humano — {ticket.protocol}"
-        texto = "O cliente pediu para falar com uma pessoa. A Helô parou a triagem na hora."
+        texto = "O cliente pediu para falar com uma pessoa. A Helô parou na hora."
     else:
-        titulo = f"Triagem concluída — {ticket.protocol}"
-        texto = "A Helô terminou a triagem e o chamado está esperando atendimento."
+        titulo = f"Helô passou o chamado — {ticket.protocol}"
+        texto = f"A Helô saiu da conversa e o chamado está esperando atendimento: {motivo}."
 
     for pessoa in equipe:
         await notify(

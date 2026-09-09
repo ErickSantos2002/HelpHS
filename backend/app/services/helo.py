@@ -320,19 +320,40 @@ TROCAS_MAXIMAS = 6
 FALAS_MAXIMAS = TROCAS_MAXIMAS + 1
 
 
+# Os motivos de escalada, e a razão de serem constantes e não frases soltas.
+#
+# Na Fase 1 havia uma saída só — o cliente pediu uma pessoa —, e a notificação
+# da equipe podia dizer isso com segurança. Agora são quatro caminhos, e três
+# deles nada têm a ver com o cliente ter pedido gente: o modelo decidiu, o teto
+# de trocas estourou, ou a IA não respondeu. Mandar "o cliente pediu para falar
+# com uma pessoa" nos quatro casos apaga a única informação que muda a ordem da
+# fila — se tem alguém do outro lado esperando gente ou não.
+MOTIVO_PEDIU_HUMANO = "o cliente pediu para falar com uma pessoa"
+MOTIVO_TETO_DE_TROCAS = f"a conversa passou de {TROCAS_MAXIMAS} trocas sem sair do lugar"
+MOTIVO_IA_MUDA = "a IA não respondeu"
+MOTIVO_SEM_MOTIVO = "o modelo escalou sem dizer o motivo"
+
+
 class FalaDaHelo(NamedTuple):
     """
-    O que ela falou, e por qual das duas saídas.
+    O que ela falou, e — quando saiu de cena — por quê.
 
-    `escalou` viaja junto porque não dá para recuperá-lo depois: quem precisa
+    `motivo` viaja junto porque não dá para recuperá-lo depois: quem precisa
     dele é a notificação da equipe, e deduzi-lo relendo o texto do cliente no
-    router seria uma segunda cópia da decisão que `quer_humano` já toma aqui.
-    As duas cópias concordam hoje e deixariam de concordar na Fase 2, quando
-    for o LLM a dizer se o cliente quer gente.
+    router seria uma segunda cópia da decisão que este módulo já tomou. As duas
+    cópias concordariam no caso do `quer_humano` e discordariam nos outros
+    três, que é justamente onde a equipe precisa de informação boa.
+
+    `None` quer dizer que ela respondeu e continua na conversa.
     """
 
     mensagem: ChatMessage
-    escalou: bool
+    motivo: str | None
+
+    @property
+    def escalou(self) -> bool:
+        """Escalar é ter motivo. Um campo separado poderia divergir do outro."""
+        return self.motivo is not None
 
 
 def monta_escalada() -> str:
@@ -451,7 +472,7 @@ async def responde_triagem(
     if falas == 0 or falas >= FALAS_MAXIMAS:
         return None
 
-    conteudo, escalou = await _o_que_ela_diz(db, ticket, cliente, texto_do_cliente, falas)
+    conteudo, motivo = await _o_que_ela_diz(db, ticket, cliente, texto_do_cliente, falas)
 
     fala = ChatMessage(
         id=uuid.uuid4(),
@@ -464,7 +485,7 @@ async def responde_triagem(
     )
     db.add(fala)
 
-    if escalou:
+    if motivo is not None:
         # ESCALAR DESLIGA A IA NO CHAMADO, e isto é novo na Fase 2.
         #
         # O desenho sempre prometeu que escalar "muda o status, notifica a
@@ -479,7 +500,7 @@ async def responde_triagem(
         # não deveria ter a conversa dele resumida por uma.
         ticket.ai_enabled = False
 
-    return FalaDaHelo(mensagem=fala, escalou=escalou)
+    return FalaDaHelo(mensagem=fala, motivo=motivo)
 
 
 async def _busca_sem_derrubar(
@@ -516,9 +537,11 @@ async def _o_que_ela_diz(
     cliente: User,
     texto_do_cliente: str,
     falas: int,
-) -> tuple[str, bool]:
+) -> tuple[str, str | None]:
     """
-    O texto da vez e se é escalada. Devolve SEMPRE alguma coisa.
+    O texto da vez e o motivo da escalada, ou `None` se ela segue na conversa.
+
+    Devolve SEMPRE alguma coisa.
 
     Nenhuma falha de infraestrutura daqui sobe, e nenhum caminho devolve vazio:
     o chamador já decidiu que ela vai falar, e "ela ia falar mas o serviço
@@ -533,11 +556,11 @@ async def _o_que_ela_diz(
     # ele funciona com o LLM fora do ar, e não se gasta uma chamada para
     # descobrir o que uma lista de substrings já disse.
     if quer_humano(texto_do_cliente):
-        return monta_escalada(), True
+        return monta_escalada(), MOTIVO_PEDIU_HUMANO
 
     # Teto de trocas: a última fala dela é uma despedida, não uma tentativa.
     if falas >= TROCAS_MAXIMAS:
-        return monta_escalada(), True
+        return monta_escalada(), MOTIVO_TETO_DE_TROCAS
 
     vetor = await embute_um(texto_do_cliente)
     trechos = await _busca_sem_derrubar(db, ticket, vetor) if vetor else []
@@ -555,7 +578,7 @@ async def _o_que_ela_diz(
         # que uma IA caiu; ele precisa de um humano, e é isso que a escalada
         # entrega. Vale para timeout, chave inválida, serviço fora e resposta
         # vazia — todos indistinguíveis daqui, e todos com o mesmo destino.
-        return monta_escalada(), True
+        return monta_escalada(), MOTIVO_IA_MUDA
 
     resposta = le_resposta(bruto)
     if resposta.escalou:
@@ -563,6 +586,6 @@ async def _o_que_ela_diz(
         # sabe por que está escalando e a frase já está no contexto da
         # conversa; trocar por `monta_escalada()` genérica soaria como se
         # ninguém tivesse lido o que o cliente escreveu.
-        return resposta.texto or monta_escalada(), True
+        return resposta.texto or monta_escalada(), resposta.motivo or MOTIVO_SEM_MOTIVO
 
-    return resposta.texto, False
+    return resposta.texto, None

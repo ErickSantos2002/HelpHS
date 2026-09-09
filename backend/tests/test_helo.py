@@ -701,6 +701,90 @@ async def test_o_modelo_recebe_o_prompt_de_sistema_e_os_tres_blocos(helo_ligada,
 
 
 @pytest.mark.asyncio
+async def test_o_pedido_de_humano_viaja_com_o_proprio_motivo(helo_ligada):
+    """
+    O motivo não é enfeite: é o que separa a fila.
+
+    "Tem gente esperando gente" é a única informação da escalada que muda a
+    ordem de atendimento. As outras três saídas chegam à equipe como trabalho
+    normal; esta chega como alguém do outro lado esperando uma pessoa.
+    """
+    fala = await responde_triagem(
+        _db_com_falas(1), _chamado(), _cliente(), "quero falar com um humano"
+    )
+
+    assert fala.motivo == helo.MOTIVO_PEDIU_HUMANO
+
+
+@pytest.mark.asyncio
+async def test_o_teto_de_trocas_diz_que_foi_o_teto(helo_ligada):
+    """Escalada por esgotamento não é pedido do cliente, e a equipe lê a diferença."""
+    fala = await responde_triagem(_db_com_falas(TROCAS_MAXIMAS), _chamado(), _cliente(), "e agora?")
+
+    assert fala.motivo == helo.MOTIVO_TETO_DE_TROCAS
+    assert str(TROCAS_MAXIMAS) in fala.motivo, "o número sai da constante, não de uma cópia"
+
+
+@pytest.mark.asyncio
+async def test_a_ia_muda_nao_se_disfarca_de_pedido_do_cliente(helo_ligada, monkeypatch):
+    """
+    Chave vencida às três da manhã não pode chegar como "o cliente pediu gente".
+
+    É o caso em que o motivo honesto vale mais: a equipe atende o chamado do
+    mesmo jeito, e alguém consegue perceber que TODOS os chamados da noite
+    escalaram pelo mesmo motivo — que é o sintoma de a IA estar fora do ar.
+    """
+    monkeypatch.setattr(helo, "responde_como_helo", AsyncMock(return_value=None))
+
+    fala = await responde_triagem(_db_com_falas(1), _chamado(), _cliente(), "não liga")
+
+    assert fala.motivo == helo.MOTIVO_IA_MUDA
+
+
+@pytest.mark.asyncio
+async def test_o_motivo_do_modelo_chega_inteiro_a_equipe(helo_ligada, modelo_diz):
+    """
+    O modelo escreve o motivo na linha `ESCALAR:`, e ele é bom.
+
+    "dano físico no visor" dito por quem leu a conversa vale mais do que
+    qualquer rótulo fixo que o backend soubesse inventar — e era informação que
+    o `le_resposta` já extraía e o código jogava fora.
+    """
+    modelo_diz("Isso precisa de um técnico.\nESCALAR: dano físico no visor")
+
+    fala = await responde_triagem(_db_com_falas(1), _chamado(), _cliente(), "a tela quebrou")
+
+    assert fala.motivo == "dano físico no visor"
+
+
+@pytest.mark.asyncio
+async def test_escalada_sem_motivo_nao_manda_a_equipe_uma_frase_vazia(helo_ligada, modelo_diz):
+    """
+    O modelo pode escrever `ESCALAR:` e mais nada — e escreve.
+
+    Sem o padrão, a notificação sairia com "o chamado está esperando
+    atendimento: ." — que denuncia o defeito para a equipe inteira e não diz
+    nada.
+    """
+    modelo_diz("Vou transferir.\nESCALAR:")
+
+    fala = await responde_triagem(_db_com_falas(1), _chamado(), _cliente(), "e o preço?")
+
+    assert fala.motivo == helo.MOTIVO_SEM_MOTIVO
+
+
+@pytest.mark.asyncio
+async def test_resposta_comum_nao_tem_motivo_nenhum(helo_ligada, modelo_diz):
+    """`escalou` é derivado do motivo — não existe escalada sem por quê, nem o contrário."""
+    modelo_diz("Segure o botão por três segundos.")
+
+    fala = await responde_triagem(_db_com_falas(1), _chamado(), _cliente(), "não liga")
+
+    assert fala.motivo is None
+    assert fala.escalou is False
+
+
+@pytest.mark.asyncio
 async def test_ela_nao_entra_em_conversa_que_comecou_sem_ela(helo_ligada):
     """
     Chamado aberto antes dela existir, ou com ela desligada.
