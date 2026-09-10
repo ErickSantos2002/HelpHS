@@ -53,11 +53,49 @@ function ordemDePrioridade(p: string): number {
 
 // ── Helpers ───────────────────────────────────────────────────
 
-function formatHours(h: number) {
+/**
+ * `null` NÃO é um caso de borda aqui — é o caso normal da Crítica.
+ *
+ * `response_time_hours` e `resolve_time_hours` são derivados de
+ * `*_time_minutes` no backend e valem `None` quando o prazo não é hora cheia.
+ * A Crítica tem 30 min, então chegam nulos por desenho, todo dia.
+ *
+ * A versão anterior recebia `h: number` e não se defendia, porque o tipo dizia
+ * que não precisava. `null < 24` é `true` (o `null` vira 0 na comparação), a
+ * interpolação escrevia `${null}h`, e a tela mostrava "nullh" em produção —
+ * sem erro de TypeScript, sem exceção em runtime, sem nada. Tipo que mente
+ * custa mais caro que tipo ausente: ele desliga a única checagem que havia.
+ */
+function formatHours(h: number | null | undefined) {
+  if (h === null || h === undefined) return null;
   if (h < 24) return `${h}h`;
   const days = Math.floor(h / 24);
   const rest = h % 24;
   return rest > 0 ? `${days}d ${rest}h` : `${days}d`;
+}
+
+/**
+ * O prazo, ou um traço quando ele não cabe em horas.
+ *
+ * O traço sozinho é ambíguo — pode ser "não configurado", pode ser zero — e a
+ * nota é o que separa os dois. Ela vive em `sr-only` e não em `title`: `title`
+ * não é anunciado de forma confiável por leitor de tela nenhum, e o valor mais
+ * importante da tela não pode ficar mudo para quem não vê o traço.
+ */
+function Prazo({ horas }: { horas: number | null | undefined }) {
+  const texto = formatHours(horas);
+  if (texto !== null) {
+    return <p className="text-sm font-semibold text-conteudo-heading mt-0.5">{texto}</p>;
+  }
+  return (
+    <p
+      className="text-sm font-semibold text-conteudo-heading mt-0.5"
+      title="Prazo não representável em horas inteiras — edite para ver o valor exato."
+    >
+      <span aria-hidden="true">—</span>
+      <span className="sr-only">não representável em horas</span>
+    </p>
+  );
 }
 
 // ── Validation schema ─────────────────────────────────────────
@@ -109,9 +147,18 @@ function SlaEditModal({ config, onClose, onSaved }: {
 
   const form = useForm<EditValues>({
     resolver: zodResolver(editSchema) as Resolver<EditValues>,
+    // `?? undefined` porque o prazo pode não ser hora cheia, e o formulário só
+    // fala em horas inteiras. Semear com `null` deixava o campo num estado que
+    // o react-hook-form não declara — e o tipo honesto foi exatamente o que
+    // mostrou isso: com `number` mentindo, esta linha compilava.
+    //
+    // Campo vazio é a leitura certa aqui: a Crítica tem 30 min, e o formulário
+    // NÃO CONSEGUE escrever esse valor. Vazio obriga a pessoa a digitar um
+    // prazo que o formulário sabe representar, em vez de mostrar um número
+    // arredondado que ela salvaria sem perceber que mudou o SLA.
     defaultValues: {
-      response_time_hours: config.response_time_hours,
-      resolve_time_hours: config.resolve_time_hours,
+      response_time_hours: config.response_time_hours ?? undefined,
+      resolve_time_hours: config.resolve_time_hours ?? undefined,
       warning_threshold: config.warning_threshold,
     },
   });
@@ -228,7 +275,13 @@ export default function SlaConfigPage() {
             <div className="divide-y divide-borda">
               {configs.map((c) => {
                 const rotulo = rotuloDePrioridade(c.level);
-                const responseRatio = Math.min((c.response_time_hours / c.resolve_time_hours) * 100, 100);
+                // Os dois prazos podem ser nulos, e `null / null` e NaN --
+                // `width: NaN%` e atributo invalido, descartado em silencio.
+                // Sem prazo nao ha proporcao a desenhar: a barra fica em zero.
+                const proporcao =
+                  c.response_time_hours != null && c.resolve_time_hours
+                    ? Math.min((c.response_time_hours / c.resolve_time_hours) * 100, 100)
+                    : 0;
                 return (
                   <div key={c.id} className="flex items-center gap-4 px-4 py-4 hover:bg-surface-elevated/40 transition-colors">
 
@@ -247,7 +300,7 @@ export default function SlaConfigPage() {
                           <div
                             aria-hidden="true"
                             className={`h-full rounded-full opacity-60 ${TOM_PRIORIDADE[varianteDePrioridade(c.level)].ponto}`}
-                            style={{ width: `${responseRatio}%` }}
+                            style={{ width: `${proporcao}%` }}
                           />
                         </div>
                       </div>
@@ -258,7 +311,7 @@ export default function SlaConfigPage() {
                           <Icon name="clock" size={16} strokeWidth={2} className="text-conteudo-muted" />
                           <div>
                             <p className="text-[10px] text-conteudo-muted leading-none">Resposta</p>
-                            <p className="text-sm font-semibold text-conteudo-heading mt-0.5">{formatHours(c.response_time_hours)}</p>
+                            <Prazo horas={c.response_time_hours} />
                           </div>
                         </div>
 
@@ -267,7 +320,7 @@ export default function SlaConfigPage() {
                           <Icon name="shield" size={16} strokeWidth={2} className="text-conteudo-muted" />
                           <div>
                             <p className="text-[10px] text-conteudo-muted leading-none">Resolução</p>
-                            <p className="text-sm font-semibold text-conteudo-heading mt-0.5">{formatHours(c.resolve_time_hours)}</p>
+                            <Prazo horas={c.resolve_time_hours} />
                           </div>
                         </div>
 

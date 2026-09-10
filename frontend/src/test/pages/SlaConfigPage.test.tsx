@@ -180,3 +180,98 @@ describe("SlaConfigPage", () => {
     );
   });
 });
+
+/**
+ * Achados em PRODUÇÃO, na /sla-config, em 10/09/2026.
+ *
+ * O primeiro é o mesmo defeito de sempre, na sua forma mais barata de cometer:
+ * um tipo que MENTE. `SLAConfig.response_time_hours` era `number`, e o backend
+ * manda `int | None` — o campo é derivado de `response_time_minutes` e vale
+ * `None` quando o prazo não é hora cheia. A Crítica tem 30 min, então o campo
+ * chega nulo POR DESENHO.
+ *
+ * `formatHours(null)` não explodia: `null < 24` é `true` (o `null` vira 0 na
+ * comparação), e a interpolação escrevia `${null}h`. O usuário lia **"nullh"**
+ * no lugar do prazo mais importante do sistema, e nem o TypeScript nem o
+ * runtime deram um pio — porque o tipo dizia que aquilo não podia acontecer.
+ *
+ * Nenhum caso pegava porque toda a fixture deste arquivo usava hora cheia. Não
+ * é régua errada: é conjunto de dados sem o ramo, que é o subtipo de mutação
+ * fraca registrado no DECISOES.md.
+ */
+describe("prazo que não é hora cheia", () => {
+  it("mostra um traço, e não 'nullh', quando as horas vêm nulas", async () => {
+    // 30 min: o valor real da Crítica em produção.
+    await montar([config("critical", { response_time_hours: null })]);
+
+    const cartao = screen.getByText("Resposta").closest("div")!.parentElement!;
+    expect(cartao).not.toHaveTextContent("nullh");
+    expect(within(cartao).getByText("—")).toBeInTheDocument();
+  });
+
+  it("diz por que o campo está vazio, e diz para o leitor de tela também", async () => {
+    // Um traço sozinho é ambíguo: pode ser "não configurado", pode ser "zero".
+    // A nota é o que separa os dois, e ela não pode viver só no `title` —
+    // `title` não é anunciado de forma confiável por leitor de tela nenhum.
+    await montar([config("critical", { response_time_hours: null })]);
+
+    expect(
+      screen.getByText(/não representável em horas/i),
+    ).toBeInTheDocument();
+  });
+
+  it("não escreve NaN na barra quando os dois prazos vêm nulos", async () => {
+    // A barra divide um prazo pelo outro, e `null / null` é NaN.
+    //
+    // O sintoma OBSERVADO, e não o que eu supus: com NaN o React não escreve
+    // a largura de jeito nenhum — antes do conserto este seletor devolvia
+    // `null`, com o elemento da barra existindo na árvore. Por isso o caso
+    // afirma as duas coisas: que a barra ESTÁ lá e que a largura é um valor
+    // de verdade. Só a segunda passaria por engano se a barra sumisse.
+    await montar([
+      config("critical", {
+        response_time_hours: null,
+        resolve_time_hours: null,
+      }),
+    ]);
+
+    const barra = document.querySelector<HTMLElement>("[aria-hidden='true'][style*='width']");
+    expect(barra).not.toBeNull();
+    expect(barra!.style.width).not.toContain("NaN");
+  });
+
+  it("abre o modal com o campo VAZIO, e não com um número arredondado", async () => {
+    // O formulário só fala em horas inteiras e não consegue escrever 30 min.
+    // Semear com um número aproximado seria pior que vazio: a pessoa salvaria
+    // sem perceber que acabou de mudar o SLA da prioridade mais urgente.
+    //
+    // O QUE ESTE CASO PRENDE, medido por mutação, porque ele passou de
+    // primeira: trocar o vazio por `?? 1` REPROVA aqui — então ele guarda o
+    // comportamento. Mas voltar ao código de antes (semear o `null` cru)
+    // PASSA: um `<input type="number">` com `null` também renderiza vazio.
+    //
+    // Ou seja, o `?? undefined` que acompanha este caso é conserto de TIPO,
+    // não de comportamento — quem o pegou foi o `tsc -b`, não o teste. O caso
+    // fica assim mesmo, como guarda contra alguém "ajudar" preenchendo um
+    // número arredondado, e não como prova de um conserto que ele não prova.
+    await montar([config("critical", { response_time_hours: null })]);
+
+    await userEvent.click(
+      screen.getByRole("button", { name: "Editar SLA da prioridade Crítica" }),
+    );
+
+    const dialogo = screen.getByRole("dialog", { name: "Editar SLA — Crítica" });
+    expect(
+      within(dialogo).getByLabelText(/Resposta \(horas úteis\)/),
+    ).toHaveValue(null);
+  });
+
+  it("segue formatando normalmente quando a hora é cheia", async () => {
+    // Controle negativo: se eu tivesse trocado o `formatHours` por algo que
+    // devolve "—" sempre, os três casos acima passariam igual.
+    await montar([config("high", { response_time_hours: 6, resolve_time_hours: 28 })]);
+
+    expect(screen.getByText("6h")).toBeInTheDocument();
+    expect(screen.getByText("1d 4h")).toBeInTheDocument();
+  });
+});
