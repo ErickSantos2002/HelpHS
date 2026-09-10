@@ -52,8 +52,8 @@ from sqlalchemy.ext.asyncio import async_sessionmaker, create_async_engine
 from app.models.models import (
     Base,
     HeloChunk,
-    HeloDocType,
-    HeloDocument,
+    KBArticle,
+    KBArticleStatus,
     Product,
     Ticket,
     TicketCategory,
@@ -62,7 +62,7 @@ from app.models.models import (
     User,
     UserRole,
     UserStatus,
-    helo_chunk_products,
+    kb_article_products,
 )
 from app.services.helo_base import TETO_DE_DISTANCIA, busca_trechos
 from servico_embedding.pooling import agrupa
@@ -268,30 +268,41 @@ async def test_a_busca_devolve_o_trecho_de_idioma_e_nao_o_de_reconhecimento_faci
         onboarding_completed=True,
     )
     produto = Product(id=uuid.uuid4(), name="Titan")
-    documento = HeloDocument(
-        id=uuid.uuid4(),
-        filename="manual.txt",
-        title="Manual Técnico",
-        doc_type=HeloDocType.tecnico,
-        content_hash=uuid.uuid4().hex,
-    )
-    db.add_all([cliente, produto, documento])
+    db.add_all([cliente, produto])
     await db.flush()
+    # Desde 10/09/2026 o trecho pertence a um ARTIGO publicado da Base de
+    # Conhecimento. O texto do artigo não importa aqui: os trechos entram
+    # direto, com o vetor que o pooling produziu — é o pooling que se testa.
+    documento = KBArticle(
+        id=uuid.uuid4(),
+        title="Manual Técnico",
+        content="(os trechos deste teste são gravados direto)",
+        slug=f"manual-{uuid.uuid4().hex}",
+        category=TicketCategory.hardware,
+        tags=[],
+        status=KBArticleStatus.published,
+        helo_pode_ler=True,
+        author_id=cliente.id,
+        view_count=0,
+        helpful=0,
+        not_helpful=0,
+    )
+    db.add(documento)
+    await db.flush()
+    await db.execute(
+        kb_article_products.insert().values(article_id=documento.id, product_id=produto.id)
+    )
 
     for ordem, nome in enumerate(("titan_idioma", "phoebus_facial", "phoebus_impressora")):
         trecho = HeloChunk(
             id=uuid.uuid4(),
-            document_id=documento.id,
+            article_id=documento.id,
             secao=nome,
             ordem=ordem,
             conteudo=textos[nome],
             embedding=vetores[indice[nome]].tolist(),
         )
         db.add(trecho)
-        await db.flush()
-        await db.execute(
-            helo_chunk_products.insert().values(chunk_id=trecho.id, product_id=produto.id)
-        )
     await db.flush()
 
     chamado = Ticket(
@@ -323,7 +334,7 @@ async def test_a_busca_devolve_o_trecho_de_idioma_e_nao_o_de_reconhecimento_faci
     distancias = (
         await db.execute(
             select(HeloChunk.secao, HeloChunk.embedding.cosine_distance(pergunta).label("d"))
-            .where(HeloChunk.document_id == documento.id)
+            .where(HeloChunk.article_id == documento.id)
             .order_by("d")
         )
     ).all()

@@ -1,5 +1,5 @@
 """
-A busca na base de manuais da Helô — e os dois filtros que não são opcionais.
+A busca na base da Helô — e os filtros que não são opcionais.
 
 Este módulo é a ÚNICA porta para os trechos. Não existe função aqui que
 devolva trecho sem filtrar, e é de propósito: um filtro que se pode esquecer é
@@ -7,41 +7,51 @@ um filtro que vai ser esquecido, e o esquecimento não aparece como erro — sai
 como resposta errada, com a fonte citada, na tela de quem opera um instrumento
 de medição legal.
 
-OS DOIS FILTROS
+DE ONDE VEM O TEXTO
+-------------------
+Desde 10/09/2026, da Base de Conhecimento: os trechos são cortados de
+`kb_articles` pela varredura de `helo_indexacao.py`. Os filtros abaixo rodam
+AO VIVO, na consulta — por isso despublicar ou desmarcar um artigo tira o
+texto dele das respostas no mesmo instante, sem esperar varredura nenhuma.
 
-**Produto.** Todos os manuais falam de sopro, LED, bocal e calibração. Sem o
-filtro, a busca vetorial traz o trecho do Phoebus para quem tem um Titan na
-mão, porque os textos se parecem — é justamente onde ela é mais parecida que
-ela mais erra.
+OS FILTROS
+----------
+**Publicação.** Só artigo `published` e com `helo_pode_ler`. Rascunho e
+arquivado ficam fora; publicado quer dizer visível para o cliente, e é o
+estado em que alguém já decidiu que aquele texto pode ser lido.
 
-**Tipo.** Só `tecnico`. Cinco dos oito documentos são fichas de venda, com
-preço de aparelho e de calibração; a Helô cotando equipamento para quem abriu
-chamado técnico é o pior resultado desta fase.
+**Produto — e a regra INVERTEU em relação à ingestão por arquivo.** Artigo sem
+produto vinculado vale para todos os aparelhos; artigo vinculado só aparece em
+chamado daquele produto. Na ingestão por arquivo, vínculo ausente era
+casamento falhado e por isso erro fatal; no artigo, é escolha de quem escreveu
+— é o que o próprio modelo documenta, e é como a barra lateral já funciona.
 
-E o filtro de tipo tem uma segunda função, que é a que custa caro se faltar. O
-**iBlow 10 Pro é o único produto com dois documentos** — a ficha comercial e o
-manual técnico — e é exatamente o par que se contradiz: a ficha diz que o
-aparelho pareia com o "Health App", o manual diz "i-SOBER". Sem o filtro de
-tipo, os dois trechos entram na mesma recuperação, o modelo escolhe um, e a
-Helô responde "Health App" CITANDO A FICHA COMERCIAL como fonte. Fonte errada é
-pior do que fonte nenhuma, porque parece conferível.
+A inversão é a mudança mais perigosa da mudança de fonte, e está escrita aqui
+para ninguém esquecer o preço: um procedimento que só serve ao Phoebus,
+publicado sem vínculo, alcança quem tem um Titan na mão. Todos os manuais
+falam de sopro, LED e calibração, e é justamente onde os textos se parecem que
+a busca mais erra. Quem protege isso é quem publica — e a importação dos três
+manuais, que exige o vínculo (ver `scripts/importa_manuais_para_kb.py`).
 
-Por isso os dois filtros têm a mesma força: não há parâmetro para desligar
-nenhum dos dois, e não há caminho alternativo até a tabela.
+**O filtro de tipo morreu**, e com ele uma proteção que precisa ser dita: as
+fichas comerciais (com preço) não entram na Base de Conhecimento, então não há
+o que separar. Se um dia alguém PUBLICAR uma ficha com preço na KB, ela vira
+fonte da Helô — a proteção deixou de ser um tipo que a busca recusa e passou a
+ser a marcação `helo_pode_ler`, que alguém precisa desligar.
 """
 
 from collections.abc import Sequence
 from dataclasses import dataclass
 
-from sqlalchemy import select
+from sqlalchemy import exists, or_, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.models.models import (
     HeloChunk,
-    HeloDocType,
-    HeloDocument,
+    KBArticle,
+    KBArticleStatus,
     Ticket,
-    helo_chunk_products,
+    kb_article_products,
 )
 
 # Quantos trechos vão para o contexto do modelo. Quatro é o teto do que cabe
@@ -67,11 +77,28 @@ K_TRECHOS = 4
 # perguntas, passam a chegar 25. Em 74% das perguntas com resposta sobra
 # exatamente UM trecho — o certo — no lugar de um mais três de ruído.
 #
+# REMEDIDO em 10/09/2026, depois de a fonte passar a ser a Base de
+# Conhecimento — mesmas 40 perguntas, contra os três manuais importados como
+# artigo e cortados pelo `corta_artigo`:
+#
+#     com resposta   n=27  mediana 0,2172   máximo 0,2850
+#     sem resposta   n=13  mínimo   0,2570  mediana 0,2838
+#
+# O 0,25 continua barrando as 13 sem resposta, e 21 das 27 com resposta
+# ainda recebem trecho (eram 22). O texto dos trechos mudou de forma — a
+# primeira linha agora é o título limpo, sem o emoji e a pontuação do
+# manual — e a distância mexeu em até oito milésimos. A margem até a
+# pergunta sem resposta mais próxima caiu de 0,009 para 0,007: hoje ela é
+# "qual o prazo de entrega de um aparelho novo" casando com "3.
+# Especificações Técnicas".
+#
 # ONDE ISTO É FRÁGIL, e por que está escrito aqui e não só no commit:
 #
-# 1. A margem é de 0,009 (0,25 contra 0,2590, que é "quanto custa a calibração
-#    do titan" casando com "2. Composição Física"). É um ajuste a 40 pontos,
-#    não uma lei — e as perguntas foram escritas por quem já sabia a resposta.
+# 1. A margem é de 0,007 (0,25 contra 0,2570, a pergunta do prazo de entrega
+#    acima; na medição original era 0,009, contra 0,2590). É um ajuste a 40
+#    pontos, não uma lei — e as perguntas foram escritas por quem já sabia a
+#    resposta. Uma margem que encolheu dois milésimos só de mudar a forma do
+#    texto é o aviso de quanto ela é pequena.
 #    O `test_helo_pooling_postgres.py` mostra, com embedding real, um ACERTO a
 #    0,2533: as duas populações se sobrepõem entre 0,25 e 0,26. Este corte não
 #    separa duas nuvens, escolhe um lado da sobreposição — o apertado, porque
@@ -88,12 +115,13 @@ K_TRECHOS = 4
 #    visor", não "como interpreto os resultados" — e distância só cresce com
 #    essa diferença. Quem revisitar o 0,25 precisa saber que os 27 não
 #    representam cliente nenhum: representam o melhor caso. O número real de
-#    acertos preservados em produção é MENOR que os 81% medidos aqui, e a
-#    forma de descobrir quanto é medir com pergunta de cliente de verdade,
-#    quando houver conversa gravada para isso.
-# 4. As 5 perguntas com resposta que o corte derruba viram escalada. É o lado
-#    barato de errar: um humano responde. O outro lado é a Helô ditar
-#    procedimento de instrumento de medição legal a partir do trecho errado.
+#    acertos preservados em produção é MENOR que os 78% medidos aqui (81% na
+#    medição original), e a forma de descobrir quanto é medir com pergunta de
+#    cliente de verdade, quando houver conversa gravada para isso.
+# 4. As 6 perguntas com resposta que o corte derruba (eram 5) viram
+#    escalada. É o lado barato de errar: um humano responde. O outro lado é a
+#    Helô ditar procedimento de instrumento de medição legal a partir do
+#    trecho errado.
 #
 # A borda em si (`<=` contra `<`) NÃO está presa por teste, e de propósito: a
 # distância vem em ponto flutuante do pgvector e nunca cai exatamente em 0,25.
@@ -128,7 +156,7 @@ async def busca_trechos(
     k: int = K_TRECHOS,
 ) -> list[TrechoRecuperado]:
     """
-    Os trechos técnicos do produto DESTE chamado, mais próximos do vetor.
+    Os trechos publicados que servem ao produto DESTE chamado, mais próximos.
 
     Args:
         ticket: o chamado — dele saem o produto e, portanto, o filtro. Recebe o
@@ -152,23 +180,36 @@ async def busca_trechos(
     # do defeito que este módulo existe para impedir. Nada encontrado faz a
     # Helô escalar, que é o comportamento certo para uma pergunta que ela não
     # tem como responder com segurança.
+    #
+    # Isto vale inclusive para os artigos SEM vínculo, que "valem para todos os
+    # aparelhos". Todos os aparelhos não é o mesmo que nenhum aparelho: sem
+    # saber de qual se trata, nem o texto universal tem como ser conferido
+    # contra o que o cliente tem na mão. Mantido como era — abrir isto é
+    # decisão, e não consequência da mudança de fonte.
     if ticket.product_id is None:
         return []
+
+    tem_vinculo = exists().where(kb_article_products.c.article_id == KBArticle.id)
+    vinculado_a_este_produto = exists().where(
+        kb_article_products.c.article_id == KBArticle.id,
+        kb_article_products.c.product_id == ticket.product_id,
+    )
 
     consulta = (
         select(
             HeloChunk.secao,
             HeloChunk.conteudo,
-            HeloDocument.title,
+            KBArticle.title,
             HeloChunk.exige_credencial_admin,
             HeloChunk.embedding.cosine_distance(vetor).label("distancia"),
         )
-        .join(HeloDocument, HeloDocument.id == HeloChunk.document_id)
-        .join(helo_chunk_products, helo_chunk_products.c.chunk_id == HeloChunk.id)
+        .join(KBArticle, KBArticle.id == HeloChunk.article_id)
         .where(
-            # Os dois filtros, lado a lado e sem condicional nenhuma em volta.
-            helo_chunk_products.c.product_id == ticket.product_id,
-            HeloDocument.doc_type == HeloDocType.tecnico,
+            # Os filtros, lado a lado e sem condicional nenhuma em volta.
+            KBArticle.status == KBArticleStatus.published,
+            KBArticle.helo_pode_ler.is_(True),
+            # Sem vínculo vale para todos; com vínculo, só para o produto dele.
+            or_(~tem_vinculo, vinculado_a_este_produto),
             # Trecho ainda não embutido não tem como ser ordenado por
             # distância — e ordenar por NULL colocaria lixo no topo.
             HeloChunk.embedding.is_not(None),

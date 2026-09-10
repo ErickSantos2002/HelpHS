@@ -25,7 +25,13 @@ _SENHA = re.compile(
     r"((?:senha|c[óo]digo)[^:\n]{0,40}:\s*)([0-9]{4,8})\b",
     re.IGNORECASE,
 )
-_REDIGIDO = r"\1[REDIGIDO — senha de administrador]"
+# A marca que a redação deixa no lugar da senha. É CONTRATO entre dois
+# momentos: a importação escreve, a indexação lê para acender
+# `exige_credencial_admin`. Se os dois divergissem, o trecho perderia a marca
+# em silêncio — e a Helô entregaria o procedimento sem avisar que ele depende
+# de uma senha que ela não pode dar.
+MARCA_DE_SENHA_REDIGIDA = "[REDIGIDO — senha de administrador]"
+_REDIGIDO = r"\1" + MARCA_DE_SENHA_REDIGIDA
 
 # Os seis links do Google Drive do manual do Phoebus. Saem até alguém
 # confirmar que são públicos: a Helô mandando um link privado para um cliente
@@ -278,3 +284,101 @@ class Trecho:
     conteudo: str
     exige_credencial: bool
     ordem: int
+
+
+# ── O artigo da Base de Conhecimento ──────────────────────────
+#
+# Desde 10/09/2026 a Helô lê artigo, não arquivo. Artigo é markdown — o que o
+# suporte escreve na tela, e o que a importação dos manuais produz —, então um
+# corte só serve para todos: título `##` abre seção, `###` abre subseção DENTRO
+# da seção corrente. É a mesma hierarquia que o `_subdivide` reconstruía nos
+# manuais numerados, agora declarada pelo próprio texto.
+
+_TITULO_MD = re.compile(r"^(#{1,6})\s+(\S.*?)\s*#*\s*$")
+
+# Régua de sinais de igual. Nos manuais do Phoebus ela sublinha título; em
+# markdown, uma linha de `===` logo abaixo de texto vira título NÍVEL 1 — a
+# página renderizaria um cabeçalho gigante no meio da seção. Sai do texto do
+# trecho pelo mesmo motivo que a régua de hifens sai: é formatação, não
+# conteúdo, e não pode entrar no vetor.
+_REGUA_IGUAL = re.compile(r"^={3,}\s*$")
+
+
+def corta_artigo(titulo: str, conteudo: str) -> tuple[list[Trecho], list[tuple[str, int, str]]]:
+    """
+    Do artigo em markdown para os trechos que vão para a busca.
+
+    Devolve (trechos, descartes). Todo descarte diz o porquê — o descarte mudo
+    foi o defeito de verdade da ingestão por arquivo.
+
+    A seção de nível 3 recebe o nome da de nível 2 que a contém ("7. Config →
+    1. Resultado"): sozinho, "1. Resultado" é ambíguo num manual que também tem
+    "1. Introdução", e o nome da seção é o que a Helô cita como fonte.
+
+    A primeira linha de cada trecho é o título da seção SEM a marcação `#`. É o
+    formato que os trechos tinham quando o teto de distância foi medido — o
+    cabeçalho do manual, em texto puro —, e manter o texto igual é o que mantém
+    a medição valendo.
+
+    Artigo sem título nenhum vira UM trecho, com o título do artigo. Sem isso,
+    um artigo curto escrito na tela sem `##` seria invisível para a Helô, sem
+    erro em lugar algum.
+
+    A redação roda aqui também, e é rede, não porta: a porta é a importação,
+    que redige ANTES de o artigo existir, porque artigo publicado é visível para
+    o cliente. Aqui ela pega o que alguém tenha digitado depois, na tela. E o
+    detector largo continua fatal — quem chama decide o que fazer com isso.
+    """
+    linhas = conteudo.splitlines()
+
+    inicios: list[tuple[int, str]] = []
+    folhas: dict[int, str] = {}
+    pai: str | None = None
+    for i, linha in enumerate(linhas):
+        m = _TITULO_MD.match(linha.strip())
+        if not m:
+            continue
+        texto = _titulo_limpo(m.group(2))
+        folhas[i] = texto
+        if len(m.group(1)) <= 2:
+            pai = texto
+            inicios.append((i, texto))
+        else:
+            inicios.append((i, f"{pai} → {texto}" if pai else texto))
+
+    blocos = _fatia(linhas, inicios, titulo_do_preambulo=titulo) if inicios else [(titulo, linhas)]
+
+    # A posição de cada bloco em `linhas`, para saber se ele abre num título.
+    posicoes = [i for i, _ in inicios]
+    if inicios and inicios[0][0] > 0:
+        posicoes = [0] + posicoes
+    elif not inicios:
+        posicoes = [0]
+
+    trechos: list[Trecho] = []
+    descartes: list[tuple[str, int, str]] = []
+    for (secao, bloco), inicio in zip(blocos, posicoes, strict=True):
+        corpo = [x for x in bloco if not (_REGUA.match(x) or _REGUA_IGUAL.match(x))]
+        if inicio in folhas and corpo:
+            cabeca, corpo = folhas[inicio], corpo[1:]
+        else:
+            cabeca = titulo
+        texto = "\n".join([cabeca, *corpo]).strip()
+
+        motivo = descarta(secao, texto)
+        if motivo:
+            descartes.append((secao, len(texto), motivo))
+            continue
+
+        limpo, exigia = redige(texto)
+        trechos.append(
+            Trecho(
+                secao=secao[:255],
+                conteudo=limpo,
+                exige_credencial=exigia or MARCA_DE_SENHA_REDIGIDA in limpo,
+                ordem=len(trechos),
+            )
+        )
+
+    confere_redacao(titulo, conteudo, trechos)
+    return trechos, descartes

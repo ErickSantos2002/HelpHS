@@ -42,6 +42,7 @@ from app.routers import (
 )
 from app.services import antivirus, storage
 from app.services.chat_backplane import assinatura_ativa, start_chat_backplane
+from app.services.helo_indexacao import start_helo_indexacao_worker
 from app.services.ticket_lifecycle import start_auto_close_worker, ultima_rodada_sem_erro
 
 settings = get_settings()
@@ -113,6 +114,10 @@ async def lifespan(app: FastAPI) -> AsyncIterator[None]:
     # app/services/ticket_lifecycle.py).
     auto_close_task = start_auto_close_worker()
 
+    # A base da Helô acompanha a Base de Conhecimento sozinha: artigo publicado
+    # ou editado é indexado na rodada seguinte (app/services/helo_indexacao.py).
+    helo_indexacao_task = start_helo_indexacao_worker()
+
     # Backplane do chat: sem ele, dois workers nao se enxergam e o sintoma e
     # silencioso (ver app/services/chat_backplane.py). Sobe sempre, inclusive
     # com --workers 1: assim ele fica exercitado em producao antes de o numero
@@ -126,6 +131,11 @@ async def lifespan(app: FastAPI) -> AsyncIterator[None]:
         auto_close_task.cancel()
         with suppress(asyncio.CancelledError):
             await auto_close_task
+
+    if helo_indexacao_task is not None:
+        helo_indexacao_task.cancel()
+        with suppress(asyncio.CancelledError):
+            await helo_indexacao_task
 
     # Antes do close_redis, de proposito: o laco segura uma conexao de pub/sub
     # tirada do mesmo cliente singleton.

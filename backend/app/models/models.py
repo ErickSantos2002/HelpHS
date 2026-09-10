@@ -117,22 +117,6 @@ class KBArticleStatus(str, enum.Enum):
     archived = "archived"
 
 
-class HeloDocType(str, enum.Enum):
-    """
-    O que o documento é — e o que a Helô pode fazer com ele.
-
-    Cinco dos oito manuais da base são fichas de venda, com preço de aparelho
-    e de calibração. A Helô cotando equipamento para quem abriu chamado técnico
-    é o pior resultado possível desta fase, e separar na hora de INGERIR é o
-    único jeito de a busca poder recusar depois: uma vez misturados, os dois
-    corpora são indistinguíveis para a busca vetorial, porque todo manual e
-    toda ficha falam de sopro, LED e calibração.
-    """
-
-    tecnico = "tecnico"
-    comercial = "comercial"
-
-
 class CalendarEventType(str, enum.Enum):
     event = "event"
     meeting = "meeting"
@@ -749,6 +733,13 @@ class KBArticle(Base):
     status: Mapped[KBArticleStatus] = mapped_column(
         Enum(KBArticleStatus), default=KBArticleStatus.draft, index=True
     )
+    # A Helô pode usar este artigo para responder cliente. Padrão `true`: desde
+    # 10/09/2026 artigo publicado alimenta as respostas dela sem ninguém rodar
+    # nada, e esta é a forma de manter um artigo na barra lateral e FORA da IA.
+    # Coluna, e não tag, porque tag é texto livre e erro de digitação mudaria
+    # o comportamento em silêncio. O porquê do padrão, com o número e a data,
+    # está na migration `c9x0y1z2a3b4`.
+    helo_pode_ler: Mapped[bool] = mapped_column(Boolean, default=True, nullable=False)
     author_id: Mapped[uuid.UUID] = mapped_column(UUID(as_uuid=True), ForeignKey("users.id"))
     view_count: Mapped[int] = mapped_column(Integer, default=0)
     helpful: Mapped[int] = mapped_column(Integer, default=0)
@@ -976,98 +967,69 @@ class CalendarEvent(Base):
 HELO_EMBEDDING_DIM = 1024
 
 
-helo_chunk_products = Table(
-    "helo_chunk_products",
-    Base.metadata,
-    Column(
-        "chunk_id",
-        UUID(as_uuid=True),
-        ForeignKey("helo_chunks.id", ondelete="CASCADE"),
-        primary_key=True,
-    ),
-    Column(
-        "product_id",
-        UUID(as_uuid=True),
-        ForeignKey("products.id", ondelete="CASCADE"),
-        primary_key=True,
-        # A chave primária composta já indexa o lado do trecho. A consulta da
-        # Helô parte do PRODUTO do chamado e pergunta quais trechos servem —
-        # o lado que a PK não cobre sozinha.
-        index=True,
-    ),
-)
-
-
-class HeloDocument(Base):
-    """Um arquivo da base de manuais da Helô."""
-
-    __tablename__ = "helo_documents"
-
-    id: Mapped[uuid.UUID] = mapped_column(UUID(as_uuid=True), primary_key=True, default=uuid.uuid4)
-    # O nome do arquivo de origem, e não o caminho: o caminho é da máquina de
-    # quem rodou a ingestão, e os manuais vivem FORA do repositório de
-    # propósito — o do Phoebus traz senhas em texto aberto e este repositório é
-    # público. Gravar o caminho vazaria a pasta de alguém para dentro do banco.
-    filename: Mapped[str] = mapped_column(String(255), unique=True, nullable=False, index=True)
-    title: Mapped[str] = mapped_column(String(255), nullable=False)
-    doc_type: Mapped[HeloDocType] = mapped_column(Enum(HeloDocType), nullable=False, index=True)
-    # SHA-256 do arquivo lido. É o que torna a ingestão idempotente sem
-    # comparar conteúdo trecho a trecho: hash igual, nada a fazer; hash
-    # diferente, os trechos daquele documento são refeitos. Sem isso, rodar de
-    # novo duplica a base inteira — e a ingestão VAI rodar várias vezes até o
-    # corte por seção ficar bom.
-    content_hash: Mapped[str] = mapped_column(String(64), nullable=False)
-    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now())
-    updated_at: Mapped[datetime] = mapped_column(
-        DateTime(timezone=True), server_default=func.now(), onupdate=func.now()
-    )
-
-    chunks: Mapped[list["HeloChunk"]] = relationship(
-        back_populates="document", cascade="all, delete-orphan"
-    )
-
-
 class HeloChunk(Base):
     """Um trecho recuperável — a unidade que a busca devolve e que a Helô cita."""
 
     __tablename__ = "helo_chunks"
     __table_args__ = (
-        # Único por documento: a ingestão não pode gravar dois trechos
-        # disputando a mesma posição, senão a ordem de leitura vira sorteio.
-        Index("ix_helo_chunks_documento_ordem", "document_id", "ordem", unique=True),
+        # Único por artigo: a indexação não pode gravar dois trechos disputando
+        # a mesma posição, senão a ordem de leitura vira sorteio.
+        Index("ix_helo_chunks_artigo_ordem", "article_id", "ordem", unique=True),
     )
 
     id: Mapped[uuid.UUID] = mapped_column(UUID(as_uuid=True), primary_key=True, default=uuid.uuid4)
-    document_id: Mapped[uuid.UUID] = mapped_column(
-        UUID(as_uuid=True), ForeignKey("helo_documents.id", ondelete="CASCADE"), index=True
+    # O ARTIGO de onde o trecho saiu. Desde 10/09/2026 a fonte da Helô é a
+    # Base de Conhecimento, e o produto do trecho é o produto do artigo — por
+    # `kb_article_products`, que a tela já edita. Um vínculo por trecho seria
+    # uma segunda fonte de verdade para a mesma pergunta.
+    article_id: Mapped[uuid.UUID] = mapped_column(
+        UUID(as_uuid=True), ForeignKey("kb_articles.id", ondelete="CASCADE"), index=True
     )
-    # Texto, e não número: só três dos oito manuais têm seção numerada. Nas
-    # cinco fichas comerciais o título é uma linha com emoji, e um inteiro não
-    # teria o que guardar. Aqui cabe tanto "8.2 Alterar Idioma" quanto
-    # "Argumentos de Venda" — e é esta string que a resposta cita como fonte.
+    # Texto, e não número: aqui cabe tanto "8.2 Alterar Idioma" quanto um
+    # título de artigo escrito pelo suporte — e é esta string que a resposta
+    # cita como fonte.
     secao: Mapped[str] = mapped_column(String(255), nullable=False)
-    # A posição do trecho dentro do documento. A ordem do arquivo é a ordem do
+    # A posição do trecho dentro do artigo. A ordem do texto é a ordem do
     # procedimento, e ela não se recupera do texto depois: "8.10" vem depois de
     # "8.9", e ordenar por `secao` como string colocaria "8.10" antes de "8.2".
     ordem: Mapped[int] = mapped_column(Integer, nullable=False)
     conteudo: Mapped[str] = mapped_column(Text, nullable=False)
     # O trecho ensina um procedimento que só roda com senha de administrador.
-    # O valor da senha é REDIGIDO na ingestão e o procedimento fica — as duas
-    # metades da mesma decisão. Excluir o trecho pareceria mais seguro e é
-    # pior: a busca não acharia nada, a Helô escalaria por NADA ENCONTRADO, e
-    # nem ela nem o técnico saberiam o motivo. Com a marca ela escala dizendo
-    # o motivo exato.
+    # O valor da senha é REDIGIDO na importação do manual e o procedimento
+    # fica — as duas metades da mesma decisão. Excluir o trecho pareceria mais
+    # seguro e é pior: a busca não acharia nada, a Helô escalaria por NADA
+    # ENCONTRADO, e nem ela nem o técnico saberiam o motivo. Com a marca ela
+    # escala dizendo o motivo exato.
     exige_credencial_admin: Mapped[bool] = mapped_column(Boolean, default=False, nullable=False)
-    # Nulo até a ingestão calcular. São duas passagens de propósito: recortar é
-    # barato e determinístico, embutir custa e depende do modelo estar
-    # carregado. Separadas, trocar de modelo de embedding é re-embutir o que já
-    # está recortado, e não reler os arquivos de novo.
+    # Nulo só por um instante: a indexação embute antes de gravar, e com o
+    # serviço de embedding fora ela não grava nada — o trecho velho fica no
+    # lugar e a próxima varredura tenta de novo.
     embedding: Mapped[list[float] | None] = mapped_column(Vector(HELO_EMBEDDING_DIM), nullable=True)
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now())
 
-    document: Mapped["HeloDocument"] = relationship(back_populates="chunks")
-    # Mesmo padrão de `kb_article_products`, e no mesmo nível: o vínculo é do
-    # TRECHO, que é o que a busca devolve, e não do documento. Trecho sem
-    # produto vinculado vale para todos; trecho vinculado ao Phoebus só aparece
-    # em chamado de Phoebus.
-    products: Mapped[list["Product"]] = relationship(secondary=helo_chunk_products)
+
+class HeloIndexacao(Base):
+    """
+    O que já foi indexado, e de qual versão do texto.
+
+    Existe para a varredura periódica reindexar SÓ o artigo que mudou. O hash
+    é do RESULTADO do corte — dos trechos que seriam gravados —, e não do
+    `content` cru nem do `updated_at`:
+
+    - `updated_at` anda a cada visualização do artigo (`view_count` é
+      incrementado por UPDATE), e cada clique pagaria embedding de texto igual;
+    - o `content` cru não enxerga mudança de receita: consertar o corte ou a
+      redação com o texto igual deixaria a base com o corte velho. É a lição
+      do `_hash_do_resultado` da ingestão por arquivo, que existia pelo mesmo
+      motivo.
+    """
+
+    __tablename__ = "helo_indexacao"
+
+    article_id: Mapped[uuid.UUID] = mapped_column(
+        UUID(as_uuid=True), ForeignKey("kb_articles.id", ondelete="CASCADE"), primary_key=True
+    )
+    content_hash: Mapped[str] = mapped_column(String(64), nullable=False)
+    indexado_em: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), server_default=func.now(), nullable=False
+    )

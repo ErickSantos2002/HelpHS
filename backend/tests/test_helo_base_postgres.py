@@ -1,5 +1,5 @@
 """
-Os dois filtros da busca da Helô, executados contra PostgreSQL de verdade.
+Os filtros da busca da Helô, executados contra PostgreSQL de verdade.
 
 Por que este arquivo existe, e por que NÃO é mock
 --------------------------------------------------
@@ -10,13 +10,16 @@ combinado de antemão, sem olhar o `WHERE` — removendo o filtro de papel de um
 classe de defeito, com um dano maior: o filtro que falta manda o procedimento
 do aparelho errado para quem opera um instrumento de medição legal.
 
-O caso central é o iBlow 10 Pro
---------------------------------
-É o único produto do corpus com DOIS documentos — a ficha comercial e o manual
-técnico — e é exatamente o par que se contradiz: a ficha diz que o aparelho
-pareia com o "Health App"; o manual diz "i-SOBER". Sem o filtro de tipo, os
-dois trechos entram na mesma recuperação e a Helô responde citando a ficha
-comercial como fonte técnica.
+Desde 10/09/2026 a fonte é a Base de Conhecimento
+-------------------------------------------------
+Os filtros mudaram de natureza com a mudança de fonte. O de TIPO morreu — as
+fichas comerciais não entram na Base — e entraram dois: publicação e a
+marcação `helo_pode_ler`. E o de produto INVERTEU: artigo sem vínculo vale
+para todos os aparelhos.
+
+Cada par abaixo fica à MESMA distância do vetor da pergunta, de propósito: se
+dois trechos empatam na distância, só o filtro pode separá-los, e é isso que
+cada teste afirma.
 
 Os vetores são sintéticos. O que se testa aqui é filtro e ordenação, não
 qualidade de embedding: um vetor de verdade não tornaria o teste mais
@@ -27,17 +30,18 @@ import asyncio
 import math
 import shutil
 import uuid
+from contextlib import suppress
 
 import pytest
 import pytest_asyncio
-from sqlalchemy import text
+from sqlalchemy import select, text
 from sqlalchemy.ext.asyncio import async_sessionmaker, create_async_engine
 
 from app.models.models import (
     Base,
     HeloChunk,
-    HeloDocType,
-    HeloDocument,
+    KBArticle,
+    KBArticleStatus,
     Product,
     Ticket,
     TicketCategory,
@@ -46,7 +50,7 @@ from app.models.models import (
     User,
     UserRole,
     UserStatus,
-    helo_chunk_products,
+    kb_article_products,
 )
 from app.services.helo_base import (
     NADA_ENCONTRADO,
@@ -102,15 +106,14 @@ def url_do_banco():
 
     if recurso is not None:
         servidor, pasta = recurso
-        try:
+        with suppress(Exception):
             servidor.cleanup()
-        except Exception:  # noqa: BLE001
-            pass
         shutil.rmtree(pasta, ignore_errors=True)
 
 
 @pytest_asyncio.fixture
 async def db(url_do_banco):
+    """Sessão numa transação revertida no fim — isolamento por teste."""
     motor = create_async_engine(url_do_banco)
     async with motor.connect() as conn:
         transacao = await conn.begin()
@@ -120,60 +123,97 @@ async def db(url_do_banco):
     await motor.dispose()
 
 
-# `ordem` é única por documento — o índice do banco recusa duplicata, e é ele
-# que pegou o primeiro rascunho deste arquivo. Um contador por documento é o
-# que o script de ingestão também faz.
-_ordem_por_documento: dict[str, int] = {}
+# ── Dados sintéticos ──────────────────────────────────────────
 
 
-async def _trecho(db, *, produto, tipo, documento, secao, conteudo, marca, credencial=False):
-    doc = (
-        await db.execute(
-            text("SELECT id FROM helo_documents WHERE filename = :f"), {"f": documento}
-        )
-    ).scalar_one_or_none()
-    if doc is None:
-        doc = uuid.uuid4()
-        db.add(
-            HeloDocument(
-                id=doc,
-                filename=documento,
-                title=documento,
-                doc_type=tipo,
-                content_hash=uuid.uuid4().hex,
-            )
-        )
-        await db.flush()
-
-    chunk = HeloChunk(
+def _pessoa(papel: UserRole) -> User:
+    return User(
         id=uuid.uuid4(),
-        document_id=doc,
-        secao=secao,
-        ordem=_ordem_por_documento.setdefault(documento, 0),
-        conteudo=conteudo,
-        exige_credencial_admin=credencial,
-        embedding=_vetor(marca),
-    )
-    _ordem_por_documento[documento] += 1
-    db.add(chunk)
-    await db.flush()
-    await db.execute(helo_chunk_products.insert().values(chunk_id=chunk.id, product_id=produto))
-    return chunk
-
-
-async def _monta_corpus(db):
-    """Dois produtos, e o iBlow com ficha E manual — como no corpus real."""
-    cliente = User(
-        id=uuid.uuid4(),
-        name="Suelen",
+        name="Suelen" if papel is UserRole.client else "Autora",
         email=f"{uuid.uuid4().hex[:8]}@t.com",
         password="x",
-        role=UserRole.client,
+        role=papel,
         status=UserStatus.active,
         lgpd_consent=True,
         email_verified=True,
         onboarding_completed=True,
     )
+
+
+_artigos_por_titulo: dict[str, uuid.UUID] = {}
+_ordem_por_artigo: dict[uuid.UUID, int] = {}
+
+
+async def _trecho(
+    db,
+    *,
+    titulo,
+    secao,
+    conteudo,
+    marca,
+    produtos=(),
+    status=KBArticleStatus.published,
+    pode=True,
+    credencial=False,
+):
+    """
+    Um trecho sob o artigo `titulo` — criado na primeira vez, com o estado e os
+    produtos pedidos. `produtos` vazio é o artigo SEM vínculo, que vale para
+    todos os aparelhos.
+    """
+    artigo_id = _artigos_por_titulo.get(titulo)
+    if artigo_id is None or await db.get(KBArticle, artigo_id) is None:
+        autora = _pessoa(UserRole.technician)
+        db.add(autora)
+        await db.flush()
+        artigo = KBArticle(
+            id=uuid.uuid4(),
+            title=titulo,
+            content="(os trechos deste teste são gravados direto)",
+            slug=f"artigo-{uuid.uuid4().hex}",
+            category=TicketCategory.hardware,
+            tags=[],
+            status=status,
+            helo_pode_ler=pode,
+            author_id=autora.id,
+            view_count=0,
+            helpful=0,
+            not_helpful=0,
+        )
+        db.add(artigo)
+        await db.flush()
+        for produto_id in produtos:
+            await db.execute(
+                kb_article_products.insert().values(article_id=artigo.id, product_id=produto_id)
+            )
+        artigo_id = artigo.id
+        _artigos_por_titulo[titulo] = artigo_id
+
+    ordem = _ordem_por_artigo.get(artigo_id, 0)
+    _ordem_por_artigo[artigo_id] = ordem + 1
+    chunk = HeloChunk(
+        id=uuid.uuid4(),
+        article_id=artigo_id,
+        secao=secao,
+        ordem=ordem,
+        conteudo=conteudo,
+        exige_credencial_admin=credencial,
+        embedding=_vetor(marca),
+    )
+    db.add(chunk)
+    await db.flush()
+    return chunk
+
+
+_MANUAL_IBLOW = "Manual Técnico do iBlow 10 Pro"
+_MANUAL_TITAN = "Manual Técnico do Titan"
+
+
+async def _monta_corpus(db):
+    """
+    Dois produtos, e os pares que só um filtro separa — todos à MESMA distância.
+    """
+    cliente = _pessoa(UserRole.client)
     iblow = Product(id=uuid.uuid4(), name="iBlow 10 Pro")
     titan = Product(id=uuid.uuid4(), name="Titan")
     db.add_all([cliente, iblow, titan])
@@ -181,30 +221,37 @@ async def _monta_corpus(db):
 
     await _trecho(
         db,
-        produto=iblow.id,
-        tipo=HeloDocType.tecnico,
-        documento="Manual_Tecnico_iBlow10Pro.txt",
+        titulo=_MANUAL_IBLOW,
+        produtos=[iblow.id],
         secao="10. Conectividade Bluetooth",
         conteudo="O pareamento é feito pelo aplicativo i-SOBER.",
         marca=0.0,
     )
     await _trecho(
         db,
-        produto=iblow.id,
-        tipo=HeloDocType.comercial,
-        documento="iblow10pro.txt",
-        secao="Informações Comerciais",
-        conteudo="Pareia com o Health App. Valor do aparelho: R$ 4.900,00.",
-        marca=0.0,  # MESMA distância do técnico: só o filtro os separa
+        titulo="Rascunho sobre o iBlow",
+        produtos=[iblow.id],
+        status=KBArticleStatus.draft,
+        secao="Rascunho",
+        conteudo="Texto ainda não revisado: pareia com o Health App.",
+        marca=0.0,
     )
     await _trecho(
         db,
-        produto=titan.id,
-        tipo=HeloDocType.tecnico,
-        documento="Manual Tecnico Titan.txt",
+        titulo="Procedimento interno do iBlow",
+        produtos=[iblow.id],
+        pode=False,
+        secao="Só para a equipe",
+        conteudo="Valor da calibração para revenda: R$ 900,00.",
+        marca=0.0,
+    )
+    await _trecho(
+        db,
+        titulo=_MANUAL_TITAN,
+        produtos=[titan.id],
         secao="9. Integração com Aplicativo",
         conteudo="O Titan integra com o Health App.",
-        marca=0.0,  # MESMA distância: só o filtro de produto os separa
+        marca=0.0,
     )
     await db.flush()
     return cliente, iblow, titan
@@ -230,35 +277,35 @@ def _chamado(cliente, produto_id):
     )
 
 
-# ── O filtro de TIPO ──────────────────────────────────────────
+async def _documentos(db, cliente, produto_id):
+    achados = await busca_trechos(db, _chamado(cliente, produto_id), _vetor(0.0))
+    return sorted(t.documento for t in achados)
+
+
+# ── Publicação ────────────────────────────────────────────────
 
 
 @pytest.mark.asyncio
-async def test_a_ficha_comercial_nao_entra_na_busca_tecnica(db):
+async def test_rascunho_nao_entra_na_busca(db):
     """
-    O caso que motivou o filtro ter a mesma força do de produto.
+    Publicado quer dizer que alguém já decidiu que o texto pode ser lido.
 
-    O iBlow 10 Pro é o único produto com ficha E manual, e os dois se
-    contradizem sobre o aplicativo: "Health App" na ficha, "i-SOBER" no
-    manual. Os dois trechos estão à MESMA distância do vetor da pergunta — é o
-    filtro, e só ele, que decide qual a Helô cita.
+    O rascunho empata na distância com o manual publicado e ainda contradiz o
+    manual ("Health App" contra "i-SOBER"): sem o filtro, a Helô citaria texto
+    que ninguém revisou.
     """
     cliente, iblow, _ = await _monta_corpus(db)
 
-    achados = await busca_trechos(db, _chamado(cliente, iblow.id), _vetor(0.0))
-
-    assert [t.documento for t in achados] == ["Manual_Tecnico_iBlow10Pro.txt"]
-    assert "i-SOBER" in achados[0].conteudo
-    assert not any("Health App" in t.conteudo for t in achados)
+    assert await _documentos(db, cliente, iblow.id) == [_MANUAL_IBLOW]
 
 
 @pytest.mark.asyncio
-async def test_preco_nunca_chega_na_resposta(db):
+async def test_artigo_marcado_para_fora_da_helo_nao_entra(db):
     """
-    A Helô cotando aparelho para quem abriu chamado técnico é o pior resultado.
+    A marcação é o que mantém um artigo na barra lateral e FORA das respostas.
 
-    O preço vive só nas fichas comerciais, e o filtro de tipo é o que o mantém
-    fora do contexto do modelo.
+    Com as fichas comerciais fora da Base, é a proteção que sobrou contra preço
+    na boca da Helô: o filtro de tipo morreu, e agora quem separa é isto.
     """
     cliente, iblow, _ = await _monta_corpus(db)
 
@@ -267,7 +314,27 @@ async def test_preco_nunca_chega_na_resposta(db):
     assert not any("R$" in t.conteudo for t in achados)
 
 
-# ── O filtro de PRODUTO ───────────────────────────────────────
+@pytest.mark.asyncio
+async def test_despublicar_tira_o_texto_das_respostas_no_mesmo_instante(db):
+    """
+    O filtro é AO VIVO, na consulta — não espera varredura nenhuma.
+
+    É o que torna a varredura periódica aceitável: ela só atrasa texto NOVO
+    entrar. Tirar texto errado do ar não pode esperar cinco minutos.
+    """
+    cliente, _, titan = await _monta_corpus(db)
+    artigo = (
+        await db.execute(select(KBArticle).where(KBArticle.title == _MANUAL_TITAN))
+    ).scalar_one()
+    assert await _documentos(db, cliente, titan.id) == [_MANUAL_TITAN]
+
+    artigo.status = KBArticleStatus.archived
+    await db.flush()
+
+    assert await _documentos(db, cliente, titan.id) == []
+
+
+# ── Produto ───────────────────────────────────────────────────
 
 
 @pytest.mark.asyncio
@@ -280,21 +347,53 @@ async def test_chamado_de_titan_nunca_recebe_trecho_de_iblow(db):
     """
     cliente, _, titan = await _monta_corpus(db)
 
-    achados = await busca_trechos(db, _chamado(cliente, titan.id), _vetor(0.0))
-
-    assert [t.documento for t in achados] == ["Manual Tecnico Titan.txt"]
+    assert await _documentos(db, cliente, titan.id) == [_MANUAL_TITAN]
 
 
 @pytest.mark.asyncio
-async def test_chamado_sem_produto_nao_recupera_nada(db):
+async def test_artigo_sem_produto_vale_para_todos_os_aparelhos(db):
     """
-    `Ticket.product_id` é nulável, e sem produto não há como garantir o aparelho.
+    A regra que INVERTEU com a mudança de fonte.
 
-    Buscar em tudo seria a versão sem filtro do defeito que este módulo existe
-    para impedir. Nada encontrado faz a Helô escalar, que é o certo para uma
-    pergunta que ela não pode responder com segurança.
+    Na ingestão por arquivo, vínculo ausente era casamento falhado — fatal. No
+    artigo, é escolha de quem escreveu, e é como a barra lateral já funciona.
+    O mesmo teste prende a outra metade: o artigo sem vínculo aparece nos dois
+    chamados, e o vinculado continua só no dele.
+    """
+    cliente, iblow, titan = await _monta_corpus(db)
+    await _trecho(
+        db,
+        titulo="Como higienizar o bocal",
+        secao="Higienização",
+        conteudo="Lave o bocal com água morna e sabão neutro.",
+        marca=0.0,
+    )
+
+    assert await _documentos(db, cliente, titan.id) == sorted(
+        ["Como higienizar o bocal", _MANUAL_TITAN]
+    )
+    assert await _documentos(db, cliente, iblow.id) == sorted(
+        ["Como higienizar o bocal", _MANUAL_IBLOW]
+    )
+
+
+@pytest.mark.asyncio
+async def test_chamado_sem_produto_nao_recebe_nem_o_artigo_universal(db):
+    """
+    Todos os aparelhos não é o mesmo que nenhum aparelho.
+
+    Sem saber qual é o aparelho, nem o texto universal tem como ser conferido
+    contra o que o cliente tem na mão. Mantido como era antes da mudança de
+    fonte — abrir isto é decisão, e não consequência dela.
     """
     cliente, _, _ = await _monta_corpus(db)
+    await _trecho(
+        db,
+        titulo="Como higienizar o bocal",
+        secao="Higienização",
+        conteudo="Lave o bocal com água morna e sabão neutro.",
+        marca=0.0,
+    )
 
     assert await busca_trechos(db, _chamado(cliente, None), _vetor(0.0)) == []
 
@@ -306,28 +405,14 @@ async def test_chamado_sem_produto_nao_recupera_nada(db):
 async def test_trecho_sem_embedding_fica_de_fora(db):
     """Ordenar por distância nula colocaria trecho não embutido no topo."""
     cliente, _, titan = await _monta_corpus(db)
-    doc = uuid.uuid4()
-    db.add(
-        HeloDocument(
-            id=doc,
-            filename="Sem embedding.txt",
-            title="Sem embedding",
-            doc_type=HeloDocType.tecnico,
-            content_hash=uuid.uuid4().hex,
-        )
-    )
-    await db.flush()
-    chunk = HeloChunk(
-        id=uuid.uuid4(),
-        document_id=doc,
+    chunk = await _trecho(
+        db,
+        titulo=_MANUAL_TITAN,
         secao="1. Nada",
-        ordem=0,
         conteudo="ainda não embutido",
-        embedding=None,
+        marca=0.0,
     )
-    db.add(chunk)
-    await db.flush()
-    await db.execute(helo_chunk_products.insert().values(chunk_id=chunk.id, product_id=titan.id))
+    chunk.embedding = None
     await db.flush()
 
     achados = await busca_trechos(db, _chamado(cliente, titan.id), _vetor(0.0))
@@ -338,8 +423,7 @@ async def test_trecho_sem_embedding_fica_de_fora(db):
 # ── O bloco de contexto ───────────────────────────────────────
 
 
-@pytest.mark.asyncio
-async def test_sem_achado_o_bloco_recebe_a_string_literal(db):
+def test_sem_achado_o_bloco_recebe_a_string_literal():
     """
     Bloco vazio o modelo lê como "não recebi contexto" e responde do bolso.
 
@@ -352,12 +436,12 @@ async def test_sem_achado_o_bloco_recebe_a_string_literal(db):
 
 @pytest.mark.asyncio
 async def test_o_bloco_leva_a_fonte_de_cada_trecho(db):
-    """A resposta cita, e a fonte precisa viajar com o trecho até o modelo."""
+    """A resposta cita, e a fonte — o título do artigo — viaja com o trecho."""
     cliente, _, titan = await _monta_corpus(db)
 
     bloco = monta_base_tecnica(await busca_trechos(db, _chamado(cliente, titan.id), _vetor(0.0)))
 
-    assert "Fonte: Manual Tecnico Titan.txt, 9. Integração com Aplicativo" in bloco
+    assert f"Fonte: {_MANUAL_TITAN}, 9. Integração com Aplicativo" in bloco
     assert "O Titan integra com o Health App." in bloco
 
 
@@ -372,9 +456,7 @@ async def test_o_bloco_avisa_quando_o_procedimento_exige_senha(db):
     cliente, _, titan = await _monta_corpus(db)
     await _trecho(
         db,
-        produto=titan.id,
-        tipo=HeloDocType.tecnico,
-        documento="Manual Tecnico Titan.txt",
+        titulo=_MANUAL_TITAN,
         secao="8.5 Configuração Avançada",
         conteudo="Digite a senha: [REDIGIDO — senha de administrador]",
         marca=0.0,
@@ -401,17 +483,14 @@ async def test_trecho_longe_demais_nao_chega_ao_modelo(db):
     a busca SEMPRE devolve os quatro mais próximos, por mais longe que estejam:
     ordenar não é o mesmo que filtrar.
     """
-    cliente, iblow, titan = await _monta_corpus(db)
+    cliente, _, titan = await _monta_corpus(db)
     await _trecho(
         db,
-        produto=titan.id,
-        tipo=HeloDocType.tecnico,
-        documento="Manual Tecnico Titan.txt",
+        titulo=_MANUAL_TITAN,
         secao="99. Assunto sem relação",
         conteudo="Texto que nada tem a ver com a pergunta.",
         marca=_marca_para_distancia(0.40),
     )
-    await db.flush()
 
     achados = await busca_trechos(db, _chamado(cliente, titan.id), _vetor(0.0))
 
@@ -434,14 +513,11 @@ async def test_o_teto_e_este_e_nao_outro(db):
     for secao, distancia in (("Dentro por pouco", 0.24), ("Fora por pouco", 0.26)):
         await _trecho(
             db,
-            produto=titan.id,
-            tipo=HeloDocType.tecnico,
-            documento="Manual Tecnico Titan.txt",
+            titulo=_MANUAL_TITAN,
             secao=secao,
             conteudo="corpo",
             marca=_marca_para_distancia(distancia),
         )
-    await db.flush()
 
     secoes = [t.secao for t in await busca_trechos(db, _chamado(cliente, titan.id), _vetor(0.0))]
 
@@ -458,30 +534,18 @@ async def test_tudo_longe_cai_no_mesmo_nada_encontrado(db):
     errado. Busca vazia e busca toda cortada desembocam no mesmo literal, que é
     o que o prompt reconhece e o que produz escalada.
     """
-    cliente = User(
-        id=uuid.uuid4(),
-        name="Suelen",
-        email=f"{uuid.uuid4().hex[:8]}@t.com",
-        password="x",
-        role=UserRole.client,
-        status=UserStatus.active,
-        lgpd_consent=True,
-        email_verified=True,
-        onboarding_completed=True,
-    )
+    cliente = _pessoa(UserRole.client)
     produto = Product(id=uuid.uuid4(), name="Só longe")
     db.add_all([cliente, produto])
     await db.flush()
     await _trecho(
         db,
-        produto=produto.id,
-        tipo=HeloDocType.tecnico,
-        documento="Manual.txt",
+        titulo="Manual do Só Longe",
+        produtos=[produto.id],
         secao="1. Único trecho, e longe",
         conteudo="corpo",
         marca=_marca_para_distancia(0.45),
     )
-    await db.flush()
 
     achados = await busca_trechos(db, _chamado(cliente, produto.id), _vetor(0.0))
 
@@ -497,13 +561,11 @@ async def test_chamado_sem_produto_nem_chega_a_consultar_o_banco():
     A propriedade aqui é "não tocou no banco", não "o WHERE filtrou certo" —
     e contra o banco ela é invisível: com `product_id = None`, o SQL vira
     `= NULL`, que não casa com nada. O resultado sai vazio de qualquer jeito,
-    então tirar a guarda passa despercebido contra Postgres de verdade
-    (conferido: a mutação sobreviveu ao arquivo inteiro).
+    então tirar a guarda passa despercebido contra Postgres de verdade.
 
-    O que a guarda compra é a resposta deixar de depender da semântica de NULL
-    do SQL. No dia em que alguém trocar o `==` por um `IN (...)` ou por um
-    LEFT JOIN, `NULL` volta a casar coisa — e a Helô passa a responder sobre
-    um aparelho que o chamado nunca disse qual era.
+    E agora ela vale mais do que valia: com a regra invertida, o artigo SEM
+    vínculo casa com qualquer chamado pelo `NOT EXISTS` — inclusive, sem a
+    guarda, com o chamado que nunca disse qual é o aparelho.
     """
 
     class SessaoQueRecusa:

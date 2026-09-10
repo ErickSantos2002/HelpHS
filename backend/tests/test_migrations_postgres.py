@@ -262,6 +262,60 @@ async def test_backfill_leva_o_dono_para_equipment_users(banco):
     assert vinculos[0].user_id == dono_id
 
 
+@pytest.mark.asyncio
+async def test_o_artigo_que_ja_existia_nasce_lido_pela_helo(banco):
+    """
+    A decisão de 10/09/2026, provada no banco em vez de afirmada.
+
+    Havia UM artigo publicado em produção (número do Rickelme), e a coluna
+    `helo_pode_ler` chega com padrão `true` para cobri-lo SEM backfill e sem
+    corrigir linha em migration. Este teste semeia um artigo ANTES da
+    `c9x0y1z2a3b4` e confere que ele sai do outro lado lido pela Helô. Com o
+    padrão invertido, o único artigo que existe sumiria das respostas no dia do
+    deploy — em silêncio.
+    """
+    assert _alembic(banco, "b8w9x0y1z2a3").returncode == 0
+    autor_id, artigo_id = uuid.uuid4(), uuid.uuid4()
+
+    motor = create_async_engine(banco)
+    async with async_sessionmaker(bind=motor, expire_on_commit=False)() as s:
+        # INSERT explícito pelo mesmo motivo do teste do backfill: nesta revisão
+        # o schema é mais antigo que o modelo, e o ORM carregaria uma coluna
+        # que ainda não existe.
+        await s.execute(
+            text(
+                "INSERT INTO users (id, name, email, password, role, status, "
+                "lgpd_consent, email_verified, onboarding_completed) "
+                "VALUES (:id, 'Autora', :email, 'x', 'technician', 'active', true, true, true)"
+            ),
+            {"id": autor_id, "email": f"{autor_id.hex[:8]}@test.com"},
+        )
+        await s.execute(
+            text(
+                "INSERT INTO kb_articles (id, title, content, slug, category, tags, status, "
+                "author_id, view_count, helpful, not_helpful) "
+                "VALUES (:id, 'O artigo que já existia', 'corpo', :slug, 'hardware', '{}', "
+                "'published', :autor, 0, 0, 0)"
+            ),
+            {"id": artigo_id, "slug": f"ja-existia-{artigo_id.hex[:8]}", "autor": autor_id},
+        )
+        await s.commit()
+    await motor.dispose()
+
+    assert _alembic(banco, "head").returncode == 0
+
+    motor = create_async_engine(banco)
+    async with async_sessionmaker(bind=motor, expire_on_commit=False)() as s:
+        pode = (
+            await s.execute(
+                text("SELECT helo_pode_ler FROM kb_articles WHERE id = :id"), {"id": artigo_id}
+            )
+        ).scalar_one()
+    await motor.dispose()
+
+    assert pode is True
+
+
 def test_upgrade_head_e_idempotente_apos_o_backfill(banco):
     """
     Rodar `upgrade head` de novo não pode estourar.

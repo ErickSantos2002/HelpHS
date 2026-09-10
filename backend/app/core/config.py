@@ -299,6 +299,13 @@ class Settings(BaseSettings):
     # melhor do que uma espera longa seguida da mesma escalada.
     helo_embedding_timeout_seconds: int = 10
 
+    # De quanto em quanto tempo a varredura procura artigo publicado novo ou
+    # editado para indexar (`app/services/helo_indexacao.py`). Cinco minutos é
+    # a latência entre publicar e a Helô passar a usar o texto — só para texto
+    # novo: despublicar tem efeito imediato, porque a busca filtra ao vivo.
+    # Zero desliga a varredura.
+    helo_indexacao_intervalo_segundos: int = 300
+
     # DeepSeek — o único provedor de LLM.
     #
     # Nasce VAZIA: a chave vive no painel do EasyPanel, nunca no repositório, e

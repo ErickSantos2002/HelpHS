@@ -26,6 +26,9 @@ class KBArticleCreate(AppBaseModel):
     category: TicketCategory = TicketCategory.general
     tags: list[str] = Field(default_factory=list)
     status: KBArticleStatus = KBArticleStatus.draft
+    # A Helô pode usar este artigo para responder cliente. Padrão igual ao da
+    # coluna: artigo publicado alimenta a IA sem ninguém rodar nada.
+    helo_pode_ler: bool = True
     # Lista vazia = artigo vale para todos os produtos
     product_ids: list[uuid.UUID] = Field(default_factory=list)
 
@@ -36,6 +39,7 @@ class KBArticleUpdate(AppBaseModel):
     category: TicketCategory | None = None
     tags: list[str] | None = None
     status: KBArticleStatus | None = None
+    helo_pode_ler: bool | None = None
     product_ids: list[uuid.UUID] | None = None
 
 
@@ -49,6 +53,7 @@ class KBArticleResponse(AppBaseModel):
     category: TicketCategory
     tags: list[str]
     status: KBArticleStatus
+    helo_pode_ler: bool
     author_id: uuid.UUID
     author_name: str = ""
     view_count: int
