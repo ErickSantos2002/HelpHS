@@ -847,6 +847,34 @@ o CI não checa formato. Lá, rodar `--write` polui o commit.
 
 ## Base da Helô
 
+### O interruptor da Helô é dela; o `ai_enabled` é de gente
+
+Decidido em 10/09/2026, corrigindo uma escolha de dois dias antes.
+
+`tickets.ai_enabled` sempre significou "alguém quer a IA fora deste chamado" —
+é o botão que o técnico aperta na tela, e ele fecha a Helô, a sugestão de
+resposta e o resumo. Quando a escalada passou a gravar nesse campo, ele ganhou
+um segundo significado: "a Helô já saiu daqui". Enquanto ela falava uma vez por
+chamado os dois davam no mesmo. Com ela conversando, deixaram: escalar por
+decisão do modelo, por teto de trocas ou por a IA estar fora do ar tirava a
+ferramenta do técnico **nos chamados em que a IA já tinha falhado**.
+
+`tickets.helo_saiu` é o campo dela, e ela escreve nos **quatro** motivos.
+
+**A exceção é deliberada e tem teste só para ela:** no pedido explícito de
+humano os dois campos caem. Ali quem quis sair da IA foi o cliente, e a vontade
+dele vale para as ferramentas todas. Sem prender isso, a assimetria com os
+outros três motivos pareceria esquecimento, e alguém "consertaria" tirando a
+linha.
+
+**A saída dela grava histórico**, como o botão da tela já gravava, com o motivo
+no comentário — o texto que o próprio modelo escreveu na linha `ESCALAR:`. Sem
+isso o técnico abre o chamado, vê a IA calada e não tem onde ler por quê. Foi
+o que forçou o gravador de histórico a sair de `routers/tickets.py` para
+`utils/history.py`: `tickets.py` importa `services.helo`, então a Helô
+importando de volta seria ciclo, e a alternativa era uma segunda cópia da
+regra.
+
 ### O teto de distância da busca foi medido, não escolhido
 
 Ordenar não é filtrar: sem teto, `busca_trechos` sempre devolve os quatro
@@ -1048,7 +1076,7 @@ por inércia.
 | ~~**Sem MFA para contas de staff**~~ | **Quitada em 26/08/2026** — ver "Segundo fator" abaixo. | — |
 | **Access token sobrevive à revogação de sessão** | Ativar ou desligar o segundo fator apaga o refresh, despejando as sessões. Os access tokens já emitidos, porém, valem até o próprio vencimento: a exposição cai de 7 dias para 8 h, não para zero. Fechar de verdade pede um `sessions_valid_after` conferido no `get_current_user`. | Houver incidente real de sessão comprometida — ou o TTL do access subir. |
 | **Não existe mais o tempo de espera por um HUMANO** | Consequência aceita da decisão de 28/08/2026 (ver "O que conta como primeira resposta"): com a Helô carimbando, o único tempo gravado é o dela. Quanto o cliente esperou até alguém de carne e osso responder deixou de entrar no banco — e por isso **não volta por filtro nem por relatório**, só por coluna nova. | A operação precisar cobrar prazo da equipe, ou alguém estranhar o indicador vivendo em 100%. A saída é um campo próprio (`sla_first_human_response`), carimbado no mesmo ponto e com a guarda de autor que valia antes. |
-| ~~**Escalar não desliga a IA no chamado**~~ | **Quitada em 09/09/2026**, na Etapa 4 da Fase 2 — no mesmo commit em que o teto deixou de ser de falas e virou de trocas, que era o gatilho registrado. `ticket.ai_enabled = False` no caminho de escalada, e vale para os dois jeitos de escalar: o pedido explícito de humano, reconhecido antes do modelo, e a escalada que o próprio modelo pede com a linha `ESCALAR:`. Consequência aceita: desliga junto o `suggest-reply` e o `summarize` daquele chamado — quem pediu para sair da IA não deveria ter a conversa dele resumida por uma. | — |
+| ~~**Escalar não desliga a IA no chamado**~~ | **Quitada em 09/09/2026**, na Etapa 4 da Fase 2 — no mesmo commit em que o teto deixou de ser de falas e virou de trocas, que era o gatilho registrado. `ticket.ai_enabled = False` no caminho de escalada, e vale para os dois jeitos de escalar: o pedido explícito de humano, reconhecido antes do modelo, e a escalada que o próprio modelo pede com a linha `ESCALAR:`. ⚠️ **A consequência aceita ali durou um dia e foi revertida em 10/09**: desligar o `ai_enabled` fechava também o `suggest-reply` e o `summarize` do TÉCNICO, e nos três motivos que não são o pedido do cliente isso tirava a ferramenta dele justamente nos chamados em que a IA já tinha falhado. Hoje quem guarda o estado é `tickets.helo_saiu`, e o `ai_enabled` voltou a ser só o botão de gente — com uma exceção deliberada: no pedido explícito de humano os dois caem, porque ali quem quis sair da IA foi o cliente. Ver "O interruptor da Helô é dela; o `ai_enabled` é de gente" abaixo. | — |
 | **Reingerir um manual apaga o embedding de trecho que não mudou** | O `--aplicar` do `ingere_manuais.py`, quando o documento mudou, apaga TODOS os trechos dele e recria com ids novos e `embedding` nulo. Corrigir uma linha de contato no manual do Phoebus invalida os 18 trechos, inclusive os 17 idênticos. Hoje não custa nada: embedding ainda não é calculado, e nada fora do próprio script referencia `helo_chunks`. | **A Etapa 3**, quando o embedding passar a ser calculado e a custar. A saída é casar trecho a trecho por hash do conteúdo antes de apagar — os iguais mantêm id e embedding, e só `ordem`/`secao` são atualizados. Vira urgente de vez quando a resposta da Helô registrar a citação por `chunk_id`: aí o refaz não custa só CPU, deixa citação apontando para trecho que não existe mais. |
 | **O `.env` de desenvolvimento aponta para produção** | Só a suíte de testes está blindada (o `conftest.py` força uma URL falsa). Migration, script avulso e shell na máquina do desenvolvedor falam com o banco real. Ver a seção própria acima. | **Antes da primeira migration da Fase 2**, que cria extensão no banco. É quando o risco deixa de ser teórico. |
 | **O trecho genérico domina a busca (hipótese B)** | `6. Passo a Passo para Utilização` do Titan — e o `5.` equivalente do iBlow — fala de operação em geral e vence perguntas de assunto diferente: 4 de 8 numa sondagem livre, incluindo impressora num aparelho sem impressora. O teto de 0,25 tira a maior parte do dano hoje, e num caso conhecido agrava: para *"como coloco o aparelho em português"*, o aspirador sobrevive ao corte e o `8.2 Alterar Idioma` não. Com três manuais dói pouco — quase toda pergunta fora do manual já não devolve nada. | **Quando houver manual técnico para mais de três produtos.** Aí o aspirador passa a competir com candidatos legítimos dentro do teto, e o dano deixa de ser contornado por ele. O conserto é do lado do trecho — cortar aquele mais fino, ou tirá-lo da base —, e NÃO do corte de todo mundo: a hipótese A foi medida e caiu, os trechos curtos são os que mais acertam. |

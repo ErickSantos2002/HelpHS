@@ -214,7 +214,10 @@ Quando ela escala, a equipe é notificada — e o aviso diz POR QUÊ:
         ├── o cliente pediu uma pessoa → "Cliente pediu atendimento humano"
         └── qualquer outro motivo      → "Helô passou o chamado", com o motivo
                                           no texto
-A IA é DESLIGADA naquele chamado (`ticket.ai_enabled = False`).
+A conversa dela ENCERRA naquele chamado (`ticket.helo_saiu = True`), e o
+histórico registra o motivo. O botão de IA do técnico só cai quando foi o
+CLIENTE quem pediu uma pessoa — nos outros motivos ele fica de pé, senão a
+sugestão de resposta e o resumo sumiriam justo onde a IA já falhou.
 Status continua "Em andamento". Não vai para "Aguardando técnico":
 esse status pausa o relógio do SLA, e o cliente está esperando um humano.
         │

@@ -919,9 +919,10 @@ Datas em DD/MM/AAAA.
   que o cliente lê; o modelo entra a partir do segundo turno.
   - O teto deixou de ser de duas falas e virou de **seis trocas**, e ele
     **escala** em vez de emudecer.
-  - **Escalar desliga a IA naquele chamado**, o que a Fase 1 prometia e não
-    fazia. Vale para o pedido explícito de humano e para a escalada que o
-    próprio modelo pede.
+  - **Escalar encerra a conversa dela naquele chamado**, o que a Fase 1
+    prometia e não fazia, e o histórico do chamado passa a registrar o motivo.
+    O botão "Desligar IA neste chamado" continua sendo só do técnico — ele só
+    cai junto quando foi o **cliente** quem pediu para falar com uma pessoa.
   - A base é de **oito manuais** (74 trechos), e a busca só enxerga documento
     **técnico** do **produto daquele chamado** — ficha comercial, com preço e
     promessa de venda, nunca vira procedimento técnico.
