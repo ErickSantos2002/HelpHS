@@ -938,10 +938,11 @@ trecho (eram 22). O texto dos trechos mudou de forma e a distância mexeu em at�
 oito milésimos. O corte continua valendo, e ficou mais apertado: a margem
 abaixo, de 0,009, hoje é de 0,007.
 
-⚠️ **A margem é de 0,009** (0,25 contra 0,2590). É um ajuste a 40 pontos, não
-uma lei, e vale para o **bge-m3 com estes textos**: trocar o modelo de
-embedding invalida a medição sem que nada quebre visivelmente. Remedir quando
-houver manual para mais produtos — mesmo gatilho da dívida da hipótese B.
+⚠️ **A margem é de 0,007** (0,25 contra 0,2570; na medição de 09/09 era 0,009,
+contra 0,2590). É um ajuste a 40 pontos, não uma lei, e vale para o **bge-m3
+com estes textos**: trocar o modelo de embedding invalida a medição sem que
+nada quebre visivelmente. Quando remedir está na dívida "O teto de 0,25
+depende do acervo", em Pendências conhecidas; como remedir, logo abaixo.
 
 ⚠️ **A população "tem resposta" está enviesada para o fácil, e isso é limite
 conhecido da medição.** As 27 perguntas foram escritas por quem já tinha lido
@@ -970,6 +971,80 @@ pode terminar em instrução errada. Por isso o corte fica no lado apertado.
 busca não devolve nada.** Não existe estado novo para "achei, mas está longe":
 seria só mais uma coisa para o modelo interpretar errado.
 
+#### Como remedir
+
+O método das duas medições (09/09 e 10/09), para quem for refazer. Ele não
+está em script no repositório: está aqui, e as 40 perguntas vão junto.
+
+1. Com a base indexada como produção a veria (artigos publicados e marcados
+   para a Helô), embutir cada pergunta pelo mesmo serviço de embedding dela.
+2. Para cada pergunta, rodar a consulta de `busca_trechos` com os mesmos
+   filtros — publicação, marcação e o **produto da pergunta** — mas SEM o
+   teto, e guardar a distância e a seção do 1º colocado.
+3. Separar pelo rótulo: com resposta (a seção esperada existe na base; casa
+   se o rótulo aparece no título da seção, sem diferenciar maiúsculas) e sem
+   resposta (preço, certificado, dano físico, entrega, nota fiscal, função
+   que o aparelho não tem — nada disso está em manual).
+4. O teto é o maior corte que ainda barra **100%** do grupo sem resposta.
+   Anotar quantas com resposta ele preserva e a margem até a sem resposta
+   mais próxima — é a margem que diz se o número ainda se sustenta.
+
+⚠️ **O viés vem junto com o método.** As 27 perguntas com resposta foram
+escritas por quem já tinha lido os manuais, e usam as palavras deles: os
+acertos preservados são o **melhor caso**. Refazer com as mesmas 40 mede o
+quanto o acervo andou, não o cliente — medir o cliente pede pergunta de
+conversa gravada.
+
+As perguntas estão como foram embutidas, **sem acento**. Reescrever uma é
+trocar de pergunta: a distância muda, e a comparação com as medições
+anteriores deixa de valer para ela.
+
+<details><summary>As 40 perguntas rotuladas</summary>
+
+| Produto | Pergunta | Seção esperada (trecho do título) |
+|---|---|---|
+| Titan | como ajusto a data e a hora do aparelho | 8.1 |
+| Titan | como mudo o idioma para portugues | 8.2 |
+| Titan | onde vejo quantos testes ja foram feitos | 8.3 |
+| Titan | como apago os testes da memoria | 8.4 |
+| Titan | o titan precisa de bocal descartavel | FAQ |
+| Titan | de quanto em quanto tempo preciso calibrar | Calibra |
+| Titan | como ligo o aparelho | Passo a Passo |
+| Titan | o que significa resultado acima do limite | Interpreta |
+| Titan | posso deixar o aparelho guardado no sol | Cuidados |
+| Titan | como conecto o titan no aplicativo do celular | Aplicativo |
+| Titan | quanto custa a calibracao do titan | — (sem resposta) |
+| Titan | quero o certificado de calibracao rbc | — (sem resposta) |
+| Titan | o aparelho caiu e a tela quebrou | — (sem resposta) |
+| Titan | qual o prazo de entrega de um aparelho novo | — (sem resposta) |
+| Titan | como conecto na impressora | — (sem resposta) |
+| Titan | quero cancelar a compra e devolver o aparelho | — (sem resposta) |
+| Titan | como troco a celula de combustivel eu mesmo | — (sem resposta) |
+| Phoebus | como ajusto data hora e fuso horario | DATA, HORA |
+| Phoebus | como mudo o idioma do dispositivo | IDIOMA |
+| Phoebus | como conecto o phoebus na internet por cabo de rede | INTERNET |
+| Phoebus | como faco para ocultar o resultado na tela | RESULTADO EXIBIDO |
+| Phoebus | como ajusto o volume da voz e do bip | UDIO E BIP |
+| Phoebus | o reconhecimento facial esta aceitando a pessoa errada | FACIAL |
+| Phoebus | o phoebus tem impressora | Impressora |
+| Phoebus | quais formas de identificacao ele aceita | Autentica |
+| Phoebus | para que serve a plataforma web | Plataforma |
+| Phoebus | quanto custa uma calibracao | — (sem resposta) |
+| Phoebus | o aparelho molhou na chuva | — (sem resposta) |
+| Phoebus | quero trocar o phoebus por outro modelo | — (sem resposta) |
+| iBlow 10 Pro | como conecto no bluetooth do celular | Bluetooth |
+| iBlow 10 Pro | como carrego a bateria do aparelho | Carregamento |
+| iBlow 10 Pro | o que fazer quando aparece calibracao requerida | Erros |
+| iBlow 10 Pro | qual a diferenca entre o modo normal e o outro modo | Modos |
+| iBlow 10 Pro | o que significa led vermelho com bipes curtos | Interpreta |
+| iBlow 10 Pro | o protetor de saliva pode ser lavado | Composi |
+| iBlow 10 Pro | qual a capacidade da bateria em mah | Especifica |
+| iBlow 10 Pro | como vejo o historico dos ultimos testes | Avan |
+| iBlow 10 Pro | quanto custa o iblow | — (sem resposta) |
+| iBlow 10 Pro | quero a nota fiscal do aparelho | — (sem resposta) |
+| iBlow 10 Pro | o aparelho queimou depois de uma queda | — (sem resposta) |
+
+</details>
 
 ### As duas hipóteses foram medidas: a A caiu, a B se confirmou
 
@@ -1146,6 +1221,7 @@ por inércia.
 | **Editar um artigo reindexa todos os trechos dele** | Reescrita em 10/09/2026, quando a fonte passou a ser a Base de Conhecimento: a varredura de `helo_indexacao.py` compara o hash do corte do artigo INTEIRO e, se mudou, apaga todos os trechos dele e recria com ids novos, pagando embedding de todos. Corrigir uma linha de contato no manual do Phoebus reembute os 18 trechos, inclusive os 17 idênticos. Hoje custa pouco: o embedding é do serviço próprio (CPU, segundos por artigo), e nada fora da busca referencia `helo_chunks`. | A base crescer a ponto de a varredura pesar, ou — o que torna urgente de vez — a resposta da Helô registrar a citação por `chunk_id`: aí o refaz deixa citação apontando para trecho que não existe mais. A saída é casar trecho a trecho por hash do conteúdo antes de apagar — os iguais mantêm id e embedding, e só `ordem`/`secao` são atualizados. |
 | **O `.env` de desenvolvimento aponta para produção** | A suíte está blindada (o `conftest.py` força uma URL falsa) e, desde 10/09/2026, a migration também (o `alembic/env.py` recusa host remoto fora do contêiner). Script avulso, shell e `psql` na máquina do desenvolvedor continuam falando com o banco real. Ver a seção própria acima. | O gatilho registrado — a primeira migration da Fase 2 — chegou e foi atendido pela trava. O próximo é **qualquer script avulso novo que escreva no banco**; o conserto de verdade é o `.env` deixar de guardar credencial de produção. |
 | **O trecho genérico domina a busca (hipótese B)** | `6. Passo a Passo para Utilização` do Titan — e o `5.` equivalente do iBlow — fala de operação em geral e vence perguntas de assunto diferente: 4 de 8 numa sondagem livre, incluindo impressora num aparelho sem impressora. O teto de 0,25 tira a maior parte do dano hoje, e num caso conhecido agrava: para *"como coloco o aparelho em português"*, o aspirador sobrevive ao corte e o `8.2 Alterar Idioma` não. Com três manuais dói pouco — quase toda pergunta fora do manual já não devolve nada. | **Quando houver manual técnico para mais de três produtos.** Aí o aspirador passa a competir com candidatos legítimos dentro do teto, e o dano deixa de ser contornado por ele. O conserto é do lado do trecho — cortar aquele mais fino, ou tirá-lo da base —, e NÃO do corte de todo mundo: a hipótese A foi medida e caiu, os trechos curtos são os que mais acertam. |
+| **O teto de 0,25 depende do acervo** | Registrada em 10/09/2026. O número foi medido em 09/09 contra 74 trechos de 8 arquivos (margem de 0,009) e remedido em 10/09 contra 46 trechos de 3 artigos (margem de 0,007): mudou a fonte, mudou a margem, e ninguém mexeu no número. Com o suporte escrevendo artigos, o acervo vai continuar andando e o teto anda junto sem que nada quebre — a falha dele é silenciosa nas duas direções: acerto virando escalada, ou trecho errado passando. O método, as 40 perguntas e o viés (as 27 com resposta foram escritas por quem sabia a resposta; os acertos preservados são o melhor caso) estão em "Como remedir", na seção do teto. | **O acervo indexado mudar de ordem de grandeza** (46 trechos em 10/09; chegando às centenas, remedir), **ou entrar artigo de produto que hoje não tem manual** (Deimos, EBS-010, Mark X, Mercury) — as 40 perguntas não têm nenhuma sobre eles, então remedir inclui escrever perguntas para esse produto. Trocar o modelo de embedding invalida a medição inteira e também é gatilho. |
 | **Contador de artigo útil sem voto identificado** | `POST /kb/articles/{id}/feedback` incrementa sem registrar quem votou; o mesmo usuário incrementa em laço. Não vaza nada. | O número for usado para decidir alguma coisa. |
 | **Antivírus aceita quando está fora do ar** | Bloquear upload com o ClamAV indisponível derrubaria o anexo por falha de infraestrutura. Hoje o estado é reportado, não mais silencioso, e há script de revarredura. | O ClamAV estiver no ambiente e estável — aí bloquear passa a custar pouco. |
 
