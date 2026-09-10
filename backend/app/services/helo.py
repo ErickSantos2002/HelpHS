@@ -47,6 +47,7 @@ from app.services.helo_prompt import (
     monta_prompt,
 )
 from app.services.llm import responde_como_helo
+from app.utils.history import registra_historico
 
 # O cálculo de horário comercial vem do motor de SLA, inclusive sendo privado.
 # Uma cópia da regra aqui é o defeito que este projeto já pagou caro: doze
@@ -111,17 +112,25 @@ def helo_pode_falar(ticket: Ticket, cliente: User) -> bool:
     semântica em que "eu desliguei" continua verdade depois — com precedência
     invertida, quem desligou precisaria vigiar os outros níveis para sempre.
 
+    O `helo_saiu` entra aqui e NÃO é um quarto nível de desligamento — é o fim
+    da conversa dela naquele chamado. A diferença importa para quem for
+    mexer: os três interruptores são de quem quer a IA fora; este é ela mesma
+    tendo dito que acabou. Ninguém religa pela tela, porque não é botão.
+
     Args:
-        ticket: o chamado em questão — `ai_enabled` é o interruptor do técnico.
+        ticket: o chamado em questão — `ai_enabled` é o interruptor do técnico,
+            `helo_saiu` é a conversa dela já encerrada ali.
         cliente: o autor do chamado — `ai_enabled` é a preferência dele (ou da
             empresa dele, quando o nível por CNPJ existir).
 
     Returns:
-        True quando os três níveis estão ligados.
+        True quando os três níveis estão ligados e ela ainda não saiu.
     """
     if not get_settings().helo_enabled:
         return False
     if not ticket.ai_enabled:
+        return False
+    if ticket.helo_saiu:
         return False
     return bool(cliente.ai_enabled)
 
@@ -486,21 +495,38 @@ async def responde_triagem(
     db.add(fala)
 
     if motivo is not None:
-        # ESCALAR DESLIGA A IA NO CHAMADO, e isto é novo na Fase 2.
-        #
-        # O desenho sempre prometeu que escalar "muda o status, notifica a
-        # equipe e desliga a IA", e só a notificação existia. Na Fase 1 não
-        # fez falta: o teto de duas falas a calava de qualquer jeito. Com teto
-        # de seis trocas, o cliente que pediu um humano continuaria recebendo
-        # robô até o teto estourar — que é exatamente o "robô que não aceita
-        # não" que o desenho inteiro existe para evitar.
-        #
-        # Desligar aqui também fecha a `suggest-reply` e o `summarize` neste
-        # chamado, e isso é consequência aceita: quem pediu para sair da IA
-        # não deveria ter a conversa dele resumida por uma.
-        ticket.ai_enabled = False
+        _ela_sai_de_cena(db, ticket, motivo)
 
     return FalaDaHelo(mensagem=fala, motivo=motivo)
+
+
+def _ela_sai_de_cena(db: AsyncSession, ticket: Ticket, motivo: str) -> None:
+    """
+    Escalou: a conversa dela acabou naquele chamado, e o histórico registra.
+
+    `helo_saiu` é o campo dela. Sai `True` nos QUATRO motivos, porque em todos
+    a conversa acabou do mesmo jeito — o chamado é do humano, e o prompt dela
+    promete que depois de escalar ela não fala mais nada ali.
+
+    **`ai_enabled` só cai no pedido explícito de humano, e isso é decisão, não
+    esquecimento.** Aquele campo é o botão de gente: desligá-lo fecha também a
+    sugestão de resposta e o resumo do TÉCNICO. Quando o cliente pede uma
+    pessoa, a vontade dele vale para as ferramentas todas e desligar é o certo.
+    Nos outros três — o modelo desistiu, o teto estourou, a IA não respondeu —
+    ninguém pediu para sair da IA, e tirar a ferramenta do técnico justamente
+    nos chamados em que a IA já falhou seria castigá-lo pelo defeito dela.
+
+    O histórico não é enfeite: sem ele o técnico abre o chamado, vê a IA
+    calada, e não tem onde ler por quê. O motivo que o modelo escreveu na linha
+    `ESCALAR:` é o melhor texto que existe para essa linha — quem o redigiu
+    tinha lido a conversa.
+    """
+    ticket.helo_saiu = True
+    registra_historico(db, ticket.id, None, "helo_saiu", str(False), str(True), motivo)
+
+    if motivo == MOTIVO_PEDIU_HUMANO:
+        ticket.ai_enabled = False
+        registra_historico(db, ticket.id, None, "ai_enabled", str(True), str(False), motivo)
 
 
 async def _busca_sem_derrubar(

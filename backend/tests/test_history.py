@@ -207,19 +207,19 @@ def _override_user(user):
 
 
 # ═══════════════════════════════════════════════════════════════
-# _record_history unit tests (pure function)
+# registra_historico unit tests (pure function)
 # ═══════════════════════════════════════════════════════════════
 
 
-def test_record_history_adds_to_session():
-    from app.routers.tickets import _record_history
+def test_registra_historico_adds_to_session():
+    from app.utils.history import registra_historico
 
     db = MagicMock()
     db.add = MagicMock()
     ticket_id = uuid.uuid4()
     user_id = uuid.uuid4()
 
-    _record_history(db, ticket_id, user_id, "status", "open", "in_progress", "Iniciando")
+    registra_historico(db, ticket_id, user_id, "status", "open", "in_progress", "Iniciando")
 
     db.add.assert_called_once()
     history_obj = db.add.call_args[0][0]
@@ -231,27 +231,27 @@ def test_record_history_adds_to_session():
     assert history_obj.comment == "Iniciando"
 
 
-def test_record_history_none_values_stay_none():
-    from app.routers.tickets import _record_history
+def test_registra_historico_none_values_stay_none():
+    from app.utils.history import registra_historico
 
     db = MagicMock()
     db.add = MagicMock()
 
-    _record_history(db, uuid.uuid4(), uuid.uuid4(), "created", None, "open")
+    registra_historico(db, uuid.uuid4(), uuid.uuid4(), "created", None, "open")
 
     history_obj = db.add.call_args[0][0]
     assert history_obj.old_value is None
     assert history_obj.new_value == "open"
 
 
-def test_record_history_converts_values_to_str():
-    from app.routers.tickets import _record_history
+def test_registra_historico_converts_values_to_str():
+    from app.utils.history import registra_historico
 
     db = MagicMock()
     db.add = MagicMock()
     some_uuid = uuid.uuid4()
 
-    _record_history(db, uuid.uuid4(), uuid.uuid4(), "assignee_id", None, some_uuid)
+    registra_historico(db, uuid.uuid4(), uuid.uuid4(), "assignee_id", None, some_uuid)
 
     history_obj = db.add.call_args[0][0]
     assert history_obj.new_value == str(some_uuid)
@@ -357,7 +357,7 @@ async def test_get_history_empty(patch_redis):
 
 @pytest.mark.asyncio
 async def test_status_change_records_history(patch_redis):
-    """Verifies _record_history is called when status changes."""
+    """Verifies registra_historico is called when status changes."""
     from app.core.database import get_db
     from app.routers import tickets as tickets_module
 
@@ -367,13 +367,13 @@ async def test_status_change_records_history(patch_redis):
     _override_user(tech)
 
     calls = []
-    original = tickets_module._record_history
+    original = tickets_module.registra_historico
 
     def _spy(*args, **kwargs):
         calls.append(args)
         return original(*args, **kwargs)
 
-    tickets_module._record_history = _spy
+    tickets_module.registra_historico = _spy
 
     try:
         async with AsyncClient(transport=ASGITransport(app=app), base_url="http://test") as c:
@@ -382,7 +382,7 @@ async def test_status_change_records_history(patch_redis):
                 json={"status": "in_progress"},
             )
     finally:
-        tickets_module._record_history = original
+        tickets_module.registra_historico = original
 
     # At least one history call with field="status"
     assert any(call[3] == "status" for call in calls)
@@ -390,7 +390,7 @@ async def test_status_change_records_history(patch_redis):
 
 @pytest.mark.asyncio
 async def test_update_ticket_records_changed_fields(patch_redis):
-    """Verifies _record_history is called only for changed fields."""
+    """Verifies registra_historico is called only for changed fields."""
     from app.core.database import get_db
     from app.routers import tickets as tickets_module
 
@@ -400,13 +400,13 @@ async def test_update_ticket_records_changed_fields(patch_redis):
     _override_user(tech)
 
     calls = []
-    original = tickets_module._record_history
+    original = tickets_module.registra_historico
 
     def _spy(*args, **kwargs):
         calls.append(args)
         return original(*args, **kwargs)
 
-    tickets_module._record_history = _spy
+    tickets_module.registra_historico = _spy
 
     try:
         async with AsyncClient(transport=ASGITransport(app=app), base_url="http://test") as c:
@@ -415,6 +415,6 @@ async def test_update_ticket_records_changed_fields(patch_redis):
                 json={"technician_notes": "Diagnóstico registrado."},
             )
     finally:
-        tickets_module._record_history = original
+        tickets_module.registra_historico = original
 
     assert any(call[3] == "technician_notes" for call in calls)

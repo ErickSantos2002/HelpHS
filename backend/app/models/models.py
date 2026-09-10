@@ -492,7 +492,26 @@ class Ticket(Base):
     # classificação automática nem a sugestão de resposta olham este chamado.
     # "Desliga a IA neste chamado" tem que significar isso, senão a promessa
     # da tela é maior que a do código.
+    #
+    # É o botão DE GENTE, e só. A Helô não escreve aqui quando decide sair
+    # sozinha — para isso existe o `helo_saiu` logo abaixo. A exceção está lá
+    # explicada: quando o CLIENTE pede para falar com uma pessoa, os dois vão
+    # a `False`, porque aí quem quis sair da IA foi ele.
     ai_enabled: Mapped[bool] = mapped_column(Boolean, default=True, nullable=False)
+
+    # A Helô já saiu deste chamado — escalou, e o chamado passou a ser do
+    # humano. Ela não volta a falar aqui nem que o cliente escreva de novo.
+    #
+    # Existe porque o `ai_enabled` estava fazendo dois trabalhos. Enquanto ela
+    # falava uma vez por chamado, "escalou" e "IA desligada" davam no mesmo. Com
+    # ela conversando, escalar por decisão do modelo, por teto de trocas ou por
+    # a IA estar fora do ar passou a desligar também a sugestão de resposta e o
+    # resumo DO TÉCNICO — tirando a ferramenta dele exatamente nos chamados em
+    # que a IA já tinha falhado, e sem ninguém ter pedido.
+    #
+    # Separado, cada campo responde a uma pergunta só: `ai_enabled` é "alguém
+    # quer a IA fora daqui?", `helo_saiu` é "a conversa dela acabou?".
+    helo_saiu: Mapped[bool] = mapped_column(Boolean, default=False, nullable=False)
 
     # SLA
     sla_config_id: Mapped[uuid.UUID | None] = mapped_column(

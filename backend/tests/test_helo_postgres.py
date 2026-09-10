@@ -44,6 +44,7 @@ from app.models.models import (
     Product,
     Ticket,
     TicketCategory,
+    TicketHistory,
     TicketPriority,
     TicketStatus,
     User,
@@ -404,6 +405,50 @@ async def test_sem_a_equipe_ela_responde_normalmente(db, helo_ligada, modelo_diz
     _sistema, contexto = espiao.await_args.args
     assert "Chamado sintético" in contexto
     assert "O aparelho não liga desde ontem" in contexto
+
+
+@pytest.mark.asyncio
+async def test_a_saida_dela_persiste_no_banco_com_o_historico(db, helo_ligada, modelo_diz):
+    """
+    A coluna nova e a linha de histórico, contra o banco de verdade.
+
+    Mock não prova que a coluna existe: `MagicMock` aceita `helo_saiu` sem
+    piscar, e um modelo sem a migration correspondente passaria verde na suíte
+    inteira e falharia no primeiro deploy. E o histórico é `INSERT` de fato —
+    campo com tamanho, chave estrangeira, `user_id` nulo. Aqui isso é exercido.
+    """
+    modelo_diz("Isso precisa de um técnico.\nESCALAR: dano físico no visor")
+    cliente, chamado = await _cenario(db)
+
+    await responde_triagem(db, chamado, cliente, "a tela quebrou")
+    await db.flush()
+
+    salvo = (await db.execute(select(Ticket).where(Ticket.id == chamado.id))).scalar_one()
+    assert salvo.helo_saiu is True
+    assert salvo.ai_enabled is True, "o modelo escalou; o botão do técnico não é dele"
+
+    linhas = (
+        (await db.execute(select(TicketHistory).where(TicketHistory.ticket_id == chamado.id)))
+        .scalars()
+        .all()
+    )
+    (saida,) = [linha for linha in linhas if linha.field == "helo_saiu"]
+    assert saida.user_id is None
+    assert saida.comment == "dano físico no visor"
+
+
+@pytest.mark.asyncio
+async def test_pedido_de_humano_desliga_o_botao_no_banco(db, helo_ligada, modelo_diz):
+    """A exceção, também contra o banco: aqui quem quis sair da IA foi o cliente."""
+    modelo_diz("não deveria chegar ao modelo")
+    cliente, chamado = await _cenario(db)
+
+    await responde_triagem(db, chamado, cliente, "quero falar com uma pessoa")
+    await db.flush()
+
+    salvo = (await db.execute(select(Ticket).where(Ticket.id == chamado.id))).scalar_one()
+    assert salvo.helo_saiu is True
+    assert salvo.ai_enabled is False
 
 
 @pytest.mark.asyncio

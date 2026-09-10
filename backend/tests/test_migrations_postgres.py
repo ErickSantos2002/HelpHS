@@ -145,6 +145,56 @@ def test_upgrade_head_sobe_do_zero(banco):
 
 
 @pytest.mark.asyncio
+async def test_o_modelo_nao_anda_na_frente_das_migrations(sessao, banco):
+    """
+    Toda coluna declarada no modelo existe no banco depois do `upgrade head`.
+
+    É a lacuna que o `create_all` esconde e que este arquivo existe para
+    fechar, num caso que ele ainda não cobria. Os testes que montam o schema
+    pela declaração — `test_helo_postgres.py` e companhia — ficam VERDES com
+    uma coluna nova no modelo e nenhuma migration para ela: eles constroem o
+    schema a partir do próprio modelo. O container não: ele roda
+    `alembic upgrade head`, e a primeira consulta que tocar na coluna que só
+    existe na declaração devolve `UndefinedColumn` em produção.
+
+    A comparação é só de PRESENÇA — nome de tabela e de coluna. Tipo, default e
+    nulabilidade ficam de fora de propósito: comparar isso a sério é o trabalho
+    do `alembic check`, que precisa de um banco no head e não roda no CI. O que
+    este teste pega é o esquecimento inteiro, que é o caso comum e o que
+    derruba o boot.
+    """
+    resultado = _alembic(banco, "head")
+    assert resultado.returncode == 0, resultado.stderr
+
+    from app.models.models import Base
+
+    reais = {}
+    linhas = await sessao.execute(
+        text(
+            "SELECT table_name, column_name FROM information_schema.columns "
+            "WHERE table_schema = 'public'"
+        )
+    )
+    for tabela, coluna in linhas.all():
+        reais.setdefault(tabela, set()).add(coluna)
+
+    faltando = []
+    for tabela in Base.metadata.sorted_tables:
+        if tabela.name not in reais:
+            faltando.append(f"{tabela.name} (tabela inteira)")
+            continue
+        for coluna in tabela.columns:
+            if coluna.name not in reais[tabela.name]:
+                faltando.append(f"{tabela.name}.{coluna.name}")
+
+    assert (
+        not faltando
+    ), "declarado no modelo e ausente depois do upgrade head — falta migration para: " + ", ".join(
+        sorted(faltando)
+    )
+
+
+@pytest.mark.asyncio
 async def test_backfill_leva_o_dono_para_equipment_users(banco):
     """
     O backfill da `v2q3r4s5t6u7` copia `equipments.owner_id` para a tabela nova.

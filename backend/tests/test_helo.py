@@ -92,9 +92,13 @@ def modelo_diz(monkeypatch):
     return _diz
 
 
-def _ticket(ai_enabled=True):
+def _ticket(ai_enabled=True, helo_saiu=False):
     t = MagicMock()
     t.ai_enabled = ai_enabled
+    # Explícito pelo mesmo motivo do `assignee_id` mais abaixo: sem esta linha
+    # o atributo nasce como filho auto-criado do MagicMock — truthy —, e a
+    # guarda de "ela já saiu" calaria a Helô em TODO teste do arquivo.
+    t.helo_saiu = helo_saiu
     return t
 
 
@@ -143,6 +147,17 @@ def test_chamado_ligado_nao_reativa_cliente_desligado(helo_ligada):
     precisaria vigiar os outros níveis para sempre.
     """
     assert helo_pode_falar(_ticket(ai_enabled=True), _cliente(ai_enabled=False)) is False
+
+
+def test_depois_de_sair_ela_nao_volta(helo_ligada):
+    """
+    O campo novo cala a Helô sem ser um quarto interruptor.
+
+    Os três níveis são de quem quer a IA fora; este é ela mesma tendo dito que
+    acabou. Antes da separação, quem fazia esse trabalho era o `ai_enabled` —
+    e junto com ele iam embora as ferramentas do técnico.
+    """
+    assert helo_pode_falar(_ticket(helo_saiu=True), _cliente()) is False
 
 
 def test_flag_global_vence_os_dois(helo_desligada):
@@ -311,6 +326,9 @@ def _chamado(**kwargs):
     # Todo cenário de "chamado sem dono" ficaria verde por acidente, e trocar
     # `is None` por `is not None` no código não derrubaria teste nenhum.
     t.assignee_id = None
+    # Mesmo motivo, e o mesmo perigo: truthy por acidente, ela nunca fala, e
+    # dezenas de testes ficariam verdes afirmando silêncio pelo motivo errado.
+    t.helo_saiu = False
     t.sla_first_response = None
     t.sla_response_due_at = None
     t.sla_response_breach = False
@@ -562,7 +580,7 @@ async def test_a_linha_de_escalada_nao_vai_para_o_cliente(helo_ligada, modelo_di
 
 
 @pytest.mark.asyncio
-async def test_escalar_desliga_a_ia_no_chamado(helo_ligada, modelo_diz):
+async def test_escalar_encerra_a_conversa_dela(helo_ligada, modelo_diz):
     """
     A promessa que o desenho fazia desde a Fase 1 e o código não cumpria.
 
@@ -575,7 +593,76 @@ async def test_escalar_desliga_a_ia_no_chamado(helo_ligada, modelo_diz):
 
     await responde_triagem(_db_com_falas(1), ticket, _cliente(), "e a garantia?")
 
+    assert ticket.helo_saiu is True
+
+
+@pytest.mark.asyncio
+async def test_escalada_do_modelo_nao_encosta_no_botao_do_tecnico(helo_ligada, modelo_diz):
+    """
+    A assimetria, e o lado que era defeito.
+
+    `ai_enabled` fecha a sugestão de resposta e o resumo DO TÉCNICO. Desligá-lo
+    porque o modelo desistiu tira a ferramenta dele justamente no chamado em
+    que a IA já falhou — e sem ninguém ter pedido. Quem escreve aqui é gente,
+    pela tela.
+    """
+    ticket = _chamado()
+    modelo_diz("Vou passar para o time comercial.\nESCALAR: pergunta de garantia")
+
+    await responde_triagem(_db_com_falas(1), ticket, _cliente(), "e a garantia?")
+
+    assert ticket.ai_enabled is True
+
+
+@pytest.mark.asyncio
+async def test_o_pedido_de_humano_desliga_os_dois(helo_ligada):
+    """
+    A exceção, e ela é deliberada.
+
+    Aqui quem quis sair da IA foi o CLIENTE, e a vontade dele não se aplica só
+    à Helô: vale para a sugestão de resposta e para o resumo também. Sem este
+    teste, a simetria com os outros três motivos pareceria esquecimento — e
+    alguém "consertaria" tirando a linha.
+    """
+    ticket = _chamado()
+
+    await responde_triagem(_db_com_falas(1), ticket, _cliente(), "quero falar com uma pessoa")
+
+    assert ticket.helo_saiu is True
     assert ticket.ai_enabled is False
+
+
+@pytest.mark.asyncio
+async def test_a_saida_dela_fica_no_historico_com_o_motivo(helo_ligada, modelo_diz):
+    """
+    Sem isto o técnico abre o chamado, vê a IA calada, e não tem onde ler por quê.
+
+    O botão da tela já grava histórico desde sempre; o caminho da Helô não
+    gravava, e o campo mudava sozinho. O motivo que o modelo escreveu na linha
+    `ESCALAR:` é o melhor texto possível para essa linha: quem o redigiu tinha
+    lido a conversa.
+    """
+    db = _db_com_falas(1)
+    modelo_diz("Isso precisa de um técnico.\nESCALAR: dano físico no visor")
+
+    await responde_triagem(db, _chamado(), _cliente(), "a tela quebrou")
+
+    historico = [c.args[0] for c in db.add.call_args_list if hasattr(c.args[0], "field")]
+    (linha,) = [h for h in historico if h.field == "helo_saiu"]
+    assert linha.user_id is None, "quem agiu foi o sistema, não uma pessoa"
+    assert linha.new_value == "True"
+    assert linha.comment == "dano físico no visor"
+
+
+@pytest.mark.asyncio
+async def test_o_pedido_de_humano_grava_as_duas_mudancas(helo_ligada):
+    """Dois campos mudaram, e o histórico do chamado mostra os dois."""
+    db = _db_com_falas(1)
+
+    await responde_triagem(db, _chamado(), _cliente(), "quero falar com um humano")
+
+    campos = {h.field for h in (c.args[0] for c in db.add.call_args_list) if hasattr(h, "field")}
+    assert campos == {"helo_saiu", "ai_enabled"}
 
 
 @pytest.mark.asyncio
@@ -593,6 +680,7 @@ async def test_resposta_comum_nao_desliga_a_ia(helo_ligada, modelo_diz):
     await responde_triagem(_db_com_falas(1), ticket, _cliente(), "não liga")
 
     assert ticket.ai_enabled is True
+    assert ticket.helo_saiu is False, "ela respondeu; a conversa continua"
 
 
 @pytest.mark.parametrize("bruto", [None, "", "   \n  "])
@@ -613,7 +701,8 @@ async def test_modelo_que_nao_responde_escala(helo_ligada, monkeypatch, bruto):
     assert fala is not None
     assert fala.escalou is True
     assert "passando seu chamado para um atendente" in fala.mensagem.content
-    assert ticket.ai_enabled is False
+    assert ticket.helo_saiu is True
+    assert ticket.ai_enabled is True, "a IA falhou; o técnico não perde as ferramentas por isso"
 
 
 @pytest.mark.asyncio
@@ -834,7 +923,7 @@ async def test_com_embedding_e_llm_fora_ela_escala_em_vez_de_prender(helo_ligada
 
     assert fala is not None
     assert fala.motivo == helo.MOTIVO_IA_MUDA
-    assert ticket.ai_enabled is False
+    assert ticket.helo_saiu is True
     helo.busca_trechos.assert_not_awaited()
 
 
