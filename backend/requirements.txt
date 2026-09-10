@@ -51,3 +51,7 @@ pytz==2025.2
 
 # PDF generation
 reportlab==4.4.0
+# Feriados nacionais brasileiros para o calculo de horas uteis do SLA.
+# Versao fixa: a lista de feriados muda entre versoes da biblioteca, e prazo
+# de SLA que muda sozinho num upgrade e a classe de defeito que ninguem nota.
+holidays==0.65
