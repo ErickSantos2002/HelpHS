@@ -182,10 +182,17 @@ async def busca_trechos(
     # tem como responder com segurança.
     #
     # Isto vale inclusive para os artigos SEM vínculo, que "valem para todos os
-    # aparelhos". Todos os aparelhos não é o mesmo que nenhum aparelho: sem
-    # saber de qual se trata, nem o texto universal tem como ser conferido
-    # contra o que o cliente tem na mão. Mantido como era — abrir isto é
-    # decisão, e não consequência da mudança de fonte.
+    # aparelhos". Todos os aparelhos não é o mesmo que nenhum aparelho: chamado
+    # sem produto é chamado em que não sabemos qual aparelho está na mão do
+    # cliente, e citar procedimento é mais arriscado justamente aí — nem o
+    # texto universal tem como ser conferido contra o que ele tem. É a mesma
+    # assimetria do teto de distância: escalar custa um turno de humano;
+    # procedimento errado num instrumento de medição legal custa mais.
+    #
+    # DECIDIDO em 10/09/2026, e não herdado: até ali era só o comportamento de
+    # antes da mudança de fonte, mantido sem discussão. O risco é parecer
+    # esquecimento — quem abrir isto está trocando a assimetria, não
+    # consertando um descuido.
     if ticket.product_id is None:
         return []
 

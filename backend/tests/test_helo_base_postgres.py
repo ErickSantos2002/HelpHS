@@ -383,8 +383,10 @@ async def test_chamado_sem_produto_nao_recebe_nem_o_artigo_universal(db):
     Todos os aparelhos não é o mesmo que nenhum aparelho.
 
     Sem saber qual é o aparelho, nem o texto universal tem como ser conferido
-    contra o que o cliente tem na mão. Mantido como era antes da mudança de
-    fonte — abrir isto é decisão, e não consequência dela.
+    contra o que o cliente tem na mão — e é justamente aí que citar
+    procedimento é mais arriscado. Decidido em 10/09/2026 (o porquê está no
+    comentário da guarda, em `busca_trechos`): escalar custa um turno de
+    humano, procedimento errado num instrumento de medição legal custa mais.
     """
     cliente, _, _ = await _monta_corpus(db)
     await _trecho(

@@ -869,8 +869,16 @@ fonte citada — o que faz parecer conferido.
 | Importação dos manuais (script) | ERRO FATAL | quem cria é máquina; ninguém escolheu nada |
 
 Quem unificar as duas achando que achou inconsistência reabre o caminho para o
-passo a passo do Phoebus chegar a quem tem um Titan. E chamado SEM produto não
-recebe nem o artigo universal: todos os aparelhos não é o mesmo que nenhum.
+passo a passo do Phoebus chegar a quem tem um Titan.
+
+**Chamado SEM produto não recebe nada — nem o artigo universal.** Decidido em
+10/09/2026; até ali era só o comportamento herdado de antes da mudança de
+fonte, e está escrito aqui para não parecer esquecimento amanhã. Chamado sem
+produto é chamado em que não sabemos qual aparelho está na mão do cliente, e
+citar procedimento é mais arriscado justamente aí: todos os aparelhos não é o
+mesmo que nenhum. É a mesma assimetria do teto de distância — escalar custa um
+turno de humano; procedimento errado num instrumento de medição legal custa
+mais.
 
 **O filtro de tipo morreu**, e com ele uma proteção: se alguém publicar uma
 ficha com preço na Base, ela vira fonte da Helô. A proteção passou a ser a
