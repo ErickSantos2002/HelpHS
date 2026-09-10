@@ -1,7 +1,7 @@
 """biblioteca de arquivos frequentes, e o anexo dela na mensagem de chat
 
 Revision ID: c9d0e1f2a3b4
-Revises: z6u7v8w9x0y1
+Revises: b8c9d0e1f2a3
 Create Date: 2026-09-08
 
 Duas coisas, porque uma nao existe sem a outra: a tabela dos arquivos
@@ -58,7 +58,13 @@ from sqlalchemy.dialects import postgresql
 from alembic import op
 
 revision: str = "c9d0e1f2a3b4"
-down_revision: str | None = "z6u7v8w9x0y1"
+# Reapontado de z6u7v8w9x0y1 para o head que a frente do SLA deixou na main.
+#
+# As duas frentes sairam do MESMO ponto e criaram migrations irmas. Duas
+# cabecas fazem o `alembic upgrade head` recusar, e ele roda no boot do
+# container sob `set -e` -- seria a API sem subir. Quem entra depois reaponta,
+# e o teste de head unico e quem cobra.
+down_revision: str | None = "b8c9d0e1f2a3"
 branch_labels: str | Sequence[str] | None = None
 depends_on: str | Sequence[str] | None = None
 
