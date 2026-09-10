@@ -16,23 +16,25 @@ import uuid
 import pytest
 
 from app.models.models import HeloDocType
+from app.services.helo_texto import (
+    CredencialNaoRedigidaError,
+    Trecho,
+    _corta_numerada,
+    confere_redacao,
+    descarta,
+    redige,
+    suspeitas,
+)
 from scripts.ingere_manuais import (
     FONTES,
     CorpusInconsistenteError,
-    CredencialNaoRedigidaError,
     Fonte,
-    Trecho,
     _corta_emoji,
-    _corta_numerada,
     _corta_regua,
     casa_produtos,
     chave,
-    confere_redacao,
-    descarta,
     exige_produtos_distinguiveis,
     recorta,
-    redige,
-    suspeitas,
 )
 
 # Os sete produtos que o `app/seeds.py` grava, com a grafia exata dele. Repetir
@@ -618,7 +620,7 @@ def test_detector_disparou_e_redator_nao_redigiu_e_erro_fatal():
     trechos = [Trecho(secao="1. Menu", conteudo=bruto, exige_credencial=False, ordem=0)]
 
     with pytest.raises(CredencialNaoRedigidaError) as erro:
-        confere_redacao(fonte, bruto, trechos)
+        confere_redacao(fonte.arquivo, bruto, trechos)
 
     assert "Fake.txt:2" in str(erro.value), "a mensagem precisa dizer arquivo e LINHA"
     assert "987654" not in str(erro.value), "a mensagem não transcreve a senha"
@@ -631,4 +633,4 @@ def test_quando_o_redator_fez_o_trabalho_nao_ha_erro():
     limpo, _ = redige(bruto)
     trechos = [Trecho(secao="1. Menu", conteudo=limpo, exige_credencial=True, ordem=0)]
 
-    confere_redacao(fonte, bruto, trechos)  # não levanta
+    confere_redacao(fonte.arquivo, bruto, trechos)  # não levanta
