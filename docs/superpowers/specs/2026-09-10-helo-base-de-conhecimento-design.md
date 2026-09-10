@@ -1,6 +1,9 @@
 # A base da Helô passa a ser a Base de Conhecimento
 
-**Plano, não implementação.** Nada aqui está no código. Decisão do cliente em
+**Plano de 10/09/2026, implementado no mesmo dia.** As decisões tomadas e o
+que a implementação encontrou estão na última seção; o texto abaixo é o
+plano como foi proposto, com as recomendações que viraram código e as que
+mudaram no caminho. Decisão do cliente em
 10/09/2026, corrigindo a decisão 3 de 08/09 ("a fonte é a pasta de manuais").
 
 A fonte da Helô deixa de ser arquivo em disco indexado por script e passa a ser
@@ -320,3 +323,65 @@ própria tela de edição do artigo, ao lado da marcação.
 - **Citação rastreável.** Com o artigo como fonte, passa a existir um alvo
   estável para apontar (`article_id`), e a Helô poderia linkar o artigo em vez
   de só citar o nome. Não está neste plano; fica anotado porque ficou barato.
+
+---
+
+## Decidido em 10/09/2026, e o que a implementação encontrou
+
+**As cinco decisões.** Quatro foram respondidas pelo Rickelme no mesmo dia; a
+quinta ficou sem resposta e seguiu a recomendação deste plano.
+
+1. **Reingestão por varredura periódica com hash — aprovada.** Auto-curativa é
+   o requisito certo para uma base que ninguém olha.
+2. **Os três manuais nascem como rascunho — aprovada.**
+3. **`helo_pode_ler` booleano, padrão `true`.** O número que faltava veio do
+   Rickelme, e é dele — não foi medido por mim: **em 10/09/2026 havia UM artigo
+   publicado em produção, nenhum rascunho, nenhum arquivado.** Com um acervo de
+   uma linha, o opt-in (padrão `false`) protegeria de nada e custaria o passo
+   manual que a mudança de fonte existe para eliminar. O argumento está datado
+   de propósito: se o acervo crescer e alguém reabrir, ele vale para um artigo,
+   não para centenas.
+4. **A inversão da regra de produto, com uma exceção explícita.** Na Base de
+   Conhecimento, vínculo ausente é escolha de quem escreveu e vale para todos.
+   Na IMPORTAÇÃO dos manuais, vínculo ausente é FATAL — ali quem cria é
+   máquina, e ninguém escolheu nada. Duas regras, dois lugares; o comentário
+   está nos dois (`scripts/importa_manuais_para_kb.py` e
+   `_set_article_products` em `app/routers/kb.py`), cada um apontando o outro.
+5. **`helo_documents` e `helo_chunk_products` morrem** — sem resposta; seguiu a
+   recomendação.
+
+**O que mudou em relação ao plano, e por quê:**
+
+- **Nenhuma migration destrutiva.** O plano previa derrubar as duas tabelas
+  numa migration nova. A `a7v8w9x0y1z2` nunca rodou em produção (a extensão
+  nem existe lá), então, pelo critério de imutabilidade, ela foi REESCRITA no
+  formato final: as tabelas antigas simplesmente não chegam a existir em
+  produção. A única migration nova é a `c9x0y1z2a3b4`, aditiva.
+- **O hash é do resultado do corte, não do `content`.** Hash do texto cru não
+  enxerga mudança de receita — a lição do `_hash_do_resultado` da ingestão por
+  arquivo.
+- **Os cortes das fichas comerciais morreram** com o script de ingestão
+  (`_corta_regua`, `_corta_markdown`, `_corta_emoji`): só as fichas os usavam.
+- **O slug saiu do router** (`app/utils/slug.py`), pelo mesmo motivo do
+  gravador de histórico: script não importa de router.
+
+**O que foi MEDIDO:**
+
+- **`updated_at` anda a cada visualização** — o argumento que escolheu hash em
+  vez de carimbo. A primeira tentativa de medir caiu numa armadilha do próprio
+  teste: o `now()` do Postgres é o início da transação, e o teste inteiro roda
+  numa só. Refeita contra uma data plantada, confirmou.
+- **Ponta a ponta, contra banco local com os manuais reais:** a importação
+  criou 3 rascunhos, cada um vinculado exatamente ao seu produto; o manual do
+  Phoebus tinha 3 linhas com cara de senha, e o artigo tem 3 marcas de redação e
+  0 dígitos sobreviventes; rodar de novo é recusado. Varredura com os artigos
+  em rascunho: 0 indexados, 0 chamadas ao embedding. Publicados: 46 trechos (18
+  Phoebus, 16 Titan, 12 iBlow), 2 marcados com credencial. Varredura seguinte:
+  3 inalterados, 0 chamadas. A cadeia inteira de migrations, de `z6u7` a
+  `c9x0`, rodou no mesmo banco, que já tinha dados.
+- **O teto de 0,25 continua valendo, e ficou mais apertado.** Remedido com as
+  mesmas 40 perguntas contra a base nova: as 13 sem resposta continuam 100%
+  barradas (mínimo 0,2570, contra 0,2590), e 21 das 27 com resposta ainda
+  recebem trecho (eram 22). A margem caiu de 0,009 para 0,007: a primeira linha
+  dos trechos agora é o título limpo, sem o emoji e a pontuação do manual, e a
+  distância mexeu em até oito milésimos.

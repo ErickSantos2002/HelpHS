@@ -445,6 +445,10 @@ adivinha esses dados.
 >
 > O que saiu foi a lista de "o que é preciso" — conclusões, todas substituídas
 > por fato. O raciocínio de cada etapa está nos commits.
+>
+> Em 10/09/2026 a fonte mudou de novo, e para melhor: a base da Helô passou a
+> ser a própria Base de Conhecimento. Ver
+> `2026-09-10-helo-base-de-conhecimento-design.md`.
 
 Ela deixou de ser recepcionista: responde o que está documentado, citando a
 fonte, e escala o que não está.
@@ -476,7 +480,7 @@ Já foram 6 trocas? ────────────────────
 Embedding da pergunta ──── serviço fora → sem vetor, base vazia
         │
         ▼
-Busca vetorial: trechos do PRODUTO do chamado, de documento TÉCNICO,
+Busca vetorial: trechos de artigo PUBLICADO que sirva ao produto,
 já embutidos, a no máximo 0,25 de distância, os 4 mais próximos
    (a consulta roda dentro de um SAVEPOINT: erro nela não pode levar
     junto a mensagem que o cliente acabou de escrever)
@@ -515,8 +519,21 @@ outro — vazamento por um caminho que nenhuma tela do sistema abre.
 
 ### A base que existe hoje
 
-74 trechos, 8 documentos, 7 produtos. Mas o filtro de tipo é `tecnico`, e só
-**três** produtos têm manual técnico:
+**Desde 10/09/2026 a fonte é a Base de Conhecimento** — os mesmos artigos da
+barra lateral, com `status = published` e `helo_pode_ler = true`. Artigo
+publicado entra nas respostas na varredura seguinte (5 min); despublicar sai
+na hora, porque a busca filtra ao vivo. Artigo sem produto vinculado vale para
+todos os aparelhos; vinculado, só para o dele.
+
+Os três manuais técnicos (Phoebus, Titan, iBlow 10 Pro) entram por uma
+importação única (`scripts/importa_manuais_para_kb.py`) que cria cada um como
+RASCUNHO, já com as senhas redigidas: uma pessoa lê e publica. As cinco fichas
+comerciais não entram — têm preço. Com os três publicados, a base tem 46
+trechos.
+
+A tabela abaixo é do acervo de manuais de 09/09 — 74 trechos, 8 documentos, 7
+produtos —, e continua valendo para o que os quatro produtos sem manual
+significam na prática. Só **três** produtos têm manual técnico:
 
 | Produto | Manual técnico | Ficha comercial |
 |---|---|---|
@@ -525,9 +542,11 @@ outro — vazamento por um caminho que nenhuma tela do sistema abre.
 | iBlow 10 Pro | 12 trechos | 8 trechos |
 | Deimos, EBS-010, Mark X, Mercury | **nenhum** | 4 a 6 trechos cada |
 
-Para um chamado dos outros quatro produtos, a base vem vazia em todo turno: ela
-saúda, o cliente responde, ela escala. Não é defeito — é o desenho encontrando
-o acervo que existe. **É decisão de escopo do cliente**, não de código.
+Para um chamado dos outros quatro produtos, a base vem vazia em todo turno — a
+menos que alguém publique na Base um artigo sem produto vinculado que responda:
+ela saúda, o cliente responde, ela escala. Não é defeito — é o desenho
+encontrando o acervo que existe. **É decisão de escopo do cliente**, não de
+código.
 
 ### O teto de distância
 
@@ -543,6 +562,11 @@ resposta nenhuma lá dentro:
 
 `0,25` é o maior corte que ainda barra 100% dessas 13, preservando 22 das 27
 com resposta. As cinco que ele derruba viram escalada — o lado barato de errar.
+
+Remedido em 10/09/2026, depois da mudança de fonte, com as mesmas 40 perguntas
+contra os três manuais importados como artigo: o 0,25 continua barrando as 13,
+preserva 21 das 27 (as derrubadas passam a seis), e a margem até a pergunta sem
+resposta mais próxima caiu de 0,009 para 0,007.
 
 Mas as duas populações **se sobrepõem** entre 0,25 e 0,26: um acerto medido com
 embedding real (*"como coloco o aparelho em português"*) fica a 0,2533, dentro
@@ -602,8 +626,8 @@ sozinha amanhã.
 
 6. **Apetite de risco.** Errar por escalar demais é aceitável; errar por
    responder de cabeça, não. Toda decisão da Fase 2 desempata para esse lado —
-   o teto de distância derruba cinco respostas boas para não deixar passar
-   nenhuma resposta inventada.
+   o teto de distância derruba cinco respostas boas (seis, na remedição de
+   10/09) para não deixar passar nenhuma resposta inventada.
 7. **Cita a fonte, sim.** Está no prompt, e a fonte viaja com o trecho desde a
    busca para o modelo não precisar inventar de onde tirou.
 8. **Continuam proibidos.** Certificado de calibração, gás, RBC, INMETRO,
@@ -615,9 +639,13 @@ sozinha amanhã.
 disponível, e a Fase 2 foi construída a partir de **oito manuais em `.txt`**
 fornecidos pelo cliente — cinco fichas comerciais e três manuais técnicos.
 Embeddings gerados pelo **bge-m3 quantizado**, em serviço próprio dentro da
-infraestrutura (nenhum texto de manual sai para provedor externo). O conteúdo é
+infraestrutura (nenhum texto de manual sai para provedor externo). ~~O conteúdo é
 material distinto dos artigos da Base de Conhecimento do HelpHS, e vive em
-tabelas próprias (`helo_documents`, `helo_chunks`); os dois não se misturam.
+tabelas próprias (`helo_documents`, `helo_chunks`); os dois não se misturam.~~
+**Invertido em 10/09/2026:** a base da Helô passou a ser a própria Base de
+Conhecimento — os manuais técnicos entram como artigo, e `helo_documents`
+deixou de existir. Ver a seção da Fase 2 acima e
+`2026-09-10-helo-base-de-conhecimento-design.md`.
 
 ---
 

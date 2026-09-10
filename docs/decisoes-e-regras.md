@@ -847,6 +847,35 @@ o CI não checa formato. Lá, rodar `--write` polui o commit.
 
 ## Base da Helô
 
+### A base da Helô é a Base de Conhecimento (desde 10/09/2026)
+
+A fonte deixou de ser uma pasta de manuais e passou a ser `kb_articles` com
+`status = published` e `helo_pode_ler = true`. Artigo publicado alimenta as
+respostas da Helô **sem ninguém rodar nada**: uma varredura periódica
+(`app/services/helo_indexacao.py`, a cada 5 min) indexa o que é novo ou
+editado, e a busca filtra publicação, marcação e produto AO VIVO — despublicar
+tira o texto das respostas no mesmo instante.
+
+⚠️ **Publicar artigo passa a mudar o que a Helô diz para o cliente.** O suporte
+não tinha esse poder e não foi avisado de que passou a ter. Passo a passo
+errado num artigo publicado vira procedimento errado ditado ao cliente, com a
+fonte citada — o que faz parecer conferido.
+
+**Duas regras de vínculo de produto, em dois lugares, de propósito:**
+
+| Onde | Vínculo ausente | Por quê |
+|---|---|---|
+| Base de Conhecimento (tela) | vale para TODOS os aparelhos | é escolha de quem escreveu |
+| Importação dos manuais (script) | ERRO FATAL | quem cria é máquina; ninguém escolheu nada |
+
+Quem unificar as duas achando que achou inconsistência reabre o caminho para o
+passo a passo do Phoebus chegar a quem tem um Titan. E chamado SEM produto não
+recebe nem o artigo universal: todos os aparelhos não é o mesmo que nenhum.
+
+**O filtro de tipo morreu**, e com ele uma proteção: se alguém publicar uma
+ficha com preço na Base, ela vira fonte da Helô. A proteção passou a ser a
+marcação `helo_pode_ler`, que alguém precisa desligar.
+
 ### O interruptor da Helô é dela; o `ai_enabled` é de gente
 
 Decidido em 10/09/2026, corrigindo uma escolha de dois dias antes.
@@ -893,6 +922,13 @@ perguntas sem resposta, preservando 22 das 27 com resposta. De quebra, corta o
 enchimento das que passam: nessas 40 perguntas chegavam 160 trechos ao modelo,
 passam a chegar 25 — e em 74% das que têm resposta sobra exatamente UM trecho,
 o certo, no lugar de um mais três de ruído.
+
+**Remedido em 10/09/2026, depois da mudança de fonte**, com as mesmas 40
+perguntas contra os três manuais vindos da Base de Conhecimento: sem resposta,
+13 de 13 barradas (mínimo 0,2570); com resposta, 21 de 27 ainda recebendo
+trecho (eram 22). O texto dos trechos mudou de forma e a distância mexeu em até
+oito milésimos. O corte continua valendo, e ficou mais apertado: a margem
+abaixo, de 0,009, hoje é de 0,007.
 
 ⚠️ **A margem é de 0,009** (0,25 contra 0,2590). É um ajuste a 40 pontos, não
 uma lei, e vale para o **bge-m3 com estes textos**: trocar o modelo de
@@ -1096,7 +1132,7 @@ por inércia.
 | **Access token sobrevive à revogação de sessão** | Ativar ou desligar o segundo fator apaga o refresh, despejando as sessões. Os access tokens já emitidos, porém, valem até o próprio vencimento: a exposição cai de 7 dias para 8 h, não para zero. Fechar de verdade pede um `sessions_valid_after` conferido no `get_current_user`. | Houver incidente real de sessão comprometida — ou o TTL do access subir. |
 | **Não existe mais o tempo de espera por um HUMANO** | Consequência aceita da decisão de 28/08/2026 (ver "O que conta como primeira resposta"): com a Helô carimbando, o único tempo gravado é o dela. Quanto o cliente esperou até alguém de carne e osso responder deixou de entrar no banco — e por isso **não volta por filtro nem por relatório**, só por coluna nova. | A operação precisar cobrar prazo da equipe, ou alguém estranhar o indicador vivendo em 100%. A saída é um campo próprio (`sla_first_human_response`), carimbado no mesmo ponto e com a guarda de autor que valia antes. |
 | ~~**Escalar não desliga a IA no chamado**~~ | **Quitada em 09/09/2026**, na Etapa 4 da Fase 2 — no mesmo commit em que o teto deixou de ser de falas e virou de trocas, que era o gatilho registrado. `ticket.ai_enabled = False` no caminho de escalada, e vale para os dois jeitos de escalar: o pedido explícito de humano, reconhecido antes do modelo, e a escalada que o próprio modelo pede com a linha `ESCALAR:`. ⚠️ **A consequência aceita ali durou um dia e foi revertida em 10/09**: desligar o `ai_enabled` fechava também o `suggest-reply` e o `summarize` do TÉCNICO, e nos três motivos que não são o pedido do cliente isso tirava a ferramenta dele justamente nos chamados em que a IA já tinha falhado. Hoje quem guarda o estado é `tickets.helo_saiu`, e o `ai_enabled` voltou a ser só o botão de gente — com uma exceção deliberada: no pedido explícito de humano os dois caem, porque ali quem quis sair da IA foi o cliente. Ver "O interruptor da Helô é dela; o `ai_enabled` é de gente" abaixo. | — |
-| **Reingerir um manual apaga o embedding de trecho que não mudou** | O `--aplicar` do `ingere_manuais.py`, quando o documento mudou, apaga TODOS os trechos dele e recria com ids novos e `embedding` nulo. Corrigir uma linha de contato no manual do Phoebus invalida os 18 trechos, inclusive os 17 idênticos. Hoje não custa nada: embedding ainda não é calculado, e nada fora do próprio script referencia `helo_chunks`. | **A Etapa 3**, quando o embedding passar a ser calculado e a custar. A saída é casar trecho a trecho por hash do conteúdo antes de apagar — os iguais mantêm id e embedding, e só `ordem`/`secao` são atualizados. Vira urgente de vez quando a resposta da Helô registrar a citação por `chunk_id`: aí o refaz não custa só CPU, deixa citação apontando para trecho que não existe mais. |
+| **Editar um artigo reindexa todos os trechos dele** | Reescrita em 10/09/2026, quando a fonte passou a ser a Base de Conhecimento: a varredura de `helo_indexacao.py` compara o hash do corte do artigo INTEIRO e, se mudou, apaga todos os trechos dele e recria com ids novos, pagando embedding de todos. Corrigir uma linha de contato no manual do Phoebus reembute os 18 trechos, inclusive os 17 idênticos. Hoje custa pouco: o embedding é do serviço próprio (CPU, segundos por artigo), e nada fora da busca referencia `helo_chunks`. | A base crescer a ponto de a varredura pesar, ou — o que torna urgente de vez — a resposta da Helô registrar a citação por `chunk_id`: aí o refaz deixa citação apontando para trecho que não existe mais. A saída é casar trecho a trecho por hash do conteúdo antes de apagar — os iguais mantêm id e embedding, e só `ordem`/`secao` são atualizados. |
 | **O `.env` de desenvolvimento aponta para produção** | Só a suíte de testes está blindada (o `conftest.py` força uma URL falsa). Migration, script avulso e shell na máquina do desenvolvedor falam com o banco real. Ver a seção própria acima. | **Antes da primeira migration da Fase 2**, que cria extensão no banco. É quando o risco deixa de ser teórico. |
 | **O trecho genérico domina a busca (hipótese B)** | `6. Passo a Passo para Utilização` do Titan — e o `5.` equivalente do iBlow — fala de operação em geral e vence perguntas de assunto diferente: 4 de 8 numa sondagem livre, incluindo impressora num aparelho sem impressora. O teto de 0,25 tira a maior parte do dano hoje, e num caso conhecido agrava: para *"como coloco o aparelho em português"*, o aspirador sobrevive ao corte e o `8.2 Alterar Idioma` não. Com três manuais dói pouco — quase toda pergunta fora do manual já não devolve nada. | **Quando houver manual técnico para mais de três produtos.** Aí o aspirador passa a competir com candidatos legítimos dentro do teto, e o dano deixa de ser contornado por ele. O conserto é do lado do trecho — cortar aquele mais fino, ou tirá-lo da base —, e NÃO do corte de todo mundo: a hipótese A foi medida e caiu, os trechos curtos são os que mais acertam. |
 | **Contador de artigo útil sem voto identificado** | `POST /kb/articles/{id}/feedback` incrementa sem registrar quem votou; o mesmo usuário incrementa em laço. Não vaza nada. | O número for usado para decidir alguma coisa. |
@@ -1198,7 +1234,9 @@ pior do que o balde único. A ordem é: fechar a porta, depois autorizar.
 
 Constatado em 09/09/2026, ao rodar as primeiras buscas de verdade. **É decisão
 de escopo do cliente, não pendência de código** — fica registrado para ninguém
-tratar como defeito nem "consertar" afrouxando o filtro de tipo.
+tratar como defeito nem "consertar" publicando a ficha comercial na Base. A
+tabela é do acervo de manuais de 09/09; desde 10/09 só os três manuais técnicos
+entram, como artigo.
 
 | Produto | Manual técnico | Ficha comercial |
 |---|---|---|
@@ -1210,11 +1248,13 @@ tratar como defeito nem "consertar" afrouxando o filtro de tipo.
 | Mark X | **nenhum** | 6 trechos |
 | Mercury | **nenhum** | 4 trechos |
 
-A busca filtra `doc_type = tecnico`, então para um chamado dos quatro últimos a
-base vem vazia **em todo turno**: ela saúda, o cliente responde, ela escala. É
-o comportamento correto — ficha comercial tem preço e promessa de venda, e é
-justamente o que não pode virar procedimento técnico. O efeito prático é que a
-Helô só ajuda de fato em três dos sete aparelhos até existir manual dos outros.
+Desde 10/09 a base é a Base de Conhecimento, e ficha comercial não entra nela:
+tem preço e promessa de venda, e é justamente o que não pode virar procedimento
+técnico. Então, para um chamado dos quatro últimos, a base vem vazia **em todo
+turno** — a menos que exista artigo publicado sem produto vinculado que
+responda: ela saúda, o cliente responde, ela escala. É o comportamento correto.
+O efeito prático é que a Helô só ajuda de fato em três dos sete aparelhos até
+existir manual dos outros.
 
 ### Duas contradições nos manuais esperam decisão do suporte técnico
 

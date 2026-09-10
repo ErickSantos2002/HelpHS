@@ -32,6 +32,7 @@ Datas em DD/MM/AAAA.
   | Variável NA API | `HELO_ENABLED` — **ausente ou `false` = ela não fala** |
   | Estado hoje | **não configurada, de propósito.** Ela sobe desligada |
   | Para ligar | `HELO_ENABLED=true` **e** `DEEPSEEK_API_KEY` preenchida |
+  | Opcional NA API | `HELO_INDEXACAO_INTERVALO_SEGUNDOS` — padrão 300; zero desliga a varredura |
 
   - ⚠️ **Ligar é decisão, e está travada por fora do código.** A Política de
     Privacidade ainda tem marcador em aberto e os Termos de Uso não existem;
@@ -67,14 +68,18 @@ Datas em DD/MM/AAAA.
     comando que roda uma vez. Sem a extensão, a migration falha com mensagem
     dizendo exatamente isto, e a API não sobe.
   - **Ordem de subida:** extensão no banco → serviço de embedding → API →
+    importar os três manuais (`scripts/importa_manuais_para_kb.py`; eles nascem
+    rascunho) → alguém lê e publica → a varredura indexa em até 5 min →
     (depois, e só depois do documento de LGPD) `HELO_ENABLED=true`. A API com a
     variável apontando para um serviço que não existe funciona (escala em
     tudo), mas não responde nada de útil.
   - **Como conferir que subiu certo, sem ligar a Helô:** `GET /health` do
-    serviço de embedding respondendo 200 com `{"dimensao": 1024}`, e no banco
-    `SELECT count(*) FROM helo_chunks WHERE embedding IS NOT NULL` devolvendo
-    **74**. Os dois verdes e `HELO_ENABLED` ausente é exatamente o estado
-    pretendido: tudo pronto, ela calada.
+    serviço de embedding respondendo 200 com `{"dimensao": 1024}`. No banco,
+    `SELECT count(*) FROM helo_chunks WHERE embedding IS NOT NULL` devolve
+    **0** até os manuais serem importados e publicados — a base nasce vazia, de
+    propósito — e **46** depois, com estes três manuais (medido em 10/09 num
+    banco local). Tudo verde e `HELO_ENABLED` ausente é o estado pretendido:
+    tudo pronto, ela calada.
 
 - **O disparo de e-mail passa a existir, pelo Resend em vez do Microsoft 365.**
   Confirmação de cadastro e redefinição de senha nunca tiveram por onde sair: o
@@ -912,6 +917,24 @@ Datas em DD/MM/AAAA.
   ambiente, o escuro segue sendo o padrão.
 
 ### Adicionado
+- **A base da Helô passa a ser a Base de Conhecimento.** A fonte deixou de ser
+  uma pasta de manuais: artigo com `status = published` e `helo_pode_ler =
+  true` alimenta as respostas dela sem ninguém rodar nada. Uma varredura
+  periódica dentro da API indexa o que é novo ou editado; despublicar tira o
+  texto das respostas no mesmo instante, porque a busca filtra ao vivo.
+  - ⚠️ **Publicar artigo passa a mudar o que a Helô diz para o cliente.** O
+    suporte não tinha esse poder e não sabe que passou a ter. Passo a passo
+    errado num artigo publicado vira procedimento errado ditado ao cliente, com
+    a fonte citada. Artigo **sem produto vinculado vale para TODOS os
+    aparelhos**. Para manter um artigo na barra lateral e fora da IA, há a
+    marcação própria (`helo_pode_ler`) — não é tag, e não é despublicar.
+  - Os três manuais técnicos entram por `scripts/importa_manuais_para_kb.py`,
+    como **rascunho**, já com as senhas redigidas; uma pessoa lê e publica. Ali,
+    produto que não casa com o cadastro é erro fatal — o oposto da tela, e de
+    propósito.
+  - Nova coluna `kb_articles.helo_pode_ler` (migration `c9x0y1z2a3b4`, aditiva,
+    padrão `true`). A `a7v8w9x0y1z2`, que nunca rodou em produção, foi reescrita
+    no formato final — nenhuma tabela é derrubada no deploy.
 - **A Helô passa a resolver o que está documentado (Fase 2).** Ela deixou de
   ser recepcionista: busca nos manuais por similaridade, responde em passos
   numerados citando a fonte, e escala o que não está na base. **A saudação
@@ -923,9 +946,10 @@ Datas em DD/MM/AAAA.
     prometia e não fazia, e o histórico do chamado passa a registrar o motivo.
     O botão "Desligar IA neste chamado" continua sendo só do técnico — ele só
     cai junto quando foi o **cliente** quem pediu para falar com uma pessoa.
-  - A base é de **oito manuais** (74 trechos), e a busca só enxerga documento
-    **técnico** do **produto daquele chamado** — ficha comercial, com preço e
-    promessa de venda, nunca vira procedimento técnico.
+  - Desde 10/09 a base é a **Base de Conhecimento** (ver o primeiro item desta
+    seção): a busca enxerga artigo **publicado**, marcado para a Helô, e que
+    sirva ao **produto daquele chamado**. Ficha comercial, com preço, não entra
+    na Base.
   - ⚠️ **Só três dos sete produtos têm manual técnico** (Titan, Phoebus,
     iBlow 10 Pro). Para Deimos, EBS-010, Mark X e Mercury a base vem vazia em
     todo turno e ela sempre escala. É decisão de escopo, não defeito.
