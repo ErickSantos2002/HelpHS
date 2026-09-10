@@ -1,8 +1,15 @@
 """
 Helô — o atendimento por IA que fala com o cliente.
 
-Fase 1: acolher e triar. Ela não resolve problema técnico, não promete prazo e
-não continua a conversa depois de entregar o chamado para um humano.
+Ela acolhe, tria e — desde a Fase 2 — **resolve o que está documentado**,
+consultando os manuais por busca vetorial. O que ela continua não fazendo:
+inventar procedimento, prometer prazo, falar de preço, e continuar a conversa
+depois de entregar o chamado para um humano.
+
+A SAUDAÇÃO NÃO USA LLM, e isso é decisão, não sobra da Fase 1. Ela é montada
+com dado do cadastro: previsível (a primeira coisa que o cliente lê nunca sai
+errada), instantânea (não espera API) e grátis. O modelo entra a partir do
+SEGUNDO turno, para interpretar o que o cliente responder.
 
 Este módulo começa pelo interruptor, e não pela conversa, de propósito: uma IA
 que fala com cliente sem ter como ser calada é a única parte disto que não tem
@@ -15,7 +22,9 @@ from collections.abc import Sequence
 from datetime import UTC, datetime
 from typing import NamedTuple
 
+from loguru import logger
 from sqlalchemy import exists, func, select
+from sqlalchemy.exc import SQLAlchemyError
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.core.config import get_settings
@@ -28,6 +37,17 @@ from app.models.models import (
     User,
     UserRole,
 )
+from app.services.helo_base import TrechoRecuperado, busca_trechos, monta_base_tecnica
+from app.services.helo_embedding import embute_um
+from app.services.helo_prompt import (
+    SISTEMA,
+    le_resposta,
+    monta_cadastro,
+    monta_conversa,
+    monta_prompt,
+)
+from app.services.llm import responde_como_helo
+from app.utils.history import registra_historico
 
 # O cálculo de horário comercial vem do motor de SLA, inclusive sendo privado.
 # Uma cópia da regra aqui é o defeito que este projeto já pagou caro: doze
@@ -92,17 +112,25 @@ def helo_pode_falar(ticket: Ticket, cliente: User) -> bool:
     semântica em que "eu desliguei" continua verdade depois — com precedência
     invertida, quem desligou precisaria vigiar os outros níveis para sempre.
 
+    O `helo_saiu` entra aqui e NÃO é um quarto nível de desligamento — é o fim
+    da conversa dela naquele chamado. A diferença importa para quem for
+    mexer: os três interruptores são de quem quer a IA fora; este é ela mesma
+    tendo dito que acabou. Ninguém religa pela tela, porque não é botão.
+
     Args:
-        ticket: o chamado em questão — `ai_enabled` é o interruptor do técnico.
+        ticket: o chamado em questão — `ai_enabled` é o interruptor do técnico,
+            `helo_saiu` é a conversa dela já encerrada ali.
         cliente: o autor do chamado — `ai_enabled` é a preferência dele (ou da
             empresa dele, quando o nível por CNPJ existir).
 
     Returns:
-        True quando os três níveis estão ligados.
+        True quando os três níveis estão ligados e ela ainda não saiu.
     """
     if not get_settings().helo_enabled:
         return False
     if not ticket.ai_enabled:
+        return False
+    if ticket.helo_saiu:
         return False
     return bool(cliente.ai_enabled)
 
@@ -282,25 +310,59 @@ async def abre_triagem(
     return True
 
 
-# Ela fala no máximo duas vezes: a saudação e o encerramento. O teto existe
-# para o dia em que a interpretação por LLM entrar e a conversa puder crescer —
-# hoje ele é a garantia de que reprocessar não faz a Helô falar de novo.
-FALAS_MAXIMAS = 2
+# Quantas vezes ela responde DEPOIS da saudação.
+#
+# Na Fase 1 o teto era de duas FALAS — a saudação e o encerramento — porque a
+# conversa não existia: ela dizia uma coisa e saía. Com o LLM, a conversa
+# cresce, e o teto passa a ser de TROCAS, que é o que o prompt dela promete:
+# "se a conversa passar de seis trocas sem sair do lugar: escale".
+#
+# O teto é a rede embaixo do modelo, não o mecanismo principal. O prompt manda
+# escalar sozinho quando não resolve em duas tentativas; isto aqui é o que
+# acontece quando ele não obedece — e modelo que não obedece é o caso comum,
+# não a exceção. Sem o teto, o cliente conversaria para sempre com alguém que
+# não vai resolver.
+TROCAS_MAXIMAS = 6
+
+# Mantido: reprocessar não pode fazer a saudação sair duas vezes. Um chamado
+# onde ela nunca falou é um chamado em que ela não entra no meio.
+FALAS_MAXIMAS = TROCAS_MAXIMAS + 1
+
+
+# Os motivos de escalada, e a razão de serem constantes e não frases soltas.
+#
+# Na Fase 1 havia uma saída só — o cliente pediu uma pessoa —, e a notificação
+# da equipe podia dizer isso com segurança. Agora são quatro caminhos, e três
+# deles nada têm a ver com o cliente ter pedido gente: o modelo decidiu, o teto
+# de trocas estourou, ou a IA não respondeu. Mandar "o cliente pediu para falar
+# com uma pessoa" nos quatro casos apaga a única informação que muda a ordem da
+# fila — se tem alguém do outro lado esperando gente ou não.
+MOTIVO_PEDIU_HUMANO = "o cliente pediu para falar com uma pessoa"
+MOTIVO_TETO_DE_TROCAS = f"a conversa passou de {TROCAS_MAXIMAS} trocas sem sair do lugar"
+MOTIVO_IA_MUDA = "a IA não respondeu"
+MOTIVO_SEM_MOTIVO = "o modelo escalou sem dizer o motivo"
 
 
 class FalaDaHelo(NamedTuple):
     """
-    O que ela falou, e por qual das duas saídas.
+    O que ela falou, e — quando saiu de cena — por quê.
 
-    `escalou` viaja junto porque não dá para recuperá-lo depois: quem precisa
+    `motivo` viaja junto porque não dá para recuperá-lo depois: quem precisa
     dele é a notificação da equipe, e deduzi-lo relendo o texto do cliente no
-    router seria uma segunda cópia da decisão que `quer_humano` já toma aqui.
-    As duas cópias concordam hoje e deixariam de concordar na Fase 2, quando
-    for o LLM a dizer se o cliente quer gente.
+    router seria uma segunda cópia da decisão que este módulo já tomou. As duas
+    cópias concordariam no caso do `quer_humano` e discordariam nos outros
+    três, que é justamente onde a equipe precisa de informação boa.
+
+    `None` quer dizer que ela respondeu e continua na conversa.
     """
 
     mensagem: ChatMessage
-    escalou: bool
+    motivo: str | None
+
+    @property
+    def escalou(self) -> bool:
+        """Escalar é ter motivo. Um campo separado poderia divergir do outro."""
+        return self.motivo is not None
 
 
 def monta_escalada() -> str:
@@ -376,22 +438,33 @@ async def responde_triagem(
     texto_do_cliente: str,
 ) -> FalaDaHelo | None:
     """
-    A resposta do cliente encerra a triagem — e a Helô sai de cena.
+    O turno da Helô: ela busca na base, responde, ou escala.
 
-    Duas saídas, mesmo efeito: se ele pediu uma pessoa, ela escala na hora; se
-    respondeu as perguntas, ela agradece e avisa quando alguém assume. Nos dois
-    casos o chamado fica em "Em andamento" esperando um humano, e ela não fala
-    mais. Se o cliente escrever de novo, silêncio: o chamado é do humano.
+    A ORDEM DAS GUARDAS É O DESENHO. As quatro primeiras não dependem do modelo
+    e vêm antes dele, de propósito — cada uma resolve um caso em que chamar o
+    LLM seria errado, caro, ou os dois:
+
+    1. Os três interruptores. Desligada é desligada, e não existe religar num
+       nível mais específico.
+    2. Um humano já está na conversa. O chamado é dele.
+    3. A saudação nunca aconteceu, ou o teto de trocas estourou.
+    4. **O cliente pediu uma pessoa.** Esta roda ANTES do LLM e não dentro
+       dele: se o modelo estiver fora do ar, o pedido de humano precisa
+       funcionar do mesmo jeito. É a regra que o desenho chama de mais
+       importante do ponto de vista de experiência, e ela não pode depender de
+       um serviço externo estar de pé.
+
+    Só depois disso o modelo entra. E se ele falhar de qualquer maneira —
+    serviço fora, timeout, resposta vazia — ela escala com mensagem neutra.
+    Nenhum chamado fica preso porque uma IA não respondeu.
 
     Não dá commit — quem abriu a transação é o `create_message`, e a fala dela
     precisa nascer no mesmo commit da fala do cliente. Metade gravada seria uma
     pergunta sem resposta ou uma resposta sem pergunta.
 
     Returns:
-        A fala dela e por qual saída, para quem precisa transmiti-la (o
-        WebSocket) e para quem precisa avisar a equipe. None quando um
-        interruptor está desligado, **um humano já está na conversa**, a
-        triagem já acabou, ou ela nunca chegou a abrir a conversa.
+        A fala dela e se escalou, para quem precisa transmiti-la (o WebSocket)
+        e para quem precisa avisar a equipe. None quando ela não deve falar.
     """
     if not helo_pode_falar(ticket, cliente):
         return None
@@ -408,8 +481,7 @@ async def responde_triagem(
     if falas == 0 or falas >= FALAS_MAXIMAS:
         return None
 
-    escalou = quer_humano(texto_do_cliente)
-    conteudo = monta_escalada() if escalou else monta_encerramento(datetime.now(UTC))
+    conteudo, motivo = await _o_que_ela_diz(db, ticket, cliente, texto_do_cliente, falas)
 
     fala = ChatMessage(
         id=uuid.uuid4(),
@@ -421,4 +493,125 @@ async def responde_triagem(
         created_at=datetime.now(UTC),
     )
     db.add(fala)
-    return FalaDaHelo(mensagem=fala, escalou=escalou)
+
+    if motivo is not None:
+        _ela_sai_de_cena(db, ticket, motivo)
+
+    return FalaDaHelo(mensagem=fala, motivo=motivo)
+
+
+def _ela_sai_de_cena(db: AsyncSession, ticket: Ticket, motivo: str) -> None:
+    """
+    Escalou: a conversa dela acabou naquele chamado, e o histórico registra.
+
+    `helo_saiu` é o campo dela. Sai `True` nos QUATRO motivos, porque em todos
+    a conversa acabou do mesmo jeito — o chamado é do humano, e o prompt dela
+    promete que depois de escalar ela não fala mais nada ali.
+
+    **`ai_enabled` só cai no pedido explícito de humano, e isso é decisão, não
+    esquecimento.** Aquele campo é o botão de gente: desligá-lo fecha também a
+    sugestão de resposta e o resumo do TÉCNICO. Quando o cliente pede uma
+    pessoa, a vontade dele vale para as ferramentas todas e desligar é o certo.
+    Nos outros três — o modelo desistiu, o teto estourou, a IA não respondeu —
+    ninguém pediu para sair da IA, e tirar a ferramenta do técnico justamente
+    nos chamados em que a IA já falhou seria castigá-lo pelo defeito dela.
+
+    O histórico não é enfeite: sem ele o técnico abre o chamado, vê a IA
+    calada, e não tem onde ler por quê. O motivo que o modelo escreveu na linha
+    `ESCALAR:` é o melhor texto que existe para essa linha — quem o redigiu
+    tinha lido a conversa.
+    """
+    ticket.helo_saiu = True
+    registra_historico(db, ticket.id, None, "helo_saiu", str(False), str(True), motivo)
+
+    if motivo == MOTIVO_PEDIU_HUMANO:
+        ticket.ai_enabled = False
+        registra_historico(db, ticket.id, None, "ai_enabled", str(True), str(False), motivo)
+
+
+async def _busca_sem_derrubar(
+    db: AsyncSession, ticket: Ticket, vetor: Sequence[float]
+) -> list[TrechoRecuperado]:
+    """
+    A busca vetorial dentro de um SAVEPOINT, e o SAVEPOINT é o ponto.
+
+    O que está em jogo é a mensagem DO CLIENTE. Ela ainda não foi commitada
+    quando isto roda — nasce no mesmo commit da resposta da Helô —, e uma falha
+    de infraestrutura da IA que apagasse o que o cliente acabou de escrever
+    seria o pior defeito que este módulo pode ter.
+
+    Só `except` não resolve isso em PostgreSQL. O erro aborta a transação
+    INTEIRA: o `db.add(fala)` seguinte ainda parece funcionar e o commit morre
+    com "current transaction is aborted", levando junto a mensagem do cliente.
+    O SAVEPOINT é o que devolve a sessão utilizável.
+
+    Vale para extensão `vector` ausente, tabela ainda não migrada e índice
+    corrompido — todos indistinguíveis daqui, e todos com o mesmo destino: base
+    vazia, e a Helô escala.
+    """
+    try:
+        async with db.begin_nested():
+            return await busca_trechos(db, ticket, vetor)
+    except SQLAlchemyError as exc:
+        logger.warning(f"busca vetorial da Helô falhou; seguindo sem base técnica: {exc}")
+        return []
+
+
+async def _o_que_ela_diz(
+    db: AsyncSession,
+    ticket: Ticket,
+    cliente: User,
+    texto_do_cliente: str,
+    falas: int,
+) -> tuple[str, str | None]:
+    """
+    O texto da vez e o motivo da escalada, ou `None` se ela segue na conversa.
+
+    Devolve SEMPRE alguma coisa.
+
+    Nenhuma falha de infraestrutura daqui sobe, e nenhum caminho devolve vazio:
+    o chamador já decidiu que ela vai falar, e "ela ia falar mas o serviço
+    caiu" não é uma resposta que o cliente possa ver. Embedding fora, busca
+    quebrada e modelo mudo têm todos o mesmo destino — escalada.
+
+    Defeito de programação continua subindo, de propósito: engolir `TypeError`
+    aqui transformaria bug em silêncio, e a Helô escalaria para sempre sem
+    ninguém descobrir por quê.
+    """
+    # O pedido de humano vem ANTES do modelo, e por dois motivos que se somam:
+    # ele funciona com o LLM fora do ar, e não se gasta uma chamada para
+    # descobrir o que uma lista de substrings já disse.
+    if quer_humano(texto_do_cliente):
+        return monta_escalada(), MOTIVO_PEDIU_HUMANO
+
+    # Teto de trocas: a última fala dela é uma despedida, não uma tentativa.
+    if falas >= TROCAS_MAXIMAS:
+        return monta_escalada(), MOTIVO_TETO_DE_TROCAS
+
+    vetor = await embute_um(texto_do_cliente)
+    trechos = await _busca_sem_derrubar(db, ticket, vetor) if vetor else []
+    base = monta_base_tecnica(trechos)
+
+    contexto = monta_prompt(
+        await monta_cadastro(db, ticket, cliente),
+        base,
+        await monta_conversa(db, ticket, texto_do_cliente),
+    )
+
+    bruto = await responde_como_helo(SISTEMA, contexto)
+    if not bruto or not bruto.strip():
+        # Falha do LLM escala com mensagem neutra. O cliente não precisa saber
+        # que uma IA caiu; ele precisa de um humano, e é isso que a escalada
+        # entrega. Vale para timeout, chave inválida, serviço fora e resposta
+        # vazia — todos indistinguíveis daqui, e todos com o mesmo destino.
+        return monta_escalada(), MOTIVO_IA_MUDA
+
+    resposta = le_resposta(bruto)
+    if resposta.escalou:
+        # O modelo pediu para escalar. O texto DELE vai para o cliente — ele
+        # sabe por que está escalando e a frase já está no contexto da
+        # conversa; trocar por `monta_escalada()` genérica soaria como se
+        # ninguém tivesse lido o que o cliente escreveu.
+        return resposta.texto or monta_escalada(), resposta.motivo or MOTIVO_SEM_MOTIVO
+
+    return resposta.texto, None

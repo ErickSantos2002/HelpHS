@@ -13,7 +13,6 @@ Endpoints:
   DELETE /kb/comments/{id}         — excluir (admin/technician qualquer um; cliente só o próprio)
 """
 
-import re
 import uuid
 from datetime import UTC, datetime
 from typing import Annotated
@@ -46,41 +45,12 @@ from app.schemas.kb import (
     KBCommentResponse,
     KBFeedbackPayload,
 )
+from app.utils.slug import slug_unico, slugifica
 
 router = APIRouter(tags=["Knowledge Base"])
 
 
 # ── Helpers ───────────────────────────────────────────────────
-
-
-def _slugify(text: str) -> str:
-    """Convert title to a URL-safe slug."""
-    text = text.lower().strip()
-    text = re.sub(r"[àáâãä]", "a", text)
-    text = re.sub(r"[èéêë]", "e", text)
-    text = re.sub(r"[ìíîï]", "i", text)
-    text = re.sub(r"[òóôõö]", "o", text)
-    text = re.sub(r"[ùúûü]", "u", text)
-    text = re.sub(r"[ç]", "c", text)
-    text = re.sub(r"[ñ]", "n", text)
-    text = re.sub(r"[^a-z0-9\s-]", "", text)
-    text = re.sub(r"[\s-]+", "-", text)
-    return text[:200].strip("-")
-
-
-async def _unique_slug(base: str, db: AsyncSession, exclude_id: uuid.UUID | None = None) -> str:
-    """Ensure slug is unique by appending a counter if needed."""
-    slug = base
-    counter = 1
-    while True:
-        q = select(KBArticle).where(KBArticle.slug == slug)
-        if exclude_id:
-            q = q.where(KBArticle.id != exclude_id)
-        result = await db.execute(q)
-        if result.scalar_one_or_none() is None:
-            return slug
-        slug = f"{base}-{counter}"
-        counter += 1
 
 
 def _to_response(article: KBArticle) -> KBArticleResponse:
@@ -92,6 +62,7 @@ def _to_response(article: KBArticle) -> KBArticleResponse:
         category=article.category,
         tags=article.tags or [],
         status=article.status,
+        helo_pode_ler=article.helo_pode_ler,
         author_id=article.author_id,
         author_name=article.author.name if article.author else "",
         view_count=article.view_count,
@@ -122,7 +93,19 @@ async def _ticket_product_ids(ticket: Ticket, db: AsyncSession) -> list[uuid.UUI
 async def _set_article_products(
     article: KBArticle, product_ids: list[uuid.UUID], db: AsyncSession
 ) -> None:
-    """Vincula os produtos ao artigo. Lista vazia = vale para todos os produtos."""
+    """
+    Vincula os produtos ao artigo. Lista vazia = vale para todos os produtos.
+
+    E vale também para a Helô: desde 10/09/2026 artigo publicado sem produto
+    alimenta as respostas dela em chamado de QUALQUER aparelho. Aqui a lista
+    vazia é escolha de quem escreveu, e por isso é permitida.
+
+    A importação dos manuais (`scripts/importa_manuais_para_kb.py`) faz o
+    contrário, e de propósito: lá quem cria o artigo é máquina, e vínculo
+    ausente é erro fatal — ninguém escolheu nada, e o passo a passo do Phoebus
+    viraria universal por um casamento frustrado. Duas regras, dois lugares.
+    Quem unificar as duas achando que achou inconsistência reabre esse caminho.
+    """
     if not product_ids:
         article.products = []
         return
@@ -347,7 +330,7 @@ async def create_article(
     db: Annotated[AsyncSession, Depends(get_db)],
     actor: Annotated[User, Depends(authorize(UserRole.admin, UserRole.technician))],
 ) -> KBArticleResponse:
-    slug = await _unique_slug(_slugify(body.title), db)
+    slug = await slug_unico(slugifica(body.title), db)
     now = datetime.now(UTC)
 
     article = KBArticle(
@@ -358,6 +341,7 @@ async def create_article(
         category=body.category,
         tags=list(dict.fromkeys(body.tags)),
         status=body.status,
+        helo_pode_ler=body.helo_pode_ler,
         author_id=actor.id,
         view_count=0,
         helpful=0,
@@ -414,7 +398,7 @@ async def update_article(
     changes = body.model_dump(exclude_unset=True)
 
     if "title" in changes:
-        new_slug = await _unique_slug(_slugify(changes["title"]), db, exclude_id=article_id)
+        new_slug = await slug_unico(slugifica(changes["title"]), db, exclude_id=article_id)
         article.slug = new_slug
 
     # product_ids não é coluna: vira vínculo na tabela de ligação

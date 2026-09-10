@@ -51,7 +51,13 @@ from app.schemas.chat import (
     SuggestReplyResponse,
 )
 from app.services import chat_backplane
-from app.services.helo import responde_triagem
+from app.services.helo import (
+    FALAS_MAXIMAS,
+    MOTIVO_PEDIU_HUMANO,
+    TROCAS_MAXIMAS,
+    FalaDaHelo,
+    responde_triagem,
+)
 from app.services.llm import improve_message, suggest_reply, summarize_conversation
 from app.services.notifications import commit_e_notificar, notify
 from app.utils.crud import get_or_404
@@ -214,6 +220,23 @@ async def _authenticate_ws(token: str, db: AsyncSession) -> User | None:
     return user
 
 
+# Quantas mensagens da conversa vão para a sugestão de resposta.
+#
+# Eram 10 fixos, e 10 bastava enquanto a Helô falava uma vez por chamado: a
+# conversa inteira de um chamado triado tinha três mensagens. Com o teto de
+# trocas, ela chega a 13 — a saudação mais seis idas e voltas —, e uma janela
+# de 10 passa a cortar JUSTO O COMEÇO. O que fica de fora é a resposta do
+# cliente às três perguntas da triagem, que é a mensagem mais útil que existe
+# para sugerir uma resposta: o técnico receberia a sugestão feita a partir do
+# meio da conversa, sem o sintoma.
+#
+# Por isso o número sai das constantes e não de um novo palpite: a janela tem
+# que caber uma triagem inteira, e quem mudar o teto de trocas move as duas
+# coisas juntas. Conversa longa DEPOIS da triagem continua saindo da janela, e
+# isso é o certo — ali o contexto recente é o que vale.
+_JANELA_DO_HISTORICO = FALAS_MAXIMAS + TROCAS_MAXIMAS
+
+
 def _exige_ia_no_chamado(ticket: Ticket) -> None:
     """
     Recusa quando a IA foi desligada NESTE chamado.
@@ -335,19 +358,28 @@ async def create_message(
         ticket, now, responder_id=actor.id, is_ai=msg.is_ai, is_system=msg.is_system
     )
 
-    # A Helô encerra a triagem quando o cliente responde. ANTES da notificação
-    # de propósito: é ela quem decide se a equipe precisa ser chamada, e a
-    # triagem recém-fechada é justamente o momento em que o chamado passa a ter
-    # conteúdo útil e ainda não tem dono.
+    # A Helô responde quando o cliente escreve. ANTES da notificação de
+    # propósito: é ela quem decide se a equipe precisa ser chamada, e um
+    # chamado que ela acabou de escalar é justamente o que precisa chegar à
+    # equipe com o aviso certo — e ainda não tem dono.
     fala_da_helo = None
     if actor.id == ticket.creator_id:
-        fala_da_helo = await responde_triagem(db, ticket, actor, msg.content)
+        fala_da_helo = await _fala_da_helo_sem_derrubar(db, ticket, actor, msg.content)
 
     # Notify the other party
     await _notify_other_party(db, ticket, actor, msg)
 
-    if fala_da_helo is not None:
-        await _avisa_equipe_da_helo(db, ticket, escalou=fala_da_helo.escalou)
+    # SÓ na escalada. Ela fala a cada turno agora, e avisar a equipe a cada
+    # fala mandaria seis notificações por chamado para todo técnico e
+    # todo admin — cinco delas dizendo que a triagem acabou enquanto a
+    # conversa seguia. Notificação que chega sempre deixa de ser lida.
+    # `motivo is not None` em vez de `.escalou`: a guarda e o argumento passam
+    # a olhar o MESMO campo. `escalou` é property, e property não estreita
+    # tipo — o mypy via `str | None` chegando onde se espera `str`, e estava
+    # certo: a property pode divergir do campo num refactor, o `is not None`
+    # não pode.
+    if fala_da_helo is not None and fala_da_helo.motivo is not None:
+        await _avisa_equipe_da_helo(db, ticket, motivo=fala_da_helo.motivo)
 
     # Auto status transition based on who is sending
     new_status_value = await _apply_chat_transition(db, ticket, actor)
@@ -394,13 +426,12 @@ async def suggest_ticket_reply(
     ticket = await _get_ticket_visivel(ticket_id, actor, db)
     _exige_ia_no_chamado(ticket)
 
-    # Load last 10 messages with sender info
     rows = await db.execute(
         select(ChatMessage)
         .options(selectinload(ChatMessage.sender))
         .where(ChatMessage.ticket_id == ticket_id)
         .order_by(ChatMessage.created_at.desc())
-        .limit(10)
+        .limit(_JANELA_DO_HISTORICO)
     )
     messages = list(reversed(rows.scalars().all()))
 
@@ -625,9 +656,10 @@ async def websocket_chat(
                 # deixaria muda na tela onde ela aparece.
                 fala_da_helo = None
                 if user.id == ticket.creator_id:
-                    fala_da_helo = await responde_triagem(db, ticket, user, msg.content)
-                    if fala_da_helo is not None:
-                        await _avisa_equipe_da_helo(db, ticket, escalou=fala_da_helo.escalou)
+                    fala_da_helo = await _fala_da_helo_sem_derrubar(db, ticket, user, msg.content)
+                    # Só na escalada — ver o mesmo trecho no caminho do POST.
+                    if fala_da_helo is not None and fala_da_helo.motivo is not None:
+                        await _avisa_equipe_da_helo(db, ticket, motivo=fala_da_helo.motivo)
 
                 new_status_value = await _apply_chat_transition(db, ticket, user)
 
@@ -735,9 +767,49 @@ async def _apply_chat_transition(
     return None
 
 
-async def _avisa_equipe_da_helo(db: AsyncSession, ticket: Ticket, *, escalou: bool) -> None:
+async def _fala_da_helo_sem_derrubar(
+    db: AsyncSession, ticket: Ticket, cliente: User, texto: str
+) -> FalaDaHelo | None:
     """
-    Chama a equipe quando a Helô sai de cena — dizendo qual das duas saídas foi.
+    A Helô inteira, embrulhada. Falha dela nunca custa a mensagem do cliente.
+
+    Dentro de `responde_triagem` cada falha PREVISTA já tem destino: LLM mudo,
+    embedding fora e busca quebrada terminam em escalada, e nenhuma delas sobe.
+    O que sobe é o que não foi previsto — um `TypeError` num bloco de contexto,
+    um campo nulo onde o código esperava texto. Sem esta guarda, esse defeito
+    vira 500 no POST do cliente, e a mensagem que ele acabou de escrever some
+    junto: ele digitou, apertou enviar, e viu um erro.
+
+    A assimetria é o argumento. O pior que acontece engolindo aqui é o chamado
+    seguir sem a fala dela — que é exatamente o estado de antes de ela existir,
+    e o cliente nem percebe. O pior que acontece deixando subir é o cliente
+    perder o que escreveu por causa de um defeito numa funcionalidade que é
+    acessório do atendimento, não o atendimento.
+
+    `logger.exception` e não `warning`: engolir é para proteger o cliente, não
+    para esconder o defeito. Sem o traço no log isto vira exatamente o que o
+    módulo da Helô recusa em todo lugar — bug virando silêncio.
+
+    **O SAVEPOINT é metade da guarda, e a metade que não é óbvia.** Se a falha
+    dela for de banco — uma consulta de contexto contra tabela que não existe,
+    um tipo errado num parâmetro —, o `except` sozinho não salva nada: em
+    PostgreSQL o erro aborta a transação INTEIRA, e o `commit` logo abaixo
+    morre com "current transaction is aborted", levando junto a mensagem do
+    cliente. O resultado seria idêntico ao de não ter guarda nenhuma, com o
+    agravante de parecer protegido. A busca vetorial já roda no próprio
+    SAVEPOINT lá dentro; este aqui cobre todo o resto dela.
+    """
+    try:
+        async with db.begin_nested():
+            return await responde_triagem(db, ticket, cliente, texto)
+    except Exception:  # noqa: BLE001 — a mensagem do cliente vale mais que a fala dela
+        logger.exception(f"Helô falhou no chamado {ticket.protocol}; seguindo sem a fala dela")
+        return None
+
+
+async def _avisa_equipe_da_helo(db: AsyncSession, ticket: Ticket, *, motivo: str) -> None:
+    """
+    Chama a equipe quando a Helô sai de cena — dizendo por quê.
 
     Sem isto o chamado fica em "Em andamento" sem dono e sem ninguém avisado: a
     notificação normal do chat vai para o RESPONSÁVEL, e a essa altura não há
@@ -753,6 +825,12 @@ async def _avisa_equipe_da_helo(db: AsyncSession, ticket: Ticket, *, escalou: bo
     manda a equipe procurar um resumo que não existe, e apaga a única
     informação que muda a ordem da fila — que tem alguém do outro lado
     esperando gente, não esperando atendimento.
+
+    Na Fase 2 o mesmo defeito voltou por outro lado: as saídas viraram quatro,
+    e três delas — modelo escalou, teto de trocas, IA muda — continuavam
+    chegando à equipe como "o cliente pediu para falar com uma pessoa". O
+    motivo agora vem pronto de `responde_triagem` e é escrito no texto; o
+    título separa só o caso que muda a prioridade da fila.
 
     O tipo continua `ticket_updated` nos dois casos: `NotificationType` é enum
     nativo do Postgres, e um valor novo custa um `ALTER TYPE` em migration que
@@ -773,12 +851,12 @@ async def _avisa_equipe_da_helo(db: AsyncSession, ticket: Ticket, *, escalou: bo
         .all()
     )
 
-    if escalou:
+    if motivo == MOTIVO_PEDIU_HUMANO:
         titulo = f"Cliente pediu atendimento humano — {ticket.protocol}"
-        texto = "O cliente pediu para falar com uma pessoa. A Helô parou a triagem na hora."
+        texto = "O cliente pediu para falar com uma pessoa. A Helô parou na hora."
     else:
-        titulo = f"Triagem concluída — {ticket.protocol}"
-        texto = "A Helô terminou a triagem e o chamado está esperando atendimento."
+        titulo = f"Helô passou o chamado — {ticket.protocol}"
+        texto = f"A Helô saiu da conversa e o chamado está esperando atendimento: {motivo}."
 
     for pessoa in equipe:
         await notify(

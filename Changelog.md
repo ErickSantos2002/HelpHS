@@ -14,6 +14,77 @@ Trabalho que ainda **não** entrou numa versão do produto. Confira: se um
 item aqui já está em produção, ou ele foi para a versão errada, ou falta
 publicar uma versão nova.
 
+### Infraestrutura
+- **A Helô ganha um QUINTO SERVIÇO no EasyPanel: o embedding.** É o que o
+  painel vai precisar, e nada disto sobe sozinho.
+
+  | | |
+  |---|---|
+  | Serviço | `helphs-embedding` (nome sugerido; o que vale é a URL bater com a variável) |
+  | Fonte | mesmo repositório, **contexto `backend/`**, Dockerfile em `backend/servico_embedding/Dockerfile` |
+  | Porta interna | **8080** — não publicar na internet: só a API precisa alcançá-la |
+  | Healthcheck | `GET /health` — responde **503 enquanto o modelo não carregou**, 200 com `{"dimensao": 1024}` |
+  | Variável NA API | `HELO_EMBEDDING_URL=http://helphs-embedding:8080` |
+  | Variável opcional na API | `HELO_EMBEDDING_TIMEOUT_SECONDS` (padrão 10) |
+  | Variável opcional no serviço | `HELO_THREADS` (padrão 1) |
+
+  E o interruptor dela, que é de outra natureza e não está na tabela acima
+  porque não é do serviço de embedding — é da API:
+
+  | | |
+  |---|---|
+  | Variável NA API | `HELO_ENABLED` — **ausente ou `false` = ela não fala** |
+  | Estado hoje | **não configurada, de propósito.** Ela sobe desligada |
+  | Para ligar | `HELO_ENABLED=true` **e** `DEEPSEEK_API_KEY` preenchida |
+  | Opcional NA API | `HELO_INDEXACAO_INTERVALO_SEGUNDOS` — padrão 300; zero desliga a varredura |
+
+  - ⚠️ **Ligar é decisão, e está travada por fora do código.** A Política de
+    Privacidade ainda tem marcador em aberto e os Termos de Uso não existem;
+    enquanto isso, uma IA falando com cliente não pode ser ligada. O padrão
+    `false` no `config.py` é a rede: sem ele, o deploy seguinte faria a IA
+    começar a falar com o cliente sem ninguém ter pedido.
+  - **Ligada sem chave da DeepSeek ela não fica pela metade.** A saudação sai
+    igual (é montada sem IA), e do segundo turno em diante toda pergunta cai
+    na escalada com mensagem neutra — o chamado vai para a equipe, com o
+    motivo `a IA não respondeu` na notificação. Nada trava, mas ela também não
+    resolve nada: é o pior dos dois mundos, e é por isso que as duas variáveis
+    andam juntas.
+
+  - ⚠️ **O build baixa 543 MB de modelo** e leva o tempo disso. É de propósito:
+    baixar no start faria cada reinício depender da rede do servidor e do
+    Hugging Face estarem de pé. Se o download falhar, o build falha — que é o
+    lugar certo para descobrir. A imagem pronta sobe sem rede nenhuma.
+  - **Memória: piso de 864 MB residentes**, medido, com o modelo carregado e
+    sem calcular nada. O pico numa pergunta de cliente é 866 MB. Cold start de
+    2,9 s. Um worker, e o Dockerfile fixa isso: dois seriam 1,7 GB para atender
+    uma fila que hoje é de uma pergunta por vez.
+  - **A API não quebra sem ele.** Sem `HELO_EMBEDDING_URL`, o cliente devolve
+    `None` em silêncio — é o estado de hoje, com a Helô desligada. Com a URL
+    configurada e o serviço fora do ar, qualquer falha (timeout, conexão
+    recusada, 503, resposta fora do contrato) também devolve `None`: a busca
+    não acontece, o bloco de contexto recebe a string `NADA ENCONTRADO` e a
+    Helô **escala com mensagem neutra**. Nenhum chamado fica preso, e nenhuma
+    dessas falhas aparece como erro na tela do cliente.
+  - ⚠️ **Antes do primeiro deploy da API com esta versão**, alguém com
+    superusuário precisa rodar `CREATE EXTENSION vector;` no banco de produção.
+    A migration `a7v8w9x0y1z2` EXIGE a extensão e recusa criá-la — criar
+    exigiria superusuário no boot do contêiner, para sempre, por causa de um
+    comando que roda uma vez. Sem a extensão, a migration falha com mensagem
+    dizendo exatamente isto, e a API não sobe.
+  - **Ordem de subida:** extensão no banco → serviço de embedding → API →
+    importar os três manuais (`scripts/importa_manuais_para_kb.py`; eles nascem
+    rascunho) → alguém lê e publica → a varredura indexa em até 5 min →
+    (depois, e só depois do documento de LGPD) `HELO_ENABLED=true`. A API com a
+    variável apontando para um serviço que não existe funciona (escala em
+    tudo), mas não responde nada de útil.
+  - **Como conferir que subiu certo, sem ligar a Helô:** `GET /health` do
+    serviço de embedding respondendo 200 com `{"dimensao": 1024}`. No banco,
+    `SELECT count(*) FROM helo_chunks WHERE embedding IS NOT NULL` devolve
+    **0** até os manuais serem importados e publicados — a base nasce vazia, de
+    propósito — e **46** depois, com estes três manuais (medido em 10/09 num
+    banco local). Tudo verde e `HELO_ENABLED` ausente é o estado pretendido:
+    tudo pronto, ela calada.
+
 ### Segurança
 
 - **As três advisories novas do front foram fechadas por conserto, e nenhuma
@@ -41,6 +112,48 @@ publicar uma versão nova.
   Crítica escrevíveis pela tela. Recusado o campo com seletor de unidade:
   trocar "minutos" por "horas" sem mexer no número multiplicaria o prazo por 60
   em silêncio, e o formulário passaria a converter nos dois sentidos.
+- **A base da Helô passa a ser a Base de Conhecimento.** A fonte deixou de ser
+  uma pasta de manuais: artigo com `status = published` e `helo_pode_ler =
+  true` alimenta as respostas dela sem ninguém rodar nada. Uma varredura
+  periódica dentro da API indexa o que é novo ou editado; despublicar tira o
+  texto das respostas no mesmo instante, porque a busca filtra ao vivo.
+  - ⚠️ **Publicar artigo passa a mudar o que a Helô diz para o cliente.** O
+    suporte não tinha esse poder e não sabe que passou a ter. Passo a passo
+    errado num artigo publicado vira procedimento errado ditado ao cliente, com
+    a fonte citada. Artigo **sem produto vinculado vale para TODOS os
+    aparelhos**. Para manter um artigo na barra lateral e fora da IA, há a
+    marcação própria (`helo_pode_ler`) — não é tag, e não é despublicar.
+  - Os três manuais técnicos entram por `scripts/importa_manuais_para_kb.py`,
+    como **rascunho**, já com as senhas redigidas; uma pessoa lê e publica. Ali,
+    produto que não casa com o cadastro é erro fatal — o oposto da tela, e de
+    propósito.
+  - Nova coluna `kb_articles.helo_pode_ler` (migration `c9x0y1z2a3b4`, aditiva,
+    padrão `true`). A `a7v8w9x0y1z2`, que nunca rodou em produção, foi reescrita
+    no formato final — nenhuma tabela é derrubada no deploy.
+- **A Helô passa a resolver o que está documentado (Fase 2).** Ela deixou de
+  ser recepcionista: busca nos manuais por similaridade, responde em passos
+  numerados citando a fonte, e escala o que não está na base. **A saudação
+  continua sem LLM** — previsível, instantânea e grátis, e é a primeira coisa
+  que o cliente lê; o modelo entra a partir do segundo turno.
+  - O teto deixou de ser de duas falas e virou de **seis trocas**, e ele
+    **escala** em vez de emudecer.
+  - **Escalar encerra a conversa dela naquele chamado**, o que a Fase 1
+    prometia e não fazia, e o histórico do chamado passa a registrar o motivo.
+    O botão "Desligar IA neste chamado" continua sendo só do técnico — ele só
+    cai junto quando foi o **cliente** quem pediu para falar com uma pessoa.
+  - Desde 10/09 a base é a **Base de Conhecimento** (ver o primeiro item desta
+    seção): a busca enxerga artigo **publicado**, marcado para a Helô, e que
+    sirva ao **produto daquele chamado**. Ficha comercial, com preço, não entra
+    na Base.
+  - ⚠️ **Só três dos sete produtos têm manual técnico** (Titan, Phoebus,
+    iBlow 10 Pro). Para Deimos, EBS-010, Mark X e Mercury a base vem vazia em
+    todo turno e ela sempre escala. É decisão de escopo, não defeito.
+- **A busca para de entregar trecho longe demais.** Ordenar não é filtrar:
+  sem teto, ela devolvia sempre os quatro trechos mais próximos por mais longe
+  que estivessem — "como conecto na impressora" num aparelho sem impressora
+  entregava o passo a passo de ligar. O corte de **0,25** saiu de medição com
+  40 perguntas rotuladas contra o corpus real, não de palpite; nas mesmas 40,
+  os trechos entregues ao modelo caem de 160 para 25.
 
 ### Alterado
 
@@ -67,6 +180,27 @@ publicar uma versão nova.
 
 - **Editar a Crítica apagava os 30 min**: o formulário só falava em horas
   inteiras e trocava o prazo por um número redondo, calado.
+- **A equipe era chamada a cada fala da Helô, e o aviso mentia o motivo.** Com
+  ela falando uma vez por chamado, um aviso por chamado. Com seis trocas, todo
+  técnico e todo admin passaria a receber até seis notificações por chamado —
+  cinco delas dizendo "Triagem concluída" com a conversa em andamento. Agora a
+  equipe só é chamada quando ela **sai de cena**, e o aviso diz por quê: o
+  pedido de humano continua sendo o único que muda a ordem da fila, e os
+  outros três motivos (o modelo decidiu, o teto estourou, a IA não respondeu)
+  chegam com o motivo escrito — inclusive o que o próprio modelo redigiu.
+- **Falha da Helô não custa mais a mensagem do cliente.** A fala dela nasce no
+  mesmo commit da fala do cliente, e em PostgreSQL um erro de consulta aborta a
+  transação inteira: um defeito dentro dela derrubava o `POST` e apagava junto o
+  que o cliente tinha acabado de escrever — ele digitava, enviava e via um erro.
+  A Helô agora roda dentro de um SAVEPOINT, e o que falha é só ela. O defeito
+  vai para o log com o traço; engolir é para proteger o cliente, não para
+  esconder o defeito.
+- **A sugestão de resposta ao técnico perdia o começo da conversa.** A janela
+  era de 10 mensagens, e bastava enquanto um chamado triado tinha três. Com
+  seis trocas a conversa chega a 13, e a janela cortava justamente a resposta
+  do cliente às perguntas da triagem — a mensagem mais útil que existe para
+  sugerir uma resposta. A janela passa a sair do teto de trocas, e as duas
+  coisas se movem juntas.
 
 ### Removido
 

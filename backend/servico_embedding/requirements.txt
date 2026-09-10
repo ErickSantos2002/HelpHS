@@ -1,0 +1,20 @@
+# Dependencias do SERVICO de embedding — separadas de propósito.
+#
+# Este contêiner não é a API: ele não tem SQLAlchemy, não tem asyncpg, não tem
+# nada de banco. E a API não tem onnxruntime. Cada imagem carrega só o que usa,
+# e é isso que mantém a imagem do backend do tamanho de hoje.
+#
+# Tamanhos MEDIDOS num venv limpo:
+#   onnxruntime  43,4 MB
+#   numpy        33,0 MB
+#   tokenizers    7,8 MB
+#   ------------------------
+#   runtime      84,2 MB   (sem torch, que sozinho seria ~1 GB)
+#   modelo      559,6 MB
+#   TOTAL       ~645 MB
+fastapi==0.115.12
+uvicorn[standard]==0.34.0
+pydantic==2.11.3
+onnxruntime==1.23.2
+tokenizers==0.21.0
+numpy==2.4.6

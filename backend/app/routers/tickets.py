@@ -71,6 +71,7 @@ from app.services.ticket_lifecycle import (
     resolution_reference,
 )
 from app.utils.crud import get_or_404
+from app.utils.history import registra_historico
 from app.utils.protocol import MAX_RETRIES, generate_protocol
 from app.utils.sla import (
     _PAUSE_STATUSES,
@@ -188,7 +189,9 @@ async def _auto_transition(
 
     check_breaches(ticket, now)
 
-    _record_history(db, ticket.id, actor_id, "status", old_status.value, new_status.value, comment)
+    registra_historico(
+        db, ticket.id, actor_id, "status", old_status.value, new_status.value, comment
+    )
     _audit(db, AuditAction.status_change, actor_id, ticket.id)
     await notify(
         db,
@@ -340,33 +343,6 @@ def _justificativa_de_sla(ticket: Ticket, now: datetime, enviada: str | None) ->
     return limpa
 
 
-def _record_history(
-    db: AsyncSession,
-    ticket_id: uuid.UUID,
-    # Nulo quando quem agiu foi o sistema — a Helô movendo o chamado para "Em
-    # andamento". A coluna já aceitava (`TicketHistory.user_id` é nullable); só
-    # a anotação aqui era estreita demais.
-    user_id: uuid.UUID | None,
-    field: str,
-    # Aceita UUID porque varios campos de historico sao id: o corpo faz str()
-    # antes de gravar, entao a anotacao estreita era a unica coisa errada.
-    old_value: str | uuid.UUID | None,
-    new_value: str | uuid.UUID | None,
-    comment: str | None = None,
-) -> None:
-    db.add(
-        TicketHistory(
-            id=uuid.uuid4(),
-            ticket_id=ticket_id,
-            user_id=user_id,
-            field=field,
-            old_value=str(old_value) if old_value is not None else None,
-            new_value=str(new_value) if new_value is not None else None,
-            comment=comment,
-        )
-    )
-
-
 # ═══════════════════════════════════════════════════════════════
 # TICKETS
 # ═══════════════════════════════════════════════════════════════
@@ -432,7 +408,7 @@ async def create_ticket(
             apply_sla_config(ticket, sla_config, ts)
         db.add(ticket)
         await _set_ticket_equipments(db, ticket, body.equipment_ids, actor)
-        _record_history(db, ticket.id, actor.id, "created", None, "open")
+        registra_historico(db, ticket.id, actor.id, "created", None, "open")
 
         # A Helô se apresenta e faz as três perguntas de triagem. Dentro do
         # mesmo commit do chamado de propósito: metade das duas coisas gravada
@@ -444,7 +420,7 @@ async def create_ticket(
         if actor.role == UserRole.client and await abre_triagem(
             db, ticket, actor, list(ticket.equipments)
         ):
-            _record_history(db, ticket.id, None, "status", "open", "in_progress", "Helô")
+            registra_historico(db, ticket.id, None, "status", "open", "in_progress", "Helô")
         _audit(db, AuditAction.create, actor.id, ticket.id)
         await notify(
             db,
@@ -660,7 +636,7 @@ async def update_ticket(
         await _set_ticket_equipments(db, ticket, novos_equipamentos, actor)
         depois = sorted(e.name for e in ticket.equipments)
         if antes != depois:
-            _record_history(
+            registra_historico(
                 db,
                 ticket.id,
                 actor.id,
@@ -672,7 +648,7 @@ async def update_ticket(
     for field, new_val in changes.items():
         old_val = getattr(ticket, field)
         if old_val != new_val:
-            _record_history(db, ticket.id, actor.id, field, old_val, new_val)
+            registra_historico(db, ticket.id, actor.id, field, old_val, new_val)
         setattr(ticket, field, new_val)
 
     ticket.updated_at = datetime.now(UTC)
@@ -709,7 +685,9 @@ async def update_client_observation(
     ticket.client_observation = body.client_observation
     ticket.updated_at = datetime.now(UTC)
     if old != body.client_observation:
-        _record_history(db, ticket.id, actor.id, "client_observation", old, body.client_observation)
+        registra_historico(
+            db, ticket.id, actor.id, "client_observation", old, body.client_observation
+        )
     _audit(db, AuditAction.update, actor.id, ticket.id)
     await commit_e_notificar(db)
     await db.refresh(ticket)
@@ -742,7 +720,7 @@ async def toggle_ticket_ai(
     ticket = await get_or_404(db, Ticket, ticket_id, _CHAMADO_NAO_ENCONTRADO)
 
     if ticket.ai_enabled != body.enabled:
-        _record_history(
+        registra_historico(
             db,
             ticket.id,
             actor.id,
@@ -789,7 +767,7 @@ async def update_ticket_status(
 
     if justificativa:
         ticket.sla_breach_justification = justificativa
-        _record_history(
+        registra_historico(
             db,
             ticket.id,
             actor.id,
@@ -813,7 +791,7 @@ async def update_ticket_status(
     if body.status in (TicketStatus.resolved, TicketStatus.closed, TicketStatus.cancelled):
         ticket.closed_at = now
 
-    _record_history(
+    registra_historico(
         db, ticket.id, actor.id, "status", old_status.value, body.status.value, body.comment
     )
     _audit(db, AuditAction.status_change, actor.id, ticket.id)
@@ -872,7 +850,7 @@ async def resolve_ticket(
 
     if justificativa:
         ticket.sla_breach_justification = justificativa
-        _record_history(
+        registra_historico(
             db,
             ticket.id,
             actor.id,
@@ -892,7 +870,7 @@ async def resolve_ticket(
         resume_sla(ticket, now)
     check_breaches(ticket, now)
 
-    _record_history(
+    registra_historico(
         db,
         ticket.id,
         actor.id,
@@ -1001,7 +979,7 @@ async def reopen_ticket(
     # bônus de horas que ninguém esperou.
     ticket.sla_total_paused_ms = 0
 
-    _record_history(
+    registra_historico(
         db,
         ticket.id,
         actor.id,
@@ -1093,7 +1071,7 @@ async def assign_ticket(
     old_assignee = ticket.assignee_id
     ticket.assignee_id = body.assignee_id
     ticket.updated_at = datetime.now(UTC)
-    _record_history(
+    registra_historico(
         db,
         ticket.id,
         actor.id,
@@ -1146,7 +1124,7 @@ async def cancel_ticket(
     ticket.status = TicketStatus.cancelled
     ticket.closed_at = datetime.now(UTC)
     ticket.updated_at = ticket.closed_at
-    _record_history(db, ticket.id, actor.id, "status", old_status.value, "cancelled")
+    registra_historico(db, ticket.id, actor.id, "status", old_status.value, "cancelled")
     _audit(db, AuditAction.delete, actor.id, ticket.id)
     await notify(
         db,

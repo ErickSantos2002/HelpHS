@@ -35,6 +35,7 @@ from datetime import UTC, datetime
 
 import pytest
 import pytest_asyncio
+from sqlalchemy import text
 from sqlalchemy.ext.asyncio import async_sessionmaker, create_async_engine
 
 from app.models.models import (
@@ -97,6 +98,15 @@ def url_do_banco():
     async def _monta() -> None:
         motor = create_async_engine(url)
         async with motor.begin() as conn:
+            # Contra Postgres o schema sobe inteiro (`tabelas` é None acima), e
+            # inteiro inclui `helo_chunks.embedding`, que é `vector(1024)`. Sem
+            # a extensão o create_all morre em `type "vector" does not exist`,
+            # levando junto testes que não têm nada com a Helô. Em produção
+            # quem cria é a migration; aqui não roda migration nenhuma.
+            # No SQLite não há extensão nem coluna vetorial — o subconjunto
+            # `_TABELAS_NO_SQLITE` não inclui as tabelas da Helô.
+            if not no_sqlite:
+                await conn.execute(text("CREATE EXTENSION IF NOT EXISTS vector"))
             await conn.run_sync(Base.metadata.create_all, tables=tabelas)
         await motor.dispose()
 

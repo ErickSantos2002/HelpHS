@@ -278,6 +278,34 @@ class Settings(BaseSettings):
     # decisão, não default.
     helo_enabled: bool = False
 
+    # O serviço de embedding da Helô — um contêiner PRÓPRIO, não uma biblioteca
+    # dentro desta API.
+    #
+    # A separação não é preferência de arquitetura: é consequência de um número
+    # medido. O backend roda com `--workers 1` (`start.sh:40`), e trabalho de
+    # CPU síncrono no event loop congela a API para TODO MUNDO. Já aconteceu e
+    # está registrado — uma requisição pesada ocupou o processo por 151
+    # segundos (`mudanças.md:50`). Calcular embedding aqui dentro seria repetir
+    # esse defeito de propósito, a cada turno de conversa da Helô.
+    #
+    # Nasce VAZIA. Sem URL, o cliente devolve None em silêncio, a busca não
+    # acontece e a Helô escala — exatamente como já faz sem a chave da
+    # DeepSeek. Ligar é decisão, não default.
+    helo_embedding_url: str = ""
+
+    # Curto de propósito, e bem menor que os 30 s do LLM. Um embedding leva
+    # centenas de milissegundos; se está demorando dez, o serviço tem problema,
+    # e prender o cliente esperando não melhora nada — escalar logo é resposta
+    # melhor do que uma espera longa seguida da mesma escalada.
+    helo_embedding_timeout_seconds: int = 10
+
+    # De quanto em quanto tempo a varredura procura artigo publicado novo ou
+    # editado para indexar (`app/services/helo_indexacao.py`). Cinco minutos é
+    # a latência entre publicar e a Helô passar a usar o texto — só para texto
+    # novo: despublicar tem efeito imediato, porque a busca filtra ao vivo.
+    # Zero desliga a varredura.
+    helo_indexacao_intervalo_segundos: int = 300
+
     # DeepSeek — o único provedor de LLM.
     #
     # Nasce VAZIA: a chave vive no painel do EasyPanel, nunca no repositório, e

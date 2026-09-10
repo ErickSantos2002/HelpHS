@@ -10,6 +10,17 @@ uvicorn[standard]==0.34.0
 sqlalchemy[asyncio]==2.0.40
 alembic==1.15.2
 asyncpg==0.30.0
+# Tipo de coluna vetorial para a base da Helo (Fase 2). E o adaptador
+# SQLAlchemy/asyncpg do pgvector: quem faz o trabalho no servidor e a extensao
+# do Postgres, nao este pacote -- ele nao traz modelo nem torch (conferido: o
+# unico Requires-Dist dele e numpy).
+#
+# MAS NAO E DE GRACA EM DISCO, e a versao anterior deste comentario afirmava
+# que era. Ele pesa 148 KiB e ARRASTA NUMPY, que sao 53,49 MB medidos -- o
+# maior pacote do ambiente do backend, 369x o tamanho do proprio pgvector, e
+# 97% disso e uma DLL de OpenBLAS. Nao da para remover enquanto o
+# `from pgvector.sqlalchemy import Vector` estiver no models.py.
+pgvector==0.4.1
 
 # Validation & Settings
 pydantic==2.11.3

@@ -91,8 +91,20 @@ def servidor():
 
 @pytest.fixture
 def banco(servidor):
-    """Banco vazio a cada teste. CREATE DATABASE exige autocommit."""
+    """
+    Banco vazio a cada teste. CREATE DATABASE exige autocommit.
+
+    A extensão `vector` é criada AQUI, e não pela migration, porque é assim
+    que acontece em produção: a `a7v8w9x0y1z2` exige a extensão e recusa
+    criá-la, para não pedir superusuário no boot do container. Quem cria é o
+    administrador, uma vez, antes do deploy — e este passo é a encenação
+    disso. Criar aqui é o que mantém o teste fiel ao que roda lá.
+
+    A extensão é por BANCO: o `CREATE DATABASE` acima nasce sem ela mesmo com
+    o pgvector instalado no servidor, então isto tem de rodar a cada recriação.
+    """
     base, _, _ = servidor.rpartition("/")
+    url_do_banco = f"{base}/{_BANCO}"
 
     async def _recria() -> None:
         motor = create_async_engine(servidor, isolation_level="AUTOCOMMIT")
@@ -101,8 +113,13 @@ def banco(servidor):
             await conn.execute(text(f"CREATE DATABASE {_BANCO}"))
         await motor.dispose()
 
+        novo = create_async_engine(url_do_banco, isolation_level="AUTOCOMMIT")
+        async with novo.connect() as conn:
+            await conn.execute(text("CREATE EXTENSION IF NOT EXISTS vector"))
+        await novo.dispose()
+
     asyncio.run(_recria())
-    return f"{base}/{_BANCO}"
+    return url_do_banco
 
 
 @pytest_asyncio.fixture
@@ -125,6 +142,56 @@ def test_upgrade_head_sobe_do_zero(banco):
     assert (
         resultado.returncode == 0
     ), f"alembic upgrade head falhou:\n{resultado.stdout}\n{resultado.stderr}"
+
+
+@pytest.mark.asyncio
+async def test_o_modelo_nao_anda_na_frente_das_migrations(sessao, banco):
+    """
+    Toda coluna declarada no modelo existe no banco depois do `upgrade head`.
+
+    É a lacuna que o `create_all` esconde e que este arquivo existe para
+    fechar, num caso que ele ainda não cobria. Os testes que montam o schema
+    pela declaração — `test_helo_postgres.py` e companhia — ficam VERDES com
+    uma coluna nova no modelo e nenhuma migration para ela: eles constroem o
+    schema a partir do próprio modelo. O container não: ele roda
+    `alembic upgrade head`, e a primeira consulta que tocar na coluna que só
+    existe na declaração devolve `UndefinedColumn` em produção.
+
+    A comparação é só de PRESENÇA — nome de tabela e de coluna. Tipo, default e
+    nulabilidade ficam de fora de propósito: comparar isso a sério é o trabalho
+    do `alembic check`, que precisa de um banco no head e não roda no CI. O que
+    este teste pega é o esquecimento inteiro, que é o caso comum e o que
+    derruba o boot.
+    """
+    resultado = _alembic(banco, "head")
+    assert resultado.returncode == 0, resultado.stderr
+
+    from app.models.models import Base
+
+    reais = {}
+    linhas = await sessao.execute(
+        text(
+            "SELECT table_name, column_name FROM information_schema.columns "
+            "WHERE table_schema = 'public'"
+        )
+    )
+    for tabela, coluna in linhas.all():
+        reais.setdefault(tabela, set()).add(coluna)
+
+    faltando = []
+    for tabela in Base.metadata.sorted_tables:
+        if tabela.name not in reais:
+            faltando.append(f"{tabela.name} (tabela inteira)")
+            continue
+        for coluna in tabela.columns:
+            if coluna.name not in reais[tabela.name]:
+                faltando.append(f"{tabela.name}.{coluna.name}")
+
+    assert (
+        not faltando
+    ), "declarado no modelo e ausente depois do upgrade head — falta migration para: " + ", ".join(
+        sorted(faltando)
+    )
 
 
 @pytest.mark.asyncio
@@ -193,6 +260,60 @@ async def test_backfill_leva_o_dono_para_equipment_users(banco):
     assert len(vinculos) == 1, f"esperava só o aparelho com dono, veio {vinculos}"
     assert vinculos[0].equipment_id == equipamento_id
     assert vinculos[0].user_id == dono_id
+
+
+@pytest.mark.asyncio
+async def test_o_artigo_que_ja_existia_nasce_lido_pela_helo(banco):
+    """
+    A decisão de 10/09/2026, provada no banco em vez de afirmada.
+
+    Havia UM artigo publicado em produção (número do Rickelme), e a coluna
+    `helo_pode_ler` chega com padrão `true` para cobri-lo SEM backfill e sem
+    corrigir linha em migration. Este teste semeia um artigo ANTES da
+    `c9x0y1z2a3b4` e confere que ele sai do outro lado lido pela Helô. Com o
+    padrão invertido, o único artigo que existe sumiria das respostas no dia do
+    deploy — em silêncio.
+    """
+    assert _alembic(banco, "b8w9x0y1z2a3").returncode == 0
+    autor_id, artigo_id = uuid.uuid4(), uuid.uuid4()
+
+    motor = create_async_engine(banco)
+    async with async_sessionmaker(bind=motor, expire_on_commit=False)() as s:
+        # INSERT explícito pelo mesmo motivo do teste do backfill: nesta revisão
+        # o schema é mais antigo que o modelo, e o ORM carregaria uma coluna
+        # que ainda não existe.
+        await s.execute(
+            text(
+                "INSERT INTO users (id, name, email, password, role, status, "
+                "lgpd_consent, email_verified, onboarding_completed) "
+                "VALUES (:id, 'Autora', :email, 'x', 'technician', 'active', true, true, true)"
+            ),
+            {"id": autor_id, "email": f"{autor_id.hex[:8]}@test.com"},
+        )
+        await s.execute(
+            text(
+                "INSERT INTO kb_articles (id, title, content, slug, category, tags, status, "
+                "author_id, view_count, helpful, not_helpful) "
+                "VALUES (:id, 'O artigo que já existia', 'corpo', :slug, 'hardware', '{}', "
+                "'published', :autor, 0, 0, 0)"
+            ),
+            {"id": artigo_id, "slug": f"ja-existia-{artigo_id.hex[:8]}", "autor": autor_id},
+        )
+        await s.commit()
+    await motor.dispose()
+
+    assert _alembic(banco, "head").returncode == 0
+
+    motor = create_async_engine(banco)
+    async with async_sessionmaker(bind=motor, expire_on_commit=False)() as s:
+        pode = (
+            await s.execute(
+                text("SELECT helo_pode_ler FROM kb_articles WHERE id = :id"), {"id": artigo_id}
+            )
+        ).scalar_one()
+    await motor.dispose()
+
+    assert pode is True
 
 
 def test_upgrade_head_e_idempotente_apos_o_backfill(banco):

@@ -14,6 +14,7 @@ from httpx import ASGITransport, AsyncClient
 
 from app.main import app
 from app.models.models import TicketCategory, TicketPriority, TicketStatus, UserRole, UserStatus
+from app.services.helo import FALAS_MAXIMAS, MOTIVO_PEDIU_HUMANO, TROCAS_MAXIMAS
 
 # ── Fake Redis ────────────────────────────────────────────────
 
@@ -134,7 +135,22 @@ def _db_sequence(*responses):
     session.add = MagicMock()
     session.commit = AsyncMock()
     session.refresh = AsyncMock()
+    # `begin_nested` do AsyncSession e SINCRONO e devolve um gerenciador de
+    # contexto assincrono. No AsyncMock todo metodo vira corrotina, e o
+    # `async with` do SAVEPOINT que protege a mensagem do cliente quebraria por
+    # defeito do mock -- no WebSocket isso trava o teste em vez de falhar.
+    session.begin_nested = MagicMock(return_value=_SavepointDeMentira())
     return session
+
+
+class _SavepointDeMentira:
+    """O bastante para o `async with`: quem prova o SAVEPOINT e o Postgres."""
+
+    async def __aenter__(self):
+        return self
+
+    async def __aexit__(self, *_excecao):
+        return False
 
 
 def _db_seq_override(*responses):
@@ -1082,46 +1098,336 @@ def _db_com_equipe(*pessoas):
     return sessao
 
 
-async def _avisos(*, escalou):
+@pytest.mark.asyncio
+async def test_mensagem_do_tecnico_nao_aciona_a_helo(patch_redis):
+    """
+    Ela responde ao CLIENTE, e a checagem e pelo autor do chamado.
+
+    Sem essa guarda ela responderia ao tecnico -- explicando o procedimento
+    para quem escreveu o manual, e gastando LLM para isso. A guarda de humano
+    na conversa provavelmente pegaria o caso depois, mas por acidente: ela
+    existe para outra pergunta, e depender dela aqui e depender de um efeito
+    colateral.
+    """
+    from app.core.database import get_db
+
+    tecnico = _mock_user(UserRole.technician, _TECH_ID)
+    ticket = _mock_ticket(creator_id=_CREATOR_ID)
+    msg = _mock_message(sender=tecnico)
+
+    _override_user(tecnico)
+    app.dependency_overrides[get_db] = _db_seq_override(ticket, msg, msg)
+
+    with patch("app.routers.chat.responde_triagem", new=AsyncMock()) as helo_falou:
+        async with AsyncClient(transport=ASGITransport(app=app), base_url="http://test") as c:
+            r = await c.post(
+                f"/api/v1/tickets/{_TICKET_ID}/messages",
+                json={"content": "Bom dia, vou dar andamento neste chamado."},
+            )
+
+    assert r.status_code == 201
+    helo_falou.assert_not_awaited()
+
+
+async def _posta_com_a_helo_explodindo(erro):
+    """
+    Cliente manda mensagem, e a Helô levanta `erro` no meio.
+
+    Simula o defeito NÃO previsto — um campo nulo onde o código esperava texto,
+    um `TypeError` num bloco de contexto. As falhas previstas (LLM mudo,
+    embedding fora, busca quebrada) nem chegam aqui: terminam em escalada
+    dentro do próprio `responde_triagem`.
+    """
+    from app.core.database import get_db
+
+    cliente = _mock_user(UserRole.client, _CREATOR_ID)
+    ticket = _mock_ticket(creator_id=_CREATOR_ID)
+    msg = _mock_message(sender=cliente)
+
+    _override_user(cliente)
+    app.dependency_overrides[get_db] = _db_seq_override(ticket, msg, msg)
+
+    with (
+        patch("app.routers.chat.responde_triagem", new=AsyncMock(side_effect=erro)),
+        patch("app.routers.chat.logger") as log,
+    ):
+        async with AsyncClient(transport=ASGITransport(app=app), base_url="http://test") as c:
+            r = await c.post(
+                f"/api/v1/tickets/{_TICKET_ID}/messages",
+                json={"content": "o aparelho não liga desde ontem"},
+            )
+
+    return r, log
+
+
+@pytest.mark.asyncio
+async def test_defeito_dentro_da_helo_nao_derruba_a_mensagem_do_cliente(patch_redis):
+    """
+    A assimetria que decide a guarda.
+
+    Engolindo, o pior caso é o chamado seguir sem a fala dela — o estado exato
+    de antes de ela existir, que o cliente nem percebe. Deixando subir, o pior
+    caso é o cliente digitar, apertar enviar, ver um erro e perder o que
+    escreveu — por causa de um defeito num acessório do atendimento.
+    """
+    resposta, _log = await _posta_com_a_helo_explodindo(TypeError("bloco de contexto quebrado"))
+
+    assert resposta.status_code == 201
+    assert resposta.json()["content"] == _mock_message().content
+
+
+@pytest.mark.asyncio
+async def test_o_defeito_engolido_vai_para_o_log_com_o_traco(patch_redis):
+    """
+    Engolir é para proteger o cliente, não para esconder o defeito.
+
+    Sem `logger.exception` — com o traço, não só a mensagem — isto vira
+    exatamente o que o módulo da Helô recusa em todo lugar: bug virando
+    silêncio. E vira o pior tipo: some sem nem 500 no monitoramento.
+    """
+    _resposta, log = await _posta_com_a_helo_explodindo(TypeError("bloco de contexto quebrado"))
+
+    log.exception.assert_called_once()
+
+
+@pytest.mark.asyncio
+async def test_a_equipe_nao_e_chamada_quando_a_helo_falha(patch_redis):
+    """Sem fala dela não há escalada, e escalada é a única coisa que chama a equipe."""
+    from app.core.database import get_db
+
+    cliente = _mock_user(UserRole.client, _CREATOR_ID)
+    ticket = _mock_ticket(creator_id=_CREATOR_ID)
+    msg = _mock_message(sender=cliente)
+
+    _override_user(cliente)
+    app.dependency_overrides[get_db] = _db_seq_override(ticket, msg, msg)
+
+    with (
+        patch("app.routers.chat.responde_triagem", new=AsyncMock(side_effect=RuntimeError("x"))),
+        patch("app.routers.chat.logger"),
+        patch("app.routers.chat._avisa_equipe_da_helo", new=AsyncMock()) as avisou,
+    ):
+        async with AsyncClient(transport=ASGITransport(app=app), base_url="http://test") as c:
+            r = await c.post(f"/api/v1/tickets/{_TICKET_ID}/messages", json={"content": "não liga"})
+
+    assert r.status_code == 201
+    avisou.assert_not_awaited()
+
+
+def test_a_janela_do_historico_cabe_uma_triagem_inteira():
+    """
+    O acoplamento entre o teto de trocas e a janela da sugestão de resposta.
+
+    Eram 10 mensagens fixas, e 10 bastava enquanto a conversa inteira de um
+    chamado triado tinha três. Com seis trocas a conversa chega a 13, e uma
+    janela de 10 corta JUSTO O COMEÇO — a resposta do cliente às três perguntas
+    da triagem, que é a mensagem mais útil que existe para sugerir uma resposta.
+    O técnico receberia a sugestão feita a partir do meio da conversa.
+
+    O que este teste prende é a RELAÇÃO, e não o número: quem subir o teto de
+    trocas sem mexer na janela quebra aqui. O tamanho efetivo da consulta não dá
+    para afirmar com sessão mockada — mock não aplica `LIMIT`, do mesmo jeito
+    que não valida `WHERE`.
+    """
+    from app.routers.chat import _JANELA_DO_HISTORICO
+
+    conversa_mais_longa = FALAS_MAXIMAS + TROCAS_MAXIMAS
+    assert _JANELA_DO_HISTORICO >= conversa_mais_longa
+
+
+async def _posta_como_cliente(fala_da_helo):
+    """
+    Cliente manda mensagem no próprio chamado, com a Helô devolvendo `fala`.
+
+    Vai pela ROTA, e não chamando a função direto, porque o que está sendo
+    afirmado mora no router: a condição que decide chamar a equipe.
+    """
+    from app.core.database import get_db
+
+    cliente = _mock_user(UserRole.client, _CREATOR_ID)
+    ticket = _mock_ticket(creator_id=_CREATOR_ID)
+    msg = _mock_message(sender=cliente)
+
+    _override_user(cliente)
+    app.dependency_overrides[get_db] = _db_seq_override(ticket, msg, msg)
+
+    with (
+        patch("app.routers.chat.responde_triagem", new=AsyncMock(return_value=fala_da_helo)),
+        patch("app.routers.chat._avisa_equipe_da_helo", new=AsyncMock()) as avisou,
+    ):
+        async with AsyncClient(transport=ASGITransport(app=app), base_url="http://test") as c:
+            r = await c.post(
+                f"/api/v1/tickets/{_TICKET_ID}/messages",
+                json={"content": "o aparelho não liga desde ontem"},
+            )
+
+    assert r.status_code == 201
+    return avisou
+
+
+@pytest.mark.asyncio
+async def test_resposta_comum_da_helo_nao_chama_a_equipe(patch_redis):
+    """
+    O defeito que a Fase 2 criou e que ninguém veria antes de produção.
+
+    Na Fase 1 ela falava UMA vez por chamado neste caminho, então avisar a
+    equipe sempre que ela falasse dava um aviso por chamado. Agora ela responde
+    a cada turno: sem esta guarda, todo técnico e todo admin recebe até seis
+    notificações por chamado dizendo que a triagem acabou — enquanto a conversa
+    segue. Notificação que chega sempre é notificação que ninguém lê, e a que
+    importa de verdade (tem gente esperando gente) se perde no meio.
+    """
+    from app.services.helo import FalaDaHelo
+
+    avisou = await _posta_como_cliente(FalaDaHelo(mensagem=MagicMock(), motivo=None))
+
+    avisou.assert_not_awaited()
+
+
+@pytest.mark.asyncio
+async def test_escalada_chama_a_equipe_com_o_motivo(patch_redis):
+    """A guarda oposta: quando ela sai de cena, alguém precisa saber e por quê."""
+    from app.services.helo import FalaDaHelo
+
+    avisou = await _posta_como_cliente(
+        FalaDaHelo(mensagem=MagicMock(), motivo="pergunta sobre garantia")
+    )
+
+    avisou.assert_awaited_once()
+    assert avisou.await_args.kwargs["motivo"] == "pergunta sobre garantia"
+
+
+def _ws_manda_mensagem(fala_da_helo):
+    """
+    Cliente manda mensagem pelo WEBSOCKET, com a Helô devolvendo `fala`.
+
+    O gêmeo do `_posta_como_cliente`, e o mais importante dos dois: o chat do
+    front conversa por WebSocket, e o POST é reserva. Uma guarda testada só no
+    POST está testada no caminho por onde a mensagem não passa.
+    """
+    from starlette.testclient import TestClient
+
+    user = _mock_user(UserRole.client, user_id=_CREATOR_ID)
+    ticket = _mock_ticket(creator_id=_CREATOR_ID)
+
+    sessao = AsyncMock()
+
+    async def _execute(*a, **k):
+        r = MagicMock()
+        r.scalar_one_or_none.return_value = ticket
+        r.scalar_one.return_value = _mock_message(sender=user)
+        return r
+
+    sessao.execute = _execute
+    sessao.add = MagicMock()
+    sessao.begin_nested = MagicMock(return_value=_SavepointDeMentira())
+
+    class _Ctx:
+        async def __aenter__(self):
+            return sessao
+
+        async def __aexit__(self, *a):
+            return False
+
+    async def _auth(token, db):
+        return user
+
+    with (
+        patch("app.routers.chat.AsyncSessionLocal", lambda: _Ctx()),
+        patch("app.routers.chat._authenticate_ws", _auth),
+        patch("app.routers.chat.commit_e_notificar", new=AsyncMock()),
+        patch("app.routers.chat._notify_other_party", new=AsyncMock()),
+        patch("app.routers.chat._apply_chat_transition", new=AsyncMock(return_value=None)),
+        patch("app.routers.chat.responde_triagem", new=AsyncMock(return_value=fala_da_helo)),
+        patch("app.routers.chat._avisa_equipe_da_helo", new=AsyncMock()) as avisou,
+    ):
+        tc = TestClient(app)
+        with tc.websocket_connect(f"/api/v1/ws/tickets/{_TICKET_ID}?token=x") as ws:
+            ws.send_text(json.dumps({"content": "o aparelho não liga desde ontem"}))
+            # Duas leituras sincronizam o teste com o servidor: a mensagem do
+            # cliente e a fala dela saem em broadcasts separados, e sem esperar
+            # as duas a asserção correria antes de o handler terminar.
+            ws.receive_json()
+            ws.receive_json()
+
+    return avisou
+
+
+def test_no_websocket_a_resposta_comum_nao_chama_a_equipe():
+    """
+    O caminho por onde o defeito aconteceria de verdade.
+
+    A versão do POST deste mesmo teste passava com a guarda removida do
+    WebSocket: a mutação sobreviveu, e o que ela deixava vivo era exatamente
+    seis notificações por chamado para toda a equipe, no único caminho que o
+    front usa.
+    """
+    from app.services.helo import FalaDaHelo
+
+    avisou = _ws_manda_mensagem(FalaDaHelo(mensagem=_mock_message(), motivo=None))
+
+    avisou.assert_not_awaited()
+
+
+def test_no_websocket_a_escalada_chama_a_equipe_com_o_motivo():
+    """A guarda oposta, no mesmo caminho."""
+    from app.services.helo import FalaDaHelo
+
+    avisou = _ws_manda_mensagem(
+        FalaDaHelo(mensagem=_mock_message(), motivo="pergunta sobre garantia")
+    )
+
+    avisou.assert_awaited_once()
+    assert avisou.await_args.kwargs["motivo"] == "pergunta sobre garantia"
+
+
+async def _avisos(*, motivo):
     """Roda o aviso da equipe e devolve os (título, texto) notificados."""
     from app.routers.chat import _avisa_equipe_da_helo
 
     db = _db_com_equipe(_mock_user(UserRole.technician), _mock_user(UserRole.admin))
 
     with patch("app.routers.chat.notify", new=AsyncMock()) as notificou:
-        await _avisa_equipe_da_helo(db, _mock_ticket(), escalou=escalou)
+        await _avisa_equipe_da_helo(db, _mock_ticket(), motivo=motivo)
 
     return [(c.args[3], c.args[4]) for c in notificou.await_args_list]
 
 
 @pytest.mark.asyncio
-async def test_triagem_concluida_avisa_que_o_chamado_espera_atendimento():
-    """A saída normal: ela perguntou, o cliente respondeu, e há o que ler."""
-    avisos = await _avisos(escalou=False)
-
-    assert len(avisos) == 2, "todo técnico e admin ativo é chamado, não um sorteado"
-    for titulo, texto in avisos:
-        assert "Triagem concluída" in titulo
-        assert "terminou a triagem" in texto
-
-
-@pytest.mark.asyncio
-async def test_escalada_nao_diz_que_a_helo_terminou_a_triagem():
+async def test_o_pedido_de_humano_e_a_saida_que_muda_a_fila():
     """
     Quando o cliente pede uma pessoa, a triagem NÃO terminou — foi interrompida.
 
-    O texto antigo era o mesmo nos dois casos, e neste mandava a equipe
+    O texto antigo era o mesmo nas duas saídas, e neste mandava a equipe
     procurar um resumo que não existe. Some também a informação que muda a
     ordem da fila: tem gente esperando gente.
     """
-    avisos = await _avisos(escalou=True)
+    avisos = await _avisos(motivo=MOTIVO_PEDIU_HUMANO)
 
-    assert len(avisos) == 2
+    assert len(avisos) == 2, "todo técnico e admin ativo é chamado, não um sorteado"
     for titulo, texto in avisos:
         assert "pediu atendimento humano" in titulo
         assert "falar com uma pessoa" in texto
         assert "terminou a triagem" not in texto
-        assert "Triagem concluída" not in titulo
+
+
+@pytest.mark.asyncio
+async def test_a_escalada_do_modelo_nao_se_disfarca_de_pedido_do_cliente():
+    """
+    A Fase 2 trouxe o mesmo defeito por outra porta.
+
+    As saídas viraram quatro — cliente pediu, modelo decidiu, teto de trocas,
+    IA muda — e três delas nada têm a ver com alguém ter pedido gente. Chegando
+    como "o cliente pediu para falar com uma pessoa", a equipe prioriza um
+    chamado por um motivo que não aconteceu, e a informação que de fato muda a
+    fila deixa de significar coisa alguma por aparecer sempre.
+    """
+    avisos = await _avisos(motivo="pergunta sobre garantia")
+
+    assert len(avisos) == 2
+    for titulo, texto in avisos:
+        assert "pediu atendimento humano" not in titulo
+        assert "pergunta sobre garantia" in texto, "o motivo do modelo chega inteiro à equipe"
 
 
 @pytest.mark.asyncio
@@ -1133,4 +1439,4 @@ async def test_as_duas_saidas_nao_mandam_o_mesmo_texto():
     refatoração e os testes acima continuam verdes se o texto unificado
     contiver as duas frases.
     """
-    assert await _avisos(escalou=True) != await _avisos(escalou=False)
+    assert await _avisos(motivo=MOTIVO_PEDIU_HUMANO) != await _avisos(motivo="teto de trocas")
