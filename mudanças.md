@@ -7,6 +7,265 @@ O changelog do produto (o que o cliente vê) fica em
 
 ---
 
+## 10/09/2026 — Quatro consertos vistos em produção, feriado no relógio do SLA e a biblioteca
+
+Dia de fechar o que o deploy da véspera revelou, e de integrar as duas frentes
+que estavam em branch. **186 commits desde o último registro aqui** (02/09 a
+10/09): a adoção do design system inteira, mais SLA, biblioteca e Helô.
+
+### ⚠️ Se algo quebrar hoje ou nos próximos dias, comece por aqui
+
+| Sintoma | Causa provável | Onde olhar |
+|---|---|---|
+| **A interface inteira parece outra** | é o esperado: a v1.13.0 subiu com o design system adotado nas 22 telas | `docs/design-system-migration/CHECKPOINT-4.md`, e as 50 fotos em `fase-16/screenshots` |
+| **Prazo de SLA menor do que era** | os prazos foram cortados pela metade em 08/09 e passaram a contar em **minutos** | `backend/app/utils/sla.py`; a Crítica responde em **30 min** |
+| **A Crítica mostra "30min" e não "0,5h"** | é o esperado: prazo que não é hora cheia agora aparece exato | `SlaConfigPage.tsx`, `descreveMinutos` |
+| **Não consigo resolver um chamado fora do prazo** | passou a exigir justificativa | `feat(sla): justificativa obrigatoria ao resolver chamado fora do prazo`, 09/09 |
+| **Prazo "pulou" um dia sem motivo** | feriado nacional entrou no relógio | `backend/app/utils/feriados.py`. Carnaval é **calculado** a partir da Páscoa; feriado municipal **não** entra |
+| **A Helô ficou calada num chamado** | por desenho: ela cala quando um humano já está na conversa | `fix: a Helo cala quando um humano ja esta na conversa`, 08/09 |
+| **Filtro de tela sumiu ou mudou de forma** | o `FilterSelect` foi removido; 17 filtros viraram `Select` nativo ou `Selector` com busca | decisão D9.2 |
+| **Excluir agora abre modal em vez de `confirm()`** | é o esperado: o último `confirm()` do sistema saiu | decisão D9.3 |
+| **`npm run dev` não abre** | a porta é a **5190**, não a 5173 | `frontend/vite.config.ts`, com `strictPort` |
+
+### Os quatro defeitos da /sla-config, e o que eles tinham em comum
+
+Vistos em produção, na tela de Configuração de SLA. Os quatro saíram em `fix:`
+separados, cada um com teste e cada um construindo sozinho.
+
+| # | O que se via | A causa |
+|---|---|---|
+| 1 | A Crítica mostrava **`nullh`** | um **tipo que mentia**: o front declarava `response_time_hours: number`, e o backend manda `int \| None` |
+| 2 | O subtítulo prometia **08h–18h** | a jornada real é 08h–17h, e o relógio do SLA já contava nove horas |
+| 3 | Editar a Crítica **apagava** os 30 min | o formulário só falava em horas inteiras, e não conseguia escrever aquele valor |
+| 4 | A lista mostrava **`—`** onde havia dado | o traço era certo enquanto o valor não existia; depois do #3, passou a esconder |
+
+O primeiro é o que vale guardar. `formatHours(null)` não explodia: `null < 24`
+é `true`, porque o `null` vira 0 na comparação, e a interpolação escrevia
+`${null}h`. **Nem o TypeScript nem o runtime deram um pio** — porque o tipo
+dizia que aquilo não podia acontecer. Tipo que mente custa mais caro que tipo
+ausente: ele desliga a única checagem que havia.
+
+E o conserto do #1 cobrou o #3 na hora: com `number | null`, o modal deixou de
+compilar, e foi assim que o vizinho apareceu.
+
+### O formulário passou a falar minutos, e por que não tem seletor de unidade
+
+A alternativa era um campo numérico com unidade (minutos/horas). Foi recusada
+por um motivo concreto: **trocar "minutos" para "horas" sem mexer no número
+multiplica o prazo por 60 sem pedir nada**, e o formulário passaria a converter
+nos dois sentidos — que é onde esse erro mora.
+
+Em minutos ele não converte: é a mesma unidade do banco, a ida e a volta são
+identidade, e o único número que existe tem um significado só. A conversão
+(`= 30min`, `= 3d`) é feedback de leitura, sem um segundo campo capaz de
+discordar dela. O mesmo formatador serve a lista e a dica de edição, com um caso
+prendendo isso de fora.
+
+### Feriado nacional no relógio, e o que ele NÃO cobre
+
+O SLA passou a pular feriado nacional. O **Carnaval é calculado** a partir da
+Páscoa (via `dateutil.easter`), e não escrito à mão ano a ano.
+
+⚠️ **Feriado municipal e ponto facultativo por decreto não entram.** Está dito
+no próprio arquivo, e é decisão consciente, não esquecimento.
+
+### Biblioteca de arquivos frequentes
+
+Arquivos que a equipe manda toda hora deixam de ser reenviados: ficam numa
+biblioteca e são anexados à conversa a partir de lá.
+
+### As três advisories do front, e nenhuma virou baseline
+
+O gate de dependências ficou vermelho com `js-yaml` (high), `vitest` e
+`baseline-browser-mapping`. **As três tinham correção**, então nenhuma entrou no
+baseline — a regra do arquivo é clara: baseline só quando não há alcance **e**
+não há conserto.
+
+A pergunta foi respondida antes do conserto assim mesmo. Para a *high*: o
+`js-yaml` só chega ao projeto por `eslint → @eslint/eslintrc`, o app não faz
+parse de YAML, e ele não aparece no `dist/`. Esse último ponto só vale porque a
+régua foi provada antes — quatro controles positivos (`recharts`, `axios`,
+`--surface`, `Plus Jakarta`) disparam no mesmo `grep`. **Grep negativo sobre
+código minificado não prova nada até você mostrar que ele sabe falar.**
+
+Efeito colateral bom: subir a família do `vitest` fechou junto as **três
+críticas** do `@vitest/browser` que estavam aceitas desde 02/09. O gate então
+acusou seis entradas obsoletas, e elas saíram.
+
+```
+critical 2 → 0   high 9 → 8   moderate 3 → 0   total 15 → 9
+```
+
+### A régua que passava por não ter medido — a segunda da família
+
+Descoberto ao consertar o #1: eu vinha rodando `npx tsc --noEmit` e reportando
+"limpo". O `tsconfig.json` do front é **arquivo-solução**: `"files": []` com
+três `references`. Medido:
+
+```
+npx tsc --noEmit --listFiles | grep -c "src/"   →   0
+```
+
+**Ele não olhava arquivo nenhum.** Quem pegou os erros foi o `npm run build`,
+que roda `tsc -b`. É a segunda ocorrência da mesma família — a primeira foi o
+eslint sem bloco para `.mjs`, que aplicava zero regra a todos os scripts.
+
+Use **`npm run typecheck`** (que é `tsc -b`). Registrado em `DECISOES.md`.
+
+---
+
+## 09/09/2026 — A v1.13.0 sai com o design system, e o SLA passa a cobrar justificativa
+
+### O que foi ao ar
+
+- **v1.13.0**, com a interface alinhada ao design system nas 22 telas.
+- Checkpoint 4 fechado pelo portão de evidência: catraca, fichas da §29 e as 50
+  fotos com a API interceptada.
+
+> **Correção deste registro.** Eu tinha escrito aqui que a *justificativa
+> obrigatória ao resolver fora do prazo* saiu junto. **Não saiu.** O commit
+> (`105878d`) é de 09/09, mas **não é ancestral de `5e7712b`** — a v1.13.0 foi
+> declarada sem ele. O erro veio de datar por dia em vez de por ancestralidade,
+> que é a mesma armadilha que o fatiamento do `Changelog.md` desfez hoje:
+> commit feito em branch tem data antes de estar na árvore. Ele consta como
+> não publicado.
+
+### O Checkpoint 4, em três pernas
+
+| medida | antes da Fase 11 | agora |
+|---|---:|---:|
+| pares de cor abaixo de AA (4,5:1) | 49 | **2** |
+| cores cheias de significado como texto | 28 | **1** |
+
+Os dois que restam são do `QuickReplyPicker` e do `ForbiddenPage`, telas que a
+fase não alcançou. **Nenhum é resíduo de tela migrada.**
+
+As 50 fotos fecharam duas execuções seguidas com **0 pixel de diferença**. A
+régua de comparação é por tolerância declarada (≤8 por canal, ≤1% de área, e a
+diferença tem de estar espalhada), e o comparador conta os nomes dos **dois
+lados** — num contador só, "nenhuma diferença" e "nenhum arquivo" são a mesma
+coisa.
+
+### A lição do dia: mecanismo certo, conjunto com buraco
+
+O mesmo defeito apareceu **quatro vezes**, em contextos sem relação:
+
+| onde | a régua acertava em | e o conjunto faltava |
+|---|---|---|
+| tabela de hashes do pacote | comparar SHA256 | a linha do `colors.css`, parada por quatro emendas |
+| `campos-aria` | as seis afirmações de cada caso | a lista de implementadores — o `Select` nunca entrou |
+| catraca de contraste | medir par de cor | o recorte do arquivo — contava comentário |
+| trava do gráfico | comparar duas leituras | a lista de elementos — lia `path`, ignorava `circle` |
+
+É difícil de ver porque **tudo que está dentro do conjunto passa**. A pergunta
+que o encontra: *sobre o que exatamente esta régua opera, e quem decidiu esse
+conjunto?*
+
+### Duas decisões de forma, que mudam o uso
+
+- **D9.2 — filtros:** os 17 filtros ganharam nome acessível; lista curta e
+  conhecida usa `Select` nativo, lista longa usa `Selector` com busca. O
+  `FilterSelect` ficou sem consumidor e **saiu**.
+- **D9.3 — exclusão:** virou uma forma só, modal com Cancelar/Excluir. O
+  **último `confirm()` do sistema saiu**.
+
+### O que eu recusei fazer, e por quê
+
+Pedi para rebatizar em português os dez commits mais antigos da branch. Não fiz:
+eles são os mais antigos, reescrevê-los trocaria o SHA dos 145, e **48
+referências** a esses SHAs virariam ponteiro órfão — 13 dentro das próprias
+mensagens, 31 em documentos versionados e 4 no repositório compartilhado já
+publicado. Um SHA morto continua com cara de SHA e não dá erro em lugar nenhum.
+
+---
+
+## 08/09/2026 — A Fase 16 fecha as 22 telas, e o SLA passa a contar em minutos
+
+O dia mais longo da adoção: 52 commits, um agente por tela, sem sobreposição.
+
+### O que muda para quem usa
+
+- **Prazos de SLA pela metade, contados em minutos.** A Crítica passou a
+  responder em 30 min — valor que a tela **não conseguia escrever**, e que
+  entrou por script. Foi essa impossibilidade que gerou os defeitos de 10/09.
+- **A Helô cala quando um humano já está na conversa.**
+- 13 telas perderam SVG solto, classe crua e cor de significado como texto.
+
+### O que as telas ganharam de acessibilidade
+
+Rótulos soltos ganharam campo, listas inalcançáveis por teclado passaram a ser
+alcançáveis, barras de comparação viraram `role="img"` com a proporção no rótulo
+(“Hardware: 6 chamados, 25% do total”), e o gráfico deixou de ler o tema.
+
+### A catraca contava a explicação do conserto como defeito
+
+Três das quatro cores cheias que restavam estavam **em comentário** — o próprio
+texto que cada tela migrada ganhou dizendo qual cor saiu dali.
+
+Isso é pior que um número errado: **cria pressão para não explicar o que foi
+removido**, que é o contrário do que esses comentários existem para fazer. O
+corte passou a ser um varredor de caractere que rastreia string, porque a classe
+mora dentro de uma string (`className="text-danger"`) — e um corte que apagasse
+strings mediria zero em tudo e pareceria consertado.
+
+E a **mutação me corrigiu no caminho**: eu tinha posto uma normalização de CRLF
+com um comentário dizendo que ela era a defesa contra a armadilha do `\r`.
+Mutei-a e o caso continuou passando — ela era **inerte**. Linha morta com cara
+de load-bearing é pior que linha nenhuma.
+
+---
+
+## 04/09/2026 — Fase 10, Checkpoint 2, e a prioridade passa a ter fonte única
+
+- Os **584 usos dos aliases do D2** saíram, com zero pixel de diferença.
+- A **prioridade** ganhou fonte única (`lib/prioridade.ts`) e o rótulo foi ao
+  feminino — "Crítica", e não "Crítico". Duas telas do mesmo sistema diziam
+  palavras diferentes para o mesmo dado.
+- O `Modal` passou a devolver o foco a quem o abriu; as abas passaram a entregar
+  o contrato que os papéis prometiam.
+- A galeria de componentes passou a ser medida **no navegador de verdade**, e
+  não só em DOM virtual — classe não é medida em jsdom, que não aplica CSS.
+
+---
+
+## 03/09/2026 — Os primitivos, e a catraca de contraste nasce
+
+Fases 7, 8 e 9. `Switch`, `Checkbox`, `FileUpload` e `Textarea` entraram como
+primitivos; os **três seletores viraram um**; `Table`, `Pagination`, `Badge`,
+`Input`, `Select` e `SlaChip` adotaram os tokens.
+
+Ganhos que o usuário sente: **ordenar tabela deixou de ser ação só de mouse**, a
+página atual da paginação deixou de ser um botão desabilitado, o erro de
+formulário passou a chegar a quem não o vê, e o estado do antivírus no anexo
+deixou de ser invisível.
+
+A **catraca de contraste** entrou no repo com 13 casos de prova e linha de base
+em 51 pares. Ela falha nos dois sentidos: subir reprova, e descer sem atualizar
+a linha de base também — número não afrouxa sozinho.
+
+---
+
+## 02/09/2026 — Os tokens do design system, e o gate de dependências
+
+Fases 0 a 6, e o Checkpoint 1.
+
+- Os sete arquivos de token entraram como **cópia byte a byte** do pacote, com
+  os SHA256 em `VERSION.md` (depois virou teste que se mede sozinho).
+- A fonte passou a vir do pacote, e não do Google — enquanto os dois conviveram,
+  ela era pedida duas vezes.
+- 563 classes `dark:` começaram a sair, onde havia token semântico.
+- O texto do botão primário no escuro saiu de **2,69:1 para 5,11:1**.
+
+### O gate de auditoria de dependências
+
+Nasceu aqui, com **chave por advisory e não por pacote**. A primeira versão
+indexava por pacote e tinha um buraco que anulava o gate: advisory **novo** num
+pacote já listado passava calado — justo o que ele existe para pegar. Pior, a
+justificativa acabava escrita para um aviso e herdada por todos os outros do
+mesmo pacote.
+
+---
+
 ## 01/09/2026 — Auditoria nova, e o dia em que produção recebeu quatro correções de segurança
 
 Auditoria independente do repositório inteiro, pedida do zero e não como
