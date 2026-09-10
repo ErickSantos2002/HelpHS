@@ -1,8 +1,15 @@
 """base vetorial da Helô
 
 Revision ID: a7v8w9x0y1z2
-Revises: z6u7v8w9x0y1
+Revises: b8c9d0e1f2a3
 Create Date: 2026-09-08
+
+RE-PARENTADA em 10/09/2026, de z6u7v8w9x0y1 para b8c9d0e1f2a3. A main mesclou
+as migrations de SLA (a7b8c9d0e1f2, b8c9d0e1f2a3), e a primeira delas nasceu
+do MESMO pai que esta. Dois heads fazem o `alembic upgrade head` recusar, e o
+`start.sh` morre antes do uvicorn com o EasyPanel mostrando build verde. Editar
+o pai foi seguro porque esta revision nunca rodou fora de banco local: nenhum
+`alembic_version` que importe a registra. As da main NAO foram tocadas.
 
 Três tabelas e uma extensão, para a Helô deixar de só triar e passar a
 responder com o manual do aparelho na mão.
@@ -108,7 +115,7 @@ from sqlalchemy import text
 from alembic import op
 
 revision: str = "a7v8w9x0y1z2"
-down_revision: str | None = "z6u7v8w9x0y1"
+down_revision: str | None = "b8c9d0e1f2a3"
 branch_labels: str | Sequence[str] | None = None
 depends_on: str | Sequence[str] | None = None
 

@@ -525,6 +525,12 @@ class Ticket(Base):
     sla_resolve_breach: Mapped[bool] = mapped_column(Boolean, default=False)
     sla_paused_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
     sla_total_paused_ms: Mapped[int] = mapped_column(Integer, default=0)
+    # Escrita por quem resolve, quando resolve fora do prazo. Nulo significa
+    # DUAS coisas legitimas e permanentes: resolvido dentro do prazo, ou
+    # resolvido antes de a exigencia existir. Nao ha default nem NOT NULL de
+    # proposito -- vazio apagaria a diferenca entre "nao precisou" e "nao
+    # preencheu".
+    sla_breach_justification: Mapped[str | None] = mapped_column(Text)
 
     # Notas internas (visível apenas para admin/técnico)
     technician_notes: Mapped[str | None] = mapped_column(Text, nullable=True)
@@ -798,8 +804,11 @@ class SLAConfig(Base):
 
     id: Mapped[uuid.UUID] = mapped_column(UUID(as_uuid=True), primary_key=True, default=uuid.uuid4)
     level: Mapped[SLALevel] = mapped_column(Enum(SLALevel), unique=True, nullable=False)
-    response_time_hours: Mapped[int] = mapped_column(Integer, nullable=False)
-    resolve_time_hours: Mapped[int] = mapped_column(Integer, nullable=False)
+    # MINUTOS, nao horas. Metade da resposta do nivel critico e 30 min, e isso
+    # nao cabe numa coluna de horas inteiras -- foi o que forcou a troca de
+    # unidade. Ver a migration a7b8c9d0e1f2.
+    response_time_minutes: Mapped[int] = mapped_column(Integer, nullable=False)
+    resolve_time_minutes: Mapped[int] = mapped_column(Integer, nullable=False)
     warning_threshold: Mapped[int] = mapped_column(Integer, default=80)
     is_active: Mapped[bool] = mapped_column(Boolean, default=True)
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now())

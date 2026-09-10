@@ -1,9 +1,11 @@
-import { useEffect, useMemo, useState } from "react";
+import { useEffect, useId, useMemo, useState } from "react";
 import { toast } from "sonner";
 import {
   Alert,
   Button,
+  Checkbox,
   Card,
+  Icon,
   Input,
   Modal,
   ModalFooter,
@@ -21,22 +23,8 @@ import {
   type QuickReply,
 } from "../../services/quickReplyService";
 
-// ── Icons ─────────────────────────────────────────────────────
-
-function IconEdit() {
-  return (
-    <svg className="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
-      <path strokeLinecap="round" strokeLinejoin="round" d="M11 5H6a2 2 0 00-2 2v11a2 2 0 002 2h11a2 2 0 002-2v-5m-1.414-9.414a2 2 0 112.828 2.828L11.828 15H9v-2.828l8.586-8.586z" />
-    </svg>
-  );
-}
-function IconTrash() {
-  return (
-    <svg className="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
-      <path strokeLinecap="round" strokeLinejoin="round" d="M19 7l-.867 12.142A2 2 0 0116.138 21H7.862a2 2 0 01-1.995-1.858L5 7m5 4v6m4-6v6m1-10V4a1 1 0 00-1-1h-4a1 1 0 00-1 1v3M4 7h16" />
-    </svg>
-  );
-}
+/* Os dois componentes locais de ícone saíram: os traçados eram, caractere a
+   caractere, os que o pacote publica como `edit` e `trash`. */
 
 const PAGE_SIZE = 10;
 
@@ -80,6 +68,10 @@ function QuickReplyModal({
   );
   const [saving, setSaving] = useState(false);
   const [error, setError] = useState<string | null>(null);
+
+  // Ligam o rotulo e a dica ao campo de atalho, que nao passa pelo `Input`.
+  const idAtalho = useId();
+  const idDicaAtalho = idAtalho + "-dica";
 
   async function handleSave() {
     if (form.shortcut.length < 2) {
@@ -127,13 +119,39 @@ function QuickReplyModal({
       <div className="space-y-4">
         {error && <Alert variant="warning">{error}</Alert>}
 
+        {/* O asterisco era `text-danger-400` — a rampa semântica pintada como
+            cor de TEXTO, que a §3.2 reprova. Passa para dentro do rótulo, como
+            no `ProfilePage`.
+
+            ── Por que este campo NÃO usa o primitivo `Input` ────────────
+            O `/` à esquerda é irmão do campo dentro de uma linha `flex`, e o
+            `Input` não tem slot de prefixo: ele desenha
+            `div.flex-col > label + input + p`, então a barra ficaria ao lado
+            do BLOCO inteiro (rótulo, campo e dica), centrada verticalmente
+            contra os três.
+
+            A saída de posicionar a barra por cima do campo, como o
+            `ProfilePage` faz com o `Spinner`, não serve aqui: lá o
+            `bottom-2.5` acerta o campo porque não há dica embaixo; aqui há, e
+            o mesmo deslocamento cairia sobre o texto da dica.
+
+            Então a ligação vai à mão — `htmlFor` + `id` do `useId`, mais o
+            `aria-describedby` que amarra a dica ao campo, que é o outro
+            brinde do primitivo. O que o campo perde é o `aria-invalid`, e ele
+            não teria uso: o erro deste formulário é um `Alert` no topo, não
+            uma mensagem por campo. */}
         <div className="space-y-1.5">
-          <label className="text-xs font-medium text-slate-400">
-            Atalho <span className="text-danger-400">*</span>
+          <label
+            htmlFor={idAtalho}
+            className="text-xs font-medium text-conteudo-muted"
+          >
+            Atalho *
           </label>
           <div className="flex items-center gap-2">
-            <span className="text-sm font-semibold text-slate-500">/</span>
+            <span className="text-sm font-semibold text-conteudo-muted">/</span>
             <input
+              id={idAtalho}
+              aria-describedby={idDicaAtalho}
               value={form.shortcut}
               onChange={(e) =>
                 setForm((f) => ({ ...f, shortcut: sanitizeShortcut(e.target.value) }))
@@ -141,10 +159,10 @@ function QuickReplyModal({
               placeholder="bomdia"
               maxLength={50}
               autoFocus
-              className="w-full rounded-lg border border-border bg-background-elevated px-3 py-2 text-sm text-slate-100 placeholder:text-slate-500 focus:outline-none focus:ring-2 focus:ring-primary focus:border-transparent transition-colors"
+              className="w-full rounded-lg border border-borda-control bg-surface-elevated px-3 py-2 text-sm text-conteudo placeholder:text-conteudo-muted focus:outline-none focus:ring-2 focus:ring-action focus:border-transparent transition-colors"
             />
           </div>
-          <p className="text-xs text-slate-500">
+          <p id={idDicaAtalho} className="text-xs text-conteudo-muted">
             É o que o técnico digita depois da barra no chat. Sem espaços nem acentos.
           </p>
         </div>
@@ -166,15 +184,12 @@ function QuickReplyModal({
           maxLength={4000}
         />
 
-        <label className="flex cursor-pointer items-center gap-2 text-sm text-slate-300">
-          <input
-            type="checkbox"
-            checked={form.isActive}
-            onChange={(e) => setForm((f) => ({ ...f, isActive: e.target.checked }))}
-            className="h-4 w-4 cursor-pointer accent-primary"
-          />
-          Disponível no chat
-        </label>
+        <Checkbox
+          checked={form.isActive}
+          onChange={(ativo) => setForm((f) => ({ ...f, isActive: ativo }))}
+          label="Disponível no chat"
+          className="items-center"
+        />
       </div>
 
       <ModalFooter>
@@ -251,10 +266,10 @@ export default function QuickRepliesPage() {
       {/* Header */}
       <div className="flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
         <div>
-          <h1 className="text-xl font-extrabold text-slate-900 dark:text-slate-100">
+          <h1 className="text-xl font-extrabold text-conteudo-heading">
             Respostas Rápidas
           </h1>
-          <p className="mt-1 text-sm text-slate-500">
+          <p className="mt-1 text-sm text-conteudo-muted">
             Mensagens prontas que a equipe insere no chat digitando <code>/atalho</code>
           </p>
         </div>
@@ -272,16 +287,28 @@ export default function QuickRepliesPage() {
       {loadError && <Alert variant="danger">{loadError}</Alert>}
 
       <Card padding="none">
-        {/* Busca */}
-        <div className="border-b border-slate-200 p-3 dark:border-border">
+        {/* Busca
+
+            O nome acessível do campo saía do `placeholder`, e o placeholder
+            **some assim que a pessoa digita**: um campo cujo nome desaparece
+            ao ser usado não tem nome. Quem volta ao campo com leitor de tela
+            ouve "caixa de edição" e o que já digitou — nunca de que busca se
+            trata.
+
+            `aria-label` fixo resolve sem tocar no leiaute da barra, que é a
+            razão de não haver rótulo visível aqui: a busca ocupa a largura
+            inteira do topo do `Card`. É a mesma forma do `KBListPage`, do
+            `UsersPage` e do `ProductsPage`. */}
+        <div className="border-b border-borda p-3">
           <input
             value={search}
             onChange={(e) => {
               setSearch(e.target.value);
               setPage(1);
             }}
+            aria-label="Buscar respostas rápidas"
             placeholder="Buscar por atalho, título ou conteúdo…"
-            className="w-full rounded-lg border border-border bg-background-elevated px-3 py-2 text-sm text-slate-100 placeholder:text-slate-500 focus:outline-none focus:ring-2 focus:ring-primary focus:border-transparent transition-colors"
+            className="w-full rounded-lg border border-borda-control bg-surface-elevated px-3 py-2 text-sm text-conteudo placeholder:text-conteudo-muted focus:outline-none focus:ring-2 focus:ring-action focus:border-transparent transition-colors"
           />
         </div>
 
@@ -290,38 +317,43 @@ export default function QuickRepliesPage() {
             <Spinner />
           </div>
         ) : paged.length === 0 ? (
-          <div className="px-4 py-10 text-center text-sm text-slate-500">
+          <div className="px-4 py-10 text-center text-sm text-conteudo-muted">
             {replies.length === 0
               ? "Nenhuma resposta rápida cadastrada ainda."
               : "Nenhuma resposta encontrada para esta busca."}
           </div>
         ) : (
-          <ul className="divide-y divide-slate-200 dark:divide-border">
+          <ul className="divide-y divide-borda">
             {paged.map((reply) => (
               <li
                 key={reply.id}
-                className="flex items-start gap-3 px-4 py-3 transition-colors hover:bg-slate-50 dark:hover:bg-background-elevated"
+                className="flex items-start gap-3 px-4 py-3 transition-colors hover:bg-surface-elevated"
               >
                 <div className="min-w-0 flex-1">
                   <div className="flex flex-wrap items-center gap-2">
-                    <span className="rounded-md bg-primary/10 px-1.5 py-0.5 text-xs font-semibold text-primary">
+                    <span className="rounded-md bg-tint-primary px-1.5 py-0.5 text-xs font-semibold text-on-tint-primary">
                       /{reply.shortcut}
                     </span>
-                    <span className="truncate text-sm font-medium text-slate-800 dark:text-slate-200">
+                    <span className="truncate text-sm font-medium text-conteudo">
                       {reply.title}
                     </span>
+                    {/* O selo "Inativa" era o par que a catraca cobrava desta
+                        tela, e só no ESCURO: `dark:bg-surface-elevated` com
+                        `dark:text-slate-500` dá 2,85:1. As duas faixas passam
+                        a ser tinta + par da tinta, como o `Badge` do pacote —
+                        e aí o claro e o escuro saem juntos do mesmo token. */}
                     <span
                       className={cn(
                         "rounded-md px-1.5 py-0.5 text-[10px] font-medium",
                         reply.is_active
-                          ? "bg-success/10 text-success-700 dark:text-success-400"
-                          : "bg-slate-200 text-slate-600 dark:bg-background-elevated dark:text-slate-500",
+                          ? "bg-tint-success text-on-tint-success"
+                          : "bg-tint-neutral text-on-tint-neutral",
                       )}
                     >
                       {reply.is_active ? "Ativa" : "Inativa"}
                     </span>
                   </div>
-                  <p className="mt-1 line-clamp-2 text-xs text-slate-500">{reply.content}</p>
+                  <p className="mt-1 line-clamp-2 text-xs text-conteudo-muted">{reply.content}</p>
                 </div>
 
                 <div className="flex shrink-0 gap-1">
@@ -331,16 +363,16 @@ export default function QuickRepliesPage() {
                       setModalOpen(true);
                     }}
                     aria-label={`Editar ${reply.shortcut}`}
-                    className="cursor-pointer rounded-lg p-1.5 text-slate-400 transition-colors hover:bg-primary/10 hover:text-primary"
+                    className="cursor-pointer rounded-lg p-1.5 text-conteudo-muted transition-colors hover:bg-tint-primary hover:text-on-tint-primary"
                   >
-                    <IconEdit />
+                    <Icon name="edit" size={16} strokeWidth={2} />
                   </button>
                   <button
                     onClick={() => setDeleteTarget(reply)}
                     aria-label={`Excluir ${reply.shortcut}`}
-                    className="cursor-pointer rounded-lg p-1.5 text-slate-400 transition-colors hover:bg-red-50 hover:text-red-500 dark:hover:bg-red-900/20 dark:hover:text-red-400"
+                    className="cursor-pointer rounded-lg p-1.5 text-conteudo-muted transition-colors hover:bg-tint-danger hover:text-on-tint-danger"
                   >
-                    <IconTrash />
+                    <Icon name="trash" size={16} strokeWidth={2} />
                   </button>
                 </div>
               </li>
@@ -371,11 +403,11 @@ export default function QuickRepliesPage() {
 
       {deleteTarget && (
         <Modal open onClose={() => setDeleteTarget(null)} title="Excluir resposta rápida" size="sm">
-          <p className="text-sm text-slate-300">
+          <p className="text-sm text-conteudo">
             A resposta <span className="font-semibold">/{deleteTarget.shortcut}</span> será removida
             e deixará de aparecer no chat.
           </p>
-          <p className="mt-2 text-xs text-slate-500">Ação irreversível.</p>
+          <p className="mt-2 text-xs text-conteudo-muted">Ação irreversível.</p>
           <ModalFooter>
             <Button variant="secondary" onClick={() => setDeleteTarget(null)}>
               Cancelar
