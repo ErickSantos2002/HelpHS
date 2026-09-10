@@ -56,6 +56,11 @@ class InterruptorDaIA(AppBaseModel):
 class TicketStatusUpdate(AppBaseModel):
     status: TicketStatus
     comment: str | None = Field(default=None, max_length=1000)
+    # Obrigatória quando o chamado é resolvido FORA do prazo — a regra vive
+    # na API, não aqui: só ela conhece o prazo do chamado, e um schema não
+    # tem como saber se este chamado específico estourou. Aqui o campo é
+    # opcional porque resolver dentro do prazo não exige nada.
+    sla_breach_justification: str | None = Field(default=None, max_length=2000)
 
 
 class TicketAssign(AppBaseModel):
@@ -68,6 +73,11 @@ class TicketObservationUpdate(AppBaseModel):
 
 class TicketResolve(AppBaseModel):
     resolution_note: str = Field(..., min_length=1, max_length=5000)
+    # Obrigatória quando o chamado é resolvido FORA do prazo — a regra vive
+    # na API, não aqui: só ela conhece o prazo do chamado, e um schema não
+    # tem como saber se este chamado específico estourou. Aqui o campo é
+    # opcional porque resolver dentro do prazo não exige nada.
+    sla_breach_justification: str | None = Field(default=None, max_length=2000)
 
 
 class TicketReopen(AppBaseModel):
