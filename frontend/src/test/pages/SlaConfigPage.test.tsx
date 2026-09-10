@@ -244,47 +244,95 @@ describe("SlaConfigPage", () => {
  * fraca registrado no DECISOES.md.
  */
 describe("prazo que não é hora cheia", () => {
-  it("mostra um traço, e não 'nullh', quando as horas vêm nulas", async () => {
-    // 30 min: o valor real da Crítica em produção.
+  it("mostra o prazo exato, e nao o traco nem 'nullh'", async () => {
+    // 30 min: o valor real da Critica em producao.
+    //
+    // Este caso ja pediu as tres coisas, em tres etapas, e a mudanca de cada
+    // uma foi um conserto de verdade:
+    //
+    //   "nullh"  o campo derivado chegava nulo e a tela concatenava "h"
+    //   "—"      certo enquanto a lista so tinha o derivado: sem valor,
+    //            traco com nota e melhor que numero inventado
+    //   "30min"  agora que a lista tem os minutos, o traco esconderia dado
+    //            que existe
+    //
+    // O que NAO mudou nas tres foi a pergunta: a tela esta dizendo a verdade
+    // sobre o que ela tem?
     await montar([config("critical", { response_time_hours: null, response_time_minutes: 30 })]);
 
     const cartao = screen.getByText("Resposta").closest("div")!.parentElement!;
     expect(cartao).not.toHaveTextContent("nullh");
-    expect(within(cartao).getByText("—")).toBeInTheDocument();
+    expect(within(cartao).getByText("30min")).toBeInTheDocument();
+    expect(within(cartao).queryByText("—")).not.toBeInTheDocument();
   });
 
-  it("diz por que o campo está vazio, e diz para o leitor de tela também", async () => {
-    // Um traço sozinho é ambíguo: pode ser "não configurado", pode ser "zero".
-    // A nota é o que separa os dois, e ela não pode viver só no `title` —
-    // `title` não é anunciado de forma confiável por leitor de tela nenhum.
+  it("a lista e o formulario dizem o MESMO prazo, com as mesmas palavras", async () => {
+    // O formatador e um so (`descreveMinutos`), e este caso e o que prende
+    // isso de fora: a linha e a dica de edicao do mesmo prazo tem de sair
+    // iguais. Se alguem duplicar a divisao um dia, os dois textos divergem e
+    // ninguem percebe ate comparar as duas telas lado a lado.
+    await montar([config("critical", { response_time_hours: null, response_time_minutes: 90 })]);
+
+    const cartao = screen.getByText("Resposta").closest("div")!.parentElement!;
+    expect(within(cartao).getByText("1h 30min")).toBeInTheDocument();
+
+    await userEvent.click(
+      screen.getByRole("button", { name: "Editar SLA da prioridade Crítica" }),
+    );
+    const dialogo = screen.getByRole("dialog", { name: "Editar SLA — Crítica" });
+    expect(within(dialogo).getByText("= 1h 30min")).toBeInTheDocument();
+  });
+
+  it("a nota do traco saiu junto com o traco", async () => {
+    // Controle: a nota so fazia sentido ao lado do "—". Deixa-la para tras
+    // seria um leitor de tela anunciando "nao representavel em horas" em cima
+    // de um numero que esta escrito ali.
     await montar([config("critical", { response_time_hours: null, response_time_minutes: 30 })]);
 
     expect(
-      screen.getByText(/não representável em horas/i),
-    ).toBeInTheDocument();
+      screen.queryByText(/não representável em horas/i),
+    ).not.toBeInTheDocument();
   });
 
-  it("não escreve NaN na barra quando os dois prazos vêm nulos", async () => {
-    // A barra divide um prazo pelo outro, e `null / null` é NaN.
+
+  it("nao escreve NaN na barra nem com um divisor que o contrato proibe", async () => {
+    // A PREMISSA DESTE CASO MUDOU, e o comentario antigo ficaria mentindo.
     //
-    // O sintoma OBSERVADO, e não o que eu supus: com NaN o React não escreve
-    // a largura de jeito nenhum — antes do conserto este seletor devolvia
-    // `null`, com o elemento da barra existindo na árvore. Por isso o caso
-    // afirma as duas coisas: que a barra ESTÁ lá e que a largura é um valor
-    // de verdade. Só a segunda passaria por engano se a barra sumisse.
+    // Ele nasceu quando a barra dividia os campos DERIVADOS, que chegam nulos:
+    // `null / null` e NaN, e o sintoma observado era o React nao escrever
+    // largura NENHUMA -- o seletor devolvia `null` com o elemento existindo.
+    //
+    // Agora a barra divide os MINUTOS, que sao `int` NOT NULL com `ge=1` no
+    // backend. Pelo contrato, NaN deixou de ser alcancavel. Entao o caso passa
+    // a exercitar o unico divisor que ainda produziria lixo -- zero --, que o
+    // contrato proibe mas a REDE pode entregar: "nao pode ser zero" e promessa
+    // de outro processo, nao garantia deste.
+    //
+    // Afirma as duas coisas: que a barra ESTA la e que a largura e valor de
+    // verdade. So a segunda passaria por engano se a barra sumisse.
     await montar([
       config("critical", {
         response_time_hours: null,
         response_time_minutes: 30,
         resolve_time_hours: null,
-        resolve_time_minutes: 90,
+        resolve_time_minutes: 0,
       }),
     ]);
 
     const barra = document.querySelector<HTMLElement>("[aria-hidden='true'][style*='width']");
     expect(barra).not.toBeNull();
-    expect(barra!.style.width).not.toContain("NaN");
+
+    // AFIRMA O VALOR, e não a ausência de lixo. Medido por mutação: tirar a
+    // guarda do divisor zero NÃO produz NaN — `30 / 0` é `Infinity`, e
+    // `Math.min(Infinity, 100)` dá **100**. A barra sai CHEIA, dizendo que a
+    // resposta consome todo o prazo de resolução.
+    //
+    // Procurar "NaN" deixava isso passar: o defeito não é um valor impossível
+    // de ler, é um valor plausível e errado. Sem prazo de resolução não há
+    // proporção nenhuma a desenhar, e a única largura honesta é zero.
+    expect(barra!.style.width).toBe("0%");
   });
+
 
   it("os 30 minutos vao e voltam pelo formulario sem virar outro numero", async () => {
     // O CASO QUE FALTAVA, e o defeito que ele fecha era perda de dado.

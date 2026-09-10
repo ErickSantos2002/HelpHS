@@ -53,34 +53,17 @@ function ordemDePrioridade(p: string): number {
 
 // ── Helpers ───────────────────────────────────────────────────
 
-/**
- * `null` NÃO é um caso de borda aqui — é o caso normal da Crítica.
- *
- * `response_time_hours` e `resolve_time_hours` são derivados de
- * `*_time_minutes` no backend e valem `None` quando o prazo não é hora cheia.
- * A Crítica tem 30 min, então chegam nulos por desenho, todo dia.
- *
- * A versão anterior recebia `h: number` e não se defendia, porque o tipo dizia
- * que não precisava. `null < 24` é `true` (o `null` vira 0 na comparação), a
- * interpolação escrevia `${null}h`, e a tela mostrava "nullh" em produção —
- * sem erro de TypeScript, sem exceção em runtime, sem nada. Tipo que mente
- * custa mais caro que tipo ausente: ele desliga a única checagem que havia.
- */
-function formatHours(h: number | null | undefined) {
-  if (h === null || h === undefined) return null;
-  return descreveMinutos(h * MINUTOS_POR_HORA);
-}
-
 const MINUTOS_POR_HORA = 60;
 const MINUTOS_POR_DIA = 24 * MINUTOS_POR_HORA;
 
 /**
  * O prazo em dias, horas e minutos, na unidade em que ele é guardado.
  *
- * É a ÚNICA implementação da regra: `formatHours` delega para cá em vez de
- * repetir a divisão. Dois formatadores do mesmo prazo, um em horas e outro em
- * minutos, iam divergir na primeira vez que alguém mexesse num só — e o valor
- * que diverge aqui é o que a pessoa lê antes de salvar.
+ * É a ÚNICA implementação da regra, e agora com os DOIS chamadores da tela: a
+ * linha da lista e a dica do formulário. Dois formatadores do mesmo prazo
+ * divergiriam na primeira vez que alguém mexesse num só — e aqui a divergência
+ * apareceria entre o que a pessoa lê na lista e o que ela lê antes de salvar,
+ * que é o pior lugar possível para dois números discordarem.
  *
  * Sem casa decimal em lugar nenhum: 30 min é "30min", não "0,5h".
  */
@@ -96,25 +79,23 @@ function descreveMinutos(total: number): string {
 }
 
 /**
- * O prazo, ou um traço quando ele não cabe em horas.
+ * O prazo, na mesma unidade em que ele é guardado e editado.
  *
- * O traço sozinho é ambíguo — pode ser "não configurado", pode ser zero — e a
- * nota é o que separa os dois. Ela vive em `sr-only` e não em `title`: `title`
- * não é anunciado de forma confiável por leitor de tela nenhum, e o valor mais
- * importante da tela não pode ficar mudo para quem não vê o traço.
+ * Aqui havia um traço com a nota "não representável em horas", e ele era a
+ * resposta CERTA enquanto a lista só tinha o campo derivado, que chega nulo
+ * quando o prazo não é hora cheia. Assim que o formulário passou a falar
+ * minutos, o valor exato ficou disponível também aqui — e traço onde há dado é
+ * a tela escondendo o que tem.
+ *
+ * `descreveMinutos` é o MESMO formatador da dica de edição. A lista e o
+ * formulário dizendo o mesmo prazo com palavras diferentes seria o defeito
+ * seguinte, e é o tipo de divergência que ninguém percebe até alguém comparar
+ * as duas telas lado a lado.
  */
-function Prazo({ horas }: { horas: number | null | undefined }) {
-  const texto = formatHours(horas);
-  if (texto !== null) {
-    return <p className="text-sm font-semibold text-conteudo-heading mt-0.5">{texto}</p>;
-  }
+function Prazo({ minutos }: { minutos: number }) {
   return (
-    <p
-      className="text-sm font-semibold text-conteudo-heading mt-0.5"
-      title="Prazo não representável em horas inteiras — edite para ver o valor exato."
-    >
-      <span aria-hidden="true">—</span>
-      <span className="sr-only">não representável em horas</span>
+    <p className="text-sm font-semibold text-conteudo-heading mt-0.5">
+      {descreveMinutos(minutos)}
     </p>
   );
 }
@@ -328,13 +309,14 @@ export default function SlaConfigPage() {
             <div className="divide-y divide-borda">
               {configs.map((c) => {
                 const rotulo = rotuloDePrioridade(c.level);
-                // Os dois prazos podem ser nulos, e `null / null` e NaN --
-                // `width: NaN%` e atributo invalido, descartado em silencio.
-                // Sem prazo nao ha proporcao a desenhar: a barra fica em zero.
-                const proporcao =
-                  c.response_time_hours != null && c.resolve_time_hours
-                    ? Math.min((c.response_time_hours / c.resolve_time_hours) * 100, 100)
-                    : 0;
+                // Em minutos nao existe o NaN que o campo derivado produzia:
+                // `*_time_minutes` e `int` NOT NULL, e o backend exige `ge=1`.
+                // A guarda do zero fica assim mesmo -- ela custa nada e o dado
+                // vem da REDE, onde "nao pode ser zero" e promessa de outro
+                // processo, nao garantia deste.
+                const proporcao = c.resolve_time_minutes
+                  ? Math.min((c.response_time_minutes / c.resolve_time_minutes) * 100, 100)
+                  : 0;
                 return (
                   <div key={c.id} className="flex items-center gap-4 px-4 py-4 hover:bg-surface-elevated/40 transition-colors">
 
@@ -364,7 +346,7 @@ export default function SlaConfigPage() {
                           <Icon name="clock" size={16} strokeWidth={2} className="text-conteudo-muted" />
                           <div>
                             <p className="text-[10px] text-conteudo-muted leading-none">Resposta</p>
-                            <Prazo horas={c.response_time_hours} />
+                            <Prazo minutos={c.response_time_minutes} />
                           </div>
                         </div>
 
@@ -373,7 +355,7 @@ export default function SlaConfigPage() {
                           <Icon name="shield" size={16} strokeWidth={2} className="text-conteudo-muted" />
                           <div>
                             <p className="text-[10px] text-conteudo-muted leading-none">Resolução</p>
-                            <Prazo horas={c.resolve_time_hours} />
+                            <Prazo minutos={c.resolve_time_minutes} />
                           </div>
                         </div>
 
