@@ -255,7 +255,7 @@ export default function SlaConfigPage() {
       <div>
         <h1 className="text-2xl font-bold text-conteudo-heading">Configurações de SLA</h1>
         <p className="text-conteudo-muted text-sm mt-0.5">
-          Tempos limite de resposta e resolução por nível de prioridade (seg–sex, 08h–18h)
+          Tempos limite de resposta e resolução por nível de prioridade (seg–sex, 08h–17h)
         </p>
       </div>
 

@@ -275,3 +275,20 @@ describe("prazo que não é hora cheia", () => {
     expect(screen.getByText("1d 4h")).toBeInTheDocument();
   });
 });
+
+/**
+ * Segundo achado do mesmo dia: o subtítulo prometia uma jornada que não é a da
+ * empresa. Dizia "08h–18h"; a real é **08h–17h**. Número em texto de tela é
+ * promessa ao usuário, e esta estava calculando errado a expectativa de quem
+ * abre um chamado às 17h30.
+ */
+describe("jornada no subtítulo", () => {
+  it("diz a jornada real, 08h–17h", async () => {
+    await montar();
+
+    expect(
+      screen.getByText(/seg–sex, 08h–17h/),
+    ).toBeInTheDocument();
+    expect(screen.queryByText(/18h/)).not.toBeInTheDocument();
+  });
+});
