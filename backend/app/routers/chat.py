@@ -348,7 +348,12 @@ async def create_message(
     # fala mandaria seis notificações por chamado para todo técnico e
     # todo admin — cinco delas dizendo que a triagem acabou enquanto a
     # conversa seguia. Notificação que chega sempre deixa de ser lida.
-    if fala_da_helo is not None and fala_da_helo.escalou:
+    # `motivo is not None` em vez de `.escalou`: a guarda e o argumento passam
+    # a olhar o MESMO campo. `escalou` é property, e property não estreita
+    # tipo — o mypy via `str | None` chegando onde se espera `str`, e estava
+    # certo: a property pode divergir do campo num refactor, o `is not None`
+    # não pode.
+    if fala_da_helo is not None and fala_da_helo.motivo is not None:
         await _avisa_equipe_da_helo(db, ticket, motivo=fala_da_helo.motivo)
 
     # Auto status transition based on who is sending
@@ -628,7 +633,7 @@ async def websocket_chat(
                 if user.id == ticket.creator_id:
                     fala_da_helo = await _fala_da_helo_sem_derrubar(db, ticket, user, msg.content)
                     # Só na escalada — ver o mesmo trecho no caminho do POST.
-                    if fala_da_helo is not None and fala_da_helo.escalou:
+                    if fala_da_helo is not None and fala_da_helo.motivo is not None:
                         await _avisa_equipe_da_helo(db, ticket, motivo=fala_da_helo.motivo)
 
                 new_status_value = await _apply_chat_transition(db, ticket, user)
