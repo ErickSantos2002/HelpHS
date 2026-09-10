@@ -8,6 +8,7 @@ import { cn } from "../../lib/utils";
 import { formatCnpj, onlyDigits } from "../../lib/documents";
 import {
   Button,
+  Icon,
   Input,
   Modal,
   ModalFooter,
@@ -46,72 +47,6 @@ import {
   type GroupNote,
   type CompanyNote,
 } from "../../services/groupService";
-
-// ── Icons ─────────────────────────────────────────────────────
-
-function IconPlus() {
-  return (
-    <svg className="w-4 h-4 shrink-0" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
-      <path strokeLinecap="round" strokeLinejoin="round" d="M12 4v16m8-8H4" />
-    </svg>
-  );
-}
-function IconEdit() {
-  return (
-    <svg className="w-4 h-4 shrink-0" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
-      <path strokeLinecap="round" strokeLinejoin="round" d="M11 5H6a2 2 0 00-2 2v11a2 2 0 002 2h11a2 2 0 002-2v-5m-1.414-9.414a2 2 0 112.828 2.828L11.828 15H9v-2.828l8.586-8.586z" />
-    </svg>
-  );
-}
-function IconTrash() {
-  return (
-    <svg className="w-4 h-4 shrink-0" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
-      <path strokeLinecap="round" strokeLinejoin="round" d="M19 7l-.867 12.142A2 2 0 0116.138 21H7.862a2 2 0 01-1.995-1.858L5 7m5 4v6m4-6v6m1-10V4a1 1 0 00-1-1h-4a1 1 0 00-1 1v3M4 7h16" />
-    </svg>
-  );
-}
-function IconNote() {
-  return (
-    <svg className="w-4 h-4 shrink-0" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
-      <path strokeLinecap="round" strokeLinejoin="round" d="M9 12h6m-6 4h6m2 5H7a2 2 0 01-2-2V5a2 2 0 012-2h5.586a1 1 0 01.707.293l5.414 5.414a1 1 0 01.293.707V19a2 2 0 01-2 2z" />
-    </svg>
-  );
-}
-function IconX() {
-  return (
-    <svg className="w-4 h-4 shrink-0" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
-      <path strokeLinecap="round" strokeLinejoin="round" d="M6 18L18 6M6 6l12 12" />
-    </svg>
-  );
-}
-function IconChevronRight() {
-  return (
-    <svg className="w-4 h-4 shrink-0" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
-      <path strokeLinecap="round" strokeLinejoin="round" d="M9 5l7 7-7 7" />
-    </svg>
-  );
-}
-function IconChevronLeft() {
-  return (
-    <svg className="w-4 h-4 shrink-0" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
-      <path strokeLinecap="round" strokeLinejoin="round" d="M15 19l-7-7 7-7" />
-    </svg>
-  );
-}
-function IconBuilding() {
-  return (
-    <svg className="w-5 h-5 shrink-0" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={1.75}>
-      <path strokeLinecap="round" strokeLinejoin="round" d="M19 21V5a2 2 0 00-2-2H7a2 2 0 00-2 2v16m14 0h2m-2 0h-5m-9 0H3m2 0h5M9 7h1m-1 4h1m4-4h1m-1 4h1m-5 10v-5a1 1 0 011-1h2a1 1 0 011 1v5m-4 0h4" />
-    </svg>
-  );
-}
-function IconUsers() {
-  return (
-    <svg className="w-4 h-4 shrink-0" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={1.75}>
-      <path strokeLinecap="round" strokeLinejoin="round" d="M12 4.354a4 4 0 110 5.292M15 21H3v-1a6 6 0 0112 0v1zm0 0h6v-1a6 6 0 00-9-5.197M13 7a4 4 0 11-8 0 4 4 0 018 0z" />
-    </svg>
-  );
-}
 
 // ── Form schemas ──────────────────────────────────────────────
 
@@ -256,7 +191,7 @@ function AddCompanyModal({
   return (
     <Modal open onClose={onClose} title="Adicionar Empresa" size="2xl">
       {/* Tabs */}
-      <div className="flex border-b border-border mb-4 -mt-1">
+      <div className="flex border-b border-borda mb-4 -mt-1">
         {(["suggestions", "manual"] as const).map((t) => (
           <button
             key={t}
@@ -264,8 +199,8 @@ function AddCompanyModal({
             className={cn(
               "px-4 py-2 text-sm font-medium border-b-2 transition-colors cursor-pointer",
               tab === t
-                ? "border-primary text-primary"
-                : "border-transparent text-slate-500 hover:text-slate-300",
+                ? "border-action text-conteudo-link"
+                : "border-transparent text-conteudo-muted hover:text-conteudo",
             )}
           >
             {t === "suggestions" ? "Empresas cadastradas" : "Cadastrar nova"}
@@ -277,24 +212,24 @@ function AddCompanyModal({
       {tab === "suggestions" && (
         <div className="space-y-3">
           {confirmando ? (
-            <div className="rounded-lg border border-border p-4 space-y-3">
+            <div className="rounded-lg border border-borda p-4 space-y-3">
               <div>
-                <p className="text-sm font-medium text-slate-100">{confirmando.company_name}</p>
+                <p className="text-sm font-medium text-conteudo-heading">{confirmando.company_name}</p>
                 {confirmando.cnpj && (
-                  <p className="text-xs text-slate-500 mt-0.5">{formatCnpj(confirmando.cnpj)}</p>
+                  <p className="text-xs text-conteudo-muted mt-0.5">{formatCnpj(confirmando.cnpj)}</p>
                 )}
               </div>
               <div>
-                <p className="text-xs text-slate-400 mb-1.5">
+                <p className="text-xs text-conteudo-muted mb-1.5">
                   {confirmando.clients.length === 1
                     ? "Este cliente será vinculado à empresa:"
                     : `Estes ${confirmando.clients.length} clientes serão vinculados à empresa:`}
                 </p>
-                <ul className="max-h-48 overflow-y-auto divide-y divide-border rounded border border-border">
+                <ul className="max-h-48 overflow-y-auto divide-y divide-borda rounded border border-borda">
                   {confirmando.clients.map((c) => (
                     <li key={c.id} className="px-3 py-2">
-                      <p className="text-sm text-slate-200 truncate">{c.name}</p>
-                      <p className="text-xs text-slate-500 truncate">{c.email}</p>
+                      <p className="text-sm text-conteudo truncate">{c.name}</p>
+                      <p className="text-xs text-conteudo-muted truncate">{c.email}</p>
                     </li>
                   ))}
                 </ul>
@@ -311,6 +246,10 @@ function AddCompanyModal({
           ) : (
           <>
           <Input
+            // O `Input` sem `label` não desenha rótulo nenhum, e placeholder
+            // some ao digitar: quem volta ao campo não sabe mais o que ele
+            // filtra.
+            aria-label="Buscar empresa por nome ou CNPJ"
             placeholder="Buscar por nome ou CNPJ..."
             value={search}
             onChange={(e) => { setSearch(e.target.value); setSuggPage(1); }}
@@ -318,7 +257,7 @@ function AddCompanyModal({
           {loadingSugg ? (
             <div className="flex justify-center py-6"><Spinner /></div>
           ) : filtered.length === 0 ? (
-            <div className="text-center py-8 text-slate-500 dark:text-slate-400 text-sm">
+            <div className="text-center py-8 text-conteudo-muted text-sm">
               {suggestions.length === 0
                 ? "Nenhum cliente com empresa cadastrada ainda."
                 : "Nenhuma empresa encontrada."}
@@ -330,23 +269,23 @@ function AddCompanyModal({
             </div>
           ) : (
             <div>
-              <ul className="divide-y divide-border rounded-lg border border-border overflow-hidden">
+              <ul className="divide-y divide-borda rounded-lg border border-borda overflow-hidden">
                 {pagedSugg.map((s) => (
-                  <li key={sugKey(s)} className="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-2 px-4 py-3 hover:bg-background-elevated">
+                  <li key={sugKey(s)} className="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-2 px-4 py-3 hover:bg-surface-elevated">
                     <div className="min-w-0 flex-1">
-                      <p className="text-sm font-medium text-slate-100 truncate">{s.company_name}</p>
-                      <div className="flex flex-wrap gap-x-3 gap-y-0.5 text-xs text-slate-500 mt-0.5">
+                      <p className="text-sm font-medium text-conteudo-heading truncate">{s.company_name}</p>
+                      <div className="flex flex-wrap gap-x-3 gap-y-0.5 text-xs text-conteudo-muted mt-0.5">
                         {s.cnpj && <span>{formatCnpj(s.cnpj)}</span>}
                         {s.city && <span>{s.city}{s.state ? ` - ${s.state}` : ""}</span>}
-                        <span className="flex items-center gap-1"><IconUsers />{s.client_count} cliente{s.client_count !== 1 ? "s" : ""}</span>
+                        <span className="flex items-center gap-1"><Icon name="users" size={16} />{s.client_count} cliente{s.client_count !== 1 ? "s" : ""}</span>
                       </div>
                     </div>
                     <div className="flex gap-2 shrink-0 justify-end">
                       <Button size="sm" variant="ghost" onClick={() => prefillManual(s)} title="Editar antes de adicionar">
-                        <IconEdit />
+                        <Icon name="edit" size={16} strokeWidth={2} />
                       </Button>
                       <Button size="sm" onClick={() => setConfirmando(s)}>
-                        <IconPlus /> Adicionar
+                        <Icon name="plus" size={16} strokeWidth={2} /> Adicionar
                       </Button>
                     </div>
                   </li>
@@ -466,20 +405,20 @@ function AssignClientModal({
   return (
     <Modal open onClose={onClose} title="Vincular Cliente" size="2xl">
       <div className="space-y-3">
-        <Input placeholder="Buscar por nome ou e-mail..." value={search} onChange={(e) => { setSearch(e.target.value); setAssignPage(1); }} />
+        <Input aria-label="Buscar cliente por nome ou e-mail" placeholder="Buscar por nome ou e-mail..." value={search} onChange={(e) => { setSearch(e.target.value); setAssignPage(1); }} />
         {loading ? <div className="flex justify-center py-6"><Spinner /></div>
           : filtered.length === 0 ? (
-            <p className="text-sm text-slate-500 text-center py-4">
+            <p className="text-sm text-conteudo-muted text-center py-4">
               {clients.length === 0 ? "Todos os clientes já estão vinculados." : "Nenhum resultado."}
             </p>
           ) : (
             <div>
-              <ul className="divide-y divide-border rounded-lg border border-border">
+              <ul className="divide-y divide-borda rounded-lg border border-borda">
                 {pagedClients.map((c) => (
-                  <li key={c.id} className="flex items-center justify-between px-3 py-2.5 hover:bg-background-elevated">
+                  <li key={c.id} className="flex items-center justify-between px-3 py-2.5 hover:bg-surface-elevated">
                     <div className="min-w-0">
-                      <p className="text-sm font-medium text-slate-100 truncate">{c.name}</p>
-                      <p className="text-xs text-slate-500 truncate">{c.email}</p>
+                      <p className="text-sm font-medium text-conteudo-heading truncate">{c.name}</p>
+                      <p className="text-xs text-conteudo-muted truncate">{c.email}</p>
                     </div>
                     <Button size="sm" variant="ghost" loading={assigning === c.id} onClick={() => handleAssign(c.id)}>Vincular</Button>
                   </li>
@@ -543,6 +482,7 @@ export function CompanyDetailModal({
   const [showAssign, setShowAssign] = useState(false);
   const [noteClient, setNoteClient] = useState<ClientInCompany | null>(null);
   const [removingId, setRemovingId] = useState<string | null>(null);
+  const [unassignTarget, setUnassignTarget] = useState<ClientInCompany | null>(null);
   const [clientsPage, setClientsPage] = useState(1);
 
   // Company notes
@@ -552,6 +492,7 @@ export function CompanyDetailModal({
   const [newCompanyNoteContent, setNewCompanyNoteContent] = useState("");
   const [companyNoteSaving, setCompanyNoteSaving] = useState(false);
   const [companyNoteDeleting, setCompanyNoteDeleting] = useState<string | null>(null);
+  const [deleteCompanyNoteTarget, setDeleteCompanyNoteTarget] = useState<CompanyNote | null>(null);
   const [activeTab, setActiveTab] = useState<"clients" | "notes">("clients");
 
   // `load` era redefinido a cada render e o efeito dependia só de `company.id`,
@@ -571,12 +512,16 @@ export function CompanyDetailModal({
 
   useEffect(() => { load(); }, [load]);
 
-  const handleUnassign = async (clientId: string) => {
-    if (!confirm("Desvincular este cliente?")) return;
-    setRemovingId(clientId);
+  // O ultimo `confirm()` nativo de `src/pages/**` sai aqui (D9.3). Ele
+  // perguntava "Desvincular este cliente?" — a mesma frase para os cinco
+  // da pagina —, sem dizer qual cliente, de que empresa, nem o que
+  // acontece com ele depois.
+  const handleUnassign = async (client: ClientInCompany) => {
+    setRemovingId(client.id);
     try {
-      await unassignClient(groupId, company.id, clientId);
-      setDetail((p) => p ? { ...p, clients: p.clients.filter((c) => c.id !== clientId), client_count: p.client_count - 1 } : p);
+      await unassignClient(groupId, company.id, client.id);
+      setDetail((p) => p ? { ...p, clients: p.clients.filter((c) => c.id !== client.id), client_count: p.client_count - 1 } : p);
+      setUnassignTarget(null);
       onUpdated();
     } finally { setRemovingId(null); }
   };
@@ -593,13 +538,15 @@ export function CompanyDetailModal({
     } finally { setCompanyNoteSaving(false); }
   };
 
-  const handleDeleteCompanyNote = async (noteId: string) => {
-    if (!confirm("Deletar esta nota?")) return;
-    setCompanyNoteDeleting(noteId);
+  // O `confirm()` nativo saiu pela D9.3: "Deletar esta nota?" servia para
+  // qualquer nota da coluna e não dizia que não volta.
+  const handleDeleteCompanyNote = async (note: CompanyNote) => {
+    setCompanyNoteDeleting(note.id);
     try {
-      await deleteCompanyNote(groupId, company.id, noteId);
-      setCompanyNotes((p) => p.filter((n) => n.id !== noteId));
-      if (viewCompanyNote?.id === noteId) setViewCompanyNote(null);
+      await deleteCompanyNote(groupId, company.id, note.id);
+      setCompanyNotes((p) => p.filter((n) => n.id !== note.id));
+      if (viewCompanyNote?.id === note.id) setViewCompanyNote(null);
+      setDeleteCompanyNoteTarget(null);
       onUpdated();
     } finally { setCompanyNoteDeleting(null); }
   };
@@ -617,22 +564,22 @@ export function CompanyDetailModal({
           ) : detail && (
             <>
               {/* Company info */}
-              <div className="flex flex-wrap gap-x-5 gap-y-1 text-sm text-slate-400 mb-4">
-                {detail.cnpj && <span>CNPJ: <span className="text-slate-300">{formatCnpj(detail.cnpj)}</span></span>}
-                {detail.phone && <span>Tel: <span className="text-slate-300">{detail.phone}</span></span>}
+              <div className="flex flex-wrap gap-x-5 gap-y-1 text-sm text-conteudo-muted mb-4">
+                {detail.cnpj && <span>CNPJ: <span className="text-conteudo">{formatCnpj(detail.cnpj)}</span></span>}
+                {detail.phone && <span>Tel: <span className="text-conteudo">{detail.phone}</span></span>}
                 {detail.city && <span>{detail.city}{detail.state ? ` - ${detail.state}` : ""}</span>}
                 {detail.address && <span>{detail.address}</span>}
               </div>
 
               {/* Tabs */}
-              <div className="flex border-b border-border mb-4 -mt-1">
+              <div className="flex border-b border-borda mb-4 -mt-1">
                 <button
                   onClick={() => setActiveTab("clients")}
                   className={cn(
                     "px-4 py-2 text-sm font-medium border-b-2 transition-colors cursor-pointer",
                     activeTab === "clients"
-                      ? "border-primary text-primary"
-                      : "border-transparent text-slate-500 hover:text-slate-300",
+                      ? "border-action text-conteudo-link"
+                      : "border-transparent text-conteudo-muted hover:text-conteudo",
                   )}
                 >
                   Clientes ({detail.client_count})
@@ -642,11 +589,11 @@ export function CompanyDetailModal({
                   className={cn(
                     "px-4 py-2 text-sm font-medium border-b-2 transition-colors cursor-pointer flex items-center gap-1.5",
                     activeTab === "notes"
-                      ? "border-amber-500 text-amber-500 dark:text-amber-400"
-                      : "border-transparent text-slate-500 hover:text-slate-300",
+                      ? "border-warning text-on-tint-warning"
+                      : "border-transparent text-conteudo-muted hover:text-conteudo",
                   )}
                 >
-                  <IconNote />
+                  <Icon name="document" size={16} strokeWidth={2} />
                   Notas ({companyNotes.length})
                 </button>
               </div>
@@ -655,29 +602,29 @@ export function CompanyDetailModal({
               {activeTab === "clients" && (
                 <>
                   <div className="flex items-center justify-between mb-2">
-                    <p className="text-sm font-semibold text-slate-300">Clientes</p>
-                    <Button size="sm" onClick={() => setShowAssign(true)}><IconPlus />Vincular</Button>
+                    <p className="text-sm font-semibold text-conteudo">Clientes</p>
+                    <Button size="sm" onClick={() => setShowAssign(true)}><Icon name="plus" size={16} strokeWidth={2} />Vincular</Button>
                   </div>
 
                   {detail.clients.length === 0 ? (
-                    <div className="flex-1 flex flex-col items-center justify-center text-center py-6 rounded-lg border border-dashed border-border text-sm text-slate-500">
+                    <div className="flex-1 flex flex-col items-center justify-center text-center py-6 rounded-lg border border-dashed border-borda text-sm text-conteudo-muted">
                       Nenhum cliente vinculado.
-                      <div className="mt-2"><Button size="sm" onClick={() => setShowAssign(true)}><IconPlus />Vincular cliente</Button></div>
+                      <div className="mt-2"><Button size="sm" onClick={() => setShowAssign(true)}><Icon name="plus" size={16} strokeWidth={2} />Vincular cliente</Button></div>
                     </div>
                   ) : (
                     <div className="flex-1 flex flex-col min-h-0">
-                      <ul className="divide-y divide-border rounded-lg border border-border overflow-y-auto flex-1">
+                      <ul className="divide-y divide-borda rounded-lg border border-borda overflow-y-auto flex-1">
                         {pagedClients.map((c) => (
-                          <li key={c.id} className="flex items-center justify-between px-3 py-2.5 hover:bg-background-elevated">
+                          <li key={c.id} className="flex items-center justify-between px-3 py-2.5 hover:bg-surface-elevated">
                             <div className="min-w-0 flex-1">
-                              <p className="text-sm font-medium text-slate-100 truncate">{c.name}</p>
-                              <p className="text-xs text-slate-500 truncate">{c.email}</p>
-                              {c.client_notes && <p className="text-xs text-amber-600 dark:text-amber-400 line-clamp-1 mt-0.5">{c.client_notes}</p>}
+                              <p className="text-sm font-medium text-conteudo-heading truncate">{c.name}</p>
+                              <p className="text-xs text-conteudo-muted truncate">{c.email}</p>
+                              {c.client_notes && <p className="text-xs text-on-tint-warning line-clamp-1 mt-0.5">{c.client_notes}</p>}
                             </div>
                             <div className="flex gap-1 ml-2 shrink-0">
-                              <button title="Notas" onClick={() => setNoteClient(c)} className="p-1.5 rounded text-slate-500 hover:text-amber-500 hover:bg-amber-100 dark:hover:text-amber-400 dark:hover:bg-amber-900/20 transition-colors cursor-pointer"><IconNote /></button>
-                              <button title="Desvincular" onClick={() => handleUnassign(c.id)} disabled={removingId === c.id} className="p-1.5 rounded text-slate-500 hover:text-red-400 hover:bg-red-900/20 transition-colors cursor-pointer disabled:opacity-50">
-                                {removingId === c.id ? <Spinner size="sm" /> : <IconX />}
+                              <button title="Notas" onClick={() => setNoteClient(c)} className="p-1.5 rounded text-conteudo-muted hover:text-on-tint-warning hover:bg-tint-warning transition-colors cursor-pointer"><Icon name="document" size={16} strokeWidth={2} /></button>
+                              <button title="Desvincular" aria-label={`Desvincular ${c.name}`} onClick={() => setUnassignTarget(c)} disabled={removingId === c.id} className="p-1.5 rounded text-conteudo-muted hover:text-on-tint-danger hover:bg-tint-danger transition-colors cursor-pointer disabled:opacity-50">
+                                {removingId === c.id ? <Spinner size="sm" /> : <Icon name="close" size={16} strokeWidth={2} />}
                               </button>
                             </div>
                           </li>
@@ -700,18 +647,18 @@ export function CompanyDetailModal({
               {activeTab === "notes" && (
                 <>
                   <div className="flex items-center justify-between mb-3">
-                    <p className="text-sm font-semibold text-amber-600 dark:text-amber-400/80">Notas da empresa</p>
+                    <p className="text-sm font-semibold text-on-tint-warning">Notas da empresa</p>
                     <Button size="sm" variant="ghost" onClick={() => setShowAddCompanyNote(true)}>
-                      <IconPlus />Adicionar nota
+                      <Icon name="plus" size={16} strokeWidth={2} />Adicionar nota
                     </Button>
                   </div>
 
                   {companyNotes.length === 0 ? (
-                    <div className="flex-1 flex flex-col items-center justify-center text-center py-8 rounded-lg border border-dashed border-amber-200 dark:border-amber-800/30 text-sm text-amber-600/70 dark:text-amber-700/50">
+                    <div className="flex-1 flex flex-col items-center justify-center text-center py-8 rounded-lg border border-dashed border-warning/30 text-sm text-on-tint-warning">
                       Nenhuma nota ainda.
                       <div className="mt-2">
                         <Button size="sm" variant="ghost" onClick={() => setShowAddCompanyNote(true)}>
-                          <IconPlus />Adicionar nota
+                          <Icon name="plus" size={16} strokeWidth={2} />Adicionar nota
                         </Button>
                       </div>
                     </div>
@@ -720,25 +667,29 @@ export function CompanyDetailModal({
                       {companyNotes.map((n) => (
                         <div
                           key={n.id}
-                          className="group rounded-lg border border-amber-200 bg-amber-50 dark:border-amber-700/20 dark:bg-amber-950/15 p-3 cursor-pointer hover:border-amber-300 dark:hover:border-amber-600/40 transition-colors"
+                          className="group rounded-lg border border-warning/20 bg-tint-warning p-3 cursor-pointer hover:border-warning/40 transition-colors"
                           onClick={() => setViewCompanyNote(n)}
                         >
                           <div className="flex items-center justify-between gap-1 mb-1">
-                            <span className="text-[11px] font-semibold text-amber-600 dark:text-amber-500/70 truncate">{n.author_name}</span>
+                            <span className="text-[11px] font-semibold text-on-tint-warning truncate">{n.author_name}</span>
                             <div className="flex items-center gap-1.5 shrink-0">
-                              <span className="text-[10px] text-amber-600/70 dark:text-amber-700/50">
+                              <span className="text-[10px] text-on-tint-warning">
                                 {new Date(n.created_at).toLocaleDateString("pt-BR", { day: "2-digit", month: "2-digit", year: "2-digit" })}
                               </span>
                               <button
-                                onClick={(e) => { e.stopPropagation(); handleDeleteCompanyNote(n.id); }}
+                                // O botão é só o ícone, e o `Icon` é
+                                // `aria-hidden`: sem isto o leitor de tela
+                                // anuncia "botão" e mais nada.
+                                aria-label="Deletar nota"
+                                onClick={(e) => { e.stopPropagation(); setDeleteCompanyNoteTarget(n); }}
                                 disabled={companyNoteDeleting === n.id}
-                                className="opacity-0 group-hover:opacity-100 p-0.5 rounded text-amber-500 dark:text-amber-700/60 hover:text-red-400 transition-all cursor-pointer"
+                                className="opacity-0 group-hover:opacity-100 p-0.5 rounded text-on-tint-warning hover:text-on-tint-danger transition-all cursor-pointer"
                               >
-                                {companyNoteDeleting === n.id ? <Spinner size="sm" /> : <IconTrash />}
+                                {companyNoteDeleting === n.id ? <Spinner size="sm" /> : <Icon name="trash" size={16} strokeWidth={2} />}
                               </button>
                             </div>
                           </div>
-                          <p className="text-xs text-slate-600 dark:text-amber-200/60 line-clamp-3 whitespace-pre-wrap">{n.content}</p>
+                          <p className="text-xs text-on-tint-warning line-clamp-3 whitespace-pre-wrap">{n.content}</p>
                         </div>
                       ))}
                     </div>
@@ -747,7 +698,7 @@ export function CompanyDetailModal({
               )}
 
               <ModalFooter>
-                <Button variant="ghost" onClick={() => setShowEdit(true)}><IconEdit />Editar empresa</Button>
+                <Button variant="ghost" onClick={() => setShowEdit(true)}><Icon name="edit" size={16} strokeWidth={2} />Editar empresa</Button>
                 <Button onClick={onClose}>Fechar</Button>
               </ModalFooter>
             </>
@@ -804,24 +755,93 @@ export function CompanyDetailModal({
       {viewCompanyNote && (
         <Modal open onClose={() => setViewCompanyNote(null)} title="Nota da empresa" size="lg">
           <div className="space-y-3">
-            <div className="flex items-center justify-between text-xs text-amber-600 dark:text-amber-500/70">
+            <div className="flex items-center justify-between text-xs text-on-tint-warning">
               <span className="font-semibold">{viewCompanyNote.author_name}</span>
               <span>{new Date(viewCompanyNote.created_at).toLocaleString("pt-BR")}</span>
             </div>
-            <p className="text-sm text-slate-700 dark:text-amber-200/80 whitespace-pre-wrap leading-relaxed min-h-[80px]">{viewCompanyNote.content}</p>
+            <p className="text-sm text-on-tint-warning whitespace-pre-wrap leading-relaxed min-h-[80px]">{viewCompanyNote.content}</p>
             <ModalFooter>
               <Button
                 variant="ghost"
                 size="sm"
-                className="text-red-500 hover:bg-red-900/20"
+                className="text-on-tint-danger hover:bg-tint-danger"
                 loading={companyNoteDeleting === viewCompanyNote.id}
-                onClick={() => handleDeleteCompanyNote(viewCompanyNote.id)}
+                onClick={() => { setDeleteCompanyNoteTarget(viewCompanyNote); setViewCompanyNote(null); }}
               >
                 Deletar
               </Button>
               <Button onClick={() => setViewCompanyNote(null)}>Fechar</Button>
             </ModalFooter>
           </div>
+        </Modal>
+      )}
+
+      {/* Desvinculacao — forma da frota (D9.3), com UMA diferenca deliberada:
+          o botao de acao e `primary`, e nao `danger`. Desvincular nao destroi
+          o cliente, tira o vinculo dele com esta empresa; a tinta de perigo
+          afirmaria uma perda que nao acontece. */}
+      {unassignTarget && (
+        <Modal
+          open
+          onClose={() => setUnassignTarget(null)}
+          size="sm"
+          title="Desvincular cliente"
+        >
+          <p className="text-sm text-conteudo-muted">
+            Tem certeza que deseja desvincular{" "}
+            <span className="font-medium text-conteudo">{unassignTarget.name}</span> de{" "}
+            <span className="font-medium text-conteudo">{company.name}</span>? A conta
+            continua cadastrada — ela só deixa de pertencer a esta empresa, e pode
+            ser vinculada de novo depois.
+          </p>
+          <ModalFooter>
+            <Button
+              variant="secondary"
+              onClick={() => setUnassignTarget(null)}
+              disabled={removingId === unassignTarget.id}
+            >
+              Cancelar
+            </Button>
+            <Button
+              variant="primary"
+              onClick={() => handleUnassign(unassignTarget)}
+              loading={removingId === unassignTarget.id}
+            >
+              Desvincular
+            </Button>
+          </ModalFooter>
+        </Modal>
+      )}
+      {/* Confirmação de exclusão da nota da empresa — forma da frota (D9.3). */}
+      {deleteCompanyNoteTarget && (
+        <Modal
+          open
+          onClose={() => setDeleteCompanyNoteTarget(null)}
+          size="sm"
+          title="Excluir nota da empresa"
+        >
+          <p className="text-sm text-conteudo-muted">
+            Tem certeza que deseja excluir a nota de{" "}
+            <span className="font-medium text-conteudo">{deleteCompanyNoteTarget.author_name}</span>
+            ? A nota será removida de {company.name}, e esta ação não pode ser
+            desfeita.
+          </p>
+          <ModalFooter>
+            <Button
+              variant="secondary"
+              onClick={() => setDeleteCompanyNoteTarget(null)}
+              disabled={companyNoteDeleting === deleteCompanyNoteTarget.id}
+            >
+              Cancelar
+            </Button>
+            <Button
+              variant="danger"
+              onClick={() => handleDeleteCompanyNote(deleteCompanyNoteTarget)}
+              loading={companyNoteDeleting === deleteCompanyNoteTarget.id}
+            >
+              Excluir
+            </Button>
+          </ModalFooter>
         </Modal>
       )}
     </>
@@ -834,13 +854,13 @@ function GroupNotesList({ notes, noteDeleting, onView, onDelete, onAdd }: {
   notes: GroupNote[];
   noteDeleting: string | null;
   onView: (n: GroupNote) => void;
-  onDelete: (id: string) => void;
+  onDelete: (note: GroupNote) => void;
   onAdd: () => void;
 }) {
   if (notes.length === 0) return (
-    <div className="text-center py-8 text-xs text-amber-600/70 dark:text-amber-700/50 italic">
+    <div className="text-center py-8 text-xs text-on-tint-warning italic">
       Nenhuma nota ainda.
-      <button onClick={onAdd} className="block mt-2 text-amber-500 hover:text-amber-600 dark:text-amber-500/70 dark:hover:text-amber-400 cursor-pointer mx-auto not-italic">
+      <button onClick={onAdd} className="block mt-2 text-on-tint-warning hover:underline cursor-pointer mx-auto not-italic">
         Adicionar nota
       </button>
     </div>
@@ -850,25 +870,26 @@ function GroupNotesList({ notes, noteDeleting, onView, onDelete, onAdd }: {
       {notes.map((n) => (
         <div
           key={n.id}
-          className="group rounded-lg border border-amber-200 bg-amber-50 dark:border-amber-700/20 dark:bg-amber-950/15 p-3 cursor-pointer hover:border-amber-300 dark:hover:border-amber-600/40 transition-colors"
+          className="group rounded-lg border border-warning/20 bg-tint-warning p-3 cursor-pointer hover:border-warning/40 transition-colors"
           onClick={() => onView(n)}
         >
           <div className="flex items-center justify-between gap-1 mb-1">
-            <span className="text-[10px] font-semibold text-amber-600 dark:text-amber-500/70 truncate">{n.author_name}</span>
+            <span className="text-[10px] font-semibold text-on-tint-warning truncate">{n.author_name}</span>
             <div className="flex items-center gap-1 shrink-0">
-              <span className="text-[10px] text-amber-600/70 dark:text-amber-700/50">
+              <span className="text-[10px] text-on-tint-warning">
                 {new Date(n.created_at).toLocaleDateString("pt-BR", { day: "2-digit", month: "2-digit", year: "2-digit" })}
               </span>
               <button
-                onClick={(e) => { e.stopPropagation(); onDelete(n.id); }}
+                aria-label="Deletar nota"
+                onClick={(e) => { e.stopPropagation(); onDelete(n); }}
                 disabled={noteDeleting === n.id}
-                className="opacity-0 group-hover:opacity-100 p-0.5 rounded text-amber-500 dark:text-amber-700/60 hover:text-red-400 transition-all cursor-pointer"
+                className="opacity-0 group-hover:opacity-100 p-0.5 rounded text-on-tint-warning hover:text-on-tint-danger transition-all cursor-pointer"
               >
-                {noteDeleting === n.id ? <Spinner size="sm" /> : <IconTrash />}
+                {noteDeleting === n.id ? <Spinner size="sm" /> : <Icon name="trash" size={16} strokeWidth={2} />}
               </button>
             </div>
           </div>
-          <p className="text-xs text-slate-600 dark:text-amber-200/60 line-clamp-3 whitespace-pre-wrap">{n.content}</p>
+          <p className="text-xs text-on-tint-warning line-clamp-3 whitespace-pre-wrap">{n.content}</p>
         </div>
       ))}
     </div>
@@ -898,6 +919,9 @@ export default function GroupsPage() {
   const [newNoteContent, setNewNoteContent] = useState("");
   const [noteSaving, setNoteSaving] = useState(false);
   const [noteDeleting, setNoteDeleting] = useState<string | null>(null);
+  const [deleteNoteTarget, setDeleteNoteTarget] = useState<GroupNote | null>(null);
+  const [confirmDeleteGroup, setConfirmDeleteGroup] = useState(false);
+  const [deleteCompanyTarget, setDeleteCompanyTarget] = useState<CompanyResponse | null>(null);
 
   const loadGroups = async () => {
     setLoading(true);
@@ -931,35 +955,36 @@ export default function GroupsPage() {
     } finally { setNoteSaving(false); }
   };
 
-  const handleDeleteNote = async (noteId: string) => {
-    if (!selectedGroup || !confirm("Deletar esta nota?")) return;
-    setNoteDeleting(noteId);
+  const handleDeleteNote = async (note: GroupNote) => {
+    if (!selectedGroup) return;
+    setNoteDeleting(note.id);
     try {
-      await deleteGroupNote(selectedGroup.id, noteId);
-      setGroupNotes((p) => p.filter((n) => n.id !== noteId));
-      if (viewNote?.id === noteId) setViewNote(null);
+      await deleteGroupNote(selectedGroup.id, note.id);
+      setGroupNotes((p) => p.filter((n) => n.id !== note.id));
+      if (viewNote?.id === note.id) setViewNote(null);
+      setDeleteNoteTarget(null);
     } finally { setNoteDeleting(null); }
   };
 
   const handleDeleteGroup = async () => {
     if (!selectedGroup) return;
-    if (!confirm(`Deletar o grupo "${selectedGroup.name}"?`)) return;
     try {
       await deleteGroup(selectedGroup.id);
       setGroups((p) => p.filter((g) => g.id !== selectedGroup.id));
       setSelectedGroup(null);
       setGroupDetail(null);
+      setConfirmDeleteGroup(false);
     } catch (err) { toastApiError(err, "Erro ao deletar grupo."); }
   };
 
   const handleDeleteCompany = async (company: CompanyResponse) => {
     if (!selectedGroup) return;
-    if (!confirm(`Deletar a empresa "${company.name}"?`)) return;
     setDeletingCompanyId(company.id);
     try {
       await deleteCompany(selectedGroup.id, company.id);
       setGroupDetail((p) => p ? { ...p, companies: p.companies.filter((c) => c.id !== company.id), company_count: p.company_count - 1 } : p);
       setGroups((p) => p.map((g) => g.id === selectedGroup.id ? { ...g, company_count: g.company_count - 1 } : g));
+      setDeleteCompanyTarget(null);
     } finally { setDeletingCompanyId(null); }
   };
 
@@ -978,45 +1003,51 @@ export default function GroupsPage() {
 
       {/* ── Left: Groups list ──────────────────────────────── */}
       <aside className={cn(
-        "shrink-0 flex flex-col w-64 border-r border-slate-200 dark:border-border bg-white dark:bg-background-surface overflow-hidden",
+        "shrink-0 flex flex-col w-64 border-r border-borda bg-surface overflow-hidden",
         "transition-transform duration-300 ease-in-out",
         "absolute inset-y-0 left-0 z-30",
         sidebarOpen ? "translate-x-0" : "-translate-x-full",
         "xl:relative xl:inset-auto xl:z-auto xl:translate-x-0",
       )}>
-        <div className="flex items-center justify-between px-4 py-4 border-b border-slate-200 dark:border-border">
-          <h1 className="text-sm font-semibold text-slate-700 dark:text-slate-300">Grupos</h1>
+        <div className="flex items-center justify-between px-4 py-4 border-b border-borda">
+          <h1 className="text-sm font-semibold text-conteudo">Grupos</h1>
           <div className="flex items-center gap-1">
             <button
               onClick={() => setShowNewGroup(true)}
               title="Novo grupo"
-              className="p-1.5 rounded-lg text-slate-400 hover:text-primary hover:bg-primary/10 transition-colors cursor-pointer"
+              className="p-1.5 rounded-lg text-conteudo-muted hover:text-conteudo-link hover:bg-action-tint transition-colors cursor-pointer"
             >
-              <IconPlus />
+              <Icon name="plus" size={16} strokeWidth={2} />
             </button>
             {selectedGroup && (
               <button
                 onClick={() => setSidebarOpen(false)}
-                className="xl:hidden p-1.5 rounded-lg text-slate-400 hover:text-slate-600 dark:hover:text-slate-200 hover:bg-slate-100 dark:hover:bg-background-elevated transition-colors cursor-pointer"
+                className="xl:hidden p-1.5 rounded-lg text-conteudo-muted hover:text-conteudo hover:bg-surface-elevated transition-colors cursor-pointer"
                 title="Fechar"
               >
-                <IconX />
+                <Icon name="close" size={16} strokeWidth={2} />
               </button>
             )}
           </div>
         </div>
 
-        <div className="px-3 py-2 border-b border-slate-200 dark:border-border">
+        <div className="px-3 py-2 border-b border-borda">
           <div className="relative">
-            <svg className="absolute left-2.5 top-1/2 -translate-y-1/2 w-3.5 h-3.5 text-slate-400 pointer-events-none" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
-              <path strokeLinecap="round" strokeLinejoin="round" d="M21 21l-4.35-4.35M17 11A6 6 0 111 11a6 6 0 0116 0z" />
-            </svg>
+            {/* Outra lupa, com o traçado de outra família — a E21 unificou as
+                três que o inventário achou num `search` só. */}
+            <Icon
+              name="search"
+              size={14}
+              strokeWidth={2}
+              className="absolute left-2.5 top-1/2 -translate-y-1/2 text-conteudo-muted pointer-events-none"
+            />
             <input
               type="text"
+              aria-label="Pesquisar grupos"
               placeholder="Pesquisar grupos..."
               value={groupSearch}
               onChange={(e) => setGroupSearch(e.target.value)}
-              className="w-full pl-8 pr-3 py-1.5 text-xs rounded-md bg-slate-100 dark:bg-background-elevated border border-transparent focus:border-primary focus:outline-none text-slate-700 dark:text-slate-300 placeholder-slate-400"
+              className="w-full pl-8 pr-3 py-1.5 text-xs rounded-md bg-surface-elevated border border-transparent focus:border-action focus:outline-none text-conteudo placeholder:text-conteudo-muted"
             />
           </div>
         </div>
@@ -1025,9 +1056,9 @@ export default function GroupsPage() {
           {loading ? (
             <div className="flex justify-center py-8"><Spinner /></div>
           ) : groups.length === 0 ? (
-            <div className="text-center px-4 py-8 text-sm text-slate-500">
+            <div className="text-center px-4 py-8 text-sm text-conteudo-muted">
               Nenhum grupo ainda.
-              <button onClick={() => setShowNewGroup(true)} className="block mt-2 text-primary hover:underline cursor-pointer mx-auto text-xs">
+              <button onClick={() => setShowNewGroup(true)} className="block mt-2 text-conteudo-link hover:underline cursor-pointer mx-auto text-xs">
                 Criar primeiro grupo
               </button>
             </div>
@@ -1036,7 +1067,7 @@ export default function GroupsPage() {
               g.name.toLowerCase().includes(groupSearch.toLowerCase())
             );
             if (filtered.length === 0) return (
-              <div className="text-center px-4 py-8 text-sm text-slate-500">
+              <div className="text-center px-4 py-8 text-sm text-conteudo-muted">
                 Nenhum resultado para "{groupSearch}".
               </div>
             );
@@ -1047,15 +1078,15 @@ export default function GroupsPage() {
                 className={cn(
                   "w-full text-left px-4 py-3 flex items-center justify-between gap-2 transition-colors cursor-pointer",
                   selectedGroup?.id === g.id
-                    ? "bg-primary/10 text-primary border-l-2 border-primary"
-                    : "text-slate-600 dark:text-slate-400 hover:bg-slate-50 dark:hover:bg-background-elevated",
+                    ? "bg-action-tint text-conteudo-link border-l-2 border-action"
+                    : "text-conteudo-muted hover:bg-surface-elevated",
                 )}
               >
                 <div className="min-w-0">
                   <p className="text-sm font-medium truncate">{g.name}</p>
                   <p className="text-xs opacity-60 mt-0.5">{g.company_count} empresa{g.company_count !== 1 ? "s" : ""}</p>
                 </div>
-                <IconChevronRight />
+                <Icon name="chevronRight" size={16} strokeWidth={2} />
               </button>
             ));
           })()}
@@ -1071,81 +1102,81 @@ export default function GroupsPage() {
           className={cn(
             "xl:hidden mb-4 flex items-center gap-1.5 text-xs font-medium border rounded-lg px-3 py-1.5 transition-colors cursor-pointer",
             selectedGroup
-              ? "text-primary border-primary/30 bg-primary/10 hover:bg-primary/20"
-              : "text-slate-400 border-border/50 bg-background-elevated hover:bg-background-surface",
+              ? "text-conteudo-link border-action/30 bg-action-tint hover:bg-action/20"
+              : "text-conteudo-muted border-borda/50 bg-surface-elevated hover:bg-surface",
           )}
         >
-          <IconChevronLeft />
+          <Icon name="chevronLeft" size={16} strokeWidth={2} />
           {selectedGroup ? selectedGroup.name : "Ver grupos"}
         </button>
 
         {!selectedGroup ? (
           <div className="flex flex-col items-center justify-center h-3/4 text-center">
-            <div className="text-slate-300 dark:text-slate-700 mb-3">
-              <svg className="w-16 h-16 mx-auto" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={0.75}>
-                <path strokeLinecap="round" strokeLinejoin="round" d="M17 20h5v-2a3 3 0 00-5.356-1.857M17 20H7m10 0v-2c0-.656-.126-1.283-.356-1.857M7 20H2v-2a3 3 0 015.356-1.857M7 20v-2c0-.656.126-1.283.356-1.857m0 0a5.002 5.002 0 019.288 0M15 7a3 3 0 11-6 0 3 3 0 016 0zm6 3a2 2 0 11-4 0 2 2 0 014 0zM7 10a2 2 0 11-4 0 2 2 0 014 0z" />
-              </svg>
+            <div className="text-conteudo-faint mb-3">
+              <Icon name="groups" size={64} strokeWidth={0.75} className="mx-auto" />
             </div>
-            <p className="text-slate-500 dark:text-slate-400 font-medium">Selecione um grupo</p>
-            <p className="text-sm text-slate-400 dark:text-slate-500 mt-1">Escolha um grupo à esquerda para ver detalhes</p>
+            <p className="text-conteudo-muted font-medium">Selecione um grupo</p>
+            {/* `faint` é o degrau do desenho, não do texto: sobre `--surface`
+                ele dá 2,6:1. Quem lê a frase precisa do `muted`. */}
+            <p className="text-sm text-conteudo-muted mt-1">Escolha um grupo à esquerda para ver detalhes</p>
           </div>
         ) : (
           <div>
             {/* Group header */}
             <div className="flex items-start justify-between mb-6 gap-3">
               <div className="min-w-0">
-                <h2 className="text-xl font-semibold text-slate-800 dark:text-slate-100 break-words">{selectedGroup.name}</h2>
+                <h2 className="text-xl font-semibold text-conteudo-heading break-words">{selectedGroup.name}</h2>
                 {groupDetail?.description && (
-                  <p className="text-sm text-slate-500 dark:text-slate-400 mt-0.5">{groupDetail.description}</p>
+                  <p className="text-sm text-conteudo-muted mt-0.5">{groupDetail.description}</p>
                 )}
               </div>
               <div className="flex gap-2 shrink-0">
-                <Button size="sm" variant="ghost" onClick={() => setShowEditGroup(true)}><IconEdit />Editar</Button>
-                <Button size="sm" variant="ghost" className="text-red-500 hover:bg-red-50 dark:hover:bg-red-900/20" onClick={handleDeleteGroup}><IconTrash /></Button>
+                <Button size="sm" variant="ghost" onClick={() => setShowEditGroup(true)}><Icon name="edit" size={16} strokeWidth={2} />Editar</Button>
+                <Button size="sm" variant="ghost" className="text-on-tint-danger hover:bg-tint-danger" aria-label={`Excluir grupo ${selectedGroup.name}`} onClick={() => setConfirmDeleteGroup(true)}><Icon name="trash" size={16} strokeWidth={2} /></Button>
               </div>
             </div>
 
             {/* Companies section */}
             <div className="flex items-center justify-between mb-3">
-              <p className="text-sm font-semibold text-slate-700 dark:text-slate-300">
+              <p className="text-sm font-semibold text-conteudo">
                 Empresas {groupDetail && `(${groupDetail.company_count})`}
               </p>
-              <Button size="sm" onClick={() => setShowAddCompany(true)}><IconPlus />Adicionar empresa</Button>
+              <Button size="sm" onClick={() => setShowAddCompany(true)}><Icon name="plus" size={16} strokeWidth={2} />Adicionar empresa</Button>
             </div>
 
             {loadingDetail ? (
               <div className="flex justify-center py-12"><Spinner /></div>
             ) : !groupDetail || groupDetail.companies.length === 0 ? (
-              <div className="text-center py-14 rounded-xl border border-dashed border-slate-200 dark:border-border">
-                <div className="flex justify-center mb-2 text-slate-300 dark:text-slate-700"><IconBuilding /></div>
-                <p className="text-sm text-slate-500 dark:text-slate-400">Nenhuma empresa neste grupo</p>
-                <Button size="sm" className="mt-3" onClick={() => setShowAddCompany(true)}><IconPlus />Adicionar empresa</Button>
+              <div className="text-center py-14 rounded-xl border border-dashed border-borda">
+                <div className="flex justify-center mb-2 text-conteudo-faint"><Icon name="building" size={20} /></div>
+                <p className="text-sm text-conteudo-muted">Nenhuma empresa neste grupo</p>
+                <Button size="sm" className="mt-3" onClick={() => setShowAddCompany(true)}><Icon name="plus" size={16} strokeWidth={2} />Adicionar empresa</Button>
               </div>
             ) : (
               <div className="grid gap-3 sm:grid-cols-2 xl:grid-cols-3">
                 {groupDetail.companies.map((c) => (
-                  <div key={c.id} className="rounded-xl border border-slate-200 dark:border-border bg-white dark:bg-background-surface hover:border-primary/40 transition-colors">
+                  <div key={c.id} className="rounded-xl border border-borda bg-surface hover:border-action/40 transition-colors">
                     <div className="p-4">
                       <div className="flex items-start justify-between gap-2">
                         <button onClick={() => setSelectedCompany(c)} className="flex-1 text-left cursor-pointer min-w-0">
-                          <p className="font-medium text-slate-800 dark:text-slate-100 truncate">{c.name}</p>
-                          <div className="mt-1 flex flex-wrap gap-x-3 gap-y-0.5 text-xs text-slate-500">
+                          <p className="font-medium text-conteudo-heading truncate">{c.name}</p>
+                          <div className="mt-1 flex flex-wrap gap-x-3 gap-y-0.5 text-xs text-conteudo-muted">
                             {c.cnpj && <span>{formatCnpj(c.cnpj)}</span>}
                             {c.city && <span>{c.city}{c.state ? ` - ${c.state}` : ""}</span>}
                           </div>
                         </button>
                         <div className="flex gap-1 shrink-0">
-                          <button onClick={() => setSelectedCompany(c)} title="Ver detalhes" className="p-1.5 rounded text-slate-400 hover:text-primary hover:bg-primary/10 transition-colors cursor-pointer"><IconChevronRight /></button>
-                          <button onClick={() => handleDeleteCompany(c)} disabled={deletingCompanyId === c.id} title="Deletar" className="p-1.5 rounded text-slate-400 hover:text-red-500 hover:bg-red-50 dark:hover:bg-red-900/20 transition-colors cursor-pointer disabled:opacity-50">
-                            {deletingCompanyId === c.id ? <Spinner size="sm" /> : <IconTrash />}
+                          <button onClick={() => setSelectedCompany(c)} title="Ver detalhes" className="p-1.5 rounded text-conteudo-muted hover:text-conteudo-link hover:bg-action-tint transition-colors cursor-pointer"><Icon name="chevronRight" size={16} strokeWidth={2} /></button>
+                          <button onClick={() => setDeleteCompanyTarget(c)} disabled={deletingCompanyId === c.id} title="Deletar" aria-label={`Excluir empresa ${c.name}`} className="p-1.5 rounded text-conteudo-muted hover:text-on-tint-danger hover:bg-tint-danger transition-colors cursor-pointer disabled:opacity-50">
+                            {deletingCompanyId === c.id ? <Spinner size="sm" /> : <Icon name="trash" size={16} strokeWidth={2} />}
                           </button>
                         </div>
                       </div>
-                      <button onClick={() => setSelectedCompany(c)} className="mt-3 flex items-center gap-2 text-xs text-slate-500 hover:text-primary transition-colors cursor-pointer">
-                        <span className="flex items-center gap-1"><IconUsers />{c.client_count} cliente{c.client_count !== 1 ? "s" : ""}</span>
+                      <button onClick={() => setSelectedCompany(c)} className="mt-3 flex items-center gap-2 text-xs text-conteudo-muted hover:text-conteudo-link transition-colors cursor-pointer">
+                        <span className="flex items-center gap-1"><Icon name="users" size={16} />{c.client_count} cliente{c.client_count !== 1 ? "s" : ""}</span>
                         {c.note_count > 0 && (
-                          <span className="flex items-center gap-1 text-amber-600 bg-amber-100 border border-amber-300 dark:text-amber-500 dark:bg-amber-900/20 dark:border-amber-700/30 rounded-full px-2 py-0.5">
-                            <IconNote />{c.note_count} nota{c.note_count !== 1 ? "s" : ""}
+                          <span className="flex items-center gap-1 text-on-tint-warning bg-tint-warning border border-warning/30 rounded-full px-2 py-0.5">
+                            <Icon name="document" size={16} strokeWidth={2} />{c.note_count} nota{c.note_count !== 1 ? "s" : ""}
                           </span>
                         )}
                       </button>
@@ -1156,16 +1187,17 @@ export default function GroupsPage() {
             )}
 
             {/* ── Notas — mobile only (below companies) ── */}
-            <div className="mt-5 xl:hidden rounded-xl border border-amber-200/50 dark:border-amber-800/20 bg-white dark:bg-background-surface overflow-hidden">
-              <div className="flex items-center justify-between px-4 py-3 border-b border-amber-200/50 dark:border-amber-800/20">
-                <p className="text-xs font-bold uppercase tracking-widest text-amber-600 dark:text-amber-500/80 flex items-center gap-1.5">
-                  <IconNote />Notas do grupo
+            <div className="mt-5 xl:hidden rounded-xl border border-warning/20 bg-surface overflow-hidden">
+              <div className="flex items-center justify-between px-4 py-3 border-b border-warning/20">
+                <p className="text-xs font-bold uppercase tracking-widest text-on-tint-warning flex items-center gap-1.5">
+                  <Icon name="document" size={16} strokeWidth={2} />Notas do grupo
                 </p>
                 <button
                   onClick={() => setShowAddNote(true)}
-                  className="p-1.5 rounded-lg text-slate-400 hover:text-amber-500 hover:bg-amber-100 dark:hover:text-amber-400 dark:hover:bg-amber-900/20 transition-colors cursor-pointer"
+                  title="Adicionar nota"
+                  className="p-1.5 rounded-lg text-conteudo-muted hover:text-on-tint-warning hover:bg-tint-warning transition-colors cursor-pointer"
                 >
-                  <IconPlus />
+                  <Icon name="plus" size={16} strokeWidth={2} />
                 </button>
               </div>
               <div className="p-3">
@@ -1173,7 +1205,7 @@ export default function GroupsPage() {
                   notes={groupNotes}
                   noteDeleting={noteDeleting}
                   onView={setViewNote}
-                  onDelete={handleDeleteNote}
+                  onDelete={setDeleteNoteTarget}
                   onAdd={() => setShowAddNote(true)}
                 />
               </div>
@@ -1184,18 +1216,18 @@ export default function GroupsPage() {
 
       {/* ── Right: Notes panel — desktop only ─────────────── */}
       {selectedGroup && (
-        <aside className="hidden xl:flex w-72 shrink-0 flex-col border-l border-slate-200 dark:border-border bg-white dark:bg-background-surface overflow-hidden">
-          <div className="flex items-center justify-between px-4 py-4 border-b border-slate-200 dark:border-border">
-            <p className="text-xs font-bold uppercase tracking-widest text-amber-600 dark:text-amber-500/80 flex items-center gap-1.5">
-              <IconNote />
+        <aside className="hidden xl:flex w-72 shrink-0 flex-col border-l border-borda bg-surface overflow-hidden">
+          <div className="flex items-center justify-between px-4 py-4 border-b border-borda">
+            <p className="text-xs font-bold uppercase tracking-widest text-on-tint-warning flex items-center gap-1.5">
+              <Icon name="document" size={16} strokeWidth={2} />
               Notas do grupo
             </p>
             <button
               onClick={() => setShowAddNote(true)}
               title="Adicionar nota"
-              className="p-1.5 rounded-lg text-slate-400 hover:text-amber-500 hover:bg-amber-100 dark:hover:text-amber-400 dark:hover:bg-amber-900/20 transition-colors cursor-pointer"
+              className="p-1.5 rounded-lg text-conteudo-muted hover:text-on-tint-warning hover:bg-tint-warning transition-colors cursor-pointer"
             >
-              <IconPlus />
+              <Icon name="plus" size={16} strokeWidth={2} />
             </button>
           </div>
           <div className="flex-1 overflow-y-auto p-3">
@@ -1203,7 +1235,7 @@ export default function GroupsPage() {
               notes={groupNotes}
               noteDeleting={noteDeleting}
               onView={setViewNote}
-              onDelete={handleDeleteNote}
+              onDelete={setDeleteNoteTarget}
               onAdd={() => setShowAddNote(true)}
             />
           </div>
@@ -1268,24 +1300,99 @@ export default function GroupsPage() {
       {viewNote && (
         <Modal open onClose={() => setViewNote(null)} title="Nota do grupo" size="lg">
           <div className="space-y-3">
-            <div className="flex items-center justify-between text-xs text-amber-600 dark:text-amber-500/70">
+            <div className="flex items-center justify-between text-xs text-on-tint-warning">
               <span className="font-semibold">{viewNote.author_name}</span>
               <span>{new Date(viewNote.created_at).toLocaleString("pt-BR")}</span>
             </div>
-            <p className="text-sm text-slate-700 dark:text-amber-200/80 whitespace-pre-wrap leading-relaxed min-h-[80px]">{viewNote.content}</p>
+            <p className="text-sm text-on-tint-warning whitespace-pre-wrap leading-relaxed min-h-[80px]">{viewNote.content}</p>
             <ModalFooter>
               <Button
                 variant="ghost"
                 size="sm"
-                className="text-red-500 hover:bg-red-900/20"
+                className="text-on-tint-danger hover:bg-tint-danger"
                 loading={noteDeleting === viewNote.id}
-                onClick={() => handleDeleteNote(viewNote.id)}
+                onClick={() => { setDeleteNoteTarget(viewNote); setViewNote(null); }}
               >
                 Deletar
               </Button>
               <Button onClick={() => setViewNote(null)}>Fechar</Button>
             </ModalFooter>
           </div>
+        </Modal>
+      )}
+
+      {/* Confirmação de exclusão da nota do grupo — forma da frota (D9.3). */}
+      {deleteNoteTarget && (
+        <Modal open onClose={() => setDeleteNoteTarget(null)} size="sm" title="Excluir nota">
+          <p className="text-sm text-conteudo-muted">
+            Tem certeza que deseja excluir a nota de{" "}
+            <span className="font-medium text-conteudo">{deleteNoteTarget.author_name}</span>
+            ? A nota será removida do grupo, e esta ação não pode ser desfeita.
+          </p>
+          <ModalFooter>
+            <Button
+              variant="secondary"
+              onClick={() => setDeleteNoteTarget(null)}
+              disabled={noteDeleting === deleteNoteTarget.id}
+            >
+              Cancelar
+            </Button>
+            <Button
+              variant="danger"
+              onClick={() => handleDeleteNote(deleteNoteTarget)}
+              loading={noteDeleting === deleteNoteTarget.id}
+            >
+              Excluir
+            </Button>
+          </ModalFooter>
+        </Modal>
+      )}
+
+      {/* Confirmação de exclusão do grupo — forma da frota (D9.3). */}
+      {confirmDeleteGroup && selectedGroup && (
+        <Modal open onClose={() => setConfirmDeleteGroup(false)} size="sm" title="Excluir grupo">
+          <p className="text-sm text-conteudo-muted">
+            Tem certeza que deseja excluir o grupo{" "}
+            <span className="font-medium text-conteudo">{selectedGroup.name}</span>? Ele
+            será removido com as empresas e as notas que carrega, e esta ação não
+            pode ser desfeita.
+          </p>
+          <ModalFooter>
+            <Button variant="secondary" onClick={() => setConfirmDeleteGroup(false)}>
+              Cancelar
+            </Button>
+            <Button variant="danger" onClick={handleDeleteGroup}>
+              Excluir
+            </Button>
+          </ModalFooter>
+        </Modal>
+      )}
+
+      {/* Confirmação de exclusão da empresa — forma da frota (D9.3). */}
+      {deleteCompanyTarget && (
+        <Modal open onClose={() => setDeleteCompanyTarget(null)} size="sm" title="Excluir empresa">
+          <p className="text-sm text-conteudo-muted">
+            Tem certeza que deseja excluir a empresa{" "}
+            <span className="font-medium text-conteudo">{deleteCompanyTarget.name}</span>? Ela
+            será removida do grupo com os clientes vinculados, e esta ação não pode
+            ser desfeita.
+          </p>
+          <ModalFooter>
+            <Button
+              variant="secondary"
+              onClick={() => setDeleteCompanyTarget(null)}
+              disabled={deletingCompanyId === deleteCompanyTarget.id}
+            >
+              Cancelar
+            </Button>
+            <Button
+              variant="danger"
+              onClick={() => handleDeleteCompany(deleteCompanyTarget)}
+              loading={deletingCompanyId === deleteCompanyTarget.id}
+            >
+              Excluir
+            </Button>
+          </ModalFooter>
         </Modal>
       )}
     </div>

@@ -1,9 +1,10 @@
 import { useCallback, useEffect, useRef, useState } from "react";
 import { useNavigate } from "react-router-dom";
-import { Avatar } from "../ui";
+import { Avatar, Icon, Switch } from "../ui";
 import { cn } from "../../lib/utils";
 import { useAuth } from "../../contexts/AuthContext";
 import { useTheme } from "../../contexts/ThemeContext";
+import { rotuloDePapel } from "../../lib/papel";
 import {
   getNotifications,
   markAllRead,
@@ -11,11 +12,7 @@ import {
   type Notification,
 } from "../../services/notificationService";
 
-const roleLabel: Record<string, string> = {
-  admin: "Administrador",
-  technician: "Técnico",
-  client: "Cliente",
-};
+/* O rótulo do papel vem de `lib/papel.ts`. Esta era uma das cinco cópias. */
 
 const NOTIF_TYPE_LABEL: Record<string, string> = {
   ticket_created: "Chamado criado",
@@ -34,6 +31,17 @@ interface TopbarProps {
   onMobileMenuClick: () => void;
   onToggleCollapsed: () => void;
   sidebarCollapsed: boolean;
+  /**
+   * Titulo da pagina, no lugar que o design system reserva para ele: o
+   * template oficial de listagem tem um unico <h1>, e ele fica aqui, nao
+   * dentro do <main>.
+   *
+   * Nasce opcional de proposito. Hoje 27 paginas do HelpHS desenham o
+   * proprio <h1>; passar o titulo aqui antes de tira-lo de la duplicaria o
+   * titulo — e dois <h1> na mesma pagina. Cada tela passa a preencher esta
+   * prop quando for migrada (Fases 11-16), soltando o <h1> que tem hoje.
+   */
+  pageTitle?: React.ReactNode;
 }
 
 // ── NotificationDropdown ──────────────────────────────────────
@@ -94,22 +102,26 @@ function NotificationDropdown({ onClose }: NotificationDropdownProps) {
   }
 
   return (
-    <div className="absolute right-0 top-[calc(100%+0.5rem)] w-80 max-w-[calc(100vw-1rem)] rounded-xl border border-slate-200 dark:border-border bg-white dark:bg-background-surface shadow-xl z-50 overflow-hidden">
+    <div className="absolute right-0 top-[calc(100%+0.5rem)] w-80 max-w-[calc(100vw-1rem)] rounded-xl border border-borda bg-surface shadow-xl z-50 overflow-hidden">
       {/* Header */}
-      <div className="flex items-center justify-between px-4 py-3 border-b border-slate-200 dark:border-border">
+      <div className="flex items-center justify-between px-4 py-3 border-b border-borda">
         <div className="flex items-center gap-2">
-          <span className="text-sm font-semibold text-slate-100">
+          <span className="text-sm font-semibold text-conteudo-heading">
             Notificações
           </span>
           {unread > 0 && (
-            <span className="text-xs bg-danger text-white rounded-full px-1.5 py-0.5 font-medium">
+            /* `bg-danger` é a cor CHEIA da rampa; com `text-white` por cima dá
+               3,76:1, e era um dos dois pares que a catraca cobrava desta
+               tela. O degrau de AÇÃO (`--action-danger`) e o par dele
+               (`--text-on-danger`) existem para isto. */
+            <span className="text-xs bg-action-danger text-on-danger rounded-full px-1.5 py-0.5 font-medium">
               {unread}
             </span>
           )}
         </div>
         {unread > 0 && (
           <button
-            className="text-xs text-primary hover:text-primary/80 disabled:opacity-50"
+            className="text-xs text-conteudo-link hover:text-conteudo-link-hover disabled:opacity-50"
             onClick={handleMarkAllRead}
             disabled={markingAll}
           >
@@ -121,11 +133,11 @@ function NotificationDropdown({ onClose }: NotificationDropdownProps) {
       {/* List */}
       <div className="max-h-80 overflow-y-auto">
         {loading ? (
-          <div className="flex items-center justify-center py-8 text-slate-500 text-sm">
+          <div className="flex items-center justify-center py-8 text-conteudo-muted text-sm">
             Carregando…
           </div>
         ) : items.length === 0 ? (
-          <div className="flex items-center justify-center py-8 text-slate-500 text-sm">
+          <div className="flex items-center justify-center py-8 text-conteudo-muted text-sm">
             Nenhuma notificação
           </div>
         ) : (
@@ -133,28 +145,33 @@ function NotificationDropdown({ onClose }: NotificationDropdownProps) {
             <button
               key={n.id}
               className={cn(
-                "w-full text-left px-4 py-3 border-b border-slate-100 dark:border-border/50 hover:bg-slate-50 dark:hover:bg-background-elevated transition-colors",
-                !n.read && "bg-slate-50 dark:bg-background-elevated/40",
+                "w-full text-left px-4 py-3 border-b border-borda hover:bg-surface-elevated transition-colors",
+                // O realce de "não lida" era `bg-slate-50` no claro e
+                // `bg-surface-elevated/40` no escuro — dois valores à mão, um
+                // por tema, e no escuro ele empatava com o hover. O
+                // `--action-tint` resolve por tema sozinho, e é o mesmo realce
+                // que a `NotificationsPage` usa para a mesma linha.
+                !n.read && "bg-action-tint",
               )}
               onClick={() => handleMarkRead(n)}
             >
               <div className="flex items-start gap-2">
                 {!n.read && (
-                  <span className="mt-1.5 w-2 h-2 rounded-full bg-primary shrink-0" />
+                  <span className="mt-1.5 w-2 h-2 rounded-full bg-action shrink-0" />
                 )}
                 <div className={cn("flex-1 min-w-0", n.read && "pl-4")}>
                   <div className="flex items-center justify-between gap-2">
-                    <p className="text-xs text-slate-500 truncate">
+                    <p className="text-xs text-conteudo-muted truncate">
                       {NOTIF_TYPE_LABEL[n.type] ?? n.type}
                     </p>
-                    <span className="text-xs text-slate-600 shrink-0">
+                    <span className="text-xs text-conteudo-muted shrink-0">
                       {timeAgo(n.created_at)}
                     </span>
                   </div>
-                  <p className="text-sm font-medium text-slate-200 truncate">
+                  <p className="text-sm font-medium text-conteudo truncate">
                     {n.title}
                   </p>
-                  <p className="text-xs text-slate-400 line-clamp-2">
+                  <p className="text-xs text-conteudo-muted line-clamp-2">
                     {n.message}
                   </p>
                 </div>
@@ -165,9 +182,9 @@ function NotificationDropdown({ onClose }: NotificationDropdownProps) {
       </div>
 
       {/* Footer */}
-      <div className="px-4 py-2.5 border-t border-slate-200 dark:border-border">
+      <div className="px-4 py-2.5 border-t border-borda">
         <button
-          className="w-full text-center text-xs text-primary hover:text-primary/80 transition-colors"
+          className="w-full text-center text-xs text-conteudo-link hover:text-conteudo-link-hover transition-colors"
           onClick={() => {
             onClose();
             navigate("/notifications");
@@ -182,7 +199,7 @@ function NotificationDropdown({ onClose }: NotificationDropdownProps) {
 
 // ── Topbar ────────────────────────────────────────────────────
 
-export function Topbar({ onMobileMenuClick, onToggleCollapsed, sidebarCollapsed }: TopbarProps) {
+export function Topbar({ onMobileMenuClick, onToggleCollapsed, sidebarCollapsed, pageTitle }: TopbarProps) {
   const { user, logout } = useAuth();
   const { theme, toggleTheme } = useTheme();
   const navigate = useNavigate();
@@ -193,6 +210,22 @@ export function Topbar({ onMobileMenuClick, onToggleCollapsed, sidebarCollapsed 
 
   const userMenuRef = useRef<HTMLDivElement>(null);
   const notifRef = useRef<HTMLDivElement>(null);
+
+  /**
+   * Os dois gatilhos, guardados para devolver o foco.
+   *
+   * Fechar um painel sem devolver o foco deixa quem navega por teclado no
+   * **início do documento**: o elemento focado saiu da árvore, o navegador
+   * recua para o `<body>`, e o próximo `Tab` recomeça do "pular para o
+   * conteúdo". O painel some sem dizer para onde ir.
+   *
+   * O que NÃO existe aqui, de propósito: armadilha de foco enquanto o painel
+   * está aberto. Prender o `Tab` dentro dele muda mais do que a decisão pede,
+   * e um painel que não prende o foco continua utilizável — um que prende e
+   * erra, não.
+   */
+  const notifBotaoRef = useRef<HTMLButtonElement>(null);
+  const userBotaoRef = useRef<HTMLButtonElement>(null);
 
   // Fetch unread count on mount + every 30s
   const fetchUnread = useCallback(() => {
@@ -207,22 +240,59 @@ export function Topbar({ onMobileMenuClick, onToggleCollapsed, sidebarCollapsed 
     return () => clearInterval(interval);
   }, [fetchUnread]);
 
+  /**
+   * Fecha o painel de notificações e devolve o foco ao sino.
+   *
+   * As duas metades andam juntas: fechar é o que a tecla pede, devolver o foco
+   * é o que faz o teclado continuar de onde parou.
+   */
+  const fecharNotif = useCallback(() => {
+    setNotifOpen(false);
+    notifBotaoRef.current?.focus();
+  }, []);
+
+  /** O mesmo para o menu do usuário. */
+  const fecharMenu = useCallback(() => {
+    setUserMenuOpen(false);
+    userBotaoRef.current?.focus();
+  }, []);
+
   // Close dropdowns on outside click
   useEffect(() => {
     function handler(e: MouseEvent) {
+      // A guarda pelo estado ABERTO é o que impede o efeito de roubar o foco:
+      // sem ela o `mousedown` em qualquer canto da tela chamaria `focus()` no
+      // gatilho de um painel que já estava fechado.
       if (
+        userMenuOpen &&
         userMenuRef.current &&
         !userMenuRef.current.contains(e.target as Node)
       ) {
-        setUserMenuOpen(false);
+        fecharMenu();
       }
-      if (notifRef.current && !notifRef.current.contains(e.target as Node)) {
-        setNotifOpen(false);
+      if (
+        notifOpen &&
+        notifRef.current &&
+        !notifRef.current.contains(e.target as Node)
+      ) {
+        fecharNotif();
       }
     }
     document.addEventListener("mousedown", handler);
     return () => document.removeEventListener("mousedown", handler);
-  }, []);
+  }, [userMenuOpen, notifOpen, fecharMenu, fecharNotif]);
+
+  // Escape fecha o painel aberto — e o foco volta ao gatilho.
+  useEffect(() => {
+    if (!userMenuOpen && !notifOpen) return;
+    function handler(e: KeyboardEvent) {
+      if (e.key !== "Escape") return;
+      if (notifOpen) fecharNotif();
+      if (userMenuOpen) fecharMenu();
+    }
+    document.addEventListener("keydown", handler);
+    return () => document.removeEventListener("keydown", handler);
+  }, [userMenuOpen, notifOpen, fecharMenu, fecharNotif]);
 
   function handleLogout() {
     logout();
@@ -230,32 +300,39 @@ export function Topbar({ onMobileMenuClick, onToggleCollapsed, sidebarCollapsed 
   }
 
   return (
-    <header className="flex h-16 shrink-0 items-center justify-between border-b border-slate-200 dark:border-border bg-white dark:bg-background-surface px-4 md:px-6">
+    <header className="flex h-16 shrink-0 items-center justify-between border-b border-borda bg-surface px-4 md:px-6">
       {/* Left: hamburger desktop (colapsa sidebar) + mobile (abre drawer) */}
       <div className="flex items-center gap-1">
         {/* Desktop toggle */}
         <button
-          className="hidden md:flex rounded-lg p-2 text-slate-500 dark:text-slate-400 hover:bg-slate-100 dark:hover:bg-background-elevated hover:text-slate-900 dark:hover:text-slate-100 transition-colors"
+          className="hidden md:flex rounded-lg p-2 text-conteudo-muted hover:bg-surface-elevated hover:text-conteudo-heading transition-colors"
           onClick={onToggleCollapsed}
           aria-label={sidebarCollapsed ? "Expandir menu" : "Recolher menu"}
+          aria-expanded={!sidebarCollapsed}
+          aria-controls="sidebar-nav"
         >
-          <svg className="w-5 h-5" aria-hidden="true" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
-            <path strokeLinecap="round" strokeLinejoin="round" d="M4 6h16M4 12h16M4 18h16" />
-          </svg>
+          <Icon name="menu" size={20} strokeWidth={2} />
         </button>
 
         {/* Mobile toggle */}
         <button
-          className="md:hidden rounded-lg p-2 text-slate-500 dark:text-slate-400 hover:bg-slate-100 dark:hover:bg-background-elevated hover:text-slate-900 dark:hover:text-slate-100 transition-colors"
+          className="md:hidden rounded-lg p-2 text-conteudo-muted hover:bg-surface-elevated hover:text-conteudo-heading transition-colors"
           onClick={onMobileMenuClick}
           aria-label="Abrir menu de navegação"
           aria-controls="sidebar-nav"
+          aria-expanded={false}
         >
-          <svg className="w-5 h-5" aria-hidden="true" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
-            <path strokeLinecap="round" strokeLinejoin="round" d="M4 6h16M4 12h16M4 18h16" />
-          </svg>
+          <Icon name="menu" size={20} strokeWidth={2} />
         </button>
       </div>
+
+      {/* Titulo da pagina — --text-base semibold --text-heading, medidas do
+          AppShell.jsx. Corta com reticencias em vez de empurrar as acoes. */}
+      {pageTitle && (
+        <h1 className="ml-2 min-w-0 truncate text-base font-semibold text-conteudo-heading">
+          {pageTitle}
+        </h1>
+      )}
 
       {/* Spacer */}
       <div className="flex-1" />
@@ -265,10 +342,11 @@ export function Topbar({ onMobileMenuClick, onToggleCollapsed, sidebarCollapsed 
         {/* Notification bell */}
         <div ref={notifRef}>
           <button
+            ref={notifBotaoRef}
             className={cn(
-              "relative rounded-lg p-2 text-slate-500 dark:text-slate-400 transition-colors",
-              "hover:bg-slate-100 dark:hover:bg-background-elevated hover:text-slate-900 dark:hover:text-slate-100",
-              notifOpen && "bg-slate-100 dark:bg-background-elevated text-slate-900 dark:text-slate-100",
+              "relative rounded-lg p-2 text-conteudo-muted transition-colors",
+              "hover:bg-surface-elevated hover:text-conteudo-heading",
+              notifOpen && "bg-surface-elevated text-conteudo-heading",
             )}
             aria-label={
               unreadCount > 0
@@ -279,28 +357,22 @@ export function Topbar({ onMobileMenuClick, onToggleCollapsed, sidebarCollapsed 
             aria-haspopup="dialog"
             onClick={() => setNotifOpen((v) => !v)}
           >
-            <svg
-              className="w-5 h-5"
-              aria-hidden="true"
-              fill="none"
-              viewBox="0 0 24 24"
-              stroke="currentColor"
-              strokeWidth={2}
-            >
-              <path
-                strokeLinecap="round"
-                strokeLinejoin="round"
-                d="M15 17h5l-1.405-1.405A2.032 2.032 0 0118 14.158V11a6.002 6.002 0 00-4-5.659V5a2 2 0 10-4 0v.341C7.67 6.165 6 8.388 6 11v3.159c0 .538-.214 1.055-.595 1.436L4 17h5m6 0v1a3 3 0 11-6 0v-1m6 0H9"
-              />
-            </svg>
+            <Icon name="bell" size={20} strokeWidth={2} />
             {unreadCount > 0 && (
-              <span className="absolute top-1 right-1 min-w-[1rem] h-4 rounded-full bg-danger text-white text-[10px] font-bold flex items-center justify-center px-0.5">
+              /* O segundo par que a catraca cobrava: mesmo `bg-danger` +
+                 `text-white` de 3,76:1 do contador de dentro do painel. */
+              <span className="absolute top-1 right-1 min-w-[1rem] h-4 rounded-full bg-action-danger text-on-danger text-[10px] font-bold flex items-center justify-center px-0.5">
                 {unreadCount > 99 ? "99+" : unreadCount}
               </span>
             )}
           </button>
 
           {notifOpen && (
+            /* Aqui o fechamento é SEM devolver foco de propósito: as duas
+               chamadas de `onClose` do painel são seguidas de `navigate(...)`,
+               e devolver o foco ao sino de uma página que já saiu de baixo do
+               pé não ajuda ninguém. Quem devolve o foco é o fechamento por
+               `Escape` e por clique fora, que deixam o usuário nesta tela. */
             <NotificationDropdown onClose={() => setNotifOpen(false)} />
           )}
         </div>
@@ -308,10 +380,11 @@ export function Topbar({ onMobileMenuClick, onToggleCollapsed, sidebarCollapsed 
         {/* User dropdown */}
         <div ref={userMenuRef}>
           <button
+            ref={userBotaoRef}
             className={cn(
               "flex items-center gap-2.5 rounded-lg px-2 py-1.5 transition-colors",
-              "hover:bg-slate-100 dark:hover:bg-background-elevated",
-              userMenuOpen && "bg-slate-100 dark:bg-background-elevated",
+              "hover:bg-surface-elevated",
+              userMenuOpen && "bg-surface-elevated",
             )}
             onClick={() => setUserMenuOpen((v) => !v)}
             aria-label={`Menu do usuário — ${user?.name ?? ""}`}
@@ -320,74 +393,65 @@ export function Topbar({ onMobileMenuClick, onToggleCollapsed, sidebarCollapsed 
           >
             <Avatar name={user?.name ?? "?"} src={user?.avatar_url ?? undefined} size="sm" />
             <div className="hidden md:block text-left">
-              <p className="text-sm font-medium text-slate-100 leading-tight">
+              <p className="text-sm font-medium text-conteudo leading-tight">
                 {user?.name}
               </p>
-              <p className="text-xs text-slate-500 leading-tight">
-                {roleLabel[user?.role ?? "client"]}
+              <p className="text-xs text-conteudo-muted leading-tight">
+                {rotuloDePapel(user?.role ?? "client")}
               </p>
             </div>
-            <svg
-              className="w-4 h-4 text-slate-500 hidden md:block"
-              aria-hidden="true"
-              fill="none"
-              viewBox="0 0 24 24"
-              stroke="currentColor"
+            <Icon
+              name="chevronDown"
+              size={16}
               strokeWidth={2}
-            >
-              <path
-                strokeLinecap="round"
-                strokeLinejoin="round"
-                d="M19 9l-7 7-7-7"
-              />
-            </svg>
+              className="text-conteudo-muted hidden md:block"
+            />
           </button>
 
           {/* Dropdown menu */}
           {userMenuOpen && (
-            <div className="absolute right-0 top-[calc(100%+0.5rem)] w-56 rounded-xl border border-slate-200 dark:border-border bg-white dark:bg-background-surface shadow-xl z-50 py-1">
+            <div className="absolute right-0 top-[calc(100%+0.5rem)] w-56 rounded-xl border border-borda bg-surface shadow-xl z-50 py-1">
               {/* User info */}
-              <div className="px-3 py-2.5 border-b border-slate-200 dark:border-border">
-                <p className="text-sm font-semibold text-slate-900 dark:text-slate-100 truncate">
+              <div className="px-3 py-2.5 border-b border-borda">
+                <p className="text-sm font-semibold text-conteudo-heading truncate">
                   {user?.name}
                 </p>
-                <p className="text-xs text-slate-500 truncate">{user?.email}</p>
+                <p className="text-xs text-conteudo-muted truncate">{user?.email}</p>
               </div>
 
               {/* Meu perfil */}
               <button
-                className="flex w-full items-center gap-2.5 px-3 py-2 text-sm text-slate-600 dark:text-slate-300 hover:bg-slate-50 dark:hover:bg-background-elevated hover:text-slate-900 dark:hover:text-slate-100 transition-colors"
+                className="flex w-full items-center gap-2.5 px-3 py-2 text-sm text-conteudo hover:bg-surface-elevated hover:text-conteudo-heading transition-colors"
                 onClick={() => { setUserMenuOpen(false); navigate("/profile"); }}
               >
-                <svg className="w-4 h-4 shrink-0" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
-                  <path strokeLinecap="round" strokeLinejoin="round" d="M16 7a4 4 0 11-8 0 4 4 0 018 0zM12 14a7 7 0 00-7 7h14a7 7 0 00-7-7z" />
-                </svg>
+                <Icon name="user" size={16} strokeWidth={2} />
                 Meu perfil
               </button>
 
-              {/* Tema */}
-              <button
-                className="flex w-full items-center gap-2.5 px-3 py-2 text-sm text-slate-600 dark:text-slate-300 hover:bg-slate-50 dark:hover:bg-background-elevated hover:text-slate-900 dark:hover:text-slate-100 transition-colors"
-                onClick={toggleTheme}
-              >
-                <svg className="w-4 h-4 shrink-0" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
-                  <path strokeLinecap="round" strokeLinejoin="round" d="M21 12.79A9 9 0 1111.21 3 7 7 0 0021 12.79z" />
-                </svg>
-                <span className="flex-1 text-left">Modo escuro</span>
-                {/* Toggle switch */}
-                <div className={`relative w-9 h-5 rounded-full transition-colors duration-200 ${theme === "dark" ? "bg-primary" : "bg-slate-300 dark:bg-slate-600"}`}>
-                  <div className={`absolute top-0.5 w-4 h-4 rounded-full bg-white shadow transition-transform duration-200 ${theme === "dark" ? "translate-x-4" : "translate-x-0.5"}`} />
-                </div>
-              </button>
+              {/* Tema — o interruptor e o primitivo `Switch`, e nao um botao
+                  com um trilho desenhado dentro: o estado agora e anunciado.
+                  O `theme === "dark"` que sobra aqui é o ESTADO do controle,
+                  não escolha de cor: ele não seleciona hexadecimal nenhum, e
+                  por isso fica. */}
+              <Switch
+                checked={theme === "dark"}
+                onChange={() => toggleTheme()}
+                size="sm"
+                className="w-full flex-row-reverse justify-between px-3 py-2 text-conteudo-muted transition-colors hover:bg-surface-elevated hover:text-conteudo"
+                label={
+                  <span className="flex flex-1 items-center gap-2.5">
+                    <Icon name="moon" size={16} strokeWidth={2} />
+                    <span className="flex-1 text-left">Modo escuro</span>
+                  </span>
+                }
+              />
 
-              <div className="border-t border-slate-200 dark:border-border mt-1 pt-1">
+              <div className="border-t border-borda mt-1 pt-1">
               <button
-                className="flex w-full items-center gap-2.5 px-3 py-2 text-sm text-danger hover:bg-slate-50 dark:hover:bg-background-elevated transition-colors"
+                className="flex w-full items-center gap-2.5 px-3 py-2 text-sm text-on-tint-danger hover:bg-surface-elevated transition-colors"
                 onClick={handleLogout}
               >
-                <svg className="w-4 h-4 shrink-0" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
-                  <path strokeLinecap="round" strokeLinejoin="round" d="M17 16l4-4m0 0l-4-4m4 4H7m6 4v1a3 3 0 01-3 3H6a3 3 0 01-3-3V7a3 3 0 013-3h4a3 3 0 013 3v1" />
-                </svg>
+                <Icon name="logout" size={16} strokeWidth={2} />
                 Sair
               </button>
             </div>

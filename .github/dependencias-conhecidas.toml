@@ -264,39 +264,6 @@ data = "2026-09-01"
 # metade: isso chega ao navegador, ou morre no build?
 
 [[frontend]]
-pacote = "@vitest/browser"
-advisory = "GHSA-2h32-95rg-cppp"
-severidade = "critical"
-faixa = ">=4.0.17 <4.1.6"
-classe = "nao_aplicavel"
-motivo = "Query param otelCarrier servido sem sanitizar como script inline (XSS no runner). `npm ls --omit=dev @vitest/browser` -> ausente da arvore de producao: e devDependency de teste, nunca publicada, e o modo browser nao roda no CI."
-remover_quando = "o pacote sair do projeto, ou o modo browser passar a rodar em CI com conteudo de terceiro"
-responsavel = "TI/Dev"
-data = "2026-09-02"
-
-[[frontend]]
-pacote = "@vitest/browser"
-advisory = "GHSA-g8mr-85jm-7xhm"
-severidade = "critical"
-faixa = ">=4.0.0 <=4.1.7"
-classe = "nao_aplicavel"
-motivo = "API do Browser Mode exposta permite proxy de CDP e sobrescrita do arquivo de configuracao. `npm ls --omit=dev @vitest/browser` -> ausente da arvore de producao: e devDependency de teste, nunca publicada, e o modo browser nao roda no CI."
-remover_quando = "o pacote sair do projeto, ou o modo browser passar a rodar em CI com conteudo de terceiro"
-responsavel = "TI/Dev"
-data = "2026-09-02"
-
-[[frontend]]
-pacote = "@vitest/browser"
-advisory = "GHSA-p63j-vcc4-9vmv"
-severidade = "critical"
-faixa = ">=4.0.0 <4.1.10"
-classe = "nao_aplicavel"
-motivo = "Comandos do provider do Browser Mode furam a checagem de permissao de acesso a arquivo. `npm ls --omit=dev @vitest/browser` -> ausente da arvore de producao: e devDependency de teste, nunca publicada, e o modo browser nao roda no CI."
-remover_quando = "o pacote sair do projeto, ou o modo browser passar a rodar em CI com conteudo de terceiro"
-responsavel = "TI/Dev"
-data = "2026-09-02"
-
-[[frontend]]
 pacote = "axios"
 advisory = "GHSA-42h9-826w-cgv3"
 severidade = "moderate"
@@ -480,39 +447,6 @@ faixa = ">=4.0.0 <4.0.6"
 classe = "nao_aplicavel"
 motivo = "Injecao CRLF por nomes de campo multipart sem escape. CORRIGE A JUSTIFICATIVA ANTERIOR: `npm ls --omit=dev form-data` NAO devolve ausente -- o pacote esta sim na arvore de producao, sob o axios. O que o tira do bundle e outra coisa: o campo `browser` do axios mapeia `./lib/platform/node/classes/FormData.js` -> `./lib/helpers/null.js`. O navegador usa o FormData NATIVO (attachmentService.ts:34, userService.ts:191)."
 remover_quando = "o axios passar a rodar em Node dentro deste projeto"
-responsavel = "TI/Dev"
-data = "2026-09-02"
-
-[[frontend]]
-pacote = "js-yaml"
-advisory = "GHSA-52cp-r559-cp3m"
-severidade = "high"
-faixa = ">=4.0.0 <4.3.0"
-classe = "nao_aplicavel"
-motivo = "Cadeia de merge keys forca consumo quadratico de CPU. `npm ls --omit=dev js-yaml` -> ausente: transitiva de ferramenta de build. O front nao faz parse de YAML em runtime."
-remover_quando = "o front passar a processar YAML no navegador"
-responsavel = "TI/Dev"
-data = "2026-09-02"
-
-[[frontend]]
-pacote = "js-yaml"
-advisory = "GHSA-5p4m-2wfm-xmqj"
-severidade = "high"
-faixa = ">=4.0.0 <4.3.1"
-classe = "nao_aplicavel"
-motivo = "Consumo quadratico de CPU na resolucao de !!omap. `npm ls --omit=dev js-yaml` -> ausente: transitiva de ferramenta de build. O front nao faz parse de YAML em runtime."
-remover_quando = "o front passar a processar YAML no navegador"
-responsavel = "TI/Dev"
-data = "2026-09-02"
-
-[[frontend]]
-pacote = "js-yaml"
-advisory = "GHSA-h67p-54hq-rp68"
-severidade = "moderate"
-faixa = ">=4.0.0 <=4.1.1"
-classe = "nao_aplicavel"
-motivo = "DoS quadratico em merge key com aliases repetidos. `npm ls --omit=dev js-yaml` -> ausente: transitiva de ferramenta de build. O front nao faz parse de YAML em runtime."
-remover_quando = "o front passar a processar YAML no navegador"
 responsavel = "TI/Dev"
 data = "2026-09-02"
 

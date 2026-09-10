@@ -1,9 +1,18 @@
 import React from "react";
 import { useEffect, useRef, useState } from "react";
-import { useNavigate, useParams } from "react-router-dom";
+import { Link, useParams } from "react-router-dom";
 import { toast } from "sonner";
 import { toastApiError } from "../../lib/toastError";
-import { Spinner } from "../../components/ui";
+import {
+  Avatar,
+  Badge,
+  Button,
+  Card,
+  Icon,
+  Spinner,
+} from "../../components/ui";
+import { rotuloDeCategoria } from "../../lib/categoria";
+import { rotuloDePapel, varianteDePapel } from "../../lib/papel";
 import { plural } from "../../lib/utils";
 import { renderMarkdown } from "../../lib/markdown";
 import { useAuth } from "../../contexts/AuthContext";
@@ -17,47 +26,62 @@ import {
   type KBComment,
 } from "../../services/kbService";
 
-// ── Constants ─────────────────────────────────────────────────
-
-const ROLE_LABEL: Record<string, string> = { admin: "Admin", technician: "Técnico", client: "Cliente" };
-const ROLE_COLOR: Record<string, string> = { admin: "text-primary", technician: "text-info-700 dark:text-info-400", client: "text-slate-400" };
-const CATEGORY_LABEL: Record<string, string> = {
-  hardware: "Hardware", software: "Software", network: "Rede",
-  access: "Acesso", email: "E-mail", security: "Segurança", general: "Geral", other: "Outro",
-};
-
-// ── Icons ─────────────────────────────────────────────────────
-
-const IC = {
-  ArrowLeft: <svg className="w-3.5 h-3.5" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2.5}><path strokeLinecap="round" strokeLinejoin="round" d="M10 19l-7-7m0 0l7-7m-7 7h18" /></svg>,
-  Edit: <svg className="w-3.5 h-3.5" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}><path strokeLinecap="round" strokeLinejoin="round" d="M11 5H6a2 2 0 00-2 2v11a2 2 0 002 2h11a2 2 0 002-2v-5m-1.414-9.414a2 2 0 112.828 2.828L11.828 15H9v-2.828l8.586-8.586z" /></svg>,
-  Eye: <svg className="w-3.5 h-3.5" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}><path strokeLinecap="round" strokeLinejoin="round" d="M15 12a3 3 0 11-6 0 3 3 0 016 0z" /><path strokeLinecap="round" strokeLinejoin="round" d="M2.458 12C3.732 7.943 7.523 5 12 5c4.478 0 8.268 2.943 9.542 7-1.274 4.057-5.064 7-9.542 7-4.477 0-8.268-2.943-9.542-7z" /></svg>,
-  ThumbUp: <svg className="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}><path strokeLinecap="round" strokeLinejoin="round" d="M14 10h4.764a2 2 0 011.789 2.894l-3.5 7A2 2 0 0115.263 21h-4.017c-.163 0-.326-.02-.485-.06L7 20m7-10V5a2 2 0 00-2-2h-.095c-.5 0-.905.405-.905.905 0 .714-.211 1.412-.608 2.006L7 11v9m7-10h-2M7 20H5a2 2 0 01-2-2v-6a2 2 0 012-2h2.5" /></svg>,
-  ThumbDown: <svg className="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}><path strokeLinecap="round" strokeLinejoin="round" d="M10 14H5.236a2 2 0 01-1.789-2.894l3.5-7A2 2 0 018.736 3h4.018a2 2 0 01.485.06l3.76.94m-7 10v5a2 2 0 002 2h.095c.5 0 .905-.405.905-.905 0-.714.211-1.412.608-2.006L17 13V4m-7 10h2m5-10h2a2 2 0 012 2v6a2 2 0 01-2 2h-2.5" /></svg>,
-  Chat: <svg className="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}><path strokeLinecap="round" strokeLinejoin="round" d="M8 12h.01M12 12h.01M16 12h.01M21 12c0 4.418-4.03 8-9 8a9.863 9.863 0 01-4.255-.949L3 20l1.395-3.72C3.512 15.042 3 13.574 3 12c0-4.418 4.03-8 9-8s9 3.582 9 8z" /></svg>,
-  User: <svg className="w-3.5 h-3.5" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}><path strokeLinecap="round" strokeLinejoin="round" d="M16 7a4 4 0 11-8 0 4 4 0 018 0zM12 14a7 7 0 00-7 7h14a7 7 0 00-7-7z" /></svg>,
-  Calendar: <svg className="w-3.5 h-3.5" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}><path strokeLinecap="round" strokeLinejoin="round" d="M8 7V3m8 4V3m-9 8h10M5 21h14a2 2 0 002-2V7a2 2 0 00-2-2H5a2 2 0 00-2 2v12a2 2 0 002 2z" /></svg>,
-  Tag: <svg className="w-3.5 h-3.5" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}><path strokeLinecap="round" strokeLinejoin="round" d="M7 7h.01M7 3h5c.512 0 1.024.195 1.414.586l7 7a2 2 0 010 2.828l-7 7a2 2 0 01-2.828 0l-7-7A1.994 1.994 0 013 12V7a4 4 0 014-4z" /></svg>,
-  Send: <svg className="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}><path strokeLinecap="round" strokeLinejoin="round" d="M12 19l9 2-9-18-9 18 9-2zm0 0v-8" /></svg>,
-};
+/**
+ * Os dois polegares, apontados por nome e não por posição no arquivo.
+ *
+ * Estas duas constantes nasceram de um defeito real: a **E21** subiu os dois
+ * ícones a partir desta tela e **inverteu os nomes** — o traçado guardado em
+ * `thumbsUp` era o polegar para baixo. Quem migrou esta tela casou pelo
+ * **traçado**, como o contrato manda, e isolou a inversão aqui em vez de
+ * espalhá-la por quatro chamadas: ficava absurdo de ler e certo de ver.
+ *
+ * A **E21-b** consertou o pacote, e o conserto desceu para cá invertendo estas
+ * duas linhas. As constantes ficam porque continuam sendo a coisa certa: o
+ * ponto de uso diz o que o desenho FAZ, não como o pacote o chamou.
+ *
+ * O que fez o defeito ser achável: os dois aparecem lado a lado, num "Sim" e
+ * num "Não". Foi o único lugar do sistema onde a troca produzia sintoma —
+ * contagem, unicidade e hash passaram verdes com ela.
+ */
+const TRACO_POLEGAR_PARA_CIMA = "thumbsUp" as const;
+const TRACO_POLEGAR_PARA_BAIXO = "thumbsDown" as const;
 
 // ── Markdown ──────────────────────────────────────────────────
 
+/**
+ * ⚠️ Nenhuma das classes `prose-*` abaixo gera CSS neste projeto.
+ *
+ * O `@tailwindcss/typography` não está no `package.json` nem em
+ * `plugins: []` do `tailwind.config.js`, e não existe regra `.prose` em
+ * `index.css` nem no pacote. Ou seja: o corpo do artigo é renderizado **sem
+ * estilo nenhum** desde sempre — título com o tamanho padrão do navegador,
+ * link azul sublinhado do agente, bloco de código sem fundo.
+ *
+ * As classes ficam, traduzidas para os tokens, por dois motivos: elas são a
+ * única declaração escrita de como o corpo do artigo deveria parecer, e trocar
+ * `slate-*` por token aqui é o que fecha a tela em zero paleta crua. Instalar o
+ * plugin mexe em `package.json` e em `tailwind.config.js`, os dois fora do
+ * escopo desta tela.
+ *
+ * Dois avisos para quem instalar: `prose-invert` está cravado sem `dark:`, o
+ * que inverteria o corpo no tema CLARO, e a altura do bloco é limitada a 15rem
+ * com rolagem — as duas coisas precisam de decisão antes de o plugin entrar.
+ */
 function MarkdownContent({ content }: { content: string }) {
   const html = renderMarkdown(content);
   return (
     <div
       className="prose prose-invert prose-sm max-w-none [overflow-wrap:anywhere] [word-break:break-word]
-        prose-headings:text-slate-100 prose-headings:font-semibold
-        prose-p:text-slate-300 prose-p:leading-relaxed
-        prose-a:text-primary prose-a:no-underline hover:prose-a:underline
-        prose-strong:text-slate-100
-        prose-code:text-primary prose-code:bg-background-elevated prose-code:px-1 prose-code:rounded
-        prose-pre:bg-background-elevated prose-pre:border prose-pre:border-border prose-pre:overflow-x-auto
-        prose-ul:text-slate-300 prose-ol:text-slate-300
-        prose-li:marker:text-slate-500
-        prose-blockquote:border-l-primary prose-blockquote:text-slate-400
-        prose-hr:border-border"
+        prose-headings:text-conteudo-heading prose-headings:font-semibold
+        prose-p:text-conteudo prose-p:leading-relaxed
+        prose-a:text-conteudo-link prose-a:no-underline hover:prose-a:underline
+        prose-strong:text-conteudo-heading
+        prose-code:text-conteudo-link prose-code:bg-surface-elevated prose-code:px-1 prose-code:rounded
+        prose-pre:bg-surface-elevated prose-pre:border prose-pre:border-borda prose-pre:overflow-x-auto
+        prose-ul:text-conteudo prose-ol:text-conteudo
+        prose-li:marker:text-conteudo-muted
+        prose-blockquote:border-l-action prose-blockquote:text-conteudo-muted
+        prose-hr:border-borda"
       dangerouslySetInnerHTML={{ __html: html }}
     />
   );
@@ -65,10 +89,26 @@ function MarkdownContent({ content }: { content: string }) {
 
 // ── Comment form ──────────────────────────────────────────────
 
-function CommentForm({ onSubmit, placeholder = "Deixe um comentário…", autoFocus = false, onCancel }: {
+function CommentForm({
+  onSubmit,
+  placeholder = "Deixe um comentário…",
+  rotulo = "Comentário",
+  autoFocus = false,
+  onCancel,
+}: {
   onSubmit: (content: string) => Promise<void>;
-  placeholder?: string; autoFocus?: boolean;
-  onCancel?: () => void; submitLabel?: string;
+  placeholder?: string;
+  /**
+   * O nome acessível do campo.
+   *
+   * O campo se identificava só pelo `placeholder` — o texto que some
+   * exatamente quando a pessoa começa a digitar, e que em leitor de tela vale
+   * como dica, não como nome. Item fixo do CHECKLIST-29.
+   */
+  rotulo?: string;
+  autoFocus?: boolean;
+  onCancel?: () => void;
+  submitLabel?: string;
 }) {
   const [content, setContent] = useState("");
   const [submitting, setSubmitting] = useState(false);
@@ -88,29 +128,61 @@ function CommentForm({ onSubmit, placeholder = "Deixe um comentário…", autoFo
   return (
     <form onSubmit={handleSubmit} className="space-y-2">
       <div className="flex items-center gap-2">
+        {/*
+          Não é o primitivo `Textarea`: ele embrulha o campo num `div` de
+          coluna e crava `resize-y min-h-[80px]`, e o `cn` do projeto é
+          concatenação simples — sem `tailwind-merge`, `resize-none` e
+          `resize-y` sairiam os dois no atributo e quem decide vira a ordem do
+          CSS gerado. Este campo é de uma linha que cresce até 6rem dentro de
+          uma linha de flex, e a geometria não sobreviveria à troca.
+
+          A borda vem de `--border-control` (E7) e não do `borda/60` de antes:
+          o contorno de um CONTROLE pede 3:1 pela 1.4.11, e o separador de
+          superfície a 60% dava perto de 1,2:1.
+        */}
         <textarea
           ref={textareaRef}
           rows={1}
           value={content}
           onChange={(e) => setContent(e.target.value)}
           placeholder={placeholder}
-          className="flex-1 resize-none rounded-lg border border-border/60 bg-background-elevated px-3 py-2 text-sm text-slate-200 placeholder:text-slate-500 focus:outline-none focus:ring-2 focus:ring-primary focus:border-transparent transition-colors max-h-24 overflow-y-auto leading-relaxed break-words"
-          onKeyDown={(e) => { if (e.key === "Enter" && !e.shiftKey) { e.preventDefault(); handleSubmit(e as unknown as React.FormEvent); } }}
+          aria-label={rotulo}
+          className="flex-1 resize-none rounded-lg border border-borda-control bg-surface-elevated px-3 py-2 text-sm text-conteudo placeholder:text-conteudo-muted focus:outline-none focus:ring-2 focus:ring-action focus:border-transparent transition-colors max-h-24 overflow-y-auto leading-relaxed break-words"
+          onKeyDown={(e) => {
+            if (e.key === "Enter" && !e.shiftKey) {
+              e.preventDefault();
+              handleSubmit(e as unknown as React.FormEvent);
+            }
+          }}
         />
-        <button
+        {/*
+          O botão não tinha nome acessível nenhum: dentro dele só havia um
+          `<svg>`, e o `Icon` é `aria-hidden`. Quem navega por leitor de tela
+          ouvia "botão" e mais nada.
+        */}
+        <Button
           type="submit"
+          aria-label={`Enviar ${rotulo.toLowerCase()}`}
           disabled={!content.trim() || submitting}
-          className="shrink-0 rounded-lg bg-primary px-3 py-2 text-white hover:bg-primary/90 disabled:opacity-40 disabled:cursor-not-allowed transition-colors cursor-pointer"
+          className="shrink-0"
         >
-          {IC.Send}
-        </button>
+          <Icon name="send" size={16} strokeWidth={2} />
+        </Button>
       </div>
       {onCancel && (
         <div className="flex justify-end">
-          <button type="button" onClick={onCancel} className="text-xs text-slate-500 hover:text-slate-300 transition-colors cursor-pointer">Cancelar</button>
+          <button
+            type="button"
+            onClick={onCancel}
+            className="text-xs text-conteudo-muted hover:text-conteudo transition-colors cursor-pointer"
+          >
+            Cancelar
+          </button>
         </div>
       )}
-      <p className="text-xs text-slate-600">Enter para enviar · Shift+Enter para nova linha</p>
+      <p className="text-xs text-conteudo-muted">
+        Enter para enviar · Shift+Enter para nova linha
+      </p>
     </form>
   );
 }
@@ -131,25 +203,33 @@ function CommentItem({ comment, currentUserId, isStaff, onReply, onDelete }: {
   return (
     <div className="space-y-3">
       <div className="flex gap-3">
-        <div className="w-8 h-8 rounded-full bg-background-elevated border border-border/50 flex items-center justify-center shrink-0 text-xs font-semibold text-slate-300">
-          {comment.author_name.charAt(0).toUpperCase()}
-        </div>
+        <Avatar name={comment.author_name} size="sm" />
         <div className="flex-1 min-w-0">
           <div className="flex flex-wrap items-center gap-2 mb-1">
-            <span className="text-sm font-semibold text-slate-200">{comment.author_name}</span>
+            <span className="text-sm font-semibold text-conteudo">
+              {comment.author_name}
+            </span>
+            {/*
+              O papel sai de `lib/papel.ts`. A cópia local desta tela era a
+              sexta, e era a que divergia no TEXTO: dizia "Admin" onde as
+              outras cinco dizem "Administrador".
+            */}
             {comment.author_role && (
-              <span className={`text-xs ${ROLE_COLOR[comment.author_role] ?? "text-slate-500"}`}>
-                {ROLE_LABEL[comment.author_role] ?? comment.author_role}
-              </span>
+              <Badge variant={varianteDePapel(comment.author_role)}>
+                {rotuloDePapel(comment.author_role)}
+              </Badge>
             )}
-            <span className="text-xs text-slate-600">{date}</span>
+            <span className="text-xs text-conteudo-muted">{date}</span>
           </div>
-          <p className="text-sm text-slate-300 leading-relaxed whitespace-pre-wrap break-words">{comment.content}</p>
+          <p className="text-sm text-conteudo leading-relaxed whitespace-pre-wrap break-words">
+            {comment.content}
+          </p>
           <div className="flex items-center gap-3 mt-2">
             {!comment.parent_id && (
               <button
                 onClick={() => setShowReplyForm((v) => !v)}
-                className="text-xs text-slate-500 hover:text-primary transition-colors cursor-pointer"
+                aria-expanded={showReplyForm}
+                className="text-xs text-conteudo-muted hover:text-conteudo-link transition-colors cursor-pointer"
               >
                 Responder
               </button>
@@ -157,19 +237,26 @@ function CommentItem({ comment, currentUserId, isStaff, onReply, onDelete }: {
             {replyCount > 0 && (
               <button
                 onClick={() => setShowReplies((v) => !v)}
-                className="flex items-center gap-1 text-xs text-slate-500 hover:text-slate-300 transition-colors cursor-pointer"
+                aria-expanded={showReplies}
+                className="flex items-center gap-1 text-xs text-conteudo-muted hover:text-conteudo transition-colors cursor-pointer"
               >
-                <svg
-                  className={`w-3 h-3 transition-transform duration-150 ${showReplies ? "rotate-180" : ""}`}
-                  fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2.5}
-                >
-                  <path strokeLinecap="round" strokeLinejoin="round" d="M19 9l-7 7-7-7" />
-                </svg>
-                {showReplies ? "Ocultar" : "Ver"} {replyCount} resposta{replyCount !== 1 ? "s" : ""}
+                <Icon
+                  name="chevronDown"
+                  size={12}
+                  strokeWidth={2.5}
+                  className={`transition-transform duration-150 ${showReplies ? "rotate-180" : ""}`}
+                />
+                {showReplies ? "Ocultar" : "Ver"} {replyCount} resposta
+                {replyCount !== 1 ? "s" : ""}
               </button>
             )}
             {canDelete && (
-              <button onClick={() => onDelete(comment.id)} className="text-xs text-slate-600 hover:text-danger transition-colors cursor-pointer">Excluir</button>
+              <button
+                onClick={() => onDelete(comment.id)}
+                className="text-xs text-conteudo-muted hover:text-on-tint-danger transition-colors cursor-pointer"
+              >
+                Excluir
+              </button>
             )}
           </div>
         </div>
@@ -177,17 +264,31 @@ function CommentItem({ comment, currentUserId, isStaff, onReply, onDelete }: {
 
       {showReplyForm && (
         <div className="ml-11">
-          <CommentForm placeholder="Escreva uma resposta…" autoFocus submitLabel="Responder"
+          <CommentForm
+            placeholder="Escreva uma resposta…"
+            rotulo="Resposta"
+            autoFocus
+            submitLabel="Responder"
             onCancel={() => setShowReplyForm(false)}
-            onSubmit={async (content) => { await onReply(comment.id, content); setShowReplyForm(false); }}
+            onSubmit={async (content) => {
+              await onReply(comment.id, content);
+              setShowReplyForm(false);
+            }}
           />
         </div>
       )}
 
       {showReplies && replyCount > 0 && (
-        <div className="ml-11 space-y-4 border-l-2 border-border/40 pl-4">
+        <div className="ml-11 space-y-4 border-l-2 border-borda/40 pl-4">
           {comment.replies.map((reply) => (
-            <CommentItem key={reply.id} comment={reply} currentUserId={currentUserId} isStaff={isStaff} onReply={onReply} onDelete={onDelete} />
+            <CommentItem
+              key={reply.id}
+              comment={reply}
+              currentUserId={currentUserId}
+              isStaff={isStaff}
+              onReply={onReply}
+              onDelete={onDelete}
+            />
           ))}
         </div>
       )}
@@ -199,11 +300,13 @@ function CommentItem({ comment, currentUserId, isStaff, onReply, onDelete }: {
 
 function PropRow({ icon, label, children }: { icon: React.JSX.Element; label: string; children: React.ReactNode }) {
   return (
-    <div className="flex items-start gap-3 py-2.5 border-b border-border/30 last:border-0">
-      <span className="mt-0.5 shrink-0 text-slate-500">{icon}</span>
+    <div className="flex items-start gap-3 py-2.5 border-b border-borda/30 last:border-0">
+      <span className="mt-0.5 shrink-0 text-conteudo-muted">{icon}</span>
       <div className="min-w-0 flex-1">
-        <p className="mb-0.5 text-[10px] font-semibold uppercase tracking-widest text-slate-500">{label}</p>
-        <div className="text-sm font-medium text-slate-200">{children}</div>
+        <p className="mb-0.5 text-[10px] font-semibold uppercase tracking-widest text-conteudo-muted">
+          {label}
+        </p>
+        <div className="text-sm font-medium text-conteudo">{children}</div>
       </div>
     </div>
   );
@@ -214,7 +317,6 @@ function PropRow({ icon, label, children }: { icon: React.JSX.Element; label: st
 export default function KBArticlePage() {
   const { id } = useParams<{ id: string }>();
   const { user } = useAuth();
-  const navigate = useNavigate();
   const isStaff = user?.role === "admin" || user?.role === "technician";
 
   const [article, setArticle] = useState<KBArticle | null>(null);
@@ -259,9 +361,29 @@ export default function KBArticlePage() {
     }
   }
 
+  /**
+   * Exclui o comentario, e so entao o tira da lista.
+   *
+   * O `await` estava SOLTO aqui, e a ordem era a inversa da segura: a lista era
+   * filtrada logo depois da chamada, sem saber se ela tinha dado certo. Uma
+   * falha de rede rejeitava a promessa sem tratamento, o comentario continuava
+   * no servidor, **e a tela mostrava removido o que continuava la** — o usuario
+   * so descobria ao recarregar.
+   *
+   * A forma e a das irmas deste mesmo arquivo (`handleAddComment`,
+   * `handleReply`): o estado local muda DENTRO do `try`, depois do `await`.
+   *
+   * Nao relanca, ao contrario das irmas: elas relancam para o formulario saber
+   * que nao deve limpar o campo. Aqui nao ha campo — o que a lixeira precisa e
+   * que a lista NAO mude, e isso o `catch` ja garante.
+   */
   async function handleDeleteComment(commentId: string) {
-    await deleteKBComment(commentId);
-    setComments((prev) => prev.filter((c) => c.id !== commentId).map((c) => ({ ...c, replies: c.replies.filter((r) => r.id !== commentId) })));
+    try {
+      await deleteKBComment(commentId);
+      setComments((prev) => prev.filter((c) => c.id !== commentId).map((c) => ({ ...c, replies: c.replies.filter((r) => r.id !== commentId) })));
+    } catch (err) {
+      toastApiError(err, "Não foi possível excluir o comentário.");
+    }
   }
 
   const totalComments = comments.reduce((acc, c) => acc + 1 + c.replies.length, 0);
@@ -271,40 +393,66 @@ export default function KBArticlePage() {
   if (notFound || !article) {
     return (
       <div className="flex flex-col items-center justify-center py-24">
-        <p className="text-slate-400 mb-2">Artigo não encontrado.</p>
-        <button onClick={() => navigate("/kb")} className="text-primary text-sm hover:text-primary/80 cursor-pointer transition-colors">Voltar à Base de Conhecimento</button>
+        <p className="text-conteudo-muted mb-2">Artigo não encontrado.</p>
+        {/* Navegação é link: o `onClick={navigate("/kb")}` tirava daqui abrir
+            em aba nova, menu de contexto e o destino na barra de status. */}
+        <Link
+          to="/kb"
+          className="text-conteudo-link text-sm hover:text-conteudo-link-hover cursor-pointer transition-colors"
+        >
+          Voltar à Base de Conhecimento
+        </Link>
       </div>
     );
   }
 
   const formattedDate = new Date(article.updated_at).toLocaleDateString("pt-BR", { day: "2-digit", month: "long", year: "numeric" });
-  const catLabel = CATEGORY_LABEL[article.category] ?? article.category;
+  const catLabel = rotuloDeCategoria(article.category);
 
   return (
     <div className="space-y-5 pb-10">
       {/* ── Header ───────────────────────────────────────────── */}
-      <div className="flex flex-col sm:flex-row sm:items-start sm:justify-between gap-4 rounded-2xl border border-border/40 bg-background-surface px-5 py-4">
+      <div className="flex flex-col sm:flex-row sm:items-start sm:justify-between gap-4 rounded-2xl border border-borda/40 bg-surface px-5 py-4">
         <div className="min-w-0 text-center sm:text-left">
-          <button
-            onClick={() => navigate("/kb")}
-            className="mb-2 inline-flex items-center gap-1.5 text-xs font-medium text-slate-500 hover:text-primary transition-colors cursor-pointer"
+          {/*
+            A trilha era UM botão com a linha inteira dentro, então o nome
+            acessível do controle era "Base de Conhecimento / <título do
+            artigo>" — a página de onde se vem e a página onde se está, num
+            controle só. Mesmo defeito, mesma correção do `TicketDetailPage`:
+            o que navega é link e leva só o nome do destino; o título do artigo
+            é texto, porque a página já está nele.
+          */}
+          <nav
+            aria-label="Trilha"
+            className="mb-2 flex items-center justify-center gap-1.5 text-xs font-medium sm:justify-start"
           >
-            {IC.ArrowLeft}
-            <span>Base de Conhecimento</span>
-            <span className="text-slate-600">/</span>
-            <span className="text-slate-500 truncate max-w-[160px] sm:max-w-xs">{article.title}</span>
-          </button>
-          <h1 className="text-xl font-extrabold leading-tight text-slate-100 break-words [overflow-wrap:anywhere]">{article.title}</h1>
+            <Link
+              to="/kb"
+              className="inline-flex items-center gap-1.5 text-conteudo-muted hover:text-conteudo-link transition-colors"
+            >
+              <Icon name="arrowLeft" size={14} strokeWidth={2.5} />
+              <span>Base de Conhecimento</span>
+            </Link>
+            <span aria-hidden="true" className="text-conteudo-faint">
+              /
+            </span>
+            <span className="text-conteudo-muted truncate max-w-[160px] sm:max-w-xs">
+              {article.title}
+            </span>
+          </nav>
+          <h1 className="text-xl font-extrabold leading-tight text-conteudo-heading break-words [overflow-wrap:anywhere]">
+            {article.title}
+          </h1>
         </div>
         {isStaff && (
           <div className="flex justify-center sm:justify-end">
-            <button
-              onClick={() => navigate(`/kb/${article.id}/edit`)}
-              className="flex items-center gap-2 rounded-xl border border-border/50 bg-background-elevated px-4 py-2 text-sm font-semibold text-slate-200 hover:border-border hover:bg-background-elevated/80 transition-colors cursor-pointer"
+            <Button
+              to={`/kb/${article.id}/edit`}
+              variant="secondary"
+              icon={<Icon name="edit" size={14} strokeWidth={2} />}
             >
-              {IC.Edit}
               Editar artigo
-            </button>
+            </Button>
           </div>
         )}
       </div>
@@ -314,131 +462,218 @@ export default function KBArticlePage() {
         {/* ── Main column ───────────────────────────────────── */}
         <div className="flex flex-col gap-5 min-w-0">
           {/* Article content */}
-          <div className="rounded-xl border border-border/40 bg-background-surface overflow-hidden">
+          <Card padding="none" className="overflow-hidden">
             <div className="px-6 pt-5 pb-0">
               <div className="max-h-[15rem] overflow-y-auto pb-5 pr-1">
                 <MarkdownContent content={article.content} />
               </div>
             </div>
 
-            {/* Feedback */}
-            <div className="border-t border-border/40 px-6 py-5 flex flex-col items-center gap-3 text-center">
-              <span className="text-sm text-slate-400">Este artigo foi útil?</span>
+            {/*
+              Feedback. Os dois botões são de escolha única e irreversível: o
+              primeiro clique desabilita os dois, e por isso `aria-pressed`
+              conta o estado — sem ele, quem não vê a tinta não sabe qual dos
+              dois foi o voto.
+
+              A tinta é o par medido (`--tint-*` com `--on-tint-*`) e não a
+              rampa a 10% com o degrau 700/400 por cima: são os mesmos valores
+              que o `Badge` usa desde a E8, e o `text-success-700
+              dark:text-success-400` de antes escrevia à mão a inversão que o
+              token já faz sozinho.
+            */}
+            <div className="border-t border-borda/40 px-6 py-5 flex flex-col items-center gap-3 text-center">
+              <span className="text-sm text-conteudo-muted">
+                Este artigo foi útil?
+              </span>
               <div className="flex items-center gap-3">
                 <button
                   onClick={() => handleFeedback(true)}
                   disabled={feedbackGiven !== null}
+                  aria-pressed={feedbackGiven === true}
                   className={`flex items-center gap-1.5 text-sm px-4 py-2 rounded-lg border transition-colors cursor-pointer disabled:cursor-not-allowed ${
                     feedbackGiven === true
-                      ? "border-success/50 text-success-700 dark:text-success-400 bg-success/10"
-                      : "border-border/50 text-slate-400 hover:border-success/50 hover:text-success-700 dark:hover:text-success-400 disabled:opacity-50"
+                      ? "border-success/30 bg-tint-success text-on-tint-success"
+                      : "border-borda text-conteudo-muted hover:border-success/30 hover:text-on-tint-success disabled:opacity-50"
                   }`}
                 >
-                  {IC.ThumbUp} Sim ({article.helpful})
+                  <Icon
+                    name={TRACO_POLEGAR_PARA_CIMA}
+                    size={16}
+                    strokeWidth={2}
+                  />{" "}
+                  Sim ({article.helpful})
                 </button>
                 <button
                   onClick={() => handleFeedback(false)}
                   disabled={feedbackGiven !== null}
+                  aria-pressed={feedbackGiven === false}
                   className={`flex items-center gap-1.5 text-sm px-4 py-2 rounded-lg border transition-colors cursor-pointer disabled:cursor-not-allowed ${
                     feedbackGiven === false
-                      ? "border-danger/50 text-danger-700 dark:text-danger-400 bg-danger/10"
-                      : "border-border/50 text-slate-400 hover:border-danger/50 hover:text-danger-700 dark:hover:text-danger-400 disabled:opacity-50"
+                      ? "border-danger/30 bg-tint-danger text-on-tint-danger"
+                      : "border-borda text-conteudo-muted hover:border-danger/30 hover:text-on-tint-danger disabled:opacity-50"
                   }`}
                 >
-                  {IC.ThumbDown} Não ({article.not_helpful})
+                  <Icon
+                    name={TRACO_POLEGAR_PARA_BAIXO}
+                    size={16}
+                    strokeWidth={2}
+                  />{" "}
+                  Não ({article.not_helpful})
                 </button>
               </div>
-              {feedbackGiven !== null && <span className="text-xs text-slate-500">Obrigado pelo feedback!</span>}
+              {feedbackGiven !== null && (
+                <span role="status" className="text-xs text-conteudo-muted">
+                  Obrigado pelo feedback!
+                </span>
+              )}
             </div>
-          </div>
+          </Card>
 
           {/* Comments */}
-          <div className="rounded-xl border border-border/40 bg-background-surface">
-            <div className="flex items-center gap-2 border-b border-border/40 px-5 py-3.5">
-              <span className="text-slate-500">{IC.Chat}</span>
-              <h2 className="text-sm font-semibold text-slate-200">Comentários ({totalComments})</h2>
+          <Card padding="none">
+            <div className="flex items-center gap-2 border-b border-borda/40 px-5 py-3.5">
+              <span className="text-conteudo-muted">
+                <Icon name="chat" size={16} strokeWidth={2} />
+              </span>
+              <h2 className="text-sm font-semibold text-conteudo">
+                Comentários ({totalComments})
+              </h2>
             </div>
             <div className="p-5 space-y-4">
               <CommentForm onSubmit={handleAddComment} />
 
               {commentsLoading ? (
-                <div className="flex justify-center py-4"><Spinner size="sm" /></div>
+                <div className="flex justify-center py-4">
+                  <Spinner size="sm" />
+                </div>
               ) : comments.length === 0 ? (
                 <div className="py-10 text-center">
-                  <div className="mx-auto mb-3 flex h-10 w-10 items-center justify-center rounded-full bg-background-elevated text-slate-600">{IC.Chat}</div>
-                  <p className="text-sm text-slate-500">Nenhum comentário ainda. Seja o primeiro!</p>
+                  {/* `conteudo-muted` e não `faint`: o par com
+                      `bg-surface-elevated` no mesmo elemento é o que a
+                      varredura media em 2,34:1 no claro. */}
+                  <div className="mx-auto mb-3 flex h-10 w-10 items-center justify-center rounded-full bg-surface-elevated text-conteudo-muted">
+                    <Icon name="chat" size={16} strokeWidth={2} />
+                  </div>
+                  <p className="text-sm text-conteudo-muted">
+                    Nenhum comentário ainda. Seja o primeiro!
+                  </p>
                 </div>
               ) : (
-                <div className="overflow-y-auto max-h-[280px] pr-1 space-y-5 divide-y divide-border/40">
+                <div className="overflow-y-auto max-h-[280px] pr-1 space-y-5 divide-y divide-borda/40">
                   {comments.map((comment) => (
                     <div key={comment.id} className="pt-5 first:pt-0">
-                      <CommentItem comment={comment} currentUserId={user?.id} currentUserRole={user?.role} isStaff={isStaff} onReply={handleReply} onDelete={handleDeleteComment} />
+                      <CommentItem
+                        comment={comment}
+                        currentUserId={user?.id}
+                        currentUserRole={user?.role}
+                        isStaff={isStaff}
+                        onReply={handleReply}
+                        onDelete={handleDeleteComment}
+                      />
                     </div>
                   ))}
                 </div>
               )}
             </div>
-          </div>
+          </Card>
         </div>
 
         {/* ── Sidebar ───────────────────────────────────────── */}
         <div className="space-y-4">
-          <div className="rounded-xl border border-border/40 bg-background-surface p-4">
-            <p className="mb-1 text-[10px] font-bold uppercase tracking-widest text-slate-500">Sobre o artigo</p>
+          <Card>
+            <p className="mb-1 text-[10px] font-bold uppercase tracking-widest text-conteudo-muted">
+              Sobre o artigo
+            </p>
             <div>
-              <PropRow icon={IC.User} label="Autor">{article.author_name}</PropRow>
-              <PropRow icon={IC.Calendar} label="Atualizado em">{formattedDate}</PropRow>
-              <PropRow icon={IC.Tag} label="Categoria">{catLabel}</PropRow>
-              <PropRow icon={IC.Eye} label="Visualizações">
-                {article.view_count} {plural(article.view_count, "visualização", "visualizações")}
+              <PropRow
+                icon={<Icon name="user" size={14} strokeWidth={2} />}
+                label="Autor"
+              >
+                {article.author_name}
+              </PropRow>
+              <PropRow
+                icon={<Icon name="calendar" size={14} strokeWidth={2} />}
+                label="Atualizado em"
+              >
+                {formattedDate}
+              </PropRow>
+              <PropRow
+                icon={<Icon name="tag" size={14} strokeWidth={2} />}
+                label="Categoria"
+              >
+                {catLabel}
+              </PropRow>
+              <PropRow
+                icon={<Icon name="eye" size={14} strokeWidth={2} />}
+                label="Visualizações"
+              >
+                {article.view_count}{" "}
+                {plural(article.view_count, "visualização", "visualizações")}
               </PropRow>
             </div>
-          </div>
+          </Card>
 
-          <div className="rounded-xl border border-border/40 bg-background-surface p-4">
-            <p className="mb-3 text-[10px] font-bold uppercase tracking-widest text-slate-500">Produtos</p>
+          <Card>
+            <p className="mb-3 text-[10px] font-bold uppercase tracking-widest text-conteudo-muted">
+              Produtos
+            </p>
             {article.products.length === 0 ? (
-              <p className="text-xs text-slate-500">Vale para todos os produtos.</p>
+              <p className="text-xs text-conteudo-muted">
+                Vale para todos os produtos.
+              </p>
             ) : (
               <div className="flex flex-wrap gap-1.5">
                 {article.products.map((p) => (
-                  <span
+                  <Badge
                     key={p.id}
-                    className="max-w-full truncate rounded-full border border-primary/30 bg-primary/10 px-2.5 py-1 text-xs font-medium text-primary"
+                    variant="primary"
+                    className="max-w-full truncate"
                   >
                     {p.name}
-                  </span>
+                  </Badge>
                 ))}
               </div>
             )}
-          </div>
+          </Card>
 
           {article.tags.length > 0 && (
-            <div className="rounded-xl border border-border/40 bg-background-surface p-4">
-              <p className="mb-3 text-[10px] font-bold uppercase tracking-widest text-slate-500">Tags</p>
+            <Card>
+              <p className="mb-3 text-[10px] font-bold uppercase tracking-widest text-conteudo-muted">
+                Tags
+              </p>
               <div className="flex flex-wrap gap-1.5">
                 {[...new Set(article.tags)].map((tag) => (
-                  <span key={tag} className="rounded-full border border-border/50 bg-background-elevated px-2.5 py-1 text-xs text-slate-400">{tag}</span>
+                  <Badge key={tag} variant="secondary">
+                    {tag}
+                  </Badge>
                 ))}
               </div>
-            </div>
+            </Card>
           )}
 
-          <div className="rounded-xl border border-border/40 bg-background-surface p-4">
-            <p className="mb-3 text-[10px] font-bold uppercase tracking-widest text-slate-500">Feedback</p>
+          <Card>
+            <p className="mb-3 text-[10px] font-bold uppercase tracking-widest text-conteudo-muted">
+              Feedback
+            </p>
             <div className="flex items-center gap-4">
-              <div className="flex items-center gap-1.5 text-success-700 dark:text-success-400">
-                {IC.ThumbUp}
+              <div className="flex items-center gap-1.5 text-on-tint-success">
+                <Icon name={TRACO_POLEGAR_PARA_CIMA} size={16} strokeWidth={2} />
                 <span className="text-sm font-semibold">{article.helpful}</span>
-                <span className="text-xs text-slate-500">útil</span>
+                <span className="text-xs text-conteudo-muted">útil</span>
               </div>
-              <div className="flex items-center gap-1.5 text-danger-700 dark:text-danger-400">
-                {IC.ThumbDown}
-                <span className="text-sm font-semibold">{article.not_helpful}</span>
-                <span className="text-xs text-slate-500">não útil</span>
+              <div className="flex items-center gap-1.5 text-on-tint-danger">
+                <Icon
+                  name={TRACO_POLEGAR_PARA_BAIXO}
+                  size={16}
+                  strokeWidth={2}
+                />
+                <span className="text-sm font-semibold">
+                  {article.not_helpful}
+                </span>
+                <span className="text-xs text-conteudo-muted">não útil</span>
               </div>
             </div>
-          </div>
+          </Card>
         </div>
       </div>
     </div>

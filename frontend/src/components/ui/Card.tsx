@@ -21,7 +21,7 @@ export function Card({
   return (
     <div
       className={cn(
-        "rounded-xl border border-border bg-background-surface",
+        "rounded-xl border border-borda bg-surface",
         paddingClasses[padding],
         className,
       )}
@@ -40,7 +40,7 @@ export function CardHeader({
   return (
     <div
       className={cn(
-        "flex items-center justify-between border-b border-border pb-4 mb-4",
+        "flex items-center justify-between border-b border-borda pb-4 mb-4",
         className,
       )}
       {...props}
@@ -57,7 +57,7 @@ export function CardTitle({
 }: HTMLAttributes<HTMLHeadingElement>) {
   return (
     <h3
-      className={cn("text-base font-semibold text-slate-100", className)}
+      className={cn("text-base font-semibold text-conteudo-heading", className)}
       {...props}
     >
       {children}

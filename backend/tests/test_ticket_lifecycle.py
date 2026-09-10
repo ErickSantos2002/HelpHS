@@ -436,7 +436,7 @@ async def test_reabertura_dá_um_prazo_de_sla_novo():
 
     sla = MagicMock()
     sla.level = SLALevel.medium
-    sla.resolve_time_hours = 8
+    sla.resolve_time_minutes = 480
     sla.is_active = True
 
     app.dependency_overrides[get_db] = _db_override(ticket, sla)
@@ -469,7 +469,7 @@ async def test_reabertura_zera_o_tempo_pausado_acumulado():
 
     sla = MagicMock()
     sla.level = SLALevel.medium
-    sla.resolve_time_hours = 8
+    sla.resolve_time_minutes = 480
     sla.is_active = True
 
     app.dependency_overrides[get_db] = _db_override(ticket, sla)

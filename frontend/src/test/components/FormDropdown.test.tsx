@@ -13,6 +13,15 @@ import { FormDropdown } from "../../components/ui/FormDropdown";
  *
  * Assim como no filtro, a linha do placeholder devolve `""` — nos formulários
  * isso é "não escolher", o valor que o zod recebe para reclamar de obrigatório.
+ *
+ * ── Uma mudanca de papel, na unificacao ───────────────────────────────
+ *
+ * As linhas de opcao eram `<button>` sem papel declarado, e hoje sao
+ * `role="option"` dentro de um `role="listbox"` — o papel explicito SUBSTITUI o
+ * implicito, entao `getByRole("button")` nao as acha mais. A troca e
+ * deliberada: um listbox cujas opcoes se anunciam como "botao" nao entrega o
+ * contrato que o widget promete. Nada mudou para o mouse; as assercoes abaixo
+ * sao as mesmas, so a consulta acompanhou o papel.
  */
 
 const PRIORIDADES = [
@@ -73,15 +82,15 @@ describe("FormDropdown — abrir e escolher", () => {
 
     await userEvent.click(gatilho());
 
-    expect(screen.getByRole("button", { name: "Baixa" })).toBeInTheDocument();
-    expect(screen.getByRole("button", { name: "Alta" })).toBeInTheDocument();
+    expect(screen.getByRole("option", { name: "Baixa" })).toBeInTheDocument();
+    expect(screen.getByRole("option", { name: "Alta" })).toBeInTheDocument();
   });
 
   it("escolher uma opção devolve o valor e fecha", async () => {
     const { onChange } = renderCampo();
 
     await userEvent.click(gatilho());
-    await userEvent.click(screen.getByRole("button", { name: "Alta" }));
+    await userEvent.click(screen.getByRole("option", { name: "Alta" }));
 
     expect(onChange).toHaveBeenCalledWith("high");
     expect(screen.queryByRole("button", { name: "Baixa" })).not.toBeInTheDocument();
@@ -91,7 +100,7 @@ describe("FormDropdown — abrir e escolher", () => {
     const { onChange } = renderCampo({ value: "high" });
 
     await userEvent.click(gatilho());
-    await userEvent.click(screen.getByRole("button", { name: "Selecione…" }));
+    await userEvent.click(screen.getByRole("option", { name: "Selecione…" }));
 
     expect(onChange).toHaveBeenCalledWith("");
   });
@@ -115,7 +124,7 @@ describe("FormDropdown — abrir e escolher", () => {
     );
 
     await userEvent.click(gatilho());
-    expect(screen.getByRole("button", { name: "Baixa" })).toBeInTheDocument();
+    expect(screen.getByRole("option", { name: "Baixa" })).toBeInTheDocument();
 
     await userEvent.click(screen.getByRole("button", { name: "Salvar" }));
 

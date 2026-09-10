@@ -1,3 +1,5 @@
+import { rotuloDePrioridade, varianteDePrioridade } from "../../lib/prioridade";
+import { rotuloDeStatus, varianteDeStatus } from "../../lib/status";
 import { cn } from "../../lib/utils";
 
 type BadgeVariant =
@@ -9,26 +11,59 @@ type BadgeVariant =
   | "success"
   | "muted";
 
-export interface BadgeProps {
+export interface BadgeProps
+  extends Omit<React.HTMLAttributes<HTMLSpanElement>, "children"> {
   variant?: BadgeVariant;
   children: React.ReactNode;
-  className?: string;
 }
 
+/**
+ * As sete variantes, como o `Badge.jsx` do pacote as define: fundo na **tinta**,
+ * texto no **par da tinta**, borda de 1px na cor semântica a 30%.
+ *
+ * ── O que estava errado, e não era pouco ──────────────────────────────
+ *
+ * Seis das sete pintavam `bg-<cor>/20` — a cor cheia da rampa com opacidade — e
+ * quatro escreviam o degrau de texto à mão, com `dark:` para inverter. Medido
+ * nas três superfícies e nos dois temas, **7 das 42 combinações reprovavam**, e
+ * a pior era o `primary` no escuro: `dark:text-primary` é o degrau 500 sobre a
+ * própria tinta, **2,77:1** sobre `--surface-elevated`.
+ *
+ * O `warning` era o único correto de ponta a ponta — e por isso foi o único que
+ * a emenda **E8** alcançou. Ela levou `--on-tint-success` ao 800 e
+ * `--on-tint-danger`/`--on-tint-info` ao 300 no escuro; nenhum desses tokens era
+ * lido aqui, então a emenda passou por cima do componente sem tocá-lo.
+ *
+ * **Corrigir o token não alcança quem não o usa.** É a quarta aparição da mesma
+ * regra nesta migração, e a primeira em que ela quase virou um relatório errado:
+ * a medição dos **tokens** dava zero reprovações e a do **componente** dava
+ * sete. O número estava certo e respondia outra pergunta.
+ *
+ * ── Sem modificador de opacidade nas tintas ───────────────────────────
+ *
+ * Regra (a) do D8-a: os cinco `--tint-*` já carregam alfa de 15% no token.
+ * `bg-tint-danger/20` multiplicaria 0,15 × 0,20 e daria fundo quase invisível —
+ * e o conserto intuitivo (subir para /30, /50) continua multiplicando e nunca
+ * chega nos 15% do pacote.
+ *
+ * A borda continua com o modificador porque ela **não** é token com alfa: é a
+ * cor cheia da rampa a 30%, exatamente como o pacote a escreve.
+ */
 const variantClasses: Record<BadgeVariant, string> = {
-  primary: "bg-primary/20 text-primary-700 dark:text-primary border-primary/30",
-  secondary: "bg-background-elevated text-slate-300 border-border",
-  danger: "bg-danger/20 text-danger-700 dark:text-danger-400 border-danger/30",
-  warning: "bg-warning/20 text-warning-700 dark:text-warning-400 border-warning/30",
-  info: "bg-info/20 text-info-700 dark:text-info-400 border-info/30",
-  success: "bg-success/20 text-success-700 dark:text-success-400 border-success/30",
-  muted: "bg-background-elevated text-slate-500 border-border",
+  primary: "bg-tint-primary text-on-tint-primary border-primary/30",
+  secondary: "bg-tint-neutral text-on-tint-neutral border-borda",
+  danger: "bg-tint-danger text-on-tint-danger border-danger/30",
+  warning: "bg-tint-warning text-on-tint-warning border-warning/30",
+  info: "bg-tint-info text-on-tint-info border-info/30",
+  success: "bg-tint-success text-on-tint-success border-success/30",
+  muted: "bg-tint-neutral text-on-tint-neutral border-borda",
 };
 
 export function Badge({
   variant = "secondary",
   children,
   className,
+  ...props
 }: BadgeProps) {
   return (
     <span
@@ -37,6 +72,7 @@ export function Badge({
         variantClasses[variant],
         className,
       )}
+      {...props}
     >
       {children}
     </span>
@@ -45,60 +81,48 @@ export function Badge({
 
 // ── Ticket status badge ───────────────────────────────────────
 
-type TicketStatus =
-  | "open"
-  | "in_progress"
-  | "awaiting_client"
-  | "awaiting_technical"
-  | "resolved"
-  | "closed"
-  | "cancelled";
+// O mapa de status saiu daqui: mora em `lib/status.ts`, que e a fonte unica
+// consumida tambem pelo quadro kanban da lista. O quadro tinha o seu proprio,
+// com a paleta CRUA do Tailwind — sky, indigo, amber, violet, emerald, slate,
+// mais seis hexadecimais cravados — e ate o rotulo divergia ("Ag. Tecnico"
+// contra "Aguardando tecnico").
 
-const statusVariant: Record<TicketStatus, BadgeVariant> = {
-  open: "info",
-  in_progress: "primary",
-  awaiting_client: "warning",
-  awaiting_technical: "warning",
-  resolved: "success",
-  closed: "muted",
-  cancelled: "danger",
-};
-
-const statusLabel: Record<TicketStatus, string> = {
-  open: "Aberto",
-  in_progress: "Em andamento",
-  awaiting_client: "Aguardando cliente",
-  awaiting_technical: "Aguardando técnico",
-  resolved: "Resolvido",
-  closed: "Fechado",
-  cancelled: "Cancelado",
-};
-
-export function StatusBadge({ status }: { status: TicketStatus }) {
-  return <Badge variant={statusVariant[status]}>{statusLabel[status]}</Badge>;
+/**
+ * Aceita `string` pelo mesmo motivo do `PriorityBadge`: o dado vem da REDE, e
+ * um status novo no backend nao pode derrubar a tela. Recua para neutro.
+ */
+export function StatusBadge({ status }: { status: string }) {
+  return (
+    <Badge variant={varianteDeStatus(status)}>{rotuloDeStatus(status)}</Badge>
+  );
 }
 
 // ── Ticket priority badge ─────────────────────────────────────
 
-type TicketPriority = "critical" | "high" | "medium" | "low";
+// O mapa de prioridade saiu daqui: mora em `lib/prioridade.ts`, que e a fonte
+// unica consumida tambem pelo ponto da lista, pelo grafico, pelo seletor e
+// pelo historico. Existiam CINCO mapas divergentes nas telas mais este; o
+// rotulo tambem divergia, e a emenda E17 fixou o feminino no pacote.
 
-const priorityVariant: Record<TicketPriority, BadgeVariant> = {
-  critical: "danger",
-  high: "warning",
-  medium: "info",
-  low: "muted",
-};
-
-const priorityLabel: Record<TicketPriority, string> = {
-  critical: "Crítico",
-  high: "Alto",
-  medium: "Médio",
-  low: "Baixo",
-};
-
-export function PriorityBadge({ priority }: { priority: TicketPriority }) {
+/**
+ * Aceita `string`, e nao apenas `TicketPriority`, de proposito.
+ *
+ * A versao anterior fazia `PRIORIDADE[priority].variante` direto: uma
+ * prioridade que o backend passasse a mandar e o front ainda nao conhecesse
+ * derrubava a TELA, com "cannot read properties of undefined". O tipo estreito
+ * dava a impressao de proteger, mas o dado vem da rede — e a rede nao respeita
+ * tipo de TypeScript.
+ *
+ * Os outros dois acessores do modulo (`rotuloDePrioridade`,
+ * `graficoDePrioridade`) ja recuavam. Este era o que faltava, e o recuo e o
+ * mesmo: neutro, porque prioridade desconhecida e ausencia de informacao — e
+ * pintar de vermelho afirmaria algo que nao se sabe.
+ */
+export function PriorityBadge({ priority }: { priority: string }) {
   return (
-    <Badge variant={priorityVariant[priority]}>{priorityLabel[priority]}</Badge>
+    <Badge variant={varianteDePrioridade(priority)}>
+      {rotuloDePrioridade(priority)}
+    </Badge>
   );
 }
 

@@ -1,7 +1,7 @@
 import { useState } from "react";
 import type { FormEvent } from "react";
 import { Link, useNavigate } from "react-router-dom";
-import { Alert, Button, Input } from "../../components/ui";
+import { Alert, Button, Checkbox, Input } from "../../components/ui";
 import { api } from "../../services/api";
 import { AuthShell } from "./AuthShell";
 import logoFull from "../../assets/Logo HelpHS.png";
@@ -138,8 +138,8 @@ export default function RegisterPage() {
       {/* ── Left panel 60% — branding ───────────────────────── */}
       <div className="hidden lg:flex lg:w-3/5 relative flex-col justify-between overflow-hidden bg-[#080F1A] px-14 py-12">
         {/* Decorative blobs */}
-        <div className="pointer-events-none absolute -top-32 -right-32 w-[500px] h-[500px] rounded-full blur-[120px]" style={{ backgroundColor: "rgba(14,165,233,0.18)" }} />
-        <div className="pointer-events-none absolute -bottom-40 -left-20 w-[400px] h-[400px] rounded-full blur-[100px]" style={{ backgroundColor: "rgba(14,165,233,0.09)" }} />
+        <div className="pointer-events-none absolute -top-32 -right-32 w-[500px] h-[500px] rounded-full blur-[120px] bg-primary/[0.18]" />
+        <div className="pointer-events-none absolute -bottom-40 -left-20 w-[400px] h-[400px] rounded-full blur-[100px] bg-primary/[0.09]" />
 
         {/* Logo */}
         <div className="relative z-10">
@@ -149,7 +149,7 @@ export default function RegisterPage() {
         {/* Main copy */}
         <div className="relative z-10 space-y-10">
           <div className="space-y-4">
-            <div className="inline-flex items-center gap-2 rounded-full px-3 py-1" style={{ border: "1px solid rgba(14,165,233,0.3)", backgroundColor: "rgba(14,165,233,0.1)" }}>
+            <div className="inline-flex items-center gap-2 rounded-full border border-primary/30 bg-primary/10 px-3 py-1">
               <span className="w-1.5 h-1.5 rounded-full bg-primary animate-pulse" />
               <span className="text-xs font-medium text-primary">Crie sua conta gratuitamente</span>
             </div>
@@ -168,7 +168,7 @@ export default function RegisterPage() {
             <div className="space-y-4">
               {STEPS.map((step, i) => (
                 <div key={step.num} className="flex items-center gap-4">
-                  <div className="relative shrink-0 flex items-center justify-center w-8 h-8 rounded-full" style={{ backgroundColor: "rgba(14,165,233,0.12)", border: "1px solid rgba(14,165,233,0.3)" }}>
+                  <div className="relative shrink-0 flex items-center justify-center w-8 h-8 rounded-full border border-primary/30 bg-primary/[0.12]">
                     <span className="text-xs font-bold text-primary">{step.num}</span>
                     {i < STEPS.length - 1 && (
                       <div className="absolute top-full left-1/2 -translate-x-1/2 w-px h-4 bg-primary/20 mt-0.5" />
@@ -227,7 +227,7 @@ export default function RegisterPage() {
       </div>
 
       {/* ── Right panel 40% — form ──────────────────────────── */}
-      <div className="flex flex-1 lg:w-2/5 flex-col items-center justify-center bg-background px-6 py-12 overflow-y-auto">
+      <div className="flex flex-1 lg:w-2/5 flex-col items-center justify-center bg-surface-base px-6 py-12 overflow-y-auto">
         <div className="w-full max-w-sm space-y-7">
           {/* Mobile logo */}
           <div className="flex lg:hidden items-center justify-center gap-2.5">
@@ -306,27 +306,28 @@ export default function RegisterPage() {
             </div>
 
             {/* LGPD */}
-            <label className="flex items-start gap-3 cursor-pointer">
-              <input
-                type="checkbox"
-                checked={lgpd}
-                onChange={(e) => setLgpd(e.target.checked)}
-                className="mt-0.5 h-4 w-4 rounded border-border bg-background-elevated accent-primary cursor-pointer"
-              />
-              <span className="text-xs text-slate-400 leading-relaxed">
-                Li e aceito os termos de uso e a{" "}
-                <Link
-                  to="/privacidade"
-                  target="_blank"
-                  rel="noopener noreferrer"
-                  className="text-primary hover:underline"
-                  onClick={(e) => e.stopPropagation()}
-                >
-                  política de privacidade
-                </Link>
-                , incluindo o tratamento dos meus dados conforme a LGPD.
-              </span>
-            </label>
+            <Checkbox
+              checked={lgpd}
+              onChange={setLgpd}
+              className="gap-3"
+              label={
+                <span className="text-xs leading-relaxed text-conteudo-muted">
+                  Li e aceito os termos de uso e a{" "}
+                  <Link
+                    to="/privacidade"
+                    target="_blank"
+                    rel="noopener noreferrer"
+                    className="text-conteudo-link hover:underline"
+                    /* Sem isto, clicar no link marcaria a caixa: ele vive dentro
+                       do <label>, e o clique borbulharia até o input. */
+                    onClick={(e) => e.stopPropagation()}
+                  >
+                    política de privacidade
+                  </Link>
+                  , incluindo o tratamento dos meus dados conforme a LGPD.
+                </span>
+              }
+            />
 
             <Button
               type="submit"
