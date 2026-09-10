@@ -116,6 +116,19 @@ class KBArticleStatus(str, enum.Enum):
     archived = "archived"
 
 
+class LibraryVisibility(str, enum.Enum):
+    """Quem pode ver um arquivo da biblioteca.
+
+    `internal` e o default da coluna, e a escolha e a regra inteira: abrir para
+    o cliente e acao explicita de quem envia, entao esquecer falha do lado
+    seguro. Ha manual tecnico com senha de configuracao em texto aberto -- ver
+    o cabecalho da migration c9d0e1f2a3b4.
+    """
+
+    internal = "internal"
+    client = "client"
+
+
 class CalendarEventType(str, enum.Enum):
     event = "event"
     meeting = "meeting"
@@ -666,6 +679,49 @@ class Attachment(Base):
     user: Mapped["User"] = relationship(back_populates="attachments")
 
 
+class LibraryFile(Base):
+    """Arquivo recorrente: manual, guia, formulario.
+
+    Guardado UMA vez e apontado por quem o usa. A mensagem de chat que o anexa
+    referencia esta linha em vez de copiar o binario -- copiar multiplicaria o
+    mesmo PDF no disco e criaria a duvida de qual copia vale quando o admin
+    subir uma versao nova.
+    """
+
+    __tablename__ = "library_files"
+
+    id: Mapped[uuid.UUID] = mapped_column(UUID(as_uuid=True), primary_key=True, default=uuid.uuid4)
+    title: Mapped[str] = mapped_column(String(255), nullable=False, index=True)
+    description: Mapped[str | None] = mapped_column(Text)
+    # Nulo = nao e de um aparelho especifico (politica, formulario).
+    product_id: Mapped[uuid.UUID | None] = mapped_column(
+        UUID(as_uuid=True), ForeignKey("products.id", ondelete="SET NULL"), index=True
+    )
+    visibility: Mapped[LibraryVisibility] = mapped_column(
+        Enum(LibraryVisibility, name="libraryvisibility"),
+        default=LibraryVisibility.internal,
+        server_default="internal",
+        nullable=False,
+    )
+
+    original_name: Mapped[str] = mapped_column(String(255), nullable=False)
+    stored_name: Mapped[str] = mapped_column(String(255), nullable=False)
+    mime_type: Mapped[str] = mapped_column(String(100), nullable=False)
+    size_bytes: Mapped[int] = mapped_column(Integer, nullable=False)
+    s3_key: Mapped[str] = mapped_column(String(500), nullable=False)
+    s3_bucket: Mapped[str] = mapped_column(String(100), nullable=False)
+    virus_scanned: Mapped[bool] = mapped_column(Boolean, default=False)
+    virus_clean: Mapped[bool] = mapped_column(Boolean, default=False)
+
+    uploaded_by: Mapped[uuid.UUID] = mapped_column(UUID(as_uuid=True), ForeignKey("users.id"))
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now())
+    updated_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), server_default=func.now(), onupdate=func.now()
+    )
+
+    product: Mapped["Product | None"] = relationship()
+
+
 class ChatMessage(Base):
     """Mensagens de chat em tempo real (WebSocket)"""
 
@@ -687,6 +743,13 @@ class ChatMessage(Base):
     content: Mapped[str] = mapped_column(Text, nullable=False)
     is_system: Mapped[bool] = mapped_column(Boolean, default=False)
     is_ai: Mapped[bool] = mapped_column(Boolean, default=False)
+    # Aponta para a biblioteca, nao copia. SET NULL no banco: apagar um item
+    # da biblioteca nao pode apagar a conversa -- a mensagem sobrevive sem o
+    # arquivo, que e ruim mas recuperavel; apagar a fala do tecnico nao e.
+    library_file_id: Mapped[uuid.UUID | None] = mapped_column(
+        UUID(as_uuid=True), ForeignKey("library_files.id", ondelete="SET NULL"), index=True
+    )
+    library_file: Mapped["LibraryFile | None"] = relationship()
     read_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now())
 
