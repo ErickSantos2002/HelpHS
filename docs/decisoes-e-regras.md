@@ -1035,8 +1035,10 @@ local. Isso remove a arma em vez de travá-la. Custa subir um banco local —
 `pgserver` já está instalado e as migrations montam o schema sozinhas (ver a
 Rota B em `desenvolvimento-local.md`, na raiz).
 
-**Enquanto isso não acontece, a trava que custa um commit:** uma guarda no
-`alembic/env.py` que recusa host remoto, nomeando o host antes de abortar.
+**A trava EXISTE desde 10/09/2026** (`app/utils/migrations.py`,
+`exige_alvo_liberado`): o `alembic/env.py` recusa host remoto, nomeando o host
+antes de abortar, e o `start.sh` exporta a liberação. Continua sendo trava, não
+conserto — a arma segue na mesa para script avulso e para `psql`.
 
 O ponto delicado do desenho é que ela **não pode quebrar o boot do container**,
 onde rodar migration contra produção é o comportamento certo — o `start.sh`
@@ -1046,6 +1048,23 @@ de chamar o alembic. Ele está no repositório e sempre roda no container, entã
 produção passa por construção, e um laptop nunca tem a variável. Uma variável
 que precisasse ser configurada no painel seria pior: esquecer de configurar
 derruba o deploy, e o modo de falha do deploy é sempre pior que o do laptop.
+
+Três detalhes do desenho que os testes prendem, e que não são óbvios:
+
+- **A liberação é o literal `"1"`.** `"true"`, `"sim"` e `"yes"` não liberam:
+  variável sobrevivente no shell de alguém não pode virar liberação por
+  acidente de valor.
+- **Alvo local passa sem liberação nenhuma.** Barrar quem desenvolve ensinaria
+  a exportar a variável no `.bashrc`, e aí a trava estaria morta para tudo.
+- **URL ilegível passa.** A trava não pode ser o motivo de o contêiner não
+  subir, e erro de digitação o alembic reporta melhor do que ela.
+
+O teste que importa roda `python -m alembic upgrade head` como **subprocesso**,
+com URL remota no ambiente: trava escrita e não ligada passa em teste de
+unidade e não impede nada. Há também um teste que lê o `start.sh` e confere que
+o nome da variável bate com a constante — renomear uma sem a outra travaria o
+DEPLOY, com o EasyPanel mostrando build verde e o contêiner não subindo, que é
+o mesmo modo de falha do `alembic heads`.
 
 **O hábito que vale desde já e não custa nada** — antes de migration ou script,
 imprimir para onde se está apontando:
