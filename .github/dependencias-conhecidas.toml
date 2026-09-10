@@ -72,7 +72,12 @@
 # ══ BACKEND — pip-audit ══════════════════════════════════════════════════════
 
 [[backend]]
-id = "CVE-2026-55558"
+# Era CVE-2026-55558. O pip-audit passou a reportar a MESMA vulnerabilidade sob
+# outro identificador, e o gate indexa por id -- entao a entrada antiga virou
+# "obsoleta" e a mesma falha reapareceu como "nova" no mesmo dia. Nao houve
+# decisao nova aqui: o texto abaixo e o de 01/09, intacto, porque a analise nao
+# mudou. Mudou o numero que a base de avisos usa para chamar o mesmo defeito.
+id = "PYSEC-2026-3805"
 pacote = "aiosmtplib"
 versao_atual = "3.0.2"
 versao_corrigida = "5.1.2"

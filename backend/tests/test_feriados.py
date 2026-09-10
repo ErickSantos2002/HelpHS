@@ -17,11 +17,14 @@ fixa em vez de calcular) e um dia da tabela manual.
 
 UNIDADE DO PRAZO
 ----------------
-Aqui os prazos são passados em HORAS, porque é o que `add_business_hours`
-recebe nesta branch. A frente do SLA (que corta os prazos pela metade) troca a
-unidade para minutos e renomeia a entrada para `add_business_minutes`. As duas
-mudanças são ortogonais — feriado mexe em QUAIS dias contam, unidade mexe em
-QUANTO se conta — e quem entrar depois ajusta as chamadas destes testes.
+Os prazos vão em MINUTOS, que é o que `add_business_minutes` recebe desde que a
+frente do SLA cortou os prazos pela metade — meia hora não cabia em hora
+inteira.
+
+As duas mudanças são ortogonais e se compõem sem se tocar: feriado decide QUAIS
+dias contam, a unidade decide QUANTO se conta. `add_business_minutes` delega
+para `add_business_hours`, que é quem pula fim de semana e feriado. Os valores
+esperados abaixo não mudaram na conversão — 4 h e 240 min são o mesmo prazo.
 
 O QUE ESTE ITEM NÃO FAZ
 -----------------------
@@ -45,7 +48,7 @@ from app.utils.feriados import (
     e_dia_util,
     e_feriado,
 )
-from app.utils.sla import add_business_hours, apply_sla_config
+from app.utils.sla import add_business_minutes, apply_sla_config
 
 _SP = ZoneInfo("America/Sao_Paulo")
 
@@ -212,7 +215,7 @@ def test_o_prazo_pula_o_feriado_no_meio():
     São 10 h e não 9 de propósito: com 9 o prazo termina às 17:00 da própria
     quarta e nem encosta no feriado, e o teste passaria sem provar nada.
     """
-    prazo = add_business_hours(_sp(2026, 6, 3, 8, 0), 10)
+    prazo = add_business_minutes(_sp(2026, 6, 3, 8, 0), 10 * 60)
 
     assert prazo == _sp(2026, 6, 5, 9, 0)
 
@@ -229,14 +232,14 @@ def test_vespera_de_feriado_as_16h_vence_no_dia_seguinte_ao_feriado():
     Antes desta mudança o prazo caía na sexta 12:00: dia em que ninguém
     atendeu, e prazo cobrado indevidamente.
     """
-    prazo = add_business_hours(_sp(2026, 12, 24, 16, 0), 4)
+    prazo = add_business_minutes(_sp(2026, 12, 24, 16, 0), 4 * 60)
 
     assert prazo == _sp(2026, 12, 28, 11, 0)
 
 
 def test_chamado_aberto_no_feriado_comeca_a_contar_no_proximo_util():
     """Abrir no Natal não consome prazo do próprio Natal."""
-    prazo = add_business_hours(_sp(2026, 12, 25, 10, 0), 1)
+    prazo = add_business_minutes(_sp(2026, 12, 25, 10, 0), 60)
 
     assert prazo == _sp(2026, 12, 28, 9, 0)
 
@@ -250,9 +253,9 @@ def test_o_deslocamento_de_pausa_continua_intacto():
     ticket = MagicMock(spec=Ticket)
     ticket.sla_total_paused_ms = 3 * 60 * 60 * 1000
 
-    # A pausa não entra em `add_business_hours`: ela é somada depois, no
+    # A pausa não entra em `add_business_minutes`: ela é somada depois, no
     # `check_breaches`. O prazo cru continua sendo o mesmo de sempre.
-    prazo = add_business_hours(_sp(2026, 9, 8, 9, 0), 2)
+    prazo = add_business_minutes(_sp(2026, 9, 8, 9, 0), 120)
 
     assert prazo == _sp(2026, 9, 8, 11, 0)
     assert ticket.sla_total_paused_ms == 3 * 60 * 60 * 1000
@@ -288,8 +291,8 @@ def test_ligar_feriados_nao_recalcula_chamado_ja_aberto():
     novo = MagicMock(spec=Ticket)
     config = MagicMock(spec=SLAConfig)
     config.id = "cfg"
-    config.response_time_hours = 1
-    config.resolve_time_hours = 4
+    config.response_time_minutes = 60
+    config.resolve_time_minutes = 240
     apply_sla_config(novo, config, _sp(2026, 12, 24, 16, 0))
 
     # O chamado novo já nasce com o feriado descontado; o antigo não muda.
