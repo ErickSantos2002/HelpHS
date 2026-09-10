@@ -1317,6 +1317,30 @@ porta 8000**. Com a porta aberta na internet, autorizar cabeçalhos de proxy
 deixa qualquer um forjar o `X-Forwarded-For` e furar o limite por completo —
 pior do que o balde único. A ordem é: fechar a porta, depois autorizar.
 
+### `PATCH /kb/articles/{id}` com `null` explícito dá 500 — defeito anterior à Helô
+
+**Não foi introduzido pelo trabalho da Helô**, e está escrito aqui para o
+próximo a encontrar não achar que foi. O laço que causa o defeito está no
+`main` desde o CRUD da Base (`3db616c`, 06/04/2026); a Fase 2 só acrescentou
+`helo_pode_ler` à lista de campos que ele atinge, e ele atinge os outros igual.
+
+Todos os campos de `KBArticleUpdate` são `X | None = None`, então a validação
+aceita `{"campo": null}`. O `model_dump(exclude_unset=True)` mantém o `null`
+explícito — ele foi enviado —, e o laço de `setattr` grava `None` no artigo.
+Todas as colunas de `kb_articles` são NOT NULL, e a aplicação não tem tratador
+de `IntegrityError`:
+
+| Campo | Onde falha |
+|---|---|
+| `title` | antes do banco: `slugifica(None)` chama `.lower()` em `None` |
+| `content`, `category`, `tags`, `status`, `helo_pode_ler` | no commit: violação de NOT NULL |
+| `product_ids` | **não falha**: o `pop` trata `null` como "não enviado" |
+
+Nos dois casos nada é gravado: é erro 500, não dado corrompido. **Lido no
+código em 10/09/2026, não medido.** O conserto vale para a rota inteira, não
+para `helo_pode_ler` sozinho — recusar `null` explícito no schema, ou
+descartar os `None` antes do laço.
+
 ### Quatro dos sete produtos não têm manual técnico
 
 Constatado em 09/09/2026, ao rodar as primeiras buscas de verdade. **É decisão
