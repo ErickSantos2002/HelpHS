@@ -1041,17 +1041,19 @@ ela.
 
 ## ⚠️ O `.env` de desenvolvimento aponta para produção
 
-**O que está protegido: a suíte de testes, e só ela.** O
-`backend/tests/conftest.py` **atribui** `DATABASE_URL` para um localhost falso
-no topo do módulo, antes de qualquer import de `app` — atribuição e não
+**O que está protegido: a suíte de testes e, desde 10/09/2026, a migration.**
+O `backend/tests/conftest.py` **atribui** `DATABASE_URL` para um localhost
+falso no topo do módulo, antes de qualquer import de `app` — atribuição e não
 `setdefault`, com o comentário dizendo exatamente por quê. `pytest` é seguro.
+E o `alembic/env.py` recusa host remoto fora do contêiner — ver "A trava
+EXISTE", abaixo.
 
 **O que não está protegido: todo o resto.** Tudo que lê a configuração de
 verdade pega a URL de produção:
 
-- **`alembic upgrade head` na máquina local.** O `alembic/env.py` monta a URL
+- ~~**`alembic upgrade head` na máquina local.** O `alembic/env.py` monta a URL
   com `get_settings().database_url`, que lê o `.env`. Migration aplicada por
-  engano em produção não tem desfazer barato.
+  engano em produção não tem desfazer barato.~~ Travado em 10/09/2026.
 - os scripts avulsos de `backend/scripts/` (`redefine_senha.py`,
   `funde_empresas_duplicadas.py`, `normaliza_cnpj.py`, ...);
 - `python -c` e shell interativo que importem `app.core.config`;
@@ -1059,9 +1061,10 @@ verdade pega a URL de produção:
 
 **Por que isso vira risco agora.** A primeira coisa que a Fase 2 da Helô roda é
 uma migration criando extensão no banco (`pgvector`). O gesto natural de testar
-isso é exatamente `alembic upgrade head` — e hoje esse comando, dessa máquina,
-aplica em produção sem perguntar nada. O erro é silencioso: sem confirmação,
-sem aviso, e o sucesso é indistinguível do sucesso local.
+isso é exatamente `alembic upgrade head` — e, até a trava de 10/09, esse
+comando, dessa máquina, aplicava em produção sem perguntar nada. O erro era
+silencioso: sem confirmação, sem aviso, e o sucesso indistinguível do sucesso
+local.
 
 ### Mitigação
 
@@ -1133,7 +1136,7 @@ por inércia.
 | **Não existe mais o tempo de espera por um HUMANO** | Consequência aceita da decisão de 28/08/2026 (ver "O que conta como primeira resposta"): com a Helô carimbando, o único tempo gravado é o dela. Quanto o cliente esperou até alguém de carne e osso responder deixou de entrar no banco — e por isso **não volta por filtro nem por relatório**, só por coluna nova. | A operação precisar cobrar prazo da equipe, ou alguém estranhar o indicador vivendo em 100%. A saída é um campo próprio (`sla_first_human_response`), carimbado no mesmo ponto e com a guarda de autor que valia antes. |
 | ~~**Escalar não desliga a IA no chamado**~~ | **Quitada em 09/09/2026**, na Etapa 4 da Fase 2 — no mesmo commit em que o teto deixou de ser de falas e virou de trocas, que era o gatilho registrado. `ticket.ai_enabled = False` no caminho de escalada, e vale para os dois jeitos de escalar: o pedido explícito de humano, reconhecido antes do modelo, e a escalada que o próprio modelo pede com a linha `ESCALAR:`. ⚠️ **A consequência aceita ali durou um dia e foi revertida em 10/09**: desligar o `ai_enabled` fechava também o `suggest-reply` e o `summarize` do TÉCNICO, e nos três motivos que não são o pedido do cliente isso tirava a ferramenta dele justamente nos chamados em que a IA já tinha falhado. Hoje quem guarda o estado é `tickets.helo_saiu`, e o `ai_enabled` voltou a ser só o botão de gente — com uma exceção deliberada: no pedido explícito de humano os dois caem, porque ali quem quis sair da IA foi o cliente. Ver "O interruptor da Helô é dela; o `ai_enabled` é de gente" abaixo. | — |
 | **Editar um artigo reindexa todos os trechos dele** | Reescrita em 10/09/2026, quando a fonte passou a ser a Base de Conhecimento: a varredura de `helo_indexacao.py` compara o hash do corte do artigo INTEIRO e, se mudou, apaga todos os trechos dele e recria com ids novos, pagando embedding de todos. Corrigir uma linha de contato no manual do Phoebus reembute os 18 trechos, inclusive os 17 idênticos. Hoje custa pouco: o embedding é do serviço próprio (CPU, segundos por artigo), e nada fora da busca referencia `helo_chunks`. | A base crescer a ponto de a varredura pesar, ou — o que torna urgente de vez — a resposta da Helô registrar a citação por `chunk_id`: aí o refaz deixa citação apontando para trecho que não existe mais. A saída é casar trecho a trecho por hash do conteúdo antes de apagar — os iguais mantêm id e embedding, e só `ordem`/`secao` são atualizados. |
-| **O `.env` de desenvolvimento aponta para produção** | Só a suíte de testes está blindada (o `conftest.py` força uma URL falsa). Migration, script avulso e shell na máquina do desenvolvedor falam com o banco real. Ver a seção própria acima. | **Antes da primeira migration da Fase 2**, que cria extensão no banco. É quando o risco deixa de ser teórico. |
+| **O `.env` de desenvolvimento aponta para produção** | A suíte está blindada (o `conftest.py` força uma URL falsa) e, desde 10/09/2026, a migration também (o `alembic/env.py` recusa host remoto fora do contêiner). Script avulso, shell e `psql` na máquina do desenvolvedor continuam falando com o banco real. Ver a seção própria acima. | O gatilho registrado — a primeira migration da Fase 2 — chegou e foi atendido pela trava. O próximo é **qualquer script avulso novo que escreva no banco**; o conserto de verdade é o `.env` deixar de guardar credencial de produção. |
 | **O trecho genérico domina a busca (hipótese B)** | `6. Passo a Passo para Utilização` do Titan — e o `5.` equivalente do iBlow — fala de operação em geral e vence perguntas de assunto diferente: 4 de 8 numa sondagem livre, incluindo impressora num aparelho sem impressora. O teto de 0,25 tira a maior parte do dano hoje, e num caso conhecido agrava: para *"como coloco o aparelho em português"*, o aspirador sobrevive ao corte e o `8.2 Alterar Idioma` não. Com três manuais dói pouco — quase toda pergunta fora do manual já não devolve nada. | **Quando houver manual técnico para mais de três produtos.** Aí o aspirador passa a competir com candidatos legítimos dentro do teto, e o dano deixa de ser contornado por ele. O conserto é do lado do trecho — cortar aquele mais fino, ou tirá-lo da base —, e NÃO do corte de todo mundo: a hipótese A foi medida e caiu, os trechos curtos são os que mais acertam. |
 | **Contador de artigo útil sem voto identificado** | `POST /kb/articles/{id}/feedback` incrementa sem registrar quem votou; o mesmo usuário incrementa em laço. Não vaza nada. | O número for usado para decidir alguma coisa. |
 | **Antivírus aceita quando está fora do ar** | Bloquear upload com o ClamAV indisponível derrubaria o anexo por falha de infraestrutura. Hoje o estado é reportado, não mais silencioso, e há script de revarredura. | O ClamAV estiver no ambiente e estável — aí bloquear passa a custar pouco. |
