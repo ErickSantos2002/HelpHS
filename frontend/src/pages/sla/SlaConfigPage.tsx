@@ -68,10 +68,31 @@ function ordemDePrioridade(p: string): number {
  */
 function formatHours(h: number | null | undefined) {
   if (h === null || h === undefined) return null;
-  if (h < 24) return `${h}h`;
-  const days = Math.floor(h / 24);
-  const rest = h % 24;
-  return rest > 0 ? `${days}d ${rest}h` : `${days}d`;
+  return descreveMinutos(h * MINUTOS_POR_HORA);
+}
+
+const MINUTOS_POR_HORA = 60;
+const MINUTOS_POR_DIA = 24 * MINUTOS_POR_HORA;
+
+/**
+ * O prazo em dias, horas e minutos, na unidade em que ele é guardado.
+ *
+ * É a ÚNICA implementação da regra: `formatHours` delega para cá em vez de
+ * repetir a divisão. Dois formatadores do mesmo prazo, um em horas e outro em
+ * minutos, iam divergir na primeira vez que alguém mexesse num só — e o valor
+ * que diverge aqui é o que a pessoa lê antes de salvar.
+ *
+ * Sem casa decimal em lugar nenhum: 30 min é "30min", não "0,5h".
+ */
+function descreveMinutos(total: number): string {
+  const dias = Math.floor(total / MINUTOS_POR_DIA);
+  const horas = Math.floor((total % MINUTOS_POR_DIA) / MINUTOS_POR_HORA);
+  const minutos = total % MINUTOS_POR_HORA;
+  const partes: string[] = [];
+  if (dias) partes.push(`${dias}d`);
+  if (horas) partes.push(`${horas}h`);
+  if (minutos) partes.push(`${minutos}min`);
+  return partes.length > 0 ? partes.join(" ") : "0min";
 }
 
 /**
@@ -100,15 +121,41 @@ function Prazo({ horas }: { horas: number | null | undefined }) {
 
 // ── Validation schema ─────────────────────────────────────────
 
+/**
+ * O formulário fala MINUTOS, que é a unidade em que o prazo é guardado.
+ *
+ * Falava horas inteiras, e por isso não conseguia escrever os 30 min da
+ * Crítica — o prazo que existe em produção e que só entrou lá por script.
+ * Enquanto isso durou, abrir "Editar SLA — Crítica" e salvar TROCAVA aquele
+ * prazo por um número redondo. Perda de dado silenciosa, na prioridade mais
+ * urgente do sistema.
+ *
+ * A alternativa era um número com seletor de unidade. Ela foi recusada por um
+ * motivo concreto: trocar "minutos" para "horas" sem mexer no número multiplica
+ * o prazo por 60 SEM PEDIR NADA, e o formulário passaria a converter nos dois
+ * sentidos — que é exatamente onde esse erro mora. Em minutos o formulário não
+ * converte: a ida e a volta são identidade, e o único número que existe tem um
+ * significado só.
+ *
+ * O teto acompanha o do backend (`SLAConfigUpdate`): 9999 h = 599 940 min.
+ */
 const editSchema = z
   .object({
-    response_time_hours: z.coerce.number().int("Deve ser inteiro").min(1, "Mínimo 1 hora").max(9999),
-    resolve_time_hours: z.coerce.number().int("Deve ser inteiro").min(1, "Mínimo 1 hora").max(9999),
+    response_time_minutes: z.coerce
+      .number()
+      .int("Deve ser inteiro")
+      .min(1, "Mínimo 1 minuto")
+      .max(599_940, "Máximo 599940 minutos"),
+    resolve_time_minutes: z.coerce
+      .number()
+      .int("Deve ser inteiro")
+      .min(1, "Mínimo 1 minuto")
+      .max(599_940, "Máximo 599940 minutos"),
     warning_threshold: z.coerce.number().int("Deve ser inteiro").min(1).max(100, "Máximo 100%"),
   })
-  .refine((v) => v.resolve_time_hours > v.response_time_hours, {
+  .refine((v) => v.resolve_time_minutes > v.response_time_minutes, {
     message: "Deve ser maior que o tempo de resposta",
-    path: ["resolve_time_hours"],
+    path: ["resolve_time_minutes"],
   });
 
 type EditValues = z.infer<typeof editSchema>;
@@ -147,21 +194,25 @@ function SlaEditModal({ config, onClose, onSaved }: {
 
   const form = useForm<EditValues>({
     resolver: zodResolver(editSchema) as Resolver<EditValues>,
-    // `?? undefined` porque o prazo pode não ser hora cheia, e o formulário só
-    // fala em horas inteiras. Semear com `null` deixava o campo num estado que
-    // o react-hook-form não declara — e o tipo honesto foi exatamente o que
-    // mostrou isso: com `number` mentindo, esta linha compilava.
-    //
-    // Campo vazio é a leitura certa aqui: a Crítica tem 30 min, e o formulário
-    // NÃO CONSEGUE escrever esse valor. Vazio obriga a pessoa a digitar um
-    // prazo que o formulário sabe representar, em vez de mostrar um número
-    // arredondado que ela salvaria sem perceber que mudou o SLA.
+    // Sem `?? undefined` e sem recuo: `*_time_minutes` é `int` NOT NULL no
+    // banco e sempre vem na resposta. O campo que podia faltar era o derivado
+    // em horas, e ele saiu do formulário.
     defaultValues: {
-      response_time_hours: config.response_time_hours ?? undefined,
-      resolve_time_hours: config.resolve_time_hours ?? undefined,
+      response_time_minutes: config.response_time_minutes,
+      resolve_time_minutes: config.resolve_time_minutes,
       warning_threshold: config.warning_threshold,
     },
   });
+
+  // A conversão é FEEDBACK, não entrada: mostra o que o número digitado quer
+  // dizer em dias e horas, sem que exista um segundo campo para discordar dele.
+  // É o que torna "4320" legível sem reintroduzir a aritmética de duas vias.
+  const respostaAgora = form.watch("response_time_minutes");
+  const resolucaoAgora = form.watch("resolve_time_minutes");
+  const emPalavras = (v: unknown) => {
+    const n = Number(v);
+    return Number.isFinite(n) && n > 0 ? `= ${descreveMinutos(Math.floor(n))}` : undefined;
+  };
 
   async function handleSubmit(values: EditValues) {
     setSubmitError(null);
@@ -182,18 +233,20 @@ function SlaEditModal({ config, onClose, onSaved }: {
 
         <div className="grid grid-cols-2 gap-3">
           <Input
-            label="Resposta (horas úteis) *"
+            label="Resposta (minutos úteis) *"
             type="number"
             min={1}
-            error={form.formState.errors.response_time_hours?.message}
-            {...form.register("response_time_hours")}
+            error={form.formState.errors.response_time_minutes?.message}
+            hint={emPalavras(respostaAgora)}
+            {...form.register("response_time_minutes")}
           />
           <Input
-            label="Resolução (horas úteis) *"
+            label="Resolução (minutos úteis) *"
             type="number"
             min={1}
-            error={form.formState.errors.resolve_time_hours?.message}
-            {...form.register("resolve_time_hours")}
+            error={form.formState.errors.resolve_time_minutes?.message}
+            hint={emPalavras(resolucaoAgora)}
+            {...form.register("resolve_time_minutes")}
           />
         </div>
 

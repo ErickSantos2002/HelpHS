@@ -26,17 +26,61 @@ import type { SLAConfig } from "../../services/slaService";
  * estrutura muda a cada refatoração sem que a promessa mude.
  */
 
+/**
+ * A fixture faz o MESMO caminho do backend: os minutos são a unidade guardada,
+ * e as horas são derivadas deles — `None` quando não é hora cheia.
+ *
+ * Antes ela só tinha as horas, e por isso nenhum caso deste arquivo tocava no
+ * ramo nulo. Agora quem passa só as horas ganha os minutos coerentes de graça,
+ * e quem precisa dos 30 min passa os minutos e deixa as horas nulas.
+ *
+ * O `throw` é controle: fixture sem nenhuma das duas unidades não é resposta
+ * que o servidor consiga produzir, e passar por ela em silêncio seria testar
+ * contra um mundo que não existe.
+ */
 function config(level: string, over: Partial<SLAConfig> = {}): SLAConfig {
-  return {
-    id: `sla-${level}`,
-    level,
+  const juntos = {
     response_time_hours: 4,
     resolve_time_hours: 24,
     warning_threshold: 80,
     is_active: true,
+    ...over,
+  };
+
+  // Sem busca por chave montada: a versão anterior indexava com
+  // `` `${campo}_minutes` `` e precisava de um cast para `Record<string, …>`,
+  // que o `tsc -b` recusou — e com razão, porque o objeto tem `id: string` e o
+  // cast dizia que todo campo era número. Passar os dois valores é mais longo
+  // e não mente.
+  function minutos(
+    emMinutos: number | null | undefined,
+    emHoras: number | null | undefined,
+    campo: string,
+  ): number {
+    if (emMinutos != null) return emMinutos;
+    if (emHoras != null) return emHoras * 60;
+    throw new Error(
+      `fixture de ${level}: ${campo} sem horas e sem minutos — o servidor ` +
+        "nunca devolve isso, e o caso estaria medindo um mundo inexistente.",
+    );
+  }
+
+  return {
+    id: `sla-${level}`,
+    level,
+    response_time_minutes: minutos(
+      over.response_time_minutes,
+      juntos.response_time_hours,
+      "response_time",
+    ),
+    resolve_time_minutes: minutos(
+      over.resolve_time_minutes,
+      juntos.resolve_time_hours,
+      "resolve_time",
+    ),
     created_at: "2026-01-01T12:00:00Z",
     updated_at: "2026-01-01T12:00:00Z",
-    ...over,
+    ...juntos,
   } as SLAConfig;
 }
 
@@ -143,15 +187,15 @@ describe("SlaConfigPage", () => {
     );
 
     const dialogo = screen.getByRole("dialog", { name: "Editar SLA — Alta" });
-    const resposta = within(dialogo).getByLabelText(/Resposta \(horas úteis\)/);
+    const resposta = within(dialogo).getByLabelText(/Resposta \(minutos úteis\)/);
     await userEvent.clear(resposta);
-    await userEvent.type(resposta, "9");
+    await userEvent.type(resposta, "540");
     await userEvent.click(within(dialogo).getByRole("button", { name: "Salvar" }));
 
     await waitFor(() =>
       expect(slaService.updateSLAConfig).toHaveBeenCalledWith(
         "sla-high",
-        expect.objectContaining({ response_time_hours: 9 }),
+        expect.objectContaining({ response_time_minutes: 540 }),
       ),
     );
     await waitFor(() => expect(screen.getByText("9h")).toBeInTheDocument());
@@ -202,7 +246,7 @@ describe("SlaConfigPage", () => {
 describe("prazo que não é hora cheia", () => {
   it("mostra um traço, e não 'nullh', quando as horas vêm nulas", async () => {
     // 30 min: o valor real da Crítica em produção.
-    await montar([config("critical", { response_time_hours: null })]);
+    await montar([config("critical", { response_time_hours: null, response_time_minutes: 30 })]);
 
     const cartao = screen.getByText("Resposta").closest("div")!.parentElement!;
     expect(cartao).not.toHaveTextContent("nullh");
@@ -213,7 +257,7 @@ describe("prazo que não é hora cheia", () => {
     // Um traço sozinho é ambíguo: pode ser "não configurado", pode ser "zero".
     // A nota é o que separa os dois, e ela não pode viver só no `title` —
     // `title` não é anunciado de forma confiável por leitor de tela nenhum.
-    await montar([config("critical", { response_time_hours: null })]);
+    await montar([config("critical", { response_time_hours: null, response_time_minutes: 30 })]);
 
     expect(
       screen.getByText(/não representável em horas/i),
@@ -231,7 +275,9 @@ describe("prazo que não é hora cheia", () => {
     await montar([
       config("critical", {
         response_time_hours: null,
+        response_time_minutes: 30,
         resolve_time_hours: null,
+        resolve_time_minutes: 90,
       }),
     ]);
 
@@ -240,30 +286,50 @@ describe("prazo que não é hora cheia", () => {
     expect(barra!.style.width).not.toContain("NaN");
   });
 
-  it("abre o modal com o campo VAZIO, e não com um número arredondado", async () => {
-    // O formulário só fala em horas inteiras e não consegue escrever 30 min.
-    // Semear com um número aproximado seria pior que vazio: a pessoa salvaria
-    // sem perceber que acabou de mudar o SLA da prioridade mais urgente.
+  it("os 30 minutos vao e voltam pelo formulario sem virar outro numero", async () => {
+    // O CASO QUE FALTAVA, e o defeito que ele fecha era perda de dado.
     //
-    // O QUE ESTE CASO PRENDE, medido por mutação, porque ele passou de
-    // primeira: trocar o vazio por `?? 1` REPROVA aqui — então ele guarda o
-    // comportamento. Mas voltar ao código de antes (semear o `null` cru)
-    // PASSA: um `<input type="number">` com `null` também renderiza vazio.
+    // Enquanto o formulario so falava em horas inteiras, os 30 min da Critica
+    // — aplicados por script, porque a tela nao conseguia escrever aquilo —
+    // NAO CABIAM no campo. Abrir "Editar SLA — Critica" e salvar trocava o
+    // prazo por um numero redondo, calado, na prioridade mais urgente.
     //
-    // Ou seja, o `?? undefined` que acompanha este caso é conserto de TIPO,
-    // não de comportamento — quem o pegou foi o `tsc -b`, não o teste. O caso
-    // fica assim mesmo, como guarda contra alguém "ajudar" preenchendo um
-    // número arredondado, e não como prova de um conserto que ele não prova.
-    await montar([config("critical", { response_time_hours: null })]);
+    // A ida e a volta sao afirmadas as duas: o campo ABRE com 30, e salvar sem
+    // tocar em nada manda 30 de volta. So a primeira passaria se o envio
+    // convertesse; so a segunda passaria se a leitura arredondasse.
+    await montar([config("critical", { response_time_hours: null, response_time_minutes: 30 })]);
+    vi.mocked(slaService.updateSLAConfig).mockResolvedValue(
+      config("critical", { response_time_hours: null, response_time_minutes: 30 }),
+    );
 
     await userEvent.click(
       screen.getByRole("button", { name: "Editar SLA da prioridade Crítica" }),
     );
-
     const dialogo = screen.getByRole("dialog", { name: "Editar SLA — Crítica" });
+
+    // Ida: o valor exato, sem fracao e sem arredondamento.
     expect(
-      within(dialogo).getByLabelText(/Resposta \(horas úteis\)/),
-    ).toHaveValue(null);
+      within(dialogo).getByLabelText(/Resposta \(minutos úteis\)/),
+    ).toHaveValue(30);
+
+    // E a conversao aparece, que e o que torna o numero legivel sem existir um
+    // segundo campo capaz de discordar dele.
+    expect(within(dialogo).getByText("= 30min")).toBeInTheDocument();
+
+    // Volta: salvar sem tocar em nada preserva os 30.
+    await userEvent.click(within(dialogo).getByRole("button", { name: "Salvar" }));
+
+    await waitFor(() =>
+      expect(slaService.updateSLAConfig).toHaveBeenCalledWith(
+        "sla-critical",
+        expect.objectContaining({ response_time_minutes: 30 }),
+      ),
+    );
+    // E NAO manda a ponte em horas junto: o backend recusa os dois campos
+    // preenchidos, com "nao ha como saber qual vale".
+    const enviado = vi.mocked(slaService.updateSLAConfig).mock.calls[0][1];
+    expect(enviado).not.toHaveProperty("response_time_hours");
+    expect(enviado).not.toHaveProperty("resolve_time_hours");
   });
 
   it("segue formatando normalmente quando a hora é cheia", async () => {

@@ -5,9 +5,15 @@ export type SLALevel = "critical" | "high" | "medium" | "low";
 export interface SLAConfig {
   id: string;
   level: SLALevel;
-  // Derivados de `*_time_minutes` no backend, e NULOS quando o prazo não é
-  // hora cheia — `app/schemas/sla.py`, `_em_horas_exatas`. A Crítica tem
-  // 30 min, então estes dois chegam nulos todo dia, e não por exceção.
+  // A UNIDADE DE VERDADE. `int` NOT NULL no banco, sempre presente na
+  // resposta — `app/models/models.py` e `SLAConfigResponse`.
+  response_time_minutes: number;
+  resolve_time_minutes: number;
+
+  // Derivados dos minutos acima, e NULOS quando o prazo não é hora cheia
+  // (`_em_horas_exatas`). A Crítica tem 30 min, então estes dois chegam nulos
+  // todo dia, e não por exceção. O próprio backend os chama de "derivados, só
+  // para a tela antiga".
   //
   // Estavam declarados `number`. O tipo mentia, e por mentir desligou a única
   // checagem que existia: a tela interpolava `${null}h` e mostrava "nullh" em
@@ -28,8 +34,12 @@ export async function getSLAConfigs(): Promise<SLAConfig[]> {
 export async function updateSLAConfig(
   id: string,
   payload: {
-    response_time_hours?: number;
-    resolve_time_hours?: number;
+    // Minutos, e SÓ minutos. A ponte em horas existe no backend
+    // (`SLAConfigUpdate`), mas mandar as duas para o mesmo campo é erro
+    // declarado lá — "com ambos preenchidos não há como saber qual vale". Não
+    // declarar as horas aqui é o que impede alguém de tentar.
+    response_time_minutes?: number;
+    resolve_time_minutes?: number;
     warning_threshold?: number;
     is_active?: boolean;
   },
