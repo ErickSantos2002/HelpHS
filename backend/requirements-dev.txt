@@ -19,3 +19,6 @@ pip-audit==2.10.1
 # Pre-commit & Commits
 pre-commit==4.2.0
 commitizen==4.4.1
+# Stubs do dateutil, para o mypy enxergar o calculo da Pascoa em
+# app/utils/feriados.py. O pacote em si vem como dependencia da holidays.
+types-python-dateutil==2.9.0.20241206

@@ -31,6 +31,7 @@ from app.core.database import AsyncSessionLocal, get_db
 from app.core.security import _is_blacklisted, authorize, decode_token, get_current_user
 from app.models.models import (
     ChatMessage,
+    LibraryFile,
     NotificationType,
     Ticket,
     TicketStatus,
@@ -59,6 +60,8 @@ from app.services.helo import (
 )
 from app.services.llm import improve_message, suggest_reply, summarize_conversation
 from app.services.notifications import commit_e_notificar, notify
+from app.utils.crud import get_or_404
+from app.utils.library_access import ensure_pode_anexar_no_chat
 from app.utils.sla import register_first_response
 from app.utils.ticket_access import ensure_ticket_visible
 
@@ -135,6 +138,7 @@ manager = ConnectionManager()
 
 def _msg_to_response(msg: ChatMessage) -> ChatMessageResponse:
     sender = msg.sender
+    arquivo = msg.library_file if msg.library_file_id else None
     return ChatMessageResponse(
         id=msg.id,
         ticket_id=msg.ticket_id,
@@ -146,6 +150,13 @@ def _msg_to_response(msg: ChatMessage) -> ChatMessageResponse:
         created_at=msg.created_at,
         sender_name=sender.name if sender else "",
         sender_role=sender.role.value if sender else "",
+        library_file_id=msg.library_file_id,
+        # `msg.library_file` pode nao estar carregado em todo caminho; quando
+        # nao estiver, os campos saem nulos e a conversa desenha so o texto. O
+        # id acima e o que importa para a tela pedir o link.
+        library_file_name=arquivo.original_name if arquivo else None,
+        library_file_mime=arquivo.mime_type if arquivo else None,
+        library_file_size=arquivo.size_bytes if arquivo else None,
     )
 
 
@@ -316,6 +327,16 @@ async def create_message(
 ) -> ChatMessageResponse:
     ticket = await _get_ticket_visivel(ticket_id, actor, db)
 
+    # Antes de gravar qualquer coisa: item interno nao entra em conversa. A
+    # recusa e da API, e nao da tela -- a API e chamada por outros clientes
+    # alem dela, e uma tela desatualizada bastaria para vazar.
+    arquivo = None
+    if payload.library_file_id is not None:
+        arquivo = await get_or_404(
+            db, LibraryFile, payload.library_file_id, "Arquivo nao encontrado na biblioteca."
+        )
+        ensure_pode_anexar_no_chat(arquivo)
+
     now = datetime.now(UTC)
     msg = ChatMessage(
         id=uuid.uuid4(),
@@ -324,8 +345,12 @@ async def create_message(
         content=payload.content.strip(),
         is_system=False,
         is_ai=False,
+        library_file_id=payload.library_file_id,
         created_at=now,
     )
+    # Evita um SELECT a mais na serializacao: o objeto ja esta em maos.
+    if arquivo is not None:
+        msg.library_file = arquivo
     db.add(msg)
 
     # SLA: falar com o cliente é o que conta como primeira resposta

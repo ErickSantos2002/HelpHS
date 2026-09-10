@@ -24,6 +24,8 @@ const mockPatch = vi.mocked(api.patch);
 const critico: SLAConfig = {
   id: "sla-critico",
   level: "critical",
+  response_time_minutes: 60,
+  resolve_time_minutes: 240,
   response_time_hours: 1,
   resolve_time_hours: 4,
   warning_threshold: 0.8,
@@ -36,6 +38,8 @@ const baixo: SLAConfig = {
   ...critico,
   id: "sla-baixo",
   level: "low",
+  response_time_minutes: 1440,
+  resolve_time_minutes: 4320,
   response_time_hours: 24,
   resolve_time_hours: 72,
 };
@@ -84,14 +88,14 @@ describe("updateSLAConfig", () => {
     mockPatch.mockResolvedValue({ data: critico });
 
     await updateSLAConfig("sla-critico", {
-      response_time_hours: 2,
-      resolve_time_hours: 8,
+      response_time_minutes: 120,
+      resolve_time_minutes: 480,
     });
 
     expect(mockPatch).toHaveBeenCalledTimes(1);
     expect(mockPatch).toHaveBeenCalledWith("/sla-configs/sla-critico", {
-      response_time_hours: 2,
-      resolve_time_hours: 8,
+      response_time_minutes: 120,
+      resolve_time_minutes: 480,
     });
     // A rota é de edição parcial: um PUT/POST aqui trocaria o contrato.
     expect(mockPut).not.toHaveBeenCalled();
@@ -101,7 +105,7 @@ describe("updateSLAConfig", () => {
   it("monta a URL com o id informado, e não com um id fixo", async () => {
     mockPatch.mockResolvedValue({ data: baixo });
 
-    await updateSLAConfig("sla-baixo", { resolve_time_hours: 96 });
+    await updateSLAConfig("sla-baixo", { resolve_time_minutes: 5760 });
 
     expect(mockPatch.mock.calls[0][0]).toBe("/sla-configs/sla-baixo");
   });
@@ -131,13 +135,17 @@ describe("updateSLAConfig", () => {
   it("devolve a config atualizada que veio do servidor", async () => {
     const atualizada: SLAConfig = {
       ...critico,
+      // Os dois juntos, e coerentes: o backend deriva as horas dos minutos, e
+      // um fixture que diz 2 h ao lado de 60 min herdados do spread é uma
+      // resposta que o servidor não consegue produzir.
+      response_time_minutes: 120,
       response_time_hours: 2,
       updated_at: "2026-02-01T00:00:00Z",
     };
     mockPatch.mockResolvedValue({ data: atualizada });
 
     const result = await updateSLAConfig("sla-critico", {
-      response_time_hours: 2,
+      response_time_minutes: 120,
     });
 
     expect(result.response_time_hours).toBe(2);

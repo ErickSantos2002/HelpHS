@@ -31,6 +31,7 @@ from app.routers import (
     files,
     groups,
     kb,
+    library,
     notifications,
     products,
     quick_replies,
@@ -236,6 +237,7 @@ app.include_router(groups.router, prefix=settings.api_prefix)
 app.include_router(calendar.router, prefix=settings.api_prefix)
 app.include_router(quick_replies.router, prefix=settings.api_prefix)
 app.include_router(files.router, prefix=settings.api_prefix)
+app.include_router(library.router, prefix=settings.api_prefix)
 
 
 # Quanto o readiness espera por cada dependência antes de chamá-la de fora.

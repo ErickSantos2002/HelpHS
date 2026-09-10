@@ -53,24 +53,90 @@ function ordemDePrioridade(p: string): number {
 
 // ── Helpers ───────────────────────────────────────────────────
 
-function formatHours(h: number) {
-  if (h < 24) return `${h}h`;
-  const days = Math.floor(h / 24);
-  const rest = h % 24;
-  return rest > 0 ? `${days}d ${rest}h` : `${days}d`;
+const MINUTOS_POR_HORA = 60;
+const MINUTOS_POR_DIA = 24 * MINUTOS_POR_HORA;
+
+/**
+ * O prazo em dias, horas e minutos, na unidade em que ele é guardado.
+ *
+ * É a ÚNICA implementação da regra, e agora com os DOIS chamadores da tela: a
+ * linha da lista e a dica do formulário. Dois formatadores do mesmo prazo
+ * divergiriam na primeira vez que alguém mexesse num só — e aqui a divergência
+ * apareceria entre o que a pessoa lê na lista e o que ela lê antes de salvar,
+ * que é o pior lugar possível para dois números discordarem.
+ *
+ * Sem casa decimal em lugar nenhum: 30 min é "30min", não "0,5h".
+ */
+function descreveMinutos(total: number): string {
+  const dias = Math.floor(total / MINUTOS_POR_DIA);
+  const horas = Math.floor((total % MINUTOS_POR_DIA) / MINUTOS_POR_HORA);
+  const minutos = total % MINUTOS_POR_HORA;
+  const partes: string[] = [];
+  if (dias) partes.push(`${dias}d`);
+  if (horas) partes.push(`${horas}h`);
+  if (minutos) partes.push(`${minutos}min`);
+  return partes.length > 0 ? partes.join(" ") : "0min";
+}
+
+/**
+ * O prazo, na mesma unidade em que ele é guardado e editado.
+ *
+ * Aqui havia um traço com a nota "não representável em horas", e ele era a
+ * resposta CERTA enquanto a lista só tinha o campo derivado, que chega nulo
+ * quando o prazo não é hora cheia. Assim que o formulário passou a falar
+ * minutos, o valor exato ficou disponível também aqui — e traço onde há dado é
+ * a tela escondendo o que tem.
+ *
+ * `descreveMinutos` é o MESMO formatador da dica de edição. A lista e o
+ * formulário dizendo o mesmo prazo com palavras diferentes seria o defeito
+ * seguinte, e é o tipo de divergência que ninguém percebe até alguém comparar
+ * as duas telas lado a lado.
+ */
+function Prazo({ minutos }: { minutos: number }) {
+  return (
+    <p className="text-sm font-semibold text-conteudo-heading mt-0.5">
+      {descreveMinutos(minutos)}
+    </p>
+  );
 }
 
 // ── Validation schema ─────────────────────────────────────────
 
+/**
+ * O formulário fala MINUTOS, que é a unidade em que o prazo é guardado.
+ *
+ * Falava horas inteiras, e por isso não conseguia escrever os 30 min da
+ * Crítica — o prazo que existe em produção e que só entrou lá por script.
+ * Enquanto isso durou, abrir "Editar SLA — Crítica" e salvar TROCAVA aquele
+ * prazo por um número redondo. Perda de dado silenciosa, na prioridade mais
+ * urgente do sistema.
+ *
+ * A alternativa era um número com seletor de unidade. Ela foi recusada por um
+ * motivo concreto: trocar "minutos" para "horas" sem mexer no número multiplica
+ * o prazo por 60 SEM PEDIR NADA, e o formulário passaria a converter nos dois
+ * sentidos — que é exatamente onde esse erro mora. Em minutos o formulário não
+ * converte: a ida e a volta são identidade, e o único número que existe tem um
+ * significado só.
+ *
+ * O teto acompanha o do backend (`SLAConfigUpdate`): 9999 h = 599 940 min.
+ */
 const editSchema = z
   .object({
-    response_time_hours: z.coerce.number().int("Deve ser inteiro").min(1, "Mínimo 1 hora").max(9999),
-    resolve_time_hours: z.coerce.number().int("Deve ser inteiro").min(1, "Mínimo 1 hora").max(9999),
+    response_time_minutes: z.coerce
+      .number()
+      .int("Deve ser inteiro")
+      .min(1, "Mínimo 1 minuto")
+      .max(599_940, "Máximo 599940 minutos"),
+    resolve_time_minutes: z.coerce
+      .number()
+      .int("Deve ser inteiro")
+      .min(1, "Mínimo 1 minuto")
+      .max(599_940, "Máximo 599940 minutos"),
     warning_threshold: z.coerce.number().int("Deve ser inteiro").min(1).max(100, "Máximo 100%"),
   })
-  .refine((v) => v.resolve_time_hours > v.response_time_hours, {
+  .refine((v) => v.resolve_time_minutes > v.response_time_minutes, {
     message: "Deve ser maior que o tempo de resposta",
-    path: ["resolve_time_hours"],
+    path: ["resolve_time_minutes"],
   });
 
 type EditValues = z.infer<typeof editSchema>;
@@ -109,12 +175,25 @@ function SlaEditModal({ config, onClose, onSaved }: {
 
   const form = useForm<EditValues>({
     resolver: zodResolver(editSchema) as Resolver<EditValues>,
+    // Sem `?? undefined` e sem recuo: `*_time_minutes` é `int` NOT NULL no
+    // banco e sempre vem na resposta. O campo que podia faltar era o derivado
+    // em horas, e ele saiu do formulário.
     defaultValues: {
-      response_time_hours: config.response_time_hours,
-      resolve_time_hours: config.resolve_time_hours,
+      response_time_minutes: config.response_time_minutes,
+      resolve_time_minutes: config.resolve_time_minutes,
       warning_threshold: config.warning_threshold,
     },
   });
+
+  // A conversão é FEEDBACK, não entrada: mostra o que o número digitado quer
+  // dizer em dias e horas, sem que exista um segundo campo para discordar dele.
+  // É o que torna "4320" legível sem reintroduzir a aritmética de duas vias.
+  const respostaAgora = form.watch("response_time_minutes");
+  const resolucaoAgora = form.watch("resolve_time_minutes");
+  const emPalavras = (v: unknown) => {
+    const n = Number(v);
+    return Number.isFinite(n) && n > 0 ? `= ${descreveMinutos(Math.floor(n))}` : undefined;
+  };
 
   async function handleSubmit(values: EditValues) {
     setSubmitError(null);
@@ -135,18 +214,20 @@ function SlaEditModal({ config, onClose, onSaved }: {
 
         <div className="grid grid-cols-2 gap-3">
           <Input
-            label="Resposta (horas úteis) *"
+            label="Resposta (minutos úteis) *"
             type="number"
             min={1}
-            error={form.formState.errors.response_time_hours?.message}
-            {...form.register("response_time_hours")}
+            error={form.formState.errors.response_time_minutes?.message}
+            hint={emPalavras(respostaAgora)}
+            {...form.register("response_time_minutes")}
           />
           <Input
-            label="Resolução (horas úteis) *"
+            label="Resolução (minutos úteis) *"
             type="number"
             min={1}
-            error={form.formState.errors.resolve_time_hours?.message}
-            {...form.register("resolve_time_hours")}
+            error={form.formState.errors.resolve_time_minutes?.message}
+            hint={emPalavras(resolucaoAgora)}
+            {...form.register("resolve_time_minutes")}
           />
         </div>
 
@@ -208,7 +289,7 @@ export default function SlaConfigPage() {
       <div>
         <h1 className="text-2xl font-bold text-conteudo-heading">Configurações de SLA</h1>
         <p className="text-conteudo-muted text-sm mt-0.5">
-          Tempos limite de resposta e resolução por nível de prioridade (seg–sex, 08h–18h)
+          Tempos limite de resposta e resolução por nível de prioridade (seg–sex, 08h–17h)
         </p>
       </div>
 
@@ -228,7 +309,14 @@ export default function SlaConfigPage() {
             <div className="divide-y divide-borda">
               {configs.map((c) => {
                 const rotulo = rotuloDePrioridade(c.level);
-                const responseRatio = Math.min((c.response_time_hours / c.resolve_time_hours) * 100, 100);
+                // Em minutos nao existe o NaN que o campo derivado produzia:
+                // `*_time_minutes` e `int` NOT NULL, e o backend exige `ge=1`.
+                // A guarda do zero fica assim mesmo -- ela custa nada e o dado
+                // vem da REDE, onde "nao pode ser zero" e promessa de outro
+                // processo, nao garantia deste.
+                const proporcao = c.resolve_time_minutes
+                  ? Math.min((c.response_time_minutes / c.resolve_time_minutes) * 100, 100)
+                  : 0;
                 return (
                   <div key={c.id} className="flex items-center gap-4 px-4 py-4 hover:bg-surface-elevated/40 transition-colors">
 
@@ -247,7 +335,7 @@ export default function SlaConfigPage() {
                           <div
                             aria-hidden="true"
                             className={`h-full rounded-full opacity-60 ${TOM_PRIORIDADE[varianteDePrioridade(c.level)].ponto}`}
-                            style={{ width: `${responseRatio}%` }}
+                            style={{ width: `${proporcao}%` }}
                           />
                         </div>
                       </div>
@@ -258,7 +346,7 @@ export default function SlaConfigPage() {
                           <Icon name="clock" size={16} strokeWidth={2} className="text-conteudo-muted" />
                           <div>
                             <p className="text-[10px] text-conteudo-muted leading-none">Resposta</p>
-                            <p className="text-sm font-semibold text-conteudo-heading mt-0.5">{formatHours(c.response_time_hours)}</p>
+                            <Prazo minutos={c.response_time_minutes} />
                           </div>
                         </div>
 
@@ -267,7 +355,7 @@ export default function SlaConfigPage() {
                           <Icon name="shield" size={16} strokeWidth={2} className="text-conteudo-muted" />
                           <div>
                             <p className="text-[10px] text-conteudo-muted leading-none">Resolução</p>
-                            <p className="text-sm font-semibold text-conteudo-heading mt-0.5">{formatHours(c.resolve_time_hours)}</p>
+                            <Prazo minutos={c.resolve_time_minutes} />
                           </div>
                         </div>
 

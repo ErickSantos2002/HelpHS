@@ -35,6 +35,7 @@ from datetime import UTC, datetime, timedelta
 import pytz
 
 from app.models.models import SLAConfig, Ticket, TicketStatus
+from app.utils.feriados import e_dia_util
 
 # ── Constants ─────────────────────────────────────────────────
 
@@ -67,27 +68,39 @@ def _to_sp(dt: datetime) -> datetime:
     return dt.astimezone(SP_TZ)
 
 
+def _proximo_inicio_util(dt: datetime) -> datetime:
+    """Início da jornada do próximo dia útil, pulando fim de semana e feriado.
+
+    Uma função só, e não um laço repetido em cada ponto que precisa avançar.
+    Havia três `while dt.weekday() >= 5` espalhados, e três lugares para alguém
+    corrigir dois — que é como feriado entraria em dois caminhos e não no
+    terceiro.
+    """
+    proximo = (dt + timedelta(days=1)).replace(hour=_WORK_START, minute=0, second=0, microsecond=0)
+    while not e_dia_util(proximo.date()):
+        proximo = (proximo + timedelta(days=1)).replace(
+            hour=_WORK_START, minute=0, second=0, microsecond=0
+        )
+    return proximo
+
+
 def _advance_to_business_hours(dt: datetime) -> datetime:
     """
     If `dt` is outside working hours, return the next moment that IS inside
     working hours (keeping the SP timezone).
+
+    "Fora da jornada" passou a incluir FERIADO, e não só noite e fim de semana.
     """
     dt = _to_sp(dt)
 
-    # Skip weekends
-    while dt.weekday() >= 5:
-        dt = (dt + timedelta(days=1)).replace(hour=_WORK_START, minute=0, second=0, microsecond=0)
+    if not e_dia_util(dt.date()):
+        return _proximo_inicio_util(dt)
 
     if dt.hour < _WORK_START:
         return dt.replace(hour=_WORK_START, minute=0, second=0, microsecond=0)
 
     if dt.hour >= _WORK_END:
-        # Move to next business day
-        dt = (dt + timedelta(days=1)).replace(hour=_WORK_START, minute=0, second=0, microsecond=0)
-        while dt.weekday() >= 5:
-            dt = (dt + timedelta(days=1)).replace(
-                hour=_WORK_START, minute=0, second=0, microsecond=0
-            )
+        return _proximo_inicio_util(dt)
 
     return dt
 
@@ -128,15 +141,7 @@ def add_business_hours(start: datetime, hours: float) -> datetime:
             remaining = 0
         else:
             remaining -= hours_left_today
-            # Jump to next business day start
-            next_day = (current + timedelta(days=1)).replace(
-                hour=_WORK_START, minute=0, second=0, microsecond=0
-            )
-            while next_day.weekday() >= 5:
-                next_day = (next_day + timedelta(days=1)).replace(
-                    hour=_WORK_START, minute=0, second=0, microsecond=0
-                )
-            current = next_day
+            current = _proximo_inicio_util(current)
 
     return current
 

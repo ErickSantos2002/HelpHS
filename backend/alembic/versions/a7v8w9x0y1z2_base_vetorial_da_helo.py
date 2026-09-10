@@ -1,26 +1,32 @@
 """base vetorial da Helô
 
 Revision ID: a7v8w9x0y1z2
-Revises: b8c9d0e1f2a3
+Revises: c9d0e1f2a3b4
 Create Date: 2026-09-08
 
-RE-PARENTADA em 10/09/2026, de z6u7v8w9x0y1 para b8c9d0e1f2a3. A main mesclou
-as migrations de SLA (a7b8c9d0e1f2, b8c9d0e1f2a3), e a primeira delas nasceu
-do MESMO pai que esta. Dois heads fazem o `alembic upgrade head` recusar, e o
-`start.sh` morre antes do uvicorn com o EasyPanel mostrando build verde. Editar
-o pai foi seguro porque esta revision nunca rodou fora de banco local: nenhum
-`alembic_version` que importe a registra. As da main NAO foram tocadas.
+RE-PARENTADA duas vezes em 10/09/2026, pelo mesmo motivo. Primeiro de
+z6u7v8w9x0y1 para b8c9d0e1f2a3, quando a main mesclou as migrations de SLA
+(a7b8c9d0e1f2, b8c9d0e1f2a3); depois de b8c9d0e1f2a3 para c9d0e1f2a3b4, quando
+a main ganhou a da biblioteca de arquivos, filha do mesmo b8c9d0e1f2a3. Nas duas
+vezes uma migration da main nasceu do MESMO pai que esta, e dois heads fazem o
+`alembic upgrade head` recusar — o `start.sh` morre antes do uvicorn com o
+EasyPanel mostrando build verde. A segunda foi pega pelo CI, que testa o PR
+mesclado com a main, e não pelo `alembic heads` local, que só via a branch.
 
-REESCRITA em 10/09/2026, no mesmo dia e pelo mesmo critério. A fonte da base
-deixou de ser uma pasta de manuais e passou a ser a Base de Conhecimento
+Editar o pai é seguro porque esta revision só existe nesta branch: ela não está
+no `main`, de onde produção sobe (conferido no remoto em 10/09/2026). As da
+main NÃO foram tocadas.
+
+REESCRITA em 10/09/2026, pelo mesmo critério. A fonte da base deixou de ser uma
+pasta de manuais e passou a ser a Base de Conhecimento
 (`docs/superpowers/specs/2026-09-10-helo-base-de-conhecimento-design.md`). A
 versão anterior criava `helo_documents` e `helo_chunk_products`; as duas
 morreram com a mudança de fonte. O plano previa derrubá-las numa migration
 nova — uma migration DESTRUTIVA rodando no boot de produção. Como esta revision
-nunca chegou a produção (a extensão nem existe lá ainda), reescrevê-la no
-formato final troca aquilo por nenhum `DROP` em produção, nunca: as tabelas
-antigas simplesmente não chegam a existir lá. O banco local que as tinha é
-recriado; ele só guardava dado derivado dos manuais.
+nunca esteve no `main`, reescrevê-la no formato final troca aquilo por nenhum
+`DROP` em produção, nunca: as tabelas antigas simplesmente não chegam a existir
+lá. Banco local que as tinha precisa ser refeito; ele só guardava dado derivado
+dos manuais.
 
 O QUE ESTA MIGRATION CRIA
 -------------------------
@@ -125,7 +131,7 @@ from sqlalchemy import text
 from alembic import op
 
 revision: str = "a7v8w9x0y1z2"
-down_revision: str | None = "b8c9d0e1f2a3"
+down_revision: str | None = "c9d0e1f2a3b4"
 branch_labels: str | Sequence[str] | None = None
 depends_on: str | Sequence[str] | None = None
 
