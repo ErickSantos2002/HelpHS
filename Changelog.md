@@ -39,6 +39,15 @@ Datas em DD/MM/AAAA.
     gastar cota nem mandar mensagem de verdade para ninguém.
 
 ### Segurança
+
+- **As três advisories novas do front foram fechadas por conserto, e nenhuma
+  entrou no baseline**: `js-yaml` GHSA-2883-xcg3-v3hh (high, → 4.3.2),
+  `vitest` GHSA-82fw-gwwq-j7x9 (→ 4.1.11, com a família junto, que é presa por
+  *peer* na versão exata) e `baseline-browser-mapping` GHSA-w5vr-8v7q-w6rv
+  (→ 2.11.21). Subir o `vitest` fechou junto as três **críticas** do
+  `@vitest/browser` que estavam aceitas desde 02/09, e as seis entradas
+  obsoletas saíram do baseline. Total: **15 → 9**, com critical e moderate a
+  zero.
 - **O cadastro para de contar quem já tem conta — o `#3.1`** (`9988fe4`). O
   `POST /register` respondia `409` *"Este e-mail já está cadastrado"*: para quem
   tem uma lista de endereços, isso é um oráculo — dá para descobrir quem é
@@ -351,6 +360,28 @@ Datas em DD/MM/AAAA.
   de ter sido cliente.
 
 ### Corrigido
+
+- **`/sla-config` mostrava "nullh" na Crítica.** O front declarava
+  `response_time_hours: number` e o backend manda `int | None` — o campo é
+  derivado dos minutos e vale `None` quando o prazo não é hora cheia.
+  `null < 24` é `true`, a interpolação escrevia `${null}h`, e **nem o
+  TypeScript nem o runtime avisaram**, porque o tipo dizia que não podia
+  acontecer.
+- **O subtítulo da `/sla-config` prometia 08h–18h**, e a jornada é 08h–17h
+  (`_WORK_START = 8`, `_WORK_END = 17`). Quem abria chamado às 17h30 lia que
+  ainda estava no expediente, e o relógio já tinha rolado para o dia seguinte.
+- **Editar a Crítica apagava os 30 min**: o formulário só falava em horas
+  inteiras e trocava o prazo por um número redondo, calado.
+- O `Modal` voltou a devolver o foco a quem o abriu.
+- O `aria-describedby` do `Selector` apontava para um `id` que só existe fora
+  da variante de filtro — apontamento órfão não dá erro em JavaScript, HTML nem
+  `tsc`, e o leitor de tela simplesmente não anuncia.
+- Ordenar tabela deixou de ser ação só de mouse; a página atual da paginação
+  deixou de ser um botão desabilitado; o erro de formulário passou a chegar a
+  quem não o vê; o estado do antivírus no anexo deixou de ser invisível.
+- **A Helô cala quando um humano já está na conversa.**
+- Os dois polegares do conjunto de ícones estavam com os **nomes trocados**
+  (E21-b).
 - **A versão do backend congelou de novo — 1.8.0 com o produto em v1.11.0**
   (`e5debd5`). O `dcfc25f` unificou a fonte porque o número vivia escrito à mão
   em dois pontos do `main.py` e as duas cópias pararam em `"1.0.0"`. Unificar
@@ -718,6 +749,23 @@ Datas em DD/MM/AAAA.
   `register_first_response` avalia antes de carimbar.
 
 ### Alterado
+
+- **Os prazos de SLA foram cortados pela metade e passam a ser contados em
+  minutos.** A Crítica responde em **30 min** — valor que a tela não conseguia
+  escrever, aplicado por script, e que foi a origem dos quatro defeitos da
+  `/sla-config` corrigidos em 10/09.
+- A **prioridade** ganhou fonte única (`frontend/src/lib/prioridade.ts`) e o
+  rótulo foi ao feminino: "Crítica", e não "Crítico". Havia cinco cópias do
+  mapa de papel e três de prioridade, já divergentes entre si.
+- **Filtros (D9.2):** os 17 filtros ganharam nome acessível; lista curta e
+  conhecida usa `Select` nativo, lista longa usa `Selector` com busca local.
+- **Exclusão (D9.3):** virou uma forma só — `Modal` pequeno com Cancelar e
+  Excluir em `danger`, com o título nomeando o que se exclui.
+- A **porta de desenvolvimento do front é a 5190**, não a 5173, fixada com
+  `strictPort`. Sem isso o Vite escorregava para 5174/5175 e o Playwright
+  abraçava o servidor de **outro projeto** com `reuseExistingServer`.
+- A lista de SLA passa a mostrar o prazo exato (`30min`) no lugar do traço,
+  pelo mesmo formatador da dica de edição.
 - **O DeepSeek passa a ser o ÚNICO provedor de LLM; OpenAI e Anthropic saem.**
   Decisão do Rickelme em 31/08/2026. O `llm.py` tinha a mesma requisição HTTP
   escrita **oito vezes** — quatro funções públicas × dois provedores — com a URL
@@ -826,6 +874,30 @@ Datas em DD/MM/AAAA.
   ambiente, o escuro segue sendo o padrão.
 
 ### Adicionado
+
+- **O design system da Health & Safety passa a valer nas 22 telas** (v1.13.0).
+  Os sete arquivos de token entram como cópia byte a byte do pacote em
+  `frontend/src/design-system/`, com os SHA256 em `VERSION.md` — e a tabela de
+  hashes virou teste que se mede sozinho, falhando em três direções (arquivo
+  mudou, tabela envelheceu, arquivo novo não registrado).
+- **Biblioteca de arquivos frequentes**, com anexo direto na conversa: o que a
+  equipe manda toda hora deixa de ser reenviado.
+- **Feriado nacional entra no relógio do SLA**, com o Carnaval **calculado** a
+  partir da Páscoa (`dateutil.easter`), e não escrito à mão ano a ano.
+  ⚠️ Feriado municipal e ponto facultativo por decreto **não** entram, por
+  decisão registrada em `backend/app/utils/feriados.py`.
+- **Justificativa obrigatória ao resolver chamado fora do prazo.**
+- **O formulário de SLA passa a falar minutos**, o que torna os 30 min da
+  Crítica escrevíveis pela tela. Recusado o campo com seletor de unidade:
+  trocar "minutos" por "horas" sem mexer no número multiplicaria o prazo por 60
+  em silêncio, e o formulário passaria a converter nos dois sentidos.
+- Primitivos novos no front: `Icon`, `Switch`, `Checkbox`, `FileUpload`,
+  `Tooltip` e `Selector` (que unificou os três seletores que existiam).
+- **Catraca de contraste** (`frontend/scripts/varredura-contraste.mjs`), que lê
+  os pares de cor a partir do JSX e falha nos **dois sentidos**: subir reprova,
+  e descer sem atualizar a linha de base também.
+- **Sonda de captura** com a rede inteiramente interceptada por lista de
+  permissão: 50 fotos de 25 entradas, chamada sem resposta prevista é erro.
 - **A Política de Privacidade vira página, e o cadastro para de mentir**
   (`721248b`, `5c123ee`). A caixa de aceite pedia *"Li e aceito os termos de uso
   e a política de privacidade"* com as duas expressões em
@@ -930,6 +1002,14 @@ Datas em DD/MM/AAAA.
   "— Sem dono —", o que também conserta os órfãos existentes um a um.
 
 ### Removido
+
+- **O `FilterSelect`**, depois que os 17 filtros migraram — ficou sem
+  consumidor.
+- **O último `confirm()` do sistema.**
+- O `formatHours` da `/sla-config`, que perdeu o último chamador quando a lista
+  passou a falar minutos.
+- A tabela local de ícones do front, substituída pelo espelho do pacote (62
+  traçados, regerados por extração).
 - **`LLM_FALLBACK_ENABLED`, `OPENAI_*` e `ANTHROPIC_*` saíram da configuração.**
   Com provedor único o `llm_fallback_enabled` não tem para onde cair. **Foi
   removido, não mantido:** uma flag chamada "fallback" que não alterna nada é
@@ -1003,6 +1083,12 @@ Datas em DD/MM/AAAA.
   consultas**.
 
 ### CI
+
+- **Gate de auditoria de dependências**, com chave por **advisory** e não por
+  pacote. A primeira versão indexava por pacote e tinha um buraco que anulava o
+  gate: advisory novo num pacote já listado passava calado — justo o que ele
+  existe para pegar. Entrada sem justificativa e entrada **obsoleta** também
+  derrubam o CI.
 - **mypy zerado e ligado** (`846c6c4`). 28 erros em 12 arquivos viraram zero, e
   o CI passa a rodar `mypy app` depois do black — a ferramenta já estava no
   `requirements-dev` desde sempre e nunca tinha sido executada. Nenhum dos
@@ -1029,6 +1115,17 @@ Datas em DD/MM/AAAA.
   aguardando staging.
 
 ### Testes
+
+- Suíte do front em **96 arquivos e 1353 casos**.
+- **A régua de comparação de capturas é por tolerância declarada**, não byte a
+  byte: nenhum pixel difere mais que 8 unidades por canal, área afetada em ~1%
+  ou menos, e a diferença tem de estar **espalhada** — pixels concentrados são
+  elemento, não antialias. O comparador conta os nomes dos **dois lados**,
+  porque num contador só "nenhuma diferença" e "nenhum arquivo" são iguais.
+- A tabela de hashes do `VERSION.md` virou teste.
+- `campos-aria` passou a ter tabela **por capacidade declarada**: cada
+  implementador declara à mão se suporta `error`, `hint` ou ambos. Inferir
+  suporte do comportamento é espelho, e é o que a regra proíbe.
 - **`improve-message` ganhou os primeiros testes** (`40d4209`). É o único
   endpoint que manda para fora texto que o técnico **ainda não publicou**, e não
   tinha nenhum. Entraram sucesso, provedor fora do ar e recusa para cliente.
@@ -1097,6 +1194,17 @@ Datas em DD/MM/AAAA.
   operacional. Cada arquivo foi verificado por mutação.
 
 ### Documentação
+
+- Checkpoints 1 a 4 da adoção do design system, em
+  `docs/design-system-migration/`, cada um com a medição colada e não o resumo
+  dela. O Checkpoint 4 fecha com a catraca em **2 pares e 1 cor cheia** (de 49
+  e 28 antes da Fase 11), 22 fichas da §29 e 50 fotos.
+- Duas regras de verificação registradas em `COMPARTILHADO/DECISOES.md`:
+  **"mecanismo certo, conjunto com buraco"** (quatro ocorrências no mesmo dia,
+  em contextos sem relação) e **"verificação que passa por não ter medido"** —
+  `npx tsc --noEmit` compilava **zero** arquivos de `src/`, porque o
+  `tsconfig.json` do front é arquivo-solução. Use `npm run typecheck`
+  (`tsc -b`).
 - O checklist de deploy (`help-deploy-check`) descrevia `GET /api/v1/health`
   como "versão e env certos" — a versão saíra na rodada anterior e o readiness
   mudou o contrato de novo. Agora descreve os dois contratos e o que um

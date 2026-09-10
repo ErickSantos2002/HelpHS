@@ -69,7 +69,9 @@ docker-compose -f backend/docker-compose.dev.yml up -d
 cd backend && python -m uvicorn app.main:app --port 8001 --reload
 
 # frontend, noutro terminal
-cd frontend && npm ci && npm run dev     # http://localhost:5173
+cd frontend && npm ci && npm run dev     # http://localhost:5190
+#   a 5190 e fixada com `strictPort`: sem isso o Vite escorrega para
+#   5174/5175 e o Playwright abraca o servidor de OUTRO projeto
 ```
 
 Login dos seeds: `admin@healthsafety.com`, com a senha vinda de
@@ -85,10 +87,19 @@ está em [desenvolvimento-local.md](desenvolvimento-local.md).
 ```bash
 cd backend  && pytest                # gate de 80% de cobertura
 cd frontend && npm test              # Vitest
+cd frontend && npm run typecheck     # tsc -b
+cd frontend && npm run lint          # eslint
 cd frontend && npx playwright test   # e2e — exige backend na 8001
 
 python .github/scripts/verifica_dependencias.py   # auditoria de dependências
 ```
+
+> ⚠️ **`npm run typecheck` é `tsc -b`, e não `tsc --noEmit`.** O
+> `frontend/tsconfig.json` é arquivo-solução — `"files": []` com três
+> `references` —, então `tsc --noEmit` compila a lista vazia e passa **sem
+> olhar nada**. Medido: `npx tsc --noEmit --listFiles | grep -c "src/"` devolve
+> `0`. Uma régua pode passar porque o que ela mede está certo, ou porque ela
+> não mediu nada, e as duas saídas são idênticas.
 
 > As contagens de teste não ficam mais escritas aqui de propósito: número
 > mantido à mão envelhece a cada teste novo. Duas vezes em 24 horas este README
@@ -154,8 +165,8 @@ ser gravados em disco. Ambas no documento de decisões.
 | [docs/decisoes-e-regras.md](docs/decisoes-e-regras.md) | **Comece por aqui.** As regras de negócio que não dá para deduzir do código: SLA, encerramento, permissões, equipamentos — e as pendências conhecidas |
 | [desenvolvimento-local.md](desenvolvimento-local.md) | Subir o sistema na sua máquina, com e sem Docker, e as pegadinhas do caminho |
 | [Changelog.md](Changelog.md) | Changelog técnico do repositório, por versão |
-| [mudanças.md](mudanças.md) | Registro do trabalho por data, com o porquê de cada decisão |
+| [mudanças.md](mudanças.md) | Registro do trabalho por data, com o porquê de cada decisão — inclui a auditoria de agosto/2026 e as dívidas com o gatilho de quando revisitar |
 | `frontend/src/data/changelog.ts` | O changelog que o **cliente** vê dentro do sistema |
+| [docs/design-system-migration/](docs/design-system-migration/) | A adoção do design system, fase a fase. Os quatro `CHECKPOINT-*.md` trazem a medição colada, não o resumo dela; `CHECKLIST-29.md` é o roteiro por tela |
 | [docs/superpowers/specs/](docs/superpowers/specs/) | Desenhos e levantamentos: atendimento por IA, regra de primeira resposta do SLA, as duas fontes de verdade de empresa |
-| [mudanças.md](mudanças.md) | Registro do trabalho por data — inclui a auditoria completa de agosto/2026 e as dívidas que ficaram registradas com o gatilho de quando revisitar |
 | `Documentação/` | Dicionário de dados e requisitos originais (`.docx`, fora do Git) |
