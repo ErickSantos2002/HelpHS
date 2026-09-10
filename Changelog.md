@@ -10,7 +10,140 @@ Datas em DD/MM/AAAA.
 
 ## [Não publicado]
 
+Trabalho que ainda **não** entrou numa versão do produto. Confira: se um
+item aqui já está em produção, ou ele foi para a versão errada, ou falta
+publicar uma versão nova.
+
+### Segurança
+
+- **As três advisories novas do front foram fechadas por conserto, e nenhuma
+  entrou no baseline**: `js-yaml` GHSA-2883-xcg3-v3hh (high, → 4.3.2),
+  `vitest` GHSA-82fw-gwwq-j7x9 (→ 4.1.11, com a família junto, que é presa por
+  *peer* na versão exata) e `baseline-browser-mapping` GHSA-w5vr-8v7q-w6rv
+  (→ 2.11.21). Subir o `vitest` fechou junto as três **críticas** do
+  `@vitest/browser` que estavam aceitas desde 02/09, e as seis entradas
+  obsoletas saíram do baseline. Total: **15 → 9**, com critical e moderate a
+  zero.
+
+### Adicionado
+
+- **Biblioteca de arquivos frequentes**, com anexo direto na conversa: o que a
+  equipe manda toda hora deixa de ser reenviado.
+
+- **Feriado nacional entra no relógio do SLA**, com o Carnaval **calculado** a
+  partir da Páscoa (`dateutil.easter`), e não escrito à mão ano a ano.
+  ⚠️ Feriado municipal e ponto facultativo por decreto **não** entram, por
+  decisão registrada em `backend/app/utils/feriados.py`.
+
+- **Justificativa obrigatória ao resolver chamado fora do prazo.**
+
+- **O formulário de SLA passa a falar minutos**, o que torna os 30 min da
+  Crítica escrevíveis pela tela. Recusado o campo com seletor de unidade:
+  trocar "minutos" por "horas" sem mexer no número multiplicaria o prazo por 60
+  em silêncio, e o formulário passaria a converter nos dois sentidos.
+
+### Alterado
+
+- **Os prazos de SLA foram cortados pela metade e passam a ser contados em
+  minutos.** A Crítica responde em **30 min** — valor que a tela não conseguia
+  escrever, aplicado por script, e que foi a origem dos quatro defeitos da
+  `/sla-config` corrigidos em 10/09.
+
+- A lista de SLA passa a mostrar o prazo exato (`30min`) no lugar do traço,
+  pelo mesmo formatador da dica de edição.
+
+### Corrigido
+
+- **`/sla-config` mostrava "nullh" na Crítica.** O front declarava
+  `response_time_hours: number` e o backend manda `int | None` — o campo é
+  derivado dos minutos e vale `None` quando o prazo não é hora cheia.
+  `null < 24` é `true`, a interpolação escrevia `${null}h`, e **nem o
+  TypeScript nem o runtime avisaram**, porque o tipo dizia que não podia
+  acontecer.
+
+- **O subtítulo da `/sla-config` prometia 08h–18h**, e a jornada é 08h–17h
+  (`_WORK_START = 8`, `_WORK_END = 17`). Quem abria chamado às 17h30 lia que
+  ainda estava no expediente, e o relógio já tinha rolado para o dia seguinte.
+
+- **Editar a Crítica apagava os 30 min**: o formulário só falava em horas
+  inteiras e trocava o prazo por um número redondo, calado.
+
+### Removido
+
+- O `formatHours` da `/sla-config`, que perdeu o último chamador quando a lista
+  passou a falar minutos.
+
+### Testes
+
+- Suíte do front em **96 arquivos e 1353 casos**.
+
+## [v1.13.0] — 09/09/2026
+
+Fechada com `5e7712b`, o commit que publicou a versão no changelog do produto (`frontend/src/data/changelog.ts`).
+
+### Adicionado
+
+- **O design system da Health & Safety passa a valer nas 22 telas** (v1.13.0).
+  Os sete arquivos de token entram como cópia byte a byte do pacote em
+  `frontend/src/design-system/`, com os SHA256 em `VERSION.md` — e a tabela de
+  hashes virou teste que se mede sozinho, falhando em três direções (arquivo
+  mudou, tabela envelheceu, arquivo novo não registrado).
+
+- Primitivos novos no front: `Icon`, `Switch`, `Checkbox`, `FileUpload`,
+  `Tooltip` e `Selector` (que unificou os três seletores que existiam).
+
+- **Catraca de contraste** (`frontend/scripts/varredura-contraste.mjs`), que lê
+  os pares de cor a partir do JSX e falha nos **dois sentidos**: subir reprova,
+  e descer sem atualizar a linha de base também.
+
+- **Sonda de captura** com a rede inteiramente interceptada por lista de
+  permissão: 50 fotos de 25 entradas, chamada sem resposta prevista é erro.
+
+### Alterado
+
+- A **prioridade** ganhou fonte única (`frontend/src/lib/prioridade.ts`) e o
+  rótulo foi ao feminino: "Crítica", e não "Crítico". Havia cinco cópias do
+  mapa de papel e três de prioridade, já divergentes entre si.
+
+- **Filtros (D9.2):** os 17 filtros ganharam nome acessível; lista curta e
+  conhecida usa `Select` nativo, lista longa usa `Selector` com busca local.
+
+- **Exclusão (D9.3):** virou uma forma só — `Modal` pequeno com Cancelar e
+  Excluir em `danger`, com o título nomeando o que se exclui.
+
+- A **porta de desenvolvimento do front é a 5190**, não a 5173, fixada com
+  `strictPort`. Sem isso o Vite escorregava para 5174/5175 e o Playwright
+  abraçava o servidor de **outro projeto** com `reuseExistingServer`.
+
+### Corrigido
+
+- O `Modal` voltou a devolver o foco a quem o abriu.
+
+- O `aria-describedby` do `Selector` apontava para um `id` que só existe fora
+  da variante de filtro — apontamento órfão não dá erro em JavaScript, HTML nem
+  `tsc`, e o leitor de tela simplesmente não anuncia.
+
+- Ordenar tabela deixou de ser ação só de mouse; a página atual da paginação
+  deixou de ser um botão desabilitado; o erro de formulário passou a chegar a
+  quem não o vê; o estado do antivírus no anexo deixou de ser invisível.
+
+- **A Helô cala quando um humano já está na conversa.**
+
+- Os dois polegares do conjunto de ícones estavam com os **nomes trocados**
+  (E21-b).
+
+### Removido
+
+- **O `FilterSelect`**, depois que os 17 filtros migraram — ficou sem
+  consumidor.
+
+- **O último `confirm()` do sistema.**
+
+- A tabela local de ícones do front, substituída pelo espelho do pacote (62
+  traçados, regerados por extração).
+
 ### Infraestrutura
+
 - **O disparo de e-mail passa a existir, pelo Resend em vez do Microsoft 365.**
   Confirmação de cadastro e redefinição de senha nunca tiveram por onde sair: o
   `.env.example` semeava `smtp.gmail.com` com senha `CHANGE_ME`. O envio agora
@@ -38,16 +171,182 @@ Datas em DD/MM/AAAA.
     comentado no `.env.example`: mexer no fluxo de e-mail em dev não precisa
     gastar cota nem mandar mensagem de verdade para ninguém.
 
+### CI
+
+- **Gate de auditoria de dependências**, com chave por **advisory** e não por
+  pacote. A primeira versão indexava por pacote e tinha um buraco que anulava o
+  gate: advisory novo num pacote já listado passava calado — justo o que ele
+  existe para pegar. Entrada sem justificativa e entrada **obsoleta** também
+  derrubam o CI.
+
+### Testes
+
+- **A régua de comparação de capturas é por tolerância declarada**, não byte a
+  byte: nenhum pixel difere mais que 8 unidades por canal, área afetada em ~1%
+  ou menos, e a diferença tem de estar **espalhada** — pixels concentrados são
+  elemento, não antialias. O comparador conta os nomes dos **dois lados**,
+  porque num contador só "nenhuma diferença" e "nenhum arquivo" são iguais.
+
+- A tabela de hashes do `VERSION.md` virou teste.
+
+- `campos-aria` passou a ter tabela **por capacidade declarada**: cada
+  implementador declara à mão se suporta `error`, `hint` ou ambos. Inferir
+  suporte do comportamento é espelho, e é o que a regra proíbe.
+
+### Documentação
+
+- Checkpoints 1 a 4 da adoção do design system, em
+  `docs/design-system-migration/`, cada um com a medição colada e não o resumo
+  dela. O Checkpoint 4 fecha com a catraca em **2 pares e 1 cor cheia** (de 49
+  e 28 antes da Fase 11), 22 fichas da §29 e 50 fotos.
+
+- Duas regras de verificação registradas em `COMPARTILHADO/DECISOES.md`:
+  **"mecanismo certo, conjunto com buraco"** (quatro ocorrências no mesmo dia,
+  em contextos sem relação) e **"verificação que passa por não ter medido"** —
+  `npx tsc --noEmit` compilava **zero** arquivos de `src/`, porque o
+  `tsconfig.json` do front é arquivo-solução. Use `npm run typecheck`
+  (`tsc -b`).
+
+## [v1.12.0] — 31/08/2026
+
+Fechada com `f4c6d8e`, o commit que publicou a versão no changelog do produto (`frontend/src/data/changelog.ts`).
+
+### Adicionado
+
+- **A Política de Privacidade vira página, e o cadastro para de mentir**
+  (`721248b`, `5c123ee`). A caixa de aceite pedia *"Li e aceito os termos de uso
+  e a política de privacidade"* com as duas expressões em
+  `<span class="text-primary">` — cor de link, sem serem link. Não havia rota,
+  não havia documento, não havia nada para abrir: pedia-se que a pessoa
+  declarasse ter **lido** o que ela não tinha como ler.
+  - O texto entra como **markdown versionado** (`src/content/`), não embutido
+    no componente. Cada revisão vira um diff, e é assim que se prova depois o
+    que a revisão 00 dizia — que é exatamente o que o registro de aceite
+    promete comprovar. O `.docx` da qualidade fica fora do repositório: ele se
+    substitui, o git não.
+  - **"Termos de uso" continua sem link, de propósito** — esse documento ainda
+    não existe. Um link que funciona vale mais que dois que fingem.
+  - **Guarda de rascunho:** enquanto o texto tiver marcador em aberto
+    (`[validar prazos de retenção]` e outros onze), a página avisa que é
+    documento em elaboração. A detecção olha o conteúdo, não uma flag — flag
+    alguém esquece de virar; o marcador some sozinho quando o texto fecha.
+  - ⚠️ **Achado de lado, não consertado:** o `@tailwindcss/typography` **nunca
+    esteve instalado** (`plugins: []`). As classes `prose-*` do
+    `KBArticlePage` são inertes, e a Base de Conhecimento renderiza markdown
+    sem estilo nenhum. Instalar o plugin consertaria a KB por acidente,
+    mudando uma tela que não era o alvo deste trabalho. Esta página se
+    estiliza sozinha; a KB fica registrada aqui.
+
+### Alterado
+
+- **O DeepSeek passa a ser o ÚNICO provedor de LLM; OpenAI e Anthropic saem.**
+  Decisão do Rickelme em 31/08/2026. O `llm.py` tinha a mesma requisição HTTP
+  escrita **oito vezes** — quatro funções públicas × dois provedores — com a URL
+  fixa em oito linhas. Com um provedor só, quatro blocos viraram código morto e
+  os outros quatro, a mesma função repetida: apagar e unificar é consequência
+  direta da decisão, não refatoração por preferência. O arquivo caiu de 634 para
+  472 linhas.
+  - **A fronteira ficou entre "fazer a chamada" e "interpretar a resposta"**,
+    porque as quatro não esperam a mesma coisa. `classify_ticket` quer JSON
+    estruturado e recusa a resposta que não cumpre o contrato; `suggest_reply`,
+    `summarize_conversation` e `improve_message` querem um campo de texto, cada
+    uma com o **seu** nome (`suggestion`, `summary`, `improved`). Sobrou um
+    transporte, `_chamar_deepseek`, que devolve o texto cru e não interpreta
+    nada; o parsing ficou por função. Colapsar os dois juntos quebraria uma das
+    quatro em silêncio.
+  - **Não foi criada camada de abstração de provedores.** Existe um.
+  - Configuração nova: `DEEPSEEK_API_KEY`, `DEEPSEEK_MODEL` e
+    `DEEPSEEK_BASE_URL` — a última com padrão e configurável, para a URL não
+    voltar para dentro do código. Metade do trabalho foi tirá-la de lá.
+  - ⚠️ **O endpoint e o nome do modelo NÃO foram conferidos contra a
+    documentação oficial da DeepSeek.** É por isso que os dois são configuração
+    com padrão e não constante: quando a chave chegar, o teste contra o serviço
+    real corrige no painel, sem tocar em código e sem deploy. Nenhum docstring
+    afirma que foram verificados, porque não foram.
+  - ⚠️ **A `temperature` do `suggest_reply` mudou de valor.** Era `0.7` fixo no
+    código e agora aponta para `LLM_TEMPERATURE` (`0.3`), a mesma configuração
+    das outras três — que era o `OPENAI_TEMPERATURE`, com o mesmo `0.3`. As
+    sugestões de resposta ficam mais conservadoras. Quem quiser o `0.7` de volta
+    muda no painel; antes precisava de deploy.
+  - **A IA continua desligada.** `LLM_ENABLED` não foi tocado e o
+    `DEEPSEEK_API_KEY` nasce **vazio** no `.env.example`. A chave vai para o
+    EasyPanel, nunca para o repositório, e ligar depende do documento de LGPD
+    publicado no cadastro — decisão de conformidade, não de configuração.
+  - Os testes mockavam os dois provedores. Não bastou apagar os da Anthropic: os
+    quatro que provavam sucesso foram reescritos contra o envelope do DeepSeek,
+    e o `test_classify_ticket_falls_back_to_anthropic` — que provava que a falha
+    do primeiro levava ao segundo — deu lugar a um que prova o oposto, contando
+    os POSTs: falhou, acabou. Entraram um teste de que a URL, o modelo e a
+    `temperature` vêm da configuração (fixar a URL de novo o derruba), o
+    primeiro teste próprio do `improve_message`, e um que manda os três campos
+    de texto na mesma resposta para provar que cada função lê o seu.
+
+### Corrigido
+
+- **A versão do backend congelou de novo — 1.8.0 com o produto em v1.11.0**
+  (`e5debd5`). O `dcfc25f` unificou a fonte porque o número vivia escrito à mão
+  em dois pontos do `main.py` e as duas cópias pararam em `"1.0.0"`. Unificar
+  não bastou: a fonte única recongelou **uma versão depois**.
+  - ⚠️ **O silêncio tem causa, e a causa é a lição.** `__version__` só alimenta
+    o construtor do FastAPI, logo só o spec OpenAPI — e o spec está fechado em
+    produção (`/openapi.json` e `/docs` respondem 404). O único espelho que
+    denunciaria a defasagem foi desligado por outra razão, boa. Ninguém vê o
+    número errado, então ninguém corrige. **Fonte única sem ninguém conferindo
+    volta a congelar**: a correção que importa é o teste, não o número.
+  - `test_a_versao_do_backend_acompanha_a_versao_do_produto` compara o
+    `app/__init__.py` com o `APP_VERSION` de `frontend/src/data/changelog.ts`,
+    que é a versão que o cliente vê. **Mutação conferida nos dois sentidos:**
+    mexer só num dos lados derruba a suíte.
+  - **O "v" é traduzido no teste, não alinhado nas pontas.** No front
+    `APP_VERSION` é texto de tela — o Sidebar imprime "HelpHS v1.11.0" e o
+    modal casa com as entradas do `CHANGELOG`, todas com "v". No backend o
+    valor vira o `info.version` do OpenAPI e o dunder de um pacote Python, que
+    pedem o número puro. Cada ponta guarda o formato do seu domínio; a
+    conversão é de quem compara.
+  - **Arquivo do front ausente falha, não pula** — decidido, não herdado. O
+    `.dockerignore` exclui `tests/`, então a imagem do backend não leva a
+    suíte: o checkout só-backend que justificaria o skip não roda `pytest`
+    nenhum. O arquivo sumir significa front movido, renomeado ou checkout pela
+    metade, e nos três casos um skip devolveria verde justamente ao teste cuja
+    única razão de existir é impedir o congelamento silencioso. O ramo foi
+    exercitado de verdade, renomeando o `changelog.ts`.
+  - A raiz do repositório sai de `Path(__file__).resolve().parents[2]`,
+    ancorada no arquivo de teste e não no diretório de onde o `pytest` foi
+    chamado — a suíte roda de `backend/` (CI, README) e também da raiz. Mesmo
+    idioma de `test_seeds.py` e `test_seeds_e2e.py`, que já atravessam para o
+    front.
+
+### Removido
+
+- **`LLM_FALLBACK_ENABLED`, `OPENAI_*` e `ANTHROPIC_*` saíram da configuração.**
+  Com provedor único o `llm_fallback_enabled` não tem para onde cair. **Foi
+  removido, não mantido:** uma flag chamada "fallback" que não alterna nada é
+  configuração que mente — quem a vê no painel do EasyPanel e a põe em `false`
+  acredita ter restringido alguma coisa, e não restringiu. Guardar o lugar para
+  um segundo provedor que não existe é a mesma arquitetura que este projeto
+  recusa em outros pontos; se um dia voltar, a flag volta junto com o código que
+  a lê. Os interruptores honestos continuam de pé: `LLM_ENABLED` e
+  `HELO_ENABLED`.
+  - ⚠️ **Sobra no painel do EasyPanel.** `Settings` roda com `extra="ignore"`,
+    então `OPENAI_API_KEY`, `ANTHROPIC_API_KEY` e `LLM_FALLBACK_ENABLED` que
+    ainda estejam lá **não derrubam o boot** — são só variáveis mortas. Vale
+    apagar, para não parecer que existe um segundo provedor. Quem tiver
+    `OPENAI_TEMPERATURE` com valor diferente de `0.3` precisa recriá-la como
+    `LLM_TEMPERATURE`: o nome antigo deixou de ser lido.
+
+### Documentação
+
+- O checklist de deploy (`help-deploy-check`) descrevia `GET /api/v1/health`
+  como "versão e env certos" — a versão saíra na rodada anterior e o readiness
+  mudou o contrato de novo. Agora descreve os dois contratos e o que um
+  `auto_close.last_success` parado quer dizer.
+
+## [v1.11.0] — 31/08/2026
+
+Fechada com `9b0cce4`, o commit que publicou a versão no changelog do produto (`frontend/src/data/changelog.ts`).
+
 ### Segurança
 
-- **As três advisories novas do front foram fechadas por conserto, e nenhuma
-  entrou no baseline**: `js-yaml` GHSA-2883-xcg3-v3hh (high, → 4.3.2),
-  `vitest` GHSA-82fw-gwwq-j7x9 (→ 4.1.11, com a família junto, que é presa por
-  *peer* na versão exata) e `baseline-browser-mapping` GHSA-w5vr-8v7q-w6rv
-  (→ 2.11.21). Subir o `vitest` fechou junto as três **críticas** do
-  `@vitest/browser` que estavam aceitas desde 02/09, e as seis entradas
-  obsoletas saíram do baseline. Total: **15 → 9**, com critical e moderate a
-  zero.
 - **O cadastro para de contar quem já tem conta — o `#3.1`** (`9988fe4`). O
   `POST /register` respondia `409` *"Este e-mail já está cadastrado"*: para quem
   tem uma lista de endereços, isso é um oráculo — dá para descobrir quem é
@@ -72,6 +371,62 @@ Datas em DD/MM/AAAA.
     deixou de mandar. Mesma classe de defeito que mordeu o projeto duas vezes
     esta semana — tipo do TypeScript afirmando sobre o runtime em vez de
     verificar.
+
+- **O envio de e-mail sai da frente da resposta em `forgot-password` e
+  `resend-verification`** (`902d331`). O SMTP só é chamado no ramo da conta
+  existente; enquanto o envio fosse aguardado dentro do handler, os dois ramos
+  respondiam em tempos diferentes e o relógio dizia o que a mensagem cala — o
+  oráculo de enumeração que o `f8e6013` fechou no login, renascendo ao lado.
+  ⚠️ **Hoje isso não é mensurável em produção só porque não há SMTP
+  configurado**: o oráculo nasceria pronto no dia em que ligassem. Com
+  `BackgroundTasks` a resposta sai antes de o envio começar. O teste mede
+  **ordem**, não relógio (mock de rede não tem latência e teste de tempo em CI
+  compartilhado mediria o runner): pelo ASGI cru, o corpo da resposta precisa
+  sair antes do envio. O `register` ficava de fora de propósito — lá a resposta
+  ainda diferia por ramo (`409`). ✅ **Fechado em 27/08 pelo `#3.1`** (`9988fe4`):
+  a resposta virou neutra e o envio ganhou o mesmo `BackgroundTasks`, com teste
+  de ordem próprio.
+
+### Alterado
+
+- **A fala da Helô passa a carimbar a primeira resposta do SLA** (`77237c1`).
+  Decisão do cliente em 28/08/2026, revertendo o desenho de 11/08: quando ela
+  responde, o atendimento começou de fato, e mostrar "aguardando primeira
+  resposta" para quem acabou de ser respondido é o indicador mentindo para o
+  lado contrário. A guarda de "não é o autor" passou a valer **só para gente**
+  — a Helô fala com remetente nulo e, sem uma saída explícita, seria recusada
+  justamente no caso que o cliente pediu. `is_system` continua sem carimbar.
+  - ⚠️ **O preço, dito antes da decisão e aceito junto com ela:** com a Helô
+    ligada todo chamado ganha primeira resposta em segundos, e o indicador vira
+    **~100% permanente**. Ele deixa de medir a equipe e passa a medir o robô,
+    que é sempre rápido. Quanto o cliente esperou por um **humano** não existe
+    mais — seria coluna nova, não filtro sobre esta.
+  - A consequência está registrada nos dois lugares onde alguém a encontraria:
+    como **dívida com gatilho** em `docs/decisoes-e-regras.md`, junto da
+    definição da regra e de um aviso ao lado do que já existia sobre a v1.8.0;
+    e como **nota de emenda** no spec de 20/08, que previa o efeito contrário
+    ("o número vai piorar no dia do deploy") e agora diz por que não piorou.
+
+### Corrigido
+
+- **Chamado sem responsável ia para "Aguardando técnico" e parava o relógio do
+  SLA** (`9eeb683`). O estado só faz sentido quando existe um técnico esperando
+  por ele — sem `assignee_id` o chamado ainda não é de ninguém, e mandá-lo para
+  lá anuncia um atendimento que não começou. Antes da Helô o caso quase não
+  aparecia: o cliente raramente escrevia antes de alguém falar com ele. Com ela
+  respondendo à triagem em segundos, **todo** chamado triado caía nesse estado
+  — que ainda por cima está em `_PAUSE_STATUSES` e **parava a contagem de
+  prazo justamente enquanto o cliente esperava um humano**. O indicador ficaria
+  melhor que a realidade em todo chamado novo. A regra passa a exigir
+  `assignee_id`; depois que um técnico se vincula, tudo volta a funcionar como
+  sempre funcionou.
+
+## [v1.10.0] — 27/08/2026
+
+Fechada com `c3e2c2a`, o commit que publicou a versão no changelog do produto (`frontend/src/data/changelog.ts`).
+
+### Segurança
+
 - **Backplane do chat, para o tempo real sobreviver a mais de um worker**
   (`dfaa82f`). Cada worker assina `helphs:chat` no Redis e reemite para os
   próprios sockets. Sem isso, subir `--workers 2` não estourava nada: as
@@ -96,6 +451,7 @@ Datas em DD/MM/AAAA.
   - ⚠️ **Resíduo assumido:** pub/sub não guarda nada. Durante uma reassinatura,
     o que os outros publicarem para aquele worker se perde. Fica no banco e
     aparece no F5 — mas ninguém sabe que precisa dar F5.
+
 - **O WebSocket passa a respeitar o logout e a ter teto de mensagem**
   (`82552e6`). `_authenticate_ws` conferia assinatura, tipo e status da conta e
   parava aí: `_is_blacklisted` — onde o logout escreve — nunca era consultada, e
@@ -105,6 +461,7 @@ Datas em DD/MM/AAAA.
   nenhum máximo, com a coluna em `Text` — os dois caminhos aceitavam megabytes.
   `LIMITE_CONTEUDO = 20_000`, generoso de propósito, com teste afirmando
   `>= 10_000` para que **apertar demais também reprove**.
+
 - **Rate limit nos endpoints que faltavam** (`5273c30`). `/reset-password` e
   `/verify-email` não tinham limite algum; o primeiro é um caminho de
   **escrita** que troca senha a partir de um token. O knob virou três, um por
@@ -116,6 +473,7 @@ Datas em DD/MM/AAAA.
   chamado automaticamente pelo interceptor de toda sessão ativa: um limite por
   IP ali deslogaria a empresa inteira assim que o volume normal passasse do
   teto, trocando um risco hipotético de força bruta por indisponibilidade certa.
+
 - **Correlação de requisição no log** (`69cb868`). Não havia **nada**:
   `request_id`, `correlation_id`, `ContextVar` e middleware que não fosse o CORS
   retornavam zero no grep. Cada linha era um evento solto, e o `serialize=True`
@@ -133,6 +491,7 @@ Datas em DD/MM/AAAA.
   - O patcher é instalado na **importação**, não no `setup_logging`: aquele só
     roda no lifespan, e os avisos de configuração — os que mais interessa
     correlacionar quando um boot dá errado — escapariam do carimbo.
+
 - **E-mail sai de oito linhas de log de `auth.py`** (`69cb868`). A pior
   registrava o e-mail **digitado** numa tentativa falha: de quem não tem conta
   (material de enumeração servido pronto) e, de vez em quando, a senha, quando a
@@ -141,6 +500,7 @@ Datas em DD/MM/AAAA.
   ⚠️ Os pontos de `email.py` e `notifications.py`, que logam o **destinatário**,
   ficaram: ali o endereço é o objeto da operação. É decisão de LGPD, não de
   higiene.
+
 - **Segundo fator (TOTP) para o staff** (`e0251bc`…`cb61d85`). Sete commits.
   `admin` e `technician` podem exigir um código de seis dígitos além da senha;
   cliente não tem acesso ao recurso (403 em todas as rotas).
@@ -184,12 +544,120 @@ Datas em DD/MM/AAAA.
   - Dependências: `pyotp==2.10.0` (wheel pura, sem transitivas) e `cryptography`
     sai de transitiva do `python-jose` para **dependência direta e pinada**,
     porque agora é importada de verdade (Fernet).
+
+### Adicionado
+
+- **`scripts/desliga_mfa.py` — saída de emergência do segundo fator**
+  (`cb61d85`). Avulso, no molde do `redefine_senha`: dry-run por padrão,
+  `--aplicar` para gravar, rastro em `audit_logs`.
+  Existe porque a API não tem esse caminho **e não deve ter**: `DELETE /auth/mfa`
+  exige a senha *e* uma sessão, e quem está trancado fora não tem nenhuma das
+  duas; um endpoint de admin para desligar o fator de terceiros seria uma forma
+  de remover a proteção de outra pessoa.
+  ⚠️ **O `redefine_senha.py` não resolve esse caso** — com `mfa_enabled = true`,
+  a senha nova não destranca nada, porque o login segue pedindo o código depois
+  dela. O docstring dele passou a dizer isso: descobrir durante a emergência é o
+  pior momento possível.
+  Apaga também o refresh da conta (sem `REDIS_URL`, avisa e segue). Provado
+  rodando contra PostgreSQL real em cinco cenários: dry-run, aplicar,
+  idempotência, conta inexistente e `--por` inexistente abortando antes de
+  escrever.
+
+### Corrigido
+
+- **O resumo da IA cortava a conversa pelo lado errado** (`40d4209`).
+  `summarize_conversation` fazia `history_text[:6000]`: juntava as mensagens em
+  ordem cronológica e guardava os **primeiros** 6000 caracteres. O endpoint
+  carregava 200 mensagens do banco para descartar as **mais recentes** — e quem
+  abre o resumo está tentando descobrir onde o chamado está, não como começou.
+  O enunciado do problema não dependia disso: título, categoria e status vão
+  para o prompt por fora.
+  O corte passou a guardar o fim e a ser **por mensagem**, não por caractere:
+  fatiar a string produzia linha truncada no meio de uma frase, e o modelo
+  recebia `"o erro é TIMEO"` como conteúdo íntegro. O texto avisa quando cortou.
+
+- **IA desligada respondia igual a IA quebrada** (`40d4209`). Os três endpoints
+  devolviam o mesmo 503 "tente novamente mais tarde" nos dois casos, e com a
+  flag desligada retentar não ajuda nunca. `_exige_ia_ligada` virou dependência,
+  então a recusa acontece **antes** de carregar chamado e mensagens do banco. A
+  mensagem de provedor fora do ar continua mandando tentar de novo — ali é a
+  coisa certa. A configuração é lida na chamada, não no import.
+
+- **Colisão de id de migration deixava o container sem subir** (`6aec15d`).
+  Duas migrations nasceram com o id `v2q3r4s5t6u7` — duas frentes partiram do
+  mesmo head e escolheram o próximo da sequência ao mesmo tempo.
+  ⚠️ **O efeito não é teste vermelho, é o boot**: `alembic upgrade head` recusa
+  com "Multiple head revisions" e o `start.sh` morre **antes** do uvicorn. Ficou
+  assim no `origin/main` por algumas horas; qualquer deploy teria falhado, com o
+  EasyPanel mostrando build verde e o container antigo continuando a servir.
+  A primeira tentativa de conserto **colidiu de novo** — a outra frente tinha
+  avançado três migrations, não uma.
+  **Regra nova:** rodar `alembic heads` e confirmar um head só sempre que criar
+  migration. E rodar `ruff check .` da **raiz** do `backend/`, não só nos
+  arquivos tocados — no mesmo dia um bloco de imports fora de ordem deixou o CI
+  vermelho porque só `black` e `mypy` tinham sido rodados naquele arquivo.
+
+- **O filtro "Suspenso" derrubava a lista de usuários com 422** (`94c7591`).
+  `UserStatus` tem três valores — `active`, `inactive`, `anonymized` — e
+  `suspended` nunca existiu. O front oferecia a opção, e selecioná-la produzia
+  `GET /users?status=suspended`: 422 antes do handler, e a lista simplesmente
+  não carregava.
+  A correção foi além da remoção: `USER_STATUSES` virou fonte única e os mapas
+  de label, cor e pílula passaram a ser tipados por ela, então um estado
+  inventado **para de compilar** em vez de virar 422 em produção.
+  ⚠️ O teste que afirmava que `setUserStatus("u1", "suspended")` funcionava foi
+  **apagado** — testava contra um servidor que não existe. No lugar, um que **lê
+  o enum de `backend/app/models/models.py`** e compara, sem repetir a lista:
+  lista copiada volta a divergir.
+
+- **Não dava para apagar descrição de evento nem de grupo** (`f8e9554`,
+  `f86c9d2`). O front manda `null` explícito ao limpar o campo, e os routers
+  testavam `is not None` — que não distingue "campo ausente" de "campo enviado
+  como nulo". O nulo era ignorado, o texto antigo ficava e reaparecia no
+  carregamento seguinte, como se a edição não tivesse acontecido.
+  Passou a ser `body.model_fields_set`, e **só nos campos nullable**: aplicar aos
+  `NOT NULL` trocaria um bug de usabilidade por erro de integridade. Há teste que
+  reprova quem uniformizar.
+  Outras três pistas do mesmo formato foram lidas e **não** eram defeito — em
+  `tickets.py:927` e `groups.py:478` a atribuição é incondicional.
+
+### Testes
+
+- **`improve-message` ganhou os primeiros testes** (`40d4209`). É o único
+  endpoint que manda para fora texto que o técnico **ainda não publicou**, e não
+  tinha nenhum. Entraram sucesso, provedor fora do ar e recusa para cliente.
+
+- **Uma mutação sobrevivente revelou um teste que provava outra coisa**
+  (`174f45b`). O teste `test_o_mesmo_desafio_nao_serve_duas_vezes` passava, mas
+  mutar `mfa_challenge.consumir` para devolver sempre `True` **não quebrava
+  nada**: ele provava o antirreplay, não o uso único. Sequencialmente a segunda
+  tentativa já morre na leitura do desafio, porque o `DEL` da primeira apagou a
+  chave — **o valor de retorno do `DEL` só importa numa corrida**.
+  A correção exigiu duas coisas: um teste com `asyncio.gather` e dar ao Redis
+  falso um `await asyncio.sleep(0)` em toda operação. Sem ceder o event loop,
+  duas requisições sob `gather` correm sequencialmente e a corrida simplesmente
+  não acontece — o teste passaria pelo motivo errado. Vale como padrão: **mock
+  que não suspende esconde condição de corrida**.
+
+- **Sete testes de login precisaram declarar `mfa_enabled = False`**
+  (`174f45b`). Eles usam `MagicMock` como usuário, e `MagicMock().mfa_enabled` é
+  **truthy** — o login desviava para o segundo fator e a falha não dizia por
+  quê. Defeito do mock, não do código: em produção a coluna é
+  `NOT NULL DEFAULT false`.
+
+## [v1.9.0] — 26/08/2026
+
+Fechada com `2521b7d`, o commit que publicou a versão no changelog do produto (`frontend/src/data/changelog.ts`).
+
+### Segurança
+
 - **O SMTP passa a verificar o certificado do servidor** (`36bfc85`).
   `VALIDATE_CERTS` estava fixo em `False`: qualquer um que conseguisse
   responder no endereço configurado recebia **usuário e senha do SMTP** — a
   credencial de envio da empresa inteira. Sem chave de configuração para
   desligar: uma opção "não verifique o certificado" é o tipo de coisa que
   alguém liga para destravar um relay interno e nunca mais desliga.
+
 - **`LLM_ENABLED` permite desligar a IA sem esvaziar as chaves** (`79ef715`).
   A única forma de parar de mandar conteúdo de chamado para OpenAI e Anthropic
   era **apagar** as chaves do painel — manobra que destrói a configuração e não
@@ -201,6 +669,7 @@ Datas em DD/MM/AAAA.
   as suas próprias requisições — são oito construções de `httpx.AsyncClient` no
   arquivo. Por isso o teste conta **construções de cliente HTTP**, não o
   retorno: é o que separa "não mandou" de "mandou e deu errado".
+
 - **O upload deixa de materializar o arquivo antes de medir** (`ab791c3`). Os
   dois endpoints que recebem arquivo faziam `await file.read()` e só então
   mediam `len(data)`: mandar 2 GB fazia o processo alocar 2 GB **antes** de
@@ -211,6 +680,7 @@ Datas em DD/MM/AAAA.
   `apiError.ts` já tem 413 no mapa de fallback e prefere o `detail`, então a
   mensagem do anexo passou de inglês (que dependia do mapa de tradução) para
   português direto.
+
 - **Rascunho da base de conhecimento deixa de existir para quem não é da
   equipe** (`bdd1418`). O `GET` do artigo fazia a checagem certa — não-staff
   mais não-publicado vira 404 — e os três vizinhos não repetiam. Com o UUID de
@@ -223,6 +693,7 @@ Datas em DD/MM/AAAA.
   proposital em relação ao `ensure_ticket_visible`: lá a regra é "é seu?" e a
   exceção de staff fica no call site; aqui o papel **é** a regra inteira. As
   duas recusas saem com a mesma frase, com teste de paridade nas três rotas.
+
 - **Anonimizar conta de admin passa a ser privilégio de admin** (`45a1601`).
   Anonimizar é o único dos quatro endpoints de gestão de usuário que **não tem
   volta**: reescreve nome e e-mail, e não existe caminho de desfazer. Qualquer
@@ -232,6 +703,7 @@ Datas em DD/MM/AAAA.
   técnicos, e excluir já é barrado pelas chaves estrangeiras. Sem técnico
   externo na empresa, o que resta é o clique errado e a conta comprometida — a
   segunda pesa mais aqui porque **não há MFA** no sistema.
+
 - **O spec da API deixa de ser público fora de desenvolvimento** (`6e8f409`).
   `docs_url` e `redoc_url` já eram desligados, mas o `openapi_url` ficou no
   default: o `/openapi.json` seguia público em produção — e o spec é o mapa
@@ -244,6 +716,7 @@ Datas em DD/MM/AAAA.
   cabeçalho e a descrição do input passam a dizer que o alvo precisa ser um
   ambiente com o spec exposto; apontar para produção agora dá 404 no passo do
   ZAP.
+
 - **Ambiente que não é local para de escapar das validações de boot**
   (`e3cea9a`). O guard começava com `if not self.is_production: return`, e
   `is_production` só reconhece "production"/"prod" — então um `APP_ENV=staging`
@@ -255,6 +728,7 @@ Datas em DD/MM/AAAA.
   validações; agora um typo as liga. Apertar não promove: `is_production`
   continua False para staging, senão ele herdaria o `/docs` desligado e o seed
   de admin que não roda.
+
 - **O link de confirmação de e-mail passa a ser de uso único** (`e8c642e`). O
   token de senha já era: carrega a impressão da senha vigente e morre quando
   ela muda. O de confirmação não carregava estado nenhum, então valia pelas
@@ -266,6 +740,7 @@ Datas em DD/MM/AAAA.
   ativa, não há nada a conceder. Não embuti também a impressão do e-mail
   (a simetria mais completa) porque **não existe fluxo de troca de e-mail** no
   sistema: seria amarra que não guarda nada hoje.
+
 - **O admin de seed deixa de nascer com senha do repositório** (`3478bae`,
   `b736114`). `start.sh` roda `python -m app.seeds` **a cada boot do
   container**, entre a migration e o uvicorn, **inclusive em produção**. Com a
@@ -292,190 +767,101 @@ Datas em DD/MM/AAAA.
   hoje no banco de produção e com que senha. Nada foi executado contra
   produção nesta rodada.
 
-- **Número de série passa a ser único por dono, não no sistema inteiro**
-  (`d5fa7a6`). A unicidade global recusava cadastro legítimo — empresas
-  diferentes têm aparelhos de mesmo número — e era um oráculo: o `409` contava
-  ao cliente que outra empresa tinha aquele serial. ⚠️ **Migration**
-  (`u1p2q3r4s5t6`), roda no boot: troca o índice único global por um composto
-  `(owner_id, serial_number)` mais um parcial `WHERE owner_id IS NULL` — em SQL,
-  `NULL` não conflita com `NULL`, e sem o parcial dois órfãos iguais passariam.
-  Upgrade seguro por construção (regra nova é mais fraca que a antiga), sem
-  backfill; o **downgrade pode falhar** se houver o mesmo serial em donos
-  distintos depois do upgrade. Testada em Postgres efêmero: upgrade, os quatro
-  casos de conflito, downgrade e upgrade de novo. **Furo aceito, por decisão:**
-  dois usuários da mesma empresa podem cadastrar o mesmo aparelho, cada um no
-  próprio escopo; a evolução para CNPJ depende de normalizar o campo. O `PATCH`
-  de staff valida o par final (dono, serial) — mover para um dono que já tem o
-  serial dá `409`.
-- **O envio de e-mail sai da frente da resposta em `forgot-password` e
-  `resend-verification`** (`902d331`). O SMTP só é chamado no ramo da conta
-  existente; enquanto o envio fosse aguardado dentro do handler, os dois ramos
-  respondiam em tempos diferentes e o relógio dizia o que a mensagem cala — o
-  oráculo de enumeração que o `f8e6013` fechou no login, renascendo ao lado.
-  ⚠️ **Hoje isso não é mensurável em produção só porque não há SMTP
-  configurado**: o oráculo nasceria pronto no dia em que ligassem. Com
-  `BackgroundTasks` a resposta sai antes de o envio começar. O teste mede
-  **ordem**, não relógio (mock de rede não tem latência e teste de tempo em CI
-  compartilhado mediria o runner): pelo ASGI cru, o corpo da resposta precisa
-  sair antes do envio. O `register` ficava de fora de propósito — lá a resposta
-  ainda diferia por ramo (`409`). ✅ **Fechado em 27/08 pelo `#3.1`** (`9988fe4`):
-  a resposta virou neutra e o envio ganhou o mesmo `BackgroundTasks`, com teste
-  de ordem próprio.
-- **Chamado alheio deixa de denunciar que existe** (`7371bc7`). Para o cliente,
-  o chamado de outra pessoa passa a responder `404`, com o mesmo texto de um id
-  inexistente, em vez do `403` que confirmava a existência — com uma lista de
-  UUIDs dava para enumerar o sistema sem ler um chamado sequer. Mesmo formato
-  que os equipamentos ganharam no `637ad0f`. A regra estava copiada em **quatro
-  arquivos sob três nomes** (`_check_ticket_access` nos anexos,
-  `_get_ticket_or_403` no chat, mais quatro inlines em tickets e avaliações),
-  doze pontos ao todo; passa a existir `ensure_ticket_visible` em `app/utils/`.
-  O helper **não abre exceção para staff** — quem decide isso é o call site,
-  pela mesma razão do `2ad773c`: um helper que "sabe" que admin passa vira
-  passe-livre invisível no dia em que for chamado de um endpoint novo. Vale só
-  para cliente: técnico e admin já listam tudo sem escopo, então `404` entre
-  eles não fecharia nada e quebraria assumir/atender. Onde a recusa é de
-  **papel** o `403` fica — técnico na observação do cliente, staff que não
-  abriu o chamado na avaliação. Três achados que varredura de status HTTP não
-  mostra: `GET /attachments/{id}` vazava **duas vezes** (id do anexo e id do
-  chamado pai, três respostas distinguíveis) e agora responde sempre pelo
-  **anexo**; o **WebSocket** tinha o mesmo oráculo em código de fechamento
-  (`4003` contra `4004`) e passa a fechar `4004` nos dois casos com o mesmo
-  motivo; e `"Attachment not found"` não tinha tradução em `apiError.ts`, o que
-  entregaria ao cliente o toast cru em inglês — o bug que o `2db8dfa` consertou
-  para equipamento. Sem migration, sem backfill. 471 → 490 testes no backend.
-- O hash descartável do login passa a acompanhar `BCRYPT_ROUNDS` sozinho
-  (`a1bbd94`). Ligar a variável ao `pwd_context` na v1.7.0 deixou o knob vivo e
-  criou uma armadilha: o dummy seguia fixado em 12 por literal, então
-  `BCRYPT_ROUNDS=14` no painel fazia o e-mail desconhecido custar 486 ms e o
-  cadastrado 1777 ms — o oráculo de tempo reabria **maior** do que era antes de
-  ser fechado. O teste de paridade não pegava porque comparava contra o
-  contexto do processo de teste, que nunca tem a variável no ambiente. Agora o
-  import compara o custo embutido no literal com o do contexto e só regera
-  quando divergem: o caminho normal não paga bcrypt nenhum.
-- `POST`, `PATCH` e `DELETE /equipment/my*` passam a exigir perfil `client`
-  (`b1ab978`). Com qualquer autenticado, staff criava equipamento pertencente a
-  staff — o mesmo estado que os endpoints de staff recusam com `400`, invisível
-  a todo cliente e impossível de vincular a chamado. A **leitura** fica aberta
-  de propósito, para não esconder equipamento legado de quem virou staff depois
-  de ter sido cliente.
+### Adicionado
+
+- **Revarredura de anexos e aviso de antivírus fora do ar** (`8ff214c`),
+  preparando a subida do ClamAV. `scripts/revarre_anexos.py` é avulso, no molde
+  do `normaliza_cnpj`: dry-run por padrão, `--aplicar` para gravar. Varre os
+  anexos com `virus_scanned=False` — os que entraram enquanto o antivírus não
+  existia, já que o upload trata `unavailable` como aprovado. **Não apaga
+  nada**, nem infectado: anexo é prova de um chamado, e script de limpeza que
+  descarta o que não entende é pior que o problema. A recusa que importa está
+  na tradução da resposta: `unavailable` e `error:` **não** viram exame —
+  marcar como examinado o que o ClamAV não conseguiu ler seria inventar
+  resultado. No boot, fora de dev/teste, um `ping` (que exige `PONG`, porque
+  abrir e fechar a conexão faria qualquer porta ocupada passar por antivírus no
+  ar) avisa quando o serviço não responde. ⚠️ A **política não mudou**: o
+  upload continua aceitando sem varrer, porque bloquear derrubaria o anexo
+  inteiro por causa de um serviço auxiliar. O que mudou é o estado deixar de
+  ser invisível.
+
+- **`/api/v1/health` vira readiness de verdade; `/health` segue intocado**
+  (`ec533c4`). A rota respondia `{"status": "ok"}` sem conferir nada — pior que
+  rota nenhuma, porque dá a quem observa a certeza de que está tudo bem
+  exatamente quando não está. Os dois conceitos ficam separados: `/health`
+  (liveness) **não mudou**, e um teste novo trava isso — é o alvo do
+  `HEALTHCHECK` do Dockerfile e dos compose, e se passasse a depender do banco
+  uma oscilação do Postgres reiniciaria o container da API, trocando uma
+  indisponibilidade parcial por uma total. `/api/v1/health` (readiness) confere
+  banco (`SELECT 1`) e Redis, os dois com timeout de 2 s, em paralelo; alguma
+  faltou responde **503** com `status: degraded` e o culpado em `checks`. Redis
+  conta porque dele dependem a blacklist de token e o lock do fechamento
+  automático. O carimbo do auto-close aparece em `auto_close.last_success`,
+  **reportado e não usado para derrubar**: é `null` nos primeiros 60 s de cada
+  worker, e derrubar por isso daria 503 em todo boot. Deu para mudar o status
+  code porque **nada consome a rota programaticamente** — `HEALTHCHECK`, os
+  dois compose, o k6, o `e2e.yml` e o `zap-scan` batem todos em `/health`.
+
+- **Script de backfill de CNPJ** (`62f022e`, `backend/scripts/normaliza_cnpj.py`).
+  O validador cuida do futuro; este script cuida do passado — sobretudo de
+  `companies.cnpj`, que nasceu texto livre. **Avulso e rodado à mão, nunca em
+  migration**, que é a regra do projeto: dado histórico se corrige em script,
+  regra nova é prospectiva. Dry-run por padrão (`--aplicar` grava), e importa a
+  mesma normalização do validador de propósito — cópia própria da regra
+  gravaria linha que a API recusaria depois. Linha que não soma 14 dígitos é
+  **relatada e deixada como está**, nunca apagada: script de limpeza que
+  descarta o que não entende é pior que o problema que veio consertar.
+  Verificado ponta a ponta em Postgres efêmero — dry-run não grava, `--aplicar`
+  normaliza, linha torta sobrevive, segunda rodada não faz nada. ⚠️ **Ainda não
+  foi rodado em produção**; o `backend/.env` local aponta para o banco real,
+  então quem roda é o Rickelme, quando quiser.
+
+### Alterado
+
+- **O uvicorn sobe com um worker enquanto o chat depender da memória do
+  processo** (`9175752`). O `ConnectionManager` guarda as conexões WebSocket
+  num dicionário **do processo**. Com dois workers, duas pessoas no mesmo
+  chamado caem em processos diferentes com probabilidade alta, cada uma numa
+  sala que o outro não enxerga: ficam conectadas, sem erro nenhum, e não
+  recebem a mensagem uma da outra. ⚠️ O **lock no Redis** do fechamento
+  automático **fica**, mesmo sendo desnecessário com um worker só: voltar a
+  dois é mudar um número, e sem o lock essa volta duplicaria histórico e
+  notificação de cada chamado fechado — calada, do mesmo jeito. O backplane
+  (Redis pub/sub reemitindo as mensagens entre workers) fica como dívida **com
+  gatilho**: é o pré-requisito para voltar a mais de um. Três comentários que
+  afirmavam `--workers 2` foram corrigidos para não depender do número.
+
+- **A versão da API ganha fonte única e sai da resposta pública** (`dcfc25f`).
+  Estava escrita à mão em dois pontos do `main.py`, e as duas cópias
+  congelaram em `"1.0.0"` enquanto o produto seguiu para v1.8.0; agora vive em
+  `app/__init__.py` e um literal novo derruba o teste. E some do
+  `/api/v1/health`, que **responde sem autenticação** — a release exata
+  entregue a qualquer um só ajuda quem quer casar versão com vulnerabilidade
+  conhecida, e quem chama health check quer saber se a API está de pé. A versão
+  continua no metadado do FastAPI, visível no `/docs`, desligado em produção.
+  Nada quebra: o front mostra a versão a partir do próprio `changelog.ts`, e os
+  `HEALTHCHECK` do Dockerfile e dos compose batem em `/health`, intocado. O
+  teste antigo fixava `data["version"] == "1.0.0"` — travava a correção do
+  próprio valor que estava errado.
+
+- **`tags.py` deixa de anotar usuário como `object` e de mentir na permissão**
+  (`21e8b22`). Os cinco `Depends` estavam anotados como `object`, e o código
+  faz `actor.id` em cima disso — enquanto o mypy não está ligado ninguém
+  reclama; no dia em que ligar, o erro aparece longe dali. O resto do projeto
+  já usa `Annotated[User, ...]`. O docstring dizia que `PATCH` e `DELETE` são
+  "admin", mas o código sempre chamou `authorize(admin, technician)`: corrigido
+  o **docstring**, não o código — técnico mexer em etiqueta é coerente com o
+  resto do sistema, onde ele já cria etiqueta e vincula etiqueta a chamado.
+
+- **O `.dockerignore` do backend passa a excluir `.coverage` e `uploads/`**
+  (`4e975b7`). Os dois estão no `.gitignore` desde sempre, mas o
+  `.dockerignore` ficou para trás — e o Dockerfile copia com `COPY . .`. O
+  `.coverage` existia na árvore com 69 KB e entrava em toda imagem; `uploads/`
+  é onde os anexos são gravados, e um build a partir de uma cópia local levaria
+  arquivo de chamado para dentro da imagem.
 
 ### Corrigido
 
-- **`/sla-config` mostrava "nullh" na Crítica.** O front declarava
-  `response_time_hours: number` e o backend manda `int | None` — o campo é
-  derivado dos minutos e vale `None` quando o prazo não é hora cheia.
-  `null < 24` é `true`, a interpolação escrevia `${null}h`, e **nem o
-  TypeScript nem o runtime avisaram**, porque o tipo dizia que não podia
-  acontecer.
-- **O subtítulo da `/sla-config` prometia 08h–18h**, e a jornada é 08h–17h
-  (`_WORK_START = 8`, `_WORK_END = 17`). Quem abria chamado às 17h30 lia que
-  ainda estava no expediente, e o relógio já tinha rolado para o dia seguinte.
-- **Editar a Crítica apagava os 30 min**: o formulário só falava em horas
-  inteiras e trocava o prazo por um número redondo, calado.
-- O `Modal` voltou a devolver o foco a quem o abriu.
-- O `aria-describedby` do `Selector` apontava para um `id` que só existe fora
-  da variante de filtro — apontamento órfão não dá erro em JavaScript, HTML nem
-  `tsc`, e o leitor de tela simplesmente não anuncia.
-- Ordenar tabela deixou de ser ação só de mouse; a página atual da paginação
-  deixou de ser um botão desabilitado; o erro de formulário passou a chegar a
-  quem não o vê; o estado do antivírus no anexo deixou de ser invisível.
-- **A Helô cala quando um humano já está na conversa.**
-- Os dois polegares do conjunto de ícones estavam com os **nomes trocados**
-  (E21-b).
-- **A versão do backend congelou de novo — 1.8.0 com o produto em v1.11.0**
-  (`e5debd5`). O `dcfc25f` unificou a fonte porque o número vivia escrito à mão
-  em dois pontos do `main.py` e as duas cópias pararam em `"1.0.0"`. Unificar
-  não bastou: a fonte única recongelou **uma versão depois**.
-  - ⚠️ **O silêncio tem causa, e a causa é a lição.** `__version__` só alimenta
-    o construtor do FastAPI, logo só o spec OpenAPI — e o spec está fechado em
-    produção (`/openapi.json` e `/docs` respondem 404). O único espelho que
-    denunciaria a defasagem foi desligado por outra razão, boa. Ninguém vê o
-    número errado, então ninguém corrige. **Fonte única sem ninguém conferindo
-    volta a congelar**: a correção que importa é o teste, não o número.
-  - `test_a_versao_do_backend_acompanha_a_versao_do_produto` compara o
-    `app/__init__.py` com o `APP_VERSION` de `frontend/src/data/changelog.ts`,
-    que é a versão que o cliente vê. **Mutação conferida nos dois sentidos:**
-    mexer só num dos lados derruba a suíte.
-  - **O "v" é traduzido no teste, não alinhado nas pontas.** No front
-    `APP_VERSION` é texto de tela — o Sidebar imprime "HelpHS v1.11.0" e o
-    modal casa com as entradas do `CHANGELOG`, todas com "v". No backend o
-    valor vira o `info.version` do OpenAPI e o dunder de um pacote Python, que
-    pedem o número puro. Cada ponta guarda o formato do seu domínio; a
-    conversão é de quem compara.
-  - **Arquivo do front ausente falha, não pula** — decidido, não herdado. O
-    `.dockerignore` exclui `tests/`, então a imagem do backend não leva a
-    suíte: o checkout só-backend que justificaria o skip não roda `pytest`
-    nenhum. O arquivo sumir significa front movido, renomeado ou checkout pela
-    metade, e nos três casos um skip devolveria verde justamente ao teste cuja
-    única razão de existir é impedir o congelamento silencioso. O ramo foi
-    exercitado de verdade, renomeando o `changelog.ts`.
-  - A raiz do repositório sai de `Path(__file__).resolve().parents[2]`,
-    ancorada no arquivo de teste e não no diretório de onde o `pytest` foi
-    chamado — a suíte roda de `backend/` (CI, README) e também da raiz. Mesmo
-    idioma de `test_seeds.py` e `test_seeds_e2e.py`, que já atravessam para o
-    front.
-- **Chamado sem responsável ia para "Aguardando técnico" e parava o relógio do
-  SLA** (`9eeb683`). O estado só faz sentido quando existe um técnico esperando
-  por ele — sem `assignee_id` o chamado ainda não é de ninguém, e mandá-lo para
-  lá anuncia um atendimento que não começou. Antes da Helô o caso quase não
-  aparecia: o cliente raramente escrevia antes de alguém falar com ele. Com ela
-  respondendo à triagem em segundos, **todo** chamado triado caía nesse estado
-  — que ainda por cima está em `_PAUSE_STATUSES` e **parava a contagem de
-  prazo justamente enquanto o cliente esperava um humano**. O indicador ficaria
-  melhor que a realidade em todo chamado novo. A regra passa a exigir
-  `assignee_id`; depois que um técnico se vincula, tudo volta a funcionar como
-  sempre funcionou.
-- **O resumo da IA cortava a conversa pelo lado errado** (`40d4209`).
-  `summarize_conversation` fazia `history_text[:6000]`: juntava as mensagens em
-  ordem cronológica e guardava os **primeiros** 6000 caracteres. O endpoint
-  carregava 200 mensagens do banco para descartar as **mais recentes** — e quem
-  abre o resumo está tentando descobrir onde o chamado está, não como começou.
-  O enunciado do problema não dependia disso: título, categoria e status vão
-  para o prompt por fora.
-  O corte passou a guardar o fim e a ser **por mensagem**, não por caractere:
-  fatiar a string produzia linha truncada no meio de uma frase, e o modelo
-  recebia `"o erro é TIMEO"` como conteúdo íntegro. O texto avisa quando cortou.
-- **IA desligada respondia igual a IA quebrada** (`40d4209`). Os três endpoints
-  devolviam o mesmo 503 "tente novamente mais tarde" nos dois casos, e com a
-  flag desligada retentar não ajuda nunca. `_exige_ia_ligada` virou dependência,
-  então a recusa acontece **antes** de carregar chamado e mensagens do banco. A
-  mensagem de provedor fora do ar continua mandando tentar de novo — ali é a
-  coisa certa. A configuração é lida na chamada, não no import.
-- **Colisão de id de migration deixava o container sem subir** (`6aec15d`).
-  Duas migrations nasceram com o id `v2q3r4s5t6u7` — duas frentes partiram do
-  mesmo head e escolheram o próximo da sequência ao mesmo tempo.
-  ⚠️ **O efeito não é teste vermelho, é o boot**: `alembic upgrade head` recusa
-  com "Multiple head revisions" e o `start.sh` morre **antes** do uvicorn. Ficou
-  assim no `origin/main` por algumas horas; qualquer deploy teria falhado, com o
-  EasyPanel mostrando build verde e o container antigo continuando a servir.
-  A primeira tentativa de conserto **colidiu de novo** — a outra frente tinha
-  avançado três migrations, não uma.
-  **Regra nova:** rodar `alembic heads` e confirmar um head só sempre que criar
-  migration. E rodar `ruff check .` da **raiz** do `backend/`, não só nos
-  arquivos tocados — no mesmo dia um bloco de imports fora de ordem deixou o CI
-  vermelho porque só `black` e `mypy` tinham sido rodados naquele arquivo.
-- **O filtro "Suspenso" derrubava a lista de usuários com 422** (`94c7591`).
-  `UserStatus` tem três valores — `active`, `inactive`, `anonymized` — e
-  `suspended` nunca existiu. O front oferecia a opção, e selecioná-la produzia
-  `GET /users?status=suspended`: 422 antes do handler, e a lista simplesmente
-  não carregava.
-  A correção foi além da remoção: `USER_STATUSES` virou fonte única e os mapas
-  de label, cor e pílula passaram a ser tipados por ela, então um estado
-  inventado **para de compilar** em vez de virar 422 em produção.
-  ⚠️ O teste que afirmava que `setUserStatus("u1", "suspended")` funcionava foi
-  **apagado** — testava contra um servidor que não existe. No lugar, um que **lê
-  o enum de `backend/app/models/models.py`** e compara, sem repetir a lista:
-  lista copiada volta a divergir.
-- **Não dava para apagar descrição de evento nem de grupo** (`f8e9554`,
-  `f86c9d2`). O front manda `null` explícito ao limpar o campo, e os routers
-  testavam `is not None` — que não distingue "campo ausente" de "campo enviado
-  como nulo". O nulo era ignorado, o texto antigo ficava e reaparecia no
-  carregamento seguinte, como se a edição não tivesse acontecido.
-  Passou a ser `body.model_fields_set`, e **só nos campos nullable**: aplicar aos
-  `NOT NULL` trocaria um bug de usabilidade por erro de integridade. Há teste que
-  reprova quem uniformizar.
-  Outras três pistas do mesmo formato foram lidas e **não** eram defeito — em
-  `tickets.py:927` e `groups.py:478` a atribuição é incondicional.
 - **Renovar o token deixava a sessão morrer em 16 h em vez de 7 dias**
   (`b3d629f`, `32a09b8`). `/auth/refresh` devolve `AccessTokenResponse` — três
   campos, **sem `refresh_token`**. O front declarava que havia, no genérico de
@@ -497,6 +883,7 @@ Datas em DD/MM/AAAA.
   tokens existem mesmo. Do lado do backend entrou um teste que fixa o
   **conjunto** de campos da resposta, não só a presença: foi na folga entre as
   duas coisas que o front supôs um campo por tempo indeterminado.
+
 - **O índice de `calendar_events` deixa de ser declarado duas vezes**
   (`205a893`). A coluna `start_date` tinha `index=True` — que já gera
   `ix_calendar_events_start_date` — e o `__table_args__` declarava um `Index()`
@@ -507,6 +894,7 @@ Datas em DD/MM/AAAA.
   ninguém pedia `create_all`, e que travava qualquer fixture montando o schema
   a partir dos modelos. Sem migration: o banco já está como o modelo agora
   descreve. Achado ao medir o custo da fixture do A6.
+
 - **O protocolo deixa de travar no 10.000º chamado do ano** (`32f07de`). A
   consulta do máximo ordenava `Ticket.protocol` como **texto**, e a sequência
   tem 4 dígitos: `'HS-2026-9999' > 'HS-2026-10000'` é verdade em ordenação de
@@ -518,11 +906,13 @@ Datas em DD/MM/AAAA.
   estouraria no Postgres se uma linha com sufixo não-numérico entrasse por fora
   do gerador). A `SEQUENCE`, que resolveria também a corrida, fica registrada
   no docstring **com gatilho**: se colisão de protocolo aparecer no log, é hora.
+
 - **O cadastro deixa de ficar pendurado no SMTP** (`36bfc85`). O `/register`
   era o único dos três fluxos de e-mail que **aguardava** o envio dentro do
   handler, sem timeout — servidor lento atrasava o cadastro, servidor que não
   responde o segurava até o timeout do proxy. Passa a `BackgroundTasks`, como
   os outros dois já faziam. O teste mede **ordem**, não relógio.
+
 - **`PATCH /sla-configs/{id}` deixa de devolver 500 em toda chamada**
   (`43c3238`). A linha de auditoria construía o `AuditLog` com três kwargs que
   o modelo não tem: `resource_type`, `resource_id` e `new_values`, quando os
@@ -536,6 +926,7 @@ Datas em DD/MM/AAAA.
   endpoint, e é o que entra: um afirma 200 e persistência, outro que a linha de
   auditoria nasce com `entity_type="sla_config"` e `entity_id` UUID, porque só
   afirmar o 200 deixaria passar um `AuditLog` com qualquer nome.
+
 - **`DELETE /users/{id}` confere o que o banco recusa e explica o 409**
   (`52a3b7f`). A guarda contava só `Ticket.creator_id`: um técnico que nunca
   abriu chamado mas tem chamados **atribuídos** passava por ela e ia bater na
@@ -549,6 +940,7 @@ Datas em DD/MM/AAAA.
   anonimização — que é o comportamento correto para a LGPD e já era a intenção
   do código; a diferença é que antes isso falhava com 500. Quem nunca agiu
   continua excluível.
+
 - **As duas listagens sem paginação param de mentir o `limit`** (`8e03e05`).
   `GET /users/technicians` e `GET /products/my-equipment` respondiam
   `limit=100, offset=0` fixos sobre queries **sem** limit: com mais de 100
@@ -558,6 +950,7 @@ Datas em DD/MM/AAAA.
   aparelhos do próprio usuário — as duas telas precisam do conjunto inteiro, e
   paginar esconderia opções atrás de uma página que a tela não sabe pedir.
   Conferido que o front lê só `items`.
+
 - **O laço do fechamento automático sobrevive ao erro e diz que está vivo**
   (`9146dc2`). O `while True: await _run_once()` não tinha `try/except`: uma
   exceção encerrava a task e o RN-005 parava até o próximo restart, **calado**
@@ -573,6 +966,7 @@ Datas em DD/MM/AAAA.
   isso — verifiquei por mutação que trocar o tratamento por `except
   BaseException` o mantém verde, porque desde o 3.11 o asyncio re-entrega o
   cancelamento pendente no `await` seguinte.
+
 - **O e-mail de notificação só sai depois do commit que o torna verdade**
   (`66f2569`). O `notify()` criava a task de envio na hora, e o docstring
   mandava chamá-lo **antes** do commit — então qualquer commit que falhasse
@@ -585,6 +979,7 @@ Datas em DD/MM/AAAA.
   commit. ⚠️ Se alguém chamar `db.commit()` direto depois de um `notify()`, o
   e-mail não sai — é o lado seguro do erro: deixar de mandar um aviso é
   recuperável, mandar aviso de algo que não aconteceu não é.
+
 - **O log de e-mail deixa de descartar o destinatário e o motivo** (`c615ad7`).
   Cinco chamadas usavam placeholder de `%`-formatting (`"%s"`), mas o loguru
   formata com `str.format()`: a linha saía com o literal `%s` e os argumentos
@@ -593,6 +988,7 @@ Datas em DD/MM/AAAA.
   reclama que não recebeu. Passa a usar f-string, o estilo do resto do projeto
   (49 chamadas contra 1). Os testes capturam a linha já formatada e afirmam que
   destinatário e motivo aparecem nela.
+
 - **Nenhum e-mail sairia com `SMTP_REPLY_TO` vazio** (`c53bb80`). Achado pelo
   teste do commit acima, não pela auditoria. O campo é opcional e nasce vazio;
   com ele vazio o `send_email` montava a mensagem com `reply_to=None`, e o
@@ -604,6 +1000,7 @@ Datas em DD/MM/AAAA.
   ligado. O campo passa a receber lista vazia, que é o próprio default do
   fastapi-mail. O teste que já existia passava por coincidência: afirmava só
   `result is False`, verdade tanto pela falha simulada quanto por este erro.
+
 - **As tags do artigo da KB deixam de ser uma lista compartilhada** (`e1985a4`).
   `default=[]` guarda **uma** lista, criada quando o módulo é importado, e o
   SQLAlchemy a reusa em toda inserção que não informe tags — quem mutasse o
@@ -613,6 +1010,7 @@ Datas em DD/MM/AAAA.
   (`KBArticle().tags` é `None`, não `[]`) — o risco é o compartilhamento entre
   inserções, não o clássico default mutável de argumento de função. Sem
   migration: default de Python não aparece no DDL.
+
 - **A pesquisa de satisfação passa a cair junto com o ticket no ORM**
   (`a8de8c6`). Era o único filho de `Ticket` sem cascade no relationship. O
   banco já cobre pelo `ON DELETE CASCADE` da chave estrangeira, mas o ORM não
@@ -621,6 +1019,7 @@ Datas em DD/MM/AAAA.
   apaga ticket pelo ORM hoje. O teste afirma a **regra inteira**, não a linha:
   todo filho `ONETOMANY` de `Ticket` precisa cascatear, então o próximo que
   alguém adicionar sem cascade também cai ali. Sem migration.
+
 - **Limpar um campo da empresa passa a funcionar.** O `PUT` de empresa pulava
   todo valor `None`, então "enviado vazio" e "não enviado" eram
   indistinguíveis: o admin apagava o CNPJ na tela, salvava, e o valor velho
@@ -633,6 +1032,7 @@ Datas em DD/MM/AAAA.
   desde o `470d56c`, escrito para que mudá-lo fosse decisão e não efeito
   colateral; as duas mutações (voltar a guarda antiga, tirar a guarda do nome)
   derrubam a suíte.
+
 - **Criar empresa pela sugestão passa a vincular os clientes** (`abdee48`).
   `handleAddFromSuggestion` chamava só `createCompany`, e `create_company`
   nunca tocou em `User`: os clientes que geraram o card seguiam com
@@ -657,6 +1057,7 @@ Datas em DD/MM/AAAA.
   e o que fazer com quem tem `company_name` sem CNPJ — decisões de produto. O
   estrago acabou mesmo assim: com o reaproveitamento por CNPJ os dois cards
   caem na mesma empresa, e o defeito virou cosmético em vez de gerar duplicata.
+
 - **A cobertura parava de contar depois do primeiro `await` no banco**
   (`e30968e`). O relatório subnotificava **todo** endpoint async que consulta o
   banco: contava a primeira linha do corpo e perdia o resto — em `groups.py`,
@@ -702,329 +1103,8 @@ Datas em DD/MM/AAAA.
   pela tela deixa de funcionar; era um caminho que gravava `""`, não `NULL`,
   e endireitá-lo é do Passo 3, junto com os testes de `groups.py`.
 
-- **Chip de SLA deixa de dizer "Vencido" para resposta já dada** (`32fc736`).
-  Chamado respondido no prazo e reaberto dias depois aparecia "Resposta:
-  Vencido" em âmbar — cor certa, letra errada: o chip comparava o prazo do
-  primeiro ciclo com o relógio sem saber que a resposta tinha sido dada, porque
-  `sla_first_response` não era enviado ao front. Passa a ser exposto no
-  `TicketResponse` (leitura, sem migration) e o `SlaChip` ganha `respondedAt`:
-  preenchido, diz "Respondido" e para o relógio. **Não** silencia pelo
-  `breached`: a flag só é recalculada em escrita, e um chamado vencido e
-  intocado chega com ela falsa — a contagem ao vivo é o único lugar que conta a
-  verdade sobre ele. O chip saiu da `TicketDetailPage` para `components/ui`,
-  com testes verificados por mutação. A lista de chamados tinha o mesmo bug na
-  barra de "1ª Resposta" (o chamado respondido pelo chat não sai de `open`) e
-  recebeu o mesmo tratamento. Prazo próprio para o ciclo reaberto fica como
-  melhoria futura.
-- `/onboarding` deixa de abrir para quem não tem onboarding (`77a8e9c`). A rota
-  estava sob o `AuthGuard` e fora do `OnboardingGuard`, então qualquer
-  autenticado abria a tela digitando a URL: o staff, que não tem onboarding
-  nenhum, e o cliente que já completou — para quem refazer significaria
-  sobrescrever dados de cadastro já revisados. Ficar fora do `OnboardingGuard`
-  era proposital (senão o redirecionamento apontaria para si mesmo); o que
-  faltava era o par, `OnboardingOnlyRoute`. Higiene de rota, só no front — a
-  porta que importava, o endpoint, já foi fechada no `b1ab978`.
-- **A primeira resposta do SLA passa a exigir uma fala ao cliente** (`230d670`).
-  `sla_first_response` era carimbado sob `old_status == open`, então "primeira
-  resposta" queria dizer "o chamado saiu do estado inicial" — e, como o mapa de
-  transições só permite `open → in_progress` e `open → cancelled`, na prática
-  "alguém assumiu ou cancelou". Duas distorções opostas conviviam: o técnico que
-  respondia pelo chat sem mexer no status não registrava resposta nenhuma
-  (`chat.py` não tocava no SLA), enquanto atribuir, assumir ou **cancelar** um
-  chamado registrava resposta sem uma palavra ter sido dita. O card de violação
-  de resposta e o tempo médio de primeira resposta mediam o tempo até alguém
-  clicar. A regra nova não olha para status nenhum: marca a primeira mensagem de
-  chat de quem **não é o autor** do chamado — o mesmo critério que o
-  `_notify_other_party` já usa para decidir a quem notificar — e a resolução como
-  rede de segurança, já que a nota de resolução é texto que o cliente lê. Sem
-  migration e **sem backfill**: a regra decide quando gravar, não reescreve o que
-  já está gravado. Desenho e levantamento dos 13 caminhos em
-  `docs/superpowers/specs/2026-08-20-primeira-resposta-sla-design.md`.
-  ⚠️ **O indicador piora no dia do deploy, e essa é a intenção.**
-- Violação de primeira resposta que se apagava sozinha (`230d670`). Nos três
-  pontos, o carimbo vinha antes do `check_breaches`, que só avalia o prazo
-  enquanto `sla_first_response` é nulo — o chamado atendido com três dias de
-  atraso saía com `sla_response_breach = False`, e a condição viva do dashboard,
-  que também exige o campo nulo, perdia a violação do outro lado.
-  `register_first_response` avalia antes de carimbar.
-
-### Alterado
-
-- **Os prazos de SLA foram cortados pela metade e passam a ser contados em
-  minutos.** A Crítica responde em **30 min** — valor que a tela não conseguia
-  escrever, aplicado por script, e que foi a origem dos quatro defeitos da
-  `/sla-config` corrigidos em 10/09.
-- A **prioridade** ganhou fonte única (`frontend/src/lib/prioridade.ts`) e o
-  rótulo foi ao feminino: "Crítica", e não "Crítico". Havia cinco cópias do
-  mapa de papel e três de prioridade, já divergentes entre si.
-- **Filtros (D9.2):** os 17 filtros ganharam nome acessível; lista curta e
-  conhecida usa `Select` nativo, lista longa usa `Selector` com busca local.
-- **Exclusão (D9.3):** virou uma forma só — `Modal` pequeno com Cancelar e
-  Excluir em `danger`, com o título nomeando o que se exclui.
-- A **porta de desenvolvimento do front é a 5190**, não a 5173, fixada com
-  `strictPort`. Sem isso o Vite escorregava para 5174/5175 e o Playwright
-  abraçava o servidor de **outro projeto** com `reuseExistingServer`.
-- A lista de SLA passa a mostrar o prazo exato (`30min`) no lugar do traço,
-  pelo mesmo formatador da dica de edição.
-- **O DeepSeek passa a ser o ÚNICO provedor de LLM; OpenAI e Anthropic saem.**
-  Decisão do Rickelme em 31/08/2026. O `llm.py` tinha a mesma requisição HTTP
-  escrita **oito vezes** — quatro funções públicas × dois provedores — com a URL
-  fixa em oito linhas. Com um provedor só, quatro blocos viraram código morto e
-  os outros quatro, a mesma função repetida: apagar e unificar é consequência
-  direta da decisão, não refatoração por preferência. O arquivo caiu de 634 para
-  472 linhas.
-  - **A fronteira ficou entre "fazer a chamada" e "interpretar a resposta"**,
-    porque as quatro não esperam a mesma coisa. `classify_ticket` quer JSON
-    estruturado e recusa a resposta que não cumpre o contrato; `suggest_reply`,
-    `summarize_conversation` e `improve_message` querem um campo de texto, cada
-    uma com o **seu** nome (`suggestion`, `summary`, `improved`). Sobrou um
-    transporte, `_chamar_deepseek`, que devolve o texto cru e não interpreta
-    nada; o parsing ficou por função. Colapsar os dois juntos quebraria uma das
-    quatro em silêncio.
-  - **Não foi criada camada de abstração de provedores.** Existe um.
-  - Configuração nova: `DEEPSEEK_API_KEY`, `DEEPSEEK_MODEL` e
-    `DEEPSEEK_BASE_URL` — a última com padrão e configurável, para a URL não
-    voltar para dentro do código. Metade do trabalho foi tirá-la de lá.
-  - ⚠️ **O endpoint e o nome do modelo NÃO foram conferidos contra a
-    documentação oficial da DeepSeek.** É por isso que os dois são configuração
-    com padrão e não constante: quando a chave chegar, o teste contra o serviço
-    real corrige no painel, sem tocar em código e sem deploy. Nenhum docstring
-    afirma que foram verificados, porque não foram.
-  - ⚠️ **A `temperature` do `suggest_reply` mudou de valor.** Era `0.7` fixo no
-    código e agora aponta para `LLM_TEMPERATURE` (`0.3`), a mesma configuração
-    das outras três — que era o `OPENAI_TEMPERATURE`, com o mesmo `0.3`. As
-    sugestões de resposta ficam mais conservadoras. Quem quiser o `0.7` de volta
-    muda no painel; antes precisava de deploy.
-  - **A IA continua desligada.** `LLM_ENABLED` não foi tocado e o
-    `DEEPSEEK_API_KEY` nasce **vazio** no `.env.example`. A chave vai para o
-    EasyPanel, nunca para o repositório, e ligar depende do documento de LGPD
-    publicado no cadastro — decisão de conformidade, não de configuração.
-  - Os testes mockavam os dois provedores. Não bastou apagar os da Anthropic: os
-    quatro que provavam sucesso foram reescritos contra o envelope do DeepSeek,
-    e o `test_classify_ticket_falls_back_to_anthropic` — que provava que a falha
-    do primeiro levava ao segundo — deu lugar a um que prova o oposto, contando
-    os POSTs: falhou, acabou. Entraram um teste de que a URL, o modelo e a
-    `temperature` vêm da configuração (fixar a URL de novo o derruba), o
-    primeiro teste próprio do `improve_message`, e um que manda os três campos
-    de texto na mesma resposta para provar que cada função lê o seu.
-- **A fala da Helô passa a carimbar a primeira resposta do SLA** (`77237c1`).
-  Decisão do cliente em 28/08/2026, revertendo o desenho de 11/08: quando ela
-  responde, o atendimento começou de fato, e mostrar "aguardando primeira
-  resposta" para quem acabou de ser respondido é o indicador mentindo para o
-  lado contrário. A guarda de "não é o autor" passou a valer **só para gente**
-  — a Helô fala com remetente nulo e, sem uma saída explícita, seria recusada
-  justamente no caso que o cliente pediu. `is_system` continua sem carimbar.
-  - ⚠️ **O preço, dito antes da decisão e aceito junto com ela:** com a Helô
-    ligada todo chamado ganha primeira resposta em segundos, e o indicador vira
-    **~100% permanente**. Ele deixa de medir a equipe e passa a medir o robô,
-    que é sempre rápido. Quanto o cliente esperou por um **humano** não existe
-    mais — seria coluna nova, não filtro sobre esta.
-  - A consequência está registrada nos dois lugares onde alguém a encontraria:
-    como **dívida com gatilho** em `docs/decisoes-e-regras.md`, junto da
-    definição da regra e de um aviso ao lado do que já existia sobre a v1.8.0;
-    e como **nota de emenda** no spec de 20/08, que previa o efeito contrário
-    ("o número vai piorar no dia do deploy") e agora diz por que não piorou.
-- **O uvicorn sobe com um worker enquanto o chat depender da memória do
-  processo** (`9175752`). O `ConnectionManager` guarda as conexões WebSocket
-  num dicionário **do processo**. Com dois workers, duas pessoas no mesmo
-  chamado caem em processos diferentes com probabilidade alta, cada uma numa
-  sala que o outro não enxerga: ficam conectadas, sem erro nenhum, e não
-  recebem a mensagem uma da outra. ⚠️ O **lock no Redis** do fechamento
-  automático **fica**, mesmo sendo desnecessário com um worker só: voltar a
-  dois é mudar um número, e sem o lock essa volta duplicaria histórico e
-  notificação de cada chamado fechado — calada, do mesmo jeito. O backplane
-  (Redis pub/sub reemitindo as mensagens entre workers) fica como dívida **com
-  gatilho**: é o pré-requisito para voltar a mais de um. Três comentários que
-  afirmavam `--workers 2` foram corrigidos para não depender do número.
-- **A versão da API ganha fonte única e sai da resposta pública** (`dcfc25f`).
-  Estava escrita à mão em dois pontos do `main.py`, e as duas cópias
-  congelaram em `"1.0.0"` enquanto o produto seguiu para v1.8.0; agora vive em
-  `app/__init__.py` e um literal novo derruba o teste. E some do
-  `/api/v1/health`, que **responde sem autenticação** — a release exata
-  entregue a qualquer um só ajuda quem quer casar versão com vulnerabilidade
-  conhecida, e quem chama health check quer saber se a API está de pé. A versão
-  continua no metadado do FastAPI, visível no `/docs`, desligado em produção.
-  Nada quebra: o front mostra a versão a partir do próprio `changelog.ts`, e os
-  `HEALTHCHECK` do Dockerfile e dos compose batem em `/health`, intocado. O
-  teste antigo fixava `data["version"] == "1.0.0"` — travava a correção do
-  próprio valor que estava errado.
-- **`tags.py` deixa de anotar usuário como `object` e de mentir na permissão**
-  (`21e8b22`). Os cinco `Depends` estavam anotados como `object`, e o código
-  faz `actor.id` em cima disso — enquanto o mypy não está ligado ninguém
-  reclama; no dia em que ligar, o erro aparece longe dali. O resto do projeto
-  já usa `Annotated[User, ...]`. O docstring dizia que `PATCH` e `DELETE` são
-  "admin", mas o código sempre chamou `authorize(admin, technician)`: corrigido
-  o **docstring**, não o código — técnico mexer em etiqueta é coerente com o
-  resto do sistema, onde ele já cria etiqueta e vincula etiqueta a chamado.
-- **O `.dockerignore` do backend passa a excluir `.coverage` e `uploads/`**
-  (`4e975b7`). Os dois estão no `.gitignore` desde sempre, mas o
-  `.dockerignore` ficou para trás — e o Dockerfile copia com `COPY . .`. O
-  `.coverage` existia na árvore com 69 KB e entrava em toda imagem; `uploads/`
-  é onde os anexos são gravados, e um build a partir de uma cópia local levaria
-  arquivo de chamado para dentro da imagem.
-- **O tema segue a preferência do sistema operacional na primeira visita**
-  (`8542183`). Quem nunca escolheu recebia escuro fixo; agora vale
-  `prefers-color-scheme`. Escolha salva continua mandando, contra o sistema
-  inclusive. Duas consequências que a regra arrasta: a gravação saiu do efeito
-  de montagem para o `toggleTheme` — gravar ao montar congelaria o valor do SO
-  daquele dia e "seguir o sistema" valeria por uma visita só; e o script
-  anti-flash do `index.html`, que roda antes do bundle, teve de repetir a regra
-  nova à mão, senão quem usa o SO no claro veria flash escuro em toda visita.
-  Valor salvo estragado deixa de contar como escolha; sem `matchMedia` no
-  ambiente, o escuro segue sendo o padrão.
-
-### Adicionado
-
-- **O design system da Health & Safety passa a valer nas 22 telas** (v1.13.0).
-  Os sete arquivos de token entram como cópia byte a byte do pacote em
-  `frontend/src/design-system/`, com os SHA256 em `VERSION.md` — e a tabela de
-  hashes virou teste que se mede sozinho, falhando em três direções (arquivo
-  mudou, tabela envelheceu, arquivo novo não registrado).
-- **Biblioteca de arquivos frequentes**, com anexo direto na conversa: o que a
-  equipe manda toda hora deixa de ser reenviado.
-- **Feriado nacional entra no relógio do SLA**, com o Carnaval **calculado** a
-  partir da Páscoa (`dateutil.easter`), e não escrito à mão ano a ano.
-  ⚠️ Feriado municipal e ponto facultativo por decreto **não** entram, por
-  decisão registrada em `backend/app/utils/feriados.py`.
-- **Justificativa obrigatória ao resolver chamado fora do prazo.**
-- **O formulário de SLA passa a falar minutos**, o que torna os 30 min da
-  Crítica escrevíveis pela tela. Recusado o campo com seletor de unidade:
-  trocar "minutos" por "horas" sem mexer no número multiplicaria o prazo por 60
-  em silêncio, e o formulário passaria a converter nos dois sentidos.
-- Primitivos novos no front: `Icon`, `Switch`, `Checkbox`, `FileUpload`,
-  `Tooltip` e `Selector` (que unificou os três seletores que existiam).
-- **Catraca de contraste** (`frontend/scripts/varredura-contraste.mjs`), que lê
-  os pares de cor a partir do JSX e falha nos **dois sentidos**: subir reprova,
-  e descer sem atualizar a linha de base também.
-- **Sonda de captura** com a rede inteiramente interceptada por lista de
-  permissão: 50 fotos de 25 entradas, chamada sem resposta prevista é erro.
-- **A Política de Privacidade vira página, e o cadastro para de mentir**
-  (`721248b`, `5c123ee`). A caixa de aceite pedia *"Li e aceito os termos de uso
-  e a política de privacidade"* com as duas expressões em
-  `<span class="text-primary">` — cor de link, sem serem link. Não havia rota,
-  não havia documento, não havia nada para abrir: pedia-se que a pessoa
-  declarasse ter **lido** o que ela não tinha como ler.
-  - O texto entra como **markdown versionado** (`src/content/`), não embutido
-    no componente. Cada revisão vira um diff, e é assim que se prova depois o
-    que a revisão 00 dizia — que é exatamente o que o registro de aceite
-    promete comprovar. O `.docx` da qualidade fica fora do repositório: ele se
-    substitui, o git não.
-  - **"Termos de uso" continua sem link, de propósito** — esse documento ainda
-    não existe. Um link que funciona vale mais que dois que fingem.
-  - **Guarda de rascunho:** enquanto o texto tiver marcador em aberto
-    (`[validar prazos de retenção]` e outros onze), a página avisa que é
-    documento em elaboração. A detecção olha o conteúdo, não uma flag — flag
-    alguém esquece de virar; o marcador some sozinho quando o texto fecha.
-  - ⚠️ **Achado de lado, não consertado:** o `@tailwindcss/typography` **nunca
-    esteve instalado** (`plugins: []`). As classes `prose-*` do
-    `KBArticlePage` são inertes, e a Base de Conhecimento renderiza markdown
-    sem estilo nenhum. Instalar o plugin consertaria a KB por acidente,
-    mudando uma tela que não era o alvo deste trabalho. Esta página se
-    estiliza sozinha; a KB fica registrada aqui.
-- **`scripts/desliga_mfa.py` — saída de emergência do segundo fator**
-  (`cb61d85`). Avulso, no molde do `redefine_senha`: dry-run por padrão,
-  `--aplicar` para gravar, rastro em `audit_logs`.
-  Existe porque a API não tem esse caminho **e não deve ter**: `DELETE /auth/mfa`
-  exige a senha *e* uma sessão, e quem está trancado fora não tem nenhuma das
-  duas; um endpoint de admin para desligar o fator de terceiros seria uma forma
-  de remover a proteção de outra pessoa.
-  ⚠️ **O `redefine_senha.py` não resolve esse caso** — com `mfa_enabled = true`,
-  a senha nova não destranca nada, porque o login segue pedindo o código depois
-  dela. O docstring dele passou a dizer isso: descobrir durante a emergência é o
-  pior momento possível.
-  Apaga também o refresh da conta (sem `REDIS_URL`, avisa e segue). Provado
-  rodando contra PostgreSQL real em cinco cenários: dry-run, aplicar,
-  idempotência, conta inexistente e `--por` inexistente abortando antes de
-  escrever.
-- **Revarredura de anexos e aviso de antivírus fora do ar** (`8ff214c`),
-  preparando a subida do ClamAV. `scripts/revarre_anexos.py` é avulso, no molde
-  do `normaliza_cnpj`: dry-run por padrão, `--aplicar` para gravar. Varre os
-  anexos com `virus_scanned=False` — os que entraram enquanto o antivírus não
-  existia, já que o upload trata `unavailable` como aprovado. **Não apaga
-  nada**, nem infectado: anexo é prova de um chamado, e script de limpeza que
-  descarta o que não entende é pior que o problema. A recusa que importa está
-  na tradução da resposta: `unavailable` e `error:` **não** viram exame —
-  marcar como examinado o que o ClamAV não conseguiu ler seria inventar
-  resultado. No boot, fora de dev/teste, um `ping` (que exige `PONG`, porque
-  abrir e fechar a conexão faria qualquer porta ocupada passar por antivírus no
-  ar) avisa quando o serviço não responde. ⚠️ A **política não mudou**: o
-  upload continua aceitando sem varrer, porque bloquear derrubaria o anexo
-  inteiro por causa de um serviço auxiliar. O que mudou é o estado deixar de
-  ser invisível.
-- **`/api/v1/health` vira readiness de verdade; `/health` segue intocado**
-  (`ec533c4`). A rota respondia `{"status": "ok"}` sem conferir nada — pior que
-  rota nenhuma, porque dá a quem observa a certeza de que está tudo bem
-  exatamente quando não está. Os dois conceitos ficam separados: `/health`
-  (liveness) **não mudou**, e um teste novo trava isso — é o alvo do
-  `HEALTHCHECK` do Dockerfile e dos compose, e se passasse a depender do banco
-  uma oscilação do Postgres reiniciaria o container da API, trocando uma
-  indisponibilidade parcial por uma total. `/api/v1/health` (readiness) confere
-  banco (`SELECT 1`) e Redis, os dois com timeout de 2 s, em paralelo; alguma
-  faltou responde **503** com `status: degraded` e o culpado em `checks`. Redis
-  conta porque dele dependem a blacklist de token e o lock do fechamento
-  automático. O carimbo do auto-close aparece em `auto_close.last_success`,
-  **reportado e não usado para derrubar**: é `null` nos primeiros 60 s de cada
-  worker, e derrubar por isso daria 503 em todo boot. Deu para mudar o status
-  code porque **nada consome a rota programaticamente** — `HEALTHCHECK`, os
-  dois compose, o k6, o `e2e.yml` e o `zap-scan` batem todos em `/health`.
-- **Script de backfill de CNPJ** (`62f022e`, `backend/scripts/normaliza_cnpj.py`).
-  O validador cuida do futuro; este script cuida do passado — sobretudo de
-  `companies.cnpj`, que nasceu texto livre. **Avulso e rodado à mão, nunca em
-  migration**, que é a regra do projeto: dado histórico se corrige em script,
-  regra nova é prospectiva. Dry-run por padrão (`--aplicar` grava), e importa a
-  mesma normalização do validador de propósito — cópia própria da regra
-  gravaria linha que a API recusaria depois. Linha que não soma 14 dígitos é
-  **relatada e deixada como está**, nunca apagada: script de limpeza que
-  descarta o que não entende é pior que o problema que veio consertar.
-  Verificado ponta a ponta em Postgres efêmero — dry-run não grava, `--aplicar`
-  normaliza, linha torta sobrevive, segunda rodada não faz nada. ⚠️ **Ainda não
-  foi rodado em produção**; o `backend/.env` local aponta para o banco real,
-  então quem roda é o Rickelme, quando quiser.
-
-- **Filtro de equipamentos sem dono** na listagem de Produtos (`3f3af90`),
-  fechando o outro lado do `3efb0cf`: atribuir dono já era possível, achar o
-  órfão para atribuir não era. Precisou ser parâmetro novo do endpoint
-  (`without_owner` em `GET /products/{id}/equipments`) e não filtro de tela —
-  a listagem é paginada no servidor, então peneirar o array recebido acharia só
-  o órfão que por acaso caiu na página aberta. A forma é um booleano e não um
-  filtro de dono genérico porque as duas coisas são ortogonais: "sem dono" é a
-  **ausência** de `owner_id` e não caberia num `owner_id=<uuid>` sem inventar um
-  valor sentinela; um filtro por dono específico, se fizer falta, entra ao lado
-  sem renegociar este contrato. O filtro **soma** ao escopo por dono do cliente
-  e nunca o substitui — cliente pedindo `without_owner=true` recebe lista vazia
-  em vez do parque órfão inteiro, e há teste para isso.
-- Seletor de dono no cadastro de equipamento pela tela de Produtos
-  (`3efb0cf`), fechando o ciclo do `51a9cb8`: o backend aceitava `owner_id`
-  desde então, mas o `productService` omitia o campo e o equipamento continuava
-  nascendo órfão. Novo componente `SearchSelect` com busca no servidor — um
-  dropdown pré-carregado quebraria em silêncio ao passar de 100 clientes, que é
-  o teto de `GET /users`. O campo aparece ao criar **e** ao editar, com
-  "— Sem dono —", o que também conserta os órfãos existentes um a um.
-
 ### Removido
 
-- **O `FilterSelect`**, depois que os 17 filtros migraram — ficou sem
-  consumidor.
-- **O último `confirm()` do sistema.**
-- O `formatHours` da `/sla-config`, que perdeu o último chamador quando a lista
-  passou a falar minutos.
-- A tabela local de ícones do front, substituída pelo espelho do pacote (62
-  traçados, regerados por extração).
-- **`LLM_FALLBACK_ENABLED`, `OPENAI_*` e `ANTHROPIC_*` saíram da configuração.**
-  Com provedor único o `llm_fallback_enabled` não tem para onde cair. **Foi
-  removido, não mantido:** uma flag chamada "fallback" que não alterna nada é
-  configuração que mente — quem a vê no painel do EasyPanel e a põe em `false`
-  acredita ter restringido alguma coisa, e não restringiu. Guardar o lugar para
-  um segundo provedor que não existe é a mesma arquitetura que este projeto
-  recusa em outros pontos; se um dia voltar, a flag volta junto com o código que
-  a lê. Os interruptores honestos continuam de pé: `LLM_ENABLED` e
-  `HELO_ENABLED`.
-  - ⚠️ **Sobra no painel do EasyPanel.** `Settings` roda com `extra="ignore"`,
-    então `OPENAI_API_KEY`, `ANTHROPIC_API_KEY` e `LLM_FALLBACK_ENABLED` que
-    ainda estejam lá **não derrubam o boot** — são só variáveis mortas. Vale
-    apagar, para não parecer que existe um segundo provedor. Quem tiver
-    `OPENAI_TEMPERATURE` com valor diferente de `0.3` precisa recriá-la como
-    `LLM_TEMPERATURE`: o nome antigo deixou de ser lido.
 - **Sete configurações que não alimentavam código nenhum** (`b30f75e`), todas
   com uso zero fora da própria definição: `llm_primary_provider` e
   `llm_fallback_provider` (o `llm.py` escolhe provedor por caminho de código
@@ -1037,6 +1117,7 @@ Datas em DD/MM/AAAA.
   `.env.example`, senão a mentira apenas mudaria de arquivo. Remover campo do
   `Settings` é seguro aqui porque o `model_config` usa `extra="ignore"`: se a
   variável continuar setada no EasyPanel, o boot ignora em vez de quebrar.
+
 - **O bloco SLA do `config.py`, que nunca alimentou o motor** (`3cf63d2`). Era o
   mais perigoso: o `config.py` anunciava `SLA_BUSINESS_HOURS_END=18:00`
   enquanto o `utils/sla.py` calcula com `_WORK_END = 17` — e o `sla.py` **não
@@ -1050,6 +1131,7 @@ Datas em DD/MM/AAAA.
   armadilha. A proteção real ficou no próprio `sla.py`: um comentário nas
   constantes explica por que são constantes e aponta para o documento de
   decisões, porque comentário de commit ninguém lê daqui a um ano.
+
 - **O pacote `app/worker/` e o Celery, que nunca executaram nada** (`3c4b433`).
   Não havia uma única chamada `.delay(` ou `.apply_async(` no repositório,
   nenhum processo Celery no `start.sh`, nenhum `beat_schedule`; as duas tarefas
@@ -1064,12 +1146,9 @@ Datas em DD/MM/AAAA.
   override de mypy no `pyproject.toml`. Nos documentos, a rotina periódica
   dentro da API deixa de aparecer como consequência de uma falta e passa a
   constar como **decisão**, com o motivo.
-- Duas linhas mortas (`0e1a917`): o comentário de `products.py` citando
-  `_check_ticket_access`, apagado no `7371bc7`, e o `!disabled &&` do
-  `FormDropdown` — o atributo `disabled` do `<button>` já impede o navegador de
-  disparar o clique, como a verificação por mutação do `f7945e0` mostrou.
 
 ### Desempenho
+
 - **As três listagens administrativas param de consultar por item** (`d765587`).
   `/dashboard/reports/technicians` fazia 2 consultas por técnico,
   `/groups` uma por grupo, e `/groups/{id}` mais `/groups/{id}/companies` duas
@@ -1084,11 +1163,6 @@ Datas em DD/MM/AAAA.
 
 ### CI
 
-- **Gate de auditoria de dependências**, com chave por **advisory** e não por
-  pacote. A primeira versão indexava por pacote e tinha um buraco que anulava o
-  gate: advisory novo num pacote já listado passava calado — justo o que ele
-  existe para pegar. Entrada sem justificativa e entrada **obsoleta** também
-  derrubam o CI.
 - **mypy zerado e ligado** (`846c6c4`). 28 erros em 12 arquivos viraram zero, e
   o CI passa a rodar `mypy app` depois do black — a ferramenta já estava no
   `requirements-dev` desde sempre e nunca tinha sido executada. Nenhum dos
@@ -1101,50 +1175,9 @@ Datas em DD/MM/AAAA.
   nada; o strip real vem do `str_strip_whitespace` do `AppBaseModel`, herdado.
   Decoração morta com o comportamento certo por outro caminho. De quebra sumiu
   a deprecation que sujava toda rodada de teste.
-- **Playwright em workflow separado, `e2e.yml`** (`d361e78`), acionado à mão
-  por enquanto; o agendamento noturno está comentado no arquivo e entra depois
-  de duas execuções manuais verdes. Sobe Postgres e Redis como services, roda
-  migrations e seeds, levanta o backend na 8001 e roda os 46 specs; relatório
-  sempre como artefato, log do backend quando falha. `APP_ENV=testing` porque a
-  suíte faz ~16 logins do mesmo IP contra o rate limit de 5/15 min; chaves JWT
-  efêmeras geradas no job — nenhum segredo do repositório. **As contas do e2e
-  não entram em `app.seeds`**, que roda no boot de produção: vivem em
-  `app.seeds_e2e`, que se recusa a rodar em produção antes de abrir sessão, com
-  teste provando que `app.seeds` não cria conta de teste nenhuma. A credencial
-  de técnico saiu do `helpers.ts` — nenhum spec a usava. k6 (Fase 3) segue
-  aguardando staging.
 
 ### Testes
 
-- Suíte do front em **96 arquivos e 1353 casos**.
-- **A régua de comparação de capturas é por tolerância declarada**, não byte a
-  byte: nenhum pixel difere mais que 8 unidades por canal, área afetada em ~1%
-  ou menos, e a diferença tem de estar **espalhada** — pixels concentrados são
-  elemento, não antialias. O comparador conta os nomes dos **dois lados**,
-  porque num contador só "nenhuma diferença" e "nenhum arquivo" são iguais.
-- A tabela de hashes do `VERSION.md` virou teste.
-- `campos-aria` passou a ter tabela **por capacidade declarada**: cada
-  implementador declara à mão se suporta `error`, `hint` ou ambos. Inferir
-  suporte do comportamento é espelho, e é o que a regra proíbe.
-- **`improve-message` ganhou os primeiros testes** (`40d4209`). É o único
-  endpoint que manda para fora texto que o técnico **ainda não publicou**, e não
-  tinha nenhum. Entraram sucesso, provedor fora do ar e recusa para cliente.
-- **Uma mutação sobrevivente revelou um teste que provava outra coisa**
-  (`174f45b`). O teste `test_o_mesmo_desafio_nao_serve_duas_vezes` passava, mas
-  mutar `mfa_challenge.consumir` para devolver sempre `True` **não quebrava
-  nada**: ele provava o antirreplay, não o uso único. Sequencialmente a segunda
-  tentativa já morre na leitura do desafio, porque o `DEL` da primeira apagou a
-  chave — **o valor de retorno do `DEL` só importa numa corrida**.
-  A correção exigiu duas coisas: um teste com `asyncio.gather` e dar ao Redis
-  falso um `await asyncio.sleep(0)` em toda operação. Sem ceder o event loop,
-  duas requisições sob `gather` correm sequencialmente e a corrida simplesmente
-  não acontece — o teste passaria pelo motivo errado. Vale como padrão: **mock
-  que não suspende esconde condição de corrida**.
-- **Sete testes de login precisaram declarar `mfa_enabled = False`**
-  (`174f45b`). Eles usam `MagicMock` como usuário, e `MagicMock().mfa_enabled` é
-  **truthy** — o login desviava para o segundo fator e a falha não dizia por
-  quê. Defeito do mock, não do código: em produção a coluna é
-  `NOT NULL DEFAULT false`.
 - **As agregações do dashboard passam a rodar contra PostgreSQL de verdade**
   (`fcd1f86`). As 26 construções só-Postgres do `dashboard.py` — `date_trunc`,
   `extract('isodow')`, `count(...).filter(...)` — não eram executadas contra
@@ -1162,6 +1195,7 @@ Datas em DD/MM/AAAA.
   Postgres à mão continua com a suíte verde. ⚠️ O `services: postgres:16` só
   entrou no `ci.yml` **depois** de existir consumidor — serviço sem consumidor
   seria a configuração que mente. Custo no CI: ~11 s.
+
 - **O domínio de empresa em `groups.py` sai do descoberto** (`470d56c`).
   Nenhum teste da suíte referenciava `Company`, `company_id` ou qualquer
   endpoint `/groups` — os únicos "company" em `tests/` eram `company_name` e
@@ -1182,6 +1216,179 @@ Datas em DD/MM/AAAA.
   `204` já garante corpo vazio) e foi trocada pelo status, que cai se a
   exclusão virar bloqueante ou informativa.
 
+## [v1.8.0] — 21/08/2026
+
+Fechada com `d8d074c`, o commit que publicou a versão no changelog do produto (`frontend/src/data/changelog.ts`).
+
+### Segurança
+
+- **Número de série passa a ser único por dono, não no sistema inteiro**
+  (`d5fa7a6`). A unicidade global recusava cadastro legítimo — empresas
+  diferentes têm aparelhos de mesmo número — e era um oráculo: o `409` contava
+  ao cliente que outra empresa tinha aquele serial. ⚠️ **Migration**
+  (`u1p2q3r4s5t6`), roda no boot: troca o índice único global por um composto
+  `(owner_id, serial_number)` mais um parcial `WHERE owner_id IS NULL` — em SQL,
+  `NULL` não conflita com `NULL`, e sem o parcial dois órfãos iguais passariam.
+  Upgrade seguro por construção (regra nova é mais fraca que a antiga), sem
+  backfill; o **downgrade pode falhar** se houver o mesmo serial em donos
+  distintos depois do upgrade. Testada em Postgres efêmero: upgrade, os quatro
+  casos de conflito, downgrade e upgrade de novo. **Furo aceito, por decisão:**
+  dois usuários da mesma empresa podem cadastrar o mesmo aparelho, cada um no
+  próprio escopo; a evolução para CNPJ depende de normalizar o campo. O `PATCH`
+  de staff valida o par final (dono, serial) — mover para um dono que já tem o
+  serial dá `409`.
+
+- **Chamado alheio deixa de denunciar que existe** (`7371bc7`). Para o cliente,
+  o chamado de outra pessoa passa a responder `404`, com o mesmo texto de um id
+  inexistente, em vez do `403` que confirmava a existência — com uma lista de
+  UUIDs dava para enumerar o sistema sem ler um chamado sequer. Mesmo formato
+  que os equipamentos ganharam no `637ad0f`. A regra estava copiada em **quatro
+  arquivos sob três nomes** (`_check_ticket_access` nos anexos,
+  `_get_ticket_or_403` no chat, mais quatro inlines em tickets e avaliações),
+  doze pontos ao todo; passa a existir `ensure_ticket_visible` em `app/utils/`.
+  O helper **não abre exceção para staff** — quem decide isso é o call site,
+  pela mesma razão do `2ad773c`: um helper que "sabe" que admin passa vira
+  passe-livre invisível no dia em que for chamado de um endpoint novo. Vale só
+  para cliente: técnico e admin já listam tudo sem escopo, então `404` entre
+  eles não fecharia nada e quebraria assumir/atender. Onde a recusa é de
+  **papel** o `403` fica — técnico na observação do cliente, staff que não
+  abriu o chamado na avaliação. Três achados que varredura de status HTTP não
+  mostra: `GET /attachments/{id}` vazava **duas vezes** (id do anexo e id do
+  chamado pai, três respostas distinguíveis) e agora responde sempre pelo
+  **anexo**; o **WebSocket** tinha o mesmo oráculo em código de fechamento
+  (`4003` contra `4004`) e passa a fechar `4004` nos dois casos com o mesmo
+  motivo; e `"Attachment not found"` não tinha tradução em `apiError.ts`, o que
+  entregaria ao cliente o toast cru em inglês — o bug que o `2db8dfa` consertou
+  para equipamento. Sem migration, sem backfill. 471 → 490 testes no backend.
+
+- O hash descartável do login passa a acompanhar `BCRYPT_ROUNDS` sozinho
+  (`a1bbd94`). Ligar a variável ao `pwd_context` na v1.7.0 deixou o knob vivo e
+  criou uma armadilha: o dummy seguia fixado em 12 por literal, então
+  `BCRYPT_ROUNDS=14` no painel fazia o e-mail desconhecido custar 486 ms e o
+  cadastrado 1777 ms — o oráculo de tempo reabria **maior** do que era antes de
+  ser fechado. O teste de paridade não pegava porque comparava contra o
+  contexto do processo de teste, que nunca tem a variável no ambiente. Agora o
+  import compara o custo embutido no literal com o do contexto e só regera
+  quando divergem: o caminho normal não paga bcrypt nenhum.
+
+- `POST`, `PATCH` e `DELETE /equipment/my*` passam a exigir perfil `client`
+  (`b1ab978`). Com qualquer autenticado, staff criava equipamento pertencente a
+  staff — o mesmo estado que os endpoints de staff recusam com `400`, invisível
+  a todo cliente e impossível de vincular a chamado. A **leitura** fica aberta
+  de propósito, para não esconder equipamento legado de quem virou staff depois
+  de ter sido cliente.
+
+### Adicionado
+
+- **Filtro de equipamentos sem dono** na listagem de Produtos (`3f3af90`),
+  fechando o outro lado do `3efb0cf`: atribuir dono já era possível, achar o
+  órfão para atribuir não era. Precisou ser parâmetro novo do endpoint
+  (`without_owner` em `GET /products/{id}/equipments`) e não filtro de tela —
+  a listagem é paginada no servidor, então peneirar o array recebido acharia só
+  o órfão que por acaso caiu na página aberta. A forma é um booleano e não um
+  filtro de dono genérico porque as duas coisas são ortogonais: "sem dono" é a
+  **ausência** de `owner_id` e não caberia num `owner_id=<uuid>` sem inventar um
+  valor sentinela; um filtro por dono específico, se fizer falta, entra ao lado
+  sem renegociar este contrato. O filtro **soma** ao escopo por dono do cliente
+  e nunca o substitui — cliente pedindo `without_owner=true` recebe lista vazia
+  em vez do parque órfão inteiro, e há teste para isso.
+
+- Seletor de dono no cadastro de equipamento pela tela de Produtos
+  (`3efb0cf`), fechando o ciclo do `51a9cb8`: o backend aceitava `owner_id`
+  desde então, mas o `productService` omitia o campo e o equipamento continuava
+  nascendo órfão. Novo componente `SearchSelect` com busca no servidor — um
+  dropdown pré-carregado quebraria em silêncio ao passar de 100 clientes, que é
+  o teto de `GET /users`. O campo aparece ao criar **e** ao editar, com
+  "— Sem dono —", o que também conserta os órfãos existentes um a um.
+
+### Alterado
+
+- **O tema segue a preferência do sistema operacional na primeira visita**
+  (`8542183`). Quem nunca escolheu recebia escuro fixo; agora vale
+  `prefers-color-scheme`. Escolha salva continua mandando, contra o sistema
+  inclusive. Duas consequências que a regra arrasta: a gravação saiu do efeito
+  de montagem para o `toggleTheme` — gravar ao montar congelaria o valor do SO
+  daquele dia e "seguir o sistema" valeria por uma visita só; e o script
+  anti-flash do `index.html`, que roda antes do bundle, teve de repetir a regra
+  nova à mão, senão quem usa o SO no claro veria flash escuro em toda visita.
+  Valor salvo estragado deixa de contar como escolha; sem `matchMedia` no
+  ambiente, o escuro segue sendo o padrão.
+
+### Corrigido
+
+- **Chip de SLA deixa de dizer "Vencido" para resposta já dada** (`32fc736`).
+  Chamado respondido no prazo e reaberto dias depois aparecia "Resposta:
+  Vencido" em âmbar — cor certa, letra errada: o chip comparava o prazo do
+  primeiro ciclo com o relógio sem saber que a resposta tinha sido dada, porque
+  `sla_first_response` não era enviado ao front. Passa a ser exposto no
+  `TicketResponse` (leitura, sem migration) e o `SlaChip` ganha `respondedAt`:
+  preenchido, diz "Respondido" e para o relógio. **Não** silencia pelo
+  `breached`: a flag só é recalculada em escrita, e um chamado vencido e
+  intocado chega com ela falsa — a contagem ao vivo é o único lugar que conta a
+  verdade sobre ele. O chip saiu da `TicketDetailPage` para `components/ui`,
+  com testes verificados por mutação. A lista de chamados tinha o mesmo bug na
+  barra de "1ª Resposta" (o chamado respondido pelo chat não sai de `open`) e
+  recebeu o mesmo tratamento. Prazo próprio para o ciclo reaberto fica como
+  melhoria futura.
+
+- `/onboarding` deixa de abrir para quem não tem onboarding (`77a8e9c`). A rota
+  estava sob o `AuthGuard` e fora do `OnboardingGuard`, então qualquer
+  autenticado abria a tela digitando a URL: o staff, que não tem onboarding
+  nenhum, e o cliente que já completou — para quem refazer significaria
+  sobrescrever dados de cadastro já revisados. Ficar fora do `OnboardingGuard`
+  era proposital (senão o redirecionamento apontaria para si mesmo); o que
+  faltava era o par, `OnboardingOnlyRoute`. Higiene de rota, só no front — a
+  porta que importava, o endpoint, já foi fechada no `b1ab978`.
+
+- **A primeira resposta do SLA passa a exigir uma fala ao cliente** (`230d670`).
+  `sla_first_response` era carimbado sob `old_status == open`, então "primeira
+  resposta" queria dizer "o chamado saiu do estado inicial" — e, como o mapa de
+  transições só permite `open → in_progress` e `open → cancelled`, na prática
+  "alguém assumiu ou cancelou". Duas distorções opostas conviviam: o técnico que
+  respondia pelo chat sem mexer no status não registrava resposta nenhuma
+  (`chat.py` não tocava no SLA), enquanto atribuir, assumir ou **cancelar** um
+  chamado registrava resposta sem uma palavra ter sido dita. O card de violação
+  de resposta e o tempo médio de primeira resposta mediam o tempo até alguém
+  clicar. A regra nova não olha para status nenhum: marca a primeira mensagem de
+  chat de quem **não é o autor** do chamado — o mesmo critério que o
+  `_notify_other_party` já usa para decidir a quem notificar — e a resolução como
+  rede de segurança, já que a nota de resolução é texto que o cliente lê. Sem
+  migration e **sem backfill**: a regra decide quando gravar, não reescreve o que
+  já está gravado. Desenho e levantamento dos 13 caminhos em
+  `docs/superpowers/specs/2026-08-20-primeira-resposta-sla-design.md`.
+  ⚠️ **O indicador piora no dia do deploy, e essa é a intenção.**
+
+- Violação de primeira resposta que se apagava sozinha (`230d670`). Nos três
+  pontos, o carimbo vinha antes do `check_breaches`, que só avalia o prazo
+  enquanto `sla_first_response` é nulo — o chamado atendido com três dias de
+  atraso saía com `sla_response_breach = False`, e a condição viva do dashboard,
+  que também exige o campo nulo, perdia a violação do outro lado.
+  `register_first_response` avalia antes de carimbar.
+
+### Removido
+
+- Duas linhas mortas (`0e1a917`): o comentário de `products.py` citando
+  `_check_ticket_access`, apagado no `7371bc7`, e o `!disabled &&` do
+  `FormDropdown` — o atributo `disabled` do `<button>` já impede o navegador de
+  disparar o clique, como a verificação por mutação do `f7945e0` mostrou.
+
+### CI
+
+- **Playwright em workflow separado, `e2e.yml`** (`d361e78`), acionado à mão
+  por enquanto; o agendamento noturno está comentado no arquivo e entra depois
+  de duas execuções manuais verdes. Sobe Postgres e Redis como services, roda
+  migrations e seeds, levanta o backend na 8001 e roda os 46 specs; relatório
+  sempre como artefato, log do backend quando falha. `APP_ENV=testing` porque a
+  suíte faz ~16 logins do mesmo IP contra o rate limit de 5/15 min; chaves JWT
+  efêmeras geradas no job — nenhum segredo do repositório. **As contas do e2e
+  não entram em `app.seeds`**, que roda no boot de produção: vivem em
+  `app.seeds_e2e`, que se recusa a rodar em produção antes de abrir sessão, com
+  teste provando que `app.seeds` não cria conta de teste nenhuma. A credencial
+  de técnico saiu do `helpers.ts` — nenhum spec a usava. k6 (Fase 3) segue
+  aguardando staging.
+
+### Testes
+
 - `FilterSelect`, `FormDropdown` e `ThemeContext` saem do descoberto
   (`f7945e0`). Os três tinham lógica real e nenhum teste; como o Vitest é gate
   do CI desde `1583b8b`, a ausência não aparecia como risco, aparecia como
@@ -1195,20 +1402,6 @@ Datas em DD/MM/AAAA.
 
 ### Documentação
 
-- Checkpoints 1 a 4 da adoção do design system, em
-  `docs/design-system-migration/`, cada um com a medição colada e não o resumo
-  dela. O Checkpoint 4 fecha com a catraca em **2 pares e 1 cor cheia** (de 49
-  e 28 antes da Fase 11), 22 fichas da §29 e 50 fotos.
-- Duas regras de verificação registradas em `COMPARTILHADO/DECISOES.md`:
-  **"mecanismo certo, conjunto com buraco"** (quatro ocorrências no mesmo dia,
-  em contextos sem relação) e **"verificação que passa por não ter medido"** —
-  `npx tsc --noEmit` compilava **zero** arquivos de `src/`, porque o
-  `tsconfig.json` do front é arquivo-solução. Use `npm run typecheck`
-  (`tsc -b`).
-- O checklist de deploy (`help-deploy-check`) descrevia `GET /api/v1/health`
-  como "versão e env certos" — a versão saíra na rodada anterior e o readiness
-  mudou o contrato de novo. Agora descreve os dois contratos e o que um
-  `auto_close.last_success` parado quer dizer.
 - Guia de desenvolvimento local (`f27f38c`, `3485092`) e mini-Redis de dev em
   `backend/scripts/` (`5fc7562`); skill de test review atualizada sobre o
   Vitest no CI (`b1f10b7`).

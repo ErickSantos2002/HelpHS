@@ -119,9 +119,16 @@ Use **`npm run typecheck`** (que é `tsc -b`). Registrado em `DECISOES.md`.
 ### O que foi ao ar
 
 - **v1.13.0**, com a interface alinhada ao design system nas 22 telas.
-- **Justificativa obrigatória** ao resolver chamado fora do prazo.
 - Checkpoint 4 fechado pelo portão de evidência: catraca, fichas da §29 e as 50
   fotos com a API interceptada.
+
+> **Correção deste registro.** Eu tinha escrito aqui que a *justificativa
+> obrigatória ao resolver fora do prazo* saiu junto. **Não saiu.** O commit
+> (`105878d`) é de 09/09, mas **não é ancestral de `5e7712b`** — a v1.13.0 foi
+> declarada sem ele. O erro veio de datar por dia em vez de por ancestralidade,
+> que é a mesma armadilha que o fatiamento do `Changelog.md` desfez hoje:
+> commit feito em branch tem data antes de estar na árvore. Ele consta como
+> não publicado.
 
 ### O Checkpoint 4, em três pernas
 
