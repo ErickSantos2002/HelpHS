@@ -244,6 +244,51 @@ describe("resolveTicket", () => {
   });
 });
 
+describe("justificativa de SLA violado no corpo", () => {
+  // O backend exige `sla_breach_justification` para resolver chamado fora do
+  // prazo. Quando ela não existe, o corpo tem de ficar como sempre foi: uma
+  // chave `undefined` a mais é invisível para o `toHaveBeenCalledWith`, e por
+  // isso os casos de ausência olham a chave, e não a igualdade.
+  it("resolveTicket leva a justificativa quando ela existe", async () => {
+    mockPost.mockResolvedValue({ data: { ...ticket, status: "resolved" } });
+
+    await resolveTicket("t1", "Placa substituída.", "Peça importada atrasou.");
+
+    expect(mockPost).toHaveBeenLastCalledWith("/tickets/t1/resolve", {
+      resolution_note: "Placa substituída.",
+      sla_breach_justification: "Peça importada atrasou.",
+    });
+  });
+
+  it("sem justificativa, o corpo do resolve não ganha a chave", async () => {
+    mockPost.mockResolvedValue({ data: { ...ticket, status: "resolved" } });
+
+    await resolveTicket("t1", "Placa substituída.");
+
+    expect(mockPost.mock.lastCall?.[1]).not.toHaveProperty("sla_breach_justification");
+  });
+
+  it("updateTicketStatus leva a justificativa quando ela existe", async () => {
+    mockPatch.mockResolvedValue({ data: ticket });
+
+    await updateTicketStatus("t1", "resolved", undefined, "Peça importada atrasou.");
+
+    expect(mockPatch).toHaveBeenLastCalledWith("/tickets/t1/status", {
+      status: "resolved",
+      comment: undefined,
+      sla_breach_justification: "Peça importada atrasou.",
+    });
+  });
+
+  it("sem justificativa, o corpo do status não ganha a chave", async () => {
+    mockPatch.mockResolvedValue({ data: ticket });
+
+    await updateTicketStatus("t1", "in_progress", "Iniciando atendimento");
+
+    expect(mockPatch.mock.lastCall?.[1]).not.toHaveProperty("sla_breach_justification");
+  });
+});
+
 describe("reopenTicket", () => {
   it("envia o motivo da reabertura para o endpoint do chamado", async () => {
     mockPost.mockResolvedValue({ data: { ...ticket, status: "in_progress" } });

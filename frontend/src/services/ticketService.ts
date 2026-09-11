@@ -85,11 +85,15 @@ export async function getTicketHistory(id: string): Promise<TicketHistoryListRes
 export async function updateTicketStatus(
   id: string,
   status: string,
-  comment?: string
+  comment?: string,
+  sla_breach_justification?: string,
 ): Promise<Ticket> {
+  // A justificativa só vai quando existe: o backend a exige para resolver
+  // fora do prazo, e sem ela o corpo fica como sempre foi.
   const { data } = await api.patch<Ticket>(`/tickets/${id}/status`, {
     status,
     comment,
+    ...(sla_breach_justification ? { sla_breach_justification } : {}),
   });
   return data;
 }
@@ -171,9 +175,14 @@ export async function updateClientObservation(
   return data;
 }
 
-export async function resolveTicket(id: string, resolution_note: string): Promise<Ticket> {
+export async function resolveTicket(
+  id: string,
+  resolution_note: string,
+  sla_breach_justification?: string,
+): Promise<Ticket> {
   const { data } = await api.post<Ticket>(`/tickets/${id}/resolve`, {
     resolution_note,
+    ...(sla_breach_justification ? { sla_breach_justification } : {}),
   });
   return data;
 }

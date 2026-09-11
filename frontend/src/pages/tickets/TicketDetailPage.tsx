@@ -53,6 +53,13 @@ import { getTicketSurvey, submitSurvey, type Survey } from "../../services/surve
 import { getTechnicians, type UserSummary } from "../../services/userService";
 import { getTags, setTicketTags, type Tag } from "../../services/tagService";
 import { TICKET_TRANSITIONS } from "../../lib/ticketConstants";
+import {
+  CAMPO_JUSTIFICATIVA,
+  LIMITE_JUSTIFICATIVA,
+  avisoDePrazo,
+  prazosDoErro,
+  prazosPelasMarcas,
+} from "../../lib/slaJustificativa";
 
 // ── Constants ─────────────────────────────────────────────────
 
@@ -68,6 +75,7 @@ const FIELD_LABEL: Record<string, string> = {
   equipment_id: "Equipamento alterado",
   technician_notes: "Notas internas atualizadas",
   client_observation: "Observação atualizada",
+  [CAMPO_JUSTIFICATIVA]: "Justificativa do SLA violado",
 };
 
 /*
@@ -205,8 +213,18 @@ function ActivityEntry({ entry }: { entry: TicketHistory }) {
           </div>
         )}
 
+        {/* Justificativa do SLA violado: o texto É a entrada. O comentário que o
+            backend grava junto só repete o rótulo, e por isso não é desenhado. */}
+        {entry.field === CAMPO_JUSTIFICATIVA && entry.new_value && (
+          <p className="mt-1.5 whitespace-pre-line break-words text-xs text-conteudo-muted bg-surface-elevated/60 rounded-lg px-3 py-2 border border-borda/30">
+            {entry.new_value}
+          </p>
+        )}
+
         {/* Comentário geral (status manual com observação, resolução, etc.) */}
-        {entry.comment && entry.field !== "assignee_id" && (
+        {entry.comment &&
+          entry.field !== "assignee_id" &&
+          entry.field !== CAMPO_JUSTIFICATIVA && (
           <p className="mt-1.5 text-xs text-conteudo-muted italic bg-surface-elevated/60 rounded-lg px-3 py-2 border border-borda/30">
             "{entry.comment}"
           </p>
@@ -737,6 +755,31 @@ export default function TicketDetailPage() {
   const [statusComment, setStatusComment] = useState("");
   const [statusLoading, setStatusLoading] = useState(false);
 
+  // Justificativa de SLA violado (`105878d`). O campo aparece quando o
+  // servidor tem certeza de que ela é exigida: marca de violação ligada, ou o
+  // 422 dele, que chega com os prazos que passaram (lib/slaJustificativa).
+  const [justificativa, setJustificativa] = useState("");
+  const [prazosDo422, setPrazosDo422] = useState<string[] | null>(null);
+  const campoJustificativa = useRef<HTMLTextAreaElement>(null);
+
+  const prazosPorMarca = ticket ? prazosPelasMarcas(ticket) : [];
+  // `prazosDo422` pode vir vazio — o servidor recusou sem dizer qual prazo —, e
+  // o campo continua exigido. Por isso a pergunta é "veio o 422?", e não "há
+  // prazo na lista?". A lista das MARCAS pode ser parcial: elas só se
+  // recalculam em escrita, e o backend pode cobrar um prazo a mais. O aviso
+  // diz a verdade, só não necessariamente toda.
+  const exigeJustificativa = prazosDo422 !== null || prazosPorMarca.length > 0;
+  const prazosVencidos = prazosDo422?.length ? prazosDo422 : prazosPorMarca;
+  const faltaJustificativa = exigeJustificativa && !justificativa.trim();
+
+  // A rota não tem `key`: trocar de chamado (pelo sino, por exemplo) reaproveita
+  // esta instância. Sem isto, o motivo escrito num chamado iria no próximo — e
+  // um chamado sem violação entraria no relatório de SLA violado.
+  useEffect(() => {
+    setJustificativa("");
+    setPrazosDo422(null);
+  }, [id]);
+
   const [newAssignee, setNewAssignee] = useState("");
   const [assignLoading, setAssignLoading] = useState(false);
 
@@ -820,19 +863,53 @@ export default function TicketDetailPage() {
         .catch(() => {});
   }, [isStaff]);
 
+  // Quando o 422 revela o campo, o foco vai para ele: a pessoa acabou de
+  // clicar em confirmar, e o que falta está logo ali.
+  useEffect(() => {
+    if (prazosDo422 !== null) campoJustificativa.current?.focus();
+  }, [prazosDo422]);
+
+  function limparJustificativa() {
+    setJustificativa("");
+    setPrazosDo422(null);
+  }
+
+  /**
+   * O 422 da justificativa não vira toast: vira o campo, no próprio modal.
+   * Antes, o toast mostrava o nome técnico do campo por 4 s e o modal ficava
+   * sem ter onde escrever — cada nova tentativa devolvia o mesmo 422.
+   */
+  function pedeJustificativa(err: unknown): boolean {
+    const prazos = prazosDoErro(err);
+    if (prazos === null) return false;
+    setPrazosDo422(prazos);
+    return true;
+  }
+
   async function handleStatusChange() {
     if (!ticket || !newStatus) return;
     setStatusLoading(true);
     try {
-      const updated = await updateTicketStatus(ticket.id, newStatus, statusComment || undefined);
+      const updated = await updateTicketStatus(
+        ticket.id,
+        newStatus,
+        statusComment || undefined,
+        // Só vai o que está exigido na tela: resolver, com o campo à vista.
+        // Texto que ficou no campo não vai de carona numa troca para outro
+        // status.
+        newStatus === "resolved" && exigeJustificativa
+          ? justificativa.trim() || undefined
+          : undefined,
+      );
       setTicket(updated);
       setHistory((await getTicketHistory(ticket.id)).items);
       setStatusModal(false);
       setNewStatus("");
       setStatusComment("");
+      limparJustificativa();
       toast.success("Status atualizado com sucesso.");
     } catch (err) {
-      toastApiError(err, "Não foi possível alterar o status.");
+      if (!pedeJustificativa(err)) toastApiError(err, "Não foi possível alterar o status.");
     } finally {
       setStatusLoading(false);
     }
@@ -842,14 +919,20 @@ export default function TicketDetailPage() {
     if (!ticket || !resolveNote.trim()) return;
     setResolveLoading(true);
     try {
-      const updated = await resolveTicket(ticket.id, resolveNote.trim());
+      const updated = await resolveTicket(
+        ticket.id,
+        resolveNote.trim(),
+        // Só vai o que está exigido na tela: texto que sobrou não sai no corpo.
+        exigeJustificativa ? justificativa.trim() || undefined : undefined,
+      );
       setTicket(updated);
       setHistory((await getTicketHistory(ticket.id)).items);
       setResolveModal(false);
       setResolveNote("");
+      limparJustificativa();
       toast.success("Ticket concluído com sucesso.");
     } catch (err) {
-      toastApiError(err, "Não foi possível concluir o ticket.");
+      if (!pedeJustificativa(err)) toastApiError(err, "Não foi possível concluir o ticket.");
     } finally {
       setResolveLoading(false);
     }
@@ -1007,6 +1090,36 @@ export default function TicketDetailPage() {
   const transitionOptions = transitions.map((s) => ({ value: s, label: rotuloDeStatus(s) }));
   const assignedTech = ticket.assignee_name ?? (ticket.assignee_id ? "Técnico" : null);
   const slaBreach = ticket.sla_response_breach || ticket.sla_resolve_breach;
+
+  /** O aviso e o campo, iguais nos dois caminhos que resolvem o chamado. */
+  const blocoJustificativa = (anunciar: boolean) => (
+    <>
+      {/* Região viva só quando o aviso CHEGA. Com o modal já aberto com ele,
+          o aviso é conteúdo, e anunciá-lo leria a consequência fora de ordem
+          (emenda E12, no `Alert`). */}
+      <div id="aviso-justificativa-sla">
+        <Alert variant="warning" live={anunciar}>
+          {avisoDePrazo(prazosVencidos)}
+        </Alert>
+      </div>
+      <Textarea
+        ref={campoJustificativa}
+        id="justificativa-sla"
+        // O aviso entra na descrição do campo. No caminho do 422 o foco vem
+        // direto para cá, e região viva inserida já preenchida não tem anúncio
+        // garantido: quem chega pelo foco precisa ouvir o porquê. Este
+        // `aria-describedby` substitui o do Textarea, então a dica é somada à mão.
+        aria-describedby="aviso-justificativa-sla justificativa-sla-dica"
+        label="Motivo do atraso *"
+        hint="Fica registrada no histórico do chamado. Escreva como se o cliente fosse ler. Até 2.000 caracteres."
+        rows={3}
+        required
+        maxLength={LIMITE_JUSTIFICATIVA}
+        value={justificativa}
+        onChange={(e) => setJustificativa(e.target.value)}
+      />
+    </>
+  );
 
   const visibleHistory =
     user?.role === "client"
@@ -1781,9 +1894,14 @@ export default function TicketDetailPage() {
       <Modal
         open={statusModal}
         onClose={() => {
+          // Fechar com a resposta a caminho engoliria um 422: ele chegaria com
+          // o modal fechado, sem toast e sem campo. O Cancelar já trava no
+          // loading; o X, o Esc e o fundo passam a travar também.
+          if (statusLoading) return;
           setStatusModal(false);
           setNewStatus("");
           setStatusComment("");
+          limparJustificativa();
         }}
         title="Alterar status"
       >
@@ -1794,10 +1912,19 @@ export default function TicketDetailPage() {
             placeholder="Selecione"
             value={newStatus}
             onChange={(e) => setNewStatus(e.target.value)}
+            disabled={statusLoading}
           />
+          {newStatus === "resolved" && exigeJustificativa && blocoJustificativa(true)}
           <Textarea
             label="Comentário (opcional)"
-            placeholder="Motivo da alteração…"
+            // Com o "Motivo do atraso" logo acima, "motivo" aqui induziria a
+            // escrever a justificativa no lugar errado. E este comentário o
+            // cliente VÊ no histórico dele; a justificativa, a tela dele não mostra.
+            placeholder={
+              newStatus === "resolved" && exigeJustificativa
+                ? "Observação que o cliente verá no histórico…"
+                : "Motivo da alteração…"
+            }
             rows={3}
             value={statusComment}
             onChange={(e) => setStatusComment(e.target.value)}
@@ -1806,12 +1933,19 @@ export default function TicketDetailPage() {
         <ModalFooter>
           <Button
             variant="secondary"
-            onClick={() => setStatusModal(false)}
+            onClick={() => {
+              setStatusModal(false);
+              limparJustificativa();
+            }}
             disabled={statusLoading}
           >
             Cancelar
           </Button>
-          <Button onClick={handleStatusChange} loading={statusLoading} disabled={!newStatus}>
+          <Button
+            onClick={handleStatusChange}
+            loading={statusLoading}
+            disabled={!newStatus || (newStatus === "resolved" && faltaJustificativa)}
+          >
             Confirmar
           </Button>
         </ModalFooter>
@@ -1960,8 +2094,12 @@ export default function TicketDetailPage() {
       <Modal
         open={resolveModal}
         onClose={() => {
+          // Mesma trava do Alterar status: sem ela, um 422 que chegasse com o
+          // modal fechado sumiria sem toast e sem campo.
+          if (resolveLoading) return;
           setResolveModal(false);
           setResolveNote("");
+          limparJustificativa();
         }}
         title="Concluir ticket"
       >
@@ -1978,16 +2116,24 @@ export default function TicketDetailPage() {
             value={resolveNote}
             onChange={(e) => setResolveNote(e.target.value)}
           />
+          {exigeJustificativa && blocoJustificativa(prazosDo422 !== null)}
         </div>
         <ModalFooter>
           <Button
             variant="secondary"
-            onClick={() => setResolveModal(false)}
+            onClick={() => {
+              setResolveModal(false);
+              limparJustificativa();
+            }}
             disabled={resolveLoading}
           >
             Cancelar
           </Button>
-          <Button onClick={handleResolve} loading={resolveLoading} disabled={!resolveNote.trim()}>
+          <Button
+            onClick={handleResolve}
+            loading={resolveLoading}
+            disabled={!resolveNote.trim() || faltaJustificativa}
+          >
             Confirmar conclusão
           </Button>
         </ModalFooter>
