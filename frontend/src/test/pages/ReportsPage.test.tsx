@@ -124,11 +124,18 @@ const RELATORIO: reportService.ReportData = {
   ],
   reopened_count: 1,
   reopen_rate: 2,
+  sla_justifications: [],
   comparison: null,
 };
 
-async function montar() {
-  vi.mocked(reportService.getReports).mockResolvedValue(RELATORIO);
+/**
+ * `montar()` continua sem argumento para os casos que já existiam; o override
+ * serve às seções que só aparecem com dado — a de justificativas de SLA é
+ * desenhada só quando houve violação no período, então o fixture padrão a
+ * mantém fora da tela de propósito.
+ */
+async function montar(ajuste: Partial<reportService.ReportData> = {}) {
+  vi.mocked(reportService.getReports).mockResolvedValue({ ...RELATORIO, ...ajuste });
   vi.mocked(reportService.getTechnicianListReport).mockResolvedValue({
     period_days: 30,
     technicians: [],
@@ -432,5 +439,143 @@ describe("ReportsPage — as fontes únicas", () => {
     expect(ativa.className).toContain("bg-action");
     expect(ativa.className).toContain("text-on-primary");
     expect(ativa.className).not.toContain("text-white");
+  });
+});
+
+/**
+ * A seção que responde POR QUÊ.
+ *
+ * O relatório já dizia quantos chamados estouraram o prazo — cartão de
+ * conformidade e gráfico por prioridade. Nenhum dos dois diz a causa, e cinco
+ * atrasos por "peça em falta" pedem providência oposta a cinco por "aberto na
+ * sexta às 17h", com o mesmo número nos dois casos.
+ *
+ * O que estes casos prendem é isto: **o motivo escrito chega inteiro à tela**,
+ * a tela **não decide** quem violou (a lista vem pronta do servidor), e o corte
+ * de 200 do `_build_report` é DITO em vez de silencioso.
+ */
+describe("ReportsPage — SLA violado, o motivo do atraso", () => {
+  const JUSTIFICATIVA = {
+    ticket_id: "t9",
+    protocol: "HS-2026-0099",
+    title: "Balança fora de calibração",
+    priority: "high",
+    resolved_at: "2026-09-05T18:30:00Z",
+    assignee_name: "Carlos",
+    justification:
+      "Peça de reposição em falta no estoque do fornecedor; o prazo correu enquanto o pedido estava em trânsito.",
+  };
+
+  /*
+    Período sem violação nenhuma não desenha casca vazia — a guarda fica no
+    pai, como nas outras seções desta tela. Uma tabela com "nenhum registro" no
+    meio do relatório se lê como coisa quebrada, não como boa notícia.
+  */
+  it("não aparece quando ninguém estourou prazo no período", async () => {
+    await montar({ sla_justifications: [] });
+
+    expect(
+      screen.queryByRole("heading", { name: /SLA violado/ }),
+    ).not.toBeInTheDocument();
+  });
+
+  it("mostra o motivo escrito, inteiro, com protocolo e responsável", async () => {
+    await montar({ sla_justifications: [JUSTIFICATIVA] });
+
+    expect(
+      screen.getByRole("heading", { name: "SLA violado — motivo do atraso" }),
+    ).toBeInTheDocument();
+    expect(screen.getByText("HS-2026-0099")).toBeInTheDocument();
+    expect(screen.getByText("Carlos")).toBeInTheDocument();
+    /*
+      O texto INTEIRO, e não um prefixo. O motivo é o conteúdo desta seção: a
+      versão cortada em "Peça de reposição em falta no estoq…" não serve a
+      ninguém, e um `slice()` na tela passaria despercebido num caso que só
+      procurasse o começo da frase.
+    */
+    expect(screen.getByText(JUSTIFICATIVA.justification)).toBeInTheDocument();
+
+    /*
+      A data de resolução sai, e o caso NÃO prende o horário: o
+      `toLocaleDateString` usa o fuso da máquina, e prender "15:30" faria a
+      suíte verde aqui e vermelha num CI em UTC — um caso que reprova pela
+      máquina, não pelo código. O que importa é que a coluna tenha data em vez
+      do traço de ausente.
+    */
+    const linha = screen.getByText("HS-2026-0099").closest("tr") as HTMLElement;
+    expect(within(linha).getByText(/\d{2}\/\d{2}\/2026/)).toBeInTheDocument();
+  });
+
+  it("a prioridade sai pelo rótulo, e não pelo valor cru do banco", async () => {
+    await montar({ sla_justifications: [JUSTIFICATIVA] });
+
+    const linha = screen.getByText("HS-2026-0099").closest("tr") as HTMLElement;
+    expect(within(linha).getByText("Alta")).toBeInTheDocument();
+    expect(within(linha).queryByText("high")).not.toBeInTheDocument();
+  });
+
+  /*
+    `_build_report` corta em 200, ordenados do mais recente para o mais antigo.
+    Corte silencioso lido como cobertura total é o que faz alguém decidir sobre
+    um número que não é o número — então ele é dito, e só quando acontece.
+  */
+  it("diz que está mostrando as 200 mais recentes quando bate no teto", async () => {
+    const duzentos = Array.from({ length: 200 }, (_, i) => ({
+      ...JUSTIFICATIVA,
+      ticket_id: `t${i}`,
+      protocol: `HS-2026-${String(i).padStart(4, "0")}`,
+    }));
+    await montar({ sla_justifications: duzentos });
+
+    expect(
+      screen.getByText("mostrando as 200 mais recentes do período"),
+    ).toBeInTheDocument();
+  });
+
+  it("não fala em teto quando a lista cabe inteira", async () => {
+    await montar({ sla_justifications: [JUSTIFICATIVA] });
+
+    expect(
+      screen.queryByText(/200 mais recentes/),
+    ).not.toBeInTheDocument();
+  });
+
+  /*
+    A tela recebe a lista pronta e não recalcula prazo: ela não tem a pausa
+    acumulada (`sla_total_paused_ms`), então uma conta local acharia vencido o
+    que não está — e um falso positivo aqui põe no relatório um chamado que não
+    violou nada. Este caso prende o desenho: o que o servidor mandou é o que
+    aparece, sem filtro por data do lado de cá.
+  */
+  it("desenha o que o servidor mandou, sem filtrar por data na tela", async () => {
+    await montar({
+      sla_justifications: [
+        JUSTIFICATIVA,
+        // Resolvido "no futuro" e sem responsável: dado que qualquer conta
+        // local de prazo descartaria. A tela não conta — ela mostra.
+        {
+          ...JUSTIFICATIVA,
+          ticket_id: "t10",
+          protocol: "HS-2026-0100",
+          resolved_at: null,
+          assignee_name: null,
+          justification: "Cliente não respondeu à solicitação de acesso remoto.",
+        },
+      ],
+    });
+
+    expect(screen.getByText("HS-2026-0099")).toBeInTheDocument();
+    expect(screen.getByText("HS-2026-0100")).toBeInTheDocument();
+    expect(
+      screen.getByText("Cliente não respondeu à solicitação de acesso remoto."),
+    ).toBeInTheDocument();
+
+    /*
+      Sem responsável e sem data de resolução, as duas células mostram o traço.
+      Célula genuinamente vazia e célula com valor ausente são a mesma coisa
+      olhando a tela — e a primeira se lê como tabela quebrada.
+    */
+    const semDono = screen.getByText("HS-2026-0100").closest("tr") as HTMLElement;
+    expect(within(semDono).getAllByText("—")).toHaveLength(2);
   });
 });
