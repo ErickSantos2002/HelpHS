@@ -227,6 +227,36 @@ def violacao_ao_resolver(ticket: Ticket, now: datetime) -> tuple[bool, bool]:
     return resposta, resolucao
 
 
+def marca_violacao_ao_resolver(ticket: Ticket, now: datetime) -> None:
+    """Carimba as marcas de violação no instante em que o chamado é resolvido.
+
+    Existe porque `check_breaches` não alcança este momento: ele pula o teste de
+    resolução quando o chamado está em estado terminal, e os dois caminhos que
+    resolvem já colocaram o status em `resolved` quando o chamam. Chamado que
+    passou do prazo e ficou **quieto** até ser resolvido chegava com a marca em
+    `False` — e o indicador agregado, que conta a marca, o dava como cumprido.
+
+    **Só acrescenta, nunca desmarca.** Marca já ligada por outro caminho fica
+    ligada, mesmo que a conta pela data discorde: desfazer conclusão alheia é
+    outra decisão, e não esta.
+
+    Por que não consertar o `check_breaches` em vez desta função: a guarda de
+    terminal lá existe para que chamado fechado pare de acumular violação a cada
+    escrita. Tirá-la marcaria chamado encerrado em qualquer atualização futura,
+    que é um problema maior do que o resolvido.
+
+    A conta é a de `violacao_ao_resolver`, com o mesmo deslocamento de pausa do
+    resto do sistema — a mesma que a exigência de justificativa já usa, para que
+    exigir o motivo e contar a violação nunca discordem.
+    """
+    resposta_violada, resolucao_violada = violacao_ao_resolver(ticket, now)
+
+    if resposta_violada:
+        ticket.sla_response_breach = True
+    if resolucao_violada:
+        ticket.sla_resolve_breach = True
+
+
 def check_breaches(ticket: Ticket, now: datetime) -> None:
     """
     Update sla_response_breach and sla_resolve_breach.
