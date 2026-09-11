@@ -1,6 +1,7 @@
 import { describe, it, expect, vi, beforeEach, afterEach } from "vitest";
 import {
   getChatMessages,
+  sendMessageWithLibraryFile,
   suggestReply,
   summarizeConversation,
   improveMessage,
@@ -38,6 +39,15 @@ const mensagem: ChatMessage = {
   sender_role: "admin",
   content: "Bom dia, já estou olhando o chamado.",
   is_system: false,
+  // Sem anexo por padrão: é o caso comum, e a fixture o diz por escrito em
+  // vez de omitir. O tipo passou a declarar os quatro campos quando o front
+  // finalmente foi desenhar o anexo da biblioteca, e o `tsc -b` apontou esta
+  // fixture na hora -- ela descrevia uma resposta que o servidor não manda
+  // mais desde o PR #6.
+  library_file_id: null,
+  library_file_name: null,
+  library_file_mime: null,
+  library_file_size: null,
   is_ai: false,
   read_at: null,
   created_at: "2026-09-01T12:00:00Z",
@@ -273,5 +283,55 @@ describe("buildWsUrl", () => {
 
   it("aponta para o chamado informado", () => {
     expect(buildWsUrl("9f2c-outro-chamado")).toContain("/ws/tickets/9f2c-outro-chamado?");
+  });
+});
+
+describe("sendMessageWithLibraryFile", () => {
+  /**
+   * Por que este caminho existe ao lado do WebSocket, e o que estes casos
+   * prendem: o manipulador do WS lê **só** `content` e descarta o resto do
+   * payload. Um `library_file_id` mandado por lá sumiria em silêncio -- a
+   * mensagem chegaria sem o anexo e ninguém veria erro nenhum.
+   */
+  it("manda o id do arquivo no corpo, junto do texto", async () => {
+    mockPost.mockResolvedValue({ data: mensagem });
+
+    await sendMessageWithLibraryFile("t1", "Segue o manual.", "lib-7");
+
+    expect(mockPost).toHaveBeenCalledWith("/tickets/t1/messages", {
+      content: "Segue o manual.",
+      library_file_id: "lib-7",
+    });
+  });
+
+  it("usa o chamado informado no caminho, e não um fixo", async () => {
+    mockPost.mockResolvedValue({ data: mensagem });
+
+    await sendMessageWithLibraryFile("outro-chamado", "oi", "lib-7");
+
+    expect(mockPost.mock.calls[0][0]).toBe("/tickets/outro-chamado/messages");
+  });
+
+  it("devolve a mensagem que o servidor gravou, e não a que foi enviada", async () => {
+    // O servidor preenche `library_file_name`, `_mime` e `_size` a partir do
+    // item. Devolver o que foi mandado deixaria a bolha sem nome de arquivo.
+    mockPost.mockResolvedValue({
+      data: { ...mensagem, library_file_id: "lib-7", library_file_name: "manual.pdf" },
+    });
+
+    const gravada = await sendMessageWithLibraryFile("t1", "Segue.", "lib-7");
+
+    expect(gravada.library_file_name).toBe("manual.pdf");
+  });
+
+  it("propaga o 422 do item interno sem engolir", async () => {
+    // A recusa é da API, e a razão dela precisa chegar a quem anexou: o
+    // técnico tem de entender por que aquele arquivo não pode ir.
+    const recusa = Object.assign(new Error("422"), {
+      response: { status: 422, data: { detail: "Este arquivo da biblioteca é de uso interno" } },
+    });
+    mockPost.mockRejectedValue(recusa);
+
+    await expect(sendMessageWithLibraryFile("t1", "Segue.", "lib-7")).rejects.toBe(recusa);
   });
 });

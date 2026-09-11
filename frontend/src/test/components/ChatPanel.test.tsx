@@ -178,6 +178,15 @@ function mensagem(over: Partial<ChatMessage> = {}): ChatMessage {
     content: "conteúdo",
     is_system: false,
     is_ai: false,
+    // Sem anexo por padrão: é o caso comum, e a fixture o diz por escrito em
+    // vez de omitir. O tipo passou a declarar os quatro campos quando o front
+    // finalmente foi desenhar o anexo da biblioteca, e o `tsc -b` apontou esta
+    // fixture na hora -- ela descrevia uma resposta que o servidor não manda
+    // mais desde o PR #6.
+    library_file_id: null,
+    library_file_name: null,
+    library_file_mime: null,
+    library_file_size: null,
     read_at: null,
     created_at: "2026-09-08T12:00:00.000Z",
     ...over,
