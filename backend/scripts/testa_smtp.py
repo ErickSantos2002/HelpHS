@@ -32,6 +32,7 @@ provedor (no Resend, a aba Emails, com delivered/bounced/complained).
 from __future__ import annotations
 
 import argparse
+import hashlib
 import os
 import smtplib
 import ssl
@@ -91,13 +92,31 @@ def ler_env(caminho: Path, exigido: bool) -> tuple[dict[str, str], str]:
     return do_ambiente, "variaveis de ambiente"
 
 
-def mascarar(segredo: str) -> str:
-    """O suficiente para conferir que e a chave certa, sem revelar a chave."""
+def impressao_digital(segredo: str) -> str:
+    """Identifica a chave sem revelar caractere nenhum dela.
+
+    Esta funcao devolvia os 6 primeiros e os 4 ultimos caracteres. Para uma API
+    key de provedor isso e revelar DEZ caracteres dela -- e o docstring deste
+    script diz, com razao, que "o terminal costuma virar print no chat".
+    Mascarar pela metade continua sendo vazar, so que menos, e o mais enganoso
+    e que a saida PARECE segura.
+
+    O digest resolve o mesmo problema sem o vazamento. O que se quer aqui e
+    responder "e a chave que eu penso que e?", e para isso basta um valor que
+    seja igual quando a chave for igual: dois segredos iguais dao a mesma
+    impressao, diferentes dao impressoes diferentes, e nenhum pedaco do segredo
+    aparece.
+
+    Oito hex sao 32 bits -- suficiente para comparar duas rodadas ou conferir
+    contra uma impressao anotada, e curto o bastante para que o proprio digest
+    nao sirva de alvo: ha colisoes demais para que ele identifique um valor
+    unico offline. O tamanho continua saindo porque distingue "vazia" de
+    "preenchida errada", que e o engano mais comum.
+    """
     if not segredo:
         return "(vazia)"
-    if len(segredo) <= 12:
-        return f"({len(segredo)} chars)"
-    return f"{segredo[:6]}…{segredo[-4:]} ({len(segredo)} chars)"
+    digest = hashlib.sha256(segredo.encode("utf-8")).hexdigest()[:8]
+    return f"impressao {digest} ({len(segredo)} chars)"
 
 
 def main() -> None:
@@ -122,7 +141,7 @@ def main() -> None:
     print(f"config de : {origem}")
     print(f"host      : {host}:{porta} (ssl={usa_ssl}, starttls={usa_tls})")
     print(f"usuario   : {usuario or '(sem autenticacao)'}")
-    print(f"senha     : {mascarar(senha)}")
+    print(f"senha     : {impressao_digital(senha)}")
     print(f"remetente : {nome} <{remetente}>")
     print(f"reply-to  : {reply_to or '(vazio)'}")
     print(f"destino   : {args.destino}\n")

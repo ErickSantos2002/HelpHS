@@ -1389,3 +1389,36 @@ manual), os dois aplicativos do Deimos, o tempo de análise do iBlow10 Pro
 (5 s na ficha, 2 s no manual). Como as fichas comerciais ficam **fora da busca
 técnica** por decisão da Fase 2, esses pares nunca chegam juntos à Helô. Se um
 dia existir uma Helô comercial, elas voltam a valer.
+
+## `backend/scripts/` vai para a imagem de propósito
+
+O `.dockerignore` exclui `tests/` e **não** exclui `scripts/`. Isso não é
+descuido: os scripts avulsos são operados **pelo terminal do container**, e é lá
+que eles precisam existir.
+
+É o caso do `redefine_senha.py` quando alguém perde a senha e o SMTP de produção
+ainda não entrega o "Esqueci minha senha"; do `desliga_mfa.py` quando some o
+celular com o segundo fator; do `diagnostico_empresa_aparelho.py` antes de uma
+migration que cria índice único. Nenhum deles roda no boot, nenhum é importado
+por módulo de `app/` — mas todos são rodados contra o banco real, e o terminal
+do container é o único lugar onde as credenciais de produção já estão no
+ambiente.
+
+Tirá-los da imagem trocaria isso por copiar script e credencial para uma máquina
+de quem administra, na hora do incidente. Pior em todo sentido.
+
+### O que isso obriga
+
+**Estar na imagem não é estar no caminho de execução, e a diferença importa na
+hora de classificar um alerta.** Nenhum script é alcançável por requisição: não
+há rota, não há import a partir de `app/`, e o `start.sh` não os toca. Um alerta
+de análise estática em `scripts/` é sempre sobre o que acontece quando *uma
+pessoa* roda aquilo à mão.
+
+O que não muda é a régua do conteúdo: **script que vai à imagem é código que
+chega a produção**, então nada de segredo escrito, nada de valor de exemplo que
+alguém possa copiar, e nada de saída que revele credencial. Foi o que motivou o
+`testa_smtp.py` a trocar a máscara parcial — que imprimia os 6 primeiros e os 4
+últimos caracteres da chave — por uma impressão digital que não revela caractere
+nenhum. Máscara pela metade continua sendo vazamento, e o mais enganoso é que a
+saída *parece* segura.
