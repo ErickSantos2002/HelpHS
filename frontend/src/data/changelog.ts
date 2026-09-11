@@ -1,4 +1,4 @@
-export const APP_VERSION = "v1.13.0";
+export const APP_VERSION = "v1.14.0";
 
 export type EntryType = "novidade" | "corrigido" | "melhoria";
 
@@ -14,6 +14,16 @@ export interface ChangelogVersion {
 }
 
 export const CHANGELOG: ChangelogVersion[] = [
+  {
+    version: "v1.14.0",
+    date: "11/09/2026",
+    entries: [
+      { type: "novidade", text: "Ao concluir um chamado que passou do prazo, a equipe informa o motivo do atraso, que fica registrado no histórico do chamado." },
+      { type: "melhoria", text: "Os prazos de atendimento ficaram mais curtos e passaram a ser acompanhados em minutos. Um chamado de prioridade Crítica, por exemplo, recebe a primeira resposta em até 30 minutos." },
+      { type: "melhoria", text: "Feriados nacionais e o Carnaval deixaram de contar no prazo de atendimento. Feriados municipais continuam contando." },
+      { type: "corrigido", text: "Na tela de Configuração de SLA, os prazos passaram a ser exibidos e editados em minutos. Antes a prioridade Crítica aparecia como \"nullh\", editar a Crítica apagava os 30 minutos, e o texto informava o expediente das 8h às 18h, quando ele vai das 8h às 17h." },
+    ],
+  },
   {
     version: "v1.13.0",
     date: "09/09/2026",
