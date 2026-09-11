@@ -80,12 +80,23 @@ falhas em quatro arquivos que não tocam a tela de chamado — todas mortas entr
 mesmo tempo. Rodados sozinhos, os quatro arquivos passaram (60 casos) e a
 catraca de contraste ficou em dia. Com a máquina parada: 97 arquivos e 1383 casos, todos verdes.
 
-### Para subir, e o que fica
+### Implantado às 15:56, e a v1.14.0 publicada
 
-- **Só front.** Sem migration e sem deploy do backend. No EasyPanel, rebuild
-  do `helphs-sistema` sem cache — build de front já saiu 100% CACHED.
-- Depois do deploy, falta **publicar a versão** no changelog do produto: tudo
-  o que está no [Não publicado] está no ar.
+- **O conserto está no ar.** O `index.html` do front passou a ter
+  `Last-Modified` de 11/09 15:56:47, e o bundle traz o campo — medido às
+  15:57: "Motivo do atraso", o id do aviso na descrição do campo e
+  `sla_breach_justification`. O 422 continua saindo do backend, de propósito;
+  agora ele abre o campo em vez do toast. Aba aberta antes das 15:56 ainda tem
+  o bundle velho: Ctrl+F5.
+- **Com tudo o que estava no [Não publicado] no ar, a versão foi publicada.**
+  A v1.14.0 entrou no changelog do produto, o `__version__` do backend a
+  acompanhou, a v1.13.0 foi para a tabela congelada, e o [Não publicado] do
+  `Changelog.md` virou a seção da v1.14.0.
+- **O que o cliente lê, e o que não.** Entraram os prazos em minutos, os
+  feriados nacionais fora do relógio, o motivo do atraso e os consertos da
+  tela de SLA. Ficaram de fora a Fase 2 da Helô — anunciar uma IA que depende
+  do documento de LGPD seria prometer o que o sistema não faz (`a265133`) — e
+  a biblioteca de arquivos, que ainda não tem tela.
 - **Risco que fica:** a reabertura zera a marca de resolução e não avisa pelo
   WebSocket. Numa aba aberta há horas, o campo pode ser pedido para um chamado
   que o servidor não considera mais vencido. O conserto é recarregar o chamado

@@ -14,6 +14,20 @@ Trabalho que ainda **não** entrou numa versão do produto. Confira: se um
 item aqui já está em produção, ou ele foi para a versão errada, ou falta
 publicar uma versão nova.
 
+Nada por enquanto: tudo o que estava aqui saiu na v1.14.0.
+
+## [v1.14.0] — 11/09/2026
+
+Fechada com `c547100`, o commit que publicou a versão no changelog do produto (`frontend/src/data/changelog.ts`).
+
+Implantada **antes** de publicada: quando a versão saiu, o banco de produção
+já estava no head `c9x0y1z2a3b4` e o front no ar já tinha o `85450ab`. Para o
+cliente, quatro entradas — o motivo do atraso, os prazos em minutos, os
+feriados fora do relógio e os consertos da tela de SLA. A Fase 2 da Helô e a
+biblioteca de arquivos estão aqui e ficaram fora do texto do cliente: uma é IA
+desligada à espera do documento de LGPD (`a265133`), a outra ainda não tem
+tela.
+
 ### Infraestrutura
 
 - **A `main` tem seis migrations a mais que a `v1.13.0`, e o boot passa por
