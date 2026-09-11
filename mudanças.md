@@ -7,6 +7,360 @@ O changelog do produto (o que o cliente vê) fica em
 
 ---
 
+## 11/09/2026 — A main tem a Fase 2 da Helô, e a última versão publicada segue sendo a v1.13.0
+
+Fotografia do dia, sem código novo: o diário e o `Changelog.md` alcançam a
+main, que está em `9c8c068`, o merge do PR #3 (10/09, 14:21). **A última
+versão publicada continua sendo a v1.13.0**, fechada em `5e7712b`, e não há
+versão depois dela. Fora dela — o que não é ancestral de `5e7712b` —, a main
+tem 55 commits sem merge e seis migrations, todos [Não publicado], e alguns
+datados antes da própria v1.13.0: a `d3921b0` e a `b56b41c` são de 08/09.
+
+⚠️ **Estar na main não é estar no ar, e publicado não é implantado.** O deploy
+é manual no EasyPanel, e eu **não medi daqui** o que está implantado nem quais
+migrations o banco de produção já tem. E os meus próprios commits de 10/09
+dizem que produção já rodava código além da v1.13.0: a `e832b27` registra o
+"nullh" visto em produção na `/sla-config` (a `bbb306b` e a `9e41693` também
+falam em produção), e aquele campo nulo só existe com o SLA em minutos
+(`d3921b0`, do PR #4), que não é ancestral de `5e7712b`. De qual árvore saiu
+esse deploy eu não sei. É provável que a `a7b8c9d0e1f2` já tenha rodado lá;
+isso também eu não medi.
+
+### O que está na main e ainda não foi publicado
+
+| Frente | Entrou por | Atenção |
+|---|---|---|
+| Fase 2 da Helô | PR #3, `9c8c068` | a entrada de baixo |
+| SLA em minutos, justificativa ao resolver fora do prazo | PR #4, `d19be23` | ⚠️ a tela não tem o campo da justificativa; o SLA em minutos já foi visto em produção (`e832b27`) |
+| Feriado nacional no relógio do SLA | PR #7, `21df8ec` | — |
+| Biblioteca de arquivos | PR #6, `0118e77` | ⚠️ só backend: nenhuma tela usa |
+| Advisories do front; os quatro consertos da `/sla-config` | PR #8; `e832b27` a `3f32354` | — |
+| Cobertura de testes do front; seletor de senha do e2e | PR #1; PR #2 | ⚠️ a última execução do e2e (`c6be1a5`, 04/09) falhou no passo Playwright; e desde `9c8c068` ele para na migration, sem pgvector |
+
+### O que o próximo deploy da API exige
+
+1. **`CREATE EXTENSION vector;` antes**, com superusuário, no banco de
+   produção. A `a7v8w9x0y1z2` exige a extensão e recusa criá-la; sem ela o
+   `start.sh` (`set -e`) morre antes do uvicorn, com build verde. Esse sintoma,
+   o da trava do alembic e o do serviço de embedding estão com a receita na
+   tabela da entrada de baixo.
+2. **Ler antes a revision que o banco tem** (`SELECT version_num FROM
+   alembic_version`, pelo painel ou por `psql`). Não pelo alembic de uma árvore
+   de dev: a trava do `env.py` recusa qualquer comando contra host remoto, até o
+   `current`. A main tem **seis migrations** além da v1.13.0, numa cadeia só
+   (head `c9x0y1z2a3b4`), e pelos commits de 10/09 as do PR #4 podem já estar
+   lá. A `a7b8c9d0e1f2` não é aditiva: renomeia as colunas de SLA e multiplica
+   por 60, e o downgrade perde (30 min voltam como 1 h).
+3. **Conferir no painel o valor de `HELO_ENABLED`.** A variável existe desde
+   26/08 (`8e9286c`) e já estava na v1.13.0. O `Changelog.md` diz que ela está
+   "não configurada, de propósito" — é o que o commit escreveu, não o que eu vi
+   no painel. Se estiver `true`, o deploy muda o que ela faz sob a mesma chave:
+   seis trocas, modelo do segundo turno em diante e, sem a chave da DeepSeek,
+   escalada a partir do segundo turno.
+4. ⚠️ **A `c9x0y1z2a3b4` torna fonte da Helô todo artigo já publicado.** A
+   coluna `helo_pode_ler` nasce com padrão `true`, e a varredura sobe só com
+   `HELO_EMBEDDING_URL`, sem olhar `HELO_ENABLED`. Criado o serviço de
+   embedding, os publicados entram na base em até 5 min, sem ninguém tê-los
+   lido para isso. Antes de `HELO_ENABLED=true`, alguém lê os publicados;
+   desmarcar é só pela API (`PATCH` com `helo_pode_ler: false`), porque a tela
+   não tem o campo.
+5. **Pela tela, resolver chamado fora do prazo volta 422**, e não há campo
+   onde escrever a justificativa: o backend exige, o front não manda. Se o
+   backend do PR #4 já estiver implantado, isso pode já estar acontecendo hoje.
+
+### O que ficou em branch e nunca entrou na main
+
+As três saem de `b863b96` (02/09), e nada delas é ancestral da main nem de
+`5e7712b`. Nas duas que têm remoto, a ponta local é igual à do `origin`.
+
+| Branch | Commits | Último | O que falta na main | Risco de continuar faltando |
+|---|---:|---|---|---|
+| `fix/email-so-autenticacao` | 15 | 04/09 15:27 | ⚠️ **segurança:** o `.gitignore` sem `.env.*` nem `backend/.env.*`; a senha do admin de teste ainda escrita em arquivos rastreados; os defaults do MinIO no compose de dev. E mais: e-mail por papel, template, link para o chamado | um `git add .` versiona um `.env.producao` com credencial; senha conhecida num repositório público; com SMTP, técnico e admin recebem e-mail na atribuição |
+| `backend/migration-guards` | 6 | 02/09 13:22 | as guardas do downgrade e a política do caminho de volta | ⚠️ **LGPD:** descer e subir a `z6u7v8w9x0y1` religa a IA para quem a desligou; `downgrade base` deixa nove ENUM e o `upgrade` seguinte não sobe; o rollback da `r8m9n0o1p2q3` apaga histórico |
+| `backup/design-system-adoption-mixed` | 15 | 02/09 15:04 | nada exclusivo | nenhum: o design system saiu na v1.13.0 e as guardas estão em `origin/backend/migration-guards`; pode ser apagada |
+
+A senha não vai escrita aqui. Na main ela aparece em
+`.github/workflows/e2e.yml`, `frontend/e2e/helpers.ts`, `.env.example`,
+`README.md` e `desenvolvimento-local.md`, que `30acedf` e `a715221`
+limpariam. E em lugares que **nenhuma branch toca**: os dois scripts de `k6/`,
+a seção v1.9.0 do `Changelog.md` e ⚠️ **a entrada de 24/08 deste próprio
+diário**. No `backend/tests/test_seeds.py` ela está de propósito: é a guarda
+que confere que ela não voltou ao seed.
+
+Um fato novo agrava o `c64f64d`: o aviso da Helô para a equipe inteira
+(`_avisa_equipe_da_helo`, em `chat.py`) chama `notify()` sem `settings`. Hoje
+ele só não vira e-mail **por omissão** — o acidente que aquele commit descreve.
+
+Trazer a `migration-guards` dá conflito em `test_migrations_postgres.py`. A de
+e-mail mescla **sem conflito textual**, mesmo com sete arquivos mexidos dos
+dois lados (`chat.py`, `tickets.py`, `README.md`, `helpers.ts`,
+`decisoes-e-regras.md`, `test_history.py`, `test_ticket_lifecycle.py`) — e é
+esse o caso em que o merge não avisa nada. O rename que a `0a3f96a` pegou não
+morde aqui, porque a branch não acrescenta chamada nova a `_record_history`.
+Mesmo assim, suíte completa antes de confiar.
+
+---
+
+## 10/09/2026 (tarde) — A Helô passa a responder o que está documentado, e o resto ela escala
+
+A Fase 2 foi feita na `feat/helo-fase-2` de 08/09 16:47 (`b56b41c`) a 10/09
+12:22 (`6a5f9c9`) — 38 commits, 35 sem merge — e entrou na main pelo PR #3
+(`9c8c068`) às 14:21. **Nenhum commit é ancestral de `5e7712b`**: é tudo não
+publicado, e **merge na main não é deploy**. O changelog do produto ficou
+intocado de propósito (`a265133`): anunciar ao cliente uma IA desligada, que
+depende do documento de LGPD, seria prometer o que o sistema não faz.
+
+### ⚠️ Antes do próximo deploy, e se algo quebrar, comece por aqui
+
+**Ordem de subida:** extensão no banco → serviço de embedding → API → importar
+os três manuais (nascem rascunho) → alguém lê e publica → a varredura indexa
+em até 5 min → e só depois do documento de LGPD, `HELO_ENABLED=true`.
+
+| Sintoma | Causa provável | Onde olhar |
+|---|---|---|
+| **Build verde, contêiner não sobe**, log fala da extensão `vector` | a `a7v8w9x0y1z2` exige a extensão e recusa criá-la | `CREATE EXTENSION vector;` com superusuário, **no banco alvo** (é por banco). Se falhar com `could not open extension control file`, falta o pgvector no servidor: é infraestrutura |
+| **Build verde, contêiner não sobe**, log diz "Migration apontada para um banco REMOTO" | o serviço tem comando de start próprio, chamando alembic sem a liberação | usar o `CMD` da imagem (`/app/start.sh`); `backend/app/utils/migrations.py` |
+| **Ela escala toda pergunta técnica, e o aviso diz "a IA não respondeu"** | falta `DEEPSEEK_API_KEY`, ou o LLM está fora (timeout, chave inválida, resposta vazia) | `helo.py`, `MOTIVO_IA_MUDA` |
+| **Ela escala toda pergunta técnica, com motivo escrito pelo modelo** | `HELO_EMBEDDING_URL` vazia, ou serviço de embedding fora (ou em 503 carregando o modelo): a busca volta vazia, o modelo recebe `NADA ENCONTRADO` e escala pelo prompt | `GET /health` do embedding |
+| Em Deimos, EBS-010, Mark X e Mercury ela escala | não há manual técnico deles: só responde o que estiver em artigo publicado **sem produto vinculado** | é escopo, não defeito |
+| Em chamado sem produto ela saúda e escala | por decisão: nem o artigo universal entra | `busca_trechos`, em `backend/app/services/helo_base.py` |
+| Ela citou um artigo que não devia | artigo publicado nasce marcado para ela, e sem produto vale para todos | despublicar ou desmarcar `helo_pode_ler` tem efeito na hora — mas a tela não tem o campo |
+| Ela ficou calada depois de escalar | por desenho: `helo_saiu = True` encerra a conversa dela no chamado | histórico do chamado, campo `helo_saiu`, com o motivo |
+| O técnico perdeu a sugestão e o resumo | só acontece quando o **cliente** pediu uma pessoa | `helo.py`, `_ela_sai_de_cena` |
+| O build do embedding para no download ou no SHA-256 | rede, Hugging Face, ou arquivo diferente do pino | `baixa_modelo.py`: **não** trocar o hash sem reembutir a base |
+| `helo_chunks` com 0 trechos com vetor | manuais não importados ou não publicados, ou varredura sem `HELO_EMBEDDING_URL` | 0 só num banco sem artigo publicado; o 46 é do banco local, com os três manuais. Em produção, todo artigo **já** publicado entra, porque a `c9x0y1z2a3b4` marca todos com `true` |
+| Um defeito dela não aparece como 500 | o SAVEPOINT engole e registra | log: "Helô falhou no chamado {protocolo}; seguindo sem a fala dela" |
+
+### A migration exige a extensão, e a senha do Phoebus não chega ao banco
+
+A base (`b56b41c`) guarda vetor de 1024 dimensões e **nenhum índice vetorial**:
+com cerca de 80 trechos, a varredura completa é exata e custa menos de 1 ms.
+Vinte minutos depois (`65deedb`), a decisão que mais pesa no deploy: **a
+migration exige a extensão em vez de criá-la.** Criar pediria o usuário da
+aplicação como superusuário para sempre — as migrations rodam no boot — por um
+comando que roda uma vez na vida do banco. A receita da mensagem de erro foi
+executada, não suposta: sem extensão ela para; depois do `CREATE EXTENSION`,
+sobe até a head.
+
+**A senha.** O manual do Phoebus traz em texto aberto as senhas de dois menus
+avançados, e um deles desliga a exibição do resultado num equipamento de
+medição legal. Excluir o trecho foi recusado: vira **escalada cega** — a busca
+não acha nada e ninguém sabe por que ela escalou. Ficou a marca
+`exige_credencial_admin` (`9316a80`) com o valor redigido (`6e56ab4`): a busca
+acha, e ela escala dizendo o motivo.
+
+Em `4fae9bd` recusei alargar a regex: padrão preciso que erra por omissão
+continua errando por omissão, só mais tarde. O **redator** é preciso e troca a
+senha pelo marcador; o **detector** é largo e só levanta a mão. Se os dígitos
+de uma linha suspeita sobrevivem no texto que iria ao banco, **a ingestão
+para**, sem transcrever a senha. Contra os oito manuais ele acusa exatamente
+as três linhas do Phoebus. Os testes usam só texto sintético: o repositório é
+público.
+
+O script de ingestão morreu em 10/09 (abaixo). Sobreviveram a migration
+(reescrita), a marca, o hash do **resultado** do corte (`1400812`: o hash dos
+bytes do arquivo tornava inútil rodar de novo depois de consertar) e a dupla
+redator/detector, que foi para `app/services/helo_texto.py` **antes** da
+feature (`c1b3683`): duas cópias do redator deixariam a senha escapar pela que
+ficasse para trás.
+
+### A busca: só o aparelho do chamado, e só o que está perto
+
+`392cb25` fez de `helo_base.py` a única porta para os trechos, com filtros
+**sem parâmetro para desligar**. Chamado sem produto devolve vazio **sem
+consultar o banco**, e bloco vazio nunca vai ao modelo: vai o literal `NADA
+ENCONTRADO`, porque vazio ele leria como "sem contexto" e responderia do
+próprio bolso. Sem a guarda, o resultado ainda saía certo **por acidente da
+semântica de NULL** — a mutação sobreviveu, e o teste novo pergunta a coisa
+certa: tocou no banco?
+
+`767fca1`: **ordenar não é filtrar.** Sem teto, "como conecto na impressora"
+num Titan, que não tem impressora, entregava o passo a passo de ligar o
+aparelho. O corte saiu de 40 perguntas rotuladas à mão:
+
+| grupo | n | mediana do 1º | extremo |
+|---|---:|---:|---|
+| tem resposta no manual | 27 | 0,2185 | máximo 0,2850 |
+| não tem resposta | 13 | 0,2789 | **mínimo 0,2590** |
+
+`TETO_DE_DISTANCIA = 0.25` fica abaixo do mínimo das 13 sem resposta (0,2590)
+e barra todas. Preserva 22 das 27, e os trechos entregues ao modelo caem de
+160 para 25. Remedido em 10/09 contra a Base de Conhecimento: 21 de 27, margem
+de **0,007**.
+
+⚠️ O número é frágil, e está escrito assim no código. As populações se
+sobrepõem entre 0,25 e 0,26 — "como coloco o aparelho em português" casa a
+seção certa a 0,2533, e o corte mata. E as 27 foram escritas por quem já tinha
+lido os manuais (`77f8b38`): **78% (21 de 27; eram 81% em 09/09) é o melhor
+caso**, não a expectativa. Revisitar começa por remedir com pergunta de
+cliente, não por mexer no número (método e perguntas em
+`docs/decisoes-e-regras.md`, `00e4bf5`). Fiquei do lado apertado de propósito:
+cortar acerto custa uma escalada; passar trecho errado custa instrução errada
+num instrumento de medição legal.
+
+### O quinto serviço, porque a API roda com um worker
+
+`8930bb6`: o embedding não mora na API. O backend roda com `--workers 1`, e CPU
+síncrona no event loop congela a API para todos — os 151 s da entrada de
+01/09. A API fala HTTP em lote e **toda falha vira `None`**: NADA ENCONTRADO, e
+ela escala com mensagem neutra. A dimensão (1024) é conferida no cliente.
+
+`f89c6c3`: **a medição derrubou a minha própria justificativa.** Eu tinha
+defendido o lote por economizar viagens de rede. Medido, o custo era memória:
+
+| trechos por chamada | 1 | 8 | 24 | 74 (a base toda) |
+|---|---:|---:|---:|---:|
+| pico do serviço | 905 MB | 1,2 GB | 1,9 GB | 3,7 GB |
+
+Num servidor com ~5,1 GB livres, compartilhados, que também compila as imagens:
+eu economizaria 73 viagens de rede e compraria 2,7 GB. O teto ficou em **4**.
+
+`f13cf12`: o modelo (bge-m3 quantizado) **baixa no build**, 543 MB, e não no
+start, para reinício não depender do Hugging Face. Fica **preso por revisão e
+SHA-256**, não por nome: embedding de um modelo não se compara com o de outro,
+e a busca pioraria sem erro. Modelo que não carrega responde 503 com o motivo,
+em vez de crashloop. ⚠️ **As rotas não têm autenticação**: a proteção é a porta
+8080 não ser publicada.
+
+### A conversa: seis trocas, e escalar encerra ela, não o técnico
+
+`813ee0b`: a saudação continua sem modelo — previsível, instantânea, grátis. Do
+segundo turno em diante entram três blocos: cadastro, base técnica e conversa.
+O teto passou de duas falas para **seis trocas**, e ao estourar ela **escala**
+em vez de emudecer. As guardas vêm antes do modelo, **inclusive o pedido de
+humano**, para "quero falar com uma pessoa" funcionar com o LLM fora do ar.
+
+Em 09/09 escalar passou a gravar `ai_enabled = False`, e aceitei fechar junto a
+sugestão e o resumo do técnico. **Durou um dia.** Em 10/09 (`2622218`) vi que
+isso tirava a ferramenta do técnico justo nos chamados em que a IA tinha
+falhado, e o campo ganhou um irmão:
+
+| Campo | Pergunta que responde | Quem escreve |
+|---|---|---|
+| `tickets.ai_enabled` | alguém quer a IA fora daqui? | o botão do técnico — e o cliente, quando pede uma pessoa |
+| `tickets.helo_saiu` | a conversa dela acabou? | ela, nos quatro motivos de saída |
+
+A exceção tem teste só para ela: no pedido explícito de humano os dois caem. A
+saída grava histórico com o motivo. Migration nova, `b8w9x0y1z2a3`, aditiva, e
+nasceu o teste que faltava no projeto: toda coluna do modelo existe depois do
+`upgrade head` — com `create_all`, a suíte fica verde com coluna sem migration.
+
+### A equipe só é chamada quando ela sai de cena
+
+`f2421ac`: com ela respondendo a cada turno, cada técnico e cada admin
+receberia até **seis notificações por chamado**, cinco delas "Triagem
+concluída" com a conversa em andamento — e toda saída dizia "o cliente pediu
+para falar com uma pessoa". Agora o aviso sai só na saída, com o motivo:
+
+| Motivo da saída | Título do aviso |
+|---|---|
+| o cliente pediu uma pessoa | "Cliente pediu atendimento humano — {protocolo}" |
+| o modelo escalou (motivo dele, inteiro), o teto de 6 trocas, a IA não respondeu | "Helô passou o chamado — {protocolo}" |
+
+O tipo continua `ticket_updated`: valor novo no enum custaria `ALTER TYPE` numa
+migration de boot. A mutação que tirava a guarda do WebSocket passava no teste
+do POST — e é pelo WebSocket que a mensagem chega. Em `3ad7e94` o mypy do CI
+pegou o que o meu laço local não rodava: property não estreita tipo.
+
+### O SAVEPOINT: falha dela não custa a mensagem do cliente
+
+`74455fe`, de uma varredura pelo padrão *era raro com ela falando uma vez, vira
+constante com ela falando seis*. A fala dela nasce no mesmo commit da fala do
+cliente, e um defeito dentro dela **apagava o que o cliente tinha acabado de
+escrever**. Em PostgreSQL, só `except` não protege: o erro aborta a transação
+e o commit seguinte morre — idêntico a não ter guarda, **com o agravante de
+parecer protegido**. Agora ela roda em `begin_nested()`, com `logger.exception`.
+
+A primeira versão do teste não pegava a mutação que troca o SAVEPOINT por
+`try/except`: terminava num `flush` vazio, que não toca o banco. De quebra, a
+janela da sugestão ao técnico (10 mensagens) cortava a resposta do cliente à
+triagem; passou a ser `FALAS_MAXIMAS + TROCAS_MAXIMAS`.
+
+### A migration passou a recusar banco remoto
+
+O `.env` de desenvolvimento aponta para produção, e a Fase 2 trazia a primeira
+migration que exige uma extensão. `161c973` pôs no `alembic/env.py`, antes de
+qualquer conexão, uma trava **por alvo**, não por comando: host local passa;
+host remoto exige `ALEMBIC_ALVO_REMOTO_LIBERADO` exatamente `"1"` (`true` e
+`sim` não liberam); URL ilegível passa, para a trava nunca ser o motivo de o
+contêiner não subir. A liberação vive no `start.sh`, não no painel: esquecer
+uma variável de painel derrubaria o deploy. Travar alvo local foi recusado —
+ensinaria a exportar a liberação no `.bashrc`.
+
+⚠️ Continua sendo trava, não conserto: **script avulso não passa por ela**, e o
+`importa_manuais_para_kb.py --aplicar` escreve onde o `.env` apontar.
+
+### A base passou a ser a Base de Conhecimento, e o suporte ganhou um poder sem saber
+
+Decisão do cliente em 10/09, corrigindo a de 08/09. Escrevi o plano antes do
+código (`b279d5b`), e `06ec337` implementou: a busca enxerga artigo publicado,
+com `helo_pode_ler = true` e do produto do chamado — ou sem produto, que vale
+para todos. **Os três filtros rodam ao vivo.** Recusei marcar por tag (texto
+livre muda comportamento em silêncio) e o opt-in: com um artigo publicado
+(número meu, de 10/09, não medido) ele não protegia nada. Uma varredura de
+5 min indexa pelo hash do corte; os manuais entram por script, **em rascunho**.
+
+| Onde | Vínculo de produto ausente | Por quê |
+|---|---|---|
+| tela da Base de Conhecimento | vale para **todos** os aparelhos | é escolha de quem escreveu |
+| script de importação | **erro fatal** | quem cria é máquina; ninguém escolheu nada |
+
+⚠️ **Publicar artigo passou a mudar o que a Helô diz ao cliente**, com a fonte
+citada, e o suporte não foi avisado. **A tela da KB não tem o campo
+`helo_pode_ler`**: pela tela, todo artigo nasce e fica marcado para ela. E o
+filtro de tipo morreu: ficha com preço publicada na Base vira fonte.
+
+A `a7v8w9x0y1z2` foi **reescrita no lugar** em vez de ganhar uma migration
+destrutiva no boot — seguro só porque ainda não estava na main. Os merges da
+main na branch pegaram o que o git não via:
+
+| Merge | O que passaria limpo | Conserto |
+|---|---|---|
+| `0a3f96a` | dois heads (a `a7v8` e a do SLA com o mesmo pai): `upgrade head` recusa no boot | re-parentar a da Helô |
+| `0a3f96a` | chamadas a `_record_history`, renomeada na branch para `registra_historico`: sem conflito, e `NameError` | trocar as duas chamadas |
+| `b501ed3` | dois heads de novo, com a biblioteca; o `alembic heads` local não via, o CI no merge ref pegou | re-parentar dentro do merge |
+
+### Lições de método que ficaram nos commits
+
+- **Exigir em vez de criar**: privilégio de um passo de uma vez não vira
+  privilégio do boot para sempre.
+- **Mutação acha o que o teste verde esconde**: o NULL que acertava por
+  acidente, o `flush` vazio, a guarda do WebSocket coberta só pelo POST.
+- **`create_all` esconde migration faltando, e o `alembic check` não compara
+  `server_default`**: `func.false()` no modelo derrubou 18 testes e o check
+  passou.
+- **O `alembic heads` local só vê a branch, e o merge não enxerga rename.**
+- **Medir antes de justificar, e o viés vai junto do número.** Uma observação
+  não sustenta conserto: das duas hipóteses para o `8.2`, a A caiu e a B virou
+  dívida.
+- **O formatador do backend é o black**: um `ruff format` reescreveu um assert
+  alheio (`1e90338`), e virou regra escrita.
+
+### O que ficou em aberto
+
+- **Dívidas com gatilho** (`docs/decisoes-e-regras.md`): o teto de 0,25
+  depende do acervo (46 trechos hoje); o trecho genérico domina a busca (quando
+  houver manual para mais de três produtos); editar um artigo reindexa todos os
+  trechos dele; o `.env` aponta para produção.
+- **Só três dos sete produtos têm manual técnico** (Titan, Phoebus, iBlow 10
+  Pro). Nos outros quatro ela sempre escala. É escopo do cliente.
+- **Ligar a Helô está travado pela LGPD**: a Política de Privacidade tem
+  marcador em aberto e os Termos de Uso não existem.
+- **Chamado sem produto não recebe nada**, nem o artigo universal — decisão de
+  10/09 (`0b82bc6`): todos os aparelhos não é o mesmo que nenhum.
+- **Duas contradições dos manuais esperam o suporte técnico**: a autonomia do
+  Titan (8.000 testes por carga numa bateria Ni-MH de 400 mAh) e qual contato é
+  o canal do cliente. O Titan tem manual na base.
+- **O `PATCH` de artigo com `null` explícito dá 500** — anterior à Helô
+  (`3db616c`), lido e não consertado, por decisão.
+- **A `a7v8w9x0y1z2` está na main e agora é imutável**: conserto nela vira
+  revision nova. A docstring dela ainda diz que ela "só existe nesta
+  branch"; é código, e fica para um commit próprio. O `Changelog.md`
+  alcançou esta entrada em 11/09: a coluna `helo_saiu`, a `b8w9x0y1z2a3`, a
+  trava do alembic e as seis migrations estão no bloco [Não publicado].
+
+---
+
 ## 10/09/2026 — Quatro consertos vistos em produção, feriado no relógio do SLA e a biblioteca
 
 Dia de fechar o que o deploy da véspera revelou, e de integrar as duas frentes
@@ -20,12 +374,19 @@ que estavam em branch. **186 commits desde o último registro aqui** (02/09 a
 | **A interface inteira parece outra** | é o esperado: a v1.13.0 subiu com o design system adotado nas 22 telas | `docs/design-system-migration/CHECKPOINT-4.md`, e as 50 fotos em `fase-16/screenshots` |
 | **Prazo de SLA menor do que era** | os prazos foram cortados pela metade em 08/09 e passaram a contar em **minutos** | `backend/app/utils/sla.py`; a Crítica responde em **30 min** |
 | **A Crítica mostra "30min" e não "0,5h"** | é o esperado: prazo que não é hora cheia agora aparece exato | `SlaConfigPage.tsx`, `descreveMinutos` |
-| **Não consigo resolver um chamado fora do prazo** | passou a exigir justificativa | `feat(sla): justificativa obrigatoria ao resolver chamado fora do prazo`, 09/09 |
+| **Não consigo resolver um chamado fora do prazo** | o backend passou a exigir justificativa, e **a tela não tem o campo**: pela interface, volta 422 sem ter onde escrever o motivo | `feat(sla): justificativa obrigatoria ao resolver chamado fora do prazo`, 09/09; o 422 sai de `backend/app/routers/tickets.py` |
 | **Prazo "pulou" um dia sem motivo** | feriado nacional entrou no relógio | `backend/app/utils/feriados.py`. Carnaval é **calculado** a partir da Páscoa; feriado municipal **não** entra |
 | **A Helô ficou calada num chamado** | por desenho: ela cala quando um humano já está na conversa | `fix: a Helo cala quando um humano ja esta na conversa`, 08/09 |
 | **Filtro de tela sumiu ou mudou de forma** | o `FilterSelect` foi removido; 17 filtros viraram `Select` nativo ou `Selector` com busca | decisão D9.2 |
 | **Excluir agora abre modal em vez de `confirm()`** | é o esperado: o último `confirm()` do sistema saiu | decisão D9.3 |
 | **`npm run dev` não abre** | a porta é a **5190**, não a 5173 | `frontend/vite.config.ts`, com `strictPort` |
+
+> **Correção deste registro (11/09).** A linha da justificativa dava a entender
+> um recurso inteiro. É só backend: a mensagem de `105878d` diz que o modal do
+> front vem depois, e em `9c8c068` nada em `frontend/src` manda
+> `sla_breach_justification`. Ela veio no PR #4, o mesmo do SLA em minutos que
+> os consertos abaixo viram em produção; se foi junto, o 422 sem campo já
+> acontece hoje. Isso eu não medi.
 
 ### Os quatro defeitos da /sla-config, e o que eles tinham em comum
 
@@ -73,6 +434,11 @@ no próprio arquivo, e é decisão consciente, não esquecimento.
 
 Arquivos que a equipe manda toda hora deixam de ser reenviados: ficam numa
 biblioteca e são anexados à conversa a partir de lá.
+
+> **Correção deste registro (11/09).** Escrito assim, parecia que a equipe já
+> usa. **Por enquanto é só backend** (`backend/app/routers/library.py`): o PR #6
+> (`0118e77`) não tem nenhum arquivo em `frontend/`, e nenhuma tela chama as
+> rotas `/library`.
 
 ### As três advisories do front, e nenhuma virou baseline
 
