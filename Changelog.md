@@ -21,8 +21,9 @@ publicar uma versão nova.
   `backend/alembic/versions/`, e nenhum arquivo antigo mudou (diff de
   `5e7712b` a `9c8c068`). O `start.sh` aplica antes do uvicorn as que o banco
   ainda não tiver, numa cadeia só: head único `c9x0y1z2a3b4`, conferido lendo
-  os arquivos em `9c8c068`, sem rodar o alembic. Daqui não dá para medir
-  quais delas produção já tem.
+  os arquivos em `9c8c068`, sem rodar o alembic. **Em produção as seis já
+  rodaram:** em 11/09 o `alembic_version` do banco de produção estava em
+  `c9x0y1z2a3b4`, o head (consultado no próprio banco).
 
   | Revision | Pai | O que faz | Aditiva? |
   |---|---|---|---|
@@ -159,6 +160,10 @@ publicar uma versão nova.
     exigiria superusuário no boot do contêiner, para sempre, por causa de um
     comando que roda uma vez. Sem a extensão, a migration falha com mensagem
     dizendo exatamente isto, e a API não sobe (`65deedb`).
+    - ✅ **Em produção, já feito.** Em 11/09 o banco de produção estava no
+      head (`c9x0y1z2a3b4`), e só se chega lá com a `a7v8w9x0y1z2` aplicada.
+      O aviso continua valendo para qualquer outro banco: staging, dev,
+      restauração de backup.
     - A extensão é **por banco**, não por servidor. A imagem com pgvector só
       põe os arquivos no lugar; o `CREATE EXTENSION` ainda precisa rodar
       conectado ao banco que vai usá-la. Se o próprio comando falhar com
@@ -431,6 +436,32 @@ publicar uma versão nova.
 
 ### Corrigido
 
+- **Resolver pela tela um chamado fora do prazo deixa de dar 422 sem saída**
+  (`85450ab`). O backend exige `sla_breach_justification` desde o `105878d`
+  (PR #4), e o front nunca ganhou o campo. Em 11/09 isso estava em produção:
+  banco no head `c9x0y1z2a3b4` e front de 10/09 sem o campo em nenhum dos 65
+  arquivos do bundle. Quem concluía um chamado vencido via um toast de 4 s com
+  o nome técnico do campo, e cada nova tentativa devolvia o mesmo 422.
+  - O campo "Motivo do atraso" aparece quando o **servidor** tem certeza: marca
+    de violação ligada, ou o próprio 422, que passa a abrir o campo no modal,
+    com o foco nele e o aviso de qual prazo passou, em vez do toast. Vale para
+    "Concluir ticket" e para "Alterar status" → Resolvido.
+  - ⚠️ **Prever pela data foi recusado.** O front não recebe a pausa acumulada
+    (`sla_total_paused_ms`), e o relatório de SLA violado filtra pela
+    **presença** da justificativa: um falso positivo poria no relatório um
+    chamado que não violou nada. Pela mesma razão, nada sobra de um pedido
+    para o outro: o Cancelar limpa, trocar de chamado na mesma tela zera, o
+    modal não fecha com a resposta a caminho, e só vai no corpo o que está
+    exigido na tela.
+  - O histórico passa a mostrar a entrada com nome legível e o texto. Antes
+    aparecia `sla_breach_justification` cru, e o texto sumia.
+  - Um teste do front lê `backend/app/routers/tickets.py` e reprova se a recusa
+    deixar de ser 422, de citar o campo ou de dizer qual prazo passou; outro
+    confere o limite de 2000 contra `schemas/ticket.py`.
+  - **Só front:** sobe sem migration e sem deploy do backend. Desenho, riscos
+    que ficam e o que ficou de fora em
+    `docs/superpowers/specs/2026-09-11-justificativa-de-sla-na-tela-design.md`.
+
 - **`/sla-config` mostrava "nullh" na Crítica.** O front declarava
   `response_time_hours: number` e o backend manda `int | None` — o campo é
   derivado dos minutos e vale `None` quando o prazo não é hora cheia.
@@ -546,7 +577,7 @@ publicar uma versão nova.
     última registrada no GitHub. Quantos testes seguiram falhando, e por
     quê, não está escrito em lugar nenhum.
 
-- Suíte do front em **96 arquivos e 1353 casos**.
+- Suíte do front em **97 arquivos e 1383 casos**, medida em 11/09 com a máquina parada.
 
 ### Documentação
 

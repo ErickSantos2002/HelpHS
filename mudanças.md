@@ -7,6 +7,95 @@ O changelog do produto (o que o cliente vê) fica em
 
 ---
 
+## 11/09/2026 (tarde) — O 422 da justificativa estava no ar, e a tela passa a pedir o motivo do atraso
+
+A entrada de baixo, escrita de manhã, dizia que eu não tinha medido o que está
+implantado. À tarde medi, e a resposta muda a ordem do que falta fazer.
+
+### O que está em produção, medido
+
+| Pergunta | Resposta | Como medi |
+|---|---|---|
+| Em que migration está o banco? | **`c9x0y1z2a3b4`, o head da main** | `SELECT version_num FROM alembic_version`, no DBeaver, contra o `helphs-banco` |
+| A extensão `vector` existe? | **sim** | a `a7v8w9x0y1z2` recusa subir sem ela e está antes do head |
+| Quantos artigos a Helô já pode ler? | **1** publicado com `helo_pode_ler` | `SELECT count(*)` no mesmo banco |
+| Que backend está no ar? | tem a rota `/library` do PR #6 | GET sem login em `/api/v1/library` responde 401, e não 404 |
+| Que front está no ar? | o de 10/09 15:04, com os consertos da `/sla-config` | baixei o `index.html` e os 65 arquivos do bundle |
+
+Então **as seis migrations desde a v1.13.0 já rodaram**, e os itens 1 e 2 do
+"próximo deploy" da entrada de baixo aconteceram. E, com o banco no head, o
+backend no ar exige a justificativa de SLA: a regra não tem variável que a
+desligue, e nenhum dos 18 commits com a biblioteca tem o SLA em minutos sem
+ela. **O front no ar não tem o campo** — zero ocorrências nos 65 arquivos. Ou
+seja: desde o deploy, ninguém da equipe consegue concluir pela tela um chamado
+vencido. Aparece um toast de 4 s com o nome técnico do campo, o modal fica
+aberto sem ter onde escrever, e cada tentativa devolve o mesmo 422.
+
+Ficam sem medir: o valor de `HELO_ENABLED` no painel e se o serviço de
+embedding existe.
+
+### O conserto: pedir o motivo quando o servidor tem certeza
+
+O campo "Motivo do atraso" aparece em dois casos: a marca de violação do
+chamado está ligada (o servidor sempre a respeita), ou o próprio 422 chegou —
+e aí ele abre no modal, com o foco e o aviso de qual prazo passou, em vez do
+toast. Vale para o "Concluir ticket" e para o "Alterar status" → Resolvido. O
+histórico passa a mostrar a entrada com nome legível e o texto.
+
+**Recusei prever a violação pela data.** O front não recebe a pausa acumulada
+do SLA, então acharia vencido o que não está — e o relatório de SLA violado
+filtra pela **presença** da justificativa. Um falso positivo põe no relatório
+um chamado que não violou nada. Desenho em
+`docs/superpowers/specs/2026-09-11-justificativa-de-sla-na-tela-design.md`.
+
+### A revisão adversarial me corrigiu em quatro pontos
+
+Três revisores, cada um com uma lente, e os três convergiram no primeiro:
+
+| O que eu tinha deixado | O efeito |
+|---|---|
+| O Cancelar fechava sem limpar, e a rota não tem `key` | o motivo escrito num chamado ia no próximo aberto pelo sino — o falso positivo que o desenho existe para evitar |
+| O teste de contrato cortava o `tickets.py` no próximo `def`, e depois da função só há `async def` | o corte ia até o fim do arquivo; o `HTTP_422` de outro endpoint fazia o caso passar, e mutar a recusa para 409 não derrubava nada |
+| O foco ia para o campo no 422, mas o aviso não estava na descrição dele | quem usa leitor de tela caía no campo sem ouvir por quê |
+| O X, o Esc e o fundo fechavam com a resposta a caminho | um 422 que chegasse depois sumia sem toast e sem campo |
+
+Os quatro viraram código e teste.
+
+### A mutação, e as duas que ficam vivas de propósito
+
+35 mutantes, um por cláusula do código novo, e mais um no **backend**: a
+recusa virando 409, para provar que o teste de contrato pega. Na primeira
+rodada sobreviveram 7: cinco eram buraco de teste (fechar pelo X, os três
+casos do Alterar status, o comentário repetido no histórico) e ganharam caso.
+**Ficaram 33 mortos e 2 vivos.** Os dois vivos são a mesma guarda, "só vai no
+corpo o que está exigido na tela", nos dois modais: com o Cancelar limpando, o
+reset por chamado e a trava no fechamento, não sobra caminho em que ela aja
+sozinha. Ficou como rede, e escrita no desenho.
+
+### O ritual, e sete falhas que não eram defeito
+
+`typecheck`, `lint` e `build` passaram. A primeira suíte completa deu 7
+falhas em quatro arquivos que não tocam a tela de chamado — todas mortas entre
+5,0 e 8,4 s, e 5 s é o tempo-limite do vitest. A revisão estava rodando ao
+mesmo tempo. Rodados sozinhos, os quatro arquivos passaram (60 casos) e a
+catraca de contraste ficou em dia. Com a máquina parada: 97 arquivos e 1383 casos, todos verdes.
+
+### Para subir, e o que fica
+
+- **Só front.** Sem migration e sem deploy do backend. No EasyPanel, rebuild
+  do `helphs-sistema` sem cache — build de front já saiu 100% CACHED.
+- Depois do deploy, falta **publicar a versão** no changelog do produto: tudo
+  o que está no [Não publicado] está no ar.
+- **Risco que fica:** a reabertura zera a marca de resolução e não avisa pelo
+  WebSocket. Numa aba aberta há horas, o campo pode ser pedido para um chamado
+  que o servidor não considera mais vencido. O conserto é recarregar o chamado
+  ao receber `status_update`.
+- **Fora deste trabalho:** a tela de relatórios não mostra as justificativas
+  que o backend já manda, e o export CSV é um link sem token para um endpoint
+  que exige Bearer — pela leitura do código, responde 401. Não medi.
+
+---
+
 ## 11/09/2026 — A main tem a Fase 2 da Helô, e a última versão publicada segue sendo a v1.13.0
 
 Fotografia do dia, sem código novo: o diário e o `Changelog.md` alcançam a
