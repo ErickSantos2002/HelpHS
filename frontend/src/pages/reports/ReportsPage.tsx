@@ -56,6 +56,7 @@ import {
   type OldestTicketItem,
   type ProductCount,
   type ReportData,
+  type SlaJustificationItem,
   type TechnicianDistItem,
   type ReportFilters,
   type TechnicianDetailReport,
@@ -485,6 +486,136 @@ function OldestOpenTable({ tickets }: { tickets: OldestTicketItem[] }) {
   );
 }
 
+// ── SLA violado: as justificativas ────────────────────────────
+
+const JUSTIFICATIVAS_PAGE_SIZE = 10;
+
+/**
+ * Por que cada chamado estourou o prazo, na palavra de quem o resolveu.
+ *
+ * ── O que esta seção acrescenta ao relatório ──────────────────────────
+ *
+ * O SLA já tinha duas leituras aqui: o cartão de conformidade e o gráfico por
+ * prioridade. Os dois respondem **quantos** estouraram — que é a pergunta da
+ * auditoria. Nenhum responde **por quê**, que é a única pergunta que permite
+ * corrigir a causa. Cinco atrasos por "peça em falta no estoque" e cinco por
+ * "chamado aberto na sexta às 17h" dão o mesmo número e pedem providências
+ * opostas.
+ *
+ * ── A tela não decide o que estourou ──────────────────────────────────
+ *
+ * A lista vem pronta do servidor, filtrada pela PRESENÇA da justificativa. O
+ * front não recalcula prazo nem compara datas: ele não recebe a pausa
+ * acumulada (`sla_total_paused_ms`), então acharia vencido o que não está — e
+ * um falso positivo aqui põe no relatório um chamado que não violou nada.
+ * Mesma regra do modal que pede o motivo: quem sabe se o prazo passou é o
+ * servidor, sempre.
+ *
+ * ── Por que o molde é o da `OldestOpenTable`, e não o `ChartCard` ─────
+ *
+ * O `ChartCard` não tem `overflow-hidden`, e sem ele os cantos arredondados da
+ * casca ficam por baixo da primeira e da última linha da tabela. As duas
+ * tabelas deste arquivo já repetem a casca à mão pelo mesmo motivo.
+ */
+function SlaJustificationsTable({ itens }: { itens: SlaJustificationItem[] }) {
+  // O `Pagination` do pacote conta a partir de 1, e este estado também —
+  // guardar 0-based foi o erro que a `OldestOpenTable` já pagou.
+  const [page, setPage] = useState(1);
+  const paged = itens.slice(
+    (page - 1) * JUSTIFICATIVAS_PAGE_SIZE,
+    page * JUSTIFICATIVAS_PAGE_SIZE,
+  );
+  const colunas = ["Protocolo", "Título", "Prioridade", "Resolvido em", "Responsável", "Motivo do atraso"];
+
+  return (
+    <div className="rounded-xl border border-borda/40 bg-surface overflow-hidden">
+      <div className="border-b border-borda/40 px-5 py-3.5 flex items-center gap-2 flex-wrap">
+        <h2 className="text-sm font-semibold text-conteudo">SLA violado — motivo do atraso</h2>
+        <span className="rounded-full bg-tint-danger px-2 py-0.5 text-[10px] font-semibold text-on-tint-danger">
+          {itens.length} {plural(itens.length, "chamado", "chamados")}
+        </span>
+        {/*
+          O teto do servidor dito por extenso.
+
+          `_build_report` corta em 200, ordenados do mais recente para o mais
+          antigo. Sem esta linha, um período com 300 violações mostraria 200 e
+          pareceria completo — corte silencioso lido como cobertura total é
+          exatamente o que faz alguém decidir sobre um número que não é o
+          número.
+        */}
+        {itens.length >= 200 && (
+          <span className="text-[11px] text-conteudo-muted">
+            mostrando as 200 mais recentes do período
+          </span>
+        )}
+      </div>
+      <Table>
+        <TableHead>
+          <TableRow>
+            {colunas.map((h) => (
+              <TableHeaderCell key={h} className="text-[11px] font-semibold">
+                {h}
+              </TableHeaderCell>
+            ))}
+          </TableRow>
+        </TableHead>
+        <TableBody>
+          {paged.map((j) => (
+            <TableRow key={j.ticket_id} className="hover:bg-surface-elevated/50">
+              <TableCell className="font-mono text-xs text-conteudo-link">{j.protocol}</TableCell>
+              <TableCell className="max-w-[200px]">
+                <span className="block truncate" title={j.title}>{j.title}</span>
+              </TableCell>
+              <TableCell>
+                <PriorityBadge priority={j.priority} />
+              </TableCell>
+              <TableCell muted className="text-xs whitespace-nowrap">
+                {j.resolved_at
+                  ? new Date(j.resolved_at).toLocaleDateString("pt-BR", {
+                      day: "2-digit", month: "2-digit", year: "numeric",
+                      hour: "2-digit", minute: "2-digit",
+                    })
+                  : "—"}
+              </TableCell>
+              <TableCell muted className="text-xs">
+                {j.assignee_name ?? "—"}
+              </TableCell>
+              {/*
+                O motivo é o conteúdo desta seção, então ele NÃO é truncado em
+                uma linha como o título: o texto foi escrito para ser lido, e a
+                versão cortada em "Peça em falta no estoq…" não serve a
+                ninguém. Duas linhas na tabela, e o texto inteiro no `title`
+                para quem precisar do resto sem sair daqui.
+              */}
+              <TableCell className="min-w-[16rem] max-w-[28rem]">
+                <span className="block text-xs text-conteudo line-clamp-2" title={j.justification}>
+                  {j.justification}
+                </span>
+              </TableCell>
+            </TableRow>
+          ))}
+          {paged.length === 0 && (
+            <TableEmpty colSpan={colunas.length} message="Nenhum chamado resolvido fora do prazo no período." />
+          )}
+        </TableBody>
+      </Table>
+
+      {itens.length > JUSTIFICATIVAS_PAGE_SIZE && (
+        <div className="px-5 py-3">
+          <Pagination
+            page={page}
+            pageSize={JUSTIFICATIVAS_PAGE_SIZE}
+            total={itens.length}
+            onPageChange={setPage}
+            itemLabel="chamados"
+            className="border-t-0 pt-0"
+          />
+        </div>
+      )}
+    </div>
+  );
+}
+
 // ── Global report (admin) ─────────────────────────────────────
 
 /*
@@ -696,6 +827,21 @@ function GlobalReport({ data }: { data: ReportData; period?: number }) {
           </ResponsiveContainer>
         </ChartCard>
       </div>
+
+      {/*
+        O porquê logo depois do quanto.
+
+        A linha acima fecha com a "Conformidade SLA por prioridade", que diz
+        QUANTOS estouraram. Esta seção vem em seguida porque é a leitura
+        seguinte da mesma pergunta — e, sem ela, o relatório respondia à
+        auditoria sem nunca apontar uma causa.
+
+        A guarda de vazio fica no PAI, como nas outras seções: período sem
+        violação nenhuma não desenha casca vazia.
+      */}
+      {(data.sla_justifications?.length ?? 0) > 0 && (
+        <SlaJustificationsTable itens={data.sla_justifications} />
+      )}
 
       {/* 3-col: Tempo médio resolução | Tempo médio 1ª resposta | Tickets por produto */}
       {((resolutionChartData?.length ?? 0) > 0 || (data.avg_first_response_by_priority ?? []).some((r) => r.avg_hours != null) || (data.tickets_by_product?.length ?? 0) > 0) && (
