@@ -14,7 +14,67 @@ Trabalho que ainda **não** entrou numa versão do produto. Confira: se um
 item aqui já está em produção, ou ele foi para a versão errada, ou falta
 publicar uma versão nova.
 
-Nada por enquanto: tudo o que estava aqui saiu na v1.14.0.
+### Adicionado
+
+- **Biblioteca de arquivos frequentes, e o anexo deles na conversa.** O acervo
+  fica em `/biblioteca`, no grupo Gestão do menu, e é **só para staff** — o
+  cliente não o vê, recebe o arquivo pelo que o técnico anexa. O técnico escolhe
+  um item pelo seletor do chat, e ele aparece na bolha com nome e tamanho.
+  (`98e10fc` — service, `LibraryPage` e modal de envio, PR #11;
+  `d652f43` e `9a70098` — rota, menu, seletor e bolha, PR #14.)
+  - **Item INTERNO não entra em conversa**, e a recusa é da API, com a razão
+    escrita, antes de gravar. O default de visibilidade é `internal`: abrir para
+    o cliente é ato explícito de quem envia, e o esquecimento falha do lado
+    seguro.
+  - **O link é emitido no clique, e não gravado na bolha.** Ele tem validade, e
+    o `/library/{id}/download` confere a visibilidade ao emitir — um item que o
+    admin fechar depois do envio para de abrir para o cliente. Um `href` gravado
+    continuaria valendo para sempre.
+  - Mensagem com anexo sai pelo **REST**, e não pelo WebSocket: o manipulador do
+    socket lê só `content` e descarta o resto do payload, então o
+    `library_file_id` sumiria em silêncio. Texto puro continua saindo pelo
+    socket.
+  - `content` é `min_length=1`: **não existe mensagem só com arquivo**.
+- **O relatório de SLA passa a mostrar o motivo do atraso**, ao lado da
+  contagem (`7e77012`, PR #12). Ele dizia *quantos* estouraram e nunca *por
+  quê* — e cinco atrasos por peça em falta e cinco por chamado aberto na sexta
+  às 17h dão o mesmo número e pedem providências opostas. O campo já vinha na
+  resposta e no CSV; só a tela não o mostrava.
+
+### Corrigido
+
+- **A violação de prazo de resolução passa a ser marcada no instante de
+  resolver** (`f16cf0e`, PR #10). O `check_breaches` só testa esse prazo quando
+  o chamado **não** está em estado terminal, e os dois caminhos que resolvem já
+  puseram o status em `resolved` quando o chamam. Chamado que passou do prazo e
+  ficou **quieto** até ser resolvido chegava com a marca em `False`, e o
+  indicador agregado o dava como cumprido.
+  ⚠️ **O indicador de conformidade vai cair a partir desta versão**, e o número
+  novo é o certo: ele passa a contar atrasos que antes passavam calados.
+- **O cache do dashboard deixa de falhar em silêncio** (`e931950`, PR #9,
+  alerta #28 do CodeQL). Engolir a exceção está certo — derrubar o
+  `/dashboard/stats` porque o cache não gravou trocaria degradação por
+  indisponibilidade. O defeito era a mudez, não a política.
+
+### Segurança
+
+- **O `testa_smtp` parava de vazar a chave na saída** (`e931950`, PR #9).
+
+### Testes
+
+- O tipo `ChatMessage` do front passou a declarar os quatro campos
+  `library_file_*` que o backend já mandava desde o PR #6. O tipo honesto
+  apontou **duas fixtures** que descreviam respostas que o servidor não manda
+  mais.
+- Nove casos novos no `ChatPanel`, provados por mutação: mandar tudo pelo
+  socket mata 2, tudo pelo REST mata 1, tirar o filtro `visibility: "client"`
+  mata 1, desenhar a caixa do anexo sempre mata 1.
+
+### Pendente
+
+- **PR #13 — o socket recusa o anexo em vez de descartá-lo.** Aberta, **não
+  mergeada**. Até entrar, um `library_file_id` mandado pelo WebSocket segue
+  sumindo em silêncio; não morde hoje porque a tela não manda anexo por ali.
 
 ## [v1.14.0] — 11/09/2026
 

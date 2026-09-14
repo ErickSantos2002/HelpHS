@@ -7,6 +7,104 @@ O changelog do produto (o que o cliente vê) fica em
 
 ---
 
+## 14/09/2026 — Cinco PRs entram na main, e a biblioteca chega inteira à tela
+
+Dia de integração. Cinco frentes fecharam ao mesmo tempo, e a maior delas — a
+biblioteca de arquivos — veio de **duas sessões em paralelo**, em worktrees
+separadas.
+
+⚠️ **Nada disso está publicado ainda.** A última versão do produto é a
+**v1.14.0**, de 11/09, e estes seis commits entraram na `main` depois dela.
+Estão no `Changelog.md`, em `[Não publicado]`.
+
+### ⚠️ Se algo quebrar depois do próximo deploy, comece por aqui
+
+| Sintoma | Causa provável | Onde olhar |
+|---|---|---|
+| **Item "Biblioteca" novo no menu** | é o esperado: grupo Gestão, só admin e técnico | `Sidebar.tsx`; o cliente não vê o acervo, recebe o arquivo pelo que o técnico anexa |
+| **Anexo no chat não sobe arquivo do computador** | por desenho: só anexa item **da biblioteca** | `ChatPanel.tsx`. Upload de arquivo solto continua sendo o anexo do chamado |
+| **Arquivo da biblioteca não aparece no seletor** | ele está como **interno** | só `visibility: "client"` entra em conversa. Um admin abre pelo `PATCH /library/{id}` |
+| **Anexo que funcionava parou de abrir** | o admin fechou o item depois do envio | é o esperado: o link é emitido na hora e confere a visibilidade. A bolha não guarda `href` |
+| **Não consigo enviar só o arquivo, sem texto** | `content` é `min_length=1` no schema | restrição de contrato. A dica do compositor diz isso |
+| **Indicador de SLA cumprido caiu** | a marca de violação passou a ser gravada no instante de resolver | `f16cf0e`. Chamado vencido e quieto **contava como cumprido** antes — o número novo é o certo |
+| **Relatório de SLA ficou mais longo** | ganhou a seção do motivo do atraso | `7e77012`, logo depois da conformidade por prioridade |
+
+### A biblioteca, e por que ela saiu em dois PRs e um recurso
+
+A frente do acervo fez o **service, a `LibraryPage` e o modal de envio**
+(`98e10fc`, PR #11). Esta frente fez a **rota, o item de menu, o seletor no
+chat e o desenho do anexo na bolha** (`d652f43` e `9a70098`, PR #14).
+
+O PR #14 contém o commit da #11 inteiro — foi assim que a rota conseguiu
+compilar —, e por isso a ordem de merge foi #11 primeiro, #14 depois.
+
+**O service não foi reescrito.** Quando fui desenhar o seletor, ele já estava
+commitado e empurrado pela outra sessão. Um segundo arquivo com o mesmo nome
+seria um merge decidido por sorte.
+
+### O achado que virou PR de outra frente
+
+O manipulador do WebSocket lê **só** `content` e descarta o resto do payload.
+Um `library_file_id` mandado por ali sumiria em silêncio: a mensagem chegaria
+sem o anexo, e ninguém veria erro.
+
+Por isso o envio **com** anexo sai pelo REST — que é também onde mora o
+`ensure_pode_anexar_no_chat`. O texto puro continua saindo pelo socket.
+
+O achado foi levado à outra frente pelo canal e virou a **PR #13**, que faz o
+socket **recusar** o anexo em vez de descartá-lo. ⚠️ **Ela ainda não entrou na
+`main`** — até entrar, o silêncio existe do lado do socket, e só não morde
+porque a tela não manda anexo por ali.
+
+### Duas correções que mudam número, e não só comportamento
+
+**A marca de violação de resolução** (`f16cf0e`) só era testada quando o
+chamado **não** estava em estado terminal — e os dois caminhos que resolvem já
+puseram o status em `resolved` quando a checagem roda. Chamado que passou do
+prazo e ficou **quieto** até ser resolvido chegava com a marca em `False`, e o
+indicador agregado o dava como cumprido. **O indicador de conformidade vai
+cair, e o número novo é o certo.**
+
+**O relatório de SLA ganhou o motivo do atraso** (`7e77012`). Ele já dizia
+*quantos* estouraram e nunca *por quê* — e cinco atrasos por peça em falta e
+cinco por chamado aberto na sexta às 17h dão o mesmo número e pedem
+providências opostas. O campo já vinha na resposta e na exportação em CSV; só a
+tela não o mostrava.
+
+### E duas saídas que pareciam seguras sem ser
+
+Do levantamento do CodeQL (`e931950`): o cache do dashboard **falhava mudo** —
+engolir a exceção está certo, derrubar o `/dashboard/stats` porque o cache não
+gravou trocaria degradação por indisponibilidade; o defeito era a mudez. E o
+`testa_smtp` **vazava a chave** na saída.
+
+### Dois defeitos meus, os dois de universo
+
+Ficam registrados porque a forma se repete:
+
+- o **socket falso** do teste tinha `send() {}` e engolia o que era enviado. O
+  caso do anexo existe justamente para provar que **nada** sai por ali;
+- meus casos de socket nasceram **fora** do `describe` que finge o `WebSocket`,
+  então o global não era trocado e o socket falso nunca existia. Falharam
+  dizendo "não enviou nada", quando o que faltava era o preparo.
+
+E um terceiro, de leitura: reportei que **o pytest não produzia saída nenhuma**
+em duas tentativas. Produzia — ele leva **9 minutos**, e o cano segura tudo até
+o fim. Eu tinha lido o arquivo antes de ele terminar e chamei lentidão de
+silêncio.
+
+### Portão
+
+| | |
+|---|---|
+| front | **1443 casos**, `tsc -b` limpo, eslint 0 erros, build ok |
+| backend | **1213 casos**, cobertura 89,76% |
+
+O PR da biblioteca **não toca o backend**: `git diff origin/main...HEAD -- backend`
+vem vazio, e os dez arquivos são todos de frontend.
+
+---
+
 ## 11/09/2026 (tarde) — O 422 da justificativa estava no ar, e a tela passa a pedir o motivo do atraso
 
 A entrada de baixo, escrita de manhã, dizia que eu não tinha medido o que está
