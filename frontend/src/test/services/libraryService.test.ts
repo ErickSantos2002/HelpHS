@@ -273,3 +273,80 @@ describe("getLibraryFileUrl", () => {
     await expect(getLibraryFileUrl("l-1")).rejects.toThrow("404");
   });
 });
+
+
+/**
+ * O id entra no CAMINHO da URL, e caminho se codifica.
+ *
+ * ── O que o alerta viu, e o que ele não viu ───────────────────────────
+ *
+ * O CodeQL marcou `js/request-forgery` na linha do download: o id era
+ * interpolado cru em `/library/${id}/download`. **Não era alcançável** — a
+ * requisição sai do navegador da própria pessoa, contra a própria API, com o
+ * token dela; não há deputado confuso, e a autorização de verdade é o
+ * `ensure_pode_baixar` do servidor, que devolve 404 para cliente em item
+ * interno. Os dois chamadores passam id vindo da própria resposta da API
+ * (`LibraryPage` da listagem, `ChatPanel` da mensagem).
+ *
+ * Mas a FORMA é defeito de qualquer jeito, e o conserto custa uma chamada.
+ * Um id com `../` reescreveria o caminho: `/library/../../users/me/download`
+ * é normalizado pelo navegador para `/users/me/download`, e a requisição sai
+ * para outra rota sem que nada na tela tenha mudado.
+ *
+ * ── Por que as TRÊS, e não só a que foi marcada ───────────────────────
+ *
+ * As linhas do PATCH e do DELETE têm a forma idêntica e não foram
+ * sinalizadas. O que distingue a do download é o destino: o retorno dela vai
+ * para `window.open()`, e o CodeQL fecha o fluxo em navegação. Consertar só a
+ * marcada deixaria duas iguais no mesmo arquivo — e quem lesse depois
+ * suporia que foram consideradas e aprovadas.
+ *
+ * As asserções são de igualdade EXATA de propósito. `toContain` passaria com
+ * codificação dupla (`..%252F..`) e com o codificador errado — `encodeURI`
+ * não toca em `/`, que é justo o caractere que importa aqui.
+ */
+describe("o id vai codificado no caminho", () => {
+  const TRAVESSIA = "../../users/me";
+  const CODIFICADO = "..%2F..%2Fusers%2Fme";
+
+  it("no pedido do link de download", async () => {
+    mockGet.mockResolvedValue({ data: { url: "/api/v1/files/tok" } });
+
+    await getLibraryFileUrl(TRAVESSIA);
+
+    expect(mockGet).toHaveBeenCalledWith(`/library/${CODIFICADO}/download`);
+  });
+
+  it("na edição", async () => {
+    mockPatch.mockResolvedValue({ data: {} });
+
+    await updateLibraryFile(TRAVESSIA, { title: "x" });
+
+    expect(mockPatch).toHaveBeenCalledWith(`/library/${CODIFICADO}`, { title: "x" });
+  });
+
+  it("na exclusão", async () => {
+    mockDelete.mockResolvedValue({ data: undefined });
+
+    await deleteLibraryFile(TRAVESSIA);
+
+    expect(mockDelete).toHaveBeenCalledWith(`/library/${CODIFICADO}`);
+  });
+
+  /*
+    E o id de verdade atravessa intacto.
+
+    Sem este caso, codificar duas vezes passaria despercebido: um UUID só tem
+    hexadecimal e hífen, e nenhum dos dois muda na primeira passada NEM na
+    segunda. O que ele prende é que o conserto não estragou o caminho comum —
+    um id mutilado daria 404 em todo download do sistema.
+  */
+  it("e o id de verdade atravessa intacto", async () => {
+    const uuid = "3f2b8c1a-7d4e-4b2f-9a13-6c5d0e8f7a21";
+    mockGet.mockResolvedValue({ data: { url: "/api/v1/files/tok" } });
+
+    await getLibraryFileUrl(uuid);
+
+    expect(mockGet).toHaveBeenCalledWith(`/library/${uuid}/download`);
+  });
+});
