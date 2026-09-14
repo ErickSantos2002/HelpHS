@@ -7,7 +7,7 @@ import {
   type QuickReply,
 } from "../../services/quickReplyService";
 import { cn } from "../../lib/utils";
-import { Avatar, Button, Icon } from "../ui";
+import { Avatar, Button, Icon, Input, Modal, Spinner } from "../ui";
 import { rotuloDePapel, varianteDePapel } from "../../lib/papel";
 import { TOM_STATUS, type VarianteStatus } from "../../lib/status";
 import {
@@ -15,9 +15,82 @@ import {
   getChatMessages,
   improveMessage,
   suggestReply,
+  sendMessageWithLibraryFile,
   summarizeConversation,
   type ChatMessage,
 } from "../../services/chatService";
+import {
+  getLibraryFileUrl,
+  getLibraryFiles,
+  type LibraryFile,
+} from "../../services/libraryService";
+
+/** Tamanho legível. Sem casa decimal em byte: "512 B", não "0,5 KB". */
+function tamanhoLegivel(bytes: number): string {
+  if (bytes < 1024) return `${bytes} B`;
+  const kb = bytes / 1024;
+  if (kb < 1024) return `${Math.round(kb)} KB`;
+  return `${(kb / 1024).toFixed(1).replace(".", ",")} MB`;
+}
+
+/**
+ * O arquivo da biblioteca, dentro da bolha.
+ *
+ * ⚠️ O LINK NÃO VEM NA MENSAGEM, e por isso este componente busca um na hora
+ * do clique em vez de desenhar um `<a href>`. O link tem validade, e o
+ * `/library/{id}/download` **confere a visibilidade quando emite**: um item que
+ * o admin fechou depois do envio para de abrir para o cliente, e é assim que
+ * tem de ser. Um href gravado na bolha continuaria valendo para sempre.
+ *
+ * O 404 para o cliente é o mesmo de id inexistente, de propósito: ele não pode
+ * aprender que o arquivo existe. Aqui isso vira uma frase honesta em vez de um
+ * erro cru — o arquivo esteve ali, e deixou de estar disponível.
+ */
+function AnexoDaBiblioteca({ msg }: { msg: ChatMessage }) {
+  const [baixando, setBaixando] = useState(false);
+
+  if (!msg.library_file_id) return null;
+  const nome = msg.library_file_name ?? "Arquivo da biblioteca";
+
+  async function baixar() {
+    if (!msg.library_file_id) return;
+    setBaixando(true);
+    try {
+      const url = await getLibraryFileUrl(msg.library_file_id);
+      window.open(url, "_blank", "noopener,noreferrer");
+    } catch {
+      // Não distingue 404 de 403 na fala: a API não distingue de propósito.
+      toast.error("Este arquivo não está mais disponível para você.");
+    } finally {
+      setBaixando(false);
+    }
+  }
+
+  return (
+    <div className="mt-2 flex items-center gap-2 rounded-lg border border-borda bg-surface px-2.5 py-2">
+      <Icon name="paperclip" size={16} strokeWidth={2} className="shrink-0 text-conteudo-muted" />
+      <div className="min-w-0 flex-1">
+        <p className="truncate text-xs font-medium text-conteudo">{nome}</p>
+        {msg.library_file_size !== null && (
+          <p className="text-xs text-conteudo-muted">{tamanhoLegivel(msg.library_file_size)}</p>
+        )}
+      </div>
+      <Button
+        variant="secondary"
+        size="sm"
+        className="shrink-0"
+        loading={baixando}
+        onClick={baixar}
+        // O nome do arquivo entra no nome acessível: são vários anexos na mesma
+        // conversa, e quatro botões dizendo só "Baixar" não deixam escolher.
+        aria-label={`Baixar ${nome}`}
+        icon={<Icon name="download" size={14} strokeWidth={2} />}
+      >
+        Baixar
+      </Button>
+    </div>
+  );
+}
 
 // ── ChatBubble ────────────────────────────────────────────────
 
@@ -91,6 +164,7 @@ function ChatBubble({ msg, isOwn }: { msg: ChatMessage; isOwn: boolean }) {
               rampa a 30% — não é token com alfa (regra (a) do D8-a). */}
           <div className="rounded-xl rounded-tr-none bg-tint-primary border border-primary/30 px-3 py-2 text-sm text-conteudo leading-relaxed break-words whitespace-pre-wrap">
             {msg.content}
+            <AnexoDaBiblioteca msg={msg} />
           </div>
           <p className="text-xs text-conteudo-muted mt-0.5 text-right">
             {time}
@@ -119,6 +193,7 @@ function ChatBubble({ msg, isOwn }: { msg: ChatMessage; isOwn: boolean }) {
         </p>
         <div className="rounded-xl rounded-tl-none bg-surface-elevated border border-borda px-3 py-2 text-sm text-conteudo leading-relaxed break-words whitespace-pre-wrap">
           {msg.content}
+          <AnexoDaBiblioteca msg={msg} />
         </div>
         <p className="text-xs text-conteudo-muted mt-0.5">{time}</p>
       </div>
@@ -196,6 +271,19 @@ export function ChatPanel({
   const [wsStatus, setWsStatus] = useState<WsStatus>("connecting");
   const [input, setInput] = useState("");
   const [sending, setSending] = useState(false);
+
+  // ── Anexo da biblioteca ─────────────────────────────────────
+  //
+  // O seletor pede à API só o que é ANEXÁVEL (`visibility: "client"`). Isso
+  // não é a tela repetindo a regra: é o filtro da própria API, e quem define o
+  // que "client" significa continua sendo o backend. A guarda de verdade
+  // (`ensure_pode_anexar_no_chat`, 422) segue valendo no envio, e ela é que
+  // pega o item que MUDOU de visibilidade entre a listagem e o clique.
+  const [anexo, setAnexo] = useState<LibraryFile | null>(null);
+  const [seletorAberto, setSeletorAberto] = useState(false);
+  const [buscaArquivo, setBuscaArquivo] = useState("");
+  const [arquivos, setArquivos] = useState<LibraryFile[]>([]);
+  const [carregandoArquivos, setCarregandoArquivos] = useState(false);
   const [loadError, setLoadError] = useState(false);
   const [suggesting, setSuggesting] = useState(false);
   const [improving, setImproving] = useState(false);
@@ -226,6 +314,10 @@ export function ChatPanel({
 
   // Load initial history via REST
   useEffect(() => {
+    // A rota não tem `key`: trocar de chamado reaproveita esta instância, e o
+    // arquivo escolhido num chamado iria parar no próximo.
+    setAnexo(null);
+    setSeletorAberto(false);
     getChatMessages(ticketId, { limit: 100 })
       .then((res) => setMessages(res.items))
       .catch(() => setLoadError(true));
@@ -341,14 +433,59 @@ export function ChatPanel({
     };
   }, [connect]);
 
-  function send() {
+  // Busca ao abrir e a cada digitação. Sem debounce próprio: a lista é curta e
+  // o `limit` de 20 é o teto do backend por página.
+  useEffect(() => {
+    if (!seletorAberto) return;
+    let vivo = true;
+    setCarregandoArquivos(true);
+    getLibraryFiles({ search: buscaArquivo.trim() || undefined, visibility: "client", limit: 20 })
+      .then((r) => {
+        if (vivo) setArquivos(r.items);
+      })
+      .catch(() => {
+        if (vivo) toast.error("Não foi possível carregar a biblioteca.");
+      })
+      .finally(() => {
+        if (vivo) setCarregandoArquivos(false);
+      });
+    return () => {
+      vivo = false;
+    };
+  }, [seletorAberto, buscaArquivo]);
+
+  /**
+   * Dois caminhos, e a escolha é do contrato, não de gosto.
+   *
+   * Texto puro sai pelo WebSocket, como sempre saiu. Mensagem COM anexo sai
+   * pelo REST, porque o manipulador do WS lê **só** `content` e descarta o
+   * resto do payload — um `library_file_id` mandado por lá sumiria em
+   * silêncio, e a mensagem chegaria sem o anexo sem ninguém ver erro.
+   *
+   * Não reinsere a mensagem na lista: o próprio `POST` transmite pelo
+   * WebSocket, então ela volta pelo mesmo caminho das outras.
+   */
+  async function send() {
     const content = input.trim();
-    if (!content || wsStatus !== "connected") return;
+    if (!content || wsStatus !== "connected" || sending) return;
     setSending(true);
     try {
-      wsRef.current?.send(JSON.stringify({ content }));
+      if (anexo) {
+        await sendMessageWithLibraryFile(ticketId, content, anexo.id);
+        setAnexo(null);
+      } else {
+        wsRef.current?.send(JSON.stringify({ content }));
+      }
       setInput("");
       inputRef.current?.focus();
+    } catch (err) {
+      // O 422 do item interno traz a razão escrita, e ela é para o técnico
+      // ler: é ele quem precisa entender por que aquele arquivo não pode ir.
+      const detalhe = (err as { response?: { data?: { detail?: unknown } } })?.response?.data
+        ?.detail;
+      toast.error(
+        typeof detalhe === "string" ? detalhe : "Não foi possível enviar a mensagem.",
+      );
     } finally {
       setSending(false);
     }
@@ -564,6 +701,20 @@ export function ChatPanel({
                 </Button>
               </div>
             )}
+            {anexo && (
+              <div className="mb-2 flex items-center gap-2 rounded-lg border border-borda bg-surface-elevated px-2.5 py-1.5">
+                <Icon name="paperclip" size={14} strokeWidth={2} className="shrink-0 text-conteudo-muted" />
+                <p className="min-w-0 flex-1 truncate text-xs text-conteudo">{anexo.title}</p>
+                <Button
+                  variant="ghost"
+                  size="sm"
+                  className="shrink-0"
+                  aria-label={`Remover o anexo ${anexo.title}`}
+                  onClick={() => setAnexo(null)}
+                  icon={<Icon name="close" size={14} strokeWidth={2} />}
+                />
+              </div>
+            )}
             <div className="relative flex items-center gap-2">
               {pickerOpen && (
                 <QuickReplyPicker
@@ -606,6 +757,19 @@ export function ChatPanel({
                   O `aria-label` é acréscimo: o botão só tinha um `<svg>`
                   dentro, sem título nem rótulo, então o nome acessível era
                   VAZIO — um leitor de tela anunciava "botão" e mais nada. */}
+              {/* Só staff: `GET /library` recusa cliente, e um botão que
+                  abrisse uma lista vazia seria pior que botão nenhum. */}
+              {isStaff && (
+                <Button
+                  variant="secondary"
+                  className="shrink-0"
+                  aria-label="Anexar arquivo da biblioteca"
+                  title="Anexar arquivo da biblioteca"
+                  onClick={() => setSeletorAberto(true)}
+                  disabled={wsStatus === "disconnected"}
+                  icon={<Icon name="paperclip" size={16} strokeWidth={2} />}
+                />
+              )}
               <Button
                 variant="primary"
                 className="shrink-0"
@@ -617,10 +781,79 @@ export function ChatPanel({
             </div>
             <p className="text-xs text-conteudo-muted mt-1 pl-1">
               Enter para enviar · Shift+Enter para nova linha
+              {anexo && " · o anexo vai junto da mensagem, que não pode ir vazia"}
             </p>
           </>
         )}
       </div>
+
+      <Modal
+        open={seletorAberto}
+        onClose={() => setSeletorAberto(false)}
+        title="Anexar da biblioteca"
+        size="md"
+      >
+        <div className="space-y-3">
+          <Input
+            label="Buscar"
+            hint="Procura no título e no nome do arquivo."
+            value={buscaArquivo}
+            onChange={(e) => setBuscaArquivo(e.target.value)}
+            placeholder="Manual, ficha técnica…"
+          />
+
+          {/* A lista pede `visibility: "client"`: item interno não entra em
+              conversa, e oferecê-lo só para a API recusar depois seria fazer a
+              pessoa descobrir a regra pelo erro. */}
+          <p className="text-xs text-conteudo-muted">
+            Só itens abertos para cliente aparecem aqui — a conversa é lida por ele.
+          </p>
+
+          {carregandoArquivos ? (
+            <div className="flex justify-center py-6">
+              <Spinner />
+            </div>
+          ) : arquivos.length === 0 ? (
+            <p className="py-6 text-center text-sm text-conteudo-muted">
+              {buscaArquivo.trim()
+                ? "Nenhum arquivo encontrado para esta busca."
+                : "Nenhum arquivo aberto para cliente na biblioteca."}
+            </p>
+          ) : (
+            <ul className="max-h-80 divide-y divide-borda overflow-y-auto">
+              {arquivos.map((a) => (
+                <li key={a.id}>
+                  <button
+                    type="button"
+                    className="flex w-full items-center gap-3 px-1 py-2.5 text-left hover:bg-surface-elevated focus:outline-none focus:ring-2 focus:ring-action rounded-lg transition-colors"
+                    onClick={() => {
+                      setAnexo(a);
+                      setSeletorAberto(false);
+                      inputRef.current?.focus();
+                    }}
+                  >
+                    <Icon
+                      name="document"
+                      size={18}
+                      strokeWidth={2}
+                      className="shrink-0 text-conteudo-muted"
+                    />
+                    <span className="min-w-0 flex-1">
+                      <span className="block truncate text-sm font-medium text-conteudo">
+                        {a.title}
+                      </span>
+                      <span className="block truncate text-xs text-conteudo-muted">
+                        {a.original_name} · {tamanhoLegivel(a.size_bytes)}
+                        {a.product_name ? ` · ${a.product_name}` : ""}
+                      </span>
+                    </span>
+                  </button>
+                </li>
+              ))}
+            </ul>
+          )}
+        </div>
+      </Modal>
     </div>
   );
 }

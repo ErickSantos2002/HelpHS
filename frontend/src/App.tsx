@@ -41,6 +41,7 @@ const EquipmentPage = lazy(() => import("./pages/equipment/EquipmentPage"));
 const AuditLogsPage = lazy(() => import("./pages/audit/AuditLogsPage"));
 const SettingsPage = lazy(() => import("./pages/settings/SettingsPage"));
 const QuickRepliesPage = lazy(() => import("./pages/settings/QuickRepliesPage"));
+const LibraryPage = lazy(() => import("./pages/library/LibraryPage"));
 const ForbiddenPage = lazy(() => import("./pages/errors/ForbiddenPage"));
 const NotFoundPage = lazy(() => import("./pages/errors/NotFoundPage"));
 
@@ -139,6 +140,11 @@ function App() {
                   <Route path="/etiquetas" element={<SettingsPage />} />
                   <Route path="/respostas-rapidas" element={<QuickRepliesPage />} />
                   <Route path="/grupos" element={<GroupsPage />} />
+                  {/* A listagem do acervo é SÓ staff, e a guarda é do backend
+                      antes de ser daqui: `GET /library` recusa cliente. Esta
+                      rota é a segunda tranca, não a primeira -- o cliente
+                      recebe o arquivo pelo que o técnico anexa na conversa. */}
+                  <Route path="/biblioteca" element={<LibraryPage />} />
                 </Route>
 
                 {/* Admin only */}
