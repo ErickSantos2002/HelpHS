@@ -11,9 +11,10 @@ Permissões:
 import uuid
 from datetime import UTC, datetime
 from typing import Annotated
+from zoneinfo import ZoneInfo
 
 from fastapi import APIRouter, Depends, HTTPException, Query, status
-from sqlalchemy import select
+from sqlalchemy import and_, or_, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.core.database import get_db
@@ -24,6 +25,12 @@ from app.schemas.calendar import (
     CalendarEventListResponse,
     CalendarEventResponse,
     CalendarEventUpdate,
+)
+from app.utils.agenda import (
+    FUSO_UTC,
+    bordas_do_dia_inteiro,
+    janela_do_mes,
+    resolve_fuso,
 )
 
 router = APIRouter(prefix="/calendar", tags=["Calendar"])
@@ -36,6 +43,37 @@ def _to_response(event: CalendarEvent) -> CalendarEventResponse:
     return resp
 
 
+def _fuso_ou_422(nome: str | None) -> ZoneInfo:
+    try:
+        return resolve_fuso(nome)
+    except ValueError as exc:
+        raise HTTPException(
+            status_code=status.HTTP_422_UNPROCESSABLE_CONTENT, detail=str(exc)
+        ) from exc
+
+
+def _bordas(inicio: datetime, fim: datetime, dia_inteiro: bool) -> tuple[datetime, datetime]:
+    """As datas como vão para o banco: derivadas quando é dia inteiro."""
+    if dia_inteiro:
+        return bordas_do_dia_inteiro(inicio, fim)
+    return inicio, fim
+
+
+def _valida_ordem(inicio: datetime, fim: datetime) -> None:
+    """O fim vem DEPOIS do início. Igual não passa: evento de duração zero não existe.
+
+    A conferência roda sobre os valores JÁ derivados, e não sobre o que chegou.
+    Um dia inteiro de um dia só chega com início e fim na mesma data — igual,
+    portanto — e só depois de derivado vira `00:00` a `23:59:59.999999`.
+    Conferir antes recusaria justamente o caso mais comum da agenda.
+    """
+    if fim <= inicio:
+        raise HTTPException(
+            status_code=status.HTTP_422_UNPROCESSABLE_CONTENT,
+            detail="A data de fim precisa ser posterior à data de início.",
+        )
+
+
 # ── GET /calendar/events ──────────────────────────────────────
 
 
@@ -45,16 +83,47 @@ async def list_events(
     _actor: Annotated[User, Depends(authorize(UserRole.admin, UserRole.technician))],
     year: int | None = Query(default=None),
     month: int | None = Query(default=None),
+    # O fuso de quem olha. Sem ele a janela do mês seria a de UTC, e um evento
+    # às 22:00 do dia 31 — que é 01:00Z do dia 1º seguinte — cairia no mês
+    # errado: a pessoa cria em janeiro e ele aparece em fevereiro.
+    timezone: str | None = Query(default=None),
 ) -> CalendarEventListResponse:
+    fuso = _fuso_ou_422(timezone)
     stmt = select(CalendarEvent).order_by(CalendarEvent.start_date)
 
     if year and month:
-        start = datetime(year, month, 1, tzinfo=UTC)
-        if month == 12:
-            end = datetime(year + 1, 1, 1, tzinfo=UTC)
-        else:
-            end = datetime(year, month + 1, 1, tzinfo=UTC)
-        stmt = stmt.where(CalendarEvent.start_date < end, CalendarEvent.end_date >= start)
+        # DUAS janelas, porque são duas naturezas de evento.
+        #
+        # O evento COM HORA é um instante: ele pertence ao mês de quem olha, e a
+        # janela dele é a local. O evento de DIA INTEIRO é data flutuante,
+        # ancorada em UTC — a janela dele é a de UTC.
+        #
+        # Usar só a local punha todo evento antigo de dia inteiro do dia 1º
+        # também no mês ANTERIOR: eles são `00:00:00Z`–`23:59:59Z`, e a janela
+        # local de Recife só começa às 03:00Z do dia 1º, de modo que o instante
+        # inicial deles cai antes dela. Para um evento com hora esse
+        # deslocamento é a verdade; para um de dia inteiro é justamente o que a
+        # ancoragem em UTC existe para negar. Medido em
+        # `test_calendar_postgres.py`.
+        inicio_local, fim_local = janela_do_mes(year, month, fuso)
+        inicio_utc, fim_utc = janela_do_mes(year, month, FUSO_UTC)
+        # Sobreposição, e não contenção: um evento que atravessa a virada do mês
+        # pertence aos dois. `>=` e não `>` porque o último microssegundo do dia
+        # inteiro ainda está dentro dele.
+        stmt = stmt.where(
+            or_(
+                and_(
+                    CalendarEvent.all_day.is_(False),
+                    CalendarEvent.start_date < fim_local,
+                    CalendarEvent.end_date >= inicio_local,
+                ),
+                and_(
+                    CalendarEvent.all_day.is_(True),
+                    CalendarEvent.start_date < fim_utc,
+                    CalendarEvent.end_date >= inicio_utc,
+                ),
+            )
+        )
 
     rows = await db.execute(stmt)
     events = rows.scalars().all()
@@ -85,11 +154,8 @@ async def create_event(
     db: Annotated[AsyncSession, Depends(get_db)],
     actor: Annotated[User, Depends(authorize(UserRole.admin, UserRole.technician))],
 ) -> CalendarEventResponse:
-    if body.end_date < body.start_date:
-        raise HTTPException(
-            status_code=status.HTTP_422_UNPROCESSABLE_CONTENT,
-            detail="A data de fim precisa ser igual ou posterior à data de início.",
-        )
+    inicio, fim = _bordas(body.start_date, body.end_date, body.all_day)
+    _valida_ordem(inicio, fim)
 
     now = datetime.now(UTC)
     event = CalendarEvent(
@@ -98,8 +164,9 @@ async def create_event(
         description=body.description,
         event_type=body.event_type,
         color=body.color,
-        start_date=body.start_date,
-        end_date=body.end_date,
+        start_date=inicio,
+        end_date=fim,
+        all_day=body.all_day,
         created_by=actor.id,
         # Explícito: o default da coluna só valeria no INSERT e a resposta é
         # montada a partir do objeto em memória
@@ -153,12 +220,15 @@ async def update_event(
         event.start_date = body.start_date
     if body.end_date is not None:
         event.end_date = body.end_date
+    if body.all_day is not None:
+        event.all_day = body.all_day
 
-    if event.end_date < event.start_date:
-        raise HTTPException(
-            status_code=status.HTTP_422_UNPROCESSABLE_CONTENT,
-            detail="A data de fim precisa ser igual ou posterior à data de início.",
-        )
+    # As bordas são derivadas DEPOIS de aplicar os campos, e com a chave que
+    # vale agora. Ligar "dia inteiro" sem mandar data nenhuma precisa reescrever
+    # as horas que já estavam lá — senão a coluna diria 14:30 e a chave diria
+    # dia inteiro, e o registro passaria a se contradizer.
+    event.start_date, event.end_date = _bordas(event.start_date, event.end_date, event.all_day)
+    _valida_ordem(event.start_date, event.end_date)
 
     await db.commit()
     await db.refresh(event)

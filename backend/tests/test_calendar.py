@@ -58,7 +58,7 @@ def _mock_user(role=UserRole.technician, user_id=None):
     return u
 
 
-def _mock_event(created_by=_CREATOR_ID):
+def _mock_event(created_by=_CREATOR_ID, all_day=False):
     e = MagicMock()
     e.id = _EVENT_ID
     e.title = "Treinamento de bafômetros"
@@ -67,6 +67,18 @@ def _mock_event(created_by=_CREATOR_ID):
     e.color = "#10b981"
     e.start_date = _NOW
     e.end_date = _NOW + timedelta(days=1)
+    # ⚠️ Booleano PRECISA de valor explícito aqui.
+    #
+    # Atributo de `MagicMock` que ninguém definiu devolve outro `MagicMock`, e
+    # `MagicMock` é VERDADEIRO. Sem esta linha, `all_day` lia como ligado em
+    # todos os casos deste arquivo — e o PATCH passava a derivar as bordas do
+    # dia, apagando as horas que o caso acabara de mandar. O sintoma foi um
+    # `assert event.start_date == novo_inicio` falhando com a meia-noite do dia
+    # certo, que parece erro de fuso e não é.
+    #
+    # Vale para qualquer coluna booleana nova: o default do mock é `True` sem
+    # que ninguém tenha escrito `True` em lugar nenhum.
+    e.all_day = all_day
     e.created_by = created_by
     e.creator = None
     # O response lê este atributo direto do objeto; sem valor explícito o
@@ -458,3 +470,197 @@ async def test_nulo_em_campo_not_null_continua_ignorado(patch_redis):
     assert event.title == "Treinamento de bafômetros"
     assert event.color == "#10b981"
     assert event.event_type == CalendarEventType.training
+
+
+# ── Horário e dia inteiro ─────────────────────────────────────
+#
+# A agenda sempre PÔDE guardar hora: `start_date` e `end_date` são
+# `TIMESTAMPTZ` desde que a tabela nasceu. O que faltava é que a tela só tinha
+# campo de data e mandava `T00:00:00Z` / `T23:59:59Z` — todo evento era de dia
+# inteiro por convenção, sem nada dizendo isso.
+#
+# A chave `all_day` dá nome à convenção. Quando ligada, a API DERIVA as bordas
+# do dia e descarta a hora recebida; quando desligada, a hora atravessa intacta.
+
+
+@pytest.mark.asyncio
+async def test_dia_inteiro_descarta_a_hora_e_grava_as_bordas_do_dia(patch_redis):
+    """A hora que veio junto não sobrevive — senão o registro se contradiz."""
+    from app.core.database import get_db
+
+    _override_user(_mock_user(UserRole.admin))
+    app.dependency_overrides[get_db] = _db_override(None)
+
+    body = _event_body(
+        start_date="2026-01-15T14:30:00Z",
+        end_date="2026-01-15T17:00:00Z",
+    )
+    body["all_day"] = True
+
+    async with AsyncClient(transport=ASGITransport(app=app), base_url="http://test") as c:
+        r = await c.post("/api/v1/calendar/events", json=body)
+
+    assert r.status_code == 201
+    corpo = r.json()
+    assert corpo["all_day"] is True
+    assert corpo["start_date"].startswith("2026-01-15T00:00:00")
+    assert "23:59:59.999999" in corpo["end_date"]
+
+
+@pytest.mark.asyncio
+async def test_evento_com_horario_guarda_a_hora_exata(patch_redis):
+    """O outro lado da chave: sem `all_day`, nada é derivado."""
+    from app.core.database import get_db
+
+    _override_user(_mock_user(UserRole.admin))
+    app.dependency_overrides[get_db] = _db_override(None)
+
+    body = _event_body(
+        start_date="2026-01-15T14:30:00Z",
+        end_date="2026-01-15T17:00:00Z",
+    )
+
+    async with AsyncClient(transport=ASGITransport(app=app), base_url="http://test") as c:
+        r = await c.post("/api/v1/calendar/events", json=body)
+
+    assert r.status_code == 201
+    corpo = r.json()
+    assert corpo["all_day"] is False
+    assert corpo["start_date"].startswith("2026-01-15T14:30:00")
+    assert corpo["end_date"].startswith("2026-01-15T17:00:00")
+
+
+@pytest.mark.asyncio
+async def test_evento_atravessa_a_virada_do_dia(patch_redis):
+    """22:00 de um dia até 02:00 do seguinte: aceito, e as duas datas ficam.
+
+    É o caso que o desenho pediu. Antes da hora existir ele nem era
+    expressável: dois campos de data davam "dia 31 ao dia 1º", que a tela
+    desenhava como dois dias inteiros.
+    """
+    from app.core.database import get_db
+
+    _override_user(_mock_user(UserRole.admin))
+    app.dependency_overrides[get_db] = _db_override(None)
+
+    body = _event_body(
+        start_date="2026-01-31T22:00:00Z",
+        end_date="2026-02-01T02:00:00Z",
+    )
+
+    async with AsyncClient(transport=ASGITransport(app=app), base_url="http://test") as c:
+        r = await c.post("/api/v1/calendar/events", json=body)
+
+    assert r.status_code == 201
+    corpo = r.json()
+    assert corpo["start_date"].startswith("2026-01-31T22:00:00")
+    assert corpo["end_date"].startswith("2026-02-01T02:00:00")
+
+
+@pytest.mark.asyncio
+async def test_fim_igual_ao_inicio_e_recusado(patch_redis):
+    """Evento de duração zero não existe.
+
+    Com data-só isto nunca acontecia — a tela mandava 00:00 e 23:59, sempre
+    diferentes. Com hora, o mesmo instante nos dois campos passa a ser
+    digitável, e `<` deixava passar.
+    """
+    from app.core.database import get_db
+
+    _override_user(_mock_user(UserRole.admin))
+    app.dependency_overrides[get_db] = _db_override(None)
+
+    body = _event_body(
+        start_date="2026-01-15T14:30:00Z",
+        end_date="2026-01-15T14:30:00Z",
+    )
+
+    async with AsyncClient(transport=ASGITransport(app=app), base_url="http://test") as c:
+        r = await c.post("/api/v1/calendar/events", json=body)
+
+    assert r.status_code == 422
+    assert "posterior" in r.json()["detail"]
+
+
+@pytest.mark.asyncio
+async def test_dia_inteiro_de_um_dia_so_nao_cai_na_recusa_de_duracao_zero(patch_redis):
+    """O caso que prende a ORDEM entre derivar e validar.
+
+    Um dia inteiro de um dia só chega com início e fim na MESMA data — iguais,
+    portanto. Validar antes de derivar recusaria o evento mais comum da agenda
+    com a mensagem de duração zero, e o defeito só apareceria em produção, na
+    primeira pessoa que marcasse um treinamento de um dia.
+    """
+    from app.core.database import get_db
+
+    _override_user(_mock_user(UserRole.admin))
+    app.dependency_overrides[get_db] = _db_override(None)
+
+    body = _event_body(
+        start_date="2026-01-15T00:00:00Z",
+        end_date="2026-01-15T00:00:00Z",
+    )
+    body["all_day"] = True
+
+    async with AsyncClient(transport=ASGITransport(app=app), base_url="http://test") as c:
+        r = await c.post("/api/v1/calendar/events", json=body)
+
+    assert r.status_code == 201, r.json()
+    assert "23:59:59.999999" in r.json()["end_date"]
+
+
+@pytest.mark.asyncio
+async def test_ligar_dia_inteiro_na_edicao_reescreve_as_horas(patch_redis):
+    """Ligar a chave sem mandar data nenhuma precisa alcançar as horas antigas.
+
+    Senão a coluna diria 14:30 e a chave diria dia inteiro, e o registro
+    passaria a se contradizer — quem lesse a coluna sem ler a chave veria um
+    evento de meia tarde.
+    """
+    from app.core.database import get_db
+
+    _override_user(_mock_user(UserRole.admin))
+    event = _mock_event(created_by=None, all_day=False)
+    event.start_date = datetime(2026, 1, 15, 14, 30, tzinfo=UTC)
+    event.end_date = datetime(2026, 1, 15, 17, 0, tzinfo=UTC)
+    app.dependency_overrides[get_db] = _db_override(event)
+
+    async with AsyncClient(transport=ASGITransport(app=app), base_url="http://test") as c:
+        r = await c.patch(f"/api/v1/calendar/events/{_EVENT_ID}", json={"all_day": True})
+
+    assert r.status_code == 200
+    assert event.start_date == datetime(2026, 1, 15, tzinfo=UTC)
+    assert event.end_date == datetime(2026, 1, 15, 23, 59, 59, 999999, tzinfo=UTC)
+
+
+@pytest.mark.asyncio
+async def test_fuso_desconhecido_na_consulta_e_recusado(patch_redis):
+    """Recusa, e não volta calado para o padrão.
+
+    Cair no padrão faria quem escreveu o fuso errado receber o mês de outro
+    lugar e nunca descobrir: o sintoma seria "alguns eventos somem", meses
+    depois, sem nada apontando para a letra trocada.
+    """
+    from app.core.database import get_db
+
+    _override_user(_mock_user(UserRole.admin))
+    app.dependency_overrides[get_db] = _db_override([], [])
+
+    async with AsyncClient(transport=ASGITransport(app=app), base_url="http://test") as c:
+        r = await c.get("/api/v1/calendar/events?year=2026&month=1&timezone=Marte/Olimpo")
+
+    assert r.status_code == 422
+    assert "Marte/Olimpo" in r.json()["detail"]
+
+
+@pytest.mark.asyncio
+async def test_fuso_conhecido_na_consulta_e_aceito(patch_redis):
+    from app.core.database import get_db
+
+    _override_user(_mock_user(UserRole.admin))
+    app.dependency_overrides[get_db] = _db_override([], [])
+
+    async with AsyncClient(transport=ASGITransport(app=app), base_url="http://test") as c:
+        r = await c.get("/api/v1/calendar/events?year=2026&month=1&timezone=America/Sao_Paulo")
+
+    assert r.status_code == 200

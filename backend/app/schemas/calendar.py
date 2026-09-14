@@ -18,6 +18,9 @@ class CalendarEventCreate(AppBaseModel):
     color: str = Field(default="#6366f1", pattern=r"^#[0-9a-fA-F]{6}$")
     start_date: datetime
     end_date: datetime
+    # Liga o modo data: a API descarta a hora recebida e grava as bordas do dia.
+    # Default `False` para nao mudar o significado do que ja e mandado hoje.
+    all_day: bool = False
 
 
 class CalendarEventUpdate(AppBaseModel):
@@ -27,6 +30,7 @@ class CalendarEventUpdate(AppBaseModel):
     color: str | None = Field(default=None, pattern=r"^#[0-9a-fA-F]{6}$")
     start_date: datetime | None = None
     end_date: datetime | None = None
+    all_day: bool | None = None
 
 
 class CalendarEventResponse(AppBaseModel):
@@ -39,6 +43,7 @@ class CalendarEventResponse(AppBaseModel):
     color: str
     start_date: datetime
     end_date: datetime
+    all_day: bool
     created_by: uuid.UUID | None
     creator_name: str | None = None
     created_at: datetime

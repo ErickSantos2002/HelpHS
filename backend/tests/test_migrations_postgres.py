@@ -47,7 +47,7 @@ _BANCO = "migracoes_testes"
 _ANTES_DO_BACKFILL = "u1p2q3r4s5t6"
 
 
-def _alembic(url: str, alvo: str) -> subprocess.CompletedProcess[str]:
+def _alembic(url: str, alvo: str, comando: str = "upgrade") -> subprocess.CompletedProcess[str]:
     """
     Roda o alembic como SUBPROCESSO, igual ao `start.sh`.
 
@@ -62,7 +62,7 @@ def _alembic(url: str, alvo: str) -> subprocess.CompletedProcess[str]:
         "APP_ENV": "testing",
     }
     return subprocess.run(  # noqa: S603
-        [sys.executable, "-m", "alembic", "upgrade", alvo],
+        [sys.executable, "-m", "alembic", comando, alvo],
         cwd=_BACKEND,
         env=ambiente,
         capture_output=True,
@@ -367,3 +367,97 @@ async def test_consultas_do_diagnostico_executam(sessao, banco):
         _LEVANTAMENTO,
     ):
         await sessao.execute(text(consulta))
+
+
+# ── O caminho de volta da agenda ──────────────────────────────
+#
+# Nenhuma migration deste projeto tinha caso de `downgrade` até aqui. Este
+# existe porque o desenho da agenda pediu o caminho de volta guardado, e
+# "guardado" só vale se alguém já tiver descido por ele: `downgrade` que nunca
+# rodou é código que se descobre quebrado no pior momento possível, com o
+# banco no meio de uma reversão.
+
+
+@pytest.mark.asyncio
+async def test_a_agenda_desce_e_sobe_sem_perder_horario(banco):
+    """`downgrade -1` larga a chave e devolve as horas intactas."""
+    assert _alembic(banco, "head").returncode == 0
+
+    inicio = "2026-01-31 22:00:00+00"
+    fim = "2026-02-01 02:00:00+00"
+    motor = create_async_engine(banco)
+    async with motor.begin() as conn:
+        await conn.execute(
+            text(
+                "INSERT INTO calendar_events "
+                "(id, title, event_type, color, start_date, end_date, all_day, "
+                " created_at, updated_at) "
+                "VALUES (gen_random_uuid(), 'plantão da virada', 'meeting', '#6366f1', "
+                f"'{inicio}', '{fim}', false, now(), now())"
+            )
+        )
+    await motor.dispose()
+
+    descida = _alembic(banco, "-1", comando="downgrade")
+    assert descida.returncode == 0, f"downgrade falhou: {descida.stdout} {descida.stderr}"
+
+    motor = create_async_engine(banco)
+    async with motor.connect() as conn:
+        colunas = (
+            (
+                await conn.execute(
+                    text(
+                        "SELECT column_name FROM information_schema.columns "
+                        "WHERE table_name = 'calendar_events'"
+                    )
+                )
+            )
+            .scalars()
+            .all()
+        )
+        assert "all_day" not in colunas, "a coluna ficou para trás"
+
+        # O que importa: as horas continuam lá. O que se perde ao voltar é a
+        # distinção entre "dia inteiro" e "evento que dura o dia todo", e ela é
+        # recuperável por convenção — nenhum horário é destruído.
+        linha = (await conn.execute(text("SELECT start_date, end_date FROM calendar_events"))).one()
+        assert linha[0].isoformat().startswith("2026-01-31T22:00")
+        assert linha[1].isoformat().startswith("2026-02-01T02:00")
+    await motor.dispose()
+
+    subida = _alembic(banco, "head")
+    assert subida.returncode == 0, f"upgrade de volta falhou: {subida.stderr}"
+
+    motor = create_async_engine(banco)
+    async with motor.connect() as conn:
+        # O `server_default` da subida alcança a linha que sobreviveu: ela volta
+        # como dia inteiro, que é o mesmo destino dos eventos antigos.
+        assert (
+            await conn.execute(text("SELECT all_day FROM calendar_events"))
+        ).scalar_one() is True
+    await motor.dispose()
+
+
+@pytest.mark.asyncio
+async def test_depois_da_migration_quem_insere_evento_declara_a_chave(banco):
+    """O `server_default` sai na mesma migration, e este caso prova que saiu.
+
+    Ele existia para as linhas de antes. Se ficasse, um INSERT que omitisse a
+    coluna viraria um evento de dia inteiro em SILÊNCIO — o contrário do que um
+    evento com horário quer, e sem nada acusando.
+    """
+    assert _alembic(banco, "head").returncode == 0
+
+    motor = create_async_engine(banco)
+    with pytest.raises(Exception, match="all_day"):
+        async with motor.begin() as conn:
+            await conn.execute(
+                text(
+                    "INSERT INTO calendar_events "
+                    "(id, title, event_type, color, start_date, end_date, "
+                    " created_at, updated_at) "
+                    "VALUES (gen_random_uuid(), 'sem a chave', 'meeting', '#6366f1', "
+                    "now(), now() + interval '1 hour', now(), now())"
+                )
+            )
+    await motor.dispose()
