@@ -8,6 +8,12 @@ vi.mock("../../services/chatService", () => ({
   improveMessage: vi.fn(),
   suggestReply: vi.fn(),
   summarizeConversation: vi.fn(),
+  sendMessageWithLibraryFile: vi.fn(),
+}));
+
+vi.mock("../../services/libraryService", () => ({
+  getLibraryFiles: vi.fn(),
+  getLibraryFileUrl: vi.fn(),
 }));
 
 vi.mock("../../services/quickReplyService", () => ({
@@ -17,12 +23,17 @@ vi.mock("../../services/quickReplyService", () => ({
 
 vi.mock("sonner", () => ({ toast: { error: vi.fn(), success: vi.fn() } }));
 
+import { toast } from "sonner";
+
 import { ChatPanel } from "../../components/chat/ChatPanel";
 import type { ChatMessage } from "../../services/chatService";
 import {
   getChatMessages,
+  sendMessageWithLibraryFile,
   summarizeConversation,
 } from "../../services/chatService";
+import { getLibraryFileUrl, getLibraryFiles } from "../../services/libraryService";
+import type { LibraryFile } from "../../services/libraryService";
 import { listQuickReplies } from "../../services/quickReplyService";
 
 /**
@@ -64,6 +75,9 @@ class SocketFalso {
   onmessage: ((ev: { data: string }) => void) | null = null;
   onclose: ((ev: { code: number }) => void) | null = null;
   onerror: (() => void) | null = null;
+  /** O que foi enviado por aqui. Era descartado, e o anexo precisa provar que
+      a mensagem com arquivo NÃO sai por este caminho. */
+  enviados: string[] = [];
 
   constructor(url: string) {
     this.url = url;
@@ -75,7 +89,9 @@ class SocketFalso {
     this.onclose?.({ code });
   }
 
-  send() {}
+  send(payload: string) {
+    this.enviados.push(payload);
+  }
 }
 
 /** Cada render devolve uma arrow NOVA, igual ao TicketDetailPage:1437. */
@@ -232,7 +248,14 @@ async function abre(ws: SocketFalso) {
   });
 }
 
-describe("ChatPanel — o que o painel promete", () => {
+/**
+ * O preparo é UMA função porque ele é a mesma coisa em todo bloco, e porque a
+ * versão duplicada já custou: os casos do anexo nasceram fora deste `describe`
+ * e sem o `stubGlobal`, então o `WebSocket` era o de verdade e o socket falso
+ * nunca chegava a existir. Três casos falharam dizendo "não enviou nada" —
+ * quando o que faltava era o preparo, não o envio.
+ */
+function preparaOPainel() {
   beforeEach(() => {
     sequencia = 0;
     socketsConstruidos.length = 0;
@@ -244,6 +267,13 @@ describe("ChatPanel — o que o painel promete", () => {
   afterEach(() => {
     vi.unstubAllGlobals();
     vi.clearAllMocks();
+  });
+}
+
+describe("ChatPanel — o que o painel promete", () => {
+  preparaOPainel();
+
+  afterEach(() => {
   });
 
   it("o nome e o papel de quem escreveu ficam ESCRITOS", async () => {
@@ -409,6 +439,269 @@ describe("ChatPanel — o que o painel promete", () => {
       expect(
         screen.queryByText("Cliente sem internet desde ontem."),
       ).not.toBeInTheDocument(),
+    );
+  });
+});
+
+
+/**
+ * O anexo da biblioteca (PR #6).
+ *
+ * Duas metades que não se encostam: a BOLHA, que todo mundo vê e cujo link é
+ * buscado no clique; e o SELETOR, que só staff tem, e cujo envio sai pelo REST
+ * porque o WebSocket descarta o `library_file_id`.
+ */
+function arquivo(over: Partial<LibraryFile> = {}): LibraryFile {
+  return {
+    id: "lib-7",
+    title: "Manual do Phoebus",
+    description: null,
+    product_id: null,
+    product_name: null,
+    visibility: "client",
+    original_name: "manual.pdf",
+    mime_type: "application/pdf",
+    size_bytes: 1048576,
+    virus_scanned: true,
+    virus_clean: true,
+    uploaded_by: "u-1",
+    created_at: "2026-09-01T12:00:00Z",
+    updated_at: "2026-09-01T12:00:00Z",
+    ...over,
+  };
+}
+
+describe("anexo da biblioteca na bolha", () => {
+  preparaOPainel();
+
+  it("mostra o nome e o tamanho do arquivo anexado", async () => {
+    await montar({
+      historico: [
+        mensagem({
+          content: "Segue o manual.",
+          library_file_id: "lib-7",
+          library_file_name: "manual.pdf",
+          library_file_size: 1048576,
+        }),
+      ],
+    });
+
+    expect(screen.getByText("manual.pdf")).toBeInTheDocument();
+    expect(screen.getByText("1,0 MB")).toBeInTheDocument();
+  });
+
+  it("busca o link no CLIQUE, e não ao desenhar a bolha", async () => {
+    // O link tem validade e a API confere a visibilidade ao EMITIR. Um href
+    // gravado na bolha continuaria valendo depois de o item ser fechado.
+    vi.mocked(getLibraryFileUrl).mockResolvedValue("https://exemplo/arquivo.pdf");
+    const abrir = vi.spyOn(window, "open").mockReturnValue(null);
+
+    await montar({
+      historico: [
+        mensagem({ library_file_id: "lib-7", library_file_name: "manual.pdf" }),
+      ],
+    });
+
+    expect(getLibraryFileUrl).not.toHaveBeenCalled();
+
+    await act(async () => {
+      fireEvent.click(screen.getByRole("button", { name: "Baixar manual.pdf" }));
+    });
+
+    expect(getLibraryFileUrl).toHaveBeenCalledWith("lib-7");
+    await waitFor(() =>
+      expect(abrir).toHaveBeenCalledWith(
+        "https://exemplo/arquivo.pdf",
+        "_blank",
+        "noopener,noreferrer",
+      ),
+    );
+    abrir.mockRestore();
+  });
+
+  it("o nome do arquivo entra no nome acessível do botão", async () => {
+    // São vários anexos na mesma conversa. Quatro botões dizendo só "Baixar"
+    // não deixam escolher qual.
+    await montar({
+      historico: [
+        mensagem({ library_file_id: "a", library_file_name: "manual.pdf" }),
+        mensagem({ library_file_id: "b", library_file_name: "ficha.pdf" }),
+      ],
+    });
+
+    expect(screen.getByRole("button", { name: "Baixar manual.pdf" })).toBeInTheDocument();
+    expect(screen.getByRole("button", { name: "Baixar ficha.pdf" })).toBeInTheDocument();
+  });
+
+  it("link recusado vira frase honesta, e não erro cru", async () => {
+    // O admin pode ter fechado o item DEPOIS do envio. Para o cliente a API
+    // responde 404, igual a id inexistente — ele não pode aprender que existe.
+    vi.mocked(getLibraryFileUrl).mockRejectedValue(new Error("404"));
+
+    await montar({
+      historico: [
+        mensagem({ library_file_id: "lib-7", library_file_name: "manual.pdf" }),
+      ],
+    });
+    await act(async () => {
+      fireEvent.click(screen.getByRole("button", { name: "Baixar manual.pdf" }));
+    });
+
+    await waitFor(() =>
+      expect(toast.error).toHaveBeenCalledWith(
+        "Este arquivo não está mais disponível para você.",
+      ),
+    );
+  });
+
+  it("mensagem sem anexo não desenha nada de arquivo", async () => {
+    // Controle negativo: sem ele, um componente que sempre desenhasse a caixa
+    // passaria nos casos acima.
+    await montar({ historico: [mensagem({ content: "Sem anexo aqui." })] });
+
+    expect(screen.queryByRole("button", { name: /^Baixar/ })).not.toBeInTheDocument();
+  });
+});
+
+describe("seletor da biblioteca", () => {
+  preparaOPainel();
+
+  it("o botão de anexar é só do staff", async () => {
+    // `GET /library` recusa cliente: um botão que abrisse lista vazia seria
+    // pior que botão nenhum.
+    await montar({ papel: "client" });
+    expect(
+      screen.queryByRole("button", { name: "Anexar arquivo da biblioteca" }),
+    ).not.toBeInTheDocument();
+  });
+
+  it("o staff tem o botão, e ele abre a lista pedindo só o que é anexável", async () => {
+    vi.mocked(getLibraryFiles).mockResolvedValue({
+      items: [arquivo()],
+      total: 1,
+      limit: 20,
+      offset: 0,
+    });
+
+    await montar({ papel: "technician" });
+    await act(async () => {
+      fireEvent.click(screen.getByRole("button", { name: "Anexar arquivo da biblioteca" }));
+    });
+
+    // `visibility: "client"` é o filtro da PRÓPRIA API, não a tela repetindo a
+    // regra: quem define o que "client" significa segue sendo o backend.
+    await waitFor(() =>
+      expect(getLibraryFiles).toHaveBeenCalledWith(
+        expect.objectContaining({ visibility: "client" }),
+      ),
+    );
+    expect(await screen.findByText("Manual do Phoebus")).toBeInTheDocument();
+  });
+
+  it("escolher um arquivo mostra o chip, e enviar vai pelo REST — não pelo socket", async () => {
+    // A metade que importa: o manipulador do WebSocket lê SÓ `content`, então
+    // um `library_file_id` mandado por lá sumiria em silêncio.
+    vi.mocked(getLibraryFiles).mockResolvedValue({
+      items: [arquivo()],
+      total: 1,
+      limit: 20,
+      offset: 0,
+    });
+    vi.mocked(sendMessageWithLibraryFile).mockResolvedValue(mensagem());
+
+    const ws = await montar({ papel: "technician" });
+    await abre(ws);
+
+    await act(async () => {
+      fireEvent.click(screen.getByRole("button", { name: "Anexar arquivo da biblioteca" }));
+    });
+    await act(async () => {
+      fireEvent.click(await screen.findByText("Manual do Phoebus"));
+    });
+
+    expect(
+      screen.getByRole("button", { name: "Remover o anexo Manual do Phoebus" }),
+    ).toBeInTheDocument();
+
+    const campo = screen.getByPlaceholderText(/Escreva uma mensagem/);
+    fireEvent.change(campo, { target: { value: "Segue o manual." } });
+    await act(async () => {
+      fireEvent.click(screen.getByRole("button", { name: "Enviar mensagem" }));
+    });
+
+    await waitFor(() =>
+      expect(sendMessageWithLibraryFile).toHaveBeenCalledWith("t-1", "Segue o manual.", "lib-7"),
+    );
+    expect(ws.enviados).toHaveLength(0);
+  });
+
+  it("sem anexo, o envio continua indo pelo socket", async () => {
+    // Controle negativo do caso acima: sem ele, mandar TUDO pelo REST passaria.
+    vi.mocked(sendMessageWithLibraryFile).mockResolvedValue(mensagem());
+    const ws = await montar({ papel: "technician" });
+    await abre(ws);
+
+    const campo = screen.getByPlaceholderText(/Escreva uma mensagem/);
+    fireEvent.change(campo, { target: { value: "só texto" } });
+    await act(async () => {
+      fireEvent.click(screen.getByRole("button", { name: "Enviar mensagem" }));
+    });
+
+    expect(sendMessageWithLibraryFile).not.toHaveBeenCalled();
+    expect(ws.enviados).toHaveLength(1);
+  });
+
+  it("anexo não dispensa o texto: o envio segue travado com o campo vazio", async () => {
+    // `content` é `min_length=1` no schema. Não existe mensagem só com
+    // arquivo, e isso é restrição de contrato, não escolha de tela.
+    vi.mocked(getLibraryFiles).mockResolvedValue({
+      items: [arquivo()],
+      total: 1,
+      limit: 20,
+      offset: 0,
+    });
+
+    const ws = await montar({ papel: "technician" });
+    await abre(ws);
+    await act(async () => {
+      fireEvent.click(screen.getByRole("button", { name: "Anexar arquivo da biblioteca" }));
+    });
+    await act(async () => {
+      fireEvent.click(await screen.findByText("Manual do Phoebus"));
+    });
+
+    expect(screen.getByRole("button", { name: "Enviar mensagem" })).toBeDisabled();
+  });
+
+  it("o 422 do item interno chega ao técnico com a razão que a API escreveu", async () => {
+    // A recusa é da API, e ela é quem sabe o porquê. A tela não inventa texto.
+    vi.mocked(getLibraryFiles).mockResolvedValue({
+      items: [arquivo()],
+      total: 1,
+      limit: 20,
+      offset: 0,
+    });
+    vi.mocked(sendMessageWithLibraryFile).mockRejectedValue({
+      response: { data: { detail: "Este arquivo da biblioteca é de uso interno." } },
+    });
+
+    const ws = await montar({ papel: "technician" });
+    await abre(ws);
+    await act(async () => {
+      fireEvent.click(screen.getByRole("button", { name: "Anexar arquivo da biblioteca" }));
+    });
+    await act(async () => {
+      fireEvent.click(await screen.findByText("Manual do Phoebus"));
+    });
+    fireEvent.change(screen.getByPlaceholderText(/Escreva uma mensagem/), {
+      target: { value: "Segue." },
+    });
+    await act(async () => {
+      fireEvent.click(screen.getByRole("button", { name: "Enviar mensagem" }));
+    });
+
+    await waitFor(() =>
+      expect(toast.error).toHaveBeenCalledWith("Este arquivo da biblioteca é de uso interno."),
     );
   });
 });

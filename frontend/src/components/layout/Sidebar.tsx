@@ -60,6 +60,12 @@ const NAV_GROUPS: NavGroup[] = [
       { label: "Agenda",     path: "/agenda",  icon: "calendar", roles: ["admin", "technician"] },
       { label: "Grupos",     path: "/grupos",  icon: "groups",   roles: ["admin", "technician"] },
       { label: "Respostas Rápidas", path: "/respostas-rapidas", icon: "chat", roles: ["admin", "technician"] },
+      // Gestão, e não Principal: o acervo é ferramenta de ATENDIMENTO,
+      // vizinha das Respostas Rápidas. O cliente não o vê -- ele recebe
+      // o arquivo pelo que o técnico anexa na conversa, e `GET /library`
+      // recusa cliente no backend. `folder` porque `book` já é a Base de
+      // Conhecimento e `document` é arquivo único, não acervo.
+      { label: "Biblioteca", path: "/biblioteca", icon: "folder", roles: ["admin", "technician"] },
     ],
   },
   {
