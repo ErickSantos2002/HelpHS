@@ -78,6 +78,7 @@ from app.utils.sla import (
     add_business_minutes,
     apply_sla_config,
     check_breaches,
+    marca_violacao_ao_resolver,
     pause_sla,
     register_first_response,
     resume_sla,
@@ -765,6 +766,12 @@ async def update_ticket_status(
     ticket.status = body.status
     ticket.updated_at = now
 
+    # A marca precisa ser carimbada AQUI, e nao pelo `check_breaches` mais
+    # abaixo: quando ele roda, o status ja e terminal e ele pula o teste de
+    # resolucao. Ver marca_violacao_ao_resolver.
+    if body.status == TicketStatus.resolved:
+        marca_violacao_ao_resolver(ticket, now)
+
     if justificativa:
         ticket.sla_breach_justification = justificativa
         registra_historico(
@@ -847,6 +854,9 @@ async def resolve_ticket(
     old_status = ticket.status
     ticket.status = TicketStatus.resolved
     ticket.resolution_note = body.resolution_note
+    # Mesmo motivo do caminho do PATCH: o `check_breaches` la embaixo ja
+    # encontra o status terminal e nao marca a violacao de resolucao.
+    marca_violacao_ao_resolver(ticket, now)
 
     if justificativa:
         ticket.sla_breach_justification = justificativa
