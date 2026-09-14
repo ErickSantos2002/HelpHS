@@ -827,6 +827,155 @@ def test_o_websocket_recusa_mensagem_grande_sem_gravar():
     assert gravadas == [], "a mensagem grande foi gravada mesmo assim"
 
 
+# ── Anexo da biblioteca nao passa pelo socket, e a recusa e ALTA ──
+#
+# O laco do WS le `content` e DESCARTA o resto do payload. Um
+# `library_file_id` mandado por ali sumia em silencio: a mensagem era gravada
+# sem o anexo, o cliente nao recebia arquivo nenhum e nada dizia por que.
+#
+# Pior: a mensagem que so tivesse anexo, sem texto, caia no `if not content:
+# continue` e simplesmente NAO EXISTIA -- sem erro, sem linha no banco, sem
+# nada para diagnosticar depois.
+#
+# Recusar aqui nao liga anexo no socket. Liga o AVISO. A regra de
+# visibilidade (`ensure_pode_anexar_no_chat`) mora no REST, e e ele que a
+# confere antes de gravar; por isso a recusa diz PARA ONDE IR, em vez de so
+# dizer "nao".
+#
+# ── Por que estes casos mandam uma segunda mensagem ──────────────────
+#
+# `ws.receive_json()` BLOQUEIA quando o servidor nao responde nada -- e o
+# estado sem a guarda e exatamente esse: o anexo e descartado em silencio.
+# Escrito do jeito obvio, o caso vermelho TRAVA a suite em vez de falhar, e
+# teste que trava nao e teste vermelho: e teste que ninguem consegue rodar.
+#
+# Entao vai um canario atras: uma mensagem grande, que o caminho JA responde
+# (`test_o_websocket_recusa_mensagem_grande_sem_gravar`). Com ela, sempre
+# chega um quadro, e o caso decide pelo CONTEUDO dele. Sem a guarda, o
+# primeiro quadro e o do tamanho -- que nao cita rota nenhuma --, e a
+# asserção falha na hora.
+
+
+def _arreia_o_ws(user, ticket, gravadas):
+    """O mesmo cenario do caso do limite: sessao falsa e autenticacao trocada."""
+    from unittest.mock import AsyncMock, MagicMock
+
+    sessao = AsyncMock()
+
+    async def _execute(*a, **k):
+        r = MagicMock()
+        r.scalar_one_or_none.return_value = ticket
+        return r
+
+    sessao.execute = _execute
+    sessao.add = lambda o: gravadas.append(o)
+
+    class _Ctx:
+        async def __aenter__(self):
+            return sessao
+
+        async def __aexit__(self, *a):
+            return False
+
+    async def _auth(token, db):
+        return user
+
+    return _Ctx, _auth
+
+
+def _primeiro_quadro(payload: dict, gravadas: list) -> dict:
+    """Manda `payload`, manda o canario atras, e devolve o primeiro quadro."""
+    from starlette.testclient import TestClient
+
+    from app.schemas.chat import LIMITE_CONTEUDO
+
+    user = _mock_user(UserRole.technician)
+    ticket = _mock_ticket(creator_id=_CREATOR_ID)
+    _contexto, _auth = _arreia_o_ws(user, ticket, gravadas)
+
+    with (
+        patch("app.routers.chat.AsyncSessionLocal", lambda: _contexto()),
+        patch("app.routers.chat._authenticate_ws", _auth),
+    ):
+        tc = TestClient(app)
+        with tc.websocket_connect(f"/api/v1/ws/tickets/{_TICKET_ID}?token=x") as ws:
+            ws.send_text(json.dumps(payload))
+            # O canario: este o servidor sempre responde.
+            ws.send_text(json.dumps({"content": "x" * (LIMITE_CONTEUDO + 1)}))
+            return ws.receive_json()
+
+
+def test_o_websocket_recusa_anexo_da_biblioteca_em_vez_de_descartar():
+    """Com texto E anexo: a mensagem NAO e gravada pela metade."""
+    gravadas = []
+    resposta = _primeiro_quadro(
+        {"content": "segue o manual em anexo", "library_file_id": str(uuid.uuid4())},
+        gravadas,
+    )
+
+    assert resposta["type"] == "error", resposta
+    # A recusa aponta o caminho que aceita anexo -- e e por isto que ela se
+    # distingue da recusa por tamanho, que e o canario. Sem citar a rota, o
+    # caso nao sabe qual das duas chegou.
+    assert "/tickets/" in resposta["detail"], resposta["detail"]
+    assert gravadas == [], "gravou a mensagem SEM o anexo, que e o defeito"
+
+
+def test_o_websocket_recusa_anexo_sem_texto_em_vez_de_sumir_com_ele():
+    """So anexo, sem texto: hoje isto nao existia -- nem linha, nem erro.
+
+    Este e o caso que o `if not content: continue` engolia, e ele importa mais
+    que o outro: com texto, ao menos a fala do tecnico chegava; sem texto, o
+    tecnico clicava enviar e a mensagem ia para lugar nenhum.
+    """
+    gravadas = []
+    resposta = _primeiro_quadro({"content": "", "library_file_id": str(uuid.uuid4())}, gravadas)
+
+    assert resposta["type"] == "error", resposta
+    assert "/tickets/" in resposta["detail"], resposta["detail"]
+    assert gravadas == []
+
+
+def test_a_recusa_por_tamanho_continua_sendo_por_tamanho():
+    """A guarda nova recusa ANEXO, nao todo payload.
+
+    Sem este caso, uma guarda larga demais -- `if True` no lugar da condicao --
+    passaria verde nos dois casos acima e deixaria o chat inteiro mudo, porque
+    toda mensagem levaria a recusa de anexo.
+
+    Ele mede pela mensagem GRANDE, e nao pela comum, por uma razao de arreio: o
+    caminho feliz deste laco serializa o eco com `ChatMessageResponse`, que nao
+    valida contra os dubles deste arquivo. Quem guarda o caminho feliz e o
+    `_ws_manda_mensagem`, mais abaixo, que roda o laco inteiro. Aqui o que se
+    prende e a ESCOLHA entre duas recusas -- e ela e observavel sem banco.
+    """
+    from starlette.testclient import TestClient
+
+    from app.schemas.chat import LIMITE_CONTEUDO
+
+    user = _mock_user(UserRole.technician)
+    ticket = _mock_ticket(creator_id=_CREATOR_ID)
+    gravadas = []
+    _contexto, _auth = _arreia_o_ws(user, ticket, gravadas)
+
+    with (
+        patch("app.routers.chat.AsyncSessionLocal", lambda: _contexto()),
+        patch("app.routers.chat._authenticate_ws", _auth),
+    ):
+        tc = TestClient(app)
+        with tc.websocket_connect(f"/api/v1/ws/tickets/{_TICKET_ID}?token=x") as ws:
+            # Sem `library_file_id` nenhum: nao ha anexo a recusar.
+            ws.send_text(json.dumps({"content": "x" * (LIMITE_CONTEUDO + 1)}))
+            resposta = ws.receive_json()
+
+    assert resposta["type"] == "error"
+    assert str(LIMITE_CONTEUDO) in resposta["detail"], resposta["detail"]
+    assert (
+        "/tickets/" not in resposta["detail"]
+    ), "a recusa de anexo respondeu a um payload sem anexo"
+    assert gravadas == []
+
+
 # ── IA desligada responde diferente de IA quebrada ────────────
 #
 # Os tres endpoints devolviam o MESMO 503 "tente novamente mais tarde" nos dois

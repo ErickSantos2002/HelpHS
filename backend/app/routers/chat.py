@@ -608,6 +608,41 @@ async def websocket_chat(
                 await websocket.send_json({"type": "error", "detail": "Invalid JSON"})
                 continue
 
+            # Anexo da biblioteca NÃO passa por aqui, e a recusa é ALTA.
+            #
+            # Este laço lê `content` e descarta o resto do payload. Um
+            # `library_file_id` mandado pelo socket sumia em silêncio: a
+            # mensagem era gravada sem o anexo, o cliente não recebia arquivo
+            # nenhum e nada dizia por quê. E a mensagem que só tivesse anexo,
+            # sem texto, caía no `if not content` logo abaixo e não existia —
+            # sem erro, sem linha, sem nada para diagnosticar depois.
+            #
+            # Esta guarda **não liga** anexo no socket: liga o aviso. Quem um
+            # dia quiser anexo por este caminho precisa trazer para cá o
+            # `ensure_pode_anexar_no_chat`, que é a conferência de visibilidade
+            # e hoje mora no REST — e é ela que decide, antes de gravar, se um
+            # item interno pode entrar numa conversa que o cliente lê.
+            #
+            # Por isso a recusa diz PARA ONDE IR, em vez de só dizer "não":
+            # quem integra por fora da tela não tem como saber que o recurso
+            # existe noutro endereço.
+            #
+            # Vem ANTES do `if not content` de propósito. Depois dele, o caso
+            # pior — só anexo, sem texto — continuaria sumindo calado, que é
+            # justamente o que se está consertando.
+            if data.get("library_file_id") is not None:
+                await websocket.send_json(
+                    {
+                        "type": "error",
+                        "detail": (
+                            "Este canal não aceita anexo da biblioteca. Envie a "
+                            "mensagem por POST /tickets/{id}/messages, que confere "
+                            "a visibilidade do arquivo antes de gravar."
+                        ),
+                    }
+                )
+                continue
+
             if not content:
                 continue
 
