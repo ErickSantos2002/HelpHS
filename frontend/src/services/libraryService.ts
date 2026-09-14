@@ -147,16 +147,44 @@ export async function uploadLibraryFile(
   return data;
 }
 
+/*
+  ── O id vai CODIFICADO no caminho, nas tres rotas por id ──────────────
+
+  Interpolado cru, um id com `../` reescreve a rota: `/library/../../users/me`
+  e normalizado pelo navegador para `/users/me`, e a requisicao sai para outro
+  endereco sem que nada na tela tenha mudado.
+
+  Nao era alcancavel aqui -- os dois chamadores passam id vindo da propria
+  resposta da API (a listagem, na `LibraryPage`; a mensagem, no `ChatPanel`),
+  a requisicao sai do navegador da propria pessoa com o token dela, e quem
+  autoriza de verdade e o `ensure_pode_baixar` do servidor. Mas alcancavel e
+  propriedade de quem chama HOJE, e o proximo chamador nao esta escrito ainda.
+  Valor que entra em segmento de caminho se codifica, e ponto.
+
+  As TRES, e nao so a que a varredura marcou. Ela fechou o fluxo na do
+  download, porque o retorno dela vai parar num `window.open()`; as outras
+  duas tem a forma identica e passaram em branco. Consertar so a marcada
+  deixaria duas iguais no mesmo arquivo, e quem lesse depois suporia que
+  foram olhadas e aprovadas.
+
+  `encodeURIComponent` e nao `encodeURI`: o segundo NAO toca em `/`, que e
+  exatamente o caractere que importa. UUID nao muda -- so tem hexadecimal e
+  hifen -- entao o caminho comum atravessa intacto.
+*/
+
 export async function updateLibraryFile(
   id: string,
   payload: LibraryFileUpdatePayload,
 ): Promise<LibraryFile> {
-  const { data } = await api.patch<LibraryFile>(`/library/${id}`, payload);
+  const { data } = await api.patch<LibraryFile>(
+    `/library/${encodeURIComponent(id)}`,
+    payload,
+  );
   return data;
 }
 
 export async function deleteLibraryFile(id: string): Promise<void> {
-  await api.delete(`/library/${id}`);
+  await api.delete(`/library/${encodeURIComponent(id)}`);
 }
 
 /**
@@ -172,7 +200,9 @@ export async function deleteLibraryFile(id: string): Promise<void> {
  * chamou; este módulo não engole nada.
  */
 export async function getLibraryFileUrl(id: string): Promise<string> {
-  const { data } = await api.get<{ url: string }>(`/library/${id}/download`);
+  const { data } = await api.get<{ url: string }>(
+    `/library/${encodeURIComponent(id)}/download`,
+  );
   // A API devolve o caminho (`/api/v1/files/<token>?filename=…`); o host vem
   // da configuração do frontend, porque em produção os dois domínios diferem.
   return resolveFileUrl(data.url);
