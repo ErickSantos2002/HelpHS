@@ -17,6 +17,7 @@ from typing import Annotated
 
 from fastapi import APIRouter, Depends, HTTPException, Query, status
 from fastapi.responses import StreamingResponse
+from loguru import logger
 from reportlab.lib import colors
 from reportlab.lib.pagesizes import A4
 from reportlab.lib.styles import getSampleStyleSheet
@@ -183,8 +184,8 @@ async def get_dashboard_stats(
     try:
         redis = await get_redis()
         await redis.setex(_STATS_CACHE_KEY, _STATS_CACHE_TTL, result.model_dump_json())
-    except Exception:
-        pass
+    except Exception as exc:  # noqa: BLE001 — degradar é melhor que derrubar
+        logger.debug(f"Cache do dashboard: gravação falhou, seguindo sem cache: {exc}")
 
     return result
 
