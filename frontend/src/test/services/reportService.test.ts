@@ -37,6 +37,7 @@ const relatorio: ReportData = {
   technicians_dist: [],
   reopened_count: 2,
   reopen_rate: 4.76,
+  sla_justifications: [],
   comparison: null,
 };
 
