@@ -49,7 +49,7 @@ async def test_login_barra_apos_estourar_o_limite(limiter_ligado):
         async with AsyncClient(transport=transport, base_url="http://testserver") as c:
             body = {"email": "quem@quer.com", "password": "SenhaErrada1"}
 
-            # O limite é 5/15minutes: as 5 primeiras passam pela regra e batem
+            # O limite é 5/5minutes: as 5 primeiras passam pela regra e batem
             # no 401 (credencial inválida); a 6ª é cortada pelo limiter antes.
             for _ in range(5):
                 r = await c.post("/api/v1/auth/login", json=body)
@@ -183,8 +183,8 @@ async def test_o_429_diz_quanto_esperar(limiter_ligado):
         cabecalho = bloqueado.headers.get("retry-after")
         assert cabecalho is not None, "o 429 saiu sem Retry-After"
         segundos = int(cabecalho)
-        # Janela de 15 min: qualquer coisa fora disso é constante disfarçada
-        assert 0 < segundos <= 15 * 60
+        # Janela de 5 min: qualquer coisa fora disso é constante disfarçada
+        assert 0 < segundos <= 5 * 60
     finally:
         app.dependency_overrides.clear()
 
@@ -274,8 +274,8 @@ def test_o_inventario_de_endpoints_limitados_e_este():
 
     esperado = {
         # Tentativa de credencial
-        "app.routers.auth.login": "5 per 15 minute",
-        "app.routers.auth.mfa_verify": "5 per 15 minute",
+        "app.routers.auth.login": "5 per 5 minute",
+        "app.routers.auth.mfa_verify": "5 per 5 minute",
         # Ciclo de conta — cada chamada dispara e-mail
         "app.routers.auth.register": "5 per 15 minute",
         "app.routers.auth.forgot_password": "5 per 15 minute",

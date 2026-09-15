@@ -400,8 +400,11 @@ class Settings(BaseSettings):
     # apertar o login para conter força bruta apertava junto o cadastro e o
     # "esqueci minha senha", e quem mexesse não teria como saber.
     #
-    # Tentativa de credencial: alguém adivinhando senha ou código.
-    rate_limit_login: str = "5/15minutes"
+    # Tentativa de credencial: alguém adivinhando senha ou código. Janela de
+    # 5 minutos por decisão de produto (15/09): 15 min de espera puniam demais
+    # o usuário legítimo de dedo errado; 5 ainda inviabilizam força bruta
+    # (60 palpites/hora por IP).
+    rate_limit_login: str = "5/5minutes"
     # Ciclo de conta — cadastro, esqueci-a-senha, reenvio de confirmação. Cada
     # chamada dispara e-mail, então o limite protege a caixa alheia tanto quanto
     # o sistema.

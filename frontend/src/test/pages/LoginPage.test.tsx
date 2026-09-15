@@ -97,7 +97,7 @@ describe("LoginPage — revelar a senha", () => {
 });
 
 /**
- * O bloqueio por tentativas dura 15 minutos e o backend informa o tempo exato
+ * O bloqueio por tentativas dura 5 minutos e o backend informa o tempo exato
  * no Retry-After. O relógio conta ao vivo até o desbloqueio — sem ele, a
  * pessoa insiste no escuro (foi o incidente de 26/08 e a reclamação de 15/09).
  */
