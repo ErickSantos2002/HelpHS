@@ -498,9 +498,11 @@ export function CompanyDetailModal({
   // `load` era redefinido a cada render e o efeito dependia só de `company.id`,
   // o que deixava `groupId` de fora: se ele mudasse sozinho, o modal seguiria
   // mostrando a empresa carregada pelo grupo anterior. Hoje isso não acontece
-  // — o backdrop do Modal cobre a tela e intercepta o clique, então trocar de
-  // grupo com o modal aberto fecha o modal antes — mas a dependência que falta
-  // é dívida esperando alguém tornar o modal não-bloqueante.
+  // — o fundo do Modal cobre a tela e intercepta o clique, então não há como
+  // clicar noutro grupo com o modal aberto. (Até 15/09/2026 esse clique também
+  // FECHAVA o modal; hoje ele só é engolido pelo fundo, e o bloqueio continua.)
+  // A dependência que falta segue sendo dívida esperando alguém tornar o
+  // modal não-bloqueante.
   const load = useCallback(async () => {
     setLoading(true);
     try {

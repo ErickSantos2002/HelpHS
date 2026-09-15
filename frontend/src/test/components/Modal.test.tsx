@@ -43,7 +43,14 @@ describe("Modal", () => {
     expect(onClose).toHaveBeenCalledTimes(1);
   });
 
-  it("calls onClose when backdrop is clicked", async () => {
+  it("NÃO fecha quando se clica no fundo, fora do painel", async () => {
+    // Pedido do usuário em 15/09/2026: clicar fora de uma modal não a fecha
+    // mais; só o X (e os botões dela, e o Escape). Um clique fora por engano
+    // descartava o que já estava digitado no formulário.
+    //
+    // Este caso AFIRMAVA o contrário até aqui ("calls onClose when backdrop is
+    // clicked"), e foi invertido, não apagado: sem ele, alguém devolveria o
+    // `onClick` ao fundo e nada cairia.
     const onClose = vi.fn();
     render(
       <Modal open onClose={onClose} title="Modal">
@@ -55,7 +62,87 @@ describe("Modal", () => {
     const backdrop = document.body.querySelector(".absolute.inset-0");
     expect(backdrop).not.toBeNull();
     await userEvent.click(backdrop!);
+    expect(onClose).not.toHaveBeenCalled();
+  });
+
+  it("clicar no próprio contêiner do diálogo, fora do painel, também não fecha", async () => {
+    // O fundo não é o único alvo possível de um clique "fora": o contêiner
+    // `role="dialog"` ocupa a tela inteira (fixed inset-0, com padding). Se o
+    // fechamento migrasse para ele um dia, o caso de cima continuaria verde.
+    const onClose = vi.fn();
+    render(
+      <Modal open onClose={onClose} title="Modal">
+        <p>body</p>
+      </Modal>,
+    );
+    await userEvent.click(screen.getByRole("dialog"));
+    expect(onClose).not.toHaveBeenCalled();
+  });
+
+  it("sem título, o X existe assim mesmo — e fecha", async () => {
+    // O X só era desenhado com `title`. Enquanto o fundo fechava, uma modal
+    // sem título tinha saída por clique; sem o fundo, ficaria PRESA.
+    //
+    // Não é hipótese: o detalhe da empresa (GroupsPage) usa `title={company.name}`,
+    // e o nome vazio é alcançável — o POST /companies grava "   " aparado para
+    // "". Carregando ou com erro de carga, aquela modal não tem botão nenhum.
+    // Se só o X fecha, toda modal precisa ter um X.
+    const onClose = vi.fn();
+    render(
+      <Modal open onClose={onClose}>
+        <p>body</p>
+      </Modal>,
+    );
+    await userEvent.click(screen.getByRole("button", { name: "Fechar" }));
     expect(onClose).toHaveBeenCalledTimes(1);
+  });
+
+  it("título vazio também não apaga o X", async () => {
+    // O caso real é string VAZIA, não ausência de prop: `title={company.name}`
+    // com `name === ""`. `{title && ...}` trata os dois do mesmo jeito, e o
+    // conserto tem de tratar os dois também.
+    const onClose = vi.fn();
+    render(
+      <Modal open onClose={onClose} title="">
+        <p>body</p>
+      </Modal>,
+    );
+    await userEvent.click(screen.getByRole("button", { name: "Fechar" }));
+    expect(onClose).toHaveBeenCalledTimes(1);
+  });
+
+  it("título longo não pode empurrar o X para fora — o título encolhe, o X não", () => {
+    // Com o fundo sem fechar, o X é a única saída por clique, e celular não
+    // tem Escape. Item flex não encolhe abaixo da maior palavra: um nome de
+    // empresa sem espaço levava o X para além da borda.
+    //
+    // ⚠️ Este caso afirma CLASSE, e jsdom não calcula layout: ele não prova
+    // que o X fica dentro, só impede que alguém tire as classes que fazem
+    // isso. A prova de layout foi medida em Chromium, a 390px, com controle
+    // negativo: classes antigas + 47 letras → X em x=484–512 (fora da tela) e
+    // o clique não o acerta; classes novas → X em 333–361, dentro e clicável,
+    // com 47 e com 255 letras. Números no commit.
+    render(
+      <Modal open onClose={vi.fn()} title={"INDUSTRIAECOMERCIODEEQUIPAMENTOSDESEGURANCALTDA"}>
+        <p>body</p>
+      </Modal>,
+    );
+    const titulo = screen.getByRole("heading", { level: 2 });
+    expect(titulo).toHaveClass("min-w-0", "break-words");
+    expect(screen.getByRole("button", { name: "Fechar" })).toHaveClass("shrink-0");
+  });
+
+  it("clicar dentro do painel não fecha", async () => {
+    // Controle: sem ele, uma modal que nunca chamasse onClose por clique
+    // nenhum passaria nos dois casos acima.
+    const onClose = vi.fn();
+    render(
+      <Modal open onClose={onClose} title="Modal">
+        <p>body</p>
+      </Modal>,
+    );
+    await userEvent.click(screen.getByText("body"));
+    expect(onClose).not.toHaveBeenCalled();
   });
 
   it("calls onClose when Escape key is pressed", () => {
@@ -116,7 +203,9 @@ describe("Modal — Fase 10: o foco volta, e os tokens entram", () => {
 
   it("devolve o foco também quando fecha pelo Escape", async () => {
     // A devolução mora na limpeza do efeito, e não num `onClose`, justamente
-    // porque o modal fecha por três caminhos: botão, Escape e clique no fundo.
+    // porque o modal fecha por mais de um caminho: o X, os botões da tela que o
+    // chamou, o Escape e a desmontagem. (Clique no fundo deixou de fechar em
+    // 15/09/2026.)
     function Tela() {
       const [aberto, setAberto] = useState(false);
       return (
