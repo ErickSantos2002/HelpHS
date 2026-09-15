@@ -1589,3 +1589,25 @@ async def test_as_duas_saidas_nao_mandam_o_mesmo_texto():
     contiver as duas frases.
     """
     assert await _avisos(motivo=MOTIVO_PEDIU_HUMANO) != await _avisos(motivo="teto de trocas")
+
+
+@pytest.mark.asyncio
+async def test_o_encerramento_da_triagem_chega_como_triagem_concluida():
+    """
+    O aviso da Fase 1 volta com o encerramento.
+
+    O `f2421ac` tirou o "Triagem concluída" porque o encerramento tinha deixado
+    de existir. No modo triagem ele existe de novo, e é a única coisa que chama
+    a equipe para um chamado triado sem dono. Não é pedido de gente — não pode
+    furar a fila —, e não é escalada genérica: a triagem terminou com as
+    respostas do cliente na conversa, que é o que a equipe vai ler.
+    """
+    from app.services.helo import MOTIVO_TRIAGEM_CONCLUIDA
+
+    avisos = await _avisos(motivo=MOTIVO_TRIAGEM_CONCLUIDA)
+
+    assert len(avisos) == 2
+    for titulo, texto in avisos:
+        assert titulo.startswith("Triagem concluída")
+        assert "pediu atendimento humano" not in titulo
+        assert "terminou a triagem" in texto

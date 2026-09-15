@@ -54,6 +54,7 @@ from app.services import chat_backplane
 from app.services.helo import (
     FALAS_MAXIMAS,
     MOTIVO_PEDIU_HUMANO,
+    MOTIVO_TRIAGEM_CONCLUIDA,
     TROCAS_MAXIMAS,
     FalaDaHelo,
     responde_triagem,
@@ -889,6 +890,13 @@ async def _avisa_equipe_da_helo(db: AsyncSession, ticket: Ticket, *, motivo: str
     if motivo == MOTIVO_PEDIU_HUMANO:
         titulo = f"Cliente pediu atendimento humano — {ticket.protocol}"
         texto = "O cliente pediu para falar com uma pessoa. A Helô parou na hora."
+    elif motivo == MOTIVO_TRIAGEM_CONCLUIDA:
+        # O aviso da Fase 1, de volta com o modo triagem. Não fura a fila como
+        # o pedido de gente, e não é escalada genérica: as respostas do
+        # cliente às três perguntas estão na conversa, e é isso que a equipe
+        # vai ler.
+        titulo = f"Triagem concluída — {ticket.protocol}"
+        texto = "A Helô terminou a triagem e o chamado está esperando atendimento."
     else:
         titulo = f"Helô passou o chamado — {ticket.protocol}"
         texto = f"A Helô saiu da conversa e o chamado está esperando atendimento: {motivo}."

@@ -14,6 +14,49 @@ Trabalho que ainda **não** entrou numa versão do produto. Confira: se um
 item aqui já está em produção, ou ele foi para a versão errada, ou falta
 publicar uma versão nova.
 
+### Infraestrutura
+
+- **A Helô ganha um modo, e o padrão é a recepcionista da Fase 1.** Os manuais
+  técnicos dos sete aparelhos estão sendo reescritos, e a Fase 2 com a base
+  vazia escala toda pergunta. Em `triagem` ela saúda, encerra ou escala, sem
+  embedding e sem LLM; em `completa` ela é a Fase 2 como está. Nada da Fase 2
+  foi removido.
+
+  | | |
+  |---|---|
+  | Variável NA API | `HELO_MODO` |
+  | Valores | `triagem` ou `completa` (sem diferença de maiúscula ou espaço) |
+  | Padrão | `triagem` — **ausente ou valor desconhecido também é `triagem`**, com aviso no log quando o valor está preenchido e não se reconhece (ex.: `completo`) |
+  | Estado hoje | não configurar: fica em `triagem` |
+  | Para virar | `HELO_MODO=completa`, **só com os sete manuais publicados na Base de Conhecimento** — o gatilho e a conferência antes de virar estão em `docs/decisoes-e-regras.md`, "O modo da Helô" |
+
+  - ⚠️ **Virar para `completa` sem manual publicado devolve escalada em toda
+    pergunta.** Ela saúda, o cliente responde às três perguntas, e em vez do
+    encerramento ele é transferido para um atendente, turno após turno.
+  - **O modo não liga nada.** Ele é ortogonal ao `HELO_ENABLED`: desligada é
+    desligada em qualquer modo. E em `triagem` a chave da DeepSeek preenchida
+    não a acorda — o modo, e não a falta de configuração, é o que segura a
+    Fase 2.
+  - **Corrige, para o modo `triagem`, a tabela da v1.14.0.** Lá, "para ligar"
+    pede `HELO_ENABLED=true` **e** `DEEPSEEK_API_KEY`, sem chave "toda
+    pergunta cai na escalada", e o teto é de seis trocas. Tudo isso passa a
+    valer só em `completa`. Em `triagem`, ligar é só `HELO_ENABLED=true`: a
+    chave não é usada, a resposta do cliente recebe o encerramento (e não a
+    escalada), e o teto é de duas falas.
+  - **O pedido de humano passa por cima do teto, nos dois modos.** Na Fase 1,
+    passadas as duas falas, "quero falar com um atendente" recebia silêncio;
+    agora escala, grava a saída, derruba o `ai_enabled` e chama a equipe com
+    "Cliente pediu atendimento humano". Resposta comum passado o teto continua
+    em silêncio.
+  - **O encerramento volta, e volta chamando a equipe** com "Triagem
+    concluída", como na Fase 1. Ele grava `helo_saiu`: um chamado triado não
+    ganha conversa nova quando o modo virar.
+  - A varredura de indexação continua rodando em `triagem` (texto de artigo,
+    não de cliente), para a base estar pronta no dia de virar.
+  - **Limitação conhecida:** voltar de `completa` para `triagem` com conversa
+    em andamento a deixa calada nesses chamados para resposta comum, sem aviso
+    à equipe. Só importa com `HELO_ENABLED=true`.
+
 ### Adicionado
 
 - **Biblioteca de arquivos frequentes, e o anexo deles na conversa.** O acervo

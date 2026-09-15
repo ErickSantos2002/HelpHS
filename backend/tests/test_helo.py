@@ -34,9 +34,33 @@ from app.services.helo_base import NADA_ENCONTRADO
 from app.utils.sla import SP_TZ
 
 
+def _settings(modo, enabled=True):
+    return MagicMock(helo_enabled=enabled, helo_modo=modo)
+
+
 @pytest.fixture
 def helo_ligada(monkeypatch):
-    monkeypatch.setattr(helo, "get_settings", lambda: MagicMock(helo_enabled=True))
+    """
+    Ligada e no modo COMPLETO — a Fase 2, que é o que a maioria deste arquivo testa.
+
+    O modo vai explícito: um `MagicMock` sem `helo_modo` cai em triagem, que é
+    o comportamento seguro, e os testes da Fase 2 passariam a afirmar silêncio
+    ou encerramento pelo motivo errado.
+    """
+    monkeypatch.setattr(helo, "get_settings", lambda: _settings("completa"))
+
+
+@pytest.fixture
+def helo_em_triagem(monkeypatch):
+    """Ligada e no modo de TRIAGEM — a recepcionista da Fase 1."""
+    monkeypatch.setattr(helo, "get_settings", lambda: _settings("triagem"))
+
+
+@pytest.fixture(params=["triagem", "completa"])
+def em_cada_modo(request, monkeypatch):
+    """Ligada, uma vez em cada modo — para o que tem de valer igual nos dois."""
+    monkeypatch.setattr(helo, "get_settings", lambda: _settings(request.param))
+    return request.param
 
 
 @pytest.fixture
@@ -1059,3 +1083,494 @@ async def test_com_a_ia_desligada_no_chamado_ela_nao_encerra(helo_ligada):
     db = _db_com_falas(1)
 
     assert await responde_triagem(db, _chamado(ai_enabled=False), _cliente(), "oi") is None
+
+
+# ── O modo: triagem até os manuais chegarem ───────────────────
+#
+# A Fase 2 dorme enquanto a base não tem manual; ela não morre. Os testes
+# abaixo dividem-se em três: o que o modo É (configuração), o que vale IGUAL
+# nos dois modos (as quatro guardas que não podem depender dele) e o que a
+# triagem faz de diferente — a começar por não chamar coisa nenhuma.
+
+
+def test_o_modo_padrao_e_triagem(monkeypatch):
+    """
+    Sem `HELO_MODO` no ambiente, ela é recepcionista.
+
+    Lê a configuração de verdade, pelo mesmo motivo do teste do `HELO_ENABLED`:
+    o que se afirma é o valor declarado no `config.py`. Por isso o ambiente e o
+    `.env` de quem roda ficam de fora — um `HELO_MODO=completa` local derrubaria
+    este teste sem o código ter mudado.
+    """
+    from app.core.config import Settings
+
+    monkeypatch.delenv("HELO_MODO", raising=False)
+
+    padrao = Settings(_env_file=None, database_url="postgresql+asyncpg://x/y").helo_modo
+    assert padrao == "triagem"
+
+
+def test_a_variavel_do_painel_se_chama_helo_modo(monkeypatch):
+    """
+    O nome que o Changelog manda pôr no painel é o nome que a configuração lê.
+
+    Os outros testes passam o modo como argumento e não provam isto: um campo
+    renomeado deixaria `HELO_MODO=completa` no painel sem efeito nenhum — e ela
+    ficaria em triagem com todo mundo achando que acordou.
+    """
+    from app.core.config import Settings
+
+    monkeypatch.setenv("HELO_MODO", "completa")
+
+    lido = Settings(_env_file=None, database_url="postgresql+asyncpg://x/y").helo_modo
+    assert lido == "completa"
+
+
+@pytest.mark.parametrize("valor", ["completo", "fase2", "true", "triagem completa", "", "   "])
+def test_modo_que_nao_se_reconhece_vira_triagem(valor):
+    """
+    O modo seguro é o que o sistema assume quando não sabe.
+
+    `completo` está na lista de propósito: é o erro de digitação provável, e o
+    que ele NÃO pode fazer é acordar a Fase 2 por aproximação.
+    """
+    from app.core.config import Settings
+
+    assert Settings(database_url="postgresql+asyncpg://x/y", helo_modo=valor).helo_modo == "triagem"
+
+
+@pytest.mark.parametrize("valor", ["completa", " COMPLETA ", "Completa"])
+def test_completa_nao_depende_de_caixa_nem_de_espaco(valor):
+    """Mesmo idioma do `APP_ENV`: a palavra é uma só, e a intenção não é ambígua."""
+    from app.core.config import Settings
+
+    assert (
+        Settings(database_url="postgresql+asyncpg://x/y", helo_modo=valor).helo_modo == "completa"
+    )
+
+
+def test_modo_escrito_errado_deixa_rastro_no_log(monkeypatch):
+    """
+    Cair em triagem calado deixaria quem configurou achando que ela acordou.
+
+    O aviso nomeia o valor que veio, porque é ele que alguém vai procurar no
+    painel.
+    """
+    from app.core import config
+
+    aviso = MagicMock()
+    monkeypatch.setattr(config, "logger", aviso)
+
+    config.Settings(database_url="postgresql+asyncpg://x/y", helo_modo="completo")
+
+    aviso.warning.assert_called_once()
+    assert "completo" in aviso.warning.call_args.args[0]
+
+
+def test_modo_ausente_nao_e_erro_e_nao_avisa(monkeypatch):
+    """Vazio é o estado padrão, e aviso que sai sempre deixa de ser lido."""
+    from app.core import config
+
+    aviso = MagicMock()
+    monkeypatch.setattr(config, "logger", aviso)
+
+    config.Settings(database_url="postgresql+asyncpg://x/y", helo_modo="")
+
+    aviso.warning.assert_not_called()
+
+
+def test_configuracao_sem_o_campo_tambem_e_triagem(monkeypatch):
+    """
+    A decisão final é do `helo.py`, e ela também não adivinha.
+
+    Um objeto de configuração que nem tem o campo — o caso de todo `MagicMock`
+    antigo desta suíte — não pode ser lido como "completa".
+    """
+    monkeypatch.setattr(helo, "get_settings", lambda: MagicMock(helo_enabled=True))
+
+    assert helo.em_modo_completo() is False
+
+
+# O que vale igual nos dois modos.
+
+
+@pytest.mark.parametrize("desligado", ["chamado", "cliente", "saiu"])
+@pytest.mark.asyncio
+async def test_os_interruptores_calam_nos_dois_modos(em_cada_modo, desligado):
+    """
+    Nada religa num nível mais específico, e o modo não é um nível.
+
+    O texto do cliente é o pedido de humano de propósito: é a entrada mais
+    forte que existe, e nem ela passa por um interruptor desligado. E nenhuma
+    consulta acontece — as chaves vêm antes de qualquer ida ao banco.
+    """
+    ticket = _chamado(ai_enabled=desligado != "chamado", helo_saiu=desligado == "saiu")
+    cliente = _cliente(ai_enabled=desligado != "cliente")
+    db = _db_com_falas(1)
+
+    assert await responde_triagem(db, ticket, cliente, "quero falar com um humano") is None
+    db.add.assert_not_called()
+    db.execute.assert_not_called()
+
+
+@pytest.mark.asyncio
+async def test_a_flag_global_cala_nos_dois_modos(em_cada_modo, monkeypatch):
+    """Desligada é desligada em qualquer modo — na abertura e na resposta."""
+    monkeypatch.setattr(helo, "get_settings", lambda: _settings(em_cada_modo, enabled=False))
+
+    assert await abre_triagem(_db_com_produto(), _chamado(), _cliente(), []) is False
+    db = _db_com_falas(1)
+    assert await responde_triagem(db, _chamado(), _cliente(), "quero falar com um humano") is None
+    db.add.assert_not_called()
+
+
+@pytest.mark.parametrize("texto", ["quero falar com um humano", "O aparelho não liga desde ontem"])
+@pytest.mark.parametrize("humano", ["equipe_falou", "tem_dono"])
+@pytest.mark.asyncio
+async def test_humano_na_conversa_cala_nos_dois_modos(em_cada_modo, humano, texto):
+    """
+    O chamado é de quem já está nele, e o modo não muda isso.
+
+    Os dois textos são necessários. Com o pedido de humano, a guarda é testada
+    contra a escalada; com a resposta comum, contra o encerramento na triagem —
+    "um atendente já vai assumir", a mesma mentira da correção de 08/09 num
+    chamado que já tem gente — e contra o modelo no modo completo. Só com o
+    primeiro, uma guarda que rodasse apenas para pedido de humano passaria.
+    """
+    db = _db_com_falas(1, equipe_ja_falou=humano == "equipe_falou")
+    ticket = _chamado(assignee_id=uuid.uuid4() if humano == "tem_dono" else None)
+
+    assert await responde_triagem(db, ticket, _cliente(), texto) is None
+    db.add.assert_not_called()
+    assert ticket.helo_saiu is False
+
+
+@pytest.mark.asyncio
+async def test_pedido_de_humano_vem_antes_de_tudo_nos_dois_modos(em_cada_modo):
+    """
+    Na triagem, antes do encerramento; no modo completo, antes do embedding e do modelo.
+
+    No completo, chegar ao modelo é falha deste teste pela fixture `sem_rede`;
+    o embedding se afirma aqui, porque ele vem antes do modelo no turno.
+    """
+    fala = await responde_triagem(
+        _db_com_falas(1), _chamado(), _cliente(), "quero falar com um humano"
+    )
+
+    assert fala.motivo == helo.MOTIVO_PEDIU_HUMANO
+    assert "passando seu chamado para um atendente" in fala.mensagem.content
+    assert "Registrei tudo aqui" not in fala.mensagem.content, "pediu gente, não é encerramento"
+    helo.embute_um.assert_not_awaited()
+
+
+def _teto_do_modo(modo):
+    return helo.FALAS_MAXIMAS_TRIAGEM if modo == "triagem" else FALAS_MAXIMAS
+
+
+@pytest.mark.asyncio
+async def test_o_pedido_de_humano_passa_por_cima_do_teto_nos_dois_modos(em_cada_modo):
+    """
+    Decidido em 15/09/2026, e diverge da Fase 1 DE PROPÓSITO.
+
+    Na Fase 1, passadas as duas falas, "quero falar com um atendente" recebia
+    silêncio. O teto de duas existia porque ela só tinha duas coisas a dizer —
+    não como recusa a um pedido. Silêncio depois de um pedido explícito o
+    cliente lê como sistema ignorando, e o custo de atender é uma escalada a
+    mais num chamado que já ia para a fila. Quem "consertar" isto de volta
+    achando que achou divergência com a Fase 1 quebra aqui.
+
+    E a escalada é inteira: a fala, a saída gravada, o botão do técnico
+    derrubado e o motivo que faz a equipe ser chamada com prioridade.
+    """
+    ticket = _chamado()
+    db = _db_com_falas(_teto_do_modo(em_cada_modo))
+
+    fala = await responde_triagem(db, ticket, _cliente(), "quero falar com um atendente")
+
+    assert fala is not None
+    assert fala.motivo == helo.MOTIVO_PEDIU_HUMANO
+    assert "passando seu chamado para um atendente" in fala.mensagem.content
+    assert ticket.helo_saiu is True
+    assert ticket.ai_enabled is False
+    campos = {h.field for h in (c.args[0] for c in db.add.call_args_list) if hasattr(h, "field")}
+    assert campos == {"helo_saiu", "ai_enabled"}
+    helo.embute_um.assert_not_awaited()
+
+
+@pytest.mark.asyncio
+async def test_passado_o_teto_so_o_pedido_de_humano_passa(em_cada_modo):
+    """
+    A exceção é do pedido, não do teto: a resposta comum continua em silêncio.
+
+    Sem esta borda, "passar por cima do teto" viraria "não ter teto", e a
+    triagem se despediria de novo a cada mensagem do cliente.
+    """
+    db = _db_com_falas(_teto_do_modo(em_cada_modo))
+
+    assert await responde_triagem(db, _chamado(), _cliente(), "alguém vai ver?") is None
+    db.add.assert_not_called()
+
+
+@pytest.mark.asyncio
+async def test_o_pedido_de_humano_nao_a_faz_entrar_em_conversa_que_comecou_sem_ela(em_cada_modo):
+    """
+    Passar por cima do teto não é passar por cima da saudação que nunca houve.
+
+    Chamado aberto antes dela, ou com ela desligada: "já estou passando seu
+    chamado para um atendente" seria a primeira coisa que ela diz ali, no meio
+    de uma conversa que já tem outro dono.
+    """
+    db = _db_com_falas(0)
+
+    assert await responde_triagem(db, _chamado(), _cliente(), "quero falar com um humano") is None
+    db.add.assert_not_called()
+
+
+@pytest.mark.asyncio
+async def test_passado_o_teto_o_pedido_de_humano_ainda_nao_fala_por_cima_do_tecnico(
+    em_cada_modo,
+):
+    """
+    Passar por cima do teto não é passar por cima da guarda de humano.
+
+    Com alguém da equipe já na conversa, "já estou passando seu chamado para um
+    atendente" é mentira com qualquer número de falas.
+    """
+    db = _db_com_falas(_teto_do_modo(em_cada_modo), equipe_ja_falou=True)
+
+    assert await responde_triagem(db, _chamado(), _cliente(), "quero falar com um humano") is None
+    db.add.assert_not_called()
+
+
+@pytest.mark.asyncio
+async def test_no_modo_completo_o_pedido_de_humano_vence_o_teto(helo_ligada):
+    """No turno em que o teto estouraria, quem pediu gente ainda chega como pedido de gente."""
+    fala = await responde_triagem(
+        _db_com_falas(TROCAS_MAXIMAS), _chamado(), _cliente(), "quero falar com um humano"
+    )
+
+    assert fala.motivo == helo.MOTIVO_PEDIU_HUMANO
+
+
+@pytest.mark.asyncio
+async def test_pedido_de_humano_grava_a_saida_e_derruba_o_botao_nos_dois_modos(em_cada_modo):
+    """A exceção deliberada de 10/09 não é da Fase 2: vale para a recepcionista também."""
+    ticket = _chamado()
+    db = _db_com_falas(1)
+
+    await responde_triagem(db, ticket, _cliente(), "quero falar com uma pessoa")
+
+    assert ticket.helo_saiu is True
+    assert ticket.ai_enabled is False
+    campos = {h.field for h in (c.args[0] for c in db.add.call_args_list) if hasattr(h, "field")}
+    assert campos == {"helo_saiu", "ai_enabled"}
+
+
+@pytest.mark.asyncio
+async def test_a_saudacao_sai_igual_nos_dois_modos(em_cada_modo):
+    """A saudação nunca usou LLM; o modo não tem nada a dizer sobre ela."""
+    db = _db_com_produto()
+    cliente = _cliente()
+    cliente.name = "Suelen Fernandes"
+
+    assert await abre_triagem(db, _chamado(), cliente, [_equipamento("WATFR01-73041")]) is True
+    (mensagem,) = [c.args[0] for c in db.add.call_args_list]
+    assert mensagem.content == monta_saudacao(
+        cliente_nome="Suelen Fernandes", produto="Phoebus", series=["WATFR01-73041"]
+    )
+
+
+# O que a triagem faz de diferente.
+
+
+class _SextaAsDezDaNoite(datetime):
+    """Relógio parado: o encerramento depende da hora, e o teste compara o texto inteiro."""
+
+    @classmethod
+    def now(cls, tz=None):
+        return datetime(2026, 8, 28, 22, 0, tzinfo=SP_TZ)
+
+
+@pytest.mark.asyncio
+async def test_na_triagem_a_resposta_do_cliente_encerra(helo_em_triagem, monkeypatch):
+    """
+    As três mensagens da Fase 1: a resposta às perguntas recebe o encerramento.
+
+    O texto é comparado INTEIRO com `monta_encerramento` — é a função que ficou
+    sem chamador na Fase 2 e volta a ter um aqui. Uma frase parecida montada em
+    outro lugar passaria num `in`, e perderia o cálculo do dia útil.
+    """
+    monkeypatch.setattr(helo, "datetime", _SextaAsDezDaNoite)
+
+    fala = await responde_triagem(
+        _db_com_falas(1), _chamado(), _cliente(), "O aparelho não liga desde ontem"
+    )
+
+    assert fala.mensagem.content == monta_encerramento(_SextaAsDezDaNoite.now())
+    assert "segunda-feira" in fala.mensagem.content
+    assert fala.mensagem.is_ai is True
+    assert fala.mensagem.sender_id is None
+
+
+@pytest.mark.asyncio
+async def test_o_encerramento_e_uma_saida_de_cena(helo_em_triagem):
+    """
+    Encerrar grava `helo_saiu` — e é isso que deixa o modo virar sem acordar ninguém.
+
+    Sem o campo, o chamado triado continuaria com duas falas e crédito até
+    sete no modo completo: no dia em que os manuais chegarem e o modo virar,
+    ela voltaria a falar num chamado em que já disse "um atendente já vai
+    assumir". O botão do técnico fica onde está — ninguém pediu para sair da IA.
+    """
+    ticket = _chamado()
+    db = _db_com_falas(1)
+
+    fala = await responde_triagem(db, ticket, _cliente(), "O aparelho não liga desde ontem")
+
+    assert fala.motivo == helo.MOTIVO_TRIAGEM_CONCLUIDA
+    assert ticket.helo_saiu is True
+    assert ticket.ai_enabled is True
+    historico = [c.args[0] for c in db.add.call_args_list if hasattr(c.args[0], "field")]
+    (linha,) = historico
+    assert linha.field == "helo_saiu"
+    assert linha.comment == helo.MOTIVO_TRIAGEM_CONCLUIDA
+
+
+@pytest.mark.asyncio
+async def test_na_triagem_o_teto_e_de_duas_falas(helo_em_triagem):
+    """
+    O número da Fase 1: saudação e encerramento, e silêncio depois.
+
+    Vale também para os chamados triados ANTES de o `helo_saiu` existir — duas
+    falas e o campo em `False`. Com o teto do modo completo eles ganhariam
+    cinco falas de crédito.
+    """
+    assert helo.FALAS_MAXIMAS_TRIAGEM == 2
+    db = _db_com_falas(helo.FALAS_MAXIMAS_TRIAGEM)
+
+    assert await responde_triagem(db, _chamado(), _cliente(), "alguém vai ver?") is None
+    db.add.assert_not_called()
+
+
+@pytest.mark.asyncio
+async def test_na_triagem_nada_de_embedding_nem_modelo_e_chamado(helo_em_triagem, monkeypatch):
+    """
+    Não usar é diferente de usar e jogar fora, e só o primeiro é standby.
+
+    Cada peça da Fase 2 vira um espião que NÃO levanta exceção: um espião que
+    levantasse seria engolido por qualquer `try` no caminho, e o teste passaria
+    com a chamada acontecendo. E as consultas ao banco são só as duas guardas
+    — nenhum bloco de cadastro, nenhuma busca.
+    """
+    espioes = {
+        nome: AsyncMock(return_value=None)
+        for nome in (
+            "embute_um",
+            "busca_trechos",
+            "responde_como_helo",
+            "monta_cadastro",
+            "monta_conversa",
+        )
+    }
+    for nome, espiao in espioes.items():
+        monkeypatch.setattr(helo, nome, espiao)
+    db = _db_com_falas(1)
+
+    fala = await responde_triagem(db, _chamado(), _cliente(), "O aparelho não liga desde ontem")
+
+    assert fala.motivo == helo.MOTIVO_TRIAGEM_CONCLUIDA
+    for nome, espiao in espioes.items():
+        assert espiao.call_count == 0, f"{nome} foi chamado em modo triagem"
+    consultas = [str(c.args[0]).upper() for c in db.execute.await_args_list]
+    assert consultas, "as guardas consultam o banco; sem consulta nenhuma o teste não afirma nada"
+    assert all("EXISTS" in q or "COUNT" in q for q in consultas), consultas
+
+
+def _rede_armada(monkeypatch):
+    """
+    O cenário do dia em que alguém preenche a chave para testar outra coisa.
+
+    As funções de verdade de embedding e de LLM voltam para o lugar, com URL e
+    chave configuradas: se o turno chegar a elas, elas VÃO construir um cliente
+    HTTP. O construtor é o espião, e levanta — os dois clientes engolem a
+    exceção e devolvem None, que é o destino de sempre.
+    """
+    import httpx
+
+    from app.services import helo_embedding, llm
+
+    monkeypatch.setattr(helo, "embute_um", helo_embedding.embute_um)
+    monkeypatch.setattr(helo, "responde_como_helo", llm.responde_como_helo)
+    monkeypatch.setattr(
+        helo_embedding,
+        "get_settings",
+        lambda: MagicMock(
+            helo_embedding_url="http://helphs-embedding:8080", helo_embedding_timeout_seconds=1
+        ),
+    )
+    monkeypatch.setattr(
+        llm,
+        "settings",
+        MagicMock(
+            llm_enabled=True,
+            deepseek_api_key="sk-chave-de-teste",
+            deepseek_base_url="https://api.deepseek.com/v1",
+            deepseek_model="deepseek-chat",
+            llm_request_timeout_seconds=1,
+            llm_temperature=0.3,
+        ),
+    )
+    rede = MagicMock(side_effect=RuntimeError("a rede foi tocada"))
+    monkeypatch.setattr(httpx, "AsyncClient", rede)
+    return rede
+
+
+@pytest.mark.asyncio
+async def test_com_chave_e_url_preenchidas_a_triagem_nao_toca_a_rede(helo_em_triagem, monkeypatch):
+    """
+    A segurança do standby não depende de faltar configuração.
+
+    Chave da DeepSeek e URL do embedding preenchidas, e nenhum cliente HTTP é
+    sequer construído. O teste abaixo, no modo completo, é a prova de que esta
+    armadilha dispara quando deveria — sem ele, este passaria até com a rede
+    armada errado.
+    """
+    rede = _rede_armada(monkeypatch)
+
+    fala = await responde_triagem(
+        _db_com_falas(1), _chamado(), _cliente(), "O aparelho não liga desde ontem"
+    )
+
+    assert fala.motivo == helo.MOTIVO_TRIAGEM_CONCLUIDA
+    rede.assert_not_called()
+
+
+@pytest.mark.asyncio
+async def test_a_armadilha_da_rede_dispara_no_modo_completo(helo_ligada, monkeypatch):
+    """O controle do teste acima: com o mesmo cenário, o modo completo vai à rede."""
+    rede = _rede_armada(monkeypatch)
+
+    fala = await responde_triagem(
+        _db_com_falas(1), _chamado(), _cliente(), "O aparelho não liga desde ontem"
+    )
+
+    assert rede.call_count == 2, "uma vez para o embedding, uma para o modelo"
+    assert fala.motivo == helo.MOTIVO_IA_MUDA
+
+
+@pytest.mark.asyncio
+async def test_virar_para_completa_nao_ressuscita_quem_ja_foi_triado(monkeypatch):
+    """
+    O dia do gatilho, encenado: triado em triagem, respondido depois em completa.
+
+    Ela fica calada. Chegar ao modelo aqui é falha pela fixture `sem_rede`.
+    """
+    ticket = _chamado()
+    monkeypatch.setattr(helo, "get_settings", lambda: _settings("triagem"))
+    await responde_triagem(_db_com_falas(1), ticket, _cliente(), "não liga desde ontem")
+
+    monkeypatch.setattr(helo, "get_settings", lambda: _settings("completa"))
+    db = _db_com_falas(2)
+
+    assert await responde_triagem(db, ticket, _cliente(), "e aí, alguém vai ver?") is None
+    db.add.assert_not_called()
