@@ -4,6 +4,7 @@ import {
   createCalendarEvent,
   updateCalendarEvent,
   deleteCalendarEvent,
+  getCalendarEventTypes,
   type CalendarEvent,
   type CalendarEventPayload,
 } from "../../services/calendarService";
@@ -31,6 +32,7 @@ const evento: CalendarEvent = {
   color: "#2563eb",
   start_date: "2026-09-10",
   end_date: "2026-09-10",
+  all_day: true,
   created_by: "u1",
   creator_name: "Rickelme David",
   created_at: "2026-09-01T00:00:00Z",
@@ -87,6 +89,28 @@ describe("getCalendarEvents", () => {
     expect(urlDoGet()).toBe("/calendar/events?year=0&month=0");
   });
 
+  /*
+    O fuso vai na consulta porque a JANELA do mês é da API, e ela a calcula no
+    fuso de quem olha. Sem ele, a API usa Recife — certo para quem está lá, e um
+    mês deslocado em horas para qualquer outro lugar.
+  */
+  it("leva o fuso de quem olha, depois do ano e do mês", async () => {
+    mockGet.mockResolvedValue({ data: { items: [], total: 0 } });
+
+    await getCalendarEvents(2026, 1, "America/Recife");
+
+    // A barra do nome do fuso sai codificada: é valor de query, não caminho.
+    expect(urlDoGet()).toBe("/calendar/events?year=2026&month=1&timezone=America%2FRecife");
+  });
+
+  it("sem fuso, não inventa o parâmetro", async () => {
+    mockGet.mockResolvedValue({ data: { items: [], total: 0 } });
+
+    await getCalendarEvents(2026, 1);
+
+    expect(urlDoGet()).not.toContain("timezone");
+  });
+
   it("devolve só a lista de itens, descartando o envelope", async () => {
     mockGet.mockResolvedValue({ data: { items: [evento], total: 1 } });
 
@@ -115,9 +139,9 @@ describe("createCalendarEvent", () => {
     title: "Treinamento de NR-35",
     description: "Trabalho em altura",
     event_type: "training",
-    color: "#2563eb",
-    start_date: "2026-09-10",
-    end_date: "2026-09-10",
+    start_date: "2026-09-10T00:00:00Z",
+    end_date: "2026-09-10T00:00:00Z",
+    all_day: true,
   };
 
   it("envia POST na rota da coleção com o payload intacto", async () => {
@@ -158,9 +182,9 @@ describe("updateCalendarEvent", () => {
   it("não completa os campos que o chamador omitiu", async () => {
     mockPatch.mockResolvedValue({ data: evento });
 
-    await updateCalendarEvent("e1", { color: "#dc2626" });
+    await updateCalendarEvent("e1", { all_day: false });
 
-    expect(mockPatch.mock.calls[0][1]).toEqual({ color: "#dc2626" });
+    expect(mockPatch.mock.calls[0][1]).toEqual({ all_day: false });
   });
 
   it("devolve o evento já atualizado", async () => {
@@ -203,3 +227,32 @@ describe("deleteCalendarEvent", () => {
     await expect(deleteCalendarEvent("e1")).rejects.toThrow("403");
   });
 });
+
+/**
+ * O mapa tipo → cor vem da API, e é a única fonte.
+ *
+ * Desde o #18 a cor do evento é derivada do tipo no backend. A tela lê o mapa
+ * para a legenda e para mostrar, no modal, a cor que o tipo escolhido vai ter —
+ * sem ele, ela precisaria de uma cópia local, e a segunda fonte voltaria.
+ */
+describe("getCalendarEventTypes", () => {
+  it("lê o mapa em /calendar/event-types e o devolve como veio", async () => {
+    const mapa = [
+      { value: "event", color: "#6366f1" },
+      { value: "holiday", color: "#ef4444" },
+    ];
+    mockGet.mockResolvedValue({ data: mapa });
+
+    const result = await getCalendarEventTypes();
+
+    expect(mockGet).toHaveBeenCalledWith("/calendar/event-types");
+    expect(result).toEqual(mapa);
+  });
+
+  it("propaga o erro", async () => {
+    mockGet.mockRejectedValue(new Error("403"));
+
+    await expect(getCalendarEventTypes()).rejects.toThrow("403");
+  });
+});
+
