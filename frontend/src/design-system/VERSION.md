@@ -244,6 +244,56 @@ que a pessoa ouve a consequência antes da causa.
 Isto vale como item de conferência nas Fases 11–16: **todo `Alert` que a tela
 renderiza já montado, e não em resposta a uma ação, leva `live={false}`.**
 
+## A emenda E24 — e por que os hashes também não mudaram
+
+Gravada em 15/09/2026: **o clique no fundo deixa de fechar a modal, e o × passa
+a existir sempre**. Toca `Modal.jsx`, `Modal.d.ts` e `Modal.prompt.md` — só
+`components/` —, e pelo mesmo motivo da E11/E12 **nenhum dos sete arquivos da
+tabela de hashes muda**.
+
+### O port mudou antes do pacote
+
+O pedido chegou para a tela: o `ui/Modal.tsx` mudou primeiro (`8fa38f9`, na
+`main` por `cc8f070`) e o pacote foi emendado **depois**, a pedido do operador.
+
+Não é a primeira vez. Na **E11**, o erro de formulário ligado ao campo entrou
+aqui em `102540f` (03/09 18:13) e no pacote em `a07c597` (04/09 08:01). Na
+**E12**, o `Modal` (`0bfaf01`, 04/09 09:12) e as `Tabs` (`0ec9acd`, 09:19)
+mudaram aqui antes do pacote (`009ead3`, 09:59). A diferença é que as duas
+corrigiam acessibilidade, e a E24 é comportamento pedido para a tela — por isso,
+entre `8fa38f9` e a E24, o `Modal.tsx` carregou um comentário de **desvio
+deliberado** do `Modal.jsx`, para uma conferência contra o pacote não
+"corrigir" a mudança de volta. Com a E24 gravada, o comentário virou referência
+à emenda.
+
+### O ChamadosHS
+
+O port do ChamadosHS **não fecha pelo fundo desde 01/09** e sempre desenha o ×
+(a D6-a do `DECISOES.md`, *"exceção só ChamadosHS"*); nisso a E24 alinha o
+pacote a ele. Sobram **duas** divergências: lá o foco inicial vai ao primeiro
+**campo**, e aqui ao primeiro focável — o ×; e lá o título longo **ainda
+empurra** o × para fora, porque o cabeçalho não tem `min-w-0` nem `shrink-0`.
+
+### Dois efeitos que este port já tinha antes da E24
+
+**Foco inicial sem título** (desde `8fa38f9`, quando o × passou a existir
+sempre). Hoje só o detalhe da empresa (`GroupsPage`) pode
+abrir sem título, e só com nome vazio. Ele abre carregando — só um spinner,
+nenhum focável —, então antes o foco ficava em quem abriu a modal, **atrás**
+dela. Agora o × existe e é o primeiro focável: o foco cai nele, e um Enter logo
+ao abrir fecha a modal. Com título sempre foi assim.
+
+**Escape em modais empilhadas — este existe aqui.** Cada `Modal.tsx` aberta
+escuta o teclado por conta própria, e um único Escape fecha **todas** as que
+estão abertas. O caso real é o da `GroupsPage`: com *"Nova nota da empresa"*
+aberta sobre o detalhe da empresa, um Esc fecha as duas e descarta a nota em
+digitação. Existe desde que o `Modal.tsx` escuta o Escape em `document` — bem
+antes da E24 — e está declarado nela.
+
+O outro defeito de empilhamento que a E24 declara — o **Tab** escapando de uma
+modal dentro de outra — **não existe aqui**: este port vai para um portal, e as
+modais "aninhadas" das telas são irmãs, não filhas.
+
 ## Como isto entra na aplicação
 
 `src/index.css` importa `design-system/styles.css` **antes** das diretivas

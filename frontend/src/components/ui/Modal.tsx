@@ -112,12 +112,14 @@ export function Modal({
       role="dialog"
       aria-labelledby={title ? titleId : undefined}
     >
-      {/* ⚠️ DESVIO DELIBERADO do original. A referência do pacote
-          (`design-system/components/feedback/Modal.jsx`, e o `Modal.d.ts`)
-          fecha pelo clique no fundo e só desenha o X quando há título. Este
-          port faz o contrário nas duas coisas, a pedido do usuário. Uma
-          conferência futura contra o pacote vai acusar a diferença: ela é
-          intencional e NÃO deve ser "corrigida" de volta sem nova decisão.
+      {/* Segue a E24 do pacote (`design-system/EMENDAS.md`): o clique no
+          fundo não fecha, e o X existe sempre. Este port mudou antes do pacote
+          (`8fa38f9`, na `main` por `cc8f070`), e o pacote foi emendado depois, a
+          pedido do operador. Não é a primeira vez que o HelpHS anda antes do
+          pacote: na E12 foi este mesmo arquivo (`0bfaf01`), e na E11 foram os
+          campos de formulário.
+          Entre `8fa38f9` e a E24 isto foi um desvio declarado do `Modal.jsx`;
+          desde a E24 não é mais.
 
           Fundo. Escurece e BLOQUEIA a tela de trás, mas não fecha mais.
 
@@ -145,11 +147,12 @@ export function Modal({
         {/* O cabeçalho — e o X dentro dele — é desenhado SEMPRE.
 
             Era `{title && ...}`: sem título, não havia X. Enquanto o fundo
-            fechava, isso não prendia ninguém. Sem o fundo, prenderia — e não é
-            hipótese: o detalhe da empresa usa `title={company.name}`, o nome
+            fechava, isso não prendia ninguém. Sem o fundo, prenderia quem só tem
+            clique (o Escape seguiria valendo — e celular não tem Escape) — e não
+            é hipótese: o detalhe da empresa usa `title={company.name}`, o nome
             vazio é alcançável, e carregando ou com erro de carga aquela modal
-            não tem botão nenhum. Se só o X fecha, toda modal precisa de um X,
-            e a garantia mora aqui, não em cada tela que chama.
+            não tem botão nenhum. Se só o X fecha por clique, toda modal precisa
+            de um X, e a garantia mora aqui, não em cada tela que chama.
 
             Sem título, a barra perde a borda e o título, e fica só o X à
             direita — o conteúdo não ganha um traço solto em cima.
@@ -163,7 +166,9 @@ export function Modal({
             isso o título tem `min-w-0 break-words` (pode encolher e quebra a
             palavra) e o botão tem `shrink-0` (nunca é espremido). Medido em
             navegador real, a 390px, com o controle negativo das classes
-            antigas — ver o commit. */}
+            antigas — ver o commit `8fa38f9`. Aquela medição usou fonte de
+            fallback: o veredito (dentro / fora) vale para qualquer fonte; os
+            pixels dela, não. */}
         <div
           className={cn(
             "flex items-center gap-3 shrink-0 px-4 py-3 sm:px-6 sm:py-4",

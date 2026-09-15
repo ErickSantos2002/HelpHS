@@ -81,12 +81,14 @@ describe("Modal", () => {
 
   it("sem título, o X existe assim mesmo — e fecha", async () => {
     // O X só era desenhado com `title`. Enquanto o fundo fechava, uma modal
-    // sem título tinha saída por clique; sem o fundo, ficaria PRESA.
+    // sem título tinha saída por clique; sem o fundo, ficaria PRESA para quem
+    // só tem clique (o Escape seguiria valendo — e celular não tem Escape).
     //
     // Não é hipótese: o detalhe da empresa (GroupsPage) usa `title={company.name}`,
-    // e o nome vazio é alcançável — o POST /companies grava "   " aparado para
+    // e o nome vazio é alcançável — o POST /groups/{group_id}/companies grava
+    // "   " aparado para
     // "". Carregando ou com erro de carga, aquela modal não tem botão nenhum.
-    // Se só o X fecha, toda modal precisa ter um X.
+    // Se só o X fecha por clique, toda modal precisa ter um X.
     const onClose = vi.fn();
     render(
       <Modal open onClose={onClose}>
@@ -121,7 +123,8 @@ describe("Modal", () => {
     // isso. A prova de layout foi medida em Chromium, a 390px, com controle
     // negativo: classes antigas + 47 letras → X em x=484–512 (fora da tela) e
     // o clique não o acerta; classes novas → X em 333–361, dentro e clicável,
-    // com 47 e com 255 letras. Números no commit.
+    // com 47 e com 255 letras. Números no commit. Aquela medição usou fonte de
+    // fallback: o veredito vale para qualquer fonte, os pixels não.
     render(
       <Modal open onClose={vi.fn()} title={"INDUSTRIAECOMERCIODEEQUIPAMENTOSDESEGURANCALTDA"}>
         <p>body</p>
