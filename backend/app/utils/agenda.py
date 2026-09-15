@@ -32,7 +32,7 @@ reescrever as linhas antigas. Ancorado em UTC, a data guardada continua sendo a
 data que a pessoa escolheu, e o recálculo não precisa existir.
 """
 
-from datetime import UTC, datetime, timedelta
+from datetime import UTC, datetime, time, timedelta
 from zoneinfo import ZoneInfo, ZoneInfoNotFoundError
 
 # Quem opera o sistema está em Recife. O padrão não é UTC de propósito: cair em
@@ -104,3 +104,32 @@ def bordas_do_dia_inteiro(inicio: datetime, fim: datetime) -> tuple[datetime, da
     primeiro = inicio.astimezone(UTC).replace(hour=0, minute=0, second=0, microsecond=0)
     ultimo = fim.astimezone(UTC).replace(hour=0, minute=0, second=0, microsecond=0)
     return primeiro, ultimo + timedelta(days=1) - timedelta(microseconds=1)
+
+
+# ── A convenção que a tela antiga ainda fala ──────────────────
+#
+# A tela no ar não conhece `all_day`: tem dois campos de data e manda
+# `T00:00:00Z` e `T23:59:59Z`. Isso É dia inteiro, por convenção. O padrão
+# `all_day=False` do contrato gravava cada evento dela como evento COM horário,
+# que a tela nova desenharia às 21:00 do dia anterior.
+#
+# A pegada é exata e não colide com cliente novo: o campo de hora da tela nova
+# só tem minutos, então `23:59:59` com segundos cravados só sai da antiga.
+
+_MEIA_NOITE = time(0, 0, 0)
+_FIM_DA_TELA_ANTIGA = time(23, 59, 59)
+
+
+def fala_a_convencao_da_tela_antiga(inicio: datetime, fim: datetime) -> bool:
+    """Início às 00:00:00 e fim às 23:59:59, EXATOS, no relógio do próprio valor.
+
+    "No relógio do próprio valor" é o fuso do pedido: `.time()` lê a hora no
+    deslocamento com que ela chegou, sem converter. Converter para UTC antes
+    faria `21:00-03:00` — que é `00:00Z` — passar pela pegada, e um evento das
+    21:00 às 20:59 de quem está em Recife viraria dia inteiro sozinho.
+
+    Exato inclui o microssegundo. `23:59:59.999999` é a borda que a API grava ao
+    derivar, não o que a tela manda — aceitá-la faria o predicado reagir ao
+    próprio resultado.
+    """
+    return inicio.time() == _MEIA_NOITE and fim.time() == _FIM_DA_TELA_ANTIGA

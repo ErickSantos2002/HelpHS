@@ -664,3 +664,165 @@ async def test_fuso_conhecido_na_consulta_e_aceito(patch_redis):
         r = await c.get("/api/v1/calendar/events?year=2026&month=1&timezone=America/Sao_Paulo")
 
     assert r.status_code == 200
+
+
+# ── A tela antiga, lida corretamente ──────────────────────────
+#
+# A tela no ar ainda não conhece `all_day`, e manda `T00:00:00Z` / `T23:59:59Z`
+# a partir de dois campos de data. Isso É dia inteiro por convenção — e o padrão
+# `all_day=False` do #16 gravava cada um desses eventos como evento COM horário,
+# que a tela nova desenharia às 21:00 do dia anterior.
+#
+# A regra: `all_day` AUSENTE + a pegada exata = dia inteiro. Explícito vence
+# sempre, nos dois sentidos.
+
+
+def _corpo_da_tela_antiga(inicio="2026-01-15", fim="2026-01-15"):
+    """O payload exato que `CalendarPage.tsx:153-161` monta hoje."""
+    corpo = _event_body(start_date=f"{inicio}T00:00:00Z", end_date=f"{fim}T23:59:59Z")
+    assert "all_day" not in corpo
+    return corpo
+
+
+@pytest.mark.asyncio
+async def test_post_da_tela_antiga_grava_dia_inteiro(patch_redis):
+    from app.core.database import get_db
+
+    _override_user(_mock_user(UserRole.admin))
+    app.dependency_overrides[get_db] = _db_override(None)
+
+    async with AsyncClient(transport=ASGITransport(app=app), base_url="http://test") as c:
+        r = await c.post("/api/v1/calendar/events", json=_corpo_da_tela_antiga())
+
+    assert r.status_code == 201
+    corpo = r.json()
+    assert corpo["all_day"] is True
+    # E as bordas passam a ser as derivadas: o último microssegundo do dia.
+    assert "23:59:59.999999" in corpo["end_date"]
+
+
+@pytest.mark.asyncio
+async def test_post_da_tela_antiga_de_varios_dias_grava_dia_inteiro(patch_redis):
+    from app.core.database import get_db
+
+    _override_user(_mock_user(UserRole.admin))
+    app.dependency_overrides[get_db] = _db_override(None)
+
+    async with AsyncClient(transport=ASGITransport(app=app), base_url="http://test") as c:
+        r = await c.post(
+            "/api/v1/calendar/events",
+            json=_corpo_da_tela_antiga(inicio="2026-01-15", fim="2026-01-17"),
+        )
+
+    assert r.status_code == 201
+    assert r.json()["all_day"] is True
+    assert r.json()["end_date"].startswith("2026-01-17T23:59:59.999999")
+
+
+@pytest.mark.asyncio
+async def test_all_day_false_explicito_vence_a_pegada(patch_redis):
+    """Quem manda o campo decide. A inferência só existe para quem não sabe dele.
+
+    Sem isto, um cliente que conhece a chave e quer mesmo um evento das 00:00
+    às 23:59:59 teria a escolha dele reescrita por uma regra feita para outro
+    cliente.
+    """
+    from app.core.database import get_db
+
+    _override_user(_mock_user(UserRole.admin))
+    app.dependency_overrides[get_db] = _db_override(None)
+
+    corpo = _corpo_da_tela_antiga()
+    corpo["all_day"] = False
+
+    async with AsyncClient(transport=ASGITransport(app=app), base_url="http://test") as c:
+        r = await c.post("/api/v1/calendar/events", json=corpo)
+
+    assert r.status_code == 201
+    assert r.json()["all_day"] is False
+    assert r.json()["end_date"].startswith("2026-01-15T23:59:59")
+    assert "999999" not in r.json()["end_date"]
+
+
+@pytest.mark.asyncio
+async def test_evento_com_horario_sem_a_chave_continua_com_horario(patch_redis):
+    """A inferência não pega o que não tem a pegada."""
+    from app.core.database import get_db
+
+    _override_user(_mock_user(UserRole.admin))
+    app.dependency_overrides[get_db] = _db_override(None)
+
+    corpo = _event_body(start_date="2026-01-15T09:00:00Z", end_date="2026-01-15T17:00:00Z")
+
+    async with AsyncClient(transport=ASGITransport(app=app), base_url="http://test") as c:
+        r = await c.post("/api/v1/calendar/events", json=corpo)
+
+    assert r.status_code == 201
+    assert r.json()["all_day"] is False
+    assert r.json()["start_date"].startswith("2026-01-15T09:00:00")
+
+
+@pytest.mark.asyncio
+async def test_patch_da_tela_antiga_cura_evento_gravado_na_lacuna(patch_redis):
+    """Um evento criado entre o deploy do #16 e este conserto tem `all_day=false`.
+
+    A tela antiga, ao editá-lo, manda o payload inteiro de novo — com a pegada e
+    sem a chave. É a chance de a linha voltar a dizer o que ela é.
+    """
+    from app.core.database import get_db
+
+    _override_user(_mock_user(UserRole.admin))
+    event = _mock_event(created_by=None, all_day=False)
+    event.start_date = datetime(2026, 1, 15, 0, 0, 0, tzinfo=UTC)
+    event.end_date = datetime(2026, 1, 15, 23, 59, 59, tzinfo=UTC)
+    app.dependency_overrides[get_db] = _db_override(event)
+
+    async with AsyncClient(transport=ASGITransport(app=app), base_url="http://test") as c:
+        r = await c.patch(f"/api/v1/calendar/events/{_EVENT_ID}", json=_corpo_da_tela_antiga())
+
+    assert r.status_code == 200
+    assert event.all_day is True
+    assert event.end_date == datetime(2026, 1, 15, 23, 59, 59, 999999, tzinfo=UTC)
+
+
+@pytest.mark.asyncio
+async def test_patch_sem_datas_nao_infere_nada(patch_redis):
+    """A pegada é lida no que CHEGOU, não no que já estava no banco.
+
+    Trocar só o título de um evento gravado na lacuna não pode ligar a chave: a
+    convenção é da requisição, e uma edição que não mandou data nenhuma não falou
+    convenção nenhuma. Ler a linha do banco transformaria qualquer edição num
+    backfill escondido — e a regra do projeto é que backfill não se esconde.
+    """
+    from app.core.database import get_db
+
+    _override_user(_mock_user(UserRole.admin))
+    event = _mock_event(created_by=None, all_day=False)
+    event.start_date = datetime(2026, 1, 15, 0, 0, 0, tzinfo=UTC)
+    event.end_date = datetime(2026, 1, 15, 23, 59, 59, tzinfo=UTC)
+    app.dependency_overrides[get_db] = _db_override(event)
+
+    async with AsyncClient(transport=ASGITransport(app=app), base_url="http://test") as c:
+        r = await c.patch(f"/api/v1/calendar/events/{_EVENT_ID}", json={"title": "Novo título"})
+
+    assert r.status_code == 200
+    assert event.all_day is False
+    assert event.end_date == datetime(2026, 1, 15, 23, 59, 59, tzinfo=UTC)
+
+
+@pytest.mark.asyncio
+async def test_patch_com_all_day_false_explicito_vence_a_pegada(patch_redis):
+    from app.core.database import get_db
+
+    _override_user(_mock_user(UserRole.admin))
+    event = _mock_event(created_by=None, all_day=True)
+    app.dependency_overrides[get_db] = _db_override(event)
+
+    corpo = _corpo_da_tela_antiga()
+    corpo["all_day"] = False
+
+    async with AsyncClient(transport=ASGITransport(app=app), base_url="http://test") as c:
+        r = await c.patch(f"/api/v1/calendar/events/{_EVENT_ID}", json=corpo)
+
+    assert r.status_code == 200
+    assert event.all_day is False

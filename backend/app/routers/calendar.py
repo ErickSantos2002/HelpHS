@@ -29,6 +29,7 @@ from app.schemas.calendar import (
 from app.utils.agenda import (
     FUSO_UTC,
     bordas_do_dia_inteiro,
+    fala_a_convencao_da_tela_antiga,
     janela_do_mes,
     resolve_fuso,
 )
@@ -57,6 +58,27 @@ def _bordas(inicio: datetime, fim: datetime, dia_inteiro: bool) -> tuple[datetim
     if dia_inteiro:
         return bordas_do_dia_inteiro(inicio, fim)
     return inicio, fim
+
+
+def _dia_inteiro_do_pedido(
+    campos_enviados: set[str], inicio: datetime, fim: datetime, enviado: bool | None
+) -> bool | None:
+    """O `all_day` que o pedido quis dizer, ou `None` se ele não disse nada.
+
+    **Explícito vence, nos dois sentidos.** A inferência existe só para o cliente
+    que não conhece o campo — a tela no ar —, e nunca reescreve a escolha de
+    quem o mandou.
+
+    **A pegada é lida no que chegou**, e só quando as duas datas chegaram. Uma
+    edição que não mandou data nenhuma não falou convenção nenhuma: ler a linha
+    do banco transformaria qualquer troca de título num backfill escondido.
+    """
+    if "all_day" in campos_enviados:
+        return enviado
+    datas_chegaram = {"start_date", "end_date"} <= campos_enviados
+    if datas_chegaram and fala_a_convencao_da_tela_antiga(inicio, fim):
+        return True
+    return None
 
 
 def _valida_ordem(inicio: datetime, fim: datetime) -> None:
@@ -154,7 +176,14 @@ async def create_event(
     db: Annotated[AsyncSession, Depends(get_db)],
     actor: Annotated[User, Depends(authorize(UserRole.admin, UserRole.technician))],
 ) -> CalendarEventResponse:
-    inicio, fim = _bordas(body.start_date, body.end_date, body.all_day)
+    # A tela no ar não manda `all_day` e fala dia inteiro por convenção — ver
+    # `fala_a_convencao_da_tela_antiga`. Sem esta leitura, o padrão `False` do
+    # schema gravava cada evento dela como evento com horário.
+    dia_inteiro = (
+        _dia_inteiro_do_pedido(body.model_fields_set, body.start_date, body.end_date, body.all_day)
+        or False
+    )
+    inicio, fim = _bordas(body.start_date, body.end_date, dia_inteiro)
     _valida_ordem(inicio, fim)
 
     now = datetime.now(UTC)
@@ -166,7 +195,7 @@ async def create_event(
         color=body.color,
         start_date=inicio,
         end_date=fim,
-        all_day=body.all_day,
+        all_day=dia_inteiro,
         created_by=actor.id,
         # Explícito: o default da coluna só valeria no INSERT e a resposta é
         # montada a partir do objeto em memória
@@ -220,8 +249,14 @@ async def update_event(
         event.start_date = body.start_date
     if body.end_date is not None:
         event.end_date = body.end_date
-    if body.all_day is not None:
-        event.all_day = body.all_day
+    # Mesma leitura do POST, sobre os valores QUE CHEGARAM. A tela antiga
+    # reenvia o payload inteiro ao editar, e é assim que um evento gravado com a
+    # chave errada volta a dizer o que ele é.
+    dia_inteiro = _dia_inteiro_do_pedido(
+        body.model_fields_set, event.start_date, event.end_date, body.all_day
+    )
+    if dia_inteiro is not None:
+        event.all_day = dia_inteiro
 
     # As bordas são derivadas DEPOIS de aplicar os campos, e com a chave que
     # vale agora. Ligar "dia inteiro" sem mandar data nenhuma precisa reescrever

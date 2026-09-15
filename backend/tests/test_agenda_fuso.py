@@ -193,3 +193,92 @@ def test_o_dia_do_evento_de_dia_inteiro_e_o_dia_em_utc():
     assert inicio.date() == datetime(2026, 1, 16).date()
     assert inicio == datetime(2026, 1, 16, tzinfo=UTC)
     assert fim == datetime(2026, 1, 16, 23, 59, 59, 999999, tzinfo=UTC)
+
+
+# ── A convenção que a tela antiga ainda fala ──────────────────
+#
+# A tela no ar não conhece `all_day`. Ela manda dois campos de data como
+# `T00:00:00Z` e `T23:59:59Z` — e isso É dia inteiro, por convenção. Com o
+# padrão `all_day=False` do #16, todo evento criado por ela passava a ser
+# gravado como evento COM horário, e só apareceria errado quando a tela nova
+# desenhasse pelo instante: às 21:00 do dia anterior.
+#
+# A pegada é exata. O campo de hora da tela nova só tem minutos, então
+# `23:59:59` cravado só sai da tela antiga.
+
+
+def test_a_pegada_da_tela_antiga_e_reconhecida():
+    from app.utils.agenda import fala_a_convencao_da_tela_antiga
+
+    assert fala_a_convencao_da_tela_antiga(
+        datetime(2026, 1, 15, 0, 0, 0, tzinfo=UTC),
+        datetime(2026, 1, 15, 23, 59, 59, tzinfo=UTC),
+    )
+
+
+def test_a_pegada_vale_para_varios_dias():
+    from app.utils.agenda import fala_a_convencao_da_tela_antiga
+
+    assert fala_a_convencao_da_tela_antiga(
+        datetime(2026, 1, 15, 0, 0, 0, tzinfo=UTC),
+        datetime(2026, 1, 17, 23, 59, 59, tzinfo=UTC),
+    )
+
+
+def test_a_pegada_e_lida_no_deslocamento_que_veio_no_valor():
+    """ "No fuso do pedido": 00:00 e 23:59:59 no relógio do próprio valor."""
+    from app.utils.agenda import fala_a_convencao_da_tela_antiga
+
+    menos_tres = datetime(2026, 1, 15, tzinfo=RECIFE).tzinfo
+    assert fala_a_convencao_da_tela_antiga(
+        datetime(2026, 1, 15, 0, 0, 0, tzinfo=menos_tres),
+        datetime(2026, 1, 15, 23, 59, 59, tzinfo=menos_tres),
+    )
+
+
+def test_o_mesmo_instante_escrito_em_outro_deslocamento_nao_e_a_pegada():
+    """00:00Z escrito como 21:00-03:00 não é meia-noite no relógio de quem mandou.
+
+    É este caso que separa "fuso do pedido" de "UTC". Converter para UTC antes
+    de comparar faria os dois valores abaixo passarem pela pegada — e um evento
+    das 21:00 às 20:59 de quem está em Recife viraria dia inteiro sozinho.
+    """
+    from app.utils.agenda import fala_a_convencao_da_tela_antiga
+
+    assert not fala_a_convencao_da_tela_antiga(
+        datetime(2026, 1, 15, 0, 0, 0, tzinfo=UTC).astimezone(RECIFE),
+        datetime(2026, 1, 15, 23, 59, 59, tzinfo=UTC).astimezone(RECIFE),
+    )
+
+
+def test_so_uma_das_bordas_nao_basta():
+    from app.utils.agenda import fala_a_convencao_da_tela_antiga
+
+    assert not fala_a_convencao_da_tela_antiga(
+        datetime(2026, 1, 15, 0, 0, 0, tzinfo=UTC),
+        datetime(2026, 1, 15, 17, 0, 0, tzinfo=UTC),
+    )
+    assert not fala_a_convencao_da_tela_antiga(
+        datetime(2026, 1, 15, 9, 0, 0, tzinfo=UTC),
+        datetime(2026, 1, 15, 23, 59, 59, tzinfo=UTC),
+    )
+
+
+def test_a_pegada_e_exata_no_microssegundo():
+    """`23:59:59.999999` é a borda que a API grava — não é o que a tela manda.
+
+    Aceitar a borda derivada como pegada faria a inferência reagir ao próprio
+    resultado dela, e um cliente novo que mandasse o valor já derivado com
+    `all_day=false` explícito... não seria afetado (explícito vence), mas o
+    predicado deixaria de dizer o que diz o nome.
+    """
+    from app.utils.agenda import fala_a_convencao_da_tela_antiga
+
+    assert not fala_a_convencao_da_tela_antiga(
+        datetime(2026, 1, 15, 0, 0, 0, tzinfo=UTC),
+        datetime(2026, 1, 15, 23, 59, 59, 999999, tzinfo=UTC),
+    )
+    assert not fala_a_convencao_da_tela_antiga(
+        datetime(2026, 1, 15, 0, 0, 0, 1, tzinfo=UTC),
+        datetime(2026, 1, 15, 23, 59, 59, tzinfo=UTC),
+    )
