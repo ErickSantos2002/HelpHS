@@ -1,23 +1,45 @@
-import { useCallback, useEffect, useState } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { toast } from "sonner";
 import { useAuth } from "../../contexts/AuthContext";
 import {
+  Alert,
   Button,
   Icon,
   Input,
   Modal,
   ModalFooter,
+  Switch,
   Textarea,
 } from "../../components/ui";
+import {
+  chaveCivil,
+  chaveDeOrdem,
+  chaveDoDia,
+  chaveFlutuante,
+  descreveComData,
+  descreveHorario,
+  diaDaSemana,
+  diasNoMes,
+  fusoDoNavegador,
+  horaCivil,
+  instanteDe,
+  jaTerminou,
+  ocupaODia,
+  ocupaOMes,
+} from "../../lib/agenda";
 import { readableTextColor } from "../../lib/colors";
+import { toastApiError } from "../../lib/toastError";
 import { cn } from "../../lib/utils";
 import {
   getCalendarEvents,
+  getCalendarEventTypes,
   createCalendarEvent,
   updateCalendarEvent,
   deleteCalendarEvent,
   type CalendarEvent,
+  type CalendarEventPayload,
   type CalendarEventType,
+  type CalendarEventTypeColor,
 } from "../../services/calendarService";
 
 // ── Constants ─────────────────────────────────────────────────
@@ -30,58 +52,22 @@ const EVENT_TYPE_LABELS: Record<CalendarEventType, string> = {
   holiday: "Feriado",
 };
 
-/**
- * Os 21 hexadecimais desta tela são **dado**, e é por isso que continuam aqui.
- *
- * A migração troca cor que é decisão de desenho — o azul de "hoje", o cinza do
- * fim de semana — por token. Estas não são: o backend guarda `color` como texto
- * na linha do evento, o usuário escolhe qual é, e a tela só repinta o que veio
- * do banco. Um `var(--chart-3)` gravado nessa coluna não é cor de gráfico: é uma
- * string que vaza para o relatório, para a exportação e para quem ler a tabela.
- *
- * O que o sistema de design resolve aqui não é a cor de fundo — é o **texto por
- * cima dela**, que era `text-white` cravado. Sobre `#ffffff` e `#eab308`, dois
- * dos dezesseis valores oferecidos, branco sobre branco não se lê. Quem decide
- * é `readableTextColor`, por luminância WCAG, uma cor de cada vez.
- *
- * Estes cinco são o **padrão por tipo**: o valor que vai para o banco quando a
- * pessoa escolhe o tipo e não mexe na cor. Os cinco são membros da paleta
- * abaixo, e é ela que manda.
- */
-const EVENT_TYPE_COLORS: Record<CalendarEventType, string> = {
-  event: "#6366f1",
-  meeting: "#3b82f6",
-  training: "#10b981",
-  deadline: "#f59e0b",
-  holiday: "#ef4444",
-};
+/*
+  ── A cor não mora mais aqui ─────────────────────────────────────────
 
-/**
- * Cores disponíveis para os eventos. As cinco primeiras são as cores padrão
- * de cada tipo de evento; as demais servem para diferenciar eventos do mesmo tipo.
- *
- * Continua com hexadecimal por ser a lista de opções de um campo de dado — não
- * a paleta da interface. Qual conjunto de cores se oferece a quem cria evento é
- * decisão de desenho de produto, e ela não se toma de dentro de uma tela.
- */
-const EVENT_COLOR_PALETTE: { value: string; label: string }[] = [
-  { value: "#6366f1", label: "Índigo" },
-  { value: "#3b82f6", label: "Azul" },
-  { value: "#10b981", label: "Verde" },
-  { value: "#f59e0b", label: "Âmbar" },
-  { value: "#ef4444", label: "Vermelho" },
-  { value: "#8b5cf6", label: "Violeta" },
-  { value: "#0ea5e9", label: "Azul-céu" },
-  { value: "#06b6d4", label: "Ciano" },
-  { value: "#14b8a6", label: "Turquesa" },
-  { value: "#84cc16", label: "Lima" },
-  { value: "#eab308", label: "Amarelo" },
-  { value: "#f97316", label: "Laranja" },
-  { value: "#ec4899", label: "Rosa" },
-  { value: "#a855f7", label: "Púrpura" },
-  { value: "#64748b", label: "Cinza" },
-  { value: "#ffffff", label: "Branco" },
-];
+  Até 15/09/2026 este arquivo tinha 21 hexadecimais: os cinco padrões por tipo e
+  as dezesseis fichas que a pessoa escolhia. O §29 os deixou de propósito — eram
+  dado, não dívida. O que mudou foi a FONTE: desde o #18 a cor do evento é
+  derivada do tipo no backend, e ele ignora a cor mandada.
+
+  Com isso, as fichas viraram controle morto, e o mapa local virou segunda fonte
+  para a mesma coisa. Os dois saíram. A tela desenha a `color` que a API devolve,
+  e lê de `GET /calendar/event-types` o mapa de que precisa para a legenda e para
+  mostrar, no modal, a cor que o tipo escolhido vai ter.
+
+  Não há mapa de reserva para quando a API falha, e isso é deliberado: um mapa de
+  reserva seria exatamente a segunda fonte que esta mudança tirou.
+*/
 
 const MONTHS = [
   "Janeiro","Fevereiro","Março","Abril","Maio","Junho",
@@ -90,30 +76,28 @@ const MONTHS = [
 const MONTHS_SHORT = ["Jan","Fev","Mar","Abr","Mai","Jun","Jul","Ago","Set","Out","Nov","Dez"];
 const WEEKDAYS = ["Dom","Seg","Ter","Qua","Qui","Sex","Sáb"];
 const WEEKDAYS_FULL = ["Domingo","Segunda","Terça","Quarta","Quinta","Sexta","Sábado"];
-const CURRENT_YEAR = new Date().getFullYear();
-const YEARS = Array.from({ length: 8 }, (_, i) => CURRENT_YEAR - 1 + i);
 
-// ── Helpers ───────────────────────────────────────────────────
+/** Horário que aparece ao desligar "dia inteiro" num evento que não tinha hora. */
+const HORA_INICIAL = "09:00";
+const HORA_FINAL = "10:00";
 
-function getDaysInMonth(year: number, month: number) {
-  return new Date(year, month + 1, 0).getDate();
+/**
+ * Quem criou o evento, em palavras.
+ *
+ * Três casos, e dois deles não podem se confundir. A coluna é `ondelete=SET NULL`:
+ * apagar o usuário esvazia `created_by` — o autor foi REMOVIDO. Anonimizar não
+ * apaga a linha, só troca o nome por "Usuário Anonimizado …", que chega aqui como
+ * nome e já diz o que é. O terceiro caso — id sem nome — não deveria existir com a
+ * chave estrangeira, e está escrito para não virar "removido", que seria mentira.
+ */
+function autoria(e: CalendarEvent): string {
+  if (e.creator_name) return `Criado por ${e.creator_name}`;
+  return e.created_by ? "Criado por um usuário não identificado" : "Criado por um usuário removido";
 }
-function getFirstDayOfMonth(year: number, month: number) {
-  return new Date(year, month, 1).getDay();
-}
 
-function dateStr(d: Date) {
-  return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, "0")}-${String(d.getDate()).padStart(2, "0")}`;
-}
-
-function isEventOnDay(event: CalendarEvent, year: number, month: number, day: number): boolean {
-  const start = new Date(event.start_date);
-  const end = new Date(event.end_date);
-  // Use UTC to avoid timezone shift (event dates are stored as UTC midnight)
-  const target = Date.UTC(year, month, day);
-  const startDay = Date.UTC(start.getUTCFullYear(), start.getUTCMonth(), start.getUTCDate());
-  const endDay = Date.UTC(end.getUTCFullYear(), end.getUTCMonth(), end.getUTCDate());
-  return target >= startDay && target <= endDay;
+/** O status HTTP de um erro do axios, ou `undefined`. */
+function statusDoErro(err: unknown): number | undefined {
+  return (err as { response?: { status?: number } } | undefined)?.response?.status;
 }
 
 // ── Event Dialog ──────────────────────────────────────────────
@@ -121,44 +105,118 @@ function isEventOnDay(event: CalendarEvent, year: number, month: number, day: nu
 interface EventDialogProps {
   event?: CalendarEvent;
   defaultDate?: string;
+  fuso: string;
+  tipos: CalendarEventTypeColor[];
   onClose: () => void;
   onSaved: () => void;
 }
 
-function EventDialog({ event, defaultDate, onClose, onSaved }: EventDialogProps) {
+function EventDialog({ event, defaultDate, fuso, tipos, onClose, onSaved }: EventDialogProps) {
   const [title, setTitle] = useState(event?.title ?? "");
   const [description, setDescription] = useState(event?.description ?? "");
   const [eventType, setEventType] = useState<CalendarEventType>(event?.event_type ?? "event");
-  // O padrão sai da tabela por tipo, e não de um sexto hexadecimal repetido:
-  // a cor inicial de um evento novo era `#6366f1` escrito de novo aqui, que
-  // podia divergir de `EVENT_TYPE_COLORS.event` sem ninguém perceber.
-  const [color, setColor] = useState(event?.color ?? EVENT_TYPE_COLORS.event);
-  const [colorOverride, setColorOverride] = useState(!!event?.color);
-  const [startDate, setStartDate] = useState(
-    event ? event.start_date.slice(0, 10) : (defaultDate ?? ""),
+  /*
+    Dia inteiro LIGADO ao abrir um evento novo. Todo evento que já existe é de dia
+    inteiro, o clique no dia do calendário é a entrada mais comum, treinamento de
+    dia todo não pede hora — e é o padrão que não perde dado: quem esquece a chave
+    cria dia inteiro, e não um evento de duração errada.
+  */
+  const [diaInteiro, setDiaInteiro] = useState(event ? event.all_day : true);
+  /*
+    As duas naturezas se leem diferente, e é aqui que o erro custaria um dia.
+    Dia inteiro é data FLUTUANTE: `00:00Z` é a data. Lido no fuso de Recife, o
+    mesmo `00:00Z` seria 21:00 da VÉSPERA — o campo mostraria o dia anterior, e
+    salvar gravaria o evento um dia antes. Evento com hora é instante, e se lê no
+    fuso de quem olha.
+  */
+  const lerData = (instante: string) =>
+    event?.all_day ? chaveFlutuante(instante) : chaveCivil(instante, fuso);
+  const [startDate, setStartDate] = useState(event ? lerData(event.start_date) : (defaultDate ?? ""));
+  const [endDate, setEndDate] = useState(event ? lerData(event.end_date) : (defaultDate ?? ""));
+  const [startTime, setStartTime] = useState(
+    event && !event.all_day ? horaCivil(event.start_date, fuso) : HORA_INICIAL,
   );
-  const [endDate, setEndDate] = useState(
-    event ? event.end_date.slice(0, 10) : (defaultDate ?? ""),
+  const [endTime, setEndTime] = useState(
+    event && !event.all_day ? horaCivil(event.end_date, fuso) : HORA_FINAL,
   );
   const [saving, setSaving] = useState(false);
 
-  function handleTypeChange(t: CalendarEventType) {
-    setEventType(t);
-    if (!colorOverride) setColor(EVENT_TYPE_COLORS[t]);
-  }
+  const fimDoEvento = endDate || startDate;
+  /*
+    O fim vem DEPOIS do início — a mesma regra da API, que recusa duração zero.
+    A tela confere antes para travar o botão e dizer por quê; quem decide
+    continua sendo o servidor, e a recusa dele chega pelo `toastApiError`.
+
+    Cada recusa vai para o CAMPO que a causa. A revisão achou a data de fim errada
+    marcando a hora de fim como inválida: quem estava na data não ouvia erro
+    nenhum, e quem corrigia a hora não via o erro sair.
+  */
+  const instanteDoInicio = diaInteiro ? null : instanteDe(startDate, startTime, fuso);
+  const instanteDoFim = diaInteiro ? null : instanteDe(fimDoEvento, endTime, fuso);
+  const dataDoFimAntes = !!startDate && fimDoEvento < startDate;
+  // `instanteDe` devolve null para hora vazia: um Backspace no campo de hora
+  // deixa o valor "", e antes isso derrubava a tela inteira.
+  const horaDoInicioFalta = !diaInteiro && !!startDate && instanteDoInicio === null;
+  const horaDoFimFalta = !diaInteiro && !!startDate && !dataDoFimAntes && instanteDoFim === null;
+  const horasForaDeOrdem =
+    !diaInteiro && !dataDoFimAntes && instanteDoInicio !== null && instanteDoFim !== null &&
+    instanteDoFim <= instanteDoInicio;
+  const podeSalvar =
+    !!title.trim() && !!startDate && !dataDoFimAntes &&
+    !horaDoInicioFalta && !horaDoFimFalta && !horasForaDeOrdem;
+
+  /*
+    O instante que ninguém mexeu volta como estava.
+
+    Recalcular a partir do "HH:MM" mostrado reescreve o instante gravado — e na
+    hora que se repete no fim do horário de verão, a leitura convencional é a
+    PRIMEIRA ocorrência: o evento recuava uma hora e mudava de duração só por ter
+    sido aberto e salvo. Achado da revisão.
+  */
+  const intacto = (instante: string, dia: string, hora: string) =>
+    !!event && !event.all_day && !diaInteiro &&
+    chaveCivil(instante, fuso) === dia && horaCivil(instante, fuso) === hora;
+
+  const corDoTipo = tipos.find((t) => t.value === eventType)?.color;
 
   async function handleSave() {
-    if (!title.trim() || !startDate) return;
+    if (!podeSalvar) return;
     setSaving(true);
+    /*
+      `all_day` vai SEMPRE, e a cor não vai nunca.
+
+      A API infere dia inteiro quando a chave não vem e as bordas são 00:00:00 e
+      23:59:59 (#17) — regra feita para a tela antiga. Esta diz o que quer, e
+      explícito vence. A cor saiu do contrato no #18: vem do tipo.
+
+      Dia inteiro manda a data à meia-noite UTC dos dois lados; a API deriva as
+      bordas do dia. Com hora, o relógio digitado vira instante no fuso de quem
+      digitou — e sem segundos, para nunca fabricar a pegada do #17.
+    */
+    const payload: CalendarEventPayload = diaInteiro
+      ? {
+          title: title.trim(),
+          description: description.trim() || null,
+          event_type: eventType,
+          start_date: `${startDate}T00:00:00Z`,
+          end_date: `${fimDoEvento}T00:00:00Z`,
+          all_day: true,
+        }
+      : {
+          title: title.trim(),
+          description: description.trim() || null,
+          event_type: eventType,
+          start_date:
+            event && intacto(event.start_date, startDate, startTime)
+              ? event.start_date
+              : instanteDoInicio!,
+          end_date:
+            event && intacto(event.end_date, fimDoEvento, endTime)
+              ? event.end_date
+              : instanteDoFim!,
+          all_day: false,
+        };
     try {
-      const payload = {
-        title: title.trim(),
-        description: description.trim() || null,
-        event_type: eventType,
-        color,
-        start_date: startDate + "T00:00:00Z",
-        end_date: (endDate || startDate) + "T23:59:59Z",
-      };
       if (event) {
         await updateCalendarEvent(event.id, payload);
         toast.success("Evento atualizado!");
@@ -168,12 +226,21 @@ function EventDialog({ event, defaultDate, onClose, onSaved }: EventDialogProps)
       }
       onSaved();
       onClose();
-    } catch {
-      toast.error("Erro ao salvar evento.");
+    } catch (err) {
+      // Era "Erro ao salvar evento." para qualquer recusa. A API diz o motivo —
+      // fim antes do início, fuso desconhecido —, e ele precisa chegar a quem salvou.
+      toastApiError(err, "Não foi possível salvar o evento.");
+      // 404: outra pessoa já removeu o evento. Deixar o modal aberto faria cada
+      // novo "Salvar" repetir a recusa, com o evento ainda desenhado na grade.
+      if (statusDoErro(err) === 404) {
+        onSaved();
+        onClose();
+      }
     } finally {
       setSaving(false);
     }
   }
+
 
   return (
     <Modal open onClose={onClose} title={event ? "Editar evento" : "Novo evento"} size="md">
@@ -194,47 +261,33 @@ function EventDialog({ event, defaultDate, onClose, onSaved }: EventDialogProps)
           <select
             id="evento-tipo"
             value={eventType}
-            onChange={(e) => handleTypeChange(e.target.value as CalendarEventType)}
+            onChange={(e) => setEventType(e.target.value as CalendarEventType)}
             className="w-full rounded-lg border border-borda bg-surface-elevated px-3 py-2 text-sm text-conteudo focus:outline-none focus:ring-2 focus:ring-primary focus:border-transparent transition-colors"
           >
             {(Object.keys(EVENT_TYPE_LABELS) as CalendarEventType[]).map((t) => (
               <option key={t} value={t}>{EVENT_TYPE_LABELS[t]}</option>
             ))}
           </select>
+          {/*
+            No lugar das dezesseis fichas, a cor que o tipo vai ter — e a frase que
+            diz por que não há escolha. Sem a frase, quem procurava as fichas
+            acharia que elas sumiram por defeito. A amostra é reforço: o que
+            informa é o tipo escrito no seletor.
+          */}
+          {corDoTipo && (
+            <p className="flex items-center gap-1.5 pt-0.5 text-xs text-conteudo-muted">
+              <span
+                data-testid="cor-do-tipo"
+                aria-hidden="true"
+                className="h-2.5 w-2.5 shrink-0 rounded-full ring-1 ring-inset ring-borda-control"
+                style={{ backgroundColor: corDoTipo }}
+              />
+              A cor do evento vem do tipo.
+            </p>
+          )}
         </div>
 
-        <div className="space-y-1.5">
-          {/* `<label>` sem `htmlFor` não rotula nada, e aqui não há um campo
-              para apontar: são dezesseis botões. Vira nome do GRUPO, que é o
-              que o leitor de tela anuncia antes de percorrer as opções. */}
-          <span id="evento-cor" className="block text-xs font-medium text-conteudo-muted">Cor</span>
-          <div role="group" aria-labelledby="evento-cor" className="grid grid-cols-4 gap-2 sm:grid-cols-8">
-            {EVENT_COLOR_PALETTE.map((c) => (
-              <button
-                key={c.value}
-                type="button"
-                title={c.label}
-                aria-label={c.label}
-                aria-pressed={color === c.value}
-                onClick={() => { setColor(c.value); setColorOverride(true); }}
-                className={cn(
-                  "h-8 w-full rounded-md border-2 transition-transform cursor-pointer",
-                  // Contorno interno para as cores claras não sumirem no fundo.
-                  // Era `ring-black/15`, que sobre a superfície branca do tema
-                  // claro dá ~1,3:1 — o limite do controle desaparece
-                  // exatamente onde ele mais fazia falta. `--border-control` é
-                  // o token da E7 para isto, medido em 4,76 / 4,55 / 4,34 no
-                  // claro e 6,23 / 6,78 / 5,29 no escuro.
-                  "ring-1 ring-inset ring-borda-control",
-                  color === c.value
-                    ? "border-action scale-105 shadow-md"
-                    : "border-transparent hover:scale-105",
-                )}
-                style={{ backgroundColor: c.value }}
-              />
-            ))}
-          </div>
-        </div>
+        <Switch checked={diaInteiro} onChange={setDiaInteiro} label="Dia inteiro" />
 
         <div className="grid grid-cols-2 gap-3">
           <Input
@@ -249,8 +302,41 @@ function EventDialog({ event, defaultDate, onClose, onSaved }: EventDialogProps)
             value={endDate}
             min={startDate}
             onChange={(e) => setEndDate(e.target.value)}
+            error={dataDoFimAntes ? "O fim precisa ser depois do início." : undefined}
           />
         </div>
+
+        {!diaInteiro && (
+          <div className="grid grid-cols-2 gap-3">
+            {/*
+              `step={60}`: minutos, sem segundos. O backend (#17) infere dia
+              inteiro quando o fim é 23:59:59 com os segundos cravados, e um campo
+              que aceitasse segundos poderia fabricar essa pegada por acidente.
+            */}
+            <Input
+              label="Hora de início"
+              type="time"
+              step={60}
+              value={startTime}
+              onChange={(e) => setStartTime(e.target.value)}
+              error={horaDoInicioFalta ? "Informe a hora de início." : undefined}
+            />
+            <Input
+              label="Hora de fim"
+              type="time"
+              step={60}
+              value={endTime}
+              onChange={(e) => setEndTime(e.target.value)}
+              error={
+                horaDoFimFalta
+                  ? "Informe a hora de fim."
+                  : horasForaDeOrdem
+                    ? "O fim precisa ser depois do início."
+                    : undefined
+              }
+            />
+          </div>
+        )}
 
         <Textarea
           label="Descrição (opcional)"
@@ -267,7 +353,7 @@ function EventDialog({ event, defaultDate, onClose, onSaved }: EventDialogProps)
           variant="primary"
           onClick={handleSave}
           loading={saving}
-          disabled={!title.trim() || !startDate}
+          disabled={!podeSalvar}
         >
           Salvar
         </Button>
@@ -282,16 +368,20 @@ interface CalendarGridProps {
   year: number;
   month: number;
   events: CalendarEvent[];
+  fuso: string;
+  hoje: string;
   canEdit: boolean;
   selectedDay: number | null;
   onSelectDay: (day: number) => void;
   onEventClick: (event: CalendarEvent) => void;
 }
 
-function CalendarGrid({ year, month, events, canEdit, selectedDay, onSelectDay, onEventClick }: CalendarGridProps) {
-  const daysInMonth = getDaysInMonth(year, month);
-  const firstDay = getFirstDayOfMonth(year, month);
-  const today = new Date();
+function CalendarGrid({ year, month, events, fuso, hoje, canEdit, selectedDay, onSelectDay, onEventClick }: CalendarGridProps) {
+  // Aritmética de data civil, sem fuso: o dia 1º cai no mesmo dia da semana em
+  // qualquer lugar do mundo. Com `new Date(ano, mês, 1).getDay()` a conta usava o
+  // fuso da máquina, e a grade dependia de onde a tela abria.
+  const daysInMonth = diasNoMes(year, month);
+  const firstDay = diaDaSemana(chaveDoDia(year, month, 1));
 
   const cells: (number | null)[] = [
     ...Array(firstDay).fill(null),
@@ -313,10 +403,13 @@ function CalendarGrid({ year, month, events, canEdit, selectedDay, onSelectDay, 
         {cells.map((day, i) => {
           if (!day) return <div key={i} className="bg-surface/40 min-h-[88px]" />;
 
-          const isToday = today.getFullYear() === year && today.getMonth() === month && today.getDate() === day;
+          const chave = chaveDoDia(year, month, day);
+          const isToday = chave === hoje;
           const isSelected = selectedDay === day;
           const isWeekend = (firstDay + day - 1) % 7 === 0 || (firstDay + day - 1) % 7 === 6;
-          const dayEvents = events.filter((e) => isEventOnDay(e, year, month, day));
+          const dayEvents = events
+            .filter((e) => ocupaODia(e, chave, fuso))
+            .sort((a, b) => chaveDeOrdem(a, fuso).localeCompare(chaveDeOrdem(b, fuso)));
 
           return (
             <div
@@ -359,24 +452,35 @@ function CalendarGrid({ year, month, events, canEdit, selectedDay, onSelectDay, 
               </div>
 
               <div className="space-y-0.5">
-                {dayEvents.slice(0, 3).map((e) => (
-                  <div
-                    key={e.id}
-                    onClick={(ev) => { ev.stopPropagation(); if (canEdit) onEventClick(e); }}
-                    className="flex items-center gap-1 text-[10px] leading-tight rounded-md px-1.5 py-0.5 truncate cursor-pointer hover:opacity-80 transition-opacity"
-                    // O fundo é cor escolhida pelo usuário — dado, não token —,
-                    // então o texto por cima não pode ser fixo: `text-white`
-                    // sobre o "#ffffff" e o "#eab308" da paleta some. Quem
-                    // escolhe é a luminância WCAG, uma cor de cada vez.
-                    style={{
-                      backgroundColor: e.color,
-                      color: readableTextColor(e.color),
-                    }}
-                    title={e.title}
-                  >
-                    {e.title}
-                  </div>
-                ))}
+                {dayEvents.slice(0, 3).map((e) => {
+                  // A hora aparece só no dia em que o evento COMEÇA. No dia
+                  // seguinte de um plantão que atravessa a meia-noite, "22:00"
+                  // diria que ele começa de novo.
+                  const comecaHoje = !e.all_day && chaveCivil(e.start_date, fuso) === chave;
+                  return (
+                    <div
+                      key={e.id}
+                      onClick={(ev) => { ev.stopPropagation(); if (canEdit) onEventClick(e); }}
+                      className="flex items-center gap-1 text-[10px] leading-tight rounded-md px-1.5 py-0.5 truncate cursor-pointer hover:opacity-80 transition-opacity"
+                      // O fundo vem da API — dado, não token —, então o texto por
+                      // cima não pode ser fixo. Quem escolhe é a luminância, uma
+                      // cor de cada vez.
+                      style={{
+                        backgroundColor: e.color,
+                        color: readableTextColor(e.color),
+                      }}
+                      title={e.title}
+                    >
+                      {comecaHoje && <span className="font-semibold">{horaCivil(e.start_date, fuso)}</span>}
+                      {e.title}
+                      {/* O tipo em texto. Com a cor derivada do tipo e a legenda de
+                          volta, a cor passou a CARREGAR o tipo — sem este texto ela
+                          seria a única portadora, que é a regra do §29. No chip não
+                          cabe visível; o detalhe do dia o mostra por extenso. */}
+                      <span className="sr-only"> — {EVENT_TYPE_LABELS[e.event_type]}</span>
+                    </div>
+                  );
+                })}
                 {dayEvents.length > 3 && (
                   <div className="text-[10px] text-conteudo-muted px-1 font-medium">
                     +{dayEvents.length - 3}
@@ -391,11 +495,44 @@ function CalendarGrid({ year, month, events, canEdit, selectedDay, onSelectDay, 
   );
 }
 
+// ── Legend ────────────────────────────────────────────────────
+
+/**
+ * A legenda dos tipos, de volta ao rodapé do calendário.
+ *
+ * Saiu em 04/08/2026 (`2a300e4`), a pedido, quando a cor era livre — e nessa época
+ * ela mentia: a legenda dizia que Prazo era âmbar, e o prazo podia estar em roxo.
+ * Com a cor derivada do tipo (#18) ela passa a dizer a verdade, e é o que o
+ * operador procurava.
+ *
+ * As cores vêm da API; os nomes, da tela. Sem o mapa, não há legenda — não uma
+ * legenda com cores inventadas.
+ */
+function Legend({ tipos }: { tipos: CalendarEventTypeColor[] }) {
+  if (tipos.length === 0) return null;
+  return (
+    <ul aria-label="Legenda dos tipos de evento" className="flex flex-wrap gap-x-4 gap-y-2 px-1">
+      {tipos.map((t) => (
+        <li key={t.value} className="flex items-center gap-1.5 text-xs text-conteudo-muted">
+          <span
+            data-testid="cor-da-legenda"
+            aria-hidden="true"
+            className="h-2.5 w-2.5 shrink-0 rounded-full"
+            style={{ backgroundColor: t.color }}
+          />
+          {EVENT_TYPE_LABELS[t.value] ?? t.value}
+        </li>
+      ))}
+    </ul>
+  );
+}
+
 // ── Day Detail ────────────────────────────────────────────────
 
 interface DayDetailProps {
-  date: Date;
+  chave: string;
   events: CalendarEvent[];
+  fuso: string;
   canEdit: boolean;
   onAdd: () => void;
   onEdit: (event: CalendarEvent) => void;
@@ -403,16 +540,23 @@ interface DayDetailProps {
   onClose: () => void;
 }
 
-function DayDetail({ date, events, canEdit, onAdd, onEdit, onDelete, onClose }: DayDetailProps) {
+function DayDetail({ chave, events, fuso, canEdit, onAdd, onEdit, onDelete, onClose }: DayDetailProps) {
+  const dia = Number(chave.slice(8, 10));
+  const mes = Number(chave.slice(5, 7)) - 1;
   return (
-    <div className="rounded-xl border border-borda bg-surface p-4 space-y-3">
+    // `section` com nome: o detalhe do dia vira uma REGIÃO que o leitor de tela
+    // lista e alcança pelo nome, em vez de um bloco solto depois da grade.
+    <section
+      aria-label={`${dia} de ${MONTHS[mes]}`}
+      className="rounded-xl border border-borda bg-surface p-4 space-y-3"
+    >
       <div className="flex items-center justify-between">
         <div>
           <p className="text-xs text-conteudo-muted font-medium uppercase tracking-wide">
-            {WEEKDAYS_FULL[date.getDay()]}
+            {WEEKDAYS_FULL[diaDaSemana(chave)]}
           </p>
           <p className="text-lg font-bold text-conteudo-heading">
-            {date.getDate()} de {MONTHS[date.getMonth()]}
+            {dia} de {MONTHS[mes]}
           </p>
         </div>
         <div className="flex items-center gap-2">
@@ -444,9 +588,11 @@ function DayDetail({ date, events, canEdit, onAdd, onEdit, onDelete, onClose }: 
               <div className="h-2.5 w-2.5 shrink-0 rounded-full" style={{ backgroundColor: e.color }} />
               <div className="flex-1 min-w-0">
                 <p className="text-sm text-conteudo font-medium truncate">{e.title}</p>
+                <p className="text-xs text-conteudo-muted mt-0.5">{descreveHorario(e, fuso)}</p>
                 {e.description && (
                   <p className="text-xs text-conteudo-muted truncate mt-0.5">{e.description}</p>
                 )}
+                <p className="text-[10px] text-conteudo-muted mt-0.5">{autoria(e)}</p>
               </div>
               <span className="text-[10px] text-conteudo-muted shrink-0">
                 {EVENT_TYPE_LABELS[e.event_type]}
@@ -479,16 +625,28 @@ function DayDetail({ date, events, canEdit, onAdd, onEdit, onDelete, onClose }: 
           ))}
         </div>
       )}
-    </div>
+    </section>
   );
 }
 
 // ── Upcoming Events ───────────────────────────────────────────
 
-function UpcomingList({ events }: { events: CalendarEvent[] }) {
-  const now = new Date();
+function UpcomingList({ events, fuso, falhou }: { events: CalendarEvent[]; fuso: string; falhou: boolean }) {
+  // Lista que não carregou não pode se passar por lista vazia: "Nenhum evento
+  // próximo" numa falha de rede faria alguém achar que a agenda está livre.
+  if (falhou) {
+    return <p className="text-xs text-conteudo-muted py-2">Não foi possível carregar os próximos eventos.</p>;
+  }
+
+  const agora = new Date();
+  /*
+    `jaTerminou`, e não `end_date >= agora`. O fim de um dia inteiro é 23:59:59Z,
+    que em Recife é 20:59: comparado como instante, o treinamento de hoje sumia da
+    lista às nove da noite. E a ordem é a do calendário, não a do instante.
+  */
   const upcoming = events
-    .filter((e) => new Date(e.end_date) >= now)
+    .filter((e) => !jaTerminou(e, agora, fuso))
+    .sort((a, b) => chaveDeOrdem(a, fuso).localeCompare(chaveDeOrdem(b, fuso)))
     .slice(0, 4);
 
   if (upcoming.length === 0) {
@@ -502,11 +660,10 @@ function UpcomingList({ events }: { events: CalendarEvent[] }) {
           <div className="mt-1 h-2.5 w-2.5 shrink-0 rounded-full" style={{ backgroundColor: e.color }} />
           <div className="min-w-0 flex-1">
             <p className="text-xs font-medium text-conteudo truncate">{e.title}</p>
+            {/* O tipo visível ao lado da data: o ponto de cor não pode ser o único
+                portador dele (§29). */}
             <p className="text-[10px] text-conteudo-muted mt-0.5">
-              {new Date(e.start_date).toLocaleDateString("pt-BR", { day: "2-digit", month: "short", timeZone: "UTC" })}
-              {e.start_date.slice(0, 10) !== e.end_date.slice(0, 10) && (
-                <> → {new Date(e.end_date).toLocaleDateString("pt-BR", { day: "2-digit", month: "short", timeZone: "UTC" })}</>
-              )}
+              {descreveComData(e, fuso)} · {EVENT_TYPE_LABELS[e.event_type]}
             </p>
           </div>
         </div>
@@ -527,29 +684,93 @@ export default function CalendarPage() {
   const { user } = useAuth();
   const canEdit = user?.role === "admin" || user?.role === "technician";
 
-  const today = new Date();
-  const [year, setYear] = useState(today.getFullYear());
-  const [month, setMonth] = useState(today.getMonth());
+  // O fuso de quem olha, lido uma vez. Tudo o que é "que dia é" passa por ele —
+  // inclusive "hoje", que com `new Date().getDate()` seria o dia da máquina.
+  const fuso = useMemo(() => fusoDoNavegador(), []);
+  const hoje = chaveCivil(new Date(), fuso);
+  const anoDeHoje = Number(hoje.slice(0, 4));
+  const mesDeHoje = Number(hoje.slice(5, 7)) - 1;
+  const diaDeHoje = Number(hoje.slice(8, 10));
+  const anos = Array.from({ length: 8 }, (_, i) => anoDeHoje - 1 + i);
+
+  const [year, setYear] = useState(anoDeHoje);
+  const [month, setMonth] = useState(mesDeHoje);
   const [selectedDay, setSelectedDay] = useState<number | null>(null);
-  const [events, setEvents] = useState<CalendarEvent[]>([]);
+  const [eventosDoMes, setEventosDoMes] = useState<CalendarEvent[]>([]);
+  const [todos, setTodos] = useState<CalendarEvent[]>([]);
+  const [todosFalharam, setTodosFalharam] = useState(false);
+  const [tipos, setTipos] = useState<CalendarEventTypeColor[]>([]);
   const [loading, setLoading] = useState(true);
+  const [mesFalhou, setMesFalhou] = useState(false);
   const [dialog, setDialog] = useState<DialogState>({ open: false });
   const [deleteTarget, setDeleteTarget] = useState<CalendarEvent | null>(null);
   const [deleting, setDeleting] = useState(false);
 
-  const loadEvents = useCallback(async () => {
+  /*
+    A grade pede à API o MÊS visível, com o fuso — é a API que decide quais
+    eventos pertencem ao mês, no relógio de quem olha. O mês da API vai de 1 a 12.
+
+    O contador descarta resposta velha: trocar de mês duas vezes seguidas dispara
+    duas consultas, e sem ele a do mês anterior, se chegasse por último, pintaria
+    a grade do mês novo com os eventos do velho.
+  */
+  const pedidoDoMes = useRef(0);
+  const carregarMes = useCallback(async () => {
+    const pedido = ++pedidoDoMes.current;
     setLoading(true);
     try {
-      const data = await getCalendarEvents();
-      setEvents(data);
+      const data = await getCalendarEvents(year, month + 1, fuso);
+      if (pedido === pedidoDoMes.current) {
+        setEventosDoMes(data);
+        setMesFalhou(false);
+      }
     } catch {
-      toast.error("Erro ao carregar eventos.");
+      /*
+        A grade que não carregou precisa DIZER, e não se passar por vazia. Era um
+        toast passageiro com a grade limpa por baixo, e a lateral mostrando evento
+        no mesmo dia. E a lista é esvaziada: sem isso, depois de excluir com a
+        recarga falhando, o evento apagado continuava desenhado. Achado da revisão.
+      */
+      if (pedido === pedidoDoMes.current) {
+        setEventosDoMes([]);
+        setMesFalhou(true);
+      }
     } finally {
-      setLoading(false);
+      if (pedido === pedidoDoMes.current) setLoading(false);
+    }
+  }, [year, month, fuso]);
+
+  /*
+    A lateral olha além do mês — a lista de próximos e o mapa do ano —, e a API
+    não tem consulta de ano nem de próximos. Por isso ela faz a consulta sem mês.
+  */
+  const pedidoDosTodos = useRef(0);
+  const carregarTodos = useCallback(async () => {
+    // O mesmo descarte da grade. A consulta da lateral é a de TODOS os eventos,
+    // a mais lenta, e sem ele a resposta de antes de uma exclusão, chegando por
+    // último, trazia o evento apagado de volta. Achado da revisão.
+    const pedido = ++pedidoDosTodos.current;
+    try {
+      const data = await getCalendarEvents();
+      if (pedido === pedidoDosTodos.current) {
+        setTodos(data);
+        setTodosFalharam(false);
+      }
+    } catch {
+      if (pedido === pedidoDosTodos.current) setTodosFalharam(true);
     }
   }, []);
 
-  useEffect(() => { loadEvents(); }, [loadEvents]);
+  useEffect(() => { carregarMes(); }, [carregarMes]);
+  useEffect(() => { carregarTodos(); }, [carregarTodos]);
+  useEffect(() => {
+    getCalendarEventTypes().then(setTipos).catch(() => setTipos([]));
+  }, []);
+
+  function recarregar() {
+    carregarMes();
+    carregarTodos();
+  }
 
   function prevMonth() {
     if (month === 0) { setMonth(11); setYear((y) => y - 1); }
@@ -562,9 +783,9 @@ export default function CalendarPage() {
     setSelectedDay(null);
   }
   function goToToday() {
-    setYear(today.getFullYear());
-    setMonth(today.getMonth());
-    setSelectedDay(today.getDate());
+    setYear(anoDeHoje);
+    setMonth(mesDeHoje);
+    setSelectedDay(diaDeHoje);
   }
 
   // O `confirm()` nativo saiu pela D9.3: ele não nomeia o evento — "Remover
@@ -581,19 +802,29 @@ export default function CalendarPage() {
       await deleteCalendarEvent(deleteTarget.id);
       toast.success("Evento removido.");
       setDeleteTarget(null);
-      loadEvents();
+      recarregar();
       setSelectedDay(null);
-    } catch {
-      toast.error("Erro ao remover evento.");
+    } catch (err) {
+      toastApiError(err, "Não foi possível remover o evento.");
+      // 404: outra pessoa já removeu. O diálogo aberto repetiria a recusa a cada
+      // clique, com o evento ainda na grade. Fecha e busca de novo.
+      if (statusDoErro(err) === 404) {
+        setDeleteTarget(null);
+        recarregar();
+      }
     } finally {
       setDeleting(false);
     }
   }
 
-  const selectedDate = selectedDay ? new Date(year, month, selectedDay) : null;
-  const selectedDayEvents = selectedDay
-    ? events.filter((e) => isEventOnDay(e, year, month, selectedDay))
+  const ordenar = (lista: CalendarEvent[]) =>
+    [...lista].sort((a, b) => chaveDeOrdem(a, fuso).localeCompare(chaveDeOrdem(b, fuso)));
+
+  const chaveSelecionada = selectedDay ? chaveDoDia(year, month, selectedDay) : null;
+  const selectedDayEvents = chaveSelecionada
+    ? ordenar(eventosDoMes.filter((e) => ocupaODia(e, chaveSelecionada, fuso)))
     : [];
+  const monthEvents = ordenar(eventosDoMes.filter((e) => ocupaOMes(e, year, month, fuso)));
 
   return (
     <div className="space-y-5 pb-10">
@@ -601,8 +832,10 @@ export default function CalendarPage() {
         <EventDialog
           event={dialog.event}
           defaultDate={dialog.date}
+          fuso={fuso}
+          tipos={tipos}
           onClose={() => setDialog({ open: false })}
-          onSaved={loadEvents}
+          onSaved={recarregar}
         />
       )}
 
@@ -687,7 +920,7 @@ export default function CalendarPage() {
           onChange={(e) => { setYear(Number(e.target.value)); setSelectedDay(null); }}
           className="h-8 rounded-lg border border-borda bg-surface px-3 text-sm font-semibold text-conteudo focus:outline-none focus:ring-2 focus:ring-primary transition-colors cursor-pointer"
         >
-          {YEARS.map((y) => (
+          {anos.map((y) => (
             <option key={y} value={y}>{y}</option>
           ))}
         </select>
@@ -716,11 +949,15 @@ export default function CalendarPage() {
             <div className="flex h-64 items-center justify-center text-conteudo-muted text-sm">
               Carregando eventos...
             </div>
+          ) : mesFalhou ? (
+            <Alert variant="danger">Não foi possível carregar os eventos deste mês.</Alert>
           ) : (
             <CalendarGrid
               year={year}
               month={month}
-              events={events}
+              events={eventosDoMes}
+              fuso={fuso}
+              hoje={hoje}
               canEdit={canEdit}
               selectedDay={selectedDay}
               onSelectDay={setSelectedDay}
@@ -728,13 +965,18 @@ export default function CalendarPage() {
             />
           )}
 
+          <Legend tipos={tipos} />
+
           {/* Day detail */}
-          {selectedDate && (
+          {/* Sem a grade, o detalhe diria "Nenhum evento neste dia." de um dia que
+              ninguém conseguiu consultar. */}
+          {chaveSelecionada && !mesFalhou && (
             <DayDetail
-              date={selectedDate}
+              chave={chaveSelecionada}
               events={selectedDayEvents}
+              fuso={fuso}
               canEdit={canEdit}
-              onAdd={() => setDialog({ open: true, date: dateStr(selectedDate) })}
+              onAdd={() => setDialog({ open: true, date: chaveSelecionada })}
               onEdit={(e) => setDialog({ open: true, event: e })}
               onDelete={handleDelete}
               onClose={() => setSelectedDay(null)}
@@ -747,7 +989,7 @@ export default function CalendarPage() {
           {/* Upcoming */}
           <div className="rounded-xl border border-borda bg-surface p-4 space-y-3">
             <h3 className="text-sm font-semibold text-conteudo">Próximos eventos</h3>
-            <UpcomingList events={events} />
+            <UpcomingList events={todos} fuso={fuso} falhou={todosFalharam} />
           </div>
 
           {/* Mini month map */}
@@ -755,16 +997,12 @@ export default function CalendarPage() {
             <h3 className="text-sm font-semibold text-conteudo">Meses do ano</h3>
             <div className="grid grid-cols-3 gap-1.5">
               {MONTHS_SHORT.map((m, i) => {
-                const hasEvents = events.some((e) => {
-                  const s = new Date(e.start_date);
-                  const en = new Date(e.end_date);
-                  return (
-                    (s.getUTCFullYear() === year && s.getUTCMonth() === i) ||
-                    (en.getUTCFullYear() === year && en.getUTCMonth() === i)
-                  );
-                });
+                // O mesmo corte da grade: dia inteiro pela data, evento com hora
+                // pelo instante no fuso de quem olha. Com `getUTCMonth()`, o
+                // evento das 22:00 do último dia marcava o mês seguinte.
+                const hasEvents = todos.some((e) => ocupaOMes(e, year, i, fuso));
                 const isCurrent = i === month;
-                const isCurrentMonth = i === today.getMonth() && year === today.getFullYear();
+                const isCurrentMonth = i === mesDeHoje && year === anoDeHoje;
                 return (
                   <button
                     key={i}
@@ -805,19 +1043,7 @@ export default function CalendarPage() {
           </div>
 
           {/* Manage events — só para admin/technician, filtrado pelo mês visível */}
-          {canEdit && (() => {
-            const monthEvents = events.filter((e) => {
-              const s = new Date(e.start_date);
-              const en = new Date(e.end_date);
-              const monthStart = Date.UTC(year, month, 1);
-              const monthEnd = Date.UTC(year, month + 1, 1) - 1;
-              return (
-                Date.UTC(s.getUTCFullYear(), s.getUTCMonth(), s.getUTCDate()) <= monthEnd &&
-                Date.UTC(en.getUTCFullYear(), en.getUTCMonth(), en.getUTCDate()) >= monthStart
-              );
-            });
-            if (monthEvents.length === 0) return null;
-            return (
+          {canEdit && monthEvents.length > 0 && (
             <div className="rounded-xl border border-borda bg-surface p-4 space-y-3">
               <h3 className="text-sm font-semibold text-conteudo">
                 Gerenciar eventos — {MONTHS_SHORT[month]}
@@ -826,7 +1052,10 @@ export default function CalendarPage() {
                 {monthEvents.slice(0, 4).map((e) => (
                   <div key={e.id} className="flex items-center gap-2 rounded-lg bg-surface-elevated/30 px-2.5 py-1.5">
                     <div className="h-2 w-2 shrink-0 rounded-full" style={{ backgroundColor: e.color }} />
-                    <span className="flex-1 text-xs text-conteudo truncate">{e.title}</span>
+                    <span className="flex-1 text-xs text-conteudo truncate">
+                      {e.title}
+                      <span className="sr-only"> — {EVENT_TYPE_LABELS[e.event_type]}</span>
+                    </span>
                     <div className="flex gap-1 shrink-0">
                       <button
                         onClick={() => setDialog({ open: true, event: e })}
@@ -849,8 +1078,7 @@ export default function CalendarPage() {
                 ))}
               </div>
             </div>
-            );
-          })()}
+          )}
         </div>
       </div>
     </div>
