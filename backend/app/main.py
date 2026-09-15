@@ -170,7 +170,10 @@ app.add_middleware(
     # `allow_headers` vale para o que o navegador MANDA; para ele conseguir LER
     # um cabecalho de resposta e preciso expo-lo. Sem isto o id existe, viaja e
     # e invisivel justamente para quem abriria o chamado de suporte citando ele.
-    expose_headers=[CABECALHO],
+    # `Retry-After` não é da lista básica do CORS: sem expô-lo, o tempo de
+    # bloqueio do rate limit viaja na resposta e o front não consegue ler —
+    # a tela dizia "alguns minutos" tendo o número exato em mãos (15/09).
+    expose_headers=[CABECALHO, "Retry-After"],
 )
 
 # Registrado DEPOIS do CORS de proposito: o `add_middleware` empilha por fora,
