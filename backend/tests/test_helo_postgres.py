@@ -128,7 +128,17 @@ async def db(url_do_banco):
 
 @pytest.fixture
 def helo_ligada(monkeypatch):
-    monkeypatch.setattr(helo, "get_settings", lambda: MagicMock(helo_enabled=True))
+    """Ligada no modo completo: sem o modo explícito, o `MagicMock` cairia em triagem."""
+    monkeypatch.setattr(
+        helo, "get_settings", lambda: MagicMock(helo_enabled=True, helo_modo="completa")
+    )
+
+
+@pytest.fixture
+def helo_em_triagem(monkeypatch):
+    monkeypatch.setattr(
+        helo, "get_settings", lambda: MagicMock(helo_enabled=True, helo_modo="triagem")
+    )
 
 
 @pytest.fixture
@@ -449,6 +459,50 @@ async def test_pedido_de_humano_desliga_o_botao_no_banco(db, helo_ligada, modelo
     salvo = (await db.execute(select(Ticket).where(Ticket.id == chamado.id))).scalar_one()
     assert salvo.helo_saiu is True
     assert salvo.ai_enabled is False
+
+
+@pytest.mark.asyncio
+async def test_na_triagem_o_encerramento_persiste_no_banco(db, helo_em_triagem):
+    """
+    A saída de cena da triagem, contra o banco: coluna, histórico e o botão intacto.
+
+    É o `helo_saiu` gravado de verdade que impede a Helô de acordar neste
+    chamado quando o modo virar para completo — e mock aceita qualquer
+    atributo sem piscar.
+    """
+    cliente, chamado = await _cenario(db)
+
+    fala = await responde_triagem(db, chamado, cliente, "O aparelho não liga desde ontem")
+    await db.flush()
+
+    assert fala.motivo == helo.MOTIVO_TRIAGEM_CONCLUIDA
+    salvo = (await db.execute(select(Ticket).where(Ticket.id == chamado.id))).scalar_one()
+    assert salvo.helo_saiu is True
+    assert salvo.ai_enabled is True
+    linhas = (
+        (await db.execute(select(TicketHistory).where(TicketHistory.ticket_id == chamado.id)))
+        .scalars()
+        .all()
+    )
+    (saida,) = linhas
+    assert saida.field == "helo_saiu"
+    assert saida.comment == helo.MOTIVO_TRIAGEM_CONCLUIDA
+
+
+@pytest.mark.asyncio
+async def test_na_triagem_depois_do_tecnico_ela_nao_encerra(db, helo_em_triagem):
+    """
+    A guarda de humano, contra o banco, no modo em que a frase é o encerramento.
+
+    "Um atendente já vai assumir seu chamado" dito depois de o técnico ter
+    escrito é a mentira que a correção de 08/09 existe para impedir.
+    """
+    tecnico = _usuario(UserRole.technician, "Erick")
+    db.add(tecnico)
+    cliente, chamado = await _cenario(db, autores_das_falas=[(tecnico, "Consegue tirar uma foto?")])
+
+    assert await responde_triagem(db, chamado, cliente, "Segue a foto do visor") is None
+    assert chamado.helo_saiu is False
 
 
 @pytest.mark.asyncio

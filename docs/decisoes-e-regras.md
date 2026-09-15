@@ -884,6 +884,105 @@ mais.
 ficha com preço na Base, ela vira fonte da Helô. A proteção passou a ser a
 marcação `helo_pode_ler`, que alguém precisa desligar.
 
+### O modo da Helô: triagem até os sete manuais (desde 15/09/2026)
+
+`HELO_MODO` diz o que ela faz quando está ligada. **`triagem`** é a
+recepcionista da Fase 1 — saudação, encerramento e escalada, nada de
+embedding, nada de LLM, teto de duas falas. **`completa`** é a Fase 2, que
+busca na Base de Conhecimento e responde com o modelo. O padrão é `triagem`, e
+valor ausente ou não reconhecido também é `triagem`: o modo seguro é o que o
+sistema assume quando não sabe. Caixa e espaço não importam; um valor
+preenchido e desconhecido (o erro provável é `completo`) deixa aviso no log.
+
+**Por que existe.** Os manuais técnicos dos sete aparelhos estão sendo
+reescritos pela assistência técnica, em cerca de quinze dias. Até lá a base
+não tem manual técnico publicado (os três importados em 10/09 continuam
+rascunho), e a Fase 2 sem manual devolve escalada em toda pergunta técnica — o
+cliente responderia às três perguntas e seria transferido para um atendente
+em vez de ler "registrei tudo aqui". A Fase 2 **dorme, não foi removida**:
+nenhuma lógica dela saiu (o diff só acrescenta o desvio da triagem e o teto
+por modo), e ela acorda virando o modo.
+
+**O modo é ortogonal ao `HELO_ENABLED`.** Desligada é desligada em qualquer
+modo. As quatro guardas valem igual nos dois, e cada uma tem teste nos dois
+modos: os três interruptores (nada religa num nível mais específico), o
+humano já na conversa, o pedido de humano antes do encerramento e antes de
+qualquer peça da Fase 2, e a saída gravando `helo_saiu` — com o pedido
+explícito de humano derrubando também o `ai_enabled`. A ordem é a de sempre:
+interruptores, humano na conversa, teto de falas, pedido de humano. Passado o
+teto, nem o pedido de humano a faz falar de novo — na triagem isso é a Fase 1,
+e tem teste que o prende como decisão.
+
+**Recusado: usar a ausência da `DEEPSEEK_API_KEY` como standby.** O
+`_chamar_deepseek` devolve `None` antes de montar a URL quando a chave falta,
+então ligar sem chave não vaza nada — mas a segurança passaria a depender de
+faltar uma configuração. No dia em que alguém preenchesse a chave para testar
+outra coisa, ela acordaria sozinha, com a base vazia, falando com cliente, sem
+ninguém ter decidido. Chave ausente continua sendo falha de infraestrutura,
+com o destino que já tinha. Em triagem, nem com chave e URL preenchidas um
+cliente HTTP é construído — há teste disso, com um controle no modo completo
+provando que a armadilha dispara.
+
+**Duas escolhas que o modo trouxe junto:**
+
+- **O encerramento grava `helo_saiu`**, com histórico, e o `ai_enabled` fica
+  onde está. Sem isso, o chamado triado continuaria com duas falas e crédito
+  até sete no modo completo: no dia do gatilho ela voltaria a falar num chamado
+  em que já disse "um atendente já vai assumir".
+- **O encerramento chama a equipe com "Triagem concluída"**, o aviso da Fase 1
+  (`db88a34`). O `f2421ac` o tinha tirado porque o encerramento deixara de
+  existir; sem ele, o chamado triado e sem dono ficaria sem ninguém avisado.
+
+**O que continua rodando em triagem:** a varredura de indexação
+(`helo_indexacao.py`). Ela manda texto de artigo — não de cliente — ao serviço
+de embedding, e é o que deixa a base pronta no dia de virar. Desligá-la é
+`HELO_INDEXACAO_INTERVALO_SEGUNDOS=0`.
+
+**Voltar de `completa` para `triagem` com conversa em andamento** a deixa
+calada nesses chamados, sem aviso à equipe: eles já passaram das duas falas.
+Aceito — é caminho de reversão. Ele só não é hipotético se a Helô estiver
+ligada: em 15/09 o Rickelme informou `HELO_ENABLED` em `false` em produção
+(informação dele, não medida aqui), e aí não existe conversa em modo completo.
+Se estiver `true`, subir esta mudança É essa reversão, e vale conferir o
+painel antes do deploy.
+
+#### O gatilho para virar para `completa`
+
+**Os sete manuais publicados na Base de Conhecimento.** Não "os manuais
+chegaram": publicados, vinculados ao produto e marcados para a Helô, e
+indexados. Antes de virar, conferir:
+
+1. Os sete artigos publicados, com vínculo de produto e `helo_pode_ler`, e
+   trechos indexados para cada um (`helo_chunks` por `article_id`).
+2. O teto de distância remedido — é gatilho da dívida "O teto de 0,25 depende
+   do acervo": entra manual de produto que hoje não tem.
+3. O serviço de embedding respondendo e a `DEEPSEEK_API_KEY` configurada.
+4. **Os chamados triados antes de o `helo_saiu` existir.** Se a Helô chegou a
+   ficar ligada com o código anterior à Fase 2 — não medido: o `HELO_ENABLED`
+   nasce `false` desde o `8e9286c`, e o encerramento só entrou numa versão a
+   partir da v1.11.0 (`db88a34`) —, esses chamados têm duas falas dela e o
+   campo em `false`. No modo completo eles ganham crédito para mais cinco, e
+   ela voltaria a falar em quem não tiver responsável nem mensagem da equipe.
+   A consulta não depende de data; contar antes de virar:
+
+   ```sql
+   SELECT t.status, count(*)
+   FROM tickets t
+   WHERE t.helo_saiu = false
+     AND t.ai_enabled = true
+     AND t.assignee_id IS NULL
+     AND (SELECT count(*) FROM chat_messages m
+          WHERE m.ticket_id = t.id AND m.is_ai) >= 2
+     AND NOT EXISTS (
+       SELECT 1 FROM chat_messages m JOIN users u ON u.id = m.sender_id
+       WHERE m.ticket_id = t.id AND u.role IN ('admin', 'technician'))
+   GROUP BY t.status;
+   ```
+
+   Havendo algum, a correção é script avulso que grava `helo_saiu` — nunca
+   migration (dado histórico se corrige fora dela).
+5. O documento de LGPD: a Fase 2 manda conteúdo de chamado para a DeepSeek.
+
 ### O interruptor da Helô é dela; o `ai_enabled` é de gente
 
 Decidido em 10/09/2026, corrigindo uma escolha de dois dias antes.
@@ -896,7 +995,8 @@ chamado os dois davam no mesmo. Com ela conversando, deixaram: escalar por
 decisão do modelo, por teto de trocas ou por a IA estar fora do ar tirava a
 ferramenta do técnico **nos chamados em que a IA já tinha falhado**.
 
-`tickets.helo_saiu` é o campo dela, e ela escreve nos **quatro** motivos.
+`tickets.helo_saiu` é o campo dela, e ela escreve nos **quatro** motivos — e,
+desde 15/09, também no encerramento do modo triagem.
 
 **A exceção é deliberada e tem teste só para ela:** no pedido explícito de
 humano os dois campos caem. Ali quem quis sair da IA foi o cliente, e a vontade
@@ -1342,6 +1442,12 @@ para `helo_pode_ler` sozinho — recusar `null` explícito no schema, ou
 descartar os `None` antes do laço.
 
 ### Quatro dos sete produtos não têm manual técnico
+
+> **Superado em parte em 15/09/2026.** O escopo mudou: os sete aparelhos
+> ganham manual técnico novo, escrito pela assistência técnica, e a Helô fica
+> em `HELO_MODO=triagem` até os sete estarem publicados — ver "O modo da Helô".
+> O "ela saúda, o cliente responde, ela escala" abaixo vale só no modo
+> `completa`; em triagem a resposta do cliente recebe o encerramento.
 
 Constatado em 09/09/2026, ao rodar as primeiras buscas de verdade. **É decisão
 de escopo do cliente, não pendência de código** — fica registrado para ninguém

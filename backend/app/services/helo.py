@@ -6,6 +6,11 @@ consultando os manuais por busca vetorial. O que ela continua não fazendo:
 inventar procedimento, prometer prazo, falar de preço, e continuar a conversa
 depois de entregar o chamado para um humano.
 
+DOIS MODOS, por `HELO_MODO`. Em `triagem` — o padrão — ela é a recepcionista
+da Fase 1: saúda, encerra ou escala, e nada da Fase 2 é chamado. Em `completa`
+ela busca na base e responde com o modelo. A Fase 2 dorme enquanto os manuais
+não chegam; ela não foi removida, e acorda virando o modo.
+
 A SAUDAÇÃO NÃO USA LLM, e isso é decisão, não sobra da Fase 1. Ela é montada
 com dado do cadastro: previsível (a primeira coisa que o cliente lê nunca sai
 errada), instantânea (não espera API) e grátis. O modelo entra a partir do
@@ -27,7 +32,7 @@ from sqlalchemy import exists, func, select
 from sqlalchemy.exc import SQLAlchemyError
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from app.core.config import get_settings
+from app.core.config import HELO_MODO_COMPLETA, get_settings
 from app.models.models import (
     ChatMessage,
     Equipment,
@@ -133,6 +138,22 @@ def helo_pode_falar(ticket: Ticket, cliente: User) -> bool:
     if ticket.helo_saiu:
         return False
     return bool(cliente.ai_enabled)
+
+
+def em_modo_completo() -> bool:
+    """
+    A Fase 2 está acordada?
+
+    Compara com a constante, e não com "diferente de triagem": qualquer coisa
+    que não seja exatamente `completa` — inclusive um objeto de configuração
+    que nem tenha o campo — é triagem. O `config.py` já normaliza o que vem do
+    painel; esta é a segunda metade da mesma regra, no lugar em que o turno é
+    decidido.
+
+    NÃO é um quarto interruptor e não entra em `helo_pode_falar`: o modo diz o
+    que ela faz quando fala, não se ela fala.
+    """
+    return bool(get_settings().helo_modo == HELO_MODO_COMPLETA)
 
 
 def _primeiro_nome(nome: str) -> str:
@@ -328,6 +349,17 @@ TROCAS_MAXIMAS = 6
 # onde ela nunca falou é um chamado em que ela não entra no meio.
 FALAS_MAXIMAS = TROCAS_MAXIMAS + 1
 
+# O teto do modo triagem, que é o da Fase 1: a saudação e o encerramento.
+#
+# Não é só nostalgia de número. Um chamado triado pelo código anterior à
+# Fase 2 — se a Helô chegou a ficar ligada, o que não foi medido — tem duas
+# falas dela e `helo_saiu` em `False`, porque o campo ainda não existia. Com o
+# teto do modo completo ele ganharia crédito para mais cinco.
+#
+# O teto vem ANTES do pedido de humano, como na Fase 1: passado dele, nem
+# "quero falar com um atendente" a faz falar de novo. O chamado já é da equipe.
+FALAS_MAXIMAS_TRIAGEM = 2
+
 
 # Os motivos de escalada, e a razão de serem constantes e não frases soltas.
 #
@@ -342,6 +374,11 @@ MOTIVO_TETO_DE_TROCAS = f"a conversa passou de {TROCAS_MAXIMAS} trocas sem sair 
 MOTIVO_IA_MUDA = "a IA não respondeu"
 MOTIVO_SEM_MOTIVO = "o modelo escalou sem dizer o motivo"
 
+# A saída normal do modo triagem. Não é escalada no sentido de "algo deu
+# errado" — as perguntas foram respondidas —, mas é saída de cena do mesmo
+# jeito: o chamado passa a esperar um humano, e ela não fala mais ali.
+MOTIVO_TRIAGEM_CONCLUIDA = "a triagem terminou"
+
 
 class FalaDaHelo(NamedTuple):
     """
@@ -353,7 +390,8 @@ class FalaDaHelo(NamedTuple):
     cópias concordariam no caso do `quer_humano` e discordariam nos outros
     três, que é justamente onde a equipe precisa de informação boa.
 
-    `None` quer dizer que ela respondeu e continua na conversa.
+    `None` quer dizer que ela respondeu e continua na conversa. No modo
+    triagem isso nunca acontece: a única fala depois da saudação já é a saída.
     """
 
     mensagem: ChatMessage
@@ -438,23 +476,26 @@ async def responde_triagem(
     texto_do_cliente: str,
 ) -> FalaDaHelo | None:
     """
-    O turno da Helô: ela busca na base, responde, ou escala.
+    O turno da Helô: no modo completo ela busca na base, responde, ou escala;
+    no modo triagem ela encerra, ou escala.
 
-    A ORDEM DAS GUARDAS É O DESENHO. As quatro primeiras não dependem do modelo
-    e vêm antes dele, de propósito — cada uma resolve um caso em que chamar o
-    LLM seria errado, caro, ou os dois:
+    A ORDEM DAS GUARDAS É O DESENHO, e ela é a mesma nos dois modos. As quatro
+    primeiras não dependem do modelo e vêm antes dele, de propósito — cada uma
+    resolve um caso em que chamar o LLM seria errado, caro, ou os dois:
 
     1. Os três interruptores. Desligada é desligada, e não existe religar num
        nível mais específico.
     2. Um humano já está na conversa. O chamado é dele.
-    3. A saudação nunca aconteceu, ou o teto de trocas estourou.
+    3. A saudação nunca aconteceu, ou o teto estourou — de falas na triagem,
+       de trocas no modo completo.
     4. **O cliente pediu uma pessoa.** Esta roda ANTES do LLM e não dentro
        dele: se o modelo estiver fora do ar, o pedido de humano precisa
        funcionar do mesmo jeito. É a regra que o desenho chama de mais
        importante do ponto de vista de experiência, e ela não pode depender de
        um serviço externo estar de pé.
 
-    Só depois disso o modelo entra. E se ele falhar de qualquer maneira —
+    Na triagem o turno acaba aí: o que sobra é o encerramento, sem embedding e
+    sem modelo. No modo completo, só depois disso o modelo entra. E se ele falhar de qualquer maneira —
     serviço fora, timeout, resposta vazia — ela escala com mensagem neutra.
     Nenhum chamado fica preso porque uma IA não respondeu.
 
@@ -474,14 +515,21 @@ async def responde_triagem(
     if await _humano_ja_esta_na_conversa(db, ticket):
         return None
 
+    # Lido UMA vez por turno e passado adiante: o teto e o que ela diz não
+    # podem ser decididos por modos diferentes.
+    completa = em_modo_completo()
+
     falas = await _quantas_vezes_ela_falou(db, ticket.id)
     # Zero: ela nunca abriu a triagem neste chamado — foi criado antes dela
     # existir, ou com ela desligada. Entrar agora seria se apresentar no meio
     # de uma conversa que já começou sem ela.
-    if falas == 0 or falas >= FALAS_MAXIMAS:
+    teto = FALAS_MAXIMAS if completa else FALAS_MAXIMAS_TRIAGEM
+    if falas == 0 or falas >= teto:
         return None
 
-    conteudo, motivo = await _o_que_ela_diz(db, ticket, cliente, texto_do_cliente, falas)
+    conteudo, motivo = await _o_que_ela_diz(
+        db, ticket, cliente, texto_do_cliente, falas, completa=completa
+    )
 
     fala = ChatMessage(
         id=uuid.uuid4(),
@@ -504,15 +552,18 @@ def _ela_sai_de_cena(db: AsyncSession, ticket: Ticket, motivo: str) -> None:
     """
     Escalou: a conversa dela acabou naquele chamado, e o histórico registra.
 
-    `helo_saiu` é o campo dela. Sai `True` nos QUATRO motivos, porque em todos
-    a conversa acabou do mesmo jeito — o chamado é do humano, e o prompt dela
-    promete que depois de escalar ela não fala mais nada ali.
+    `helo_saiu` é o campo dela. Sai `True` em TODOS os motivos — os quatro do
+    modo completo e o encerramento da triagem —, porque em todos a conversa
+    acabou do mesmo jeito: o chamado é do humano, e ela não fala mais nada ali.
+    No encerramento isso tem uma segunda função: é o que impede a Helô de
+    acordar num chamado já triado quando o modo virar para completo.
 
     **`ai_enabled` só cai no pedido explícito de humano, e isso é decisão, não
     esquecimento.** Aquele campo é o botão de gente: desligá-lo fecha também a
     sugestão de resposta e o resumo do TÉCNICO. Quando o cliente pede uma
     pessoa, a vontade dele vale para as ferramentas todas e desligar é o certo.
-    Nos outros três — o modelo desistiu, o teto estourou, a IA não respondeu —
+    Nos outros — a triagem terminou, o modelo desistiu, o teto estourou, a IA
+    não respondeu —
     ninguém pediu para sair da IA, e tirar a ferramenta do técnico justamente
     nos chamados em que a IA já falhou seria castigá-lo pelo defeito dela.
 
@@ -563,9 +614,11 @@ async def _o_que_ela_diz(
     cliente: User,
     texto_do_cliente: str,
     falas: int,
+    *,
+    completa: bool,
 ) -> tuple[str, str | None]:
     """
-    O texto da vez e o motivo da escalada, ou `None` se ela segue na conversa.
+    O texto da vez e o motivo da saída, ou `None` se ela segue na conversa.
 
     Devolve SEMPRE alguma coisa.
 
@@ -583,6 +636,12 @@ async def _o_que_ela_diz(
     # descobrir o que uma lista de substrings já disse.
     if quer_humano(texto_do_cliente):
         return monta_escalada(), MOTIVO_PEDIU_HUMANO
+
+    # Modo triagem: a resposta às três perguntas encerra, e o turno acaba aqui.
+    # Tudo abaixo — embedding, busca, blocos de contexto, modelo — fica sem
+    # ser chamado, e não chamado e descartado: standby é não usar.
+    if not completa:
+        return monta_encerramento(datetime.now(UTC)), MOTIVO_TRIAGEM_CONCLUIDA
 
     # Teto de trocas: a última fala dela é uma despedida, não uma tentativa.
     if falas >= TROCAS_MAXIMAS:

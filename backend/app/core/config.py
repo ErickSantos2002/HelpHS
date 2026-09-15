@@ -3,8 +3,15 @@ from functools import lru_cache
 from typing import Any
 from urllib.parse import urlparse
 
+from loguru import logger
 from pydantic import field_validator
 from pydantic_settings import BaseSettings, SettingsConfigDict
+
+# Os dois modos da Helô. Constantes, e não literais soltos, porque o valor é
+# comparado em dois lugares — aqui, ao ler o painel, e em `helo.py`, ao decidir
+# o turno —, e uma grafia divergente entre os dois cairia calada em triagem.
+HELO_MODO_TRIAGEM = "triagem"
+HELO_MODO_COMPLETA = "completa"
 
 # Nomes e endereços que só existem na máquina de quem desenvolve. Comparar o
 # HOST da URL com este conjunto — e não procurar "localhost" no texto — evita os
@@ -277,6 +284,45 @@ class Settings(BaseSettings):
     # FALAR COM O CLIENTE no deploy seguinte, sem ninguém ter pedido. Ligar é
     # decisão, não default.
     helo_enabled: bool = False
+
+    # O que a Helô faz quando está ligada — e é ORTOGONAL ao `helo_enabled`:
+    # desligada é desligada em qualquer modo.
+    #
+    # `triagem` é a recepcionista da Fase 1: saudação, encerramento e escalada,
+    # sem embedding e sem LLM. `completa` é a Fase 2, que busca na Base de
+    # Conhecimento e responde com o modelo.
+    #
+    # Existe porque a Fase 2 com a base vazia escala toda pergunta, e os
+    # manuais técnicos dos sete aparelhos estão sendo reescritos. O gatilho para
+    # virar está em `docs/decisoes-e-regras.md`.
+    #
+    # TRIAGEM por padrão, e também quando o valor não se reconhece. O modo
+    # seguro é o que o sistema assume quando não sabe — e a alternativa que foi
+    # recusada é usar a AUSÊNCIA da `DEEPSEEK_API_KEY` como standby: no dia em
+    # que alguém preenchesse a chave para testar outra coisa, ela acordaria
+    # sozinha, com a base vazia, falando com cliente.
+    helo_modo: str = HELO_MODO_TRIAGEM
+
+    @field_validator("helo_modo")
+    @classmethod
+    def _modo_da_helo_seguro(cls, valor: str) -> str:
+        """
+        Só `completa` acorda a Fase 2; todo o resto é triagem.
+
+        Caixa e espaço não importam, no mesmo idioma do `APP_ENV`. Um valor
+        preenchido e não reconhecido deixa aviso no log com o que veio: cair em
+        triagem calado deixaria quem configurou achando que ela acordou — e o
+        erro de digitação provável, `completo`, é justamente esse.
+        """
+        limpo = valor.strip().lower()
+        if limpo == HELO_MODO_COMPLETA:
+            return HELO_MODO_COMPLETA
+        if limpo not in ("", HELO_MODO_TRIAGEM):
+            logger.warning(
+                f"HELO_MODO={valor!r} não é um modo conhecido "
+                f"({HELO_MODO_TRIAGEM!r} ou {HELO_MODO_COMPLETA!r}); a Helô fica em triagem"
+            )
+        return HELO_MODO_TRIAGEM
 
     # O serviço de embedding da Helô — um contêiner PRÓPRIO, não uma biblioteca
     # dentro desta API.
