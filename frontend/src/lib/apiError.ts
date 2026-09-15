@@ -75,9 +75,9 @@ function describeError(err: unknown): string | null {
   // limit — quando ele vem, os minutos exatos valem mais que o detail vago.
   // Sem o header (storage indisponível, por exemplo), o fluxo normal segue.
   if (axiosErr?.response?.status === 429) {
-    const retryAfter = Number(axiosErr.response.headers?.["retry-after"]);
-    if (Number.isFinite(retryAfter) && retryAfter > 0) {
-      const minutos = Math.ceil(retryAfter / 60);
+    const segundos = getRetryAfterSeconds(err);
+    if (segundos !== null) {
+      const minutos = Math.ceil(segundos / 60);
       return `Muitas tentativas. Aguarde ${minutos} ${plural(minutos, "minuto", "minutos")} e tente novamente.`;
     }
   }
@@ -100,6 +100,18 @@ function describeError(err: unknown): string | null {
   if (status && STATUS_FALLBACKS[status]) return STATUS_FALLBACKS[status];
 
   return null;
+}
+
+/**
+ * Segundos do header Retry-After, quando o servidor informou um valor
+ * utilizável. É a fonte única do tempo de bloqueio no front — o relógio da
+ * tela de login conta a partir daqui.
+ */
+export function getRetryAfterSeconds(err: unknown): number | null {
+  const axiosErr = err as AxiosError;
+  const bruto = axiosErr?.response?.headers?.["retry-after"];
+  const segundos = Number(bruto);
+  return Number.isFinite(segundos) && segundos > 0 ? Math.ceil(segundos) : null;
 }
 
 /** Mensagem única e legível para o erro da API. */

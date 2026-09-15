@@ -190,6 +190,26 @@ async def test_o_429_diz_quanto_esperar(limiter_ligado):
 
 
 @pytest.mark.asyncio
+async def test_o_navegador_consegue_ler_o_retry_after_de_outra_origem():
+    """O header existia e viajava — e era invisível para o front.
+
+    Site e API vivem em domínios diferentes, e o navegador só deixa o
+    JavaScript ler header de resposta listado em `expose_headers`
+    (`Retry-After` não está na lista básica do CORS). Sem a exposição, a
+    tela mostrava "alguns minutos" tendo o número exato dentro da resposta
+    — medido em produção em 15/09.
+    """
+    from app.core.config import get_settings
+
+    origem = get_settings().get_cors_origins()[0]
+    async with AsyncClient(transport=ASGITransport(app=app), base_url="http://t") as c:
+        r = await c.get("/health", headers={"Origin": origem})
+
+    expostos = r.headers.get("access-control-expose-headers", "").lower()
+    assert "retry-after" in expostos
+
+
+@pytest.mark.asyncio
 async def test_resposta_normal_nao_carrega_retry_after(limiter_ligado):
     from app.core.database import get_db
 

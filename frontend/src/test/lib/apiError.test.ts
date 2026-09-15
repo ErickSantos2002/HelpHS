@@ -1,5 +1,5 @@
 import { describe, it, expect } from "vitest";
-import { getApiError, getApiErrorParts } from "../../lib/apiError";
+import { getApiError, getApiErrorParts, getRetryAfterSeconds } from "../../lib/apiError";
 
 describe("getApiError", () => {
   it("usa o detail quando vem como string", () => {
@@ -134,5 +134,27 @@ describe("getApiError — 429 com Retry-After", () => {
       },
     };
     expect(getApiError(err)).toBe("Muitas tentativas. Aguarde alguns minutos e tente novamente.");
+  });
+});
+
+/**
+ * O relógio da tela de login precisa dos segundos crus, não da frase pronta —
+ * este extrator é a fonte única do Retry-After no front.
+ */
+describe("getRetryAfterSeconds", () => {
+  it("devolve os segundos quando o header vem", () => {
+    const err = { response: { status: 429, headers: { "retry-after": "90" } } };
+    expect(getRetryAfterSeconds(err)).toBe(90);
+  });
+
+  it("devolve null sem header, com valor inválido ou zerado", () => {
+    expect(getRetryAfterSeconds({ response: { status: 429, headers: {} } })).toBeNull();
+    expect(
+      getRetryAfterSeconds({ response: { status: 429, headers: { "retry-after": "abc" } } }),
+    ).toBeNull();
+    expect(
+      getRetryAfterSeconds({ response: { status: 429, headers: { "retry-after": "0" } } }),
+    ).toBeNull();
+    expect(getRetryAfterSeconds(new Error("rede"))).toBeNull();
   });
 });
