@@ -6,16 +6,17 @@ import re
 import uuid
 from datetime import datetime
 
-from pydantic import ConfigDict, EmailStr, Field, field_validator
+from pydantic import ConfigDict, Field, field_validator
 
 from app.models.models import UserRole, UserStatus
 from app.schemas.base import AppBaseModel
 from app.utils.documents import CnpjObrigatorio, CnpjOpcional
+from app.utils.email_normalizado import EmailNormalizado
 
 
 class UserCreate(AppBaseModel):
     name: str = Field(..., min_length=2, max_length=255)
-    email: EmailStr
+    email: EmailNormalizado
     password: str = Field(..., min_length=8, max_length=128)
     role: UserRole = UserRole.client
     phone: str | None = Field(default=None, max_length=20)
