@@ -998,10 +998,18 @@ class CalendarEvent(Base):
         Enum(CalendarEventType), default=CalendarEventType.event, nullable=False
     )
     color: Mapped[str] = mapped_column(String(7), nullable=False, default="#6366f1")
+    # As duas continuam NOT NULL e com hora. "Dia inteiro" nao as torna nulas:
+    # a API deriva as bordas do dia quando `all_day` esta ligado, e o indice, os
+    # filtros e as leituras antigas seguem funcionando sem saber da chave.
     start_date: Mapped[datetime] = mapped_column(
         DateTime(timezone=True), nullable=False, index=True
     )
     end_date: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False)
+    # Data FLUTUANTE quando ligado: o evento vale das 00:00:00Z as 23:59:59.999999Z
+    # da data escolhida, e a tela o desenha pela DATA, nao pelo instante. Ver o
+    # cabecalho de `app/utils/agenda.py` -- e a decisao que permite os eventos
+    # antigos virarem dia inteiro sem recalcular linha nenhuma.
+    all_day: Mapped[bool] = mapped_column(Boolean, nullable=False, default=False)
     created_by: Mapped[uuid.UUID | None] = mapped_column(
         UUID(as_uuid=True), ForeignKey("users.id", ondelete="SET NULL"), nullable=True
     )
