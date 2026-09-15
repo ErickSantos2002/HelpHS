@@ -1896,7 +1896,8 @@ export default function TicketDetailPage() {
         onClose={() => {
           // Fechar com a resposta a caminho engoliria um 422: ele chegaria com
           // o modal fechado, sem toast e sem campo. O Cancelar já trava no
-          // loading; o X, o Esc e o fundo passam a travar também.
+          // loading; o X e o Esc passam a travar também. (O fundo também
+          // travava até 15/09/2026 — hoje ele não fecha modal nenhuma.)
           if (statusLoading) return;
           setStatusModal(false);
           setNewStatus("");

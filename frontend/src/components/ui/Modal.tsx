@@ -89,7 +89,8 @@ export function Modal({
     return () => {
       document.removeEventListener("keydown", handleKeyDown);
       // A devolucao vai na limpeza, e nao num `onClose`: o modal tambem
-      // fecha por Escape, por clique no fundo e por desmontagem da tela.
+      // fecha por Escape, pelos botoes da tela que o chamou e por
+      // desmontagem da tela. (O clique no fundo ja NAO fecha — 15/09/2026.)
       focoAnterior.current?.focus();
     };
   }, [open]);
@@ -111,11 +112,24 @@ export function Modal({
       role="dialog"
       aria-labelledby={title ? titleId : undefined}
     >
-      {/* Backdrop */}
-      <div
-        className="absolute inset-0 bg-black/60 backdrop-blur-sm"
-        onClick={onClose}
-      />
+      {/* ⚠️ DESVIO DELIBERADO do original. A referência do pacote
+          (`design-system/components/feedback/Modal.jsx`, e o `Modal.d.ts`)
+          fecha pelo clique no fundo e só desenha o X quando há título. Este
+          port faz o contrário nas duas coisas, a pedido do usuário. Uma
+          conferência futura contra o pacote vai acusar a diferença: ela é
+          intencional e NÃO deve ser "corrigida" de volta sem nova decisão.
+
+          Fundo. Escurece e BLOQUEIA a tela de trás, mas não fecha mais.
+
+          Tinha `onClick={onClose}`, e saiu a pedido do usuário (15/09/2026):
+          um clique fora por engano descartava o que já estava digitado no
+          formulário. Uma modal fecha pelo X, pelos botões dela e pelo Escape.
+
+          O fundo continua existindo e cobrindo a tela inteira de propósito: é
+          ele que impede o clique de chegar à página atrás. Tirar a div junto
+          com o `onClick` trocaria "não fecha por engano" por "clica sem querer
+          no que está atrás". */}
+      <div className="absolute inset-0 bg-black/60 backdrop-blur-sm" />
 
       {/* Panel */}
       <div
@@ -128,30 +142,60 @@ export function Modal({
           className,
         )}
       >
-        {title && (
-          <div className="flex items-center justify-between border-b border-borda px-4 py-3 sm:px-6 sm:py-4 shrink-0">
-            <h2 id={titleId} className="text-base font-semibold text-conteudo-heading">
+        {/* O cabeçalho — e o X dentro dele — é desenhado SEMPRE.
+
+            Era `{title && ...}`: sem título, não havia X. Enquanto o fundo
+            fechava, isso não prendia ninguém. Sem o fundo, prenderia — e não é
+            hipótese: o detalhe da empresa usa `title={company.name}`, o nome
+            vazio é alcançável, e carregando ou com erro de carga aquela modal
+            não tem botão nenhum. Se só o X fecha, toda modal precisa de um X,
+            e a garantia mora aqui, não em cada tela que chama.
+
+            Sem título, a barra perde a borda e o título, e fica só o X à
+            direita — o conteúdo não ganha um traço solto em cima.
+
+            E o X não pode ser EMPURRADO para fora. Item flex não encolhe abaixo
+            da sua maior palavra: um título sem espaço (nome de empresa como
+            "INDUSTRIAECOMERCIODEEQUIPAMENTOS…", que o backend aceita) estourava
+            a linha e levava o X para além da borda do painel — no celular,
+            para fora da tela. Enquanto o fundo fechava, sobrava saída. Agora o
+            X é a única saída por clique, e celular não tem tecla Escape. Por
+            isso o título tem `min-w-0 break-words` (pode encolher e quebra a
+            palavra) e o botão tem `shrink-0` (nunca é espremido). Medido em
+            navegador real, a 390px, com o controle negativo das classes
+            antigas — ver o commit. */}
+        <div
+          className={cn(
+            "flex items-center gap-3 shrink-0 px-4 py-3 sm:px-6 sm:py-4",
+            title ? "justify-between border-b border-borda" : "justify-end",
+          )}
+        >
+          {title && (
+            <h2
+              id={titleId}
+              className="min-w-0 break-words text-base font-semibold text-conteudo-heading"
+            >
               {title}
             </h2>
-            <button
-              // Hoje isto NAO muda comportamento: o modal vai para um portal em
-              // `document.body`, entao o botao nunca e descendente do `<form>`
-              // no DOM e nao teria como submeter. Fica porque a garantia e do
-              // portal, nao do botao — se o portal sair um dia, o padrao do HTML
-              // dentro de `<form>` volta a ser `submit`.
-              type="button"
-              onClick={onClose}
-              className={cn(
-                "rounded-lg p-1 text-conteudo-muted transition-colors",
-                "hover:bg-surface-elevated hover:text-conteudo-heading",
-                "focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-action",
-              )}
-              aria-label="Fechar"
-            >
-              <Icon name="close" size={20} strokeWidth={2} />
-            </button>
-          </div>
-        )}
+          )}
+          <button
+            // Hoje isto NAO muda comportamento: o modal vai para um portal em
+            // `document.body`, entao o botao nunca e descendente do `<form>`
+            // no DOM e nao teria como submeter. Fica porque a garantia e do
+            // portal, nao do botao — se o portal sair um dia, o padrao do HTML
+            // dentro de `<form>` volta a ser `submit`.
+            type="button"
+            onClick={onClose}
+            className={cn(
+              "shrink-0 rounded-lg p-1 text-conteudo-muted transition-colors",
+              "hover:bg-surface-elevated hover:text-conteudo-heading",
+              "focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-action",
+            )}
+            aria-label="Fechar"
+          >
+            <Icon name="close" size={20} strokeWidth={2} />
+          </button>
+        </div>
         <div className="px-4 pt-4 sm:px-6 overflow-y-auto flex-1 min-h-0">{children}</div>
       </div>
     </div>,
