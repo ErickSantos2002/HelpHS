@@ -3,6 +3,7 @@ Agenda da equipe — CRUD de eventos do calendário.
 
 Permissões:
   GET    /calendar/events         — admin | technician
+  GET    /calendar/event-types    — admin | technician
   POST   /calendar/events         — admin | technician
   PATCH  /calendar/events/{id}    — admin | technician
   DELETE /calendar/events/{id}    — admin | technician
@@ -24,11 +25,14 @@ from app.schemas.calendar import (
     CalendarEventCreate,
     CalendarEventListResponse,
     CalendarEventResponse,
+    CalendarEventTypeResponse,
     CalendarEventUpdate,
 )
 from app.utils.agenda import (
+    COR_POR_TIPO,
     FUSO_UTC,
     bordas_do_dia_inteiro,
+    cor_do_tipo,
     fala_a_convencao_da_tela_antiga,
     janela_do_mes,
     resolve_fuso,
@@ -167,6 +171,26 @@ async def list_events(
     )
 
 
+# ── GET /calendar/event-types ─────────────────────────────────
+
+
+@router.get("/event-types", response_model=list[CalendarEventTypeResponse])
+async def list_event_types(
+    _actor: Annotated[User, Depends(authorize(UserRole.admin, UserRole.technician))],
+) -> list[CalendarEventTypeResponse]:
+    """O mapa tipo → cor, para a tela não precisar de uma cópia dele.
+
+    Sem este endpoint o modal só mostraria a cor de um tipo antes de salvar se
+    tivesse o mapa escrito localmente — e a segunda fonte, que esta mudança
+    existe para eliminar, voltaria pela porta da frente. Rótulo não vem: texto é
+    da tela.
+
+    A ordem é a da declaração do enum, que é a ordem em que a tela já oferece os
+    tipos.
+    """
+    return [CalendarEventTypeResponse(value=tipo, color=cor) for tipo, cor in COR_POR_TIPO.items()]
+
+
 # ── POST /calendar/events ─────────────────────────────────────
 
 
@@ -192,7 +216,9 @@ async def create_event(
         title=body.title,
         description=body.description,
         event_type=body.event_type,
-        color=body.color,
+        # A coluna é CÓPIA do mapa, gravada para quem lê o banco direto e para um
+        # rollback do código. A resposta não a lê — ver `CalendarEventResponse`.
+        color=cor_do_tipo(body.event_type),
         start_date=inicio,
         end_date=fim,
         all_day=dia_inteiro,
@@ -235,16 +261,17 @@ async def update_event(
     # explícito quando a pessoa limpa o campo. Com `is not None` esse nulo era
     # ignorado e o texto antigo reaparecia no carregamento seguinte.
     #
-    # NÃO uniformize os outros cinco. `title`, `event_type`, `color`,
-    # `start_date` e `end_date` são NOT NULL no modelo — para eles, ignorar o
+    # NÃO uniformize os outros quatro. `title`, `event_type`, `start_date` e
+    # `end_date` são NOT NULL no modelo — para eles, ignorar o
     # nulo está correto, e aceitá-lo trocaria este bug por um erro de
     # integridade no banco.
     if "description" in body.model_fields_set:
         event.description = body.description
     if body.event_type is not None:
         event.event_type = body.event_type
-    if body.color is not None:
-        event.color = body.color
+        # A cópia acompanha o tipo. Sem isto a coluna voltaria a divergir — que é o
+        # defeito que esta mudança existe para fechar.
+        event.color = cor_do_tipo(body.event_type)
     if body.start_date is not None:
         event.start_date = body.start_date
     if body.end_date is not None:

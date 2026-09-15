@@ -288,7 +288,11 @@ async def test_editar_evento(patch_redis):
 
     assert r.status_code == 200
     assert event.title == "Treinamento remarcado"
-    assert event.color == "#ef4444"
+    # Este caso prendia `event.color == "#ef4444"` — a cor mandada virando a cor
+    # gravada. Mudou pela regra de 15/09: a cor vem do tipo e saiu do contrato de
+    # escrita. O `color` do corpo é ignorado, e o treinamento continua verde.
+    assert event.color == "#10b981"
+    assert r.json()["color"] == "#10b981"
 
 
 @pytest.mark.asyncio
@@ -826,3 +830,207 @@ async def test_patch_com_all_day_false_explicito_vence_a_pegada(patch_redis):
 
     assert r.status_code == 200
     assert event.all_day is False
+
+
+# ── A cor vem do tipo ─────────────────────────────────────────
+#
+# Havia duas fontes para a mesma coisa. O mapa por tipo no front só sugeria a
+# cor na criação; o desenho lia a coluna, que guardava o que tivesse sido
+# clicado. Em produção, 15/09: cinco dos seis eventos numa cor diferente da do
+# tipo — treinamento e reunião no mesmo azul, feriado em cinza.
+#
+# A resposta passa a DERIVAR a cor do tipo e nunca ler a coluna. A coluna
+# continua existindo e é gravada a partir do mapa, para quem lê o banco direto
+# e para um rollback do código — mas é cópia, não fonte.
+
+
+def _sessao_que_guarda(gravados: list, *respostas):
+    """A sessão do arreio, com o `add` anotando o que a rota gravou."""
+    sessao = _db_sequence(*respostas)
+    sessao.add = lambda objeto: gravados.append(objeto)
+
+    async def _gen():
+        yield sessao
+
+    return _gen
+
+
+@pytest.mark.asyncio
+async def test_cor_enviada_no_post_e_ignorada_e_a_do_tipo_vence(patch_redis):
+    """A tela no ar sempre manda `color`. Ignorar, e não recusar, é de propósito.
+
+    Recusar com 422 quebraria a criação de evento na tela antiga até o round do
+    frontend — a mesma armadilha do #16. E ignorar não fica escondido: a resposta
+    da mesma requisição já traz a cor que valeu.
+    """
+    from app.core.database import get_db
+
+    _override_user(_mock_user(UserRole.admin))
+    gravados: list = []
+    app.dependency_overrides[get_db] = _sessao_que_guarda(gravados, None)
+
+    corpo = _event_body(event_type="meeting", color="#eab308")
+
+    async with AsyncClient(transport=ASGITransport(app=app), base_url="http://test") as c:
+        r = await c.post("/api/v1/calendar/events", json=corpo)
+
+    assert r.status_code == 201
+    assert r.json()["color"] == "#3b82f6"
+    # E a coluna recebe a do tipo, não a clicada.
+    assert gravados[0].color == "#3b82f6"
+
+
+@pytest.mark.asyncio
+async def test_feriado_criado_sem_cor_nasce_vermelho_e_nao_indigo(patch_redis):
+    """O padrão antigo era `#6366f1` para qualquer tipo."""
+    from app.core.database import get_db
+
+    _override_user(_mock_user(UserRole.admin))
+    gravados: list = []
+    app.dependency_overrides[get_db] = _sessao_que_guarda(gravados, None)
+
+    corpo = _event_body(event_type="holiday")
+    corpo.pop("color")
+
+    async with AsyncClient(transport=ASGITransport(app=app), base_url="http://test") as c:
+        r = await c.post("/api/v1/calendar/events", json=corpo)
+
+    assert r.status_code == 201
+    assert r.json()["color"] == "#ef4444"
+    assert gravados[0].color == "#ef4444"
+
+
+@pytest.mark.asyncio
+async def test_trocar_o_tipo_na_edicao_leva_a_cor_junto(patch_redis):
+    """Na tela, a trava de cor ficava ligada em toda edição — trocar o tipo nunca
+    mudava a cor. Aqui a cor não tem como ficar para trás."""
+    from app.core.database import get_db
+
+    _override_user(_mock_user(UserRole.admin))
+    event = _mock_event(created_by=None)
+    event.event_type = CalendarEventType.meeting
+    event.color = "#3b82f6"
+    app.dependency_overrides[get_db] = _db_override(event)
+
+    async with AsyncClient(transport=ASGITransport(app=app), base_url="http://test") as c:
+        r = await c.patch(f"/api/v1/calendar/events/{_EVENT_ID}", json={"event_type": "deadline"})
+
+    assert r.status_code == 200
+    assert r.json()["color"] == "#f59e0b"
+    assert event.color == "#f59e0b"
+
+
+@pytest.mark.asyncio
+async def test_mandar_so_a_cor_na_edicao_nao_muda_nada(patch_redis):
+    from app.core.database import get_db
+
+    _override_user(_mock_user(UserRole.admin))
+    event = _mock_event(created_by=None)
+    event.event_type = CalendarEventType.training
+    event.color = "#10b981"
+    app.dependency_overrides[get_db] = _db_override(event)
+
+    async with AsyncClient(transport=ASGITransport(app=app), base_url="http://test") as c:
+        r = await c.patch(f"/api/v1/calendar/events/{_EVENT_ID}", json={"color": "#ec4899"})
+
+    assert r.status_code == 200
+    assert r.json()["color"] == "#10b981"
+    assert event.color == "#10b981"
+
+
+@pytest.mark.asyncio
+async def test_a_listagem_desfaz_a_divergencia_sem_reescrever_linha(patch_redis):
+    """Os quatro valores DE PRODUÇÃO de 15/09, com a coluna divergindo do tipo.
+
+    É este caso que autoriza o "sem backfill": a coluna continua com o valor
+    antigo, e a resposta já sai com a cor do tipo. A divergência some no deploy,
+    sem nenhuma linha tocada.
+    """
+    from app.core.database import get_db
+
+    _override_user(_mock_user(UserRole.admin))
+
+    def _divergente(tipo, cor_na_coluna):
+        e = _mock_event(created_by=None)
+        e.id = uuid.uuid4()
+        e.event_type = tipo
+        e.color = cor_na_coluna
+        return e
+
+    linhas = [
+        _divergente(CalendarEventType.event, "#f97316"),
+        _divergente(CalendarEventType.meeting, "#eab308"),
+        _divergente(CalendarEventType.training, "#3b82f6"),
+        _divergente(CalendarEventType.holiday, "#64748b"),
+    ]
+    app.dependency_overrides[get_db] = _db_override(linhas, [])
+
+    async with AsyncClient(transport=ASGITransport(app=app), base_url="http://test") as c:
+        r = await c.get("/api/v1/calendar/events")
+
+    assert r.status_code == 200
+    cores = {item["event_type"]: item["color"] for item in r.json()["items"]}
+    assert cores == {
+        "event": "#6366f1",
+        "meeting": "#3b82f6",
+        "training": "#10b981",
+        "holiday": "#ef4444",
+    }
+    # E a coluna não foi reescrita pela leitura.
+    assert linhas[0].color == "#f97316"
+
+
+@pytest.mark.asyncio
+async def test_a_tela_le_o_mapa_de_cores_da_api(patch_redis):
+    """O endpoint existe para a tela não precisar de uma cópia do mapa.
+
+    Sem ele, o modal só mostraria a cor de um tipo antes de salvar se tivesse o
+    mapa escrito localmente — e a segunda fonte voltaria pela porta da frente.
+    Rótulo não vem: texto é da tela.
+    """
+    from app.core.database import get_db
+
+    _override_user(_mock_user(UserRole.technician))
+    app.dependency_overrides[get_db] = _db_override([])
+
+    async with AsyncClient(transport=ASGITransport(app=app), base_url="http://test") as c:
+        r = await c.get("/api/v1/calendar/event-types")
+
+    assert r.status_code == 200
+    assert r.json() == [
+        {"value": "event", "color": "#6366f1"},
+        {"value": "meeting", "color": "#3b82f6"},
+        {"value": "training", "color": "#10b981"},
+        {"value": "deadline", "color": "#f59e0b"},
+        {"value": "holiday", "color": "#ef4444"},
+    ]
+
+
+@pytest.mark.asyncio
+async def test_cliente_nao_le_o_mapa_de_cores(patch_redis):
+    from app.core.database import get_db
+
+    _override_user(_mock_user(UserRole.client))
+    app.dependency_overrides[get_db] = _db_override([])
+
+    async with AsyncClient(transport=ASGITransport(app=app), base_url="http://test") as c:
+        r = await c.get("/api/v1/calendar/event-types")
+
+    assert r.status_code == 403
+
+
+def test_a_cor_nao_esta_no_contrato_de_escrita():
+    """ "Sai do contrato" preso no contrato, e não só no comportamento.
+
+    Um mutante que devolvia `color` ao schema de criação SOBREVIVEU aos casos de
+    comportamento: o router ignora o campo e a resposta é calculada, então nada
+    muda por fora. Mas o OpenAPI voltaria a anunciar uma entrada que não faz nada
+    — e a tela nova, lendo esse contrato, manteria as fichas de cor. Bastaria uma
+    linha no router para a segunda fonte voltar.
+    """
+    esquemas = app.openapi()["components"]["schemas"]
+
+    assert "color" not in esquemas["CalendarEventCreate"]["properties"]
+    assert "color" not in esquemas["CalendarEventUpdate"]["properties"]
+    # E na resposta ela continua — derivada, mas presente.
+    assert "color" in esquemas["CalendarEventResponse"]["properties"]

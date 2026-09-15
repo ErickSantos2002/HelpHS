@@ -35,6 +35,8 @@ data que a pessoa escolheu, e o recálculo não precisa existir.
 from datetime import UTC, datetime, time, timedelta
 from zoneinfo import ZoneInfo, ZoneInfoNotFoundError
 
+from app.models.models import CalendarEventType
+
 # Quem opera o sistema está em Recife. O padrão não é UTC de propósito: cair em
 # UTC por omissão seria escolher o fuso de ninguém, e um cliente antigo que não
 # mande o parâmetro veria o mês deslocado três horas sem nenhum aviso.
@@ -133,3 +135,30 @@ def fala_a_convencao_da_tela_antiga(inicio: datetime, fim: datetime) -> bool:
     próprio resultado.
     """
     return inicio.time() == _MEIA_NOITE and fim.time() == _FIM_DA_TELA_ANTIGA
+
+
+# ── A cor vem do tipo ─────────────────────────────────────────
+#
+# Fonte ÚNICA. Havia duas, e já divergiam: o mapa por tipo no front só sugeria
+# a cor na criação, e o desenho lia a coluna `color`, que guardava o que tivesse
+# sido clicado. Em produção, 15/09/2026, cinco dos seis eventos estavam numa cor
+# diferente da do tipo — treinamento e reunião no mesmo azul, feriado em cinza.
+#
+# Os valores são os cinco que a tela já usava como padrão. Trocar a paleta é
+# outra decisão, e `test_os_valores_sao_os_cinco_de_hoje` existe para que ela
+# chegue como pergunta antes do deploy.
+#
+# Hexadecimal cravado de propósito: é DADO que vai para a resposta da API, não
+# token da interface. Um `var(--chart-3)` aqui vazaria como texto para qualquer
+# um que lesse o JSON.
+COR_POR_TIPO: dict[CalendarEventType, str] = {
+    CalendarEventType.event: "#6366f1",
+    CalendarEventType.meeting: "#3b82f6",
+    CalendarEventType.training: "#10b981",
+    CalendarEventType.deadline: "#f59e0b",
+    CalendarEventType.holiday: "#ef4444",
+}
+
+
+def cor_do_tipo(tipo: CalendarEventType) -> str:
+    return COR_POR_TIPO[tipo]
