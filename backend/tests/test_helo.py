@@ -1263,24 +1263,83 @@ async def test_pedido_de_humano_vem_antes_de_tudo_nos_dois_modos(em_cada_modo):
     helo.embute_um.assert_not_awaited()
 
 
-@pytest.mark.asyncio
-async def test_na_triagem_passado_o_teto_nem_o_pedido_de_humano_a_faz_falar(helo_em_triagem):
-    """
-    A borda que o teste acima não alcança, e ela é a da Fase 1.
+def _teto_do_modo(modo):
+    return helo.FALAS_MAXIMAS_TRIAGEM if modo == "triagem" else FALAS_MAXIMAS
 
-    O teto vem antes do pedido de humano na ordem das guardas — nos dois modos.
-    Com duas falas dela o chamado já passou pelo "um atendente já vai
-    assumir", e uma terceira fala repetindo isso não acrescenta nada. Fica
-    preso como decisão: se um dia o pedido de humano tiver de passar por cima
-    do teto — para gravar a saída e avisar a equipe num chamado antigo —, este
-    teste quebra e a conversa acontece, em vez de a ordem mudar calada.
+
+@pytest.mark.asyncio
+async def test_o_pedido_de_humano_passa_por_cima_do_teto_nos_dois_modos(em_cada_modo):
+    """
+    Decidido em 15/09/2026, e diverge da Fase 1 DE PROPÓSITO.
+
+    Na Fase 1, passadas as duas falas, "quero falar com um atendente" recebia
+    silêncio. O teto de duas existia porque ela só tinha duas coisas a dizer —
+    não como recusa a um pedido. Silêncio depois de um pedido explícito o
+    cliente lê como sistema ignorando, e o custo de atender é uma escalada a
+    mais num chamado que já ia para a fila. Quem "consertar" isto de volta
+    achando que achou divergência com a Fase 1 quebra aqui.
+
+    E a escalada é inteira: a fala, a saída gravada, o botão do técnico
+    derrubado e o motivo que faz a equipe ser chamada com prioridade.
     """
     ticket = _chamado()
-    db = _db_com_falas(helo.FALAS_MAXIMAS_TRIAGEM)
+    db = _db_com_falas(_teto_do_modo(em_cada_modo))
 
-    assert await responde_triagem(db, ticket, _cliente(), "quero falar com um humano") is None
+    fala = await responde_triagem(db, ticket, _cliente(), "quero falar com um atendente")
+
+    assert fala is not None
+    assert fala.motivo == helo.MOTIVO_PEDIU_HUMANO
+    assert "passando seu chamado para um atendente" in fala.mensagem.content
+    assert ticket.helo_saiu is True
+    assert ticket.ai_enabled is False
+    campos = {h.field for h in (c.args[0] for c in db.add.call_args_list) if hasattr(h, "field")}
+    assert campos == {"helo_saiu", "ai_enabled"}
+    helo.embute_um.assert_not_awaited()
+
+
+@pytest.mark.asyncio
+async def test_passado_o_teto_so_o_pedido_de_humano_passa(em_cada_modo):
+    """
+    A exceção é do pedido, não do teto: a resposta comum continua em silêncio.
+
+    Sem esta borda, "passar por cima do teto" viraria "não ter teto", e a
+    triagem se despediria de novo a cada mensagem do cliente.
+    """
+    db = _db_com_falas(_teto_do_modo(em_cada_modo))
+
+    assert await responde_triagem(db, _chamado(), _cliente(), "alguém vai ver?") is None
     db.add.assert_not_called()
-    assert ticket.ai_enabled is True
+
+
+@pytest.mark.asyncio
+async def test_o_pedido_de_humano_nao_a_faz_entrar_em_conversa_que_comecou_sem_ela(em_cada_modo):
+    """
+    Passar por cima do teto não é passar por cima da saudação que nunca houve.
+
+    Chamado aberto antes dela, ou com ela desligada: "já estou passando seu
+    chamado para um atendente" seria a primeira coisa que ela diz ali, no meio
+    de uma conversa que já tem outro dono.
+    """
+    db = _db_com_falas(0)
+
+    assert await responde_triagem(db, _chamado(), _cliente(), "quero falar com um humano") is None
+    db.add.assert_not_called()
+
+
+@pytest.mark.asyncio
+async def test_passado_o_teto_o_pedido_de_humano_ainda_nao_fala_por_cima_do_tecnico(
+    em_cada_modo,
+):
+    """
+    Passar por cima do teto não é passar por cima da guarda de humano.
+
+    Com alguém da equipe já na conversa, "já estou passando seu chamado para um
+    atendente" é mentira com qualquer número de falas.
+    """
+    db = _db_com_falas(_teto_do_modo(em_cada_modo), equipe_ja_falou=True)
+
+    assert await responde_triagem(db, _chamado(), _cliente(), "quero falar com um humano") is None
+    db.add.assert_not_called()
 
 
 @pytest.mark.asyncio

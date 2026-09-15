@@ -43,11 +43,19 @@ publicar uma versão nova.
     valer só em `completa`. Em `triagem`, ligar é só `HELO_ENABLED=true`: a
     chave não é usada, a resposta do cliente recebe o encerramento (e não a
     escalada), e o teto é de duas falas.
+  - **O pedido de humano passa por cima do teto, nos dois modos.** Na Fase 1,
+    passadas as duas falas, "quero falar com um atendente" recebia silêncio;
+    agora escala, grava a saída, derruba o `ai_enabled` e chama a equipe com
+    "Cliente pediu atendimento humano". Resposta comum passado o teto continua
+    em silêncio.
   - **O encerramento volta, e volta chamando a equipe** com "Triagem
     concluída", como na Fase 1. Ele grava `helo_saiu`: um chamado triado não
     ganha conversa nova quando o modo virar.
   - A varredura de indexação continua rodando em `triagem` (texto de artigo,
     não de cliente), para a base estar pronta no dia de virar.
+  - **Limitação conhecida:** voltar de `completa` para `triagem` com conversa
+    em andamento a deixa calada nesses chamados para resposta comum, sem aviso
+    à equipe. Só importa com `HELO_ENABLED=true`.
 
 ### Adicionado
 

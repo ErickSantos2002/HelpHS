@@ -356,8 +356,8 @@ FALAS_MAXIMAS = TROCAS_MAXIMAS + 1
 # falas dela e `helo_saiu` em `False`, porque o campo ainda não existia. Com o
 # teto do modo completo ele ganharia crédito para mais cinco.
 #
-# O teto vem ANTES do pedido de humano, como na Fase 1: passado dele, nem
-# "quero falar com um atendente" a faz falar de novo. O chamado já é da equipe.
+# O teto cala a Helô para tudo, MENOS para o pedido de humano — ver o
+# comentário no ponto em que ele é conferido, em `responde_triagem`.
 FALAS_MAXIMAS_TRIAGEM = 2
 
 
@@ -487,7 +487,8 @@ async def responde_triagem(
        nível mais específico.
     2. Um humano já está na conversa. O chamado é dele.
     3. A saudação nunca aconteceu, ou o teto estourou — de falas na triagem,
-       de trocas no modo completo.
+       de trocas no modo completo. **O pedido de humano passa por cima do
+       teto** (não da saudação que nunca aconteceu, nem das duas guardas acima).
     4. **O cliente pediu uma pessoa.** Esta roda ANTES do LLM e não dentro
        dele: se o modelo estiver fora do ar, o pedido de humano precisa
        funcionar do mesmo jeito. É a regra que o desenho chama de mais
@@ -495,8 +496,9 @@ async def responde_triagem(
        um serviço externo estar de pé.
 
     Na triagem o turno acaba aí: o que sobra é o encerramento, sem embedding e
-    sem modelo. No modo completo, só depois disso o modelo entra. E se ele falhar de qualquer maneira —
-    serviço fora, timeout, resposta vazia — ela escala com mensagem neutra.
+    sem modelo. No modo completo, só depois disso o modelo entra. E se ele
+    falhar de qualquer maneira — serviço fora, timeout, resposta vazia — ela
+    escala com mensagem neutra.
     Nenhum chamado fica preso porque uma IA não respondeu.
 
     Não dá commit — quem abriu a transação é o `create_message`, e a fala dela
@@ -523,8 +525,23 @@ async def responde_triagem(
     # Zero: ela nunca abriu a triagem neste chamado — foi criado antes dela
     # existir, ou com ela desligada. Entrar agora seria se apresentar no meio
     # de uma conversa que já começou sem ela.
+    if falas == 0:
+        return None
+
+    # O PEDIDO DE HUMANO PASSA POR CIMA DO TETO, nos dois modos — e isto
+    # diverge da Fase 1 de propósito (decisão de 15/09/2026).
+    #
+    # Na Fase 1, passadas as duas falas, "quero falar com um atendente" recebia
+    # silêncio. O teto de duas existia porque ela só tinha duas coisas a dizer,
+    # não como recusa a um pedido. Silêncio depois de um pedido explícito o
+    # cliente lê como sistema ignorando; o custo de atender é uma escalada a
+    # mais num chamado que já ia para a fila. Fidelidade à Fase 1 NÃO é
+    # argumento para voltar a ordem.
+    #
+    # A exceção é só do pedido: resposta comum passado o teto continua em
+    # silêncio, e as duas guardas acima continuam valendo antes dela.
     teto = FALAS_MAXIMAS if completa else FALAS_MAXIMAS_TRIAGEM
-    if falas == 0 or falas >= teto:
+    if falas >= teto and not quer_humano(texto_do_cliente):
         return None
 
     conteudo, motivo = await _o_que_ela_diz(

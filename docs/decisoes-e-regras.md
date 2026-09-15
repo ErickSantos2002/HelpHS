@@ -908,10 +908,19 @@ modo. As quatro guardas valem igual nos dois, e cada uma tem teste nos dois
 modos: os três interruptores (nada religa num nível mais específico), o
 humano já na conversa, o pedido de humano antes do encerramento e antes de
 qualquer peça da Fase 2, e a saída gravando `helo_saiu` — com o pedido
-explícito de humano derrubando também o `ai_enabled`. A ordem é a de sempre:
-interruptores, humano na conversa, teto de falas, pedido de humano. Passado o
-teto, nem o pedido de humano a faz falar de novo — na triagem isso é a Fase 1,
-e tem teste que o prende como decisão.
+explícito de humano derrubando também o `ai_enabled`. A ordem: interruptores,
+humano na conversa, saudação que nunca aconteceu, teto de falas, pedido de
+humano.
+
+**O pedido de humano passa por cima do teto, nos dois modos** — decidido em
+15/09/2026, e diverge da Fase 1 **de propósito**. Na Fase 1, passadas as duas
+falas, "quero falar com um atendente" recebia silêncio. O teto de duas existia
+porque ela só tinha duas coisas a dizer, não como recusa a um pedido: silêncio
+depois de um pedido explícito o cliente lê como sistema ignorando, e o custo de
+atender é uma escalada a mais num chamado que já ia para a fila. A exceção é só
+do pedido — resposta comum passado o teto continua em silêncio — e não passa
+por cima dos interruptores nem da guarda de humano na conversa. Fidelidade à
+Fase 1 não é argumento para desfazer; há teste que prende isto.
 
 **Recusado: usar a ausência da `DEEPSEEK_API_KEY` como standby.** O
 `_chamar_deepseek` devolve `None` antes de montar a URL quando a chave falta,
@@ -933,18 +942,20 @@ provando que a armadilha dispara.
   (`db88a34`). O `f2421ac` o tinha tirado porque o encerramento deixara de
   existir; sem ele, o chamado triado e sem dono ficaria sem ninguém avisado.
 
-**O que continua rodando em triagem:** a varredura de indexação
-(`helo_indexacao.py`). Ela manda texto de artigo — não de cliente — ao serviço
-de embedding, e é o que deixa a base pronta no dia de virar. Desligá-la é
+**O que continua rodando em triagem, por decisão (15/09/2026):** a varredura
+de indexação (`helo_indexacao.py`). Ela manda texto de artigo — não de
+cliente — ao serviço de embedding, e deixar a base pronta durante os quinze
+dias é exatamente o que se quer. Desligá-la seria
 `HELO_INDEXACAO_INTERVALO_SEGUNDOS=0`.
 
-**Voltar de `completa` para `triagem` com conversa em andamento** a deixa
-calada nesses chamados, sem aviso à equipe: eles já passaram das duas falas.
-Aceito — é caminho de reversão. Ele só não é hipotético se a Helô estiver
-ligada: em 15/09 o Rickelme informou `HELO_ENABLED` em `false` em produção
-(informação dele, não medida aqui), e aí não existe conversa em modo completo.
-Se estiver `true`, subir esta mudança É essa reversão, e vale conferir o
-painel antes do deploy.
+**Limitação conhecida, não consertada: voltar de `completa` para `triagem`
+com conversa em andamento.** Nesses chamados ela fica calada para resposta
+comum, sem aviso à equipe — eles já passaram das duas falas. (O pedido de
+humano continua sendo atendido, porque passa por cima do teto.) Só importa com
+`HELO_ENABLED=true`, e nesse cenário quem vira o modo sabe o que está fazendo.
+Em 15/09/2026 o `HELO_ENABLED` estava `false` no painel de produção — medido
+pelo Rickelme —, então não havia conversa em modo completo para esta mudança
+calar.
 
 #### O gatilho para virar para `completa`
 
