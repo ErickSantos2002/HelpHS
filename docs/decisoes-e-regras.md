@@ -802,11 +802,11 @@ propósito**. Manter o endpoint para uso futuro.
 
 Aplicado com slowapi (`app/core/rate_limit.py`), contadores no Redis — valem
 entre os workers e sobrevivem a restart do backend. Desligado sob
-`APP_ENV=testing`. Três limites, todos por IP e por janela de 15 minutos:
+`APP_ENV=testing`. Três limites, todos por IP:
 
 | Variável | Default | Endpoints |
 |---|---|---|
-| `RATE_LIMIT_LOGIN` | 5/15min | login e verificação do segundo fator (tentativa de credencial) |
+| `RATE_LIMIT_LOGIN` | 5/5min | login e verificação do segundo fator (tentativa de credencial). Janela de 5 min por decisão de produto (15/09): 15 puniam demais o dedo errado; 5 ainda inviabilizam força bruta |
 | `RATE_LIMIT_ACCOUNT` | 5/15min | registro, reenviar confirmação, esqueci minha senha (disparam e-mail) |
 | `RATE_LIMIT_TOKEN` | 10/15min | confirmar e-mail, redefinir senha (quem chega já tem token assinado) |
 
