@@ -78,11 +78,11 @@ const MESES = [
 
 /** O mapa que a API devolve, na ordem do enum. */
 const TIPOS: calendarService.CalendarEventTypeColor[] = [
-  { value: "event", color: "#6366f1" },
-  { value: "meeting", color: "#3b82f6" },
-  { value: "training", color: "#10b981" },
-  { value: "deadline", color: "#f59e0b" },
-  { value: "holiday", color: "#ef4444" },
+  { value: "event", color: "#4f46e5" },
+  { value: "meeting", color: "#2563eb" },
+  { value: "training", color: "#047857" },
+  { value: "deadline", color: "#b45309" },
+  { value: "holiday", color: "#dc2626" },
 ];
 
 function evento(over: Partial<calendarService.CalendarEvent>) {
@@ -91,7 +91,7 @@ function evento(over: Partial<calendarService.CalendarEvent>) {
     title: "Evento",
     description: null,
     event_type: "event",
-    color: "#6366f1",
+    color: "#4f46e5",
     start_date: `${CHAVE}T00:00:00Z`,
     end_date: `${CHAVE}T23:59:59Z`,
     all_day: true,
@@ -108,7 +108,7 @@ function evento(over: Partial<calendarService.CalendarEvent>) {
  * vier, e este é o caso que prova que o texto é calculado, e não fixo.
  */
 const BRANCO = evento({ id: "branco", title: "Feriado municipal", color: "#ffffff", event_type: "holiday" });
-const INDIGO = evento({ id: "indigo", title: "Reunião de equipe", color: "#6366f1", event_type: "meeting" });
+const AZUL = evento({ id: "azul", title: "Reunião de equipe", color: "#2563eb", event_type: "meeting" });
 
 type Opcoes = {
   todos?: calendarService.CalendarEvent[];
@@ -117,7 +117,7 @@ type Opcoes = {
 
 async function montar(
   papel: "admin" | "technician" | "client" = "admin",
-  doMes: calendarService.CalendarEvent[] = [BRANCO, INDIGO],
+  doMes: calendarService.CalendarEvent[] = [BRANCO, AZUL],
   { todos, tiposFalham = false }: Opcoes = {},
 ) {
   vi.mocked(useAuth).mockReturnValue({
@@ -196,7 +196,7 @@ describe("CalendarPage — navegação e acessibilidade", () => {
       color: "#0f172a",
     });
     expect(screen.getByTitle("Reunião de equipe")).toHaveStyle({
-      backgroundColor: "#6366f1",
+      backgroundColor: "#2563eb",
       color: "#ffffff",
     });
   });
@@ -389,10 +389,10 @@ describe("CalendarPage — a cor vem do tipo", () => {
     await screen.findByRole("dialog");
 
     const amostra = screen.getByTestId("cor-do-tipo");
-    expect(amostra).toHaveStyle({ backgroundColor: "#6366f1" });
+    expect(amostra).toHaveStyle({ backgroundColor: "#4f46e5" });
 
     fireEvent.change(screen.getByLabelText("Tipo"), { target: { value: "holiday" } });
-    expect(screen.getByTestId("cor-do-tipo")).toHaveStyle({ backgroundColor: "#ef4444" });
+    expect(screen.getByTestId("cor-do-tipo")).toHaveStyle({ backgroundColor: "#dc2626" });
   });
 
   it("a legenda volta ao rodapé, com as cores da API e os nomes da tela", async () => {
@@ -406,13 +406,13 @@ describe("CalendarPage — a cor vem do tipo", () => {
       "Evento", "Reunião", "Treinamento", "Prazo", "Feriado",
     ]);
     expect(within(itens[3]).getByTestId("cor-da-legenda")).toHaveStyle({
-      backgroundColor: "#f59e0b",
+      backgroundColor: "#b45309",
     });
   });
 
   it("sem o mapa da API, não há legenda — e nenhuma cor inventada no lugar", async () => {
     // Um mapa local de reserva seria a segunda fonte voltando pela porta dos fundos.
-    await montar("admin", [BRANCO, INDIGO], { tiposFalham: true });
+    await montar("admin", [BRANCO, AZUL], { tiposFalham: true });
 
     expect(
       screen.queryByRole("list", { name: "Legenda dos tipos de evento" }),
@@ -455,7 +455,7 @@ describe("CalendarPage — horário e dia inteiro", () => {
   });
 
   it("desligar a chave mostra a hora, em minutos, e manda o instante em UTC", async () => {
-    vi.mocked(calendarService.createCalendarEvent).mockResolvedValue(INDIGO);
+    vi.mocked(calendarService.createCalendarEvent).mockResolvedValue(AZUL);
     await montar();
     const dialogo = await novoEventoNoDia();
 
@@ -640,7 +640,7 @@ const FUTURO = evento({
   id: "futuro",
   title: "Vistoria anual",
   event_type: "deadline",
-  color: "#f59e0b",
+  color: "#b45309",
   start_date: `${ANO + 1}-01-05T00:00:00Z`,
   end_date: `${ANO + 1}-01-05T23:59:59Z`,
 });
@@ -665,7 +665,7 @@ describe("CalendarPage — achados da revisão", () => {
     // Recalcular a hora que ninguém mexeu reescreve o instante — e na hora que se
     // repete no fim do horário de verão, recua uma hora e muda a duração. Aqui o
     // sinal é o formato: o gravado não tem milissegundos, o recalculado tem.
-    vi.mocked(calendarService.updateCalendarEvent).mockResolvedValue(INDIGO);
+    vi.mocked(calendarService.updateCalendarEvent).mockResolvedValue(AZUL);
     const gravado = evento({
       id: "gravado",
       title: "Reunião gravada",
@@ -695,7 +695,7 @@ describe("CalendarPage — achados da revisão", () => {
   });
 
   it("o tipo é dito em texto no chip da grade e na lista de gerenciar", async () => {
-    const vistoria = evento({ id: "vistoria", title: "Vistoria", event_type: "deadline", color: "#f59e0b" });
+    const vistoria = evento({ id: "vistoria", title: "Vistoria", event_type: "deadline", color: "#b45309" });
     await montar("admin", [vistoria]);
 
     expect(screen.getByTitle("Vistoria")).toHaveTextContent(/Prazo/);
