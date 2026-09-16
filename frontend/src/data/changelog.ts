@@ -1,4 +1,4 @@
-export const APP_VERSION = "v1.14.0";
+export const APP_VERSION = "v1.15.0";
 
 export type EntryType = "novidade" | "corrigido" | "melhoria";
 
@@ -14,6 +14,22 @@ export interface ChangelogVersion {
 }
 
 export const CHANGELOG: ChangelogVersion[] = [
+  {
+    version: "v1.15.0",
+    date: "16/09/2026",
+    entries: [
+      { type: "novidade", text: "Biblioteca de arquivos: a equipe guarda uma vez os manuais, formulários e documentos que manda toda semana, e passa a anexá-los nos chamados sem subir o mesmo arquivo de novo. Cada item nasce interno à equipe; deixá-lo visível para o cliente é uma escolha explícita de um administrador." },
+      { type: "novidade", text: "No chat do chamado, a equipe anexa um arquivo da biblioteca direto na conversa. Item marcado como interno não chega ao cliente." },
+      { type: "novidade", text: "Os eventos da agenda passaram a ter hora de início e de fim. Quem marca um treinamento que ocupa o dia todo deixa a chave \"dia inteiro\" ligada e não digita horário nenhum, e um plantão que vira a madrugada aparece nos dois dias. Os eventos que já existiam viraram dia inteiro, na mesma data de sempre." },
+      { type: "melhoria", text: "A cor do evento da agenda passou a vir do tipo dele, e a legenda voltou ao rodapé do calendário dizendo qual cor é qual. Antes a cor era escolhida à mão e não queria dizer nada: dois treinamentos podiam sair de cores diferentes, e um treinamento e uma reunião saíam do mesmo azul. Os tons foram escolhidos para o texto sobre a cor ficar legível." },
+      { type: "melhoria", text: "A agenda mostra quem criou cada evento." },
+      { type: "melhoria", text: "Os motivos de atraso informados pela equipe passaram a aparecer no relatório, logo depois da conformidade de SLA por prioridade. O relatório já dizia quantos chamados estouraram o prazo, mas não por quê — e cinco atrasos por peça em falta pedem providência diferente de cinco atrasos por chamado aberto na sexta às 17h." },
+      { type: "melhoria", text: "Quando o login é bloqueado por tentativas erradas, a tela passou a mostrar a contagem regressiva ao vivo até a liberação, e se libera sozinha quando ela zera." },
+      { type: "corrigido", text: "Entrar com o e-mail escrito em maiúsculas passou a funcionar. Antes \"Fulano@empresa.com\" e \"fulano@empresa.com\" podiam virar duas contas diferentes, e quem digitasse a caixa errada recebia \"senha incorreta\" sem entender o motivo." },
+      { type: "corrigido", text: "Clicar fora de uma janela do sistema não a fecha mais — um clique fora por engano descartava tudo o que já estava digitado. Ela sai pelo X ou pelo Cancelar, e todas as janelas passaram a ter o X." },
+      { type: "corrigido", text: "O indicador de SLA deixou de dar como cumprido um chamado que passou do prazo e ficou parado até ser resolvido. Na medição dos últimos seis meses o percentual não mudou — esses chamados já contavam pela data —, mas a marca de violação no chamado agora fica correta." },
+    ],
+  },
   {
     version: "v1.14.0",
     date: "11/09/2026",
