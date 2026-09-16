@@ -12,6 +12,8 @@ Estes casos prendem o mapa. Os da API estão em `test_calendar.py`.
 
 import re
 
+import pytest
+
 from app.models.models import CalendarEventType
 from app.utils.agenda import COR_POR_TIPO, cor_do_tipo
 
@@ -40,12 +42,66 @@ def test_os_valores_sao_os_cinco_de_hoje():
     decidido?" chegando antes do deploy.
     """
     assert COR_POR_TIPO == {
-        CalendarEventType.event: "#6366f1",
-        CalendarEventType.meeting: "#3b82f6",
-        CalendarEventType.training: "#10b981",
-        CalendarEventType.deadline: "#f59e0b",
-        CalendarEventType.holiday: "#ef4444",
+        CalendarEventType.event: "#4f46e5",
+        CalendarEventType.meeting: "#2563eb",
+        CalendarEventType.training: "#047857",
+        CalendarEventType.deadline: "#b45309",
+        CalendarEventType.holiday: "#dc2626",
     }
+
+
+def _luminancia(cor: str) -> float:
+    """Luminância relativa da WCAG 2.1, do jeito que a norma define."""
+
+    def canal(v: int) -> float:
+        c = v / 255
+        return c / 12.92 if c <= 0.03928 else ((c + 0.055) / 1.055) ** 2.4
+
+    n = int(cor[1:], 16)
+    return 0.2126 * canal(n >> 16 & 255) + 0.7152 * canal(n >> 8 & 255) + 0.0722 * canal(n & 255)
+
+
+def _contraste(a: str, b: str) -> float:
+    claro, escuro = sorted((_luminancia(a), _luminancia(b)), reverse=True)
+    return (claro + 0.05) / (escuro + 0.05)
+
+
+def test_toda_cor_passa_o_contraste_com_o_texto_branco():
+    """A régua que decidiu estes degraus, morando junto do mapa.
+
+    A tela põe o título do evento por cima desta cor, em 10px — texto normal,
+    que a WCAG cobra em 4,5:1. Os cinco valores anteriores eram o degrau 500 do
+    Tailwind: quatro reprovavam, e o índigo reprovava com as duas cores de texto
+    possíveis.
+
+    Enquanto a cor era escolhida à mão, cada evento ruim era um evento ruim.
+    Derivada do tipo, uma cor que reprova reprova TODOS os eventos daquele tipo,
+    para sempre. Por isso a régua fica aqui: cor nova sem contraste deixa a
+    suíte vermelha antes do deploy.
+
+    O branco é a cor que o `readableTextColor` da tela escolhe para toda
+    luminância abaixo de 0,45 — e as cinco estão bem abaixo disso.
+    """
+    reprovadas = {
+        tipo.value: round(_contraste(cor, "#ffffff"), 2)
+        for tipo, cor in COR_POR_TIPO.items()
+        if _contraste(cor, "#ffffff") < 4.5
+    }
+    assert not reprovadas, f"texto branco ilegível sobre: {reprovadas}"
+
+
+def test_a_regua_do_contraste_reprova_o_que_tem_de_reprovar():
+    """Controle da régua acima: ela mede, ou só devolve verde?
+
+    Sem este caso, um erro na conta — canal trocado, expoente errado — passaria
+    despercebido, e `test_toda_cor_passa_o_contraste` viraria uma régua que
+    aprova qualquer coisa. Os números são os medidos para os degraus 500 que
+    saíram, e para o par clássico de preto no branco.
+    """
+    assert _contraste("#ffffff", "#000000") == pytest.approx(21.0, abs=0.01)
+    assert _contraste("#f59e0b", "#ffffff") == pytest.approx(2.15, abs=0.01)
+    assert _contraste("#6366f1", "#ffffff") == pytest.approx(4.47, abs=0.01)
+    assert _contraste("#4f46e5", "#ffffff") == pytest.approx(6.29, abs=0.01)
 
 
 def test_cor_do_tipo_le_o_mapa():
