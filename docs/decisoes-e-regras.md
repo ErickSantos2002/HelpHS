@@ -798,6 +798,25 @@ propósito**. Manter o endpoint para uso futuro.
 
 ---
 
+## E-mail sem distinção de maiúsculas
+
+`Fulano@x.com` e `fulano@x.com` são a mesma caixa postal no mundo real — e
+até 15/09 eram duas contas possíveis no sistema (o `EmailStr` só baixa o
+domínio, e as buscas comparavam igualdade exata). Produção foi conferida no
+mesmo dia: zero duplicatas; a porta fechou limpa. Três camadas:
+
+- **Regra prospectiva**: toda entrada de e-mail (cadastro, login,
+  esqueci-a-senha, criação por admin) usa o tipo `EmailNormalizado`
+  (`app/utils/email_normalizado.py`) — minúsculas no tipo, no padrão do CNPJ.
+  Guard de fonte em `tests/test_email_normalizado.py` pega schema novo que
+  declare `EmailStr` cru.
+- **Passado**: `scripts/normaliza_emails.py` (avulso, dry-run por padrão)
+  baixa linhas antigas; colisão por caixa é relatada e NUNCA fundida — a
+  decisão é humana.
+- **Trava de banco**: índice único em `lower(email)` (revision
+  `e1z2a3b4c5d6`). Roda no boot e FALHA se houver duplicata — por isso o
+  script roda ANTES do deploy que leva a migration.
+
 ## Limite de tentativas (rate limiting)
 
 Aplicado com slowapi (`app/core/rate_limit.py`), contadores no Redis — valem

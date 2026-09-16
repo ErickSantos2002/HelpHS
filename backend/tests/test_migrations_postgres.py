@@ -46,6 +46,12 @@ _BANCO = "migracoes_testes"
 # de exercitar um backfill: num banco vazio ele não tem o que copiar.
 _ANTES_DO_BACKFILL = "u1p2q3r4s5t6"
 
+# O pai da migration da agenda (`d0y1z2a3b4c5`). A descida aponta a revision,
+# nunca "-1": o "-1" assumia que a agenda era o head e quebrou no primeiro
+# merge que pôs outra migration em cima dela (15/09, índice único de e-mail) —
+# o CI de main ficou vermelho sem a agenda ter mudado uma linha.
+_ANTES_DA_AGENDA = "c9x0y1z2a3b4"
+
 
 def _alembic(url: str, alvo: str, comando: str = "upgrade") -> subprocess.CompletedProcess[str]:
     """
@@ -380,7 +386,7 @@ async def test_consultas_do_diagnostico_executam(sessao, banco):
 
 @pytest.mark.asyncio
 async def test_a_agenda_desce_e_sobe_sem_perder_horario(banco):
-    """`downgrade -1` larga a chave e devolve as horas intactas."""
+    """A descida até antes da agenda larga a chave e devolve as horas intactas."""
     assert _alembic(banco, "head").returncode == 0
 
     inicio = "2026-01-31 22:00:00+00"
@@ -398,7 +404,7 @@ async def test_a_agenda_desce_e_sobe_sem_perder_horario(banco):
         )
     await motor.dispose()
 
-    descida = _alembic(banco, "-1", comando="downgrade")
+    descida = _alembic(banco, _ANTES_DA_AGENDA, comando="downgrade")
     assert descida.returncode == 0, f"downgrade falhou: {descida.stdout} {descida.stderr}"
 
     motor = create_async_engine(banco)
