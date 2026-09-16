@@ -64,7 +64,7 @@ def _mock_event(created_by=_CREATOR_ID, all_day=False):
     e.title = "Treinamento de bafômetros"
     e.description = "Sala 201"
     e.event_type = CalendarEventType.training
-    e.color = "#10b981"
+    e.color = "#047857"
     e.start_date = _NOW
     e.end_date = _NOW + timedelta(days=1)
     # ⚠️ Booleano PRECISA de valor explícito aqui.
@@ -150,7 +150,7 @@ def _event_body(**overrides):
         "title": "Treinamento de bafômetros",
         "description": "Sala 201",
         "event_type": "training",
-        "color": "#10b981",
+        "color": "#047857",
         "start_date": _NOW.isoformat(),
         "end_date": (_NOW + timedelta(days=1)).isoformat(),
     }
@@ -283,16 +283,16 @@ async def test_editar_evento(patch_redis):
     async with AsyncClient(transport=ASGITransport(app=app), base_url="http://test") as c:
         r = await c.patch(
             f"/api/v1/calendar/events/{_EVENT_ID}",
-            json={"title": "Treinamento remarcado", "color": "#ef4444"},
+            json={"title": "Treinamento remarcado", "color": "#dc2626"},
         )
 
     assert r.status_code == 200
     assert event.title == "Treinamento remarcado"
-    # Este caso prendia `event.color == "#ef4444"` — a cor mandada virando a cor
+    # Este caso prendia `event.color == "#dc2626"` — a cor mandada virando a cor
     # gravada. Mudou pela regra de 15/09: a cor vem do tipo e saiu do contrato de
     # escrita. O `color` do corpo é ignorado, e o treinamento continua verde.
-    assert event.color == "#10b981"
-    assert r.json()["color"] == "#10b981"
+    assert event.color == "#047857"
+    assert r.json()["color"] == "#047857"
 
 
 @pytest.mark.asyncio
@@ -313,7 +313,7 @@ async def test_editar_todos_os_campos_do_evento(patch_redis):
                 "title": "Reunião de equipe",
                 "description": "Pauta: metas do trimestre",
                 "event_type": "meeting",
-                "color": "#3b82f6",
+                "color": "#2563eb",
                 "start_date": novo_inicio.isoformat(),
                 "end_date": novo_fim.isoformat(),
             },
@@ -472,7 +472,7 @@ async def test_nulo_em_campo_not_null_continua_ignorado(patch_redis):
 
     assert r.status_code == 200
     assert event.title == "Treinamento de bafômetros"
-    assert event.color == "#10b981"
+    assert event.color == "#047857"
     assert event.event_type == CalendarEventType.training
 
 
@@ -875,14 +875,14 @@ async def test_cor_enviada_no_post_e_ignorada_e_a_do_tipo_vence(patch_redis):
         r = await c.post("/api/v1/calendar/events", json=corpo)
 
     assert r.status_code == 201
-    assert r.json()["color"] == "#3b82f6"
+    assert r.json()["color"] == "#2563eb"
     # E a coluna recebe a do tipo, não a clicada.
-    assert gravados[0].color == "#3b82f6"
+    assert gravados[0].color == "#2563eb"
 
 
 @pytest.mark.asyncio
 async def test_feriado_criado_sem_cor_nasce_vermelho_e_nao_indigo(patch_redis):
-    """O padrão antigo era `#6366f1` para qualquer tipo."""
+    """O padrão antigo era `#4f46e5` para qualquer tipo."""
     from app.core.database import get_db
 
     _override_user(_mock_user(UserRole.admin))
@@ -896,8 +896,8 @@ async def test_feriado_criado_sem_cor_nasce_vermelho_e_nao_indigo(patch_redis):
         r = await c.post("/api/v1/calendar/events", json=corpo)
 
     assert r.status_code == 201
-    assert r.json()["color"] == "#ef4444"
-    assert gravados[0].color == "#ef4444"
+    assert r.json()["color"] == "#dc2626"
+    assert gravados[0].color == "#dc2626"
 
 
 @pytest.mark.asyncio
@@ -909,15 +909,15 @@ async def test_trocar_o_tipo_na_edicao_leva_a_cor_junto(patch_redis):
     _override_user(_mock_user(UserRole.admin))
     event = _mock_event(created_by=None)
     event.event_type = CalendarEventType.meeting
-    event.color = "#3b82f6"
+    event.color = "#2563eb"
     app.dependency_overrides[get_db] = _db_override(event)
 
     async with AsyncClient(transport=ASGITransport(app=app), base_url="http://test") as c:
         r = await c.patch(f"/api/v1/calendar/events/{_EVENT_ID}", json={"event_type": "deadline"})
 
     assert r.status_code == 200
-    assert r.json()["color"] == "#f59e0b"
-    assert event.color == "#f59e0b"
+    assert r.json()["color"] == "#b45309"
+    assert event.color == "#b45309"
 
 
 @pytest.mark.asyncio
@@ -927,15 +927,15 @@ async def test_mandar_so_a_cor_na_edicao_nao_muda_nada(patch_redis):
     _override_user(_mock_user(UserRole.admin))
     event = _mock_event(created_by=None)
     event.event_type = CalendarEventType.training
-    event.color = "#10b981"
+    event.color = "#047857"
     app.dependency_overrides[get_db] = _db_override(event)
 
     async with AsyncClient(transport=ASGITransport(app=app), base_url="http://test") as c:
         r = await c.patch(f"/api/v1/calendar/events/{_EVENT_ID}", json={"color": "#ec4899"})
 
     assert r.status_code == 200
-    assert r.json()["color"] == "#10b981"
-    assert event.color == "#10b981"
+    assert r.json()["color"] == "#047857"
+    assert event.color == "#047857"
 
 
 @pytest.mark.asyncio
@@ -960,7 +960,7 @@ async def test_a_listagem_desfaz_a_divergencia_sem_reescrever_linha(patch_redis)
     linhas = [
         _divergente(CalendarEventType.event, "#f97316"),
         _divergente(CalendarEventType.meeting, "#eab308"),
-        _divergente(CalendarEventType.training, "#3b82f6"),
+        _divergente(CalendarEventType.training, "#2563eb"),
         _divergente(CalendarEventType.holiday, "#64748b"),
     ]
     app.dependency_overrides[get_db] = _db_override(linhas, [])
@@ -971,10 +971,10 @@ async def test_a_listagem_desfaz_a_divergencia_sem_reescrever_linha(patch_redis)
     assert r.status_code == 200
     cores = {item["event_type"]: item["color"] for item in r.json()["items"]}
     assert cores == {
-        "event": "#6366f1",
-        "meeting": "#3b82f6",
-        "training": "#10b981",
-        "holiday": "#ef4444",
+        "event": "#4f46e5",
+        "meeting": "#2563eb",
+        "training": "#047857",
+        "holiday": "#dc2626",
     }
     # E a coluna não foi reescrita pela leitura.
     assert linhas[0].color == "#f97316"
@@ -998,11 +998,11 @@ async def test_a_tela_le_o_mapa_de_cores_da_api(patch_redis):
 
     assert r.status_code == 200
     assert r.json() == [
-        {"value": "event", "color": "#6366f1"},
-        {"value": "meeting", "color": "#3b82f6"},
-        {"value": "training", "color": "#10b981"},
-        {"value": "deadline", "color": "#f59e0b"},
-        {"value": "holiday", "color": "#ef4444"},
+        {"value": "event", "color": "#4f46e5"},
+        {"value": "meeting", "color": "#2563eb"},
+        {"value": "training", "color": "#047857"},
+        {"value": "deadline", "color": "#b45309"},
+        {"value": "holiday", "color": "#dc2626"},
     ]
 
 

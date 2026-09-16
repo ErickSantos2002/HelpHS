@@ -144,19 +144,30 @@ def fala_a_convencao_da_tela_antiga(inicio: datetime, fim: datetime) -> bool:
 # sido clicado. Em produção, 15/09/2026, cinco dos seis eventos estavam numa cor
 # diferente da do tipo — treinamento e reunião no mesmo azul, feriado em cinza.
 #
-# Os valores são os cinco que a tela já usava como padrão. Trocar a paleta é
-# outra decisão, e `test_os_valores_sao_os_cinco_de_hoje` existe para que ela
-# chegue como pergunta antes do deploy.
+# ── Por que estes degraus, e não os de antes ──────────────────────────
+#
+# Os cinco eram o degrau 500 do Tailwind, herdados da tela. Medidos contra o
+# texto branco que a tela põe por cima deles, quatro reprovavam o piso de 4,5:1
+# que texto de 10px exige, e o índigo reprovava com as DUAS cores de texto
+# possíveis — ou seja, não havia escolha de texto que salvasse aquela cor.
+#
+# Enquanto a cor era livre, o problema era de quem escolhesse mal. Derivada do
+# tipo, ela virou de todo mundo: todo prazo passou a ser o mesmo âmbar ilegível.
+#
+# Cada um virou o degrau MAIS CLARO da mesma matiz que passa — 600 para índigo,
+# azul e vermelho; 700 para esmeralda e âmbar, onde o 600 ainda reprova. O teste
+# `test_toda_cor_passa_o_contraste_com_o_texto_branco` é a régua: cor nova que
+# reprove deixa a suíte vermelha antes do deploy, e não depois.
 #
 # Hexadecimal cravado de propósito: é DADO que vai para a resposta da API, não
 # token da interface. Um `var(--chart-3)` aqui vazaria como texto para qualquer
 # um que lesse o JSON.
 COR_POR_TIPO: dict[CalendarEventType, str] = {
-    CalendarEventType.event: "#6366f1",
-    CalendarEventType.meeting: "#3b82f6",
-    CalendarEventType.training: "#10b981",
-    CalendarEventType.deadline: "#f59e0b",
-    CalendarEventType.holiday: "#ef4444",
+    CalendarEventType.event: "#4f46e5",
+    CalendarEventType.meeting: "#2563eb",
+    CalendarEventType.training: "#047857",
+    CalendarEventType.deadline: "#b45309",
+    CalendarEventType.holiday: "#dc2626",
 }
 
 
