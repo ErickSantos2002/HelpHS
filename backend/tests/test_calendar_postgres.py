@@ -261,3 +261,107 @@ async def test_dezembro_vira_o_ano_com_o_fuso_certo(db):
 
     assert "réveillon de plantão" in await _titulos(db, 2026, 12)
     assert "réveillon de plantão" not in await _titulos(db, 2027, 1)
+
+
+# ── A borda do fim do evento com hora ─────────────────────────
+#
+# As duas naturezas também diferem no FIM, e a condição da consulta era a mesma
+# para as duas. Dia inteiro termina em `23:59:59.999999` — o último microssegundo
+# ainda é dele, e por isso `>=`. Evento com hora termina no instante do fim, que
+# é exclusivo: um evento que acaba às 00:00 do dia 1º não dura um minuto sequer
+# no mês que começa.
+#
+# Achado por uma revisão independente da tela: a invariante "o que a API devolve
+# para o mês cai em alguma célula" quebrava só nessa borda.
+
+
+@pytest.mark.asyncio
+async def test_evento_com_hora_que_acaba_a_meia_noite_nao_entra_no_mes_seguinte(db):
+    """22:00 → 00:00 de 31/01 é de janeiro, e só."""
+    await _grava(
+        db,
+        "plantão até a meia-noite",
+        datetime(2026, 1, 31, 22, tzinfo=RECIFE),
+        datetime(2026, 2, 1, 0, tzinfo=RECIFE),
+    )
+
+    assert "plantão até a meia-noite" in await _titulos(db, 2026, 1)
+    assert "plantão até a meia-noite" not in await _titulos(db, 2026, 2)
+
+
+@pytest.mark.asyncio
+async def test_um_minuto_depois_da_meia_noite_ja_e_do_mes_seguinte(db):
+    """A borda é exclusiva, não é um dia inteiro de tolerância.
+
+    Sem este caso, trocar `>=` por `>` poderia virar `>` sobre o dia, e o evento
+    que de fato atravessa a virada sumiria do mês novo.
+    """
+    await _grava(
+        db,
+        "plantão que vira o mês",
+        datetime(2026, 1, 31, 22, tzinfo=RECIFE),
+        datetime(2026, 2, 1, 0, 1, tzinfo=RECIFE),
+    )
+
+    assert "plantão que vira o mês" in await _titulos(db, 2026, 1)
+    assert "plantão que vira o mês" in await _titulos(db, 2026, 2)
+
+
+@pytest.mark.asyncio
+async def test_dia_inteiro_continua_com_o_ultimo_microssegundo_dentro(db):
+    """O `>=` que fica: a borda do dia inteiro é o último microssegundo do dia.
+
+    Trocar os DOIS ramos por `>` tiraria todo evento de dia inteiro do primeiro
+    dia do mês dele — que é o caso mais comum da agenda.
+    """
+    await _grava(
+        db,
+        "treinamento do dia 1º",
+        datetime(2026, 2, 1, 0, 0, 0, tzinfo=UTC),
+        datetime(2026, 2, 1, 23, 59, 59, 999999, tzinfo=UTC),
+        dia_inteiro=True,
+    )
+
+    assert "treinamento do dia 1º" in await _titulos(db, 2026, 2)
+
+
+@pytest.mark.asyncio
+async def test_evento_que_comeca_na_virada_e_do_mes_novo(db):
+    """A outra ponta da mesma borda: o início também é exclusivo do lado de cima.
+
+    Um evento que começa às 00:00 do dia 1º de fevereiro não acontece em janeiro
+    — nem por um minuto. A mutação achou esta lacuna: nenhum caso tinha evento
+    começando EXATAMENTE na virada, então trocar `<` por `<=` no fim da janela
+    não reprovava nada, e janeiro passaria a listar o primeiro evento de
+    fevereiro.
+    """
+    await _grava(
+        db,
+        "reunião que abre o mês",
+        datetime(2026, 2, 1, 0, tzinfo=RECIFE),
+        datetime(2026, 2, 1, 1, tzinfo=RECIFE),
+    )
+
+    assert "reunião que abre o mês" not in await _titulos(db, 2026, 1)
+    assert "reunião que abre o mês" in await _titulos(db, 2026, 2)
+
+
+@pytest.mark.asyncio
+async def test_dia_inteiro_antigo_que_acaba_na_meia_noite_nao_some_da_agenda(db):
+    """A linha que o `>=` do ramo de dia inteiro existe para não perder.
+
+    Até o #16 a API não validava a ordem das datas: `CalendarEventCreate` pedia
+    `start_date` e `end_date` e nada mais, então uma linha com as duas iguais na
+    meia-noite era aceita — e a migration a marcou dia inteiro sem recalcular.
+    Para uma data flutuante, meia-noite do dia 1º É o dia 1º; o instante não é o
+    fim do evento, é o começo do dia dele.
+
+    Trocar esse ramo por `>` faria o evento sumir de fevereiro — e de todo mês,
+    porque `start < fim` já o exclui de janeiro. Não é uma borda de meio grau: é
+    a linha desaparecer da agenda.
+    """
+    meia_noite = datetime(2026, 2, 1, 0, 0, 0, tzinfo=UTC)
+    await _grava(db, "feriado antigo sem duração", meia_noite, meia_noite, dia_inteiro=True)
+
+    assert "feriado antigo sem duração" in await _titulos(db, 2026, 2)
+    assert "feriado antigo sem duração" not in await _titulos(db, 2026, 1)

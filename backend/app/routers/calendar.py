@@ -134,14 +134,21 @@ async def list_events(
         inicio_local, fim_local = janela_do_mes(year, month, fuso)
         inicio_utc, fim_utc = janela_do_mes(year, month, FUSO_UTC)
         # Sobreposição, e não contenção: um evento que atravessa a virada do mês
-        # pertence aos dois. `>=` e não `>` porque o último microssegundo do dia
-        # inteiro ainda está dentro dele.
+        # pertence aos dois.
+        #
+        # E o FIM também difere entre as duas naturezas. Dia inteiro acaba em
+        # `23:59:59.999999`: o último microssegundo ainda é dele, por isso `>=`.
+        # Evento com hora acaba NO instante do fim, que é exclusivo — um plantão
+        # que termina às 00:00 do dia 1º não dura um minuto sequer no mês que
+        # começa, e o `>=` o trazia na lista dele. A tela não chegava a
+        # desenhá-lo, porque refiltra; quem via o item a mais era quem lia a
+        # resposta da API. Achado por uma revisão independente da tela.
         stmt = stmt.where(
             or_(
                 and_(
                     CalendarEvent.all_day.is_(False),
                     CalendarEvent.start_date < fim_local,
-                    CalendarEvent.end_date >= inicio_local,
+                    CalendarEvent.end_date > inicio_local,
                 ),
                 and_(
                     CalendarEvent.all_day.is_(True),
