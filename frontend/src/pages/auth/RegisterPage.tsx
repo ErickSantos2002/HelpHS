@@ -2,6 +2,14 @@ import { useState } from "react";
 import type { FormEvent } from "react";
 import { Link, useNavigate } from "react-router-dom";
 import { Alert, Button, Checkbox, Input } from "../../components/ui";
+import { getApiError } from "../../lib/apiError";
+import {
+  ERRO_TELEFONE,
+  PLACEHOLDER_TELEFONE,
+  isValidPhone,
+  maskPhoneInput,
+  toE164,
+} from "../../lib/telefone";
 import { api } from "../../services/api";
 import { AuthShell } from "./AuthShell";
 import logoFull from "../../assets/Logo HelpHS.png";
@@ -60,6 +68,10 @@ export default function RegisterPage() {
     if (!/[A-Z]/.test(password)) return "A senha deve conter ao menos uma letra maiúscula.";
     if (!/[0-9]/.test(password)) return "A senha deve conter ao menos um número.";
     if (password !== confirm) return "As senhas não coincidem.";
+    // O cadastro público cria cliente ativo, e cliente ativo precisa de
+    // telefone — a barreira é o backend; isto só evita a viagem até o 422.
+    if (!phone.trim()) return "Telefone é obrigatório.";
+    if (!isValidPhone(phone)) return ERRO_TELEFONE;
     if (!lgpd) return "Você deve aceitar os termos de uso para criar uma conta.";
     return null;
   }
@@ -78,7 +90,8 @@ export default function RegisterPage() {
         name: name.trim(),
         email: email.trim(),
         password,
-        phone: phone.trim() || null,
+        // Vai em E.164: a pontuação é de tela, como no CNPJ.
+        phone: toE164(phone),
         department: department.trim() || null,
         lgpd_consent: true,
       });
@@ -93,16 +106,16 @@ export default function RegisterPage() {
       navigate("/login", { state: { registered: true }, replace: true });
     } catch (err: unknown) {
       const status = (err as { response?: { status?: number } })?.response?.status;
-      const detail = (err as { response?: { data?: { detail?: string } } })?.response?.data?.detail;
       if (status === 409) {
         // Só chega aqui em ambiente SEM envio de e-mail. Com e-mail
         // configurado o backend responde 201 neutro e avisa o dono do
         // endereço por mensagem — ver #3.1 em app/routers/auth.py.
         setError("Este e-mail já está cadastrado. Tente fazer login.");
-      } else if (detail) {
-        setError(detail);
       } else {
-        setError("Erro ao criar conta. Tente novamente.");
+        // O `detail` de um 422 do FastAPI é LISTA, não string: lê-lo como
+        // string punha um array no estado e ele ia direto para o <Alert>.
+        // O tradutor central já cobre os quatro formatos de resposta.
+        setError(getApiError(err, "Erro ao criar conta. Tente novamente."));
       }
     } finally {
       setLoading(false);
@@ -291,9 +304,10 @@ export default function RegisterPage() {
               <Input
                 label="Telefone"
                 type="tel"
-                placeholder="(11) 99999-9999"
+                required
+                placeholder={PLACEHOLDER_TELEFONE}
                 value={phone}
-                onChange={(e) => setPhone(e.target.value)}
+                onChange={(e) => setPhone(maskPhoneInput(e.target.value))}
                 autoComplete="tel"
               />
               <Input

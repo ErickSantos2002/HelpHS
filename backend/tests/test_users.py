@@ -186,6 +186,10 @@ async def test_create_user_as_admin(patch_redis):
                 "email": "newclient@test.com",
                 "password": "Secret1234",
                 "role": "client",
+                # Cliente nasce ativo, e cliente ativo precisa de telefone —
+                # ver tests/test_telefone.py. Sem isto, 422 antes de chegar
+                # ao que estes testes medem.
+                "phone": "(81) 99999-9999",
                 "lgpd_consent": True,
             },
         )
@@ -238,6 +242,9 @@ async def test_create_user_duplicate_email(patch_redis):
                 "name": "Dup",
                 "email": "dup@test.com",
                 "password": "Secret1234",
+                # Sem `role`, o default é cliente — e cliente ativo precisa de
+                # telefone. O 409 de e-mail duplicado é o que se mede aqui.
+                "phone": "(81) 99999-9999",
                 "lgpd_consent": True,
             },
         )
@@ -790,6 +797,10 @@ async def test_create_user_hashes_password_off_the_event_loop(patch_redis):
                     "email": "newclient@test.com",
                     "password": "Secret1234",
                     "role": "client",
+                    # Cliente ativo precisa de telefone — ver
+                    # tests/test_telefone.py. O que se mede aqui é a thread
+                    # em que o bcrypt roda.
+                    "phone": "(81) 99999-9999",
                     "lgpd_consent": True,
                 },
             )

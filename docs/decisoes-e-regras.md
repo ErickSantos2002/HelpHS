@@ -746,6 +746,102 @@ As colunas seguem `nullable` no banco de propósito: **clientes cadastrados ante
 da regra não são bloqueados**. Eles veem um aviso no perfil pedindo para
 completar o cadastro.
 
+## Telefone do cliente
+
+### `users.phone` é a fonte canônica — e `companies.phone` não é alternativa
+
+> **Quem o sistema liga é a pessoa, não a empresa.** O telefone do atendimento
+> é `users.phone`. `companies.phone` **não** é usado como reserva.
+
+Existem duas colunas gêmeas, ambas `String(20)` e anuláveis: `users.phone`
+(`models.py:209`) e `companies.phone` (`models.py:177`). Elegê-las as duas
+criaria duas fontes de verdade para a mesma pergunta — o erro que o par
+`users.cnpj` / `companies.cnpj` já custou caro (ver "Qual é a autoridade sobre
+'de qual empresa é este cliente'").
+
+Não existe precedência do tipo `users.phone ?? companies.phone`. Três medições
+de 18/09/2026 sustentam a escolha:
+
+- o caminho majoritário de criação de empresa **nasce sem telefone** — a
+  sugestão montada do onboarding não tem o campo, e o front não o envia;
+- `users.phone` é dado pessoal declarado na política de privacidade, e a
+  anonimização o apaga; `companies.phone` é dado de empresa;
+- desvincular um cliente da empresa é `ON DELETE SET NULL`, então uma regra
+  apoiada na empresa perderia efeito no instante em que alguém clicasse em
+  Desvincular.
+
+### E.164 é a representação interna
+
+O telefone é guardado em **E.164** (`+5581999999999`), normalizado por
+`app/utils/telefone.py`, que é a autoridade; `frontend/src/lib/telefone.ts`
+espelha a mesma regra para o usuário saber o que errou antes de enviar.
+
+**E.164 é a forma canônica interna do HelpHS e não depende de fornecedor
+nenhum.** A conversão para o formato que a telefonia espera no momento de
+discar é responsabilidade isolada do adapter da integração — não está
+implementada, e a grafia exata segue em aberto com o fornecedor.
+
+A máscara é coisa de tela, como no CNPJ. Entradas brasileiras razoáveis são
+aceitas e normalizadas (`81999999999`, `5581999999999`, `+5581999999999`,
+`(81) 99999-9999`); número de fora do Brasil exige o `+` explícito, porque sem
+ele não há como saber onde termina o código do país — e chutar `+55` produz
+número indiscável gravado com cara de telefone bom.
+
+### A regra é prospectiva: proíbe a PERDA, não a ausência
+
+> **Novo cliente ativo precisa de telefone. Cliente ativo que já tem telefone
+> não pode ficar sem. Cliente legado sem telefone continua editando o resto do
+> cadastro normalmente.**
+
+São exatamente duas proibições, implementadas em `_guarda_telefone_do_cliente`
+(`app/routers/users.py`) e cobradas em `tests/test_telefone.py`:
+
+| | O que é proibido |
+|---|---|
+| **P1 — remoção** | tinha telefone e a requisição o esvazia, sendo cliente ativo |
+| **P2 — transição** | virar `client`, ou voltar a `active`, sem telefone |
+
+O que **não** é proibido: um cliente ativo que já estava sem telefone salvar o
+nome, o departamento ou a foto. Medido em produção em 18/09/2026: **18 contas
+`role=client` + `status=active`, das quais 14 sem telefone**. O responsável
+informou que essa população é composta por contas **fictícias/de teste** — ou
+seja, o número não descreve qualidade cadastral de clientes reais, e sim
+**legado técnico**. Mas elas existem fisicamente, e uma exigência genérica
+("cliente ativo sempre precisa de telefone", cobrada em todo `PATCH`) as
+deixaria incapazes de editar o próprio nome. Regra nova é prospectiva; dado
+histórico se corrige em script avulso.
+
+A obrigatoriedade **não** mora no `UserUpdate`: esse schema é compartilhado por
+`PATCH /users/me` e `PATCH /users/{id}` e não conhece o usuário alvo, o estado
+atual dele nem o resultante. Ele só valida e normaliza quando o campo vem, e o
+`exclude_unset` do router é o que distingue "não enviou" de "enviou vazio" —
+distinção da qual a regra depende inteiramente. Quem decide é o router.
+
+O `RegisterRequest` é a exceção: o cadastro público grava `role=client` e
+`status=active` como literais, então não há estado a descobrir e a exigência
+cabe no próprio schema.
+
+**A anonimização continua podendo zerar o telefone.** O direito ao esquecimento
+é mais forte que esta regra: `anonymize_user` escreve `phone = None` direto no
+objeto, sem passar pelos guards, e há teste dedicado para que ninguém
+"conserte" isso depois.
+
+**Não há constraint no banco ainda.** A coluna segue anulável, e o `CHECK` é
+fase seguinte — ele precisa nascer `NOT VALID` por causa das 14 linhas acima,
+senão a migration falha e derruba o boot do contêiner, que roda
+`alembic upgrade head` a cada subida.
+
+### Telefone só chega ao front quando alguém vai ligar
+
+O contrato do chamado **não** carrega telefone. Ele expõe apenas se a ação de
+ligar está disponível e, quando não está, o motivo. O número é buscado por
+endpoint próprio e autorizado, no momento em que a confirmação da ligação
+abre — e o backend **rebusca o telefone no banco** ao disparar a chamada, sem
+aceitar número vindo do navegador.
+
+Minimização de dado pessoal: sem isso, o telefone de todo cliente trafegaria em
+cada abertura de chamado, inclusive para quem nunca vai ligar.
+
 ## Respostas rápidas do chat
 
 Lista **única para toda a equipe** — não há respostas por técnico. Admin e
@@ -1373,6 +1469,7 @@ por inércia.
 | **O trecho genérico domina a busca (hipótese B)** | `6. Passo a Passo para Utilização` do Titan — e o `5.` equivalente do iBlow — fala de operação em geral e vence perguntas de assunto diferente: 4 de 8 numa sondagem livre, incluindo impressora num aparelho sem impressora. O teto de 0,25 tira a maior parte do dano hoje, e num caso conhecido agrava: para *"como coloco o aparelho em português"*, o aspirador sobrevive ao corte e o `8.2 Alterar Idioma` não. Com três manuais dói pouco — quase toda pergunta fora do manual já não devolve nada. | **Quando houver manual técnico para mais de três produtos.** Aí o aspirador passa a competir com candidatos legítimos dentro do teto, e o dano deixa de ser contornado por ele. O conserto é do lado do trecho — cortar aquele mais fino, ou tirá-lo da base —, e NÃO do corte de todo mundo: a hipótese A foi medida e caiu, os trechos curtos são os que mais acertam. |
 | **O teto de 0,25 depende do acervo** | Registrada em 10/09/2026. O número foi medido em 09/09 contra 74 trechos de 8 arquivos (margem de 0,009) e remedido em 10/09 contra 46 trechos de 3 artigos (margem de 0,007): mudou a fonte, mudou a margem, e ninguém mexeu no número. Com o suporte escrevendo artigos, o acervo vai continuar andando e o teto anda junto sem que nada quebre — a falha dele é silenciosa nas duas direções: acerto virando escalada, ou trecho errado passando. O método, as 40 perguntas e o viés (as 27 com resposta foram escritas por quem sabia a resposta; os acertos preservados são o melhor caso) estão em "Como remedir", na seção do teto. | **O acervo indexado mudar de ordem de grandeza** (46 trechos em 10/09; chegando às centenas, remedir), **ou entrar artigo de produto que hoje não tem manual** (Deimos, EBS-010, Mark X, Mercury) — as 40 perguntas não têm nenhuma sobre eles, então remedir inclui escrever perguntas para esse produto. Trocar o modelo de embedding invalida a medição inteira e também é gatilho. |
 | **Contador de artigo útil sem voto identificado** | `POST /kb/articles/{id}/feedback` incrementa sem registrar quem votou; o mesmo usuário incrementa em laço. Não vaza nada. | O número for usado para decidir alguma coisa. |
+| **O chamado não sabe quem é o cliente quando o staff o abre** | Medido em 18/09/2026: `Ticket` tem exatamente duas FKs para `users` — `creator_id` e `assignee_id` —, `TicketCreate` não tem campo de destinatário e `creator_id = actor.id` é incondicional. Quando um técnico abre chamado em nome de alguém (prática que o próprio código reconhece em comentário), **o cliente real fica sem vínculo nenhum**: some da listagem dele, leva 404 no detalhe, no chat e nos anexos, e a pesquisa de satisfação fica travada. Na mesma medição: 23 chamados, 4 abertos por staff, **os 4 já fechados e nenhum ativo**. Por isso a telefonia sai com o caminho barato — a ligação só aparece quando o criador do chamado é `role=client`, e nos demais a ação fica indisponível com motivo, em vez de discar para a pessoa errada. | **Antes de suportar formalmente a abertura de chamado por staff em nome de um cliente.** A saída é um `requester_id`/`client_id` explícito no chamado, com migration e backfill do histórico — e aí ele passa a ser a fonte do telefone da ligação, no lugar do criador. |
 | **Antivírus aceita quando está fora do ar** | Bloquear upload com o ClamAV indisponível derrubaria o anexo por falha de infraestrutura. Hoje o estado é reportado, não mais silencioso, e há script de revarredura. | O ClamAV estiver no ambiente e estável — aí bloquear passa a custar pouco. |
 
 
@@ -1391,6 +1488,43 @@ caiba numa rodada de hora em hora, ou que não possa competir com as requisiçõ
 pelo mesmo processo — aí sim vale subir uma fila de verdade. A decisão de qual
 ferramenta fica em aberto de propósito: escolher agora, sem o problema na mão,
 foi exatamente o que produziu o pacote morto.
+
+### Telefonia (API4COM): o que já está fechado com o fornecedor
+
+Nada da integração está implementado — o que existe é a Fase 1A do telefone,
+acima. O que segue é contrato **confirmado**, registrado para que ninguém
+precise redescobrir, e para que a implementação não copie o material
+desatualizado que circula.
+
+| Item | Valor confirmado |
+|---|---|
+| Autenticação | `Authorization: <token>` — **o token cru, SEM o prefixo `Bearer`**. Confirmado pelo suporte e medido na nossa conta (`GET /users/me` → HTTP 200). |
+| Endpoint de chamada | `POST /calls`. O `POST /dialer` está **descontinuado** na documentação oficial e devolve um id que não é o da chamada. |
+| Payload | `caller`, `called`, `extension`, `metadata` — o `{extension, phone, metadata}` que aparece em material antigo é o da rota morta. |
+| `webhookVersion` | literal **`"1.8"`**, sem o prefixo `v`. ⚠️ A nossa conta tem uma integração armazenada como `v1.8`; o valor a ENVIAR é `1.8`, confirmado pelo suporte. |
+| `webhookConstraint` | `{"metadata": {"gateway": "HelpHS"}}` — recomendação direta do suporte para esta integração. A chave é definida por quem chama (a integração `pipedrive` da mesma conta usa `api4comGateway`), então o `POST /calls` precisa enviar `metadata.gateway = "HelpHS"` **exatamente assim**, ou a entrega para em silêncio. |
+| Eventos | `channel-answer` e `channel-hangup`, e só esses dois. |
+
+⚠️ **Duas integrações da conta estão sem filtro** (`webhook` com
+`webhookConstraint` nulo, `oficina` com `{}`). Se constraint vazia significar
+"sem filtro", os webhooks das chamadas do HelpHS também serão entregues nesses
+endpoints, que pertencem a outros sistemas da empresa. É mais um motivo para o
+`metadata` não levar nome, e-mail, CPF nem texto do chamado — só identificadores.
+
+**Quatro coisas seguem em aberto, e nenhuma pode ser resolvida por suposição:**
+
+- **o formato aceito em `POST /calls.called`** — a documentação mostra
+  `4833328530` e `+554833328530` para a mesma rota, e o suporte não definiu
+  canônico. O que `GET /calls` devolve descreve o que a API emitiu, não o que
+  ela aceita;
+- **o fuso semântico dos webhooks** — os exemplos vêm sem offset. O `GET
+  /calls` da nossa conta devolve ISO com offset explícito, mas isso é outro
+  contrato. Gravar data de webhook antes de resolver isto é erro de três horas
+  que não levanta exceção nenhuma;
+- **o payload completo de `channel-answer`** — o evento existe, exemplo
+  público não;
+- **autenticação de origem do webhook** — não há HMAC, assinatura, secret nem
+  faixa de IP documentados. A proteção terá de ser desenhada do nosso lado.
 
 ### Antivírus (ClamAV) não está no ambiente
 
