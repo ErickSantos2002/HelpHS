@@ -12,6 +12,7 @@ from app.models.models import UserRole, UserStatus
 from app.schemas.base import AppBaseModel
 from app.utils.documents import CnpjObrigatorio, CnpjOpcional
 from app.utils.email_normalizado import EmailNormalizado
+from app.utils.telefone import TelefoneOpcional
 
 
 class UserCreate(AppBaseModel):
@@ -19,7 +20,11 @@ class UserCreate(AppBaseModel):
     email: EmailNormalizado
     password: str = Field(..., min_length=8, max_length=128)
     role: UserRole = UserRole.client
-    phone: str | None = Field(default=None, max_length=20)
+    # Só normaliza. A obrigatoriedade depende do ESTADO RESULTANTE, e quem o
+    # conhece é o router — `create_user` fixa `status=active`, de modo que a
+    # exigência recai sobre `role == client`. Pôr a regra aqui significaria
+    # o schema afirmar sozinho qual status o router vai gravar.
+    phone: TelefoneOpcional = Field(default=None, max_length=20)
     department: str | None = Field(default=None, max_length=100)
     lgpd_consent: bool = False
 
@@ -35,7 +40,12 @@ class UserCreate(AppBaseModel):
 
 class UserUpdate(AppBaseModel):
     name: str | None = Field(default=None, min_length=2, max_length=255)
-    phone: str | None = Field(default=None, max_length=20)
+    # Este schema é COMPARTILHADO por `PATCH /users/me` e `PATCH /users/{id}`
+    # e não decide domínio: ele não conhece o usuário alvo, o estado atual dele
+    # nem o resultante. Aqui só valida e normaliza quando o campo vem, e o
+    # `exclude_unset` do router continua distinguindo "não enviou" de "enviou
+    # vazio" — distinção da qual a regra prospectiva depende inteiramente.
+    phone: TelefoneOpcional = Field(default=None, max_length=20)
     department: str | None = Field(default=None, max_length=100)
     avatar_url: str | None = Field(default=None, max_length=500)
     role: UserRole | None = None

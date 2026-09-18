@@ -41,7 +41,14 @@ def test_o_tipo_poe_o_email_inteiro_em_minusculas():
         (LoginRequest, {"password": "qualquer"}),
         (
             RegisterRequest,
-            {"name": "Fulano", "password": "SenhaForte1", "lgpd_consent": True},
+            {
+                "name": "Fulano",
+                "password": "SenhaForte1",
+                # O cadastro público cria cliente ativo, e desde a Fase 1A o
+                # telefone é obrigatório nesse fluxo (tests/test_telefone.py).
+                "phone": "(81) 99999-9999",
+                "lgpd_consent": True,
+            },
         ),
         (EmailRequest, {}),
         (UserCreate, {"name": "Fulano", "password": "SenhaForte1"}),
