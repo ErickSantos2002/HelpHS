@@ -1,7 +1,7 @@
-import { render, screen } from "@testing-library/react";
+import { act, fireEvent, render, screen } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { MemoryRouter } from "react-router-dom";
-import { beforeEach, describe, expect, it, vi } from "vitest";
+import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
 vi.mock("../../contexts/AuthContext", () => ({
   useAuth: vi.fn(),
@@ -93,5 +93,73 @@ describe("LoginPage — revelar a senha", () => {
 
     await userEvent.click(screen.getByRole("button", { name: "Ocultar senha" }));
     expect(senha).toHaveAttribute("type", "password");
+  });
+});
+
+/**
+ * O bloqueio por tentativas dura 15 minutos e o backend informa o tempo exato
+ * no Retry-After. O relógio conta ao vivo até o desbloqueio — sem ele, a
+ * pessoa insiste no escuro (foi o incidente de 26/08 e a reclamação de 15/09).
+ */
+describe("LoginPage — contagem regressiva do bloqueio", () => {
+  afterEach(() => {
+    vi.useRealTimers();
+  });
+
+  async function submeteBloqueado(retryAfter: string) {
+    vi.clearAllMocks();
+    mockUseAuth.mockReturnValue({
+      login: vi.fn().mockRejectedValue({
+        response: { status: 429, headers: { "retry-after": retryAfter }, data: {} },
+      }),
+      verifyMfa: vi.fn(),
+    } as unknown as ReturnType<typeof useAuth>);
+    render(
+      <MemoryRouter>
+        <LoginPage />
+      </MemoryRouter>,
+    );
+    // fireEvent, não userEvent: o userEvent espera em timers e trava sob o
+    // relógio falso (happy-dom). O preenchimento é síncrono de propósito.
+    fireEvent.change(screen.getByLabelText("E-mail"), {
+      target: { value: "alguem@exemplo.com" },
+    });
+    fireEvent.change(screen.getByLabelText("Senha"), {
+      target: { value: "SenhaQualquer1" },
+    });
+    // O relógio falso liga ANTES do click, para o setInterval do bloqueio já
+    // nascer nele — só timers e Date; mockar mais que isso trava o ambiente.
+    vi.useFakeTimers({
+      toFake: ["setTimeout", "clearTimeout", "setInterval", "clearInterval", "Date"],
+    });
+    fireEvent.click(screen.getByRole("button", { name: "Entrar" }));
+    // A rejeição do login assenta por microtask (não faked) — o act vazio basta.
+    await act(async () => {});
+  }
+
+  it("mostra o relógio com o tempo do Retry-After e trava o Entrar", async () => {
+    await submeteBloqueado("90");
+    expect(screen.getByText(/tentar novamente em/)).toBeInTheDocument();
+    expect(screen.getByText("1:30")).toBeInTheDocument();
+    expect(screen.getByRole("button", { name: "Entrar" })).toBeDisabled();
+  });
+
+  it("o relógio anda um segundo por vez", async () => {
+    await submeteBloqueado("90");
+    screen.getByText("1:30");
+    await act(async () => {
+      vi.advanceTimersByTime(1000);
+    });
+    expect(screen.getByText("1:29")).toBeInTheDocument();
+  });
+
+  it("ao zerar, o aviso some e o Entrar volta a funcionar", async () => {
+    await submeteBloqueado("2");
+    screen.getByText(/tentar novamente em/);
+    await act(async () => {
+      vi.advanceTimersByTime(2500);
+    });
+    expect(screen.queryByText(/tentar novamente em/)).not.toBeInTheDocument();
+    expect(screen.getByRole("button", { name: "Entrar" })).toBeEnabled();
   });
 });

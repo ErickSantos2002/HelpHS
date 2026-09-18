@@ -27,7 +27,13 @@ import threading
 from pathlib import Path
 
 os.environ["APP_ENV"] = "testing"
-os.environ.setdefault("DATABASE_URL", "postgresql+asyncpg://user:pass@localhost/db")
+# Atribuicao, NAO setdefault: com setdefault, quem tivesse `DATABASE_URL`
+# exportado no shell rodaria a suite contra aquele banco -- e o `.env` de
+# desenvolvimento deste projeto aponta para producao. Nenhum teste usa esta
+# URL para valer (os que precisam de Postgres sobem `pgserver` ou leem
+# `TEST_POSTGRES_URL`), entao forcar o valor falso nao tira capacidade de
+# nada e fecha o unico caminho pelo qual a suite tocaria dado real.
+os.environ["DATABASE_URL"] = "postgresql+asyncpg://user:pass@localhost/db"
 
 from cryptography.hazmat.primitives import serialization  # noqa: E402
 from cryptography.hazmat.primitives.asymmetric import rsa  # noqa: E402

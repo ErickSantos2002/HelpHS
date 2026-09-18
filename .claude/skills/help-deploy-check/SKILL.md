@@ -98,7 +98,10 @@ outro, os dois lados precisam conviver:
       `env` e o `auto_close.last_success` — `null` é o normal no primeiro
       minuto de cada worker, mas continuar `null` depois disso quer dizer
       que a rotina do RN-005 não está concluindo rodada. **Não** espere
-      versão aqui: ela não é exposta a quem não está logado.
+      versão aqui: desde o `dcfc25f` ela não é exposta a **ninguém**. O
+      `__version__` só alimenta o spec OpenAPI, e o spec está fechado em
+      produção — `/openapi.json` e `/docs` respondem 404. Para saber qual
+      commit está no ar, a fonte é o EasyPanel.
 - [ ] Login funciona; rota protegida **sem** token → `401`
 - [ ] Listagem de chamados carrega
 - [ ] **Abrir um anexo existente** — prova que o volume sobreviveu ao deploy

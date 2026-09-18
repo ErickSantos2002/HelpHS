@@ -35,6 +35,7 @@ from datetime import UTC, datetime, timedelta
 import pytz
 
 from app.models.models import SLAConfig, Ticket, TicketStatus
+from app.utils.feriados import e_dia_util
 
 # ── Constants ─────────────────────────────────────────────────
 
@@ -67,27 +68,39 @@ def _to_sp(dt: datetime) -> datetime:
     return dt.astimezone(SP_TZ)
 
 
+def _proximo_inicio_util(dt: datetime) -> datetime:
+    """Início da jornada do próximo dia útil, pulando fim de semana e feriado.
+
+    Uma função só, e não um laço repetido em cada ponto que precisa avançar.
+    Havia três `while dt.weekday() >= 5` espalhados, e três lugares para alguém
+    corrigir dois — que é como feriado entraria em dois caminhos e não no
+    terceiro.
+    """
+    proximo = (dt + timedelta(days=1)).replace(hour=_WORK_START, minute=0, second=0, microsecond=0)
+    while not e_dia_util(proximo.date()):
+        proximo = (proximo + timedelta(days=1)).replace(
+            hour=_WORK_START, minute=0, second=0, microsecond=0
+        )
+    return proximo
+
+
 def _advance_to_business_hours(dt: datetime) -> datetime:
     """
     If `dt` is outside working hours, return the next moment that IS inside
     working hours (keeping the SP timezone).
+
+    "Fora da jornada" passou a incluir FERIADO, e não só noite e fim de semana.
     """
     dt = _to_sp(dt)
 
-    # Skip weekends
-    while dt.weekday() >= 5:
-        dt = (dt + timedelta(days=1)).replace(hour=_WORK_START, minute=0, second=0, microsecond=0)
+    if not e_dia_util(dt.date()):
+        return _proximo_inicio_util(dt)
 
     if dt.hour < _WORK_START:
         return dt.replace(hour=_WORK_START, minute=0, second=0, microsecond=0)
 
     if dt.hour >= _WORK_END:
-        # Move to next business day
-        dt = (dt + timedelta(days=1)).replace(hour=_WORK_START, minute=0, second=0, microsecond=0)
-        while dt.weekday() >= 5:
-            dt = (dt + timedelta(days=1)).replace(
-                hour=_WORK_START, minute=0, second=0, microsecond=0
-            )
+        return _proximo_inicio_util(dt)
 
     return dt
 
@@ -95,10 +108,26 @@ def _advance_to_business_hours(dt: datetime) -> datetime:
 # ── Public API ────────────────────────────────────────────────
 
 
-def add_business_hours(start: datetime, hours: int) -> datetime:
+def add_business_minutes(start: datetime, minutes: int) -> datetime:
+    """
+    Devolve o instante que fica `minutes` minutos ÚTEIS depois de `start`.
+
+    É a entrada canônica desde que os prazos de SLA passaram a ser guardados em
+    minutos. Delega para `add_business_hours`, que já trabalhava em ponto
+    flutuante internamente — meia hora não exigiu tocar na aritmética, só parar
+    de arredondá-la na borda.
+    """
+    return add_business_hours(start, minutes / 60)
+
+
+def add_business_hours(start: datetime, hours: float) -> datetime:
     """
     Return a datetime that is exactly `hours` business hours after `start`.
     Result is in America/Sao_Paulo timezone.
+
+    Aceita fração: `0.5` são 30 minutos úteis. A anotação dizia `int` enquanto
+    todo prazo era hora cheia, mas o laço abaixo sempre foi float — a mudança é
+    de contrato declarado, não de comportamento.
     """
     current = _advance_to_business_hours(start)
     remaining: float = hours
@@ -112,15 +141,7 @@ def add_business_hours(start: datetime, hours: int) -> datetime:
             remaining = 0
         else:
             remaining -= hours_left_today
-            # Jump to next business day start
-            next_day = (current + timedelta(days=1)).replace(
-                hour=_WORK_START, minute=0, second=0, microsecond=0
-            )
-            while next_day.weekday() >= 5:
-                next_day = (next_day + timedelta(days=1)).replace(
-                    hour=_WORK_START, minute=0, second=0, microsecond=0
-                )
-            current = next_day
+            current = _proximo_inicio_util(current)
 
     return current
 
@@ -139,8 +160,8 @@ def add_business_days(start: datetime, days: int) -> datetime:
 def apply_sla_config(ticket: Ticket, config: SLAConfig, now: datetime) -> None:
     """Stamp SLA deadlines on a ticket at creation time."""
     ticket.sla_config_id = config.id
-    ticket.sla_response_due_at = add_business_hours(now, config.response_time_hours)
-    ticket.sla_resolve_due_at = add_business_hours(now, config.resolve_time_hours)
+    ticket.sla_response_due_at = add_business_minutes(now, config.response_time_minutes)
+    ticket.sla_resolve_due_at = add_business_minutes(now, config.resolve_time_minutes)
 
 
 def pause_sla(ticket: Ticket, now: datetime) -> None:
@@ -162,6 +183,78 @@ def resume_sla(ticket: Ticket, now: datetime) -> None:
         paused_ms = int((now - ticket.sla_paused_at).total_seconds() * 1000)
         ticket.sla_total_paused_ms = (ticket.sla_total_paused_ms or 0) + paused_ms
         ticket.sla_paused_at = None
+
+
+def violacao_ao_resolver(ticket: Ticket, now: datetime) -> tuple[bool, bool]:
+    """
+    Diz se o SLA está violado NO INSTANTE em que alguém vai resolver o chamado.
+
+    Devolve `(resposta_violada, resolucao_violada)`.
+
+    Por que não basta ler `sla_response_breach` / `sla_resolve_breach`
+    ---------------------------------------------------------------------
+    As duas marcas são gravadas por outros caminhos, e nenhuma delas está
+    garantidamente em dia no momento da resolução:
+
+    **A de resolução não é marcada ao resolver.** `check_breaches` pula o teste
+    quando o chamado está em estado terminal, e os dois caminhos que resolvem
+    já colocaram o status em `resolved` quando o chamam. Um chamado que passou
+    do prazo e ficou quieto até ser resolvido chega aqui com a marca em `False`
+    — que são justamente os casos que uma exigência de justificativa existe
+    para pegar.
+
+    **A de resposta pode estar prestes a mudar.** Quando a própria nota de
+    resolução é a primeira resposta, quem marca é o `register_first_response`,
+    que roda depois desta verificação. Ler a marca aqui veria o passado.
+
+    Por isso as duas são calculadas da DATA, com o mesmo deslocamento de pausa
+    que o `check_breaches` usa — e a marca existente é respeitada quando já
+    estiver ligada, para não desfazer o que outro caminho já concluiu.
+
+    Esta função NÃO escreve nada. Ela é consultada antes de qualquer mutação,
+    para que a recusa não deixe rastro pela metade.
+    """
+    offset = timedelta(milliseconds=ticket.sla_total_paused_ms or 0)
+
+    resposta = bool(ticket.sla_response_breach)
+    if not resposta and ticket.sla_response_due_at and ticket.sla_first_response is None:
+        resposta = now > ticket.sla_response_due_at + offset
+
+    resolucao = bool(ticket.sla_resolve_breach)
+    if not resolucao and ticket.sla_resolve_due_at:
+        resolucao = now > ticket.sla_resolve_due_at + offset
+
+    return resposta, resolucao
+
+
+def marca_violacao_ao_resolver(ticket: Ticket, now: datetime) -> None:
+    """Carimba as marcas de violação no instante em que o chamado é resolvido.
+
+    Existe porque `check_breaches` não alcança este momento: ele pula o teste de
+    resolução quando o chamado está em estado terminal, e os dois caminhos que
+    resolvem já colocaram o status em `resolved` quando o chamam. Chamado que
+    passou do prazo e ficou **quieto** até ser resolvido chegava com a marca em
+    `False` — e o indicador agregado, que conta a marca, o dava como cumprido.
+
+    **Só acrescenta, nunca desmarca.** Marca já ligada por outro caminho fica
+    ligada, mesmo que a conta pela data discorde: desfazer conclusão alheia é
+    outra decisão, e não esta.
+
+    Por que não consertar o `check_breaches` em vez desta função: a guarda de
+    terminal lá existe para que chamado fechado pare de acumular violação a cada
+    escrita. Tirá-la marcaria chamado encerrado em qualquer atualização futura,
+    que é um problema maior do que o resolvido.
+
+    A conta é a de `violacao_ao_resolver`, com o mesmo deslocamento de pausa do
+    resto do sistema — a mesma que a exigência de justificativa já usa, para que
+    exigir o motivo e contar a violação nunca discordem.
+    """
+    resposta_violada, resolucao_violada = violacao_ao_resolver(ticket, now)
+
+    if resposta_violada:
+        ticket.sla_response_breach = True
+    if resolucao_violada:
+        ticket.sla_resolve_breach = True
 
 
 def check_breaches(ticket: Ticket, now: datetime) -> None:

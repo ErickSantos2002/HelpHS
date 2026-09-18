@@ -1,5 +1,15 @@
 import { useEffect, useState } from "react";
-import { Card, FilterSelect, Input, Modal, Pagination, Spinner } from "../../components/ui";
+import {
+  Badge,
+  Card,
+  Icon,
+  Input,
+  Modal,
+  Pagination,
+  Select,
+  Spinner,
+  type BadgeProps,
+} from "../../components/ui";
 import {
   getAuditLogs,
   type AuditAction,
@@ -10,57 +20,140 @@ import {
 
 const PAGE_SIZE = 20;
 
-const ACTION_OPTIONS = [
-  { value: "create",          label: "Criação" },
-  { value: "update",          label: "Atualização" },
-  { value: "delete",          label: "Exclusão" },
-  { value: "login",           label: "Login" },
-  { value: "logout",          label: "Logout" },
-  { value: "export",          label: "Exportação" },
-  { value: "assign",          label: "Atribuição" },
-  { value: "status_change",   label: "Mudança de status" },
-  { value: "password_change", label: "Troca de senha" },
-  { value: "anonymize",       label: "Anonimização" },
-];
+/** A variante do selo, tirada do próprio primitivo — sem lista paralela. */
+type VarianteSelo = NonNullable<BadgeProps["variant"]>;
 
-const ENTITY_OPTIONS = [
-  { value: "user",       label: "Usuário" },
-  { value: "ticket",     label: "Ticket" },
-  { value: "attachment", label: "Anexo" },
-  { value: "kb_article", label: "Artigo KB" },
-  { value: "product",    label: "Produto" },
-  { value: "equipment",  label: "Equipamento" },
-];
-
-const ACTION_BADGE: Record<AuditAction, { label: string; cls: string }> = {
-  create:          { label: "Criação",          cls: "bg-emerald-50 text-emerald-600 border border-emerald-200 dark:bg-emerald-900/30 dark:text-emerald-300 dark:border-emerald-700/40" },
-  update:          { label: "Atualização",       cls: "bg-blue-50 text-blue-600 border border-blue-200 dark:bg-blue-900/30 dark:text-blue-300 dark:border-blue-700/40" },
-  delete:          { label: "Exclusão",          cls: "bg-red-50 text-red-600 border border-red-200 dark:bg-red-900/30 dark:text-red-300 dark:border-red-700/40" },
-  login:           { label: "Login",             cls: "bg-primary/10 text-primary border border-primary/30" },
-  logout:          { label: "Logout",            cls: "bg-slate-100 text-slate-500 border border-slate-300 dark:bg-slate-800/60 dark:text-slate-400 dark:border-slate-600/40" },
-  export:          { label: "Exportação",        cls: "bg-yellow-50 text-yellow-600 border border-yellow-200 dark:bg-yellow-900/30 dark:text-yellow-300 dark:border-yellow-700/40" },
-  assign:          { label: "Atribuição",        cls: "bg-cyan-50 text-cyan-600 border border-cyan-200 dark:bg-cyan-900/30 dark:text-cyan-300 dark:border-cyan-700/40" },
-  status_change:   { label: "Status",            cls: "bg-orange-50 text-orange-600 border border-orange-200 dark:bg-orange-900/30 dark:text-orange-300 dark:border-orange-700/40" },
-  password_change: { label: "Senha",             cls: "bg-pink-50 text-pink-600 border border-pink-200 dark:bg-pink-900/30 dark:text-pink-300 dark:border-pink-700/40" },
-  anonymize:       { label: "Anonimização",      cls: "bg-purple-50 text-purple-600 border border-purple-200 dark:bg-purple-900/30 dark:text-purple-300 dark:border-purple-700/40" },
+/**
+ * A ação de auditoria, numa fonte só desta tela.
+ *
+ * Existia em **duas** tabelas que ninguém obrigava a concordar: `ACTION_OPTIONS`
+ * dava o rótulo do filtro e `ACTION_BADGE` dava o rótulo do selo — e elas já
+ * discordavam em duas das dez linhas ("Mudança de status" contra "Status",
+ * "Troca de senha" contra "Senha"), sem regra dizendo qual valia onde. Agora a
+ * divergência é **declarada**: `rotulo` é o nome por extenso e `curto` é a forma
+ * que cabe na coluna de 110px da lista, exatamente como `lib/status.ts` separa
+ * os dois. O que some é a possibilidade de acrescentar uma ação num lugar e
+ * esquecê-la no outro.
+ *
+ * ── Por que o selo perdeu nove matizes ────────────────────────────────
+ *
+ * A tabela anterior pintava dez cores cruas do Tailwind — emerald, blue, red,
+ * slate, yellow, cyan, orange, pink, purple — uma por ação. Fora do sistema de
+ * cor: nenhuma medida contra as superfícies, nenhuma com par de texto próprio,
+ * e a única com token (`login`) já era a exceção que provava o resto.
+ *
+ * O sistema tem sete variantes de selo, não dez, então as ações se **agrupam**.
+ * O agrupamento é pelo que o evento significa para quem audita, e não pela
+ * família da palavra:
+ *
+ * | grupo | variante | ações |
+ * |---|---|---|
+ * | destrói de forma irreversível | `danger` | exclusão, anonimização |
+ * | expõe dado ou credencial | `warning` | exportação, troca de senha |
+ * | altera um registro | `info` | atualização, atribuição, mudança de status |
+ * | acrescenta | `success` | criação |
+ * | abre sessão | `primary` | login |
+ * | encerra sessão | `muted` | logout |
+ *
+ * Duas ações compartilharem cor é o mesmo caso dos dois "aguardando" do
+ * `lib/status.ts`: a cor vira **reforço** e o rótulo carrega a distinção — e o
+ * rótulo está escrito dentro do próprio selo, em toda ocorrência. Qual grupo
+ * cada ação ocupa é decisão de desenho, e está relatada como tal.
+ *
+ * **Exportada para que o teste a prenda literal.** O agrupamento acima é
+ * decisão, não dedução: nada no código o deriva, e por isso nada além de um
+ * caso comparando a tabela inteira por igualdade impede que uma edição
+ * distraída troque `danger` por `muted` na exclusão sem ninguém ver. É a mesma
+ * razão pela qual `SLOT_DE_STATUS` é comparada literal, e não derivada.
+ *
+ * O `react-refresh` reclama que um arquivo com componente não deveria exportar
+ * mais nada — a queixa é legítima e o remédio dela (arquivo próprio) está fora
+ * do escopo desta fase, que pode escrever só nesta tela e no teste dela. Fica
+ * silenciado AQUI, na linha, e não na configuração: quando a tabela virar
+ * módulo, o silêncio sai junto com ela.
+ */
+// eslint-disable-next-line react-refresh/only-export-components
+export const ACAO: Record<
+  AuditAction,
+  { rotulo: string; curto: string; variante: VarianteSelo }
+> = {
+  create: { rotulo: "Criação", curto: "Criação", variante: "success" },
+  update: {
+    rotulo: "Atualização",
+    curto: "Atualização",
+    variante: "info",
+  },
+  delete: { rotulo: "Exclusão", curto: "Exclusão", variante: "danger" },
+  login: { rotulo: "Login", curto: "Login", variante: "primary" },
+  logout: { rotulo: "Logout", curto: "Logout", variante: "muted" },
+  export: { rotulo: "Exportação", curto: "Exportação", variante: "warning" },
+  assign: { rotulo: "Atribuição", curto: "Atribuição", variante: "info" },
+  status_change: {
+    rotulo: "Mudança de status",
+    curto: "Status",
+    variante: "info",
+  },
+  password_change: {
+    rotulo: "Troca de senha",
+    curto: "Senha",
+    variante: "warning",
+  },
+  anonymize: {
+    rotulo: "Anonimização",
+    curto: "Anonimização",
+    variante: "danger",
+  },
 };
 
-const ENTITY_LABEL: Record<string, string> = {
-  user: "Usuário", ticket: "Ticket", attachment: "Anexo",
-  kb_article: "Artigo KB", product: "Produto", equipment: "Equipamento",
+/**
+ * A entidade auditada, também numa fonte só.
+ *
+ * `ENTITY_OPTIONS` e `ENTITY_LABEL` eram o mesmo dado escrito duas vezes, com
+ * as seis chaves e os seis rótulos repetidos linha a linha.
+ */
+const ENTIDADE: Record<string, string> = {
+  user: "Usuário",
+  ticket: "Ticket",
+  attachment: "Anexo",
+  kb_article: "Artigo KB",
+  product: "Produto",
+  equipment: "Equipamento",
 };
 
-// ── Icons ─────────────────────────────────────────────────────
+/** As opções do filtro saem das tabelas acima — nunca de uma lista paralela. */
+const ACTION_OPTIONS = (Object.keys(ACAO) as AuditAction[]).map((value) => ({
+  value,
+  label: ACAO[value].rotulo,
+}));
 
-const IC = {
-  Search: <svg className="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}><path strokeLinecap="round" strokeLinejoin="round" d="M21 21l-6-6m2-5a7 7 0 11-14 0 7 7 0 0114 0z" /></svg>,
-  X:      <svg className="w-3.5 h-3.5" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2.5}><path strokeLinecap="round" strokeLinejoin="round" d="M6 18L18 6M6 6l12 12" /></svg>,
-  Filter: <svg className="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}><path strokeLinecap="round" strokeLinejoin="round" d="M3 4a1 1 0 011-1h16a1 1 0 011 1v2a1 1 0 01-.293.707L13 13.414V19a1 1 0 01-.553.894l-4 2A1 1 0 017 21v-7.586L3.293 6.707A1 1 0 013 6V4z" /></svg>,
-  Clock:  <svg className="w-3.5 h-3.5" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}><circle cx="12" cy="12" r="10" /><path strokeLinecap="round" strokeLinejoin="round" d="M12 6v6l4 2" /></svg>,
-  User:   <svg className="w-3.5 h-3.5" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}><path strokeLinecap="round" strokeLinejoin="round" d="M16 7a4 4 0 11-8 0 4 4 0 018 0zM12 14a7 7 0 00-7 7h14a7 7 0 00-7-7z" /></svg>,
-  Eye:    <svg className="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}><path strokeLinecap="round" strokeLinejoin="round" d="M15 12a3 3 0 11-6 0 3 3 0 016 0z" /><path strokeLinecap="round" strokeLinejoin="round" d="M2.458 12C3.732 7.943 7.523 5 12 5c4.478 0 8.268 2.943 9.542 7-1.274 4.057-5.064 7-9.542 7-4.477 0-8.268-2.943-9.542-7z" /></svg>,
-  Globe:  <svg className="w-3.5 h-3.5" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}><path strokeLinecap="round" strokeLinejoin="round" d="M21 12a9 9 0 01-9 9m9-9a9 9 0 00-9-9m9 9H3m9 9a9 9 0 01-9-9m9 9c1.657 0 3-4.03 3-9s-1.343-9-3-9m0 18c-1.657 0-3-4.03-3-9s1.343-9 3-9" /></svg>,
-};
+const ENTITY_OPTIONS = Object.entries(ENTIDADE).map(([value, label]) => ({
+  value,
+  label,
+}));
+
+/**
+ * Os acessores recuam para o neutro, e não derrubam a tela.
+ *
+ * O dado vem da REDE: uma ação nova no backend que o front ainda não conheça
+ * não pode virar "cannot read properties of undefined" — é o mesmo recuo que
+ * `varianteDeStatus` e `varianteDePrioridade` já fazem. O rótulo recua para o
+ * valor cru, que ao menos diz à pessoa o que aconteceu.
+ */
+function rotuloDeAcao(a: string): string {
+  return ACAO[a as AuditAction]?.rotulo ?? a;
+}
+
+function curtoDeAcao(a: string): string {
+  return ACAO[a as AuditAction]?.curto ?? a;
+}
+
+function varianteDeAcao(a: string): VarianteSelo {
+  return ACAO[a as AuditAction]?.variante ?? "muted";
+}
+
+function rotuloDeEntidade(e: string): string {
+  return ENTIDADE[e] ?? e;
+}
 
 // ── Helpers ───────────────────────────────────────────────────
 
@@ -79,7 +172,6 @@ function shortUuid(id: string | null) {
 // ── DetailModal ───────────────────────────────────────────────
 
 function DetailModal({ log, onClose }: { log: AuditLog; onClose: () => void }) {
-  const badge = ACTION_BADGE[log.action] ?? { label: log.action, cls: "bg-slate-100 text-slate-500 border border-slate-300 dark:bg-slate-800/60 dark:text-slate-400 dark:border-slate-600/40" };
   const hasOld = log.old_data && Object.keys(log.old_data).length > 0;
   const hasNew = log.new_data && Object.keys(log.new_data).length > 0;
 
@@ -89,40 +181,43 @@ function DetailModal({ log, onClose }: { log: AuditLog; onClose: () => void }) {
 
         {/* Action + Entity */}
         <div className="flex items-center gap-3 flex-wrap">
-          <span className={`inline-flex items-center px-2.5 py-1 rounded-full text-xs font-semibold ${badge.cls}`}>
-            {badge.label}
-          </span>
-          <span className="text-slate-500 dark:text-slate-400">
-            {ENTITY_LABEL[log.entity_type] ?? log.entity_type}
+          {/* Por extenso aqui: o modal não tem a coluna de 110px da lista. */}
+          <Badge variant={varianteDeAcao(log.action)}>
+            {rotuloDeAcao(log.action)}
+          </Badge>
+          <span className="text-conteudo-muted">
+            {rotuloDeEntidade(log.entity_type)}
           </span>
         </div>
 
         {/* Info grid */}
         <div className="grid grid-cols-2 gap-3">
-          <div className="rounded-lg bg-background-elevated border border-border/40 p-3 space-y-0.5">
-            <p className="text-[10px] text-slate-500 uppercase tracking-wide">Data / Hora</p>
-            <p className="text-slate-700 dark:text-slate-200 text-xs font-mono">{formatDate(log.created_at)}</p>
+          <div className="rounded-lg bg-surface-elevated border border-borda/40 p-3 space-y-0.5">
+            <p className="text-[10px] text-conteudo-muted uppercase tracking-wide">Data / Hora</p>
+            <p className="text-conteudo text-xs font-mono">{formatDate(log.created_at)}</p>
           </div>
-          <div className="rounded-lg bg-background-elevated border border-border/40 p-3 space-y-0.5">
-            <p className="text-[10px] text-slate-500 uppercase tracking-wide">IP</p>
-            <p className="text-slate-700 dark:text-slate-200 text-xs font-mono">{log.ip_address ?? "—"}</p>
+          <div className="rounded-lg bg-surface-elevated border border-borda/40 p-3 space-y-0.5">
+            <p className="text-[10px] text-conteudo-muted uppercase tracking-wide">IP</p>
+            <p className="text-conteudo text-xs font-mono">{log.ip_address ?? "—"}</p>
           </div>
-          <div className="rounded-lg bg-background-elevated border border-border/40 p-3 space-y-0.5">
-            <p className="text-[10px] text-slate-500 uppercase tracking-wide">Usuário</p>
-            <p className="text-slate-700 dark:text-slate-200 text-xs">{log.user_name ?? "—"}</p>
-            {log.user_id && <p className="text-slate-400 dark:text-slate-600 text-[10px] font-mono">{log.user_id}</p>}
+          <div className="rounded-lg bg-surface-elevated border border-borda/40 p-3 space-y-0.5">
+            <p className="text-[10px] text-conteudo-muted uppercase tracking-wide">Usuário</p>
+            <p className="text-conteudo text-xs">{log.user_name ?? "—"}</p>
+            {/* `conteudo-faint` daria 2,34:1 sobre a superfície elevada deste
+                cartão — não é par, e um UUID é dado, não decoração. */}
+            {log.user_id && <p className="text-conteudo-muted text-[10px] font-mono">{log.user_id}</p>}
           </div>
-          <div className="rounded-lg bg-background-elevated border border-border/40 p-3 space-y-0.5">
-            <p className="text-[10px] text-slate-500 uppercase tracking-wide">ID Entidade</p>
-            <p className="text-slate-700 dark:text-slate-200 text-[10px] font-mono break-all">{log.entity_id ?? "—"}</p>
+          <div className="rounded-lg bg-surface-elevated border border-borda/40 p-3 space-y-0.5">
+            <p className="text-[10px] text-conteudo-muted uppercase tracking-wide">ID Entidade</p>
+            <p className="text-conteudo text-[10px] font-mono break-all">{log.entity_id ?? "—"}</p>
           </div>
         </div>
 
         {/* User agent */}
         {log.user_agent && (
-          <div className="rounded-lg bg-background-elevated border border-border/40 p-3 space-y-0.5">
-            <p className="text-[10px] text-slate-500 uppercase tracking-wide">User Agent</p>
-            <p className="text-slate-500 dark:text-slate-400 text-xs break-all">{log.user_agent}</p>
+          <div className="rounded-lg bg-surface-elevated border border-borda/40 p-3 space-y-0.5">
+            <p className="text-[10px] text-conteudo-muted uppercase tracking-wide">User Agent</p>
+            <p className="text-conteudo-muted text-xs break-all">{log.user_agent}</p>
           </div>
         )}
 
@@ -131,16 +226,21 @@ function DetailModal({ log, onClose }: { log: AuditLog; onClose: () => void }) {
           <div className={`grid gap-3 ${hasOld && hasNew ? "grid-cols-2" : "grid-cols-1"}`}>
             {hasOld && (
               <div>
-                <p className="text-[10px] text-slate-500 uppercase tracking-wide mb-1.5">Dados anteriores</p>
-                <pre className="text-xs text-red-600 bg-red-50 border border-red-200 dark:text-red-300/80 dark:bg-red-900/10 dark:border-red-800/20 rounded-lg p-3 overflow-auto max-h-48 whitespace-pre-wrap break-all">
+                <p className="text-[10px] text-conteudo-muted uppercase tracking-wide mb-1.5">Dados anteriores</p>
+                {/* Tinta + par da tinta, a receita medida pela E8 e usada pelo
+                    `Badge`. A cor cheia de significado como cor de texto
+                    reprova o piso em 16 das 24 combinações medidas — e nem o
+                    nome da classe pode ser escrito aqui: a varredura das cores
+                    cheias casa por linha, sem saber o que é comentário. */}
+                <pre className="text-xs text-on-tint-danger bg-tint-danger border border-danger/30 rounded-lg p-3 overflow-auto max-h-48 whitespace-pre-wrap break-all">
                   {JSON.stringify(log.old_data, null, 2)}
                 </pre>
               </div>
             )}
             {hasNew && (
               <div>
-                <p className="text-[10px] text-slate-500 uppercase tracking-wide mb-1.5">Dados novos</p>
-                <pre className="text-xs text-emerald-700 bg-emerald-50 border border-emerald-200 dark:text-emerald-300/80 dark:bg-emerald-900/10 dark:border-emerald-800/20 rounded-lg p-3 overflow-auto max-h-48 whitespace-pre-wrap break-all">
+                <p className="text-[10px] text-conteudo-muted uppercase tracking-wide mb-1.5">Dados novos</p>
+                <pre className="text-xs text-on-tint-success bg-tint-success border border-success/30 rounded-lg p-3 overflow-auto max-h-48 whitespace-pre-wrap break-all">
                   {JSON.stringify(log.new_data, null, 2)}
                 </pre>
               </div>
@@ -191,18 +291,16 @@ export default function AuditLogsPage() {
     setDateFrom(""); setDateTo("");
   }
 
-  const dateInputCls = "rounded-lg border border-border/60 bg-background-elevated px-3 py-[7px] text-sm text-slate-700 dark:text-slate-200 focus:outline-none focus:ring-2 focus:ring-primary transition-colors [color-scheme:light] dark:[color-scheme:dark]";
-
   return (
     <div className="space-y-5">
       {/* Header */}
       <div className="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-3">
         <div className="text-center sm:text-left">
-          <h1 className="text-2xl font-bold text-slate-800 dark:text-slate-100">Logs de Auditoria</h1>
-          <p className="text-slate-500 dark:text-slate-400 text-sm mt-0.5">Registro completo de operações — conformidade LGPD</p>
+          <h1 className="text-2xl font-bold text-conteudo-heading">Logs de Auditoria</h1>
+          <p className="text-conteudo-muted text-sm mt-0.5">Registro completo de operações — conformidade LGPD</p>
         </div>
         {!loading && (
-          <span className="self-center sm:self-auto text-xs text-slate-500 bg-background-elevated border border-border/60 px-3 py-1.5 rounded-full">
+          <span className="self-center sm:self-auto text-xs text-conteudo-muted bg-surface-elevated border border-borda/60 px-3 py-1.5 rounded-full">
             {total} {total === 1 ? "registro" : "registros"}
           </span>
         )}
@@ -210,33 +308,90 @@ export default function AuditLogsPage() {
 
       {/* Filters */}
       <Card padding="none">
-        <div className="px-4 py-3 border-b border-border flex items-center gap-2">
-          <span className="text-slate-500">{IC.Filter}</span>
-          <p className="text-sm font-semibold text-slate-700 dark:text-slate-200">Filtros</p>
+        <div className="px-4 py-3 border-b border-borda flex items-center gap-2">
+          <Icon name="filter" size={16} strokeWidth={2} className="text-conteudo-muted" />
+          <p className="text-sm font-semibold text-conteudo">Filtros</p>
           {hasFilters && (
-            <button onClick={clearFilters} className="ml-auto inline-flex items-center gap-1 text-xs text-slate-500 hover:text-slate-700 dark:text-slate-400 dark:hover:text-slate-200 transition-colors cursor-pointer">
-              {IC.X} Limpar filtros
+            <button onClick={clearFilters} className="ml-auto inline-flex items-center gap-1 text-xs text-conteudo-muted hover:text-conteudo transition-colors cursor-pointer">
+              <Icon name="close" size={14} strokeWidth={2.5} /> Limpar filtros
             </button>
           )}
         </div>
         <div className="px-4 py-3 flex flex-col gap-3">
           {/* Dropdowns */}
           <div className="flex flex-wrap gap-3 items-center justify-center sm:justify-start">
-            <FilterSelect value={actionFilter} onChange={setActionFilter} options={ACTION_OPTIONS} placeholder="Todas as ações" />
-            <FilterSelect value={entityFilter} onChange={setEntityFilter} options={ENTITY_OPTIONS} placeholder="Todas as entidades" />
+            {/* D9.2 — as duas listas são curtas e conhecidas (dez ações, seis
+                entidades, ambas fixas no código e nenhuma vinda da rede), então
+                o controle é o `<select>` nativo: teclado de graça e papel
+                anunciado sem JavaScript nenhum.
+
+                O `<span>` de rótulo não é enfeite. O `FilterSelect` não
+                repassava `label`, e numa barra com dois filtros os dois se
+                anunciavam pelo VALOR escolhido — "Criação", "Ticket" — sem
+                dizer de QUE filtro eram. O rótulo é `sr-only` porque a barra
+                não tem espaço para ele visível; o nome acessível existe do
+                mesmo jeito. */}
+            <span id="rotulo-filtro-acao" className="sr-only">
+              Ação
+            </span>
+            <Select
+              id="filtro-acao"
+              aria-labelledby="rotulo-filtro-acao"
+              value={actionFilter}
+              onChange={(e) => setActionFilter(e.target.value)}
+              options={ACTION_OPTIONS}
+              placeholder="Todas as ações"
+            />
+            <span id="rotulo-filtro-entidade" className="sr-only">
+              Entidade
+            </span>
+            <Select
+              id="filtro-entidade"
+              aria-labelledby="rotulo-filtro-entidade"
+              value={entityFilter}
+              onChange={(e) => setEntityFilter(e.target.value)}
+              options={ENTITY_OPTIONS}
+              placeholder="Todas as entidades"
+            />
           </div>
           {/* Date range */}
           <div className="flex flex-wrap items-center gap-2">
-            <span className="text-xs text-slate-500 shrink-0">De</span>
-            <input type="date" value={dateFrom} onChange={(e) => setDateFrom(e.target.value)} className={`${dateInputCls} flex-1 min-w-[130px]`} />
-            <span className="text-xs text-slate-500 shrink-0">até</span>
-            <input type="date" value={dateTo} onChange={(e) => setDateTo(e.target.value)} className={`${dateInputCls} flex-1 min-w-[130px]`} />
+            {/* O "De" e o "até" ficam: são a leitura do intervalo. Mas eles nunca
+                foram `<label>` de nada, então o campo em si não tinha nome
+                acessível nenhum — daí o `aria-label`, que diz qual das duas
+                pontas é esta sem mudar o que está desenhado. */}
+            <span className="text-xs text-conteudo-muted shrink-0">De</span>
+            <div className="flex-1 min-w-[130px]">
+              <Input
+                type="date"
+                aria-label="Data inicial"
+                value={dateFrom}
+                onChange={(e) => setDateFrom(e.target.value)}
+                className="py-[7px] text-sm [color-scheme:light] dark:[color-scheme:dark]"
+              />
+            </div>
+            <span className="text-xs text-conteudo-muted shrink-0">até</span>
+            <div className="flex-1 min-w-[130px]">
+              <Input
+                type="date"
+                aria-label="Data final"
+                value={dateTo}
+                onChange={(e) => setDateTo(e.target.value)}
+                className="py-[7px] text-sm [color-scheme:light] dark:[color-scheme:dark]"
+              />
+            </div>
           </div>
           {/* User ID search */}
           <div className="relative">
-            <span className="absolute left-3 top-1/2 -translate-y-1/2 text-slate-500 pointer-events-none">{IC.Search}</span>
+            <Icon
+              name="search"
+              size={16}
+              strokeWidth={2}
+              className="absolute left-3 top-1/2 -translate-y-1/2 text-conteudo-muted pointer-events-none z-10"
+            />
             <Input
               className="pl-9 w-full"
+              aria-label="Buscar por User ID"
               placeholder="Buscar por User ID (UUID)…"
               value={userIdFilter}
               onChange={(e) => setUserIdFilter(e.target.value)}
@@ -248,9 +403,9 @@ export default function AuditLogsPage() {
       {/* Logs list */}
       <Card padding="none">
         {/* Column headers — desktop only */}
-        <div className="hidden lg:grid grid-cols-[1fr_110px_110px_160px_100px_44px] px-4 py-2.5 border-b border-border bg-background-elevated/30">
+        <div className="hidden lg:grid grid-cols-[1fr_110px_110px_160px_100px_44px] px-4 py-2.5 border-b border-borda bg-surface-elevated/30">
           {["Evento", "Entidade", "Ação", "Usuário", "IP", ""].map((h, i) => (
-            <span key={i} className="text-[11px] font-medium text-slate-500 uppercase tracking-wide">{h}</span>
+            <span key={i} className="text-[11px] font-medium text-conteudo-muted uppercase tracking-wide">{h}</span>
           ))}
         </div>
 
@@ -258,77 +413,81 @@ export default function AuditLogsPage() {
           <div className="flex h-48 items-center justify-center"><Spinner /></div>
         ) : logs.length === 0 ? (
           <div className="flex flex-col items-center justify-center py-16 text-center">
-            <div className="w-10 h-10 rounded-full bg-background-elevated border border-border flex items-center justify-center text-slate-600 mb-3">{IC.Filter}</div>
-            <p className="text-sm text-slate-400">Nenhum registro encontrado.</p>
+            <div className="w-10 h-10 rounded-full bg-surface-elevated border border-borda flex items-center justify-center text-conteudo-muted mb-3">
+              <Icon name="filter" size={16} strokeWidth={2} />
+            </div>
+            <p className="text-sm text-conteudo-muted">Nenhum registro encontrado.</p>
             {hasFilters && (
-              <button onClick={clearFilters} className="mt-2 text-sm text-primary hover:text-primary/80 transition-colors cursor-pointer">Limpar filtros</button>
+              <button onClick={clearFilters} className="mt-2 text-sm text-conteudo-link hover:text-conteudo-link-hover transition-colors cursor-pointer">Limpar filtros</button>
             )}
           </div>
         ) : (
-          <div className="divide-y divide-border">
+          <div className="divide-y divide-borda">
             {logs.map((log) => {
-              const badge = ACTION_BADGE[log.action] ?? { label: log.action, cls: "bg-slate-100 text-slate-500 border border-slate-300 dark:bg-slate-800/60 dark:text-slate-400 dark:border-slate-600/40" };
               const hasData = (log.old_data && Object.keys(log.old_data).length > 0) || (log.new_data && Object.keys(log.new_data).length > 0);
               return (
                 <div key={log.id}>
                   {/* Mobile layout */}
                   <div
-                    className="lg:hidden flex items-start justify-between gap-3 px-4 py-3 hover:bg-background-elevated/40 transition-colors cursor-pointer"
+                    className="lg:hidden flex items-start justify-between gap-3 px-4 py-3 hover:bg-surface-elevated/40 transition-colors cursor-pointer"
                     onClick={() => setDetail(log)}
                   >
                     <div className="flex-1 min-w-0 space-y-1">
                       <div className="flex items-center gap-2 flex-wrap">
-                        <span className={`inline-flex items-center px-2 py-0.5 rounded-full text-xs font-medium ${badge.cls}`}>{badge.label}</span>
-                        <span className="text-xs text-slate-500 dark:text-slate-400">{ENTITY_LABEL[log.entity_type] ?? log.entity_type}</span>
+                        <Badge variant={varianteDeAcao(log.action)}>{curtoDeAcao(log.action)}</Badge>
+                        <span className="text-xs text-conteudo-muted">{rotuloDeEntidade(log.entity_type)}</span>
                       </div>
-                      <div className="flex items-center gap-1.5 text-xs text-slate-500 dark:text-slate-400">
-                        <span className="shrink-0">{IC.Clock}</span>
+                      <div className="flex items-center gap-1.5 text-xs text-conteudo-muted">
+                        <Icon name="clock" size={14} strokeWidth={2} />
                         <span>{formatDate(log.created_at)}</span>
                       </div>
-                      <div className="flex items-center gap-1.5 text-xs text-slate-500 dark:text-slate-400 truncate">
-                        <span className="shrink-0">{IC.User}</span>
+                      <div className="flex items-center gap-1.5 text-xs text-conteudo-muted truncate">
+                        <Icon name="user" size={14} strokeWidth={2} />
                         <span className="truncate">{log.user_name ?? "—"}</span>
-                        {log.ip_address && <span className="font-mono text-slate-400 ml-1">· {log.ip_address}</span>}
+                        {log.ip_address && <span className="font-mono ml-1">· {log.ip_address}</span>}
                       </div>
                     </div>
                     <button
                       title="Ver detalhes"
-                      className={`shrink-0 p-1.5 rounded-lg transition-colors cursor-pointer ${hasData ? "text-primary hover:bg-primary/10" : "text-slate-400 hover:bg-background-elevated"}`}
+                      aria-label="Ver detalhes"
+                      className={`shrink-0 p-1.5 rounded-lg transition-colors cursor-pointer hover:bg-surface-elevated ${hasData ? "text-conteudo-link" : "text-conteudo-muted"}`}
                       onClick={(e) => { e.stopPropagation(); setDetail(log); }}
                     >
-                      {IC.Eye}
+                      <Icon name="eye" size={16} strokeWidth={2} />
                     </button>
                   </div>
 
                   {/* Desktop layout */}
-                  <div className="hidden lg:grid grid-cols-[1fr_110px_110px_160px_100px_44px] items-center px-4 py-3 hover:bg-background-elevated/40 transition-colors">
+                  <div className="hidden lg:grid grid-cols-[1fr_110px_110px_160px_100px_44px] items-center px-4 py-3 hover:bg-surface-elevated/40 transition-colors">
                     <div className="min-w-0">
-                      <div className="flex items-center gap-1.5 text-xs text-slate-500 dark:text-slate-400">
-                        <span className="text-slate-400 dark:text-slate-600 shrink-0">{IC.Clock}</span>
+                      <div className="flex items-center gap-1.5 text-xs text-conteudo-muted">
+                        <Icon name="clock" size={14} strokeWidth={2} />
                         <span className="whitespace-nowrap">{formatDate(log.created_at)}</span>
                       </div>
-                      <p className="text-[11px] text-slate-400 dark:text-slate-600 font-mono mt-0.5">
+                      <p className="text-[11px] text-conteudo-muted font-mono mt-0.5">
                         {log.entity_id ? shortUuid(log.entity_id) : "—"}
                       </p>
                     </div>
-                    <span className="text-xs text-slate-600 dark:text-slate-300">{ENTITY_LABEL[log.entity_type] ?? log.entity_type}</span>
+                    <span className="text-xs text-conteudo">{rotuloDeEntidade(log.entity_type)}</span>
                     <div>
-                      <span className={`inline-flex items-center px-2 py-0.5 rounded-full text-xs font-medium ${badge.cls}`}>{badge.label}</span>
+                      {/* A forma curta: a coluna tem 110px. */}
+                      <Badge variant={varianteDeAcao(log.action)}>{curtoDeAcao(log.action)}</Badge>
                     </div>
                     <div className="min-w-0">
-                      <div className="flex items-center gap-1 text-xs text-slate-600 dark:text-slate-300 truncate">
-                        <span className="text-slate-400 dark:text-slate-600 shrink-0">{IC.User}</span>
+                      <div className="flex items-center gap-1 text-xs text-conteudo truncate">
+                        <Icon name="user" size={14} strokeWidth={2} className="text-conteudo-muted" />
                         <span className="truncate">{log.user_name ?? "—"}</span>
                       </div>
-                      {log.user_id && <p className="text-[11px] text-slate-400 dark:text-slate-600 font-mono mt-0.5">{shortUuid(log.user_id)}</p>}
+                      {log.user_id && <p className="text-[11px] text-conteudo-muted font-mono mt-0.5">{shortUuid(log.user_id)}</p>}
                     </div>
-                    <span className="text-xs text-slate-500 font-mono">{log.ip_address ?? "—"}</span>
+                    <span className="text-xs text-conteudo-muted font-mono">{log.ip_address ?? "—"}</span>
                     <button
                       onClick={() => setDetail(log)}
                       title="Ver detalhes"
-                      className={`p-1.5 rounded-lg transition-colors cursor-pointer ${hasData ? "text-primary hover:bg-primary/10" : "text-slate-400 dark:text-slate-600 hover:text-slate-600 dark:hover:text-slate-400 hover:bg-background-elevated"}`}
+                      aria-label="Ver detalhes"
+                      className={`p-1.5 rounded-lg transition-colors cursor-pointer hover:bg-surface-elevated ${hasData ? "text-conteudo-link" : "text-conteudo-muted"}`}
                     >
-                      {IC.Eye}
+                      <Icon name="eye" size={16} strokeWidth={2} />
                     </button>
                   </div>
                 </div>
@@ -338,7 +497,7 @@ export default function AuditLogsPage() {
         )}
 
         {!loading && total > 0 && (
-          <div className="px-4 py-2 border-t border-border">
+          <div className="px-4 py-2 border-t border-borda">
             <Pagination page={page} pageSize={PAGE_SIZE} total={total} onPageChange={setPage} itemLabel="registros" />
           </div>
         )}

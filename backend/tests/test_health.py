@@ -1,6 +1,8 @@
 """Smoke tests — verifica que a aplicacao sobe e responde."""
 
+import re
 from datetime import UTC, datetime
+from pathlib import Path
 from unittest.mock import AsyncMock, patch
 
 import pytest
@@ -177,3 +179,71 @@ def test_spec_e_docs_desligados_fora_de_desenvolvimento():
 
     dev = Settings(database_url="postgresql+asyncpg://u:p@localhost/db", app_env="development")
     assert dev.openapi_url_efetiva() == "/openapi.json"
+
+
+# ═══════════════════════════════════════════════════════════════
+# A versão do backend acompanha a versão do produto
+# ═══════════════════════════════════════════════════════════════
+
+# Ancorado no próprio arquivo, não no diretório de onde o pytest foi chamado:
+# a suíte roda tanto de `backend/` (CI, README) quanto da raiz do repositório.
+# Mesmo idioma já usado em test_seeds.py e test_seeds_e2e.py.
+_RAIZ_DO_REPO = Path(__file__).resolve().parents[2]
+_CHANGELOG_DO_FRONT = _RAIZ_DO_REPO / "frontend" / "src" / "data" / "changelog.ts"
+
+_APP_VERSION = re.compile(r"""export\s+const\s+APP_VERSION\s*=\s*["'](v?\d+\.\d+\.\d+)["']""")
+
+
+def test_a_versao_do_backend_acompanha_a_versao_do_produto():
+    """
+    O elo que faltava. O teste acima garante que o main.py não reinvente um
+    literal — mas a fonte única pode congelar inteira, e congelou: em
+    31/08/2026 o `__version__` estava em 1.8.0 com o produto em v1.11.0.
+
+    Recongelou em silêncio porque `__version__` só alimenta o construtor do
+    FastAPI, logo só o spec OpenAPI, e o spec está fechado em produção — o
+    único espelho que denunciaria a defasagem foi desligado por outro motivo,
+    e bom. Fonte única sem ninguém conferindo volta a congelar. Este teste é
+    o espelho que faltava.
+
+    O "v" é traduzido aqui de propósito, em vez de alinhado nas pontas: no
+    front `APP_VERSION` é texto de tela (o Sidebar imprime "HelpHS v1.11.0" e
+    o modal casa com as entradas do CHANGELOG, todas com "v"); no backend o
+    valor vira o `info.version` do OpenAPI e o dunder de um pacote Python, que
+    pedem o número puro. Cada ponta guarda o formato do seu domínio, e a
+    conversão é de quem compara.
+    """
+    from app import __version__
+
+    if not _CHANGELOG_DO_FRONT.exists():
+        # Falhar, não pular — escolha deliberada.
+        #
+        # Pular manteria o teste honesto num checkout só do backend, mas esse
+        # checkout não roda a suíte: o .dockerignore exclui `tests/`, então a
+        # imagem do backend não leva pytest nem testes. Os dois lugares onde a
+        # suíte roda de verdade — CI e máquina de quem desenvolve — têm o
+        # monorepo inteiro.
+        #
+        # O arquivo sumir, portanto, não é "isolamento normal": é o front ter
+        # mudado de lugar, sido renomeado, ou o checkout estar pela metade. Nos
+        # três casos um skip devolveria verde justamente ao teste cuja única
+        # razão de existir é impedir que a versão congele em silêncio.
+        pytest.fail(
+            f"{_CHANGELOG_DO_FRONT} não existe. Este teste compara a versão do "
+            "backend com a do produto e não tem como fazer isso sem o arquivo do "
+            "front. Se o changelog mudou de lugar, corrija o caminho aqui."
+        )
+
+    achado = _APP_VERSION.search(_CHANGELOG_DO_FRONT.read_text(encoding="utf-8"))
+    assert achado, (
+        f"não achei a declaração de APP_VERSION em {_CHANGELOG_DO_FRONT}. O teste "
+        "perdeu a capacidade de ler o front — e sem ela passaria sem comparar nada."
+    )
+
+    versao_do_produto = achado.group(1).removeprefix("v")
+
+    assert __version__ == versao_do_produto, (
+        f"o backend diz {__version__} e o produto está em {achado.group(1)}. Suba o "
+        "`__version__` em app/__init__.py junto com o APP_VERSION do front: o número "
+        "do backend não tem espelho em produção e, ficando para trás, ninguém percebe."
+    )

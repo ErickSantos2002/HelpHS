@@ -3,14 +3,60 @@ from functools import lru_cache
 from typing import Any
 from urllib.parse import urlparse
 
+from loguru import logger
 from pydantic import field_validator
 from pydantic_settings import BaseSettings, SettingsConfigDict
+
+# Os dois modos da Helô. Constantes, e não literais soltos, porque o valor é
+# comparado em dois lugares — aqui, ao ler o painel, e em `helo.py`, ao decidir
+# o turno —, e uma grafia divergente entre os dois cairia calada em triagem.
+HELO_MODO_TRIAGEM = "triagem"
+HELO_MODO_COMPLETA = "completa"
 
 # Nomes e endereços que só existem na máquina de quem desenvolve. Comparar o
 # HOST da URL com este conjunto — e não procurar "localhost" no texto — evita os
 # dois erros: barrar um domínio legítimo que contenha a palavra (ex.:
 # localhost.healthsafetytech.com) e deixar passar [::1] ou 0.0.0.0.
 _HOSTS_LOCAIS = frozenset({"localhost", "127.0.0.1", "::1", "0.0.0.0", ""})
+
+# ── STARTTLS e o CVE-2026-55558 ───────────────────────────────
+#
+# O `aiosmtplib` abaixo da 5.1.2 não descarta o que ficou no buffer de recepção
+# antes do handshake do STARTTLS. Bytes lidos do socket em TEXTO CLARO
+# sobrevivem à fronteira e são interpretados como se tivessem chegado dentro do
+# TLS — um atacante ativo na perna em claro injeta respostas na sessão.
+#
+# O aviso afeta SÓ quem faz o upgrade por STARTTLS. Com TLS implícito (porta
+# 465) não existe perna em claro, e o caminho vulnerável nunca é percorrido.
+#
+# A correção pelo pacote exige `aiosmtplib >= 5.1.2`, hoje travado pelo
+# `fastapi-mail <4.0.0`. Até isso destravar, a mitigação é de configuração — e
+# a guarda em `_valida_producao` existe para que ela não dependa de alguém
+# lembrar de manter a variável certa no painel.
+_AIOSMTPLIB_CORRIGIDO = (5, 1, 2)
+
+
+def _aiosmtplib_vulneravel() -> bool:
+    """True se a versão instalada estiver abaixo da que corrige o CVE.
+
+    Lê a versão real do ambiente em vez de olhar o `requirements.txt`: o que
+    importa é o que está rodando, não o que está escrito.
+    """
+    try:
+        from importlib.metadata import version
+
+        bruta = version("aiosmtplib")
+    except Exception:  # noqa: BLE001 — pacote ausente: sem envio, sem risco
+        return False
+
+    numeros = []
+    for parte in bruta.split(".")[:3]:
+        digitos = "".join(c for c in parte if c.isdigit())
+        numeros.append(int(digitos) if digitos else 0)
+    while len(numeros) < 3:
+        numeros.append(0)
+    return tuple(numeros) < _AIOSMTPLIB_CORRIGIDO
+
 
 # APP_ENV vem digitado à mão no painel de deploy: "Production" e "prod" precisam
 # valer como produção, senão um detalhe de caixa desliga TODAS as validações.
@@ -175,6 +221,28 @@ class Settings(BaseSettings):
                 "presas esperando um e-mail que nunca chega"
             )
 
+        # ── STARTTLS vulnerável (CVE-2026-55558) ──────────────────
+        #
+        # Só vale quando há envio configurado: SMTP desligado não tem risco de
+        # transporte e não pode travar o boot por causa disso.
+        if self.email_is_configured():
+            if self.smtp_tls and self.smtp_ssl:
+                raise ValueError(
+                    "SMTP_TLS e SMTP_SSL não podem estar ligados ao mesmo tempo: "
+                    "STARTTLS (587) e TLS implícito (465) são caminhos "
+                    "excludentes, e ligar os dois esconde qual está em uso"
+                )
+            if self.smtp_tls and not self.smtp_ssl and _aiosmtplib_vulneravel():
+                raise ValueError(
+                    "STARTTLS com aiosmtplib vulnerável não é permitido em "
+                    "produção. Use TLS implícito na porta 465 "
+                    "(SMTP_SSL=true, SMTP_TLS=false, SMTP_PORT=465) ou "
+                    "atualize aiosmtplib para versão corrigida (>= 5.1.2). "
+                    "Motivo: CVE-2026-55558 — bytes lidos em texto claro "
+                    "sobrevivem ao handshake do STARTTLS e são interpretados "
+                    "como se tivessem chegado dentro do TLS."
+                )
+
     # Armazenamento de arquivos (anexos e avatares) em disco.
     # No deploy, este caminho precisa ser um volume — sem isso os arquivos
     # somem a cada redeploy do container.
@@ -199,9 +267,9 @@ class Settings(BaseSettings):
     # de emergência deve fazer.
     #
     # Existe porque, até então, a única forma de parar de mandar conteúdo de
-    # chamado para OpenAI e Anthropic era APAGAR as chaves do painel: uma
-    # manobra que também destrói a configuração e que ninguém desfaz sem ter as
-    # chaves de novo. Com a flag, desligar é reversível.
+    # chamado para fora era APAGAR a chave do painel: uma manobra que também
+    # destrói a configuração e que ninguém desfaz sem ter a chave de novo. Com
+    # a flag, desligar é reversível.
     llm_enabled: bool = True
 
     # Interruptor SÓ da Helô — o atendimento por IA que fala com o cliente.
@@ -217,21 +285,102 @@ class Settings(BaseSettings):
     # decisão, não default.
     helo_enabled: bool = False
 
-    openai_api_key: str = ""
-    openai_model: str = "gpt-4o-mini"
-    openai_temperature: float = 0.3
+    # O que a Helô faz quando está ligada — e é ORTOGONAL ao `helo_enabled`:
+    # desligada é desligada em qualquer modo.
+    #
+    # `triagem` é a recepcionista da Fase 1: saudação, encerramento e escalada,
+    # sem embedding e sem LLM. `completa` é a Fase 2, que busca na Base de
+    # Conhecimento e responde com o modelo.
+    #
+    # Existe porque a Fase 2 com a base vazia escala toda pergunta, e os
+    # manuais técnicos dos sete aparelhos estão sendo reescritos. O gatilho para
+    # virar está em `docs/decisoes-e-regras.md`.
+    #
+    # TRIAGEM por padrão, e também quando o valor não se reconhece. O modo
+    # seguro é o que o sistema assume quando não sabe — e a alternativa que foi
+    # recusada é usar a AUSÊNCIA da `DEEPSEEK_API_KEY` como standby: no dia em
+    # que alguém preenchesse a chave para testar outra coisa, ela acordaria
+    # sozinha, com a base vazia, falando com cliente.
+    helo_modo: str = HELO_MODO_TRIAGEM
 
-    anthropic_api_key: str = ""
-    anthropic_model: str = "claude-3-5-haiku-20241022"
+    @field_validator("helo_modo")
+    @classmethod
+    def _modo_da_helo_seguro(cls, valor: str) -> str:
+        """
+        Só `completa` acorda a Fase 2; todo o resto é triagem.
 
-    llm_fallback_enabled: bool = True
+        Caixa e espaço não importam, no mesmo idioma do `APP_ENV`. Um valor
+        preenchido e não reconhecido deixa aviso no log com o que veio: cair em
+        triagem calado deixaria quem configurou achando que ela acordou — e o
+        erro de digitação provável, `completo`, é justamente esse.
+        """
+        limpo = valor.strip().lower()
+        if limpo == HELO_MODO_COMPLETA:
+            return HELO_MODO_COMPLETA
+        if limpo not in ("", HELO_MODO_TRIAGEM):
+            logger.warning(
+                f"HELO_MODO={valor!r} não é um modo conhecido "
+                f"({HELO_MODO_TRIAGEM!r} ou {HELO_MODO_COMPLETA!r}); a Helô fica em triagem"
+            )
+        return HELO_MODO_TRIAGEM
+
+    # O serviço de embedding da Helô — um contêiner PRÓPRIO, não uma biblioteca
+    # dentro desta API.
+    #
+    # A separação não é preferência de arquitetura: é consequência de um número
+    # medido. O backend roda com `--workers 1` (`start.sh:40`), e trabalho de
+    # CPU síncrono no event loop congela a API para TODO MUNDO. Já aconteceu e
+    # está registrado — uma requisição pesada ocupou o processo por 151
+    # segundos (`mudanças.md:50`). Calcular embedding aqui dentro seria repetir
+    # esse defeito de propósito, a cada turno de conversa da Helô.
+    #
+    # Nasce VAZIA. Sem URL, o cliente devolve None em silêncio, a busca não
+    # acontece e a Helô escala — exatamente como já faz sem a chave da
+    # DeepSeek. Ligar é decisão, não default.
+    helo_embedding_url: str = ""
+
+    # Curto de propósito, e bem menor que os 30 s do LLM. Um embedding leva
+    # centenas de milissegundos; se está demorando dez, o serviço tem problema,
+    # e prender o cliente esperando não melhora nada — escalar logo é resposta
+    # melhor do que uma espera longa seguida da mesma escalada.
+    helo_embedding_timeout_seconds: int = 10
+
+    # De quanto em quanto tempo a varredura procura artigo publicado novo ou
+    # editado para indexar (`app/services/helo_indexacao.py`). Cinco minutos é
+    # a latência entre publicar e a Helô passar a usar o texto — só para texto
+    # novo: despublicar tem efeito imediato, porque a busca filtra ao vivo.
+    # Zero desliga a varredura.
+    helo_indexacao_intervalo_segundos: int = 300
+
+    # DeepSeek — o único provedor de LLM.
+    #
+    # Nasce VAZIA: a chave vive no painel do EasyPanel, nunca no repositório, e
+    # a IA só é ligada depois do documento de LGPD publicado no cadastro. Sem
+    # chave, o `llm.py` devolve None em silêncio — é o comportamento de hoje em
+    # produção e é o que segura o sistema com a IA desligada.
+    deepseek_api_key: str = ""
+
+    # ⚠️ O endpoint e o nome do modelo abaixo NÃO foram conferidos contra a
+    # documentação oficial da DeepSeek. São CONFIGURAÇÃO com padrão, e não
+    # constante no código, justamente por isso: quando a chave chegar e o teste
+    # contra o serviço real disser outra coisa, o conserto é no painel, sem
+    # tocar em código e sem deploy.
+    deepseek_model: str = "deepseek-chat"
+    deepseek_base_url: str = "https://api.deepseek.com/v1"
+
+    # Vale para as quatro chamadas. Era `openai_temperature`, com o mesmo 0.3.
+    llm_temperature: float = 0.3
     llm_request_timeout_seconds: int = 30
 
     # Email
     smtp_host: str = "smtp.gmail.com"
-    smtp_port: int = 587
-    smtp_tls: bool = True
-    smtp_ssl: bool = False
+    # TLS implícito (465), e não STARTTLS (587) — ver `_aiosmtplib_vulneravel`
+    # e o CVE-2026-55558 no topo deste arquivo. O padrão precisa ser o caminho
+    # seguro: quem herdar a configuração sem ler nada não deve cair no
+    # vulnerável por omissão.
+    smtp_port: int = 465
+    smtp_tls: bool = False
+    smtp_ssl: bool = True
     smtp_user: str = ""
     smtp_password: str = ""
     smtp_from_name: str = "Help Desk Health & Safety"
@@ -307,6 +456,18 @@ class Settings(BaseSettings):
     # chega aqui já tem um token assinado nas mãos, e o caso comum é a pessoa
     # clicando de novo no link porque a primeira tentativa pareceu não responder.
     rate_limit_token: str = "10/15minutes"
+    # Consulta de CNPJ e CEP em provedor externo. Chaveado por USUÁRIO, não por
+    # IP (ver `chave_por_usuario`), porque o endpoint exige sessão.
+    #
+    # 30/hora é generoso de propósito. O gatilho no front é `onBlur` com o campo
+    # completo — 14 dígitos de CNPJ, 8 de CEP —, então cada consulta custa um
+    # ciclo de foco humano, e os dois únicos chamadores são formulários:
+    # onboarding, que a pessoa faz uma vez, e edição de perfil. Uma sessão real
+    # gasta 1 a 3 consultas; quem estiver corrigindo o número várias vezes chega
+    # talvez a 10. O teto é umas dez vezes a sessão mais pesada que consigo
+    # imaginar, e mesmo assim limita cada conta a 30 chamadas externas por hora
+    # — antes do cache, que derruba esse número de novo.
+    rate_limit_consulta_externa: str = "30/hour"
 
     # Quem pode falar pelos outros: lista de IPs/redes cujo X-Forwarded-For o
     # uvicorn aceita como sendo o IP real de quem chamou. O uvicorn lê esta

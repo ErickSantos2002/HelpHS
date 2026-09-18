@@ -3,6 +3,7 @@ import {
   Alert,
   Button,
   Card,
+  Icon,
   Input,
   Modal,
   ModalFooter,
@@ -10,6 +11,7 @@ import {
   Spinner,
 } from "../../components/ui";
 import { TagBadge } from "../../components/ui";
+import { readableTextColor } from "../../lib/colors";
 import { useAuth } from "../../contexts/AuthContext";
 import {
   createTag,
@@ -19,25 +21,28 @@ import {
   type Tag,
 } from "../../services/tagService";
 
-// ── Icons ─────────────────────────────────────────────────────
-
-function IconEdit() {
-  return (
-    <svg className="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
-      <path strokeLinecap="round" strokeLinejoin="round" d="M11 5H6a2 2 0 00-2 2v11a2 2 0 002 2h11a2 2 0 002-2v-5m-1.414-9.414a2 2 0 112.828 2.828L11.828 15H9v-2.828l8.586-8.586z" />
-    </svg>
-  );
-}
-function IconTrash() {
-  return (
-    <svg className="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
-      <path strokeLinecap="round" strokeLinejoin="round" d="M19 7l-.867 12.142A2 2 0 0116.138 21H7.862a2 2 0 01-1.995-1.858L5 7m5 4v6m4-6v6m1-10V4a1 1 0 00-1-1h-4a1 1 0 00-1 1v3M4 7h16" />
-    </svg>
-  );
-}
-
 // ── Color picker ──────────────────────────────────────────────
 
+/**
+ * Os dezesseis hexadecimais desta tela **não são dívida de sistema de design**,
+ * e é por isso que continuam escritos aqui.
+ *
+ * Cor de etiqueta é DADO: quem escolhe é o usuário, o valor viaja para o
+ * backend em `tags.color` e volta para pintar o selo em toda a lista de
+ * tickets. Um token semântico não cabe — `--tint-danger` não é uma opção que
+ * alguém possa escolher para chamar de "Vermelho", e trocar estes valores por
+ * tokens mudaria a cor das etiquetas que já existem no banco.
+ *
+ * O que a tabela é, então: a **paleta padrão oferecida**, o atalho para não
+ * obrigar ninguém a abrir o seletor do sistema operacional. Qual paleta
+ * oferecer é decisão de desenho de quem cuida do produto, não desta migração —
+ * fica como está, e o relatório da fase a aponta.
+ *
+ * O que a migração resolveu foi o outro lado: o "certo" que marca a escolhida
+ * era `text-white` cravado sobre uma cor arbitrária. Sobre o `#eab308` isso é
+ * texto claro sobre fundo claro. O `readableTextColor` decide por luminância
+ * (WCAG) e é o mesmo que o `TagBadge` e a agenda já usam.
+ */
 const PRESET_COLORS = [
   { hex: "#6366f1", label: "Índigo"   },
   { hex: "#8b5cf6", label: "Violeta"  },
@@ -60,7 +65,7 @@ const PRESET_COLORS = [
 function ColorPicker({ value, onChange }: { value: string; onChange: (c: string) => void }) {
   return (
     <div className="space-y-3">
-      <p className="text-xs font-semibold text-slate-400 uppercase tracking-wider">Cor da etiqueta</p>
+      <p className="text-xs font-semibold text-conteudo-muted uppercase tracking-wider">Cor da etiqueta</p>
       <div className="grid grid-cols-8 gap-2">
         {PRESET_COLORS.map((c) => (
           <button
@@ -68,31 +73,46 @@ function ColorPicker({ value, onChange }: { value: string; onChange: (c: string)
             type="button"
             onClick={() => onChange(c.hex)}
             title={c.label}
-            className="relative w-8 h-8 rounded-lg transition-all duration-150 hover:scale-110 focus:outline-none"
+            // `aria-pressed` porque o único sinal de "esta é a escolhida" era
+            // o desenho do certo. Quem não vê a tela ouvia dezesseis botões
+            // idênticos e nenhum jeito de saber em qual a etiqueta está.
+            aria-pressed={value === c.hex}
+            // O `focus:outline-none` de antes tirava o anel do sistema e não
+            // punha nada no lugar: dava para chegar ao botão pelo teclado e
+            // não dava para ver onde se estava.
+            className="relative w-8 h-8 rounded-lg transition-all duration-150 hover:scale-110 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-action focus-visible:ring-offset-2 focus-visible:ring-offset-surface"
             style={{ backgroundColor: c.hex }}
           >
             {value === c.hex && (
               <span className="absolute inset-0 flex items-center justify-center">
-                <svg className="w-4 h-4 text-white drop-shadow" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={3}>
-                  <path strokeLinecap="round" strokeLinejoin="round" d="M5 13l4 4L19 7" />
-                </svg>
+                <Icon
+                  name="check"
+                  size={16}
+                  strokeWidth={2}
+                  className="drop-shadow"
+                  // A cor do certo depende da cor escolhida, e por isso sai de
+                  // função e não de token: é o par de um fundo que o sistema
+                  // não conhece.
+                  style={{ color: readableTextColor(c.hex) }}
+                />
               </span>
             )}
           </button>
         ))}
         <label
           title="Cor personalizada"
-          className="w-8 h-8 rounded-lg border-2 border-dashed border-slate-600 hover:border-primary flex items-center justify-center cursor-pointer transition-colors overflow-hidden"
+          className="w-8 h-8 rounded-lg border-2 border-dashed border-borda-control hover:border-action flex items-center justify-center cursor-pointer transition-colors overflow-hidden"
         >
           <input
             type="color"
+            // O rótulo visível deste campo é um desenho: sem `aria-label` o
+            // campo não tem nome nenhum na árvore de acessibilidade.
+            aria-label="Cor personalizada"
             value={value}
             onChange={(e) => onChange(e.target.value)}
             className="opacity-0 absolute w-0 h-0"
           />
-          <svg className="w-4 h-4 text-slate-500" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
-            <path strokeLinecap="round" strokeLinejoin="round" d="M12 4v16m8-8H4" />
-          </svg>
+          <Icon name="plus" size={16} strokeWidth={2} className="text-conteudo-muted" />
         </label>
       </div>
     </div>
@@ -222,12 +242,15 @@ function TagsSection({
             <Alert variant="danger">{error}</Alert>
           </div>
         ) : tags.length === 0 ? (
-          <p className="text-slate-500 text-sm text-center py-8">
+          <p className="text-conteudo-muted text-sm text-center py-8">
             Nenhuma etiqueta cadastrada.{" "}
             {canCreate && (
               <button
+                type="button"
                 onClick={onOpenCreate}
-                className="text-primary hover:underline"
+                // `text-primary` é o degrau de MARCA e dá 3,66:1 sobre a
+                // superfície; `--text-link` existe para texto que se clica.
+                className="text-conteudo-link hover:text-conteudo-link-hover hover:underline"
               >
                 Criar a primeira
               </button>
@@ -235,7 +258,7 @@ function TagsSection({
           </p>
         ) : (
           <div>
-            <div className="divide-y divide-border" style={{ minHeight: 520 }}>
+            <div className="divide-y divide-borda" style={{ minHeight: 520 }}>
               {tags.slice((page - 1) * PAGE_SIZE, page * PAGE_SIZE).map((tag) => (
                 <div
                   key={tag.id}
@@ -244,26 +267,34 @@ function TagsSection({
                   <TagBadge name={tag.name} color={tag.color} />
                   {canCreate && (
                     <div className="flex items-center gap-1">
+                      {/* O nome acessível diz QUAL etiqueta: dez linhas na
+                          página davam dez botões chamados "Editar", e o
+                          `title` sozinho não separa um do outro para quem
+                          navega pela lista de controles. */}
                       <button
+                        type="button"
                         onClick={() => openEdit(tag)}
                         title="Editar"
-                        className="p-1.5 rounded-lg text-slate-400 hover:text-primary hover:bg-primary/10 transition-colors cursor-pointer"
+                        aria-label={`Editar ${tag.name}`}
+                        className="p-1.5 rounded-lg text-conteudo-muted hover:text-conteudo-link hover:bg-surface-elevated transition-colors cursor-pointer"
                       >
-                        <IconEdit />
+                        <Icon name="edit" size={16} strokeWidth={2} />
                       </button>
                       <button
+                        type="button"
                         onClick={() => setDeleteTarget(tag)}
                         title="Excluir"
-                        className="p-1.5 rounded-lg text-slate-400 hover:text-red-400 hover:bg-red-900/20 transition-colors cursor-pointer"
+                        aria-label={`Excluir ${tag.name}`}
+                        className="p-1.5 rounded-lg text-conteudo-muted hover:text-on-tint-danger hover:bg-tint-danger transition-colors cursor-pointer"
                       >
-                        <IconTrash />
+                        <Icon name="trash" size={16} strokeWidth={2} />
                       </button>
                     </div>
                   )}
                 </div>
               ))}
             </div>
-            <div className="px-4 py-2 border-t border-border">
+            <div className="px-4 py-2 border-t border-borda">
               <Pagination
                 page={page}
                 pageSize={PAGE_SIZE}
@@ -298,8 +329,8 @@ function TagsSection({
           <ColorPicker value={newColor} onChange={setNewColor} />
 
           {/* Preview */}
-          <div className="rounded-xl border border-border bg-background-elevated p-4">
-            <p className="text-[11px] font-semibold uppercase tracking-widest text-slate-500 mb-3">Prévia</p>
+          <div className="rounded-xl border border-borda bg-surface-elevated p-4">
+            <p className="text-[11px] font-semibold uppercase tracking-widest text-conteudo-muted mb-3">Prévia</p>
             <div className="flex items-center gap-3">
               <div
                 className="w-10 h-10 rounded-xl shrink-0 shadow-lg"
@@ -307,7 +338,7 @@ function TagsSection({
               />
               <div>
                 <TagBadge name={newName || "Nome da etiqueta"} color={newColor} />
-                <p className="text-xs text-slate-500 mt-1">Assim aparecerá nos tickets</p>
+                <p className="text-xs text-conteudo-muted mt-1">Assim aparecerá nos tickets</p>
               </div>
             </div>
           </div>
@@ -343,8 +374,8 @@ function TagsSection({
           <ColorPicker value={editColor} onChange={setEditColor} />
 
           {/* Preview */}
-          <div className="rounded-xl border border-border bg-background-elevated p-4">
-            <p className="text-[11px] font-semibold uppercase tracking-widest text-slate-500 mb-3">Prévia</p>
+          <div className="rounded-xl border border-borda bg-surface-elevated p-4">
+            <p className="text-[11px] font-semibold uppercase tracking-widest text-conteudo-muted mb-3">Prévia</p>
             <div className="flex items-center gap-3">
               <div
                 className="w-10 h-10 rounded-xl shrink-0 shadow-lg"
@@ -352,7 +383,7 @@ function TagsSection({
               />
               <div>
                 <TagBadge name={editName || "Nome da etiqueta"} color={editColor} />
-                <p className="text-xs text-slate-500 mt-1">Assim aparecerá nos tickets</p>
+                <p className="text-xs text-conteudo-muted mt-1">Assim aparecerá nos tickets</p>
               </div>
             </div>
           </div>
@@ -371,43 +402,41 @@ function TagsSection({
       <Modal
         open={!!deleteTarget}
         onClose={() => setDeleteTarget(null)}
+        size="sm"
         title="Excluir etiqueta"
       >
         <div className="space-y-4">
-          {/* Warning banner */}
-          <div className="flex gap-3 rounded-xl bg-red-900/20 border border-red-800/40 p-4">
-            <div className="shrink-0 w-9 h-9 rounded-full bg-red-900/40 flex items-center justify-center">
-              <IconTrash />
-            </div>
-            <div>
-              <p className="text-sm font-semibold text-red-300">Ação irreversível</p>
-              <p className="text-xs text-red-400/80 mt-0.5">
-                Esta etiqueta será removida de todos os tickets que a utilizam.
-              </p>
-            </div>
-          </div>
+          {/* O aviso de "não volta" era um banner à mão em `red-900/20`, virou
+              `Alert variant="danger" live={false}`, e pela D9.3 virou PROSA: a
+              forma de exclusão da frota é modal `sm` com a frase que nomeia o
+              que some, sem bloco com casca em volta. */}
 
           {/* Tag being deleted */}
           {deleteTarget && (
-            <div className="flex items-center gap-3 rounded-xl border border-border bg-background-elevated px-4 py-3">
+            <div className="flex items-center gap-3 rounded-xl border border-borda bg-surface-elevated px-4 py-3">
+              {/* Quadrado da cor da etiqueta: dado do registro, como no resto
+                  da tela. */}
               <div className="w-8 h-8 rounded-lg shrink-0" style={{ backgroundColor: deleteTarget.color }} />
-              <div>
-                <p className="text-sm font-medium text-slate-100">{deleteTarget.name}</p>
-                <p className="text-xs text-slate-500">Etiqueta selecionada</p>
+              <div className="min-w-0">
+                <p className="text-sm font-medium text-conteudo-heading truncate">{deleteTarget.name}</p>
+                <p className="text-xs text-conteudo-muted">Etiqueta selecionada</p>
               </div>
             </div>
           )}
 
-          <p className="text-sm text-slate-400">
-            Tem certeza que deseja excluir <span className="text-slate-200 font-medium">"{deleteTarget?.name}"</span>?
+          <p className="text-sm text-conteudo-muted">
+            Tem certeza que deseja excluir{" "}
+            <span className="text-conteudo font-medium">"{deleteTarget?.name}"</span>? A
+            etiqueta será removida de todos os tickets que a utilizam, e esta
+            ação não pode ser desfeita.
           </p>
         </div>
         <ModalFooter>
-          <Button variant="ghost" onClick={() => setDeleteTarget(null)} disabled={deleteLoading}>
+          <Button variant="secondary" onClick={() => setDeleteTarget(null)} disabled={deleteLoading}>
             Cancelar
           </Button>
           <Button variant="danger" onClick={handleDelete} loading={deleteLoading}>
-            Sim, excluir
+            Excluir
           </Button>
         </ModalFooter>
       </Modal>
@@ -426,8 +455,10 @@ export default function SettingsPage() {
     <div className="space-y-5">
       <div className="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-3">
         <div className="text-center sm:text-left">
-          <h1 className="text-2xl font-bold text-slate-800 dark:text-slate-100">Etiquetas</h1>
-          <p className="text-slate-500 dark:text-slate-400 text-sm mt-0.5">
+          {/* Era `text-slate-800 dark:text-slate-100`: dois degraus da paleta
+              crua, um por tema, escritos à mão. `--text-heading` já inverte. */}
+          <h1 className="text-2xl font-bold text-conteudo-heading">Etiquetas</h1>
+          <p className="text-conteudo-muted text-sm mt-0.5">
             Classifique tickets com etiquetas coloridas para facilitar a organização.
           </p>
         </div>

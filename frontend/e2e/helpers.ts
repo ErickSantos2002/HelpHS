@@ -25,7 +25,13 @@ export async function login(
   const { email, password } = CREDENTIALS[role];
   await page.goto("/login");
   await page.getByLabel("E-mail").fill(email);
-  await page.getByLabel("Senha").fill(password);
+  // `exact` porque a tela de login tem DOIS elementos rotulados com "senha": o
+  // campo (label "Senha") e o botão do olho de revelar (aria-label "Mostrar
+  // senha" / "Ocultar senha", que entrou na v1.10.0). `getByLabel` casa por
+  // substring e sem diferenciar caixa, então sem isto o seletor é ambíguo e o
+  // Playwright recusa com "strict mode violation" — foi o que derrubou 45 dos
+  // 46 testes da suíte.
+  await page.getByLabel("Senha", { exact: true }).fill(password);
   await page.getByRole("button", { name: "Entrar" }).click();
   // Wait for redirect away from /login
   await page.waitForURL((url) => !url.pathname.includes("/login"), {

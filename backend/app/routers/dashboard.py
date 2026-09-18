@@ -17,6 +17,7 @@ from typing import Annotated
 
 from fastapi import APIRouter, Depends, HTTPException, Query, status
 from fastapi.responses import StreamingResponse
+from loguru import logger
 from reportlab.lib import colors
 from reportlab.lib.pagesizes import A4
 from reportlab.lib.styles import getSampleStyleSheet
@@ -54,6 +55,7 @@ from app.schemas.dashboard import (
     ReportComparison,
     ReportData,
     SLAComplianceItem,
+    SlaJustificationItem,
     SlaStats,
     SurveyStats,
     TechnicianDetailReport,
@@ -182,8 +184,8 @@ async def get_dashboard_stats(
     try:
         redis = await get_redis()
         await redis.setex(_STATS_CACHE_KEY, _STATS_CACHE_TTL, result.model_dump_json())
-    except Exception:
-        pass
+    except Exception as exc:  # noqa: BLE001 — degradar é melhor que derrubar
+        logger.debug(f"Cache do dashboard: gravação falhou, seguindo sem cache: {exc}")
 
     return result
 
@@ -552,6 +554,48 @@ async def _build_report(
     reopened_count: int = (await db.execute(reopen_q)).scalar_one() or 0
     reopen_rate = round(reopened_count / total * 100, 1) if total > 0 else 0.0
 
+    # Chamados resolvidos no periodo cuja resolucao passou do prazo E que
+    # trazem justificativa escrita. O filtro e pela JUSTIFICATIVA, e nao pela
+    # marca `sla_resolve_breach`: a marca nao e gravada no instante da
+    # resolucao (o status ja esta terminal quando `check_breaches` roda), entao
+    # filtrar por ela deixaria de fora justamente os chamados que venceram
+    # calados. A presenca da justificativa e o sinal confiavel -- ela so existe
+    # porque a API exigiu.
+    justificativas_rows = (
+        await db.execute(
+            select(
+                Ticket.id,
+                Ticket.protocol,
+                Ticket.title,
+                Ticket.priority,
+                Ticket.resolved_at,
+                Ticket.sla_breach_justification,
+                User.name.label("assignee_name"),
+            )
+            .outerjoin(User, Ticket.assignee_id == User.id)
+            .where(
+                Ticket.sla_breach_justification.is_not(None),
+                Ticket.resolved_at.is_not(None),
+                Ticket.resolved_at >= since,
+                *extra,
+            )
+            .order_by(Ticket.resolved_at.desc())
+            .limit(200)
+        )
+    ).all()
+    sla_justifications = [
+        SlaJustificationItem(
+            ticket_id=str(r.id),
+            protocol=r.protocol,
+            title=r.title,
+            priority=r.priority.value,
+            resolved_at=r.resolved_at,
+            assignee_name=r.assignee_name,
+            justification=r.sla_breach_justification,
+        )
+        for r in justificativas_rows
+    ]
+
     comparison = await _build_comparison(db, since, actual_period, category, priority)
 
     return ReportData(
@@ -573,6 +617,7 @@ async def _build_report(
         technicians_dist=technicians_dist,
         reopened_count=reopened_count,
         reopen_rate=reopen_rate,
+        sla_justifications=sla_justifications,
         comparison=comparison,
     )
 
@@ -693,6 +738,24 @@ async def export_reports_csv(
     for d in data.tickets_by_day:
         writer.writerow([d.date, d.count])
     writer.writerow([])
+
+    if data.sla_justifications:
+        writer.writerow(["SLA VIOLADO — JUSTIFICATIVAS"])
+        writer.writerow(
+            ["Protocolo", "Título", "Prioridade", "Resolvido em", "Responsável", "Motivo"]
+        )
+        for j in data.sla_justifications:
+            writer.writerow(
+                [
+                    j.protocol,
+                    j.title,
+                    j.priority,
+                    j.resolved_at.strftime("%d/%m/%Y %H:%M") if j.resolved_at else "",
+                    j.assignee_name or "",
+                    j.justification,
+                ]
+            )
+        writer.writerow([])
 
     writer.writerow(["TICKETS POR CATEGORIA"])
     writer.writerow(["Categoria", "Quantidade"])

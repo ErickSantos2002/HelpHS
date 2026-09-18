@@ -190,6 +190,26 @@ async def test_o_429_diz_quanto_esperar(limiter_ligado):
 
 
 @pytest.mark.asyncio
+async def test_o_navegador_consegue_ler_o_retry_after_de_outra_origem():
+    """O header existia e viajava — e era invisível para o front.
+
+    Site e API vivem em domínios diferentes, e o navegador só deixa o
+    JavaScript ler header de resposta listado em `expose_headers`
+    (`Retry-After` não está na lista básica do CORS). Sem a exposição, a
+    tela mostrava "alguns minutos" tendo o número exato dentro da resposta
+    — medido em produção em 15/09.
+    """
+    from app.core.config import get_settings
+
+    origem = get_settings().get_cors_origins()[0]
+    async with AsyncClient(transport=ASGITransport(app=app), base_url="http://t") as c:
+        r = await c.get("/health", headers={"Origin": origem})
+
+    expostos = r.headers.get("access-control-expose-headers", "").lower()
+    assert "retry-after" in expostos
+
+
+@pytest.mark.asyncio
 async def test_resposta_normal_nao_carrega_retry_after(limiter_ligado):
     from app.core.database import get_db
 
@@ -263,6 +283,12 @@ def test_o_inventario_de_endpoints_limitados_e_este():
         # Resgate de token de e-mail — mais folgado, ver config.py
         "app.routers.auth.verify_email": "10 per 15 minute",
         "app.routers.auth.reset_password": "10 per 15 minute",
+        # Consulta em provedor externo. Chaveados por USUÁRIO, e não por IP —
+        # são endpoints autenticados, e o que se quer limitar é a conta. O teto
+        # protege menos o HelpHS do que o IP público do servidor, que é quem
+        # leva o bloqueio da `brasilapi` e da `viacep`.
+        "app.routers.auth.lookup_cnpj": "30 per 1 hour",
+        "app.routers.auth.lookup_cep": "30 per 1 hour",
     }
     real = {
         nome: str(limites[0].limit)

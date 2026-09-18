@@ -31,6 +31,7 @@ from app.core.database import AsyncSessionLocal, get_db
 from app.core.security import _is_blacklisted, authorize, decode_token, get_current_user
 from app.models.models import (
     ChatMessage,
+    LibraryFile,
     NotificationType,
     Ticket,
     TicketStatus,
@@ -50,9 +51,18 @@ from app.schemas.chat import (
     SuggestReplyResponse,
 )
 from app.services import chat_backplane
-from app.services.helo import responde_triagem
+from app.services.helo import (
+    FALAS_MAXIMAS,
+    MOTIVO_PEDIU_HUMANO,
+    MOTIVO_TRIAGEM_CONCLUIDA,
+    TROCAS_MAXIMAS,
+    FalaDaHelo,
+    responde_triagem,
+)
 from app.services.llm import improve_message, suggest_reply, summarize_conversation
 from app.services.notifications import commit_e_notificar, notify
+from app.utils.crud import get_or_404
+from app.utils.library_access import ensure_pode_anexar_no_chat
 from app.utils.sla import register_first_response
 from app.utils.ticket_access import ensure_ticket_visible
 
@@ -129,6 +139,7 @@ manager = ConnectionManager()
 
 def _msg_to_response(msg: ChatMessage) -> ChatMessageResponse:
     sender = msg.sender
+    arquivo = msg.library_file if msg.library_file_id else None
     return ChatMessageResponse(
         id=msg.id,
         ticket_id=msg.ticket_id,
@@ -140,6 +151,13 @@ def _msg_to_response(msg: ChatMessage) -> ChatMessageResponse:
         created_at=msg.created_at,
         sender_name=sender.name if sender else "",
         sender_role=sender.role.value if sender else "",
+        library_file_id=msg.library_file_id,
+        # `msg.library_file` pode nao estar carregado em todo caminho; quando
+        # nao estiver, os campos saem nulos e a conversa desenha so o texto. O
+        # id acima e o que importa para a tela pedir o link.
+        library_file_name=arquivo.original_name if arquivo else None,
+        library_file_mime=arquivo.mime_type if arquivo else None,
+        library_file_size=arquivo.size_bytes if arquivo else None,
     )
 
 
@@ -201,6 +219,23 @@ async def _authenticate_ws(token: str, db: AsyncSession) -> User | None:
     if user is None or user.status != UserStatus.active:
         return None
     return user
+
+
+# Quantas mensagens da conversa vão para a sugestão de resposta.
+#
+# Eram 10 fixos, e 10 bastava enquanto a Helô falava uma vez por chamado: a
+# conversa inteira de um chamado triado tinha três mensagens. Com o teto de
+# trocas, ela chega a 13 — a saudação mais seis idas e voltas —, e uma janela
+# de 10 passa a cortar JUSTO O COMEÇO. O que fica de fora é a resposta do
+# cliente às três perguntas da triagem, que é a mensagem mais útil que existe
+# para sugerir uma resposta: o técnico receberia a sugestão feita a partir do
+# meio da conversa, sem o sintoma.
+#
+# Por isso o número sai das constantes e não de um novo palpite: a janela tem
+# que caber uma triagem inteira, e quem mudar o teto de trocas move as duas
+# coisas juntas. Conversa longa DEPOIS da triagem continua saindo da janela, e
+# isso é o certo — ali o contexto recente é o que vale.
+_JANELA_DO_HISTORICO = FALAS_MAXIMAS + TROCAS_MAXIMAS
 
 
 def _exige_ia_no_chamado(ticket: Ticket) -> None:
@@ -293,6 +328,16 @@ async def create_message(
 ) -> ChatMessageResponse:
     ticket = await _get_ticket_visivel(ticket_id, actor, db)
 
+    # Antes de gravar qualquer coisa: item interno nao entra em conversa. A
+    # recusa e da API, e nao da tela -- a API e chamada por outros clientes
+    # alem dela, e uma tela desatualizada bastaria para vazar.
+    arquivo = None
+    if payload.library_file_id is not None:
+        arquivo = await get_or_404(
+            db, LibraryFile, payload.library_file_id, "Arquivo nao encontrado na biblioteca."
+        )
+        ensure_pode_anexar_no_chat(arquivo)
+
     now = datetime.now(UTC)
     msg = ChatMessage(
         id=uuid.uuid4(),
@@ -301,8 +346,12 @@ async def create_message(
         content=payload.content.strip(),
         is_system=False,
         is_ai=False,
+        library_file_id=payload.library_file_id,
         created_at=now,
     )
+    # Evita um SELECT a mais na serializacao: o objeto ja esta em maos.
+    if arquivo is not None:
+        msg.library_file = arquivo
     db.add(msg)
 
     # SLA: falar com o cliente é o que conta como primeira resposta
@@ -310,19 +359,28 @@ async def create_message(
         ticket, now, responder_id=actor.id, is_ai=msg.is_ai, is_system=msg.is_system
     )
 
-    # A Helô encerra a triagem quando o cliente responde. ANTES da notificação
-    # de propósito: é ela quem decide se a equipe precisa ser chamada, e a
-    # triagem recém-fechada é justamente o momento em que o chamado passa a ter
-    # conteúdo útil e ainda não tem dono.
-    encerrou_triagem = False
+    # A Helô responde quando o cliente escreve. ANTES da notificação de
+    # propósito: é ela quem decide se a equipe precisa ser chamada, e um
+    # chamado que ela acabou de escalar é justamente o que precisa chegar à
+    # equipe com o aviso certo — e ainda não tem dono.
+    fala_da_helo = None
     if actor.id == ticket.creator_id:
-        encerrou_triagem = await responde_triagem(db, ticket, actor, msg.content) is not None
+        fala_da_helo = await _fala_da_helo_sem_derrubar(db, ticket, actor, msg.content)
 
     # Notify the other party
     await _notify_other_party(db, ticket, actor, msg)
 
-    if encerrou_triagem:
-        await _avisa_equipe_da_triagem(db, ticket)
+    # SÓ na escalada. Ela fala a cada turno agora, e avisar a equipe a cada
+    # fala mandaria seis notificações por chamado para todo técnico e
+    # todo admin — cinco delas dizendo que a triagem acabou enquanto a
+    # conversa seguia. Notificação que chega sempre deixa de ser lida.
+    # `motivo is not None` em vez de `.escalou`: a guarda e o argumento passam
+    # a olhar o MESMO campo. `escalou` é property, e property não estreita
+    # tipo — o mypy via `str | None` chegando onde se espera `str`, e estava
+    # certo: a property pode divergir do campo num refactor, o `is not None`
+    # não pode.
+    if fala_da_helo is not None and fala_da_helo.motivo is not None:
+        await _avisa_equipe_da_helo(db, ticket, motivo=fala_da_helo.motivo)
 
     # Auto status transition based on who is sending
     new_status_value = await _apply_chat_transition(db, ticket, actor)
@@ -369,13 +427,12 @@ async def suggest_ticket_reply(
     ticket = await _get_ticket_visivel(ticket_id, actor, db)
     _exige_ia_no_chamado(ticket)
 
-    # Load last 10 messages with sender info
     rows = await db.execute(
         select(ChatMessage)
         .options(selectinload(ChatMessage.sender))
         .where(ChatMessage.ticket_id == ticket_id)
         .order_by(ChatMessage.created_at.desc())
-        .limit(10)
+        .limit(_JANELA_DO_HISTORICO)
     )
     messages = list(reversed(rows.scalars().all()))
 
@@ -469,7 +526,7 @@ async def summarize_ticket_conversation(
 
     if not messages:
         raise HTTPException(
-            status_code=status.HTTP_422_UNPROCESSABLE_ENTITY,
+            status_code=status.HTTP_422_UNPROCESSABLE_CONTENT,
             detail="Ainda não há mensagens nesta conversa para resumir.",
         )
 
@@ -552,6 +609,41 @@ async def websocket_chat(
                 await websocket.send_json({"type": "error", "detail": "Invalid JSON"})
                 continue
 
+            # Anexo da biblioteca NÃO passa por aqui, e a recusa é ALTA.
+            #
+            # Este laço lê `content` e descarta o resto do payload. Um
+            # `library_file_id` mandado pelo socket sumia em silêncio: a
+            # mensagem era gravada sem o anexo, o cliente não recebia arquivo
+            # nenhum e nada dizia por quê. E a mensagem que só tivesse anexo,
+            # sem texto, caía no `if not content` logo abaixo e não existia —
+            # sem erro, sem linha, sem nada para diagnosticar depois.
+            #
+            # Esta guarda **não liga** anexo no socket: liga o aviso. Quem um
+            # dia quiser anexo por este caminho precisa trazer para cá o
+            # `ensure_pode_anexar_no_chat`, que é a conferência de visibilidade
+            # e hoje mora no REST — e é ela que decide, antes de gravar, se um
+            # item interno pode entrar numa conversa que o cliente lê.
+            #
+            # Por isso a recusa diz PARA ONDE IR, em vez de só dizer "não":
+            # quem integra por fora da tela não tem como saber que o recurso
+            # existe noutro endereço.
+            #
+            # Vem ANTES do `if not content` de propósito. Depois dele, o caso
+            # pior — só anexo, sem texto — continuaria sumindo calado, que é
+            # justamente o que se está consertando.
+            if data.get("library_file_id") is not None:
+                await websocket.send_json(
+                    {
+                        "type": "error",
+                        "detail": (
+                            "Este canal não aceita anexo da biblioteca. Envie a "
+                            "mensagem por POST /tickets/{id}/messages, que confere "
+                            "a visibilidade do arquivo antes de gravar."
+                        ),
+                    }
+                )
+                continue
+
             if not content:
                 continue
 
@@ -600,9 +692,10 @@ async def websocket_chat(
                 # deixaria muda na tela onde ela aparece.
                 fala_da_helo = None
                 if user.id == ticket.creator_id:
-                    fala_da_helo = await responde_triagem(db, ticket, user, msg.content)
-                    if fala_da_helo is not None:
-                        await _avisa_equipe_da_triagem(db, ticket)
+                    fala_da_helo = await _fala_da_helo_sem_derrubar(db, ticket, user, msg.content)
+                    # Só na escalada — ver o mesmo trecho no caminho do POST.
+                    if fala_da_helo is not None and fala_da_helo.motivo is not None:
+                        await _avisa_equipe_da_helo(db, ticket, motivo=fala_da_helo.motivo)
 
                 new_status_value = await _apply_chat_transition(db, ticket, user)
 
@@ -622,7 +715,7 @@ async def websocket_chat(
                 # é transmitida. Ela fica gravada, e só aparece num F5 — que
                 # foi exatamente o sintoma relatado.
                 dados_da_helo = (
-                    _response_to_dict(_msg_to_response(fala_da_helo))
+                    _response_to_dict(_msg_to_response(fala_da_helo.mensagem))
                     if fala_da_helo is not None
                     else None
                 )
@@ -710,9 +803,49 @@ async def _apply_chat_transition(
     return None
 
 
-async def _avisa_equipe_da_triagem(db: AsyncSession, ticket: Ticket) -> None:
+async def _fala_da_helo_sem_derrubar(
+    db: AsyncSession, ticket: Ticket, cliente: User, texto: str
+) -> FalaDaHelo | None:
     """
-    Chama a equipe quando a Helô termina de triar.
+    A Helô inteira, embrulhada. Falha dela nunca custa a mensagem do cliente.
+
+    Dentro de `responde_triagem` cada falha PREVISTA já tem destino: LLM mudo,
+    embedding fora e busca quebrada terminam em escalada, e nenhuma delas sobe.
+    O que sobe é o que não foi previsto — um `TypeError` num bloco de contexto,
+    um campo nulo onde o código esperava texto. Sem esta guarda, esse defeito
+    vira 500 no POST do cliente, e a mensagem que ele acabou de escrever some
+    junto: ele digitou, apertou enviar, e viu um erro.
+
+    A assimetria é o argumento. O pior que acontece engolindo aqui é o chamado
+    seguir sem a fala dela — que é exatamente o estado de antes de ela existir,
+    e o cliente nem percebe. O pior que acontece deixando subir é o cliente
+    perder o que escreveu por causa de um defeito numa funcionalidade que é
+    acessório do atendimento, não o atendimento.
+
+    `logger.exception` e não `warning`: engolir é para proteger o cliente, não
+    para esconder o defeito. Sem o traço no log isto vira exatamente o que o
+    módulo da Helô recusa em todo lugar — bug virando silêncio.
+
+    **O SAVEPOINT é metade da guarda, e a metade que não é óbvia.** Se a falha
+    dela for de banco — uma consulta de contexto contra tabela que não existe,
+    um tipo errado num parâmetro —, o `except` sozinho não salva nada: em
+    PostgreSQL o erro aborta a transação INTEIRA, e o `commit` logo abaixo
+    morre com "current transaction is aborted", levando junto a mensagem do
+    cliente. O resultado seria idêntico ao de não ter guarda nenhuma, com o
+    agravante de parecer protegido. A busca vetorial já roda no próprio
+    SAVEPOINT lá dentro; este aqui cobre todo o resto dela.
+    """
+    try:
+        async with db.begin_nested():
+            return await responde_triagem(db, ticket, cliente, texto)
+    except Exception:  # noqa: BLE001 — a mensagem do cliente vale mais que a fala dela
+        logger.exception(f"Helô falhou no chamado {ticket.protocol}; seguindo sem a fala dela")
+        return None
+
+
+async def _avisa_equipe_da_helo(db: AsyncSession, ticket: Ticket, *, motivo: str) -> None:
+    """
+    Chama a equipe quando a Helô sai de cena — dizendo por quê.
 
     Sem isto o chamado fica em "Em andamento" sem dono e sem ninguém avisado: a
     notificação normal do chat vai para o RESPONSÁVEL, e a essa altura não há
@@ -721,6 +854,25 @@ async def _avisa_equipe_da_triagem(db: AsyncSession, ticket: Ticket) -> None:
     Vai para todos os técnicos e admins ativos, e não para um sorteado: sem
     dono, escolher um seria inventar uma atribuição que ninguém pediu — e o
     escolhido poderia estar de férias.
+
+    **As duas saídas mandavam o mesmo texto, e uma delas era falsa.** Quando o
+    cliente pede uma pessoa, a triagem não terminou: ela foi interrompida, com
+    as perguntas ainda sem resposta. Dizer "a Helô terminou a triagem" ali
+    manda a equipe procurar um resumo que não existe, e apaga a única
+    informação que muda a ordem da fila — que tem alguém do outro lado
+    esperando gente, não esperando atendimento.
+
+    Na Fase 2 o mesmo defeito voltou por outro lado: as saídas viraram quatro,
+    e três delas — modelo escalou, teto de trocas, IA muda — continuavam
+    chegando à equipe como "o cliente pediu para falar com uma pessoa". O
+    motivo agora vem pronto de `responde_triagem` e é escrito no texto; o
+    título separa só o caso que muda a prioridade da fila.
+
+    O tipo continua `ticket_updated` nos dois casos: `NotificationType` é enum
+    nativo do Postgres, e um valor novo custa um `ALTER TYPE` em migration que
+    roda sozinha no boot — o preço que o desenho já recusou pagar pelo
+    `ai_handling`. A distinção vive no título e no texto, que é onde a equipe
+    de fato lê.
     """
     equipe = (
         (
@@ -735,13 +887,27 @@ async def _avisa_equipe_da_triagem(db: AsyncSession, ticket: Ticket) -> None:
         .all()
     )
 
+    if motivo == MOTIVO_PEDIU_HUMANO:
+        titulo = f"Cliente pediu atendimento humano — {ticket.protocol}"
+        texto = "O cliente pediu para falar com uma pessoa. A Helô parou na hora."
+    elif motivo == MOTIVO_TRIAGEM_CONCLUIDA:
+        # O aviso da Fase 1, de volta com o modo triagem. Não fura a fila como
+        # o pedido de gente, e não é escalada genérica: as respostas do
+        # cliente às três perguntas estão na conversa, e é isso que a equipe
+        # vai ler.
+        titulo = f"Triagem concluída — {ticket.protocol}"
+        texto = "A Helô terminou a triagem e o chamado está esperando atendimento."
+    else:
+        titulo = f"Helô passou o chamado — {ticket.protocol}"
+        texto = f"A Helô saiu da conversa e o chamado está esperando atendimento: {motivo}."
+
     for pessoa in equipe:
         await notify(
             db,
             pessoa.id,
             NotificationType.ticket_updated,
-            f"Triagem concluída — {ticket.protocol}",
-            "A Helô terminou a triagem e o chamado está esperando atendimento.",
+            titulo,
+            texto,
             data={"ticket_id": str(ticket.id), "protocol": ticket.protocol},
         )
 

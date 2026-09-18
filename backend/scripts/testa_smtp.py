@@ -10,14 +10,19 @@ de proposito — nao passa pelo FastAPI-Mail nem pelo `Settings` do app. Se ele
 entrega e a aplicacao nao, o problema esta na aplicacao; se ele tambem falha,
 nao adianta procurar no codigo.
 
-Le as variaveis SMTP_* do `.env` indicado (padrao: o `.env` do backend) e
-**nunca imprime a senha inteira** — o terminal costuma virar print no chat, e
+Le as variaveis SMTP_* do `.env` do backend; se esse arquivo nao existir,
+cai para as VARIAVEIS DE AMBIENTE — que e o caso de rodar dentro do
+container, onde a configuracao vem do painel do EasyPanel. A origem usada
+sai impressa no relatorio. O script **nunca imprime a senha inteira** — o terminal costuma virar print no chat, e
 a API key do provedor e a credencial de envio da empresa inteira.
 
 Uso:
 
     python -m scripts.testa_smtp destino@exemplo.com
     python -m scripts.testa_smtp destino@exemplo.com --env ../.env.staging
+
+Dentro do container do EasyPanel, sem `.env`, as variaveis do painel sao
+usadas automaticamente.
 
 Sair com codigo 0 significa apenas que o servidor ACEITOU a mensagem para
 entrega. Nao prova que ela chegou na caixa: quem responde isso e o painel do
@@ -27,6 +32,8 @@ provedor (no Resend, a aba Emails, com delivered/bounced/complained).
 from __future__ import annotations
 
 import argparse
+import hashlib
+import os
 import smtplib
 import ssl
 import sys
@@ -36,35 +43,91 @@ from pathlib import Path
 PADRAO_ENV = Path(__file__).resolve().parent.parent / ".env"
 
 
-def ler_env(caminho: Path) -> dict[str, str]:
-    if not caminho.is_file():
+_CHAVES = (
+    "SMTP_HOST",
+    "SMTP_PORT",
+    "SMTP_TLS",
+    "SMTP_SSL",
+    "SMTP_USER",
+    "SMTP_PASSWORD",
+    "SMTP_FROM_NAME",
+    "SMTP_FROM_EMAIL",
+)
+
+
+def ler_env(caminho: Path, exigido: bool) -> tuple[dict[str, str], str]:
+    """Le a configuracao de SMTP do arquivo, ou do AMBIENTE quando nao ha arquivo.
+
+    O fallback existe para o caso que mais importa: rodar isto DENTRO do
+    container, onde as variaveis vem do painel do EasyPanel e nao ha `.env`
+    nenhum. Sem ele o script morria com "arquivo nao encontrado" justamente no
+    ambiente que a gente precisa diagnosticar.
+
+    Arquivo pedido explicitamente com `--env` continua sendo exigido: ali o
+    silencio seria pior, porque a pessoa nomeou o arquivo e mereceria saber que
+    ele nao existe em vez de receber a configuracao de outro lugar.
+
+    Devolve tambem a ORIGEM, que vai impressa no relatorio: diagnosticar sem
+    saber de onde veio a configuracao ja custou tempo neste projeto.
+    """
+    if caminho.is_file():
+        valores: dict[str, str] = {}
+        for linha in caminho.read_text(encoding="utf-8").splitlines():
+            linha = linha.strip()
+            if not linha or linha.startswith("#") or "=" not in linha:
+                continue
+            chave, _, valor = linha.partition("=")
+            valores[chave.strip()] = valor.strip()
+        return valores, str(caminho)
+
+    if exigido:
         sys.exit(f"ERRO: arquivo de ambiente nao encontrado: {caminho}")
-    valores: dict[str, str] = {}
-    for linha in caminho.read_text(encoding="utf-8").splitlines():
-        linha = linha.strip()
-        if not linha or linha.startswith("#") or "=" not in linha:
-            continue
-        chave, _, valor = linha.partition("=")
-        valores[chave.strip()] = valor.strip()
-    return valores
+
+    do_ambiente = {c: os.environ[c] for c in _CHAVES if c in os.environ}
+    if not do_ambiente:
+        sys.exit(
+            f"ERRO: nao achei {caminho} nem variaveis SMTP_* no ambiente. "
+            "Rode de dentro do container, ou aponte --env para um arquivo."
+        )
+    return do_ambiente, "variaveis de ambiente"
 
 
-def mascarar(segredo: str) -> str:
-    """O suficiente para conferir que e a chave certa, sem revelar a chave."""
+def impressao_digital(segredo: str) -> str:
+    """Identifica a chave sem revelar caractere nenhum dela.
+
+    Esta funcao devolvia os 6 primeiros e os 4 ultimos caracteres. Para uma API
+    key de provedor isso e revelar DEZ caracteres dela -- e o docstring deste
+    script diz, com razao, que "o terminal costuma virar print no chat".
+    Mascarar pela metade continua sendo vazar, so que menos, e o mais enganoso
+    e que a saida PARECE segura.
+
+    O digest resolve o mesmo problema sem o vazamento. O que se quer aqui e
+    responder "e a chave que eu penso que e?", e para isso basta um valor que
+    seja igual quando a chave for igual: dois segredos iguais dao a mesma
+    impressao, diferentes dao impressoes diferentes, e nenhum pedaco do segredo
+    aparece.
+
+    Oito hex sao 32 bits -- suficiente para comparar duas rodadas ou conferir
+    contra uma impressao anotada, e curto o bastante para que o proprio digest
+    nao sirva de alvo: ha colisoes demais para que ele identifique um valor
+    unico offline. O tamanho continua saindo porque distingue "vazia" de
+    "preenchida errada", que e o engano mais comum.
+    """
     if not segredo:
         return "(vazia)"
-    if len(segredo) <= 12:
-        return f"({len(segredo)} chars)"
-    return f"{segredo[:6]}…{segredo[-4:]} ({len(segredo)} chars)"
+    digest = hashlib.sha256(segredo.encode("utf-8")).hexdigest()[:8]
+    return f"impressao {digest} ({len(segredo)} chars)"
 
 
 def main() -> None:
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("destino", help="endereco que vai receber o teste")
-    parser.add_argument("--env", type=Path, default=PADRAO_ENV, help="arquivo .env a ler")
+    parser.add_argument("--env", type=Path, default=None, help="arquivo .env a ler")
     args = parser.parse_args()
 
-    env = ler_env(args.env)
+    # Sem --env: tenta o .env do backend e, se nao existir, cai para as
+    # variaveis de ambiente (o caso de rodar dentro do container).
+    env, origem = ler_env(args.env or PADRAO_ENV, exigido=args.env is not None)
     host = env.get("SMTP_HOST", "")
     porta = int(env.get("SMTP_PORT", "587") or 587)
     usuario = env.get("SMTP_USER", "")
@@ -75,10 +138,10 @@ def main() -> None:
     usa_ssl = env.get("SMTP_SSL", "false").lower() == "true"
     usa_tls = env.get("SMTP_TLS", "true").lower() == "true"
 
-    print(f"env       : {args.env}")
+    print(f"config de : {origem}")
     print(f"host      : {host}:{porta} (ssl={usa_ssl}, starttls={usa_tls})")
     print(f"usuario   : {usuario or '(sem autenticacao)'}")
-    print(f"senha     : {mascarar(senha)}")
+    print(f"senha     : {impressao_digital(senha)}")
     print(f"remetente : {nome} <{remetente}>")
     print(f"reply-to  : {reply_to or '(vazio)'}")
     print(f"destino   : {args.destino}\n")

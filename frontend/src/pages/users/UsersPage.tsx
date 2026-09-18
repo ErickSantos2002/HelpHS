@@ -4,9 +4,11 @@ import { useForm } from "react-hook-form";
 import { z } from "zod";
 import {
   Alert,
+  Avatar,
+  Badge,
   Button,
   Card,
-  FilterSelect,
+  Icon,
   Input,
   Modal,
   ModalFooter,
@@ -14,6 +16,12 @@ import {
   Select,
   Spinner,
 } from "../../components/ui";
+import { cn } from "../../lib/utils";
+import {
+  OPCOES_DE_PAPEL,
+  rotuloDePapel,
+  varianteDePapel,
+} from "../../lib/papel";
 import {
   createUser,
   deleteUser,
@@ -24,78 +32,104 @@ import {
   type UserSummary,
 } from "../../services/userService";
 
-// ── Icons ─────────────────────────────────────────────────────
-
-const IC = {
-  Edit: (
-    <svg className="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
-      <path strokeLinecap="round" strokeLinejoin="round" d="M11 5H6a2 2 0 00-2 2v11a2 2 0 002 2h11a2 2 0 002-2v-5m-1.414-9.414a2 2 0 112.828 2.828L11.828 15H9v-2.828l8.586-8.586z" />
-    </svg>
-  ),
-  Trash: (
-    <svg className="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
-      <path strokeLinecap="round" strokeLinejoin="round" d="M19 7l-.867 12.142A2 2 0 0116.138 21H7.862a2 2 0 01-1.995-1.858L5 7m5 4v6m4-6v6m1-10V4a1 1 0 00-1-1h-4a1 1 0 00-1 1v3M4 7h16" />
-    </svg>
-  ),
-  User: (
-    <svg className="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
-      <path strokeLinecap="round" strokeLinejoin="round" d="M16 7a4 4 0 11-8 0 4 4 0 018 0zM12 14a7 7 0 00-7 7h14a7 7 0 00-7-7z" />
-    </svg>
-  ),
-  Plus: (
-    <svg className="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
-      <path strokeLinecap="round" strokeLinejoin="round" d="M12 4v16m8-8H4" />
-    </svg>
-  ),
-  Search: (
-    <svg className="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
-      <path strokeLinecap="round" strokeLinejoin="round" d="M21 21l-6-6m2-5a7 7 0 11-14 0 7 7 0 0114 0z" />
-    </svg>
-  ),
-};
-
 // ── Constants ─────────────────────────────────────────────────
 
 const PAGE_SIZE = 10;
 
-const ROLE_LABEL: Record<string, string> = {
-  admin: "Administrador",
-  technician: "Técnico",
-  client: "Cliente",
+/**
+ * O papel do usuário: rótulo e variante do selo, numa tabela só.
+ *
+ * Aqui ele morava em **quatro** constantes do próprio arquivo — `ROLE_LABEL`,
+ * `ROLE_BADGE`, `ROLE_OPTIONS` e `FILTER_ROLE_OPTIONS`, sendo as duas últimas
+ * idênticas linha a linha. As quatro viram esta.
+ *
+ * ⚠️ **A casa dela não é aqui.** A mesma tabela existe em
+ * `layout/Topbar.tsx`, `profile/ProfilePage.tsx` e `kb/KBArticlePage.tsx` — e
+ * as quatro já divergem: a da KB diz "Admin" onde as outras dizem
+ * "Administrador". É o mesmo defeito que `lib/status.ts` e `lib/prioridade.ts`
+ * consertaram para chamado, e o conserto tem o mesmo formato: um `lib/papel.ts`
+ * consumido pelos quatro. Criar esse módulo é escrita em `src/lib`, fora do
+ * escopo da migração de UMA tela — então o que dá para fazer daqui é reduzir
+ * quatro cópias locais a uma, e relatar. **Não** inventar um quinto mapa.
+ *
+ * O `as const` faz `variante` inferir os literais do `Badge` em vez de
+ * `string`: acrescentar um papel com variante que não existe para de compilar.
+ */
+/* O módulo existe agora: `lib/papel.ts`. Este agente reduziu quatro cópias a
+ * uma e relatou em vez de criar a quinta — e foi o relato dele que produziu o
+ * módulo. A tabela, as opções e os dois acessores vêm de lá. */
+
+
+
+/**
+ * O estado da CONTA — que não é o status do chamado.
+ *
+ * Por isso ele não sai de `lib/status.ts`: aquele módulo é dos sete estados de
+ * um chamado, e `active`/`inactive`/`anonymized` são outra coisa. Os valores
+ * são os de `USER_STATUSES`, no `userService`, que o teste do serviço compara
+ * com o enum do backend.
+ *
+ * As três colunas eram três mapas separados (`STATUS_LABEL`, `STATUS_DOT`,
+ * `STATUS_PILL`) com trinta e uma classes de paleta crua e oito `dark:` para
+ * inverter à mão o que o token inverte sozinho.
+ *
+ * **Classes por extenso, nunca por concatenação.** O Tailwind gera utilitário
+ * varrendo o texto do arquivo: `"bg-tint-" + estado` some da varredura, a regra
+ * não nasce, a pílula fica sem fundo, e não há erro nem aviso.
+ *
+ * O hover é de BORDA e não de fundo porque `--tint-*` já carrega alfa de 15% no
+ * próprio token (regra (a) do D8-a): `hover:bg-tint-success/30` multiplicaria
+ * 0,15 × 0,30 e daria um realce praticamente invisível.
+ */
+const ESTADO_DA_CONTA: Record<
+  UserStatus,
+  { rotulo: string; pilula: string; ponto: string }
+> = {
+  active: {
+    rotulo: "Ativo",
+    pilula:
+      "border-success/30 bg-tint-success text-on-tint-success hover:border-success/60",
+    ponto: "bg-fill-success",
+  },
+  inactive: {
+    rotulo: "Inativo",
+    pilula:
+      "border-borda bg-tint-neutral text-on-tint-neutral hover:border-borda-strong",
+    ponto: "bg-borda-control",
+  },
+  // Anonimizado pinta igual a inativo, e é deliberado: quem carrega a
+  // diferença é a PALAVRA, não a cor. Duas faixas de cinza a distinguiriam
+  // para quem enxerga e para mais ninguém — e o que o estado tem de próprio
+  // (não dá para alternar) já está no botão desabilitado.
+  anonymized: {
+    rotulo: "Anonimizado",
+    pilula: "border-borda bg-tint-neutral text-on-tint-neutral cursor-default",
+    ponto: "bg-borda-control",
+  },
 };
 
-const ROLE_BADGE: Record<string, string> = {
-  admin: "bg-primary/15 text-primary border border-primary/30",
-  technician: "bg-info/15 text-info-700 dark:text-info-400 border border-info/30",
-  client: "bg-slate-100 text-slate-600 border border-slate-300 dark:bg-slate-700/40 dark:text-slate-300 dark:border-slate-600/40",
-};
+/** Recuo para o neutro com o valor cru no rótulo — o dado vem da rede. */
+function estadoDaConta(status: string) {
+  return (
+    ESTADO_DA_CONTA[status as UserStatus] ?? {
+      ...ESTADO_DA_CONTA.inactive,
+      rotulo: status,
+    }
+  );
+}
 
-// Tipado por `UserStatus` de propósito: se o enum do backend mudar, isto para
-// de compilar em vez de renderizar um rótulo vazio.
-const STATUS_LABEL: Record<UserStatus, string> = {
-  active: "Ativo",
-  inactive: "Inativo",
-  anonymized: "Anonimizado",
-};
-
-
-const ROLE_OPTIONS = [
-  { value: "admin", label: "Administrador" },
-  { value: "technician", label: "Técnico" },
-  { value: "client", label: "Cliente" },
-];
-
-const FILTER_ROLE_OPTIONS = [
-  { value: "admin", label: "Administrador" },
-  { value: "technician", label: "Técnico" },
-  { value: "client", label: "Cliente" },
-];
-
-// Subconjunto deliberado: filtrar por anonimizado não é uso de tela. Os
-// valores saem de `UserStatus`, então um estado inventado não compila.
+/**
+ * Subconjunto deliberado: filtrar por anonimizado não é uso de tela.
+ *
+ * E a lista curta tem história: "suspended" já morou no `userService` sem
+ * nunca ter existido no banco, e a opção que ele gerava derrubava a lista com
+ * 422 — o FastAPI recusa na validação do Query, antes do handler. Por isso os
+ * valores saem de `UserStatus` e os rótulos da tabela acima: um estado
+ * inventado não compila, e um rótulo divergente não tem onde nascer.
+ */
 const FILTER_STATUS_OPTIONS: { value: UserStatus; label: string }[] = [
-  { value: "active", label: STATUS_LABEL.active },
-  { value: "inactive", label: STATUS_LABEL.inactive },
+  { value: "active", label: ESTADO_DA_CONTA.active.rotulo },
+  { value: "inactive", label: ESTADO_DA_CONTA.inactive.rotulo },
 ];
 
 // ── Validation ─────────────────────────────────────────────────
@@ -123,37 +157,15 @@ const editSchema = z.object({
 type CreateValues = z.infer<typeof createSchema>;
 type EditValues = z.infer<typeof editSchema>;
 
-// ── UserAvatar ────────────────────────────────────────────────
-
-function UserAvatar({ name }: { name: string }) {
-  const initials = name
-    .split(" ")
-    .map((n) => n[0])
-    .slice(0, 2)
-    .join("")
-    .toUpperCase();
-  return (
-    <div className="w-9 h-9 rounded-full bg-background-elevated border border-border/60 flex items-center justify-center shrink-0 text-sm font-semibold text-slate-600 dark:text-slate-200 select-none">
-      {initials || "?"}
-    </div>
-  );
-}
-
 // ── StatusPill ────────────────────────────────────────────────
 
-const STATUS_DOT: Record<UserStatus, string> = {
-  active:     "bg-emerald-500",
-  inactive:   "bg-slate-400 dark:bg-slate-500",
-  anonymized: "bg-slate-400 dark:bg-slate-600",
-};
-
-const STATUS_PILL: Record<UserStatus, string> = {
-  active:     "border-emerald-300 bg-emerald-50 text-emerald-600 hover:bg-emerald-100 dark:border-emerald-700/50 dark:bg-emerald-900/20 dark:text-emerald-300 dark:hover:bg-emerald-900/40",
-  inactive:   "border-slate-300 bg-slate-100 text-slate-500 hover:bg-slate-200 dark:border-slate-600/50 dark:bg-slate-800/40 dark:text-slate-400 dark:hover:bg-slate-700/40",
-  anonymized: "border-slate-300 bg-slate-100 text-slate-500 cursor-default dark:border-slate-700/50 dark:bg-slate-800/50 dark:text-slate-600",
-};
-
-function StatusPill({ user, onToggled }: { user: UserSummary; onToggled: (u: UserSummary) => void }) {
+function StatusPill({
+  user,
+  onToggled,
+}: {
+  user: UserSummary;
+  onToggled: (u: UserSummary) => void;
+}) {
   const [loading, setLoading] = useState(false);
 
   async function toggle() {
@@ -169,20 +181,40 @@ function StatusPill({ user, onToggled }: { user: UserSummary; onToggled: (u: Use
   }
 
   const canToggle = user.status === "active" || user.status === "inactive";
+  const estado = estadoDaConta(user.status);
 
   return (
     <button
+      // `type="button"` porque a pílula aparece dentro de blocos que um dia
+      // podem virar formulário: o padrão do HTML dentro de `<form>` é
+      // `submit`, e um clique aqui gravaria a página inteira.
+      type="button"
       onClick={toggle}
       disabled={!canToggle || loading}
-      title={canToggle ? (user.status === "active" ? "Clique para desativar" : "Clique para ativar") : undefined}
-      className={`inline-flex items-center gap-1.5 px-2.5 py-1 rounded-full border text-xs font-medium transition-colors shrink-0 ${STATUS_PILL[user.status] ?? STATUS_PILL.inactive} ${canToggle ? "cursor-pointer" : ""}`}
+      title={
+        canToggle
+          ? user.status === "active"
+            ? "Clique para desativar"
+            : "Clique para ativar"
+          : undefined
+      }
+      className={cn(
+        "inline-flex items-center gap-1.5 px-2.5 py-1 rounded-full border",
+        "text-xs font-medium transition-colors shrink-0",
+        // O foco não estava fraco, estava ausente — o mesmo defeito da E9.
+        "focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-action",
+        estado.pilula,
+        canToggle && "cursor-pointer",
+      )}
     >
       {loading ? (
         <span className="w-1.5 h-1.5 rounded-full bg-current animate-pulse" />
       ) : (
-        <span className={`w-1.5 h-1.5 rounded-full shrink-0 ${STATUS_DOT[user.status] ?? "bg-slate-500"}`} />
+        <span
+          className={cn("w-1.5 h-1.5 rounded-full shrink-0", estado.ponto)}
+        />
       )}
-      {STATUS_LABEL[user.status] ?? user.status}
+      {estado.rotulo}
     </button>
   );
 }
@@ -191,15 +223,17 @@ function StatusPill({ user, onToggled }: { user: UserSummary; onToggled: (u: Use
 
 function UserPreviewCard({ user }: { user: UserSummary }) {
   return (
-    <div className="flex items-center gap-3 rounded-xl border border-border bg-background-elevated px-4 py-3">
-      <UserAvatar name={user.name} />
+    <div className="flex items-center gap-3 rounded-xl border border-borda bg-surface-elevated px-4 py-3">
+      <Avatar name={user.name} />
       <div className="flex-1 min-w-0">
-        <p className="text-sm font-medium text-slate-800 dark:text-slate-100 truncate">{user.name}</p>
-        <p className="text-xs text-slate-500 truncate">{user.email}</p>
+        <p className="text-sm font-medium text-conteudo-heading truncate">
+          {user.name}
+        </p>
+        <p className="text-xs text-conteudo-muted truncate">{user.email}</p>
       </div>
-      <span className={`shrink-0 text-xs font-medium px-2.5 py-1 rounded-full ${ROLE_BADGE[user.role] ?? ""}`}>
-        {ROLE_LABEL[user.role] ?? user.role}
-      </span>
+      <Badge variant={varianteDePapel(user.role)} className="shrink-0">
+        {rotuloDePapel(user.role)}
+      </Badge>
     </div>
   );
 }
@@ -258,7 +292,7 @@ function CreateModal({ onClose, onSaved }: { onClose: () => void; onSaved: (u: U
         />
         <Select
           label="Perfil *"
-          options={ROLE_OPTIONS}
+          options={OPCOES_DE_PAPEL}
           error={form.formState.errors.role?.message}
           {...form.register("role")}
         />
@@ -321,7 +355,7 @@ function EditModal({ user, onClose, onSaved }: { user: UserSummary; onClose: () 
         />
         <Select
           label="Perfil *"
-          options={ROLE_OPTIONS}
+          options={OPCOES_DE_PAPEL}
           error={form.formState.errors.role?.message}
           {...form.register("role")}
         />
@@ -363,24 +397,30 @@ function DeleteModal({ user, onClose, onDeleted }: { user: UserSummary; onClose:
   }
 
   return (
-    <Modal open onClose={onClose} title="Excluir usuário">
+    // `md`, e não `sm`, por UM motivo medido: o cartão de prévia põe
+    // Avatar + (nome, e-mail) + Badge em três colunas, e em 384px sobram
+    // ~150px para o bloco de texto. O nome e o e-mail são `truncate`, e o
+    // e-mail é o ÚNICO dado do diálogo que não se repete na frase abaixo —
+    // clipado, some justamente o que desambigua homônimos. As outras telas
+    // ficam em `sm`: nelas o que a prévia clipa a frase repete inteiro.
+    <Modal open onClose={onClose} size="md" title="Excluir usuário">
       <div className="space-y-4">
+        {/* Este `Alert` NÃO é o aviso da D9.3, e por isso fica: ele reporta a
+            falha de uma exclusão JÁ TENTADA. O que saiu foi o painel de aviso
+            desenhado à mão — disco, lixeira e "Ação irreversível" —, que pela
+            D9.3 vira PROSA: modal `sm` com a frase que nomeia quem some. */}
         {error && <Alert variant="danger">{error}</Alert>}
-        <div className="flex gap-3 rounded-xl bg-red-50 border border-red-200 dark:bg-red-900/20 dark:border-red-800/40 p-4">
-          <div className="shrink-0 w-9 h-9 rounded-full bg-red-100 dark:bg-red-900/40 flex items-center justify-center text-red-500 dark:text-red-400">
-            {IC.Trash}
-          </div>
-          <div>
-            <p className="text-sm font-semibold text-red-700 dark:text-red-300">Ação irreversível</p>
-            <p className="text-xs text-red-500/80 dark:text-red-400/80 mt-0.5">
-              Só é possível excluir usuários sem tickets. Se houver tickets vinculados, use "Anonimizar".
-            </p>
-          </div>
-        </div>
         <UserPreviewCard user={user} />
-        <p className="text-sm text-slate-500 dark:text-slate-400">
+        <p className="text-sm text-conteudo-muted">
           Tem certeza que deseja excluir permanentemente{" "}
-          <span className="font-medium text-slate-800 dark:text-slate-200">{user.name}</span>?
+          <span className="font-medium text-conteudo-heading">{user.name}</span>?
+          Esta ação não pode ser desfeita.
+        </p>
+        {/* Regra de produto, não aviso de severidade: diz QUANDO a exclusão é
+            possível, e qual é a saída quando não é. */}
+        <p className="text-sm text-conteudo-muted">
+          Só é possível excluir usuários sem tickets. Se houver tickets
+          vinculados, use "Anonimizar".
         </p>
       </div>
       <ModalFooter>
@@ -388,7 +428,7 @@ function DeleteModal({ user, onClose, onDeleted }: { user: UserSummary; onClose:
           Cancelar
         </Button>
         <Button variant="danger" onClick={handleDelete} loading={loading}>
-          Excluir permanentemente
+          Excluir
         </Button>
       </ModalFooter>
     </Modal>
@@ -460,46 +500,75 @@ export default function UsersPage() {
       {/* Header */}
       <div className="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-3">
         <div className="text-center sm:text-left">
-          <h1 className="text-2xl font-bold text-slate-800 dark:text-slate-100">Usuários</h1>
-          <p className="text-slate-500 dark:text-slate-400 text-sm mt-0.5">
+          <h1 className="text-2xl font-bold text-conteudo-heading">Usuários</h1>
+          <p className="text-conteudo-muted text-sm mt-0.5">
             {total} {total === 1 ? "usuário cadastrado" : "usuários cadastrados"}
           </p>
         </div>
-        <Button onClick={() => setCreateOpen(true)} className="w-full sm:w-auto">
-          {IC.Plus} Novo usuário
+        <Button
+          onClick={() => setCreateOpen(true)}
+          className="w-full sm:w-auto"
+          icon={<Icon name="plus" size={16} strokeWidth={2} />}
+        >
+          Novo usuário
         </Button>
       </div>
 
       {/* Filters */}
       <div className="flex flex-col md:flex-row md:items-center gap-2">
         <div className="relative md:flex-1">
-          <span className="absolute left-3 top-1/2 -translate-y-1/2 text-slate-500 pointer-events-none">
-            {IC.Search}
+          <span className="absolute left-3 top-1/2 -translate-y-1/2 z-10 text-conteudo-muted pointer-events-none">
+            <Icon name="search" size={16} strokeWidth={2} />
           </span>
-          <input
-            className="w-full pl-9 pr-3 py-2 rounded-xl border border-border/60 bg-background-surface text-sm text-slate-700 dark:text-slate-200 placeholder:text-slate-500 focus:outline-none focus:ring-2 focus:ring-primary focus:border-transparent transition-colors"
+          {/*
+            Campo do primitivo, e não `<input>` à mão — e o `aria-label` é
+            carga: o campo só tinha `placeholder`, que NÃO é nome acessível.
+            Quem navega por leitor de tela chegava num campo de texto sem nome
+            nenhum no meio da barra de filtros.
+          */}
+          <Input
+            aria-label="Buscar usuários"
+            className="pl-9"
             placeholder="Buscar por nome ou e-mail…"
             value={search}
             onChange={(e) => { setSearch(e.target.value); setPage(1); }}
           />
         </div>
         <div className="flex flex-wrap gap-2 items-center justify-center sm:justify-start">
-          <FilterSelect
-            options={FILTER_ROLE_OPTIONS}
+          {/* D9.2 — três papéis e dois estados, ambos fixos no código: listas
+              curtas e conhecidas, logo `<select>` nativo nos dois.
+
+              O rótulo `sr-only` é o conserto: o `FilterSelect` não repassava
+              `label`, e os dois filtros lado a lado se anunciavam "Perfil" e
+              "Status" só enquanto vazios — escolhido um valor, viravam
+              "Técnico" e "Ativo", sem dizer de que filtro eram. */}
+          <span id="rotulo-filtro-papel" className="sr-only">
+            Perfil
+          </span>
+          <Select
+            id="filtro-papel"
+            aria-labelledby="rotulo-filtro-papel"
+            options={OPCOES_DE_PAPEL}
             placeholder="Perfil"
             value={roleFilter}
-            onChange={(v) => { setRoleFilter(v); setPage(1); }}
+            onChange={(e) => { setRoleFilter(e.target.value); setPage(1); }}
           />
-          <FilterSelect
+          <span id="rotulo-filtro-status" className="sr-only">
+            Status da conta
+          </span>
+          <Select
+            id="filtro-status"
+            aria-labelledby="rotulo-filtro-status"
             options={FILTER_STATUS_OPTIONS}
             placeholder="Status"
             value={statusFilter}
-            onChange={(v) => { setStatusFilter(v); setPage(1); }}
+            onChange={(e) => { setStatusFilter(e.target.value); setPage(1); }}
           />
           {hasFilters && (
             <button
+              type="button"
               onClick={() => { setSearch(""); setRoleFilter(""); setStatusFilter(""); setPage(1); }}
-              className="text-xs text-slate-500 hover:text-slate-300 transition-colors px-2 py-1.5 rounded-lg hover:bg-background-elevated cursor-pointer"
+              className="text-xs text-conteudo-muted hover:text-conteudo transition-colors px-2 py-1.5 rounded-lg hover:bg-surface-elevated cursor-pointer focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-action"
             >
               Limpar filtros
             </button>
@@ -511,10 +580,10 @@ export default function UsersPage() {
 
       {/* Card */}
       <Card padding="none">
-        <div className="px-4 py-3 border-b border-border flex items-center justify-between">
+        <div className="px-4 py-3 border-b border-borda flex items-center justify-between">
           <div>
-            <p className="text-sm font-semibold text-slate-700 dark:text-slate-200">Lista de usuários</p>
-            <p className="text-xs text-slate-500 mt-0.5">
+            <p className="text-sm font-semibold text-conteudo-heading">Lista de usuários</p>
+            <p className="text-xs text-conteudo-muted mt-0.5">
               Gerencie acessos e perfis dos usuários.
             </p>
           </div>
@@ -526,16 +595,20 @@ export default function UsersPage() {
           </div>
         ) : users.length === 0 ? (
           <div className="flex flex-col items-center justify-center py-16 text-center">
-            <div className="w-12 h-12 rounded-full bg-background-elevated border border-border flex items-center justify-center text-slate-600 mb-3">
-              {IC.User}
+            <div className="w-12 h-12 rounded-full bg-surface-elevated border border-borda flex items-center justify-center text-conteudo-muted mb-3">
+              <Icon name="user" size={20} strokeWidth={2} />
             </div>
-            <p className="text-sm text-slate-400">
+            <p className="text-sm text-conteudo-muted">
               {hasFilters ? "Nenhum usuário encontrado para esses filtros." : "Nenhum usuário cadastrado."}
             </p>
+            {/* Só o vazio SEM filtro convida a criar: com filtro, o cadastro
+                provavelmente existe e está escondido — oferecer "criar" ali
+                empurra para o duplicado. */}
             {!hasFilters && (
               <button
+                type="button"
                 onClick={() => setCreateOpen(true)}
-                className="mt-2 text-sm text-primary hover:text-primary/80 transition-colors cursor-pointer"
+                className="mt-2 text-sm text-conteudo-link hover:text-conteudo-link-hover transition-colors cursor-pointer focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-action rounded"
               >
                 Criar o primeiro usuário
               </button>
@@ -543,28 +616,31 @@ export default function UsersPage() {
           </div>
         ) : (
           <>
-            <div className="divide-y divide-border" style={{ minHeight: 520 }}>
+            <div className="divide-y divide-borda" style={{ minHeight: 520 }}>
               {users.map((u) => (
                 <div
                   key={u.id}
-                  className="flex items-center gap-4 px-4 py-3 hover:bg-background-elevated/40 transition-colors"
+                  className="flex items-center gap-4 px-4 py-3 hover:bg-surface-elevated/40 transition-colors"
                 >
                   {/* Avatar */}
-                  <UserAvatar name={u.name} />
+                  <Avatar name={u.name} />
 
                   {/* Name + email + dept */}
                   <div className="flex-1 min-w-0">
-                    <p className="text-sm font-medium text-slate-800 dark:text-slate-200 truncate">{u.name}</p>
-                    <p className="text-xs text-slate-500 truncate">{u.email}</p>
+                    <p className="text-sm font-medium text-conteudo-heading truncate">{u.name}</p>
+                    <p className="text-xs text-conteudo-muted truncate">{u.email}</p>
                     {u.department && (
-                      <p className="text-xs text-slate-600 truncate">{u.department}</p>
+                      <p className="text-xs text-conteudo-muted truncate">{u.department}</p>
                     )}
                   </div>
 
                   {/* Role badge */}
-                  <span className={`hidden sm:inline-flex shrink-0 text-xs font-medium px-2.5 py-1 rounded-full ${ROLE_BADGE[u.role] ?? ""}`}>
-                    {ROLE_LABEL[u.role] ?? u.role}
-                  </span>
+                  <Badge
+                    variant={varianteDePapel(u.role)}
+                    className="hidden sm:inline-flex shrink-0"
+                  >
+                    {rotuloDePapel(u.role)}
+                  </Badge>
 
                   {/* Status pill */}
                   <div className="hidden md:block shrink-0">
@@ -572,32 +648,43 @@ export default function UsersPage() {
                   </div>
 
                   {/* Created date */}
-                  <span className="hidden xl:block shrink-0 text-xs text-slate-600">
+                  <span className="hidden xl:block shrink-0 text-xs text-conteudo-muted">
                     {new Date(u.created_at).toLocaleDateString("pt-BR")}
                   </span>
 
-                  {/* Actions */}
+                  {/*
+                    Ações. O nome do usuário entra no `aria-label` porque são N
+                    botões por página: sem ele, uma lista de dez cadastros
+                    anuncia dez controles chamados "Editar" e dez chamados
+                    "Excluir", e quem não vê a linha não tem como saber qual é
+                    qual. O `title` fica curto — é dica de mouse, e o mouse já
+                    sabe em que linha está.
+                  */}
                   <div className="flex items-center gap-1 shrink-0">
                     <button
+                      type="button"
                       onClick={() => setEditTarget(u)}
                       title="Editar"
-                      className="p-1.5 rounded-lg text-slate-400 hover:text-primary hover:bg-primary/10 transition-colors cursor-pointer"
+                      aria-label={`Editar ${u.name}`}
+                      className="p-1.5 rounded-lg text-conteudo-muted hover:text-conteudo-link hover:bg-action-tint transition-colors cursor-pointer focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-action"
                     >
-                      {IC.Edit}
+                      <Icon name="edit" size={16} strokeWidth={2} />
                     </button>
                     <button
+                      type="button"
                       onClick={() => setDeleteTarget(u)}
                       title="Excluir"
-                      className="p-1.5 rounded-lg text-slate-400 hover:text-red-500 hover:bg-red-50 dark:hover:text-red-400 dark:hover:bg-red-900/20 transition-colors cursor-pointer"
+                      aria-label={`Excluir ${u.name}`}
+                      className="p-1.5 rounded-lg text-conteudo-muted hover:text-on-tint-danger hover:bg-tint-danger transition-colors cursor-pointer focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-action"
                     >
-                      {IC.Trash}
+                      <Icon name="trash" size={16} strokeWidth={2} />
                     </button>
                   </div>
                 </div>
               ))}
             </div>
 
-            <div className="px-4 py-2 border-t border-border">
+            <div className="px-4 py-2 border-t border-borda">
               <Pagination
                 page={page}
                 pageSize={PAGE_SIZE}

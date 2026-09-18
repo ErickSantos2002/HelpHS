@@ -69,7 +69,9 @@ docker-compose -f backend/docker-compose.dev.yml up -d
 cd backend && python -m uvicorn app.main:app --port 8001 --reload
 
 # frontend, noutro terminal
-cd frontend && npm ci && npm run dev     # http://localhost:5173
+cd frontend && npm ci && npm run dev     # http://localhost:5190
+#   a 5190 e fixada com `strictPort`: sem isso o Vite escorrega para
+#   5174/5175 e o Playwright abraca o servidor de OUTRO projeto
 ```
 
 Login dos seeds: `admin@healthsafety.com`, com a senha vinda de
@@ -83,10 +85,52 @@ está em [desenvolvimento-local.md](desenvolvimento-local.md).
 ## Testes
 
 ```bash
-cd backend  && pytest                # 863 testes, gate de 80% de cobertura
-cd frontend && npm test              # 315 testes (Vitest)
+cd backend  && pytest                # gate de 80% de cobertura
+cd frontend && npm test              # Vitest
+cd frontend && npm run typecheck     # tsc -b
+cd frontend && npm run lint          # eslint
 cd frontend && npx playwright test   # e2e — exige backend na 8001
+
+python .github/scripts/verifica_dependencias.py   # auditoria de dependências
 ```
+
+> ⚠️ **`npm run typecheck` é `tsc -b`, e não `tsc --noEmit`.** O
+> `frontend/tsconfig.json` é arquivo-solução — `"files": []` com três
+> `references` —, então `tsc --noEmit` compila a lista vazia e passa **sem
+> olhar nada**. Medido: `npx tsc --noEmit --listFiles | grep -c "src/"` devolve
+> `0`. Uma régua pode passar porque o que ela mede está certo, ou porque ela
+> não mediu nada, e as duas saídas são idênticas.
+
+> As contagens de teste não ficam mais escritas aqui de propósito: número
+> mantido à mão envelhece a cada teste novo. Duas vezes em 24 horas este README
+> ficou desatualizado. Quem quiser o número corrente, roda o comando.
+
+### Auditoria de dependências
+
+O gate falha quando aparece vulnerabilidade **nova**, fora do baseline em
+`.github/dependencias-conhecidas.toml`. Ele roda nos dois jobs do CI, sem
+`continue-on-error`.
+
+Quebrou o CI? A pergunta **não** é como fazer passar. É: *esse código é
+alcançável no HelpHS?*
+
+- **Alcançável** → conserte. Suba o pacote, ou mitigue na aplicação. Só entra no
+  baseline depois, com a evidência.
+- **Inalcançável** → acrescente ao baseline, e o `motivo` precisa citar o
+  **comando** que provou. "Parece não usado" não passa — o script recusa entrada
+  sem justificativa, e entrada obsoleta também derruba o CI, para o arquivo não
+  virar lista que só cresce.
+
+**Uma linha por advisory, não por pacote.** No backend a chave é o `id` do
+pip-audit; no front é `pacote` + `advisory` (o GHSA). Indexar por pacote deixava
+passar advisory **novo** num pacote já listado — justo o que o gate existe para
+pegar — e fazia uma justificativa escrita para um aviso ser herdada por todos os
+outros do mesmo pacote. Pacote sinalizado só por herança (`react-router-dom` →
+`react-router`) não entra: o aviso é o do pacote de baixo, e o script imprime
+esses nomes a cada rodada.
+
+Ignore novo é aprovado no code review do PR que mexer no baseline. Os testes do
+gate estão em `backend/tests/test_gate_dependencias.py` e rodam no `pytest`.
 
 O `pytest` roda sem preparo: o `conftest.py` fixa o ambiente e gera chaves JWT
 efêmeras. Cinco testes exercitam as agregações do dashboard contra **PostgreSQL
@@ -101,12 +145,12 @@ workflow próprio (`e2e.yml`), acionado à mão.
 | Backend     | Python 3.13, FastAPI, SQLAlchemy 2.0, Alembic   |
 | Banco       | PostgreSQL 15                                   |
 | Cache       | Redis 7                                         |
-| WebSocket   | python-socketio                                 |
+| WebSocket   | Nativo do FastAPI (`starlette`), sem biblioteca |
 | Frontend    | React, Vite, TypeScript, Tailwind CSS           |
 | Storage     | Disco, em volume (`UPLOAD_DIR`)                 |
 | Antivírus   | ClamAV                                          |
 | Auth        | JWT RS256 (python-jose)                         |
-| IA          | OpenAI GPT-4o-mini + Anthropic (fallback)       |
+| IA          | DeepSeek (provedor único, desligado)            |
 | Deploy      | EasyPanel (backend e frontend separados)        |
 
 Duas ressalvas que a tabela não conta: **não existe fila de tarefas** — o que
@@ -121,8 +165,8 @@ ser gravados em disco. Ambas no documento de decisões.
 | [docs/decisoes-e-regras.md](docs/decisoes-e-regras.md) | **Comece por aqui.** As regras de negócio que não dá para deduzir do código: SLA, encerramento, permissões, equipamentos — e as pendências conhecidas |
 | [desenvolvimento-local.md](desenvolvimento-local.md) | Subir o sistema na sua máquina, com e sem Docker, e as pegadinhas do caminho |
 | [Changelog.md](Changelog.md) | Changelog técnico do repositório, por versão |
-| [mudanças.md](mudanças.md) | Registro do trabalho por data, com o porquê de cada decisão |
+| [mudanças.md](mudanças.md) | Registro do trabalho por data, com o porquê de cada decisão — inclui a auditoria de agosto/2026 e as dívidas com o gatilho de quando revisitar |
 | `frontend/src/data/changelog.ts` | O changelog que o **cliente** vê dentro do sistema |
+| [docs/design-system-migration/](docs/design-system-migration/) | A adoção do design system, fase a fase. Os quatro `CHECKPOINT-*.md` trazem a medição colada, não o resumo dela; `CHECKLIST-29.md` é o roteiro por tela |
 | [docs/superpowers/specs/](docs/superpowers/specs/) | Desenhos e levantamentos: atendimento por IA, regra de primeira resposta do SLA, as duas fontes de verdade de empresa |
-| [mudanças.md](mudanças.md) | Registro do trabalho por data — inclui a auditoria completa de agosto/2026 e as dívidas que ficaram registradas com o gatilho de quando revisitar |
 | `Documentação/` | Dicionário de dados e requisitos originais (`.docx`, fora do Git) |

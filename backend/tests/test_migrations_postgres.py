@@ -46,8 +46,14 @@ _BANCO = "migracoes_testes"
 # de exercitar um backfill: num banco vazio ele não tem o que copiar.
 _ANTES_DO_BACKFILL = "u1p2q3r4s5t6"
 
+# O pai da migration da agenda (`d0y1z2a3b4c5`). A descida aponta a revision,
+# nunca "-1": o "-1" assumia que a agenda era o head e quebrou no primeiro
+# merge que pôs outra migration em cima dela (15/09, índice único de e-mail) —
+# o CI de main ficou vermelho sem a agenda ter mudado uma linha.
+_ANTES_DA_AGENDA = "c9x0y1z2a3b4"
 
-def _alembic(url: str, alvo: str) -> subprocess.CompletedProcess[str]:
+
+def _alembic(url: str, alvo: str, comando: str = "upgrade") -> subprocess.CompletedProcess[str]:
     """
     Roda o alembic como SUBPROCESSO, igual ao `start.sh`.
 
@@ -62,7 +68,7 @@ def _alembic(url: str, alvo: str) -> subprocess.CompletedProcess[str]:
         "APP_ENV": "testing",
     }
     return subprocess.run(  # noqa: S603
-        [sys.executable, "-m", "alembic", "upgrade", alvo],
+        [sys.executable, "-m", "alembic", comando, alvo],
         cwd=_BACKEND,
         env=ambiente,
         capture_output=True,
@@ -91,8 +97,20 @@ def servidor():
 
 @pytest.fixture
 def banco(servidor):
-    """Banco vazio a cada teste. CREATE DATABASE exige autocommit."""
+    """
+    Banco vazio a cada teste. CREATE DATABASE exige autocommit.
+
+    A extensão `vector` é criada AQUI, e não pela migration, porque é assim
+    que acontece em produção: a `a7v8w9x0y1z2` exige a extensão e recusa
+    criá-la, para não pedir superusuário no boot do container. Quem cria é o
+    administrador, uma vez, antes do deploy — e este passo é a encenação
+    disso. Criar aqui é o que mantém o teste fiel ao que roda lá.
+
+    A extensão é por BANCO: o `CREATE DATABASE` acima nasce sem ela mesmo com
+    o pgvector instalado no servidor, então isto tem de rodar a cada recriação.
+    """
     base, _, _ = servidor.rpartition("/")
+    url_do_banco = f"{base}/{_BANCO}"
 
     async def _recria() -> None:
         motor = create_async_engine(servidor, isolation_level="AUTOCOMMIT")
@@ -101,8 +119,13 @@ def banco(servidor):
             await conn.execute(text(f"CREATE DATABASE {_BANCO}"))
         await motor.dispose()
 
+        novo = create_async_engine(url_do_banco, isolation_level="AUTOCOMMIT")
+        async with novo.connect() as conn:
+            await conn.execute(text("CREATE EXTENSION IF NOT EXISTS vector"))
+        await novo.dispose()
+
     asyncio.run(_recria())
-    return f"{base}/{_BANCO}"
+    return url_do_banco
 
 
 @pytest_asyncio.fixture
@@ -125,6 +148,56 @@ def test_upgrade_head_sobe_do_zero(banco):
     assert (
         resultado.returncode == 0
     ), f"alembic upgrade head falhou:\n{resultado.stdout}\n{resultado.stderr}"
+
+
+@pytest.mark.asyncio
+async def test_o_modelo_nao_anda_na_frente_das_migrations(sessao, banco):
+    """
+    Toda coluna declarada no modelo existe no banco depois do `upgrade head`.
+
+    É a lacuna que o `create_all` esconde e que este arquivo existe para
+    fechar, num caso que ele ainda não cobria. Os testes que montam o schema
+    pela declaração — `test_helo_postgres.py` e companhia — ficam VERDES com
+    uma coluna nova no modelo e nenhuma migration para ela: eles constroem o
+    schema a partir do próprio modelo. O container não: ele roda
+    `alembic upgrade head`, e a primeira consulta que tocar na coluna que só
+    existe na declaração devolve `UndefinedColumn` em produção.
+
+    A comparação é só de PRESENÇA — nome de tabela e de coluna. Tipo, default e
+    nulabilidade ficam de fora de propósito: comparar isso a sério é o trabalho
+    do `alembic check`, que precisa de um banco no head e não roda no CI. O que
+    este teste pega é o esquecimento inteiro, que é o caso comum e o que
+    derruba o boot.
+    """
+    resultado = _alembic(banco, "head")
+    assert resultado.returncode == 0, resultado.stderr
+
+    from app.models.models import Base
+
+    reais = {}
+    linhas = await sessao.execute(
+        text(
+            "SELECT table_name, column_name FROM information_schema.columns "
+            "WHERE table_schema = 'public'"
+        )
+    )
+    for tabela, coluna in linhas.all():
+        reais.setdefault(tabela, set()).add(coluna)
+
+    faltando = []
+    for tabela in Base.metadata.sorted_tables:
+        if tabela.name not in reais:
+            faltando.append(f"{tabela.name} (tabela inteira)")
+            continue
+        for coluna in tabela.columns:
+            if coluna.name not in reais[tabela.name]:
+                faltando.append(f"{tabela.name}.{coluna.name}")
+
+    assert (
+        not faltando
+    ), "declarado no modelo e ausente depois do upgrade head — falta migration para: " + ", ".join(
+        sorted(faltando)
+    )
 
 
 @pytest.mark.asyncio
@@ -195,6 +268,60 @@ async def test_backfill_leva_o_dono_para_equipment_users(banco):
     assert vinculos[0].user_id == dono_id
 
 
+@pytest.mark.asyncio
+async def test_o_artigo_que_ja_existia_nasce_lido_pela_helo(banco):
+    """
+    A decisão de 10/09/2026, provada no banco em vez de afirmada.
+
+    Havia UM artigo publicado em produção (número do Rickelme), e a coluna
+    `helo_pode_ler` chega com padrão `true` para cobri-lo SEM backfill e sem
+    corrigir linha em migration. Este teste semeia um artigo ANTES da
+    `c9x0y1z2a3b4` e confere que ele sai do outro lado lido pela Helô. Com o
+    padrão invertido, o único artigo que existe sumiria das respostas no dia do
+    deploy — em silêncio.
+    """
+    assert _alembic(banco, "b8w9x0y1z2a3").returncode == 0
+    autor_id, artigo_id = uuid.uuid4(), uuid.uuid4()
+
+    motor = create_async_engine(banco)
+    async with async_sessionmaker(bind=motor, expire_on_commit=False)() as s:
+        # INSERT explícito pelo mesmo motivo do teste do backfill: nesta revisão
+        # o schema é mais antigo que o modelo, e o ORM carregaria uma coluna
+        # que ainda não existe.
+        await s.execute(
+            text(
+                "INSERT INTO users (id, name, email, password, role, status, "
+                "lgpd_consent, email_verified, onboarding_completed) "
+                "VALUES (:id, 'Autora', :email, 'x', 'technician', 'active', true, true, true)"
+            ),
+            {"id": autor_id, "email": f"{autor_id.hex[:8]}@test.com"},
+        )
+        await s.execute(
+            text(
+                "INSERT INTO kb_articles (id, title, content, slug, category, tags, status, "
+                "author_id, view_count, helpful, not_helpful) "
+                "VALUES (:id, 'O artigo que já existia', 'corpo', :slug, 'hardware', '{}', "
+                "'published', :autor, 0, 0, 0)"
+            ),
+            {"id": artigo_id, "slug": f"ja-existia-{artigo_id.hex[:8]}", "autor": autor_id},
+        )
+        await s.commit()
+    await motor.dispose()
+
+    assert _alembic(banco, "head").returncode == 0
+
+    motor = create_async_engine(banco)
+    async with async_sessionmaker(bind=motor, expire_on_commit=False)() as s:
+        pode = (
+            await s.execute(
+                text("SELECT helo_pode_ler FROM kb_articles WHERE id = :id"), {"id": artigo_id}
+            )
+        ).scalar_one()
+    await motor.dispose()
+
+    assert pode is True
+
+
 def test_upgrade_head_e_idempotente_apos_o_backfill(banco):
     """
     Rodar `upgrade head` de novo não pode estourar.
@@ -246,3 +373,97 @@ async def test_consultas_do_diagnostico_executam(sessao, banco):
         _LEVANTAMENTO,
     ):
         await sessao.execute(text(consulta))
+
+
+# ── O caminho de volta da agenda ──────────────────────────────
+#
+# Nenhuma migration deste projeto tinha caso de `downgrade` até aqui. Este
+# existe porque o desenho da agenda pediu o caminho de volta guardado, e
+# "guardado" só vale se alguém já tiver descido por ele: `downgrade` que nunca
+# rodou é código que se descobre quebrado no pior momento possível, com o
+# banco no meio de uma reversão.
+
+
+@pytest.mark.asyncio
+async def test_a_agenda_desce_e_sobe_sem_perder_horario(banco):
+    """A descida até antes da agenda larga a chave e devolve as horas intactas."""
+    assert _alembic(banco, "head").returncode == 0
+
+    inicio = "2026-01-31 22:00:00+00"
+    fim = "2026-02-01 02:00:00+00"
+    motor = create_async_engine(banco)
+    async with motor.begin() as conn:
+        await conn.execute(
+            text(
+                "INSERT INTO calendar_events "
+                "(id, title, event_type, color, start_date, end_date, all_day, "
+                " created_at, updated_at) "
+                "VALUES (gen_random_uuid(), 'plantão da virada', 'meeting', '#6366f1', "
+                f"'{inicio}', '{fim}', false, now(), now())"
+            )
+        )
+    await motor.dispose()
+
+    descida = _alembic(banco, _ANTES_DA_AGENDA, comando="downgrade")
+    assert descida.returncode == 0, f"downgrade falhou: {descida.stdout} {descida.stderr}"
+
+    motor = create_async_engine(banco)
+    async with motor.connect() as conn:
+        colunas = (
+            (
+                await conn.execute(
+                    text(
+                        "SELECT column_name FROM information_schema.columns "
+                        "WHERE table_name = 'calendar_events'"
+                    )
+                )
+            )
+            .scalars()
+            .all()
+        )
+        assert "all_day" not in colunas, "a coluna ficou para trás"
+
+        # O que importa: as horas continuam lá. O que se perde ao voltar é a
+        # distinção entre "dia inteiro" e "evento que dura o dia todo", e ela é
+        # recuperável por convenção — nenhum horário é destruído.
+        linha = (await conn.execute(text("SELECT start_date, end_date FROM calendar_events"))).one()
+        assert linha[0].isoformat().startswith("2026-01-31T22:00")
+        assert linha[1].isoformat().startswith("2026-02-01T02:00")
+    await motor.dispose()
+
+    subida = _alembic(banco, "head")
+    assert subida.returncode == 0, f"upgrade de volta falhou: {subida.stderr}"
+
+    motor = create_async_engine(banco)
+    async with motor.connect() as conn:
+        # O `server_default` da subida alcança a linha que sobreviveu: ela volta
+        # como dia inteiro, que é o mesmo destino dos eventos antigos.
+        assert (
+            await conn.execute(text("SELECT all_day FROM calendar_events"))
+        ).scalar_one() is True
+    await motor.dispose()
+
+
+@pytest.mark.asyncio
+async def test_depois_da_migration_quem_insere_evento_declara_a_chave(banco):
+    """O `server_default` sai na mesma migration, e este caso prova que saiu.
+
+    Ele existia para as linhas de antes. Se ficasse, um INSERT que omitisse a
+    coluna viraria um evento de dia inteiro em SILÊNCIO — o contrário do que um
+    evento com horário quer, e sem nada acusando.
+    """
+    assert _alembic(banco, "head").returncode == 0
+
+    motor = create_async_engine(banco)
+    with pytest.raises(Exception, match="all_day"):
+        async with motor.begin() as conn:
+            await conn.execute(
+                text(
+                    "INSERT INTO calendar_events "
+                    "(id, title, event_type, color, start_date, end_date, "
+                    " created_at, updated_at) "
+                    "VALUES (gen_random_uuid(), 'sem a chave', 'meeting', '#6366f1', "
+                    "now(), now() + interval '1 hour', now(), now())"
+                )
+            )
+    await motor.dispose()

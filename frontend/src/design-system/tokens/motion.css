@@ -1,0 +1,52 @@
+/* Health & Safety — movimento
+ *
+ * Regra do sistema: a transição é de COR e de estado, não de posição. Hover,
+ * foco e tema animam em 150ms. O que se move é o que entra e sai — gaveta
+ * (300ms), modal (150ms, fade + zoom 95%).
+ *
+ * Nada pisca em laço numa tela que fica aberta o dia inteiro. As duas
+ * animações contínuas dos repositórios são exceções deliberadas e locais:
+ * o spinner e o pulso do logo no login.
+ */
+
+:root {
+  --duration-fast: 150ms; /* @kind other */
+  --duration-base: 200ms; /* @kind other */
+  --duration-slow: 300ms; /* @kind other */
+  --duration-drawer: 300ms; /* @kind other */
+
+  --ease-out: cubic-bezier(0, 0, 0.2, 1); /* @kind other */
+  --ease-in-out: cubic-bezier(0.4, 0, 0.2, 1); /* @kind other */
+
+  --transition-colors: color var(--duration-fast) var(--ease-in-out),
+    background-color var(--duration-fast) var(--ease-in-out),
+    border-color var(--duration-fast) var(--ease-in-out);
+}
+
+@keyframes hs-spin {
+  to { transform: rotate(360deg); }
+}
+
+@keyframes hs-fade-in {
+  from { opacity: 0; }
+  to { opacity: 1; }
+}
+
+@keyframes hs-modal-in {
+  from { opacity: 0; transform: scale(0.95); }
+  to { opacity: 1; transform: scale(1); }
+}
+
+/* Pulso do logo — HelpHS/frontend/tailwind.config.js */
+@keyframes hs-logo-pulse {
+  0%, 100% { transform: scale(1); filter: drop-shadow(0 0 0 rgb(14 165 233 / 0)); }
+  50% { transform: scale(1.06); filter: drop-shadow(0 0 10px rgb(14 165 233 / 0.55)); }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  *, *::before, *::after {
+    animation-duration: 0.01ms !important;
+    animation-iteration-count: 1 !important;
+    transition-duration: 0.01ms !important;
+  }
+}

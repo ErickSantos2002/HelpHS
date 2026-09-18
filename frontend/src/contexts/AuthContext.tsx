@@ -41,7 +41,12 @@ interface AuthContextValue {
   updateAvatarUrl: (url: string | null) => void;
 }
 
-const AuthContext = createContext<AuthContextValue | null>(null);
+/* Exportado para a galeria da casca (src/dev/GaleriaCasca.tsx), que monta
+ * Sidebar e Topbar reais sobre um usuario falso, sem sessao e sem rede. A
+ * galeria so existe em desenvolvimento e sai na Fase 20 — este export sai
+ * junto. Nenhum codigo de producao consome o contexto direto: use useAuth. */
+// eslint-disable-next-line react-refresh/only-export-components
+export const AuthContext = createContext<AuthContextValue | null>(null);
 
 export function AuthProvider({ children }: { children: ReactNode }) {
   const [user, setUser] = useState<AuthUser | null>(null);

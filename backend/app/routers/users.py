@@ -281,7 +281,7 @@ async def upload_avatar(
     allowed_types = {"image/jpeg", "image/png", "image/gif", "image/webp"}
     if file.content_type not in allowed_types:
         raise HTTPException(
-            status_code=status.HTTP_422_UNPROCESSABLE_ENTITY,
+            status_code=status.HTTP_422_UNPROCESSABLE_CONTENT,
             detail="Formato inválido. Use JPG, PNG, GIF ou WebP.",
         )
 

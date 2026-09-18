@@ -30,9 +30,19 @@ resolução como rede de segurança — a nota de resolução é texto que o cli
 lê, e sem ela o chamado resolvido sem conversa nenhuma ficaria eternamente sem
 resposta registrada.
 
-Mudança de status **não conta**, nem para "Aguardando cliente". Se o
-atendimento aconteceu por telefone, a fala precisa virar mensagem no chamado
-de qualquer forma — para o indicador e para o próximo técnico que pegar o caso.
+**A fala da Helô também carimba** — decisão do cliente em 28/08/2026,
+revertendo o desenho de 11/08. O argumento: quando ela responde, o
+atendimento começou de fato, e mostrar "aguardando primeira resposta" para
+quem acabou de ser respondido é o indicador mentindo para o lado contrário. A
+guarda de "não é o autor" passou a valer **só para gente** — a Helô fala com
+remetente nulo, e sem uma saída explícita para ela a regra a recusaria
+justamente no caso que o cliente pediu.
+
+Mudança de status **não conta**, nem para "Aguardando cliente" — nem a
+mensagem automática que a acompanha, que é o sistema narrando a si mesmo e não
+alguém falando com o cliente. Se o atendimento aconteceu por telefone, a fala
+precisa virar mensagem no chamado de qualquer forma — para o indicador e para
+o próximo técnico que pegar o caso.
 
 **A fala da Helô conta** — decisão do cliente em 28/08/2026. Quando ela
 responde, o atendimento começou de fato, e dizer "aguardando primeira resposta"
@@ -78,6 +88,15 @@ sistema que grava esse campo.
 > violação atrasada. Comparações com relatórios anteriores a essa data não são
 > justas. O levantamento dos treze caminhos que alimentavam a regra antiga está
 > em `docs/superpowers/specs/2026-08-20-primeira-resposta-sla-design.md`.
+
+> ⚠️ **E mudaram de novo, na direção oposta, quando a Helô passou a
+> carimbar.** Com ela ligada todo chamado ganha primeira resposta em segundos:
+> o indicador sobe para perto de 100% e o tempo médio despenca. Não é a equipe
+> ficando mais rápida — é o indicador **deixando de medir a equipe e passando
+> a medir o robô**, que é sempre rápido. Enquanto a Helô atender primeiro,
+> este número não serve para avaliar gente, e comparação só é justa entre
+> períodos do mesmo lado de 28/08/2026. O preço foi dito antes da decisão e
+> aceito junto com ela.
 
 ## Ciclo de encerramento do chamado
 
@@ -799,6 +818,25 @@ propósito**. Manter o endpoint para uso futuro.
 
 ---
 
+## E-mail sem distinção de maiúsculas
+
+`Fulano@x.com` e `fulano@x.com` são a mesma caixa postal no mundo real — e
+até 15/09 eram duas contas possíveis no sistema (o `EmailStr` só baixa o
+domínio, e as buscas comparavam igualdade exata). Produção foi conferida no
+mesmo dia: zero duplicatas; a porta fechou limpa. Três camadas:
+
+- **Regra prospectiva**: toda entrada de e-mail (cadastro, login,
+  esqueci-a-senha, criação por admin) usa o tipo `EmailNormalizado`
+  (`app/utils/email_normalizado.py`) — minúsculas no tipo, no padrão do CNPJ.
+  Guard de fonte em `tests/test_email_normalizado.py` pega schema novo que
+  declare `EmailStr` cru.
+- **Passado**: `scripts/normaliza_emails.py` (avulso, dry-run por padrão)
+  baixa linhas antigas; colisão por caixa é relatada e NUNCA fundida — a
+  decisão é humana.
+- **Trava de banco**: índice único em `lower(email)` (revision
+  `e1z2a3b4c5d6`). Roda no boot e FALHA se houver duplicata — por isso o
+  script roda ANTES do deploy que leva a migration.
+
 ## Limite de tentativas (rate limiting)
 
 Aplicado com slowapi (`app/core/rate_limit.py`), contadores no Redis — valem
@@ -828,6 +866,490 @@ Decisões:
   roteador divide o contador. Se algum cliente sentir o limite, o ajuste é a
   env var no painel — não é mudança de código.
 
+## Formato do código
+
+### O formatador do backend é o `black`. O `ruff` é linter, nunca formatador.
+
+O CI roda os dois (`.github/workflows/ci.yml`): `ruff check .` e
+`black --check .`. Eles **discordam** de formatação, e quem manda é o `black`,
+rodado de dentro de `backend/`.
+
+**Nunca rode `ruff format` num arquivo do backend.** Ele reformata o arquivo
+inteiro no estilo dele, inclusive linhas que você não escreveu, e o
+`black --check` reprova o resultado. Em 08/09/2026 isso derrubou o CI de um
+commit de migration por causa de um `assert` de outra pessoa, num arquivo de
+teste que só tinha sido tocado numa fixture.
+
+No frontend a regra é diferente e igualmente contraintuitiva — ver o Prettier
+em `mudanças.md`: os arquivos estão em 80 colunas, o `.prettierrc` diz 100, e
+o CI não checa formato. Lá, rodar `--write` polui o commit.
+
+## Base da Helô
+
+### A base da Helô é a Base de Conhecimento (desde 10/09/2026)
+
+A fonte deixou de ser uma pasta de manuais e passou a ser `kb_articles` com
+`status = published` e `helo_pode_ler = true`. Artigo publicado alimenta as
+respostas da Helô **sem ninguém rodar nada**: uma varredura periódica
+(`app/services/helo_indexacao.py`, a cada 5 min) indexa o que é novo ou
+editado, e a busca filtra publicação, marcação e produto AO VIVO — despublicar
+tira o texto das respostas no mesmo instante.
+
+⚠️ **Publicar artigo passa a mudar o que a Helô diz para o cliente.** O suporte
+não tinha esse poder e não foi avisado de que passou a ter. Passo a passo
+errado num artigo publicado vira procedimento errado ditado ao cliente, com a
+fonte citada — o que faz parecer conferido.
+
+**Duas regras de vínculo de produto, em dois lugares, de propósito:**
+
+| Onde | Vínculo ausente | Por quê |
+|---|---|---|
+| Base de Conhecimento (tela) | vale para TODOS os aparelhos | é escolha de quem escreveu |
+| Importação dos manuais (script) | ERRO FATAL | quem cria é máquina; ninguém escolheu nada |
+
+Quem unificar as duas achando que achou inconsistência reabre o caminho para o
+passo a passo do Phoebus chegar a quem tem um Titan.
+
+**Chamado SEM produto não recebe nada — nem o artigo universal.** Decidido em
+10/09/2026; até ali era só o comportamento herdado de antes da mudança de
+fonte, e está escrito aqui para não parecer esquecimento amanhã. Chamado sem
+produto é chamado em que não sabemos qual aparelho está na mão do cliente, e
+citar procedimento é mais arriscado justamente aí: todos os aparelhos não é o
+mesmo que nenhum. É a mesma assimetria do teto de distância — escalar custa um
+turno de humano; procedimento errado num instrumento de medição legal custa
+mais.
+
+**O filtro de tipo morreu**, e com ele uma proteção: se alguém publicar uma
+ficha com preço na Base, ela vira fonte da Helô. A proteção passou a ser a
+marcação `helo_pode_ler`, que alguém precisa desligar.
+
+### O modo da Helô: triagem até os sete manuais (desde 15/09/2026)
+
+`HELO_MODO` diz o que ela faz quando está ligada. **`triagem`** é a
+recepcionista da Fase 1 — saudação, encerramento e escalada, nada de
+embedding, nada de LLM, teto de duas falas. **`completa`** é a Fase 2, que
+busca na Base de Conhecimento e responde com o modelo. O padrão é `triagem`, e
+valor ausente ou não reconhecido também é `triagem`: o modo seguro é o que o
+sistema assume quando não sabe. Caixa e espaço não importam; um valor
+preenchido e desconhecido (o erro provável é `completo`) deixa aviso no log.
+
+**Por que existe.** Os manuais técnicos dos sete aparelhos estão sendo
+reescritos pela assistência técnica, em cerca de quinze dias. Até lá a base
+não tem manual técnico publicado (os três importados em 10/09 continuam
+rascunho), e a Fase 2 sem manual devolve escalada em toda pergunta técnica — o
+cliente responderia às três perguntas e seria transferido para um atendente
+em vez de ler "registrei tudo aqui". A Fase 2 **dorme, não foi removida**:
+nenhuma lógica dela saiu (o diff só acrescenta o desvio da triagem e o teto
+por modo), e ela acorda virando o modo.
+
+**O modo é ortogonal ao `HELO_ENABLED`.** Desligada é desligada em qualquer
+modo. As quatro guardas valem igual nos dois, e cada uma tem teste nos dois
+modos: os três interruptores (nada religa num nível mais específico), o
+humano já na conversa, o pedido de humano antes do encerramento e antes de
+qualquer peça da Fase 2, e a saída gravando `helo_saiu` — com o pedido
+explícito de humano derrubando também o `ai_enabled`. A ordem: interruptores,
+humano na conversa, saudação que nunca aconteceu, teto de falas, pedido de
+humano.
+
+**O pedido de humano passa por cima do teto, nos dois modos** — decidido em
+15/09/2026, e diverge da Fase 1 **de propósito**. Na Fase 1, passadas as duas
+falas, "quero falar com um atendente" recebia silêncio. O teto de duas existia
+porque ela só tinha duas coisas a dizer, não como recusa a um pedido: silêncio
+depois de um pedido explícito o cliente lê como sistema ignorando, e o custo de
+atender é uma escalada a mais num chamado que já ia para a fila. A exceção é só
+do pedido — resposta comum passado o teto continua em silêncio — e não passa
+por cima dos interruptores nem da guarda de humano na conversa. Fidelidade à
+Fase 1 não é argumento para desfazer; há teste que prende isto.
+
+**Recusado: usar a ausência da `DEEPSEEK_API_KEY` como standby.** O
+`_chamar_deepseek` devolve `None` antes de montar a URL quando a chave falta,
+então ligar sem chave não vaza nada — mas a segurança passaria a depender de
+faltar uma configuração. No dia em que alguém preenchesse a chave para testar
+outra coisa, ela acordaria sozinha, com a base vazia, falando com cliente, sem
+ninguém ter decidido. Chave ausente continua sendo falha de infraestrutura,
+com o destino que já tinha. Em triagem, nem com chave e URL preenchidas um
+cliente HTTP é construído — há teste disso, com um controle no modo completo
+provando que a armadilha dispara.
+
+**Duas escolhas que o modo trouxe junto:**
+
+- **O encerramento grava `helo_saiu`**, com histórico, e o `ai_enabled` fica
+  onde está. Sem isso, o chamado triado continuaria com duas falas e crédito
+  até sete no modo completo: no dia do gatilho ela voltaria a falar num chamado
+  em que já disse "um atendente já vai assumir".
+- **O encerramento chama a equipe com "Triagem concluída"**, o aviso da Fase 1
+  (`db88a34`). O `f2421ac` o tinha tirado porque o encerramento deixara de
+  existir; sem ele, o chamado triado e sem dono ficaria sem ninguém avisado.
+
+**O que continua rodando em triagem, por decisão (15/09/2026):** a varredura
+de indexação (`helo_indexacao.py`). Ela manda texto de artigo — não de
+cliente — ao serviço de embedding, e deixar a base pronta durante os quinze
+dias é exatamente o que se quer. Desligá-la seria
+`HELO_INDEXACAO_INTERVALO_SEGUNDOS=0`.
+
+**Limitação conhecida, não consertada: voltar de `completa` para `triagem`
+com conversa em andamento.** Nesses chamados ela fica calada para resposta
+comum, sem aviso à equipe — eles já passaram das duas falas. (O pedido de
+humano continua sendo atendido, porque passa por cima do teto.) Só importa com
+`HELO_ENABLED=true`, e nesse cenário quem vira o modo sabe o que está fazendo.
+Em 15/09/2026 o `HELO_ENABLED` estava `false` no painel de produção — medido
+pelo Rickelme —, então não havia conversa em modo completo para esta mudança
+calar.
+
+#### O gatilho para virar para `completa`
+
+**Os sete manuais publicados na Base de Conhecimento.** Não "os manuais
+chegaram": publicados, vinculados ao produto e marcados para a Helô, e
+indexados. Antes de virar, conferir:
+
+1. Os sete artigos publicados, com vínculo de produto e `helo_pode_ler`, e
+   trechos indexados para cada um (`helo_chunks` por `article_id`).
+2. O teto de distância remedido — é gatilho da dívida "O teto de 0,25 depende
+   do acervo": entra manual de produto que hoje não tem.
+3. O serviço de embedding respondendo e a `DEEPSEEK_API_KEY` configurada.
+4. **Os chamados triados antes de o `helo_saiu` existir.** Se a Helô chegou a
+   ficar ligada com o código anterior à Fase 2 — não medido: o `HELO_ENABLED`
+   nasce `false` desde o `8e9286c`, e o encerramento só entrou numa versão a
+   partir da v1.11.0 (`db88a34`) —, esses chamados têm duas falas dela e o
+   campo em `false`. No modo completo eles ganham crédito para mais cinco, e
+   ela voltaria a falar em quem não tiver responsável nem mensagem da equipe.
+   A consulta não depende de data; contar antes de virar:
+
+   ```sql
+   SELECT t.status, count(*)
+   FROM tickets t
+   WHERE t.helo_saiu = false
+     AND t.ai_enabled = true
+     AND t.assignee_id IS NULL
+     AND (SELECT count(*) FROM chat_messages m
+          WHERE m.ticket_id = t.id AND m.is_ai) >= 2
+     AND NOT EXISTS (
+       SELECT 1 FROM chat_messages m JOIN users u ON u.id = m.sender_id
+       WHERE m.ticket_id = t.id AND u.role IN ('admin', 'technician'))
+   GROUP BY t.status;
+   ```
+
+   Havendo algum, a correção é script avulso que grava `helo_saiu` — nunca
+   migration (dado histórico se corrige fora dela).
+5. O documento de LGPD: a Fase 2 manda conteúdo de chamado para a DeepSeek.
+
+### O interruptor da Helô é dela; o `ai_enabled` é de gente
+
+Decidido em 10/09/2026, corrigindo uma escolha de dois dias antes.
+
+`tickets.ai_enabled` sempre significou "alguém quer a IA fora deste chamado" —
+é o botão que o técnico aperta na tela, e ele fecha a Helô, a sugestão de
+resposta e o resumo. Quando a escalada passou a gravar nesse campo, ele ganhou
+um segundo significado: "a Helô já saiu daqui". Enquanto ela falava uma vez por
+chamado os dois davam no mesmo. Com ela conversando, deixaram: escalar por
+decisão do modelo, por teto de trocas ou por a IA estar fora do ar tirava a
+ferramenta do técnico **nos chamados em que a IA já tinha falhado**.
+
+`tickets.helo_saiu` é o campo dela, e ela escreve nos **quatro** motivos — e,
+desde 15/09, também no encerramento do modo triagem.
+
+**A exceção é deliberada e tem teste só para ela:** no pedido explícito de
+humano os dois campos caem. Ali quem quis sair da IA foi o cliente, e a vontade
+dele vale para as ferramentas todas. Sem prender isso, a assimetria com os
+outros três motivos pareceria esquecimento, e alguém "consertaria" tirando a
+linha.
+
+**A saída dela grava histórico**, como o botão da tela já gravava, com o motivo
+no comentário — o texto que o próprio modelo escreveu na linha `ESCALAR:`. Sem
+isso o técnico abre o chamado, vê a IA calada e não tem onde ler por quê. Foi
+o que forçou o gravador de histórico a sair de `routers/tickets.py` para
+`utils/history.py`: `tickets.py` importa `services.helo`, então a Helô
+importando de volta seria ciclo, e a alternativa era uma segunda cópia da
+regra.
+
+### O teto de distância da busca foi medido, não escolhido
+
+Ordenar não é filtrar: sem teto, `busca_trechos` sempre devolve os quatro
+trechos mais próximos, por mais longe que estejam — e o modelo os recebe num
+bloco que o prompt chama de "sua única fonte de verdade técnica".
+
+Medido em 09/09/2026 com 40 perguntas rotuladas contra o corpus real:
+
+| grupo | n | mediana do 1º | extremo |
+|---|---|---|---|
+| tem resposta na base | 27 | 0,2185 | máximo 0,2850 |
+| não tem resposta na base | 13 | 0,2789 | **mínimo 0,2590** |
+
+`TETO_DE_DISTANCIA = 0.25` é o maior corte que ainda barra **100%** das
+perguntas sem resposta, preservando 22 das 27 com resposta. De quebra, corta o
+enchimento das que passam: nessas 40 perguntas chegavam 160 trechos ao modelo,
+passam a chegar 25 — e em 74% das que têm resposta sobra exatamente UM trecho,
+o certo, no lugar de um mais três de ruído.
+
+**Remedido em 10/09/2026, depois da mudança de fonte**, com as mesmas 40
+perguntas contra os três manuais vindos da Base de Conhecimento: sem resposta,
+13 de 13 barradas (mínimo 0,2570); com resposta, 21 de 27 ainda recebendo
+trecho (eram 22). O texto dos trechos mudou de forma e a distância mexeu em até
+oito milésimos. O corte continua valendo, e ficou mais apertado: a margem
+abaixo, de 0,009, hoje é de 0,007.
+
+⚠️ **A margem é de 0,007** (0,25 contra 0,2570; na medição de 09/09 era 0,009,
+contra 0,2590). É um ajuste a 40 pontos, não uma lei, e vale para o **bge-m3
+com estes textos**: trocar o modelo de embedding invalida a medição sem que
+nada quebre visivelmente. Quando remedir está na dívida "O teto de 0,25
+depende do acervo", em Pendências conhecidas; como remedir, logo abaixo.
+
+⚠️ **A população "tem resposta" está enviesada para o fácil, e isso é limite
+conhecido da medição.** As 27 perguntas foram escritas por quem já tinha lido
+os manuais, e por isso usam as palavras do manual. Cliente escreve *"não sai
+nada no visor"*, não *"como interpreto os resultados"* — e a distância só
+cresce com essa diferença. Os 81% de acertos preservados são o **melhor caso**,
+não a expectativa: em produção o número é menor, e quanto menor só se descobre
+medindo com pergunta de cliente de verdade, quando houver conversa gravada para
+isso. Quem for revisitar o 0,25 começa por refazer a medição com perguntas
+reais — não por mexer no número.
+
+⚠️ **E o "barra 100%" é do conjunto de perguntas, não do mundo.** As perguntas
+foram escritas por quem já sabia a resposta, e saíram mais gentis que as de um
+cliente. A prova está no `test_helo_pooling_postgres.py`, com embedding real:
+*"como coloco o aparelho em português"* casa a seção certa a **0,2533** — um
+acerto DENTRO da faixa que a medição tratou como território de quem não tem
+resposta. Ou seja: as duas populações se sobrepõem entre 0,25 e 0,26, e o corte
+não separa duas nuvens, ele **escolhe um lado da sobreposição**.
+
+A escolha é de apetite de risco, e é a do desenho: passar trecho errado faz a
+Helô ditar procedimento de instrumento de medição legal a partir dele; cortar
+acerto faz um humano responder. Os dois erros terminam em escalada; só um deles
+pode terminar em instrução errada. Por isso o corte fica no lado apertado.
+
+**Quando o teto corta tudo, o resultado é o mesmo `NADA ENCONTRADO` de quando a
+busca não devolve nada.** Não existe estado novo para "achei, mas está longe":
+seria só mais uma coisa para o modelo interpretar errado.
+
+#### Como remedir
+
+O método das duas medições (09/09 e 10/09), para quem for refazer. Ele não
+está em script no repositório: está aqui, e as 40 perguntas vão junto.
+
+1. Com a base indexada como produção a veria (artigos publicados e marcados
+   para a Helô), embutir cada pergunta pelo mesmo serviço de embedding dela.
+2. Para cada pergunta, rodar a consulta de `busca_trechos` com os mesmos
+   filtros — publicação, marcação e o **produto da pergunta** — mas SEM o
+   teto, e guardar a distância e a seção do 1º colocado.
+3. Separar pelo rótulo: com resposta (a seção esperada existe na base; casa
+   se o rótulo aparece no título da seção, sem diferenciar maiúsculas) e sem
+   resposta (preço, certificado, dano físico, entrega, nota fiscal, função
+   que o aparelho não tem — nada disso está em manual).
+4. O teto é o maior corte que ainda barra **100%** do grupo sem resposta.
+   Anotar quantas com resposta ele preserva e a margem até a sem resposta
+   mais próxima — é a margem que diz se o número ainda se sustenta.
+
+⚠️ **O viés vem junto com o método.** As 27 perguntas com resposta foram
+escritas por quem já tinha lido os manuais, e usam as palavras deles: os
+acertos preservados são o **melhor caso**. Refazer com as mesmas 40 mede o
+quanto o acervo andou, não o cliente — medir o cliente pede pergunta de
+conversa gravada.
+
+As perguntas estão como foram embutidas, **sem acento**. Reescrever uma é
+trocar de pergunta: a distância muda, e a comparação com as medições
+anteriores deixa de valer para ela.
+
+<details><summary>As 40 perguntas rotuladas</summary>
+
+| Produto | Pergunta | Seção esperada (trecho do título) |
+|---|---|---|
+| Titan | como ajusto a data e a hora do aparelho | 8.1 |
+| Titan | como mudo o idioma para portugues | 8.2 |
+| Titan | onde vejo quantos testes ja foram feitos | 8.3 |
+| Titan | como apago os testes da memoria | 8.4 |
+| Titan | o titan precisa de bocal descartavel | FAQ |
+| Titan | de quanto em quanto tempo preciso calibrar | Calibra |
+| Titan | como ligo o aparelho | Passo a Passo |
+| Titan | o que significa resultado acima do limite | Interpreta |
+| Titan | posso deixar o aparelho guardado no sol | Cuidados |
+| Titan | como conecto o titan no aplicativo do celular | Aplicativo |
+| Titan | quanto custa a calibracao do titan | — (sem resposta) |
+| Titan | quero o certificado de calibracao rbc | — (sem resposta) |
+| Titan | o aparelho caiu e a tela quebrou | — (sem resposta) |
+| Titan | qual o prazo de entrega de um aparelho novo | — (sem resposta) |
+| Titan | como conecto na impressora | — (sem resposta) |
+| Titan | quero cancelar a compra e devolver o aparelho | — (sem resposta) |
+| Titan | como troco a celula de combustivel eu mesmo | — (sem resposta) |
+| Phoebus | como ajusto data hora e fuso horario | DATA, HORA |
+| Phoebus | como mudo o idioma do dispositivo | IDIOMA |
+| Phoebus | como conecto o phoebus na internet por cabo de rede | INTERNET |
+| Phoebus | como faco para ocultar o resultado na tela | RESULTADO EXIBIDO |
+| Phoebus | como ajusto o volume da voz e do bip | UDIO E BIP |
+| Phoebus | o reconhecimento facial esta aceitando a pessoa errada | FACIAL |
+| Phoebus | o phoebus tem impressora | Impressora |
+| Phoebus | quais formas de identificacao ele aceita | Autentica |
+| Phoebus | para que serve a plataforma web | Plataforma |
+| Phoebus | quanto custa uma calibracao | — (sem resposta) |
+| Phoebus | o aparelho molhou na chuva | — (sem resposta) |
+| Phoebus | quero trocar o phoebus por outro modelo | — (sem resposta) |
+| iBlow 10 Pro | como conecto no bluetooth do celular | Bluetooth |
+| iBlow 10 Pro | como carrego a bateria do aparelho | Carregamento |
+| iBlow 10 Pro | o que fazer quando aparece calibracao requerida | Erros |
+| iBlow 10 Pro | qual a diferenca entre o modo normal e o outro modo | Modos |
+| iBlow 10 Pro | o que significa led vermelho com bipes curtos | Interpreta |
+| iBlow 10 Pro | o protetor de saliva pode ser lavado | Composi |
+| iBlow 10 Pro | qual a capacidade da bateria em mah | Especifica |
+| iBlow 10 Pro | como vejo o historico dos ultimos testes | Avan |
+| iBlow 10 Pro | quanto custa o iblow | — (sem resposta) |
+| iBlow 10 Pro | quero a nota fiscal do aparelho | — (sem resposta) |
+| iBlow 10 Pro | o aparelho queimou depois de uma queda | — (sem resposta) |
+
+</details>
+
+### As duas hipóteses foram medidas: a A caiu, a B se confirmou
+
+Levantadas em 09/09/2026 a partir de UMA observação — *"como coloco o aparelho
+em português"* num Titan devolvia `6. Passo a Passo` (0,2420) à frente de
+`8.2 Alterar Idioma` (0,2592). As duas leituras pediam consertos opostos, e por
+isso ficaram separadas em vez de virar conserto na hora.
+
+Medidas no mesmo dia, com 40 perguntas rotuladas à mão contra o corpus real —
+27 com resposta conhecida no manual do produto e 13 sem resposta nenhuma.
+
+**Hipótese A — "trecho curto perde por ter menos sinal" — CAIU.** É o oposto:
+os trechos mais curtos da base são os que mais acertam. As quatro subseções
+`8.x` do Titan têm de 104 a 137 caracteres, e são os melhores resultados do
+corpus inteiro — `8.1 Ajustar Data e Hora` a 0,1527, `8.3` a 0,1753, `8.2` a
+0,2028, `8.4` a 0,2184. O que a observação original pegou foi sensibilidade à
+FORMA da pergunta, não ao tamanho do trecho: *"como mudo o idioma para
+português"* traz o `8.2` em primeiro, *"como coloco o aparelho em português"*
+não. **Não juntar subseção curta com a vizinha** — seria estragar o que está
+melhor.
+
+**Hipótese B — "o `6. Passo a Passo` é um aspirador" — CONFIRMOU.** Ele ficou
+em primeiro lugar em 4 de 8 perguntas de assuntos diferentes num sondagem
+livre, incluindo *"como conecto na impressora"* num aparelho que não tem
+impressora. O equivalente do iBlow (`5. Passo a Passo`) fez o mesmo em 3 de 8.
+Virou dívida com gatilho — ver a tabela de dívidas.
+
+**O teto de distância tira a maior parte do dano, e agrava um caso.** Com
+0,25, as duas perguntas em que o aspirador vencia sem concorrência (0,2789 e
+0,2710) passam a não devolver nada, que é o certo. Mas a pergunta original
+desta seção fica PIOR: `6. Passo a Passo` (0,2420) sobrevive ao corte e o
+`8.2` (0,2592) não, então o modelo passa a receber só o trecho errado onde
+antes recebia os dois. É o contraexemplo conhecido do teto, e é a melhor razão
+para a dívida da hipótese B existir.
+
+## Testes
+
+### Teste cuja garantia É uma cláusula `WHERE` não vai em mock
+
+Regra nascida de um defeito medido, não de preferência.
+
+A suíte do backend mocka a sessão do banco. O mock devolve o resultado que o
+teste combinou de antemão — ele **não olha a consulta**. Isso isola bem quem
+depende do banco, e não prova nada sobre quem depende do `WHERE`.
+
+Como isso apareceu: a guarda de silêncio da Helô (`_humano_ja_esta_na_conversa`)
+pergunta se alguém da equipe já falou no chamado, com três condições no
+`WHERE` — o chamado, a junção com o autor e o papel dele. **Removendo o filtro
+por papel, os 39 testes de `test_helo.py` continuavam verdes.** Sem esse filtro
+a consulta casaria a mensagem do próprio cliente, que está sempre presente
+quando a Helô vai responder: ela ficaria muda em todo chamado, para sempre. Um
+defeito de comportamento total, invisível para a suíte inteira.
+
+**A regra:** quando o que o teste promete garantir é o conteúdo de um `WHERE` —
+um filtro por papel, por dono, por escopo de empresa, um `EXISTS`, um `JOIN`
+que decide inclusão — o teste vai para um arquivo `*_postgres.py`, que executa
+a consulta contra PostgreSQL de verdade. Mock continua certo para o resto:
+ramificação, contrato de rota, texto, erro de provedor.
+
+Os arquivos `*_postgres.py` (`test_helo_postgres.py`,
+`test_dashboard_postgres.py`, `test_tickets_postgres.py`,
+`test_migrations_postgres.py`) leem `TEST_POSTGRES_URL` quando existe — o CI
+passa a variável (`.github/workflows/ci.yml`), então **eles rodam no gate** —
+e senão sobem um Postgres efêmero via `pgserver`. Sem nenhum dos dois, pulam
+em vez de falhar: quem não tem Postgres à mão continua rodando a suíte inteira.
+
+⚠️ **O alcance disto é maior do que a Helô.** Se o mock responde sem olhar a
+consulta, então **toda** cláusula `WHERE` coberta apenas por mock está sem
+cobertura de fato — inclusive as de escopo por cliente e por empresa, que são
+as mais valiosas do sistema. O que existe hoje em `*_postgres.py` é um começo,
+não um inventário. Ao mexer numa consulta cuja correção é o filtro, presuma
+que ela não está coberta e confira.
+
+**Como conferir se um teste prova o que diz:** apague a cláusula do código e
+rode. Se nenhum teste cair, o teste não cobre a cláusula — cobre o caminho até
+ela.
+
+## ⚠️ O `.env` de desenvolvimento aponta para produção
+
+**O que está protegido: a suíte de testes e, desde 10/09/2026, a migration.**
+O `backend/tests/conftest.py` **atribui** `DATABASE_URL` para um localhost
+falso no topo do módulo, antes de qualquer import de `app` — atribuição e não
+`setdefault`, com o comentário dizendo exatamente por quê. `pytest` é seguro.
+E o `alembic/env.py` recusa host remoto fora do contêiner — ver "A trava
+EXISTE", abaixo.
+
+**O que não está protegido: todo o resto.** Tudo que lê a configuração de
+verdade pega a URL de produção:
+
+- ~~**`alembic upgrade head` na máquina local.** O `alembic/env.py` monta a URL
+  com `get_settings().database_url`, que lê o `.env`. Migration aplicada por
+  engano em produção não tem desfazer barato.~~ Travado em 10/09/2026.
+- os scripts avulsos de `backend/scripts/` (`redefine_senha.py`,
+  `funde_empresas_duplicadas.py`, `normaliza_cnpj.py`, ...);
+- `python -c` e shell interativo que importem `app.core.config`;
+- `psql` com a URL copiada do `.env`.
+
+**Por que isso vira risco agora.** A primeira coisa que a Fase 2 da Helô roda é
+uma migration criando extensão no banco (`pgvector`). O gesto natural de testar
+isso é exatamente `alembic upgrade head` — e, até a trava de 10/09, esse
+comando, dessa máquina, aplicava em produção sem perguntar nada. O erro era
+silencioso: sem confirmação, sem aviso, e o sucesso indistinguível do sucesso
+local.
+
+### Mitigação
+
+**O conserto de verdade é o `.env` não guardar credencial de produção.** A URL
+de produção vive no painel do EasyPanel; a da máquina aponta para um Postgres
+local. Isso remove a arma em vez de travá-la. Custa subir um banco local —
+`pgserver` já está instalado e as migrations montam o schema sozinhas (ver a
+Rota B em `desenvolvimento-local.md`, na raiz).
+
+**A trava EXISTE desde 10/09/2026** (`app/utils/migrations.py`,
+`exige_alvo_liberado`): o `alembic/env.py` recusa host remoto, nomeando o host
+antes de abortar, e o `start.sh` exporta a liberação. Continua sendo trava, não
+conserto — a arma segue na mesa para script avulso e para `psql`.
+
+O ponto delicado do desenho é que ela **não pode quebrar o boot do container**,
+onde rodar migration contra produção é o comportamento certo — o `start.sh`
+faz `alembic upgrade head` na linha 5. A saída que não depende de ninguém
+lembrar de nada: **o próprio `start.sh` exporta a variável de liberação** antes
+de chamar o alembic. Ele está no repositório e sempre roda no container, então
+produção passa por construção, e um laptop nunca tem a variável. Uma variável
+que precisasse ser configurada no painel seria pior: esquecer de configurar
+derruba o deploy, e o modo de falha do deploy é sempre pior que o do laptop.
+
+Três detalhes do desenho que os testes prendem, e que não são óbvios:
+
+- **A liberação é o literal `"1"`.** `"true"`, `"sim"` e `"yes"` não liberam:
+  variável sobrevivente no shell de alguém não pode virar liberação por
+  acidente de valor.
+- **Alvo local passa sem liberação nenhuma.** Barrar quem desenvolve ensinaria
+  a exportar a variável no `.bashrc`, e aí a trava estaria morta para tudo.
+- **URL ilegível passa.** A trava não pode ser o motivo de o contêiner não
+  subir, e erro de digitação o alembic reporta melhor do que ela.
+
+O teste que importa roda `python -m alembic upgrade head` como **subprocesso**,
+com URL remota no ambiente: trava escrita e não ligada passa em teste de
+unidade e não impede nada. Há também um teste que lê o `start.sh` e confere que
+o nome da variável bate com a constante — renomear uma sem a outra travaria o
+DEPLOY, com o EasyPanel mostrando build verde e o contêiner não subindo, que é
+o mesmo modo de falha do `alembic heads`.
+
+**O hábito que vale desde já e não custa nada** — antes de migration ou script,
+imprimir para onde se está apontando:
+
+```
+cd backend && python -c "from app.core.config import get_settings; print(get_settings().database_url.rsplit('@', 1)[-1])"
+```
+
+Se sair host que não é `localhost`, o próximo comando fala com produção.
+
+Ver `desenvolvimento-local.md` e `docs/fechar-banco-para-a-internet.md` — o
+banco estar alcançável da máquina do desenvolvedor é a outra metade disto.
+
 # Pendências conhecidas
 
 ## Dívidas com gatilho — escolhas conscientes, não esquecimentos
@@ -844,6 +1366,12 @@ por inércia.
 | **Prazo de resposta sem campo por ciclo** | Reabrir renova só o prazo de resolução. A exibição foi corrigida (o chip diz "Respondido" em vez de mentir "Vencido"), mas o ciclo novo não ganha prazo de resposta próprio. | A operação precisar medir a resposta do ciclo reaberto. Exige um campo por ciclo, não por chamado. |
 | ~~**Sem MFA para contas de staff**~~ | **Quitada em 26/08/2026** — ver "Segundo fator" abaixo. | — |
 | **Access token sobrevive à revogação de sessão** | Ativar ou desligar o segundo fator apaga o refresh, despejando as sessões. Os access tokens já emitidos, porém, valem até o próprio vencimento: a exposição cai de 7 dias para 8 h, não para zero. Fechar de verdade pede um `sessions_valid_after` conferido no `get_current_user`. | Houver incidente real de sessão comprometida — ou o TTL do access subir. |
+| **Não existe mais o tempo de espera por um HUMANO** | Consequência aceita da decisão de 28/08/2026 (ver "O que conta como primeira resposta"): com a Helô carimbando, o único tempo gravado é o dela. Quanto o cliente esperou até alguém de carne e osso responder deixou de entrar no banco — e por isso **não volta por filtro nem por relatório**, só por coluna nova. | A operação precisar cobrar prazo da equipe, ou alguém estranhar o indicador vivendo em 100%. A saída é um campo próprio (`sla_first_human_response`), carimbado no mesmo ponto e com a guarda de autor que valia antes. |
+| ~~**Escalar não desliga a IA no chamado**~~ | **Quitada em 09/09/2026**, na Etapa 4 da Fase 2 — no mesmo commit em que o teto deixou de ser de falas e virou de trocas, que era o gatilho registrado. `ticket.ai_enabled = False` no caminho de escalada, e vale para os dois jeitos de escalar: o pedido explícito de humano, reconhecido antes do modelo, e a escalada que o próprio modelo pede com a linha `ESCALAR:`. ⚠️ **A consequência aceita ali durou um dia e foi revertida em 10/09**: desligar o `ai_enabled` fechava também o `suggest-reply` e o `summarize` do TÉCNICO, e nos três motivos que não são o pedido do cliente isso tirava a ferramenta dele justamente nos chamados em que a IA já tinha falhado. Hoje quem guarda o estado é `tickets.helo_saiu`, e o `ai_enabled` voltou a ser só o botão de gente — com uma exceção deliberada: no pedido explícito de humano os dois caem, porque ali quem quis sair da IA foi o cliente. Ver "O interruptor da Helô é dela; o `ai_enabled` é de gente" abaixo. | — |
+| **Editar um artigo reindexa todos os trechos dele** | Reescrita em 10/09/2026, quando a fonte passou a ser a Base de Conhecimento: a varredura de `helo_indexacao.py` compara o hash do corte do artigo INTEIRO e, se mudou, apaga todos os trechos dele e recria com ids novos, pagando embedding de todos. Corrigir uma linha de contato no manual do Phoebus reembute os 18 trechos, inclusive os 17 idênticos. Hoje custa pouco: o embedding é do serviço próprio (CPU, segundos por artigo), e nada fora da busca referencia `helo_chunks`. | A base crescer a ponto de a varredura pesar, ou — o que torna urgente de vez — a resposta da Helô registrar a citação por `chunk_id`: aí o refaz deixa citação apontando para trecho que não existe mais. A saída é casar trecho a trecho por hash do conteúdo antes de apagar — os iguais mantêm id e embedding, e só `ordem`/`secao` são atualizados. |
+| **O `.env` de desenvolvimento aponta para produção** | A suíte está blindada (o `conftest.py` força uma URL falsa) e, desde 10/09/2026, a migration também (o `alembic/env.py` recusa host remoto fora do contêiner). Script avulso, shell e `psql` na máquina do desenvolvedor continuam falando com o banco real. Ver a seção própria acima. | O gatilho registrado — a primeira migration da Fase 2 — chegou e foi atendido pela trava. O próximo é **qualquer script avulso novo que escreva no banco**; o conserto de verdade é o `.env` deixar de guardar credencial de produção. |
+| **O trecho genérico domina a busca (hipótese B)** | `6. Passo a Passo para Utilização` do Titan — e o `5.` equivalente do iBlow — fala de operação em geral e vence perguntas de assunto diferente: 4 de 8 numa sondagem livre, incluindo impressora num aparelho sem impressora. O teto de 0,25 tira a maior parte do dano hoje, e num caso conhecido agrava: para *"como coloco o aparelho em português"*, o aspirador sobrevive ao corte e o `8.2 Alterar Idioma` não. Com três manuais dói pouco — quase toda pergunta fora do manual já não devolve nada. | **Quando houver manual técnico para mais de três produtos.** Aí o aspirador passa a competir com candidatos legítimos dentro do teto, e o dano deixa de ser contornado por ele. O conserto é do lado do trecho — cortar aquele mais fino, ou tirá-lo da base —, e NÃO do corte de todo mundo: a hipótese A foi medida e caiu, os trechos curtos são os que mais acertam. |
+| **O teto de 0,25 depende do acervo** | Registrada em 10/09/2026. O número foi medido em 09/09 contra 74 trechos de 8 arquivos (margem de 0,009) e remedido em 10/09 contra 46 trechos de 3 artigos (margem de 0,007): mudou a fonte, mudou a margem, e ninguém mexeu no número. Com o suporte escrevendo artigos, o acervo vai continuar andando e o teto anda junto sem que nada quebre — a falha dele é silenciosa nas duas direções: acerto virando escalada, ou trecho errado passando. O método, as 40 perguntas e o viés (as 27 com resposta foram escritas por quem sabia a resposta; os acertos preservados são o melhor caso) estão em "Como remedir", na seção do teto. | **O acervo indexado mudar de ordem de grandeza** (46 trechos em 10/09; chegando às centenas, remedir), **ou entrar artigo de produto que hoje não tem manual** (Deimos, EBS-010, Mark X, Mercury) — as 40 perguntas não têm nenhuma sobre eles, então remedir inclui escrever perguntas para esse produto. Trocar o modelo de embedding invalida a medição inteira e também é gatilho. |
 | **Contador de artigo útil sem voto identificado** | `POST /kb/articles/{id}/feedback` incrementa sem registrar quem votou; o mesmo usuário incrementa em laço. Não vaza nada. | O número for usado para decidir alguma coisa. |
 | **Antivírus aceita quando está fora do ar** | Bloquear upload com o ClamAV indisponível derrubaria o anexo por falha de infraestrutura. Hoje o estado é reportado, não mais silencioso, e há script de revarredura. | O ClamAV estiver no ambiente e estável — aí bloquear passa a custar pouco. |
 
@@ -896,9 +1424,13 @@ leia o verde dele como garantia.
 
 ### Cobertura de testes desigual
 
-A suíte do backend está em **84%**, mas concentrada. O ponto fraco que
-permanece é o `groups.py` (**34%**); o `chat.py` subiu de 53% para **69%** ao
-longo das rodadas de agosto, sem ter sido alvo direto.
+A cobertura do backend é **concentrada**: alta na média e baixa em módulos
+específicos, sendo o `groups.py` o ponto fraco persistente.
+
+O número atual **não fica escrito aqui** — um percentual em documento nasce
+certo e vira mentira sozinho, sem ninguém mexer nele. O valor por arquivo sai
+do `term-missing` a cada execução (`pytest` a partir de `backend/`), e o CI
+reprova abaixo de 80% (`--cov-fail-under=80` no `backend/pyproject.toml`).
 
 ### O prazo de resposta não é renovado na reabertura
 
@@ -934,3 +1466,115 @@ Ligar `FORWARDED_ALLOW_IPS` resolve, **mas só depois de fechar a publicação d
 porta 8000**. Com a porta aberta na internet, autorizar cabeçalhos de proxy
 deixa qualquer um forjar o `X-Forwarded-For` e furar o limite por completo —
 pior do que o balde único. A ordem é: fechar a porta, depois autorizar.
+
+### `PATCH /kb/articles/{id}` com `null` explícito dá 500 — defeito anterior à Helô
+
+**Não foi introduzido pelo trabalho da Helô**, e está escrito aqui para o
+próximo a encontrar não achar que foi. O laço que causa o defeito está no
+`main` desde o CRUD da Base (`3db616c`, 06/04/2026); a Fase 2 só acrescentou
+`helo_pode_ler` à lista de campos que ele atinge, e ele atinge os outros igual.
+
+Todos os campos de `KBArticleUpdate` são `X | None = None`, então a validação
+aceita `{"campo": null}`. O `model_dump(exclude_unset=True)` mantém o `null`
+explícito — ele foi enviado —, e o laço de `setattr` grava `None` no artigo.
+Todas as colunas de `kb_articles` são NOT NULL, e a aplicação não tem tratador
+de `IntegrityError`:
+
+| Campo | Onde falha |
+|---|---|
+| `title` | antes do banco: `slugifica(None)` chama `.lower()` em `None` |
+| `content`, `category`, `tags`, `status`, `helo_pode_ler` | no commit: violação de NOT NULL |
+| `product_ids` | **não falha**: o `pop` trata `null` como "não enviado" |
+
+Nos dois casos nada é gravado: é erro 500, não dado corrompido. **Lido no
+código em 10/09/2026, não medido.** O conserto vale para a rota inteira, não
+para `helo_pode_ler` sozinho — recusar `null` explícito no schema, ou
+descartar os `None` antes do laço.
+
+### Quatro dos sete produtos não têm manual técnico
+
+> **Superado em parte em 15/09/2026.** O escopo mudou: os sete aparelhos
+> ganham manual técnico novo, escrito pela assistência técnica, e a Helô fica
+> em `HELO_MODO=triagem` até os sete estarem publicados — ver "O modo da Helô".
+> O "ela saúda, o cliente responde, ela escala" abaixo vale só no modo
+> `completa`; em triagem a resposta do cliente recebe o encerramento.
+
+Constatado em 09/09/2026, ao rodar as primeiras buscas de verdade. **É decisão
+de escopo do cliente, não pendência de código** — fica registrado para ninguém
+tratar como defeito nem "consertar" publicando a ficha comercial na Base. A
+tabela é do acervo de manuais de 09/09; desde 10/09 só os três manuais técnicos
+entram, como artigo.
+
+| Produto | Manual técnico | Ficha comercial |
+|---|---|---|
+| Titan | 15 trechos | — |
+| Phoebus | 18 trechos | — |
+| iBlow 10 Pro | 12 trechos | 8 trechos |
+| Deimos | **nenhum** | 6 trechos |
+| EBS-010 | **nenhum** | 5 trechos |
+| Mark X | **nenhum** | 6 trechos |
+| Mercury | **nenhum** | 4 trechos |
+
+Desde 10/09 a base é a Base de Conhecimento, e ficha comercial não entra nela:
+tem preço e promessa de venda, e é justamente o que não pode virar procedimento
+técnico. Então, para um chamado dos quatro últimos, a base vem vazia **em todo
+turno** — a menos que exista artigo publicado sem produto vinculado que
+responda: ela saúda, o cliente responde, ela escala. É o comportamento correto.
+O efeito prático é que a Helô só ajuda de fato em três dos sete aparelhos até
+existir manual dos outros.
+
+### Duas contradições nos manuais esperam decisão do suporte técnico
+
+Levantadas em 08/09/2026, ao preparar a base da Helô (Fase 2). **Não são
+decisão de código:** ninguém no desenvolvimento sabe qual dos números está
+certo, e escolher no chute seria escolher por ela.
+
+Por que importa: busca vetorial não resolve contradição. Ela traz os dois
+trechos e o modelo escolhe um, ou mistura — e a Helô responde **com a fonte
+citada**, que é pior do que responder sem fonte, porque parece conferível.
+
+| Contradição | O que a documentação diz |
+|---|---|
+| **Titan: memória e autonomia** | "Memória: até 8.000 testes" e "Autonomia: até 8.000 testes por carga", num aparelho com bateria Ni-MH de 400 mAh. O segundo número parece cópia do primeiro — uma bateria dessas dificilmente sustenta 8.000 sopros por carga. Enquanto não houver resposta, a Helô pode prometer autonomia que o aparelho não tem. |
+| **Canal de contato oficial** | Três telefones — (11) 4007-1507, (81) 9 9118-9612, (81) 98177-1177 — e dois e-mails, `cs@` e `sac@`. Não há como saber qual é o canal para o cliente sem perguntar. |
+
+**As outras contradições do corpus não precisam de decisão**, e vale registrar
+por quê para ninguém reabrir: todas elas são ficha comercial contra manual
+técnico — o aplicativo do iBlow10 Pro (Health App na ficha, i-SOBER no
+manual), os dois aplicativos do Deimos, o tempo de análise do iBlow10 Pro
+(5 s na ficha, 2 s no manual). Como as fichas comerciais ficam **fora da busca
+técnica** por decisão da Fase 2, esses pares nunca chegam juntos à Helô. Se um
+dia existir uma Helô comercial, elas voltam a valer.
+
+## `backend/scripts/` vai para a imagem de propósito
+
+O `.dockerignore` exclui `tests/` e **não** exclui `scripts/`. Isso não é
+descuido: os scripts avulsos são operados **pelo terminal do container**, e é lá
+que eles precisam existir.
+
+É o caso do `redefine_senha.py` quando alguém perde a senha e o SMTP de produção
+ainda não entrega o "Esqueci minha senha"; do `desliga_mfa.py` quando some o
+celular com o segundo fator; do `diagnostico_empresa_aparelho.py` antes de uma
+migration que cria índice único. Nenhum deles roda no boot, nenhum é importado
+por módulo de `app/` — mas todos são rodados contra o banco real, e o terminal
+do container é o único lugar onde as credenciais de produção já estão no
+ambiente.
+
+Tirá-los da imagem trocaria isso por copiar script e credencial para uma máquina
+de quem administra, na hora do incidente. Pior em todo sentido.
+
+### O que isso obriga
+
+**Estar na imagem não é estar no caminho de execução, e a diferença importa na
+hora de classificar um alerta.** Nenhum script é alcançável por requisição: não
+há rota, não há import a partir de `app/`, e o `start.sh` não os toca. Um alerta
+de análise estática em `scripts/` é sempre sobre o que acontece quando *uma
+pessoa* roda aquilo à mão.
+
+O que não muda é a régua do conteúdo: **script que vai à imagem é código que
+chega a produção**, então nada de segredo escrito, nada de valor de exemplo que
+alguém possa copiar, e nada de saída que revele credencial. Foi o que motivou o
+`testa_smtp.py` a trocar a máscara parcial — que imprimia os 6 primeiros e os 4
+últimos caracteres da chave — por uma impressão digital que não revela caractere
+nenhum. Máscara pela metade continua sendo vazamento, e o mais enganoso é que a
+saída *parece* segura.

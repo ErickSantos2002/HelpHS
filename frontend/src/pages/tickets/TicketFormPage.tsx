@@ -1,9 +1,22 @@
 import { zodResolver } from "@hookform/resolvers/zod";
-import { useCallback, useEffect, useRef, useState } from "react";
+import { useEffect, useState } from "react";
 import { useForm } from "react-hook-form";
-import { useNavigate, useParams } from "react-router-dom";
+import { Link, useNavigate, useParams } from "react-router-dom";
 import { z } from "zod";
-import { Alert, Button, FormDropdown, Input, Spinner, Textarea } from "../../components/ui";
+import {
+  Alert,
+  Button,
+  FileUpload,
+  FormDropdown,
+  Icon,
+  Input,
+  PriorityBadge,
+  RadioCards,
+  Spinner,
+  Textarea,
+} from "../../components/ui";
+import { CATEGORIAS, rotuloDeCategoria } from "../../lib/categoria";
+import { PRIORIDADE, PRIORIDADES, type TicketPriority } from "../../lib/prioridade";
 import {
   getProducts,
   type Product,
@@ -47,53 +60,106 @@ const ALLOWED_EXTENSIONS = [".pdf",".doc",".docx",".xls",".xlsx",".png",".jpg","
 const MAX_FILE_SIZE_MB = 25;
 const MAX_FILES = 10;
 
-const CATEGORY_LABEL: Record<string, string> = {
-  hardware: "Hardware", software: "Software", network: "Rede",
-  access: "Acesso", email: "E-mail", security: "Segurança",
-  general: "Geral", other: "Outro",
-};
+/*
+ * As oito categorias saíram daqui: moram em `lib/categoria.ts`, que é a fonte
+ * única consumida também pelo detalhe do chamado e pelo relatório. Eram TRÊS
+ * cópias, todas concordando — e foi exatamente assim que prioridade começou,
+ * antes de virar dez mapas divergentes.
+ */
 
-const PRIORITY_CONFIG = {
-  critical: { label: "Crítico",  dot: "bg-red-500",    active: "border-red-500/50 bg-red-500/10 text-red-700 dark:text-red-400"    },
-  high:     { label: "Alto",     dot: "bg-amber-500",  active: "border-amber-500/50 bg-amber-500/10 text-amber-700 dark:text-amber-400" },
-  medium:   { label: "Médio",    dot: "bg-info",       active: "border-info/50 bg-info/10 text-info-700 dark:text-info-400"           },
-  low:      { label: "Baixo",    dot: "bg-slate-400",  active: "border-border bg-background-elevated text-slate-400"                 },
-} as const;
+/**
+ * As quatro prioridades, como opções do `RadioCards`.
+ *
+ * Vêm de `lib/prioridade`. O que havia aqui era o **sexto** mapa divergente do
+ * mesmo dado, e discordava dos outros em duas coisas ao mesmo tempo: pintava
+ * `bg-red-500` e `bg-amber-500` crus, fora do sistema, e dizia "Crítico",
+ * "Alto", "Médio", "Baixo" — no masculino, contra "prioridade". A emenda E17
+ * fixou o feminino no pacote.
+ */
+const PRIORIDADES_OPCOES = PRIORIDADES.map((p) => ({
+  value: p,
+  label: PRIORIDADE[p].rotulo,
+  tone: PRIORIDADE[p].variante,
+}));
 
-const CATEGORY_CONFIG = [
-  { value: "hardware",  label: "Hardware",  icon: <svg className="w-5 h-5" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={1.5}><path strokeLinecap="round" strokeLinejoin="round" d="M9 3H5a2 2 0 00-2 2v4m6-6h10a2 2 0 012 2v4M9 3v18m0 0h10a2 2 0 002-2V9M9 21H5a2 2 0 01-2-2V9m0 0h18" /></svg> },
-  { value: "software",  label: "Software",  icon: <svg className="w-5 h-5" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={1.5}><path strokeLinecap="round" strokeLinejoin="round" d="M10 20l4-16m4 4l4 4-4 4M6 16l-4-4 4-4" /></svg> },
-  { value: "network",   label: "Rede",      icon: <svg className="w-5 h-5" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={1.5}><path strokeLinecap="round" strokeLinejoin="round" d="M3.055 11H5a2 2 0 012 2v1a2 2 0 002 2 2 2 0 012 2v2.945M8 3.935V5.5A2.5 2.5 0 0010.5 8h.5a2 2 0 012 2 2 2 0 104 0 2 2 0 012-2h1.064M15 20.488V18a2 2 0 012-2h3.064" /></svg> },
-  { value: "access",    label: "Acesso",    icon: <svg className="w-5 h-5" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={1.5}><path strokeLinecap="round" strokeLinejoin="round" d="M15 7a2 2 0 012 2m4 0a6 6 0 01-7.743 5.743L11 17H9v2H7v2H4a1 1 0 01-1-1v-2.586a1 1 0 01.293-.707l5.964-5.964A6 6 0 1121 9z" /></svg> },
-  { value: "email",     label: "E-mail",    icon: <svg className="w-5 h-5" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={1.5}><path strokeLinecap="round" strokeLinejoin="round" d="M3 8l7.89 5.26a2 2 0 002.22 0L21 8M5 19h14a2 2 0 002-2V7a2 2 0 00-2-2H5a2 2 0 00-2 2v10a2 2 0 002 2z" /></svg> },
-  { value: "security",  label: "Segurança", icon: <svg className="w-5 h-5" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={1.5}><path strokeLinecap="round" strokeLinejoin="round" d="M9 12l2 2 4-4m5.618-4.016A11.955 11.955 0 0112 2.944a11.955 11.955 0 01-8.618 3.04A12.02 12.02 0 003 9c0 5.591 3.824 10.29 9 11.622 5.176-1.332 9-6.03 9-11.622 0-1.042-.133-2.052-.382-3.016z" /></svg> },
-  { value: "general",   label: "Geral",     icon: <svg className="w-5 h-5" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={1.5}><path strokeLinecap="round" strokeLinejoin="round" d="M8.228 9c.549-1.165 2.03-2 3.772-2 2.21 0 4 1.343 4 3 0 1.4-1.278 2.575-3.006 2.907-.542.104-.994.54-.994 1.093m0 3h.01M21 12a9 9 0 11-18 0 9 9 0 0118 0z" /></svg> },
-  { value: "other",     label: "Outro",     icon: <svg className="w-5 h-5" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={1.5}><path strokeLinecap="round" strokeLinejoin="round" d="M5 12h.01M12 12h.01M19 12h.01M6 12a1 1 0 11-2 0 1 1 0 012 0zm7 0a1 1 0 11-2 0 1 1 0 012 0zm7 0a1 1 0 11-2 0 1 1 0 012 0z" /></svg> },
-];
-
-// ── Icons ─────────────────────────────────────────────────────
-
-const IC = {
-  ArrowLeft: <svg className="w-3.5 h-3.5" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2.5}><path strokeLinecap="round" strokeLinejoin="round" d="M10 19l-7-7m0 0l7-7m-7 7h18" /></svg>,
-  Clip: <svg className="w-5 h-5" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={1.5}><path strokeLinecap="round" strokeLinejoin="round" d="M15.172 7l-6.586 6.586a2 2 0 102.828 2.828l6.414-6.586a4 4 0 00-5.656-5.656l-6.415 6.585a6 6 0 108.486 8.486L20.5 13" /></svg>,
-  X: <svg className="w-3.5 h-3.5" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2.5}><path strokeLinecap="round" strokeLinejoin="round" d="M6 18L18 6M6 6l12 12" /></svg>,
-  Check: <svg className="w-3.5 h-3.5" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2.5}><path strokeLinecap="round" strokeLinejoin="round" d="M5 13l4 4L19 7" /></svg>,
-  Info: <svg className="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}><path strokeLinecap="round" strokeLinejoin="round" d="M13 16h-1v-4h-1m1-4h.01M21 12a9 9 0 11-18 0 9 9 0 0118 0z" /></svg>,
-};
 
 // ── Step indicator ────────────────────────────────────────────
 
+/**
+ * Onde a pessoa está: preenchendo ou revisando.
+ *
+ * Era uma fileira de `<span>`, e a etapa corrente existia **só na cor** —
+ * `text-slate-200` contra `text-slate-500`. Quem usa leitor de tela ouvia
+ * "1 Formulário / 2 Revisão" e não tinha como saber em qual estava.
+ *
+ * Agora é uma lista ordenada com `aria-current="step"`, que é o que carrega
+ * "esta é a atual" para a árvore. A etapa cumprida diz "concluída" em texto,
+ * porque o ✓ é desenho e sai da árvore.
+ *
+ * As cores saíram do sistema: `bg-emerald-600 text-white` era verde cru, e
+ * `bg-primary text-white` é a família da emenda E1 — branco sobre primário dá
+ * 3,83:1. O par medido é `text-on-primary`.
+ */
 function StepIndicator({ current }: { current: 1 | 2 }) {
+  const etapas = [
+    { numero: 1, nome: "Formulário" },
+    { numero: 2, nome: "Revisão" },
+  ] as const;
+
   return (
-    <div className="flex items-center gap-2 text-sm shrink-0">
-      <span className={`flex h-6 w-6 items-center justify-center rounded-full text-xs font-bold ${current > 1 ? "bg-emerald-600 text-white" : "bg-primary text-white"}`}>
-        {current > 1 ? IC.Check : "1"}
-      </span>
-      <span className={`font-medium ${current === 1 ? "text-slate-200" : "text-emerald-400"}`}>Formulário</span>
-      <span className="text-slate-600">/</span>
-      <span className={`flex h-6 w-6 items-center justify-center rounded-full text-xs font-bold ${current === 2 ? "bg-primary text-white" : "bg-background-elevated text-slate-500"}`}>2</span>
-      <span className={`font-medium ${current === 2 ? "text-slate-200" : "text-slate-500"}`}>Revisão</span>
-    </div>
+    <ol className="flex shrink-0 items-center gap-2 text-sm">
+      {etapas.map((etapa, i) => {
+        const atual = current === etapa.numero;
+        const cumprida = current > etapa.numero;
+        return (
+          <li key={etapa.numero} className="flex items-center gap-2">
+            {i > 0 && (
+              <span className="text-conteudo-muted" aria-hidden="true">
+                /
+              </span>
+            )}
+            <span
+              className={cn(
+                "flex h-6 w-6 items-center justify-center rounded-full text-xs font-bold",
+                cumprida
+                  // `bg-action-success`, e NÃO `bg-success`: o par de
+                  // `text-on-success` é o degrau de AÇÃO da emenda E2. Sobre a
+                  // cor cheia da rampa esse mesmo texto dá 2,54:1 — foi o que a
+                  // catraca acusou aqui, e é exatamente o defeito que a E2
+                  // existe para tornar impossível.
+                  ? "bg-action-success text-on-success"
+                  : atual
+                    // `bg-action`, e NAO `bg-primary`: o par de
+                    // `text-on-primary` e o degrau de ACAO, e o comentario do
+                    // tailwind.config diz isso com todas as letras. Sobre o
+                    // degrau de MARCA o mesmo texto da 3,83 no claro e 3,59 no
+                    // escuro. Mesma familia do `bg-success` que a catraca pegou
+                    // duas telas atras — o par certo com o fundo errado.
+                    ? "bg-action text-on-primary"
+                    : "bg-surface-elevated text-conteudo-muted",
+              )}
+              aria-hidden="true"
+            >
+              {cumprida ? <Icon name="check" size={14} strokeWidth={2.5} /> : etapa.numero}
+            </span>
+            <span
+              aria-current={atual ? "step" : undefined}
+              className={cn(
+                "font-medium",
+                atual
+                  ? "text-conteudo"
+                  : cumprida
+                    ? "text-on-tint-success"
+                    : "text-conteudo-muted",
+              )}
+            >
+              {etapa.nome}
+              {cumprida && <span className="sr-only"> (concluída)</span>}
+            </span>
+          </li>
+        );
+      })}
+    </ol>
   );
 }
 
@@ -101,129 +167,11 @@ function StepIndicator({ current }: { current: 1 | 2 }) {
 
 function FormSection({ title, children }: { title: string; children: React.ReactNode }) {
   return (
-    <div className="rounded-xl border border-border/40 bg-background-surface">
-      <div className="border-b border-border/40 px-5 py-3.5">
-        <h2 className="text-sm font-semibold text-slate-200">{title}</h2>
+    <div className="rounded-xl border border-borda/40 bg-surface">
+      <div className="border-b border-borda/40 px-5 py-3.5">
+        <h2 className="text-sm font-semibold text-conteudo">{title}</h2>
       </div>
       <div className="p-5 space-y-4">{children}</div>
-    </div>
-  );
-}
-
-// ── Category grid ─────────────────────────────────────────────
-
-function CategoryGrid({ value, onChange, error }: { value: string; onChange: (v: string) => void; error?: string }) {
-  return (
-    <div className="space-y-2">
-      <p className="text-sm font-medium text-slate-300">Categoria <span className="text-danger">*</span></p>
-      <div className="grid grid-cols-4 sm:grid-cols-8 gap-2">
-        {CATEGORY_CONFIG.map((cat) => {
-          const selected = value === cat.value;
-          return (
-            <button
-              key={cat.value}
-              type="button"
-              onClick={() => onChange(cat.value)}
-              className={`flex flex-col items-center gap-1.5 rounded-lg border px-2 py-3 text-center transition-all cursor-pointer ${
-                selected
-                  ? "border-primary bg-primary/10 text-primary"
-                  : "border-border/50 bg-background-elevated/40 text-slate-400 hover:border-border hover:text-slate-300 hover:bg-background-elevated"
-              }`}
-            >
-              {cat.icon}
-              <span className="text-[11px] font-semibold leading-tight">{cat.label}</span>
-            </button>
-          );
-        })}
-      </div>
-      {error && <p className="text-xs text-danger">{error}</p>}
-    </div>
-  );
-}
-
-// ── Priority selector ─────────────────────────────────────────
-
-function PrioritySelector({ value, onChange }: { value: string; onChange: (v: string) => void }) {
-  return (
-    <div className="space-y-2">
-      <p className="text-sm font-medium text-slate-300">Prioridade</p>
-      <div className="flex gap-2">
-        {(["critical", "high", "medium", "low"] as const).map((p) => {
-          const cfg = PRIORITY_CONFIG[p];
-          const selected = value === p;
-          return (
-            <button
-              key={p}
-              type="button"
-              onClick={() => onChange(p)}
-              className={`flex flex-1 items-center justify-center gap-1.5 rounded-lg border px-3 py-2 text-xs font-semibold transition-all cursor-pointer ${
-                selected ? cfg.active : "border-border/40 bg-background-elevated/40 text-slate-500 hover:border-border hover:text-slate-400"
-              }`}
-            >
-              <span className={`w-2 h-2 rounded-full shrink-0 ${selected ? cfg.dot : "bg-slate-600"}`} />
-              {cfg.label}
-            </button>
-          );
-        })}
-      </div>
-    </div>
-  );
-}
-
-// ── Drop zone ─────────────────────────────────────────────────
-
-function DropZone({ files, onChange }: { files: File[]; onChange: (files: File[]) => void }) {
-  const inputRef = useRef<HTMLInputElement>(null);
-  const [dragOver, setDragOver] = useState(false);
-  const [fileError, setFileError] = useState<string | null>(null);
-
-  const validateAndAdd = useCallback((incoming: File[]) => {
-    setFileError(null);
-    const valid: File[] = [];
-    for (const f of incoming) {
-      const ext = "." + f.name.split(".").pop()?.toLowerCase();
-      if (!ALLOWED_EXTENSIONS.includes(ext)) { setFileError(`Tipo não permitido: ${f.name}`); continue; }
-      if (f.size > MAX_FILE_SIZE_MB * 1024 * 1024) { setFileError(`Arquivo muito grande (máx ${MAX_FILE_SIZE_MB} MB): ${f.name}`); continue; }
-      if (!files.find((x) => x.name === f.name && x.size === f.size)) valid.push(f);
-    }
-    onChange([...files, ...valid].slice(0, MAX_FILES));
-  }, [files, onChange]);
-
-  return (
-    <div className="space-y-3">
-      <div
-        onDragOver={(e) => { e.preventDefault(); setDragOver(true); }}
-        onDragLeave={() => setDragOver(false)}
-        onDrop={(e) => { e.preventDefault(); setDragOver(false); validateAndAdd(Array.from(e.dataTransfer.files)); }}
-        onClick={() => inputRef.current?.click()}
-        className={`flex flex-col items-center gap-2 rounded-xl border-2 border-dashed px-6 py-8 text-center cursor-pointer transition-all ${
-          dragOver ? "border-primary bg-primary/5" : "border-border/50 hover:border-primary/40 hover:bg-primary/5"
-        }`}
-      >
-        <span className="text-slate-500">{IC.Clip}</span>
-        <div>
-          <p className="text-sm text-slate-400">Arraste arquivos aqui ou <span className="text-primary font-medium">clique para selecionar</span></p>
-          <p className="text-xs text-slate-600 mt-0.5">Máx {MAX_FILES} arquivos · {MAX_FILE_SIZE_MB} MB cada</p>
-        </div>
-        <input ref={inputRef} type="file" multiple accept={ALLOWED_EXTENSIONS.join(",")} className="hidden"
-          onChange={(e) => { if (e.target.files) validateAndAdd(Array.from(e.target.files)); e.target.value = ""; }} />
-      </div>
-      {fileError && <p className="text-xs text-danger">{fileError}</p>}
-      {files.length > 0 && (
-        <ul className="space-y-1.5">
-          {files.map((f, i) => (
-            <li key={i} className="flex items-center gap-3 rounded-lg border border-border/40 bg-background-elevated/40 px-3 py-2">
-              <div className="flex h-8 w-8 shrink-0 items-center justify-center rounded-lg bg-primary/10 text-[9px] font-bold text-primary">
-                {(f.name.split(".").pop() ?? "?").toUpperCase().slice(0, 4)}
-              </div>
-              <span className="flex-1 truncate text-sm text-slate-300">{f.name}</span>
-              <span className="text-xs text-slate-500 shrink-0">{(f.size / 1024 / 1024).toFixed(1)} MB</span>
-              <button type="button" onClick={() => onChange(files.filter((_, j) => j !== i))}
-                className="shrink-0 text-slate-500 hover:text-danger transition-colors cursor-pointer">{IC.X}</button>
-            </li>
-          ))}
-        </ul>
-      )}
     </div>
   );
 }
@@ -231,49 +179,43 @@ function DropZone({ files, onChange }: { files: File[]; onChange: (files: File[]
 // ── Sidebar summary ───────────────────────────────────────────
 
 function SidebarSummary({ values, files, productName }: { values: Partial<FormValues>; files: File[]; productName?: string }) {
-  const pri = values.priority ? PRIORITY_CONFIG[values.priority] : null;
-  const cat = values.category ? CATEGORY_LABEL[values.category] : null;
+  const cat = values.category ? rotuloDeCategoria(values.category) : null;
 
   return (
     <div className="space-y-4">
-      <div className="rounded-xl border border-border/40 bg-background-surface p-4">
-        <p className="mb-3 text-[10px] font-bold uppercase tracking-widest text-slate-500">Resumo</p>
+      <div className="rounded-xl border border-borda/40 bg-surface p-4">
+        <p className="mb-3 text-[10px] font-bold uppercase tracking-widest text-conteudo-muted">Resumo</p>
         <div className="space-y-3">
           <SummaryRow label="Título" empty="Não preenchido">
             {values.title && values.title.length >= 5 ? (
-              <span className="text-sm text-slate-200 line-clamp-2">{values.title}</span>
+              <span className="text-sm text-conteudo line-clamp-2">{values.title}</span>
             ) : null}
           </SummaryRow>
           <SummaryRow label="Categoria" empty="Não selecionada">
-            {cat ? <span className="text-sm text-slate-200">{cat}</span> : null}
+            {cat ? <span className="text-sm text-conteudo">{cat}</span> : null}
           </SummaryRow>
           <SummaryRow label="Prioridade" empty="Não definida">
-            {pri ? (
-              <span className={`inline-flex items-center gap-1.5 text-xs font-semibold ${pri.active.split(" ").filter(c => c.startsWith("text-")).join(" ")}`}>
-                <span className={`w-2 h-2 rounded-full ${pri.dot}`} />
-                {pri.label}
-              </span>
-            ) : null}
+            {values.priority ? <PriorityBadge priority={values.priority} /> : null}
           </SummaryRow>
           {productName && (
             <SummaryRow label="Produto" empty="">
-              <span className="text-sm text-slate-200">{productName}</span>
+              <span className="text-sm text-conteudo">{productName}</span>
             </SummaryRow>
           )}
           {files.length > 0 && (
             <SummaryRow label="Anexos" empty="">
-              <span className="text-sm text-slate-200">{files.length} arquivo{files.length > 1 ? "s" : ""}</span>
+              <span className="text-sm text-conteudo">{files.length} arquivo{files.length > 1 ? "s" : ""}</span>
             </SummaryRow>
           )}
         </div>
       </div>
 
-      <div className="rounded-xl border border-border/40 bg-background-surface p-4">
-        <p className="mb-3 flex items-center gap-1.5 text-[10px] font-bold uppercase tracking-widest text-slate-500">
-          {IC.Info}
+      <div className="rounded-xl border border-borda/40 bg-surface p-4">
+        <p className="mb-3 flex items-center gap-1.5 text-[10px] font-bold uppercase tracking-widest text-conteudo-muted">
+          <Icon name="info" size={16} />
           Dicas
         </p>
-        <ul className="space-y-2.5 text-xs text-slate-500">
+        <ul className="space-y-2.5 text-xs text-conteudo-muted">
           <li className="flex gap-2"><span className="shrink-0 text-primary mt-0.5">•</span>Descreva o problema com o máximo de detalhes possível.</li>
           <li className="flex gap-2"><span className="shrink-0 text-primary mt-0.5">•</span>Informe quando o problema começou e com que frequência ocorre.</li>
           <li className="flex gap-2"><span className="shrink-0 text-primary mt-0.5">•</span>Anexe prints ou fotos — isso acelera muito o atendimento.</li>
@@ -287,8 +229,8 @@ function SidebarSummary({ values, files, productName }: { values: Partial<FormVa
 function SummaryRow({ label, children, empty }: { label: string; children: React.ReactNode; empty: string }) {
   return (
     <div className="flex flex-col gap-0.5">
-      <p className="text-[10px] font-semibold uppercase tracking-widest text-slate-500">{label}</p>
-      {children ?? <span className="text-xs italic text-slate-600">{empty}</span>}
+      <p className="text-[10px] font-semibold uppercase tracking-widest text-conteudo-muted">{label}</p>
+      {children ?? <span className="text-xs italic text-conteudo-faint">{empty}</span>}
     </div>
   );
 }
@@ -297,9 +239,9 @@ function SummaryRow({ label, children, empty }: { label: string; children: React
 
 function PreviewRow({ label, children }: { label: string; children: React.ReactNode }) {
   return (
-    <div className="flex gap-4 py-3 border-b border-border/30 last:border-0">
-      <p className="w-28 shrink-0 text-[11px] font-semibold uppercase tracking-widest text-slate-500 pt-0.5">{label}</p>
-      <div className="flex-1 text-sm text-slate-200">{children}</div>
+    <div className="flex gap-4 py-3 border-b border-borda/30 last:border-0">
+      <p className="w-28 shrink-0 text-[11px] font-semibold uppercase tracking-widest text-conteudo-muted pt-0.5">{label}</p>
+      <div className="flex-1 text-sm text-conteudo">{children}</div>
     </div>
   );
 }
@@ -310,44 +252,40 @@ function PreviewStep({ values, files, productName, equipmentNames, onBack, onSub
   values: FormValues; files: File[]; productName?: string; equipmentNames: string[];
   onBack: () => void; onSubmit: () => void; submitting: boolean; isEdit: boolean;
 }) {
-  const pri = PRIORITY_CONFIG[values.priority];
   return (
     <div className="grid grid-cols-1 gap-5 lg:grid-cols-[1fr_300px]">
       <div className="space-y-5">
-        <div className="rounded-xl border border-border/40 bg-background-surface">
-          <div className="border-b border-border/40 px-5 py-3.5">
-            <h2 className="text-sm font-semibold text-slate-200">Confirme os dados antes de enviar</h2>
+        <div className="rounded-xl border border-borda/40 bg-surface">
+          <div className="border-b border-borda/40 px-5 py-3.5">
+            <h2 className="text-sm font-semibold text-conteudo">Confirme os dados antes de enviar</h2>
           </div>
           <div className="px-5 py-2">
             <PreviewRow label="Título">{values.title}</PreviewRow>
-            <PreviewRow label="Categoria">{CATEGORY_LABEL[values.category] ?? values.category}</PreviewRow>
+            <PreviewRow label="Categoria">{rotuloDeCategoria(values.category)}</PreviewRow>
             <PreviewRow label="Prioridade">
-              <span className={`inline-flex items-center gap-1.5 text-xs font-semibold ${pri.active.split(" ").filter(c => c.startsWith("text-")).join(" ")}`}>
-                <span className={`w-2 h-2 rounded-full ${pri.dot}`} />
-                {pri.label}
-              </span>
+              <PriorityBadge priority={values.priority} />
             </PreviewRow>
             {productName && <PreviewRow label="Produto">{productName}</PreviewRow>}
             {equipmentNames.length > 0 && (
               <PreviewRow label={plural(equipmentNames.length, "Equipamento", "Equipamentos")}>
                 <ul className="space-y-0.5">
                   {equipmentNames.map((nome) => (
-                    <li key={nome} className="text-slate-300">{nome}</li>
+                    <li key={nome} className="text-conteudo">{nome}</li>
                   ))}
                 </ul>
               </PreviewRow>
             )}
             <PreviewRow label="Descrição">
-              <p className="whitespace-pre-wrap leading-relaxed text-slate-300">{values.description}</p>
+              <p className="whitespace-pre-wrap leading-relaxed text-conteudo">{values.description}</p>
             </PreviewRow>
             {!isEdit && values.client_observation && (
               <PreviewRow label="Observações">
-                <p className="whitespace-pre-wrap text-slate-300">{values.client_observation}</p>
+                <p className="whitespace-pre-wrap text-conteudo">{values.client_observation}</p>
               </PreviewRow>
             )}
             {files.length > 0 && (
               <PreviewRow label={`Anexos (${files.length})`}>
-                <ul className="space-y-0.5">{files.map((f, i) => <li key={i} className="text-slate-400">{f.name}</li>)}</ul>
+                <ul className="space-y-0.5">{files.map((f, i) => <li key={i} className="text-conteudo-muted">{f.name}</li>)}</ul>
               </PreviewRow>
             )}
           </div>
@@ -360,9 +298,9 @@ function PreviewStep({ values, files, productName, equipmentNames, onBack, onSub
       </div>
 
       <div>
-        <div className="rounded-xl border border-border/40 bg-background-surface p-4">
-          <p className="mb-3 text-[10px] font-bold uppercase tracking-widest text-slate-500">Resumo</p>
-          <div className="space-y-2.5 text-xs text-slate-500">
+        <div className="rounded-xl border border-borda/40 bg-surface p-4">
+          <p className="mb-3 text-[10px] font-bold uppercase tracking-widest text-conteudo-muted">Resumo</p>
+          <div className="space-y-2.5 text-xs text-conteudo-muted">
             <p>Revise todas as informações antes de confirmar. Após o envio, o chamado será registrado e encaminhado para a equipe técnica.</p>
             <p className="text-primary font-medium">Você poderá acompanhar o status em Tickets.</p>
           </div>
@@ -507,23 +445,44 @@ export default function TicketFormPage() {
   return (
     <div className="space-y-5 pb-10">
       {/* ── Header ───────────────────────────────────────────── */}
-      <div className="flex flex-wrap items-start justify-between gap-4 rounded-2xl border border-border/40 bg-background-surface px-5 py-4">
+      <div className="flex flex-wrap items-start justify-between gap-4 rounded-2xl border border-borda/40 bg-surface px-5 py-4">
         <div className="min-w-0">
-          <button
-            onClick={() => navigate(-1)}
-            className="mb-2 flex items-center gap-1.5 text-xs font-medium text-slate-500 hover:text-primary transition-colors cursor-pointer"
-          >
-            {IC.ArrowLeft}
-            <span>Tickets</span>
-            <span className="text-slate-600">/</span>
-            <span className="font-mono text-slate-500">
-              {isEdit && existingTicket ? existingTicket.protocol : "Novo chamado"}
-            </span>
-          </button>
-          <h1 className="text-xl font-extrabold leading-tight text-slate-100">
+          {/*
+            Era um `<button onClick={navigate(-1)}>` com a linha inteira dentro,
+            então o nome acessível do controle era "Tickets / Novo chamado" — a
+            página de onde se vem E a página onde se está, num controle só.
+
+            Agora é trilha: um LINK para o destino (regra "navegação é link"),
+            e a página atual como texto com `aria-current="page"`, que é o que
+            diz "esta é a que você está vendo" sem fingir ser clicável.
+
+            A volta também deixou de ser `navigate(-1)`: de um formulário, o
+            histórico pode ter vindo do detalhe, da lista ou do painel, e "para
+            trás" não é um lugar. `/tickets` é.
+          */}
+          <nav aria-label="Trilha" className="mb-2">
+            <ol className="flex items-center gap-1.5 text-xs font-medium">
+              <li>
+                <Link
+                  to="/tickets"
+                  className="flex items-center gap-1.5 text-conteudo-muted transition-colors hover:text-conteudo-link"
+                >
+                  <Icon name="arrowLeft" size={14} strokeWidth={2.5} />
+                  Tickets
+                </Link>
+              </li>
+              <li aria-hidden="true" className="text-conteudo-faint">
+                /
+              </li>
+              <li aria-current="page" className="font-mono text-conteudo-muted">
+                {isEdit && existingTicket ? existingTicket.protocol : "Novo chamado"}
+              </li>
+            </ol>
+          </nav>
+          <h1 className="text-xl font-extrabold leading-tight text-conteudo-heading">
             {isEdit ? "Editar chamado" : "Abrir chamado"}
           </h1>
-          <p className="mt-1 text-sm text-slate-500">
+          <p className="mt-1 text-sm text-conteudo-muted">
             {isEdit ? "Atualize as informações do chamado." : "Preencha os campos para registrar seu chamado."}
           </p>
         </div>
@@ -561,18 +520,26 @@ export default function TicketFormPage() {
                   error={errors.title?.message}
                   {...register("title")}
                 />
-                <p className="text-xs text-slate-500">Resumo curto e objetivo do problema.</p>
+                <p className="text-xs text-conteudo-muted">Resumo curto e objetivo do problema.</p>
               </div>
 
-              <CategoryGrid
+              <RadioCards
+                name="category"
+                label="Categoria"
+                required
                 value={watchedCategory}
                 onChange={(v) => setValue("category", v, { shouldValidate: true })}
+                options={CATEGORIAS.map((c) => ({ ...c }))}
                 error={errors.category?.message}
               />
 
-              <PrioritySelector
+              <RadioCards
+                name="priority"
+                label="Prioridade"
+                layout="linha"
                 value={watchedPriority}
-                onChange={(v) => setValue("priority", v as FormValues["priority"])}
+                onChange={(v) => setValue("priority", v as TicketPriority)}
+                options={PRIORIDADES_OPCOES}
               />
             </FormSection>
 
@@ -586,25 +553,48 @@ export default function TicketFormPage() {
                 placeholder="Nenhum (opcional)"
               />
 
-              <div className="space-y-2">
-                <div className="flex items-center justify-between gap-3">
-                  <label className="text-sm font-medium text-slate-300">Equipamentos</label>
-                  {equipments.length > 1 && (
-                    <button
-                      type="button"
-                      onClick={toggleAllEquipments}
-                      className="text-xs font-medium text-primary hover:underline cursor-pointer"
-                    >
-                      {todosMarcados
-                        ? "Limpar seleção"
-                        : `Selecionar todos (${Math.min(equipments.length, MAX_EQUIPAMENTOS)})`}
-                    </button>
-                  )}
-                </div>
+              {/*
+                `fieldset` com `legend`, e não um `<label>` solto.
+
+                O que havia aqui era um `<label>` sem `htmlFor` — um rótulo
+                pendurado no vazio, que não nomeia coisa nenhuma e some da
+                árvore de acessibilidade. As fichas abaixo são botões de
+                alternância com `aria-pressed`, então quem usa leitor de tela
+                ouvia "Notebook Dell, não pressionado" sem nunca ouvir a palavra
+                "Equipamentos": não havia grupo.
+
+                As fichas continuam `<button aria-pressed>` de propósito: é
+                seleção MÚLTIPLA, o estado é binário por item, e `aria-pressed`
+                é o que a especificação manda para alternância. Não é primitivo
+                reinventado — é o controle nativo certo para o caso.
+              */}
+              <fieldset className="relative min-w-0 space-y-2 border-0 p-0">
+                {/*
+                  O `legend` é o PRIMEIRO filho, e isso não é estilo: fora dessa
+                  posição ele deixa de nomear o grupo. Estava dentro de um `div`
+                  de layout, e o grupo ficou sem nome de novo — o teste pegou.
+
+                  Por isso o "Selecionar todos" vai posicionado, e não numa
+                  linha de flex junto: pô-lo dentro do `legend` costuraria o
+                  texto dele ao nome do grupo ("Equipamentos Selecionar todos
+                  (3)"), que é outra forma de perder o nome.
+                */}
+                <legend className="text-sm font-medium text-conteudo">Equipamentos</legend>
+                {equipments.length > 1 && (
+                  <button
+                    type="button"
+                    onClick={toggleAllEquipments}
+                    className="absolute right-0 top-0 cursor-pointer text-xs font-medium text-conteudo-link hover:underline"
+                  >
+                    {todosMarcados
+                      ? "Limpar seleção"
+                      : `Selecionar todos (${Math.min(equipments.length, MAX_EQUIPAMENTOS)})`}
+                  </button>
+                )}
                 {!selectedProductId ? (
-                  <p className="text-sm text-slate-500">Selecione um produto primeiro.</p>
+                  <p className="text-sm text-conteudo-muted">Selecione um produto primeiro.</p>
                 ) : equipments.length === 0 ? (
-                  <p className="text-sm text-slate-500">
+                  <p className="text-sm text-conteudo-muted">
                     Você não tem equipamentos cadastrados para este produto.
                   </p>
                 ) : (
@@ -625,13 +615,13 @@ export default function TicketFormPage() {
                               "rounded-lg border px-3 py-2 text-left text-sm transition-colors",
                               bloqueado ? "cursor-not-allowed opacity-40" : "cursor-pointer",
                               marcado
-                                ? "border-primary bg-primary/15 text-slate-100"
-                                : "border-border text-slate-400 hover:border-slate-500",
+                                ? "border-primary bg-primary/15 text-conteudo-heading"
+                                : "border-borda text-conteudo-muted hover:border-borda",
                             )}
                           >
                             <span className="font-medium">{e.name}</span>
                             {e.serial_number && (
-                              <span className="ml-2 font-mono text-xs text-slate-500">
+                              <span className="ml-2 font-mono text-xs text-conteudo-muted">
                                 {e.serial_number}
                               </span>
                             )}
@@ -639,7 +629,7 @@ export default function TicketFormPage() {
                         );
                       })}
                     </div>
-                    <p className="text-xs text-slate-500">
+                    <p className="text-xs text-conteudo-muted">
                       {noLimite
                         ? `Máximo de ${MAX_EQUIPAMENTOS} aparelhos por chamado. Para os demais, abra um segundo chamado.`
                         : selectedEquipmentIds.length > 0
@@ -648,7 +638,7 @@ export default function TicketFormPage() {
                     </p>
                   </>
                 )}
-              </div>
+              </fieldset>
             </FormSection>
 
             {/* Descrição */}
@@ -661,7 +651,7 @@ export default function TicketFormPage() {
                   error={errors.description?.message}
                   {...register("description")}
                 />
-                <p className="text-xs text-slate-500">Quanto mais detalhes, mais rápido conseguimos resolver.</p>
+                <p className="text-xs text-conteudo-muted">Quanto mais detalhes, mais rápido conseguimos resolver.</p>
               </div>
 
               {!isEdit && (
@@ -673,15 +663,21 @@ export default function TicketFormPage() {
                     error={errors.client_observation?.message}
                     {...register("client_observation")}
                   />
-                  <p className="text-xs text-slate-500">Campo opcional — editável após abrir o chamado.</p>
+                  <p className="text-xs text-conteudo-muted">Campo opcional — editável após abrir o chamado.</p>
                 </div>
               )}
             </FormSection>
 
             {/* Anexos */}
             <FormSection title="Anexos (opcional)">
-              <DropZone files={files} onChange={setFiles} />
-              <p className="text-xs text-slate-500">
+              <FileUpload
+                files={files}
+                onChange={setFiles}
+                accept={ALLOWED_EXTENSIONS}
+                maxFiles={MAX_FILES}
+                maxSizeMb={MAX_FILE_SIZE_MB}
+              />
+              <p className="text-xs text-conteudo-muted">
                 Prints, fotos ou documentos ajudam o técnico a resolver mais rapidamente.
               </p>
             </FormSection>

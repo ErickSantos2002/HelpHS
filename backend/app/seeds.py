@@ -40,29 +40,45 @@ PRODUCTS = [
     {"name": "Titan", "description": "Bafômetro Titan", "version": None},
 ]
 
+# Prazos aprovados pelo SGI: cada valor anterior pela METADE, contado em
+# MINUTOS. A unidade mudou porque metade da resposta do critico e 30 min, e isso
+# nao cabe em hora inteira.
+#
+# ESTES VALORES SO ALCANCAM AMBIENTE NOVO. `seed_sla_configs` cria o que nao
+# existe e nao toca no que existe -- entao producao, que ja tem as quatro
+# linhas, continua com os prazos antigos ate alguem edita-los pela interface. E
+# de proposito: prazo de SLA e configuracao do cliente, e um seed que
+# sobrescreve mudaria o contrato de atendimento no boot seguinte, sem ninguem
+# pedir.
+#
+#   nivel     resposta            resolucao
+#   critico    1 h ->  30 min      4 h ->  120 min
+#   alto       2 h ->  60 min      8 h ->  240 min
+#   medio      4 h -> 120 min     24 h ->  720 min
+#   baixo      8 h -> 240 min     48 h -> 1440 min
 SLA_CONFIGS: list[dict[str, Any]] = [
     {
         "level": SLALevel.critical,
-        "response_time_hours": 1,
-        "resolve_time_hours": 4,
+        "response_time_minutes": 30,
+        "resolve_time_minutes": 120,
         "warning_threshold": 80,
     },
     {
         "level": SLALevel.high,
-        "response_time_hours": 2,
-        "resolve_time_hours": 8,
+        "response_time_minutes": 60,
+        "resolve_time_minutes": 240,
         "warning_threshold": 80,
     },
     {
         "level": SLALevel.medium,
-        "response_time_hours": 4,
-        "resolve_time_hours": 24,
+        "response_time_minutes": 120,
+        "resolve_time_minutes": 720,
         "warning_threshold": 80,
     },
     {
         "level": SLALevel.low,
-        "response_time_hours": 8,
-        "resolve_time_hours": 48,
+        "response_time_minutes": 240,
+        "resolve_time_minutes": 1440,
         "warning_threshold": 80,
     },
 ]
@@ -158,7 +174,7 @@ async def seed_sla_configs(session: AsyncSession) -> None:
         config = SLAConfig(id=uuid.uuid4(), **data)
         session.add(config)
         logger.info(
-            f"SLA config created: {data['level'].value} — response {data['response_time_hours']}h / resolve {data['resolve_time_hours']}h"
+            f"SLA config created: {data['level'].value} — response {data['response_time_minutes']}min / resolve {data['resolve_time_minutes']}min"
         )
 
 

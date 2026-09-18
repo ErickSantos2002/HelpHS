@@ -14,6 +14,9 @@ import { Spinner } from "./components/ui";
 const LoginPage = lazy(() => import("./pages/auth/LoginPage"));
 const RegisterPage = lazy(() => import("./pages/auth/RegisterPage"));
 const VerifyEmailPage = lazy(() => import("./pages/auth/VerifyEmailPage"));
+const PoliticaPrivacidadePage = lazy(
+  () => import("./pages/legal/PoliticaPrivacidadePage"),
+);
 const ForgotPasswordPage = lazy(() => import("./pages/auth/ForgotPasswordPage"));
 const ResetPasswordPage = lazy(() => import("./pages/auth/ResetPasswordPage"));
 const OnboardingPage = lazy(() => import("./pages/onboarding/OnboardingPage"));
@@ -38,12 +41,27 @@ const EquipmentPage = lazy(() => import("./pages/equipment/EquipmentPage"));
 const AuditLogsPage = lazy(() => import("./pages/audit/AuditLogsPage"));
 const SettingsPage = lazy(() => import("./pages/settings/SettingsPage"));
 const QuickRepliesPage = lazy(() => import("./pages/settings/QuickRepliesPage"));
+const LibraryPage = lazy(() => import("./pages/library/LibraryPage"));
 const ForbiddenPage = lazy(() => import("./pages/errors/ForbiddenPage"));
 const NotFoundPage = lazy(() => import("./pages/errors/NotFoundPage"));
 
+/* Galeria da casca — SO EM DESENVOLVIMENTO (src/dev/GaleriaCasca.tsx).
+ * O ternario e o guarda: no build `import.meta.env.DEV` vira `false`, o ramo
+ * com o import dinamico fica inalcancavel e o Rollup nao emite o chunk. Por
+ * isso o `lazy()` mora dentro da condicao, e nao fora dela — se ficasse fora,
+ * o chunk seria gerado mesmo sem rota que o use. Sai na Fase 20. */
+const GaleriaCasca = import.meta.env.DEV
+  ? lazy(() => import("./dev/GaleriaCasca"))
+  : null;
+
+/* Galeria dos primitivos — mesma regra, mesmo guarda, mesma saida na Fase 20. */
+const GaleriaPrimitivos = import.meta.env.DEV
+  ? lazy(() => import("./dev/GaleriaPrimitivos"))
+  : null;
+
 function Loading() {
   return (
-    <div className="flex h-screen items-center justify-center bg-background">
+    <div className="flex h-screen items-center justify-center bg-surface-base">
       <Spinner size="lg" />
     </div>
   );
@@ -66,6 +84,19 @@ function App() {
           {/* Confirmação de e-mail — acessível mesmo com sessão aberta, já que
               o link pode ser clicado em outro navegador */}
           <Route path="/confirmar-email" element={<VerifyEmailPage />} />
+
+          {/* Política de privacidade — pública e fora do PublicOnlyRoute: é
+              lida por quem está se cadastrando (sem sessão) e por quem já usa
+              o sistema (com sessão). */}
+          <Route path="/privacidade" element={<PoliticaPrivacidadePage />} />
+
+          {/* Galeria da casca — nao existe no bundle de producao. */}
+          {GaleriaCasca && (
+            <Route path="/galeria-ds" element={<GaleriaCasca />} />
+          )}
+          {GaleriaPrimitivos && (
+            <Route path="/galeria-primitivos" element={<GaleriaPrimitivos />} />
+          )}
 
           {/* ── Error pages ──────────────────────────────────── */}
           <Route path="/403" element={<ForbiddenPage />} />
@@ -109,6 +140,11 @@ function App() {
                   <Route path="/etiquetas" element={<SettingsPage />} />
                   <Route path="/respostas-rapidas" element={<QuickRepliesPage />} />
                   <Route path="/grupos" element={<GroupsPage />} />
+                  {/* A listagem do acervo é SÓ staff, e a guarda é do backend
+                      antes de ser daqui: `GET /library` recusa cliente. Esta
+                      rota é a segunda tranca, não a primeira -- o cliente
+                      recebe o arquivo pelo que o técnico anexa na conversa. */}
+                  <Route path="/biblioteca" element={<LibraryPage />} />
                 </Route>
 
                 {/* Admin only */}

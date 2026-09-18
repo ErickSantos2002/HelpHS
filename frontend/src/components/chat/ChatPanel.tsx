@@ -7,31 +7,115 @@ import {
   type QuickReply,
 } from "../../services/quickReplyService";
 import { cn } from "../../lib/utils";
+import { Avatar, Button, Icon, Input, Modal, Spinner } from "../ui";
+import { rotuloDePapel, varianteDePapel } from "../../lib/papel";
+import { TOM_STATUS, type VarianteStatus } from "../../lib/status";
 import {
   buildWsUrl,
   getChatMessages,
   improveMessage,
   suggestReply,
+  sendMessageWithLibraryFile,
   summarizeConversation,
   type ChatMessage,
 } from "../../services/chatService";
+import {
+  getLibraryFileUrl,
+  getLibraryFiles,
+  type LibraryFile,
+} from "../../services/libraryService";
 
-// ── Role label ────────────────────────────────────────────────
+/** Tamanho legível. Sem casa decimal em byte: "512 B", não "0,5 KB". */
+function tamanhoLegivel(bytes: number): string {
+  if (bytes < 1024) return `${bytes} B`;
+  const kb = bytes / 1024;
+  if (kb < 1024) return `${Math.round(kb)} KB`;
+  return `${(kb / 1024).toFixed(1).replace(".", ",")} MB`;
+}
 
-const ROLE_LABEL: Record<string, string> = {
-  admin: "Admin",
-  technician: "Técnico",
-  client: "Cliente",
-};
+/**
+ * O arquivo da biblioteca, dentro da bolha.
+ *
+ * ⚠️ O LINK NÃO VEM NA MENSAGEM, e por isso este componente busca um na hora
+ * do clique em vez de desenhar um `<a href>`. O link tem validade, e o
+ * `/library/{id}/download` **confere a visibilidade quando emite**: um item que
+ * o admin fechou depois do envio para de abrir para o cliente, e é assim que
+ * tem de ser. Um href gravado na bolha continuaria valendo para sempre.
+ *
+ * O 404 para o cliente é o mesmo de id inexistente, de propósito: ele não pode
+ * aprender que o arquivo existe. Aqui isso vira uma frase honesta em vez de um
+ * erro cru — o arquivo esteve ali, e deixou de estar disponível.
+ */
+function AnexoDaBiblioteca({ msg }: { msg: ChatMessage }) {
+  const [baixando, setBaixando] = useState(false);
 
-const ROLE_COLOR: Record<string, string> = {
-  admin: "text-primary",
-  technician: "text-info",
-  client: "text-slate-400",
-};
+  if (!msg.library_file_id) return null;
+  const nome = msg.library_file_name ?? "Arquivo da biblioteca";
+
+  async function baixar() {
+    if (!msg.library_file_id) return;
+    setBaixando(true);
+    try {
+      const url = await getLibraryFileUrl(msg.library_file_id);
+      window.open(url, "_blank", "noopener,noreferrer");
+    } catch {
+      // Não distingue 404 de 403 na fala: a API não distingue de propósito.
+      toast.error("Este arquivo não está mais disponível para você.");
+    } finally {
+      setBaixando(false);
+    }
+  }
+
+  return (
+    <div className="mt-2 flex items-center gap-2 rounded-lg border border-borda bg-surface px-2.5 py-2">
+      <Icon name="paperclip" size={16} strokeWidth={2} className="shrink-0 text-conteudo-muted" />
+      <div className="min-w-0 flex-1">
+        <p className="truncate text-xs font-medium text-conteudo">{nome}</p>
+        {msg.library_file_size !== null && (
+          <p className="text-xs text-conteudo-muted">{tamanhoLegivel(msg.library_file_size)}</p>
+        )}
+      </div>
+      <Button
+        variant="secondary"
+        size="sm"
+        className="shrink-0"
+        loading={baixando}
+        onClick={baixar}
+        // O nome do arquivo entra no nome acessível: são vários anexos na mesma
+        // conversa, e quatro botões dizendo só "Baixar" não deixam escolher.
+        aria-label={`Baixar ${nome}`}
+        icon={<Icon name="download" size={14} strokeWidth={2} />}
+      >
+        Baixar
+      </Button>
+    </div>
+  );
+}
 
 // ── ChatBubble ────────────────────────────────────────────────
 
+/**
+ * O papel de quem fala saiu daqui.
+ *
+ * Havia um `ROLE_LABEL` e um `ROLE_COLOR` locais — a sétima e a oitava cópia da
+ * mesma tabela. O rótulo divergia ("Admin" contra "Administrador", que é o que
+ * as outras seis escrevem) e a cor era a cor CHEIA da rampa como texto:
+ * `text-info` sobre a superfície branca dá 3,68:1, abaixo do piso de 4,5:1.
+ * Agora vem de `lib/papel.ts`, e o tom vem do `TOM_STATUS` — o mesmo
+ * vocabulário de variante em que o `varianteDePapel` fala.
+ *
+ * ── Como as três bolhas se distinguem ─────────────────────────────────
+ *
+ * Por LADO, por COR e por AUTOR ESCRITO. A cor sozinha não satisfaz a 1.4.1, e
+ * é por isso que a bolha da IA mantém "Assistente IA" acima do texto e a de
+ * outra pessoa mantém o nome.
+ *
+ * ⚠️ A bolha de quem está escrevendo (`isOwn`) **não tem autor escrito**, e
+ * nunca teve: ela se distingue por ficar à direita e pintar a tinta primária —
+ * cor e posição, exatamente o que a 1.4.1 não aceita sozinho. O conserto ("Você"
+ * no texto, ou em `sr-only`) muda o que a árvore de acessibilidade fala, e essa
+ * decisão não é desta migração. Relatado, não consertado aqui.
+ */
 function ChatBubble({ msg, isOwn }: { msg: ChatMessage; isOwn: boolean }) {
   const time = new Date(msg.created_at).toLocaleTimeString("pt-BR", {
     hour: "2-digit",
@@ -41,7 +125,9 @@ function ChatBubble({ msg, isOwn }: { msg: ChatMessage; isOwn: boolean }) {
   if (msg.is_system) {
     return (
       <div className="flex justify-center my-2">
-        <span className="text-xs text-slate-500 bg-background-elevated px-3 py-1 rounded-full italic">
+        {/* `conteudo-muted` e não `conteudo-faint`: faint sobre a superfície
+            elevada é o par de 2,34:1, e este aviso é texto que se lê. */}
+        <span className="text-xs text-conteudo-muted bg-surface-elevated px-3 py-1 rounded-full italic">
           {msg.content}
         </span>
       </div>
@@ -51,15 +137,18 @@ function ChatBubble({ msg, isOwn }: { msg: ChatMessage; isOwn: boolean }) {
   if (msg.is_ai) {
     return (
       <div className="flex gap-2 mb-3">
-        <div className="w-7 h-7 rounded-full bg-purple-900 border border-purple-700 flex items-center justify-center shrink-0 text-xs font-bold text-purple-300">
+        {/* Não é `Avatar`: o primitivo deriva a cor do NOME de quem fala, e a
+            IA não é uma pessoa entre outras — a marca dela é fixa, e "AI" não
+            são iniciais de nome nenhum. */}
+        <div className="w-8 h-8 rounded-full bg-tint-info border border-info/30 flex items-center justify-center shrink-0 text-xs font-bold text-on-tint-info">
           AI
         </div>
         <div className="max-w-[75%]">
-          <p className="text-xs text-purple-400 mb-0.5">Assistente IA</p>
-          <div className="rounded-xl rounded-tl-none bg-purple-950 border border-purple-800 px-3 py-2 text-sm text-slate-200 leading-relaxed break-words whitespace-pre-wrap">
+          <p className="text-xs text-on-tint-info mb-0.5">Assistente IA</p>
+          <div className="rounded-xl rounded-tl-none bg-tint-info border border-info/30 px-3 py-2 text-sm text-conteudo leading-relaxed break-words whitespace-pre-wrap">
             {msg.content}
           </div>
-          <p className="text-xs text-slate-600 mt-0.5">{time}</p>
+          <p className="text-xs text-conteudo-muted mt-0.5">{time}</p>
         </div>
       </div>
     );
@@ -69,10 +158,17 @@ function ChatBubble({ msg, isOwn }: { msg: ChatMessage; isOwn: boolean }) {
     return (
       <div className="flex flex-col items-end mb-3">
         <div className="max-w-[75%]">
-          <div className="rounded-xl rounded-tr-none bg-primary/20 border border-primary/30 px-3 py-2 text-sm text-slate-100 leading-relaxed break-words whitespace-pre-wrap">
+          {/* `bg-tint-primary` e não `bg-primary/20`: a tinta já carrega os 15%
+              no próprio token, e é o mesmo fundo que o `Badge` primário pinta.
+              A borda continua com o modificador porque ela é a cor cheia da
+              rampa a 30% — não é token com alfa (regra (a) do D8-a). */}
+          <div className="rounded-xl rounded-tr-none bg-tint-primary border border-primary/30 px-3 py-2 text-sm text-conteudo leading-relaxed break-words whitespace-pre-wrap">
             {msg.content}
+            <AnexoDaBiblioteca msg={msg} />
           </div>
-          <p className="text-xs text-slate-600 mt-0.5 text-right">{time}</p>
+          <p className="text-xs text-conteudo-muted mt-0.5 text-right">
+            {time}
+          </p>
         </div>
       </div>
     );
@@ -80,28 +176,26 @@ function ChatBubble({ msg, isOwn }: { msg: ChatMessage; isOwn: boolean }) {
 
   return (
     <div className="flex gap-2 mb-3">
-      {/* Avatar initial */}
-      <div className="w-7 h-7 rounded-full bg-background-elevated border border-border flex items-center justify-center shrink-0 text-xs font-medium text-slate-300">
-        {msg.sender_name.charAt(0).toUpperCase()}
-      </div>
+      <Avatar name={msg.sender_name} size="sm" />
       <div className="max-w-[75%]">
         <p className="text-xs mb-0.5">
-          <span className="text-slate-300 font-medium">{msg.sender_name}</span>
+          <span className="text-conteudo font-medium">{msg.sender_name}</span>
           {msg.sender_role && (
             <span
               className={cn(
                 "ml-1.5",
-                ROLE_COLOR[msg.sender_role] ?? "text-slate-500",
+                TOM_STATUS[varianteDePapel(msg.sender_role)].texto,
               )}
             >
-              {ROLE_LABEL[msg.sender_role] ?? msg.sender_role}
+              {rotuloDePapel(msg.sender_role)}
             </span>
           )}
         </p>
-        <div className="rounded-xl rounded-tl-none bg-background-elevated border border-border px-3 py-2 text-sm text-slate-200 leading-relaxed break-words whitespace-pre-wrap">
+        <div className="rounded-xl rounded-tl-none bg-surface-elevated border border-borda px-3 py-2 text-sm text-conteudo leading-relaxed break-words whitespace-pre-wrap">
           {msg.content}
+          <AnexoDaBiblioteca msg={msg} />
         </div>
-        <p className="text-xs text-slate-600 mt-0.5">{time}</p>
+        <p className="text-xs text-conteudo-muted mt-0.5">{time}</p>
       </div>
     </div>
   );
@@ -111,21 +205,42 @@ function ChatBubble({ msg, isOwn }: { msg: ChatMessage; isOwn: boolean }) {
 
 type WsStatus = "connecting" | "connected" | "disconnected";
 
+/**
+ * O ponto do socket, no vocabulário de variante do resto do sistema.
+ *
+ * `bg-yellow-500` não é token nenhum — amarelo não existe no pacote, e o degrau
+ * de aviso que passa 3:1 contra as três superfícies é `--fill-warning`. As três
+ * classes saem do `TOM_STATUS`, que é onde elas já estão escritas por extenso.
+ *
+ * A tabela é **local de propósito**: estado de WebSocket tem um consumidor só e
+ * não é vocabulário compartilhado — é a mesma regra pela qual `lib/papel.ts`
+ * existe e `lib/auditoria.ts` não. O que ela não faz é repetir as classes:
+ * mapeia para a variante e deixa o tom no módulo.
+ *
+ * O ponto pode ser só cor porque o texto ao lado diz a mesma coisa; sem ele,
+ * seria 1.4.1.
+ */
+const VARIANTE_DO_SOCKET: Record<WsStatus, VarianteStatus> = {
+  connecting: "warning",
+  connected: "primary",
+  disconnected: "muted",
+};
+
+const TITULO_DO_SOCKET: Record<WsStatus, string> = {
+  connecting: "Conectando…",
+  connected: "Conectado",
+  disconnected: "Desconectado",
+};
+
 function StatusDot({ status }: { status: WsStatus }) {
   return (
     <span
-      className={cn("inline-block w-2 h-2 rounded-full", {
-        "bg-yellow-500 animate-pulse": status === "connecting",
-        "bg-primary": status === "connected",
-        "bg-slate-600": status === "disconnected",
-      })}
-      title={
-        status === "connected"
-          ? "Conectado"
-          : status === "connecting"
-            ? "Conectando…"
-            : "Desconectado"
-      }
+      className={cn(
+        "inline-block w-2 h-2 rounded-full",
+        TOM_STATUS[VARIANTE_DO_SOCKET[status]].ponto,
+        status === "connecting" && "animate-pulse",
+      )}
+      title={TITULO_DO_SOCKET[status]}
     />
   );
 }
@@ -156,6 +271,19 @@ export function ChatPanel({
   const [wsStatus, setWsStatus] = useState<WsStatus>("connecting");
   const [input, setInput] = useState("");
   const [sending, setSending] = useState(false);
+
+  // ── Anexo da biblioteca ─────────────────────────────────────
+  //
+  // O seletor pede à API só o que é ANEXÁVEL (`visibility: "client"`). Isso
+  // não é a tela repetindo a regra: é o filtro da própria API, e quem define o
+  // que "client" significa continua sendo o backend. A guarda de verdade
+  // (`ensure_pode_anexar_no_chat`, 422) segue valendo no envio, e ela é que
+  // pega o item que MUDOU de visibilidade entre a listagem e o clique.
+  const [anexo, setAnexo] = useState<LibraryFile | null>(null);
+  const [seletorAberto, setSeletorAberto] = useState(false);
+  const [buscaArquivo, setBuscaArquivo] = useState("");
+  const [arquivos, setArquivos] = useState<LibraryFile[]>([]);
+  const [carregandoArquivos, setCarregandoArquivos] = useState(false);
   const [loadError, setLoadError] = useState(false);
   const [suggesting, setSuggesting] = useState(false);
   const [improving, setImproving] = useState(false);
@@ -186,6 +314,10 @@ export function ChatPanel({
 
   // Load initial history via REST
   useEffect(() => {
+    // A rota não tem `key`: trocar de chamado reaproveita esta instância, e o
+    // arquivo escolhido num chamado iria parar no próximo.
+    setAnexo(null);
+    setSeletorAberto(false);
     getChatMessages(ticketId, { limit: 100 })
       .then((res) => setMessages(res.items))
       .catch(() => setLoadError(true));
@@ -270,6 +402,27 @@ export function ChatPanel({
     ws.onerror = () => {
       setWsStatus("disconnected");
     };
+    // `onStatusChange` fica FORA das deps de propósito, e não por esquecimento.
+    //
+    // O pai (TicketDetailPage) passa uma arrow inline, então a prop ganha
+    // identidade nova a cada render dele. Se ela entrar aqui, `connect` muda de
+    // identidade junto, o efeito abaixo reexecuta, o cleanup fecha o socket e
+    // ele reconecta: tempestade de reconexão no chat a cada tecla digitada na
+    // página do chamado.
+    //
+    // A closure velha é inofensiva porque o único uso da prop é chamar
+    // `setTicket` com atualização funcional: o setter do `useState` tem
+    // identidade estável por garantia do React, e o updater recebe `prev`
+    // fresco. Não há dado velho a capturar.
+    //
+    // ⚠️ Esta isenção vale enquanto essa condição valer. Se algum dia o
+    // `onStatusChange` do pai passar a LER uma variável do render (props,
+    // estado, contexto) em vez de só chamar um setter estável, a closure velha
+    // passa a mentir e o certo aí é o padrão de ref para o callback mais
+    // recente — não incluir a dep. `ChatPanel.test.tsx` prende as duas metades:
+    // que o socket é construído uma vez só, e que a mudança de status ainda
+    // chega ao pai depois de vários re-renders.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [ticketId]);
 
   useEffect(() => {
@@ -280,14 +433,59 @@ export function ChatPanel({
     };
   }, [connect]);
 
-  function send() {
+  // Busca ao abrir e a cada digitação. Sem debounce próprio: a lista é curta e
+  // o `limit` de 20 é o teto do backend por página.
+  useEffect(() => {
+    if (!seletorAberto) return;
+    let vivo = true;
+    setCarregandoArquivos(true);
+    getLibraryFiles({ search: buscaArquivo.trim() || undefined, visibility: "client", limit: 20 })
+      .then((r) => {
+        if (vivo) setArquivos(r.items);
+      })
+      .catch(() => {
+        if (vivo) toast.error("Não foi possível carregar a biblioteca.");
+      })
+      .finally(() => {
+        if (vivo) setCarregandoArquivos(false);
+      });
+    return () => {
+      vivo = false;
+    };
+  }, [seletorAberto, buscaArquivo]);
+
+  /**
+   * Dois caminhos, e a escolha é do contrato, não de gosto.
+   *
+   * Texto puro sai pelo WebSocket, como sempre saiu. Mensagem COM anexo sai
+   * pelo REST, porque o manipulador do WS lê **só** `content` e descarta o
+   * resto do payload — um `library_file_id` mandado por lá sumiria em
+   * silêncio, e a mensagem chegaria sem o anexo sem ninguém ver erro.
+   *
+   * Não reinsere a mensagem na lista: o próprio `POST` transmite pelo
+   * WebSocket, então ela volta pelo mesmo caminho das outras.
+   */
+  async function send() {
     const content = input.trim();
-    if (!content || wsStatus !== "connected") return;
+    if (!content || wsStatus !== "connected" || sending) return;
     setSending(true);
     try {
-      wsRef.current?.send(JSON.stringify({ content }));
+      if (anexo) {
+        await sendMessageWithLibraryFile(ticketId, content, anexo.id);
+        setAnexo(null);
+      } else {
+        wsRef.current?.send(JSON.stringify({ content }));
+      }
       setInput("");
       inputRef.current?.focus();
+    } catch (err) {
+      // O 422 do item interno traz a razão escrita, e ela é para o técnico
+      // ler: é ele quem precisa entender por que aquele arquivo não pode ir.
+      const detalhe = (err as { response?: { data?: { detail?: unknown } } })?.response?.data
+        ?.detail;
+      toast.error(
+        typeof detalhe === "string" ? detalhe : "Não foi possível enviar a mensagem.",
+      );
     } finally {
       setSending(false);
     }
@@ -366,51 +564,34 @@ export function ChatPanel({
   }
 
   return (
-    <div className="rounded-xl bg-background-surface border border-border flex flex-col lg:h-full">
+    <div className="rounded-xl bg-surface border border-borda flex flex-col lg:h-full">
       {/* Header */}
-      <div className="flex items-center justify-between px-4 py-3 border-b border-border shrink-0">
-        <h2 className="text-sm font-semibold text-slate-300">Chat</h2>
+      <div className="flex items-center justify-between px-4 py-3 border-b border-borda shrink-0">
+        <h2 className="text-sm font-semibold text-conteudo-heading">Chat</h2>
         <div className="flex items-center gap-3">
           {isStaff && (
-            <button
+            <Button
+              variant="secondary"
+              size="sm"
               onClick={
                 summary ? () => setShowSummary((v) => !v) : handleSummarize
               }
-              disabled={summarizing}
-              className={cn(
-                "flex items-center gap-1 text-xs px-2 py-1 rounded-md transition-colors",
-                "border border-slate-700 text-slate-400 hover:bg-background-elevated hover:text-slate-300",
-                "disabled:opacity-40 disabled:cursor-not-allowed",
-              )}
+              // O `Button` desabilita junto com o anel de carregando, então
+              // `loading` sozinho faz o que o `disabled={summarizing}` fazia.
+              loading={summarizing}
+              icon={<Icon name="document" size={14} strokeWidth={2} />}
               title={
                 summary
                   ? "Ver/ocultar resumo da conversa"
                   : "Gerar resumo da conversa com IA"
               }
             >
-              {summarizing ? (
-                <span className="inline-block w-3 h-3 border border-slate-400 border-t-transparent rounded-full animate-spin" />
-              ) : (
-                <svg
-                  className="w-3 h-3"
-                  fill="none"
-                  viewBox="0 0 24 24"
-                  stroke="currentColor"
-                  strokeWidth={2}
-                >
-                  <path
-                    strokeLinecap="round"
-                    strokeLinejoin="round"
-                    d="M9 12h6m-6 4h6m2 5H7a2 2 0 01-2-2V5a2 2 0 012-2h5.586a1 1 0 01.707.293l5.414 5.414a1 1 0 01.293.707V19a2 2 0 01-2 2z"
-                  />
-                </svg>
-              )}
               {summarizing ? "Resumindo…" : summary ? "Resumo" : "Resumir"}
-            </button>
+            </Button>
           )}
           <div className="flex items-center gap-1.5">
             <StatusDot status={wsStatus} />
-            <span className="text-xs text-slate-500">
+            <span className="text-xs text-conteudo-muted">
               {wsStatus === "connected"
                 ? "ao vivo"
                 : wsStatus === "connecting"
@@ -423,56 +604,33 @@ export function ChatPanel({
 
       {/* Summary panel */}
       {isStaff && showSummary && summary && (
-        <div className="border-b border-border bg-background-elevated/50 px-4 py-3 shrink-0">
+        <div className="border-b border-borda bg-surface-elevated/50 px-4 py-3 shrink-0">
           <div className="flex items-start justify-between gap-2">
             <div className="flex-1">
-              <p className="text-xs font-medium text-slate-400 mb-1">
+              <p className="text-xs font-medium text-conteudo-muted mb-1">
                 Resumo da conversa (IA)
               </p>
-              <p className="text-xs text-slate-300 leading-relaxed">
-                {summary}
-              </p>
+              <p className="text-xs text-conteudo leading-relaxed">{summary}</p>
             </div>
             <div className="flex items-center gap-1.5 shrink-0">
-              <button
+              {/* Os dois só têm ícone, e o nome acessível vem do `title` — que
+                  é o que a árvore de acessibilidade lê quando não há texto
+                  dentro do controle. Já era assim antes da migração. */}
+              <Button
+                variant="ghost"
+                size="sm"
                 onClick={handleSummarize}
-                disabled={summarizing}
-                className="text-xs text-slate-500 hover:text-slate-300 transition-colors disabled:opacity-40"
+                loading={summarizing}
+                icon={<Icon name="refresh" size={14} strokeWidth={2} />}
                 title="Regenerar resumo"
-              >
-                <svg
-                  className="w-3.5 h-3.5"
-                  fill="none"
-                  viewBox="0 0 24 24"
-                  stroke="currentColor"
-                  strokeWidth={2}
-                >
-                  <path
-                    strokeLinecap="round"
-                    strokeLinejoin="round"
-                    d="M4 4v5h.582m15.356 2A8.001 8.001 0 004.582 9m0 0H9m11 11v-5h-.581m0 0a8.003 8.003 0 01-15.357-2m15.357 2H15"
-                  />
-                </svg>
-              </button>
-              <button
+              />
+              <Button
+                variant="ghost"
+                size="sm"
                 onClick={() => setShowSummary(false)}
-                className="text-xs text-slate-500 hover:text-slate-300 transition-colors"
+                icon={<Icon name="close" size={14} strokeWidth={2} />}
                 title="Fechar resumo"
-              >
-                <svg
-                  className="w-3.5 h-3.5"
-                  fill="none"
-                  viewBox="0 0 24 24"
-                  stroke="currentColor"
-                  strokeWidth={2}
-                >
-                  <path
-                    strokeLinecap="round"
-                    strokeLinejoin="round"
-                    d="M6 18L18 6M6 6l12 12"
-                  />
-                </svg>
-              </button>
+              />
             </div>
           </div>
         </div>
@@ -481,12 +639,15 @@ export function ChatPanel({
       {/* Message list */}
       <div className="h-[320px] overflow-y-auto lg:h-auto lg:flex-1 lg:overflow-y-auto px-4 py-3 space-y-0">
         {loadError && (
-          <p className="text-xs text-danger text-center py-4">
+          // `text-on-tint-danger` e não `text-danger`: o degrau cheio da rampa
+          // como cor de TEXTO dá 3,76:1 sobre a superfície. O par da tinta dá
+          // 6,5:1 no claro e 7,39:1 no escuro, e inverte sozinho por tema.
+          <p className="text-xs text-on-tint-danger text-center py-4">
             Não foi possível carregar o histórico.
           </p>
         )}
         {!loadError && messages.length === 0 && (
-          <p className="text-xs text-slate-500 text-center py-8">
+          <p className="text-xs text-conteudo-muted text-center py-8">
             Nenhuma mensagem ainda. Seja o primeiro a escrever.
           </p>
         )}
@@ -501,85 +662,57 @@ export function ChatPanel({
       </div>
 
       {/* Input */}
-      <div className="border-t border-border px-3 py-2.5 shrink-0">
+      <div className="border-t border-borda px-3 py-2.5 shrink-0">
         {locked ? (
-          <p className="text-xs text-slate-500 text-center py-2 italic">
+          <p className="text-xs text-conteudo-muted text-center py-2 italic">
             Este ticket foi encerrado — o chat está bloqueado.
           </p>
         ) : (
           <>
             {isStaff && (
               <div className="mb-2 flex flex-wrap gap-2">
-                <button
+                {/* As duas ações de IA eram ROXAS — `purple-*`, que não é do
+                    pacote: não existe `--color-purple-*` nem `--color-pink-*`.
+                    Não há tom de "isto é IA" no sistema, e inventar um é
+                    emenda. As duas caíram no degrau secundário e, com isso,
+                    perderam a cor que as separava do resto da barra. O ícone e
+                    o rótulo continuam dizendo que é IA. Relatado ao operador. */}
+                <Button
+                  variant="secondary"
+                  size="sm"
                   onClick={handleSuggest}
-                  disabled={suggesting || wsStatus === "disconnected"}
-                  className={cn(
-                    "flex items-center gap-1.5 text-xs px-2.5 py-1 rounded-md transition-colors",
-                    "border border-purple-700 text-purple-400 hover:bg-purple-900/40",
-                    "disabled:opacity-40 disabled:cursor-not-allowed",
-                  )}
+                  loading={suggesting}
+                  disabled={wsStatus === "disconnected"}
+                  icon={<Icon name="lightbulb" size={14} strokeWidth={2} />}
                 >
-                  {suggesting ? (
-                    <>
-                      <span className="inline-block w-3 h-3 border border-purple-400 border-t-transparent rounded-full animate-spin" />
-                      Gerando…
-                    </>
-                  ) : (
-                    <>
-                      <svg
-                        className="w-3 h-3"
-                        fill="none"
-                        viewBox="0 0 24 24"
-                        stroke="currentColor"
-                        strokeWidth={2}
-                      >
-                        <path
-                          strokeLinecap="round"
-                          strokeLinejoin="round"
-                          d="M9.663 17h4.673M12 3v1m6.364 1.636l-.707.707M21 12h-1M4 12H3m3.343-5.657l-.707-.707m2.828 9.9a5 5 0 117.072 0l-.347.346a3 3 0 01-1.595.835l-.468.094a2 2 0 01-2.362-1.174l-.101-.302a3 3 0 01.22-2.562l.345-.518"
-                        />
-                      </svg>
-                      Sugerir resposta (IA)
-                    </>
-                  )}
-                </button>
+                  {suggesting ? "Gerando…" : "Sugerir resposta (IA)"}
+                </Button>
 
-                <button
+                <Button
+                  variant="secondary"
+                  size="sm"
                   onClick={handleImprove}
-                  disabled={
-                    improving || !input.trim() || wsStatus === "disconnected"
-                  }
-                  className={cn(
-                    "flex items-center gap-1.5 text-xs px-2.5 py-1 rounded-md transition-colors",
-                    "border border-slate-600 text-slate-400 hover:bg-background-elevated hover:text-slate-300",
-                    "disabled:opacity-40 disabled:cursor-not-allowed",
-                  )}
+                  loading={improving}
+                  disabled={!input.trim() || wsStatus === "disconnected"}
+                  icon={<Icon name="edit" size={14} strokeWidth={2} />}
                   title="Melhorar gramática e clareza do texto digitado"
                 >
-                  {improving ? (
-                    <>
-                      <span className="inline-block w-3 h-3 border border-slate-400 border-t-transparent rounded-full animate-spin" />
-                      Melhorando…
-                    </>
-                  ) : (
-                    <>
-                      <svg
-                        className="w-3 h-3"
-                        fill="none"
-                        viewBox="0 0 24 24"
-                        stroke="currentColor"
-                        strokeWidth={2}
-                      >
-                        <path
-                          strokeLinecap="round"
-                          strokeLinejoin="round"
-                          d="M11 5H6a2 2 0 00-2 2v11a2 2 0 002 2h11a2 2 0 002-2v-5m-1.414-9.414a2 2 0 112.828 2.828L11.828 15H9v-2.828l8.586-8.586z"
-                        />
-                      </svg>
-                      Melhorar texto (IA)
-                    </>
-                  )}
-                </button>
+                  {improving ? "Melhorando…" : "Melhorar texto (IA)"}
+                </Button>
+              </div>
+            )}
+            {anexo && (
+              <div className="mb-2 flex items-center gap-2 rounded-lg border border-borda bg-surface-elevated px-2.5 py-1.5">
+                <Icon name="paperclip" size={14} strokeWidth={2} className="shrink-0 text-conteudo-muted" />
+                <p className="min-w-0 flex-1 truncate text-xs text-conteudo">{anexo.title}</p>
+                <Button
+                  variant="ghost"
+                  size="sm"
+                  className="shrink-0"
+                  aria-label={`Remover o anexo ${anexo.title}`}
+                  onClick={() => setAnexo(null)}
+                  icon={<Icon name="close" size={14} strokeWidth={2} />}
+                />
               </div>
             )}
             <div className="relative flex items-center gap-2">
@@ -595,9 +728,15 @@ export function ChatPanel({
                 ref={inputRef}
                 rows={1}
                 className={cn(
-                  "flex-1 resize-none rounded-lg border bg-background-elevated px-3 py-2 text-sm text-slate-100",
-                  "placeholder:text-slate-500 focus:outline-none focus:ring-2 focus:ring-primary focus:border-transparent",
-                  "border-border hover:border-slate-500 transition-colors leading-relaxed",
+                  "flex-1 resize-none rounded-lg border bg-surface-elevated px-3 py-2 text-sm text-conteudo",
+                  "placeholder:text-conteudo-muted focus:outline-none focus:ring-2 focus:ring-action focus:border-transparent",
+                  // O hover da borda SAIU, pelo mesmo motivo pelo qual saiu do
+                  // primitivo `Textarea`: a E7 levou a borda de repouso do
+                  // controle a `--border-control`, que é slate-500 — exatamente
+                  // onde o `hover:border-slate-500` chegava. O campo está sempre
+                  // na força que antes dependia do ponteiro, e a 1.4.11 pede 3:1
+                  // para o limite do componente, não 3:1 sob o mouse.
+                  "border-borda-control transition-colors leading-relaxed",
                   "overflow-hidden",
                 )}
                 placeholder={
@@ -610,36 +749,111 @@ export function ChatPanel({
                 onKeyDown={handleKeyDown}
                 disabled={wsStatus === "disconnected"}
               />
-              <button
+              {/* Era `bg-primary` com `text-white`: 3,83:1 nos DOIS temas,
+                  porque o degrau 500 é absoluto e não inverte. O `Button`
+                  primário usa o par `--action` / `--text-on-primary`, que é
+                  branco no claro e navy no escuro.
+
+                  O `aria-label` é acréscimo: o botão só tinha um `<svg>`
+                  dentro, sem título nem rótulo, então o nome acessível era
+                  VAZIO — um leitor de tela anunciava "botão" e mais nada. */}
+              {/* Só staff: `GET /library` recusa cliente, e um botão que
+                  abrisse uma lista vazia seria pior que botão nenhum. */}
+              {isStaff && (
+                <Button
+                  variant="secondary"
+                  className="shrink-0"
+                  aria-label="Anexar arquivo da biblioteca"
+                  title="Anexar arquivo da biblioteca"
+                  onClick={() => setSeletorAberto(true)}
+                  disabled={wsStatus === "disconnected"}
+                  icon={<Icon name="paperclip" size={16} strokeWidth={2} />}
+                />
+              )}
+              <Button
+                variant="primary"
+                className="shrink-0"
+                aria-label="Enviar mensagem"
                 onClick={send}
                 disabled={!input.trim() || sending || wsStatus !== "connected"}
-                className={cn(
-                  "shrink-0 rounded-lg px-3 py-2 text-sm font-medium transition-colors",
-                  "bg-primary text-white hover:bg-primary/90",
-                  "disabled:opacity-40 disabled:cursor-not-allowed",
-                )}
-              >
-                <svg
-                  className="w-4 h-4"
-                  fill="none"
-                  viewBox="0 0 24 24"
-                  stroke="currentColor"
-                  strokeWidth={2}
-                >
-                  <path
-                    strokeLinecap="round"
-                    strokeLinejoin="round"
-                    d="M12 19l9 2-9-18-9 18 9-2zm0 0v-8"
-                  />
-                </svg>
-              </button>
+                icon={<Icon name="send" size={16} strokeWidth={2} />}
+              />
             </div>
-            <p className="text-xs text-slate-600 mt-1 pl-1">
+            <p className="text-xs text-conteudo-muted mt-1 pl-1">
               Enter para enviar · Shift+Enter para nova linha
+              {anexo && " · o anexo vai junto da mensagem, que não pode ir vazia"}
             </p>
           </>
         )}
       </div>
+
+      <Modal
+        open={seletorAberto}
+        onClose={() => setSeletorAberto(false)}
+        title="Anexar da biblioteca"
+        size="md"
+      >
+        <div className="space-y-3">
+          <Input
+            label="Buscar"
+            hint="Procura no título e no nome do arquivo."
+            value={buscaArquivo}
+            onChange={(e) => setBuscaArquivo(e.target.value)}
+            placeholder="Manual, ficha técnica…"
+          />
+
+          {/* A lista pede `visibility: "client"`: item interno não entra em
+              conversa, e oferecê-lo só para a API recusar depois seria fazer a
+              pessoa descobrir a regra pelo erro. */}
+          <p className="text-xs text-conteudo-muted">
+            Só itens abertos para cliente aparecem aqui — a conversa é lida por ele.
+          </p>
+
+          {carregandoArquivos ? (
+            <div className="flex justify-center py-6">
+              <Spinner />
+            </div>
+          ) : arquivos.length === 0 ? (
+            <p className="py-6 text-center text-sm text-conteudo-muted">
+              {buscaArquivo.trim()
+                ? "Nenhum arquivo encontrado para esta busca."
+                : "Nenhum arquivo aberto para cliente na biblioteca."}
+            </p>
+          ) : (
+            <ul className="max-h-80 divide-y divide-borda overflow-y-auto">
+              {arquivos.map((a) => (
+                <li key={a.id}>
+                  <button
+                    type="button"
+                    className="flex w-full items-center gap-3 px-1 py-2.5 text-left hover:bg-surface-elevated focus:outline-none focus:ring-2 focus:ring-action rounded-lg transition-colors"
+                    onClick={() => {
+                      setAnexo(a);
+                      setSeletorAberto(false);
+                      inputRef.current?.focus();
+                    }}
+                  >
+                    <Icon
+                      name="document"
+                      size={18}
+                      strokeWidth={2}
+                      className="shrink-0 text-conteudo-muted"
+                    />
+                    <span className="min-w-0 flex-1">
+                      <span className="block truncate text-sm font-medium text-conteudo">
+                        {a.title}
+                      </span>
+                      <span className="block truncate text-xs text-conteudo-muted">
+                        {a.original_name} · {tamanhoLegivel(a.size_bytes)}
+                        {a.product_name ? ` · ${a.product_name}` : ""}
+                      </span>
+                    </span>
+                  </button>
+                </li>
+              ))}
+            </ul>
+          )}
+        </div>
+      </Modal>
     </div>
   );
 }

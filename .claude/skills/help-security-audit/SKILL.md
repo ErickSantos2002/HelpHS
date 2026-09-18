@@ -19,7 +19,7 @@ Monorepo — front e back no **mesmo repositório**, sob `frontend/` e `backend/
 | | `backend/` | `frontend/` |
 |---|---|---|
 | Stack | FastAPI, SQLAlchemy 2.0 **async** (asyncpg), Pydantic 2 | React 19, Vite 6, TypeScript, Axios |
-| Infra | PostgreSQL 15, Redis 7, ClamAV, SMTP, LLM (OpenAI + Anthropic) | Tailwind, token no `localStorage` |
+| Infra | PostgreSQL 15, Redis 7, ClamAV, SMTP, LLM (DeepSeek) | Tailwind, token no `localStorage` |
 | Auth | JWT **RS256** (par de chaves), refresh + blacklist no Redis | interceptor com refresh em `src/services/api.ts` |
 | Deploy | EasyPanel, serviço próprio | EasyPanel, serviço próprio |
 
@@ -112,8 +112,12 @@ e confirmação de e-mail. Qualquer outra rota respondendo sem token é 🔴.
 - `/auth/cnpj` e `/auth/cep` chamam BrasilAPI/ViaCEP com input do usuário —
   hoje o input é reduzido a dígitos e há timeout; manter esse padrão.
 - `classify_ticket` (`app/services/llm.py`) envia o texto do chamado para
-  OpenAI/Anthropic — **dado do cliente saindo do sistema**. Falha ou timeout
-  do LLM não pode derrubar a criação do chamado.
+  a **DeepSeek** — **dado do cliente saindo do sistema**, e desde o `71f84cb`
+  é o único destino externo de texto de chamado. Falha ou timeout do LLM não
+  pode derrubar a criação do chamado. Confira também `suggest_reply`,
+  `summarize_conversation` e `improve_message`: as quatro saem pelo mesmo
+  transporte (`_chamar_deepseek`), e o `improve_message` manda texto que o
+  técnico **ainda não publicou**.
 - E-mails de reset/confirmação: validade dos tokens vem de `config.py`
   (`PASSWORD_RESET_TOKEN_HOURS=1`) — não aumentar sem motivo.
 

@@ -1,9 +1,9 @@
-import React, { useState } from "react";
+import React, { useEffect, useState } from "react";
 import { useNavigate, useLocation, Link } from "react-router-dom";
 import { Alert, Button, Input } from "../../components/ui";
 import { useAuth } from "../../contexts/AuthContext";
 import { resendVerificationApi } from "../../services/authService";
-import { getApiError } from "../../lib/apiError";
+import { getApiError, getRetryAfterSeconds } from "../../lib/apiError";
 import logoFull from "../../assets/Logo HelpHS.png";
 
 const FEATURES = [
@@ -59,6 +59,13 @@ const IC = {
   ),
 };
 
+/** mm:ss para o relógio do bloqueio — 90s vira "1:30". */
+function formataContagem(totalSegundos: number): string {
+  const minutos = Math.floor(totalSegundos / 60);
+  const segundos = totalSegundos % 60;
+  return `${minutos}:${String(segundos).padStart(2, "0")}`;
+}
+
 export default function LoginPage() {
   const { login, verifyMfa } = useAuth();
   const navigate = useNavigate();
@@ -79,6 +86,28 @@ export default function LoginPage() {
   const [desafio, setDesafio] = useState<string | null>(null);
   const [codigo, setCodigo] = useState("");
 
+  // Bloqueio por excesso de tentativas (429): o instante em que o servidor
+  // volta a aceitar login, vindo do Retry-After. O relógio abaixo conta até lá.
+  const [bloqueadoAte, setBloqueadoAte] = useState<number | null>(null);
+  const [agora, setAgora] = useState(() => Date.now());
+
+  useEffect(() => {
+    if (bloqueadoAte === null) return;
+    const id = setInterval(() => setAgora(Date.now()), 1000);
+    return () => clearInterval(id);
+  }, [bloqueadoAte]);
+
+  const segundosRestantes =
+    bloqueadoAte === null ? 0 : Math.max(0, Math.ceil((bloqueadoAte - agora) / 1000));
+
+  // Zerou: o balde do servidor virou junto — a tela se libera sozinha.
+  useEffect(() => {
+    if (bloqueadoAte !== null && segundosRestantes === 0) {
+      setBloqueadoAte(null);
+      setError(null);
+    }
+  }, [bloqueadoAte, segundosRestantes]);
+
   const justRegistered =
     (location.state as { registered?: boolean })?.registered === true;
   const passwordReset =
@@ -97,7 +126,7 @@ export default function LoginPage() {
 
   async function handleSubmit(e: React.FormEvent<HTMLFormElement>) {
     e.preventDefault();
-    if (!email || !password) return;
+    if (!email || !password || segundosRestantes > 0) return;
     setLoading(true);
     setError(null);
     try {
@@ -120,9 +149,19 @@ export default function LoginPage() {
       } else if (status === 401 || status === 422) {
         setError("E-mail ou senha incorretos.");
       } else if (status === 429) {
-        // Rate limit do login: o bloqueio é proposital e o backend explica em
-        // português — mostrar "erro ao conectar" aqui faria o usuário insistir.
-        setError(getApiError(err, "Muitas tentativas. Aguarde alguns minutos e tente novamente."));
+        // Rate limit do login: com o Retry-After, a tela vira um relógio até o
+        // desbloqueio; sem ele, fica a mensagem do backend — nunca um chute.
+        const segundos = getRetryAfterSeconds(err);
+        if (segundos !== null) {
+          const inicio = Date.now();
+          setAgora(inicio);
+          setBloqueadoAte(inicio + segundos * 1000);
+          setError(null);
+        } else {
+          setError(
+            getApiError(err, "Muitas tentativas. Aguarde alguns minutos e tente novamente."),
+          );
+        }
       } else {
         setError("Erro ao conectar com o servidor. Tente novamente.");
       }
@@ -172,8 +211,8 @@ export default function LoginPage() {
       {/* ── Left panel 60% — branding ───────────────────────── */}
       <div className="hidden lg:flex lg:w-3/5 relative flex-col justify-between overflow-hidden bg-[#080F1A] px-14 py-12">
         {/* Decorative blobs */}
-        <div className="pointer-events-none absolute -top-32 -right-32 w-[500px] h-[500px] rounded-full blur-[120px]" style={{ backgroundColor: "rgba(14,165,233,0.18)" }} />
-        <div className="pointer-events-none absolute -bottom-40 -left-20 w-[400px] h-[400px] rounded-full blur-[100px]" style={{ backgroundColor: "rgba(14,165,233,0.09)" }} />
+        <div className="pointer-events-none absolute -top-32 -right-32 w-[500px] h-[500px] rounded-full blur-[120px] bg-primary/[0.18]" />
+        <div className="pointer-events-none absolute -bottom-40 -left-20 w-[400px] h-[400px] rounded-full blur-[100px] bg-primary/[0.09]" />
 
         {/* Logo */}
         <div className="relative z-10">
@@ -183,7 +222,7 @@ export default function LoginPage() {
         {/* Main copy */}
         <div className="relative z-10 space-y-10">
           <div className="space-y-4">
-            <div className="inline-flex items-center gap-2 rounded-full px-3 py-1" style={{ border: "1px solid rgba(14,165,233,0.3)", backgroundColor: "rgba(14,165,233,0.1)" }}>
+            <div className="inline-flex items-center gap-2 rounded-full border border-primary/30 bg-primary/10 px-3 py-1">
               <span className="w-1.5 h-1.5 rounded-full bg-primary animate-pulse" />
               <span className="text-xs font-medium text-primary">Help Desk — Saúde &amp; Segurança</span>
             </div>
@@ -200,7 +239,7 @@ export default function LoginPage() {
           <div className="grid grid-cols-1 gap-5">
             {FEATURES.map((f) => (
               <div key={f.title} className="flex items-start gap-4">
-                <div className="shrink-0 flex items-center justify-center w-9 h-9 rounded-lg text-[#0ea5e9]" style={{ backgroundColor: "rgba(14,165,233,0.12)" }}>
+                <div className="shrink-0 flex items-center justify-center w-9 h-9 rounded-lg bg-primary/[0.12] text-primary">
                   {f.icon}
                 </div>
                 <div>
@@ -249,6 +288,15 @@ export default function LoginPage() {
           {passwordReset && (
             <Alert variant="success">
               Senha alterada com sucesso. Entre com a nova senha.
+            </Alert>
+          )}
+          {segundosRestantes > 0 && (
+            <Alert variant="danger">
+              Muitas tentativas. Você poderá tentar novamente em{" "}
+              <span className="font-semibold tabular-nums">
+                {formataContagem(segundosRestantes)}
+              </span>
+              .
             </Alert>
           )}
           {error && (
@@ -358,6 +406,7 @@ export default function LoginPage() {
               variant="primary"
               size="lg"
               loading={loading}
+              disabled={segundosRestantes > 0}
               className="w-full"
             >
               Entrar

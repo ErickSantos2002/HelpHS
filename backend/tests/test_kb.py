@@ -917,3 +917,41 @@ async def test_cliente_continua_alcancando_artigo_publicado(patch_redis, rota_fn
     publicado = _mock_article(status=KBArticleStatus.published)
     resp = await _bate(rota_fn, publicado, UserRole.client)
     assert resp.status_code != 404, "artigo publicado sumiu para o cliente"
+
+
+@pytest.mark.asyncio
+async def test_criar_artigo_grava_a_marcacao_da_helo(patch_redis):
+    """
+    A marcação que mantém um artigo na barra lateral e FORA das respostas da IA.
+
+    O que se afirma é o que a rota GRAVA — o objeto entregue ao `db.add` —, e
+    não o que ela devolve. A resposta sai do artigo recarregado, que neste
+    arquivo é um `MagicMock`, e o Pydantic deste projeto aceita `MagicMock`
+    num campo `bool` como verdadeiro (medido em 10/09: o modo não estrito
+    converte `int(MagicMock())`, que é 1). Afirmar pela resposta daria verde
+    com a rota ignorando o campo.
+    """
+    from app.core.database import get_db
+    from app.models.models import KBArticle
+
+    _override_user(_mock_user(UserRole.technician, _AUTHOR_ID))
+    sessao = _db_sequence(None, _mock_article(status=KBArticleStatus.draft))
+
+    async def _gen():
+        yield sessao
+
+    app.dependency_overrides[get_db] = _gen
+
+    async with AsyncClient(transport=ASGITransport(app=app), base_url="http://test") as client:
+        r = await client.post(
+            "/api/v1/kb/articles",
+            json={
+                "title": "Procedimento interno",
+                "content": "Só para a equipe.",
+                "helo_pode_ler": False,
+            },
+        )
+
+    assert r.status_code == 201
+    (gravado,) = [c.args[0] for c in sessao.add.call_args_list if isinstance(c.args[0], KBArticle)]
+    assert gravado.helo_pode_ler is False

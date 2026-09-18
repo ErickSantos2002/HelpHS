@@ -2,13 +2,14 @@
 Pydantic schemas for authentication endpoints.
 """
 
-from pydantic import EmailStr, Field, field_validator
+from pydantic import Field, field_validator
 
 from app.schemas.base import AppBaseModel
+from app.utils.email_normalizado import EmailNormalizado
 
 
 class LoginRequest(AppBaseModel):
-    email: EmailStr
+    email: EmailNormalizado
     password: str
 
     @field_validator("password")
@@ -21,7 +22,7 @@ class LoginRequest(AppBaseModel):
 
 class RegisterRequest(AppBaseModel):
     name: str = Field(..., min_length=2, max_length=255)
-    email: EmailStr
+    email: EmailNormalizado
     password: str = Field(..., min_length=8, max_length=128)
     phone: str | None = Field(default=None, max_length=20)
     department: str | None = Field(default=None, max_length=100)
@@ -67,7 +68,7 @@ class AccessTokenResponse(AppBaseModel):
 class EmailRequest(AppBaseModel):
     """Usado no reenvio da confirmação e no 'esqueci minha senha'."""
 
-    email: EmailStr
+    email: EmailNormalizado
 
 
 class TokenOnlyRequest(AppBaseModel):

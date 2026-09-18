@@ -35,9 +35,9 @@ export function QuickReplyPicker({
       ref={listRef}
       role="listbox"
       aria-label="Respostas rápidas"
-      className="absolute bottom-full left-0 right-0 z-30 mb-2 max-h-64 overflow-y-auto rounded-xl border border-border bg-background-surface shadow-xl"
+      className="absolute bottom-full left-0 right-0 z-30 mb-2 max-h-64 overflow-y-auto rounded-xl border border-borda bg-surface shadow-xl"
     >
-      <p className="sticky top-0 bg-background-surface px-3 py-2 text-[10px] font-semibold uppercase tracking-widest text-slate-500">
+      <p className="sticky top-0 bg-surface px-3 py-2 text-[10px] font-semibold uppercase tracking-widest text-slate-500">
         Respostas rápidas
       </p>
 
@@ -54,7 +54,7 @@ export function QuickReplyPicker({
             "block w-full px-3 py-2 text-left transition-colors cursor-pointer",
             index === activeIndex
               ? "bg-primary/10"
-              : "hover:bg-background-elevated",
+              : "hover:bg-surface-elevated",
           )}
         >
           <span className="flex items-baseline gap-2">
@@ -65,7 +65,7 @@ export function QuickReplyPicker({
         </button>
       ))}
 
-      <p className="sticky bottom-0 border-t border-border/50 bg-background-surface px-3 py-1.5 text-[10px] text-slate-600">
+      <p className="sticky bottom-0 border-t border-borda/50 bg-surface px-3 py-1.5 text-[10px] text-slate-600">
         ↑ ↓ para navegar · Enter para inserir · Esc para fechar
       </p>
     </div>

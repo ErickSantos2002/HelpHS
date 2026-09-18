@@ -3,10 +3,11 @@ import { useNavigate } from "react-router-dom";
 import {
   Area, AreaChart, ResponsiveContainer, Tooltip, XAxis, YAxis,
 } from "recharts";
-import { Alert, FilterSelect, Spinner, StatusBadge } from "../../components/ui";
+import { Alert, Icon, KpiCard, Select, Spinner, StatusBadge } from "../../components/ui";
 import { cn } from "../../lib/utils";
+import { CROMO, COR_SERIE_TEMPORAL, ENVOLTORIO_DICA, ESTILO_DICA } from "../../lib/grafico";
+import { PRIORIDADE } from "../../lib/prioridade";
 import { useAuth } from "../../contexts/AuthContext";
-import { useTheme } from "../../contexts/ThemeContext";
 import { getDashboardStats } from "../../services/dashboardService";
 import { getTechnicianDetailReport, type TechnicianDetailReport } from "../../services/reportService";
 import { getTickets, type Ticket } from "../../services/ticketService";
@@ -53,62 +54,40 @@ function formatHours(h: number | null): string {
   return `${(h / 24).toFixed(1)} dias`;
 }
 
-const PRIORITY_DOT: Record<string, string> = {
-  critical: "bg-danger",
-  high:     "bg-warning",
-  medium:   "bg-primary",
-  low:      "bg-slate-400",
-};
-
 // ── Sub-components ────────────────────────────────────────────
-
-interface KpiCardProps {
-  label: string;
-  value: number | string;
-  sub?: string;
-  icon: React.ReactNode;
-  iconBg: string;
-  accent: string;
-  valueCls?: string;
-}
-
-function KpiCard({ label, value, sub, icon, iconBg, accent, valueCls = "text-slate-900 dark:text-slate-100" }: KpiCardProps) {
-  return (
-    <div className={cn("relative rounded-xl bg-white dark:bg-background-surface border border-slate-200 dark:border-border p-5 overflow-hidden border-l-4", accent)}>
-      <div className="flex items-start justify-between gap-3">
-        <div className="min-w-0">
-          <p className="text-xs font-semibold uppercase tracking-wider text-slate-500">{label}</p>
-          <p className={cn("text-3xl font-bold mt-2 tabular-nums", valueCls)}>{value}</p>
-          {sub && <p className="text-xs text-slate-500 mt-1.5">{sub}</p>}
-        </div>
-        <div className={cn("w-11 h-11 rounded-xl flex items-center justify-center shrink-0", iconBg)}>
-          {icon}
-        </div>
-      </div>
-    </div>
-  );
-}
 
 function TicketRow({ ticket, showTech }: { ticket: Ticket; showTech?: boolean }) {
   const navigate = useNavigate();
   const hasBreach = ticket.sla_response_breach || ticket.sla_resolve_breach;
+  // `PRIORITY_DOT` era um sexto mapa de prioridade, com "médio" em
+  // `bg-primary` — divergindo do canônico (`bg-info`, no `lib/prioridade.ts`).
+  // Sai o mapa local; o ponto usa a mesma fonte que o selo e o gráfico.
+  const prioridade = PRIORIDADE[ticket.priority];
 
   return (
     <button
       onClick={() => navigate(`/tickets/${ticket.id}`)}
-      className="w-full flex items-center gap-3 px-4 py-3 text-left hover:bg-slate-50 dark:hover:bg-background-elevated transition-colors"
+      className="w-full flex items-center gap-3 px-4 py-3 text-left hover:bg-surface-elevated transition-colors"
     >
-      <div className={cn("w-1.5 h-1.5 rounded-full shrink-0", PRIORITY_DOT[ticket.priority] ?? "bg-slate-400")} />
+      {/* O ponto nunca pode ser a única fonte da prioridade (regra do
+          `lib/prioridade.ts`): fica decorativo, e o rótulo entra em sr-only —
+          antes não existia nenhum dos dois, e quem não distinguisse a cor
+          não tinha a informação de jeito nenhum. */}
+      <div
+        aria-hidden="true"
+        className={cn("w-1.5 h-1.5 rounded-full shrink-0", prioridade?.ponto ?? "bg-borda-control")}
+      />
+      <span className="sr-only">Prioridade {prioridade?.rotulo ?? ticket.priority}.</span>
       <div className="flex-1 min-w-0">
         <div className="flex items-center gap-1.5 mb-0.5">
-          <span className="text-xs font-mono text-slate-400">{ticket.protocol}</span>
+          <span className="text-xs font-mono text-conteudo-muted">{ticket.protocol}</span>
           {hasBreach && (
-            <span className="text-[10px] font-bold text-danger bg-danger/10 px-1.5 py-0.5 rounded">SLA</span>
+            <span className="text-[10px] font-bold text-on-tint-danger bg-tint-danger px-1.5 py-0.5 rounded">SLA</span>
           )}
         </div>
-        <p className="text-sm text-slate-700 dark:text-slate-200 truncate">{ticket.title}</p>
+        <p className="text-sm text-conteudo truncate">{ticket.title}</p>
         {showTech && ticket.assignee_name && (
-          <p className="text-xs text-slate-500 mt-0.5">{ticket.assignee_name}</p>
+          <p className="text-xs text-conteudo-muted mt-0.5">{ticket.assignee_name}</p>
         )}
       </div>
       <StatusBadge status={ticket.status} />
@@ -122,22 +101,20 @@ function TicketListCard({
   title: string; count: number; tickets: Ticket[]; emptyMsg: string; showTech?: boolean;
 }) {
   return (
-    <div className="rounded-xl bg-white dark:bg-background-surface border border-slate-200 dark:border-border overflow-hidden flex flex-col">
-      <div className="flex items-center justify-between px-4 py-3.5 border-b border-slate-100 dark:border-border/60 shrink-0">
-        <p className="text-sm font-semibold text-slate-700 dark:text-slate-200">{title}</p>
-        <span className="text-xs font-medium text-slate-500 bg-slate-100 dark:bg-background-elevated px-2 py-0.5 rounded-full">{count}</span>
+    <div className="rounded-xl bg-surface border border-borda overflow-hidden flex flex-col">
+      <div className="flex items-center justify-between px-4 py-3.5 border-b border-borda/60 shrink-0">
+        <p className="text-sm font-semibold text-conteudo">{title}</p>
+        <span className="text-xs font-medium text-conteudo-muted bg-surface-elevated px-2 py-0.5 rounded-full">{count}</span>
       </div>
       {tickets.length === 0 ? (
         <div className="flex flex-col items-center justify-center py-10 gap-2">
-          <div className="w-8 h-8 rounded-full bg-slate-100 dark:bg-background-elevated flex items-center justify-center">
-            <svg className="w-4 h-4 text-slate-400" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={1.5}>
-              <path strokeLinecap="round" strokeLinejoin="round" d="M9 12l2 2 4-4m6 2a9 9 0 11-18 0 9 9 0 0118 0z" />
-            </svg>
+          <div className="w-8 h-8 rounded-full bg-surface-elevated flex items-center justify-center">
+            <Icon name="check" size={16} strokeWidth={1.5} className="text-conteudo-muted" />
           </div>
-          <p className="text-sm text-slate-500">{emptyMsg}</p>
+          <p className="text-sm text-conteudo-muted">{emptyMsg}</p>
         </div>
       ) : (
-        <div className="overflow-y-auto max-h-[168px] divide-y divide-border/60">
+        <div className="overflow-y-auto max-h-[168px] divide-y divide-borda/60">
           {tickets.map((t) => <TicketRow key={t.id} ticket={t} showTech={showTech} />)}
         </div>
       )}
@@ -151,15 +128,24 @@ interface TechGroup { name: string; tickets: Ticket[] }
 
 export default function TechnicianDashboard() {
   const { user } = useAuth();
-  const { theme } = useTheme();
 
   // Period state
   const [periodKey, setPeriodKey] = useState<PeriodKey>("mes");
   const [customDates, setCustomDates] = useState(getDefaultCustomDates);
 
+  // O recuo existe porque `find` devolve `undefined` para chave desconhecida,
+  // e o `!` que estava aqui lia `days` dela — a tela quebrava inteira. O
+  // caminho conhecido era a opção de limpar do filtro antigo, que devolvia
+  // `""`; ela saiu na D9.2, mas o estouro nunca dependeu dela.
+  //
+  // Recuo para 30 e não para o primeiro da lista: 30 é o padrão declarado no
+  // backend (`period: Annotated[int, Query(ge=1, le=365)] = 30`), ou seja, o
+  // que o servidor faria sozinho se o parâmetro não fosse mandado. E é por
+  // esse mesmo `ge=1` que **não existe "todo o período"**: a opção de limpar
+  // não tem para onde apontar, e por isso saiu em vez de virar estado válido.
   const activePeriod = periodKey === "custom"
     ? customDays(customDates.start, customDates.end)
-    : PERIOD_OPTIONS.find((p) => p.key === periodKey)!.days;
+    : (PERIOD_OPTIONS.find((p) => p.key === periodKey)?.days ?? 30);
 
   const periodLabel = PERIOD_OPTIONS.find((p) => p.key === periodKey)?.label ?? "";
 
@@ -215,71 +201,82 @@ export default function TechnicianDashboard() {
       .finally(() => setLoading(false));
   }, [user, activePeriod]);
 
-  const tooltipBg     = theme === "dark" ? "#132238" : "#ffffff";
-  const tooltipBorder = theme === "dark" ? "#1E3A5F" : "#e2e8f0";
-  const tooltipStyle  = {
-    backgroundColor: tooltipBg,
-    border: `1px solid ${tooltipBorder}`,
-    borderRadius: "8px",
-    color: theme === "dark" ? "#f1f5f9" : "#0f172a",
-    fontSize: "12px",
-  };
-  const tooltipWrapper = {
-    backgroundColor: tooltipBg,
-    border: `1px solid ${tooltipBorder}`,
-    borderRadius: "8px",
-    outline: "none",
-  };
-
   if (loading) return <div className="flex h-64 items-center justify-center"><Spinner size="lg" /></div>;
   if (error)   return <Alert variant="danger">{error}</Alert>;
   if (!detail) return <Alert variant="danger">Erro ao carregar dados.</Alert>;
 
   const myActiveCount = myTickets.filter((t) => t.status === "open" || t.status === "in_progress").length;
   const myBreachCount = myTickets.filter((t) => t.sla_response_breach || t.sla_resolve_breach).length;
-  const axisColor     = theme === "dark" ? "#475569" : "#94a3b8";
   const teamAllTickets = teamGroups.flatMap((g) => g.tickets);
 
+  /*
+   * Os tres icones dos indicadores ficaram como `<svg>` solto na primeira
+   * passada desta tela, porque nenhum deles tinha par no pacote — e aquela
+   * passada foi ANTES da **E21**.
+   *
+   * Hoje `clipboard` e `inbox` existem e batem caractere a caractere; foi
+   * esta tela, entre outras, que os pediu. O terceiro e o triangulo de aviso,
+   * unificado com `warning` pelo significado — o mesmo caso que a E21 nomeia
+   * dez vezes.
+   *
+   * Fica a licao de ordem: tela migrada antes de uma emenda de icone precisa
+   * de uma segunda olhada depois dela, senao o `<svg>` solto vira permanente
+   * por motivo que ja deixou de existir.
+   */
   return (
     <div className="space-y-5">
 
       {/* ── Header ──────────────────────────────────────────── */}
-      <div className="flex flex-col sm:flex-row sm:flex-wrap sm:items-center sm:justify-between gap-4 rounded-2xl border border-border/40 bg-background-surface px-5 py-4">
+      <div className="flex flex-col sm:flex-row sm:flex-wrap sm:items-center sm:justify-between gap-4 rounded-2xl border border-borda/40 bg-surface px-5 py-4">
         <div className="text-center sm:text-left">
-          <h1 className="text-xl font-extrabold text-slate-100">Dashboard</h1>
-          <p className="mt-0.5 text-sm text-slate-500">
-            Olá, <span className="font-semibold text-slate-300">{user?.name?.split(" ")[0]}</span>! Aqui está sua fila de hoje.
+          <h1 className="text-xl font-extrabold text-conteudo-heading">Dashboard</h1>
+          <p className="mt-0.5 text-sm text-conteudo-muted">
+            Olá, <span className="font-semibold text-conteudo">{user?.name?.split(" ")[0]}</span>! Aqui está sua fila de hoje.
           </p>
         </div>
 
         <div className="flex flex-wrap items-center justify-center sm:justify-end gap-2">
           {/* Period filter */}
-          <FilterSelect
+          {/* D9.2 — oito períodos fixos no código: lista curta e conhecida,
+              logo `<select>` nativo.
+
+              Sem `placeholder`, e isso conserta uma queda. A linha de limpar do
+              `FilterSelect` devolvia `""`, e logo abaixo
+              `PERIOD_OPTIONS.find((p) => p.key === periodKey)!.days` lia `days`
+              de `undefined`. O `<select>` nativo não tem linha de limpar, e o
+              período passa a ser o que sempre foi: uma escolha obrigatória.
+
+              O rótulo é `sr-only`: sem ele o filtro se anunciava "Este Mês". */}
+          <span id="rotulo-filtro-periodo" className="sr-only">
+            Período
+          </span>
+          <Select
+            id="filtro-periodo"
+            aria-labelledby="rotulo-filtro-periodo"
             value={periodKey}
-            onChange={(v) => setPeriodKey(v as PeriodKey)}
+            onChange={(e) => setPeriodKey(e.target.value as PeriodKey)}
             options={PERIOD_OPTIONS.map((p) => ({ value: p.key, label: p.label }))}
-            placeholder="Período"
           />
 
           {/* Custom date range */}
           {periodKey === "custom" && (
-            <div className="flex h-9 items-center gap-1.5 rounded-lg border border-border/60 bg-background-elevated px-3 text-sm">
-              <svg className="w-3.5 h-3.5 shrink-0 text-slate-500" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}><path strokeLinecap="round" strokeLinejoin="round" d="M8 7V3m8 4V3m-9 8h10M5 21h14a2 2 0 002-2V7a2 2 0 00-2-2H5a2 2 0 00-2 2v12a2 2 0 002 2z" /></svg>
+            <div className="flex h-9 items-center gap-1.5 rounded-lg border border-borda/60 bg-surface-elevated px-3 text-sm">
+              <Icon name="calendar" size={14} strokeWidth={2} className="shrink-0 text-conteudo-muted" />
               <input
                 type="date"
                 value={customDates.start}
                 max={customDates.end}
                 onChange={(e) => setCustomDates((d) => ({ ...d, start: e.target.value }))}
-                className="bg-transparent text-slate-700 dark:text-slate-300 text-xs outline-none cursor-pointer w-28 [color-scheme:light] dark:[color-scheme:dark]"
+                className="bg-transparent text-conteudo text-xs outline-none cursor-pointer w-28 [color-scheme:light] dark:[color-scheme:dark]"
               />
-              <span className="text-slate-500 text-xs">até</span>
+              <span className="text-conteudo-muted text-xs">até</span>
               <input
                 type="date"
                 value={customDates.end}
                 min={customDates.start}
                 max={new Date().toISOString().slice(0, 10)}
                 onChange={(e) => setCustomDates((d) => ({ ...d, end: e.target.value }))}
-                className="bg-transparent text-slate-700 dark:text-slate-300 text-xs outline-none cursor-pointer w-28 [color-scheme:light] dark:[color-scheme:dark]"
+                className="bg-transparent text-conteudo text-xs outline-none cursor-pointer w-28 [color-scheme:light] dark:[color-scheme:dark]"
               />
             </div>
           )}
@@ -292,64 +289,60 @@ export default function TechnicianDashboard() {
           label="Meus tickets ativos"
           value={myActiveCount}
           sub="Abertos + em andamento"
-          accent={myActiveCount > 0 ? "border-l-sky-500" : "border-l-slate-300 dark:border-l-slate-600"}
-          iconBg={myActiveCount > 0 ? "bg-sky-500/10" : "bg-slate-100 dark:bg-background-elevated"}
-          valueCls={myActiveCount > 0 ? "text-sky-600 dark:text-sky-400" : "text-slate-900 dark:text-slate-100"}
-          icon={<svg className={cn("w-5 h-5", myActiveCount > 0 ? "text-sky-500" : "text-slate-400")} fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={1.75}><path strokeLinecap="round" strokeLinejoin="round" d="M9 5H7a2 2 0 00-2 2v12a2 2 0 002 2h10a2 2 0 002-2V7a2 2 0 00-2-2h-2M9 5a2 2 0 002 2h2a2 2 0 002-2M9 5a2 2 0 012-2h2a2 2 0 012 2" /></svg>}
+          tone={myActiveCount > 0 ? "info" : "neutral"}
+          icon={<Icon name="clipboard" size={20} />}
         />
         <KpiCard
           label="Fila geral aberta"
           value={openCount}
           sub="Aguardando atendimento"
-          accent="border-l-slate-300 dark:border-l-slate-600"
-          iconBg="bg-slate-100 dark:bg-background-elevated"
-          icon={<svg className="w-5 h-5 text-slate-400" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={1.75}><path strokeLinecap="round" strokeLinejoin="round" d="M20 13V6a2 2 0 00-2-2H6a2 2 0 00-2 2v7m16 0v5a2 2 0 01-2 2H6a2 2 0 01-2-2v-5m16 0h-2.586a1 1 0 00-.707.293l-2.414 2.414a1 1 0 01-.707.293h-3.172a1 1 0 01-.707-.293l-2.414-2.414A1 1 0 006.586 13H4" /></svg>}
+          tone="neutral"
+          icon={<Icon name="inbox" size={20} />}
         />
         <KpiCard
           label="SLA em risco"
           value={myBreachCount}
           sub="Nos meus tickets"
-          accent={myBreachCount > 0 ? "border-l-red-500" : "border-l-slate-300 dark:border-l-slate-600"}
-          iconBg={myBreachCount > 0 ? "bg-red-500/10" : "bg-slate-100 dark:bg-background-elevated"}
-          valueCls={myBreachCount > 0 ? "text-red-600 dark:text-red-400" : "text-slate-900 dark:text-slate-100"}
-          icon={<svg className={cn("w-5 h-5", myBreachCount > 0 ? "text-red-500" : "text-slate-400")} fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={1.75}><path strokeLinecap="round" strokeLinejoin="round" d="M12 9v2m0 4h.01m-6.938 4h13.856c1.54 0 2.502-1.667 1.732-3L13.732 4c-.77-1.333-2.694-1.333-3.464 0L3.34 16c-.77 1.333.192 3 1.732 3z" /></svg>}
+          tone={myBreachCount > 0 ? "danger" : "neutral"}
+          icon={<Icon name="warning" size={20} />}
         />
         <KpiCard
           label="Meu CSAT"
           value={detail.csat_average != null ? `${detail.csat_average.toFixed(1)} / 10` : "—"}
           sub={`${detail.csat_count} avaliações · ${periodLabel}`}
-          accent="border-l-amber-400"
-          iconBg="bg-amber-500/10"
-          valueCls="text-amber-600 dark:text-amber-400"
-          icon={<svg className="w-5 h-5 text-amber-500" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={1.75}><path strokeLinecap="round" strokeLinejoin="round" d="M11.049 2.927c.3-.921 1.603-.921 1.902 0l1.519 4.674a1 1 0 00.95.69h4.915c.969 0 1.371 1.24.588 1.81l-3.976 2.888a1 1 0 00-.363 1.118l1.518 4.674c.3.922-.755 1.688-1.538 1.118l-3.976-2.888a1 1 0 00-1.176 0l-3.976 2.888c-.783.57-1.838-.197-1.538-1.118l1.518-4.674a1 1 0 00-.363-1.118l-3.976-2.888c-.784-.57-.38-1.81.588-1.81h4.914a1 1 0 00.951-.69l1.519-4.674z" /></svg>}
+          tone="warning"
+          icon={<Icon name="star" />}
         />
       </div>
 
       {/* ── Charts + stats ───────────────────────────────────── */}
       <div className="grid grid-cols-1 lg:grid-cols-3 gap-4">
         {/* Area chart */}
-        <div className="lg:col-span-2 rounded-xl bg-white dark:bg-background-surface border border-slate-200 dark:border-border overflow-hidden">
-          <div className="px-5 py-4 border-b border-slate-100 dark:border-border/60">
-            <p className="text-sm font-semibold text-slate-700 dark:text-slate-200">
+        <div className="lg:col-span-2 rounded-xl bg-surface border border-borda overflow-hidden">
+          <div className="px-5 py-4 border-b border-borda/60">
+            <p className="text-sm font-semibold text-conteudo">
               Meus atendimentos por dia — {periodLabel}
             </p>
           </div>
           <div className="p-5">
             {detail.tickets_by_day.length === 0 ? (
-              <p className="text-slate-500 text-sm py-8 text-center">Sem dados para o período</p>
+              <p className="text-conteudo-muted text-sm py-8 text-center">Sem dados para o período</p>
             ) : (
               <ResponsiveContainer width="100%" height={180}>
+                {/* Série temporal de medida única — chamados por dia —, então uma
+                    cor só, `COR_SERIE_TEMPORAL`. Era `#0ea5e9` cravado, a quarta
+                    cor diferente entre cinco gráficos da mesma natureza. */}
                 <AreaChart data={detail.tickets_by_day} margin={{ top: 4, right: 4, left: -24, bottom: 0 }}>
                   <defs>
                     <linearGradient id="techGradient" x1="0" y1="0" x2="0" y2="1">
-                      <stop offset="5%"  stopColor="#0ea5e9" stopOpacity={0.3} />
-                      <stop offset="95%" stopColor="#0ea5e9" stopOpacity={0}   />
+                      <stop offset="5%"  stopColor={COR_SERIE_TEMPORAL} stopOpacity={0.3} />
+                      <stop offset="95%" stopColor={COR_SERIE_TEMPORAL} stopOpacity={0}   />
                     </linearGradient>
                   </defs>
-                  <XAxis dataKey="date" tickFormatter={fmtDate} tick={{ fill: axisColor, fontSize: 11 }} axisLine={false} tickLine={false} interval="preserveStartEnd" />
-                  <YAxis tick={{ fill: axisColor, fontSize: 11 }} axisLine={false} tickLine={false} allowDecimals={false} />
-                  <Tooltip contentStyle={tooltipStyle} wrapperStyle={tooltipWrapper} labelFormatter={(v) => fmtDate(String(v))} formatter={(v) => [v, "Tickets"]} />
-                  <Area type="monotone" dataKey="count" stroke="#0ea5e9" strokeWidth={2} fill="url(#techGradient)" dot={false} activeDot={{ r: 4, fill: "#0ea5e9" }} />
+                  <XAxis dataKey="date" tickFormatter={fmtDate} tick={{ fill: CROMO.eixo, fontSize: 11 }} axisLine={false} tickLine={false} interval="preserveStartEnd" />
+                  <YAxis tick={{ fill: CROMO.eixo, fontSize: 11 }} axisLine={false} tickLine={false} allowDecimals={false} />
+                  <Tooltip contentStyle={ESTILO_DICA} wrapperStyle={ENVOLTORIO_DICA} labelFormatter={(v) => fmtDate(String(v))} formatter={(v) => [v, "Tickets"]} />
+                  <Area type="monotone" dataKey="count" stroke={COR_SERIE_TEMPORAL} strokeWidth={2} fill="url(#techGradient)" dot={false} activeDot={{ r: 4, fill: COR_SERIE_TEMPORAL }} />
                 </AreaChart>
               </ResponsiveContainer>
             )}
@@ -357,9 +350,9 @@ export default function TechnicianDashboard() {
         </div>
 
         {/* Personal stats summary */}
-        <div className="rounded-xl bg-white dark:bg-background-surface border border-slate-200 dark:border-border overflow-hidden">
-          <div className="px-5 py-4 border-b border-slate-100 dark:border-border/60">
-            <p className="text-sm font-semibold text-slate-700 dark:text-slate-200">
+        <div className="rounded-xl bg-surface border border-borda overflow-hidden">
+          <div className="px-5 py-4 border-b border-borda/60">
+            <p className="text-sm font-semibold text-conteudo">
               Meu desempenho — {periodLabel}
             </p>
           </div>
@@ -373,10 +366,10 @@ export default function TechnicianDashboard() {
               { label: "Conformidade SLA",   value: `${detail.sla_compliance_rate.toFixed(0)}%`,     raw: true },
             ].map((item) => (
               <div key={item.label} className="flex items-center justify-between">
-                <span className="text-sm text-slate-500">{item.label}</span>
+                <span className="text-sm text-conteudo-muted">{item.label}</span>
                 <span className={cn(
                   "text-sm font-semibold tabular-nums",
-                  item.danger ? "text-danger" : "text-slate-700 dark:text-slate-200",
+                  item.danger ? "text-on-tint-danger" : "text-conteudo",
                 )}>
                   {item.value}
                 </span>

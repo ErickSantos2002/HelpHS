@@ -8,6 +8,7 @@ import enum
 import uuid
 from datetime import datetime
 
+from pgvector.sqlalchemy import Vector
 from sqlalchemy import (
     Boolean,
     CheckConstraint,
@@ -114,6 +115,19 @@ class KBArticleStatus(str, enum.Enum):
     draft = "draft"
     published = "published"
     archived = "archived"
+
+
+class LibraryVisibility(str, enum.Enum):
+    """Quem pode ver um arquivo da biblioteca.
+
+    `internal` e o default da coluna, e a escolha e a regra inteira: abrir para
+    o cliente e acao explicita de quem envia, entao esquecer falha do lado
+    seguro. Ha manual tecnico com senha de configuracao em texto aberto -- ver
+    o cabecalho da migration c9d0e1f2a3b4.
+    """
+
+    internal = "internal"
+    client = "client"
 
 
 class CalendarEventType(str, enum.Enum):
@@ -475,7 +489,26 @@ class Ticket(Base):
     # classificação automática nem a sugestão de resposta olham este chamado.
     # "Desliga a IA neste chamado" tem que significar isso, senão a promessa
     # da tela é maior que a do código.
+    #
+    # É o botão DE GENTE, e só. A Helô não escreve aqui quando decide sair
+    # sozinha — para isso existe o `helo_saiu` logo abaixo. A exceção está lá
+    # explicada: quando o CLIENTE pede para falar com uma pessoa, os dois vão
+    # a `False`, porque aí quem quis sair da IA foi ele.
     ai_enabled: Mapped[bool] = mapped_column(Boolean, default=True, nullable=False)
+
+    # A Helô já saiu deste chamado — escalou, e o chamado passou a ser do
+    # humano. Ela não volta a falar aqui nem que o cliente escreva de novo.
+    #
+    # Existe porque o `ai_enabled` estava fazendo dois trabalhos. Enquanto ela
+    # falava uma vez por chamado, "escalou" e "IA desligada" davam no mesmo. Com
+    # ela conversando, escalar por decisão do modelo, por teto de trocas ou por
+    # a IA estar fora do ar passou a desligar também a sugestão de resposta e o
+    # resumo DO TÉCNICO — tirando a ferramenta dele exatamente nos chamados em
+    # que a IA já tinha falhado, e sem ninguém ter pedido.
+    #
+    # Separado, cada campo responde a uma pergunta só: `ai_enabled` é "alguém
+    # quer a IA fora daqui?", `helo_saiu` é "a conversa dela acabou?".
+    helo_saiu: Mapped[bool] = mapped_column(Boolean, default=False, nullable=False)
 
     # SLA
     sla_config_id: Mapped[uuid.UUID | None] = mapped_column(
@@ -489,6 +522,12 @@ class Ticket(Base):
     sla_resolve_breach: Mapped[bool] = mapped_column(Boolean, default=False)
     sla_paused_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
     sla_total_paused_ms: Mapped[int] = mapped_column(Integer, default=0)
+    # Escrita por quem resolve, quando resolve fora do prazo. Nulo significa
+    # DUAS coisas legitimas e permanentes: resolvido dentro do prazo, ou
+    # resolvido antes de a exigencia existir. Nao ha default nem NOT NULL de
+    # proposito -- vazio apagaria a diferenca entre "nao precisou" e "nao
+    # preencheu".
+    sla_breach_justification: Mapped[str | None] = mapped_column(Text)
 
     # Notas internas (visível apenas para admin/técnico)
     technician_notes: Mapped[str | None] = mapped_column(Text, nullable=True)
@@ -660,6 +699,49 @@ class Attachment(Base):
     user: Mapped["User"] = relationship(back_populates="attachments")
 
 
+class LibraryFile(Base):
+    """Arquivo recorrente: manual, guia, formulario.
+
+    Guardado UMA vez e apontado por quem o usa. A mensagem de chat que o anexa
+    referencia esta linha em vez de copiar o binario -- copiar multiplicaria o
+    mesmo PDF no disco e criaria a duvida de qual copia vale quando o admin
+    subir uma versao nova.
+    """
+
+    __tablename__ = "library_files"
+
+    id: Mapped[uuid.UUID] = mapped_column(UUID(as_uuid=True), primary_key=True, default=uuid.uuid4)
+    title: Mapped[str] = mapped_column(String(255), nullable=False, index=True)
+    description: Mapped[str | None] = mapped_column(Text)
+    # Nulo = nao e de um aparelho especifico (politica, formulario).
+    product_id: Mapped[uuid.UUID | None] = mapped_column(
+        UUID(as_uuid=True), ForeignKey("products.id", ondelete="SET NULL"), index=True
+    )
+    visibility: Mapped[LibraryVisibility] = mapped_column(
+        Enum(LibraryVisibility, name="libraryvisibility"),
+        default=LibraryVisibility.internal,
+        server_default="internal",
+        nullable=False,
+    )
+
+    original_name: Mapped[str] = mapped_column(String(255), nullable=False)
+    stored_name: Mapped[str] = mapped_column(String(255), nullable=False)
+    mime_type: Mapped[str] = mapped_column(String(100), nullable=False)
+    size_bytes: Mapped[int] = mapped_column(Integer, nullable=False)
+    s3_key: Mapped[str] = mapped_column(String(500), nullable=False)
+    s3_bucket: Mapped[str] = mapped_column(String(100), nullable=False)
+    virus_scanned: Mapped[bool] = mapped_column(Boolean, default=False)
+    virus_clean: Mapped[bool] = mapped_column(Boolean, default=False)
+
+    uploaded_by: Mapped[uuid.UUID] = mapped_column(UUID(as_uuid=True), ForeignKey("users.id"))
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now())
+    updated_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), server_default=func.now(), onupdate=func.now()
+    )
+
+    product: Mapped["Product | None"] = relationship()
+
+
 class ChatMessage(Base):
     """Mensagens de chat em tempo real (WebSocket)"""
 
@@ -681,6 +763,13 @@ class ChatMessage(Base):
     content: Mapped[str] = mapped_column(Text, nullable=False)
     is_system: Mapped[bool] = mapped_column(Boolean, default=False)
     is_ai: Mapped[bool] = mapped_column(Boolean, default=False)
+    # Aponta para a biblioteca, nao copia. SET NULL no banco: apagar um item
+    # da biblioteca nao pode apagar a conversa -- a mensagem sobrevive sem o
+    # arquivo, que e ruim mas recuperavel; apagar a fala do tecnico nao e.
+    library_file_id: Mapped[uuid.UUID | None] = mapped_column(
+        UUID(as_uuid=True), ForeignKey("library_files.id", ondelete="SET NULL"), index=True
+    )
+    library_file: Mapped["LibraryFile | None"] = relationship()
     read_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now())
 
@@ -707,6 +796,13 @@ class KBArticle(Base):
     status: Mapped[KBArticleStatus] = mapped_column(
         Enum(KBArticleStatus), default=KBArticleStatus.draft, index=True
     )
+    # A Helô pode usar este artigo para responder cliente. Padrão `true`: desde
+    # 10/09/2026 artigo publicado alimenta as respostas dela sem ninguém rodar
+    # nada, e esta é a forma de manter um artigo na barra lateral e FORA da IA.
+    # Coluna, e não tag, porque tag é texto livre e erro de digitação mudaria
+    # o comportamento em silêncio. O porquê do padrão, com o número e a data,
+    # está na migration `c9x0y1z2a3b4`.
+    helo_pode_ler: Mapped[bool] = mapped_column(Boolean, default=True, nullable=False)
     author_id: Mapped[uuid.UUID] = mapped_column(UUID(as_uuid=True), ForeignKey("users.id"))
     view_count: Mapped[int] = mapped_column(Integer, default=0)
     helpful: Mapped[int] = mapped_column(Integer, default=0)
@@ -762,8 +858,11 @@ class SLAConfig(Base):
 
     id: Mapped[uuid.UUID] = mapped_column(UUID(as_uuid=True), primary_key=True, default=uuid.uuid4)
     level: Mapped[SLALevel] = mapped_column(Enum(SLALevel), unique=True, nullable=False)
-    response_time_hours: Mapped[int] = mapped_column(Integer, nullable=False)
-    resolve_time_hours: Mapped[int] = mapped_column(Integer, nullable=False)
+    # MINUTOS, nao horas. Metade da resposta do nivel critico e 30 min, e isso
+    # nao cabe numa coluna de horas inteiras -- foi o que forcou a troca de
+    # unidade. Ver a migration a7b8c9d0e1f2.
+    response_time_minutes: Mapped[int] = mapped_column(Integer, nullable=False)
+    resolve_time_minutes: Mapped[int] = mapped_column(Integer, nullable=False)
     warning_threshold: Mapped[int] = mapped_column(Integer, default=80)
     is_active: Mapped[bool] = mapped_column(Boolean, default=True)
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now())
@@ -899,10 +998,18 @@ class CalendarEvent(Base):
         Enum(CalendarEventType), default=CalendarEventType.event, nullable=False
     )
     color: Mapped[str] = mapped_column(String(7), nullable=False, default="#6366f1")
+    # As duas continuam NOT NULL e com hora. "Dia inteiro" nao as torna nulas:
+    # a API deriva as bordas do dia quando `all_day` esta ligado, e o indice, os
+    # filtros e as leituras antigas seguem funcionando sem saber da chave.
     start_date: Mapped[datetime] = mapped_column(
         DateTime(timezone=True), nullable=False, index=True
     )
     end_date: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False)
+    # Data FLUTUANTE quando ligado: o evento vale das 00:00:00Z as 23:59:59.999999Z
+    # da data escolhida, e a tela o desenha pela DATA, nao pelo instante. Ver o
+    # cabecalho de `app/utils/agenda.py` -- e a decisao que permite os eventos
+    # antigos virarem dia inteiro sem recalcular linha nenhuma.
+    all_day: Mapped[bool] = mapped_column(Boolean, nullable=False, default=False)
     created_by: Mapped[uuid.UUID | None] = mapped_column(
         UUID(as_uuid=True), ForeignKey("users.id", ondelete="SET NULL"), nullable=True
     )
@@ -912,3 +1019,88 @@ class CalendarEvent(Base):
     )
 
     creator: Mapped["User | None"] = relationship()
+
+
+# ── BASE DA HELÔ (Fase 2) ────────────────────────────────────
+#
+# Separada dos `KBArticle`, confirmando a decisão de 26/08. São dois corpora
+# com donos e ciclos diferentes: o artigo da Base de Conhecimento é escrito por
+# gente da equipe, tem autor, rascunho e contador de "foi útil"; o trecho de
+# manual é derivado de um arquivo que alguém do fabricante escreveu e que a
+# ingestão recorta. Misturar os dois obrigaria metade das colunas de cada um a
+# nascer nula na outra metade das linhas.
+
+# Dimensão do vetor. 1024 é o que bge-m3 e multilingual-e5-large produzem — os
+# dois modelos locais em avaliação. NÃO é configurável: `vector(N)` é tipo de
+# coluna, e trocar o modelo por um de dimensão diferente é migration nova, não
+# variável de ambiente. Está escrito aqui para que a troca seja uma decisão
+# consciente e não a descoberta de um INSERT recusado em produção.
+HELO_EMBEDDING_DIM = 1024
+
+
+class HeloChunk(Base):
+    """Um trecho recuperável — a unidade que a busca devolve e que a Helô cita."""
+
+    __tablename__ = "helo_chunks"
+    __table_args__ = (
+        # Único por artigo: a indexação não pode gravar dois trechos disputando
+        # a mesma posição, senão a ordem de leitura vira sorteio.
+        Index("ix_helo_chunks_artigo_ordem", "article_id", "ordem", unique=True),
+    )
+
+    id: Mapped[uuid.UUID] = mapped_column(UUID(as_uuid=True), primary_key=True, default=uuid.uuid4)
+    # O ARTIGO de onde o trecho saiu. Desde 10/09/2026 a fonte da Helô é a
+    # Base de Conhecimento, e o produto do trecho é o produto do artigo — por
+    # `kb_article_products`, que a tela já edita. Um vínculo por trecho seria
+    # uma segunda fonte de verdade para a mesma pergunta.
+    article_id: Mapped[uuid.UUID] = mapped_column(
+        UUID(as_uuid=True), ForeignKey("kb_articles.id", ondelete="CASCADE"), index=True
+    )
+    # Texto, e não número: aqui cabe tanto "8.2 Alterar Idioma" quanto um
+    # título de artigo escrito pelo suporte — e é esta string que a resposta
+    # cita como fonte.
+    secao: Mapped[str] = mapped_column(String(255), nullable=False)
+    # A posição do trecho dentro do artigo. A ordem do texto é a ordem do
+    # procedimento, e ela não se recupera do texto depois: "8.10" vem depois de
+    # "8.9", e ordenar por `secao` como string colocaria "8.10" antes de "8.2".
+    ordem: Mapped[int] = mapped_column(Integer, nullable=False)
+    conteudo: Mapped[str] = mapped_column(Text, nullable=False)
+    # O trecho ensina um procedimento que só roda com senha de administrador.
+    # O valor da senha é REDIGIDO na importação do manual e o procedimento
+    # fica — as duas metades da mesma decisão. Excluir o trecho pareceria mais
+    # seguro e é pior: a busca não acharia nada, a Helô escalaria por NADA
+    # ENCONTRADO, e nem ela nem o técnico saberiam o motivo. Com a marca ela
+    # escala dizendo o motivo exato.
+    exige_credencial_admin: Mapped[bool] = mapped_column(Boolean, default=False, nullable=False)
+    # Nulo só por um instante: a indexação embute antes de gravar, e com o
+    # serviço de embedding fora ela não grava nada — o trecho velho fica no
+    # lugar e a próxima varredura tenta de novo.
+    embedding: Mapped[list[float] | None] = mapped_column(Vector(HELO_EMBEDDING_DIM), nullable=True)
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now())
+
+
+class HeloIndexacao(Base):
+    """
+    O que já foi indexado, e de qual versão do texto.
+
+    Existe para a varredura periódica reindexar SÓ o artigo que mudou. O hash
+    é do RESULTADO do corte — dos trechos que seriam gravados —, e não do
+    `content` cru nem do `updated_at`:
+
+    - `updated_at` anda a cada visualização do artigo (`view_count` é
+      incrementado por UPDATE), e cada clique pagaria embedding de texto igual;
+    - o `content` cru não enxerga mudança de receita: consertar o corte ou a
+      redação com o texto igual deixaria a base com o corte velho. É a lição
+      do `_hash_do_resultado` da ingestão por arquivo, que existia pelo mesmo
+      motivo.
+    """
+
+    __tablename__ = "helo_indexacao"
+
+    article_id: Mapped[uuid.UUID] = mapped_column(
+        UUID(as_uuid=True), ForeignKey("kb_articles.id", ondelete="CASCADE"), primary_key=True
+    )
+    content_hash: Mapped[str] = mapped_column(String(64), nullable=False)
+    indexado_em: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), server_default=func.now(), nullable=False
+    )

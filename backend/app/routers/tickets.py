@@ -71,15 +71,18 @@ from app.services.ticket_lifecycle import (
     resolution_reference,
 )
 from app.utils.crud import get_or_404
+from app.utils.history import registra_historico
 from app.utils.protocol import MAX_RETRIES, generate_protocol
 from app.utils.sla import (
     _PAUSE_STATUSES,
-    add_business_hours,
+    add_business_minutes,
     apply_sla_config,
     check_breaches,
+    marca_violacao_ao_resolver,
     pause_sla,
     register_first_response,
     resume_sla,
+    violacao_ao_resolver,
 )
 from app.utils.ticket_access import ensure_ticket_visible
 
@@ -187,7 +190,9 @@ async def _auto_transition(
 
     check_breaches(ticket, now)
 
-    _record_history(db, ticket.id, actor_id, "status", old_status.value, new_status.value, comment)
+    registra_historico(
+        db, ticket.id, actor_id, "status", old_status.value, new_status.value, comment
+    )
     _audit(db, AuditAction.status_change, actor_id, ticket.id)
     await notify(
         db,
@@ -300,31 +305,43 @@ async def _set_ticket_equipments(
     ticket.equipments = encontrados
 
 
-def _record_history(
-    db: AsyncSession,
-    ticket_id: uuid.UUID,
-    # Nulo quando quem agiu foi o sistema — a Helô movendo o chamado para "Em
-    # andamento". A coluna já aceitava (`TicketHistory.user_id` é nullable); só
-    # a anotação aqui era estreita demais.
-    user_id: uuid.UUID | None,
-    field: str,
-    # Aceita UUID porque varios campos de historico sao id: o corpo faz str()
-    # antes de gravar, entao a anotacao estreita era a unica coisa errada.
-    old_value: str | uuid.UUID | None,
-    new_value: str | uuid.UUID | None,
-    comment: str | None = None,
-) -> None:
-    db.add(
-        TicketHistory(
-            id=uuid.uuid4(),
-            ticket_id=ticket_id,
-            user_id=user_id,
-            field=field,
-            old_value=str(old_value) if old_value is not None else None,
-            new_value=str(new_value) if new_value is not None else None,
-            comment=comment,
+def _justificativa_de_sla(ticket: Ticket, now: datetime, enviada: str | None) -> str | None:
+    """
+    Recusa resolver chamado fora do prazo sem justificativa escrita.
+
+    Roda ANTES de qualquer mutação, de propósito: uma recusa depois de o status
+    já ter mudado deixaria o chamado resolvido e o pedido rejeitado ao mesmo
+    tempo, e o cliente da API não teria como saber em que estado ficou.
+
+    A violação é calculada da DATA, não das marcas `sla_*_breach` — ver
+    `violacao_ao_resolver`, que explica por que as marcas não servem aqui. Se
+    servissem, um chamado vencido e esquecido passaria batido, e é exatamente
+    ele que a exigência existe para pegar.
+
+    Justificativa enviada sem haver violação é gravada mesmo assim: quem
+    explicou não perde o texto por ter entregado no prazo.
+    """
+    resposta_violada, resolucao_violada = violacao_ao_resolver(ticket, now)
+    limpa = (enviada or "").strip()
+
+    if not (resposta_violada or resolucao_violada):
+        return limpa or None
+
+    if not limpa:
+        quais = []
+        if resposta_violada:
+            quais.append("o de primeira resposta")
+        if resolucao_violada:
+            quais.append("o de resolução")
+        raise HTTPException(
+            status_code=status.HTTP_422_UNPROCESSABLE_CONTENT,
+            detail=(
+                f"Este chamado passou do prazo ({' e '.join(quais)}). "
+                "Informe 'sla_breach_justification' com o motivo do atraso para resolvê-lo."
+            ),
         )
-    )
+
+    return limpa
 
 
 # ═══════════════════════════════════════════════════════════════
@@ -392,7 +409,7 @@ async def create_ticket(
             apply_sla_config(ticket, sla_config, ts)
         db.add(ticket)
         await _set_ticket_equipments(db, ticket, body.equipment_ids, actor)
-        _record_history(db, ticket.id, actor.id, "created", None, "open")
+        registra_historico(db, ticket.id, actor.id, "created", None, "open")
 
         # A Helô se apresenta e faz as três perguntas de triagem. Dentro do
         # mesmo commit do chamado de propósito: metade das duas coisas gravada
@@ -404,7 +421,7 @@ async def create_ticket(
         if actor.role == UserRole.client and await abre_triagem(
             db, ticket, actor, list(ticket.equipments)
         ):
-            _record_history(db, ticket.id, None, "status", "open", "in_progress", "Helô")
+            registra_historico(db, ticket.id, None, "status", "open", "in_progress", "Helô")
         _audit(db, AuditAction.create, actor.id, ticket.id)
         await notify(
             db,
@@ -430,8 +447,8 @@ async def create_ticket(
     # Fire-and-forget LLM classification (non-blocking).
     #
     # O interruptor do chamado vale aqui também: o botão diz "Desligar IA neste
-    # chamado", e classificar assim mesmo mandaria o texto do cliente para a
-    # OpenAI depois de alguém ter pedido para não mandar.
+    # chamado", e classificar assim mesmo mandaria o texto do cliente para o
+    # provedor de LLM depois de alguém ter pedido para não mandar.
     if ticket.ai_enabled:
         asyncio.create_task(
             _classify_ticket_async(ticket.id, body.title, body.description, body.category.value)
@@ -620,7 +637,7 @@ async def update_ticket(
         await _set_ticket_equipments(db, ticket, novos_equipamentos, actor)
         depois = sorted(e.name for e in ticket.equipments)
         if antes != depois:
-            _record_history(
+            registra_historico(
                 db,
                 ticket.id,
                 actor.id,
@@ -632,7 +649,7 @@ async def update_ticket(
     for field, new_val in changes.items():
         old_val = getattr(ticket, field)
         if old_val != new_val:
-            _record_history(db, ticket.id, actor.id, field, old_val, new_val)
+            registra_historico(db, ticket.id, actor.id, field, old_val, new_val)
         setattr(ticket, field, new_val)
 
     ticket.updated_at = datetime.now(UTC)
@@ -669,7 +686,9 @@ async def update_client_observation(
     ticket.client_observation = body.client_observation
     ticket.updated_at = datetime.now(UTC)
     if old != body.client_observation:
-        _record_history(db, ticket.id, actor.id, "client_observation", old, body.client_observation)
+        registra_historico(
+            db, ticket.id, actor.id, "client_observation", old, body.client_observation
+        )
     _audit(db, AuditAction.update, actor.id, ticket.id)
     await commit_e_notificar(db)
     await db.refresh(ticket)
@@ -702,7 +721,7 @@ async def toggle_ticket_ai(
     ticket = await get_or_404(db, Ticket, ticket_id, _CHAMADO_NAO_ENCONTRADO)
 
     if ticket.ai_enabled != body.enabled:
-        _record_history(
+        registra_historico(
             db,
             ticket.id,
             actor.id,
@@ -737,9 +756,33 @@ async def update_ticket_status(
         )
 
     now = datetime.now(UTC)
+    # Antes de mudar qualquer coisa: fora do prazo sem justificativa, recusa.
+    justificativa = (
+        _justificativa_de_sla(ticket, now, body.sla_breach_justification)
+        if body.status == TicketStatus.resolved
+        else None
+    )
     old_status = ticket.status
     ticket.status = body.status
     ticket.updated_at = now
+
+    # A marca precisa ser carimbada AQUI, e nao pelo `check_breaches` mais
+    # abaixo: quando ele roda, o status ja e terminal e ele pula o teste de
+    # resolucao. Ver marca_violacao_ao_resolver.
+    if body.status == TicketStatus.resolved:
+        marca_violacao_ao_resolver(ticket, now)
+
+    if justificativa:
+        ticket.sla_breach_justification = justificativa
+        registra_historico(
+            db,
+            ticket.id,
+            actor.id,
+            "sla_breach_justification",
+            None,
+            justificativa,
+            "Justificativa do SLA violado",
+        )
 
     # SLA: mudar o status não marca primeira resposta — quem marca é falar com
     # o cliente (chat) ou entregar a resolução. Ver register_first_response.
@@ -755,7 +798,7 @@ async def update_ticket_status(
     if body.status in (TicketStatus.resolved, TicketStatus.closed, TicketStatus.cancelled):
         ticket.closed_at = now
 
-    _record_history(
+    registra_historico(
         db, ticket.id, actor.id, "status", old_status.value, body.status.value, body.comment
     )
     _audit(db, AuditAction.status_change, actor.id, ticket.id)
@@ -806,9 +849,26 @@ async def resolve_ticket(
         )
 
     now = datetime.now(UTC)
+    # Antes de mudar qualquer coisa: fora do prazo sem justificativa, recusa.
+    justificativa = _justificativa_de_sla(ticket, now, body.sla_breach_justification)
     old_status = ticket.status
     ticket.status = TicketStatus.resolved
     ticket.resolution_note = body.resolution_note
+    # Mesmo motivo do caminho do PATCH: o `check_breaches` la embaixo ja
+    # encontra o status terminal e nao marca a violacao de resolucao.
+    marca_violacao_ao_resolver(ticket, now)
+
+    if justificativa:
+        ticket.sla_breach_justification = justificativa
+        registra_historico(
+            db,
+            ticket.id,
+            actor.id,
+            "sla_breach_justification",
+            None,
+            justificativa,
+            "Justificativa do SLA violado",
+        )
     ticket.closed_at = now
     ticket.resolved_at = now
     ticket.updated_at = now
@@ -820,7 +880,7 @@ async def resolve_ticket(
         resume_sla(ticket, now)
     check_breaches(ticket, now)
 
-    _record_history(
+    registra_historico(
         db,
         ticket.id,
         actor.id,
@@ -915,7 +975,13 @@ async def reopen_ticket(
     )
     sla_config = sla_result.scalar_one_or_none()
     if sla_config:
-        ticket.sla_resolve_due_at = add_business_hours(now, sla_config.resolve_time_hours)
+        # Usa a configuração VIGENTE, não a que valia quando o chamado nasceu.
+        # É exceção consciente à regra de transição dos prazos aprovados pelo
+        # SGI: chamado antigo mantém o prazo de origem, mas quem é REABERTO
+        # começa um ciclo novo e ele segue a regra de hoje. Congelar exigiria
+        # versionar `sla_configs`, porque `sla_config_id` aponta para a linha
+        # atual, já editada.
+        ticket.sla_resolve_due_at = add_business_minutes(now, sla_config.resolve_time_minutes)
         ticket.sla_resolve_breach = False
     ticket.sla_paused_at = None
     # O tempo pausado é acumulado para esticar o prazo do ciclo em que ocorreu.
@@ -923,7 +989,7 @@ async def reopen_ticket(
     # bônus de horas que ninguém esperou.
     ticket.sla_total_paused_ms = 0
 
-    _record_history(
+    registra_historico(
         db,
         ticket.id,
         actor.id,
@@ -995,12 +1061,12 @@ async def assign_ticket(
             )
         if new_assignee_user.role not in (UserRole.admin, UserRole.technician):
             raise HTTPException(
-                status_code=status.HTTP_422_UNPROCESSABLE_ENTITY,
+                status_code=status.HTTP_422_UNPROCESSABLE_CONTENT,
                 detail="Tickets só podem ser atribuídos a técnicos ou administradores.",
             )
         if new_assignee_user.status != UserStatus.active:
             raise HTTPException(
-                status_code=status.HTTP_422_UNPROCESSABLE_ENTITY,
+                status_code=status.HTTP_422_UNPROCESSABLE_CONTENT,
                 detail=(
                     f"{new_assignee_user.name} está com o cadastro inativo e não pode "
                     "receber tickets."
@@ -1015,7 +1081,7 @@ async def assign_ticket(
     old_assignee = ticket.assignee_id
     ticket.assignee_id = body.assignee_id
     ticket.updated_at = datetime.now(UTC)
-    _record_history(
+    registra_historico(
         db,
         ticket.id,
         actor.id,
@@ -1068,7 +1134,7 @@ async def cancel_ticket(
     ticket.status = TicketStatus.cancelled
     ticket.closed_at = datetime.now(UTC)
     ticket.updated_at = ticket.closed_at
-    _record_history(db, ticket.id, actor.id, "status", old_status.value, "cancelled")
+    registra_historico(db, ticket.id, actor.id, "status", old_status.value, "cancelled")
     _audit(db, AuditAction.delete, actor.id, ticket.id)
     await notify(
         db,

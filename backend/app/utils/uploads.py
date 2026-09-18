@@ -48,7 +48,7 @@ async def ler_ate_o_limite(file: UploadFile, max_bytes: int, rotulo: str) -> byt
         total += len(bloco)
         if total > max_bytes:
             raise HTTPException(
-                status_code=status.HTTP_413_REQUEST_ENTITY_TOO_LARGE,
+                status_code=status.HTTP_413_CONTENT_TOO_LARGE,
                 detail=(
                     f"O arquivo '{file.filename}' passa do limite de {rotulo}. "
                     "Envie um arquivo menor."

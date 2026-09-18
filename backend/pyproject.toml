@@ -44,7 +44,9 @@ addopts = "--cov=app --cov-report=term-missing --cov-fail-under=80"
 
 # ── Coverage ─────────────────────────────────────────────────
 [tool.coverage.run]
-source = ["app"]
+# `servico_embedding` entra na conta: e codigo de producao, so que de outro
+# conteiner. Fora daqui, o gate de 80% nao o enxergaria.
+source = ["app", "servico_embedding"]
 concurrency = ["thread", "greenlet"]
 omit = [
     "app/seeds.py",
