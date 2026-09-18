@@ -1374,3 +1374,43 @@ async def test_cliente_nao_mexe_no_interruptor_do_chamado(patch_redis):
         resp = await c.patch(f"/api/v1/tickets/{_TICKET_ID}/ai", json={"enabled": False})
 
     assert resp.status_code == 403
+
+
+# ═══════════════════════════════════════════════════════════════
+# A CATEGORIA `other`, QUE SAIU
+# ═══════════════════════════════════════════════════════════════
+
+
+@pytest.mark.asyncio
+async def test_abrir_chamado_com_categoria_other_e_recusado(patch_redis):
+    """A recusa é na porta, e por isso não precisa de banco.
+
+    O valor saiu do enum em 18/09/2026 — zero chamados o usavam. Sem este caso,
+    reintroduzi-lo no `TicketCategory` voltaria a abrir a API sem nada acusando:
+    o modelo é a única coisa que o schema consulta.
+    """
+    _override_user(_mock_user(UserRole.client))
+
+    async with AsyncClient(transport=ASGITransport(app=app), base_url="http://test") as c:
+        resp = await c.post(
+            "/api/v1/tickets",
+            json={
+                "title": "Equipamento com falha",
+                "description": "O bafômetro não liga",
+                "category": "other",
+            },
+        )
+
+    assert resp.status_code == 422
+    assert "category" in str(resp.json()), resp.json()
+
+
+@pytest.mark.asyncio
+async def test_mudar_chamado_para_categoria_other_e_recusado(patch_redis):
+    """Editar é a outra porta, e ela fecha junto."""
+    _override_user(_mock_user(UserRole.technician))
+
+    async with AsyncClient(transport=ASGITransport(app=app), base_url="http://test") as c:
+        resp = await c.patch(f"/api/v1/tickets/{_TICKET_ID}", json={"category": "other"})
+
+    assert resp.status_code == 422
