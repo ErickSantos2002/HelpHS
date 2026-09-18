@@ -955,3 +955,49 @@ async def test_criar_artigo_grava_a_marcacao_da_helo(patch_redis):
     assert r.status_code == 201
     (gravado,) = [c.args[0] for c in sessao.add.call_args_list if isinstance(c.args[0], KBArticle)]
     assert gravado.helo_pode_ler is False
+
+
+# ═══════════════════════════════════════════════════════════════
+# A CATEGORIA `other`, QUE SAIU
+# ═══════════════════════════════════════════════════════════════
+
+
+@pytest.mark.asyncio
+async def test_criar_artigo_com_categoria_other_e_recusado(patch_redis):
+    """O valor saiu do enum, então a API o recusa na porta — 422, não 500.
+
+    O artigo e o chamado compartilham o MESMO tipo no Postgres
+    (`ticketcategory`), e por isso cada um tem seu caso: recusar num lado e
+    aceitar no outro seria o tipo aceitando o que a coluna gêmea já rejeita.
+    """
+    tech = _mock_user(UserRole.technician)
+    _override_user(tech)
+
+    async with AsyncClient(transport=ASGITransport(app=app), base_url="http://test") as client:
+        r = await client.post(
+            "/api/v1/kb/articles",
+            json={
+                "title": "Como trocar o sensor",
+                "content": "Conteúdo",
+                "category": "other",
+                "tags": [],
+            },
+        )
+
+    assert r.status_code == 422
+    assert "category" in str(r.json()), r.json()
+
+
+@pytest.mark.asyncio
+async def test_editar_artigo_para_categoria_other_e_recusado(patch_redis):
+    """A porta de trás. Criar recusando e editar aceitando seria a mesma fresta."""
+    tech = _mock_user(UserRole.technician)
+    _override_user(tech)
+
+    async with AsyncClient(transport=ASGITransport(app=app), base_url="http://test") as client:
+        r = await client.patch(
+            f"/api/v1/kb/articles/{uuid.uuid4()}",
+            json={"category": "other"},
+        )
+
+    assert r.status_code == 422

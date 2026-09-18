@@ -52,6 +52,9 @@ _ANTES_DO_BACKFILL = "u1p2q3r4s5t6"
 # o CI de main ficou vermelho sem a agenda ter mudado uma linha.
 _ANTES_DA_AGENDA = "c9x0y1z2a3b4"
 
+# O pai da saída do `other` do enum de categoria (`f2a3b4c5d6e7`).
+_ANTES_DA_SAIDA_DO_OTHER = "e1z2a3b4c5d6"
+
 
 def _alembic(url: str, alvo: str, comando: str = "upgrade") -> subprocess.CompletedProcess[str]:
     """
@@ -467,3 +470,101 @@ async def test_depois_da_migration_quem_insere_evento_declara_a_chave(banco):
                 )
             )
     await motor.dispose()
+
+
+# ── A saída do `other` do enum de categoria ───────────────────
+
+
+async def _rotulos_da_categoria(url: str) -> list[str]:
+    motor = create_async_engine(url)
+    async with motor.connect() as conn:
+        rotulos = (
+            (
+                await conn.execute(
+                    text(
+                        "SELECT e.enumlabel FROM pg_enum e "
+                        "JOIN pg_type t ON t.oid = e.enumtypid "
+                        "WHERE t.typname = 'ticketcategory' ORDER BY e.enumsortorder"
+                    )
+                )
+            )
+            .scalars()
+            .all()
+        )
+    await motor.dispose()
+    return list(rotulos)
+
+
+@pytest.mark.asyncio
+async def test_o_tipo_de_categoria_perde_o_other_e_o_recupera_na_descida(banco):
+    """O caminho de ida e o de volta, medidos no catálogo do Postgres.
+
+    Não há `DROP VALUE` em enum: a migration recria o tipo, converte as duas
+    colunas que o usam e derruba o antigo. Um erro nessa dança não aparece em
+    teste que monta o schema por `create_all` — aparece no boot do container.
+    """
+    assert _alembic(banco, "head").returncode == 0
+    assert await _rotulos_da_categoria(banco) == [
+        "hardware",
+        "software",
+        "network",
+        "access",
+        "email",
+        "security",
+        "general",
+    ]
+
+    descida = _alembic(banco, _ANTES_DA_SAIDA_DO_OTHER, comando="downgrade")
+    assert descida.returncode == 0, f"downgrade falhou: {descida.stdout} {descida.stderr}"
+    assert "other" in await _rotulos_da_categoria(banco), "o caminho de volta não devolveu o valor"
+
+    subida = _alembic(banco, "head")
+    assert subida.returncode == 0, f"upgrade de volta falhou: {subida.stderr}"
+    assert "other" not in await _rotulos_da_categoria(banco)
+
+
+@pytest.mark.asyncio
+async def test_a_migration_para_alto_se_alguma_linha_ainda_usa_other(banco):
+    """As contagens deram zero em 18/09, e é justamente por isso que há guarda.
+
+    A medição vale para o instante em que foi feita. Entre ela e o deploy uma
+    linha pode nascer, e converter dado dentro de migration é o que a casa não
+    faz: o boot para, dizendo qual tabela e quantas linhas, e quem decide o
+    destino delas é uma pessoa.
+    """
+    assert _alembic(banco, _ANTES_DA_SAIDA_DO_OTHER).returncode == 0
+
+    autor_id = uuid.uuid4()
+    motor = create_async_engine(banco)
+    async with async_sessionmaker(bind=motor, expire_on_commit=False)() as s:
+        # Colunas nomeadas, e não o ORM: este INSERT roda num schema mais
+        # antigo que o modelo — ver a nota longa no teste do backfill.
+        await s.execute(
+            text(
+                "INSERT INTO users (id, name, email, password, role, status, "
+                "lgpd_consent, email_verified, onboarding_completed) "
+                "VALUES (:id, 'Autor', :email, 'x', 'technician', 'active', true, true, true)"
+            ),
+            {"id": autor_id, "email": f"{autor_id.hex[:8]}@test.com"},
+        )
+        await s.execute(
+            text(
+                "INSERT INTO kb_articles (id, title, content, slug, category, tags, "
+                "status, helo_pode_ler, author_id, view_count, helpful, not_helpful) "
+                "VALUES (gen_random_uuid(), 'Sobra do other', 'x', 'sobra-do-other', "
+                "'other', '{}', 'draft', true, :autor, 0, 0, 0)"
+            ),
+            {"autor": autor_id},
+        )
+        await s.commit()
+    await motor.dispose()
+
+    subida = _alembic(banco, "head")
+    assert subida.returncode != 0, "a migration passou por cima de uma linha em `other`"
+
+    recado = subida.stdout + subida.stderr
+    assert "kb_articles.category: 1" in recado, recado
+    assert "script avulso" in recado, recado
+
+    # E o tipo continua inteiro: a transação foi desfeita, não meio aplicada.
+    assert "other" in await _rotulos_da_categoria(banco)

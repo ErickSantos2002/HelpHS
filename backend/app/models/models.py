@@ -74,8 +74,13 @@ class TicketCategory(str, enum.Enum):
     access = "access"
     email = "email"
     security = "security"
+    # `general` é o balde de quem não sabe classificar. Havia um segundo,
+    # `other`, que saiu em 18/09/2026 com zero uso em chamados, artigos e
+    # histórico: dois baldes para a mesma dúvida só dividem quem os lê.
+    # Este enum é UM tipo no Postgres (`ticketcategory`) servindo
+    # `tickets.category` e `kb_articles.category` — acrescentar valor aqui
+    # sem migration derruba a primeira leitura que o encontrar.
     general = "general"
-    other = "other"
 
 
 class SLALevel(str, enum.Enum):

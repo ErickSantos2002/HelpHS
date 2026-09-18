@@ -31,3 +31,31 @@ def test_nenhum_indice_e_declarado_duas_vezes():
         f"índice(s) declarado(s) mais de uma vez: {duplicados}. "
         "Provavelmente `index=True` na coluna e um `Index()` de mesmo nome em __table_args__."
     )
+
+
+def test_categoria_nao_tem_mais_o_valor_other():
+    """`other` saiu do enum em 18/09/2026, e este caso prende a saída.
+
+    Ele não era categoria de nada: zero chamados, zero artigos e zero linhas de
+    histórico o usavam — medido em produção antes de mexer. O que ele fazia era
+    dar à API uma oitava resposta possível que ninguém sabia ler, e à tela uma
+    opção que empurrava a pessoa para longe de escolher a categoria certa.
+
+    "Geral" já é o balde de quem não sabe classificar. Dois baldes não são
+    redundância: são duas perguntas diferentes feitas à mesma pessoa, com a
+    mesma resposta esperada.
+
+    Voltar a acrescentá-lo exige migration — o tipo no Postgres é um só, o
+    `ticketcategory`, e serve `tickets.category` e `kb_articles.category`.
+    """
+    from app.models.models import TicketCategory
+
+    assert [c.value for c in TicketCategory] == [
+        "hardware",
+        "software",
+        "network",
+        "access",
+        "email",
+        "security",
+        "general",
+    ]
