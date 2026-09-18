@@ -154,7 +154,8 @@ FUNCIONALIDADE
 [x] mostra erro     — `Alert variant="danger"` dispensável, `live` implícito
 [x] mostra estado vazio  — "Selecione um produto primeiro"
 [x] mostra loading  — `Spinner` na carga de produtos e do chamado
-[x] funciona no mobile   — grade de 4 colunas no telefone, 8 no desktop
+[x] funciona no mobile   — grade de 4 colunas no telefone, 8 no desktop; a
+    descrição da categoria acompanha as fichas quando o Resumo desce (18/09)
 [x] funciona no tema escuro — zero classe de cor crua no código
 [x] nenhum campo depende do placeholder — todos com `label`
 [–] barras desenhadas
@@ -167,6 +168,8 @@ ACRESCENTADOS PELAS DECISÕES
     erro        `aria-describedby` do grupo + `aria-invalid` nos rádios
     etapa atual `aria-current="step"`, era só cor
     concluída   texto "(concluída)", era só o ✓ e a cor
+    descrição   (18/09) a frase da categoria escolhida descreve o GRUPO por
+                `aria-describedby` e a troca é anunciada (`aria-live="polite"`)
 [x] nenhuma ação só de mouse — o grupo inteiro é 1 parada de tabulação e as
     setas andam nele, tudo nativo
 [x] nenhum `text-slate-*` sem `dark:` — 36 trocas, zero restante no código
@@ -177,6 +180,52 @@ ACRESCENTADOS PELAS DECISÕES
 [x] nenhum primitivo reinventado — dois grupos falsos viraram `RadioCards`
 [x] a catraca desceu — 48 → 46 pares, 28 → 26 cheias
 ```
+
+### Adendo de 18/09/2026 — a categoria passa a se explicar
+
+Pedido de produto do operador: cada categoria ganha **uma frase** dizendo o que
+ela abrange, e o painel de Resumo mostra a da escolhida, trocando ao clicar.
+
+A frase mora em `lib/categoria.ts`, ao lado do rótulo e do ícone — mesma fonte
+única, mesmo motivo: descrição é parte do que a categoria **é**, e quem
+precisar explicar categoria noutra tela pega daqui em vez de reescrever.
+
+O que a ficha acima ganhou, e por quê:
+
+| item | como ficou |
+|---|---|
+| liga ao grupo | `aria-describedby` no `fieldset` das fichas, pela prop nova `describedBy` do `RadioCards` — que **soma** ao erro em vez de substituí-lo |
+| anúncio | `aria-live="polite"` no parágrafo, que é desenhado **sempre**, mesmo vazio: região viva só anuncia mudança se já estava na página antes dela |
+| tela estreita | o Resumo desce para o fim da página; lá quem mostra a frase é um parágrafo logo abaixo das fichas |
+
+São **duas cópias do mesmo texto**, uma por largura, e nunca as duas visíveis:
+`lg:hidden` na de baixo, `hidden lg:block` na do Resumo. `hidden` é
+`display:none`, que também tira o elemento da árvore de acessibilidade — então
+só uma é lida e só uma anuncia. O `id` do `aria-describedby` é o da cópia de
+baixo, que está sempre na página: texto apontado por `aria-describedby` é lido
+mesmo escondido por CSS, e as duas dizem a mesma frase.
+
+Medido em Chromium, com o CSS que o `npm run build` gerou, em duas rodadas
+idênticas, com controle negativo (um parágrafo sem classe de largura, visível
+nas duas):
+
+| largura | abaixo das fichas | no Resumo | cópias visíveis |
+|---|---|---|---|
+| 390px | visível | escondida | **1** |
+| 1280px | escondida | visível | **1** |
+
+A troca acontece na mesma largura em que o painel muda de lugar: as duas usam o
+`lg` do Tailwind (1024px), e não dois números escritos à mão.
+
+**"Outro" ficou sem frase, de propósito.** Ele se sobrepõe a "Geral" — são a
+mesma ideia com dois nomes —, e a decisão de tirá-lo do formulário é do
+operador, com a contagem de chamados já abertos nessa categoria na mesa.
+Escrever um texto para ele agora seria inventar diferença onde não há. A ficha
+prende isso: escolher "Outro" não descreve o grupo e não mostra frase nenhuma.
+
+Sete mutações — incluindo tirar o `describedBy`, tirar o `aria-live`, deixar as
+duas cópias visíveis na mesma largura e dar descrição ao "Outro" — reprovaram a
+suíte. Nenhum teste cego.
 
 ### Contagem do que resta à mão
 

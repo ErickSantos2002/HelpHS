@@ -86,6 +86,20 @@ export interface RadioCardsProps {
   required?: boolean;
   error?: string;
   hint?: string;
+  /**
+   * `id` de um texto de fora que também descreve o grupo — some ao
+   * `aria-describedby`, não o substitui.
+   *
+   * Existe porque nem toda explicação cabe embaixo das fichas: na
+   * `TicketFormPage`, a descrição da categoria escolhida é desenhada no painel
+   * de Resumo, noutra coluna da grade. Sem isto, o texto estaria na tela e
+   * ficaria mudo para quem chega ao grupo pelo teclado.
+   *
+   * O alvo pode estar escondido por CSS (`display:none`): texto apontado por
+   * `aria-describedby` é lido mesmo assim — é justamente assim que a descrição
+   * segue valendo na largura em que ela mora na outra coluna.
+   */
+  describedBy?: string;
   className?: string;
 }
 
@@ -99,12 +113,18 @@ export function RadioCards({
   required,
   error,
   hint,
+  describedBy,
   className,
 }: RadioCardsProps) {
   const base = useId();
   const idErro = base + "-erro";
   const idDica = base + "-dica";
-  const descrito = error ? idErro : hint ? idDica : undefined;
+  // O erro vem primeiro: quando os dois existem, é ele que precisa ser ouvido
+  // antes. `join` com espaço porque `aria-describedby` aceita vários `id`.
+  const descrito =
+    [error ? idErro : hint ? idDica : undefined, describedBy]
+      .filter(Boolean)
+      .join(" ") || undefined;
 
   return (
     <fieldset
