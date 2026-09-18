@@ -122,4 +122,31 @@ describe("RadioCards", () => {
     montar({ options: [{ value: "hardware", label: "Hardware", icon: "server" }] });
     expect(screen.getByRole("radio", { name: "Hardware" })).toBeInTheDocument();
   });
+
+  it("texto de fora descreve o grupo sem expulsar o erro", () => {
+    // A `TicketFormPage` desenha a descrição da categoria escolhida noutra
+    // coluna da grade — fora do `fieldset`. Sem `describedBy`, ela estaria na
+    // tela e ficaria muda para quem chega ao grupo pelo teclado.
+    render(<p id="de-fora">Dificuldade de conexão.</p>);
+    montar({ describedBy: "de-fora", error: "Selecione uma categoria" });
+
+    const ids = screen
+      .getByRole("group", { name: "Categoria" })
+      .getAttribute("aria-describedby")
+      ?.split(" ");
+    // O erro primeiro: quando os dois existem, é ele que precisa ser ouvido
+    // antes.
+    expect(ids).toHaveLength(2);
+    expect(ids?.[1]).toBe("de-fora");
+    expect(document.getElementById(ids?.[0] as string)).toHaveTextContent(
+      "Selecione uma categoria",
+    );
+  });
+
+  it("sem erro, sem dica e sem texto de fora, o grupo não é descrito por nada", () => {
+    montar();
+    expect(screen.getByRole("group", { name: "Categoria" })).not.toHaveAttribute(
+      "aria-describedby",
+    );
+  });
 });

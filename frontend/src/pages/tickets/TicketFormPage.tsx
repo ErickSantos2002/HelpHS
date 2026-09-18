@@ -1,5 +1,5 @@
 import { zodResolver } from "@hookform/resolvers/zod";
-import { useEffect, useState } from "react";
+import { useEffect, useId, useState } from "react";
 import { useForm } from "react-hook-form";
 import { Link, useNavigate, useParams } from "react-router-dom";
 import { z } from "zod";
@@ -15,7 +15,11 @@ import {
   Spinner,
   Textarea,
 } from "../../components/ui";
-import { CATEGORIAS, rotuloDeCategoria } from "../../lib/categoria";
+import {
+  CATEGORIAS,
+  descricaoDeCategoria,
+  rotuloDeCategoria,
+} from "../../lib/categoria";
 import { PRIORIDADE, PRIORIDADES, type TicketPriority } from "../../lib/prioridade";
 import {
   getProducts,
@@ -180,6 +184,7 @@ function FormSection({ title, children }: { title: string; children: React.React
 
 function SidebarSummary({ values, files, productName }: { values: Partial<FormValues>; files: File[]; productName?: string }) {
   const cat = values.category ? rotuloDeCategoria(values.category) : null;
+  const descricaoCat = values.category ? descricaoDeCategoria(values.category) : undefined;
 
   return (
     <div className="space-y-4">
@@ -191,9 +196,30 @@ function SidebarSummary({ values, files, productName }: { values: Partial<FormVa
               <span className="text-sm text-conteudo line-clamp-2">{values.title}</span>
             ) : null}
           </SummaryRow>
-          <SummaryRow label="Categoria" empty="Não selecionada">
-            {cat ? <span className="text-sm text-conteudo">{cat}</span> : null}
-          </SummaryRow>
+          {/*
+            A descrição da categoria escolhida, na largura em que este painel
+            fica AO LADO do formulário.
+
+            Na tela estreita o painel desce para o fim da página, longe das
+            fichas; lá quem mostra a frase é o parágrafo que mora logo abaixo
+            delas, e este some. `hidden` é `display:none`, que também tira o
+            elemento da árvore de acessibilidade: em cada largura existe uma
+            cópia visível só, ela é a única lida e a única que anuncia a troca.
+
+            O parágrafo é desenhado sempre, mesmo vazio: região viva (`aria-live`)
+            só anuncia mudança se já estiver na página antes dela.
+          */}
+          <div className="flex flex-col gap-0.5">
+            <SummaryRow label="Categoria" empty="Não selecionada">
+              {cat ? <span className="text-sm text-conteudo">{cat}</span> : null}
+            </SummaryRow>
+            <p
+              aria-live="polite"
+              className="hidden text-xs leading-snug text-conteudo-muted lg:block"
+            >
+              {descricaoCat}
+            </p>
+          </div>
           <SummaryRow label="Prioridade" empty="Não definida">
             {values.priority ? <PriorityBadge priority={values.priority} /> : null}
           </SummaryRow>
@@ -338,6 +364,15 @@ export default function TicketFormPage() {
   const watchedCategory = watch("category");
   const watchedPriority = watch("priority");
   const currentValues = watch();
+
+  // A descrição da categoria escolhida aparece em dois lugares — abaixo das
+  // fichas na tela estreita, no Resumo na larga —, e é o de baixo que carrega
+  // o `id`: ele está sempre na página, e texto apontado por `aria-describedby`
+  // é lido mesmo quando o CSS o esconde.
+  const idDescricaoCategoria = useId();
+  const descricaoCategoria = watchedCategory
+    ? descricaoDeCategoria(watchedCategory)
+    : undefined;
 
   useEffect(() => {
     Promise.all([
@@ -523,15 +558,43 @@ export default function TicketFormPage() {
                 <p className="text-xs text-conteudo-muted">Resumo curto e objetivo do problema.</p>
               </div>
 
-              <RadioCards
-                name="category"
-                label="Categoria"
-                required
-                value={watchedCategory}
-                onChange={(v) => setValue("category", v, { shouldValidate: true })}
-                options={CATEGORIAS.map((c) => ({ ...c }))}
-                error={errors.category?.message}
-              />
+              {/*
+                A descrição da categoria escolhida, ligada ao GRUPO pelo
+                `describedBy`: quem chega às fichas pelo teclado ouve o nome do
+                grupo, a opção e, junto, o que aquela categoria abrange.
+
+                Ela é desenhada aqui na tela estreita (`lg:hidden`), onde o
+                painel de Resumo desceu para o fim da página, e no Resumo na
+                larga — nunca nas duas ao mesmo tempo. O parágrafo existe mesmo
+                vazio porque é região viva: `aria-live` só anuncia se o elemento
+                já estava na página antes da mudança.
+
+                `describedBy` só aponta para cá quando há frase: apontar para um
+                parágrafo vazio descreveria o grupo com nada.
+              */}
+              <div className="space-y-2">
+                <RadioCards
+                  name="category"
+                  label="Categoria"
+                  required
+                  value={watchedCategory}
+                  onChange={(v) => setValue("category", v, { shouldValidate: true })}
+                  options={CATEGORIAS.map((c) => ({
+                    value: c.value,
+                    label: c.label,
+                    icon: c.icon,
+                  }))}
+                  error={errors.category?.message}
+                  describedBy={descricaoCategoria ? idDescricaoCategoria : undefined}
+                />
+                <p
+                  id={idDescricaoCategoria}
+                  aria-live="polite"
+                  className="text-xs leading-snug text-conteudo-muted lg:hidden"
+                >
+                  {descricaoCategoria}
+                </p>
+              </div>
 
               <RadioCards
                 name="priority"
