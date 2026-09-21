@@ -826,10 +826,75 @@ cabe no próprio schema.
 objeto, sem passar pelos guards, e há teste dedicado para que ninguém
 "conserte" isso depois.
 
-**Não há constraint no banco ainda.** A coluna segue anulável, e o `CHECK` é
-fase seguinte — ele precisa nascer `NOT VALID` por causa das 14 linhas acima,
-senão a migration falha e derruba o boot do contêiner, que roda
-`alembic upgrade head` a cada subida.
+**Não há constraint no banco ainda**, e o caminho até ela mudou depois de um
+experimento — ver a seção seguinte.
+
+### Por que não usamos CHECK NOT VALID para telefone
+
+> **`CHECK ... NOT VALID` é incompatível com a regra prospectiva acima.** A
+> constraint de banco só pode nascer quando **nenhuma** linha a violar.
+
+O desenho anterior previa criar o `CHECK` como `NOT VALID`, no entendimento de
+que isso deixaria as linhas legadas isentas. **Não deixa**, e a diferença foi
+medida em PostgreSQL 16.2 descartável, com uma linha por cenário para que um
+caso não contaminasse o outro:
+
+| Cenário | Regra da Fase 1A | `CHECK NOT VALID` |
+|---|---|---|
+| legado: `UPDATE` só o `name` | permite | **recusa** |
+| legado: `UPDATE` só o `department` | permite | **recusa** |
+| legado: `UPDATE name` + `phone=NULL` (formulário completo) | permite | **recusa** |
+| legado: acrescentar telefone válido | permite | permite |
+| legado: mudar situação para `inactive` | permite | permite |
+| remover telefone de cliente ativo (P1) | recusa | recusa |
+| `inactive` → `active` sem telefone (P2) | recusa | recusa |
+| novo cliente ativo sem telefone (P2) | recusa | recusa |
+
+**Três divergências em onze**, todas sobre o legado.
+
+O motivo é simples depois de visto: `NOT VALID` pula **apenas o escaneamento
+inicial**. Dali em diante o PostgreSQL avalia o `CHECK` sobre a **nova versão
+da linha** em todo `UPDATE` — e não existe, para `CHECK`, a otimização de
+"pular quando as colunas da constraint não mudaram" que existe para chave
+estrangeira. Trocar só o nome de uma linha legada produz uma versão que
+continua violando, e o `UPDATE` falha.
+
+`ALTER TABLE ... VALIDATE CONSTRAINT` com linha legada presente também foi
+medido: **recusa**. Só dá para validar depois que o legado zera.
+
+**Um gatilho foi testado e rejeitado.** Um `BEFORE INSERT OR UPDATE` enxerga
+`OLD` e `NEW`, então reproduz P1 e P2 com **zero divergências** — medido. Mas
+ele cria uma **segunda fonte de verdade** para a regra: ela passaria a viver
+em PL/pgSQL e em Python ao mesmo tempo, e o lado do banco não tem teste de
+mutação, nem `mypy`, nem o guard de fonte que hoje cobra a versão da
+aplicação. O ganho não paga a deriva.
+
+**A condição para a constraint é `LEGADO_INVALIDO = 0`.** Quem mede é
+`backend/scripts/diagnostico_telefone.py`, que imprime a linha
+`LEGADO_INVALIDO=<N>` e sai com 0 (pronto), 1 (há legado) ou 2 (falha
+operacional — banco fora do ar não pode ser lido como "ainda há legado").
+
+Quando esse número chegar a zero, a constraint pode ser criada **validada**,
+sem `NOT VALID`. O PostgreSQL ainda verifica as linhas existentes nesse
+momento, mas com o volume atual da tabela esse custo é operacionalmente
+pequeno — e, com zero linhas violando, não há divergência possível.
+
+O fatiamento ficou assim:
+
+| Fase | O que faz |
+|---|---|
+| **1A** | ✅ regra na aplicação, normalização E.164, front. Em `main`. |
+| **1B** | readiness e saneamento. **Sem migration.** |
+| **1C** | `CHECK` validado, depois de `LEGADO_INVALIDO = 0`. |
+
+⚠️ **A anonimização e a constraint futura, um detalhe que morde.** Medido: com
+o `CHECK` de presença no lugar, gravar `phone = NULL` e `status = anonymized`
+**na mesma instrução** passa — que é exatamente o que `anonymize_user` faz,
+num `commit` só. Mas limpar o telefone **antes** de mudar a situação é
+recusado, e o resultado é pior que um erro visível: a conta termina
+`anonymized` **com o telefone intacto**. Vale para qualquer script avulso de
+anonimização escrito no futuro. A Fase 1C precisa de teste contra PostgreSQL
+real cobrindo esse caminho.
 
 ### Telefone só chega ao front quando alguém vai ligar
 
