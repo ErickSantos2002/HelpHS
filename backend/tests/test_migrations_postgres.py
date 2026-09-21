@@ -227,9 +227,16 @@ async def test_backfill_leva_o_dono_para_equipment_users(banco):
         # prende o seed ao schema daquele momento, que é o que se quer testar.
         await s.execute(
             text(
-                "INSERT INTO users (id, name, email, password, role, status, "
+                # `phone` entrou aqui quando a Fase 1C pôs
+                # `ck_users_cliente_ativo_tem_telefone` no banco: este seed
+                # planta um cliente ATIVO, e sem telefone o `upgrade head`
+                # passa a falhar na criação da constraint. O teste segue
+                # medindo o backfill de equipamento — só o dado ficou
+                # conforme a regra de domínio.
+                "INSERT INTO users (id, name, email, password, role, status, phone, "
                 "lgpd_consent, email_verified, onboarding_completed) "
-                "VALUES (:id, :nome, :email, 'x', 'client', 'active', true, true, true)"
+                "VALUES (:id, :nome, :email, 'x', 'client', 'active', "
+                "'+5581999999999', true, true, true)"
             ),
             {"id": dono_id, "nome": "Dona do aparelho", "email": f"{dono_id.hex[:8]}@test.com"},
         )

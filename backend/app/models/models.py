@@ -292,6 +292,27 @@ class User(Base):
             "mfa_enabled = false OR mfa_secret IS NOT NULL",
             name="ck_users_mfa_ligado_tem_segredo",
         ),
+        # Cliente ativo sem telefone é um chamado que nunca vira ligação. A
+        # regra vive na aplicação desde a Fase 1A; aqui ela vira invariante,
+        # para o caminho de escrita que ainda não existe não poder esquecê-la.
+        #
+        # PRESENÇA, não formato: `\s` trata tabulação e quebra de linha como
+        # ausência, e E.164 continua sendo assunto do tipo anotado em
+        # `app/utils/telefone.py`. Pôr a regex do formato aqui criaria uma
+        # segunda fonte de verdade que deriva da primeira em silêncio.
+        #
+        # ⚠️ `ddl_if(dialect="postgresql")` não é preciosismo: `regexp_replace`
+        # é função do PostgreSQL, e a maior parte da suíte monta o schema por
+        # `create_all` em SQLite. Sem a guarda, o `CREATE TABLE users` morre lá
+        # com `no such function: regexp_replace` — medido, 47 falhas e 37 erros.
+        # A constraint continua DECLARADA no metadata (é o que mantém o
+        # `autogenerate` ciente dela); o que a guarda muda é só onde o DDL sai.
+        # O CHECK do MFA, acima, não precisa disso porque é SQL portável.
+        CheckConstraint(
+            "NOT (role = 'client' AND status = 'active') "
+            r"OR regexp_replace(coalesce(phone, ''), '\s', '', 'g') <> ''",
+            name="ck_users_cliente_ativo_tem_telefone",
+        ).ddl_if(dialect="postgresql"),
     )
 
 

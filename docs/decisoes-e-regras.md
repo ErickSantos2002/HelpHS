@@ -884,17 +884,43 @@ O fatiamento ficou assim:
 | Fase | O que faz |
 |---|---|
 | **1A** | ✅ regra na aplicação, normalização E.164, front. Em `main`. |
-| **1B** | readiness e saneamento. **Sem migration.** |
-| **1C** | `CHECK` validado, depois de `LEGADO_INVALIDO = 0`. |
+| **1B** | ✅ readiness oficial. **Sem migration.** Em `main`. |
+| **1C** | ✅ `CHECK` validado de presença — `ck_users_cliente_ativo_tem_telefone`. |
 
-⚠️ **A anonimização e a constraint futura, um detalhe que morde.** Medido: com
-o `CHECK` de presença no lugar, gravar `phone = NULL` e `status = anonymized`
-**na mesma instrução** passa — que é exatamente o que `anonymize_user` faz,
-num `commit` só. Mas limpar o telefone **antes** de mudar a situação é
-recusado, e o resultado é pior que um erro visível: a conta termina
-`anonymized` **com o telefone intacto**. Vale para qualquer script avulso de
-anonimização escrito no futuro. A Fase 1C precisa de teste contra PostgreSQL
-real cobrindo esse caminho.
+**O portão foi aberto por saneamento, não por exceção.** O readiness mediu
+`LEGADO_INVALIDO=14` em produção. As contas eram exemplos e foram
+**inativadas administrativamente** — sem telefone inventado, sem exclusão de
+histórico, sem `UPDATE` de saneamento dentro de migration. A medição seguinte
+deu `LEGADO_INVALIDO=0`, e só então a constraint passou a poder existir.
+
+A constraint é **validada**, sem `NOT VALID`. O PostgreSQL verifica as linhas
+existentes ao criá-la, mas com o volume atual da tabela esse custo é
+operacionalmente pequeno — e, com zero linhas violando, não há divergência
+possível com a regra da aplicação.
+
+**A aplicação não foi simplificada por causa dela.** Os guards da Fase 1A
+continuam onde estavam: o banco recusa o estado impossível, a aplicação
+explica o porquê em português e devolve 422 no campo certo. Defesa em
+profundidade só vale com as duas camadas vivas.
+
+⚠️ **A anonimização e a constraint, um detalhe que morde.** Medido em
+PostgreSQL real: gravar `phone = NULL` e `status = anonymized` **na mesma
+instrução** passa — que é exatamente o que `anonymize_user` faz, num `commit`
+só. Mas limpar o telefone **antes** de mudar a situação é recusado, e o
+resultado é pior que um erro visível: a conta terminaria `anonymized` **com o
+telefone intacto**. Vale para qualquer script avulso de anonimização escrito
+no futuro; há teste cobrindo os dois caminhos.
+
+⚠️ **Não cite valor de enum acrescentado por `ALTER TYPE` numa migration.**
+Descoberto ao mutar esta constraint: o projeto não usa
+`transaction_per_migration`, então `alembic upgrade head` roda a cadeia
+inteira numa transação só. Como `anonymized` entrou em `userstatus` por
+`ALTER TYPE ... ADD VALUE`, mencioná-lo em DDL estoura com `unsafe use of new
+value "anonymized" of enum type userstatus` ao subir do zero. O predicado
+escolhido isenta o anonimizado **sem nomeá-lo**, e por isso não esbarra nisso.
+
+`companies.phone` segue fora de tudo isto: não é fonte da telefonia, e nenhuma
+constraint foi criada para ela.
 
 ### Telefone só chega ao front quando alguém vai ligar
 
