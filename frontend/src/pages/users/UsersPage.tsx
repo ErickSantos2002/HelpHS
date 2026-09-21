@@ -16,6 +16,14 @@ import {
   Select,
   Spinner,
 } from "../../components/ui";
+import { getApiError } from "../../lib/apiError";
+import {
+  ERRO_TELEFONE,
+  PLACEHOLDER_TELEFONE,
+  isValidPhone,
+  maskPhoneInput,
+  toE164,
+} from "../../lib/telefone";
 import { cn } from "../../lib/utils";
 import {
   OPCOES_DE_PAPEL,
@@ -134,28 +142,88 @@ const FILTER_STATUS_OPTIONS: { value: UserStatus; label: string }[] = [
 
 // ── Validation ─────────────────────────────────────────────────
 
-const createSchema = z.object({
-  name: z.string().min(2, "Nome deve ter ao menos 2 caracteres"),
-  email: z.string().email("E-mail inválido"),
-  password: z
-    .string()
-    .min(8, "Senha deve ter ao menos 8 caracteres")
-    .regex(/[A-Z]/, "Deve conter ao menos uma letra maiúscula")
-    .regex(/[0-9]/, "Deve conter ao menos um número"),
-  role: z.enum(["admin", "technician", "client"]),
-  phone: z.string().optional(),
-  department: z.string().optional(),
-});
+/**
+ * Telefone preenchido precisa ser válido — em QUALQUER papel. Vazio é tratado
+ * pela obrigatoriedade condicional abaixo, não aqui: recusar vazio no campo
+ * impediria técnico e admin de ficarem sem telefone, que sempre foi permitido.
+ */
+function exigeFormatoDeTelefone(
+  valor: string | undefined,
+  ctx: z.RefinementCtx,
+): void {
+  if (valor && valor.trim() && !isValidPhone(valor)) {
+    ctx.addIssue({ code: z.ZodIssueCode.custom, path: ["phone"], message: ERRO_TELEFONE });
+  }
+}
 
-const editSchema = z.object({
-  name: z.string().min(2, "Nome deve ter ao menos 2 caracteres"),
-  role: z.enum(["admin", "technician", "client"]),
-  phone: z.string().optional(),
-  department: z.string().optional(),
-});
+const createSchema = z
+  .object({
+    name: z.string().min(2, "Nome deve ter ao menos 2 caracteres"),
+    email: z.string().email("E-mail inválido"),
+    password: z
+      .string()
+      .min(8, "Senha deve ter ao menos 8 caracteres")
+      .regex(/[A-Z]/, "Deve conter ao menos uma letra maiúscula")
+      .regex(/[0-9]/, "Deve conter ao menos um número"),
+    role: z.enum(["admin", "technician", "client"]),
+    phone: z.string().optional(),
+    department: z.string().optional(),
+  })
+  .superRefine((valores, ctx) => {
+    exigeFormatoDeTelefone(valores.phone, ctx);
+    // Conta criada aqui nasce ATIVA (o router fixa `status=active`), então
+    // criar cliente é sempre a transição que exige telefone.
+    if (valores.role === "client" && !valores.phone?.trim()) {
+      ctx.addIssue({
+        code: z.ZodIssueCode.custom,
+        path: ["phone"],
+        message: "Telefone é obrigatório para cliente.",
+      });
+    }
+  });
+
+/**
+ * O schema de edição depende do usuário que está sendo editado — por isso é
+ * fábrica, e não constante.
+ *
+ * Ele espelha as DUAS proibições do backend, e só elas: não pode REMOVER o
+ * telefone de um cliente ativo, e não pode VIRAR cliente sem telefone. Um
+ * cliente legado que já estava sem telefone continua podendo salvar o nome —
+ * eram 14 contas assim em produção em 18/09/2026, e uma exigência genérica
+ * aqui as deixaria presas na própria tela.
+ */
+function criaEditSchema(user: UserSummary) {
+  const tinhaTelefone = Boolean(user.phone && user.phone.trim());
+  const eraCliente = user.role === "client";
+  return z
+    .object({
+      name: z.string().min(2, "Nome deve ter ao menos 2 caracteres"),
+      role: z.enum(["admin", "technician", "client"]),
+      phone: z.string().optional(),
+      department: z.string().optional(),
+    })
+    .superRefine((valores, ctx) => {
+      exigeFormatoDeTelefone(valores.phone, ctx);
+      if (valores.role !== "client" || valores.phone?.trim()) return;
+      if (tinhaTelefone) {
+        ctx.addIssue({
+          code: z.ZodIssueCode.custom,
+          path: ["phone"],
+          message: "Não é possível remover o telefone de um cliente ativo.",
+        });
+      } else if (!eraCliente) {
+        ctx.addIssue({
+          code: z.ZodIssueCode.custom,
+          path: ["phone"],
+          message: "Telefone é obrigatório para cliente.",
+        });
+      }
+      // Sem telefone antes e já era cliente: legado intocado, passa.
+    });
+}
 
 type CreateValues = z.infer<typeof createSchema>;
-type EditValues = z.infer<typeof editSchema>;
+type EditValues = z.infer<ReturnType<typeof criaEditSchema>>;
 
 // ── StatusPill ────────────────────────────────────────────────
 
@@ -253,17 +321,15 @@ function CreateModal({ onClose, onSaved }: { onClose: () => void; onSaved: (u: U
       const user = await createUser({
         ...values,
         lgpd_consent: true,
-        phone: values.phone || undefined,
+        phone: toE164(values.phone) ?? undefined,
         department: values.department || undefined,
       });
       onSaved(user);
     } catch (err: unknown) {
-      const msg = (err as { response?: { data?: { detail?: string } } })?.response?.data?.detail;
-      setSubmitError(
-        msg === "Email already registered"
-          ? "Este e-mail já está cadastrado."
-          : "Erro ao criar usuário. Tente novamente.",
-      );
+      // Antes só o e-mail duplicado tinha texto próprio e todo o resto virava
+      // "Tente novamente" — inclusive o 422, que diz exatamente qual campo
+      // está errado. O tradutor central já cobre os quatro formatos.
+      setSubmitError(getApiError(err, "Erro ao criar usuário. Tente novamente."));
     }
   }
 
@@ -297,7 +363,17 @@ function CreateModal({ onClose, onSaved }: { onClose: () => void; onSaved: (u: U
           {...form.register("role")}
         />
         <div className="grid grid-cols-2 gap-3">
-          <Input label="Telefone" placeholder="(11) 9 9999-9999" {...form.register("phone")} />
+          <Input
+            label="Telefone"
+            type="tel"
+            placeholder={PLACEHOLDER_TELEFONE}
+            error={form.formState.errors.phone?.message}
+            {...form.register("phone", {
+              onChange: (e) => {
+                e.target.value = maskPhoneInput(e.target.value);
+              },
+            })}
+          />
           <Input label="Departamento" {...form.register("department")} />
         </div>
         <ModalFooter>
@@ -318,7 +394,7 @@ function CreateModal({ onClose, onSaved }: { onClose: () => void; onSaved: (u: U
 function EditModal({ user, onClose, onSaved }: { user: UserSummary; onClose: () => void; onSaved: (u: UserSummary) => void }) {
   const [submitError, setSubmitError] = useState<string | null>(null);
   const form = useForm<EditValues>({
-    resolver: zodResolver(editSchema),
+    resolver: zodResolver(criaEditSchema(user)),
     defaultValues: {
       name: user.name,
       role: user.role as "admin" | "technician" | "client",
@@ -333,12 +409,14 @@ function EditModal({ user, onClose, onSaved }: { user: UserSummary; onClose: () 
       const updated = await updateUser(user.id, {
         name: values.name,
         role: values.role,
-        phone: values.phone || null,
+        phone: toE164(values.phone),
         department: values.department || null,
       });
       onSaved(updated);
-    } catch {
-      setSubmitError("Erro ao salvar alterações. Tente novamente.");
+    } catch (err: unknown) {
+      // O `catch {}` seco engolia até o 403 de troca de papel, que o tradutor
+      // já sabe explicar.
+      setSubmitError(getApiError(err, "Erro ao salvar alterações. Tente novamente."));
     }
   }
 
@@ -360,7 +438,17 @@ function EditModal({ user, onClose, onSaved }: { user: UserSummary; onClose: () 
           {...form.register("role")}
         />
         <div className="grid grid-cols-2 gap-3">
-          <Input label="Telefone" placeholder="(11) 9 9999-9999" {...form.register("phone")} />
+          <Input
+            label="Telefone"
+            type="tel"
+            placeholder={PLACEHOLDER_TELEFONE}
+            error={form.formState.errors.phone?.message}
+            {...form.register("phone", {
+              onChange: (e) => {
+                e.target.value = maskPhoneInput(e.target.value);
+              },
+            })}
+          />
           <Input label="Departamento" {...form.register("department")} />
         </div>
         <ModalFooter>

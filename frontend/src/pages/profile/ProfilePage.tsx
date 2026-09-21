@@ -29,6 +29,14 @@ import { lookupCnpj, lookupCep } from "../../services/equipmentService";
 import { getApiError } from "../../lib/apiError";
 import { rotuloDePapel, varianteDePapel } from "../../lib/papel";
 import { formatCnpj, isValidCep, isValidCnpj, maskCnpjInput, onlyDigits } from "../../lib/documents";
+import {
+  ERRO_TELEFONE,
+  PLACEHOLDER_TELEFONE,
+  formatPhone,
+  isValidPhone,
+  maskPhoneInput,
+  toE164,
+} from "../../lib/telefone";
 
 // ── Shared ────────────────────────────────────────────────────
 
@@ -429,7 +437,14 @@ function EditProfileForm({
   onCancel: () => void;
 }) {
   const [name, setName] = useState(profile.name);
-  const [phone, setPhone] = useState(profile.phone ?? "");
+  const [phone, setPhone] = useState(formatPhone(profile.phone));
+  // Quem JÁ tem telefone não pode ficar sem, sendo cliente ativo. Quem nunca
+  // teve continua podendo salvar o perfil — são as contas legadas, e travá-las
+  // aqui seria transformar uma regra prospectiva em migração forçada.
+  const exigeTelefone =
+    profile.role === "client" &&
+    profile.status === "active" &&
+    Boolean(profile.phone && profile.phone.trim());
   const [department, setDepartment] = useState(profile.department ?? "");
   const [saving, setSaving] = useState(false);
   const [error, setError] = useState("");
@@ -437,12 +452,19 @@ function EditProfileForm({
   async function handleSubmit(e: React.FormEvent) {
     e.preventDefault();
     if (!name.trim()) { setError("Nome é obrigatório"); return; }
+    if (exigeTelefone && !phone.trim()) {
+      setError("Não é possível remover o telefone de um cliente ativo.");
+      return;
+    }
+    if (phone.trim() && !isValidPhone(phone)) { setError(ERRO_TELEFONE); return; }
     setSaving(true);
     setError("");
     try {
-      onSaved(await updateMe({ name: name.trim(), phone: phone.trim() || null, department: department.trim() || null }));
-    } catch {
-      setError("Erro ao salvar. Tente novamente.");
+      onSaved(await updateMe({ name: name.trim(), phone: toE164(phone), department: department.trim() || null }));
+    } catch (err: unknown) {
+      // O `catch` seco jogava fora o motivo — inclusive o 422 que nomeia o
+      // campo. O tradutor central cobre os quatro formatos de resposta.
+      setError(getApiError(err, "Erro ao salvar. Tente novamente."));
     } finally {
       setSaving(false);
     }
@@ -455,7 +477,14 @@ function EditProfileForm({
         <div className="sm:col-span-2">
           <Input label="Nome completo" value={name} onChange={(e) => setName(e.target.value)} />
         </div>
-        <Input label="Telefone" value={phone} onChange={(e) => setPhone(e.target.value)} placeholder="(11) 99999-9999" />
+        <Input
+          label="Telefone"
+          type="tel"
+          required={exigeTelefone}
+          value={phone}
+          onChange={(e) => setPhone(maskPhoneInput(e.target.value))}
+          placeholder={PLACEHOLDER_TELEFONE}
+        />
         <Input label="Departamento" value={department} onChange={(e) => setDepartment(e.target.value)} placeholder="Ex: TI, RH" />
       </div>
       <FormActions saving={saving} onCancel={onCancel} />
@@ -799,7 +828,7 @@ export default function ProfilePage() {
           <div className="grid grid-cols-1 sm:grid-cols-2 gap-5">
             <Field label="Nome completo" value={profile.name} />
             <Field label="E-mail" value={profile.email} />
-            <Field label="Telefone" value={profile.phone ?? ""} />
+            <Field label="Telefone" value={formatPhone(profile.phone)} />
             <Field label="Departamento" value={profile.department ?? ""} />
           </div>
         )}

@@ -56,6 +56,7 @@ from app.schemas.user import (
     UserUpdate,
 )
 from app.services import storage
+from app.utils.telefone import telefone_ausente
 from app.utils.uploads import ler_ate_o_limite
 
 router = APIRouter(prefix="/users", tags=["Users"])
@@ -85,6 +86,50 @@ def _audit(
     )
 
 
+_ERRO_REMOVER = "Não é possível remover o telefone de um cliente ativo."
+_ERRO_EXIGE = "Cliente ativo precisa de um telefone válido."
+
+
+def _guarda_telefone_do_cliente(
+    *,
+    role_final: UserRole,
+    status_final: UserStatus,
+    telefone_final: str | None,
+    telefone_anterior: str | None,
+    mudou_papel_ou_situacao: bool,
+) -> None:
+    """Recusa as duas — e somente as duas — perdas de telefone que importam.
+
+    A regra é PROSPECTIVA. Medido em produção em 18/09/2026: 14 contas
+    `role=client` + `status=active` estão sem telefone. São contas de teste,
+    mas existem fisicamente, e uma exigência genérica do tipo "cliente ativo
+    sempre precisa de telefone" as deixaria incapazes de editar o próprio
+    nome. Por isso o que se proíbe é a PERDA, não a ausência:
+
+    P1  REMOÇÃO   — tinha telefone e a requisição o esvazia.
+    P2  TRANSIÇÃO — virar cliente, ou voltar a `active`, sem telefone.
+
+    Quem já estava sem telefone e não mexeu em papel nem em situação passa,
+    de propósito. O saneamento dessas linhas é tarefa separada, e dado
+    histórico se corrige em script avulso — nunca numa validação de entrada.
+
+    `telefone_anterior` é `None` na criação: lá não há passado, e é sempre a
+    transição (P2) que responde.
+    """
+    if role_final != UserRole.client or status_final != UserStatus.active:
+        return
+    if not telefone_ausente(telefone_final):
+        return
+
+    # Daqui para baixo o estado resultante é cliente ativo SEM telefone.
+    if not telefone_ausente(telefone_anterior):
+        raise HTTPException(status_code=status.HTTP_422_UNPROCESSABLE_CONTENT, detail=_ERRO_REMOVER)
+    if mudou_papel_ou_situacao:
+        raise HTTPException(status_code=status.HTTP_422_UNPROCESSABLE_CONTENT, detail=_ERRO_EXIGE)
+    # Legado intocado: seguia sem telefone e segue, sem mudar papel nem
+    # situação. Passa.
+
+
 # ── POST /users ───────────────────────────────────────────────
 
 
@@ -94,6 +139,16 @@ async def create_user(
     db: Annotated[AsyncSession, Depends(get_db)],
     actor: Annotated[User, Depends(authorize(UserRole.admin, UserRole.technician))],
 ) -> UserResponse:
+    # `status=UserStatus.active` é literal logo abaixo, então o estado
+    # resultante depende só do papel escolhido. Criar já é a transição.
+    _guarda_telefone_do_cliente(
+        role_final=body.role,
+        status_final=UserStatus.active,
+        telefone_final=body.phone,
+        telefone_anterior=None,
+        mudou_papel_ou_situacao=True,
+    )
+
     result = await db.execute(select(User).where(User.email == body.email))
     if result.scalar_one_or_none():
         raise HTTPException(status_code=status.HTTP_409_CONFLICT, detail="Email already registered")
@@ -258,6 +313,17 @@ async def update_me(
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Usuário não encontrado.")
 
     update_data = body.model_dump(exclude_unset=True, exclude={"role"})
+    # Aqui nem papel nem situação mudam (o `role` sai no `exclude`, e `status`
+    # não existe neste schema): só a remoção (P1) pode acontecer.
+    if "phone" in update_data:
+        _guarda_telefone_do_cliente(
+            role_final=user.role,
+            status_final=user.status,
+            telefone_final=update_data["phone"],
+            telefone_anterior=user.phone,
+            mudou_papel_ou_situacao=False,
+        )
+
     for field, value in update_data.items():
         setattr(user, field, value)
 
@@ -402,6 +468,19 @@ async def update_user(
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Usuário não encontrado.")
 
     update_data = body.model_dump(exclude_unset=True)
+    # O estado resultante só difere do atual nos campos realmente enviados —
+    # é o `exclude_unset` que separa "não mandou" de "mandou vazio", e a regra
+    # prospectiva depende dessa distinção para não travar conta legada.
+    papel_final = update_data.get("role") or user.role
+    if "phone" in update_data or papel_final != user.role:
+        _guarda_telefone_do_cliente(
+            role_final=papel_final,
+            status_final=user.status,
+            telefone_final=(update_data["phone"] if "phone" in update_data else user.phone),
+            telefone_anterior=user.phone,
+            mudou_papel_ou_situacao=papel_final != user.role,
+        )
+
     for field, value in update_data.items():
         setattr(user, field, value)
 
@@ -431,6 +510,17 @@ async def update_user_status(
     user = result.scalar_one_or_none()
     if not user:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Usuário não encontrado.")
+
+    # Reativar é o instante em que a conta volta a valer para a telefonia:
+    # é aqui que um cliente sem telefone precisa ganhar um. Desativar nunca
+    # é bloqueado — a regra guarda o estado ATIVO, não a saída dele.
+    _guarda_telefone_do_cliente(
+        role_final=user.role,
+        status_final=body.status,
+        telefone_final=user.phone,
+        telefone_anterior=user.phone,
+        mudou_papel_ou_situacao=body.status != user.status,
+    )
 
     user.status = body.status
     _audit(db, AuditAction.status_change, actor.id, user.id)

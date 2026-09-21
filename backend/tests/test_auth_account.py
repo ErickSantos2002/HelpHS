@@ -451,6 +451,9 @@ async def test_cadastro_hasheia_a_senha_fora_do_event_loop(smtp_configurado):
                     "name": "Novo Cliente",
                     "email": "novo@test.com",
                     "password": "Senha@123456",
+                    # O cadastro público cria cliente ativo, e desde a Fase 1A
+                    # o telefone é obrigatório nele (tests/test_telefone.py).
+                    "phone": "(81) 99999-9999",
                     "lgpd_consent": True,
                 },
             )
@@ -692,6 +695,9 @@ async def test_cadastro_responde_antes_de_mandar_o_email(smtp_configurado):
             "name": "Cliente Novo",
             "email": "novo@test.com",
             "password": "Senha@123456",
+            # O cadastro público cria cliente ativo, e desde a Fase 1A
+            # o telefone é obrigatório nele (tests/test_telefone.py).
+            "phone": "(81) 99999-9999",
             "lgpd_consent": True,
         },
     )
@@ -779,6 +785,9 @@ async def test_cadastrar_com_email_existente_responde_como_cadastro_novo(smtp_co
                         "name": "Fulano",
                         "email": _EMAIL,
                         "password": "Senha@123456",
+                        # O cadastro público cria cliente ativo, e desde a Fase 1A
+                        # o telefone é obrigatório nele (tests/test_telefone.py).
+                        "phone": "(81) 99999-9999",
                         "lgpd_consent": True,
                     },
                 )
@@ -811,6 +820,9 @@ async def test_a_resposta_do_cadastro_nao_carrega_dado_de_conta(smtp_configurado
                 "name": "Fulano",
                 "email": _EMAIL,
                 "password": "Senha@123456",
+                # O cadastro público cria cliente ativo, e desde a Fase 1A
+                # o telefone é obrigatório nele (tests/test_telefone.py).
+                "phone": "(81) 99999-9999",
                 "lgpd_consent": True,
             },
         )
@@ -839,6 +851,9 @@ async def test_quem_ja_tem_conta_recebe_e_mail_explicando(smtp_configurado):
                     "name": "Fulano",
                     "email": _EMAIL,
                     "password": "Senha@123456",
+                    # O cadastro público cria cliente ativo, e desde a Fase 1A
+                    # o telefone é obrigatório nele (tests/test_telefone.py).
+                    "phone": "(81) 99999-9999",
                     "lgpd_consent": True,
                 },
             )
@@ -875,6 +890,9 @@ async def test_cadastro_com_email_existente_nao_cria_segunda_conta(smtp_configur
                     "name": "Fulano",
                     "email": _EMAIL,
                     "password": "Senha@123456",
+                    # O cadastro público cria cliente ativo, e desde a Fase 1A
+                    # o telefone é obrigatório nele (tests/test_telefone.py).
+                    "phone": "(81) 99999-9999",
                     "lgpd_consent": True,
                 },
             )
@@ -905,6 +923,9 @@ async def test_sem_e_mail_configurado_o_409_continua():
                     "name": "Fulano",
                     "email": _EMAIL,
                     "password": "Senha@123456",
+                    # O cadastro público cria cliente ativo, e desde a Fase 1A
+                    # o telefone é obrigatório nele (tests/test_telefone.py).
+                    "phone": "(81) 99999-9999",
                     "lgpd_consent": True,
                 },
             )
@@ -944,6 +965,9 @@ async def test_cadastro_responde_antes_de_mandar_o_e_mail_de_conta_existente(smt
                 "name": "Fulano",
                 "email": _EMAIL,
                 "password": "Senha@123456",
+                # O cadastro público cria cliente ativo, e desde a Fase 1A
+                # o telefone é obrigatório nele (tests/test_telefone.py).
+                "phone": "(81) 99999-9999",
                 "lgpd_consent": True,
             },
         )

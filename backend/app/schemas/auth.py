@@ -6,6 +6,7 @@ from pydantic import Field, field_validator
 
 from app.schemas.base import AppBaseModel
 from app.utils.email_normalizado import EmailNormalizado
+from app.utils.telefone import TelefoneObrigatorio
 
 
 class LoginRequest(AppBaseModel):
@@ -24,7 +25,11 @@ class RegisterRequest(AppBaseModel):
     name: str = Field(..., min_length=2, max_length=255)
     email: EmailNormalizado
     password: str = Field(..., min_length=8, max_length=128)
-    phone: str | None = Field(default=None, max_length=20)
+    # Obrigatório no schema porque este fluxo cria SEMPRE cliente ativo:
+    # `role=UserRole.client` e `status=UserStatus.active` são literais no
+    # router (`app/routers/auth.py`). Não há estado resultante a descobrir,
+    # então a regra cabe aqui — diferente do `UserCreate`/`UserUpdate`.
+    phone: TelefoneObrigatorio = Field(..., max_length=20)
     department: str | None = Field(default=None, max_length=100)
     lgpd_consent: bool
 
