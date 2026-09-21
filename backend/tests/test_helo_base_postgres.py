@@ -134,6 +134,11 @@ def _pessoa(papel: UserRole) -> User:
         password="x",
         role=papel,
         status=UserStatus.active,
+        # Cliente ativo precisa de telefone desde a Fase 1C
+        # (ck_users_cliente_ativo_tem_telefone). O create_all destes
+        # testes monta o schema pelo model, então o fixture precisa
+        # nascer conforme a regra de domínio.
+        phone="+5581999999999",
         lgpd_consent=True,
         email_verified=True,
         onboarding_completed=True,
@@ -574,6 +579,15 @@ async def test_chamado_sem_produto_nem_chega_a_consultar_o_banco():
         async def execute(self, *args, **kwargs):
             raise AssertionError("buscou no banco mesmo sem produto no chamado")
 
-    cliente = User(id=uuid.uuid4(), name="x", email="x@t.com", password="x", role=UserRole.client)
+    # `phone` porque o status default e `active`, e cliente ativo precisa
+    # de telefone desde a Fase 1C (ck_users_cliente_ativo_tem_telefone).
+    cliente = User(
+        id=uuid.uuid4(),
+        name="x",
+        email="x@t.com",
+        password="x",
+        role=UserRole.client,
+        phone="+5581999999999",
+    )
 
     assert await busca_trechos(SessaoQueRecusa(), _chamado(cliente, None), _vetor(0.0)) == []

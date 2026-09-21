@@ -263,6 +263,9 @@ async def test_a_busca_devolve_o_trecho_de_idioma_e_nao_o_de_reconhecimento_faci
         password="x",
         role=UserRole.client,
         status=UserStatus.active,
+        # Cliente ativo precisa de telefone desde a Fase 1C
+        # (ck_users_cliente_ativo_tem_telefone).
+        phone="+5581999999999",
         lgpd_consent=True,
         email_verified=True,
         onboarding_completed=True,
