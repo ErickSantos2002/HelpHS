@@ -20,6 +20,28 @@ e PULA se não houver nenhum dos dois.
 Já o mapeamento contagem -> código de saída é função pura e é testado sem
 banco nenhum, porque é isso que ele é.
 
+⚠️ Por que `CREATE TEMP TABLE`, e não tabela comum
+--------------------------------------------------
+A primeira versão deste arquivo criava uma tabela `users` FÍSICA e a
+derrubava a cada teste. Passava aqui e **quebrava no CI**, com 18 erros de
+`DependentObjectsStillExistError: cannot drop table users because other
+objects depend on it`.
+
+A diferença não era o PostgreSQL: era a topologia. Sem `TEST_POSTGRES_URL`,
+`_sobe_postgres` cria um servidor e um banco NOVOS a cada chamada, então cada
+módulo ganha um banco vazio. **No CI a variável existe**, a mesma função
+devolve sempre o banco COMPARTILHADO — onde as migrations já rodaram e
+`public.users` tem doze chaves estrangeiras apontando para ela. O `DROP` batia
+nelas.
+
+A tabela temporária resolve os dois lados de uma vez: ela vive no schema
+`pg_temp` da própria sessão, que vem antes de `public` no `search_path`, então
+o `FROM users` da consulta real resolve para ela — e `public.users` não é
+tocada, lida nem derrubada. O ciclo de vida é o da conexão, então não há
+teardown a esquecer.
+
+**Não existe um único `DROP TABLE` neste arquivo**, e há teste guardando isso.
+
 Nada aqui toca em produção nem em rede.
 """
 
@@ -29,6 +51,7 @@ import pytest
 import pytest_asyncio
 from sqlalchemy import text
 from sqlalchemy.ext.asyncio import create_async_engine
+from sqlalchemy.pool import NullPool
 
 from scripts.diagnostico_telefone import (
     SAIDA_ERRO,
@@ -81,18 +104,22 @@ def test_url_invalida_sai_com_erro_operacional_e_nao_com_legado(monkeypatch):
 
 
 # ══════════════════════════════════════════════════════════════
-# 2. A contagem — contra PostgreSQL de verdade
+# 2. A contagem — contra PostgreSQL de verdade, em tabela TEMPORÁRIA
 # ══════════════════════════════════════════════════════════════
 
-_CRIA = """
-CREATE TABLE users (
-    id     serial PRIMARY KEY,
-    name   text NOT NULL,
+# Só as colunas que as consultas do script realmente tocam. Reconstruir o
+# model `User` inteiro aqui seria manter um segundo schema em paralelo, e o
+# que se mede é o SQL do script, não a declaração da aplicação.
+_TEMP_USERS = """
+CREATE TEMP TABLE users (
     role   text NOT NULL,
     status text NOT NULL,
     phone  text
 )
 """
+
+# O bloco 5 do relatório consulta `companies`. Temporária pelo mesmo motivo.
+_TEMP_COMPANIES = "CREATE TEMP TABLE companies (phone text)"
 
 
 @pytest.fixture(scope="module")
@@ -115,24 +142,26 @@ def url_do_banco():
 
 @pytest_asyncio.fixture
 async def conexao(url_do_banco):
-    """Tabela `users` mínima, recriada a cada teste.
+    """Uma conexão por teste, com `users` e `companies` TEMPORÁRIAS.
 
-    Mínima de propósito: o que se mede aqui é a cláusula de ausência, e montar
-    o schema inteiro por `create_all` traria vinte tabelas irrelevantes e a
-    extensão `vector` junto.
+    `NullPool` não é detalhe: com o pool padrão, a conexão física volta para a
+    piscina levando as tabelas temporárias junto, e o próximo teste esbarraria
+    num `relation "users" already exists`. Sem pool, cada teste abre e fecha a
+    sua sessão — e o fim da sessão é o que apaga as temporárias, de graça.
+
+    Por isso também não há teardown aqui: não existe `DROP` neste arquivo.
     """
-    engine = create_async_engine(url_do_banco, isolation_level="AUTOCOMMIT")
+    engine = create_async_engine(url_do_banco, isolation_level="AUTOCOMMIT", poolclass=NullPool)
     async with engine.connect() as conn:
-        await conn.execute(text("DROP TABLE IF EXISTS users"))
-        await conn.execute(text(_CRIA))
+        await conn.execute(text(_TEMP_USERS))
+        await conn.execute(text(_TEMP_COMPANIES))
         yield conn
-        await conn.execute(text("DROP TABLE IF EXISTS users"))
     await engine.dispose()
 
 
 async def _planta(conn, role, status, phone):
     await conn.execute(
-        text("INSERT INTO users (name, role, status, phone) VALUES ('x',:r,:s,:p)"),
+        text("INSERT INTO users (role, status, phone) VALUES (:r,:s,:p)"),
         {"r": role, "s": status, "p": phone},
     )
 
@@ -224,20 +253,134 @@ async def test_conta_apenas_os_do_recorte_numa_base_misturada(conexao):
 
 
 # ══════════════════════════════════════════════════════════════
-# 3. A saída não pode vazar dado pessoal
+# 3. Isolamento: a suíte não pode tocar em public.users
 # ══════════════════════════════════════════════════════════════
 
 
 @pytest.mark.asyncio
-async def test_a_saida_nao_imprime_dado_pessoal_nem_a_url(conexao, capsys, monkeypatch):
+async def test_a_consulta_real_resolve_para_a_tabela_temporaria(conexao):
+    """A prova de que o isolamento funciona onde importa: no `FROM users` da
+    consulta do script, e não só no `INSERT` do teste.
+
+    `'users'::regclass` resolve pelo `search_path` da sessão — o mesmo caminho
+    que a consulta real percorre. Se o schema não começar com `pg_temp`, o
+    script está lendo a tabela compartilhada, e o teste que passa aqui estaria
+    medindo o banco de outra pessoa.
+    """
+    schema = (
+        await conexao.execute(
+            text(
+                "SELECT n.nspname FROM pg_class c"
+                " JOIN pg_namespace n ON n.oid = c.relnamespace"
+                " WHERE c.oid = 'users'::regclass"
+            )
+        )
+    ).scalar_one()
+    assert schema.startswith("pg_temp"), f"`users` resolveu para {schema}, não para pg_temp"
+
+
+@pytest.mark.asyncio
+async def test_public_users_sobrevive_intacta_ao_diagnostico(conexao):
+    """Regressão do defeito que derrubou o CI do PR #30.
+
+    Quando o banco tem o schema HelpHS completo — que é a condição do CI —
+    `public.users` existe e carrega doze chaves estrangeiras. Rodar o
+    diagnóstico não pode alterá-la, lê-la nem derrubá-la. Onde ela não existir
+    (banco vazio do desenvolvimento), o que se afirma é que o diagnóstico
+    também **não a cria**.
+    """
+    existia = (await conexao.execute(text("SELECT to_regclass('public.users')"))).scalar()
+
+    antes = None
+    if existia is not None:
+        antes = (await conexao.execute(text("SELECT count(*) FROM public.users"))).scalar_one()
+
+    await _planta(conexao, "client", "active", None)
+    assert await conta_legado_invalido(conexao) == 1
+
+    depois_existe = (await conexao.execute(text("SELECT to_regclass('public.users')"))).scalar()
+
+    if existia is not None:
+        assert depois_existe is not None, "public.users foi DERRUBADA pelo diagnóstico"
+        depois = (await conexao.execute(text("SELECT count(*) FROM public.users"))).scalar_one()
+        assert depois == antes, "public.users foi ALTERADA pelo diagnóstico"
+    else:
+        assert depois_existe is None, "o diagnóstico CRIOU uma public.users"
+
+
+def _sql_que_este_arquivo_executa() -> list[str]:
+    """Todo literal passado a `text(...)` neste arquivo.
+
+    Por AST, e não por busca de substring: a prosa aqui NOMEIA o comando que
+    quebrou o CI para explicá-lo, e um `grep` casaria com a explicação. O que
+    interessa é o que chega ao banco.
+    """
+    import ast
+    from pathlib import Path
+
+    arvore = ast.parse(Path(__file__).read_text(encoding="utf-8"))
+
+    # As DDLs das temporárias moram em constantes de módulo, então `text(...)`
+    # recebe um nome e não um literal. Sem resolver isso, o guard passaria a
+    # não enxergar justamente o SQL que ele existe para conferir.
+    constantes: dict[str, str] = {
+        alvo.id: no.value.value
+        for no in ast.walk(arvore)
+        if isinstance(no, ast.Assign)
+        and isinstance(no.value, ast.Constant)
+        and isinstance(no.value.value, str)
+        for alvo in no.targets
+        if isinstance(alvo, ast.Name)
+    }
+
+    achados: list[str] = []
+    for no in ast.walk(arvore):
+        if not (
+            isinstance(no, ast.Call)
+            and isinstance(no.func, ast.Name)
+            and no.func.id == "text"
+            and no.args
+        ):
+            continue
+        arg = no.args[0]
+        if isinstance(arg, ast.Constant) and isinstance(arg.value, str):
+            achados.append(arg.value)
+        elif isinstance(arg, ast.Name) and arg.id in constantes:
+            achados.append(constantes[arg.id])
+        else:
+            raise AssertionError(f"SQL que o guard não consegue ler: {ast.dump(arg)[:80]}")
+    return achados
+
+
+def test_a_suite_nao_derruba_tabela_nenhuma():
+    """Guard de fonte: foi um comando de derrubar tabela que quebrou o CI com
+    18 erros. A correção é a tabela temporária, cujo ciclo de vida é o da
+    sessão — então não há motivo para a suíte destruir nada, e reintroduzir
+    isso é o caminho de volta para o mesmo defeito.
+    """
+    executado = " ".join(_sql_que_este_arquivo_executa()).upper()
+    assert executado, "a varredura por AST não achou SQL nenhum — o guard ficou cego"
+
+    for proibido in ("DROP ", "CASCADE", "TRUNCATE", "ALTER "):
+        assert proibido not in executado, f"a suíte voltou a executar {proibido.strip()}"
+    assert "CREATE TEMP TABLE" in executado, "as tabelas do teste deixaram de ser temporárias"
+    # E o que é criado tem de ser SEMPRE temporário: um `CREATE TABLE` comum
+    # em `public` é exatamente o defeito original, com outro nome.
+    assert "CREATE TABLE" not in executado.replace("CREATE TEMP TABLE", "")
+
+
+# ══════════════════════════════════════════════════════════════
+# 4. A saída não pode vazar dado pessoal
+# ══════════════════════════════════════════════════════════════
+
+
+@pytest.mark.asyncio
+async def test_a_saida_nao_imprime_dado_pessoal_nem_a_url(conexao, capsys):
     """O relatório é feito para ser colado num chamado. Se ele imprimir
     telefone, nome ou a URL do banco, deixa de ser colável — e alguém vai
     colar mesmo assim."""
     from scripts.diagnostico_telefone import _relatorio
 
-    await conexao.execute(
-        text("CREATE TABLE IF NOT EXISTS companies (id serial PRIMARY KEY, phone text)")
-    )
     await _planta(conexao, "client", "active", "+5581987654321")
     await _planta(conexao, "client", "active", None)
 
@@ -247,6 +390,10 @@ async def test_a_saida_nao_imprime_dado_pessoal_nem_a_url(conexao, capsys, monke
     assert "LEGADO_INVALIDO=1" in saida
     for vazamento in ("+5581987654321", "87654321", "5581987"):
         assert vazamento not in saida, f"telefone vazou: {vazamento}"
+    # `password` fica na lista de propósito. O GitGuardian marcou ESTA linha
+    # no PR #30 — é falso positivo (lista de substrings de uma asserção
+    # negativa, sem valor secreto nenhum) e foi classificado como tal. Tirar a
+    # palavra para agradar o detector enfraqueceria a verificação.
     for chave in ("postgresql", "asyncpg", "password", "@127.0.0.1", "DATABASE_URL="):
         assert chave not in saida, f"credencial/URL vazou: {chave}"
 
@@ -255,9 +402,6 @@ async def test_a_saida_nao_imprime_dado_pessoal_nem_a_url(conexao, capsys, monke
 async def test_a_linha_parseavel_sai_exatamente_uma_vez(conexao, capsys):
     from scripts.diagnostico_telefone import _relatorio
 
-    await conexao.execute(
-        text("CREATE TABLE IF NOT EXISTS companies (id serial PRIMARY KEY, phone text)")
-    )
     await _relatorio(conexao)
     saida = capsys.readouterr().out
     assert saida.count("LEGADO_INVALIDO=") == 1
@@ -266,15 +410,13 @@ async def test_a_linha_parseavel_sai_exatamente_uma_vez(conexao, capsys):
 
 def test_o_script_nao_tem_verbo_de_escrita():
     """Guard de fonte: o portão é somente leitura, e isso não pode depender de
-    alguém lembrar. Um INSERT/UPDATE/DELETE/DDL aqui seria mudança de natureza
+    alguém lembrar. Um INSERT/UPDATE/DELETE/DDL ali seria mudança de natureza
     da ferramenta, não detalhe de implementação."""
     from pathlib import Path
 
     import scripts.diagnostico_telefone as modulo
 
     fonte = Path(modulo.__file__).read_text(encoding="utf-8")
-    # Recorta o docstring do módulo: ele NOMEIA os verbos para dizer que não
-    # os usa, e casar com a prosa transformaria o guard num falso positivo.
     corpo = fonte.split('"""', 2)[2]
     for verbo in ("INSERT ", "UPDATE ", "DELETE ", "ALTER ", "DROP ", "CREATE "):
         assert verbo not in corpo.upper(), f"o script passou a escrever: {verbo}"
