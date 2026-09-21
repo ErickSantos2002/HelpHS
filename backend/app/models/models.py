@@ -305,8 +305,13 @@ class User(Base):
         # é função do PostgreSQL, e a maior parte da suíte monta o schema por
         # `create_all` em SQLite. Sem a guarda, o `CREATE TABLE users` morre lá
         # com `no such function: regexp_replace` — medido, 47 falhas e 37 erros.
-        # A constraint continua DECLARADA no metadata (é o que mantém o
-        # `autogenerate` ciente dela); o que a guarda muda é só onde o DDL sai.
+        # A constraint continua DECLARADA no metadata; o que a guarda muda é
+        # só onde o DDL sai. Declarar aqui mantém o mapeamento alinhado com a
+        # invariante real do banco, faz o `create_all` de PostgreSQL nascer
+        # com a mesma regra da migration, e dá aos testes um alvo explícito
+        # para comparar model e migration. O `autogenerate` do Alembic NÃO
+        # compara CHECK — medido na 1.15.2 —, então essa paridade é
+        # responsabilidade do teste, não da ferramenta.
         # O CHECK do MFA, acima, não precisa disso porque é SQL portável.
         CheckConstraint(
             "NOT (role = 'client' AND status = 'active') "

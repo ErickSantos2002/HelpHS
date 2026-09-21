@@ -826,8 +826,10 @@ cabe no próprio schema.
 objeto, sem passar pelos guards, e há teste dedicado para que ninguém
 "conserte" isso depois.
 
-**Não há constraint no banco ainda**, e o caminho até ela mudou depois de um
-experimento — ver a seção seguinte.
+**Até a Fase 1B não havia constraint no banco**, e o caminho até ela mudou
+depois de um experimento — ver a seção seguinte. A Fase 1C criou o `CHECK`
+validado de presença; tudo o que está descrito acima continua valendo como o
+que a **aplicação** faz.
 
 ### Por que não usamos CHECK NOT VALID para telefone
 

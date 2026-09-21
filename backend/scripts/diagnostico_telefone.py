@@ -1,25 +1,31 @@
 """
-Readiness do telefone: mede quanto legado separa o banco da constraint futura.
+Readiness do telefone: mede o legado que impede — ou que voltaria a impedir —
+a constraint de presença no PostgreSQL.
 
 **Somente leitura.** Não existe `--aplicar` aqui de propósito: este script não
 decide nada, só conta. Roda à mão, na máquina de quem administra.
 
 Por que ele existe
 ------------------
-A regra "cliente ativo precisa de telefone" vive HOJE só na aplicação
-(Fase 1A, `app/utils/telefone.py` e `_guarda_telefone_do_cliente`). Ela é
-**prospectiva**: proíbe a perda do telefone, não a ausência dele, para que as
-contas legadas continuem podendo editar nome e departamento.
+A regra "cliente ativo precisa de telefone" vive em duas camadas. Na
+**aplicação** (Fase 1A, `app/utils/telefone.py` e `_guarda_telefone_do_cliente`)
+ela valida e **normaliza** o número para E.164, e é **prospectiva**: proíbe a
+perda do telefone, não a ausência dele, para que as contas legadas continuem
+podendo editar nome e departamento. No **banco**, a Fase 1C acrescentou a
+proteção estrutural de **PRESENÇA**: o `CHECK` validado
+`ck_users_cliente_ativo_tem_telefone`, na tabela `users`.
 
-A trava de banco correspondente — um `CHECK` de PRESENÇA — só pode nascer
-quando **nenhuma** linha a violar. O motivo está medido em
-`docs/decisoes-e-regras.md`, na seção "Por que não usamos CHECK NOT VALID
-para telefone": um `CHECK ... NOT VALID` aceita o legado na criação, mas
-rejeita qualquer `UPDATE` posterior daquela linha — inclusive o que só troca
-o nome. Seria o banco contradizendo a regra publicada.
+Essa trava de banco só pôde nascer porque **nenhuma** linha a violava. O motivo
+está medido em `docs/decisoes-e-regras.md`, na seção "Por que não usamos CHECK
+NOT VALID para telefone": um `CHECK ... NOT VALID` aceita o legado na criação,
+mas rejeita qualquer `UPDATE` posterior daquela linha — inclusive o que só
+troca o nome. Seria o banco contradizendo a regra publicada.
 
-Este script é o portão: enquanto `LEGADO_INVALIDO` for maior que zero, a
-constraint não pode ser criada. Quando chegar a zero, pode.
+Este script segue sendo a ferramenta operacional que mede `client + active`
+sem telefone, e continua sendo pré-requisito de deploy: a migration da Fase 1C
+falha se encontrar linha violando, então `LEGADO_INVALIDO` precisa estar em
+zero antes de subir — e continua servindo para conferir o estado de qualquer
+banco depois disso.
 
 O que ele NÃO faz
 -----------------
@@ -27,10 +33,13 @@ O que ele NÃO faz
   e-mail, telefone e id de usuário ficam de fora, para que o relatório possa
   ser colado num chamado ou numa conversa sem vazar dado pessoal. Listar as
   linhas para saneamento é consulta separada e deliberada.
-- **Não mede FORMATO.** A constraint aprovada é de presença; o formato E.164
-  é garantido pelo tipo anotado em toda porta de escrita da aplicação. Os
-  blocos informativos sobre formato continuam abaixo, mas **não entram no
-  `LEGADO_INVALIDO` nem no código de saída**.
+- **Não mede FORMATO.** A constraint da Fase 1C é de presença; o formato E.164
+  fica **fora dela** e é garantido pelo tipo anotado em toda porta de escrita
+  da aplicação. Os blocos informativos sobre formato continuam abaixo, mas
+  **não entram no `LEGADO_INVALIDO` nem no código de saída**.
+- **Não olha `companies.phone`.** A fonte da telefonia é `users.phone`
+  (decisão registrada); `companies.phone` continua **fora do portão** e
+  aparece adiante só como bloco informativo.
 - **Não corrige nada.** Dado histórico se corrige em tarefa administrativa
   explícita, nunca por backfill automático e nunca por número inventado.
 

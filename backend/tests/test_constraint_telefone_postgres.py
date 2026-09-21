@@ -450,10 +450,12 @@ def _carrega_a_migration():
 
 def test_o_model_declara_a_mesma_constraint():
     """O projeto declara CHECK no `__table_args__` (precedente: o do MFA).
-    Se a migration criasse a constraint e o model não a conhecesse, um
-    `autogenerate` futuro proporia removê-la — e o teste de deriva
-    modelo-x-migration não pega isso, porque ele compara presença de tabela e
-    coluna, não de constraint."""
+    Declarar no model mantém o mapeamento alinhado com a invariante real do
+    banco e faz o `create_all` de PostgreSQL nascer com a mesma regra da
+    migration. O `autogenerate` do Alembic não compara CHECK (medido na
+    1.15.2), e o teste de deriva modelo-x-migration compara presença de tabela
+    e coluna, não de constraint — então quem garante essa paridade é este
+    teste, e nenhuma ferramenta."""
     from app.models.models import User
 
     checks = {

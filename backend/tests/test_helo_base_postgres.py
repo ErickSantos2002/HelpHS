@@ -579,8 +579,9 @@ async def test_chamado_sem_produto_nem_chega_a_consultar_o_banco():
         async def execute(self, *args, **kwargs):
             raise AssertionError("buscou no banco mesmo sem produto no chamado")
 
-    # `phone` porque o status default e `active`, e cliente ativo precisa
-    # de telefone desde a Fase 1C (ck_users_cliente_ativo_tem_telefone).
+    # `phone` para o objeto continuar válido segundo a invariante de domínio
+    # de cliente ativo, ainda que ESTE teste não persista o User: a sessão
+    # recusa qualquer ida ao banco, então nenhuma CHECK chega a ser avaliada.
     cliente = User(
         id=uuid.uuid4(),
         name="x",
