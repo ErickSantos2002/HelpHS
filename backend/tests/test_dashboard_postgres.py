@@ -143,6 +143,11 @@ def _usuario(papel: UserRole, nome: str) -> User:
         password="x",
         role=papel,
         status=UserStatus.active,
+        # Cliente ativo precisa de telefone desde a Fase 1C
+        # (ck_users_cliente_ativo_tem_telefone). O create_all destes
+        # testes monta o schema pelo model, então o fixture precisa
+        # nascer conforme a regra de domínio.
+        phone="+5581999999999",
         lgpd_consent=True,
         email_verified=True,
         onboarding_completed=True,

@@ -142,6 +142,9 @@ async def _cliente_com_aparelho(db) -> tuple[User, Equipment]:
         password="x",
         role=UserRole.client,
         status=UserStatus.active,
+        # Cliente ativo precisa de telefone desde a Fase 1C
+        # (ck_users_cliente_ativo_tem_telefone).
+        phone="+5581999999999",
         lgpd_consent=True,
         email_verified=True,
         onboarding_completed=True,
