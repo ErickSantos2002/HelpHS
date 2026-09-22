@@ -25,10 +25,12 @@ com uma URL assinada dentro.
 """
 
 import logging
+from unittest.mock import MagicMock, patch
 
+import pytest
 from loguru import logger
 
-from app.core.logging import instalar_ponte_stdlib
+from app.core.logging import instalar_ponte_stdlib, setup_logging
 
 _TOKEN = "eyJhbGciOiJSUzI1NiJ9.cargaUtilQueNaoPodeVazar.assinaturaSecreta"
 
@@ -164,3 +166,95 @@ def test_o_carimbo_de_request_id_sobrevive_a_redacao():
 
     assert capturado, "o log parou de funcionar"
     assert "request_id" in capturado[-1], "o carimbo do request_id sumiu"
+
+
+# ── Valor de variável local não pode ser renderizado ─────────
+#
+# Outro caminho, e o patcher acima não alcança este. O `diagnose` do loguru
+# acrescenta ao traceback o VALOR das variáveis locais de cada quadro. Uma
+# função que tenha a credencial numa variável — montar um `Authorization`, por
+# exemplo — passa a imprimir a credencial em qualquer exceção que atravesse
+# aquele quadro.
+#
+# A redação de `_SEGREDO_NA_QUERY` reescreve `record["message"]`; o bloco de
+# diagnóstico é montado pelo loguru DEPOIS, ao formatar a exceção. São caminhos
+# diferentes, e por isso este grupo existe.
+#
+# Medido no loguru 0.7.3: `logger.add` tem `diagnose=True` por default, e o
+# `setup_logging` não passava o parâmetro em nenhum dos três sinks.
+
+_SEGREDO_EM_VARIAVEL = "credencial-que-so-existe-numa-variavel-local-7K3P"
+
+
+def _monta_cabecalho_e_falha(token: str) -> dict:
+    """Reproduz o risco real: a credencial numa variável, e a linha estoura.
+
+    A linha que falha é a MESMA que referencia `token`, e isso é o ponto. O
+    `diagnose` anota o valor das variáveis CITADAS na linha exibida de cada
+    quadro — uma primeira versão deste teste levantava o erro numa linha que
+    não mencionava a variável, o `diagnose=True` não anotava nada, e o teste
+    passava sem provar coisa nenhuma.
+    """
+    return {"Authorization": token, "estoura": 1 // 0}
+
+
+def _loga_excecao_com_segredo_na_pilha(**opcoes_do_sink) -> str:
+    """Loga uma exceção com o segredo na pilha e devolve o texto formatado."""
+    saida: list[str] = []
+    sink = logger.add(lambda m: saida.append(str(m)), level="DEBUG", **opcoes_do_sink)
+    try:
+        try:
+            _monta_cabecalho_e_falha(_SEGREDO_EM_VARIAVEL)
+        except ZeroDivisionError:
+            logger.exception("falha ao falar com o fornecedor")
+    finally:
+        logger.remove(sink)
+    return "".join(saida)
+
+
+def test_o_valor_de_variavel_local_nao_vai_para_o_traceback():
+    """Com `diagnose=False`, o traceback mostra as linhas e não os valores."""
+    texto = _loga_excecao_com_segredo_na_pilha(diagnose=False)
+
+    assert "ZeroDivisionError" in texto, "o traceback sumiu junto com o diagnóstico"
+    assert _SEGREDO_EM_VARIAVEL not in texto
+
+
+def test_o_teste_acima_detectaria_a_volta_do_default():
+    """Prova que o teste anterior tem dente.
+
+    Sem isto, `diagnose=False` poderia estar sendo verificado contra uma saída
+    que nunca renderizaria variável nenhuma, e o teste passaria por engano.
+    """
+    texto = _loga_excecao_com_segredo_na_pilha(diagnose=True)
+
+    assert _SEGREDO_EM_VARIAVEL in texto
+
+
+@pytest.mark.parametrize("ambiente", ["development", "production"])
+def test_setup_logging_desliga_o_diagnostico_em_todos_os_sinks(ambiente):
+    """Prende a configuração real, e não só o comportamento do loguru.
+
+    Os dois ramos de `setup_logging` são percorridos: development instala dois
+    sinks (stdout colorido e arquivo), produção instala um (stdout em JSON).
+    Qualquer `logger.add` novo que esqueça o `diagnose=False` derruba isto.
+    """
+    ajustes = MagicMock()
+    ajustes.log_level = "INFO"
+    # O sink de arquivo nunca chega a ser criado: `logger.add` está trocado.
+    ajustes.log_dir = "/caminho/que/nao/e/aberto"
+    ajustes.is_development = ambiente == "development"
+
+    with (
+        patch("app.core.logging.get_settings", return_value=ajustes),
+        patch("app.core.logging.instalar_ponte_stdlib"),
+        patch("app.core.logging.logger.remove"),
+        patch("app.core.logging.logger.add") as adicionar,
+    ):
+        setup_logging()
+
+    assert adicionar.call_count >= 1
+    for chamada in adicionar.call_args_list:
+        assert (
+            chamada.kwargs.get("diagnose") is False
+        ), f"um sink de {ambiente} foi instalado sem diagnose=False"
