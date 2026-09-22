@@ -6,7 +6,7 @@ import {
   Button,
   Icon,
   PriorityBadge,
-  Select,
+  SelectMenu,
   Spinner,
 } from "../../components/ui";
 import {
@@ -499,23 +499,31 @@ export default function TicketListPage() {
           </div>
 
           {/* Priority — D9.2: quatro prioridades, fixas em `lib/prioridade.ts` e
-              nenhuma vinda da rede. Lista curta e conhecida, logo `<select>`
-              nativo.
+              nenhuma vinda da rede. Lista fechada e escrita no código, logo
+              `SelectMenu`.
 
-              O ponto de cor sai junto: o `<option>` nativo não aceita marcador,
-              e a cor nunca foi o que distinguia as quatro — o rótulo escrito é.
-              O selo da própria linha do chamado continua pintando pela mesma
-              fonte.
+              O critério da D9.2 não mudou — quem decide é quem ESCREVE a lista:
+              fechada no código fica aqui, e a que vem da rede e cresce com o
+              cadastro vai para o `Selector variant="filter"`, com busca. O que
+              mudou foi só o controle deste lado: era o seletor nativo do
+              navegador, que desenhava a lista fora do tema, e passou a ser o
+              painel do pacote.
+
+              O ponto de cor segue de fora, e a razão mudou de lugar: não é mais
+              que a opção nativa não aceitava marcador — este painel é nosso e
+              aceitaria — e sim que a cor nunca foi o que distinguia as quatro,
+              o rótulo escrito é. O selo da própria linha do chamado continua
+              pintando pela mesma fonte.
 
               O rótulo é `sr-only`: sem ele o filtro se anunciava "Alta". */}
           <span id="rotulo-filtro-prioridade" className="sr-only">
             Prioridade
           </span>
-          <Select
+          <SelectMenu
             id="filtro-prioridade"
             aria-labelledby="rotulo-filtro-prioridade"
             value={filterPriority}
-            onChange={(e) => setFilterPriority(e.target.value)}
+            onChange={(v) => setFilterPriority(v)}
             placeholder="Todas prioridades"
             options={PRIORIDADES.map((p) => ({
               value: p,
@@ -528,11 +536,11 @@ export default function TicketListPage() {
           <span id="rotulo-filtro-tecnico" className="sr-only">
             Atribuição
           </span>
-          <Select
+          <SelectMenu
             id="filtro-tecnico"
             aria-labelledby="rotulo-filtro-tecnico"
             value={filterAssignee === "all" ? "" : filterAssignee}
-            onChange={(e) => setFilterAssignee((e.target.value || "all") as typeof filterAssignee)}
+            onChange={(v) => setFilterAssignee((v || "all") as typeof filterAssignee)}
             placeholder="Todos"
             options={[
               { value: "unassigned", label: "Sem técnico" },

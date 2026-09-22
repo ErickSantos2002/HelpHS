@@ -32,8 +32,15 @@ test.describe("Dashboard e Relatórios", () => {
     );
 
     // Period selector defaults to 30 days
-    const periodSelect = page.locator("select").first();
-    await expect(periodSelect).toHaveValue("30", { timeout: 5_000 });
+    //
+    // O filtro tem rótulo `sr-only` ("Período"), que é o nome acessível do
+    // gatilho e não muda quando o período muda. O que está escolhido se lê
+    // pelo TEXTO do gatilho: o `toHaveValue` do Playwright só serve a
+    // `<input>`, `<textarea>` e `<select>` e recusa qualquer outro elemento.
+    const periodSelect = page.getByRole("combobox", { name: "Período" });
+    await expect(periodSelect).toContainText("Últimos 30 dias", {
+      timeout: 5_000,
+    });
   });
 
   test("filtro de período atualiza os relatórios", async ({ page }) => {
@@ -42,10 +49,13 @@ test.describe("Dashboard e Relatórios", () => {
       { timeout: 8_000 },
     );
 
-    await page.locator("select").first().selectOption("7");
+    const periodSelect = page.getByRole("combobox", { name: "Período" });
+    await periodSelect.click();
+    await page.getByRole("option", { name: "Últimos 7 dias" }).click();
 
-    // Select shows the new period option label
-    await expect(page.locator("select").first()).toHaveValue("7");
+    // O gatilho passa a mostrar o rótulo do novo período — é o texto dele que
+    // diz o que está escolhido, não um `value`.
+    await expect(periodSelect).toContainText("Últimos 7 dias");
     // Loading spinner disappears (API call completes)
     await expect(page.getByText("Carregando…")).not.toBeVisible({
       timeout: 8_000,

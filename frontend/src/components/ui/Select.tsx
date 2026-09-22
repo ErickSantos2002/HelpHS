@@ -19,6 +19,21 @@ export interface SelectProps extends SelectHTMLAttributes<HTMLSelectElement> {
 /**
  * Seletor nativo, de `DS/components/forms/Select.jsx`.
  *
+ * @deprecated Ficou **sem nenhuma chamada**: as vinte e nove telas que o
+ * usavam passaram para o {@link SelectMenu}, que abre um painel nosso em vez
+ * da lista que o sistema operacional desenhava — fora do tema, sem os tokens
+ * do pacote e diferente em cada navegador.
+ *
+ * O critério da D9.2 não mudou: quem escreve a lista é que decide o controle.
+ * Lista fechada, escrita no código, é o `SelectMenu`; lista que vem da rede e
+ * cresce com o cadastro continua sendo `Selector variant="filter"`, com busca.
+ * O que mudou foi só o controle do lado fechado.
+ *
+ * Ele não saiu no mesmo passo de propósito — é o que a D9.2 fez com o
+ * `FilterSelect`: primeiro esvaziar, depois tirar. Continua na galeria
+ * enquanto existir, porque o que a galeria mede é o que ainda pode ser
+ * pintado.
+ *
  * ── O `id` deixou de sair do rótulo (E11) ─────────────────────────────
  *
  * Ele era `label.toLowerCase()`. **Dois seletores com o mesmo rótulo na mesma

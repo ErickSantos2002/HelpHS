@@ -42,8 +42,12 @@ test.describe("Base de Conhecimento", () => {
       .fill("Conteúdo de teste criado por E2E.");
 
     // Set status to "published" so the detail page can find the article
-    // Status is the 2nd select (1st is category)
-    await page.locator("select").nth(1).selectOption("published");
+    // O campo de Status é o `SelectMenu`: o gatilho abre um painel nosso, e a
+    // escolha é um clique no RÓTULO ("Publicado"), não no valor. Localizado
+    // pelo nome acessível — o `<label>` do primitivo —, e não mais pela ordem
+    // dos campos na tela.
+    await page.getByRole("combobox", { name: "Status" }).click();
+    await page.getByRole("option", { name: "Publicado" }).click();
 
     await page.getByRole("button", { name: /criar artigo/i }).click();
 

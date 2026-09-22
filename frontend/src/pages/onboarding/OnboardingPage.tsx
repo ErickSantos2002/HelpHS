@@ -1,7 +1,7 @@
 import { useEffect, useState } from "react";
 import { useNavigate } from "react-router-dom";
 import { useAuth } from "../../contexts/AuthContext";
-import { Alert, Button, Input, Select, Spinner } from "../../components/ui";
+import { Alert, Button, Input, SelectMenu, Spinner } from "../../components/ui";
 import { completeOnboarding } from "../../services/userService";
 import { isValidCep, isValidCnpj, maskCnpjInput, onlyDigits } from "../../lib/documents";
 import {
@@ -368,15 +368,17 @@ function StepEquipment({ onNext }: { onNext: () => void }) {
             </Alert>
           )}
 
-          {/* O `id` vai explícito: o `Select` do pacote, sem ele, deriva o id
-              do rótulo em minúsculas — e dois seletores de mesmo rótulo na
-              mesma tela gerariam o mesmo `id`. Aqui há um só, mas o defeito
-              nasce silencioso e não custa nada fechar. */}
-          <Select
+          {/* O `id` vai explícito desde o `Select` do pacote, que derivava
+              o id do rótulo em minúsculas — e dois seletores de mesmo rótulo
+              na mesma tela nasciam com o MESMO `id`. Quem desenha o campo
+              agora é o `SelectMenu`, e ele gera o dele pelo `useId`, um por
+              instância; o explícito continua porque é um nome fixo para
+              apontar de fora, e tirá-lo não ganharia nada. */}
+          <SelectMenu
             id="onboarding-produto"
             label="Produto"
             value={productId}
-            onChange={(e) => setProductId(e.target.value)}
+            onChange={(v) => setProductId(v)}
             options={products.map((p) => ({
               value: p.id,
               label: p.name + (p.version ? ` (${p.version})` : ""),

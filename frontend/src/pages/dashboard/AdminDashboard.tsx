@@ -3,7 +3,7 @@ import {
   Area, AreaChart, Bar, BarChart, Cell,
   Pie, PieChart, ResponsiveContainer, Tooltip, XAxis, YAxis,
 } from "recharts";
-import { Alert, Icon, KpiCard, Select, Selector, Spinner } from "../../components/ui";
+import { Alert, Icon, KpiCard, SelectMenu, Selector, Spinner } from "../../components/ui";
 import { cn } from "../../lib/utils";
 import {
   CROMO, ESTILO_DICA, ENVOLTORIO_DICA, COR_SERIE_TEMPORAL,
@@ -321,8 +321,10 @@ export default function AdminDashboard() {
         <div className="flex flex-wrap items-center justify-center sm:justify-end gap-2">
           {/* Technician filter — D9.2: lista LONGA. As opções vêm da rede
               (`getTechnicianListReport`) e crescem com a equipe, então o
-              controle é o `Selector variant="filter"`, e não o `<select>`
-              nativo.
+              controle é o `Selector variant="filter"`, e não o de lista
+              fechada ao lado — que era o `<select>` nativo e hoje é o
+              `SelectMenu`. O critério da D9.2 não mudou: ele é sobre QUEM
+              escreve a lista, não sobre qual desenho a pinta.
 
               O `label` é a razão da troca: o `FilterSelect` não o repassava, e
               o filtro se anunciava só pelo nome do técnico escolhido. O
@@ -343,20 +345,25 @@ export default function AdminDashboard() {
           )}
 
           {/* Period filter — D9.2: oito períodos fixos no código, lista curta e
-              conhecida, logo `<select>` nativo.
+              conhecida, logo o controle de lista fechada. Este lado da regra
+              era o `<select>` nativo e passou a ser o `SelectMenu`: a lista
+              agora é desenhada por nós, com os tokens do tema, em vez de pelo
+              sistema operacional. O teclado, que o nativo dava de graça, o
+              `SelectMenu` implementa — setas, Enter, Escape e busca por letra.
 
               Sem `placeholder`, e isso conserta uma queda: a linha de limpar do
               `FilterSelect` devolvia `""`, e `activePeriod` lia
               `PERIOD_OPTIONS.find((p) => p.key === "")!.days` — `days` de
-              `undefined`. O `<select>` nativo não tem linha de limpar. */}
+              `undefined`. Sem `placeholder` o `SelectMenu` não desenha linha de
+              limpar, exatamente como o nativo não tinha nenhuma. */}
           <span id="rotulo-filtro-periodo" className="sr-only">
             Período
           </span>
-          <Select
+          <SelectMenu
             id="filtro-periodo"
             aria-labelledby="rotulo-filtro-periodo"
             value={periodKey}
-            onChange={(e) => setPeriodKey(e.target.value as PeriodKey)}
+            onChange={(v) => setPeriodKey(v as PeriodKey)}
             options={PERIOD_OPTIONS.map((p) => ({ value: p.key, label: p.label }))}
           />
 

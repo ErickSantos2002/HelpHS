@@ -15,7 +15,7 @@ import {
   Modal,
   ModalFooter,
   PriorityBadge,
-  Select,
+  SelectMenu,
   SlaChip,
   Spinner,
   StatusBadge,
@@ -1907,12 +1907,12 @@ export default function TicketDetailPage() {
         title="Alterar status"
       >
         <div className="space-y-4">
-          <Select
+          <SelectMenu
             label="Novo status"
             options={transitionOptions}
             placeholder="Selecione"
             value={newStatus}
-            onChange={(e) => setNewStatus(e.target.value)}
+            onChange={(v) => setNewStatus(v)}
             disabled={statusLoading}
           />
           {newStatus === "resolved" && exigeJustificativa && blocoJustificativa(true)}
@@ -1961,12 +1961,12 @@ export default function TicketDetailPage() {
       >
         <div className="space-y-4">
           {user?.role === "admin" ? (
-            <Select
+            <SelectMenu
               label="Técnico"
               options={technicians.map((t) => ({ value: t.id, label: t.name }))}
               placeholder="Selecione um técnico"
               value={newAssignee}
-              onChange={(e) => setNewAssignee(e.target.value)}
+              onChange={(v) => setNewAssignee(v)}
             />
           ) : (
             <p className="text-sm text-conteudo">Deseja assumir este ticket para você?</p>

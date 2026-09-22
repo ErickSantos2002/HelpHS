@@ -48,6 +48,7 @@ import * as attachmentService from "../../services/attachmentService";
 import * as surveyService from "../../services/surveyService";
 import * as userService from "../../services/userService";
 import * as tagService from "../../services/tagService";
+import { escolherNoMenu } from "../helpers/menu";
 
 /**
  * O que esta tela tinha, e que estes casos prendem.
@@ -446,10 +447,13 @@ describe("justificativa de SLA violado", () => {
     const dialogo = await abrirStatus();
     const status = within(dialogo).getByLabelText("Novo status");
 
-    fireEvent.change(status, { target: { value: "awaiting_client" } });
+    // O campo é um menu, e o menu escolhe pelo RÓTULO — "Aguardando cliente" é
+    // o `awaiting_client`, "Resolvido" é o `resolved`. O painel abre num portal
+    // fora do diálogo, e quem cuida disso é o auxiliar.
+    escolherNoMenu(status, "Aguardando cliente");
     expect(within(dialogo).queryByLabelText("Motivo do atraso *")).not.toBeInTheDocument();
 
-    fireEvent.change(status, { target: { value: "resolved" } });
+    escolherNoMenu(status, "Resolvido");
     expect(
       within(dialogo).getByText(/passou do prazo \(o de primeira resposta\)/),
     ).toBeInTheDocument();
@@ -483,11 +487,11 @@ describe("justificativa de SLA violado", () => {
     const dialogo = await abrirStatus();
     const status = within(dialogo).getByLabelText("Novo status");
 
-    fireEvent.change(status, { target: { value: "resolved" } });
+    escolherNoMenu(status, "Resolvido");
     fireEvent.change(within(dialogo).getByLabelText("Motivo do atraso *"), {
       target: { value: "Peça importada atrasou." },
     });
-    fireEvent.change(status, { target: { value: "awaiting_client" } });
+    escolherNoMenu(status, "Aguardando cliente");
     fireEvent.click(within(dialogo).getByRole("button", { name: "Confirmar" }));
 
     await waitFor(() =>
@@ -506,9 +510,7 @@ describe("justificativa de SLA violado", () => {
       .mockResolvedValueOnce({ ...EM_ATENDIMENTO, status: "resolved" } as never);
     await montar([], EM_ATENDIMENTO);
     const dialogo = await abrirStatus();
-    fireEvent.change(within(dialogo).getByLabelText("Novo status"), {
-      target: { value: "resolved" },
-    });
+    escolherNoMenu(within(dialogo).getByLabelText("Novo status"), "Resolvido");
     const confirmar = within(dialogo).getByRole("button", { name: "Confirmar" });
     fireEvent.click(confirmar);
 
@@ -533,9 +535,7 @@ describe("justificativa de SLA violado", () => {
     });
     await montar([], EM_ATENDIMENTO);
     const dialogo = await abrirStatus();
-    fireEvent.change(within(dialogo).getByLabelText("Novo status"), {
-      target: { value: "resolved" },
-    });
+    escolherNoMenu(within(dialogo).getByLabelText("Novo status"), "Resolvido");
     fireEvent.click(within(dialogo).getByRole("button", { name: "Confirmar" }));
 
     await waitFor(() => expect(toast.error).toHaveBeenCalled());
@@ -562,9 +562,7 @@ describe("justificativa de SLA violado", () => {
     vi.mocked(ticketService.updateTicketStatus).mockRejectedValueOnce(ERRO_422);
     await montar([], EM_ATENDIMENTO);
     let dialogo = await abrirStatus();
-    fireEvent.change(within(dialogo).getByLabelText("Novo status"), {
-      target: { value: "resolved" },
-    });
+    escolherNoMenu(within(dialogo).getByLabelText("Novo status"), "Resolvido");
     fireEvent.click(within(dialogo).getByRole("button", { name: "Confirmar" }));
     await within(dialogo).findByLabelText("Motivo do atraso *");
 
@@ -574,9 +572,7 @@ describe("justificativa de SLA violado", () => {
     );
 
     dialogo = await abrirStatus();
-    fireEvent.change(within(dialogo).getByLabelText("Novo status"), {
-      target: { value: "resolved" },
-    });
+    escolherNoMenu(within(dialogo).getByLabelText("Novo status"), "Resolvido");
     expect(within(dialogo).queryByLabelText("Motivo do atraso *")).not.toBeInTheDocument();
   });
 
@@ -592,7 +588,7 @@ describe("justificativa de SLA violado", () => {
     await montar([], EM_ATENDIMENTO);
     const dialogo = await abrirStatus();
     const status = within(dialogo).getByLabelText("Novo status");
-    fireEvent.change(status, { target: { value: "resolved" } });
+    escolherNoMenu(status, "Resolvido");
     fireEvent.click(within(dialogo).getByRole("button", { name: "Confirmar" }));
 
     expect(status).toBeDisabled();

@@ -46,6 +46,23 @@ export type { SelectorProps, SelectorOption } from "./Selector";
 export { RadioCards } from "./RadioCards";
 export type { RadioCardsProps, RadioOption, RadioTone } from "./RadioCards";
 
+// O `Select` e o `SelectMenu` sao o MESMO papel em duas encarnacoes, e a
+// divisao do trabalho continua sendo a da D9.2 -- quem escreve a lista:
+//
+//   lista fechada, escrita no codigo  -> `SelectMenu`
+//   lista que vem da rede e cresce    -> `Selector variant="filter"`, com busca
+//
+// O que mudou foi so o CONTROLE do lado fechado: era o `<select>` nativo, que
+// abria uma lista desenhada pelo sistema operacional -- fora do tema, sem os
+// tokens do pacote e diferente em cada navegador --, e passou a ser um painel
+// nosso, no desenho do `SelectMenu` do HS Growth.
+//
+// O `Select` fica `@deprecated` e sem chamada nenhuma. Ele nao foi removido no
+// mesmo passo de proposito: e o que a D9.2 fez com o `FilterSelect`, primeiro
+// esvaziar, depois tirar.
+export { SelectMenu } from "./SelectMenu";
+export type { SelectMenuProps, SelectMenuOption } from "./SelectMenu";
+
 export { Select } from "./Select";
 export type { SelectProps, SelectOption } from "./Select";
 

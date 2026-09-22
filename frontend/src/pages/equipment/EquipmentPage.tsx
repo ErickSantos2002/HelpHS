@@ -1,6 +1,6 @@
 import { zodResolver } from "@hookform/resolvers/zod";
 import { useEffect, useState } from "react";
-import { useForm } from "react-hook-form";
+import { Controller, useForm } from "react-hook-form";
 import { z } from "zod";
 import {
   Alert,
@@ -13,7 +13,7 @@ import {
   Modal,
   ModalFooter,
   Pagination,
-  Select,
+  SelectMenu,
   Spinner,
 } from "../../components/ui";
 import type { BadgeProps } from "../../components/ui";
@@ -182,16 +182,32 @@ function AddModal({ products, onClose, onAdded }: {
         {submitError && <Alert variant="danger">{submitError}</Alert>}
         {/* Era um `<select>` com classe à mão e um `<label>` sem `htmlFor` —
             campo sem nome acessível. O primitivo amarra os dois e traz o anel
-            de foco do degrau de AÇÃO, o mesmo dos `Input` logo abaixo. */}
-        <Select
-          id="equipamento-produto"
-          label="Produto *"
-          options={products.map((p) => ({
-            value: p.id,
-            label: p.name + (p.version ? ` (${p.version})` : ""),
-          }))}
-          error={form.formState.errors.product_id?.message}
-          {...form.register("product_id")}
+            de foco do degrau de AÇÃO, o mesmo dos `Input` logo abaixo.
+
+            O `register` espalhado só serve em campo nativo: ele entrega um
+            `onChange` que lê `e.target.value` e um `ref` de `<select>`. O
+            `SelectMenu` avisa com o valor já pronto, e o `ref` dele é o
+            gatilho — o botão que o formulário precisa focar quando recusa o
+            campo. O `Controller` é a ponte entre os dois, como na
+            `ProductsPage`. */}
+        <Controller
+          control={form.control}
+          name="product_id"
+          render={({ field }) => (
+            <SelectMenu
+              id="equipamento-produto"
+              label="Produto *"
+              options={products.map((p) => ({
+                value: p.id,
+                label: p.name + (p.version ? ` (${p.version})` : ""),
+              }))}
+              error={form.formState.errors.product_id?.message}
+              value={field.value}
+              onChange={field.onChange}
+              onBlur={field.onBlur}
+              ref={field.ref}
+            />
+          )}
         />
         <Input
           label="Nome do equipamento *"

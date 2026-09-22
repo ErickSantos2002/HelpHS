@@ -19,6 +19,7 @@ import { MemoryRouter, Route, Routes } from "react-router-dom";
 import KBFormPage from "../../pages/kb/KBFormPage";
 import * as kbService from "../../services/kbService";
 import * as productService from "../../services/productService";
+import { escolherNoMenu, opcoesDoMenu } from "../helpers/menu";
 
 /**
  * O que esta tela tinha, e o que estes casos prendem.
@@ -234,11 +235,7 @@ describe("KBFormPage", () => {
     await montarNovo();
 
     const seletor = screen.getByRole("combobox", { name: "Categoria" });
-    expect(
-      within(seletor)
-        .getAllByRole("option")
-        .map((o) => o.textContent),
-    ).toEqual([
+    expect(opcoesDoMenu(seletor)).toEqual([
       "Hardware",
       "Software",
       "Rede",
@@ -261,22 +258,43 @@ describe("KBFormPage", () => {
   });
 
   it("o resumo mostra o estado do artigo pelo rótulo, e acompanha o seletor", async () => {
-    const user = userEvent.setup();
     await montarEdicao();
 
-    // Escopado ao cartão: as três `<option>` do seletor de Status carregam
-    // exatamente os mesmos três rótulos, e uma busca solta acharia as duas.
+    // Escopado ao cartão: o gatilho do seletor de Status exibe o rótulo do
+    // estado escolhido — o mesmo texto do resumo —, e uma busca solta acharia
+    // os dois.
     const resumo = () => screen.getByText("Resumo").closest("div") as HTMLElement;
 
     // O artigo chega publicado.
     expect(within(resumo()).getByText("Publicado")).toBeInTheDocument();
 
-    await user.selectOptions(
+    escolherNoMenu(
       screen.getByRole("combobox", { name: "Status" }),
-      "archived",
+      "Arquivado",
     );
     expect(within(resumo()).getByText("Arquivado")).toBeInTheDocument();
     expect(within(resumo()).queryByText("Publicado")).not.toBeInTheDocument();
+  });
+
+  it("o rótulo escolhido no menu leva o VALOR do estado para a API", async () => {
+    // O menu escolhe pelo RÓTULO ("Arquivado"); o campo nativo escolhia pelo
+    // VALOR ("archived"). Com a troca, o par rótulo↔valor de
+    // `ESTADOS_DO_ARTIGO` deixou de ser exercido por qualquer caso — e é ele
+    // que decide o que o backend recebe. Este caso vai até o envio e olha o
+    // literal que sai na chamada.
+    const user = userEvent.setup();
+    await montarEdicao();
+    vi.mocked(kbService.updateKBArticle).mockResolvedValue({ id: "a1" } as never);
+
+    escolherNoMenu(screen.getByRole("combobox", { name: "Status" }), "Arquivado");
+    await user.click(screen.getByRole("button", { name: "Salvar alterações" }));
+
+    await waitFor(() =>
+      expect(kbService.updateKBArticle).toHaveBeenCalledWith(
+        "a1",
+        expect.objectContaining({ status: "archived" }),
+      ),
+    );
   });
 
   // ── Navegação ───────────────────────────────────────────────

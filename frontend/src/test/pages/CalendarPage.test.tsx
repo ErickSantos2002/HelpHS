@@ -31,6 +31,7 @@ import CalendarPage from "../../pages/calendar/CalendarPage";
 import { useAuth } from "../../contexts/AuthContext";
 import * as calendarService from "../../services/calendarService";
 import { chaveCivil, chaveDoDia, instanteDe } from "../../lib/agenda";
+import { escolherNoMenu } from "../helpers/menu";
 import { toast } from "sonner";
 
 /**
@@ -163,20 +164,22 @@ describe("CalendarPage — navegação e acessibilidade", () => {
   it("as setas de mês têm nome, e mudam o mês de fato", async () => {
     await montar();
 
-    const seletorMes = screen.getByLabelText("Mês") as HTMLSelectElement;
-    expect(seletorMes.value).toBe(String(MES));
+    // O campo é o gatilho do menu: quem diz o mês é o TEXTO dele. `.value` de um
+    // botão é "" sempre, e o caso passaria com a seta levando a qualquer mês.
+    const seletorMes = screen.getByLabelText("Mês");
+    expect(seletorMes).toHaveTextContent(MESES[MES]);
 
     fireEvent.click(screen.getByRole("button", { name: "Próximo mês" }));
-    expect(seletorMes.value).toBe(String((MES + 1) % 12));
+    expect(seletorMes).toHaveTextContent(MESES[(MES + 1) % 12]);
 
     fireEvent.click(screen.getByRole("button", { name: "Mês anterior" }));
-    expect(seletorMes.value).toBe(String(MES));
+    expect(seletorMes).toHaveTextContent(MESES[MES]);
   });
 
   it("os dois seletores da navegação dizem o que selecionam", async () => {
     await montar();
-    expect(screen.getByLabelText("Mês")).toHaveValue(String(MES));
-    expect(screen.getByLabelText("Ano")).toHaveValue(String(ANO));
+    expect(screen.getByLabelText("Mês")).toHaveTextContent(MESES[MES]);
+    expect(screen.getByLabelText("Ano")).toHaveTextContent(String(ANO));
   });
 
   it("o dia de hoje é dito em texto, e não só pelo disco", async () => {
@@ -275,9 +278,30 @@ describe("CalendarPage — navegação e acessibilidade", () => {
     fireEvent.click(screen.getByRole("button", { name: "Novo evento" }));
 
     const tipo = await screen.findByLabelText("Tipo");
-    expect(tipo).toHaveValue("event");
-    fireEvent.change(tipo, { target: { value: "meeting" } });
-    expect(tipo).toHaveValue("meeting");
+    expect(tipo).toHaveTextContent("Evento");
+    escolherNoMenu(tipo, "Reunião");
+    expect(tipo).toHaveTextContent("Reunião");
+  });
+
+  it("o tipo escolhido pelo rótulo manda o LITERAL do tipo no evento", async () => {
+    // O menu escolhe pelo rótulo visível ("Reunião"); o campo nativo escolhia
+    // pelo valor ("meeting"). Sem este caso, nada mais amarraria o rótulo ao
+    // literal de `event_type` que vai para a API — trocar o `value` da opção
+    // pelo próprio rótulo passaria despercebido.
+    vi.mocked(calendarService.createCalendarEvent).mockResolvedValue(AZUL);
+    await montar();
+    const dialogo = await novoEventoNoDia();
+
+    fireEvent.change(within(dialogo).getByLabelText("Título"), {
+      target: { value: "Reunião da virada" },
+    });
+    escolherNoMenu(within(dialogo).getByLabelText("Tipo"), "Reunião");
+    fireEvent.click(within(dialogo).getByRole("button", { name: "Salvar" }));
+
+    await waitFor(() => expect(calendarService.createCalendarEvent).toHaveBeenCalled());
+    expect(
+      vi.mocked(calendarService.createCalendarEvent).mock.calls[0][0],
+    ).toMatchObject({ event_type: "meeting" });
   });
 
   it("sem evento nenhum, a tela diz que não há — e o mês continua navegável", async () => {
@@ -318,7 +342,7 @@ describe("CalendarPage — a consulta do mês vai com o fuso", () => {
     await montar();
     vi.mocked(calendarService.getCalendarEvents).mockClear();
 
-    fireEvent.change(screen.getByLabelText("Mês"), { target: { value: String(OUTRO_MES) } });
+    escolherNoMenu(screen.getByLabelText("Mês"), MESES[OUTRO_MES]);
 
     await waitFor(() =>
       expect(calendarService.getCalendarEvents).toHaveBeenCalledWith(ANO, OUTRO_MES + 1, FUSO),
@@ -342,8 +366,8 @@ describe("CalendarPage — a consulta do mês vai com o fuso", () => {
     );
 
     const seletor = screen.getByLabelText("Mês");
-    fireEvent.change(seletor, { target: { value: String(OUTRO_MES) } });
-    fireEvent.change(seletor, { target: { value: String(MES) } });
+    escolherNoMenu(seletor, MESES[OUTRO_MES]);
+    escolherNoMenu(seletor, MESES[MES]);
     await waitFor(() => expect(soltas).toHaveLength(2));
 
     // A do mês atual volta primeiro; a do mês abandonado, depois — e ela traz um
@@ -391,7 +415,7 @@ describe("CalendarPage — a cor vem do tipo", () => {
     const amostra = screen.getByTestId("cor-do-tipo");
     expect(amostra).toHaveStyle({ backgroundColor: "#4f46e5" });
 
-    fireEvent.change(screen.getByLabelText("Tipo"), { target: { value: "holiday" } });
+    escolherNoMenu(screen.getByLabelText("Tipo"), "Feriado");
     expect(screen.getByTestId("cor-do-tipo")).toHaveStyle({ backgroundColor: "#dc2626" });
   });
 

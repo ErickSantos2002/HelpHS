@@ -1,6 +1,6 @@
 import { zodResolver } from "@hookform/resolvers/zod";
 import { useEffect, useState } from "react";
-import { useForm } from "react-hook-form";
+import { Controller, useForm } from "react-hook-form";
 import { z } from "zod";
 import {
   Alert,
@@ -13,7 +13,7 @@ import {
   Modal,
   ModalFooter,
   Pagination,
-  Select,
+  SelectMenu,
   Spinner,
 } from "../../components/ui";
 import { getApiError } from "../../lib/apiError";
@@ -356,11 +356,27 @@ function CreateModal({ onClose, onSaved }: { onClose: () => void; onSaved: (u: U
           error={form.formState.errors.password?.message}
           {...form.register("password")}
         />
-        <Select
-          label="Perfil *"
-          options={OPCOES_DE_PAPEL}
-          error={form.formState.errors.role?.message}
-          {...form.register("role")}
+        {/* `Controller`, e não o espalhamento do `register`: o `SelectMenu`
+            entrega o VALOR ao `onChange`, e o `register` devolve um punhado de
+            props que só um campo nativo sabe receber. O `ref` precisa alcançar
+            o gatilho — é por ele que o `shouldFocusError` foca o campo
+            recusado. E o valor precisa chegar ao formulário porque o papel
+            COMANDA a validação do telefone no `superRefine` acima: cliente
+            sem telefone é recusado, admin sem telefone passa. */}
+        <Controller
+          control={form.control}
+          name="role"
+          render={({ field }) => (
+            <SelectMenu
+              label="Perfil *"
+              options={OPCOES_DE_PAPEL}
+              error={form.formState.errors.role?.message}
+              value={field.value ?? ""}
+              onChange={field.onChange}
+              onBlur={field.onBlur}
+              ref={field.ref}
+            />
+          )}
         />
         <div className="grid grid-cols-2 gap-3">
           <Input
@@ -431,11 +447,25 @@ function EditModal({ user, onClose, onSaved }: { user: UserSummary; onClose: () 
           error={form.formState.errors.name?.message}
           {...form.register("name")}
         />
-        <Select
-          label="Perfil *"
-          options={OPCOES_DE_PAPEL}
-          error={form.formState.errors.role?.message}
-          {...form.register("role")}
+        {/* Mesmo motivo do modal de criação: o `SelectMenu` avisa com o valor,
+            não com o evento de um campo nativo, e o `ref` precisa chegar ao
+            gatilho para o `shouldFocusError` continuar focando o campo
+            recusado. Aqui o papel manda ainda mais: é ele que decide, no
+            `criaEditSchema`, se remover o telefone é proibido. */}
+        <Controller
+          control={form.control}
+          name="role"
+          render={({ field }) => (
+            <SelectMenu
+              label="Perfil *"
+              options={OPCOES_DE_PAPEL}
+              error={form.formState.errors.role?.message}
+              value={field.value ?? ""}
+              onChange={field.onChange}
+              onBlur={field.onBlur}
+              ref={field.ref}
+            />
+          )}
         />
         <div className="grid grid-cols-2 gap-3">
           <Input
@@ -624,7 +654,14 @@ export default function UsersPage() {
         </div>
         <div className="flex flex-wrap gap-2 items-center justify-center sm:justify-start">
           {/* D9.2 — três papéis e dois estados, ambos fixos no código: listas
-              curtas e conhecidas, logo `<select>` nativo nos dois.
+              curtas e conhecidas, logo o controle de lista fechada nos dois.
+              O critério da D9.2 é quem escreve a lista, e ele não mudou; o que
+              mudou foi o controle desse lado. Aqui a lista fechada era o campo
+              nativo do navegador, que abria um painel desenhado pelo sistema
+              operacional — fora do tema, diferente em cada navegador —, e
+              passou a ser o `SelectMenu`, cujo painel é nosso. Lista que vem da
+              rede e cresce com o cadastro continua sendo
+              `Selector variant="filter"`, com busca.
 
               O rótulo `sr-only` é o conserto: o `FilterSelect` não repassava
               `label`, e os dois filtros lado a lado se anunciavam "Perfil" e
@@ -633,24 +670,24 @@ export default function UsersPage() {
           <span id="rotulo-filtro-papel" className="sr-only">
             Perfil
           </span>
-          <Select
+          <SelectMenu
             id="filtro-papel"
             aria-labelledby="rotulo-filtro-papel"
             options={OPCOES_DE_PAPEL}
             placeholder="Perfil"
             value={roleFilter}
-            onChange={(e) => { setRoleFilter(e.target.value); setPage(1); }}
+            onChange={(v) => { setRoleFilter(v); setPage(1); }}
           />
           <span id="rotulo-filtro-status" className="sr-only">
             Status da conta
           </span>
-          <Select
+          <SelectMenu
             id="filtro-status"
             aria-labelledby="rotulo-filtro-status"
             options={FILTER_STATUS_OPTIONS}
             placeholder="Status"
             value={statusFilter}
-            onChange={(e) => { setStatusFilter(e.target.value); setPage(1); }}
+            onChange={(v) => { setStatusFilter(v); setPage(1); }}
           />
           {hasFilters && (
             <button

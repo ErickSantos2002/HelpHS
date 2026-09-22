@@ -8,6 +8,7 @@ import {
   Input,
   Modal,
   ModalFooter,
+  SelectMenu,
   Switch,
   Textarea,
 } from "../../components/ui";
@@ -261,20 +262,35 @@ function EventDialog({ event, defaultDate, fuso, tipos, onClose, onSaved }: Even
         />
 
         <div className="space-y-1.5">
-          {/* `htmlFor` e `id`: sem o par, o rótulo fica só POR CIMA do campo —
-              quem usa leitor de tela ouve "caixa de combinação" sem saber de
-              quê. Item fixo do CHECKLIST-29. */}
-          <label htmlFor="evento-tipo" className="text-xs font-medium text-conteudo-muted">Tipo</label>
-          <select
-            id="evento-tipo"
-            value={eventType}
-            onChange={(e) => setEventType(e.target.value as CalendarEventType)}
-            className="w-full rounded-lg border border-borda bg-surface-elevated px-3 py-2 text-sm text-conteudo focus:outline-none focus:ring-2 focus:ring-primary focus:border-transparent transition-colors"
+          {/* O rótulo precisa estar LIGADO ao campo: solto, ele fica só POR
+              CIMA dele, e quem usa leitor de tela ouve "caixa de combinação"
+              sem saber de quê. Item fixo do CHECKLIST-29.
+              São duas ligações, e cada uma serve a uma ponta. O par
+              `htmlFor`/`id` é o CLIQUE: clicar no rótulo foca o campo. O
+              `aria-labelledby` é o NOME, e passou a ser obrigatório aqui
+              quando o alvo deixou de ser um `<select>`: o `<label for>` nomeia
+              sozinho os elementos rotuláveis, e o gatilho é um `<button>`,
+              cujo nome a especificação manda tirar do CONTEÚDO — que aqui é o
+              tipo escolhido. Sem esta linha o campo se anunciaria "Reunião",
+              sem dizer reunião de quê. */}
+          <label
+            id="evento-tipo-rotulo"
+            htmlFor="evento-tipo"
+            className="text-xs font-medium text-conteudo-muted"
           >
-            {(Object.keys(EVENT_TYPE_LABELS) as CalendarEventType[]).map((t) => (
-              <option key={t} value={t}>{EVENT_TYPE_LABELS[t]}</option>
-            ))}
-          </select>
+            Tipo
+          </label>
+          <SelectMenu
+            id="evento-tipo"
+            aria-labelledby="evento-tipo-rotulo"
+            value={eventType}
+            onChange={(v) => setEventType(v as CalendarEventType)}
+            options={(Object.keys(EVENT_TYPE_LABELS) as CalendarEventType[]).map((t) => ({
+              value: t,
+              label: EVENT_TYPE_LABELS[t],
+            }))}
+            className="w-full"
+          />
           {/*
             No lugar das dezesseis fichas, a cor que o tipo vai ter — e a frase que
             diz por que não há escolha. Sem a frase, quem procurava as fichas
@@ -910,27 +926,23 @@ export default function CalendarPage() {
           <Icon name="chevronLeft" size={16} strokeWidth={2.5} />
         </button>
 
-        <select
-          value={month}
+        {/* O valor do menu é texto, como era o do `<option>`. O estado continua
+            número — é o `Number` da volta que o mantém assim. */}
+        <SelectMenu
+          value={String(month)}
           aria-label="Mês"
-          onChange={(e) => { setMonth(Number(e.target.value)); setSelectedDay(null); }}
-          className="h-8 rounded-lg border border-borda bg-surface px-3 text-sm font-semibold text-conteudo focus:outline-none focus:ring-2 focus:ring-primary transition-colors cursor-pointer"
-        >
-          {MONTHS.map((m, i) => (
-            <option key={i} value={i}>{m}</option>
-          ))}
-        </select>
+          onChange={(v) => { setMonth(Number(v)); setSelectedDay(null); }}
+          options={MONTHS.map((m, i) => ({ value: String(i), label: m }))}
+          className="h-8 font-semibold"
+        />
 
-        <select
-          value={year}
+        <SelectMenu
+          value={String(year)}
           aria-label="Ano"
-          onChange={(e) => { setYear(Number(e.target.value)); setSelectedDay(null); }}
-          className="h-8 rounded-lg border border-borda bg-surface px-3 text-sm font-semibold text-conteudo focus:outline-none focus:ring-2 focus:ring-primary transition-colors cursor-pointer"
-        >
-          {anos.map((y) => (
-            <option key={y} value={y}>{y}</option>
-          ))}
-        </select>
+          onChange={(v) => { setYear(Number(v)); setSelectedDay(null); }}
+          options={anos.map((y) => ({ value: String(y), label: String(y) }))}
+          className="h-8 font-semibold"
+        />
 
         <button
           onClick={nextMonth}

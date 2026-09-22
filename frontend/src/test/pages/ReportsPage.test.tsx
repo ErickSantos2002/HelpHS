@@ -2,6 +2,8 @@ import { render, screen, waitFor, within } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { describe, expect, it, vi } from "vitest";
 
+import { opcoesDoMenu } from "../helpers/menu";
+
 /**
  * O `ResponsiveContainer` mede o pai com `ResizeObserver`, e num DOM sem
  * layout o pai tem largura zero — o Recharts então não desenha **nada**, e um
@@ -301,9 +303,11 @@ describe("ReportsPage — os filtros da barra", () => {
    * O defeito que a D9.2 fecha: o `FilterSelect` não repassava `label`, e os
    * três filtros desta barra se anunciavam pelo VALOR escolhido — "Últimos 30
    * dias", "Hardware", "Alta" — sem dizer de que filtro cada um era. São três
-   * `<select>` nativos porque as três listas são fixas no código (cinco
-   * períodos, oito categorias, quatro prioridades) e nenhuma cresce com o
-   * banco.
+   * `SelectMenu` porque as três listas são fixas no código (cinco períodos,
+   * oito categorias, quatro prioridades) e nenhuma cresce com o banco — o
+   * critério da D9.2 continua sendo esse. O controle deste lado dela é que
+   * mudou: era o `<select>` nativo, hoje é o painel do pacote, e o nome
+   * acessível se lê do mesmo jeito porque o gatilho tem o papel `combobox`.
    */
   it("os três filtros têm nome próprio, e não se anunciam pelo valor", async () => {
     await montar();
@@ -321,11 +325,13 @@ describe("ReportsPage — os filtros da barra", () => {
     // A linha de limpar do `FilterSelect` devolvia `""`, que `Number(period)
     // || 30` traduzia de volta para trinta dias enquanto o gatilho anunciava
     // "Período" — a tela mostrava um número e dizia outro.
+    //
+    // A lista só existe com o menu ABERTO, e mora num portal no `body`: ler as
+    // opções por dentro do gatilho não acha nada, e "nenhuma opção vazia"
+    // passaria por não haver opção nenhuma. O auxiliar abre e lê de lá.
     await montar();
 
-    const rotulos = within(screen.getByRole("combobox", { name: "Período" }))
-      .getAllByRole("option")
-      .map((o) => o.textContent);
+    const rotulos = opcoesDoMenu(screen.getByRole("combobox", { name: "Período" }));
     expect(rotulos).toEqual([
       "Últimos 7 dias",
       "Últimos 14 dias",
@@ -337,7 +343,8 @@ describe("ReportsPage — os filtros da barra", () => {
 
   it("o seletor de técnico é o de LISTA LONGA, e leva rótulo mais valor no nome", async () => {
     // Os técnicos vêm da rede e crescem com a equipe: pela D9.2 este é o
-    // `Selector variant="filter"`, e não o `<select>` nativo. O nome acessível
+    // `Selector variant="filter"`, e não o controle de lista fechada — o
+    // `SelectMenu`, que é onde o `<select>` nativo foi parar. O nome acessível
     // dele soma o rótulo ao valor visível — "Técnico" mais o que o gatilho
     // mostra —, e é por isso que ele NÃO se lê por `combobox`.
     //
@@ -375,19 +382,21 @@ describe("ReportsPage — os filtros da barra", () => {
     // Aqui o vazio SIGNIFICA algo — "todas" — e é o estado inicial dos dois.
     await montar();
 
-    expect(screen.getByRole("combobox", { name: "Categoria" })).toHaveValue("");
-    expect(
-      within(screen.getByRole("combobox", { name: "Categoria" })).getByRole(
-        "option",
-        { name: "Todas as categorias" },
-      ),
-    ).toBeInTheDocument();
-    expect(
-      within(screen.getByRole("combobox", { name: "Prioridade" })).getByRole(
-        "option",
-        { name: "Todas as prioridades" },
-      ),
-    ).toBeInTheDocument();
+    const categoria = screen.getByRole("combobox", { name: "Categoria" });
+    const prioridade = screen.getByRole("combobox", { name: "Prioridade" });
+
+    // Num gatilho, o estado vazio se lê pelo TEXTO: é o `placeholder` que ele
+    // mostra quando nada foi escolhido. Perguntar `toHaveValue("")` a um botão
+    // passaria com qualquer escolha — `button.value` é "" sempre.
+    expect(categoria).toHaveTextContent("Todas as categorias");
+    expect(prioridade).toHaveTextContent("Todas as prioridades");
+
+    // E a linha de limpar está na LISTA dos dois, não só no gatilho vazio.
+    // Um painel de cada vez, sem precisar fechar à mão: abrir o segundo foca o
+    // gatilho dele, o primeiro perde o foco e fecha — que é o que acontece com
+    // a pessoa passando de um filtro ao outro.
+    expect(opcoesDoMenu(categoria)).toContain("Todas as categorias");
+    expect(opcoesDoMenu(prioridade)).toContain("Todas as prioridades");
   });
 });
 

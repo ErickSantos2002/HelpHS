@@ -14,7 +14,7 @@ import {
   ModalFooter,
   Pagination,
   SearchSelect,
-  Select,
+  SelectMenu,
   Spinner,
   Textarea,
 } from "../../components/ui";
@@ -561,7 +561,11 @@ export default function ProductsPage() {
         </div>
         <div className="flex flex-wrap gap-2 items-center justify-center sm:justify-start">
           {/* D9.2 — três opções fixas no código, que não crescem com o banco:
-              lista curta e conhecida, logo `<select>` nativo.
+              lista curta e conhecida, logo o `SelectMenu`. O critério da D9.2
+              continua o mesmo (quem escreve a lista decide o controle; lista
+              que vem da rede e cresce fica com `Selector variant="filter"`, que
+              tem busca) — o que mudou foi o controle deste lado, que era o
+              `<select>` nativo e passou a ser o painel do pacote.
 
               Sem `placeholder`: o `FilterTab` só admite "all", "active" e
               "inactive", e a opção vazia que o `placeholder` desenha devolveria
@@ -573,12 +577,12 @@ export default function ProductsPage() {
           <span id="rotulo-filtro-produto-status" className="sr-only">
             Status do produto
           </span>
-          <Select
+          <SelectMenu
             id="filtro-produto-status"
             aria-labelledby="rotulo-filtro-produto-status"
             options={FILTROS}
             value={productFilter}
-            onChange={(e) => { setProductFilter(e.target.value as FilterTab); setProductPage(1); }}
+            onChange={(v) => { setProductFilter(v as FilterTab); setProductPage(1); }}
           />
           {(productSearch || productFilter !== "active") && (
             <button

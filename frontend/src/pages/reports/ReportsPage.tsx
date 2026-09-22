@@ -17,7 +17,7 @@ import {
   Icon,
   Pagination,
   PriorityBadge,
-  Select,
+  SelectMenu,
   Selector,
   Spinner,
   Table,
@@ -1298,22 +1298,24 @@ export default function ReportsPage() {
           )}
 
           {/* D9.2 — cinco períodos fixos no código: lista curta e conhecida,
-              logo `<select>` nativo. Sem `placeholder`: a opção vazia que ele
-              desenha devolveria `""`, que `Number(period) || 30` traduz de volta
-              para trinta dias enquanto o gatilho anuncia "Período" — um estado
-              que mostra um número e diz outro. Escolher o período é obrigatório
-              e sempre foi.
+              logo `SelectMenu`. O critério da D9.2 é o mesmo de sempre — quem
+              escreve a lista —; o que mudou foi o controle deste lado dela, que
+              era o `<select>` nativo e passou a ser o painel do pacote. Sem
+              `placeholder`: a linha vazia que ele desenha devolveria `""`, que
+              `Number(period) || 30` traduz de volta para trinta dias enquanto o
+              gatilho anuncia "Período" — um estado que mostra um número e diz
+              outro. Escolher o período é obrigatório e sempre foi.
 
               O rótulo é `sr-only` porque a barra não tem espaço para ele: sem
               rótulo o filtro se anunciava "Últimos 30 dias", sem dizer de quê. */}
           <span id="rotulo-filtro-periodo" className="sr-only">
             Período
           </span>
-          <Select
+          <SelectMenu
             id="filtro-periodo"
             aria-labelledby="rotulo-filtro-periodo"
             value={period}
-            onChange={(e) => setPeriod(e.target.value)}
+            onChange={(v) => setPeriod(v)}
             options={PERIOD_OPTIONS}
           />
 
@@ -1335,28 +1337,29 @@ export default function ReportsPage() {
             <>
               {/* D9.2 — oito categorias e quatro prioridades, ambas vindas de
                   `lib/categoria.ts` e `lib/prioridade.ts` e nenhuma da rede:
-                  listas curtas e conhecidas, logo `<select>` nativo. Aqui o
+                  listas curtas e conhecidas, logo `SelectMenu` — o mesmo lado
+                  da D9.2 que antes era o `<select>` nativo. Aqui o
                   `placeholder` FICA — o vazio significa "todas", e é o estado
                   inicial dos dois. */}
               <span id="rotulo-filtro-categoria" className="sr-only">
                 Categoria
               </span>
-              <Select
+              <SelectMenu
                 id="filtro-categoria"
                 aria-labelledby="rotulo-filtro-categoria"
                 value={category}
-                onChange={(e) => setCategory(e.target.value)}
+                onChange={(v) => setCategory(v)}
                 options={CATEGORY_OPTIONS}
                 placeholder="Todas as categorias"
               />
               <span id="rotulo-filtro-prioridade" className="sr-only">
                 Prioridade
               </span>
-              <Select
+              <SelectMenu
                 id="filtro-prioridade"
                 aria-labelledby="rotulo-filtro-prioridade"
                 value={priority}
-                onChange={(e) => setPriority(e.target.value)}
+                onChange={(v) => setPriority(v)}
                 options={PRIORITY_OPTIONS}
                 placeholder="Todas as prioridades"
               />
