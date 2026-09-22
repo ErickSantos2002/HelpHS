@@ -164,6 +164,30 @@ describe("TicketListPage", () => {
     ).not.toBeInTheDocument();
   });
 
+  it("o não triado é o PRIMEIRO da coluna, antes da crítica", async () => {
+    // Ordem operacional (22/09/2026): quem ainda não foi classificado precisa
+    // de ação inicial, e o prazo de resolução dele já corre desde a abertura.
+    // No fim da coluna ele ficaria escondido justamente enquanto o relógio
+    // anda. Ver `ordemNaFila` em `lib/prioridade.ts`.
+    await montar([
+      { ...BASE, id: "t-baixa", title: "Baixa", priority: "low" } as Ticket,
+      { ...BASE, id: "t-critica", title: "Crítica", priority: "critical" } as Ticket,
+      { ...BASE, id: "t-sem", title: "Sem triagem", priority: null } as Ticket,
+      { ...BASE, id: "t-media", title: "Média", priority: "medium" } as Ticket,
+    ]);
+
+    const coluna = screen.getByRole("region", { name: /Aberto/ });
+    const titulos = within(coluna)
+      .getAllByRole("link")
+      .map((a) => a.textContent ?? "");
+
+    // A ordem da ÁRVORE, que é a que a pessoa lê de cima para baixo.
+    expect(titulos[0]).toContain("Sem triagem");
+    expect(titulos[1]).toContain("Crítica");
+    expect(titulos[2]).toContain("Média");
+    expect(titulos[3]).toContain("Baixa");
+  });
+
   it("o botão de limpar busca tem nome", async () => {
     // Ele só tinha o `<svg>` dentro, e o `Icon` é `aria-hidden`: quem usa
     // leitor de tela ouvia "botão".

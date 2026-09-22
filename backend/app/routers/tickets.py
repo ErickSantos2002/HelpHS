@@ -525,7 +525,19 @@ async def list_tickets(
 
     # Build sort expression
     if sort_by == "priority":
+        # **Sem prioridade vem ANTES de "Crítica"**, e não no fim da fila.
+        #
+        # Ordenar por urgência passou a ter duas perguntas dentro: quão urgente
+        # é, e alguém já disse quão urgente é. A segunda vem primeiro — o
+        # chamado não triado é o que precisa de ação inicial, e o prazo de
+        # resolução dele **já corre desde a abertura** (o SLA é ancorado em
+        # `created_at`). Mandá-lo para o fim esconderia justamente quem ainda
+        # não foi olhado, e o atraso chegaria pronto.
+        #
+        # O `else_` continua sendo o fim: valor que o banco tenha e este código
+        # não conheça é dado estranho, não fila de triagem.
         sort_expr = case(
+            (Ticket.priority.is_(None), -1),
             (Ticket.priority == "critical", 0),
             (Ticket.priority == "high", 1),
             (Ticket.priority == "medium", 2),

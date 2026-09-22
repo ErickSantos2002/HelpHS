@@ -14,8 +14,8 @@ import {
   PRIORIDADE,
   PRIORIDADES,
   TOM_PRIORIDADE,
+  ordemNaFila,
   varianteDePrioridade,
-  type TicketPriority,
 } from "../../lib/prioridade";
 import {
   STATUS,
@@ -442,17 +442,9 @@ export default function TicketListPage() {
       if (map.has(t.status)) map.get(t.status)!.push(t);
     }
     for (const arr of map.values()) {
-      // A ordem vem do modulo: `ordem` e a urgencia, do mais critico ao menos.
-      //
-      // Nao triado vai para o FIM, depois de "Baixa" (`ordem` 3): o recuo era
-      // `?? 3`, que o empatava com baixa e deixava a ordem entre os dois ao
-      // acaso do `sort`. Ele nao e menos urgente que baixa -- e desconhecido,
-      // e a coluna ordenada por urgencia nao tem onde afirmar isso.
-      arr.sort(
-        (a, b) =>
-          (PRIORIDADE[a.priority as TicketPriority]?.ordem ?? 4) -
-          (PRIORIDADE[b.priority as TicketPriority]?.ordem ?? 4),
-      );
+      // A ordem vem do modulo, e e a mesma que o backend aplica no
+      // `sort_by=priority`: nao triado PRIMEIRO, depois critica -> baixa.
+      arr.sort((a, b) => ordemNaFila(a.priority) - ordemNaFila(b.priority));
     }
     return map;
   }, [filtered]);

@@ -74,7 +74,13 @@ export interface Prioridade {
    * não por acaso.
    */
   grafico: string;
-  /** Ordem de urgência, do mais crítico ao menos. Serve à ordenação. */
+  /**
+   * Ordem de urgência, do mais crítico ao menos.
+   *
+   * Não é a ordem da FILA: quem ordena uma lista de chamados usa
+   * `ordemNaFila`, que põe o não triado antes da crítica. Aqui só moram os
+   * quatro níveis, e entre eles a urgência é esta.
+   */
   ordem: number;
 }
 
@@ -121,6 +127,29 @@ export const PRIORIDADE: Record<TicketPriority, Prioridade> = {
 export const PRIORIDADES = (
   Object.keys(PRIORIDADE) as TicketPriority[]
 ).sort((a, b) => PRIORIDADE[a].ordem - PRIORIDADE[b].ordem);
+
+/**
+ * A posição do chamado numa fila ordenada por urgência.
+ *
+ * **Sem prioridade vem antes de "Crítica"** (-1), e não no fim. Ordenar por
+ * urgência passou a ter duas perguntas dentro — quão urgente é, e se alguém já
+ * disse quão urgente é —, e a segunda vem primeiro: o chamado não triado é o
+ * que precisa de ação inicial, e o prazo de resolução dele já corre desde a
+ * abertura, porque o SLA é ancorado no `created_at`. No fim da coluna ele
+ * ficaria escondido justamente enquanto o relógio anda.
+ *
+ * Isto NÃO faz de "sem prioridade" um quinto nível: é ordem operacional, e ele
+ * continua fora do denominador da conformidade de SLA enquanto não houver
+ * prazo. É a mesma ordem que o backend aplica no `sort_by=priority`.
+ *
+ * Prioridade desconhecida — valor que o backend mande e este módulo não
+ * conheça — vai para o fim (4), e não para o começo: dado estranho não é fila
+ * de triagem.
+ */
+export function ordemNaFila(p: string | null | undefined): number {
+  if (!p) return -1;
+  return PRIORIDADE[p as TicketPriority]?.ordem ?? 4;
+}
 
 /** O rótulo, com recuo para o valor cru quando o backend manda algo novo. */
 export function rotuloDePrioridade(p: string): string {
