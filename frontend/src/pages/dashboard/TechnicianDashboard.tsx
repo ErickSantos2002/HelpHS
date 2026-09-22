@@ -114,7 +114,10 @@ function TicketListCard({
           <p className="text-sm text-conteudo-muted">{emptyMsg}</p>
         </div>
       ) : (
-        <div className="overflow-y-auto max-h-[168px] divide-y divide-borda/60">
+        // `relative`: quem rola, contém. O "Prioridade …" de cada linha é
+        // `sr-only`, e o das linhas abaixo dos 168px escapava da caixa e
+        // esticava a rolagem da página. Ver o `<main>` na `AppLayout`.
+        <div className="relative overflow-y-auto max-h-[168px] divide-y divide-borda/60">
           {tickets.map((t) => <TicketRow key={t.id} ticket={t} showTech={showTech} />)}
         </div>
       )}
