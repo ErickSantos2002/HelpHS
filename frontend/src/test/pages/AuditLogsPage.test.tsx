@@ -15,6 +15,7 @@ vi.mock("../../services/auditService", () => ({
 import AuditLogsPage, { ACAO } from "../../pages/audit/AuditLogsPage";
 import * as auditService from "../../services/auditService";
 import type { AuditLog } from "../../services/auditService";
+import { escolherNoMenu, opcoesDoMenu } from "../helpers/menu";
 
 /**
  * O que esta tela tinha, e que estes casos prendem.
@@ -33,14 +34,18 @@ import type { AuditLog } from "../../services/auditService";
  */
 
 /**
- * O `<select>` nativo dos dois filtros (D9.2) desenha TODAS as opções na
- * árvore, o tempo todo — ao contrário do painel do `FilterSelect`, que só
- * existia enquanto aberto. Como as opções de ação carregam o rótulo LONGO,
- * um `queryByText("Mudança de status")` passa a achá-lo dentro do filtro.
+ * Os dois filtros (D9.2) são `SelectMenu`, e o painel deles só existe enquanto
+ * aberto, num portal em `document.body`. O `<select>` nativo que estava aqui
+ * fazia o oposto: desenhava TODAS as opções na árvore, o tempo todo — e como
+ * as opções de ação carregam o rótulo LONGO, um
+ * `queryByText("Mudança de status")` passava a achá-lo dentro do filtro.
  *
- * Estes casos falam do que a pessoa lê **na lista**, então a opção sai da
- * busca — e sai por `ignore`, e não por `getAllByText(...)[0]`, que continuaria
- * passando se o texto da lista sumisse.
+ * Estes casos falam do que a pessoa lê **na lista**, e nenhum deles abre o
+ * menu — então hoje não sobra opção nenhuma para excluir da busca. A exclusão
+ * fica: continua correta, não custa nada, e é o lugar já escrito caso um dia
+ * um caso precise afirmar texto com o menu aberto. Esse caso teria de
+ * acrescentar `[role="option"]`, porque o que o painel desenha é um item de
+ * lista, e não a tag `<option>` do nativo.
  */
 const FORA_DO_FILTRO = { ignore: "script, style, option" } as const;
 
@@ -150,13 +155,13 @@ describe("AuditLogsPage", () => {
 
   it("o filtro de ação lista as dez ações da tabela, e o filtro de entidade as seis", async () => {
     // As opções saem de `ACAO` e de `ENTIDADE`, e não de uma lista paralela —
-    // é a mesma afirmação de antes, agora lida do `<select>` nativo.
+    // é a mesma afirmação de antes, agora lida do painel do `SelectMenu`, que
+    // o auxiliar abre para poder contar: fechado, ele não desenha opção
+    // nenhuma, e `within(campo)` nunca alcançaria o portal.
     await montar([log()]);
 
     const acao = screen.getByRole("combobox", { name: "Ação" });
-    const rotulos = within(acao)
-      .getAllByRole("option")
-      .map((o) => o.textContent);
+    const rotulos = opcoesDoMenu(acao);
     expect(rotulos).toContain("Todas as ações");
     expect(rotulos).toContain("Mudança de status");
     expect(rotulos).toContain("Anonimização");
@@ -166,9 +171,11 @@ describe("AuditLogsPage", () => {
   it("escolher no filtro pede ao serviço aquele filtro, e não outro", async () => {
     await montar([log()]);
 
-    await userEvent.selectOptions(
+    // O auxiliar escolhe pelo RÓTULO, que é o que a pessoa lê na lista; o
+    // valor `kb_article` continua sendo o que a chamada abaixo exige.
+    escolherNoMenu(
       screen.getByRole("combobox", { name: "Entidade" }),
-      "kb_article",
+      "Artigo KB",
     );
 
     await waitFor(() =>

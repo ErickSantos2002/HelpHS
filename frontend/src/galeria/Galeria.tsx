@@ -12,6 +12,7 @@ import { Pagination } from "../components/ui/Pagination";
 import { RadioCards } from "../components/ui/RadioCards";
 import { PRIORIDADE, PRIORIDADES } from "../lib/prioridade";
 import { Select } from "../components/ui/Select";
+import { SelectMenu } from "../components/ui/SelectMenu";
 import { Selector } from "../components/ui/Selector";
 import { SlaChip } from "../components/ui/SlaChip";
 import { Switch } from "../components/ui/Switch";
@@ -76,7 +77,7 @@ const AVISOS = ["info", "success", "warning", "danger"] as const;
  *
  * Ao acrescentar um `Bloco`, ajuste este número — a suíte cobra.
  */
-export const AMOSTRAS = 16;
+export const AMOSTRAS = 17;
 
 /** `texto` cobra 4,5:1; `grafico` cobra 3:1 (WCAG 1.4.11). */
 function Bloco({
@@ -198,6 +199,41 @@ export function Galeria() {
             options={[{ value: "a", label: "Alta" }]}
             placeholder="Selecione"
             data-medir
+          />
+        </div>
+      </Bloco>
+
+      {/*
+        O seletor de lista fechada com painel NOSSO.
+
+        Ele e o `Select` nativo do bloco acima são o mesmo papel em duas
+        encarnações: a divisão do trabalho continua sendo a de quem escreve a
+        lista — fechada no código fica aqui, lista que vem da rede e cresce vai
+        para o `Selector variant="filter"`, logo abaixo. O que mudou foi só o
+        controle deste lado, e a amostra do nativo fica onde está enquanto o
+        primitivo existir: o que a galeria mede é o que ainda pode ser pintado.
+
+        A amostra fica FECHADA de propósito. O painel mora num portal em
+        `document.body`, fora de `[data-bloco]`, e a medição só enxerga o que
+        está dentro do bloco — aberta, ela mediria o gatilho e nada mais, com a
+        lista por cima dos vizinhos. Fechado, o gatilho é o que há para medir:
+        a borda de repouso, o rótulo e o texto da opção escolhida.
+
+        O `data-medir` vai no INVÓLUCRO, e não no primitivo: o `SelectMenu`
+        não espalha prop que não conhece, então ali ele não chegaria ao DOM —
+        e atributo que some em silêncio é pior que atributo nenhum, porque
+        quem lê acha que está marcado. Medido hoje: ninguém consulta esse
+        marcador (nem o `galeria.spec.ts`, nem os scripts de captura); ele é
+        simetria com as outras amostras do arquivo.
+      */}
+      <Bloco nome="SelectMenu">
+        <div className="w-64" data-medir>
+          <SelectMenu
+            label="Prioridade"
+            value="a"
+            onChange={() => {}}
+            options={[{ value: "a", label: "Alta" }]}
+            placeholder="Selecione"
           />
         </div>
       </Bloco>

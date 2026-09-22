@@ -7,7 +7,7 @@ import {
   Modal,
   ModalFooter,
   Pagination,
-  Select,
+  SelectMenu,
   Selector,
   Spinner,
 } from "../../components/ui";
@@ -240,7 +240,9 @@ export default function KBListPage() {
           </div>
 
           {/* Category — D9.2: oito categorias, de `lib/categoria.ts`, nenhuma
-              vinda da rede. Lista curta e conhecida, logo `<select>` nativo.
+              vinda da rede. Lista fechada e escrita no código, logo
+              `SelectMenu` — que é o controle deste lado da regra desde que
+              substituiu o `<select>` nativo por um painel do nosso tema.
 
               O rótulo é `sr-only` porque a barra não tem espaço para ele: sem
               rótulo, os três filtros desta barra se anunciavam pelo valor
@@ -249,11 +251,11 @@ export default function KBListPage() {
           <span id="rotulo-filtro-categoria" className="sr-only">
             Categoria
           </span>
-          <Select
+          <SelectMenu
             id="filtro-categoria"
             aria-labelledby="rotulo-filtro-categoria"
             value={category}
-            onChange={(e) => setCategory(e.target.value)}
+            onChange={(v) => setCategory(v)}
             placeholder="Todas as categorias"
             options={OPCOES_DE_CATEGORIA}
           />
@@ -273,20 +275,22 @@ export default function KBListPage() {
           )}
 
           {/* Status (staff only) — D9.2: três estados de publicação, de
-              `STATUS_DO_ARTIGO`. Lista curta e conhecida, logo `<select>`
-              nativo — e o ponto de cor sai com ele, porque o `<option>` não
-              aceita marcador. O selo de cada linha da lista continua pintando
-              pela mesma fonte, então a cor não some da tela. */}
+              `STATUS_DO_ARTIGO`. Lista fechada e escrita no código, logo
+              `SelectMenu` — o mesmo lado da regra que já era do `<select>`
+              nativo. O ponto de cor continua fora: a linha deste controle é só
+              rótulo, e marcador de cor é coisa do `Selector`. O selo de cada
+              linha da lista continua pintando pela mesma fonte, então a cor
+              não some da tela. */}
           {isStaff && (
             <>
               <span id="rotulo-filtro-status" className="sr-only">
                 Status do artigo
               </span>
-              <Select
+              <SelectMenu
                 id="filtro-status"
                 aria-labelledby="rotulo-filtro-status"
                 value={statusFilter}
-                onChange={(e) => setStatusFilter(e.target.value)}
+                onChange={(v) => setStatusFilter(v)}
                 placeholder="Todos os status"
                 options={OPCOES_DE_STATUS}
               />

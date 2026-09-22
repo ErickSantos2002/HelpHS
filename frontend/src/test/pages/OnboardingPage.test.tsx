@@ -26,6 +26,7 @@ import * as equipmentService from "../../services/equipmentService";
 import * as userService from "../../services/userService";
 import { api } from "../../services/api";
 import { AA, contraste } from "../helpers/contraste";
+import { opcoesDoMenu } from "../helpers/menu";
 
 /**
  * O passo a passo de primeiro acesso, e o que a Fase 16 mexeu aqui.
@@ -266,9 +267,14 @@ describe("OnboardingPage — cada campo é alcançável pelo próprio rótulo", 
     await userEvent.click(screen.getByRole("button", { name: "Continuar" }));
 
     const seletor = await screen.findByLabelText("Produto");
-    expect(seletor.tagName).toBe("SELECT");
-    // O rótulo do produto é montado pelo `Select` a partir de nome + versão.
-    expect(screen.getByRole("option", { name: "Detector (2.1)" })).toBeTruthy();
+    // O campo deixou de ser um `<select>`: é o gatilho do `SelectMenu`, um
+    // botão com o mesmo papel que o nativo tinha na árvore. O que este caso
+    // prende continua sendo que o rótulo alcança o campo — e a consulta pelo
+    // papel é o que sobra quando a tag muda.
+    expect(seletor).toHaveAttribute("role", "combobox");
+    // O rótulo do produto é montado a partir de nome + versão, e a lista só
+    // existe com o menu aberto: o painel mora num portal em `document.body`.
+    expect(opcoesDoMenu(seletor)).toContain("Detector (2.1)");
   });
 
   it("clicar no rótulo foca o campo — que é o que o `htmlFor` compra", async () => {

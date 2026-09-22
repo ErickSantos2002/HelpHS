@@ -14,6 +14,7 @@ import EquipmentPage from "../../pages/equipment/EquipmentPage";
 import { api } from "../../services/api";
 import * as equipmentService from "../../services/equipmentService";
 import type { Equipment } from "../../services/equipmentService";
+import { opcoesDoMenu } from "../helpers/menu";
 
 /**
  * O que esta tela tinha, e que estes casos prendem.
@@ -264,8 +265,14 @@ describe("EquipmentPage", () => {
     );
 
     const campo = await screen.findByLabelText("Produto *");
-    expect(within(campo).getByText("Detector de Gases (2.1.0)")).toBeInTheDocument();
-    expect(within(campo).queryByText(/Cinto Paraquedista/)).not.toBeInTheDocument();
+    // As opções deixaram de morar DENTRO do campo: o painel do `SelectMenu`
+    // vive num portal em `document.body` e só existe com o menu aberto — por
+    // isso `within(campo)` não acha nada. O auxiliar abre e devolve os
+    // rótulos, e o que o caso prende é o mesmo: o produto ativo é oferecido,
+    // o inativo não.
+    const opcoes = opcoesDoMenu(campo);
+    expect(opcoes).toContain("Detector de Gases (2.1.0)");
+    expect(opcoes.join(" | ")).not.toMatch(/Cinto Paraquedista/);
   });
 
   it("o vazio de tela sem cadastro não é o vazio de filtro", async () => {

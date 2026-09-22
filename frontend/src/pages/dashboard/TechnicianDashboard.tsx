@@ -3,7 +3,7 @@ import { useNavigate } from "react-router-dom";
 import {
   Area, AreaChart, ResponsiveContainer, Tooltip, XAxis, YAxis,
 } from "recharts";
-import { Alert, Icon, KpiCard, Select, Spinner, StatusBadge } from "../../components/ui";
+import { Alert, Icon, KpiCard, SelectMenu, Spinner, StatusBadge } from "../../components/ui";
 import { cn } from "../../lib/utils";
 import { CROMO, COR_SERIE_TEMPORAL, ENVOLTORIO_DICA, ESTILO_DICA } from "../../lib/grafico";
 import { PRIORIDADE } from "../../lib/prioridade";
@@ -238,23 +238,29 @@ export default function TechnicianDashboard() {
         <div className="flex flex-wrap items-center justify-center sm:justify-end gap-2">
           {/* Period filter */}
           {/* D9.2 — oito períodos fixos no código: lista curta e conhecida,
-              logo `<select>` nativo.
+              logo o controle de lista fechada. O critério da D9.2 continua
+              sendo quem escreve a lista; o que mudou foi o controle deste
+              lado, que era o `<select>` nativo e passou a ser o `SelectMenu` —
+              painel nosso, no tema, igual em todo navegador. O teclado que o
+              nativo dava de graça não se perdeu: o `SelectMenu` o implementa
+              (setas, Enter, Escape, busca por letra).
 
               Sem `placeholder`, e isso conserta uma queda. A linha de limpar do
               `FilterSelect` devolvia `""`, e logo abaixo
               `PERIOD_OPTIONS.find((p) => p.key === periodKey)!.days` lia `days`
-              de `undefined`. O `<select>` nativo não tem linha de limpar, e o
-              período passa a ser o que sempre foi: uma escolha obrigatória.
+              de `undefined`. Sem `placeholder` o `SelectMenu` não desenha linha
+              de limpar — como o nativo não desenhava —, e o período passa a ser
+              o que sempre foi: uma escolha obrigatória.
 
               O rótulo é `sr-only`: sem ele o filtro se anunciava "Este Mês". */}
           <span id="rotulo-filtro-periodo" className="sr-only">
             Período
           </span>
-          <Select
+          <SelectMenu
             id="filtro-periodo"
             aria-labelledby="rotulo-filtro-periodo"
             value={periodKey}
-            onChange={(e) => setPeriodKey(e.target.value as PeriodKey)}
+            onChange={(v) => setPeriodKey(v as PeriodKey)}
             options={PERIOD_OPTIONS.map((p) => ({ value: p.key, label: p.label }))}
           />
 

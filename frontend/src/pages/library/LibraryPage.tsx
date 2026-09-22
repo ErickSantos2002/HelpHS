@@ -13,7 +13,7 @@ import {
   ModalFooter,
   Pagination,
   RadioCards,
-  Select,
+  SelectMenu,
   Selector,
   Spinner,
   Textarea,
@@ -302,7 +302,14 @@ export default function LibraryPage() {
           )}
 
           {/* Visibilidade — D9.2: duas opções, vindas de uma constante do
-              próprio código. Lista curta e conhecida, logo `<select>` nativo.
+              próprio código. Lista curta e conhecida, logo o `SelectMenu`.
+
+              O critério da D9.2 não mudou — quem escreve a lista é que decide
+              o controle. O que mudou foi o controle deste lado: era o
+              `<select>` nativo, que abria uma lista desenhada pelo sistema
+              operacional, fora do tema; hoje é o painel do pacote. O filtro de
+              Produto, logo acima, continua no `Selector variant="filter"` com
+              busca, porque a lista dele vem da rede e cresce.
 
               O rótulo é `sr-only` porque a barra não tem espaço para ele: sem
               rótulo, o filtro se anunciaria pelo VALOR escolhido — "Uso
@@ -310,11 +317,11 @@ export default function LibraryPage() {
           <span id="rotulo-filtro-visibilidade" className="sr-only">
             Visibilidade
           </span>
-          <Select
+          <SelectMenu
             id="filtro-visibilidade"
             aria-labelledby="rotulo-filtro-visibilidade"
             value={filtroVisibilidade}
-            onChange={(e) => setFiltroVisibilidade(e.target.value)}
+            onChange={(v) => setFiltroVisibilidade(v)}
             placeholder="Todas as visibilidades"
             options={OPCOES_DE_VISIBILIDADE}
           />

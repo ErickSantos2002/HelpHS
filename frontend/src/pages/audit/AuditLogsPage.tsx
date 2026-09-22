@@ -6,7 +6,7 @@ import {
   Input,
   Modal,
   Pagination,
-  Select,
+  SelectMenu,
   Spinner,
   type BadgeProps,
 } from "../../components/ui";
@@ -321,9 +321,18 @@ export default function AuditLogsPage() {
           {/* Dropdowns */}
           <div className="flex flex-wrap gap-3 items-center justify-center sm:justify-start">
             {/* D9.2 — as duas listas são curtas e conhecidas (dez ações, seis
-                entidades, ambas fixas no código e nenhuma vinda da rede), então
-                o controle é o `<select>` nativo: teclado de graça e papel
-                anunciado sem JavaScript nenhum.
+                entidades, ambas fixas no código e nenhuma vinda da rede), e o
+                critério segue valendo inteiro: lista fechada, escrita aqui, é
+                deste controle; lista que viesse da rede e crescesse com o
+                cadastro pediria o `Selector variant="filter"`, com busca.
+
+                O que mudou foi só o controle deste lado da regra: era o
+                `<select>` nativo e passou a ser o `SelectMenu`. O nativo trazia
+                de graça o teclado e o papel de campo, e era esse o argumento
+                para ficar com ele — mas abria uma lista desenhada pelo sistema
+                operacional, fora do tema. O `SelectMenu` desenha o painel com
+                os tokens do pacote e reimplanta o teclado e o papel; o que era
+                de graça agora é trabalho dele, e não desta tela.
 
                 O `<span>` de rótulo não é enfeite. O `FilterSelect` não
                 repassava `label`, e numa barra com dois filtros os dois se
@@ -334,22 +343,22 @@ export default function AuditLogsPage() {
             <span id="rotulo-filtro-acao" className="sr-only">
               Ação
             </span>
-            <Select
+            <SelectMenu
               id="filtro-acao"
               aria-labelledby="rotulo-filtro-acao"
               value={actionFilter}
-              onChange={(e) => setActionFilter(e.target.value)}
+              onChange={(v) => setActionFilter(v)}
               options={ACTION_OPTIONS}
               placeholder="Todas as ações"
             />
             <span id="rotulo-filtro-entidade" className="sr-only">
               Entidade
             </span>
-            <Select
+            <SelectMenu
               id="filtro-entidade"
               aria-labelledby="rotulo-filtro-entidade"
               value={entityFilter}
-              onChange={(e) => setEntityFilter(e.target.value)}
+              onChange={(v) => setEntityFilter(v)}
               options={ENTITY_OPTIONS}
               placeholder="Todas as entidades"
             />

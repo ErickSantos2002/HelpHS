@@ -9,7 +9,7 @@ import {
   Checkbox,
   Icon,
   Input,
-  Select,
+  SelectMenu,
   Spinner,
   Textarea,
   type BadgeProps,
@@ -395,27 +395,29 @@ export default function KBFormPage() {
               </div>
 
               {/*
-                Os dois `<select>` à mão viraram o primitivo `Select`. Cada um
-                tinha um `<label>` SEM `htmlFor` e um campo SEM `id`: os dois
-                rótulos não pertenciam a campo nenhum, e quem navega por leitor
-                de tela ouvia "caixa de combinação" sem saber de quê. O
-                primitivo amarra os dois, e ainda traz a seta pelo `Icon` — a
-                anterior era um data URI com `stroke='%2394a3b8'` cravado, que
-                não segue o tema.
+                Os dois `<select>` à mão viraram primitivo do pacote — hoje o
+                `SelectMenu`, que trocou a lista desenhada pelo sistema
+                operacional por um painel nosso, dentro do tema. Cada um tinha
+                um `<label>` SEM `htmlFor` e um campo SEM `id`: os dois rótulos
+                não pertenciam a campo nenhum, e quem navega por leitor de tela
+                ouvia "caixa de combinação" sem saber de quê. O primitivo
+                amarra os dois, e ainda traz a seta pelo `Icon` — a anterior era
+                um data URI com `stroke='%2394a3b8'` cravado, que não segue o
+                tema.
               */}
               <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
-                <Select
+                <SelectMenu
                   id="kb-categoria"
                   label="Categoria"
                   value={category}
-                  onChange={(e) => setCategory(e.target.value)}
+                  onChange={(v) => setCategory(v)}
                   options={OPCOES_DE_CATEGORIA}
                 />
-                <Select
+                <SelectMenu
                   id="kb-status"
                   label="Status"
                   value={status}
-                  onChange={(e) => setStatus(e.target.value as KBArticleStatus)}
+                  onChange={(v) => setStatus(v as KBArticleStatus)}
                   options={OPCOES_DE_ESTADO}
                 />
               </div>

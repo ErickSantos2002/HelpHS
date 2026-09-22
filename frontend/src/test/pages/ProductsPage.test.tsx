@@ -1,6 +1,7 @@
 import { render, screen, waitFor, within } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { beforeEach, describe, expect, it, vi } from "vitest";
+import { escolherNoMenu, opcoesDoMenu } from "../helpers/menu";
 
 vi.mock("../../services/productService", () => ({
   createEquipment: vi.fn(),
@@ -138,28 +139,33 @@ describe("ProductsPage", () => {
 
   it("o filtro de status dos produtos tem nome próprio, e não se anuncia pelo valor", async () => {
     // O defeito que a D9.2 fecha: o `FilterSelect` não repassava `label`, e o
-    // controle se anunciava "Ativos" — que é o valor, não o filtro. Ele é
-    // `<select>` nativo porque as três opções são fixas no código e não
-    // crescem com o banco.
+    // controle se anunciava "Ativos" — que é o valor, não o filtro. Ele é o
+    // `SelectMenu` porque as três opções são fixas no código e não crescem
+    // com o banco; o gatilho dele guarda o mesmo `role="combobox"` que o
+    // `<select>` nativo tinha, então o nome continua sendo lido do mesmo
+    // jeito.
     await montar();
 
     const filtro = screen.getByRole("combobox", { name: "Status do produto" });
-    expect(
-      within(filtro)
-        .getAllByRole("option")
-        .map((o) => o.textContent),
-    ).toEqual(["Todos", "Ativos", "Inativos"]);
+    // O painel mora num portal em `document.body` e só existe aberto, então a
+    // lista é lida pelo auxiliar em vez de por `within(filtro)`.
+    expect(opcoesDoMenu(filtro)).toEqual(["Todos", "Ativos", "Inativos"]);
     // Sem linha vazia: `""` não é um `FilterTab`, e "Todos" já é o que zera.
-    expect(filtro).toHaveValue("active");
+    // A leitura é pelo TEXTO porque é o texto que o gatilho mostra. Medido,
+    // para a regra não virar lenda: num botão, `toHaveValue("Ativos")` FALHA
+    // sempre (o jest-dom lê `button.value`, que é `""`) e `toHaveValue("")`
+    // PASSA com qualquer escolha. A armadilha é só a segunda forma.
+    expect(filtro).toHaveTextContent(/^Ativos$/);
   });
 
   it("o status escolhido peneira no SERVIDOR, e não na página aberta", async () => {
-    const user = userEvent.setup();
     await montar();
 
-    await user.selectOptions(
+    // Pelo RÓTULO ("Inativos"); o valor cru por trás dele é "inactive", e é
+    // ele que precisa virar `is_active: false` na chamada ao serviço.
+    escolherNoMenu(
       screen.getByRole("combobox", { name: "Status do produto" }),
-      "inactive",
+      "Inativos",
     );
 
     await waitFor(() =>

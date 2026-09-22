@@ -1,6 +1,7 @@
 import { render, screen, waitFor } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { describe, expect, it, vi, beforeEach, afterEach } from "vitest";
+import { escolherNoMenu } from "../helpers/menu";
 
 /**
  * A biblioteca de arquivos frequentes, do lado da tela.
@@ -541,10 +542,9 @@ describe("LibraryPage — os filtros", () => {
   it("o filtro de visibilidade chega ao serviço com o valor cru", async () => {
     await montar();
 
-    await userEvent.selectOptions(
-      screen.getByLabelText("Visibilidade"),
-      "client",
-    );
+    // O menu escolhe pelo RÓTULO; o que precisa chegar ao serviço é o VALOR
+    // cru por trás dele ("client"), e é isso que a espera abaixo prende.
+    escolherNoMenu(screen.getByLabelText("Visibilidade"), "Visível ao cliente");
 
     await waitFor(() =>
       expect(libraryService.getLibraryFiles).toHaveBeenLastCalledWith(

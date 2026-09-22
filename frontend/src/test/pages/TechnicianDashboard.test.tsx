@@ -1,7 +1,6 @@
 import { readFileSync } from "node:fs";
 import { resolve } from "node:path";
 import {
-  fireEvent,
   render,
   screen,
   waitFor,
@@ -9,9 +8,26 @@ import {
 } from "@testing-library/react";
 import { describe, expect, it, vi } from "vitest";
 
-vi.mock("../../contexts/AuthContext", () => ({
-  useAuth: () => ({ user: { id: "tech1", name: "Ana Silva", role: "technician" } }),
-}));
+vi.mock("../../contexts/AuthContext", () => {
+  // O `user` é UM objeto, criado uma vez, e isso não é detalhe de estilo.
+  //
+  // O efeito da tela depende de `[user, activePeriod]`. Devolvendo um literal
+  // novo a cada chamada, `useAuth()` entregava uma identidade diferente em
+  // TODO render: o efeito rodava, mudava estado, e a mudança de estado gerava
+  // outro render com outro `user` — um laço que não para sozinho.
+  //
+  // Com o `<select>` nativo isso ficava escondido, porque escolher era UM
+  // gesto (`fireEvent.change`). O menu tem DOIS — abrir e clicar na linha — e
+  // entre eles o laço redesenha a tela, troca o conteúdo pelo Spinner e
+  // desmonta o painel aberto: a segunda metade do gesto não acha a opção.
+  // Quem desmontava o painel era o laço da TELA, não o menu.
+  //
+  // O `AuthContext` de verdade nunca fez isso: o valor vem do contexto e não
+  // troca de identidade quando o filho re-renderiza. O mock é que divergia da
+  // produção; nenhum dado mudou aqui.
+  const user = { id: "tech1", name: "Ana Silva", role: "technician" };
+  return { useAuth: () => ({ user }) };
+});
 vi.mock("../../services/dashboardService", () => ({
   getDashboardStats: vi.fn(),
 }));
@@ -28,6 +44,7 @@ import * as dashboardService from "../../services/dashboardService";
 import * as reportService from "../../services/reportService";
 import * as ticketService from "../../services/ticketService";
 import type { Ticket, TicketFilters, TicketListResponse } from "../../services/ticketService";
+import { escolherNoMenu, opcoesDoMenu } from "../helpers/menu";
 
 /**
  * O que esta tela tinha, e que estes casos prendem.
@@ -160,7 +177,10 @@ describe("TechnicianDashboard", () => {
   it("o filtro de período tem nome próprio, e não se anuncia pelo valor", async () => {
     // O defeito que a D9.2 fecha: o `FilterSelect` não repassava `label`, e o
     // único filtro do cabeçalho se anunciava "Este Mês" — o valor, não o
-    // filtro. É `<select>` nativo porque os oito períodos são fixos no código.
+    // filtro. É o `SelectMenu` porque os oito períodos são fixos no código —
+    // o critério da D9.2 é esse, e só o controle mudou: era o `<select>`
+    // nativo, e o gatilho do menu declara o mesmo `combobox` que ele tinha
+    // implícito.
     await montar();
 
     expect(screen.getByRole("combobox", { name: "Período" })).toBeInTheDocument();
@@ -169,12 +189,15 @@ describe("TechnicianDashboard", () => {
   it("o período não oferece linha vazia — e isso é o que impede a queda", async () => {
     // A linha de limpar do `FilterSelect` devolvia `""`, e
     // `PERIOD_OPTIONS.find((p) => p.key === "")!.days` lia `days` de
-    // `undefined`: a tela caía. O `<select>` nativo não tem essa linha.
+    // `undefined`: a tela caía. Nem o `<select>` nativo tinha essa linha, nem
+    // o `SelectMenu` que o substituiu a desenha sem `placeholder`.
+    //
+    // A lista vive num portal em `document.body` e só existe com o menu
+    // ABERTO — daí `opcoesDoMenu`, que abre e lê, no lugar do
+    // `within(campo).getAllByRole("option")` que servia ao nativo.
     await montar();
 
-    const rotulos = within(screen.getByRole("combobox", { name: "Período" }))
-      .getAllByRole("option")
-      .map((o) => o.textContent);
+    const rotulos = opcoesDoMenu(screen.getByRole("combobox", { name: "Período" }));
     expect(rotulos).toEqual([
       "Hoje",
       "Ontem",
@@ -193,13 +216,17 @@ describe("TechnicianDashboard", () => {
     // Antes: nenhuma. É o "antes" que faz o "depois" significar algo.
     expect(container.querySelectorAll('input[type="date"]')).toHaveLength(0);
 
-    // `fireEvent.change` e não `userEvent`: a troca de período dispara três
-    // buscas, e o `waitFor` abaixo é quem espera o novo desenho. Com
-    // `userEvent` o caso ficava à mercê da carga da máquina — a árvore é
-    // compartilhada com outras sessões.
-    fireEvent.change(screen.getByRole("combobox", { name: "Período" }), {
-      target: { value: "custom" },
-    });
+    // `fireEvent` e não `userEvent`: a troca de período dispara três buscas, e
+    // o `waitFor` abaixo é quem espera o novo desenho. Com `userEvent` o caso
+    // ficava à mercê da carga da máquina — a árvore é compartilhada com outras
+    // sessões. A razão continua valendo: `escolherNoMenu` abre e clica com
+    // `fireEvent`, e só o gesto mudou — o `SelectMenu` não tem `change` para
+    // disparar, e o auxiliar escolhe pelo RÓTULO ("Personalizado"), não pelo
+    // valor `"custom"`.
+    escolherNoMenu(
+      screen.getByRole("combobox", { name: "Período" }),
+      "Personalizado",
+    );
 
     await waitFor(() =>
       expect(container.querySelectorAll('input[type="date"]')).toHaveLength(2),

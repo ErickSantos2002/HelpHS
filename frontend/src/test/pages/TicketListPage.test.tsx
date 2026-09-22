@@ -1,5 +1,4 @@
 import { render, screen, waitFor, within } from "@testing-library/react";
-import userEvent from "@testing-library/user-event";
 import { describe, expect, it, vi } from "vitest";
 
 vi.mock("../../services/ticketService", () => ({ getTickets: vi.fn() }));
@@ -8,6 +7,7 @@ vi.mock("sonner", () => ({ toast: { error: vi.fn(), success: vi.fn() } }));
 import { MemoryRouter } from "react-router-dom";
 import TicketListPage from "../../pages/tickets/TicketListPage";
 import { getTickets, type Ticket } from "../../services/ticketService";
+import { escolherNoMenu, opcoesDoMenu } from "../helpers/menu";
 
 /**
  * O quadro kanban tinha DOIS mapas próprios, e os dois divergiam do resto.
@@ -26,13 +26,24 @@ import { getTickets, type Ticket } from "../../services/ticketService";
  * para algo que muda de página.
  */
 /**
- * O `<select>` nativo dos filtros (D9.2) desenha TODAS as opções na árvore, o
- * tempo todo — o painel do `FilterSelect` só existia enquanto aberto. "Alta"
- * passa a estar em dois lugares: o selo do cartão e a opção do filtro. Os
- * casos abaixo falam do CARTÃO, então a opção sai da busca por `ignore` — e
- * não por `getAllByText(...)[0]`, que continuaria passando com o selo apagado.
+ * Os filtros voltaram a desenhar a lista SÓ enquanto o menu está aberto.
+ *
+ * O seletor nativo da D9.2 mantinha todas as opções na árvore o tempo todo — o
+ * painel do `FilterSelect`, antes dele, só existia aberto. Com o nativo, "Alta"
+ * ficava em dois lugares ao mesmo tempo: o selo do cartão e a opção do filtro.
+ * Os casos abaixo falam do CARTÃO, e por isso a opção saía da busca por um
+ * `ignore` — e não por `getAllByText(...)[0]`, que continuaria passando com o
+ * selo apagado.
+ *
+ * O `SelectMenu` põe a lista num painel que só existe ABERTO, e num portal no
+ * `document.body`. A exclusão perdeu o que excluir e saiu junto. Com uma
+ * ressalva que vale escrever: o gatilho fechado mostra o RÓTULO do que está
+ * escolhido, então num caso que escolhe "Alta" no filtro o texto volta a
+ * existir em dois lugares — o gatilho e o selo do cartão. Os casos abaixo não
+ * escolhem nada no filtro; o que escolhe lê o cartão por dentro da linha.
+ * Quem quiser ler a lista do filtro tem de abri-la, e é o que `opcoesDoMenu`
+ * faz.
  */
-const FORA_DO_FILTRO = { ignore: "script, style, option" } as const;
 
 const BASE: Ticket = {
   id: "t1",
@@ -86,10 +97,14 @@ describe("TicketListPage", () => {
   it("a prioridade fala a língua do módulo", async () => {
     // Feminino, da emenda E17. O mapa daqui dizia "Alto".
     await montar();
-    expect(screen.getByText("Alta", FORA_DO_FILTRO)).toBeInTheDocument();
-    expect(screen.queryByText("Alto", FORA_DO_FILTRO)).not.toBeInTheDocument();
-    // E nem no filtro: o módulo é a fonte dos dois.
+    expect(screen.getByText("Alta")).toBeInTheDocument();
     expect(screen.queryByText("Alto")).not.toBeInTheDocument();
+    // E nem no filtro: o módulo é a fonte dos dois. Com o painel fechado a
+    // lista não está na árvore, então a única forma de cobrar isso do filtro é
+    // abri-lo — as duas asserções acima já falam do cartão, e só dele.
+    expect(
+      opcoesDoMenu(screen.getByRole("combobox", { name: "Prioridade" })),
+    ).not.toContain("Alto");
   });
 
   it("o ponto de prioridade sai da árvore, porque o selo já diz", async () => {
@@ -118,10 +133,9 @@ describe("TicketListPage", () => {
     await montar();
 
     const filtro = screen.getByRole("combobox", { name: "Prioridade" });
-    const rotulos = within(filtro)
-      .getAllByRole("option")
-      .map((o) => o.textContent);
-    expect(rotulos).toEqual([
+    // A lista inteira, na ordem, com o menu aberto — o painel mora num portal,
+    // então `within(filtro)` não alcança nenhuma opção.
+    expect(opcoesDoMenu(filtro)).toEqual([
       "Todas prioridades",
       "Crítica",
       "Alta",
@@ -136,9 +150,10 @@ describe("TicketListPage", () => {
       { ...BASE, id: "t2", protocol: "HS-2026-0002", title: "Mouse quebrado", priority: "low" } as Ticket,
     ]);
 
-    await userEvent.selectOptions(
+    // O menu escolhe pelo RÓTULO: "Alta" é o `high` da linha de cima.
+    escolherNoMenu(
       screen.getByRole("combobox", { name: "Prioridade" }),
-      "high",
+      "Alta",
     );
 
     expect(

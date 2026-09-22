@@ -49,16 +49,23 @@ import * as kbService from "../../services/kbService";
 import * as productService from "../../services/productService";
 import { toast } from "sonner";
 import { CATEGORIAS } from "../../lib/categoria";
+import { escolherNoMenu, opcoesDoMenu } from "../helpers/menu";
 
 /**
- * Dois dos três filtros da barra viraram `<select>` nativo pela D9.2, e o
- * `<select>` desenha TODAS as opções na árvore o tempo todo — o painel do
- * `FilterSelect` só existia enquanto aberto. "Rede" e "Rascunho" passam a
- * estar em dois lugares: a linha do artigo e a opção do filtro.
+ * Dois dos três filtros da barra são de lista fechada pela D9.2. Quando eram
+ * `<select>` nativo, desenhavam TODAS as opções na árvore o tempo todo, e
+ * "Rede" e "Rascunho" ficavam em dois lugares: a linha do artigo e a opção do
+ * filtro. Com o `SelectMenu` a duplicata sumiu — a lista vive num portal e só
+ * existe com o menu aberto, como era no `FilterSelect`.
  *
- * Os casos que falam da LINHA tiram a opção da busca por `ignore`, e não por
- * `getAllByText(...)[0]` — este continuaria passando com o texto da linha
- * apagado, que é o que eles existem para reprovar.
+ * O `ignore` fica, mas é preciso dizer o que ele virou, para ninguém contar
+ * com o que ele não faz: `ignore` é seletor CSS de TAG, e as linhas do menu
+ * são `<li role="option">` — a tag `option` não casa com nenhuma delas. Quem
+ * impede a duplicata hoje é o painel não estar montado, não este filtro.
+ * Ele segue aqui porque o MOTIVO dele continua valendo: os casos que falam da
+ * LINHA têm de reprovar se o texto sumir DELA, e não passar por uma cópia em
+ * outro canto da árvore — que é o que `getAllByText(...)[0]` deixaria
+ * acontecer.
  */
 const FORA_DO_FILTRO = { ignore: "script, style, option" } as const;
 
@@ -134,8 +141,8 @@ describe("KBListPage", () => {
     await montar();
 
     expect(await screen.findByText("Rede", FORA_DO_FILTRO)).toBeInTheDocument();
-    // Nem na linha nem dentro do filtro: no `<option>` o valor cru é o
-    // `value`, e nunca o texto.
+    // Nem na linha nem dentro do filtro: na lista do menu o valor cru é o
+    // `value` da opção, e nunca o texto que ela mostra.
     expect(screen.queryByText("network")).not.toBeInTheDocument();
   });
 
@@ -143,9 +150,7 @@ describe("KBListPage", () => {
     await montar();
 
     const filtro = screen.getByRole("combobox", { name: "Categoria" });
-    const rotulos = within(filtro)
-      .getAllByRole("option")
-      .map((o) => o.textContent);
+    const rotulos = opcoesDoMenu(filtro);
 
     // As oito de `CATEGORIAS`, mais a linha de "todas".
     expect(rotulos).toContain("Hardware");
@@ -164,10 +169,7 @@ describe("KBListPage", () => {
 
     // E no filtro, DERIVADO da mesma tabela — não escrito ao lado dela.
     const filtro = screen.getByRole("combobox", { name: "Status do artigo" });
-    const rotulos = within(filtro)
-      .getAllByRole("option")
-      .map((o) => o.textContent);
-    expect(rotulos).toEqual([
+    expect(opcoesDoMenu(filtro)).toEqual([
       "Todos os status",
       "Publicado",
       "Rascunho",
@@ -181,7 +183,8 @@ describe("KBListPage", () => {
     // "Hardware", "Impressora HS-1", "Publicado" — sem dizer de que filtro
     // cada um era.
     //
-    // Os dois curtos são `<select>` nativo e se leem por `combobox`; o de
+    // Os dois curtos são `SelectMenu` e continuam se lendo por `combobox` —
+    // o gatilho carrega o mesmo papel que o `<select>` nativo tinha; o de
     // produto é o `Selector`, cujo nome soma o rótulo ao valor visível, e por
     // isso é "Produto Todos os produtos" e não só "Produto".
     await montar();
@@ -198,9 +201,9 @@ describe("KBListPage", () => {
   it("escolher a categoria no filtro pede ao serviço aquela categoria", async () => {
     await montar();
 
-    await userEvent.selectOptions(
+    escolherNoMenu(
       screen.getByRole("combobox", { name: "Categoria" }),
-      "network",
+      "Rede",
     );
 
     await waitFor(() =>
@@ -325,9 +328,9 @@ describe("KBListPage", () => {
       screen.getByRole("textbox", { name: "Buscar artigos" }),
       "toner",
     );
-    await user.selectOptions(
+    escolherNoMenu(
       screen.getByRole("combobox", { name: "Status do artigo" }),
-      "published",
+      "Publicado",
     );
 
     await waitFor(() =>

@@ -13,6 +13,7 @@ vi.mock("../../services/userService", () => ({
 import UsersPage from "../../pages/users/UsersPage";
 import * as userService from "../../services/userService";
 import type { UserSummary } from "../../services/userService";
+import { escolherNoMenu, opcoesDoMenu } from "../helpers/menu";
 
 /**
  * O que esta tela tinha, e que estes casos prendem.
@@ -37,17 +38,23 @@ import type { UserSummary } from "../../services/userService";
  */
 
 /**
- * Os dois filtros da barra viraram `<select>` nativo pela D9.2, e o `<select>`
- * desenha TODAS as opções na árvore o tempo todo — o painel do `FilterSelect`
- * só existia enquanto aberto. "Administrador" e "Inativo" passam a estar em
- * dois lugares: o selo da linha e a opção do filtro.
+ * Por que "Administrador" e "Inativo" já precisaram de um filtro na busca.
  *
- * Os casos que falam da LINHA tiram a opção da busca por `ignore`, e não por
- * `getAllByText(...)[0]` — este continuaria passando com o selo apagado, que é
- * exatamente o que eles existem para reprovar.
+ * Pela D9.2 os dois filtros da barra eram o campo nativo do navegador, e o
+ * nativo desenha TODAS as opções na árvore o tempo todo. As duas palavras
+ * ficavam em dois lugares — o selo da linha e a opção do filtro —, então os
+ * casos que falam da LINHA passavam `{ ignore: "script, style, option" }` para
+ * tirar a opção da busca. Não `getAllByText(...)[0]`: esse continuaria passando
+ * com o selo apagado, que é o que eles existem para reprovar.
+ *
+ * O `SelectMenu` desfez o empate: o painel mora num portal e só existe com o
+ * menu ABERTO, então numa página em repouso a palavra do selo é a única
+ * ocorrência. O guardião saiu, e não por limpeza: as linhas do painel são
+ * `role="option"` sem serem elemento `option`, logo um seletor de tag não as
+ * alcança — ele não guardava mais nada. O que ele protegia segue protegido, e
+ * de mais perto: agora uma segunda ocorrência REPROVA o caso em vez de ser
+ * ignorada em silêncio.
  */
-const FORA_DO_FILTRO = { ignore: "script, style, option" } as const;
-
 const BASE: Omit<UserSummary, "id" | "name" | "email" | "role" | "status"> = {
   phone: null,
   department: null,
@@ -119,11 +126,9 @@ describe("UsersPage", () => {
     // O que não pode ter mudado é o que sobra para quem não enxerga a cor: a
     // PALAVRA — e que ela seja a palavra do rótulo, e não o valor do backend.
     await montar();
-    expect(
-      await screen.findByText("Administrador", FORA_DO_FILTRO),
-    ).toBeInTheDocument();
-    expect(screen.getByText("Técnico", FORA_DO_FILTRO)).toBeInTheDocument();
-    expect(screen.getByText("Cliente", FORA_DO_FILTRO)).toBeInTheDocument();
+    expect(await screen.findByText("Administrador")).toBeInTheDocument();
+    expect(screen.getByText("Técnico")).toBeInTheDocument();
+    expect(screen.getByText("Cliente")).toBeInTheDocument();
     // O valor cru do backend não aparece em lugar nenhum — nem na linha, nem
     // dentro do filtro, onde ele é o `value` e nunca o texto.
     expect(screen.queryByText("admin")).not.toBeInTheDocument();
@@ -138,9 +143,7 @@ describe("UsersPage", () => {
     });
     await montar();
 
-    expect(
-      await screen.findByText("Inativo", FORA_DO_FILTRO),
-    ).toBeInTheDocument();
+    expect(await screen.findByText("Inativo")).toBeInTheDocument();
     await user.click(screen.getByRole("button", { name: "Ativo" }));
 
     expect(userService.setUserStatus).toHaveBeenCalledWith("u1", "inactive");
@@ -230,10 +233,10 @@ describe("UsersPage", () => {
   it("escolher o perfil no filtro pede ao serviço aquele papel", async () => {
     await montar();
 
-    await userEvent.selectOptions(
-      screen.getByRole("combobox", { name: "Perfil" }),
-      "technician",
-    );
+    // O auxiliar escolhe pelo RÓTULO — o `selectOptions` escolhia pelo valor.
+    // O que o caso prende continua sendo o VALOR que chega ao serviço: a
+    // travessia "Técnico" → `technician` é justamente o que pode quebrar.
+    escolherNoMenu(screen.getByRole("combobox", { name: "Perfil" }), "Técnico");
 
     await waitFor(() =>
       expect(userService.getUsers).toHaveBeenLastCalledWith(
@@ -328,6 +331,64 @@ describe("UsersPage", () => {
     const dialogo = await screen.findByRole("dialog");
     expect(within(dialogo).getByText("bruno@exemplo.com")).toBeInTheDocument();
     expect(within(dialogo).getByLabelText("Nome *")).toHaveValue("Bruno Lima");
+    // O perfil também vem preenchido. A leitura é por TEXTO porque é o texto
+    // que o gatilho mostra: `toHaveValue("technician")` num botão falharia
+    // sempre, já que o jest-dom lê `button.value` e ali é `""` (medido).
+    expect(within(dialogo).getByRole("combobox", { name: "Perfil *" })).toHaveTextContent(
+      "Técnico",
+    );
+  });
+
+  it("o perfil escolhido no formulário manda na validação do telefone e chega ao serviço", async () => {
+    // O campo de perfil deixou de ser nativo e passou a falar com o
+    // react-hook-form por um `Controller`. Se o valor não chegasse lá, o
+    // `superRefine` julgaria o papel ERRADO: admin barrado por falta de
+    // telefone, ou cliente sem telefone passando. As duas metades ficam no
+    // MESMO formulário, com o telefone vazio o tempo todo — o que muda entre
+    // uma e outra é só o perfil.
+    const user = userEvent.setup();
+    vi.mocked(userService.createUser).mockResolvedValue({
+      ...ANA,
+      id: "u9",
+      name: "Dora Melo",
+      email: "dora@exemplo.com",
+    });
+    await montar();
+
+    await user.click(screen.getByRole("button", { name: "Novo usuário" }));
+    const dialogo = await screen.findByRole("dialog", { name: "Novo usuário" });
+    await user.type(within(dialogo).getByLabelText("Nome *"), "Dora Melo");
+    await user.type(
+      within(dialogo).getByLabelText("E-mail *"),
+      "dora@exemplo.com",
+    );
+    await user.type(within(dialogo).getByLabelText("Senha *"), "Senha1234");
+
+    // O formulário nasce em "Cliente", e cliente sem telefone é recusado.
+    const perfil = within(dialogo).getByRole("combobox", { name: "Perfil *" });
+    expect(perfil).toHaveTextContent("Cliente");
+    await user.click(
+      within(dialogo).getByRole("button", { name: "Criar usuário" }),
+    );
+    expect(
+      await within(dialogo).findByText("Telefone é obrigatório para cliente."),
+    ).toBeInTheDocument();
+    expect(userService.createUser).not.toHaveBeenCalled();
+
+    // Trocar para "Administrador" muda o que o mesmo formulário exige.
+    escolherNoMenu(perfil, "Administrador");
+    await waitFor(() => expect(perfil).toHaveTextContent("Administrador"));
+
+    await user.click(
+      within(dialogo).getByRole("button", { name: "Criar usuário" }),
+    );
+
+    // E o valor que chega ao serviço é o do backend, não o rótulo da tela.
+    await waitFor(() =>
+      expect(userService.createUser).toHaveBeenCalledWith(
+        expect.objectContaining({ role: "admin" }),
+      ),
+    );
   });
 
   it("o filtro de estado oferece só os dois valores que o servidor aceita", async () => {
@@ -337,10 +398,11 @@ describe("UsersPage", () => {
     // por ele não é uso de tela.
     await montar();
 
+    // A lista agora vive num portal e só existe com o menu ABERTO — por isso a
+    // leitura é `opcoesDoMenu`, que abre antes de ler. A conta é a mesma de
+    // antes, e é ela que prende a lista curta: exatamente três linhas, na
+    // ordem, com "Anonimizado" de fora.
     const filtro = screen.getByRole("combobox", { name: "Status da conta" });
-    const opcoes = within(filtro)
-      .getAllByRole("option")
-      .map((o) => o.textContent);
-    expect(opcoes).toEqual(["Status", "Ativo", "Inativo"]);
+    expect(opcoesDoMenu(filtro)).toEqual(["Status", "Ativo", "Inativo"]);
   });
 });

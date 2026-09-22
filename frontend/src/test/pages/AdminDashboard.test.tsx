@@ -15,6 +15,7 @@ import { ICON_PATHS } from "../../components/ui";
 import AdminDashboard from "../../pages/dashboard/AdminDashboard";
 import * as dashboardService from "../../services/dashboardService";
 import * as reportService from "../../services/reportService";
+import { escolherNoMenu, opcoesDoMenu } from "../helpers/menu";
 
 /**
  * O que esta tela tinha, e que estes casos prendem.
@@ -254,9 +255,12 @@ describe("AdminDashboard — ícones e nome acessível", () => {
     const { container } = await montar();
     const antes = container.querySelectorAll("svg").length;
 
-    fireEvent.change(screen.getByRole("combobox", { name: "Período" }), {
-      target: { value: "custom" },
-    });
+    // O filtro é um `SelectMenu`: abre-se o painel e clica-se na opção. O
+    // auxiliar escolhe pelo RÓTULO, então é "Personalizado" e não `"custom"`.
+    escolherNoMenu(
+      screen.getByRole("combobox", { name: "Período" }),
+      "Personalizado",
+    );
     await waitFor(() =>
       expect(container.querySelectorAll("svg").length).toBeGreaterThan(antes),
     );
@@ -273,10 +277,11 @@ describe("AdminDashboard — ícones e nome acessível", () => {
     // técnicos" e "Este Mês" — sem dizer de que filtro eram.
     //
     // Os dois controles são diferentes de propósito. O período tem oito
-    // opções fixas no código: `<select>` nativo, que se lê por `combobox`. Os
-    // técnicos vêm da rede e crescem com a equipe: `Selector variant="filter"`,
-    // cujo nome soma o rótulo ao valor visível — daí "Técnico Todos os
-    // técnicos", e daí ele NÃO ser um `combobox`.
+    // opções fixas no código: o `SelectMenu`, que se lê por `combobox` — o
+    // papel que o `<select>` nativo, que vivia aqui, tinha implícito e que o
+    // gatilho do menu declara. Os técnicos vêm da rede e crescem com a equipe:
+    // `Selector variant="filter"`, cujo nome soma o rótulo ao valor visível —
+    // daí "Técnico Todos os técnicos", e daí ele NÃO ser um `combobox`.
     await montar();
 
     expect(screen.getByRole("combobox", { name: "Período" })).toBeInTheDocument();
@@ -288,13 +293,16 @@ describe("AdminDashboard — ícones e nome acessível", () => {
   it("o período não oferece linha vazia — e isso é o que impede a queda", async () => {
     // A linha de limpar do `FilterSelect` devolvia `""`, e
     // `PERIOD_OPTIONS.find((p) => p.key === "")!.days` lia `days` de
-    // `undefined`: a tela caía. O `<select>` nativo não tem essa linha, e as
-    // oito opções são exatamente as oito do código.
+    // `undefined`: a tela caía. Nem o `<select>` nativo tinha essa linha, nem
+    // o `SelectMenu` que o substituiu a desenha sem `placeholder` — e as oito
+    // opções são exatamente as oito do código.
+    //
+    // A lista do menu mora num portal em `document.body`, fora do gatilho, e
+    // só existe com ele ABERTO: por isso `opcoesDoMenu`, que abre e lê, no
+    // lugar do `within(campo).getAllByRole("option")` que lia o nativo.
     await montar();
 
-    const rotulos = within(screen.getByRole("combobox", { name: "Período" }))
-      .getAllByRole("option")
-      .map((o) => o.textContent);
+    const rotulos = opcoesDoMenu(screen.getByRole("combobox", { name: "Período" }));
     expect(rotulos).toEqual([
       "Hoje",
       "Ontem",

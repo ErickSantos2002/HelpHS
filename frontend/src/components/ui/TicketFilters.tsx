@@ -2,7 +2,7 @@ import { useEffect, useRef } from "react";
 import { cn } from "../../lib/utils";
 import { Button } from "./Button";
 import { Input } from "./Input";
-import { Select } from "./Select";
+import { SelectMenu } from "./SelectMenu";
 
 // ── Filter state type ─────────────────────────────────────────
 
@@ -112,44 +112,42 @@ export function TicketFilters({
 
       {/* Status */}
       <div className="w-44">
-        <Select
+        <SelectMenu
           placeholder="Status"
           options={STATUS_OPTIONS}
           value={value.status}
-          onChange={(e) => onChange({ ...value, status: e.target.value })}
+          onChange={(v) => onChange({ ...value, status: v })}
         />
       </div>
 
       {/* Priority */}
       <div className="w-36">
-        <Select
+        <SelectMenu
           placeholder="Prioridade"
           options={PRIORITY_OPTIONS}
           value={value.priority}
-          onChange={(e) => onChange({ ...value, priority: e.target.value })}
+          onChange={(v) => onChange({ ...value, priority: v })}
         />
       </div>
 
       {/* Category */}
       <div className="w-40">
-        <Select
+        <SelectMenu
           placeholder="Categoria"
           options={CATEGORY_OPTIONS}
           value={value.category}
-          onChange={(e) => onChange({ ...value, category: e.target.value })}
+          onChange={(v) => onChange({ ...value, category: v })}
         />
       </div>
 
       {/* Responsável (staff only) */}
       {technicians && technicians.length > 0 && (
         <div className="w-44">
-          <Select
+          <SelectMenu
             placeholder="Responsável"
             options={technicians.map((t) => ({ value: t.id, label: t.name }))}
             value={value.assignee_id}
-            onChange={(e) =>
-              onChange({ ...value, assignee_id: e.target.value })
-            }
+            onChange={(v) => onChange({ ...value, assignee_id: v })}
           />
         </div>
       )}
@@ -157,11 +155,11 @@ export function TicketFilters({
       {/* Etiqueta */}
       {tags && tags.length > 0 && (
         <div className="w-40">
-          <Select
+          <SelectMenu
             placeholder="Etiqueta"
             options={tags.map((t) => ({ value: t.id, label: t.name }))}
             value={value.tag_id}
-            onChange={(e) => onChange({ ...value, tag_id: e.target.value })}
+            onChange={(v) => onChange({ ...value, tag_id: v })}
           />
         </div>
       )}
