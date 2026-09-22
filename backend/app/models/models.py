@@ -143,6 +143,36 @@ class CalendarEventType(str, enum.Enum):
     holiday = "holiday"
 
 
+class CallCreationStatus(str, enum.Enum):
+    """O que sabemos sobre a TENTATIVA de criar a chamada no fornecedor.
+
+    ⚠️ NÃO é o estado telefônico. `ringing`, `answered` e `hangup` chegam pelo
+    webhook e são assunto da Fase 2D. Aqui a pergunta é só uma, e é a mesma do
+    `services/api4com.py`: **a chamada saiu?**
+
+    ⚠️ Este enum NÃO vira tipo nativo do PostgreSQL. A coluna é `String` com
+    `CHECK`, e a diferença é deliberada: acrescentar valor a enum nativo exige
+    `ALTER TYPE ... ADD VALUE`, que nesta casa não pode ser citado em DDL
+    posterior — o alembic roda a cadeia inteira numa transação só. E remover
+    valor custa recriar o tipo e converter toda coluna que o usa, como foi
+    preciso fazer em 18/09 com `ticketcategory`. Uma máquina de estados que
+    ainda vai crescer na 2D não pode nascer com esse custo.
+    """
+
+    # Linha criada antes de falar com o fornecedor. Nada saiu ainda.
+    pending = "pending"
+    # HTTP 200 com `id` legível: a chamada existe do lado de lá.
+    confirmed = "confirmed"
+    # 4xx: o fornecedor respondeu recusando a requisição.
+    rejected = "rejected"
+    # Falha de conexão: não houve comunicação HTTP útil.
+    unavailable = "unavailable"
+    # ⚠️ Pode ter tocado o telefone de alguém e não sabemos. 5xx, 3xx, timeout
+    # de leitura, 2xx ilegível. É o estado que existe para ser reconciliado,
+    # e é a razão de `provider_call_id` aceitar NULL.
+    indeterminate = "indeterminate"
+
+
 # ── MODELS ───────────────────────────────────────────────────
 
 
@@ -1141,4 +1171,97 @@ class HeloIndexacao(Base):
     content_hash: Mapped[str] = mapped_column(String(64), nullable=False)
     indexado_em: Mapped[datetime] = mapped_column(
         DateTime(timezone=True), server_default=func.now(), nullable=False
+    )
+
+
+# ── TELEFONIA (Fase 2B) ──────────────────────────────────────
+
+
+class TicketCall(Base):
+    """Uma TENTATIVA de ligar para o cliente de um chamado.
+
+    O nome importa: a linha nasce antes de existir chamada, e pode terminar
+    sem que nunca tenhamos sabido se existiu. Modelar só "chamadas
+    confirmadas" perderia exatamente o estado perigoso — aquele em que o
+    `POST /calls` pode ter tocado o telefone de alguém e a resposta não voltou.
+    É por isso que `provider_call_id` aceita NULL: uma tabela que o exigisse
+    NOT NULL seria incapaz de registrar o caso que mais precisa ser
+    reconciliado depois.
+
+    Por que tabela própria, e não coluna em `tickets`
+    --------------------------------------------------
+    Uma tentativa tem estado e ciclo próprios, e a maioria dos chamados nunca
+    terá nenhuma. Cinco colunas nulas em 99% das linhas é o sinal, já escrito
+    nesta casa, de que são duas coisas — o mesmo critério que criou
+    `helo_indexacao` em vez de inchar `kb_articles`.
+
+    Não há `relationship()` para `Ticket`, de propósito: `helo_indexacao` é o
+    precedente de tabela satélite que se liga só pela FK. Evita tocar o modelo
+    `Ticket` por uma frente que ainda não tem consumidor.
+
+    O que esta tabela NÃO guarda, e é escolha
+    ------------------------------------------
+    Telefone, `caller`, `extension`, cabeçalho, corpo da requisição, corpo da
+    resposta, `message` do fornecedor, metadata e URL de gravação. O telefone
+    canônico continua em `users.phone`, e o resto é dado de terceiro que não
+    precisamos reter para saber o estado da tentativa. Guardar resposta bruta
+    seria criar um segundo lugar por onde PII e credencial poderiam vazar.
+    """
+
+    __tablename__ = "ticket_calls"
+
+    id: Mapped[uuid.UUID] = mapped_column(UUID(as_uuid=True), primary_key=True, default=uuid.uuid4)
+    ticket_id: Mapped[uuid.UUID] = mapped_column(
+        UUID(as_uuid=True), ForeignKey("tickets.id", ondelete="CASCADE"), nullable=False, index=True
+    )
+    # NULL = quem iniciou não existe mais. Mesmo critério de `kb_comments.author_id`
+    # e `equipments.owner_id`: a tentativa é fato do chamado e sobrevive à
+    # exclusão da conta; quem some é a autoria.
+    initiated_by_id: Mapped[uuid.UUID | None] = mapped_column(
+        UUID(as_uuid=True), ForeignKey("users.id", ondelete="SET NULL"), nullable=True, index=True
+    )
+    # STRING OPACA, e `Text` porque não sabemos o comprimento. A documentação
+    # oficial diz `string` e mostra DOIS formatos para o mesmo campo: 27
+    # caracteres base62 (`1PkXhmBsYAvr9legLB2d7BimT0Q`) na referência da API, e
+    # UUID textual de 36 (`bdf199fa-...`) no guia de integração. Por isso NÃO é
+    # `UUID` do PostgreSQL: o tipo nativo rejeitaria o primeiro formato, e o
+    # HelpHS quebraria por validar algo que o fornecedor nunca prometeu.
+    # Nada é validado, nada é transformado — o valor volta como chegou.
+    provider_call_id: Mapped[str | None] = mapped_column(Text, nullable=True)
+    creation_status: Mapped[str] = mapped_column(String(20), nullable=False)
+    # O status HTTP que o fornecedor devolveu, quando houve resposta. NULL
+    # quando não houve — e a diferença entre "não respondeu" e "respondeu 500"
+    # é justamente o que separa `unavailable` de `indeterminate`.
+    provider_http_status: Mapped[int | None] = mapped_column(Integer, nullable=True)
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now())
+    updated_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), server_default=func.now(), onupdate=func.now()
+    )
+
+    __table_args__ = (
+        # SQL portável de propósito: `IN`, `<>` e `IS NOT NULL` existem no
+        # SQLite, então esta constraint NÃO precisa do `ddl_if` que o CHECK do
+        # telefone precisou — lá o problema era `regexp_replace`, que é só do
+        # PostgreSQL. Aqui a mesma regra vale nos dois bancos, e a suíte que
+        # monta schema por `create_all` a exercita de graça.
+        CheckConstraint(
+            "creation_status IN ('pending', 'confirmed', 'rejected', "
+            "'unavailable', 'indeterminate')",
+            name="ck_ticket_calls_status_conhecido",
+        ),
+        # Confirmada sem identificador seria um registro que afirma saber da
+        # chamada sem ter como apontá-la — nem para consultar, nem para
+        # desligar. O inverso NÃO é imposto: ter `provider_call_id` sem estar
+        # `confirmed` é estado legítimo que a reconciliação da 2D pode produzir.
+        CheckConstraint(
+            "creation_status <> 'confirmed' OR provider_call_id IS NOT NULL",
+            name="ck_ticket_calls_confirmada_tem_id",
+        ),
+        # Índice único NOMEADO, e não `unique=True` na coluna, para que o
+        # downgrade da migration remova exatamente este objeto — mesmo padrão
+        # do `uq_equipments_product_serial`. No PostgreSQL vários NULL convivem
+        # sob UNIQUE, que é o comportamento que queremos: toda tentativa sem
+        # identificador é distinta das outras.
+        Index("uq_ticket_calls_provider_call_id", "provider_call_id", unique=True),
+        Index("ix_ticket_calls_ticket_created", "ticket_id", "created_at"),
     )

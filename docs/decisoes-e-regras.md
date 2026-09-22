@@ -1806,6 +1806,173 @@ o identificador da chamada**: o schema da resposta de `POST /calls` não está
 confirmado. Inventar `id`, `call_id` ou `data.id` criaria um contrato que o
 fornecedor não prometeu. **A Fase 2B segue bloqueada até haver evidência.**
 
+### Fase 2B: a telefonia ganha memória, e o contrato do `id` sai do escuro
+
+A Fase 2A dizia, em código e em documento, que o schema da resposta de
+`POST /calls` "não estava confirmado". **Estava.** A documentação oficial
+baixada na Fase 0 responde a pergunta, e ninguém a tinha lido até o fim. Fica
+registrado porque o erro foi de método, não de fato: tratamos por "não
+determinado" algo que estava escrito, e por isso a 2B nasceu bloqueada sem
+precisar.
+
+#### O que a documentação oficial diz
+
+`POST /calls`, seção **Respostas / 200**:
+
+```json
+{ "status": "200", "message": "successful request", "id": "1PkXhmBsYAvr9legLB2d7BimT0Q" }
+```
+
+E a prosa da mesma página: *"o `id` retornado por este método corresponde ao
+mesmo ID da chamada exibido na Lista de Chamadas, podendo ser usado tanto para
+consultas quanto para cancelar a chamada."* A página do
+`POST /calls/{id}/hangup` confirma do outro lado: parâmetro de caminho `id`,
+**tipo `string`, obrigatório**.
+
+Portanto está estabelecido: **campo `id`, no topo do JSON, tipo `string`,
+mesmo identificador usado no hangup.**
+
+#### ⚠️ O formato NÃO está estabelecido, e é por isso que ele é opaco
+
+Dois documentos oficiais mostram formatos diferentes **para o mesmo campo**:
+
+| Fonte | Exemplo | Forma |
+|---|---|---|
+| Referência da API (`clickToCall`, `hangupCall`) | `1PkXhmBsYAvr9legLB2d7BimT0Q` | 27 caracteres, base62 |
+| Guia "Integração utilizando Webphone próprio" | `bdf199fa-f85b-4378-80cd-0ac28c1355e9` | UUID textual, 36 |
+| Payload do webhook `channel-hangup` | `2ee13fa4-975c-499d-bbb8-5177ff418316` | UUID textual, 36 |
+
+Consequência direta, e é a decisão de schema da 2B: a coluna é **`TEXT`**, não
+`uuid` nativo. O tipo nativo do PostgreSQL **rejeitaria o primeiro formato**. O
+HelpHS trata o identificador como **string opaca**: não valida formato, não
+valida comprimento, não transforma, não normaliza caixa nem espaço. Há teste
+que grava `"  com-espaco  "` e exige que volte igual.
+
+Estreitar depois, quando o fornecedor confirmar, é uma linha. Ter quebrado em
+produção por validar o que ele nunca prometeu, não.
+
+#### Só 200 é sucesso. 201 e 202 são indeterminados
+
+A documentação publica **apenas 200** como criação aceita. Aceitar 201 seria
+assumir contrato que o fornecedor não escreveu — e se ele responder 202 com o
+corpo em outro formato, teríamos aceitado um identificador que não sabemos ler.
+A pergunta está na lista enviada ao suporte.
+
+A classificação completa do `services/api4com.py` passa a ser:
+
+| Situação | A ligação saiu? |
+|---|---|
+| flag desligada | não houve tentativa |
+| `ConnectError` / `ConnectTimeout` | não houve comunicação HTTP útil |
+| HTTP 4xx | rejeição HTTP confirmada |
+| **HTTP 200 com `id` legível** | **SIM — e temos o identificador** |
+| HTTP 200 sem `id` utilizável | INDETERMINADO |
+| HTTP 201 / 202 / outro 2xx | INDETERMINADO |
+| HTTP 3xx e 5xx | INDETERMINADO |
+| transporte após conexão | INDETERMINADO |
+
+Para o 200, exigimos: corpo é JSON, é objeto, tem `id`, `id` é `str`, e tem
+pelo menos um caractere não-branco. Qualquer falha vira **indeterminado**, e
+não erro de contrato — houve HTTP 200, então o fornecedor provavelmente criou a
+chamada; o que falhou foi nossa capacidade de saber **qual**. Chamar isso de
+falha autorizaria uma segunda tentativa.
+
+#### `Api4ComCreateCallResult` encolheu
+
+Era `(status_code, payload)`; virou `(status_code, provider_call_id)`. A 2A
+devolvia o corpo inteiro porque não sabíamos qual campo importava. Agora
+sabemos, e carregar o resto seria mais um lugar por onde `message`, metadata ou
+dado de terceiro poderiam vazar para um log. Provado por busca que não havia
+consumidor de `.payload` antes de remover.
+
+#### `ticket_calls`: uma linha é uma TENTATIVA
+
+O nome importa. A linha nasce **antes** de existir chamada, e pode terminar sem
+que jamais saibamos se existiu.
+
+| Coluna | Tipo | Por quê |
+|---|---|---|
+| `id` | UUID | identidade interna; é o que a 2C poderá mandar no `metadata` para reconciliar |
+| `ticket_id` | UUID, FK `CASCADE` | como as outras sete filhas de `tickets` |
+| `initiated_by_id` | UUID, FK `SET NULL`, nulável | a tentativa é fato do chamado e sobrevive à exclusão da conta; quem some é a autoria |
+| `provider_call_id` | **TEXT, nulável, índice único** | string opaca; NULL é estado legítimo e frequente |
+| `creation_status` | String(20) + CHECK | ver abaixo |
+| `provider_http_status` | Integer, nulável | NULL quando não houve resposta — a diferença entre "não respondeu" e "respondeu 500" |
+
+**Por que `provider_call_id` aceita NULL:** porque o estado mais perigoso da
+integração é justamente aquele em que não temos o identificador. Uma coluna
+NOT NULL tornaria o indeterminado **impossível de registrar** — e é ele que
+precisa ser reconciliado, e o que impede uma segunda tentativa às cegas.
+
+**O CHECK que existe:** `creation_status <> 'confirmed' OR provider_call_id IS
+NOT NULL`. Confirmada sem identificador seria um registro que afirma saber da
+chamada sem ter como apontá-la, nem para consultar nem para desligar. **O
+inverso não é imposto**: ter identificador sem estar `confirmed` é estado
+legítimo que a reconciliação da 2D pode produzir.
+
+#### `creation_status` é String com CHECK, e não enum nativo
+
+Decisão de custo, com os dois precedentes desta casa na mão: acrescentar valor
+a enum nativo exige `ALTER TYPE ... ADD VALUE`, que aqui não pode ser citado em
+DDL posterior porque o alembic roda a cadeia inteira numa transação só; e
+remover valor custa recriar o tipo e converter toda coluna que o usa, como a
+`f2a3b4c5d6e7` teve de fazer com `ticketcategory`. Esta máquina de estados
+**ainda vai crescer na 2D**.
+
+Os cinco estados descrevem o **resultado da criação**, não o estado telefônico:
+`pending`, `confirmed`, `rejected`, `unavailable`, `indeterminate`. `ringing`,
+`answered` e `hangup` chegam pelo webhook e são outra coluna, em outra fase — há
+teste que recusa esses três valores nesta.
+
+#### O que a 2B deliberadamente NÃO guarda
+
+Telefone, `caller`, `extension`, cabeçalho, corpo da requisição, corpo da
+resposta, `message` do fornecedor, metadata, URL de gravação. O telefone
+canônico continua em `users.phone`.
+
+A garantia não é disciplina: **nenhuma função de `services/telefonia.py` aceita
+esses dados como parâmetro**, e há teste que varre as assinaturas e a lista de
+colunas procurando por eles. Não há como persistir por descuido.
+
+#### `services/telefonia.py` não conhece o transporte
+
+Ele não importa `httpx` nem `api4com.py` — provado por AST em teste. É o mesmo
+arranjo de `helo_embedding.py` (cliente) e `helo.py` (domínio). A orquestração
+`banco → API4COM → banco` é da Fase 2C; a máquina de estados fica provada antes
+de haver efeito externo para depurar junto.
+
+#### Ainda em aberto, e registrado
+
+- **Idempotência: NÃO DOCUMENTADA / NÃO CONFIRMADA.** A varredura em toda a
+  documentação não encontrou `Idempotency-Key`, `externalId` nem
+  `clientReference` — mas ausência na documentação não é prova de inexistência.
+  Sem resposta do fornecedor: nada de chave de idempotência inventada, nada de
+  retry automático. É pergunta aberta para a 2C.
+- **Formato e comprimento do `id`** — pergunta enviada ao suporte.
+- **Status 201/202** — idem.
+- **`metadata` com o UUID interno da tentativa**: a documentação afirma que a
+  metadata enviada em `POST /calls` chega no webhook, o que abriria a
+  reconciliação do indeterminado. **Não implementado na 2B** — o payload segue
+  só com `gateway`. Decisão da 2C.
+- **Duplo clique e concorrência**: a 2B não cria unique de `pending` por
+  chamado, lock nem rate limit. A tabela só precisa conseguir representar o
+  estado; a proteção é decisão da 2C, junto com o endpoint.
+
+#### Correção ao que a Fase 0 registrou sobre o formato de `called`
+
+A sonda anota que "a doc mostra três grafias para o mesmo número". Separando
+por rota, isso não se sustenta:
+
+| Grafia | Onde | Natureza |
+|---|---|---|
+| `4833328530` | `POST /calls` (rota atual), campo `called` | **entrada documentada** |
+| `+554833328530` | `POST /dialer` **descontinuada**, campo `phone` | rota morta, campo diferente |
+| `04833328530` | payload do webhook, campo `called` | **saída**, não entrada |
+
+A rota atual mostra **uma** grafia. Um exemplo não é especificação — a pergunta
+segue na lista do suporte —, mas é bem mais forte que "três grafias
+contraditórias".
+
 ### Antivírus (ClamAV) não está no ambiente
 
 O upload de anexo passa por varredura antivírus antes de gravar
