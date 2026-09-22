@@ -12,9 +12,15 @@ test.describe("Tickets", () => {
     await expect(page.getByRole("heading", { name: /tickets/i })).toBeVisible();
   });
 
-  test("filtro por status atualiza a lista", async ({ page }) => {
+  test("filtro por prioridade atualiza a lista", async ({ page }) => {
     await page.goto("/tickets");
-    await page.locator("select").first().selectOption("open");
+    // O nome do caso dizia "status", e a barra de /tickets NUNCA teve filtro
+    // de status: o primeiro campo sempre foi o de prioridade, e "open" jamais
+    // esteve entre os valores dele. O gesto novo vai no filtro que existe —
+    // gatilho pelo nome acessível (o rótulo `sr-only` "Prioridade") e escolha
+    // pelo RÓTULO da opção —, e o nome do caso passou a dizer isso.
+    await page.getByRole("combobox", { name: "Prioridade" }).click();
+    await page.getByRole("option", { name: "Alta" }).click();
     // The count subtitle updates with the result
     await expect(page.getByText(/chamados? encontrados?/i)).toBeVisible({
       timeout: 5_000,
@@ -44,6 +50,11 @@ test.describe("Tickets", () => {
       .getByPlaceholder(/descreva o problema com detalhes/i)
       .fill("Descrição criada por teste automatizado.");
 
+    // ⚠️ DEFEITO ANTERIOR A ESTA MIGRAÇÃO, DEIXADO COMO ESTAVA DE PROPÓSITO:
+    // em /tickets/new a Prioridade e a Categoria são fichas de rádio
+    // (`RadioCards`), e já eram antes — nunca houve `<select>` nesta tela, de
+    // modo que estas duas linhas já falhavam. Consertá-las aqui misturaria no
+    // mesmo diff um conserto que nada tem a ver com a troca do seletor.
     // Priority and category selects (1st = priority, 2nd = category)
     await page.locator("select").first().selectOption("medium");
     await page.locator("select").nth(1).selectOption("software");

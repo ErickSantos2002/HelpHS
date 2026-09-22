@@ -18,6 +18,11 @@ test.describe("Ticket Detail — Interações", () => {
     await page
       .getByPlaceholder(/descreva o problema com detalhes/i)
       .fill("Descrição para teste de detalhe do chamado.");
+    // ⚠️ DEFEITO ANTERIOR A ESTA MIGRAÇÃO, DEIXADO COMO ESTAVA DE PROPÓSITO:
+    // em /tickets/new a Prioridade e a Categoria são fichas de rádio
+    // (`RadioCards`), e já eram antes — nunca houve `<select>` nesta tela, de
+    // modo que estas duas linhas já falhavam. O conserto é de outro assunto e
+    // de outro commit.
     await page.locator("select").first().selectOption("medium");
     await page.locator("select").nth(1).selectOption("software");
 
@@ -56,8 +61,15 @@ test.describe("Ticket Detail — Interações", () => {
     ).toBeVisible({ timeout: 5_000 });
 
     // Select first available transition (in_progress for an open ticket)
-    const statusSelect = page.getByLabel("Novo status");
-    await statusSelect.selectOption({ index: 1 });
+    //
+    // O campo virou `SelectMenu`: abrir o painel e clicar na linha. Continua
+    // pela POSIÇÃO, como antes — o caso não quer um status específico, quer a
+    // primeira transição que o chamado oferece, e cravar o rótulo o amarraria
+    // à ordem de `TICKET_TRANSITIONS`. A linha 0 é o "Selecione" do
+    // `placeholder`, igual à primeira `<option>` do campo nativo.
+    const statusSelect = page.getByRole("combobox", { name: "Novo status" });
+    await statusSelect.click();
+    await page.getByRole("listbox").getByRole("option").nth(1).click();
 
     await page.getByRole("button", { name: "Confirmar" }).click();
 
