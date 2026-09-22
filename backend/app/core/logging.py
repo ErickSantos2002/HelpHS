@@ -113,12 +113,29 @@ def setup_logging() -> None:
     # o access log do uvicorn tambem passa por eles.
     instalar_ponte_stdlib()
 
+    # ⚠️ Todo `logger.add` abaixo leva `diagnose=False`, e o default do loguru
+    # e o contrario.
+    #
+    # Com `diagnose=True`, o traceback de uma excecao nao mostra so as linhas:
+    # mostra o VALOR das variaveis locais de cada quadro. Uma funcao que tenha
+    # a credencial numa variavel -- montar um cabecalho `Authorization`, por
+    # exemplo -- passa a imprimir a credencial inteira em qualquer excecao que
+    # atravesse aquele quadro.
+    #
+    # O patcher de `_SEGREDO_NA_QUERY` nao alcanca isso: ele reescreve
+    # `record["message"]`, e o bloco de diagnostico e montado pelo loguru
+    # DEPOIS, ao formatar a excecao. Sao caminhos diferentes.
+    #
+    # `backtrace` fica como esta: ele acrescenta os quadros acima do ponto de
+    # captura, o que ajuda a achar o caminho e nao imprime valor nenhum.
+
     if settings.is_development:
         logger.add(
             sys.stdout,
             level=settings.log_level,
             format="<green>{time:YYYY-MM-DD HH:mm:ss}</green> | <level>{level: <8}</level> | <cyan>{name}</cyan>:<cyan>{line}</cyan> - <level>{message}</level>",
             colorize=True,
+            diagnose=False,
         )
         try:
             logger.add(
@@ -129,6 +146,7 @@ def setup_logging() -> None:
                 retention="30 days",
                 compression="zip",
                 serialize=True,
+                diagnose=False,
             )
         except PermissionError:
             logger.warning("Could not create log file — stdout only")
@@ -138,4 +156,5 @@ def setup_logging() -> None:
             sys.stdout,
             level=settings.log_level,
             serialize=True,
+            diagnose=False,
         )

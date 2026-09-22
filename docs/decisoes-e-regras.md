@@ -1619,6 +1619,156 @@ endpoints, que pertencem a outros sistemas da empresa. É mais um motivo para o
 - **autenticação de origem do webhook** — não há HMAC, assinatura, secret nem
   faixa de IP documentados. A proteção terá de ser desenhada do nosso lado.
 
+### Fase 2A da telefonia: a fundação existe e não liga para ninguém
+
+`backend/app/services/api4com.py` sabe fazer `POST /calls`. **Nenhum router,
+lifespan ou laço de fundo o importa**, e isso é o desenho, não uma etapa que
+faltou: em produção a 2A continua incapaz de iniciar ligação por ausência de
+consumidor. Quem ligar o primeiro precisa ter lido as quatro categorias de erro
+abaixo.
+
+**A integração nasce desligada.** `API4COM_ENABLED=false`, pelo mesmo raciocínio
+do `HELO_ENABLED`, só que mais forte: ligada, ela disca para o telefone de uma
+pessoa.
+
+| Variável | Default | Papel |
+|---|---|---|
+| `API4COM_ENABLED` | `false` | interruptor |
+| `API4COM_TOKEN` | vazio | credencial, **`SecretStr`** |
+| `API4COM_BASE_URL` | `https://api.api4com.com/api/v1` | configuração com padrão, critério do `DEEPSEEK_BASE_URL` |
+| `API4COM_TIMEOUT_SECONDS` | `15` | teto de UMA tentativa |
+
+`API4COM_CALLER` e `API4COM_EXTENSION` **não existem**. O número de origem tem
+formato ainda não definido com o fornecedor, e o ramal é identidade do agente —
+dado de usuário, não configuração global. Os dois são argumentos de
+`create_call` até a Fase 2C resolver a origem deles.
+
+#### Três divergências deliberadas do resto da casa
+
+**1. `SecretStr`, e é o único do projeto.** `smtp_password`,
+`deepseek_api_key` e `mfa_secret_encryption_key` são `str` cru e saem por
+extenso em `repr`, `str`, `model_dump` e `model_dump_json` — o que os segura
+hoje é disciplina de quem escreve log, não o tipo. Segredo novo não precisa
+nascer com essa dívida. O valor é lido por `get_secret_value()` num único
+ponto: a montagem do `Authorization`. Um teste documenta o ESCOPO da
+divergência e cai se alguém converter os antigos sem conversar sobre migração
+de painel.
+
+**2. A validação de boot roda também em dev e testing.** Todas as outras
+validações do `model_post_init` saem cedo em `is_development or is_testing`,
+porque protegem contra subir PRODUÇÃO com valor de desenvolvimento — e em dev
+aquele valor é o certo. Esta protege contra ligar a integração sem ter como
+autenticar, o que está errado em qualquer ambiente. Por isso a chamada fica no
+**topo** do `model_post_init`, antes do `return`; há teste que prende essa
+posição.
+
+**3. A exceção de configuração NÃO é `ValueError`.** Enquanto era, o pydantic a
+embrulhava num `ValidationError` — que imprime `input_value=` com o dicionário
+de entrada **truncado no meio**, cabeça e cauda visíveis. MEDIDO no pydantic
+2.11.3, com o token vindo do ambiente e outra validação falhando: os 22
+caracteres finais do token saíam na mensagem, e iam para o log de boot.
+`ConfiguracaoDaTelefoniaInvalidaError` herda de `RuntimeError`, que o pydantic
+deixa subir intacta. Consequência: `pytest.raises(ValueError)` não pega esta.
+
+#### Por que nunca pode haver retry em `POST /calls`
+
+É a **primeira escrita externa** do HelpHS. Todas as outras chamadas que saem
+daqui são leitura (ViaCEP, BrasilAPI) ou idempotentes na prática (DeepSeek,
+embedding). Escrita externa traz o problema que nenhuma delas tem: quando a
+resposta não volta, não dá para saber se o outro lado agiu — e aqui "agir"
+significa tocar o telefone de alguém.
+
+Medido no `httpx` 0.28.1 / `httpcore` 1.0.9 instalados:
+
+- `retries` default é **0** nos dois transportes;
+- o laço de retentativa vive em `_connect()` e captura estritamente
+  `(ConnectError, ConnectTimeout)` — cobre TCP/TLS, e **nenhum byte de
+  requisição é escrito ali**. `ReadTimeout`, 5xx e 429 nunca são repetidos,
+  nem com `retries` alto;
+- a **única** porta de duplicação é o redirect: `follow_redirects` vem `False`,
+  mas 307 e 308 preservam método e corpo (`_redirect_method` só rebaixa para
+  GET em 301/302/303). Ligar redirect no cliente da telefonia criaria duas
+  ligações com um clique.
+
+Por isso `retries=0` e `follow_redirects=False` vão **explícitos**, mesmo sendo
+os defaults. `httpcore` é transitiva e **não está pinada** (só `httpcore==1.*`
+pelo metadado do httpx): pinar foi descartado para não mexer no gate de
+dependências, e quem avisa se um rebuild mudar o comportamento é o teste que
+prende `await_count == 1`.
+
+#### As quatro categorias de erro respondem sempre a mesma pergunta
+
+**A ligação saiu?**
+
+| Situação | A ligação saiu? | Exceção |
+|---|---|---|
+| flag desligada | não houve tentativa | `Api4ComDesligadaError` |
+| `ConnectError`, `ConnectTimeout` | não houve comunicação HTTP útil | `Api4ComIndisponivelError` |
+| **HTTP 4xx** | rejeição HTTP confirmada | `Api4ComRecusadaError` |
+| **HTTP 5xx** | ⚠️ **INDETERMINADO** | `Api4ComResultadoIndeterminadoError` |
+| **HTTP 3xx** | ⚠️ **INDETERMINADO** | `Api4ComResultadoIndeterminadoError` |
+| transporte após conexão | ⚠️ **INDETERMINADO** | `Api4ComResultadoIndeterminadoError` |
+| 2xx com corpo ilegível | ⚠️ **INDETERMINADO** | `Api4ComResultadoIndeterminadoError` |
+
+⚠️ **5xx não significa que a chamada não ocorreu, e essa é a linha que custa
+caro.** O fornecedor pode ter recebido o POST, disparado a ligação e só então
+quebrado por dentro: o 500 descreve o estado do servidor dele, não o do telefone
+de quem ia receber. A primeira versão deste módulo tratava todo não-2xx como
+recusa — o que autorizaria uma segunda tentativa e tocaria o telefone duas
+vezes. `Api4ComRecusadaError` é **só 4xx**, e a afirmação que ela faz é sobre a
+REQUISIÇÃO ter sido rejeitada, nunca sobre o telefone.
+
+3xx pela mesma razão: com `follow_redirects=False` o redirect chega sem ter sido
+seguido, e um redirect inesperado num endpoint de escrita não é sucesso nem
+recusa de domínio. Nunca seguir, nunca reenviar.
+
+O resto do indeterminado leva demais `TransportError` (leitura, escrita,
+protocolo, pool, proxy). `PoolTimeout` e `ProxyError` entram aí de propósito —
+dá para argumentar que a requisição não saiu, mas o argumento depende de
+detalhe interno de biblioteca não pinada, e o custo de errar para o lado
+otimista é ligar duas vezes para a mesma pessoa.
+
+**Em TODOS os casos: zero retry automático de `POST /calls`.**
+
+Só a `Api4ComRecusadaError` guarda atributo, e é um `status_code`. **Nenhuma
+guarda `Response` ou `Request`**: o objeto do httpx carrega os cabeçalhos por referência, e uma
+exceção que o segurasse levaria o `Authorization` para dentro de qualquer
+traceback. Pelo mesmo motivo a tradução usa `from None`.
+
+#### `metadata` é fechado, e o motivo não é zelo
+
+O corpo leva exatamente `{"gateway": "HelpHS"}`, sem parâmetro que permita
+acrescentar nada — não dá para sobrescrever `gateway` porque não há por onde
+passar. Duas integrações desta conta no fornecedor estão **sem filtro**
+(`webhookConstraint` nulo e `{}`), e se constraint vazia significar "sem
+filtro", os webhooks das nossas chamadas serão entregues a endpoints de outros
+sistemas da empresa. Enquanto isso não for resolvido, `metadata` não carrega
+nome, e-mail, documento, telefone nem texto de chamado.
+
+#### `diagnose=False` nos três sinks do loguru
+
+Não é da telefonia; é consequência de introduzir um segredo externo. O default
+do loguru é `diagnose=True`, que acrescenta ao traceback o **valor das
+variáveis locais** citadas na linha exibida de cada quadro. Uma função que
+monte um `Authorization` passaria a imprimir a credencial em qualquer exceção
+que atravessasse aquele quadro. O patcher de `_SEGREDO_NA_QUERY` não alcança
+isso: ele reescreve `record["message"]`, e o bloco de diagnóstico é montado
+depois, ao formatar a exceção. `backtrace` ficou como estava — ele mostra os
+quadros e não imprime valor nenhum.
+
+#### O que a 2A NÃO resolve
+
+`create_call` repassa `caller`, `called` e `extension` **byte a byte como
+chegaram**. Não normaliza telefone, não acrescenta nem remove `+55`, não valida
+regra brasileira: o formato aceito em `called` segue em aberto com o fornecedor
+(ver a seção acima), e transporte que "conserta" o número cria uma segunda
+fonte de verdade competindo com `app/utils/telefone.py`.
+
+`Api4ComCreateCallResult` tem `status_code` e `payload`, e **nenhum campo para
+o identificador da chamada**: o schema da resposta de `POST /calls` não está
+confirmado. Inventar `id`, `call_id` ou `data.id` criaria um contrato que o
+fornecedor não prometeu. **A Fase 2B segue bloqueada até haver evidência.**
+
 ### Antivírus (ClamAV) não está no ambiente
 
 O upload de anexo passa por varredura antivírus antes de gravar
