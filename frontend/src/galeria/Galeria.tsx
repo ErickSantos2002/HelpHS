@@ -78,7 +78,15 @@ const AVISOS = ["info", "success", "warning", "danger"] as const;
  *
  * Ao acrescentar um `Bloco`, ajuste este número — a suíte cobra.
  */
-export const AMOSTRAS = 17;
+/*
+  18 depois do merge com a `main`, e o caminho até aqui merece nota porque o
+  git NÃO acusa: a `main` subiu este número de 16 para 17 ao acrescentar o
+  bloco "Button como link", e esta frente subiu de 16 para 17 ao acrescentar o
+  bloco "SelectMenu". Os dois lados gravaram o MESMO texto (`= 17`), então a
+  mesclagem passou limpa — com dezoito blocos no arquivo e dezessete na conta.
+  Quem acusaria é só o `e2e/galeria.spec.ts`, que roda por `workflow_dispatch`.
+*/
+export const AMOSTRAS = 18;
 
 /** `texto` cobra 4,5:1; `grafico` cobra 3:1 (WCAG 1.4.11). */
 function Bloco({
