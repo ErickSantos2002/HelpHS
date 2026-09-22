@@ -302,6 +302,66 @@ test("no RadioCards, a opção escolhida pinta diferente da livre", async ({ pag
 });
 
 /**
+ * O `Button` com `to` pinta, no hover, igual ao `Button` sem ele.
+ *
+ * O caso que o comprou: o "Abrir chamado" da v1.15.0 ficava um retângulo azul
+ * sem texto nem ícone ao passar o mouse. Com `to`, o botão vira `<a>`, e o
+ * `a:hover` do `base.css` do pacote (especificidade 0,1,1) vence a classe de
+ * cor da variante (0,1,0). A cor do texto passava a ser `--text-link-hover` —
+ * que é o MESMO degrau do `--action-hover` do fundo, nos dois temas.
+ *
+ * A medição de contraste da galeria não pega isto: ela lê o repouso, e o
+ * defeito só existe com o mouse em cima. Daí comparar os dois elementos no
+ * hover, em vez de medir um só — a pergunta é "o destino mudou a aparência?",
+ * e ela vale também para as variantes em que o defeito não some com o texto,
+ * só o tinge de azul e sublinha.
+ */
+for (const tema of ["claro", "escuro"] as const) {
+  test("o Button com destino pinta igual ao sem destino, no hover — tema " + tema, async ({
+    page,
+  }) => {
+    await page.goto("/galeria.html");
+    await conferirProduto(page);
+    await page.waitForSelector("[data-galeria]");
+    if (tema === "escuro") {
+      await page.getByTestId("alternar-tema").click();
+      await expect(page.locator("html")).toHaveClass(/dark/);
+    }
+    // A leitura no meio do `transition-colors` devolve a cor interpolada, em
+    // `oklab()`. O que se compara é o estado final.
+    await page.addStyleTag({
+      content: "*, *::before, *::after { transition: none !important; }",
+    });
+
+    const pintura = async (seletor: string) => {
+      const el = page.locator(seletor);
+      await el.hover();
+      return el.evaluate((n) => {
+        const s = getComputedStyle(n);
+        return {
+          cor: s.color,
+          fundo: s.backgroundColor,
+          borda: s.borderColor,
+          sublinhado: s.textDecorationLine,
+        };
+      });
+    };
+
+    for (const v of ["primary", "secondary", "danger", "success", "ghost"]) {
+      const link = page.locator(`[data-par="link-${v}"]`);
+      await expect(link, "o par precisa ser um link de verdade").toHaveJSProperty(
+        "tagName",
+        "A",
+      );
+      expect(
+        await pintura(`[data-par="link-${v}"]`),
+        `variante ${v}: o link pinta diferente do botão no hover`,
+      ).toEqual(await pintura(`[data-par="botao-${v}"]`));
+    }
+  });
+}
+
+/**
  * As 36 células da E16-b, medidas por estilo COMPUTADO.
  *
  * Seis séries × três superfícies × dois temas. O piso é 3:1 — WCAG 1.4.11,
