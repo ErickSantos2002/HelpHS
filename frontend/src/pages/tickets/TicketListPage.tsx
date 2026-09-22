@@ -345,7 +345,10 @@ function KanbanColumn({
 
       <div className={cn("h-0.5 shrink-0", tom.ponto)} />
 
-      <div className="min-h-0 flex-1 space-y-2 overflow-y-auto p-2">
+      {/* `relative`: quem rola, contém. Sem ele o "Sem responsável" (`sr-only`,
+          absoluto) do último cartão escapava desta lista e esticava a
+          rolagem da página. Ver o comentário do `<main>` na `AppLayout`. */}
+      <div className="relative min-h-0 flex-1 space-y-2 overflow-y-auto p-2">
         {tickets.length === 0 ? (
           <div className="mx-1 mt-1 flex flex-col items-center justify-center rounded-lg border-2 border-dashed border-borda/60 py-10">
             <Icon
@@ -567,14 +570,17 @@ export default function TicketListPage() {
           valores crus escolhidos a mao por tema. `--bg-base` ja e o degrau
           abaixo da superficie, e ja inverte. */}
       <div className="min-h-0 flex-1 overflow-hidden rounded-2xl border border-borda bg-surface-base">
-        {/* overflow-x-auto = scroll horizontal quando colunas não cabem */}
+        {/* overflow-x-auto = scroll horizontal quando colunas não cabem.
+            `relative` pelo mesmo motivo da lista da coluna: o contador de cada
+            cabeçalho tem um `sr-only`, e o das colunas fora da tela esticava a
+            página para a direita. */}
         <div
           ref={scrollRef}
           onMouseDown={onMouseDown}
           onMouseMove={onMouseMove}
           onMouseLeave={stopDrag}
           onMouseUp={stopDrag}
-          className="h-full overflow-x-auto kanban-scroll cursor-grab"
+          className="relative h-full overflow-x-auto kanban-scroll cursor-grab"
         >
           <div className="flex gap-3 h-full p-3 min-w-max">
             {COLUNAS.map((status) => (

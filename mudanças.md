@@ -7,6 +7,72 @@ O changelog do produto (o que o cliente vê) fica em
 
 ---
 
+## 22/09/2026 — Dois defeitos de tela da v1.15.0: o botão sem texto e a página que rolava inteira
+
+Os dois foram vistos em produção no quadro de chamados, e nenhum dos dois
+aparece em jsdom: um é cascata de CSS, o outro é leiaute. Foram reproduzidos
+num Chromium de verdade antes de qualquer conserto, com as telas reais e a
+API interceptada. Nada saiu para a rede, e o `.env` da árvore principal
+aponta para produção.
+
+⚠️ **Nada disso está no ar.** Branch `fix/botao-link-e-rolagem-do-quadro`,
+worktree `HelpHS-fix-front`. Só front, então sem migration e sem variável
+nova. Sobe com o rebuild do serviço do front no EasyPanel.
+
+### ⚠️ Se algo parecer diferente depois do deploy
+
+| Sintoma | Causa provável | Onde olhar |
+|---|---|---|
+| Botão-link não sublinha mais no hover | é o esperado: agora ele pinta igual ao botão | `Button.tsx`, comentário da cor repetida no `hover:` |
+| Algum elemento posicionado mudou de lugar dentro de uma tela | o `<main>` passou a ser `relative` | a varredura das 22 telas achou só um `absolute` sem pai posicionado fora os `sr-only`, e ele não tem `top`/`left`; se aparecer outro, é tela fora das 22 |
+
+### O botão (`eb0fc1c`)
+
+O `Button` com `to` vira `<a>`, e o `base.css` do pacote tem
+`a:hover { color: var(--text-link-hover); text-decoration: underline }`.
+Tailwind 3, sem camadas nativas: `a:hover` (0,1,1) vence `.text-on-primary`
+(0,1,0). E o `--text-link-hover` do primário é **o mesmo degrau** do
+`--action-hover` do fundo nos dois temas. Medido: `rgb(21, 89, 132)` sobre
+`rgb(21, 89, 132)` no claro e `rgb(123, 192, 234)` sobre ele mesmo no
+escuro.
+
+O conserto é local, no `Button`: repete a cor de cada variante no `hover:` e
+põe `hover:no-underline`. O pacote não foi editado.
+
+### A rolagem (`62cd312`)
+
+Os `sr-only` são `position: absolute`. Sem ancestral posicionado, nenhum
+`overflow` os corta, e eles esticam o documento até onde estariam no fluxo.
+No quadro, isso é o fim de uma coluna cheia, numa coluna fora da tela.
+
+**Não era só o quadro.** Medido com dados de mentira: 1114 × 574 px no quadro,
+973 px no painel do técnico, 3213 px na KB com 40 artigos. A KB tem 4 em
+produção e ainda cabe, mas quebraria ao crescer. Notificações escapava por
+acaso, porque cada linha já é `relative` pela barrinha de não lida.
+
+A regra: **quem rola, contém.** `relative` no `<main>` e nos três contêineres
+aninhados que rolam com `sr-only` dentro. Só o `<main>` não bastava: a
+mutação mostrou o fantasma saindo do documento e indo para o `<main>`.
+
+### O que ficou de fora, de propósito
+
+- **A lista "Gerenciar eventos" da Agenda** (`CalendarPage.tsx:1051`) também
+  rola sem ser posicionada, com `sr-only` dentro. Ela é cortada em
+  `slice(0, 4)` e não passa dos 168 px, então o caso vertical não acontece.
+  Sobra uma hipótese **não medida**: o `sr-only` depois de um título longo,
+  dentro de um `truncate`, pode esticar na horizontal.
+- **O `a:hover` do pacote também vale para os links que não são `Button`.**
+  Medido no mesmo harness: no hover, o **cartão do quadro sublinha todo o
+  texto** (protocolo, título, categoria, prioridade e "SLA Vencido"), e **os
+  itens da sidebar sublinham**. A cor não sofre, porque ali as classes
+  explícitas vencem. Já está assim em produção. O conserto geral seria uma
+  emenda no `base.css`; o local seria um `hover:no-underline` em cada link
+  com cara de componente. Emenda é decisão sua.
+- **O `Changelog.md` não tem seção `[v1.15.0]`**, mas o `changelog.ts` do app
+  tem (16/09). Parte do `[Não publicado]` pode já estar no ar.
+
+---
+
 ## 14/09/2026 — Cinco PRs entram na main, e a biblioteca chega inteira à tela
 
 Dia de integração. Cinco frentes fecharam ao mesmo tempo, e a maior delas — a

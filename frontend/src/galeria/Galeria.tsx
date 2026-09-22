@@ -1,4 +1,5 @@
 import { useState } from "react";
+import { MemoryRouter } from "react-router-dom";
 import { Alert } from "../components/ui/Alert";
 import { Avatar } from "../components/ui/Avatar";
 import { Badge } from "../components/ui/Badge";
@@ -76,7 +77,7 @@ const AVISOS = ["info", "success", "warning", "danger"] as const;
  *
  * Ao acrescentar um `Bloco`, ajuste este número — a suíte cobra.
  */
-export const AMOSTRAS = 16;
+export const AMOSTRAS = 17;
 
 /** `texto` cobra 4,5:1; `grafico` cobra 3:1 (WCAG 1.4.11). */
 function Bloco({
@@ -132,6 +133,32 @@ export function Galeria() {
             {v} off
           </Button>
         ))}
+      </Bloco>
+
+      {/*
+        Cada variante duas vezes, lado a lado: como `<button>` e como `<a>`.
+
+        O `Button` com `to` vira link, e link herda as regras de `a` do
+        `base.css` do pacote — que estão fora do Tailwind e, no hover, têm
+        especificidade maior que uma classe só. A regra que o par prova é que o
+        destino muda o ELEMENTO e não a APARÊNCIA: o `e2e/galeria.spec.ts` passa
+        o mouse nos dois e exige a mesma pintura.
+
+        O roteador de memória existe só porque `Link` exige um.
+      */}
+      <Bloco nome="Button como link">
+        <MemoryRouter>
+          {BOTOES.map((v) => (
+            <div key={v} className="flex gap-2">
+              <Button variant={v} data-par={"botao-" + v}>
+                {v}
+              </Button>
+              <Button variant={v} to="/destino" data-par={"link-" + v}>
+                {v} link
+              </Button>
+            </div>
+          ))}
+        </MemoryRouter>
       </Bloco>
 
       <Bloco nome="Badge">

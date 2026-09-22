@@ -42,18 +42,31 @@ export interface ButtonProps extends ButtonHTMLAttributes<HTMLButtonElement> {
  * A troca é das Fases 11–16; até lá, "botão semântico corrigido" vale para este
  * arquivo e não para as telas. Lista, medições e as quatro armadilhas da
  * varredura em `docs/design-system-migration/fase-7/contraste-fundo-cheio.md`.
+ *
+ * ── A cor do texto se repete no `hover:` de propósito ─────────────────
+ *
+ * Parece redundante, e para `<button>` é. Para o `Button` com `to`, que vira
+ * `<a>`, é o que segura o texto: o `base.css` do pacote declara
+ * `a:hover { color: var(--text-link-hover); text-decoration: underline }`, e
+ * `a:hover` (0,1,1) vence `.text-on-primary` (0,1,0). No primário o
+ * `--text-link-hover` é o MESMO degrau do `--action-hover` do fundo, nos dois
+ * temas — texto e ícone sumiam no hover (v1.15.0, "Abrir chamado" e "Novo
+ * artigo"). `hover:text-*` e `hover:no-underline` têm (0,2,0) e ganham.
+ *
+ * O `e2e/galeria.spec.ts` passa o mouse no par botão/link de cada variante e
+ * exige a mesma pintura.
  */
 const variantClasses: Record<Variant, string> = {
   primary:
-    "bg-action text-on-primary border-action hover:bg-action-hover focus-visible:ring-action",
+    "bg-action text-on-primary border-action hover:bg-action-hover hover:text-on-primary focus-visible:ring-action",
   secondary:
-    "bg-surface text-conteudo border-borda hover:bg-surface-elevated focus-visible:ring-action",
+    "bg-surface text-conteudo border-borda hover:bg-surface-elevated hover:text-conteudo focus-visible:ring-action",
   danger:
-    "bg-action-danger text-on-danger border-action-danger hover:bg-action-danger-hover focus-visible:ring-danger",
+    "bg-action-danger text-on-danger border-action-danger hover:bg-action-danger-hover hover:text-on-danger focus-visible:ring-danger",
   success:
-    "bg-action-success text-on-success border-action-success hover:bg-action-success-hover focus-visible:ring-success",
+    "bg-action-success text-on-success border-action-success hover:bg-action-success-hover hover:text-on-success focus-visible:ring-success",
   ghost:
-    "bg-transparent text-conteudo-muted border-transparent hover:bg-surface-elevated focus-visible:ring-action",
+    "bg-transparent text-conteudo-muted border-transparent hover:bg-surface-elevated hover:text-conteudo-muted focus-visible:ring-action",
 };
 
 const sizeClasses: Record<Size, string> = {
@@ -75,7 +88,7 @@ export function Button({
   ...props
 }: ButtonProps) {
   const classes = cn(
-    "inline-flex items-center justify-center gap-2 rounded-lg border font-medium leading-tight transition-colors",
+    "inline-flex items-center justify-center gap-2 rounded-lg border font-medium leading-tight transition-colors hover:no-underline",
     // `ring-offset-background` era alias do D2 e escapou da varredura da Etapa 1:
     // o utilitário ali é `ring-offset-`, e o padrão só previa `ring-`.
     "focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-offset-2 focus-visible:ring-offset-surface-base",

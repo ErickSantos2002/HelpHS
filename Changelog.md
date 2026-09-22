@@ -98,6 +98,19 @@ publicar uma versão nova.
   alerta #28 do CodeQL). Engolir a exceção está certo — derrubar o
   `/dashboard/stats` porque o cache não gravou trocaria degradação por
   indisponibilidade. O defeito era a mudez, não a política.
+- **Botão que leva a outra tela deixa de sumir no hover** (`eb0fc1c`). Visto
+  na v1.15.0 em "Abrir chamado" e "Novo artigo". O `Button` com `to` vira
+  `<a>`, e o `a:hover` do `base.css` do pacote (0,1,1) vencia a cor da
+  variante (0,1,0). No primário, o `--text-link-hover` é o mesmo degrau do
+  `--action-hover` do fundo, com contraste 1,00 nos dois temas. Nas outras
+  variantes o texto virava azul-link sublinhado. O pacote não foi editado.
+- **A página inteira deixa de rolar no quadro de chamados** (`62cd312`). Os
+  `sr-only` são absolutos e, sem ancestral posicionado, escapavam de todo
+  `overflow` e esticavam o documento: a sidebar terminava no meio da tela e
+  sobrava uma faixa vazia. `relative` no `<main>` da `AppLayout` e nos três
+  contêineres aninhados que rolam com `sr-only` dentro (lista da coluna,
+  quadro e lista do painel do técnico). Medido antes: 1114 × 574 px no
+  quadro, 973 px no painel do técnico e 3213 px na KB com 40 artigos.
 
 ### Segurança
 
@@ -112,6 +125,13 @@ publicar uma versão nova.
 - Nove casos novos no `ChatPanel`, provados por mutação: mandar tudo pelo
   socket mata 2, tudo pelo REST mata 1, tirar o filtro `visibility: "client"`
   mata 1, desenhar a caixa do anexo sempre mata 1.
+- **`e2e/rolagem-da-casca.spec.ts`**, que não depende de backend: as telas
+  reais com a API interceptada e a rede barrada. Mede todo contêiner que
+  rola, com e sem os `sr-only`, e exige diferença zero. Cada um dos quatro
+  `relative`, tirado sozinho, derruba o teste da sua tela.
+- A galeria ganha o bloco "Button como link", e o `galeria.spec.ts` compara
+  no hover o par botão/link das cinco variantes, nos dois temas. Provado por
+  mutação no `no-underline` e na cor do `ghost`.
 
 ### Pendente
 
