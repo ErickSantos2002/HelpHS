@@ -7,6 +7,26 @@ import { AA, contraste } from "../helpers/contraste";
 /** Piso da WCAG 1.4.11 para componente de interface e limite gráfico. */
 const NAO_TEXTO = 3;
 
+/**
+ * Classe de fundo → token, só as que o `Switch` pinta.
+ *
+ * Classe fora daqui levanta erro em vez de medir: no navegador, uma classe sem
+ * token herda a cor do pai, e o número sai plausível e errado.
+ */
+const TOKEN_DO_FUNDO: Record<string, string> = {
+  "bg-action": "--action",
+  "bg-surface-elevated": "--surface-elevated",
+  "bg-on-primary": "--text-on-primary",
+  "bg-borda-control": "--border-control",
+};
+
+function tokenDoFundo(el: Element): string {
+  const classe = Array.from(el.classList).find((c) => c.startsWith("bg-"));
+  const token = classe ? TOKEN_DO_FUNDO[classe] : undefined;
+  if (!token) throw new Error(`fundo sem token conhecido: "${el.className}"`);
+  return token;
+}
+
 describe("Switch", () => {
   it("é um interruptor de verdade, não um botão com desenho de interruptor", () => {
     // O alternador de tema era um `<button>` com um trilho desenhado dentro.
@@ -94,6 +114,29 @@ describe("Switch", () => {
         // carregava. `--text-on-primary` é o token que a E1 criou para isso.
         expect(
           contraste("--action", "--text-on-primary", tema),
+        ).toBeGreaterThanOrEqual(NAO_TEXTO);
+      },
+    );
+
+    it.each([
+      [true, "claro"],
+      [true, "escuro"],
+      [false, "claro"],
+      [false, "escuro"],
+    ] as const)(
+      "a bolinha se distingue do trilho em que está — ligado=%s, tema %s",
+      (ligado, tema) => {
+        // Mede o componente renderizado, e não um par de tokens escolhido à
+        // mão: o par certo é o que as classes pintam. O teste de cima mede só
+        // o ligado, e no desligado a bolinha sumia no trilho — foi assim que
+        // ela apareceu no "Dia inteiro" do modal de evento da agenda.
+        const { container } = render(
+          <Switch checked={ligado} label="X" onChange={() => {}} />,
+        );
+        const [trilho, bolinha] = container.querySelectorAll('span[aria-hidden="true"]');
+
+        expect(
+          contraste(tokenDoFundo(trilho), tokenDoFundo(bolinha), tema),
         ).toBeGreaterThanOrEqual(NAO_TEXTO);
       },
     );
