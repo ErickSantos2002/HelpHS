@@ -11,7 +11,7 @@ from unittest.mock import patch
 
 import pytest
 
-from app.core.config import Settings
+from app.core.config import ConfiguracaoDaTelefoniaInvalidaError, Settings
 
 # Variáveis que, exportadas no shell, mudariam o resultado destes testes: são
 # exatamente as que a suíte quer avaliar no default. O conftest já exporta
@@ -25,6 +25,10 @@ _ENVS_SENSIVEIS = frozenset(
         "EMAIL_VERIFICATION_ENABLED",
         "SMTP_USER",
         "SMTP_FROM_EMAIL",
+        "API4COM_ENABLED",
+        "API4COM_TOKEN",
+        "API4COM_BASE_URL",
+        "API4COM_TIMEOUT_SECONDS",
     }
 )
 
@@ -400,3 +404,146 @@ def test_staging_correto_sobe_e_continua_nao_sendo_producao():
     s = _settings(app_env="staging", cors_origins=_DOMINIO_REAL, frontend_url=_DOMINIO_REAL)
     assert s.is_production is False
     assert s.is_development is False
+
+
+_SEGREDO = "token-de-teste-que-nao-pode-aparecer-em-lugar-nenhum-4F2X"
+
+
+# ── Telefonia — API4COM ──────────────────────────────────────
+#
+# Esta validação é a ÚNICA do arquivo que roda em todos os ambientes. As
+# outras protegem contra subir PRODUÇÃO com valor de desenvolvimento, e em dev
+# aquele valor é o certo. Esta protege contra ligar a integração sem ter como
+# autenticar — e isso está igualmente errado em qualquer lugar.
+#
+# Daí a posição no `model_post_init`: no topo, antes do `return` que dispensa
+# development e testing. Os dois testes de ambiente abaixo prendem justamente
+# essa posição; se alguém mover a chamada para baixo do `return`, eles caem.
+
+
+def test_desligada_e_sem_token_e_configuracao_valida():
+    """O estado de hoje em produção: ninguém precisa de token para o sistema subir."""
+    s = _settings()
+    assert s.api4com_enabled is False
+    assert s.api4com_token.get_secret_value() == ""
+    assert s.api4com_base_url == "https://api.api4com.com/api/v1"
+
+
+def test_ligada_sem_token_nao_sobe():
+    with pytest.raises(ConfiguracaoDaTelefoniaInvalidaError, match="API4COM_TOKEN"):
+        _settings(api4com_enabled=True)
+
+
+@pytest.mark.parametrize("vazio", ["", "   ", "\t", "\n"])
+def test_token_so_de_espaco_conta_como_ausente(vazio):
+    """Um espaço colado sem querer no painel não pode passar por credencial."""
+    with pytest.raises(ConfiguracaoDaTelefoniaInvalidaError, match="API4COM_TOKEN"):
+        _settings(api4com_enabled=True, api4com_token=vazio)
+
+
+@pytest.mark.parametrize(
+    "url",
+    ["", "   ", "api.api4com.com/api/v1", "ftp://api.api4com.com", "https://", "só um texto"],
+)
+def test_ligada_com_base_url_invalida_nao_sobe(url):
+    with pytest.raises(ConfiguracaoDaTelefoniaInvalidaError, match="API4COM_BASE_URL"):
+        _settings(api4com_enabled=True, api4com_token="x", api4com_base_url=url)
+
+
+@pytest.mark.parametrize("url", ["https://api.api4com.com/api/v1", "http://localhost:8080/v1"])
+def test_ligada_com_base_url_valida_sobe(url):
+    """`http` é aceito de propósito: um proxy local de homologação é caso legítimo."""
+    s = _settings(api4com_enabled=True, api4com_token="x", api4com_base_url=url)
+    assert s.api4com_base_url == url
+
+
+@pytest.mark.parametrize("valor", [0, -1, -30])
+def test_ligada_com_timeout_nao_positivo_nao_sobe(valor):
+    with pytest.raises(ConfiguracaoDaTelefoniaInvalidaError, match="API4COM_TIMEOUT_SECONDS"):
+        _settings(api4com_enabled=True, api4com_token="x", api4com_timeout_seconds=valor)
+
+
+@pytest.mark.parametrize("ambiente", ["development", "testing", "staging", "production"])
+def test_a_validacao_da_telefonia_vale_em_todos_os_ambientes(ambiente):
+    """Inclusive dev e testing, ao contrário de todas as outras deste arquivo.
+
+    Se a chamada a `_valida_api4com()` escorregar para depois do `return` que
+    dispensa os ambientes locais, os dois primeiros casos deste teste passam a
+    não levantar nada — e é exatamente isso que ele existe para impedir.
+    """
+    base = {"app_env": ambiente, "api4com_enabled": True}
+    if ambiente in {"staging", "production"}:
+        base |= {"cors_origins": _DOMINIO_REAL, "frontend_url": _DOMINIO_REAL}
+
+    with pytest.raises(ConfiguracaoDaTelefoniaInvalidaError, match="API4COM_TOKEN"):
+        _settings(**base)
+
+
+@pytest.mark.parametrize(
+    "estrago",
+    [
+        {"api4com_base_url": "nao-e-url"},
+        {"api4com_timeout_seconds": 0},
+    ],
+    ids=["base_url", "timeout"],
+)
+def test_o_erro_de_boot_nao_conta_qual_era_o_token(estrago):
+    """Quem lê um log de boot que falhou não pode ganhar a credencial de brinde.
+
+    Este teste pegou um vazamento real. Enquanto a validação levantava
+    `ValueError`, o pydantic a embrulhava num `ValidationError` que imprime
+    `input_value=` com o dicionário de entrada truncado — e a CAUDA do token
+    aparecia ali, medido com o valor vindo do ambiente. Por isso
+    `ConfiguracaoDaTelefoniaInvalidaError` não herda de `ValueError`.
+
+    Os dois casos estragam OUTRO campo de propósito: com o token preenchido e
+    válido, ele é justamente o que não pode aparecer na mensagem.
+    """
+    with pytest.raises(ConfiguracaoDaTelefoniaInvalidaError) as capturado:
+        _settings(api4com_enabled=True, api4com_token=_SEGREDO, **estrago)
+
+    texto = str(capturado.value)
+    assert _SEGREDO not in texto
+    assert _SEGREDO[-12:] not in texto, "a cauda do token vazou na mensagem de boot"
+    assert _SEGREDO[:12] not in texto, "a cabeça do token vazou na mensagem de boot"
+    assert "input_value" not in texto, "o pydantic voltou a ecoar o dicionário de entrada"
+    assert "database_url" not in texto.lower()
+
+
+# ── O token não vaza pela representação do Settings ──────────
+#
+# Divergência deliberada do resto do arquivo: `smtp_password`,
+# `deepseek_api_key` e `mfa_secret_encryption_key` são `str` cru e SAEM por
+# extenso em qualquer uma das quatro formas abaixo. O que segura os três hoje é
+# disciplina de quem escreve log, não o tipo. Segredo novo não precisa nascer
+# com essa dívida.
+
+
+@pytest.mark.parametrize(
+    "como",
+    [repr, str, lambda s: str(s.model_dump()), lambda s: s.model_dump_json()],
+    ids=["repr", "str", "model_dump", "model_dump_json"],
+)
+def test_o_token_nao_aparece_na_representacao_do_settings(como):
+    s = _settings(api4com_enabled=True, api4com_token=_SEGREDO)
+    assert _SEGREDO not in como(s)
+
+
+def test_o_token_continua_legivel_por_quem_precisa_dele():
+    """O segredo não some — só exige um `get_secret_value()` explícito e greppável."""
+    s = _settings(api4com_enabled=True, api4com_token=_SEGREDO)
+    assert s.api4com_token.get_secret_value() == _SEGREDO
+
+
+def test_os_segredos_antigos_continuam_como_estao():
+    """Prende o ESCOPO da divergência: a 2A não mexeu nos outros campos.
+
+    Este teste não aprova o comportamento — ele documenta que a dívida dos
+    segredos antigos segue de pé e que trocá-los é decisão separada, com
+    migração de painel. Se alguém converter um deles para `SecretStr`, este
+    teste cai e obriga a conversa.
+    """
+    s = _settings(smtp_password="x", deepseek_api_key="y", mfa_secret_encryption_key="z")
+    assert isinstance(s.smtp_password, str)
+    assert isinstance(s.deepseek_api_key, str)
+    assert isinstance(s.mfa_secret_encryption_key, str)

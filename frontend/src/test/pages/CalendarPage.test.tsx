@@ -447,14 +447,47 @@ describe("CalendarPage — a cor vem do tipo", () => {
 // ── Horário e dia inteiro ─────────────────────────────────────
 
 describe("CalendarPage — horário e dia inteiro", () => {
-  it("evento novo abre como dia inteiro, sem campo de hora", async () => {
-    // O padrão que não perde dado: quem esquece a chave cria dia inteiro, e não
-    // evento de duração errada.
+  it("evento novo abre COM hora, e a chave de dia inteiro desligada", async () => {
+    // Padrão trocado a pedido do operador em 22/09/2026: quem marca evento na
+    // agenda marca hora, e ligar a chave é um clique a menos que desligá-la.
+    // O preço está medido no teste de baixo: quem esquece a chave grava um
+    // evento de 09:00 a 10:00, e não um dia inteiro.
     await montar();
-    await novoEventoNoDia();
+    const dialogo = await novoEventoNoDia();
 
-    expect(screen.getByRole("switch", { name: "Dia inteiro" })).toBeChecked();
-    expect(screen.queryByLabelText("Hora de início")).not.toBeInTheDocument();
+    expect(within(dialogo).getByRole("switch", { name: "Dia inteiro" })).not.toBeChecked();
+    expect(within(dialogo).getByLabelText("Hora de início")).toHaveValue("09:00");
+    expect(within(dialogo).getByLabelText("Hora de fim")).toHaveValue("10:00");
+  });
+
+  it("ligar a chave esconde os campos de hora", async () => {
+    // A outra metade do padrão novo: a chave continua governando os campos, e
+    // agora no sentido que ninguém exercitava ao abrir a tela.
+    await montar();
+    const dialogo = await novoEventoNoDia();
+
+    fireEvent.click(within(dialogo).getByRole("switch", { name: "Dia inteiro" }));
+
+    expect(within(dialogo).getByRole("switch", { name: "Dia inteiro" })).toBeChecked();
+    expect(within(dialogo).queryByLabelText("Hora de início")).not.toBeInTheDocument();
+  });
+
+  it("sem tocar na chave, o evento novo grava hora — e não um dia inteiro", async () => {
+    // O que o padrão antigo protegia: agora quem esquece a chave grava uma hora
+    // de duração. É a consequência aceita da troca, e fica prendida aqui para
+    // que ninguém a descubra em produção.
+    vi.mocked(calendarService.createCalendarEvent).mockResolvedValue(AZUL);
+    await montar();
+    const dialogo = await novoEventoNoDia();
+
+    fireEvent.change(within(dialogo).getByLabelText("Título"), { target: { value: "Sem mexer na chave" } });
+    fireEvent.click(within(dialogo).getByRole("button", { name: "Salvar" }));
+
+    await waitFor(() => expect(calendarService.createCalendarEvent).toHaveBeenCalled());
+    const payload = vi.mocked(calendarService.createCalendarEvent).mock.calls[0][0];
+    expect(payload.all_day).toBe(false);
+    expect(payload.start_date).toBe(instanteDe(CHAVE, "09:00", FUSO));
+    expect(payload.end_date).toBe(instanteDe(CHAVE, "10:00", FUSO));
   });
 
   it("dia inteiro manda a data, a chave, e nenhuma cor", async () => {
@@ -463,6 +496,7 @@ describe("CalendarPage — horário e dia inteiro", () => {
     const dialogo = await novoEventoNoDia();
 
     fireEvent.change(within(dialogo).getByLabelText("Título"), { target: { value: "Treinamento NR-35" } });
+    fireEvent.click(within(dialogo).getByRole("switch", { name: "Dia inteiro" }));
     fireEvent.click(within(dialogo).getByRole("button", { name: "Salvar" }));
 
     await waitFor(() => expect(calendarService.createCalendarEvent).toHaveBeenCalled());
@@ -478,13 +512,12 @@ describe("CalendarPage — horário e dia inteiro", () => {
     expect(payload).not.toHaveProperty("color");
   });
 
-  it("desligar a chave mostra a hora, em minutos, e manda o instante em UTC", async () => {
+  it("a hora vai em minutos, e o instante em UTC", async () => {
     vi.mocked(calendarService.createCalendarEvent).mockResolvedValue(AZUL);
     await montar();
     const dialogo = await novoEventoNoDia();
 
     fireEvent.change(within(dialogo).getByLabelText("Título"), { target: { value: "Reunião da virada" } });
-    fireEvent.click(within(dialogo).getByRole("switch", { name: "Dia inteiro" }));
 
     const inicio = within(dialogo).getByLabelText("Hora de início");
     // Minutos, e não segundos: a pegada do #17 é 23:59:59 com os segundos, e um
@@ -507,7 +540,6 @@ describe("CalendarPage — horário e dia inteiro", () => {
     const dialogo = await novoEventoNoDia();
 
     fireEvent.change(within(dialogo).getByLabelText("Título"), { target: { value: "Zero minutos" } });
-    fireEvent.click(within(dialogo).getByRole("switch", { name: "Dia inteiro" }));
     fireEvent.change(within(dialogo).getByLabelText("Hora de início"), { target: { value: "10:00" } });
     fireEvent.change(within(dialogo).getByLabelText("Hora de fim"), { target: { value: "10:00" } });
 
@@ -676,7 +708,6 @@ describe("CalendarPage — achados da revisão", () => {
     await montar();
     const dialogo = await novoEventoNoDia();
     fireEvent.change(within(dialogo).getByLabelText("Título"), { target: { value: "X" } });
-    fireEvent.click(within(dialogo).getByRole("switch", { name: "Dia inteiro" }));
 
     fireEvent.change(within(dialogo).getByLabelText("Hora de fim"), { target: { value: "" } });
 
@@ -730,7 +761,6 @@ describe("CalendarPage — achados da revisão", () => {
   it("data de fim antes do início marca a DATA como inválida, e não a hora", async () => {
     await montar();
     const dialogo = await novoEventoNoDia();
-    fireEvent.click(within(dialogo).getByRole("switch", { name: "Dia inteiro" }));
 
     fireEvent.change(within(dialogo).getByLabelText("Data de fim"), {
       target: { value: chaveDoDia(ANO, MES, DIA - 1) },

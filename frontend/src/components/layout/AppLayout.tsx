@@ -29,7 +29,12 @@ export function AppLayout() {
           onToggleCollapsed={() => setSidebarCollapsed((v) => !v)}
           sidebarCollapsed={sidebarCollapsed}
         />
-        <main id="main-content" className="flex-1 overflow-y-auto p-4 md:p-6">
+        {/* `relative` é o que segura a casca parada. O `sr-only` é absoluto,
+            e sem ancestral posicionado o bloco de contenção dele é o
+            documento: nenhum `overflow` corta o texto, e uma lista longa
+            esticava a rolagem do DOCUMENTO — sidebar e topbar rolavam junto.
+            Quem rola, contém. Ver `e2e/rolagem-da-casca.spec.ts`. */}
+        <main id="main-content" className="relative flex-1 overflow-y-auto p-4 md:p-6">
           <Outlet />
         </main>
       </div>
