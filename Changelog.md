@@ -78,6 +78,12 @@ publicar uma versão nova.
   - **Chamado sem triagem não tem prazo de SLA**, e por isso não mostra
     relógio nem entra no denominador da conformidade — não se cobra prazo que
     ainda não existe. O total de chamados continua contando com eles.
+  - **Na ordenação por prioridade, o não triado vem PRIMEIRO** — sem
+    prioridade → crítica → alta → média → baixa —, tanto no `sort_by=priority`
+    da API quanto no quadro de chamados. Ele é o que precisa de ação inicial, e
+    o prazo de resolução dele já corre desde a abertura: no fim da fila ficaria
+    escondido justamente enquanto o relógio anda. É ordem operacional e não faz
+    dele um quinto nível — segue fora do denominador da conformidade.
   - **`priority` saiu do `PATCH /tickets/{id}` genérico.** Um caminho só: o
     genérico gravaria o campo sem recalcular o SLA, e o chamado ficaria crítico
     com o prazo de quando era baixo.

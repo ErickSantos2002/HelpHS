@@ -4,6 +4,8 @@
 **Origem:** pedido do Rickelme, com desenho aprovado no mesmo dia (decisões D1 a D4)
 **Status:** aprovado e implementado; **com migration**, sem backfill
 **Branch:** `feat/prioridade-definida-na-triagem`, worktree `HelpHS-prioridade`
+**Emendado no mesmo dia (D5):** o não triado passa a vir **primeiro** na
+ordenação por prioridade, e não no fim. Ver a seção D5.
 
 Este documento existe para responder **"por que o número mudou?"**. Dois
 indicadores se mexem no dia do deploy, e os dois se mexem para pior antes de
@@ -45,7 +47,7 @@ prioridade que o próprio cliente marcou.
 | `schemas/ticket.py:34` | `TicketUpdate.priority` existia | campo sai (D3) |
 | `tickets.py:368-374, 408` | busca `SLAConfig` por `body.priority` e carimba | move para a triagem |
 | `tickets.py:970-985` | reabertura relê `ticket.priority.value` | **quebraria com nulo** |
-| `tickets.py:527-534` | ordenação por prioridade, com `else_=4` | já aguentava nulo |
+| `tickets.py:527-534` | ordenação por prioridade, com `else_=4` | aguentava nulo, mas na ponta errada — ver D5 |
 | `chat.py:454` | `str(ticket.priority)` para a LLM | mandaria a string `"None"` |
 | `dashboard.py` (6 pontos) | `r.priority.value` | **`AttributeError` → 500** |
 
@@ -97,6 +99,31 @@ regra foi mantida e **fixada em teste**: um prazo retroativo não acusa quem
 respondeu antes de ele existir. A espera continua medida onde sempre foi —
 `sla_first_response - created_at`, no relatório.
 
+### D5 — O não triado vem PRIMEIRO na fila
+
+Decidido depois da primeira rodada, com o código já escrito: a ordenação por
+prioridade passa a ser **sem prioridade → crítica → alta → média → baixa**.
+
+O primeiro desenho mandava o não triado para o fim, depois de "Baixa", pelo
+argumento de que ele não é menos urgente que baixa — é desconhecido, e a coluna
+ordenada por urgência não tem onde afirmar isso. O argumento que ganhou é
+operacional e mais forte:
+
+- ordenar por urgência passou a ter **duas perguntas dentro** — quão urgente é,
+  e se alguém já disse quão urgente é —, e a segunda vem primeiro;
+- no fim da coluna, o não triado fica **escondido justamente enquanto o relógio
+  anda**: o prazo de resolução dele corre desde a abertura (D1), então atrasar
+  a triagem custa prazo que não volta.
+
+Vale nos dois lugares onde a ordem existe, com a mesma régua: o `case()` do
+`sort_by=priority` na API (`Ticket.priority.is_(None)` → -1) e o
+`ordemNaFila` do `lib/prioridade.ts`, que o quadro kanban usa.
+
+**Não faz de "sem prioridade" um quinto nível.** É ordem operacional; ele
+continua fora do denominador da conformidade enquanto não houver prazo (D2).
+E prioridade **desconhecida** — valor que o banco tenha e o código não conheça
+— continua indo para o fim: dado estranho não é fila de triagem.
+
 ### Decisão que não estava nas quatro: chamado encerrado
 
 O endpoint **não mexe no SLA** de chamado resolvido, fechado ou cancelado —
@@ -131,6 +158,7 @@ que `marca_violacao_ao_resolver` já segue: só acrescenta, nunca desmarca.
 | `ticketService.ts` | `updateTicketPriority`; tipos nuláveis |
 | `TicketDetailPage.tsx` | "Sem prioridade" em três lugares; modal de triagem para a equipe |
 | `TicketListPage.tsx`, dashboards, `ReportsPage.tsx` | "Sem prioridade" onde o selo assumia valor |
+| `tickets.py` (`case`) e `lib/prioridade.ts` (`ordemNaFila`) | o não triado vem primeiro na ordenação (D5) |
 
 ## 4. Impacto nos dados existentes
 
@@ -164,21 +192,25 @@ espera real; o que não acontece é a acusação retroativa.
 
 ## 5. Testes
 
-**13 casos** em `tests/test_prioridade_na_triagem.py`, **3** em
+**14 casos** em `tests/test_prioridade_na_triagem.py`, **3** em
 `test_dashboard_postgres.py` (contra Postgres, porque a linha `NULL` do
 `GROUP BY` é defeito de banco e nenhum mock a produz), **1** em
-`test_migrations_postgres.py` (a subida e a descida, rodando de verdade) e
-**7** em `TicketDetailPage.test.tsx`.
+`test_migrations_postgres.py` (a subida e a descida, rodando de verdade), **1**
+em `test_tickets_postgres.py` (a ordem da fila, que é `ORDER BY` e por isso
+também não se prova com mock), **7** em `TicketDetailPage.test.tsx`, **4** em
+`prioridade.test.ts` e **1** em `TicketListPage.test.tsx`.
 
 O prazo é provado **sem depender do relógio**: a abertura é fixa
 (`2026-09-14 12:00 UTC`), e o teste compara o prazo carimbado com
 `add_business_minutes(abertura, 30)`. Trocar a âncora por `now` derruba as
 duas asserções.
 
-### As doze mutações
+### As quinze mutações
 
-Oito no backend, quatro no frontend, cada uma derrubando o teste
-correspondente. **Duas passaram na primeira rodada e viraram conserto:**
+Nove no backend, seis no frontend, cada uma derrubando o teste correspondente.
+As três da ordem (D5) incluem a que importa: tirar a cláusula
+`Ticket.priority.is_(None)` do `case()` manda o não triado para o fim, e o
+teste de `ORDER BY` contra banco de verdade cai. **Duas passaram na primeira rodada e viraram conserto:**
 
 1. **`TicketCreate` voltou a aceitar `priority` e nenhum teste caiu.** Duas
    defesas cobriam o mesmo caminho: o router não escreve o campo, então o

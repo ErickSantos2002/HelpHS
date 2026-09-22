@@ -47,7 +47,16 @@ Duas exceções, as duas pelo mesmo princípio de não desfazer conclusão alhei
   deixa os prazos como estão — uma justificativa de violação já escrita se
   apoia neles.
 
-O desenho completo, com as quatro decisões aprovadas, está em
+**Na ordenação por prioridade, o não triado vem PRIMEIRO** — sem prioridade →
+crítica → alta → média → baixa. Vale no `sort_by=priority` da API e no quadro
+de chamados, com a mesma régua. O motivo é o prazo: ele corre desde a abertura,
+então o chamado que espera triagem no fim da fila fica escondido justamente
+enquanto o relógio anda. É ordem operacional — "sem prioridade" continua não
+sendo um nível, e continua fora do denominador da conformidade. Prioridade
+**desconhecida** (valor que o banco tenha e o código não conheça) vai para o
+fim, não para o começo.
+
+O desenho completo, com as cinco decisões aprovadas, está em
 `docs/superpowers/specs/2026-09-22-prioridade-definida-na-triagem-design.md`.
 
 ### O que conta como primeira resposta

@@ -64,6 +64,27 @@ provava o que o nome dizia:
 Os dois viraram teste novo. A terceira correção foi de precisão: contar as
 ocorrências de "Sem prioridade" em vez de aceitar "pelo menos uma".
 
+### A ordem da fila mudou depois (D5)
+
+Fechada a primeira rodada, você pediu o inverso do que eu tinha feito: o não
+triado vai para o **começo** da ordenação por prioridade, não para o fim.
+
+Eu tinha mandado para o fim com o argumento de que "sem prioridade" não é menos
+urgente que "baixa" — é desconhecido, e a coluna ordenada por urgência não tem
+onde afirmar isso. O seu argumento ganha porque é operacional: no fim da
+coluna, o chamado não triado fica escondido **justamente enquanto o relógio
+anda**, já que o prazo de resolução corre desde a abertura. Atrasar a triagem
+passa a custar prazo que não volta.
+
+A ordem agora é **sem prioridade → crítica → alta → média → baixa**, nos dois
+lugares onde ela existe (o `case()` do `sort_by=priority` na API e o
+`ordemNaFila` do `lib/prioridade.ts`, que o quadro usa). Prioridade
+desconhecida — valor que o banco tenha e o código não conheça — continua indo
+para o fim: dado estranho não é fila de triagem.
+
+Três testes, e a mutação que importa é tirar a cláusula do nulo do `case()`: o
+teste de `ORDER BY` contra Postgres de verdade cai.
+
 ### Fora do escopo, ficou anotado
 
 O campo `ai_classification` já guarda a prioridade que a LLM sugere e a API já
