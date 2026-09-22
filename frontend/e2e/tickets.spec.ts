@@ -50,14 +50,21 @@ test.describe("Tickets", () => {
       .getByPlaceholder(/descreva o problema com detalhes/i)
       .fill("Descrição criada por teste automatizado.");
 
-    // ⚠️ DEFEITO ANTERIOR A ESTA MIGRAÇÃO, DEIXADO COMO ESTAVA DE PROPÓSITO:
-    // em /tickets/new a Prioridade e a Categoria são fichas de rádio
-    // (`RadioCards`), e já eram antes — nunca houve `<select>` nesta tela, de
-    // modo que estas duas linhas já falhavam. Consertá-las aqui misturaria no
-    // mesmo diff um conserto que nada tem a ver com a troca do seletor.
-    // Priority and category selects (1st = priority, 2nd = category)
-    await page.locator("select").first().selectOption("medium");
-    await page.locator("select").nth(1).selectOption("software");
+    // Estas duas linhas já falhavam ANTES da troca do seletor, e por um
+    // motivo próprio: em /tickets/new a Prioridade e a Categoria nunca foram
+    // campo de lista — são fichas de rádio (`RadioCards`), e o
+    // `locator("select")` não achava nada. O rádio de verdade fica `sr-only`
+    // atrás da ficha, então o clique vai no rótulo visível, dentro do grupo
+    // que o `fieldset`/`legend` nomeia: "Média" também aparece no Resumo ao
+    // lado, e sem o grupo o seletor pegaria os dois.
+    await page
+      .getByRole("group", { name: "Prioridade" })
+      .getByText("Média", { exact: true })
+      .click();
+    await page
+      .getByRole("group", { name: "Categoria" })
+      .getByText("Software", { exact: true })
+      .click();
 
     // Submit goes to preview step first
     await page.getByRole("button", { name: /revisar e enviar/i }).click();

@@ -18,13 +18,18 @@ test.describe("Ticket Detail — Interações", () => {
     await page
       .getByPlaceholder(/descreva o problema com detalhes/i)
       .fill("Descrição para teste de detalhe do chamado.");
-    // ⚠️ DEFEITO ANTERIOR A ESTA MIGRAÇÃO, DEIXADO COMO ESTAVA DE PROPÓSITO:
-    // em /tickets/new a Prioridade e a Categoria são fichas de rádio
-    // (`RadioCards`), e já eram antes — nunca houve `<select>` nesta tela, de
-    // modo que estas duas linhas já falhavam. O conserto é de outro assunto e
-    // de outro commit.
-    await page.locator("select").first().selectOption("medium");
-    await page.locator("select").nth(1).selectOption("software");
+    // Como em `tickets.spec.ts`: estas duas linhas já falhavam antes da troca
+    // do seletor, porque em /tickets/new a Prioridade e a Categoria são fichas
+    // de rádio (`RadioCards`) e nunca houve `<select>` nesta tela. O clique
+    // vai no rótulo visível, dentro do grupo nomeado pelo `fieldset`/`legend`.
+    await page
+      .getByRole("group", { name: "Prioridade" })
+      .getByText("Média", { exact: true })
+      .click();
+    await page
+      .getByRole("group", { name: "Categoria" })
+      .getByText("Software", { exact: true })
+      .click();
 
     await page.getByRole("button", { name: /revisar e enviar/i }).click();
     await page.getByRole("button", { name: /confirmar e enviar/i }).click();
