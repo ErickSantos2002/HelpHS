@@ -1,4 +1,4 @@
-export const APP_VERSION = "v1.15.0";
+export const APP_VERSION = "v1.16.0";
 
 export type EntryType = "novidade" | "corrigido" | "melhoria";
 
@@ -14,6 +14,13 @@ export interface ChangelogVersion {
 }
 
 export const CHANGELOG: ChangelogVersion[] = [
+  {
+    version: "v1.16.0",
+    date: "22/09/2026",
+    entries: [
+      { type: "melhoria", text: "As listas de escolha do sistema — os filtros das telas e os campos de formulário — passaram a abrir dentro do próprio sistema. Antes quem desenhava a lista era o Windows, o Android ou o navegador, e ela ficava de fora do tema: no modo escuro abria clara, e mudava de aparência conforme o aparelho de cada pessoa. Agora ela segue as cores do sistema em qualquer navegador, marca a opção que está escolhida e, no celular, abre para cima quando não há espaço embaixo. O que cada campo faz continua igual: as setas, o Enter e a digitação da primeira letra funcionam como antes, e nenhum filtro, formulário ou prazo mudou de comportamento." },
+    ],
+  },
   {
     version: "v1.15.0",
     date: "16/09/2026",
