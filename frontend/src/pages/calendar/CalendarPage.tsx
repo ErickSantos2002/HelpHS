@@ -116,12 +116,19 @@ function EventDialog({ event, defaultDate, fuso, tipos, onClose, onSaved }: Even
   const [description, setDescription] = useState(event?.description ?? "");
   const [eventType, setEventType] = useState<CalendarEventType>(event?.event_type ?? "event");
   /*
-    Dia inteiro LIGADO ao abrir um evento novo. Todo evento que já existe é de dia
-    inteiro, o clique no dia do calendário é a entrada mais comum, treinamento de
-    dia todo não pede hora — e é o padrão que não perde dado: quem esquece a chave
-    cria dia inteiro, e não um evento de duração errada.
+    Dia inteiro DESLIGADO ao abrir um evento novo, por pedido do operador em
+    22/09/2026. O evento que se marca na agenda tem hora; dia inteiro é o caso
+    raro, e ligar a chave é um clique — o mesmo que desligá-la era.
+
+    O padrão antigo era o oposto, e tinha um motivo que segue verdadeiro: quem
+    esquecer a chave agora grava um evento de 09:00 a 10:00, e não um dia
+    inteiro. A troca aceita esse preço; o teste
+    "sem tocar na chave, o evento novo grava hora" prende a consequência, para
+    que ela seja uma decisão e não uma surpresa.
+
+    Evento que já existe continua abrindo como foi gravado.
   */
-  const [diaInteiro, setDiaInteiro] = useState(event ? event.all_day : true);
+  const [diaInteiro, setDiaInteiro] = useState(event ? event.all_day : false);
   /*
     As duas naturezas se leem diferente, e é aqui que o erro custaria um dia.
     Dia inteiro é data FLUTUANTE: `00:00Z` é a data. Lido no fuso de Recife, o
