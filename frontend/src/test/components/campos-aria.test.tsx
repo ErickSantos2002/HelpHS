@@ -6,6 +6,7 @@ import { Checkbox } from "../../components/ui/Checkbox";
 import { Input } from "../../components/ui/Input";
 import { RadioCards } from "../../components/ui/RadioCards";
 import { Select } from "../../components/ui/Select";
+import { SelectMenu } from "../../components/ui/SelectMenu";
 import { Selector } from "../../components/ui/Selector";
 import { Textarea } from "../../components/ui/Textarea";
 
@@ -266,6 +267,26 @@ const TABELA: Linha[] = [
     descrito: campo,
     invalido: campo,
     nativo: campo,
+  },
+  {
+    // O substituto do `<select>` nativo. Quem carrega os dois atributos é o
+    // gatilho, que é `role="combobox"` — o papel que o `<select>` tinha. Sem
+    // `nativo`: o gatilho é `<button>`, e botão não tem `required` para herdar.
+    nome: "SelectMenu",
+    capacidades: ["error", "hint"],
+    montar: ({ error, hint }) =>
+      render(
+        <SelectMenu
+          value=""
+          onChange={vi.fn()}
+          options={OPCOES}
+          label="Título"
+          error={error}
+          hint={hint}
+        />,
+      ),
+    descrito: () => screen.getByRole("combobox"),
+    invalido: () => screen.getByRole("combobox"),
   },
   {
     // Só `error`. O `hint` do `Selector` é da OPÇÃO (`SelectorOption.hint`, a
