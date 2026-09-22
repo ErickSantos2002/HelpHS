@@ -99,6 +99,12 @@ const ALTURA_LINHA = 36;
 const CAMADA = 9999;
 /** Janela da busca por letra: teclas dentro dela somam ao termo. */
 const JANELA_BUSCA_MS = 500;
+/**
+ * Folga, em `ch`, do que o gatilho tem além do texto: `px-4` dos dois lados,
+ * o `gap-3` e a seta de 16px. A 14px (`text-sm`) isso dá ~62px, e o `ch` do
+ * Inter mede ~8,4px.
+ */
+const FOLGA_CH = 8;
 
 interface Posicao {
   left: number;
@@ -210,6 +216,20 @@ export const SelectMenu = forwardRef<HTMLButtonElement, SelectMenuProps>(
     const escolhida = linhas.findIndex((l) => l.value === value);
     const opcaoEscolhida = options.find((o) => o.value === value);
     const texto = opcaoEscolhida?.label ?? placeholder ?? "Selecione";
+
+    /**
+     * A largura do campo sai da opção MAIS LONGA, não do que está escolhido.
+     *
+     * É o que o `<select>` nativo fazia, e não é detalhe: um botão mede pelo
+     * texto que exibe, então numa barra de filtros a largura pularia a cada
+     * escolha ("Perfil" → "Administrador") e empurraria os vizinhos.
+     *
+     * `min()` com `100%` é o que impede o conserto de virar outro defeito: num
+     * formulário estreito ou num celular, um rótulo longo estouraria a largura
+     * do pai e criaria rolagem horizontal. O teto é sempre o pai.
+     */
+    const maiorRotulo = linhas.reduce((n, l) => Math.max(n, l.label.length), 0);
+    const larguraMinima = "min(" + String(maiorRotulo + FOLGA_CH) + "ch, 100%)";
 
     // O nome é o RÓTULO, e só ele — o valor é o conteúdo do combobox, como no
     // `<select>`. Quem chama pode apontar para um rótulo da própria tela.
@@ -478,6 +498,7 @@ export const SelectMenu = forwardRef<HTMLButtonElement, SelectMenuProps>(
             fechar();
             onBlur?.();
           }}
+          style={{ minWidth: larguraMinima }}
           className={cn(
             "flex w-full items-center justify-between gap-3 rounded-lg border bg-surface px-4 py-2 text-left text-sm",
             "focus:outline-none focus:ring-2 focus:ring-action focus:border-transparent",

@@ -176,6 +176,24 @@ describe("SelectMenu — o que o gatilho mostra", () => {
     expect(gatilho()).toHaveTextContent("Selecione");
   });
 
+  it("o campo tem a largura da opção mais longa, e não a do que está escolhido", () => {
+    // O `<select>` nativo media pela opção mais longa. Sem isto, escolher
+    // "Congelado" alargaria o campo e empurraria os vizinhos da barra.
+    montar({ value: "open" });
+
+    // "Congelado" tem 9 letras, mais a folga do padding, do vão e da seta.
+    expect(gatilho().style.minWidth).toBe("min(17ch, 100%)");
+  });
+
+  it("a largura do campo nunca estoura o pai — nem no celular", () => {
+    montar({
+      options: [{ value: "x", label: "Um rótulo muito, muito comprido mesmo" }],
+    });
+
+    // O teto é o pai (`100%`), e é isso que impede rolagem horizontal.
+    expect(gatilho().style.minWidth).toContain("100%");
+  });
+
   it("texto longo é truncado no gatilho", () => {
     montar({ value: "open" });
 
