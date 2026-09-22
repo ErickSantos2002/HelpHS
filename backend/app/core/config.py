@@ -4,7 +4,7 @@ from typing import Any
 from urllib.parse import urlparse
 
 from loguru import logger
-from pydantic import field_validator
+from pydantic import SecretStr, field_validator
 from pydantic_settings import BaseSettings, SettingsConfigDict
 
 # Os dois modos da Helô. Constantes, e não literais soltos, porque o valor é
@@ -18,6 +18,29 @@ HELO_MODO_COMPLETA = "completa"
 # dois erros: barrar um domínio legítimo que contenha a palavra (ex.:
 # localhost.healthsafetytech.com) e deixar passar [::1] ou 0.0.0.0.
 _HOSTS_LOCAIS = frozenset({"localhost", "127.0.0.1", "::1", "0.0.0.0", ""})
+
+
+class ConfiguracaoDaTelefoniaInvalidaError(RuntimeError):
+    """A telefonia está ligada com configuração que não permite operar.
+
+    ⚠️ NÃO herda de `ValueError`, e essa é a única razão de a classe existir.
+
+    Todas as outras validações deste arquivo levantam `ValueError` de dentro do
+    `model_post_init`, e o pydantic as embrulha num `ValidationError` — que
+    imprime, junto da mensagem, um `input_value=` com o dicionário de entrada
+    truncado. MEDIDO no pydantic 2.11.3: com `API4COM_TOKEN` vindo do ambiente
+    e outra validação falhando, a mensagem do `ValidationError` traz a CAUDA do
+    token. O segredo inteiro não sai, mas 22 caracteres finais saem — e vão
+    para o log de boot, que é lido por mais gente do que o painel.
+
+    Exceção que não seja `ValueError` nem `AssertionError` o pydantic deixa
+    subir intacta, com a nossa mensagem e nada mais. É o que esta faz.
+
+    Consequência para quem lê: `pytest.raises(ValueError)` NÃO pega esta. Os
+    testes da telefonia em `tests/test_config.py` esperam esta classe pelo
+    nome, de propósito.
+    """
+
 
 # ── STARTTLS e o CVE-2026-55558 ───────────────────────────────
 #
@@ -163,6 +186,18 @@ class Settings(BaseSettings):
     bcrypt_rounds: int = 12
 
     def model_post_init(self, __context: Any) -> None:
+        # ⚠️ A API4COM é validada AQUI, no topo, e essa posição é o requisito —
+        # não estilo. Tudo o que vem depois do `return` abaixo é pulado em
+        # development e testing; a telefonia não pode ser pulada.
+        #
+        # A razão da divergência: as validações de baixo protegem contra subir
+        # PRODUÇÃO com valor de desenvolvimento, e em dev esse valor é o certo.
+        # Esta protege contra ligar a integração sem ter como autenticar — e
+        # isso está igualmente errado em qualquer ambiente. Quem ligar a flag
+        # em dev sem token merece descobrir na subida, não numa falha confusa
+        # no primeiro uso.
+        self._valida_api4com()
+
         # A lista do que ESCAPA é fechada, e é essa a diferença. Enquanto a
         # condição era `if not self.is_production`, qualquer APP_ENV fora de
         # "production"/"prod" passava batido: um staging publicado na internet
@@ -371,6 +406,69 @@ class Settings(BaseSettings):
     # Vale para as quatro chamadas. Era `openai_temperature`, com o mesmo 0.3.
     llm_temperature: float = 0.3
     llm_request_timeout_seconds: int = 30
+
+    # ── Telefonia — API4COM ───────────────────────────────────
+    #
+    # DESLIGADA por padrão, pelo mesmo raciocínio do `helo_enabled`: ligar
+    # sozinha faria o sistema DISCAR PARA O TELEFONE DE UMA PESSOA no deploy
+    # seguinte, sem ninguém ter pedido. Ligar é decisão.
+    #
+    # Na Fase 2A não existe consumidor: nenhum router, lifespan ou laço de
+    # fundo importa `services/api4com.py`. A flag existe desde já porque a
+    # validação de boot abaixo precisa de um interruptor para guardar.
+    api4com_enabled: bool = False
+
+    # CONFIGURAÇÃO com padrão, não constante no código — mesmo critério do
+    # `deepseek_base_url`: se o fornecedor mudar o endereço, o conserto é no
+    # painel, sem tocar em código e sem deploy. É o endereço que a sonda já
+    # exercita.
+    api4com_base_url: str = "https://api.api4com.com/api/v1"
+
+    # ⚠️ ÚNICO segredo do projeto declarado como `SecretStr`, e é divergência
+    # deliberada do resto do arquivo.
+    #
+    # Todos os outros (`smtp_password`, `deepseek_api_key`,
+    # `mfa_secret_encryption_key`) são `str` cru. Isso significa que
+    # `repr(settings)`, `settings.model_dump()` e `model_dump_json()` imprimem
+    # os três por extenso — o que segura hoje é disciplina de quem escreve log,
+    # não o tipo. Segredo NOVO não precisa nascer com essa dívida: com
+    # `SecretStr`, o vazamento passa a exigir um `get_secret_value()` explícito,
+    # que é greppável e aparece em revisão.
+    #
+    # O custo é que ler o valor tem cerimônia. Ele é lido em UM lugar só, na
+    # montagem do `Authorization` em `services/api4com.py`.
+    api4com_token: SecretStr = SecretStr("")
+
+    api4com_timeout_seconds: int = 15
+
+    def _valida_api4com(self) -> None:
+        """Desligada, nada é exigido. Ligada, o que falta impede a subida.
+
+        As mensagens citam o NOME da variável e mais nada: nunca o valor do
+        token, nunca o `Settings` inteiro. Quem lê um log de boot que falhou
+        não deveria ganhar de brinde a credencial que faltava.
+        """
+        if not self.api4com_enabled:
+            return
+
+        if not self.api4com_token.get_secret_value().strip():
+            raise ConfiguracaoDaTelefoniaInvalidaError(
+                "API4COM_ENABLED=true exige API4COM_TOKEN preenchido: "
+                "sem credencial nenhuma chamada seria autenticada"
+            )
+
+        endereco = urlparse(self.api4com_base_url.strip())
+        if endereco.scheme not in {"http", "https"} or not endereco.netloc:
+            raise ConfiguracaoDaTelefoniaInvalidaError(
+                "API4COM_BASE_URL precisa ser uma URL http(s) completa "
+                "(exemplo: https://api.api4com.com/api/v1)"
+            )
+
+        if self.api4com_timeout_seconds <= 0:
+            raise ConfiguracaoDaTelefoniaInvalidaError(
+                "API4COM_TIMEOUT_SECONDS precisa ser maior que zero: "
+                "iniciar ligação sem teto de espera prenderia a requisição"
+            )
 
     # Email
     smtp_host: str = "smtp.gmail.com"
