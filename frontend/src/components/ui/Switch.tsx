@@ -41,6 +41,15 @@ import { cn } from "../../lib/utils";
  *
  * A E7 levou a bolinha do `Switch.jsx` do pacote a `--text-on-primary` junto,
  * então este arquivo e a referência voltaram a dizer a mesma coisa.
+ *
+ * ── Um desvio aberto: a bolinha no desligado ───────────────────────────
+ *
+ * A E7 mediu a bolinha só sobre o trilho **ligado**. No desligado o trilho é
+ * `--surface-elevated`, e o `--text-on-primary` por cima dá **1,10:1** no claro
+ * (branco sobre slate-100) e **1,01:1** no escuro (navy sobre navy): a bolinha
+ * some. Aqui ela passa a `--border-control` quando desligada — o mesmo token do
+ * contorno do trilho, que o `colors.css` já nomeia como o neutro que inverte.
+ * O `Switch.jsx` do pacote ainda pinta `--text-on-primary` nos dois estados.
  */
 export interface SwitchProps
   extends Omit<
@@ -120,13 +129,17 @@ export function Switch({
           )}
         />
 
-        {/* A bolinha. --text-on-primary e não branco cravado: no escuro o
+        {/* A bolinha troca de cor com o trilho, porque o fundo dela troca.
+            Ligado: --text-on-primary e não branco cravado — no escuro o
             --action inverte para o degrau claro da rampa, e o branco cai a
-            2,69:1. É a lição da emenda E1. */}
+            2,69:1 (a lição da emenda E1). Desligado: --border-control, o
+            neutro que inverte por tema. O --text-on-primary ali dava 1,10:1 no
+            claro e 1,01:1 no escuro — a bolinha sumia no trilho. */}
         <span
           aria-hidden="true"
           className={cn(
-            "absolute top-1/2 left-1 -translate-y-1/2 rounded-full bg-on-primary shadow-sm transition-transform",
+            "absolute top-1/2 left-1 -translate-y-1/2 rounded-full shadow-sm transition-transform",
+            checked ? "bg-on-primary" : "bg-borda-control",
             m.bolinha,
             checked && m.desloca,
           )}
