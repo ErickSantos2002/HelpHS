@@ -18,14 +18,10 @@ test.describe("Ticket Detail — Interações", () => {
     await page
       .getByPlaceholder(/descreva o problema com detalhes/i)
       .fill("Descrição para teste de detalhe do chamado.");
-    // Como em `tickets.spec.ts`: estas duas linhas já falhavam antes da troca
-    // do seletor, porque em /tickets/new a Prioridade e a Categoria são fichas
-    // de rádio (`RadioCards`) e nunca houve `<select>` nesta tela. O clique
-    // vai no rótulo visível, dentro do grupo nomeado pelo `fieldset`/`legend`.
-    await page
-      .getByRole("group", { name: "Prioridade" })
-      .getByText("Média", { exact: true })
-      .click();
+    // Como em `tickets.spec.ts`: a prioridade NÃO se escolhe em /tickets/new
+    // desde 22/09/2026 — o chamado nasce sem ela e quem a define é a triagem.
+    // A Categoria continua sendo ficha de rádio (`RadioCards`), e o clique vai
+    // no rótulo visível, dentro do grupo nomeado pelo `fieldset`/`legend`.
     await page
       .getByRole("group", { name: "Categoria" })
       .getByText("Software", { exact: true })

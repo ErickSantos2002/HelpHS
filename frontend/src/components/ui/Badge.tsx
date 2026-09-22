@@ -126,6 +126,27 @@ export function PriorityBadge({ priority }: { priority: string }) {
   );
 }
 
+/**
+ * O chamado que ainda nao foi triado.
+ *
+ * Componente proprio, e NAO um `PriorityBadge` com o valor nulo: "sem
+ * prioridade" nao e um quinto nivel de urgencia, e um selo colorido ao lado
+ * dos outros quatro o venderia como se fosse. O selo neutro tambem nao serve
+ * aqui -- `low` ja usa a variante `muted`, e "Baixa" e "Sem prioridade"
+ * ficariam identicos na tela.
+ *
+ * O tom e o mesmo que o sistema ja usa para ausencia ("Nao atribuido", no
+ * painel de propriedades do chamado): texto apagado em italico, que se le como
+ * falta de informacao e nao como informacao.
+ */
+export function SemPrioridade() {
+  return (
+    <span className="text-conteudo-muted font-normal italic text-xs">
+      Sem prioridade
+    </span>
+  );
+}
+
 // ── Tag badge ─────────────────────────────────────────────────
 
 export function TagBadge({

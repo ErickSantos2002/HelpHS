@@ -575,3 +575,125 @@ async def test_a_migration_para_alto_se_alguma_linha_ainda_usa_other(banco):
 
     # E o tipo continua inteiro: a transação foi desfeita, não meio aplicada.
     assert "other" in await _rotulos_da_categoria(banco)
+
+
+# ── O caminho de volta da prioridade ──────────────────────────
+
+_ANTES_DA_PRIORIDADE_VAZIA = "g3b4c5d6e7f8"
+
+
+@pytest.mark.asyncio
+async def test_a_prioridade_desce_e_sobe_sem_perder_o_que_ja_estava(banco):
+    """A coluna aceita NULL na subida, e a descida carimba `medium` no que é nulo.
+
+    O downgrade desta revision é o único do projeto que ESCREVE. Ele existe
+    porque `NOT NULL` não volta com linha nula na tabela, e o valor que ele
+    carimba é o que o código antigo teria gravado. Um caminho de volta que
+    nunca rodou é código que se descobre quebrado no meio de uma reversão —
+    daí este teste.
+    """
+    assert _alembic(banco, "head").returncode == 0
+
+    criador_id = uuid.uuid4()
+    sem_prioridade = uuid.uuid4()
+    com_prioridade = uuid.uuid4()
+
+    motor = create_async_engine(banco)
+    async with motor.begin() as conn:
+        await conn.execute(
+            text(
+                "INSERT INTO users (id, name, email, password, role, status, phone, "
+                "lgpd_consent, email_verified, onboarding_completed) "
+                "VALUES (:id, 'Cliente', :email, 'x', 'client', 'active', "
+                "'+5581999999999', true, true, true)"
+            ),
+            {"id": criador_id, "email": f"{criador_id.hex[:8]}@test.com"},
+        )
+        # O chamado recém-aberto: sem prioridade. É a linha que o `NOT NULL`
+        # anterior recusaria, e é por ela que esta migration existe.
+        await conn.execute(
+            text(
+                "INSERT INTO tickets (id, protocol, title, description, status, "
+                "category, creator_id, sla_response_breach, sla_resolve_breach, "
+                "sla_total_paused_ms, auto_closed, reopen_count, created_at, updated_at) "
+                "VALUES (:id, :protocolo, 'Sem triagem', 'corpo', 'open', 'hardware', "
+                ":criador, false, false, 0, false, 0, now(), now())"
+            ),
+            {
+                "id": sem_prioridade,
+                "protocolo": f"HS-MIG-{sem_prioridade.hex[:6]}",
+                "criador": criador_id,
+            },
+        )
+        # E um chamado antigo, que já tinha prioridade: ele não pode ser tocado
+        # por nada disto.
+        await conn.execute(
+            text(
+                "INSERT INTO tickets (id, protocol, title, description, status, priority, "
+                "category, creator_id, sla_response_breach, sla_resolve_breach, "
+                "sla_total_paused_ms, auto_closed, reopen_count, created_at, updated_at) "
+                "VALUES (:id, :protocolo, 'Antigo', 'corpo', 'open', 'critical', 'hardware', "
+                ":criador, false, false, 0, false, 0, now(), now())"
+            ),
+            {
+                "id": com_prioridade,
+                "protocolo": f"HS-MIG-{com_prioridade.hex[:6]}",
+                "criador": criador_id,
+            },
+        )
+    await motor.dispose()
+
+    descida = _alembic(banco, _ANTES_DA_PRIORIDADE_VAZIA, comando="downgrade")
+    assert descida.returncode == 0, f"downgrade falhou: {descida.stdout} {descida.stderr}"
+
+    motor = create_async_engine(banco)
+    async with motor.connect() as conn:
+        nulavel = (
+            await conn.execute(
+                text(
+                    "SELECT is_nullable FROM information_schema.columns "
+                    "WHERE table_name = 'tickets' AND column_name = 'priority'"
+                )
+            )
+        ).scalar_one()
+        assert nulavel == "NO", "o NOT NULL não voltou"
+
+        # O que era nulo virou `medium` — o valor que o código antigo daria.
+        assert (
+            await conn.execute(
+                text("SELECT priority::text FROM tickets WHERE id = :id"),
+                {"id": sem_prioridade},
+            )
+        ).scalar_one() == "medium"
+        # E o chamado que já tinha prioridade continua com a dele.
+        assert (
+            await conn.execute(
+                text("SELECT priority::text FROM tickets WHERE id = :id"),
+                {"id": com_prioridade},
+            )
+        ).scalar_one() == "critical"
+    await motor.dispose()
+
+    subida = _alembic(banco, "head")
+    assert subida.returncode == 0, f"upgrade de volta falhou: {subida.stderr}"
+
+    motor = create_async_engine(banco)
+    async with motor.connect() as conn:
+        nulavel = (
+            await conn.execute(
+                text(
+                    "SELECT is_nullable FROM information_schema.columns "
+                    "WHERE table_name = 'tickets' AND column_name = 'priority'"
+                )
+            )
+        ).scalar_one()
+        assert nulavel == "YES", "a coluna não voltou a aceitar NULL"
+        # A subida NÃO desfaz o carimbo da descida: nenhuma migration deste
+        # projeto reescreve dado para trás.
+        assert (
+            await conn.execute(
+                text("SELECT priority::text FROM tickets WHERE id = :id"),
+                {"id": sem_prioridade},
+            )
+        ).scalar_one() == "medium"
+    await motor.dispose()

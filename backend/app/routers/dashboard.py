@@ -133,7 +133,12 @@ async def get_dashboard_stats(
             select(Ticket.priority, func.count().label("cnt")).group_by(Ticket.priority)
         )
     ).all()
-    by_priority: dict[str, int] = {r.priority.value: r.cnt for r in priority_rows}
+    # A chave `None` é o balde "Sem prioridade": chamado que ninguém triou
+    # ainda. Ele CONTA no total (D2) — os cinco baldes somam o total de
+    # chamados, e é por isso que a chave nula não pode ser descartada aqui.
+    by_priority: dict[str | None, int] = {
+        (r.priority.value if r.priority else None): r.cnt for r in priority_rows
+    }
 
     total = sum(by_status.values())
     awaiting = by_status.get(TicketStatus.awaiting_client.value, 0) + by_status.get(
@@ -175,6 +180,7 @@ async def get_dashboard_stats(
             by_priority_high=by_priority.get(TicketPriority.high.value, 0),
             by_priority_medium=by_priority.get(TicketPriority.medium.value, 0),
             by_priority_low=by_priority.get(TicketPriority.low.value, 0),
+            by_priority_none=by_priority.get(None, 0),
         ),
         surveys=SurveyStats(total=survey_row.total, average_rating=avg_rating),
         sla=SlaStats(response_breached=sla_row.resp, resolve_breached=sla_row.resolve),
@@ -265,8 +271,11 @@ async def _build_report(
             .group_by(Ticket.priority)
         )
     ).all()
+    # Sem prioridade fica FORA da conformidade (D2): não se cobra cumprimento
+    # de um prazo que ainda não existe. Esses chamados aparecem no total, não
+    # aqui.
     sla_by_priority: dict[str, tuple[int, int]] = {
-        r.priority.value: (r.total, r.breached) for r in sla_rows
+        r.priority.value: (r.total, r.breached) for r in sla_rows if r.priority is not None
     }
     sla_compliance: list[SLAComplianceItem] = []
     priorities_iter = [priority] if priority else list(TicketPriority)
@@ -348,6 +357,7 @@ async def _build_report(
     resolution_map: dict[str, float | None] = {
         r.priority.value: round(float(r.avg_hours), 1) if r.avg_hours else None
         for r in resolution_rows
+        if r.priority is not None
     }
     avg_resolution_by_priority = [
         AvgResolutionItem(
@@ -421,6 +431,7 @@ async def _build_report(
     first_resp_map: dict[str, float | None] = {
         r.priority.value: round(float(r.avg_hours), 1) if r.avg_hours else None
         for r in first_resp_rows
+        if r.priority is not None
     }
     avg_first_response_by_priority = [
         AvgFirstResponseItem(priority=prio.value, avg_hours=first_resp_map.get(prio.value))
@@ -490,7 +501,7 @@ async def _build_report(
             ticket_id=str(r.id),
             protocol=r.protocol,
             title=r.title,
-            priority=r.priority.value,
+            priority=r.priority.value if r.priority else None,
             category=r.category.value,
             status=r.status.value,
             age_hours=round((now - r.created_at).total_seconds() / 3600, 1),
@@ -588,7 +599,7 @@ async def _build_report(
             ticket_id=str(r.id),
             protocol=r.protocol,
             title=r.title,
-            priority=r.priority.value,
+            priority=r.priority.value if r.priority else None,
             resolved_at=r.resolved_at,
             assignee_name=r.assignee_name,
             justification=r.sla_breach_justification,

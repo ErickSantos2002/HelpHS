@@ -451,8 +451,15 @@ async def suggest_ticket_reply(
         category=(
             ticket.category.value if hasattr(ticket.category, "value") else str(ticket.category)
         ),
+        # Chamado ainda não triado não tem prioridade, e o que ia para o prompt
+        # era a string "None" — a LLM lendo "Prioridade: None" como se fosse um
+        # nível. "sem prioridade definida" diz a verdade, em português.
         priority=(
-            ticket.priority.value if hasattr(ticket.priority, "value") else str(ticket.priority)
+            "sem prioridade definida"
+            if ticket.priority is None
+            else (
+                ticket.priority.value if hasattr(ticket.priority, "value") else str(ticket.priority)
+            )
         ),
         status=ticket.status.value if hasattr(ticket.status, "value") else str(ticket.status),
         history=history,

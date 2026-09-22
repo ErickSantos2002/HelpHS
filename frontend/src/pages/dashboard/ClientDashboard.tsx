@@ -9,6 +9,7 @@ import {
   KpiCard,
   Pagination,
   PriorityBadge,
+  SemPrioridade,
   Spinner,
   StatusBadge,
   Table,
@@ -70,7 +71,11 @@ function LinhaDeChamado({ ticket }: { ticket: Ticket }) {
       </TableCell>
 
       <TableCell>
-        <PriorityBadge priority={ticket.priority} />
+        {ticket.priority ? (
+          <PriorityBadge priority={ticket.priority} />
+        ) : (
+          <SemPrioridade />
+        )}
       </TableCell>
       <TableCell>
         <StatusBadge status={ticket.status} />

@@ -162,6 +162,7 @@ def _chamado(
     status: TicketStatus = TicketStatus.open,
     dias_atras: int = 1,
     horas_ate_resolver: float | None = None,
+    prioridade: TicketPriority | None = TicketPriority.medium,
 ) -> Ticket:
     aberto_em = _AGORA - timedelta(days=dias_atras)
     resolvido_em = (
@@ -172,7 +173,7 @@ def _chamado(
         protocol=f"HS-TEST-{uuid.uuid4().hex[:10]}",
         title="Chamado sintético",
         description="corpo",
-        priority=TicketPriority.medium,
+        priority=prioridade,
         category=TicketCategory.hardware,
         status=status,
         creator_id=criador.id,
@@ -365,3 +366,91 @@ async def test_csat_medio_vem_do_join_com_a_pesquisa(db):
 
     assert resumo.csat_count == 2
     assert resumo.csat_average == pytest.approx(9.0, abs=0.01)
+
+
+@pytest.mark.asyncio
+async def test_painel_conta_os_sem_prioridade(db):
+    """O balde "Sem prioridade" existe e fecha a soma com o total (D2).
+
+    Contra Postgres de verdade porque o defeito que este teste tranca é de
+    banco: a linha `NULL` do `GROUP BY priority` chegava ao `r.priority.value`
+    e derrubava o painel inteiro com `AttributeError`. Mock nenhum produz essa
+    linha.
+    """
+    cliente = _usuario(UserRole.client, "Cliente")
+    tecnico = _usuario(UserRole.technician, "Ana")
+    db.add_all([cliente, tecnico])
+    await db.flush()
+
+    db.add_all(
+        [
+            _chamado(cliente, tecnico, prioridade=None),
+            _chamado(cliente, tecnico, prioridade=None),
+            _chamado(cliente, tecnico, prioridade=TicketPriority.critical),
+            _chamado(cliente, tecnico, prioridade=TicketPriority.low),
+        ]
+    )
+    await db.flush()
+
+    stats = await get_dashboard_stats(db, tecnico)
+
+    assert stats.tickets.by_priority_none == 2
+    assert stats.tickets.by_priority_critical == 1
+    assert stats.tickets.by_priority_low == 1
+    assert stats.tickets.total == 4
+    assert (
+        stats.tickets.by_priority_critical
+        + stats.tickets.by_priority_high
+        + stats.tickets.by_priority_medium
+        + stats.tickets.by_priority_low
+        + stats.tickets.by_priority_none
+        == stats.tickets.total
+    )
+
+
+@pytest.mark.asyncio
+async def test_sem_prioridade_fica_fora_da_conformidade_de_sla(db):
+    """Chamado não triado não entra no denominador da conformidade (D2).
+
+    Ele conta no total de chamados do relatório, mas cobrar cumprimento de um
+    prazo que ainda não existe afundaria o indicador com trabalho que ninguém
+    deixou de fazer.
+    """
+    cliente = _usuario(UserRole.client, "Cliente")
+    tecnico = _usuario(UserRole.technician, "Ana")
+    db.add_all([cliente, tecnico])
+    await db.flush()
+
+    db.add_all(
+        [
+            _chamado(cliente, tecnico, prioridade=None),
+            _chamado(cliente, tecnico, prioridade=None),
+            _chamado(cliente, tecnico, prioridade=TicketPriority.low),
+        ]
+    )
+    await db.flush()
+
+    relatorio = await _build_report(db, period=30)
+
+    assert relatorio.total_tickets == 3
+    por_nivel = {item.priority: item for item in relatorio.sla_compliance}
+    assert set(por_nivel) == {"critical", "high", "medium", "low"}
+    assert por_nivel["low"].total == 1
+    assert sum(item.total for item in relatorio.sla_compliance) == 1
+
+
+@pytest.mark.asyncio
+async def test_mais_antigos_sem_resposta_aceitam_prioridade_nula(db):
+    """A lista dos mais antigos é onde o não-triado aparece primeiro."""
+    cliente = _usuario(UserRole.client, "Cliente")
+    tecnico = _usuario(UserRole.technician, "Ana")
+    db.add_all([cliente, tecnico])
+    await db.flush()
+
+    db.add_all([_chamado(cliente, tecnico, TicketStatus.open, prioridade=None)])
+    await db.flush()
+
+    relatorio = await _build_report(db, period=30)
+
+    assert len(relatorio.oldest_open_tickets) == 1
+    assert relatorio.oldest_open_tickets[0].priority is None

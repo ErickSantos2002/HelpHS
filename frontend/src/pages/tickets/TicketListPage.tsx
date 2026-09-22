@@ -7,6 +7,7 @@ import {
   Icon,
   PriorityBadge,
   SelectMenu,
+  SemPrioridade,
   Spinner,
 } from "../../components/ui";
 import {
@@ -217,7 +218,9 @@ function SlaIndicator({ ticket, now }: { ticket: Ticket; now: number }) {
  * pratica, decoracao, e sai da arvore com `aria-hidden`.
  */
 function TicketCard({ ticket, now }: { ticket: Ticket; now: number }) {
-  const variante = varianteDePrioridade(ticket.priority);
+  // `?? ""` e nao `!`: sem prioridade cai no recuo neutro do modulo, que e o
+  // mesmo tom que a ausencia ja tem no resto do sistema.
+  const variante = varianteDePrioridade(ticket.priority ?? "");
   const hasBreach = ticket.sla_response_breach || ticket.sla_resolve_breach;
 
   return (
@@ -258,7 +261,11 @@ function TicketCard({ ticket, now }: { ticket: Ticket; now: number }) {
           <span className="max-w-[100px] truncate rounded bg-surface-elevated px-2 py-0.5 text-[11px] text-conteudo-muted">
             {ticket.category}
           </span>
-          <PriorityBadge priority={ticket.priority} />
+          {ticket.priority ? (
+            <PriorityBadge priority={ticket.priority} />
+          ) : (
+            <SemPrioridade />
+          )}
         </div>
         {ticket.assignee_name ? (
           <Avatar name={ticket.assignee_name} size="xs" />
@@ -436,10 +443,15 @@ export default function TicketListPage() {
     }
     for (const arr of map.values()) {
       // A ordem vem do modulo: `ordem` e a urgencia, do mais critico ao menos.
+      //
+      // Nao triado vai para o FIM, depois de "Baixa" (`ordem` 3): o recuo era
+      // `?? 3`, que o empatava com baixa e deixava a ordem entre os dois ao
+      // acaso do `sort`. Ele nao e menos urgente que baixa -- e desconhecido,
+      // e a coluna ordenada por urgencia nao tem onde afirmar isso.
       arr.sort(
         (a, b) =>
-          (PRIORIDADE[a.priority as TicketPriority]?.ordem ?? 3) -
-          (PRIORIDADE[b.priority as TicketPriority]?.ordem ?? 3),
+          (PRIORIDADE[a.priority as TicketPriority]?.ordem ?? 4) -
+          (PRIORIDADE[b.priority as TicketPriority]?.ordem ?? 4),
       );
     }
     return map;

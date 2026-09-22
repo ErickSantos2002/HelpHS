@@ -50,17 +50,13 @@ test.describe("Tickets", () => {
       .getByPlaceholder(/descreva o problema com detalhes/i)
       .fill("Descrição criada por teste automatizado.");
 
-    // Estas duas linhas já falhavam ANTES da troca do seletor, e por um
-    // motivo próprio: em /tickets/new a Prioridade e a Categoria nunca foram
-    // campo de lista — são fichas de rádio (`RadioCards`), e o
-    // `locator("select")` não achava nada. O rádio de verdade fica `sr-only`
-    // atrás da ficha, então o clique vai no rótulo visível, dentro do grupo
-    // que o `fieldset`/`legend` nomeia: "Média" também aparece no Resumo ao
-    // lado, e sem o grupo o seletor pegaria os dois.
-    await page
-      .getByRole("group", { name: "Prioridade" })
-      .getByText("Média", { exact: true })
-      .click();
+    // A PRIORIDADE NÃO SE ESCOLHE AQUI desde 22/09/2026: quem abre descreve o
+    // problema, e quem classifica a urgência é a triagem. O passo que clicava
+    // em "Média" saiu junto com o grupo de rádio que ele procurava.
+    //
+    // A Categoria continua sendo ficha de rádio (`RadioCards`), e não campo de
+    // lista: o rádio de verdade fica `sr-only` atrás da ficha, então o clique
+    // vai no rótulo visível, dentro do grupo que o `fieldset`/`legend` nomeia.
     await page
       .getByRole("group", { name: "Categoria" })
       .getByText("Software", { exact: true })

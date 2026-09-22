@@ -9,6 +9,7 @@ import {
   getTicketHistory,
   reopenTicket,
   resolveTicket,
+  updateTicketPriority,
 } from "../../services/ticketService";
 import { api } from "../../services/api";
 
@@ -119,17 +120,44 @@ describe("createTicket", () => {
     const result = await createTicket({
       title: "Problema no sistema",
       description: "Detalhes",
-      priority: "medium",
       category: "software",
     });
 
     expect(mockPost).toHaveBeenCalledWith("/tickets", {
       title: "Problema no sistema",
       description: "Detalhes",
-      priority: "medium",
       category: "software",
     });
     expect(result.protocol).toBe("HS-2026-0001");
+  });
+
+  it("a abertura não leva prioridade no corpo", async () => {
+    // `toHaveBeenCalledWith` acima já é exato, mas ele cai por "objeto
+    // diferente" se qualquer campo mudar. Este diz POR QUE cairia — e é o que
+    // alguém lê quando pensa em pôr o campo de volta.
+    mockPost.mockResolvedValue({ data: ticket });
+
+    await createTicket({
+      title: "Problema no sistema",
+      description: "Detalhes",
+      category: "software",
+    });
+
+    const [, corpo] = mockPost.mock.calls[0];
+    expect(corpo).not.toHaveProperty("priority");
+  });
+});
+
+describe("updateTicketPriority", () => {
+  it("patches /tickets/:id/priority — e não o PATCH genérico", async () => {
+    mockPatch.mockResolvedValue({ data: { ...ticket, priority: "critical" } });
+
+    const result = await updateTicketPriority("t1", "critical");
+
+    expect(mockPatch).toHaveBeenCalledWith("/tickets/t1/priority", {
+      priority: "critical",
+    });
+    expect(result.priority).toBe("critical");
   });
 });
 
@@ -211,7 +239,6 @@ describe("equipamentos do chamado", () => {
     await createTicket({
       title: "Três aparelhos sem conexão",
       description: "Nenhum deles conecta",
-      priority: "high",
       category: "hardware",
       product_id: "p1",
       equipment_ids: ["e1", "e2", "e3"],

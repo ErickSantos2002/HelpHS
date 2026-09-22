@@ -6,8 +6,11 @@ vi.mock("../../components/chat/ChatPanel", () => ({ ChatPanel: () => null }));
 vi.mock("../../components/kb/KBSuggestionsPanel", () => ({
   KBSuggestionsPanel: () => null,
 }));
+// O papel e lido a CADA render (dentro do `useAuth`), entao a variavel pode
+// ser trocada por teste — o `vi.mock` so e hoisted na definicao da fabrica.
+let papelDoUsuario = "admin";
 vi.mock("../../contexts/AuthContext", () => ({
-  useAuth: () => ({ user: { id: "u1", role: "admin", name: "Admin" } }),
+  useAuth: () => ({ user: { id: "u1", role: papelDoUsuario, name: "Admin" } }),
 }));
 vi.mock("../../services/attachmentService", () => ({
   getAttachments: vi.fn(),
@@ -27,6 +30,7 @@ vi.mock("../../services/ticketService", () => ({
   reopenTicket: vi.fn(),
   resolveTicket: vi.fn(),
   updateClientObservation: vi.fn(),
+  updateTicketPriority: vi.fn(),
   updateTicketStatus: vi.fn(),
 }));
 vi.mock("../../services/surveyService", () => ({
@@ -626,5 +630,115 @@ describe("justificativa de SLA violado", () => {
     // repete — desenhado, diria a mesma coisa duas vezes, entre aspas.
     expect(screen.getAllByText(/Justificativa do SLA violado/)).toHaveLength(1);
     expect(screen.queryByText("sla_breach_justification")).not.toBeInTheDocument();
+  });
+});
+
+
+/**
+ * A triagem (22/09/2026).
+ *
+ * O chamado nasce sem prioridade, e quem a define e tecnico ou administrador.
+ * O que estes casos prendem: o cliente nao ve o controle, a ausencia se le em
+ * palavras, e a triagem passa pelo endpoint de prioridade — nao pelo PATCH
+ * generico, que abriria junto titulo, categoria e produto.
+ */
+describe("prioridade na triagem", () => {
+  const SEM_PRIORIDADE = { ...TICKET, priority: null } as typeof TICKET;
+
+  beforeEach(() => {
+    papelDoUsuario = "admin";
+    vi.mocked(ticketService.updateTicketPriority).mockReset();
+  });
+
+  it("antes da triagem a tela diz 'Sem prioridade' nos tres lugares", async () => {
+    // TRES: o cabecalho (ao lado do status) e o painel de Propriedades, que
+    // ficam a vista; e a ficha "Informacoes do chamado", que mora na aba
+    // Detalhes. Contar e o que distingue um deles regredindo —
+    // `toBeGreaterThan(0)` continuava verde com dois dos tres quebrados, e foi
+    // a mutacao do painel que mostrou isso.
+    await montar([], SEM_PRIORIDADE);
+    expect(screen.getAllByText("Sem prioridade")).toHaveLength(2);
+    // E nao inventa um nivel no lugar.
+    expect(screen.queryByText("Média")).not.toBeInTheDocument();
+
+    fireEvent.click(screen.getByText("Detalhes"));
+    expect(screen.getAllByText("Sem prioridade")).toHaveLength(3);
+  });
+
+  it("o cliente nao ve controle de prioridade", async () => {
+    papelDoUsuario = "client";
+    await montar([], SEM_PRIORIDADE);
+    expect(
+      screen.queryByRole("button", { name: /prioridade/i }),
+    ).not.toBeInTheDocument();
+    // Mas continua vendo o estado do chamado.
+    expect(screen.getAllByText("Sem prioridade").length).toBeGreaterThan(0);
+  });
+
+  it("o cliente com a secao de acoes ABERTA ainda nao ve a triagem", async () => {
+    // O caso acima passa pelo guarda de FORA (`isStaff || canReopen`): com o
+    // chamado aberto, o cliente nao recebe a secao de Acoes, e o guarda do
+    // botao nunca chega a ser consultado. A mutacao mostrou isso — trocar o
+    // `isStaff` do botao por `true` nao derrubava nada.
+    //
+    // Aqui a secao EXISTE para o cliente: chamado dele, resolvido, dentro do
+    // prazo de reabertura. Ele ve "Reabrir chamado" ao lado, e e o guarda do
+    // proprio botao que precisa segurar a triagem.
+    papelDoUsuario = "client";
+    const amanha = new Date(Date.now() + 86_400_000).toISOString();
+    await montar([], {
+      ...SEM_PRIORIDADE,
+      status: "resolved",
+      creator_id: "u1",
+      reopen_deadline: amanha,
+    } as typeof TICKET);
+
+    // Dois controles levam a reabertura (a barra lateral e o rodape da
+    // conversa); o que importa e que a secao de Acoes esta na tela.
+    expect(screen.getAllByRole("button", { name: /Reabrir/i }).length).toBeGreaterThan(0);
+    expect(
+      screen.queryByRole("button", { name: /prioridade/i }),
+    ).not.toBeInTheDocument();
+  });
+
+  it.each(["admin", "technician"])("%s pode definir a prioridade", async (papel) => {
+    papelDoUsuario = papel;
+    await montar([], SEM_PRIORIDADE);
+    expect(
+      screen.getByRole("button", { name: "Definir prioridade" }),
+    ).toBeInTheDocument();
+  });
+
+  it("com prioridade ja definida o botao diz 'Alterar'", async () => {
+    await montar([], TICKET);
+    expect(
+      screen.getByRole("button", { name: "Alterar prioridade" }),
+    ).toBeInTheDocument();
+  });
+
+  it("confirmar chama o endpoint de prioridade e fecha o modal", async () => {
+    vi.mocked(ticketService.updateTicketPriority).mockResolvedValue({
+      ...SEM_PRIORIDADE,
+      priority: "critical",
+    } as never);
+    await montar([], SEM_PRIORIDADE);
+
+    fireEvent.click(screen.getByRole("button", { name: "Definir prioridade" }));
+    const modal = screen.getByRole("dialog");
+    // O campo e um menu (`SelectMenu`, D9.2), nao um `<select>`: o gatilho tem
+    // `role="combobox"`, a escolha e pelo ROTULO, e o painel abre num portal
+    // fora do dialogo. Quem cuida dos dois ultimos e o auxiliar de menu.
+    escolherNoMenu(
+      within(modal).getByRole("combobox", { name: "Prioridade" }),
+      "Crítica",
+    );
+    fireEvent.click(within(modal).getByRole("button", { name: "Salvar" }));
+
+    await waitFor(() =>
+      expect(ticketService.updateTicketPriority).toHaveBeenCalledWith("t1", "critical"),
+    );
+    await waitFor(() =>
+      expect(screen.queryByRole("dialog")).not.toBeInTheDocument(),
+    );
   });
 });

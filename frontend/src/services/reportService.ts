@@ -64,7 +64,8 @@ export interface OldestTicketItem {
   ticket_id: string;
   protocol: string;
   title: string;
-  priority: string;
+  /** Nulo enquanto o chamado nao foi triado. */
+  priority: string | null;
   category: string;
   status: string;
   age_hours: number;
@@ -88,7 +89,7 @@ export interface SlaJustificationItem {
   ticket_id: string;
   protocol: string;
   title: string;
-  priority: string;
+  priority: string | null;
   resolved_at: string | null;
   assignee_name: string | null;
   justification: string;

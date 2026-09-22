@@ -1,4 +1,5 @@
 import { api } from "./api";
+import type { TicketPriority } from "../lib/prioridade";
 import type { Tag } from "./tagService";
 
 /** Equipamento como ele aparece dentro do chamado — não é a ficha completa. */
@@ -22,7 +23,9 @@ export interface Ticket {
     | "resolved"
     | "closed"
     | "cancelled";
-  priority: "critical" | "high" | "medium" | "low";
+  /** Nulo ate a triagem: o chamado nasce sem prioridade e quem a define e a
+   *  equipe, pelo `updateTicketPriority`. */
+  priority: "critical" | "high" | "medium" | "low" | null;
   category: string;
   creator_id: string;
   assignee_id: string | null;
@@ -137,7 +140,6 @@ export interface TicketFilters {
 export interface TicketCreatePayload {
   title: string;
   description: string;
-  priority: "critical" | "high" | "medium" | "low";
   category: string;
   product_id?: string | null;
   equipment_ids?: string[];
@@ -147,7 +149,6 @@ export interface TicketCreatePayload {
 export interface TicketUpdatePayload {
   title?: string;
   description?: string;
-  priority?: "critical" | "high" | "medium" | "low";
   category?: string;
   product_id?: string | null;
   /** Omitir mantém os equipamentos atuais; lista vazia desvincula todos. */
@@ -162,6 +163,27 @@ export async function createTicket(payload: TicketCreatePayload): Promise<Ticket
 
 export async function updateTicket(id: string, payload: TicketUpdatePayload): Promise<Ticket> {
   const { data } = await api.patch<Ticket>(`/tickets/${id}`, payload);
+  return data;
+}
+
+/**
+ * A triagem: define ou troca a prioridade do chamado.
+ *
+ * Endpoint proprio, e nao o `updateTicket` generico, por dois motivos. O
+ * primeiro e de permissao: o PATCH generico e a porta de todos os campos do
+ * chamado, e dar a chave dela ao tecnico para que ele possa triar entregaria
+ * junto o titulo, a categoria e o produto. O segundo e de regra: so este
+ * caminho recalcula o SLA do nivel novo -- gravar a prioridade por fora
+ * deixaria um chamado critico com o prazo de quando era baixo.
+ */
+export async function updateTicketPriority(
+  ticketId: string,
+  priority: TicketPriority
+): Promise<Ticket> {
+  const { data } = await api.patch<Ticket>(
+    `/tickets/${ticketId}/priority`,
+    { priority }
+  );
   return data;
 }
 

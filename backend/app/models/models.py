@@ -496,8 +496,15 @@ class Ticket(Base):
     status: Mapped[TicketStatus] = mapped_column(
         Enum(TicketStatus), default=TicketStatus.open, nullable=False, index=True
     )
-    priority: Mapped[TicketPriority] = mapped_column(
-        Enum(TicketPriority), default=TicketPriority.medium, nullable=False, index=True
+    # NULO até a triagem. O chamado nasce sem prioridade e quem a define é
+    # técnico ou administrador, pelo `PATCH /tickets/{id}/priority` — o cliente
+    # não escolhe a própria urgência.
+    #
+    # Sem `default`: um default aqui traria o `medium` de volta pela porta dos
+    # fundos, e "média" seria indistinguível de "ninguém olhou ainda". São duas
+    # informações diferentes, e o painel conta as duas em baldes separados.
+    priority: Mapped[TicketPriority | None] = mapped_column(
+        Enum(TicketPriority), nullable=True, index=True
     )
     category: Mapped[TicketCategory] = mapped_column(
         Enum(TicketCategory), default=TicketCategory.general
