@@ -1203,14 +1203,20 @@ export default function TicketDetailPage() {
             )}
             <SlaChip
               label="Resposta"
-              dueAt={ticket.sla_response_due_at}
+              restanteMin={ticket.sla_response_restante_min}
+              venceEm={ticket.sla_response_vence_em}
+              expediente={ticket.expediente}
               breached={ticket.sla_response_breach}
               respondedAt={ticket.sla_first_response}
+              onExpirou={load}
             />
             <SlaChip
               label="Resolução"
-              dueAt={ticket.sla_resolve_due_at}
+              restanteMin={ticket.sla_resolve_restante_min}
+              venceEm={ticket.sla_resolve_vence_em}
+              expediente={ticket.expediente}
               breached={ticket.sla_resolve_breach}
+              onExpirou={load}
             />
           </div>
         </div>
@@ -1667,7 +1673,9 @@ export default function TicketDetailPage() {
                     <span className="text-xs text-conteudo-muted">Resposta</span>
                     <SlaChip
                       label=""
-                      dueAt={ticket.sla_response_due_at}
+                      restanteMin={ticket.sla_response_restante_min}
+                      venceEm={ticket.sla_response_vence_em}
+                      expediente={ticket.expediente}
                       breached={ticket.sla_response_breach}
                       respondedAt={ticket.sla_first_response}
                     />
@@ -1678,7 +1686,9 @@ export default function TicketDetailPage() {
                     <span className="text-xs text-conteudo-muted">Resolução</span>
                     <SlaChip
                       label=""
-                      dueAt={ticket.sla_resolve_due_at}
+                      restanteMin={ticket.sla_resolve_restante_min}
+                      venceEm={ticket.sla_resolve_vence_em}
+                      expediente={ticket.expediente}
                       breached={ticket.sla_resolve_breach}
                     />
                   </div>

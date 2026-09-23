@@ -101,6 +101,30 @@ class TicketReopen(AppBaseModel):
     reason: str = Field(..., min_length=5, max_length=2000)
 
 
+class ExpedienteInfo(AppBaseModel):
+    """O estado do relogio de SLA no SERVIDOR, para a tela nao ter calendario.
+
+    A tela precisa saber tres coisas para contar prazo sem saber o que e
+    feriado: que horas sao no servidor, se o relogio corre agora, e quando esse
+    estado muda. Com isso ela desconta um minuto por minuto enquanto `aberto` e
+    CONGELA na `proxima_virada` -- sem jornada, sem fim de semana e sem a
+    tabela de feriados do `feriados.py` duplicada em TypeScript.
+
+    O `agora` tambem tira o relogio da maquina de quem olha da conta: era
+    `Date.now()` do navegador contra um prazo do servidor, e qualquer desvio de
+    relogio aparecia como minutos a mais ou a menos no contador.
+
+    O `fuso` viaja junto porque "Vence em 24/09/2026 as 12:11" so faz sentido
+    no fuso em que a jornada e definida. Vem do motor (`FUSO_DA_JORNADA`), e
+    nao de um literal do frontend: a regra mora num lugar so.
+    """
+
+    agora: datetime
+    aberto: bool
+    proxima_virada: datetime
+    fuso: str
+
+
 class TicketEquipmentBrief(AppBaseModel):
     """O necessário para exibir o equipamento no chamado, sem a ficha inteira."""
 
@@ -138,6 +162,28 @@ class TicketResponse(AppBaseModel):
     # deixa o front parar o relógio de resposta em vez de adivinhar pela flag
     # de violação, que só é recalculada em escrita e por isso é velha.
     sla_first_response: datetime | None = None
+    # ── O que a tela precisa para contar prazo em horas ÚTEIS ──────────
+    #
+    # `*_due_at` acima continua sendo o prazo CARIMBADO, intocado. Os dois
+    # campos abaixo sao o prazo EFETIVO -- com a pausa acumulada somada --, que
+    # e o instante que o `check_breaches` de fato compara. A tela mostra este,
+    # e por isso nao pode mais discordar da regra de violacao.
+    sla_response_vence_em: datetime | None = None
+    sla_resolve_vence_em: datetime | None = None
+    # Minutos UTEIS que faltam no instante em que a resposta foi montada. Nao e
+    # `vence_em - agora`: essa subtracao corrida foi o defeito que motivou tudo
+    # isto, porque contava a noite e o fim de semana como prazo correndo.
+    sla_response_restante_min: int | None = None
+    sla_resolve_restante_min: int | None = None
+    # O tamanho do prazo em minutos UTEIS, da abertura ate o vencimento
+    # efetivo. E o denominador da barra de progresso da lista, que hoje calcula
+    # `(agora - abertura) / (vence - abertura)` em tempo corrido e por isso
+    # enche sozinha durante a noite e o fim de semana.
+    sla_response_total_min: int | None = None
+    sla_resolve_total_min: int | None = None
+    # So no chamado avulso. Na LISTAGEM ele vem uma vez no topo, e nao repetido
+    # em cada item: e estado do servidor, nao do chamado.
+    expediente: ExpedienteInfo | None = None
     closed_at: datetime | None
     resolved_at: datetime | None = None
     auto_closed: bool = False
@@ -165,6 +211,10 @@ class TicketListResponse(AppBaseModel):
     total: int
     limit: int
     offset: int
+    # Uma vez so, aqui: os itens vem com `expediente = None`. O relogio e o
+    # mesmo para os cinquenta chamados da pagina, e repeti-lo em cada um seria
+    # carregar cinquenta copias do mesmo instante.
+    expediente: ExpedienteInfo | None = None
 
 
 class TicketHistoryResponse(AppBaseModel):

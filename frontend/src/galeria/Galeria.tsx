@@ -108,6 +108,16 @@ function Bloco({
   );
 }
 
+/** Expedientes de mentira, so para a galeria desenhar os estados do chip. */
+const EXPEDIENTE_ABERTO = {
+  agora: new Date().toISOString(),
+  aberto: true,
+  proxima_virada: new Date(Date.now() + 3 * 3600_000).toISOString(),
+  fuso: "America/Sao_Paulo",
+};
+
+const EXPEDIENTE_FECHADO = { ...EXPEDIENTE_ABERTO, aberto: false };
+
 export function Galeria() {
   const [escuro, setEscuro] = useState(
     () => document.documentElement.classList.contains("dark"),
@@ -189,11 +199,35 @@ export function Galeria() {
       </Bloco>
 
       <Bloco nome="SlaChip">
-        <SlaChip label="Resposta" dueAt={new Date(Date.now() + 9e6).toISOString()} breached={false} />
-        <SlaChip label="Resolução" dueAt={new Date(Date.now() - 9e6).toISOString()} breached />
+        {/* O chip conta tempo ÚTIL, e quem calcula é o backend. A galeria monta
+            um expediente de mentira para desenhar os quatro estados: correndo,
+            congelado fora do expediente, vencido e respondido. */}
         <SlaChip
           label="Resposta"
-          dueAt={new Date(Date.now() - 9e6).toISOString()}
+          restanteMin={251}
+          venceEm={new Date(Date.now() + 9e6).toISOString()}
+          expediente={EXPEDIENTE_ABERTO}
+          breached={false}
+        />
+        <SlaChip
+          label="Resolução"
+          restanteMin={692}
+          venceEm={new Date(Date.now() + 9e6).toISOString()}
+          expediente={EXPEDIENTE_FECHADO}
+          breached={false}
+        />
+        <SlaChip
+          label="Resolução"
+          restanteMin={0}
+          venceEm={new Date(Date.now() - 9e6).toISOString()}
+          expediente={EXPEDIENTE_ABERTO}
+          breached
+        />
+        <SlaChip
+          label="Resposta"
+          restanteMin={0}
+          venceEm={new Date(Date.now() - 9e6).toISOString()}
+          expediente={EXPEDIENTE_ABERTO}
           breached={false}
           respondedAt={new Date().toISOString()}
         />

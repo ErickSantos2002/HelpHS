@@ -121,7 +121,7 @@ const DETAIL = {
 };
 
 function resposta(items: Ticket[]): TicketListResponse {
-  return { items, total: items.length, limit: 200, offset: 0 };
+  return { items, total: items.length, limit: 200, offset: 0, expediente: null };
 }
 
 /**

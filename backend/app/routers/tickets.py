@@ -48,6 +48,7 @@ from app.models.models import (
     ticket_tags,
 )
 from app.schemas.ticket import (
+    ExpedienteInfo,
     InterruptorDaIA,
     TicketAssign,
     TicketCreate,
@@ -78,11 +79,15 @@ from app.utils.protocol import MAX_RETRIES, generate_protocol
 from app.utils.sla import (
     _PAUSE_STATUSES,
     _TERMINAL_STATUSES,
+    FUSO_DA_JORNADA,
     add_business_minutes,
     apply_sla_config,
+    business_minutes_between,
     check_breaches,
+    estado_do_expediente,
     marca_violacao_ao_resolver,
     pause_sla,
+    prazo_efetivo,
     register_first_response,
     resume_sla,
     violacao_ao_resolver,
@@ -231,13 +236,66 @@ def _audit(
     )
 
 
-def _serialize_ticket(ticket: Ticket) -> TicketResponse:
-    """TicketResponse com os campos que são calculados, não armazenados."""
+def _expediente(agora: datetime) -> ExpedienteInfo:
+    """O relógio do servidor, para a tela congelar o contador sem calendário."""
+    aberto, virada = estado_do_expediente(agora)
+    return ExpedienteInfo(
+        agora=agora,
+        aberto=aberto,
+        proxima_virada=virada,
+        fuso=FUSO_DA_JORNADA,
+    )
+
+
+def _serialize_ticket(
+    ticket: Ticket,
+    agora: datetime | None = None,
+    *,
+    com_expediente: bool = True,
+) -> TicketResponse:
+    """TicketResponse com os campos que são calculados, não armazenados.
+
+    `agora` é parâmetro, e não `datetime.now()` lá dentro, por dois motivos: a
+    listagem serializa cinquenta chamados e todos devem ser lidos do MESMO
+    instante, e o teste precisa fixar o relógio sem congelar o processo.
+
+    `com_expediente=False` é o que a listagem usa: lá o bloco vem uma vez no
+    topo da resposta.
+    """
+    agora = agora or datetime.now(UTC)
     response = TicketResponse.model_validate(ticket)
+
     if ticket.status in (TicketStatus.resolved, TicketStatus.closed):
         referencia = resolution_reference(ticket)
         if referencia is not None:
             response.reopen_deadline = reopen_deadline(referencia, get_settings())
+
+    # O prazo EFETIVO, e o tempo ÚTIL que falta até ele. As duas contas que a
+    # tela fazia errado: ela ignorava a pausa e subtraía tempo corrido.
+    response.sla_response_vence_em = prazo_efetivo(
+        ticket.sla_response_due_at, ticket.sla_total_paused_ms
+    )
+    response.sla_resolve_vence_em = prazo_efetivo(
+        ticket.sla_resolve_due_at, ticket.sla_total_paused_ms
+    )
+    if response.sla_response_vence_em is not None:
+        response.sla_response_restante_min = business_minutes_between(
+            agora, response.sla_response_vence_em
+        )
+        response.sla_response_total_min = business_minutes_between(
+            ticket.created_at, response.sla_response_vence_em
+        )
+    if response.sla_resolve_vence_em is not None:
+        response.sla_resolve_restante_min = business_minutes_between(
+            agora, response.sla_resolve_vence_em
+        )
+        response.sla_resolve_total_min = business_minutes_between(
+            ticket.created_at, response.sla_resolve_vence_em
+        )
+
+    if com_expediente:
+        response.expediente = _expediente(agora)
+
     return response
 
 
@@ -573,8 +631,12 @@ async def list_tickets(
 
     # Os equipamentos vêm junto pelo lazy="selectin" do relacionamento: uma
     # consulta para a página inteira, não uma por chamado.
+    # Um instante só para a página inteira: cinquenta chamados lidos de
+    # relógios ligeiramente diferentes dariam restantes que não somam.
+    agora = datetime.now(UTC)
+
     def _serialize(t: Ticket) -> TicketResponse:
-        r = _serialize_ticket(t)
+        r = _serialize_ticket(t, agora, com_expediente=False)
         r.assignee_name = name_map.get(t.assignee_id) if t.assignee_id else None
         r.product_name = product_map.get(t.product_id) if t.product_id else None
         if not r.product_name and t.equipments and t.equipments[0].product_id:
@@ -588,6 +650,7 @@ async def list_tickets(
         total=total,
         limit=limit,
         offset=offset,
+        expediente=_expediente(agora),
     )
 
 

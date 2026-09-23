@@ -1,5 +1,6 @@
 import { api } from "./api";
 import type { TicketPriority } from "../lib/prioridade";
+import type { Expediente } from "../lib/tempoUtil";
 import type { Tag } from "./tagService";
 
 /** Equipamento como ele aparece dentro do chamado — não é a ficha completa. */
@@ -34,8 +35,27 @@ export interface Ticket {
   // A IA pode atuar neste chamado. Vale para a Helô e para a classificação
   // automática — desligado, nenhuma delas olha para ele.
   ai_enabled: boolean;
+  /** O prazo CARIMBADO. Para contar tempo, use `sla_*_vence_em`. */
   sla_response_due_at: string | null;
   sla_resolve_due_at: string | null;
+  /**
+   * O prazo EFETIVO — o carimbado mais a pausa acumulada. E o mesmo instante
+   * que o backend compara para decidir violacao, entao a tela que mostra este
+   * nao pode discordar da regra.
+   */
+  sla_response_vence_em: string | null;
+  sla_resolve_vence_em: string | null;
+  /** Minutos UTEIS que faltavam quando a resposta foi montada. */
+  sla_response_restante_min: number | null;
+  sla_resolve_restante_min: number | null;
+  /** O tamanho do prazo em minutos uteis — denominador da barra de progresso. */
+  sla_response_total_min: number | null;
+  sla_resolve_total_min: number | null;
+  /**
+   * So no chamado avulso. Na LISTAGEM ele vem uma vez no topo da resposta, e
+   * nao repetido em cada item.
+   */
+  expediente: Expediente | null;
   sla_response_breach: boolean;
   sla_resolve_breach: boolean;
   sla_first_response: string | null;
@@ -118,6 +138,8 @@ export interface TicketListResponse {
   total: number;
   limit: number;
   offset: number;
+  /** O relogio do servidor, uma vez para a pagina inteira. */
+  expediente: Expediente | null;
 }
 
 export type SortBy = "created_at" | "updated_at" | "priority" | "sla_resolve_due_at";
