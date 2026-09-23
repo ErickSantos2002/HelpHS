@@ -59,6 +59,39 @@ fim, não para o começo.
 O desenho completo, com as cinco decisões aprovadas, está em
 `docs/superpowers/specs/2026-09-22-prioridade-definida-na-triagem-design.md`.
 
+### O contador da tela conta HORAS ÚTEIS (23/09/2026)
+
+**O prazo mostrado no chip e na barra do cartão é tempo ÚTIL restante**, não a
+diferença entre o relógio e o vencimento. Um prazo de 12h úteis carimbado às
+09:11 mostra `12h 0m úteis`, e não as 27 horas corridas até 12:11 do dia
+seguinte.
+
+O contador **congela fora do expediente** — 17:00 às 08:00, fim de semana e
+feriado — e volta a andar quando a jornada seguinte começa.
+
+**O frontend não tem calendário.** O backend manda os minutos úteis restantes
+(`business_minutes_between`), o prazo efetivo e o estado do expediente
+(`estado_do_expediente`), e a tela só desconta o tempo que passa. Jornada, fim
+de semana e feriado têm uma fonte só: `backend/app/utils/sla.py`. O fuso em que
+o vencimento é exibido também viaja no contrato (`FUSO_DA_JORNADA`), para não
+existir literal de fuso no frontend.
+
+O prazo que a tela mostra é o **efetivo** (`prazo_efetivo` = carimbado + pausa
+acumulada) — o mesmo que `check_breaches` compara. Antes o chip usava o prazo
+cru e, num chamado pausado por três horas, escrevia "Vencido" três horas antes
+de o motor concordar.
+
+### ⚠️ Dívida conhecida: a pausa é tempo corrido num prazo útil
+
+`sla_total_paused_ms` acumula tempo **corrido** e é somado a um prazo calculado
+em horas **úteis**. Uma pausa das 16:00 às 09:00 acrescenta 17 horas a um prazo
+que só perdeu 1 hora de atendimento — o chamado ganha folga muito maior do que
+a pausa custou.
+
+Registrado em 23/09/2026 e **deixado de propósito**: corrigir muda vencimento e
+indicador de SLA, e por isso é frente própria, com desenho antes do código. Até
+lá, tela e motor usam a mesma conta — a de hoje.
+
 ### O que conta como primeira resposta
 
 **A primeira resposta é a primeira fala dirigida ao cliente por alguém que não

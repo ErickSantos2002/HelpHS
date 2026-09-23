@@ -7,6 +7,60 @@ O changelog do produto (o que o cliente vê) fica em
 
 ---
 
+## 23/09/2026 — O relógio de SLA da tela contava tempo corrido
+
+Você viu "27h" num prazo de 12 horas e trouxe o caso com a conta já feita:
+prioridade às 09:11, 7h49 até as 17:00, as 4h11 restantes no dia seguinte,
+vencimento às 12:11. O backend estava certo o tempo todo — quem mentia era a
+tela, que subtraía `vencimento - agora` em tempo corrido e somava as 15 horas
+em que ninguém atende.
+
+Desenho aprovado antes do código (D1 a D5), spec em
+[2026-09-23-relogio-de-sla-em-horas-uteis-design.md](docs/superpowers/specs/2026-09-23-relogio-de-sla-em-horas-uteis-design.md).
+
+⚠️ **Nada disso está no ar.** Branch `feat/relogio-de-sla-em-horas-uteis`,
+worktree `HelpHS-relogio`. **Sem migration** e sem variável nova: é só cálculo
+de leitura, e nenhum prazo foi alterado.
+
+### O que muda na tela
+
+| Situação | Antes | Depois |
+|---|---|---|
+| Média triada 09:11, prazo 12h | `27h 0m` | `12h 0m úteis` |
+| O mesmo às 18:00 | seguia correndo | congelado, `· fora do expediente` |
+| Sexta 16:00, prazo de 4h | `64h` até segunda | `4h 0m úteis` |
+| Barra do cartão no fim de semana | enchia sozinha | parada |
+
+### O que eu achei medindo, além do que você trouxe
+
+**Eram cinco contas erradas, não uma.** Quatro delas na barra do cartão da
+lista — o texto, o percentual e o estado de vencimento —, e é a barra que pinta
+o cartão de vermelho aos 80%. Ela chegava lá durante o fim de semana.
+
+**E um defeito mais antigo:** o chip nunca somava `sla_total_paused_ms`. Num
+chamado que ficou três horas em "Aguardando cliente", ele escrevia "Vencido"
+três horas antes de o backend concordar. O front nem tinha como acertar — o
+campo não estava no contrato da API.
+
+**A conta do prazo efetivo estava escrita à mão em TRÊS lugares** do motor, não
+dois como eu disse na proposta. O `register_first_response` tinha a terceira
+cópia. Os três passaram a chamar a mesma função.
+
+### O que a mutação pegou
+
+Onze mutações, e **uma passou verde**: cravar o fuso na formatação da data não
+derrubava nada, porque o caso usava um instante em que São Paulo e UTC caem no
+mesmo dia — só a hora estava provada. Isolado com um instante que vira o dia.
+
+### O que NÃO foi consertado, a seu pedido
+
+`sla_total_paused_ms` é tempo corrido somado a um prazo em horas úteis: uma
+pausa das 16:00 às 09:00 alarga o prazo em 17 horas quando só 1 hora útil foi
+perdida. Fica como frente separada — mexer nisso muda vencimento e indicador. O
+contador reproduz fielmente a regra de hoje.
+
+---
+
 ## 22/09/2026 — A prioridade sai da abertura do chamado e passa para a triagem
 
 Mudança de regra de negócio, com desenho escrito e aprovado antes do código

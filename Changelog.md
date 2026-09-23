@@ -126,6 +126,30 @@ publicar uma versão nova.
 
 ### Corrigido
 
+- **O relógio de prazo da tela passa a contar horas ÚTEIS.** Ele subtraía
+  `vencimento - agora` em tempo corrido, então um prazo de 12h úteis carimbado
+  às 09:11 aparecia como **27h** — a conta incluía as 15 horas entre 17:00 e
+  08:00, em que ninguém atende.
+  - O contador **congela fora do expediente** (com o rótulo `· fora do
+    expediente`) e volta a andar quando a jornada seguinte começa. Feriado,
+    fim de semana e noite param o relógio, com a mesma régua do backend.
+  - **A barra do cartão na lista tinha o mesmo defeito, em três lugares**: o
+    texto, o percentual — que enchia sozinha durante a noite e o fim de
+    semana — e a decisão de pintar de vermelho.
+  - **O chip passa a usar o prazo EFETIVO**, com `sla_total_paused_ms` somado.
+    Num chamado pausado por três horas ele escrevia "Vencido" três horas antes
+    de o backend concordar.
+  - O detalhe do vencimento aparece ao passar o mouse: `Vence em 24/09/2026 às
+    12:11`, no fuso em que a jornada é definida — o fuso vem do backend, não é
+    literal do frontend.
+  - **Nenhum prazo mudou, e nenhuma migration foi necessária.** A conformidade
+    de SLA não se mexe: ela sempre leu as flags do backend, que estavam certas.
+    O que muda é a tela passar a dizer a mesma coisa que o motor.
+  - ⚠️ Fica registrada uma dívida que esta entrega **não** conserta:
+    `sla_total_paused_ms` é tempo corrido somado a um prazo em horas úteis, e
+    uma pausa noturna alarga o prazo muito além do que ela custou. Virou frente
+    separada — ver `docs/decisoes-e-regras.md`.
+
 - **A violação de prazo de resolução passa a ser marcada no instante de
   resolver** (`f16cf0e`, PR #10). O `check_breaches` só testa esse prazo quando
   o chamado **não** está em estado terminal, e os dois caminhos que resolvem já
