@@ -19,6 +19,7 @@ import {
   PriorityBadge,
   SelectMenu,
   Selector,
+  SemPrioridade,
   Spinner,
   Table,
   TableBody,
@@ -444,7 +445,11 @@ function OldestOpenTable({ tickets }: { tickets: OldestTicketItem[] }) {
                   E2 e a E8 mediram e reprovaram — e aqui nem era medido, era
                   um sufixo `22` no hexadecimal.
                 */}
-                <PriorityBadge priority={t.priority} />
+                {t.priority ? (
+                  <PriorityBadge priority={t.priority} />
+                ) : (
+                  <SemPrioridade />
+                )}
               </TableCell>
               <TableCell muted className="text-xs">{rotuloDeCategoria(t.category)}</TableCell>
               <TableCell muted className="text-xs">{rotuloDeStatus(t.status)}</TableCell>
@@ -567,7 +572,11 @@ function SlaJustificationsTable({ itens }: { itens: SlaJustificationItem[] }) {
                 <span className="block truncate" title={j.title}>{j.title}</span>
               </TableCell>
               <TableCell>
-                <PriorityBadge priority={j.priority} />
+                {j.priority ? (
+                  <PriorityBadge priority={j.priority} />
+                ) : (
+                  <SemPrioridade />
+                )}
               </TableCell>
               <TableCell muted className="text-xs whitespace-nowrap">
                 {j.resolved_at

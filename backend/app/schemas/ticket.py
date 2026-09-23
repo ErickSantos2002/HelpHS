@@ -19,7 +19,9 @@ MAX_EQUIPMENTS_PER_TICKET = 20
 class TicketCreate(AppBaseModel):
     title: str = Field(..., min_length=1, max_length=255)
     description: str = Field(..., min_length=1)
-    priority: TicketPriority = TicketPriority.medium
+    # Sem `priority`: o chamado nasce sem prioridade e quem a define é a
+    # triagem. O campo não é apenas ignorado por política — ele não existe
+    # aqui, então o cliente que monta o POST à mão não tem onde escrever.
     category: TicketCategory = TicketCategory.general
     product_id: uuid.UUID | None = None
     equipment_ids: list[uuid.UUID] = Field(
@@ -31,7 +33,9 @@ class TicketCreate(AppBaseModel):
 class TicketUpdate(AppBaseModel):
     title: str | None = Field(default=None, min_length=1, max_length=255)
     description: str | None = Field(default=None, min_length=1)
-    priority: TicketPriority | None = None
+    # Sem `priority`: prioridade tem um caminho só, o
+    # `PATCH /tickets/{id}/priority`. Por aqui ela seria gravada sem recalcular
+    # o SLA, e o chamado ficaria crítico com o prazo de quando era baixo.
     category: TicketCategory | None = None
     product_id: uuid.UUID | None = None
     # None = não mexe nos equipamentos; lista vazia = desvincula todos
@@ -61,6 +65,17 @@ class TicketStatusUpdate(AppBaseModel):
     # tem como saber se este chamado específico estourou. Aqui o campo é
     # opcional porque resolver dentro do prazo não exige nada.
     sla_breach_justification: str | None = Field(default=None, max_length=2000)
+
+
+class TicketPriorityUpdate(AppBaseModel):
+    """A triagem. Só a prioridade, e ela é obrigatória.
+
+    Não aceita nulo de propósito: "sem prioridade" é o estado de quem nunca
+    foi triado, não uma escolha que alguém faz. Devolver um chamado para a
+    fila de triagem seria outra decisão, e ela não foi tomada.
+    """
+
+    priority: TicketPriority
 
 
 class TicketAssign(AppBaseModel):
@@ -107,7 +122,9 @@ class TicketResponse(AppBaseModel):
     status: TicketStatus
     # A tela precisa saber o estado para desenhar o botão certo.
     ai_enabled: bool = True
-    priority: TicketPriority
+    # Nulo enquanto ninguém triou. A tela mostra "Sem prioridade", e não um
+    # valor de mentira.
+    priority: TicketPriority | None
     category: TicketCategory
     creator_id: uuid.UUID
     assignee_id: uuid.UUID | None

@@ -22,6 +22,43 @@ Requisitos (RN-013) sempre disse 08h–17h, e o cliente confirmou 9h/dia em
 
 Feriados não são modelados nesta versão — só fins de semana.
 
+### Quando o prazo é carimbado (22/09/2026)
+
+**O chamado nasce sem prioridade e, portanto, sem prazo.** Quem carimba os dois
+prazos é a triagem — técnico ou administrador, pelo
+`PATCH /tickets/{id}/priority`. Até lá o chamado não tem `sla_response_due_at`
+nem `sla_resolve_due_at`, não mostra relógio na tela e fica **fora do
+denominador** da conformidade de SLA. Ele continua contando no total de
+chamados, num balde próprio ("Sem prioridade").
+
+**O prazo conta da ABERTURA, não da triagem.** `apply_sla_config` recebe
+`ticket.created_at`, e não o instante do clique: o RN-013 diz que o SLA conta
+da abertura até a resolução, e classificar não é recomeçar. A consequência foi
+decidida com ela à vista — **triagem demorada entrega um chamado que já nasce
+vencido**, e é assim que a demora aparece na conformidade em vez de sumir.
+
+Duas exceções, as duas pelo mesmo princípio de não desfazer conclusão alheia:
+
+- **Resposta já dada não vira violação retroativa.** `check_breaches` só olha o
+  prazo de resposta enquanto `sla_first_response` é nulo. Quem respondeu antes
+  de o prazo existir não passa a dever resposta.
+- **Chamado encerrado não tem o prazo recalculado.** Corrigir a prioridade de
+  um chamado resolvido, fechado ou cancelado grava o campo e o histórico, e
+  deixa os prazos como estão — uma justificativa de violação já escrita se
+  apoia neles.
+
+**Na ordenação por prioridade, o não triado vem PRIMEIRO** — sem prioridade →
+crítica → alta → média → baixa. Vale no `sort_by=priority` da API e no quadro
+de chamados, com a mesma régua. O motivo é o prazo: ele corre desde a abertura,
+então o chamado que espera triagem no fim da fila fica escondido justamente
+enquanto o relógio anda. É ordem operacional — "sem prioridade" continua não
+sendo um nível, e continua fora do denominador da conformidade. Prioridade
+**desconhecida** (valor que o banco tenha e o código não conheça) vai para o
+fim, não para o começo.
+
+O desenho completo, com as cinco decisões aprovadas, está em
+`docs/superpowers/specs/2026-09-22-prioridade-definida-na-triagem-design.md`.
+
 ### O que conta como primeira resposta
 
 **A primeira resposta é a primeira fala dirigida ao cliente por alguém que não

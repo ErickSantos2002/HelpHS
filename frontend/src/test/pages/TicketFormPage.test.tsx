@@ -25,9 +25,10 @@ import { getMyEquipment } from "../../services/equipmentService";
  * palavras "Categoria" e "Prioridade" escritas acima deles. A escolha existia
  * apenas na cor.
  *
- * A prioridade ainda trazia o **sexto** mapa divergente do mesmo dado, com
- * rótulos no masculino ("Crítico") contra o feminino que a emenda E17 fixou no
- * pacote — no mesmo sistema, a mesma prioridade tinha dois nomes.
+ * A prioridade SAIU desta tela em 22/09/2026: quem abre o chamado descreve o
+ * problema, quem classifica a urgência é a triagem. O que ficou aqui é o caso
+ * que prende a ausência — o seletor não volta por descuido, e o POST não leva
+ * o campo.
  *
  * E a trilha era um `<button>` com a linha inteira dentro, então o nome
  * acessível do controle era "Tickets / Novo chamado": a página de onde se vem
@@ -48,27 +49,22 @@ async function montar() {
 }
 
 describe("TicketFormPage", () => {
-  it("categoria e prioridade são grupos de rádio, com nome", async () => {
+  it("categoria é grupo de rádio, com nome", async () => {
     await montar();
     expect(screen.getByRole("group", { name: "Categoria" })).toBeInTheDocument();
-    expect(screen.getByRole("group", { name: "Prioridade" })).toBeInTheDocument();
-    // Oito categorias e quatro prioridades, e nenhuma delas é botão.
-    expect(screen.getAllByRole("radio")).toHaveLength(12);
+    // Oito categorias, e nenhuma delas é botão. Eram doze enquanto as quatro
+    // prioridades moravam aqui.
+    expect(screen.getAllByRole("radio")).toHaveLength(8);
   });
 
-  it("a prioridade fala a mesma língua do resto do sistema", async () => {
-    // Feminino, concordando com "prioridade" — emenda E17. O mapa que existia
-    // aqui dizia "Crítico", "Alto", "Médio", "Baixo".
+  it("quem abre o chamado não escolhe prioridade", async () => {
     await montar();
+    expect(screen.queryByRole("group", { name: "Prioridade" })).not.toBeInTheDocument();
     for (const rotulo of ["Crítica", "Alta", "Média", "Baixa"]) {
-      expect(screen.getByRole("radio", { name: rotulo })).toBeInTheDocument();
+      expect(screen.queryByRole("radio", { name: rotulo })).not.toBeInTheDocument();
     }
-  });
-
-  it("a prioridade nasce em Média, e a árvore diz isso", async () => {
-    // `defaultValues` já era `medium`; o que faltava era alguém CONSEGUIR saber.
-    await montar();
-    expect(screen.getByRole("radio", { name: "Média" })).toBeChecked();
+    // Nem escondido num campo: a palavra não aparece na tela de abertura.
+    expect(screen.queryByText("Prioridade")).not.toBeInTheDocument();
   });
 
   it("escolher categoria muda o que a árvore diz, não só a cor", async () => {

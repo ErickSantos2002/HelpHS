@@ -10,7 +10,6 @@ import {
   FormDropdown,
   Icon,
   Input,
-  PriorityBadge,
   RadioCards,
   Spinner,
   Textarea,
@@ -20,7 +19,6 @@ import {
   descricaoDeCategoria,
   rotuloDeCategoria,
 } from "../../lib/categoria";
-import { PRIORIDADE, PRIORIDADES, type TicketPriority } from "../../lib/prioridade";
 import {
   getProducts,
   type Product,
@@ -44,7 +42,6 @@ const MAX_EQUIPAMENTOS = 20;
 const schema = z.object({
   title: z.string().min(5, "Mínimo 5 caracteres").max(200, "Título muito longo"),
   description: z.string().min(10, "Mínimo 10 caracteres").max(5000, "Descrição muito longa"),
-  priority: z.enum(["critical", "high", "medium", "low"]),
   category: z.string().min(1, "Selecione uma categoria"),
   product_id: z.string().optional(),
   // Sem .default([]): o default faz o zod gerar um tipo de entrada opcional e
@@ -71,20 +68,13 @@ const MAX_FILES = 10;
  * antes de virar dez mapas divergentes.
  */
 
-/**
- * As quatro prioridades, como opções do `RadioCards`.
- *
- * Vêm de `lib/prioridade`. O que havia aqui era o **sexto** mapa divergente do
- * mesmo dado, e discordava dos outros em duas coisas ao mesmo tempo: pintava
- * `bg-red-500` e `bg-amber-500` crus, fora do sistema, e dizia "Crítico",
- * "Alto", "Médio", "Baixo" — no masculino, contra "prioridade". A emenda E17
- * fixou o feminino no pacote.
+/*
+ * A prioridade NÃO se escolhe aqui. Quem abre o chamado descreve o problema;
+ * quem classifica a urgência é a triagem — técnico ou administrador, pelo
+ * detalhe do chamado. O seletor que existia nesta seção deixava o cliente
+ * declarar a própria urgência, e o chamado nascia "Média" quando ele não
+ * mexia, que é indistinguível de ninguém ter olhado.
  */
-const PRIORIDADES_OPCOES = PRIORIDADES.map((p) => ({
-  value: p,
-  label: PRIORIDADE[p].rotulo,
-  tone: PRIORIDADE[p].variante,
-}));
 
 
 // ── Step indicator ────────────────────────────────────────────
@@ -220,9 +210,6 @@ function SidebarSummary({ values, files, productName }: { values: Partial<FormVa
               {descricaoCat}
             </p>
           </div>
-          <SummaryRow label="Prioridade" empty="Não definida">
-            {values.priority ? <PriorityBadge priority={values.priority} /> : null}
-          </SummaryRow>
           {productName && (
             <SummaryRow label="Produto" empty="">
               <span className="text-sm text-conteudo">{productName}</span>
@@ -288,9 +275,6 @@ function PreviewStep({ values, files, productName, equipmentNames, onBack, onSub
           <div className="px-5 py-2">
             <PreviewRow label="Título">{values.title}</PreviewRow>
             <PreviewRow label="Categoria">{rotuloDeCategoria(values.category)}</PreviewRow>
-            <PreviewRow label="Prioridade">
-              <PriorityBadge priority={values.priority} />
-            </PreviewRow>
             {productName && <PreviewRow label="Produto">{productName}</PreviewRow>}
             {equipmentNames.length > 0 && (
               <PreviewRow label={plural(equipmentNames.length, "Equipamento", "Equipamentos")}>
@@ -357,12 +341,11 @@ export default function TicketFormPage() {
 
   const { register, handleSubmit, watch, setValue, reset, formState: { errors } } = useForm<FormValues>({
     resolver: zodResolver(schema),
-    defaultValues: { priority: "medium", category: "", product_id: "", equipment_ids: [] },
+    defaultValues: { category: "", product_id: "", equipment_ids: [] },
   });
 
   const selectedProductId = watch("product_id");
   const watchedCategory = watch("category");
-  const watchedPriority = watch("priority");
   const currentValues = watch();
 
   // A descrição da categoria escolhida aparece em dois lugares — abaixo das
@@ -401,7 +384,6 @@ export default function TicketFormPage() {
         reset({
           title: t.title,
           description: "",
-          priority: t.priority,
           category: t.category,
           product_id: t.product_id ?? "",
           equipment_ids: t.equipments.map((e) => e.id),
@@ -442,7 +424,6 @@ export default function TicketFormPage() {
       const base = {
         title: currentValues.title,
         description: currentValues.description,
-        priority: currentValues.priority,
         category: currentValues.category,
         product_id: currentValues.product_id || null,
         equipment_ids: currentValues.equipment_ids ?? [],
@@ -595,15 +576,6 @@ export default function TicketFormPage() {
                   {descricaoCategoria}
                 </p>
               </div>
-
-              <RadioCards
-                name="priority"
-                label="Prioridade"
-                layout="linha"
-                value={watchedPriority}
-                onChange={(v) => setValue("priority", v as TicketPriority)}
-                options={PRIORIDADES_OPCOES}
-              />
             </FormSection>
 
             {/* Produto / Equipamentos */}

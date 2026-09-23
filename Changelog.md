@@ -57,6 +57,46 @@ publicar uma versão nova.
     em andamento a deixa calada nesses chamados para resposta comum, sem aviso
     à equipe. Só importa com `HELO_ENABLED=true`.
 
+### Alterado
+
+- **A prioridade do chamado passa a ser definida na triagem, não na abertura.**
+  Quem abre descreve o problema; quem classifica a urgência é técnico ou
+  administrador, pelo `PATCH /tickets/{id}/priority` — os dois com a **mesma**
+  permissão, e o cliente com 403. O chamado nasce com `priority = NULL` e a
+  tela diz "Sem prioridade" até alguém triar.
+  - ⚠️ **Dois indicadores se mexem no dia do deploy, e é a intenção.** A
+    distribuição por prioridade ganha um quinto balde ("Sem prioridade", no
+    campo `by_priority_none`), e os cinco somam o total de chamados. E a
+    **conformidade de SLA piora quando a triagem demora**: o prazo conta da
+    ABERTURA (RN-013), então um chamado triado como crítico no dia seguinte
+    nasce vencido e é marcado na hora. Antes ele nascia "Média" com 720
+    minutos, e a demora não aparecia em lugar nenhum. O porquê está em
+    `docs/superpowers/specs/2026-09-22-prioridade-definida-na-triagem-design.md`.
+  - **"Média" deixa de querer dizer duas coisas.** O formulário vinha com ela
+    pré-marcada, então o nível escolhido de propósito e o chamado que ninguém
+    olhou ficavam idênticos no painel.
+  - **Chamado sem triagem não tem prazo de SLA**, e por isso não mostra
+    relógio nem entra no denominador da conformidade — não se cobra prazo que
+    ainda não existe. O total de chamados continua contando com eles.
+  - **Na ordenação por prioridade, o não triado vem PRIMEIRO** — sem
+    prioridade → crítica → alta → média → baixa —, tanto no `sort_by=priority`
+    da API quanto no quadro de chamados. Ele é o que precisa de ação inicial, e
+    o prazo de resolução dele já corre desde a abertura: no fim da fila ficaria
+    escondido justamente enquanto o relógio anda. É ordem operacional e não faz
+    dele um quinto nível — segue fora do denominador da conformidade.
+  - **`priority` saiu do `PATCH /tickets/{id}` genérico.** Um caminho só: o
+    genérico gravaria o campo sem recalcular o SLA, e o chamado ficaria crítico
+    com o prazo de quando era baixo.
+  - **Resposta dada antes da triagem não vira violação retroativa.** O motor já
+    guardava a violação de resposta atrás de `sla_first_response`, e a regra
+    virou teste.
+  - **Chamado encerrado não tem o SLA recalculado** ao corrigir a prioridade:
+    grava o campo e o histórico, e deixa os prazos como estavam — uma
+    justificativa de violação já escrita se apoia neles.
+  - **Migration `h4c5d6e7f8a9`** (`tickets.priority` aceita `NULL`), sem
+    backfill: chamado antigo mantém a prioridade que tem. O downgrade carimba
+    `medium` no que for nulo, porque `NOT NULL` não volta de outro jeito.
+
 ### Adicionado
 
 - **Biblioteca de arquivos frequentes, e o anexo deles na conversa.** O acervo

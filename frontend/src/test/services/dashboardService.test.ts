@@ -30,6 +30,7 @@ const stats: DashboardStats = {
     by_priority_high: 5,
     by_priority_medium: 20,
     by_priority_low: 15,
+    by_priority_none: 2,
   },
   surveys: {
     total: 12,

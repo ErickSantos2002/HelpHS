@@ -62,7 +62,9 @@ function TicketRow({ ticket, showTech }: { ticket: Ticket; showTech?: boolean })
   // `PRIORITY_DOT` era um sexto mapa de prioridade, com "médio" em
   // `bg-primary` — divergindo do canônico (`bg-info`, no `lib/prioridade.ts`).
   // Sai o mapa local; o ponto usa a mesma fonte que o selo e o gráfico.
-  const prioridade = PRIORIDADE[ticket.priority];
+  // Chamado que ainda nao foi triado nao tem entrada no mapa: `undefined`
+  // cai no mesmo recuo neutro que o `?.` abaixo ja dava.
+  const prioridade = ticket.priority ? PRIORIDADE[ticket.priority] : undefined;
 
   return (
     <button
@@ -77,7 +79,9 @@ function TicketRow({ ticket, showTech }: { ticket: Ticket; showTech?: boolean })
         aria-hidden="true"
         className={cn("w-1.5 h-1.5 rounded-full shrink-0", prioridade?.ponto ?? "bg-borda-control")}
       />
-      <span className="sr-only">Prioridade {prioridade?.rotulo ?? ticket.priority}.</span>
+      <span className="sr-only">
+        {prioridade ? `Prioridade ${prioridade.rotulo}.` : "Sem prioridade."}
+      </span>
       <div className="flex-1 min-w-0">
         <div className="flex items-center gap-1.5 mb-0.5">
           <span className="text-xs font-mono text-conteudo-muted">{ticket.protocol}</span>

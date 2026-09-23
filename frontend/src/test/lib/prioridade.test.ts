@@ -2,6 +2,7 @@ import { describe, expect, it } from "vitest";
 import {
   PRIORIDADE,
   PRIORIDADES,
+  ordemNaFila,
   rotuloDePrioridade,
 } from "../../lib/prioridade";
 import type { TicketPriority } from "../../lib/prioridade";
@@ -109,5 +110,35 @@ describe("prioridade — o ponto", () => {
     expect(contraste("--surface", "--color-warning-500", "claro")).toBeLessThan(
       NAO_TEXTO,
     );
+  });
+});
+
+/**
+ * A ordem da FILA (22/09/2026), que não é a ordem da urgência.
+ *
+ * `PRIORIDADE[p].ordem` responde "quão urgente é". `ordemNaFila` responde
+ * "quem eu olho primeiro" — e a resposta começa por quem ninguém classificou
+ * ainda, porque o prazo de resolução dele já corre desde a abertura.
+ */
+describe("ordemNaFila", () => {
+  it("sem prioridade vem ANTES de crítica", () => {
+    expect(ordemNaFila(null)).toBeLessThan(ordemNaFila("critical"));
+  });
+
+  it("a fila inteira: sem prioridade → crítica → alta → média → baixa", () => {
+    const embaralhado = ["low", "critical", null, "medium", "high"];
+    const ordenado = [...embaralhado].sort((a, b) => ordemNaFila(a) - ordemNaFila(b));
+    expect(ordenado).toEqual([null, "critical", "high", "medium", "low"]);
+  });
+
+  it("prioridade desconhecida vai para o FIM, e não para o começo", () => {
+    // Recuo diferente do nulo de propósito: valor que o backend mande e este
+    // módulo não conheça é dado estranho, não chamado esperando triagem.
+    expect(ordemNaFila("urgentissima")).toBeGreaterThan(ordemNaFila("low"));
+  });
+
+  it("a ordem de urgência do módulo não mudou", () => {
+    // `ordem` continua 0..3 a partir de crítica; quem mudou foi só a fila.
+    expect(PRIORIDADES.map((p) => PRIORIDADE[p].ordem)).toEqual([0, 1, 2, 3]);
   });
 });

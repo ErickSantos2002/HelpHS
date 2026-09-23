@@ -7,14 +7,15 @@ import {
   Icon,
   PriorityBadge,
   SelectMenu,
+  SemPrioridade,
   Spinner,
 } from "../../components/ui";
 import {
   PRIORIDADE,
   PRIORIDADES,
   TOM_PRIORIDADE,
+  ordemNaFila,
   varianteDePrioridade,
-  type TicketPriority,
 } from "../../lib/prioridade";
 import {
   STATUS,
@@ -217,7 +218,9 @@ function SlaIndicator({ ticket, now }: { ticket: Ticket; now: number }) {
  * pratica, decoracao, e sai da arvore com `aria-hidden`.
  */
 function TicketCard({ ticket, now }: { ticket: Ticket; now: number }) {
-  const variante = varianteDePrioridade(ticket.priority);
+  // `?? ""` e nao `!`: sem prioridade cai no recuo neutro do modulo, que e o
+  // mesmo tom que a ausencia ja tem no resto do sistema.
+  const variante = varianteDePrioridade(ticket.priority ?? "");
   const hasBreach = ticket.sla_response_breach || ticket.sla_resolve_breach;
 
   return (
@@ -258,7 +261,11 @@ function TicketCard({ ticket, now }: { ticket: Ticket; now: number }) {
           <span className="max-w-[100px] truncate rounded bg-surface-elevated px-2 py-0.5 text-[11px] text-conteudo-muted">
             {ticket.category}
           </span>
-          <PriorityBadge priority={ticket.priority} />
+          {ticket.priority ? (
+            <PriorityBadge priority={ticket.priority} />
+          ) : (
+            <SemPrioridade />
+          )}
         </div>
         {ticket.assignee_name ? (
           <Avatar name={ticket.assignee_name} size="xs" />
@@ -435,12 +442,9 @@ export default function TicketListPage() {
       if (map.has(t.status)) map.get(t.status)!.push(t);
     }
     for (const arr of map.values()) {
-      // A ordem vem do modulo: `ordem` e a urgencia, do mais critico ao menos.
-      arr.sort(
-        (a, b) =>
-          (PRIORIDADE[a.priority as TicketPriority]?.ordem ?? 3) -
-          (PRIORIDADE[b.priority as TicketPriority]?.ordem ?? 3),
-      );
+      // A ordem vem do modulo, e e a mesma que o backend aplica no
+      // `sort_by=priority`: nao triado PRIMEIRO, depois critica -> baixa.
+      arr.sort((a, b) => ordemNaFila(a.priority) - ordemNaFila(b.priority));
     }
     return map;
   }, [filtered]);

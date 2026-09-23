@@ -7,6 +7,92 @@ O changelog do produto (o que o cliente vê) fica em
 
 ---
 
+## 22/09/2026 — A prioridade sai da abertura do chamado e passa para a triagem
+
+Mudança de regra de negócio, com desenho escrito e aprovado antes do código
+(as quatro decisões D1–D4). O spec é
+[2026-09-22-prioridade-definida-na-triagem-design.md](docs/superpowers/specs/2026-09-22-prioridade-definida-na-triagem-design.md),
+e é ele que responde "por que o número mudou" quando alguém perguntar.
+
+⚠️ **Nada disso está no ar.** Branch `feat/prioridade-definida-na-triagem`,
+worktree `HelpHS-prioridade`, aberta a partir da `origin/main` (`236d000`) para
+não misturar com o `feat/api4com-foundation` que está na árvore principal.
+**Tem migration** (`h4c5d6e7f8a9`), que roda sozinha no boot do contêiner.
+
+### O que muda para quem usa
+
+| Antes | Agora |
+|---|---|
+| O cliente escolhia a prioridade, e o formulário já vinha em "Média" | O cliente não vê prioridade nenhuma ao abrir |
+| Chamado nascia com prazo de SLA de "Média" (720 min) | Chamado nasce sem prazo; quem carimba é a triagem |
+| Só o admin mudava prioridade, pela tela de editar o ticket | Técnico **e** admin, por um botão no próprio chamado |
+
+### ⚠️ Os dois números que vão se mexer no dia do deploy
+
+| Indicador | O que acontece | Por quê |
+|---|---|---|
+| Distribuição por prioridade | ganha um quinto balde, "Sem prioridade" | todo chamado novo nasce lá; os cinco baldes somam o total |
+| Conformidade de SLA | **piora** quando a triagem demora | o prazo conta da abertura (RN-013), então triagem tardia entrega chamado já vencido |
+
+O segundo é o ponto da mudança, não um efeito colateral: antes, o chamado
+parado nascia "Média" com 12 horas úteis de prazo e a demora da triagem não
+aparecia em indicador nenhum.
+
+### O que estava quebrado e ninguém tinha visto
+
+O painel do administrador **quebraria com 500** no primeiro chamado sem
+prioridade: seis lugares do `dashboard.py` faziam `r.priority.value` direto, e
+a linha `NULL` do `GROUP BY` derruba tudo. Não estava no pedido; apareceu no
+levantamento e está consertado com o balde novo.
+
+A reabertura e o prompt da Helô tinham o mesmo problema em menor escala — a
+primeira relia `ticket.priority.value`, e o segundo mandava a string `"None"`
+para a LLM como se fosse um nível.
+
+### O que a mutação pegou
+
+Doze mutações, e **duas passaram** na primeira rodada — teste verde que não
+provava o que o nome dizia:
+
+1. Devolver o campo `priority` ao contrato de abertura não derrubava nada: o
+   router já não gravava o campo, então duas defesas cobriam o mesmo caminho.
+2. Fazer o botão de triagem aparecer para o cliente não derrubava nada: com o
+   chamado aberto, a seção de Ações inteira já é da equipe. O cenário que
+   isola é real — cliente vendo o próprio chamado **resolvido**, onde a seção
+   aparece por causa da reabertura.
+
+Os dois viraram teste novo. A terceira correção foi de precisão: contar as
+ocorrências de "Sem prioridade" em vez de aceitar "pelo menos uma".
+
+### A ordem da fila mudou depois (D5)
+
+Fechada a primeira rodada, você pediu o inverso do que eu tinha feito: o não
+triado vai para o **começo** da ordenação por prioridade, não para o fim.
+
+Eu tinha mandado para o fim com o argumento de que "sem prioridade" não é menos
+urgente que "baixa" — é desconhecido, e a coluna ordenada por urgência não tem
+onde afirmar isso. O seu argumento ganha porque é operacional: no fim da
+coluna, o chamado não triado fica escondido **justamente enquanto o relógio
+anda**, já que o prazo de resolução corre desde a abertura. Atrasar a triagem
+passa a custar prazo que não volta.
+
+A ordem agora é **sem prioridade → crítica → alta → média → baixa**, nos dois
+lugares onde ela existe (o `case()` do `sort_by=priority` na API e o
+`ordemNaFila` do `lib/prioridade.ts`, que o quadro usa). Prioridade
+desconhecida — valor que o banco tenha e o código não conheça — continua indo
+para o fim: dado estranho não é fila de triagem.
+
+Três testes, e a mutação que importa é tirar a cláusula do nulo do `case()`: o
+teste de `ORDER BY` contra Postgres de verdade cai.
+
+### Fora do escopo, ficou anotado
+
+O campo `ai_classification` já guarda a prioridade que a LLM sugere e a API já
+a devolve — **nenhuma tela mostra**. O modal de triagem é o lugar óbvio para
+ela aparecer como sugestão.
+
+---
+
 ## 22/09/2026 — Dois defeitos de tela da v1.15.0: o botão sem texto e a página que rolava inteira
 
 Os dois foram vistos em produção no quadro de chamados, e nenhum dos dois

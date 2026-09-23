@@ -21,6 +21,10 @@ class TicketStats(AppBaseModel):
     by_priority_high: int
     by_priority_medium: int
     by_priority_low: int
+    # Chamado aberto que ninguém triou. Existe como balde próprio para que
+    # crítica + alta + média + baixa + sem prioridade feche o `total` — sem ele,
+    # a distribuição por prioridade some com parte da fila.
+    by_priority_none: int = 0
 
 
 class SurveyStats(AppBaseModel):
@@ -108,7 +112,9 @@ class OldestTicketItem(AppBaseModel):
     ticket_id: str
     protocol: str
     title: str
-    priority: str
+    # Nulo enquanto não houve triagem — e é justamente entre os mais antigos
+    # sem resposta que o não-triado aparece.
+    priority: str | None
     category: str
     status: str
     age_hours: float
@@ -133,7 +139,7 @@ class SlaJustificationItem(AppBaseModel):
     ticket_id: str
     protocol: str
     title: str
-    priority: str
+    priority: str | None
     resolved_at: datetime | None
     assignee_name: str | None
     justification: str

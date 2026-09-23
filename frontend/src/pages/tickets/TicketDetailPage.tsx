@@ -3,7 +3,12 @@ import { toast } from "sonner";
 import { toastApiError } from "../../lib/toastError";
 import { readableTextColor } from "../../lib/colors";
 import { rotuloDeCategoria } from "../../lib/categoria";
-import { rotuloDePrioridade } from "../../lib/prioridade";
+import {
+  PRIORIDADE,
+  PRIORIDADES,
+  rotuloDePrioridade,
+  type TicketPriority,
+} from "../../lib/prioridade";
 import { rotuloDeStatus } from "../../lib/status";
 import { cn, plural } from "../../lib/utils";
 import { Link, useParams } from "react-router-dom";
@@ -16,6 +21,7 @@ import {
   ModalFooter,
   PriorityBadge,
   SelectMenu,
+  SemPrioridade,
   SlaChip,
   Spinner,
   StatusBadge,
@@ -44,6 +50,7 @@ import {
   reopenTicket,
   resolveTicket,
   updateClientObservation,
+  updateTicketPriority,
   updateTicketStatus,
   type Ticket,
   type TicketHistory,
@@ -741,6 +748,9 @@ export default function TicketDetailPage() {
 
   const [statusModal, setStatusModal] = useState(false);
   const [assignModal, setAssignModal] = useState(false);
+  const [priorityModal, setPriorityModal] = useState(false);
+  const [newPriority, setNewPriority] = useState("");
+  const [priorityLoading, setPriorityLoading] = useState(false);
   const [uploadModal, setUploadModal] = useState(false);
   const [resolveModal, setResolveModal] = useState(false);
 
@@ -970,6 +980,25 @@ export default function TicketDetailPage() {
     }
   }
 
+  async function handlePriorityChange() {
+    if (!ticket || !newPriority) return;
+    // Lido ANTES da resposta chegar: depois dela o chamado já tem prioridade,
+    // e toda triagem diria "alterada".
+    const eraSemPrioridade = ticket.priority === null;
+    setPriorityLoading(true);
+    try {
+      setTicket(await updateTicketPriority(ticket.id, newPriority as TicketPriority));
+      setHistory((await getTicketHistory(ticket.id)).items);
+      setPriorityModal(false);
+      setNewPriority("");
+      toast.success(eraSemPrioridade ? "Prioridade definida." : "Prioridade alterada.");
+    } catch (err) {
+      toastApiError(err, "Não foi possível definir a prioridade.");
+    } finally {
+      setPriorityLoading(false);
+    }
+  }
+
   async function handleToggleAi() {
     if (!ticket) return;
     const desligando = ticket.ai_enabled;
@@ -1158,7 +1187,11 @@ export default function TicketDetailPage() {
           <h1 className="text-xl font-extrabold leading-tight text-conteudo-heading">{ticket.title}</h1>
           <div className="mt-2 flex flex-wrap items-center gap-2">
             <StatusBadge status={ticket.status} />
-            <PriorityBadge priority={ticket.priority} />
+            {ticket.priority ? (
+              <PriorityBadge priority={ticket.priority} />
+            ) : (
+              <SemPrioridade />
+            )}
             {ticket.tags.map((tag) => (
               <TagBadge key={tag.id} name={tag.name} color={tag.color} />
             ))}
@@ -1306,7 +1339,11 @@ export default function TicketDetailPage() {
                     />
                     <DetailField
                       label="Prioridade"
-                      value={rotuloDePrioridade(ticket.priority)}
+                      value={
+                        ticket.priority
+                          ? rotuloDePrioridade(ticket.priority)
+                          : "Sem prioridade"
+                      }
                     />
                     <DetailField label="Produto" value={ticket.product_name} />
                     <DetailField
@@ -1515,6 +1552,21 @@ export default function TicketDetailPage() {
                     variant="default"
                   />
                 )}
+                {/* A triagem. Técnico e administrador têm a mesma permissão
+                    aqui, e o cliente não vê este botão — quem abre o chamado
+                    descreve o problema, quem classifica a urgência é quem
+                    atende. */}
+                {isStaff && (
+                  <SidebarAction
+                    icon=<Icon name="warning" size={12} strokeWidth={2} />
+                    label={ticket.priority ? "Alterar prioridade" : "Definir prioridade"}
+                    onClick={() => {
+                      setNewPriority(ticket.priority ?? "");
+                      setPriorityModal(true);
+                    }}
+                    variant="default"
+                  />
+                )}
                 {isStaff && (
                   <SidebarAction
                     icon=<Icon name="warning" size={12} strokeWidth={2} />
@@ -1543,7 +1595,11 @@ export default function TicketDetailPage() {
               <StatusBadge status={ticket.status} />
             </PropRow>
             <PropRow icon=<Icon name="warning" size={12} strokeWidth={2} /> label="Prioridade">
-              <PriorityBadge priority={ticket.priority} />
+              {ticket.priority ? (
+                <PriorityBadge priority={ticket.priority} />
+              ) : (
+                <SemPrioridade />
+              )}
             </PropRow>
             <PropRow icon=<Icon name="user" size={16} strokeWidth={2} /> label="Responsável">
               {assignedTech ? (
@@ -1948,6 +2004,48 @@ export default function TicketDetailPage() {
             disabled={!newStatus || (newStatus === "resolved" && faltaJustificativa)}
           >
             Confirmar
+          </Button>
+        </ModalFooter>
+      </Modal>
+
+      <Modal
+        open={priorityModal}
+        onClose={() => {
+          setPriorityModal(false);
+        }}
+        title={ticket.priority ? "Alterar prioridade" : "Definir prioridade"}
+      >
+        <div className="space-y-4">
+          <SelectMenu
+            label="Prioridade"
+            options={PRIORIDADES.map((p) => ({
+              value: p,
+              label: PRIORIDADE[p].rotulo,
+            }))}
+            placeholder="Selecione a prioridade"
+            value={newPriority}
+            onChange={(v) => setNewPriority(v)}
+            disabled={priorityLoading}
+          />
+          <p className="text-xs leading-snug text-conteudo-muted">
+            O prazo de SLA é calculado a partir da abertura do chamado, não
+            deste momento.
+          </p>
+        </div>
+        <ModalFooter>
+          <Button
+            variant="secondary"
+            onClick={() => setPriorityModal(false)}
+            disabled={priorityLoading}
+          >
+            Cancelar
+          </Button>
+          <Button
+            onClick={handlePriorityChange}
+            loading={priorityLoading}
+            disabled={!newPriority || newPriority === ticket.priority}
+          >
+            Salvar
           </Button>
         </ModalFooter>
       </Modal>

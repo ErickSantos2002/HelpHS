@@ -10,6 +10,7 @@ Permissões:
   PATCH  /tickets/{id}               — admin/technician (todos os campos)
                                        client (title/description, apenas se status=open)
   PATCH  /tickets/{id}/status        — admin, technician
+  PATCH  /tickets/{id}/priority      — admin, technician (a triagem)
   PATCH  /tickets/{id}/assign        — admin, technician
   POST   /tickets/{id}/reopen        — criador (dentro do prazo), admin/technician
   DELETE /tickets/{id}               — admin (cancela o ticket)
@@ -56,6 +57,7 @@ from app.schemas.ticket import (
     TicketNoteCreate,
     TicketNoteResponse,
     TicketObservationUpdate,
+    TicketPriorityUpdate,
     TicketReopen,
     TicketResolve,
     TicketResponse,
@@ -75,6 +77,7 @@ from app.utils.history import registra_historico
 from app.utils.protocol import MAX_RETRIES, generate_protocol
 from app.utils.sla import (
     _PAUSE_STATUSES,
+    _TERMINAL_STATUSES,
     add_business_minutes,
     apply_sla_config,
     check_breaches,
@@ -358,20 +361,17 @@ async def create_ticket(
 ) -> TicketResponse:
     """Create a new support ticket.
 
-    Generates a unique protocol number (HS-YYYY-NNNN), applies the matching
-    SLA configuration, persists the ticket, and triggers async AI classification.
+    Generates a unique protocol number (HS-YYYY-NNNN), persists the ticket and
+    triggers async AI classification.
+
+    **O chamado nasce sem prioridade e, por consequência, sem prazo de SLA.**
+    Quem define a prioridade é a triagem (`PATCH /tickets/{id}/priority`), e é
+    ela que carrega a `SLAConfig` e carimba os prazos — contados da abertura,
+    não do instante da triagem. Buscar uma configuração de SLA aqui não teria
+    por qual nível procurar: não existe prioridade ainda.
     """
     ts = datetime.now(UTC)
     ticket_id = uuid.uuid4()
-
-    # Look up SLA config matching this ticket's priority
-    sla_result = await db.execute(
-        select(SLAConfig).where(
-            SLAConfig.level == body.priority.value,
-            SLAConfig.is_active.is_(True),
-        )
-    )
-    sla_config = sla_result.scalar_one_or_none()
 
     for attempt in range(MAX_RETRIES):
         protocol = await generate_protocol(db)
@@ -380,7 +380,6 @@ async def create_ticket(
             protocol=protocol,
             title=body.title,
             description=body.description,
-            priority=body.priority,
             category=body.category,
             status=TicketStatus.open,
             creator_id=actor.id,
@@ -405,8 +404,6 @@ async def create_ticket(
             created_at=ts,
             updated_at=ts,
         )
-        if sla_config:
-            apply_sla_config(ticket, sla_config, ts)
         db.add(ticket)
         await _set_ticket_equipments(db, ticket, body.equipment_ids, actor)
         registra_historico(db, ticket.id, actor.id, "created", None, "open")
@@ -528,7 +525,19 @@ async def list_tickets(
 
     # Build sort expression
     if sort_by == "priority":
+        # **Sem prioridade vem ANTES de "Crítica"**, e não no fim da fila.
+        #
+        # Ordenar por urgência passou a ter duas perguntas dentro: quão urgente
+        # é, e alguém já disse quão urgente é. A segunda vem primeiro — o
+        # chamado não triado é o que precisa de ação inicial, e o prazo de
+        # resolução dele **já corre desde a abertura** (o SLA é ancorado em
+        # `created_at`). Mandá-lo para o fim esconderia justamente quem ainda
+        # não foi olhado, e o atraso chegaria pronto.
+        #
+        # O `else_` continua sendo o fim: valor que o banco tenha e este código
+        # não conheça é dado estranho, não fila de triagem.
         sort_expr = case(
+            (Ticket.priority.is_(None), -1),
             (Ticket.priority == "critical", 0),
             (Ticket.priority == "high", 1),
             (Ticket.priority == "medium", 2),
@@ -737,6 +746,85 @@ async def toggle_ticket_ai(
     response = _serialize_ticket(ticket)
     await _fill_product_and_equipment(response, ticket, db)
     return response
+
+
+@router.patch("/tickets/{ticket_id}/priority", response_model=TicketResponse)
+async def update_ticket_priority(
+    ticket_id: uuid.UUID,
+    body: TicketPriorityUpdate,
+    db: Annotated[AsyncSession, Depends(get_db)],
+    actor: Annotated[User, Depends(authorize(UserRole.admin, UserRole.technician))],
+) -> TicketResponse:
+    """A triagem: define (ou troca) a prioridade e carimba o SLA correspondente.
+
+    Técnico e administrador têm a MESMA permissão aqui — quem tria é quem
+    atende. O cliente recebe 403: ele descreve o problema, não classifica a
+    urgência dele.
+
+    **O prazo conta da ABERTURA, não deste clique.** `apply_sla_config` recebe
+    `ticket.created_at`, e não o `now`, porque o RN-013 diz que o SLA conta da
+    abertura até a resolução (ver "SLA" em `docs/decisoes-e-regras.md`) e a
+    triagem não é um recomeço. A consequência é real e foi decidida com ela à
+    vista: triagem demorada entrega um chamado que **já nasce vencido**, e é
+    assim que a demora aparece na conformidade em vez de sumir.
+
+    Duas coisas que esta função deliberadamente NÃO faz:
+
+    **Não desfaz violação de primeira resposta.** `check_breaches` só olha o
+    prazo de resposta enquanto `sla_first_response` é nulo, então um chamado já
+    respondido não passa a dever resposta por causa de um prazo retroativo. A
+    espera continua medida onde ela é medida — `sla_first_response -
+    created_at`, no relatório —, só não vira acusação de prazo que não existia.
+
+    **Não mexe no SLA de chamado encerrado.** Resolvido, fechado ou cancelado
+    guardam prazos e marcas do momento em que foram encerrados, e uma
+    justificativa de violação já escrita se apoia naqueles números. Corrigir a
+    prioridade de um chamado morto é catalogação: grava o campo e o histórico,
+    e deixa o relógio como está. É a mesma regra do `marca_violacao_ao_resolver`
+    — só acrescenta, nunca desmarca.
+    """
+    ticket = await get_or_404(db, Ticket, ticket_id, _CHAMADO_NAO_ENCONTRADO)
+
+    anterior = ticket.priority
+    if anterior == body.priority:
+        return _serialize_ticket(ticket)
+
+    now = datetime.now(UTC)
+
+    sla_result = await db.execute(
+        select(SLAConfig).where(
+            SLAConfig.level == body.priority.value,
+            SLAConfig.is_active.is_(True),
+        )
+    )
+    sla_config = sla_result.scalar_one_or_none()
+
+    ticket.priority = body.priority
+
+    # Sem `SLAConfig` ativa para o nível não há prazo a carimbar — a prioridade
+    # grava assim mesmo. O contrário deixaria o chamado sem triagem porque
+    # falta uma linha de catálogo.
+    if sla_config and ticket.status not in _TERMINAL_STATUSES:
+        apply_sla_config(ticket, sla_config, ticket.created_at)
+        # Com o prazo vindo da abertura, a violação pode já ser fato no
+        # instante em que ele é carimbado. Avaliar aqui evita um chamado
+        # vencido que só se declara vencido na próxima escrita alheia.
+        check_breaches(ticket, now)
+
+    ticket.updated_at = now
+
+    registra_historico(
+        db,
+        ticket.id,
+        actor.id,
+        "priority",
+        anterior.value if anterior else None,
+        body.priority.value,
+    )
+    _audit(db, AuditAction.update, actor.id, ticket.id)
+    await commit_e_notificar(db)
+    await db.refresh(ticket)
+    return _serialize_ticket(ticket)
 
 
 @router.patch("/tickets/{ticket_id}/status", response_model=TicketResponse)
@@ -967,13 +1055,19 @@ async def reopen_ticket(
 
     # Prazo de resolução novo. Sem isso o chamado nasceria reaberto já vencido,
     # com o cronômetro parado no dia em que foi resolvido.
-    sla_result = await db.execute(
-        select(SLAConfig).where(
-            SLAConfig.level == ticket.priority.value,
-            SLAConfig.is_active.is_(True),
+    #
+    # Chamado sem prioridade não tem por qual nível procurar, e reabrir não é
+    # hora de arbitrar uma: ele volta sem prazo, como voltou para a fila de
+    # triagem. Quem triar carimba o prazo pelo endpoint de prioridade.
+    sla_config = None
+    if ticket.priority is not None:
+        sla_result = await db.execute(
+            select(SLAConfig).where(
+                SLAConfig.level == ticket.priority.value,
+                SLAConfig.is_active.is_(True),
+            )
         )
-    )
-    sla_config = sla_result.scalar_one_or_none()
+        sla_config = sla_result.scalar_one_or_none()
     if sla_config:
         # Usa a configuração VIGENTE, não a que valia quando o chamado nasceu.
         # É exceção consciente à regra de transição dos prazos aprovados pelo
