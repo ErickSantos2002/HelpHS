@@ -53,17 +53,19 @@ A pergunta que cada uma responde é sempre a mesma: **a ligação saiu?**
 
 A tabela, porque a linha entre a terceira e a quarta é a que custa caro:
 
-===============================  ==================================
- situação                         a ligação saiu?
-===============================  ==================================
- flag desligada                   não houve tentativa
- ConnectError / ConnectTimeout    não houve comunicação HTTP útil
- HTTP 4xx                         rejeição HTTP confirmada
- HTTP 5xx                         INDETERMINADO
- HTTP 3xx                         INDETERMINADO
- transporte após conexão          INDETERMINADO
- 2xx com corpo ilegível           INDETERMINADO
-===============================  ==================================
+===================================  ==================================
+ situação                             a ligação saiu?
+===================================  ==================================
+ flag desligada                       não houve tentativa
+ ConnectError / ConnectTimeout        não houve comunicação HTTP útil
+ HTTP 4xx                             rejeição HTTP confirmada
+ **HTTP 200 com `id` legível**        SIM — e temos o identificador
+ HTTP 200 sem `id` utilizável         INDETERMINADO
+ HTTP 201 / 202 / outro 2xx           INDETERMINADO
+ HTTP 5xx                             INDETERMINADO
+ HTTP 3xx                             INDETERMINADO
+ transporte após conexão              INDETERMINADO
+===================================  ==================================
 
 ⚠️ **5xx não é prova de que a ligação não saiu.** O fornecedor pode ter recebido
 o POST, disparado a chamada e só então quebrado por dentro: o 500 descreve o
@@ -74,8 +76,27 @@ recusa é o erro que autoriza uma segunda tentativa e toca o telefone duas vezes
 seguido, e um redirect inesperado num endpoint de escrita não é sucesso nem
 recusa.
 
+⚠️ **201 e 202 não são sucesso aqui**, e o motivo é de mesma natureza: a
+documentação de `POST /calls` publica **apenas 200** como criação aceita. Aceitar
+201 seria assumir um contrato que o fornecedor não escreveu. A pergunta está na
+lista enviada ao suporte; quando ele responder, ampliar é uma linha.
+
 A regra é conservadora por construção: só afirmamos "não saiu" quando dá para
-provar. Em TODOS os casos, zero retry automático.
+provar, e só afirmamos "saiu" quando temos o identificador em mãos. Em TODOS os
+casos, zero retry automático.
+
+O identificador
+---------------
+A documentação de `POST /calls` mostra a resposta 200 como
+``{"status": "200", "message": "successful request", "id": "…"}`` e diz que esse
+`id` é "o mesmo ID da chamada exibido na Lista de Chamadas, podendo ser usado
+tanto para consultas quanto para cancelar a chamada" — e `POST /calls/{id}/hangup`
+o consome como parâmetro de caminho, tipo `string`.
+
+É **string opaca**: dois documentos oficiais mostram formatos diferentes para o
+mesmo campo (27 caracteres base62 na referência, UUID textual de 36 no guia de
+integração). Não validamos formato, não validamos comprimento, não
+transformamos.
 
 Segredo e PII
 -------------
@@ -153,25 +174,73 @@ class Api4ComResultadoIndeterminadoError(RuntimeError):
 
 @dataclass(frozen=True)
 class Api4ComCreateCallResult:
-    """O que o fornecedor devolveu, sem interpretação.
+    """A chamada foi criada, e este é o identificador dela no fornecedor.
 
-    Não há campo para o identificador da chamada porque o schema da resposta de
-    `POST /calls` **não está confirmado**: a documentação não o define e a sonda
-    classifica a pergunta como NÃO DETERMINADO. Inventar `id`, `call_id` ou
-    `data.id` aqui criaria um contrato que o fornecedor não prometeu. A Fase 2B
-    segue bloqueada até haver evidência, e é ela quem acrescenta o campo.
+    Só existe para o caminho de sucesso confirmado. Qualquer outra coisa é
+    exceção — não há resultado "parcial" aqui.
+
+    ⚠️ `provider_call_id` é **string opaca**. A documentação declara o tipo como
+    `string` e mostra DOIS formatos para o mesmo campo: 27 caracteres base62
+    (`1PkXhmBsYAvr9legLB2d7BimT0Q`) na referência da API, e UUID textual de 36
+    (`bdf199fa-…`) no guia de integração. Não validamos formato nem
+    comprimento, e não transformamos: o valor volta exatamente como chegou.
+
+    O corpo bruto da resposta NÃO sai daqui. A Fase 2A o devolvia inteiro
+    porque não sabíamos qual campo importava; agora sabemos, e carregar o resto
+    só criaria mais um lugar por onde `message`, metadata ou dado de terceiro
+    poderiam vazar para um log.
     """
 
     status_code: int
-    payload: object | None
+    provider_call_id: str
 
 
 def _url_das_chamadas(base_url: str) -> str:
     """Junta a base com `/calls` sem depender de o painel ter acertado a barra.
 
-    Só junção estrutural: nada do payload passa por aqui.
+    Só junção estrutural: nada do corpo da requisição passa por aqui.
     """
     return f"{base_url.rstrip('/')}/calls"
+
+
+def _identificador_da_resposta(resposta: httpx.Response) -> str:
+    """Tira o `id` de uma resposta 200. Sem validar formato, sem transformar.
+
+    A documentação de `POST /calls` diz que o retorno traz `id` no topo do
+    JSON, e que é esse mesmo `id` que `POST /calls/{id}/hangup` consome. É tudo
+    o que exigimos: um `id` textual e não vazio.
+
+    Cada recusa abaixo vira INDETERMINADO, e não erro de contrato, pela mesma
+    razão: houve HTTP 200. O fornecedor provavelmente criou a chamada — o que
+    falhou foi a nossa capacidade de saber QUAL. Chamar isso de falha
+    autorizaria uma segunda tentativa, e o telefone tocaria duas vezes.
+    """
+    try:
+        corpo = resposta.json()
+    except ValueError:
+        raise Api4ComResultadoIndeterminadoError(
+            "a API4COM respondeu HTTP 200 com um corpo ilegível: "
+            "a chamada pode ter sido iniciada e não sabemos o identificador"
+        ) from None
+
+    # `json()` aceita lista, número e string no topo; só objeto serve.
+    if not isinstance(corpo, dict):
+        raise Api4ComResultadoIndeterminadoError(
+            "a API4COM respondeu HTTP 200 sem um objeto JSON: "
+            "a chamada pode ter sido iniciada e não sabemos o identificador"
+        )
+
+    identificador = corpo.get("id")
+    # `isinstance(x, str)` e não `str(x)`: converter um 123 em "123" inventaria
+    # um identificador que o fornecedor não mandou.
+    if not isinstance(identificador, str) or not identificador.strip():
+        raise Api4ComResultadoIndeterminadoError(
+            "a API4COM respondeu HTTP 200 sem `id` utilizável: "
+            "a chamada pode ter sido iniciada e não sabemos o identificador"
+        )
+
+    # `strip()` serviu SÓ para decidir se está vazio. O que volta é o original.
+    return identificador
 
 
 async def create_call(*, caller: str, called: str, extension: str) -> Api4ComCreateCallResult:
@@ -238,31 +307,27 @@ async def create_call(*, caller: str, called: str, extension: str) -> Api4ComCre
     if 400 <= codigo < 500:
         raise Api4ComRecusadaError(codigo)
 
-    # 5xx NÃO prova que a chamada não saiu. O fornecedor pode ter recebido o
-    # POST, disparado a ligação e só depois quebrado por dentro — o 500 descreve
-    # o estado do servidor dele, não o do telefone de quem ia receber.
+    # Tudo o que não for 200 e não for 4xx é indeterminado — e isso inclui
+    # 201 e 202.
     #
-    # 3xx também não: com `follow_redirects=False` o redirect chega aqui sem ter
-    # sido seguido, e um redirect inesperado num endpoint de escrita não é nem
-    # sucesso nem recusa. Pode ter havido efeito antes.
+    # 5xx NÃO prova que a chamada não saiu: o fornecedor pode ter recebido o
+    # POST, disparado a ligação e só depois quebrado por dentro. 3xx também
+    # não: com `follow_redirects=False` o redirect chega aqui sem ter sido
+    # seguido, e redirect inesperado num endpoint de escrita não é sucesso nem
+    # recusa.
     #
-    # Os dois vão para indeterminado pela mesma regra conservadora do resto do
-    # módulo: só afirmamos "não saiu" quando dá para provar.
-    if not 200 <= codigo < 300:
+    # E 201/202 ficam de fora do sucesso por um motivo diferente, mas de mesma
+    # natureza: a documentação de `POST /calls` só publica **200** como criação
+    # aceita. Tratar 201 como sucesso seria assumir contrato que o fornecedor
+    # não escreveu — e se ele um dia responder 202 com o corpo em outro
+    # formato, teríamos aceitado um identificador que não sabemos ler. Quando o
+    # suporte responder, ampliar é uma linha; ter errado em produção, não.
+    if codigo != 200:
         raise Api4ComResultadoIndeterminadoError(
             f"a API4COM respondeu HTTP {codigo}: a chamada pode ter sido iniciada"
         )
 
-    if not resposta.content:
-        return Api4ComCreateCallResult(status_code=resposta.status_code, payload=None)
-
-    try:
-        payload = resposta.json()
-    except ValueError:
-        # Respondeu 2xx com um corpo que não se lê. Provavelmente criou a
-        # chamada; não dá para afirmar. Vale a regra conservadora.
-        raise Api4ComResultadoIndeterminadoError(
-            "a API4COM respondeu com um corpo ilegível: a chamada pode ter sido iniciada"
-        ) from None
-
-    return Api4ComCreateCallResult(status_code=resposta.status_code, payload=payload)
+    return Api4ComCreateCallResult(
+        status_code=codigo,
+        provider_call_id=_identificador_da_resposta(resposta),
+    )

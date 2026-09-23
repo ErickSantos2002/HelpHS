@@ -34,6 +34,11 @@ from app.services.api4com import (
 # mensagem de exceção ou numa linha de log, veio do token.
 _TOKEN = "marcador-de-token-que-nao-pode-vazar-9Z7Q"
 
+# Os DOIS formatos que a documentação oficial mostra para o mesmo campo `id`.
+# Ter os dois no arquivo é o que impede alguém de "arrumar" o tipo da coluna.
+_ID_BASE62 = "1PkXhmBsYAvr9legLB2d7BimT0Q"  # referência da API, 27 chars
+_ID_UUID = "bdf199fa-f85b-4378-80cd-0ac28c1355e9"  # guia de integração, 36 chars
+
 _CALLER = "1130000000"
 _CALLED = "  +55 (81) 99999-9999  "  # sujo DE PROPÓSITO — ver o teste do byte a byte
 _EXTENSION = "1001"
@@ -61,16 +66,31 @@ def _settings(
     return s
 
 
-def _resposta(
-    *, status: int = 200, conteudo: bytes = b"", json_devolve=None, json_erro=None
-) -> MagicMock:
+# Sentinela. Sem ela, `json_devolve=None` seria ambíguo entre "use o corpo de
+# sucesso" e "o fornecedor respondeu `null`" — e o segundo caso jamais seria
+# exercido, passando por sucesso sem ninguém notar. Foi o que aconteceu na
+# primeira versão deste arquivo.
+_PADRAO = object()
+
+
+def _corpo_ok(identificador: str = _ID_BASE62) -> dict:
+    """O corpo exato que a documentação de `POST /calls` publica para o 200."""
+    return {"status": "200", "message": "successful request", "id": identificador}
+
+
+def _resposta(*, status: int = 200, json_devolve=_PADRAO, json_erro=None) -> MagicMock:
+    """Duplo de resposta. O default é o 200 de sucesso documentado.
+
+    Omitir `json_devolve` usa o corpo de sucesso. Passar `None` explicitamente
+    significa o JSON `null`, que é caso de teste. Para corpo ausente ou
+    ilegível existe `json_erro`, que é o que o `httpx` levanta de verdade.
+    """
     r = MagicMock()
     r.status_code = status
-    r.content = conteudo
     if json_erro is not None:
         r.json = MagicMock(side_effect=json_erro)
     else:
-        r.json = MagicMock(return_value=json_devolve)
+        r.json = MagicMock(return_value=_corpo_ok() if json_devolve is _PADRAO else json_devolve)
     return r
 
 
@@ -498,53 +518,171 @@ async def test_nao_repetimos_a_mensagem_da_excecao_original(erro):
 
 
 # ═══════════════════════════════════════════════════════════════
-# A resposta 2xx — sem inventar schema
+# A resposta 200 — de onde sai o identificador
 # ═══════════════════════════════════════════════════════════════
+#
+# A documentação de `POST /calls` publica o 200 como
+# {"status": "200", "message": "successful request", "id": "..."} e diz que
+# esse `id` é o mesmo consumido por `POST /calls/{id}/hangup`. É a única coisa
+# que extraímos — e a única que exigimos.
 
 
 @pytest.mark.asyncio
-async def test_2xx_com_json_devolve_o_payload_sem_extrair_nada():
-    """O caminho do identificador da chamada NÃO está confirmado.
+@pytest.mark.parametrize(
+    "identificador",
+    [_ID_BASE62, _ID_UUID],
+    ids=["base62-27", "uuid-textual-36"],
+)
+async def test_200_com_id_devolve_a_string_exata(identificador):
+    """Os DOIS formatos que a doc oficial mostra passam, e sem transformação.
 
-    Enquanto não estiver, o payload volta inteiro e quem chamar decide. A Fase
-    2B é quem acrescenta o campo, com evidência.
+    A referência da API mostra 27 caracteres base62; o guia de integração
+    mostra UUID textual de 36. Validar qualquer um dos dois formatos quebraria
+    o outro — por isso o identificador é string opaca, aqui e na coluna.
     """
-    corpo = {"id": "abc-123", "status": "queued", "qualquer": {"coisa": 1}}
-    _, contextos = _monta(resposta=_resposta(status=201, conteudo=b"{...}", json_devolve=corpo))
+    _, contextos = _monta(resposta=_resposta(json_devolve=_corpo_ok(identificador)))
     with contextos[0], contextos[1], contextos[2]:
         resultado = await create_call(caller=_CALLER, called=_CALLED, extension=_EXTENSION)
 
-    assert resultado.status_code == 201
-    assert resultado.payload == corpo
+    assert resultado.provider_call_id == identificador
+    assert resultado.status_code == 200
 
 
 @pytest.mark.asyncio
-async def test_2xx_com_corpo_vazio_devolve_payload_none():
-    _, contextos = _monta(resposta=_resposta(status=204, conteudo=b""))
+async def test_o_id_nao_e_normalizado():
+    """Espaço interno, caixa e pontuação sobrevivem: o valor volta como veio."""
+    esquisito = "  Ab-9_x  "
+    _, contextos = _monta(resposta=_resposta(json_devolve=_corpo_ok(esquisito)))
     with contextos[0], contextos[1], contextos[2]:
         resultado = await create_call(caller=_CALLER, called=_CALLED, extension=_EXTENSION)
 
-    assert resultado.status_code == 204
-    assert resultado.payload is None
+    assert resultado.provider_call_id == esquisito
 
 
 @pytest.mark.asyncio
-async def test_2xx_com_corpo_ilegivel_e_indeterminado():
-    """Respondeu, provavelmente criou — e não dá para afirmar. Regra conservadora."""
-    _, contextos = _monta(
-        resposta=_resposta(
-            status=200, conteudo=b"<html>opa</html>", json_erro=ValueError("nao e json")
-        )
-    )
+@pytest.mark.parametrize(
+    "corpo",
+    [
+        {},
+        {"status": "200", "message": "successful request"},
+        {"id": None},
+        {"id": 123},
+        {"id": 1.5},
+        {"id": True},
+        {"id": ""},
+        {"id": "   "},
+        {"id": "\t\n"},
+        {"id": {"valor": _ID_BASE62}},
+        {"id": [_ID_BASE62]},
+        [{"id": _ID_BASE62}],
+        [],
+        "só um texto",
+        42,
+        None,
+    ],
+    ids=[
+        "objeto-vazio",
+        "sem-id",
+        "id-null",
+        "id-int",
+        "id-float",
+        "id-bool",
+        "id-string-vazia",
+        "id-so-espaco",
+        "id-so-whitespace",
+        "id-objeto",
+        "id-lista",
+        "array-no-topo",
+        "array-vazio",
+        "string-no-topo",
+        "numero-no-topo",
+        "null-no-topo",
+    ],
+)
+async def test_200_sem_id_utilizavel_e_indeterminado(corpo):
+    """200 sem identificador legível NÃO é erro de contrato — é indeterminado.
+
+    O fornecedor provavelmente criou a chamada; o que falhou foi nossa
+    capacidade de saber QUAL. Tratar como falha autorizaria segunda tentativa.
+
+    `{"id": True}` está na lista de propósito: em Python `bool` é subclasse de
+    `int`, e uma checagem descuidada por `isinstance(x, (str, int))` deixaria
+    `True` passar como identificador.
+    """
+    _, contextos = _monta(resposta=_resposta(json_devolve=corpo))
     with contextos[0], contextos[1], contextos[2]:
         with pytest.raises(Api4ComResultadoIndeterminadoError):
             await create_call(caller=_CALLER, called=_CALLED, extension=_EXTENSION)
 
 
-def test_o_resultado_nao_tem_campo_de_identificador():
-    """Prende a ausência: inventar `provider_call_id` aqui seria contrato falso."""
+@pytest.mark.asyncio
+async def test_200_com_corpo_ilegivel_e_indeterminado():
+    """Corpo que não é JSON — inclui o caso de corpo vazio, que `json()` recusa."""
+    _, contextos = _monta(resposta=_resposta(json_erro=ValueError("nao e json")))
+    with contextos[0], contextos[1], contextos[2]:
+        with pytest.raises(Api4ComResultadoIndeterminadoError):
+            await create_call(caller=_CALLER, called=_CALLED, extension=_EXTENSION)
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("status", [201, 202, 203, 204, 206])
+async def test_2xx_que_nao_seja_200_e_indeterminado_mesmo_com_id(status):
+    """⚠️ 201 e 202 NÃO são sucesso, mesmo trazendo um `id` perfeito.
+
+    A documentação de `POST /calls` publica apenas **200** como criação aceita.
+    Aceitar 201 seria assumir contrato que o fornecedor não escreveu. A
+    pergunta está na lista enviada ao suporte; até a resposta chegar, o lado
+    conservador é o que não perde o identificador de uma chamada que já tocou.
+    """
+    _, contextos = _monta(resposta=_resposta(status=status, json_devolve=_corpo_ok()))
+    with contextos[0], contextos[1], contextos[2]:
+        with pytest.raises(Api4ComResultadoIndeterminadoError):
+            await create_call(caller=_CALLER, called=_CALLED, extension=_EXTENSION)
+
+
+def test_o_resultado_carrega_so_status_e_identificador():
+    """Prende a REDUÇÃO do contrato: o corpo bruto não sai mais do módulo.
+
+    A Fase 2A devolvia `payload` inteiro porque não sabíamos qual campo
+    importava. Agora sabemos, e carregar o resto seria mais um lugar por onde
+    `message`, metadata ou dado de terceiro poderiam vazar para um log.
+    """
     campos = set(api4com.Api4ComCreateCallResult.__dataclass_fields__)
-    assert campos == {"status_code", "payload"}
+    assert campos == {"status_code", "provider_call_id"}
+
+
+def test_o_resultado_e_construido_so_com_status_e_id():
+    """Guard por AST: o que entra no resultado não pode ser a resposta bruta.
+
+    Procurar substring aqui não serve — a primeira versão deste teste proibia
+    `=resposta` e caía na própria linha `resposta = await cliente.post(...)`.
+    A AST pergunta o que interessa: quais expressões alimentam o dataclass.
+    """
+    import ast
+    import inspect
+
+    arvore = ast.parse(inspect.getsource(api4com))
+    construcoes = [
+        n
+        for n in ast.walk(arvore)
+        if isinstance(n, ast.Call)
+        and isinstance(n.func, ast.Name)
+        and n.func.id == "Api4ComCreateCallResult"
+    ]
+    assert construcoes, "o resultado deixou de ser construído"
+
+    # Lista BRANCA, e não negra: a primeira versão proibia a palavra "resposta"
+    # e caía no próprio extrator, que recebe a resposta e devolve uma string —
+    # que é justamente o desenho. O que importa é o que ALIMENTA o dataclass.
+    permitido = {
+        "status_code": {"codigo", "resposta.status_code"},
+        "provider_call_id": {"_identificador_da_resposta(resposta)"},
+    }
+    for chamada in construcoes:
+        argumentos = {k.arg: ast.unparse(k.value) for k in chamada.keywords}
+        assert set(argumentos) == set(permitido), argumentos
+        for campo, expressao in argumentos.items():
+            assert expressao in permitido[campo], f"{campo} passou a receber {expressao!r}"
 
 
 # ═══════════════════════════════════════════════════════════════
