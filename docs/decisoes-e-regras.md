@@ -81,6 +81,51 @@ acumulada) — o mesmo que `check_breaches` compara. Antes o chip usava o prazo
 cru e, num chamado pausado por três horas, escrevia "Vencido" três horas antes
 de o motor concordar.
 
+### Estender o prazo de resolução (23/09/2026)
+
+**Técnico e administrador podem prorrogar o prazo de RESOLUÇÃO** em 1, 3, 5, 15
+ou 30 **dias úteis**, com justificativa obrigatória que o cliente lê. O SLA de
+**resposta** não é afetado.
+
+Regras que valem a pena estar aqui:
+
+- **O prazo original nunca é sobrescrito.** `sla_resolve_due_at` continua sendo
+  o que a prioridade carimbou; o que cresce é `sla_resolve_extension_total_min`,
+  um acumulador de minutos úteis. Guardar o acumulado — e não um prazo pronto —
+  é o que faz +3 e depois +1 valerem exatamente +4, e o que faz a extensão
+  sobreviver a uma troca de prioridade, que recarimba só a base.
+- **Só antes de vencer.** A recusa compara `now` com o prazo efetivo do motor,
+  e **não** com `sla_resolve_breach` — a flag só é recalculada em escrita, e um
+  chamado vencido e intocado chega com ela falsa. A extensão serve para evitar
+  o atraso, não para desfazê-lo.
+- **Prorrogar não apaga violação já marcada.** O que aconteceu, aconteceu.
+- **Reabrir zera a extensão do ciclo novo**, e não apaga os registros do ciclo
+  anterior: o histórico continua mostrando que houve prorrogação antes.
+- Cada concessão é uma linha em `ticket_sla_extensions`, **append-only pela
+  regra de negócio**.
+
+### ⚠️ O painel passou a medir o MESMO prazo do chamado (23/09/2026)
+
+Até aqui o painel e os relatórios decidiam violação em SQL comparando a coluna
+crua `sla_resolve_due_at` contra `now()`. Isso **ignorava a pausa acumulada**,
+então um chamado pausado contava violação no painel que o chamado não contava
+na tela. Ninguém tinha medido.
+
+Passou a existir `sla_resolve_effective_due_at` — o prazo efetivo
+**materializado**, escrito só por `atualiza_prazo_efetivo` e igual ao que
+`prazo_efetivo_de_resolucao` devolve. O SQL compara essa coluna.
+
+**A conformidade mudou no deploy por causa disso**, inclusive para chamados que
+só tiveram pausa e nunca extensão. Foi decisão consciente: a alternativa era
+manter duas definições de prazo, ou deixar um chamado prorrogado aparecer "no
+prazo" na tela e "violado" no relatório.
+
+A materialização é possível porque o prazo efetivo é função pura de três campos
+**persistidos** — prazo base, pausa acumulada e extensão acumulada. A pausa
+**em curso** (`sla_paused_at`) não participa, porque o motor nunca a
+considerou. Se isso mudar um dia, a materialização deixa de ser possível — há
+teste que falha se alguém tentar.
+
 ### ⚠️ Dívida conhecida: a pausa é tempo corrido num prazo útil
 
 `sla_total_paused_ms` acumula tempo **corrido** e é somado a um prazo calculado
@@ -90,7 +135,8 @@ a pausa custou.
 
 Registrado em 23/09/2026 e **deixado de propósito**: corrigir muda vencimento e
 indicador de SLA, e por isso é frente própria, com desenho antes do código. Até
-lá, tela e motor usam a mesma conta — a de hoje.
+lá, tela, motor **e painel** usam a mesma conta — a de hoje, torta e igual nos
+três.
 
 ### O que conta como primeira resposta
 
