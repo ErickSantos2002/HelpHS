@@ -13,9 +13,10 @@ até alguém procurar por que a IA saiu de um chamado.
 
 import uuid
 
+from sqlalchemy import ColumnElement
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from app.models.models import TicketHistory
+from app.models.models import TicketHistory, User, UserRole
 
 
 def registra_historico(
@@ -43,3 +44,35 @@ def registra_historico(
             comment=comment,
         )
     )
+
+
+# ── Quem pode LER o quê ──────────────────────────────────────
+
+# Campos do chamado que são internos da equipe. O histórico guarda `old_value`
+# e `new_value` por extenso, sem truncar — então um evento de `technician_notes`
+# carrega as DUAS versões do texto que o modelo declara "visível apenas para
+# admin/técnico".
+CAMPOS_INTERNOS = frozenset({"technician_notes"})
+
+
+def filtra_historico_para(actor: User) -> ColumnElement[bool] | None:
+    """Cláusula que esconde do cliente os campos internos. `None` para staff.
+
+    ⚠️ Filtra na CONSULTA, e não na lista já carregada, de propósito. Podar
+    depois deixaria `total` contando eventos que o cliente não recebe, e as
+    páginas viriam com buracos — pediria 50 e chegariam 48, sem explicação.
+    Aqui o `count` e o `limit` enxergam o mesmo conjunto.
+
+    E filtra por CAMPO, não apagando a linha: o registro continua no banco e o
+    staff continua lendo tudo. Auditoria não se protege destruindo histórico.
+
+    Uso::
+
+        base = select(TicketHistory).where(TicketHistory.ticket_id == ticket_id)
+        recorte = filtra_historico_para(actor)
+        if recorte is not None:
+            base = base.where(recorte)
+    """
+    if actor.role != UserRole.client:
+        return None
+    return TicketHistory.field.notin_(CAMPOS_INTERNOS)
