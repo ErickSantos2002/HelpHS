@@ -20,6 +20,7 @@ import asyncio
 import uuid
 from datetime import UTC, datetime
 from typing import Annotated
+from zoneinfo import ZoneInfo
 
 from fastapi import APIRouter, Depends, HTTPException, Query, status
 from sqlalchemy import func, select  # func used in list_tickets subquery
@@ -40,6 +41,7 @@ from app.models.models import (
     Ticket,
     TicketHistory,
     TicketNote,
+    TicketSlaExtension,
     TicketStatus,
     User,
     UserRole,
@@ -48,8 +50,11 @@ from app.models.models import (
     ticket_tags,
 )
 from app.schemas.ticket import (
+    DiasDeExtensao,
     ExpedienteInfo,
     InterruptorDaIA,
+    SlaExtensionPreview,
+    SlaExtensionRequest,
     TicketAssign,
     TicketCreate,
     TicketHistoryListResponse,
@@ -82,12 +87,15 @@ from app.utils.sla import (
     FUSO_DA_JORNADA,
     add_business_minutes,
     apply_sla_config,
+    atualiza_prazo_efetivo,
     business_minutes_between,
     check_breaches,
     estado_do_expediente,
     marca_violacao_ao_resolver,
+    minutos_uteis_de_dias,
     pause_sla,
-    prazo_efetivo,
+    prazo_efetivo_de_resolucao,
+    prazo_efetivo_de_resposta,
     register_first_response,
     resume_sla,
     violacao_ao_resolver,
@@ -247,6 +255,18 @@ def _expediente(agora: datetime) -> ExpedienteInfo:
     )
 
 
+def _formata_prazo(quando: datetime | None) -> str:
+    """ "24/09/2026 às 12:11" no fuso em que a jornada é definida.
+
+    O fuso vem do motor (`FUSO_DA_JORNADA`), e não de um literal daqui: o
+    horário do vencimento só faz sentido na jornada que o produziu.
+    """
+    if quando is None:
+        return "sem prazo"
+    local = quando.astimezone(ZoneInfo(FUSO_DA_JORNADA))
+    return local.strftime("%d/%m/%Y às %H:%M")
+
+
 def _serialize_ticket(
     ticket: Ticket,
     agora: datetime | None = None,
@@ -272,12 +292,8 @@ def _serialize_ticket(
 
     # O prazo EFETIVO, e o tempo ÚTIL que falta até ele. As duas contas que a
     # tela fazia errado: ela ignorava a pausa e subtraía tempo corrido.
-    response.sla_response_vence_em = prazo_efetivo(
-        ticket.sla_response_due_at, ticket.sla_total_paused_ms
-    )
-    response.sla_resolve_vence_em = prazo_efetivo(
-        ticket.sla_resolve_due_at, ticket.sla_total_paused_ms
-    )
+    response.sla_response_vence_em = prazo_efetivo_de_resposta(ticket)
+    response.sla_resolve_vence_em = prazo_efetivo_de_resolucao(ticket)
     if response.sla_response_vence_em is not None:
         response.sla_response_restante_min = business_minutes_between(
             agora, response.sla_response_vence_em
@@ -446,6 +462,11 @@ async def create_ticket(
             sla_response_breach=False,
             sla_resolve_breach=False,
             sla_total_paused_ms=0,
+            # Explícito, e não pelo `default=0` da coluna, pelo mesmo motivo do
+            # `ai_enabled` logo abaixo: o default do ORM só vale no INSERT, e o
+            # chamado é SERIALIZADO antes do flush. Sem esta linha o campo sai
+            # `None` na resposta da criação, e o contrato diz `int`.
+            sla_resolve_extension_total_min=0,
             # Explícito, e não pelo `default=True` da coluna: o default do ORM
             # só vale no INSERT, e a Helô é consultada ANTES do flush. Sem esta
             # linha `ticket.ai_enabled` é None no objeto em memória, `bool(None)`
@@ -516,7 +537,12 @@ _SORT_COLUMNS = {
     "created_at": Ticket.created_at,
     "updated_at": Ticket.updated_at,
     "priority": Ticket.priority,
-    "sla_resolve_due_at": Ticket.sla_resolve_due_at,
+    # Ordena pelo prazo EFETIVO, que e o que a tela mostra e o que o motor
+    # cobra. Pela coluna crua, um chamado prorrogado para daqui a 15 dias
+    # continuaria aparecendo como se vencesse hoje. O nome do parametro
+    # nao muda: quem chama pede "por prazo de resolucao", e essa resposta
+    # passou a ser outra coluna.
+    "sla_resolve_due_at": Ticket.sla_resolve_effective_due_at,
 }
 
 
@@ -809,6 +835,178 @@ async def toggle_ticket_ai(
     response = _serialize_ticket(ticket)
     await _fill_product_and_equipment(response, ticket, db)
     return response
+
+
+def _pode_estender(ticket: Ticket, agora: datetime) -> datetime:
+    """Garante que este chamado aceita prorrogação e devolve o prazo atual.
+
+    Quatro recusas, todas 409 — a requisição está bem formada, o ESTADO é que
+    não permite:
+
+    - chamado encerrado: prorrogar prazo de quem já acabou não quer dizer nada;
+    - sem prioridade: não há prazo de resolução para prorrogar;
+    - sem `sla_resolve_due_at`: idem, e é o caso do chamado não triado;
+    - **prazo efetivo já vencido**.
+
+    A última recusa NÃO olha `sla_resolve_breach`. A flag só é recalculada em
+    caminhos de escrita, então um chamado vencido e intocado chega com ela
+    falsa — e seria justamente esse que alguém prorrogaria para apagar a
+    violação antes que ela fosse marcada. Quem decide é a comparação de `agora`
+    com o prazo efetivo que o motor calcula.
+    """
+    if ticket.status in _TERMINAL_STATUSES:
+        raise HTTPException(
+            status_code=status.HTTP_409_CONFLICT,
+            detail=(
+                "Este chamado já foi encerrado e o prazo de resolução não pode "
+                "mais ser estendido."
+            ),
+        )
+
+    if ticket.priority is None or ticket.sla_resolve_due_at is None:
+        raise HTTPException(
+            status_code=status.HTTP_409_CONFLICT,
+            detail=(
+                "Este chamado ainda não tem prazo de resolução. Defina a "
+                "prioridade antes de estender o SLA."
+            ),
+        )
+
+    atual = prazo_efetivo_de_resolucao(ticket)
+    if atual is None or agora > atual:
+        raise HTTPException(
+            status_code=status.HTTP_409_CONFLICT,
+            detail=(
+                "O prazo de resolução deste chamado já venceu. A extensão serve "
+                "para evitar o atraso, não para desfazê-lo."
+            ),
+        )
+
+    return atual
+
+
+@router.get(
+    "/tickets/{ticket_id}/sla/extend/preview",
+    response_model=SlaExtensionPreview,
+)
+async def preview_sla_extension(
+    ticket_id: uuid.UUID,
+    db: Annotated[AsyncSession, Depends(get_db)],
+    actor: Annotated[User, Depends(authorize(UserRole.admin, UserRole.technician))],
+    days: DiasDeExtensao = Query(...),
+) -> SlaExtensionPreview:
+    """O prazo que a concessão produziria, sem conceder nada.
+
+    Existe para o modal poder mostrar "de … para …" antes de confirmar **sem
+    recalcular prazo na tela**: dia útil, jornada e feriado são do motor, e um
+    `add_business_days` em TypeScript seria a segunda verdade que a entrega do
+    relógio acabou de eliminar.
+
+    Só leitura — não escreve, não commita. As mesmas recusas do POST valem
+    aqui, para o modal não oferecer um botão que o servidor vai negar.
+    """
+    ticket = await get_or_404(db, Ticket, ticket_id, _CHAMADO_NAO_ENCONTRADO)
+    agora = datetime.now(UTC)
+    atual = _pode_estender(ticket, agora)
+
+    minutos = minutos_uteis_de_dias(int(days))
+    return SlaExtensionPreview(
+        days=int(days),
+        business_minutes=minutos,
+        prazo_atual=atual,
+        novo_prazo=add_business_minutes(atual, minutos),
+    )
+
+
+@router.post("/tickets/{ticket_id}/sla/extend", response_model=TicketResponse)
+async def extend_sla(
+    ticket_id: uuid.UUID,
+    body: SlaExtensionRequest,
+    db: Annotated[AsyncSession, Depends(get_db)],
+    actor: Annotated[User, Depends(authorize(UserRole.admin, UserRole.technician))],
+    settings: Annotated[Settings, Depends(get_settings)],
+) -> TicketResponse:
+    """Prorroga o prazo de RESOLUÇÃO em dias úteis, com justificativa pública.
+
+    POST e não PATCH porque cada concessão é um EVENTO: acontece mais de uma
+    vez, é cumulativa, e cada uma vira uma linha própria em
+    `ticket_sla_extensions`.
+
+    **O prazo original não é tocado.** `sla_resolve_due_at` continua sendo o
+    que a prioridade carimbou; o que cresce é o acumulador
+    `sla_resolve_extension_total_min`. Guardar o acumulado — e não um prazo já
+    calculado — é o que faz duas concessões de +3 e +1 valerem exatamente uma
+    de +4, e o que faz a extensão sobreviver a uma troca de prioridade, que
+    recarimba só a base.
+
+    O SLA de RESPOSTA não muda: a extensão só existe no caminho da resolução,
+    e isso é estrutural — `prazo_efetivo_de_resposta` nem recebe o campo.
+    """
+    ticket = await get_or_404(db, Ticket, ticket_id, _CHAMADO_NAO_ENCONTRADO)
+    agora = datetime.now(UTC)
+    prazo_anterior = _pode_estender(ticket, agora)
+
+    dias = int(body.days)
+    minutos = minutos_uteis_de_dias(dias)
+    ticket.sla_resolve_extension_total_min = (ticket.sla_resolve_extension_total_min or 0) + minutos
+    # A coluna que o painel consome acompanha na mesma escrita. Sem isto, o
+    # chamado apareceria prorrogado na tela e violado no relatório.
+    atualiza_prazo_efetivo(ticket)
+    ticket.updated_at = agora
+
+    novo_prazo = ticket.sla_resolve_effective_due_at
+
+    # O evento, com tudo que a auditoria precisa. A tabela é append-only pela
+    # regra de negócio: nenhum fluxo edita ou apaga uma concessão.
+    db.add(
+        TicketSlaExtension(
+            id=uuid.uuid4(),
+            ticket_id=ticket.id,
+            user_id=actor.id,
+            days=dias,
+            business_minutes=minutos,
+            justification=body.justification,
+            previous_effective_due_at=prazo_anterior,
+            new_effective_due_at=novo_prazo,
+        )
+    )
+
+    # E a linha da timeline, para a Atividade não ficar com um buraco onde
+    # houve decisão de prazo. A fonte auditável dos dados é a tabela acima.
+    registra_historico(
+        db,
+        ticket.id,
+        actor.id,
+        "sla_extension",
+        prazo_anterior.isoformat() if prazo_anterior else None,
+        novo_prazo.isoformat() if novo_prazo else None,
+        body.justification,
+    )
+    _audit(db, AuditAction.update, actor.id, ticket.id)
+
+    plural_dias = "dia útil" if dias == 1 else "dias úteis"
+    await notify(
+        db,
+        ticket.creator_id,
+        NotificationType.ticket_updated,
+        "Prazo de resolução atualizado",
+        (
+            f"O prazo de resolução do chamado {ticket.protocol} foi estendido em "
+            f"{dias} {plural_dias}.\n"
+            f"Novo prazo: {_formata_prazo(novo_prazo)}.\n"
+            f"Justificativa: {body.justification}"
+        ),
+        data={
+            "ticket_id": str(ticket.id),
+            "protocol": ticket.protocol,
+            "days": dias,
+        },
+        settings=settings,
+    )
+
+    await commit_e_notificar(db)
+    await db.refresh(ticket)
+    return _serialize_ticket(ticket)
 
 
 @router.patch("/tickets/{ticket_id}/priority", response_model=TicketResponse)
@@ -1145,6 +1343,16 @@ async def reopen_ticket(
     # Como o prazo acima já parte de agora, mantê-lo daria ao ciclo novo um
     # bônus de horas que ninguém esperou.
     ticket.sla_total_paused_ms = 0
+    # A extensão pertence ao ciclo que acabou. O ciclo novo começa com o prazo
+    # da prioridade, sem o tempo que foi concedido no anterior — herdar daria
+    # um bônus que ninguém aprovou para este ciclo.
+    #
+    # As linhas de `ticket_sla_extensions` do ciclo anterior NÃO são tocadas:
+    # a prorrogação aconteceu, foi comunicada ao cliente, e continua auditável.
+    ticket.sla_resolve_extension_total_min = 0
+    # Os três campos acima mudaram os insumos do prazo efetivo; a coluna que o
+    # painel consome acompanha.
+    atualiza_prazo_efetivo(ticket)
 
     registra_historico(
         db,

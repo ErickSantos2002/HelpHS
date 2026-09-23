@@ -10,6 +10,7 @@ import {
   type TicketPriority,
 } from "../../lib/prioridade";
 import { rotuloDeStatus } from "../../lib/status";
+import { textoDoVencimento } from "../../lib/tempoUtil";
 import { cn, plural } from "../../lib/utils";
 import { Link, useParams } from "react-router-dom";
 import {
@@ -49,8 +50,12 @@ import {
   listTicketNotes,
   reopenTicket,
   resolveTicket,
+  extendSla,
+  previewSlaExtension,
   updateClientObservation,
   updateTicketPriority,
+  type DiasDeExtensao,
+  type SlaExtensionPreview,
   updateTicketStatus,
   type Ticket,
   type TicketHistory,
@@ -76,6 +81,7 @@ const FIELD_LABEL: Record<string, string> = {
   title: "Título alterado",
   description: "Descrição alterada",
   priority: "Prioridade alterada",
+  sla_extension: "SLA de resolução estendido",
   category: "Categoria alterada",
   assignee_id: "Responsável alterado",
   product_id: "Produto alterado",
@@ -102,6 +108,29 @@ const FIELD_LABEL: Record<string, string> = {
 
 
 // ── Activity entry ────────────────────────────────────────────
+
+/**
+ * `"+3 dias úteis"`, a partir dos dois prazos que o histórico guardou.
+ *
+ * A quantidade concedida é dado de verdade — ela vive em
+ * `ticket_sla_extensions`, que é a fonte auditável. Aqui ela é reconstruída
+ * para a timeline não precisar de uma segunda consulta, e a conta é exata:
+ * um dia útil é a jornada de 9 h, e a diferença entre os dois prazos foi
+ * produzida somando múltiplos dela.
+ */
+function rotuloDoAcrescimo(anterior: string, novo: string): string {
+  const ms = new Date(novo).getTime() - new Date(anterior).getTime();
+  // Entre os dois prazos pode haver noite e fim de semana; o que se conta é
+  // quantas JORNADAS de 9 h foram concedidas, e o arredondamento resolve a
+  // borda porque só múltiplos inteiros de dia são concedíveis.
+  const dias = Math.max(1, Math.round(ms / (9 * 3_600_000)));
+  return `+${dias} ${dias === 1 ? "dia útil" : "dias úteis"}`;
+}
+
+/** `"24/09/2026 às 12:11"` — sem o prefixo que o `textoDoVencimento` traz. */
+function formataPrazoDaAtividade(quando: string): string {
+  return textoDoVencimento(quando, "America/Sao_Paulo").replace("Vence em ", "");
+}
 
 function ActivityEntry({ entry }: { entry: TicketHistory }) {
   const label = FIELD_LABEL[entry.field] ?? entry.field;
@@ -176,6 +205,27 @@ function ActivityEntry({ entry }: { entry: TicketHistory }) {
           <p className="mt-1 text-xs font-medium text-on-tint-success">{entry.comment}</p>
         )}
 
+        {/* SLA estendido: quanto, até quando, e por quê */}
+        {entry.field === "sla_extension" && (
+          <div className="mt-1 space-y-0.5">
+            {entry.old_value && entry.new_value && (
+              <p className="text-xs font-semibold text-conteudo">
+                {rotuloDoAcrescimo(entry.old_value, entry.new_value)}
+              </p>
+            )}
+            {entry.new_value && (
+              <p className="text-xs text-conteudo-muted">
+                Novo prazo: {formataPrazoDaAtividade(entry.new_value)}
+              </p>
+            )}
+            {entry.comment && (
+              <p className="text-xs leading-snug text-conteudo">
+                Justificativa: {entry.comment}
+              </p>
+            )}
+          </div>
+        )}
+
         {/* Prioridade: de → para */}
         {entry.field === "priority" && entry.new_value && (
           <div className="flex items-center gap-1.5 mt-1">
@@ -231,6 +281,7 @@ function ActivityEntry({ entry }: { entry: TicketHistory }) {
         {/* Comentário geral (status manual com observação, resolução, etc.) */}
         {entry.comment &&
           entry.field !== "assignee_id" &&
+          entry.field !== "sla_extension" &&
           entry.field !== CAMPO_JUSTIFICATIVA && (
           <p className="mt-1.5 text-xs text-conteudo-muted italic bg-surface-elevated/60 rounded-lg px-3 py-2 border border-borda/30">
             "{entry.comment}"
@@ -734,6 +785,26 @@ function TabBar({
 
 // ── Main Component ────────────────────────────────────────────
 
+/**
+ * Os cinco prazos que se pode conceder, do lado da tela.
+ *
+ * O backend recusa qualquer outro valor — a lista é fechada lá, num enum. Esta
+ * aqui é só o que o menu oferece; se as duas divergirem, o servidor manda.
+ */
+const OPCOES_DE_EXTENSAO: { value: string; label: string }[] = [
+  { value: "1", label: "1 dia útil" },
+  { value: "3", label: "3 dias úteis" },
+  { value: "5", label: "5 dias úteis" },
+  { value: "15", label: "15 dias úteis" },
+  { value: "30", label: "30 dias úteis" },
+];
+
+/** `1620` → `"+3 dias úteis"`. A jornada de 9 h é a do motor. */
+function rotuloDaExtensao(minutos: number): string {
+  const dias = Math.round(minutos / 540);
+  return `+${dias} ${dias === 1 ? "dia útil" : "dias úteis"}`;
+}
+
 export default function TicketDetailPage() {
   const { id } = useParams<{ id: string }>();
   const { user } = useAuth();
@@ -749,6 +820,13 @@ export default function TicketDetailPage() {
   const [statusModal, setStatusModal] = useState(false);
   const [assignModal, setAssignModal] = useState(false);
   const [priorityModal, setPriorityModal] = useState(false);
+  const [extensaoModal, setExtensaoModal] = useState(false);
+  const [extensaoDias, setExtensaoDias] = useState("");
+  const [extensaoJustificativa, setExtensaoJustificativa] = useState("");
+  const [extensaoLoading, setExtensaoLoading] = useState(false);
+  // O novo prazo vem do BACKEND, nunca calculado aqui.
+  const [extensaoPreview, setExtensaoPreview] = useState<SlaExtensionPreview | null>(null);
+  const [previewLoading, setPreviewLoading] = useState(false);
   const [newPriority, setNewPriority] = useState("");
   const [priorityLoading, setPriorityLoading] = useState(false);
   const [uploadModal, setUploadModal] = useState(false);
@@ -999,6 +1077,49 @@ export default function TicketDetailPage() {
     }
   }
 
+  // O preview é uma ida ao servidor por escolha de prazo. Podia ser um
+  // `add_business_days` aqui, e é exatamente isso que não pode: dia útil,
+  // jornada e feriado moram no motor.
+  async function carregaPreview(dias: string) {
+    setExtensaoDias(dias);
+    setExtensaoPreview(null);
+    if (!ticket || !dias) return;
+    setPreviewLoading(true);
+    try {
+      setExtensaoPreview(
+        await previewSlaExtension(ticket.id, Number(dias) as DiasDeExtensao),
+      );
+    } catch (err) {
+      toastApiError(err, "Não foi possível calcular o novo prazo.");
+    } finally {
+      setPreviewLoading(false);
+    }
+  }
+
+  async function handleExtendSla() {
+    if (!ticket || !extensaoDias || !extensaoJustificativa.trim()) return;
+    setExtensaoLoading(true);
+    try {
+      setTicket(
+        await extendSla(
+          ticket.id,
+          Number(extensaoDias) as DiasDeExtensao,
+          extensaoJustificativa.trim(),
+        ),
+      );
+      setHistory((await getTicketHistory(ticket.id)).items);
+      setExtensaoModal(false);
+      setExtensaoDias("");
+      setExtensaoJustificativa("");
+      setExtensaoPreview(null);
+      toast.success("Prazo de resolução estendido.");
+    } catch (err) {
+      toastApiError(err, "Não foi possível estender o prazo.");
+    } finally {
+      setExtensaoLoading(false);
+    }
+  }
+
   async function handleToggleAi() {
     if (!ticket) return;
     const desligando = ticket.ai_enabled;
@@ -1150,9 +1271,12 @@ export default function TicketDetailPage() {
     </>
   );
 
+  // A extensão de prazo ENTRA na lista do cliente: ela é um compromisso
+  // comunicado a ele, e a justificativa foi escrita para ele ler. Nenhum campo
+  // interno do chamado vem junto — o que o cliente vê é o que já é dele.
   const visibleHistory =
     user?.role === "client"
-      ? history.filter((e) => ["created", "status"].includes(e.field))
+      ? history.filter((e) => ["created", "status", "sla_extension"].includes(e.field))
       : history;
 
   return (
@@ -1573,6 +1697,14 @@ export default function TicketDetailPage() {
                     variant="default"
                   />
                 )}
+                {isStaff && !isClosed && ticket.sla_resolve_due_at && (
+                  <SidebarAction
+                    icon=<Icon name="clock" size={16} strokeWidth={2} />
+                    label="Estender SLA"
+                    onClick={() => setExtensaoModal(true)}
+                    variant="default"
+                  />
+                )}
                 {isStaff && (
                   <SidebarAction
                     icon=<Icon name="warning" size={12} strokeWidth={2} />
@@ -1668,6 +1800,14 @@ export default function TicketDetailPage() {
           {(ticket.sla_response_due_at || ticket.sla_resolve_due_at) && (
             <SidebarSection title="SLA" defaultOpen={slaBreach}>
               <div className="space-y-2">
+                {/* O indicativo é para TODO MUNDO, inclusive o cliente: ele
+                    explica por que o prazo na tela não é o da prioridade. */}
+                {ticket.sla_resolve_extension_total_min > 0 && (
+                  <p className="text-[11px] font-semibold text-conteudo-muted">
+                    SLA estendido ·{" "}
+                    {rotuloDaExtensao(ticket.sla_resolve_extension_total_min)}
+                  </p>
+                )}
                 {ticket.sla_response_due_at && (
                   <div className="flex items-center justify-between">
                     <span className="text-xs text-conteudo-muted">Resposta</span>
@@ -2014,6 +2154,76 @@ export default function TicketDetailPage() {
             disabled={!newStatus || (newStatus === "resolved" && faltaJustificativa)}
           >
             Confirmar
+          </Button>
+        </ModalFooter>
+      </Modal>
+
+      <Modal
+        open={extensaoModal}
+        onClose={() => setExtensaoModal(false)}
+        title="Estender SLA de resolução"
+      >
+        <div className="space-y-4">
+          <SelectMenu
+            label="Prazo adicional"
+            options={OPCOES_DE_EXTENSAO}
+            placeholder="Selecione o prazo"
+            value={extensaoDias}
+            onChange={(v) => carregaPreview(v)}
+            disabled={extensaoLoading}
+          />
+
+          {/* De → para, com o novo prazo vindo do BACKEND. A tela não
+              recalcula prazo: dia útil, jornada e feriado são do motor. */}
+          {(extensaoPreview || previewLoading) && (
+            <div className="grid grid-cols-2 gap-3 rounded-lg border border-borda/40 bg-surface-elevated px-3 py-2.5">
+              <div>
+                <p className="text-[10px] font-semibold uppercase tracking-widest text-conteudo-muted">
+                  Prazo atual
+                </p>
+                <p className="text-sm text-conteudo">
+                  {previewLoading || !extensaoPreview?.prazo_atual
+                    ? "—"
+                    : formataPrazoDaAtividade(extensaoPreview.prazo_atual)}
+                </p>
+              </div>
+              <div>
+                <p className="text-[10px] font-semibold uppercase tracking-widest text-conteudo-muted">
+                  Novo prazo
+                </p>
+                <p className="text-sm font-semibold text-conteudo">
+                  {previewLoading || !extensaoPreview?.novo_prazo
+                    ? "—"
+                    : formataPrazoDaAtividade(extensaoPreview.novo_prazo)}
+                </p>
+              </div>
+            </div>
+          )}
+
+          <Textarea
+            label="Justificativa ao cliente *"
+            hint="Esta justificativa ficará visível para o cliente. Até 2.000 caracteres."
+            rows={3}
+            required
+            maxLength={LIMITE_JUSTIFICATIVA}
+            value={extensaoJustificativa}
+            onChange={(e) => setExtensaoJustificativa(e.target.value)}
+          />
+        </div>
+        <ModalFooter>
+          <Button
+            variant="secondary"
+            onClick={() => setExtensaoModal(false)}
+            disabled={extensaoLoading}
+          >
+            Cancelar
+          </Button>
+          <Button
+            onClick={handleExtendSla}
+            loading={extensaoLoading}
+            disabled={!extensaoDias || !extensaoJustificativa.trim()}
+          >
+            Estender prazo
           </Button>
         </ModalFooter>
       </Modal>

@@ -124,7 +124,44 @@ publicar uma versão nova.
   às 17h dão o mesmo número e pedem providências opostas. O campo já vinha na
   resposta e no CSV; só a tela não o mostrava.
 
+### Adicionado
+
+- **Técnico e administrador podem estender o prazo de resolução**, em 1, 3, 5,
+  15 ou 30 **dias úteis**, com justificativa obrigatória que o cliente lê. A
+  ação fica na seção SLA do chamado; o cliente nunca vê o botão, mas vê o
+  resultado.
+  - **O prazo original não é sobrescrito.** `sla_resolve_due_at` continua sendo
+    o da prioridade; a extensão vive num acumulador separado, e por isso
+    sobrevive a uma troca de prioridade.
+  - **Só antes de vencer.** A recusa compara o relógio com o prazo efetivo do
+    motor, não com a flag de violação — que é velha por construção. A extensão
+    evita o atraso, não o desfaz. E prorrogar **não apaga** violação já marcada.
+  - Cada concessão vira uma linha própria em `ticket_sla_extensions`, com quem,
+    quantos dias, de que prazo para qual e por quê. **Reabrir zera a extensão do
+    ciclo novo** e não apaga os registros do anterior.
+  - O cliente é **notificado** com o prazo novo e a justificativa, e vê a
+    prorrogação na Atividade. A seção SLA mostra `SLA estendido · +N dias úteis`
+    para todo mundo.
+  - O novo prazo mostrado no modal vem do **backend**: dia útil, jornada e
+    feriado continuam com uma fonte só.
+
 ### Corrigido
+
+- ⚠️ **O painel e os relatórios passaram a medir o MESMO prazo que o chamado.**
+  Eles decidiam violação comparando a coluna crua `sla_resolve_due_at` contra
+  `now()`, o que **ignorava a pausa acumulada** — um chamado pausado contava
+  violação no painel que não contava na tela. Ninguém tinha medido essa
+  divergência.
+  - Passou a existir `sla_resolve_effective_due_at`, o prazo efetivo
+    materializado, e o SQL compara essa coluna.
+  - **A conformidade de SLA muda no deploy por causa disto**, inclusive para
+    chamados que só tiveram pausa e nunca extensão. Foi decisão consciente: a
+    alternativa era manter duas definições de prazo. Ver
+    `docs/decisoes-e-regras.md`.
+  - Afeta cinco números: o card do painel, a conformidade por prioridade, a
+    comparação com o período anterior e as violações por técnico.
+  - A ordenação por prazo de resolução também passa a usar o prazo efetivo —
+    senão um chamado prorrogado continuaria aparecendo como se vencesse hoje.
 
 - **O relógio de prazo da tela passa a contar horas ÚTEIS.** Ele subtraía
   `vencimento - agora` em tempo corrido, então um prazo de 12h úteis carimbado

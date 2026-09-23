@@ -590,6 +590,24 @@ class Ticket(Base):
     sla_resolve_breach: Mapped[bool] = mapped_column(Boolean, default=False)
     sla_paused_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
     sla_total_paused_ms: Mapped[int] = mapped_column(Integer, default=0)
+    # Total de minutos ÚTEIS concedidos por extensões de prazo no ciclo ATUAL.
+    # Acumulador, e não um prazo já calculado: conceder +3 e depois +1 tem de
+    # dar o mesmo que conceder +4, e isso só vale se o prazo for sempre
+    # recomputado da base. A reabertura zera; as linhas de
+    # `ticket_sla_extensions` do ciclo anterior continuam lá.
+    sla_resolve_extension_total_min: Mapped[int] = mapped_column(
+        Integer, nullable=False, server_default="0", default=0
+    )
+    # O prazo efetivo de resolução, MATERIALIZADO para o SQL agregado.
+    #
+    # O painel e os relatórios decidem violação em `count(...).filter(...)`, e
+    # não passam pelo motor: comparavam `sla_resolve_due_at < now()`, que
+    # ignora pausa e ignoraria a extensão. Esta coluna é a versão SQL do que
+    # `prazo_efetivo_de_resolucao` devolve, e quem a escreve é
+    # `atualiza_prazo_efetivo` — ninguém mais.
+    sla_resolve_effective_due_at: Mapped[datetime | None] = mapped_column(
+        DateTime(timezone=True), index=True
+    )
     # Escrita por quem resolve, quando resolve fora do prazo. Nulo significa
     # DUAS coisas legitimas e permanentes: resolvido dentro do prazo, ou
     # resolvido antes de a exigencia existir. Nao ha default nem NOT NULL de
@@ -639,6 +657,9 @@ class Ticket(Base):
     )
     product: Mapped["Product | None"] = relationship(back_populates="tickets")
     sla_config: Mapped["SLAConfig | None"] = relationship(back_populates="tickets")
+    sla_extensions: Mapped[list["TicketSlaExtension"]] = relationship(
+        back_populates="ticket", cascade="all, delete-orphan"
+    )
     histories: Mapped[list["TicketHistory"]] = relationship(
         back_populates="ticket", cascade="all, delete-orphan"
     )
@@ -723,6 +744,45 @@ class CompanyNote(Base):
 
     company: Mapped["Company"] = relationship(back_populates="company_notes")
     author: Mapped["User"] = relationship()
+
+
+class TicketSlaExtension(Base):
+    """Cada prorrogação de prazo concedida, como evento próprio.
+
+    Por que tabela e não só `ticket_history`: a extensão é um COMPROMISSO DE
+    PRAZO comunicado ao cliente, pode acontecer várias vezes, e cada concessão
+    tem dados próprios — quantos dias, de que prazo para que prazo, com que
+    justificativa. Guardar isso espremido em `old_value`/`new_value` deixaria
+    a quantidade concedida como informação derivada, e ela é o que o cliente
+    lê na Atividade.
+
+    **Append-only pela regra de negócio.** Nenhum fluxo edita ou apaga uma
+    linha daqui: uma prorrogação concedida aconteceu, e reabrir o chamado zera
+    o acumulador do ciclo novo sem tocar no registro do ciclo anterior.
+    """
+
+    __tablename__ = "ticket_sla_extensions"
+
+    id: Mapped[uuid.UUID] = mapped_column(UUID(as_uuid=True), primary_key=True, default=uuid.uuid4)
+    ticket_id: Mapped[uuid.UUID] = mapped_column(
+        UUID(as_uuid=True), ForeignKey("tickets.id", ondelete="CASCADE"), index=True
+    )
+    # Quem concedeu. Sem `ondelete`: a autoria de um compromisso de prazo não
+    # some porque a conta foi desligada — é o mesmo critério do histórico.
+    user_id: Mapped[uuid.UUID | None] = mapped_column(UUID(as_uuid=True), ForeignKey("users.id"))
+    # Dias ÚTEIS pedidos (1, 3, 5, 15 ou 30) e o que eles valem em minutos
+    # úteis. Os dois, e não só um: `days` é o que a pessoa escolheu e o que a
+    # tela mostra; `business_minutes` é o que entrou na conta. Guardar apenas
+    # os dias faria a auditoria depender da jornada VIGENTE para reconstruir o
+    # que foi concedido naquele dia.
+    days: Mapped[int] = mapped_column(Integer, nullable=False)
+    business_minutes: Mapped[int] = mapped_column(Integer, nullable=False)
+    justification: Mapped[str] = mapped_column(Text, nullable=False)
+    previous_effective_due_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
+    new_effective_due_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now())
+
+    ticket: Mapped["Ticket"] = relationship(back_populates="sla_extensions")
 
 
 class TicketNote(Base):

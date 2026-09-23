@@ -98,6 +98,8 @@ def _mock_ticket(status=TicketStatus.resolved, resolved_at=None, creator_id=None
     t.sla_response_total_min = None
     t.sla_resolve_total_min = None
     t.expediente = None
+    t.sla_resolve_extension_total_min = 0
+    t.sla_resolve_effective_due_at = None
     t.product_name = None
     t.equipment_name = None
     t.equipment_serial = None

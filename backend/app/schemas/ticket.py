@@ -2,6 +2,7 @@
 Pydantic v2 schemas for Ticket endpoints.
 """
 
+import enum
 import uuid
 from datetime import datetime
 
@@ -76,6 +77,50 @@ class TicketPriorityUpdate(AppBaseModel):
     """
 
     priority: TicketPriority
+
+
+class DiasDeExtensao(int, enum.Enum):
+    """Os cinco prazos que se pode conceder. A lista e fechada AQUI.
+
+    Enum de inteiros, e nao `Literal[1, 3, ...]`, por um motivo medido: o
+    `Literal` de int NAO converte a string que chega numa query string, entao o
+    mesmo tipo recusaria `?days=3` no preview e aceitaria `{"days": 3}` no
+    corpo. Com o enum, uma definicao so serve aos dois -- e quem montar a
+    requisicao na unha recebe 422 antes de qualquer codigo do router rodar,
+    sem um `if dias not in (...)` para alguem esquecer de atualizar.
+    """
+
+    um = 1
+    tres = 3
+    cinco = 5
+    quinze = 15
+    trinta = 30
+
+
+class SlaExtensionRequest(AppBaseModel):
+    """Uma concessao de prazo de resolucao.
+
+    A justificativa e PUBLICA -- foi escrita para o cliente ler, e aparece na
+    Atividade dele e na notificacao. Mesmo teto das outras justificativas do
+    projeto.
+    """
+
+    days: DiasDeExtensao
+    justification: str = Field(..., min_length=1, max_length=2000)
+
+
+class SlaExtensionPreview(AppBaseModel):
+    """O que o modal mostra antes de confirmar.
+
+    Existe para a tela nao recalcular prazo: dia util, jornada e feriado sao do
+    motor, e um `add_business_days` em TypeScript seria a segunda verdade que
+    a entrega do relogio acabou de eliminar.
+    """
+
+    days: int
+    business_minutes: int
+    prazo_atual: datetime | None
+    novo_prazo: datetime | None
 
 
 class TicketAssign(AppBaseModel):
@@ -181,6 +226,9 @@ class TicketResponse(AppBaseModel):
     # enche sozinha durante a noite e o fim de semana.
     sla_response_total_min: int | None = None
     sla_resolve_total_min: int | None = None
+    # Total ja concedido em extensoes, em minutos uteis. A lateral mostra
+    # "SLA estendido - +N dias uteis"; o cliente ve tambem.
+    sla_resolve_extension_total_min: int = 0
     # So no chamado avulso. Na LISTAGEM ele vem uma vez no topo, e nao repetido
     # em cada item: e estado do servidor, nao do chamado.
     expediente: ExpedienteInfo | None = None

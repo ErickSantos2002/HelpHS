@@ -64,6 +64,8 @@ def _ticket() -> MagicMock:
     t.sla_resolve_breach = False
     t.sla_paused_at = None
     t.sla_total_paused_ms = 0
+    t.sla_resolve_extension_total_min = 0
+    t.sla_resolve_effective_due_at = None
     t.resolved_at = None
     return t
 

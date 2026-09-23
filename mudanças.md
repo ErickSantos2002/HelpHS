@@ -7,6 +7,63 @@ O changelog do produto (o que o cliente vê) fica em
 
 ---
 
+## 23/09/2026 — Estender o prazo de resolução, e o painel parar de discordar
+
+Funcionalidade pedida com desenho antes do código: técnico e administrador
+prorrogam o prazo de resolução em dias úteis, com justificativa que o cliente
+lê. Spec em
+[2026-09-23-estender-sla-de-resolucao-design.md](docs/superpowers/specs/2026-09-23-estender-sla-de-resolucao-design.md).
+
+⚠️ **Nada está no ar.** Branch `feat/estender-sla-de-resolucao`, worktree
+`HelpHS-extensao`. **Tem migration** (`i5d6e7f8a9b0`), que roda no boot.
+
+### O levantamento mudou o tamanho da entrega
+
+Você perguntou se isso mexia em algum número além do esperado. Mexe — e o
+motivo não é a extensão: **o painel nunca passou pelo motor**. Ele comparava
+`sla_resolve_due_at < now()` em SQL, o que ignora a pausa acumulada. Um chamado
+pausado já contava violação no painel que não contava na tela, e ninguém tinha
+medido isso.
+
+Com a extensão, a divergência ficaria pior. Você decidiu o F1 = E1: materializar
+o prazo efetivo e fazer os cinco números do painel lerem a mesma definição do
+motor. **A conformidade pode subir no deploy, e parte da subida não vem desta
+funcionalidade.**
+
+### O que ficou de estrutura
+
+**Duas portas nomeadas** em vez de um terceiro argumento: a extensão só existe
+no caminho da resolução, e não há onde escrevê-la no de resposta. Há mutação
+provando — injetar a extensão na porta de resposta derruba teste.
+
+**O acumulador, e não um prazo pronto.** Três propriedades saem de graça: +3
+depois +1 == +4; trocar a prioridade não apaga a extensão; e recalcular nunca
+muda o resultado.
+
+### O que a mutação pegou
+
+Nove mutações, e **uma passou verde**: remover o zeramento da extensão na
+reabertura não quebrava nada, porque o meu teste de invariante **simulava** a
+reabertura escrevendo os campos à mão. Passou a haver um teste que chama o
+endpoint de verdade. Só o caminho de verdade prova o caminho de verdade.
+
+### Dois achados de implementação
+
+O `Literal[1,3,5,15,30]` que o desenho previa **não serve**: ele não converte a
+string de uma query, então aceitaria `{"days": 3}` no corpo e recusaria
+`?days=3` no preview. Virou enum de inteiros.
+
+E `Ticket(...)` sem o campo deixa o acumulador como `None` em memória — o
+`default=0` do ORM só vale no INSERT, e o chamado é serializado antes do flush.
+É o mesmo que o `ai_enabled` já documenta ali; 42 testes caíram por isso.
+
+### O que NÃO foi mexido, a seu pedido
+
+`sla_total_paused_ms` continua tempo corrido somado a prazo útil. O F1 faz o
+painel **respeitar essa mesma regra torta**, não a conserta.
+
+---
+
 ## 23/09/2026 — O relógio de SLA da tela contava tempo corrido
 
 Você viu "27h" num prazo de 12 horas e trouxe o caso com a conta já feita:
