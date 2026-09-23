@@ -21,6 +21,17 @@ pause_sla(ticket, now)
 resume_sla(ticket, now)
     Accumulates elapsed pause time and restarts the clock.
 
+business_minutes_between(inicio, fim)  → int
+    Minutos ÚTEIS que faltam de `inicio` até `fim`. A volta de
+    `add_business_minutes`, e o que a tela consome para contar prazo.
+
+prazo_efetivo(due_at, total_paused_ms)  → datetime | None
+    O prazo que o motor de fato compara. Uma definição só, lida por todo mundo.
+
+estado_do_expediente(agora)  → (aberto, proxima_virada)
+    Se o relógio corre agora e quando esse estado muda. É o que deixa a tela
+    congelar o contador sem saber o que é feriado.
+
 check_breaches(ticket, now)
     Flips sla_response_breach / sla_resolve_breach if deadlines have passed.
 
@@ -49,6 +60,14 @@ from app.utils.feriados import e_dia_util
 # de uma vez, sem ninguém perceber. Se o horário precisar mudar um dia, muda
 # aqui — e a decisão vai para o documento antes do código.
 SP_TZ = pytz.timezone("America/Sao_Paulo")
+
+# O NOME do fuso, para quem precisa formatar o prazo fora daqui.
+# Derivado do `SP_TZ`, e nao um literal repetido: a tela mostra
+# "Vence em 24/09/2026 as 12:11", e esse horario so faz sentido no fuso em
+# que a jornada e definida. Com um segundo literal no frontend, mudar a
+# jornada de fuso exigiria lembrar de dois lugares -- e o esquecido
+# mostraria um horario que nao corresponde a jornada nenhuma.
+FUSO_DA_JORNADA = str(SP_TZ)
 _WORK_START = 8  # 08:00
 _WORK_END = 17  # 17:00
 _WORK_HOURS_PER_DAY = _WORK_END - _WORK_START  # 9 h
@@ -146,6 +165,90 @@ def add_business_hours(start: datetime, hours: float) -> datetime:
     return current
 
 
+def business_minutes_between(inicio: datetime, fim: datetime) -> int:
+    """Quantos minutos ÚTEIS faltam de `inicio` até `fim`. Nunca negativo.
+
+    A VOLTA de `add_business_minutes`, e a razão de ela existir: o relógio da
+    tela subtraía `fim - agora` em tempo corrido, então um prazo de 12h úteis
+    carimbado às 09:11 aparecia como "27h" — a conta incluía as 15 horas em que
+    ninguém atende. Quem pergunta "quanto falta" precisa da mesma régua que
+    respondeu "quando vence".
+
+    Percorre jornada a jornada com as MESMAS peças da ida — `_proximo_inicio_util`
+    e `_advance_to_business_hours`, que já sabem de noite, fim de semana e
+    feriado. Nenhuma regra de calendário nasce aqui: se nascesse, seriam duas
+    verdades sobre dia útil, e elas divergiriam no primeiro feriado que alguém
+    lembrasse de pôr só num lado.
+
+    Devolve ZERO quando `fim` já passou, e não um número negativo: "faltam -40
+    minutos" não é informação que alguma tela queira mostrar, e quem precisa
+    saber que venceu tem o próprio zero para ler.
+    """
+    atual = _advance_to_business_hours(inicio)
+    alvo = _to_sp(fim)
+
+    if alvo <= atual:
+        return 0
+
+    total = 0.0
+    while atual < alvo:
+        fim_do_dia = atual.replace(hour=_WORK_END, minute=0, second=0, microsecond=0)
+        limite = min(fim_do_dia, alvo)
+        if limite > atual:
+            total += (limite - atual).total_seconds() / 60
+        if alvo <= fim_do_dia:
+            break
+        atual = _proximo_inicio_util(atual)
+
+    # `round`, e nao `int`: a ida faz aritmetica em ponto flutuante (meia hora
+    # util existe desde que os prazos viraram minutos), e truncar 239,9999
+    # devolveria 239 -- quebrando a ida e volta por um minuto fantasma.
+    return int(round(total))
+
+
+def prazo_efetivo(due_at: datetime | None, total_paused_ms: int | None) -> datetime | None:
+    """O prazo que o motor DE FATO compara: o carimbado mais a pausa acumulada.
+
+    Existe para que o prazo tenha uma definição só. A expressão
+    `due_at + timedelta(milliseconds=total_paused_ms)` estava escrita à mão em
+    `check_breaches` e em `violacao_ao_resolver`, e o chip da tela não a fazia
+    de jeito nenhum — ele comparava contra o `due_at` cru e, num chamado que
+    ficou três horas em "Aguardando cliente", escrevia "Vencido" três horas
+    antes de o motor concordar.
+
+    ⚠️ O acumulado é tempo CORRIDO somado a um prazo calculado em horas ÚTEIS.
+    Uma pausa das 16:00 às 09:00 acrescenta 17 horas a um prazo que só perdeu 1
+    hora de atendimento. É inconsistência conhecida, registrada em
+    `docs/decisoes-e-regras.md`, e NÃO é o que esta função conserta: ela
+    reproduz fielmente a regra de hoje, para que a tela e o motor digam a mesma
+    coisa. Corrigir a regra muda vencimento e indicador, e é frente própria.
+    """
+    if due_at is None:
+        return None
+    return due_at + timedelta(milliseconds=total_paused_ms or 0)
+
+
+def estado_do_expediente(agora: datetime) -> tuple[bool, datetime]:
+    """Diz se o relógio corre AGORA e quando esse estado muda.
+
+    Devolve `(aberto, proxima_virada)`. É o par que deixa a tela congelar o
+    contador sem saber o que é feriado: enquanto `aberto`, ela desconta um
+    minuto por minuto até a `proxima_virada`; a partir dali, para.
+
+    Fora da jornada, a virada é o próximo instante ÚTIL — que já pula noite,
+    fim de semana e feriado, porque é o mesmo `_advance_to_business_hours` que
+    o cálculo de prazo usa.
+    """
+    agora_sp = _to_sp(agora)
+    proximo_util = _advance_to_business_hours(agora_sp)
+
+    if proximo_util == agora_sp:
+        fecha = agora_sp.replace(hour=_WORK_END, minute=0, second=0, microsecond=0)
+        return True, fecha
+
+    return False, proximo_util
+
+
 def add_business_days(start: datetime, days: int) -> datetime:
     """
     Return a datetime that is exactly `days` business days after `start`.
@@ -214,15 +317,16 @@ def violacao_ao_resolver(ticket: Ticket, now: datetime) -> tuple[bool, bool]:
     Esta função NÃO escreve nada. Ela é consultada antes de qualquer mutação,
     para que a recusa não deixe rastro pela metade.
     """
-    offset = timedelta(milliseconds=ticket.sla_total_paused_ms or 0)
+    efetivo_resposta = prazo_efetivo(ticket.sla_response_due_at, ticket.sla_total_paused_ms)
+    efetivo_resolucao = prazo_efetivo(ticket.sla_resolve_due_at, ticket.sla_total_paused_ms)
 
     resposta = bool(ticket.sla_response_breach)
-    if not resposta and ticket.sla_response_due_at and ticket.sla_first_response is None:
-        resposta = now > ticket.sla_response_due_at + offset
+    if not resposta and efetivo_resposta and ticket.sla_first_response is None:
+        resposta = now > efetivo_resposta
 
     resolucao = bool(ticket.sla_resolve_breach)
-    if not resolucao and ticket.sla_resolve_due_at:
-        resolucao = now > ticket.sla_resolve_due_at + offset
+    if not resolucao and efetivo_resolucao:
+        resolucao = now > efetivo_resolucao
 
     return resposta, resolucao
 
@@ -260,19 +364,21 @@ def marca_violacao_ao_resolver(ticket: Ticket, now: datetime) -> None:
 def check_breaches(ticket: Ticket, now: datetime) -> None:
     """
     Update sla_response_breach and sla_resolve_breach.
-    The effective deadline = original_due_at + total_paused_ms,
-    so pause time extends the deadlines proportionally.
-    """
-    offset = timedelta(milliseconds=ticket.sla_total_paused_ms or 0)
 
-    if ticket.sla_response_due_at and ticket.sla_first_response is None:
-        effective = ticket.sla_response_due_at + offset
-        if now > effective:
+    O prazo efetivo vem do `prazo_efetivo` — a MESMA função que a tela consome
+    para montar o contador. Era uma expressão escrita à mão aqui e outra igual
+    no `violacao_ao_resolver`, e o chip não fazia nenhuma das duas: dois
+    lugares para corrigir um, mais um terceiro que discordava em silêncio.
+    """
+    efetivo_resposta = prazo_efetivo(ticket.sla_response_due_at, ticket.sla_total_paused_ms)
+    efetivo_resolucao = prazo_efetivo(ticket.sla_resolve_due_at, ticket.sla_total_paused_ms)
+
+    if efetivo_resposta and ticket.sla_first_response is None:
+        if now > efetivo_resposta:
             ticket.sla_response_breach = True
 
-    if ticket.sla_resolve_due_at and ticket.status not in _TERMINAL_STATUSES:
-        effective = ticket.sla_resolve_due_at + offset
-        if now > effective:
+    if efetivo_resolucao and ticket.status not in _TERMINAL_STATUSES:
+        if now > efetivo_resolucao:
             ticket.sla_resolve_breach = True
 
 
@@ -328,8 +434,8 @@ def register_first_response(
     if not is_ai and (responder_id is None or responder_id == ticket.creator_id):
         return False
 
-    offset = timedelta(milliseconds=ticket.sla_total_paused_ms or 0)
-    if ticket.sla_response_due_at and now > ticket.sla_response_due_at + offset:
+    efetivo = prazo_efetivo(ticket.sla_response_due_at, ticket.sla_total_paused_ms)
+    if efetivo and now > efetivo:
         ticket.sla_response_breach = True
 
     ticket.sla_first_response = now

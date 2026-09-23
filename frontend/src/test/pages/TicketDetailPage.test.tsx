@@ -80,6 +80,15 @@ const TICKET = {
   equipments: [],
   tags: [],
   creator_name: "Cliente",
+  // O contrato do relógio de SLA (23/09/2026). Sem prazo nenhum aqui: o chip
+  // não desenha, e os casos desta tela não são sobre ele.
+  sla_response_vence_em: null,
+  sla_resolve_vence_em: null,
+  sla_response_restante_min: null,
+  sla_resolve_restante_min: null,
+  sla_response_total_min: null,
+  sla_resolve_total_min: null,
+  expediente: null,
 } as unknown as Awaited<ReturnType<typeof ticketService.getTicket>>;
 
 /** Uma nota interna, para os casos do diálogo de exclusão. */

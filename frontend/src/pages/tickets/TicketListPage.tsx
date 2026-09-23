@@ -24,6 +24,7 @@ import {
   type TicketStatus,
 } from "../../lib/status";
 import { cn } from "../../lib/utils";
+import { formataUtil, restanteUtil, type Expediente } from "../../lib/tempoUtil";
 import { getTickets, type Ticket } from "../../services/ticketService";
 
 /**
@@ -70,7 +71,15 @@ function formatDuration(ms: number): string {
   return h > 0 ? `${h}h ${m}m` : `${m}m`;
 }
 
-function SlaIndicator({ ticket, now }: { ticket: Ticket; now: number }) {
+function SlaIndicator({
+  ticket,
+  expediente,
+  decorridoMs,
+}: {
+  ticket: Ticket;
+  expediente: Expediente | null;
+  decorridoMs: number;
+}) {
   const isOpen     = ticket.status === "open";
   const isTerminal = TERMINAL_STATUSES.includes(ticket.status);
 
@@ -135,12 +144,29 @@ function SlaIndicator({ ticket, now }: { ticket: Ticket; now: number }) {
     );
   }
 
-  const dueMs     = new Date(dueAt).getTime();
-  const createdMs = new Date(ticket.created_at).getTime();
-  const totalMs   = dueMs - createdMs;
-  const timeLeft  = dueMs - now;
-  const breached  = timeLeft <= 0 || breach;
-  const pct       = totalMs > 0 ? Math.min(100, Math.max(0, ((now - createdMs) / totalMs) * 100)) : 100;
+  // Tempo ÚTIL, e não a subtração corrida que estava aqui. Eram TRÊS contas
+  // erradas no mesmo bloco: o `timeLeft` do texto, o `pct` da barra — que
+  // enchia sozinha durante a noite e o fim de semana — e o `breached`, que
+  // declarava vencido antes de o backend concordar, porque ignorava a pausa.
+  //
+  // O cálculo vem do backend; aqui só se desconta o que passou. Sem
+  // expediente (resposta antiga em cache) o bloco não desenha: melhor não
+  // mostrar do que mostrar errado.
+  if (!expediente) return null;
+
+  const restanteBruto = isOpen
+    ? ticket.sla_response_restante_min
+    : ticket.sla_resolve_restante_min;
+  const totalMin = isOpen ? ticket.sla_response_total_min : ticket.sla_resolve_total_min;
+  // `== null` pega nulo E indefinido, como no `SlaChip`: resposta antiga em
+  // cache nao tem os campos novos, e o cartao nao pode quebrar por isso.
+  if (restanteBruto == null) return null;
+
+  const restante  = restanteUtil(restanteBruto, expediente, decorridoMs);
+  const breached  = restante <= 0 || breach;
+  const pct       = totalMin && totalMin > 0
+    ? Math.min(100, Math.max(0, ((totalMin - restante) / totalMin) * 100))
+    : 100;
 
   // Color thresholds
   const isRed    = breached || pct >= 80;
@@ -160,13 +186,10 @@ function SlaIndicator({ ticket, now }: { ticket: Ticket; now: number }) {
       ? "text-on-tint-warning"
       : "text-on-tint-success";
 
-  // Format remaining time
-  let display = "";
-  if (!breached && timeLeft > 0) {
-    const h = Math.floor(timeLeft / 3_600_000);
-    const m = Math.floor((timeLeft % 3_600_000) / 60_000);
-    display = h > 0 ? `${h}h ${m}m` : `${m}m`;
-  }
+  // "4h 11m úteis" — a palavra importa: sem ela o número parece tempo de
+  // relógio e volta a confundir quem compara com a hora do dia.
+  const display = breached ? "" : `${formataUtil(restante)} úteis`;
+  const foraDoExpediente = !breached && !expediente.aberto;
 
   return (
     <div className="mt-2.5 space-y-1">
@@ -192,7 +215,11 @@ function SlaIndicator({ ticket, now }: { ticket: Ticket; now: number }) {
       </div>
       <div className={cn("flex items-center gap-1 text-[10px] font-bold", textCls)}>
         <Icon name="clock" size={12} strokeWidth={2} />
-        <span>{breached ? "SLA Vencido" : `${phase}: ${display}`}</span>
+        <span>
+          {breached
+            ? "SLA Vencido"
+            : `${phase}: ${display}${foraDoExpediente ? " · fora do expediente" : ""}`}
+        </span>
       </div>
     </div>
   );
@@ -217,7 +244,15 @@ function SlaIndicator({ ticket, now }: { ticket: Ticket; now: number }) {
  * rodape mostra a prioridade em TEXTO. O ponto passa a ser o que sempre foi na
  * pratica, decoracao, e sai da arvore com `aria-hidden`.
  */
-function TicketCard({ ticket, now }: { ticket: Ticket; now: number }) {
+function TicketCard({
+  ticket,
+  expediente,
+  decorridoMs,
+}: {
+  ticket: Ticket;
+  expediente: Expediente | null;
+  decorridoMs: number;
+}) {
   // `?? ""` e nao `!`: sem prioridade cai no recuo neutro do modulo, que e o
   // mesmo tom que a ausencia ja tem no resto do sistema.
   const variante = varianteDePrioridade(ticket.priority ?? "");
@@ -280,7 +315,7 @@ function TicketCard({ ticket, now }: { ticket: Ticket; now: number }) {
         )}
       </div>
 
-      <SlaIndicator ticket={ticket} now={now} />
+      <SlaIndicator ticket={ticket} expediente={expediente} decorridoMs={decorridoMs} />
     </Link>
   );
 }
@@ -307,11 +342,13 @@ function TicketCard({ ticket, now }: { ticket: Ticket; now: number }) {
 function KanbanColumn({
   status,
   tickets,
-  now,
+  expediente,
+  decorridoMs,
 }: {
   status: TicketStatus;
   tickets: Ticket[];
-  now: number;
+  expediente: Expediente | null;
+  decorridoMs: number;
 }) {
   const s = STATUS[status];
   const tom = TOM_STATUS[s.variante];
@@ -367,7 +404,14 @@ function KanbanColumn({
             <p className="text-xs text-conteudo-muted">Nenhum chamado</p>
           </div>
         ) : (
-          tickets.map((t) => <TicketCard key={t.id} ticket={t} now={now} />)
+          tickets.map((t) => (
+            <TicketCard
+              key={t.id}
+              ticket={t}
+              expediente={expediente}
+              decorridoMs={decorridoMs}
+            />
+          ))
         )}
       </div>
     </section>
@@ -379,6 +423,8 @@ function KanbanColumn({
 export default function TicketListPage() {
 
   const [tickets, setTickets]               = useState<Ticket[]>([]);
+  const [expediente, setExpediente]         = useState<Expediente | null>(null);
+  const [carregadoEm, setCarregadoEm]       = useState(() => Date.now());
   const [loading, setLoading]               = useState(true);
   const [error, setError]                   = useState<string | null>(null);
   const [search, setSearch]                 = useState("");
@@ -416,7 +462,14 @@ export default function TicketListPage() {
   useEffect(() => {
     setLoading(true);
     getTickets({ limit: 500 })
-      .then((r) => setTickets(r.items))
+      .then((r) => {
+        setTickets(r.items);
+        setExpediente(r.expediente);
+        // O contador conta DAQUI, e nao de `expediente.agora`: aquela
+        // subtracao misturaria o relogio do servidor com o da maquina de quem
+        // olha, e um desvio de dez minutos viraria dez minutos no prazo.
+        setCarregadoEm(Date.now());
+      })
       .catch(() => setError("Não foi possível carregar os tickets."))
       .finally(() => setLoading(false));
   }, []);
@@ -600,7 +653,8 @@ export default function TicketListPage() {
                 key={status}
                 status={status}
                 tickets={grouped.get(status) ?? []}
-                now={now}
+                expediente={expediente}
+                decorridoMs={now - carregadoEm}
               />
             ))}
           </div>

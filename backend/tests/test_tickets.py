@@ -111,6 +111,16 @@ def _mock_ticket(
     # devolve um objeto no lugar de None e a validação falha
     t.assignee_name = None
     t.product_name = None
+    # O contrato do relogio de SLA (23/09/2026). Mesma armadilha do bloco
+    # acima: sem valor explicito o MagicMock devolve um objeto, e o
+    # `expediente` derruba a validacao do `TicketResponse`.
+    t.sla_response_vence_em = None
+    t.sla_resolve_vence_em = None
+    t.sla_response_restante_min = None
+    t.sla_resolve_restante_min = None
+    t.sla_response_total_min = None
+    t.sla_resolve_total_min = None
+    t.expediente = None
     t.equipment_name = None
     t.equipment_serial = None
     t.client_observation = None
