@@ -300,6 +300,61 @@ def test_o_recorte_e_so_para_cliente():
     assert filtra_historico_para(_mock_user(UserRole.technician)) is None
 
 
+# ── As duas que já mascaravam: a defesa delas foi TROCADA ────
+
+# `GET /tickets` e `GET /tickets/{id}` não estavam entre os vazamentos — cada
+# uma apagava a nota no próprio corpo, logo depois de serializar. A correção
+# removeu essas duas linhas e passou a confiar na regra central: a garantia
+# continua, mas quem a sustenta mudou. Sem prova direta, essas duas rotas
+# ficariam apoiadas nos testes de `observation` e `reopen`, e nada impediria
+# uma mudança futura de atender àquelas e não a estas.
+
+
+@pytest.mark.asyncio
+async def test_listagem_nao_devolve_nota_interna_ao_cliente(patch_redis):  # noqa: F811
+    """`GET /tickets` — o cliente lista os próprios chamados."""
+    from app.core.database import get_db
+
+    dono = _mock_user(UserRole.client, user_id=_CREATOR_ID)
+    ticket = _com_nota(creator_id=_CREATOR_ID)
+    # `1` responde ao count e a lista é a página — mesma sequência que o
+    # `test_list_tickets_client_sees_own` já usa para esta rota.
+    app.dependency_overrides[get_db] = _db_seq_override(1, [ticket])
+    _override_user(dono)
+
+    async with AsyncClient(transport=ASGITransport(app=app), base_url="http://test") as c:
+        resp = await c.get("/api/v1/tickets")
+
+    assert resp.status_code == 200, resp.text
+    corpo = resp.json()
+    # O chamado precisa estar na resposta: "não vazou" não pode ser verdade
+    # só porque a página veio vazia.
+    assert [item["id"] for item in corpo["items"]] == [str(_TICKET_ID)]
+    assert corpo["items"][0]["technician_notes"] is None
+    # E o texto da nota não sobra em nenhum outro campo do JSON inteiro.
+    assert _NOTA not in resp.text
+
+
+@pytest.mark.asyncio
+async def test_detalhe_nao_devolve_nota_interna_ao_cliente(patch_redis):  # noqa: F811
+    """`GET /tickets/{id}` — o cliente abre o chamado que é dele."""
+    from app.core.database import get_db
+
+    dono = _mock_user(UserRole.client, user_id=_CREATOR_ID)
+    ticket = _com_nota(creator_id=_CREATOR_ID)
+    app.dependency_overrides[get_db] = _db_override(ticket)
+    _override_user(dono)
+
+    async with AsyncClient(transport=ASGITransport(app=app), base_url="http://test") as c:
+        resp = await c.get(f"/api/v1/tickets/{_TICKET_ID}")
+
+    assert resp.status_code == 200, resp.text
+    corpo = resp.json()
+    assert corpo["id"] == str(_TICKET_ID)
+    assert corpo["technician_notes"] is None
+    assert _NOTA not in resp.text
+
+
 # ── O staff não pode perder nada ─────────────────────────────
 
 
