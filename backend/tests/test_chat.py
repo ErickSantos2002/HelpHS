@@ -82,6 +82,10 @@ def _mock_ticket(creator_id=None):
     t.sla_first_response = None
     t.sla_paused_at = None
     t.sla_total_paused_ms = 0
+    # Campos novos do SLA (23/09/2026). Sem valor explicito o MagicMock
+    # devolve um objeto, e o motor estoura em `MagicMock() <= 0`.
+    t.sla_resolve_extension_total_min = 0
+    t.sla_resolve_effective_due_at = None
     t.sla_response_breach = False
     t.sla_resolve_breach = False
     return t

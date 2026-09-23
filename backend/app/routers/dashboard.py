@@ -78,12 +78,31 @@ _ACTIVE_SLA_STATUSES = [
 
 
 def _resolve_breached_cond() -> ColumnElement[bool]:
-    """True se SLA de resolução foi violado (flag salva OU prazo já passou)."""
+    """True se SLA de resolução foi violado (flag salva OU prazo já passou).
+
+    Compara o prazo EFETIVO materializado — `sla_resolve_effective_due_at` —,
+    e não mais a coluna crua `sla_resolve_due_at`.
+
+    A troca conserta uma divergência que já existia e ninguém tinha medido: o
+    prazo cru ignora `sla_total_paused_ms`, então um chamado pausado contava
+    violação AQUI que o motor não contava no chamado. Com a extensão de SLA a
+    divergência ficaria pior — um chamado prorrogado apareceria "no prazo" na
+    tela e "violado" no relatório.
+
+    ⚠️ **Isso muda a conformidade no deploy**, inclusive para chamados que só
+    tiveram pausa. Foi decidido assim em 23/09/2026, com o preço à vista: a
+    alternativa era manter duas definições de prazo. Ver "SLA" em
+    `docs/decisoes-e-regras.md`.
+
+    A materialização é escrita só por `atualiza_prazo_efetivo`, e é função pura
+    de três campos persistidos — a pausa EM CURSO não participa, porque o motor
+    nunca a considerou.
+    """
     return or_(
         Ticket.sla_resolve_breach.is_(True),
         and_(
-            Ticket.sla_resolve_due_at.is_not(None),
-            Ticket.sla_resolve_due_at < func.now(),
+            Ticket.sla_resolve_effective_due_at.is_not(None),
+            Ticket.sla_resolve_effective_due_at < func.now(),
             Ticket.status.in_(_ACTIVE_SLA_STATUSES),
         ),
     )

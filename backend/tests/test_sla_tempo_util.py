@@ -262,6 +262,8 @@ def _ticket_com_prazo(**kwargs):
     t.sla_response_breach = False
     t.sla_resolve_breach = False
     t.sla_total_paused_ms = 0
+    t.sla_resolve_extension_total_min = 0
+    t.sla_resolve_effective_due_at = None
     t.closed_at = None
     t.resolved_at = None
     t.auto_closed = False

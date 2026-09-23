@@ -228,6 +228,76 @@ def prazo_efetivo(due_at: datetime | None, total_paused_ms: int | None) -> datet
     return due_at + timedelta(milliseconds=total_paused_ms or 0)
 
 
+def minutos_uteis_de_dias(dias: int) -> int:
+    """Dias úteis → minutos úteis. Um dia é a JORNADA inteira, 9 h.
+
+    Função, e não constante multiplicada na mão, porque a jornada é definida
+    num lugar só (`_WORK_HOURS_PER_DAY`). Se ela mudar um dia, a extensão de
+    "3 dias úteis" acompanha sem ninguém lembrar de procurar o 540.
+    """
+    return int(dias * _WORK_HOURS_PER_DAY * 60)
+
+
+def prazo_efetivo_de_resposta(ticket: Ticket) -> datetime | None:
+    """O prazo de PRIMEIRA RESPOSTA que o motor compara.
+
+    Base mais pausa acumulada. **Extensão não entra aqui**, e essa é a razão
+    de existirem duas portas em vez de um argumento opcional: com um
+    parâmetro, bastava alguém passá-lo na chamada errada para o prazo de
+    resposta esticar em silêncio. Aqui não existe onde escrever isso.
+    """
+    return prazo_efetivo(ticket.sla_response_due_at, ticket.sla_total_paused_ms)
+
+
+def prazo_efetivo_de_resolucao(ticket: Ticket) -> datetime | None:
+    """O prazo de RESOLUÇÃO que o motor compara.
+
+    Três camadas, nesta ordem: **base → pausa → extensão**.
+
+    A ordem não é estética. A pausa é tempo CORRIDO somado ao prazo (dívida
+    conhecida, registrada em `docs/decisoes-e-regras.md` e fora do escopo
+    desta entrega); a extensão é tempo ÚTIL contado a partir do resultado.
+    Inverter daria outro instante, porque somar minutos úteis a partir de
+    pontos diferentes pula jornadas diferentes.
+
+    A extensão é o ACUMULADO (`sla_resolve_extension_total_min`), e não um
+    prazo já calculado. É o que torna duas concessões de +3 e +1 idênticas a
+    uma de +4: o prazo é sempre recomputado da base, então conceder é
+    associativo e a conta nunca depende de quando a anterior foi feita.
+    """
+    com_pausa = prazo_efetivo(ticket.sla_resolve_due_at, ticket.sla_total_paused_ms)
+    if com_pausa is None:
+        return None
+    extensao = ticket.sla_resolve_extension_total_min or 0
+    if extensao <= 0:
+        return com_pausa
+    return add_business_minutes(com_pausa, extensao)
+
+
+def atualiza_prazo_efetivo(ticket: Ticket) -> None:
+    """Materializa o prazo efetivo de resolução na coluna que o SQL consome.
+
+    O painel e os relatórios decidem violação em SQL agregado — eles não
+    passam pelo motor. Até aqui comparavam a coluna CRUA contra `now()`, e
+    por isso já discordavam do chamado sempre que havia pausa. Com a
+    extensão, discordariam também de todo prazo prorrogado.
+
+    A saída é materializar: esta função é a ÚNICA escritora de
+    `sla_resolve_effective_due_at`, e ela copia exatamente o que
+    `prazo_efetivo_de_resolucao` devolve.
+
+    É determinística porque os três insumos são campos PERSISTIDOS — prazo
+    base, pausa acumulada e extensão acumulada. A pausa EM CURSO
+    (`sla_paused_at`) não participa: o motor nunca a considerou, e é isso que
+    permite guardar o resultado em vez de recalcular a cada leitura.
+
+    Chamada de `apply_sla_config` e `resume_sla` — que são duas das cinco
+    escritas dos insumos — e explicitamente na reabertura e na extensão, que
+    escrevem os campos direto no router.
+    """
+    ticket.sla_resolve_effective_due_at = prazo_efetivo_de_resolucao(ticket)
+
+
 def estado_do_expediente(agora: datetime) -> tuple[bool, datetime]:
     """Diz se o relógio corre AGORA e quando esse estado muda.
 
@@ -265,6 +335,9 @@ def apply_sla_config(ticket: Ticket, config: SLAConfig, now: datetime) -> None:
     ticket.sla_config_id = config.id
     ticket.sla_response_due_at = add_business_minutes(now, config.response_time_minutes)
     ticket.sla_resolve_due_at = add_business_minutes(now, config.resolve_time_minutes)
+    # Carimbar o prazo base muda o efetivo: materializa junto, para o painel
+    # nunca ler um prazo mais velho que o do chamado.
+    atualiza_prazo_efetivo(ticket)
 
 
 def pause_sla(ticket: Ticket, now: datetime) -> None:
@@ -286,6 +359,8 @@ def resume_sla(ticket: Ticket, now: datetime) -> None:
         paused_ms = int((now - ticket.sla_paused_at).total_seconds() * 1000)
         ticket.sla_total_paused_ms = (ticket.sla_total_paused_ms or 0) + paused_ms
         ticket.sla_paused_at = None
+        # O acumulado de pausa entra no prazo efetivo — a coluna acompanha.
+        atualiza_prazo_efetivo(ticket)
 
 
 def violacao_ao_resolver(ticket: Ticket, now: datetime) -> tuple[bool, bool]:
@@ -317,8 +392,8 @@ def violacao_ao_resolver(ticket: Ticket, now: datetime) -> tuple[bool, bool]:
     Esta função NÃO escreve nada. Ela é consultada antes de qualquer mutação,
     para que a recusa não deixe rastro pela metade.
     """
-    efetivo_resposta = prazo_efetivo(ticket.sla_response_due_at, ticket.sla_total_paused_ms)
-    efetivo_resolucao = prazo_efetivo(ticket.sla_resolve_due_at, ticket.sla_total_paused_ms)
+    efetivo_resposta = prazo_efetivo_de_resposta(ticket)
+    efetivo_resolucao = prazo_efetivo_de_resolucao(ticket)
 
     resposta = bool(ticket.sla_response_breach)
     if not resposta and efetivo_resposta and ticket.sla_first_response is None:
@@ -370,8 +445,8 @@ def check_breaches(ticket: Ticket, now: datetime) -> None:
     no `violacao_ao_resolver`, e o chip não fazia nenhuma das duas: dois
     lugares para corrigir um, mais um terceiro que discordava em silêncio.
     """
-    efetivo_resposta = prazo_efetivo(ticket.sla_response_due_at, ticket.sla_total_paused_ms)
-    efetivo_resolucao = prazo_efetivo(ticket.sla_resolve_due_at, ticket.sla_total_paused_ms)
+    efetivo_resposta = prazo_efetivo_de_resposta(ticket)
+    efetivo_resolucao = prazo_efetivo_de_resolucao(ticket)
 
     if efetivo_resposta and ticket.sla_first_response is None:
         if now > efetivo_resposta:
@@ -434,7 +509,7 @@ def register_first_response(
     if not is_ai and (responder_id is None or responder_id == ticket.creator_id):
         return False
 
-    efetivo = prazo_efetivo(ticket.sla_response_due_at, ticket.sla_total_paused_ms)
+    efetivo = prazo_efetivo_de_resposta(ticket)
     if efetivo and now > efetivo:
         ticket.sla_response_breach = True
 

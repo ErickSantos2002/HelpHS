@@ -29,6 +29,8 @@ vi.mock("../../services/ticketService", () => ({
   listTicketNotes: vi.fn(),
   reopenTicket: vi.fn(),
   resolveTicket: vi.fn(),
+  extendSla: vi.fn(),
+  previewSlaExtension: vi.fn(),
   updateClientObservation: vi.fn(),
   updateTicketPriority: vi.fn(),
   updateTicketStatus: vi.fn(),
@@ -89,6 +91,7 @@ const TICKET = {
   sla_response_total_min: null,
   sla_resolve_total_min: null,
   expediente: null,
+  sla_resolve_extension_total_min: 0,
 } as unknown as Awaited<ReturnType<typeof ticketService.getTicket>>;
 
 /** Uma nota interna, para os casos do diálogo de exclusão. */
@@ -749,5 +752,173 @@ describe("prioridade na triagem", () => {
     await waitFor(() =>
       expect(screen.queryByRole("dialog")).not.toBeInTheDocument(),
     );
+  });
+});
+
+
+/**
+ * Estender o SLA de resolução (23/09/2026).
+ *
+ * O que estes casos prendem: o cliente nunca vê o botão mas vê o RESULTADO, o
+ * novo prazo do modal vem do backend, e a concessão passa pelo endpoint
+ * próprio — nunca por um cálculo de calendário na tela.
+ */
+describe("estender SLA de resolução", () => {
+  const COM_PRAZO = {
+    ...TICKET,
+    sla_resolve_due_at: "2026-09-24T15:11:00Z",
+    sla_resolve_vence_em: "2026-09-24T15:11:00Z",
+    sla_resolve_restante_min: 692,
+    sla_resolve_total_min: 720,
+    expediente: {
+      agora: "2026-09-23T12:39:00Z",
+      aberto: true,
+      proxima_virada: "2026-09-23T20:00:00Z",
+      fuso: "America/Sao_Paulo",
+    },
+  } as typeof TICKET;
+
+  const PRORROGADO = {
+    ...COM_PRAZO,
+    sla_resolve_extension_total_min: 1620,
+  } as typeof TICKET;
+
+  beforeEach(() => {
+    papelDoUsuario = "admin";
+    vi.mocked(ticketService.extendSla).mockReset();
+    vi.mocked(ticketService.previewSlaExtension).mockReset();
+  });
+
+  it("a equipe vê a ação de estender", async () => {
+    await montar([], COM_PRAZO);
+    expect(screen.getByRole("button", { name: "Estender SLA" })).toBeInTheDocument();
+  });
+
+  it("o cliente NÃO vê a ação", async () => {
+    papelDoUsuario = "client";
+    await montar([], COM_PRAZO);
+    expect(screen.queryByRole("button", { name: "Estender SLA" })).not.toBeInTheDocument();
+  });
+
+  it("sem prazo de resolução não há o que estender", async () => {
+    await montar([], TICKET);
+    expect(screen.queryByRole("button", { name: "Estender SLA" })).not.toBeInTheDocument();
+  });
+
+  it("o indicativo aparece quando há extensão — e o CLIENTE também o vê", async () => {
+    papelDoUsuario = "client";
+    await montar([], PRORROGADO);
+    expect(screen.getByText(/SLA estendido/)).toBeInTheDocument();
+    expect(screen.getByText(/\+3 dias úteis/)).toBeInTheDocument();
+  });
+
+  it("sem extensão, nenhum indicativo", async () => {
+    await montar([], COM_PRAZO);
+    expect(screen.queryByText(/SLA estendido/)).not.toBeInTheDocument();
+  });
+
+  it("o novo prazo do modal vem do BACKEND, não de conta na tela", async () => {
+    vi.mocked(ticketService.previewSlaExtension).mockResolvedValue({
+      days: 3,
+      business_minutes: 1620,
+      prazo_atual: "2026-09-24T15:11:00Z",
+      novo_prazo: "2026-09-29T15:11:00Z",
+    } as never);
+    await montar([], COM_PRAZO);
+
+    fireEvent.click(screen.getByRole("button", { name: "Estender SLA" }));
+    const modal = screen.getByRole("dialog");
+    escolherNoMenu(
+      within(modal).getByRole("combobox", { name: "Prazo adicional" }),
+      "3 dias úteis",
+    );
+
+    await waitFor(() =>
+      expect(ticketService.previewSlaExtension).toHaveBeenCalledWith("t1", 3),
+    );
+    expect(await within(modal).findByText("29/09/2026 às 12:11")).toBeInTheDocument();
+    expect(within(modal).getByText("24/09/2026 às 12:11")).toBeInTheDocument();
+  });
+
+  it("a justificativa avisa que o cliente vai ler", async () => {
+    await montar([], COM_PRAZO);
+    fireEvent.click(screen.getByRole("button", { name: "Estender SLA" }));
+    expect(
+      screen.getByText(/ficará visível para o cliente/i),
+    ).toBeInTheDocument();
+  });
+
+  it("sem justificativa o botão não confirma", async () => {
+    vi.mocked(ticketService.previewSlaExtension).mockResolvedValue({
+      days: 3,
+      business_minutes: 1620,
+      prazo_atual: "2026-09-24T15:11:00Z",
+      novo_prazo: "2026-09-29T15:11:00Z",
+    } as never);
+    await montar([], COM_PRAZO);
+
+    fireEvent.click(screen.getByRole("button", { name: "Estender SLA" }));
+    const modal = screen.getByRole("dialog");
+    escolherNoMenu(
+      within(modal).getByRole("combobox", { name: "Prazo adicional" }),
+      "3 dias úteis",
+    );
+
+    expect(within(modal).getByRole("button", { name: "Estender prazo" })).toBeDisabled();
+  });
+
+  it("confirmar chama o endpoint próprio e fecha o modal", async () => {
+    vi.mocked(ticketService.previewSlaExtension).mockResolvedValue({
+      days: 3,
+      business_minutes: 1620,
+      prazo_atual: "2026-09-24T15:11:00Z",
+      novo_prazo: "2026-09-29T15:11:00Z",
+    } as never);
+    vi.mocked(ticketService.extendSla).mockResolvedValue(PRORROGADO as never);
+    await montar([], COM_PRAZO);
+
+    fireEvent.click(screen.getByRole("button", { name: "Estender SLA" }));
+    const modal = screen.getByRole("dialog");
+    escolherNoMenu(
+      within(modal).getByRole("combobox", { name: "Prazo adicional" }),
+      "3 dias úteis",
+    );
+    fireEvent.change(within(modal).getByLabelText(/Justificativa ao cliente/), {
+      target: { value: "Aguardando peça de reposição do fabricante." },
+    });
+    fireEvent.click(within(modal).getByRole("button", { name: "Estender prazo" }));
+
+    await waitFor(() =>
+      expect(ticketService.extendSla).toHaveBeenCalledWith(
+        "t1",
+        3,
+        "Aguardando peça de reposição do fabricante.",
+      ),
+    );
+    await waitFor(() => expect(screen.queryByRole("dialog")).not.toBeInTheDocument());
+  });
+
+  it("o cliente vê a extensão na Atividade, com prazo e justificativa", async () => {
+    papelDoUsuario = "client";
+    await montar([], PRORROGADO, [
+      {
+        id: "h1",
+        ticket_id: "t1",
+        user_id: "u9",
+        user_name: "Rickelme David",
+        field: "sla_extension",
+        old_value: "2026-09-24T15:11:00Z",
+        new_value: "2026-09-29T15:11:00Z",
+        comment: "Aguardando peça de reposição do fabricante.",
+        created_at: new Date().toISOString(),
+      },
+    ]);
+    fireEvent.click(screen.getByText("Atividade"));
+
+    expect(await screen.findByText("SLA de resolução estendido")).toBeInTheDocument();
+    expect(screen.getByText(/Novo prazo: 29\/09\/2026 às 12:11/)).toBeInTheDocument();
+    expect(
+      screen.getByText(/Aguardando peça de reposição do fabricante\./),
+    ).toBeInTheDocument();
   });
 });

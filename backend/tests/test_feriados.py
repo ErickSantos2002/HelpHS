@@ -252,6 +252,10 @@ def test_o_deslocamento_de_pausa_continua_intacto():
     """
     ticket = MagicMock(spec=Ticket)
     ticket.sla_total_paused_ms = 3 * 60 * 60 * 1000
+    # Campos novos do SLA (23/09/2026). Sem valor explicito o MagicMock
+    # devolve um objeto, e o motor estoura em `MagicMock() <= 0`.
+    ticket.sla_resolve_extension_total_min = 0
+    ticket.sla_resolve_effective_due_at = None
 
     # A pausa não entra em `add_business_minutes`: ela é somada depois, no
     # `check_breaches`. O prazo cru continua sendo o mesmo de sempre.
@@ -289,6 +293,12 @@ def test_ligar_feriados_nao_recalcula_chamado_ja_aberto():
 
     # E o carimbo, quando roda, só roda na CRIAÇÃO — com o `now` de então.
     novo = MagicMock(spec=Ticket)
+    # `apply_sla_config` passou a materializar o prazo efetivo, e a conta lê a
+    # pausa e a extensão. Sem valor explícito o MagicMock devolve um objeto, e
+    # `timedelta(milliseconds=...)` recusa.
+    novo.sla_total_paused_ms = 0
+    novo.sla_resolve_extension_total_min = 0
+    novo.sla_resolve_effective_due_at = None
     config = MagicMock(spec=SLAConfig)
     config.id = "cfg"
     config.response_time_minutes = 60

@@ -51,6 +51,8 @@ export interface Ticket {
   /** O tamanho do prazo em minutos uteis — denominador da barra de progresso. */
   sla_response_total_min: number | null;
   sla_resolve_total_min: number | null;
+  /** Total ja concedido em extensoes, em minutos uteis. Zero = sem extensao. */
+  sla_resolve_extension_total_min: number;
   /**
    * So no chamado avulso. Na LISTAGEM ele vem uma vez no topo da resposta, e
    * nao repetido em cada item.
@@ -198,6 +200,50 @@ export async function updateTicket(id: string, payload: TicketUpdatePayload): Pr
  * caminho recalcula o SLA do nivel novo -- gravar a prioridade por fora
  * deixaria um chamado critico com o prazo de quando era baixo.
  */
+/** Os cinco prazos que se pode conceder. A lista e fechada no backend. */
+export type DiasDeExtensao = 1 | 3 | 5 | 15 | 30;
+
+export interface SlaExtensionPreview {
+  days: number;
+  business_minutes: number;
+  prazo_atual: string | null;
+  novo_prazo: string | null;
+}
+
+/**
+ * O prazo que a concessao produziria, SEM conceder.
+ *
+ * Existe para o modal mostrar "de ... para ..." sem recalcular prazo na tela:
+ * dia util, jornada e feriado sao do motor, e um `add_business_days` em
+ * TypeScript seria a segunda verdade que a entrega do relogio eliminou.
+ */
+export async function previewSlaExtension(
+  ticketId: string,
+  days: DiasDeExtensao
+): Promise<SlaExtensionPreview> {
+  const { data } = await api.get<SlaExtensionPreview>(
+    `/tickets/${ticketId}/sla/extend/preview`,
+    { params: { days } }
+  );
+  return data;
+}
+
+/**
+ * Concede a extensao. POST porque cada concessao e um EVENTO auditavel, e
+ * pode acontecer mais de uma vez.
+ */
+export async function extendSla(
+  ticketId: string,
+  days: DiasDeExtensao,
+  justification: string
+): Promise<Ticket> {
+  const { data } = await api.post<Ticket>(`/tickets/${ticketId}/sla/extend`, {
+    days,
+    justification,
+  });
+  return data;
+}
+
 export async function updateTicketPriority(
   ticketId: string,
   priority: TicketPriority

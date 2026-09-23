@@ -697,3 +697,106 @@ async def test_a_prioridade_desce_e_sobe_sem_perder_o_que_ja_estava(banco):
             )
         ).scalar_one() == "medium"
     await motor.dispose()
+
+
+# ── O caminho de volta da extensao de SLA ─────────────────────
+
+_ANTES_DA_EXTENSAO = "h4c5d6e7f8g9"
+
+
+@pytest.mark.asyncio
+async def test_a_extensao_de_sla_sobe_e_desce(banco):
+    """A coluna nasce com 0, o prazo efetivo nasce calculado, e volta limpo.
+
+    O `UPDATE` da subida NAO e correcao de dado historico: ele materializa um
+    valor que o motor ja calculava e ninguem guardava. Este caso prova que a
+    conta bate — base mais pausa — para uma linha que ja existia.
+    """
+    assert _alembic(banco, _ANTES_DA_EXTENSAO).returncode == 0
+
+    criador_id = uuid.uuid4()
+    antigo = uuid.uuid4()
+    prazo = "2026-09-24 15:11:00+00"
+    pausa_ms = 3 * 60 * 60 * 1000
+
+    motor = create_async_engine(banco)
+    async with motor.begin() as conn:
+        await conn.execute(
+            text(
+                "INSERT INTO users (id, name, email, password, role, status, phone, "
+                "lgpd_consent, email_verified, onboarding_completed) "
+                "VALUES (:id, 'Cliente', :email, 'x', 'client', 'active', "
+                "'+5581999999999', true, true, true)"
+            ),
+            {"id": criador_id, "email": f"{criador_id.hex[:8]}@test.com"},
+        )
+        await conn.execute(
+            text(
+                "INSERT INTO tickets (id, protocol, title, description, status, priority, "
+                "category, creator_id, sla_resolve_due_at, sla_total_paused_ms, "
+                "sla_response_breach, sla_resolve_breach, auto_closed, reopen_count, "
+                "created_at, updated_at) "
+                "VALUES (:id, :protocolo, 'Antigo', 'corpo', 'open', 'medium', 'hardware', "
+                f":criador, '{prazo}', {pausa_ms}, false, false, false, 0, now(), now())"
+            ),
+            {"id": antigo, "protocolo": f"HS-MIG-{antigo.hex[:6]}", "criador": criador_id},
+        )
+    await motor.dispose()
+
+    subida = _alembic(banco, "head")
+    assert subida.returncode == 0, f"upgrade falhou: {subida.stdout} {subida.stderr}"
+
+    motor = create_async_engine(banco)
+    async with motor.connect() as conn:
+        linha = (
+            await conn.execute(
+                text(
+                    "SELECT sla_resolve_extension_total_min, sla_resolve_effective_due_at "
+                    "FROM tickets WHERE id = :id"
+                ),
+                {"id": antigo},
+            )
+        ).one()
+        assert linha[0] == 0, "a coluna nova devia nascer zerada"
+        # base + 3h de pausa acumulada
+        assert linha[1].isoformat().startswith("2026-09-24T18:11")
+
+        # E a tabela de eventos existe, vazia.
+        assert (
+            await conn.execute(text("SELECT count(*) FROM ticket_sla_extensions"))
+        ).scalar_one() == 0
+    await motor.dispose()
+
+    descida = _alembic(banco, _ANTES_DA_EXTENSAO, comando="downgrade")
+    assert descida.returncode == 0, f"downgrade falhou: {descida.stdout} {descida.stderr}"
+
+    motor = create_async_engine(banco)
+    async with motor.connect() as conn:
+        colunas = (
+            (
+                await conn.execute(
+                    text(
+                        "SELECT column_name FROM information_schema.columns "
+                        "WHERE table_name = 'tickets'"
+                    )
+                )
+            )
+            .scalars()
+            .all()
+        )
+        assert "sla_resolve_extension_total_min" not in colunas
+        assert "sla_resolve_effective_due_at" not in colunas
+        # O prazo ORIGINAL sobrevive ao caminho de volta: nada de dado se perde.
+        assert (
+            (
+                await conn.execute(
+                    text("SELECT sla_resolve_due_at FROM tickets WHERE id = :id"), {"id": antigo}
+                )
+            )
+            .scalar_one()
+            .isoformat()
+            .startswith("2026-09-24T15:11")
+        )
+    await motor.dispose()
+
+    assert _alembic(banco, "head").returncode == 0
