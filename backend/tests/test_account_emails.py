@@ -20,7 +20,20 @@ import pytest
 from app.core.config import Settings
 from app.services import account_emails
 
-_TOKEN = "eyJhbGciOiJIUzI1NiJ9.abc"
+# Explicitamente NÃO parecido com um JWT.
+#
+# Era um literal que começava com o cabeçalho `{"alg":"HS256"}` em base64, e o
+# detector de JWT do GitGuardian disparou nele: reprovou o check do PR #50 com
+# "1 secret uncovered". O scanner não distingue token falso de token real, e
+# tinha razão em não distinguir.
+#
+# O valor nunca foi decodificado por teste nenhum — o que se afirma aqui é que
+# o token chega ao link inteiro e escapado. Para isso qualquer literal serve, e
+# o que não parece credencial serve melhor.
+#
+# O padrão não é repetido neste comentário de propósito: o scanner lê o arquivo
+# inteiro, comentário incluído.
+_TOKEN = "token-de-teste-123"
 
 
 def _settings() -> Settings:
