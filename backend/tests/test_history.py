@@ -132,7 +132,7 @@ def _mock_history_entry(field="status", old_value=None, new_value="open"):
 def _db(lookup=None, count=0):
     async def _execute(*args, **kwargs):
         result = MagicMock()
-        # O notify() busca (email, papel) do destinatário com .one_or_none().
+        # O notify() busca (email, papel, nome) do destinatário com .one_or_none().
         # Cliente de propósito: mantém o caminho de e-mail exercido como antes.
         result.one_or_none.return_value = ("dest@test.com", UserRole.client, "Destino")
         result.scalar_one_or_none.return_value = lookup
