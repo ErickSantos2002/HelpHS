@@ -79,7 +79,7 @@ from app.services.ticket_lifecycle import (
     resolution_reference,
 )
 from app.utils.crud import get_or_404
-from app.utils.history import registra_historico
+from app.utils.history import filtra_historico_para, registra_historico
 from app.utils.protocol import MAX_RETRIES, generate_protocol
 from app.utils.sla import (
     _PAUSE_STATUSES,
@@ -271,9 +271,23 @@ def _serialize_ticket(
     ticket: Ticket,
     agora: datetime | None = None,
     *,
+    actor: User,
     com_expediente: bool = True,
 ) -> TicketResponse:
     """TicketResponse com os campos que são calculados, não armazenados.
+
+    ⚠️ `actor` é OBRIGATÓRIO, e keyword-only, e isso é a correção inteira.
+
+    `technician_notes` é declarada interna no modelo ("visível apenas para
+    admin/técnico"), mas a máscara morava no call site — cada endpoint
+    precisava lembrar de apagá-la. Dois lembraram e **três esqueceram**:
+    `PATCH /observation`, `POST /reopen` e, pior, `GET /history`, que entregava
+    todas as VERSÕES da nota. Um cliente dono do chamado lia tudo com 200.
+
+    Enquanto o parâmetro tivesse default, esquecer voltaria a vazar em
+    silêncio. Sem default, esquecer é `TypeError` na primeira chamada — o
+    esquecimento passa a ser barulhento, e é o único jeito de a regra parar de
+    depender de memória.
 
     `agora` é parâmetro, e não `datetime.now()` lá dentro, por dois motivos: a
     listagem serializa cinquenta chamados e todos devem ser lidos do MESMO
@@ -284,6 +298,12 @@ def _serialize_ticket(
     """
     agora = agora or datetime.now(UTC)
     response = TicketResponse.model_validate(ticket)
+
+    # A nota interna nunca sai para o cliente. Note que apagamos no RESPONSE,
+    # não no `ticket`: mexer no objeto ORM marcaria a coluna como suja e o
+    # próximo `commit()` da requisição gravaria NULL no banco.
+    if actor.role == UserRole.client:
+        response.technician_notes = None
 
     if ticket.status in (TicketStatus.resolved, TicketStatus.closed):
         referencia = resolution_reference(ticket)
@@ -530,7 +550,7 @@ async def create_ticket(
             _classify_ticket_async(ticket.id, body.title, body.description, body.category.value)
         )
 
-    return _serialize_ticket(ticket)
+    return _serialize_ticket(ticket, actor=actor)
 
 
 _SORT_COLUMNS = {
@@ -662,13 +682,11 @@ async def list_tickets(
     agora = datetime.now(UTC)
 
     def _serialize(t: Ticket) -> TicketResponse:
-        r = _serialize_ticket(t, agora, com_expediente=False)
+        r = _serialize_ticket(t, agora, actor=actor, com_expediente=False)
         r.assignee_name = name_map.get(t.assignee_id) if t.assignee_id else None
         r.product_name = product_map.get(t.product_id) if t.product_id else None
         if not r.product_name and t.equipments and t.equipments[0].product_id:
             r.product_name = product_map.get(t.equipments[0].product_id)
-        if actor.role == UserRole.client:
-            r.technician_notes = None
         return r
 
     return TicketListResponse(
@@ -696,13 +714,11 @@ async def get_ticket(
     if actor.role == UserRole.client:
         ensure_ticket_visible(ticket, actor, _CHAMADO_NAO_ENCONTRADO)
 
-    response = _serialize_ticket(ticket)
+    response = _serialize_ticket(ticket, actor=actor)
     if ticket.assignee_id:
         assignee = await db.get(User, ticket.assignee_id)
         response.assignee_name = assignee.name if assignee else None
     await _fill_product_and_equipment(response, ticket, db)
-    if actor.role == UserRole.client:
-        response.technician_notes = None
     return response
 
 
@@ -754,7 +770,7 @@ async def update_ticket(
     _audit(db, AuditAction.update, actor.id, ticket.id)
     await commit_e_notificar(db)
     await db.refresh(ticket)
-    return _serialize_ticket(ticket)
+    return _serialize_ticket(ticket, actor=actor)
 
 
 @router.patch("/tickets/{ticket_id}/observation", response_model=TicketResponse)
@@ -790,7 +806,7 @@ async def update_client_observation(
     _audit(db, AuditAction.update, actor.id, ticket.id)
     await commit_e_notificar(db)
     await db.refresh(ticket)
-    return _serialize_ticket(ticket)
+    return _serialize_ticket(ticket, actor=actor)
 
 
 @router.patch("/tickets/{ticket_id}/ai", response_model=TicketResponse)
@@ -832,7 +848,7 @@ async def toggle_ticket_ai(
         await db.commit()
         await db.refresh(ticket)
 
-    response = _serialize_ticket(ticket)
+    response = _serialize_ticket(ticket, actor=actor)
     await _fill_product_and_equipment(response, ticket, db)
     return response
 
@@ -1006,7 +1022,7 @@ async def extend_sla(
 
     await commit_e_notificar(db)
     await db.refresh(ticket)
-    return _serialize_ticket(ticket)
+    return _serialize_ticket(ticket, actor=actor)
 
 
 @router.patch("/tickets/{ticket_id}/priority", response_model=TicketResponse)
@@ -1048,7 +1064,7 @@ async def update_ticket_priority(
 
     anterior = ticket.priority
     if anterior == body.priority:
-        return _serialize_ticket(ticket)
+        return _serialize_ticket(ticket, actor=actor)
 
     now = datetime.now(UTC)
 
@@ -1085,7 +1101,7 @@ async def update_ticket_priority(
     _audit(db, AuditAction.update, actor.id, ticket.id)
     await commit_e_notificar(db)
     await db.refresh(ticket)
-    return _serialize_ticket(ticket)
+    return _serialize_ticket(ticket, actor=actor)
 
 
 @router.patch("/tickets/{ticket_id}/status", response_model=TicketResponse)
@@ -1178,7 +1194,7 @@ async def update_ticket_status(
         )
     await commit_e_notificar(db)
     await db.refresh(ticket)
-    return _serialize_ticket(ticket)
+    return _serialize_ticket(ticket, actor=actor)
 
 
 @router.post("/tickets/{ticket_id}/resolve", response_model=TicketResponse)
@@ -1261,7 +1277,7 @@ async def resolve_ticket(
 
     await commit_e_notificar(db)
     await db.refresh(ticket)
-    return _serialize_ticket(ticket)
+    return _serialize_ticket(ticket, actor=actor)
 
 
 @router.post("/tickets/{ticket_id}/reopen", response_model=TicketResponse)
@@ -1390,7 +1406,7 @@ async def reopen_ticket(
 
     await commit_e_notificar(db)
     await db.refresh(ticket)
-    return _serialize_ticket(ticket)
+    return _serialize_ticket(ticket, actor=actor)
 
 
 @router.patch("/tickets/{ticket_id}/assign", response_model=TicketResponse)
@@ -1477,7 +1493,7 @@ async def assign_ticket(
             )
     await commit_e_notificar(db)
     await db.refresh(ticket)
-    return _serialize_ticket(ticket)
+    return _serialize_ticket(ticket, actor=actor)
 
 
 @router.delete("/tickets/{ticket_id}", status_code=status.HTTP_204_NO_CONTENT)
@@ -1606,6 +1622,12 @@ async def get_ticket_history(
         ensure_ticket_visible(ticket, actor, _CHAMADO_NAO_ENCONTRADO)
 
     base = select(TicketHistory).where(TicketHistory.ticket_id == ticket_id)
+    # O cliente não lê evento de campo interno — nem o `field`, nem o antes, nem
+    # o depois. No `base`, antes do count, para que total e paginação enxerguem
+    # o mesmo conjunto que os itens.
+    recorte = filtra_historico_para(actor)
+    if recorte is not None:
+        base = base.where(recorte)
     total = (await db.execute(select(func.count()).select_from(base.subquery()))).scalar_one()
     rows = await db.execute(
         base.options(selectinload(TicketHistory.user))

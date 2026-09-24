@@ -2,7 +2,7 @@
 CRUD de usuários.
 
 Permissões:
-  POST   /users                   — admin | technician
+  POST   /users                   — admin | technician (só admin cria staff)
   GET    /users                   — admin | technician
   GET    /users/me                — qualquer autenticado
   GET    /users/technicians       — admin | technician (lista técnicos ativos)
@@ -130,6 +130,39 @@ def _guarda_telefone_do_cliente(
     # situação. Passa.
 
 
+_ERRO_PAPEL = "Apenas administradores podem alterar o tipo de usuário."
+
+
+def _guarda_de_atribuicao_de_papel(*, ator: User, papel_atribuido: UserRole | None) -> None:
+    """Papel é atribuição de administrador — nas duas rotas em que se atribui.
+
+    A regra já existia, e existia só em `update_user`. `create_user` deixava o
+    `role` do corpo chegar ao `User()` sem perguntar quem estava criando: um
+    técnico criava um administrador numa requisição e entrava nele em seguida,
+    porque escolheu a senha. Não faltava a regra — faltava ela valer no único
+    lugar onde a conta NASCE. Agora tem um autor só.
+
+    `papel_atribuido` é `None` quando a requisição não atribui papel nenhum, e
+    o que conta como atribuição muda com a rota. Por isso a tradução é de cada
+    chamador, e a decisão é daqui:
+
+    * `update_user` passa o `role` do corpo cru. Lá não existe default —
+      qualquer papel no corpo é atribuição, inclusive rebaixar alguém a
+      cliente. Comportamento idêntico ao que havia antes desta função.
+    * `create_user` passa `None` quando o papel pedido é `client`, o default do
+      schema. O front manda `role` SEMPRE (`UsersPage.tsx` abre o formulário
+      com `role: "client"`), então olhar a PRESENÇA do campo recusaria toda
+      criação de cliente feita por técnico — que é o uso real da tela.
+
+    O efeito somado é um só: quem não é admin não produz conta de staff nem
+    move ninguém de papel. Criar técnico também é escalação, só que lateral —
+    staff lê chamado alheio e nota interna.
+    """
+    if papel_atribuido is None or ator.role == UserRole.admin:
+        return
+    raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail=_ERRO_PAPEL)
+
+
 # ── POST /users ───────────────────────────────────────────────
 
 
@@ -139,6 +172,13 @@ async def create_user(
     db: Annotated[AsyncSession, Depends(get_db)],
     actor: Annotated[User, Depends(authorize(UserRole.admin, UserRole.technician))],
 ) -> UserResponse:
+    # Autorização antes de validação: o que decide é QUEM está criando.
+    _guarda_de_atribuicao_de_papel(
+        ator=actor,
+        # `client` é o default do schema — pedi-lo não é atribuir papel.
+        papel_atribuido=None if body.role == UserRole.client else body.role,
+    )
+
     # `status=UserStatus.active` é literal logo abaixo, então o estado
     # resultante depende só do papel escolhido. Criar já é a transição.
     _guarda_telefone_do_cliente(
@@ -456,11 +496,7 @@ async def update_user(
             status_code=status.HTTP_403_FORBIDDEN,
             detail="Você não tem permissão para acessar este item.",
         )
-    if current_user.role != UserRole.admin and body.role is not None:
-        raise HTTPException(
-            status_code=status.HTTP_403_FORBIDDEN,
-            detail="Apenas administradores podem alterar o tipo de usuário.",
-        )
+    _guarda_de_atribuicao_de_papel(ator=current_user, papel_atribuido=body.role)
 
     result = await db.execute(select(User).where(User.id == user_id))
     user = result.scalar_one_or_none()

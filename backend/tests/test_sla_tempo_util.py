@@ -17,7 +17,7 @@ from unittest.mock import MagicMock
 
 import pytest
 
-from app.models.models import TicketCategory, TicketStatus
+from app.models.models import TicketCategory, TicketStatus, UserRole
 from app.utils.sla import SP_TZ
 
 
@@ -297,6 +297,15 @@ def _ticket_com_prazo(**kwargs):
     return t
 
 
+# O relogio e o assunto desta classe. `_serialize_ticket` passou a exigir o
+# ator porque e ele que decide se a nota interna sai na resposta -- ver
+# `tests/test_notas_internas_nao_vazam.py`. Staff foi escolhido de proposito:
+# um ator `client` tambem zeraria `technician_notes` e mudaria o objeto que
+# estes testes medem. Com staff a resposta e identica a de antes da guarda.
+_ATOR = MagicMock()
+_ATOR.role = UserRole.technician
+
+
 class TestContratoDoRelogio:
     """O que a resposta leva para a tela poder contar sem ter calendário."""
 
@@ -304,7 +313,7 @@ class TestContratoDoRelogio:
         """Chamado sem triagem: nada de prazo, nada de restante."""
         from app.routers.tickets import _serialize_ticket
 
-        r = _serialize_ticket(_ticket_com_prazo())
+        r = _serialize_ticket(_ticket_com_prazo(), actor=_ATOR)
 
         assert r.sla_resolve_vence_em is None
         assert r.sla_resolve_restante_min is None
@@ -317,7 +326,7 @@ class TestContratoDoRelogio:
         abertura = _sp(2026, 9, 23, 9, 11)
         t = _ticket_com_prazo(sla_resolve_due_at=add_business_minutes(abertura, 720))
 
-        r = _serialize_ticket(t, agora=_sp(2026, 9, 23, 9, 39))
+        r = _serialize_ticket(t, agora=_sp(2026, 9, 23, 9, 39), actor=_ATOR)
 
         assert r.sla_resolve_restante_min == 692  # 11h32m
         assert r.sla_resolve_vence_em == _sp(2026, 9, 24, 12, 11)
@@ -332,7 +341,7 @@ class TestContratoDoRelogio:
             sla_total_paused_ms=3 * 60 * 60 * 1000,
         )
 
-        r = _serialize_ticket(t, agora=_sp(2026, 9, 23, 10, 0))
+        r = _serialize_ticket(t, agora=_sp(2026, 9, 23, 10, 0), actor=_ATOR)
 
         assert r.sla_resolve_vence_em == prazo + timedelta(hours=3)
 
@@ -343,8 +352,8 @@ class TestContratoDoRelogio:
 
         t = _ticket_com_prazo(sla_resolve_due_at=add_business_minutes(_sp(2026, 9, 23, 9, 11), 720))
 
-        meia_noite = _serialize_ticket(t, agora=_sp(2026, 9, 24, 0, 0))
-        quatro_da_manha = _serialize_ticket(t, agora=_sp(2026, 9, 24, 4, 0))
+        meia_noite = _serialize_ticket(t, agora=_sp(2026, 9, 24, 0, 0), actor=_ATOR)
+        quatro_da_manha = _serialize_ticket(t, agora=_sp(2026, 9, 24, 4, 0), actor=_ATOR)
 
         assert meia_noite.sla_resolve_restante_min == quatro_da_manha.sla_resolve_restante_min
 
@@ -363,7 +372,7 @@ class TestContratoDoRelogio:
             sla_resolve_due_at=add_business_minutes(abertura, 720),
         )
 
-        r = _serialize_ticket(t, agora=_sp(2026, 9, 23, 9, 39))
+        r = _serialize_ticket(t, agora=_sp(2026, 9, 23, 9, 39), actor=_ATOR)
 
         assert r.sla_resolve_total_min == 720
         # 28 minutos úteis consumidos de 720 — e não de 27 horas corridas.
@@ -374,7 +383,7 @@ class TestContratoDoRelogio:
 
         t = _ticket_com_prazo(sla_resolve_due_at=_sp(2026, 9, 23, 10, 0))
 
-        r = _serialize_ticket(t, agora=_sp(2026, 9, 23, 14, 0))
+        r = _serialize_ticket(t, agora=_sp(2026, 9, 23, 14, 0), actor=_ATOR)
 
         assert r.sla_resolve_restante_min == 0
 
@@ -383,7 +392,7 @@ class TestContratoDoRelogio:
         from app.routers.tickets import _serialize_ticket
         from app.utils.sla import FUSO_DA_JORNADA
 
-        r = _serialize_ticket(_ticket_com_prazo(), agora=_sp(2026, 9, 23, 9, 39))
+        r = _serialize_ticket(_ticket_com_prazo(), agora=_sp(2026, 9, 23, 9, 39), actor=_ATOR)
 
         assert r.expediente is not None
         assert r.expediente.aberto is True
@@ -394,6 +403,6 @@ class TestContratoDoRelogio:
         """Na lista ele vem uma vez no topo — 50 cópias do mesmo relógio é lixo."""
         from app.routers.tickets import _serialize_ticket
 
-        r = _serialize_ticket(_ticket_com_prazo(), com_expediente=False)
+        r = _serialize_ticket(_ticket_com_prazo(), com_expediente=False, actor=_ATOR)
 
         assert r.expediente is None
