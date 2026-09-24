@@ -77,9 +77,7 @@ async def ultimo_aceite_vigente(db: AsyncSession, user_id: uuid.UUID) -> LgpdCon
     return resultado.scalars().first()
 
 
-def precisa_reaceitar(
-    ultimo: LgpdConsent | None, *, role: UserRole, settings: Settings
-) -> bool:
+def precisa_reaceitar(ultimo: LgpdConsent | None, *, role: UserRole, settings: Settings) -> bool:
     """Se a pessoa precisa passar pela tela de aceite antes de usar o sistema.
 
     Decisões de 24/09/2026: só clientes, e só com `LGPD_EXIGE_REACEITE` ligado.
