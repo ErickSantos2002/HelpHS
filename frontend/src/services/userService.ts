@@ -142,6 +142,20 @@ export async function updateLGPDConsent(
   return data;
 }
 
+/** A situação do aceite de quem está logado — o que a tela de re-aceite lê. */
+export interface LgpdConsentStatus {
+  revisao_politica_vigente: string | null;
+  revisao_termos_vigente: string | null;
+  revisao_politica_aceita: string | null;
+  revisao_termos_aceita: string | null;
+  precisa_reaceitar: boolean;
+}
+
+export async function getLgpdConsentStatus(): Promise<LgpdConsentStatus> {
+  const { data } = await api.get<LgpdConsentStatus>("/users/me/lgpd-consent");
+  return data;
+}
+
 export async function getTechnicians(): Promise<UserSummary[]> {
   const { data } = await api.get<UserListResponse>("/users/technicians");
   return data.items;
