@@ -18,7 +18,7 @@ import uuid
 from datetime import UTC, datetime
 from typing import Annotated, Any
 
-from fastapi import APIRouter, Depends, File, HTTPException, Query, UploadFile, status
+from fastapi import APIRouter, Depends, File, HTTPException, Query, Request, UploadFile, status
 from sqlalchemy import func, select
 from sqlalchemy.exc import IntegrityError
 from sqlalchemy.ext.asyncio import AsyncSession
@@ -457,6 +457,7 @@ async def complete_onboarding(
 @router.post("/me/change-password", status_code=status.HTTP_204_NO_CONTENT)
 async def change_password(
     body: PasswordChange,
+    request: Request,
     db: Annotated[AsyncSession, Depends(get_db)],
     current_user: Annotated[User, Depends(get_current_user)],
 ) -> None:
@@ -475,7 +476,19 @@ async def change_password(
 
     user.password = await run_in_threadpool(hash_password, body.new_password)
     user.updated_at = datetime.now(UTC)
-    _audit(db, AuditAction.update, current_user.id, user.id)
+    # O mesmo rastro da redefinição por e-mail (`auth.py`): a Política de
+    # Privacidade promete IP e navegador nos eventos de conta, e a troca de
+    # senha é um deles.
+    db.add(
+        AuditLog(
+            user_id=current_user.id,
+            action=AuditAction.password_change,
+            entity_type="user",
+            entity_id=user.id,
+            ip_address=request.client.host if request.client else None,
+            user_agent=request.headers.get("user-agent", ""),
+        )
+    )
     await db.commit()
 
 
