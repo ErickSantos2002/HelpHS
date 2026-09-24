@@ -2,6 +2,13 @@ import { render, screen, waitFor, within } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { beforeEach, describe, expect, it, vi } from "vitest";
 
+// O papel de QUEM edita decide se o campo de ramal aparece, e ele e lido a
+// cada render dentro do `useAuth` — por isso a variavel troca por teste, e nao
+// a fabrica do mock (que o vitest ica uma vez so).
+let papelDeQuemEdita = "admin";
+vi.mock("../../contexts/AuthContext", () => ({
+  useAuth: () => ({ user: { id: "eu", role: papelDeQuemEdita, name: "Quem Edita" } }),
+}));
 vi.mock("../../services/userService", () => ({
   createUser: vi.fn(),
   deleteUser: vi.fn(),
@@ -13,7 +20,7 @@ vi.mock("../../services/userService", () => ({
 import UsersPage from "../../pages/users/UsersPage";
 import * as userService from "../../services/userService";
 import type { UserSummary } from "../../services/userService";
-import { escolherNoMenu, opcoesDoMenu } from "../helpers/menu";
+import { campoDeMenu, escolherNoMenu, opcoesDoMenu } from "../helpers/menu";
 
 /**
  * O que esta tela tinha, e que estes casos prendem.
@@ -69,6 +76,7 @@ const BASE: Omit<UserSummary, "id" | "name" | "email" | "role" | "status"> = {
   company_city: null,
   company_state: null,
   onboarding_completed: true,
+  api4com_extension: null,
   created_at: "2026-03-04T12:00:00Z",
   updated_at: "2026-03-04T12:00:00Z",
 };
@@ -121,6 +129,10 @@ beforeEach(() => {
 });
 
 describe("UsersPage", () => {
+  beforeEach(() => {
+    papelDeQuemEdita = "admin";
+  });
+
   it("o papel de cada usuário está escrito, e não só pintado", async () => {
     // O selo saiu de um mapa local de classes cruas para o `Badge` do pacote.
     // O que não pode ter mudado é o que sobra para quem não enxerga a cor: a
@@ -389,6 +401,194 @@ describe("UsersPage", () => {
         expect.objectContaining({ role: "admin" }),
       ),
     );
+  });
+
+
+  // ── Ramal API4COM ───────────────────────────────────────────
+  //
+  // O campo decide COM QUAL IDENTIDADE uma ligação sai. Quem o controla
+  // controla de quem a chamada parece ter vindo — por isso a tela só o mostra
+  // a admin, e por isso "não aparece" é caso de teste tanto quanto "aparece".
+  // A autoridade continua sendo o backend; aqui se prende a superfície.
+
+  it("admin vê o ramal ao editar um técnico, e ao editar outro admin", async () => {
+    const user = userEvent.setup();
+    comUsuarios([ANA, BRUNO]);
+    await montar();
+
+    await user.click(await screen.findByRole("button", { name: "Editar Bruno Lima" }));
+    expect(
+      within(await screen.findByRole("dialog")).getByLabelText("Ramal API4COM"),
+    ).toBeInTheDocument();
+    await user.click(screen.getByRole("button", { name: "Cancelar" }));
+
+    await waitFor(() => expect(screen.queryByRole("dialog")).not.toBeInTheDocument());
+    await user.click(await screen.findByRole("button", { name: "Editar Ana Souza" }));
+    expect(
+      within(await screen.findByRole("dialog")).getByLabelText("Ramal API4COM"),
+    ).toBeInTheDocument();
+  });
+
+  it("editar um cliente não oferece ramal — cliente não origina ligação", async () => {
+    const user = userEvent.setup();
+    await montar();
+
+    await user.click(await screen.findByRole("button", { name: "Editar Carla Dias" }));
+
+    const dialogo = await screen.findByRole("dialog");
+    expect(within(dialogo).queryByLabelText("Ramal API4COM")).not.toBeInTheDocument();
+  });
+
+  it("técnico não recebe o controle de ramal, nem para si", async () => {
+    papelDeQuemEdita = "technician";
+    const user = userEvent.setup();
+    await montar();
+
+    await user.click(await screen.findByRole("button", { name: "Editar Bruno Lima" }));
+
+    const dialogo = await screen.findByRole("dialog");
+    expect(within(dialogo).queryByLabelText("Ramal API4COM")).not.toBeInTheDocument();
+    // E o campo não pode viajar escondido no corpo: o backend devolveria 403
+    // num salvamento que só mexeu no nome.
+    await user.click(within(dialogo).getByRole("button", { name: "Salvar alterações" }));
+    await waitFor(() => expect(userService.updateUser).toHaveBeenCalled());
+    expect(vi.mocked(userService.updateUser).mock.calls[0][1]).not.toHaveProperty(
+      "api4com_extension",
+    );
+  });
+
+  it("admin define o ramal de quem não tinha", async () => {
+    const user = userEvent.setup();
+    vi.mocked(userService.updateUser).mockResolvedValue({ ...BRUNO, api4com_extension: "1018" });
+    await montar();
+
+    await user.click(await screen.findByRole("button", { name: "Editar Bruno Lima" }));
+    const dialogo = await screen.findByRole("dialog");
+    const campo = within(dialogo).getByLabelText("Ramal API4COM");
+    expect(campo).toHaveValue("");
+
+    await user.type(campo, "1018");
+    await user.click(within(dialogo).getByRole("button", { name: "Salvar alterações" }));
+
+    await waitFor(() =>
+      expect(userService.updateUser).toHaveBeenCalledWith(
+        "u2",
+        expect.objectContaining({ api4com_extension: "1018" }),
+      ),
+    );
+  });
+
+  it("admin troca um ramal por outro", async () => {
+    const user = userEvent.setup();
+    comUsuarios([{ ...BRUNO, api4com_extension: "1018" }]);
+    vi.mocked(userService.updateUser).mockResolvedValue({ ...BRUNO, api4com_extension: "1019" });
+    await montar();
+
+    await user.click(await screen.findByRole("button", { name: "Editar Bruno Lima" }));
+    const dialogo = await screen.findByRole("dialog");
+    const campo = within(dialogo).getByLabelText("Ramal API4COM");
+    expect(campo).toHaveValue("1018");
+
+    await user.clear(campo);
+    await user.type(campo, "1019");
+    await user.click(within(dialogo).getByRole("button", { name: "Salvar alterações" }));
+
+    await waitFor(() =>
+      expect(userService.updateUser).toHaveBeenCalledWith(
+        "u2",
+        expect.objectContaining({ api4com_extension: "1019" }),
+      ),
+    );
+  });
+
+  it("esvaziar o campo REMOVE o vínculo, e manda null — não string vazia", async () => {
+    // A distinção é do backend: a string vazia seria um VALOR, e o índice
+    // único a trataria como tal — o segundo usuário esvaziado colidiria com o
+    // primeiro. Quem remove manda null.
+    const user = userEvent.setup();
+    comUsuarios([{ ...BRUNO, api4com_extension: "1018" }]);
+    vi.mocked(userService.updateUser).mockResolvedValue({ ...BRUNO, api4com_extension: null });
+    await montar();
+
+    await user.click(await screen.findByRole("button", { name: "Editar Bruno Lima" }));
+    const dialogo = await screen.findByRole("dialog");
+    await user.clear(within(dialogo).getByLabelText("Ramal API4COM"));
+    await user.click(within(dialogo).getByRole("button", { name: "Salvar alterações" }));
+
+    await waitFor(() =>
+      expect(userService.updateUser).toHaveBeenCalledWith(
+        "u2",
+        expect.objectContaining({ api4com_extension: null }),
+      ),
+    );
+  });
+
+  it("o ramal viaja como texto, e zero à esquerda sobrevive", async () => {
+    // Converter para número faria 0700 virar 700, e a ligação sairia de outro
+    // lugar. O fornecedor declara o ramal como identificador textual.
+    const user = userEvent.setup();
+    vi.mocked(userService.updateUser).mockResolvedValue({ ...BRUNO, api4com_extension: "0700" });
+    await montar();
+
+    await user.click(await screen.findByRole("button", { name: "Editar Bruno Lima" }));
+    const dialogo = await screen.findByRole("dialog");
+    await user.type(within(dialogo).getByLabelText("Ramal API4COM"), "0700");
+    await user.click(within(dialogo).getByRole("button", { name: "Salvar alterações" }));
+
+    await waitFor(() => expect(userService.updateUser).toHaveBeenCalled());
+    const enviado = vi.mocked(userService.updateUser).mock.calls[0][1].api4com_extension;
+    expect(enviado).toBe("0700");
+    expect(typeof enviado).toBe("string");
+  });
+
+  it("ramal já usado por outra pessoa é dito com as palavras do servidor", async () => {
+    const user = userEvent.setup();
+    vi.mocked(userService.updateUser).mockRejectedValue({
+      response: { status: 409, data: { detail: "Este ramal já está vinculado a outro usuário." } },
+    });
+    await montar();
+
+    await user.click(await screen.findByRole("button", { name: "Editar Bruno Lima" }));
+    const dialogo = await screen.findByRole("dialog");
+    await user.type(within(dialogo).getByLabelText("Ramal API4COM"), "1018");
+    await user.click(within(dialogo).getByRole("button", { name: "Salvar alterações" }));
+
+    expect(
+      await within(dialogo).findByText("Este ramal já está vinculado a outro usuário."),
+    ).toBeInTheDocument();
+  });
+
+  it("rebaixar a cliente fecha o campo do ramal", async () => {
+    // O backend recusa com 422 quem vira cliente ainda tendo ramal — de
+    // propósito. Mandar null junto apagaria o vínculo em silêncio, e quem
+    // rebaixasse por engano perderia o dado sem ver.
+    const user = userEvent.setup();
+    comUsuarios([{ ...BRUNO, api4com_extension: "1018", phone: "+5581999999999" }]);
+    await montar();
+
+    await user.click(await screen.findByRole("button", { name: "Editar Bruno Lima" }));
+    const dialogo = await screen.findByRole("dialog");
+    expect(within(dialogo).getByLabelText("Ramal API4COM")).toBeInTheDocument();
+
+    escolherNoMenu(campoDeMenu("Perfil *"), "Cliente");
+
+    await waitFor(() =>
+      expect(within(dialogo).queryByLabelText("Ramal API4COM")).not.toBeInTheDocument(),
+    );
+  });
+
+  it("promover a técnico já abre o campo na mesma edição", async () => {
+    const user = userEvent.setup();
+    comUsuarios([{ ...CARLA, status: "active", phone: "+5581999999999" }]);
+    await montar();
+
+    await user.click(await screen.findByRole("button", { name: "Editar Carla Dias" }));
+    const dialogo = await screen.findByRole("dialog");
+    expect(within(dialogo).queryByLabelText("Ramal API4COM")).not.toBeInTheDocument();
+
+    escolherNoMenu(campoDeMenu("Perfil *"), "Técnico");
+
+    expect(await within(dialogo).findByLabelText("Ramal API4COM")).toBeInTheDocument();
   });
 
   it("o filtro de estado oferece só os dois valores que o servidor aceita", async () => {

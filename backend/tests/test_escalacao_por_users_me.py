@@ -57,6 +57,10 @@ def _user(role=UserRole.client, status=UserStatus.active):
     u.company_city = None
     u.company_state = None
     u.onboarding_completed = True
+    # Campo novo do `UserResponse` (Fase 2C.1a). Sem valor explícito o
+    # MagicMock devolve um objeto e o `model_validate` recusa — mesma
+    # armadilha que os campos de empresa acima já registram.
+    u.api4com_extension = None
     u.ai_enabled = True
     u.email_verified = True
     u.mfa_enabled = False
@@ -284,6 +288,13 @@ def test_o_schema_do_perfil_nao_ganhou_campo_administrativo():
         "department",
         "avatar_url",
         "role",  # existe no schema, mas o update_me o exclui — ver testes acima
+        # Mesma situação do `role`, e pela mesma razão: o ramal da API4COM é
+        # provisionamento de admin, não configuração de perfil. Está no schema
+        # porque `PATCH /users/{id}` precisa dele, e o `update_me` o descarta
+        # no mesmo `exclude`. A recusa explícita a não-admin vive em
+        # `_guarda_de_atribuicao_de_ramal`; a cobertura, em
+        # `tests/test_ramal_api4com.py`.
+        "api4com_extension",
         "company_name",
         "cnpj",
         "company_cep",

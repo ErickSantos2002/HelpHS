@@ -49,12 +49,35 @@ class UserUpdate(AppBaseModel):
     department: str | None = Field(default=None, max_length=100)
     avatar_url: str | None = Field(default=None, max_length=500)
     role: UserRole | None = None
+    # Provisionamento administrativo, não configuração de perfil. O schema é
+    # compartilhado com `PATCH /users/me`, que o descarta pelo `exclude` — a
+    # recusa explícita de quem não é admin vive em
+    # `_guarda_de_atribuicao_de_ramal`, no router.
+    #
+    # `None` aqui é SIGNIFICATIVO, ao contrário de `role`: é assim que o admin
+    # REMOVE um vínculo. Quem separa "não enviou" de "enviou nulo" é o
+    # `exclude_unset` do router, como no telefone.
+    api4com_extension: str | None = Field(default=None, max_length=20)
     company_name: str | None = Field(default=None, max_length=255)
     cnpj: CnpjOpcional = Field(default=None, max_length=18)
     company_cep: str | None = Field(default=None, max_length=9)
     company_address: str | None = Field(default=None, max_length=255)
     company_city: str | None = Field(default=None, max_length=100)
     company_state: str | None = Field(default=None, max_length=2)
+
+    @field_validator("api4com_extension")
+    @classmethod
+    def ramal_vazio_e_ausencia(cls, v: str | None) -> str | None:
+        """Campo limpo no formulário vira remoção, não string vazia.
+
+        O `AppBaseModel` já apara as pontas; o que sobra aqui é o caso em que
+        sobrou nada. Os formulários do projeto mandam `""`, não `null`, quando
+        o usuário esvazia um campo — mesma razão do
+        `normaliza_telefone_opcional`. Sem isto, esvaziar gravaria `''`, que o
+        índice único trataria como valor de verdade e recusaria no segundo
+        usuário que fizesse o mesmo.
+        """
+        return v or None
 
 
 class PasswordChange(AppBaseModel):
@@ -129,6 +152,11 @@ class UserResponse(AppBaseModel):
     company_city: str | None
     company_state: str | None
     onboarding_completed: bool
+    # O ramal não é segredo — a credencial da API4COM é o token e a senha SIP,
+    # e nenhum dos dois passa perto do `User`. Sai aqui para o técnico saber
+    # em `/users/me` por que a telefonia está indisponível para ele, e para o
+    # admin conferir o provisionamento na listagem. Para cliente é sempre nulo.
+    api4com_extension: str | None = None
     # Este cliente aceita ser atendido por IA. Default True para o caso do
     # objeto que ainda não passou pelo banco.
     ai_enabled: bool = True

@@ -471,8 +471,15 @@ def test_o_model_declara_as_mesmas_constraints():
     assert "ix_ticket_calls_ticket_created" in indices
 
 
-def test_os_cinco_estados_do_enum_batem_com_o_check():
-    """Se alguém acrescentar estado no Python sem migration, cai aqui."""
+def test_os_estados_do_enum_batem_com_o_check():
+    """Se alguém acrescentar estado no Python sem migration, cai aqui.
+
+    ⚠️ O retrato do fim é o que força a pergunta, e ele já foi atualizado uma
+    vez: `dispatching` entrou na Fase 2C.2 com a migration `8d08cbca1768`, que
+    derruba e recria este CHECK. A coluna é `String` + `CHECK` justamente para
+    que crescer custe isto — uma linha aqui e uma migration barata — em vez de
+    um `ALTER TYPE` que o alembic desta casa não consegue encadear.
+    """
     from app.models.models import CallCreationStatus, TicketCall
 
     do_enum = {e.value for e in CallCreationStatus}
@@ -483,4 +490,11 @@ def test_os_cinco_estados_do_enum_batem_com_o_check():
     )
     for valor in do_enum:
         assert f"'{valor}'" in check, f"{valor} não está no CHECK"
-    assert do_enum == {"pending", "confirmed", "rejected", "unavailable", "indeterminate"}
+    assert do_enum == {
+        "pending",
+        "dispatching",
+        "confirmed",
+        "rejected",
+        "unavailable",
+        "indeterminate",
+    }

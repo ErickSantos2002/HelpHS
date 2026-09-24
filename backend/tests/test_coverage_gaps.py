@@ -71,6 +71,9 @@ def _mock_user(role=UserRole.admin, uid=None):
     u.company_city = None
     u.company_state = None
     u.onboarding_completed = True
+    # Campo novo do `UserResponse` (Fase 2C.1a): sem valor explícito o
+    # MagicMock devolve um objeto e o `model_validate` recusa.
+    u.api4com_extension = None
     u.created_at = _NOW
     u.updated_at = _NOW
     return u

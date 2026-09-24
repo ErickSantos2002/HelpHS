@@ -68,6 +68,25 @@ async def registra_tentativa(
     return tentativa
 
 
+async def marca_em_despacho(db: AsyncSession, tentativa: TicketCall) -> TicketCall:
+    """`pending → dispatching`: a fronteira do efeito externo.
+
+    ⚠️ Quem chamar isto precisa **COMMITAR antes** de emitir o `POST /calls`.
+    Não é detalhe de estilo: o estado só protege se estiver durável no banco
+    quando o processo morrer. Gravado e não commitado, some no rollback e a
+    linha volta a ser um `pending` ambíguo — exatamente o problema que este
+    estado existe para resolver.
+
+    Na Fase 2C.2 esta função existe e é testada, mas NÃO é exercida pelo
+    orquestrador: aquela fase termina no `pending`, sem tocar no fornecedor. A
+    chamada daqui entra na fase seguinte, na linha imediatamente anterior ao
+    `create_call`.
+    """
+    tentativa.creation_status = CallCreationStatus.dispatching.value
+    await db.flush()
+    return tentativa
+
+
 async def confirma(
     db: AsyncSession,
     tentativa: TicketCall,

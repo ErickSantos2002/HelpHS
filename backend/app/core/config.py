@@ -450,6 +450,22 @@ class Settings(BaseSettings):
 
     api4com_timeout_seconds: int = 15
 
+    # ── Orquestração da tentativa (Fase 2C.2) ────────────────
+    #
+    # O lock cobre a janela inteira entre validar e terminar a conversa com o
+    # fornecedor. 30s é o teto da chamada (15s) com folga: um processo que
+    # morra segurando o lock libera sozinho, e ninguém fica preso.
+    api4com_lock_ttl_seconds: int = 30
+    # Duas ligações para o mesmo chamado em cinco minutos é gente ligando duas
+    # vezes, não duas necessidades. A janela vale para tentativa que PODE ter
+    # tocado — `pending` não entra, porque significa que nada saiu.
+    api4com_repeat_window_seconds: int = 300
+    # Tetos por hora. Não substituem o lock: o lock impede simultaneidade, isto
+    # impede volume. Chave autenticada, nunca IP — atrás do proxy do EasyPanel
+    # o IP junta a empresa inteira num balde só.
+    api4com_calls_per_actor_per_hour: int = 20
+    api4com_calls_per_ticket_per_hour: int = 3
+
     def _valida_api4com(self) -> None:
         """Desligada, nada é exigido. Ligada, o que falta impede a subida.
 
