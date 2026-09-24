@@ -54,6 +54,7 @@ Falha de envio é registrada e ignorada — nunca desfaz a transação.
 
 import asyncio
 import uuid
+from collections.abc import Sequence
 from dataclasses import dataclass
 from typing import Any
 from weakref import WeakKeyDictionary
@@ -63,7 +64,7 @@ from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.core.config import Settings
-from app.models.models import Notification, NotificationType, User, UserRole
+from app.models.models import Notification, NotificationType, User, UserRole, UserStatus
 from app.services.email import send_email
 from app.services.email_layout import Mensagem, em_html, em_texto
 
@@ -97,6 +98,44 @@ _IN_APP_ONLY = frozenset({NotificationType.satisfaction_survey})
 # Isto não toca os e-mails de conta — confirmação de cadastro e redefinição de
 # senha saem por `services/account_emails.py`, que não passa por aqui.
 _SEM_EMAIL_POR_PAPEL = frozenset({UserRole.admin, UserRole.technician})
+
+# Os papéis que formam a OPERAÇÃO: quem atende chamado.
+#
+# `frozenset` próprio, e NÃO o `_SEM_EMAIL_POR_PAPEL` acima — que hoje tem
+# exatamente os mesmos dois membros. São perguntas diferentes: este diz "quem é
+# a equipe", o outro diz "quem não recebe e-mail". Reaproveitar um pelo outro
+# faria a Fase 2, ao mexer num, mudar o outro em silêncio — e o sintoma seria
+# alguém sumir da audiência por causa de uma decisão sobre e-mail.
+_PAPEIS_OPERACIONAIS = frozenset({UserRole.admin, UserRole.technician})
+
+
+async def audiencia_operacional(db: AsyncSession) -> Sequence[User]:
+    """Todos os técnicos e administradores ATIVOS — a definição única de "a equipe".
+
+    A consulta existia inline em `_avisa_equipe_da_helo`, e era o único lugar do
+    sistema que respondia "quem é a operação". Com o chamado novo passando a
+    avisar a equipe, ela viraria o SEGUNDO lugar — e duas consultas com a mesma
+    intenção divergem no primeiro técnico desativado, sem nada avisando.
+
+    `status == active`, e não `!= inactive`: existe um terceiro valor,
+    `anonymized`, que é conta apagada pela LGPD. O e-mail dela não é mais de
+    ninguém, e a comparação por desigualdade a deixaria entrar.
+
+    Sem `ORDER BY` de propósito: a ordem não muda nada — cada notificação tem id
+    e carimbo próprios, e ordenar custaria uma varredura a cada chamado aberto.
+
+    O filtro é uma cláusula `WHERE`, então quem o prova é
+    `tests/test_audiencia_operacional_postgres.py`, contra Postgres de verdade.
+    Mock não executa `WHERE` — a lição está registrada no cabeçalho de
+    `tests/test_helo_base_postgres.py`.
+    """
+    resultado = await db.execute(
+        select(User).where(
+            User.role.in_(_PAPEIS_OPERACIONAIS),
+            User.status == UserStatus.active,
+        )
+    )
+    return resultado.scalars().all()
 
 
 @dataclass(frozen=True)
