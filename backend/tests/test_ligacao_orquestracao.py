@@ -456,6 +456,44 @@ async def test_recusa_antes_das_validacoes_nao_gasta_cota(redis_falso):
     assert f"{ligacao._PREFIXO_TETO_ATOR}{ator.id}" not in redis_falso.dados
 
 
+# ── Os ramais reais do suporte ───────────────────────────────
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("ramal", ["1018", "1019"])
+async def test_os_ramais_do_suporte_passam_pela_validacao(redis_falso, ramal):
+    """1018 e 1019 foram criados na API4COM para o suporte do HelpHS.
+
+    Este teste prova que a orquestração deixa de parar no "ator sem ramal"
+    para quem os tiver — e que, mesmo passando, NADA sai para o fornecedor.
+    O provisionamento em si (qual pessoa recebe qual ramal) é decisão
+    administrativa, não código.
+    """
+    ticket = _ticket()
+    sessao = _Sessao(ticket, _cliente())
+
+    with patch("httpx.AsyncClient.send", side_effect=AssertionError("saiu HTTP!")):
+        tentativa = await _prepara(_ator(ramal=ramal), sessao, ticket.id)
+
+    assert tentativa.creation_status == CallCreationStatus.pending.value
+    assert tentativa.provider_call_id is None
+
+
+@pytest.mark.asyncio
+async def test_ramal_do_suporte_nao_e_convertido_para_numero(redis_falso):
+    """O ramal viaja como string do banco até o fornecedor, sem passar por int.
+
+    Um ramal com zero à esquerda existe no plano de numeração de muita central;
+    `int("0700")` viraria 700 e a ligação sairia de outro lugar.
+    """
+    ticket = _ticket()
+    ator = _ator(ramal="0700")
+    assert ligacao._ramal_do_ator(ator) == "0700"
+
+    tentativa = await _prepara(ator, _Sessao(ticket, _cliente()), ticket.id)
+    assert tentativa.creation_status == CallCreationStatus.pending.value
+
+
 # ── O sentinela ──────────────────────────────────────────────
 
 

@@ -75,6 +75,7 @@ const PERFIL: UserSummary = {
   company_address: null,
   company_city: null,
   company_state: null,
+  api4com_extension: null,
   onboarding_completed: true,
   created_at: "2026-01-10T12:00:00Z",
   updated_at: "2026-01-10T12:00:00Z",

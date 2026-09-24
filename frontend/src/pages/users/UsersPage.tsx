@@ -16,6 +16,7 @@ import {
   SelectMenu,
   Spinner,
 } from "../../components/ui";
+import { useAuth } from "../../contexts/AuthContext";
 import { getApiError } from "../../lib/apiError";
 import {
   ERRO_TELEFONE,
@@ -38,6 +39,7 @@ import {
   updateUser,
   type UserStatus,
   type UserSummary,
+  type UserUpdatePayload,
 } from "../../services/userService";
 
 // ── Constants ─────────────────────────────────────────────────
@@ -201,6 +203,11 @@ function criaEditSchema(user: UserSummary) {
       role: z.enum(["admin", "technician", "client"]),
       phone: z.string().optional(),
       department: z.string().optional(),
+      // String, nunca número: o fornecedor declara o ramal como identificador
+      // textual, e `0700` não pode virar 700. O limite espelha o
+      // `String(20)` da coluna — validar formato aqui inventaria uma regra
+      // que o backend não tem.
+      api4com_extension: z.string().max(20, "No máximo 20 caracteres").optional(),
     })
     .superRefine((valores, ctx) => {
       exigeFormatoDeTelefone(valores.phone, ctx);
@@ -409,6 +416,11 @@ function CreateModal({ onClose, onSaved }: { onClose: () => void; onSaved: (u: U
 
 function EditModal({ user, onClose, onSaved }: { user: UserSummary; onClose: () => void; onSaved: (u: UserSummary) => void }) {
   const [submitError, setSubmitError] = useState<string | null>(null);
+  // A rota `/users` é de admin E técnico — o técnico chega até aqui. Quem
+  // decide é o backend, mas mostrar um campo que ele vai recusar é desenhar a
+  // tela para frustrar.
+  const { user: atual } = useAuth();
+  const souAdmin = atual?.role === "admin";
   const form = useForm<EditValues>({
     resolver: zodResolver(criaEditSchema(user)),
     defaultValues: {
@@ -416,18 +428,33 @@ function EditModal({ user, onClose, onSaved }: { user: UserSummary; onClose: () 
       role: user.role as "admin" | "technician" | "client",
       phone: user.phone ?? "",
       department: user.department ?? "",
+      api4com_extension: user.api4com_extension ?? "",
     },
   });
+  const papelSelecionado = form.watch("role");
 
   async function handleSubmit(values: EditValues) {
     setSubmitError(null);
     try {
-      const updated = await updateUser(user.id, {
+      const alteracoes: UserUpdatePayload = {
         name: values.name,
         role: values.role,
         phone: toE164(values.phone),
         department: values.department || null,
-      });
+      };
+      // O campo só entra no corpo quando quem edita é admin: o backend
+      // responde 403 para qualquer outro, mesmo que o valor não tenha mudado,
+      // e um técnico salvando o nome de alguém não pode esbarrar nisso.
+      //
+      // E só quando o papel resultante é staff. Rebaixar a cliente alguém que
+      // tem ramal é recusado pelo backend com 422 — de propósito: mandar
+      // `null` junto apagaria o vínculo em silêncio, e quem rebaixa por engano
+      // perderia o dado sem ver. Melhor o admin tirar o ramal de forma
+      // explícita, numa edição que diz o que faz.
+      if (souAdmin && values.role !== "client") {
+        alteracoes.api4com_extension = values.api4com_extension?.trim() || null;
+      }
+      const updated = await updateUser(user.id, alteracoes);
       onSaved(updated);
     } catch (err: unknown) {
       // O `catch {}` seco engolia até o 403 de troca de papel, que o tradutor
@@ -481,6 +508,18 @@ function EditModal({ user, onClose, onSaved }: { user: UserSummary; onClose: () 
           />
           <Input label="Departamento" {...form.register("department")} />
         </div>
+        {/* Acompanha o papel SELECIONADO, não o salvo: promover alguém a
+            técnico já abre o campo na mesma edição, e rebaixar a cliente o
+            fecha. Cliente não origina ligação, logo não tem ramal. */}
+        {souAdmin && papelSelecionado !== "client" && (
+          <Input
+            label="Ramal API4COM"
+            placeholder="Sem ramal configurado"
+            maxLength={20}
+            error={form.formState.errors.api4com_extension?.message}
+            {...form.register("api4com_extension")}
+          />
+        )}
         <ModalFooter>
           <Button type="button" variant="secondary" onClick={onClose} disabled={form.formState.isSubmitting}>
             Cancelar
