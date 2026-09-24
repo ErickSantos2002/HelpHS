@@ -65,6 +65,11 @@ def _db(ticket):
 
     async def _execute(*args, **kwargs):
         r = MagicMock()
+        # O notify() busca (email, papel, nome) do destinatário com .one_or_none().
+        # Cliente de propósito: mantém o caminho de e-mail EXERCIDO — com staff, o
+        # filtro por papel silenciaria o envio e o `test_avisa_o_cliente` passaria
+        # por não ter mandado nada.
+        r.one_or_none.return_value = ("dest@test.com", UserRole.client, "Destino")
         r.scalar_one_or_none.return_value = ticket
         r.scalar_one.return_value = 0
         r.scalars.return_value.all.return_value = []
@@ -495,6 +500,8 @@ async def test_reabrir_zera_a_extensao_do_ciclo_novo(patch_redis):  # noqa: F811
         r = MagicMock()
         atual = respostas[min(indice["i"], len(respostas) - 1)]
         indice["i"] += 1
+        # Mesmo motivo da fábrica acima: a reabertura também notifica.
+        r.one_or_none.return_value = ("dest@test.com", UserRole.client, "Destino")
         r.scalar_one_or_none.return_value = atual
         r.scalar_one.return_value = 0
         r.scalars.return_value.all.return_value = []
