@@ -278,6 +278,15 @@ class Settings(BaseSettings):
                     "como se tivessem chegado dentro do TLS."
                 )
 
+        # Por último de propósito: as validações acima protegem a subida de
+        # quebras que já existiam, e cada teste delas espera o PRÓPRIO erro.
+        if self.lgpd_revisao_politica is None:
+            raise ValueError(
+                f"LGPD_REVISAO_POLITICA está vazio em '{self.app_env}': defina a "
+                "revisão vigente da Política de Privacidade (ex.: 00). Sem ela, "
+                "cada aceite seria gravado sem dizer qual texto foi aceito"
+            )
+
     # Armazenamento de arquivos (anexos e avatares) em disco.
     # No deploy, este caminho precisa ser um volume — sem isso os arquivos
     # somem a cada redeploy do container.
@@ -498,6 +507,34 @@ class Settings(BaseSettings):
     email_verification_enabled: bool = False
     email_verification_token_hours: int = 24
     password_reset_token_hours: int = 1
+
+    # LGPD — a revisão VIGENTE dos documentos que o cadastro pede para aceitar
+    #
+    # Declarada, não consultada: publicar revisão nova é evento raro e manual,
+    # do mesmo tipo do deploy, e cada aceite grava estes valores em
+    # `lgpd_consents`. É isso que permite provar QUAL texto cada pessoa aceitou
+    # (seção 15 da Política de Privacidade). Desenho em
+    # `docs/superpowers/specs/2026-08-31-registro-da-revisao-aceita-design.md`.
+    #
+    # A da política é OBRIGATÓRIA fora de desenvolvimento e teste (ver o fim do
+    # `model_post_init`): aceite sem revisão é exatamente o estado que a tabela
+    # existe para acabar. A dos Termos de Uso é opcional porque o documento
+    # ainda não existe — vazia, o aceite grava NULL, que é a verdade.
+    lgpd_revisao_politica: str | None = None
+    lgpd_revisao_termos: str | None = None
+    # Liga a tela de re-aceite para clientes cuja última revisão aceita não é a
+    # vigente. DESLIGADA por padrão: nenhum usuário anterior a esta mudança tem
+    # histórico, e ligar antes do texto final faria todo cliente aceitar o
+    # rascunho no primeiro login.
+    lgpd_exige_reaceite: bool = False
+
+    @field_validator("lgpd_revisao_politica", "lgpd_revisao_termos")
+    @classmethod
+    def _revisao_em_branco_e_ausente(cls, valor: str | None) -> str | None:
+        # Variável criada no painel e deixada vazia é ausência, não a revisão "".
+        if valor is None:
+            return None
+        return valor.strip() or None
 
     def email_is_configured(self) -> bool:
         """Só dá para exigir confirmação se houver como enviar o e-mail."""

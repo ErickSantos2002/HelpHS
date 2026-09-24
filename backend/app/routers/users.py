@@ -18,7 +18,7 @@ import uuid
 from datetime import UTC, datetime
 from typing import Annotated, Any
 
-from fastapi import APIRouter, Depends, File, HTTPException, Query, UploadFile, status
+from fastapi import APIRouter, Depends, File, HTTPException, Query, Request, UploadFile, status
 from sqlalchemy import func, select
 from sqlalchemy.exc import IntegrityError
 from sqlalchemy.ext.asyncio import AsyncSession
@@ -46,6 +46,7 @@ from app.models.models import (
 )
 from app.schemas.ticket import InterruptorDaIA
 from app.schemas.user import (
+    LGPDConsentStatus,
     LGPDConsentUpdate,
     OnboardingUpdate,
     PasswordChange,
@@ -55,7 +56,7 @@ from app.schemas.user import (
     UserStatusUpdate,
     UserUpdate,
 )
-from app.services import storage
+from app.services import consentimento, storage
 from app.utils.telefone import telefone_ausente
 from app.utils.uploads import ler_ate_o_limite
 
@@ -225,6 +226,16 @@ async def create_user(
     )
     db.add(user)
     _audit(db, AuditAction.create, actor.id, user.id)
+    if body.lgpd_consent:
+        # Quem marcou foi a equipe, não o titular: a origem diz isso, e o IP
+        # fica de fora porque seria o de quem criou a conta.
+        consentimento.registra_aceite(
+            db,
+            user_id=user.id,
+            origem=consentimento.ORIGEM_CRIADO_POR_TERCEIRO,
+            ip=None,
+            agora=ts,
+        )
     await db.commit()
     await db.refresh(user)
     return _to_response(user)
@@ -599,9 +610,29 @@ async def toggle_user_ai(
 # ── PATCH /users/me/lgpd-consent ──────────────────────────────
 
 
+@router.get("/me/lgpd-consent", response_model=LGPDConsentStatus)
+async def get_lgpd_consent(
+    db: Annotated[AsyncSession, Depends(get_db)],
+    current_user: Annotated[User, Depends(get_current_user)],
+    settings: Annotated[Settings, Depends(get_settings)],
+) -> LGPDConsentStatus:
+    """A situação do aceite de quem está logado — o que a tela de re-aceite lê."""
+    ultimo = await consentimento.ultimo_aceite_vigente(db, current_user.id)
+    return LGPDConsentStatus(
+        revisao_politica_vigente=settings.lgpd_revisao_politica,
+        revisao_termos_vigente=settings.lgpd_revisao_termos,
+        revisao_politica_aceita=ultimo.revisao_politica if ultimo else None,
+        revisao_termos_aceita=ultimo.revisao_termos if ultimo else None,
+        precisa_reaceitar=consentimento.precisa_reaceitar(
+            ultimo, role=current_user.role, settings=settings
+        ),
+    )
+
+
 @router.patch("/me/lgpd-consent", response_model=UserResponse)
 async def update_lgpd_consent(
     body: LGPDConsentUpdate,
+    request: Request,
     db: Annotated[AsyncSession, Depends(get_db)],
     current_user: Annotated[User, Depends(get_current_user)],
 ) -> UserResponse:
@@ -610,9 +641,22 @@ async def update_lgpd_consent(
     if not user:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Usuário não encontrado.")
 
+    agora = datetime.now(UTC)
     user.lgpd_consent = body.lgpd_consent
-    user.lgpd_consent_at = datetime.now(UTC) if body.lgpd_consent else None
-    user.updated_at = datetime.now(UTC)
+    user.lgpd_consent_at = agora if body.lgpd_consent else None
+    user.updated_at = agora
+    # As colunas acima são a leitura rápida e seguem mutáveis. A prova fica no
+    # histórico: conceder é linha nova, revogar fecha as abertas sem apagar.
+    if body.lgpd_consent:
+        consentimento.registra_aceite(
+            db,
+            user_id=user.id,
+            origem=consentimento.ORIGEM_ALTERACAO_PROPRIA,
+            ip=request.client.host if request.client else None,
+            agora=agora,
+        )
+    else:
+        await consentimento.revoga_aceites(db, user_id=user.id, agora=agora)
     _audit(db, AuditAction.update, current_user.id, user.id)
     await db.commit()
     await db.refresh(user)

@@ -351,6 +351,59 @@ class User(Base):
     )
 
 
+class LgpdConsent(Base):
+    """Cada aceite da Política de Privacidade (e dos Termos), como evento próprio.
+
+    `users.lgpd_consent` e `users.lgpd_consent_at` continuam sendo a leitura
+    rápida do estado ATUAL — é o que as telas leem. Esta tabela é a PROVA: diz
+    qual revisão cada pessoa aceitou, quando e por qual caminho, que é o que a
+    seção 15 da política promete guardar.
+
+    **Append-only pela regra de negócio.** Aceite novo é linha nova; revogar
+    ESCREVE `revogado_em` nos aceites abertos e não apaga nada. Antes desta
+    tabela, revogar zerava `lgpd_consent_at` e a prova do período consentido
+    — justamente o que precisaria ser defendido — sumia.
+
+    **Sem backfill.** Quem se cadastrou antes dela aceitou um texto que ainda
+    não existia: a revisão dessas pessoas é desconhecida, e a ausência de
+    linha é a verdade que fica gravada. É ela que dispara o re-aceite.
+
+    Desenho em `docs/superpowers/specs/2026-08-31-registro-da-revisao-aceita-design.md`.
+    """
+
+    __tablename__ = "lgpd_consents"
+
+    id: Mapped[uuid.UUID] = mapped_column(UUID(as_uuid=True), primary_key=True, default=uuid.uuid4)
+    # `SET NULL`, decidido em 24/09/2026: excluir a conta não apaga o registro
+    # de que houve aceite daquela revisão — a política promete guardá-lo por
+    # até 5 anos —, mas também não prende a pessoa ao registro.
+    user_id: Mapped[uuid.UUID | None] = mapped_column(
+        UUID(as_uuid=True), ForeignKey("users.id", ondelete="SET NULL"), nullable=True, index=True
+    )
+    # As revisões vêm de `LGPD_REVISAO_POLITICA` e `LGPD_REVISAO_TERMOS`, lidas
+    # no momento do aceite. Nulas quando o documento não existe (os Termos,
+    # hoje) ou quando o ambiente não declarou — desenvolvimento e teste.
+    revisao_politica: Mapped[str | None] = mapped_column(String(20), nullable=True)
+    revisao_termos: Mapped[str | None] = mapped_column(String(20), nullable=True)
+    origem: Mapped[str] = mapped_column(String(30), nullable=False)
+    concedido_em: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), nullable=False, server_default=func.now()
+    )
+    revogado_em: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
+    # De onde o TITULAR aceitou. Nulo quando quem gravou foi outra pessoa (a
+    # equipe criando a conta): o IP seria o dela, e o registro afirmaria algo
+    # que não aconteceu.
+    ip: Mapped[str | None] = mapped_column(String(45), nullable=True)
+
+    __table_args__ = (
+        # SQL portável: vale no `create_all` do SQLite e no PostgreSQL.
+        CheckConstraint(
+            "origem IN ('auto_cadastro', 'criado_por_terceiro', 'alteracao_propria')",
+            name="ck_lgpd_consents_origem_conhecida",
+        ),
+    )
+
+
 class Product(Base):
     """Produtos da empresa Health & Safety"""
 

@@ -36,6 +36,7 @@ def _producao(**extra):
         cors_origins='["https://helphs.exemplo.com"]',
         frontend_url="https://helphs.exemplo.com",
         smtp_from_email="naoresponda@exemplo.com",
+        lgpd_revisao_politica="00",
     )
     base.update(extra)
     return Settings(**base)

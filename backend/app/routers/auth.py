@@ -53,7 +53,7 @@ from app.schemas.auth import (
     TokenOnlyRequest,
     TokenResponse,
 )
-from app.services import account_tokens, consulta_externa, mfa, mfa_challenge
+from app.services import account_tokens, consentimento, consulta_externa, mfa, mfa_challenge
 from app.services.account_emails import (
     send_account_exists_email,
     send_password_reset_email,
@@ -192,6 +192,13 @@ async def register(
     await db.flush()
 
     _audit(db, AuditAction.create, user.id, request)
+    consentimento.registra_aceite(
+        db,
+        user_id=user.id,
+        origem=consentimento.ORIGEM_AUTO_CADASTRO,
+        ip=request.client.host if request.client else None,
+        agora=now,
+    )
     await db.commit()
     await db.refresh(user)
 
