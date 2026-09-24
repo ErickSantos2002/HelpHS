@@ -16,6 +16,44 @@ from fastapi_mail import (
 from loguru import logger
 
 from app.core.config import Settings
+from app.services.email_layout import CID_LOGO, LOGO_EMAIL
+
+
+def _anexo_da_logo() -> list[dict]:
+    """A logo da faixa, como parte MIME `inline` referenciada por `cid:`.
+
+    Só acompanha e-mail COM html — em texto puro ela não seria vista e os 75 KB
+    viajariam por nada.
+
+    A árvore que isto produz é `multipart/related` envolvendo o
+    `multipart/alternative`, com a imagem IRMÃ dele. Isso importa: dentro do
+    `alternative`, a RFC 2046 permite ao cliente escolher a imagem e descartar o
+    HTML, e o leitor receberia só a logo. Quem monta assim é o
+    `attach_alternative` da `fastapi_mail` — comportamento de terceiro, medido em
+    `tests/test_email_anexo.py` e não deduzido da documentação.
+
+    Asset ausente devolve lista vazia em vez de levantar: o e-mail sai sem a
+    imagem, e a faixa continua dizendo "Help Desk Health & Safety" em texto.
+    Derrubar o envio porque falta um arquivo decorativo seria trocar um e-mail
+    feio por nenhum e-mail.
+    """
+    if not LOGO_EMAIL.is_file():
+        logger.warning(f"logo do e-mail ausente em {LOGO_EMAIL}: a mensagem sai sem imagem")
+        return []
+
+    return [
+        {
+            "file": str(LOGO_EMAIL),
+            "mime_type": "image",
+            "mime_subtype": "png",
+            "headers": {
+                # Os `<>` são do cabeçalho; no `src` o `cid:` vem sem eles.
+                "Content-ID": f"<{CID_LOGO}>",
+                "Content-Disposition": f'inline; filename="{LOGO_EMAIL.name}"',
+            },
+        }
+    ]
+
 
 # Module-level cache — one instance per Settings snapshot
 _mail_instance: FastMail | None = None
@@ -83,6 +121,7 @@ async def send_email(
             {
                 "alternative_body": html,
                 "multipart_subtype": MultipartSubtypeEnum.alternative,
+                "attachments": _anexo_da_logo(),
             }
             if html
             else {}

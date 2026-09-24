@@ -33,12 +33,26 @@ reprova o AA para texto normal. O botão usa `#1a71a8` (5,29:1). A faixa do topo
 fica com o azul da marca porque ali o texto é grande e negrito, onde o limiar é
 3:1 — e por isso mesmo NÃO cabe rótulo pequeno sobre ela.
 
-**Marca tipográfica, não imagem.** O logo do projeto é PNG com transparência e
-tinta escura: no Gmail e Outlook do celular, que invertem cores à força, o fundo
-escurece e os pixels não, e a marca some. Além disso, 75 KB viram ~100 KB em
-base64 e estouram sozinhos o corte de ~102 KB do Gmail, que esconde tudo abaixo
-— inclusive o botão. Texto nunca é bloqueado, não pesa e não depende de o
-backend passar a servir arquivo estático.
+**A logo é ANEXO por `cid:`, e a marca tipográfica FICA.** Em 04/09/2026 a
+imagem foi recusada por dois motivos. Um deles caiu em 24/09/2026 e o outro não:
+
+* *caiu* — "100 KB em base64 estouram o corte de ~102 KB do Gmail". Isso vale
+  para imagem embutida no CORPO (`data:`). O anexo por `cid:` é parte MIME
+  separada e não conta no tamanho do HTML: o corpo continua abaixo de 60 KB, e
+  há teste medindo;
+* *continua valendo* — o PNG tem tinta escura sobre transparência, e no Gmail e
+  Outlook do celular, que invertem cores à força, o fundo escurece e os pixels
+  não. A marca some.
+
+Por isso a faixa tem as DUAS: a imagem e o texto. A imagem carrega
+`alt="HelpHS"` para quem bloqueia imagem, e o nome da casa continua escrito em
+texto para quem a perde por inversão de cor — os dois casos em que sobrar só a
+imagem deixaria o e-mail sem remetente reconhecível. Há teste que apaga toda
+tag `<img>` e exige que "Help Desk Health & Safety" continue legível.
+
+`data:` segue recusado, e `<img src="https://...">` também: o segundo exigiria o
+backend servir arquivo estático, que hoje ele não faz e não vale abrir só para
+isto.
 
 **Tudo escapado.** `html.escape` em cada valor interpolado. Hoje o nome do
 usuário entra no corpo e, em texto puro, isso é inofensivo; em HTML seria
@@ -49,6 +63,7 @@ from __future__ import annotations
 
 from dataclasses import dataclass, field
 from html import escape
+from pathlib import Path
 
 # ── Paleta, lida do design system da Health & Safety ──────────
 # frontend/src/design-system/tokens/colors.css. Os contrastes ao lado saem da
@@ -65,6 +80,24 @@ _FONTE = "'Plus Jakarta Sans',-apple-system,BlinkMacSystemFont,'Segoe UI',Roboto
 
 ASSINATURA = "Health &amp; Safety Tech"
 ASSINATURA_TEXTO = "Health & Safety Tech"
+
+# ── A logo do e-mail ──────────────────────────────────────────
+
+# O identificador do anexo. Sem os `<>`: eles entram no cabeçalho `Content-ID`
+# da parte MIME, e no `src` o `cid:` vem sem eles. Trocar um sem o outro deixa a
+# imagem quebrada sem erro nenhum — é por isso que o valor mora aqui e os dois
+# lados o leem.
+CID_LOGO = "logo-helphs"
+
+# O asset CANÔNICO das mensagens. É uma cópia byte a byte de
+# `frontend/src/assets/Logo HelpHS.png`, e a cópia é necessária, não desleixo:
+# o `COPY . .` do Dockerfile tem `backend/` como contexto, então a pasta do
+# frontend não existe na imagem — e o arquivo de lá sai do bundle do Vite com
+# hash no nome, sem endereço estável. O nome perdeu o espaço de propósito.
+#
+# Se a marca mudar, este arquivo tem de ser trocado junto. Há teste que exige
+# que ele exista e seja um PNG de verdade.
+LOGO_EMAIL = Path(__file__).parent / "assets" / "logo-helphs.png"
 
 
 @dataclass(frozen=True)
@@ -175,6 +208,9 @@ def em_html(m: Mensagem) -> str:
   <tr>
     <td align="center" bgcolor="{_MARCA}"
         style="background-color:{_MARCA};padding:20px 24px;border-radius:6px 6px 0 0;">
+      <img src="cid:{CID_LOGO}" alt="HelpHS" width="140" height="35"
+           style="display:block;border:0;outline:none;text-decoration:none;
+                  margin:0 auto 10px auto;" />
       <span style="font-family:{_FONTE};font-size:19px;line-height:24px;
                    font-weight:700;color:{_BRANCO};">Help Desk
         <span style="font-weight:400;">Health &amp; Safety</span></span>

@@ -19,6 +19,7 @@ Nada aqui envia e-mail nem toca SMTP.
 from __future__ import annotations
 
 import re
+from html import escape
 
 import pytest
 
@@ -71,13 +72,41 @@ def test_a_url_e_escapada_no_atributo_href():
     ],
 )
 def test_todo_campo_interpolado_e_escapado(campo, valor):
-    """Não basta escapar a saudação: qualquer campo pode carregar dado de fora."""
+    """Não basta escapar a saudação: qualquer campo pode carregar dado de fora.
+
+    A afirmação é sobre O VALOR, e não "o documento não contém `<img`". Era o
+    segundo até 24/09/2026, e funcionava como atalho porque o layout não tinha
+    imagem nenhuma — quando a logo por CID entrou, o atalho passou a acusar a
+    própria faixa. A forma abaixo é mais estreita e mais forte: exige o valor
+    escapado presente E o valor cru ausente, então continua caindo se alguém
+    tirar o `escape`.
+    """
     html = em_html(_mensagem(**{campo: valor}))
 
-    assert "<b>" not in html
-    assert "<img" not in html
-    assert "<i>" not in html
-    assert "<u>" not in html
+    crus = [valor] if isinstance(valor, str) else [p for t in valor for p in _partes(t)]
+    for cru in crus:
+        assert cru not in html, f"{campo} entrou cru no HTML: {cru}"
+        assert escape(cru) in html, f"{campo} não apareceu escapado: {cru}"
+
+
+def _partes(item):
+    """Tuplas de `dados` são pares (rótulo, valor); o resto é string."""
+    return item if isinstance(item, tuple) else (item,)
+
+
+def test_a_unica_imagem_do_layout_e_a_logo():
+    """A guarda que o teste acima deixou de fazer: nenhum `<img` inesperado.
+
+    Um `<img>` a mais no documento é rastreador ou injeção — e é exatamente o
+    que o atalho antigo pegava de graça. Aqui a conta é explícita.
+    """
+    from app.services.email_layout import CID_LOGO
+
+    html = em_html(_mensagem(paragrafos=("<img src=x onerror=1>",)))
+
+    imagens = re.findall(r"<img[^>]*>", html)
+    assert len(imagens) == 1, f"imagem inesperada no layout: {imagens}"
+    assert f"cid:{CID_LOGO}" in imagens[0]
 
 
 # ── Paridade entre as duas versões ────────────────────────────
@@ -168,3 +197,75 @@ def test_o_html_cabe_no_corte_do_gmail():
     html = em_html(_mensagem(paragrafos=tuple(f"Parágrafo {i}." for i in range(12))))
 
     assert len(html.encode("utf-8")) < 60_000
+
+
+# ── A logo por CID, e o que sobra sem ela ─────────────────────
+#
+# A logo entrou em 24/09/2026 como ANEXO por `cid:`, e não como `data:` nem
+# apontando para um endereço público.
+#
+# A objeção de 04/09 contra imagem tinha duas metades, e só uma delas continua
+# valendo. A que caiu: "100 KB em base64 estouram o corte de ~102 KB do Gmail"
+# — isso vale para imagem embutida NO CORPO; o anexo por CID é parte MIME
+# separada e não conta no tamanho do HTML (o teste acima mede o corpo, e ele
+# continua abaixo de 60 KB). A que CONTINUA valendo: o PNG tem tinta escura
+# sobre transparência, e em cliente que inverte cores à força a marca some.
+#
+# É por isso que a faixa mantém a marca TIPOGRÁFICA junto da imagem. Os três
+# testes abaixo prendem as três pontas: o CID existe, a imagem tem texto
+# alternativo, e o nome da casa sobrevive sem imagem nenhuma.
+
+
+def test_o_html_referencia_a_logo_por_cid():
+    from app.services.email_layout import CID_LOGO
+
+    html = em_html(_mensagem())
+
+    assert f'src="cid:{CID_LOGO}"' in html
+    # `data:` foi recusado: ~100 KB em base64 dentro do corpo estouram o corte
+    # do Gmail e escondem o botão.
+    assert "data:image" not in html
+
+
+def test_a_imagem_da_logo_tem_texto_alternativo():
+    """Cliente que bloqueia imagem mostra o `alt` — e ele tem de dizer a casa."""
+    html = em_html(_mensagem())
+
+    imagem = re.search(r"<img[^>]*>", html)
+    assert imagem, "a faixa perdeu a imagem"
+    assert 'alt="HelpHS"' in imagem.group(0)
+
+
+def test_sem_a_imagem_o_email_continua_dizendo_o_nome_da_casa():
+    """A prova de que a logo é ACRÉSCIMO, não a única identificação.
+
+    Remove toda tag `<img>` do HTML — é o que o leitor vê quando o cliente
+    bloqueia imagem, ou quando a inversão de cores apaga a marca — e exige que
+    o nome da casa continue legível por TEXTO.
+    """
+    sem_imagens = re.sub(r"<img[^>]*>", "", em_html(_mensagem()))
+
+    assert "Help Desk" in sem_imagens
+    assert "Health &amp; Safety" in sem_imagens
+
+
+def test_o_texto_puro_nao_menciona_a_logo():
+    """A parte de texto não tem imagem e não deve falar de uma."""
+    texto = em_texto(_mensagem())
+
+    assert "cid:" not in texto
+    assert "Health & Safety" in texto
+
+
+def test_o_asset_canonico_da_logo_existe_e_e_png():
+    """O asset de e-mail vive no BACKEND, e é o canônico para mensagens.
+
+    A cópia do frontend não serve: o `COPY . .` do Dockerfile tem
+    `backend/` como contexto, então `frontend/src/assets/` não existe na
+    imagem. E o arquivo de lá sai do bundle do Vite com hash no nome, sem
+    endereço estável.
+    """
+    from app.services.email_layout import LOGO_EMAIL
+
+    assert LOGO_EMAIL.is_file(), f"asset de e-mail ausente: {LOGO_EMAIL}"
+    assert LOGO_EMAIL.read_bytes()[:8] == b"\x89PNG\r\n\x1a\n"
