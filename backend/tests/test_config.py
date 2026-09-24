@@ -29,6 +29,9 @@ _ENVS_SENSIVEIS = frozenset(
         "API4COM_TOKEN",
         "API4COM_BASE_URL",
         "API4COM_TIMEOUT_SECONDS",
+        "LGPD_REVISAO_POLITICA",
+        "LGPD_REVISAO_TERMOS",
+        "LGPD_EXIGE_REACEITE",
     }
 )
 
@@ -63,6 +66,7 @@ def _producao(**overrides) -> Settings:
         "app_env": "production",
         "cors_origins": _DOMINIO_REAL,
         "frontend_url": _DOMINIO_REAL,
+        "lgpd_revisao_politica": "00",
     }
     return _settings(**{**base, **overrides})
 
@@ -224,7 +228,12 @@ def test_production_still_rejects_short_secret_key():
     ],
 )
 def test_app_env_is_stored_normalized(digitado, esperado):
-    s = _settings(app_env=digitado, cors_origins=_DOMINIO_REAL, frontend_url=_DOMINIO_REAL)
+    s = _settings(
+        app_env=digitado,
+        cors_origins=_DOMINIO_REAL,
+        frontend_url=_DOMINIO_REAL,
+        lgpd_revisao_politica="00",
+    )
     assert s.app_env == esperado
 
 
@@ -401,7 +410,12 @@ def test_staging_correto_sobe_e_continua_nao_sendo_producao():
     staging herdaria decisões que são só de produção (o /docs desligado, o
     seed de admin que não roda).
     """
-    s = _settings(app_env="staging", cors_origins=_DOMINIO_REAL, frontend_url=_DOMINIO_REAL)
+    s = _settings(
+        app_env="staging",
+        cors_origins=_DOMINIO_REAL,
+        frontend_url=_DOMINIO_REAL,
+        lgpd_revisao_politica="00",
+    )
     assert s.is_production is False
     assert s.is_development is False
 
@@ -547,3 +561,45 @@ def test_os_segredos_antigos_continuam_como_estao():
     assert isinstance(s.smtp_password, str)
     assert isinstance(s.deepseek_api_key, str)
     assert isinstance(s.mfa_secret_encryption_key, str)
+
+
+# ── LGPD: a revisão vigente da política é obrigatória ─────────
+#
+# Cada aceite grava a revisão vigente em `lgpd_consents`. Subir produção sem
+# ela recriaria, por esquecimento de variável, o aceite que não diz qual texto
+# foi aceito — o estado que a tabela existe para acabar.
+
+
+def test_producao_sem_revisao_da_politica_nao_sobe():
+    with pytest.raises(ValueError, match="LGPD_REVISAO_POLITICA"):
+        _producao(lgpd_revisao_politica=None)
+
+
+def test_producao_com_revisao_em_branco_nao_sobe():
+    """Variável criada no painel e deixada vazia é ausência, não a revisão ""."""
+    with pytest.raises(ValueError, match="LGPD_REVISAO_POLITICA"):
+        _producao(lgpd_revisao_politica="   ")
+
+
+def test_staging_tambem_exige_a_revisao():
+    with pytest.raises(ValueError, match="LGPD_REVISAO_POLITICA"):
+        _producao(app_env="staging", lgpd_revisao_politica=None)
+
+
+def test_desenvolvimento_sobe_sem_revisao():
+    assert _settings(app_env="development").lgpd_revisao_politica is None
+
+
+def test_revisao_chega_sem_espacos():
+    s = _producao(lgpd_revisao_politica=" 01 ", lgpd_revisao_termos=" 00 ")
+    assert s.lgpd_revisao_politica == "01"
+    assert s.lgpd_revisao_termos == "00"
+
+
+def test_termos_de_uso_em_branco_viram_ausencia():
+    """Os Termos ainda não existem: vazio precisa gravar NULL, não ""."""
+    assert _producao(lgpd_revisao_termos="").lgpd_revisao_termos is None
+
+
+def test_reaceite_nasce_desligado():
+    assert _producao().lgpd_exige_reaceite is False

@@ -29,6 +29,11 @@ describe("contemMarcadorPendente", () => {
     "Encarregado (DPO): [nome do Encarregado]",
     "Contato: [e-mail do Encarregado]",
     "Endereço: [endereço completo da sede – rua, número, cidade/UF, CEP]",
+    // Os dois que sobraram na versão C4 (24/09). O segundo passava batido: a
+    // lista de palavras não tinha "país", e a página perdia o aviso de
+    // rascunho com uma lacuna ainda aberta.
+    "adequação da ANPD. [definir o mecanismo do art. 33 da LGPD adotado para esta transferência]",
+    "infraestrutura localizada em [país do data center da VPS — conferir no hPanel].",
   ])("reconhece o marcador em %s", (trecho) => {
     expect(contemMarcadorPendente(trecho)).toBe(true);
   });

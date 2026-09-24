@@ -15,7 +15,7 @@
 // começasse por uma destas palavras marcaria o documento como rascunho para
 // sempre, e um aviso que nunca sai da tela deixa de ser lido.
 const MARCADOR_PENDENTE =
-  /\[(?:validar|definir|confirmar|nome|e-mail|endereço|elaborado|aprovado)[^\]]*\](?!\()/i;
+  /\[(?:validar|definir|confirmar|conferir|nome|e-mail|endereço|país|elaborado|aprovado)[^\]]*\](?!\()/i;
 
 export function contemMarcadorPendente(texto: string): boolean {
   return MARCADOR_PENDENTE.test(texto);

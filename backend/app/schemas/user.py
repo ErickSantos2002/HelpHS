@@ -79,6 +79,17 @@ class LGPDConsentUpdate(AppBaseModel):
     lgpd_consent: bool
 
 
+class LGPDConsentStatus(AppBaseModel):
+    """O que a tela de re-aceite precisa saber sobre o aceite de quem está logado."""
+
+    revisao_politica_vigente: str | None
+    revisao_termos_vigente: str | None
+    # Do último aceite não revogado; nulas quando não há nenhum registrado.
+    revisao_politica_aceita: str | None
+    revisao_termos_aceita: str | None
+    precisa_reaceitar: bool
+
+
 class OnboardingUpdate(AppBaseModel):
     company_name: str = Field(..., min_length=1, max_length=255)
     cnpj: CnpjObrigatorio = Field(..., max_length=18)

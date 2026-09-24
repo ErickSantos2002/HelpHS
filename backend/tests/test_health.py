@@ -173,6 +173,7 @@ def test_spec_e_docs_desligados_fora_de_desenvolvimento():
         secret_key="x" * 32,
         cors_origins="https://helphs.example.com",
         frontend_url="https://helphs.example.com",
+        lgpd_revisao_politica="00",
     )
     assert prod.is_development is False
     assert prod.openapi_url_efetiva() is None
