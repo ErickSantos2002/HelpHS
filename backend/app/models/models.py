@@ -159,8 +159,17 @@ class CallCreationStatus(str, enum.Enum):
     ainda vai crescer na 2D não pode nascer com esse custo.
     """
 
-    # Linha criada antes de falar com o fornecedor. Nada saiu ainda.
+    # Linha criada antes de falar com o fornecedor. Nada saiu ainda — e é essa
+    # certeza que faz `pending` NÃO bloquear uma nova tentativa: uma linha
+    # `pending` órfã de um processo que morreu significa que nenhum telefone
+    # tocou.
     pending = "pending"
+    # A fronteira do efeito externo. Gravado imediatamente ANTES do
+    # `create_call`, e é o que tira a ambiguidade que o `pending` tinha sozinho:
+    # antes deste estado existir, uma linha órfã podia significar "nunca enviei"
+    # OU "enviei e não soube do resultado", e as duas exigiam condutas opostas.
+    # `dispatching` órfã é o caso perigoso — bloqueia nova tentativa.
+    dispatching = "dispatching"
     # HTTP 200 com `id` legível: a chamada existe do lado de lá.
     confirmed = "confirmed"
     # 4xx: o fornecedor respondeu recusando a requisição.
@@ -1383,8 +1392,8 @@ class TicketCall(Base):
         # PostgreSQL. Aqui a mesma regra vale nos dois bancos, e a suíte que
         # monta schema por `create_all` a exercita de graça.
         CheckConstraint(
-            "creation_status IN ('pending', 'confirmed', 'rejected', "
-            "'unavailable', 'indeterminate')",
+            "creation_status IN ('pending', 'dispatching', 'confirmed', "
+            "'rejected', 'unavailable', 'indeterminate')",
             name="ck_ticket_calls_status_conhecido",
         ),
         # Confirmada sem identificador seria um registro que afirma saber da
