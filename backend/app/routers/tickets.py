@@ -1262,7 +1262,7 @@ async def resolve_ticket(
         NotificationType.ticket_updated,
         "Ticket resolvido",
         f"O ticket {ticket.protocol} foi marcado como resolvido.",
-        data={"ticket_id": str(ticket.id), "new_status": "resolved"},
+        data={"ticket_id": str(ticket.id), "protocol": ticket.protocol, "new_status": "resolved"},
         settings=settings,
     )
     await notify(
@@ -1390,7 +1390,11 @@ async def reopen_ticket(
             NotificationType.ticket_updated,
             "Chamado reaberto",
             f"O ticket {ticket.protocol} foi reaberto por {actor.name}.",
-            data={"ticket_id": str(ticket.id), "new_status": new_status.value},
+            data={
+                "ticket_id": str(ticket.id),
+                "protocol": ticket.protocol,
+                "new_status": new_status.value,
+            },
             settings=settings,
         )
     if ticket.creator_id != actor.id:
@@ -1400,7 +1404,11 @@ async def reopen_ticket(
             NotificationType.ticket_updated,
             "Chamado reaberto",
             f"O ticket {ticket.protocol} foi reaberto e voltou para atendimento.",
-            data={"ticket_id": str(ticket.id), "new_status": new_status.value},
+            data={
+                "ticket_id": str(ticket.id),
+                "protocol": ticket.protocol,
+                "new_status": new_status.value,
+            },
             settings=settings,
         )
 

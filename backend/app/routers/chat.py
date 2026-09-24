@@ -941,7 +941,7 @@ async def _notify_other_party(
                 NotificationType.chat_message,
                 f"Nova mensagem no chamado {ticket.protocol}",
                 f"{sender.name}: {msg.content[:120]}",
-                data={"ticket_id": str(ticket.id)},
+                data={"ticket_id": str(ticket.id), "protocol": ticket.protocol},
             )
     else:
         # Notify requester
@@ -951,5 +951,5 @@ async def _notify_other_party(
             NotificationType.chat_message,
             f"Nova mensagem no chamado {ticket.protocol}",
             f"{sender.name}: {msg.content[:120]}",
-            data={"ticket_id": str(ticket.id)},
+            data={"ticket_id": str(ticket.id), "protocol": ticket.protocol},
         )
