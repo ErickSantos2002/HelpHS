@@ -845,6 +845,61 @@ async def test_change_password_runs_bcrypt_off_the_event_loop(patch_redis):
     assert espia_hash.rodou_fora_da_thread(thread_do_loop), "hash_password no event loop"
 
 
+@pytest.mark.asyncio
+async def test_change_password_audita_com_ip_e_navegador(patch_redis):
+    """A troca de senha pelo perfil deixa o mesmo rastro da redefinição por e-mail.
+
+    A seção 6 da Política de Privacidade (versão C4) promete que, "nos eventos
+    de autenticação e de conta — como cadastro, login, logout e troca de
+    senha —", ficam gravados o IP e o navegador. A redefinição por e-mail
+    (`auth.py`) já gravava; a troca pelo perfil gravava um `update` genérico,
+    sem nenhum dos dois.
+    """
+    from app.core.database import get_db
+    from app.core.security import get_current_user
+    from app.models.models import AuditAction, AuditLog
+
+    alvo = _user(UserRole.client)
+    gerador = _simple_db(alvo)
+    sessao = await gerador().__anext__()
+
+    async def _db():
+        yield sessao
+
+    app.dependency_overrides[get_db] = _db
+
+    async def _actor():
+        return alvo
+
+    app.dependency_overrides[get_current_user] = _actor
+
+    with (
+        patch("app.routers.users.verify_password", return_value=True),
+        patch("app.routers.users.hash_password", return_value="hash-novo"),
+    ):
+        async with AsyncClient(transport=ASGITransport(app=app), base_url="http://test") as c:
+            resp = await c.post(
+                "/api/v1/users/me/change-password",
+                json={"current_password": "Secret1234", "new_password": "NovaSenha1"},
+                headers={"User-Agent": "Navegador-de-Teste/1.0"},
+            )
+
+    assert resp.status_code == 204, resp.text
+    registros = [
+        chamada.args[0]
+        for chamada in sessao.add.call_args_list
+        if isinstance(chamada.args[0], AuditLog)
+    ]
+    assert len(registros) == 1
+    registro = registros[0]
+    assert registro.action == AuditAction.password_change
+    assert registro.user_id == alvo.id
+    assert registro.entity_id == alvo.id
+    assert registro.user_agent == "Navegador-de-Teste/1.0"
+    # O ASGITransport do httpx apresenta o cliente como 127.0.0.1.
+    assert registro.ip_address == "127.0.0.1"
+
+
 # ═══════════════════════════════════════════════════════════════
 # DELETE /users/{id} — a guarda precisa cobrir o que o banco recusa
 # ═══════════════════════════════════════════════════════════════
