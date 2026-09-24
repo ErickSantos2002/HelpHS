@@ -243,6 +243,19 @@ class User(Base):
     )
     phone: Mapped[str | None] = mapped_column(String(20))
     department: Mapped[str | None] = mapped_column(String(100))
+    # Ramal da API4COM deste usuário — o `extension`/`caller` que o `POST
+    # /calls` exige. Guardado aqui porque o fornecedor instrui o integrador a
+    # manter o vínculo do próprio lado, e porque resolver o ramal por e-mail a
+    # cada clique não funcionaria: medido em 24/09/2026, ZERO dos 16 e-mails do
+    # staff do HelpHS aparece entre os 18 ramais da conta.
+    #
+    # String, e não inteiro: o fornecedor declara o ramal como identificador
+    # textual, e ramal futuro pode não ser numérico. Mesma escolha do
+    # `provider_call_id`.
+    #
+    # Nulo é o normal, não a exceção: quem não tem ramal não liga, e não há
+    # padrão nem fallback. Ver `_guarda_de_atribuicao_de_ramal` no router.
+    api4com_extension: Mapped[str | None] = mapped_column(String(20), nullable=True)
     avatar_url: Mapped[str | None] = mapped_column(String(500))
     last_login: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
 
@@ -315,6 +328,18 @@ class User(Base):
 
     __table_args__ = (
         Index("ix_users_role_status", "role", "status"),
+        # Um ramal, um usuário. Índice NOMEADO e não `unique=True` na coluna,
+        # para o downgrade da migration remover exatamente este objeto — mesmo
+        # padrão do `uq_ticket_calls_provider_call_id` e do
+        # `uq_equipments_product_serial`. No PostgreSQL vários NULL convivem
+        # sob UNIQUE, que é exatamente o desejado: dezesseis pessoas sem ramal
+        # não colidem entre si.
+        #
+        # A unicidade não é capricho de modelagem: o ramal é identidade SIP.
+        # Dois usuários sob o mesmo ramal produzem ligações indistinguíveis na
+        # origem, e quando os webhooks entrarem (2D) não haverá como atribuir a
+        # chamada a uma pessoa — a trilha de auditoria quebra em silêncio.
+        Index("uq_users_api4com_extension", "api4com_extension", unique=True),
         # Segundo fator ligado sem segredo é uma conta trancada: o login exigiria
         # um código que não há como conferir. O banco recusa esse estado em vez
         # de confiar que todo caminho de escrita futuro se lembre da regra.

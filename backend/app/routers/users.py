@@ -164,6 +164,65 @@ def _guarda_de_atribuicao_de_papel(*, ator: User, papel_atribuido: UserRole | No
     raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail=_ERRO_PAPEL)
 
 
+_ERRO_RAMAL = "Apenas administradores podem configurar o ramal da telefonia."
+_ERRO_RAMAL_DE_CLIENTE = "Cliente não tem ramal de telefonia."
+_ERRO_RAMAL_OCUPADO = "Este ramal já está vinculado a outro usuário."
+
+
+def _guarda_de_atribuicao_de_ramal(*, ator: User, ramal_enviado: bool) -> None:
+    """Ramal é provisionamento administrativo, não configuração de perfil.
+
+    Nem o próprio técnico mexe no seu: quem pudesse escolher o próprio ramal
+    poderia reivindicar o de outra pessoa, e passaria a originar ligações com a
+    identidade dela. É a mesma família de problema que
+    `_guarda_de_atribuicao_de_papel` fecha, e por isso tem a mesma forma.
+
+    ⚠️ O sinal aqui é **se o campo veio**, não o valor — ao contrário do papel.
+    `api4com_extension = null` é uma operação legítima e significativa: é assim
+    que o admin REMOVE um vínculo. Olhar o valor confundiria remover com não
+    pedir nada, e um não-admin conseguiria apagar o ramal alheio mandando nulo.
+    """
+    if not ramal_enviado or ator.role == UserRole.admin:
+        return
+    raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail=_ERRO_RAMAL)
+
+
+def _guarda_de_ramal_do_cliente(*, papel_final: UserRole, ramal_final: str | None) -> None:
+    """Cliente não origina ligação, logo não tem ramal.
+
+    A regra olha o ESTADO RESULTANTE, e não o campo enviado — mesma escolha do
+    `_guarda_telefone_do_cliente`. Isso cobre os dois caminhos com uma frase
+    só: dar ramal a quem é cliente, e rebaixar a cliente quem tem ramal. O
+    segundo passaria despercebido por uma guarda que só olhasse o campo.
+    """
+    if ramal_final is not None and papel_final == UserRole.client:
+        raise HTTPException(
+            status_code=status.HTTP_422_UNPROCESSABLE_CONTENT,
+            detail=_ERRO_RAMAL_DE_CLIENTE,
+        )
+
+
+async def _guarda_de_ramal_unico(db: AsyncSession, ramal: str, usuario_id: uuid.UUID) -> None:
+    """Consulta antes de gravar, como o e-mail duplicado do `create_user`.
+
+    O índice único é a invariante; esta consulta existe para o conflito virar
+    409 com texto de domínio em vez de `IntegrityError` virando 500.
+
+    Exclui o próprio usuário: regravar o mesmo ramal em quem já o tem é
+    idempotente, não conflito.
+
+    ⚠️ Resta a corrida entre a consulta e o INSERT — dois admins gravando o
+    mesmo ramal no mesmo instante. O índice recusa o segundo de qualquer jeito;
+    o que se perde é a mensagem boa. É a mesma janela que o cadastro por e-mail
+    tem desde sempre, e o backend sobe com UM worker.
+    """
+    result = await db.execute(
+        select(User).where(User.api4com_extension == ramal, User.id != usuario_id)
+    )
+    if result.scalar_one_or_none():
+        raise HTTPException(status_code=status.HTTP_409_CONFLICT, detail=_ERRO_RAMAL_OCUPADO)
+
+
 # ── POST /users ───────────────────────────────────────────────
 
 
@@ -363,7 +422,11 @@ async def update_me(
     if not user:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Usuário não encontrado.")
 
-    update_data = body.model_dump(exclude_unset=True, exclude={"role"})
+    # `role` e `api4com_extension` saem aqui pelo mesmo motivo: o próprio
+    # perfil não promove ninguém nem se dá um ramal. Ver
+    # `tests/test_escalacao_por_users_me.py`, que trata este `exclude` como a
+    # defesa de uma palavra só que ele é.
+    update_data = body.model_dump(exclude_unset=True, exclude={"role", "api4com_extension"})
     # Aqui nem papel nem situação mudam (o `role` sai no `exclude`, e `status`
     # não existe neste schema): só a remoção (P1) pode acontecer.
     if "phone" in update_data:
@@ -521,6 +584,11 @@ async def update_user(
             detail="Você não tem permissão para acessar este item.",
         )
     _guarda_de_atribuicao_de_papel(ator=current_user, papel_atribuido=body.role)
+    # `model_fields_set` e não o valor: nulo aqui é remover, não "não pediu".
+    _guarda_de_atribuicao_de_ramal(
+        ator=current_user,
+        ramal_enviado="api4com_extension" in body.model_fields_set,
+    )
 
     result = await db.execute(select(User).where(User.id == user_id))
     user = result.scalar_one_or_none()
@@ -540,6 +608,13 @@ async def update_user(
             telefone_anterior=user.phone,
             mudou_papel_ou_situacao=papel_final != user.role,
         )
+
+    mudou_o_ramal = "api4com_extension" in update_data
+    if mudou_o_ramal or papel_final != user.role:
+        ramal_final = update_data["api4com_extension"] if mudou_o_ramal else user.api4com_extension
+        _guarda_de_ramal_do_cliente(papel_final=papel_final, ramal_final=ramal_final)
+    if mudou_o_ramal and update_data["api4com_extension"] is not None:
+        await _guarda_de_ramal_unico(db, update_data["api4com_extension"], user.id)
 
     for field, value in update_data.items():
         setattr(user, field, value)

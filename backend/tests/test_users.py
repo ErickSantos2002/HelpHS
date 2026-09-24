@@ -67,6 +67,10 @@ def _user(role=UserRole.admin, uid=None, status=UserStatus.active):
     u.company_city = None
     u.company_state = None
     u.onboarding_completed = True
+    # Campo novo do `UserResponse` (Fase 2C.1a). Sem valor explícito o
+    # MagicMock devolve um objeto e o `model_validate` recusa — mesma
+    # armadilha que os campos de empresa acima já registram.
+    u.api4com_extension = None
     u.ai_enabled = True
     from datetime import datetime
 
