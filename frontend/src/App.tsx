@@ -8,6 +8,7 @@ import { RoleGuard } from "./components/layout/RoleGuard";
 import { PublicOnlyRoute } from "./components/layout/PublicOnlyRoute";
 import { OnboardingGuard } from "./components/layout/OnboardingGuard";
 import { OnboardingOnlyRoute } from "./components/layout/OnboardingOnlyRoute";
+import { ReaceiteGuard } from "./components/layout/ReaceiteGuard";
 import { Spinner } from "./components/ui";
 
 // Pages (lazy-loaded for code splitting)
@@ -112,6 +113,9 @@ function App() {
             </Route>
 
             <Route element={<OnboardingGuard />}>
+              {/* Novo aceite da Política de Privacidade, quando o backend
+                  cobrar (só cliente, só com LGPD_EXIGE_REACEITE ligado). */}
+              <Route element={<ReaceiteGuard />}>
               <Route element={<AppLayout />}>
                 {/* All authenticated roles */}
                 <Route path="/" element={<HomePage />} />
@@ -152,6 +156,7 @@ function App() {
                   <Route path="/sla-config" element={<SlaConfigPage />} />
                   <Route path="/audit-logs" element={<AuditLogsPage />} />
                 </Route>
+              </Route>
               </Route>
             </Route>
           </Route>
