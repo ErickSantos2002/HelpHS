@@ -54,7 +54,7 @@ Falha de envio é registrada e ignorada — nunca desfaz a transação.
 
 import asyncio
 import uuid
-from collections.abc import Sequence
+from collections.abc import Iterable, Sequence
 from dataclasses import dataclass
 from typing import Any
 from weakref import WeakKeyDictionary
@@ -99,6 +99,27 @@ _IN_APP_ONLY = frozenset({NotificationType.satisfaction_survey})
 # senha saem por `services/account_emails.py`, que não passa por aqui.
 _SEM_EMAIL_POR_PAPEL = frozenset({UserRole.admin, UserRole.technician})
 
+# Tipos em que o filtro por PAPEL não se aplica: staff recebe e-mail APESAR de
+# ser staff.
+#
+# `ticket_created` entrou em 24/09/2026. Chamado novo é o único evento em que a
+# equipe precisa ser alcançada FORA do sistema: é ele que dispara o atendimento,
+# e esperar alguém olhar o sininho é justamente o atraso que esta frente existe
+# para cortar.
+#
+# Isto NÃO enfraquece a decisão de 04/09: o `_SEM_EMAIL_POR_PAPEL` acima segue
+# valendo para todos os outros tipos. Atribuição e reabertura continuam sem
+# e-mail para staff, como a equipe pediu — o ruído que motivou aquele pedido era
+# desses eventos, que acontecem muitas vezes no mesmo chamado. Chamado novo
+# acontece uma vez.
+#
+# É o espelho do `_IN_APP_ONLY`: um conjunto de tipos que SILENCIA o e-mail,
+# outro que o DESTRAVA. Mesma forma, mesmo arquivo, mesmo idioma.
+#
+# Na Fase 2, o aviso de SLA próximo do vencimento entra aqui — é acrescentar um
+# membro, não espalhar condição por router.
+_EMAIL_PARA_STAFF = frozenset({NotificationType.ticket_created})
+
 # Os papéis que formam a OPERAÇÃO: quem atende chamado.
 #
 # `frozenset` próprio, e NÃO o `_SEM_EMAIL_POR_PAPEL` acima — que hoje tem
@@ -107,6 +128,27 @@ _SEM_EMAIL_POR_PAPEL = frozenset({UserRole.admin, UserRole.technician})
 # faria a Fase 2, ao mexer num, mudar o outro em silêncio — e o sintoma seria
 # alguém sumir da audiência por causa de uma decisão sobre e-mail.
 _PAPEIS_OPERACIONAIS = frozenset({UserRole.admin, UserRole.technician})
+
+
+def _pode_mandar_email(notif_type: NotificationType, papel: UserRole) -> bool:
+    """O filtro por PAPEL, com a lista de exceções por TIPO.
+
+    Uma função com nome em vez de uma condição composta na linha do envio: a
+    regra tem duas metades que se leem ao contrário uma da outra, e escrita
+    inline ela virava `papel not in A or tipo in B`, que ninguém confere de
+    relance.
+
+    O `return True` antecipado é a garantia do CLIENTE: ele nunca é filtrado,
+    em nenhum tipo. Não é economia de linha — é o que impede que uma decisão
+    sobre ruído interno silencie quem está do lado de fora.
+
+    NÃO decide sobre `_IN_APP_ONLY`: aquele filtro vale para todo mundo e é
+    resolvido antes, no `notify`. Acrescentar um tipo a `_EMAIL_PARA_STAFF` não
+    fura o `_IN_APP_ONLY`.
+    """
+    if papel not in _SEM_EMAIL_POR_PAPEL:
+        return True
+    return notif_type in _EMAIL_PARA_STAFF
 
 
 async def audiencia_operacional(db: AsyncSession) -> Sequence[User]:
@@ -121,7 +163,7 @@ async def audiencia_operacional(db: AsyncSession) -> Sequence[User]:
     `anonymized`, que é conta apagada pela LGPD. O e-mail dela não é mais de
     ninguém, e a comparação por desigualdade a deixaria entrar.
 
-    Sem `ORDER BY` de propósito: a ordem não muda nada — cada notificação tem id
+    Sem `ORDER BY` de propósito: a ordem não muda nada: cada notificação tem id
     e carimbo próprios, e ordenar custaria uma varredura a cada chamado aberto.
 
     O filtro é uma cláusula `WHERE`, então quem o prova é
@@ -159,7 +201,7 @@ _EM_VOO: set[asyncio.Task] = set()
 
 
 def _assunto_do_email(title: str, data: dict[str, Any] | None) -> str:
-    """`[HelpHS] Chamado resolvido · HS-2026-0042`.
+    """`[HelpHS] Chamado resolvido — HS-2026-0042`.
 
     O assunto era o título cru da notificação, e na lista da caixa isso é
     ilegível: cinco chamados abertos rendiam cinco "Ticket resolvido" idênticos,
@@ -168,9 +210,17 @@ def _assunto_do_email(title: str, data: dict[str, Any] | None) -> str:
     nada.
 
     Não mexe no `title`: o sininho continua mostrando o texto cru.
+
+    O separador é TRAVESSÃO desde 24/09/2026. Era ponto médio: ele some em fonte
+    estreita de lista de caixa de entrada, e o travessão é o que o produto já usa
+    para separar protocolo de título.
+
+    É o FALLBACK: quem tem um assunto melhor a dizer passa `email_subject` ao
+    `notify`. O chamado novo faz isso — ali o assunto carrega protocolo E título
+    do chamado, que não caberiam no título do sininho.
     """
     protocolo = (data or {}).get("protocol")
-    return f"[HelpHS] {title} · {protocolo}" if protocolo else f"[HelpHS] {title}"
+    return f"[HelpHS] {title} — {protocolo}" if protocolo else f"[HelpHS] {title}"
 
 
 def _mensagem_do_email(
@@ -216,22 +266,15 @@ def _link_do_chamado(ticket_id: Any, settings: Settings) -> str | None:
     return f"{settings.frontend_url.rstrip('/')}/tickets/{ticket_id}"
 
 
-async def notify(
+def _grava_notificacao(
     db: AsyncSession,
     user_id: uuid.UUID,
     notif_type: NotificationType,
     title: str,
     message: str,
-    data: dict[str, Any] | None = None,
-    settings: Settings | None = None,
-) -> None:
-    """
-    Cria a notificação in-app e REGISTRA o e-mail como pendência da sessão.
-
-    Não commita e não envia nada: o commit é do chamador, para que a
-    notificação seja atômica com a operação que a provocou, e o envio só
-    acontece no ``commit_e_notificar``.
-    """
+    data: dict[str, Any] | None,
+) -> Notification:
+    """A linha do sininho, adicionada à sessão. Não commita."""
     notif = Notification(
         id=uuid.uuid4(),
         user_id=user_id,
@@ -243,6 +286,76 @@ async def notify(
         email_sent=False,
     )
     db.add(notif)
+    return notif
+
+
+def _registra_email(
+    db: AsyncSession,
+    notif: Notification,
+    *,
+    to_email: str | None,
+    papel: UserRole,
+    nome: str | None,
+    notif_type: NotificationType,
+    title: str,
+    message: str,
+    data: dict[str, Any] | None,
+    settings: Settings | None,
+    email_subject: str | None,
+) -> None:
+    """Registra o e-mail como pendência da SESSÃO. Não envia.
+
+    Extraído em 24/09/2026 para que o envio individual e o em lote tomem a MESMA
+    decisão. Eram para ser duas cópias da mesma condição — e duas cópias de
+    "quem recebe e-mail" é exatamente o tipo de coisa que divergiu no `_IN_APP_ONLY`
+    contra o filtro por papel antes de existir `_pode_mandar_email`.
+    """
+    if settings is None or notif_type in _IN_APP_ONLY:
+        return  # no email without settings
+    if not to_email or not _pode_mandar_email(notif_type, papel):
+        return
+
+    conteudo = _mensagem_do_email(title, message, data, nome, settings)
+    _PENDENTES.setdefault(db, []).append(
+        _EmailPendente(
+            notif_id=notif.id,
+            to_email=to_email,
+            subject=email_subject or _assunto_do_email(title, data),
+            body=em_texto(conteudo),
+            html=em_html(conteudo),
+            settings=settings,
+        )
+    )
+
+
+async def notify(
+    db: AsyncSession,
+    user_id: uuid.UUID,
+    notif_type: NotificationType,
+    title: str,
+    message: str,
+    data: dict[str, Any] | None = None,
+    settings: Settings | None = None,
+    email_subject: str | None = None,
+) -> None:
+    """
+    Cria a notificação in-app e REGISTRA o e-mail como pendência da sessão.
+
+    Não commita e não envia nada: o commit é do chamador, para que a
+    notificação seja atômica com a operação que a provocou, e o envio só
+    acontece no ``commit_e_notificar``.
+
+    ``email_subject`` separa o assunto do e-mail do título do sininho. Nasce
+    `None` e cai no `_assunto_do_email`, então as catorze chamadas que existiam
+    antes dele continuam valendo sem mudar uma linha. Existe porque as duas
+    coisas passaram a querer textos diferentes: o sininho já mostra o tipo num
+    selo próprio e tem largura de dropdown, enquanto o assunto precisa dizer
+    protocolo e título para ser reconhecível numa lista de caixa de entrada.
+
+    Para vários destinatários use ``notifica_audiencia``: um laço de ``notify``
+    aqui faz um SELECT por pessoa.
+    """
+    notif = _grava_notificacao(db, user_id, notif_type, title, message, data)
 
     if settings is None or notif_type in _IN_APP_ONLY:
         return  # no email without settings
@@ -259,19 +372,78 @@ async def notify(
         return
 
     email_addr, papel, nome = destinatario
+    _registra_email(
+        db,
+        notif,
+        to_email=email_addr,
+        papel=papel,
+        nome=nome,
+        notif_type=notif_type,
+        title=title,
+        message=message,
+        data=data,
+        settings=settings,
+        email_subject=email_subject,
+    )
 
-    if email_addr and papel not in _SEM_EMAIL_POR_PAPEL:
-        conteudo = _mensagem_do_email(title, message, data, nome, settings)
-        _PENDENTES.setdefault(db, []).append(
-            _EmailPendente(
-                notif_id=notif.id,
-                to_email=email_addr,
-                subject=_assunto_do_email(title, data),
-                body=em_texto(conteudo),
-                html=em_html(conteudo),
-                settings=settings,
-            )
+
+async def notifica_audiencia(
+    db: AsyncSession,
+    destinatarios: Iterable[User],
+    notif_type: NotificationType,
+    title: str,
+    message: str,
+    data: dict[str, Any] | None = None,
+    settings: Settings | None = None,
+    email_subject: str | None = None,
+    exclude_user_ids: set[uuid.UUID] | None = None,
+) -> list[uuid.UUID]:
+    """O mesmo evento para VÁRIAS pessoas. Devolve os `user_id` de fato avisados.
+
+    Recebe destinatários JÁ CARREGADOS — é o que ``audiencia_operacional``
+    devolve. Por isso não vai ao banco **nenhuma vez**: o `notify()` individual
+    faz um SELECT por destinatário, e um laço dele faria N. Com quinze técnicos,
+    quinze consultas por chamado aberto. Aqui é zero, não uma.
+
+    ``exclude_user_ids`` é EXPLÍCITO, e não "quem já foi notificado antes". A
+    diferença importa: o `create_ticket` avisa o autor e depois a equipe, e se a
+    exclusão dependesse da ordem das duas chamadas, invertê-las produziria duas
+    notificações para o autor-staff sem nada avisando. Passando o conjunto, a
+    ordem deixa de ser parte da regra.
+
+    A dedup por `user_id` é interna e independente disso: a mesma pessoa
+    chegando duas vezes na lista recebe uma notificação. Hoje a audiência não
+    repete — a consulta é por chave primária —, mas quem compuser duas listas um
+    dia não deveria precisar saber disso.
+
+    Não commita: quem consolida é ``commit_e_notificar``, como no `notify`.
+    """
+    excluidos: set[uuid.UUID] = exclude_user_ids or set()
+    vistos: set[uuid.UUID] = set()
+    avisados: list[uuid.UUID] = []
+
+    for pessoa in destinatarios:
+        if pessoa.id in excluidos or pessoa.id in vistos:
+            continue
+        vistos.add(pessoa.id)
+
+        notif = _grava_notificacao(db, pessoa.id, notif_type, title, message, data)
+        _registra_email(
+            db,
+            notif,
+            to_email=pessoa.email,
+            papel=pessoa.role,
+            nome=pessoa.name,
+            notif_type=notif_type,
+            title=title,
+            message=message,
+            data=data,
+            settings=settings,
+            email_subject=email_subject,
         )
+        avisados.append(pessoa.id)
+
+    return avisados
 
 
 async def commit_e_notificar(db: AsyncSession) -> None:

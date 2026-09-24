@@ -1046,3 +1046,372 @@ async def test_o_sininho_nao_muda():
     gravada = db.add.call_args.args[0]
     assert gravada.title == "Chamado resolvido"
     assert gravada.message == "O chamado HS-2026-0042 foi marcado como resolvido."
+
+
+# ═══════════════════════════════════════════════════════════════
+# O FILTRO POR PAPEL, E A EXCEÇÃO POR TIPO
+# ═══════════════════════════════════════════════════════════════
+#
+# Dois filtros independentes decidem se sai e-mail:
+#
+#   _IN_APP_ONLY          — por TIPO, vale para todo mundo
+#   _SEM_EMAIL_POR_PAPEL  — por PAPEL, com exceções em _EMAIL_PARA_STAFF
+#
+# Estes testes batem direto na função de decisão, sem passar por sessão nem
+# por endpoint: é regra de negócio pura, e um teste que precisasse de mock
+# aqui estaria medindo o mock.
+
+
+@pytest.mark.parametrize(
+    "papel",
+    [UserRole.client, UserRole.technician, UserRole.admin],
+)
+def test_chamado_novo_manda_email_para_todos_os_papeis(papel):
+    """A exceção da Fase 1: staff volta a receber e-mail — SÓ de chamado novo."""
+    from app.services.notifications import _pode_mandar_email
+
+    assert _pode_mandar_email(NotificationType.ticket_created, papel) is True
+
+
+@pytest.mark.parametrize("papel", [UserRole.technician, UserRole.admin])
+@pytest.mark.parametrize(
+    "tipo",
+    [
+        NotificationType.ticket_assigned,
+        # A REABERTURA usa `ticket_updated`, e não um tipo próprio — o enum
+        # agrega mais de um evento de domínio. Ver a dívida registrada em
+        # docs/decisoes-e-regras.md.
+        NotificationType.ticket_updated,
+    ],
+)
+def test_staff_nao_recebe_email_dos_outros_tipos(tipo, papel):
+    """A decisão de 04/09/2026 continua valendo fora do chamado novo."""
+    from app.services.notifications import _pode_mandar_email
+
+    assert _pode_mandar_email(tipo, papel) is False
+
+
+@pytest.mark.parametrize(
+    "tipo",
+    [NotificationType.ticket_assigned, NotificationType.ticket_updated],
+)
+def test_cliente_recebe_email_de_tudo(tipo):
+    """A CONTRAPROVA, e ela é o teste mais importante deste bloco.
+
+    Sem ela, alargar o filtro por papel para incluir `client` — ou trocar a
+    saída antecipada por um `return False` — silenciaria o cliente e nenhum
+    outro teste reclamaria. O cliente é justamente quem não vive aqui dentro:
+    para ele o e-mail é como fica sabendo que o chamado andou.
+    """
+    from app.services.notifications import _pode_mandar_email
+
+    assert _pode_mandar_email(tipo, UserRole.client) is True
+
+
+def test_a_pesquisa_de_satisfacao_nao_passa_pelo_filtro_de_papel():
+    """`_IN_APP_ONLY` é decidido ANTES, no notify — nem o cliente recebe.
+
+    Este teste existe para que a exceção por papel não seja confundida com um
+    passe livre: acrescentar `satisfaction_survey` a `_EMAIL_PARA_STAFF` não
+    faria e-mail de CSAT sair, porque o outro filtro já barrou.
+    """
+    from app.services.notifications import _IN_APP_ONLY
+
+    assert NotificationType.satisfaction_survey in _IN_APP_ONLY
+
+
+# ═══════════════════════════════════════════════════════════════
+# NOTIFICAÇÃO EM LOTE — DEDUPLICAÇÃO E AUSÊNCIA DE N+1
+# ═══════════════════════════════════════════════════════════════
+
+
+def _pessoa(papel=UserRole.technician, nome="Tecnico", email=None, pid=None):
+    """Destinatário já CARREGADO — é o que a audiência devolve."""
+    u = MagicMock()
+    u.id = pid or uuid.uuid4()
+    u.email = email or f"{uuid.uuid4().hex[:6]}@test.com"
+    u.name = nome
+    u.role = papel
+    u.status = UserStatus.active
+    return u
+
+
+def _db_de_lote():
+    """Sessão que LEVANTA em `execute`: ida ao banco aqui é defeito de desenho."""
+    sessao = AsyncMock()
+    sessao.add = MagicMock()
+    sessao.commit = AsyncMock()
+    sessao.execute = AsyncMock(
+        side_effect=AssertionError("o lote não deve consultar o banco por destinatário")
+    )
+    return sessao
+
+
+@pytest.mark.asyncio
+async def test_o_lote_cria_uma_notificacao_por_pessoa():
+    from app.services import notifications
+
+    db = _db_de_lote()
+    equipe = [_pessoa(), _pessoa(UserRole.admin), _pessoa()]
+
+    await notifications.notifica_audiencia(
+        db, equipe, NotificationType.ticket_created, "Novo chamado", "corpo"
+    )
+
+    gravados = [c.args[0] for c in db.add.call_args_list]
+    assert {n.user_id for n in gravados} == {p.id for p in equipe}
+    assert len(gravados) == 3
+
+
+@pytest.mark.asyncio
+async def test_lista_com_repetido_gera_uma_notificacao_so():
+    """Dedup por `user_id`, não importa de onde a repetição veio."""
+    from app.services import notifications
+
+    db = _db_de_lote()
+    alguem = _pessoa()
+    # O MESMO id chegando três vezes: dois objetos distintos e um repetido.
+    equipe = [alguem, _pessoa(pid=alguem.id), alguem]
+
+    avisados = await notifications.notifica_audiencia(
+        db, equipe, NotificationType.ticket_created, "Novo chamado", "corpo"
+    )
+
+    assert len(db.add.call_args_list) == 1
+    assert avisados == [alguem.id]
+
+
+@pytest.mark.asyncio
+async def test_exclude_user_ids_tira_a_pessoa_do_lote():
+    from app.services import notifications
+
+    db = _db_de_lote()
+    autor = _pessoa(UserRole.technician, "Autor")
+    colega = _pessoa(UserRole.admin, "Colega")
+
+    avisados = await notifications.notifica_audiencia(
+        db,
+        [autor, colega],
+        NotificationType.ticket_created,
+        "Novo chamado",
+        "corpo",
+        exclude_user_ids={autor.id},
+    )
+
+    assert avisados == [colega.id]
+    gravados = [c.args[0] for c in db.add.call_args_list]
+    assert [n.user_id for n in gravados] == [colega.id]
+
+
+@pytest.mark.asyncio
+async def test_a_dedup_nao_depende_da_ordem_das_chamadas():
+    """A exclusão é EXPLÍCITA, não efeito colateral da sequência.
+
+    Se a dedup dependesse de "quem foi notificado primeiro", inverter a ordem
+    das duas chamadas no `create_ticket` produziria duas notificações para o
+    autor-staff e nada avisaria. Aqui a mesma exclusão dá o mesmo resultado com
+    a audiência em qualquer ordem.
+    """
+    from app.services import notifications
+
+    autor = _pessoa(UserRole.technician, "Autor")
+    colega = _pessoa(UserRole.admin, "Colega")
+
+    avisados_a = await notifications.notifica_audiencia(
+        _db_de_lote(),
+        [autor, colega],
+        NotificationType.ticket_created,
+        "Novo chamado",
+        "corpo",
+        exclude_user_ids={autor.id},
+    )
+    avisados_b = await notifications.notifica_audiencia(
+        _db_de_lote(),
+        [colega, autor],
+        NotificationType.ticket_created,
+        "Novo chamado",
+        "corpo",
+        exclude_user_ids={autor.id},
+    )
+
+    assert avisados_a == avisados_b == [colega.id]
+
+
+@pytest.mark.asyncio
+async def test_o_lote_nao_consulta_o_banco_nenhuma_vez():
+    """A prova de que não há N+1 de e-mail.
+
+    O `notify()` individual faz um SELECT do destinatário. Um laço de `notify`
+    por pessoa faria N — com 15 técnicos, 15 consultas por chamado aberto. O
+    lote recebe os destinatários JÁ CARREGADOS pela audiência: não é uma
+    consulta em vez de N, é ZERO.
+
+    A sessão deste teste LEVANTA em `execute`, então a afirmação não depende de
+    contar chamadas: qualquer ida ao banco derruba o teste.
+    """
+    from app.core.config import get_settings
+    from app.services import notifications
+
+    db = _db_de_lote()
+    equipe = [_pessoa() for _ in range(15)]
+
+    with patch.object(notifications, "send_email", new=AsyncMock(return_value=True)):
+        await notifications.notifica_audiencia(
+            db,
+            equipe,
+            NotificationType.ticket_created,
+            "Novo chamado",
+            "corpo",
+            data={"ticket_id": str(uuid.uuid4()), "protocol": "HS-2026-0042"},
+            settings=get_settings(),
+        )
+
+    db.execute.assert_not_called()
+    assert len(db.add.call_args_list) == 15
+
+
+@pytest.mark.asyncio
+async def test_o_lote_manda_um_email_por_pessoa_e_so_depois_do_commit():
+    from app.core.config import get_settings
+    from app.services import notifications
+
+    db = _db_de_lote()
+    equipe = [_pessoa(email="a@test.com"), _pessoa(UserRole.admin, email="b@test.com")]
+
+    with patch.object(notifications, "send_email", new=AsyncMock(return_value=True)) as enviar:
+        await notifications.notifica_audiencia(
+            db,
+            equipe,
+            NotificationType.ticket_created,
+            "Novo chamado",
+            "corpo",
+            data={"ticket_id": str(uuid.uuid4()), "protocol": "HS-2026-0042"},
+            settings=get_settings(),
+        )
+        enviar.assert_not_awaited()  # nada sai antes do commit
+        await notifications.commit_e_notificar(db)
+        await _deixar_as_tarefas_rodarem()
+
+    destinos = {c.args[0] for c in enviar.await_args_list}
+    assert destinos == {"a@test.com", "b@test.com"}
+    assert enviar.await_count == 2
+
+
+# ═══════════════════════════════════════════════════════════════
+# O ASSUNTO DO E-MAIL É SEPARADO DO TÍTULO DO SININHO
+# ═══════════════════════════════════════════════════════════════
+
+
+@pytest.mark.asyncio
+async def test_email_subject_explicito_vence_o_titulo():
+    """O sininho diz "Novo chamado"; o e-mail diz protocolo e título."""
+    from app.core.config import get_settings
+    from app.services import notifications
+
+    db = _db_para_notify("cliente@test.com")
+
+    with patch.object(notifications, "send_email", new=AsyncMock(return_value=True)) as enviar:
+        await notifications.notify(
+            db,
+            _USER_ID,
+            NotificationType.ticket_created,
+            "Novo chamado",
+            "HS-2026-0042 — Impressora sem conexao",
+            data={"ticket_id": str(uuid.uuid4()), "protocol": "HS-2026-0042"},
+            settings=get_settings(),
+            email_subject="[HelpHS] Novo chamado HS-2026-0042 — Impressora sem conexao",
+        )
+        await notifications.commit_e_notificar(db)
+        await _deixar_as_tarefas_rodarem()
+
+    _, assunto, _ = _pega_email(enviar)
+    assert assunto == "[HelpHS] Novo chamado HS-2026-0042 — Impressora sem conexao"
+
+    # E o sininho NÃO recebeu o assunto.
+    gravada = db.add.call_args.args[0]
+    assert gravada.title == "Novo chamado"
+
+
+@pytest.mark.asyncio
+async def test_sem_email_subject_o_fallback_e_o_de_sempre():
+    """Compatibilidade: as catorze chamadas existentes não passam o parâmetro."""
+    from app.core.config import get_settings
+    from app.services import notifications
+
+    db = _db_para_notify("cliente@test.com")
+
+    with patch.object(notifications, "send_email", new=AsyncMock(return_value=True)) as enviar:
+        await notifications.notify(
+            db,
+            _USER_ID,
+            NotificationType.ticket_updated,
+            "Chamado resolvido",
+            "corpo",
+            data={"ticket_id": str(uuid.uuid4()), "protocol": "HS-2026-0042"},
+            settings=get_settings(),
+        )
+        await notifications.commit_e_notificar(db)
+        await _deixar_as_tarefas_rodarem()
+
+    _, assunto, _ = _pega_email(enviar)
+    assert assunto == "[HelpHS] Chamado resolvido — HS-2026-0042"
+
+
+def test_o_separador_do_assunto_e_travessao():
+    """`—`, não `·`. Decidido em 24/09/2026.
+
+    O ponto médio some em fonte estreita de lista de caixa de entrada, e o
+    travessão é o que o produto já usa para separar protocolo de título.
+    """
+    from app.services.notifications import _assunto_do_email
+
+    assunto = _assunto_do_email("Chamado atribuido", {"protocol": "HS-2026-0042"})
+    assert assunto == "[HelpHS] Chamado atribuido — HS-2026-0042"
+    assert "·" not in assunto
+
+
+@pytest.mark.asyncio
+async def test_o_lote_tambem_nao_sobrevive_a_commit_que_falha():
+    """O laço de protocolo do `create_ticket` agora notifica a EQUIPE também.
+
+    O teste irmão (`test_cinco_tentativas_de_protocolo_mandam_um_email_so`)
+    prova isso para o aviso do autor. Sem este, o mesmo defeito voltaria pelo
+    lado novo: cinco tentativas descartadas × N técnicos anunciando protocolos
+    que não passaram a existir — e com quinze técnicos seriam setenta e cinco
+    e-mails de um chamado que não existe.
+    """
+    from sqlalchemy.exc import IntegrityError
+
+    from app.core.config import Settings
+    from app.services import notifications
+    from app.utils.protocol import MAX_RETRIES
+
+    settings = Settings(database_url="postgresql+asyncpg://u:p@localhost/db")
+    db = _db_de_lote()
+    equipe = [_pessoa(email="a@test.com"), _pessoa(UserRole.admin, email="b@test.com")]
+
+    falhas = [IntegrityError("insert", {}, Exception("protocolo repetido"))] * (MAX_RETRIES - 1)
+    db.commit = AsyncMock(side_effect=[*falhas, None])
+    db.rollback = AsyncMock()
+
+    with patch.object(notifications, "send_email", new=AsyncMock(return_value=True)) as enviar:
+        for tentativa in range(MAX_RETRIES):
+            await notifications.notifica_audiencia(
+                db,
+                equipe,
+                NotificationType.ticket_created,
+                "Novo chamado",
+                f"HS-2026-000{tentativa} — Impressora",
+                settings=settings,
+            )
+            try:
+                await notifications.commit_e_notificar(db)
+                break
+            except IntegrityError:
+                await db.rollback()
+        await _deixar_as_tarefas_rodarem()
+
+    # Dois destinatários, UMA tentativa que valeu: dois e-mails, não dez.
+    assert enviar.await_count == 2, "as tentativas descartadas mandaram e-mail"
+    corpos = {c.args[2] for c in enviar.await_args_list}
+    assert all(f"HS-2026-000{MAX_RETRIES - 1}" in corpo for corpo in corpos)
