@@ -429,6 +429,17 @@ export default function LoginPage() {
                 ? "Perdeu o acesso ao aplicativo? Contate o administrador."
                 : "Problemas para acessar? Contate o administrador."}
             </p>
+            {/* Nova aba: o e-mail já digitado não se perde. */}
+            <p className="text-xs">
+              <Link
+                to="/privacidade"
+                target="_blank"
+                rel="noopener noreferrer"
+                className="text-conteudo-link hover:underline"
+              >
+                Política de Privacidade
+              </Link>
+            </p>
           </div>
         </div>
       </div>

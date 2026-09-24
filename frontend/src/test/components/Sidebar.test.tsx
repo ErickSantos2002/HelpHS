@@ -219,7 +219,10 @@ describe("Sidebar — os treze desenhos vêm do pacote", () => {
   it("desenha um ícone por item, todos do conjunto publicado", () => {
     const { container } = montar({ papel: "admin" });
     const desenhos = [...container.querySelectorAll("nav svg")];
-    expect(desenhos.length).toBe(screen.getAllByRole("link").length);
+    // Conta os links do `nav`, não da barra: o rodapé tem o link da política,
+    // que não é destino de menu e não leva ícone.
+    const nav = screen.getByRole("navigation", { name: "Navegação principal" });
+    expect(desenhos.length).toBe(within(nav).getAllByRole("link").length);
 
     // `Set<string>` explícito: o mapa do pacote é `as const`, e sem a anotação
     // o `has()` só aceitaria os 68 literais — o que é o contrário do que o
@@ -292,4 +295,25 @@ describe("Sidebar — as cores, medidas nos tokens", () => {
     expect(contraste("--surface", "--color-slate-600", "escuro")).toBeLessThan(AA);
     expect(FONTE).not.toMatch(/text-conteudo-faint/);
   });
+});
+
+/**
+ * A seção 20 da Política de Privacidade promete que o texto vigente fica
+ * "acessível pelos links apresentados na tela de cadastro e no rodapé do
+ * sistema". Até 24/09 só o cadastro tinha o link: quem já tinha conta não
+ * achava mais o documento que aceitou.
+ */
+describe("Sidebar — a política de privacidade no rodapé", () => {
+  it.each(["admin", "technician", "client"] as const)(
+    "o rodapé leva à política para %s, em nova aba",
+    (papel) => {
+      montar({ papel });
+      const link = screen.getByRole("link", { name: "Política de Privacidade" });
+      expect(link.getAttribute("href")).toBe("/privacidade");
+      // A página é pública e fica fora do AppLayout: na mesma aba, o usuário
+      // sairia do sistema e perderia o que estivesse fazendo.
+      expect(link.getAttribute("target")).toBe("_blank");
+      expect(link.getAttribute("rel")).toContain("noopener");
+    },
+  );
 });
