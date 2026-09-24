@@ -20,6 +20,27 @@ from tests.test_tickets import _mock_ticket, _mock_user, _override_user, patch_r
 
 _ABERTURA = SP_TZ.localize(datetime(2026, 9, 23, 9, 11))
 _PRAZO = SP_TZ.localize(datetime(2026, 9, 24, 12, 11))
+# Uma hora depois da abertura: o prazo acima ainda está no futuro.
+_AGORA = _ABERTURA + timedelta(hours=1)
+
+
+class _RelogioParado(datetime):
+    """`datetime` cujo `now()` devolve sempre `_AGORA`.
+
+    O endpoint compara o prazo com `datetime.now(UTC)`. Com o relógio de
+    verdade, o `_PRAZO` fixo virou passado às 12:11 de 24/09/2026, e todo caso
+    que espera 200 passou a receber 409 ("o prazo já venceu") — em qualquer
+    branch, a partir daquele minuto.
+    """
+
+    @classmethod
+    def now(cls, tz=None):  # type: ignore[override]
+        return _AGORA.astimezone(tz) if tz else _AGORA.replace(tzinfo=None)
+
+
+@pytest.fixture(autouse=True)
+def _relogio_parado(monkeypatch):
+    monkeypatch.setattr("app.routers.tickets.datetime", _RelogioParado)
 
 
 def _ticket_extensivel(**kwargs):
