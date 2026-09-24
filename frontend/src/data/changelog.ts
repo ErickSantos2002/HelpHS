@@ -1,4 +1,4 @@
-export const APP_VERSION = "v1.16.0";
+export const APP_VERSION = "v1.17.0";
 
 export type EntryType = "novidade" | "corrigido" | "melhoria";
 
@@ -14,6 +14,17 @@ export interface ChangelogVersion {
 }
 
 export const CHANGELOG: ChangelogVersion[] = [
+  {
+    version: "v1.17.0",
+    date: "24/09/2026",
+    entries: [
+      { type: "novidade", text: "Chamado aberto agora avisa a equipe inteira, e não só quem abriu. Todos os técnicos e administradores ativos recebem o aviso no sininho na hora, com o número e o título do chamado, e clicar nele abre o chamado direto. Antes o chamado novo só aparecia para quem estivesse olhando o quadro, e um pedido aberto no fim da tarde podia esperar a manhã seguinte para ser visto. O aviso vai para a equipe toda de propósito, e não para um técnico sorteado: o chamado nasce sem responsável, e escolher um seria inventar uma atribuição que ninguém pediu." },
+      { type: "melhoria", text: "Quem abre o chamado continua recebendo a mesma confirmação de antes, com o protocolo. Um técnico ou administrador que abre chamado em nome de um cliente recebe só essa confirmação, uma vez — ele não recebe também o aviso de chamado novo." },
+      { type: "novidade", text: "O chamado novo passa a gerar também aviso por e-mail para os técnicos e administradores ativos, nos ambientes em que o envio de e-mail estiver configurado. É o único evento da equipe que sai por e-mail: atribuição e reabertura seguem só no sininho, a pedido de quem trabalha dentro do sistema o dia inteiro." },
+      { type: "melhoria", text: "Os e-mails do sistema passam a usar um layout único com a identidade da Health & Safety: a marca no topo, o texto organizado e um botão que abre o chamado. A mesma mensagem leva também uma versão em texto simples, para quem lê e-mail em programa que não mostra imagem ou formatação — o conteúdo é o mesmo nos dois casos, e o nome da empresa continua legível mesmo se a imagem for bloqueada." },
+      { type: "melhoria", text: "O assunto dos e-mails passa a começar com [HelpHS] e a trazer o número do chamado. Antes cinco chamados resolvidos renderiam cinco e-mails com o mesmo assunto, sem dizer de qual chamado se tratava. Observação operacional: o envio de e-mail depende da configuração do servidor de e-mail (SMTP) do ambiente. Sem isso, os avisos do sininho funcionam normalmente e nenhum e-mail é enviado." },
+    ],
+  },
   {
     version: "v1.16.0",
     date: "22/09/2026",

@@ -326,6 +326,149 @@ O fechamento automático fica no histórico **sem autor** (`user_id` nulo,
 exibido como "Sistema"). Apontá-lo para um administrador qualquer registraria
 uma ação que ninguém praticou.
 
+## Política de notificações
+
+Registrado em **24/09/2026** (Fase 1 da frente de notificações).
+
+Dois canais, e eles **não** são simétricos: o sininho é barato e chega a quem
+está dentro do sistema; o e-mail alcança quem não está, e por isso é o que gera
+ruído quando sobra. Toda a política abaixo é a consequência disso.
+
+### Quem recebe o quê
+
+| Evento | Cliente autor | Técnico atribuído | Equipe inteira | E-mail |
+|---|---|---|---|---|
+| **Chamado aberto** | 🔔 sininho | — | 🔔 **sininho** | ✉️ **autor e equipe** |
+| Triagem / escalada da Helô | — | — | 🔔 sininho | ❌ |
+| Nova mensagem no chat | 🔔 | 🔔 | — | ❌ |
+| Atribuição | — | 🔔 | — | ❌ (staff) |
+| Mudança de status | 🔔 | — | — | ✉️ cliente |
+| Resolução | 🔔 | — | — | ✉️ cliente |
+| Reabertura | 🔔 | 🔔 | — | ✉️ cliente · ❌ staff |
+| Extensão de prazo | 🔔 | — | — | ✉️ cliente |
+| Cancelamento | 🔔 | — | — | ✉️ cliente |
+| Fechamento automático | 🔔 | — | — | ✉️ cliente |
+| Pesquisa de satisfação | 🔔 | — | — | ❌ (só in-app) |
+
+**Só o chamado novo mudou de audiência nesta fase.** Todos os outros eventos
+continuam alcançando exatamente quem alcançavam.
+
+### A audiência operacional tem uma definição só
+
+`audiencia_operacional()` em `app/services/notifications.py`:
+
+```
+role IN (admin, technician) AND status == active
+```
+
+Ela nasceu inline no `_avisa_equipe_da_helo`, que era o único lugar do sistema
+que respondia "quem é a equipe". Com o chamado novo avisando a equipe também,
+aquela consulta viraria a segunda — e duas consultas com a mesma intenção
+divergem no primeiro técnico desativado, sem nada avisando.
+
+**`status == active`, e não `!= inactive`.** Existe um terceiro valor,
+`anonymized`, que é conta apagada pela LGPD: o e-mail dela não é mais de
+ninguém, e a comparação por desigualdade a deixaria entrar.
+
+O filtro é uma cláusula `WHERE`, então ele é provado contra **PostgreSQL de
+verdade** em `tests/test_audiencia_operacional_postgres.py`. Mock não executa
+`WHERE` — a lição está registrada no cabeçalho de
+`tests/test_helo_base_postgres.py`, e foi paga uma vez aqui.
+
+### Dedup por usuário, e a confirmação do autor vence
+
+Um técnico que abre chamado em nome de um cliente cai nas duas regras: é o autor
+e é da equipe. Ele recebe **uma** notificação e **um** e-mail, e o que fica é a
+confirmação do autor — `"Seu ticket foi registrado com o protocolo X"`.
+
+Se a audiência vencesse, o autor-staff perderia a própria confirmação e
+receberia no lugar um aviso escrito para outra pessoa. Deixar de mandar o aviso
+operacional para quem acabou de abrir o chamado não perde informação nenhuma.
+
+A exclusão é **explícita** (`exclude_user_ids`), e não efeito colateral da ordem
+das chamadas: inverter as duas linhas do `create_ticket` dá o mesmo resultado.
+
+### O e-mail para staff: o filtro de 04/09 continua valendo
+
+Em 04/09/2026 a equipe pediu para desligar o e-mail de notificação para técnico
+e administrador — quem passa o dia dentro do sistema já vê o sininho, e o e-mail
+virava ruído. Esse filtro (`_SEM_EMAIL_POR_PAPEL`) **não foi revogado**.
+
+O que entrou em 24/09 é uma exceção **por tipo**, nomeada e com um membro:
+
+```python
+_EMAIL_PARA_STAFF = frozenset({NotificationType.ticket_created})
+```
+
+Chamado novo é o único evento que dispara o atendimento e acontece **uma vez**
+por chamado. O ruído que motivou o pedido de setembro vinha de eventos que se
+repetem no mesmo chamado — atribuição e reabertura —, e esses continuam sem
+e-mail para staff.
+
+É o espelho do `_IN_APP_ONLY`: um conjunto de tipos que silencia o e-mail, outro
+que o destrava. Na Fase 2 o aviso de SLA entra ali como um membro a mais, não
+como condição espalhada por router.
+
+**O cliente nunca é filtrado**, em nenhum tipo. Há duas contraprovas de teste
+justamente porque alargar o filtro silenciaria quem está do lado de fora.
+
+### O assunto do e-mail não é o título do sininho
+
+```
+sininho:  Novo chamado
+assunto:  [HelpHS] Novo chamado HS-2026-0042 — Impressora sem conexão
+```
+
+As duas coisas passaram a querer textos diferentes: o sininho já mostra o tipo
+num selo e tem largura de dropdown; o assunto precisa dizer protocolo e título
+para ser reconhecível numa lista de caixa de entrada. Quem tem um assunto melhor
+a dizer passa `email_subject` ao `notify`; sem ele, o fallback é
+`[HelpHS] <título> — <protocolo>`.
+
+Todo assunto leva o prefixo **`[HelpHS]`**, e o separador é **travessão** — o
+ponto médio some em fonte estreita de lista de caixa.
+
+### Vocabulário misto, conhecido e aceito
+
+O aviso da equipe diz "chamado"; a confirmação do autor continua dizendo
+"ticket". O aviso é texto novo, a confirmação é texto existente, e renomear os
+dez textos visíveis ao cliente é refatoração editorial que ficou **fora** desta
+frente por decisão de 24/09/2026.
+
+### ⚠️ Dívida: `ticket_updated` agrega mais de um evento
+
+`NotificationType.ticket_updated` é usado pela **reabertura** e pela **mudança
+de status**. Não dá para dar políticas de e-mail diferentes a esses dois eventos
+olhando só o `NotificationType`.
+
+Aceito nesta fase porque é o comportamento atual e a Fase 1 não muda a semântica
+do enum. Se um dia a distinção fizer falta, o caminho a avaliar **primeiro** é um
+discriminador explícito no `data` ou uma camada de evento mais específica — não
+expandir o enum, que é nativo do Postgres e custa `ALTER TYPE` em migration que
+roda sozinha no boot.
+
+### ⚠️ A Fase 1 NÃO garante entrega
+
+Não há retry, não há fila, não há outbox. O envio continua sendo
+`asyncio.create_task` depois do commit, e `email_sent` continua nascendo `False`
+e nunca sendo atualizado.
+
+O que isso significa na prática: **SMTP fora do ar ou reinício da API entre o
+commit e o envio perdem o e-mail**, e o único rastro é uma linha de log. A
+notificação do sininho sobrevive, porque ela é transacional com o fato que a
+gerou. Durabilidade é a Fase 3.
+
+### Otimização futura: o peso da logo
+
+A logo por `cid:` acrescenta ~100 KB por mensagem MIME (PNG de 75 KB em base64).
+Com quinze técnicos, um chamado novo gera ~1,5 MB de tráfego SMTP. Não bloqueia
+nada — e o corte de ~102 KB do Gmail **não** se aplica, porque o anexo é parte
+MIME separada e não conta no tamanho do HTML.
+
+Uma frente futura pode criar uma variante otimizada exclusivamente para e-mail.
+Deliberadamente **não** feito aqui: redimensionar ou recomprimir a marca é
+decisão de identidade visual, não de engenharia de entrega.
+
 ## Pesquisa de satisfação (CSAT)
 
 **Escala de 1 a 10.**

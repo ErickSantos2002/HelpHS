@@ -60,7 +60,7 @@ from app.services.helo import (
     responde_triagem,
 )
 from app.services.llm import improve_message, suggest_reply, summarize_conversation
-from app.services.notifications import commit_e_notificar, notify
+from app.services.notifications import audiencia_operacional, commit_e_notificar, notify
 from app.utils.crud import get_or_404
 from app.utils.library_access import ensure_pode_anexar_no_chat
 from app.utils.sla import register_first_response
@@ -881,18 +881,12 @@ async def _avisa_equipe_da_helo(db: AsyncSession, ticket: Ticket, *, motivo: str
     `ai_handling`. A distinção vive no título e no texto, que é onde a equipe
     de fato lê.
     """
-    equipe = (
-        (
-            await db.execute(
-                select(User).where(
-                    User.role.in_([UserRole.admin, UserRole.technician]),
-                    User.status == UserStatus.active,
-                )
-            )
-        )
-        .scalars()
-        .all()
-    )
+    # A consulta morava aqui, e este era o único lugar do sistema que respondia
+    # "quem é a operação". Com o chamado novo passando a avisar a equipe também,
+    # ela viraria o SEGUNDO — e duas consultas com a mesma intenção divergem no
+    # primeiro técnico desativado, em silêncio. Agora a resposta é uma só, em
+    # `services/notifications.py`, provada contra Postgres de verdade.
+    equipe = await audiencia_operacional(db)
 
     if motivo == MOTIVO_PEDIU_HUMANO:
         titulo = f"Cliente pediu atendimento humano — {ticket.protocol}"
@@ -941,7 +935,7 @@ async def _notify_other_party(
                 NotificationType.chat_message,
                 f"Nova mensagem no chamado {ticket.protocol}",
                 f"{sender.name}: {msg.content[:120]}",
-                data={"ticket_id": str(ticket.id)},
+                data={"ticket_id": str(ticket.id), "protocol": ticket.protocol},
             )
     else:
         # Notify requester
@@ -951,5 +945,5 @@ async def _notify_other_party(
             NotificationType.chat_message,
             f"Nova mensagem no chamado {ticket.protocol}",
             f"{sender.name}: {msg.content[:120]}",
-            data={"ticket_id": str(ticket.id)},
+            data={"ticket_id": str(ticket.id), "protocol": ticket.protocol},
         )

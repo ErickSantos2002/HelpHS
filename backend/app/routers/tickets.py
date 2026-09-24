@@ -72,7 +72,12 @@ from app.schemas.ticket import (
 )
 from app.services.helo import abre_triagem
 from app.services.llm import classify_ticket
-from app.services.notifications import commit_e_notificar, notify
+from app.services.notifications import (
+    audiencia_operacional,
+    commit_e_notificar,
+    notifica_audiencia,
+    notify,
+)
 from app.services.ticket_lifecycle import (
     can_client_reopen,
     reopen_deadline,
@@ -519,14 +524,40 @@ async def create_ticket(
         ):
             registra_historico(db, ticket.id, None, "status", "open", "in_progress", "Helô")
         _audit(db, AuditAction.create, actor.id, ticket.id)
+        dados_da_notificacao = {"ticket_id": str(ticket.id), "protocol": protocol}
         await notify(
             db,
             actor.id,
             NotificationType.ticket_created,
             "Ticket aberto",
             f"Seu ticket foi registrado com o protocolo {protocol}.",
-            data={"ticket_id": str(ticket.id), "protocol": protocol},
+            data=dados_da_notificacao,
             settings=settings,
+        )
+        # E a equipe inteira, para o atendimento não depender de alguém olhar o
+        # quadro. Vai para TODOS os técnicos e admins ativos, e não para um
+        # sorteado: o chamado nasce sem dono, e escolher um seria inventar uma
+        # atribuição que ninguém pediu — o mesmo argumento que já vale para o
+        # aviso da Helô (ver `_avisa_equipe_da_helo`).
+        #
+        # O AUTOR SAI DA AUDIÊNCIA. Staff que abre chamado em nome de um cliente
+        # cai nas duas regras, e a confirmação acima é a que fica: ela diz "Seu
+        # ticket foi registrado", que é a informação de quem abriu. Trocá-la pelo
+        # aviso operacional seria substituir uma mensagem dirigida a ele por uma
+        # escrita para outra pessoa.
+        #
+        # A exclusão é EXPLÍCITA e não depende desta ordem de chamadas: inverter
+        # as duas linhas dá o mesmo resultado. Ver `notifica_audiencia`.
+        await notifica_audiencia(
+            db,
+            await audiencia_operacional(db),
+            NotificationType.ticket_created,
+            "Novo chamado",
+            f"{protocol} — {body.title}",
+            data=dados_da_notificacao,
+            settings=settings,
+            email_subject=f"[HelpHS] Novo chamado {protocol} — {body.title}",
+            exclude_user_ids={actor.id},
         )
         try:
             await commit_e_notificar(db)
@@ -1262,7 +1293,7 @@ async def resolve_ticket(
         NotificationType.ticket_updated,
         "Ticket resolvido",
         f"O ticket {ticket.protocol} foi marcado como resolvido.",
-        data={"ticket_id": str(ticket.id), "new_status": "resolved"},
+        data={"ticket_id": str(ticket.id), "protocol": ticket.protocol, "new_status": "resolved"},
         settings=settings,
     )
     await notify(
@@ -1390,7 +1421,11 @@ async def reopen_ticket(
             NotificationType.ticket_updated,
             "Chamado reaberto",
             f"O ticket {ticket.protocol} foi reaberto por {actor.name}.",
-            data={"ticket_id": str(ticket.id), "new_status": new_status.value},
+            data={
+                "ticket_id": str(ticket.id),
+                "protocol": ticket.protocol,
+                "new_status": new_status.value,
+            },
             settings=settings,
         )
     if ticket.creator_id != actor.id:
@@ -1400,7 +1435,11 @@ async def reopen_ticket(
             NotificationType.ticket_updated,
             "Chamado reaberto",
             f"O ticket {ticket.protocol} foi reaberto e voltou para atendimento.",
-            data={"ticket_id": str(ticket.id), "new_status": new_status.value},
+            data={
+                "ticket_id": str(ticket.id),
+                "protocol": ticket.protocol,
+                "new_status": new_status.value,
+            },
             settings=settings,
         )
 
