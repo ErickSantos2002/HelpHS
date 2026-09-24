@@ -1,4 +1,4 @@
-import { useNavigate } from "react-router-dom";
+import { useLocation, useNavigate } from "react-router-dom";
 import { renderMarkdown } from "../../lib/markdown";
 import { Button } from "../../components/ui";
 import conteudo from "../../content/politica-privacidade.md?raw";
@@ -44,7 +44,26 @@ const ESTILO_DOCUMENTO = [
 
 export default function PoliticaPrivacidadePage() {
   const navigate = useNavigate();
+  const location = useLocation();
   const html = renderMarkdown(conteudo);
+
+  /**
+   * Todo link para esta página abre em ABA NOVA (cadastro, login, rodapé), e
+   * numa aba nova não há página anterior: o `navigate(-1)` não fazia nada.
+   * A chave "default" é a da primeira entrada do histórico desta aba.
+   *
+   * Aí fecha a aba — o navegador permite quando ela tem uma página só — e a
+   * pessoa cai de volta onde estava, com o formulário intacto. Se o navegador
+   * recusar, vai para o início em vez de deixar o botão parado.
+   */
+  function voltar() {
+    if (location.key !== "default") {
+      navigate(-1);
+      return;
+    }
+    window.close();
+    setTimeout(() => navigate("/", { replace: true }), 150);
+  }
   const emElaboracao = contemMarcadorPendente(conteudo);
 
   return (
@@ -73,7 +92,7 @@ export default function PoliticaPrivacidadePage() {
         />
 
         <div className="mt-12 border-t border-borda pt-6">
-          <Button variant="secondary" onClick={() => navigate(-1)}>
+          <Button variant="secondary" onClick={voltar}>
             Voltar
           </Button>
         </div>
