@@ -1,4 +1,4 @@
-export const APP_VERSION = "v1.16.0";
+export const APP_VERSION = "v1.17.0";
 
 export type EntryType = "novidade" | "corrigido" | "melhoria";
 
@@ -14,6 +14,16 @@ export interface ChangelogVersion {
 }
 
 export const CHANGELOG: ChangelogVersion[] = [
+  {
+    version: "v1.17.0",
+    date: "24/09/2026",
+    entries: [
+      { type: "novidade", text: "Chamado aberto agora avisa a equipe inteira, e não só quem abriu. Todos os técnicos e administradores ativos recebem o aviso no sininho na hora, com o número e o título do chamado, e clicar nele abre o chamado direto. Antes o chamado novo só aparecia para quem estivesse olhando o quadro, e um pedido aberto no fim da tarde podia esperar a manhã seguinte para ser visto. O aviso vai para a equipe toda de propósito, e não para um técnico sorteado: o chamado nasce sem responsável, e escolher um seria inventar uma atribuição que ninguém pediu." },
+      { type: "melhoria", text: "Quem abre o chamado continua recebendo a mesma confirmação de antes, com o protocolo. Um técnico ou administrador que abre chamado em nome de um cliente recebe só essa confirmação, uma vez — ele não recebe também o aviso de chamado novo." },
+      { type: "melhoria", text: "Os e-mails que o sistema envia passaram a sair com a identidade da Health & Safety: a marca no topo, o texto organizado e um botão que abre o chamado. Continuam saindo também em texto simples na mesma mensagem, para quem lê e-mail em programa que não mostra imagem ou formatação — o conteúdo é o mesmo nos dois casos, e o nome da empresa continua legível mesmo se a imagem for bloqueada." },
+      { type: "melhoria", text: "O assunto dos e-mails passou a começar com [HelpHS] e a trazer o número do chamado. Antes cinco chamados resolvidos rendiam cinco e-mails com o mesmo assunto, sem dizer de qual chamado se tratava." },
+    ],
+  },
   {
     version: "v1.16.0",
     date: "22/09/2026",
