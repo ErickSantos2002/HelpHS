@@ -163,3 +163,22 @@ describe("LoginPage — contagem regressiva do bloqueio", () => {
     expect(screen.getByRole("button", { name: "Entrar" })).toBeEnabled();
   });
 });
+
+describe("LoginPage — a política de privacidade", () => {
+  it("oferece o link da política, em nova aba", () => {
+    mockUseAuth.mockReturnValue({
+      login: vi.fn(),
+      verifyMfa: vi.fn(),
+    } as unknown as ReturnType<typeof useAuth>);
+    render(
+      <MemoryRouter>
+        <LoginPage />
+      </MemoryRouter>,
+    );
+    const link = screen.getByRole("link", { name: "Política de Privacidade" });
+    expect(link.getAttribute("href")).toBe("/privacidade");
+    // Nova aba: o e-mail já digitado não se perde.
+    expect(link.getAttribute("target")).toBe("_blank");
+    expect(link.getAttribute("rel")).toContain("noopener");
+  });
+});

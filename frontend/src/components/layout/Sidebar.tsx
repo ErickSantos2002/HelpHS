@@ -1,5 +1,5 @@
 import { useState } from "react";
-import { NavLink } from "react-router-dom";
+import { Link, NavLink } from "react-router-dom";
 import { cn } from "../../lib/utils";
 import { useAuth } from "../../contexts/AuthContext";
 import type { UserRole } from "../../types/auth";
@@ -264,6 +264,16 @@ export function Sidebar({ collapsed, mobileOpen, onMobileClose }: SidebarProps) 
               serve: 2,56 e 3,36. Quem aprova é `--text-muted` — 7,58 e 6,23.
               O crédito escurece, e é conserto de defeito medido, não gosto.
             */}
+            {/* A seção 20 da política promete o link "no rodapé do sistema".
+                Nova aba porque a página fica fora do AppLayout. */}
+            <Link
+              to="/privacidade"
+              target="_blank"
+              rel="noopener noreferrer"
+              className="text-[11px] text-conteudo-muted hover:text-action transition-colors"
+            >
+              Política de Privacidade
+            </Link>
             <p className="text-[11px] text-conteudo-muted">
               © 2026 Health &amp; Safety Tech
             </p>
