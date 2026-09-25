@@ -1416,3 +1416,108 @@ class TicketCall(Base):
         Index("uq_ticket_calls_provider_call_id", "provider_call_id", unique=True),
         Index("ix_ticket_calls_ticket_created", "ticket_id", "created_at"),
     )
+
+
+class SlaAlertEvent(Base):
+    """Um aviso de SLA que JA FOI dado. Uma linha e um EVENTO, nao um estado.
+
+    Por que uma tabela, e nao um booleano no ticket
+    -----------------------------------------------
+    "Ja avisei" nao e pergunta de sim/nao: e pergunta sobre QUAL prazo e QUAL
+    limiar. Um booleano responderia a primeira vez e mentiria em todas as
+    outras — prorrogacao, troca de prioridade, reabertura e mudanca de
+    configuracao criam prazos novos que merecem aviso novo, e um booleano ja
+    ligado os engoliria em silencio.
+
+    Tambem nao e `notifications`: aquela tabela guarda o EFEITO, uma linha por
+    pessoa, com `ondelete=CASCADE` para o usuario. Excluir o ultimo destinatario
+    apagaria a prova de que o aviso aconteceu, e a rodada seguinte reenviaria.
+    O precedente da casa para "o worker ja fez isto" e estado persistido
+    proprio: `helo_indexacoes` na indexacao, e a transicao de status no
+    fechamento automatico.
+
+    A identidade
+    ------------
+    `(ticket_id, alert_kind, reopen_count, effective_due_at, warning_threshold)`,
+    sob indice UNICO.
+
+    `reopen_count` entrou em 25/09/2026, depois de uma medicao. A versao anterior
+    contava com o prazo distinguir os ciclos, e ele NAO distingue:
+    `add_business_minutes` primeiro avanca o instante para dentro do expediente,
+    entao duas reaberturas em momentos diferentes da mesma janela fechada
+    colapsam no mesmo inicio de jornada e dao prazos IDENTICOS — sabado as 11:00
+    e domingo as 19:30 BRT, 32 horas de diferenca, mesmo vencimento. Como a
+    reabertura tambem zera pausa e extensao, o prazo do ciclo novo e independente
+    do anterior e pode coincidir com ele. Sem `reopen_count` na chave, o segundo
+    aviso ficava SILENCIADO — o pior desfecho possivel para um alerta.
+
+    `priority` e `extension_total_min` seguem fora da identidade: nenhum dos dois
+    muda o ciclo, e os dois ja mudam o prazo, que esta na chave. Incluir qualquer
+    um criaria uma segunda resposta para "e o mesmo aviso?".
+
+    A consequencia e deliberada: mesmo ciclo, mesmo prazo e mesmo limiar nunca
+    repetem; qualquer coisa que MUDE o ciclo, o prazo ou o limiar habilita um
+    aviso novo.
+    """
+
+    __tablename__ = "sla_alert_events"
+
+    id: Mapped[uuid.UUID] = mapped_column(UUID(as_uuid=True), primary_key=True, default=uuid.uuid4)
+    ticket_id: Mapped[uuid.UUID] = mapped_column(
+        UUID(as_uuid=True), ForeignKey("tickets.id", ondelete="CASCADE"), nullable=False
+    )
+    # `String` com CHECK, e nao enum nativo — convencao registrada na migration
+    # `h4c5d6e7f8g9`: acrescentar valor a enum nativo exige `ALTER TYPE`, e o
+    # alembic daqui roda a cadeia inteira numa transacao so. A Fase 2B
+    # acrescenta `response_warning` sem tocar no schema.
+    alert_kind: Mapped[str] = mapped_column(String(40), nullable=False)
+    # O prazo VIGENTE no instante do aviso — saida de
+    # `prazo_efetivo_de_resolucao`, e nao a coluna crua. E o que torna a
+    # identidade sensivel a prorrogacao.
+    effective_due_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False)
+    warning_threshold: Mapped[int] = mapped_column(Integer, nullable=False)
+
+    # O CICLO. Parte da identidade desde 25/09/2026 — ver o docstring acima: dois
+    # ciclos distintos podem produzir o mesmo `effective_due_at`.
+    reopen_count: Mapped[int] = mapped_column(Integer, nullable=False, default=0)
+
+    # ── Daqui para baixo: auditoria. NAO entra na identidade. ─────
+    # Serve para responder "por que este aviso saiu?" meses depois, quando a
+    # `sla_configs` ja foi editada e o chamado ja mudou de mao.
+    priority: Mapped[str | None] = mapped_column(String(20), nullable=True)
+    extension_total_min: Mapped[int] = mapped_column(Integer, nullable=False, default=0)
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now())
+
+    __table_args__ = (
+        # SQL portavel: `IN` e comparacao de inteiro existem no SQLite tambem,
+        # entao a suite que monta schema por `create_all` exercita as duas de
+        # graca — sem precisar do `ddl_if` que o CHECK do telefone precisou.
+        CheckConstraint(
+            "alert_kind IN ('resolution_warning')",
+            name="ck_sla_alert_events_kind_conhecido",
+        ),
+        # O limiar e PERCENTUAL, o mesmo dominio que `SLAConfigUpdate` valida
+        # (1..100). A constraint existe porque no dia em que alguem tratar o
+        # campo como fracao (0.8) o banco recusa, em vez de gravar um aviso que
+        # dispararia em 1% de consumo — e ha fixture de mock no frontend com
+        # exatamente esse valor errado.
+        CheckConstraint(
+            "warning_threshold >= 1 AND warning_threshold <= 100",
+            name="ck_sla_alert_events_threshold_percentual",
+        ),
+        # Indice unico NOMEADO, e nao `unique=True` na coluna, para que o
+        # downgrade remova exatamente este objeto — mesmo padrao do
+        # `uq_ticket_calls_provider_call_id`. E a reivindicacao atomica depende
+        # DELE: `ON CONFLICT DO NOTHING` precisa de um indice unico para ter em
+        # que conflitar.
+        Index(
+            "uq_sla_alert_events_identidade",
+            "ticket_id",
+            "alert_kind",
+            "reopen_count",
+            "effective_due_at",
+            "warning_threshold",
+            unique=True,
+        ),
+        Index("ix_sla_alert_events_ticket_created", "ticket_id", "created_at"),
+    )

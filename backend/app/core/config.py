@@ -630,6 +630,16 @@ class Settings(BaseSettings):
     # 0 desliga a rotina (útil em testes e em execução local).
     ticket_auto_close_interval_seconds: int = 3600
 
+    # De quanto em quanto tempo a rotina de aviso de SLA próximo do vencimento
+    # roda. 0 desliga, como no fechamento automático.
+    #
+    # 300 s, e não os 3600 s do fechamento: o limiar é um PONTO na linha do
+    # prazo, não uma condição que fica de pé esperando. Com 3600 s, um prazo de
+    # resposta de 30 min do nível crítico atravessaria 80% e venceria dentro da
+    # mesma janela, e o aviso nunca sairia. 300 s é o precedente da indexação da
+    # Helô, e a granularidade que sobra é de 5 minutos.
+    sla_warning_interval_seconds: int = 300
+
     # Logging
     log_level: str = "INFO"
     log_dir: str = "./logs"

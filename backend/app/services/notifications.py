@@ -116,9 +116,19 @@ _SEM_EMAIL_POR_PAPEL = frozenset({UserRole.admin, UserRole.technician})
 # É o espelho do `_IN_APP_ONLY`: um conjunto de tipos que SILENCIA o e-mail,
 # outro que o DESTRAVA. Mesma forma, mesmo arquivo, mesmo idioma.
 #
-# Na Fase 2, o aviso de SLA próximo do vencimento entra aqui — é acrescentar um
-# membro, não espalhar condição por router.
-_EMAIL_PARA_STAFF = frozenset({NotificationType.ticket_created})
+# `sla_warning` entrou em 25/09/2026, na Fase 2A, e exatamente como estava
+# previsto: um membro a mais, não uma condição espalhada por router.
+#
+# Ele honra o critério de `ticket_created` — "acontece uma vez" — por construção,
+# e não por sorte: `sla_alert_events` tem índice único em
+# `(ticket_id, alert_kind, effective_due_at, warning_threshold)`, e só quem
+# consegue inserir a linha manda o aviso. Sem essa garantia ele seria justamente
+# o tipo de evento repetido que o filtro de 04/09 existe para barrar — e é por
+# isso que a dedup e esta linha são o mesmo assunto.
+#
+# `sla_breached` NÃO entra: ele não tem produtor nenhum hoje, e criá-lo mexe em
+# indicador publicado.
+_EMAIL_PARA_STAFF = frozenset({NotificationType.ticket_created, NotificationType.sla_warning})
 
 # Os papéis que formam a OPERAÇÃO: quem atende chamado.
 #

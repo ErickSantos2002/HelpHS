@@ -406,8 +406,139 @@ repetem no mesmo chamado — atribuição e reabertura —, e esses continuam se
 e-mail para staff.
 
 É o espelho do `_IN_APP_ONLY`: um conjunto de tipos que silencia o e-mail, outro
-que o destrava. Na Fase 2 o aviso de SLA entra ali como um membro a mais, não
-como condição espalhada por router.
+que o destrava.
+
+Em 25/09/2026 a Fase 2A acrescentou o segundo membro, exatamente como estava
+previsto — um nome no conjunto, não condição espalhada por router:
+
+```python
+_EMAIL_PARA_STAFF = frozenset({NotificationType.ticket_created, NotificationType.sla_warning})
+```
+
+E o critério de admissão foi honrado por **construção**, não por sorte: o aviso
+de SLA só sai para quem consegue inserir a linha de `sla_alert_events`, sob
+índice único. Sem essa garantia ele seria justamente o evento repetido que o
+filtro de 04/09 existe para barrar — por isso a deduplicação e esta linha são o
+mesmo assunto, e não dois.
+
+`sla_breached` **não** entrou: ele continua sem produtor nenhum.
+
+## Aviso de SLA próximo do vencimento (Fase 2A, 25/09/2026)
+
+`SLAConfig.warning_threshold` está no schema desde a primeira migration, é
+editável por prioridade, e a `SlaConfigPage` afirmava ao administrador que "o
+alerta dispara quando o percentual do tempo já consumido atingir o limiar".
+**Nada disparava.** Nenhum caminho de produção lia o campo. A Fase 2A não
+acrescentou funcionalidade: ela cumpriu uma promessa que a interface já fazia.
+
+### A semântica do limiar estava decidida — e em dois lugares
+
+Percentual do tempo **consumido**, inteiro, de 1 a 100. Não é resto, não é
+minutos, não é fração. Dois lugares independentes já afirmavam isso e
+concordavam: o texto de ajuda da tela de SLA, e a fórmula da barra do cartão em
+`TicketListPage`. O worker adotou a mesma, consumindo
+`prazo_efetivo_de_resolucao` e `business_minutes_between` — sem espelho próprio.
+
+⚠️ As fixtures de `frontend/src/test/services/slaService.test.ts` usam `0.8` e
+`0.5`, como se fosse fração. É mock, não afeta produção, mas codifica a escala
+errada. Há `CheckConstraint` no banco (`1..100`) e teste nomeado contra essa
+confusão.
+
+### O que a identidade do evento decide
+
+```
+(ticket_id, alert_kind, effective_due_at, warning_threshold)
+```
+
+`effective_due_at` carrega sozinho pausa acumulada, extensão e ciclo de
+reabertura, porque é a saída de `prazo_efetivo_de_resolucao`. Por isso
+`priority`, `reopen_count` e `extension_total_min` são gravados como
+**auditoria** e ficam **fora** da chave: incluir qualquer um deles criaria uma
+segunda resposta para "é o mesmo aviso?".
+
+A consequência é deliberada: mesmo prazo e mesmo limiar nunca repetem; tudo o
+que **muda** o prazo — prorrogar, reabrir, retomar de uma pausa, trocar a
+prioridade — ou o limiar habilita um aviso novo.
+
+### Por que tabela, e não booleano, `notifications` ou Redis
+
+Booleano no ticket responderia a primeira vez e mentiria nas outras: "já avisei"
+não é pergunta de sim/não, é pergunta sobre qual prazo e qual limiar.
+
+`notifications` guarda o **efeito**, uma linha por pessoa, com `CASCADE` para
+`users` — excluir o último destinatário apagaria a prova e a rodada seguinte
+reenviaria.
+
+Redis é **lock**, nunca memória de evento: chave que expira não pode ser a prova
+de que um aviso foi dado. O precedente da casa para "o worker já fez isto" é
+estado persistido próprio, duas vezes: `helo_indexacoes` na indexação, e a
+transição de status no fechamento automático.
+
+### Pausado não avisa, e vencido não avisa
+
+A pausa **em curso** não entra no prazo efetivo (dívida antiga, registrada
+acima e não corrigida aqui), então um chamado parado continua se aproximando do
+vencimento. Avisar a equipe sobre um chamado que ela não pode tocar porque
+espera o cliente é o começo do ruído que derruba o canal.
+
+Passado o prazo o assunto é violação, não aviso. `sla_warning` sobre algo que já
+venceu diria "está chegando" sobre o que chegou.
+
+### O intervalo é 300 s, e não os 3600 s do fechamento automático
+
+O limiar é um **ponto** na linha do prazo, não uma condição que fica de pé
+esperando ser notada. Com 3600 s, um prazo de resposta de 30 minutos do nível
+crítico atravessaria 80% e venceria dentro da mesma janela, e o aviso nunca
+sairia.
+
+### De onde começa o percentual — o ciclo, não a abertura
+
+O percentual de resolução conta do **início do ciclo vigente**, dado por
+`inicio_do_ciclo_de_resolucao(ticket)` em `app/utils/sla.py`:
+
+```
+primeiro ciclo                        → ticket.created_at   (RN-013 intacto)
+após reabertura                       → ticket.reopened_at
+troca de prioridade no mesmo ciclo    → não reinicia
+pausa / resume                        → não reinicia
+extensão                              → não reinicia
+SLA de PRIMEIRA RESPOSTA              → segue ancorado em created_at
+```
+
+A última linha não é exceção esquecida: `reopen_ticket` **não** recarimba
+`sla_response_due_at`, então o prazo de resposta tem um ciclo só, e `created_at`
+é o início dele. Ancorá-lo no ciclo introduziria um defeito onde não havia — há
+teste de contraprova, e é a armadilha que quem "completar" esta correção vai
+encontrar.
+
+**Por que a regra existe.** Medido em 25/09/2026: chamado criado dez dias úteis
+antes e reaberto naquele instante aparecia com **90% do prazo consumido**, porque
+o prazo era do ciclo novo e o total partia da abertura original — 5400 minutos
+úteis contra 540 de restante, inflação que cresce com a idade do chamado. O texto
+se contradizia sozinho: *"90% do prazo consumido, restam 540 minutos úteis"* —
+540 úteis **é** o ciclo inteiro.
+
+Não foi preciso coluna nova: `reopened_at` já é gravado em `reopen_ticket`, na
+mesma linha em que `reopen_count` incrementa, e é o único lugar do sistema que o
+escreve. Um campo novo criaria uma segunda fonte para a mesma pergunta.
+
+**A mesma função serve os dois consumidores** — o worker e o
+`sla_resolve_total_min` de `routers/tickets.py`, que é o campo que a barra do
+cartão divide. Com duas contas, o e-mail diria 0% e o cartão 90%; o defeito, aliás,
+já estava na barra antes desta fase existir.
+
+### `reopen_count` participa da identidade do alerta
+
+Porque dois ciclos distintos **podem** produzir o mesmo `effective_due_at`:
+`add_business_minutes` avança o instante para dentro do expediente antes de
+somar, então duas reaberturas em momentos diferentes da mesma janela fechada
+colapsam no mesmo início de jornada — sábado às 11:00 e domingo às 19:30,
+32 horas de diferença, **prazo idêntico**. E a reabertura zera pausa e extensão,
+então o prazo do ciclo novo é independente do anterior.
+
+Sem `reopen_count` na chave, o segundo aviso ficava silenciado. `priority` e
+`extension_total_min` seguem fora: nenhum muda o ciclo, e os dois já mudam o
+prazo, que está na chave.
 
 **O cliente nunca é filtrado**, em nenhum tipo. Há duas contraprovas de teste
 justamente porque alargar o filtro silenciaria quem está do lado de fora.

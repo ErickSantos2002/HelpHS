@@ -41,6 +41,13 @@ _PRODUCAO = "j6e7f8a9b0c1"
 _RAMAL = "d68500999f24"
 _DISPATCHING = "8d08cbca1768"
 
+# A PONTA da cadeia. ⚠️ Toda migration nova precisa mover esta constante — é o
+# preço de prender a ponta, e o preço é de propósito: uma migration irmã nascida
+# com o mesmo pai criaria DOIS heads sem conflito textual nenhum, e foi assim
+# que a colisão que nomeia este arquivo passou por todos os gates.
+# Mover esta linha é o momento em que alguém OLHA para o grafo.
+_HEAD = "f7a8b9c0d1e2"  # eventos de alerta de SLA (Fase 2A, 25/09/2026)
+
 
 async def _versao(conn) -> str:
     return (await conn.execute(text("SELECT version_num FROM alembic_version"))).scalar_one()
@@ -88,7 +95,7 @@ async def test_upgrade_a_partir_do_estado_real_de_producao(banco):  # noqa: F811
 
     engine = await _conecta(banco)
     async with engine.connect() as conn:
-        assert await _versao(conn) == _DISPATCHING
+        assert await _versao(conn) == _HEAD
 
         # A LGPD continua de pé, e NÃO foi recriada — a linha de antes está lá.
         assert (
@@ -193,9 +200,13 @@ def test_a_cadeia_e_linear_e_tem_um_head_so():
 
     filhos = {p for p in pai.values() if p}
     heads = [r for r in pai if r not in filhos]
-    assert heads == [_DISPATCHING], f"heads: {heads}"
+    assert heads == [_HEAD], f"heads: {heads}"
 
-    # E a ordem que importa: LGPD antes do ramal, ramal antes do dispatching.
+    # E a ordem que importa: LGPD antes do ramal, ramal antes do dispatching, e
+    # o aviso de SLA depois dele. Cada elo é uma afirmação separada de propósito:
+    # "tem um head só" não diz NADA sobre a ordem, e foi a ordem que a colisão
+    # embaralhou.
+    assert pai[_HEAD] == _DISPATCHING
     assert pai[_DISPATCHING] == _RAMAL
     assert pai[_RAMAL] == _PRODUCAO
 

@@ -135,6 +135,44 @@ async def test_readiness_reporta_rotina_nunca_concluida_sem_derrubar():
 
 
 @pytest.mark.asyncio
+async def test_readiness_reporta_a_rodada_do_aviso_de_sla():
+    """O aviso de SLA é invisível quando falha: a ausência de e-mail se parece
+    com "nenhum chamado está vencendo". Este carimbo é o único lugar em que a
+    diferença aparece, e ele é REPORTADO, não usado para derrubar — mesma regra
+    do fechamento automático."""
+    carimbo = datetime(2026, 9, 25, 15, 30, tzinfo=UTC)
+
+    with (
+        patch("app.main._checar_banco", new=AsyncMock(return_value=True)),
+        patch("app.main._checar_redis", new=AsyncMock(return_value=True)),
+        patch("app.main.ultima_rodada_sem_erro", return_value=None),
+        patch("app.main.ultima_rodada_do_aviso_de_sla", return_value=carimbo),
+    ):
+        r = await _get("/api/v1/health")
+
+    assert r.status_code == 200
+    assert r.json()["sla_warning"]["last_success"] == carimbo.isoformat()
+
+
+@pytest.mark.asyncio
+async def test_readiness_reporta_aviso_de_sla_nunca_concluido_sem_derrubar():
+    """`None` é o normal logo depois do boot, e os dois carimbos são
+    independentes: um laço pode estar girando e o outro não."""
+    with (
+        patch("app.main._checar_banco", new=AsyncMock(return_value=True)),
+        patch("app.main._checar_redis", new=AsyncMock(return_value=True)),
+        patch("app.main.ultima_rodada_sem_erro", return_value=datetime.now(UTC)),
+        patch("app.main.ultima_rodada_do_aviso_de_sla", return_value=None),
+    ):
+        r = await _get("/api/v1/health")
+
+    assert r.status_code == 200
+    corpo = r.json()
+    assert corpo["sla_warning"]["last_success"] is None
+    assert corpo["auto_close"]["last_success"] is not None
+
+
+@pytest.mark.asyncio
 async def test_liveness_nao_depende_de_banco_nem_de_redis():
     """
     `/health` é o alvo do HEALTHCHECK do Dockerfile e do compose. Se passasse
