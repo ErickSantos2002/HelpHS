@@ -1,6 +1,6 @@
 # Política de Privacidade — HelpHS
 
-**Documento:** [definir código do documento] · **Revisão:** 00 · **Vigência:** 31 de agosto de 2026
+**Documento:** PGS-TI-031 · **Revisão:** 00 · **Vigência:** 05/10/2026
 
 ---
 
@@ -8,7 +8,7 @@
 
 Estabelecer as regras e as informações sobre o tratamento de dados pessoais realizado na plataforma HelpHS, central de atendimento ao cliente da Health & Safety, em conformidade com a Lei nº 13.709/2018 – Lei Geral de Proteção de Dados Pessoais (LGPD), informando ao titular quais dados são coletados, com que finalidade, com quem são compartilhados, por quanto tempo são guardados e como exercer os seus direitos.
 
-**Vigência:** esta revisão entra em vigor em 31 de agosto de 2026 e substitui todas as versões anteriores deste documento.
+**Vigência:** esta revisão entra em vigor na Data de 05/10/2026 e substitui todas as versões anteriores deste documento.
 
 ## 2. Aplicação
 
@@ -23,7 +23,8 @@ Esta política deve ser lida em conjunto com os Termos de Uso da plataforma Help
 - Lei nº 13.709/2018 – Lei Geral de Proteção de Dados Pessoais (LGPD);
 - Lei nº 12.965/2014 – Marco Civil da Internet;
 - Lei nº 8.078/1990 – Código de Defesa do Consumidor;
-- Resolução CD/ANPD nº 19/2024 – Regulamento de Transferência Internacional de Dados;
+- Resolução CD/ANPD nº 15/2024 – Regulamento de Comunicação de Incidente de Segurança;
+- Resolução CD/ANPD nº 19/2024 – Regulamento de Transferência Internacional de Dados e cláusulas-padrão contratuais;
 - NBR ISO/IEC 27001 – Sistema de Gestão de Segurança da Informação;
 - NBR ISO 9001 – Sistema de Gestão da Qualidade;
 - PGS-TI-025 – Política de Privacidade;
@@ -175,7 +176,23 @@ Os e-mails enviados pela plataforma — confirmação de cadastro, redefinição
 
 As mensagens são expedidas a partir de servidores localizados em São Paulo. Conforme a documentação do próprio provedor, porém, os registros dos envios — incluindo o endereço de e-mail do destinatário, o conteúdo e os metadados das mensagens — são armazenados nos Estados Unidos, o que configura transferência internacional de dados pessoais.
 
-Os Estados Unidos não são, nesta data, destino coberto por decisão de adequação emitida pelo Conselho Diretor da ANPD. A transferência é realizada com fundamento no art. 33, inciso IX, da LGPD, por ser necessária à execução do contrato e dos procedimentos preliminares relacionados ao uso da plataforma (art. 7º, inciso V): o envio de e-mails de confirmação de cadastro, de redefinição de senha e de notificações sobre chamados é parte do próprio serviço prestado ao usuário. O provedor atua como Operador, vinculado a obrigações contratuais de confidencialidade e de segurança, e não pode utilizar os dados para finalidades próprias.
+Os Estados Unidos não são, nesta data, destino coberto por decisão de adequação emitida pelo Conselho Diretor da ANPD. A transferência fundamenta-se no art. 33, IX, combinado com o art. 7º, V, da LGPD, por ser necessária à execução do contrato de prestação do serviço de suporte, do qual o envio desses e-mails faz parte, e limita-se aos dados necessários a esse envio.
+
+Para dar transparência à operação, conforme as diretrizes da Resolução CD/ANPD nº 19/2024, as informações sobre essa transferência estão reunidas no quadro abaixo:
+
+| Aspecto | Informação |
+|---|---|
+| Forma | Transferência contínua, realizada automaticamente a cada envio de e-mail pela plataforma, com fundamento no art. 33, IX, da LGPD. |
+| Finalidade específica | Envio dos e-mails de confirmação de cadastro, de redefinição de senha e de notificações sobre chamados. Os dados não são utilizados para nenhuma outra finalidade. |
+| Duração | Enquanto a Health & Safety utilizar o provedor para o envio dos e-mails da plataforma. Encerrada a utilização, os dados são eliminados pelo provedor conforme os seus termos de tratamento de dados. |
+| País de destino | Estados Unidos. |
+| Dados transferidos | Nome e endereço de e-mail do destinatário, conteúdo das mensagens e metadados de envio. |
+| Controlador e exportador | Health & Safety, identificada na seção 5, responsável pelo atendimento aos titulares e pela comunicação de incidentes relativos à transferência. |
+| Operador e importador | Resend (Plus Five Five, Inc.), que trata os dados apenas para executar o envio, conforme as instruções da Health & Safety e os termos de tratamento de dados do provedor. |
+| Uso compartilhado | Os dados são compartilhados apenas com o provedor, para a finalidade indicada neste quadro (ver seção 12). |
+| Medidas de segurança | Comunicação criptografada (TLS) entre a plataforma e o provedor e obrigações de segurança e de confidencialidade previstas nos termos do provedor. |
+| Transferências posteriores | O provedor utiliza suboperadores para executar o serviço, entre eles a Amazon Web Services (AWS), responsável pela hospedagem e pela expedição das mensagens. A relação completa é publicada pelo provedor em resend.com/legal/subprocessors. |
+| Direitos do titular | Os direitos da seção 16 podem ser exercidos pelos canais da seção 22, inclusive o de peticionar contra a Health & Safety perante a ANPD. |
 
 ### 10.2. Recursos de inteligência artificial
 
@@ -192,7 +209,7 @@ Antes da ativação, a Health & Safety realizará a avaliação do provedor conf
 
 ### 10.3. Hospedagem
 
-As demais operações de tratamento realizadas na plataforma — hospedagem, banco de dados e backups — ocorrem em infraestrutura localizada no Brasil, em São Paulo/SP.
+As demais operações de tratamento realizadas na plataforma — hospedagem, banco de dados e backups — ocorrem em infraestrutura localizada no Brasil, na cidade de São Paulo.
 
 ## 11. Assistente Virtual Helô
 
@@ -319,7 +336,7 @@ Algumas solicitações podem não ser integralmente atendidas quando houver obri
 
 A Health & Safety mantém procedimento formal para o tratamento de incidentes de segurança da informação, contemplando detecção, contenção, apuração, correção e registro.
 
-Ocorrendo incidente que possa acarretar risco ou dano relevante aos titulares, a Health & Safety comunicará o fato à ANPD e aos titulares afetados em prazo razoável, informando, no mínimo, a natureza dos dados atingidos, os titulares envolvidos, as medidas técnicas de proteção adotadas, os riscos relacionados e as medidas adotadas para reverter ou mitigar os efeitos do prejuízo, nos termos do art. 48 da LGPD.
+Ocorrendo incidente que possa acarretar risco ou dano relevante aos titulares, a Health & Safety comunicará o fato à ANPD e aos titulares afetados no prazo de 3 (três) dias úteis, contados do conhecimento de que o incidente afetou dados pessoais, informando, no mínimo, a natureza dos dados atingidos, os titulares envolvidos, as medidas técnicas de proteção adotadas, os riscos relacionados e as medidas adotadas para reverter ou mitigar os efeitos do prejuízo, nos termos do art. 48 da LGPD e da Resolução CD/ANPD nº 15/2024.
 
 ## 18. Cookies
 
@@ -367,4 +384,4 @@ O titular pode, ainda, apresentar reclamação diretamente à Autoridade Naciona
 
 | Revisão | Sumário de mudança | Data | Elaborado | Aprovado |
 |---|---|---|---|---|
-| 00 | Emissão Inicial | 31/08/2026 | Hyago Guimarães | Nicholson Pimentel |
+| 00 | Emissão Inicial | 25/09/2026 | Gustavo Oliveira | Nicholson Pimentel |

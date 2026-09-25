@@ -1,6 +1,6 @@
 # Termos de Uso — HelpHS
 
-**Documento:** [definir código do documento] · **Revisão:** 00 · **Vigência:** [definir data de publicação]
+**Documento:** PGS-TI-032 · **Revisão:** 00 · **Vigência:** 25/09/2026
 
 ---
 
@@ -10,7 +10,7 @@ Estes Termos de Uso regulam o acesso e a utilização da plataforma HelpHS, cent
 
 Ao criar uma conta e assinalar a caixa de aceite na tela de cadastro, o usuário declara que leu, compreendeu e aceita integralmente estes Termos de Uso e a Política de Privacidade da plataforma HelpHS. Quem não concordar com qualquer das condições aqui descritas não deve utilizar a plataforma.
 
-**Vigência:** esta revisão entra em vigor na data indicada no cabeçalho e substitui todas as versões anteriores deste documento.
+**Vigência:** esta revisão entra em vigor na data registrada na Tabela de Revisão e Aprovação e substitui todas as versões anteriores deste documento.
 
 ## 2. Identificação da Health & Safety
 
@@ -76,6 +76,8 @@ A plataforma deve ser utilizada exclusivamente para solicitações de suporte re
 
 A plataforma aplica limites de uso, como o número de tentativas de login em determinado período, para proteger as contas e a disponibilidade do serviço. Ao atingir um limite, o acesso é liberado automaticamente após o intervalo indicado na tela.
 
+Quem identificar uma falha de segurança na plataforma deve comunicá-la à Health & Safety pelos canais indicados na seção 18.
+
 ## 7. Chamados e Atendimento
 
 **Horário de atendimento:** a equipe de atendimento trabalha de segunda a sexta-feira, das 8h às 17h, horário de Brasília. Chamados abertos fora desse horário são atendidos a partir do próximo período de expediente.
@@ -106,7 +108,7 @@ A Health & Safety pode atualizar, corrigir ou retirar conteúdos da Base de Conh
 
 O usuário é responsável pelo conteúdo que registra na plataforma — descrições, mensagens e arquivos — e declara ter o direito de compartilhá-lo com a Health & Safety.
 
-Ao enviar conteúdo, o usuário autoriza a Health & Safety a utilizá-lo para prestar o atendimento solicitado, manter o histórico técnico de suporte, melhorar os seus produtos e serviços e cumprir obrigações legais, observada a Política de Privacidade.
+A Health & Safety utiliza esse conteúdo para prestar o atendimento solicitado, manter o histórico técnico de suporte, cumprir obrigações legais e, a partir de dados agregados ou anonimizados, produzir indicadores de desempenho do atendimento e melhorar a plataforma, nos termos da Política de Privacidade.
 
 A Health & Safety pode remover conteúdo que viole estes Termos, mediante registro no chamado.
 
@@ -152,7 +154,7 @@ A Health & Safety se comunica com o usuário por e-mail, pelas notificações da
 
 Estes Termos podem ser revisados a qualquer tempo. Cada revisão recebe novo número e nova data, registrados na Tabela de Revisão e Aprovação.
 
-Alterações relevantes serão comunicadas previamente aos usuários pelos canais de contato cadastrados, com antecedência mínima de 15 (quinze) dias em relação à sua entrada em vigor. Nesses casos, será solicitado novo aceite no primeiro acesso posterior à entrada em vigor; o usuário que não concordar poderá recusar, hipótese em que não poderá continuar utilizando a plataforma.
+Alterações relevantes serão comunicadas previamente aos usuários pelos canais de contato cadastrados, com antecedência mínima de 15 (quinze) dias em relação à sua entrada em vigor. Nesses casos, será solicitado novo aceite no primeiro acesso posterior à entrada em vigor; o usuário que não concordar poderá recusar, hipótese em que não poderá continuar utilizando a plataforma, sem prejuízo do exercício dos direitos previstos na Política de Privacidade.
 
 A plataforma registra qual revisão destes Termos e da Política de Privacidade cada usuário aceitou, com data e hora.
 
@@ -166,10 +168,11 @@ Dúvidas sobre estes Termos podem ser encaminhadas para:
 
 - **Suporte da plataforma:** https://helphs.healthsafetytech.com
 - **Telefone:** 4007-1507 | (81) 98177-1177
-- **Encarregado (DPO), para assuntos de dados pessoais:** Erick Santos – ti@healthsafety.com.br
+
+Encarregado (DPO), para assuntos de dados pessoais: Erick Santos – ti@healthsafety.com.br
 
 ## Tabela de Revisão e Aprovação
 
 | Revisão | Sumário de mudança | Data | Elaborado | Aprovado |
 |---|---|---|---|---|
-| 00 | Emissão inicial – Termos de Uso da plataforma HelpHS | [definir data de publicação] | [elaborado por] | [aprovado por] |
+| 00 | Emissão inicial – Termos de Uso da plataforma HelpHS | 25/09/2026 | Gustavo Oliveira | Nicholson Pimentel |
