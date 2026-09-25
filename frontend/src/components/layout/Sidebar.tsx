@@ -274,6 +274,14 @@ export function Sidebar({ collapsed, mobileOpen, onMobileClose }: SidebarProps) 
             >
               Política de Privacidade
             </Link>
+            <Link
+              to="/termos"
+              target="_blank"
+              rel="noopener noreferrer"
+              className="text-[11px] text-conteudo-muted hover:text-action transition-colors"
+            >
+              Termos de Uso
+            </Link>
             <p className="text-[11px] text-conteudo-muted">
               © 2026 Health &amp; Safety Tech
             </p>

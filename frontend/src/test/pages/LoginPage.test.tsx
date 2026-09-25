@@ -182,3 +182,21 @@ describe("LoginPage — a política de privacidade", () => {
     expect(link.getAttribute("rel")).toContain("noopener");
   });
 });
+
+describe("LoginPage — os termos de uso", () => {
+  it("oferece o link dos termos, em nova aba", () => {
+    mockUseAuth.mockReturnValue({
+      login: vi.fn(),
+      verifyMfa: vi.fn(),
+    } as unknown as ReturnType<typeof useAuth>);
+    render(
+      <MemoryRouter>
+        <LoginPage />
+      </MemoryRouter>,
+    );
+    const link = screen.getByRole("link", { name: "Termos de Uso" });
+    expect(link.getAttribute("href")).toBe("/termos");
+    expect(link.getAttribute("target")).toBe("_blank");
+    expect(link.getAttribute("rel")).toContain("noopener");
+  });
+});

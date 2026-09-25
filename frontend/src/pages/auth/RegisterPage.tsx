@@ -326,7 +326,17 @@ export default function RegisterPage() {
               className="gap-3"
               label={
                 <span className="text-xs leading-relaxed text-conteudo-muted">
-                  Li e aceito os termos de uso e a{" "}
+                  Li e aceito os{" "}
+                  <Link
+                    to="/termos"
+                    target="_blank"
+                    rel="noopener noreferrer"
+                    className="text-conteudo-link hover:underline"
+                    onClick={(e) => e.stopPropagation()}
+                  >
+                    termos de uso
+                  </Link>{" "}
+                  e a{" "}
                   <Link
                     to="/privacidade"
                     target="_blank"
