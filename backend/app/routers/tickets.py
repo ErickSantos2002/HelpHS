@@ -38,6 +38,7 @@ from app.models.models import (
     NotificationType,
     Product,
     SLAConfig,
+    SLALevel,
     Ticket,
     TicketHistory,
     TicketNote,
@@ -80,6 +81,7 @@ from app.services.notifications import (
     notifica_audiencia,
     notify,
 )
+from app.services.sla_alertas import configs_por_nivel, threshold_da_prioridade
 from app.services.ticket_lifecycle import (
     can_client_reopen,
     reopen_deadline,
@@ -280,6 +282,10 @@ def _serialize_ticket(
     agora: datetime | None = None,
     *,
     actor: User,
+    # `dict`, e não `Mapping`, porque é o que `threshold_da_prioridade` declara
+    # receber — e essa função é do worker da Fase 2A, que não se altera aqui.
+    # Anotar mais largo do lado novo faria o mypy recusar a composição.
+    limiares: dict[SLALevel, SLAConfig],
     com_expediente: bool = True,
 ) -> TicketResponse:
     """TicketResponse com os campos que são calculados, não armazenados.
@@ -303,6 +309,12 @@ def _serialize_ticket(
 
     `com_expediente=False` é o que a listagem usa: lá o bloco vem uma vez no
     topo da resposta.
+
+    ⚠️ `limiares` também é OBRIGATÓRIO e sem default, pela MESMA razão do
+    `actor`. Com default, os treze pontos que serializam chamado devolveriam
+    `sla_warning_threshold: null` em silêncio e a barra cairia no fallback sem
+    ninguém perceber. É o mapa `nível → SLAConfig` que `configs_por_nivel`
+    devolve — **uma consulta por requisição**, nunca uma por chamado.
     """
     agora = agora or datetime.now(UTC)
     response = TicketResponse.model_validate(ticket)
@@ -349,6 +361,12 @@ def _serialize_ticket(
         response.sla_resolve_total_min = business_minutes_between(
             inicio_do_ciclo_de_resolucao(ticket), response.sla_resolve_vence_em
         )
+
+    # O limiar que a barra do cartão usa para decidir cor. Mesma função que o
+    # aviso de SLA por e-mail consome (`sla_alertas.threshold_da_prioridade`),
+    # de propósito: com duas cópias da regra, o e-mail sairia num percentual e a
+    # tela ficaria vermelha em outro.
+    response.sla_warning_threshold = threshold_da_prioridade(ticket, limiares)
 
     if com_expediente:
         response.expediente = _expediente(agora)
@@ -597,7 +615,7 @@ async def create_ticket(
             _classify_ticket_async(ticket.id, body.title, body.description, body.category.value)
         )
 
-    return _serialize_ticket(ticket, actor=actor)
+    return _serialize_ticket(ticket, actor=actor, limiares=await configs_por_nivel(db))
 
 
 _SORT_COLUMNS = {
@@ -722,6 +740,13 @@ async def list_tickets(
         )
         product_map = {row.id: row.name for row in product_rows}
 
+    # Os limiares de alerta, em lote: são quatro linhas de catálogo que não
+    # mudam durante a requisição, e a barra de cada cartão precisa do limiar da
+    # prioridade dele. UMA consulta para a página inteira — passá-la para dentro
+    # de `_serialize_ticket` faria uma por chamado, que com cinquenta cartões
+    # seriam cinquenta consultas para ler as mesmas quatro linhas.
+    limiares = await configs_por_nivel(db)
+
     # Os equipamentos vêm junto pelo lazy="selectin" do relacionamento: uma
     # consulta para a página inteira, não uma por chamado.
     # Um instante só para a página inteira: cinquenta chamados lidos de
@@ -729,7 +754,7 @@ async def list_tickets(
     agora = datetime.now(UTC)
 
     def _serialize(t: Ticket) -> TicketResponse:
-        r = _serialize_ticket(t, agora, actor=actor, com_expediente=False)
+        r = _serialize_ticket(t, agora, actor=actor, limiares=limiares, com_expediente=False)
         r.assignee_name = name_map.get(t.assignee_id) if t.assignee_id else None
         r.product_name = product_map.get(t.product_id) if t.product_id else None
         if not r.product_name and t.equipments and t.equipments[0].product_id:
@@ -761,7 +786,7 @@ async def get_ticket(
     if actor.role == UserRole.client:
         ensure_ticket_visible(ticket, actor, _CHAMADO_NAO_ENCONTRADO)
 
-    response = _serialize_ticket(ticket, actor=actor)
+    response = _serialize_ticket(ticket, actor=actor, limiares=await configs_por_nivel(db))
     if ticket.assignee_id:
         assignee = await db.get(User, ticket.assignee_id)
         response.assignee_name = assignee.name if assignee else None
@@ -817,7 +842,7 @@ async def update_ticket(
     _audit(db, AuditAction.update, actor.id, ticket.id)
     await commit_e_notificar(db)
     await db.refresh(ticket)
-    return _serialize_ticket(ticket, actor=actor)
+    return _serialize_ticket(ticket, actor=actor, limiares=await configs_por_nivel(db))
 
 
 @router.patch("/tickets/{ticket_id}/observation", response_model=TicketResponse)
@@ -853,7 +878,7 @@ async def update_client_observation(
     _audit(db, AuditAction.update, actor.id, ticket.id)
     await commit_e_notificar(db)
     await db.refresh(ticket)
-    return _serialize_ticket(ticket, actor=actor)
+    return _serialize_ticket(ticket, actor=actor, limiares=await configs_por_nivel(db))
 
 
 @router.patch("/tickets/{ticket_id}/ai", response_model=TicketResponse)
@@ -895,7 +920,7 @@ async def toggle_ticket_ai(
         await db.commit()
         await db.refresh(ticket)
 
-    response = _serialize_ticket(ticket, actor=actor)
+    response = _serialize_ticket(ticket, actor=actor, limiares=await configs_por_nivel(db))
     await _fill_product_and_equipment(response, ticket, db)
     return response
 
@@ -1069,7 +1094,7 @@ async def extend_sla(
 
     await commit_e_notificar(db)
     await db.refresh(ticket)
-    return _serialize_ticket(ticket, actor=actor)
+    return _serialize_ticket(ticket, actor=actor, limiares=await configs_por_nivel(db))
 
 
 @router.patch("/tickets/{ticket_id}/priority", response_model=TicketResponse)
@@ -1111,7 +1136,7 @@ async def update_ticket_priority(
 
     anterior = ticket.priority
     if anterior == body.priority:
-        return _serialize_ticket(ticket, actor=actor)
+        return _serialize_ticket(ticket, actor=actor, limiares=await configs_por_nivel(db))
 
     now = datetime.now(UTC)
 
@@ -1148,7 +1173,7 @@ async def update_ticket_priority(
     _audit(db, AuditAction.update, actor.id, ticket.id)
     await commit_e_notificar(db)
     await db.refresh(ticket)
-    return _serialize_ticket(ticket, actor=actor)
+    return _serialize_ticket(ticket, actor=actor, limiares=await configs_por_nivel(db))
 
 
 @router.patch("/tickets/{ticket_id}/status", response_model=TicketResponse)
@@ -1241,7 +1266,7 @@ async def update_ticket_status(
         )
     await commit_e_notificar(db)
     await db.refresh(ticket)
-    return _serialize_ticket(ticket, actor=actor)
+    return _serialize_ticket(ticket, actor=actor, limiares=await configs_por_nivel(db))
 
 
 @router.post("/tickets/{ticket_id}/resolve", response_model=TicketResponse)
@@ -1324,7 +1349,7 @@ async def resolve_ticket(
 
     await commit_e_notificar(db)
     await db.refresh(ticket)
-    return _serialize_ticket(ticket, actor=actor)
+    return _serialize_ticket(ticket, actor=actor, limiares=await configs_por_nivel(db))
 
 
 @router.post("/tickets/{ticket_id}/reopen", response_model=TicketResponse)
@@ -1461,7 +1486,7 @@ async def reopen_ticket(
 
     await commit_e_notificar(db)
     await db.refresh(ticket)
-    return _serialize_ticket(ticket, actor=actor)
+    return _serialize_ticket(ticket, actor=actor, limiares=await configs_por_nivel(db))
 
 
 @router.patch("/tickets/{ticket_id}/assign", response_model=TicketResponse)
@@ -1548,7 +1573,7 @@ async def assign_ticket(
             )
     await commit_e_notificar(db)
     await db.refresh(ticket)
-    return _serialize_ticket(ticket, actor=actor)
+    return _serialize_ticket(ticket, actor=actor, limiares=await configs_por_nivel(db))
 
 
 @router.post(

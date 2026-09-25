@@ -294,7 +294,10 @@ def test_o_router_e_o_worker_usam_a_mesma_origem_de_ciclo():
     reabertura = _ABERTURA + timedelta(days=13)
     _reabre(ticket, reabertura)
 
-    resposta = _serialize_ticket(ticket, actor=_ator_tecnico(), agora=reabertura)
+    # `limiares={}` de propósito: este teste é sobre o INÍCIO DO CICLO, não
+    # sobre o limiar. Mapa vazio devolve `sla_warning_threshold=None`, e é a
+    # declaração honesta de que o campo não participa do que se mede aqui.
+    resposta = _serialize_ticket(ticket, actor=_ator_tecnico(), agora=reabertura, limiares={})
 
     prazo = prazo_efetivo_de_resolucao(ticket)
     assert prazo is not None
@@ -318,9 +321,9 @@ def test_o_total_da_primeira_resposta_continua_na_abertura():
 
     ticket = _chamado()
     reabertura = _ABERTURA + timedelta(days=13)
-    resposta_antes = _serialize_ticket(ticket, actor=_ator_tecnico(), agora=_ABERTURA)
+    resposta_antes = _serialize_ticket(ticket, actor=_ator_tecnico(), agora=_ABERTURA, limiares={})
     _reabre(ticket, reabertura)
-    resposta_depois = _serialize_ticket(ticket, actor=_ator_tecnico(), agora=_ABERTURA)
+    resposta_depois = _serialize_ticket(ticket, actor=_ator_tecnico(), agora=_ABERTURA, limiares={})
 
     assert resposta_antes.sla_response_total_min == resposta_depois.sla_response_total_min
 

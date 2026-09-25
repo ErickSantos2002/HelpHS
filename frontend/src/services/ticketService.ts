@@ -54,6 +54,14 @@ export interface Ticket {
   /** Total ja concedido em extensoes, em minutos uteis. Zero = sem extensao. */
   sla_resolve_extension_total_min: number;
   /**
+   * O limiar de alerta da PRIORIDADE ATUAL, em percentual inteiro (1..100).
+   *
+   * `null` em chamado sem prioridade — que nasce assim, esperando triagem — e
+   * quando nao ha `SLAConfig` ativa para o nivel. Quem decide a cor a partir
+   * dele e `lib/slaVisual.ts`, que documenta o fallback.
+   */
+  sla_warning_threshold: number | null;
+  /**
    * So no chamado avulso. Na LISTAGEM ele vem uma vez no topo da resposta, e
    * nao repetido em cada item.
    */
