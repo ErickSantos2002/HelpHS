@@ -459,15 +459,25 @@ class Settings(BaseSettings):
     # fornecedor. 30s é o teto da chamada (15s) com folga: um processo que
     # morra segurando o lock libera sozinho, e ninguém fica preso.
     api4com_lock_ttl_seconds: int = 30
-    # Duas ligações para o mesmo chamado em cinco minutos é gente ligando duas
-    # vezes, não duas necessidades. A janela vale para tentativa que PODE ter
-    # tocado — `pending` não entra, porque significa que nada saiu.
-    api4com_repeat_window_seconds: int = 300
-    # Tetos por hora. Não substituem o lock: o lock impede simultaneidade, isto
-    # impede volume. Chave autenticada, nunca IP — atrás do proxy do EasyPanel
-    # o IP junta a empresa inteira num balde só.
+    # ⚠️ Aqui morava `api4com_repeat_window_seconds`, a janela de 5 minutos da
+    # antirrepetição. Saiu em 25/09/2026 junto com a regra que a lia: quem
+    # atende liga quantas vezes for preciso. `extra="ignore"` no `model_config`
+    # garante que um `API4COM_REPEAT_WINDOW_SECONDS` esquecido no painel não
+    # derruba o boot — ele passa a ser apenas ignorado.
+    # Teto por hora, POR ATOR. Não substitui o lock: o lock impede
+    # simultaneidade, isto impede volume. Chave autenticada, nunca IP — atrás do
+    # proxy do EasyPanel o IP junta a empresa inteira num balde só.
+    #
+    # ⚠️ Aqui morava também `api4com_calls_per_ticket_per_hour = 3`, o teto por
+    # CHAMADO. Saiu em 25/09/2026: ele limitava quantas vezes se liga para o
+    # mesmo chamado, e a regra passou a ser "quantas vezes for preciso". O teto
+    # por ator cobre o risco que motivou os dois — laço, conta comprometida e
+    # volume anormal são propriedades de quem liga.
+    #
+    # `extra="ignore"` no `model_config` garante que um
+    # `API4COM_CALLS_PER_TICKET_PER_HOUR` esquecido no painel seja apenas
+    # ignorado, sem derrubar o boot.
     api4com_calls_per_actor_per_hour: int = 20
-    api4com_calls_per_ticket_per_hour: int = 3
 
     # ── Formato de `called` no POST /calls (Fase 2C.3) ───────
     #

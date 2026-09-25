@@ -1133,18 +1133,33 @@ describe("TicketDetailPage — Ligar para cliente", () => {
   });
 
   it("409 mostra o motivo que o backend deu", async () => {
+    // ⚠️ O motivo mudou em 25/09/2026. Este caso usava a mensagem da
+    // antirrepetição temporal ("há poucos minutos"), que saiu do backend com a
+    // regra. O 409 continua existindo — hoje quem o produz é o lock de
+    // concorrência, e o tratamento do front sempre foi genérico: ele mostra o
+    // `detail` que vier, sem conhecer nenhum motivo em particular.
     vi.mocked(ticketService.createTicketCall).mockRejectedValue(
-      erroDaApi(
-        409,
-        "Já houve uma tentativa de ligação para este chamado há poucos minutos.",
-      ),
+      erroDaApi(409, "Já há uma ligação em andamento para este chamado."),
     );
     await montar();
     fireEvent.click(botao());
     await waitFor(() =>
       expect(toast.error).toHaveBeenCalledWith("Não foi possível iniciar a ligação.", {
+        description: "Já há uma ligação em andamento para este chamado.",
+      }),
+    );
+  });
+
+  it("409 sem detail cai na mensagem genérica da casa", async () => {
+    // Prova que o front NÃO depende de conhecer o motivo: um 409 de qualquer
+    // regra futura continua legível.
+    vi.mocked(ticketService.createTicketCall).mockRejectedValue(erroDaApi(409));
+    await montar();
+    fireEvent.click(botao());
+    await waitFor(() =>
+      expect(toast.error).toHaveBeenCalledWith("Não foi possível iniciar a ligação.", {
         description:
-          "Já houve uma tentativa de ligação para este chamado há poucos minutos.",
+          "Esta ação conflita com o estado atual do registro. Atualize a página e tente de novo.",
       }),
     );
   });
