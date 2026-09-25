@@ -94,6 +94,13 @@ export const ICON_PATHS_PACOTE = {
     "M3 9a2 2 0 012-2h.93a2 2 0 001.664-.89l.812-1.22A2 2 0 0110.07 4h3.86a2 2 0 011.664.89l.812 1.22A2 2 0 0018.07 7H19a2 2 0 012 2v9a2 2 0 01-2 2H5a2 2 0 01-2-2V9z",
     "M15 13a3 3 0 11-6 0 3 3 0 016 0z",
   ],
+  // ── E22 ────────────────────────────────────────────────────
+  // Telefone. Entrou pela ação 'Ligar para cliente' do chamado: nenhum
+  // dos 62 significava isso — `chat` é conversa escrita, `bell` é aviso,
+  // `send` é envio —, então não havia o que unificar por significado.
+  // Aprovada pelo operador em 25/09/2026 como EMENDA, e não como variante
+  // local: a tabela local segue vazia, que é a regra de 08/09.
+  phone: "M3 5a2 2 0 012-2h3.28a1 1 0 01.948.684l1.498 4.493a1 1 0 01-.502 1.21l-2.257 1.13a11.042 11.042 0 005.516 5.516l1.13-2.257a1 1 0 011.21-.502l4.493 1.498a1 1 0 01.684.949V19a2 2 0 01-2 2h-1C9.716 21 3 14.284 3 6V5z",
 } as const;
 
 /**
