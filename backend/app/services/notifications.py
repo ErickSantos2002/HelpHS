@@ -471,16 +471,25 @@ def _disparar(pendente: _EmailPendente) -> None:
 
 
 async def _send_and_log(pendente: _EmailPendente) -> None:
+    """Envia e registra o desfecho pelo ID da notificação, nunca pelo endereço.
+
+    O `notif_id` é identificador interno: quem lê o log acha a linha em
+    `notifications` e, de lá, o destinatário — se tiver acesso ao banco, que é
+    outra permissão. Quem lê log é tipicamente mais gente do que quem lê o banco.
+
+    Mudado em 25/09/2026: as duas linhas abaixo diziam `delivered to
+    {to_email}`, e a do `send_email` levava também o ASSUNTO — que no aviso de
+    chamado novo contém o título do chamado.
+    """
     sent = await send_email(
         pendente.to_email,
         pendente.subject,
         pendente.body,
         pendente.settings,
         html=pendente.html,
+        contexto=f"notification {pendente.notif_id}",
     )
     if sent:
-        logger.debug(f"Email notification {pendente.notif_id} delivered to {pendente.to_email}")
+        logger.debug(f"Email notification {pendente.notif_id} delivered")
     else:
-        logger.warning(
-            f"Email notification {pendente.notif_id} NOT delivered to {pendente.to_email}"
-        )
+        logger.warning(f"Email notification {pendente.notif_id} NOT delivered")

@@ -443,11 +443,26 @@ def _capturar_log():
 
 
 @pytest.mark.asyncio
-async def test_log_de_falha_de_email_diz_o_destinatario_e_o_motivo():
+async def test_log_de_falha_de_email_diz_o_contexto_e_o_tipo_do_erro():
     """
     Quando alguém reclama que não recebeu o email, a linha de log é a única
     pista que existe. Se ela sair com o placeholder literal, os argumentos são
     descartados e a linha não serve para nada.
+
+    ⚠️ ESTE TESTE MUDOU DE IDENTIFICADOR EM 25/09/2026, e a versão anterior
+    exigia o contrário do que esta exige.
+
+    Ele se chamava `..._diz_o_destinatario_e_o_motivo` e afirmava o endereço e a
+    mensagem da exceção dentro da linha. A intenção era boa e continua valendo —
+    "sem rastro a linha não serve" —, mas o rastro escolhido era dado pessoal:
+    com SMTP ligado, cada falha punha o endereço do cliente no log de produção,
+    e `str(exc)` de `SMTPRecipientRefused` põe o destinatário mesmo quando
+    ninguém interpola `{to_email}`.
+
+    A invariante que sobrevive é a do docstring original: a linha tem de estar
+    INTERPOLADA e tem de dizer o suficiente para diagnosticar. O que mudou é o
+    que conta como suficiente — contexto interno e classe do erro, em vez de
+    endereço e texto de servidor.
     """
     from app.core.config import Settings
     from app.services.email import send_email
@@ -463,22 +478,40 @@ async def test_log_de_falha_de_email_diz_o_destinatario_e_o_motivo():
 
     with patch("app.services.email._get_mail_client") as mock_client:
         mock_fm = AsyncMock()
-        mock_fm.send_message = AsyncMock(side_effect=Exception("conexao recusada"))
+        mock_fm.send_message = AsyncMock(side_effect=ValueError("conexao recusada"))
         mock_client.return_value = mock_fm
 
         with _capturar_log() as linhas:
-            enviado = await send_email("quem.reclamou@test.com", "Assunto", "Corpo", settings)
+            enviado = await send_email(
+                "quem.reclamou@test.com",
+                "Assunto",
+                "Corpo",
+                settings,
+                contexto="notification abc-123",
+            )
 
     assert enviado is False
-    falhas = [linha for linha in linhas if "Failed to send email" in linha]
+    falhas = [linha for linha in linhas if "SMTP delivery failed" in linha]
     assert falhas, f"a falha de entrega não foi registrada: {linhas}"
-    assert "quem.reclamou@test.com" in falhas[0]
-    assert "conexao recusada" in falhas[0]
+    # Interpolada, não literal — a razão original deste teste existir.
+    assert "{contexto}" not in falhas[0]
+    assert "notification abc-123" in falhas[0]
+    assert "ValueError" in falhas[0], "sem a classe do erro a linha não diagnostica nada"
+    # E o que NÃO pode estar ali.
+    assert "quem.reclamou@test.com" not in falhas[0]
+    assert "conexao recusada" not in falhas[0]
+    assert "Assunto" not in falhas[0]
 
 
 @pytest.mark.asyncio
-async def test_log_de_notificacao_nao_entregue_diz_o_destinatario():
-    """Mesma dívida do lado da notificação: sem destinatário não há rastro."""
+async def test_log_de_notificacao_nao_entregue_diz_o_id_e_nao_o_destinatario():
+    """Mesma dívida do lado da notificação — e a mesma troca de identificador.
+
+    A versão anterior exigia `destino@test.com` na linha. O rastro agora é o
+    `notif_id`, que é interno: com ele se acha a linha em `notifications` e, de
+    lá, o destinatário — mas isso exige acesso ao banco, que é outra permissão.
+    Quem lê log é tipicamente mais gente do que quem lê o banco.
+    """
     from app.core.config import Settings
     from app.services import notifications
     from app.services.notifications import _send_and_log
@@ -502,7 +535,9 @@ async def test_log_de_notificacao_nao_entregue_diz_o_destinatario():
 
     nao_entregues = [linha for linha in linhas if "NOT delivered" in linha]
     assert nao_entregues, f"a não-entrega não foi registrada: {linhas}"
-    assert "destino@test.com" in nao_entregues[0]
+    assert str(_NOTIF_ID) in nao_entregues[0], "sem o id não há rastro nenhum"
+    assert "destino@test.com" not in nao_entregues[0]
+    assert "Assunto" not in nao_entregues[0]
     assert str(_NOTIF_ID) in nao_entregues[0]
 
 

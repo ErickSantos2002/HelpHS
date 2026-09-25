@@ -25,13 +25,28 @@ def _link(settings: Settings, caminho: str, token: str) -> str:
     return f"{base}/{caminho}?token={quote(token)}"
 
 
-async def _envia(to_email: str, assunto: str, conteudo: Mensagem, settings: Settings) -> bool:
+async def _envia(
+    to_email: str, assunto: str, conteudo: Mensagem, settings: Settings, evento: str
+) -> bool:
+    """Envia, e diz ao log QUE EVENTO é — nunca para quem.
+
+    O `evento` é obrigatório e sem default de propósito. Estes três e-mails não
+    têm `notif_id`, e a linha que o `send_email` escreve é a ÚNICA que registra o
+    desfecho deles: o `auth.py` só registra o enfileiramento (`... queued`), e
+    nunca se aquilo chegou a ser aceito. Um default genérico faria confirmação de
+    cadastro e redefinição de senha saírem indistinguíveis no log, justamente no
+    momento em que alguém investiga "o cliente diz que não recebeu".
+
+    O nome do evento não é dado pessoal: que ALGUÉM pediu redefinição de senha
+    nesta requisição já está no log do `auth.py`, com o `user_id`.
+    """
     return await send_email(
         to_email=to_email,
         subject=assunto,
         body=em_texto(conteudo),
         html=em_html(conteudo),
         settings=settings,
+        contexto=f"account email ({evento})",
     )
 
 
@@ -60,6 +75,7 @@ async def send_verification_email(to_email: str, name: str, token: str, settings
         "[HelpHS] Confirme seu e-mail para ativar a conta",
         conteudo,
         settings,
+        evento="verification",
     )
 
 
@@ -85,7 +101,13 @@ async def send_password_reset_email(
         ),
     )
 
-    return await _envia(to_email, "[HelpHS] Redefinição de senha", conteudo, settings)
+    return await _envia(
+        to_email,
+        "[HelpHS] Redefinição de senha",
+        conteudo,
+        settings,
+        evento="password reset",
+    )
 
 
 async def send_account_exists_email(to_email: str, settings: Settings) -> bool:
@@ -127,4 +149,5 @@ async def send_account_exists_email(to_email: str, settings: Settings) -> bool:
         "[HelpHS] Você já tem uma conta com este e-mail",
         conteudo,
         settings,
+        evento="account exists",
     )

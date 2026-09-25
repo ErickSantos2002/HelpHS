@@ -258,3 +258,306 @@ def test_setup_logging_desliga_o_diagnostico_em_todos_os_sinks(ambiente):
         assert (
             chamada.kwargs.get("diagnose") is False
         ), f"um sink de {ambiente} foi instalado sem diagnose=False"
+
+
+# ══════════════════════════════════════════════════════════════
+# DADO PESSOAL NO LOG DE E-MAIL
+# ══════════════════════════════════════════════════════════════
+#
+# Os testes acima tratam de SEGREDO. Este grupo trata de DADO PESSOAL, que é
+# problema diferente e chega pelo mesmo cano.
+#
+# Até 25/09/2026 o caminho de e-mail logava, em `INFO`:
+#
+#     Email sent to cliente@empresa.com.br: [HelpHS] Novo chamado HS-2026-0042
+#     — Impressora da recepção sem conexão
+#
+# Endereço do cliente e TÍTULO DO CHAMADO, no log de produção, numa linha por
+# e-mail. Enquanto não houve SMTP configurado nada disso saiu — a função retorna
+# antes. Ligar o SMTP ligava o vazamento junto, e era o mesmo restart.
+#
+# O `patcher` de `logging.py` não alcança isto: ele apaga token de QUERY STRING,
+# e aqui o dado vem interpolado no texto da mensagem.
+#
+# ⚠️ E `str(exc)` também carrega endereço. Medido no aiosmtplib 3.0.2:
+# `SMTPSenderRefused` leva o remetente, `SMTPRecipientRefused` e
+# `SMTPRecipientsRefused` levam o DESTINATÁRIO. É por isso que o log passou a
+# registrar a CLASSE do erro e o código numérico, nunca a mensagem.
+
+_ENDERECO = "cliente.real@empresa.com.br"
+_TITULO_DO_CHAMADO = "Impressora da recepcao sem conexao"
+_ASSUNTO = f"[HelpHS] Novo chamado HS-2026-0042 - {_TITULO_DO_CHAMADO}"
+_SENHA_SMTP = "re_CHAVE-FALSA-DE-TESTE-9Q2W"
+
+# O que NUNCA pode aparecer numa linha de log do caminho de e-mail.
+_PROIBIDO = {
+    "endereço do destinatário": _ENDERECO,
+    "título do chamado": _TITULO_DO_CHAMADO,
+    "assunto do e-mail": _ASSUNTO,
+    "senha do SMTP": _SENHA_SMTP,
+}
+
+
+def _dado_pessoal_em(linhas: list[str]) -> list[str]:
+    """Quais fragmentos proibidos aparecem nas linhas. Vazio = limpo.
+
+    Devolve o NOME do fragmento, e não o valor: a mensagem de falha do pytest
+    vai para o terminal, e o terminal costuma virar print no chat.
+    """
+    texto = "\n".join(linhas)
+    return [nome for nome, valor in _PROIBIDO.items() if valor in texto]
+
+
+def _settings_com_smtp():
+    from app.core.config import Settings
+
+    return Settings(
+        database_url="postgresql+asyncpg://u:p@localhost/db",
+        smtp_from_email="naoresponda@test.com",
+        smtp_user="naoresponda@test.com",
+        smtp_password=_SENHA_SMTP,
+    )
+
+
+async def _envia_capturando(erro: BaseException | None = None, **extras) -> list[str]:
+    """Roda `send_email` com o sink instalado e devolve as linhas logadas."""
+    from unittest.mock import AsyncMock
+
+    from app.services import email as servico
+
+    linhas, sink = _captura()
+    enviar = AsyncMock(side_effect=erro) if erro else AsyncMock()
+    try:
+        with patch.object(servico.FastMail, "send_message", new=enviar):
+            await servico.send_email(
+                to_email=_ENDERECO,
+                subject=_ASSUNTO,
+                body="corpo",
+                settings=_settings_com_smtp(),
+                **extras,
+            )
+    finally:
+        logger.remove(sink)
+    return linhas
+
+
+# ── O detector tem dente ──────────────────────────────────────
+
+
+def test_o_detector_de_dado_pessoal_pegaria_o_formato_antigo():
+    """Prova que os testes abaixo não passam por vacuidade.
+
+    Reproduz as duas linhas que existiam antes da correção. Se `_dado_pessoal_em`
+    não as acusasse, todo teste deste grupo passaria sem verificar nada.
+    """
+    antigas = [
+        f"Email sent to {_ENDERECO}: {_ASSUNTO}",
+        f"Failed to send email to {_ENDERECO}: algum erro",
+    ]
+
+    achados = _dado_pessoal_em(antigas)
+    assert "endereço do destinatário" in achados
+    assert "assunto do e-mail" in achados
+    assert "título do chamado" in achados
+
+
+# ── Sucesso ───────────────────────────────────────────────────
+
+
+@pytest.mark.asyncio
+async def test_o_log_de_entrega_aceita_nao_leva_endereco_nem_assunto():
+    linhas = await _envia_capturando()
+
+    assert linhas, "o envio bem-sucedido deixou de registrar qualquer linha"
+    assert not _dado_pessoal_em(linhas), _dado_pessoal_em(linhas)
+
+
+@pytest.mark.asyncio
+async def test_o_log_de_entrega_ainda_diz_que_deu_certo():
+    """Remover dado pessoal não pode virar remover informação operacional."""
+    linhas = await _envia_capturando()
+
+    texto = " ".join(linhas).lower()
+    assert "accepted" in texto or "delivered" in texto or "sent" in texto
+
+
+# ── Falha ─────────────────────────────────────────────────────
+
+
+@pytest.mark.asyncio
+async def test_o_log_de_falha_nao_leva_o_endereco_que_a_excecao_carrega():
+    """O caso mais traiçoeiro: o endereço vem de DENTRO da exceção.
+
+    `SMTPRecipientRefused` guarda o destinatário e o expõe no `str()`. Logar
+    `{exc}` põe o endereço do cliente no log sem ninguém escrever `{to_email}`.
+    """
+    from aiosmtplib.errors import SMTPRecipientRefused
+
+    linhas = await _envia_capturando(
+        erro=SMTPRecipientRefused(550, "mailbox unavailable", _ENDERECO)
+    )
+
+    assert linhas, "a falha deixou de registrar qualquer linha"
+    assert not _dado_pessoal_em(linhas), _dado_pessoal_em(linhas)
+
+
+@pytest.mark.asyncio
+async def test_o_log_de_falha_diz_a_classe_e_o_codigo_do_servidor():
+    """O que sobra tem de bastar para diagnosticar.
+
+    A classe separa "não conectou" de "credencial recusada"; o código separa
+    535 (credencial) de 550 (domínio não verificado) e de 421 (tente depois).
+    O código é inteiro do protocolo, não texto de servidor.
+    """
+    from aiosmtplib.errors import SMTPAuthenticationError
+
+    linhas = await _envia_capturando(
+        erro=SMTPAuthenticationError(535, "Authentication credentials invalid")
+    )
+
+    texto = " ".join(linhas)
+    assert "SMTPAuthenticationError" in texto
+    assert "535" in texto
+
+
+@pytest.mark.asyncio
+async def test_o_log_de_falha_nao_leva_a_mensagem_do_servidor():
+    """Texto de servidor é conteúdo variável: hoje é inócuo, amanhã não."""
+    from aiosmtplib.errors import SMTPAuthenticationError
+
+    linhas = await _envia_capturando(erro=SMTPAuthenticationError(535, f"rejected for {_ENDERECO}"))
+
+    assert "rejected for" not in " ".join(linhas)
+
+
+@pytest.mark.asyncio
+async def test_a_senha_do_smtp_nunca_aparece_no_log():
+    """Regressão da conclusão da auditoria: credencial não vaza por este caminho.
+
+    Exercita os dois ramos — aceito e recusado — porque a senha está no
+    `Settings` dos dois.
+    """
+    from aiosmtplib.errors import SMTPAuthenticationError
+
+    aceito = await _envia_capturando()
+    recusado = await _envia_capturando(erro=SMTPAuthenticationError(535, "nope"))
+
+    assert _SENHA_SMTP not in " ".join(aceito + recusado)
+
+
+# ── SMTP desligado ────────────────────────────────────────────
+
+
+@pytest.mark.asyncio
+async def test_o_log_de_smtp_desligado_nao_leva_o_endereco():
+    from unittest.mock import AsyncMock
+
+    from app.core.config import Settings
+    from app.services import email as servico
+
+    sem_smtp = Settings(database_url="postgresql+asyncpg://u:p@localhost/db")
+
+    linhas, sink = _captura()
+    try:
+        with patch.object(servico.FastMail, "send_message", new=AsyncMock()):
+            await servico.send_email(_ENDERECO, _ASSUNTO, "corpo", sem_smtp)
+    finally:
+        logger.remove(sink)
+
+    assert not _dado_pessoal_em(linhas), _dado_pessoal_em(linhas)
+
+
+# ── A notificação mantém o id ─────────────────────────────────
+
+
+@pytest.mark.asyncio
+async def test_o_log_da_notificacao_mantem_o_id_e_perde_o_endereco():
+    """`notif_id` é o identificador interno — ele FICA, o endereço sai.
+
+    É o que permite achar a notificação no banco sem que o log carregue para
+    quem ela foi.
+    """
+    import uuid
+    from unittest.mock import AsyncMock
+
+    from app.services import notifications
+
+    notif_id = uuid.uuid4()
+    pendente = notifications._EmailPendente(
+        notif_id=notif_id,
+        to_email=_ENDERECO,
+        subject=_ASSUNTO,
+        body="corpo",
+        html="<p>corpo</p>",
+        settings=_settings_com_smtp(),
+    )
+
+    linhas, sink = _captura()
+    try:
+        with patch.object(notifications, "send_email", new=AsyncMock(return_value=True)):
+            await notifications._send_and_log(pendente)
+    finally:
+        logger.remove(sink)
+
+    texto = " ".join(linhas)
+    assert str(notif_id) in texto, "o id da notificação saiu do log junto com o endereço"
+    assert not _dado_pessoal_em(linhas), _dado_pessoal_em(linhas)
+
+
+@pytest.mark.asyncio
+async def test_o_log_da_notificacao_nao_entregue_tambem_perde_o_endereco():
+    import uuid
+    from unittest.mock import AsyncMock
+
+    from app.services import notifications
+
+    notif_id = uuid.uuid4()
+    pendente = notifications._EmailPendente(
+        notif_id=notif_id,
+        to_email=_ENDERECO,
+        subject=_ASSUNTO,
+        body="corpo",
+        html="<p>corpo</p>",
+        settings=_settings_com_smtp(),
+    )
+
+    linhas, sink = _captura()
+    try:
+        with patch.object(notifications, "send_email", new=AsyncMock(return_value=False)):
+            await notifications._send_and_log(pendente)
+    finally:
+        logger.remove(sink)
+
+    assert str(notif_id) in " ".join(linhas)
+    assert not _dado_pessoal_em(linhas), _dado_pessoal_em(linhas)
+
+
+# ── E-mail de conta: evento, não endereço ─────────────────────
+
+
+@pytest.mark.asyncio
+async def test_o_email_de_conta_registra_o_evento_e_nao_o_destinatario():
+    """E-mail de conta não tem `notif_id`, então o log diz QUE EVENTO foi.
+
+    Sem isso a linha de transporte seria indistinguível entre confirmação de
+    cadastro e redefinição de senha — e é a ÚNICA linha que esses três têm,
+    porque o `auth.py` só registra o enfileiramento, nunca o desfecho.
+    """
+    from unittest.mock import AsyncMock
+
+    from app.services import account_emails
+
+    linhas, sink = _captura()
+    try:
+        with patch.object(account_emails, "send_email", new=AsyncMock(return_value=True)) as enviar:
+            await account_emails.send_password_reset_email(
+                _ENDERECO, "Welton", "token-de-teste-123", _settings_com_smtp()
+            )
+    finally:
+        logger.remove(sink)
+
+    # O `contexto` é o que o `send_email` vai logar, e ele não pode ser o endereço.
+    contexto = enviar.await_args.kwargs.get("contexto", "")
+    assert contexto, "o e-mail de conta não disse ao `send_email` que evento é"
+    assert _ENDERECO not in contexto
+    assert not _dado_pessoal_em(linhas + [contexto]), _dado_pessoal_em(linhas + [contexto])
