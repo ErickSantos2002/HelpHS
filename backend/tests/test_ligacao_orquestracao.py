@@ -16,6 +16,7 @@ from __future__ import annotations
 
 import uuid
 from datetime import UTC, datetime, timedelta
+from types import SimpleNamespace
 from unittest.mock import AsyncMock, MagicMock, patch
 
 import pytest
@@ -147,7 +148,45 @@ def redis_falso():
 
 
 async def _prepara(ator, sessao, ticket_id=None):
-    return await ligacao.prepara_tentativa(sessao, ticket_id=ticket_id or uuid.uuid4(), ator=ator)
+    return await ligacao.inicia_ligacao(sessao, ticket_id=ticket_id or uuid.uuid4(), ator=ator)
+
+
+@pytest.fixture(autouse=True)
+def telefonia_ligada():
+    """Liga a flag e substitui o transporte — em TODOS os testes deste arquivo.
+
+    Autouse de propósito: um teste que esquecesse de mockar falaria com a
+    API4COM de verdade. Aqui o esquecimento não é possível; quem quer medir a
+    flag desligada desliga explicitamente.
+
+    O dublê devolve sucesso confirmado. Os testes de recusa trocam o
+    `side_effect` pelo que querem medir.
+    """
+    from app.services.api4com import Api4ComCreateCallResult
+
+    with (
+        patch("app.services.ligacao.get_settings") as settings_falso,
+        patch(
+            "app.services.ligacao.api4com.create_call",
+            new=AsyncMock(
+                return_value=Api4ComCreateCallResult(
+                    status_code=200, provider_call_id="1PkXhmBsYAvr9legLB2d7BimT0Q"
+                )
+            ),
+        ) as chamada,
+    ):
+        from app.core.config import get_settings as real
+
+        base = real()
+        settings_falso.return_value = SimpleNamespace(
+            api4com_enabled=True,
+            api4com_lock_ttl_seconds=base.api4com_lock_ttl_seconds,
+            api4com_repeat_window_seconds=base.api4com_repeat_window_seconds,
+            api4com_calls_per_actor_per_hour=base.api4com_calls_per_actor_per_hour,
+            api4com_calls_per_ticket_per_hour=base.api4com_calls_per_ticket_per_hour,
+            api4com_called_format=base.api4com_called_format,
+        )
+        yield chamada
 
 
 # ── Autorização ──────────────────────────────────────────────
@@ -160,10 +199,12 @@ async def test_staff_com_ramal_prepara_a_tentativa(redis_falso, papel):
     sessao = _Sessao(ticket, _cliente())
     tentativa = await _prepara(_ator(papel), sessao, ticket.id)
 
-    assert tentativa.creation_status == CallCreationStatus.pending.value
-    assert tentativa.provider_call_id is None
-    assert tentativa.provider_http_status is None
-    assert sessao.commit.await_count == 1, "a tentativa precisa ficar DURÁVEL"
+    assert tentativa.creation_status == CallCreationStatus.confirmed.value
+    assert tentativa.provider_call_id == "1PkXhmBsYAvr9legLB2d7BimT0Q"
+    assert tentativa.provider_http_status == 200
+    # Três commits, e a conta importa: `pending`, `dispatching` e o estado
+    # final. Juntar quaisquer dois abriria a janela que o desenho fecha.
+    assert sessao.commit.await_count == 3
 
 
 @pytest.mark.asyncio
@@ -213,7 +254,7 @@ async def test_ator_sem_ramal_e_bloqueado(redis_falso, ramal):
 async def test_situacoes_que_aceitam_ligacao(redis_falso, situacao):
     ticket = _ticket(situacao)
     tentativa = await _prepara(_ator(), _Sessao(ticket, _cliente()), ticket.id)
-    assert tentativa.creation_status == CallCreationStatus.pending.value
+    assert tentativa.creation_status == CallCreationStatus.confirmed.value
 
 
 @pytest.mark.asyncio
@@ -441,7 +482,7 @@ async def test_janela_expirada_libera(redis_falso):
     redis_falso.dados.pop(f"{ligacao._PREFIXO_TETO_CHAMADO}{ticket.id}")
 
     tentativa = await _prepara(_ator(), _Sessao(ticket, _cliente()), ticket.id)
-    assert tentativa.creation_status == CallCreationStatus.pending.value
+    assert tentativa.creation_status == CallCreationStatus.confirmed.value
 
 
 @pytest.mark.asyncio
@@ -461,7 +502,7 @@ async def test_recusa_antes_das_validacoes_nao_gasta_cota(redis_falso):
 
 @pytest.mark.asyncio
 @pytest.mark.parametrize("ramal", ["1018", "1019"])
-async def test_os_ramais_do_suporte_passam_pela_validacao(redis_falso, ramal):
+async def test_os_ramais_do_suporte_passam_pela_validacao(redis_falso, telefonia_ligada, ramal):
     """1018 e 1019 foram criados na API4COM para o suporte do HelpHS.
 
     Este teste prova que a orquestração deixa de parar no "ator sem ramal"
@@ -475,8 +516,11 @@ async def test_os_ramais_do_suporte_passam_pela_validacao(redis_falso, ramal):
     with patch("httpx.AsyncClient.send", side_effect=AssertionError("saiu HTTP!")):
         tentativa = await _prepara(_ator(ramal=ramal), sessao, ticket.id)
 
-    assert tentativa.creation_status == CallCreationStatus.pending.value
-    assert tentativa.provider_call_id is None
+    assert tentativa.creation_status == CallCreationStatus.confirmed.value
+    # E o ramal do ator chegou ao fornecedor como `extension` E como `caller`.
+    enviado = telefonia_ligada.await_args.kwargs
+    assert enviado["extension"] == ramal
+    assert enviado["caller"] == ramal
 
 
 @pytest.mark.asyncio
@@ -491,18 +535,19 @@ async def test_ramal_do_suporte_nao_e_convertido_para_numero(redis_falso):
     assert ligacao._ramal_do_ator(ator) == "0700"
 
     tentativa = await _prepara(ator, _Sessao(ticket, _cliente()), ticket.id)
-    assert tentativa.creation_status == CallCreationStatus.pending.value
+    assert tentativa.creation_status == CallCreationStatus.confirmed.value
 
 
 # ── O sentinela ──────────────────────────────────────────────
 
 
-def test_a_orquestracao_nao_fala_com_o_fornecedor():
-    """Nenhum caminho deste módulo alcança a API4COM. Prova por AST.
+def test_o_transporte_e_o_unico_caminho_para_o_fornecedor():
+    """A orquestração fala com a API4COM por UMA porta só: `api4com.create_call`.
 
-    Enquanto isto for verdade, um erro em qualquer regra acima custa um 4xx —
-    nunca um telefone tocando. É o teste que dá licença para os outros
-    existirem.
+    Na 2C.2 este sentinela afirmava o oposto — que o módulo não tocava o
+    transporte. A fase mudou, e a garantia muda com ela: o que não pode
+    acontecer agora é `httpx` aparecer aqui, montando requisição por fora do
+    contrato do transporte (que roda `retries=0`, sem redirect e com timeout).
     """
     import ast
     from pathlib import Path
@@ -518,24 +563,64 @@ def test_a_orquestracao_nao_fala_com_o_fornecedor():
             importados.add(no.module)
             importados.update(f"{no.module}.{a.name}" for a in no.names)
 
-    proibidos = {i for i in importados if "api4com" in i or i == "httpx"}
-    assert not proibidos, f"a orquestração importou o transporte: {proibidos}"
+    assert "httpx" not in importados, "a orquestração montou HTTP por fora do transporte"
 
-    chamadas = {
-        no.func.attr
+    chamadas = [
+        no
         for no in ast.walk(arvore)
         if isinstance(no, ast.Call) and isinstance(no.func, ast.Attribute)
-    }
-    assert "create_call" not in chamadas
+    ]
+    do_fornecedor = [c for c in chamadas if c.func.attr == "create_call"]
+    assert len(do_fornecedor) == 1, "há mais de um ponto chamando o fornecedor"
 
 
-@pytest.mark.asyncio
-async def test_nenhuma_requisicao_http_sai_durante_a_preparacao(redis_falso):
-    """Cinto e suspensório: o sentinela é estático, este é em execução."""
-    ticket = _ticket()
-    with patch("httpx.AsyncClient.send", side_effect=AssertionError("saiu HTTP!")):
-        tentativa = await _prepara(_ator(), _Sessao(ticket, _cliente()), ticket.id)
-    assert tentativa.creation_status == CallCreationStatus.pending.value
+def test_nao_existe_retry_automatico():
+    """Nenhum caminho repete a chamada. Prova por contagem, não por leitura."""
+    import ast
+    from pathlib import Path
+
+    fonte = Path(ligacao.__file__).read_text(encoding="utf-8")
+    chamadas = [
+        no
+        for no in ast.walk(ast.parse(fonte))
+        if isinstance(no, ast.Call) and isinstance(no.func, ast.Attribute)
+    ]
+    assert len([c for c in chamadas if c.func.attr == "create_call"]) == 1
+
+    # E nenhuma estrutura de repetição envolve a chamada.
+    arvore = ast.parse(fonte)
+    for no in ast.walk(arvore):
+        if isinstance(no, ast.For | ast.While | ast.AsyncFor):
+            dentro = [
+                c
+                for c in ast.walk(no)
+                if isinstance(c, ast.Call)
+                and isinstance(c.func, ast.Attribute)
+                and c.func.attr == "create_call"
+            ]
+            assert not dentro, "o `create_call` está dentro de um laço"
+
+
+def test_o_despacho_e_commitado_antes_da_chamada():
+    """A ordem que torna `dispatching` útil: gravar, commitar, só então ligar.
+
+    Se o commit viesse depois do `create_call`, um crash no meio deixaria a
+    linha como `pending` — e `pending` significa "nada saiu". Alguém repetiria
+    com segurança aparente, e o telefone tocaria de novo.
+    """
+    import ast
+    import inspect
+
+    fonte = inspect.getsource(ligacao.inicia_ligacao)
+    linhas = fonte.splitlines()
+    i_despacho = next(i for i, ln in enumerate(linhas) if "marca_em_despacho" in ln)
+    i_commit = next(i for i, ln in enumerate(linhas) if i > i_despacho and "db.commit()" in ln)
+    i_executa = next(i for i, ln in enumerate(linhas) if "_executa_e_persiste" in ln)
+
+    assert (
+        i_despacho < i_commit < i_executa
+    ), f"ordem errada: despacho({i_despacho}) commit({i_commit}) chamada({i_executa})"
+    assert ast.parse(fonte) is not None
 
 
 # ── A transição que existe mas não é exercida ─────────────────
@@ -558,18 +643,23 @@ async def test_marca_em_despacho_muda_o_estado():
     db.flush.assert_awaited_once()
 
 
-def test_a_orquestracao_desta_fase_nao_usa_dispatching():
-    """A fase termina no `pending`. O despacho entra na próxima."""
+def test_o_despacho_e_usado_exatamente_uma_vez():
+    """Na 2C.2 este caso afirmava que `dispatching` NÃO era exercido.
+
+    A 2C.3 é justamente o efeito externo, então a garantia inverte: o estado
+    passa a ser usado, e uma vez só — no ponto que antecede a chamada. Duas
+    marcações significariam duas travessias da fronteira.
+    """
     import ast
     from pathlib import Path
 
     fonte = Path(ligacao.__file__).read_text(encoding="utf-8")
-    chamadas = {
+    chamadas = [
         no.func.attr
         for no in ast.walk(ast.parse(fonte))
         if isinstance(no, ast.Call) and isinstance(no.func, ast.Attribute)
-    }
-    assert "marca_em_despacho" not in chamadas
+    ]
+    assert chamadas.count("marca_em_despacho") == 1
 
 
 # ── Contrato do request ──────────────────────────────────────

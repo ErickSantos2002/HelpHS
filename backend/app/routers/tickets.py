@@ -49,6 +49,7 @@ from app.models.models import (
     ticket_equipments,
     ticket_tags,
 )
+from app.schemas.telefonia import TicketCallCreate, TicketCallResponse
 from app.schemas.ticket import (
     DiasDeExtensao,
     ExpedienteInfo,
@@ -70,6 +71,7 @@ from app.schemas.ticket import (
     TicketStatusUpdate,
     TicketUpdate,
 )
+from app.services import ligacao
 from app.services.helo import abre_triagem
 from app.services.llm import classify_ticket
 from app.services.notifications import (
@@ -1533,6 +1535,38 @@ async def assign_ticket(
     await commit_e_notificar(db)
     await db.refresh(ticket)
     return _serialize_ticket(ticket, actor=actor)
+
+
+@router.post(
+    "/tickets/{ticket_id}/calls",
+    response_model=TicketCallResponse,
+    status_code=status.HTTP_201_CREATED,
+)
+async def iniciar_ligacao(
+    ticket_id: uuid.UUID,
+    body: TicketCallCreate,
+    db: Annotated[AsyncSession, Depends(get_db)],
+    actor: Annotated[User, Depends(authorize(UserRole.admin, UserRole.technician))],
+) -> TicketCallResponse:
+    """Liga para o cliente que abriu o chamado.
+
+    ⚠️ O navegador NÃO escolhe nada. O corpo é `{}` e qualquer campo a mais é
+    422 — ver `TicketCallCreate`. Destinatário, telefone, ramal e origem saem
+    todos do banco, no instante da ação, em `services/ligacao.py`.
+
+    **201 mesmo quando o fornecedor recusa**, e isso é desenho, não descuido: o
+    que esta rota promete é REGISTRAR a tentativa, e ela foi registrada. O
+    desfecho vai em `creation_status`, no corpo. Devolver 5xx depois de um
+    efeito externo possivelmente ocorrido convida proxy, biblioteca e usuário a
+    tentar de novo — e o telefone tocaria duas vezes.
+
+    As recusas que acontecem ANTES de qualquer efeito têm status próprio:
+    403 (cliente), 404 (chamado), 422 (estado inválido, destinatário
+    inelegível, ator sem ramal), 409 (ligação em andamento ou tentativa recente),
+    429 (teto por hora) e 503 (telefonia desligada).
+    """
+    tentativa = await ligacao.inicia_ligacao(db, ticket_id=ticket_id, ator=actor)
+    return TicketCallResponse.model_validate(tentativa)
 
 
 @router.delete("/tickets/{ticket_id}", status_code=status.HTTP_204_NO_CONTENT)
