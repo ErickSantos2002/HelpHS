@@ -19,6 +19,31 @@ from app.core.config import Settings
 from app.services.email_layout import CID_LOGO, LOGO_EMAIL
 
 
+def _resumo_do_erro(exc: BaseException) -> str:
+    """A CLASSE do erro e, quando houver, o código numérico do servidor.
+
+    **Nunca `str(exc)`.** Medido no aiosmtplib 3.0.2, em 25/09/2026:
+
+        SMTPSenderRefused      -> o str() carrega o REMETENTE
+        SMTPRecipientRefused   -> carrega o DESTINATÁRIO
+        SMTPRecipientsRefused  -> carrega o destinatário, dentro da lista
+
+    Ou seja: logar `{exc}` põe endereço de cliente no log sem ninguém ter
+    escrito `{to_email}` em lugar nenhum. É o vazamento que não aparece na
+    revisão, porque a linha de código parece limpa.
+
+    O código numérico FICA, e é o que sobra de diagnóstico: separa 535
+    (credencial recusada) de 550 (domínio não verificado) e de 421 (tente mais
+    tarde). É inteiro do protocolo SMTP, não texto que o servidor escolhe.
+
+    A mensagem do servidor sai inteira. Hoje ela é inócua na maioria dos casos,
+    mas é conteúdo variável de terceiro — e o log não é lugar para apostar nisso.
+    """
+    codigo = getattr(exc, "code", None)
+    nome = type(exc).__name__
+    return f"{nome} (code {codigo})" if isinstance(codigo, int) else nome
+
+
 def _anexo_da_logo() -> list[dict]:
     """A logo da faixa, como parte MIME `inline` referenciada por `cid:`.
 
@@ -96,6 +121,7 @@ async def send_email(
     body: str,
     settings: Settings,
     html: str | None = None,
+    contexto: str = "email",
 ) -> bool:
     """Envia o e-mail; com `html`, manda texto e HTML na mesma mensagem.
 
@@ -107,9 +133,25 @@ async def send_email(
 
     Devolve True quando o servidor aceitou. Falha é registrada e NÃO
     re-levantada: quem chamou já fez o trabalho, e o e-mail é o acessório.
+
+    ``contexto`` é o que vai para o LOG no lugar do destinatário.
+    -----------------------------------------------------------
+    Até 25/09/2026 estas três linhas registravam `{to_email}` e `{subject}`.
+    Com SMTP desligado nada saía — a função retorna antes —, então ligar o envio
+    ligava junto um vazamento de dado pessoal no log de produção: endereço do
+    cliente e, no aviso de chamado novo, o TÍTULO do chamado dentro do assunto.
+
+    Quem chama diz o que a linha deve identificar, e a regra é que seja
+    identificador INTERNO ou nome de evento: `notification <uuid>` para o
+    sininho, `account email (password reset)` para os de conta. Nunca endereço.
+
+    Não há hash de e-mail aqui de propósito. A correlação que faltaria já existe
+    por outro caminho: o `request_id` de `core/contexto.py` é `ContextVar`, e
+    `asyncio.create_task` copia o contexto — então a task do envio herda o id da
+    requisição que a originou, e ele entra no `extra` de toda linha.
     """
     if not settings.smtp_from_email and not settings.smtp_user:
-        logger.debug(f"SMTP not configured — skipping email to {to_email}")
+        logger.debug(f"SMTP not configured — {contexto} skipped")
         return False
 
     try:
@@ -137,8 +179,8 @@ async def send_email(
             **duas_partes,
         )
         await mail.send_message(message)
-        logger.info(f"Email sent to {to_email}: {subject}")
+        logger.info(f"Delivery accepted by SMTP server: {contexto}")
         return True
     except Exception as exc:  # noqa: BLE001
-        logger.warning(f"Failed to send email to {to_email}: {exc}")
+        logger.warning(f"SMTP delivery failed for {contexto}: {_resumo_do_erro(exc)}")
         return False
