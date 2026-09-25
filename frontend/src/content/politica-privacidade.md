@@ -1,6 +1,6 @@
 # Política de Privacidade — HelpHS
 
-**Documento:** PGS-TI-0XX · **Revisão:** 00 · **Vigência:** 31 de agosto de 2026
+**Documento:** [definir código do documento] · **Revisão:** 00 · **Vigência:** 31 de agosto de 2026
 
 ---
 
@@ -69,6 +69,8 @@ São coletados apenas os dados necessários ao funcionamento da plataforma e ao 
 | Categoria | Dados tratados | Origem |
 |---|---|---|
 | Dados cadastrais | Nome, endereço de e-mail, telefone e setor de atuação. | Informados pelo usuário no cadastro. |
+| Dados da empresa | Razão social, CNPJ, CEP, endereço, cidade e estado da empresa do usuário. | Informados pelo usuário no primeiro acesso. O endereço pode ser preenchido automaticamente a partir do CNPJ e do CEP (ver seção 12). |
+| Dados dos equipamentos | Produto, nome do equipamento, número de série e localização dos equipamentos cadastrados pelo cliente. | Informados pelo usuário no primeiro acesso e na tela de equipamentos. |
 | Credencial de acesso | Senha armazenada exclusivamente sob resumo criptográfico (hash) irreversível. A senha em texto legível não é armazenada e não pode ser recuperada nem visualizada por nenhum colaborador da Health & Safety. | Definida pelo próprio usuário. |
 | Imagem de perfil | Fotografia de perfil, quando o usuário optar por enviá-la. O envio é facultativo e a ausência da foto não limita o uso da plataforma. | Enviada voluntariamente pelo usuário. |
 | Dados de acesso | Data e hora do último acesso à plataforma e, nos eventos de autenticação e de conta — como cadastro, login, logout e troca de senha —, o endereço IP e a identificação do navegador (user agent), com data e hora. | Registrados automaticamente pelo sistema. |
@@ -113,7 +115,7 @@ Não serão realizados tratamentos para finalidades incompatíveis com as inform
 
 ### 9.1. Estado atual
 
-A plataforma HelpHS possui, em seu código, quatro funcionalidades baseadas em inteligência artificial. Na data de vigência desta revisão essas funcionalidades estão **desativadas**: nenhuma chave de acesso a provedor de inteligência artificial está configurada e, portanto, nenhum conteúdo tratado na plataforma é enviado a provedores externos de inteligência artificial.
+A plataforma HelpHS possui, em seu código, cinco funcionalidades baseadas em inteligência artificial. Na data de vigência desta revisão essas funcionalidades estão **desativadas**: nenhuma chave de acesso a provedor de inteligência artificial está configurada e, portanto, nenhum conteúdo tratado na plataforma é enviado a provedores externos de inteligência artificial.
 
 Enquanto os recursos permanecerem desativados, nenhum dado descrito na seção 6 é enviado a provedor de inteligência artificial.
 
@@ -124,7 +126,8 @@ Quando ativadas, as seguintes funcionalidades passarão a operar:
 - Classificação automática do chamado na abertura, para direcionamento à equipe adequada e definição de prioridade;
 - Sugestão de resposta ao técnico responsável pelo atendimento, apresentada como rascunho de apoio;
 - Resumo de conversas longas, para facilitar a leitura do histórico do chamado;
-- Aprimoramento do texto de uma mensagem, a pedido de quem a está redigindo.
+- Aprimoramento do texto de uma mensagem, a pedido de quem a está redigindo;
+- Resposta da assistente virtual Helô ao usuário com base nos artigos da Base de Conhecimento da plataforma, apresentada como assistente virtual e com encaminhamento a um atendente humano sempre que o assunto não estiver documentado ou o usuário solicitar.
 
 ### 9.3. Conteúdo enviado ao provedor
 
@@ -154,7 +157,7 @@ Nenhum conteúdo será enviado a provedor de inteligência artificial antes de c
 
 ### 9.6. Supervisão humana e decisões automatizadas
 
-As funcionalidades de inteligência artificial têm caráter auxiliar. A classificação sugerida, o rascunho de resposta, o resumo e o texto aprimorado são apresentados a um profissional da equipe de atendimento, a quem cabe revisar, alterar, aprovar ou descartar o resultado antes de qualquer efeito para o usuário.
+As funcionalidades de inteligência artificial têm caráter auxiliar. A classificação sugerida, o rascunho de resposta, o resumo e o texto aprimorado são apresentados a um profissional da equipe de atendimento, a quem cabe revisar, alterar, aprovar ou descartar o resultado antes de qualquer efeito para o usuário. A exceção é a resposta da assistente virtual Helô descrita na seção 9.2, que é apresentada diretamente ao usuário. Ela se limita ao conteúdo dos artigos da Base de Conhecimento, é identificada como assistente virtual e encaminha o chamado a um atendente humano sempre que solicitado.
 
 A plataforma não toma decisões unicamente automatizadas que afetem interesses do titular, como concessão ou negativa de garantia, de atendimento ou de crédito.
 
@@ -172,7 +175,7 @@ Os e-mails enviados pela plataforma — confirmação de cadastro, redefinição
 
 As mensagens são expedidas a partir de servidores localizados em São Paulo. Conforme a documentação do próprio provedor, porém, os registros dos envios — incluindo o endereço de e-mail do destinatário, o conteúdo e os metadados das mensagens — são armazenados nos Estados Unidos, o que configura transferência internacional de dados pessoais.
 
-Os Estados Unidos não são, nesta data, destino coberto por decisão de adequação emitida pelo Conselho Diretor da ANPD. [definir o mecanismo do art. 33 da LGPD adotado para esta transferência]
+Os Estados Unidos não são, nesta data, destino coberto por decisão de adequação emitida pelo Conselho Diretor da ANPD. A transferência é realizada com fundamento no art. 33, inciso IX, da LGPD, por ser necessária à execução do contrato e dos procedimentos preliminares relacionados ao uso da plataforma (art. 7º, inciso V): o envio de e-mails de confirmação de cadastro, de redefinição de senha e de notificações sobre chamados é parte do próprio serviço prestado ao usuário. O provedor atua como Operador, vinculado a obrigações contratuais de confidencialidade e de segurança, e não pode utilizar os dados para finalidades próprias.
 
 ### 10.2. Recursos de inteligência artificial
 
@@ -189,11 +192,11 @@ Antes da ativação, a Health & Safety realizará a avaliação do provedor conf
 
 ### 10.3. Hospedagem
 
-As demais operações de tratamento realizadas na plataforma — hospedagem, banco de dados e backups — ocorrem em infraestrutura localizada em [país do data center da VPS — conferir no hPanel].
+As demais operações de tratamento realizadas na plataforma — hospedagem, banco de dados e backups — ocorrem em infraestrutura localizada no Brasil, em São Paulo/SP.
 
 ## 11. Assistente Virtual Helô
 
-A Helô é a assistente virtual da plataforma HelpHS. Nesta revisão sua atuação limita-se à apresentação de mensagem automática de boas-vindas na abertura do chamado, com texto fixo e sem qualquer processamento por inteligência artificial.
+A Helô é a assistente virtual da plataforma HelpHS. Nesta revisão ela atua na triagem inicial dos chamados, sem qualquer processamento por inteligência artificial. Na abertura do chamado, ela apresenta uma mensagem montada com dados do cadastro — o primeiro nome do usuário e, quando houver, o produto e o número de série do equipamento — e faz três perguntas sobre o problema. Após a resposta do usuário, ela encerra a triagem e informa quando um atendente assumirá o chamado. Se o usuário pedir para falar com uma pessoa, a triagem é interrompida imediatamente e o chamado segue para a equipe. As respostas do usuário ficam registradas no chamado, como parte do conteúdo descrito na seção 6.
 
 Caso a Helô passe a manter diálogo com o usuário mediante uso de inteligência artificial, aplicar-se-ão integralmente as regras das seções 9 e 10, incluindo a exigência de publicação prévia de nova revisão desta política e de comunicação prévia aos usuários.
 
@@ -207,6 +210,7 @@ A Health & Safety não vende nem disponibiliza dados pessoais a terceiros para f
 |---|---|---|
 | Provedor de infraestrutura e hospedagem | Todos os dados armazenados na plataforma. | Hospedagem da aplicação, do banco de dados e das rotinas de backup, na condição de Operador. |
 | Provedor de envio de e-mails (Resend, Estados Unidos) | Nome, e-mail e conteúdo das mensagens. | Envio de confirmação de cadastro, redefinição de senha e notificações sobre chamados, na condição de Operador. Ver seção 10.1. |
+| Serviços públicos de consulta de CNPJ e CEP (BrasilAPI e ViaCEP) | Somente o número do CNPJ ou do CEP digitado. Nenhum dado pessoal do usuário é enviado. | Preenchimento automático da razão social e do endereço no cadastro da empresa. |
 | Provedor de inteligência artificial | Conteúdo dos chamados. | Execução das funcionalidades da seção 9, após ativação e mediante nova revisão desta política. |
 | Auditores independentes e organismos certificadores | Amostras de registros e evidências, no menor volume possível. | Auditoria do Sistema de Gestão de Segurança da Informação, sob compromisso de confidencialidade. |
 | Autoridades públicas e Poder Judiciário | Dados especificamente requisitados. | Cumprimento de obrigação legal, ordem judicial ou requisição de autoridade competente. |
