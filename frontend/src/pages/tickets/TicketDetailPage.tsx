@@ -43,6 +43,7 @@ import {
 import {
   assignTicket,
   toggleTicketAi,
+  createTicketCall,
   createTicketNote,
   deleteTicketNote,
   getTicket,
@@ -87,6 +88,11 @@ const FIELD_LABEL: Record<string, string> = {
   product_id: "Produto alterado",
   equipment_id: "Equipamento alterado",
   technician_notes: "Notas internas atualizadas",
+  // O backend grava `field="ligacao"` a cada TENTATIVA, antes de saber o
+  // desfecho. O rótulo diz "tentativa de contato" e não "ligação feita"
+  // porque a linha nasce quando o pedido sai, e o telefone pode nunca ter
+  // tocado.
+  ligacao: "Tentativa de contato por telefone",
   client_observation: "Observação atualizada",
   [CAMPO_JUSTIFICATIVA]: "Justificativa do SLA violado",
 };
@@ -490,6 +496,8 @@ function SidebarAction({
   onClick,
   to,
   variant = "default",
+  disabled = false,
+  title,
 }: {
   icon: React.JSX.Element;
   label: string;
@@ -498,6 +506,10 @@ function SidebarAction({
   /** Destino. Vira um `<Link>` com aparência de botão. */
   to?: string;
   variant?: "primary" | "default" | "ghost";
+  /** Só faz sentido com `onClick`: navegação não tem estado de espera. */
+  disabled?: boolean;
+  /** Dica do porquê da espera ou do bloqueio. */
+  title?: string;
 }) {
   const cls = {
     // `action-success` e `on-success` da emenda E2, e nao o verde cru: o
@@ -526,7 +538,14 @@ function SidebarAction({
   }
 
   return (
-    <button type="button" onClick={onClick} className={classes}>
+    <button
+      type="button"
+      onClick={onClick}
+      disabled={disabled}
+      title={title}
+      aria-busy={disabled || undefined}
+      className={`${classes} disabled:cursor-not-allowed disabled:opacity-60`}
+    >
       {icon}
       {label}
     </button>
@@ -829,6 +848,20 @@ export default function TicketDetailPage() {
   const [previewLoading, setPreviewLoading] = useState(false);
   const [newPriority, setNewPriority] = useState("");
   const [priorityLoading, setPriorityLoading] = useState(false);
+  /** Uma tentativa de ligação por vez, por chamado e por aba. */
+  const [ligando, setLigando] = useState(false);
+  /**
+   * A trava de verdade do duplo clique.
+   *
+   * ⚠️ Estado NÃO serve aqui, e isto foi medido: três cliques no mesmo
+   * lote de eventos leem todos o mesmo `ligando` do closure da render
+   * anterior — ainda `false` —, e saíam TRÊS requisições. O `disabled` do
+   * botão só entra em vigor depois que a tela repinta, então ele não
+   * cobre a janela entre o primeiro clique e o repintar.
+   *
+   * O ref muda no mesmo instante e é o mesmo objeto em todos os closures.
+   */
+  const ligandoRef = useRef(false);
   const [uploadModal, setUploadModal] = useState(false);
   const [resolveModal, setResolveModal] = useState(false);
 
@@ -1117,6 +1150,74 @@ export default function TicketDetailPage() {
       toastApiError(err, "Não foi possível estender o prazo.");
     } finally {
       setExtensaoLoading(false);
+    }
+  }
+
+  /**
+   * Situações em que o backend aceita registrar uma ligação.
+   *
+   * Copiada de `STATUS_QUE_PERMITEM_LIGACAO` do `services/ligacao.py`, e não
+   * derivada de `isClosed`: aquele guarda inclui `resolved`, que a telefonia
+   * PERMITE — alguém liga justamente para confirmar que o problema resolveu.
+   * Reaproveitá-lo esconderia o botão numa situação válida.
+   *
+   * Em caso de divergência, o backend é a autoridade: ele responde 422 e o
+   * motivo aparece no toast. Isto aqui é só para não oferecer o que já se
+   * sabe que será recusado.
+   */
+  const situacaoAceitaLigacao =
+    ticket?.status === "open" ||
+    ticket?.status === "in_progress" ||
+    ticket?.status === "awaiting_client" ||
+    ticket?.status === "awaiting_technical" ||
+    ticket?.status === "resolved";
+
+  /**
+   * Pede ao backend que ligue para o cliente do chamado.
+   *
+   * O corpo vai vazio: destinatário, telefone, ramal e origem são decididos
+   * no servidor. Aqui só existe a intenção.
+   *
+   * **Sem repetição automática, em nenhum caminho.** Depois que o pedido
+   * cruza a fronteira, "deu erro" não significa "nada aconteceu" — o telefone
+   * do cliente pode ter tocado. Quem decide tentar de novo é a pessoa, lendo
+   * o aviso.
+   */
+  async function handleLigarParaCliente() {
+    // A trava do duplo clique, antes de qualquer coisa.
+    if (!ticket || ligandoRef.current) return;
+    ligandoRef.current = true;
+    setLigando(true);
+    try {
+      const tentativa = await createTicketCall(ticket.id);
+      if (tentativa.creation_status === "confirmed") {
+        toast.success("Ligação iniciada com sucesso.");
+      } else if (tentativa.creation_status === "rejected") {
+        toast.error("Não foi possível iniciar a ligação.");
+      } else if (tentativa.creation_status === "unavailable") {
+        toast.error("Serviço de telefonia indisponível no momento.");
+      } else {
+        // `indeterminate` — e qualquer estado que o backend passe a devolver.
+        // O texto é deliberadamente alarmante: este é o único caso em que o
+        // telefone pode ter tocado sem que ninguém saiba.
+        toast.error("Não foi possível confirmar o resultado da ligação.", {
+          description: "Não tente novamente imediatamente.",
+        });
+      }
+      // A tentativa virou evento no histórico antes mesmo de sair para o
+      // fornecedor. Recarrega só a aba Atividade — recarregar o chamado
+      // inteiro perderia rolagem e rascunho por um evento de uma linha.
+      try {
+        setHistory((await getTicketHistory(ticket.id)).items);
+      } catch {
+        // A atividade desatualizar não é motivo para dizer que a ligação
+        // falhou. Ela chega no próximo carregamento da tela.
+      }
+    } catch (err) {
+      toastApiError(err, "Não foi possível iniciar a ligação.");
+    } finally {
+      ligandoRef.current = false;
+      setLigando(false);
     }
   }
 
@@ -1679,6 +1780,21 @@ export default function TicketDetailPage() {
                     icon=<Icon name="userPlus" size={16} strokeWidth={2} />
                     label={ticket.assignee_id ? "Reatribuir" : "Atribuir técnico"}
                     onClick={() => setAssignModal(true)}
+                    variant="default"
+                  />
+                )}
+                {/* Telefonia. Só a equipe vê — e o backend recusa cliente
+                    com 403 de qualquer forma, porque esconder botão não é
+                    autorização. Fica depois de "Atribuir técnico" porque é a
+                    ação seguinte na mesma linha de raciocínio: peguei o
+                    chamado, agora falo com quem abriu. */}
+                {isStaff && situacaoAceitaLigacao && (
+                  <SidebarAction
+                    icon=<Icon name="phone" size={16} strokeWidth={2} />
+                    label={ligando ? "Ligando..." : "Ligar para cliente"}
+                    onClick={handleLigarParaCliente}
+                    disabled={ligando}
+                    title={ligando ? "Aguardando a resposta da telefonia." : undefined}
                     variant="default"
                   />
                 )}

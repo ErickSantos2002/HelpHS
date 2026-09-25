@@ -1,4 +1,4 @@
-import { fireEvent, render, screen, waitFor, within } from "@testing-library/react";
+import { act, fireEvent, render, screen, waitFor, within } from "@testing-library/react";
 import type { ReactNode } from "react";
 import { beforeEach, describe, expect, it, vi } from "vitest";
 
@@ -22,6 +22,7 @@ vi.mock("../../services/attachmentService", () => ({
 vi.mock("../../services/ticketService", () => ({
   assignTicket: vi.fn(),
   toggleTicketAi: vi.fn(),
+  createTicketCall: vi.fn(),
   createTicketNote: vi.fn(),
   deleteTicketNote: vi.fn(),
   getTicket: vi.fn(),
@@ -920,5 +921,330 @@ describe("estender SLA de resolução", () => {
     expect(
       screen.getByText(/Aguardando peça de reposição do fabricante\./),
     ).toBeInTheDocument();
+  });
+});
+
+// ── Ligar para cliente ────────────────────────────────────────
+
+/** Erro no formato que o axios entrega, para o `toastApiError` ler. */
+function erroDaApi(status: number, detail?: string) {
+  return {
+    request: {},
+    response: { status, data: detail ? { detail } : {}, headers: {} },
+  };
+}
+
+const TENTATIVA = {
+  id: "c1",
+  creation_status: "confirmed",
+  created_at: new Date().toISOString(),
+};
+
+describe("TicketDetailPage — Ligar para cliente", () => {
+  beforeEach(() => {
+    papelDoUsuario = "admin";
+    vi.mocked(toast.error).mockClear();
+    vi.mocked(toast.success).mockClear();
+    vi.mocked(ticketService.createTicketCall).mockReset();
+  });
+
+  const botao = () => screen.getByRole("button", { name: /Ligar para cliente/ });
+
+  it("o administrador vê a ação", async () => {
+    await montar();
+    expect(botao()).toBeInTheDocument();
+  });
+
+  it("o técnico vê a ação", async () => {
+    papelDoUsuario = "technician";
+    await montar();
+    expect(botao()).toBeInTheDocument();
+  });
+
+  it("o cliente NÃO vê a ação — mesmo com o card de Ações na tela", async () => {
+    // Esconder não é autorizar: o backend recusa cliente com 403 de qualquer
+    // jeito. Isto é para não oferecer o que não é dele.
+    //
+    // ⚠️ O chamado aqui é `resolved` com prazo de reabertura aberto DE
+    // PROPÓSITO. Num chamado `open`, o card "Ações" inteiro não renderiza
+    // para cliente — `{(isStaff || canReopen) && ...}` —, e o caso passaria
+    // sem provar nada sobre o botão. Medido: tirar o `isStaff` da linha do
+    // botão não fazia este caso falhar. Com "Reabrir chamado" na tela, o
+    // card existe, e a única coisa que segura o botão é a guarda dele.
+    papelDoUsuario = "client";
+    const daquiUmaSemana = new Date(Date.now() + 7 * 24 * 3600 * 1000).toISOString();
+    await montar([], {
+      ...TICKET,
+      status: "resolved",
+      creator_id: "u1",
+      reopen_deadline: daquiUmaSemana,
+    } as unknown as typeof TICKET);
+
+    // O card existe — esta é a pré-condição que dá sentido ao caso.
+    // Há dois na tela (o do corpo e o do card lateral) — o que importa é
+    // que o card exista.
+    expect(screen.getAllByRole("button", { name: /Reabrir chamado/ }).length).toBeGreaterThan(0);
+    expect(
+      screen.queryByRole("button", { name: /Ligar para cliente/ }),
+    ).not.toBeInTheDocument();
+  });
+
+  it("some em chamado cancelado, que o backend não aceita", async () => {
+    await montar([], { ...TICKET, status: "cancelled" } as typeof TICKET);
+    expect(
+      screen.queryByRole("button", { name: /Ligar para cliente/ }),
+    ).not.toBeInTheDocument();
+  });
+
+  it("CONTINUA em chamado resolvido — a telefonia aceita esse estado", async () => {
+    // `isClosed` da tela inclui `resolved`; a telefonia NÃO. Reaproveitar
+    // aquele guarda esconderia o botão numa situação válida — ligar para
+    // confirmar que o problema resolveu é exatamente um caso de uso.
+    await montar([], { ...TICKET, status: "resolved" } as typeof TICKET);
+    expect(botao()).toBeInTheDocument();
+  });
+
+  it("um clique manda uma requisição, com o id do chamado", async () => {
+    vi.mocked(ticketService.createTicketCall).mockResolvedValue(TENTATIVA as never);
+    await montar();
+    fireEvent.click(botao());
+    await waitFor(() =>
+      expect(ticketService.createTicketCall).toHaveBeenCalledWith("t1"),
+    );
+    expect(ticketService.createTicketCall).toHaveBeenCalledTimes(1);
+  });
+
+  it("durante a espera o botão bloqueia e anuncia que está ligando", async () => {
+    let libera: (v: unknown) => void = () => {};
+    vi.mocked(ticketService.createTicketCall).mockReturnValue(
+      new Promise((r) => {
+        libera = r;
+      }) as never,
+    );
+    await montar();
+    fireEvent.click(botao());
+
+    const emEspera = await screen.findByRole("button", { name: /Ligando/ });
+    expect(emEspera).toBeDisabled();
+    expect(emEspera).toHaveAttribute("aria-busy", "true");
+
+    libera(TENTATIVA);
+    await waitFor(() => expect(botao()).toBeEnabled());
+  });
+
+  it("clique duplo rápido continua sendo UMA requisição", async () => {
+    // O telefone do cliente tocando duas vezes é o defeito que este caso
+    // impede. O backend tem trava própria; isto evita chegar lá.
+    //
+    // Os cliques vão dentro de UM `act` só, e isso é o ponto: fora dele, o
+    // `fireEvent` faz flush do estado a cada chamada, o botão já volta
+    // `disabled` no segundo clique e a guarda de dentro do handler nunca é
+    // exercitada — medido, a mutação que removia `|| ligando` sobrevivia.
+    // Dois cliques antes de a tela repintar é o que acontece de verdade
+    // quando alguém clica rápido.
+    let libera: (v: unknown) => void = () => {};
+    vi.mocked(ticketService.createTicketCall).mockReturnValue(
+      new Promise((r) => {
+        libera = r;
+      }) as never,
+    );
+    await montar();
+    const b = botao();
+    act(() => {
+      fireEvent.click(b);
+      fireEvent.click(b);
+      fireEvent.click(b);
+    });
+
+    await screen.findByRole("button", { name: /Ligando/ });
+    expect(ticketService.createTicketCall).toHaveBeenCalledTimes(1);
+    libera(TENTATIVA);
+  });
+
+  it("e o botão desabilitado barra o clique seguinte, depois do repintar", async () => {
+    // A segunda linha de defesa, provada separadamente: depois que a tela
+    // repinta, o próprio `disabled` impede o evento de sair.
+    let libera: (v: unknown) => void = () => {};
+    vi.mocked(ticketService.createTicketCall).mockReturnValue(
+      new Promise((r) => {
+        libera = r;
+      }) as never,
+    );
+    await montar();
+    fireEvent.click(botao());
+    const emEspera = await screen.findByRole("button", { name: /Ligando/ });
+
+    fireEvent.click(emEspera);
+    fireEvent.click(emEspera);
+
+    expect(ticketService.createTicketCall).toHaveBeenCalledTimes(1);
+    libera(TENTATIVA);
+  });
+
+  it("confirmed avisa que a ligação saiu", async () => {
+    vi.mocked(ticketService.createTicketCall).mockResolvedValue(TENTATIVA as never);
+    await montar();
+    fireEvent.click(botao());
+    await waitFor(() =>
+      expect(toast.success).toHaveBeenCalledWith("Ligação iniciada com sucesso."),
+    );
+  });
+
+  it("rejected avisa a falha sem detalhar o fornecedor", async () => {
+    vi.mocked(ticketService.createTicketCall).mockResolvedValue({
+      ...TENTATIVA,
+      creation_status: "rejected",
+    } as never);
+    await montar();
+    fireEvent.click(botao());
+    await waitFor(() =>
+      expect(toast.error).toHaveBeenCalledWith("Não foi possível iniciar a ligação."),
+    );
+    expect(toast.success).not.toHaveBeenCalled();
+  });
+
+  it("unavailable diz que a telefonia está fora", async () => {
+    vi.mocked(ticketService.createTicketCall).mockResolvedValue({
+      ...TENTATIVA,
+      creation_status: "unavailable",
+    } as never);
+    await montar();
+    fireEvent.click(botao());
+    await waitFor(() =>
+      expect(toast.error).toHaveBeenCalledWith(
+        "Serviço de telefonia indisponível no momento.",
+      ),
+    );
+  });
+
+  it("indeterminate manda NÃO repetir — pode ter havido efeito", async () => {
+    vi.mocked(ticketService.createTicketCall).mockResolvedValue({
+      ...TENTATIVA,
+      creation_status: "indeterminate",
+    } as never);
+    await montar();
+    fireEvent.click(botao());
+    await waitFor(() =>
+      expect(toast.error).toHaveBeenCalledWith(
+        "Não foi possível confirmar o resultado da ligação.",
+        { description: "Não tente novamente imediatamente." },
+      ),
+    );
+  });
+
+  it("409 mostra o motivo que o backend deu", async () => {
+    vi.mocked(ticketService.createTicketCall).mockRejectedValue(
+      erroDaApi(
+        409,
+        "Já houve uma tentativa de ligação para este chamado há poucos minutos.",
+      ),
+    );
+    await montar();
+    fireEvent.click(botao());
+    await waitFor(() =>
+      expect(toast.error).toHaveBeenCalledWith("Não foi possível iniciar a ligação.", {
+        description:
+          "Já houve uma tentativa de ligação para este chamado há poucos minutos.",
+      }),
+    );
+  });
+
+  it("422 mostra o motivo que o backend deu", async () => {
+    vi.mocked(ticketService.createTicketCall).mockRejectedValue(
+      erroDaApi(422, "Você não tem ramal de telefonia configurado."),
+    );
+    await montar();
+    fireEvent.click(botao());
+    await waitFor(() =>
+      expect(toast.error).toHaveBeenCalledWith("Não foi possível iniciar a ligação.", {
+        description: "Você não tem ramal de telefonia configurado.",
+      }),
+    );
+  });
+
+  it("403 cai na mensagem de permissão da casa", async () => {
+    vi.mocked(ticketService.createTicketCall).mockRejectedValue(erroDaApi(403));
+    await montar();
+    fireEvent.click(botao());
+    await waitFor(() =>
+      expect(toast.error).toHaveBeenCalledWith("Não foi possível iniciar a ligação.", {
+        description: "Você não tem permissão para realizar esta ação.",
+      }),
+    );
+  });
+
+  it("falha na tentativa devolve o botão — sem travar a tela", async () => {
+    vi.mocked(ticketService.createTicketCall).mockRejectedValue(erroDaApi(409, "x"));
+    await montar();
+    fireEvent.click(botao());
+    await waitFor(() => expect(toast.error).toHaveBeenCalled());
+    expect(botao()).toBeEnabled();
+  });
+
+  it("nenhum desfecho dispara nova tentativa sozinho", async () => {
+    // Sem retry automático em caminho nenhum: depois de cruzar a fronteira,
+    // "deu erro" não significa "nada aconteceu".
+    vi.mocked(ticketService.createTicketCall).mockResolvedValue({
+      ...TENTATIVA,
+      creation_status: "indeterminate",
+    } as never);
+    await montar();
+    fireEvent.click(botao());
+    await waitFor(() => expect(toast.error).toHaveBeenCalled());
+    await new Promise((r) => setTimeout(r, 50));
+    expect(ticketService.createTicketCall).toHaveBeenCalledTimes(1);
+  });
+
+  it("a aba Atividade recarrega, e o evento aparece com nome legível", async () => {
+    vi.mocked(ticketService.createTicketCall).mockResolvedValue(TENTATIVA as never);
+    await montar();
+    const antes = vi.mocked(ticketService.getTicketHistory).mock.calls.length;
+
+    vi.mocked(ticketService.getTicketHistory).mockResolvedValue({
+      items: [
+        {
+          id: "h1",
+          field: "ligacao",
+          old_value: null,
+          new_value: "tentativa",
+          user_name: "Suelen Patricia",
+          created_at: new Date().toISOString(),
+        },
+      ],
+    } as never);
+
+    fireEvent.click(botao());
+    await waitFor(() =>
+      expect(vi.mocked(ticketService.getTicketHistory).mock.calls.length).toBe(
+        antes + 1,
+      ),
+    );
+
+    fireEvent.click(screen.getByText("Atividade"));
+    expect(
+      await screen.findByText("Tentativa de contato por telefone"),
+    ).toBeInTheDocument();
+    // E não o nome cru do campo.
+    expect(screen.queryByText("ligacao")).not.toBeInTheDocument();
+  });
+
+  it("nada do fornecedor aparece na tela", async () => {
+    vi.mocked(ticketService.createTicketCall).mockResolvedValue(TENTATIVA as never);
+    await montar();
+    fireEvent.click(botao());
+    await waitFor(() => expect(toast.success).toHaveBeenCalled());
+
+    const texto = document.body.textContent ?? "";
+    for (const proibido of [
+      "provider_call_id",
+      "caller",
+      "called",
+      "extension",
+      "api4com",
+      "API4COM",
+      "1019",
+    ]) {
+      expect(texto).not.toContain(proibido);
+    }
   });
 });
