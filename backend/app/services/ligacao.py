@@ -23,9 +23,8 @@ Cada passo está onde está por um motivo, e trocar a ordem reabre um buraco:
   5. telefone .............. relido do banco, validado pelo helper oficial
   6. ramal do ator ......... sem ramal não há origem possível
   7. LOCK .................. só agora: não se toma lock para depois dar 422
-  8. antirrepetição ........ DENTRO do lock, senão dois cliques passam juntos
-  9. teto por hora ......... idem
- 10. `pending` + COMMIT .... a tentativa fica durável ANTES de qualquer efeito
+  8. teto por hora ......... DENTRO do lock, senão dois cliques passam juntos
+  9. `pending` + COMMIT .... a tentativa fica durável ANTES de qualquer efeito
 
 A fase seguinte acrescenta, sem mexer em nada acima: `dispatching` + COMMIT →
 `create_call` → estado final + COMMIT. Tudo isso **dentro** do mesmo lock.
@@ -41,7 +40,6 @@ from __future__ import annotations
 
 import uuid
 from collections.abc import Awaitable
-from datetime import UTC, datetime, timedelta
 from typing import Any, cast
 
 from fastapi import HTTPException, status
@@ -51,7 +49,6 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from app.core.config import get_settings
 from app.core.redis import get_redis
 from app.models.models import (
-    CallCreationStatus,
     Ticket,
     TicketCall,
     TicketStatus,
@@ -81,20 +78,27 @@ STATUS_QUE_PERMITEM_LIGACAO = frozenset(
     }
 )
 
-# Tentativas que PODEM ter feito um telefone tocar. `pending` não está aqui, e
-# é a diferença que o estado `dispatching` comprou: uma linha `pending` órfã
-# significa que nada saiu, então ela não impede uma nova tentativa.
-STATUS_QUE_BLOQUEIAM_REPETICAO = frozenset(
-    {
-        CallCreationStatus.dispatching.value,
-        CallCreationStatus.confirmed.value,
-        CallCreationStatus.indeterminate.value,
-    }
-)
+# ⚠️ Aqui morava `STATUS_QUE_BLOQUEIAM_REPETICAO`, e com ela uma janela de 5
+# minutos que recusava nova ligação para o mesmo chamado com 409.
+#
+# Saiu em 25/09/2026, por decisão de negócio: quem atende liga para o cliente
+# quantas vezes for preciso, e não caiu do céu — a primeira ligação real do
+# HelpHS precisou de DUAS tentativas (a primeira voltou 424 do fornecedor), e a
+# janela teria transformado uma segunda tentativa legítima em erro se a primeira
+# tivesse sido `confirmed`.
+#
+# O que NÃO saiu, e não pode ser confundido com isto:
+#
+#   - o lock do Redis, que impede DUAS ligações ao mesmo tempo no mesmo chamado;
+#   - os tetos por hora, que são defesa contra laço e conta comprometida;
+#   - a ausência de repetição automática — quem repete é gente, clicando.
+#
+# A distinção é: a janela olhava para o PASSADO ("já ligaram há pouco"), e o
+# lock olha para o PRESENTE ("estão ligando agora"). Só a primeira contrariava
+# a regra nova.
 
 _PREFIXO_LOCK = "helphs:lock:telefonia:ticket:"
 _PREFIXO_TETO_ATOR = "helphs:telefonia:ator:"
-_PREFIXO_TETO_CHAMADO = "helphs:telefonia:chamado:"
 
 # `redis.eval` é o comando de SCRIPT LUA do Redis — nada a ver com o `eval()` do
 # Python. O script abaixo é constante literal; a chave e o token viajam como
@@ -244,30 +248,22 @@ def _ramal_do_ator(ator: User) -> str:
     return ramal
 
 
-async def _recusa_repeticao(db: AsyncSession, ticket_id: uuid.UUID) -> None:
-    """Recusa quando há tentativa recente que pode ter tocado um telefone."""
-    settings = get_settings()
-    desde = datetime.now(UTC) - timedelta(seconds=settings.api4com_repeat_window_seconds)
-    resultado = await db.execute(
-        select(TicketCall).where(
-            TicketCall.ticket_id == ticket_id,
-            TicketCall.creation_status.in_(STATUS_QUE_BLOQUEIAM_REPETICAO),
-            TicketCall.created_at >= desde,
-        )
-    )
-    if resultado.scalars().first() is not None:
-        raise HTTPException(
-            status_code=status.HTTP_409_CONFLICT,
-            detail="Já houve uma tentativa de ligação para este chamado há poucos minutos.",
-        )
+async def _recusa_excesso(ator: User) -> None:
+    """Teto por hora, POR ATOR. Não existe mais teto por chamado.
 
-
-async def _recusa_excesso(db: AsyncSession, ticket_id: uuid.UUID, ator: User) -> None:
-    """Tetos por hora, por ator e por chamado.
-
-    Consumidos aqui, depois de todas as validações: um pedido recusado por
+    Consumido aqui, depois de todas as validações: um pedido recusado por
     chamado encerrado ou cliente sem telefone não gasta cota de ninguém. O
     contador anda quando a tentativa vai mesmo ser criada.
+
+    ⚠️ Havia um segundo teto, de 3 por hora POR CHAMADO. Saiu em 25/09/2026
+    junto com a antirrepetição temporal, e pelo mesmo motivo: ele dizia quantas
+    vezes se pode ligar para o mesmo chamado, e a regra de negócio passou a ser
+    "quantas vezes for preciso". A primeira ligação real gastou 2 das 3 cotas
+    de uma vez, porque a primeira tentativa voltou 424 do fornecedor.
+
+    O teto por ATOR fica, e é ele que cobre o risco que motivou os dois: laço
+    de código, conta comprometida e volume anormal são propriedades de QUEM
+    liga, não do chamado para onde se liga.
     """
     settings = get_settings()
     if not await _consome_teto(
@@ -276,13 +272,6 @@ async def _recusa_excesso(db: AsyncSession, ticket_id: uuid.UUID, ator: User) ->
         raise HTTPException(
             status_code=status.HTTP_429_TOO_MANY_REQUESTS,
             detail="Você atingiu o limite de ligações por hora.",
-        )
-    if not await _consome_teto(
-        f"{_PREFIXO_TETO_CHAMADO}{ticket_id}", settings.api4com_calls_per_ticket_per_hour
-    ):
-        raise HTTPException(
-            status_code=status.HTTP_429_TOO_MANY_REQUESTS,
-            detail="Este chamado atingiu o limite de ligações por hora.",
         )
 
 
@@ -349,7 +338,7 @@ async def inicia_ligacao(
     O caminho inteiro, e cada passo está onde está por um motivo:
 
         flag → papel → chamado → situação → destinatário → telefone → ramal
-        → LOCK → antirrepetição → teto → `pending` + COMMIT
+        → LOCK → teto → `pending` + COMMIT
         → `dispatching` + COMMIT → create_call → estado final + COMMIT
         → libera o lock
 
@@ -404,8 +393,7 @@ async def inicia_ligacao(
         ) from None
 
     try:
-        await _recusa_repeticao(db, ticket_id)
-        await _recusa_excesso(db, ticket_id, ator)
+        await _recusa_excesso(ator)
 
         tentativa = await telefonia.registra_tentativa(
             db, ticket_id=ticket_id, initiated_by_id=ator.id
@@ -417,8 +405,14 @@ async def inicia_ligacao(
         # `dispatching` é gravado e COMMITADO antes do POST. Daqui para a
         # frente, uma linha órfã significa "não sabemos se tocou", e é por isso
         # que este commit não pode ser adiado nem agrupado com o próximo: se o
-        # processo morrer entre ele e a resposta, é exatamente este estado que
-        # impede alguém de repetir por engano.
+        # processo morrer entre ele e a resposta, é este estado que REGISTRA
+        # que houve uma zona cinzenta, para quem for reconciliar depois.
+        #
+        # ⚠️ Até 25/09/2026 esta linha dizia que o estado "impede alguém de
+        # repetir por engano". Deixou de ser verdade quando a antirrepetição
+        # temporal saiu: hoje `dispatching` órfã não barra nada além do que o
+        # lock já barra enquanto vive. Ele continua sendo o que distingue
+        # "nada saiu" de "não sei" — valor de auditoria, não de bloqueio.
         await telefonia.marca_em_despacho(db, tentativa)
         # O evento humano nasce AQUI, e não junto do `pending`: uma linha
         # `pending` não é contato — ninguém foi chamado ainda. A partir do

@@ -168,7 +168,11 @@ class CallCreationStatus(str, enum.Enum):
     # `create_call`, e é o que tira a ambiguidade que o `pending` tinha sozinho:
     # antes deste estado existir, uma linha órfã podia significar "nunca enviei"
     # OU "enviei e não soube do resultado", e as duas exigiam condutas opostas.
-    # `dispatching` órfã é o caso perigoso — bloqueia nova tentativa.
+    # `dispatching` órfã continua sendo o caso que exige olho humano: ela diz
+    # que o pedido saiu e o desfecho não voltou. ⚠️ Desde 25/09/2026 ela NÃO
+    # bloqueia mais nova tentativa — a antirrepetição temporal saiu por decisão
+    # de negócio, e quem atende liga de novo quando precisa. O que impede duas
+    # ligações ao MESMO TEMPO continua sendo o lock, não este estado.
     dispatching = "dispatching"
     # HTTP 200 com `id` legível: a chamada existe do lado de lá.
     confirmed = "confirmed"

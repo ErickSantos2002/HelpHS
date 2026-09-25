@@ -186,9 +186,7 @@ def liga(request):
         cfg.return_value = SimpleNamespace(
             api4com_enabled=True,
             api4com_lock_ttl_seconds=base.api4com_lock_ttl_seconds,
-            api4com_repeat_window_seconds=base.api4com_repeat_window_seconds,
             api4com_calls_per_actor_per_hour=base.api4com_calls_per_actor_per_hour,
-            api4com_calls_per_ticket_per_hour=base.api4com_calls_per_ticket_per_hour,
             api4com_called_format=base.api4com_called_format,
         )
         yield chama
@@ -237,9 +235,7 @@ async def test_o_id_do_fornecedor_e_opaco(redis_falso):
         cfg.return_value = SimpleNamespace(
             api4com_enabled=True,
             api4com_lock_ttl_seconds=base.api4com_lock_ttl_seconds,
-            api4com_repeat_window_seconds=base.api4com_repeat_window_seconds,
             api4com_calls_per_actor_per_hour=base.api4com_calls_per_actor_per_hour,
-            api4com_calls_per_ticket_per_hour=base.api4com_calls_per_ticket_per_hour,
             api4com_called_format=base.api4com_called_format,
         )
         t, s = _monta()
@@ -288,9 +284,7 @@ async def test_a_chamada_so_acontece_depois_do_despacho_commitado(redis_falso):
         cfg.return_value = SimpleNamespace(
             api4com_enabled=True,
             api4com_lock_ttl_seconds=base.api4com_lock_ttl_seconds,
-            api4com_repeat_window_seconds=base.api4com_repeat_window_seconds,
             api4com_calls_per_actor_per_hour=base.api4com_calls_per_actor_per_hour,
-            api4com_calls_per_ticket_per_hour=base.api4com_calls_per_ticket_per_hour,
             api4com_called_format=base.api4com_called_format,
         )
         await _liga_para(s, ticket=t)

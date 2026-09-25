@@ -14,6 +14,7 @@ semântica. O `eval` emula o script Lua de liberação: compara e só então apa
 
 from __future__ import annotations
 
+import inspect
 import uuid
 from datetime import UTC, datetime, timedelta
 from types import SimpleNamespace
@@ -181,9 +182,7 @@ def telefonia_ligada():
         settings_falso.return_value = SimpleNamespace(
             api4com_enabled=True,
             api4com_lock_ttl_seconds=base.api4com_lock_ttl_seconds,
-            api4com_repeat_window_seconds=base.api4com_repeat_window_seconds,
             api4com_calls_per_actor_per_hour=base.api4com_calls_per_actor_per_hour,
-            api4com_calls_per_ticket_per_hour=base.api4com_calls_per_ticket_per_hour,
             api4com_called_format=base.api4com_called_format,
         )
         yield chamada
@@ -362,13 +361,21 @@ async def test_lock_ocupado_devolve_409(redis_falso):
 
 @pytest.mark.asyncio
 async def test_lock_e_liberado_quando_a_execucao_falha(redis_falso):
-    """Falha depois do lock não pode prender o chamado por 30s."""
+    """Falha depois do lock não pode prender o chamado por 30s.
+
+    ⚠️ A causa da falha mudou em 25/09/2026. Este caso usava uma tentativa
+    recente `confirmed` para provocar o 409 da antirrepetição; com aquela regra
+    removida, uma tentativa recente não falha mais nada. A falha agora vem do
+    teto por hora, que é a outra recusa que acontece DEPOIS do lock — e é
+    exatamente essa posição que o caso mede.
+    """
     ticket = _ticket()
-    sessao = _Sessao(ticket, _cliente(), recentes=[_tentativa_recente("confirmed")])
+    sessao = _Sessao(ticket, _cliente())
+    with patch.object(ligacao, "_consome_teto", new=AsyncMock(return_value=False)):
+        with pytest.raises(HTTPException) as erro:
+            await _prepara(_ator(), sessao, ticket.id)
 
-    with pytest.raises(HTTPException):
-        await _prepara(_ator(), sessao, ticket.id)
-
+    assert erro.value.status_code == 429
     assert f"{ligacao._PREFIXO_LOCK}{ticket.id}" not in redis_falso.dados
 
 
@@ -396,37 +403,127 @@ async def test_o_lock_nasce_com_ttl(redis_falso):
     )
 
 
-# ── Antirrepetição ───────────────────────────────────────────
+# ── Repetição PERMITIDA (2C.5b) ──────────────────────────────
+#
+# Até 25/09/2026 uma janela de 5 minutos recusava com 409 a segunda ligação
+# para o mesmo chamado quando a primeira estava em `dispatching`, `confirmed`
+# ou `indeterminate`. A regra de negócio mudou: quem atende liga para o cliente
+# quantas vezes for preciso.
+#
+# A primeira ligação real do HelpHS mostrou por que isso importa — ela precisou
+# de DUAS tentativas, porque a primeira voltou 424 do fornecedor. Se aquela
+# primeira tivesse sido `confirmed`, a janela teria transformado a segunda
+# tentativa legítima em erro.
+#
+# O que os casos abaixo prendem é o inverso do que os antigos prendiam.
 
 
 @pytest.mark.asyncio
-@pytest.mark.parametrize("status_recente", ["dispatching", "confirmed", "indeterminate"])
-async def test_tentativa_recente_que_pode_ter_tocado_bloqueia(redis_falso, status_recente):
+@pytest.mark.parametrize(
+    "estado_anterior",
+    ["pending", "dispatching", "confirmed", "rejected", "unavailable", "indeterminate"],
+)
+async def test_tentativa_anterior_nao_bloqueia_mais(redis_falso, estado_anterior):
+    """NENHUM estado anterior recusa uma nova tentativa manual."""
     ticket = _ticket()
-    sessao = _Sessao(ticket, _cliente(), recentes=[_tentativa_recente(status_recente)])
+    sessao = _Sessao(ticket, _cliente(), recentes=[_tentativa_recente(estado_anterior)])
+
+    tentativa = await _prepara(_ator(), sessao, ticket.id)
+
+    assert tentativa is not None
+    assert sessao.add.call_count >= 1, "a tentativa nova precisa ter sido criada"
+
+
+def test_a_regra_da_antirrepeticao_nao_existe_mais(redis_falso):
+    """Sentinela estrutural: o código da janela não pode voltar por descuido.
+
+    Prende o NOME e a MENSAGEM, não o comportamento — comportamento já está nos
+    casos acima. Se alguém reintroduzir a regra, é aqui que aparece primeiro.
+    """
+    assert not hasattr(ligacao, "STATUS_QUE_BLOQUEIAM_REPETICAO")
+    assert not hasattr(ligacao, "_recusa_repeticao")
+    fonte = inspect.getsource(ligacao.inicia_ligacao)
+    assert "_recusa_repeticao" not in fonte
+    assert "poucos minutos" not in inspect.getsource(ligacao)
+
+
+@pytest.mark.asyncio
+async def test_duas_chamadas_seguidas_geram_duas_tentativas(redis_falso):
+    """Duas ações manuais sucessivas: duas linhas, duas idas ao fornecedor.
+
+    É a prova direta da regra nova — e também prova que não há repetição
+    automática, porque cada `create_call` corresponde a UMA ação de gente.
+    """
+    ticket = _ticket()
+
+    primeira = await _prepara(_ator(), _Sessao(ticket, _cliente()), ticket.id)
+    segunda = await _prepara(
+        _ator(),
+        _Sessao(ticket, _cliente(), recentes=[_tentativa_recente("confirmed")]),
+        ticket.id,
+    )
+
+    assert primeira is not None
+    assert segunda is not None
+    assert primeira is not segunda
+
+
+@pytest.mark.asyncio
+async def test_duas_chamadas_geram_dois_eventos_de_historico(redis_falso):
+    """Cada tentativa que entra no fluxo conta a sua própria linha na Atividade.
+
+    Mede o que o banco de produção mediu depois da primeira ligação real: duas
+    tentativas, dois eventos. O AST de `test_efeito_externo_telefonia` já prende
+    o CONTEÚDO do evento; este prende a CONTAGEM, que é o que a regra nova
+    mudou.
+    """
+    from app.models.models import TicketHistory
+
+    ticket = _ticket()
+    eventos = []
+
+    for _ in range(2):
+        sessao = _Sessao(ticket, _cliente(), recentes=[_tentativa_recente("confirmed")])
+        await _prepara(_ator(), sessao, ticket.id)
+        eventos += [
+            c.args[0] for c in sessao.add.call_args_list if isinstance(c.args[0], TicketHistory)
+        ]
+
+    assert len(eventos) == 2, f"esperava 2 eventos, vieram {len(eventos)}"
+    for e in eventos:
+        assert e.field == "ligacao"
+        assert e.new_value == "tentativa"
+        assert e.old_value is None
+        # Nada de sensível viaja no evento: ele diz QUE houve tentativa.
+        texto = f"{e.field}{e.old_value}{e.new_value}{getattr(e, 'comment', None)}"
+        for proibido in (
+            "phone",
+            "telefone",
+            "ramal",
+            "extension",
+            "caller",
+            "called",
+            "1019",
+            "provider",
+        ):
+            assert proibido not in texto
+
+
+@pytest.mark.asyncio
+async def test_o_lock_continua_barrando_a_simultaneidade(redis_falso):
+    """A defesa que NÃO saiu: duas execuções ao mesmo tempo no mesmo chamado.
+
+    A janela olhava para o passado; o lock olha para o presente. Só a primeira
+    contrariava a regra nova, e é por isso que esta continua de pé.
+    """
+    ticket = _ticket()
+    await redis_falso.set(f"{ligacao._PREFIXO_LOCK}{ticket.id}", "de-outro", nx=True, ex=30)
 
     with pytest.raises(HTTPException) as erro:
-        await _prepara(_ator(), sessao, ticket.id)
+        await _prepara(_ator(), _Sessao(ticket, _cliente()), ticket.id)
 
     assert erro.value.status_code == 409
-    assert sessao.add.call_count == 0
-
-
-def test_pending_nao_bloqueia_repeticao():
-    """A diferença que o estado `dispatching` comprou.
-
-    Antes dele, `pending` órfão era ambíguo e a conduta segura era travar. Com
-    a fronteira explícita, `pending` significa que NADA saiu — travar seria
-    punir o usuário por um crash que não causou efeito nenhum.
-    """
-    assert CallCreationStatus.pending.value not in ligacao.STATUS_QUE_BLOQUEIAM_REPETICAO
-    assert CallCreationStatus.dispatching.value in ligacao.STATUS_QUE_BLOQUEIAM_REPETICAO
-
-
-def test_rejected_e_unavailable_nao_bloqueiam():
-    """4xx e falha de conexão: o fornecedor respondeu, ou nem ouviu. Nada tocou."""
-    assert CallCreationStatus.rejected.value not in ligacao.STATUS_QUE_BLOQUEIAM_REPETICAO
-    assert CallCreationStatus.unavailable.value not in ligacao.STATUS_QUE_BLOQUEIAM_REPETICAO
+    assert "andamento" in erro.value.detail
 
 
 # ── Tetos por hora ───────────────────────────────────────────
@@ -453,35 +550,95 @@ async def test_teto_do_ator(redis_falso):
 
 
 @pytest.mark.asyncio
-async def test_teto_do_chamado(redis_falso):
+async def test_o_chamado_nao_tem_teto(redis_falso, telefonia_ligada):
+    """SEIS chamadas manuais no MESMO chamado, todas aceitas.
+
+    Antes de 25/09/2026 a quarta batia num teto de 3/hora por chamado e voltava
+    429. O teto saiu: quem atende liga quantas vezes for preciso.
+
+    Seis é de propósito — o dobro do teto antigo mais um. Ator diferente a cada
+    volta para que o teto do ATOR, que continua existindo, não responda no
+    lugar do que este caso mede.
+    """
+    from app.models.models import TicketHistory
+
+    ticket = _ticket()
+    tentativas, eventos = [], []
+
+    for _ in range(6):
+        sessao = _Sessao(ticket, _cliente(), recentes=[_tentativa_recente("confirmed")])
+        tentativas.append(await _prepara(_ator(), sessao, ticket.id))
+        eventos += [
+            c.args[0] for c in sessao.add.call_args_list if isinstance(c.args[0], TicketHistory)
+        ]
+
+    # 1. todas permitidas
+    assert all(t is not None for t in tentativas)
+    # 2. linhas independentes
+    assert len({id(t) for t in tentativas}) == 6
+    # 3. um evento de histórico por tentativa
+    assert len(eventos) == 6
+    # 4. o fornecedor foi chamado uma vez por ação de gente — nunca mais
+    assert telefonia_ligada.await_count == 6
+
+
+@pytest.mark.asyncio
+async def test_o_teto_do_ator_continua_de_pe(redis_falso):
+    """A defesa que FICA: 20/h por ator, contra laço e conta comprometida.
+
+    O mesmo ator, em chamados diferentes, para que nenhum teto por chamado
+    pudesse responder no lugar — e hoje não há nenhum.
+    """
     from app.core.config import get_settings
 
-    limite = get_settings().api4com_calls_per_ticket_per_hour
-    ticket = _ticket()
-    for _ in range(limite):
-        # Ator diferente a cada volta, para o teto do ATOR não responder antes.
-        await _prepara(_ator(), _Sessao(ticket, _cliente()), ticket.id)
+    limite = get_settings().api4com_calls_per_actor_per_hour
+    ator = _ator()
 
+    for _ in range(limite):
+        t = _ticket()
+        await _prepara(ator, _Sessao(t, _cliente()), t.id)
+
+    t = _ticket()
     with pytest.raises(HTTPException) as erro:
-        await _prepara(_ator(), _Sessao(ticket, _cliente()), ticket.id)
+        await _prepara(ator, _Sessao(t, _cliente()), t.id)
 
     assert erro.value.status_code == 429
-    assert "Este chamado" in erro.value.detail
+    assert "Você atingiu" in erro.value.detail
+
+
+def test_a_regra_do_teto_por_chamado_nao_existe_mais():
+    """Sentinela estrutural: o teto por chamado não pode voltar por descuido."""
+    from app.core.config import get_settings
+
+    assert not hasattr(ligacao, "_PREFIXO_TETO_CHAMADO")
+    assert not hasattr(get_settings(), "api4com_calls_per_ticket_per_hour")
+    fonte = inspect.getsource(ligacao)
+    assert "Este chamado atingiu" not in fonte
+    # E o teto que fica continua lá.
+    assert hasattr(ligacao, "_PREFIXO_TETO_ATOR")
+    assert get_settings().api4com_calls_per_actor_per_hour == 20
 
 
 @pytest.mark.asyncio
 async def test_janela_expirada_libera(redis_falso):
-    """O contador some com o TTL; apagar a chave é o que o Redis faria."""
+    """O contador some com o TTL; apagar a chave é o que o Redis faria.
+
+    ⚠️ Medido no teto do ATOR desde 25/09/2026. Este caso usava o teto por
+    chamado, que deixou de existir — mas o que ele mede é o comportamento da
+    JANELA, e essa continua igual no contador que sobrou.
+    """
     from app.core.config import get_settings
 
-    limite = get_settings().api4com_calls_per_ticket_per_hour
-    ticket = _ticket()
+    limite = get_settings().api4com_calls_per_actor_per_hour
+    ator = _ator()
     for _ in range(limite):
-        await _prepara(_ator(), _Sessao(ticket, _cliente()), ticket.id)
+        t = _ticket()
+        await _prepara(ator, _Sessao(t, _cliente()), t.id)
 
-    redis_falso.dados.pop(f"{ligacao._PREFIXO_TETO_CHAMADO}{ticket.id}")
+    redis_falso.dados.pop(f"{ligacao._PREFIXO_TETO_ATOR}{ator.id}")
 
-    tentativa = await _prepara(_ator(), _Sessao(ticket, _cliente()), ticket.id)
+    t = _ticket()
+    tentativa = await _prepara(ator, _Sessao(t, _cliente()), t.id)
     assert tentativa.creation_status == CallCreationStatus.confirmed.value
 
 
