@@ -10,11 +10,19 @@ de proposito — nao passa pelo FastAPI-Mail nem pelo `Settings` do app. Se ele
 entrega e a aplicacao nao, o problema esta na aplicacao; se ele tambem falha,
 nao adianta procurar no codigo.
 
+Essa independencia e a razao de existir do script, e por isso ele NAO chama
+`get_settings()`: os dois lados do diagnostico diferencial lendo a mesma fonte
+acabariam com o diagnostico. Quem garante que ele enxerga a mesma configuracao
+que a aplicacao e `tests/test_testa_smtp.py`, por paridade contra os campos
+`smtp_*` do `Settings` — inclusive os PADROES de transporte daqui de baixo.
+
 Le as variaveis SMTP_* do `.env` do backend; se esse arquivo nao existir,
 cai para as VARIAVEIS DE AMBIENTE — que e o caso de rodar dentro do
 container, onde a configuracao vem do painel do EasyPanel. A origem usada
 sai impressa no relatorio. O script **nunca imprime a senha inteira** — o terminal costuma virar print no chat, e
-a API key do provedor e a credencial de envio da empresa inteira.
+a API key do provedor e a credencial de envio da empresa inteira. Pelo mesmo
+motivo o Reply-To sai como CONFIGURADO/(vazio), sem o endereco: para
+diagnosticar basta saber se existe.
 
 Uso:
 
@@ -37,12 +45,18 @@ import os
 import smtplib
 import ssl
 import sys
+from dataclasses import dataclass
 from email.message import EmailMessage
 from pathlib import Path
 
 PADRAO_ENV = Path(__file__).resolve().parent.parent / ".env"
 
 
+# Lista branca das variaveis copiadas do AMBIENTE (o caminho de dentro do
+# container). Chave lida adiante e ausente daqui vira silenciosamente vazia:
+# foi assim que `SMTP_REPLY_TO` passou meses aparecendo como "(vazio)" em
+# producao com o valor preenchido no painel. O teste de paridade contra
+# `Settings` existe para que isso nao dependa de ninguem lembrar.
 _CHAVES = (
     "SMTP_HOST",
     "SMTP_PORT",
@@ -52,7 +66,36 @@ _CHAVES = (
     "SMTP_PASSWORD",
     "SMTP_FROM_NAME",
     "SMTP_FROM_EMAIL",
+    "SMTP_REPLY_TO",
 )
+
+# Padroes iguais aos do `Settings`: TLS implicito na 465, e nao STARTTLS na
+# 587. A escolha e a mitigacao do CVE-2026-55558, nao estilo — um script que
+# caisse no STARTTLS por omissao testaria um transporte que a aplicacao nao
+# usa, e devolveria "OK" sobre outro caminho.
+PADRAO_PORTA = 465
+PADRAO_SSL = True
+PADRAO_TLS = False
+
+
+@dataclass(frozen=True)
+class Configuracao:
+    """A configuracao de envio, ja interpretada.
+
+    Imutavel porque atravessa o relatorio E a mensagem: se alguem a ajustasse
+    entre os dois, o relatorio deixaria de descrever o que foi enviado — e o
+    relatorio e a unica coisa que sobra depois que o terminal fecha.
+    """
+
+    host: str
+    porta: int
+    usuario: str
+    senha: str
+    remetente: str
+    nome: str
+    reply_to: str
+    usa_ssl: bool
+    usa_tls: bool
 
 
 def ler_env(caminho: Path, exigido: bool) -> tuple[dict[str, str], str]:
@@ -92,6 +135,35 @@ def ler_env(caminho: Path, exigido: bool) -> tuple[dict[str, str], str]:
     return do_ambiente, "variaveis de ambiente"
 
 
+def le_configuracao(env: dict[str, str]) -> Configuracao:
+    """Interpreta o mapa cru de variaveis.
+
+    `SMTP_HOST` nao tem padrao de proposito, e o `Settings` tem: num
+    diagnostico, adivinhar o servidor e o pior padrao possivel — testaria um
+    provedor que ninguem configurou. A ausencia vira erro no `main`.
+    """
+    return Configuracao(
+        host=env.get("SMTP_HOST", ""),
+        porta=int(env.get("SMTP_PORT", "") or PADRAO_PORTA),
+        usuario=env.get("SMTP_USER", ""),
+        senha=env.get("SMTP_PASSWORD", ""),
+        # Em muitos provedores remetente e usuario coincidem; exigir o par
+        # completo travaria o diagnostico sem motivo.
+        remetente=env.get("SMTP_FROM_EMAIL", "") or env.get("SMTP_USER", ""),
+        nome=env.get("SMTP_FROM_NAME", "HelpHS"),
+        reply_to=env.get("SMTP_REPLY_TO", ""),
+        usa_ssl=_booleano(env.get("SMTP_SSL"), PADRAO_SSL),
+        usa_tls=_booleano(env.get("SMTP_TLS"), PADRAO_TLS),
+    )
+
+
+def _booleano(valor: str | None, padrao: bool) -> bool:
+    """Nem o painel do EasyPanel normaliza caixa, nem quem digita."""
+    if valor is None or not valor.strip():
+        return padrao
+    return valor.strip().lower() == "true"
+
+
 def impressao_digital(segredo: str) -> str:
     """Identifica a chave sem revelar caractere nenhum dela.
 
@@ -119,6 +191,47 @@ def impressao_digital(segredo: str) -> str:
     return f"impressao {digest} ({len(segredo)} chars)"
 
 
+def linhas_do_relatorio(cfg: Configuracao, destino: str, origem: str) -> list[str]:
+    """O que sai no terminal antes de qualquer conexao.
+
+    O Reply-To sai como CONFIGURADO/(vazio) e nao como endereco: distinguir os
+    dois estados e o unico trabalho desta linha, e foi exatamente o que falhou
+    em producao. O destino sai inteiro porque quem rodou o comando acabou de
+    digita-lo.
+    """
+    return [
+        f"config de : {origem}",
+        f"host      : {cfg.host}:{cfg.porta} (ssl={cfg.usa_ssl}, starttls={cfg.usa_tls})",
+        f"usuario   : {cfg.usuario or '(sem autenticacao)'}",
+        f"senha     : {impressao_digital(cfg.senha)}",
+        f"remetente : {cfg.nome} <{cfg.remetente}>",
+        f"reply-to  : {'CONFIGURADO' if cfg.reply_to else '(vazio)'}",
+        f"destino   : {destino}",
+    ]
+
+
+def monta_mensagem(cfg: Configuracao, destino: str) -> EmailMessage:
+    """A mensagem de teste.
+
+    O `Reply-To` so entra quando ha valor: cabecalho vazio e cabecalho
+    malformado, e ha provedor que recusa a mensagem por causa dele.
+    """
+    msg = EmailMessage()
+    msg["Subject"] = "[HelpHS] Teste de envio SMTP"
+    msg["From"] = f"{cfg.nome} <{cfg.remetente}>"
+    msg["To"] = destino
+    if cfg.reply_to:
+        msg["Reply-To"] = cfg.reply_to
+    msg.set_content(
+        "Teste de configuracao de SMTP do HelpHS.\n\n"
+        "Se esta mensagem chegou, o provedor aceita a credencial e o dominio\n"
+        "do remetente esta verificado. Os e-mails de confirmacao de cadastro e\n"
+        "de redefinicao de senha saem por este mesmo caminho.\n\n"
+        "-- Help Desk Health & Safety\n"
+    )
+    return msg
+
+
 def main() -> None:
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("destino", help="endereco que vai receber o teste")
@@ -128,58 +241,34 @@ def main() -> None:
     # Sem --env: tenta o .env do backend e, se nao existir, cai para as
     # variaveis de ambiente (o caso de rodar dentro do container).
     env, origem = ler_env(args.env or PADRAO_ENV, exigido=args.env is not None)
-    host = env.get("SMTP_HOST", "")
-    porta = int(env.get("SMTP_PORT", "587") or 587)
-    usuario = env.get("SMTP_USER", "")
-    senha = env.get("SMTP_PASSWORD", "")
-    remetente = env.get("SMTP_FROM_EMAIL", "") or usuario
-    nome = env.get("SMTP_FROM_NAME", "HelpHS")
-    reply_to = env.get("SMTP_REPLY_TO", "")
-    usa_ssl = env.get("SMTP_SSL", "false").lower() == "true"
-    usa_tls = env.get("SMTP_TLS", "true").lower() == "true"
+    cfg = le_configuracao(env)
 
-    print(f"config de : {origem}")
-    print(f"host      : {host}:{porta} (ssl={usa_ssl}, starttls={usa_tls})")
-    print(f"usuario   : {usuario or '(sem autenticacao)'}")
-    print(f"senha     : {impressao_digital(senha)}")
-    print(f"remetente : {nome} <{remetente}>")
-    print(f"reply-to  : {reply_to or '(vazio)'}")
-    print(f"destino   : {args.destino}\n")
+    for linha in linhas_do_relatorio(cfg, args.destino, origem):
+        print(linha)
+    print()
 
-    if not host:
+    if not cfg.host:
         sys.exit("ERRO: SMTP_HOST vazio.")
-    if not remetente:
+    if not cfg.remetente:
         sys.exit("ERRO: sem SMTP_FROM_EMAIL nem SMTP_USER — nao ha remetente.")
-    if "CHANGE_ME" in senha:
+    if "CHANGE_ME" in cfg.senha:
         sys.exit("ERRO: SMTP_PASSWORD ainda esta com o valor de exemplo.")
 
-    msg = EmailMessage()
-    msg["Subject"] = "[HelpHS] Teste de envio SMTP"
-    msg["From"] = f"{nome} <{remetente}>"
-    msg["To"] = args.destino
-    if reply_to:
-        msg["Reply-To"] = reply_to
-    msg.set_content(
-        "Teste de configuracao de SMTP do HelpHS.\n\n"
-        "Se esta mensagem chegou, o provedor aceita a credencial e o dominio\n"
-        "do remetente esta verificado. Os e-mails de confirmacao de cadastro e\n"
-        "de redefinicao de senha saem por este mesmo caminho.\n\n"
-        "-- Help Desk Health & Safety\n"
-    )
+    msg = monta_mensagem(cfg, args.destino)
 
     contexto = ssl.create_default_context()
     try:
-        if usa_ssl:
-            servidor = smtplib.SMTP_SSL(host, porta, timeout=30, context=contexto)
+        if cfg.usa_ssl:
+            servidor = smtplib.SMTP_SSL(cfg.host, cfg.porta, timeout=30, context=contexto)
         else:
-            servidor = smtplib.SMTP(host, porta, timeout=30)
+            servidor = smtplib.SMTP(cfg.host, cfg.porta, timeout=30)
         with servidor as smtp:
             smtp.ehlo()
-            if usa_tls and not usa_ssl:
+            if cfg.usa_tls and not cfg.usa_ssl:
                 smtp.starttls(context=contexto)
                 smtp.ehlo()
-            if usuario:
-                smtp.login(usuario, senha)
+            if cfg.usuario:
+                smtp.login(cfg.usuario, cfg.senha)
             recusados = smtp.send_message(msg)
         if recusados:
             sys.exit(f"FALHA parcial — destinatarios recusados: {recusados}")
