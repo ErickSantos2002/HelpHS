@@ -439,6 +439,15 @@ export default function LoginPage() {
               >
                 Política de Privacidade
               </Link>
+              <span aria-hidden="true" className="text-conteudo-muted"> · </span>
+              <Link
+                to="/termos"
+                target="_blank"
+                rel="noopener noreferrer"
+                className="text-conteudo-link hover:underline"
+              >
+                Termos de Uso
+              </Link>
             </p>
           </div>
         </div>

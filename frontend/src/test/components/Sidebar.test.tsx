@@ -317,3 +317,16 @@ describe("Sidebar — a política de privacidade no rodapé", () => {
     },
   );
 });
+
+describe("Sidebar — os termos de uso no rodapé", () => {
+  it.each(["admin", "technician", "client"] as const)(
+    "o rodapé leva aos termos para %s, em nova aba",
+    (papel) => {
+      montar({ papel });
+      const link = screen.getByRole("link", { name: "Termos de Uso" });
+      expect(link.getAttribute("href")).toBe("/termos");
+      expect(link.getAttribute("target")).toBe("_blank");
+      expect(link.getAttribute("rel")).toContain("noopener");
+    },
+  );
+});

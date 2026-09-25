@@ -15,6 +15,7 @@ import { Spinner } from "./components/ui";
 const LoginPage = lazy(() => import("./pages/auth/LoginPage"));
 const RegisterPage = lazy(() => import("./pages/auth/RegisterPage"));
 const VerifyEmailPage = lazy(() => import("./pages/auth/VerifyEmailPage"));
+const TermosDeUsoPage = lazy(() => import("./pages/legal/TermosDeUsoPage"));
 const PoliticaPrivacidadePage = lazy(
   () => import("./pages/legal/PoliticaPrivacidadePage"),
 );
@@ -90,6 +91,7 @@ function App() {
               lida por quem está se cadastrando (sem sessão) e por quem já usa
               o sistema (com sessão). */}
           <Route path="/privacidade" element={<PoliticaPrivacidadePage />} />
+          <Route path="/termos" element={<TermosDeUsoPage />} />
 
           {/* Galeria da casca — nao existe no bundle de producao. */}
           {GaleriaCasca && (
