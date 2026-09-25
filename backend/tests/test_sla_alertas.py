@@ -65,7 +65,13 @@ from app.services.sla_alertas import (
     mensagem_do_aviso,
     threshold_da_prioridade,
 )
-from app.utils.sla import add_business_minutes, business_minutes_between
+from app.utils.sla import (
+    add_business_minutes,
+    atualiza_prazo_efetivo,
+    business_minutes_between,
+    inicio_do_ciclo_de_resolucao,
+    prazo_efetivo_de_resolucao,
+)
 
 # Uma terça-feira às 09:00 em São Paulo, dentro do expediente (08:00–17:00).
 _ABERTURA = datetime(2026, 9, 22, 12, 0, tzinfo=UTC)  # 09:00 BRT
@@ -116,6 +122,10 @@ def _chamado(
         sla_resolve_breach=False,
         auto_closed=False,
         reopen_count=reaberturas,
+        # `default=True` do SQLAlchemy só é aplicado no INSERT, e estes testes não
+        # tocam banco — sem isto o campo chega `None` e o `TicketResponse` recusa.
+        ai_enabled=True,
+        helo_saiu=False,
         created_at=_ABERTURA,
         updated_at=_ABERTURA,
     )
@@ -128,13 +138,41 @@ def _instante_com_consumo(ticket: Ticket, pct: float) -> datetime:
     Calculado pelo motor, não por regra de três sobre tempo corrido: o prazo é
     em minutos úteis e a jornada tem 9 h, então somar tempo de relógio daria
     outro ponto.
-    """
-    from app.utils.sla import prazo_efetivo_de_resolucao
 
+    Parte do INÍCIO DO CICLO, e não de `created_at`. A diferença só aparece em
+    chamado reaberto — e era justamente ali que a conta antiga mentia.
+    """
     prazo = prazo_efetivo_de_resolucao(ticket)
     assert prazo is not None
-    total = business_minutes_between(ticket.created_at, prazo)
-    return add_business_minutes(ticket.created_at, int(round(total * pct / 100)))
+    inicio = inicio_do_ciclo_de_resolucao(ticket)
+    total = business_minutes_between(inicio, prazo)
+    return add_business_minutes(inicio, int(round(total * pct / 100)))
+
+
+def _reabre(ticket: Ticket, agora: datetime, resolve_min: int = 540) -> None:
+    """O que `reopen_ticket` faz com o SLA (`app/routers/tickets.py:1358-1404`).
+
+    Reproduzido aqui, e não chamado, porque o endpoint exige requisição, sessão
+    e permissão — e o que está sob teste é a aritmética do ciclo, não o HTTP. As
+    seis escritas abaixo são as seis que aquele bloco faz.
+    """
+    ticket.status = TicketStatus.in_progress
+    ticket.resolved_at = None
+    ticket.closed_at = None
+    ticket.sla_resolve_due_at = add_business_minutes(agora, resolve_min)
+    ticket.sla_resolve_breach = False
+    ticket.sla_paused_at = None
+    ticket.sla_total_paused_ms = 0
+    ticket.sla_resolve_extension_total_min = 0
+    ticket.reopened_at = agora
+    ticket.reopen_count = (ticket.reopen_count or 0) + 1
+    atualiza_prazo_efetivo(ticket)
+
+
+def _ator_tecnico() -> MagicMock:
+    ator = MagicMock()
+    ator.role = UserRole.technician
+    return ator
 
 
 def _pessoa(papel: UserRole, status: UserStatus = UserStatus.active, nome: str = "Ana") -> User:
@@ -149,6 +187,142 @@ def _pessoa(papel: UserRole, status: UserStatus = UserStatus.active, nome: str =
         email_verified=True,
         onboarding_completed=True,
     )
+
+
+# ══════════════════════════════════════════════════════════════
+# 0. O início do ciclo — o que a reabertura ensinou
+# ══════════════════════════════════════════════════════════════
+#
+# Medido em 25/09/2026, com a Fase 2A já escrita: um chamado criado dez dias
+# úteis antes e reaberto AGORA aparecia com **90% do prazo consumido** e
+# disparava o aviso no mesmo instante da reabertura. O prazo era do ciclo novo
+# e o `total` partia de `created_at`, que é o ciclo ANTERIOR — o total inflava
+# 10× (5400 minutos úteis contra 540), e a inflação cresce com a idade do
+# chamado.
+#
+# O e-mail que sairia era autocontraditório na própria frase: "90% do prazo
+# consumido. Restam 540 minutos úteis" — 540 úteis É o ciclo inteiro.
+#
+# ⚠️ O defeito não nasceu no worker. `routers/tickets.py` monta
+# `sla_resolve_total_min` com a mesma conta desde antes desta fase, e a barra do
+# cartão divide exatamente esses campos: chamado reaberto já aparecia quase
+# cheio na tela. Por isso a correção é na fonte única, e os dois a consomem.
+
+
+def test_primeiro_ciclo_comeca_na_abertura():
+    """RN-013 preservado: sem reabertura, o ciclo é o da abertura."""
+    ticket = _chamado()
+
+    assert ticket.reopened_at is None
+    assert inicio_do_ciclo_de_resolucao(ticket) == ticket.created_at
+
+
+def test_ciclo_reaberto_comeca_na_reabertura():
+    ticket = _chamado()
+    reabertura = _ABERTURA + timedelta(days=13)
+    ticket.reopened_at = reabertura
+
+    assert inicio_do_ciclo_de_resolucao(ticket) == reabertura
+
+
+def test_a_ordem_do_ou_importa():
+    """`reopened_at or created_at`, e não o contrário.
+
+    Invertido, todo chamado passaria a contar da abertura — inclusive os
+    reabertos — e o defeito voltaria inteiro, calado, porque a expressão
+    continuaria parecendo certa.
+    """
+    ticket = _chamado()
+    reabertura = _ABERTURA + timedelta(days=13)
+    ticket.reopened_at = reabertura
+
+    assert inicio_do_ciclo_de_resolucao(ticket) != ticket.created_at
+
+
+def test_chamado_antigo_reaberto_agora_tem_consumo_perto_de_zero():
+    """A prova numérica que motivou esta correção, virada em teste.
+
+    Dez dias úteis de vida, reaberto agora, ciclo novo de uma jornada inteira.
+    O consumo tem de ser ~0%, e antes era 90%.
+    """
+    ticket = _chamado()
+    reabertura = _ABERTURA + timedelta(days=13)
+    _reabre(ticket, reabertura)
+
+    pct = consumido_pct(ticket, reabertura)
+
+    assert pct is not None
+    assert pct == pytest.approx(0, abs=0.5), f"consumo logo após reabrir: {pct:.2f}%"
+
+
+def test_imediatamente_apos_reabrir_nao_dispara_aviso():
+    ticket = _chamado()
+    reabertura = _ABERTURA + timedelta(days=13)
+    _reabre(ticket, reabertura)
+    configs = {SLALevel.medium: _config(SLALevel.medium, 80)}
+
+    assert e_candidato(ticket, reabertura, configs) is False
+
+
+def test_o_ciclo_reaberto_avisa_no_ponto_certo_do_proprio_ciclo():
+    """A correção não pode calar o aviso do ciclo novo — só movê-lo para a hora
+    certa. Em 85% do ciclo REABERTO, ele sai."""
+    ticket = _chamado()
+    reabertura = _ABERTURA + timedelta(days=13)
+    _reabre(ticket, reabertura)
+    configs = {SLALevel.medium: _config(SLALevel.medium, 80)}
+
+    prazo = prazo_efetivo_de_resolucao(ticket)
+    assert prazo is not None
+    total = business_minutes_between(reabertura, prazo)
+    em_85 = add_business_minutes(reabertura, int(total * 0.85))
+
+    assert consumido_pct(ticket, em_85) == pytest.approx(85, abs=1)
+    assert e_candidato(ticket, em_85, configs) is True
+
+
+def test_o_router_e_o_worker_usam_a_mesma_origem_de_ciclo():
+    """A divergência que esta frente existe para não criar: o e-mail dizendo 0%
+    enquanto o cartão diz 90%.
+
+    `sla_resolve_total_min` é o que a barra do frontend divide. Ele tem de ser
+    exatamente o `total` do worker — não "parecido", igual.
+    """
+    from app.routers.tickets import _serialize_ticket
+
+    ticket = _chamado()
+    reabertura = _ABERTURA + timedelta(days=13)
+    _reabre(ticket, reabertura)
+
+    resposta = _serialize_ticket(ticket, actor=_ator_tecnico(), agora=reabertura)
+
+    prazo = prazo_efetivo_de_resolucao(ticket)
+    assert prazo is not None
+    total_do_worker = business_minutes_between(inicio_do_ciclo_de_resolucao(ticket), prazo)
+
+    assert resposta.sla_resolve_total_min == total_do_worker
+    # E o percentual que a tela calcularia com esses dois campos bate com o nosso.
+    restante = resposta.sla_resolve_restante_min
+    assert restante is not None and resposta.sla_resolve_total_min
+    pct_da_tela = (resposta.sla_resolve_total_min - restante) / resposta.sla_resolve_total_min * 100
+    assert pct_da_tela == pytest.approx(consumido_pct(ticket, reabertura) or 0, abs=0.5)
+
+
+def test_o_total_da_primeira_resposta_continua_na_abertura():
+    """⚠️ Contraprova de escopo. O prazo de RESPOSTA não é recarimbado na
+    reabertura (`reopen_ticket` só mexe no de resolução), então ele tem um ciclo
+    só, e `created_at` é o início dele. Ancorá-lo em `reopened_at` introduziria
+    um defeito onde não havia — foi a armadilha desta frente.
+    """
+    from app.routers.tickets import _serialize_ticket
+
+    ticket = _chamado()
+    reabertura = _ABERTURA + timedelta(days=13)
+    resposta_antes = _serialize_ticket(ticket, actor=_ator_tecnico(), agora=_ABERTURA)
+    _reabre(ticket, reabertura)
+    resposta_depois = _serialize_ticket(ticket, actor=_ator_tecnico(), agora=_ABERTURA)
+
+    assert resposta_antes.sla_response_total_min == resposta_depois.sla_response_total_min
 
 
 # ══════════════════════════════════════════════════════════════

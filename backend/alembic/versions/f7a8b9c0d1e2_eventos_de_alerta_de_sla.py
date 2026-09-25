@@ -27,13 +27,21 @@ evento.
 A identidade, e o que ela decide
 --------------------------------
 `uq_sla_alert_events_identidade` cobre
-`(ticket_id, alert_kind, effective_due_at, warning_threshold)`.
+`(ticket_id, alert_kind, reopen_count, effective_due_at, warning_threshold)`.
 
-O `effective_due_at` carrega sozinho pausa acumulada, extensao e ciclo de
-reabertura, porque e a saida de `prazo_efetivo_de_resolucao`. Por isso
-`priority`, `reopen_count` e `extension_total_min` ficam de FORA da identidade:
-sao auditoria, e incluir qualquer um deles criaria uma segunda resposta para "e
-o mesmo aviso?".
+O `reopen_count` esta ai por medicao, nao por precaucao. A primeira versao desta
+migration contava com o prazo distinguir os ciclos, e ele NAO distingue:
+`add_business_minutes` avanca o instante para dentro do expediente antes de
+somar, entao duas reaberturas em momentos diferentes da mesma janela fechada
+colapsam no mesmo inicio de jornada e produzem o MESMO vencimento -- sabado as
+11:00 e domingo as 19:30 BRT, 32 horas de diferenca, prazo identico. E a
+reabertura zera pausa e extensao, entao o prazo do ciclo novo e independente do
+anterior e pode coincidir com ele. Sem `reopen_count` na chave, o segundo aviso
+ficava silenciado, que e o pior desfecho possivel para um alerta.
+
+`priority` e `extension_total_min` ficam de FORA: sao auditoria, nenhum dos dois
+muda o ciclo, e os dois ja mudam o prazo -- que esta na chave. Incluir qualquer
+um criaria uma segunda resposta para "e o mesmo aviso?".
 
 O indice unico nao e enfeite de integridade: e ele que permite o
 `INSERT ... ON CONFLICT DO NOTHING RETURNING id` do worker. Sem um indice unico
@@ -113,7 +121,7 @@ def upgrade() -> None:
     op.create_index(
         "uq_sla_alert_events_identidade",
         _TABELA,
-        ["ticket_id", "alert_kind", "effective_due_at", "warning_threshold"],
+        ["ticket_id", "alert_kind", "reopen_count", "effective_due_at", "warning_threshold"],
         unique=True,
     )
     op.create_index("ix_sla_alert_events_ticket_created", _TABELA, ["ticket_id", "created_at"])

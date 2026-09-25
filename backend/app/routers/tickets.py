@@ -98,6 +98,7 @@ from app.utils.sla import (
     business_minutes_between,
     check_breaches,
     estado_do_expediente,
+    inicio_do_ciclo_de_resolucao,
     marca_violacao_ao_resolver,
     minutos_uteis_de_dias,
     pause_sla,
@@ -332,8 +333,21 @@ def _serialize_ticket(
         response.sla_resolve_restante_min = business_minutes_between(
             agora, response.sla_resolve_vence_em
         )
+        # Do início do CICLO, e não da abertura. A reabertura recomeça o prazo de
+        # resolução e não o `created_at`: contar da abertura original contra um
+        # prazo do ciclo novo inflava o total — medido em 25/09/2026, chamado com
+        # dez dias úteis de vida aparecia com 90% da barra cheia no instante em
+        # que foi reaberto, porque o total dava 5400 minutos úteis contra 540 de
+        # restante.
+        #
+        # É a MESMA função que o aviso de SLA consome (`sla_alertas.py`), de
+        # propósito: com duas contas, o e-mail diria 0% e o cartão 90%.
+        #
+        # ⚠️ A linha do prazo de RESPOSTA acima continua em `created_at`, e está
+        # certa: `reopen_ticket` não recarimba `sla_response_due_at`, então
+        # aquele prazo tem um ciclo só.
         response.sla_resolve_total_min = business_minutes_between(
-            ticket.created_at, response.sla_resolve_vence_em
+            inicio_do_ciclo_de_resolucao(ticket), response.sla_resolve_vence_em
         )
 
     if com_expediente:

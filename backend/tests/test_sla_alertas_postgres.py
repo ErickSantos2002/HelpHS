@@ -279,8 +279,14 @@ async def test_prazo_diferente_e_outra_identidade(db):
 
 @pytest.mark.asyncio
 async def test_a_auditoria_nao_participa_da_identidade(db):
-    """`priority`, `reopen_count` e `extension_total_min` são snapshot. Se
-    entrassem na chave haveria duas respostas para "é o mesmo aviso?"."""
+    """`priority` e `extension_total_min` são snapshot puro.
+
+    ⚠️ `reopen_count` ERA snapshot e passou a integrar a identidade em
+    25/09/2026 — ver `test_dois_ciclos_com_o_mesmo_prazo_sao_identidades_distintas`.
+    Os outros dois ficaram de fora porque nenhum deles muda o ciclo: prorrogar
+    muda o prazo, que já está na chave, e trocar a prioridade também. Incluí-los
+    criaria uma segunda resposta para "é o mesmo aviso?".
+    """
     criador = _pessoa(UserRole.client)
     db.add(criador)
     ticket = _chamado(criador)
@@ -291,9 +297,67 @@ async def test_a_auditoria_nao_participa_da_identidade(db):
 
     assert await reivindica_evento(db, ticket, prazo, 80) is True
 
-    # Muda só o que é auditoria: mesma identidade, segue recusando.
-    ticket.reopen_count = 7
+    # Muda só o que é auditoria — sem tocar em `reopen_count`.
+    ticket.priority = TicketPriority.critical
     ticket.sla_resolve_extension_total_min = 123
+    assert await reivindica_evento(db, ticket, prazo, 80) is False
+    assert await _conta_eventos(db, ticket) == 1
+
+
+@pytest.mark.asyncio
+async def test_dois_ciclos_com_o_mesmo_prazo_sao_identidades_distintas(db):
+    """A colisão medida em 25/09/2026, e a razão de `reopen_count` estar na chave.
+
+    `add_business_minutes` primeiro avança o instante para dentro do expediente.
+    Então DUAS reaberturas em momentos diferentes da mesma janela fechada — noite,
+    fim de semana, feriado — colapsam no mesmo início de jornada e produzem
+    **exatamente o mesmo prazo**:
+
+        sábado  11:00 BRT  ->  prazo 2026-09-21T17:00-03:00
+        domingo 19:30 BRT  ->  prazo 2026-09-21T17:00-03:00   (32 h depois)
+
+    E a reabertura zera pausa e extensão, então o prazo do ciclo novo é
+    independente do anterior e pode coincidir com ele.
+
+    Sem `reopen_count` na chave, o segundo aviso seria **silenciado** — e o
+    silêncio é o pior desfecho possível para um alerta.
+    """
+    criador = _pessoa(UserRole.client)
+    db.add(criador)
+    ticket = _chamado(criador)
+    db.add(ticket)
+    await db.flush()
+
+    sabado = datetime(2026, 9, 19, 14, 0, tzinfo=UTC)
+    domingo = datetime(2026, 9, 20, 22, 30, tzinfo=UTC)
+    prazo_a = add_business_minutes(sabado, 540)
+    prazo_b = add_business_minutes(domingo, 540)
+    assert prazo_a == prazo_b, "a premissa deste teste: os dois ciclos colidem no prazo"
+
+    ticket.reopen_count = 1
+    ticket.reopened_at = sabado
+    assert await reivindica_evento(db, ticket, prazo_a, 80) is True
+
+    ticket.reopen_count = 2
+    ticket.reopened_at = domingo
+    assert await reivindica_evento(db, ticket, prazo_b, 80) is True
+
+    assert await _conta_eventos(db, ticket) == 2
+
+
+@pytest.mark.asyncio
+async def test_mesmo_ciclo_mesmo_prazo_mesmo_limiar_continua_deduplicado(db):
+    """O outro lado: `reopen_count` na chave não pode afrouxar a dedup."""
+    criador = _pessoa(UserRole.client)
+    db.add(criador)
+    ticket = _chamado(criador, reaberturas=3)
+    db.add(ticket)
+    await db.flush()
+    prazo = ticket.sla_resolve_effective_due_at
+    assert prazo is not None
+
+    assert await reivindica_evento(db, ticket, prazo, 80) is True
+    assert await reivindica_evento(db, ticket, prazo, 80) is False
     assert await reivindica_evento(db, ticket, prazo, 80) is False
     assert await _conta_eventos(db, ticket) == 1
 

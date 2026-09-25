@@ -26,8 +26,9 @@ havia pausa, escrevendo "Vencido" horas antes.
 
 O percentual e o MESMO que a tela mostra na barra do cartao:
 
-    total     = business_minutes_between(created_at, prazo_efetivo)
-    restante  = business_minutes_between(agora,      prazo_efetivo)
+    inicio    = inicio_do_ciclo_de_resolucao(ticket)   # reopened_at or created_at
+    total     = business_minutes_between(inicio, prazo_efetivo)
+    restante  = business_minutes_between(agora,  prazo_efetivo)
     consumido = (total - restante) / total * 100
 
 Como nao repete
@@ -69,6 +70,7 @@ from app.services.notifications import (
 from app.utils.sla import (
     _TERMINAL_STATUSES,
     business_minutes_between,
+    inicio_do_ciclo_de_resolucao,
     prazo_efetivo_de_resolucao,
 )
 
@@ -107,7 +109,10 @@ def consumido_pct(ticket: Ticket, agora: datetime) -> float | None:
     if prazo is None:
         return None
 
-    total = business_minutes_between(ticket.created_at, prazo)
+    # Do inicio do CICLO, nao da abertura: a reabertura recomeca o prazo de
+    # resolucao e nao o `created_at`. Ver `inicio_do_ciclo_de_resolucao`, e o
+    # 90% que este worker produzia no instante da reabertura.
+    total = business_minutes_between(inicio_do_ciclo_de_resolucao(ticket), prazo)
     if total <= 0:
         return None
 
@@ -290,7 +295,13 @@ async def reivindica_evento(
             extension_total_min=ticket.sla_resolve_extension_total_min or 0,
         )
         .on_conflict_do_nothing(
-            index_elements=["ticket_id", "alert_kind", "effective_due_at", "warning_threshold"]
+            index_elements=[
+                "ticket_id",
+                "alert_kind",
+                "reopen_count",
+                "effective_due_at",
+                "warning_threshold",
+            ]
         )
         .returning(SlaAlertEvent.id)
     )

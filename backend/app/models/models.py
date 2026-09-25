@@ -1438,14 +1438,26 @@ class SlaAlertEvent(Base):
 
     A identidade
     ------------
-    `(ticket_id, alert_kind, effective_due_at, warning_threshold)`, sob indice
-    UNICO. O `effective_due_at` carrega sozinho pausa, extensao e ciclo de
-    reabertura, porque e a saida de `prazo_efetivo_de_resolucao` — e os campos
-    de auditoria abaixo NAO participam da identidade, justamente para que nao
-    existam duas respostas para "e o mesmo aviso?".
+    `(ticket_id, alert_kind, reopen_count, effective_due_at, warning_threshold)`,
+    sob indice UNICO.
 
-    A consequencia e deliberada: mesmo prazo e mesmo limiar nunca repetem;
-    qualquer coisa que MUDE o prazo, ou o limiar, habilita um aviso novo.
+    `reopen_count` entrou em 25/09/2026, depois de uma medicao. A versao anterior
+    contava com o prazo distinguir os ciclos, e ele NAO distingue:
+    `add_business_minutes` primeiro avanca o instante para dentro do expediente,
+    entao duas reaberturas em momentos diferentes da mesma janela fechada
+    colapsam no mesmo inicio de jornada e dao prazos IDENTICOS — sabado as 11:00
+    e domingo as 19:30 BRT, 32 horas de diferenca, mesmo vencimento. Como a
+    reabertura tambem zera pausa e extensao, o prazo do ciclo novo e independente
+    do anterior e pode coincidir com ele. Sem `reopen_count` na chave, o segundo
+    aviso ficava SILENCIADO — o pior desfecho possivel para um alerta.
+
+    `priority` e `extension_total_min` seguem fora da identidade: nenhum dos dois
+    muda o ciclo, e os dois ja mudam o prazo, que esta na chave. Incluir qualquer
+    um criaria uma segunda resposta para "e o mesmo aviso?".
+
+    A consequencia e deliberada: mesmo ciclo, mesmo prazo e mesmo limiar nunca
+    repetem; qualquer coisa que MUDE o ciclo, o prazo ou o limiar habilita um
+    aviso novo.
     """
 
     __tablename__ = "sla_alert_events"
@@ -1465,11 +1477,14 @@ class SlaAlertEvent(Base):
     effective_due_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False)
     warning_threshold: Mapped[int] = mapped_column(Integer, nullable=False)
 
+    # O CICLO. Parte da identidade desde 25/09/2026 — ver o docstring acima: dois
+    # ciclos distintos podem produzir o mesmo `effective_due_at`.
+    reopen_count: Mapped[int] = mapped_column(Integer, nullable=False, default=0)
+
     # ── Daqui para baixo: auditoria. NAO entra na identidade. ─────
     # Serve para responder "por que este aviso saiu?" meses depois, quando a
     # `sla_configs` ja foi editada e o chamado ja mudou de mao.
     priority: Mapped[str | None] = mapped_column(String(20), nullable=True)
-    reopen_count: Mapped[int] = mapped_column(Integer, nullable=False, default=0)
     extension_total_min: Mapped[int] = mapped_column(Integer, nullable=False, default=0)
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now())
 
@@ -1499,6 +1514,7 @@ class SlaAlertEvent(Base):
             "uq_sla_alert_events_identidade",
             "ticket_id",
             "alert_kind",
+            "reopen_count",
             "effective_due_at",
             "warning_threshold",
             unique=True,

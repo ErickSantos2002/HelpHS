@@ -238,6 +238,41 @@ def minutos_uteis_de_dias(dias: int) -> int:
     return int(dias * _WORK_HOURS_PER_DAY * 60)
 
 
+def inicio_do_ciclo_de_resolucao(ticket: Ticket) -> datetime:
+    """Quando começou o ciclo de resolução VIGENTE.
+
+    Existe porque o prazo de resolução é recomeçado na reabertura e o `created_at`
+    não: um chamado com dez dias úteis de vida, reaberto agora, tinha `total`
+    contado da abertura ORIGINAL contra um prazo do ciclo NOVO. Medido em
+    25/09/2026: 5400 minutos úteis de total contra 540 de restante — **90% de
+    consumo no instante da reabertura**, e a inflação cresce com a idade do
+    chamado. O texto que saía se contradizia sozinho: "90% do prazo consumido,
+    restam 540 minutos úteis" — 540 úteis É o ciclo inteiro.
+
+    `reopened_at` é gravado em `reopen_ticket`, na mesma linha em que
+    `reopen_count` incrementa, e é o ÚNICO lugar do sistema que o escreve. Por
+    isso não foi preciso criar coluna: ele já é, com outro nome, o "início do
+    ciclo". Um campo novo criaria uma segunda fonte para a mesma pergunta, e
+    duas fontes divergem na primeira escrita que atualizar uma e não a outra —
+    foi o que aconteceu entre o `warning_threshold` e o 80 fixo do frontend.
+
+    As quatro semânticas que ele satisfaz, sem código adicional:
+
+    * **primeiro ciclo / triagem** → `created_at`. O RN-013 fica intacto: a
+      triagem continua carimbando `apply_sla_config(..., ticket.created_at)`, e
+      chamado nunca reaberto tem `reopened_at` nulo;
+    * **troca de prioridade no mesmo ciclo** → não muda. O endpoint da triagem
+      não escreve `reopened_at`;
+    * **reabertura** → o instante da reabertura, literalmente;
+    * **pausa/resume e extensão** → não mudam. Nenhum dos dois toca o campo.
+
+    ⚠️ **Não vale para o prazo de PRIMEIRA RESPOSTA.** A reabertura não
+    recarimba `sla_response_due_at` — ele tem um ciclo só, e `created_at` é o
+    início dele. Ancorar a resposta aqui introduziria um defeito onde não havia.
+    """
+    return ticket.reopened_at or ticket.created_at
+
+
 def prazo_efetivo_de_resposta(ticket: Ticket) -> datetime | None:
     """O prazo de PRIMEIRA RESPOSTA que o motor compara.
 
