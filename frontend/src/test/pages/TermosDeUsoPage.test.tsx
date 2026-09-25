@@ -7,9 +7,9 @@ import { describe, expect, it } from "vitest";
 import TermosDeUsoPage from "../../pages/legal/TermosDeUsoPage";
 
 /**
- * Os Termos de Uso, com o texto real do arquivo versionado. O rascunho de
- * 25/09 foi redigido pela TI e ainda depende da aprovação da qualidade — os
- * marcadores do cabeçalho e da tabela de revisão mantêm o aviso na tela até lá.
+ * Os Termos de Uso, com o texto real do arquivo versionado — o PGS-TI-032,
+ * aprovado pela qualidade em 25/09/2026. Enquanto era rascunho, os marcadores
+ * mantinham o aviso de "documento em elaboração"; aprovado, o aviso sai.
  */
 describe("TermosDeUsoPage", () => {
   function monta() {
@@ -30,9 +30,14 @@ describe("TermosDeUsoPage", () => {
     ).toBeInTheDocument();
   });
 
-  it("avisa que é rascunho enquanto a qualidade não aprovar", () => {
+  it("aprovado, não mostra o aviso de rascunho", () => {
     monta();
-    expect(screen.getByRole("alert")).toHaveTextContent(/documento em elaboração/i);
+    expect(screen.queryByRole("alert")).toBeNull();
+  });
+
+  it("identifica o documento pelo código do Sistema de Gestão", () => {
+    monta();
+    expect(screen.getByText(/PGS-TI-032/)).toBeInTheDocument();
   });
 
   it("tem o Voltar das páginas legais", () => {
