@@ -491,6 +491,55 @@ esperando ser notada. Com 3600 s, um prazo de resposta de 30 minutos do nível
 crítico atravessaria 80% e venceria dentro da mesma janela, e o aviso nunca
 sairia.
 
+### De onde começa o percentual — o ciclo, não a abertura
+
+O percentual de resolução conta do **início do ciclo vigente**, dado por
+`inicio_do_ciclo_de_resolucao(ticket)` em `app/utils/sla.py`:
+
+```
+primeiro ciclo                        → ticket.created_at   (RN-013 intacto)
+após reabertura                       → ticket.reopened_at
+troca de prioridade no mesmo ciclo    → não reinicia
+pausa / resume                        → não reinicia
+extensão                              → não reinicia
+SLA de PRIMEIRA RESPOSTA              → segue ancorado em created_at
+```
+
+A última linha não é exceção esquecida: `reopen_ticket` **não** recarimba
+`sla_response_due_at`, então o prazo de resposta tem um ciclo só, e `created_at`
+é o início dele. Ancorá-lo no ciclo introduziria um defeito onde não havia — há
+teste de contraprova, e é a armadilha que quem "completar" esta correção vai
+encontrar.
+
+**Por que a regra existe.** Medido em 25/09/2026: chamado criado dez dias úteis
+antes e reaberto naquele instante aparecia com **90% do prazo consumido**, porque
+o prazo era do ciclo novo e o total partia da abertura original — 5400 minutos
+úteis contra 540 de restante, inflação que cresce com a idade do chamado. O texto
+se contradizia sozinho: *"90% do prazo consumido, restam 540 minutos úteis"* —
+540 úteis **é** o ciclo inteiro.
+
+Não foi preciso coluna nova: `reopened_at` já é gravado em `reopen_ticket`, na
+mesma linha em que `reopen_count` incrementa, e é o único lugar do sistema que o
+escreve. Um campo novo criaria uma segunda fonte para a mesma pergunta.
+
+**A mesma função serve os dois consumidores** — o worker e o
+`sla_resolve_total_min` de `routers/tickets.py`, que é o campo que a barra do
+cartão divide. Com duas contas, o e-mail diria 0% e o cartão 90%; o defeito, aliás,
+já estava na barra antes desta fase existir.
+
+### `reopen_count` participa da identidade do alerta
+
+Porque dois ciclos distintos **podem** produzir o mesmo `effective_due_at`:
+`add_business_minutes` avança o instante para dentro do expediente antes de
+somar, então duas reaberturas em momentos diferentes da mesma janela fechada
+colapsam no mesmo início de jornada — sábado às 11:00 e domingo às 19:30,
+32 horas de diferença, **prazo idêntico**. E a reabertura zera pausa e extensão,
+então o prazo do ciclo novo é independente do anterior.
+
+Sem `reopen_count` na chave, o segundo aviso ficava silenciado. `priority` e
+`extension_total_min` seguem fora: nenhum muda o ciclo, e os dois já mudam o
+prazo, que está na chave.
+
 **O cliente nunca é filtrado**, em nenhum tipo. Há duas contraprovas de teste
 justamente porque alargar o filtro silenciaria quem está do lado de fora.
 
