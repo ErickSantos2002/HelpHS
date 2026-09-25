@@ -1,6 +1,6 @@
 # Política de Privacidade — HelpHS
 
-**Documento:** PGS-TI-0XX · **Revisão:** 00 · **Vigência:** 31 de agosto de 2026
+**Documento:** [definir código do documento] · **Revisão:** 00 · **Vigência:** 31 de agosto de 2026
 
 ---
 
@@ -192,7 +192,7 @@ Antes da ativação, a Health & Safety realizará a avaliação do provedor conf
 
 ### 10.3. Hospedagem
 
-As demais operações de tratamento realizadas na plataforma — hospedagem, banco de dados e backups — ocorrem em infraestrutura localizada em [país do data center da VPS — conferir no hPanel].
+As demais operações de tratamento realizadas na plataforma — hospedagem, banco de dados e backups — ocorrem em infraestrutura localizada no Brasil, em São Paulo/SP.
 
 ## 11. Assistente Virtual Helô
 
