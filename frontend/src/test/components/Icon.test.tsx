@@ -16,12 +16,12 @@ function svg(elemento: React.ReactElement): SVGSVGElement | null {
 }
 
 describe("Icon", () => {
-  it("traz os 62 nomes do pacote, nem um a mais", () => {
+  it("traz os 63 nomes do pacote, nem um a mais", () => {
     // Eram 25 até a **E20**, que subiu para o pacote os 21 que viviam numa
     // tabela local do HelpHS, e 62 desde a **E21**, que acrescentou 16 vindos
     // dos 151 `<svg>` soltos das telas internas. O número muda quando o pacote
     // muda, e só então.
-    expect(Object.keys(ICON_PATHS_PACOTE)).toHaveLength(62);
+    expect(Object.keys(ICON_PATHS_PACOTE)).toHaveLength(63);
   });
 
   it("a tabela local está vazia — variante local não existe", () => {
@@ -92,7 +92,7 @@ describe("Icon", () => {
     expect(vistos.size).toBe(Object.keys(ICON_PATHS).length);
   });
 
-  it("os 62 traçados continuam idênticos aos do pacote", () => {
+  it("os 63 traçados continuam idênticos aos do pacote", () => {
     // O teste acima compara a tabela consigo mesma: trocar um traçado aqui e no
     // componente passaria verde. Este prende a tabela a um número calculado do
     // `Icon.jsx` do pacote no dia da cópia — a mesma conferência por hash que o
@@ -105,6 +105,16 @@ describe("Icon", () => {
       .join("\n");
     const hash = createHash("sha256").update(serial, "utf-8").digest("hex");
     expect(hash.toUpperCase()).toBe(
+      // Trocado na E20, na E21, na E21-b e na E22. As três primeiras pelo
+      // segundo dos dois casos abaixo; a E22 é de natureza diferente e está
+      // anotada logo após.
+      //
+      // E22 (25/09/2026): `phone`, acrescentado pela ação "Ligar para
+      // cliente" do chamado. É o PRIMEIRO traçado que nasce aqui em vez de
+      // vir por extração do pacote — aprovado pelo operador como emenda,
+      // porque nenhum dos 62 significava telefone. Falta registrar em
+      // EMENDAS.md, que vive no repositório do pacote.
+      //
       // Trocado na E20, na E21 e na E21-b — as três vezes pelo segundo dos dois
       // casos que o comentário acima prevê: o pacote mudou, e a tabela foi
       // REGERADA a partir dele por extração, com os 62 traçados conferidos
@@ -116,7 +126,7 @@ describe("Icon", () => {
       // polegares TROCADOS DE NOME, porque o hash foi calculado sobre a tabela
       // errada. Hash prova que ninguém mexeu depois; não prova que estava certo
       // antes. É por isso que existe o caso da geometria, logo abaixo.
-      "42F3A276E0477FFF5DB82069E251117CE1ECAD44575093C07E42B449545650B6",
+      "B5ABAC8039E765941C69E1EDD9D38992D80CA4A7233B36C137322336C32FB56D",
     );
   });
 

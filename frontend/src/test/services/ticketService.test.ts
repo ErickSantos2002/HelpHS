@@ -10,6 +10,7 @@ import {
   reopenTicket,
   resolveTicket,
   updateTicketPriority,
+  createTicketCall,
 } from "../../services/ticketService";
 import { api } from "../../services/api";
 
@@ -336,5 +337,36 @@ describe("reopenTicket", () => {
     await expect(reopenTicket("t1", "Voltou o problema")).rejects.toMatchObject({
       response: { status: 409 },
     });
+  });
+});
+
+describe("createTicketCall", () => {
+  beforeEach(() => {
+    mockPost.mockReset();
+  });
+
+  it("manda o corpo VAZIO — o navegador nao escolhe para quem se liga", async () => {
+    // O contrato do backend e `extra="forbid"` com zero campos. Qualquer
+    // `phone`, `called`, `caller`, `extension` ou `metadata` daqui viraria
+    // 422. Este caso e a prova de que nao mandamos nenhum deles.
+    mockPost.mockResolvedValue({
+      data: { id: "c1", creation_status: "confirmed", created_at: "2026-09-25T10:00:00Z" },
+    } as never);
+
+    const r = await createTicketCall("t1");
+
+    expect(mockPost).toHaveBeenCalledTimes(1);
+    expect(mockPost).toHaveBeenCalledWith("/tickets/t1/calls", {});
+    const [, corpo] = mockPost.mock.calls[0];
+    expect(Object.keys(corpo as object)).toHaveLength(0);
+    expect(r.creation_status).toBe("confirmed");
+  });
+
+  it("devolve so os tres campos publicos", async () => {
+    mockPost.mockResolvedValue({
+      data: { id: "c1", creation_status: "indeterminate", created_at: "2026-09-25T10:00:00Z" },
+    } as never);
+    const r = await createTicketCall("t1");
+    expect(Object.keys(r).sort()).toEqual(["created_at", "creation_status", "id"]);
   });
 });

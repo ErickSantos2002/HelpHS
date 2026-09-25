@@ -327,3 +327,46 @@ export async function getTickets(filters: TicketFilters = {}): Promise<TicketLis
   const { data } = await api.get<TicketListResponse>(`/tickets?${params.toString()}`);
   return data;
 }
+
+// ── Telefonia ─────────────────────────────────────────────────
+
+/**
+ * Desfecho da TENTATIVA de ligação, como o backend o conta.
+ *
+ * Não é "o telefone tocou": é o que sabemos sobre o efeito externo. Os dois
+ * primeiros são estados de passagem e não deveriam chegar ao navegador — a
+ * rota só responde depois que a tentativa alcançou um desfecho —, mas estão
+ * declarados porque o backend pode persisti-los e um dia devolvê-los.
+ */
+export type TicketCallCreationStatus =
+  | "pending"
+  | "dispatching"
+  | "confirmed"
+  | "rejected"
+  | "unavailable"
+  | "indeterminate";
+
+/**
+ * A resposta pública da tentativa — três campos, e nada mais.
+ *
+ * Não existe aqui `provider_call_id`, telefone, `caller`, `called`,
+ * `extension`, metadata nem corpo do fornecedor: o backend não os devolve, e
+ * declarar campo que não chega convidaria alguém a lê-lo.
+ */
+export interface TicketCall {
+  id: string;
+  creation_status: TicketCallCreationStatus;
+  created_at: string;
+}
+
+/**
+ * Registra uma tentativa de ligação para o cliente do chamado.
+ *
+ * O corpo é `{}` de propósito, e o backend recusa qualquer campo extra com
+ * 422. Quem liga, para quem, de qual ramal e em que grafia é decidido lá
+ * dentro, no instante da ação — o navegador não escolhe nada disso.
+ */
+export async function createTicketCall(id: string): Promise<TicketCall> {
+  const { data } = await api.post<TicketCall>(`/tickets/${id}/calls`, {});
+  return data;
+}
