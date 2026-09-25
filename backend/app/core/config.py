@@ -20,6 +20,9 @@ HELO_MODO_COMPLETA = "completa"
 _HOSTS_LOCAIS = frozenset({"localhost", "127.0.0.1", "::1", "0.0.0.0", ""})
 
 
+_FORMATOS_DE_CALLED = frozenset({"nacional", "e164"})
+
+
 class ConfiguracaoDaTelefoniaInvalidaError(RuntimeError):
     """A telefonia está ligada com configuração que não permite operar.
 
@@ -466,6 +469,28 @@ class Settings(BaseSettings):
     api4com_calls_per_actor_per_hour: int = 20
     api4com_calls_per_ticket_per_hour: int = 3
 
+    # ── Formato de `called` no POST /calls (Fase 2C.3) ───────
+    #
+    # ⚠️ DECISÃO EM ABERTO COM O FORNECEDOR. A documentação oficial mostra as
+    # DUAS grafias para a MESMA rota e o MESMO campo:
+    #
+    #   referência da API (Call.clickToCall)  ->  "called": "4833328530"
+    #   guia do webphone próprio              ->  "called": "+554833328530"
+    #
+    # Medido em 24/09/2026 nas duas páginas. Não é o caso do `/dialer`, que é
+    # rota morta e usa outro campo (`phone`) — essa separação já estava escrita
+    # em `docs/decisoes-e-regras.md` e está INCOMPLETA: o `+55` aparece também
+    # no `/calls`.
+    #
+    # O padrão segue a REFERÊNCIA da API, por ser a especificação da rota e não
+    # um exemplo de tutorial. Mas é escolha de moeda, não conclusão: trocar é
+    # mudar esta variável, sem tocar em código. Enquanto `API4COM_ENABLED` for
+    # falso, a escolha não produz efeito nenhum.
+    #
+    #   nacional -> 4833328530     (tira o +55 de um E.164 brasileiro)
+    #   e164     -> +554833328530  (manda o canônico interno como está)
+    api4com_called_format: str = "nacional"
+
     def _valida_api4com(self) -> None:
         """Desligada, nada é exigido. Ligada, o que falta impede a subida.
 
@@ -493,6 +518,14 @@ class Settings(BaseSettings):
             raise ConfiguracaoDaTelefoniaInvalidaError(
                 "API4COM_TIMEOUT_SECONDS precisa ser maior que zero: "
                 "iniciar ligação sem teto de espera prenderia a requisição"
+            )
+
+        # Validado com a integração LIGADA: um valor desconhecido aqui faria
+        # cada ligação sair com o telefone numa grafia que ninguém escolheu.
+        if self.api4com_called_format not in _FORMATOS_DE_CALLED:
+            raise ConfiguracaoDaTelefoniaInvalidaError(
+                "API4COM_CALLED_FORMAT precisa ser um de "
+                f"{sorted(_FORMATOS_DE_CALLED)} — veja o comentário do campo"
             )
 
     # Email

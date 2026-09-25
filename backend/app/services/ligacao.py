@@ -59,8 +59,9 @@ from app.models.models import (
     UserRole,
     UserStatus,
 )
-from app.services import telefonia
+from app.services import api4com, telefonia
 from app.utils.crud import get_or_404
+from app.utils.history import registra_historico
 from app.utils.telefone import normaliza_telefone
 
 _CHAMADO_NAO_ENCONTRADO = "Chamado não encontrado."
@@ -285,16 +286,72 @@ async def _recusa_excesso(db: AsyncSession, ticket_id: uuid.UUID, ator: User) ->
         )
 
 
-async def prepara_tentativa(
+# ── As duas políticas do payload ─────────────────────────────
+
+
+def _resolve_caller(extension: str) -> str:
+    """De onde a ligação diz que parte. Hoje: o próprio ramal do ator.
+
+    ⚠️ Isto é DECISÃO DE INTEGRAÇÃO, não regra universal do fornecedor. A
+    documentação descreve `caller` como "o número que originará a chamada,
+    **normalmente** o mesmo valor que `extension`" — e "normalmente" não é
+    "sempre". Se um dia a conta precisar exibir um número de saída diferente do
+    ramal (uma bina comercial, por exemplo), é esta função que muda, e só ela.
+
+    Existe como função de uma linha exatamente para que a decisão tenha um
+    lugar, um nome e um teste, em vez de virar uma repetição de variável dentro
+    da montagem do payload.
+    """
+    return extension
+
+
+def _formata_called_api4com(telefone_e164: str) -> str:
+    """Traduz o E.164 interno para a grafia que o fornecedor espera em `called`.
+
+    ⚠️ **A GRAFIA CANÔNICA SEGUE EM ABERTO COM O FORNECEDOR.** A documentação
+    oficial mostra as duas, para a MESMA rota e o MESMO campo (medido em
+    24/09/2026):
+
+        referência da API (Call.clickToCall)  ->  "called": "4833328530"
+        guia do webphone próprio              ->  "called": "+554833328530"
+
+    `docs/decisoes-e-regras.md` registra que o `+55` seria da rota morta
+    `/dialer` — isso está INCOMPLETO: o `+55` aparece também no `/calls` atual.
+
+    Por isso a escolha é CONFIGURÁVEL (`API4COM_CALLED_FORMAT`) e vive só aqui.
+    Trocar de ideia é mudar uma variável de ambiente, não caçar concatenação
+    espalhada. E o padrão (`nacional`) segue a REFERÊNCIA da rota, por ser
+    especificação e não tutorial — mas é escolha de moeda até o suporte
+    responder.
+
+    Só sabe tirar o `+55` de número BRASILEIRO. Um E.164 de outro país volta
+    como está: inventar regra de trunk para país que não temos seria pior que
+    mandar o canônico.
+    """
+    canonico = telefone_e164.strip()
+    if get_settings().api4com_called_format == "e164":
+        return canonico
+    if canonico.startswith("+55"):
+        return canonico[3:]
+    return canonico
+
+
+async def inicia_ligacao(
     db: AsyncSession,
     *,
     ticket_id: uuid.UUID,
     ator: User,
 ) -> TicketCall:
-    """Valida tudo, reserva o chamado e deixa a tentativa `pending` DURÁVEL.
+    """Valida, reserva o chamado, fala com o fornecedor e persiste o desfecho.
 
-    Devolve a linha de `ticket_calls` já commitada. **Nenhuma requisição sai
-    para o fornecedor** — nem daqui, nem de nada que este módulo chame.
+    Devolve a linha de `ticket_calls` no estado FINAL, já commitada.
+
+    O caminho inteiro, e cada passo está onde está por um motivo:
+
+        flag → papel → chamado → situação → destinatário → telefone → ramal
+        → LOCK → antirrepetição → teto → `pending` + COMMIT
+        → `dispatching` + COMMIT → create_call → estado final + COMMIT
+        → libera o lock
 
     ⚠️ Esta função COMMITA, contra a convenção da casa de que o controle
     transacional é de quem chama. É deliberado e é o ponto inteiro do desenho:
@@ -302,11 +359,20 @@ async def prepara_tentativa(
     começar. Um `flush` sem commit some no rollback, e aí o fornecedor teria
     recebido uma ligação da qual não haveria registro nenhum.
 
-    ⚠️ O lock é liberado no fim desta função porque a fase termina aqui. Quando
-    o `create_call` entrar, ele fica DENTRO deste bloco protegido, e a
-    liberação passa para depois do estado final — senão a janela que o lock
-    existe para cobrir fica descoberta justamente onde importa.
+    ⚠️ O lock cobre a conversa inteira com o fornecedor, e não só a criação da
+    linha: é entre o `dispatching` e a resposta que dois cliques fariam o
+    telefone tocar duas vezes. Ele é liberado no `finally`, depois do estado
+    final — e o TTL de 30s é a rede para o processo que morrer segurando.
     """
+    if not get_settings().api4com_enabled:
+        # Antes de QUALQUER escrita: desligada não cria tentativa, não reserva
+        # chamado e não gasta cota. 503 é o que esta casa usa para dependência
+        # externa indisponível — ver `/auth/cnpj` e `/auth/cep`.
+        raise HTTPException(
+            status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
+            detail="A telefonia está indisponível no momento.",
+        )
+
     if ator.role not in (UserRole.admin, UserRole.technician):
         raise HTTPException(
             status_code=status.HTTP_403_FORBIDDEN,
@@ -345,10 +411,96 @@ async def prepara_tentativa(
             db, ticket_id=ticket_id, initiated_by_id=ator.id
         )
         await db.commit()
+
+        # ── A FRONTEIRA ──────────────────────────────────────
+        #
+        # `dispatching` é gravado e COMMITADO antes do POST. Daqui para a
+        # frente, uma linha órfã significa "não sabemos se tocou", e é por isso
+        # que este commit não pode ser adiado nem agrupado com o próximo: se o
+        # processo morrer entre ele e a resposta, é exatamente este estado que
+        # impede alguém de repetir por engano.
+        await telefonia.marca_em_despacho(db, tentativa)
+        # O evento humano nasce AQUI, e não junto do `pending`: uma linha
+        # `pending` não é contato — ninguém foi chamado ainda. A partir do
+        # despacho, houve tentativa de verdade, e é isso que o histórico conta.
+        #
+        # Genérico de propósito: diz QUE houve tentativa, não como terminou. O
+        # desfecho é máquina de estados e vive em `ticket_calls`; duplicá-lo
+        # aqui criaria duas versões que divergem em silêncio — defeito que este
+        # projeto já pagou caro.
+        #
+        # ⚠️ NÃO entra em `CAMPOS_INTERNOS`: o cliente recebeu a ligação, então
+        # esconder dele que ela foi tentada seria opacidade sem ganho. E o
+        # evento não carrega telefone, ramal, identificador do fornecedor nem
+        # payload — só o fato.
+        registra_historico(db, ticket_id, ator.id, "ligacao", None, "tentativa")
+        await db.commit()
+
+        await _executa_e_persiste(db, tentativa, destinatario=destinatario, ator=ator)
         await db.refresh(tentativa)
         return tentativa
     finally:
         await libera_lock(ticket_id, token)
+
+
+async def _executa_e_persiste(
+    db: AsyncSession,
+    tentativa: TicketCall,
+    *,
+    destinatario: User,
+    ator: User,
+) -> None:
+    """A única chamada externa do HelpHS, e a leitura do que ela devolveu.
+
+    Cada `except` aqui traduz uma afirmação do transporte sobre o EFEITO, não
+    sobre o erro. A classificação inteira mora em `services/api4com.py` e este
+    módulo não a reinterpreta — só persiste.
+
+    ⚠️ Não há retry. Nenhum caminho abaixo chama `create_call` de novo, e o
+    `httpx` do transporte roda com `retries=0` e sem seguir redirect. Repetir
+    aqui faria o telefone do cliente tocar duas vezes por uma decisão que
+    ninguém tomou.
+    """
+    try:
+        resultado = await api4com.create_call(
+            caller=_resolve_caller(_ramal_do_ator(ator)),
+            called=_formata_called_api4com(_telefone_do_destinatario(destinatario)),
+            extension=_ramal_do_ator(ator),
+        )
+    except api4com.Api4ComRecusadaError as erro:
+        # 4xx: o fornecedor respondeu recusando a REQUISIÇÃO. Nada tocou.
+        await telefonia.marca_recusada(db, tentativa, provider_http_status=erro.status_code)
+        await db.commit()
+        return
+    except api4com.Api4ComIndisponivelError:
+        # A conexão falhou antes de a requisição ser escrita: é a única
+        # categoria em que se pode afirmar que não houve efeito externo.
+        await telefonia.marca_indisponivel(db, tentativa)
+        await db.commit()
+        return
+    except api4com.Api4ComDesligadaError:
+        # A flag é conferida no início de `inicia_ligacao`; chegar aqui
+        # significa que ela mudou no meio do caminho. Sem efeito externo.
+        await telefonia.marca_indisponivel(db, tentativa)
+        await db.commit()
+        return
+    except Exception:
+        # ⚠️ Inclui `Api4ComResultadoIndeterminadoError` e QUALQUER surpresa.
+        # A regra é conservadora de propósito: entramos na zona de efeito
+        # externo, e o que não se sabe explicar não pode ser tratado como "não
+        # aconteceu". Deixar a tentativa em `dispatching` seria pior — ela
+        # ficaria parecendo uma execução em curso para sempre.
+        await telefonia.marca_indeterminada(db, tentativa)
+        await db.commit()
+        return
+
+    await telefonia.confirma(
+        db,
+        tentativa,
+        provider_call_id=resultado.provider_call_id,
+        provider_http_status=resultado.status_code,
+    )
+    await db.commit()
 
 
 async def tentativas_do_chamado(db: AsyncSession, ticket_id: uuid.UUID) -> int:
