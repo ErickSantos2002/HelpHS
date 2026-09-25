@@ -175,7 +175,7 @@ Os e-mails enviados pela plataforma — confirmação de cadastro, redefinição
 
 As mensagens são expedidas a partir de servidores localizados em São Paulo. Conforme a documentação do próprio provedor, porém, os registros dos envios — incluindo o endereço de e-mail do destinatário, o conteúdo e os metadados das mensagens — são armazenados nos Estados Unidos, o que configura transferência internacional de dados pessoais.
 
-Os Estados Unidos não são, nesta data, destino coberto por decisão de adequação emitida pelo Conselho Diretor da ANPD. [definir o mecanismo do art. 33 da LGPD adotado para esta transferência]
+Os Estados Unidos não são, nesta data, destino coberto por decisão de adequação emitida pelo Conselho Diretor da ANPD. A transferência é realizada com fundamento no art. 33, inciso IX, da LGPD, por ser necessária à execução do contrato e dos procedimentos preliminares relacionados ao uso da plataforma (art. 7º, inciso V): o envio de e-mails de confirmação de cadastro, de redefinição de senha e de notificações sobre chamados é parte do próprio serviço prestado ao usuário. O provedor atua como Operador, vinculado a obrigações contratuais de confidencialidade e de segurança, e não pode utilizar os dados para finalidades próprias.
 
 ### 10.2. Recursos de inteligência artificial
 
