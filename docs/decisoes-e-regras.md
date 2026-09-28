@@ -447,18 +447,19 @@ confusão.
 ### O que a identidade do evento decide
 
 ```
-(ticket_id, alert_kind, effective_due_at, warning_threshold)
+(ticket_id, alert_kind, reopen_count, effective_due_at, warning_threshold)
 ```
 
-`effective_due_at` carrega sozinho pausa acumulada, extensão e ciclo de
-reabertura, porque é a saída de `prazo_efetivo_de_resolucao`. Por isso
-`priority`, `reopen_count` e `extension_total_min` são gravados como
-**auditoria** e ficam **fora** da chave: incluir qualquer um deles criaria uma
-segunda resposta para "é o mesmo aviso?".
+`effective_due_at` carrega sozinho pausa acumulada e extensão, porque é a saída
+de `prazo_efetivo_de_resolucao`. `reopen_count` entrou depois — ver a seção
+própria mais abaixo, "`reopen_count` participa da identidade do alerta" — porque
+dois ciclos distintos podem produzir o mesmo `effective_due_at`. `priority` e
+`extension_total_min` continuam gravados só como **auditoria**, fora da chave:
+incluir qualquer um deles criaria uma segunda resposta para "é o mesmo aviso?".
 
-A consequência é deliberada: mesmo prazo e mesmo limiar nunca repetem; tudo o
-que **muda** o prazo — prorrogar, reabrir, retomar de uma pausa, trocar a
-prioridade — ou o limiar habilita um aviso novo.
+A consequência é deliberada: mesmo ciclo, mesmo prazo e mesmo limiar nunca
+repetem; tudo o que **muda** o ciclo, o prazo — prorrogar, reabrir, retomar de
+uma pausa, trocar a prioridade — ou o limiar habilita um aviso novo.
 
 ### Por que tabela, e não booleano, `notifications` ou Redis
 
@@ -599,6 +600,73 @@ MIME separada e não conta no tamanho do HTML.
 Uma frente futura pode criar uma variante otimizada exclusivamente para e-mail.
 Deliberadamente **não** feito aqui: redimensionar ou recomprimir a marca é
 decisão de identidade visual, não de engenharia de entrega.
+
+## Barra de SLA acompanha o warning_threshold (Fase 2B, 28/09/2026)
+
+Até aqui, `TicketListPage` decidia a cor da barra de prazo com `pct >= 80` e
+`pct >= 60` escritos no componente — ao lado do `warning_threshold`
+configurável por prioridade que a Fase 2A já fazia o aviso por e-mail
+respeitar. Um administrador que baixasse o limiar de um nível para 60 receberia
+e-mail em 60% e veria a barra continuar ficando vermelha só em 80%: a tela
+discordando do aviso que a própria equipe acabou de receber. A Fase 2B fecha
+essa divergência.
+
+### `warning_threshold`
+
+Percentual de tempo **útil** consumido, inteiro, de 1 a 100, configurado por
+**prioridade** (ver "A semântica do limiar estava decidida", acima). O
+frontend passa a receber o mesmo valor que o worker usa: `TicketResponse` ganha
+`sla_warning_threshold`, resolvido por `threshold_da_prioridade` — a MESMA
+função da Fase 2A, não uma segunda cópia da regra.
+
+Resolvido pela **prioridade atual** do chamado, não por `sla_config_id`:
+aquela coluna é escrita só por `apply_sla_config` e pode ficar apontando para a
+config de um nível anterior, o que faria a tela mostrar o limiar de uma
+prioridade que o chamado já não tem.
+
+Carregado em lote (`configs_por_nivel`, uma consulta por requisição) e passado
+como parâmetro **obrigatório** de `_serialize_ticket` — sem default, para que
+esquecê-lo em algum dos pontos de chamada quebre alto (`TypeError`) em vez de
+devolver `null` em silêncio e cair no fallback sem ninguém perceber.
+
+### A régua visual
+
+```
+vermelho   pct >= warning_threshold
+âmbar      pct >= warning_threshold * 0,75   e   pct < warning_threshold
+verde      abaixo disso
+vencido    sempre vermelho, em qualquer percentual
+```
+
+Em `frontend/src/lib/slaVisual.ts`. A fração de atenção é 0,75 por construção:
+com o `warning_threshold` no default de 80, ela reproduz **exatamente** o
+visual anterior — âmbar em 60, vermelho em 80 —, então ligar a configuração não
+muda nada para quem não a configurou. O limiar não é arredondado na decisão
+(só a apresentação pode arredondar): com 70 o ponto de atenção é 52,5, e
+arredondar para 53 pintaria de verde um chamado que já devia estar âmbar.
+
+Sem `warning_threshold` do backend — chamado sem prioridade, ou sem
+`SLAConfig` ativa para o nível —, a régua cai no `LIMIAR_PADRAO` de 80: o
+default da COLUNA, não uma escolha nova. Verde esconderia urgência; vermelho
+gritaria sem motivo.
+
+`SlaChip` (usado no detalhe do chamado) **ficou fora** desta regra de
+propósito: ele não usa percentual — três estados fixos, vencido/respondido/o
+resto —, e não há limiar para ele acompanhar. Consequência aceita: a barra da
+lista respeita o `warning_threshold` configurado e o chip do detalhe continua
+âmbar desde o primeiro minuto de consumo. Não é regressão desta fase, mas fica
+mais visível depois dela; alinhar os dois é frente própria.
+
+### Resolução: de onde conta o percentual
+
+Registrado em detalhe na seção "De onde começa o percentual — o ciclo, não a
+abertura", acima. Resumo que vale para os dois consumidores (worker e barra,
+pela mesma função `inicio_do_ciclo_de_resolucao`):
+
+```
+primeiro ciclo      → ticket.created_at    (RN-013 intacto)
+após reabertura      → ticket.reopened_at
+```
 
 ## Pesquisa de satisfação (CSAT)
 

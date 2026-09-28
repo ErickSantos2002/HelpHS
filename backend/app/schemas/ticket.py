@@ -226,6 +226,20 @@ class TicketResponse(AppBaseModel):
     # enche sozinha durante a noite e o fim de semana.
     sla_response_total_min: int | None = None
     sla_resolve_total_min: int | None = None
+    # O limiar de alerta da PRIORIDADE ATUAL, em percentual inteiro (1..100).
+    # `None` quando o chamado não tem prioridade, ou quando não há `SLAConfig`
+    # ativa para o nível dele.
+    #
+    # Sai daqui porque a barra do cartão precisa dele para decidir cor: até
+    # 25/09/2026 ela usava `pct >= 80` e `pct >= 60` fixos no código, ao lado
+    # deste campo configurável que ninguém lia. Com o aviso de SLA por e-mail
+    # respeitando a configuração e a barra não, o e-mail sairia em 70% enquanto
+    # a tela só ficaria vermelha em 80% — duas réguas para a mesma pergunta.
+    #
+    # Resolvido pela PRIORIDADE, não por `sla_config_id`: aquela coluna é
+    # escrita só por `apply_sla_config` e pode ficar apontando para a config de
+    # um nível anterior.
+    sla_warning_threshold: int | None = None
     # Total ja concedido em extensoes, em minutos uteis. A lateral mostra
     # "SLA estendido - +N dias uteis"; o cliente ve tambem.
     sla_resolve_extension_total_min: int = 0

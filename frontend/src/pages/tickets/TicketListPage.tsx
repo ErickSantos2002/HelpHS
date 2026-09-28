@@ -23,6 +23,7 @@ import {
   TOM_STATUS,
   type TicketStatus,
 } from "../../lib/status";
+import { getSlaVisualState } from "../../lib/slaVisual";
 import { cn } from "../../lib/utils";
 import { formataUtil, restanteUtil, type Expediente } from "../../lib/tempoUtil";
 import { getTickets, type Ticket } from "../../services/ticketService";
@@ -168,9 +169,15 @@ function SlaIndicator({
     ? Math.min(100, Math.max(0, ((totalMin - restante) / totalMin) * 100))
     : 100;
 
-  // Color thresholds
-  const isRed    = breached || pct >= 80;
-  const isAmber  = !isRed && pct >= 60;
+  // A cor vem do limiar CONFIGURADO para a prioridade do chamado, não de
+  // números fixos aqui. Eram `pct >= 80` e `pct >= 60` escritos nestas duas
+  // linhas, ao lado de um `warning_threshold` editável por prioridade que
+  // nenhum caminho de produção lia — e, com o aviso de SLA por e-mail
+  // respeitando o campo desde a Fase 2A, a tela passaria a discordar do aviso
+  // que a equipe acabou de receber. A régua está em `lib/slaVisual.ts`.
+  const estado   = getSlaVisualState(pct, ticket.sla_warning_threshold, breached);
+  const isRed    = estado === "vermelho";
+  const isAmber  = estado === "ambar";
   // Preenchimento pelos `--fill-*`, e texto pelos `on-tint-*`. Sao pares
   // diferentes de propositos diferentes: a barra e forma (piso 3:1) e o rotulo
   // e texto (piso 4,5:1). Os hexadecimais que estavam aqui — #ef4444, #f59e0b,

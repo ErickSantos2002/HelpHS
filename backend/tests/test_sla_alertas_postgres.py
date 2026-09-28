@@ -206,6 +206,34 @@ def _settings_sem_smtp() -> Settings:
     )
 
 
+async def _lista(db, ator):
+    """Chama a listagem passando TODO parametro explicitamente.
+
+    Chamar o endpoint direto entrega os `Query(...)` como OBJETO, nao como
+    valor: `sort_by` caia em `KeyError: Query(created_at)` e `priority`, que e
+    truthy, acrescentava um filtro contra um objeto de metadados. O teste tem de
+    passar por todos eles -- e a alternativa, subir a app com TestClient, trocaria
+    a medicao de consultas por um arranjo que abre conexao propria.
+    """
+    from app.routers.tickets import list_tickets
+
+    return await list_tickets(
+        db=db,
+        actor=ator,
+        offset=0,
+        limit=50,
+        status_filter=None,
+        priority=None,
+        category=None,
+        assignee_id=None,
+        creator_id=None,
+        tag_id=None,
+        search=None,
+        sort_by="created_at",
+        sort_dir="desc",
+    )
+
+
 async def _conta_eventos(db, ticket: Ticket) -> int:
     resultado = await db.execute(
         select(func.count()).select_from(SlaAlertEvent).where(SlaAlertEvent.ticket_id == ticket.id)
@@ -733,6 +761,73 @@ async def test_a_rodada_nao_faz_n_mais_um_de_config_nem_de_usuario(db):
 
     assert len(de_config) == 1, f"N+1 de SLAConfig: {len(de_config)} consultas"
     assert len(de_usuario) == 1, f"N+1 de usuários: {len(de_usuario)} consultas"
+
+
+# ══════════════════════════════════════════════════════════════
+# 6b. O limiar na LISTAGEM — Fase 2B, sem N+1
+# ══════════════════════════════════════════════════════════════
+#
+# Mora neste arquivo, e não num `test_sla_limiar_postgres.py` próprio, por um
+# motivo medido: sem `TEST_POSTGRES_URL`, cada módulo `*_postgres` sobe um
+# cluster PostgreSQL EFÊMERO próprio, e já são quinze. O décimo sexto foi o que
+# matou a suíte completa pelo guardião de memória em 25/09/2026. O assunto é o
+# mesmo — o limiar que decide o alerta e o limiar que decide a cor da barra são
+# o mesmo campo.
+
+
+@pytest.mark.asyncio
+async def test_a_listagem_devolve_o_limiar_sem_fazer_n_mais_um(db):
+    """Dez chamados na página: UMA consulta a `sla_configs`, não dez.
+
+    `_serialize_ticket` é síncrono e recebe o mapa já carregado — é o que
+    impede alguém de trocar por uma consulta lá dentro sem ver o custo. Com
+    cinquenta cartões seriam cinquenta consultas para ler as mesmas quatro
+    linhas de catálogo.
+    """
+    cliente = _pessoa(UserRole.client, nome="Cliente")
+    tecnico = _pessoa(UserRole.technician, nome="Tecnico")
+    db.add_all([cliente, tecnico])
+    db.add(_config(SLALevel.medium, 70))
+    tickets = [_chamado(cliente) for _ in range(10)]
+    db.add_all(tickets)
+    await db.flush()
+
+    consultas: list[str] = []
+    bruta = await db.connection()
+
+    def _grava(_conn, _cursor, instrucao, *_resto):
+        consultas.append(" ".join(instrucao.split()).lower())
+
+    event.listen(bruta.sync_connection.engine, "before_cursor_execute", _grava)
+    try:
+        resposta = await _lista(db, tecnico)
+    finally:
+        event.remove(bruta.sync_connection.engine, "before_cursor_execute", _grava)
+
+    de_config = [q for q in consultas if "from sla_configs" in q]
+
+    assert len(resposta.items) == 10
+    assert len(de_config) == 1, f"N+1 de SLAConfig na listagem: {len(de_config)} consultas"
+    assert {item.sla_warning_threshold for item in resposta.items} == {70}
+
+
+@pytest.mark.asyncio
+async def test_a_listagem_devolve_nulo_para_chamado_sem_prioridade(db):
+    """Chamado sem triagem não tem nível, e a barra cai no fallback documentado."""
+    cliente = _pessoa(UserRole.client, nome="Cliente")
+    tecnico = _pessoa(UserRole.technician, nome="Tecnico")
+    db.add_all([cliente, tecnico])
+    db.add(_config(SLALevel.medium, 80))
+    sem_prioridade = _chamado(cliente)
+    sem_prioridade.priority = None
+    sem_prioridade.sla_resolve_due_at = None
+    sem_prioridade.sla_resolve_effective_due_at = None
+    db.add(sem_prioridade)
+    await db.flush()
+
+    resposta = await _lista(db, tecnico)
+
+    assert [item.sla_warning_threshold for item in resposta.items] == [None]
 
 
 # ══════════════════════════════════════════════════════════════

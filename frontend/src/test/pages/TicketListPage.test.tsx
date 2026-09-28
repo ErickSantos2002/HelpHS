@@ -56,10 +56,23 @@ const BASE: Ticket = {
   updated_at: new Date().toISOString(),
 } as unknown as Ticket;
 
-async function montar(itens: Ticket[] = [BASE]) {
+/**
+ * Expediente ABERTO, com o relógio do servidor. A barra de SLA não desenha sem
+ * ele — `if (!expediente) return null` —, e é ele que impede o teste de
+ * depender do relógio da máquina que roda a suíte.
+ */
+const EXPEDIENTE = {
+  agora: "2026-09-22T12:00:00+00:00",
+  aberto: true,
+  proxima_virada: "2026-09-22T20:00:00+00:00",
+  fuso: "America/Sao_Paulo",
+};
+
+async function montar(itens: Ticket[] = [BASE], expediente: unknown = EXPEDIENTE) {
   vi.mocked(getTickets).mockResolvedValue({
     items: itens,
     total: itens.length,
+    expediente,
   } as never);
   render(
     <MemoryRouter initialEntries={["/tickets"]}>
@@ -213,5 +226,83 @@ describe("TicketListPage", () => {
       (_, el) => el?.tagName === "SPAN" && el.textContent === "1 chamado",
     );
     expect(contagem.length).toBeGreaterThan(0);
+  });
+
+  /**
+   * A FIAÇÃO do limiar configurável — Fase 2B.
+   *
+   * `lib/slaVisual.ts` tem os seus próprios testes, e eles não provam nada sobre
+   * esta página: se o argumento aqui fosse `80` em vez de
+   * `ticket.sla_warning_threshold`, todos continuariam verdes. O que estes dois
+   * casos prendem é que o campo do backend chega de verdade até a decisão de
+   * cor — o mesmo percentual, dois limiares, duas cores.
+   */
+  describe("a cor da barra segue o warning_threshold do chamado", () => {
+    /** Chamado com 55% do prazo de resolução consumido. */
+    function comLimiar(limiar: number | null): Ticket {
+      return {
+        ...BASE,
+        id: "t-sla",
+        status: "in_progress",
+        // `sla_resolve_due_at` é obrigatório para a barra existir — há um
+        // `if (!dueAt) return null` antes dela. Sem ele o teste passaria por
+        // vacuidade, procurando um elemento que nunca foi desenhado.
+        sla_resolve_due_at: "2026-09-23T12:00:00+00:00",
+        sla_resolve_vence_em: "2026-09-23T12:00:00+00:00",
+        sla_resolve_total_min: 100,
+        sla_resolve_restante_min: 45,
+        sla_resolve_breach: false,
+        sla_warning_threshold: limiar,
+      } as unknown as Ticket;
+    }
+
+    async function classeDaBarra(limiar: number | null): Promise<string> {
+      await montar([comLimiar(limiar)]);
+      const barra = await screen.findByRole("progressbar", {
+        name: "Prazo de Resolução",
+      });
+      const preenchimento = barra.firstElementChild;
+      expect(preenchimento).not.toBeNull();
+      return preenchimento!.className;
+    }
+
+    it("com limiar 80, 55% ainda é verde", async () => {
+      expect(await classeDaBarra(80)).toContain("bg-fill-success");
+    });
+
+    it("com limiar 60, o MESMO 55% já é âmbar", async () => {
+      // 60 × 0,75 = 45. Aqui está o ponto inteiro da fase: a barra passa a
+      // avisar mais cedo para quem configurou um limiar mais apertado.
+      expect(await classeDaBarra(60)).toContain("bg-fill-warning");
+    });
+
+    it("sem limiar, se comporta como o default de 80", async () => {
+      // Chamado sem prioridade ou sem SLAConfig ativa. Verde, como era antes
+      // desta fase existir — o fallback não muda o que já estava na tela.
+      expect(await classeDaBarra(null)).toContain("bg-fill-success");
+    });
+
+    it("vencido é vermelho mesmo com o consumo abaixo do limiar", async () => {
+      /**
+       * A regra antiga era `isRed = breached || pct >= 80`, e o `breached` vinha
+       * antes de qualquer limiar. Ao mover a decisão para o helper, esse termo
+       * passou a ser um ARGUMENTO — e argumento pode ser esquecido.
+       *
+       * Este caso existe porque a mutação encontrou a lacuna: trocar `breached`
+       * por `false` na chamada deixava os treze outros testes verdes. Aqui o
+       * consumo é 55% contra limiar 80 (verde, se ninguém olhasse a violação), e
+       * a marca de violação está ligada.
+       */
+      const vencido = {
+        ...comLimiar(80),
+        sla_resolve_breach: true,
+      } as unknown as Ticket;
+      await montar([vencido]);
+
+      const barra = await screen.findByRole("progressbar", {
+        name: "Prazo de Resolução",
+      });
+      expect(barra.firstElementChild!.className).toContain("bg-fill-danger");
+    });
   });
 });
