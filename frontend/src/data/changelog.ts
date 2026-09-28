@@ -1,4 +1,4 @@
-export const APP_VERSION = "v1.17.0";
+export const APP_VERSION = "v1.18.0";
 
 export type EntryType = "novidade" | "corrigido" | "melhoria";
 
@@ -14,6 +14,16 @@ export interface ChangelogVersion {
 }
 
 export const CHANGELOG: ChangelogVersion[] = [
+  {
+    version: "v1.18.0",
+    date: "28/09/2026",
+    entries: [
+      { type: "novidade", text: "O HelpHS agora avisa a equipe quando o prazo de resolução de um chamado está próximo do vencimento. O aviso chega no sininho e por e-mail para todos os técnicos e administradores ativos, nos ambientes em que o envio de e-mail estiver configurado — sem isso, o aviso funciona normalmente pelo sininho e nenhum e-mail é enviado. Chamado pausado, aguardando o cliente, não recebe aviso: a equipe não pode agir nele enquanto espera, e um aviso nessa hora só seria ruído." },
+      { type: "melhoria", text: "O momento do aviso respeita o percentual configurado para cada nível de prioridade, na tela de Configuração de SLA — não é mais um número único para todos os chamados. Baixar o limiar de um nível faz o aviso chegar mais cedo só para ele." },
+      { type: "melhoria", text: "A barra de prazo da lista de chamados passa a acompanhar esse mesmo limite, em vez de mudar de cor sempre nos mesmos pontos fixos. Quem tem um limiar mais apertado configurado vê a barra ficar amarela e vermelha mais cedo, do mesmo jeito que o aviso chega mais cedo para esse nível." },
+      { type: "corrigido", text: "Chamados reabertos calculavam o percentual do prazo de resolução a partir da abertura original, e não do novo prazo que a reabertura concede. Um chamado antigo reaberto podia aparecer com a barra quase cheia no mesmo instante em que voltava a ser atendido. O percentual agora conta do início do ciclo atual." },
+    ],
+  },
   {
     version: "v1.17.0",
     date: "24/09/2026",
