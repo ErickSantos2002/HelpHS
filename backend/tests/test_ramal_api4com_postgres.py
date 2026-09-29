@@ -142,6 +142,64 @@ async def test_varios_nulos_convivem_e_o_ramal_repetido_nao(banco):  # noqa: F81
 
 
 @pytest.mark.asyncio
+async def test_anonimizar_libera_o_ramal_para_outra_pessoa(banco):  # noqa: F811
+    """A consequência real da Correção 2: `anonymize_user` passa a zerar
+    `api4com_extension`, e é o índice único — não a aplicação — que decide se
+    o ramal fica de fato livre depois disso.
+
+    Reproduz aqui o UPDATE que `anonymize_user` faz (o mesmo SET, sem passar
+    pelo endpoint HTTP, porque o que está sob prova é o índice, não a rota):
+    técnico com ramal '3001' é "anonimizado" — o `api4com_extension` vira
+    NULL junto dos demais campos —, e então uma SEGUNDA pessoa recebe o
+    MESMO '3001'. Sem a correção, a segunda tentativa seria REJEITADA pelo
+    índice, porque a primeira linha ainda ocupava o ramal.
+    """
+    assert _alembic(banco, "upgrade", "head").returncode == 0
+
+    engine = await _conecta(banco)
+    async with engine.connect() as conn:
+        tecnico_id = uuid.uuid4()
+        await conn.execute(
+            text(
+                "INSERT INTO users (id, name, email, password, role, status, phone,"
+                " api4com_extension, lgpd_consent, created_at, updated_at)"
+                " VALUES (:id, 'Anonimizando', :e, 'hash', 'technician', 'active',"
+                " '+5581999999999', '3001', true, now(), now())"
+            ),
+            {"id": tecnico_id, "e": f"{uuid.uuid4()}@x.com"},
+        )
+
+        # ANTES da correção: o ramal segue ocupado, e o segundo cadastro cai
+        # no UNIQUE. Prova que a premissa do teste é real, não hipotética.
+        assert await _tenta(conn, "3001") == "REJEITADO"
+
+        # A anonimização — mesmo SET que `anonymize_user` passa a fazer.
+        await conn.execute(
+            text(
+                "UPDATE users SET"
+                "   name = 'Usuário Anonimizado', email = :e_anon, phone = NULL,"
+                "   department = NULL, avatar_url = NULL, lgpd_consent = false,"
+                "   lgpd_consent_at = NULL, status = 'anonymized',"
+                "   api4com_extension = NULL"
+                " WHERE id = :id"
+            ),
+            {"id": tecnico_id, "e_anon": f"anon_{tecnico_id.hex}@anonymized.invalid"},
+        )
+
+        # DEPOIS da correção: o mesmo ramal, para outra pessoa, é aceito.
+        assert await _tenta(conn, "3001") == "ACEITO", "o ramal continuou preso à conta anonimizada"
+
+        # E o vínculo antigo — histórico, UUID, FK — não foi tocado por isto:
+        # a linha do anonimizado continua lá, só sem o dado pessoal e sem o
+        # ramal.
+        status_final = (
+            await conn.execute(text("SELECT status FROM users WHERE id = :id"), {"id": tecnico_id})
+        ).scalar_one()
+        assert status_final == "anonymized"
+    await engine.dispose()
+
+
+@pytest.mark.asyncio
 async def test_ciclo_upgrade_downgrade_upgrade(banco):  # noqa: F811
     assert _alembic(banco, "upgrade", "head").returncode == 0
 
