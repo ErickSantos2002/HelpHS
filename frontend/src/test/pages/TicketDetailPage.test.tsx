@@ -52,7 +52,9 @@ vi.mock("sonner", () => ({ toast: { error: vi.fn(), success: vi.fn() } }));
 
 import { MemoryRouter, Route, Routes, useNavigate } from "react-router-dom";
 import { toast } from "sonner";
-import TicketDetailPage from "../../pages/tickets/TicketDetailPage";
+import TicketDetailPage, {
+  CHAVE_WEBPHONE_ORIENTADO,
+} from "../../pages/tickets/TicketDetailPage";
 import * as ticketService from "../../services/ticketService";
 import * as attachmentService from "../../services/attachmentService";
 import * as surveyService from "../../services/surveyService";
@@ -950,6 +952,11 @@ describe("TicketDetailPage — Ligar para cliente", () => {
     vi.mocked(toast.error).mockClear();
     vi.mocked(toast.success).mockClear();
     vi.mocked(ticketService.createTicketCall).mockReset();
+    // Esta seção mede o DESFECHO da ligação, não a porta que a antecede. A
+    // orientação do Webphone (2C.6a) aparece uma vez por sessão do navegador;
+    // marcá-la como já vista aqui deixa cada caso medindo o que foi escrito
+    // para medir. A porta tem seção própria, logo abaixo, que limpa a chave.
+    sessionStorage.setItem(CHAVE_WEBPHONE_ORIENTADO, "1");
   });
 
   const botao = () => screen.getByRole("button", { name: /Ligar para cliente/ });
@@ -1494,5 +1501,228 @@ describe("TicketDetailPage — editar telefone do solicitante", () => {
       }),
     );
     expect(screen.getByRole("dialog")).toBeInTheDocument();
+  });
+});
+
+// ── Prontidão do Webphone (2C.6a) ─────────────────────────────
+
+describe("TicketDetailPage — orientação do Webphone", () => {
+  beforeEach(() => {
+    papelDoUsuario = "technician";
+    vi.mocked(toast.error).mockClear();
+    vi.mocked(toast.success).mockClear();
+    vi.mocked(ticketService.createTicketCall).mockReset();
+    vi.mocked(ticketService.createTicketCall).mockResolvedValue({
+      id: "c1",
+      creation_status: "confirmed",
+      created_at: new Date().toISOString(),
+    } as never);
+    // Sessão nova: a chave não existe.
+    sessionStorage.removeItem(CHAVE_WEBPHONE_ORIENTADO);
+  });
+
+  const ligar = () => screen.getByRole("button", { name: /Ligar para cliente/ });
+  const confirmar = (d: HTMLElement) =>
+    within(d).getByRole("button", { name: /Já está conectado/ });
+
+  it("a primeira ligação da sessão abre a orientação", async () => {
+    await montar();
+    fireEvent.click(ligar());
+
+    const dialogo = await screen.findByRole("dialog");
+    expect(within(dialogo).getByText("Antes de ligar")).toBeInTheDocument();
+    expect(within(dialogo).getByText(/Webphone API4COM/)).toBeInTheDocument();
+  });
+
+  it("não sai requisição nenhuma antes de confirmar", async () => {
+    await montar();
+    fireEvent.click(ligar());
+    await screen.findByRole("dialog");
+
+    expect(ticketService.createTicketCall).not.toHaveBeenCalled();
+  });
+
+  it("o texto NÃO afirma que o sistema sabe o estado do Webphone", async () => {
+    // A regra da fase: orientar sem mentir. O HelpHS não detecta o ramal.
+    await montar();
+    fireEvent.click(ligar());
+    const dialogo = await screen.findByRole("dialog");
+    const texto = dialogo.textContent ?? "";
+
+    for (const mentira of [
+      "Webphone conectado",
+      "Ramal online",
+      "está online",
+      "detectado",
+      "Conectado com sucesso",
+    ]) {
+      expect(texto).not.toContain(mentira);
+    }
+  });
+
+  it("Cancelar não faz requisição e não marca a sessão", async () => {
+    await montar();
+    fireEvent.click(ligar());
+    const dialogo = await screen.findByRole("dialog");
+
+    fireEvent.click(within(dialogo).getByRole("button", { name: "Cancelar" }));
+
+    await waitFor(() =>
+      expect(screen.queryByRole("dialog")).not.toBeInTheDocument(),
+    );
+    expect(ticketService.createTicketCall).not.toHaveBeenCalled();
+    expect(sessionStorage.getItem(CHAVE_WEBPHONE_ORIENTADO)).toBeNull();
+  });
+
+  it("depois de cancelar, o clique seguinte mostra a orientação de novo", async () => {
+    await montar();
+    fireEvent.click(ligar());
+    let dialogo = await screen.findByRole("dialog");
+    fireEvent.click(within(dialogo).getByRole("button", { name: "Cancelar" }));
+    await waitFor(() =>
+      expect(screen.queryByRole("dialog")).not.toBeInTheDocument(),
+    );
+
+    fireEvent.click(ligar());
+    dialogo = await screen.findByRole("dialog");
+    expect(within(dialogo).getByText("Antes de ligar")).toBeInTheDocument();
+    expect(ticketService.createTicketCall).not.toHaveBeenCalled();
+  });
+
+  it("confirmar faz exatamente UMA requisição e marca a sessão", async () => {
+    await montar();
+    fireEvent.click(ligar());
+    const dialogo = await screen.findByRole("dialog");
+
+    fireEvent.click(confirmar(dialogo));
+
+    await waitFor(() =>
+      expect(ticketService.createTicketCall).toHaveBeenCalledTimes(1),
+    );
+    expect(ticketService.createTicketCall).toHaveBeenCalledWith("t1");
+    expect(sessionStorage.getItem(CHAVE_WEBPHONE_ORIENTADO)).toBe("1");
+  });
+
+  it("a segunda ligação da mesma sessão vai direto, sem orientação", async () => {
+    await montar();
+    fireEvent.click(ligar());
+    fireEvent.click(confirmar(await screen.findByRole("dialog")));
+    await waitFor(() =>
+      expect(ticketService.createTicketCall).toHaveBeenCalledTimes(1),
+    );
+    await waitFor(() =>
+      expect(screen.queryByRole("dialog")).not.toBeInTheDocument(),
+    );
+
+    fireEvent.click(ligar());
+
+    await waitFor(() =>
+      expect(ticketService.createTicketCall).toHaveBeenCalledTimes(2),
+    );
+    expect(screen.queryByRole("dialog")).not.toBeInTheDocument();
+  });
+
+  it("sessão nova (sem a chave) volta a mostrar a orientação", async () => {
+    // É o que separa `sessionStorage` de `localStorage`: fechar o navegador
+    // apaga a confirmação, e o Webphone também precisa ser aberto de novo.
+    sessionStorage.setItem(CHAVE_WEBPHONE_ORIENTADO, "1");
+    await montar();
+    fireEvent.click(ligar());
+    await waitFor(() =>
+      expect(ticketService.createTicketCall).toHaveBeenCalledTimes(1),
+    );
+
+    document.body.innerHTML = "";
+    sessionStorage.clear();
+    vi.mocked(ticketService.createTicketCall).mockClear();
+
+    await montar();
+    fireEvent.click(ligar());
+
+    expect(await screen.findByRole("dialog")).toBeInTheDocument();
+    expect(ticketService.createTicketCall).not.toHaveBeenCalled();
+  });
+
+  it("duplo clique no botão abre UM modal, não dois", async () => {
+    await montar();
+    const b = ligar();
+    act(() => {
+      fireEvent.click(b);
+      fireEvent.click(b);
+      fireEvent.click(b);
+    });
+
+    expect(await screen.findAllByRole("dialog")).toHaveLength(1);
+    expect(ticketService.createTicketCall).not.toHaveBeenCalled();
+  });
+
+  it("duplo clique em 'Já está conectado' não duplica a requisição", async () => {
+    // A trava síncrona do `ligandoRef` continua sendo a defesa — o modal não
+    // pode ter reintroduzido a duplicidade que a 2C.5 consertou.
+    let libera: (v: unknown) => void = () => {};
+    vi.mocked(ticketService.createTicketCall).mockReturnValue(
+      new Promise((r) => {
+        libera = r;
+      }) as never,
+    );
+    await montar();
+    fireEvent.click(ligar());
+    const dialogo = await screen.findByRole("dialog");
+    const ok = confirmar(dialogo);
+
+    act(() => {
+      fireEvent.click(ok);
+      fireEvent.click(ok);
+      fireEvent.click(ok);
+    });
+
+    expect(ticketService.createTicketCall).toHaveBeenCalledTimes(1);
+    libera({ id: "c1", creation_status: "confirmed", created_at: "x" });
+  });
+
+  it("o cliente continua sem o botão — a orientação não o trouxe de volta", async () => {
+    papelDoUsuario = "client";
+    await montar();
+    expect(
+      screen.queryByRole("button", { name: /Ligar para cliente/ }),
+    ).not.toBeInTheDocument();
+  });
+
+  it("rejected continua com a mensagem genérica, sem falar em 424", async () => {
+    // A mensagem específica do 424 espera a confirmação da API4COM (2C.6b).
+    vi.mocked(ticketService.createTicketCall).mockResolvedValue({
+      id: "c1",
+      creation_status: "rejected",
+      created_at: new Date().toISOString(),
+    } as never);
+    await montar();
+    fireEvent.click(ligar());
+    fireEvent.click(confirmar(await screen.findByRole("dialog")));
+
+    await waitFor(() =>
+      expect(toast.error).toHaveBeenCalledWith("Não foi possível iniciar a ligação."),
+    );
+    const texto = document.body.textContent ?? "";
+    expect(texto).not.toContain("424");
+  });
+
+  it("indeterminate continua avisando para não repetir, e não repete sozinho", async () => {
+    vi.mocked(ticketService.createTicketCall).mockResolvedValue({
+      id: "c1",
+      creation_status: "indeterminate",
+      created_at: new Date().toISOString(),
+    } as never);
+    await montar();
+    fireEvent.click(ligar());
+    fireEvent.click(confirmar(await screen.findByRole("dialog")));
+
+    await waitFor(() =>
+      expect(toast.error).toHaveBeenCalledWith(
+        "Não foi possível confirmar o resultado da ligação.",
+        { description: "Não tente novamente imediatamente." },
+      ),
+    );
+    await new Promise((r) => setTimeout(r, 50));
+    expect(ticketService.createTicketCall).toHaveBeenCalledTimes(1);
   });
 });
