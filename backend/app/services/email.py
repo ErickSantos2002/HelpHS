@@ -6,6 +6,9 @@ The FastMail instance is created lazily so that missing SMTP config
 in development does not crash startup.
 """
 
+import enum
+from dataclasses import dataclass
+
 from fastapi_mail import (
     ConnectionConfig,
     FastMail,
@@ -17,6 +20,53 @@ from loguru import logger
 
 from app.core.config import Settings
 from app.services.email_layout import CID_LOGO, LOGO_EMAIL
+
+
+class EmailDeliveryStatus(str, enum.Enum):
+    """O que a outbox (Fase 3A) precisa saber para decidir o que fazer a seguir.
+
+    `send_email()` sempre devolveu só `bool` — o suficiente para quem apenas
+    loga o desfecho, insuficiente para quem precisa decidir "tenta de novo" ou
+    "desiste". `temporary_failure`/`permanent_failure` existem só para isso.
+    """
+
+    success = "success"
+    temporary_failure = "temporary_failure"
+    permanent_failure = "permanent_failure"
+
+
+@dataclass(frozen=True)
+class EmailDeliveryResult:
+    """Desfecho estruturado de uma tentativa de envio.
+
+    `error_summary` é sempre o que `_resumo_do_erro` produz — classe da
+    exceção e código SMTP numérico quando existir, nunca `str(exc)` cru. `None`
+    quando `status == success`.
+    """
+
+    status: EmailDeliveryStatus
+    error_summary: str | None = None
+
+
+def _classifica_falha(exc: BaseException) -> EmailDeliveryStatus:
+    """4xx é temporário (tente de novo), 5xx é permanente (endereço/servidor
+
+    recusa definitivamente). SMTP é assim por definição do protocolo — RFC
+    5321 §4.2.1: "5yz" é "Permanent Negative Completion", "4yz" é "Transient".
+
+    Sem código numérico (erro de conexão, timeout, exceção genérica): trata
+    como temporário. Uma falha que este código não sabe classificar não deve
+    matar a mensagem de vez — o pior caso de tratar como temporário é uma
+    tentativa a mais antes do limite; o pior caso do contrário seria descartar
+    uma mensagem que uma nova tentativa entregaria.
+    """
+    codigo = getattr(exc, "code", None)
+    if isinstance(codigo, int):
+        if 500 <= codigo < 600:
+            return EmailDeliveryStatus.permanent_failure
+        if 400 <= codigo < 500:
+            return EmailDeliveryStatus.temporary_failure
+    return EmailDeliveryStatus.temporary_failure
 
 
 def _resumo_do_erro(exc: BaseException) -> str:
@@ -115,6 +165,59 @@ def _get_mail_client(settings: Settings) -> FastMail:
     return _mail_instance
 
 
+async def send_email_detalhado(
+    to_email: str,
+    subject: str,
+    body: str,
+    settings: Settings,
+    html: str | None = None,
+    contexto: str = "email",
+) -> EmailDeliveryResult:
+    """O mesmo envio de `send_email`, com o desfecho estruturado que a outbox
+
+    (Fase 3A) precisa para decidir entre tentar de novo e desistir. Ver o
+    docstring de `send_email` para o resto do comportamento — esta função É o
+    corpo dele; `send_email` é hoje um wrapper fino por cima desta, mantido
+    para não mudar o contrato dos ~20 call sites que só querem `bool`.
+    """
+    if not settings.smtp_from_email and not settings.smtp_user:
+        logger.debug(f"SMTP not configured — {contexto} skipped")
+        return EmailDeliveryResult(EmailDeliveryStatus.temporary_failure, "SMTPNotConfigured")
+
+    try:
+        mail = _get_mail_client(settings)
+        # `body` vira text/plain e `alternative_body` vira text/html, nessa
+        # ordem dentro do multipart/alternative — conferido na árvore MIME que a
+        # biblioteca monta, não deduzido da documentação.
+        duas_partes = (
+            {
+                "alternative_body": html,
+                "multipart_subtype": MultipartSubtypeEnum.alternative,
+                "attachments": _anexo_da_logo(),
+            }
+            if html
+            else {}
+        )
+        message = MessageSchema(
+            subject=subject,
+            recipients=[to_email],
+            body=body,
+            subtype=MessageType.plain,
+            # SMTP_REPLY_TO é opcional e nasce vazio. O MessageSchema recusa
+            # None neste campo, e a montagem morreria antes de tentar entregar.
+            reply_to=[settings.smtp_reply_to] if settings.smtp_reply_to else [],
+            **duas_partes,
+        )
+        await mail.send_message(message)
+        logger.info(f"Delivery accepted by SMTP server: {contexto}")
+        return EmailDeliveryResult(EmailDeliveryStatus.success)
+    except Exception as exc:  # noqa: BLE001
+        resumo = _resumo_do_erro(exc)
+        status = _classifica_falha(exc)
+        logger.warning(f"SMTP delivery failed for {contexto}: {resumo}")
+        return EmailDeliveryResult(status, resumo)
+
+
 async def send_email(
     to_email: str,
     subject: str,
@@ -150,37 +253,5 @@ async def send_email(
     `asyncio.create_task` copia o contexto — então a task do envio herda o id da
     requisição que a originou, e ele entra no `extra` de toda linha.
     """
-    if not settings.smtp_from_email and not settings.smtp_user:
-        logger.debug(f"SMTP not configured — {contexto} skipped")
-        return False
-
-    try:
-        mail = _get_mail_client(settings)
-        # `body` vira text/plain e `alternative_body` vira text/html, nessa
-        # ordem dentro do multipart/alternative — conferido na árvore MIME que a
-        # biblioteca monta, não deduzido da documentação.
-        duas_partes = (
-            {
-                "alternative_body": html,
-                "multipart_subtype": MultipartSubtypeEnum.alternative,
-                "attachments": _anexo_da_logo(),
-            }
-            if html
-            else {}
-        )
-        message = MessageSchema(
-            subject=subject,
-            recipients=[to_email],
-            body=body,
-            subtype=MessageType.plain,
-            # SMTP_REPLY_TO é opcional e nasce vazio. O MessageSchema recusa
-            # None neste campo, e a montagem morreria antes de tentar entregar.
-            reply_to=[settings.smtp_reply_to] if settings.smtp_reply_to else [],
-            **duas_partes,
-        )
-        await mail.send_message(message)
-        logger.info(f"Delivery accepted by SMTP server: {contexto}")
-        return True
-    except Exception as exc:  # noqa: BLE001
-        logger.warning(f"SMTP delivery failed for {contexto}: {_resumo_do_erro(exc)}")
-        return False
+    resultado = await send_email_detalhado(to_email, subject, body, settings, html, contexto)
+    return resultado.status == EmailDeliveryStatus.success
