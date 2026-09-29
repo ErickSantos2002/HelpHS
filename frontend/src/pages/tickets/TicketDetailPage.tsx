@@ -443,6 +443,54 @@ function PropRow({
   );
 }
 
+/**
+ * Marca que, NESTA sessão do navegador, o técnico já foi orientado a preparar
+ * o Webphone API4COM.
+ *
+ * ⚠️ O que esta chave significa e o que ela NÃO significa:
+ *
+ *   significa  → "o usuário confirmou que preparou o Webphone"
+ *   NÃO significa → "o HelpHS detectou que o ramal está online"
+ *
+ * A distinção não é preciosismo. O HelpHS **não tem como saber** o estado do
+ * Webphone: a API4COM não publica endpoint de presença nem campo de registro
+ * no modelo `Extension`, e a extensão do Chrome não declara
+ * `externally_connectable`, não tem `onMessageExternal` e não injeta nada em
+ * `helphs.healthsafetytech.com` — tudo medido na auditoria da Fase 2C.6.
+ * Qualquer nome que sugira detecção seria mentira no código.
+ *
+ * `sessionStorage`, e não `localStorage`: a orientação vale enquanto a pessoa
+ * está trabalhando, atravessa a navegação entre chamados, e some quando ela
+ * fecha o navegador — que é exatamente quando o Webphone também precisa ser
+ * aberto de novo. Em `localStorage` viraria preferência permanente e a
+ * orientação nunca mais apareceria, inclusive na primeira ligação de amanhã.
+ *
+ * O sufixo `-v1` existe para que mudar o significado da chave um dia não
+ * herde a confirmação de quem leu o texto antigo.
+ */
+export const CHAVE_WEBPHONE_ORIENTADO = "helphs:webphone-api4com-ready-v1";
+
+/** Leitura tolerante: navegador sem storage vale como "ainda não orientado". */
+function jaOrientadoNestaSessao(): boolean {
+  try {
+    return sessionStorage.getItem(CHAVE_WEBPHONE_ORIENTADO) === "1";
+  } catch {
+    // Modo privado, storage desabilitado, cota estourada. Mostrar o aviso de
+    // novo incomoda; deixar de mostrar esconderia a única orientação que
+    // existe. Na dúvida, orientar.
+    return false;
+  }
+}
+
+function marcaOrientadoNestaSessao(): void {
+  try {
+    sessionStorage.setItem(CHAVE_WEBPHONE_ORIENTADO, "1");
+  } catch {
+    // Falhar aqui só faz o aviso reaparecer no próximo clique. Nada quebra, e
+    // a ligação segue: por isso não vira erro na tela.
+  }
+}
+
 // ── Solicitante ──────────────────────────────────────────────
 
 /** Uma linha do bloco do solicitante: rótulo pequeno em cima, valor embaixo. */
@@ -912,6 +960,8 @@ export default function TicketDetailPage() {
   const [telefoneValor, setTelefoneValor] = useState("");
   const [telefoneErro, setTelefoneErro] = useState<string | null>(null);
   const [telefoneSalvando, setTelefoneSalvando] = useState(false);
+  /** A orientação do Webphone, só na primeira ligação da sessão. */
+  const [webphoneModal, setWebphoneModal] = useState(false);
   /** Uma tentativa de ligação por vez, por chamado e por aba. */
   const [ligando, setLigando] = useState(false);
   /**
@@ -1238,6 +1288,34 @@ export default function TicketDetailPage() {
     ticket?.status === "resolved";
 
   /**
+   * O que o botão chama. **Não liga**: decide se antes disso cabe orientar.
+   *
+   * Na primeira ligação da sessão, abre o aviso e não faz requisição nenhuma
+   * — quem dispara o `POST` é a confirmação dentro do modal. Nas seguintes,
+   * vai direto, porque repetir a orientação a cada chamado seria ruído para
+   * quem já preparou o Webphone.
+   *
+   * A trava do duplo clique é conferida aqui TAMBÉM, e não só no
+   * `executaLigacao`: sem ela, clicar durante uma ligação em curso reabriria
+   * o aviso por cima de uma requisição que já está viajando.
+   */
+  function handleLigarParaCliente() {
+    if (!ticket || ligandoRef.current) return;
+    if (!jaOrientadoNestaSessao()) {
+      setWebphoneModal(true);
+      return;
+    }
+    void executaLigacao();
+  }
+
+  /** Confirmou a orientação: marca a sessão e liga — uma vez. */
+  function confirmaOrientacaoELiga() {
+    marcaOrientadoNestaSessao();
+    setWebphoneModal(false);
+    void executaLigacao();
+  }
+
+  /**
    * Pede ao backend que ligue para o cliente do chamado.
    *
    * O corpo vai vazio: destinatário, telefone, ramal e origem são decididos
@@ -1248,7 +1326,7 @@ export default function TicketDetailPage() {
    * do cliente pode ter tocado. Quem decide tentar de novo é a pessoa, lendo
    * o aviso.
    */
-  async function handleLigarParaCliente() {
+  async function executaLigacao() {
     // A trava do duplo clique, antes de qualquer coisa.
     if (!ticket || ligandoRef.current) return;
     ligandoRef.current = true;
@@ -2414,6 +2492,53 @@ export default function TicketDetailPage() {
             disabled={!newStatus || (newStatus === "resolved" && faltaJustificativa)}
           >
             Confirmar
+          </Button>
+        </ModalFooter>
+      </Modal>
+
+      {/* Prontidão do Webphone — orientação, não detecção.
+
+          O HelpHS NÃO sabe se o ramal está online: a API4COM não publica
+          endpoint de presença, e a extensão do Chrome não expõe API para a
+          página (medido na Fase 2C.6). Por isso o texto pede uma ação e
+          devolve a decisão para quem sabe — a pessoa que enxerga o círculo
+          verde na extensão. Nada aqui afirma estado.
+
+          Só na primeira ligação da sessão do navegador. */}
+      <Modal
+        open={webphoneModal}
+        onClose={() => setWebphoneModal(false)}
+        title="Antes de ligar"
+        size="sm"
+      >
+        <div className="space-y-4">
+          <Alert variant="info">
+            Abra a extensão <strong>Webphone API4COM</strong> e aguarde o ramal
+            ficar online. Depois, continue com a ligação.
+          </Alert>
+          <p className="text-sm text-conteudo-muted">
+            A ligação toca primeiro no seu Webphone e só então disca para o
+            cliente. Com o ramal desconectado, a tentativa costuma ser recusada
+            pela operadora.
+          </p>
+          <p className="text-xs text-conteudo-muted">
+            Este aviso aparece uma vez por sessão do navegador.
+          </p>
+        </div>
+        <ModalFooter>
+          <Button
+            type="button"
+            variant="secondary"
+            onClick={() => setWebphoneModal(false)}
+          >
+            Cancelar
+          </Button>
+          <Button
+            type="button"
+            onClick={confirmaOrientacaoELiga}
+            disabled={ligando}
+          >
+            Já está conectado — ligar
           </Button>
         </ModalFooter>
       </Modal>
