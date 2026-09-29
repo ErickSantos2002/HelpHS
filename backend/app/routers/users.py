@@ -36,10 +36,12 @@ from app.models.models import (
     CompanyNote,
     GroupNote,
     KBArticle,
+    LibraryFile,
     SatisfactionSurvey,
     Ticket,
     TicketHistory,
     TicketNote,
+    TicketSlaExtension,
     User,
     UserRole,
     UserStatus,
@@ -812,6 +814,12 @@ async def anonymize_user(
     user.avatar_url = None
     user.lgpd_consent = False
     user.lgpd_consent_at = None
+    # O ramal tem índice ÚNICO (`uq_users_api4com_extension`), e nada aqui o
+    # zerava até 29/09/2026 — a conta perdia nome, e-mail e telefone, mas
+    # continuava "dona" do ramal para sempre, e nenhum outro técnico podia
+    # recebê-lo. Não é dado pessoal (não entra na LGPD por isso), é recurso
+    # operacional preso a uma conta morta.
+    user.api4com_extension = None
     user.status = UserStatus.anonymized
     user.updated_at = ts
 
@@ -830,15 +838,27 @@ async def anonymize_user(
 
 
 # Toda referência a `users.id` que NÃO tem ondelete no banco — são exatamente
-# estas que fazem o DELETE falhar. As outras seis (SET NULL e CASCADE) se
+# estas que fazem o DELETE falhar. As outras nove (SET NULL e CASCADE) se
 # resolvem sozinhas e por isso não entram aqui.
 #
 # A guarda contava só `Ticket.creator_id`, então um técnico sem chamados
 # próprios mas com chamados atribuídos passava e ia bater na chave estrangeira.
 #
-# São 11 COUNTs numa rota que um admin usa raramente: preferi a clareza de uma
+# São 13 COUNTs numa rota que um admin usa raramente: preferi a clareza de uma
 # lista legível — que também alimenta a mensagem de erro — a uma query só,
 # montada com UNION, que ninguém consegue reler depois.
+#
+# ⚠️ Esta lista é escrita à mão contra o SCHEMA, não gerada dele — e por isso
+# ela já ficou desatualizada uma vez: nasceu em 25/08/2026 com 11 entradas, e
+# duas tabelas com FK sem `ondelete` chegaram depois sem que ninguém voltasse
+# aqui para acrescentá-las (`library_files` em 10/09, `ticket_sla_extensions`
+# em 23/09 — auditado em 29/09/2026, contra `information_schema` real, não
+# contra esta lista). O `except IntegrityError` de `delete_user` cobria a
+# lacuna com um 409 genérico enquanto ela existiu; as duas entradas abaixo
+# devolvem a contagem exata que faltava. Da próxima vez que uma migration
+# criar uma FK para `users.id` sem `ondelete`, é AQUI que ela precisa entrar —
+# não há teste que detecte a omissão por conta própria, e é por isso que este
+# comentário existe.
 _REFERENCIAS_QUE_BLOQUEIAM: tuple[tuple[str, type[Any], InstrumentedAttribute], ...] = (
     ("chamado(s) aberto(s)", Ticket, Ticket.creator_id),
     ("chamado(s) atribuído(s)", Ticket, Ticket.assignee_id),
@@ -851,6 +871,8 @@ _REFERENCIAS_QUE_BLOQUEIAM: tuple[tuple[str, type[Any], InstrumentedAttribute], 
     ("artigo(s) da base de conhecimento", KBArticle, KBArticle.author_id),
     ("avaliação(ões) de atendimento", SatisfactionSurvey, SatisfactionSurvey.user_id),
     ("registro(s) de auditoria", AuditLog, AuditLog.user_id),
+    ("arquivo(s) da biblioteca", LibraryFile, LibraryFile.uploaded_by),
+    ("extensão(ões) de SLA concedida(s)", TicketSlaExtension, TicketSlaExtension.user_id),
 )
 
 _COMO_RESOLVER = (
