@@ -282,6 +282,26 @@ async def test_claim_pega_pending_vencido(db, db_factory):
 
 
 @pytest.mark.asyncio
+async def test_claim_pega_next_attempt_at_exatamente_agora(db, db_factory):
+    """Alvo de mutação em `next_attempt_at <= agora`: virar `<` deixaria de
+
+    fora uma linha vencida EXATAMENTE agora — "vencido" inclui o instante
+    exato, não só o passado estrito."""
+    user = _usuario()
+    notif = _notificacao(user)
+    db.add_all([user, notif])
+    await db.commit()
+    outbox = _outbox(notif, next_attempt_at=_AGORA)
+    db.add(outbox)
+    await db.commit()
+
+    ids = await reivindica_lote(db_factory, limite=10, worker_id="w1", agora=_AGORA)
+    assert outbox.id in ids
+
+    await _limpa(db, user)
+
+
+@pytest.mark.asyncio
 async def test_claim_nao_pega_next_attempt_at_futuro(db, db_factory):
     user = _usuario()
     notif = _notificacao(user)
