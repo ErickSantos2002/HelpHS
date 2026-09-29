@@ -40,7 +40,10 @@ vi.mock("../../services/surveyService", () => ({
   getTicketSurvey: vi.fn(),
   submitSurvey: vi.fn(),
 }));
-vi.mock("../../services/userService", () => ({ getTechnicians: vi.fn() }));
+vi.mock("../../services/userService", () => ({
+  getTechnicians: vi.fn(),
+  updateUser: vi.fn(),
+}));
 vi.mock("../../services/tagService", () => ({
   getTags: vi.fn(),
   setTicketTags: vi.fn(),
@@ -56,6 +59,7 @@ import * as surveyService from "../../services/surveyService";
 import * as userService from "../../services/userService";
 import * as tagService from "../../services/tagService";
 import { escolherNoMenu } from "../helpers/menu";
+import { ERRO_TELEFONE } from "../../lib/telefone";
 
 /**
  * O que esta tela tinha, e que estes casos prendem.
@@ -1261,5 +1265,234 @@ describe("TicketDetailPage — Ligar para cliente", () => {
     ]) {
       expect(texto).not.toContain(proibido);
     }
+  });
+});
+
+// ── Solicitante ───────────────────────────────────────────────
+
+const SOLICITANTE: {
+  id: string;
+  name: string;
+  email: string;
+  phone: string | null;
+  company_name: string | null;
+} = {
+  id: "u9",
+  name: "Pedro Henrique",
+  email: "pedro@empresa.com",
+  phone: "+5581988887777",
+  company_name: "Health & Safety",
+};
+
+describe("TicketDetailPage — Solicitante", () => {
+  beforeEach(() => {
+    papelDoUsuario = "admin";
+    vi.mocked(toast.error).mockClear();
+    vi.mocked(toast.success).mockClear();
+    vi.mocked(userService.updateUser).mockReset();
+  });
+
+  const comSolicitante = (extra: Partial<typeof SOLICITANTE> = {}) =>
+    ({ ...TICKET, requester: { ...SOLICITANTE, ...extra } }) as unknown as typeof TICKET;
+
+  /**
+   * Lê o valor de uma linha do bloco pelo RÓTULO dela.
+   *
+   * "Não informado" aparece em mais de um lugar da tela — o cartão de
+   * propriedades também usa esse texto. Buscar pelo texto solto encontrava
+   * três elementos e o caso falhava por ambiguidade, não por defeito. O rótulo
+   * é o âncora estável.
+   */
+  function valorDoDado(rotulo: string): string {
+    const etiqueta = screen
+      .getAllByText(rotulo, { selector: "p" })
+      .find((el) => el.className.includes("uppercase"));
+    if (!etiqueta) throw new Error(`rótulo "${rotulo}" não encontrado no bloco`);
+    const valor = etiqueta.parentElement?.querySelector("span");
+    return valor?.textContent?.trim() ?? "";
+  }
+
+  async function abreBloco(chamado: typeof TICKET = comSolicitante()) {
+    await montar([], chamado);
+    return screen.getByText("Solicitante").closest("div") as HTMLElement;
+  }
+
+  it("o administrador vê os quatro dados do solicitante", async () => {
+    await abreBloco();
+    expect(screen.getByText("Pedro Henrique")).toBeInTheDocument();
+    expect(screen.getByText("Health & Safety")).toBeInTheDocument();
+    expect(screen.getByText("pedro@empresa.com")).toBeInTheDocument();
+    // Formatado para leitura, não o E.164 cru.
+    expect(screen.getByText("(81) 98888-7777")).toBeInTheDocument();
+    expect(screen.queryByText("+5581988887777")).not.toBeInTheDocument();
+  });
+
+  it("o técnico vê o bloco", async () => {
+    papelDoUsuario = "technician";
+    await abreBloco();
+    expect(screen.getByText("Pedro Henrique")).toBeInTheDocument();
+  });
+
+  it("o cliente vê os próprios dados, mas sem a ação de editar", async () => {
+    // O cliente só alcança o chamado que ele mesmo abriu, então o solicitante
+    // é ele. Ver o próprio cadastro não é vazamento; poder alterá-lo por aqui
+    // seria outra conversa.
+    papelDoUsuario = "client";
+    await abreBloco();
+    expect(screen.getByText("Pedro Henrique")).toBeInTheDocument();
+    expect(screen.queryByRole("button", { name: "Editar" })).not.toBeInTheDocument();
+  });
+
+  it("sem empresa, diz 'Não informada'", async () => {
+    await abreBloco(comSolicitante({ company_name: null }));
+    expect(valorDoDado("Empresa")).toBe("Não informada");
+  });
+
+  it("sem telefone, diz 'Não informado' — e não some da tela", async () => {
+    // Sumir seria pior: "este cliente não tem telefone" é informação para
+    // quem vai atender, e é o que explica a telefonia recusar a ligação.
+    await abreBloco(comSolicitante({ phone: null }));
+    expect(valorDoDado("Telefone")).toBe("Não informado");
+  });
+
+  it("o bloco não existe quando a resposta não traz o solicitante", async () => {
+    await montar([], TICKET);
+    expect(screen.queryByText("Solicitante")).not.toBeInTheDocument();
+  });
+
+  it("nada de administrativo ou pessoal aparece no bloco", async () => {
+    await abreBloco();
+    const texto = document.body.textContent ?? "";
+    for (const proibido of ["CPF", "CNPJ", "Ramal", "1019", "api4com", "Departamento"]) {
+      expect(texto).not.toContain(proibido);
+    }
+  });
+
+  it("o bloco SOBREVIVE a uma mutação que devolve o chamado sem solicitante", async () => {
+    // A razão de o solicitante ser estado PRÓPRIO, e não um campo de `ticket`.
+    //
+    // As rotas de mutação devolvem `TicketResponse`, que não tem `requester` —
+    // só o `GET /tickets/{id}` tem. A tela faz `setTicket(await mutacao())` em
+    // uma dúzia de lugares; se o dado morasse dentro de `ticket`, desligar a
+    // IA apagaria o bloco inteiro da lateral.
+    vi.mocked(ticketService.toggleTicketAi).mockResolvedValue({
+      ...TICKET,
+      ai_enabled: false,
+    } as never);
+    await abreBloco();
+    expect(screen.getByText("Pedro Henrique")).toBeInTheDocument();
+
+    // O rótulo depende de `ai_enabled`, que o fixture não define — o que
+    // importa aqui é a mutação acontecer, não qual das duas faces do botão.
+    fireEvent.click(screen.getByRole("button", { name: /IA neste chamado/ }));
+
+    await waitFor(() => expect(toast.success).toHaveBeenCalled());
+    expect(screen.getByText("Pedro Henrique")).toBeInTheDocument();
+    expect(screen.getByText("pedro@empresa.com")).toBeInTheDocument();
+  });
+});
+
+describe("TicketDetailPage — editar telefone do solicitante", () => {
+  beforeEach(() => {
+    papelDoUsuario = "technician";
+    vi.mocked(toast.error).mockClear();
+    vi.mocked(toast.success).mockClear();
+    vi.mocked(userService.updateUser).mockReset();
+  });
+
+  const chamado = () =>
+    ({ ...TICKET, requester: SOLICITANTE }) as unknown as typeof TICKET;
+
+  async function abreModal() {
+    await montar([], chamado());
+    fireEvent.click(screen.getByRole("button", { name: "Editar" }));
+    return await screen.findByRole("dialog");
+  }
+
+  it("o técnico consegue abrir a edição", async () => {
+    const dialogo = await abreModal();
+    expect(within(dialogo).getByLabelText("Telefone")).toHaveValue("(81) 98888-7777");
+  });
+
+  it("salva mandando SOMENTE o telefone", async () => {
+    // O ponto inteiro do modal próprio. Um corpo de um campo é o que torna a
+    // permissão do técnico legível: ele não muda papel, situação nem ramal, e
+    // o pedido que ele emite não contém nenhum deles.
+    vi.mocked(userService.updateUser).mockResolvedValue({
+      ...SOLICITANTE,
+      phone: "+5581911112222",
+    } as never);
+    const dialogo = await abreModal();
+
+    const campo = within(dialogo).getByLabelText("Telefone");
+    fireEvent.change(campo, { target: { value: "(81) 91111-2222" } });
+    fireEvent.click(within(dialogo).getByRole("button", { name: "Salvar" }));
+
+    await waitFor(() => expect(userService.updateUser).toHaveBeenCalled());
+    const [alvo, corpo] = vi.mocked(userService.updateUser).mock.calls[0];
+    expect(alvo).toBe("u9");
+    expect(Object.keys(corpo)).toEqual(["phone"]);
+    expect(corpo).toEqual({ phone: "+5581911112222" });
+  });
+
+  it("nenhum campo administrativo aparece no modal", async () => {
+    const dialogo = await abreModal();
+    for (const rotulo of ["Ramal API4COM", "Tipo de usuário", "Situação", "Papel"]) {
+      expect(within(dialogo).queryByLabelText(rotulo)).not.toBeInTheDocument();
+    }
+  });
+
+  it("telefone inválido nem chega ao servidor", async () => {
+    const dialogo = await abreModal();
+    const campo = within(dialogo).getByLabelText("Telefone");
+    fireEvent.change(campo, { target: { value: "123" } });
+    fireEvent.click(within(dialogo).getByRole("button", { name: "Salvar" }));
+
+    // A mensagem exata do helper da casa, e não um regex que casa com o
+    // rótulo do campo e com o título do modal ao mesmo tempo.
+    expect(await within(dialogo).findByText(ERRO_TELEFONE)).toBeInTheDocument();
+    expect(userService.updateUser).not.toHaveBeenCalled();
+  });
+
+  it("sucesso avisa e atualiza o que a tela mostra", async () => {
+    vi.mocked(userService.updateUser).mockResolvedValue({
+      ...SOLICITANTE,
+      phone: "+5581911112222",
+    } as never);
+    const dialogo = await abreModal();
+    fireEvent.change(within(dialogo).getByLabelText("Telefone"), {
+      target: { value: "(81) 91111-2222" },
+    });
+    fireEvent.click(within(dialogo).getByRole("button", { name: "Salvar" }));
+
+    await waitFor(() => expect(toast.success).toHaveBeenCalledWith("Telefone atualizado."));
+    // O bloco tem de refletir o valor novo sem recarregar a tela.
+    await waitFor(() => {
+      const etiqueta = screen
+        .getAllByText("Telefone", { selector: "p" })
+        .find((el) => el.className.includes("uppercase"));
+      expect(etiqueta?.parentElement?.querySelector("span")?.textContent).toBe(
+        "(81) 91111-2222",
+      );
+    });
+  });
+
+  it("erro do backend vira toast e o modal continua aberto", async () => {
+    vi.mocked(userService.updateUser).mockRejectedValue({
+      request: {},
+      response: { status: 403, data: { detail: "Sem permissão." }, headers: {} },
+    });
+    const dialogo = await abreModal();
+    fireEvent.change(within(dialogo).getByLabelText("Telefone"), {
+      target: { value: "(81) 91111-2222" },
+    });
+    fireEvent.click(within(dialogo).getByRole("button", { name: "Salvar" }));
+
+    await waitFor(() =>
+      expect(toast.error).toHaveBeenCalledWith("Não foi possível atualizar o telefone.", {
+        description: "Sem permissão.",
+      }),
+    );
+    expect(screen.getByRole("dialog")).toBeInTheDocument();
   });
 });

@@ -18,6 +18,7 @@ import {
   Badge,
   Button,
   Icon,
+  Input,
   Modal,
   ModalFooter,
   PriorityBadge,
@@ -59,11 +60,20 @@ import {
   type SlaExtensionPreview,
   updateTicketStatus,
   type Ticket,
+  type TicketRequester,
   type TicketHistory,
   type TicketNote,
 } from "../../services/ticketService";
 import { getTicketSurvey, submitSurvey, type Survey } from "../../services/surveyService";
-import { getTechnicians, type UserSummary } from "../../services/userService";
+import { getTechnicians, updateUser, type UserSummary } from "../../services/userService";
+import {
+  ERRO_TELEFONE,
+  PLACEHOLDER_TELEFONE,
+  formatPhone,
+  isValidPhone,
+  maskPhoneInput,
+  toE164,
+} from "../../lib/telefone";
 import { getTags, setTicketTags, type Tag } from "../../services/tagService";
 import { TICKET_TRANSITIONS } from "../../lib/ticketConstants";
 import {
@@ -428,6 +438,43 @@ function PropRow({
           {label}
         </p>
         <div className="text-sm font-medium text-conteudo">{children}</div>
+      </div>
+    </div>
+  );
+}
+
+// ── Solicitante ──────────────────────────────────────────────
+
+/** Uma linha do bloco do solicitante: rótulo pequeno em cima, valor embaixo. */
+function DadoDoSolicitante({
+  label,
+  valor,
+  vazio,
+  acao,
+}: {
+  label: string;
+  valor: string | null | undefined;
+  /** O que dizer quando o dado não existe. Some silenciosamente seria pior:
+   *  "sem telefone" é informação para quem vai atender. */
+  vazio: string;
+  acao?: React.ReactNode;
+}) {
+  const tem = Boolean(valor && valor.trim());
+  return (
+    <div className="py-2.5 border-b border-borda/30 last:border-0">
+      <p className="mb-0.5 text-[10px] font-semibold uppercase tracking-widest text-conteudo-muted">
+        {label}
+      </p>
+      <div className="flex items-center justify-between gap-2">
+        <span
+          className={cn(
+            "text-sm break-words min-w-0",
+            tem ? "font-medium text-conteudo" : "italic text-conteudo-muted",
+          )}
+        >
+          {tem ? valor : vazio}
+        </span>
+        {acao}
       </div>
     </div>
   );
@@ -848,6 +895,23 @@ export default function TicketDetailPage() {
   const [previewLoading, setPreviewLoading] = useState(false);
   const [newPriority, setNewPriority] = useState("");
   const [priorityLoading, setPriorityLoading] = useState(false);
+  /**
+   * Quem abriu o chamado. Estado PRÓPRIO, e não um campo de `ticket`.
+   *
+   * A tela faz `setTicket(await mutacao())` em uma dúzia de lugares, e as
+   * rotas de mutação devolvem o chamado SEM o solicitante — ele só vem no
+   * `GET /tickets/{id}`. Se morasse dentro de `ticket`, o bloco da lateral
+   * desapareceria a cada mudança de status, atribuição ou prioridade.
+   *
+   * Quem abriu um chamado também não muda, então guardar à parte não é
+   * duplicação de estado: é dizer que o dado tem outro ciclo de vida.
+   */
+  const [solicitante, setSolicitante] = useState<TicketRequester | null>(null);
+  // Edição do telefone do solicitante, a partir do próprio chamado.
+  const [telefoneModal, setTelefoneModal] = useState(false);
+  const [telefoneValor, setTelefoneValor] = useState("");
+  const [telefoneErro, setTelefoneErro] = useState<string | null>(null);
+  const [telefoneSalvando, setTelefoneSalvando] = useState(false);
   /** Uma tentativa de ligação por vez, por chamado e por aba. */
   const [ligando, setLigando] = useState(false);
   /**
@@ -948,6 +1012,7 @@ export default function TicketDetailPage() {
         getAttachments(id),
       ]);
       setTicket(t);
+      setSolicitante(t.requester ?? null);
       setObsValue(t.client_observation ?? "");
       setHistory(h.items);
       setAttachments(a.items);
@@ -1218,6 +1283,47 @@ export default function TicketDetailPage() {
     } finally {
       ligandoRef.current = false;
       setLigando(false);
+    }
+  }
+
+  function abreEdicaoDoTelefone() {
+    setTelefoneValor(formatPhone(solicitante?.phone) || "");
+    setTelefoneErro(null);
+    setTelefoneModal(true);
+  }
+
+  /**
+   * Corrige o telefone do solicitante sem sair do chamado.
+   *
+   * Manda **só `phone`**, e isso é desenho: o formulário completo de usuário
+   * envia nome, papel e departamento juntos, e aqui nada disso está sendo
+   * editado — mandar de volta valores que a tela nem mostrou seria escrever no
+   * escuro. Um corpo de um campo também é o que torna a permissão do técnico
+   * legível: ele não pode mudar papel, situação nem ramal, e o pedido que ele
+   * emite não contém nenhum deles.
+   *
+   * A normalização é a mesma do resto da casa (`toE164`), e quem valida de
+   * verdade é o backend.
+   */
+  async function salvaTelefoneDoSolicitante() {
+    if (!solicitante) return;
+    if (!isValidPhone(telefoneValor)) {
+      setTelefoneErro(ERRO_TELEFONE);
+      return;
+    }
+    setTelefoneSalvando(true);
+    setTelefoneErro(null);
+    try {
+      const atualizado = await updateUser(solicitante.id, {
+        phone: toE164(telefoneValor),
+      });
+      setSolicitante({ ...solicitante, phone: atualizado.phone ?? null });
+      setTelefoneModal(false);
+      toast.success("Telefone atualizado.");
+    } catch (err) {
+      toastApiError(err, "Não foi possível atualizar o telefone.");
+    } finally {
+      setTelefoneSalvando(false);
     }
   }
 
@@ -1843,6 +1949,44 @@ export default function TicketDetailPage() {
             </SidebarSection>
           )}
 
+          {/* Solicitante — antes de Propriedades porque é a primeira
+              pergunta de quem abre um chamado alheio: com quem eu falo? */}
+          {solicitante && (
+            <SidebarSection title="Solicitante">
+              <DadoDoSolicitante
+                label="Nome"
+                valor={solicitante.name}
+                vazio="Não informado"
+              />
+              <DadoDoSolicitante
+                label="Empresa"
+                valor={solicitante.company_name}
+                vazio="Não informada"
+              />
+              <DadoDoSolicitante
+                label="E-mail"
+                valor={solicitante.email}
+                vazio="Não informado"
+              />
+              <DadoDoSolicitante
+                label="Telefone"
+                valor={formatPhone(solicitante.phone)}
+                vazio="Não informado"
+                acao={
+                  isStaff ? (
+                    <button
+                      type="button"
+                      onClick={abreEdicaoDoTelefone}
+                      className="shrink-0 rounded-md px-2 py-1 text-xs font-semibold text-conteudo-muted hover:bg-surface-elevated hover:text-conteudo transition-colors cursor-pointer"
+                    >
+                      Editar
+                    </button>
+                  ) : undefined
+                }
+              />
+            </SidebarSection>
+          )}
+
           {/* Properties */}
           <SidebarSection title="Propriedades">
             <PropRow icon=<Icon name="activity" size={16} strokeWidth={2} /> label="Status">
@@ -2270,6 +2414,56 @@ export default function TicketDetailPage() {
             disabled={!newStatus || (newStatus === "resolved" && faltaJustificativa)}
           >
             Confirmar
+          </Button>
+        </ModalFooter>
+      </Modal>
+
+      {/* Telefone do solicitante — modal próprio, e não o formulário de
+          usuário inteiro.
+
+          Reaproveitar aquele traria nome, papel, departamento e ramal para uma
+          tela cujo assunto é o chamado, e o corpo salvo carregaria campos que
+          ninguém editou. Aqui o pedido tem UM campo, que é também o que torna
+          a permissão do técnico legível: ele não muda papel nem ramal, e a
+          requisição que ele emite não contém nenhum dos dois. */}
+      <Modal
+        open={telefoneModal}
+        onClose={() => setTelefoneModal(false)}
+        title="Editar telefone do solicitante"
+      >
+        <div className="space-y-4">
+          <Input
+            label="Telefone"
+            type="tel"
+            autoFocus
+            placeholder={PLACEHOLDER_TELEFONE}
+            value={telefoneValor}
+            error={telefoneErro ?? undefined}
+            onChange={(e) => {
+              setTelefoneValor(maskPhoneInput(e.target.value));
+              setTelefoneErro(null);
+            }}
+          />
+          <p className="text-xs text-conteudo-muted">
+            Altera o cadastro de {solicitante?.name}. É este número que a
+            telefonia usa para ligar.
+          </p>
+        </div>
+        <ModalFooter>
+          <Button
+            type="button"
+            variant="secondary"
+            onClick={() => setTelefoneModal(false)}
+            disabled={telefoneSalvando}
+          >
+            Cancelar
+          </Button>
+          <Button
+            type="button"
+            onClick={salvaTelefoneDoSolicitante}
+            loading={telefoneSalvando}
+          >
+            Salvar
           </Button>
         </ModalFooter>
       </Modal>

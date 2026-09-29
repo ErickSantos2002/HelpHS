@@ -147,9 +147,13 @@ def _guarda_de_atribuicao_de_papel(*, ator: User, papel_atribuido: UserRole | No
     o que conta como atribuição muda com a rota. Por isso a tradução é de cada
     chamador, e a decisão é daqui:
 
-    * `update_user` passa o `role` do corpo cru. Lá não existe default —
-      qualquer papel no corpo é atribuição, inclusive rebaixar alguém a
-      cliente. Comportamento idêntico ao que havia antes desta função.
+    * `update_user` passa o papel do corpo **só quando ele DIFERE do atual**.
+      Mandar de volta o papel que a pessoa já tem não move ninguém de lugar, e
+      tratar isso como atribuição tinha uma consequência que ninguém quis:
+      o formulário de edição manda `role` sempre, então o técnico levava 403
+      ao salvar QUALQUER campo — nome, departamento, telefone. A regra que
+      protegia a promoção estava, na prática, proibindo a edição inteira.
+      Rebaixar alguém a cliente continua sendo atribuição, porque muda.
     * `create_user` passa `None` quando o papel pedido é `client`, o default do
       schema. O front manda `role` SEMPRE (`UsersPage.tsx` abre o formulário
       com `role: "client"`), então olhar a PRESENÇA do campo recusaria toda
@@ -583,7 +587,6 @@ async def update_user(
             status_code=status.HTTP_403_FORBIDDEN,
             detail="Você não tem permissão para acessar este item.",
         )
-    _guarda_de_atribuicao_de_papel(ator=current_user, papel_atribuido=body.role)
     # `model_fields_set` e não o valor: nulo aqui é remover, não "não pediu".
     _guarda_de_atribuicao_de_ramal(
         ator=current_user,
@@ -594,6 +597,16 @@ async def update_user(
     user = result.scalar_one_or_none()
     if not user:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Usuário não encontrado.")
+
+    # A guarda do papel desceu para DEPOIS da leitura, porque agora ela precisa
+    # saber o papel atual para responder "isto muda alguma coisa?". Só chega
+    # aqui quem é staff ou está editando a si mesmo — o 403 de acesso já foi
+    # dado acima —, então trocar a ordem não revela existência de conta a
+    # ninguém que já não pudesse listá-la.
+    _guarda_de_atribuicao_de_papel(
+        ator=current_user,
+        papel_atribuido=body.role if body.role != user.role else None,
+    )
 
     update_data = body.model_dump(exclude_unset=True)
     # O estado resultante só difere do atual nos campos realmente enviados —

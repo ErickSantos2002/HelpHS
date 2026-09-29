@@ -59,6 +59,7 @@ from app.schemas.ticket import (
     SlaExtensionRequest,
     TicketAssign,
     TicketCreate,
+    TicketDetailResponse,
     TicketHistoryListResponse,
     TicketHistoryResponse,
     TicketListResponse,
@@ -67,6 +68,7 @@ from app.schemas.ticket import (
     TicketObservationUpdate,
     TicketPriorityUpdate,
     TicketReopen,
+    TicketRequesterBrief,
     TicketResolve,
     TicketResponse,
     TicketStatusUpdate,
@@ -770,12 +772,12 @@ async def list_tickets(
     )
 
 
-@router.get("/tickets/{ticket_id}", response_model=TicketResponse)
+@router.get("/tickets/{ticket_id}", response_model=TicketDetailResponse)
 async def get_ticket(
     ticket_id: uuid.UUID,
     db: Annotated[AsyncSession, Depends(get_db)],
     actor: Annotated[User, Depends(get_current_user)],
-) -> TicketResponse:
+) -> TicketDetailResponse:
     """Retrieve a single ticket by ID.
 
     Clients may only access tickets they created; admins and technicians
@@ -790,8 +792,21 @@ async def get_ticket(
     if ticket.assignee_id:
         assignee = await db.get(User, ticket.assignee_id)
         response.assignee_name = assignee.name if assignee else None
+    # Quem abriu o chamado, para a tela poder falar com ele sem sair daqui.
+    #
+    # `db.get` e não `ticket.creator`: o relacionamento é lazy e tocá-lo em
+    # sessão async estoura `MissingGreenlet` — o mesmo motivo que já vale para
+    # o responsável, logo acima, e para o destinatário da telefonia. São duas
+    # consultas por chave primária no chamado avulso, não um N+1: a listagem
+    # não passa por aqui.
     await _fill_product_and_equipment(response, ticket, db)
-    return response
+
+    criador = await db.get(User, ticket.creator_id)
+    detalhe = TicketDetailResponse(
+        **response.model_dump(),
+        requester=TicketRequesterBrief.model_validate(criador) if criador else None,
+    )
+    return detalhe
 
 
 @router.patch("/tickets/{ticket_id}", response_model=TicketResponse)

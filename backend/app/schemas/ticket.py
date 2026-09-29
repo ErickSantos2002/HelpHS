@@ -181,6 +181,41 @@ class TicketEquipmentBrief(AppBaseModel):
     product_id: uuid.UUID | None = None
 
 
+class TicketRequesterBrief(AppBaseModel):
+    """Quem abriu o chamado, no mínimo que a tela precisa para falar com ele.
+
+    ⚠️ A lista de campos é a regra, não um começo. Entra o que serve para
+    ATENDER: nome para chamar pelo nome, empresa para situar, e-mail e telefone
+    para responder. Fora ficam CPF, CNPJ, endereço, departamento, consentimento
+    de LGPD, `api4com_extension` e qualquer dado do fornecedor de telefonia —
+    nada disso ajuda a resolver o chamado, e cada campo a mais é uma superfície
+    a mais.
+
+    `company_name` e não a relação `Company`: a empresa que o cliente informa no
+    onboarding mora em `users.company_name`, e é ela que está preenchida. O
+    vínculo `company_id` pertence à frente de grupos/CNPJ, cujo backfill nunca
+    rodou — apontar para lá mostraria "Não informada" para todo mundo.
+
+    Só aparece no chamado AVULSO. Na listagem seria uma consulta por linha, e o
+    que a lista mostra do criador já cabe no que ela tem.
+
+    ⚠️ O campo no `TicketResponse` chama-se `requester`, e NÃO `creator`. O
+    nome curto colide com `Ticket.creator`, que é um `relationship()` lazy:
+    como o response tem `from_attributes=True`, o `model_validate(ticket)` de
+    `_serialize_ticket` passaria a LER esse relacionamento e estouraria
+    `MissingGreenlet` em sessão async — em toda serialização de chamado,
+    listagem inclusive. Um caso desta suíte prende isso.
+    """
+
+    model_config = ConfigDict(from_attributes=True)
+
+    id: uuid.UUID
+    name: str
+    email: str
+    phone: str | None = None
+    company_name: str | None = None
+
+
 class TicketResponse(AppBaseModel):
     model_config = ConfigDict(from_attributes=True, str_strip_whitespace=True)
 
@@ -266,6 +301,29 @@ class TicketResponse(AppBaseModel):
     client_observation: str | None = None
     resolution_note: str | None = None
     tags: list[TagResponse] = []
+
+
+class TicketDetailResponse(TicketResponse):
+    """O chamado avulso: tudo o que a listagem tem, mais quem abriu.
+
+    ⚠️ Existe como modelo SEPARADO, e não como campo opcional no
+    `TicketResponse`, por duas razões medidas:
+
+    1. `_serialize_ticket` faz `TicketResponse.model_validate(ticket)` com
+       `from_attributes=True`. **Todo campo daquele modelo é um atributo lido
+       do objeto do ORM.** Um campo que o `Ticket` não tem só funciona por
+       acidente (o `AttributeError` vira default) — e 26 testes com dublê
+       solto estouraram na hora em que se tentou.
+    2. As rotas de mutação (`PATCH /tickets/{id}`, resolve, reopen, status…)
+       devolvem `TicketResponse` e não têm o solicitante. Se o campo morasse
+       lá, a tela — que faz `setTicket(await mutacao())` em uma dúzia de
+       lugares — APAGARIA o bloco do solicitante a cada ação.
+
+    Herdar é o que mantém um contrato só: o detalhe é o chamado mais uma
+    coisa, não outro chamado.
+    """
+
+    requester: TicketRequesterBrief | None = None
 
 
 class TicketListResponse(AppBaseModel):
