@@ -457,6 +457,53 @@ describe("UsersPage", () => {
     );
   });
 
+  it("o técnico salva o telefone de um cliente SEM mandar o papel", async () => {
+    // O defeito que a Fase 2C.5c conserta, do lado do front.
+    //
+    // O formulário mandava `role` sempre — inclusive igual ao que já estava
+    // gravado —, e o backend tratava qualquer papel no corpo como tentativa de
+    // atribuição. O técnico levava 403 ao salvar QUALQUER campo desta tela.
+    //
+    // O backend também passou a comparar com o papel atual; esta metade é não
+    // mandar o que não se pode mudar.
+    const user = userEvent.setup();
+    papelDeQuemEdita = "technician";
+    vi.mocked(userService.updateUser).mockResolvedValue({
+      ...BRUNO,
+      phone: "+5581911112222",
+    });
+    await montar();
+
+    await user.click(await screen.findByRole("button", { name: "Editar Bruno Lima" }));
+    const dialogo = await screen.findByRole("dialog");
+    const campo = within(dialogo).getByLabelText("Telefone");
+    await user.clear(campo);
+    await user.type(campo, "81911112222");
+    await user.click(within(dialogo).getByRole("button", { name: "Salvar alterações" }));
+
+    await waitFor(() => expect(userService.updateUser).toHaveBeenCalled());
+    const corpo = vi.mocked(userService.updateUser).mock.calls[0][1];
+    expect(corpo).not.toHaveProperty("role");
+    expect(corpo).not.toHaveProperty("api4com_extension");
+    expect(corpo).toHaveProperty("phone");
+  });
+
+  it("o administrador continua mandando o papel", async () => {
+    // A correção não podia fechar o que era permitido: admin promove e
+    // rebaixa, e para isso o campo precisa viajar.
+    const user = userEvent.setup();
+    papelDeQuemEdita = "admin";
+    vi.mocked(userService.updateUser).mockResolvedValue(BRUNO);
+    await montar();
+
+    await user.click(await screen.findByRole("button", { name: "Editar Bruno Lima" }));
+    const dialogo = await screen.findByRole("dialog");
+    await user.click(within(dialogo).getByRole("button", { name: "Salvar alterações" }));
+
+    await waitFor(() => expect(userService.updateUser).toHaveBeenCalled());
+    expect(vi.mocked(userService.updateUser).mock.calls[0][1]).toHaveProperty("role");
+  });
+
   it("admin define o ramal de quem não tinha", async () => {
     const user = userEvent.setup();
     vi.mocked(userService.updateUser).mockResolvedValue({ ...BRUNO, api4com_extension: "1018" });

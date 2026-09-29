@@ -438,10 +438,19 @@ function EditModal({ user, onClose, onSaved }: { user: UserSummary; onClose: () 
     try {
       const alteracoes: UserUpdatePayload = {
         name: values.name,
-        role: values.role,
         phone: toE164(values.phone),
         department: values.department || null,
       };
+      // ⚠️ `role` só entra no corpo quando quem edita é admin, pela mesma
+      // razão do ramal logo abaixo — e por um defeito que isto conserta: o
+      // formulário mandava `role` SEMPRE, inclusive igual ao que já estava, e
+      // o backend tratava qualquer papel no corpo como tentativa de
+      // atribuição. O efeito era que o técnico levava 403 ao salvar QUALQUER
+      // campo, telefone incluído. O backend também passou a comparar com o
+      // papel atual; aqui é a metade que não manda o que não pode mudar.
+      if (souAdmin) {
+        alteracoes.role = values.role;
+      }
       // O campo só entra no corpo quando quem edita é admin: o backend
       // responde 403 para qualquer outro, mesmo que o valor não tenha mudado,
       // e um técnico salvando o nome de alguém não pode esbarrar nisso.

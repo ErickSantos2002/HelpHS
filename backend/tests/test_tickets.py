@@ -152,6 +152,15 @@ def _db(lookup=None, count=0):
     session.add = MagicMock()
     session.commit = AsyncMock()
     session.refresh = AsyncMock()
+    # ⚠️ `session.get` explícito, e não o que o `AsyncMock` inventaria.
+    #
+    # `GET /tickets/{id}` chama `db.get(User, ticket.creator_id)` para montar o
+    # bloco do solicitante — SEMPRE, não só quando há responsável. Um
+    # `AsyncMock` devolve outro mock para qualquer método, e `model_validate`
+    # recusa isso com erro de tipo. Devolver `None` é o que significa "esta
+    # sessão não tem usuário nenhum", que é a verdade destes casos: eles medem
+    # produto, equipamento e SLA, não o solicitante.
+    session.get = AsyncMock(return_value=None)
     return session
 
 
@@ -185,6 +194,8 @@ def _db_sequence(*responses):
     session.add = MagicMock()
     session.commit = AsyncMock()
     session.refresh = AsyncMock()
+    # Mesma razão do `_db`: o detalhe do chamado chama `db.get`.
+    session.get = AsyncMock(return_value=None)
     return session
 
 
@@ -588,7 +599,10 @@ async def test_detalhe_traz_produto_e_equipamentos(patch_redis):
     session = _db_sequence(ticket)
 
     async def _get(model, pk):
-        return produto
+        # So o produto. O detalhe tambem chama `db.get(User, creator_id)`
+        # para o bloco do solicitante, e devolver o produto ali daria um
+        # erro de tipo que nao tem nada a ver com o que este caso mede.
+        return produto if model.__name__ == "Product" else None
 
     session.get = _get
 
@@ -631,7 +645,10 @@ async def test_chamado_com_varios_equipamentos(patch_redis):
     session = _db_sequence(ticket)
 
     async def _get(model, pk):
-        return produto
+        # So o produto. O detalhe tambem chama `db.get(User, creator_id)`
+        # para o bloco do solicitante, e devolver o produto ali daria um
+        # erro de tipo que nao tem nada a ver com o que este caso mede.
+        return produto if model.__name__ == "Product" else None
 
     session.get = _get
 
@@ -671,7 +688,10 @@ async def test_produto_vem_do_equipamento_quando_o_chamado_nao_informou(patch_re
     session = _db_sequence(ticket)
 
     async def _get(model, pk):
-        return produto
+        # So o produto. O detalhe tambem chama `db.get(User, creator_id)`
+        # para o bloco do solicitante, e devolver o produto ali daria um
+        # erro de tipo que nao tem nada a ver com o que este caso mede.
+        return produto if model.__name__ == "Product" else None
 
     session.get = _get
 

@@ -3,6 +3,24 @@ import type { TicketPriority } from "../lib/prioridade";
 import type { Expediente } from "../lib/tempoUtil";
 import type { Tag } from "./tagService";
 
+/**
+ * Quem abriu o chamado, no mínimo que a tela precisa para falar com ele.
+ *
+ * Chega só no chamado avulso (`getTicket`); na listagem vem `undefined`,
+ * porque lá seria uma consulta por linha.
+ *
+ * ⚠️ Não há CPF, CNPJ, endereço, departamento, ramal nem nada do fornecedor de
+ * telefonia — o backend não manda, e declarar campo que não chega convidaria
+ * alguém a lê-lo.
+ */
+export interface TicketRequester {
+  id: string;
+  name: string;
+  email: string;
+  phone: string | null;
+  company_name: string | null;
+}
+
 /** Equipamento como ele aparece dentro do chamado — não é a ficha completa. */
 export interface TicketEquipment {
   id: string;
@@ -290,8 +308,20 @@ export async function reopenTicket(id: string, reason: string): Promise<Ticket> 
   return data;
 }
 
-export async function getTicket(id: string): Promise<Ticket> {
-  const { data } = await api.get<Ticket>(`/tickets/${id}`);
+/**
+ * O chamado avulso: tudo o que a lista tem, mais quem abriu.
+ *
+ * ⚠️ Tipo SEPARADO, e não um campo opcional no `Ticket`, pelo mesmo motivo do
+ * backend: as rotas de mutação devolvem `Ticket` sem o solicitante, e um campo
+ * opcional faria a tela apagar o bloco a cada ação. Aqui o tipo diz em qual
+ * resposta o dado existe.
+ */
+export interface TicketDetail extends Ticket {
+  requester?: TicketRequester | null;
+}
+
+export async function getTicket(id: string): Promise<TicketDetail> {
+  const { data } = await api.get<TicketDetail>(`/tickets/${id}`);
   return data;
 }
 
