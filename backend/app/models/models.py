@@ -329,11 +329,38 @@ class User(Base):
     chat_messages: Mapped[list["ChatMessage"]] = relationship(back_populates="sender")
     attachments: Mapped[list["Attachment"]] = relationship(back_populates="user")
     kb_articles: Mapped[list["KBArticle"]] = relationship(back_populates="author")
-    notifications: Mapped[list["Notification"]] = relationship(back_populates="user")
+    # `passive_deletes=True`: `notifications.user_id -> users.id` é
+    # `ON DELETE CASCADE` no banco, e é o Postgres quem deve executá-lo.
+    #
+    # Sem isto, o cascade padrão do SQLAlchemy (`save-update, merge` — sem
+    # `delete`) faz o unit-of-work tentar ANULAR `user_id` de cada
+    # notificação antes do `DELETE FROM users`. Duas falhas medidas por causa
+    # disso: `user_id` é `NOT NULL`, então o `UPDATE ... SET user_id = NULL`
+    # colide com a constraint e sobe como `IntegrityError` (a regressão de
+    # 29/09/2026 — um técnico sem nenhuma referência bloqueadora, mas com
+    # notificações, recebia 409 em vez de 204); e em sessão assíncrona o
+    # carregamento *lazy* da coleção durante o `flush` nem chega a rodar —
+    # `sqlalchemy.exc.MissingGreenlet`, porque a IO implícita do lazy-load não
+    # está dentro do greenlet do `await`.
+    #
+    # `passive_deletes=True` resolve as duas: o SQLAlchemy não carrega nem
+    # gerencia a coleção no delete, só emite `DELETE FROM users` e deixa o
+    # `ON DELETE CASCADE` do banco apagar as notificações.
+    notifications: Mapped[list["Notification"]] = relationship(
+        back_populates="user", passive_deletes=True
+    )
     satisfaction_given: Mapped[list["SatisfactionSurvey"]] = relationship(back_populates="user")
     audit_logs: Mapped[list["AuditLog"]] = relationship(back_populates="user")
+    # `passive_deletes=True`: `equipments.owner_id -> users.id` é
+    # `ON DELETE SET NULL` no banco. Sem isto, o SQLAlchemy chega ao mesmo
+    # resultado por um caminho mais caro — carrega a coleção e emite
+    # `UPDATE equipments SET owner_id = NULL` ele mesmo, porque a coluna é
+    # nullable e o UPDATE não colide com nada. Funciona hoje por acaso, não
+    # por desenho: passar a mão para o Postgres deixa de depender de
+    # `owner_id` continuar nullable para não repetir a mesma classe de
+    # defeito do `notifications` acima.
     equipments: Mapped[list["Equipment"]] = relationship(
-        back_populates="owner", foreign_keys="Equipment.owner_id"
+        back_populates="owner", foreign_keys="Equipment.owner_id", passive_deletes=True
     )
     company: Mapped["Company | None"] = relationship(
         "Company", back_populates="clients", foreign_keys=[company_id]
