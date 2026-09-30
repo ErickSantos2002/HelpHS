@@ -592,7 +592,6 @@ async def create_ticket(
             f"{protocol} — {body.title}",
             data=dados_da_notificacao,
             settings=settings,
-            email_subject=f"[HelpHS] Novo chamado {protocol} — {body.title}",
             exclude_user_ids={actor.id},
         )
         try:
