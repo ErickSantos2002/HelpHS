@@ -1173,13 +1173,30 @@ class Notification(Base):
 
 
 class EmailOutbox(Base):
-    """Fila durável de e-mail — Fase 3A. Uma linha é uma PROMESSA de envio, não
+    """Fila durável de e-mail — Fase 3A/3B (Notification) + Fase 3C (conta).
 
-    o envio em si: o worker é quem tenta, registra o desfecho e decide se tenta
-    de novo.
+    Uma linha é uma PROMESSA de envio, não o envio em si: o worker é quem
+    tenta, registra o desfecho e decide se tenta de novo.
 
-    Por que não guarda destinatário, assunto ou corpo
-    ---------------------------------------------------
+    Duas origens, uma tabela só
+    ----------------------------
+    Desde a Fase 3C esta tabela aceita duas formas de linha, nunca misturadas
+    (ver `ck_email_outbox_origem_valida`):
+
+    * **Notification** (Fase 3A/3B): `notification_id` preenchido,
+      `user_id`/`event_type`/`dedup_key` NULOS. O conteúdo reconstrói via
+      `Notification.title`/`message`/`data` — ver a explicação original
+      abaixo.
+    * **Account** (Fase 3C): `user_id`/`event_type`/`dedup_key` preenchidos,
+      `notification_id` NULO. Cobre os três e-mails de conta/autenticação
+      (`verification`, `password_reset`, `account_exists`), que NUNCA tiveram
+      `Notification` — a auditoria da Fase 3C confirmou que esses fluxos
+      sempre têm `user_id` disponível no momento do enqueue, então não há
+      necessidade de uma segunda tabela: a mesma máquina de estado, o mesmo
+      worker, o mesmo `FOR UPDATE SKIP LOCKED` servem as duas origens.
+
+    Por que não guarda destinatário, assunto, corpo, token ou senha
+    -------------------------------------------------------------------
     Toda notificação passível de e-mail já nasce como `Notification`, e essa
     linha já carrega tudo que o envio precisa: `user_id` (→ `users.email`),
     `title`/`message`/`data` (→ assunto e corpo, reconstruídos em tempo de
@@ -1192,10 +1209,23 @@ class EmailOutbox(Base):
     em `notifications` primeiro. Esta tabela guarda só ESTADO OPERACIONAL:
     quantas vezes tentou, quando tenta de novo, quem está com a linha na mão.
 
+    Para a origem Account, o mesmo raciocínio vale para o JWT: o token de
+    verificação/reset NUNCA é persistido — é gerado pelo worker, no momento do
+    envio, a partir do `User` carregado por `user_id`. A auditoria da Fase 3C
+    provou que isso é seguro: a validação dos dois tokens compara o ESTADO
+    embutido (`vrf`/`pwd`) contra o estado atual do usuário no momento do
+    clique, nunca contra um registro de "qual foi o último token emitido" — e
+    por isso múltiplos tokens válidos para o mesmo usuário já coexistem hoje,
+    antes desta fase.
+
     `notification_id` é UNIQUE de propósito: no máximo uma linha de outbox por
     notificação, sempre. Isso é a primeira camada de deduplicação — a segunda é
     o `FOR UPDATE SKIP LOCKED` do worker, contra dois processos pegando a MESMA
-    linha já existente.
+    linha já existente. Para a origem Account, o papel de `notification_id` é
+    feito por `dedup_key` (`event_type:user_id:intent_id` — ver
+    `app/services/email_outbox.py:enqueue_account_email`): a MESMA intenção
+    (mesmo `intent_id`, gerado pelo chamador) nunca duplica; um pedido novo,
+    legítimo, tem um `intent_id` novo e por isso uma `dedup_key` diferente.
 
     Garantia é at-least-once, não exactly-once
     -------------------------------------------
@@ -1205,15 +1235,27 @@ class EmailOutbox(Base):
     recuperação de linha travada (ver `app/services/email_outbox.py`) vai
     reenviá-lo. Não há como fechar essa janela sem um protocolo de confirmação
     do lado do provedor SMTP que este sistema não tem — então a garantia real e
-    documentada é "pelo menos uma vez", nunca "exatamente uma vez".
+    documentada é "pelo menos uma vez", nunca "exatamente uma vez". Para a
+    origem Account isso é ainda mais barato de tolerar do que para
+    Notification: dois tokens válidos simultâneos para o mesmo evento não é
+    uma falha de segurança (ver acima), só um e-mail a mais.
     """
 
     __tablename__ = "email_outbox"
 
     id: Mapped[uuid.UUID] = mapped_column(UUID(as_uuid=True), primary_key=True, default=uuid.uuid4)
-    notification_id: Mapped[uuid.UUID] = mapped_column(
-        UUID(as_uuid=True), ForeignKey("notifications.id", ondelete="CASCADE"), nullable=False
+    notification_id: Mapped[uuid.UUID | None] = mapped_column(
+        UUID(as_uuid=True), ForeignKey("notifications.id", ondelete="CASCADE"), nullable=True
     )
+    # Origem Account (Fase 3C) — os três nascem e morrem juntos: preenchidos
+    # só quando `notification_id` é NULO, ver `ck_email_outbox_origem_valida`.
+    user_id: Mapped[uuid.UUID | None] = mapped_column(
+        UUID(as_uuid=True), ForeignKey("users.id", ondelete="CASCADE"), nullable=True
+    )
+    # String + CHECK, mesma convenção do `status` logo abaixo — nenhum enum
+    # nativo aqui, pelo mesmo motivo.
+    event_type: Mapped[str | None] = mapped_column(String(20), nullable=True)
+    dedup_key: Mapped[str | None] = mapped_column(String(160), nullable=True)
     # String + CHECK, não enum nativo — mesma convenção (e mesmo motivo) de
     # `SlaAlertEvent.alert_kind`: acrescentar um estado novo não pode exigir
     # `ALTER TYPE` numa cadeia de migrations que roda inteira numa transação.
@@ -1237,19 +1279,39 @@ class EmailOutbox(Base):
     # `email_outbox` precisa vir DEPOIS do de `notifications`: a ordenação por
     # dependência do SQLAlchemy é por `relationship()` mapeado, não pela FK
     # crua da tabela. Medido: sem esta linha, os dois INSERTs às vezes saem na
-    # ordem errada e o `email_outbox_notification_id_fkey` rejeita.
-    notification: Mapped["Notification"] = relationship()
+    # ordem errada e o `email_outbox_notification_id_fkey` rejeita. Mesmo
+    # raciocínio para `user` abaixo, no caminho de conta da Fase 3C.
+    notification: Mapped["Notification | None"] = relationship()
+    user: Mapped["User | None"] = relationship()
 
     __table_args__ = (
         Index("uq_email_outbox_notification_id", "notification_id", unique=True),
+        Index("uq_email_outbox_dedup_key", "dedup_key", unique=True),
         CheckConstraint(
             "status IN ('pending', 'processing', 'sent', 'dead')",
             name="ck_email_outbox_status_conhecido",
         ),
+        CheckConstraint(
+            "event_type IS NULL OR event_type IN "
+            "('verification', 'password_reset', 'account_exists')",
+            name="ck_email_outbox_event_type_conhecido",
+        ),
+        # A origem é OU Notification OU Account, nunca as duas, nunca nenhuma.
+        # NOT VALID na migration (c8b8d6994fae) evita o lock de leitura da
+        # tabela inteira; `VALIDATE CONSTRAINT` roda logo em seguida, na mesma
+        # migration, sem bloquear escrita durante a validação.
+        CheckConstraint(
+            "(notification_id IS NOT NULL AND user_id IS NULL AND event_type IS NULL "
+            "AND dedup_key IS NULL) "
+            "OR "
+            "(notification_id IS NULL AND user_id IS NOT NULL AND event_type IS NOT NULL "
+            "AND dedup_key IS NOT NULL)",
+            name="ck_email_outbox_origem_valida",
+        ),
         # Índice parcial: é exatamente a consulta do hot path do worker
         # (`status='pending' AND next_attempt_at <= now()`), e as linhas
         # `sent`/`dead` — que tendem a ser a maioria com o tempo — nunca
-        # precisam entrar nele.
+        # precisam entrar nele. Serve as duas origens sem distinção.
         Index(
             "ix_email_outbox_pending_next_attempt",
             "next_attempt_at",

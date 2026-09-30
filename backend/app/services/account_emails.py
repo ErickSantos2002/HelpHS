@@ -11,6 +11,20 @@ entregam, e o que filtro de spam procura.
 Estes três continuam indo para TODO MUNDO, inclusive técnico e admin. São a
 autenticação e a troca de senha, e o filtro por papel das notificações não os
 alcança.
+
+Fase 3C — a montagem do conteúdo é separada do envio
+-------------------------------------------------------
+Desde a Fase 3C, `send_verification_email`/`send_password_reset_email`/
+`send_account_exists_email` são wrappers finos: a MONTAGEM (`_conteudo_*`) foi
+extraída para que o worker da outbox (`app/services/email_outbox.py`) possa
+chamar `conteudo_da_conta(...)` diretamente, sem passar por `send_email`. É o
+mesmo corte que `notifications.py`/`email_outbox.py` já fazem para os e-mails
+operacionais — `_assunto_do_email`/`_mensagem_do_email` continuam existindo
+separadas do envio.
+
+`app/routers/auth.py` não chama mais nenhuma das três funções de envio nem
+`account_tokens.create_*`: quem gera o token e manda o e-mail, depois desta
+fase, é exclusivamente o worker — ver `enqueue_account_email`.
 """
 
 from urllib.parse import quote
@@ -50,7 +64,7 @@ async def _envia(
     )
 
 
-async def send_verification_email(to_email: str, name: str, token: str, settings: Settings) -> bool:
+def _conteudo_verification(name: str, token: str, settings: Settings) -> tuple[str, Mensagem]:
     link = _link(settings, "confirmar-email", token)
     horas = settings.email_verification_token_hours
 
@@ -69,19 +83,10 @@ async def send_verification_email(to_email: str, name: str, token: str, settings
             "será ativada sem essa confirmação."
         ),
     )
-
-    return await _envia(
-        to_email,
-        "[HelpHS] Confirme seu e-mail para ativar a conta",
-        conteudo,
-        settings,
-        evento="verification",
-    )
+    return "[HelpHS] Confirme seu e-mail para ativar a conta", conteudo
 
 
-async def send_password_reset_email(
-    to_email: str, name: str, token: str, settings: Settings
-) -> bool:
+def _conteudo_password_reset(name: str, token: str, settings: Settings) -> tuple[str, Mensagem]:
     link = _link(settings, "redefinir-senha", token)
     horas = settings.password_reset_token_hours
 
@@ -100,17 +105,10 @@ async def send_password_reset_email(
             "valendo e nada muda na sua conta."
         ),
     )
-
-    return await _envia(
-        to_email,
-        "[HelpHS] Redefinição de senha",
-        conteudo,
-        settings,
-        evento="password reset",
-    )
+    return "[HelpHS] Redefinição de senha", conteudo
 
 
-async def send_account_exists_email(to_email: str, settings: Settings) -> bool:
+def _conteudo_account_exists(settings: Settings) -> tuple[str, Mensagem]:
     """Avisa que já existe conta com este endereço, sem dizer isso a mais ninguém.
 
     É o que sustenta a resposta neutra do cadastro. Sem esta mensagem, quem
@@ -120,7 +118,9 @@ async def send_account_exists_email(to_email: str, settings: Settings) -> bool:
     O texto NÃO revela nome, data de criação nem qualquer outro dado: quem
     recebe já sabe que a conta é dele, e quem não é dono não deveria receber
     nada. É o mesmo cuidado do "esqueci minha senha" — e por isso, ao contrário
-    dos outros dois, esta mensagem não cumprimenta pelo nome.
+    dos outros dois, esta mensagem não cumprimenta pelo nome. Não recebe `name`
+    nem `user` por parâmetro de propósito — não há como vazar o que a função
+    nunca recebeu.
     """
     base = settings.frontend_url.rstrip("/")
 
@@ -143,11 +143,48 @@ async def send_account_exists_email(to_email: str, settings: Settings) -> bool:
             "ninguém teve acesso a ela."
         ),
     )
+    return "[HelpHS] Você já tem uma conta com este e-mail", conteudo
 
-    return await _envia(
-        to_email,
-        "[HelpHS] Você já tem uma conta com este e-mail",
-        conteudo,
-        settings,
-        evento="account exists",
-    )
+
+def conteudo_da_conta(
+    event_type: str, *, name: str | None, token: str | None, settings: Settings
+) -> tuple[str, str, str]:
+    """(assunto, corpo em texto, corpo em HTML) para o evento — usado
+
+    exclusivamente pelo worker da outbox (Fase 3C), que já carregou o `User`
+    e gerou o token (quando o evento tem um). É o ponto único de dispatch por
+    `event_type`: `email_outbox.py` não conhece os templates, só chama esta
+    função.
+
+    `token` é `None` para `account_exists` — obrigatório para os outros dois.
+    `name` é `None` só para `account_exists`, que não cumprimenta ninguém.
+    """
+    if event_type == "verification":
+        assert token is not None, "verification sempre tem token"
+        assunto, conteudo = _conteudo_verification(name or "", token, settings)
+    elif event_type == "password_reset":
+        assert token is not None, "password_reset sempre tem token"
+        assunto, conteudo = _conteudo_password_reset(name or "", token, settings)
+    elif event_type == "account_exists":
+        assunto, conteudo = _conteudo_account_exists(settings)
+    else:
+        raise ValueError(f"event_type desconhecido para e-mail de conta: {event_type}")
+
+    return assunto, em_texto(conteudo), em_html(conteudo)
+
+
+async def send_verification_email(to_email: str, name: str, token: str, settings: Settings) -> bool:
+    assunto, conteudo = _conteudo_verification(name, token, settings)
+    return await _envia(to_email, assunto, conteudo, settings, evento="verification")
+
+
+async def send_password_reset_email(
+    to_email: str, name: str, token: str, settings: Settings
+) -> bool:
+    assunto, conteudo = _conteudo_password_reset(name, token, settings)
+    return await _envia(to_email, assunto, conteudo, settings, evento="password reset")
+
+
+async def send_account_exists_email(to_email: str, settings: Settings) -> bool:
+    assunto, conteudo = _conteudo_account_exists(settings)
+    return await _envia(to_email, assunto, conteudo, settings, evento="account exists")
