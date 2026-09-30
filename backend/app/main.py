@@ -43,6 +43,7 @@ from app.routers import (
 )
 from app.services import antivirus, storage
 from app.services.chat_backplane import assinatura_ativa, start_chat_backplane
+from app.services.email_outbox import start_email_outbox_worker
 from app.services.helo_indexacao import start_helo_indexacao_worker
 from app.services.sla_alertas import start_sla_warning_worker
 from app.services.sla_alertas import ultima_rodada_sem_erro as ultima_rodada_do_aviso_de_sla
@@ -123,6 +124,12 @@ async def lifespan(app: FastAPI) -> AsyncIterator[None]:
     # (app/services/sla_alertas.py).
     sla_warning_task = start_sla_warning_worker()
 
+    # Outbox durável de e-mail (Fase 3A). Nesta fase a tabela fica vazia em
+    # produção — nenhum call site real grava nela ainda —, então o laço sobe
+    # sem efeito observável, só para ficar exercitado antes da Fase 3B migrar
+    # o primeiro disparador de verdade (app/services/email_outbox.py).
+    email_outbox_task = start_email_outbox_worker()
+
     # A base da Helô acompanha a Base de Conhecimento sozinha: artigo publicado
     # ou editado é indexado na rodada seguinte (app/services/helo_indexacao.py).
     helo_indexacao_task = start_helo_indexacao_worker()
@@ -145,6 +152,11 @@ async def lifespan(app: FastAPI) -> AsyncIterator[None]:
         sla_warning_task.cancel()
         with suppress(asyncio.CancelledError):
             await sla_warning_task
+
+    if email_outbox_task is not None:
+        email_outbox_task.cancel()
+        with suppress(asyncio.CancelledError):
+            await email_outbox_task
 
     if helo_indexacao_task is not None:
         helo_indexacao_task.cancel()

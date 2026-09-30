@@ -640,6 +640,20 @@ class Settings(BaseSettings):
     # Helô, e a granularidade que sobra é de 5 minutos.
     sla_warning_interval_seconds: int = 300
 
+    # Outbox de e-mail (Fase 3A) — de quanto em quanto tempo o worker tenta
+    # reivindicar um lote de linhas `pending` vencidas. 0 desliga, como nos
+    # outros dois. Nesta fase a tabela fica vazia em produção (nenhum call site
+    # real grava nela ainda), então o intervalo curto não tem custo — é o que
+    # os testes de retry/backoff exercitam.
+    email_outbox_interval_seconds: int = 30
+    # Tamanho do lote por rodada de `FOR UPDATE SKIP LOCKED`. Pequeno de
+    # propósito: o volume atual é de poucas dezenas de e-mails em voo, e um
+    # lote grande só prende mais linhas por mais tempo atrás de um SMTP lento.
+    email_outbox_batch_size: int = 10
+    # Quanto tempo uma linha pode ficar `processing` antes de ser considerada
+    # abandonada por um worker morto e liberada de volta para `pending`.
+    email_outbox_stale_processing_minutes: int = 5
+
     # Logging
     log_level: str = "INFO"
     log_dir: str = "./logs"

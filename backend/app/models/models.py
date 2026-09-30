@@ -23,6 +23,7 @@ from sqlalchemy import (
     String,
     Table,
     Text,
+    text,
 )
 from sqlalchemy.dialects.postgresql import ARRAY, JSONB, UUID
 from sqlalchemy.orm import DeclarativeBase, Mapped, mapped_column, relationship
@@ -1168,6 +1169,92 @@ class Notification(Base):
     __table_args__ = (
         Index("ix_notifications_user_read", "user_id", "read"),
         Index("ix_notifications_user_created", "user_id", "created_at"),
+    )
+
+
+class EmailOutbox(Base):
+    """Fila durável de e-mail — Fase 3A. Uma linha é uma PROMESSA de envio, não
+
+    o envio em si: o worker é quem tenta, registra o desfecho e decide se tenta
+    de novo.
+
+    Por que não guarda destinatário, assunto ou corpo
+    ---------------------------------------------------
+    Toda notificação passível de e-mail já nasce como `Notification`, e essa
+    linha já carrega tudo que o envio precisa: `user_id` (→ `users.email`),
+    `title`/`message`/`data` (→ assunto e corpo, reconstruídos em tempo de
+    envio pelas mesmas funções que hoje montam o e-mail síncrono). Duplicar
+    qualquer um desses campos aqui criaria uma SEGUNDA cópia de dado pessoal —
+    endereço, e possivelmente o título de um chamado escrito pelo cliente —
+    numa tabela nova, sem necessidade: a auditoria da Fase 3 mediu que os
+    ~20 pontos de disparo hoje convergem em duas funções (`notify`,
+    `notifica_audiencia`), e todos os campos que ELAS recebem já são persistidos
+    em `notifications` primeiro. Esta tabela guarda só ESTADO OPERACIONAL:
+    quantas vezes tentou, quando tenta de novo, quem está com a linha na mão.
+
+    `notification_id` é UNIQUE de propósito: no máximo uma linha de outbox por
+    notificação, sempre. Isso é a primeira camada de deduplicação — a segunda é
+    o `FOR UPDATE SKIP LOCKED` do worker, contra dois processos pegando a MESMA
+    linha já existente.
+
+    Garantia é at-least-once, não exactly-once
+    -------------------------------------------
+    Existe uma janela inevitável entre o servidor SMTP aceitar a mensagem e
+    este processo persistir `status=sent`: se o processo morrer exatamente
+    nesse intervalo, o e-mail SAIU mas a linha continua `processing`, e a
+    recuperação de linha travada (ver `app/services/email_outbox.py`) vai
+    reenviá-lo. Não há como fechar essa janela sem um protocolo de confirmação
+    do lado do provedor SMTP que este sistema não tem — então a garantia real e
+    documentada é "pelo menos uma vez", nunca "exatamente uma vez".
+    """
+
+    __tablename__ = "email_outbox"
+
+    id: Mapped[uuid.UUID] = mapped_column(UUID(as_uuid=True), primary_key=True, default=uuid.uuid4)
+    notification_id: Mapped[uuid.UUID] = mapped_column(
+        UUID(as_uuid=True), ForeignKey("notifications.id", ondelete="CASCADE"), nullable=False
+    )
+    # String + CHECK, não enum nativo — mesma convenção (e mesmo motivo) de
+    # `SlaAlertEvent.alert_kind`: acrescentar um estado novo não pode exigir
+    # `ALTER TYPE` numa cadeia de migrations que roda inteira numa transação.
+    status: Mapped[str] = mapped_column(String(20), nullable=False, default="pending")
+    attempts: Mapped[int] = mapped_column(Integer, nullable=False, default=0)
+    next_attempt_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False)
+    # Preenchidos só enquanto status=processing; None em qualquer outro estado.
+    locked_by: Mapped[str | None] = mapped_column(String(120), nullable=True)
+    locked_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
+    # Mesma disciplina de `_resumo_do_erro`: classe da exceção + código SMTP
+    # numérico quando existir. NUNCA a mensagem crua do servidor nem o
+    # destinatário — ver `app/services/email.py`.
+    last_error: Mapped[str | None] = mapped_column(Text, nullable=True)
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now())
+    sent_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
+
+    # Sem back_populates de propósito: `Notification` não precisa navegar até a
+    # sua outbox nesta fase. A relação existe principalmente para o unit of
+    # work do SQLAlchemy — sem ela, gravar `Notification` + `EmailOutbox` no
+    # MESMO flush (o que a Fase 3B faz) não tem como saber que o INSERT de
+    # `email_outbox` precisa vir DEPOIS do de `notifications`: a ordenação por
+    # dependência do SQLAlchemy é por `relationship()` mapeado, não pela FK
+    # crua da tabela. Medido: sem esta linha, os dois INSERTs às vezes saem na
+    # ordem errada e o `email_outbox_notification_id_fkey` rejeita.
+    notification: Mapped["Notification"] = relationship()
+
+    __table_args__ = (
+        Index("uq_email_outbox_notification_id", "notification_id", unique=True),
+        CheckConstraint(
+            "status IN ('pending', 'processing', 'sent', 'dead')",
+            name="ck_email_outbox_status_conhecido",
+        ),
+        # Índice parcial: é exatamente a consulta do hot path do worker
+        # (`status='pending' AND next_attempt_at <= now()`), e as linhas
+        # `sent`/`dead` — que tendem a ser a maioria com o tempo — nunca
+        # precisam entrar nele.
+        Index(
+            "ix_email_outbox_pending_next_attempt",
+            "next_attempt_at",
+            postgresql_where=text("status = 'pending'"),
+        ),
     )
 
 
