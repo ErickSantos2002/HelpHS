@@ -194,10 +194,13 @@ def test_migration_upgrade_downgrade_upgrade():
 
     padrão de `test_email_outbox_postgres.py::test_migration_upgrade_downgrade_upgrade`.
     """
-    try:
-        import pgserver
-    except ImportError:
-        pytest.skip("pgserver não instalado")
+    # `importorskip`, e não `try/import/except ImportError: skip`: o CodeQL
+    # (`py/uninitialized-local-variable`) não sabe que `pytest.skip()`
+    # interrompe o fluxo, então enxergava um caminho em que `pgserver` chegava
+    # desvinculado à linha de baixo — alerta de severidade `error` no PR #69.
+    # `importorskip` devolve o módulo ou aborta o teste, e não deixa esse
+    # caminho existir.
+    pgserver = pytest.importorskip("pgserver", reason="pgserver não instalado")
 
     pasta = tempfile.mkdtemp(prefix="helphs-testes-pg-migration-3c-")
     servidor = pgserver.get_server(pasta, cleanup_mode=None)
