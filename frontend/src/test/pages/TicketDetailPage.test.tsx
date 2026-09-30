@@ -1726,3 +1726,160 @@ describe("TicketDetailPage — orientação do Webphone", () => {
     expect(ticketService.createTicketCall).toHaveBeenCalledTimes(1);
   });
 });
+
+// ── O motivo público da recusa (2C.6b) ────────────────────────
+
+describe("TicketDetailPage — recusa com motivo", () => {
+  beforeEach(() => {
+    papelDoUsuario = "technician";
+    vi.mocked(toast.error).mockClear();
+    vi.mocked(toast.success).mockClear();
+    vi.mocked(ticketService.createTicketCall).mockReset();
+    // A orientação da 2C.6a tem seção própria; aqui medimos o DESFECHO.
+    sessionStorage.setItem(CHAVE_WEBPHONE_ORIENTADO, "1");
+  });
+
+  const ligar = () => screen.getByRole("button", { name: /Ligar para cliente/ });
+
+  const recusaCom = (reason?: string | null) =>
+    vi.mocked(ticketService.createTicketCall).mockResolvedValue({
+      id: "c1",
+      creation_status: "rejected",
+      created_at: new Date().toISOString(),
+      ...(reason === undefined ? {} : { reason }),
+    } as never);
+
+  it("webphone_unavailable vira conselho acionável", async () => {
+    recusaCom("webphone_unavailable");
+    await montar();
+    fireEvent.click(ligar());
+
+    await waitFor(() =>
+      expect(toast.error).toHaveBeenCalledWith("Webphone API4COM não está conectado.", {
+        description:
+          "Abra a extensão Webphone API4COM, aguarde o ramal ficar online e tente novamente.",
+      }),
+    );
+  });
+
+  it("a mensagem NÃO mostra jargão técnico do fornecedor", async () => {
+    // O técnico precisa saber o que FAZER, não qual código HTTP voltou.
+    recusaCom("webphone_unavailable");
+    await montar();
+    fireEvent.click(ligar());
+    await waitFor(() => expect(toast.error).toHaveBeenCalled());
+
+    const dito = JSON.stringify(vi.mocked(toast.error).mock.calls);
+    for (const jargao of ["424", "SIP", "provider", "extension", "1019", "webphone_unavailable"]) {
+      expect(dito).not.toContain(jargao);
+    }
+  });
+
+  it("rejected SEM motivo continua na mensagem genérica", async () => {
+    // Token caído, cota estourada, número inválido: nada disso é webphone.
+    recusaCom(null);
+    await montar();
+    fireEvent.click(ligar());
+
+    await waitFor(() =>
+      expect(toast.error).toHaveBeenCalledWith("Não foi possível iniciar a ligação."),
+    );
+  });
+
+  it("backend ANTIGO, sem o campo, continua funcionando", async () => {
+    // Deploy desacoplado: front novo contra backend que ainda não manda
+    // `reason`. Sem isto, a tela mostraria "undefined" ou quebraria.
+    recusaCom(undefined);
+    await montar();
+    fireEvent.click(ligar());
+
+    await waitFor(() =>
+      expect(toast.error).toHaveBeenCalledWith("Não foi possível iniciar a ligação."),
+    );
+  });
+
+  it("motivo DESCONHECIDO cai no genérico, não vaza para a tela", async () => {
+    // Um backend mais novo que esta versão do front. O valor cru não pode
+    // aparecer como mensagem.
+    recusaCom("algum_motivo_que_esta_versao_nao_conhece");
+    await montar();
+    fireEvent.click(ligar());
+
+    await waitFor(() =>
+      expect(toast.error).toHaveBeenCalledWith("Não foi possível iniciar a ligação."),
+    );
+    const dito = JSON.stringify(vi.mocked(toast.error).mock.calls);
+    expect(dito).not.toContain("algum_motivo_que_esta_versao_nao_conhece");
+  });
+
+  it("confirmed ignora o motivo e continua sucesso", async () => {
+    vi.mocked(ticketService.createTicketCall).mockResolvedValue({
+      id: "c1",
+      creation_status: "confirmed",
+      created_at: new Date().toISOString(),
+      reason: null,
+    } as never);
+    await montar();
+    fireEvent.click(ligar());
+
+    await waitFor(() =>
+      expect(toast.success).toHaveBeenCalledWith("Ligação iniciada com sucesso."),
+    );
+  });
+
+  it("unavailable mantém a mensagem atual", async () => {
+    vi.mocked(ticketService.createTicketCall).mockResolvedValue({
+      id: "c1",
+      creation_status: "unavailable",
+      created_at: new Date().toISOString(),
+    } as never);
+    await montar();
+    fireEvent.click(ligar());
+
+    await waitFor(() =>
+      expect(toast.error).toHaveBeenCalledWith(
+        "Serviço de telefonia indisponível no momento.",
+      ),
+    );
+  });
+
+  it("indeterminate mantém o aviso de não repetir", async () => {
+    vi.mocked(ticketService.createTicketCall).mockResolvedValue({
+      id: "c1",
+      creation_status: "indeterminate",
+      created_at: new Date().toISOString(),
+    } as never);
+    await montar();
+    fireEvent.click(ligar());
+
+    await waitFor(() =>
+      expect(toast.error).toHaveBeenCalledWith(
+        "Não foi possível confirmar o resultado da ligação.",
+        { description: "Não tente novamente imediatamente." },
+      ),
+    );
+  });
+
+  it("a recusa por webphone NÃO dispara nova tentativa sozinha", async () => {
+    // O conselho é para a pessoa agir, não para o sistema repetir.
+    recusaCom("webphone_unavailable");
+    await montar();
+    fireEvent.click(ligar());
+    await waitFor(() => expect(toast.error).toHaveBeenCalled());
+
+    await new Promise((r) => setTimeout(r, 50));
+    expect(ticketService.createTicketCall).toHaveBeenCalledTimes(1);
+  });
+
+  it("a orientação da 2C.6a continua valendo numa sessão nova", async () => {
+    // As duas fases se complementam: uma orienta antes, a outra explica
+    // depois. Esta não pode ter apagado aquela.
+    sessionStorage.removeItem(CHAVE_WEBPHONE_ORIENTADO);
+    recusaCom("webphone_unavailable");
+    await montar();
+    fireEvent.click(ligar());
+
+    expect(await screen.findByRole("dialog")).toBeInTheDocument();
+    expect(ticketService.createTicketCall).not.toHaveBeenCalled();
+  });
+});
