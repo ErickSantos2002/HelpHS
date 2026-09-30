@@ -1336,7 +1336,21 @@ export default function TicketDetailPage() {
       if (tentativa.creation_status === "confirmed") {
         toast.success("Ligação iniciada com sucesso.");
       } else if (tentativa.creation_status === "rejected") {
-        toast.error("Não foi possível iniciar a ligação.");
+        // O fornecedor recusou. Quando ele diz POR QUE, e o HelpHS sabe
+        // traduzir num conselho acionável, a tela conta — senão, fica na
+        // mensagem genérica.
+        //
+        // A comparação é com o motivo que ESTA versão conhece: um `reason`
+        // desconhecido, vindo de um backend mais novo, cai no genérico em vez
+        // de virar texto vazio ou o código cru na tela.
+        if (tentativa.reason === "webphone_unavailable") {
+          toast.error("Webphone API4COM não está conectado.", {
+            description:
+              "Abra a extensão Webphone API4COM, aguarde o ramal ficar online e tente novamente.",
+          });
+        } else {
+          toast.error("Não foi possível iniciar a ligação.");
+        }
       } else if (tentativa.creation_status === "unavailable") {
         toast.error("Serviço de telefonia indisponível no momento.");
       } else {

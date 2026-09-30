@@ -391,10 +391,32 @@ export type TicketCallCreationStatus =
  * `extension`, metadata nem corpo do fornecedor: o backend não os devolve, e
  * declarar campo que não chega convidaria alguém a lê-lo.
  */
+/**
+ * Por que uma recusa aconteceu, quando o HelpHS sabe explicar.
+ *
+ * Vocabulário do HELPHS, não da API4COM: a tela aprende "o webphone não está
+ * registrado", nunca o número HTTP que o fornecedor devolveu. Trocar de
+ * fornecedor não deve obrigar a reescrever mensagem de tela.
+ *
+ * Tem um valor só, e é deliberado: a API4COM confirmou por escrito que o
+ * código por trás deste motivo significa **ramal do operador offline ou
+ * indisponível** — webphone fechado, desconectado, deslogado ou não
+ * registrado. Os outros erros continuam sem explicação publicável: inventar
+ * rótulo para eles seria mandar o técnico abrir uma extensão que já está
+ * aberta enquanto o problema real segue lá.
+ */
+export type TicketCallReason = "webphone_unavailable";
+
 export interface TicketCall {
   id: string;
   creation_status: TicketCallCreationStatus;
   created_at: string;
+  /**
+   * Opcional de propósito, e em dois sentidos: a maioria das recusas não tem
+   * motivo publicável, e um frontend novo precisa continuar funcionando
+   * contra um backend antigo que ainda não manda o campo.
+   */
+  reason?: TicketCallReason | null;
 }
 
 /**

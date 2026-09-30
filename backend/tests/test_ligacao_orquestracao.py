@@ -852,9 +852,11 @@ def test_o_corpo_valido_e_vazio():
 
 
 def test_a_resposta_nao_leva_dado_do_fornecedor():
+    """⚠️ `reason` entrou na Fase 2C.6b — nome do HelpHS, não número do
+    fornecedor. `provider_http_status` segue proibido."""
     from app.schemas.telefonia import TicketCallResponse
 
     campos = set(TicketCallResponse.model_fields)
-    assert campos == {"id", "creation_status", "created_at"}
+    assert campos == {"id", "creation_status", "created_at", "reason"}
     for proibido in ("provider_call_id", "provider_http_status", "phone", "caller", "extension"):
         assert proibido not in campos

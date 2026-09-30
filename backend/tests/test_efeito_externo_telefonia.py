@@ -484,10 +484,17 @@ async def test_nenhum_socket_http_e_aberto(redis_falso, liga):
 
 
 def test_a_resposta_publica_nao_leva_nada_do_fornecedor():
+    """O conjunto EXATO de campos públicos, e a lista do que nunca pode entrar.
+
+    ⚠️ `reason` entrou em 30/09 (Fase 2C.6b) e NÃO é exceção à regra: ele é
+    vocabulário do HelpHS (`webphone_unavailable`), derivado do status do
+    fornecedor e nunca igual a ele. O número do HTTP continua proibido logo
+    abaixo — é isso que separa "traduzir" de "vazar".
+    """
     from app.schemas.telefonia import TicketCallResponse
 
     campos = set(TicketCallResponse.model_fields)
-    assert campos == {"id", "creation_status", "created_at"}
+    assert campos == {"id", "creation_status", "created_at", "reason"}
     for proibido in (
         "provider_call_id",
         "provider_http_status",
@@ -574,12 +581,18 @@ async def test_a_rota_devolve_o_minimo_e_nada_do_fornecedor(redis_falso, liga, _
 
     assert resposta.status_code == 201, resposta.text
     corpo = resposta.json()
-    assert set(corpo) == {"id", "creation_status", "created_at"}
+    # ⚠️ `reason` entrou na Fase 2C.6b. Aqui ele vem NULO, e isso é o ponto:
+    # sucesso não tem motivo de recusa para explicar.
+    assert set(corpo) == {"id", "creation_status", "created_at", "reason"}
     assert corpo["creation_status"] == "confirmed"
+    assert corpo["reason"] is None
     # E o identificador do fornecedor não aparece em lugar nenhum do corpo.
     assert _ID_DO_FORNECEDOR not in resposta.text
     assert _TELEFONE not in resposta.text
     assert _RAMAL not in resposta.text
+    # Nem o número do HTTP do fornecedor, que é o que `reason` TRADUZ.
+    assert "424" not in resposta.text
+    assert "provider_http_status" not in resposta.text
 
 
 @pytest.mark.asyncio
@@ -632,3 +645,197 @@ async def test_resultado_indeterminado_ainda_devolve_201(redis_falso, liga, _lim
 
     assert resposta.status_code == 201, resposta.text
     assert resposta.json()["creation_status"] == "indeterminate"
+
+
+# ── O motivo público da recusa (2C.6b) ───────────────────────
+#
+# A API4COM confirmou por escrito: ramal não registrado no SIP devolve
+# HTTP 424. É a ÚNICA correspondência documentada, e por isso é a única que
+# vira explicação na tela. Qualquer outro 4xx continua sem motivo — inventar
+# rótulo seria publicar hipótese para quem atende.
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("liga", [{"side_effect": Api4ComRecusadaError(424)}], indirect=True)
+async def test_424_vira_motivo_de_webphone_indisponivel(redis_falso, liga, _limpa_overrides):
+    """O caso da fase, medido ponta a ponta pela rota."""
+    t, s = _monta()
+    async with _cliente_http(_ator(), s) as http:
+        resposta = await http.post(f"/api/v1/tickets/{t.id}/calls", json={})
+
+    assert resposta.status_code == 201, resposta.text
+    corpo = resposta.json()
+    assert corpo["creation_status"] == "rejected"
+    assert corpo["reason"] == "webphone_unavailable"
+    # O número do fornecedor NÃO viaja — é ele que o motivo traduz.
+    assert "424" not in resposta.text
+    assert "provider_http_status" not in resposta.text
+    assert "SIP" not in resposta.text
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("liga", [{"side_effect": Api4ComRecusadaError(424)}], indirect=True)
+async def test_424_continua_sendo_uma_tentativa_de_verdade(redis_falso, liga):
+    """Motivo público não muda o que a tentativa É: linha, estado e histórico.
+
+    Sem `provider_call_id`, porque nada foi criado do lado de lá.
+    """
+    from app.models.models import TicketHistory
+
+    t, s = _monta()
+    tentativa = await _liga_para(s, ticket=t)
+
+    assert tentativa.creation_status == CallCreationStatus.rejected.value
+    assert tentativa.provider_http_status == 424
+    assert tentativa.provider_call_id is None
+    eventos = [o for o in s.adicionados if isinstance(o, TicketHistory)]
+    assert len(eventos) == 1
+    assert eventos[0].field == "ligacao"
+    assert eventos[0].new_value == "tentativa"
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("liga", [{"side_effect": Api4ComRecusadaError(424)}], indirect=True)
+async def test_o_historico_do_424_nao_conta_o_motivo_tecnico(redis_falso, liga):
+    """ "Webphone offline", "424" e "SIP" não entram no histórico do chamado.
+
+    O histórico é lido pelo cliente. A razão técnica serve ao técnico, no
+    toast — não ao registro permanente do chamado.
+    """
+    from app.models.models import TicketHistory
+
+    t, s = _monta()
+    await _liga_para(s, ticket=t)
+
+    eventos = [o for o in s.adicionados if isinstance(o, TicketHistory)]
+    texto = "".join(
+        f"{e.field}{e.old_value}{e.new_value}{getattr(e, 'comment', None)}" for e in eventos
+    )
+    for proibido in ("424", "webphone", "Webphone", "SIP", "sip", "registrad", "offline"):
+        assert proibido not in texto
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize(
+    "liga",
+    [
+        {"side_effect": Api4ComRecusadaError(400)},
+        {"side_effect": Api4ComRecusadaError(401)},
+        {"side_effect": Api4ComRecusadaError(403)},
+        {"side_effect": Api4ComRecusadaError(404)},
+        {"side_effect": Api4ComRecusadaError(422)},
+        {"side_effect": Api4ComRecusadaError(429)},
+    ],
+    indirect=True,
+)
+async def test_outros_4xx_nao_viram_problema_de_webphone(redis_falso, liga, _limpa_overrides):
+    """Token caído, cota estourada e número inválido NÃO são webphone offline.
+
+    Este é o caso que impede a fase de virar "todo erro é culpa do webphone",
+    que seria pior que a mensagem genérica: mandaria o técnico abrir uma
+    extensão que já está aberta enquanto o token expirado segue expirado.
+    """
+    t, s = _monta()
+    async with _cliente_http(_ator(), s) as http:
+        resposta = await http.post(f"/api/v1/tickets/{t.id}/calls", json={})
+
+    assert resposta.status_code == 201, resposta.text
+    corpo = resposta.json()
+    assert corpo["creation_status"] == "rejected"
+    assert corpo["reason"] is None, "só o 424 vira motivo público"
+
+
+@pytest.mark.asyncio
+async def test_sucesso_nao_tem_motivo(redis_falso, liga, _limpa_overrides):
+    t, s = _monta()
+    async with _cliente_http(_ator(), s) as http:
+        resposta = await http.post(f"/api/v1/tickets/{t.id}/calls", json={})
+
+    corpo = resposta.json()
+    assert corpo["creation_status"] == "confirmed"
+    assert corpo["reason"] is None
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize(
+    "liga",
+    [{"side_effect": Api4ComResultadoIndeterminadoError("timeout")}],
+    indirect=True,
+)
+async def test_indeterminate_nao_tem_motivo(redis_falso, liga, _limpa_overrides):
+    """O estado mais perigoso não ganha explicação que não existe."""
+    t, s = _monta()
+    async with _cliente_http(_ator(), s) as http:
+        resposta = await http.post(f"/api/v1/tickets/{t.id}/calls", json={})
+
+    corpo = resposta.json()
+    assert corpo["creation_status"] == "indeterminate"
+    assert corpo["reason"] is None
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("liga", [{"side_effect": Api4ComIndisponivelError()}], indirect=True)
+async def test_unavailable_nao_tem_motivo(redis_falso, liga, _limpa_overrides):
+    t, s = _monta()
+    async with _cliente_http(_ator(), s) as http:
+        resposta = await http.post(f"/api/v1/tickets/{t.id}/calls", json={})
+
+    corpo = resposta.json()
+    assert corpo["creation_status"] == "unavailable"
+    assert corpo["reason"] is None
+
+
+def test_o_vocabulario_publico_e_do_helphs_e_nao_do_fornecedor():
+    """Sentinela: nenhum valor público pode ser o número do fornecedor.
+
+    Se alguém um dia acrescentar `"424"` como motivo, ou nomear um motivo com
+    o código HTTP dentro, é aqui que aparece.
+    """
+    from app.schemas.telefonia import MotivoPublicoDaRecusa
+
+    for motivo in MotivoPublicoDaRecusa:
+        assert not motivo.value.isdigit()
+        assert "424" not in motivo.value
+        assert "http" not in motivo.value.lower()
+
+
+def test_a_traducao_do_codigo_mora_num_lugar_so():
+    """`424` não pode virar `if` espalhado pelo sistema.
+
+    O mapa é um dicionário no schema; o resto do código fala de `reason`.
+
+    ⚠️ Olha o CÓDIGO, não o texto: `ligacao.py` cita 424 em comentários que
+    contam a história da primeira ligação real, e comentário não decide nada.
+    O que esta sentinela proíbe é o número aparecer numa expressão — um
+    `== 424`, um `in (424,)`, um literal dentro de condição.
+    """
+    import ast
+    import inspect
+
+    from app.routers import tickets
+    from app.schemas import telefonia
+    from app.services import api4com, ligacao
+
+    assert "424" in inspect.getsource(telefonia), "o mapa tem de estar aqui"
+
+    def literais_424(modulo) -> list[int]:
+        arvore = ast.parse(inspect.getsource(modulo))
+        return [
+            no.value for no in ast.walk(arvore) if isinstance(no, ast.Constant) and no.value == 424
+        ]
+
+    for modulo in (api4com, ligacao):
+        assert not literais_424(modulo), f"{modulo.__name__} não pode decidir isso"
+    assert "424" not in inspect.getsource(tickets.iniciar_ligacao)
+
+
+def test_o_motivo_so_vale_para_recusa():
+    """Um número de fornecedor guardado noutro estado não explica nada."""
+    from app.schemas.telefonia import motivo_publico
+
+    assert motivo_publico("rejected", 424) is not None
+    assert motivo_publico("confirmed", 424) is None
+    assert motivo_publico("indeterminate", 424) is None
+    assert motivo_publico("dispatching", 424) is None
+    assert motivo_publico("rejected", None) is None
+    assert motivo_publico("rejected", 401) is None
