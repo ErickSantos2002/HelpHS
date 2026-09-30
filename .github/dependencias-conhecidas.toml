@@ -379,50 +379,6 @@ responsavel = "TI/Dev"
 data = "2026-09-02"
 
 [[frontend]]
-pacote = "brace-expansion"
-advisory = "GHSA-3jxr-9vmj-r5cp"
-severidade = "high"
-faixa = ">=3.0.0 <5.0.7"
-classe = "nao_aplicavel"
-motivo = "DoS por expansao de tempo exponencial em nao-expansiveis consecutivos. `npm ls --omit=dev brace-expansion` -> ausente: transitiva de ferramenta de build. Nao roda em producao nem no navegador."
-remover_quando = "brace-expansion entrar na arvore de producao"
-responsavel = "TI/Dev"
-data = "2026-09-02"
-
-[[frontend]]
-pacote = "brace-expansion"
-advisory = "GHSA-jxxr-4gwj-5jf2"
-severidade = "moderate"
-faixa = ">=5.0.0 <5.0.6"
-classe = "nao_aplicavel"
-motivo = "Range numerico grande derrota a protecao documentada de `max`. `npm ls --omit=dev brace-expansion` -> ausente: transitiva de ferramenta de build. Nao roda em producao nem no navegador."
-remover_quando = "brace-expansion entrar na arvore de producao"
-responsavel = "TI/Dev"
-data = "2026-09-02"
-
-[[frontend]]
-pacote = "brace-expansion"
-advisory = "GHSA-mh99-v99m-4gvg"
-severidade = "high"
-faixa = ">=4.0.0 <5.0.8"
-classe = "nao_aplicavel"
-motivo = "DoS por expansao sem limite de tamanho, ate estourar memoria. `npm ls --omit=dev brace-expansion` -> ausente: transitiva de ferramenta de build. Nao roda em producao nem no navegador."
-remover_quando = "brace-expansion entrar na arvore de producao"
-responsavel = "TI/Dev"
-data = "2026-09-02"
-
-[[frontend]]
-pacote = "brace-expansion"
-advisory = "GHSA-rgw5-rvv9-x895"
-severidade = "high"
-faixa = "<1.1.18"
-classe = "nao_aplicavel"
-motivo = "DoS por arrays intermediarios sem limite, furando a correcao anterior. `npm ls --omit=dev brace-expansion` -> ausente: transitiva de ferramenta de build. Nao roda em producao nem no navegador."
-remover_quando = "brace-expansion entrar na arvore de producao"
-responsavel = "TI/Dev"
-data = "2026-09-02"
-
-[[frontend]]
 pacote = "browserslist"
 advisory = "GHSA-73wf-gq98-2v4g"
 severidade = "high"
