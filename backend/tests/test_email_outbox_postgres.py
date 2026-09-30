@@ -1170,7 +1170,15 @@ def test_migration_upgrade_downgrade_upgrade():
 
         assert asyncio.run(_tem_tabela()) is True
 
-        _roda("downgrade", "-1")
+        # Alvo pela REVISION anterior a `ae3cf7068dd6` (a migration desta
+        # fase), não por `-1`: `-1` é relativo ao head atual, e a Fase 3C
+        # empilhou uma migration em cima (`c8b8d6994fae`) que só ALTERA a
+        # tabela — não a cria. Descer só um passo relativo, hoje, reverteria
+        # a 3C e deixaria a tabela inteira de pé, o que não prova nada sobre
+        # esta migration. Descer até o revision explícito derruba as duas —
+        # 3C depende de 3A — e é o que de fato prova que ESTA migration cria
+        # a tabela (e a remove, de volta).
+        _roda("downgrade", "f7a8b9c0d1e2")
         assert asyncio.run(_tem_tabela()) is False
 
         _roda("upgrade", "head")
