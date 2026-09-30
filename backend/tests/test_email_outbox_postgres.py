@@ -462,6 +462,10 @@ async def test_sucesso_marca_sent_com_sent_at(db, db_factory):
     assert atualizado.locked_by is None
     assert atualizado.locked_at is None
 
+    notif_atualizada = await db.get(Notification, notif.id)
+    await db.refresh(notif_atualizada)
+    assert notif_atualizada.email_sent is True, "sent + email_sent precisam ser consistentes"
+
     await _limpa(db, user)
 
 
@@ -490,6 +494,10 @@ async def test_falha_temporaria_volta_a_pending_com_backoff_e_attempts(db, db_fa
     assert atualizado.last_error == "SMTPServerDisconnected"
     assert atualizado.locked_by is None
 
+    notif_atualizada = await db.get(Notification, notif.id)
+    await db.refresh(notif_atualizada)
+    assert notif_atualizada.email_sent is False, "falha temporária não marca como enviado"
+
     await _limpa(db, user)
 
 
@@ -514,6 +522,10 @@ async def test_quinta_falha_vai_para_dead(db, db_factory):
     await db.refresh(atualizado)
     assert atualizado.status == "dead"
     assert atualizado.attempts == 5
+
+    notif_atualizada = await db.get(Notification, notif.id)
+    await db.refresh(notif_atualizada)
+    assert notif_atualizada.email_sent is False, "dead não marca como enviado"
 
     await _limpa(db, user)
 

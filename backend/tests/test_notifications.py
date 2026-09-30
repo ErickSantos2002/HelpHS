@@ -971,6 +971,27 @@ def test_chamado_novo_manda_email_para_todos_os_papeis(papel):
     assert _pode_mandar_email(NotificationType.ticket_created, papel) is True
 
 
+def test_sem_destinatario_nao_enfileira_mesmo_com_tudo_mais_liberado():
+    """`to_email` vazio barra o enfileiramento mesmo quando tipo e papel
+
+    liberariam e-mail — cobre o `notify()` que encontrou o destinatário (a
+    tupla não é `None`) mas o e-mail veio vazio, caso distinto de
+    "destinatário sumiu" (que `notify()` já intercepta antes de chegar aqui)."""
+    from app.core.config import get_settings
+    from app.services.notifications import _deve_enfileirar_email
+
+    assert (
+        _deve_enfileirar_email(NotificationType.ticket_updated, UserRole.client, "", get_settings())
+        is False
+    )
+    assert (
+        _deve_enfileirar_email(
+            NotificationType.ticket_updated, UserRole.client, None, get_settings()
+        )
+        is False
+    )
+
+
 @pytest.mark.parametrize("papel", [UserRole.technician, UserRole.admin])
 @pytest.mark.parametrize(
     "tipo",
