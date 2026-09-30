@@ -25,8 +25,10 @@ O que fica provado aqui
 6. não há N+1: uma consulta de `sla_configs` e uma de `users` por rodada,
    independentemente de quantos chamados entram na faixa.
 
-Nenhum e-mail é enviado: `_disparar` é substituído em todos os testes que
-chegam a commitar, e há contraprova disso no fim do arquivo.
+Nenhum e-mail sai de verdade: desde a Fase 3B, `notifica_audiencia` só cria a
+linha da `EmailOutbox` — quem manda SMTP é o worker da outbox, em outro
+processo/ciclo, que nenhum destes testes executa. Não há mais nada aqui para
+interceptar. Contraprova disso no fim do arquivo.
 """
 
 import shutil
@@ -436,9 +438,8 @@ async def test_a_rodada_avisa_uma_vez_e_a_seguinte_nao_repete(db):
     (ticket,) = await _monta_cenario(db)
     agora = _instante(ticket, 85)
 
-    with patch.object(servico_notificacoes, "_disparar"):
-        primeira = await avisa_sla_proximo(db, _settings_sem_smtp(), agora)
-        segunda = await avisa_sla_proximo(db, _settings_sem_smtp(), agora)
+    primeira = await avisa_sla_proximo(db, _settings_sem_smtp(), agora)
+    segunda = await avisa_sla_proximo(db, _settings_sem_smtp(), agora)
 
     assert primeira == 1
     assert segunda == 0
@@ -453,18 +454,17 @@ async def test_a_extensao_habilita_um_aviso_novo(db):
     (ticket,) = await _monta_cenario(db)
     agora = _instante(ticket, 85)
 
-    with patch.object(servico_notificacoes, "_disparar"):
-        assert await avisa_sla_proximo(db, _settings_sem_smtp(), agora) == 1
+    assert await avisa_sla_proximo(db, _settings_sem_smtp(), agora) == 1
 
-        # +30 min úteis: o prazo muda, e um instante mais adiante volta à faixa.
-        ticket.sla_resolve_extension_total_min = 30
-        from app.utils.sla import atualiza_prazo_efetivo
+    # +30 min úteis: o prazo muda, e um instante mais adiante volta à faixa.
+    ticket.sla_resolve_extension_total_min = 30
+    from app.utils.sla import atualiza_prazo_efetivo
 
-        atualiza_prazo_efetivo(ticket)
-        await db.flush()
+    atualiza_prazo_efetivo(ticket)
+    await db.flush()
 
-        depois = _instante(ticket, 90)
-        assert await avisa_sla_proximo(db, _settings_sem_smtp(), depois) == 1
+    depois = _instante(ticket, 90)
+    assert await avisa_sla_proximo(db, _settings_sem_smtp(), depois) == 1
 
     assert await _conta_eventos(db, ticket) == 2
 
@@ -476,23 +476,22 @@ async def test_a_reabertura_habilita_um_aviso_novo(db):
     (ticket,) = await _monta_cenario(db)
     agora = _instante(ticket, 85)
 
-    with patch.object(servico_notificacoes, "_disparar"):
-        assert await avisa_sla_proximo(db, _settings_sem_smtp(), agora) == 1
+    assert await avisa_sla_proximo(db, _settings_sem_smtp(), agora) == 1
 
-        from app.utils.sla import atualiza_prazo_efetivo
+    from app.utils.sla import atualiza_prazo_efetivo
 
-        reabertura = agora + timedelta(minutes=5)
-        ticket.status = TicketStatus.in_progress
-        ticket.sla_resolve_due_at = add_business_minutes(reabertura, 540)
-        ticket.sla_resolve_breach = False
-        ticket.sla_total_paused_ms = 0
-        ticket.sla_resolve_extension_total_min = 0
-        ticket.reopen_count = 1
-        atualiza_prazo_efetivo(ticket)
-        await db.flush()
+    reabertura = agora + timedelta(minutes=5)
+    ticket.status = TicketStatus.in_progress
+    ticket.sla_resolve_due_at = add_business_minutes(reabertura, 540)
+    ticket.sla_resolve_breach = False
+    ticket.sla_total_paused_ms = 0
+    ticket.sla_resolve_extension_total_min = 0
+    ticket.reopen_count = 1
+    atualiza_prazo_efetivo(ticket)
+    await db.flush()
 
-        # O ciclo novo conta da abertura ORIGINAL para o total, como o motor faz.
-        assert await avisa_sla_proximo(db, _settings_sem_smtp(), _instante(ticket, 95)) == 1
+    # O ciclo novo conta da abertura ORIGINAL para o total, como o motor faz.
+    assert await avisa_sla_proximo(db, _settings_sem_smtp(), _instante(ticket, 95)) == 1
 
     assert await _conta_eventos(db, ticket) == 2
 
@@ -502,15 +501,14 @@ async def test_mudar_o_limiar_habilita_um_aviso_novo(db):
     (ticket,) = await _monta_cenario(db, threshold=90)
     agora = _instante(ticket, 92)
 
-    with patch.object(servico_notificacoes, "_disparar"):
-        assert await avisa_sla_proximo(db, _settings_sem_smtp(), agora) == 1
+    assert await avisa_sla_proximo(db, _settings_sem_smtp(), agora) == 1
 
-        config = (await db.execute(select(SLAConfig))).scalars().first()
-        assert config is not None
-        config.warning_threshold = 70
-        await db.flush()
+    config = (await db.execute(select(SLAConfig))).scalars().first()
+    assert config is not None
+    config.warning_threshold = 70
+    await db.flush()
 
-        assert await avisa_sla_proximo(db, _settings_sem_smtp(), agora) == 1
+    assert await avisa_sla_proximo(db, _settings_sem_smtp(), agora) == 1
 
     assert await _conta_eventos(db, ticket) == 2
 
@@ -603,8 +601,7 @@ async def test_rollback_na_notificacao_nao_deixa_evento_orfao(db):
     assert await _conta_eventos(db, ticket) == 0
 
     # E a rodada seguinte, agora sem o defeito, avisa normalmente.
-    with patch.object(servico_notificacoes, "_disparar"):
-        assert await avisa_sla_proximo(db, settings, agora) == 1
+    assert await avisa_sla_proximo(db, settings, agora) == 1
     assert await _conta_eventos(db, ticket) == 1
 
 
@@ -627,8 +624,7 @@ async def test_todos_os_tecnicos_e_admins_ativos_recebem_e_mais_ninguem(db):
     db.add(ticket)
     await db.flush()
 
-    with patch.object(servico_notificacoes, "_disparar"):
-        assert await avisa_sla_proximo(db, _settings_sem_smtp(), _instante(ticket, 85)) == 1
+    assert await avisa_sla_proximo(db, _settings_sem_smtp(), _instante(ticket, 85)) == 1
 
     avisados = {n.user_id for n in await _notificacoes(db, ticket)}
 
@@ -642,8 +638,7 @@ async def test_todos_os_tecnicos_e_admins_ativos_recebem_e_mais_ninguem(db):
 async def test_o_data_da_notificacao_permite_navegar(db):
     (ticket,) = await _monta_cenario(db)
 
-    with patch.object(servico_notificacoes, "_disparar"):
-        await avisa_sla_proximo(db, _settings_sem_smtp(), _instante(ticket, 85))
+    await avisa_sla_proximo(db, _settings_sem_smtp(), _instante(ticket, 85))
 
     notificacao = (await _notificacoes(db, ticket))[0]
     dados = notificacao.data or {}
@@ -658,19 +653,24 @@ async def test_o_data_da_notificacao_permite_navegar(db):
 
 @pytest.mark.asyncio
 async def test_o_assunto_do_email_nao_leva_o_titulo_do_chamado(db):
-    """O e-mail é registrado como pendência da sessão; aqui interceptamos o
-    disparo e lemos o que teria saído. Nenhum socket é aberto."""
+    """O e-mail nasce só como linha de `EmailOutbox` (Fase 3B) — nenhum
+
+    assunto/corpo é montado no enqueue. Aqui reconstruímos o assunto do jeito
+    que o worker da outbox reconstrói (`_assunto_do_email`, a partir de
+    `Notification.title`/`data`) e conferimos que ele não carrega o título do
+    chamado — mesma garantia que o `_EmailPendente` antigo dava, provada agora
+    contra o que fica persistido de fato.
+    """
     (ticket,) = await _monta_cenario(db)
-    disparados = []
+    await avisa_sla_proximo(db, _settings_sem_smtp(), _instante(ticket, 85))
 
-    with patch.object(servico_notificacoes, "_disparar", new=disparados.append):
-        await avisa_sla_proximo(db, _settings_sem_smtp(), _instante(ticket, 85))
-
-    assert len(disparados) == 2, "admin e técnico"
-    for pendente in disparados:
-        assert pendente.subject == f"[HelpHS] SLA próximo do vencimento — {ticket.protocol}"
-        assert ticket.title not in pendente.subject
-        assert ticket.title not in pendente.body
+    notificacoes = await _notificacoes(db, ticket)
+    assert len(notificacoes) == 2, "admin e técnico"
+    for notif in notificacoes:
+        assunto = servico_notificacoes._assunto_do_email(notif.title, notif.data)
+        assert assunto == f"[HelpHS] SLA próximo do vencimento — {ticket.protocol}"
+        assert ticket.title not in assunto
+        assert ticket.title not in notif.message
 
 
 # ══════════════════════════════════════════════════════════════
@@ -751,8 +751,7 @@ async def test_a_rodada_nao_faz_n_mais_um_de_config_nem_de_usuario(db):
 
     event.listen(bruta.sync_connection.engine, "before_cursor_execute", _grava)
     try:
-        with patch.object(servico_notificacoes, "_disparar"):
-            assert await avisa_sla_proximo(db, _settings_sem_smtp(), agora) == 3
+        assert await avisa_sla_proximo(db, _settings_sem_smtp(), agora) == 3
     finally:
         event.remove(bruta.sync_connection.engine, "before_cursor_execute", _grava)
 
@@ -836,8 +835,10 @@ async def test_a_listagem_devolve_nulo_para_chamado_sem_prioridade(db):
 
 
 def test_o_settings_destes_testes_nao_tem_smtp():
-    """Mesmo se alguém remover um `patch` de `_disparar`, `send_email` retorna no
-    primeiro `if` — não há credencial nem host neste arquivo."""
+    """Mesmo que algum worker de outbox rode contra este banco por acidente,
+
+    `send_email_detalhado` retorna no primeiro `if` — não há credencial nem
+    host neste arquivo."""
     settings = _settings_sem_smtp()
 
     assert settings.email_is_configured() is False

@@ -1,13 +1,13 @@
 """
-Outbox durável de e-mail — Fase 3A.
+Outbox durável de e-mail — Fase 3A (estrutura, worker) + Fase 3B (migração das
 
-Constrói a infraestrutura (tabela, enqueue, worker) sem migrar nenhum
-disparador real: `notifications.py` continua mandando e-mail do jeito que manda
-hoje (`commit_e_notificar` → `asyncio.create_task`, fire-and-forget), e os
-e-mails de conta/autenticação continuam via `BackgroundTasks`. A tabela
-`email_outbox` fica praticamente vazia em produção até a Fase 3B decidir migrar
-os call sites — aqui ela só precisa existir, funcionar, e estar coberta de
-teste.
+notificações operacionais).
+
+Desde a Fase 3B, `notifications.py` grava `Notification` + `EmailOutbox` na
+MESMA transação (via `enqueue_email`, chamado de dentro de `notify`/
+`notifica_audiencia`) — o antigo fire-and-forget (`commit_e_notificar` →
+`asyncio.create_task`) não existe mais. Os e-mails de conta/autenticação
+continuam via `BackgroundTasks`, fora desta outbox — ficam para a Fase 3C.
 
 Por que roda dentro da API, e não numa fila
 --------------------------------------------
@@ -54,7 +54,7 @@ from sqlalchemy import func, select, update
 from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker
 
 from app.core.config import Settings, get_settings
-from app.models.models import EmailOutbox, Notification, User
+from app.models.models import EmailOutbox, Notification, NotificationType, Ticket, User
 from app.services.email import (
     EmailDeliveryResult,
     EmailDeliveryStatus,
@@ -204,33 +204,74 @@ async def recupera_travados(
 
 async def _carrega_contexto(
     db: AsyncSession, notification_id: uuid.UUID
-) -> tuple[Notification, User] | None:
+) -> tuple[Notification, User, Ticket | None] | None:
+    """`Notification` + `User` (join, uma consulta) e, quando aplicável, o
+
+    `Ticket` — buscado à parte, só para `ticket_created`, que é o único tipo
+    cujo assunto reconstruído precisa do título do chamado (ver
+    `_assunto_reconstruido`). Os demais tipos nunca pagam essa segunda
+    consulta.
+    """
     resultado = await db.execute(
         select(Notification, User)
         .join(User, User.id == Notification.user_id)
         .where(Notification.id == notification_id)
     )
     linha = resultado.first()
-    return (linha[0], linha[1]) if linha else None
+    if linha is None:
+        return None
+    notif, user = linha
+
+    ticket: Ticket | None = None
+    if notif.type == NotificationType.ticket_created:
+        ticket_id = (notif.data or {}).get("ticket_id")
+        if ticket_id:
+            ticket = await db.get(Ticket, uuid.UUID(str(ticket_id)))
+
+    return notif, user, ticket
 
 
-def _conteudo_do_email(notif: Notification, user: User, settings: Settings) -> tuple[str, str, str]:
-    """(assunto, corpo em texto, corpo em HTML) — as mesmas funções que hoje
+def _assunto_reconstruido(notif: Notification, ticket: Ticket | None) -> str:
+    """O assunto que os call sites customizavam via `email_subject=`, antes da
 
-    montam o e-mail síncrono em `notifications.py`. Reaproveitadas, não
-    reescritas: usam só `title`/`message`/`data`, que a `Notification` já
-    persiste.
+    Fase 3B remover esse parâmetro de `notify`/`notifica_audiencia` — o
+    conteúdo do e-mail passou a nascer inteiramente aqui, nunca no momento do
+    enqueue.
 
-    Simplificação assumida nesta Fase 3A, registrada para revisão na 3B: os
-    assuntos CUSTOMIZADOS que alguns call sites passam hoje via
-    `email_subject=` (`ticket_created`, `sla_warning`) não estão disponíveis
-    aqui — só o fallback genérico (`_assunto_do_email`) está. Isso não afeta
-    produção nesta fase porque nenhum call site real grava na outbox ainda; a
-    Fase 3B precisa decidir entre persistir o assunto customizado ou
-    reconstruí-lo por um builder específico por `NotificationType` (ver a
-    auditoria da Fase 3, seção 3).
+    `sla_warning` não precisa de caso especial: `sla_alertas.assunto_do_aviso`
+    já era, byte a byte, o mesmo que `_assunto_do_email(notif.title,
+    notif.data)` produz — `_TITULO` é o `title` passado a `notify`, e
+    `ticket.protocol` é o `data["protocol"]`.
+
+    `ticket_created` é o único caso genuinamente especial: o aviso "Novo
+    chamado" para a EQUIPE embute o título do chamado (texto do cliente) no
+    assunto, e a confirmação "Ticket aberto" para o AUTOR não. As duas usam o
+    mesmo `NotificationType`, então a distinção não pode ser o tipo — é se
+    quem recebe é quem abriu o chamado. `notif.user_id != ticket.creator_id`
+    é exatamente essa pergunta, direto da regra de negócio, e não uma
+    comparação de texto contra o título da notificação (frágil a mudança de
+    redação).
     """
-    assunto = _assunto_do_email(notif.title, notif.data)
+    if (
+        notif.type == NotificationType.ticket_created
+        and ticket is not None
+        and notif.user_id != ticket.creator_id
+    ):
+        protocolo = (notif.data or {}).get("protocol") or ticket.protocol
+        return f"[HelpHS] Novo chamado {protocolo} — {ticket.title}"
+    return _assunto_do_email(notif.title, notif.data)
+
+
+def _conteudo_do_email(
+    notif: Notification, user: User, ticket: Ticket | None, settings: Settings
+) -> tuple[str, str, str]:
+    """(assunto, corpo em texto, corpo em HTML) — reconstruído inteiramente a
+
+    partir do que já está persistido (`Notification`, `User`, e o `Ticket`
+    quando aplicável). Nada disso vem da outbox: ela não guarda conteúdo (ver
+    o modelo `EmailOutbox`).
+    """
+    assunto = _assunto_reconstruido(notif, ticket)
     mensagem = _mensagem_do_email(notif.title, notif.message, notif.data, user.name, settings)
     return assunto, em_texto(mensagem), em_html(mensagem)
 
@@ -242,6 +283,16 @@ async def _persiste_resultado(
     *,
     agora: datetime | None = None,
 ) -> None:
+    """Persiste o desfecho da tentativa. No sucesso, também marca
+
+    `Notification.email_sent = True` — NO MESMO COMMIT que marca
+    `EmailOutbox.status = sent`: as duas colunas descrevem o mesmo fato
+    ("este e-mail foi entregue"), e um commit que movesse só uma delas
+    deixaria as duas fontes divergentes até a próxima tentativa (que não
+    haveria, porque `sent` não tenta de novo). Em retry ou `dead`,
+    `email_sent` simplesmente não é tocado — continua `False`, o valor com
+    que `Notification` sempre nasce.
+    """
     agora = agora or datetime.now(UTC)
     async with db_factory() as db:
         outbox = await db.get(EmailOutbox, outbox_id)
@@ -252,6 +303,9 @@ async def _persiste_resultado(
             outbox.status = "sent"
             outbox.sent_at = agora
             outbox.last_error = None
+            notif = await db.get(Notification, outbox.notification_id)
+            if notif is not None:
+                notif.email_sent = True
         else:
             outbox.attempts += 1
             outbox.last_error = resultado.error_summary
@@ -290,8 +344,8 @@ async def _processa_um(
         )
         return
 
-    notif, user = contexto
-    assunto, texto, html = _conteudo_do_email(notif, user, settings)
+    notif, user, ticket = contexto
+    assunto, texto, html = _conteudo_do_email(notif, user, ticket, settings)
     resultado = await send_email_detalhado(
         user.email,
         assunto,

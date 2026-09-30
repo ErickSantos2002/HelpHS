@@ -11,62 +11,46 @@ Chame ``notify()`` dentro do handler **antes** do commit, e termine com
                  settings=settings)
     await commit_e_notificar(db)
 
-``notify()`` NÃO envia nada. Ele adiciona a linha de notificação à sessão — ela
-faz parte da transação, e é por isso que continua antes do commit — e registra
-o e-mail como **pendência daquela sessão**. Quem dispara é o
-``commit_e_notificar``, depois de o commit voltar.
+``notify()`` NÃO envia nada — nunca enviou. Ele adiciona a linha de notificação
+à sessão e, quando o tipo/papel liberam e-mail, adiciona TAMBÉM a linha da
+outbox (``EmailOutbox``, via ``enqueue_email``) — as duas na MESMA transação.
+``commit_e_notificar`` só commita; o envio de verdade é responsabilidade
+exclusiva do worker da outbox (``app/services/email_outbox.py``), que roda em
+outro ciclo, depois do commit ter voltado.
 
-Por que o registro é chaveado por sessão
-----------------------------------------
-Antes, o ``notify()`` criava a task de envio na hora. Qualquer commit que
-falhasse depois mandava e-mail sobre um fato que não passou a existir — o caso
-visível era o laço de protocolo do ``create_ticket``, que mandava um e-mail por
-tentativa descartada, cada um anunciando um protocolo que não existe.
+Fase 3B — o que mudou daqui
+----------------------------
+Até 29/09/2026 este módulo tinha um segundo mecanismo: um registro em
+``WeakKeyDictionary`` chaveado pela sessão (a pendência de e-mail), disparado
+via ``asyncio.create_task`` logo depois do commit — fire-and-forget, sem
+durabilidade. Ele resolvia o mesmo problema que motiva esta seção agora
+("não mandar e-mail sobre um commit que falhou"), mas por um caminho frágil:
+se o processo morresse entre o commit e o envio, o e-mail se perdia sem deixar
+rastro. A Fase 3A construiu a outbox durável para substituir exatamente isso; a
+3B é o corte: ``Notification`` e ``EmailOutbox`` nascem na MESMA transação, o
+commit é o único ponto de não-retorno para as duas, e o envio em si sai
+inteiramente daqui.
 
-Duas alternativas foram descartadas por motivo prático, não por gosto:
-
-* **BackgroundTasks do FastAPI.** Só existe onde existe request, e o
-  ``ticket_lifecycle`` notifica de dentro do laço de fechamento automático, sem
-  request nenhum. Precisaria de um segundo mecanismo para esse caminho — e o
-  ``_auto_transition``, que notifica e é chamado de outro handler, teria de
-  carregar o parâmetro por toda a cadeia.
-* **Listener de ``after_commit`` do SQLAlchemy.** Seria automático e invisível,
-  mas a suíte mocka o banco em TODOS os testes (``session = AsyncMock()``):
-  o evento nunca dispararia, e o mecanismo inteiro ficaria fora do alcance dos
-  testes. Mecanismo que a suíte não enxerga não entra.
-
-O registro vive num ``WeakKeyDictionary`` chaveado pela sessão: funciona com a
-sessão real e com a mockada, isola requisições simultâneas, e some sozinho se a
-sessão morrer sem commit — handler que levanta no meio não deixa e-mail para
-trás.
-
-A pendência é **retirada antes** do commit. É isso que resolve o laço de
-retentativa de graça: se o commit levanta, a pendência daquela tentativa já saiu
-do registro e não sobra para a próxima. Nenhum ``rollback`` precisa saber que
-notificações existem.
-
-O que se perde de propósito: se alguém chamar ``db.commit()`` direto depois de
-um ``notify()``, o e-mail não sai. É o lado seguro do erro — deixar de mandar
-um aviso é recuperável, mandar aviso de algo que não aconteceu não é.
-
-Falha de envio é registrada e ignorada — nunca desfaz a transação.
+Falha de envio SMTP nunca chega a este módulo — pertence só ao worker.
 """
 
-import asyncio
 import uuid
 from collections.abc import Iterable, Sequence
-from dataclasses import dataclass
 from typing import Any
-from weakref import WeakKeyDictionary
 
-from loguru import logger
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.core.config import Settings
 from app.models.models import Notification, NotificationType, User, UserRole, UserStatus
-from app.services.email import send_email
-from app.services.email_layout import Mensagem, em_html, em_texto
+from app.services.email_layout import Mensagem
+
+# Import tardio de propósito: `email_outbox.py` importa `_assunto_do_email` e
+# `_mensagem_do_email` DESTE módulo (para reconstruir o e-mail em tempo de
+# envio, sem persistir conteúdo na outbox) — um `import` no topo aqui criaria
+# um ciclo. `enqueue_email` só é chamado dentro de função, depois que os dois
+# módulos já terminaram de carregar, então o import correspondente também vive
+# ali dentro.
 
 # Tipos que ficam SÓ no sininho, mesmo com SMTP configurado.
 #
@@ -190,26 +174,6 @@ async def audiencia_operacional(db: AsyncSession) -> Sequence[User]:
     return resultado.scalars().all()
 
 
-@dataclass(frozen=True)
-class _EmailPendente:
-    """Tudo que o envio precisa, capturado no notify() e independente da sessão."""
-
-    notif_id: uuid.UUID
-    to_email: str
-    subject: str
-    body: str
-    html: str
-    settings: Settings
-
-
-# E-mails registrados por sessão, aguardando o commit que os torna verdade.
-_PENDENTES: WeakKeyDictionary = WeakKeyDictionary()
-
-# O asyncio só guarda referência fraca para a task em voo: sem isto, o coletor
-# pode levar o envio no meio do caminho.
-_EM_VOO: set[asyncio.Task] = set()
-
-
 def _assunto_do_email(title: str, data: dict[str, Any] | None) -> str:
     """`[HelpHS] Chamado resolvido — HS-2026-0042`.
 
@@ -225,9 +189,15 @@ def _assunto_do_email(title: str, data: dict[str, Any] | None) -> str:
     estreita de lista de caixa de entrada, e o travessão é o que o produto já usa
     para separar protocolo de título.
 
-    É o FALLBACK: quem tem um assunto melhor a dizer passa `email_subject` ao
-    `notify`. O chamado novo faz isso — ali o assunto carrega protocolo E título
-    do chamado, que não caberiam no título do sininho.
+    É o FALLBACK GERAL, e desde a Fase 3B o ÚNICO caminho para a maioria dos
+    tipos: o `email_subject` que `notify`/`notifica_audiencia` aceitavam foi
+    removido junto com o envio eager — o worker da outbox reconstrói o assunto
+    inteiramente a partir da `Notification` persistida, e não há mais lugar
+    para computar um assunto "melhor" no momento do enqueue. O único tipo que
+    precisava de mais que isto (`ticket_created`, para a equipe, que embute o
+    título do chamado) ganhou reconstrução própria em
+    `app/services/email_outbox.py:_assunto_reconstruido` — o resto passa por
+    aqui.
     """
     protocolo = (data or {}).get("protocol")
     return f"[HelpHS] {title} — {protocolo}" if protocolo else f"[HelpHS] {title}"
@@ -299,43 +269,31 @@ def _grava_notificacao(
     return notif
 
 
-def _registra_email(
-    db: AsyncSession,
-    notif: Notification,
-    *,
-    to_email: str | None,
-    papel: UserRole,
-    nome: str | None,
+def _deve_enfileirar_email(
     notif_type: NotificationType,
-    title: str,
-    message: str,
-    data: dict[str, Any] | None,
+    papel: UserRole,
+    to_email: str | None,
     settings: Settings | None,
-    email_subject: str | None,
-) -> None:
-    """Registra o e-mail como pendência da SESSÃO. Não envia.
+) -> bool:
+    """A MESMA decisão de sempre — só que agora decide "cria linha de
 
-    Extraído em 24/09/2026 para que o envio individual e o em lote tomem a MESMA
-    decisão. Eram para ser duas cópias da mesma condição — e duas cópias de
-    "quem recebe e-mail" é exatamente o tipo de coisa que divergiu no `_IN_APP_ONLY`
-    contra o filtro por papel antes de existir `_pode_mandar_email`.
+    outbox?" em vez de "registra pendência de envio?". Extraída para que o
+    envio individual (`notify`) e o em lote (`notifica_audiencia`) tomem a
+    mesma condição; duas cópias da mesma regra é o que já divergiu uma vez,
+    entre `_IN_APP_ONLY` e o filtro por papel, antes de existir
+    `_pode_mandar_email`.
+
+    `settings is None` continua sendo o sinal de "este call site não quer
+    e-mail" — não é config de SMTP (o worker resolve isso sozinho, na hora do
+    envio): é a marca histórica de quem chama `notify`/`notifica_audiencia`
+    sem passar `settings=`, e dois eventos hoje fazem isso de propósito (ver
+    `_SEM_EMAIL_POR_PAPEL`).
     """
     if settings is None or notif_type in _IN_APP_ONLY:
-        return  # no email without settings
-    if not to_email or not _pode_mandar_email(notif_type, papel):
-        return
-
-    conteudo = _mensagem_do_email(title, message, data, nome, settings)
-    _PENDENTES.setdefault(db, []).append(
-        _EmailPendente(
-            notif_id=notif.id,
-            to_email=to_email,
-            subject=email_subject or _assunto_do_email(title, data),
-            body=em_texto(conteudo),
-            html=em_html(conteudo),
-            settings=settings,
-        )
-    )
+        return False
+    if not to_email:
+        return False
+    return _pode_mandar_email(notif_type, papel)
 
 
 async def notify(
@@ -346,21 +304,15 @@ async def notify(
     message: str,
     data: dict[str, Any] | None = None,
     settings: Settings | None = None,
-    email_subject: str | None = None,
 ) -> None:
     """
-    Cria a notificação in-app e REGISTRA o e-mail como pendência da sessão.
+    Cria a notificação in-app e, quando o tipo/papel liberam e-mail, a linha
+    da outbox — as duas na MESMA transação.
 
-    Não commita e não envia nada: o commit é do chamador, para que a
-    notificação seja atômica com a operação que a provocou, e o envio só
-    acontece no ``commit_e_notificar``.
-
-    ``email_subject`` separa o assunto do e-mail do título do sininho. Nasce
-    `None` e cai no `_assunto_do_email`, então as catorze chamadas que existiam
-    antes dele continuam valendo sem mudar uma linha. Existe porque as duas
-    coisas passaram a querer textos diferentes: o sininho já mostra o tipo num
-    selo próprio e tem largura de dropdown, enquanto o assunto precisa dizer
-    protocolo e título para ser reconhecível numa lista de caixa de entrada.
+    Não commita e não envia nada: o commit é do chamador, para que
+    `Notification` e `EmailOutbox` sejam atômicas com a operação que as
+    provocou. Quem envia de fato é o worker da outbox, depois do commit ter
+    voltado, em outro ciclo.
 
     Para vários destinatários use ``notifica_audiencia``: um laço de ``notify``
     aqui faz um SELECT por pessoa.
@@ -381,20 +333,11 @@ async def notify(
     if destinatario is None:
         return
 
-    email_addr, papel, nome = destinatario
-    _registra_email(
-        db,
-        notif,
-        to_email=email_addr,
-        papel=papel,
-        nome=nome,
-        notif_type=notif_type,
-        title=title,
-        message=message,
-        data=data,
-        settings=settings,
-        email_subject=email_subject,
-    )
+    email_addr, papel, _nome = destinatario
+    if _deve_enfileirar_email(notif_type, papel, email_addr, settings):
+        from app.services.email_outbox import enqueue_email
+
+        enqueue_email(db, notif)
 
 
 async def notifica_audiencia(
@@ -405,7 +348,6 @@ async def notifica_audiencia(
     message: str,
     data: dict[str, Any] | None = None,
     settings: Settings | None = None,
-    email_subject: str | None = None,
     exclude_user_ids: set[uuid.UUID] | None = None,
 ) -> list[uuid.UUID]:
     """O mesmo evento para VÁRIAS pessoas. Devolve os `user_id` de fato avisados.
@@ -428,6 +370,8 @@ async def notifica_audiencia(
 
     Não commita: quem consolida é ``commit_e_notificar``, como no `notify`.
     """
+    from app.services.email_outbox import enqueue_email
+
     excluidos: set[uuid.UUID] = exclude_user_ids or set()
     vistos: set[uuid.UUID] = set()
     avisados: list[uuid.UUID] = []
@@ -438,19 +382,8 @@ async def notifica_audiencia(
         vistos.add(pessoa.id)
 
         notif = _grava_notificacao(db, pessoa.id, notif_type, title, message, data)
-        _registra_email(
-            db,
-            notif,
-            to_email=pessoa.email,
-            papel=pessoa.role,
-            nome=pessoa.name,
-            notif_type=notif_type,
-            title=title,
-            message=message,
-            data=data,
-            settings=settings,
-            email_subject=email_subject,
-        )
+        if _deve_enfileirar_email(notif_type, pessoa.role, pessoa.email, settings):
+            enqueue_email(db, notif)
         avisados.append(pessoa.id)
 
     return avisados
@@ -458,48 +391,14 @@ async def notifica_audiencia(
 
 async def commit_e_notificar(db: AsyncSession) -> None:
     """
-    Commita e, só se o commit voltar, dispara os e-mails registrados na sessão.
+    Commita a transação.
 
-    As pendências saem do registro ANTES do commit: se ele levantar, elas já não
-    existem e a tentativa seguinte começa limpa.
+    O nome sobrevive por compatibilidade com os ~20 call sites que já
+    terminam seus handlers com ``await commit_e_notificar(db)`` — até a Fase
+    3B esta função também disparava os e-mails registrados na sessão, logo
+    depois do commit. Isso não existe mais: `Notification` e `EmailOutbox` já
+    nasceram juntas, dentro da MESMA transação que este commit fecha, e quem
+    envia de fato é o worker da outbox, em outro ciclo. Não há mais nada para
+    disparar aqui.
     """
-    pendentes = _PENDENTES.pop(db, [])
     await db.commit()
-
-    for pendente in pendentes:
-        _disparar(pendente)
-
-
-def _disparar(pendente: _EmailPendente) -> None:
-    """Envio best-effort: falha aqui não pode afetar quem já commitou."""
-    tarefa = asyncio.create_task(
-        _send_and_log(pendente),
-        name=f"email-notif-{pendente.notif_id}",
-    )
-    _EM_VOO.add(tarefa)
-    tarefa.add_done_callback(_EM_VOO.discard)
-
-
-async def _send_and_log(pendente: _EmailPendente) -> None:
-    """Envia e registra o desfecho pelo ID da notificação, nunca pelo endereço.
-
-    O `notif_id` é identificador interno: quem lê o log acha a linha em
-    `notifications` e, de lá, o destinatário — se tiver acesso ao banco, que é
-    outra permissão. Quem lê log é tipicamente mais gente do que quem lê o banco.
-
-    Mudado em 25/09/2026: as duas linhas abaixo diziam `delivered to
-    {to_email}`, e a do `send_email` levava também o ASSUNTO — que no aviso de
-    chamado novo contém o título do chamado.
-    """
-    sent = await send_email(
-        pendente.to_email,
-        pendente.subject,
-        pendente.body,
-        pendente.settings,
-        html=pendente.html,
-        contexto=f"notification {pendente.notif_id}",
-    )
-    if sent:
-        logger.debug(f"Email notification {pendente.notif_id} delivered")
-    else:
-        logger.warning(f"Email notification {pendente.notif_id} NOT delivered")

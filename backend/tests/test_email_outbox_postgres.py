@@ -39,12 +39,18 @@ from app.models.models import (
     EmailOutbox,
     Notification,
     NotificationType,
+    Ticket,
+    TicketCategory,
+    TicketPriority,
+    TicketStatus,
     User,
     UserRole,
     UserStatus,
 )
 from app.services.email import EmailDeliveryResult, EmailDeliveryStatus
 from app.services.email_outbox import (
+    _assunto_reconstruido,
+    _carrega_contexto,
     _persiste_resultado,
     _processa_um,
     contadores_por_status,
@@ -133,6 +139,23 @@ def _notificacao(
         data=data,
         read=False,
         email_sent=False,
+    )
+
+
+def _chamado(criador: User, *, titulo: str = "Impressora da recepção sem conexão") -> Ticket:
+    return Ticket(
+        id=uuid.uuid4(),
+        protocol=f"HS-2026-{uuid.uuid4().hex[:6]}",
+        title=titulo,
+        description="corpo",
+        priority=TicketPriority.medium,
+        category=TicketCategory.hardware,
+        status=TicketStatus.open,
+        creator_id=criador.id,
+        auto_closed=False,
+        reopen_count=0,
+        created_at=_AGORA,
+        updated_at=_AGORA,
     )
 
 
@@ -741,6 +764,44 @@ async def test_logs_do_ciclo_completo_sem_pii(db, db_factory):
     await _limpa(db, user)
 
 
+@pytest.mark.asyncio
+async def test_sucesso_nao_vaza_endereco_so_o_outbox_id(db, db_factory):
+    """A contraparte de sucesso: o `outbox_id` é o correlator que fica no log
+
+    (papel que `notif_id` fazia no mecanismo antigo — ver
+    `tests/test_log_sem_segredo.py`), o endereço nunca aparece."""
+    from loguru import logger
+
+    endereco = "outro.cliente@empresa.com.br"
+    user = _usuario(nome="Outro Cliente")
+    user.email = endereco
+    notif = _notificacao(user, title="Ticket aberto")
+    db.add_all([user, notif])
+    await db.commit()
+    outbox = _outbox(notif, next_attempt_at=_AGORA - timedelta(minutes=1))
+    db.add(outbox)
+    await db.commit()
+    outbox_id = outbox.id
+
+    settings = _settings()
+    linhas: list[str] = []
+    sink = logger.add(lambda m: linhas.append(m.record["message"]), level="DEBUG")
+    try:
+        with patch("app.services.email._get_mail_client") as mock_client:
+            mock_fm = AsyncMock()
+            mock_fm.send_message = AsyncMock()
+            mock_client.return_value = mock_fm
+            await processa_lote(db_factory, settings, worker_id="w1", agora=_AGORA)
+    finally:
+        logger.remove(sink)
+
+    texto = "\n".join(linhas)
+    assert endereco not in texto
+    assert str(outbox_id) in texto, "o outbox_id saiu do log junto com o endereço"
+
+    await _limpa(db, user)
+
+
 # ═══════════════════════════════════════════════════════════════
 # enqueue_email dentro da transação de negócio: rollback não deixa órfã
 # ═══════════════════════════════════════════════════════════════
@@ -783,6 +844,197 @@ async def test_enqueue_com_commit_persiste_outbox_junto_com_a_notification(db):
     assert outbox.notification_id == notif.id
 
     await _limpa(db, user)
+
+
+@pytest.mark.asyncio
+async def test_retry_de_protocolo_nao_deixa_outbox_duplicada(db):
+    """Reproduz o laço de `create_ticket`: várias tentativas de `notify()`,
+
+    cada uma seguida de rollback exceto a última, que commita. Antes da Fase
+    3B, cada tentativa DESCARTADA já tinha mandado o seu e-mail — o motivo
+    histórico do `_PENDENTES` (bug "M6"). Sem aquele mecanismo, a pergunta
+    passa a ser: o `db.add()` de uma tentativa descartada sobrevive ao
+    `rollback()`? A resposta é não — é o unit of work do SQLAlchemy que
+    garante isso, não código deste módulo — e é exatamente isso que este
+    teste prova contra Postgres de verdade.
+    """
+    from app.services.notifications import notify
+
+    user = _usuario()
+    db.add(user)
+    await db.commit()
+    # `user.id` é lido em CADA iteração, e um `rollback()` expira os atributos
+    # de todo objeto da sessão (`expire_on_commit=False` só protege o lado do
+    # commit) — tocar `user.id` depois disso dispara um refresh lazy síncrono
+    # fora do greenlet. Capturado uma vez, em variável simples, nunca mais
+    # toca o objeto ORM.
+    user_id = user.id
+    settings = _settings()
+
+    for tentativa in range(5):
+        await notify(
+            db,
+            user_id,
+            NotificationType.ticket_created,
+            "Ticket aberto",
+            f"Protocolo da tentativa {tentativa}",
+            settings=settings,
+        )
+        if tentativa < 4:
+            await db.rollback()
+        else:
+            await db.commit()
+
+    notifs = (
+        (await db.execute(select(Notification).where(Notification.user_id == user_id)))
+        .scalars()
+        .all()
+    )
+    assert len(notifs) == 1, "só a tentativa que commitou sobrevive"
+    assert notifs[0].message == "Protocolo da tentativa 4"
+
+    outboxes = (
+        (await db.execute(select(EmailOutbox).where(EmailOutbox.notification_id == notifs[0].id)))
+        .scalars()
+        .all()
+    )
+    assert len(outboxes) == 1, "uma outbox só, não uma por tentativa descartada"
+
+    await _limpa(db, user)  # `_limpa` lê o id via `sa_inspect`, não `.id` — seguro pós-rollback
+
+
+@pytest.mark.asyncio
+async def test_retry_de_lote_nao_deixa_outbox_duplicada(db):
+    """O mesmo teste acima, para o lado do `notifica_audiencia` — o laço real
+
+    de `create_ticket` avisa o autor E a equipe a cada tentativa."""
+    from types import SimpleNamespace
+
+    from app.services.notifications import notifica_audiencia
+
+    equipe_db = [_usuario(nome="Admin"), _usuario(nome="Tecnico")]
+    for pessoa in equipe_db:
+        pessoa.role = UserRole.admin if pessoa.name == "Admin" else UserRole.technician
+    db.add_all(equipe_db)
+    await db.commit()
+
+    # `notifica_audiencia` lê `.id`/`.email`/`.role`/`.name` em CADA iteração,
+    # e um `rollback()` expira os atributos de todo objeto da sessão. Um
+    # `SimpleNamespace` capturado uma vez, fora da sessão, nunca expira —
+    # mesma disciplina do teste irmão (`test_retry_de_protocolo_...`), aqui
+    # aplicada a uma lista em vez de um id só.
+    equipe = [SimpleNamespace(id=p.id, email=p.email, role=p.role, name=p.name) for p in equipe_db]
+    ids_da_equipe = [p.id for p in equipe]
+    settings = _settings()
+
+    for tentativa in range(5):
+        await notifica_audiencia(
+            db,
+            equipe,
+            NotificationType.ticket_created,
+            "Novo chamado",
+            f"HS-2026-000{tentativa} — Impressora",
+            settings=settings,
+        )
+        if tentativa < 4:
+            await db.rollback()
+        else:
+            await db.commit()
+
+    notifs = (
+        (await db.execute(select(Notification).where(Notification.user_id.in_(ids_da_equipe))))
+        .scalars()
+        .all()
+    )
+    assert len(notifs) == 2, "um por destinatário, só da tentativa que commitou"
+
+    outboxes = (
+        (
+            await db.execute(
+                select(EmailOutbox).where(EmailOutbox.notification_id.in_([n.id for n in notifs]))
+            )
+        )
+        .scalars()
+        .all()
+    )
+    assert len(outboxes) == 2, "uma outbox por destinatário, não uma por tentativa descartada"
+
+    await _limpa(db, *equipe_db)  # os objetos ORM reais, não os SimpleNamespace
+
+
+@pytest.mark.asyncio
+async def test_assunto_do_ticket_created_preserva_os_dois_formatos(db, db_factory):
+    """`ticket_created` produz DOIS e-mails de formato diferente para o MESMO
+
+    evento — a confirmação ao autor ("Ticket aberto", sem título) e o aviso à
+    equipe ("Novo chamado", com título). Reproduz exatamente os dois
+    `notify`/`notifica_audiencia` de `create_ticket`
+    (`app/routers/tickets.py`) e confere que a reconstrução do worker produz
+    byte a byte o mesmo assunto que o código de antes da Fase 3B montava
+    inline."""
+    from app.services.notifications import notifica_audiencia, notify
+
+    autor = _usuario(nome="Cliente Autor")
+    colega = _usuario(nome="Tecnico Colega")
+    colega.role = UserRole.technician
+    db.add_all([autor, colega])
+    await db.commit()
+
+    ticket = _chamado(autor, titulo="Impressora da recepção sem conexão")
+    db.add(ticket)
+    await db.flush()
+
+    protocolo = ticket.protocol
+    dados = {"ticket_id": str(ticket.id), "protocol": protocolo}
+
+    await notify(
+        db,
+        autor.id,
+        NotificationType.ticket_created,
+        "Ticket aberto",
+        f"Seu ticket foi registrado com o protocolo {protocolo}.",
+        data=dados,
+        settings=_settings(),
+    )
+    await notifica_audiencia(
+        db,
+        [colega],
+        NotificationType.ticket_created,
+        "Novo chamado",
+        f"{protocolo} — {ticket.title}",
+        data=dados,
+        settings=_settings(),
+        exclude_user_ids={autor.id},
+    )
+    await db.commit()
+
+    notif_autor = (
+        await db.execute(select(Notification).where(Notification.user_id == autor.id))
+    ).scalar_one()
+    notif_colega = (
+        await db.execute(select(Notification).where(Notification.user_id == colega.id))
+    ).scalar_one()
+
+    contexto_autor = await _carrega_contexto(db, notif_autor.id)
+    contexto_colega = await _carrega_contexto(db, notif_colega.id)
+    assert contexto_autor is not None and contexto_colega is not None
+    notif_a, _user_a, ticket_a = contexto_autor
+    notif_c, _user_c, ticket_c = contexto_colega
+
+    assunto_autor = _assunto_reconstruido(notif_a, ticket_a)
+    assunto_colega = _assunto_reconstruido(notif_c, ticket_c)
+
+    assert assunto_autor == f"[HelpHS] Ticket aberto — {protocolo}"
+    assert ticket.title not in assunto_autor, "confirmação ao autor não leva título"
+
+    assert assunto_colega == f"[HelpHS] Novo chamado {protocolo} — {ticket.title}"
+
+    # O Ticket referencia `creator_id` sem CASCADE — apaga antes dos usuários.
+    ticket_no_banco = await db.get(Ticket, ticket.id)
+    if ticket_no_banco is not None:
+        await db.delete(ticket_no_banco)
+        await db.commit()
+    await _limpa(db, autor, colega)
 
 
 # ═══════════════════════════════════════════════════════════════

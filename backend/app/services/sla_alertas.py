@@ -188,6 +188,14 @@ def assunto_do_aviso(ticket: Ticket) -> str:
     O titulo e texto escrito pelo cliente. Ele saiu das linhas de log em
     25/09/2026 pela mesma razao, e assunto de e-mail atravessa mais caixas de
     entrada do que log atravessa terminais.
+
+    Desde a Fase 3B (29/09/2026) esta funcao nao alimenta mais o envio: o
+    `email_subject` que `notifica_audiencia` aceitava foi removido, e o
+    worker da outbox reconstroi o assunto sozinho a partir da `Notification`
+    persistida — que produz o MESMO texto, porque `_TITULO` e `ticket.protocol`
+    ja estao em `title`/`data` (ver `notifications._assunto_do_email`). A
+    funcao fica como documentacao viva do formato e sob teste proprio
+    (`tests/test_sla_alertas.py`), mas nenhum call site de producao a chama.
     """
     return f"[HelpHS] {_TITULO} — {ticket.protocol}"
 
@@ -356,7 +364,6 @@ async def avisa_sla_proximo(
             mensagem_do_aviso(ticket, consumido, business_minutes_between(agora, prazo)),
             data=dados_do_aviso(ticket, prazo, limiar, consumido),
             settings=settings,
-            email_subject=assunto_do_aviso(ticket),
         )
         avisados += 1
 

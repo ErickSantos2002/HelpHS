@@ -468,68 +468,16 @@ async def test_o_log_de_smtp_desligado_nao_leva_o_endereco():
 
 
 # ── A notificação mantém o id ─────────────────────────────────
-
-
-@pytest.mark.asyncio
-async def test_o_log_da_notificacao_mantem_o_id_e_perde_o_endereco():
-    """`notif_id` é o identificador interno — ele FICA, o endereço sai.
-
-    É o que permite achar a notificação no banco sem que o log carregue para
-    quem ela foi.
-    """
-    import uuid
-    from unittest.mock import AsyncMock
-
-    from app.services import notifications
-
-    notif_id = uuid.uuid4()
-    pendente = notifications._EmailPendente(
-        notif_id=notif_id,
-        to_email=_ENDERECO,
-        subject=_ASSUNTO,
-        body="corpo",
-        html="<p>corpo</p>",
-        settings=_settings_com_smtp(),
-    )
-
-    linhas, sink = _captura()
-    try:
-        with patch.object(notifications, "send_email", new=AsyncMock(return_value=True)):
-            await notifications._send_and_log(pendente)
-    finally:
-        logger.remove(sink)
-
-    texto = " ".join(linhas)
-    assert str(notif_id) in texto, "o id da notificação saiu do log junto com o endereço"
-    assert not _dado_pessoal_em(linhas), _dado_pessoal_em(linhas)
-
-
-@pytest.mark.asyncio
-async def test_o_log_da_notificacao_nao_entregue_tambem_perde_o_endereco():
-    import uuid
-    from unittest.mock import AsyncMock
-
-    from app.services import notifications
-
-    notif_id = uuid.uuid4()
-    pendente = notifications._EmailPendente(
-        notif_id=notif_id,
-        to_email=_ENDERECO,
-        subject=_ASSUNTO,
-        body="corpo",
-        html="<p>corpo</p>",
-        settings=_settings_com_smtp(),
-    )
-
-    linhas, sink = _captura()
-    try:
-        with patch.object(notifications, "send_email", new=AsyncMock(return_value=False)):
-            await notifications._send_and_log(pendente)
-    finally:
-        logger.remove(sink)
-
-    assert str(notif_id) in " ".join(linhas)
-    assert not _dado_pessoal_em(linhas), _dado_pessoal_em(linhas)
+#
+# Até a Fase 3B, este arquivo tinha dois testes aqui: construíam um
+# `notifications._EmailPendente` direto e chamavam `notifications._send_and_log`,
+# provando que o log do disparo fire-and-forget mantinha o `notif_id` e perdia
+# o endereço. Esse mecanismo foi removido — o envio agora é do worker da
+# outbox, em outro módulo, e o correlator do log passou a ser o `outbox_id`
+# (não mais o `notif_id`). O equivalente, sucesso e falha, mora em
+# `tests/test_email_outbox_postgres.py::test_logs_do_ciclo_completo_sem_pii`
+# e `test_sucesso_nao_vaza_endereco_so_o_outbox_id` — precisam de Postgres de
+# verdade, porque `_processa_um` reconstrói o e-mail com um SELECT/JOIN real.
 
 
 # ── E-mail de conta: evento, não endereço ─────────────────────
