@@ -2670,6 +2670,92 @@ de download e compartilhamento.
 Isso **não** é trabalho de engenharia e não se resolve escrevendo código. Ver a
 seção **LGPD** deste documento.
 
+#### Gravação de chamadas: o que ficou decidido e o que ainda bloqueia
+
+A auditoria de 01/10/2026 mediu que a política de privacidade aprovada
+(PGS-TI-031, revisão 00) **não cobria** gravação de ligação: a seção 6 não tinha
+categoria de áudio, a seção 8 não tinha a finalidade, a seção 12 não tinha o
+provedor de telefonia e a seção 13 não tinha prazo. A política ganhou uma seção
+23 e cinco linhas nas seções existentes — ver `frontend/src/content/politica-privacidade.md`.
+
+⚠️ **A revisão da política NÃO foi incrementada, e isso é deliberado.** Pela
+seção 19 do próprio documento, elaborar e controlar versões é do Setor de
+Qualidade/SGI e aprovar é da Diretoria. O texto novo está escrito; o cabeçalho
+segue em **revisão 00** e a Tabela de Revisão e Aprovação segue intocada. Até que
+sejam atualizados, **o documento está internamente inconsistente de propósito** —
+o corpo descreve um tratamento que o cabeçalho ainda não versionou.
+
+⚠️ E a consequência operacional é maior que um número de revisão. A seção 15 diz
+que nova finalidade ou novo destinatário exigem **novo aceite** no primeiro acesso
+seguinte, e a seção 20 exige **comunicação prévia de 15 dias** aos usuários.
+Publicar esse texto, portanto, força re-aceite de toda a base. Não é mudança
+redacional.
+
+##### A. Decisões fechadas
+
+| Tema | Decisão |
+|---|---|
+| Finalidade | registro do atendimento; continuidade do suporte; auditoria operacional; apuração de divergências; melhoria da qualidade |
+| Acesso | **V1 staff-only**, pela regra de visibilidade do chamado |
+| Cliente | **sem acesso** a gravação e sem acesso a transcrição na V1 |
+| Download | **V1 sem download** — só reprodução controlada dentro do HelpHS |
+| `record_url` | **nunca** ao frontend, **nunca** em log |
+| Armazenamento | storage **privado**, endpoint **próprio** autenticado e autorizado por chamado |
+| Áudio x transcrição | recursos **separados** para autorização e auditoria |
+| IA paga | **fora de escopo** |
+| STT futuro | **local ou self-hosted** |
+| Logs | sem `record_url`, sem áudio, sem transcrição, sem payload bruto do fornecedor |
+| Correlação | `metadata.ticket_call_id`, validada em produção |
+
+⚠️ **O endpoint `/files/{token}` NÃO pode ser reaproveitado para gravação.**
+Medido: ele não recebe `current_user` e autoriza por **posse do token**, sem
+conferir visibilidade do chamado. Para anexo foi troca aceita; para áudio dos
+dois lados de uma conversa é outra classe de risco — link repassado é acesso, e a
+URL pode aparecer em log de proxy. Gravação exige caminho novo.
+
+Auditoria de acesso precisará distinguir `recording_played`, `recording_viewed`,
+`transcript_viewed`, `recording_deleted`, `transcript_deleted` e
+`transcript_reprocessed` — e `recording_downloaded`, se download existir algum
+dia. ⚠️ `AuditAction` é **Enum nativo do PostgreSQL** com 10 valores hoje:
+acrescentar valor **exige migration**, diferente de `creation_status`, que é
+`String` + `CheckConstraint` justamente para evitar isso. Nada disso foi criado
+nesta rodada.
+
+##### B. Pendências jurídicas e organizacionais — são elas que bloqueiam
+
+1. **Base legal** aplicável à gravação — do Encarregado. Não escolhida aqui, e
+   não se escolhe no código.
+2. **Texto final do aviso** ao titular e a forma de apresentá-lo.
+3. **Papel jurídico do provedor de telefonia.** ⚠️ Isto não é pendência só do
+   futuro: a seção 12 da política enumera infraestrutura, Resend, consulta de
+   CNPJ/CEP, provedor de IA, auditores e autoridades — e o provedor de telefonia
+   **não estava lá**, embora o telefone do cliente já seja compartilhado com ele
+   a cada ligação, com gravação ativa no ramal. A linha nova descreve o
+   tratamento sem afirmar enquadramento jurídico; **qualificá-lo formalmente
+   como Operador é decisão do Encarregado.**
+4. **Contrato / DPA / termos de tratamento** do provedor.
+5. **Subcontratados** do provedor.
+6. **Retenção definitiva** do áudio e da transcrição.
+7. **Eliminação no provedor** — anonimizar no HelpHS não apaga o áudio lá, e o
+   fornecedor declarou **não haver prazo de expiração definido**.
+8. **Classificação formal** da gravação segundo o PGS-TI-020.
+9. **Exportação e exercício de direito** do titular sobre a gravação.
+
+##### C. Proposta ainda NÃO aprovada
+
+> **PROPOSTA — NÃO É REGRA VIGENTE AINDA**
+>
+> Retenção do áudio: **90 dias**.
+>
+> Pendente de aprovação organizacional e jurídica. **Não foi publicado na
+> política**, e de propósito: a política diz apenas que o prazo será menor que o
+> do conteúdo dos chamados e que será definido antes da ativação. Anunciar 90
+> dias ao titular antes da aprovação criaria compromisso que ninguém assumiu — e
+> que a plataforma hoje não teria como cumprir, porque a rotina de expurgo só
+> está prevista para 30/06/2027 (seção 13.2 da política).
+>
+> A transcrição pode ter prazo próprio. **Não assumir o mesmo número.**
+
 #### O que sabemos sobre a Native AI da API4COM — e o que o documento não prova
 
 A ressalva da subseção de medição se confirmou: a transcrição **não aparece** no
