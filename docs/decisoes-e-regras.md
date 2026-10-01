@@ -2448,6 +2448,10 @@ Campos que o `GET /calls` devolveu: `id`, `metadata`, `record_url`, `duration`,
 não prova que o produto comercial de IA da API4COM não exista. Prova que não se
 pode construir transcrição em cima do `GET /calls` como ele é hoje.
 
+A ressalva se confirmou: em 01/10/2026 o suporte enviou documentação do módulo
+**Native AI**, que é separado e entrega por outro caminho. Ver *O que sabemos
+sobre a Native AI da API4COM* adiante — e a decisão de não contratá-lo.
+
 #### O que o suporte da API4COM confirmou por escrito
 
 **Webphone** — e isto encerra a esperança que a 2C.6 tinha deixado em aberto:
@@ -2621,12 +2625,163 @@ de download e compartilhamento.
 Isso **não** é trabalho de engenharia e não se resolve escrevendo código. Ver a
 seção **LGPD** deste documento.
 
+#### O que sabemos sobre a Native AI da API4COM — e o que o documento não prova
+
+A ressalva da subseção de medição se confirmou: a transcrição **não aparece** no
+`GET /calls`, e isso nunca significou que o produto não existisse. Ele existe, é
+um módulo separado, e em 01/10/2026 o suporte confirmou e enviou documentação
+técnica. Fica registrado em detalhe porque a decisão de **não usá-lo** (abaixo)
+só tem valor se for possível reconstruir o que foi avaliado.
+
+**O que o suporte confirmou:**
+
+- existe documentação técnica para consumir a transcrição nativa;
+- a transcrição suporta **português do Brasil** e faz **separação dos
+  participantes** da conversa;
+- **Cloud Recordings** para AWS/GCP **não tem documentação de integração
+  disponível** hoje.
+
+**O que o documento técnico demonstra.** O fluxo muda só no último passo:
+
+```
+sem AI:   CRM inicia ligação via API -> API4COM finaliza -> webhook recebe dados da ligação
+com AI:   CRM inicia ligação via API -> API4COM finaliza -> webhook recebe dados da ligação + dados de AI
+```
+
+A entrega é um **envelope de conector** — campos como `connectorName`, `status`,
+`configuration.webhook.url` — que encaminha para uma URL de webhook configurada.
+Dentro dele, `data.output` carrega o resultado de AI e `data.rawInput` **preserva
+o evento original** `channel-hangup`, com campos `id`, `domain`, `direction`,
+`caller`, `called`, `startedAt`, `answeredAt`, `endedAt`, `duration`,
+`hangupCause`, `hangupCauseCode`, `recordUrl` e `metadata`.
+
+O documento mostra **dois cenários**, e a diferença entre eles é operacionalmente
+importante:
+
+| Cenário | `data.output` |
+|---|---|
+| chamada **abaixo** da duração configurada | lista **vazia** |
+| chamada **igual ou acima** da configurada | lista de objetos `{type, mediaType, format, content}` |
+
+Ou seja: **o webhook pode chegar sem nenhum output de AI**, legitimamente, quando
+a chamada não atinge o critério configurado. Quem consumir isso não pode tratar
+lista vazia como erro.
+
+⚠️ **O documento usa placeholders, e placeholder não é especificação.** Ele **não**
+estabelece: os nomes concretos dos tipos de output; qual output corresponde à
+transcrição e qual ao resumo; o formato concreto da separação de participantes; a
+estrutura interna do conteúdo; nem ordem garantida entre os outputs. No exemplo,
+os dois objetos da lista têm **o mesmo placeholder** de tipo — o documento não
+chega a mostrar que eles diferem.
+
+⚠️ **E continua desconhecido**, porque o documento não trata: autenticação do
+webhook recebido pelo HelpHS, HMAC, assinatura criptográfica, retries, número de
+tentativas, timeout, garantia de entrega, política de reenvio, chave de
+idempotência, latência de processamento da AI, comportamento detalhado em falha e
+SLA da transcrição.
+
+Uma precisão que importa para não ler garantia onde não há: o exemplo técnico
+contém um header relacionado a **API key**, e **o valor foi deliberadamente
+omitido** deste registro. Esse header aparece na requisição que chega ao serviço
+de conectores **do próprio fornecedor** — não é evidência de como um webhook
+entregue ao HelpHS seria autenticado. A pergunta de autenticação segue aberta.
+
+**A rota de correlação que isso abriria — capacidade documentada, não plano.**
+Como o `rawInput` preserva o `metadata` enviado na criação da chamada, e como a
+Fase 2D.2 passou a enviar `{"gateway": "HelpHS", "ticket_call_id": "<UUID>"}`,
+existe caminho técnico plausível de `rawInput` → evento `channel-hangup` →
+`metadata.ticket_call_id` → `ticket_calls.id`. Fica registrado como **hipótese
+arquitetural**, não como decisão e não como trabalho previsto.
+
+**Custos informados pelo suporte em 01/10/2026** — informação comercial recebida
+nessa data, e **não** preço permanente, contratual ou garantido:
+
+| Item | Custo informado |
+|---|---|
+| Gravação padrão de áudio | incluída; **sem custo adicional informado** para gravar e armazenar na plataforma |
+| IA / transcrição por IA | **assinatura separada**: R$ 99,90 por usuário/mês no plano anual, R$ 129,90 no mensal |
+
+**Observação sobre os dois relógios do exemplo.** No payload de exemplo,
+`created_at` vem com sufixo `Z` (UTC) enquanto `startedAt`, `answeredAt` e
+`endedAt` vêm como texto **sem marcador de fuso**, e a diferença entre os dois
+relógios no próprio exemplo é de pouco mais de três horas. Isso é **consistente**
+com a diferença de ~3h que medimos entre `ticket_calls.created_at` e o
+`started_at` do fornecedor, e torna "campo sem fuso" uma hipótese mais plausível
+que "relógio errado". ⚠️ **Não é prova** — os dois campos do exemplo não
+descrevem o mesmo instante — e **nada foi investigado nem corrigido**. A regra da
+subseção anterior continua valendo integralmente: horário não é identidade.
+
+#### Decisão de negócio: IA paga está FORA DE ESCOPO
+
+**O HelpHS não contratará, não assinará e não pagará serviço de IA para
+transcrição.** É decisão de negócio do projeto, não conclusão técnica, e por isso
+nenhuma medição a reabre.
+
+Consequências, explícitas para quem for planejar:
+
+- a **Native AI da API4COM está fora de escopo**; não planejar a contratação
+  desse módulo e não construir integração que dependa dele;
+- a solução paga do fornecedor **não** é o caminho futuro do HelpHS;
+- também estão fora: OpenAI API, Google Speech-to-Text, AWS Transcribe e
+  **qualquer** serviço de IA pago como solução de transcrição.
+
+⚠️ A Native AI **não foi apagada** deste documento de propósito. Ela existe, o
+suporte a confirmou, o documento técnico demonstra o formato, e ela foi
+**descartada por custo**. Registrar as três coisas juntas preserva a história
+técnica sem que alguém confunda evidência recebida com opção ativa de roadmap —
+e evita que a avaliação seja refeita do zero daqui a um ano.
+
+#### Direção futura: transcrição local ou self-hosted
+
+A transcrição futura do HelpHS, se houver, deve ser **local ou self-hosted**:
+executada na nossa infraestrutura, **sem assinatura recorrente** de serviço
+externo de IA e **sem custo por usuário ou por chamada** para fornecedor de IA.
+
+**Whisper self-hosted é citado como candidato técnico — e nada além disso.** Não
+está escolhido. Antes de escolher tecnologia, ainda é preciso **medir**: CPU
+disponível; GPU disponível ou não; memória; duração média dos áudios; tamanho
+médio dos MP3; concorrência; fila; tempo de processamento; throughput; qualidade
+em PT-BR; necessidade de diarização; custo da própria infraestrutura; retenção;
+LGPD; isolamento dos arquivos; e estratégia de processamento assíncrono.
+
+Nenhum desses números existe hoje. Escolher a ferramenta antes de medir seria
+repetir o erro de método que a Fase 2B já pagou — tratar o que não foi medido
+como se estivesse decidido.
+
+#### ⚠️ Diarização não vem de graça na solução própria
+
+O suporte informou que a **Native AI paga** separa os participantes da conversa.
+Isso é fato sobre o produto **do fornecedor**, e não se transfere.
+
+Numa solução self-hosted, separação de participantes (*speaker diarization*) é
+capacidade **separada**, que precisa ser investigada e medida por conta própria.
+**Não prometer diarização na primeira versão sem medição.** A gravação conter os
+dois lados da conversa torna a transcrição possível; não torna a atribuição de
+falas resolvida.
+
 #### O próximo trabalho técnico — e por que ele não tem número aqui
 
 Depois de a 2D.2 estar integrada e implantada, **e** depois da decisão de
 privacidade acima, o próximo trabalho técnico é **desenhar a reconciliação de
 CDR e gravação**: listar chamadas, casar `metadata.ticket_call_id` localmente,
 e decidir o que o HelpHS passa a guardar.
+
+A ordem é esta, e cada passo depende do anterior:
+
+1. **2D.2 integrada e implantada**, para que chamadas novas carreguem
+   `ticket_call_id` — sem isso não há o que reconciliar;
+2. **decisão organizacional e de LGPD** (ver o bloqueio acima);
+3. **reconciliação de CDR e gravação**;
+4. **download seguro do áudio pelo backend**;
+5. **storage privado** do HelpHS;
+6. **avaliação de STT local ou self-hosted**, com as medições listadas acima;
+7. **só depois** implementação de transcrição.
+
+Duas coisas **não entram** nesse roteiro, e é deliberado. A **Native AI da
+API4COM** não entra como solução candidata, por decisão de negócio. E o **Cloud
+Recordings para AWS/GCP** não entra como dependência, por dois motivos somados:
+não há documentação de integração disponível, e a arquitetura pretendida —
+download pelo backend para storage próprio — não precisa dele.
 
 Deliberadamente **sem número de fase atribuído**. A numeração `2D.x` não foi
 reservada em lugar nenhum deste documento, e batizar a próxima fase sem que o
