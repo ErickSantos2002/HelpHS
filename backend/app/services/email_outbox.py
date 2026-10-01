@@ -49,16 +49,55 @@ de confirmação do provedor SMTP que este sistema não tem. A escolha é
 deliberada: entre "nunca perder" (at-least-once) e "nunca duplicar"
 (exactly-once, inatingível aqui sem infraestrutura nova), perder um e-mail
 operacional é pior do que raramente duplicar um.
+
+Fase 3D — observabilidade e retenção
+-------------------------------------
+Três coisas novas, nenhuma delas mexendo em schema, retry, backoff, SMTP,
+templates ou na semântica de `Notification`:
+
+1. **Snapshot em memória.** O WORKER mede a fila uma vez por rodada e guarda o
+   resultado aqui; o `/api/v1/health` só LÊ memória. Se o endpoint consultasse
+   a tabela, cada probe pagaria um `GROUP BY` — e a resolução ganha com isso
+   seria menor que o próprio ciclo do worker. Por isso o snapshot carrega um
+   `as_of` obrigatório: contagem em cache ao lado de um heartbeat parado é
+   interpretável, sem o `as_of` alguém lê contagem velha como atual.
+
+2. **Dois heartbeats, de propósito.** `_ultima_rodada_iniciada` é carimbado no
+   INÍCIO da rodada e `_ultima_rodada_sem_erro` só quando o NÚCLEO (recuperar
+   travadas → reivindicar → processar) termina sem levantar. Limpeza e coleta
+   de métricas rodam DEPOIS, cada uma com o seu próprio `except`: uma falha
+   nelas não pode transformar uma rodada de envio bem-sucedida em falha do
+   worker.
+
+3. **Retenção.** `sent` e `dead` expiram; `pending` e `processing` NUNCA —
+   apagar um deles por retenção seria descartar e-mail em silêncio. A limpeza
+   roda dentro deste mesmo laço (não há worker novo: é o precedente da
+   "Arrumação" de `helo_indexacao.varre`), em lotes, com
+   `FOR UPDATE SKIP LOCKED` na subconsulta. Dois processos limpando ao mesmo
+   tempo pegam lotes DISJUNTOS — sem Redis e sem advisory lock, pela mesma
+   razão arquitetural da seção acima.
+
+Dívida técnica conhecida e deliberadamente NÃO tocada aqui (achado A3 da
+auditoria da Fase 3D): `recupera_travados` devolve a linha para `pending` sem
+incrementar `attempts` nem reagendar `next_attempt_at`. É a única transição
+que não avança a máquina de estado, e uma mensagem que trave repetidamente
+pode circular para sempre sem alcançar `MAX_ATTEMPTS`. A Fase 3D a torna
+OBSERVÁVEL (`oldest_processing_seconds` no health) de propósito, sem
+consertá-la: mudança de máquina de estado não entra na mesma frente que
+observabilidade. Frente própria, imediatamente depois desta.
 """
 
 import asyncio
 import os
 import uuid
+from dataclasses import dataclass
 from datetime import UTC, datetime, timedelta
+from typing import Any
 
 from loguru import logger
-from sqlalchemy import func, select, update
+from sqlalchemy import delete, func, select, update
 from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker
+from sqlalchemy.orm import InstrumentedAttribute
 
 from app.core.config import Settings, get_settings
 from app.models.models import EmailOutbox, Notification, NotificationType, Ticket, User, UserStatus
@@ -66,6 +105,7 @@ from app.services import account_emails, account_tokens
 from app.services.email import (
     EmailDeliveryResult,
     EmailDeliveryStatus,
+    _resumo_do_erro,
     send_email_detalhado,
 )
 from app.services.email_layout import em_html, em_texto
@@ -400,6 +440,13 @@ async def _persiste_resultado(
                 if proxima is not None:
                     outbox.next_attempt_at = proxima
 
+            # Fase 3D (achado A1): a transição para `dead` deixou de ser
+            # silenciosa. Dentro do `else` de propósito — só o caminho de FALHA
+            # pode produzir `dead`, e assim um `sent` nunca paga a consulta.
+            # Ver `classifica_dead`/`_loga_dead` na seção 4.1.
+            if outbox.status == "dead":
+                await _loga_dead(db, outbox, resultado.error_summary)
+
         outbox.locked_by = None
         outbox.locked_at = None
         await db.commit()
@@ -422,7 +469,7 @@ async def _processa_notification(
         await _persiste_resultado(
             db_factory,
             outbox_id,
-            EmailDeliveryResult(EmailDeliveryStatus.permanent_failure, "NotificationNotFound"),
+            EmailDeliveryResult(EmailDeliveryStatus.permanent_failure, _NOTIFICACAO_NAO_ENCONTRADA),
         )
         return
 
@@ -445,6 +492,103 @@ _CONTA_USUARIO_NAO_ENCONTRADO = "AccountUserNotFound"
 _CONTA_USUARIO_ANONIMIZADO = "AccountUserAnonymized"
 _CONTA_USUARIO_INATIVO = "AccountUserInactive"
 _CONTA_VERIFICACAO_JA_CONCLUIDA = "AccountAlreadyVerified"
+# Mesma família, na origem Notification. Era um literal solto dentro de
+# `_processa_notification`; virou constante na Fase 3D porque agora ele também
+# é consumido pela classificação de `dead` logo abaixo — e a lista de motivos
+# e o produtor dos motivos NÃO podem morar em dois lugares (foi exatamente
+# esse o buraco que a auditoria apontou em classificar `dead` por texto).
+_NOTIFICACAO_NAO_ENCONTRADA = "NotificationNotFound"
+
+
+# ══════════════════════════════════════════════════════════════
+# 4.1 Classificação de `dead` (Fase 3D) — em memória, nunca persistida
+# ══════════════════════════════════════════════════════════════
+#
+# Até a Fase 3D uma linha virava `dead` em SILÊNCIO: `_persiste_resultado`
+# mudava o estado e commitava, sem uma linha de log. O e-mail definitivamente
+# não entregue era o evento mais importante do subsistema e só existia como
+# estado no banco — achado A1 da auditoria.
+#
+# Por que a classificação NÃO é persistida
+# -----------------------------------------
+# Um `failure_code` em coluna seria o desenho certo para MÉTRICA agregada, e
+# foi deliberadamente adiado: sem consumidor, não se paga uma migration. O que
+# a Fase 3D precisa é separar "terminal de negócio" de "falha real de entrega"
+# no LOG, e para isso basta classificar em código, no momento em que o motivo
+# ainda está na mão — sem segunda cópia, sem schema novo, sem backfill.
+#
+# `attempts` já é metade da resposta, de graça: veredito permanente vira `dead`
+# na hora (`attempts` baixo), esgotamento vira `dead` com `attempts == 5`. O que
+# ele NÃO separa é "usuário anonimizado" de "550 domínio não verificado" — os
+# dois são permanentes na primeira tentativa. É essa metade que vem daqui.
+
+_DEAD_NEGOCIO = frozenset(
+    {_CONTA_USUARIO_ANONIMIZADO, _CONTA_USUARIO_INATIVO, _CONTA_VERIFICACAO_JA_CONCLUIDA}
+)
+_DEAD_DEFENSIVO = frozenset({_CONTA_USUARIO_NAO_ENCONTRADO, _NOTIFICACAO_NAO_ENCONTRADA})
+_DEAD_CONFIGURACAO = frozenset({"SMTPNotConfigured"})
+
+DEAD_NEGOCIO = "business"
+DEAD_DEFENSIVO = "defensive"
+DEAD_CONFIGURACAO = "configuration"
+DEAD_ENTREGA = "delivery"
+
+# Severidade por classe. Um terminal de negócio NÃO é incidente — o usuário
+# anonimizou a conta, ou já confirmou o e-mail por outro caminho; logar isso
+# como erro treinaria quem lê o log a ignorar a linha que importa.
+_NIVEL_DO_DEAD = {
+    DEAD_NEGOCIO: "INFO",
+    DEAD_DEFENSIVO: "WARNING",
+    DEAD_CONFIGURACAO: "ERROR",
+    DEAD_ENTREGA: "ERROR",
+}
+
+
+def classifica_dead(motivo: str | None) -> str:
+    """A que família pertence este `dead`. Pura, e o default é o pior caso.
+
+    Motivo desconhecido cai em `delivery` de propósito: é a classe que gera
+    `ERROR`. Um motivo novo que alguém esqueça de cadastrar aqui aparece como
+    falha de entrega — alto demais, e não baixo demais. O inverso (default
+    silencioso) esconderia exatamente o que este log existe para mostrar.
+    """
+    if motivo in _DEAD_NEGOCIO:
+        return DEAD_NEGOCIO
+    if motivo in _DEAD_DEFENSIVO:
+        return DEAD_DEFENSIVO
+    if motivo in _DEAD_CONFIGURACAO:
+        return DEAD_CONFIGURACAO
+    return DEAD_ENTREGA
+
+
+async def _loga_dead(db: AsyncSession, outbox: EmailOutbox, motivo: str | None) -> None:
+    """Fecha o A1: toda transição nova para `dead` deixa rastro, sem PII.
+
+    O que PODE entrar nesta linha: origem, tipo do evento, número de
+    tentativas, classe do `dead` e o motivo seguro (que por construção é uma
+    das constantes acima ou a saída de `_resumo_do_erro` — nome de classe mais
+    código SMTP numérico).
+
+    O que NUNCA entra: `user_id`, `notification_id`, `ticket_id`, endereço,
+    nome, título, assunto, corpo, token. `notification_type` entra porque é um
+    valor de enum fechado (`ticket_created`, `chat_message`, …) — diz QUAL
+    espécie de aviso está falhando sem apontar pessoa nenhuma.
+    """
+    if outbox.notification_id is not None:
+        origem = "notification"
+        notif = await db.get(Notification, outbox.notification_id)
+        evento = notif.type.value if notif is not None else "unknown"
+    else:
+        origem = "account"
+        evento = outbox.event_type or "unknown"
+
+    classe = classifica_dead(motivo)
+    logger.log(
+        _NIVEL_DO_DEAD[classe],
+        f"Outbox de e-mail: linha encerrada em dead — origin={origem} "
+        f"event={evento} attempts={outbox.attempts} dead_kind={classe} "
+        f"reason={motivo}",
+    )
 
 
 async def _processa_conta(
@@ -592,29 +736,191 @@ async def processa_lote(
 # ══════════════════════════════════════════════════════════════
 
 
+async def _contagens(db: AsyncSession) -> dict[str, int]:
+    """Um `GROUP BY status` na sessão recebida. Só contagens e nomes de estado.
+
+    Separada de `contadores_por_status` para que o snapshot da Fase 3D faça as
+    TRÊS medições numa sessão só, em vez de abrir uma por consulta.
+    """
+    contagens = {"pending": 0, "processing": 0, "sent": 0, "dead": 0}
+    resultado = await db.execute(
+        select(EmailOutbox.status, func.count()).group_by(EmailOutbox.status)
+    )
+    for status, total in resultado.all():
+        contagens[status] = total
+    return contagens
+
+
 async def contadores_por_status(db_factory: async_sessionmaker[AsyncSession]) -> dict[str, int]:
     """`{"pending": N, "processing": N, "sent": N, "dead": N}` — só contagens
 
     e nomes de estado, nada que identifique um destinatário ou um evento.
-    Existe para a Fase 3D montar o bloco `email_outbox` do `/api/v1/health`
-    (mesmo formato de `auto_close`/`sla_warning`); não é chamada em nenhum
-    endpoint nesta fase.
+    Desde a Fase 3D o corpo real é `_contagens`; esta função segue existindo
+    com o mesmo contrato (abre a própria sessão) porque é o que os testes da
+    Fase 3A exercitam.
     """
-    contagens = {"pending": 0, "processing": 0, "sent": 0, "dead": 0}
     async with db_factory() as db:
-        resultado = await db.execute(
-            select(EmailOutbox.status, func.count()).group_by(EmailOutbox.status)
-        )
-        for status, total in resultado.all():
-            contagens[status] = total
-    return contagens
+        return await _contagens(db)
+
+
+@dataclass(frozen=True)
+class SnapshotDaFila:
+    """O que o worker mediu da fila, e QUANDO mediu.
+
+    `as_of` não é enfeite: este objeto vive em memória entre rodadas e é o que
+    o `/api/v1/health` devolve. Sem o carimbo, quem lê não tem como distinguir
+    "a fila está vazia" de "o worker parou de medir há duas horas".
+
+    As duas idades são `None` quando não há linha no estado correspondente —
+    `None` significa "não há nada velho", nunca "não mediu".
+    """
+
+    as_of: datetime
+    pending: int
+    processing: int
+    sent: int
+    dead: int
+    oldest_overdue_seconds: float | None
+    oldest_processing_seconds: float | None
+
+
+async def coleta_snapshot(
+    db_factory: async_sessionmaker[AsyncSession], *, agora: datetime | None = None
+) -> SnapshotDaFila:
+    """Mede a fila inteira numa sessão só. Chamada pelo WORKER, nunca pelo
+    endpoint de health — ver a seção "Fase 3D" no topo do módulo.
+
+    `oldest_overdue_seconds` sai de `status='pending' AND next_attempt_at <=
+    agora`, e o `AND` é a parte que importa: uma linha no meio da escada de
+    backoff está `pending` e está EM DIA (`next_attempt_at` no futuro).
+    Medir idade desde `created_at` confundiria "o worker parou" com "esta
+    linha está cumprindo os 60 minutos dela". O predicado é também, letra por
+    letra, o do índice parcial `ix_email_outbox_pending_next_attempt`, que já
+    existe desde a Fase 3A — nenhum índice novo é necessário.
+
+    `oldest_processing_seconds` mede `locked_at` do `processing` mais antigo. É
+    o que torna a recuperação de linha travada observável, e com ela o achado
+    A3: uma linha que o worker reivindica e devolve a cada `stale_minutes`, sem
+    nunca avançar `attempts`, aparece aqui como idade que não baixa.
+    """
+    agora = agora or datetime.now(UTC)
+    async with db_factory() as db:
+        contagens = await _contagens(db)
+
+        mais_velho_vencido = (
+            await db.execute(
+                select(func.min(EmailOutbox.next_attempt_at)).where(
+                    EmailOutbox.status == "pending",
+                    EmailOutbox.next_attempt_at <= agora,
+                )
+            )
+        ).scalar_one_or_none()
+
+        mais_velho_processando = (
+            await db.execute(
+                select(func.min(EmailOutbox.locked_at)).where(EmailOutbox.status == "processing")
+            )
+        ).scalar_one_or_none()
+
+    return SnapshotDaFila(
+        as_of=agora,
+        pending=contagens["pending"],
+        processing=contagens["processing"],
+        sent=contagens["sent"],
+        dead=contagens["dead"],
+        oldest_overdue_seconds=(
+            (agora - mais_velho_vencido).total_seconds() if mais_velho_vencido else None
+        ),
+        oldest_processing_seconds=(
+            (agora - mais_velho_processando).total_seconds() if mais_velho_processando else None
+        ),
+    )
+
+
+# ══════════════════════════════════════════════════════════════
+# 5.1 Retenção (Fase 3D) — `sent` e `dead` expiram, fila viva nunca
+# ══════════════════════════════════════════════════════════════
+
+# Constante, não configuração: ninguém ajusta tamanho de lote de limpeza por
+# ambiente. Mesmo critério (e mesmo precedente) do `_READINESS_TIMEOUT_S` do
+# `main.py`. 100 seria pouco — com limpeza de hora em hora, drenar um acúmulo
+# levaria dias; 1000 prenderia mais linhas por transação sem ganho real.
+_LOTE_DA_LIMPEZA = 500
+
+
+async def _apaga_lote(
+    db: AsyncSession,
+    *,
+    status: str,
+    coluna: InstrumentedAttribute[Any],
+    cutoff: datetime,
+) -> int:
+    """Um lote de no máximo `_LOTE_DA_LIMPEZA` linhas, e nunca a tabela inteira.
+
+    `FOR UPDATE SKIP LOCKED` dentro da subconsulta é o que faz dois processos
+    limpando ao mesmo tempo pegarem lotes DISJUNTOS: o segundo pula o que o
+    primeiro travou. Não é só eficiência — é o que dispensa lock de qualquer
+    espécie, Redis ou advisory, mantendo o PostgreSQL como única fonte de
+    verdade (ver o topo do módulo). Um advisory lock funcionaria; ele serializa
+    onde a disjunção já resolve, e por isso foi descartado por desnecessário.
+    """
+    ids = (
+        select(EmailOutbox.id)
+        .where(EmailOutbox.status == status, coluna < cutoff)
+        .order_by(coluna)
+        .limit(_LOTE_DA_LIMPEZA)
+        .with_for_update(skip_locked=True)
+    )
+    resultado = await db.execute(delete(EmailOutbox).where(EmailOutbox.id.in_(ids)))
+    return resultado.rowcount or 0
+
+
+async def limpa_expirados(
+    db_factory: async_sessionmaker[AsyncSession],
+    settings: Settings,
+    *,
+    agora: datetime | None = None,
+) -> dict[str, int]:
+    """Apaga `sent` e `dead` vencidos. `pending` e `processing`, NUNCA.
+
+    Duas razões independentes impedem a limpeza de tocar fila viva, e é de
+    propósito que sejam duas: o filtro de `status`, e o fato de `sent_at` ser
+    `NULL` numa linha que nunca foi enviada (`NULL < cutoff` é `NULL`, nunca
+    verdadeiro). Apagar um `pending` por retenção seria descartar e-mail em
+    silêncio — o pior modo de falha possível para esta tabela.
+
+    `dead` corta por `created_at`, não por `sent_at`: linha que morreu nunca
+    teve `sent_at` preenchido.
+    """
+    agora = agora or datetime.now(UTC)
+    corte_sent = agora - timedelta(days=settings.email_outbox_sent_retention_days)
+    corte_dead = agora - timedelta(days=settings.email_outbox_dead_retention_days)
+
+    async with db_factory() as db:
+        apagados = {
+            "sent": await _apaga_lote(
+                db, status="sent", coluna=EmailOutbox.sent_at, cutoff=corte_sent
+            ),
+            "dead": await _apaga_lote(
+                db, status="dead", coluna=EmailOutbox.created_at, cutoff=corte_dead
+            ),
+        }
+        await db.commit()
+    return apagados
 
 
 # ══════════════════════════════════════════════════════════════
 # 6. O laço
 # ══════════════════════════════════════════════════════════════
 
+# Três carimbos e um snapshot, todos na memória DESTE processo — mesma
+# semântica declarada em `ticket_lifecycle`: com mais de um worker cada um tem
+# os seus, e o /api/v1/health responde pelo worker que atendeu a requisição.
+_inicio_do_worker: datetime | None = None
+_ultima_rodada_iniciada: datetime | None = None
 _ultima_rodada_sem_erro: datetime | None = None
+_ultima_limpeza: datetime | None = None
+_snapshot: SnapshotDaFila | None = None
 
 
 def ultima_rodada_sem_erro() -> datetime | None:
@@ -623,21 +929,251 @@ def ultima_rodada_sem_erro() -> datetime | None:
     `sla_alertas.ultima_rodada_sem_erro`: quando ESTE processo concluiu uma
     rodada sem levantar, não se a fila está em dia. `None` até a primeira
     rodada concluir.
+
+    Desde a Fase 3D o "sem levantar" é explicitamente o do NÚCLEO — recuperar
+    travadas, reivindicar, processar. Limpeza e coleta de métricas rodam depois
+    e não podem transformar uma rodada de envio bem-sucedida em falha.
     """
     return _ultima_rodada_sem_erro
 
 
+def ultima_rodada_iniciada() -> datetime | None:
+    """Quando a rodada mais recente COMEÇOU, carimbado antes de qualquer SMTP.
+
+    Existe separado de `ultima_rodada_sem_erro` porque os dois têm tetos
+    diferentes: uma rodada cheia e lenta deixa `last_success` legitimamente
+    velho, enquanto este carimbo é limitado pelo intervalo do laço. Um limiar
+    único sobre o carimbo de sucesso ou mentiria (frouxo) ou daria falso alarme
+    (apertado).
+    """
+    return _ultima_rodada_iniciada
+
+
+def snapshot_da_fila() -> SnapshotDaFila | None:
+    """O que a última rodada mediu. `None` até a primeira medição."""
+    return _snapshot
+
+
+def reinicia_estado_para_testes() -> None:
+    """Zera os carimbos e o snapshot. Só para teste — estado de módulo vaza
+    entre casos, e um health que herda o carimbo do teste anterior passa
+    verde por acidente."""
+    global _inicio_do_worker, _ultima_rodada_iniciada, _ultima_rodada_sem_erro
+    global _ultima_limpeza, _snapshot
+    _inicio_do_worker = None
+    _ultima_rodada_iniciada = None
+    _ultima_rodada_sem_erro = None
+    _ultima_limpeza = None
+    _snapshot = None
+
+
+# ── Estado OK/degraded/error ──────────────────────────────────
+
+ESTADO_DESLIGADO = "disabled"
+ESTADO_INICIANDO = "starting"
+ESTADO_OK = "ok"
+ESTADO_DEGRADADO = "degraded"
+ESTADO_ERRO = "error"
+
+# Ordem de gravidade, para "o pior entre vários sinais".
+_GRAVIDADE = {ESTADO_OK: 0, ESTADO_DEGRADADO: 1, ESTADO_ERRO: 2}
+
+
+def _degrau(idade: float | None, limite_degradado: float, limite_erro: float) -> str:
+    """`>` estrito nos dois limiares: exatamente NO limite ainda é o estado de
+    baixo. Idade `None` é `ok` — não há nada velho para reclamar."""
+    if idade is None:
+        return ESTADO_OK
+    if idade > limite_erro:
+        return ESTADO_ERRO
+    if idade > limite_degradado:
+        return ESTADO_DEGRADADO
+    return ESTADO_OK
+
+
+def _idade(momento: datetime | None, agora: datetime) -> float | None:
+    return None if momento is None else (agora - momento).total_seconds()
+
+
+def classifica_estado(
+    *,
+    habilitado: bool,
+    inicio: datetime | None,
+    last_run: datetime | None,
+    last_success: datetime | None,
+    snapshot: SnapshotDaFila | None,
+    intervalo_segundos: int,
+    stale_processing_minutes: int,
+    agora: datetime,
+) -> str:
+    """Pura, e inteiramente DERIVADA das configurações que já existem.
+
+    Nenhum limiar é número solto: todos saem de `intervalo_segundos` e de
+    `stale_processing_minutes`. Um limiar configurável à parte poderia sair de
+    sincronia com o intervalo e passar a mentir; uma derivação não pode.
+
+        last_run / last_success : degraded > 4 × intervalo · error > 20 × intervalo
+        oldest_overdue          : degraded > 2 × intervalo · error > stale
+        oldest_processing       : degraded > stale         · error > 3 × stale
+
+    `pending > 0` e `dead > 0`, sozinhos, NUNCA degradam — pending é o estado
+    normal entre o enqueue e a rodada seguinte, e `dead` nesta fase é
+    informativo: sem classificação persistida, o health não tem como separar
+    com robustez um `AccountAlreadyVerified` de uma falha real de entrega, e um
+    número que mistura os dois viraria alarme que se aprende a ignorar. A
+    distinção existe, com severidade, no LOG (ver `classifica_dead`).
+    """
+    if not habilitado:
+        return ESTADO_DESLIGADO
+
+    degradado_s = 4 * intervalo_segundos
+    erro_s = 20 * intervalo_segundos
+    stale_s = stale_processing_minutes * 60
+
+    # Antes da primeira rodada não se afirma saúde: o laço espera
+    # `min(30, intervalo)` antes de começar. `starting` dura enquanto a espera
+    # é plausível; passado o limiar de degradação sem NENHUMA rodada, o laço
+    # não subiu, e isso é um problema de verdade — não um boot em andamento.
+    if last_run is None:
+        idade_do_boot = _idade(inicio, agora)
+        if idade_do_boot is None or idade_do_boot <= degradado_s:
+            return ESTADO_INICIANDO
+        return _degrau(idade_do_boot, degradado_s, erro_s)
+
+    # Sem sucesso nenhum ainda, a idade que vale é a do processo: `last_run`
+    # é atualizado a cada rodada e ficaria sempre novo, escondendo um worker
+    # que levanta em TODA rodada desde o boot.
+    referencia_do_sucesso = last_success if last_success is not None else inicio
+
+    sinais = [
+        _degrau(_idade(last_run, agora), degradado_s, erro_s),
+        _degrau(_idade(referencia_do_sucesso, agora), degradado_s, erro_s),
+    ]
+
+    if snapshot is not None:
+        sinais.append(_degrau(snapshot.oldest_overdue_seconds, 2 * intervalo_segundos, stale_s))
+        sinais.append(_degrau(snapshot.oldest_processing_seconds, stale_s, 3 * stale_s))
+
+    return max(sinais, key=lambda e: _GRAVIDADE[e])
+
+
+def bloco_de_health(settings: Settings, *, agora: datetime | None = None) -> dict:
+    """O bloco `email_outbox` do `/api/v1/health`. Lê MEMÓRIA, não o banco.
+
+    Mesmo formato dos vizinhos (`auto_close`, `sla_warning`): um objeto
+    chaveado pelo nome da rotina. Todas as chaves existem sempre, com `None`
+    onde nada foi medido — `0` ali seria afirmar uma contagem que não houve.
+
+    `sent` fica fora de propósito: é total cumulativo, cresce para sempre,
+    ninguém alerta nele, e a retenção o torna um número sem significado.
+    """
+    agora = agora or datetime.now(UTC)
+    habilitado = settings.email_outbox_interval_seconds > 0
+    snap = _snapshot
+
+    estado = classifica_estado(
+        habilitado=habilitado,
+        inicio=_inicio_do_worker,
+        last_run=_ultima_rodada_iniciada,
+        last_success=_ultima_rodada_sem_erro,
+        snapshot=snap,
+        intervalo_segundos=settings.email_outbox_interval_seconds,
+        stale_processing_minutes=settings.email_outbox_stale_processing_minutes,
+        agora=agora,
+    )
+
+    return {
+        "enabled": habilitado,
+        "state": estado,
+        "last_run": _ultima_rodada_iniciada.isoformat() if _ultima_rodada_iniciada else None,
+        "last_success": (_ultima_rodada_sem_erro.isoformat() if _ultima_rodada_sem_erro else None),
+        "as_of": snap.as_of.isoformat() if snap else None,
+        "pending": snap.pending if snap else None,
+        "processing": snap.processing if snap else None,
+        "dead": snap.dead if snap else None,
+        "oldest_overdue_seconds": snap.oldest_overdue_seconds if snap else None,
+        "oldest_processing_seconds": snap.oldest_processing_seconds if snap else None,
+    }
+
+
+# ── A rodada ──────────────────────────────────────────────────
+
+
+def _deve_limpar(settings: Settings, agora: datetime) -> bool:
+    """Carimbo de tempo, não contador de rodadas: um contador passaria a
+    significar outro intervalo no instante em que alguém mudasse
+    `EMAIL_OUTBOX_INTERVAL_SECONDS`."""
+    if settings.email_outbox_cleanup_interval_seconds <= 0:
+        return False
+    if _ultima_limpeza is None:
+        return True
+    return (
+        agora - _ultima_limpeza
+    ).total_seconds() >= settings.email_outbox_cleanup_interval_seconds
+
+
+async def _limpeza_protegida(
+    db_factory: async_sessionmaker[AsyncSession], settings: Settings, agora: datetime
+) -> None:
+    """`except` PRÓPRIO, e é o ponto todo: uma limpeza que falhe não pode
+    impedir o carimbo de `last_success` do núcleo — isso inventaria um alarme
+    de worker parado a partir de um problema que não encostou no envio.
+
+    O carimbo é da TENTATIVA, gravado antes do trabalho: assim uma falha
+    recorrente espera o intervalo inteiro em vez de tentar a cada 30 s e
+    encher o log.
+    """
+    global _ultima_limpeza
+    if not _deve_limpar(settings, agora):
+        return
+
+    _ultima_limpeza = agora
+    try:
+        apagados = await limpa_expirados(db_factory, settings, agora=agora)
+    except Exception as exc:  # noqa: BLE001
+        logger.warning(f"Outbox de e-mail: limpeza falhou; o envio segue: {_resumo_do_erro(exc)}")
+        return
+
+    if apagados["sent"] or apagados["dead"]:
+        logger.info(
+            f"Outbox de e-mail: limpeza apagou sent={apagados['sent']} " f"dead={apagados['dead']}"
+        )
+
+
+async def _snapshot_protegido(
+    db_factory: async_sessionmaker[AsyncSession], agora: datetime
+) -> None:
+    """Mesmo contrato da limpeza: falhar aqui não é falhar a rodada de envio.
+    O snapshot anterior fica de pé, com o `as_of` velho dizendo a verdade."""
+    global _snapshot
+    try:
+        _snapshot = await coleta_snapshot(db_factory, agora=agora)
+    except Exception as exc:  # noqa: BLE001
+        logger.warning(f"Outbox de e-mail: coleta de métricas falhou: {_resumo_do_erro(exc)}")
+
+
 async def _run_once(worker_id: str) -> None:
-    global _ultima_rodada_sem_erro
+    global _ultima_rodada_iniciada, _ultima_rodada_sem_erro
 
     from app.core.database import AsyncSessionLocal
 
     settings = get_settings()
+    agora = datetime.now(UTC)
+    _ultima_rodada_iniciada = agora
+
     try:
         await processa_lote(AsyncSessionLocal, settings, worker_id=worker_id)
         _ultima_rodada_sem_erro = datetime.now(UTC)
     except Exception as exc:  # noqa: BLE001
-        logger.error(f"Falha na rodada da outbox de e-mail: {exc}")
+        # `_resumo_do_erro`, nunca `{exc}` (achado A2): o `str()` de um
+        # `DBAPIError` do SQLAlchemy carrega o SQL e os `[parameters: ...]`, e
+        # era por aqui que conteúdo de biblioteca de terceiro podia chegar ao
+        # log sem ninguém ter escrito um campo sensível em lugar nenhum.
+        logger.error(f"Falha na rodada da outbox de e-mail: {_resumo_do_erro(exc)}")
+
+    # Depois do núcleo, e cada um com o seu próprio `except`.
+    await _limpeza_protegida(AsyncSessionLocal, settings, agora)
+    await _snapshot_protegido(AsyncSessionLocal, agora)
 
 
 async def email_outbox_loop() -> None:
@@ -655,17 +1191,25 @@ async def email_outbox_loop() -> None:
         except asyncio.CancelledError:
             raise
         except Exception as exc:  # noqa: BLE001
-            logger.error(f"Laço da outbox de e-mail levantou; o laço segue: {exc}")
+            # Mesma disciplina do `except` de dentro — ver o A2 ali.
+            logger.error(f"Laço da outbox de e-mail levantou; o laço segue: {_resumo_do_erro(exc)}")
 
         await asyncio.sleep(intervalo)
 
 
 def start_email_outbox_worker() -> asyncio.Task | None:
     """Sobe o laço em background. Devolve `None` quando a rotina está desligada."""
+    global _inicio_do_worker
+
     settings = get_settings()
     if settings.email_outbox_interval_seconds <= 0:
         logger.info("Outbox de e-mail desligada (intervalo = 0)")
         return None
+
+    # Carimbado aqui, e não dentro do laço: é a referência de "há quanto tempo
+    # este processo deveria estar girando", que é o que separa `starting`
+    # legítimo de um laço que nunca chegou a rodar.
+    _inicio_do_worker = datetime.now(UTC)
 
     logger.info(
         f"Outbox de e-mail ativa: verificando a cada {settings.email_outbox_interval_seconds}s"
