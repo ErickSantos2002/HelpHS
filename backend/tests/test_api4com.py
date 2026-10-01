@@ -15,6 +15,7 @@ Nenhum teste toca a rede: o `httpx.AsyncClient` é substituído por um duplo,
 como já fazem `test_llm.py` e `test_consulta_externa.py`.
 """
 
+import uuid
 from unittest.mock import AsyncMock, MagicMock, patch
 
 import httpx
@@ -42,6 +43,10 @@ _ID_UUID = "bdf199fa-f85b-4378-80cd-0ac28c1355e9"  # guia de integração, 36 ch
 _CALLER = "1130000000"
 _CALLED = "  +55 (81) 99999-9999  "  # sujo DE PROPÓSITO — ver o teste do byte a byte
 _EXTENSION = "1001"
+
+# O UUID da linha de `ticket_calls`. Constante no arquivo para que cada teste
+# possa afirmar IGUALDADE com ele, em vez de só conferir que "tem alguma coisa".
+_TICKET_CALL_ID = uuid.UUID("3f1c9d2e-7a84-4b16-9c05-2e8d1f6a40bb")
 
 
 # ═══════════════════════════════════════════════════════════════
@@ -141,7 +146,12 @@ async def test_desligada_nao_constroi_cliente_http():
         patch.object(api4com.httpx, "AsyncClient") as fabrica,
     ):
         with pytest.raises(Api4ComDesligadaError):
-            await create_call(caller=_CALLER, called=_CALLED, extension=_EXTENSION)
+            await create_call(
+                caller=_CALLER,
+                called=_CALLED,
+                extension=_EXTENSION,
+                ticket_call_id=_TICKET_CALL_ID,
+            )
 
     fabrica.assert_not_called()
 
@@ -152,7 +162,12 @@ async def test_desligada_nao_le_o_token():
     s = _settings(ligada=False)
     with patch.object(api4com, "get_settings", return_value=s):
         with pytest.raises(Api4ComDesligadaError):
-            await create_call(caller=_CALLER, called=_CALLED, extension=_EXTENSION)
+            await create_call(
+                caller=_CALLER,
+                called=_CALLED,
+                extension=_EXTENSION,
+                ticket_call_id=_TICKET_CALL_ID,
+            )
 
     s.api4com_token.get_secret_value.assert_not_called()
 
@@ -167,7 +182,12 @@ async def test_authorization_e_o_token_cru():
     """`Authorization: <token>`. O fornecedor confirmou que é assim."""
     cliente, contextos = _monta(resposta=_resposta())
     with contextos[0], contextos[1], contextos[2]:
-        await create_call(caller=_CALLER, called=_CALLED, extension=_EXTENSION)
+        await create_call(
+            caller=_CALLER,
+            called=_CALLED,
+            extension=_EXTENSION,
+            ticket_call_id=_TICKET_CALL_ID,
+        )
 
     assert cliente.post.await_args.kwargs["headers"] == {"Authorization": _TOKEN}
 
@@ -181,7 +201,12 @@ async def test_authorization_nao_leva_bearer():
     """
     cliente, contextos = _monta(resposta=_resposta())
     with contextos[0], contextos[1], contextos[2]:
-        await create_call(caller=_CALLER, called=_CALLED, extension=_EXTENSION)
+        await create_call(
+            caller=_CALLER,
+            called=_CALLED,
+            extension=_EXTENSION,
+            ticket_call_id=_TICKET_CALL_ID,
+        )
 
     enviado = cliente.post.await_args.kwargs["headers"]["Authorization"]
     assert "Bearer" not in enviado
@@ -198,7 +223,12 @@ async def test_authorization_nao_leva_bearer():
 async def test_o_post_vai_para_calls():
     cliente, contextos = _monta(resposta=_resposta())
     with contextos[0], contextos[1], contextos[2]:
-        await create_call(caller=_CALLER, called=_CALLED, extension=_EXTENSION)
+        await create_call(
+            caller=_CALLER,
+            called=_CALLED,
+            extension=_EXTENSION,
+            ticket_call_id=_TICKET_CALL_ID,
+        )
 
     assert cliente.post.await_args.args[0] == "https://exemplo.invalido/api/v1/calls"
 
@@ -216,7 +246,12 @@ async def test_barra_sobrando_na_base_nao_duplica_na_url(base):
     """Quem preenche o painel não deveria precisar acertar a barra final."""
     cliente, contextos = _monta(resposta=_resposta(), base_url=base)
     with contextos[0], contextos[1], contextos[2]:
-        await create_call(caller=_CALLER, called=_CALLED, extension=_EXTENSION)
+        await create_call(
+            caller=_CALLER,
+            called=_CALLED,
+            extension=_EXTENSION,
+            ticket_call_id=_TICKET_CALL_ID,
+        )
 
     assert cliente.post.await_args.args[0] == "https://exemplo.invalido/api/v1/calls"
 
@@ -232,7 +267,12 @@ async def test_called_chega_byte_a_byte_como_entrou():
     """
     cliente, contextos = _monta(resposta=_resposta())
     with contextos[0], contextos[1], contextos[2]:
-        await create_call(caller=_CALLER, called=_CALLED, extension=_EXTENSION)
+        await create_call(
+            caller=_CALLER,
+            called=_CALLED,
+            extension=_EXTENSION,
+            ticket_call_id=_TICKET_CALL_ID,
+        )
 
     assert cliente.post.await_args.kwargs["json"]["called"] == _CALLED
 
@@ -241,7 +281,12 @@ async def test_called_chega_byte_a_byte_como_entrou():
 async def test_caller_e_extension_chegam_sem_transformacao():
     cliente, contextos = _monta(resposta=_resposta())
     with contextos[0], contextos[1], contextos[2]:
-        await create_call(caller=_CALLER, called=_CALLED, extension=_EXTENSION)
+        await create_call(
+            caller=_CALLER,
+            called=_CALLED,
+            extension=_EXTENSION,
+            ticket_call_id=_TICKET_CALL_ID,
+        )
 
     corpo = cliente.post.await_args.kwargs["json"]
     assert corpo["caller"] == _CALLER
@@ -249,13 +294,47 @@ async def test_caller_e_extension_chegam_sem_transformacao():
 
 
 @pytest.mark.asyncio
-async def test_metadata_e_exatamente_o_gateway():
-    """Grafia divergente faz o webhook parar em silêncio — não levanta erro."""
+async def test_metadata_e_o_gateway_mais_a_correlacao():
+    """Grafia divergente faz o webhook parar em silêncio — não levanta erro.
+
+    Igualdade com o dicionário INTEIRO, e não `in`: é o que pega tanto a chave
+    que desapareceu quanto a chave que alguém acrescentou.
+    """
     cliente, contextos = _monta(resposta=_resposta())
     with contextos[0], contextos[1], contextos[2]:
-        await create_call(caller=_CALLER, called=_CALLED, extension=_EXTENSION)
+        await create_call(
+            caller=_CALLER,
+            called=_CALLED,
+            extension=_EXTENSION,
+            ticket_call_id=_TICKET_CALL_ID,
+        )
 
-    assert cliente.post.await_args.kwargs["json"]["metadata"] == {"gateway": "HelpHS"}
+    assert cliente.post.await_args.kwargs["json"]["metadata"] == {
+        "gateway": "HelpHS",
+        "ticket_call_id": "3f1c9d2e-7a84-4b16-9c05-2e8d1f6a40bb",
+    }
+
+
+@pytest.mark.asyncio
+async def test_o_ticket_call_id_vai_como_texto_e_nao_como_uuid():
+    """JSON não tem tipo UUID.
+
+    Se o objeto `uuid.UUID` fosse direto para `json=`, o `httpx` levantaria na
+    serialização — e o `POST` nunca sairia. O `str()` mora em `api4com.py` por
+    isso, e este teste prende o TIPO, não só o valor.
+    """
+    cliente, contextos = _monta(resposta=_resposta())
+    with contextos[0], contextos[1], contextos[2]:
+        await create_call(
+            caller=_CALLER,
+            called=_CALLED,
+            extension=_EXTENSION,
+            ticket_call_id=_TICKET_CALL_ID,
+        )
+
+    enviado = cliente.post.await_args.kwargs["json"]["metadata"]["ticket_call_id"]
+    assert isinstance(enviado, str)
+    assert enviado == str(_TICKET_CALL_ID)
 
 
 @pytest.mark.asyncio
@@ -268,19 +347,49 @@ async def test_o_corpo_nao_tem_mais_nada_alem_dos_quatro_campos():
     """
     cliente, contextos = _monta(resposta=_resposta())
     with contextos[0], contextos[1], contextos[2]:
-        await create_call(caller=_CALLER, called=_CALLED, extension=_EXTENSION)
+        await create_call(
+            caller=_CALLER,
+            called=_CALLED,
+            extension=_EXTENSION,
+            ticket_call_id=_TICKET_CALL_ID,
+        )
 
     corpo = cliente.post.await_args.kwargs["json"]
     assert set(corpo) == {"caller", "called", "extension", "metadata"}
-    assert set(corpo["metadata"]) == {"gateway"}
+    # CONJUNTO FECHADO, e é esta linha que é a trava anti-PII: acrescentar nome,
+    # e-mail ou assunto do chamado ao `metadata` reprova aqui, não em revisão.
+    assert set(corpo["metadata"]) == {"gateway", "ticket_call_id"}
 
 
-def test_create_call_nao_aceita_metadata():
-    """Não dá para sobrescrever `gateway` porque não há por onde passar nada."""
+def test_create_call_nao_aceita_metadata_livre():
+    """Não dá para sobrescrever `gateway` nem inventar chave: não há por onde.
+
+    `ticket_call_id` entrou na 2D.2, mas o contrato não afrouxou — o que entra é
+    um UUID, não um dicionário. Se algum dia aparecer `metadata` ou `kwargs`
+    nesta assinatura, a porta que a 2A fechou está aberta de novo.
+    """
     import inspect
 
-    parametros = set(inspect.signature(create_call).parameters)
-    assert parametros == {"caller", "called", "extension"}
+    parametros = inspect.signature(create_call).parameters
+    assert set(parametros) == {"caller", "called", "extension", "ticket_call_id"}
+    assert "metadata" not in parametros
+    assert not any(p.kind in (p.VAR_KEYWORD, p.VAR_POSITIONAL) for p in parametros.values())
+
+
+def test_o_ticket_call_id_e_obrigatorio_e_tipado():
+    """Obrigatório porque esquecer não pode ser uma opção.
+
+    Com um call site só, um parâmetro opcional faria a correlação desaparecer em
+    silêncio no dia em que alguém escrevesse o segundo. E o tipo é `uuid.UUID`
+    de propósito: é o que faz o `mypy` recusar telefone, e-mail ou número de
+    chamado entrando aqui como string.
+    """
+    import inspect
+
+    parametro = inspect.signature(create_call).parameters["ticket_call_id"]
+    assert parametro.default is inspect.Parameter.empty
+    assert parametro.annotation is uuid.UUID
+    assert parametro.kind is inspect.Parameter.KEYWORD_ONLY
 
 
 # ═══════════════════════════════════════════════════════════════
@@ -301,7 +410,12 @@ async def test_o_transporte_e_construido_com_retries_zero():
         patch.object(api4com.httpx, "AsyncClient", return_value=cliente),
         patch.object(api4com.httpx, "AsyncHTTPTransport") as transporte,
     ):
-        await create_call(caller=_CALLER, called=_CALLED, extension=_EXTENSION)
+        await create_call(
+            caller=_CALLER,
+            called=_CALLED,
+            extension=_EXTENSION,
+            ticket_call_id=_TICKET_CALL_ID,
+        )
 
     transporte.assert_called_once_with(retries=0)
 
@@ -315,7 +429,12 @@ async def test_o_cliente_nao_segue_redirect():
         patch.object(api4com.httpx, "AsyncClient", return_value=cliente) as fabrica,
         patch.object(api4com.httpx, "AsyncHTTPTransport"),
     ):
-        await create_call(caller=_CALLER, called=_CALLED, extension=_EXTENSION)
+        await create_call(
+            caller=_CALLER,
+            called=_CALLED,
+            extension=_EXTENSION,
+            ticket_call_id=_TICKET_CALL_ID,
+        )
 
     assert fabrica.call_args.kwargs["follow_redirects"] is False
 
@@ -328,7 +447,12 @@ async def test_o_timeout_vem_da_configuracao():
         patch.object(api4com.httpx, "AsyncClient", return_value=cliente) as fabrica,
         patch.object(api4com.httpx, "AsyncHTTPTransport"),
     ):
-        await create_call(caller=_CALLER, called=_CALLED, extension=_EXTENSION)
+        await create_call(
+            caller=_CALLER,
+            called=_CALLED,
+            extension=_EXTENSION,
+            ticket_call_id=_TICKET_CALL_ID,
+        )
 
     assert fabrica.call_args.kwargs["timeout"] == 15
 
@@ -354,7 +478,12 @@ async def test_nenhuma_falha_dispara_um_segundo_post(erro):
     cliente, contextos = _monta(erro=erro)
     with contextos[0], contextos[1], contextos[2]:
         with pytest.raises((Api4ComIndisponivelError, Api4ComResultadoIndeterminadoError)):
-            await create_call(caller=_CALLER, called=_CALLED, extension=_EXTENSION)
+            await create_call(
+                caller=_CALLER,
+                called=_CALLED,
+                extension=_EXTENSION,
+                ticket_call_id=_TICKET_CALL_ID,
+            )
 
     assert cliente.post.await_count == 1
 
@@ -366,7 +495,12 @@ async def test_nenhuma_resposta_de_erro_dispara_um_segundo_post(status):
     cliente, contextos = _monta(resposta=_resposta(status=status))
     with contextos[0], contextos[1], contextos[2]:
         with pytest.raises((Api4ComRecusadaError, Api4ComResultadoIndeterminadoError)):
-            await create_call(caller=_CALLER, called=_CALLED, extension=_EXTENSION)
+            await create_call(
+                caller=_CALLER,
+                called=_CALLED,
+                extension=_EXTENSION,
+                ticket_call_id=_TICKET_CALL_ID,
+            )
 
     assert cliente.post.await_count == 1
 
@@ -387,7 +521,12 @@ async def test_falha_de_conexao_prova_que_a_ligacao_nao_saiu(erro):
     _, contextos = _monta(erro=erro)
     with contextos[0], contextos[1], contextos[2]:
         with pytest.raises(Api4ComIndisponivelError):
-            await create_call(caller=_CALLER, called=_CALLED, extension=_EXTENSION)
+            await create_call(
+                caller=_CALLER,
+                called=_CALLED,
+                extension=_EXTENSION,
+                ticket_call_id=_TICKET_CALL_ID,
+            )
 
 
 @pytest.mark.asyncio
@@ -423,7 +562,12 @@ async def test_o_resto_do_transporte_e_conservadoramente_indeterminado(erro):
     _, contextos = _monta(erro=erro)
     with contextos[0], contextos[1], contextos[2]:
         with pytest.raises(Api4ComResultadoIndeterminadoError):
-            await create_call(caller=_CALLER, called=_CALLED, extension=_EXTENSION)
+            await create_call(
+                caller=_CALLER,
+                called=_CALLED,
+                extension=_EXTENSION,
+                ticket_call_id=_TICKET_CALL_ID,
+            )
 
 
 @pytest.mark.asyncio
@@ -433,7 +577,12 @@ async def test_4xx_e_rejeicao_confirmada_com_status(status):
     cliente, contextos = _monta(resposta=_resposta(status=status))
     with contextos[0], contextos[1], contextos[2]:
         with pytest.raises(Api4ComRecusadaError) as capturado:
-            await create_call(caller=_CALLER, called=_CALLED, extension=_EXTENSION)
+            await create_call(
+                caller=_CALLER,
+                called=_CALLED,
+                extension=_EXTENSION,
+                ticket_call_id=_TICKET_CALL_ID,
+            )
 
     assert capturado.value.status_code == status
     assert cliente.post.await_count == 1
@@ -452,7 +601,12 @@ async def test_5xx_e_indeterminado_e_nao_recusa(status):
     cliente, contextos = _monta(resposta=_resposta(status=status))
     with contextos[0], contextos[1], contextos[2]:
         with pytest.raises(Api4ComResultadoIndeterminadoError):
-            await create_call(caller=_CALLER, called=_CALLED, extension=_EXTENSION)
+            await create_call(
+                caller=_CALLER,
+                called=_CALLED,
+                extension=_EXTENSION,
+                ticket_call_id=_TICKET_CALL_ID,
+            )
 
     assert cliente.post.await_count == 1
 
@@ -470,7 +624,12 @@ async def test_3xx_e_indeterminado_e_nao_e_seguido(status):
     cliente, contextos = _monta(resposta=_resposta(status=status))
     with contextos[0], contextos[1], contextos[2]:
         with pytest.raises(Api4ComResultadoIndeterminadoError):
-            await create_call(caller=_CALLER, called=_CALLED, extension=_EXTENSION)
+            await create_call(
+                caller=_CALLER,
+                called=_CALLED,
+                extension=_EXTENSION,
+                ticket_call_id=_TICKET_CALL_ID,
+            )
 
     assert cliente.post.await_count == 1
 
@@ -482,7 +641,12 @@ async def test_indeterminado_por_status_nao_guarda_nada(status):
     _, contextos = _monta(resposta=_resposta(status=status))
     with contextos[0], contextos[1], contextos[2]:
         with pytest.raises(Api4ComResultadoIndeterminadoError) as capturado:
-            await create_call(caller=_CALLER, called=_CALLED, extension=_EXTENSION)
+            await create_call(
+                caller=_CALLER,
+                called=_CALLED,
+                extension=_EXTENSION,
+                ticket_call_id=_TICKET_CALL_ID,
+            )
 
     assert vars(capturado.value) == {}
     assert _TOKEN not in str(capturado.value)
@@ -510,7 +674,12 @@ async def test_nao_repetimos_a_mensagem_da_excecao_original(erro):
         with pytest.raises(
             (Api4ComIndisponivelError, Api4ComResultadoIndeterminadoError)
         ) as capturado:
-            await create_call(caller=_CALLER, called=_CALLED, extension=_EXTENSION)
+            await create_call(
+                caller=_CALLER,
+                called=_CALLED,
+                extension=_EXTENSION,
+                ticket_call_id=_TICKET_CALL_ID,
+            )
 
     assert _TOKEN not in str(capturado.value)
     assert _TOKEN not in repr(capturado.value)
@@ -542,7 +711,12 @@ async def test_200_com_id_devolve_a_string_exata(identificador):
     """
     _, contextos = _monta(resposta=_resposta(json_devolve=_corpo_ok(identificador)))
     with contextos[0], contextos[1], contextos[2]:
-        resultado = await create_call(caller=_CALLER, called=_CALLED, extension=_EXTENSION)
+        resultado = await create_call(
+            caller=_CALLER,
+            called=_CALLED,
+            extension=_EXTENSION,
+            ticket_call_id=_TICKET_CALL_ID,
+        )
 
     assert resultado.provider_call_id == identificador
     assert resultado.status_code == 200
@@ -554,7 +728,12 @@ async def test_o_id_nao_e_normalizado():
     esquisito = "  Ab-9_x  "
     _, contextos = _monta(resposta=_resposta(json_devolve=_corpo_ok(esquisito)))
     with contextos[0], contextos[1], contextos[2]:
-        resultado = await create_call(caller=_CALLER, called=_CALLED, extension=_EXTENSION)
+        resultado = await create_call(
+            caller=_CALLER,
+            called=_CALLED,
+            extension=_EXTENSION,
+            ticket_call_id=_TICKET_CALL_ID,
+        )
 
     assert resultado.provider_call_id == esquisito
 
@@ -612,7 +791,12 @@ async def test_200_sem_id_utilizavel_e_indeterminado(corpo):
     _, contextos = _monta(resposta=_resposta(json_devolve=corpo))
     with contextos[0], contextos[1], contextos[2]:
         with pytest.raises(Api4ComResultadoIndeterminadoError):
-            await create_call(caller=_CALLER, called=_CALLED, extension=_EXTENSION)
+            await create_call(
+                caller=_CALLER,
+                called=_CALLED,
+                extension=_EXTENSION,
+                ticket_call_id=_TICKET_CALL_ID,
+            )
 
 
 @pytest.mark.asyncio
@@ -621,7 +805,12 @@ async def test_200_com_corpo_ilegivel_e_indeterminado():
     _, contextos = _monta(resposta=_resposta(json_erro=ValueError("nao e json")))
     with contextos[0], contextos[1], contextos[2]:
         with pytest.raises(Api4ComResultadoIndeterminadoError):
-            await create_call(caller=_CALLER, called=_CALLED, extension=_EXTENSION)
+            await create_call(
+                caller=_CALLER,
+                called=_CALLED,
+                extension=_EXTENSION,
+                ticket_call_id=_TICKET_CALL_ID,
+            )
 
 
 @pytest.mark.asyncio
@@ -637,7 +826,12 @@ async def test_2xx_que_nao_seja_200_e_indeterminado_mesmo_com_id(status):
     _, contextos = _monta(resposta=_resposta(status=status, json_devolve=_corpo_ok()))
     with contextos[0], contextos[1], contextos[2]:
         with pytest.raises(Api4ComResultadoIndeterminadoError):
-            await create_call(caller=_CALLER, called=_CALLED, extension=_EXTENSION)
+            await create_call(
+                caller=_CALLER,
+                called=_CALLED,
+                extension=_EXTENSION,
+                ticket_call_id=_TICKET_CALL_ID,
+            )
 
 
 def test_o_resultado_carrega_so_status_e_identificador():
@@ -702,7 +896,12 @@ async def test_o_token_nao_aparece_na_excecao_de_transporte(erro):
         with pytest.raises(
             (Api4ComIndisponivelError, Api4ComResultadoIndeterminadoError)
         ) as capturado:
-            await create_call(caller=_CALLER, called=_CALLED, extension=_EXTENSION)
+            await create_call(
+                caller=_CALLER,
+                called=_CALLED,
+                extension=_EXTENSION,
+                ticket_call_id=_TICKET_CALL_ID,
+            )
 
     assert _TOKEN not in str(capturado.value)
     assert _TOKEN not in repr(capturado.value)
@@ -713,7 +912,12 @@ async def test_o_token_nao_aparece_na_excecao_de_recusa():
     _, contextos = _monta(resposta=_resposta(status=401))
     with contextos[0], contextos[1], contextos[2]:
         with pytest.raises(Api4ComRecusadaError) as capturado:
-            await create_call(caller=_CALLER, called=_CALLED, extension=_EXTENSION)
+            await create_call(
+                caller=_CALLER,
+                called=_CALLED,
+                extension=_EXTENSION,
+                ticket_call_id=_TICKET_CALL_ID,
+            )
 
     assert _TOKEN not in str(capturado.value)
     assert _TOKEN not in repr(capturado.value)
@@ -735,7 +939,12 @@ async def test_a_excecao_de_transporte_nao_encadeia_a_original():
     _, contextos = _monta(erro=original)
     with contextos[0], contextos[1], contextos[2]:
         with pytest.raises(Api4ComResultadoIndeterminadoError) as capturado:
-            await create_call(caller=_CALLER, called=_CALLED, extension=_EXTENSION)
+            await create_call(
+                caller=_CALLER,
+                called=_CALLED,
+                extension=_EXTENSION,
+                ticket_call_id=_TICKET_CALL_ID,
+            )
 
     assert capturado.value.__cause__ is None
     assert capturado.value.__context__ is None or _TOKEN not in str(capturado.value)
@@ -768,7 +977,12 @@ async def test_nenhum_caminho_de_erro_escreve_o_token_no_log(erro):
     try:
         with contextos[0], contextos[1], contextos[2]:
             with pytest.raises((Api4ComIndisponivelError, Api4ComResultadoIndeterminadoError)):
-                await create_call(caller=_CALLER, called=_CALLED, extension=_EXTENSION)
+                await create_call(
+                    caller=_CALLER,
+                    called=_CALLED,
+                    extension=_EXTENSION,
+                    ticket_call_id=_TICKET_CALL_ID,
+                )
     finally:
         logger.remove(sink)
 
@@ -785,7 +999,12 @@ async def test_o_telefone_tambem_nao_vai_para_o_log():
     try:
         with contextos[0], contextos[1], contextos[2]:
             with pytest.raises(Api4ComResultadoIndeterminadoError):
-                await create_call(caller=_CALLER, called=_CALLED, extension=_EXTENSION)
+                await create_call(
+                    caller=_CALLER,
+                    called=_CALLED,
+                    extension=_EXTENSION,
+                    ticket_call_id=_TICKET_CALL_ID,
+                )
     finally:
         logger.remove(sink)
 
