@@ -460,6 +460,11 @@ async def _executa_e_persiste(
             caller=_resolve_caller(_ramal_do_ator(ator)),
             called=_formata_called_api4com(_telefone_do_destinatario(destinatario)),
             extension=_ramal_do_ator(ator),
+            # A correlação da Fase 2D.2. Este `id` já está DURÁVEL no banco: a
+            # linha foi commitada duas vezes antes de chegarmos aqui (`pending`
+            # e `dispatching`), então o fornecedor nunca recebe um identificador
+            # que o rollback poderia apagar.
+            ticket_call_id=tentativa.id,
         )
     except api4com.Api4ComRecusadaError as erro:
         # 4xx: o fornecedor respondeu recusando a REQUISIÇÃO. Nada tocou.

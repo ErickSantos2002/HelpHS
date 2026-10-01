@@ -110,16 +110,33 @@ exceção que o segurasse levaria o `Authorization` para dentro de qualquer
 traceback. Pelo mesmo motivo a tradução usa `from None` — encadear a exceção
 original a penduraria no `__cause__`.
 
-E `metadata` é exatamente `{"gateway": "HelpHS"}`, sem parâmetro que permita
-acrescentar nada. Não é excesso de zelo: duas integrações desta conta no
-fornecedor estão **sem filtro** (`webhookConstraint` nulo e `{}`), e se
-constraint vazia significar "sem filtro", os webhooks das nossas chamadas serão
-entregues a endpoints de outros sistemas da empresa. Enquanto isso não for
-resolvido, o `metadata` não carrega nome, e-mail, documento, telefone nem texto
-de chamado. A chave `gateway` também é o que o `webhookConstraint` da nossa
-integração vai filtrar: grafia divergente faz a entrega parar em silêncio.
+E `metadata` é um conjunto FECHADO de duas chaves — `gateway` e
+`ticket_call_id` —, montado aqui dentro e em lugar nenhum mais. Não existe
+parâmetro `metadata`, não existe `**kwargs`: quem chama fornece um UUID, não um
+dicionário. Não é excesso de zelo: duas integrações desta conta no fornecedor
+estão **sem filtro** (`webhookConstraint` nulo e `{}`), e se constraint vazia
+significar "sem filtro", os webhooks das nossas chamadas serão entregues a
+endpoints de outros sistemas da empresa. Enquanto isso não for resolvido, o
+`metadata` não carrega nome, e-mail, documento, telefone nem texto de chamado.
+A chave `gateway` também é o que o `webhookConstraint` da nossa integração vai
+filtrar: grafia divergente faz a entrega parar em silêncio.
+
+`ticket_call_id` entrou na Fase 2D.2 e é um UUID **opaco**: identifica a linha
+de `ticket_calls`, e não diz nada sobre quem foi ligado. Ele existe porque a
+medição autenticada de 30/09/2026 provou que não há outra âncora confiável —
+
+* o `id` que o `POST /calls` devolve (e que guardamos em `provider_call_id`)
+  **não** é o `id` que o `GET /calls` devolve depois para a mesma chamada;
+* filtrar por `metadata.gateway` responde HTTP 200 mas traz registros que não
+  são todos nossos, então o filtro do fornecedor não serve de chave;
+* o horário divergiu de forma sistemática (~3h) entre o nosso `created_at` e o
+  `started_at` do fornecedor — e horário nunca foi identidade.
+
+Sobra o que nós mesmos plantamos. Por isso a grafia desta chave é contrato: se
+mudar aqui, a reconciliação para em silêncio, igual ao `gateway`.
 """
 
+import uuid
 from dataclasses import dataclass
 
 import httpx
@@ -243,13 +260,25 @@ def _identificador_da_resposta(resposta: httpx.Response) -> str:
     return identificador
 
 
-async def create_call(*, caller: str, called: str, extension: str) -> Api4ComCreateCallResult:
+async def create_call(
+    *, caller: str, called: str, extension: str, ticket_call_id: uuid.UUID
+) -> Api4ComCreateCallResult:
     """Pede ao fornecedor que inicie uma ligação. NÃO repete em nenhuma hipótese.
 
-    Os três argumentos são repassados como chegaram. Este módulo não conhece
-    DDD, não acrescenta nem remove `+55` e não valida grafia de número: o
-    formato aceito em `called` segue em aberto com o fornecedor, e o transporte
-    não é o lugar de adivinhá-lo.
+    `caller`, `called` e `extension` são repassados como chegaram. Este módulo
+    não conhece DDD, não acrescenta nem remove `+55` e não valida grafia de
+    número: o formato aceito em `called` segue em aberto com o fornecedor, e o
+    transporte não é o lugar de adivinhá-lo.
+
+    `ticket_call_id` é o `id` da linha de `ticket_calls` e é **obrigatório**.
+    Obrigatório de propósito: com um único call site, um parâmetro opcional só
+    criaria a chance de alguém esquecer e a correlação desaparecer sem que teste
+    nenhum reclamasse.
+
+    ⚠️ O tipo é `uuid.UUID`, e não `str`. É a trava que impede telefone, e-mail
+    ou número de chamado de chegarem aqui por descuido de chamador: `mypy`
+    recusa qualquer outra coisa, e a conversão para texto acontece só na
+    montagem do JSON, logo abaixo.
     """
     settings = get_settings()
 
@@ -260,11 +289,14 @@ async def create_call(*, caller: str, called: str, extension: str) -> Api4ComCre
             "API4COM_ENABLED está desligada: nenhuma chamada é iniciada nesse estado"
         )
 
+    # O `metadata` é montado AQUI e em lugar nenhum mais, e o conjunto de chaves
+    # é fechado. `str()` acontece neste ponto porque JSON não tem tipo UUID — a
+    # interface interna segue tipada, e só o corpo da requisição vê texto.
     corpo = {
         "caller": caller,
         "called": called,
         "extension": extension,
-        "metadata": {"gateway": GATEWAY},
+        "metadata": {"gateway": GATEWAY, "ticket_call_id": str(ticket_call_id)},
     }
 
     # `get_secret_value()` aparece uma única vez no módulo, e é aqui. Sem

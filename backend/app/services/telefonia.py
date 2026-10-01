@@ -54,9 +54,14 @@ async def registra_tentativa(
 ) -> TicketCall:
     """Cria a linha `pending`, ANTES de qualquer conversa com o fornecedor.
 
-    Devolve a tentativa já com `id` atribuído — é esse UUID interno que a Fase
-    2C poderá mandar no `metadata` da chamada para reconciliar o webhook com a
-    linha. (Ainda NÃO mandamos: o payload da 2A segue só com `gateway`.)
+    Devolve a tentativa já com `id` atribuído — `TicketCall.id` tem default do
+    lado do Python (`uuid.uuid4`), então o UUID existe desde a construção do
+    objeto, e não depende de o banco responder.
+
+    Desde a Fase 2D.2 esse UUID **é mandado** no `metadata` do `POST /calls`,
+    como `ticket_call_id`, e é a única âncora de reconciliação que temos: medimos
+    que o `id` do `POST` não é o `id` que o `GET /calls` devolve depois. Quem
+    monta o payload é `services/api4com.py`; aqui só nasce o identificador.
     """
     tentativa = TicketCall(
         ticket_id=ticket_id,

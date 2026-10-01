@@ -411,7 +411,45 @@ async def test_o_payload_sai_do_banco_e_das_politicas(redis_falso, liga):
     assert enviado["extension"] == "1019", "o ramal não veio do ator"
     assert enviado["caller"] == "1019", "o caller não seguiu a política"
     assert enviado["called"] == "48933328530", "o called não passou pela política"
-    assert set(enviado) == {"caller", "called", "extension"}
+    assert set(enviado) == {"caller", "called", "extension", "ticket_call_id"}
+
+
+@pytest.mark.asyncio
+async def test_o_ticket_call_id_enviado_e_o_da_linha_criada(redis_falso, liga):
+    """A correlação da Fase 2D.2, comparada contra a LINHA e não contra literal.
+
+    Este é o teste que importa da fase inteira. Ele não confere que "existe
+    alguma coisa" no `ticket_call_id`: ele exige o `id` exato da tentativa que a
+    orquestração acabou de criar. Um literal repetido aqui passaria mesmo se o
+    código mandasse o UUID errado — por exemplo o `ticket_id`, que também é um
+    UUID e está à mão no mesmo escopo.
+    """
+    t, s = _monta()
+    tentativa = await _liga_para(s, ticket=t)
+
+    enviado = liga.await_args.kwargs["ticket_call_id"]
+    assert enviado == tentativa.id
+    # E não é o do chamado: os dois são UUID, e trocar um pelo outro não levanta
+    # erro nenhum — só faz a reconciliação apontar para a linha errada.
+    assert enviado != t.id
+
+
+@pytest.mark.asyncio
+async def test_a_correlacao_e_opaca_por_construcao(redis_falso, liga):
+    """O que viaja é um UUID, e é por isso que não pode carregar PII.
+
+    ⚠️ Aqui NÃO se procura telefone nem e-mail dentro do valor, e a razão é que
+    tal teste seria intermitente: "1019" são quatro dígitos hexadecimais válidos
+    e podem aparecer por acaso num UUID aleatório. A garantia é ESTRUTURAL — se
+    o tipo é `uuid.UUID` e o valor é o `id` da linha, não existe caminho por onde
+    dado de pessoa entre. É o tipo que protege, não a varredura de texto.
+    """
+    t, s = _monta()
+    tentativa = await _liga_para(s, ator=_ator(ramal="1019"), ticket=t)
+
+    enviado = liga.await_args.kwargs["ticket_call_id"]
+    assert isinstance(enviado, uuid.UUID), "a interface interna deixou de ser tipada"
+    assert enviado == tentativa.id
 
 
 def test_caller_segue_o_extension_por_politica_explicita():

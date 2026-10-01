@@ -1463,6 +1463,14 @@ Como o arquivo em disco tem nome interno (uuid), o backend acrescenta
 A anonimização de usuário existe no backend e foi **removida da interface de
 propósito**. Manter o endpoint para uso futuro.
 
+⚠️ **Pendente e bloqueante: a gravação de ligações.** O ramal usado em
+produção **já grava** hoje (`gravar_audio = 1`, medido em 30/09/2026), o áudio
+contém **os dois lados** da conversa e o link do fornecedor é estático e **sem
+prazo de expiração definido**. Nenhuma reprodução ou transcrição pode ser
+oferecida a pessoas antes de decisão sobre finalidade, base legal, aviso,
+quem ouve, retenção, exclusão e auditoria de acesso. A lista completa e as
+evidências estão em **Fases 2D.1 e 2D.2**, em *Pendências conhecidas*.
+
 ---
 
 ## E-mail sem distinção de maiúsculas
@@ -2373,8 +2381,11 @@ de haver efeito externo para depurar junto.
 - **Status 201/202** — idem.
 - **`metadata` com o UUID interno da tentativa**: a documentação afirma que a
   metadata enviada em `POST /calls` chega no webhook, o que abriria a
-  reconciliação do indeterminado. **Não implementado na 2B** — o payload segue
-  só com `gateway`. Decisão da 2C.
+  reconciliação do indeterminado. **Não implementado na 2B** — o payload seguiu
+  só com `gateway` até a **Fase 2D.2**, que o resolveu. ⚠️ Este item dizia
+  "decisão da 2C", e a 2C não o decidiu: quem decidiu foi a 2D.2, depois de a
+  2D.1 medir que as alternativas do fornecedor não serviam. Ver **Fases 2D.1 e
+  2D.2** mais abaixo.
 - **Duplo clique e concorrência**: a 2B não cria unique de `pending` por
   chamado, lock nem rate limit. A tabela só precisa conseguir representar o
   estado; a proteção é decisão da 2C, junto com o endpoint.
@@ -2393,6 +2404,389 @@ por rota, isso não se sustenta:
 A rota atual mostra **uma** grafia. Um exemplo não é especificação — a pergunta
 segue na lista do suporte —, mas é bem mais forte que "três grafias
 contraditórias".
+
+### Fases 2D.1 e 2D.2: a gravação existe, e a correlação do CDR passou a ser nossa
+
+A 2D.1 foi a primeira rodada da telefonia feita **com token, contra produção, só
+leitura**. Ela respondeu perguntas que estavam abertas desde a 2B e, mais
+importante, **derrubou duas suposições** que já estavam escritas neste documento.
+A 2D.2 implementou a única consequência que não dependia de decisão de ninguém.
+
+Vale o registro de método: a 2D.1 foi tentada antes sem token e **parou**. O
+`API4COM_TOKEN` é `SecretStr` alimentado só pelo ambiente do processo, não mora
+em tabela nenhuma, e da máquina de desenvolvimento não há caminho até o
+container — sem SSH, sem docker. A medição só aconteceu quando rodou **dentro**
+do container, por script sanitizado, com `SET default_transaction_read_only = on`
+para que a garantia de leitura fosse do servidor e não da leitura do código.
+
+#### O que foi medido em produção, 30/09/2026
+
+| Medição | Resultado |
+|---|---|
+| `GET /extensions` encontra o ramal **1019** | sim |
+| `gravar_audio` do 1019 | **`1` — gravação LIGADA** |
+| Campo confiável de presença/online no objeto do ramal | **não existe** |
+| `metadata` presente nas chamadas consultadas | **100 de 100** |
+| Chamadas do HelpHS identificáveis por `metadata.gateway="HelpHS"` | sim, **inspecionando localmente** |
+| `record_url` em chamadas atendidas | presente |
+| Host dos `record_url` observados | `listener.api4com.com` |
+| Extensão aparente | `.mp3` |
+| Query string nas URLs observadas | **ausente** |
+| `duration` | inteiro |
+
+Campos que o `GET /calls` devolveu: `id`, `metadata`, `record_url`, `duration`,
+`started_at`, `ended_at`, `call_type`, `hangup_cause`, entre outros.
+
+| Desfecho observado | `hangup_cause` | `duration` | `record_url` |
+|---|---|---|---|
+| atendida | `NORMAL_CLEARING` | `> 0` | presente |
+| não completada | `ORIGINATOR_CANCEL`, `NUMBER_CHANGED` | `0` | ausente |
+
+**Transcrição: nenhum campo apareceu.** Não vieram `transcript`,
+`transcription`, `transcription_text`, `summary`, `quality`, `evaluation` nem
+`analysis`. ⚠️ Isso é afirmação sobre **este endpoint medido**, e nada além:
+não prova que o produto comercial de IA da API4COM não exista. Prova que não se
+pode construir transcrição em cima do `GET /calls` como ele é hoje.
+
+A ressalva se confirmou: em 01/10/2026 o suporte enviou documentação do módulo
+**Native AI**, que é separado e entrega por outro caminho. Ver *O que sabemos
+sobre a Native AI da API4COM* adiante — e a decisão de não contratá-lo.
+
+#### O que o suporte da API4COM confirmou por escrito
+
+**Webphone** — e isto encerra a esperança que a 2C.6 tinha deixado em aberto:
+
+- incluir o domínio `helphs.healthsafetytech.com` **não** habilita comunicação
+  direta com o Webphone;
+- é possível verificar se o **ramal está registrado**, mas isso **não** indica
+  se o Webphone está ativo e disponível para ligar — são coisas diferentes;
+- **não existe evento** que avise o HelpHS quando o ramal ficar online;
+- o Webphone **não pode ser aberto** por sistema externo;
+- com o Webphone **já aberto**, o `POST /calls` consegue direcionar o foco para
+  a extensão.
+
+Consequência, e é regra: **manter o fluxo manual de preparação do Webphone.**
+Não documentar `sessionStorage` nem qualquer sinal local como presença real —
+ele registra que alguém **leu uma orientação**, nunca que o ramal está pronto. O
+HTTP 424 continua sendo o sinal operacional observado de ramal ou Webphone
+indisponível para aquela tentativa. **Não inventar detecção automática de
+disponibilidade**: não existe meio honesto de fazê-la hoje.
+
+**Gravação:**
+
+1. `gravar_audio` é configuração **do ramal**.
+2. Com gravação habilitada, o `record_url` aparece no `GET /calls` e também em
+   payloads de webhook.
+3. O `record_url` normalmente fica disponível **imediatamente** após o
+   encerramento.
+4. **Não há prazo de expiração definido** para a gravação.
+5. O link MP3 é **estático** e permite download e reprodução direta.
+6. A gravação contém **os dois lados** da conversa.
+7. O `GET /calls` aceita filtros por intervalo de datas, ramal e origem/destino.
+8. É possível usar identificador próprio em integrações por meio de `metadata`.
+
+⚠️ O item 8 diz que **dá para enviar** identificador próprio. Ele **não** diz
+que dá para **filtrar** por ele no servidor — e a nossa medição mostrou o
+contrário disso. Ver abaixo.
+
+#### As três âncoras que não servem
+
+Esta é a parte da 2D.1 que mudou o desenho, e cada linha é medição, não leitura
+de documentação.
+
+**1. `provider_call_id` NÃO é chave de reconciliação do CDR.** O identificador
+que o `POST /calls` devolve na criação **não corresponde** ao campo `id` que o
+`GET /calls` devolve depois para a mesma chamada. A correlação exata foi testada
+e deu **0 matches**. Buscar o CDR por ele não encontra.
+
+Ele **continua armazenado e continua valendo** pelo que de fato é: o
+identificador devolvido no efeito de criação. É a prova de que o fornecedor
+aceitou a chamada, é o que sustenta a `CheckConstraint` de `confirmed` e é o que
+torna a tentativa idempotente pelo índice único. O que mudou foi a
+**descrição** — o comentário da coluna sugeria que servia para localizar a
+chamada, e isso agora está medido como falso. Documentação interna sabidamente
+errada é pior que ausente: alguém a leria como contrato.
+
+**2. O filtro server-side por `metadata` NÃO é confiável.** Pedir
+`metadata.gateway = HelpHS` responde **HTTP 200** e devolve registros que **não
+são todos do HelpHS**. Um 200 não é prova de que o filtro filtrou. ⚠️ Nenhuma
+reconciliação futura pode assumir que esse filtro restringe o resultado.
+
+**3. Horário não é identidade.** Foi observada diferença sistemática de
+**aproximadamente 3 horas** entre `ticket_calls.created_at` e o `started_at`
+devolvido pela API4COM. Fica registrado como observação medida e **nada mais**:
+não foi investigado nem corrigido de propósito. Mesmo resolvido, horário não
+serve como mecanismo definitivo de correlação.
+
+#### A decisão: um identificador nosso, opaco, no `metadata`
+
+Caíram as três âncoras do fornecedor. Sobra o que nós mesmos plantamos:
+
+```json
+{ "gateway": "HelpHS", "ticket_call_id": "<UUID interno>" }
+```
+
+`ticket_call_id` é **UUID opaco**: sem telefone, sem nome, sem e-mail, sem
+número do chamado, sem conteúdo do chamado, **sem PII de espécie nenhuma**. Ele
+identifica uma linha do nosso banco e não diz nada sobre quem foi ligado.
+
+A reconciliação futura deve **listar** chamadas, **inspecionar o `metadata`
+localmente** e casar `metadata.ticket_call_id` com `ticket_calls.id`. Não pode
+depender do filtro server-side por `metadata`, não pode depender de
+`provider_call_id` e não pode depender só de horário.
+
+#### Fase 2D.2: o que entrou no código
+
+`api4com.create_call` ganhou um quarto argumento, **obrigatório** e keyword-only:
+
+```python
+create_call(*, caller: str, called: str, extension: str, ticket_call_id: uuid.UUID)
+```
+
+e o corpo do `POST` passou de `{"gateway": "HelpHS"}` para
+`{"gateway": "HelpHS", "ticket_call_id": str(ticket_call_id)}`. O único call
+site, em `ligacao.py`, passa `ticket_call_id=tentativa.id`.
+
+O parâmetro é **obrigatório de propósito**: com um call site só, um opcional
+criaria a chance de alguém esquecer e a correlação desaparecer sem que teste
+nenhum reclamasse.
+
+⚠️ **A porta que a 2A fechou continua fechada.** A 2A proibiu deliberadamente
+passar `metadata` para este módulo, porque duas integrações desta conta estão
+sem filtro de webhook e o que sai daqui pode chegar a endpoints de outros
+sistemas da empresa. A 2D.2 **não** afrouxou isso:
+
+- o `metadata` é montado **exclusivamente** dentro de `api4com.py`;
+- **não existe** parâmetro `metadata: dict`, e também **não existe** `**kwargs`;
+- o conjunto de chaves é **FECHADO** em `{"gateway", "ticket_call_id"}`, e há
+  teste que reprova a chave extra;
+- o tipo interno é `uuid.UUID`, e é essa a trava que impede telefone ou e-mail
+  de entrarem por descuido de chamador — o `str()` acontece só na montagem do
+  JSON.
+
+O `id` já é **durável** quando o fornecedor o recebe: a linha é commitada duas
+vezes antes do efeito externo (`pending` e `dispatching`), então o identificador
+enviado nunca pode ser apagado por um rollback.
+
+Intocados: os seis estados, o tratamento do HTTP 424, a ausência de retry
+automático, o rate limit, o lock do Redis, o `provider_call_id` em si, o schema
+público, os routers, o frontend e os logs. **Nenhuma mudança de schema e
+nenhuma migration** — `ticket_call_id` é a coluna `id` que já existia.
+
+Provado por **mutação, 6 de 6 detectadas e zero sobreviventes**: remover a
+chave, grafá-la em camelCase, enviar o UUID sem `str()`, dar default ao
+parâmetro, acrescentar chave de PII ao `metadata`, e mandar `ticket_id` no lugar
+de `tentativa.id`.
+
+#### ⚠️ A correlação é PROSPECTIVA, e não há backfill
+
+As chamadas criadas antes de a 2D.2 estar em produção já existem **no
+fornecedor** com `metadata` sem `ticket_call_id`. Esse metadata é do lado de lá e
+não há backfill seguro conhecido para reescrevê-lo. A reconciliação determinística
+cobre **apenas** chamadas criadas depois de a instrumentação estar no ar — o
+histórico anterior continua sem âncora, e isso é consequência de medir antes de
+instrumentar, não defeito do desenho.
+
+#### ⚠️ BLOQUEIO: `record_url` é segredo de acesso ao áudio
+
+Juntando o que o suporte confirmou — áudio **bidirecional**, link **estático**,
+**sem expiração definida**, com download direto — o `record_url` é um
+**segredo**: quem tem a URL tem a conversa inteira, das duas pessoas, para
+sempre.
+
+Portanto a arquitetura futura **não deve**:
+
+- mandar `record_url` ao navegador;
+- registrar `record_url` em log;
+- exibir URL externa no frontend;
+- tratar o fornecedor como camada de autorização do HelpHS.
+
+O caminho desejado, quando houver autorização para construí-lo:
+
+```
+API4COM → backend → download controlado → storage privado do HelpHS
+        → endpoint autorizado do HelpHS → staff autorizado
+```
+
+**Não implementar isso agora.**
+
+#### ⚠️ BLOQUEIO: a decisão de privacidade vem antes da função
+
+**Estado atual observado: a gravação já está habilitada no ramal 1019 hoje.**
+Fica registrado como fato, sem tentar resolver o tema jurídico aqui.
+
+Antes de habilitar qualquer reprodução ou transcrição para pessoas, precisa
+existir decisão organizacional e de LGPD sobre: finalidade da gravação; base
+legal; aviso ou consentimento quando aplicável; quem pode ouvir; quem pode ler
+transcrição; retenção do áudio; retenção da transcrição; exclusão; exportação;
+auditoria de acesso; dados sensíveis que possam aparecer na conversa; e política
+de download e compartilhamento.
+
+Isso **não** é trabalho de engenharia e não se resolve escrevendo código. Ver a
+seção **LGPD** deste documento.
+
+#### O que sabemos sobre a Native AI da API4COM — e o que o documento não prova
+
+A ressalva da subseção de medição se confirmou: a transcrição **não aparece** no
+`GET /calls`, e isso nunca significou que o produto não existisse. Ele existe, é
+um módulo separado, e em 01/10/2026 o suporte confirmou e enviou documentação
+técnica. Fica registrado em detalhe porque a decisão de **não usá-lo** (abaixo)
+só tem valor se for possível reconstruir o que foi avaliado.
+
+**O que o suporte confirmou:**
+
+- existe documentação técnica para consumir a transcrição nativa;
+- a transcrição suporta **português do Brasil** e faz **separação dos
+  participantes** da conversa;
+- **Cloud Recordings** para AWS/GCP **não tem documentação de integração
+  disponível** hoje.
+
+**O que o documento técnico demonstra.** O fluxo muda só no último passo:
+
+```
+sem AI:   CRM inicia ligação via API -> API4COM finaliza -> webhook recebe dados da ligação
+com AI:   CRM inicia ligação via API -> API4COM finaliza -> webhook recebe dados da ligação + dados de AI
+```
+
+A entrega é um **envelope de conector** — campos como `connectorName`, `status`,
+`configuration.webhook.url` — que encaminha para uma URL de webhook configurada.
+Dentro dele, `data.output` carrega o resultado de AI e `data.rawInput` **preserva
+o evento original** `channel-hangup`, com campos `id`, `domain`, `direction`,
+`caller`, `called`, `startedAt`, `answeredAt`, `endedAt`, `duration`,
+`hangupCause`, `hangupCauseCode`, `recordUrl` e `metadata`.
+
+O documento mostra **dois cenários**, e a diferença entre eles é operacionalmente
+importante:
+
+| Cenário | `data.output` |
+|---|---|
+| chamada **abaixo** da duração configurada | lista **vazia** |
+| chamada **igual ou acima** da configurada | lista de objetos `{type, mediaType, format, content}` |
+
+Ou seja: **o webhook pode chegar sem nenhum output de AI**, legitimamente, quando
+a chamada não atinge o critério configurado. Quem consumir isso não pode tratar
+lista vazia como erro.
+
+⚠️ **O documento usa placeholders, e placeholder não é especificação.** Ele **não**
+estabelece: os nomes concretos dos tipos de output; qual output corresponde à
+transcrição e qual ao resumo; o formato concreto da separação de participantes; a
+estrutura interna do conteúdo; nem ordem garantida entre os outputs. No exemplo,
+os dois objetos da lista têm **o mesmo placeholder** de tipo — o documento não
+chega a mostrar que eles diferem.
+
+⚠️ **E continua desconhecido**, porque o documento não trata: autenticação do
+webhook recebido pelo HelpHS, HMAC, assinatura criptográfica, retries, número de
+tentativas, timeout, garantia de entrega, política de reenvio, chave de
+idempotência, latência de processamento da AI, comportamento detalhado em falha e
+SLA da transcrição.
+
+Uma precisão que importa para não ler garantia onde não há: o exemplo técnico
+contém um header relacionado a **API key**, e **o valor foi deliberadamente
+omitido** deste registro. Esse header aparece na requisição que chega ao serviço
+de conectores **do próprio fornecedor** — não é evidência de como um webhook
+entregue ao HelpHS seria autenticado. A pergunta de autenticação segue aberta.
+
+**A rota de correlação que isso abriria — capacidade documentada, não plano.**
+Como o `rawInput` preserva o `metadata` enviado na criação da chamada, e como a
+Fase 2D.2 passou a enviar `{"gateway": "HelpHS", "ticket_call_id": "<UUID>"}`,
+existe caminho técnico plausível de `rawInput` → evento `channel-hangup` →
+`metadata.ticket_call_id` → `ticket_calls.id`. Fica registrado como **hipótese
+arquitetural**, não como decisão e não como trabalho previsto.
+
+**Custos informados pelo suporte em 01/10/2026** — informação comercial recebida
+nessa data, e **não** preço permanente, contratual ou garantido:
+
+| Item | Custo informado |
+|---|---|
+| Gravação padrão de áudio | incluída; **sem custo adicional informado** para gravar e armazenar na plataforma |
+| IA / transcrição por IA | **assinatura separada**: R$ 99,90 por usuário/mês no plano anual, R$ 129,90 no mensal |
+
+**Observação sobre os dois relógios do exemplo.** No payload de exemplo,
+`created_at` vem com sufixo `Z` (UTC) enquanto `startedAt`, `answeredAt` e
+`endedAt` vêm como texto **sem marcador de fuso**, e a diferença entre os dois
+relógios no próprio exemplo é de pouco mais de três horas. Isso é **consistente**
+com a diferença de ~3h que medimos entre `ticket_calls.created_at` e o
+`started_at` do fornecedor, e torna "campo sem fuso" uma hipótese mais plausível
+que "relógio errado". ⚠️ **Não é prova** — os dois campos do exemplo não
+descrevem o mesmo instante — e **nada foi investigado nem corrigido**. A regra da
+subseção anterior continua valendo integralmente: horário não é identidade.
+
+#### Decisão de negócio: IA paga está FORA DE ESCOPO
+
+**O HelpHS não contratará, não assinará e não pagará serviço de IA para
+transcrição.** É decisão de negócio do projeto, não conclusão técnica, e por isso
+nenhuma medição a reabre.
+
+Consequências, explícitas para quem for planejar:
+
+- a **Native AI da API4COM está fora de escopo**; não planejar a contratação
+  desse módulo e não construir integração que dependa dele;
+- a solução paga do fornecedor **não** é o caminho futuro do HelpHS;
+- também estão fora: OpenAI API, Google Speech-to-Text, AWS Transcribe e
+  **qualquer** serviço de IA pago como solução de transcrição.
+
+⚠️ A Native AI **não foi apagada** deste documento de propósito. Ela existe, o
+suporte a confirmou, o documento técnico demonstra o formato, e ela foi
+**descartada por custo**. Registrar as três coisas juntas preserva a história
+técnica sem que alguém confunda evidência recebida com opção ativa de roadmap —
+e evita que a avaliação seja refeita do zero daqui a um ano.
+
+#### Direção futura: transcrição local ou self-hosted
+
+A transcrição futura do HelpHS, se houver, deve ser **local ou self-hosted**:
+executada na nossa infraestrutura, **sem assinatura recorrente** de serviço
+externo de IA e **sem custo por usuário ou por chamada** para fornecedor de IA.
+
+**Whisper self-hosted é citado como candidato técnico — e nada além disso.** Não
+está escolhido. Antes de escolher tecnologia, ainda é preciso **medir**: CPU
+disponível; GPU disponível ou não; memória; duração média dos áudios; tamanho
+médio dos MP3; concorrência; fila; tempo de processamento; throughput; qualidade
+em PT-BR; necessidade de diarização; custo da própria infraestrutura; retenção;
+LGPD; isolamento dos arquivos; e estratégia de processamento assíncrono.
+
+Nenhum desses números existe hoje. Escolher a ferramenta antes de medir seria
+repetir o erro de método que a Fase 2B já pagou — tratar o que não foi medido
+como se estivesse decidido.
+
+#### ⚠️ Diarização não vem de graça na solução própria
+
+O suporte informou que a **Native AI paga** separa os participantes da conversa.
+Isso é fato sobre o produto **do fornecedor**, e não se transfere.
+
+Numa solução self-hosted, separação de participantes (*speaker diarization*) é
+capacidade **separada**, que precisa ser investigada e medida por conta própria.
+**Não prometer diarização na primeira versão sem medição.** A gravação conter os
+dois lados da conversa torna a transcrição possível; não torna a atribuição de
+falas resolvida.
+
+#### O próximo trabalho técnico — e por que ele não tem número aqui
+
+Depois de a 2D.2 estar integrada e implantada, **e** depois da decisão de
+privacidade acima, o próximo trabalho técnico é **desenhar a reconciliação de
+CDR e gravação**: listar chamadas, casar `metadata.ticket_call_id` localmente,
+e decidir o que o HelpHS passa a guardar.
+
+A ordem é esta, e cada passo depende do anterior:
+
+1. **2D.2 integrada e implantada**, para que chamadas novas carreguem
+   `ticket_call_id` — sem isso não há o que reconciliar;
+2. **decisão organizacional e de LGPD** (ver o bloqueio acima);
+3. **reconciliação de CDR e gravação**;
+4. **download seguro do áudio pelo backend**;
+5. **storage privado** do HelpHS;
+6. **avaliação de STT local ou self-hosted**, com as medições listadas acima;
+7. **só depois** implementação de transcrição.
+
+Duas coisas **não entram** nesse roteiro, e é deliberado. A **Native AI da
+API4COM** não entra como solução candidata, por decisão de negócio. E o **Cloud
+Recordings para AWS/GCP** não entra como dependência, por dois motivos somados:
+não há documentação de integração disponível, e a arquitetura pretendida —
+download pelo backend para storage próprio — não precisa dele.
+
+Deliberadamente **sem número de fase atribuído**. A numeração `2D.x` não foi
+reservada em lugar nenhum deste documento, e batizar a próxima fase sem que o
+roadmap a tenha reservado criaria conflito com qualquer uso futuro da mesma
+numeração. Quem for abrir a fase escolhe o número no roadmap, não aqui.
 
 ### Antivírus (ClamAV) não está no ambiente
 
