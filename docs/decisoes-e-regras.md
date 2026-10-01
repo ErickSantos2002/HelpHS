@@ -2578,6 +2578,51 @@ chave, grafá-la em camelCase, enviar o UUID sem `str()`, dar default ao
 parâmetro, acrescentar chave de PII ao `metadata`, e mandar `ticket_id` no lugar
 de `tentativa.id`.
 
+#### Validação ponta a ponta em produção
+
+**Fase 2D.2 validada ponta a ponta em produção** em 01/10/2026, com uma chamada
+controlada feita **depois** do deploy — nenhuma chamada histórica foi reutilizada,
+porque a correlação é prospectiva e reaproveitar o passado provaria outra coisa.
+
+| O que foi verificado | Resultado |
+|---|---|
+| Chamada posterior ao deploy | sim |
+| `creation_status` | `confirmed` |
+| `provider_http_status` | 200 |
+| `provider_call_id` presente | sim |
+| `GET /calls` | HTTP 200 |
+| CDR localizado por `metadata.ticket_call_id` | **sim** |
+| `metadata.gateway` | `HelpHS` |
+| `metadata.ticket_call_id` == `ticket_calls.id` | **igualdade exata** |
+| `duration` | 9 |
+| `hangup_cause` | `NORMAL_CLEARING` |
+| `record_url` presente | sim, host `listener.api4com.com` |
+
+O CDR foi achado **sem usar `provider_call_id`** e **sem heurística de horário** —
+listando chamadas e inspecionando o `metadata` localmente, que é exatamente o
+procedimento que a 2D.1 tinha indicado como o único confiável. Nenhum áudio foi
+baixado, o `record_url` não foi aberto, e nenhuma escrita tocou o banco durante a
+validação (a consulta correu com `default_transaction_read_only = on`, para que a
+garantia fosse do servidor e não da leitura do código).
+
+**O que isto fecha, e que vale como regra daqui para frente:**
+
+- **`metadata.ticket_call_id` é a chave determinística de correlação** de CDR para
+  chamadas novas. Determinística, e não heurística: é igualdade de UUID.
+- A correlação é **prospectiva**. Chamadas anteriores a este deploy continuam sem
+  esse `metadata` do lado do fornecedor, e não há backfill — ver a subseção
+  seguinte.
+- **`provider_call_id` continua armazenado e continua NÃO sendo chave do CDR.**
+  Vale pelo que é: prova de que a criação foi aceita.
+- **Horário não é chave.** Serve, no máximo, para separar "antes" de "depois" de
+  um deploy.
+- **O filtro server-side por `metadata` continua não confiável** — responde 200 e
+  traz registros alheios. Quem reconciliar inspeciona localmente.
+
+⚠️ Validada a correlação, **nada sobre gravação foi liberado**. O HelpHS ainda não
+baixa, não armazena, não reproduz e não transcreve áudio, e os dois BLOQUEIOS
+abaixo continuam de pé.
+
 #### ⚠️ A correlação é PROSPECTIVA, e não há backfill
 
 As chamadas criadas antes de a 2D.2 estar em produção já existem **no
