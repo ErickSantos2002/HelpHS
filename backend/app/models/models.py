@@ -1554,6 +1554,19 @@ class TicketCall(Base):
     # `UUID` do PostgreSQL: o tipo nativo rejeitaria o primeiro formato, e o
     # HelpHS quebraria por validar algo que o fornecedor nunca prometeu.
     # Nada é validado, nada é transformado — o valor volta como chegou.
+    #
+    # ⚠️ O QUE ELE É, MEDIDO: o identificador que o `POST /calls` devolve na
+    # criação. Nada além disso. A medição autenticada de 30/09/2026 provou que
+    # ele **não corresponde** ao campo `id` que o `GET /calls` devolve depois
+    # para a mesma chamada — ou seja, ele NÃO é chave de reconciliação do CDR, e
+    # buscar o CDR por ele não encontra. Quem reconcilia é o `ticket_call_id`
+    # que a Fase 2D.2 passou a plantar no `metadata` do `POST`.
+    #
+    # Ele continua valendo, e por isso não saiu: é a prova de que o fornecedor
+    # aceitou a criação, é o que sustenta a `CheckConstraint` de `confirmed` e é
+    # o que torna a tentativa idempotente pelo índice único. Trocar o significado
+    # documentado por "chave do CDR" seria descrever o campo pelo que
+    # gostaríamos que ele fosse.
     provider_call_id: Mapped[str | None] = mapped_column(Text, nullable=True)
     creation_status: Mapped[str] = mapped_column(String(20), nullable=False)
     # O status HTTP que o fornecedor devolveu, quando houve resposta. NULL
