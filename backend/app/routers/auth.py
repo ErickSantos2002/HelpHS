@@ -54,10 +54,9 @@ from app.schemas.auth import (
     TokenResponse,
 )
 from app.services import account_tokens, consentimento, consulta_externa, mfa, mfa_challenge
-from app.services.account_emails import (
-    send_account_exists_email,
-    send_password_reset_email,
-    send_verification_email,
+from app.services.email_outbox import (
+    enfileira_email_de_conta_em_segundo_plano,
+    enqueue_account_email,
 )
 
 router = APIRouter(prefix="/auth", tags=["Auth"])
@@ -140,7 +139,6 @@ async def lookup_cep(
 async def register(
     body: RegisterRequest,
     request: Request,
-    background: BackgroundTasks,
     db: Annotated[AsyncSession, Depends(get_db)],
 ) -> RegisterResponse:
     existing = await db.execute(select(User).where(User.email == body.email))
@@ -167,7 +165,17 @@ async def register(
                 detail="Este e-mail já está cadastrado.",
             )
 
-        background.add_task(send_account_exists_email, body.email, settings)
+        # Fase 3C: enfileira na MESMA transação (não há BackgroundTasks aqui —
+        # ao contrário de forgot-password/resend-verification, este ramo já
+        # sempre teve um `User` de propósito (`ja_existe`) e o SELECT acima é
+        # feito nos dois ramos de `register`; a diferença de custo síncrono
+        # entre "existe" e "não existe" já era maior no ramo "não existe" (que
+        # cria User + AuditLog + LgpdConsent) antes desta fase — um INSERT a
+        # mais aqui não abre um oráculo novo).
+        enqueue_account_email(
+            db, user_id=ja_existe.id, event_type="account_exists", intent_id=uuid.uuid4()
+        )
+        await db.commit()
         logger.info("Register attempt on existing account (neutral response)")
         return RegisterResponse(email=body.email, email_verified=not exige_confirmacao)
 
@@ -199,18 +207,21 @@ async def register(
         ip=request.client.host if request.client else None,
         agora=now,
     )
+
+    # Fase 3C: User + AuditLog + LgpdConsent + a intenção de e-mail, tudo na
+    # MESMA transação — se o commit falhar (protocolo duplicado, etc.), nem o
+    # usuário nem a outbox existem, e a tentativa seguinte começa limpa. Nem
+    # token nem SMTP acontecem aqui: o worker da outbox gera o token e manda
+    # o e-mail, em outro ciclo — ver `app/services/email_outbox.py`.
+    if exige_confirmacao:
+        enqueue_account_email(
+            db, user_id=user.id, event_type="verification", intent_id=uuid.uuid4()
+        )
+
     await db.commit()
     await db.refresh(user)
 
     if exige_confirmacao:
-        token = account_tokens.create_email_verification_token(
-            user.id, user.email_verified, settings
-        )
-        # Agendado, não aguardado: era o único dos três fluxos de e-mail que
-        # segurava o handler no SMTP, sem timeout. Servidor lento atrasava o
-        # cadastro; servidor que não responde o segurava até o timeout do
-        # proxy. O `forgot-password` e o `resend-verification` já faziam assim.
-        background.add_task(send_verification_email, user.email, user.name, token, settings)
         logger.info(f"New client registered (awaiting confirmation): user_id={user.id}")
     else:
         logger.warning(
@@ -289,9 +300,16 @@ async def resend_verification(
     A resposta é sempre a mesma, exista ou não a conta: caso contrário qualquer
     pessoa poderia descobrir quais e-mails estão cadastrados.
 
-    Mesma mensagem não basta: o envio vai para segundo plano porque só o ramo
-    da conta existente manda e-mail, e aguardá-lo aqui faria o RELÓGIO dizer o
-    que a mensagem cala. Ver `forgot_password`.
+    Mesma mensagem não basta: o ENFILEIRAMENTO vai para segundo plano porque só
+    o ramo da conta existente escreve na outbox, e aguardá-lo aqui faria o
+    RELÓGIO dizer o que a mensagem cala — o mesmo raciocínio de antes da Fase
+    3C, só que agora sobre um INSERT em vez de um SMTP. Ver `forgot_password` e
+    a auditoria da Fase 3C (achado central).
+
+    Nem token nem SMTP acontecem neste processo: o worker da outbox gera o
+    token e manda o e-mail, em outro ciclo. `BackgroundTasks` aqui só abre uma
+    sessão curta e enfileira — ver
+    `email_outbox.enfileira_email_de_conta_em_segundo_plano`.
     """
     neutra = MessageResponse(
         message="Se este e-mail estiver cadastrado e ainda não confirmado, você receberá o link."
@@ -303,8 +321,9 @@ async def resend_verification(
     if user is None or user.email_verified or not settings.requires_email_verification():
         return neutra
 
-    token = account_tokens.create_email_verification_token(user.id, user.email_verified, settings)
-    background.add_task(send_verification_email, user.email, user.name, token, settings)
+    background.add_task(
+        enfileira_email_de_conta_em_segundo_plano, user.id, "verification", uuid.uuid4()
+    )
     logger.info(f"Verification email queued (resend): user_id={user.id}")
     return neutra
 
@@ -326,14 +345,24 @@ async def forgot_password(
     Também responde igual para e-mail inexistente — a mensagem nunca confirma
     se alguém tem conta no sistema.
 
-    E também não pode confirmar pelo RELÓGIO. O SMTP só é chamado no ramo da
-    conta existente, então enquanto o envio fosse aguardado aqui dentro os dois
-    ramos respondiam em tempos diferentes: o mesmo oráculo de enumeração que o
-    `f8e6013` fechou no login, renascendo ao lado dele. Com `BackgroundTasks` a
-    resposta sai antes de o envio começar e os dois ramos custam o mesmo.
+    E também não pode confirmar pelo RELÓGIO. Nem o ENFILEIRAMENTO pode
+    acontecer síncrono só no ramo da conta existente: um `INSERT`+`COMMIT` que
+    só um dos dois ramos faz é, de novo, o mesmo oráculo de enumeração que o
+    `f8e6013` fechou no login — só que medido em I/O de banco, não em SMTP.
+    Achado da auditoria da Fase 3C, registrado ali como risco central: mover o
+    enqueue para dentro do request (o ideal de atomicidade da Fase 3B) reabriria
+    exatamente isto. Por isso o enqueue continua em `BackgroundTasks`, do
+    mesmo jeito que o SMTP síncrono estava antes — a resposta sai antes de
+    qualquer escrita relacionada a e-mail acontecer, nos dois ramos.
 
-    Hoje isso não é mensurável em produção porque não há SMTP configurado — o
-    oráculo nasceria pronto no dia em que ligassem.
+    Isto mantém uma pequena janela de não-durabilidade entre a resposta HTTP e
+    o commit do `BackgroundTask` — documentada em
+    `email_outbox.enfileira_email_de_conta_em_segundo_plano` — de propósito:
+    é o preço de não reabrir o oráculo de tempo.
+
+    Hoje isso não é mensurável em produção porque há pouquíssimos usuários — o
+    oráculo se tornaria observável na escala em que a diferença de tempo entre
+    "com outbox" e "sem outbox" deixasse de ser ruído estatístico.
     """
     # Sem SMTP, prometer um e-mail que não vai sair só faria a pessoa esperar.
     # Isto revela configuração do sistema, não dados de usuário.
@@ -359,8 +388,9 @@ async def forgot_password(
     if user is None or user.status != UserStatus.active:
         return neutra
 
-    token = account_tokens.create_password_reset_token(user.id, user.password, settings)
-    background.add_task(send_password_reset_email, user.email, user.name, token, settings)
+    background.add_task(
+        enfileira_email_de_conta_em_segundo_plano, user.id, "password_reset", uuid.uuid4()
+    )
     logger.info(f"Password reset queued: user_id={user.id}")
     return neutra
 

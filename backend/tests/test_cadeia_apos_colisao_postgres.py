@@ -41,13 +41,14 @@ _PRODUCAO = "j6e7f8a9b0c1"
 _RAMAL = "d68500999f24"
 _DISPATCHING = "8d08cbca1768"
 _SLA_ALERT_EVENTS = "f7a8b9c0d1e2"
+_EMAIL_OUTBOX = "ae3cf7068dd6"
 
 # A PONTA da cadeia. ⚠️ Toda migration nova precisa mover esta constante — é o
 # preço de prender a ponta, e o preço é de propósito: uma migration irmã nascida
 # com o mesmo pai criaria DOIS heads sem conflito textual nenhum, e foi assim
 # que a colisão que nomeia este arquivo passou por todos os gates.
 # Mover esta linha é o momento em que alguém OLHA para o grafo.
-_HEAD = "ae3cf7068dd6"  # outbox de e-mail (Fase 3A, 29/09/2026)
+_HEAD = "c8b8d6994fae"  # outbox de conta e autenticação (Fase 3C, 30/09/2026)
 
 
 async def _versao(conn) -> str:
@@ -204,10 +205,13 @@ def test_a_cadeia_e_linear_e_tem_um_head_so():
     assert heads == [_HEAD], f"heads: {heads}"
 
     # E a ordem que importa: LGPD antes do ramal, ramal antes do dispatching, o
-    # aviso de SLA depois dele, e a outbox de e-mail depois do aviso de SLA. Cada
-    # elo é uma afirmação separada de propósito: "tem um head só" não diz NADA
-    # sobre a ordem, e foi a ordem que a colisão embaralhou.
-    assert pai[_HEAD] == _SLA_ALERT_EVENTS
+    # aviso de SLA depois dele, a outbox de e-mail (Fase 3A) depois do aviso de
+    # SLA, e a outbox de conta/autenticação (Fase 3C, generaliza a mesma
+    # tabela) depois dela. Cada elo é uma afirmação separada de propósito: "tem
+    # um head só" não diz NADA sobre a ordem, e foi a ordem que a colisão
+    # embaralhou.
+    assert pai[_HEAD] == _EMAIL_OUTBOX
+    assert pai[_EMAIL_OUTBOX] == _SLA_ALERT_EVENTS
     assert pai[_SLA_ALERT_EVENTS] == _DISPATCHING
     assert pai[_DISPATCHING] == _RAMAL
     assert pai[_RAMAL] == _PRODUCAO

@@ -1,13 +1,20 @@
 """
-Outbox durável de e-mail — Fase 3A (estrutura, worker) + Fase 3B (migração das
+Outbox durável de e-mail — Fase 3A (estrutura, worker) + Fase 3B (notificações
 
-notificações operacionais).
+operacionais) + Fase 3C (conta/autenticação).
 
 Desde a Fase 3B, `notifications.py` grava `Notification` + `EmailOutbox` na
 MESMA transação (via `enqueue_email`, chamado de dentro de `notify`/
 `notifica_audiencia`) — o antigo fire-and-forget (`commit_e_notificar` →
-`asyncio.create_task`) não existe mais. Os e-mails de conta/autenticação
-continuam via `BackgroundTasks`, fora desta outbox — ficam para a Fase 3C.
+`asyncio.create_task`) não existe mais.
+
+Desde a Fase 3C, os três e-mails de conta/autenticação (`verification`,
+`password_reset`, `account_exists`) também passam por aqui, via
+`enqueue_account_email` — mas SEM `Notification` por baixo: essa origem
+referencia `user_id`+`event_type` direto (ver `app/models/models.py:
+EmailOutbox` para a CHECK que garante as duas origens nunca se misturarem).
+O token JWT nunca é persistido — é gerado pelo worker, em `_processa_conta`,
+no momento do envio, a partir do `User` carregado por `user_id`.
 
 Por que roda dentro da API, e não numa fila
 --------------------------------------------
@@ -54,7 +61,8 @@ from sqlalchemy import func, select, update
 from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker
 
 from app.core.config import Settings, get_settings
-from app.models.models import EmailOutbox, Notification, NotificationType, Ticket, User
+from app.models.models import EmailOutbox, Notification, NotificationType, Ticket, User, UserStatus
+from app.services import account_emails, account_tokens
 from app.services.email import (
     EmailDeliveryResult,
     EmailDeliveryStatus,
@@ -95,6 +103,77 @@ def enqueue_email(
     )
     db.add(outbox)
     return outbox
+
+
+_EVENT_TYPES_CONTA = frozenset({"verification", "password_reset", "account_exists"})
+
+
+def enqueue_account_email(
+    db: AsyncSession,
+    *,
+    user_id: uuid.UUID,
+    event_type: str,
+    intent_id: uuid.UUID | str,
+    agora: datetime | None = None,
+) -> EmailOutbox:
+    """Adiciona a linha da outbox de CONTA à sessão recebida — mesma regra de
+
+    `enqueue_email`: não abre sessão própria, não commita, quem chama
+    continua dono da transação.
+
+    `intent_id` é OBRIGATÓRIO e vem de fora — esta função não gera um UUID
+    novo internamente. Isso é o que separa duplicação técnica (o CHAMADOR
+    reusa o mesmo `intent_id` — mesma requisição, retry de framework — e
+    colide na UNIQUE de `dedup_key`) de um pedido novo legítimo (o chamador
+    gera um `intent_id` novo a cada request de negócio — ex.: cada clique em
+    "esqueci minha senha" — e a `dedup_key` sai diferente, sem colidir).
+
+    `dedup_key = f"{event_type}:{user_id}:{intent_id}"` — o mesmo papel que
+    `UNIQUE(notification_id)` cumpre para a origem Notification, adaptado
+    para uma origem sem `Notification` para ancorar a identidade.
+    """
+    if event_type not in _EVENT_TYPES_CONTA:
+        raise ValueError(f"event_type desconhecido: {event_type}")
+
+    outbox = EmailOutbox(
+        id=uuid.uuid4(),
+        user_id=user_id,
+        event_type=event_type,
+        dedup_key=f"{event_type}:{user_id}:{intent_id}",
+        status="pending",
+        attempts=0,
+        next_attempt_at=agora or datetime.now(UTC),
+    )
+    db.add(outbox)
+    return outbox
+
+
+async def enfileira_email_de_conta_em_segundo_plano(
+    user_id: uuid.UUID, event_type: str, intent_id: uuid.UUID
+) -> None:
+    """Abre uma sessão curta própria e SÓ enfileira — nunca manda SMTP.
+
+    Usada via `BackgroundTasks` em `forgot_password`/`resend_verification`
+    (`app/routers/auth.py`): esses dois fluxos não têm alteração de negócio
+    para ancorar a intenção na mesma transação do request (diferente de
+    `register`, que sempre cria ou encontra um `User`) — mover só o ENQUEUE
+    para depois da resposta preserva a neutralidade de tempo entre "usuário
+    existe" e "usuário não existe" que esses dois endpoints já garantiam
+    antes da Fase 3C (ver a auditoria da Fase 3C, achado central).
+
+    Isto reabre, deliberadamente, uma pequena janela de não-durabilidade
+    entre a resposta HTTP sair e este commit acontecer: se o processo morrer
+    nesse intervalo exato, a intenção se perde e a pessoa não recebe o
+    e-mail, sem nenhum registro de que deveria. A janela é bem menor que a de
+    antes da Fase 3 inteira (só um INSERT, não mais um SMTP síncrono
+    aguardado), mas não é zero — é o preço de não reabrir o oráculo de tempo
+    de resposta, e foi uma escolha deliberada, não um descuido.
+    """
+    from app.core.database import AsyncSessionLocal
+
+    async with AsyncSessionLocal() as db:
+        enqueue_account_email(db, user_id=user_id, event_type=event_type, intent_id=intent_id)
+        await db.commit()
 
 
 # ══════════════════════════════════════════════════════════════
@@ -292,6 +371,9 @@ async def _persiste_resultado(
     haveria, porque `sent` não tenta de novo). Em retry ou `dead`,
     `email_sent` simplesmente não é tocado — continua `False`, o valor com
     que `Notification` sempre nasce.
+
+    Linhas de origem Account (Fase 3C) não têm `Notification` — `outbox.
+    notification_id` é `None` para elas, e o UPDATE nunca é tentado.
     """
     agora = agora or datetime.now(UTC)
     async with db_factory() as db:
@@ -303,9 +385,10 @@ async def _persiste_resultado(
             outbox.status = "sent"
             outbox.sent_at = agora
             outbox.last_error = None
-            notif = await db.get(Notification, outbox.notification_id)
-            if notif is not None:
-                notif.email_sent = True
+            if outbox.notification_id is not None:
+                notif = await db.get(Notification, outbox.notification_id)
+                if notif is not None:
+                    notif.email_sent = True
         else:
             outbox.attempts += 1
             outbox.last_error = resultado.error_summary
@@ -322,16 +405,15 @@ async def _persiste_resultado(
         await db.commit()
 
 
-async def _processa_um(
+async def _processa_notification(
     db_factory: async_sessionmaker[AsyncSession],
     settings: Settings,
     outbox_id: uuid.UUID,
+    notification_id: uuid.UUID,
 ) -> None:
+    """A origem Notification (Fase 3A/3B) — inalterada pela Fase 3C."""
     async with db_factory() as db:
-        outbox = await db.get(EmailOutbox, outbox_id)
-        if outbox is None or outbox.status != "processing":
-            return  # já tratada por outro caminho; defensivo
-        contexto = await _carrega_contexto(db, outbox.notification_id)
+        contexto = await _carrega_contexto(db, notification_id)
 
     if contexto is None:
         # Não deveria acontecer: `notification_id` tem FK com CASCADE, então a
@@ -355,6 +437,131 @@ async def _processa_um(
         contexto=f"outbox {outbox_id}",
     )
     await _persiste_resultado(db_factory, outbox_id, resultado)
+
+
+# Motivos seguros para `last_error` quando a linha vai para `dead` sem
+# tentativa de SMTP — nunca PII, mesma disciplina de `_resumo_do_erro`.
+_CONTA_USUARIO_NAO_ENCONTRADO = "AccountUserNotFound"
+_CONTA_USUARIO_ANONIMIZADO = "AccountUserAnonymized"
+_CONTA_USUARIO_INATIVO = "AccountUserInactive"
+_CONTA_VERIFICACAO_JA_CONCLUIDA = "AccountAlreadyVerified"
+
+
+async def _processa_conta(
+    db_factory: async_sessionmaker[AsyncSession],
+    settings: Settings,
+    outbox_id: uuid.UUID,
+    user_id: uuid.UUID,
+    event_type: str,
+) -> None:
+    """A origem Account (Fase 3C) — verification/password_reset/account_exists.
+
+    Elegibilidade checada ANTES de qualquer tentativa de SMTP, na ordem que a
+    auditoria da Fase 3C fechou:
+
+    1. usuário sumiu (`ON DELETE CASCADE` já deveria ter levado a linha junto
+       — chegar aqui é defensivo) → dead, sem SMTP;
+    2. `anonymized` → dead, sem SMTP. Nunca tenta mandar para o endereço
+       sintético (`anon_...@anonymized.invalid`) que a anonimização grava —
+       checagem explícita de `status`, não confiança em bounce de DNS;
+    3. `password_reset` para usuário `inactive` → dead, sem SMTP. Ninguém
+       consegue logar mesmo, o link não serviria para nada;
+    4. `verification` quando `email_verified` já é `True` (confirmado por
+       outro caminho entre o enqueue e o processamento) → dead, sem SMTP —
+       mandar a confirmação de novo seria ruído, e o link gerado nem
+       validaria (`vrf` do token bateria com o estado atual, mas o endpoint
+       de confirmação já responde "já estava confirmado" antes de checar o
+       token).
+
+    `verification`/`account_exists` para `inactive` são PERMITIDOS — só
+    `password_reset` é bloqueado por status.
+
+    O token, quando o evento tem um, nasce AQUI — nunca antes, nunca
+    persistido (ver `app/services/account_tokens.py` e a auditoria da Fase
+    3C: a validação compara estado embutido contra o estado ATUAL do usuário,
+    não contra um registro de qual foi o último token emitido, então gerar no
+    momento do envio é seguro e não precisa de token duplicado no banco).
+    """
+    async with db_factory() as db:
+        user = await db.get(User, user_id)
+
+    if user is None:
+        await _persiste_resultado(
+            db_factory,
+            outbox_id,
+            EmailDeliveryResult(
+                EmailDeliveryStatus.permanent_failure, _CONTA_USUARIO_NAO_ENCONTRADO
+            ),
+        )
+        return
+
+    if user.status == UserStatus.anonymized:
+        await _persiste_resultado(
+            db_factory,
+            outbox_id,
+            EmailDeliveryResult(EmailDeliveryStatus.permanent_failure, _CONTA_USUARIO_ANONIMIZADO),
+        )
+        return
+
+    if event_type == "password_reset" and user.status == UserStatus.inactive:
+        await _persiste_resultado(
+            db_factory,
+            outbox_id,
+            EmailDeliveryResult(EmailDeliveryStatus.permanent_failure, _CONTA_USUARIO_INATIVO),
+        )
+        return
+
+    if event_type == "verification" and user.email_verified:
+        await _persiste_resultado(
+            db_factory,
+            outbox_id,
+            EmailDeliveryResult(
+                EmailDeliveryStatus.permanent_failure, _CONTA_VERIFICACAO_JA_CONCLUIDA
+            ),
+        )
+        return
+
+    token: str | None = None
+    if event_type == "verification":
+        token = account_tokens.create_email_verification_token(
+            user.id, user.email_verified, settings
+        )
+    elif event_type == "password_reset":
+        token = account_tokens.create_password_reset_token(user.id, user.password, settings)
+    # account_exists: sem token.
+
+    assunto, texto, html = account_emails.conteudo_da_conta(
+        event_type, name=user.name, token=token, settings=settings
+    )
+    resultado = await send_email_detalhado(
+        user.email,
+        assunto,
+        texto,
+        settings,
+        html=html,
+        contexto=f"outbox {outbox_id}",
+    )
+    await _persiste_resultado(db_factory, outbox_id, resultado)
+
+
+async def _processa_um(
+    db_factory: async_sessionmaker[AsyncSession],
+    settings: Settings,
+    outbox_id: uuid.UUID,
+) -> None:
+    async with db_factory() as db:
+        outbox = await db.get(EmailOutbox, outbox_id)
+        if outbox is None or outbox.status != "processing":
+            return  # já tratada por outro caminho; defensivo
+        notification_id = outbox.notification_id
+        user_id = outbox.user_id
+        event_type = outbox.event_type
+
+    if notification_id is not None:
+        await _processa_notification(db_factory, settings, outbox_id, notification_id)
+    else:
+        assert user_id is not None and event_type is not None  # garantido pela CHECK do banco
+        await _processa_conta(db_factory, settings, outbox_id, user_id, event_type)
 
 
 async def processa_lote(
