@@ -464,6 +464,83 @@ async def test_dois_limpadores_concorrentes_pegam_lotes_disjuntos(
         assert await _total(sessao) == 0
 
 
+@pytest.mark.asyncio
+async def test_a_limpeza_nao_espera_por_linha_travada_por_outra_transacao(
+    db_factory, url_do_banco, usuario
+):
+    """O teste que nasceu de um MUTANTE SOBREVIVENTE.
+
+    O teste de cima — dois limpadores em `asyncio.gather` — passava igual com
+    `skip_locked=False`, e por um motivo que vale escrever: sem `SKIP LOCKED` o
+    segundo limpador BLOQUEIA no `FOR UPDATE` até o primeiro commitar, acorda,
+    não encontra mais as linhas e apaga zero. A soma continua exata, o total
+    continua zero, e as asserções de lá seguem verdes. Elas provam DISJUNÇÃO —
+    que é correção — e disjunção também existe com bloqueio.
+
+    O que `SKIP LOCKED` garante além disso é NÃO ESPERAR, e é só isso que
+    separa "ineficiente" de "a limpeza pendura atrás de uma transação alheia".
+    Para medir isso é preciso um lock que NÃO se solta: aqui uma terceira sessão
+    segura 5 linhas com a transação aberta, e a limpeza tem de voltar depressa
+    tendo pulado exatamente aquelas 5.
+
+    O `wait_for` é o detector: com `skip_locked=False` esta chamada ficaria
+    presa até o `rollback` lá embaixo, que nunca chega — e o teste falha por
+    tempo, em vez de passar por acidente.
+    """
+    total = 12
+    travadas = 5
+    base = _AGORA - timedelta(days=_RETENCAO_SENT + 10)
+
+    # `sent_at` distinto por linha: a limpeza ordena por ele, então travar as
+    # 5 MAIS ANTIGAS é travar justamente as que ela tentaria primeiro.
+    async with db_factory() as sessao:
+        sessao.add_all(
+            [
+                _monta_linha(
+                    usuario,
+                    status="sent",
+                    next_attempt_at=base,
+                    sent_at=base + timedelta(minutes=i),
+                )
+                for i in range(total)
+            ]
+        )
+        await sessao.commit()
+
+    motor_travador = create_async_engine(url_do_banco)
+    try:
+        fabrica_travador = async_sessionmaker(motor_travador, expire_on_commit=False)
+        async with fabrica_travador() as travador:
+            presas = (
+                (
+                    await travador.execute(
+                        select(EmailOutbox.id)
+                        .where(EmailOutbox.status == "sent")
+                        .order_by(EmailOutbox.sent_at)
+                        .limit(travadas)
+                        .with_for_update()
+                    )
+                )
+                .scalars()
+                .all()
+            )
+            assert len(presas) == travadas
+
+            # A transação do travador segue ABERTA aqui: as 5 estão presas.
+            apagados = await asyncio.wait_for(
+                limpa_expirados(db_factory, _settings(), agora=_AGORA), timeout=15
+            )
+            await travador.rollback()
+    finally:
+        await motor_travador.dispose()
+
+    assert apagados["sent"] == total - travadas, "a limpeza não pulou as linhas travadas"
+
+    async with db_factory() as sessao:
+        restantes = set((await sessao.execute(select(EmailOutbox.id))).scalars().all())
+    assert restantes == set(presas), "sobraram linhas diferentes das que estavam travadas"
+
+
 # ═══════════════════════════════════════════════════════════════
 # Apagar a outbox não encosta no histórico funcional
 # ═══════════════════════════════════════════════════════════════
