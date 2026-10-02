@@ -390,7 +390,16 @@ async def _dead_com(motivo: str, *, origem: str = "account", attempts: int = 1):
 
     capturado, sink = _captura()
     try:
-        await mod._loga_dead(db, outbox, motivo)
+        # A3 trocou a assinatura para VALORES: há dois chamadores agora, e o de
+        # `recupera_travados` trabalha sobre tuplas de projeção, sem instância
+        # mapeada na mão.
+        await mod._loga_dead(
+            db,
+            notification_id=outbox.notification_id,
+            event_type=outbox.event_type,
+            attempts=outbox.attempts,
+            motivo=motivo,
+        )
     finally:
         logger.remove(sink)
     return capturado, outbox
