@@ -267,7 +267,12 @@ def test_migration_upgrade_downgrade_upgrade():
 
         assert asyncio.run(_tem_colunas()) is True
 
-        _roda("downgrade", "-1")
+        # ⚠️ Revision EXPLÍCITA, e não `-1`. Com `-1` este teste descia a
+        # migration que por acaso fosse o head — e quebrou no dia em que uma
+        # migration NOVA entrou depois desta, descendo a errada. É a mesma
+        # correção que o teste da Fase 3A já recebeu (`ffdfe2d`); aqui o padrão
+        # relativo tinha sobrevivido, e uma migration de outra frente o expôs.
+        _roda("downgrade", "ae3cf7068dd6")
         assert asyncio.run(_tem_colunas()) is False
 
         _roda("upgrade", "head")
