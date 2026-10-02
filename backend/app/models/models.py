@@ -1573,6 +1573,48 @@ class TicketCall(Base):
     # quando não houve — e a diferença entre "não respondeu" e "respondeu 500"
     # é justamente o que separa `unavailable` de `indeterminate`.
     provider_http_status: Mapped[int | None] = mapped_column(Integer, nullable=True)
+
+    # ── Desfecho da chamada, vindo do evento de encerramento ──────────────
+    #
+    # As quatro colunas abaixo são preenchidas por UM evento só, encaminhado de
+    # fora depois que a ligação termina. Nenhuma delas participa da máquina de
+    # estados de `creation_status`: aquela descreve se a chamada foi CRIADA, e
+    # estas descrevem como ela ACABOU. Confundir as duas foi o risco que esta
+    # separação evita.
+    #
+    # A unidade está no NOME, e não num comentário: `duration_seconds`. Foi a
+    # lição que `provider_call_id` cobrou — um campo cujo significado só existia
+    # na cabeça de quem o criou precisou de correção documental meses depois.
+    duration_seconds: Mapped[int | None] = mapped_column(Integer, nullable=True)
+    # Vocabulário do FORNECEDOR, e por isso sem `CheckConstraint` e sem enum
+    # nativo. Medimos `NORMAL_CLEARING`, `ORIGINATOR_CANCEL` e `NUMBER_CHANGED`,
+    # e a documentação não publica o conjunto fechado. Fechar uma lista que o
+    # fornecedor não prometeu faria o HelpHS recusar um desfecho legítimo no dia
+    # em que ele aparecesse. Mesmo critério do `creation_status` não ser enum do
+    # PostgreSQL — só que aqui nem a constraint cabe.
+    hangup_cause: Mapped[str | None] = mapped_column(String(40), nullable=True)
+    # TRÊS estados, e é por isso que é nullable: `True`, `False` e NULL para "o
+    # evento não informou". `NOT NULL DEFAULT false` apagaria o terceiro, e
+    # "não sabemos" viraria "não existe gravação".
+    #
+    # ⚠️ É só um registro. Nada no HelpHS consome este campo: não há download,
+    # não há reprodução e não há `record_url` em lugar nenhum deste modelo.
+    recording_available: Mapped[bool | None] = mapped_column(Boolean, nullable=True)
+    # O relógio é NOSSO: marca quando o HelpHS RECEBEU e processou o evento, e
+    # não o instante de encerramento que o fornecedor informa.
+    #
+    # ⚠️ A distinção não é preciosismo. Medimos em 30/09/2026 uma divergência
+    # sistemática de ~3h entre o nosso `created_at` e o `started_at` do
+    # fornecedor, e o exemplo da documentação dele mistura campo com fuso (`Z`) e
+    # campo sem fuso. Guardar o horário dele aqui seria importar essa confusão
+    # para dentro de uma coluna que serve de trava de idempotência.
+    #
+    # E é essa a função principal: `NULL` significa "evento ainda não chegou", e
+    # é a condição do UPDATE atômico que faz a primeira entrega vencer.
+    hangup_event_received_at: Mapped[datetime | None] = mapped_column(
+        DateTime(timezone=True), nullable=True
+    )
+
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now())
     updated_at: Mapped[datetime] = mapped_column(
         DateTime(timezone=True), server_default=func.now(), onupdate=func.now()

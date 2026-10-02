@@ -214,7 +214,15 @@ _PROIBIDOS = {
     "authorization",
     "headers",
     "cabecalho",
-    "record",
+    # ⚠️ Em 02/10/2026 este termo era `"record"`, e foi ESTREITADO para as
+    # duas grafias da URL. O que esta lista protege e o ENDERECO da
+    # gravacao, que da acesso ao audio dos dois lados da conversa e por isso
+    # e tratado como credencial. Um booleano dizendo que existe gravacao nao
+    # e PII, nao e corpo bruto e nao abre porta nenhuma -- e o
+    # `recording_available` do evento de encerramento colidia com o termo
+    # largo. Estreitar foi deliberado; alargar de novo exige o mesmo cuidado.
+    "record_url",
+    "recording_url",
     "gravacao",
 }
 
@@ -227,6 +235,7 @@ _PROIBIDOS = {
         telefonia.marca_recusada,
         telefonia.marca_indisponivel,
         telefonia.marca_indeterminada,
+        telefonia.registra_encerramento,
     ],
     ids=lambda f: f.__name__,
 )
@@ -253,6 +262,13 @@ def test_a_tabela_nao_tem_coluna_para_pii_ou_corpo_bruto():
         "provider_call_id",
         "creation_status",
         "provider_http_status",
+        # Desfecho da chamada, vindo do evento de encerramento (02/10/2026). O
+        # conjunto segue FECHADO de proposito: e esta igualdade que faz uma
+        # coluna nova aparecer em revisao em vez de entrar no banco calada.
+        "duration_seconds",
+        "hangup_cause",
+        "recording_available",
+        "hangup_event_received_at",
         "created_at",
         "updated_at",
     }

@@ -30,6 +30,7 @@ from app.routers import (
     dashboard,
     files,
     groups,
+    integrations,
     kb,
     library,
     notifications,
@@ -266,6 +267,7 @@ app.include_router(groups.router, prefix=settings.api_prefix)
 app.include_router(calendar.router, prefix=settings.api_prefix)
 app.include_router(quick_replies.router, prefix=settings.api_prefix)
 app.include_router(files.router, prefix=settings.api_prefix)
+app.include_router(integrations.router, prefix=settings.api_prefix)
 app.include_router(library.router, prefix=settings.api_prefix)
 
 

@@ -40,7 +40,10 @@ a garantia, não a disciplina de quem chamar.
 from __future__ import annotations
 
 import uuid
+from datetime import UTC, datetime
+from enum import StrEnum
 
+from sqlalchemy import select, update
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.models.models import CallCreationStatus, TicketCall
@@ -162,3 +165,81 @@ async def marca_indeterminada(
     tentativa.creation_status = CallCreationStatus.indeterminate.value
     await db.flush()
     return tentativa
+
+
+# ═══════════════════════════════════════════════════════════════
+# O evento de encerramento
+# ═══════════════════════════════════════════════════════════════
+
+
+class ResultadoDoEncerramento(StrEnum):
+    """O que aconteceu com o evento. Três desfechos, e nenhum é erro de verdade."""
+
+    #: Primeira entrega: os campos foram gravados.
+    registrado = "registrado"
+    #: Já havia evento nesta tentativa. Nada foi tocado.
+    duplicado = "duplicado"
+    #: Não existe `ticket_call` com esse id.
+    inexistente = "inexistente"
+
+
+async def registra_encerramento(
+    db: AsyncSession,
+    *,
+    ticket_call_id: uuid.UUID,
+    duration_seconds: int | None,
+    hangup_cause: str | None,
+    recording_available: bool | None,
+) -> ResultadoDoEncerramento:
+    """Grava o desfecho da chamada. A PRIMEIRA entrega vence, sempre.
+
+    A idempotência não é verificada antes — ela é **imposta pelo banco**, na
+    cláusula do próprio `UPDATE`:
+
+        UPDATE ticket_calls SET ... WHERE id = :id AND hangup_event_received_at IS NULL
+
+    ⚠️ Essa condição é a trava inteira, e trocá-la por um `SELECT` seguido de um
+    `if` reabriria a corrida que ela fecha: duas entregas simultâneas leriam
+    `NULL` as duas, e as duas gravariam. Com a condição dentro do `UPDATE`, o
+    PostgreSQL serializa as escritas na mesma linha e a segunda encontra
+    `hangup_event_received_at` já preenchido — `rowcount` volta 0 sem ter tocado
+    em nada. Uma instrução, sem lock de aplicação, sem `SKIP LOCKED`, sem tabela
+    de eventos. O `email_outbox` precisou daquele arsenal porque tem fila com
+    vários workers; aqui há um `UPDATE` condicional.
+
+    ⚠️ `rowcount == 0` NÃO significa duplicado. Significa "não atualizei", e há
+    duas causas bem diferentes: a linha já tinha evento, ou a linha não existe.
+    Responder a mesma coisa para as duas esconderia um erro de roteamento da
+    integração — evento de outro sistema chegando aqui seria contado como
+    duplicata benigna. Por isso a função confere a existência depois, e só
+    depois, quando já se sabe que nada foi escrito.
+
+    O horário gravado é o NOSSO (`datetime.now(UTC)`), e não o do fornecedor. Ver
+    o comentário da coluna: o relógio dele divergiu ~3h de forma sistemática, e
+    esta coluna é trava de idempotência, não registro de quando a ligação caiu.
+    """
+    agora = datetime.now(UTC)
+
+    resultado = await db.execute(
+        update(TicketCall)
+        .where(
+            TicketCall.id == ticket_call_id,
+            TicketCall.hangup_event_received_at.is_(None),
+        )
+        .values(
+            duration_seconds=duration_seconds,
+            hangup_cause=hangup_cause,
+            recording_available=recording_available,
+            hangup_event_received_at=agora,
+        )
+    )
+
+    if resultado.rowcount:
+        await db.flush()
+        return ResultadoDoEncerramento.registrado
+
+    # Nada foi atualizado. Agora, e só agora, vale perguntar por quê.
+    existe = await db.scalar(select(TicketCall.id).where(TicketCall.id == ticket_call_id))
+    if existe is None:
+        return ResultadoDoEncerramento.inexistente
+    return ResultadoDoEncerramento.duplicado
