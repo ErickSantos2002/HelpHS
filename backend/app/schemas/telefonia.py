@@ -134,3 +134,45 @@ class TicketCallResponse(AppBaseModel):
             "created_at": dados.created_at,
             "reason": motivo_publico(estado, bruto),
         }
+
+
+# ═══════════════════════════════════════════════════════════════
+# O evento de encerramento, encaminhado de fora
+# ═══════════════════════════════════════════════════════════════
+
+
+class EventoDeEncerramento(AppBaseModel):
+    """O que uma integração externa pode contar ao HelpHS sobre o fim da chamada.
+
+    O contrato é ESTREITO de propósito, e a lista do que ele NÃO aceita é tão
+    importante quanto a do que aceita. Não entram aqui: `record_url`, `caller`,
+    `called`, telefone, e-mail, áudio, transcrição, token do fornecedor nem o
+    payload bruto do webhook. Quem encaminha o evento recorta antes de mandar.
+
+    ⚠️ `extra="forbid"`, pelo mesmo motivo que o `TicketCallCreate` acima — e
+    aqui com mais força. Um corpo trazendo `record_url` é o endereço da gravação
+    circulando entre serviços sem necessidade; um corpo trazendo `caller` ou
+    `called` é telefone entrando numa superfície que não precisa dele. Ignorar em
+    silêncio seria seguro para o EFEITO (nada no HelpHS leria esses campos) e
+    péssimo para a DETECÇÃO: a integração passaria meses mandando dado sensível
+    sem ninguém notar. Com `forbid`, a primeira tentativa vira 422 observável.
+
+    `ticket_call_id` é a ÚNICA chave, e é obrigatória. Veio da correlação que a
+    Fase 2D.2 plantou no `metadata` do `POST /calls` e que foi validada ponta a
+    ponta em produção: igualdade de UUID contra `ticket_calls.id`, sem
+    `provider_call_id` e sem heurística de horário.
+
+    Os três campos de desfecho são OPCIONAIS porque o fornecedor não garante
+    nenhum deles — chamada não completada chega com duração zero e sem gravação,
+    e um campo exigido faria o HelpHS recusar um evento verdadeiro.
+    """
+
+    model_config = ConfigDict(extra="forbid")
+
+    ticket_call_id: uuid.UUID
+    # `duration` no contrato externo, `duration_seconds` na coluna: o nome de
+    # fora é o que o fornecedor usa, e o de dentro carrega a unidade. A tradução
+    # acontece no service, num lugar só.
+    duration: int | None = None
+    hangup_cause: str | None = None
+    recording_available: bool | None = None

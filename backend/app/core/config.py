@@ -501,6 +501,21 @@ class Settings(BaseSettings):
     #   e164     -> +554833328530  (manda o canônico interno como está)
     api4com_called_format: str = "nacional"
 
+    # ── Evento de encerramento encaminhado de fora ───────────
+    #
+    # Segredo compartilhado com quem encaminha o `channel-hangup` ao HelpHS. É a
+    # PRIMEIRA credencial de ENTRADA do projeto: até aqui tudo o que autenticava
+    # vinha de sessão de gente (`get_current_user`), e as únicas chaves eram de
+    # saída. `SecretStr` pelo mesmo motivo do `api4com_token` — ler o valor passa
+    # a exigir `get_secret_value()`, que é greppável e aparece em revisão.
+    #
+    # ⚠️ O default é vazio, e é deliberado. Exigir a variável no boot derrubaria
+    # a subida do contêiner no primeiro deploy que a esquecesse, trocando uma
+    # integração inoperante por uma aplicação inteira fora do ar. O fecho mora no
+    # endpoint: sem segredo configurado ele recusa com 503, e jamais com 200.
+    # Fail-closed aqui significa que a porta não abre — não que a casa cai.
+    helphs_webhook_secret: SecretStr = SecretStr("")
+
     def _valida_api4com(self) -> None:
         """Desligada, nada é exigido. Ligada, o que falta impede a subida.
 
