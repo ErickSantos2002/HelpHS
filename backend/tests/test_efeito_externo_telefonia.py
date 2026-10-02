@@ -43,6 +43,52 @@ _RAMAL = "1019"  # o ramal real da Suelen, provisionado em 24/09/2026
 _TELEFONE = "+5548933328530"
 _ID_DO_FORNECEDOR = "1PkXhmBsYAvr9legLB2d7BimT0Q"
 
+#: Campos da `TicketCallResponse` cujo conteúdo é gerado pela máquina: `id` é
+#: UUID e `created_at` carrega microssegundos. Procurar uma agulha CURTA no JSON
+#: inteiro sorteia os dígitos deles, e isso não é teoria — derrubou a suíte
+#: completa em 01/10/2026 com o comportamento funcional CORRETO: o carimbo saiu
+#: `...20.414247Z`, e `414247` contém `424`.
+#:
+#: Medido em 02/10/2026 sobre 200 mil corpos com a forma real do schema:
+#:
+#:     "424"                         1,22% das rodadas   <- frágil
+#:     "1019"  (_RAMAL)              0,05% das rodadas   <- frágil
+#:     "+5548933328530"              0,00%
+#:     "1PkXhmBsYAvr9legLB2d7BimT0Q" 0,00%
+#:     "provider_http_status"        0,00%
+#:     "SIP"                         0,00%
+#:
+#: As quatro de 0,00% continuam sendo verificadas no corpo INTEIRO — para elas a
+#: busca ampla é mais forte e não custa nada. As duas curtas passam por
+#: `_nao_vaza`.
+_CAMPOS_OPACOS = frozenset({"id", "created_at"})
+
+
+def _nao_vaza(corpo: dict, agulha: str) -> None:
+    """A agulha não aparece em NENHUM campo de texto do contrato.
+
+    Preserva a intenção da asserção original — "o número do fornecedor não
+    viaja" — e tira dela a única parte que era sorteio. Olha os campos de
+    TEXTO, que é onde um vazamento apareceria de verdade: `creation_status` e
+    `reason` hoje, e qualquer campo textual que o schema ganhe amanhã.
+
+    O `assert textuais` não é zelo: estreitar uma asserção tem um modo de falha
+    próprio, que é deixar de verificar qualquer coisa em silêncio. Se o contrato
+    perder os campos de texto, isto cai em vez de passar vazio.
+
+    Só é seguro porque quem chama também prende o CONJUNTO de chaves do corpo
+    (`set(corpo) == {...}`): é essa asserção que garante que não existe campo
+    novo escapando do laço aqui.
+    """
+    textuais = {
+        chave: valor
+        for chave, valor in corpo.items()
+        if isinstance(valor, str) and chave not in _CAMPOS_OPACOS
+    }
+    assert textuais, f"nenhum campo de texto em {sorted(corpo)}: a asserção ficou vazia"
+    for chave, valor in textuais.items():
+        assert agulha not in valor, f"{agulha!r} vazou no campo {chave!r}: {valor!r}"
+
 
 class _RedisFalso:
     def __init__(self) -> None:
@@ -625,11 +671,13 @@ async def test_a_rota_devolve_o_minimo_e_nada_do_fornecedor(redis_falso, liga, _
     assert corpo["creation_status"] == "confirmed"
     assert corpo["reason"] is None
     # E o identificador do fornecedor não aparece em lugar nenhum do corpo.
+    # Estes dois são longos o bastante para a busca ampla ser segura (0,00%).
     assert _ID_DO_FORNECEDOR not in resposta.text
     assert _TELEFONE not in resposta.text
-    assert _RAMAL not in resposta.text
-    # Nem o número do HTTP do fornecedor, que é o que `reason` TRADUZ.
-    assert "424" not in resposta.text
+    # O ramal e o número do HTTP do fornecedor são CURTOS: nos campos de texto
+    # do contrato, não no JSON inteiro — ver `_nao_vaza`.
+    _nao_vaza(corpo, _RAMAL)
+    _nao_vaza(corpo, "424")
     assert "provider_http_status" not in resposta.text
 
 
@@ -703,10 +751,15 @@ async def test_424_vira_motivo_de_webphone_indisponivel(redis_falso, liga, _limp
 
     assert resposta.status_code == 201, resposta.text
     corpo = resposta.json()
+    # O conjunto de chaves é prendido aqui porque é ele que garante que nenhum
+    # campo do fornecedor viaja — e é também o que torna `_nao_vaza` seguro:
+    # sem isto, um campo novo escaparia do laço de lá sem ninguém notar.
+    assert set(corpo) == {"id", "creation_status", "created_at", "reason"}
     assert corpo["creation_status"] == "rejected"
     assert corpo["reason"] == "webphone_unavailable"
-    # O número do fornecedor NÃO viaja — é ele que o motivo traduz.
-    assert "424" not in resposta.text
+    # O número do fornecedor NÃO viaja — é ele que o motivo traduz. Nos campos
+    # de texto do contrato, não no JSON inteiro: ver `_nao_vaza`.
+    _nao_vaza(corpo, "424")
     assert "provider_http_status" not in resposta.text
     assert "SIP" not in resposta.text
 
@@ -877,3 +930,52 @@ def test_o_motivo_so_vale_para_recusa():
     assert motivo_publico("dispatching", 424) is None
     assert motivo_publico("rejected", None) is None
     assert motivo_publico("rejected", 401) is None
+
+
+# ═══════════════════════════════════════════════════════════════
+# A asserção de vazamento, testada ela mesma
+# ═══════════════════════════════════════════════════════════════
+#
+# Estreitar uma asserção tem dois modos de falha opostos, e os dois precisam de
+# prova: deixar de pegar vazamento de verdade (falso NEGATIVO) e continuar
+# falhando por sorteio (falso POSITIVO). Os três casos abaixo fecham os dois,
+# mais o terceiro — a asserção vazia, que passaria sem verificar nada.
+
+
+def _corpo_de_resposta(**overrides) -> dict:
+    base = {
+        # Entupido de "424" de propósito: o grupo literal aparece duas vezes.
+        "id": "424c8e42-4000-4000-8000-000000000424",
+        "creation_status": "rejected",
+        # O carimbo REAL da rodada que derrubou a suíte completa em 01/10/2026.
+        "created_at": "2026-10-01T18:55:20.414247Z",
+        "reason": "webphone_unavailable",
+    }
+    base.update(overrides)
+    return base
+
+
+def test_a_asercao_de_vazamento_ignora_uuid_e_carimbo_com_os_digitos():
+    """O caso que motivou o conserto, reproduzido de propósito.
+
+    A asserção antiga (`"424" not in resposta.text`) quebrava nos dois campos
+    abaixo; esta não pode nem tossir, porque nenhum dos dois é campo de texto do
+    contrato — são identificador opaco e carimbo de tempo.
+    """
+    _nao_vaza(_corpo_de_resposta(), "424")
+    _nao_vaza(_corpo_de_resposta(), _RAMAL)
+
+
+def test_a_asercao_de_vazamento_ainda_pega_vazamento_de_verdade():
+    """O outro lado, e o que importa: asserção estreitada que não pega nada é
+    pior que a frágil, porque fica verde para sempre."""
+    for campo in ("creation_status", "reason"):
+        with pytest.raises(AssertionError, match="vazou no campo"):
+            _nao_vaza(_corpo_de_resposta(**{campo: "recusa do fornecedor: 424"}), "424")
+
+
+def test_a_asercao_de_vazamento_recusa_corpo_sem_campo_de_texto():
+    """Se o contrato perder os campos de texto, isto CAI em vez de passar
+    vazio — é a diferença entre uma asserção estreitada e uma desativada."""
+    with pytest.raises(AssertionError, match="a asserção ficou vazia"):
+        _nao_vaza({"id": "x", "created_at": "y"}, "424")
