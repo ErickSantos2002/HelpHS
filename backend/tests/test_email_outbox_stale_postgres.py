@@ -409,6 +409,52 @@ async def test_dois_recoverers_pegam_lotes_disjuntos(db_factory, url_do_banco, u
     assert sobraram == 0
 
 
+@pytest.mark.asyncio
+async def test_a_recuperacao_nao_espera_por_linha_travada(db_factory, url_do_banco, usuario):
+    """`SKIP LOCKED`, e a lição que o `cleanup` da Fase 3D já tinha ensinado.
+
+    O teste de lotes disjuntos passa igual SEM `SKIP LOCKED`: o segundo recoverer
+    BLOQUEIA no `FOR UPDATE`, acorda depois do commit do primeiro, não encontra
+    mais nada e recupera zero. A soma continua exata — aquele teste prova
+    disjunção, que também existe com bloqueio.
+
+    O que `SKIP LOCKED` garante além disso é NÃO ESPERAR. Para medir isso é
+    preciso um lock que não se solta: uma terceira sessão segura uma das linhas
+    com a transação ABERTA, e a recuperação tem de voltar depressa tendo pulado
+    exatamente aquela. O `wait_for` é o detector — sem `SKIP LOCKED` a chamada
+    fica presa até um `rollback` que só vem depois dela.
+    """
+    presa = await _linha(db_factory, usuario)
+    livre = await _linha(db_factory, usuario)
+
+    motor_travador = create_async_engine(url_do_banco)
+    try:
+        fabrica = async_sessionmaker(motor_travador, expire_on_commit=False)
+        async with fabrica() as travador:
+            travadas = (
+                (
+                    await travador.execute(
+                        select(EmailOutbox.id).where(EmailOutbox.id == presa).with_for_update()
+                    )
+                )
+                .scalars()
+                .all()
+            )
+            assert travadas == [presa]
+
+            resultado = await asyncio.wait_for(
+                recupera_travados(db_factory, stale_minutes=_STALE_MIN, agora=_AGORA),
+                timeout=15,
+            )
+            await travador.rollback()
+    finally:
+        await motor_travador.dispose()
+
+    assert resultado.recuperadas == 1, "a recuperação não pulou a linha travada"
+    assert (await _estado(db_factory, presa)).status == "processing"
+    assert (await _estado(db_factory, livre)).status == "pending"
+
+
 # ═══════════════════════════════════════════════════════════════
 # Ownership fencing — a corrida reproduzida, e fechada
 # ═══════════════════════════════════════════════════════════════
@@ -646,6 +692,49 @@ async def test_dono_legitimo_marca_email_sent(db_factory, usuario):
     )
 
     assert await _email_sent(db_factory, nid) is True
+
+
+@pytest.mark.asyncio
+async def test_falha_do_dono_legitimo_nao_marca_email_sent(db_factory, usuario):
+    """`email_sent` descreve ENTREGA, não "o worker chegou até aqui".
+
+    Sem a condição `novo_status == "sent"` no UPDATE da notificação, uma falha
+    temporária marcaria a notificação como enviada por e-mail — e a linha
+    continuaria tentando, com as duas fontes dizendo coisas opostas.
+    """
+    lid, nid = await _com_notificacao(db_factory, usuario, locked_by="w")
+
+    await _persiste_resultado(
+        db_factory,
+        lid,
+        EmailDeliveryResult(EmailDeliveryStatus.temporary_failure, "SMTPServerDisconnected"),
+        worker_id="w",
+        agora=_AGORA,
+    )
+
+    assert await _email_sent(db_factory, nid) is False
+    st = await _estado(db_factory, lid)
+    assert st.status == "pending"
+    assert st.attempts == 1
+
+
+@pytest.mark.asyncio
+async def test_dead_do_dono_legitimo_nao_marca_email_sent(db_factory, usuario):
+    """Mesma regra no outro desfecho terminal: desistir não é entregar."""
+    lid, nid = await _com_notificacao(db_factory, usuario, locked_by="w")
+
+    await _persiste_resultado(
+        db_factory,
+        lid,
+        EmailDeliveryResult(
+            EmailDeliveryStatus.permanent_failure, "SMTPRecipientRefused (code 550)"
+        ),
+        worker_id="w",
+        agora=_AGORA,
+    )
+
+    assert await _email_sent(db_factory, nid) is False
+    assert (await _estado(db_factory, lid)).status == "dead"
 
 
 @pytest.mark.asyncio

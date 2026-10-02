@@ -583,7 +583,11 @@ async def _persiste_resultado(
     Um `if row.locked_by == worker_id` depois de um `db.get` NÃO serviria: entre
     a leitura e a escrita cabe exatamente a corrida que esta função precisa
     fechar. O `SELECT` abaixo existe apenas para CALCULAR o destino (a escada de
-    backoff precisa do `attempts` atual); a autoridade é o `UPDATE`.
+    backoff precisa do `attempts` atual) e **não repete a guarda de propósito**:
+    uma guarda duplicada no `SELECT` faria a leitura decidir antes, deixando o
+    `UPDATE` — que é a única barreira que vale sob concorrência — nunca
+    exercitado. Medido: com a guarda também no `SELECT`, mutar o `locked_by` do
+    `UPDATE` e mutar o próprio `rowcount == 0` passava pela suíte inteira.
 
     `sent` e `dead` seguem terminais, e agora por construção: o predicado exige
     `status='processing'`, que nenhum dos dois satisfaz.
@@ -596,23 +600,21 @@ async def _persiste_resultado(
     agora = agora or datetime.now(UTC)
 
     async with db_factory() as db:
-        # Leitura só para COMPUTAR. Se a linha mudar entre este SELECT e o
-        # UPDATE abaixo, o UPDATE não casa e o desfecho é descartado — qualquer
-        # transição concorrente limpa `locked_by`, então a guarda protege também
-        # o valor de `attempts` lido aqui.
+        # Leitura só para COMPUTAR — por ID, SEM repetir a guarda. Quem decide
+        # é o UPDATE lá embaixo; ver o docstring. Se a linha mudar entre os dois,
+        # o UPDATE não casa e o desfecho é descartado inteiro.
         atual = (
             await db.execute(
                 select(
                     EmailOutbox.attempts, EmailOutbox.notification_id, EmailOutbox.event_type
-                ).where(
-                    EmailOutbox.id == outbox_id,
-                    EmailOutbox.status == "processing",
-                    EmailOutbox.locked_by == worker_id,
-                )
+                ).where(EmailOutbox.id == outbox_id)
             )
         ).first()
 
         if atual is None:
+            # A linha sumiu (CASCADE de `Notification`/`User`, ou retenção). Sem
+            # linha não há desfecho a registrar, e o caminho é o mesmo de ter
+            # perdido a claim: este resultado não é autoritativo.
             _loga_claim_perdida()
             return
 
