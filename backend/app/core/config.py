@@ -654,6 +654,33 @@ class Settings(BaseSettings):
     # abandonada por um worker morto e liberada de volta para `pending`.
     email_outbox_stale_processing_minutes: int = 5
 
+    # Retenção da outbox (Fase 3D). Sem isto a tabela cresce para sempre: o
+    # caminho felizar termina em `sent`, e nada apagava.
+    #
+    # 60 dias para `sent`, e não 30: 30 é exatamente a retenção do `app.log`
+    # (`core/logging.py`), e os dois expirariam juntos. Para os e-mails de
+    # conta isso deixaria ZERO evidência de que a redefinição de senha foi
+    # enviada — o `AuditLog` cobre register/password_change/login, não
+    # `forgot_password` nem `resend_verification` (ver a auditoria da Fase 3D).
+    # 60 faz o registro estruturado sobreviver ao log. Mais que isso seria
+    # guardar atividade de autenticação ligada a `user_id` sem finalidade.
+    email_outbox_sent_retention_days: int = 60
+    # 180 para `dead`: é a linha que alguém vai querer explicar meses depois
+    # ("desde quando o domínio deste cliente rejeita?"), e `dead` é raro — o
+    # volume não entra na decisão. 365 seria um ano de registro de falha
+    # ligado a `user_id`, também sem consumidor definido.
+    email_outbox_dead_retention_days: int = 180
+    # De quanto em quanto tempo a limpeza roda, DENTRO do worker que já existe
+    # (não há worker novo — ver `email_outbox.py`). 0 desliga, como em todo
+    # laço do projeto. Com o intervalo do worker em 30 s, limpar a cada rodada
+    # seriam 2 880 limpezas/dia sem necessidade nenhuma.
+    #
+    # ⚠️ O primeiro deploy desta fase deve subir com 0 e ser ligado depois de
+    # conferir as contagens no /api/v1/health — é a lição registrada do
+    # SLA_WARNING_INTERVAL_SECONDS, cujo default ligado já causou efeito não
+    # pretendido num primeiro deploy.
+    email_outbox_cleanup_interval_seconds: int = 3600
+
     # Logging
     log_level: str = "INFO"
     log_dir: str = "./logs"

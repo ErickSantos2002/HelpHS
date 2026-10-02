@@ -86,8 +86,21 @@ def _resumo_do_erro(exc: BaseException) -> str:
     (credencial recusada) de 550 (domínio não verificado) e de 421 (tente mais
     tarde). É inteiro do protocolo SMTP, não texto que o servidor escolhe.
 
-    A mensagem do servidor sai inteira. Hoje ela é inócua na maioria dos casos,
-    mas é conteúdo variável de terceiro — e o log não é lugar para apostar nisso.
+    A MENSAGEM DE TEXTO DO SERVIDOR É DESCARTADA POR COMPLETO — ela não entra
+    no valor devolvido por esta função. Hoje seria inócua na maioria dos casos,
+    mas é conteúdo variável de terceiro, e o log não é lugar para apostar nisso.
+
+    (A frase anterior aqui era "a mensagem do servidor sai inteira", que em
+    português lê-se nos dois sentidos — "é incluída" ou "é embora". O código
+    sempre fez a segunda; a auditoria da Fase 3D registrou a ambiguidade como
+    achado A7, porque o risco real era alguém "consertar" o CÓDIGO para casar
+    com a leitura errada da frase.)
+
+    Serve também ao worker da outbox, que desde a Fase 3D usa esta função nos
+    seus `except` gerais: um `DBAPIError` do SQLAlchemy carrega o SQL e os
+    `[parameters: ...]` no `str()`, e o `.code` dele é uma STRING (o código
+    curto da documentação), não um int — então o `isinstance(codigo, int)`
+    abaixo não o deixa passar, e sobra só o nome da classe.
     """
     codigo = getattr(exc, "code", None)
     nome = type(exc).__name__

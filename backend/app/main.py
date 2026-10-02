@@ -43,6 +43,7 @@ from app.routers import (
 )
 from app.services import antivirus, storage
 from app.services.chat_backplane import assinatura_ativa, start_chat_backplane
+from app.services.email_outbox import bloco_de_health as bloco_da_outbox_de_email
 from app.services.email_outbox import start_email_outbox_worker
 from app.services.helo_indexacao import start_helo_indexacao_worker
 from app.services.sla_alertas import start_sla_warning_worker
@@ -354,6 +355,16 @@ async def readiness_check(response: Response) -> dict:
         # aqui — e o aviso de SLA é invisível quando falha, porque a ausência de
         # e-mail se parece com "nenhum chamado está vencendo".
         "sla_warning": {"last_success": ultima_do_sla.isoformat() if ultima_do_sla else None},
+        # Outbox de e-mail (Fase 3D). Este bloco lê MEMÓRIA, não o banco: o
+        # worker mede a fila uma vez por rodada e guarda o snapshot, então um
+        # probe nunca paga um `COUNT(*)`. O `as_of` dentro dele é o que impede
+        # alguém de ler contagem em cache como estado atual.
+        #
+        # Como os dois carimbos acima, é REPORTADO e não derruba: `state` pode
+        # dizer "error" com a resposta em 200. Um worker de e-mail travado
+        # tirando a API de rotação trocaria degradação parcial por total —
+        # banco e Redis seguem sendo os únicos que decidem readiness.
+        "email_outbox": bloco_da_outbox_de_email(settings),
         # Reportado, nao usado para derrubar -- mesma regra do carimbo acima. Com
         # a assinatura caida o chat ainda funciona dentro de cada worker; o que
         # se perde e o tempo real ENTRE workers, que e justamente a falha que
