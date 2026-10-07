@@ -1752,3 +1752,38 @@ class SlaAlertEvent(Base):
         ),
         Index("ix_sla_alert_events_ticket_created", "ticket_id", "created_at"),
     )
+
+
+class TicketProtocolCounter(Base):
+    """O ultimo numero de protocolo JA EMITIDO em cada ano. Uma linha por ano.
+
+    Por que uma tabela, e nao `max()+1` sobre `tickets`
+    ----------------------------------------------------
+    O numero do protocolo sai do HelpHS: vai no e-mail de abertura e fica no
+    texto de notificacoes que NAO fazem cascata com o chamado. Derivar o proximo
+    numero dos chamados que ainda existem fazia apagar chamados devolver
+    numeros: zerar `tickets` voltava a `HS-AAAA-0001`, e apagar o mais recente
+    reusava o dele. Aqui a fonte da verdade e o que ja foi emitido, nao o que
+    sobrou.
+
+    E e o lock desta linha que serializa duas aberturas simultaneas: o
+    `INSERT ... ON CONFLICT DO UPDATE` de `app/utils/protocol.py` a trava ate o
+    commit da transacao do chamado. Sem isso, as duas liam o mesmo maximo e a
+    segunda so descobria no indice unico, gastando retentativas.
+
+    `last_number` e o ultimo EMITIDO, nao o proximo: a linha so existe depois do
+    primeiro chamado do ano, e `0` nunca e gravado pelo gerador. Ano novo nao
+    precisa de virada — a linha do ano novo nasce no primeiro chamado dele.
+    """
+
+    __tablename__ = "ticket_protocol_counters"
+
+    # O ano do protocolo, nao uma chave substituta: e por ele que o
+    # `ON CONFLICT` encontra a linha, e um id a mais so criaria uma segunda
+    # forma de identificar o mesmo ano.
+    year: Mapped[int] = mapped_column(Integer, primary_key=True, autoincrement=False)
+    last_number: Mapped[int] = mapped_column(Integer, nullable=False)
+
+    __table_args__ = (
+        CheckConstraint("last_number >= 0", name="ck_ticket_protocol_counters_last_number"),
+    )

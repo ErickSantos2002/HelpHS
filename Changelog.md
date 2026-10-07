@@ -147,6 +147,19 @@ publicar uma versão nova.
 
 ### Corrigido
 
+- ⚠️ **O protocolo de chamado não é mais reutilizado depois de exclusão.**
+  O próximo número era `max()+1` sobre os chamados que ainda existiam: zerar
+  `tickets` voltava a `HS-AAAA-0001`, e apagar o mais recente devolvia o número
+  dele. Passou a existir `ticket_protocol_counters`, com o último número
+  emitido por ano, alocado de forma atômica na transação do chamado.
+  - **Tem migration** (`0a17fd87823c`), que semeia cada ano com o maior
+    protocolo existente. Ela precisa rodar **antes** de qualquer limpeza de
+    chamados em produção.
+  - Também fecha a corrida entre aberturas simultâneas, que antes gastava
+    retentativas e podia terminar em 500 (medido: 3 de 10 simultâneas).
+    Duplicata nunca houve.
+  - Spec: `docs/superpowers/specs/2026-10-07-protocolo-duravel-design.md`.
+
 - ⚠️ **O painel e os relatórios passaram a medir o MESMO prazo que o chamado.**
   Eles decidiam violação comparando a coluna crua `sla_resolve_due_at` contra
   `now()`, o que **ignorava a pausa acumulada** — um chamado pausado contava
