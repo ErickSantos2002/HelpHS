@@ -242,53 +242,13 @@ def _override_user(user):
 
 
 # ═══════════════════════════════════════════════════════════════
-# PROTOCOL GENERATION UNIT TESTS
+# PROTOCOL GENERATION
 # ═══════════════════════════════════════════════════════════════
-
-
-@pytest.mark.asyncio
-async def test_generate_protocol_first_ticket():
-    """When no tickets exist, protocol should be HS-YYYY-0001."""
-    from app.utils.protocol import generate_protocol
-
-    db = _db(lookup=None)
-    protocol = await generate_protocol(db)
-    year = datetime.now(UTC).year
-    assert protocol == f"HS-{year}-0001"
-
-
-@pytest.mark.asyncio
-async def test_generate_protocol_increments():
-    """When last ticket is HS-YYYY-0005, next should be HS-YYYY-0006."""
-    from app.utils.protocol import generate_protocol
-
-    year = datetime.now(UTC).year
-    db = _db(lookup=f"HS-{year}-0005")
-    protocol = await generate_protocol(db)
-    assert protocol == f"HS-{year}-0006"
-
-
-@pytest.mark.asyncio
-async def test_generate_protocol_pads_to_4_digits():
-    """Sequence number should always be zero-padded to 4 digits."""
-    from app.utils.protocol import generate_protocol
-
-    year = datetime.now(UTC).year
-    db = _db(lookup=f"HS-{year}-0009")
-    protocol = await generate_protocol(db)
-    assert protocol == f"HS-{year}-0010"
-    assert len(protocol.split("-")[-1]) == 4
-
-
-@pytest.mark.asyncio
-async def test_generate_protocol_large_seq():
-    """Protocol handles sequence numbers beyond 9999 (zero-padding still works)."""
-    from app.utils.protocol import generate_protocol
-
-    year = datetime.now(UTC).year
-    db = _db(lookup=f"HS-{year}-9999")
-    protocol = await generate_protocol(db)
-    assert protocol == f"HS-{year}-10000"
+# Os testes do gerador saíram daqui em 07/10/2026: com sessão mockada eles
+# afirmavam o que o mock devolvia, e o gerador passou a depender de um contador
+# persistido e de lock de linha — nada disso existe num mock. Estão em
+# `test_protocol.py` (SQLite) e `test_protocolo_contador_postgres.py`
+# (concorrência e migration, Postgres real).
 
 
 # ═══════════════════════════════════════════════════════════════
@@ -303,8 +263,8 @@ async def test_create_ticket(patch_redis):
     creator = _mock_user(UserRole.client)
     ticket = _mock_ticket(creator_id=creator.id)
 
-    # Sequence: 1st execute = generate_protocol (returns None → seq 1)
-    # commit + refresh sets up the ticket
+    # O protocolo da resposta vem do `_refresh` abaixo, não do gerador: com a
+    # sessão mockada, o número alocado não significa nada (ver test_protocol.py).
     db_session = _db_sequence(None)
 
     async def _refresh(obj):

@@ -49,7 +49,8 @@ _EMAIL_OUTBOX = "ae3cf7068dd6"
 # que a colisão que nomeia este arquivo passou por todos os gates.
 # Mover esta linha é o momento em que alguém OLHA para o grafo.
 _OUTBOX_CONTA = "c8b8d6994fae"  # outbox de conta e autenticação (Fase 3C, 30/09/2026)
-_HEAD = "k7f8g9h0i1j2"  # desfecho da chamada em ticket_calls (02/10/2026)
+_DESFECHO = "k7f8g9h0i1j2"  # desfecho da chamada em ticket_calls (02/10/2026)
+_HEAD = "0a17fd87823c"  # contador durável de protocolo (07/10/2026)
 
 
 async def _versao(conn) -> str:
@@ -208,11 +209,12 @@ def test_a_cadeia_e_linear_e_tem_um_head_so():
     # E a ordem que importa: LGPD antes do ramal, ramal antes do dispatching, o
     # aviso de SLA depois dele, a outbox de e-mail (Fase 3A) depois do aviso de
     # SLA, a outbox de conta/autenticação (Fase 3C, generaliza a mesma tabela)
-    # depois dela, e o desfecho da chamada depois de tudo. Cada elo é uma
-    # afirmação separada de propósito: "tem
-    # um head só" não diz NADA sobre a ordem, e foi a ordem que a colisão
+    # depois dela, o desfecho da chamada depois dela, e o contador de
+    # protocolo depois de tudo. Cada elo é uma afirmação separada de propósito:
+    # "tem um head só" não diz NADA sobre a ordem, e foi a ordem que a colisão
     # embaralhou.
-    assert pai[_HEAD] == _OUTBOX_CONTA
+    assert pai[_HEAD] == _DESFECHO
+    assert pai[_DESFECHO] == _OUTBOX_CONTA
     assert pai[_OUTBOX_CONTA] == _EMAIL_OUTBOX
     assert pai[_EMAIL_OUTBOX] == _SLA_ALERT_EVENTS
     assert pai[_SLA_ALERT_EVENTS] == _DISPATCHING
