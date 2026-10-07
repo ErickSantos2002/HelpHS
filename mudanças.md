@@ -7,6 +7,36 @@ O changelog do produto (o que o cliente vê) fica em
 
 ---
 
+## 07/10/2026 — Protocolo de chamado durável, antes de zerar produção
+
+Pré-requisito da sanitização para o piloto. A auditoria só de leitura de
+produção mostrou que zerar `tickets` faria o próximo protocolo voltar a
+`HS-2026-0001`, porque o gerador era `max()+1` sobre os chamados que ainda
+existiam. Spec em
+[2026-10-07-protocolo-duravel-design.md](docs/superpowers/specs/2026-10-07-protocolo-duravel-design.md).
+
+⚠️ **Nada está no ar.** Branch `feat/protocolo-duravel`, sem push e sem PR.
+**Tem migration** (`0a17fd87823c`), que roda no boot e semeia 2026 com o
+maior protocolo existente, 26 em produção. Ela tem que subir **antes** da
+limpeza: apagar os chamados primeiro perderia a semente.
+
+### O que mudou
+
+O próximo número sai de `ticket_protocol_counters`, com o último emitido por
+ano, alocado num `INSERT ... ON CONFLICT DO UPDATE ... RETURNING` que trava a
+linha do ano até o commit. O maior protocolo em `tickets` virou só piso, para
+o contêiner antigo e para scripts que gravam por fora.
+
+### A corrida que existia além do reset
+
+Medida num Postgres efêmero, com o gerador da `main`: 10 aberturas
+simultâneas, 3 falharam depois das 5 retentativas; 20 simultâneas, 13
+falharam. Duplicata nunca houve, porque o índice único barrava, mas quem
+perdia recebia 500. Com o contador, as 10 recebem números distintos na
+primeira tentativa.
+
+---
+
 ## 23/09/2026 — Estender o prazo de resolução, e o painel parar de discordar
 
 Funcionalidade pedida com desenho antes do código: técnico e administrador
