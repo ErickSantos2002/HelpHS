@@ -260,6 +260,29 @@ remover_quando = "starlette >= 1.1.0, ou se o projeto passar a montar StaticFile
 responsavel = "TI/Dev"
 data = "2026-09-01"
 
+[[backend]]
+id = "CVE-2026-85394"
+pacote = "python-jose"
+versao_atual = "3.4.0"
+versao_corrigida = ""
+classe = "nao_aplicavel"
+motivo = """
+Confusão de algoritmo (RS256↔HS256): um verificador que aceite `alg: HS256`
+pode ser enganado por token HMAC assinado com a chave PÚBLICA RSA como segredo.
+Inalcançável aqui porque TODO `jwt.decode` do backend fixa
+`algorithms=["RS256"]`, e o jose recusa o `alg` fora dessa lista ANTES de tocar
+no material de chave. PROVADO, não deduzido: `backend/tests/
+test_jwt_confusao_de_algoritmo.py` forja um token `alg=HS256` e verifica que os
+QUATRO decodes reais (access, email_verify, password_reset, file) o rejeitam,
+enquanto o RS256 legítimo passa — e um teste de fonte exige `algorithms=` em
+todo `jwt.decode(`. Medido também: o jose 3.4.0 já recusa ASSINAR HS256 com
+chave assimétrica (JWSError). Comando: `python -m pytest
+tests/test_jwt_confusao_de_algoritmo.py` → 7 passed.
+"""
+remover_quando = "sair correção do python-jose (hoje fix_versions=[], afeta <=3.5.0), ou se algum jwt.decode passar a aceitar alg não-RS256"
+responsavel = "TI/Dev"
+data = "2026-10-07"
+
 
 # ══ FRONTEND — npm audit ═════════════════════════════════════════════════════
 #
