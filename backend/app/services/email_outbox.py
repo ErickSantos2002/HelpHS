@@ -77,14 +77,34 @@ templates ou na semântica de `Notification`:
    tempo pegam lotes DISJUNTOS — sem Redis e sem advisory lock, pela mesma
    razão arquitetural da seção acima.
 
-Dívida técnica conhecida e deliberadamente NÃO tocada aqui (achado A3 da
-auditoria da Fase 3D): `recupera_travados` devolve a linha para `pending` sem
-incrementar `attempts` nem reagendar `next_attempt_at`. É a única transição
-que não avança a máquina de estado, e uma mensagem que trave repetidamente
-pode circular para sempre sem alcançar `MAX_ATTEMPTS`. A Fase 3D a torna
-OBSERVÁVEL (`oldest_processing_seconds` no health) de propósito, sem
-consertá-la: mudança de máquina de estado não entra na mesma frente que
-observabilidade. Frente própria, imediatamente depois desta.
+Frente A3 — stale consome tentativa, e o dono da claim é quem escreve
+----------------------------------------------------------------------
+A Fase 3D tornou OBSERVÁVEL (via `oldest_processing_seconds`) uma dívida que
+não consertou: `recupera_travados` devolvia a linha para `pending` sem
+incrementar `attempts` nem reagendar. Era a única transição que não registrava
+desfecho, e uma mensagem que travasse a cada reivindicação circularia para
+sempre sem alcançar `MAX_ATTEMPTS`. A frente A3 fechou isso — e, ao auditar,
+encontrou um defeito maior no mesmo caminho:
+
+1. **Stale registra desfecho.** `attempts += 1`, destino decidido por
+   `proximo_estado_apos_falha` (a MESMA escada e o MESMO `MAX_ATTEMPTS` da
+   falha SMTP), `last_error` em `ProcessingStale`/`ProcessingStaleExceeded`.
+   Consequência deliberada: a linha recuperada respeita o backoff e NÃO é
+   reivindicada na mesma rodada.
+
+2. **Fencing por ownership.** `_persiste_resultado` não tinha guarda alguma, e
+   a corrida foi REPRODUZIDA em PostgreSQL real: um worker lento que concluía
+   depois de a linha ter sido recuperada e reivindicada por outro limpava o
+   lock do novo dono e sobrescrevia o estado — terminando em
+   `status='pending'` com `sent_at` preenchido, uma mensagem já entregue de
+   volta na fila. Agora a escrita é um compare-and-set
+   (`WHERE id AND status='processing' AND locked_by=:worker_id`): quem perdeu a
+   claim não escreve nada e só registra um log seguro.
+
+Nada disso muda a garantia: segue **at-least-once**. Se o SMTP aceitou a
+mensagem e o desfecho não pôde ser persistido porque a claim expirou, outro
+processamento pode reenviar. Isso é esperado, e nenhuma deduplicação externa de
+SMTP é tentada.
 """
 
 import asyncio
@@ -284,35 +304,151 @@ async def reivindica_lote(
         return ids
 
 
+#: Motivos seguros de um desfecho que a recuperação de stale registra. Curtos,
+#: sem exceção crua, sem SQL, sem worker id, sem hostname, sem destinatário,
+#: sem `user_id` e sem `notification_id` — mesma disciplina das constantes de
+#: conta (ver a seção 4.1).
+PROCESSING_STALE = "ProcessingStale"
+PROCESSING_STALE_EXCEDIDO = "ProcessingStaleExceeded"
+
+
+@dataclass(frozen=True)
+class ResultadoDaRecuperacao:
+    """O que uma rodada de recuperação fez. Só contagens.
+
+    Existe porque a recuperação passou a ter DOIS destinos — devolver para a
+    fila ou encerrar em `dead` —, e um `int` só não distingue "o worker morreu e
+    a mensagem volta" de "esta mensagem desistiu".
+    """
+
+    recuperadas: int
+    reenfileiradas: int
+    mortas: int
+
+
 async def recupera_travados(
     db_factory: async_sessionmaker[AsyncSession],
     *,
     stale_minutes: int,
     agora: datetime | None = None,
-) -> int:
-    """Devolve para `pending` toda linha `processing` cujo `locked_at` é mais
+) -> ResultadoDaRecuperacao:
+    """Fecha o desfecho de toda linha `processing` abandonada — e CONSOME uma
+    tentativa ao fazê-lo.
 
-    velho que `stale_minutes` — o worker que a travou morreu sem terminar (ou
-    sem terminar de registrar o desfecho). Sem heartbeat: o valor de
-    `stale_minutes` é a única confiança de que um envio SMTP nunca leva mais
-    que isso.
+    Por que stale conta como tentativa (achado A3)
+    -----------------------------------------------
+    Até esta frente, uma linha stale voltava para `pending` sem incrementar
+    `attempts` e sem reagendar. Era a ÚNICA transição da máquina que não
+    registrava desfecho nenhum, e a consequência era um laço sem fim: uma
+    mensagem que travasse a cada reivindicação circularia para sempre sem nunca
+    alcançar `MAX_ATTEMPTS`.
 
-    Um `UPDATE` isolado, e não um `SELECT ... FOR UPDATE` seguido de `UPDATE`:
-    o `UPDATE` já é atômico por linha — duas chamadas concorrentes desta
-    função nunca liberam a mesma linha duas vezes, porque a segunda,
-    executando depois da primeira ter commitado, não encontra mais nenhuma
-    linha `processing` com aquele `locked_at` velho para casar no `WHERE`.
+    `attempts` significa, no resto do módulo, "desfechos malsucedidos
+    registrados" (ver `_persiste_resultado`). Uma passagem por `processing` que
+    não voltou É um desfecho malsucedido por essa definição — então contar não
+    é política nova, é fazer o stale obedecer à invariante que as outras
+    transições já cumprem.
+
+    O destino sai de `proximo_estado_apos_falha`, a MESMA função da falha SMTP:
+    mesma escada de backoff, mesmo `MAX_ATTEMPTS`. Nenhum limite separado para
+    stale, nenhum número de minutos duplicado.
+
+    Consequência deliberada: a linha recuperada NÃO é elegível na mesma rodada
+    (`processa_lote` chama esta função antes de `reivindica_lote`, com o mesmo
+    `agora`, e o claim respeita `next_attempt_at`). Um restart que deixou linhas
+    em `processing` passa a retomar em ~1 minuto, não em ~30 s. É o preço de o
+    stale ter o mesmo freio que a falha de entrega, e vale: sem o freio, o
+    `oldest_overdue_seconds` do health acusaria atraso numa linha que acabou de
+    ser reagendada.
+
+    `SELECT ... FOR UPDATE SKIP LOCKED` e não um `UPDATE` amplo
+    -----------------------------------------------------------
+    O `UPDATE` amplo bastaria para a corretude — MEDIDO em PostgreSQL real:
+    dois recoverers concorrentes com `attempts = attempts + 1` deixam
+    `attempts = 1`, nunca 2, porque o segundo reavalia o predicado contra a
+    versão já commitada e não casa mais. Mas o destino depende da escada de
+    backoff, que vive num dicionário Python — e escrevê-la num `CASE` SQL
+    duplicaria os minutos em dois lugares, exatamente o que a Fase 3A evitou ao
+    centralizá-la. Então: seleciona com `SKIP LOCKED` (dois recoverers pegam
+    conjuntos disjuntos) e aplica a transição linha por linha, com a função
+    pura.
     """
     agora = agora or datetime.now(UTC)
     limite = agora - timedelta(minutes=stale_minutes)
+
+    reenfileiradas = 0
+    mortas = 0
+
     async with db_factory() as db:
-        resultado = await db.execute(
-            update(EmailOutbox)
-            .where(EmailOutbox.status == "processing", EmailOutbox.locked_at < limite)
-            .values(status="pending", locked_by=None, locked_at=None)
+        travadas = (
+            (
+                await db.execute(
+                    select(
+                        EmailOutbox.id,
+                        EmailOutbox.attempts,
+                        EmailOutbox.notification_id,
+                        EmailOutbox.event_type,
+                    )
+                    .where(EmailOutbox.status == "processing", EmailOutbox.locked_at < limite)
+                    .order_by(EmailOutbox.locked_at)
+                    .with_for_update(skip_locked=True)
+                )
+            )
+            .tuples()
+            .all()
         )
+
+        for outbox_id, attempts, notification_id, event_type in travadas:
+            novos = attempts + 1
+            novo_status, proxima = proximo_estado_apos_falha(novos, agora)
+            motivo = PROCESSING_STALE if novo_status != "dead" else PROCESSING_STALE_EXCEDIDO
+
+            valores: dict[str, object] = {
+                "status": novo_status,
+                "attempts": novos,
+                "last_error": motivo,
+                "locked_by": None,
+                "locked_at": None,
+            }
+            # `dead` não tem próxima tentativa para agendar — `next_attempt_at`
+            # fica como estava, igual ao caminho de falha permanente.
+            if proxima is not None:
+                valores["next_attempt_at"] = proxima
+
+            await db.execute(
+                update(EmailOutbox).where(EmailOutbox.id == outbox_id).values(**valores)
+            )
+
+            if novo_status == "dead":
+                mortas += 1
+                await _loga_dead(
+                    db,
+                    notification_id=notification_id,
+                    event_type=event_type,
+                    attempts=novos,
+                    motivo=motivo,
+                )
+            else:
+                reenfileiradas += 1
+
         await db.commit()
-        return resultado.rowcount or 0
+
+    resultado = ResultadoDaRecuperacao(
+        recuperadas=len(travadas), reenfileiradas=reenfileiradas, mortas=mortas
+    )
+
+    # Só quando houve o que recuperar: stale é raro por definição, e um resumo
+    # por RODADA (não por linha) mantém o log legível mesmo no caso patológico
+    # que esta frente conserta — que agora termina em `MAX_ATTEMPTS` ocorrências
+    # em vez de girar para sempre.
+    if resultado.recuperadas:
+        logger.warning(
+            "Outbox de e-mail: recuperacao de processing stale — "
+            f"recovered={resultado.recuperadas} requeued={resultado.reenfileiradas} "
+            f"dead={resultado.mortas}"
+        )
+
+    return resultado
 
 
 # ══════════════════════════════════════════════════════════════
@@ -395,60 +531,149 @@ def _conteudo_do_email(
     return assunto, em_texto(mensagem), em_html(mensagem)
 
 
+def _loga_claim_perdida() -> None:
+    """Mensagem FIXA, sem um único campo variável — e isso é o desenho.
+
+    Quem perdeu a claim é, por definição, um worker que estava lento ou que
+    acordou depois de uma recuperação. Pôr `worker_id` aqui daria um nome de
+    processo e um PID no log; pôr o id da linha daria o fio para cruzar com o
+    destinatário. Nenhum dos dois ajuda a diagnosticar o que importa — que é
+    QUANTAS vezes isto acontece —, e a contagem sai do próprio volume de linhas.
+    """
+    logger.warning("Outbox de e-mail: outbox result ignored because claim was lost")
+
+
 async def _persiste_resultado(
     db_factory: async_sessionmaker[AsyncSession],
     outbox_id: uuid.UUID,
     resultado: EmailDeliveryResult,
     *,
+    worker_id: str,
     agora: datetime | None = None,
 ) -> None:
-    """Persiste o desfecho da tentativa. No sucesso, também marca
+    """Persiste o desfecho da tentativa — SE este worker ainda for o dono da
+    reivindicação.
 
-    `Notification.email_sent = True` — NO MESMO COMMIT que marca
-    `EmailOutbox.status = sent`: as duas colunas descrevem o mesmo fato
-    ("este e-mail foi entregue"), e um commit que movesse só uma delas
-    deixaria as duas fontes divergentes até a próxima tentativa (que não
-    haveria, porque `sent` não tenta de novo). Em retry ou `dead`,
-    `email_sent` simplesmente não é tocado — continua `False`, o valor com
-    que `Notification` sempre nasce.
+    Fencing por ownership (achado A3)
+    ----------------------------------
+    Até esta frente a função era `db.get` + atribuição + `commit`, sem guarda
+    nenhuma. A consequência foi REPRODUZIDA em PostgreSQL real:
 
-    Linhas de origem Account (Fase 3C) não têm `Notification` — `outbox.
-    notification_id` é `None` para elas, e o UPDATE nunca é tentado.
+        t0  processing, locked_by=A, locked_at=-10min
+        t1  recuperação devolve para pending
+        t2  worker B reivindica        -> processing, locked_by=B
+        t3  worker A, lento, conclui   -> sent, e LIMPA o lock de B
+        t4  worker B conclui com falha -> pending, attempts=1, sent_at PREENCHIDO
+
+    A linha terminava em estado impossível: `status='pending'` com `sent_at`
+    preenchido e, na origem Notification, `email_sent=True` — ou seja, uma
+    mensagem já entregue voltava para a fila e saía uma terceira vez.
+
+    A guarda é um **compare-and-set no banco**, não um `if` depois de um
+    `SELECT`:
+
+        UPDATE ... WHERE id = :id
+                     AND status = 'processing'
+                     AND locked_by = :worker_id
+
+    `rowcount == 0` significa "perdi a claim": o resultado deste worker deixa de
+    ser autoritativo e NADA é escrito — nem estado, nem `attempts`, nem lock, nem
+    `sent_at`, nem `Notification.email_sent`. Só um log seguro.
+
+    Um `if row.locked_by == worker_id` depois de um `db.get` NÃO serviria: entre
+    a leitura e a escrita cabe exatamente a corrida que esta função precisa
+    fechar. O `SELECT` abaixo existe apenas para CALCULAR o destino (a escada de
+    backoff precisa do `attempts` atual) e **não repete a guarda de propósito**:
+    uma guarda duplicada no `SELECT` faria a leitura decidir antes, deixando o
+    `UPDATE` — que é a única barreira que vale sob concorrência — nunca
+    exercitado. Medido: com a guarda também no `SELECT`, mutar o `locked_by` do
+    `UPDATE` e mutar o próprio `rowcount == 0` passava pela suíte inteira.
+
+    `sent` e `dead` seguem terminais, e agora por construção: o predicado exige
+    `status='processing'`, que nenhum dos dois satisfaz.
+
+    No sucesso, `Notification.email_sent = True` continua indo no MESMO COMMIT
+    que `status='sent'` — as duas colunas descrevem o mesmo fato, e um commit que
+    movesse só uma deixaria as fontes divergentes. Linhas de origem Account não
+    têm `Notification`: ali o UPDATE nunca é tentado.
     """
     agora = agora or datetime.now(UTC)
+
     async with db_factory() as db:
-        outbox = await db.get(EmailOutbox, outbox_id)
-        if outbox is None:
-            return  # defensivo: a linha sumiu entre a reivindicação e aqui
+        # Leitura só para COMPUTAR — por ID, SEM repetir a guarda. Quem decide
+        # é o UPDATE lá embaixo; ver o docstring. Se a linha mudar entre os dois,
+        # o UPDATE não casa e o desfecho é descartado inteiro.
+        atual = (
+            await db.execute(
+                select(
+                    EmailOutbox.attempts, EmailOutbox.notification_id, EmailOutbox.event_type
+                ).where(EmailOutbox.id == outbox_id)
+            )
+        ).first()
+
+        if atual is None:
+            # A linha sumiu (CASCADE de `Notification`/`User`, ou retenção). Sem
+            # linha não há desfecho a registrar, e o caminho é o mesmo de ter
+            # perdido a claim: este resultado não é autoritativo.
+            _loga_claim_perdida()
+            return
+
+        attempts_atual, notification_id, event_type = atual
+
+        valores: dict[str, object] = {"locked_by": None, "locked_at": None}
+        novo_status: str
+        attempts_novo = attempts_atual
 
         if resultado.status == EmailDeliveryStatus.success:
-            outbox.status = "sent"
-            outbox.sent_at = agora
-            outbox.last_error = None
-            if outbox.notification_id is not None:
-                notif = await db.get(Notification, outbox.notification_id)
-                if notif is not None:
-                    notif.email_sent = True
+            novo_status = "sent"
+            valores.update(status="sent", sent_at=agora, last_error=None)
         else:
-            outbox.attempts += 1
-            outbox.last_error = resultado.error_summary
+            attempts_novo = attempts_atual + 1
+            valores.update(attempts=attempts_novo, last_error=resultado.error_summary)
             if resultado.status == EmailDeliveryStatus.permanent_failure:
-                outbox.status = "dead"
+                novo_status = "dead"
             else:
-                novo_status, proxima = proximo_estado_apos_falha(outbox.attempts, agora)
-                outbox.status = novo_status
+                novo_status, proxima = proximo_estado_apos_falha(attempts_novo, agora)
                 if proxima is not None:
-                    outbox.next_attempt_at = proxima
+                    valores["next_attempt_at"] = proxima
+            valores["status"] = novo_status
 
-            # Fase 3D (achado A1): a transição para `dead` deixou de ser
-            # silenciosa. Dentro do `else` de propósito — só o caminho de FALHA
-            # pode produzir `dead`, e assim um `sent` nunca paga a consulta.
-            # Ver `classifica_dead`/`_loga_dead` na seção 4.1.
-            if outbox.status == "dead":
-                await _loga_dead(db, outbox, resultado.error_summary)
+        guardado = await db.execute(
+            update(EmailOutbox)
+            .where(
+                EmailOutbox.id == outbox_id,
+                EmailOutbox.status == "processing",
+                EmailOutbox.locked_by == worker_id,
+            )
+            .values(**valores)
+        )
 
-        outbox.locked_by = None
-        outbox.locked_at = None
+        if guardado.rowcount == 0:
+            # A claim foi perdida entre o SELECT e o UPDATE. Nada foi escrito —
+            # o `rollback` é explícito para deixar isso evidente a quem lê.
+            await db.rollback()
+            _loga_claim_perdida()
+            return
+
+        if novo_status == "sent" and notification_id is not None:
+            await db.execute(
+                update(Notification)
+                .where(Notification.id == notification_id)
+                .values(email_sent=True)
+            )
+
+        # Fase 3D (achado A1): a transição para `dead` deixou de ser silenciosa.
+        # Só depois de a escrita ter sido ACEITA — logar um `dead` que a guarda
+        # descartou seria inventar um incidente que não aconteceu.
+        if novo_status == "dead":
+            await _loga_dead(
+                db,
+                notification_id=notification_id,
+                event_type=event_type,
+                attempts=attempts_novo,
+                motivo=resultado.error_summary,
+            )
+
         await db.commit()
 
 
@@ -457,6 +682,8 @@ async def _processa_notification(
     settings: Settings,
     outbox_id: uuid.UUID,
     notification_id: uuid.UUID,
+    *,
+    worker_id: str,
 ) -> None:
     """A origem Notification (Fase 3A/3B) — inalterada pela Fase 3C."""
     async with db_factory() as db:
@@ -469,7 +696,10 @@ async def _processa_notification(
         await _persiste_resultado(
             db_factory,
             outbox_id,
-            EmailDeliveryResult(EmailDeliveryStatus.permanent_failure, _NOTIFICACAO_NAO_ENCONTRADA),
+            worker_id=worker_id,
+            resultado=EmailDeliveryResult(
+                EmailDeliveryStatus.permanent_failure, _NOTIFICACAO_NAO_ENCONTRADA
+            ),
         )
         return
 
@@ -483,7 +713,7 @@ async def _processa_notification(
         html=html,
         contexto=f"outbox {outbox_id}",
     )
-    await _persiste_resultado(db_factory, outbox_id, resultado)
+    await _persiste_resultado(db_factory, outbox_id, resultado, worker_id=worker_id)
 
 
 # Motivos seguros para `last_error` quando a linha vai para `dead` sem
@@ -527,6 +757,12 @@ _DEAD_NEGOCIO = frozenset(
 )
 _DEAD_DEFENSIVO = frozenset({_CONTA_USUARIO_NAO_ENCONTRADO, _NOTIFICACAO_NAO_ENCONTRADA})
 _DEAD_CONFIGURACAO = frozenset({"SMTPNotConfigured"})
+# Cadastrados EXPLICITAMENTE, e não deixados cair no default (achado A3). O
+# default já devolveria `delivery` para os dois, e por acaso estaria certo —
+# mas "certo por acidente" é a fragilidade que a Fase 3D combateu em todo
+# lugar. Uma mensagem que atravessou cinco passagens por `processing` sem
+# nunca confirmar entrega É falha de entrega, e merece o nível ERROR.
+_DEAD_STALE = frozenset({PROCESSING_STALE, PROCESSING_STALE_EXCEDIDO})
 
 DEAD_NEGOCIO = "business"
 DEAD_DEFENSIVO = "defensive"
@@ -558,11 +794,25 @@ def classifica_dead(motivo: str | None) -> str:
         return DEAD_DEFENSIVO
     if motivo in _DEAD_CONFIGURACAO:
         return DEAD_CONFIGURACAO
+    if motivo in _DEAD_STALE:
+        return DEAD_ENTREGA
     return DEAD_ENTREGA
 
 
-async def _loga_dead(db: AsyncSession, outbox: EmailOutbox, motivo: str | None) -> None:
+async def _loga_dead(
+    db: AsyncSession,
+    *,
+    notification_id: uuid.UUID | None,
+    event_type: str | None,
+    attempts: int,
+    motivo: str | None,
+) -> None:
     """Fecha o A1: toda transição nova para `dead` deixa rastro, sem PII.
+
+    Recebe VALORES, não o objeto do ORM: desde a frente A3 há dois chamadores —
+    `_persiste_resultado`, que escreve por `UPDATE ... WHERE` guardado e por isso
+    não tem instância mapeada na mão, e `recupera_travados`, que trabalha sobre
+    tuplas de uma projeção.
 
     O que PODE entrar nesta linha: origem, tipo do evento, número de
     tentativas, classe do `dead` e o motivo seguro (que por construção é uma
@@ -574,19 +824,19 @@ async def _loga_dead(db: AsyncSession, outbox: EmailOutbox, motivo: str | None) 
     valor de enum fechado (`ticket_created`, `chat_message`, …) — diz QUAL
     espécie de aviso está falhando sem apontar pessoa nenhuma.
     """
-    if outbox.notification_id is not None:
+    if notification_id is not None:
         origem = "notification"
-        notif = await db.get(Notification, outbox.notification_id)
+        notif = await db.get(Notification, notification_id)
         evento = notif.type.value if notif is not None else "unknown"
     else:
         origem = "account"
-        evento = outbox.event_type or "unknown"
+        evento = event_type or "unknown"
 
     classe = classifica_dead(motivo)
     logger.log(
         _NIVEL_DO_DEAD[classe],
         f"Outbox de e-mail: linha encerrada em dead — origin={origem} "
-        f"event={evento} attempts={outbox.attempts} dead_kind={classe} "
+        f"event={evento} attempts={attempts} dead_kind={classe} "
         f"reason={motivo}",
     )
 
@@ -597,6 +847,8 @@ async def _processa_conta(
     outbox_id: uuid.UUID,
     user_id: uuid.UUID,
     event_type: str,
+    *,
+    worker_id: str,
 ) -> None:
     """A origem Account (Fase 3C) — verification/password_reset/account_exists.
 
@@ -633,7 +885,8 @@ async def _processa_conta(
         await _persiste_resultado(
             db_factory,
             outbox_id,
-            EmailDeliveryResult(
+            worker_id=worker_id,
+            resultado=EmailDeliveryResult(
                 EmailDeliveryStatus.permanent_failure, _CONTA_USUARIO_NAO_ENCONTRADO
             ),
         )
@@ -643,7 +896,10 @@ async def _processa_conta(
         await _persiste_resultado(
             db_factory,
             outbox_id,
-            EmailDeliveryResult(EmailDeliveryStatus.permanent_failure, _CONTA_USUARIO_ANONIMIZADO),
+            worker_id=worker_id,
+            resultado=EmailDeliveryResult(
+                EmailDeliveryStatus.permanent_failure, _CONTA_USUARIO_ANONIMIZADO
+            ),
         )
         return
 
@@ -651,7 +907,10 @@ async def _processa_conta(
         await _persiste_resultado(
             db_factory,
             outbox_id,
-            EmailDeliveryResult(EmailDeliveryStatus.permanent_failure, _CONTA_USUARIO_INATIVO),
+            worker_id=worker_id,
+            resultado=EmailDeliveryResult(
+                EmailDeliveryStatus.permanent_failure, _CONTA_USUARIO_INATIVO
+            ),
         )
         return
 
@@ -659,7 +918,8 @@ async def _processa_conta(
         await _persiste_resultado(
             db_factory,
             outbox_id,
-            EmailDeliveryResult(
+            worker_id=worker_id,
+            resultado=EmailDeliveryResult(
                 EmailDeliveryStatus.permanent_failure, _CONTA_VERIFICACAO_JA_CONCLUIDA
             ),
         )
@@ -685,13 +945,15 @@ async def _processa_conta(
         html=html,
         contexto=f"outbox {outbox_id}",
     )
-    await _persiste_resultado(db_factory, outbox_id, resultado)
+    await _persiste_resultado(db_factory, outbox_id, resultado, worker_id=worker_id)
 
 
 async def _processa_um(
     db_factory: async_sessionmaker[AsyncSession],
     settings: Settings,
     outbox_id: uuid.UUID,
+    *,
+    worker_id: str,
 ) -> None:
     async with db_factory() as db:
         outbox = await db.get(EmailOutbox, outbox_id)
@@ -702,10 +964,14 @@ async def _processa_um(
         event_type = outbox.event_type
 
     if notification_id is not None:
-        await _processa_notification(db_factory, settings, outbox_id, notification_id)
+        await _processa_notification(
+            db_factory, settings, outbox_id, notification_id, worker_id=worker_id
+        )
     else:
         assert user_id is not None and event_type is not None  # garantido pela CHECK do banco
-        await _processa_conta(db_factory, settings, outbox_id, user_id, event_type)
+        await _processa_conta(
+            db_factory, settings, outbox_id, user_id, event_type, worker_id=worker_id
+        )
 
 
 async def processa_lote(
@@ -727,7 +993,7 @@ async def processa_lote(
         db_factory, limite=settings.email_outbox_batch_size, worker_id=worker_id, agora=agora
     )
     for outbox_id in ids:
-        await _processa_um(db_factory, settings, outbox_id)
+        await _processa_um(db_factory, settings, outbox_id, worker_id=worker_id)
     return len(ids)
 
 

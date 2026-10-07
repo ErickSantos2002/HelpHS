@@ -30,7 +30,7 @@ import pytest
 import pytest_asyncio
 from jose import jwt
 from sqlalchemy import inspect as sa_inspect
-from sqlalchemy import select, text
+from sqlalchemy import select, text, update
 from sqlalchemy.ext.asyncio import async_sessionmaker, create_async_engine
 
 from app.core.config import Settings
@@ -138,6 +138,24 @@ def _settings(**overrides) -> Settings:
     )
     base.update(overrides)
     return Settings(**base)
+
+
+async def _reivindica(db_factory, outbox_id, worker_id: str = "w1", agora=None) -> None:
+    """Põe a linha em `processing` com dono, como `reivindica_lote` faria.
+
+    Desde a frente A3 isto não é cerimônia: `_persiste_resultado` exige ser o
+    DONO da reivindicação (`status='processing' AND locked_by=:worker_id`). Um
+    teste que chamasse `_processa_conta` sobre uma linha `pending` veria o
+    desfecho descartado por claim perdida — e passaria verde sem provar nada,
+    que é o pior desfecho possível para um teste.
+    """
+    async with db_factory() as sessao:
+        await sessao.execute(
+            update(EmailOutbox)
+            .where(EmailOutbox.id == outbox_id)
+            .values(status="processing", locked_by=worker_id, locked_at=agora or _AGORA)
+        )
+        await sessao.commit()
 
 
 async def _limpa(db, *users: User) -> None:
@@ -530,7 +548,10 @@ async def test_token_so_e_gerado_no_worker(db, db_factory):
             new=AsyncMock(return_value=EmailDeliveryResult(EmailDeliveryStatus.success)),
         ):
             criar_token.assert_not_called()  # nada até aqui
-            await _processa_conta(db_factory, settings, outbox_id, user.id, "verification")
+            await _reivindica(db_factory, outbox_id)
+        await _processa_conta(
+            db_factory, settings, outbox_id, user.id, "verification", worker_id="w1"
+        )
 
     criar_token.assert_called_once()
 
@@ -578,7 +599,10 @@ async def test_ttl_conta_a_partir_do_processamento(db, db_factory):
             "app.services.email_outbox.account_tokens.create_email_verification_token",
             side_effect=_create_e_captura,
         ):
-            await _processa_conta(db_factory, settings, outbox_id, user.id, "verification")
+            await _reivindica(db_factory, outbox_id)
+            await _processa_conta(
+                db_factory, settings, outbox_id, user.id, "verification", worker_id="w1"
+            )
 
     assert len(tokens_capturados) == 1
     payload = jwt.decode(
@@ -614,7 +638,10 @@ async def test_verification_token_gerado_pelo_worker_e_valido(db, db_factory):
         return EmailDeliveryResult(EmailDeliveryStatus.success)
 
     with patch("app.services.email_outbox.send_email_detalhado", new=AsyncMock(side_effect=_envio)):
-        await _processa_conta(db_factory, settings, outbox_id, user.id, "verification")
+        await _reivindica(db_factory, outbox_id)
+        await _processa_conta(
+            db_factory, settings, outbox_id, user.id, "verification", worker_id="w1"
+        )
 
     # O link está no corpo — extrai o token e valida de verdade.
     assert "confirmar-email?token=" in capturado["texto"]
@@ -644,7 +671,10 @@ async def test_password_reset_token_gerado_pelo_worker_e_valido(db, db_factory):
         return EmailDeliveryResult(EmailDeliveryStatus.success)
 
     with patch("app.services.email_outbox.send_email_detalhado", new=AsyncMock(side_effect=_envio)):
-        await _processa_conta(db_factory, settings, outbox_id, user.id, "password_reset")
+        await _reivindica(db_factory, outbox_id)
+        await _processa_conta(
+            db_factory, settings, outbox_id, user.id, "password_reset", worker_id="w1"
+        )
 
     assert "redefinir-senha?token=" in capturado["texto"]
     token = capturado["texto"].split("token=")[1].split()[0].split(")")[0]
@@ -845,7 +875,10 @@ async def test_usuario_anonymized_vai_para_dead_sem_smtp(db, db_factory):
 
     settings = _settings()
     with patch("app.services.email_outbox.send_email_detalhado", new=AsyncMock()) as smtp:
-        await _processa_conta(db_factory, settings, outbox_id, user.id, "verification")
+        await _reivindica(db_factory, outbox_id)
+        await _processa_conta(
+            db_factory, settings, outbox_id, user.id, "verification", worker_id="w1"
+        )
 
     smtp.assert_not_awaited()
     atualizado = await db.get(EmailOutbox, outbox_id)
@@ -869,7 +902,10 @@ async def test_password_reset_para_inactive_vai_para_dead(db, db_factory):
 
     settings = _settings()
     with patch("app.services.email_outbox.send_email_detalhado", new=AsyncMock()) as smtp:
-        await _processa_conta(db_factory, settings, outbox_id, user.id, "password_reset")
+        await _reivindica(db_factory, outbox_id)
+        await _processa_conta(
+            db_factory, settings, outbox_id, user.id, "password_reset", worker_id="w1"
+        )
 
     smtp.assert_not_awaited()
     atualizado = await db.get(EmailOutbox, outbox_id)
@@ -897,7 +933,8 @@ async def test_inactive_permitido_para_verification_e_account_exists(db, db_fact
         mock_fm = AsyncMock()
         mock_fm.send_message = AsyncMock()
         mock_client.return_value = mock_fm
-        await _processa_conta(db_factory, settings, outbox_id, user.id, event_type)
+        await _reivindica(db_factory, outbox_id)
+        await _processa_conta(db_factory, settings, outbox_id, user.id, event_type, worker_id="w1")
 
     atualizado = await db.get(EmailOutbox, outbox_id)
     await db.refresh(atualizado)
@@ -928,7 +965,10 @@ async def test_verificacao_ja_concluida_antes_do_worker_nao_envia(db, db_factory
 
     settings = _settings()
     with patch("app.services.email_outbox.send_email_detalhado", new=AsyncMock()) as smtp:
-        await _processa_conta(db_factory, settings, outbox_id, user.id, "verification")
+        await _reivindica(db_factory, outbox_id)
+        await _processa_conta(
+            db_factory, settings, outbox_id, user.id, "verification", worker_id="w1"
+        )
 
     smtp.assert_not_awaited()
     atualizado = await db.get(EmailOutbox, outbox_id)
@@ -964,7 +1004,10 @@ async def test_email_alterado_usa_endereco_atual(db, db_factory):
         return EmailDeliveryResult(EmailDeliveryStatus.success)
 
     with patch("app.services.email_outbox.send_email_detalhado", new=AsyncMock(side_effect=_envio)):
-        await _processa_conta(db_factory, settings, outbox_id, user.id, "account_exists")
+        await _reivindica(db_factory, outbox_id)
+        await _processa_conta(
+            db_factory, settings, outbox_id, user.id, "account_exists", worker_id="w1"
+        )
 
     assert destinatarios == [novo_email]
 
@@ -983,7 +1026,9 @@ async def test_usuario_nao_encontrado_nao_tenta_smtp(db_factory):
     não existe."""
     settings = _settings()
     with patch("app.services.email_outbox.send_email_detalhado", new=AsyncMock()) as smtp:
-        await _processa_conta(db_factory, settings, uuid.uuid4(), uuid.uuid4(), "verification")
+        await _processa_conta(
+            db_factory, settings, uuid.uuid4(), uuid.uuid4(), "verification", worker_id="w1"
+        )
 
     smtp.assert_not_awaited()
 
@@ -1130,12 +1175,18 @@ async def test_restart_de_linha_de_conta_travada_e_recuperada(db, db_factory):
     db.add(outbox)
     await db.commit()
 
-    recuperados = await recupera_travados(db_factory, stale_minutes=5, agora=_AGORA)
-    assert recuperados == 1
+    resultado = await recupera_travados(db_factory, stale_minutes=5, agora=_AGORA)
+    assert resultado.recuperadas == 1
+    assert resultado.reenfileiradas == 1
 
     atualizado = await db.get(EmailOutbox, outbox.id)
     await db.refresh(atualizado)
     assert atualizado.status == "pending"
+    # A3: a passagem abandonada por `processing` consome tentativa, igual na
+    # origem Notification — a mesma maquina de estados serve as duas origens.
+    assert atualizado.attempts == 1
+    assert atualizado.last_error == "ProcessingStale"
+    assert atualizado.next_attempt_at == _AGORA + timedelta(minutes=1)
 
     await _limpa(db, user)
 
@@ -1167,7 +1218,10 @@ async def test_logs_sem_pii_nem_token(db, db_factory):
             mock_fm = AsyncMock()
             mock_fm.send_message = AsyncMock(side_effect=_ErroComCodigoError(550))
             mock_client.return_value = mock_fm
-            await _processa_conta(db_factory, settings, outbox_id, user.id, "verification")
+            await _reivindica(db_factory, outbox_id)
+        await _processa_conta(
+            db_factory, settings, outbox_id, user.id, "verification", worker_id="w1"
+        )
     finally:
         logger.remove(sink)
 

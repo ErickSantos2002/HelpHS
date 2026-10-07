@@ -413,7 +413,7 @@ async def test_nenhum_lock_fica_aberto_durante_o_envio_smtp(db, db_factory):
         return EmailDeliveryResult(EmailDeliveryStatus.success)
 
     with patch("app.services.email_outbox.send_email_detalhado", side_effect=_envio_lento):
-        tarefa = asyncio.create_task(_processa_um(db_factory, settings, outbox_id))
+        tarefa = asyncio.create_task(_processa_um(db_factory, settings, outbox_id, worker_id="w1"))
         await asyncio.sleep(0.05)  # deixa o envio "em voo"
 
         # Consegue travar a linha sem bloquear: prova que a reivindicação já
@@ -452,7 +452,11 @@ async def test_sucesso_marca_sent_com_sent_at(db, db_factory):
     await db.commit()
 
     await _persiste_resultado(
-        db_factory, outbox.id, EmailDeliveryResult(EmailDeliveryStatus.success), agora=_AGORA
+        db_factory,
+        outbox.id,
+        EmailDeliveryResult(EmailDeliveryStatus.success),
+        worker_id="w1",
+        agora=_AGORA,
     )
 
     atualizado = await db.get(EmailOutbox, outbox.id)
@@ -482,7 +486,10 @@ async def test_falha_temporaria_volta_a_pending_com_backoff_e_attempts(db, db_fa
     await _persiste_resultado(
         db_factory,
         outbox.id,
-        EmailDeliveryResult(EmailDeliveryStatus.temporary_failure, "SMTPServerDisconnected"),
+        worker_id="w1",
+        resultado=EmailDeliveryResult(
+            EmailDeliveryStatus.temporary_failure, "SMTPServerDisconnected"
+        ),
         agora=_AGORA,
     )
 
@@ -514,7 +521,10 @@ async def test_quinta_falha_vai_para_dead(db, db_factory):
     await _persiste_resultado(
         db_factory,
         outbox.id,
-        EmailDeliveryResult(EmailDeliveryStatus.temporary_failure, "SMTPServerDisconnected"),
+        worker_id="w1",
+        resultado=EmailDeliveryResult(
+            EmailDeliveryStatus.temporary_failure, "SMTPServerDisconnected"
+        ),
         agora=_AGORA,
     )
 
@@ -543,7 +553,8 @@ async def test_falha_permanente_vai_direto_para_dead_sem_gastar_tentativas(db, d
     await _persiste_resultado(
         db_factory,
         outbox.id,
-        EmailDeliveryResult(
+        worker_id="w1",
+        resultado=EmailDeliveryResult(
             EmailDeliveryStatus.permanent_failure, "SMTPRecipientRefused (code 550)"
         ),
         agora=_AGORA,
@@ -601,6 +612,10 @@ async def test_processa_lote_ponta_a_ponta_sucesso(db, db_factory):
 
 @pytest.mark.asyncio
 async def test_processing_stale_e_recuperado(db, db_factory):
+    """⚠️ Semântica MUDADA pela frente A3: a recuperação agora registra um
+    desfecho. Antes a linha voltava para `pending` com `attempts` intacto e
+    `next_attempt_at` intacto — e era isso que a deixava circular para sempre.
+    """
     user = _usuario()
     notif = _notificacao(user)
     db.add_all([user, notif])
@@ -610,14 +625,21 @@ async def test_processing_stale_e_recuperado(db, db_factory):
     db.add(outbox)
     await db.commit()
 
-    recuperados = await recupera_travados(db_factory, stale_minutes=5, agora=_AGORA)
-    assert recuperados == 1
+    resultado = await recupera_travados(db_factory, stale_minutes=5, agora=_AGORA)
+    assert resultado.recuperadas == 1
+    assert resultado.reenfileiradas == 1
+    assert resultado.mortas == 0
 
     atualizado = await db.get(EmailOutbox, outbox.id)
     await db.refresh(atualizado)
     assert atualizado.status == "pending"
     assert atualizado.locked_by is None
     assert atualizado.locked_at is None
+    # O que a A3 acrescentou: a passagem abandonada por `processing` CONSOME
+    # tentativa e paga o backoff do primeiro degrau.
+    assert atualizado.attempts == 1
+    assert atualizado.next_attempt_at == _AGORA + timedelta(minutes=1)
+    assert atualizado.last_error == "ProcessingStale"
 
     await _limpa(db, user)
 
@@ -633,12 +655,13 @@ async def test_processing_recente_nao_e_recuperado(db, db_factory):
     db.add(outbox)
     await db.commit()
 
-    recuperados = await recupera_travados(db_factory, stale_minutes=5, agora=_AGORA)
-    assert recuperados == 0
+    resultado = await recupera_travados(db_factory, stale_minutes=5, agora=_AGORA)
+    assert resultado.recuperadas == 0
 
     atualizado = await db.get(EmailOutbox, outbox.id)
     await db.refresh(atualizado)
     assert atualizado.status == "processing"
+    assert atualizado.attempts == 0, "linha viva nao pode gastar tentativa"
 
     await _limpa(db, user)
 
@@ -658,8 +681,8 @@ async def test_fronteira_exata_do_stale_nao_e_recuperada(db, db_factory):
     db.add(outbox)
     await db.commit()
 
-    recuperados = await recupera_travados(db_factory, stale_minutes=5, agora=_AGORA)
-    assert recuperados == 0
+    resultado = await recupera_travados(db_factory, stale_minutes=5, agora=_AGORA)
+    assert resultado.recuperadas == 0
 
     await _limpa(db, user)
 
@@ -671,7 +694,17 @@ async def test_restart_simulado_linha_travada_e_reivindicada_de_novo(db, db_fact
     fecha sua própria sessão. Uma linha `processing` "esquecida" por um
     processo que morreu é indistinguível, para um `processa_lote` novo, de uma
     linha travada antes de um restart: os dois casos passam pelo mesmo
-    caminho de recuperação."""
+    caminho de recuperação.
+
+    ⚠️ Comportamento MUDADO pela frente A3, e de propósito. Antes a linha era
+    recuperada e reenviada na MESMA rodada. Agora a recuperação registra um
+    desfecho e paga o backoff, então a primeira rodada só recupera — e a
+    segunda, depois de o relógio alcançar `next_attempt_at`, é que envia.
+
+    O preço: um restart que deixou linhas em `processing` retoma em ~1 minuto
+    em vez de ~30 s. É o mesmo freio que uma falha de entrega paga, e sem ele a
+    linha que trava a cada reivindicação circula para sempre.
+    """
     user = _usuario()
     notif = _notificacao(user)
     db.add_all([user, notif])
@@ -682,16 +715,33 @@ async def test_restart_simulado_linha_travada_e_reivindicada_de_novo(db, db_fact
     await db.commit()
 
     settings = _settings()
-    with patch(
-        "app.services.email_outbox.send_email_detalhado",
-        new=AsyncMock(return_value=EmailDeliveryResult(EmailDeliveryStatus.success)),
-    ):
+    envio = AsyncMock(return_value=EmailDeliveryResult(EmailDeliveryStatus.success))
+
+    # Rodada 1: recupera, e NÃO reivindica — o backoff ainda não venceu.
+    with patch("app.services.email_outbox.send_email_detalhado", new=envio):
         processados = await processa_lote(db_factory, settings, worker_id="w-novo", agora=_AGORA)
 
-    assert processados == 1
+    assert processados == 0
+    assert envio.await_count == 0, "não pode mandar e-mail na rodada da recuperação"
+
     atualizado = await db.get(EmailOutbox, outbox.id)
     await db.refresh(atualizado)
+    assert atualizado.status == "pending"
+    assert atualizado.attempts == 1
+    assert atualizado.next_attempt_at == _AGORA + timedelta(minutes=1)
+    assert atualizado.locked_by is None
+
+    # Rodada 2, com o relógio no vencimento: agora sim.
+    depois = atualizado.next_attempt_at
+    with patch("app.services.email_outbox.send_email_detalhado", new=envio):
+        processados = await processa_lote(db_factory, settings, worker_id="w-novo", agora=depois)
+
+    assert processados == 1
+    await db.refresh(atualizado)
     assert atualizado.status == "sent"
+    # `attempts` NÃO é zerado no sucesso: a linha registra que gastou uma
+    # tentativa com a passagem abandonada antes de entregar.
+    assert atualizado.attempts == 1
 
     await _limpa(db, user)
 
