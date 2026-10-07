@@ -369,17 +369,6 @@ responsavel = "TI/Dev"
 data = "2026-09-02"
 
 [[frontend]]
-pacote = "postcss-selector-parser"
-advisory = "GHSA-w9m9-85wc-3x92"
-severidade = "low"
-faixa = ">=6.1.0 <6.1.3"
-classe = "nao_aplicavel"
-motivo = "DoS por recursao de AST sem controle. `npm ls --omit=dev postcss-selector-parser` -> ausente: transitiva do postcss, tempo de build."
-remover_quando = "junto com o postcss"
-responsavel = "TI/Dev"
-data = "2026-09-02"
-
-[[frontend]]
 pacote = "vite"
 advisory = "GHSA-fx2h-pf6j-xcff"
 severidade = "high"
@@ -422,3 +411,26 @@ motivo = "DoS por exaustao de memoria com fragmentos e chunks minusculos. `npm l
 remover_quando = "o front passar a depender de ws em runtime"
 responsavel = "TI/Dev"
 data = "2026-09-02"
+
+[[frontend]]
+pacote = "braces"
+advisory = "GHSA-vfj7-8cjw-p6xm"
+severidade = "high"
+faixa = "<=3.0.3"
+classe = "nao_aplicavel"
+motivo = """
+Estouro de pilha com padrao de glob profundamente aninhado. NAO HA VERSAO
+CORRIGIDA: first_patched_version = null no GHSA (gh api
+advisories/GHSA-vfj7-8cjw-p6xm) e 3.0.3 e a ultima publicada (npm view braces
+versions). A unica saida pelo pai e tailwindcss 4, que e migracao major fora
+deste escopo. Inalcancavel por entrada de usuario, provado em 07/10/2026:
+(1) `npm ls --omit=dev braces` -> ausente; so entra por tailwindcss@3.4.19
+(micromatch e chokidar), dependencia de build. (2) `grep -rnE "from
+['\"](braces|micromatch|chokidar|fast-glob|tailwindcss)" src` -> vazio. (3)
+instrumentando braces() para registrar cada entrada e rodando `npm run build`:
+UMA chamada, com o literal "./src/**/*.{js,ts,jsx,tsx}" do `content` de
+tailwind.config.js -- texto do repositorio, nao do usuario.
+"""
+remover_quando = "existir braces corrigido, o front migrar para tailwindcss 4, ou o content do tailwind passar a vir de fora do repositorio"
+responsavel = "TI/Dev"
+data = "2026-10-07"
