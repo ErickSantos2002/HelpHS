@@ -11,6 +11,7 @@ HelpHS/
 ├── backend/                    # API Python + FastAPI
 │   └── docker-compose.dev.yml  # Infraestrutura de dev (PostgreSQL, Redis, MinIO, ClamAV...)
 ├── frontend/                   # App React + Vite + TypeScript + Tailwind
+├── docs/                       # Regras de negócio, runbooks e especificações
 ├── Documentação/               # Documentação do projeto (.docx)
 ├── schema.prisma               # Referência do schema original
 └── .env.example
@@ -170,3 +171,5 @@ ser gravados em disco. Ambas no documento de decisões.
 | [docs/design-system-migration/](docs/design-system-migration/) | A adoção do design system, fase a fase. Os quatro `CHECKPOINT-*.md` trazem a medição colada, não o resumo dela; `CHECKLIST-29.md` é o roteiro por tela |
 | [docs/superpowers/specs/](docs/superpowers/specs/) | Desenhos e levantamentos: atendimento por IA, regra de primeira resposta do SLA, as duas fontes de verdade de empresa |
 | `Documentação/` | Dicionário de dados e requisitos originais (`.docx`, fora do Git) |
+| [docs/runbook-conta-nova-mesmo-email.md](docs/runbook-conta-nova-mesmo-email.md) | Runbook de suporte: quando NÃO excluir uma conta, a diferença entre excluir e anonimizar, e o roteiro medido de 15/09 — **fonte de verdade** para pedido de "refazer a conta" |
+| [docs/fechar-banco-para-a-internet.md](docs/fechar-banco-para-a-internet.md) | O PostgreSQL de produção atendia na internet pública (achado de 27/08, verificado de fora). Em 07/10 as portas 8888 e 5432 respondiam em timeout — fechadas |

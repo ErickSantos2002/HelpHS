@@ -1,4 +1,4 @@
-export const APP_VERSION = "v1.18.0";
+export const APP_VERSION = "v1.19.0";
 
 export type EntryType = "novidade" | "corrigido" | "melhoria";
 
@@ -14,6 +14,28 @@ export interface ChangelogVersion {
 }
 
 export const CHANGELOG: ChangelogVersion[] = [
+  {
+    version: "v1.19.0",
+    date: "07/10/2026",
+    entries: [
+      {
+        type: "novidade",
+        text: "Ligar para o cliente a partir do chamado. Na tela do chamado, técnico e administrador têm um botão que inicia a ligação para quem abriu o pedido, sem copiar número para o telefone nem sair do sistema. O destino não é escolhido na tela: ele vem do cadastro de quem abriu o chamado, no momento do clique, e por isso a ação só aparece quando o chamado foi aberto por um cliente que tem telefone cadastrado. Cada tentativa fica registrada no histórico do chamado, com quem ligou e quando — sem o número discado e sem o conteúdo da conversa.",
+      },
+      {
+        type: "novidade",
+        text: "O chamado passa a mostrar quem o abriu. Um bloco Solicitante reúne o nome, a empresa e o telefone de quem registrou o pedido, que antes exigiam sair para a tela de usuários. O telefone aparece só para quem pode ligar. E o técnico passa a corrigir o telefone do cliente ali mesmo: antes disso, número errado ou desatualizado só era ajustado por um administrador, e a ligação ficava bloqueada até isso acontecer.",
+      },
+      {
+        type: "melhoria",
+        text: "Antes da primeira ligação de cada sessão, o sistema lembra o que precisa estar pronto: o Webphone da operadora aberto, conectado com o ramal e com o microfone liberado. O aviso aparece uma vez por sessão do navegador e não se repete a cada chamada. É orientação, e não verificação: o HelpHS não tem como saber se o Webphone está aberto — a operadora não oferece nenhum caminho para consultar isso —, e prometer essa checagem seria afirmar o que não se mede.",
+      },
+      {
+        type: "melhoria",
+        text: "Quando a ligação não sai porque o ramal ou o Webphone estão indisponíveis, a mensagem diz isso, com a ação a tomar, em vez de um erro genérico. É a recusa mais comum na prática, e confundi-la com falha do sistema levava a tentar de novo sem abrir o Webphone. Repetir a tentativa é livre: não existe espera obrigatória entre uma ligação e a próxima no mesmo chamado, e o sistema nunca repete sozinho — quem decide ligar de novo é uma pessoa.",
+      },
+    ],
+  },
   {
     version: "v1.18.0",
     date: "28/09/2026",

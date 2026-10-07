@@ -37,6 +37,184 @@ primeira tentativa.
 
 ---
 
+## 02/10/2026 — A telefonia sai do inerte e chega ao cliente, e a gravação para num bloqueio
+
+Sete frentes entre 25/09 e 02/10, da primeira ligação real até a correlação do
+CDR validada em produção. Tudo o que é tela **está no ar** desde 30/09 e foi
+anunciado agora na v1.19.0 — a funcionalidade rodou quatro versões sem o cliente
+ser informado.
+
+### O botão, e o corpo vazio
+
+`POST /tickets/{id}/calls` com corpo `{}` e nada mais. O destino vem do cadastro
+de quem abriu o chamado, no instante do clique; `phone`, `called`, `caller`,
+`extension` ou `metadata` no corpo viram 422, por `extra="forbid"` — o primeiro
+do projeto. Ignorar seria seguro para o efeito, porque o destino continua vindo
+do banco, e péssimo para a detecção: um front adulterado passaria meses sem
+ninguém notar.
+
+Defeito real pego por mutação, não por leitura: três cliques dentro do mesmo
+`act()` geravam três POSTs, porque os três liam o `ligando` do render anterior.
+`useRef` resolveu — é síncrono e é o mesmo objeto entre closures.
+
+### A regra de negócio mudou duas vezes, e a segunda foi medida
+
+Saíram a janela de 5 minutos entre tentativas e o teto de 3/h por chamado. O
+motivo é de operação: a recusa mais comum é o Webphone fechado, e a correção é
+abrir e tentar de novo — a espera punia o caminho de recuperação. Ficaram o teto
+de 20/h por ator, o lock do Redis e a ausência de retry.
+
+Que a remoção estava no ar foi provado **sem endpoint de versão**: duas linhas
+`confirmed` em produção com 11 segundos de intervalo. Prova comportamental.
+
+### Solicitante no chamado, e a causa que não era a suposta
+
+O bloco mostra nome, empresa e telefone de quem abriu. A empresa vem de
+`users.company_name`, escolhido contando produção: 21 de 36 contas tinham o
+campo, 4 tinham `company_id`, **nenhuma** tinha só `company_id`.
+
+O técnico não conseguia corrigir o telefone do cliente, e a causa **não** era
+permissão de campo: era a guarda de papel, que recusava a requisição inteira
+quando o corpo trazia `role` igual ao já gravado. Passou a comparar antes de
+recusar.
+
+Armadilha que custou 26 testes: `requester` em `TicketResponse` quebrou tudo o
+que não era chamado de detalhe. Virou `TicketDetailResponse(TicketResponse)`. E
+o nome original, `creator`, colidia com o `relationship()` `Ticket.creator` —
+`from_attributes=True` faz o pydantic tocar a relação lazy e estourar
+`MissingGreenlet` em sessão async. Há sentinela de AST comparando os campos do
+schema com as relações do ORM.
+
+### Prontidão do Webphone: o que não dá para saber
+
+Auditoria antes de implementar, e ela fechou a porta. As 45 operações da API4COM
+não têm nenhuma de status de ramal; `Extension` não tem `registered`, `online`
+nem `sip_status`; a extensão instalada (manifest v3, v5.13.0) não expõe
+`externally_connectable` nem `onMessageExternal`, e seus 26 content scripts são
+por host — `helphs.healthsafetytech.com` não está na lista. O fornecedor
+confirmou por escrito: **não existe endpoint de presença**.
+
+Sobrou orientar com honestidade. Modal uma vez por sessão do navegador
+(`sessionStorage`, nunca `localStorage`), e o que ele registra é que alguém **leu
+um aviso** — jamais que o ramal está pronto.
+
+### O 424 era padrão, não exceção
+
+3 de 5 tentativas na primeira semana. O fornecedor confirmou por escrito que
+**424 = ramal do operador offline ou indisponível**, incluindo webphone fechado,
+desconectado ou deslogado — e isso não está na documentação da rota, que publica
+só o 200. A tradução virou `reason "webphone_unavailable"`, vocabulário do
+HelpHS num dicionário só; `provider_http_status` segue privado. Sentinela de AST
+impede `424` voltar a ser `if` em `api4com.py` ou `ligacao.py`.
+
+O nome do motivo mudou no meio: era `webphone_not_registered`, e "não
+registrado" descrevia **uma** das causas que o fornecedor listou. O rótulo
+público tem de ser tão largo quanto o significado oficial.
+
+### A correlação do CDR, e as três âncoras que não servem
+
+Medição autenticada em produção, 30/09, com o token lido dentro do contêiner:
+
+| Âncora | Veredito |
+|---|---|
+| `provider_call_id` do `POST` | **0 matches** contra o `id` do `GET /calls` |
+| filtro `metadata.gateway` | HTTP 200, mas devolve registros alheios |
+| horário | divergência sistemática de ~3h |
+
+Sobrou o que plantamos. `create_call` ganhou `ticket_call_id: uuid.UUID`
+obrigatório, e o `metadata` passou a `{gateway, ticket_call_id}` — conjunto
+fechado, sem parâmetro `metadata: dict` e sem `**kwargs`. **Validado ponta a
+ponta em produção em 01/10**: chamada posterior ao deploy, `confirmed`/200, CDR
+achado por igualdade de UUID, `duration` 9, `NORMAL_CLEARING`, `record_url`
+presente. Sem `provider_call_id` e sem heurística de horário.
+
+⚠️ A correlação é **prospectiva**: as chamadas anteriores existem no fornecedor
+sem `ticket_call_id`, e não há backfill.
+
+### A primeira porta de entrada do projeto
+
+`POST /api/v1/integrations/telefonia/call-ended` recebe o desfecho da chamada.
+Até ela, tudo o que autenticava vinha de `get_current_user` — sessão de gente —
+e as únicas chaves eram de saída. A autenticação nasceu em arquivo próprio
+(`core/integracao.py`): misturada em `core/security.py`, alguém "consertaria" o
+acesso com `get_current_user` um dia, e isso abriria a rota a qualquer usuário
+autenticado, cliente incluído. Há teste que reprova isso por inspeção das
+dependências.
+
+Segredo em `SecretStr`, `hmac.compare_digest`, 401 com mensagem **idêntica** para
+ausente, vazio e errado. Fail-closed é 503 **no endpoint**, não falha de boot:
+exigir a variável na subida derrubaria o contêiner no primeiro deploy que a
+esquecesse — a porta não abre, a casa não cai.
+
+Idempotência pelo banco, não por `if`:
+`UPDATE ... WHERE id = :id AND hangup_event_received_at IS NULL`. E `rowcount == 0`
+**não** é assumido como duplicata: confere se a linha existe, porque evento de
+outro sistema tem de dar 404.
+
+⚠️ **Não está no ar** — mesclado no PR #74, deploy pendente. E o n8n, que vai
+rotear os eventos dos ramais 1018/1019, **não foi tocado**: está em produção
+alimentando o GrowthHS.
+
+### Três sentinelas textuais enganadas pelo próprio texto
+
+Padrão que apareceu três vezes nesta frente e vale como regra: **sentinela por
+`grep` falha quando a docstring explica a regra proibida.**
+
+1. O grep de `"424"` achou comentários históricos em `ligacao.py`.
+2. O grep de `record_url` no router achou a docstring que proíbe `record_url`.
+3. O grep de `compare_digest` **sobreviveu à mutação**: trocar a chamada por
+   `==` deixava intacta a docstring que cita `hmac.compare_digest`.
+
+As três viraram AST, dentro da função. E um teste meu quase nasceu com o mesmo
+defeito do outro lado: procurar `"1019"` dentro de um UUID, sendo que são quatro
+dígitos hexadecimais válidos.
+
+Em paralelo, outra frente consertou o `assert "424" not in resposta.text` da 2C.6b
+(PR #72) — e melhor que a minha versão: mediu 1,22% sobre 200 mil corpos, cobriu
+também o `_RAMAL`, e **testa a própria asserção** em três casos. No rebase a
+versão dela foi tomada integralmente. O diagnóstico dela corrige o meu: a falha
+real veio do **carimbo** (`...T18:55:20.414247Z`, e `414247` contém `424`), não
+do UUID como eu havia atribuído.
+
+### A gravação existe, e para num bloqueio que não é técnico
+
+`gravar_audio = 1` no ramal 1019; o fornecedor grava **os dois lados**;
+`record_url` é link estático, **sem prazo de expiração definido**, com download
+direto. A Native AI de transcrição existe, tem documentação, suporta PT-BR e
+separa participantes — e foi **descartada por custo** (decisão de negócio: nada
+de IA paga; STT futuro local ou self-hosted).
+
+⚠️ O HelpHS não baixa, não armazena, não reproduz e não transcreve áudio. A
+auditoria de 02/10 achou **nove bloqueios, nenhum deles técnico**: finalidade,
+base legal, aviso, papel jurídico do fornecedor, contrato/DPA, subcontratados,
+retenção do áudio, retenção da transcrição e eliminação no fornecedor.
+
+Dois achados que mudam o desenho futuro: `/files/{token}` **não serve** para
+gravação, porque autoriza por posse do token sem conferir visibilidade do
+chamado; e `AuditAction` é enum nativo do PostgreSQL, logo as sete ações novas
+de auditoria exigiriam migration.
+
+A política de privacidade aprovada (PGS-TI-031 rev. 00) **não cobria** gravação
+— nem categoria de dado, nem finalidade, nem prazo, nem o provedor de telefonia
+na lista de compartilhamento. Ganhou uma seção 23 e cinco linhas nas seções
+existentes, **sem** escolher base legal e **sem** publicar prazo não aprovado.
+A revisão **não** foi incrementada de propósito: versionar é do Qualidade/SGI e
+aprovar é da Diretoria.
+
+### ⚠️ Lacuna deste registro
+
+Entre 24/09 e 06/10 entraram **34 PRs** na `main`. Esta entrada cobre só a
+frente de telefonia e gravação, que esta sessão fez de ponta a ponta. Ficaram
+**sem narrativa aqui**: a outbox de e-mail (Fases 3A a 3D e o conserto do
+`stale`), as telas de LGPD e re-aceite, as notificações da Fase 1, o aviso de
+SLA, e as frentes de dependências (`brace-expansion`, `axios`/`dompurify`,
+advisories do front, CVE do `python-jose`).
+
+Não estão aqui porque eu teria de escrevê-las a partir da mensagem do commit, e
+este arquivo vale pelo que foi medido. Quem fez cada uma é quem deve registrar.
+
+---
+
 ## 23/09/2026 — Estender o prazo de resolução, e o painel parar de discordar
 
 Funcionalidade pedida com desenho antes do código: técnico e administrador
