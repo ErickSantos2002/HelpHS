@@ -554,10 +554,19 @@ async def test_falha_do_dono_legitimo_volta_a_pending_sem_sent_at(db_factory, us
         ("dead", EmailDeliveryStatus.success),
     ],
 )
-async def test_worker_atrasado_nao_reverte_estado_terminal(db_factory, usuario, terminal, desfecho):
-    """`sent` e `dead` são terminais POR CONSTRUÇÃO: o predicado do fencing
-    exige `status='processing'`, que nenhum dos dois satisfaz. Sem isso, uma
-    linha já entregue voltava para a fila."""
+async def test_worker_atrasado_nao_reverte_terminal_sem_lock(
+    db_factory, usuario, terminal, desfecho
+):
+    """O caso NORMAL: `sent`/`dead` chegam ao terminal com `locked_by=None`,
+    porque toda saída de `processing` limpa o lock no mesmo UPDATE.
+
+    O que este teste prova é que o worker atrasado não reverte esse terminal.
+    Quem barra aqui é `locked_by = :worker_id` — `None` nunca casa —, e NÃO o
+    `status='processing'`: com as duas condições cobrindo o mesmo caminho, o
+    teste exercita a primeira que dispara. Medido: tirar `status='processing'`
+    da guarda não derrubava este teste. A guarda de status, sozinha, é provada
+    por `test_status_processing_protege_terminal_com_lock_residual`, logo abaixo.
+    """
     lid = await _linha(
         db_factory,
         usuario,
@@ -577,6 +586,97 @@ async def test_worker_atrasado_nao_reverte_estado_terminal(db_factory, usuario, 
     )
 
     assert await _estado(db_factory, lid) == antes
+
+
+async def _terminal_com_lock_residual(db_factory, usuario, *, terminal: str, worker: str):
+    """Linha terminal de origem Notification que AINDA carrega o lock do worker.
+
+    O código não produz este estado — toda saída de `processing` limpa o lock no
+    mesmo UPDATE. Ele é plantado de propósito: é o único em que `locked_by`
+    casa com o worker e, portanto, só `status='processing'` pode barrar a escrita.
+    Notificação coerente com o terminal: `sent` já entregue, `dead` não.
+    """
+    nid = uuid.uuid4()
+    lid = uuid.uuid4()
+    async with db_factory() as s:
+        s.add(
+            Notification(
+                id=nid,
+                user_id=usuario,
+                type=NotificationType.ticket_created,
+                title="Ticket aberto",
+                message="corpo",
+                data=None,
+                read=False,
+                email_sent=terminal == "sent",
+            )
+        )
+        await s.flush()
+        s.add(
+            EmailOutbox(
+                id=lid,
+                notification_id=nid,
+                status=terminal,
+                attempts=3,
+                next_attempt_at=_AGORA - timedelta(hours=1),
+                locked_by=worker,
+                locked_at=_VELHO,
+                last_error=None if terminal == "sent" else "SMTPRecipientRefused (code 550)",
+                sent_at=_AGORA if terminal == "sent" else None,
+            )
+        )
+        await s.commit()
+    return lid, nid
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize(
+    "terminal, desfecho, erro",
+    [
+        # Tenta devolver um `sent` para a fila.
+        ("sent", EmailDeliveryStatus.temporary_failure, "SMTPServerDisconnected"),
+        # Tenta transformar um `dead` em `sent` e marcar a notificação.
+        ("dead", EmailDeliveryStatus.success, None),
+    ],
+)
+async def test_status_processing_protege_terminal_com_lock_residual(
+    db_factory, usuario, terminal, desfecho, erro
+):
+    """`WHERE status = 'processing'` é condição INDEPENDENTE do fencing.
+
+    Aqui `locked_by` é o do próprio worker atrasado, então a condição de lock
+    casa. Se a guarda fosse só `id AND locked_by`, o UPDATE afetaria a linha: o
+    `sent` voltaria para `pending` (e a mensagem sairia de novo) e o `dead`
+    viraria `sent`, com `Notification.email_sent=True` declarando uma entrega
+    que nunca houve. Com `status='processing'`, o UPDATE afeta 0 linhas e o
+    terminal fica intacto, inclusive o lock residual.
+    """
+    lid, nid = await _terminal_com_lock_residual(
+        db_factory, usuario, terminal=terminal, worker="worker-atrasado"
+    )
+    antes = await _estado(db_factory, lid)
+    email_sent_antes = await _email_sent(db_factory, nid)
+
+    capturado, sink = _captura()
+    try:
+        await _persiste_resultado(
+            db_factory,
+            lid,
+            EmailDeliveryResult(desfecho, erro),
+            worker_id="worker-atrasado",
+            agora=_AGORA + timedelta(minutes=1),
+        )
+    finally:
+        logger.remove(sink)
+
+    # O UPDATE guardado afetou 0 linhas: é o único caminho que loga claim perdida.
+    assert len([m for _, m in capturado if "claim was lost" in m]) == 1
+
+    depois = await _estado(db_factory, lid)
+    # status, attempts, locked_by, locked_at, next_attempt_at, last_error, sent_at
+    assert depois == antes, "o worker atrasado alterou uma linha terminal"
+    assert depois.status == terminal
+    assert await _email_sent(db_factory, nid) is email_sent_antes
 
 
 @pytest.mark.asyncio
