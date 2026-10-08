@@ -106,6 +106,7 @@ const TABELA_CONGELADA: ReadonlyArray<{
   itens: number;
   resumo: string;
 }> = [
+  { version: "v1.18.0", date: "28/09/2026", itens: 4, resumo: "37hp0z-10x" },
   { version: "v1.17.0", date: "24/09/2026", itens: 5, resumo: "bw1nu4-1gz" },
   { version: "v1.16.0", date: "22/09/2026", itens: 1, resumo: "1nng7ev-hv" },
   { version: "v1.15.0", date: "16/09/2026", itens: 10, resumo: "1n4trcy-1th" },

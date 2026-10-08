@@ -253,6 +253,113 @@ publicar uma versão nova.
   mergeada**. Até entrar, um `library_file_id` mandado pelo WebSocket segue
   sumindo em silêncio; não morde hoje porque a tela não manda anexo por ali.
 
+### ⚠️ Dívida de reconciliação: v1.15.0 a v1.18.0
+
+Este arquivo salta de **v1.14.0 (11/09)** para **v1.19.0 (07/10)**, mas o
+changelog do produto publicou v1.15.0, v1.16.0, v1.17.0 e v1.18.0 nesse
+intervalo. Parte dos itens de *[Não publicado]* acima **já está em
+produção** sob essas quatro versões — o próprio cabeçalho desta seção avisa
+que isso significa versão errada ou versão faltando.
+
+Separar item por item exige cruzar cada entrada com `changelog.ts` e com o
+histórico do git, e atribuir um item à versão errada é pior que deixá-lo
+aqui. Fica registrado como tarefa própria, **não feita**, em vez de
+silenciosamente arrumada.
+
+Sinais úteis para quem for fazer: a extensão de prazo (`Prorrogar`) **não**
+está no bundle em 07/10, logo não saiu; o botão-link e a rolagem do quadro
+entraram pelos PRs #32 e #34 e **estão** no ar.
+
+## [v1.19.0] — 07/10/2026
+
+A telefonia, que chegou à produção em pedaços ao longo de quatro versões e
+**nunca foi anunciada ao cliente**. Esta versão existe para fechar essa dívida:
+o que entra aqui não é código novo, é texto para funcionalidade que a equipe
+**já usa**.
+
+**Publicada depois de implantada, e o recorte foi decidido por medição.** Em
+07/10 o bundle no ar (`/assets/TicketDetailPage-BcsJGbVS.js`, 72 929 bytes)
+responde `Solicitante`, `Ligar para cliente`, `Webphone` e
+`webphone_unavailable` — os quatro marcadores das frentes abaixo. A
+`APP_VERSION` no bundle ainda era `v1.18.0`: a equipe operava com recurso que o
+changelog do produto não mencionava.
+
+⚠️ **O que ficou deliberadamente fora, e por quê.** A outbox de e-mail (Fases
+3C e 3D), o conserto do `stale` (A3) e o protocolo durável mesclaram entre 30/09
+e 07/10, mas **o deploy do backend não é verificável de fora** — o PostgreSQL de
+produção foi fechado para a internet (medido em 07/10: portas 8888 e 5432 em
+timeout) e a API não está exposta publicamente. Anunciar ao cliente o que não se
+mediu seria prometer o que talvez não esteja no ar. Esses itens seguem em
+*[Não publicado]* até haver confirmação.
+
+Também fora: a correlação do CDR por `metadata.ticket_call_id` (Fase 2D.2,
+PR #74). Ela é invisível ao cliente por construção — é identificador opaco no
+payload do fornecedor, sem efeito em tela.
+
+### Adicionado
+
+- **Ligar para o cliente a partir do chamado.** Botão na tela do chamado, para
+  `admin` e `technician`, que inicia a chamada pela API4COM sem o atendente
+  copiar número. O destino **não** vem do navegador: o corpo da requisição é
+  `{}` e o backend deriva `called` do cadastro de quem abriu o chamado no
+  instante do clique — um `phone`, `called`, `caller` ou `extension` mandados no
+  corpo viram 422, por `extra="forbid"` no `TicketCallCreate`. A ação só aparece
+  quando o criador do chamado é `role=client` com telefone cadastrado.
+
+  Cada tentativa nasce como linha em `ticket_calls` **antes** do efeito externo,
+  e o histórico do chamado recebe um evento genérico (`field="ligacao"`,
+  `new_value="tentativa"`): diz QUE houve tentativa, não como terminou. Sem
+  número discado, sem identificador do fornecedor e sem payload.
+
+- **Bloco "Solicitante" no chamado, e o técnico corrige o telefone do cliente.**
+  Nome, empresa e telefone de quem abriu, no painel lateral — o telefone só para
+  quem pode ligar. A empresa vem de `users.company_name`, escolhido por medição:
+  21 de 36 contas de produção tinham o campo preenchido, 4 tinham `company_id` e
+  **nenhuma** tinha só `company_id`.
+
+  O técnico passou a editar o telefone do cliente. A causa do bloqueio anterior
+  não era permissão de campo: era a guarda de atribuição de papel, que recusava
+  a requisição inteira quando o corpo trazia `role` igual ao que já estava
+  gravado. A guarda passou a comparar antes de recusar.
+
+### Alterado
+
+- **Repetir a ligação no mesmo chamado deixou de ter espera obrigatória.** Saíram
+  a janela de 5 minutos entre tentativas e o teto de 3 por hora por chamado. O
+  motivo é de operação, não de engenharia: a recusa mais comum é o Webphone
+  fechado, e a correção é abrir e tentar de novo — a espera punia justamente o
+  caminho de recuperação. Seguem de pé o teto de 20/h por ator, o lock do Redis
+  contra duplo clique, e a ausência total de retry automático.
+
+### Corrigido
+
+- **Orientação do Webphone antes da primeira ligação da sessão.** Modal que
+  lembra abrir o Webphone da API4COM, conectar com o ramal e liberar o
+  microfone. Uma vez por sessão do navegador (`sessionStorage`, chave
+  `helphs:webphone-api4com-ready-v1`), nunca permanente.
+
+  ⚠️ É orientação, e **não** verificação. A auditoria da Fase 2C.6 mediu que
+  detecção de prontidão é impossível hoje: as 45 operações da API4COM não têm
+  nenhuma de status de ramal, o modelo `Extension` não tem `registered`,
+  `online` nem `sip_status`, e a extensão Webphone instalada (manifest v3, v5.13.0)
+  não expõe `externally_connectable` nem `onMessageExternal` — e seus 26 content
+  scripts não incluem `helphs.healthsafetytech.com`. O fornecedor confirmou por
+  escrito que não existe endpoint de presença. O `sessionStorage` registra que
+  alguém **leu um aviso**, nunca que o ramal está pronto.
+
+- **HTTP 424 do fornecedor passou a ter mensagem própria.** Era a recusa mais
+  comum em produção — 3 de 5 tentativas na primeira semana — e caía no texto
+  genérico de falha, levando o atendente a repetir sem abrir o Webphone. A
+  API4COM confirmou por escrito que **424 significa ramal do operador offline ou
+  indisponível**, o que inclui webphone fechado, desconectado ou deslogado.
+
+  A tradução é vocabulário do HelpHS e mora num dicionário só, em
+  `schemas/telefonia.py`: `424 -> reason "webphone_unavailable"`. Os outros 4xx
+  seguem sem motivo público, porque inventar rótulo para eles seria publicar
+  hipótese na tela de quem atende. O `provider_http_status` continua **privado**
+  — persistido em `ticket_calls`, nunca na resposta ao navegador. Há sentinela
+  AST impedindo que `424` volte a virar `if` em `api4com.py` ou `ligacao.py`.
+
 ## [v1.14.0] — 11/09/2026
 
 Fechada com `c547100`, o commit que publicou a versão no changelog do produto (`frontend/src/data/changelog.ts`).
