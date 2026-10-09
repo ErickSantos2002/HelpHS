@@ -286,7 +286,8 @@ def test_o_schema_do_perfil_nao_ganhou_campo_administrativo():
         "name",
         "phone",
         "department",
-        "avatar_url",
+        # `avatar_url` saiu em 09/10/2026: era campo livre, e a foto só deve
+        # mudar pelo upload — ver `tests/test_avatar_url_so_pelo_upload.py`.
         "role",  # existe no schema, mas o update_me o exclui — ver testes acima
         # Mesma situação do `role`, e pela mesma razão: o ramal da API4COM é
         # provisionamento de admin, não configuração de perfil. Está no schema

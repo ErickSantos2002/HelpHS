@@ -229,6 +229,19 @@ publicar uma versão nova.
 ### Segurança
 
 - **O `testa_smtp` parava de vazar a chave na saída** (`e931950`, PR #9).
+- **A foto de perfil deixa de aceitar referência escrita à mão.** `avatar_url`
+  era campo livre do `UserUpdate`, então `PATCH /users/me` e
+  `PATCH /users/{id}` gravavam qualquer texto: URL externa (que o
+  `resolveFileUrl` do front deixa passar intacta para o `<img>`) ou a chave da
+  foto de **outra conta**, que o `GET /users/me` assinava e entregava. O campo
+  saiu do schema — o PATCH responde 200 e o descarta, como já fazia com
+  `status`, `email` e `password` —, e a foto só muda por
+  `POST /users/me/avatar`. Na leitura, toda resposta de usuário só devolve a
+  referência se ela for **exatamente** `avatars/{id-do-próprio}.{jpg,png,gif,webp}`;
+  qualquer outra vira `null` e a tela mostra as iniciais. O que já estiver
+  gravado no banco **não** foi corrigido nem apagado — só deixa de ser usado.
+  Sem migration e sem mudança de contrato além de `null` no lugar do valor
+  indevido. Cobertura em `tests/test_avatar_url_so_pelo_upload.py`.
 
 ### Testes
 
