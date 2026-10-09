@@ -2,6 +2,23 @@
 
 **Documento:** PGS-TI-031 · **Revisão:** 00 · **Vigência:** 05/10/2026
 
+> ⚠️ **TEXTO EM PROPOSTA — NÃO VIGENTE.** O conteúdo sobre **gravação de
+> chamadas de atendimento** é minuta técnica submetida à aprovação
+> institucional, e **não** integra a revisão 00 em vigência. Alcança a linha
+> de gravação na seção 6, a finalidade na seção 8, o parágrafo do canal de voz
+> na seção 7, o provedor de telefonia na seção 12, o prazo na seção 13 e a
+> **seção 23** inteira.
+>
+> Enquanto este aviso existir: a **base legal não está definida**, o **prazo de
+> retenção não está aprovado**, o **enquadramento jurídico do provedor de
+> telefonia não está formalizado**, e o número de revisão, a data de vigência e
+> a Tabela de Revisão e Aprovação **seguem intocados de propósito** — versionar
+> é do Setor de Qualidade/SGI e aprovar é da Diretoria (seção 19).
+>
+> Publicar este texto exige, pelas próprias seções 15 e 20: nova revisão,
+> **comunicação prévia de 15 dias** e **novo aceite** do titular. Este aviso sai
+> no mesmo ato em que a revisão for aprovada.
+
 ---
 
 ## 1. Objetivo
@@ -392,7 +409,7 @@ O titular pode, ainda, apresentar reclamação diretamente à Autoridade Naciona
 
 A plataforma HelpHS permite que a equipe de atendimento inicie uma ligação telefônica a partir de um chamado. Essa ligação é realizada por provedor de telefonia contratado e, no ramal utilizado em produção, a **gravação do áudio está habilitada na plataforma do provedor**, que registra as falas dos dois participantes.
 
-Na data de vigência desta revisão, a plataforma HelpHS **não** transfere, **não** armazena, **não** reproduz e **não** transcreve essas gravações: o áudio permanece exclusivamente na plataforma do provedor de telefonia, e nenhum usuário da plataforma — cliente ou integrante da equipe — tem acesso a ele pela interface do HelpHS.
+Hoje a plataforma HelpHS **não** transfere, **não** armazena, **não** reproduz e **não** transcreve essas gravações: o áudio permanece exclusivamente na plataforma do provedor de telefonia, e nenhum usuário da plataforma — cliente ou integrante da equipe — tem acesso a ele pela interface do HelpHS.
 
 As condições descritas nas subseções seguintes aplicam-se ao tratamento das gravações e serão observadas quando e se o recurso for implantado, na forma da subseção 23.8.
 

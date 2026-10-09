@@ -2623,6 +2623,55 @@ garantia fosse do servidor e não da leitura do código).
 baixa, não armazena, não reproduz e não transcreve áudio, e os dois BLOQUEIOS
 abaixo continuam de pé.
 
+#### Estado em 09/10/2026: o evento de encerramento em produção, e o ramal 1018
+
+Três itens que a auditoria de 02/10 listava como pendentes saíram da lista. Cada
+um com a medição que o tirou de lá.
+
+**A migration está aplicada.** Conferido no contêiner: `alembic current` devolve
+`k7f8g9h0i1j2 (head)` e `alembic heads` devolve o mesmo. As quatro colunas do
+desfecho — `duration_seconds`, `hangup_cause`, `recording_available`,
+`hangup_event_received_at` — existem em produção.
+
+**O endpoint foi implantado e validado em produção.** `POST
+/api/v1/integrations/telefonia/call-ended`, exercitado contra o ambiente real:
+
+| O que foi exercitado | Resultado |
+|---|---|
+| segredo incorreto | **401** |
+| segredo correto + `ticket_call_id` inexistente | **404** |
+| corpo com `record_url` a mais | **422** |
+| autenticação sem segredo configurado | fail-closed, não abre |
+| conjunto fechado do corpo (`extra="forbid"`) | recusa campo a mais |
+| `record_url` como campo de entrada | **não é aceito** |
+
+Os três códigos são exatamente a separação que o desenho pedia: 401 não distingue
+ausente de errado, 404 diz "esse evento não é nosso" em vez de tratá-lo como
+reentrega benigna, e 422 torna observável a tentativa de mandar o endereço da
+gravação entre serviços.
+
+⚠️ **O que isso NÃO prova.** Nenhum evento real chegou. O que foi validado é o
+endpoint: autenticação, contrato e recusa. A entrega de um `channel-hangup`
+verdadeiro depende do n8n, que não foi tocado — logo a **integração real segue
+NÃO VALIDADA**, e as quatro colunas do desfecho continuam sem nenhuma linha
+preenchida em produção.
+
+**O ramal 1018 foi provisionado e medido.** O Gabriel está com
+`role = technician`, `status = active` e `api4com_extension = 1018`. Do lado do
+fornecedor, `GET /extensions` respondeu **200**, o 1018 foi **encontrado** e
+`gravar_audio = 1`.
+
+O objeto da extensão traz campo de senha SIP; **o valor não foi exposto** em
+nenhum ponto da medição nem deste registro. E o que já se sabia continua
+valendo: o objeto **não** oferece presença nem estado online — saber se o
+Webphone está aberto permanece impossível pela API.
+
+**O 1019 da Suelen não foi tocado nesta rodada.** `gravar_audio = 1` segue como
+medido em 30/09. A associação pessoa↔ramal é *confirmada operacionalmente* e não
+tem prova no código — nem deveria ter: ramal é dado em `users.api4com_extension`,
+com índice único, e nunca constante no código. Os números 1018 e 1019 **não
+aparecem** em `backend/app/`.
+
 #### ⚠️ A correlação é PROSPECTIVA, e não há backfill
 
 As chamadas criadas antes de a 2D.2 estar em produção já existem **no
@@ -2755,6 +2804,47 @@ nesta rodada.
 > está prevista para 30/06/2027 (seção 13.2 da política).
 >
 > A transcrição pode ter prazo próprio. **Não assumir o mesmo número.**
+
+#### O que a API4COM respondeu sobre privacidade da gravação
+
+Respostas do fornecedor obtidas em 09/10/2026. Estão separadas da interpretação
+de propósito: a coluna da esquerda é o que **ele** afirmou; o que fazemos com
+isso está na seção de decisões, e é nosso.
+
+| Fato confirmado pela API4COM | |
+|---|---|
+| DPA separado | **não existe** |
+| Cobertura contratual | Termos de Uso + Política do fornecedor cobrem **parte** dos pontos |
+| Onde o áudio fica | servidores **próprios** da API4COM |
+| Localização | **São Paulo, Brasil** |
+| Endpoint de exclusão | **não existe** |
+| Botão de exclusão no painel | **não existe** |
+| Exclusão específica | somente **via suporte**, sujeita a análise técnica e jurídica |
+| Link da gravação | **único por chamada** |
+| Áudio | **bidirecional** — as falas dos dois participantes |
+| `record_url` | disponibilizado **após** o encerramento da chamada |
+| HTTP 424 | ramal/Webphone **indisponível** |
+
+🔴 **O item que muda o quadro é a exclusão.** Sem endpoint e sem botão, o HelpHS
+**não consegue cumprir sozinho** um pedido de eliminação do titular sobre o
+áudio: a eliminação depende de abrir chamado no suporte do fornecedor e de uma
+análise que ele conduz. Isso não é detalhe de implementação — é uma limitação de
+**direito do titular**, e precisa de decisão de quem responde por isso.
+
+Pela mesma razão, "anonimizar a conta no HelpHS" continua **não** produzindo
+efeito no áudio que está lá. Já estava registrado; agora está confirmado pelo
+fornecedor que nem existe caminho automatizado para produzir esse efeito.
+
+⚠️ **O que é interpretação NOSSA, e não declaração dele:**
+
+- que `record_url` deve ser tratado como **credencial de acesso ao áudio** — ele
+  disse que o link é único por chamada e permite reprodução direta; concluir que
+  isso o torna segredo é decisão interna;
+- que a ausência de DPA é **lacuna a resolver** — ele disse que não existe, não
+  que seja suficiente;
+- que o armazenamento no Brasil **dispensa** a análise de transferência
+  internacional da seção 10 da política — isso é leitura jurídica, e é do
+  Encarregado, não daqui.
 
 #### O que sabemos sobre a Native AI da API4COM — e o que o documento não prova
 
@@ -2892,19 +2982,21 @@ falas resolvida.
 
 #### O próximo trabalho técnico — e por que ele não tem número aqui
 
-Depois de a 2D.2 estar integrada e implantada, **e** depois da decisão de
-privacidade acima, o próximo trabalho técnico é **desenhar a reconciliação de
-CDR e gravação**: listar chamadas, casar `metadata.ticket_call_id` localmente,
-e decidir o que o HelpHS passa a guardar.
+O passo que abria este roteiro **está feito**: a 2D.2 está integrada e
+implantada, a migration `k7f8g9h0i1j2` está aplicada em produção e o endpoint
+de encerramento foi validado lá — ver *Estado em 09/10/2026* acima. O que
+sobra, em ordem, e cada passo dependendo do anterior:
 
-A ordem é esta, e cada passo depende do anterior:
-
-1. **2D.2 integrada e implantada**, para que chamadas novas carreguem
-   `ticket_call_id` — sem isso não há o que reconciliar;
-2. **decisão organizacional e de LGPD** (ver o bloqueio acima);
+1. **o n8n passar a rotear 1018/1019 para o HelpHS**, em cópia controlada, e
+   um evento REAL chegar ao endpoint — hoje ele responde certo e não recebe
+   nada;
+2. **decisão organizacional e de LGPD**, agora com um item a mais: o
+   fornecedor confirmou que **não há endpoint nem botão de exclusão** da
+   gravação, só pedido ao suporte sujeito a análise;
 3. **reconciliação de CDR e gravação**;
 4. **download seguro do áudio pelo backend**;
-5. **storage privado** do HelpHS;
+5. **storage privado** do HelpHS, com endpoint próprio — e **não** o
+   `/files/{token}`, que autoriza por posse do token;
 6. **avaliação de STT local ou self-hosted**, com as medições listadas acima;
 7. **só depois** implementação de transcrição.
 
