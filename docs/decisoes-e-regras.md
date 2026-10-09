@@ -735,10 +735,11 @@ dígitos, e quem confere os dígitos verificadores é o **frontend** — ou seja
 validação que o cliente controla. Elegê-lo como chave de escopo deixaria o
 usuário escolher em qual grupo de dados ele cai.
 
-Consequência prática já sentida: a unicidade de número de série ficou **por
-dono** e não por empresa (ver "Equipamentos do chamado"). Com esta regra
-escrita, aquilo deixa de parecer contorno e passa a ser o que é — a decisão
-correta, dado que não existe chave de empresa confiável hoje.
+Consequência prática já sentida: a unicidade de número de série nunca pôde ser
+**por empresa** — foi por dono até 26/08 e hoje é por produto (ver
+"Equipamentos do chamado"). Com esta regra escrita, aquilo deixa de parecer
+contorno e passa a ser o que é — a decisão correta, dado que não existe chave
+de empresa confiável hoje.
 
 Duas coisas que decorrem disso e valem saber:
 
@@ -1169,28 +1170,58 @@ cliente, e a listagem tem um **filtro de equipamentos sem dono** para achar os
 `/equipment/my*` ele não é aceito, senão o cliente escolheria de quem é o
 aparelho.
 
-### Número de série é único por dono, não no sistema inteiro
+### Número de série é único por produto
 
-**Dois clientes diferentes podem ter o mesmo número de série cadastrado.** Até
-a v1.8.0 a unicidade era global, o que produzia dois problemas: um cliente era
-impedido de cadastrar o próprio aparelho porque outra empresa já tinha aquele
-número, e a recusa (`409`) funcionava como oráculo — dava para descobrir quais
-seriais existem na base sondando o cadastro.
+**O par `(produto, número de série)` identifica um aparelho, de quem quer que
+seja.** A mesma série pode se repetir entre produtos diferentes, nunca dentro
+do mesmo. No banco é um índice só, `uq_equipments_product_serial`; série vazia
+não conflita.
 
-No banco são dois índices: `(owner_id, serial_number)` para quem tem dono, e um
-índice parcial sobre `serial_number` `WHERE owner_id IS NULL`, porque no
-Postgres nulos não conflitam entre si e dois órfãos com o mesmo serial passariam
-em silêncio.
+A chave mudou duas vezes:
 
-**O furo aceito:** dois usuários da *mesma* empresa podem cadastrar o mesmo
-aparelho, cada um no próprio escopo. O escopo certo seria a empresa, e não é
-por falta de vontade que não é — é porque **não existe chave de empresa
-confiável** hoje: `users.cnpj` é autodeclarado e não serve para escopo (ver
+- **Antes da v1.8.0 era global.** O cliente era impedido de cadastrar o
+  próprio aparelho porque outra empresa tinha aquele número em outro produto.
+- **Da v1.8.0 (21/08) a 26/08 foi por dono** (`(owner_id, serial_number)` mais um
+  índice parcial para os sem dono). Duas pessoas que cadastravam o mesmo
+  aparelho criavam duas linhas, cada uma se achando dona.
+- **Desde 26/08 é por produto** (migration `x4s5t6u7v8w9`), decidido com o
+  cliente: a mesma série do mesmo produto é o mesmo aparelho físico.
+
+### O cliente não se associa a aparelho que já existe
+
+Cadastrar pelo `POST /equipment/my` uma série que já existe naquele produto é
+recusado com **`409` "Este número de série já está cadastrado em outro
+equipamento."** — o mesmo status e o mesmo texto quando o aparelho é do próprio
+cliente, de outro cliente ou não tem responsável. A recusa não devolve dado
+nenhum do aparelho existente e não cria vínculo nenhum.
+
+Aparelho já cadastrado é assunto da **equipe**: admin e técnico atribuem ou
+trocam o responsável pela tela de Produtos (campo `owner_id`, ver "O dono do
+equipamento"). Estar na mesma empresa não dá acesso ao aparelho de outro
+cliente — o escopo do equipamento é o responsável, não `company_id`.
+
+Por que é assim (09/10/2026): de 26/08 até essa data, a série existente
+**anexava** o cliente ao aparelho (tabela `equipment_users`) e respondia `201`
+com o próprio aparelho existente — o responsável, o nome, o modelo, a descrição
+e a localização que outra empresa cadastrou. Acertar a série bastava para ler o
+cadastro alheio. O `201` também não escondia nada: o aparelho "cadastrado" não
+aparecia em `GET /equipment/my`, que filtra pelo responsável, e o vínculo em
+`equipment_users` não era lido por consulta nenhuma.
+
+**O preço aceito:** o `409` confirma que aquela série existe naquele produto.
+Não diz de quem é — há teste comparando as três recusas byte a byte. E quem
+tem o aparelho de verdade, mas não é o responsável cadastrado, precisa da
+equipe para acertar o cadastro.
+
+O que ficou de pé: o cadastro novo continua gravando o cadastrante em
+`equipment_users`, e os vínculos que a anexação gravou antes de 09/10 seguem no
+banco, sem efeito — nada os lê. Aparelho compartilhado entre clientes, se
+voltar, volta como regra própria, decidindo antes quem pode se anexar.
+
+Escopo por empresa depende de uma chave de empresa confiável, que hoje não
+existe: `users.cnpj` é autodeclarado e não serve para escopo (ver
 "Permissões"), e `users.company_id` está preenchido só para quem um admin
-vinculou à mão pela tela de Grupos.
-
-Evoluir para escopo por empresa depende de reconciliar esses dois campos
-primeiro — caminho levantado em
+vinculou à mão pela tela de Grupos — caminho levantado em
 `docs/superpowers/specs/2026-08-24-duas-fontes-de-verdade-empresa.md`.
 
 ## Cadastro do cliente
