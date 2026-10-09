@@ -1132,7 +1132,7 @@ def _db_tabela_equipamentos(linhas, *, product=None, users=None, por_id=None):
         yield session
 
     # A sessão fica pendurada no gerador para os testes que precisam afirmar o
-    # que NÃO aconteceu — anexar-se a um aparelho existente não pode chamar
+    # que NÃO aconteceu — esbarrar num aparelho existente não pode chamar
     # `add`, senão a linha nova nasceu do mesmo jeito.
     _gen.session = session
     return _gen
@@ -1153,10 +1153,9 @@ async def test_staff_nao_cadastra_de_novo_um_aparelho_que_ja_existe(patch_redis)
     de 21/08 — dois donos, duas linhas. Em 26/08 a chave passou a ser
     `(produto, série)` e as duas linhas viraram uma.
 
-    Aqui o 409 é a resposta certa, e é o oposto do `/equipment/my`: quem
-    cadastra pela tela de Produtos é staff, que já lista o parque inteiro. O
-    status não conta nada de novo, e anexar em silêncio prenderia o aparelho ao
-    dono errado sem ninguém perceber.
+    Aqui o 409 é a resposta certa: quem cadastra pela tela de Produtos é
+    staff, que já lista o parque inteiro, e o status não conta nada de novo.
+    Desde 09/10 o `/equipment/my` recusa do mesmo jeito.
     """
     from app.core.database import get_db
 
@@ -1322,19 +1321,17 @@ async def test_editar_so_o_nome_nao_esbarra_no_proprio_serial(patch_redis):
 
 
 @pytest.mark.asyncio
-async def test_cliente_e_anexado_ao_aparelho_do_outro_e_nao_repete_o_proprio(patch_redis):
-    """As duas metades da regra nova, no mesmo teste porque uma define a outra.
+async def test_cliente_nao_cadastra_de_novo_um_aparelho_que_ja_existe(patch_redis):
+    """Série alheia e série própria: 409 nos dois casos, sem linha nova.
 
-    Série de outra pessoa: **anexa** e responde 201 com o aparelho que já
-    existe — nenhuma linha nova. Série que já é dele: 409, porque um 201
-    silencioso faria a tela dizer que cadastrou o que não cadastrou.
+    Substitui `test_cliente_e_anexado_ao_aparelho_do_outro_e_nao_repete_o_proprio`,
+    que exigia 201 com o aparelho alheio — o vazamento corrigido em 09/10.
     """
     from app.core.database import get_db
 
     outro = _mock_user(UserRole.client)
-    do_outro = _equipamento_de(outro.id, "SN-001")
     gen = _db_tabela_equipamentos(
-        [do_outro, _equipamento_de(_CLIENT.id, "SN-009")],
+        [_equipamento_de(outro.id, "SN-001"), _equipamento_de(_CLIENT.id, "SN-009")],
         product=_mock_product(),
     )
     app.dependency_overrides[get_db] = gen
@@ -1350,25 +1347,51 @@ async def test_cliente_e_anexado_ao_aparelho_do_outro_e_nao_repete_o_proprio(pat
             json={"name": "Meu Titan", "serial_number": "SN-009"},
         )
 
-    assert de_outro.status_code == 201, de_outro.text
-    assert de_outro.json()["id"] == str(
-        do_outro.id
-    ), "devia ter devolvido o aparelho que já existe, não um recém-criado"
+    assert de_outro.status_code == 409, de_outro.text
+    assert meu_repetido.status_code == 409, meu_repetido.text
     criados = [c.args[0] for c in gen.session.add.call_args_list]
-    assert not any(
-        isinstance(o, Equipment) for o in criados
-    ), "anexar não pode criar linha nova — é a duplicata que a mudança veio tirar"
-    assert meu_repetido.status_code == 409
+    assert not any(isinstance(o, Equipment) for o in criados)
 
 
 @pytest.mark.asyncio
-async def test_anexar_e_cadastrar_respondem_a_mesma_coisa(patch_redis):
-    """O oráculo que a anexação fecha.
+async def test_serie_inedita_continua_cadastrando_com_o_cliente_como_responsavel(patch_redis):
+    """O cadastro legítimo não mudou: 201, o que ele enviou e ele como responsável."""
+    from app.core.database import get_db
 
-    Se a série de outra empresa devolvesse 409 e a inédita 201, o cliente
-    saberia pelo status quais aparelhos existem no parque alheio — bastava
-    varrer números de série. Os dois caminhos precisam ser indistinguíveis de
-    fora, e é isso que este teste prende.
+    outro = _mock_user(UserRole.client)
+    # Há aparelho de outro cliente na tabela, com outra série: só a série
+    # repetida recusa, a existência de outros cadastros não.
+    gen = _db_tabela_equipamentos([_aparelho_alheio(outro.id)], product=_mock_product())
+    app.dependency_overrides[get_db] = gen
+    _override_user(_CLIENT)
+
+    async with AsyncClient(transport=ASGITransport(app=app), base_url="http://test") as c:
+        resp = await c.post(
+            f"/api/v1/equipment/my?product_id={_PRODUCT_ID}",
+            json={"name": "Meu Titan", "serial_number": "SN-777", "location": "Minha sala"},
+        )
+
+    assert resp.status_code == 201, resp.text
+    corpo = resp.json()
+    assert corpo["owner_id"] == str(_CLIENT.id)
+    assert (corpo["name"], corpo["serial_number"], corpo["location"]) == (
+        "Meu Titan",
+        "SN-777",
+        "Minha sala",
+    )
+    criados = [c.args[0] for c in gen.session.add.call_args_list]
+    assert any(isinstance(o, Equipment) for o in criados)
+
+
+@pytest.mark.asyncio
+async def test_a_recusa_nao_diz_de_quem_e_o_aparelho(patch_redis):
+    """Série alheia, sem responsável ou própria: a mesma resposta, byte a byte.
+
+    O 409 conta que a série existe naquele produto — preço aceito em 09/10,
+    porque o 201 anterior também contava (o aparelho não aparecia no
+    `GET /equipment/my`) e ainda entregava os dados. O que ele não pode contar é
+    DE QUEM é: se o texto mudasse conforme o responsável, voltaria a ser
+    informação sobre o cadastro alheio.
     """
     from app.core.database import get_db
 
@@ -1383,10 +1406,15 @@ async def test_anexar_e_cadastrar_respondem_a_mesma_coisa(patch_redis):
                 json={"name": "Meu Titan", "serial_number": "SN-001"},
             )
 
-    serie_de_outra_empresa = await _posta([_equipamento_de(outro.id, "SN-001")])
-    serie_inedita = await _posta([])
+    alheia = await _posta([_aparelho_alheio(outro.id)])
+    sem_responsavel = await _posta([_aparelho_alheio(None)])
+    propria = await _posta([_equipamento_de(_CLIENT.id, "SN-001")])
 
-    assert serie_de_outra_empresa.status_code == serie_inedita.status_code == 201
+    assert alheia.status_code == sem_responsavel.status_code == propria.status_code == 409
+    assert alheia.content == sem_responsavel.content == propria.content
+    assert (
+        alheia.json()["detail"] == "Este número de série já está cadastrado em outro equipamento."
+    )
 
 
 @pytest.mark.asyncio
@@ -1395,9 +1423,8 @@ async def test_a_consulta_de_serial_procura_por_produto_e_serie(patch_redis):
 
     Substitui `test_a_consulta_de_serial_filtra_pelo_dono`, que guardava a
     regra de 21/08. O dono deixou de ser a chave em 26/08: o aparelho é
-    `(produto, série)`, e é por isso que o cliente que cadastra a série de
-    outro é ANEXADO em vez de recusado — a consulta precisa achar o aparelho
-    alheio para poder anexar.
+    `(produto, série)`, e a consulta precisa achar o aparelho alheio para
+    poder recusar o cadastro repetido.
     """
     from app.core.database import get_db
 
@@ -1417,3 +1444,124 @@ async def test_a_consulta_de_serial_procura_por_produto_e_serie(patch_redis):
         "a consulta precisa casar produto E série — sem o produto, a mesma série "
         "em produtos diferentes viraria o mesmo aparelho"
     )
+
+
+# ═══════════════════════════════════════════════════════════════
+# O CADASTRO NÃO DEVOLVE O APARELHO ALHEIO
+# ═══════════════════════════════════════════════════════════════
+#
+# O `POST /equipment/my` com a série de um aparelho que já existe respondia com
+# o PRÓPRIO aparelho existente: o `owner_id` de outro cliente, o nome que ele
+# deu, o modelo, a descrição e a localização. Bastava acertar `(produto, série)`
+# para ler o cadastro de outra empresa. Os testes acima só comparavam o status.
+
+
+def _aparelho_alheio(dono_id):
+    """Um aparelho cujos dados nenhum outro cliente pode ler."""
+    e = _equipamento_de(dono_id, "SN-001")
+    e.name = "Titan da Diretoria"
+    e.model = "TN-RESERVADO"
+    e.description = "Fica na sala do diretor financeiro"
+    e.location = "Filial Norte, 3º andar"
+    return e
+
+
+_DADOS_ALHEIOS = (
+    "Titan da Diretoria",
+    "TN-RESERVADO",
+    "Fica na sala do diretor financeiro",
+    "Filial Norte, 3º andar",
+)
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("mesma_empresa", [False, True], ids=["outra-empresa", "mesma-empresa"])
+async def test_cadastro_com_serie_alheia_nao_devolve_o_aparelho_alheio(patch_redis, mesma_empresa):
+    """Nem o dono, nem os dados: a resposta não pode conter nada do aparelho alheio.
+
+    Estar na mesma empresa não muda nada — o escopo do equipamento é o
+    responsável, e `company_id` não concede acesso a ninguém.
+    """
+    from app.core.database import get_db
+
+    outro = _mock_user(UserRole.client)
+    if mesma_empresa:
+        outro.company_id = _CLIENT.company_id = uuid.uuid4()
+    alheio = _aparelho_alheio(outro.id)
+    app.dependency_overrides[get_db] = _db_tabela_equipamentos([alheio], product=_mock_product())
+    _override_user(_CLIENT)
+
+    async with AsyncClient(transport=ASGITransport(app=app), base_url="http://test") as c:
+        resp = await c.post(
+            f"/api/v1/equipment/my?product_id={_PRODUCT_ID}",
+            json={"name": "Meu Titan", "serial_number": "SN-001"},
+        )
+
+    assert resp.status_code == 409, resp.text
+    corpo = resp.text
+    assert str(outro.id) not in corpo, "a resposta entregou o responsável do aparelho alheio"
+    vazados = [d for d in _DADOS_ALHEIOS if d in corpo]
+    assert not vazados, f"a resposta entregou dados do aparelho alheio: {vazados}"
+
+
+@pytest.mark.asyncio
+async def test_cadastro_com_serie_de_aparelho_sem_responsavel_nao_devolve_os_dados_dele(
+    patch_redis,
+):
+    """O órfão foi cadastrado pela equipe para algum cliente: também não é dele."""
+    from app.core.database import get_db
+
+    orfao = _aparelho_alheio(None)
+    app.dependency_overrides[get_db] = _db_tabela_equipamentos([orfao], product=_mock_product())
+    _override_user(_CLIENT)
+
+    async with AsyncClient(transport=ASGITransport(app=app), base_url="http://test") as c:
+        resp = await c.post(
+            f"/api/v1/equipment/my?product_id={_PRODUCT_ID}",
+            json={"name": "Meu Titan", "serial_number": "SN-001"},
+        )
+
+    assert resp.status_code == 409, resp.text
+    vazados = [d for d in _DADOS_ALHEIOS if d in resp.text]
+    assert not vazados, f"a resposta entregou dados do aparelho sem responsável: {vazados}"
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("dono", ["outro-cliente", "sem-responsavel"])
+async def test_cadastro_com_serie_existente_nao_muda_nem_vincula_nada(patch_redis, dono):
+    """A tentativa não toma o aparelho, não reescreve o cadastro e não cria vínculo.
+
+    O vínculo é a linha em `equipment_users` que a anexação gravava: sem
+    verificação nenhuma, acertar a série bastava para virar "usuário" do
+    aparelho de outra empresa.
+    """
+    from app.core.database import get_db
+
+    responsavel = _mock_user(UserRole.client).id if dono == "outro-cliente" else None
+    alheio = _aparelho_alheio(responsavel)
+    gen = _db_tabela_equipamentos([alheio], product=_mock_product())
+    executados = []
+    responde = gen.session.execute
+
+    async def _registra(stmt, *args, **kwargs):
+        executados.append(str(stmt).lower())
+        return await responde(stmt, *args, **kwargs)
+
+    gen.session.execute = _registra
+    app.dependency_overrides[get_db] = gen
+    _override_user(_CLIENT)
+
+    async with AsyncClient(transport=ASGITransport(app=app), base_url="http://test") as c:
+        resp = await c.post(
+            f"/api/v1/equipment/my?product_id={_PRODUCT_ID}",
+            json={"name": "Meu Titan", "serial_number": "SN-001", "location": "Minha sala"},
+        )
+
+    assert resp.status_code == 409, resp.text
+    assert alheio.owner_id == responsavel
+    assert (alheio.name, alheio.model, alheio.description, alheio.location) == _DADOS_ALHEIOS
+    assert not [
+        q for q in executados if "insert into equipment_users" in q
+    ], "a tentativa vinculou o cliente ao aparelho existente"
+    gen.session.add.assert_not_called()
+    gen.session.commit.assert_not_called()

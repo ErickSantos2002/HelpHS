@@ -151,30 +151,6 @@ async def _valida_dono(db: AsyncSession, owner_id: uuid.UUID) -> None:
 _SERIE_DUPLICADA = "Este número de série já está cadastrado em outro equipamento."
 
 
-async def _aparelho_do_produto(
-    db: AsyncSession, product_id: uuid.UUID, serial: str | None
-) -> Equipment | None:
-    """
-    O aparelho identificado por `(produto, série)` — de quem quer que seja.
-
-    É a chave nova, decidida com o cliente em 26/08: a mesma série pode se
-    repetir entre produtos diferentes, nunca dentro do mesmo. Duas pessoas que
-    cadastram a mesma série do mesmo produto estão falando do MESMO aparelho
-    físico, não de dois.
-
-    Sem filtro de dono de propósito — é justamente o aparelho do outro que
-    precisa ser encontrado. Quem cuida de não vazar essa informação é o call
-    site: o cliente nunca recebe uma resposta diferente por causa dela.
-    """
-    if not serial:
-        return None
-    consulta = select(Equipment).where(
-        Equipment.product_id == product_id,
-        Equipment.serial_number == serial,
-    )
-    return (await db.execute(consulta)).scalar_one_or_none()
-
-
 async def _recusa_serie_do_produto(
     db: AsyncSession,
     product_id: uuid.UUID,
@@ -186,10 +162,12 @@ async def _recusa_serie_do_produto(
     409 quando `(produto, série)` já existe.
 
     Substitui a `_recusa_serie_duplicada`, que escopava por dono. O dono deixou
-    de fazer parte da chave em 26/08: duas pessoas com a mesma série do mesmo
-    produto têm o MESMO aparelho, e é por isso que o `/equipment/my` anexa em
-    vez de recusar. Aqui a recusa continua valendo onde anexar não faz sentido
-    — a tela de staff e as edições.
+    de fazer parte da chave em 26/08: a mesma série do mesmo produto é o MESMO
+    aparelho, de quem quer que seja. Vale para a tela de staff, as edições e o
+    `/equipment/my` — que não anexa mais o cliente ao aparelho existente.
+
+    Só consulta o id: quem chama nunca recebe o aparelho que já existe, então
+    nenhum dado dele tem como chegar à resposta.
 
     `ignorando` tira o próprio equipamento da busca ao editar: sem isso,
     salvar sem mexer no serial esbarraria nele mesmo.
@@ -219,14 +197,6 @@ async def _anexa_usuario(db: AsyncSession, equipment_id: uuid.UUID, user_id: uui
         .values(equipment_id=equipment_id, user_id=user_id)
         .on_conflict_do_nothing()
     )
-
-
-async def _ja_usa(db: AsyncSession, equipment_id: uuid.UUID, user_id: uuid.UUID) -> bool:
-    consulta = select(equipment_users.c.user_id).where(
-        equipment_users.c.equipment_id == equipment_id,
-        equipment_users.c.user_id == user_id,
-    )
-    return (await db.execute(consulta)).scalar_one_or_none() is not None
 
 
 # ═══════════════════════════════════════════════════════════════
@@ -527,27 +497,18 @@ async def create_my_equipment(
 ) -> EquipmentResponse:
     await get_or_404(db, Product, product_id, "Product not found")
 
-    # O aparelho já existe? Então ele NÃO nasce de novo: a pessoa é anexada ao
-    # que está lá. É o que impede o mesmo aparelho físico de virar duas linhas
-    # quando dois colegas o cadastram.
+    # `(produto, série)` já cadastrado — dele, de outro cliente ou sem
+    # responsável — é 409, com o mesmo texto nos três casos.
     #
-    # E a resposta é a mesma do cadastro comum — 201 com o equipamento. Recusar
-    # com 409 aqui recriaria o oráculo que o `uq_equipments_owner_serial`
-    # existiu para fechar: o cliente saberia, pelo status, que aquela série já
-    # está com outra empresa. Anexando, as duas respostas são indistinguíveis.
-    existente = await _aparelho_do_produto(db, product_id, body.serial_number)
-    if existente is not None:
-        # O próprio cadastro repetido continua sendo 409: aqui a informação já
-        # é dele, e um 201 silencioso faria a tela dizer que cadastrou de novo
-        # o que não cadastrou.
-        if existente.owner_id == actor.id or await _ja_usa(db, existente.id, actor.id):
-            raise HTTPException(status_code=status.HTTP_409_CONFLICT, detail=_SERIE_DUPLICADA)
-
-        await _anexa_usuario(db, existente.id, actor.id)
-        _audit(db, AuditAction.update, actor.id, "equipment", existente.id)
-        await db.commit()
-        await db.refresh(existente)
-        return EquipmentResponse.model_validate(existente)
+    # Até 09/10 a série alheia ANEXAVA o cliente ao aparelho existente e
+    # respondia 201 com esse aparelho: `owner_id` de outra empresa, nome,
+    # modelo, descrição e localização. Acertar a série bastava para ler o
+    # cadastro alheio. O 201 também não fechava o oráculo que prometia: o
+    # aparelho "cadastrado" não aparecia no `GET /equipment/my`, que filtra por
+    # `owner_id`, e o vínculo em `equipment_users` não era lido por consulta
+    # nenhuma. A anexação saiu; se o aparelho compartilhado voltar, volta como
+    # regra própria, decidindo antes quem pode se anexar.
+    await _recusa_serie_do_produto(db, product_id, body.serial_number)
 
     ts = datetime.now(UTC)
     equipment = Equipment(
