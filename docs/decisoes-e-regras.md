@@ -1458,6 +1458,34 @@ existe para que mudar essa variável não abra um buraco.
 Como o arquivo em disco tem nome interno (uuid), o backend acrescenta
 `?filename=` na URL do anexo para o download sair com o nome original.
 
+### A foto de perfil só muda pelo upload
+
+`users.avatar_url` guarda uma **chave**, nunca uma URL, e só existe um formato
+dela desde que o upload nasceu (`de2aa09`, 18/05/2026):
+`avatars/{id-do-usuário}{.jpg|.png|.gif|.webp}`. Quem grava é
+`POST /users/me/avatar`, que monta a chave a partir do id de quem envia.
+
+**Não há outro caminho de escrita.** Até 09/10/2026 o campo estava no
+`UserUpdate`, e os dois PATCH de usuário gravavam qualquer texto — URL externa
+ou a chave da foto de outra conta. Saiu do schema; mandar `avatar_url` num
+PATCH hoje dá 200 e o campo não é persistido: campos extras são ignorados
+pelo comportamento padrão do Pydantic, herdado por `UserUpdate` (o
+`AppBaseModel` não configura `extra`). É o mesmo tratamento de `status`,
+`email` e `password`. Nada é recusado com erro, de propósito: é o padrão do
+projeto para campo que o perfil não edita.
+
+**A leitura não confia no que está gravado.** O que entrou antes da correção
+continua no banco — dado histórico não se corrige em migration nem em massa
+no deploy. Por isso `_to_response`, por onde passam todas as respostas de
+usuário, só devolve a chave quando ela é **igual** a uma das quatro que o
+upload geraria para aquele id; o resto vira `null`, e o front mostra as
+iniciais. O `GET /users/me` só assina o que sobreviveu a esse filtro: o link
+`/files/{token}` autoriza por posse do token, não por dono, então assinar a
+chave errada entregaria a foto de outra pessoa.
+
+Fora do `/me`, a chave legítima continua saindo **crua** (não é URL
+utilizável). Mostrar foto de terceiros é decisão de produto ainda em aberto.
+
 ## LGPD
 
 A anonimização de usuário existe no backend e foi **removida da interface de

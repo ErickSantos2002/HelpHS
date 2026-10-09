@@ -47,7 +47,12 @@ class UserUpdate(AppBaseModel):
     # vazio" — distinção da qual a regra prospectiva depende inteiramente.
     phone: TelefoneOpcional = Field(default=None, max_length=20)
     department: str | None = Field(default=None, max_length=100)
-    avatar_url: str | None = Field(default=None, max_length=500)
+    # `avatar_url` NÃO entra aqui: a foto só muda por `POST /users/me/avatar`,
+    # que gera a chave a partir do id de quem envia. Como campo livre, deixava
+    # qualquer um gravar URL externa ou a chave da foto de outra conta. Campos
+    # extras são ignorados pelo comportamento padrão do Pydantic, herdado por
+    # `UserUpdate`; por isso `avatar_url` enviado no PATCH não é persistido.
+    # Ver `tests/test_avatar_url_so_pelo_upload.py`.
     role: UserRole | None = None
     # Provisionamento administrativo, não configuração de perfil. O schema é
     # compartilhado com `PATCH /users/me`, que o descarta pelo `exclude` — a

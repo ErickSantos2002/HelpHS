@@ -68,12 +68,50 @@ router = APIRouter(prefix="/users", tags=["Users"])
 # não documento de chamado.
 _AVATAR_MAX_BYTES = 5 * 1024 * 1024
 
+# Tipo aceito no upload → extensão gravada. É daqui que sai o único formato de
+# chave que um avatar já teve (`avatars/{id}{ext}`, desde `de2aa09`): o upload
+# grava com ele, e a leitura só aceita de volta exatamente isso.
+_AVATAR_EXTENSOES = {
+    "image/jpeg": ".jpg",
+    "image/png": ".png",
+    "image/gif": ".gif",
+    "image/webp": ".webp",
+}
+
 
 # ── Helpers ───────────────────────────────────────────────────
 
 
+def _chave_do_avatar(user_id: uuid.UUID, extensao: str) -> str:
+    return f"avatars/{user_id}{extensao}"
+
+
+def _avatar_do_proprio_usuario(user: User) -> str | None:
+    """A chave gravada, se for a que o upload produz para ESTE usuário.
+
+    Até 09/10/2026 `avatar_url` era gravável por `PATCH /users/me` e
+    `PATCH /users/{id}` com qualquer texto — URL externa, chave da foto de
+    outra conta, caminho com `..`. O campo saiu do `UserUpdate`, mas o que
+    foi gravado antes continua no banco, e não é corrigido em massa aqui.
+
+    Por isso a leitura não confia no valor: compara por IGUALDADE com as
+    quatro chaves que o upload poderia ter gerado para este id. Sem prefixo e
+    sem parsing, não há travessia, maiúscula ou domínio de terceiro que passe.
+    Qualquer outra coisa vira "sem foto", e o front cai nas iniciais.
+    """
+    chave = user.avatar_url
+    if not chave:
+        return None
+    validas = {_chave_do_avatar(user.id, ext) for ext in _AVATAR_EXTENSOES.values()}
+    return chave if chave in validas else None
+
+
 def _to_response(user: User) -> UserResponse:
-    return UserResponse.model_validate(user)
+    response = UserResponse.model_validate(user)
+    # Toda resposta de usuário passa por aqui: a referência indevida gravada
+    # antes da correção não sai por nenhuma delas, nem crua.
+    response.avatar_url = _avatar_do_proprio_usuario(user)
+    return response
 
 
 def _audit(
@@ -351,11 +389,13 @@ async def get_me(
     settings: Annotated[Settings, Depends(get_settings)],
 ) -> UserResponse:
     response = _to_response(current_user)
-    if current_user.avatar_url and current_user.avatar_url.startswith("avatars/"):
+    # Só a chave do PRÓPRIO usuário é assinada. O link autoriza por posse do
+    # token, não por dono: assinar `avatars/<id-de-outro>` entregaria a foto
+    # de outra conta. `_to_response` já zerou o que não for legítimo.
+    chave = response.avatar_url
+    if chave:
         try:
-            response.avatar_url = await storage.get_presigned_url(
-                current_user.avatar_url, settings, expires=604800
-            )
+            response.avatar_url = await storage.get_presigned_url(chave, settings, expires=604800)
         except Exception:
             response.avatar_url = None
     return response
@@ -464,8 +504,7 @@ async def upload_avatar(
     current_user: Annotated[User, Depends(get_current_user)],
     settings: Annotated[Settings, Depends(get_settings)],
 ) -> UserResponse:
-    allowed_types = {"image/jpeg", "image/png", "image/gif", "image/webp"}
-    if file.content_type not in allowed_types:
+    if file.content_type not in _AVATAR_EXTENSOES:
         raise HTTPException(
             status_code=status.HTTP_422_UNPROCESSABLE_CONTENT,
             detail="Formato inválido. Use JPG, PNG, GIF ou WebP.",
@@ -476,13 +515,7 @@ async def upload_avatar(
     # memória — ver app/utils/uploads.py.
     data = await ler_ate_o_limite(file, max_bytes=_AVATAR_MAX_BYTES, rotulo="5 MB")
 
-    ext_map = {
-        "image/jpeg": ".jpg",
-        "image/png": ".png",
-        "image/gif": ".gif",
-        "image/webp": ".webp",
-    }
-    key = f"avatars/{current_user.id}{ext_map[file.content_type]}"
+    key = _chave_do_avatar(current_user.id, _AVATAR_EXTENSOES[file.content_type])
     await storage.upload_file(data, key, file.content_type, settings)
     url = await storage.get_presigned_url(key, settings, expires=604800)
 
