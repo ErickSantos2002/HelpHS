@@ -1,6 +1,6 @@
 import { useState } from "react";
 import { Link, useNavigate, useSearchParams } from "react-router-dom";
-import { Alert, Button, Input } from "../../components/ui";
+import { Alert, Button, Icon, Input } from "../../components/ui";
 import { resetPasswordApi } from "../../services/authService";
 import { getApiError } from "../../lib/apiError";
 import { AuthShell } from "./AuthShell";
@@ -20,6 +20,8 @@ export default function ResetPasswordPage() {
 
   const [senha, setSenha] = useState("");
   const [confirmacao, setConfirmacao] = useState("");
+  const [verSenha, setVerSenha] = useState(false);
+  const [verConfirmacao, setVerConfirmacao] = useState(false);
   const [loading, setLoading] = useState(false);
   const [erro, setErro] = useState<string | null>(null);
 
@@ -77,24 +79,50 @@ export default function ResetPasswordPage() {
           </Alert>
         )}
 
-        <Input
-          label="Nova senha"
-          type="password"
-          value={senha}
-          onChange={(e) => setSenha(e.target.value)}
-          placeholder="Mín. 8 caracteres, 1 maiúscula, 1 número"
-          autoFocus
-          required
-        />
+        <div className="relative">
+          <Input
+            label="Nova senha"
+            type={verSenha ? "text" : "password"}
+            value={senha}
+            onChange={(e) => setSenha(e.target.value)}
+            placeholder="Mín. 8 caracteres, 1 maiúscula, 1 número"
+            className="pr-10"
+            autoFocus
+            required
+          />
+          {/* Mesmo arranjo do login: o campo é o último elemento do bloco
+              do Input, então `bottom-0` ancora o botão sobre ele. */}
+          <button
+            type="button"
+            onClick={() => setVerSenha((v) => !v)}
+            aria-label={verSenha ? "Ocultar nova senha" : "Mostrar nova senha"}
+            title={verSenha ? "Ocultar nova senha" : "Mostrar nova senha"}
+            className="absolute bottom-0 right-0 flex h-[38px] w-10 items-center justify-center rounded-r-lg text-slate-500 transition-colors hover:text-slate-300 focus:outline-none focus-visible:ring-2 focus-visible:ring-primary cursor-pointer"
+          >
+            <Icon name={verSenha ? "eyeOff" : "eye"} size={16} strokeWidth={2} />
+          </button>
+        </div>
 
-        <Input
-          label="Confirmar nova senha"
-          type="password"
-          value={confirmacao}
-          onChange={(e) => setConfirmacao(e.target.value)}
-          placeholder="Repita a senha"
-          required
-        />
+        <div className="relative">
+          <Input
+            label="Confirmar nova senha"
+            type={verConfirmacao ? "text" : "password"}
+            value={confirmacao}
+            onChange={(e) => setConfirmacao(e.target.value)}
+            placeholder="Repita a senha"
+            className="pr-10"
+            required
+          />
+          <button
+            type="button"
+            onClick={() => setVerConfirmacao((v) => !v)}
+            aria-label={verConfirmacao ? "Ocultar confirmação da senha" : "Mostrar confirmação da senha"}
+            title={verConfirmacao ? "Ocultar confirmação da senha" : "Mostrar confirmação da senha"}
+            className="absolute bottom-0 right-0 flex h-[38px] w-10 items-center justify-center rounded-r-lg text-slate-500 transition-colors hover:text-slate-300 focus:outline-none focus-visible:ring-2 focus-visible:ring-primary cursor-pointer"
+          >
+            <Icon name={verConfirmacao ? "eyeOff" : "eye"} size={16} strokeWidth={2} />
+          </button>
+        </div>
 
         <Button type="submit" variant="primary" size="lg" loading={loading} className="w-full">
           Salvar nova senha
