@@ -16,6 +16,10 @@ fechamento automático para sempre.
 `ticket_history.user_id` passa a aceitar NULL para representar o que o próprio
 sistema fez — o fechamento automático não tem autor humano, e apontá-lo para um
 administrador qualquer registraria no histórico uma ação que ninguém praticou.
+
+DOWNGRADE: só passa se não existir nenhuma linha de sistema. Havendo qualquer
+uma, ele ABORTA — repor o NOT NULL exigiria apagar trilha de auditoria, e essa
+decisão não é da migration.
 """
 
 from collections.abc import Sequence
@@ -56,7 +60,40 @@ def upgrade() -> None:
 
 
 def downgrade() -> None:
-    op.execute("DELETE FROM ticket_history WHERE user_id IS NULL")
+    # Até 02/09/2026 esta função começava com
+    #
+    #     DELETE FROM ticket_history WHERE user_id IS NULL
+    #
+    # para conseguir repor o NOT NULL logo abaixo. Só que essas linhas não são
+    # desta migration: são o que a APLICAÇÃO grava para representar ação do
+    # sistema (`ticket_lifecycle.py`, fechamento automático, e a Helô). Um
+    # rollback de emergência apagava a prova do que o sistema fez, calado, e o
+    # re-upgrade não traz nenhuma de volta.
+    #
+    # A política é falhar antes de destruir. Ver docs/decisoes-e-regras.md,
+    # "Migrations: a política do caminho de volta", regra 3.
+    bloqueiam = (
+        op.get_bind()
+        .execute(sa.text("SELECT count(*) FROM ticket_history WHERE user_id IS NULL"))
+        .scalar_one()
+    )
+    if bloqueiam:
+        raise RuntimeError(
+            f"ROLLBACK BLOQUEADO: {bloqueiam} linha(s) de ticket_history com user_id nulo.\n"
+            "\n"
+            "São ação do SISTEMA — fechamento automático e Helô —, gravadas pela\n"
+            "aplicação e não por esta migration. Repor o NOT NULL exigiria apagá-las,\n"
+            "e isso destrói trilha de auditoria sem volta: o re-upgrade não recupera\n"
+            "nenhuma.\n"
+            "\n"
+            "Este downgrade NÃO apaga e NÃO preenche com autor falso. A saída é\n"
+            "manual — decida o que fazer com essas linhas antes de tentar de novo,\n"
+            "ou reverta por restore de backup:\n"
+            "\n"
+            "    SELECT id, ticket_id, field, created_at\n"
+            "      FROM ticket_history WHERE user_id IS NULL;\n"
+        )
+
     op.alter_column("ticket_history", "user_id", existing_type=sa.UUID(), nullable=False)
 
     op.drop_index("ix_tickets_resolved_at", table_name="tickets")

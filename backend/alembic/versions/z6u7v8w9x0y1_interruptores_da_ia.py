@@ -29,9 +29,13 @@ que nasce DESLIGADO.
 NOT NULL recusa, porque as linhas existentes ficariam nulas. Com ele o
 Postgres preenche todas de uma vez.
 
-Upgrade sem risco: duas colunas novas com default. O downgrade derruba as
-duas e perde quem estava desligado -- nao ha para onde guardar essa informacao
-num schema que nao tem as colunas.
+Upgrade sem risco: duas colunas novas com default.
+
+DOWNGRADE: derruba as duas colunas, e nao ha para onde guardar quem estava
+desligado num schema que nao tem as colunas. Como o re-upgrade recria tudo com
+default TRUE, um ciclo de descer e subir RELIGARIA a IA de quem a desligou.
+Por isso o downgrade ABORTA quando existe qualquer opt-out — preferimos parar a
+religar em silencio. Ver docs/decisoes-e-regras.md, regra 5.
 """
 
 from collections.abc import Sequence
@@ -60,5 +64,45 @@ def upgrade() -> None:
 
 
 def downgrade() -> None:
+    # Guarda acrescentada em 02/09/2026. Descer apaga a coluna; o re-upgrade a
+    # recria com `server_default` TRUE. Quem tinha desligado a IA volta LIGADO
+    # — o estado nao volta neutro, volta ligado.
+    #
+    # Nao ha de onde reconstruir. Procurei: `_audit()` em app/routers/users.py
+    # grava o AuditLog so com action/entity_type/entity_id, deixando `old_data`
+    # e `new_data` nulos, entao o valor anterior de `users.ai_enabled` nao
+    # existe em lugar nenhum do banco. Para `tickets.ai_enabled` o
+    # `ticket_history` registra a troca, mas e log de mudanca e nao retrato de
+    # estado: some junto com o chamado por CASCADE.
+    #
+    # Sem fonte confiavel, nao se inventa restauracao. Aborta.
+    bind = op.get_bind()
+    desligados = {
+        tabela: bind.execute(
+            sa.text(f"SELECT count(*) FROM {tabela} WHERE ai_enabled = false")  # noqa: S608
+        ).scalar_one()
+        for tabela in ("users", "tickets")
+    }
+
+    if any(desligados.values()):
+        raise RuntimeError(
+            "ROLLBACK BLOQUEADO: "
+            f"{sum(desligados.values())} opt-out(s) de IA seriam religados.\n"
+            "\n"
+            f"    users.ai_enabled = false  : {desligados['users']}\n"
+            f"    tickets.ai_enabled = false: {desligados['tickets']}\n"
+            "\n"
+            "Descer apaga a coluna e o re-upgrade a recria com default TRUE — quem\n"
+            "desligou a IA de proposito volta com ela ligada, sem ser avisado.\n"
+            "\n"
+            "Nao ha de onde reconstruir esse valor: o AuditLog de usuario e gravado\n"
+            "sem old_data/new_data. Este downgrade nao inventa restauracao e nao\n"
+            "religa em silencio. A saida e manual — anote quem esta desligado antes\n"
+            "de descer e reponha depois de subir:\n"
+            "\n"
+            "    SELECT id, email FROM users WHERE ai_enabled = false;\n"
+            "    SELECT id, protocol FROM tickets WHERE ai_enabled = false;\n"
+        )
+
     for tabela in ("users", "tickets"):
         op.drop_column(tabela, "ai_enabled")

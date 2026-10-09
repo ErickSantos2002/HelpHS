@@ -28,6 +28,7 @@ import shutil
 import subprocess
 import sys
 import uuid
+from datetime import UTC, datetime
 from pathlib import Path
 
 import pytest
@@ -800,3 +801,420 @@ async def test_a_extensao_de_sla_sobe_e_desce(banco):
     await motor.dispose()
 
     assert _alembic(banco, "head").returncode == 0
+
+
+# ---------------------------------------------------------------------------
+# Guardas do CAMINHO DE VOLTA (02/09/2026)
+#
+# Os testes acima medem a ida. Os de baixo medem a volta, que era onde o
+# `downgrade` mentia: saía com código 0 e deixava o banco impróprio para o
+# `upgrade` seguinte. Cada par abaixo é (revisão sob teste, revisão
+# imediatamente anterior): subir só até a revisão alvo e descer UM passo isola
+# o `downgrade` daquela migration — descer a partir de `head` executaria a
+# cadeia inteira, e um `raise` de outra revisão mascararia o que se quer medir.
+# ---------------------------------------------------------------------------
+
+# Cada par é (revisão sob teste, revisão imediatamente anterior). Subir só até a
+# revisão alvo e descer um passo isola o `downgrade` daquela migration — descer
+# a partir de `head` executaria a cadeia inteira e um `raise` de outra revisão
+# mascararia o que se quer medir.
+_A1_AUDITORIA = ("r8m9n0o1p2q3", "q7l8m9n0o1p2")
+
+
+# Cada par é (revisão sob teste, revisão imediatamente anterior). Subir só até a
+# revisão alvo e descer um passo isola o `downgrade` daquela migration — descer
+# a partir de `head` executaria a cadeia inteira e um `raise` de outra revisão
+# mascararia o que se quer medir.
+_A1_AUDITORIA = ("r8m9n0o1p2q3", "q7l8m9n0o1p2")
+_A2_UNICIDADE = ("x4s5t6u7v8w9", "w3r4s5t6u7v8")
+
+
+_A2_UNICIDADE = ("x4s5t6u7v8w9", "w3r4s5t6u7v8")
+_A3_EQUIPAMENTOS = ("t0o1p2q3r4s5", "s9n0o1p2q3r4")
+
+
+_A3_EQUIPAMENTOS = ("t0o1p2q3r4s5", "s9n0o1p2q3r4")
+_A4_IA = ("z6u7v8w9x0y1", "y5t6u7v8w9x0")
+
+
+_INVENTARIO = {
+    "tabelas": "SELECT tablename FROM pg_tables WHERE schemaname='public'",
+    "enums": (
+        "SELECT t.typname FROM pg_type t JOIN pg_namespace n ON n.oid = t.typnamespace "
+        "WHERE n.nspname='public' AND t.typtype='e'"
+    ),
+    "indices": "SELECT indexname FROM pg_indexes WHERE schemaname='public'",
+}
+
+
+async def _fotografa(url: str) -> dict[str, set[str]]:
+    """O que existe no banco agora, por categoria.
+
+    A `alembic_version` fica de fora: ela é a contabilidade do próprio Alembic e
+    sobrevive ao `downgrade base` por desenho, não por defeito.
+    """
+    motor = create_async_engine(url)
+    foto: dict[str, set[str]] = {}
+    async with motor.connect() as conn:
+        for nome, sql in _INVENTARIO.items():
+            foto[nome] = {
+                str(x)
+                for x in (await conn.execute(text(sql))).scalars().all()
+                if not str(x).startswith("alembic_version")
+            }
+    await motor.dispose()
+    return foto
+
+
+async def _semeia_usuario(sessao, nome: str = "Fulana") -> uuid.UUID:
+    """Um usuário mínimo, por SQL explícito.
+
+    Pelo ORM não serve: estes testes rodam em pontos INTERMEDIÁRIOS da cadeia,
+    onde o schema é mais antigo que o modelo, e o INSERT do ORM carregaria toda
+    coluna que o modelo tem hoje. Já quebrou assim com `mfa_enabled` em 26/08.
+    """
+    identificador = uuid.uuid4()
+    await sessao.execute(
+        text(
+            "INSERT INTO users (id, name, email, password, role, status, "
+            "lgpd_consent, email_verified, onboarding_completed) "
+            "VALUES (:id, :nome, :email, 'x', 'client', 'active', true, true, true)"
+        ),
+        {"id": identificador, "nome": nome, "email": f"{identificador.hex[:8]}@test.com"},
+    )
+    return identificador
+
+
+async def _semeia_chamado(sessao, criador: uuid.UUID) -> uuid.UUID:
+    identificador = uuid.uuid4()
+    await sessao.execute(
+        text(
+            "INSERT INTO tickets (id, protocol, title, description, status, priority, "
+            "category, creator_id, sla_response_breach, sla_resolve_breach, "
+            "sla_total_paused_ms) "
+            "VALUES (:id, :protocolo, 'Chamado de teste', 'corpo', 'open', 'medium', "
+            "'general', :criador, false, false, 0)"
+        ),
+        {"id": identificador, "protocolo": identificador.hex[:12], "criador": criador},
+    )
+    return identificador
+
+
+async def _semeia_produto(sessao) -> uuid.UUID:
+    identificador = uuid.uuid4()
+    await sessao.execute(
+        text("INSERT INTO products (id, name, is_active) VALUES (:id, :nome, true)"),
+        {"id": identificador, "nome": f"Produto {identificador.hex[:6]}"},
+    )
+    return identificador
+
+
+@pytest.mark.asyncio
+async def test_downgrade_base_nao_deixa_tipo_para_tras(banco):
+    """
+    `downgrade base` tem que devolver o banco ao zero — e sair com 0 não prova isso.
+
+    Medido em 02/09/2026: o comando saía com código **0** e deixava **nove**
+    tipos ENUM no schema. `create_table` cria o tipo junto; `drop_table` não o
+    remove. O sintoma não aparece na volta — aparece no `upgrade head` seguinte,
+    com `DuplicateObjectError: type "slalevel" already exists`. Ou seja: no boot
+    do container, depois de um rollback, com a API não subindo.
+
+    A asserção é sobre o RESÍDUO, e não sobre o código de saída, de propósito:
+    era justamente o código de saída que estava mentindo.
+    """
+    assert _alembic(banco, "head").returncode == 0
+
+    volta = _alembic(banco, "base", comando="downgrade")
+    assert volta.returncode == 0, f"{volta.stdout}\n{volta.stderr}"
+
+    sobrou = await _fotografa(banco)
+
+    assert not sobrou["enums"], (
+        "tipos ENUM sobreviveram ao downgrade: "
+        + ", ".join(sorted(sobrou["enums"]))
+        + ". Toda migration que cria um tipo precisa derrubá-lo no downgrade; o"
+        " modelo é o `DROP TYPE IF EXISTS` da n4i5j6k7l8m9."
+    )
+    assert not sobrou["tabelas"], f"tabelas de sobra: {sorted(sobrou['tabelas'])}"
+
+
+@pytest.mark.asyncio
+async def test_ciclo_upgrade_downgrade_upgrade_devolve_o_mesmo_schema(banco):
+    """
+    O caminho de volta do deploy, exercitado de ponta a ponta.
+
+    O checklist de deploy do próprio projeto pede "upgrade → downgrade →
+    upgrade" como item **manual**, e nada automatizava isso. E não basta o ciclo
+    não estourar: o schema depois dele tem que ser o MESMO da subida limpa.
+    Ficar diferente é pior do que falhar, porque não faz barulho — o banco passa
+    a divergir do que o código espera, e o defeito reaparece numa consulta
+    qualquer, dias depois, longe da causa.
+    """
+    assert _alembic(banco, "head").returncode == 0
+    primeira = await _fotografa(banco)
+
+    assert _alembic(banco, "base", comando="downgrade").returncode == 0
+
+    subida = _alembic(banco, "head")
+    assert subida.returncode == 0, (
+        "o segundo `upgrade head` falhou — o downgrade não devolveu o banco ao"
+        f" estado inicial:\n{subida.stdout}\n{subida.stderr}"
+    )
+
+    segunda = await _fotografa(banco)
+    for categoria in _INVENTARIO:
+        assert segunda[categoria] == primeira[categoria], (
+            f"{categoria} diferente depois do ciclo. sumiram: "
+            f"{sorted(primeira[categoria] - segunda[categoria])} · sobraram: "
+            f"{sorted(segunda[categoria] - primeira[categoria])}"
+        )
+
+
+@pytest.mark.asyncio
+async def test_a1_downgrade_passa_quando_todo_historico_tem_autor(banco):
+    """Histórico com autor humano não bloqueia o rollback — o caminho normal."""
+    assert _alembic(banco, _A1_AUDITORIA[0]).returncode == 0
+
+    motor = create_async_engine(banco)
+    async with async_sessionmaker(bind=motor, expire_on_commit=False)() as s:
+        autor = await _semeia_usuario(s)
+        chamado = await _semeia_chamado(s, autor)
+        await s.execute(
+            text(
+                "INSERT INTO ticket_history (id, ticket_id, user_id, field, new_value) "
+                "VALUES (:id, :chamado, :autor, 'status', 'in_progress')"
+            ),
+            {"id": uuid.uuid4(), "chamado": chamado, "autor": autor},
+        )
+        await s.commit()
+    await motor.dispose()
+
+    volta = _alembic(banco, _A1_AUDITORIA[1], comando="downgrade")
+
+    assert volta.returncode == 0, f"{volta.stdout}\n{volta.stderr}"
+
+
+@pytest.mark.asyncio
+async def test_a1_downgrade_aborta_e_preserva_a_trilha_do_sistema(banco):
+    """O rollback não pode apagar o que o sistema fez para caber no schema antigo.
+
+    As linhas com `user_id` nulo são ação do sistema — fechamento automático
+    (`ticket_lifecycle.py:115`) e a Helô. Elas não foram criadas por esta
+    migration: foram gravadas pela aplicação depois do deploy. Apagá-las para
+    poder repor o `NOT NULL` destrói a prova do que o sistema fez, sem aviso e
+    sem volta.
+    """
+    assert _alembic(banco, _A1_AUDITORIA[0]).returncode == 0
+
+    motor = create_async_engine(banco)
+    async with async_sessionmaker(bind=motor, expire_on_commit=False)() as s:
+        autor = await _semeia_usuario(s)
+        chamado = await _semeia_chamado(s, autor)
+        for campo in ("status", "closed_at"):
+            await s.execute(
+                text(
+                    "INSERT INTO ticket_history (id, ticket_id, user_id, field, new_value) "
+                    "VALUES (:id, :chamado, NULL, :campo, 'x')"
+                ),
+                {"id": uuid.uuid4(), "chamado": chamado, "campo": campo},
+            )
+        await s.commit()
+    await motor.dispose()
+
+    volta = _alembic(banco, _A1_AUDITORIA[1], comando="downgrade")
+    saida = volta.stdout + volta.stderr
+
+    assert volta.returncode != 0, "o downgrade passou e apagou a trilha"
+    assert "2" in saida, f"a mensagem precisa dizer quantas linhas bloqueiam:\n{saida}"
+    assert "ticket_history" in saida
+    assert "manual" in saida.lower(), "a mensagem precisa dizer que exige decisão humana"
+
+    motor = create_async_engine(banco)
+    async with async_sessionmaker(bind=motor, expire_on_commit=False)() as s:
+        sobreviventes = (
+            await s.execute(text("SELECT count(*) FROM ticket_history WHERE user_id IS NULL"))
+        ).scalar_one()
+    await motor.dispose()
+
+    assert sobreviventes == 2, "as linhas do sistema tinham que continuar lá"
+
+
+@pytest.mark.asyncio
+async def test_a2_downgrade_passa_sem_serie_repetida(banco):
+    assert _alembic(banco, _A2_UNICIDADE[0]).returncode == 0
+
+    motor = create_async_engine(banco)
+    async with async_sessionmaker(bind=motor, expire_on_commit=False)() as s:
+        dono = await _semeia_usuario(s)
+        produto = await _semeia_produto(s)
+        await s.execute(
+            text(
+                "INSERT INTO equipments (id, product_id, owner_id, name, serial_number, "
+                "is_active) VALUES (:id, :produto, :dono, 'Phoebus', 'SERIE-A', true)"
+            ),
+            {"id": uuid.uuid4(), "produto": produto, "dono": dono},
+        )
+        await s.commit()
+    await motor.dispose()
+
+    volta = _alembic(banco, _A2_UNICIDADE[1], comando="downgrade")
+
+    assert volta.returncode == 0, f"{volta.stdout}\n{volta.stderr}"
+
+
+@pytest.mark.asyncio
+async def test_a2_downgrade_aborta_com_serie_que_a_chave_nova_permite(banco):
+    """A chave nova é (produto, série); a antiga era (dono, série).
+
+    Mesmo dono, mesma série, produtos diferentes: legítimo sob a chave de hoje e
+    proibido sob a de ontem. O downgrade precisa dizer isso antes de tentar criar
+    o índice — `CREATE UNIQUE INDEX` estourando sozinho dá um erro opaco que não
+    diz quantos casos existem nem o que fazer.
+    """
+    assert _alembic(banco, _A2_UNICIDADE[0]).returncode == 0
+
+    motor = create_async_engine(banco)
+    async with async_sessionmaker(bind=motor, expire_on_commit=False)() as s:
+        dono = await _semeia_usuario(s)
+        for _ in range(2):
+            produto = await _semeia_produto(s)
+            await s.execute(
+                text(
+                    "INSERT INTO equipments (id, product_id, owner_id, name, "
+                    "serial_number, is_active) "
+                    "VALUES (:id, :produto, :dono, 'Phoebus', 'SERIE-REPETIDA', true)"
+                ),
+                {"id": uuid.uuid4(), "produto": produto, "dono": dono},
+            )
+        await s.commit()
+    await motor.dispose()
+
+    volta = _alembic(banco, _A2_UNICIDADE[1], comando="downgrade")
+    saida = volta.stdout + volta.stderr
+
+    assert volta.returncode != 0, "o downgrade passou com dado que a chave antiga proíbe"
+    assert "1" in saida, "a mensagem precisa dizer quantos grupos conflitam"
+    assert "serial_number" in saida
+    assert "SERIE-REPETIDA" not in saida, "a mensagem não deve despejar o dado em si"
+
+    motor = create_async_engine(banco)
+    async with async_sessionmaker(bind=motor, expire_on_commit=False)() as s:
+        quantos = (await s.execute(text("SELECT count(*) FROM equipments"))).scalar_one()
+    await motor.dispose()
+
+    assert quantos == 2, "nenhum aparelho podia ter sido apagado"
+
+
+@pytest.mark.asyncio
+async def test_a3_downgrade_escolhe_o_equipamento_mais_antigo_e_nao_o_uuid_menor(banco):
+    """ "Mais antigo" tem que ser tempo, não ordem lexical de UUID.
+
+    O UUID é v4: não carrega cronologia nenhuma. Este teste monta o caso que
+    separa as duas leituras — o aparelho MAIS ANTIGO recebe o UUID MAIOR. Se a
+    escolha voltar a ser por id, o resultado inverte e o teste acusa.
+    """
+    assert _alembic(banco, _A3_EQUIPAMENTOS[0]).returncode == 0
+
+    antigo = uuid.UUID(int=2**127)  # maior lexicalmente
+    novo = uuid.UUID(int=1)  # menor lexicalmente
+
+    motor = create_async_engine(banco)
+    async with async_sessionmaker(bind=motor, expire_on_commit=False)() as s:
+        criador = await _semeia_usuario(s)
+        produto = await _semeia_produto(s)
+        chamado = await _semeia_chamado(s, criador)
+        for identificador, serie, quando in (
+            (antigo, "SERIE-ANTIGA", datetime(2020, 1, 1, tzinfo=UTC)),
+            (novo, "SERIE-NOVA", datetime(2026, 1, 1, tzinfo=UTC)),
+        ):
+            await s.execute(
+                text(
+                    "INSERT INTO equipments (id, product_id, name, serial_number, "
+                    "is_active, created_at) "
+                    "VALUES (:id, :produto, 'Phoebus', :serie, true, :quando)"
+                ),
+                {"id": identificador, "produto": produto, "serie": serie, "quando": quando},
+            )
+            await s.execute(
+                text(
+                    "INSERT INTO ticket_equipments (ticket_id, equipment_id) "
+                    "VALUES (:chamado, :equipamento)"
+                ),
+                {"chamado": chamado, "equipamento": identificador},
+            )
+        await s.commit()
+    await motor.dispose()
+
+    volta = _alembic(banco, _A3_EQUIPAMENTOS[1], comando="downgrade")
+    assert volta.returncode == 0, f"{volta.stdout}\n{volta.stderr}"
+
+    motor = create_async_engine(banco)
+    async with async_sessionmaker(bind=motor, expire_on_commit=False)() as s:
+        escolhido = (
+            await s.execute(
+                text("SELECT equipment_id FROM tickets WHERE id = :id"), {"id": chamado}
+            )
+        ).scalar_one()
+    await motor.dispose()
+
+    assert escolhido == antigo, (
+        "o downgrade escolheu por UUID, não por data: ficou com o aparelho de 2026 "
+        "em vez do de 2020"
+    )
+
+
+@pytest.mark.asyncio
+async def test_a4_downgrade_passa_quando_ninguem_desligou_a_ia(banco):
+    assert _alembic(banco, _A4_IA[0]).returncode == 0
+
+    motor = create_async_engine(banco)
+    async with async_sessionmaker(bind=motor, expire_on_commit=False)() as s:
+        await _semeia_usuario(s)  # nasce com ai_enabled = true
+        await s.commit()
+    await motor.dispose()
+
+    volta = _alembic(banco, _A4_IA[1], comando="downgrade")
+
+    assert volta.returncode == 0, f"{volta.stdout}\n{volta.stderr}"
+
+
+@pytest.mark.asyncio
+async def test_a4_downgrade_aborta_quando_alguem_desligou_a_ia(banco):
+    """Descer e subir de novo RELIGA a IA de quem a tinha desligado.
+
+    O `server_default` do re-upgrade é TRUE, e não existe de onde reconstruir o
+    valor: `_audit()` em `users.py:75` grava o AuditLog sem `old_data`/`new_data`.
+    Como não há fonte confiável, o downgrade não tenta restaurar nada — ele para
+    e exige decisão humana, que é melhor do que religar em silêncio uma coisa
+    que o cliente desligou de propósito.
+    """
+    assert _alembic(banco, _A4_IA[0]).returncode == 0
+
+    motor = create_async_engine(banco)
+    async with async_sessionmaker(bind=motor, expire_on_commit=False)() as s:
+        quem_desligou = await _semeia_usuario(s, "Empresa sem robô")
+        await s.execute(
+            text("UPDATE users SET ai_enabled = false WHERE id = :id"),
+            {"id": quem_desligou},
+        )
+        await s.commit()
+    await motor.dispose()
+
+    volta = _alembic(banco, _A4_IA[1], comando="downgrade")
+    saida = volta.stdout + volta.stderr
+
+    assert volta.returncode != 0, "o downgrade passou e o re-upgrade religaria a IA"
+    assert "1" in saida, "a mensagem precisa dizer quantos opt-outs bloqueiam"
+    assert "ai_enabled" in saida
+
+    motor = create_async_engine(banco)
+    async with async_sessionmaker(bind=motor, expire_on_commit=False)() as s:
+        ainda_desligado = (
+            await s.execute(
+                text("SELECT ai_enabled FROM users WHERE id = :id"), {"id": quem_desligou}
+            )
+        ).scalar_one()
+    await motor.dispose()
+
+    assert ainda_desligado is False, "o opt-out tinha que continuar valendo"
