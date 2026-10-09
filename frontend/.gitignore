@@ -25,3 +25,7 @@ coverage
 *.njsproj
 *.sln
 *.sw?
+
+# Referencia do comparador de capturas: 17 MB de PNG em base64, gerado
+# a cada execucao. E insumo de comparacao, nao evidencia.
+scripts/.capturas-anteriores.json

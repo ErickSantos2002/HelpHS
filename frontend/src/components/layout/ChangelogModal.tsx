@@ -1,35 +1,80 @@
 import type { ReactNode } from "react";
 import { cn } from "../../lib/utils";
-import { Modal } from "../ui";
+import { Icon, Modal } from "../ui";
 import { APP_VERSION, CHANGELOG, type EntryType } from "../../data/changelog";
 
+/**
+ * O selo de cada tipo de entrada.
+ *
+ * As três cores eram paleta crua com opacidade escolhida à mão — `blue-500/15`,
+ * `orange-500/15`, `emerald-500/15` com texto no degrau 400 e borda a /25.
+ * Passam a ser o mesmo trio que o `Badge` do pacote pinta: fundo na **tinta**,
+ * texto no **par da tinta**, borda na cor cheia a 30%.
+ *
+ * Por que não é o `Badge`: o selo aqui é de 10px com `gap-1`, e o primitivo é
+ * de 12px sem espaço entre ícone e rótulo. O `cn` deste projeto **não** é
+ * `tailwind-merge` — ele concatena —, então `className="px-2 text-[10px]"` por
+ * cima do `px-2.5 text-xs` do primitivo deixaria as duas regras vivas e a
+ * vencedora seria a ordem do CSS gerado, que não é nossa. Copiar as três
+ * classes de cor mantém a geometria e não inventa cor local.
+ *
+ * ── A variante sai do SIGNIFICADO, não da cor que estava aqui ─────────
+ *
+ * A primeira passada traduziu cor por cor: azul→`info`, laranja→`warning`,
+ * verde→`success`. Isso preserva a aparência e **não** é o critério do
+ * pacote — a cor antiga não era decisão de ninguém, era o que estava lá.
+ *
+ * | tipo | variante | por quê |
+ * |---|---|---|
+ * | `novidade` | `info` | é um **anúncio**: algo passou a existir. Não é resultado bom nem ruim, é informação — que é o que `info` significa em toda a interface (o `Alert`, o papel "Técnico", o selo de aviso neutro). |
+ * | `corrigido` | `success` | um defeito foi **resolvido**. Decisão do operador, e é a leitura certa: o laranja de antes dizia "atenção", e não há nada a que atentar num defeito que já saiu. |
+ * | `melhoria` | `secondary` | "algo que já existia ficou melhor" não é anúncio, nem resultado bom, nem alerta: é a **ausência** de carga semântica — que é o que a variante neutra do `Badge` carrega. Decisão do operador, e ela só passou a ser possível com a E23 (abaixo). |
+ *
+ * ── `melhoria` esteve sem casa até a E23, e o motivo era medido ────────
+ *
+ * A primeira passada prendeu `melhoria` em `success`, **gêmea de
+ * `corrigido`**, e não por gosto: sobre o cartão desta janela
+ * (`--surface-elevated`) as seis tintas ofereciam só **quatro** aparências
+ * distintas. `--tint-neutral` era literalmente `var(--surface-elevated)` — o
+ * selo seria o próprio fundo do cartão, ΔE76 **0,0**, razão **1,00:1** — e
+ * `primary` é o **mesmo azul** de `info` (ΔE76 4,5 claro / 5,7 escuro).
+ *
+ * A **E23** trocou a tinta neutra por `rgb(100 116 139 / 0.15)` (slate-500 a
+ * 15%), declarada nos **dois** blocos do `colors.css`. Medida contra as três
+ * superfícies:
+ *
+ * | | claro | escuro |
+ * |---|---|---|
+ * | ΔE76 da tinta × superfície | 7,3 / 7,6 / 7,0 (era 0,0) | 6,5 / 5,8 / 4,8 (era 0,0) |
+ * | `--on-tint-neutral` por cima | 6,04 / 6,29 / 5,79 | 5,81 / 5,32 / 4,55 |
+ *
+ * Com aparência própria, a neutra virou casa, e os três tipos passam a ter
+ * **três** aparências distintas — era isso que faltava. O rótulo continua
+ * escrito ao lado do ícone: 1.4.1 nunca dependeu da cor, e agora a cor
+ * acrescenta em vez de só não atrapalhar.
+ *
+ * ⚠️ A variante se chama **`secondary`**. No `Badge` ela e `muted` têm classes
+ * idênticas (`bg-tint-neutral text-on-tint-neutral border-borda`) — as duas
+ * apontam para a tinta que a E23 consertou, então não há ambiguidade de
+ * aparência; `secondary` é o nome que a decisão usa. A borda aqui é
+ * `border-borda`, e não `border-<cor>/30` como nas outras duas, porque a tinta
+ * neutra não tem cor cheia de rampa a que recorrer — é assim no primitivo.
+ */
 const ENTRY_CONFIG: Record<EntryType, { label: string; className: string; icon: ReactNode }> = {
   novidade: {
     label: "Novidade",
-    className: "bg-blue-500/15 text-blue-400 border border-blue-500/25",
-    icon: (
-      <svg className="w-3 h-3 shrink-0" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2.5}>
-        <path strokeLinecap="round" strokeLinejoin="round" d="M12 4v16m8-8H4" />
-      </svg>
-    ),
+    className: "bg-tint-info text-on-tint-info border border-info/30",
+    icon: <Icon name="plus" size={12} strokeWidth={2.5} />,
   },
   corrigido: {
     label: "Corrigido",
-    className: "bg-orange-500/15 text-orange-400 border border-orange-500/25",
-    icon: (
-      <svg className="w-3 h-3 shrink-0" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2.5}>
-        <path strokeLinecap="round" strokeLinejoin="round" d="M11 5H6a2 2 0 00-2 2v11a2 2 0 002 2h11a2 2 0 002-2v-5m-1.414-9.414a2 2 0 112.828 2.828L11.828 15H9v-2.828l8.586-8.586z" />
-      </svg>
-    ),
+    className: "bg-tint-success text-on-tint-success border border-success/30",
+    icon: <Icon name="edit" size={12} strokeWidth={2.5} />,
   },
   melhoria: {
     label: "Melhoria",
-    className: "bg-emerald-500/15 text-emerald-400 border border-emerald-500/25",
-    icon: (
-      <svg className="w-3 h-3 shrink-0" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2.5}>
-        <path strokeLinecap="round" strokeLinejoin="round" d="M13 7h8m0 0v8m0-8l-8 8-4-4-6 6" />
-      </svg>
-    ),
+    className: "bg-tint-neutral text-on-tint-neutral border border-borda",
+    icon: <Icon name="trendingUp" size={12} strokeWidth={2.5} />,
   },
 };
 
@@ -41,7 +86,7 @@ interface ChangelogModalProps {
 export function ChangelogModal({ open, onClose }: ChangelogModalProps) {
   return (
     <Modal open={open} onClose={onClose} title="O que há de novo?" size="2xl">
-      <p className="-mt-1 mb-5 text-sm text-slate-500">Atualizações recentes do HelpHS</p>
+      <p className="-mt-1 mb-5 text-sm text-conteudo-muted">Atualizações recentes do HelpHS</p>
 
       <div className="space-y-6">
         {CHANGELOG.map((v, idx) => {
@@ -49,15 +94,22 @@ export function ChangelogModal({ open, onClose }: ChangelogModalProps) {
           return (
             <div key={v.version}>
               <div className="flex items-center gap-2 mb-3">
+                {/* A pastilha da versão vigente era `bg-emerald-500` com
+                    `text-white`: a cor CHEIA da rampa, que dá 2,54:1 com
+                    branco por cima. O degrau de ação (`--action-success`)
+                    existe justamente por isso, e `text-on-success` é o par
+                    dele. */}
                 <span className={cn(
                   "rounded-full px-2.5 py-0.5 text-xs font-bold",
-                  isCurrent ? "bg-emerald-500 text-white" : "bg-slate-200 text-slate-600 dark:bg-slate-700 dark:text-slate-300",
+                  isCurrent
+                    ? "bg-action-success text-on-success"
+                    : "bg-tint-neutral text-on-tint-neutral",
                 )}>
                   {v.version}
                 </span>
-                <span className="text-xs text-slate-500">{v.date}</span>
+                <span className="text-xs text-conteudo-muted">{v.date}</span>
                 {isCurrent && (
-                  <span className="rounded-full bg-emerald-500/15 text-emerald-400 border border-emerald-500/25 px-2 py-0.5 text-[10px] font-semibold">
+                  <span className="rounded-full bg-tint-success text-on-tint-success border border-success/30 px-2 py-0.5 text-[10px] font-semibold">
                     Versão atual
                   </span>
                 )}
@@ -67,7 +119,7 @@ export function ChangelogModal({ open, onClose }: ChangelogModalProps) {
                 {v.entries.map((entry, i) => {
                   const cfg = ENTRY_CONFIG[entry.type];
                   return (
-                    <div key={i} className="flex items-start gap-3 rounded-xl border border-border bg-background-elevated px-3.5 py-2.5">
+                    <div key={i} className="flex items-start gap-3 rounded-xl border border-borda bg-surface-elevated px-3.5 py-2.5">
                       <span className={cn(
                         "inline-flex items-center gap-1 rounded-full px-2 py-0.5 text-[10px] font-semibold shrink-0 mt-0.5",
                         cfg.className,
@@ -75,21 +127,21 @@ export function ChangelogModal({ open, onClose }: ChangelogModalProps) {
                         {cfg.icon}
                         {cfg.label}
                       </span>
-                      <p className="text-sm text-slate-300 leading-relaxed">{entry.text}</p>
+                      <p className="text-sm text-conteudo leading-relaxed">{entry.text}</p>
                     </div>
                   );
                 })}
               </div>
 
               {idx < CHANGELOG.length - 1 && (
-                <div className="mt-6 border-b border-border" />
+                <div className="mt-6 border-b border-borda" />
               )}
             </div>
           );
         })}
       </div>
 
-      <p className="mt-6 text-center text-xs text-slate-600">
+      <p className="mt-6 text-center text-xs text-conteudo-muted">
         HelpHS — desenvolvido internamente pela equipe
       </p>
     </Modal>

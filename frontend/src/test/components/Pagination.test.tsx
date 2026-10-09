@@ -100,3 +100,69 @@ describe("Pagination", () => {
     expect(onPageChange).toHaveBeenCalledWith(2);
   });
 });
+
+describe("Pagination — Fase 9: o que os tokens e o teclado mudaram", () => {
+  it("é uma navegação com nome, e não uma div solta no fim da lista", () => {
+    // Sem o landmark, quem usa leitor de tela não consegue pular para a
+    // paginação: ela é só mais um punhado de botões depois da tabela.
+    render(
+      <Pagination page={2} pageSize={10} total={42} onPageChange={() => {}} />,
+    );
+
+    expect(screen.getByRole("navigation", { name: "Paginação" })).toBeInTheDocument();
+  });
+
+  it("a página atual é anunciada por aria-current, e continua alcançável", () => {
+    // Antes ela era marcada com `disabled`, o que a tirava da ordem de
+    // tabulação: quem navega por teclado não conseguia chegar nela para saber
+    // onde estava. `aria-current="page"` diz a mesma coisa sem sumir com o
+    // botão — o mesmo erro de "sinal certo, mecanismo errado" da E9.
+    render(
+      <Pagination page={2} pageSize={10} total={42} onPageChange={() => {}} />,
+    );
+
+    // Os dois layouts existem no jsdom, e com page=2 ambos mostram "2" como
+    // atual. Os dois têm de dizer a mesma coisa.
+    const atuais = screen.getAllByRole("button", { name: "2" });
+    expect(atuais).toHaveLength(2);
+    for (const b of atuais) {
+      expect(b).toHaveAttribute("aria-current", "page");
+      expect(b).not.toBeDisabled();
+    }
+  });
+
+  it("clicar na página atual não dispara mudança", async () => {
+    // A guarda substituiu o `disabled`: sem ela, o clique pediria de novo a
+    // página em que já se está.
+    const onPageChange = vi.fn();
+    render(
+      <Pagination page={2} pageSize={10} total={42} onPageChange={onPageChange} />,
+    );
+
+    await userEvent.click(screen.getAllByRole("button", { name: "2" })[0]);
+
+    expect(onPageChange).not.toHaveBeenCalled();
+  });
+
+  it("a página atual usa o par medido, e não branco sobre o degrau de marca", () => {
+    // Era `bg-primary text-white` — 3,83:1, medido pela varredura, e página é
+    // texto. É a família da E1: branco cravado sobre um fundo que muda de tema.
+    render(
+      <Pagination page={2} pageSize={10} total={42} onPageChange={() => {}} />,
+    );
+
+    const c = screen.getAllByRole("button", { name: "2" })[0].className;
+    expect(c).toContain("bg-action");
+    expect(c).toContain("text-on-primary");
+    expect(c).not.toContain("text-white");
+  });
+
+  it("não sobra cor cravada nem alias de fundo", () => {
+    const { container } = render(
+      <Pagination page={2} pageSize={10} total={42} onPageChange={() => {}} />,
+    );
+
+    expect(container.innerHTML).not.toMatch(/slate-\d/);
+    expect(container.innerHTML).not.toMatch(/background-surface|background-elevated/);
+  });
+});

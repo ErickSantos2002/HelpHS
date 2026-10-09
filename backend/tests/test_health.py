@@ -135,6 +135,140 @@ async def test_readiness_reporta_rotina_nunca_concluida_sem_derrubar():
 
 
 @pytest.mark.asyncio
+async def test_readiness_reporta_a_rodada_do_aviso_de_sla():
+    """O aviso de SLA é invisível quando falha: a ausência de e-mail se parece
+    com "nenhum chamado está vencendo". Este carimbo é o único lugar em que a
+    diferença aparece, e ele é REPORTADO, não usado para derrubar — mesma regra
+    do fechamento automático."""
+    carimbo = datetime(2026, 9, 25, 15, 30, tzinfo=UTC)
+
+    with (
+        patch("app.main._checar_banco", new=AsyncMock(return_value=True)),
+        patch("app.main._checar_redis", new=AsyncMock(return_value=True)),
+        patch("app.main.ultima_rodada_sem_erro", return_value=None),
+        patch("app.main.ultima_rodada_do_aviso_de_sla", return_value=carimbo),
+    ):
+        r = await _get("/api/v1/health")
+
+    assert r.status_code == 200
+    assert r.json()["sla_warning"]["last_success"] == carimbo.isoformat()
+
+
+@pytest.mark.asyncio
+async def test_readiness_reporta_aviso_de_sla_nunca_concluido_sem_derrubar():
+    """`None` é o normal logo depois do boot, e os dois carimbos são
+    independentes: um laço pode estar girando e o outro não."""
+    with (
+        patch("app.main._checar_banco", new=AsyncMock(return_value=True)),
+        patch("app.main._checar_redis", new=AsyncMock(return_value=True)),
+        patch("app.main.ultima_rodada_sem_erro", return_value=datetime.now(UTC)),
+        patch("app.main.ultima_rodada_do_aviso_de_sla", return_value=None),
+    ):
+        r = await _get("/api/v1/health")
+
+    assert r.status_code == 200
+    corpo = r.json()
+    assert corpo["sla_warning"]["last_success"] is None
+    assert corpo["auto_close"]["last_success"] is not None
+
+
+# ═══════════════════════════════════════════════════════════════
+# Outbox de e-mail (Fase 3D): reporta, e NUNCA derruba o readiness
+# ═══════════════════════════════════════════════════════════════
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("estado", ["ok", "starting", "degraded", "error", "disabled"])
+async def test_readiness_segue_200_em_qualquer_estado_da_outbox(estado):
+    """O requisito explícito da Fase 3D, e em TODOS os estados, não só no bom.
+
+    Um worker de e-mail travado tirando a API de rotação trocaria uma
+    degradação parcial por uma total — é o mesmo argumento que mantém o
+    liveness sem dependências. Banco e Redis seguem sendo os únicos que
+    decidem readiness.
+    """
+    bloco = {"enabled": estado != "disabled", "state": estado, "pending": 0}
+
+    with (
+        patch("app.main._checar_banco", new=AsyncMock(return_value=True)),
+        patch("app.main._checar_redis", new=AsyncMock(return_value=True)),
+        patch("app.main.ultima_rodada_sem_erro", return_value=None),
+        patch("app.main.bloco_da_outbox_de_email", return_value=bloco),
+    ):
+        r = await _get("/api/v1/health")
+
+    assert r.status_code == 200
+    corpo = r.json()
+    assert corpo["status"] == "ok", "a outbox não participa do veredito de readiness"
+    assert corpo["email_outbox"]["state"] == estado
+
+
+@pytest.mark.asyncio
+async def test_readiness_traz_o_bloco_da_outbox_com_o_contrato_da_fase_3d():
+    """O bloco inteiro, do worker de verdade — sem mock do `bloco_de_health`.
+    Prende o CONTRATO que a infraestrutura vai monitorar."""
+    from app.services import email_outbox as outbox_mod
+
+    outbox_mod.reinicia_estado_para_testes()
+    try:
+        with (
+            patch("app.main._checar_banco", new=AsyncMock(return_value=True)),
+            patch("app.main._checar_redis", new=AsyncMock(return_value=True)),
+            patch("app.main.ultima_rodada_sem_erro", return_value=None),
+        ):
+            r = await _get("/api/v1/health")
+    finally:
+        outbox_mod.reinicia_estado_para_testes()
+
+    assert r.status_code == 200
+    bloco = r.json()["email_outbox"]
+    assert set(bloco) == {
+        "enabled",
+        "state",
+        "last_run",
+        "last_success",
+        "as_of",
+        "pending",
+        "processing",
+        "dead",
+        "oldest_overdue_seconds",
+        "oldest_processing_seconds",
+    }
+    # Sem worker rodando neste processo, o honesto é `starting` — nunca `ok`.
+    assert bloco["state"] in {"starting", "disabled"}
+    assert bloco["as_of"] is None
+    assert "sent" not in bloco
+
+
+@pytest.mark.asyncio
+async def test_readiness_nao_consulta_a_outbox_no_banco():
+    """O endpoint lê memória. Se um dia alguém o fizer consultar, cada probe
+    passa a pagar um `COUNT(*)` — e quem chama readiness quer resposta rápida."""
+    from app.services import email_outbox as outbox_mod
+
+    with (
+        patch("app.main._checar_banco", new=AsyncMock(return_value=True)),
+        patch("app.main._checar_redis", new=AsyncMock(return_value=True)),
+        patch("app.main.ultima_rodada_sem_erro", return_value=None),
+        patch.object(outbox_mod, "coleta_snapshot", new=AsyncMock()) as coleta,
+        patch.object(outbox_mod, "contadores_por_status", new=AsyncMock()) as contadores,
+    ):
+        r = await _get("/api/v1/health")
+
+    assert r.status_code == 200
+    coleta.assert_not_called()
+    contadores.assert_not_called()
+
+
+@pytest.mark.asyncio
+async def test_liveness_nao_expoe_a_outbox():
+    """`/health` é o alvo do HEALTHCHECK do Dockerfile e continua sendo só
+    `{"status": "ok"}` — a Fase 3D não o tocou."""
+    r = await _get("/health")
+    assert r.json() == {"status": "ok"}
+
+
+@pytest.mark.asyncio
 async def test_liveness_nao_depende_de_banco_nem_de_redis():
     """
     `/health` é o alvo do HEALTHCHECK do Dockerfile e do compose. Se passasse
@@ -173,6 +307,7 @@ def test_spec_e_docs_desligados_fora_de_desenvolvimento():
         secret_key="x" * 32,
         cors_origins="https://helphs.example.com",
         frontend_url="https://helphs.example.com",
+        lgpd_revisao_politica="00",
     )
     assert prod.is_development is False
     assert prod.openapi_url_efetiva() is None

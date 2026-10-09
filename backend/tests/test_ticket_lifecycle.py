@@ -88,6 +88,18 @@ def _mock_ticket(status=TicketStatus.resolved, resolved_at=None, creator_id=None
     t.ai_summary = None
     t.ai_conversation_summary = None
     t.assignee_name = None
+    # O contrato do relogio de SLA (23/09/2026). Mesma armadilha do bloco
+    # acima: sem valor explicito o MagicMock devolve um objeto, e o
+    # `expediente` derruba a validacao do `TicketResponse`.
+    t.sla_response_vence_em = None
+    t.sla_resolve_vence_em = None
+    t.sla_response_restante_min = None
+    t.sla_resolve_restante_min = None
+    t.sla_response_total_min = None
+    t.sla_resolve_total_min = None
+    t.expediente = None
+    t.sla_resolve_extension_total_min = 0
+    t.sla_resolve_effective_due_at = None
     t.product_name = None
     t.equipment_name = None
     t.equipment_serial = None
@@ -107,6 +119,9 @@ def _db(*lookups):
         item = lookups[idx]
 
         result = MagicMock()
+        # O notify() busca (email, papel, nome) do destinatário com .one_or_none().
+        # Cliente de propósito: mantém o caminho de e-mail exercido como antes.
+        result.one_or_none.return_value = ("dest@test.com", UserRole.client, "Destino")
         if isinstance(item, list):
             result.scalars.return_value.all.return_value = item
             result.scalar_one_or_none.return_value = None
@@ -436,7 +451,7 @@ async def test_reabertura_dá_um_prazo_de_sla_novo():
 
     sla = MagicMock()
     sla.level = SLALevel.medium
-    sla.resolve_time_hours = 8
+    sla.resolve_time_minutes = 480
     sla.is_active = True
 
     app.dependency_overrides[get_db] = _db_override(ticket, sla)
@@ -469,7 +484,7 @@ async def test_reabertura_zera_o_tempo_pausado_acumulado():
 
     sla = MagicMock()
     sla.level = SLALevel.medium
-    sla.resolve_time_hours = 8
+    sla.resolve_time_minutes = 480
     sla.is_active = True
 
     app.dependency_overrides[get_db] = _db_override(ticket, sla)

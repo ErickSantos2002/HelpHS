@@ -3,7 +3,8 @@
 **Data:** 31/08/2026
 **Status:** **APROVADA pelo Rickelme em 31/08/2026** — opção B (histórico
 append-only). Ainda não implementada. A aprovação trouxe uma decisão que
-**aumenta o escopo**: ver "Re-aceite" na parte 5.
+**aumenta o escopo**: ver "Re-aceite" na parte 5. As perguntas em aberto
+foram respondidas em 24/09/2026 — ver a parte 6.
 **Origem:** a Política de Privacidade entregue pela qualidade em 31/08/2026
 (revisão 00, redigida pelo Hyago e pelo Gustavo) lista, na tabela de retenção,
 o item *"Registro de aceite dos Termos e desta política"* com a justificativa
@@ -207,6 +208,50 @@ consentir por outra pessoa. É pergunta jurídica, vai junto com o retorno à
 qualidade, e não bloqueia o campo.
 
 ---
+
+## 6. Auditoria de 24/09/2026 — o que mudou desde o desenho
+
+Nada foi implementado. O levantamento da parte 1 continua certo, com duas
+correções que o código de hoje impõe.
+
+**O caminho 2 é pior do que a tabela diz.** Não existe caixa que o admin marque
+pelo cliente: o `CreateModal` da `UsersPage` envia `lgpd_consent: true` fixo.
+É consentimento gravado sem que ninguém tenha decidido nada — mais um motivo
+para a `origem = criado_por_terceiro`.
+
+**Um sexto caminho: `DELETE /users/{id}`.** Não existia no levantamento. Com a
+tabela nova ele precisa de destino para o histórico — decidido abaixo.
+
+Também confirmado: o `PATCH /users/me/lgpd-consent` existe e o `userService`
+tem a função, mas **nenhuma tela o chama**. A revogação hoje só acontece pelo
+Encarregado, que é o canal que a política indica.
+
+### Decisões do Rickelme em 24/09/2026
+
+| Pergunta | Decisão |
+|---|---|
+| Excluir usuário leva o histórico? | **Não.** A linha fica, com `user_id` desvinculado (`ON DELETE SET NULL`). Prova que houve aceite daquela revisão sem manter a pessoa. A exclusão continua funcionando. |
+| Dá para recusar o re-aceite? | **Sim.** Botões Aceitar e Recusar; recusar faz logout, e a tela volta no próximo login. Recusa não grava linha de aceite. |
+| Re-aceite vale para a equipe? | **Só para clientes.** Técnicos e admins não passam pela tela. |
+| Quando dispara? | **No próximo login** — o "primeiro acesso posterior" que a própria seção 15 da política já promete. |
+
+As três perguntas da parte 5 estão respondidas; a tela deixa de precisar de
+proposta própria.
+
+### Duas consequências que o desenho original não tratava
+
+**Os Termos de Uso não existem.** `revisao_termos` não pode receber um valor
+inventado: enquanto não houver documento, a configuração fica vazia e a
+coluna grava `NULL`, que é a verdade. A regra de "falhar no boot sem
+configuração" da parte 2 vale só para `LGPD_REVISAO_POLITICA`.
+
+**Ligar o re-aceite antes do texto final obrigaria todo cliente a aceitar um
+rascunho.** Nenhum usuário atual tem linha no histórico (parte 3), então a
+tela dispararia para todos no primeiro login após o deploy — aceitando a
+revisão 00 com os marcadores em aberto. Por isso a tela nasce atrás de um
+interruptor, `LGPD_EXIGE_REACEITE`, **desligado por padrão**. O histórico
+passa a ser gravado desde o deploy; a cobrança do aceite liga quando a
+qualidade fechar o texto.
 
 ## O que eu NÃO verifiquei
 

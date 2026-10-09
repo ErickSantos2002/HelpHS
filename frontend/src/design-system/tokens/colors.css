@@ -1,0 +1,381 @@
+/* Health & Safety — cor
+ *
+ * Origem dos valores:
+ *   --hs-brand-*        medido do arquivo assets/logo-hs.png
+ *   --color-primary-*   HelpHS/frontend/tailwind.config.js (rampa `primary`)
+ *   --color-success/danger/warning/info-*  idem
+ *   --color-slate-*     escala neutra usada nas telas (Tailwind slate)
+ *   superfícies/bordas  HelpHS/frontend/src/index.css (:root e .dark)
+ *
+ * Nada aqui foi inventado: cada hexadecimal existe hoje em produção num dos
+ * quatro repositórios lidos. Ver readme.md → "Divergências entre sistemas".
+ */
+
+:root {
+  /* ── Marca ────────────────────────────────────────────────
+   * O azul do logo, medido do arquivo. É o primário oficial do sistema. */
+  --hs-brand-blue: #1f89ca;
+  --hs-brand-gray: #7a7677;
+  --hs-brand-gray-light: #9f999a;
+
+  /* ── Primária (azul da marca) ─────────────────────────────
+   * Rampa construída sobre #1F89CA — matiz 203°, saturação 73%. Os degraus
+   * 400 e 600 não foram derivados: são os dois valores que o ChamadosHS já
+   * usava como cor de sinal (#47A6E1 no escuro, #1A71A8 no claro), medidos
+   * lá contra a superfície. Os demais seguem a mesma família.
+   *
+   * CONTRASTE — a regra que decide qual degrau usar:
+   *   500 (#1F89CA) → 3,83:1 no branco. LOGO, superfície de marca, borda,
+   *                   preenchimento de gráfico, ícone grande. Nunca texto.
+   *   600 (#1A71A8) → 5,30:1 no branco. AÇÃO: fundo de botão primário, link,
+   *                   texto azul, item ativo. É o padrão interativo.
+   *   700+          → texto azul sobre fundo azul tênue (50/100). */
+  --color-primary-50: #f1f9fe;
+  --color-primary-100: #dbeefa;
+  --color-primary-200: #b8ddf5;
+  --color-primary-300: #7bc0ea;
+  --color-primary-400: #47a6e1;
+  --color-primary-500: #1f89ca;
+  --color-primary-600: #1a71a8;
+  --color-primary-700: #155984;
+  --color-primary-800: #104565;
+  --color-primary-900: #0b3047;
+  --color-primary: var(--color-primary-500);
+
+  /* ── Neutros ────────────────────────────────────────────── */
+  --color-white: #ffffff;
+  --color-slate-50: #f8fafc;
+  --color-slate-100: #f1f5f9;
+  --color-slate-200: #e2e8f0;
+  --color-slate-300: #cbd5e1;
+  --color-slate-400: #94a3b8;
+  --color-slate-500: #64748b;
+  --color-slate-600: #475569;
+  --color-slate-700: #334155;
+  --color-slate-800: #1e293b;
+  --color-slate-900: #0f172a;
+
+  /* ── Semânticas ─────────────────────────────────────────── */
+  --color-success-50: #ecfdf5;
+  --color-success-100: #d1fae5;
+  --color-success-400: #34d399;
+  --color-success-500: #10b981;
+  --color-success-600: #059669;
+  --color-success-700: #047857;
+  --color-success: var(--color-success-500);
+
+  --color-danger-50: #fef2f2;
+  --color-danger-100: #fee2e2;
+  --color-danger-300: #fca5a5;                       /* E8 */
+  --color-danger-400: #f87171;
+  --color-danger-500: #ef4444;
+  --color-danger-600: #dc2626;
+  --color-danger-700: #b91c1c;
+  --color-danger: var(--color-danger-500);
+
+  --color-warning-50: #fffbeb;
+  --color-warning-100: #fef3c7;
+  --color-warning-400: #fbbf24;
+  --color-warning-500: #f59e0b;
+  --color-warning-600: #d97706;
+  --color-warning-700: #b45309;
+  --color-warning: var(--color-warning-500);
+
+  --color-info-50: #eff6ff;
+  --color-info-100: #dbeafe;
+  --color-info-300: #93c5fd;                         /* E8 */
+  --color-info-400: #60a5fa;
+  --color-info-500: #3b82f6;
+  --color-info-600: #2563eb;
+  --color-info-700: #1d4ed8;
+  --color-info: var(--color-info-500);
+
+  /* ── Aliases semânticos — tema claro (padrão) ───────────── */
+  --bg-base: var(--color-slate-50);          /* fundo da página        */
+  --surface: var(--color-white);             /* card, painel, topbar   */
+  --surface-elevated: var(--color-slate-100);/* hover, cabeçalho tabela*/
+
+  --border-color: var(--color-slate-200);
+  --border-muted: var(--color-slate-100);
+  --border-strong: var(--color-slate-300);
+  /* E7 — contorno de CONTROLE. Os de cima sao separadores de superficie e
+     ficam entre 1,13:1 e 1,48:1 contra as tres superficies; a WCAG 1.4.11 pede
+     3:1 para o limite de um componente. Este da 4,76 / 4,55 / 4,34 no claro. */
+  --border-control: var(--color-slate-500);
+
+  --text-heading: var(--color-slate-900);
+  --text-body: var(--color-slate-800);
+  /* E5 — slate-600 e nao 500: sobre --surface-elevated o 500 da 4,34:1. */
+  --text-muted: var(--color-slate-600);
+  --text-faint: var(--color-slate-400);
+  --text-on-primary: var(--color-white);
+  --text-link: var(--color-primary-600);
+  --text-link-hover: var(--color-primary-700);
+
+  /* Ação: o degrau interativo, separado do degrau de marca. Botão primário,
+   * item ativo, foco e link saem daqui — nunca de --color-primary-500. */
+  --action: var(--color-primary-600);
+  --action-hover: var(--color-primary-700);
+  --action-tint: var(--color-primary-50);
+  --action-tint-border: var(--color-primary-100);
+  --brand-surface: var(--color-primary-500);
+
+  --focus-ring: var(--color-primary-600);
+  --overlay: rgb(0 0 0 / 0.6);
+
+  /* E2 — botões semânticos: rampa emerald/amber do Tailwind, mesma fonte dos degraus existentes */
+  --color-success-800: #065f46;
+  --color-warning-800: #92400e;
+  --action-danger: var(--color-danger-600);           /* branco: 4,83:1 */
+  --action-danger-hover: var(--color-danger-700);     /* branco: 6,47:1 */
+  --action-success: var(--color-success-700);         /* branco: 5,48:1 */
+  --action-success-hover: var(--color-success-800);   /* branco: ~7,7:1 */
+  --text-on-danger: var(--color-white);
+  --text-on-success: var(--color-white);
+
+  /* E16 — a paleta de grafico.
+
+     Existe porque grafico nao e interface: as series precisam ser
+     DISTINGUIVEIS entre si, e nao legiveis sobre uma superficie. Mapear
+     duas series para o mesmo azul do sistema destroi a funcao do grafico,
+     e foi o que aconteceu ao tentar migrar a rosca e a barra empilhada do
+     painel administrativo com os tokens de interface.
+
+     E16-b — a E16 escolhia seis degraus absolutos da rampa, e QUATRO DELES
+     REPROVAM o piso de 3:1 que ela mesma declara. A causa tem nome nesta
+     serie: degrau fixo nao inverte por tema. E a familia da E1, da E8 e do
+     `perigo-forte` que o ChamadosHS descartou.
+
+     Estas seis foram escolhidas por BUSCA, sob dois criterios obrigatorios:
+
+       contraste  >= 3:1 contra as TRES superficies do tema (WCAG 1.4.11 —
+                  barra e ponto sao forma). Pior das 36 celulas: 3,22.
+       separacao  >= 20 de DeltaE*ab entre QUALQUER par, simulado para visao
+                  normal, deuteranopia, protanopia e tritanopia. Pior: 26,1.
+
+     "Qualquer par", e nao vizinhos: num grafico de seis series as seis estao
+     na tela ao mesmo tempo. Uma paleta anterior passou so entre vizinhos e
+     tinha quatro colisoes par a par, todas em deuteranopia.
+
+     Os --chart-* existem nos DOIS blocos, ao contrario dos degraus da rampa.
+     Nao sao degraus: sao papeis, e papel inverte com o tema.
+
+     O sexto NAO e "outros". Esse papel nao e realizavel no claro sob os dois
+     criterios: das 5.615 cores que passam, NENHUMA e quase-neutra e cabe na
+     faixa de luminancia das outras cinco. "Outros" e hachura sobre neutro
+     mais rotulo — nunca opacidade, que recompoe a cor e invalida a medicao.
+
+     Serie e PREENCHIMENTO, nao texto: o piso aqui e o de 3:1, e a distincao
+     entre series importa mais que o contraste de cada uma contra o fundo.
+     Rotulo de grafico continua saindo dos tokens de texto — piso 4,5:1, e
+     nenhuma destas foi medida para carregar texto. */
+  --chart-1: #174e8c;   /* azul profundo  */
+  --chart-2: #91633b;   /* ambar queimado */
+  --chart-3: #1493a3;   /* turquesa       */
+  --chart-4: #981652;   /* vinho          */
+  --chart-5: #8f4ade;   /* violeta        */
+  --chart-6: #e15a05;   /* laranja        */
+
+  /* E18 — o setimo slot, para o grafico de STATUS.
+     Buscado na mesma regua da E16-b: >= 3:1 contra as tres superficies e
+     DeltaE >= 20 contra as seis, nas quatro visoes. Pior par: 21,7 float /
+     21,9 arredondado, contra --chart-1 em protanopia. Publica-se o 21,7.
+     Contraste 3,53 / 3,69 / 3,37.
+
+     A margem e ESTREITA. De 140.608 candidatos em grade de 5, passam 4.326 —
+     mas so NOVE ficam dentro da faixa de luminancia E de croma das seis. As
+     demais leem como texto (quase-pretas) ou como fundo. Nao ha folga para uma
+     oitava serie, e mudar qualquer uma das seis exige refazer esta busca. */
+  --chart-7: #7d7dcd;   /* pervinca       */
+
+  /* E19 — as semanticas na forca de PREENCHIMENTO.
+     O pacote tinha token para a semantica como texto (--on-tint-*), como acao
+     (--action-danger/success) e como tinta (--tint-*). Nao tinha para
+     preenchimento — barra, ponto, fatia, anel — e o degrau canonico nao serve:
+     contra as tres superficies do CLARO, warning-500 da 1,96 e success-500 da
+     2,54, contra um piso de 3:1 (WCAG 1.4.11). Duas das quatro reprovam, e a
+     causa e a de sempre: degrau fixo nao inverte por tema.
+
+     O pacote ja resolve esse caso para o NEUTRO com --border-control, e e por
+     isso que a prioridade "baixa" sempre passou. Estes quatro fazem o mesmo
+     para as semanticas.
+
+     Criterio: o degrau mais proximo do 500 que passa 3:1 nas tres superficies
+     do tema. Perto do 500 de proposito — a cor tem de continuar lendo como a
+     semantica que representa, e a busca sem esse desempate vai aos extremos.
+
+     Medido, base / surface / elevada:
+       --fill-info      3,52 / 3,68 / 3,36
+       --fill-success   3,60 / 3,77 / 3,44
+       --fill-warning   4,80 / 5,02 / 4,58
+       --fill-danger    3,60 / 3,76 / 3,44
+
+     `info` e `danger` levam o mesmo degrau nos dois temas, e mesmo assim estao
+     declarados dos dois lados: token e papel, e papel existe nos dois temas.
+     Declarar so aqui funciona por heranca ate o dia em que a rampa mudar de um
+     lado so, e ai quem for consertar precisa primeiro descobrir que falta um
+     bloco.
+
+     NAO ha --fill-primary: o papel de acao ja e do --action. NAO ha
+     --fill-muted: o --border-control ja e o neutro que inverte. E texto sobre
+     estas quatro e outra pergunta, com piso 4,5:1 — nenhuma foi medida
+     para isso. */
+  --fill-info: var(--color-info-500);
+  --fill-success: var(--color-success-600);
+  --fill-warning: var(--color-warning-700);
+  --fill-danger: var(--color-danger-500);
+
+  /* Toast — consumidos em JS pela biblioteca (react-hot-toast no ChamadosHS,
+   * sonner no HelpHS), que recebe um objeto de estilo e não enxerga classe. */
+  --toast-bg: var(--color-white);
+  --toast-color: var(--text-heading);
+  --toast-border: var(--border-strong);
+
+  /* ── Tintas semânticas ───────────────────────────────────
+   * Fundo de badge, aviso e chip. São a cor de significado com 15% de
+   * opacidade, NÃO o degrau 50 da rampa: o fundo translúcido pega o tom da
+   * superfície embaixo e por isso funciona nos dois temas sem regra separada.
+   * Foi assim que os dois repositórios com biblioteca fizeram, e é a
+   * diferença entre um selo que acompanha o tema e um retângulo branco no
+   * meio do navy.
+   *
+   * O par de cada tinta é `--on-*`: o texto que vai por cima. Esse sim troca
+   * por tema — escuro no claro, claro no escuro. */
+  --tint-primary: rgb(31 137 202 / 0.15);
+  --tint-success: rgb(16 185 129 / 0.15);
+  --tint-danger: rgb(239 68 68 / 0.15);
+  --tint-warning: rgb(245 158 11 / 0.15);
+  --tint-info: rgb(59 130 246 / 0.15);
+  /* E23 — a neutra deixa de ser alias da superficie elevada.
+
+     `var(--surface-elevated)` fazia dela a PROPRIA superficie do cartao: um
+     selo neutro sobre uma tabela, um cartao ou um bloco em hover ficava com
+     DeltaE 0,0 contra o fundo -- invisivel, e nao por pouco. So a borda do
+     `Badge` dizia que havia um selo ali.
+
+     Achado no changelog do HelpHS, procurando variante para um terceiro tipo
+     de entrada: das seis tintas, sobre aquele cartao, so QUATRO tinham
+     aparencia distinta -- a neutra sumia no fundo e a `primary` e o mesmo
+     azul da `info` (DeltaE 4,6 claro / 6,8 escuro, contra o piso 20 do
+     proprio pacote para serie).
+
+     Slate-500 a 15%, medido nas tres superficies dos dois temas:
+
+       DeltaE tinta x superficie   claro  7,3 / 7,6 / 7,0   (era 0,0)
+                                   escuro 6,5 / 5,8 / 4,8   (era 0,0)
+       --on-tint-neutral por cima  claro  6,04 / 6,29 / 5,79
+                                   escuro 5,81 / 5,32 / 4,55
+
+     O pior caso de TEXTO e 4,55:1 na elevada do escuro — passa o piso de
+     4,5 com 0,05 de margem. Quem escurecer o `--text-muted` do escuro um dia
+     quebra este par, e por isso o numero esta escrito aqui.
+
+     A separacao das outras cinco tintas e de 4,8 no pior caso (contra a
+     `primary`). NAO se aplica o piso 20 da E16-b: aquele e para serie de
+     grafico, que se distingue sozinha e sem rotulo. Uma tinta e fundo de selo
+     ROTULADO, com borda propria — ela precisa dizer "ha um selo aqui", nao
+     "qual selo". Quem diz qual e a palavra escrita dentro. */
+  --tint-neutral: rgb(100 116 139 / 0.15);
+
+  --on-tint-primary: var(--color-primary-700);
+  --on-tint-success: var(--color-success-800);        /* E8 — claro: elevada 6,15 / surface 6,67 / base 6,41 */
+  --on-tint-danger: var(--color-danger-700);
+  --on-tint-warning: var(--color-warning-800);        /* sobre a tinta âmbar: 6,3:1 (era 4,47) */
+  --on-tint-info: var(--color-info-700);
+  --on-tint-neutral: var(--text-muted);               /* E5: volta ao alias; o valor e o mesmo */
+}
+
+/* ── Tema escuro ──────────────────────────────────────────────
+ * Navy profundo, de HelpHS/frontend/src/index.css (.dark). Aplicado por
+ * classe `dark` no <html>, como nos quatro sistemas. */
+.dark {
+  --bg-base: #0d1b2a;
+  --surface: #132238;
+  --surface-elevated: #1a2f4a;
+
+  /* E14 — a rampa de borda do escuro sobe um degrau, com a hierarquia
+     preservada. O `--border-muted` era #132238, o MESMO valor de
+     `--surface`: contraste 1,00 contra ela, ou seja, divisor invisivel
+     dentro de qualquer Card. O `--border-color` cede o proprio valor ao
+     muted e sobe para #2a4463; o `--border-strong` fica onde estava.
+
+     Medido contra as tres superficies do escuro:
+                       bg-base  surface  elevada
+       muted   antes      1,09     1,00     1,18
+       muted   depois     1,51     1,39     1,18
+       color   antes      1,51     1,39     1,18
+       color   depois     1,74     1,60     1,36
+       strong  (igual)    2,50     2,29     1,94
+
+     Nada piora: o muted na elevada fica em 1,18, que e exatamente onde o
+     `--border-color` ja estava. */
+  --border-color: #2a4463;
+  --border-muted: #1e3a5f;
+  --border-strong: #315d81;
+  --border-control: var(--color-slate-400);   /* E7: 6,23 / 6,78 / 5,29 */
+
+  --text-heading: var(--color-slate-100);
+  --text-body: var(--color-slate-200);
+  --text-muted: var(--color-slate-400);
+  --text-faint: var(--color-slate-500);
+  /* Branco sobre --action no escuro dá 2,69:1 — reprova AA; este navy dá 5,11:1. */
+  --text-on-primary: var(--color-primary-900);
+  --text-link: var(--color-primary-400);
+  --text-link-hover: var(--color-primary-300);
+
+  /* No escuro a escada inverte: o tom claro é que passa no contraste. */
+  --action: var(--color-primary-400);
+  --action-hover: var(--color-primary-300);
+  --action-tint: rgb(31 137 202 / 0.15);
+  --action-tint-border: rgb(31 137 202 / 0.3);
+  --focus-ring: var(--color-primary-400);
+
+  --toast-bg: #192938;
+  --toast-color: #dae7f1;
+  --toast-border: #253e56;
+
+  /* As tintas não mudam — a opacidade já resolve. O texto por cima, sim. */
+  --on-tint-primary: var(--color-primary-300);
+  --on-tint-success: var(--color-success-400);
+  --on-tint-danger: var(--color-danger-300);          /* E8 — escuro: elevada 6,38 / surface 7,39 / base 8,02 */
+  --on-tint-warning: var(--color-warning-400);
+  --on-tint-info: var(--color-info-300);              /* E8 — escuro: elevada 6,21 / surface 7,28 / base 7,96 */
+  --on-tint-neutral: var(--text-muted);
+
+  /* E23 — declarada tambem aqui, e nao por simetria decorativa.
+
+     O comentario acima diz que as tintas nao mudam porque a opacidade
+     resolve. Isso e verdade para as cinco que sao `rgb(... / 0.15)` e era
+     FALSO para a neutra, que era `var(--surface-elevated)` — sem alfa, ela
+     virava a superficie escura e sumia do mesmo jeito. Declarar dos dois
+     lados e o que impede a proxima leitura daquela frase de recriar o
+     defeito. */
+  --tint-neutral: rgb(100 116 139 / 0.15);
+
+  /* E16-b — a paleta de grafico no escuro. Bloco NOVO: a E16 declarava os
+     --chart-* so no :root, e por isso quatro deles reprovavam de um dos dois
+     lados. Ver a nota no :root.
+
+     Nao sao as mesmas cores clareadas: cada tema foi buscado contra as SUAS
+     tres superficies, e o que passa num nao passa no outro. */
+  --chart-1: #4e86c6;   /* azul    */
+  --chart-2: #bc7638;   /* ambar   */
+  --chart-3: #2ed0e5;   /* ciano   */
+  --chart-4: #ee1178;   /* rosa    */
+  --chart-5: #9e53f3;   /* violeta */
+  --chart-6: #c8c300;   /* oliva   */
+
+  /* E18 — ver a nota no :root. Pior par 24,6 (float e arredondado), contra
+     --chart-2 em deuteranopia. Contraste 9,33 / 8,57 / 7,27. */
+  --chart-7: #91cd82;   /* salvia  */
+
+  /* E19 — ver a nota no :root. Medido, base / surface / elevada:
+       --fill-info      4,73 / 4,35 / 3,69
+       --fill-success   6,86 / 6,30 / 5,34
+       --fill-warning   8,10 / 7,44 / 6,31
+       --fill-danger    4,62 / 4,25 / 3,60 */
+  --fill-info: var(--color-info-500);
+  --fill-success: var(--color-success-500);
+  --fill-warning: var(--color-warning-500);
+  --fill-danger: var(--color-danger-500);
+}

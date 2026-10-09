@@ -1,0 +1,308 @@
+import { render, screen, waitFor, within } from "@testing-library/react";
+import { describe, expect, it, vi } from "vitest";
+
+vi.mock("../../services/ticketService", () => ({ getTickets: vi.fn() }));
+vi.mock("sonner", () => ({ toast: { error: vi.fn(), success: vi.fn() } }));
+
+import { MemoryRouter } from "react-router-dom";
+import TicketListPage from "../../pages/tickets/TicketListPage";
+import { getTickets, type Ticket } from "../../services/ticketService";
+import { escolherNoMenu, opcoesDoMenu } from "../helpers/menu";
+
+/**
+ * O quadro kanban tinha DOIS mapas próprios, e os dois divergiam do resto.
+ *
+ * `PRIORITY_CFG` era o **sétimo** mapa de prioridade das telas: dizia "Crítico",
+ * "Alto", "Médio", "Baixo" no masculino — contra o feminino que a emenda E17
+ * fixou — e pintava `medium` de índigo, que não é a variante `info` de nenhum
+ * dos outros seis. O `FilterSelect` da barra trazia o **oitavo**.
+ *
+ * `COLUMNS` mapeava os seis status com a paleta crua do Tailwind mais seis
+ * hexadecimais, e com rótulos próprios ("Ag. Técnico" contra "Aguardando
+ * técnico").
+ *
+ * E o cartão era um `<button onClick={navigate}>`: sem abrir em aba nova, sem
+ * menu de contexto, sem destino na barra de status, e anunciado como "botão"
+ * para algo que muda de página.
+ */
+/**
+ * Os filtros voltaram a desenhar a lista SÓ enquanto o menu está aberto.
+ *
+ * O seletor nativo da D9.2 mantinha todas as opções na árvore o tempo todo — o
+ * painel do `FilterSelect`, antes dele, só existia aberto. Com o nativo, "Alta"
+ * ficava em dois lugares ao mesmo tempo: o selo do cartão e a opção do filtro.
+ * Os casos abaixo falam do CARTÃO, e por isso a opção saía da busca por um
+ * `ignore` — e não por `getAllByText(...)[0]`, que continuaria passando com o
+ * selo apagado.
+ *
+ * O `SelectMenu` põe a lista num painel que só existe ABERTO, e num portal no
+ * `document.body`. A exclusão perdeu o que excluir e saiu junto. Com uma
+ * ressalva que vale escrever: o gatilho fechado mostra o RÓTULO do que está
+ * escolhido, então num caso que escolhe "Alta" no filtro o texto volta a
+ * existir em dois lugares — o gatilho e o selo do cartão. Os casos abaixo não
+ * escolhem nada no filtro; o que escolhe lê o cartão por dentro da linha.
+ * Quem quiser ler a lista do filtro tem de abri-la, e é o que `opcoesDoMenu`
+ * faz.
+ */
+
+const BASE: Ticket = {
+  id: "t1",
+  protocol: "HS-2026-0001",
+  title: "Impressora não imprime",
+  status: "open",
+  priority: "high",
+  category: "hardware",
+  created_at: new Date().toISOString(),
+  updated_at: new Date().toISOString(),
+} as unknown as Ticket;
+
+/**
+ * Expediente ABERTO, com o relógio do servidor. A barra de SLA não desenha sem
+ * ele — `if (!expediente) return null` —, e é ele que impede o teste de
+ * depender do relógio da máquina que roda a suíte.
+ */
+const EXPEDIENTE = {
+  agora: "2026-09-22T12:00:00+00:00",
+  aberto: true,
+  proxima_virada: "2026-09-22T20:00:00+00:00",
+  fuso: "America/Sao_Paulo",
+};
+
+async function montar(itens: Ticket[] = [BASE], expediente: unknown = EXPEDIENTE) {
+  vi.mocked(getTickets).mockResolvedValue({
+    items: itens,
+    total: itens.length,
+    expediente,
+  } as never);
+  render(
+    <MemoryRouter initialEntries={["/tickets"]}>
+      <TicketListPage />
+    </MemoryRouter>,
+  );
+  await waitFor(() =>
+    expect(screen.getByRole("heading", { name: "Aberto" })).toBeInTheDocument(),
+  );
+}
+
+describe("TicketListPage", () => {
+  it("cada coluna é uma região com nome, e não um parágrafo", async () => {
+    // Seis regiões nomeadas dão a quem navega por cabeçalho um sumário do
+    // quadro. Antes eram seis `<p>`, e não havia como pular de coluna em coluna.
+    await montar();
+    for (const nome of [
+      "Aberto",
+      "Em andamento",
+      "Ag. técnico",
+      "Ag. cliente",
+      "Resolvido",
+      "Fechado",
+    ]) {
+      expect(screen.getByRole("heading", { name: nome })).toBeInTheDocument();
+    }
+  });
+
+  it("o cartão do chamado é um LINK, e não um botão", async () => {
+    await montar();
+    const link = screen.getByRole("link", { name: /Impressora não imprime/ });
+    expect(link).toHaveAttribute("href", "/tickets/t1");
+  });
+
+  it("a prioridade fala a língua do módulo", async () => {
+    // Feminino, da emenda E17. O mapa daqui dizia "Alto".
+    await montar();
+    expect(screen.getByText("Alta")).toBeInTheDocument();
+    expect(screen.queryByText("Alto")).not.toBeInTheDocument();
+    // E nem no filtro: o módulo é a fonte dos dois. Com o painel fechado a
+    // lista não está na árvore, então a única forma de cobrar isso do filtro é
+    // abri-lo — as duas asserções acima já falam do cartão, e só dele.
+    expect(
+      opcoesDoMenu(screen.getByRole("combobox", { name: "Prioridade" })),
+    ).not.toContain("Alto");
+  });
+
+  it("o ponto de prioridade sai da árvore, porque o selo já diz", async () => {
+    // Ele tinha `title` com o rótulo, e `title` não é nome acessível confiável.
+    // A informação não se perdeu: o selo do rodapé mostra em texto.
+    await montar();
+    const cartao = screen.getByRole("link", { name: /Impressora não imprime/ });
+    expect(within(cartao).getByText("Alta")).toBeVisible();
+  });
+
+  it("cada filtro tem nome próprio, e não se anuncia pelo valor escolhido", async () => {
+    // O defeito que a D9.2 fecha: o `FilterSelect` não repassava `label`, e os
+    // dois filtros desta barra se anunciavam pelo VALOR — "Alta", "Sem
+    // técnico" — sem dizer de que filtro eram.
+    await montar();
+
+    expect(
+      screen.getByRole("combobox", { name: "Prioridade" }),
+    ).toBeInTheDocument();
+    expect(
+      screen.getByRole("combobox", { name: "Atribuição" }),
+    ).toBeInTheDocument();
+  });
+
+  it("o filtro de prioridade oferece as quatro do módulo, no feminino", async () => {
+    await montar();
+
+    const filtro = screen.getByRole("combobox", { name: "Prioridade" });
+    // A lista inteira, na ordem, com o menu aberto — o painel mora num portal,
+    // então `within(filtro)` não alcança nenhuma opção.
+    expect(opcoesDoMenu(filtro)).toEqual([
+      "Todas prioridades",
+      "Crítica",
+      "Alta",
+      "Média",
+      "Baixa",
+    ]);
+  });
+
+  it("escolher a prioridade filtra o quadro por ela", async () => {
+    await montar([
+      BASE,
+      { ...BASE, id: "t2", protocol: "HS-2026-0002", title: "Mouse quebrado", priority: "low" } as Ticket,
+    ]);
+
+    // O menu escolhe pelo RÓTULO: "Alta" é o `high` da linha de cima.
+    escolherNoMenu(
+      screen.getByRole("combobox", { name: "Prioridade" }),
+      "Alta",
+    );
+
+    expect(
+      screen.getByRole("link", { name: /Impressora não imprime/ }),
+    ).toBeInTheDocument();
+    expect(
+      screen.queryByRole("link", { name: /Mouse quebrado/ }),
+    ).not.toBeInTheDocument();
+  });
+
+  it("o não triado é o PRIMEIRO da coluna, antes da crítica", async () => {
+    // Ordem operacional (22/09/2026): quem ainda não foi classificado precisa
+    // de ação inicial, e o prazo de resolução dele já corre desde a abertura.
+    // No fim da coluna ele ficaria escondido justamente enquanto o relógio
+    // anda. Ver `ordemNaFila` em `lib/prioridade.ts`.
+    await montar([
+      { ...BASE, id: "t-baixa", title: "Baixa", priority: "low" } as Ticket,
+      { ...BASE, id: "t-critica", title: "Crítica", priority: "critical" } as Ticket,
+      { ...BASE, id: "t-sem", title: "Sem triagem", priority: null } as Ticket,
+      { ...BASE, id: "t-media", title: "Média", priority: "medium" } as Ticket,
+    ]);
+
+    const coluna = screen.getByRole("region", { name: /Aberto/ });
+    const titulos = within(coluna)
+      .getAllByRole("link")
+      .map((a) => a.textContent ?? "");
+
+    // A ordem da ÁRVORE, que é a que a pessoa lê de cima para baixo.
+    expect(titulos[0]).toContain("Sem triagem");
+    expect(titulos[1]).toContain("Crítica");
+    expect(titulos[2]).toContain("Média");
+    expect(titulos[3]).toContain("Baixa");
+  });
+
+  it("o botão de limpar busca tem nome", async () => {
+    // Ele só tinha o `<svg>` dentro, e o `Icon` é `aria-hidden`: quem usa
+    // leitor de tela ouvia "botão".
+    await montar();
+    const busca = screen.getByPlaceholderText(/Título, protocolo/);
+    const { fireEvent } = await import("@testing-library/react");
+    fireEvent.change(busca, { target: { value: "impressora" } });
+    expect(
+      screen.getByRole("button", { name: "Limpar busca" }),
+    ).toBeInTheDocument();
+  });
+
+  it("a contagem da coluna diz do que é", async () => {
+    // "Aberto ... 1" não informa; "1 chamado" informa.
+    //
+    // A primeira versão deste caso usava /chamados?$/, que casava também com o
+    // "Nenhum chamado" das cinco colunas vazias — passava com o sr-only
+    // removido. A mutação pegou.
+    await montar();
+    // Matcher por função: o texto está partido entre o número e o ,
+    // e o matcher de string exige um elemento só.
+    const contagem = screen.getAllByText(
+      (_, el) => el?.tagName === "SPAN" && el.textContent === "1 chamado",
+    );
+    expect(contagem.length).toBeGreaterThan(0);
+  });
+
+  /**
+   * A FIAÇÃO do limiar configurável — Fase 2B.
+   *
+   * `lib/slaVisual.ts` tem os seus próprios testes, e eles não provam nada sobre
+   * esta página: se o argumento aqui fosse `80` em vez de
+   * `ticket.sla_warning_threshold`, todos continuariam verdes. O que estes dois
+   * casos prendem é que o campo do backend chega de verdade até a decisão de
+   * cor — o mesmo percentual, dois limiares, duas cores.
+   */
+  describe("a cor da barra segue o warning_threshold do chamado", () => {
+    /** Chamado com 55% do prazo de resolução consumido. */
+    function comLimiar(limiar: number | null): Ticket {
+      return {
+        ...BASE,
+        id: "t-sla",
+        status: "in_progress",
+        // `sla_resolve_due_at` é obrigatório para a barra existir — há um
+        // `if (!dueAt) return null` antes dela. Sem ele o teste passaria por
+        // vacuidade, procurando um elemento que nunca foi desenhado.
+        sla_resolve_due_at: "2026-09-23T12:00:00+00:00",
+        sla_resolve_vence_em: "2026-09-23T12:00:00+00:00",
+        sla_resolve_total_min: 100,
+        sla_resolve_restante_min: 45,
+        sla_resolve_breach: false,
+        sla_warning_threshold: limiar,
+      } as unknown as Ticket;
+    }
+
+    async function classeDaBarra(limiar: number | null): Promise<string> {
+      await montar([comLimiar(limiar)]);
+      const barra = await screen.findByRole("progressbar", {
+        name: "Prazo de Resolução",
+      });
+      const preenchimento = barra.firstElementChild;
+      expect(preenchimento).not.toBeNull();
+      return preenchimento!.className;
+    }
+
+    it("com limiar 80, 55% ainda é verde", async () => {
+      expect(await classeDaBarra(80)).toContain("bg-fill-success");
+    });
+
+    it("com limiar 60, o MESMO 55% já é âmbar", async () => {
+      // 60 × 0,75 = 45. Aqui está o ponto inteiro da fase: a barra passa a
+      // avisar mais cedo para quem configurou um limiar mais apertado.
+      expect(await classeDaBarra(60)).toContain("bg-fill-warning");
+    });
+
+    it("sem limiar, se comporta como o default de 80", async () => {
+      // Chamado sem prioridade ou sem SLAConfig ativa. Verde, como era antes
+      // desta fase existir — o fallback não muda o que já estava na tela.
+      expect(await classeDaBarra(null)).toContain("bg-fill-success");
+    });
+
+    it("vencido é vermelho mesmo com o consumo abaixo do limiar", async () => {
+      /**
+       * A regra antiga era `isRed = breached || pct >= 80`, e o `breached` vinha
+       * antes de qualquer limiar. Ao mover a decisão para o helper, esse termo
+       * passou a ser um ARGUMENTO — e argumento pode ser esquecido.
+       *
+       * Este caso existe porque a mutação encontrou a lacuna: trocar `breached`
+       * por `false` na chamada deixava os treze outros testes verdes. Aqui o
+       * consumo é 55% contra limiar 80 (verde, se ninguém olhasse a violação), e
+       * a marca de violação está ligada.
+       */
+      const vencido = {
+        ...comLimiar(80),
+        sla_resolve_breach: true,
+      } as unknown as Ticket;
+      await montar([vencido]);
+
+      const barra = await screen.findByRole("progressbar", {
+        name: "Prazo de Resolução",
+      });
+      expect(barra.firstElementChild!.className).toContain("bg-fill-danger");
+    });
+  });
+});

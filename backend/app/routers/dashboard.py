@@ -17,6 +17,7 @@ from typing import Annotated
 
 from fastapi import APIRouter, Depends, HTTPException, Query, status
 from fastapi.responses import StreamingResponse
+from loguru import logger
 from reportlab.lib import colors
 from reportlab.lib.pagesizes import A4
 from reportlab.lib.styles import getSampleStyleSheet
@@ -54,6 +55,7 @@ from app.schemas.dashboard import (
     ReportComparison,
     ReportData,
     SLAComplianceItem,
+    SlaJustificationItem,
     SlaStats,
     SurveyStats,
     TechnicianDetailReport,
@@ -76,12 +78,31 @@ _ACTIVE_SLA_STATUSES = [
 
 
 def _resolve_breached_cond() -> ColumnElement[bool]:
-    """True se SLA de resolução foi violado (flag salva OU prazo já passou)."""
+    """True se SLA de resolução foi violado (flag salva OU prazo já passou).
+
+    Compara o prazo EFETIVO materializado — `sla_resolve_effective_due_at` —,
+    e não mais a coluna crua `sla_resolve_due_at`.
+
+    A troca conserta uma divergência que já existia e ninguém tinha medido: o
+    prazo cru ignora `sla_total_paused_ms`, então um chamado pausado contava
+    violação AQUI que o motor não contava no chamado. Com a extensão de SLA a
+    divergência ficaria pior — um chamado prorrogado apareceria "no prazo" na
+    tela e "violado" no relatório.
+
+    ⚠️ **Isso muda a conformidade no deploy**, inclusive para chamados que só
+    tiveram pausa. Foi decidido assim em 23/09/2026, com o preço à vista: a
+    alternativa era manter duas definições de prazo. Ver "SLA" em
+    `docs/decisoes-e-regras.md`.
+
+    A materialização é escrita só por `atualiza_prazo_efetivo`, e é função pura
+    de três campos persistidos — a pausa EM CURSO não participa, porque o motor
+    nunca a considerou.
+    """
     return or_(
         Ticket.sla_resolve_breach.is_(True),
         and_(
-            Ticket.sla_resolve_due_at.is_not(None),
-            Ticket.sla_resolve_due_at < func.now(),
+            Ticket.sla_resolve_effective_due_at.is_not(None),
+            Ticket.sla_resolve_effective_due_at < func.now(),
             Ticket.status.in_(_ACTIVE_SLA_STATUSES),
         ),
     )
@@ -131,7 +152,12 @@ async def get_dashboard_stats(
             select(Ticket.priority, func.count().label("cnt")).group_by(Ticket.priority)
         )
     ).all()
-    by_priority: dict[str, int] = {r.priority.value: r.cnt for r in priority_rows}
+    # A chave `None` é o balde "Sem prioridade": chamado que ninguém triou
+    # ainda. Ele CONTA no total (D2) — os cinco baldes somam o total de
+    # chamados, e é por isso que a chave nula não pode ser descartada aqui.
+    by_priority: dict[str | None, int] = {
+        (r.priority.value if r.priority else None): r.cnt for r in priority_rows
+    }
 
     total = sum(by_status.values())
     awaiting = by_status.get(TicketStatus.awaiting_client.value, 0) + by_status.get(
@@ -173,6 +199,7 @@ async def get_dashboard_stats(
             by_priority_high=by_priority.get(TicketPriority.high.value, 0),
             by_priority_medium=by_priority.get(TicketPriority.medium.value, 0),
             by_priority_low=by_priority.get(TicketPriority.low.value, 0),
+            by_priority_none=by_priority.get(None, 0),
         ),
         surveys=SurveyStats(total=survey_row.total, average_rating=avg_rating),
         sla=SlaStats(response_breached=sla_row.resp, resolve_breached=sla_row.resolve),
@@ -182,8 +209,8 @@ async def get_dashboard_stats(
     try:
         redis = await get_redis()
         await redis.setex(_STATS_CACHE_KEY, _STATS_CACHE_TTL, result.model_dump_json())
-    except Exception:
-        pass
+    except Exception as exc:  # noqa: BLE001 — degradar é melhor que derrubar
+        logger.debug(f"Cache do dashboard: gravação falhou, seguindo sem cache: {exc}")
 
     return result
 
@@ -263,8 +290,11 @@ async def _build_report(
             .group_by(Ticket.priority)
         )
     ).all()
+    # Sem prioridade fica FORA da conformidade (D2): não se cobra cumprimento
+    # de um prazo que ainda não existe. Esses chamados aparecem no total, não
+    # aqui.
     sla_by_priority: dict[str, tuple[int, int]] = {
-        r.priority.value: (r.total, r.breached) for r in sla_rows
+        r.priority.value: (r.total, r.breached) for r in sla_rows if r.priority is not None
     }
     sla_compliance: list[SLAComplianceItem] = []
     priorities_iter = [priority] if priority else list(TicketPriority)
@@ -346,6 +376,7 @@ async def _build_report(
     resolution_map: dict[str, float | None] = {
         r.priority.value: round(float(r.avg_hours), 1) if r.avg_hours else None
         for r in resolution_rows
+        if r.priority is not None
     }
     avg_resolution_by_priority = [
         AvgResolutionItem(
@@ -419,6 +450,7 @@ async def _build_report(
     first_resp_map: dict[str, float | None] = {
         r.priority.value: round(float(r.avg_hours), 1) if r.avg_hours else None
         for r in first_resp_rows
+        if r.priority is not None
     }
     avg_first_response_by_priority = [
         AvgFirstResponseItem(priority=prio.value, avg_hours=first_resp_map.get(prio.value))
@@ -488,7 +520,7 @@ async def _build_report(
             ticket_id=str(r.id),
             protocol=r.protocol,
             title=r.title,
-            priority=r.priority.value,
+            priority=r.priority.value if r.priority else None,
             category=r.category.value,
             status=r.status.value,
             age_hours=round((now - r.created_at).total_seconds() / 3600, 1),
@@ -552,6 +584,48 @@ async def _build_report(
     reopened_count: int = (await db.execute(reopen_q)).scalar_one() or 0
     reopen_rate = round(reopened_count / total * 100, 1) if total > 0 else 0.0
 
+    # Chamados resolvidos no periodo cuja resolucao passou do prazo E que
+    # trazem justificativa escrita. O filtro e pela JUSTIFICATIVA, e nao pela
+    # marca `sla_resolve_breach`: a marca nao e gravada no instante da
+    # resolucao (o status ja esta terminal quando `check_breaches` roda), entao
+    # filtrar por ela deixaria de fora justamente os chamados que venceram
+    # calados. A presenca da justificativa e o sinal confiavel -- ela so existe
+    # porque a API exigiu.
+    justificativas_rows = (
+        await db.execute(
+            select(
+                Ticket.id,
+                Ticket.protocol,
+                Ticket.title,
+                Ticket.priority,
+                Ticket.resolved_at,
+                Ticket.sla_breach_justification,
+                User.name.label("assignee_name"),
+            )
+            .outerjoin(User, Ticket.assignee_id == User.id)
+            .where(
+                Ticket.sla_breach_justification.is_not(None),
+                Ticket.resolved_at.is_not(None),
+                Ticket.resolved_at >= since,
+                *extra,
+            )
+            .order_by(Ticket.resolved_at.desc())
+            .limit(200)
+        )
+    ).all()
+    sla_justifications = [
+        SlaJustificationItem(
+            ticket_id=str(r.id),
+            protocol=r.protocol,
+            title=r.title,
+            priority=r.priority.value if r.priority else None,
+            resolved_at=r.resolved_at,
+            assignee_name=r.assignee_name,
+            justification=r.sla_breach_justification,
+        )
+        for r in justificativas_rows
+    ]
+
     comparison = await _build_comparison(db, since, actual_period, category, priority)
 
     return ReportData(
@@ -573,6 +647,7 @@ async def _build_report(
         technicians_dist=technicians_dist,
         reopened_count=reopened_count,
         reopen_rate=reopen_rate,
+        sla_justifications=sla_justifications,
         comparison=comparison,
     )
 
@@ -693,6 +768,24 @@ async def export_reports_csv(
     for d in data.tickets_by_day:
         writer.writerow([d.date, d.count])
     writer.writerow([])
+
+    if data.sla_justifications:
+        writer.writerow(["SLA VIOLADO — JUSTIFICATIVAS"])
+        writer.writerow(
+            ["Protocolo", "Título", "Prioridade", "Resolvido em", "Responsável", "Motivo"]
+        )
+        for j in data.sla_justifications:
+            writer.writerow(
+                [
+                    j.protocol,
+                    j.title,
+                    j.priority,
+                    j.resolved_at.strftime("%d/%m/%Y %H:%M") if j.resolved_at else "",
+                    j.assignee_name or "",
+                    j.justification,
+                ]
+            )
+        writer.writerow([])
 
     writer.writerow(["TICKETS POR CATEGORIA"])
     writer.writerow(["Categoria", "Quantidade"])

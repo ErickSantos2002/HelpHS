@@ -13,6 +13,9 @@ export interface DashboardStats {
     by_priority_high: number;
     by_priority_medium: number;
     by_priority_low: number;
+    /** Chamados que ainda nao passaram pela triagem. Os cinco baldes
+     *  somam `total`. */
+    by_priority_none: number;
   };
   surveys: {
     total: number;

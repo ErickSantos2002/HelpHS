@@ -67,6 +67,10 @@ def _user(role=UserRole.admin, uid=None, status=UserStatus.active):
     u.company_city = None
     u.company_state = None
     u.onboarding_completed = True
+    # Campo novo do `UserResponse` (Fase 2C.1a). Sem valor explícito o
+    # MagicMock devolve um objeto e o `model_validate` recusa — mesma
+    # armadilha que os campos de empresa acima já registram.
+    u.api4com_extension = None
     u.ai_enabled = True
     from datetime import datetime
 
@@ -186,6 +190,10 @@ async def test_create_user_as_admin(patch_redis):
                 "email": "newclient@test.com",
                 "password": "Secret1234",
                 "role": "client",
+                # Cliente nasce ativo, e cliente ativo precisa de telefone —
+                # ver tests/test_telefone.py. Sem isto, 422 antes de chegar
+                # ao que estes testes medem.
+                "phone": "(81) 99999-9999",
                 "lgpd_consent": True,
             },
         )
@@ -238,6 +246,9 @@ async def test_create_user_duplicate_email(patch_redis):
                 "name": "Dup",
                 "email": "dup@test.com",
                 "password": "Secret1234",
+                # Sem `role`, o default é cliente — e cliente ativo precisa de
+                # telefone. O 409 de e-mail duplicado é o que se mede aqui.
+                "phone": "(81) 99999-9999",
                 "lgpd_consent": True,
             },
         )
@@ -585,6 +596,119 @@ async def test_anonymize_already_anonymized(patch_redis):
     assert resp.status_code == 409
 
 
+# POST /users/{id}/anonymize — libera o ramal da API4COM
+#
+# `api4com_extension` tem índice ÚNICO (`uq_users_api4com_extension`). Antes
+# da Correção 2, anonimizar não tocava o campo, e o ramal ficava preso a uma
+# conta sem nome, sem e-mail e sem telefone — mas ainda "dona" do número, para
+# sempre. Os quatro casos abaixo são exatamente os quatro que a Correção 2
+# promete: técnico com ramal pode ser anonimizado; o ramal fica NULL; um
+# OUTRO usuário consegue recebê-lo depois (provado contra Postgres real em
+# `test_ramal_api4com_postgres.py::test_anonimizar_libera_o_ramal_para_outra_pessoa`,
+# porque é o índice do banco que decide isso, não a aplicação); e os demais
+# campos da anonimização continuam corretos — a correção acrescenta um campo à
+# limpeza, não troca a limpeza que já existia.
+
+
+@pytest.mark.asyncio
+async def test_tecnico_com_ramal_pode_ser_anonimizado(patch_redis):
+    target = _user(UserRole.technician)
+    target.api4com_extension = "3001"
+    from app.core.database import get_db
+    from app.core.security import get_current_user
+
+    app.dependency_overrides[get_db] = _simple_db(target)
+
+    async def _admin():
+        return _ADMIN
+
+    app.dependency_overrides[get_current_user] = _admin
+
+    async with AsyncClient(transport=ASGITransport(app=app), base_url="http://test") as c:
+        resp = await c.post(f"/api/v1/users/{target.id}/anonymize")
+    assert resp.status_code == 200
+
+
+@pytest.mark.asyncio
+async def test_anonimizar_zera_o_ramal(patch_redis):
+    target = _user(UserRole.technician)
+    target.api4com_extension = "3001"
+    from app.core.database import get_db
+    from app.core.security import get_current_user
+
+    app.dependency_overrides[get_db] = _simple_db(target)
+
+    async def _admin():
+        return _ADMIN
+
+    app.dependency_overrides[get_current_user] = _admin
+
+    async with AsyncClient(transport=ASGITransport(app=app), base_url="http://test") as c:
+        resp = await c.post(f"/api/v1/users/{target.id}/anonymize")
+
+    assert resp.status_code == 200
+    assert target.api4com_extension is None, "o ramal continuou preso à conta anonimizada"
+
+
+@pytest.mark.asyncio
+async def test_apos_anonimizar_o_ramal_pode_ser_reatribuido(patch_redis):
+    """A prova AUTORITATIVA de que o ramal fica livre é a de Postgres real —
+    é o índice único quem decide, não esta função. Aqui confere-se só que o
+    CAMINHO de código que a rota de edição usa (`_guarda_de_ramal_unico`)
+    concorda: sem ninguém ocupando o ramal no banco, ele não acusa conflito
+    para um OUTRO usuário que peça o mesmo número.
+    """
+    from app.routers.users import _guarda_de_ramal_unico
+
+    outro_id = uuid.uuid4()
+    resultado = MagicMock()
+    resultado.scalar_one_or_none.return_value = None  # ninguém mais tem "3001"
+    db = AsyncMock()
+    db.execute = AsyncMock(return_value=resultado)
+
+    # Não pode levantar HTTPException 409 — é a ausência de exceção que se
+    # confere; não há o que "assert" além de ela não subir.
+    await _guarda_de_ramal_unico(db, "3001", outro_id)
+
+
+@pytest.mark.asyncio
+async def test_anonimizar_continua_limpando_os_demais_campos(patch_redis):
+    """A Correção 2 acrescenta `api4com_extension` à limpeza — não troca o
+    que já era limpo. Confere os oito campos de uma vez, no mesmo alvo."""
+    target = _user(UserRole.technician)
+    target.name = "Nome Real"
+    target.email = "real@empresa.com"
+    target.phone = "+5581999999999"
+    target.department = "Suporte"
+    target.avatar_url = "https://exemplo.com/foto.png"
+    target.lgpd_consent = True
+    target.lgpd_consent_at = "2026-01-01T00:00:00Z"
+    target.api4com_extension = "3001"
+    from app.core.database import get_db
+    from app.core.security import get_current_user
+
+    app.dependency_overrides[get_db] = _simple_db(target)
+
+    async def _admin():
+        return _ADMIN
+
+    app.dependency_overrides[get_current_user] = _admin
+
+    async with AsyncClient(transport=ASGITransport(app=app), base_url="http://test") as c:
+        resp = await c.post(f"/api/v1/users/{target.id}/anonymize")
+
+    assert resp.status_code == 200
+    assert target.name.startswith("Usuário Anonimizado")
+    assert target.email.startswith("anon_") and target.email.endswith("@anonymized.invalid")
+    assert target.phone is None
+    assert target.department is None
+    assert target.avatar_url is None
+    assert target.lgpd_consent is False
+    assert target.lgpd_consent_at is None
+    assert target.api4com_extension is None
+    assert target.status is UserStatus.anonymized
+
+
 # DELETE /users/{id} — success (no tickets)
 
 
@@ -790,6 +914,10 @@ async def test_create_user_hashes_password_off_the_event_loop(patch_redis):
                     "email": "newclient@test.com",
                     "password": "Secret1234",
                     "role": "client",
+                    # Cliente ativo precisa de telefone — ver
+                    # tests/test_telefone.py. O que se mede aqui é a thread
+                    # em que o bcrypt roda.
+                    "phone": "(81) 99999-9999",
                     "lgpd_consent": True,
                 },
             )
@@ -832,6 +960,61 @@ async def test_change_password_runs_bcrypt_off_the_event_loop(patch_redis):
     assert resp.status_code == 204, resp.text
     assert espia_verify.rodou_fora_da_thread(thread_do_loop), "verify_password no event loop"
     assert espia_hash.rodou_fora_da_thread(thread_do_loop), "hash_password no event loop"
+
+
+@pytest.mark.asyncio
+async def test_change_password_audita_com_ip_e_navegador(patch_redis):
+    """A troca de senha pelo perfil deixa o mesmo rastro da redefinição por e-mail.
+
+    A seção 6 da Política de Privacidade (versão C4) promete que, "nos eventos
+    de autenticação e de conta — como cadastro, login, logout e troca de
+    senha —", ficam gravados o IP e o navegador. A redefinição por e-mail
+    (`auth.py`) já gravava; a troca pelo perfil gravava um `update` genérico,
+    sem nenhum dos dois.
+    """
+    from app.core.database import get_db
+    from app.core.security import get_current_user
+    from app.models.models import AuditAction, AuditLog
+
+    alvo = _user(UserRole.client)
+    gerador = _simple_db(alvo)
+    sessao = await gerador().__anext__()
+
+    async def _db():
+        yield sessao
+
+    app.dependency_overrides[get_db] = _db
+
+    async def _actor():
+        return alvo
+
+    app.dependency_overrides[get_current_user] = _actor
+
+    with (
+        patch("app.routers.users.verify_password", return_value=True),
+        patch("app.routers.users.hash_password", return_value="hash-novo"),
+    ):
+        async with AsyncClient(transport=ASGITransport(app=app), base_url="http://test") as c:
+            resp = await c.post(
+                "/api/v1/users/me/change-password",
+                json={"current_password": "Secret1234", "new_password": "NovaSenha1"},
+                headers={"User-Agent": "Navegador-de-Teste/1.0"},
+            )
+
+    assert resp.status_code == 204, resp.text
+    registros = [
+        chamada.args[0]
+        for chamada in sessao.add.call_args_list
+        if isinstance(chamada.args[0], AuditLog)
+    ]
+    assert len(registros) == 1
+    registro = registros[0]
+    assert registro.action == AuditAction.password_change
+    assert registro.user_id == alvo.id
+    assert registro.entity_id == alvo.id
+    assert registro.user_agent == "Navegador-de-Teste/1.0"
+    # O ASGITransport do httpx apresenta o cliente como 127.0.0.1.
+    assert registro.ip_address == "127.0.0.1"
 
 
 # ═══════════════════════════════════════════════════════════════
@@ -948,6 +1131,84 @@ async def test_delete_diz_quantos_e_de_que_tipo(patch_redis):
     assert resp.status_code == 409
     detalhe = resp.json()["detail"]
     assert "2" in detalhe and "5" in detalhe, f"não diz quantos: {detalhe}"
+
+
+# DELETE /users/{id} — as duas referências que faltavam na pré-checagem
+#
+# `library_files` (10/09/2026) e `ticket_sla_extensions` (23/09/2026) nasceram
+# DEPOIS de `_REFERENCIAS_QUE_BLOQUEIAM` (25/08/2026) e nunca entraram na
+# lista. O `except IntegrityError` cobria o caso — 409 genérico, não 500 —,
+# mas sem dizer QUANTAS linhas nem de QUE tipo. Estes dois provam a contagem
+# explícita nova, no mesmo padrão dos onze itens antigos: os zeros que vêm
+# ANTES na tupla continuam zero, e é o valor na posição das duas novas
+# entradas que aparece na mensagem.
+
+
+def test_a_pre_checagem_usa_as_colunas_certas():
+    """Guarda estrutural: confere a IDENTIDADE da coluna, não só a contagem.
+
+    Um teste que só provasse "409 quando o count é 4" passaria mesmo se a
+    entrada apontasse para outra coluna do mesmo modelo — o mock de
+    `_db_contagens` não sabe qual coluna a query real usaria, então mutar
+    `LibraryFile.uploaded_by` para `LibraryFile.id` na tupla não derrubaria
+    nenhum teste puramente mockado. Foi achado por mutação, não por revisão.
+    """
+    from app.models.models import LibraryFile, TicketSlaExtension
+    from app.routers.users import _REFERENCIAS_QUE_BLOQUEIAM
+
+    mapa = {modelo: coluna for _, modelo, coluna in _REFERENCIAS_QUE_BLOQUEIAM}
+    assert mapa[LibraryFile] is LibraryFile.uploaded_by
+    assert mapa[TicketSlaExtension] is TicketSlaExtension.user_id
+
+
+@pytest.mark.asyncio
+async def test_delete_bloqueia_por_arquivo_da_biblioteca(patch_redis):
+    """`library_files.uploaded_by` — a Biblioteca de Arquivos, sem `ondelete`."""
+    target = _user(UserRole.technician)
+    from app.core.database import get_db
+    from app.core.security import get_current_user
+
+    # 11 zeros para as referências antigas, 4 para `library_files`, 0 para
+    # `ticket_sla_extensions` — a ordem é a de `_REFERENCIAS_QUE_BLOQUEIAM`.
+    app.dependency_overrides[get_db] = _override(
+        _db_contagens(target, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 4, 0)
+    )
+
+    async def _admin():
+        return _ADMIN
+
+    app.dependency_overrides[get_current_user] = _admin
+
+    async with AsyncClient(transport=ASGITransport(app=app), base_url="http://test") as c:
+        resp = await c.delete(f"/api/v1/users/{target.id}")
+
+    assert resp.status_code == 409
+    detalhe = resp.json()["detail"]
+    assert "4" in detalhe and "biblioteca" in detalhe.lower(), f"não aponta a biblioteca: {detalhe}"
+
+
+@pytest.mark.asyncio
+async def test_delete_bloqueia_por_extensao_de_sla(patch_redis):
+    """`ticket_sla_extensions.user_id` — quem concedeu uma prorrogação, sem `ondelete`."""
+    target = _user(UserRole.technician)
+    from app.core.database import get_db
+    from app.core.security import get_current_user
+
+    app.dependency_overrides[get_db] = _override(
+        _db_contagens(target, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 7)
+    )
+
+    async def _admin():
+        return _ADMIN
+
+    app.dependency_overrides[get_current_user] = _admin
+
+    async with AsyncClient(transport=ASGITransport(app=app), base_url="http://test") as c:
+        resp = await c.delete(f"/api/v1/users/{target.id}")
+
+    assert resp.status_code == 409
+    detalhe = resp.json()["detail"]
+    assert "7" in detalhe and "sla" in detalhe.lower(), f"não aponta a extensão de SLA: {detalhe}"
 
 
 @pytest.mark.asyncio

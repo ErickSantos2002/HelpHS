@@ -470,3 +470,32 @@ async def improve_message(draft: str, title: str, description: str) -> str | Non
 
     logger.info("Message improved via DeepSeek")
     return melhorado
+
+
+async def responde_como_helo(sistema: str, contexto: str) -> str | None:
+    """
+    O turno da Helô — a única função daqui que fala COM O CLIENTE.
+
+    As outras quatro conversam com o técnico: classificar chamado, sugerir
+    resposta, melhorar redação, resumir conversa. Se saírem estranhas, um
+    humano lê antes. Esta não: o que ela devolver vai direto para a tela de
+    quem está com um instrumento de medição legal na mão.
+
+    Por isso ela não tem template próprio. O prompt de sistema e os blocos de
+    contexto vêm prontos de `helo_prompt.py`, montados pelo backend a cada
+    turno — aqui é só transporte.
+
+    `max_tokens` maior que o do `suggest_reply` porque a resposta dela é um
+    procedimento numerado com a fonte citada ao final, não uma frase.
+
+    Returns:
+        O texto cru, para quem chama separar a linha `ESCALAR:`. None em
+        qualquer falha, como as outras quatro — e aí a Helô escala com mensagem
+        neutra, sem prender o chamado.
+    """
+    return await _chamar_deepseek(
+        system=sistema,
+        prompt=contexto,
+        max_tokens=800,
+        operacao="helo",
+    )

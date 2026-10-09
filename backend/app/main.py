@@ -30,7 +30,9 @@ from app.routers import (
     dashboard,
     files,
     groups,
+    integrations,
     kb,
+    library,
     notifications,
     products,
     quick_replies,
@@ -42,6 +44,11 @@ from app.routers import (
 )
 from app.services import antivirus, storage
 from app.services.chat_backplane import assinatura_ativa, start_chat_backplane
+from app.services.email_outbox import bloco_de_health as bloco_da_outbox_de_email
+from app.services.email_outbox import start_email_outbox_worker
+from app.services.helo_indexacao import start_helo_indexacao_worker
+from app.services.sla_alertas import start_sla_warning_worker
+from app.services.sla_alertas import ultima_rodada_sem_erro as ultima_rodada_do_aviso_de_sla
 from app.services.ticket_lifecycle import start_auto_close_worker, ultima_rodada_sem_erro
 
 settings = get_settings()
@@ -113,6 +120,22 @@ async def lifespan(app: FastAPI) -> AsyncIterator[None]:
     # app/services/ticket_lifecycle.py).
     auto_close_task = start_auto_close_worker()
 
+    # Aviso de SLA próximo do vencimento. O `warning_threshold` do `sla_configs`
+    # existe desde a primeira migration e a tela de SLA já prometia o alerta ao
+    # administrador; este laço é quem cumpre a promessa
+    # (app/services/sla_alertas.py).
+    sla_warning_task = start_sla_warning_worker()
+
+    # Outbox durável de e-mail (Fase 3A). Nesta fase a tabela fica vazia em
+    # produção — nenhum call site real grava nela ainda —, então o laço sobe
+    # sem efeito observável, só para ficar exercitado antes da Fase 3B migrar
+    # o primeiro disparador de verdade (app/services/email_outbox.py).
+    email_outbox_task = start_email_outbox_worker()
+
+    # A base da Helô acompanha a Base de Conhecimento sozinha: artigo publicado
+    # ou editado é indexado na rodada seguinte (app/services/helo_indexacao.py).
+    helo_indexacao_task = start_helo_indexacao_worker()
+
     # Backplane do chat: sem ele, dois workers nao se enxergam e o sintoma e
     # silencioso (ver app/services/chat_backplane.py). Sobe sempre, inclusive
     # com --workers 1: assim ele fica exercitado em producao antes de o numero
@@ -126,6 +149,21 @@ async def lifespan(app: FastAPI) -> AsyncIterator[None]:
         auto_close_task.cancel()
         with suppress(asyncio.CancelledError):
             await auto_close_task
+
+    if sla_warning_task is not None:
+        sla_warning_task.cancel()
+        with suppress(asyncio.CancelledError):
+            await sla_warning_task
+
+    if email_outbox_task is not None:
+        email_outbox_task.cancel()
+        with suppress(asyncio.CancelledError):
+            await email_outbox_task
+
+    if helo_indexacao_task is not None:
+        helo_indexacao_task.cancel()
+        with suppress(asyncio.CancelledError):
+            await helo_indexacao_task
 
     # Antes do close_redis, de proposito: o laco segura uma conexao de pub/sub
     # tirada do mesmo cliente singleton.
@@ -159,7 +197,10 @@ app.add_middleware(
     # `allow_headers` vale para o que o navegador MANDA; para ele conseguir LER
     # um cabecalho de resposta e preciso expo-lo. Sem isto o id existe, viaja e
     # e invisivel justamente para quem abriria o chamado de suporte citando ele.
-    expose_headers=[CABECALHO],
+    # `Retry-After` não é da lista básica do CORS: sem expô-lo, o tempo de
+    # bloqueio do rate limit viaja na resposta e o front não consegue ler —
+    # a tela dizia "alguns minutos" tendo o número exato em mãos (15/09).
+    expose_headers=[CABECALHO, "Retry-After"],
 )
 
 # Registrado DEPOIS do CORS de proposito: o `add_middleware` empilha por fora,
@@ -226,6 +267,8 @@ app.include_router(groups.router, prefix=settings.api_prefix)
 app.include_router(calendar.router, prefix=settings.api_prefix)
 app.include_router(quick_replies.router, prefix=settings.api_prefix)
 app.include_router(files.router, prefix=settings.api_prefix)
+app.include_router(integrations.router, prefix=settings.api_prefix)
+app.include_router(library.router, prefix=settings.api_prefix)
 
 
 # Quanto o readiness espera por cada dependência antes de chamá-la de fora.
@@ -300,6 +343,7 @@ async def readiness_check(response: Response) -> dict:
         response.status_code = status.HTTP_503_SERVICE_UNAVAILABLE
 
     ultima = ultima_rodada_sem_erro()
+    ultima_do_sla = ultima_rodada_do_aviso_de_sla()
     return {
         "status": "ok" if pronto else "degraded",
         "env": settings.app_env,
@@ -308,6 +352,21 @@ async def readiness_check(response: Response) -> dict:
             "redis": "ok" if redis_ok else "down",
         },
         "auto_close": {"last_success": ultima.isoformat() if ultima else None},
+        # Mesma semântica do carimbo acima, e pelo mesmo motivo: um laço que
+        # parou de girar é a falha que ninguém percebe sem alguém olhar para
+        # aqui — e o aviso de SLA é invisível quando falha, porque a ausência de
+        # e-mail se parece com "nenhum chamado está vencendo".
+        "sla_warning": {"last_success": ultima_do_sla.isoformat() if ultima_do_sla else None},
+        # Outbox de e-mail (Fase 3D). Este bloco lê MEMÓRIA, não o banco: o
+        # worker mede a fila uma vez por rodada e guarda o snapshot, então um
+        # probe nunca paga um `COUNT(*)`. O `as_of` dentro dele é o que impede
+        # alguém de ler contagem em cache como estado atual.
+        #
+        # Como os dois carimbos acima, é REPORTADO e não derruba: `state` pode
+        # dizer "error" com a resposta em 200. Um worker de e-mail travado
+        # tirando a API de rotação trocaria degradação parcial por total —
+        # banco e Redis seguem sendo os únicos que decidem readiness.
+        "email_outbox": bloco_da_outbox_de_email(settings),
         # Reportado, nao usado para derrubar -- mesma regra do carimbo acima. Com
         # a assinatura caida o chat ainda funciona dentro de cada worker; o que
         # se perde e o tempo real ENTRE workers, que e justamente a falha que

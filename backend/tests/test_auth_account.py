@@ -98,18 +98,56 @@ def _limpa():
 
 @pytest.fixture()
 def smtp_configurado():
-    """Simula a confirmação ADOTADA: flag ligada + SMTP presente, envio interceptado."""
+    """Simula a confirmação ADOTADA: flag ligada + SMTP presente.
+
+    Fase 3C: nenhum dos três e-mails é mais enviado — nem sequer enfileirado,
+    no caso de `register` — de forma diretamente observável por
+    `send_*_email`. O envio de verdade é responsabilidade exclusiva do
+    worker da outbox, em outro ciclo; o que o router faz agora é só
+    ENFILEIRAR a intenção, por dois mecanismos diferentes:
+
+    * `register` chama `enqueue_account_email` — SÍNCRONO, sem `await`,
+      mesma transação — tanto para `verification` (usuário novo) quanto para
+      `account_exists` (ramo `ja_existe`);
+    * `resend_verification`/`forgot_password` chamam
+      `enfileira_email_de_conta_em_segundo_plano` — ASSÍNCRONO, via
+      `BackgroundTasks`, sessão própria — para `verification` e
+      `password_reset`, respectivamente.
+
+    São dois mocks distintos de propósito: um `MagicMock` para o caminho
+    síncrono (nunca teria `await_count` de verdade — chamá-lo sem `await`
+    não executaria nada) e um `AsyncMock` para o caminho em segundo plano.
+    """
     original = _settings.smtp_from_email
     original_flag = _settings.email_verification_enabled
     _settings.smtp_from_email = "naoresponda@healthsafety.com"
     _settings.email_verification_enabled = True
+
+    enqueue = MagicMock()
+    enfileira = AsyncMock()
+
     with (
-        patch("app.routers.auth.send_verification_email", new=AsyncMock(return_value=True)) as v,
-        patch("app.routers.auth.send_password_reset_email", new=AsyncMock(return_value=True)) as p,
+        patch("app.routers.auth.enqueue_account_email", new=enqueue),
+        patch("app.routers.auth.enfileira_email_de_conta_em_segundo_plano", new=enfileira),
     ):
-        yield {"verification": v, "reset": p}
+        yield {"enqueue": enqueue, "enfileira": enfileira}
     _settings.smtp_from_email = original
     _settings.email_verification_enabled = original_flag
+
+
+def _chamadas_de(mock, event_type: str) -> list:
+    """Filtra as chamadas de `enqueue`/`enfileira` por `event_type` — os dois
+
+    mocks do fixture acima recebem TODOS os eventos que passarem pelo
+    endpoint, e a maioria dos testes só quer saber de um.
+    """
+    chamadas = []
+    for chamada in mock.call_args_list:
+        args, kwargs = chamada
+        tipo = kwargs.get("event_type") or (args[1] if len(args) > 1 else None)
+        if tipo == event_type:
+            chamadas.append(chamada)
+    return chamadas
 
 
 @pytest.fixture()
@@ -265,7 +303,8 @@ async def test_esqueci_senha_envia_o_link(smtp_configurado):
         r = await c.post("/api/v1/auth/forgot-password", json={"email": _EMAIL})
 
     assert r.status_code == 200
-    smtp_configurado["reset"].assert_awaited_once()
+    smtp_configurado["enfileira"].assert_awaited_once()
+    assert _chamadas_de(smtp_configurado["enfileira"], "password_reset")
 
 
 @pytest.mark.asyncio
@@ -283,7 +322,7 @@ async def test_esqueci_senha_de_email_inexistente_responde_igual(smtp_configurad
 
     assert existente.status_code == inexistente.status_code == 200
     assert existente.json() == inexistente.json()
-    smtp_configurado["reset"].assert_not_awaited()
+    smtp_configurado["enfileira"].assert_not_awaited()
 
 
 @pytest.mark.asyncio
@@ -313,7 +352,7 @@ async def test_reenvio_de_confirmacao_responde_igual_para_email_inexistente(smtp
         r = await c.post("/api/v1/auth/resend-verification", json={"email": "ninguem@test.com"})
 
     assert r.status_code == 200
-    smtp_configurado["verification"].assert_not_awaited()
+    smtp_configurado["enfileira"].assert_not_awaited()
 
 
 # ═══════════════════════════════════════════════════════════════
@@ -451,6 +490,9 @@ async def test_cadastro_hasheia_a_senha_fora_do_event_loop(smtp_configurado):
                     "name": "Novo Cliente",
                     "email": "novo@test.com",
                     "password": "Senha@123456",
+                    # O cadastro público cria cliente ativo, e desde a Fase 1A
+                    # o telefone é obrigatório nele (tests/test_telefone.py).
+                    "phone": "(81) 99999-9999",
                     "lgpd_consent": True,
                 },
             )
@@ -548,7 +590,7 @@ async def test_esqueci_senha_responde_antes_de_mandar_o_email(smtp_configurado):
     app.dependency_overrides[get_db] = _db_with(_mock_user(email_verified=True))
 
     eventos = await _ordem_dos_eventos(
-        "/api/v1/auth/forgot-password", _EMAIL, smtp_configurado["reset"]
+        "/api/v1/auth/forgot-password", _EMAIL, smtp_configurado["enfileira"]
     )
 
     assert "envio" in eventos, "o e-mail precisa continuar saindo para a conta existente"
@@ -564,7 +606,7 @@ async def test_reenvio_de_confirmacao_responde_antes_de_mandar_o_email(smtp_conf
     app.dependency_overrides[get_db] = _db_with(_mock_user(email_verified=False))
 
     eventos = await _ordem_dos_eventos(
-        "/api/v1/auth/resend-verification", _EMAIL, smtp_configurado["verification"]
+        "/api/v1/auth/resend-verification", _EMAIL, smtp_configurado["enfileira"]
     )
 
     assert "envio" in eventos
@@ -581,7 +623,7 @@ async def test_esqueci_senha_nao_agenda_envio_para_conta_inexistente(smtp_config
     app.dependency_overrides[get_db] = _db_with(None, get_result=None)
 
     eventos = await _ordem_dos_eventos(
-        "/api/v1/auth/forgot-password", "ninguem@test.com", smtp_configurado["reset"]
+        "/api/v1/auth/forgot-password", "ninguem@test.com", smtp_configurado["enfileira"]
     )
 
     assert "envio" not in eventos
@@ -596,7 +638,7 @@ async def test_reenvio_nao_agenda_envio_para_conta_ja_confirmada(smtp_configurad
     app.dependency_overrides[get_db] = _db_with(_mock_user(email_verified=True))
 
     eventos = await _ordem_dos_eventos(
-        "/api/v1/auth/resend-verification", _EMAIL, smtp_configurado["verification"]
+        "/api/v1/auth/resend-verification", _EMAIL, smtp_configurado["enfileira"]
     )
 
     assert "envio" not in eventos
@@ -637,23 +679,26 @@ async def test_link_de_confirmacao_nao_serve_para_outra_conta_depois_de_usado(sm
 
 
 @pytest.mark.asyncio
-async def test_cadastro_responde_antes_de_mandar_o_email(smtp_configurado):
+async def test_cadastro_nunca_chama_smtp_no_request(smtp_configurado):
     """
-    O `forgot-password` e o `resend-verification` já respondiam antes de
-    enviar; o `/register` era o único que **aguardava** o SMTP dentro do
-    handler, sem timeout. Um servidor de e-mail lento segurava o cadastro, e um
-    que não responde o segurava até o timeout do proxy.
+    Sucessor de "o cadastro responde antes de mandar o e-mail" — a Fase 3C
+    muda a natureza da garantia. Antes, `register` aguardava o SMTP inline
+    (motivo do teste original); depois da 3B/3C, SMTP nunca acontece dentro
+    de request nenhum, em nenhum dos três e-mails — é responsabilidade
+    exclusiva do worker da outbox, em outro ciclo. A ordem "resposta antes do
+    envio" deixou de fazer sentido como propriedade a medir (não há mais
+    "envio" no request para ordenar contra) — o que se prova agora é a
+    AUSÊNCIA total de SMTP no caminho do request.
 
-    Mede ORDEM, não relógio: pelo ASGI cru dá para ver o corpo da resposta sair
-    antes de o envio começar.
+    Deixa `enqueue_account_email` rodar de verdade (não usa o mock do
+    fixture para ESTE case específico) — o que se quer provar é que o
+    `INSERT` na outbox acontece, e nenhuma chamada de rede acontece junto.
     """
     from app.core.database import get_db
     from app.models.models import User as ModeloUser
 
     # O `register` cria um User de verdade e o serializa no fim. Num flush real
-    # o banco preenche id e os timestamps; aqui o mock precisa fazer o mesmo,
-    # senão a resposta nem chega a ser montada e o teste morre antes de medir
-    # a ordem, que é o que ele existe para medir.
+    # o banco preenche id e os timestamps; aqui o mock precisa fazer o mesmo.
     def _sessao_que_preenche():
         adicionados: list = []
         resultado = MagicMock()
@@ -684,22 +729,24 @@ async def test_cadastro_responde_antes_de_mandar_o_email(smtp_configurado):
 
     app.dependency_overrides[get_db] = _sessao_que_preenche()
 
-    eventos = await _ordem_dos_eventos(
-        "/api/v1/auth/register",
-        _EMAIL,
-        smtp_configurado["verification"],
-        corpo_dict={
-            "name": "Cliente Novo",
-            "email": "novo@test.com",
-            "password": "Senha@123456",
-            "lgpd_consent": True,
-        },
-    )
+    with patch("app.services.email.send_email_detalhado", new=AsyncMock()) as smtp:
+        async with AsyncClient(transport=ASGITransport(app=app), base_url="http://test") as c:
+            r = await c.post(
+                "/api/v1/auth/register",
+                json={
+                    "name": "Cliente Novo",
+                    "email": "novo@test.com",
+                    "password": "Senha@123456",
+                    "phone": "(81) 99999-9999",
+                    "lgpd_consent": True,
+                },
+            )
 
-    assert "envio" in eventos, "o e-mail de confirmação precisa continuar saindo"
-    assert eventos.index("http.response.body") < eventos.index(
-        "envio"
-    ), f"o envio acontece antes de a resposta sair: {eventos}"
+    assert r.status_code == 201, r.text
+    smtp.assert_not_awaited()
+    enqueue = smtp_configurado["enqueue"]
+    enqueue.assert_called_once()
+    assert enqueue.call_args.kwargs["event_type"] == "verification"
 
 
 # ═══════════════════════════════════════════════════════════════
@@ -771,17 +818,19 @@ async def test_cadastrar_com_email_existente_responde_como_cadastro_novo(smtp_co
 
     async def _cadastra(db_override):
         app.dependency_overrides[get_db] = db_override
-        with patch("app.routers.auth.send_account_exists_email", new=AsyncMock(return_value=True)):
-            async with AsyncClient(transport=ASGITransport(app=app), base_url="http://test") as c:
-                return await c.post(
-                    "/api/v1/auth/register",
-                    json={
-                        "name": "Fulano",
-                        "email": _EMAIL,
-                        "password": "Senha@123456",
-                        "lgpd_consent": True,
-                    },
-                )
+        async with AsyncClient(transport=ASGITransport(app=app), base_url="http://test") as c:
+            return await c.post(
+                "/api/v1/auth/register",
+                json={
+                    "name": "Fulano",
+                    "email": _EMAIL,
+                    "password": "Senha@123456",
+                    # O cadastro público cria cliente ativo, e desde a Fase 1A
+                    # o telefone é obrigatório nele (tests/test_telefone.py).
+                    "phone": "(81) 99999-9999",
+                    "lgpd_consent": True,
+                },
+            )
 
     r_novo = await _cadastra(novo)
     r_existente = await _cadastra(existente)
@@ -811,6 +860,9 @@ async def test_a_resposta_do_cadastro_nao_carrega_dado_de_conta(smtp_configurado
                 "name": "Fulano",
                 "email": _EMAIL,
                 "password": "Senha@123456",
+                # O cadastro público cria cliente ativo, e desde a Fase 1A
+                # o telefone é obrigatório nele (tests/test_telefone.py).
+                "phone": "(81) 99999-9999",
                 "lgpd_consent": True,
             },
         )
@@ -827,24 +879,27 @@ async def test_quem_ja_tem_conta_recebe_e_mail_explicando(smtp_configurado):
     não funciona, sem nada explicando por quê."""
     from app.core.database import get_db
 
-    app.dependency_overrides[get_db] = _db_with(_mock_user(email_verified=True))
+    user = _mock_user(email_verified=True)
+    app.dependency_overrides[get_db] = _db_with(user)
 
-    with patch(
-        "app.routers.auth.send_account_exists_email", new=AsyncMock(return_value=True)
-    ) as aviso:
-        async with AsyncClient(transport=ASGITransport(app=app), base_url="http://test") as c:
-            await c.post(
-                "/api/v1/auth/register",
-                json={
-                    "name": "Fulano",
-                    "email": _EMAIL,
-                    "password": "Senha@123456",
-                    "lgpd_consent": True,
-                },
-            )
+    async with AsyncClient(transport=ASGITransport(app=app), base_url="http://test") as c:
+        await c.post(
+            "/api/v1/auth/register",
+            json={
+                "name": "Fulano",
+                "email": _EMAIL,
+                "password": "Senha@123456",
+                # O cadastro público cria cliente ativo, e desde a Fase 1A
+                # o telefone é obrigatório nele (tests/test_telefone.py).
+                "phone": "(81) 99999-9999",
+                "lgpd_consent": True,
+            },
+        )
 
-    assert aviso.await_count == 1
-    assert aviso.await_args.args[0] == _EMAIL
+    enqueue = smtp_configurado["enqueue"]
+    enqueue.assert_called_once()
+    assert enqueue.call_args.kwargs["user_id"] == user.id
+    assert enqueue.call_args.kwargs["event_type"] == "account_exists"
 
 
 @pytest.mark.asyncio
@@ -867,17 +922,19 @@ async def test_cadastro_com_email_existente_nao_cria_segunda_conta(smtp_configur
 
     app.dependency_overrides[get_db] = _gen
 
-    with patch("app.routers.auth.send_account_exists_email", new=AsyncMock(return_value=True)):
-        async with AsyncClient(transport=ASGITransport(app=app), base_url="http://test") as c:
-            r = await c.post(
-                "/api/v1/auth/register",
-                json={
-                    "name": "Fulano",
-                    "email": _EMAIL,
-                    "password": "Senha@123456",
-                    "lgpd_consent": True,
-                },
-            )
+    async with AsyncClient(transport=ASGITransport(app=app), base_url="http://test") as c:
+        r = await c.post(
+            "/api/v1/auth/register",
+            json={
+                "name": "Fulano",
+                "email": _EMAIL,
+                "password": "Senha@123456",
+                # O cadastro público cria cliente ativo, e desde a Fase 1A
+                # o telefone é obrigatório nele (tests/test_telefone.py).
+                "phone": "(81) 99999-9999",
+                "lgpd_consent": True,
+            },
+        )
 
     assert r.status_code == 201
     criados = [ch.args[0] for ch in sessao.add.call_args_list if isinstance(ch.args[0], User)]
@@ -905,6 +962,9 @@ async def test_sem_e_mail_configurado_o_409_continua():
                     "name": "Fulano",
                     "email": _EMAIL,
                     "password": "Senha@123456",
+                    # O cadastro público cria cliente ativo, e desde a Fase 1A
+                    # o telefone é obrigatório nele (tests/test_telefone.py).
+                    "phone": "(81) 99999-9999",
                     "lgpd_consent": True,
                 },
             )
@@ -914,41 +974,38 @@ async def test_sem_e_mail_configurado_o_409_continua():
 
 
 @pytest.mark.asyncio
-async def test_cadastro_responde_antes_de_mandar_o_e_mail_de_conta_existente(smtp_configurado):
-    """O `#3.1` fechou o oráculo de RESPOSTA; este fecha o de TEMPO.
+async def test_cadastro_de_conta_existente_nunca_chama_smtp_no_request(smtp_configurado):
+    """O `#3.1` fechou o oráculo de RESPOSTA; a Fase 3C muda como se fecha o de
 
-    Sem `BackgroundTasks`, o caminho do e-mail já cadastrado esperaria o envio
-    terminar e o caminho do e-mail novo não — as duas respostas seriam idênticas
-    no corpo e distinguíveis no relógio, que é o mesmo vazamento com outra
-    régua.
-
-    A entrada do `Changelog.md` que documentou o tratamento nos outros fluxos já
-    dizia: *"o register fica de fora de propósito, mas quando o #3.1 o tornar
-    neutro este tratamento precisa ir junto"*. É este teste.
-
-    Mede **ordem**, não relógio: mock de rede não tem latência, e cronometrar em
-    CI compartilhado mediria o runner.
+    TEMPO. Antes, o ramo `ja_existe` aguardava o SMTP inline enquanto o ramo
+    novo não — o mesmo vazamento do `register`/`verification`, com a régua
+    do relógio. Depois da 3C, SMTP nunca acontece dentro de request nenhum:
+    o que se prova é a ausência total de chamada de rede — o `INSERT` na
+    outbox é o único efeito síncrono, e ele acontece nos dois ramos de
+    `register` (um cria `User`+outbox, o outro só a outbox).
     """
     from app.core.database import get_db
 
-    app.dependency_overrides[get_db] = _db_with(_mock_user(email_verified=True))
+    user = _mock_user(email_verified=True)
+    app.dependency_overrides[get_db] = _db_with(user)
 
-    with patch(
-        "app.routers.auth.send_account_exists_email", new=AsyncMock(return_value=True)
-    ) as aviso:
-        eventos = await _ordem_dos_eventos(
-            "/api/v1/auth/register",
-            _EMAIL,
-            aviso,
-            corpo_dict={
-                "name": "Fulano",
-                "email": _EMAIL,
-                "password": "Senha@123456",
-                "lgpd_consent": True,
-            },
-        )
+    with patch("app.services.email.send_email_detalhado", new=AsyncMock()) as smtp:
+        async with AsyncClient(transport=ASGITransport(app=app), base_url="http://test") as c:
+            r = await c.post(
+                "/api/v1/auth/register",
+                json={
+                    "name": "Fulano",
+                    "email": _EMAIL,
+                    "password": "Senha@123456",
+                    # O cadastro público cria cliente ativo, e desde a Fase 1A
+                    # o telefone é obrigatório nele (tests/test_telefone.py).
+                    "phone": "(81) 99999-9999",
+                    "lgpd_consent": True,
+                },
+            )
 
-    assert "envio" in eventos, "o aviso precisa continuar saindo para quem já tem conta"
-    assert eventos.index("http.response.body") < eventos.index(
-        "envio"
-    ), f"o envio acontece antes de a resposta sair — o tempo denuncia quem tem conta: {eventos}"
+    assert r.status_code == 201, r.text
+    smtp.assert_not_awaited()
+    enqueue = smtp_configurado["enqueue"]
+    enqueue.assert_called_once()
+    assert enqueue.call_args.kwargs["event_type"] == "account_exists"

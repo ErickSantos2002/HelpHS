@@ -64,12 +64,35 @@ export interface OldestTicketItem {
   ticket_id: string;
   protocol: string;
   title: string;
-  priority: string;
+  /** Nulo enquanto o chamado nao foi triado. */
+  priority: string | null;
   category: string;
   status: string;
   age_hours: number;
   sla_breached: boolean;
   assignee_name: string | null;
+}
+
+/**
+ * Chamado resolvido fora do prazo, com o motivo que quem resolveu escreveu.
+ *
+ * O relatório de SLA só tinha número agregado: sabia-se QUANTOS estouraram,
+ * nunca POR QUÊ. A contagem responde à auditoria; o motivo é o que permite
+ * corrigir a causa.
+ *
+ * A lista vem do servidor pela PRESENÇA da justificativa, e não por uma conta
+ * de datas feita na tela — é a mesma razão pela qual o front nunca decide se o
+ * SLA estourou: ele não recebe a pausa acumulada (`sla_total_paused_ms`), então
+ * acharia vencido o que não está.
+ */
+export interface SlaJustificationItem {
+  ticket_id: string;
+  protocol: string;
+  title: string;
+  priority: string | null;
+  resolved_at: string | null;
+  assignee_name: string | null;
+  justification: string;
 }
 
 export interface ReportComparison {
@@ -98,6 +121,7 @@ export interface ReportData {
   technicians_dist: TechnicianDistItem[];
   reopened_count: number;
   reopen_rate: number;
+  sla_justifications: SlaJustificationItem[];
   comparison: ReportComparison | null;
 }
 

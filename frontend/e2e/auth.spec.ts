@@ -10,7 +10,9 @@ test.describe("Autenticação", () => {
   test("exibe erro com credenciais inválidas", async ({ page }) => {
     await page.goto("/login");
     await page.getByLabel("E-mail").fill("admin@healthsafety.com");
-    await page.getByLabel("Senha").fill("senhaerrada123");
+    // `exact` pelo mesmo motivo do helpers.ts: o olho de revelar senha também
+    // casa com "Senha" na busca por rótulo.
+    await page.getByLabel("Senha", { exact: true }).fill("senhaerrada123");
     await page.getByRole("button", { name: "Entrar" }).click();
     // Should stay on login page (not redirect on failure)
     await expect(page).toHaveURL(/\/login/, { timeout: 8_000 });

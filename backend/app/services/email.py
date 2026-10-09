@@ -6,10 +6,142 @@ The FastMail instance is created lazily so that missing SMTP config
 in development does not crash startup.
 """
 
-from fastapi_mail import ConnectionConfig, FastMail, MessageSchema, MessageType
+import enum
+from dataclasses import dataclass
+
+from fastapi_mail import (
+    ConnectionConfig,
+    FastMail,
+    MessageSchema,
+    MessageType,
+    MultipartSubtypeEnum,
+)
 from loguru import logger
 
 from app.core.config import Settings
+from app.services.email_layout import CID_LOGO, LOGO_EMAIL
+
+
+class EmailDeliveryStatus(str, enum.Enum):
+    """O que a outbox (Fase 3A) precisa saber para decidir o que fazer a seguir.
+
+    `send_email()` sempre devolveu só `bool` — o suficiente para quem apenas
+    loga o desfecho, insuficiente para quem precisa decidir "tenta de novo" ou
+    "desiste". `temporary_failure`/`permanent_failure` existem só para isso.
+    """
+
+    success = "success"
+    temporary_failure = "temporary_failure"
+    permanent_failure = "permanent_failure"
+
+
+@dataclass(frozen=True)
+class EmailDeliveryResult:
+    """Desfecho estruturado de uma tentativa de envio.
+
+    `error_summary` é sempre o que `_resumo_do_erro` produz — classe da
+    exceção e código SMTP numérico quando existir, nunca `str(exc)` cru. `None`
+    quando `status == success`.
+    """
+
+    status: EmailDeliveryStatus
+    error_summary: str | None = None
+
+
+def _classifica_falha(exc: BaseException) -> EmailDeliveryStatus:
+    """4xx é temporário (tente de novo), 5xx é permanente (endereço/servidor
+
+    recusa definitivamente). SMTP é assim por definição do protocolo — RFC
+    5321 §4.2.1: "5yz" é "Permanent Negative Completion", "4yz" é "Transient".
+
+    Sem código numérico (erro de conexão, timeout, exceção genérica): trata
+    como temporário. Uma falha que este código não sabe classificar não deve
+    matar a mensagem de vez — o pior caso de tratar como temporário é uma
+    tentativa a mais antes do limite; o pior caso do contrário seria descartar
+    uma mensagem que uma nova tentativa entregaria.
+    """
+    codigo = getattr(exc, "code", None)
+    if isinstance(codigo, int):
+        if 500 <= codigo < 600:
+            return EmailDeliveryStatus.permanent_failure
+        if 400 <= codigo < 500:
+            return EmailDeliveryStatus.temporary_failure
+    return EmailDeliveryStatus.temporary_failure
+
+
+def _resumo_do_erro(exc: BaseException) -> str:
+    """A CLASSE do erro e, quando houver, o código numérico do servidor.
+
+    **Nunca `str(exc)`.** Medido no aiosmtplib 3.0.2, em 25/09/2026:
+
+        SMTPSenderRefused      -> o str() carrega o REMETENTE
+        SMTPRecipientRefused   -> carrega o DESTINATÁRIO
+        SMTPRecipientsRefused  -> carrega o destinatário, dentro da lista
+
+    Ou seja: logar `{exc}` põe endereço de cliente no log sem ninguém ter
+    escrito `{to_email}` em lugar nenhum. É o vazamento que não aparece na
+    revisão, porque a linha de código parece limpa.
+
+    O código numérico FICA, e é o que sobra de diagnóstico: separa 535
+    (credencial recusada) de 550 (domínio não verificado) e de 421 (tente mais
+    tarde). É inteiro do protocolo SMTP, não texto que o servidor escolhe.
+
+    A MENSAGEM DE TEXTO DO SERVIDOR É DESCARTADA POR COMPLETO — ela não entra
+    no valor devolvido por esta função. Hoje seria inócua na maioria dos casos,
+    mas é conteúdo variável de terceiro, e o log não é lugar para apostar nisso.
+
+    (A frase anterior aqui era "a mensagem do servidor sai inteira", que em
+    português lê-se nos dois sentidos — "é incluída" ou "é embora". O código
+    sempre fez a segunda; a auditoria da Fase 3D registrou a ambiguidade como
+    achado A7, porque o risco real era alguém "consertar" o CÓDIGO para casar
+    com a leitura errada da frase.)
+
+    Serve também ao worker da outbox, que desde a Fase 3D usa esta função nos
+    seus `except` gerais: um `DBAPIError` do SQLAlchemy carrega o SQL e os
+    `[parameters: ...]` no `str()`, e o `.code` dele é uma STRING (o código
+    curto da documentação), não um int — então o `isinstance(codigo, int)`
+    abaixo não o deixa passar, e sobra só o nome da classe.
+    """
+    codigo = getattr(exc, "code", None)
+    nome = type(exc).__name__
+    return f"{nome} (code {codigo})" if isinstance(codigo, int) else nome
+
+
+def _anexo_da_logo() -> list[dict]:
+    """A logo da faixa, como parte MIME `inline` referenciada por `cid:`.
+
+    Só acompanha e-mail COM html — em texto puro ela não seria vista e os 75 KB
+    viajariam por nada.
+
+    A árvore que isto produz é `multipart/related` envolvendo o
+    `multipart/alternative`, com a imagem IRMÃ dele. Isso importa: dentro do
+    `alternative`, a RFC 2046 permite ao cliente escolher a imagem e descartar o
+    HTML, e o leitor receberia só a logo. Quem monta assim é o
+    `attach_alternative` da `fastapi_mail` — comportamento de terceiro, medido em
+    `tests/test_email_anexo.py` e não deduzido da documentação.
+
+    Asset ausente devolve lista vazia em vez de levantar: o e-mail sai sem a
+    imagem, e a faixa continua dizendo "Help Desk Health & Safety" em texto.
+    Derrubar o envio porque falta um arquivo decorativo seria trocar um e-mail
+    feio por nenhum e-mail.
+    """
+    if not LOGO_EMAIL.is_file():
+        logger.warning(f"logo do e-mail ausente em {LOGO_EMAIL}: a mensagem sai sem imagem")
+        return []
+
+    return [
+        {
+            "file": str(LOGO_EMAIL),
+            "mime_type": "image",
+            "mime_subtype": "png",
+            "headers": {
+                # Os `<>` são do cabeçalho; no `src` o `cid:` vem sem eles.
+                "Content-ID": f"<{CID_LOGO}>",
+                "Content-Disposition": f'inline; filename="{LOGO_EMAIL.name}"',
+            },
+        }
+    ]
+
 
 # Module-level cache — one instance per Settings snapshot
 _mail_instance: FastMail | None = None
@@ -46,24 +178,39 @@ def _get_mail_client(settings: Settings) -> FastMail:
     return _mail_instance
 
 
-async def send_email(
+async def send_email_detalhado(
     to_email: str,
     subject: str,
     body: str,
     settings: Settings,
-) -> bool:
-    """
-    Send a plain-text email notification.
+    html: str | None = None,
+    contexto: str = "email",
+) -> EmailDeliveryResult:
+    """O mesmo envio de `send_email`, com o desfecho estruturado que a outbox
 
-    Returns True on success, False if delivery failed (error is logged but
-    not re-raised so the caller is never blocked by email failures).
+    (Fase 3A) precisa para decidir entre tentar de novo e desistir. Ver o
+    docstring de `send_email` para o resto do comportamento — esta função É o
+    corpo dele; `send_email` é hoje um wrapper fino por cima desta, mantido
+    para não mudar o contrato dos ~20 call sites que só querem `bool`.
     """
     if not settings.smtp_from_email and not settings.smtp_user:
-        logger.debug(f"SMTP not configured — skipping email to {to_email}")
-        return False
+        logger.debug(f"SMTP not configured — {contexto} skipped")
+        return EmailDeliveryResult(EmailDeliveryStatus.temporary_failure, "SMTPNotConfigured")
 
     try:
         mail = _get_mail_client(settings)
+        # `body` vira text/plain e `alternative_body` vira text/html, nessa
+        # ordem dentro do multipart/alternative — conferido na árvore MIME que a
+        # biblioteca monta, não deduzido da documentação.
+        duas_partes = (
+            {
+                "alternative_body": html,
+                "multipart_subtype": MultipartSubtypeEnum.alternative,
+                "attachments": _anexo_da_logo(),
+            }
+            if html
+            else {}
+        )
         message = MessageSchema(
             subject=subject,
             recipients=[to_email],
@@ -72,10 +219,52 @@ async def send_email(
             # SMTP_REPLY_TO é opcional e nasce vazio. O MessageSchema recusa
             # None neste campo, e a montagem morreria antes de tentar entregar.
             reply_to=[settings.smtp_reply_to] if settings.smtp_reply_to else [],
+            **duas_partes,
         )
         await mail.send_message(message)
-        logger.info(f"Email sent to {to_email}: {subject}")
-        return True
+        logger.info(f"Delivery accepted by SMTP server: {contexto}")
+        return EmailDeliveryResult(EmailDeliveryStatus.success)
     except Exception as exc:  # noqa: BLE001
-        logger.warning(f"Failed to send email to {to_email}: {exc}")
-        return False
+        resumo = _resumo_do_erro(exc)
+        status = _classifica_falha(exc)
+        logger.warning(f"SMTP delivery failed for {contexto}: {resumo}")
+        return EmailDeliveryResult(status, resumo)
+
+
+async def send_email(
+    to_email: str,
+    subject: str,
+    body: str,
+    settings: Settings,
+    html: str | None = None,
+    contexto: str = "email",
+) -> bool:
+    """Envia o e-mail; com `html`, manda texto e HTML na mesma mensagem.
+
+    A parte de texto NÃO é rascunho da de HTML: filtro de spam penaliza HTML sem
+    alternativa, e gateway corporativo às vezes entrega só ela. Quem monta as
+    duas é o `email_layout`, a partir da mesma `Mensagem`, para não divergirem.
+
+    Sem `html`, sai só o texto — que é o caminho de quem ainda não migrou.
+
+    Devolve True quando o servidor aceitou. Falha é registrada e NÃO
+    re-levantada: quem chamou já fez o trabalho, e o e-mail é o acessório.
+
+    ``contexto`` é o que vai para o LOG no lugar do destinatário.
+    -----------------------------------------------------------
+    Até 25/09/2026 estas três linhas registravam `{to_email}` e `{subject}`.
+    Com SMTP desligado nada saía — a função retorna antes —, então ligar o envio
+    ligava junto um vazamento de dado pessoal no log de produção: endereço do
+    cliente e, no aviso de chamado novo, o TÍTULO do chamado dentro do assunto.
+
+    Quem chama diz o que a linha deve identificar, e a regra é que seja
+    identificador INTERNO ou nome de evento: `notification <uuid>` para o
+    sininho, `account email (password reset)` para os de conta. Nunca endereço.
+
+    Não há hash de e-mail aqui de propósito. A correlação que faltaria já existe
+    por outro caminho: o `request_id` de `core/contexto.py` é `ContextVar`, e
+    `asyncio.create_task` copia o contexto — então a task do envio herda o id da
+    requisição que a originou, e ele entra no `extra` de toda linha.
+    """
+    resultado = await send_email_detalhado(to_email, subject, body, settings, html, contexto)
+    return resultado.status == EmailDeliveryStatus.success

@@ -2,6 +2,8 @@
 Schemas for dashboard statistics endpoint.
 """
 
+from datetime import datetime
+
 from pydantic import ConfigDict
 
 from app.schemas.base import AppBaseModel
@@ -19,6 +21,10 @@ class TicketStats(AppBaseModel):
     by_priority_high: int
     by_priority_medium: int
     by_priority_low: int
+    # Chamado aberto que ninguém triou. Existe como balde próprio para que
+    # crítica + alta + média + baixa + sem prioridade feche o `total` — sem ele,
+    # a distribuição por prioridade some com parte da fila.
+    by_priority_none: int = 0
 
 
 class SurveyStats(AppBaseModel):
@@ -106,7 +112,9 @@ class OldestTicketItem(AppBaseModel):
     ticket_id: str
     protocol: str
     title: str
-    priority: str
+    # Nulo enquanto não houve triagem — e é justamente entre os mais antigos
+    # sem resposta que o não-triado aparece.
+    priority: str | None
     category: str
     status: str
     age_hours: float
@@ -118,6 +126,23 @@ class ReportComparison(AppBaseModel):
     total_tickets: int
     csat_average: float | None
     sla_compliance: list[SLAComplianceItem]
+
+
+class SlaJustificationItem(AppBaseModel):
+    """Chamado resolvido fora do prazo, com o motivo que quem resolveu escreveu.
+
+    Existe porque o relatorio de SLA so tinha numero agregado: sabia-se QUANTOS
+    estouraram, nunca POR QUE. A contagem responde a auditoria; o motivo e o
+    que permite corrigir a causa.
+    """
+
+    ticket_id: str
+    protocol: str
+    title: str
+    priority: str | None
+    resolved_at: datetime | None
+    assignee_name: str | None
+    justification: str
 
 
 class ReportData(AppBaseModel):
@@ -141,6 +166,7 @@ class ReportData(AppBaseModel):
     technicians_dist: list[TechnicianDistItem] = []
     reopened_count: int = 0
     reopen_rate: float = 0.0
+    sla_justifications: list[SlaJustificationItem] = []
     comparison: ReportComparison | None = None
 
 

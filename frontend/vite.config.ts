@@ -29,7 +29,20 @@ export default defineConfig(({ mode }) => {
       },
     },
     server: {
-      port: 5173,
+      // Porta própria do HelpHS, e `strictPort` para ele MORRER em vez de
+      // escorregar.
+      //
+      // Era 5173 sem `strictPort`. Quando outro projeto ocupava a 5173, o Vite
+      // andava calado para a 5174/5175 e subia — enquanto o Playwright, cravado
+      // na 5173 com `reuseExistingServer`, abraçava o servidor do OUTRO
+      // projeto. Foi o que aconteceu: a suíte e2e do HelpHS apontando para o
+      // ChamadosHS, que respondia `<title>ChamadosHS</title>` e 404 em
+      // `/galeria.html`.
+      //
+      // A 5190 fica fora da faixa por onde o Vite escorrega (5173→5174→5175…),
+      // que é justamente onde as colisões caem.
+      port: 5190,
+      strictPort: true,
       proxy: {
         // WebSocket must be matched before the generic /api rule
         "/api/v1/ws": {
@@ -59,6 +72,12 @@ export default defineConfig(({ mode }) => {
           "src/lib/**/*.ts",
           "src/services/**/*.ts",
           "src/contexts/**/*.tsx",
+          // O changelog é o único conteúdo de src/data, e é texto que o
+          // usuário final lê dentro do app. Está aqui porque tem invariante
+          // de verdade a guardar — versão publicada não se reescreve, a
+          // ordem é decrescente, a data existe — e fora do include essas
+          // regras não apareceriam no relatório nem quando quebrassem.
+          "src/data/**/*.ts",
         ],
       },
     },

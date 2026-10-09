@@ -2,6 +2,7 @@
 Pydantic v2 schemas for Ticket endpoints.
 """
 
+import enum
 import uuid
 from datetime import datetime
 
@@ -19,7 +20,9 @@ MAX_EQUIPMENTS_PER_TICKET = 20
 class TicketCreate(AppBaseModel):
     title: str = Field(..., min_length=1, max_length=255)
     description: str = Field(..., min_length=1)
-    priority: TicketPriority = TicketPriority.medium
+    # Sem `priority`: o chamado nasce sem prioridade e quem a define é a
+    # triagem. O campo não é apenas ignorado por política — ele não existe
+    # aqui, então o cliente que monta o POST à mão não tem onde escrever.
     category: TicketCategory = TicketCategory.general
     product_id: uuid.UUID | None = None
     equipment_ids: list[uuid.UUID] = Field(
@@ -31,7 +34,9 @@ class TicketCreate(AppBaseModel):
 class TicketUpdate(AppBaseModel):
     title: str | None = Field(default=None, min_length=1, max_length=255)
     description: str | None = Field(default=None, min_length=1)
-    priority: TicketPriority | None = None
+    # Sem `priority`: prioridade tem um caminho só, o
+    # `PATCH /tickets/{id}/priority`. Por aqui ela seria gravada sem recalcular
+    # o SLA, e o chamado ficaria crítico com o prazo de quando era baixo.
     category: TicketCategory | None = None
     product_id: uuid.UUID | None = None
     # None = não mexe nos equipamentos; lista vazia = desvincula todos
@@ -56,6 +61,66 @@ class InterruptorDaIA(AppBaseModel):
 class TicketStatusUpdate(AppBaseModel):
     status: TicketStatus
     comment: str | None = Field(default=None, max_length=1000)
+    # Obrigatória quando o chamado é resolvido FORA do prazo — a regra vive
+    # na API, não aqui: só ela conhece o prazo do chamado, e um schema não
+    # tem como saber se este chamado específico estourou. Aqui o campo é
+    # opcional porque resolver dentro do prazo não exige nada.
+    sla_breach_justification: str | None = Field(default=None, max_length=2000)
+
+
+class TicketPriorityUpdate(AppBaseModel):
+    """A triagem. Só a prioridade, e ela é obrigatória.
+
+    Não aceita nulo de propósito: "sem prioridade" é o estado de quem nunca
+    foi triado, não uma escolha que alguém faz. Devolver um chamado para a
+    fila de triagem seria outra decisão, e ela não foi tomada.
+    """
+
+    priority: TicketPriority
+
+
+class DiasDeExtensao(int, enum.Enum):
+    """Os cinco prazos que se pode conceder. A lista e fechada AQUI.
+
+    Enum de inteiros, e nao `Literal[1, 3, ...]`, por um motivo medido: o
+    `Literal` de int NAO converte a string que chega numa query string, entao o
+    mesmo tipo recusaria `?days=3` no preview e aceitaria `{"days": 3}` no
+    corpo. Com o enum, uma definicao so serve aos dois -- e quem montar a
+    requisicao na unha recebe 422 antes de qualquer codigo do router rodar,
+    sem um `if dias not in (...)` para alguem esquecer de atualizar.
+    """
+
+    um = 1
+    tres = 3
+    cinco = 5
+    quinze = 15
+    trinta = 30
+
+
+class SlaExtensionRequest(AppBaseModel):
+    """Uma concessao de prazo de resolucao.
+
+    A justificativa e PUBLICA -- foi escrita para o cliente ler, e aparece na
+    Atividade dele e na notificacao. Mesmo teto das outras justificativas do
+    projeto.
+    """
+
+    days: DiasDeExtensao
+    justification: str = Field(..., min_length=1, max_length=2000)
+
+
+class SlaExtensionPreview(AppBaseModel):
+    """O que o modal mostra antes de confirmar.
+
+    Existe para a tela nao recalcular prazo: dia util, jornada e feriado sao do
+    motor, e um `add_business_days` em TypeScript seria a segunda verdade que
+    a entrega do relogio acabou de eliminar.
+    """
+
+    days: int
+    business_minutes: int
+    prazo_atual: datetime | None
+    novo_prazo: datetime | None
 
 
 class TicketAssign(AppBaseModel):
@@ -68,12 +133,41 @@ class TicketObservationUpdate(AppBaseModel):
 
 class TicketResolve(AppBaseModel):
     resolution_note: str = Field(..., min_length=1, max_length=5000)
+    # Obrigatória quando o chamado é resolvido FORA do prazo — a regra vive
+    # na API, não aqui: só ela conhece o prazo do chamado, e um schema não
+    # tem como saber se este chamado específico estourou. Aqui o campo é
+    # opcional porque resolver dentro do prazo não exige nada.
+    sla_breach_justification: str | None = Field(default=None, max_length=2000)
 
 
 class TicketReopen(AppBaseModel):
     # O motivo é obrigatório: quem for atender de novo precisa saber o que
     # continuou errado, e a nota de resolução original fica no chamado.
     reason: str = Field(..., min_length=5, max_length=2000)
+
+
+class ExpedienteInfo(AppBaseModel):
+    """O estado do relogio de SLA no SERVIDOR, para a tela nao ter calendario.
+
+    A tela precisa saber tres coisas para contar prazo sem saber o que e
+    feriado: que horas sao no servidor, se o relogio corre agora, e quando esse
+    estado muda. Com isso ela desconta um minuto por minuto enquanto `aberto` e
+    CONGELA na `proxima_virada` -- sem jornada, sem fim de semana e sem a
+    tabela de feriados do `feriados.py` duplicada em TypeScript.
+
+    O `agora` tambem tira o relogio da maquina de quem olha da conta: era
+    `Date.now()` do navegador contra um prazo do servidor, e qualquer desvio de
+    relogio aparecia como minutos a mais ou a menos no contador.
+
+    O `fuso` viaja junto porque "Vence em 24/09/2026 as 12:11" so faz sentido
+    no fuso em que a jornada e definida. Vem do motor (`FUSO_DA_JORNADA`), e
+    nao de um literal do frontend: a regra mora num lugar so.
+    """
+
+    agora: datetime
+    aberto: bool
+    proxima_virada: datetime
+    fuso: str
 
 
 class TicketEquipmentBrief(AppBaseModel):
@@ -87,6 +181,41 @@ class TicketEquipmentBrief(AppBaseModel):
     product_id: uuid.UUID | None = None
 
 
+class TicketRequesterBrief(AppBaseModel):
+    """Quem abriu o chamado, no mínimo que a tela precisa para falar com ele.
+
+    ⚠️ A lista de campos é a regra, não um começo. Entra o que serve para
+    ATENDER: nome para chamar pelo nome, empresa para situar, e-mail e telefone
+    para responder. Fora ficam CPF, CNPJ, endereço, departamento, consentimento
+    de LGPD, `api4com_extension` e qualquer dado do fornecedor de telefonia —
+    nada disso ajuda a resolver o chamado, e cada campo a mais é uma superfície
+    a mais.
+
+    `company_name` e não a relação `Company`: a empresa que o cliente informa no
+    onboarding mora em `users.company_name`, e é ela que está preenchida. O
+    vínculo `company_id` pertence à frente de grupos/CNPJ, cujo backfill nunca
+    rodou — apontar para lá mostraria "Não informada" para todo mundo.
+
+    Só aparece no chamado AVULSO. Na listagem seria uma consulta por linha, e o
+    que a lista mostra do criador já cabe no que ela tem.
+
+    ⚠️ O campo no `TicketResponse` chama-se `requester`, e NÃO `creator`. O
+    nome curto colide com `Ticket.creator`, que é um `relationship()` lazy:
+    como o response tem `from_attributes=True`, o `model_validate(ticket)` de
+    `_serialize_ticket` passaria a LER esse relacionamento e estouraria
+    `MissingGreenlet` em sessão async — em toda serialização de chamado,
+    listagem inclusive. Um caso desta suíte prende isso.
+    """
+
+    model_config = ConfigDict(from_attributes=True)
+
+    id: uuid.UUID
+    name: str
+    email: str
+    phone: str | None = None
+    company_name: str | None = None
+
+
 class TicketResponse(AppBaseModel):
     model_config = ConfigDict(from_attributes=True, str_strip_whitespace=True)
 
@@ -97,7 +226,9 @@ class TicketResponse(AppBaseModel):
     status: TicketStatus
     # A tela precisa saber o estado para desenhar o botão certo.
     ai_enabled: bool = True
-    priority: TicketPriority
+    # Nulo enquanto ninguém triou. A tela mostra "Sem prioridade", e não um
+    # valor de mentira.
+    priority: TicketPriority | None
     category: TicketCategory
     creator_id: uuid.UUID
     assignee_id: uuid.UUID | None
@@ -111,6 +242,45 @@ class TicketResponse(AppBaseModel):
     # deixa o front parar o relógio de resposta em vez de adivinhar pela flag
     # de violação, que só é recalculada em escrita e por isso é velha.
     sla_first_response: datetime | None = None
+    # ── O que a tela precisa para contar prazo em horas ÚTEIS ──────────
+    #
+    # `*_due_at` acima continua sendo o prazo CARIMBADO, intocado. Os dois
+    # campos abaixo sao o prazo EFETIVO -- com a pausa acumulada somada --, que
+    # e o instante que o `check_breaches` de fato compara. A tela mostra este,
+    # e por isso nao pode mais discordar da regra de violacao.
+    sla_response_vence_em: datetime | None = None
+    sla_resolve_vence_em: datetime | None = None
+    # Minutos UTEIS que faltam no instante em que a resposta foi montada. Nao e
+    # `vence_em - agora`: essa subtracao corrida foi o defeito que motivou tudo
+    # isto, porque contava a noite e o fim de semana como prazo correndo.
+    sla_response_restante_min: int | None = None
+    sla_resolve_restante_min: int | None = None
+    # O tamanho do prazo em minutos UTEIS, da abertura ate o vencimento
+    # efetivo. E o denominador da barra de progresso da lista, que hoje calcula
+    # `(agora - abertura) / (vence - abertura)` em tempo corrido e por isso
+    # enche sozinha durante a noite e o fim de semana.
+    sla_response_total_min: int | None = None
+    sla_resolve_total_min: int | None = None
+    # O limiar de alerta da PRIORIDADE ATUAL, em percentual inteiro (1..100).
+    # `None` quando o chamado não tem prioridade, ou quando não há `SLAConfig`
+    # ativa para o nível dele.
+    #
+    # Sai daqui porque a barra do cartão precisa dele para decidir cor: até
+    # 25/09/2026 ela usava `pct >= 80` e `pct >= 60` fixos no código, ao lado
+    # deste campo configurável que ninguém lia. Com o aviso de SLA por e-mail
+    # respeitando a configuração e a barra não, o e-mail sairia em 70% enquanto
+    # a tela só ficaria vermelha em 80% — duas réguas para a mesma pergunta.
+    #
+    # Resolvido pela PRIORIDADE, não por `sla_config_id`: aquela coluna é
+    # escrita só por `apply_sla_config` e pode ficar apontando para a config de
+    # um nível anterior.
+    sla_warning_threshold: int | None = None
+    # Total ja concedido em extensoes, em minutos uteis. A lateral mostra
+    # "SLA estendido - +N dias uteis"; o cliente ve tambem.
+    sla_resolve_extension_total_min: int = 0
+    # So no chamado avulso. Na LISTAGEM ele vem uma vez no topo, e nao repetido
+    # em cada item: e estado do servidor, nao do chamado.
+    expediente: ExpedienteInfo | None = None
     closed_at: datetime | None
     resolved_at: datetime | None = None
     auto_closed: bool = False
@@ -133,11 +303,38 @@ class TicketResponse(AppBaseModel):
     tags: list[TagResponse] = []
 
 
+class TicketDetailResponse(TicketResponse):
+    """O chamado avulso: tudo o que a listagem tem, mais quem abriu.
+
+    ⚠️ Existe como modelo SEPARADO, e não como campo opcional no
+    `TicketResponse`, por duas razões medidas:
+
+    1. `_serialize_ticket` faz `TicketResponse.model_validate(ticket)` com
+       `from_attributes=True`. **Todo campo daquele modelo é um atributo lido
+       do objeto do ORM.** Um campo que o `Ticket` não tem só funciona por
+       acidente (o `AttributeError` vira default) — e 26 testes com dublê
+       solto estouraram na hora em que se tentou.
+    2. As rotas de mutação (`PATCH /tickets/{id}`, resolve, reopen, status…)
+       devolvem `TicketResponse` e não têm o solicitante. Se o campo morasse
+       lá, a tela — que faz `setTicket(await mutacao())` em uma dúzia de
+       lugares — APAGARIA o bloco do solicitante a cada ação.
+
+    Herdar é o que mantém um contrato só: o detalhe é o chamado mais uma
+    coisa, não outro chamado.
+    """
+
+    requester: TicketRequesterBrief | None = None
+
+
 class TicketListResponse(AppBaseModel):
     items: list[TicketResponse]
     total: int
     limit: int
     offset: int
+    # Uma vez so, aqui: os itens vem com `expediente = None`. O relogio e o
+    # mesmo para os cinquenta chamados da pagina, e repeti-lo em cada um seria
+    # carregar cinquenta copias do mesmo instante.
+    expediente: ExpedienteInfo | None = None
 
 
 class TicketHistoryResponse(AppBaseModel):

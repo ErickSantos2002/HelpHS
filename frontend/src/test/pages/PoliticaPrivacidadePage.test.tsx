@@ -2,8 +2,8 @@
 // Mesma razão do markdown.test.ts: o `renderMarkdown` passa por DOMPurify, que
 // sob o happy-dom padrão do projeto não devolve HTML utilizável. Sem jsdom a
 // página renderiza vazia e os testes de conteúdo não provariam nada.
-import { render, screen } from "@testing-library/react";
-import { MemoryRouter } from "react-router-dom";
+import { fireEvent, render, screen } from "@testing-library/react";
+import { MemoryRouter, Route, Routes } from "react-router-dom";
 import { afterEach, describe, expect, it, vi } from "vitest";
 
 import { contemMarcadorPendente } from "../../pages/legal/marcadorPendente";
@@ -29,6 +29,11 @@ describe("contemMarcadorPendente", () => {
     "Encarregado (DPO): [nome do Encarregado]",
     "Contato: [e-mail do Encarregado]",
     "Endereço: [endereço completo da sede – rua, número, cidade/UF, CEP]",
+    // Os dois que sobraram na versão C4 (24/09). O segundo passava batido: a
+    // lista de palavras não tinha "país", e a página perdia o aviso de
+    // rascunho com uma lacuna ainda aberta.
+    "adequação da ANPD. [definir o mecanismo do art. 33 da LGPD adotado para esta transferência]",
+    "infraestrutura localizada em [país do data center da VPS — conferir no hPanel].",
   ])("reconhece o marcador em %s", (trecho) => {
     expect(contemMarcadorPendente(trecho)).toBe(true);
   });
@@ -109,5 +114,55 @@ describe("PoliticaPrivacidadePage", () => {
     expect(screen.getByRole("table")).toBeInTheDocument();
     expect(screen.getByRole("cell", { name: "Registro de aceite" })).
       toBeInTheDocument();
+  });
+});
+
+/**
+ * O "Voltar" da página da política.
+ *
+ * Desde 24/09 todo link para `/privacidade` abre em ABA NOVA (cadastro, login e
+ * rodapé da barra lateral). Numa aba nova não existe página anterior, e o
+ * `navigate(-1)` de antes não fazia nada — o botão parecia quebrado.
+ */
+describe("PoliticaPrivacidadePage — Voltar", () => {
+  async function monta(entradas: string[]) {
+    const { default: Pagina } = await import(
+      "../../pages/legal/PoliticaPrivacidadePage"
+    );
+    render(
+      <MemoryRouter initialEntries={entradas} initialIndex={entradas.length - 1}>
+        <Routes>
+          <Route path="/" element={<div>início do sistema</div>} />
+          <Route path="/tickets" element={<div>lista de chamados</div>} />
+          <Route path="/privacidade" element={<Pagina />} />
+        </Routes>
+      </MemoryRouter>,
+    );
+  }
+
+  afterEach(() => {
+    vi.restoreAllMocks();
+  });
+
+  it("aberta em aba nova, fecha a aba e não fica parada", async () => {
+    const fechar = vi.spyOn(window, "close").mockImplementation(() => {});
+    await monta(["/privacidade"]);
+
+    fireEvent.click(screen.getByRole("button", { name: "Voltar" }));
+
+    expect(fechar).toHaveBeenCalled();
+    // O navegador pode recusar fechar a aba: aí a pessoa vai para o início,
+    // em vez de clicar num botão que não faz nada.
+    expect(await screen.findByText("início do sistema")).toBeInTheDocument();
+  });
+
+  it("com página anterior no sistema, volta para ela", async () => {
+    const fechar = vi.spyOn(window, "close").mockImplementation(() => {});
+    await monta(["/tickets", "/privacidade"]);
+
+    fireEvent.click(screen.getByRole("button", { name: "Voltar" }));
+
+    expect(await screen.findByText("lista de chamados")).toBeInTheDocument();
+    expect(fechar).not.toHaveBeenCalled();
   });
 });

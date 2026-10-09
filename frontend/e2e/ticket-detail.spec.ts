@@ -18,8 +18,14 @@ test.describe("Ticket Detail — Interações", () => {
     await page
       .getByPlaceholder(/descreva o problema com detalhes/i)
       .fill("Descrição para teste de detalhe do chamado.");
-    await page.locator("select").first().selectOption("medium");
-    await page.locator("select").nth(1).selectOption("software");
+    // Como em `tickets.spec.ts`: a prioridade NÃO se escolhe em /tickets/new
+    // desde 22/09/2026 — o chamado nasce sem ela e quem a define é a triagem.
+    // A Categoria continua sendo ficha de rádio (`RadioCards`), e o clique vai
+    // no rótulo visível, dentro do grupo nomeado pelo `fieldset`/`legend`.
+    await page
+      .getByRole("group", { name: "Categoria" })
+      .getByText("Software", { exact: true })
+      .click();
 
     await page.getByRole("button", { name: /revisar e enviar/i }).click();
     await page.getByRole("button", { name: /confirmar e enviar/i }).click();
@@ -56,8 +62,15 @@ test.describe("Ticket Detail — Interações", () => {
     ).toBeVisible({ timeout: 5_000 });
 
     // Select first available transition (in_progress for an open ticket)
-    const statusSelect = page.getByLabel("Novo status");
-    await statusSelect.selectOption({ index: 1 });
+    //
+    // O campo virou `SelectMenu`: abrir o painel e clicar na linha. Continua
+    // pela POSIÇÃO, como antes — o caso não quer um status específico, quer a
+    // primeira transição que o chamado oferece, e cravar o rótulo o amarraria
+    // à ordem de `TICKET_TRANSITIONS`. A linha 0 é o "Selecione" do
+    // `placeholder`, igual à primeira `<option>` do campo nativo.
+    const statusSelect = page.getByRole("combobox", { name: "Novo status" });
+    await statusSelect.click();
+    await page.getByRole("listbox").getByRole("option").nth(1).click();
 
     await page.getByRole("button", { name: "Confirmar" }).click();
 

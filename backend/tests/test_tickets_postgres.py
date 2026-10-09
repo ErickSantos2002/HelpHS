@@ -35,6 +35,7 @@ from datetime import UTC, datetime
 
 import pytest
 import pytest_asyncio
+from sqlalchemy import text
 from sqlalchemy.ext.asyncio import async_sessionmaker, create_async_engine
 
 from app.models.models import (
@@ -97,6 +98,15 @@ def url_do_banco():
     async def _monta() -> None:
         motor = create_async_engine(url)
         async with motor.begin() as conn:
+            # Contra Postgres o schema sobe inteiro (`tabelas` é None acima), e
+            # inteiro inclui `helo_chunks.embedding`, que é `vector(1024)`. Sem
+            # a extensão o create_all morre em `type "vector" does not exist`,
+            # levando junto testes que não têm nada com a Helô. Em produção
+            # quem cria é a migration; aqui não roda migration nenhuma.
+            # No SQLite não há extensão nem coluna vetorial — o subconjunto
+            # `_TABELAS_NO_SQLITE` não inclui as tabelas da Helô.
+            if not no_sqlite:
+                await conn.execute(text("CREATE EXTENSION IF NOT EXISTS vector"))
             await conn.run_sync(Base.metadata.create_all, tables=tabelas)
         await motor.dispose()
 
@@ -132,6 +142,9 @@ async def _cliente_com_aparelho(db) -> tuple[User, Equipment]:
         password="x",
         role=UserRole.client,
         status=UserStatus.active,
+        # Cliente ativo precisa de telefone desde a Fase 1C
+        # (ck_users_cliente_ativo_tem_telefone).
+        phone="+5581999999999",
         lgpd_consent=True,
         email_verified=True,
         onboarding_completed=True,
@@ -275,3 +288,74 @@ async def test_o_payload_da_fala_dela_leva_remetente_nulo(db):
     assert payload["sender_id"] is None
     assert payload["is_ai"] is True
     assert payload["sender_name"] == ""
+
+
+# ── A ordem da fila ───────────────────────────────────────────
+
+
+@pytest.mark.asyncio
+async def test_sem_prioridade_vem_primeiro_na_ordenacao(db):
+    """`sort_by=priority` põe o não triado ANTES da crítica.
+
+    Contra banco de verdade porque a ordem é SQL: o `case()` do endpoint é
+    quem decide, e mock de sessão não executa `ORDER BY`. O nulo não casa com
+    nenhum literal de enum — `NULL = 'critical'` é `NULL`, não `false` —,
+    então sem a cláusula `is_(None)` ele cairia no `else_` e iria para o fim.
+    """
+    from app.routers.tickets import list_tickets
+
+    cliente, _ = await _cliente_com_aparelho(db)
+    tecnico = User(
+        id=uuid.uuid4(),
+        name="Ana Técnica",
+        email=f"{uuid.uuid4().hex[:8]}@test.com",
+        password="x",
+        role=UserRole.technician,
+        status=UserStatus.active,
+        lgpd_consent=True,
+        email_verified=True,
+        onboarding_completed=True,
+        created_at=_AGORA,
+        updated_at=_AGORA,
+    )
+    db.add(tecnico)
+    await db.flush()
+
+    # Inseridos FORA da ordem esperada, para que o resultado não possa vir de
+    # ordem de inserção.
+    for rotulo, prioridade in (
+        ("baixa", TicketPriority.low),
+        ("critica", TicketPriority.critical),
+        ("sem", None),
+        ("media", TicketPriority.medium),
+        ("alta", TicketPriority.high),
+    ):
+        chamado = _chamado_novo(cliente)
+        chamado.title = rotulo
+        chamado.priority = prioridade
+        db.add(chamado)
+    await db.flush()
+
+    resposta = await list_tickets(
+        db=db,
+        actor=tecnico,
+        offset=0,
+        limit=20,
+        status_filter=None,
+        priority=None,
+        category=None,
+        assignee_id=None,
+        creator_id=None,
+        tag_id=None,
+        search=None,
+        sort_by="priority",
+        sort_dir="asc",
+    )
+
+    assert [t.title for t in resposta.items] == [
+        "sem",
+        "critica",
+        "alta",
+        "media",
+        "baixa",
+    ]

@@ -1,0 +1,245 @@
+"""
+Memória das tentativas de ligação. Não fala com o fornecedor.
+
+Este módulo escreve e lê `ticket_calls`, e **não importa `httpx` nem
+`api4com.py`**. A separação é a mesma que a Helô já usa entre
+`helo_embedding.py` (o cliente do serviço) e `helo.py` (a regra): transporte de
+um lado, domínio do outro. Aqui o domínio é ainda menor — é só estado.
+
+Quem orquestra `banco → API4COM → banco` é a Fase 2C, quando existir endpoint.
+Enquanto isso, cada função abaixo é testável sem rede nenhuma, e é exatamente
+por isso que elas existem antes da orquestração: a máquina de estados fica
+provada antes de haver efeito externo para depurar junto.
+
+O ciclo
+-------
+Uma tentativa nasce ``pending`` — a linha existe **antes** de a requisição
+sair. Não é zelo de contabilidade: se o processo morrer entre o `POST` e a
+resposta, sem a linha prévia não haveria sequer registro de que alguém tentou.
+
+Dali ela vai para exatamente um destino, e cada um responde à mesma pergunta
+que o `api4com.py` responde — **a chamada saiu?**
+
+- ``confirmed``     HTTP 200 com `id` legível. Saiu, e temos o identificador.
+- ``rejected``      4xx. O fornecedor recusou a requisição.
+- ``unavailable``   não houve comunicação HTTP útil.
+- ``indeterminate`` ⚠️ pode ter tocado o telefone de alguém.
+
+`indeterminate` é o estado que justifica a tabela inteira. Ele é o que a
+reconciliação da 2D vai procurar, e o que impede uma segunda tentativa às
+cegas.
+
+O que NÃO entra aqui
+--------------------
+Telefone, `caller`, `extension`, corpo de requisição, corpo de resposta,
+`message` do fornecedor, metadata, URL de gravação. Nenhuma função aceita esses
+dados, então não há como persistí-los por descuido — a ausência de parâmetro é
+a garantia, não a disciplina de quem chamar.
+"""
+
+from __future__ import annotations
+
+import uuid
+from datetime import UTC, datetime
+from enum import StrEnum
+
+from sqlalchemy import select, update
+from sqlalchemy.ext.asyncio import AsyncSession
+
+from app.models.models import CallCreationStatus, TicketCall
+
+
+async def registra_tentativa(
+    db: AsyncSession,
+    *,
+    ticket_id: uuid.UUID,
+    initiated_by_id: uuid.UUID | None,
+) -> TicketCall:
+    """Cria a linha `pending`, ANTES de qualquer conversa com o fornecedor.
+
+    Devolve a tentativa já com `id` atribuído — `TicketCall.id` tem default do
+    lado do Python (`uuid.uuid4`), então o UUID existe desde a construção do
+    objeto, e não depende de o banco responder.
+
+    Desde a Fase 2D.2 esse UUID **é mandado** no `metadata` do `POST /calls`,
+    como `ticket_call_id`, e é a única âncora de reconciliação que temos: medimos
+    que o `id` do `POST` não é o `id` que o `GET /calls` devolve depois. Quem
+    monta o payload é `services/api4com.py`; aqui só nasce o identificador.
+    """
+    tentativa = TicketCall(
+        ticket_id=ticket_id,
+        initiated_by_id=initiated_by_id,
+        creation_status=CallCreationStatus.pending.value,
+    )
+    db.add(tentativa)
+    await db.flush()
+    return tentativa
+
+
+async def marca_em_despacho(db: AsyncSession, tentativa: TicketCall) -> TicketCall:
+    """`pending → dispatching`: a fronteira do efeito externo.
+
+    ⚠️ Quem chamar isto precisa **COMMITAR antes** de emitir o `POST /calls`.
+    Não é detalhe de estilo: o estado só protege se estiver durável no banco
+    quando o processo morrer. Gravado e não commitado, some no rollback e a
+    linha volta a ser um `pending` ambíguo — exatamente o problema que este
+    estado existe para resolver.
+
+    Na Fase 2C.2 esta função existe e é testada, mas NÃO é exercida pelo
+    orquestrador: aquela fase termina no `pending`, sem tocar no fornecedor. A
+    chamada daqui entra na fase seguinte, na linha imediatamente anterior ao
+    `create_call`.
+    """
+    tentativa.creation_status = CallCreationStatus.dispatching.value
+    await db.flush()
+    return tentativa
+
+
+async def confirma(
+    db: AsyncSession,
+    tentativa: TicketCall,
+    *,
+    provider_call_id: str,
+    provider_http_status: int,
+) -> TicketCall:
+    """A chamada existe do lado de lá, e este é o identificador dela.
+
+    `provider_call_id` é gravado **exatamente como chegou**: sem `strip`, sem
+    caixa alterada, sem validação de formato. O fornecedor documenta o tipo
+    como `string` e mostra dois formatos diferentes para o mesmo campo; quem
+    normalizasse aqui inventaria um terceiro.
+    """
+    tentativa.provider_call_id = provider_call_id
+    tentativa.provider_http_status = provider_http_status
+    tentativa.creation_status = CallCreationStatus.confirmed.value
+    await db.flush()
+    return tentativa
+
+
+async def marca_recusada(
+    db: AsyncSession,
+    tentativa: TicketCall,
+    *,
+    provider_http_status: int,
+) -> TicketCall:
+    """4xx: o fornecedor respondeu recusando. O status é obrigatório aqui.
+
+    É a única transição de falha em que sabemos o número — e saber que foi 401
+    e não 422 é a diferença entre "o token caiu" e "o número não serve".
+    """
+    tentativa.provider_http_status = provider_http_status
+    tentativa.creation_status = CallCreationStatus.rejected.value
+    await db.flush()
+    return tentativa
+
+
+async def marca_indisponivel(db: AsyncSession, tentativa: TicketCall) -> TicketCall:
+    """Não houve comunicação HTTP útil.
+
+    **Não recebe status HTTP**, e a assinatura é a garantia: não houve resposta,
+    então não há número para gravar. Inventar um zero ou um 503 aqui faria o
+    banco afirmar que o fornecedor respondeu algo.
+    """
+    tentativa.creation_status = CallCreationStatus.unavailable.value
+    await db.flush()
+    return tentativa
+
+
+async def marca_indeterminada(
+    db: AsyncSession,
+    tentativa: TicketCall,
+    *,
+    provider_http_status: int | None = None,
+) -> TicketCall:
+    """⚠️ Pode ter tocado o telefone de alguém, e não sabemos.
+
+    `provider_http_status` é opcional porque o indeterminado chega por dois
+    caminhos: com resposta (5xx, 3xx, 200 sem `id`) e sem resposta nenhuma
+    (`ReadTimeout`). A ausência do número é informação, não lacuna.
+
+    `provider_call_id` **não é tocado** de propósito: continua nulo, e é essa
+    ausência que a reconciliação vai procurar.
+    """
+    if provider_http_status is not None:
+        tentativa.provider_http_status = provider_http_status
+    tentativa.creation_status = CallCreationStatus.indeterminate.value
+    await db.flush()
+    return tentativa
+
+
+# ═══════════════════════════════════════════════════════════════
+# O evento de encerramento
+# ═══════════════════════════════════════════════════════════════
+
+
+class ResultadoDoEncerramento(StrEnum):
+    """O que aconteceu com o evento. Três desfechos, e nenhum é erro de verdade."""
+
+    #: Primeira entrega: os campos foram gravados.
+    registrado = "registrado"
+    #: Já havia evento nesta tentativa. Nada foi tocado.
+    duplicado = "duplicado"
+    #: Não existe `ticket_call` com esse id.
+    inexistente = "inexistente"
+
+
+async def registra_encerramento(
+    db: AsyncSession,
+    *,
+    ticket_call_id: uuid.UUID,
+    duration_seconds: int | None,
+    hangup_cause: str | None,
+    recording_available: bool | None,
+) -> ResultadoDoEncerramento:
+    """Grava o desfecho da chamada. A PRIMEIRA entrega vence, sempre.
+
+    A idempotência não é verificada antes — ela é **imposta pelo banco**, na
+    cláusula do próprio `UPDATE`:
+
+        UPDATE ticket_calls SET ... WHERE id = :id AND hangup_event_received_at IS NULL
+
+    ⚠️ Essa condição é a trava inteira, e trocá-la por um `SELECT` seguido de um
+    `if` reabriria a corrida que ela fecha: duas entregas simultâneas leriam
+    `NULL` as duas, e as duas gravariam. Com a condição dentro do `UPDATE`, o
+    PostgreSQL serializa as escritas na mesma linha e a segunda encontra
+    `hangup_event_received_at` já preenchido — `rowcount` volta 0 sem ter tocado
+    em nada. Uma instrução, sem lock de aplicação, sem `SKIP LOCKED`, sem tabela
+    de eventos. O `email_outbox` precisou daquele arsenal porque tem fila com
+    vários workers; aqui há um `UPDATE` condicional.
+
+    ⚠️ `rowcount == 0` NÃO significa duplicado. Significa "não atualizei", e há
+    duas causas bem diferentes: a linha já tinha evento, ou a linha não existe.
+    Responder a mesma coisa para as duas esconderia um erro de roteamento da
+    integração — evento de outro sistema chegando aqui seria contado como
+    duplicata benigna. Por isso a função confere a existência depois, e só
+    depois, quando já se sabe que nada foi escrito.
+
+    O horário gravado é o NOSSO (`datetime.now(UTC)`), e não o do fornecedor. Ver
+    o comentário da coluna: o relógio dele divergiu ~3h de forma sistemática, e
+    esta coluna é trava de idempotência, não registro de quando a ligação caiu.
+    """
+    agora = datetime.now(UTC)
+
+    resultado = await db.execute(
+        update(TicketCall)
+        .where(
+            TicketCall.id == ticket_call_id,
+            TicketCall.hangup_event_received_at.is_(None),
+        )
+        .values(
+            duration_seconds=duration_seconds,
+            hangup_cause=hangup_cause,
+            recording_available=recording_available,
+            hangup_event_received_at=agora,
+        )
+    )
+
+    if resultado.rowcount:
+        await db.flush()
+        return ResultadoDoEncerramento.registrado
+
+    # Nada foi atualizado. Agora, e só agora, vale perguntar por quê.
+    existe = await db.scalar(select(TicketCall.id).where(TicketCall.id == ticket_call_id))
+    if existe is None:
+        return ResultadoDoEncerramento.inexistente
+    return ResultadoDoEncerramento.duplicado

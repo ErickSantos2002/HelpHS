@@ -2,7 +2,11 @@
 set -e
 
 echo "Running Alembic migrations..."
-alembic upgrade head
+# A liberacao da trava de alvo remoto (app/utils/migrations.py). Aqui dentro o
+# banco remoto E o alvo pretendido -- e este e o unico lugar em que isso vale.
+# Fora do conteiner, quem roda alembic aponta para onde o .env da arvore dele
+# apontar, e uma dessas arvores aponta para producao.
+ALEMBIC_ALVO_REMOTO_LIBERADO=1 alembic upgrade head
 echo "Migrations complete."
 
 echo "Running database seeds..."

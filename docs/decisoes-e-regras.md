@@ -22,6 +22,122 @@ Requisitos (RN-013) sempre disse 08h–17h, e o cliente confirmou 9h/dia em
 
 Feriados não são modelados nesta versão — só fins de semana.
 
+### Quando o prazo é carimbado (22/09/2026)
+
+**O chamado nasce sem prioridade e, portanto, sem prazo.** Quem carimba os dois
+prazos é a triagem — técnico ou administrador, pelo
+`PATCH /tickets/{id}/priority`. Até lá o chamado não tem `sla_response_due_at`
+nem `sla_resolve_due_at`, não mostra relógio na tela e fica **fora do
+denominador** da conformidade de SLA. Ele continua contando no total de
+chamados, num balde próprio ("Sem prioridade").
+
+**O prazo conta da ABERTURA, não da triagem.** `apply_sla_config` recebe
+`ticket.created_at`, e não o instante do clique: o RN-013 diz que o SLA conta
+da abertura até a resolução, e classificar não é recomeçar. A consequência foi
+decidida com ela à vista — **triagem demorada entrega um chamado que já nasce
+vencido**, e é assim que a demora aparece na conformidade em vez de sumir.
+
+Duas exceções, as duas pelo mesmo princípio de não desfazer conclusão alheia:
+
+- **Resposta já dada não vira violação retroativa.** `check_breaches` só olha o
+  prazo de resposta enquanto `sla_first_response` é nulo. Quem respondeu antes
+  de o prazo existir não passa a dever resposta.
+- **Chamado encerrado não tem o prazo recalculado.** Corrigir a prioridade de
+  um chamado resolvido, fechado ou cancelado grava o campo e o histórico, e
+  deixa os prazos como estão — uma justificativa de violação já escrita se
+  apoia neles.
+
+**Na ordenação por prioridade, o não triado vem PRIMEIRO** — sem prioridade →
+crítica → alta → média → baixa. Vale no `sort_by=priority` da API e no quadro
+de chamados, com a mesma régua. O motivo é o prazo: ele corre desde a abertura,
+então o chamado que espera triagem no fim da fila fica escondido justamente
+enquanto o relógio anda. É ordem operacional — "sem prioridade" continua não
+sendo um nível, e continua fora do denominador da conformidade. Prioridade
+**desconhecida** (valor que o banco tenha e o código não conheça) vai para o
+fim, não para o começo.
+
+O desenho completo, com as cinco decisões aprovadas, está em
+`docs/superpowers/specs/2026-09-22-prioridade-definida-na-triagem-design.md`.
+
+### O contador da tela conta HORAS ÚTEIS (23/09/2026)
+
+**O prazo mostrado no chip e na barra do cartão é tempo ÚTIL restante**, não a
+diferença entre o relógio e o vencimento. Um prazo de 12h úteis carimbado às
+09:11 mostra `12h 0m úteis`, e não as 27 horas corridas até 12:11 do dia
+seguinte.
+
+O contador **congela fora do expediente** — 17:00 às 08:00, fim de semana e
+feriado — e volta a andar quando a jornada seguinte começa.
+
+**O frontend não tem calendário.** O backend manda os minutos úteis restantes
+(`business_minutes_between`), o prazo efetivo e o estado do expediente
+(`estado_do_expediente`), e a tela só desconta o tempo que passa. Jornada, fim
+de semana e feriado têm uma fonte só: `backend/app/utils/sla.py`. O fuso em que
+o vencimento é exibido também viaja no contrato (`FUSO_DA_JORNADA`), para não
+existir literal de fuso no frontend.
+
+O prazo que a tela mostra é o **efetivo** (`prazo_efetivo` = carimbado + pausa
+acumulada) — o mesmo que `check_breaches` compara. Antes o chip usava o prazo
+cru e, num chamado pausado por três horas, escrevia "Vencido" três horas antes
+de o motor concordar.
+
+### Estender o prazo de resolução (23/09/2026)
+
+**Técnico e administrador podem prorrogar o prazo de RESOLUÇÃO** em 1, 3, 5, 15
+ou 30 **dias úteis**, com justificativa obrigatória que o cliente lê. O SLA de
+**resposta** não é afetado.
+
+Regras que valem a pena estar aqui:
+
+- **O prazo original nunca é sobrescrito.** `sla_resolve_due_at` continua sendo
+  o que a prioridade carimbou; o que cresce é `sla_resolve_extension_total_min`,
+  um acumulador de minutos úteis. Guardar o acumulado — e não um prazo pronto —
+  é o que faz +3 e depois +1 valerem exatamente +4, e o que faz a extensão
+  sobreviver a uma troca de prioridade, que recarimba só a base.
+- **Só antes de vencer.** A recusa compara `now` com o prazo efetivo do motor,
+  e **não** com `sla_resolve_breach` — a flag só é recalculada em escrita, e um
+  chamado vencido e intocado chega com ela falsa. A extensão serve para evitar
+  o atraso, não para desfazê-lo.
+- **Prorrogar não apaga violação já marcada.** O que aconteceu, aconteceu.
+- **Reabrir zera a extensão do ciclo novo**, e não apaga os registros do ciclo
+  anterior: o histórico continua mostrando que houve prorrogação antes.
+- Cada concessão é uma linha em `ticket_sla_extensions`, **append-only pela
+  regra de negócio**.
+
+### ⚠️ O painel passou a medir o MESMO prazo do chamado (23/09/2026)
+
+Até aqui o painel e os relatórios decidiam violação em SQL comparando a coluna
+crua `sla_resolve_due_at` contra `now()`. Isso **ignorava a pausa acumulada**,
+então um chamado pausado contava violação no painel que o chamado não contava
+na tela. Ninguém tinha medido.
+
+Passou a existir `sla_resolve_effective_due_at` — o prazo efetivo
+**materializado**, escrito só por `atualiza_prazo_efetivo` e igual ao que
+`prazo_efetivo_de_resolucao` devolve. O SQL compara essa coluna.
+
+**A conformidade mudou no deploy por causa disso**, inclusive para chamados que
+só tiveram pausa e nunca extensão. Foi decisão consciente: a alternativa era
+manter duas definições de prazo, ou deixar um chamado prorrogado aparecer "no
+prazo" na tela e "violado" no relatório.
+
+A materialização é possível porque o prazo efetivo é função pura de três campos
+**persistidos** — prazo base, pausa acumulada e extensão acumulada. A pausa
+**em curso** (`sla_paused_at`) não participa, porque o motor nunca a
+considerou. Se isso mudar um dia, a materialização deixa de ser possível — há
+teste que falha se alguém tentar.
+
+### ⚠️ Dívida conhecida: a pausa é tempo corrido num prazo útil
+
+`sla_total_paused_ms` acumula tempo **corrido** e é somado a um prazo calculado
+em horas **úteis**. Uma pausa das 16:00 às 09:00 acrescenta 17 horas a um prazo
+que só perdeu 1 hora de atendimento — o chamado ganha folga muito maior do que
+a pausa custou.
+
+Registrado em 23/09/2026 e **deixado de propósito**: corrigir muda vencimento e
+indicador de SLA, e por isso é frente própria, com desenho antes do código. Até
+lá, tela, motor **e painel** usam a mesma conta — a de hoje, torta e igual nos
+três.
+
 ### O que conta como primeira resposta
 
 **A primeira resposta é a primeira fala dirigida ao cliente por alguém que não
@@ -44,6 +160,18 @@ alguém falando com o cliente. Se o atendimento aconteceu por telefone, a fala
 precisa virar mensagem no chamado de qualquer forma — para o indicador e para
 o próximo técnico que pegar o caso.
 
+**A fala da Helô conta** — decisão do cliente em 28/08/2026. Quando ela
+responde, o atendimento começou de fato, e dizer "aguardando primeira resposta"
+a quem acabou de ser respondido é o indicador mentindo para o outro lado. A
+saudação dela carimba `sla_first_response` no mesmo instante em que o chamado
+nasce.
+
+O desenho original dizia o contrário, e o motivo continua verdadeiro — está
+registrado em `docs/superpowers/specs/2026-08-11-helo-atendimento-ia-design.md`
+junto da reversão. Mensagem automática de sistema (`is_system`) segue sem
+carimbar: mudança de status anunciada no chat não é alguém falando com o
+cliente.
+
 Até 20/08/2026 a regra era outra, e media coisa diferente do que o nome dizia:
 o carimbo acontecia quando o chamado **saía de "Aberto"**. Como o mapa de
 transições só permite `open → in_progress` e `open → cancelled`, "primeira
@@ -61,6 +189,14 @@ avaliação de prazo, e `check_breaches` só olha o prazo enquanto
 com `sla_response_breach = False`. Hoje `register_first_response`
 (`app/utils/sla.py`) avalia a violação antes de carimbar, e é o único ponto do
 sistema que grava esse campo.
+
+> ⚠️ **Com a Helô ligada, este indicador tende a 100%.** Todo chamado passa a
+> ter primeira resposta em segundos, porque ela responde na abertura. O número
+> deixa de medir a equipe e passa a medir o robô, que é sempre rápido — a
+> consequência foi dita antes da decisão e aceita com ela. Quem quiser saber
+> quanto o cliente esperou por um **humano** precisa de uma coluna nova: não dá
+> para extrair essa informação desta, porque o carimbo é um só e já foi usado.
+> A flag `HELO_ENABLED` desliga a Helô, e com ela o indicador volta ao que era.
 
 > ⚠️ **Os números de primeira resposta mudaram a partir da v1.8.0.** O card de
 > violação sobe e o tempo médio sobe — não porque o atendimento piorou, mas
@@ -189,6 +325,348 @@ rotina.
 O fechamento automático fica no histórico **sem autor** (`user_id` nulo,
 exibido como "Sistema"). Apontá-lo para um administrador qualquer registraria
 uma ação que ninguém praticou.
+
+## Política de notificações
+
+Registrado em **24/09/2026** (Fase 1 da frente de notificações).
+
+Dois canais, e eles **não** são simétricos: o sininho é barato e chega a quem
+está dentro do sistema; o e-mail alcança quem não está, e por isso é o que gera
+ruído quando sobra. Toda a política abaixo é a consequência disso.
+
+### Quem recebe o quê
+
+| Evento | Cliente autor | Técnico atribuído | Equipe inteira | E-mail |
+|---|---|---|---|---|
+| **Chamado aberto** | 🔔 sininho | — | 🔔 **sininho** | ✉️ **autor e equipe** |
+| Triagem / escalada da Helô | — | — | 🔔 sininho | ❌ |
+| Nova mensagem no chat | 🔔 | 🔔 | — | ❌ |
+| Atribuição | — | 🔔 | — | ❌ (staff) |
+| Mudança de status | 🔔 | — | — | ✉️ cliente |
+| Resolução | 🔔 | — | — | ✉️ cliente |
+| Reabertura | 🔔 | 🔔 | — | ✉️ cliente · ❌ staff |
+| Extensão de prazo | 🔔 | — | — | ✉️ cliente |
+| Cancelamento | 🔔 | — | — | ✉️ cliente |
+| Fechamento automático | 🔔 | — | — | ✉️ cliente |
+| Pesquisa de satisfação | 🔔 | — | — | ❌ (só in-app) |
+
+**Só o chamado novo mudou de audiência nesta fase.** Todos os outros eventos
+continuam alcançando exatamente quem alcançavam.
+
+### A audiência operacional tem uma definição só
+
+`audiencia_operacional()` em `app/services/notifications.py`:
+
+```
+role IN (admin, technician) AND status == active
+```
+
+Ela nasceu inline no `_avisa_equipe_da_helo`, que era o único lugar do sistema
+que respondia "quem é a equipe". Com o chamado novo avisando a equipe também,
+aquela consulta viraria a segunda — e duas consultas com a mesma intenção
+divergem no primeiro técnico desativado, sem nada avisando.
+
+**`status == active`, e não `!= inactive`.** Existe um terceiro valor,
+`anonymized`, que é conta apagada pela LGPD: o e-mail dela não é mais de
+ninguém, e a comparação por desigualdade a deixaria entrar.
+
+O filtro é uma cláusula `WHERE`, então ele é provado contra **PostgreSQL de
+verdade** em `tests/test_audiencia_operacional_postgres.py`. Mock não executa
+`WHERE` — a lição está registrada no cabeçalho de
+`tests/test_helo_base_postgres.py`, e foi paga uma vez aqui.
+
+### Dedup por usuário, e a confirmação do autor vence
+
+Um técnico que abre chamado em nome de um cliente cai nas duas regras: é o autor
+e é da equipe. Ele recebe **uma** notificação e **um** e-mail, e o que fica é a
+confirmação do autor — `"Seu ticket foi registrado com o protocolo X"`.
+
+Se a audiência vencesse, o autor-staff perderia a própria confirmação e
+receberia no lugar um aviso escrito para outra pessoa. Deixar de mandar o aviso
+operacional para quem acabou de abrir o chamado não perde informação nenhuma.
+
+A exclusão é **explícita** (`exclude_user_ids`), e não efeito colateral da ordem
+das chamadas: inverter as duas linhas do `create_ticket` dá o mesmo resultado.
+
+### O e-mail para staff: o filtro de 04/09 continua valendo
+
+Em 04/09/2026 a equipe pediu para desligar o e-mail de notificação para técnico
+e administrador — quem passa o dia dentro do sistema já vê o sininho, e o e-mail
+virava ruído. Esse filtro (`_SEM_EMAIL_POR_PAPEL`) **não foi revogado**.
+
+O que entrou em 24/09 é uma exceção **por tipo**, nomeada e com um membro:
+
+```python
+_EMAIL_PARA_STAFF = frozenset({NotificationType.ticket_created})
+```
+
+Chamado novo é o único evento que dispara o atendimento e acontece **uma vez**
+por chamado. O ruído que motivou o pedido de setembro vinha de eventos que se
+repetem no mesmo chamado — atribuição e reabertura —, e esses continuam sem
+e-mail para staff.
+
+É o espelho do `_IN_APP_ONLY`: um conjunto de tipos que silencia o e-mail, outro
+que o destrava.
+
+Em 25/09/2026 a Fase 2A acrescentou o segundo membro, exatamente como estava
+previsto — um nome no conjunto, não condição espalhada por router:
+
+```python
+_EMAIL_PARA_STAFF = frozenset({NotificationType.ticket_created, NotificationType.sla_warning})
+```
+
+E o critério de admissão foi honrado por **construção**, não por sorte: o aviso
+de SLA só sai para quem consegue inserir a linha de `sla_alert_events`, sob
+índice único. Sem essa garantia ele seria justamente o evento repetido que o
+filtro de 04/09 existe para barrar — por isso a deduplicação e esta linha são o
+mesmo assunto, e não dois.
+
+`sla_breached` **não** entrou: ele continua sem produtor nenhum.
+
+## Aviso de SLA próximo do vencimento (Fase 2A, 25/09/2026)
+
+`SLAConfig.warning_threshold` está no schema desde a primeira migration, é
+editável por prioridade, e a `SlaConfigPage` afirmava ao administrador que "o
+alerta dispara quando o percentual do tempo já consumido atingir o limiar".
+**Nada disparava.** Nenhum caminho de produção lia o campo. A Fase 2A não
+acrescentou funcionalidade: ela cumpriu uma promessa que a interface já fazia.
+
+### A semântica do limiar estava decidida — e em dois lugares
+
+Percentual do tempo **consumido**, inteiro, de 1 a 100. Não é resto, não é
+minutos, não é fração. Dois lugares independentes já afirmavam isso e
+concordavam: o texto de ajuda da tela de SLA, e a fórmula da barra do cartão em
+`TicketListPage`. O worker adotou a mesma, consumindo
+`prazo_efetivo_de_resolucao` e `business_minutes_between` — sem espelho próprio.
+
+⚠️ As fixtures de `frontend/src/test/services/slaService.test.ts` usam `0.8` e
+`0.5`, como se fosse fração. É mock, não afeta produção, mas codifica a escala
+errada. Há `CheckConstraint` no banco (`1..100`) e teste nomeado contra essa
+confusão.
+
+### O que a identidade do evento decide
+
+```
+(ticket_id, alert_kind, reopen_count, effective_due_at, warning_threshold)
+```
+
+`effective_due_at` carrega sozinho pausa acumulada e extensão, porque é a saída
+de `prazo_efetivo_de_resolucao`. `reopen_count` entrou depois — ver a seção
+própria mais abaixo, "`reopen_count` participa da identidade do alerta" — porque
+dois ciclos distintos podem produzir o mesmo `effective_due_at`. `priority` e
+`extension_total_min` continuam gravados só como **auditoria**, fora da chave:
+incluir qualquer um deles criaria uma segunda resposta para "é o mesmo aviso?".
+
+A consequência é deliberada: mesmo ciclo, mesmo prazo e mesmo limiar nunca
+repetem; tudo o que **muda** o ciclo, o prazo — prorrogar, reabrir, retomar de
+uma pausa, trocar a prioridade — ou o limiar habilita um aviso novo.
+
+### Por que tabela, e não booleano, `notifications` ou Redis
+
+Booleano no ticket responderia a primeira vez e mentiria nas outras: "já avisei"
+não é pergunta de sim/não, é pergunta sobre qual prazo e qual limiar.
+
+`notifications` guarda o **efeito**, uma linha por pessoa, com `CASCADE` para
+`users` — excluir o último destinatário apagaria a prova e a rodada seguinte
+reenviaria.
+
+Redis é **lock**, nunca memória de evento: chave que expira não pode ser a prova
+de que um aviso foi dado. O precedente da casa para "o worker já fez isto" é
+estado persistido próprio, duas vezes: `helo_indexacoes` na indexação, e a
+transição de status no fechamento automático.
+
+### Pausado não avisa, e vencido não avisa
+
+A pausa **em curso** não entra no prazo efetivo (dívida antiga, registrada
+acima e não corrigida aqui), então um chamado parado continua se aproximando do
+vencimento. Avisar a equipe sobre um chamado que ela não pode tocar porque
+espera o cliente é o começo do ruído que derruba o canal.
+
+Passado o prazo o assunto é violação, não aviso. `sla_warning` sobre algo que já
+venceu diria "está chegando" sobre o que chegou.
+
+### O intervalo é 300 s, e não os 3600 s do fechamento automático
+
+O limiar é um **ponto** na linha do prazo, não uma condição que fica de pé
+esperando ser notada. Com 3600 s, um prazo de resposta de 30 minutos do nível
+crítico atravessaria 80% e venceria dentro da mesma janela, e o aviso nunca
+sairia.
+
+### De onde começa o percentual — o ciclo, não a abertura
+
+O percentual de resolução conta do **início do ciclo vigente**, dado por
+`inicio_do_ciclo_de_resolucao(ticket)` em `app/utils/sla.py`:
+
+```
+primeiro ciclo                        → ticket.created_at   (RN-013 intacto)
+após reabertura                       → ticket.reopened_at
+troca de prioridade no mesmo ciclo    → não reinicia
+pausa / resume                        → não reinicia
+extensão                              → não reinicia
+SLA de PRIMEIRA RESPOSTA              → segue ancorado em created_at
+```
+
+A última linha não é exceção esquecida: `reopen_ticket` **não** recarimba
+`sla_response_due_at`, então o prazo de resposta tem um ciclo só, e `created_at`
+é o início dele. Ancorá-lo no ciclo introduziria um defeito onde não havia — há
+teste de contraprova, e é a armadilha que quem "completar" esta correção vai
+encontrar.
+
+**Por que a regra existe.** Medido em 25/09/2026: chamado criado dez dias úteis
+antes e reaberto naquele instante aparecia com **90% do prazo consumido**, porque
+o prazo era do ciclo novo e o total partia da abertura original — 5400 minutos
+úteis contra 540 de restante, inflação que cresce com a idade do chamado. O texto
+se contradizia sozinho: *"90% do prazo consumido, restam 540 minutos úteis"* —
+540 úteis **é** o ciclo inteiro.
+
+Não foi preciso coluna nova: `reopened_at` já é gravado em `reopen_ticket`, na
+mesma linha em que `reopen_count` incrementa, e é o único lugar do sistema que o
+escreve. Um campo novo criaria uma segunda fonte para a mesma pergunta.
+
+**A mesma função serve os dois consumidores** — o worker e o
+`sla_resolve_total_min` de `routers/tickets.py`, que é o campo que a barra do
+cartão divide. Com duas contas, o e-mail diria 0% e o cartão 90%; o defeito, aliás,
+já estava na barra antes desta fase existir.
+
+### `reopen_count` participa da identidade do alerta
+
+Porque dois ciclos distintos **podem** produzir o mesmo `effective_due_at`:
+`add_business_minutes` avança o instante para dentro do expediente antes de
+somar, então duas reaberturas em momentos diferentes da mesma janela fechada
+colapsam no mesmo início de jornada — sábado às 11:00 e domingo às 19:30,
+32 horas de diferença, **prazo idêntico**. E a reabertura zera pausa e extensão,
+então o prazo do ciclo novo é independente do anterior.
+
+Sem `reopen_count` na chave, o segundo aviso ficava silenciado. `priority` e
+`extension_total_min` seguem fora: nenhum muda o ciclo, e os dois já mudam o
+prazo, que está na chave.
+
+**O cliente nunca é filtrado**, em nenhum tipo. Há duas contraprovas de teste
+justamente porque alargar o filtro silenciaria quem está do lado de fora.
+
+### O assunto do e-mail não é o título do sininho
+
+```
+sininho:  Novo chamado
+assunto:  [HelpHS] Novo chamado HS-2026-0042 — Impressora sem conexão
+```
+
+As duas coisas passaram a querer textos diferentes: o sininho já mostra o tipo
+num selo e tem largura de dropdown; o assunto precisa dizer protocolo e título
+para ser reconhecível numa lista de caixa de entrada. Quem tem um assunto melhor
+a dizer passa `email_subject` ao `notify`; sem ele, o fallback é
+`[HelpHS] <título> — <protocolo>`.
+
+Todo assunto leva o prefixo **`[HelpHS]`**, e o separador é **travessão** — o
+ponto médio some em fonte estreita de lista de caixa.
+
+### Vocabulário misto, conhecido e aceito
+
+O aviso da equipe diz "chamado"; a confirmação do autor continua dizendo
+"ticket". O aviso é texto novo, a confirmação é texto existente, e renomear os
+dez textos visíveis ao cliente é refatoração editorial que ficou **fora** desta
+frente por decisão de 24/09/2026.
+
+### ⚠️ Dívida: `ticket_updated` agrega mais de um evento
+
+`NotificationType.ticket_updated` é usado pela **reabertura** e pela **mudança
+de status**. Não dá para dar políticas de e-mail diferentes a esses dois eventos
+olhando só o `NotificationType`.
+
+Aceito nesta fase porque é o comportamento atual e a Fase 1 não muda a semântica
+do enum. Se um dia a distinção fizer falta, o caminho a avaliar **primeiro** é um
+discriminador explícito no `data` ou uma camada de evento mais específica — não
+expandir o enum, que é nativo do Postgres e custa `ALTER TYPE` em migration que
+roda sozinha no boot.
+
+### ⚠️ A Fase 1 NÃO garante entrega
+
+Não há retry, não há fila, não há outbox. O envio continua sendo
+`asyncio.create_task` depois do commit, e `email_sent` continua nascendo `False`
+e nunca sendo atualizado.
+
+O que isso significa na prática: **SMTP fora do ar ou reinício da API entre o
+commit e o envio perdem o e-mail**, e o único rastro é uma linha de log. A
+notificação do sininho sobrevive, porque ela é transacional com o fato que a
+gerou. Durabilidade é a Fase 3.
+
+### Otimização futura: o peso da logo
+
+A logo por `cid:` acrescenta ~100 KB por mensagem MIME (PNG de 75 KB em base64).
+Com quinze técnicos, um chamado novo gera ~1,5 MB de tráfego SMTP. Não bloqueia
+nada — e o corte de ~102 KB do Gmail **não** se aplica, porque o anexo é parte
+MIME separada e não conta no tamanho do HTML.
+
+Uma frente futura pode criar uma variante otimizada exclusivamente para e-mail.
+Deliberadamente **não** feito aqui: redimensionar ou recomprimir a marca é
+decisão de identidade visual, não de engenharia de entrega.
+
+## Barra de SLA acompanha o warning_threshold (Fase 2B, 28/09/2026)
+
+Até aqui, `TicketListPage` decidia a cor da barra de prazo com `pct >= 80` e
+`pct >= 60` escritos no componente — ao lado do `warning_threshold`
+configurável por prioridade que a Fase 2A já fazia o aviso por e-mail
+respeitar. Um administrador que baixasse o limiar de um nível para 60 receberia
+e-mail em 60% e veria a barra continuar ficando vermelha só em 80%: a tela
+discordando do aviso que a própria equipe acabou de receber. A Fase 2B fecha
+essa divergência.
+
+### `warning_threshold`
+
+Percentual de tempo **útil** consumido, inteiro, de 1 a 100, configurado por
+**prioridade** (ver "A semântica do limiar estava decidida", acima). O
+frontend passa a receber o mesmo valor que o worker usa: `TicketResponse` ganha
+`sla_warning_threshold`, resolvido por `threshold_da_prioridade` — a MESMA
+função da Fase 2A, não uma segunda cópia da regra.
+
+Resolvido pela **prioridade atual** do chamado, não por `sla_config_id`:
+aquela coluna é escrita só por `apply_sla_config` e pode ficar apontando para a
+config de um nível anterior, o que faria a tela mostrar o limiar de uma
+prioridade que o chamado já não tem.
+
+Carregado em lote (`configs_por_nivel`, uma consulta por requisição) e passado
+como parâmetro **obrigatório** de `_serialize_ticket` — sem default, para que
+esquecê-lo em algum dos pontos de chamada quebre alto (`TypeError`) em vez de
+devolver `null` em silêncio e cair no fallback sem ninguém perceber.
+
+### A régua visual
+
+```
+vermelho   pct >= warning_threshold
+âmbar      pct >= warning_threshold * 0,75   e   pct < warning_threshold
+verde      abaixo disso
+vencido    sempre vermelho, em qualquer percentual
+```
+
+Em `frontend/src/lib/slaVisual.ts`. A fração de atenção é 0,75 por construção:
+com o `warning_threshold` no default de 80, ela reproduz **exatamente** o
+visual anterior — âmbar em 60, vermelho em 80 —, então ligar a configuração não
+muda nada para quem não a configurou. O limiar não é arredondado na decisão
+(só a apresentação pode arredondar): com 70 o ponto de atenção é 52,5, e
+arredondar para 53 pintaria de verde um chamado que já devia estar âmbar.
+
+Sem `warning_threshold` do backend — chamado sem prioridade, ou sem
+`SLAConfig` ativa para o nível —, a régua cai no `LIMIAR_PADRAO` de 80: o
+default da COLUNA, não uma escolha nova. Verde esconderia urgência; vermelho
+gritaria sem motivo.
+
+`SlaChip` (usado no detalhe do chamado) **ficou fora** desta regra de
+propósito: ele não usa percentual — três estados fixos, vencido/respondido/o
+resto —, e não há limiar para ele acompanhar. Consequência aceita: a barra da
+lista respeita o `warning_threshold` configurado e o chip do detalhe continua
+âmbar desde o primeiro minuto de consumo. Não é regressão desta fase, mas fica
+mais visível depois dela; alinhar os dois é frente própria.
+
+### Resolução: de onde conta o percentual
+
+Registrado em detalhe na seção "De onde começa o percentual — o ciclo, não a
+abertura", acima. Resumo que vale para os dois consumidores (worker e barra,
+pela mesma função `inicio_do_ciclo_de_resolucao`):
+
+```
+primeiro ciclo      → ticket.created_at    (RN-013 intacto)
+após reabertura      → ticket.reopened_at
+```
 
 ## Pesquisa de satisfação (CSAT)
 
@@ -726,6 +1204,195 @@ As colunas seguem `nullable` no banco de propósito: **clientes cadastrados ante
 da regra não são bloqueados**. Eles veem um aviso no perfil pedindo para
 completar o cadastro.
 
+## Telefone do cliente
+
+### `users.phone` é a fonte canônica — e `companies.phone` não é alternativa
+
+> **Quem o sistema liga é a pessoa, não a empresa.** O telefone do atendimento
+> é `users.phone`. `companies.phone` **não** é usado como reserva.
+
+Existem duas colunas gêmeas, ambas `String(20)` e anuláveis: `users.phone`
+(`models.py:209`) e `companies.phone` (`models.py:177`). Elegê-las as duas
+criaria duas fontes de verdade para a mesma pergunta — o erro que o par
+`users.cnpj` / `companies.cnpj` já custou caro (ver "Qual é a autoridade sobre
+'de qual empresa é este cliente'").
+
+Não existe precedência do tipo `users.phone ?? companies.phone`. Três medições
+de 18/09/2026 sustentam a escolha:
+
+- o caminho majoritário de criação de empresa **nasce sem telefone** — a
+  sugestão montada do onboarding não tem o campo, e o front não o envia;
+- `users.phone` é dado pessoal declarado na política de privacidade, e a
+  anonimização o apaga; `companies.phone` é dado de empresa;
+- desvincular um cliente da empresa é `ON DELETE SET NULL`, então uma regra
+  apoiada na empresa perderia efeito no instante em que alguém clicasse em
+  Desvincular.
+
+### E.164 é a representação interna
+
+O telefone é guardado em **E.164** (`+5581999999999`), normalizado por
+`app/utils/telefone.py`, que é a autoridade; `frontend/src/lib/telefone.ts`
+espelha a mesma regra para o usuário saber o que errou antes de enviar.
+
+**E.164 é a forma canônica interna do HelpHS e não depende de fornecedor
+nenhum.** A conversão para o formato que a telefonia espera no momento de
+discar é responsabilidade isolada do adapter da integração — não está
+implementada, e a grafia exata segue em aberto com o fornecedor.
+
+A máscara é coisa de tela, como no CNPJ. Entradas brasileiras razoáveis são
+aceitas e normalizadas (`81999999999`, `5581999999999`, `+5581999999999`,
+`(81) 99999-9999`); número de fora do Brasil exige o `+` explícito, porque sem
+ele não há como saber onde termina o código do país — e chutar `+55` produz
+número indiscável gravado com cara de telefone bom.
+
+### A regra é prospectiva: proíbe a PERDA, não a ausência
+
+> **Novo cliente ativo precisa de telefone. Cliente ativo que já tem telefone
+> não pode ficar sem. Cliente legado sem telefone continua editando o resto do
+> cadastro normalmente.**
+
+São exatamente duas proibições, implementadas em `_guarda_telefone_do_cliente`
+(`app/routers/users.py`) e cobradas em `tests/test_telefone.py`:
+
+| | O que é proibido |
+|---|---|
+| **P1 — remoção** | tinha telefone e a requisição o esvazia, sendo cliente ativo |
+| **P2 — transição** | virar `client`, ou voltar a `active`, sem telefone |
+
+O que **não** é proibido: um cliente ativo que já estava sem telefone salvar o
+nome, o departamento ou a foto. Medido em produção em 18/09/2026: **18 contas
+`role=client` + `status=active`, das quais 14 sem telefone**. O responsável
+informou que essa população é composta por contas **fictícias/de teste** — ou
+seja, o número não descreve qualidade cadastral de clientes reais, e sim
+**legado técnico**. Mas elas existem fisicamente, e uma exigência genérica
+("cliente ativo sempre precisa de telefone", cobrada em todo `PATCH`) as
+deixaria incapazes de editar o próprio nome. Regra nova é prospectiva; dado
+histórico se corrige em script avulso.
+
+A obrigatoriedade **não** mora no `UserUpdate`: esse schema é compartilhado por
+`PATCH /users/me` e `PATCH /users/{id}` e não conhece o usuário alvo, o estado
+atual dele nem o resultante. Ele só valida e normaliza quando o campo vem, e o
+`exclude_unset` do router é o que distingue "não enviou" de "enviou vazio" —
+distinção da qual a regra depende inteiramente. Quem decide é o router.
+
+O `RegisterRequest` é a exceção: o cadastro público grava `role=client` e
+`status=active` como literais, então não há estado a descobrir e a exigência
+cabe no próprio schema.
+
+**A anonimização continua podendo zerar o telefone.** O direito ao esquecimento
+é mais forte que esta regra: `anonymize_user` escreve `phone = None` direto no
+objeto, sem passar pelos guards, e há teste dedicado para que ninguém
+"conserte" isso depois.
+
+**Até a Fase 1B não havia constraint no banco**, e o caminho até ela mudou
+depois de um experimento — ver a seção seguinte. A Fase 1C criou o `CHECK`
+validado de presença; tudo o que está descrito acima continua valendo como o
+que a **aplicação** faz.
+
+### Por que não usamos CHECK NOT VALID para telefone
+
+> **`CHECK ... NOT VALID` é incompatível com a regra prospectiva acima.** A
+> constraint de banco só pode nascer quando **nenhuma** linha a violar.
+
+O desenho anterior previa criar o `CHECK` como `NOT VALID`, no entendimento de
+que isso deixaria as linhas legadas isentas. **Não deixa**, e a diferença foi
+medida em PostgreSQL 16.2 descartável, com uma linha por cenário para que um
+caso não contaminasse o outro:
+
+| Cenário | Regra da Fase 1A | `CHECK NOT VALID` |
+|---|---|---|
+| legado: `UPDATE` só o `name` | permite | **recusa** |
+| legado: `UPDATE` só o `department` | permite | **recusa** |
+| legado: `UPDATE name` + `phone=NULL` (formulário completo) | permite | **recusa** |
+| legado: acrescentar telefone válido | permite | permite |
+| legado: mudar situação para `inactive` | permite | permite |
+| remover telefone de cliente ativo (P1) | recusa | recusa |
+| `inactive` → `active` sem telefone (P2) | recusa | recusa |
+| novo cliente ativo sem telefone (P2) | recusa | recusa |
+
+**Três divergências em onze**, todas sobre o legado.
+
+O motivo é simples depois de visto: `NOT VALID` pula **apenas o escaneamento
+inicial**. Dali em diante o PostgreSQL avalia o `CHECK` sobre a **nova versão
+da linha** em todo `UPDATE` — e não existe, para `CHECK`, a otimização de
+"pular quando as colunas da constraint não mudaram" que existe para chave
+estrangeira. Trocar só o nome de uma linha legada produz uma versão que
+continua violando, e o `UPDATE` falha.
+
+`ALTER TABLE ... VALIDATE CONSTRAINT` com linha legada presente também foi
+medido: **recusa**. Só dá para validar depois que o legado zera.
+
+**Um gatilho foi testado e rejeitado.** Um `BEFORE INSERT OR UPDATE` enxerga
+`OLD` e `NEW`, então reproduz P1 e P2 com **zero divergências** — medido. Mas
+ele cria uma **segunda fonte de verdade** para a regra: ela passaria a viver
+em PL/pgSQL e em Python ao mesmo tempo, e o lado do banco não tem teste de
+mutação, nem `mypy`, nem o guard de fonte que hoje cobra a versão da
+aplicação. O ganho não paga a deriva.
+
+**A condição para a constraint é `LEGADO_INVALIDO = 0`.** Quem mede é
+`backend/scripts/diagnostico_telefone.py`, que imprime a linha
+`LEGADO_INVALIDO=<N>` e sai com 0 (pronto), 1 (há legado) ou 2 (falha
+operacional — banco fora do ar não pode ser lido como "ainda há legado").
+
+Quando esse número chegar a zero, a constraint pode ser criada **validada**,
+sem `NOT VALID`. O PostgreSQL ainda verifica as linhas existentes nesse
+momento, mas com o volume atual da tabela esse custo é operacionalmente
+pequeno — e, com zero linhas violando, não há divergência possível.
+
+O fatiamento ficou assim:
+
+| Fase | O que faz |
+|---|---|
+| **1A** | ✅ regra na aplicação, normalização E.164, front. Em `main`. |
+| **1B** | ✅ readiness oficial. **Sem migration.** Em `main`. |
+| **1C** | ✅ `CHECK` validado de presença — `ck_users_cliente_ativo_tem_telefone`. |
+
+**O portão foi aberto por saneamento, não por exceção.** O readiness mediu
+`LEGADO_INVALIDO=14` em produção. As contas eram exemplos e foram
+**inativadas administrativamente** — sem telefone inventado, sem exclusão de
+histórico, sem `UPDATE` de saneamento dentro de migration. A medição seguinte
+deu `LEGADO_INVALIDO=0`, e só então a constraint passou a poder existir.
+
+A constraint é **validada**, sem `NOT VALID`. O PostgreSQL verifica as linhas
+existentes ao criá-la, mas com o volume atual da tabela esse custo é
+operacionalmente pequeno — e, com zero linhas violando, não há divergência
+possível com a regra da aplicação.
+
+**A aplicação não foi simplificada por causa dela.** Os guards da Fase 1A
+continuam onde estavam: o banco recusa o estado impossível, a aplicação
+explica o porquê em português e devolve 422 no campo certo. Defesa em
+profundidade só vale com as duas camadas vivas.
+
+⚠️ **A anonimização e a constraint, um detalhe que morde.** Medido em
+PostgreSQL real: gravar `phone = NULL` e `status = anonymized` **na mesma
+instrução** passa — que é exatamente o que `anonymize_user` faz, num `commit`
+só. Mas limpar o telefone **antes** de mudar a situação é recusado, e o
+resultado é pior que um erro visível: a conta terminaria `anonymized` **com o
+telefone intacto**. Vale para qualquer script avulso de anonimização escrito
+no futuro; há teste cobrindo os dois caminhos.
+
+⚠️ **Não cite valor de enum acrescentado por `ALTER TYPE` numa migration.**
+Descoberto ao mutar esta constraint: o projeto não usa
+`transaction_per_migration`, então `alembic upgrade head` roda a cadeia
+inteira numa transação só. Como `anonymized` entrou em `userstatus` por
+`ALTER TYPE ... ADD VALUE`, mencioná-lo em DDL estoura com `unsafe use of new
+value "anonymized" of enum type userstatus` ao subir do zero. O predicado
+escolhido isenta o anonimizado **sem nomeá-lo**, e por isso não esbarra nisso.
+
+`companies.phone` segue fora de tudo isto: não é fonte da telefonia, e nenhuma
+constraint foi criada para ela.
+
+### Telefone só chega ao front quando alguém vai ligar
+
+O contrato do chamado **não** carrega telefone. Ele expõe apenas se a ação de
+ligar está disponível e, quando não está, o motivo. O número é buscado por
+endpoint próprio e autorizado, no momento em que a confirmação da ligação
+abre — e o backend **rebusca o telefone no banco** ao disparar a chamada, sem
+aceitar número vindo do navegador.
+
+Minimização de dado pessoal: sem isso, o telefone de todo cliente trafegaria em
+cada abertura de chamado, inclusive para quem nunca vai ligar.
+
 ## Respostas rápidas do chat
 
 Lista **única para toda a equipe** — não há respostas por técnico. Admin e
@@ -796,7 +1463,34 @@ Como o arquivo em disco tem nome interno (uuid), o backend acrescenta
 A anonimização de usuário existe no backend e foi **removida da interface de
 propósito**. Manter o endpoint para uso futuro.
 
+⚠️ **Pendente e bloqueante: a gravação de ligações.** O ramal usado em
+produção **já grava** hoje (`gravar_audio = 1`, medido em 30/09/2026), o áudio
+contém **os dois lados** da conversa e o link do fornecedor é estático e **sem
+prazo de expiração definido**. Nenhuma reprodução ou transcrição pode ser
+oferecida a pessoas antes de decisão sobre finalidade, base legal, aviso,
+quem ouve, retenção, exclusão e auditoria de acesso. A lista completa e as
+evidências estão em **Fases 2D.1 e 2D.2**, em *Pendências conhecidas*.
+
 ---
+
+## E-mail sem distinção de maiúsculas
+
+`Fulano@x.com` e `fulano@x.com` são a mesma caixa postal no mundo real — e
+até 15/09 eram duas contas possíveis no sistema (o `EmailStr` só baixa o
+domínio, e as buscas comparavam igualdade exata). Produção foi conferida no
+mesmo dia: zero duplicatas; a porta fechou limpa. Três camadas:
+
+- **Regra prospectiva**: toda entrada de e-mail (cadastro, login,
+  esqueci-a-senha, criação por admin) usa o tipo `EmailNormalizado`
+  (`app/utils/email_normalizado.py`) — minúsculas no tipo, no padrão do CNPJ.
+  Guard de fonte em `tests/test_email_normalizado.py` pega schema novo que
+  declare `EmailStr` cru.
+- **Passado**: `scripts/normaliza_emails.py` (avulso, dry-run por padrão)
+  baixa linhas antigas; colisão por caixa é relatada e NUNCA fundida — a
+  decisão é humana.
+- **Trava de banco**: índice único em `lower(email)` (revision
+  `e1z2a3b4c5d6`). Roda no boot e FALHA se houver duplicata — por isso o
+  script roda ANTES do deploy que leva a migration.
 
 ## Limite de tentativas (rate limiting)
 
@@ -826,6 +1520,490 @@ Decisões:
 - "Por IP" significa por conexão de internet: um escritório atrás do mesmo
   roteador divide o contador. Se algum cliente sentir o limite, o ajuste é a
   env var no painel — não é mudança de código.
+
+## Formato do código
+
+### O formatador do backend é o `black`. O `ruff` é linter, nunca formatador.
+
+O CI roda os dois (`.github/workflows/ci.yml`): `ruff check .` e
+`black --check .`. Eles **discordam** de formatação, e quem manda é o `black`,
+rodado de dentro de `backend/`.
+
+**Nunca rode `ruff format` num arquivo do backend.** Ele reformata o arquivo
+inteiro no estilo dele, inclusive linhas que você não escreveu, e o
+`black --check` reprova o resultado. Em 08/09/2026 isso derrubou o CI de um
+commit de migration por causa de um `assert` de outra pessoa, num arquivo de
+teste que só tinha sido tocado numa fixture.
+
+No frontend a regra é diferente e igualmente contraintuitiva — ver o Prettier
+em `mudanças.md`: os arquivos estão em 80 colunas, o `.prettierrc` diz 100, e
+o CI não checa formato. Lá, rodar `--write` polui o commit.
+
+## Base da Helô
+
+### A base da Helô é a Base de Conhecimento (desde 10/09/2026)
+
+A fonte deixou de ser uma pasta de manuais e passou a ser `kb_articles` com
+`status = published` e `helo_pode_ler = true`. Artigo publicado alimenta as
+respostas da Helô **sem ninguém rodar nada**: uma varredura periódica
+(`app/services/helo_indexacao.py`, a cada 5 min) indexa o que é novo ou
+editado, e a busca filtra publicação, marcação e produto AO VIVO — despublicar
+tira o texto das respostas no mesmo instante.
+
+⚠️ **Publicar artigo passa a mudar o que a Helô diz para o cliente.** O suporte
+não tinha esse poder e não foi avisado de que passou a ter. Passo a passo
+errado num artigo publicado vira procedimento errado ditado ao cliente, com a
+fonte citada — o que faz parecer conferido.
+
+**Duas regras de vínculo de produto, em dois lugares, de propósito:**
+
+| Onde | Vínculo ausente | Por quê |
+|---|---|---|
+| Base de Conhecimento (tela) | vale para TODOS os aparelhos | é escolha de quem escreveu |
+| Importação dos manuais (script) | ERRO FATAL | quem cria é máquina; ninguém escolheu nada |
+
+Quem unificar as duas achando que achou inconsistência reabre o caminho para o
+passo a passo do Phoebus chegar a quem tem um Titan.
+
+**Chamado SEM produto não recebe nada — nem o artigo universal.** Decidido em
+10/09/2026; até ali era só o comportamento herdado de antes da mudança de
+fonte, e está escrito aqui para não parecer esquecimento amanhã. Chamado sem
+produto é chamado em que não sabemos qual aparelho está na mão do cliente, e
+citar procedimento é mais arriscado justamente aí: todos os aparelhos não é o
+mesmo que nenhum. É a mesma assimetria do teto de distância — escalar custa um
+turno de humano; procedimento errado num instrumento de medição legal custa
+mais.
+
+**O filtro de tipo morreu**, e com ele uma proteção: se alguém publicar uma
+ficha com preço na Base, ela vira fonte da Helô. A proteção passou a ser a
+marcação `helo_pode_ler`, que alguém precisa desligar.
+
+### O modo da Helô: triagem até os sete manuais (desde 15/09/2026)
+
+`HELO_MODO` diz o que ela faz quando está ligada. **`triagem`** é a
+recepcionista da Fase 1 — saudação, encerramento e escalada, nada de
+embedding, nada de LLM, teto de duas falas. **`completa`** é a Fase 2, que
+busca na Base de Conhecimento e responde com o modelo. O padrão é `triagem`, e
+valor ausente ou não reconhecido também é `triagem`: o modo seguro é o que o
+sistema assume quando não sabe. Caixa e espaço não importam; um valor
+preenchido e desconhecido (o erro provável é `completo`) deixa aviso no log.
+
+**Por que existe.** Os manuais técnicos dos sete aparelhos estão sendo
+reescritos pela assistência técnica, em cerca de quinze dias. Até lá a base
+não tem manual técnico publicado (os três importados em 10/09 continuam
+rascunho), e a Fase 2 sem manual devolve escalada em toda pergunta técnica — o
+cliente responderia às três perguntas e seria transferido para um atendente
+em vez de ler "registrei tudo aqui". A Fase 2 **dorme, não foi removida**:
+nenhuma lógica dela saiu (o diff só acrescenta o desvio da triagem e o teto
+por modo), e ela acorda virando o modo.
+
+**O modo é ortogonal ao `HELO_ENABLED`.** Desligada é desligada em qualquer
+modo. As quatro guardas valem igual nos dois, e cada uma tem teste nos dois
+modos: os três interruptores (nada religa num nível mais específico), o
+humano já na conversa, o pedido de humano antes do encerramento e antes de
+qualquer peça da Fase 2, e a saída gravando `helo_saiu` — com o pedido
+explícito de humano derrubando também o `ai_enabled`. A ordem: interruptores,
+humano na conversa, saudação que nunca aconteceu, teto de falas, pedido de
+humano.
+
+**O pedido de humano passa por cima do teto, nos dois modos** — decidido em
+15/09/2026, e diverge da Fase 1 **de propósito**. Na Fase 1, passadas as duas
+falas, "quero falar com um atendente" recebia silêncio. O teto de duas existia
+porque ela só tinha duas coisas a dizer, não como recusa a um pedido: silêncio
+depois de um pedido explícito o cliente lê como sistema ignorando, e o custo de
+atender é uma escalada a mais num chamado que já ia para a fila. A exceção é só
+do pedido — resposta comum passado o teto continua em silêncio — e não passa
+por cima dos interruptores nem da guarda de humano na conversa. Fidelidade à
+Fase 1 não é argumento para desfazer; há teste que prende isto.
+
+**Recusado: usar a ausência da `DEEPSEEK_API_KEY` como standby.** O
+`_chamar_deepseek` devolve `None` antes de montar a URL quando a chave falta,
+então ligar sem chave não vaza nada — mas a segurança passaria a depender de
+faltar uma configuração. No dia em que alguém preenchesse a chave para testar
+outra coisa, ela acordaria sozinha, com a base vazia, falando com cliente, sem
+ninguém ter decidido. Chave ausente continua sendo falha de infraestrutura,
+com o destino que já tinha. Em triagem, nem com chave e URL preenchidas um
+cliente HTTP é construído — há teste disso, com um controle no modo completo
+provando que a armadilha dispara.
+
+**Duas escolhas que o modo trouxe junto:**
+
+- **O encerramento grava `helo_saiu`**, com histórico, e o `ai_enabled` fica
+  onde está. Sem isso, o chamado triado continuaria com duas falas e crédito
+  até sete no modo completo: no dia do gatilho ela voltaria a falar num chamado
+  em que já disse "um atendente já vai assumir".
+- **O encerramento chama a equipe com "Triagem concluída"**, o aviso da Fase 1
+  (`db88a34`). O `f2421ac` o tinha tirado porque o encerramento deixara de
+  existir; sem ele, o chamado triado e sem dono ficaria sem ninguém avisado.
+
+**O que continua rodando em triagem, por decisão (15/09/2026):** a varredura
+de indexação (`helo_indexacao.py`). Ela manda texto de artigo — não de
+cliente — ao serviço de embedding, e deixar a base pronta durante os quinze
+dias é exatamente o que se quer. Desligá-la seria
+`HELO_INDEXACAO_INTERVALO_SEGUNDOS=0`.
+
+**Limitação conhecida, não consertada: voltar de `completa` para `triagem`
+com conversa em andamento.** Nesses chamados ela fica calada para resposta
+comum, sem aviso à equipe — eles já passaram das duas falas. (O pedido de
+humano continua sendo atendido, porque passa por cima do teto.) Só importa com
+`HELO_ENABLED=true`, e nesse cenário quem vira o modo sabe o que está fazendo.
+Em 15/09/2026 o `HELO_ENABLED` estava `false` no painel de produção — medido
+pelo Rickelme —, então não havia conversa em modo completo para esta mudança
+calar.
+
+#### O gatilho para virar para `completa`
+
+**Os sete manuais publicados na Base de Conhecimento.** Não "os manuais
+chegaram": publicados, vinculados ao produto e marcados para a Helô, e
+indexados. Antes de virar, conferir:
+
+1. Os sete artigos publicados, com vínculo de produto e `helo_pode_ler`, e
+   trechos indexados para cada um (`helo_chunks` por `article_id`).
+2. O teto de distância remedido — é gatilho da dívida "O teto de 0,25 depende
+   do acervo": entra manual de produto que hoje não tem.
+3. O serviço de embedding respondendo e a `DEEPSEEK_API_KEY` configurada.
+4. **Os chamados triados antes de o `helo_saiu` existir.** Se a Helô chegou a
+   ficar ligada com o código anterior à Fase 2 — não medido: o `HELO_ENABLED`
+   nasce `false` desde o `8e9286c`, e o encerramento só entrou numa versão a
+   partir da v1.11.0 (`db88a34`) —, esses chamados têm duas falas dela e o
+   campo em `false`. No modo completo eles ganham crédito para mais cinco, e
+   ela voltaria a falar em quem não tiver responsável nem mensagem da equipe.
+   A consulta não depende de data; contar antes de virar:
+
+   ```sql
+   SELECT t.status, count(*)
+   FROM tickets t
+   WHERE t.helo_saiu = false
+     AND t.ai_enabled = true
+     AND t.assignee_id IS NULL
+     AND (SELECT count(*) FROM chat_messages m
+          WHERE m.ticket_id = t.id AND m.is_ai) >= 2
+     AND NOT EXISTS (
+       SELECT 1 FROM chat_messages m JOIN users u ON u.id = m.sender_id
+       WHERE m.ticket_id = t.id AND u.role IN ('admin', 'technician'))
+   GROUP BY t.status;
+   ```
+
+   Havendo algum, a correção é script avulso que grava `helo_saiu` — nunca
+   migration (dado histórico se corrige fora dela).
+5. O documento de LGPD: a Fase 2 manda conteúdo de chamado para a DeepSeek.
+
+### O interruptor da Helô é dela; o `ai_enabled` é de gente
+
+Decidido em 10/09/2026, corrigindo uma escolha de dois dias antes.
+
+`tickets.ai_enabled` sempre significou "alguém quer a IA fora deste chamado" —
+é o botão que o técnico aperta na tela, e ele fecha a Helô, a sugestão de
+resposta e o resumo. Quando a escalada passou a gravar nesse campo, ele ganhou
+um segundo significado: "a Helô já saiu daqui". Enquanto ela falava uma vez por
+chamado os dois davam no mesmo. Com ela conversando, deixaram: escalar por
+decisão do modelo, por teto de trocas ou por a IA estar fora do ar tirava a
+ferramenta do técnico **nos chamados em que a IA já tinha falhado**.
+
+`tickets.helo_saiu` é o campo dela, e ela escreve nos **quatro** motivos — e,
+desde 15/09, também no encerramento do modo triagem.
+
+**A exceção é deliberada e tem teste só para ela:** no pedido explícito de
+humano os dois campos caem. Ali quem quis sair da IA foi o cliente, e a vontade
+dele vale para as ferramentas todas. Sem prender isso, a assimetria com os
+outros três motivos pareceria esquecimento, e alguém "consertaria" tirando a
+linha.
+
+**A saída dela grava histórico**, como o botão da tela já gravava, com o motivo
+no comentário — o texto que o próprio modelo escreveu na linha `ESCALAR:`. Sem
+isso o técnico abre o chamado, vê a IA calada e não tem onde ler por quê. Foi
+o que forçou o gravador de histórico a sair de `routers/tickets.py` para
+`utils/history.py`: `tickets.py` importa `services.helo`, então a Helô
+importando de volta seria ciclo, e a alternativa era uma segunda cópia da
+regra.
+
+### O teto de distância da busca foi medido, não escolhido
+
+Ordenar não é filtrar: sem teto, `busca_trechos` sempre devolve os quatro
+trechos mais próximos, por mais longe que estejam — e o modelo os recebe num
+bloco que o prompt chama de "sua única fonte de verdade técnica".
+
+Medido em 09/09/2026 com 40 perguntas rotuladas contra o corpus real:
+
+| grupo | n | mediana do 1º | extremo |
+|---|---|---|---|
+| tem resposta na base | 27 | 0,2185 | máximo 0,2850 |
+| não tem resposta na base | 13 | 0,2789 | **mínimo 0,2590** |
+
+`TETO_DE_DISTANCIA = 0.25` é o maior corte que ainda barra **100%** das
+perguntas sem resposta, preservando 22 das 27 com resposta. De quebra, corta o
+enchimento das que passam: nessas 40 perguntas chegavam 160 trechos ao modelo,
+passam a chegar 25 — e em 74% das que têm resposta sobra exatamente UM trecho,
+o certo, no lugar de um mais três de ruído.
+
+**Remedido em 10/09/2026, depois da mudança de fonte**, com as mesmas 40
+perguntas contra os três manuais vindos da Base de Conhecimento: sem resposta,
+13 de 13 barradas (mínimo 0,2570); com resposta, 21 de 27 ainda recebendo
+trecho (eram 22). O texto dos trechos mudou de forma e a distância mexeu em até
+oito milésimos. O corte continua valendo, e ficou mais apertado: a margem
+abaixo, de 0,009, hoje é de 0,007.
+
+⚠️ **A margem é de 0,007** (0,25 contra 0,2570; na medição de 09/09 era 0,009,
+contra 0,2590). É um ajuste a 40 pontos, não uma lei, e vale para o **bge-m3
+com estes textos**: trocar o modelo de embedding invalida a medição sem que
+nada quebre visivelmente. Quando remedir está na dívida "O teto de 0,25
+depende do acervo", em Pendências conhecidas; como remedir, logo abaixo.
+
+⚠️ **A população "tem resposta" está enviesada para o fácil, e isso é limite
+conhecido da medição.** As 27 perguntas foram escritas por quem já tinha lido
+os manuais, e por isso usam as palavras do manual. Cliente escreve *"não sai
+nada no visor"*, não *"como interpreto os resultados"* — e a distância só
+cresce com essa diferença. Os 81% de acertos preservados são o **melhor caso**,
+não a expectativa: em produção o número é menor, e quanto menor só se descobre
+medindo com pergunta de cliente de verdade, quando houver conversa gravada para
+isso. Quem for revisitar o 0,25 começa por refazer a medição com perguntas
+reais — não por mexer no número.
+
+⚠️ **E o "barra 100%" é do conjunto de perguntas, não do mundo.** As perguntas
+foram escritas por quem já sabia a resposta, e saíram mais gentis que as de um
+cliente. A prova está no `test_helo_pooling_postgres.py`, com embedding real:
+*"como coloco o aparelho em português"* casa a seção certa a **0,2533** — um
+acerto DENTRO da faixa que a medição tratou como território de quem não tem
+resposta. Ou seja: as duas populações se sobrepõem entre 0,25 e 0,26, e o corte
+não separa duas nuvens, ele **escolhe um lado da sobreposição**.
+
+A escolha é de apetite de risco, e é a do desenho: passar trecho errado faz a
+Helô ditar procedimento de instrumento de medição legal a partir dele; cortar
+acerto faz um humano responder. Os dois erros terminam em escalada; só um deles
+pode terminar em instrução errada. Por isso o corte fica no lado apertado.
+
+**Quando o teto corta tudo, o resultado é o mesmo `NADA ENCONTRADO` de quando a
+busca não devolve nada.** Não existe estado novo para "achei, mas está longe":
+seria só mais uma coisa para o modelo interpretar errado.
+
+#### Como remedir
+
+O método das duas medições (09/09 e 10/09), para quem for refazer. Ele não
+está em script no repositório: está aqui, e as 40 perguntas vão junto.
+
+1. Com a base indexada como produção a veria (artigos publicados e marcados
+   para a Helô), embutir cada pergunta pelo mesmo serviço de embedding dela.
+2. Para cada pergunta, rodar a consulta de `busca_trechos` com os mesmos
+   filtros — publicação, marcação e o **produto da pergunta** — mas SEM o
+   teto, e guardar a distância e a seção do 1º colocado.
+3. Separar pelo rótulo: com resposta (a seção esperada existe na base; casa
+   se o rótulo aparece no título da seção, sem diferenciar maiúsculas) e sem
+   resposta (preço, certificado, dano físico, entrega, nota fiscal, função
+   que o aparelho não tem — nada disso está em manual).
+4. O teto é o maior corte que ainda barra **100%** do grupo sem resposta.
+   Anotar quantas com resposta ele preserva e a margem até a sem resposta
+   mais próxima — é a margem que diz se o número ainda se sustenta.
+
+⚠️ **O viés vem junto com o método.** As 27 perguntas com resposta foram
+escritas por quem já tinha lido os manuais, e usam as palavras deles: os
+acertos preservados são o **melhor caso**. Refazer com as mesmas 40 mede o
+quanto o acervo andou, não o cliente — medir o cliente pede pergunta de
+conversa gravada.
+
+As perguntas estão como foram embutidas, **sem acento**. Reescrever uma é
+trocar de pergunta: a distância muda, e a comparação com as medições
+anteriores deixa de valer para ela.
+
+<details><summary>As 40 perguntas rotuladas</summary>
+
+| Produto | Pergunta | Seção esperada (trecho do título) |
+|---|---|---|
+| Titan | como ajusto a data e a hora do aparelho | 8.1 |
+| Titan | como mudo o idioma para portugues | 8.2 |
+| Titan | onde vejo quantos testes ja foram feitos | 8.3 |
+| Titan | como apago os testes da memoria | 8.4 |
+| Titan | o titan precisa de bocal descartavel | FAQ |
+| Titan | de quanto em quanto tempo preciso calibrar | Calibra |
+| Titan | como ligo o aparelho | Passo a Passo |
+| Titan | o que significa resultado acima do limite | Interpreta |
+| Titan | posso deixar o aparelho guardado no sol | Cuidados |
+| Titan | como conecto o titan no aplicativo do celular | Aplicativo |
+| Titan | quanto custa a calibracao do titan | — (sem resposta) |
+| Titan | quero o certificado de calibracao rbc | — (sem resposta) |
+| Titan | o aparelho caiu e a tela quebrou | — (sem resposta) |
+| Titan | qual o prazo de entrega de um aparelho novo | — (sem resposta) |
+| Titan | como conecto na impressora | — (sem resposta) |
+| Titan | quero cancelar a compra e devolver o aparelho | — (sem resposta) |
+| Titan | como troco a celula de combustivel eu mesmo | — (sem resposta) |
+| Phoebus | como ajusto data hora e fuso horario | DATA, HORA |
+| Phoebus | como mudo o idioma do dispositivo | IDIOMA |
+| Phoebus | como conecto o phoebus na internet por cabo de rede | INTERNET |
+| Phoebus | como faco para ocultar o resultado na tela | RESULTADO EXIBIDO |
+| Phoebus | como ajusto o volume da voz e do bip | UDIO E BIP |
+| Phoebus | o reconhecimento facial esta aceitando a pessoa errada | FACIAL |
+| Phoebus | o phoebus tem impressora | Impressora |
+| Phoebus | quais formas de identificacao ele aceita | Autentica |
+| Phoebus | para que serve a plataforma web | Plataforma |
+| Phoebus | quanto custa uma calibracao | — (sem resposta) |
+| Phoebus | o aparelho molhou na chuva | — (sem resposta) |
+| Phoebus | quero trocar o phoebus por outro modelo | — (sem resposta) |
+| iBlow 10 Pro | como conecto no bluetooth do celular | Bluetooth |
+| iBlow 10 Pro | como carrego a bateria do aparelho | Carregamento |
+| iBlow 10 Pro | o que fazer quando aparece calibracao requerida | Erros |
+| iBlow 10 Pro | qual a diferenca entre o modo normal e o outro modo | Modos |
+| iBlow 10 Pro | o que significa led vermelho com bipes curtos | Interpreta |
+| iBlow 10 Pro | o protetor de saliva pode ser lavado | Composi |
+| iBlow 10 Pro | qual a capacidade da bateria em mah | Especifica |
+| iBlow 10 Pro | como vejo o historico dos ultimos testes | Avan |
+| iBlow 10 Pro | quanto custa o iblow | — (sem resposta) |
+| iBlow 10 Pro | quero a nota fiscal do aparelho | — (sem resposta) |
+| iBlow 10 Pro | o aparelho queimou depois de uma queda | — (sem resposta) |
+
+</details>
+
+### As duas hipóteses foram medidas: a A caiu, a B se confirmou
+
+Levantadas em 09/09/2026 a partir de UMA observação — *"como coloco o aparelho
+em português"* num Titan devolvia `6. Passo a Passo` (0,2420) à frente de
+`8.2 Alterar Idioma` (0,2592). As duas leituras pediam consertos opostos, e por
+isso ficaram separadas em vez de virar conserto na hora.
+
+Medidas no mesmo dia, com 40 perguntas rotuladas à mão contra o corpus real —
+27 com resposta conhecida no manual do produto e 13 sem resposta nenhuma.
+
+**Hipótese A — "trecho curto perde por ter menos sinal" — CAIU.** É o oposto:
+os trechos mais curtos da base são os que mais acertam. As quatro subseções
+`8.x` do Titan têm de 104 a 137 caracteres, e são os melhores resultados do
+corpus inteiro — `8.1 Ajustar Data e Hora` a 0,1527, `8.3` a 0,1753, `8.2` a
+0,2028, `8.4` a 0,2184. O que a observação original pegou foi sensibilidade à
+FORMA da pergunta, não ao tamanho do trecho: *"como mudo o idioma para
+português"* traz o `8.2` em primeiro, *"como coloco o aparelho em português"*
+não. **Não juntar subseção curta com a vizinha** — seria estragar o que está
+melhor.
+
+**Hipótese B — "o `6. Passo a Passo` é um aspirador" — CONFIRMOU.** Ele ficou
+em primeiro lugar em 4 de 8 perguntas de assuntos diferentes num sondagem
+livre, incluindo *"como conecto na impressora"* num aparelho que não tem
+impressora. O equivalente do iBlow (`5. Passo a Passo`) fez o mesmo em 3 de 8.
+Virou dívida com gatilho — ver a tabela de dívidas.
+
+**O teto de distância tira a maior parte do dano, e agrava um caso.** Com
+0,25, as duas perguntas em que o aspirador vencia sem concorrência (0,2789 e
+0,2710) passam a não devolver nada, que é o certo. Mas a pergunta original
+desta seção fica PIOR: `6. Passo a Passo` (0,2420) sobrevive ao corte e o
+`8.2` (0,2592) não, então o modelo passa a receber só o trecho errado onde
+antes recebia os dois. É o contraexemplo conhecido do teto, e é a melhor razão
+para a dívida da hipótese B existir.
+
+## Testes
+
+### Teste cuja garantia É uma cláusula `WHERE` não vai em mock
+
+Regra nascida de um defeito medido, não de preferência.
+
+A suíte do backend mocka a sessão do banco. O mock devolve o resultado que o
+teste combinou de antemão — ele **não olha a consulta**. Isso isola bem quem
+depende do banco, e não prova nada sobre quem depende do `WHERE`.
+
+Como isso apareceu: a guarda de silêncio da Helô (`_humano_ja_esta_na_conversa`)
+pergunta se alguém da equipe já falou no chamado, com três condições no
+`WHERE` — o chamado, a junção com o autor e o papel dele. **Removendo o filtro
+por papel, os 39 testes de `test_helo.py` continuavam verdes.** Sem esse filtro
+a consulta casaria a mensagem do próprio cliente, que está sempre presente
+quando a Helô vai responder: ela ficaria muda em todo chamado, para sempre. Um
+defeito de comportamento total, invisível para a suíte inteira.
+
+**A regra:** quando o que o teste promete garantir é o conteúdo de um `WHERE` —
+um filtro por papel, por dono, por escopo de empresa, um `EXISTS`, um `JOIN`
+que decide inclusão — o teste vai para um arquivo `*_postgres.py`, que executa
+a consulta contra PostgreSQL de verdade. Mock continua certo para o resto:
+ramificação, contrato de rota, texto, erro de provedor.
+
+Os arquivos `*_postgres.py` (`test_helo_postgres.py`,
+`test_dashboard_postgres.py`, `test_tickets_postgres.py`,
+`test_migrations_postgres.py`) leem `TEST_POSTGRES_URL` quando existe — o CI
+passa a variável (`.github/workflows/ci.yml`), então **eles rodam no gate** —
+e senão sobem um Postgres efêmero via `pgserver`. Sem nenhum dos dois, pulam
+em vez de falhar: quem não tem Postgres à mão continua rodando a suíte inteira.
+
+⚠️ **O alcance disto é maior do que a Helô.** Se o mock responde sem olhar a
+consulta, então **toda** cláusula `WHERE` coberta apenas por mock está sem
+cobertura de fato — inclusive as de escopo por cliente e por empresa, que são
+as mais valiosas do sistema. O que existe hoje em `*_postgres.py` é um começo,
+não um inventário. Ao mexer numa consulta cuja correção é o filtro, presuma
+que ela não está coberta e confira.
+
+**Como conferir se um teste prova o que diz:** apague a cláusula do código e
+rode. Se nenhum teste cair, o teste não cobre a cláusula — cobre o caminho até
+ela.
+
+## ⚠️ O `.env` de desenvolvimento aponta para produção
+
+**O que está protegido: a suíte de testes e, desde 10/09/2026, a migration.**
+O `backend/tests/conftest.py` **atribui** `DATABASE_URL` para um localhost
+falso no topo do módulo, antes de qualquer import de `app` — atribuição e não
+`setdefault`, com o comentário dizendo exatamente por quê. `pytest` é seguro.
+E o `alembic/env.py` recusa host remoto fora do contêiner — ver "A trava
+EXISTE", abaixo.
+
+**O que não está protegido: todo o resto.** Tudo que lê a configuração de
+verdade pega a URL de produção:
+
+- ~~**`alembic upgrade head` na máquina local.** O `alembic/env.py` monta a URL
+  com `get_settings().database_url`, que lê o `.env`. Migration aplicada por
+  engano em produção não tem desfazer barato.~~ Travado em 10/09/2026.
+- os scripts avulsos de `backend/scripts/` (`redefine_senha.py`,
+  `funde_empresas_duplicadas.py`, `normaliza_cnpj.py`, ...);
+- `python -c` e shell interativo que importem `app.core.config`;
+- `psql` com a URL copiada do `.env`.
+
+**Por que isso vira risco agora.** A primeira coisa que a Fase 2 da Helô roda é
+uma migration criando extensão no banco (`pgvector`). O gesto natural de testar
+isso é exatamente `alembic upgrade head` — e, até a trava de 10/09, esse
+comando, dessa máquina, aplicava em produção sem perguntar nada. O erro era
+silencioso: sem confirmação, sem aviso, e o sucesso indistinguível do sucesso
+local.
+
+### Mitigação
+
+**O conserto de verdade é o `.env` não guardar credencial de produção.** A URL
+de produção vive no painel do EasyPanel; a da máquina aponta para um Postgres
+local. Isso remove a arma em vez de travá-la. Custa subir um banco local —
+`pgserver` já está instalado e as migrations montam o schema sozinhas (ver a
+Rota B em `desenvolvimento-local.md`, na raiz).
+
+**A trava EXISTE desde 10/09/2026** (`app/utils/migrations.py`,
+`exige_alvo_liberado`): o `alembic/env.py` recusa host remoto, nomeando o host
+antes de abortar, e o `start.sh` exporta a liberação. Continua sendo trava, não
+conserto — a arma segue na mesa para script avulso e para `psql`.
+
+O ponto delicado do desenho é que ela **não pode quebrar o boot do container**,
+onde rodar migration contra produção é o comportamento certo — o `start.sh`
+faz `alembic upgrade head` na linha 5. A saída que não depende de ninguém
+lembrar de nada: **o próprio `start.sh` exporta a variável de liberação** antes
+de chamar o alembic. Ele está no repositório e sempre roda no container, então
+produção passa por construção, e um laptop nunca tem a variável. Uma variável
+que precisasse ser configurada no painel seria pior: esquecer de configurar
+derruba o deploy, e o modo de falha do deploy é sempre pior que o do laptop.
+
+Três detalhes do desenho que os testes prendem, e que não são óbvios:
+
+- **A liberação é o literal `"1"`.** `"true"`, `"sim"` e `"yes"` não liberam:
+  variável sobrevivente no shell de alguém não pode virar liberação por
+  acidente de valor.
+- **Alvo local passa sem liberação nenhuma.** Barrar quem desenvolve ensinaria
+  a exportar a variável no `.bashrc`, e aí a trava estaria morta para tudo.
+- **URL ilegível passa.** A trava não pode ser o motivo de o contêiner não
+  subir, e erro de digitação o alembic reporta melhor do que ela.
+
+O teste que importa roda `python -m alembic upgrade head` como **subprocesso**,
+com URL remota no ambiente: trava escrita e não ligada passa em teste de
+unidade e não impede nada. Há também um teste que lê o `start.sh` e confere que
+o nome da variável bate com a constante — renomear uma sem a outra travaria o
+DEPLOY, com o EasyPanel mostrando build verde e o contêiner não subindo, que é
+o mesmo modo de falha do `alembic heads`.
+
+**O hábito que vale desde já e não custa nada** — antes de migration ou script,
+imprimir para onde se está apontando:
+
+```
+cd backend && python -c "from app.core.config import get_settings; print(get_settings().database_url.rsplit('@', 1)[-1])"
+```
+
+Se sair host que não é `localhost`, o próximo comando fala com produção.
+
+Ver `desenvolvimento-local.md` e `docs/fechar-banco-para-a-internet.md` — o
+banco estar alcançável da máquina do desenvolvedor é a outra metade disto.
 
 # Pendências conhecidas
 
@@ -926,7 +2104,13 @@ por inércia.
 | ~~**Sem MFA para contas de staff**~~ | **Quitada em 26/08/2026** — ver "Segundo fator" abaixo. | — |
 | **Access token sobrevive à revogação de sessão** | Ativar ou desligar o segundo fator apaga o refresh, despejando as sessões. Os access tokens já emitidos, porém, valem até o próprio vencimento: a exposição cai de 7 dias para 8 h, não para zero. Fechar de verdade pede um `sessions_valid_after` conferido no `get_current_user`. | Houver incidente real de sessão comprometida — ou o TTL do access subir. |
 | **Não existe mais o tempo de espera por um HUMANO** | Consequência aceita da decisão de 28/08/2026 (ver "O que conta como primeira resposta"): com a Helô carimbando, o único tempo gravado é o dela. Quanto o cliente esperou até alguém de carne e osso responder deixou de entrar no banco — e por isso **não volta por filtro nem por relatório**, só por coluna nova. | A operação precisar cobrar prazo da equipe, ou alguém estranhar o indicador vivendo em 100%. A saída é um campo próprio (`sla_first_human_response`), carimbado no mesmo ponto e com a guarda de autor que valia antes. |
+| ~~**Escalar não desliga a IA no chamado**~~ | **Quitada em 09/09/2026**, na Etapa 4 da Fase 2 — no mesmo commit em que o teto deixou de ser de falas e virou de trocas, que era o gatilho registrado. `ticket.ai_enabled = False` no caminho de escalada, e vale para os dois jeitos de escalar: o pedido explícito de humano, reconhecido antes do modelo, e a escalada que o próprio modelo pede com a linha `ESCALAR:`. ⚠️ **A consequência aceita ali durou um dia e foi revertida em 10/09**: desligar o `ai_enabled` fechava também o `suggest-reply` e o `summarize` do TÉCNICO, e nos três motivos que não são o pedido do cliente isso tirava a ferramenta dele justamente nos chamados em que a IA já tinha falhado. Hoje quem guarda o estado é `tickets.helo_saiu`, e o `ai_enabled` voltou a ser só o botão de gente — com uma exceção deliberada: no pedido explícito de humano os dois caem, porque ali quem quis sair da IA foi o cliente. Ver "O interruptor da Helô é dela; o `ai_enabled` é de gente" abaixo. | — |
+| **Editar um artigo reindexa todos os trechos dele** | Reescrita em 10/09/2026, quando a fonte passou a ser a Base de Conhecimento: a varredura de `helo_indexacao.py` compara o hash do corte do artigo INTEIRO e, se mudou, apaga todos os trechos dele e recria com ids novos, pagando embedding de todos. Corrigir uma linha de contato no manual do Phoebus reembute os 18 trechos, inclusive os 17 idênticos. Hoje custa pouco: o embedding é do serviço próprio (CPU, segundos por artigo), e nada fora da busca referencia `helo_chunks`. | A base crescer a ponto de a varredura pesar, ou — o que torna urgente de vez — a resposta da Helô registrar a citação por `chunk_id`: aí o refaz deixa citação apontando para trecho que não existe mais. A saída é casar trecho a trecho por hash do conteúdo antes de apagar — os iguais mantêm id e embedding, e só `ordem`/`secao` são atualizados. |
+| **O `.env` de desenvolvimento aponta para produção** | A suíte está blindada (o `conftest.py` força uma URL falsa) e, desde 10/09/2026, a migration também (o `alembic/env.py` recusa host remoto fora do contêiner). Script avulso, shell e `psql` na máquina do desenvolvedor continuam falando com o banco real. Ver a seção própria acima. | O gatilho registrado — a primeira migration da Fase 2 — chegou e foi atendido pela trava. O próximo é **qualquer script avulso novo que escreva no banco**; o conserto de verdade é o `.env` deixar de guardar credencial de produção. |
+| **O trecho genérico domina a busca (hipótese B)** | `6. Passo a Passo para Utilização` do Titan — e o `5.` equivalente do iBlow — fala de operação em geral e vence perguntas de assunto diferente: 4 de 8 numa sondagem livre, incluindo impressora num aparelho sem impressora. O teto de 0,25 tira a maior parte do dano hoje, e num caso conhecido agrava: para *"como coloco o aparelho em português"*, o aspirador sobrevive ao corte e o `8.2 Alterar Idioma` não. Com três manuais dói pouco — quase toda pergunta fora do manual já não devolve nada. | **Quando houver manual técnico para mais de três produtos.** Aí o aspirador passa a competir com candidatos legítimos dentro do teto, e o dano deixa de ser contornado por ele. O conserto é do lado do trecho — cortar aquele mais fino, ou tirá-lo da base —, e NÃO do corte de todo mundo: a hipótese A foi medida e caiu, os trechos curtos são os que mais acertam. |
+| **O teto de 0,25 depende do acervo** | Registrada em 10/09/2026. O número foi medido em 09/09 contra 74 trechos de 8 arquivos (margem de 0,009) e remedido em 10/09 contra 46 trechos de 3 artigos (margem de 0,007): mudou a fonte, mudou a margem, e ninguém mexeu no número. Com o suporte escrevendo artigos, o acervo vai continuar andando e o teto anda junto sem que nada quebre — a falha dele é silenciosa nas duas direções: acerto virando escalada, ou trecho errado passando. O método, as 40 perguntas e o viés (as 27 com resposta foram escritas por quem sabia a resposta; os acertos preservados são o melhor caso) estão em "Como remedir", na seção do teto. | **O acervo indexado mudar de ordem de grandeza** (46 trechos em 10/09; chegando às centenas, remedir), **ou entrar artigo de produto que hoje não tem manual** (Deimos, EBS-010, Mark X, Mercury) — as 40 perguntas não têm nenhuma sobre eles, então remedir inclui escrever perguntas para esse produto. Trocar o modelo de embedding invalida a medição inteira e também é gatilho. |
 | **Contador de artigo útil sem voto identificado** | `POST /kb/articles/{id}/feedback` incrementa sem registrar quem votou; o mesmo usuário incrementa em laço. Não vaza nada. | O número for usado para decidir alguma coisa. |
+| **O chamado não sabe quem é o cliente quando o staff o abre** | Medido em 18/09/2026: `Ticket` tem exatamente duas FKs para `users` — `creator_id` e `assignee_id` —, `TicketCreate` não tem campo de destinatário e `creator_id = actor.id` é incondicional. Quando um técnico abre chamado em nome de alguém (prática que o próprio código reconhece em comentário), **o cliente real fica sem vínculo nenhum**: some da listagem dele, leva 404 no detalhe, no chat e nos anexos, e a pesquisa de satisfação fica travada. Na mesma medição: 23 chamados, 4 abertos por staff, **os 4 já fechados e nenhum ativo**. Por isso a telefonia sai com o caminho barato — a ligação só aparece quando o criador do chamado é `role=client`, e nos demais a ação fica indisponível com motivo, em vez de discar para a pessoa errada. | **Antes de suportar formalmente a abertura de chamado por staff em nome de um cliente.** A saída é um `requester_id`/`client_id` explícito no chamado, com migration e backfill do histórico — e aí ele passa a ser a fonte do telefone da ligação, no lugar do criador. |
 | **Antivírus aceita quando está fora do ar** | Bloquear upload com o ClamAV indisponível derrubaria o anexo por falha de infraestrutura. Hoje o estado é reportado, não mais silencioso, e há script de revarredura. | O ClamAV estiver no ambiente e estável — aí bloquear passa a custar pouco. |
 
 
@@ -945,6 +2129,969 @@ caiba numa rodada de hora em hora, ou que não possa competir com as requisiçõ
 pelo mesmo processo — aí sim vale subir uma fila de verdade. A decisão de qual
 ferramenta fica em aberto de propósito: escolher agora, sem o problema na mão,
 foi exatamente o que produziu o pacote morto.
+
+### Telefonia (API4COM): o que já está fechado com o fornecedor
+
+Nada da integração está implementado — o que existe é a Fase 1A do telefone,
+acima. O que segue é contrato **confirmado**, registrado para que ninguém
+precise redescobrir, e para que a implementação não copie o material
+desatualizado que circula.
+
+| Item | Valor confirmado |
+|---|---|
+| Autenticação | `Authorization: <token>` — **o token cru, SEM o prefixo `Bearer`**. Confirmado pelo suporte e medido na nossa conta (`GET /users/me` → HTTP 200). |
+| Endpoint de chamada | `POST /calls`. O `POST /dialer` está **descontinuado** na documentação oficial e devolve um id que não é o da chamada. |
+| Payload | `caller`, `called`, `extension`, `metadata` — o `{extension, phone, metadata}` que aparece em material antigo é o da rota morta. |
+| `webhookVersion` | literal **`"1.8"`**, sem o prefixo `v`. ⚠️ A nossa conta tem uma integração armazenada como `v1.8`; o valor a ENVIAR é `1.8`, confirmado pelo suporte. |
+| `webhookConstraint` | `{"metadata": {"gateway": "HelpHS"}}` — recomendação direta do suporte para esta integração. A chave é definida por quem chama (a integração `pipedrive` da mesma conta usa `api4comGateway`), então o `POST /calls` precisa enviar `metadata.gateway = "HelpHS"` **exatamente assim**, ou a entrega para em silêncio. |
+| Eventos | `channel-answer` e `channel-hangup`, e só esses dois. |
+
+⚠️ **Duas integrações da conta estão sem filtro** (`webhook` com
+`webhookConstraint` nulo, `oficina` com `{}`). Se constraint vazia significar
+"sem filtro", os webhooks das chamadas do HelpHS também serão entregues nesses
+endpoints, que pertencem a outros sistemas da empresa. É mais um motivo para o
+`metadata` não levar nome, e-mail, CPF nem texto do chamado — só identificadores.
+
+**Quatro coisas seguem em aberto, e nenhuma pode ser resolvida por suposição:**
+
+- **o formato aceito em `POST /calls.called`** — a documentação mostra
+  `4833328530` e `+554833328530` para a mesma rota, e o suporte não definiu
+  canônico. O que `GET /calls` devolve descreve o que a API emitiu, não o que
+  ela aceita;
+- **o fuso semântico dos webhooks** — os exemplos vêm sem offset. O `GET
+  /calls` da nossa conta devolve ISO com offset explícito, mas isso é outro
+  contrato. Gravar data de webhook antes de resolver isto é erro de três horas
+  que não levanta exceção nenhuma;
+- **o payload completo de `channel-answer`** — o evento existe, exemplo
+  público não;
+- **autenticação de origem do webhook** — não há HMAC, assinatura, secret nem
+  faixa de IP documentados. A proteção terá de ser desenhada do nosso lado.
+
+### Fase 2A da telefonia: a fundação existe e não liga para ninguém
+
+`backend/app/services/api4com.py` sabe fazer `POST /calls`. **Nenhum router,
+lifespan ou laço de fundo o importa**, e isso é o desenho, não uma etapa que
+faltou: em produção a 2A continua incapaz de iniciar ligação por ausência de
+consumidor. Quem ligar o primeiro precisa ter lido as quatro categorias de erro
+abaixo.
+
+**A integração nasce desligada.** `API4COM_ENABLED=false`, pelo mesmo raciocínio
+do `HELO_ENABLED`, só que mais forte: ligada, ela disca para o telefone de uma
+pessoa.
+
+| Variável | Default | Papel |
+|---|---|---|
+| `API4COM_ENABLED` | `false` | interruptor |
+| `API4COM_TOKEN` | vazio | credencial, **`SecretStr`** |
+| `API4COM_BASE_URL` | `https://api.api4com.com/api/v1` | configuração com padrão, critério do `DEEPSEEK_BASE_URL` |
+| `API4COM_TIMEOUT_SECONDS` | `15` | teto de UMA tentativa |
+
+`API4COM_CALLER` e `API4COM_EXTENSION` **não existem**. O número de origem tem
+formato ainda não definido com o fornecedor, e o ramal é identidade do agente —
+dado de usuário, não configuração global. Os dois são argumentos de
+`create_call` até a Fase 2C resolver a origem deles.
+
+#### Três divergências deliberadas do resto da casa
+
+**1. `SecretStr`, e é o único do projeto.** `smtp_password`,
+`deepseek_api_key` e `mfa_secret_encryption_key` são `str` cru e saem por
+extenso em `repr`, `str`, `model_dump` e `model_dump_json` — o que os segura
+hoje é disciplina de quem escreve log, não o tipo. Segredo novo não precisa
+nascer com essa dívida. O valor é lido por `get_secret_value()` num único
+ponto: a montagem do `Authorization`. Um teste documenta o ESCOPO da
+divergência e cai se alguém converter os antigos sem conversar sobre migração
+de painel.
+
+**2. A validação de boot roda também em dev e testing.** Todas as outras
+validações do `model_post_init` saem cedo em `is_development or is_testing`,
+porque protegem contra subir PRODUÇÃO com valor de desenvolvimento — e em dev
+aquele valor é o certo. Esta protege contra ligar a integração sem ter como
+autenticar, o que está errado em qualquer ambiente. Por isso a chamada fica no
+**topo** do `model_post_init`, antes do `return`; há teste que prende essa
+posição.
+
+**3. A exceção de configuração NÃO é `ValueError`.** Enquanto era, o pydantic a
+embrulhava num `ValidationError` — que imprime `input_value=` com o dicionário
+de entrada **truncado no meio**, cabeça e cauda visíveis. MEDIDO no pydantic
+2.11.3, com o token vindo do ambiente e outra validação falhando: os 22
+caracteres finais do token saíam na mensagem, e iam para o log de boot.
+`ConfiguracaoDaTelefoniaInvalidaError` herda de `RuntimeError`, que o pydantic
+deixa subir intacta. Consequência: `pytest.raises(ValueError)` não pega esta.
+
+#### Por que nunca pode haver retry em `POST /calls`
+
+É a **primeira escrita externa** do HelpHS. Todas as outras chamadas que saem
+daqui são leitura (ViaCEP, BrasilAPI) ou idempotentes na prática (DeepSeek,
+embedding). Escrita externa traz o problema que nenhuma delas tem: quando a
+resposta não volta, não dá para saber se o outro lado agiu — e aqui "agir"
+significa tocar o telefone de alguém.
+
+Medido no `httpx` 0.28.1 / `httpcore` 1.0.9 instalados:
+
+- `retries` default é **0** nos dois transportes;
+- o laço de retentativa vive em `_connect()` e captura estritamente
+  `(ConnectError, ConnectTimeout)` — cobre TCP/TLS, e **nenhum byte de
+  requisição é escrito ali**. `ReadTimeout`, 5xx e 429 nunca são repetidos,
+  nem com `retries` alto;
+- a **única** porta de duplicação é o redirect: `follow_redirects` vem `False`,
+  mas 307 e 308 preservam método e corpo (`_redirect_method` só rebaixa para
+  GET em 301/302/303). Ligar redirect no cliente da telefonia criaria duas
+  ligações com um clique.
+
+Por isso `retries=0` e `follow_redirects=False` vão **explícitos**, mesmo sendo
+os defaults. `httpcore` é transitiva e **não está pinada** (só `httpcore==1.*`
+pelo metadado do httpx): pinar foi descartado para não mexer no gate de
+dependências, e quem avisa se um rebuild mudar o comportamento é o teste que
+prende `await_count == 1`.
+
+#### As quatro categorias de erro respondem sempre a mesma pergunta
+
+**A ligação saiu?**
+
+| Situação | A ligação saiu? | Exceção |
+|---|---|---|
+| flag desligada | não houve tentativa | `Api4ComDesligadaError` |
+| `ConnectError`, `ConnectTimeout` | não houve comunicação HTTP útil | `Api4ComIndisponivelError` |
+| **HTTP 4xx** | rejeição HTTP confirmada | `Api4ComRecusadaError` |
+| **HTTP 5xx** | ⚠️ **INDETERMINADO** | `Api4ComResultadoIndeterminadoError` |
+| **HTTP 3xx** | ⚠️ **INDETERMINADO** | `Api4ComResultadoIndeterminadoError` |
+| transporte após conexão | ⚠️ **INDETERMINADO** | `Api4ComResultadoIndeterminadoError` |
+| 2xx com corpo ilegível | ⚠️ **INDETERMINADO** | `Api4ComResultadoIndeterminadoError` |
+
+⚠️ **5xx não significa que a chamada não ocorreu, e essa é a linha que custa
+caro.** O fornecedor pode ter recebido o POST, disparado a ligação e só então
+quebrado por dentro: o 500 descreve o estado do servidor dele, não o do telefone
+de quem ia receber. A primeira versão deste módulo tratava todo não-2xx como
+recusa — o que autorizaria uma segunda tentativa e tocaria o telefone duas
+vezes. `Api4ComRecusadaError` é **só 4xx**, e a afirmação que ela faz é sobre a
+REQUISIÇÃO ter sido rejeitada, nunca sobre o telefone.
+
+3xx pela mesma razão: com `follow_redirects=False` o redirect chega sem ter sido
+seguido, e um redirect inesperado num endpoint de escrita não é sucesso nem
+recusa de domínio. Nunca seguir, nunca reenviar.
+
+O resto do indeterminado leva demais `TransportError` (leitura, escrita,
+protocolo, pool, proxy). `PoolTimeout` e `ProxyError` entram aí de propósito —
+dá para argumentar que a requisição não saiu, mas o argumento depende de
+detalhe interno de biblioteca não pinada, e o custo de errar para o lado
+otimista é ligar duas vezes para a mesma pessoa.
+
+**Em TODOS os casos: zero retry automático de `POST /calls`.**
+
+Só a `Api4ComRecusadaError` guarda atributo, e é um `status_code`. **Nenhuma
+guarda `Response` ou `Request`**: o objeto do httpx carrega os cabeçalhos por referência, e uma
+exceção que o segurasse levaria o `Authorization` para dentro de qualquer
+traceback. Pelo mesmo motivo a tradução usa `from None`.
+
+#### `metadata` é fechado, e o motivo não é zelo
+
+O corpo leva exatamente `{"gateway": "HelpHS"}`, sem parâmetro que permita
+acrescentar nada — não dá para sobrescrever `gateway` porque não há por onde
+passar. Duas integrações desta conta no fornecedor estão **sem filtro**
+(`webhookConstraint` nulo e `{}`), e se constraint vazia significar "sem
+filtro", os webhooks das nossas chamadas serão entregues a endpoints de outros
+sistemas da empresa. Enquanto isso não for resolvido, `metadata` não carrega
+nome, e-mail, documento, telefone nem texto de chamado.
+
+#### `diagnose=False` nos três sinks do loguru
+
+Não é da telefonia; é consequência de introduzir um segredo externo. O default
+do loguru é `diagnose=True`, que acrescenta ao traceback o **valor das
+variáveis locais** citadas na linha exibida de cada quadro. Uma função que
+monte um `Authorization` passaria a imprimir a credencial em qualquer exceção
+que atravessasse aquele quadro. O patcher de `_SEGREDO_NA_QUERY` não alcança
+isso: ele reescreve `record["message"]`, e o bloco de diagnóstico é montado
+depois, ao formatar a exceção. `backtrace` ficou como estava — ele mostra os
+quadros e não imprime valor nenhum.
+
+#### O que a 2A NÃO resolve
+
+`create_call` repassa `caller`, `called` e `extension` **byte a byte como
+chegaram**. Não normaliza telefone, não acrescenta nem remove `+55`, não valida
+regra brasileira: o formato aceito em `called` segue em aberto com o fornecedor
+(ver a seção acima), e transporte que "conserta" o número cria uma segunda
+fonte de verdade competindo com `app/utils/telefone.py`.
+
+`Api4ComCreateCallResult` tem `status_code` e `payload`, e **nenhum campo para
+o identificador da chamada**: o schema da resposta de `POST /calls` não está
+confirmado. Inventar `id`, `call_id` ou `data.id` criaria um contrato que o
+fornecedor não prometeu. **A Fase 2B segue bloqueada até haver evidência.**
+
+### Fase 2B: a telefonia ganha memória, e o contrato do `id` sai do escuro
+
+A Fase 2A dizia, em código e em documento, que o schema da resposta de
+`POST /calls` "não estava confirmado". **Estava.** A documentação oficial
+baixada na Fase 0 responde a pergunta, e ninguém a tinha lido até o fim. Fica
+registrado porque o erro foi de método, não de fato: tratamos por "não
+determinado" algo que estava escrito, e por isso a 2B nasceu bloqueada sem
+precisar.
+
+#### O que a documentação oficial diz
+
+`POST /calls`, seção **Respostas / 200**:
+
+```json
+{ "status": "200", "message": "successful request", "id": "1PkXhmBsYAvr9legLB2d7BimT0Q" }
+```
+
+E a prosa da mesma página: *"o `id` retornado por este método corresponde ao
+mesmo ID da chamada exibido na Lista de Chamadas, podendo ser usado tanto para
+consultas quanto para cancelar a chamada."* A página do
+`POST /calls/{id}/hangup` confirma do outro lado: parâmetro de caminho `id`,
+**tipo `string`, obrigatório**.
+
+Portanto está estabelecido: **campo `id`, no topo do JSON, tipo `string`,
+mesmo identificador usado no hangup.**
+
+#### ⚠️ O formato NÃO está estabelecido, e é por isso que ele é opaco
+
+Dois documentos oficiais mostram formatos diferentes **para o mesmo campo**:
+
+| Fonte | Exemplo | Forma |
+|---|---|---|
+| Referência da API (`clickToCall`, `hangupCall`) | `1PkXhmBsYAvr9legLB2d7BimT0Q` | 27 caracteres, base62 |
+| Guia "Integração utilizando Webphone próprio" | `bdf199fa-f85b-4378-80cd-0ac28c1355e9` | UUID textual, 36 |
+| Payload do webhook `channel-hangup` | `2ee13fa4-975c-499d-bbb8-5177ff418316` | UUID textual, 36 |
+
+Consequência direta, e é a decisão de schema da 2B: a coluna é **`TEXT`**, não
+`uuid` nativo. O tipo nativo do PostgreSQL **rejeitaria o primeiro formato**. O
+HelpHS trata o identificador como **string opaca**: não valida formato, não
+valida comprimento, não transforma, não normaliza caixa nem espaço. Há teste
+que grava `"  com-espaco  "` e exige que volte igual.
+
+Estreitar depois, quando o fornecedor confirmar, é uma linha. Ter quebrado em
+produção por validar o que ele nunca prometeu, não.
+
+#### Só 200 é sucesso. 201 e 202 são indeterminados
+
+A documentação publica **apenas 200** como criação aceita. Aceitar 201 seria
+assumir contrato que o fornecedor não escreveu — e se ele responder 202 com o
+corpo em outro formato, teríamos aceitado um identificador que não sabemos ler.
+A pergunta está na lista enviada ao suporte.
+
+A classificação completa do `services/api4com.py` passa a ser:
+
+| Situação | A ligação saiu? |
+|---|---|
+| flag desligada | não houve tentativa |
+| `ConnectError` / `ConnectTimeout` | não houve comunicação HTTP útil |
+| HTTP 4xx | rejeição HTTP confirmada |
+| **HTTP 200 com `id` legível** | **SIM — e temos o identificador** |
+| HTTP 200 sem `id` utilizável | INDETERMINADO |
+| HTTP 201 / 202 / outro 2xx | INDETERMINADO |
+| HTTP 3xx e 5xx | INDETERMINADO |
+| transporte após conexão | INDETERMINADO |
+
+Para o 200, exigimos: corpo é JSON, é objeto, tem `id`, `id` é `str`, e tem
+pelo menos um caractere não-branco. Qualquer falha vira **indeterminado**, e
+não erro de contrato — houve HTTP 200, então o fornecedor provavelmente criou a
+chamada; o que falhou foi nossa capacidade de saber **qual**. Chamar isso de
+falha autorizaria uma segunda tentativa.
+
+#### `Api4ComCreateCallResult` encolheu
+
+Era `(status_code, payload)`; virou `(status_code, provider_call_id)`. A 2A
+devolvia o corpo inteiro porque não sabíamos qual campo importava. Agora
+sabemos, e carregar o resto seria mais um lugar por onde `message`, metadata ou
+dado de terceiro poderiam vazar para um log. Provado por busca que não havia
+consumidor de `.payload` antes de remover.
+
+#### `ticket_calls`: uma linha é uma TENTATIVA
+
+O nome importa. A linha nasce **antes** de existir chamada, e pode terminar sem
+que jamais saibamos se existiu.
+
+| Coluna | Tipo | Por quê |
+|---|---|---|
+| `id` | UUID | identidade interna; é o que a 2C poderá mandar no `metadata` para reconciliar |
+| `ticket_id` | UUID, FK `CASCADE` | como as outras sete filhas de `tickets` |
+| `initiated_by_id` | UUID, FK `SET NULL`, nulável | a tentativa é fato do chamado e sobrevive à exclusão da conta; quem some é a autoria |
+| `provider_call_id` | **TEXT, nulável, índice único** | string opaca; NULL é estado legítimo e frequente |
+| `creation_status` | String(20) + CHECK | ver abaixo |
+| `provider_http_status` | Integer, nulável | NULL quando não houve resposta — a diferença entre "não respondeu" e "respondeu 500" |
+
+**Por que `provider_call_id` aceita NULL:** porque o estado mais perigoso da
+integração é justamente aquele em que não temos o identificador. Uma coluna
+NOT NULL tornaria o indeterminado **impossível de registrar** — e é ele que
+precisa ser reconciliado, e o que impede uma segunda tentativa às cegas.
+
+**O CHECK que existe:** `creation_status <> 'confirmed' OR provider_call_id IS
+NOT NULL`. Confirmada sem identificador seria um registro que afirma saber da
+chamada sem ter como apontá-la, nem para consultar nem para desligar. **O
+inverso não é imposto**: ter identificador sem estar `confirmed` é estado
+legítimo que a reconciliação da 2D pode produzir.
+
+#### `creation_status` é String com CHECK, e não enum nativo
+
+Decisão de custo, com os dois precedentes desta casa na mão: acrescentar valor
+a enum nativo exige `ALTER TYPE ... ADD VALUE`, que aqui não pode ser citado em
+DDL posterior porque o alembic roda a cadeia inteira numa transação só; e
+remover valor custa recriar o tipo e converter toda coluna que o usa, como a
+`f2a3b4c5d6e7` teve de fazer com `ticketcategory`. Esta máquina de estados
+**ainda vai crescer na 2D**.
+
+Os cinco estados descrevem o **resultado da criação**, não o estado telefônico:
+`pending`, `confirmed`, `rejected`, `unavailable`, `indeterminate`. `ringing`,
+`answered` e `hangup` chegam pelo webhook e são outra coluna, em outra fase — há
+teste que recusa esses três valores nesta.
+
+#### O que a 2B deliberadamente NÃO guarda
+
+Telefone, `caller`, `extension`, cabeçalho, corpo da requisição, corpo da
+resposta, `message` do fornecedor, metadata, URL de gravação. O telefone
+canônico continua em `users.phone`.
+
+A garantia não é disciplina: **nenhuma função de `services/telefonia.py` aceita
+esses dados como parâmetro**, e há teste que varre as assinaturas e a lista de
+colunas procurando por eles. Não há como persistir por descuido.
+
+#### `services/telefonia.py` não conhece o transporte
+
+Ele não importa `httpx` nem `api4com.py` — provado por AST em teste. É o mesmo
+arranjo de `helo_embedding.py` (cliente) e `helo.py` (domínio). A orquestração
+`banco → API4COM → banco` é da Fase 2C; a máquina de estados fica provada antes
+de haver efeito externo para depurar junto.
+
+#### Ainda em aberto, e registrado
+
+- **Idempotência: NÃO DOCUMENTADA / NÃO CONFIRMADA.** A varredura em toda a
+  documentação não encontrou `Idempotency-Key`, `externalId` nem
+  `clientReference` — mas ausência na documentação não é prova de inexistência.
+  Sem resposta do fornecedor: nada de chave de idempotência inventada, nada de
+  retry automático. É pergunta aberta para a 2C.
+- **Formato e comprimento do `id`** — pergunta enviada ao suporte.
+- **Status 201/202** — idem.
+- **`metadata` com o UUID interno da tentativa**: a documentação afirma que a
+  metadata enviada em `POST /calls` chega no webhook, o que abriria a
+  reconciliação do indeterminado. **Não implementado na 2B** — o payload seguiu
+  só com `gateway` até a **Fase 2D.2**, que o resolveu. ⚠️ Este item dizia
+  "decisão da 2C", e a 2C não o decidiu: quem decidiu foi a 2D.2, depois de a
+  2D.1 medir que as alternativas do fornecedor não serviam. Ver **Fases 2D.1 e
+  2D.2** mais abaixo.
+- **Duplo clique e concorrência**: a 2B não cria unique de `pending` por
+  chamado, lock nem rate limit. A tabela só precisa conseguir representar o
+  estado; a proteção é decisão da 2C, junto com o endpoint.
+
+#### Correção ao que a Fase 0 registrou sobre o formato de `called`
+
+A sonda anota que "a doc mostra três grafias para o mesmo número". Separando
+por rota, isso não se sustenta:
+
+| Grafia | Onde | Natureza |
+|---|---|---|
+| `4833328530` | `POST /calls` (rota atual), campo `called` | **entrada documentada** |
+| `+554833328530` | `POST /dialer` **descontinuada**, campo `phone` | rota morta, campo diferente |
+| `04833328530` | payload do webhook, campo `called` | **saída**, não entrada |
+
+A rota atual mostra **uma** grafia. Um exemplo não é especificação — a pergunta
+segue na lista do suporte —, mas é bem mais forte que "três grafias
+contraditórias".
+
+### Fases 2D.1 e 2D.2: a gravação existe, e a correlação do CDR passou a ser nossa
+
+A 2D.1 foi a primeira rodada da telefonia feita **com token, contra produção, só
+leitura**. Ela respondeu perguntas que estavam abertas desde a 2B e, mais
+importante, **derrubou duas suposições** que já estavam escritas neste documento.
+A 2D.2 implementou a única consequência que não dependia de decisão de ninguém.
+
+Vale o registro de método: a 2D.1 foi tentada antes sem token e **parou**. O
+`API4COM_TOKEN` é `SecretStr` alimentado só pelo ambiente do processo, não mora
+em tabela nenhuma, e da máquina de desenvolvimento não há caminho até o
+container — sem SSH, sem docker. A medição só aconteceu quando rodou **dentro**
+do container, por script sanitizado, com `SET default_transaction_read_only = on`
+para que a garantia de leitura fosse do servidor e não da leitura do código.
+
+#### O que foi medido em produção, 30/09/2026
+
+| Medição | Resultado |
+|---|---|
+| `GET /extensions` encontra o ramal **1019** | sim |
+| `gravar_audio` do 1019 | **`1` — gravação LIGADA** |
+| Campo confiável de presença/online no objeto do ramal | **não existe** |
+| `metadata` presente nas chamadas consultadas | **100 de 100** |
+| Chamadas do HelpHS identificáveis por `metadata.gateway="HelpHS"` | sim, **inspecionando localmente** |
+| `record_url` em chamadas atendidas | presente |
+| Host dos `record_url` observados | `listener.api4com.com` |
+| Extensão aparente | `.mp3` |
+| Query string nas URLs observadas | **ausente** |
+| `duration` | inteiro |
+
+Campos que o `GET /calls` devolveu: `id`, `metadata`, `record_url`, `duration`,
+`started_at`, `ended_at`, `call_type`, `hangup_cause`, entre outros.
+
+| Desfecho observado | `hangup_cause` | `duration` | `record_url` |
+|---|---|---|---|
+| atendida | `NORMAL_CLEARING` | `> 0` | presente |
+| não completada | `ORIGINATOR_CANCEL`, `NUMBER_CHANGED` | `0` | ausente |
+
+**Transcrição: nenhum campo apareceu.** Não vieram `transcript`,
+`transcription`, `transcription_text`, `summary`, `quality`, `evaluation` nem
+`analysis`. ⚠️ Isso é afirmação sobre **este endpoint medido**, e nada além:
+não prova que o produto comercial de IA da API4COM não exista. Prova que não se
+pode construir transcrição em cima do `GET /calls` como ele é hoje.
+
+A ressalva se confirmou: em 01/10/2026 o suporte enviou documentação do módulo
+**Native AI**, que é separado e entrega por outro caminho. Ver *O que sabemos
+sobre a Native AI da API4COM* adiante — e a decisão de não contratá-lo.
+
+#### O que o suporte da API4COM confirmou por escrito
+
+**Webphone** — e isto encerra a esperança que a 2C.6 tinha deixado em aberto:
+
+- incluir o domínio `helphs.healthsafetytech.com` **não** habilita comunicação
+  direta com o Webphone;
+- é possível verificar se o **ramal está registrado**, mas isso **não** indica
+  se o Webphone está ativo e disponível para ligar — são coisas diferentes;
+- **não existe evento** que avise o HelpHS quando o ramal ficar online;
+- o Webphone **não pode ser aberto** por sistema externo;
+- com o Webphone **já aberto**, o `POST /calls` consegue direcionar o foco para
+  a extensão.
+
+Consequência, e é regra: **manter o fluxo manual de preparação do Webphone.**
+Não documentar `sessionStorage` nem qualquer sinal local como presença real —
+ele registra que alguém **leu uma orientação**, nunca que o ramal está pronto. O
+HTTP 424 continua sendo o sinal operacional observado de ramal ou Webphone
+indisponível para aquela tentativa. **Não inventar detecção automática de
+disponibilidade**: não existe meio honesto de fazê-la hoje.
+
+**Gravação:**
+
+1. `gravar_audio` é configuração **do ramal**.
+2. Com gravação habilitada, o `record_url` aparece no `GET /calls` e também em
+   payloads de webhook.
+3. O `record_url` normalmente fica disponível **imediatamente** após o
+   encerramento.
+4. **Não há prazo de expiração definido** para a gravação.
+5. O link MP3 é **estático** e permite download e reprodução direta.
+6. A gravação contém **os dois lados** da conversa.
+7. O `GET /calls` aceita filtros por intervalo de datas, ramal e origem/destino.
+8. É possível usar identificador próprio em integrações por meio de `metadata`.
+
+⚠️ O item 8 diz que **dá para enviar** identificador próprio. Ele **não** diz
+que dá para **filtrar** por ele no servidor — e a nossa medição mostrou o
+contrário disso. Ver abaixo.
+
+#### As três âncoras que não servem
+
+Esta é a parte da 2D.1 que mudou o desenho, e cada linha é medição, não leitura
+de documentação.
+
+**1. `provider_call_id` NÃO é chave de reconciliação do CDR.** O identificador
+que o `POST /calls` devolve na criação **não corresponde** ao campo `id` que o
+`GET /calls` devolve depois para a mesma chamada. A correlação exata foi testada
+e deu **0 matches**. Buscar o CDR por ele não encontra.
+
+Ele **continua armazenado e continua valendo** pelo que de fato é: o
+identificador devolvido no efeito de criação. É a prova de que o fornecedor
+aceitou a chamada, é o que sustenta a `CheckConstraint` de `confirmed` e é o que
+torna a tentativa idempotente pelo índice único. O que mudou foi a
+**descrição** — o comentário da coluna sugeria que servia para localizar a
+chamada, e isso agora está medido como falso. Documentação interna sabidamente
+errada é pior que ausente: alguém a leria como contrato.
+
+**2. O filtro server-side por `metadata` NÃO é confiável.** Pedir
+`metadata.gateway = HelpHS` responde **HTTP 200** e devolve registros que **não
+são todos do HelpHS**. Um 200 não é prova de que o filtro filtrou. ⚠️ Nenhuma
+reconciliação futura pode assumir que esse filtro restringe o resultado.
+
+**3. Horário não é identidade.** Foi observada diferença sistemática de
+**aproximadamente 3 horas** entre `ticket_calls.created_at` e o `started_at`
+devolvido pela API4COM. Fica registrado como observação medida e **nada mais**:
+não foi investigado nem corrigido de propósito. Mesmo resolvido, horário não
+serve como mecanismo definitivo de correlação.
+
+#### A decisão: um identificador nosso, opaco, no `metadata`
+
+Caíram as três âncoras do fornecedor. Sobra o que nós mesmos plantamos:
+
+```json
+{ "gateway": "HelpHS", "ticket_call_id": "<UUID interno>" }
+```
+
+`ticket_call_id` é **UUID opaco**: sem telefone, sem nome, sem e-mail, sem
+número do chamado, sem conteúdo do chamado, **sem PII de espécie nenhuma**. Ele
+identifica uma linha do nosso banco e não diz nada sobre quem foi ligado.
+
+A reconciliação futura deve **listar** chamadas, **inspecionar o `metadata`
+localmente** e casar `metadata.ticket_call_id` com `ticket_calls.id`. Não pode
+depender do filtro server-side por `metadata`, não pode depender de
+`provider_call_id` e não pode depender só de horário.
+
+#### Fase 2D.2: o que entrou no código
+
+`api4com.create_call` ganhou um quarto argumento, **obrigatório** e keyword-only:
+
+```python
+create_call(*, caller: str, called: str, extension: str, ticket_call_id: uuid.UUID)
+```
+
+e o corpo do `POST` passou de `{"gateway": "HelpHS"}` para
+`{"gateway": "HelpHS", "ticket_call_id": str(ticket_call_id)}`. O único call
+site, em `ligacao.py`, passa `ticket_call_id=tentativa.id`.
+
+O parâmetro é **obrigatório de propósito**: com um call site só, um opcional
+criaria a chance de alguém esquecer e a correlação desaparecer sem que teste
+nenhum reclamasse.
+
+⚠️ **A porta que a 2A fechou continua fechada.** A 2A proibiu deliberadamente
+passar `metadata` para este módulo, porque duas integrações desta conta estão
+sem filtro de webhook e o que sai daqui pode chegar a endpoints de outros
+sistemas da empresa. A 2D.2 **não** afrouxou isso:
+
+- o `metadata` é montado **exclusivamente** dentro de `api4com.py`;
+- **não existe** parâmetro `metadata: dict`, e também **não existe** `**kwargs`;
+- o conjunto de chaves é **FECHADO** em `{"gateway", "ticket_call_id"}`, e há
+  teste que reprova a chave extra;
+- o tipo interno é `uuid.UUID`, e é essa a trava que impede telefone ou e-mail
+  de entrarem por descuido de chamador — o `str()` acontece só na montagem do
+  JSON.
+
+O `id` já é **durável** quando o fornecedor o recebe: a linha é commitada duas
+vezes antes do efeito externo (`pending` e `dispatching`), então o identificador
+enviado nunca pode ser apagado por um rollback.
+
+Intocados: os seis estados, o tratamento do HTTP 424, a ausência de retry
+automático, o rate limit, o lock do Redis, o `provider_call_id` em si, o schema
+público, os routers, o frontend e os logs. **Nenhuma mudança de schema e
+nenhuma migration** — `ticket_call_id` é a coluna `id` que já existia.
+
+Provado por **mutação, 6 de 6 detectadas e zero sobreviventes**: remover a
+chave, grafá-la em camelCase, enviar o UUID sem `str()`, dar default ao
+parâmetro, acrescentar chave de PII ao `metadata`, e mandar `ticket_id` no lugar
+de `tentativa.id`.
+
+#### Validação ponta a ponta em produção
+
+**Fase 2D.2 validada ponta a ponta em produção** em 01/10/2026, com uma chamada
+controlada feita **depois** do deploy — nenhuma chamada histórica foi reutilizada,
+porque a correlação é prospectiva e reaproveitar o passado provaria outra coisa.
+
+| O que foi verificado | Resultado |
+|---|---|
+| Chamada posterior ao deploy | sim |
+| `creation_status` | `confirmed` |
+| `provider_http_status` | 200 |
+| `provider_call_id` presente | sim |
+| `GET /calls` | HTTP 200 |
+| CDR localizado por `metadata.ticket_call_id` | **sim** |
+| `metadata.gateway` | `HelpHS` |
+| `metadata.ticket_call_id` == `ticket_calls.id` | **igualdade exata** |
+| `duration` | 9 |
+| `hangup_cause` | `NORMAL_CLEARING` |
+| `record_url` presente | sim, host `listener.api4com.com` |
+
+O CDR foi achado **sem usar `provider_call_id`** e **sem heurística de horário** —
+listando chamadas e inspecionando o `metadata` localmente, que é exatamente o
+procedimento que a 2D.1 tinha indicado como o único confiável. Nenhum áudio foi
+baixado, o `record_url` não foi aberto, e nenhuma escrita tocou o banco durante a
+validação (a consulta correu com `default_transaction_read_only = on`, para que a
+garantia fosse do servidor e não da leitura do código).
+
+**O que isto fecha, e que vale como regra daqui para frente:**
+
+- **`metadata.ticket_call_id` é a chave determinística de correlação** de CDR para
+  chamadas novas. Determinística, e não heurística: é igualdade de UUID.
+- A correlação é **prospectiva**. Chamadas anteriores a este deploy continuam sem
+  esse `metadata` do lado do fornecedor, e não há backfill — ver a subseção
+  seguinte.
+- **`provider_call_id` continua armazenado e continua NÃO sendo chave do CDR.**
+  Vale pelo que é: prova de que a criação foi aceita.
+- **Horário não é chave.** Serve, no máximo, para separar "antes" de "depois" de
+  um deploy.
+- **O filtro server-side por `metadata` continua não confiável** — responde 200 e
+  traz registros alheios. Quem reconciliar inspeciona localmente.
+
+⚠️ Validada a correlação, **nada sobre gravação foi liberado**. O HelpHS ainda não
+baixa, não armazena, não reproduz e não transcreve áudio, e os dois BLOQUEIOS
+abaixo continuam de pé.
+
+#### Estado em 09/10/2026: o evento de encerramento em produção, e o ramal 1018
+
+Três itens que a auditoria de 02/10 listava como pendentes saíram da lista. Cada
+um com a medição que o tirou de lá.
+
+**A migration está aplicada.** Conferido no contêiner: `alembic current` devolve
+`k7f8g9h0i1j2 (head)` e `alembic heads` devolve o mesmo. As quatro colunas do
+desfecho — `duration_seconds`, `hangup_cause`, `recording_available`,
+`hangup_event_received_at` — existem em produção.
+
+**O endpoint foi implantado e validado em produção.** `POST
+/api/v1/integrations/telefonia/call-ended`, exercitado contra o ambiente real:
+
+| O que foi exercitado | Resultado |
+|---|---|
+| segredo incorreto | **401** |
+| segredo correto + `ticket_call_id` inexistente | **404** |
+| corpo com `record_url` a mais | **422** |
+| autenticação sem segredo configurado | fail-closed, não abre |
+| conjunto fechado do corpo (`extra="forbid"`) | recusa campo a mais |
+| `record_url` como campo de entrada | **não é aceito** |
+
+Os três códigos são exatamente a separação que o desenho pedia: 401 não distingue
+ausente de errado, 404 diz "esse evento não é nosso" em vez de tratá-lo como
+reentrega benigna, e 422 torna observável a tentativa de mandar o endereço da
+gravação entre serviços.
+
+⚠️ **O que isso NÃO prova.** Nenhum evento real chegou. O que foi validado é o
+endpoint: autenticação, contrato e recusa. A entrega de um `channel-hangup`
+verdadeiro depende do n8n, que não foi tocado — logo a **integração real segue
+NÃO VALIDADA**, e as quatro colunas do desfecho continuam sem nenhuma linha
+preenchida em produção.
+
+**O ramal 1018 foi provisionado e medido.** O Gabriel está com
+`role = technician`, `status = active` e `api4com_extension = 1018`. Do lado do
+fornecedor, `GET /extensions` respondeu **200**, o 1018 foi **encontrado** e
+`gravar_audio = 1`.
+
+O objeto da extensão traz campo de senha SIP; **o valor não foi exposto** em
+nenhum ponto da medição nem deste registro. E o que já se sabia continua
+valendo: o objeto **não** oferece presença nem estado online — saber se o
+Webphone está aberto permanece impossível pela API.
+
+**O 1019 da Suelen não foi tocado nesta rodada.** `gravar_audio = 1` segue como
+medido em 30/09. A associação pessoa↔ramal é *confirmada operacionalmente* e não
+tem prova no código — nem deveria ter: ramal é dado em `users.api4com_extension`,
+com índice único, e nunca constante no código. Os números 1018 e 1019 **não
+aparecem** em `backend/app/`.
+
+#### ⚠️ A correlação é PROSPECTIVA, e não há backfill
+
+As chamadas criadas antes de a 2D.2 estar em produção já existem **no
+fornecedor** com `metadata` sem `ticket_call_id`. Esse metadata é do lado de lá e
+não há backfill seguro conhecido para reescrevê-lo. A reconciliação determinística
+cobre **apenas** chamadas criadas depois de a instrumentação estar no ar — o
+histórico anterior continua sem âncora, e isso é consequência de medir antes de
+instrumentar, não defeito do desenho.
+
+#### ⚠️ BLOQUEIO: `record_url` é segredo de acesso ao áudio
+
+Juntando o que o suporte confirmou — áudio **bidirecional**, link **estático**,
+**sem expiração definida**, com download direto — o `record_url` é um
+**segredo**: quem tem a URL tem a conversa inteira, das duas pessoas, para
+sempre.
+
+Portanto a arquitetura futura **não deve**:
+
+- mandar `record_url` ao navegador;
+- registrar `record_url` em log;
+- exibir URL externa no frontend;
+- tratar o fornecedor como camada de autorização do HelpHS.
+
+O caminho desejado, quando houver autorização para construí-lo:
+
+```
+API4COM → backend → download controlado → storage privado do HelpHS
+        → endpoint autorizado do HelpHS → staff autorizado
+```
+
+**Não implementar isso agora.**
+
+#### ⚠️ BLOQUEIO: a decisão de privacidade vem antes da função
+
+**Estado atual observado: a gravação já está habilitada no ramal 1019 hoje.**
+Fica registrado como fato, sem tentar resolver o tema jurídico aqui.
+
+Antes de habilitar qualquer reprodução ou transcrição para pessoas, precisa
+existir decisão organizacional e de LGPD sobre: finalidade da gravação; base
+legal; aviso ou consentimento quando aplicável; quem pode ouvir; quem pode ler
+transcrição; retenção do áudio; retenção da transcrição; exclusão; exportação;
+auditoria de acesso; dados sensíveis que possam aparecer na conversa; e política
+de download e compartilhamento.
+
+Isso **não** é trabalho de engenharia e não se resolve escrevendo código. Ver a
+seção **LGPD** deste documento.
+
+#### Gravação de chamadas: o que ficou decidido e o que ainda bloqueia
+
+A auditoria de 01/10/2026 mediu que a política de privacidade aprovada
+(PGS-TI-031, revisão 00) **não cobria** gravação de ligação: a seção 6 não tinha
+categoria de áudio, a seção 8 não tinha a finalidade, a seção 12 não tinha o
+provedor de telefonia e a seção 13 não tinha prazo. A política ganhou uma seção
+23 e cinco linhas nas seções existentes — ver `frontend/src/content/politica-privacidade.md`.
+
+⚠️ **A revisão da política NÃO foi incrementada, e isso é deliberado.** Pela
+seção 19 do próprio documento, elaborar e controlar versões é do Setor de
+Qualidade/SGI e aprovar é da Diretoria. O texto novo está escrito; o cabeçalho
+segue em **revisão 00** e a Tabela de Revisão e Aprovação segue intocada. Até que
+sejam atualizados, **o documento está internamente inconsistente de propósito** —
+o corpo descreve um tratamento que o cabeçalho ainda não versionou.
+
+⚠️ E a consequência operacional é maior que um número de revisão. A seção 15 diz
+que nova finalidade ou novo destinatário exigem **novo aceite** no primeiro acesso
+seguinte, e a seção 20 exige **comunicação prévia de 15 dias** aos usuários.
+Publicar esse texto, portanto, força re-aceite de toda a base. Não é mudança
+redacional.
+
+##### A. Decisões fechadas
+
+| Tema | Decisão |
+|---|---|
+| Finalidade | registro do atendimento; continuidade do suporte; auditoria operacional; apuração de divergências; melhoria da qualidade |
+| Acesso | **V1 staff-only**, pela regra de visibilidade do chamado |
+| Cliente | **sem acesso** a gravação e sem acesso a transcrição na V1 |
+| Download | **V1 sem download** — só reprodução controlada dentro do HelpHS |
+| `record_url` | **nunca** ao frontend, **nunca** em log |
+| Armazenamento | storage **privado**, endpoint **próprio** autenticado e autorizado por chamado |
+| Áudio x transcrição | recursos **separados** para autorização e auditoria |
+| IA paga | **fora de escopo** |
+| STT futuro | **local ou self-hosted** |
+| Logs | sem `record_url`, sem áudio, sem transcrição, sem payload bruto do fornecedor |
+| Correlação | `metadata.ticket_call_id`, validada em produção |
+
+⚠️ **O endpoint `/files/{token}` NÃO pode ser reaproveitado para gravação.**
+Medido: ele não recebe `current_user` e autoriza por **posse do token**, sem
+conferir visibilidade do chamado. Para anexo foi troca aceita; para áudio dos
+dois lados de uma conversa é outra classe de risco — link repassado é acesso, e a
+URL pode aparecer em log de proxy. Gravação exige caminho novo.
+
+Auditoria de acesso precisará distinguir `recording_played`, `recording_viewed`,
+`transcript_viewed`, `recording_deleted`, `transcript_deleted` e
+`transcript_reprocessed` — e `recording_downloaded`, se download existir algum
+dia. ⚠️ `AuditAction` é **Enum nativo do PostgreSQL** com 10 valores hoje:
+acrescentar valor **exige migration**, diferente de `creation_status`, que é
+`String` + `CheckConstraint` justamente para evitar isso. Nada disso foi criado
+nesta rodada.
+
+##### B. Pendências jurídicas e organizacionais — são elas que bloqueiam
+
+1. **Base legal** aplicável à gravação — do Encarregado. Não escolhida aqui, e
+   não se escolhe no código.
+2. **Texto final do aviso** ao titular e a forma de apresentá-lo.
+3. **Papel jurídico do provedor de telefonia.** ⚠️ Isto não é pendência só do
+   futuro: a seção 12 da política enumera infraestrutura, Resend, consulta de
+   CNPJ/CEP, provedor de IA, auditores e autoridades — e o provedor de telefonia
+   **não estava lá**, embora o telefone do cliente já seja compartilhado com ele
+   a cada ligação, com gravação ativa no ramal. A linha nova descreve o
+   tratamento sem afirmar enquadramento jurídico; **qualificá-lo formalmente
+   como Operador é decisão do Encarregado.**
+4. **Contrato / DPA / termos de tratamento** do provedor.
+5. **Subcontratados** do provedor.
+6. **Retenção definitiva** do áudio e da transcrição.
+7. **Eliminação no provedor** — anonimizar no HelpHS não apaga o áudio lá, e o
+   fornecedor declarou **não haver prazo de expiração definido**.
+8. **Classificação formal** da gravação segundo o PGS-TI-020.
+9. **Exportação e exercício de direito** do titular sobre a gravação.
+
+##### C. Proposta ainda NÃO aprovada
+
+> **PROPOSTA — NÃO É REGRA VIGENTE AINDA**
+>
+> Retenção do áudio: **90 dias**.
+>
+> Pendente de aprovação organizacional e jurídica. **Não foi publicado na
+> política**, e de propósito: a política diz apenas que o prazo será menor que o
+> do conteúdo dos chamados e que será definido antes da ativação. Anunciar 90
+> dias ao titular antes da aprovação criaria compromisso que ninguém assumiu — e
+> que a plataforma hoje não teria como cumprir, porque a rotina de expurgo só
+> está prevista para 30/06/2027 (seção 13.2 da política).
+>
+> A transcrição pode ter prazo próprio. **Não assumir o mesmo número.**
+
+#### O que a API4COM respondeu sobre privacidade da gravação
+
+Respostas do fornecedor obtidas em 09/10/2026. Estão separadas da interpretação
+de propósito: a coluna da esquerda é o que **ele** afirmou; o que fazemos com
+isso está na seção de decisões, e é nosso.
+
+| Fato confirmado pela API4COM | |
+|---|---|
+| DPA separado | **não existe** |
+| Cobertura contratual | Termos de Uso + Política do fornecedor cobrem **parte** dos pontos |
+| Onde o áudio fica | servidores **próprios** da API4COM |
+| Localização | **São Paulo, Brasil** |
+| Endpoint de exclusão | **não existe** |
+| Botão de exclusão no painel | **não existe** |
+| Exclusão específica | somente **via suporte**, sujeita a análise técnica e jurídica |
+| Link da gravação | **único por chamada** |
+| Áudio | **bidirecional** — as falas dos dois participantes |
+| `record_url` | disponibilizado **após** o encerramento da chamada |
+| HTTP 424 | ramal/Webphone **indisponível** |
+
+🔴 **O item que muda o quadro é a exclusão.** Sem endpoint e sem botão, o HelpHS
+**não consegue cumprir sozinho** um pedido de eliminação do titular sobre o
+áudio: a eliminação depende de abrir chamado no suporte do fornecedor e de uma
+análise que ele conduz. Isso não é detalhe de implementação — é uma limitação de
+**direito do titular**, e precisa de decisão de quem responde por isso.
+
+Pela mesma razão, "anonimizar a conta no HelpHS" continua **não** produzindo
+efeito no áudio que está lá. Já estava registrado; agora está confirmado pelo
+fornecedor que nem existe caminho automatizado para produzir esse efeito.
+
+⚠️ **O que é interpretação NOSSA, e não declaração dele:**
+
+- que `record_url` deve ser tratado como **credencial de acesso ao áudio** — ele
+  disse que o link é único por chamada e permite reprodução direta; concluir que
+  isso o torna segredo é decisão interna;
+- que a ausência de DPA é **lacuna a resolver** — ele disse que não existe, não
+  que seja suficiente;
+- que o armazenamento no Brasil **dispensa** a análise de transferência
+  internacional da seção 10 da política — isso é leitura jurídica, e é do
+  Encarregado, não daqui.
+
+#### O que sabemos sobre a Native AI da API4COM — e o que o documento não prova
+
+A ressalva da subseção de medição se confirmou: a transcrição **não aparece** no
+`GET /calls`, e isso nunca significou que o produto não existisse. Ele existe, é
+um módulo separado, e em 01/10/2026 o suporte confirmou e enviou documentação
+técnica. Fica registrado em detalhe porque a decisão de **não usá-lo** (abaixo)
+só tem valor se for possível reconstruir o que foi avaliado.
+
+**O que o suporte confirmou:**
+
+- existe documentação técnica para consumir a transcrição nativa;
+- a transcrição suporta **português do Brasil** e faz **separação dos
+  participantes** da conversa;
+- **Cloud Recordings** para AWS/GCP **não tem documentação de integração
+  disponível** hoje.
+
+**O que o documento técnico demonstra.** O fluxo muda só no último passo:
+
+```
+sem AI:   CRM inicia ligação via API -> API4COM finaliza -> webhook recebe dados da ligação
+com AI:   CRM inicia ligação via API -> API4COM finaliza -> webhook recebe dados da ligação + dados de AI
+```
+
+A entrega é um **envelope de conector** — campos como `connectorName`, `status`,
+`configuration.webhook.url` — que encaminha para uma URL de webhook configurada.
+Dentro dele, `data.output` carrega o resultado de AI e `data.rawInput` **preserva
+o evento original** `channel-hangup`, com campos `id`, `domain`, `direction`,
+`caller`, `called`, `startedAt`, `answeredAt`, `endedAt`, `duration`,
+`hangupCause`, `hangupCauseCode`, `recordUrl` e `metadata`.
+
+O documento mostra **dois cenários**, e a diferença entre eles é operacionalmente
+importante:
+
+| Cenário | `data.output` |
+|---|---|
+| chamada **abaixo** da duração configurada | lista **vazia** |
+| chamada **igual ou acima** da configurada | lista de objetos `{type, mediaType, format, content}` |
+
+Ou seja: **o webhook pode chegar sem nenhum output de AI**, legitimamente, quando
+a chamada não atinge o critério configurado. Quem consumir isso não pode tratar
+lista vazia como erro.
+
+⚠️ **O documento usa placeholders, e placeholder não é especificação.** Ele **não**
+estabelece: os nomes concretos dos tipos de output; qual output corresponde à
+transcrição e qual ao resumo; o formato concreto da separação de participantes; a
+estrutura interna do conteúdo; nem ordem garantida entre os outputs. No exemplo,
+os dois objetos da lista têm **o mesmo placeholder** de tipo — o documento não
+chega a mostrar que eles diferem.
+
+⚠️ **E continua desconhecido**, porque o documento não trata: autenticação do
+webhook recebido pelo HelpHS, HMAC, assinatura criptográfica, retries, número de
+tentativas, timeout, garantia de entrega, política de reenvio, chave de
+idempotência, latência de processamento da AI, comportamento detalhado em falha e
+SLA da transcrição.
+
+Uma precisão que importa para não ler garantia onde não há: o exemplo técnico
+contém um header relacionado a **API key**, e **o valor foi deliberadamente
+omitido** deste registro. Esse header aparece na requisição que chega ao serviço
+de conectores **do próprio fornecedor** — não é evidência de como um webhook
+entregue ao HelpHS seria autenticado. A pergunta de autenticação segue aberta.
+
+**A rota de correlação que isso abriria — capacidade documentada, não plano.**
+Como o `rawInput` preserva o `metadata` enviado na criação da chamada, e como a
+Fase 2D.2 passou a enviar `{"gateway": "HelpHS", "ticket_call_id": "<UUID>"}`,
+existe caminho técnico plausível de `rawInput` → evento `channel-hangup` →
+`metadata.ticket_call_id` → `ticket_calls.id`. Fica registrado como **hipótese
+arquitetural**, não como decisão e não como trabalho previsto.
+
+**Custos informados pelo suporte em 01/10/2026** — informação comercial recebida
+nessa data, e **não** preço permanente, contratual ou garantido:
+
+| Item | Custo informado |
+|---|---|
+| Gravação padrão de áudio | incluída; **sem custo adicional informado** para gravar e armazenar na plataforma |
+| IA / transcrição por IA | **assinatura separada**: R$ 99,90 por usuário/mês no plano anual, R$ 129,90 no mensal |
+
+**Observação sobre os dois relógios do exemplo.** No payload de exemplo,
+`created_at` vem com sufixo `Z` (UTC) enquanto `startedAt`, `answeredAt` e
+`endedAt` vêm como texto **sem marcador de fuso**, e a diferença entre os dois
+relógios no próprio exemplo é de pouco mais de três horas. Isso é **consistente**
+com a diferença de ~3h que medimos entre `ticket_calls.created_at` e o
+`started_at` do fornecedor, e torna "campo sem fuso" uma hipótese mais plausível
+que "relógio errado". ⚠️ **Não é prova** — os dois campos do exemplo não
+descrevem o mesmo instante — e **nada foi investigado nem corrigido**. A regra da
+subseção anterior continua valendo integralmente: horário não é identidade.
+
+#### Decisão de negócio: IA paga está FORA DE ESCOPO
+
+**O HelpHS não contratará, não assinará e não pagará serviço de IA para
+transcrição.** É decisão de negócio do projeto, não conclusão técnica, e por isso
+nenhuma medição a reabre.
+
+Consequências, explícitas para quem for planejar:
+
+- a **Native AI da API4COM está fora de escopo**; não planejar a contratação
+  desse módulo e não construir integração que dependa dele;
+- a solução paga do fornecedor **não** é o caminho futuro do HelpHS;
+- também estão fora: OpenAI API, Google Speech-to-Text, AWS Transcribe e
+  **qualquer** serviço de IA pago como solução de transcrição.
+
+⚠️ A Native AI **não foi apagada** deste documento de propósito. Ela existe, o
+suporte a confirmou, o documento técnico demonstra o formato, e ela foi
+**descartada por custo**. Registrar as três coisas juntas preserva a história
+técnica sem que alguém confunda evidência recebida com opção ativa de roadmap —
+e evita que a avaliação seja refeita do zero daqui a um ano.
+
+#### Direção futura: transcrição local ou self-hosted
+
+A transcrição futura do HelpHS, se houver, deve ser **local ou self-hosted**:
+executada na nossa infraestrutura, **sem assinatura recorrente** de serviço
+externo de IA e **sem custo por usuário ou por chamada** para fornecedor de IA.
+
+**Whisper self-hosted é citado como candidato técnico — e nada além disso.** Não
+está escolhido. Antes de escolher tecnologia, ainda é preciso **medir**: CPU
+disponível; GPU disponível ou não; memória; duração média dos áudios; tamanho
+médio dos MP3; concorrência; fila; tempo de processamento; throughput; qualidade
+em PT-BR; necessidade de diarização; custo da própria infraestrutura; retenção;
+LGPD; isolamento dos arquivos; e estratégia de processamento assíncrono.
+
+Nenhum desses números existe hoje. Escolher a ferramenta antes de medir seria
+repetir o erro de método que a Fase 2B já pagou — tratar o que não foi medido
+como se estivesse decidido.
+
+#### ⚠️ Diarização não vem de graça na solução própria
+
+O suporte informou que a **Native AI paga** separa os participantes da conversa.
+Isso é fato sobre o produto **do fornecedor**, e não se transfere.
+
+Numa solução self-hosted, separação de participantes (*speaker diarization*) é
+capacidade **separada**, que precisa ser investigada e medida por conta própria.
+**Não prometer diarização na primeira versão sem medição.** A gravação conter os
+dois lados da conversa torna a transcrição possível; não torna a atribuição de
+falas resolvida.
+
+#### O próximo trabalho técnico — e por que ele não tem número aqui
+
+O passo que abria este roteiro **está feito**: a 2D.2 está integrada e
+implantada, a migration `k7f8g9h0i1j2` está aplicada em produção e o endpoint
+de encerramento foi validado lá — ver *Estado em 09/10/2026* acima. O que
+sobra, em ordem, e cada passo dependendo do anterior:
+
+1. **o n8n passar a rotear 1018/1019 para o HelpHS**, em cópia controlada, e
+   um evento REAL chegar ao endpoint — hoje ele responde certo e não recebe
+   nada;
+2. **decisão organizacional e de LGPD**, agora com um item a mais: o
+   fornecedor confirmou que **não há endpoint nem botão de exclusão** da
+   gravação, só pedido ao suporte sujeito a análise;
+3. **reconciliação de CDR e gravação**;
+4. **download seguro do áudio pelo backend**;
+5. **storage privado** do HelpHS, com endpoint próprio — e **não** o
+   `/files/{token}`, que autoriza por posse do token;
+6. **avaliação de STT local ou self-hosted**, com as medições listadas acima;
+7. **só depois** implementação de transcrição.
+
+Duas coisas **não entram** nesse roteiro, e é deliberado. A **Native AI da
+API4COM** não entra como solução candidata, por decisão de negócio. E o **Cloud
+Recordings para AWS/GCP** não entra como dependência, por dois motivos somados:
+não há documentação de integração disponível, e a arquitetura pretendida —
+download pelo backend para storage próprio — não precisa dele.
+
+Deliberadamente **sem número de fase atribuído**. A numeração `2D.x` não foi
+reservada em lugar nenhum deste documento, e batizar a próxima fase sem que o
+roadmap a tenha reservado criaria conflito com qualquer uso futuro da mesma
+numeração. Quem for abrir a fase escolhe o número no roadmap, não aqui.
 
 ### Antivírus (ClamAV) não está no ambiente
 
@@ -978,9 +3125,13 @@ leia o verde dele como garantia.
 
 ### Cobertura de testes desigual
 
-A suíte do backend está em **84%**, mas concentrada. O ponto fraco que
-permanece é o `groups.py` (**34%**); o `chat.py` subiu de 53% para **69%** ao
-longo das rodadas de agosto, sem ter sido alvo direto.
+A cobertura do backend é **concentrada**: alta na média e baixa em módulos
+específicos, sendo o `groups.py` o ponto fraco persistente.
+
+O número atual **não fica escrito aqui** — um percentual em documento nasce
+certo e vira mentira sozinho, sem ninguém mexer nele. O valor por arquivo sai
+do `term-missing` a cada execução (`pytest` a partir de `backend/`), e o CI
+reprova abaixo de 80% (`--cov-fail-under=80` no `backend/pyproject.toml`).
 
 ### O prazo de resposta não é renovado na reabertura
 
@@ -1016,3 +3167,115 @@ Ligar `FORWARDED_ALLOW_IPS` resolve, **mas só depois de fechar a publicação d
 porta 8000**. Com a porta aberta na internet, autorizar cabeçalhos de proxy
 deixa qualquer um forjar o `X-Forwarded-For` e furar o limite por completo —
 pior do que o balde único. A ordem é: fechar a porta, depois autorizar.
+
+### `PATCH /kb/articles/{id}` com `null` explícito dá 500 — defeito anterior à Helô
+
+**Não foi introduzido pelo trabalho da Helô**, e está escrito aqui para o
+próximo a encontrar não achar que foi. O laço que causa o defeito está no
+`main` desde o CRUD da Base (`3db616c`, 06/04/2026); a Fase 2 só acrescentou
+`helo_pode_ler` à lista de campos que ele atinge, e ele atinge os outros igual.
+
+Todos os campos de `KBArticleUpdate` são `X | None = None`, então a validação
+aceita `{"campo": null}`. O `model_dump(exclude_unset=True)` mantém o `null`
+explícito — ele foi enviado —, e o laço de `setattr` grava `None` no artigo.
+Todas as colunas de `kb_articles` são NOT NULL, e a aplicação não tem tratador
+de `IntegrityError`:
+
+| Campo | Onde falha |
+|---|---|
+| `title` | antes do banco: `slugifica(None)` chama `.lower()` em `None` |
+| `content`, `category`, `tags`, `status`, `helo_pode_ler` | no commit: violação de NOT NULL |
+| `product_ids` | **não falha**: o `pop` trata `null` como "não enviado" |
+
+Nos dois casos nada é gravado: é erro 500, não dado corrompido. **Lido no
+código em 10/09/2026, não medido.** O conserto vale para a rota inteira, não
+para `helo_pode_ler` sozinho — recusar `null` explícito no schema, ou
+descartar os `None` antes do laço.
+
+### Quatro dos sete produtos não têm manual técnico
+
+> **Superado em parte em 15/09/2026.** O escopo mudou: os sete aparelhos
+> ganham manual técnico novo, escrito pela assistência técnica, e a Helô fica
+> em `HELO_MODO=triagem` até os sete estarem publicados — ver "O modo da Helô".
+> O "ela saúda, o cliente responde, ela escala" abaixo vale só no modo
+> `completa`; em triagem a resposta do cliente recebe o encerramento.
+
+Constatado em 09/09/2026, ao rodar as primeiras buscas de verdade. **É decisão
+de escopo do cliente, não pendência de código** — fica registrado para ninguém
+tratar como defeito nem "consertar" publicando a ficha comercial na Base. A
+tabela é do acervo de manuais de 09/09; desde 10/09 só os três manuais técnicos
+entram, como artigo.
+
+| Produto | Manual técnico | Ficha comercial |
+|---|---|---|
+| Titan | 15 trechos | — |
+| Phoebus | 18 trechos | — |
+| iBlow 10 Pro | 12 trechos | 8 trechos |
+| Deimos | **nenhum** | 6 trechos |
+| EBS-010 | **nenhum** | 5 trechos |
+| Mark X | **nenhum** | 6 trechos |
+| Mercury | **nenhum** | 4 trechos |
+
+Desde 10/09 a base é a Base de Conhecimento, e ficha comercial não entra nela:
+tem preço e promessa de venda, e é justamente o que não pode virar procedimento
+técnico. Então, para um chamado dos quatro últimos, a base vem vazia **em todo
+turno** — a menos que exista artigo publicado sem produto vinculado que
+responda: ela saúda, o cliente responde, ela escala. É o comportamento correto.
+O efeito prático é que a Helô só ajuda de fato em três dos sete aparelhos até
+existir manual dos outros.
+
+### Duas contradições nos manuais esperam decisão do suporte técnico
+
+Levantadas em 08/09/2026, ao preparar a base da Helô (Fase 2). **Não são
+decisão de código:** ninguém no desenvolvimento sabe qual dos números está
+certo, e escolher no chute seria escolher por ela.
+
+Por que importa: busca vetorial não resolve contradição. Ela traz os dois
+trechos e o modelo escolhe um, ou mistura — e a Helô responde **com a fonte
+citada**, que é pior do que responder sem fonte, porque parece conferível.
+
+| Contradição | O que a documentação diz |
+|---|---|
+| **Titan: memória e autonomia** | "Memória: até 8.000 testes" e "Autonomia: até 8.000 testes por carga", num aparelho com bateria Ni-MH de 400 mAh. O segundo número parece cópia do primeiro — uma bateria dessas dificilmente sustenta 8.000 sopros por carga. Enquanto não houver resposta, a Helô pode prometer autonomia que o aparelho não tem. |
+| **Canal de contato oficial** | Três telefones — (11) 4007-1507, (81) 9 9118-9612, (81) 98177-1177 — e dois e-mails, `cs@` e `sac@`. Não há como saber qual é o canal para o cliente sem perguntar. |
+
+**As outras contradições do corpus não precisam de decisão**, e vale registrar
+por quê para ninguém reabrir: todas elas são ficha comercial contra manual
+técnico — o aplicativo do iBlow10 Pro (Health App na ficha, i-SOBER no
+manual), os dois aplicativos do Deimos, o tempo de análise do iBlow10 Pro
+(5 s na ficha, 2 s no manual). Como as fichas comerciais ficam **fora da busca
+técnica** por decisão da Fase 2, esses pares nunca chegam juntos à Helô. Se um
+dia existir uma Helô comercial, elas voltam a valer.
+
+## `backend/scripts/` vai para a imagem de propósito
+
+O `.dockerignore` exclui `tests/` e **não** exclui `scripts/`. Isso não é
+descuido: os scripts avulsos são operados **pelo terminal do container**, e é lá
+que eles precisam existir.
+
+É o caso do `redefine_senha.py` quando alguém perde a senha e o SMTP de produção
+ainda não entrega o "Esqueci minha senha"; do `desliga_mfa.py` quando some o
+celular com o segundo fator; do `diagnostico_empresa_aparelho.py` antes de uma
+migration que cria índice único. Nenhum deles roda no boot, nenhum é importado
+por módulo de `app/` — mas todos são rodados contra o banco real, e o terminal
+do container é o único lugar onde as credenciais de produção já estão no
+ambiente.
+
+Tirá-los da imagem trocaria isso por copiar script e credencial para uma máquina
+de quem administra, na hora do incidente. Pior em todo sentido.
+
+### O que isso obriga
+
+**Estar na imagem não é estar no caminho de execução, e a diferença importa na
+hora de classificar um alerta.** Nenhum script é alcançável por requisição: não
+há rota, não há import a partir de `app/`, e o `start.sh` não os toca. Um alerta
+de análise estática em `scripts/` é sempre sobre o que acontece quando *uma
+pessoa* roda aquilo à mão.
+
+O que não muda é a régua do conteúdo: **script que vai à imagem é código que
+chega a produção**, então nada de segredo escrito, nada de valor de exemplo que
+alguém possa copiar, e nada de saída que revele credencial. Foi o que motivou o
+`testa_smtp.py` a trocar a máscara parcial — que imprimia os 6 primeiros e os 4
+últimos caracteres da chave — por uma impressão digital que não revela caractere
+nenhum. Máscara pela metade continua sendo vazamento, e o mais enganoso é que a
+saída *parece* segura.

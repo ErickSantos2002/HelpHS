@@ -8,6 +8,7 @@ import enum
 import uuid
 from datetime import datetime
 
+from pgvector.sqlalchemy import Vector
 from sqlalchemy import (
     Boolean,
     CheckConstraint,
@@ -22,6 +23,7 @@ from sqlalchemy import (
     String,
     Table,
     Text,
+    text,
 )
 from sqlalchemy.dialects.postgresql import ARRAY, JSONB, UUID
 from sqlalchemy.orm import DeclarativeBase, Mapped, mapped_column, relationship
@@ -73,8 +75,13 @@ class TicketCategory(str, enum.Enum):
     access = "access"
     email = "email"
     security = "security"
+    # `general` é o balde de quem não sabe classificar. Havia um segundo,
+    # `other`, que saiu em 18/09/2026 com zero uso em chamados, artigos e
+    # histórico: dois baldes para a mesma dúvida só dividem quem os lê.
+    # Este enum é UM tipo no Postgres (`ticketcategory`) servindo
+    # `tickets.category` e `kb_articles.category` — acrescentar valor aqui
+    # sem migration derruba a primeira leitura que o encontrar.
     general = "general"
-    other = "other"
 
 
 class SLALevel(str, enum.Enum):
@@ -116,12 +123,68 @@ class KBArticleStatus(str, enum.Enum):
     archived = "archived"
 
 
+class LibraryVisibility(str, enum.Enum):
+    """Quem pode ver um arquivo da biblioteca.
+
+    `internal` e o default da coluna, e a escolha e a regra inteira: abrir para
+    o cliente e acao explicita de quem envia, entao esquecer falha do lado
+    seguro. Ha manual tecnico com senha de configuracao em texto aberto -- ver
+    o cabecalho da migration c9d0e1f2a3b4.
+    """
+
+    internal = "internal"
+    client = "client"
+
+
 class CalendarEventType(str, enum.Enum):
     event = "event"
     meeting = "meeting"
     training = "training"
     deadline = "deadline"
     holiday = "holiday"
+
+
+class CallCreationStatus(str, enum.Enum):
+    """O que sabemos sobre a TENTATIVA de criar a chamada no fornecedor.
+
+    ⚠️ NÃO é o estado telefônico. `ringing`, `answered` e `hangup` chegam pelo
+    webhook e são assunto da Fase 2D. Aqui a pergunta é só uma, e é a mesma do
+    `services/api4com.py`: **a chamada saiu?**
+
+    ⚠️ Este enum NÃO vira tipo nativo do PostgreSQL. A coluna é `String` com
+    `CHECK`, e a diferença é deliberada: acrescentar valor a enum nativo exige
+    `ALTER TYPE ... ADD VALUE`, que nesta casa não pode ser citado em DDL
+    posterior — o alembic roda a cadeia inteira numa transação só. E remover
+    valor custa recriar o tipo e converter toda coluna que o usa, como foi
+    preciso fazer em 18/09 com `ticketcategory`. Uma máquina de estados que
+    ainda vai crescer na 2D não pode nascer com esse custo.
+    """
+
+    # Linha criada antes de falar com o fornecedor. Nada saiu ainda — e é essa
+    # certeza que faz `pending` NÃO bloquear uma nova tentativa: uma linha
+    # `pending` órfã de um processo que morreu significa que nenhum telefone
+    # tocou.
+    pending = "pending"
+    # A fronteira do efeito externo. Gravado imediatamente ANTES do
+    # `create_call`, e é o que tira a ambiguidade que o `pending` tinha sozinho:
+    # antes deste estado existir, uma linha órfã podia significar "nunca enviei"
+    # OU "enviei e não soube do resultado", e as duas exigiam condutas opostas.
+    # `dispatching` órfã continua sendo o caso que exige olho humano: ela diz
+    # que o pedido saiu e o desfecho não voltou. ⚠️ Desde 25/09/2026 ela NÃO
+    # bloqueia mais nova tentativa — a antirrepetição temporal saiu por decisão
+    # de negócio, e quem atende liga de novo quando precisa. O que impede duas
+    # ligações ao MESMO TEMPO continua sendo o lock, não este estado.
+    dispatching = "dispatching"
+    # HTTP 200 com `id` legível: a chamada existe do lado de lá.
+    confirmed = "confirmed"
+    # 4xx: o fornecedor respondeu recusando a requisição.
+    rejected = "rejected"
+    # Falha de conexão: não houve comunicação HTTP útil.
+    unavailable = "unavailable"
+    # ⚠️ Pode ter tocado o telefone de alguém e não sabemos. 5xx, 3xx, timeout
+    # de leitura, 2xx ilegível. É o estado que existe para ser reconciliado,
+    # e é a razão de `provider_call_id` aceitar NULL.
+    indeterminate = "indeterminate"
 
 
 # ── MODELS ───────────────────────────────────────────────────
@@ -194,6 +257,19 @@ class User(Base):
     )
     phone: Mapped[str | None] = mapped_column(String(20))
     department: Mapped[str | None] = mapped_column(String(100))
+    # Ramal da API4COM deste usuário — o `extension`/`caller` que o `POST
+    # /calls` exige. Guardado aqui porque o fornecedor instrui o integrador a
+    # manter o vínculo do próprio lado, e porque resolver o ramal por e-mail a
+    # cada clique não funcionaria: medido em 24/09/2026, ZERO dos 16 e-mails do
+    # staff do HelpHS aparece entre os 18 ramais da conta.
+    #
+    # String, e não inteiro: o fornecedor declara o ramal como identificador
+    # textual, e ramal futuro pode não ser numérico. Mesma escolha do
+    # `provider_call_id`.
+    #
+    # Nulo é o normal, não a exceção: quem não tem ramal não liga, e não há
+    # padrão nem fallback. Ver `_guarda_de_atribuicao_de_ramal` no router.
+    api4com_extension: Mapped[str | None] = mapped_column(String(20), nullable=True)
     avatar_url: Mapped[str | None] = mapped_column(String(500))
     last_login: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
 
@@ -254,11 +330,38 @@ class User(Base):
     chat_messages: Mapped[list["ChatMessage"]] = relationship(back_populates="sender")
     attachments: Mapped[list["Attachment"]] = relationship(back_populates="user")
     kb_articles: Mapped[list["KBArticle"]] = relationship(back_populates="author")
-    notifications: Mapped[list["Notification"]] = relationship(back_populates="user")
+    # `passive_deletes=True`: `notifications.user_id -> users.id` é
+    # `ON DELETE CASCADE` no banco, e é o Postgres quem deve executá-lo.
+    #
+    # Sem isto, o cascade padrão do SQLAlchemy (`save-update, merge` — sem
+    # `delete`) faz o unit-of-work tentar ANULAR `user_id` de cada
+    # notificação antes do `DELETE FROM users`. Duas falhas medidas por causa
+    # disso: `user_id` é `NOT NULL`, então o `UPDATE ... SET user_id = NULL`
+    # colide com a constraint e sobe como `IntegrityError` (a regressão de
+    # 29/09/2026 — um técnico sem nenhuma referência bloqueadora, mas com
+    # notificações, recebia 409 em vez de 204); e em sessão assíncrona o
+    # carregamento *lazy* da coleção durante o `flush` nem chega a rodar —
+    # `sqlalchemy.exc.MissingGreenlet`, porque a IO implícita do lazy-load não
+    # está dentro do greenlet do `await`.
+    #
+    # `passive_deletes=True` resolve as duas: o SQLAlchemy não carrega nem
+    # gerencia a coleção no delete, só emite `DELETE FROM users` e deixa o
+    # `ON DELETE CASCADE` do banco apagar as notificações.
+    notifications: Mapped[list["Notification"]] = relationship(
+        back_populates="user", passive_deletes=True
+    )
     satisfaction_given: Mapped[list["SatisfactionSurvey"]] = relationship(back_populates="user")
     audit_logs: Mapped[list["AuditLog"]] = relationship(back_populates="user")
+    # `passive_deletes=True`: `equipments.owner_id -> users.id` é
+    # `ON DELETE SET NULL` no banco. Sem isto, o SQLAlchemy chega ao mesmo
+    # resultado por um caminho mais caro — carrega a coleção e emite
+    # `UPDATE equipments SET owner_id = NULL` ele mesmo, porque a coluna é
+    # nullable e o UPDATE não colide com nada. Funciona hoje por acaso, não
+    # por desenho: passar a mão para o Postgres deixa de depender de
+    # `owner_id` continuar nullable para não repetir a mesma classe de
+    # defeito do `notifications` acima.
     equipments: Mapped[list["Equipment"]] = relationship(
-        back_populates="owner", foreign_keys="Equipment.owner_id"
+        back_populates="owner", foreign_keys="Equipment.owner_id", passive_deletes=True
     )
     company: Mapped["Company | None"] = relationship(
         "Company", back_populates="clients", foreign_keys=[company_id]
@@ -266,12 +369,103 @@ class User(Base):
 
     __table_args__ = (
         Index("ix_users_role_status", "role", "status"),
+        # Um ramal, um usuário. Índice NOMEADO e não `unique=True` na coluna,
+        # para o downgrade da migration remover exatamente este objeto — mesmo
+        # padrão do `uq_ticket_calls_provider_call_id` e do
+        # `uq_equipments_product_serial`. No PostgreSQL vários NULL convivem
+        # sob UNIQUE, que é exatamente o desejado: dezesseis pessoas sem ramal
+        # não colidem entre si.
+        #
+        # A unicidade não é capricho de modelagem: o ramal é identidade SIP.
+        # Dois usuários sob o mesmo ramal produzem ligações indistinguíveis na
+        # origem, e quando os webhooks entrarem (2D) não haverá como atribuir a
+        # chamada a uma pessoa — a trilha de auditoria quebra em silêncio.
+        Index("uq_users_api4com_extension", "api4com_extension", unique=True),
         # Segundo fator ligado sem segredo é uma conta trancada: o login exigiria
         # um código que não há como conferir. O banco recusa esse estado em vez
         # de confiar que todo caminho de escrita futuro se lembre da regra.
         CheckConstraint(
             "mfa_enabled = false OR mfa_secret IS NOT NULL",
             name="ck_users_mfa_ligado_tem_segredo",
+        ),
+        # Cliente ativo sem telefone é um chamado que nunca vira ligação. A
+        # regra vive na aplicação desde a Fase 1A; aqui ela vira invariante,
+        # para o caminho de escrita que ainda não existe não poder esquecê-la.
+        #
+        # PRESENÇA, não formato: `\s` trata tabulação e quebra de linha como
+        # ausência, e E.164 continua sendo assunto do tipo anotado em
+        # `app/utils/telefone.py`. Pôr a regex do formato aqui criaria uma
+        # segunda fonte de verdade que deriva da primeira em silêncio.
+        #
+        # ⚠️ `ddl_if(dialect="postgresql")` não é preciosismo: `regexp_replace`
+        # é função do PostgreSQL, e a maior parte da suíte monta o schema por
+        # `create_all` em SQLite. Sem a guarda, o `CREATE TABLE users` morre lá
+        # com `no such function: regexp_replace` — medido, 47 falhas e 37 erros.
+        # A constraint continua DECLARADA no metadata; o que a guarda muda é
+        # só onde o DDL sai. Declarar aqui mantém o mapeamento alinhado com a
+        # invariante real do banco, faz o `create_all` de PostgreSQL nascer
+        # com a mesma regra da migration, e dá aos testes um alvo explícito
+        # para comparar model e migration. O `autogenerate` do Alembic NÃO
+        # compara CHECK — medido na 1.15.2 —, então essa paridade é
+        # responsabilidade do teste, não da ferramenta.
+        # O CHECK do MFA, acima, não precisa disso porque é SQL portável.
+        CheckConstraint(
+            "NOT (role = 'client' AND status = 'active') "
+            r"OR regexp_replace(coalesce(phone, ''), '\s', '', 'g') <> ''",
+            name="ck_users_cliente_ativo_tem_telefone",
+        ).ddl_if(dialect="postgresql"),
+    )
+
+
+class LgpdConsent(Base):
+    """Cada aceite da Política de Privacidade (e dos Termos), como evento próprio.
+
+    `users.lgpd_consent` e `users.lgpd_consent_at` continuam sendo a leitura
+    rápida do estado ATUAL — é o que as telas leem. Esta tabela é a PROVA: diz
+    qual revisão cada pessoa aceitou, quando e por qual caminho, que é o que a
+    seção 15 da política promete guardar.
+
+    **Append-only pela regra de negócio.** Aceite novo é linha nova; revogar
+    ESCREVE `revogado_em` nos aceites abertos e não apaga nada. Antes desta
+    tabela, revogar zerava `lgpd_consent_at` e a prova do período consentido
+    — justamente o que precisaria ser defendido — sumia.
+
+    **Sem backfill.** Quem se cadastrou antes dela aceitou um texto que ainda
+    não existia: a revisão dessas pessoas é desconhecida, e a ausência de
+    linha é a verdade que fica gravada. É ela que dispara o re-aceite.
+
+    Desenho em `docs/superpowers/specs/2026-08-31-registro-da-revisao-aceita-design.md`.
+    """
+
+    __tablename__ = "lgpd_consents"
+
+    id: Mapped[uuid.UUID] = mapped_column(UUID(as_uuid=True), primary_key=True, default=uuid.uuid4)
+    # `SET NULL`, decidido em 24/09/2026: excluir a conta não apaga o registro
+    # de que houve aceite daquela revisão — a política promete guardá-lo por
+    # até 5 anos —, mas também não prende a pessoa ao registro.
+    user_id: Mapped[uuid.UUID | None] = mapped_column(
+        UUID(as_uuid=True), ForeignKey("users.id", ondelete="SET NULL"), nullable=True, index=True
+    )
+    # As revisões vêm de `LGPD_REVISAO_POLITICA` e `LGPD_REVISAO_TERMOS`, lidas
+    # no momento do aceite. Nulas quando o documento não existe (os Termos,
+    # hoje) ou quando o ambiente não declarou — desenvolvimento e teste.
+    revisao_politica: Mapped[str | None] = mapped_column(String(20), nullable=True)
+    revisao_termos: Mapped[str | None] = mapped_column(String(20), nullable=True)
+    origem: Mapped[str] = mapped_column(String(30), nullable=False)
+    concedido_em: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), nullable=False, server_default=func.now()
+    )
+    revogado_em: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
+    # De onde o TITULAR aceitou. Nulo quando quem gravou foi outra pessoa (a
+    # equipe criando a conta): o IP seria o dela, e o registro afirmaria algo
+    # que não aconteceu.
+    ip: Mapped[str | None] = mapped_column(String(45), nullable=True)
+
+    __table_args__ = (
+        # SQL portável: vale no `create_all` do SQLite e no PostgreSQL.
+        CheckConstraint(
+            "origem IN ('auto_cadastro', 'criado_por_terceiro', 'alteracao_propria')",
+            name="ck_lgpd_consents_origem_conhecida",
         ),
     )
 
@@ -451,8 +645,15 @@ class Ticket(Base):
     status: Mapped[TicketStatus] = mapped_column(
         Enum(TicketStatus), default=TicketStatus.open, nullable=False, index=True
     )
-    priority: Mapped[TicketPriority] = mapped_column(
-        Enum(TicketPriority), default=TicketPriority.medium, nullable=False, index=True
+    # NULO até a triagem. O chamado nasce sem prioridade e quem a define é
+    # técnico ou administrador, pelo `PATCH /tickets/{id}/priority` — o cliente
+    # não escolhe a própria urgência.
+    #
+    # Sem `default`: um default aqui traria o `medium` de volta pela porta dos
+    # fundos, e "média" seria indistinguível de "ninguém olhou ainda". São duas
+    # informações diferentes, e o painel conta as duas em baldes separados.
+    priority: Mapped[TicketPriority | None] = mapped_column(
+        Enum(TicketPriority), nullable=True, index=True
     )
     category: Mapped[TicketCategory] = mapped_column(
         Enum(TicketCategory), default=TicketCategory.general
@@ -475,7 +676,26 @@ class Ticket(Base):
     # classificação automática nem a sugestão de resposta olham este chamado.
     # "Desliga a IA neste chamado" tem que significar isso, senão a promessa
     # da tela é maior que a do código.
+    #
+    # É o botão DE GENTE, e só. A Helô não escreve aqui quando decide sair
+    # sozinha — para isso existe o `helo_saiu` logo abaixo. A exceção está lá
+    # explicada: quando o CLIENTE pede para falar com uma pessoa, os dois vão
+    # a `False`, porque aí quem quis sair da IA foi ele.
     ai_enabled: Mapped[bool] = mapped_column(Boolean, default=True, nullable=False)
+
+    # A Helô já saiu deste chamado — escalou, e o chamado passou a ser do
+    # humano. Ela não volta a falar aqui nem que o cliente escreva de novo.
+    #
+    # Existe porque o `ai_enabled` estava fazendo dois trabalhos. Enquanto ela
+    # falava uma vez por chamado, "escalou" e "IA desligada" davam no mesmo. Com
+    # ela conversando, escalar por decisão do modelo, por teto de trocas ou por
+    # a IA estar fora do ar passou a desligar também a sugestão de resposta e o
+    # resumo DO TÉCNICO — tirando a ferramenta dele exatamente nos chamados em
+    # que a IA já tinha falhado, e sem ninguém ter pedido.
+    #
+    # Separado, cada campo responde a uma pergunta só: `ai_enabled` é "alguém
+    # quer a IA fora daqui?", `helo_saiu` é "a conversa dela acabou?".
+    helo_saiu: Mapped[bool] = mapped_column(Boolean, default=False, nullable=False)
 
     # SLA
     sla_config_id: Mapped[uuid.UUID | None] = mapped_column(
@@ -489,6 +709,30 @@ class Ticket(Base):
     sla_resolve_breach: Mapped[bool] = mapped_column(Boolean, default=False)
     sla_paused_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
     sla_total_paused_ms: Mapped[int] = mapped_column(Integer, default=0)
+    # Total de minutos ÚTEIS concedidos por extensões de prazo no ciclo ATUAL.
+    # Acumulador, e não um prazo já calculado: conceder +3 e depois +1 tem de
+    # dar o mesmo que conceder +4, e isso só vale se o prazo for sempre
+    # recomputado da base. A reabertura zera; as linhas de
+    # `ticket_sla_extensions` do ciclo anterior continuam lá.
+    sla_resolve_extension_total_min: Mapped[int] = mapped_column(
+        Integer, nullable=False, server_default="0", default=0
+    )
+    # O prazo efetivo de resolução, MATERIALIZADO para o SQL agregado.
+    #
+    # O painel e os relatórios decidem violação em `count(...).filter(...)`, e
+    # não passam pelo motor: comparavam `sla_resolve_due_at < now()`, que
+    # ignora pausa e ignoraria a extensão. Esta coluna é a versão SQL do que
+    # `prazo_efetivo_de_resolucao` devolve, e quem a escreve é
+    # `atualiza_prazo_efetivo` — ninguém mais.
+    sla_resolve_effective_due_at: Mapped[datetime | None] = mapped_column(
+        DateTime(timezone=True), index=True
+    )
+    # Escrita por quem resolve, quando resolve fora do prazo. Nulo significa
+    # DUAS coisas legitimas e permanentes: resolvido dentro do prazo, ou
+    # resolvido antes de a exigencia existir. Nao ha default nem NOT NULL de
+    # proposito -- vazio apagaria a diferenca entre "nao precisou" e "nao
+    # preencheu".
+    sla_breach_justification: Mapped[str | None] = mapped_column(Text)
 
     # Notas internas (visível apenas para admin/técnico)
     technician_notes: Mapped[str | None] = mapped_column(Text, nullable=True)
@@ -532,6 +776,9 @@ class Ticket(Base):
     )
     product: Mapped["Product | None"] = relationship(back_populates="tickets")
     sla_config: Mapped["SLAConfig | None"] = relationship(back_populates="tickets")
+    sla_extensions: Mapped[list["TicketSlaExtension"]] = relationship(
+        back_populates="ticket", cascade="all, delete-orphan"
+    )
     histories: Mapped[list["TicketHistory"]] = relationship(
         back_populates="ticket", cascade="all, delete-orphan"
     )
@@ -618,6 +865,45 @@ class CompanyNote(Base):
     author: Mapped["User"] = relationship()
 
 
+class TicketSlaExtension(Base):
+    """Cada prorrogação de prazo concedida, como evento próprio.
+
+    Por que tabela e não só `ticket_history`: a extensão é um COMPROMISSO DE
+    PRAZO comunicado ao cliente, pode acontecer várias vezes, e cada concessão
+    tem dados próprios — quantos dias, de que prazo para que prazo, com que
+    justificativa. Guardar isso espremido em `old_value`/`new_value` deixaria
+    a quantidade concedida como informação derivada, e ela é o que o cliente
+    lê na Atividade.
+
+    **Append-only pela regra de negócio.** Nenhum fluxo edita ou apaga uma
+    linha daqui: uma prorrogação concedida aconteceu, e reabrir o chamado zera
+    o acumulador do ciclo novo sem tocar no registro do ciclo anterior.
+    """
+
+    __tablename__ = "ticket_sla_extensions"
+
+    id: Mapped[uuid.UUID] = mapped_column(UUID(as_uuid=True), primary_key=True, default=uuid.uuid4)
+    ticket_id: Mapped[uuid.UUID] = mapped_column(
+        UUID(as_uuid=True), ForeignKey("tickets.id", ondelete="CASCADE"), index=True
+    )
+    # Quem concedeu. Sem `ondelete`: a autoria de um compromisso de prazo não
+    # some porque a conta foi desligada — é o mesmo critério do histórico.
+    user_id: Mapped[uuid.UUID | None] = mapped_column(UUID(as_uuid=True), ForeignKey("users.id"))
+    # Dias ÚTEIS pedidos (1, 3, 5, 15 ou 30) e o que eles valem em minutos
+    # úteis. Os dois, e não só um: `days` é o que a pessoa escolheu e o que a
+    # tela mostra; `business_minutes` é o que entrou na conta. Guardar apenas
+    # os dias faria a auditoria depender da jornada VIGENTE para reconstruir o
+    # que foi concedido naquele dia.
+    days: Mapped[int] = mapped_column(Integer, nullable=False)
+    business_minutes: Mapped[int] = mapped_column(Integer, nullable=False)
+    justification: Mapped[str] = mapped_column(Text, nullable=False)
+    previous_effective_due_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
+    new_effective_due_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now())
+
+    ticket: Mapped["Ticket"] = relationship(back_populates="sla_extensions")
+
+
 class TicketNote(Base):
     """Notas internas de tickets (múltiplas por ticket)"""
 
@@ -660,6 +946,49 @@ class Attachment(Base):
     user: Mapped["User"] = relationship(back_populates="attachments")
 
 
+class LibraryFile(Base):
+    """Arquivo recorrente: manual, guia, formulario.
+
+    Guardado UMA vez e apontado por quem o usa. A mensagem de chat que o anexa
+    referencia esta linha em vez de copiar o binario -- copiar multiplicaria o
+    mesmo PDF no disco e criaria a duvida de qual copia vale quando o admin
+    subir uma versao nova.
+    """
+
+    __tablename__ = "library_files"
+
+    id: Mapped[uuid.UUID] = mapped_column(UUID(as_uuid=True), primary_key=True, default=uuid.uuid4)
+    title: Mapped[str] = mapped_column(String(255), nullable=False, index=True)
+    description: Mapped[str | None] = mapped_column(Text)
+    # Nulo = nao e de um aparelho especifico (politica, formulario).
+    product_id: Mapped[uuid.UUID | None] = mapped_column(
+        UUID(as_uuid=True), ForeignKey("products.id", ondelete="SET NULL"), index=True
+    )
+    visibility: Mapped[LibraryVisibility] = mapped_column(
+        Enum(LibraryVisibility, name="libraryvisibility"),
+        default=LibraryVisibility.internal,
+        server_default="internal",
+        nullable=False,
+    )
+
+    original_name: Mapped[str] = mapped_column(String(255), nullable=False)
+    stored_name: Mapped[str] = mapped_column(String(255), nullable=False)
+    mime_type: Mapped[str] = mapped_column(String(100), nullable=False)
+    size_bytes: Mapped[int] = mapped_column(Integer, nullable=False)
+    s3_key: Mapped[str] = mapped_column(String(500), nullable=False)
+    s3_bucket: Mapped[str] = mapped_column(String(100), nullable=False)
+    virus_scanned: Mapped[bool] = mapped_column(Boolean, default=False)
+    virus_clean: Mapped[bool] = mapped_column(Boolean, default=False)
+
+    uploaded_by: Mapped[uuid.UUID] = mapped_column(UUID(as_uuid=True), ForeignKey("users.id"))
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now())
+    updated_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), server_default=func.now(), onupdate=func.now()
+    )
+
+    product: Mapped["Product | None"] = relationship()
+
+
 class ChatMessage(Base):
     """Mensagens de chat em tempo real (WebSocket)"""
 
@@ -681,6 +1010,13 @@ class ChatMessage(Base):
     content: Mapped[str] = mapped_column(Text, nullable=False)
     is_system: Mapped[bool] = mapped_column(Boolean, default=False)
     is_ai: Mapped[bool] = mapped_column(Boolean, default=False)
+    # Aponta para a biblioteca, nao copia. SET NULL no banco: apagar um item
+    # da biblioteca nao pode apagar a conversa -- a mensagem sobrevive sem o
+    # arquivo, que e ruim mas recuperavel; apagar a fala do tecnico nao e.
+    library_file_id: Mapped[uuid.UUID | None] = mapped_column(
+        UUID(as_uuid=True), ForeignKey("library_files.id", ondelete="SET NULL"), index=True
+    )
+    library_file: Mapped["LibraryFile | None"] = relationship()
     read_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now())
 
@@ -707,6 +1043,13 @@ class KBArticle(Base):
     status: Mapped[KBArticleStatus] = mapped_column(
         Enum(KBArticleStatus), default=KBArticleStatus.draft, index=True
     )
+    # A Helô pode usar este artigo para responder cliente. Padrão `true`: desde
+    # 10/09/2026 artigo publicado alimenta as respostas dela sem ninguém rodar
+    # nada, e esta é a forma de manter um artigo na barra lateral e FORA da IA.
+    # Coluna, e não tag, porque tag é texto livre e erro de digitação mudaria
+    # o comportamento em silêncio. O porquê do padrão, com o número e a data,
+    # está na migration `c9x0y1z2a3b4`.
+    helo_pode_ler: Mapped[bool] = mapped_column(Boolean, default=True, nullable=False)
     author_id: Mapped[uuid.UUID] = mapped_column(UUID(as_uuid=True), ForeignKey("users.id"))
     view_count: Mapped[int] = mapped_column(Integer, default=0)
     helpful: Mapped[int] = mapped_column(Integer, default=0)
@@ -762,8 +1105,11 @@ class SLAConfig(Base):
 
     id: Mapped[uuid.UUID] = mapped_column(UUID(as_uuid=True), primary_key=True, default=uuid.uuid4)
     level: Mapped[SLALevel] = mapped_column(Enum(SLALevel), unique=True, nullable=False)
-    response_time_hours: Mapped[int] = mapped_column(Integer, nullable=False)
-    resolve_time_hours: Mapped[int] = mapped_column(Integer, nullable=False)
+    # MINUTOS, nao horas. Metade da resposta do nivel critico e 30 min, e isso
+    # nao cabe numa coluna de horas inteiras -- foi o que forcou a troca de
+    # unidade. Ver a migration a7b8c9d0e1f2.
+    response_time_minutes: Mapped[int] = mapped_column(Integer, nullable=False)
+    resolve_time_minutes: Mapped[int] = mapped_column(Integer, nullable=False)
     warning_threshold: Mapped[int] = mapped_column(Integer, default=80)
     is_active: Mapped[bool] = mapped_column(Boolean, default=True)
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now())
@@ -823,6 +1169,154 @@ class Notification(Base):
     __table_args__ = (
         Index("ix_notifications_user_read", "user_id", "read"),
         Index("ix_notifications_user_created", "user_id", "created_at"),
+    )
+
+
+class EmailOutbox(Base):
+    """Fila durável de e-mail — Fase 3A/3B (Notification) + Fase 3C (conta).
+
+    Uma linha é uma PROMESSA de envio, não o envio em si: o worker é quem
+    tenta, registra o desfecho e decide se tenta de novo.
+
+    Duas origens, uma tabela só
+    ----------------------------
+    Desde a Fase 3C esta tabela aceita duas formas de linha, nunca misturadas
+    (ver `ck_email_outbox_origem_valida`):
+
+    * **Notification** (Fase 3A/3B): `notification_id` preenchido,
+      `user_id`/`event_type`/`dedup_key` NULOS. O conteúdo reconstrói via
+      `Notification.title`/`message`/`data` — ver a explicação original
+      abaixo.
+    * **Account** (Fase 3C): `user_id`/`event_type`/`dedup_key` preenchidos,
+      `notification_id` NULO. Cobre os três e-mails de conta/autenticação
+      (`verification`, `password_reset`, `account_exists`), que NUNCA tiveram
+      `Notification` — a auditoria da Fase 3C confirmou que esses fluxos
+      sempre têm `user_id` disponível no momento do enqueue, então não há
+      necessidade de uma segunda tabela: a mesma máquina de estado, o mesmo
+      worker, o mesmo `FOR UPDATE SKIP LOCKED` servem as duas origens.
+
+    Por que não guarda destinatário, assunto, corpo, token ou senha
+    -------------------------------------------------------------------
+    Toda notificação passível de e-mail já nasce como `Notification`, e essa
+    linha já carrega tudo que o envio precisa: `user_id` (→ `users.email`),
+    `title`/`message`/`data` (→ assunto e corpo, reconstruídos em tempo de
+    envio pelas mesmas funções que hoje montam o e-mail síncrono). Duplicar
+    qualquer um desses campos aqui criaria uma SEGUNDA cópia de dado pessoal —
+    endereço, e possivelmente o título de um chamado escrito pelo cliente —
+    numa tabela nova, sem necessidade: a auditoria da Fase 3 mediu que os
+    ~20 pontos de disparo hoje convergem em duas funções (`notify`,
+    `notifica_audiencia`), e todos os campos que ELAS recebem já são persistidos
+    em `notifications` primeiro. Esta tabela guarda só ESTADO OPERACIONAL:
+    quantas vezes tentou, quando tenta de novo, quem está com a linha na mão.
+
+    Para a origem Account, o mesmo raciocínio vale para o JWT: o token de
+    verificação/reset NUNCA é persistido — é gerado pelo worker, no momento do
+    envio, a partir do `User` carregado por `user_id`. A auditoria da Fase 3C
+    provou que isso é seguro: a validação dos dois tokens compara o ESTADO
+    embutido (`vrf`/`pwd`) contra o estado atual do usuário no momento do
+    clique, nunca contra um registro de "qual foi o último token emitido" — e
+    por isso múltiplos tokens válidos para o mesmo usuário já coexistem hoje,
+    antes desta fase.
+
+    `notification_id` é UNIQUE de propósito: no máximo uma linha de outbox por
+    notificação, sempre. Isso é a primeira camada de deduplicação — a segunda é
+    o `FOR UPDATE SKIP LOCKED` do worker, contra dois processos pegando a MESMA
+    linha já existente. Para a origem Account, o papel de `notification_id` é
+    feito por `dedup_key` (`event_type:user_id:intent_id` — ver
+    `app/services/email_outbox.py:enqueue_account_email`): a MESMA intenção
+    (mesmo `intent_id`, gerado pelo chamador) nunca duplica; um pedido novo,
+    legítimo, tem um `intent_id` novo e por isso uma `dedup_key` diferente.
+
+    Garantia é at-least-once, não exactly-once
+    -------------------------------------------
+    Existe uma janela inevitável entre o servidor SMTP aceitar a mensagem e
+    este processo persistir `status=sent`: se o processo morrer exatamente
+    nesse intervalo, o e-mail SAIU mas a linha continua `processing`, e a
+    recuperação de linha travada (ver `app/services/email_outbox.py`) vai
+    reenviá-lo. Não há como fechar essa janela sem um protocolo de confirmação
+    do lado do provedor SMTP que este sistema não tem — então a garantia real e
+    documentada é "pelo menos uma vez", nunca "exatamente uma vez". Para a
+    origem Account isso é ainda mais barato de tolerar do que para
+    Notification: dois tokens válidos simultâneos para o mesmo evento não é
+    uma falha de segurança (ver acima), só um e-mail a mais.
+    """
+
+    __tablename__ = "email_outbox"
+
+    id: Mapped[uuid.UUID] = mapped_column(UUID(as_uuid=True), primary_key=True, default=uuid.uuid4)
+    notification_id: Mapped[uuid.UUID | None] = mapped_column(
+        UUID(as_uuid=True), ForeignKey("notifications.id", ondelete="CASCADE"), nullable=True
+    )
+    # Origem Account (Fase 3C) — os três nascem e morrem juntos: preenchidos
+    # só quando `notification_id` é NULO, ver `ck_email_outbox_origem_valida`.
+    user_id: Mapped[uuid.UUID | None] = mapped_column(
+        UUID(as_uuid=True), ForeignKey("users.id", ondelete="CASCADE"), nullable=True
+    )
+    # String + CHECK, mesma convenção do `status` logo abaixo — nenhum enum
+    # nativo aqui, pelo mesmo motivo.
+    event_type: Mapped[str | None] = mapped_column(String(20), nullable=True)
+    dedup_key: Mapped[str | None] = mapped_column(String(160), nullable=True)
+    # String + CHECK, não enum nativo — mesma convenção (e mesmo motivo) de
+    # `SlaAlertEvent.alert_kind`: acrescentar um estado novo não pode exigir
+    # `ALTER TYPE` numa cadeia de migrations que roda inteira numa transação.
+    status: Mapped[str] = mapped_column(String(20), nullable=False, default="pending")
+    attempts: Mapped[int] = mapped_column(Integer, nullable=False, default=0)
+    next_attempt_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False)
+    # Preenchidos só enquanto status=processing; None em qualquer outro estado.
+    locked_by: Mapped[str | None] = mapped_column(String(120), nullable=True)
+    locked_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
+    # Mesma disciplina de `_resumo_do_erro`: classe da exceção + código SMTP
+    # numérico quando existir. NUNCA a mensagem crua do servidor nem o
+    # destinatário — ver `app/services/email.py`.
+    last_error: Mapped[str | None] = mapped_column(Text, nullable=True)
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now())
+    sent_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
+
+    # Sem back_populates de propósito: `Notification` não precisa navegar até a
+    # sua outbox nesta fase. A relação existe principalmente para o unit of
+    # work do SQLAlchemy — sem ela, gravar `Notification` + `EmailOutbox` no
+    # MESMO flush (o que a Fase 3B faz) não tem como saber que o INSERT de
+    # `email_outbox` precisa vir DEPOIS do de `notifications`: a ordenação por
+    # dependência do SQLAlchemy é por `relationship()` mapeado, não pela FK
+    # crua da tabela. Medido: sem esta linha, os dois INSERTs às vezes saem na
+    # ordem errada e o `email_outbox_notification_id_fkey` rejeita. Mesmo
+    # raciocínio para `user` abaixo, no caminho de conta da Fase 3C.
+    notification: Mapped["Notification | None"] = relationship()
+    user: Mapped["User | None"] = relationship()
+
+    __table_args__ = (
+        Index("uq_email_outbox_notification_id", "notification_id", unique=True),
+        Index("uq_email_outbox_dedup_key", "dedup_key", unique=True),
+        CheckConstraint(
+            "status IN ('pending', 'processing', 'sent', 'dead')",
+            name="ck_email_outbox_status_conhecido",
+        ),
+        CheckConstraint(
+            "event_type IS NULL OR event_type IN "
+            "('verification', 'password_reset', 'account_exists')",
+            name="ck_email_outbox_event_type_conhecido",
+        ),
+        # A origem é OU Notification OU Account, nunca as duas, nunca nenhuma.
+        # NOT VALID na migration (c8b8d6994fae) evita o lock de leitura da
+        # tabela inteira; `VALIDATE CONSTRAINT` roda logo em seguida, na mesma
+        # migration, sem bloquear escrita durante a validação.
+        CheckConstraint(
+            "(notification_id IS NOT NULL AND user_id IS NULL AND event_type IS NULL "
+            "AND dedup_key IS NULL) "
+            "OR "
+            "(notification_id IS NULL AND user_id IS NOT NULL AND event_type IS NOT NULL "
+            "AND dedup_key IS NOT NULL)",
+            name="ck_email_outbox_origem_valida",
+        ),
+        # Índice parcial: é exatamente a consulta do hot path do worker
+        # (`status='pending' AND next_attempt_at <= now()`), e as linhas
+        # `sent`/`dead` — que tendem a ser a maioria com o tempo — nunca
+        # precisam entrar nele. Serve as duas origens sem distinção.
+        Index(
+            "ix_email_outbox_pending_next_attempt",
+            "next_attempt_at",
+            postgresql_where=text("status = 'pending'"),
+        ),
     )
 
 
@@ -899,10 +1393,18 @@ class CalendarEvent(Base):
         Enum(CalendarEventType), default=CalendarEventType.event, nullable=False
     )
     color: Mapped[str] = mapped_column(String(7), nullable=False, default="#6366f1")
+    # As duas continuam NOT NULL e com hora. "Dia inteiro" nao as torna nulas:
+    # a API deriva as bordas do dia quando `all_day` esta ligado, e o indice, os
+    # filtros e as leituras antigas seguem funcionando sem saber da chave.
     start_date: Mapped[datetime] = mapped_column(
         DateTime(timezone=True), nullable=False, index=True
     )
     end_date: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False)
+    # Data FLUTUANTE quando ligado: o evento vale das 00:00:00Z as 23:59:59.999999Z
+    # da data escolhida, e a tela o desenha pela DATA, nao pelo instante. Ver o
+    # cabecalho de `app/utils/agenda.py` -- e a decisao que permite os eventos
+    # antigos virarem dia inteiro sem recalcular linha nenhuma.
+    all_day: Mapped[bool] = mapped_column(Boolean, nullable=False, default=False)
     created_by: Mapped[uuid.UUID | None] = mapped_column(
         UUID(as_uuid=True), ForeignKey("users.id", ondelete="SET NULL"), nullable=True
     )
@@ -912,3 +1414,376 @@ class CalendarEvent(Base):
     )
 
     creator: Mapped["User | None"] = relationship()
+
+
+# ── BASE DA HELÔ (Fase 2) ────────────────────────────────────
+#
+# Separada dos `KBArticle`, confirmando a decisão de 26/08. São dois corpora
+# com donos e ciclos diferentes: o artigo da Base de Conhecimento é escrito por
+# gente da equipe, tem autor, rascunho e contador de "foi útil"; o trecho de
+# manual é derivado de um arquivo que alguém do fabricante escreveu e que a
+# ingestão recorta. Misturar os dois obrigaria metade das colunas de cada um a
+# nascer nula na outra metade das linhas.
+
+# Dimensão do vetor. 1024 é o que bge-m3 e multilingual-e5-large produzem — os
+# dois modelos locais em avaliação. NÃO é configurável: `vector(N)` é tipo de
+# coluna, e trocar o modelo por um de dimensão diferente é migration nova, não
+# variável de ambiente. Está escrito aqui para que a troca seja uma decisão
+# consciente e não a descoberta de um INSERT recusado em produção.
+HELO_EMBEDDING_DIM = 1024
+
+
+class HeloChunk(Base):
+    """Um trecho recuperável — a unidade que a busca devolve e que a Helô cita."""
+
+    __tablename__ = "helo_chunks"
+    __table_args__ = (
+        # Único por artigo: a indexação não pode gravar dois trechos disputando
+        # a mesma posição, senão a ordem de leitura vira sorteio.
+        Index("ix_helo_chunks_artigo_ordem", "article_id", "ordem", unique=True),
+    )
+
+    id: Mapped[uuid.UUID] = mapped_column(UUID(as_uuid=True), primary_key=True, default=uuid.uuid4)
+    # O ARTIGO de onde o trecho saiu. Desde 10/09/2026 a fonte da Helô é a
+    # Base de Conhecimento, e o produto do trecho é o produto do artigo — por
+    # `kb_article_products`, que a tela já edita. Um vínculo por trecho seria
+    # uma segunda fonte de verdade para a mesma pergunta.
+    article_id: Mapped[uuid.UUID] = mapped_column(
+        UUID(as_uuid=True), ForeignKey("kb_articles.id", ondelete="CASCADE"), index=True
+    )
+    # Texto, e não número: aqui cabe tanto "8.2 Alterar Idioma" quanto um
+    # título de artigo escrito pelo suporte — e é esta string que a resposta
+    # cita como fonte.
+    secao: Mapped[str] = mapped_column(String(255), nullable=False)
+    # A posição do trecho dentro do artigo. A ordem do texto é a ordem do
+    # procedimento, e ela não se recupera do texto depois: "8.10" vem depois de
+    # "8.9", e ordenar por `secao` como string colocaria "8.10" antes de "8.2".
+    ordem: Mapped[int] = mapped_column(Integer, nullable=False)
+    conteudo: Mapped[str] = mapped_column(Text, nullable=False)
+    # O trecho ensina um procedimento que só roda com senha de administrador.
+    # O valor da senha é REDIGIDO na importação do manual e o procedimento
+    # fica — as duas metades da mesma decisão. Excluir o trecho pareceria mais
+    # seguro e é pior: a busca não acharia nada, a Helô escalaria por NADA
+    # ENCONTRADO, e nem ela nem o técnico saberiam o motivo. Com a marca ela
+    # escala dizendo o motivo exato.
+    exige_credencial_admin: Mapped[bool] = mapped_column(Boolean, default=False, nullable=False)
+    # Nulo só por um instante: a indexação embute antes de gravar, e com o
+    # serviço de embedding fora ela não grava nada — o trecho velho fica no
+    # lugar e a próxima varredura tenta de novo.
+    embedding: Mapped[list[float] | None] = mapped_column(Vector(HELO_EMBEDDING_DIM), nullable=True)
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now())
+
+
+class HeloIndexacao(Base):
+    """
+    O que já foi indexado, e de qual versão do texto.
+
+    Existe para a varredura periódica reindexar SÓ o artigo que mudou. O hash
+    é do RESULTADO do corte — dos trechos que seriam gravados —, e não do
+    `content` cru nem do `updated_at`:
+
+    - `updated_at` anda a cada visualização do artigo (`view_count` é
+      incrementado por UPDATE), e cada clique pagaria embedding de texto igual;
+    - o `content` cru não enxerga mudança de receita: consertar o corte ou a
+      redação com o texto igual deixaria a base com o corte velho. É a lição
+      do `_hash_do_resultado` da ingestão por arquivo, que existia pelo mesmo
+      motivo.
+    """
+
+    __tablename__ = "helo_indexacao"
+
+    article_id: Mapped[uuid.UUID] = mapped_column(
+        UUID(as_uuid=True), ForeignKey("kb_articles.id", ondelete="CASCADE"), primary_key=True
+    )
+    content_hash: Mapped[str] = mapped_column(String(64), nullable=False)
+    indexado_em: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), server_default=func.now(), nullable=False
+    )
+
+
+# ── TELEFONIA (Fase 2B) ──────────────────────────────────────
+
+
+class TicketCall(Base):
+    """Uma TENTATIVA de ligar para o cliente de um chamado.
+
+    O nome importa: a linha nasce antes de existir chamada, e pode terminar
+    sem que nunca tenhamos sabido se existiu. Modelar só "chamadas
+    confirmadas" perderia exatamente o estado perigoso — aquele em que o
+    `POST /calls` pode ter tocado o telefone de alguém e a resposta não voltou.
+    É por isso que `provider_call_id` aceita NULL: uma tabela que o exigisse
+    NOT NULL seria incapaz de registrar o caso que mais precisa ser
+    reconciliado depois.
+
+    Por que tabela própria, e não coluna em `tickets`
+    --------------------------------------------------
+    Uma tentativa tem estado e ciclo próprios, e a maioria dos chamados nunca
+    terá nenhuma. Cinco colunas nulas em 99% das linhas é o sinal, já escrito
+    nesta casa, de que são duas coisas — o mesmo critério que criou
+    `helo_indexacao` em vez de inchar `kb_articles`.
+
+    Não há `relationship()` para `Ticket`, de propósito: `helo_indexacao` é o
+    precedente de tabela satélite que se liga só pela FK. Evita tocar o modelo
+    `Ticket` por uma frente que ainda não tem consumidor.
+
+    O que esta tabela NÃO guarda, e é escolha
+    ------------------------------------------
+    Telefone, `caller`, `extension`, cabeçalho, corpo da requisição, corpo da
+    resposta, `message` do fornecedor, metadata e URL de gravação. O telefone
+    canônico continua em `users.phone`, e o resto é dado de terceiro que não
+    precisamos reter para saber o estado da tentativa. Guardar resposta bruta
+    seria criar um segundo lugar por onde PII e credencial poderiam vazar.
+    """
+
+    __tablename__ = "ticket_calls"
+
+    id: Mapped[uuid.UUID] = mapped_column(UUID(as_uuid=True), primary_key=True, default=uuid.uuid4)
+    ticket_id: Mapped[uuid.UUID] = mapped_column(
+        UUID(as_uuid=True), ForeignKey("tickets.id", ondelete="CASCADE"), nullable=False, index=True
+    )
+    # NULL = quem iniciou não existe mais. Mesmo critério de `kb_comments.author_id`
+    # e `equipments.owner_id`: a tentativa é fato do chamado e sobrevive à
+    # exclusão da conta; quem some é a autoria.
+    initiated_by_id: Mapped[uuid.UUID | None] = mapped_column(
+        UUID(as_uuid=True), ForeignKey("users.id", ondelete="SET NULL"), nullable=True, index=True
+    )
+    # STRING OPACA, e `Text` porque não sabemos o comprimento. A documentação
+    # oficial diz `string` e mostra DOIS formatos para o mesmo campo: 27
+    # caracteres base62 (`1PkXhmBsYAvr9legLB2d7BimT0Q`) na referência da API, e
+    # UUID textual de 36 (`bdf199fa-...`) no guia de integração. Por isso NÃO é
+    # `UUID` do PostgreSQL: o tipo nativo rejeitaria o primeiro formato, e o
+    # HelpHS quebraria por validar algo que o fornecedor nunca prometeu.
+    # Nada é validado, nada é transformado — o valor volta como chegou.
+    #
+    # ⚠️ O QUE ELE É, MEDIDO: o identificador que o `POST /calls` devolve na
+    # criação. Nada além disso. A medição autenticada de 30/09/2026 provou que
+    # ele **não corresponde** ao campo `id` que o `GET /calls` devolve depois
+    # para a mesma chamada — ou seja, ele NÃO é chave de reconciliação do CDR, e
+    # buscar o CDR por ele não encontra. Quem reconcilia é o `ticket_call_id`
+    # que a Fase 2D.2 passou a plantar no `metadata` do `POST`.
+    #
+    # Ele continua valendo, e por isso não saiu: é a prova de que o fornecedor
+    # aceitou a criação, é o que sustenta a `CheckConstraint` de `confirmed` e é
+    # o que torna a tentativa idempotente pelo índice único. Trocar o significado
+    # documentado por "chave do CDR" seria descrever o campo pelo que
+    # gostaríamos que ele fosse.
+    provider_call_id: Mapped[str | None] = mapped_column(Text, nullable=True)
+    creation_status: Mapped[str] = mapped_column(String(20), nullable=False)
+    # O status HTTP que o fornecedor devolveu, quando houve resposta. NULL
+    # quando não houve — e a diferença entre "não respondeu" e "respondeu 500"
+    # é justamente o que separa `unavailable` de `indeterminate`.
+    provider_http_status: Mapped[int | None] = mapped_column(Integer, nullable=True)
+
+    # ── Desfecho da chamada, vindo do evento de encerramento ──────────────
+    #
+    # As quatro colunas abaixo são preenchidas por UM evento só, encaminhado de
+    # fora depois que a ligação termina. Nenhuma delas participa da máquina de
+    # estados de `creation_status`: aquela descreve se a chamada foi CRIADA, e
+    # estas descrevem como ela ACABOU. Confundir as duas foi o risco que esta
+    # separação evita.
+    #
+    # A unidade está no NOME, e não num comentário: `duration_seconds`. Foi a
+    # lição que `provider_call_id` cobrou — um campo cujo significado só existia
+    # na cabeça de quem o criou precisou de correção documental meses depois.
+    duration_seconds: Mapped[int | None] = mapped_column(Integer, nullable=True)
+    # Vocabulário do FORNECEDOR, e por isso sem `CheckConstraint` e sem enum
+    # nativo. Medimos `NORMAL_CLEARING`, `ORIGINATOR_CANCEL` e `NUMBER_CHANGED`,
+    # e a documentação não publica o conjunto fechado. Fechar uma lista que o
+    # fornecedor não prometeu faria o HelpHS recusar um desfecho legítimo no dia
+    # em que ele aparecesse. Mesmo critério do `creation_status` não ser enum do
+    # PostgreSQL — só que aqui nem a constraint cabe.
+    hangup_cause: Mapped[str | None] = mapped_column(String(40), nullable=True)
+    # TRÊS estados, e é por isso que é nullable: `True`, `False` e NULL para "o
+    # evento não informou". `NOT NULL DEFAULT false` apagaria o terceiro, e
+    # "não sabemos" viraria "não existe gravação".
+    #
+    # ⚠️ É só um registro. Nada no HelpHS consome este campo: não há download,
+    # não há reprodução e não há `record_url` em lugar nenhum deste modelo.
+    recording_available: Mapped[bool | None] = mapped_column(Boolean, nullable=True)
+    # O relógio é NOSSO: marca quando o HelpHS RECEBEU e processou o evento, e
+    # não o instante de encerramento que o fornecedor informa.
+    #
+    # ⚠️ A distinção não é preciosismo. Medimos em 30/09/2026 uma divergência
+    # sistemática de ~3h entre o nosso `created_at` e o `started_at` do
+    # fornecedor, e o exemplo da documentação dele mistura campo com fuso (`Z`) e
+    # campo sem fuso. Guardar o horário dele aqui seria importar essa confusão
+    # para dentro de uma coluna que serve de trava de idempotência.
+    #
+    # E é essa a função principal: `NULL` significa "evento ainda não chegou", e
+    # é a condição do UPDATE atômico que faz a primeira entrega vencer.
+    hangup_event_received_at: Mapped[datetime | None] = mapped_column(
+        DateTime(timezone=True), nullable=True
+    )
+
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now())
+    updated_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), server_default=func.now(), onupdate=func.now()
+    )
+
+    __table_args__ = (
+        # SQL portável de propósito: `IN`, `<>` e `IS NOT NULL` existem no
+        # SQLite, então esta constraint NÃO precisa do `ddl_if` que o CHECK do
+        # telefone precisou — lá o problema era `regexp_replace`, que é só do
+        # PostgreSQL. Aqui a mesma regra vale nos dois bancos, e a suíte que
+        # monta schema por `create_all` a exercita de graça.
+        CheckConstraint(
+            "creation_status IN ('pending', 'dispatching', 'confirmed', "
+            "'rejected', 'unavailable', 'indeterminate')",
+            name="ck_ticket_calls_status_conhecido",
+        ),
+        # Confirmada sem identificador seria um registro que afirma saber da
+        # chamada sem ter como apontá-la — nem para consultar, nem para
+        # desligar. O inverso NÃO é imposto: ter `provider_call_id` sem estar
+        # `confirmed` é estado legítimo que a reconciliação da 2D pode produzir.
+        CheckConstraint(
+            "creation_status <> 'confirmed' OR provider_call_id IS NOT NULL",
+            name="ck_ticket_calls_confirmada_tem_id",
+        ),
+        # Índice único NOMEADO, e não `unique=True` na coluna, para que o
+        # downgrade da migration remova exatamente este objeto — mesmo padrão
+        # do `uq_equipments_product_serial`. No PostgreSQL vários NULL convivem
+        # sob UNIQUE, que é o comportamento que queremos: toda tentativa sem
+        # identificador é distinta das outras.
+        Index("uq_ticket_calls_provider_call_id", "provider_call_id", unique=True),
+        Index("ix_ticket_calls_ticket_created", "ticket_id", "created_at"),
+    )
+
+
+class SlaAlertEvent(Base):
+    """Um aviso de SLA que JA FOI dado. Uma linha e um EVENTO, nao um estado.
+
+    Por que uma tabela, e nao um booleano no ticket
+    -----------------------------------------------
+    "Ja avisei" nao e pergunta de sim/nao: e pergunta sobre QUAL prazo e QUAL
+    limiar. Um booleano responderia a primeira vez e mentiria em todas as
+    outras — prorrogacao, troca de prioridade, reabertura e mudanca de
+    configuracao criam prazos novos que merecem aviso novo, e um booleano ja
+    ligado os engoliria em silencio.
+
+    Tambem nao e `notifications`: aquela tabela guarda o EFEITO, uma linha por
+    pessoa, com `ondelete=CASCADE` para o usuario. Excluir o ultimo destinatario
+    apagaria a prova de que o aviso aconteceu, e a rodada seguinte reenviaria.
+    O precedente da casa para "o worker ja fez isto" e estado persistido
+    proprio: `helo_indexacoes` na indexacao, e a transicao de status no
+    fechamento automatico.
+
+    A identidade
+    ------------
+    `(ticket_id, alert_kind, reopen_count, effective_due_at, warning_threshold)`,
+    sob indice UNICO.
+
+    `reopen_count` entrou em 25/09/2026, depois de uma medicao. A versao anterior
+    contava com o prazo distinguir os ciclos, e ele NAO distingue:
+    `add_business_minutes` primeiro avanca o instante para dentro do expediente,
+    entao duas reaberturas em momentos diferentes da mesma janela fechada
+    colapsam no mesmo inicio de jornada e dao prazos IDENTICOS — sabado as 11:00
+    e domingo as 19:30 BRT, 32 horas de diferenca, mesmo vencimento. Como a
+    reabertura tambem zera pausa e extensao, o prazo do ciclo novo e independente
+    do anterior e pode coincidir com ele. Sem `reopen_count` na chave, o segundo
+    aviso ficava SILENCIADO — o pior desfecho possivel para um alerta.
+
+    `priority` e `extension_total_min` seguem fora da identidade: nenhum dos dois
+    muda o ciclo, e os dois ja mudam o prazo, que esta na chave. Incluir qualquer
+    um criaria uma segunda resposta para "e o mesmo aviso?".
+
+    A consequencia e deliberada: mesmo ciclo, mesmo prazo e mesmo limiar nunca
+    repetem; qualquer coisa que MUDE o ciclo, o prazo ou o limiar habilita um
+    aviso novo.
+    """
+
+    __tablename__ = "sla_alert_events"
+
+    id: Mapped[uuid.UUID] = mapped_column(UUID(as_uuid=True), primary_key=True, default=uuid.uuid4)
+    ticket_id: Mapped[uuid.UUID] = mapped_column(
+        UUID(as_uuid=True), ForeignKey("tickets.id", ondelete="CASCADE"), nullable=False
+    )
+    # `String` com CHECK, e nao enum nativo — convencao registrada na migration
+    # `h4c5d6e7f8g9`: acrescentar valor a enum nativo exige `ALTER TYPE`, e o
+    # alembic daqui roda a cadeia inteira numa transacao so. A Fase 2B
+    # acrescenta `response_warning` sem tocar no schema.
+    alert_kind: Mapped[str] = mapped_column(String(40), nullable=False)
+    # O prazo VIGENTE no instante do aviso — saida de
+    # `prazo_efetivo_de_resolucao`, e nao a coluna crua. E o que torna a
+    # identidade sensivel a prorrogacao.
+    effective_due_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False)
+    warning_threshold: Mapped[int] = mapped_column(Integer, nullable=False)
+
+    # O CICLO. Parte da identidade desde 25/09/2026 — ver o docstring acima: dois
+    # ciclos distintos podem produzir o mesmo `effective_due_at`.
+    reopen_count: Mapped[int] = mapped_column(Integer, nullable=False, default=0)
+
+    # ── Daqui para baixo: auditoria. NAO entra na identidade. ─────
+    # Serve para responder "por que este aviso saiu?" meses depois, quando a
+    # `sla_configs` ja foi editada e o chamado ja mudou de mao.
+    priority: Mapped[str | None] = mapped_column(String(20), nullable=True)
+    extension_total_min: Mapped[int] = mapped_column(Integer, nullable=False, default=0)
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now())
+
+    __table_args__ = (
+        # SQL portavel: `IN` e comparacao de inteiro existem no SQLite tambem,
+        # entao a suite que monta schema por `create_all` exercita as duas de
+        # graca — sem precisar do `ddl_if` que o CHECK do telefone precisou.
+        CheckConstraint(
+            "alert_kind IN ('resolution_warning')",
+            name="ck_sla_alert_events_kind_conhecido",
+        ),
+        # O limiar e PERCENTUAL, o mesmo dominio que `SLAConfigUpdate` valida
+        # (1..100). A constraint existe porque no dia em que alguem tratar o
+        # campo como fracao (0.8) o banco recusa, em vez de gravar um aviso que
+        # dispararia em 1% de consumo — e ha fixture de mock no frontend com
+        # exatamente esse valor errado.
+        CheckConstraint(
+            "warning_threshold >= 1 AND warning_threshold <= 100",
+            name="ck_sla_alert_events_threshold_percentual",
+        ),
+        # Indice unico NOMEADO, e nao `unique=True` na coluna, para que o
+        # downgrade remova exatamente este objeto — mesmo padrao do
+        # `uq_ticket_calls_provider_call_id`. E a reivindicacao atomica depende
+        # DELE: `ON CONFLICT DO NOTHING` precisa de um indice unico para ter em
+        # que conflitar.
+        Index(
+            "uq_sla_alert_events_identidade",
+            "ticket_id",
+            "alert_kind",
+            "reopen_count",
+            "effective_due_at",
+            "warning_threshold",
+            unique=True,
+        ),
+        Index("ix_sla_alert_events_ticket_created", "ticket_id", "created_at"),
+    )
+
+
+class TicketProtocolCounter(Base):
+    """O ultimo numero de protocolo JA EMITIDO em cada ano. Uma linha por ano.
+
+    Por que uma tabela, e nao `max()+1` sobre `tickets`
+    ----------------------------------------------------
+    O numero do protocolo sai do HelpHS: vai no e-mail de abertura e fica no
+    texto de notificacoes que NAO fazem cascata com o chamado. Derivar o proximo
+    numero dos chamados que ainda existem fazia apagar chamados devolver
+    numeros: zerar `tickets` voltava a `HS-AAAA-0001`, e apagar o mais recente
+    reusava o dele. Aqui a fonte da verdade e o que ja foi emitido, nao o que
+    sobrou.
+
+    E e o lock desta linha que serializa duas aberturas simultaneas: o
+    `INSERT ... ON CONFLICT DO UPDATE` de `app/utils/protocol.py` a trava ate o
+    commit da transacao do chamado. Sem isso, as duas liam o mesmo maximo e a
+    segunda so descobria no indice unico, gastando retentativas.
+
+    `last_number` e o ultimo EMITIDO, nao o proximo: a linha so existe depois do
+    primeiro chamado do ano, e `0` nunca e gravado pelo gerador. Ano novo nao
+    precisa de virada — a linha do ano novo nasce no primeiro chamado dele.
+    """
+
+    __tablename__ = "ticket_protocol_counters"
+
+    # O ano do protocolo, nao uma chave substituta: e por ele que o
+    # `ON CONFLICT` encontra a linha, e um id a mais so criaria uma segunda
+    # forma de identificar o mesmo ano.
+    year: Mapped[int] = mapped_column(Integer, primary_key=True, autoincrement=False)
+    last_number: Mapped[int] = mapped_column(Integer, nullable=False)
+
+    __table_args__ = (
+        CheckConstraint("last_number >= 0", name="ck_ticket_protocol_counters_last_number"),
+    )

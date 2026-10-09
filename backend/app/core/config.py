@@ -3,14 +3,47 @@ from functools import lru_cache
 from typing import Any
 from urllib.parse import urlparse
 
-from pydantic import field_validator
+from loguru import logger
+from pydantic import SecretStr, field_validator
 from pydantic_settings import BaseSettings, SettingsConfigDict
+
+# Os dois modos da Helô. Constantes, e não literais soltos, porque o valor é
+# comparado em dois lugares — aqui, ao ler o painel, e em `helo.py`, ao decidir
+# o turno —, e uma grafia divergente entre os dois cairia calada em triagem.
+HELO_MODO_TRIAGEM = "triagem"
+HELO_MODO_COMPLETA = "completa"
 
 # Nomes e endereços que só existem na máquina de quem desenvolve. Comparar o
 # HOST da URL com este conjunto — e não procurar "localhost" no texto — evita os
 # dois erros: barrar um domínio legítimo que contenha a palavra (ex.:
 # localhost.healthsafetytech.com) e deixar passar [::1] ou 0.0.0.0.
 _HOSTS_LOCAIS = frozenset({"localhost", "127.0.0.1", "::1", "0.0.0.0", ""})
+
+
+_FORMATOS_DE_CALLED = frozenset({"nacional", "e164"})
+
+
+class ConfiguracaoDaTelefoniaInvalidaError(RuntimeError):
+    """A telefonia está ligada com configuração que não permite operar.
+
+    ⚠️ NÃO herda de `ValueError`, e essa é a única razão de a classe existir.
+
+    Todas as outras validações deste arquivo levantam `ValueError` de dentro do
+    `model_post_init`, e o pydantic as embrulha num `ValidationError` — que
+    imprime, junto da mensagem, um `input_value=` com o dicionário de entrada
+    truncado. MEDIDO no pydantic 2.11.3: com `API4COM_TOKEN` vindo do ambiente
+    e outra validação falhando, a mensagem do `ValidationError` traz a CAUDA do
+    token. O segredo inteiro não sai, mas 22 caracteres finais saem — e vão
+    para o log de boot, que é lido por mais gente do que o painel.
+
+    Exceção que não seja `ValueError` nem `AssertionError` o pydantic deixa
+    subir intacta, com a nossa mensagem e nada mais. É o que esta faz.
+
+    Consequência para quem lê: `pytest.raises(ValueError)` NÃO pega esta. Os
+    testes da telefonia em `tests/test_config.py` esperam esta classe pelo
+    nome, de propósito.
+    """
+
 
 # ── STARTTLS e o CVE-2026-55558 ───────────────────────────────
 #
@@ -156,6 +189,18 @@ class Settings(BaseSettings):
     bcrypt_rounds: int = 12
 
     def model_post_init(self, __context: Any) -> None:
+        # ⚠️ A API4COM é validada AQUI, no topo, e essa posição é o requisito —
+        # não estilo. Tudo o que vem depois do `return` abaixo é pulado em
+        # development e testing; a telefonia não pode ser pulada.
+        #
+        # A razão da divergência: as validações de baixo protegem contra subir
+        # PRODUÇÃO com valor de desenvolvimento, e em dev esse valor é o certo.
+        # Esta protege contra ligar a integração sem ter como autenticar — e
+        # isso está igualmente errado em qualquer ambiente. Quem ligar a flag
+        # em dev sem token merece descobrir na subida, não numa falha confusa
+        # no primeiro uso.
+        self._valida_api4com()
+
         # A lista do que ESCAPA é fechada, e é essa a diferença. Enquanto a
         # condição era `if not self.is_production`, qualquer APP_ENV fora de
         # "production"/"prod" passava batido: um staging publicado na internet
@@ -236,6 +281,15 @@ class Settings(BaseSettings):
                     "como se tivessem chegado dentro do TLS."
                 )
 
+        # Por último de propósito: as validações acima protegem a subida de
+        # quebras que já existiam, e cada teste delas espera o PRÓPRIO erro.
+        if self.lgpd_revisao_politica is None:
+            raise ValueError(
+                f"LGPD_REVISAO_POLITICA está vazio em '{self.app_env}': defina a "
+                "revisão vigente da Política de Privacidade (ex.: 00). Sem ela, "
+                "cada aceite seria gravado sem dizer qual texto foi aceito"
+            )
+
     # Armazenamento de arquivos (anexos e avatares) em disco.
     # No deploy, este caminho precisa ser um volume — sem isso os arquivos
     # somem a cada redeploy do container.
@@ -278,6 +332,73 @@ class Settings(BaseSettings):
     # decisão, não default.
     helo_enabled: bool = False
 
+    # O que a Helô faz quando está ligada — e é ORTOGONAL ao `helo_enabled`:
+    # desligada é desligada em qualquer modo.
+    #
+    # `triagem` é a recepcionista da Fase 1: saudação, encerramento e escalada,
+    # sem embedding e sem LLM. `completa` é a Fase 2, que busca na Base de
+    # Conhecimento e responde com o modelo.
+    #
+    # Existe porque a Fase 2 com a base vazia escala toda pergunta, e os
+    # manuais técnicos dos sete aparelhos estão sendo reescritos. O gatilho para
+    # virar está em `docs/decisoes-e-regras.md`.
+    #
+    # TRIAGEM por padrão, e também quando o valor não se reconhece. O modo
+    # seguro é o que o sistema assume quando não sabe — e a alternativa que foi
+    # recusada é usar a AUSÊNCIA da `DEEPSEEK_API_KEY` como standby: no dia em
+    # que alguém preenchesse a chave para testar outra coisa, ela acordaria
+    # sozinha, com a base vazia, falando com cliente.
+    helo_modo: str = HELO_MODO_TRIAGEM
+
+    @field_validator("helo_modo")
+    @classmethod
+    def _modo_da_helo_seguro(cls, valor: str) -> str:
+        """
+        Só `completa` acorda a Fase 2; todo o resto é triagem.
+
+        Caixa e espaço não importam, no mesmo idioma do `APP_ENV`. Um valor
+        preenchido e não reconhecido deixa aviso no log com o que veio: cair em
+        triagem calado deixaria quem configurou achando que ela acordou — e o
+        erro de digitação provável, `completo`, é justamente esse.
+        """
+        limpo = valor.strip().lower()
+        if limpo == HELO_MODO_COMPLETA:
+            return HELO_MODO_COMPLETA
+        if limpo not in ("", HELO_MODO_TRIAGEM):
+            logger.warning(
+                f"HELO_MODO={valor!r} não é um modo conhecido "
+                f"({HELO_MODO_TRIAGEM!r} ou {HELO_MODO_COMPLETA!r}); a Helô fica em triagem"
+            )
+        return HELO_MODO_TRIAGEM
+
+    # O serviço de embedding da Helô — um contêiner PRÓPRIO, não uma biblioteca
+    # dentro desta API.
+    #
+    # A separação não é preferência de arquitetura: é consequência de um número
+    # medido. O backend roda com `--workers 1` (`start.sh:40`), e trabalho de
+    # CPU síncrono no event loop congela a API para TODO MUNDO. Já aconteceu e
+    # está registrado — uma requisição pesada ocupou o processo por 151
+    # segundos (`mudanças.md:50`). Calcular embedding aqui dentro seria repetir
+    # esse defeito de propósito, a cada turno de conversa da Helô.
+    #
+    # Nasce VAZIA. Sem URL, o cliente devolve None em silêncio, a busca não
+    # acontece e a Helô escala — exatamente como já faz sem a chave da
+    # DeepSeek. Ligar é decisão, não default.
+    helo_embedding_url: str = ""
+
+    # Curto de propósito, e bem menor que os 30 s do LLM. Um embedding leva
+    # centenas de milissegundos; se está demorando dez, o serviço tem problema,
+    # e prender o cliente esperando não melhora nada — escalar logo é resposta
+    # melhor do que uma espera longa seguida da mesma escalada.
+    helo_embedding_timeout_seconds: int = 10
+
+    # De quanto em quanto tempo a varredura procura artigo publicado novo ou
+    # editado para indexar (`app/services/helo_indexacao.py`). Cinco minutos é
+    # a latência entre publicar e a Helô passar a usar o texto — só para texto
+    # novo: despublicar tem efeito imediato, porque a busca filtra ao vivo.
+    # Zero desliga a varredura.
+    helo_indexacao_intervalo_segundos: int = 300
+
     # DeepSeek — o único provedor de LLM.
     #
     # Nasce VAZIA: a chave vive no painel do EasyPanel, nunca no repositório, e
@@ -297,6 +418,140 @@ class Settings(BaseSettings):
     # Vale para as quatro chamadas. Era `openai_temperature`, com o mesmo 0.3.
     llm_temperature: float = 0.3
     llm_request_timeout_seconds: int = 30
+
+    # ── Telefonia — API4COM ───────────────────────────────────
+    #
+    # DESLIGADA por padrão, pelo mesmo raciocínio do `helo_enabled`: ligar
+    # sozinha faria o sistema DISCAR PARA O TELEFONE DE UMA PESSOA no deploy
+    # seguinte, sem ninguém ter pedido. Ligar é decisão.
+    #
+    # Na Fase 2A não existe consumidor: nenhum router, lifespan ou laço de
+    # fundo importa `services/api4com.py`. A flag existe desde já porque a
+    # validação de boot abaixo precisa de um interruptor para guardar.
+    api4com_enabled: bool = False
+
+    # CONFIGURAÇÃO com padrão, não constante no código — mesmo critério do
+    # `deepseek_base_url`: se o fornecedor mudar o endereço, o conserto é no
+    # painel, sem tocar em código e sem deploy. É o endereço que a sonda já
+    # exercita.
+    api4com_base_url: str = "https://api.api4com.com/api/v1"
+
+    # ⚠️ ÚNICO segredo do projeto declarado como `SecretStr`, e é divergência
+    # deliberada do resto do arquivo.
+    #
+    # Todos os outros (`smtp_password`, `deepseek_api_key`,
+    # `mfa_secret_encryption_key`) são `str` cru. Isso significa que
+    # `repr(settings)`, `settings.model_dump()` e `model_dump_json()` imprimem
+    # os três por extenso — o que segura hoje é disciplina de quem escreve log,
+    # não o tipo. Segredo NOVO não precisa nascer com essa dívida: com
+    # `SecretStr`, o vazamento passa a exigir um `get_secret_value()` explícito,
+    # que é greppável e aparece em revisão.
+    #
+    # O custo é que ler o valor tem cerimônia. Ele é lido em UM lugar só, na
+    # montagem do `Authorization` em `services/api4com.py`.
+    api4com_token: SecretStr = SecretStr("")
+
+    api4com_timeout_seconds: int = 15
+
+    # ── Orquestração da tentativa (Fase 2C.2) ────────────────
+    #
+    # O lock cobre a janela inteira entre validar e terminar a conversa com o
+    # fornecedor. 30s é o teto da chamada (15s) com folga: um processo que
+    # morra segurando o lock libera sozinho, e ninguém fica preso.
+    api4com_lock_ttl_seconds: int = 30
+    # ⚠️ Aqui morava `api4com_repeat_window_seconds`, a janela de 5 minutos da
+    # antirrepetição. Saiu em 25/09/2026 junto com a regra que a lia: quem
+    # atende liga quantas vezes for preciso. `extra="ignore"` no `model_config`
+    # garante que um `API4COM_REPEAT_WINDOW_SECONDS` esquecido no painel não
+    # derruba o boot — ele passa a ser apenas ignorado.
+    # Teto por hora, POR ATOR. Não substitui o lock: o lock impede
+    # simultaneidade, isto impede volume. Chave autenticada, nunca IP — atrás do
+    # proxy do EasyPanel o IP junta a empresa inteira num balde só.
+    #
+    # ⚠️ Aqui morava também `api4com_calls_per_ticket_per_hour = 3`, o teto por
+    # CHAMADO. Saiu em 25/09/2026: ele limitava quantas vezes se liga para o
+    # mesmo chamado, e a regra passou a ser "quantas vezes for preciso". O teto
+    # por ator cobre o risco que motivou os dois — laço, conta comprometida e
+    # volume anormal são propriedades de quem liga.
+    #
+    # `extra="ignore"` no `model_config` garante que um
+    # `API4COM_CALLS_PER_TICKET_PER_HOUR` esquecido no painel seja apenas
+    # ignorado, sem derrubar o boot.
+    api4com_calls_per_actor_per_hour: int = 20
+
+    # ── Formato de `called` no POST /calls (Fase 2C.3) ───────
+    #
+    # ⚠️ DECISÃO EM ABERTO COM O FORNECEDOR. A documentação oficial mostra as
+    # DUAS grafias para a MESMA rota e o MESMO campo:
+    #
+    #   referência da API (Call.clickToCall)  ->  "called": "4833328530"
+    #   guia do webphone próprio              ->  "called": "+554833328530"
+    #
+    # Medido em 24/09/2026 nas duas páginas. Não é o caso do `/dialer`, que é
+    # rota morta e usa outro campo (`phone`) — essa separação já estava escrita
+    # em `docs/decisoes-e-regras.md` e está INCOMPLETA: o `+55` aparece também
+    # no `/calls`.
+    #
+    # O padrão segue a REFERÊNCIA da API, por ser a especificação da rota e não
+    # um exemplo de tutorial. Mas é escolha de moeda, não conclusão: trocar é
+    # mudar esta variável, sem tocar em código. Enquanto `API4COM_ENABLED` for
+    # falso, a escolha não produz efeito nenhum.
+    #
+    #   nacional -> 4833328530     (tira o +55 de um E.164 brasileiro)
+    #   e164     -> +554833328530  (manda o canônico interno como está)
+    api4com_called_format: str = "nacional"
+
+    # ── Evento de encerramento encaminhado de fora ───────────
+    #
+    # Segredo compartilhado com quem encaminha o `channel-hangup` ao HelpHS. É a
+    # PRIMEIRA credencial de ENTRADA do projeto: até aqui tudo o que autenticava
+    # vinha de sessão de gente (`get_current_user`), e as únicas chaves eram de
+    # saída. `SecretStr` pelo mesmo motivo do `api4com_token` — ler o valor passa
+    # a exigir `get_secret_value()`, que é greppável e aparece em revisão.
+    #
+    # ⚠️ O default é vazio, e é deliberado. Exigir a variável no boot derrubaria
+    # a subida do contêiner no primeiro deploy que a esquecesse, trocando uma
+    # integração inoperante por uma aplicação inteira fora do ar. O fecho mora no
+    # endpoint: sem segredo configurado ele recusa com 503, e jamais com 200.
+    # Fail-closed aqui significa que a porta não abre — não que a casa cai.
+    helphs_webhook_secret: SecretStr = SecretStr("")
+
+    def _valida_api4com(self) -> None:
+        """Desligada, nada é exigido. Ligada, o que falta impede a subida.
+
+        As mensagens citam o NOME da variável e mais nada: nunca o valor do
+        token, nunca o `Settings` inteiro. Quem lê um log de boot que falhou
+        não deveria ganhar de brinde a credencial que faltava.
+        """
+        if not self.api4com_enabled:
+            return
+
+        if not self.api4com_token.get_secret_value().strip():
+            raise ConfiguracaoDaTelefoniaInvalidaError(
+                "API4COM_ENABLED=true exige API4COM_TOKEN preenchido: "
+                "sem credencial nenhuma chamada seria autenticada"
+            )
+
+        endereco = urlparse(self.api4com_base_url.strip())
+        if endereco.scheme not in {"http", "https"} or not endereco.netloc:
+            raise ConfiguracaoDaTelefoniaInvalidaError(
+                "API4COM_BASE_URL precisa ser uma URL http(s) completa "
+                "(exemplo: https://api.api4com.com/api/v1)"
+            )
+
+        if self.api4com_timeout_seconds <= 0:
+            raise ConfiguracaoDaTelefoniaInvalidaError(
+                "API4COM_TIMEOUT_SECONDS precisa ser maior que zero: "
+                "iniciar ligação sem teto de espera prenderia a requisição"
+            )
+
+        # Validado com a integração LIGADA: um valor desconhecido aqui faria
+        # cada ligação sair com o telefone numa grafia que ninguém escolheu.
+        if self.api4com_called_format not in _FORMATOS_DE_CALLED:
+            raise ConfiguracaoDaTelefoniaInvalidaError(
+                "API4COM_CALLED_FORMAT precisa ser um de "
+                f"{sorted(_FORMATOS_DE_CALLED)} — veja o comentário do campo"
+            )
 
     # Email
     smtp_host: str = "smtp.gmail.com"
@@ -326,6 +581,34 @@ class Settings(BaseSettings):
     email_verification_enabled: bool = False
     email_verification_token_hours: int = 24
     password_reset_token_hours: int = 1
+
+    # LGPD — a revisão VIGENTE dos documentos que o cadastro pede para aceitar
+    #
+    # Declarada, não consultada: publicar revisão nova é evento raro e manual,
+    # do mesmo tipo do deploy, e cada aceite grava estes valores em
+    # `lgpd_consents`. É isso que permite provar QUAL texto cada pessoa aceitou
+    # (seção 15 da Política de Privacidade). Desenho em
+    # `docs/superpowers/specs/2026-08-31-registro-da-revisao-aceita-design.md`.
+    #
+    # A da política é OBRIGATÓRIA fora de desenvolvimento e teste (ver o fim do
+    # `model_post_init`): aceite sem revisão é exatamente o estado que a tabela
+    # existe para acabar. A dos Termos de Uso é opcional porque o documento
+    # ainda não existe — vazia, o aceite grava NULL, que é a verdade.
+    lgpd_revisao_politica: str | None = None
+    lgpd_revisao_termos: str | None = None
+    # Liga a tela de re-aceite para clientes cuja última revisão aceita não é a
+    # vigente. DESLIGADA por padrão: nenhum usuário anterior a esta mudança tem
+    # histórico, e ligar antes do texto final faria todo cliente aceitar o
+    # rascunho no primeiro login.
+    lgpd_exige_reaceite: bool = False
+
+    @field_validator("lgpd_revisao_politica", "lgpd_revisao_termos")
+    @classmethod
+    def _revisao_em_branco_e_ausente(cls, valor: str | None) -> str | None:
+        # Variável criada no painel e deixada vazia é ausência, não a revisão "".
+        if valor is None:
+            return None
+        return valor.strip() or None
 
     def email_is_configured(self) -> bool:
         """Só dá para exigir confirmação se houver como enviar o e-mail."""
@@ -361,6 +644,57 @@ class Settings(BaseSettings):
     # De quanto em quanto tempo a rotina de fechamento automático roda.
     # 0 desliga a rotina (útil em testes e em execução local).
     ticket_auto_close_interval_seconds: int = 3600
+
+    # De quanto em quanto tempo a rotina de aviso de SLA próximo do vencimento
+    # roda. 0 desliga, como no fechamento automático.
+    #
+    # 300 s, e não os 3600 s do fechamento: o limiar é um PONTO na linha do
+    # prazo, não uma condição que fica de pé esperando. Com 3600 s, um prazo de
+    # resposta de 30 min do nível crítico atravessaria 80% e venceria dentro da
+    # mesma janela, e o aviso nunca sairia. 300 s é o precedente da indexação da
+    # Helô, e a granularidade que sobra é de 5 minutos.
+    sla_warning_interval_seconds: int = 300
+
+    # Outbox de e-mail (Fase 3A) — de quanto em quanto tempo o worker tenta
+    # reivindicar um lote de linhas `pending` vencidas. 0 desliga, como nos
+    # outros dois. Nesta fase a tabela fica vazia em produção (nenhum call site
+    # real grava nela ainda), então o intervalo curto não tem custo — é o que
+    # os testes de retry/backoff exercitam.
+    email_outbox_interval_seconds: int = 30
+    # Tamanho do lote por rodada de `FOR UPDATE SKIP LOCKED`. Pequeno de
+    # propósito: o volume atual é de poucas dezenas de e-mails em voo, e um
+    # lote grande só prende mais linhas por mais tempo atrás de um SMTP lento.
+    email_outbox_batch_size: int = 10
+    # Quanto tempo uma linha pode ficar `processing` antes de ser considerada
+    # abandonada por um worker morto e liberada de volta para `pending`.
+    email_outbox_stale_processing_minutes: int = 5
+
+    # Retenção da outbox (Fase 3D). Sem isto a tabela cresce para sempre: o
+    # caminho felizar termina em `sent`, e nada apagava.
+    #
+    # 60 dias para `sent`, e não 30: 30 é exatamente a retenção do `app.log`
+    # (`core/logging.py`), e os dois expirariam juntos. Para os e-mails de
+    # conta isso deixaria ZERO evidência de que a redefinição de senha foi
+    # enviada — o `AuditLog` cobre register/password_change/login, não
+    # `forgot_password` nem `resend_verification` (ver a auditoria da Fase 3D).
+    # 60 faz o registro estruturado sobreviver ao log. Mais que isso seria
+    # guardar atividade de autenticação ligada a `user_id` sem finalidade.
+    email_outbox_sent_retention_days: int = 60
+    # 180 para `dead`: é a linha que alguém vai querer explicar meses depois
+    # ("desde quando o domínio deste cliente rejeita?"), e `dead` é raro — o
+    # volume não entra na decisão. 365 seria um ano de registro de falha
+    # ligado a `user_id`, também sem consumidor definido.
+    email_outbox_dead_retention_days: int = 180
+    # De quanto em quanto tempo a limpeza roda, DENTRO do worker que já existe
+    # (não há worker novo — ver `email_outbox.py`). 0 desliga, como em todo
+    # laço do projeto. Com o intervalo do worker em 30 s, limpar a cada rodada
+    # seriam 2 880 limpezas/dia sem necessidade nenhuma.
+    #
+    # ⚠️ O primeiro deploy desta fase deve subir com 0 e ser ligado depois de
+    # conferir as contagens no /api/v1/health — é a lição registrada do
+    # SLA_WARNING_INTERVAL_SECONDS, cujo default ligado já causou efeito não
+    # pretendido num primeiro deploy.
+    email_outbox_cleanup_interval_seconds: int = 3600
 
     # Logging
     log_level: str = "INFO"

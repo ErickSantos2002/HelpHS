@@ -1,5 +1,25 @@
 import { api } from "./api";
+import type { TicketPriority } from "../lib/prioridade";
+import type { Expediente } from "../lib/tempoUtil";
 import type { Tag } from "./tagService";
+
+/**
+ * Quem abriu o chamado, no mínimo que a tela precisa para falar com ele.
+ *
+ * Chega só no chamado avulso (`getTicket`); na listagem vem `undefined`,
+ * porque lá seria uma consulta por linha.
+ *
+ * ⚠️ Não há CPF, CNPJ, endereço, departamento, ramal nem nada do fornecedor de
+ * telefonia — o backend não manda, e declarar campo que não chega convidaria
+ * alguém a lê-lo.
+ */
+export interface TicketRequester {
+  id: string;
+  name: string;
+  email: string;
+  phone: string | null;
+  company_name: string | null;
+}
 
 /** Equipamento como ele aparece dentro do chamado — não é a ficha completa. */
 export interface TicketEquipment {
@@ -22,7 +42,9 @@ export interface Ticket {
     | "resolved"
     | "closed"
     | "cancelled";
-  priority: "critical" | "high" | "medium" | "low";
+  /** Nulo ate a triagem: o chamado nasce sem prioridade e quem a define e a
+   *  equipe, pelo `updateTicketPriority`. */
+  priority: "critical" | "high" | "medium" | "low" | null;
   category: string;
   creator_id: string;
   assignee_id: string | null;
@@ -31,8 +53,37 @@ export interface Ticket {
   // A IA pode atuar neste chamado. Vale para a Helô e para a classificação
   // automática — desligado, nenhuma delas olha para ele.
   ai_enabled: boolean;
+  /** O prazo CARIMBADO. Para contar tempo, use `sla_*_vence_em`. */
   sla_response_due_at: string | null;
   sla_resolve_due_at: string | null;
+  /**
+   * O prazo EFETIVO — o carimbado mais a pausa acumulada. E o mesmo instante
+   * que o backend compara para decidir violacao, entao a tela que mostra este
+   * nao pode discordar da regra.
+   */
+  sla_response_vence_em: string | null;
+  sla_resolve_vence_em: string | null;
+  /** Minutos UTEIS que faltavam quando a resposta foi montada. */
+  sla_response_restante_min: number | null;
+  sla_resolve_restante_min: number | null;
+  /** O tamanho do prazo em minutos uteis — denominador da barra de progresso. */
+  sla_response_total_min: number | null;
+  sla_resolve_total_min: number | null;
+  /** Total ja concedido em extensoes, em minutos uteis. Zero = sem extensao. */
+  sla_resolve_extension_total_min: number;
+  /**
+   * O limiar de alerta da PRIORIDADE ATUAL, em percentual inteiro (1..100).
+   *
+   * `null` em chamado sem prioridade — que nasce assim, esperando triagem — e
+   * quando nao ha `SLAConfig` ativa para o nivel. Quem decide a cor a partir
+   * dele e `lib/slaVisual.ts`, que documenta o fallback.
+   */
+  sla_warning_threshold: number | null;
+  /**
+   * So no chamado avulso. Na LISTAGEM ele vem uma vez no topo da resposta, e
+   * nao repetido em cada item.
+   */
+  expediente: Expediente | null;
   sla_response_breach: boolean;
   sla_resolve_breach: boolean;
   sla_first_response: string | null;
@@ -85,11 +136,15 @@ export async function getTicketHistory(id: string): Promise<TicketHistoryListRes
 export async function updateTicketStatus(
   id: string,
   status: string,
-  comment?: string
+  comment?: string,
+  sla_breach_justification?: string,
 ): Promise<Ticket> {
+  // A justificativa só vai quando existe: o backend a exige para resolver
+  // fora do prazo, e sem ela o corpo fica como sempre foi.
   const { data } = await api.patch<Ticket>(`/tickets/${id}/status`, {
     status,
     comment,
+    ...(sla_breach_justification ? { sla_breach_justification } : {}),
   });
   return data;
 }
@@ -111,6 +166,8 @@ export interface TicketListResponse {
   total: number;
   limit: number;
   offset: number;
+  /** O relogio do servidor, uma vez para a pagina inteira. */
+  expediente: Expediente | null;
 }
 
 export type SortBy = "created_at" | "updated_at" | "priority" | "sla_resolve_due_at";
@@ -133,7 +190,6 @@ export interface TicketFilters {
 export interface TicketCreatePayload {
   title: string;
   description: string;
-  priority: "critical" | "high" | "medium" | "low";
   category: string;
   product_id?: string | null;
   equipment_ids?: string[];
@@ -143,7 +199,6 @@ export interface TicketCreatePayload {
 export interface TicketUpdatePayload {
   title?: string;
   description?: string;
-  priority?: "critical" | "high" | "medium" | "low";
   category?: string;
   product_id?: string | null;
   /** Omitir mantém os equipamentos atuais; lista vazia desvincula todos. */
@@ -161,6 +216,71 @@ export async function updateTicket(id: string, payload: TicketUpdatePayload): Pr
   return data;
 }
 
+/**
+ * A triagem: define ou troca a prioridade do chamado.
+ *
+ * Endpoint proprio, e nao o `updateTicket` generico, por dois motivos. O
+ * primeiro e de permissao: o PATCH generico e a porta de todos os campos do
+ * chamado, e dar a chave dela ao tecnico para que ele possa triar entregaria
+ * junto o titulo, a categoria e o produto. O segundo e de regra: so este
+ * caminho recalcula o SLA do nivel novo -- gravar a prioridade por fora
+ * deixaria um chamado critico com o prazo de quando era baixo.
+ */
+/** Os cinco prazos que se pode conceder. A lista e fechada no backend. */
+export type DiasDeExtensao = 1 | 3 | 5 | 15 | 30;
+
+export interface SlaExtensionPreview {
+  days: number;
+  business_minutes: number;
+  prazo_atual: string | null;
+  novo_prazo: string | null;
+}
+
+/**
+ * O prazo que a concessao produziria, SEM conceder.
+ *
+ * Existe para o modal mostrar "de ... para ..." sem recalcular prazo na tela:
+ * dia util, jornada e feriado sao do motor, e um `add_business_days` em
+ * TypeScript seria a segunda verdade que a entrega do relogio eliminou.
+ */
+export async function previewSlaExtension(
+  ticketId: string,
+  days: DiasDeExtensao
+): Promise<SlaExtensionPreview> {
+  const { data } = await api.get<SlaExtensionPreview>(
+    `/tickets/${ticketId}/sla/extend/preview`,
+    { params: { days } }
+  );
+  return data;
+}
+
+/**
+ * Concede a extensao. POST porque cada concessao e um EVENTO auditavel, e
+ * pode acontecer mais de uma vez.
+ */
+export async function extendSla(
+  ticketId: string,
+  days: DiasDeExtensao,
+  justification: string
+): Promise<Ticket> {
+  const { data } = await api.post<Ticket>(`/tickets/${ticketId}/sla/extend`, {
+    days,
+    justification,
+  });
+  return data;
+}
+
+export async function updateTicketPriority(
+  ticketId: string,
+  priority: TicketPriority
+): Promise<Ticket> {
+  const { data } = await api.patch<Ticket>(
+    `/tickets/${ticketId}/priority`,
+    { priority }
+  );
+  return data;
+}
+
 export async function updateClientObservation(
   id: string,
   client_observation: string | null
@@ -171,9 +291,14 @@ export async function updateClientObservation(
   return data;
 }
 
-export async function resolveTicket(id: string, resolution_note: string): Promise<Ticket> {
+export async function resolveTicket(
+  id: string,
+  resolution_note: string,
+  sla_breach_justification?: string,
+): Promise<Ticket> {
   const { data } = await api.post<Ticket>(`/tickets/${id}/resolve`, {
     resolution_note,
+    ...(sla_breach_justification ? { sla_breach_justification } : {}),
   });
   return data;
 }
@@ -183,8 +308,20 @@ export async function reopenTicket(id: string, reason: string): Promise<Ticket> 
   return data;
 }
 
-export async function getTicket(id: string): Promise<Ticket> {
-  const { data } = await api.get<Ticket>(`/tickets/${id}`);
+/**
+ * O chamado avulso: tudo o que a lista tem, mais quem abriu.
+ *
+ * ⚠️ Tipo SEPARADO, e não um campo opcional no `Ticket`, pelo mesmo motivo do
+ * backend: as rotas de mutação devolvem `Ticket` sem o solicitante, e um campo
+ * opcional faria a tela apagar o bloco a cada ação. Aqui o tipo diz em qual
+ * resposta o dado existe.
+ */
+export interface TicketDetail extends Ticket {
+  requester?: TicketRequester | null;
+}
+
+export async function getTicket(id: string): Promise<TicketDetail> {
+  const { data } = await api.get<TicketDetail>(`/tickets/${id}`);
   return data;
 }
 
@@ -226,5 +363,70 @@ export async function getTickets(filters: TicketFilters = {}): Promise<TicketLis
   if (filters.sort_dir) params.set("sort_dir", filters.sort_dir);
 
   const { data } = await api.get<TicketListResponse>(`/tickets?${params.toString()}`);
+  return data;
+}
+
+// ── Telefonia ─────────────────────────────────────────────────
+
+/**
+ * Desfecho da TENTATIVA de ligação, como o backend o conta.
+ *
+ * Não é "o telefone tocou": é o que sabemos sobre o efeito externo. Os dois
+ * primeiros são estados de passagem e não deveriam chegar ao navegador — a
+ * rota só responde depois que a tentativa alcançou um desfecho —, mas estão
+ * declarados porque o backend pode persisti-los e um dia devolvê-los.
+ */
+export type TicketCallCreationStatus =
+  | "pending"
+  | "dispatching"
+  | "confirmed"
+  | "rejected"
+  | "unavailable"
+  | "indeterminate";
+
+/**
+ * A resposta pública da tentativa — três campos, e nada mais.
+ *
+ * Não existe aqui `provider_call_id`, telefone, `caller`, `called`,
+ * `extension`, metadata nem corpo do fornecedor: o backend não os devolve, e
+ * declarar campo que não chega convidaria alguém a lê-lo.
+ */
+/**
+ * Por que uma recusa aconteceu, quando o HelpHS sabe explicar.
+ *
+ * Vocabulário do HELPHS, não da API4COM: a tela aprende "o webphone não está
+ * registrado", nunca o número HTTP que o fornecedor devolveu. Trocar de
+ * fornecedor não deve obrigar a reescrever mensagem de tela.
+ *
+ * Tem um valor só, e é deliberado: a API4COM confirmou por escrito que o
+ * código por trás deste motivo significa **ramal do operador offline ou
+ * indisponível** — webphone fechado, desconectado, deslogado ou não
+ * registrado. Os outros erros continuam sem explicação publicável: inventar
+ * rótulo para eles seria mandar o técnico abrir uma extensão que já está
+ * aberta enquanto o problema real segue lá.
+ */
+export type TicketCallReason = "webphone_unavailable";
+
+export interface TicketCall {
+  id: string;
+  creation_status: TicketCallCreationStatus;
+  created_at: string;
+  /**
+   * Opcional de propósito, e em dois sentidos: a maioria das recusas não tem
+   * motivo publicável, e um frontend novo precisa continuar funcionando
+   * contra um backend antigo que ainda não manda o campo.
+   */
+  reason?: TicketCallReason | null;
+}
+
+/**
+ * Registra uma tentativa de ligação para o cliente do chamado.
+ *
+ * O corpo é `{}` de propósito, e o backend recusa qualquer campo extra com
+ * 422. Quem liga, para quem, de qual ramal e em que grafia é decidido lá
+ * dentro, no instante da ação — o navegador não escolhe nada disso.
+ */
+export async function createTicketCall(id: string): Promise<TicketCall> {
+  const { data } = await api.post<TicketCall>(`/tickets/${id}/calls`, {});
   return data;
 }

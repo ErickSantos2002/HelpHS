@@ -33,6 +33,17 @@ export interface UserSummary {
   company_city: string | null;
   company_state: string | null;
   onboarding_completed: boolean;
+  /**
+   * Ramal da API4COM deste usuário — o `extension`/`caller` do `POST /calls`.
+   *
+   * Nulo é o normal: quem não tem ramal não liga, e não há padrão nem
+   * fallback. Só admin configura; o backend recusa com 403 quem não for.
+   * Cliente nunca tem.
+   *
+   * Não é segredo — a credencial da API4COM é o token e a senha SIP, e
+   * nenhum dos dois chega perto do usuário.
+   */
+  api4com_extension: string | null;
   created_at: string;
   updated_at: string;
 }
@@ -78,6 +89,17 @@ export interface UserUpdatePayload {
   phone?: string | null;
   department?: string | null;
   role?: "admin" | "technician" | "client";
+  /**
+   * `null` REMOVE o vínculo; ausente significa "não mexa".
+   *
+   * A distinção é do backend (`exclude_unset`), então mandar `""` não é o
+   * mesmo que mandar `null` — a string vazia seria um valor, e o índice único
+   * a trataria como tal. Quem remove manda `null`.
+   *
+   * Só inclua este campo quando quem edita for admin: o backend devolve 403
+   * para qualquer outro, mesmo que o valor não tenha mudado.
+   */
+  api4com_extension?: string | null;
 }
 
 export async function getUsers(
@@ -139,6 +161,20 @@ export async function updateLGPDConsent(
   const { data } = await api.patch<UserSummary>("/users/me/lgpd-consent", {
     lgpd_consent: consent,
   });
+  return data;
+}
+
+/** A situação do aceite de quem está logado — o que a tela de re-aceite lê. */
+export interface LgpdConsentStatus {
+  revisao_politica_vigente: string | null;
+  revisao_termos_vigente: string | null;
+  revisao_politica_aceita: string | null;
+  revisao_termos_aceita: string | null;
+  precisa_reaceitar: boolean;
+}
+
+export async function getLgpdConsentStatus(): Promise<LgpdConsentStatus> {
+  const { data } = await api.get<LgpdConsentStatus>("/users/me/lgpd-consent");
   return data;
 }
 

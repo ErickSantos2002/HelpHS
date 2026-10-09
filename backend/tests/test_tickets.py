@@ -111,6 +111,18 @@ def _mock_ticket(
     # devolve um objeto no lugar de None e a validação falha
     t.assignee_name = None
     t.product_name = None
+    # O contrato do relogio de SLA (23/09/2026). Mesma armadilha do bloco
+    # acima: sem valor explicito o MagicMock devolve um objeto, e o
+    # `expediente` derruba a validacao do `TicketResponse`.
+    t.sla_response_vence_em = None
+    t.sla_resolve_vence_em = None
+    t.sla_response_restante_min = None
+    t.sla_resolve_restante_min = None
+    t.sla_response_total_min = None
+    t.sla_resolve_total_min = None
+    t.expediente = None
+    t.sla_resolve_extension_total_min = 0
+    t.sla_resolve_effective_due_at = None
     t.equipment_name = None
     t.equipment_serial = None
     t.client_observation = None
@@ -127,6 +139,9 @@ def _db(lookup=None, count=0):
 
     async def _execute(*args, **kwargs):
         result = MagicMock()
+        # O notify() busca (email, papel, nome) do destinatário com .one_or_none().
+        # Cliente de propósito: mantém o caminho de e-mail exercido como antes.
+        result.one_or_none.return_value = ("dest@test.com", UserRole.client, "Destino")
         result.scalar_one_or_none.return_value = lookup
         result.scalar_one.return_value = count
         result.scalars.return_value.all.return_value = [lookup] if lookup else []
@@ -137,6 +152,15 @@ def _db(lookup=None, count=0):
     session.add = MagicMock()
     session.commit = AsyncMock()
     session.refresh = AsyncMock()
+    # ⚠️ `session.get` explícito, e não o que o `AsyncMock` inventaria.
+    #
+    # `GET /tickets/{id}` chama `db.get(User, ticket.creator_id)` para montar o
+    # bloco do solicitante — SEMPRE, não só quando há responsável. Um
+    # `AsyncMock` devolve outro mock para qualquer método, e `model_validate`
+    # recusa isso com erro de tipo. Devolver `None` é o que significa "esta
+    # sessão não tem usuário nenhum", que é a verdade destes casos: eles medem
+    # produto, equipamento e SLA, não o solicitante.
+    session.get = AsyncMock(return_value=None)
     return session
 
 
@@ -150,6 +174,7 @@ def _db_sequence(*responses):
         resp = responses[idx]
 
         result = MagicMock()
+        result.one_or_none.return_value = ("dest@test.com", UserRole.client, "Destino")
         if isinstance(resp, int):
             result.scalar_one.return_value = resp
             result.scalar_one_or_none.return_value = None
@@ -169,6 +194,8 @@ def _db_sequence(*responses):
     session.add = MagicMock()
     session.commit = AsyncMock()
     session.refresh = AsyncMock()
+    # Mesma razão do `_db`: o detalhe do chamado chama `db.get`.
+    session.get = AsyncMock(return_value=None)
     return session
 
 
@@ -215,53 +242,13 @@ def _override_user(user):
 
 
 # ═══════════════════════════════════════════════════════════════
-# PROTOCOL GENERATION UNIT TESTS
+# PROTOCOL GENERATION
 # ═══════════════════════════════════════════════════════════════
-
-
-@pytest.mark.asyncio
-async def test_generate_protocol_first_ticket():
-    """When no tickets exist, protocol should be HS-YYYY-0001."""
-    from app.utils.protocol import generate_protocol
-
-    db = _db(lookup=None)
-    protocol = await generate_protocol(db)
-    year = datetime.now(UTC).year
-    assert protocol == f"HS-{year}-0001"
-
-
-@pytest.mark.asyncio
-async def test_generate_protocol_increments():
-    """When last ticket is HS-YYYY-0005, next should be HS-YYYY-0006."""
-    from app.utils.protocol import generate_protocol
-
-    year = datetime.now(UTC).year
-    db = _db(lookup=f"HS-{year}-0005")
-    protocol = await generate_protocol(db)
-    assert protocol == f"HS-{year}-0006"
-
-
-@pytest.mark.asyncio
-async def test_generate_protocol_pads_to_4_digits():
-    """Sequence number should always be zero-padded to 4 digits."""
-    from app.utils.protocol import generate_protocol
-
-    year = datetime.now(UTC).year
-    db = _db(lookup=f"HS-{year}-0009")
-    protocol = await generate_protocol(db)
-    assert protocol == f"HS-{year}-0010"
-    assert len(protocol.split("-")[-1]) == 4
-
-
-@pytest.mark.asyncio
-async def test_generate_protocol_large_seq():
-    """Protocol handles sequence numbers beyond 9999 (zero-padding still works)."""
-    from app.utils.protocol import generate_protocol
-
-    year = datetime.now(UTC).year
-    db = _db(lookup=f"HS-{year}-9999")
-    protocol = await generate_protocol(db)
-    assert protocol == f"HS-{year}-10000"
+# Os testes do gerador saíram daqui em 07/10/2026: com sessão mockada eles
+# afirmavam o que o mock devolvia, e o gerador passou a depender de um contador
+# persistido e de lock de linha — nada disso existe num mock. Estão em
+# `test_protocol.py` (SQLite) e `test_protocolo_contador_postgres.py`
+# (concorrência e migration, Postgres real).
 
 
 # ═══════════════════════════════════════════════════════════════
@@ -276,8 +263,8 @@ async def test_create_ticket(patch_redis):
     creator = _mock_user(UserRole.client)
     ticket = _mock_ticket(creator_id=creator.id)
 
-    # Sequence: 1st execute = generate_protocol (returns None → seq 1)
-    # commit + refresh sets up the ticket
+    # O protocolo da resposta vem do `_refresh` abaixo, não do gerador: com a
+    # sessão mockada, o número alocado não significa nada (ver test_protocol.py).
     db_session = _db_sequence(None)
 
     async def _refresh(obj):
@@ -572,7 +559,10 @@ async def test_detalhe_traz_produto_e_equipamentos(patch_redis):
     session = _db_sequence(ticket)
 
     async def _get(model, pk):
-        return produto
+        # So o produto. O detalhe tambem chama `db.get(User, creator_id)`
+        # para o bloco do solicitante, e devolver o produto ali daria um
+        # erro de tipo que nao tem nada a ver com o que este caso mede.
+        return produto if model.__name__ == "Product" else None
 
     session.get = _get
 
@@ -615,7 +605,10 @@ async def test_chamado_com_varios_equipamentos(patch_redis):
     session = _db_sequence(ticket)
 
     async def _get(model, pk):
-        return produto
+        # So o produto. O detalhe tambem chama `db.get(User, creator_id)`
+        # para o bloco do solicitante, e devolver o produto ali daria um
+        # erro de tipo que nao tem nada a ver com o que este caso mede.
+        return produto if model.__name__ == "Product" else None
 
     session.get = _get
 
@@ -655,7 +648,10 @@ async def test_produto_vem_do_equipamento_quando_o_chamado_nao_informou(patch_re
     session = _db_sequence(ticket)
 
     async def _get(model, pk):
-        return produto
+        # So o produto. O detalhe tambem chama `db.get(User, creator_id)`
+        # para o bloco do solicitante, e devolver o produto ali daria um
+        # erro de tipo que nao tem nada a ver com o que este caso mede.
+        return produto if model.__name__ == "Product" else None
 
     session.get = _get
 
@@ -1374,3 +1370,213 @@ async def test_cliente_nao_mexe_no_interruptor_do_chamado(patch_redis):
         resp = await c.patch(f"/api/v1/tickets/{_TICKET_ID}/ai", json={"enabled": False})
 
     assert resp.status_code == 403
+
+
+# ═══════════════════════════════════════════════════════════════
+# A CATEGORIA `other`, QUE SAIU
+# ═══════════════════════════════════════════════════════════════
+
+
+@pytest.mark.asyncio
+async def test_abrir_chamado_com_categoria_other_e_recusado(patch_redis):
+    """A recusa é na porta, e por isso não precisa de banco.
+
+    O valor saiu do enum em 18/09/2026 — zero chamados o usavam. Sem este caso,
+    reintroduzi-lo no `TicketCategory` voltaria a abrir a API sem nada acusando:
+    o modelo é a única coisa que o schema consulta.
+    """
+    _override_user(_mock_user(UserRole.client))
+
+    async with AsyncClient(transport=ASGITransport(app=app), base_url="http://test") as c:
+        resp = await c.post(
+            "/api/v1/tickets",
+            json={
+                "title": "Equipamento com falha",
+                "description": "O bafômetro não liga",
+                "category": "other",
+            },
+        )
+
+    assert resp.status_code == 422
+    assert "category" in str(resp.json()), resp.json()
+
+
+@pytest.mark.asyncio
+async def test_mudar_chamado_para_categoria_other_e_recusado(patch_redis):
+    """Editar é a outra porta, e ela fecha junto."""
+    _override_user(_mock_user(UserRole.technician))
+
+    async with AsyncClient(transport=ASGITransport(app=app), base_url="http://test") as c:
+        resp = await c.patch(f"/api/v1/tickets/{_TICKET_ID}", json={"category": "other"})
+
+    assert resp.status_code == 422
+
+
+# ═══════════════════════════════════════════════════════════════
+# CHAMADO NOVO AVISA A EQUIPE
+# ═══════════════════════════════════════════════════════════════
+#
+# Estes testes provam a LIGAÇÃO e a DEDUPLICAÇÃO. Quem é a audiência — a
+# cláusula `WHERE` de papel e status — é provado contra Postgres de verdade em
+# `test_audiencia_operacional_postgres.py`; mock não executa `WHERE`. Aqui a
+# audiência é substituída por uma lista conhecida, que é o seio certo para
+# afirmar o que o `create_ticket` FAZ com ela.
+
+
+def _equipe(*pessoas):
+    """Substitui a audiência por uma lista conhecida."""
+    from unittest.mock import AsyncMock as _AsyncMock
+
+    return _AsyncMock(return_value=list(pessoas))
+
+
+def _staff(papel=UserRole.technician, nome="Tecnico", email=None, pid=None):
+    u = MagicMock()
+    u.id = pid or uuid.uuid4()
+    u.email = email or f"{uuid.uuid4().hex[:6]}@test.com"
+    u.name = nome
+    u.role = papel
+    u.status = UserStatus.active
+    return u
+
+
+async def _abre_chamado(autor, equipe, *, titulo="Impressora sem conexao"):
+    """Abre um chamado e devolve as Notifications que foram gravadas."""
+    from app.core.database import get_db
+    from app.routers import tickets as router_tickets
+
+    ticket = _mock_ticket(creator_id=autor.id)
+    db_session = _db_sequence(None)
+
+    async def _refresh(obj):
+        obj.id = ticket.id
+        obj.protocol = ticket.protocol
+        obj.title = titulo
+        obj.description = "corpo"
+        obj.status = TicketStatus.open
+        obj.priority = None
+        obj.category = TicketCategory.hardware
+        obj.creator_id = autor.id
+        obj.assignee_id = None
+        obj.product_id = None
+        obj.equipment_id = None
+        obj.sla_response_due_at = None
+        obj.sla_resolve_due_at = None
+        obj.sla_response_breach = False
+        obj.sla_resolve_breach = False
+        obj.closed_at = None
+        obj.created_at = _NOW
+        obj.updated_at = _NOW
+
+    db_session.refresh = _refresh
+
+    async def _gen():
+        yield db_session
+
+    app.dependency_overrides[get_db] = _gen
+    _override_user(autor)
+
+    with patch.object(router_tickets, "audiencia_operacional", new=_equipe(*equipe)):
+        async with AsyncClient(transport=ASGITransport(app=app), base_url="http://test") as c:
+            resp = await c.post(
+                "/api/v1/tickets",
+                json={"title": titulo, "description": "corpo", "category": "hardware"},
+            )
+
+    assert resp.status_code == 201, resp.text
+    gravadas = [
+        c.args[0]
+        for c in db_session.add.call_args_list
+        if type(c.args[0]).__name__ == "Notification"
+    ]
+    return gravadas
+
+
+@pytest.mark.asyncio
+async def test_o_autor_cliente_recebe_a_confirmacao(patch_redis):
+    cliente = _mock_user(UserRole.client)
+    gravadas = await _abre_chamado(cliente, [_staff(), _staff(UserRole.admin)])
+
+    do_autor = [n for n in gravadas if n.user_id == cliente.id]
+    assert len(do_autor) == 1
+    # "Ticket aberto", e NÃO "Chamado aberto": a renomeação editorial de
+    # `ticket` para `chamado` ficou fora desta frente por decisão de 24/09/2026.
+    # O aviso NOVO da equipe usa "chamado" porque é texto novo.
+    assert do_autor[0].title == "Ticket aberto"
+
+
+@pytest.mark.asyncio
+async def test_toda_a_equipe_ativa_recebe_novo_chamado(patch_redis):
+    cliente = _mock_user(UserRole.client)
+    tecnico = _staff(UserRole.technician)
+    admin = _staff(UserRole.admin)
+
+    gravadas = await _abre_chamado(cliente, [tecnico, admin])
+
+    da_equipe = {n.user_id: n for n in gravadas if n.user_id != cliente.id}
+    assert set(da_equipe) == {tecnico.id, admin.id}
+    assert all(n.title == "Novo chamado" for n in da_equipe.values())
+
+
+@pytest.mark.asyncio
+async def test_cada_destinatario_gera_uma_linha_so(patch_redis):
+    cliente = _mock_user(UserRole.client)
+    equipe = [_staff(), _staff(UserRole.admin), _staff()]
+
+    gravadas = await _abre_chamado(cliente, equipe)
+
+    ids = [n.user_id for n in gravadas]
+    assert len(ids) == len(set(ids)), f"destinatário repetido: {ids}"
+    assert len(ids) == 4  # o autor + os três da equipe
+
+
+@pytest.mark.asyncio
+async def test_staff_autor_recebe_uma_vez_e_a_confirmacao_vence(patch_redis):
+    """A regra de deduplicação, no caso que a motivou.
+
+    Um técnico que abre chamado em nome de um cliente cai nas DUAS regras: é o
+    autor e é da equipe. Ele recebe UMA notificação, e é a confirmação — a
+    audiência não substitui "Seu chamado foi registrado" por um aviso escrito
+    para outra pessoa.
+    """
+    tecnico_autor = _mock_user(UserRole.technician)
+    tecnico_autor.email = "autor@test.com"
+    tecnico_autor.name = "Autor"
+    colega = _staff(UserRole.admin, "Colega")
+
+    # O autor está NA audiência, como em produção.
+    na_audiencia = _staff(UserRole.technician, "Autor", "autor@test.com", tecnico_autor.id)
+    gravadas = await _abre_chamado(tecnico_autor, [na_audiencia, colega])
+
+    do_autor = [n for n in gravadas if n.user_id == tecnico_autor.id]
+    assert len(do_autor) == 1, "o autor-staff recebeu duas vezes"
+    assert do_autor[0].title == "Ticket aberto"
+
+    do_colega = [n for n in gravadas if n.user_id == colega.id]
+    assert len(do_colega) == 1
+    assert do_colega[0].title == "Novo chamado"
+
+
+@pytest.mark.asyncio
+async def test_o_aviso_da_equipe_leva_ticket_id_e_protocolo(patch_redis):
+    """`data.ticket_id` é o contrato que o Topbar usa para navegar."""
+    cliente = _mock_user(UserRole.client)
+    tecnico = _staff()
+
+    gravadas = await _abre_chamado(cliente, [tecnico])
+
+    da_equipe = next(n for n in gravadas if n.user_id == tecnico.id)
+    assert da_equipe.data["ticket_id"]
+    assert da_equipe.data["protocol"]
+
+
+@pytest.mark.asyncio
+async def test_a_mensagem_da_equipe_diz_protocolo_e_titulo(patch_redis):
+    cliente = _mock_user(UserRole.client)
+    tecnico = _staff()
+
+    gravadas = await _abre_chamado(cliente, [tecnico], titulo="Impressora sem conexao")
+
+    da_equipe = next(n for n in gravadas if n.user_id == tecnico.id)
+    assert "Impressora sem conexao" in da_equipe.message
+    assert da_equipe.data["protocol"] in da_equipe.message

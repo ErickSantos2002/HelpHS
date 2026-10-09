@@ -33,6 +33,14 @@ class ChatMessageResponse(AppBaseModel):
     read_at: datetime | None
     created_at: datetime
 
+    # O bastante para a conversa desenhar o anexo sem uma segunda chamada. O
+    # link nao vem aqui: ele tem validade e sai do /library/{id}/download, que
+    # confere a visibilidade na hora de emitir.
+    library_file_id: uuid.UUID | None = None
+    library_file_name: str | None = None
+    library_file_mime: str | None = None
+    library_file_size: int | None = None
+
     # Flattened sender fields (populated manually)
     sender_name: str = ""
     sender_role: str = ""
@@ -59,6 +67,9 @@ LIMITE_CONTEUDO = 20_000
 
 class ChatMessageCreate(AppBaseModel):
     content: str = Field(..., min_length=1, max_length=LIMITE_CONTEUDO)
+    # Aponta para um item da biblioteca; nao carrega arquivo. Item INTERNO e
+    # recusado pela API antes de gravar -- a conversa e lida pelo cliente.
+    library_file_id: uuid.UUID | None = None
 
 
 class SuggestReplyResponse(AppBaseModel):

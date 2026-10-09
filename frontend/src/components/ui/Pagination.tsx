@@ -38,9 +38,12 @@ export function Pagination({
   const visiblePages = getVisiblePages(page, totalPages);
 
   return (
-    <div className={cn("border-t border-border pt-3", className)}>
+    <nav
+      aria-label="Paginação"
+      className={cn("border-t border-borda pt-3", className)}
+    >
       {/* Desktop */}
-      <div className="hidden md:flex items-center justify-between text-sm text-slate-500 dark:text-slate-400">
+      <div className="hidden md:flex items-center justify-between text-sm text-conteudo-muted">
         <span>
           {total === 0
             ? "Nenhum resultado"
@@ -67,7 +70,7 @@ export function Pagination({
       </div>
 
       {/* Mobile */}
-      <div className="flex flex-col items-center gap-2 text-sm text-slate-500 dark:text-slate-400 md:hidden">
+      <div className="flex flex-col items-center gap-2 text-sm text-conteudo-muted md:hidden">
         <span>
           {total === 0
             ? "Nenhum resultado"
@@ -79,7 +82,7 @@ export function Pagination({
           <NavBtn onClick={() => onPageChange(page + 1)} disabled={!hasNext} ariaLabel="Próxima página">›</NavBtn>
         </div>
       </div>
-    </div>
+    </nav>
   );
 }
 
@@ -103,8 +106,8 @@ function NavBtn({
       disabled={disabled}
       aria-label={ariaLabel}
       className={cn(
-        "rounded-lg border border-border bg-background-surface px-3 py-1.5 text-sm font-medium transition-colors cursor-pointer",
-        "text-slate-300 hover:bg-background-elevated hover:text-slate-100",
+        "rounded-lg border border-borda-control bg-surface px-3 py-1.5 text-sm font-medium transition-colors cursor-pointer",
+        "text-conteudo hover:bg-surface-elevated hover:text-conteudo-heading",
         "disabled:cursor-not-allowed disabled:opacity-40",
       )}
     >
@@ -124,13 +127,17 @@ function PageBtn({
 }) {
   return (
     <button
-      onClick={onClick}
-      disabled={active}
+      // A página atual NÃO é `disabled`: botão desabilitado sai da ordem de
+      // tabulação, e quem navega por teclado não chega nele para saber onde
+      // está. `aria-current="page"` é o sinal certo, e o clique fica inerte
+      // por guarda em vez de por desabilitação.
+      onClick={active ? undefined : onClick}
+      aria-current={active ? "page" : undefined}
       className={cn(
         "min-w-9 h-8 rounded-lg px-2.5 text-sm font-medium transition-colors cursor-pointer",
         active
-          ? "bg-primary text-white cursor-default"
-          : "border border-border bg-background-surface text-slate-300 hover:bg-background-elevated hover:text-slate-100",
+          ? "bg-action text-on-primary cursor-default"
+          : "border border-borda-control bg-surface text-conteudo hover:bg-surface-elevated hover:text-conteudo-heading",
       )}
     >
       {children}

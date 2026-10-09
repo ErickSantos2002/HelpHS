@@ -18,8 +18,12 @@ test.describe("Gestão de Usuários", () => {
   test("filtra usuários por perfil", async ({ page }) => {
     await expect(page.locator("table")).toBeVisible({ timeout: 8_000 });
 
-    // First select in the filter row is role filter
-    await page.locator("select").first().selectOption("admin");
+    // O filtro de perfil, agora pelo nome acessível: o gatilho tem rótulo
+    // `sr-only` ("Perfil"), que não muda quando o filtro é escolhido — a
+    // ordem dos campos na barra deixou de importar. A escolha é pelo RÓTULO
+    // da opção ("Administrador"), não pelo valor.
+    await page.getByRole("combobox", { name: "Perfil" }).click();
+    await page.getByRole("option", { name: "Administrador" }).click();
 
     // Table updates (any row count is valid, even 0)
     await expect(page.locator("table")).toBeVisible();
@@ -49,7 +53,10 @@ test.describe("Gestão de Usuários", () => {
     await page.getByLabel("Nome *").fill("Usuário E2E");
     await page.getByLabel("E-mail *").fill(email);
     await page.getByLabel("Senha *").fill("Senha@12345");
-    await page.getByLabel("Perfil *").selectOption("client");
+    // "Perfil *" é o do modal; o filtro da barra atrás dele se chama só
+    // "Perfil", e o asterisco separa os dois.
+    await page.getByRole("combobox", { name: "Perfil *" }).click();
+    await page.getByRole("option", { name: "Cliente" }).click();
 
     await page.getByRole("button", { name: "Criar" }).click();
 

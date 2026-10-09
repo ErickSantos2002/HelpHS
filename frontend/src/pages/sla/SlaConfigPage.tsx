@@ -4,106 +4,165 @@ import { useForm, type Resolver } from "react-hook-form";
 import { z } from "zod";
 import {
   Alert,
+  Badge,
   Button,
   Card,
+  Icon,
   Input,
   Modal,
   ModalFooter,
   Spinner,
 } from "../../components/ui";
 import {
+  PRIORIDADE,
+  PRIORIDADES,
+  TOM_PRIORIDADE,
+  rotuloDePrioridade,
+  varianteDePrioridade,
+  type TicketPriority,
+} from "../../lib/prioridade";
+import {
   getSLAConfigs,
   updateSLAConfig,
   type SLAConfig,
 } from "../../services/slaService";
 
-// ── Constants ─────────────────────────────────────────────────
+// ── A prioridade, que aqui se chamava "nível" ─────────────────
+//
+// Esta tela tinha os três mapas de sempre — `LEVEL_LABEL`, `LEVEL_STYLE` e
+// `LEVEL_ORDER` —, e os três diziam coisa própria: o rótulo estava no
+// MASCULINO ("Crítico", "Alto", "Médio", "Baixo"), contra o feminino que a
+// emenda E17 fixou por concordar com "prioridade"; a cor era um sexto esquema
+// (vermelho/laranja/amarelo/cinza da paleta crua) que não batia com nenhuma das
+// outras telas; e a ordem repetia à mão o campo `ordem` do módulo.
+//
+// Os três saíram para `lib/prioridade.ts`. O que a tela chama de "nível de
+// SLA" é a prioridade do chamado — o backend manda os mesmos quatro valores —,
+// e duas palavras para o mesmo dado era metade do problema.
 
-const LEVEL_LABEL: Record<string, string> = {
-  critical: "Crítico",
-  high: "Alto",
-  medium: "Médio",
-  low: "Baixo",
-};
-
-const LEVEL_STYLE: Record<string, { badge: string; bar: string; dot: string }> = {
-  critical: {
-    badge: "bg-red-50 text-red-600 border border-red-200 dark:bg-red-900/30 dark:text-red-300 dark:border-red-700/40",
-    bar: "bg-red-500",
-    dot: "bg-red-500 dark:bg-red-400",
-  },
-  high: {
-    badge: "bg-orange-50 text-orange-600 border border-orange-200 dark:bg-orange-900/30 dark:text-orange-300 dark:border-orange-700/40",
-    bar: "bg-orange-500",
-    dot: "bg-orange-500 dark:bg-orange-400",
-  },
-  medium: {
-    badge: "bg-yellow-50 text-yellow-600 border border-yellow-200 dark:bg-yellow-900/30 dark:text-yellow-300 dark:border-yellow-700/40",
-    bar: "bg-yellow-500",
-    dot: "bg-yellow-500 dark:bg-yellow-400",
-  },
-  low: {
-    badge: "bg-slate-100 text-slate-500 border border-slate-300 dark:bg-slate-800/60 dark:text-slate-400 dark:border-slate-600/40",
-    bar: "bg-slate-400 dark:bg-slate-500",
-    dot: "bg-slate-400",
-  },
-};
-
-const LEVEL_ORDER = ["critical", "high", "medium", "low"];
-
-// ── Icons ─────────────────────────────────────────────────────
-
-const IC = {
-  Clock: (
-    <svg className="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
-      <circle cx="12" cy="12" r="10" /><path strokeLinecap="round" strokeLinejoin="round" d="M12 6v6l4 2" />
-    </svg>
-  ),
-  Shield: (
-    <svg className="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
-      <path strokeLinecap="round" strokeLinejoin="round" d="M9 12l2 2 4-4m5.618-4.016A11.955 11.955 0 0112 2.944a11.955 11.955 0 01-8.618 3.04A12.02 12.02 0 003 9c0 5.591 3.824 10.29 9 11.622 5.176-1.332 9-6.03 9-11.622 0-1.042-.133-2.052-.382-3.016z" />
-    </svg>
-  ),
-  Edit: (
-    <svg className="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
-      <path strokeLinecap="round" strokeLinejoin="round" d="M11 5H6a2 2 0 00-2 2v11a2 2 0 002 2h11a2 2 0 002-2v-5m-1.414-9.414a2 2 0 112.828 2.828L11.828 15H9v-2.828l8.586-8.586z" />
-    </svg>
-  ),
-  Bell: (
-    <svg className="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
-      <path strokeLinecap="round" strokeLinejoin="round" d="M15 17h5l-1.405-1.405A2.032 2.032 0 0118 14.158V11a6.002 6.002 0 00-4-5.659V5a2 2 0 10-4 0v.341C7.67 6.165 6 8.388 6 11v3.159c0 .538-.214 1.055-.595 1.436L4 17h5m6 0v1a3 3 0 11-6 0v-1m6 0H9" />
-    </svg>
-  ),
-  Info: (
-    <svg className="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
-      <path strokeLinecap="round" strokeLinejoin="round" d="M13 16h-1v-4h-1m1-4h.01M21 12a9 9 0 11-18 0 9 9 0 0118 0z" />
-    </svg>
-  ),
-};
+/**
+ * A ordem de urgência sai do módulo, com recuo.
+ *
+ * O recuo manda a prioridade desconhecida para o **fim** da lista. `indexOf`
+ * daria -1, que a ordenaria como mais urgente que "crítica" — um valor que o
+ * backend passasse a mandar apareceria no topo da tela por acidente aritmético.
+ */
+function ordemDePrioridade(p: string): number {
+  return PRIORIDADE[p as TicketPriority]?.ordem ?? PRIORIDADES.length;
+}
 
 // ── Helpers ───────────────────────────────────────────────────
 
-function formatHours(h: number) {
-  if (h < 24) return `${h}h`;
-  const days = Math.floor(h / 24);
-  const rest = h % 24;
-  return rest > 0 ? `${days}d ${rest}h` : `${days}d`;
+const MINUTOS_POR_HORA = 60;
+const MINUTOS_POR_DIA = 24 * MINUTOS_POR_HORA;
+
+/**
+ * O prazo em dias, horas e minutos, na unidade em que ele é guardado.
+ *
+ * É a ÚNICA implementação da regra, e agora com os DOIS chamadores da tela: a
+ * linha da lista e a dica do formulário. Dois formatadores do mesmo prazo
+ * divergiriam na primeira vez que alguém mexesse num só — e aqui a divergência
+ * apareceria entre o que a pessoa lê na lista e o que ela lê antes de salvar,
+ * que é o pior lugar possível para dois números discordarem.
+ *
+ * Sem casa decimal em lugar nenhum: 30 min é "30min", não "0,5h".
+ */
+function descreveMinutos(total: number): string {
+  const dias = Math.floor(total / MINUTOS_POR_DIA);
+  const horas = Math.floor((total % MINUTOS_POR_DIA) / MINUTOS_POR_HORA);
+  const minutos = total % MINUTOS_POR_HORA;
+  const partes: string[] = [];
+  if (dias) partes.push(`${dias}d`);
+  if (horas) partes.push(`${horas}h`);
+  if (minutos) partes.push(`${minutos}min`);
+  return partes.length > 0 ? partes.join(" ") : "0min";
+}
+
+/**
+ * O prazo, na mesma unidade em que ele é guardado e editado.
+ *
+ * Aqui havia um traço com a nota "não representável em horas", e ele era a
+ * resposta CERTA enquanto a lista só tinha o campo derivado, que chega nulo
+ * quando o prazo não é hora cheia. Assim que o formulário passou a falar
+ * minutos, o valor exato ficou disponível também aqui — e traço onde há dado é
+ * a tela escondendo o que tem.
+ *
+ * `descreveMinutos` é o MESMO formatador da dica de edição. A lista e o
+ * formulário dizendo o mesmo prazo com palavras diferentes seria o defeito
+ * seguinte, e é o tipo de divergência que ninguém percebe até alguém comparar
+ * as duas telas lado a lado.
+ */
+function Prazo({ minutos }: { minutos: number }) {
+  return (
+    <p className="text-sm font-semibold text-conteudo-heading mt-0.5">
+      {descreveMinutos(minutos)}
+    </p>
+  );
 }
 
 // ── Validation schema ─────────────────────────────────────────
 
+/**
+ * O formulário fala MINUTOS, que é a unidade em que o prazo é guardado.
+ *
+ * Falava horas inteiras, e por isso não conseguia escrever os 30 min da
+ * Crítica — o prazo que existe em produção e que só entrou lá por script.
+ * Enquanto isso durou, abrir "Editar SLA — Crítica" e salvar TROCAVA aquele
+ * prazo por um número redondo. Perda de dado silenciosa, na prioridade mais
+ * urgente do sistema.
+ *
+ * A alternativa era um número com seletor de unidade. Ela foi recusada por um
+ * motivo concreto: trocar "minutos" para "horas" sem mexer no número multiplica
+ * o prazo por 60 SEM PEDIR NADA, e o formulário passaria a converter nos dois
+ * sentidos — que é exatamente onde esse erro mora. Em minutos o formulário não
+ * converte: a ida e a volta são identidade, e o único número que existe tem um
+ * significado só.
+ *
+ * O teto acompanha o do backend (`SLAConfigUpdate`): 9999 h = 599 940 min.
+ */
 const editSchema = z
   .object({
-    response_time_hours: z.coerce.number().int("Deve ser inteiro").min(1, "Mínimo 1 hora").max(9999),
-    resolve_time_hours: z.coerce.number().int("Deve ser inteiro").min(1, "Mínimo 1 hora").max(9999),
+    response_time_minutes: z.coerce
+      .number()
+      .int("Deve ser inteiro")
+      .min(1, "Mínimo 1 minuto")
+      .max(599_940, "Máximo 599940 minutos"),
+    resolve_time_minutes: z.coerce
+      .number()
+      .int("Deve ser inteiro")
+      .min(1, "Mínimo 1 minuto")
+      .max(599_940, "Máximo 599940 minutos"),
     warning_threshold: z.coerce.number().int("Deve ser inteiro").min(1).max(100, "Máximo 100%"),
   })
-  .refine((v) => v.resolve_time_hours > v.response_time_hours, {
+  .refine((v) => v.resolve_time_minutes > v.response_time_minutes, {
     message: "Deve ser maior que o tempo de resposta",
-    path: ["resolve_time_hours"],
+    path: ["resolve_time_minutes"],
   });
 
 type EditValues = z.infer<typeof editSchema>;
+
+// ── PrioridadeChip ────────────────────────────────────────────
+
+/**
+ * O selo de prioridade da tela, que é o `Badge` do pacote com o ponto dentro.
+ *
+ * Não é o `PriorityBadge` porque este desenho leva o ponto colorido junto do
+ * rótulo — e o ponto é justamente o que o módulo pede que nunca apareça
+ * sozinho. Aqui ele tem o rótulo ao lado, então a cor é reforço e não o único
+ * portador da informação.
+ */
+function PrioridadeChip({ level }: { level: string }) {
+  const variante = varianteDePrioridade(level);
+  return (
+    <Badge variant={variante} className="gap-1.5">
+      <span
+        aria-hidden="true"
+        className={`h-1.5 w-1.5 shrink-0 rounded-full ${TOM_PRIORIDADE[variante].ponto}`}
+      />
+      {rotuloDePrioridade(level)}
+    </Badge>
+  );
+}
 
 // ── SlaEditModal ──────────────────────────────────────────────
 
@@ -113,16 +172,28 @@ function SlaEditModal({ config, onClose, onSaved }: {
   onSaved: (updated: SLAConfig) => void;
 }) {
   const [submitError, setSubmitError] = useState<string | null>(null);
-  const style = LEVEL_STYLE[config.level];
 
   const form = useForm<EditValues>({
     resolver: zodResolver(editSchema) as Resolver<EditValues>,
+    // Sem `?? undefined` e sem recuo: `*_time_minutes` é `int` NOT NULL no
+    // banco e sempre vem na resposta. O campo que podia faltar era o derivado
+    // em horas, e ele saiu do formulário.
     defaultValues: {
-      response_time_hours: config.response_time_hours,
-      resolve_time_hours: config.resolve_time_hours,
+      response_time_minutes: config.response_time_minutes,
+      resolve_time_minutes: config.resolve_time_minutes,
       warning_threshold: config.warning_threshold,
     },
   });
+
+  // A conversão é FEEDBACK, não entrada: mostra o que o número digitado quer
+  // dizer em dias e horas, sem que exista um segundo campo para discordar dele.
+  // É o que torna "4320" legível sem reintroduzir a aritmética de duas vias.
+  const respostaAgora = form.watch("response_time_minutes");
+  const resolucaoAgora = form.watch("resolve_time_minutes");
+  const emPalavras = (v: unknown) => {
+    const n = Number(v);
+    return Number.isFinite(n) && n > 0 ? `= ${descreveMinutos(Math.floor(n))}` : undefined;
+  };
 
   async function handleSubmit(values: EditValues) {
     setSubmitError(null);
@@ -135,30 +206,28 @@ function SlaEditModal({ config, onClose, onSaved }: {
   }
 
   return (
-    <Modal open onClose={onClose} title={`Editar SLA — ${LEVEL_LABEL[config.level]}`}>
+    <Modal open onClose={onClose} title={`Editar SLA — ${rotuloDePrioridade(config.level)}`}>
       <form onSubmit={form.handleSubmit(handleSubmit)} className="space-y-4">
-        {/* Level badge */}
-        <div className={`inline-flex items-center gap-2 px-3 py-1.5 rounded-lg text-sm font-medium ${style.badge}`}>
-          <span className={`w-2 h-2 rounded-full shrink-0 ${style.dot}`} />
-          Nível {LEVEL_LABEL[config.level]}
-        </div>
+        <PrioridadeChip level={config.level} />
 
         {submitError && <Alert variant="danger">{submitError}</Alert>}
 
         <div className="grid grid-cols-2 gap-3">
           <Input
-            label="Resposta (horas úteis) *"
+            label="Resposta (minutos úteis) *"
             type="number"
             min={1}
-            error={form.formState.errors.response_time_hours?.message}
-            {...form.register("response_time_hours")}
+            error={form.formState.errors.response_time_minutes?.message}
+            hint={emPalavras(respostaAgora)}
+            {...form.register("response_time_minutes")}
           />
           <Input
-            label="Resolução (horas úteis) *"
+            label="Resolução (minutos úteis) *"
             type="number"
             min={1}
-            error={form.formState.errors.resolve_time_hours?.message}
-            {...form.register("resolve_time_hours")}
+            error={form.formState.errors.resolve_time_minutes?.message}
+            hint={emPalavras(resolucaoAgora)}
+            {...form.register("resolve_time_minutes")}
           />
         </div>
 
@@ -171,7 +240,7 @@ function SlaEditModal({ config, onClose, onSaved }: {
           {...form.register("warning_threshold")}
         />
 
-        <p className="text-xs text-slate-500">
+        <p className="text-xs text-conteudo-muted">
           O alerta dispara quando o percentual do tempo já consumido atingir o limiar. Ex.: 80% = alerta quando 80% do prazo foi usado.
         </p>
 
@@ -199,7 +268,11 @@ export default function SlaConfigPage() {
   useEffect(() => {
     getSLAConfigs()
       .then((data) => {
-        setConfigs([...data].sort((a, b) => LEVEL_ORDER.indexOf(a.level) - LEVEL_ORDER.indexOf(b.level)));
+        setConfigs(
+          [...data].sort(
+            (a, b) => ordemDePrioridade(a.level) - ordemDePrioridade(b.level),
+          ),
+        );
       })
       .catch(() => setError("Não foi possível carregar as configurações de SLA."))
       .finally(() => setLoading(false));
@@ -214,9 +287,9 @@ export default function SlaConfigPage() {
     <div className="space-y-5">
       {/* Header */}
       <div>
-        <h1 className="text-2xl font-bold text-slate-800 dark:text-slate-100">Configurações de SLA</h1>
-        <p className="text-slate-500 dark:text-slate-400 text-sm mt-0.5">
-          Tempos limite de resposta e resolução por nível de prioridade (seg–sex, 08h–18h)
+        <h1 className="text-2xl font-bold text-conteudo-heading">Configurações de SLA</h1>
+        <p className="text-conteudo-muted text-sm mt-0.5">
+          Tempos limite de resposta e resolução por nível de prioridade (seg–sex, 08h–17h)
         </p>
       </div>
 
@@ -228,32 +301,41 @@ export default function SlaConfigPage() {
         <>
           <Card padding="none">
             {/* Card header */}
-            <div className="px-4 py-3 border-b border-border">
-              <p className="text-sm font-semibold text-slate-700 dark:text-slate-200">Níveis de SLA</p>
-              <p className="text-xs text-slate-500 mt-0.5">Clique em editar para ajustar os tempos de cada nível.</p>
+            <div className="px-4 py-3 border-b border-borda">
+              <p className="text-sm font-semibold text-conteudo-heading">Níveis de SLA</p>
+              <p className="text-xs text-conteudo-muted mt-0.5">Clique em editar para ajustar os tempos de cada nível.</p>
             </div>
 
-            <div className="divide-y divide-border">
+            <div className="divide-y divide-borda">
               {configs.map((c) => {
-                const style = LEVEL_STYLE[c.level];
-                const responseRatio = Math.min((c.response_time_hours / c.resolve_time_hours) * 100, 100);
+                const rotulo = rotuloDePrioridade(c.level);
+                // Em minutos nao existe o NaN que o campo derivado produzia:
+                // `*_time_minutes` e `int` NOT NULL, e o backend exige `ge=1`.
+                // A guarda do zero fica assim mesmo -- ela custa nada e o dado
+                // vem da REDE, onde "nao pode ser zero" e promessa de outro
+                // processo, nao garantia deste.
+                const proporcao = c.resolve_time_minutes
+                  ? Math.min((c.response_time_minutes / c.resolve_time_minutes) * 100, 100)
+                  : 0;
                 return (
-                  <div key={c.id} className="flex items-center gap-4 px-4 py-4 hover:bg-background-elevated/40 transition-colors">
+                  <div key={c.id} className="flex items-center gap-4 px-4 py-4 hover:bg-surface-elevated/40 transition-colors">
 
                     {/* Level badge */}
-                    <div className={`shrink-0 inline-flex items-center gap-1.5 px-2.5 py-1 rounded-full text-xs font-semibold ${style.badge}`}>
-                      <span className={`w-1.5 h-1.5 rounded-full ${style.dot}`} />
-                      {LEVEL_LABEL[c.level]}
+                    <div className="shrink-0">
+                      <PrioridadeChip level={c.level} />
                     </div>
 
                     {/* Times */}
                     <div className="flex-1 min-w-0">
-                      {/* Progress bar — mostra resposta vs resolução */}
+                      {/* Progress bar — mostra resposta vs resolução. Decorativa:
+                          os dois números que ela compara estão escritos logo
+                          abaixo, então ela não é o único portador de nada. */}
                       <div className="flex items-center gap-3 mb-2">
-                        <div className="flex-1 h-1.5 rounded-full bg-background-elevated overflow-hidden">
+                        <div className="flex-1 h-1.5 rounded-full bg-surface-elevated overflow-hidden">
                           <div
-                            className={`h-full rounded-full ${style.bar} opacity-60`}
-                            style={{ width: `${responseRatio}%` }}
+                            aria-hidden="true"
+                            className={`h-full rounded-full opacity-60 ${TOM_PRIORIDADE[varianteDePrioridade(c.level)].ponto}`}
+                            style={{ width: `${proporcao}%` }}
                           />
                         </div>
                       </div>
@@ -261,45 +343,51 @@ export default function SlaConfigPage() {
                       <div className="flex flex-wrap gap-4">
                         {/* Resposta */}
                         <div className="flex items-center gap-1.5">
-                          <span className="text-slate-500">{IC.Clock}</span>
+                          <Icon name="clock" size={16} strokeWidth={2} className="text-conteudo-muted" />
                           <div>
-                            <p className="text-[10px] text-slate-500 leading-none">Resposta</p>
-                            <p className="text-sm font-semibold text-slate-700 dark:text-slate-200 mt-0.5">{formatHours(c.response_time_hours)}</p>
+                            <p className="text-[10px] text-conteudo-muted leading-none">Resposta</p>
+                            <Prazo minutos={c.response_time_minutes} />
                           </div>
                         </div>
 
                         {/* Resolução */}
                         <div className="flex items-center gap-1.5">
-                          <span className="text-slate-500">{IC.Shield}</span>
+                          <Icon name="shield" size={16} strokeWidth={2} className="text-conteudo-muted" />
                           <div>
-                            <p className="text-[10px] text-slate-500 leading-none">Resolução</p>
-                            <p className="text-sm font-semibold text-slate-700 dark:text-slate-200 mt-0.5">{formatHours(c.resolve_time_hours)}</p>
+                            <p className="text-[10px] text-conteudo-muted leading-none">Resolução</p>
+                            <Prazo minutos={c.resolve_time_minutes} />
                           </div>
                         </div>
 
                         {/* Alerta */}
                         <div className="flex items-center gap-1.5">
-                          <span className="text-slate-500">{IC.Bell}</span>
+                          <Icon name="bell" size={16} strokeWidth={2} className="text-conteudo-muted" />
                           <div>
-                            <p className="text-[10px] text-slate-500 leading-none">Alerta</p>
-                            <p className="text-sm font-semibold text-slate-700 dark:text-slate-200 mt-0.5">{c.warning_threshold}%</p>
+                            <p className="text-[10px] text-conteudo-muted leading-none">Alerta</p>
+                            <p className="text-sm font-semibold text-conteudo-heading mt-0.5">{c.warning_threshold}%</p>
                           </div>
                         </div>
                       </div>
                     </div>
 
                     {/* Updated at */}
-                    <p className="hidden md:block shrink-0 text-xs text-slate-500 dark:text-slate-600">
+                    <p className="hidden md:block shrink-0 text-xs text-conteudo-muted">
                       {new Date(c.updated_at).toLocaleDateString("pt-BR", { day: "2-digit", month: "2-digit", year: "numeric" })}
                     </p>
 
                     {/* Edit */}
                     <button
+                      type="button"
                       onClick={() => setEditing(c)}
                       title="Editar"
-                      className="p-1.5 rounded-lg text-slate-400 hover:text-primary hover:bg-primary/10 transition-colors cursor-pointer shrink-0"
+                      // Quatro linhas, quatro botões só de ícone, e o `Icon` é
+                      // `aria-hidden`: sem o rótulo com a prioridade dentro,
+                      // quem usa leitor de tela ouvia "Editar" quatro vezes e
+                      // não tinha como saber qual linha estava escolhendo.
+                      aria-label={`Editar SLA da prioridade ${rotulo}`}
+                      className="p-1.5 rounded-lg text-conteudo-muted hover:text-conteudo-link hover:bg-action-tint transition-colors cursor-pointer shrink-0"
                     >
-                      {IC.Edit}
+                      <Icon name="edit" size={16} strokeWidth={2} />
                     </button>
                   </div>
                 );
@@ -308,16 +396,16 @@ export default function SlaConfigPage() {
           </Card>
 
           {/* Info card */}
-          <div className="rounded-xl border border-border/60 bg-background-surface/50 p-4">
-            <div className="flex items-center gap-2 mb-2 text-slate-600 dark:text-slate-300">
-              <span className="text-slate-500">{IC.Info}</span>
+          <div className="rounded-xl border border-borda/60 bg-surface/50 p-4">
+            <div className="flex items-center gap-2 mb-2 text-conteudo">
+              <Icon name="info" size={16} strokeWidth={2} className="text-conteudo-muted" />
               <p className="text-sm font-medium">Como funciona</p>
             </div>
-            <ul className="space-y-1 text-xs text-slate-500">
-              <li><span className="text-slate-600 dark:text-slate-400 font-medium">Resposta:</span> tempo máximo para a primeira interação de um técnico no chamado.</li>
-              <li><span className="text-slate-600 dark:text-slate-400 font-medium">Resolução:</span> tempo máximo para fechar o chamado.</li>
-              <li><span className="text-slate-600 dark:text-slate-400 font-medium">Alerta:</span> notificação antecipada quando o percentual do prazo consumido atingir o limiar.</li>
-              <li>Períodos de espera (aguardando cliente / aguardando técnico) <span className="text-slate-600 dark:text-slate-400 font-medium">pausam</span> o contador de SLA.</li>
+            <ul className="space-y-1 text-xs text-conteudo-muted">
+              <li><span className="text-conteudo font-medium">Resposta:</span> tempo máximo para a primeira interação de um técnico no chamado.</li>
+              <li><span className="text-conteudo font-medium">Resolução:</span> tempo máximo para fechar o chamado.</li>
+              <li><span className="text-conteudo font-medium">Alerta:</span> notificação antecipada quando o percentual do prazo consumido atingir o limiar.</li>
+              <li>Períodos de espera (aguardando cliente / aguardando técnico) <span className="text-conteudo font-medium">pausam</span> o contador de SLA.</li>
             </ul>
           </div>
         </>

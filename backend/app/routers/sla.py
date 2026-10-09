@@ -45,7 +45,7 @@ async def update_sla_config(
             detail="Configuração de SLA não encontrada para esta prioridade.",
         )
 
-    update_data = payload.model_dump(exclude_unset=True)
+    update_data = payload.campos_para_gravar()
     for field, value in update_data.items():
         setattr(config, field, value)
     config.updated_at = datetime.now(UTC)

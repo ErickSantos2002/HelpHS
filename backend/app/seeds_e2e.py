@@ -72,6 +72,12 @@ async def seed_e2e_client(session: AsyncSession) -> None:
             password=pwd_context.hash(E2E_CLIENT["password"]),
             role=UserRole.client,
             status=UserStatus.active,
+            # Cliente ativo precisa de telefone. Este seed monta o objeto
+            # SQLAlchemy direto, sem passar por Pydantic, então nada aqui
+            # falharia hoje — está explícito porque a conta que o e2e cria é
+            # a única conta de cliente que o projeto cria por código, e ela
+            # tem de nascer já no formato que a regra exige.
+            phone="+5581999990000",
             lgpd_consent=True,
             lgpd_consent_at=now,
             email_verified=True,

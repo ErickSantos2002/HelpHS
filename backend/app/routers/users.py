@@ -2,7 +2,7 @@
 CRUD de usuários.
 
 Permissões:
-  POST   /users                   — admin | technician
+  POST   /users                   — admin | technician (só admin cria staff)
   GET    /users                   — admin | technician
   GET    /users/me                — qualquer autenticado
   GET    /users/technicians       — admin | technician (lista técnicos ativos)
@@ -18,7 +18,7 @@ import uuid
 from datetime import UTC, datetime
 from typing import Annotated, Any
 
-from fastapi import APIRouter, Depends, File, HTTPException, Query, UploadFile, status
+from fastapi import APIRouter, Depends, File, HTTPException, Query, Request, UploadFile, status
 from sqlalchemy import func, select
 from sqlalchemy.exc import IntegrityError
 from sqlalchemy.ext.asyncio import AsyncSession
@@ -36,16 +36,19 @@ from app.models.models import (
     CompanyNote,
     GroupNote,
     KBArticle,
+    LibraryFile,
     SatisfactionSurvey,
     Ticket,
     TicketHistory,
     TicketNote,
+    TicketSlaExtension,
     User,
     UserRole,
     UserStatus,
 )
 from app.schemas.ticket import InterruptorDaIA
 from app.schemas.user import (
+    LGPDConsentStatus,
     LGPDConsentUpdate,
     OnboardingUpdate,
     PasswordChange,
@@ -55,7 +58,8 @@ from app.schemas.user import (
     UserStatusUpdate,
     UserUpdate,
 )
-from app.services import storage
+from app.services import consentimento, storage
+from app.utils.telefone import telefone_ausente
 from app.utils.uploads import ler_ate_o_limite
 
 router = APIRouter(prefix="/users", tags=["Users"])
@@ -85,6 +89,146 @@ def _audit(
     )
 
 
+_ERRO_REMOVER = "Não é possível remover o telefone de um cliente ativo."
+_ERRO_EXIGE = "Cliente ativo precisa de um telefone válido."
+
+
+def _guarda_telefone_do_cliente(
+    *,
+    role_final: UserRole,
+    status_final: UserStatus,
+    telefone_final: str | None,
+    telefone_anterior: str | None,
+    mudou_papel_ou_situacao: bool,
+) -> None:
+    """Recusa as duas — e somente as duas — perdas de telefone que importam.
+
+    A regra é PROSPECTIVA. Medido em produção em 18/09/2026: 14 contas
+    `role=client` + `status=active` estão sem telefone. São contas de teste,
+    mas existem fisicamente, e uma exigência genérica do tipo "cliente ativo
+    sempre precisa de telefone" as deixaria incapazes de editar o próprio
+    nome. Por isso o que se proíbe é a PERDA, não a ausência:
+
+    P1  REMOÇÃO   — tinha telefone e a requisição o esvazia.
+    P2  TRANSIÇÃO — virar cliente, ou voltar a `active`, sem telefone.
+
+    Quem já estava sem telefone e não mexeu em papel nem em situação passa,
+    de propósito. O saneamento dessas linhas é tarefa separada, e dado
+    histórico se corrige em script avulso — nunca numa validação de entrada.
+
+    `telefone_anterior` é `None` na criação: lá não há passado, e é sempre a
+    transição (P2) que responde.
+    """
+    if role_final != UserRole.client or status_final != UserStatus.active:
+        return
+    if not telefone_ausente(telefone_final):
+        return
+
+    # Daqui para baixo o estado resultante é cliente ativo SEM telefone.
+    if not telefone_ausente(telefone_anterior):
+        raise HTTPException(status_code=status.HTTP_422_UNPROCESSABLE_CONTENT, detail=_ERRO_REMOVER)
+    if mudou_papel_ou_situacao:
+        raise HTTPException(status_code=status.HTTP_422_UNPROCESSABLE_CONTENT, detail=_ERRO_EXIGE)
+    # Legado intocado: seguia sem telefone e segue, sem mudar papel nem
+    # situação. Passa.
+
+
+_ERRO_PAPEL = "Apenas administradores podem alterar o tipo de usuário."
+
+
+def _guarda_de_atribuicao_de_papel(*, ator: User, papel_atribuido: UserRole | None) -> None:
+    """Papel é atribuição de administrador — nas duas rotas em que se atribui.
+
+    A regra já existia, e existia só em `update_user`. `create_user` deixava o
+    `role` do corpo chegar ao `User()` sem perguntar quem estava criando: um
+    técnico criava um administrador numa requisição e entrava nele em seguida,
+    porque escolheu a senha. Não faltava a regra — faltava ela valer no único
+    lugar onde a conta NASCE. Agora tem um autor só.
+
+    `papel_atribuido` é `None` quando a requisição não atribui papel nenhum, e
+    o que conta como atribuição muda com a rota. Por isso a tradução é de cada
+    chamador, e a decisão é daqui:
+
+    * `update_user` passa o papel do corpo **só quando ele DIFERE do atual**.
+      Mandar de volta o papel que a pessoa já tem não move ninguém de lugar, e
+      tratar isso como atribuição tinha uma consequência que ninguém quis:
+      o formulário de edição manda `role` sempre, então o técnico levava 403
+      ao salvar QUALQUER campo — nome, departamento, telefone. A regra que
+      protegia a promoção estava, na prática, proibindo a edição inteira.
+      Rebaixar alguém a cliente continua sendo atribuição, porque muda.
+    * `create_user` passa `None` quando o papel pedido é `client`, o default do
+      schema. O front manda `role` SEMPRE (`UsersPage.tsx` abre o formulário
+      com `role: "client"`), então olhar a PRESENÇA do campo recusaria toda
+      criação de cliente feita por técnico — que é o uso real da tela.
+
+    O efeito somado é um só: quem não é admin não produz conta de staff nem
+    move ninguém de papel. Criar técnico também é escalação, só que lateral —
+    staff lê chamado alheio e nota interna.
+    """
+    if papel_atribuido is None or ator.role == UserRole.admin:
+        return
+    raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail=_ERRO_PAPEL)
+
+
+_ERRO_RAMAL = "Apenas administradores podem configurar o ramal da telefonia."
+_ERRO_RAMAL_DE_CLIENTE = "Cliente não tem ramal de telefonia."
+_ERRO_RAMAL_OCUPADO = "Este ramal já está vinculado a outro usuário."
+
+
+def _guarda_de_atribuicao_de_ramal(*, ator: User, ramal_enviado: bool) -> None:
+    """Ramal é provisionamento administrativo, não configuração de perfil.
+
+    Nem o próprio técnico mexe no seu: quem pudesse escolher o próprio ramal
+    poderia reivindicar o de outra pessoa, e passaria a originar ligações com a
+    identidade dela. É a mesma família de problema que
+    `_guarda_de_atribuicao_de_papel` fecha, e por isso tem a mesma forma.
+
+    ⚠️ O sinal aqui é **se o campo veio**, não o valor — ao contrário do papel.
+    `api4com_extension = null` é uma operação legítima e significativa: é assim
+    que o admin REMOVE um vínculo. Olhar o valor confundiria remover com não
+    pedir nada, e um não-admin conseguiria apagar o ramal alheio mandando nulo.
+    """
+    if not ramal_enviado or ator.role == UserRole.admin:
+        return
+    raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail=_ERRO_RAMAL)
+
+
+def _guarda_de_ramal_do_cliente(*, papel_final: UserRole, ramal_final: str | None) -> None:
+    """Cliente não origina ligação, logo não tem ramal.
+
+    A regra olha o ESTADO RESULTANTE, e não o campo enviado — mesma escolha do
+    `_guarda_telefone_do_cliente`. Isso cobre os dois caminhos com uma frase
+    só: dar ramal a quem é cliente, e rebaixar a cliente quem tem ramal. O
+    segundo passaria despercebido por uma guarda que só olhasse o campo.
+    """
+    if ramal_final is not None and papel_final == UserRole.client:
+        raise HTTPException(
+            status_code=status.HTTP_422_UNPROCESSABLE_CONTENT,
+            detail=_ERRO_RAMAL_DE_CLIENTE,
+        )
+
+
+async def _guarda_de_ramal_unico(db: AsyncSession, ramal: str, usuario_id: uuid.UUID) -> None:
+    """Consulta antes de gravar, como o e-mail duplicado do `create_user`.
+
+    O índice único é a invariante; esta consulta existe para o conflito virar
+    409 com texto de domínio em vez de `IntegrityError` virando 500.
+
+    Exclui o próprio usuário: regravar o mesmo ramal em quem já o tem é
+    idempotente, não conflito.
+
+    ⚠️ Resta a corrida entre a consulta e o INSERT — dois admins gravando o
+    mesmo ramal no mesmo instante. O índice recusa o segundo de qualquer jeito;
+    o que se perde é a mensagem boa. É a mesma janela que o cadastro por e-mail
+    tem desde sempre, e o backend sobe com UM worker.
+    """
+    result = await db.execute(
+        select(User).where(User.api4com_extension == ramal, User.id != usuario_id)
+    )
+    if result.scalar_one_or_none():
+        raise HTTPException(status_code=status.HTTP_409_CONFLICT, detail=_ERRO_RAMAL_OCUPADO)
+
+
 # ── POST /users ───────────────────────────────────────────────
 
 
@@ -94,6 +238,23 @@ async def create_user(
     db: Annotated[AsyncSession, Depends(get_db)],
     actor: Annotated[User, Depends(authorize(UserRole.admin, UserRole.technician))],
 ) -> UserResponse:
+    # Autorização antes de validação: o que decide é QUEM está criando.
+    _guarda_de_atribuicao_de_papel(
+        ator=actor,
+        # `client` é o default do schema — pedi-lo não é atribuir papel.
+        papel_atribuido=None if body.role == UserRole.client else body.role,
+    )
+
+    # `status=UserStatus.active` é literal logo abaixo, então o estado
+    # resultante depende só do papel escolhido. Criar já é a transição.
+    _guarda_telefone_do_cliente(
+        role_final=body.role,
+        status_final=UserStatus.active,
+        telefone_final=body.phone,
+        telefone_anterior=None,
+        mudou_papel_ou_situacao=True,
+    )
+
     result = await db.execute(select(User).where(User.email == body.email))
     if result.scalar_one_or_none():
         raise HTTPException(status_code=status.HTTP_409_CONFLICT, detail="Email already registered")
@@ -130,6 +291,16 @@ async def create_user(
     )
     db.add(user)
     _audit(db, AuditAction.create, actor.id, user.id)
+    if body.lgpd_consent:
+        # Quem marcou foi a equipe, não o titular: a origem diz isso, e o IP
+        # fica de fora porque seria o de quem criou a conta.
+        consentimento.registra_aceite(
+            db,
+            user_id=user.id,
+            origem=consentimento.ORIGEM_CRIADO_POR_TERCEIRO,
+            ip=None,
+            agora=ts,
+        )
     await db.commit()
     await db.refresh(user)
     return _to_response(user)
@@ -257,7 +428,22 @@ async def update_me(
     if not user:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Usuário não encontrado.")
 
-    update_data = body.model_dump(exclude_unset=True, exclude={"role"})
+    # `role` e `api4com_extension` saem aqui pelo mesmo motivo: o próprio
+    # perfil não promove ninguém nem se dá um ramal. Ver
+    # `tests/test_escalacao_por_users_me.py`, que trata este `exclude` como a
+    # defesa de uma palavra só que ele é.
+    update_data = body.model_dump(exclude_unset=True, exclude={"role", "api4com_extension"})
+    # Aqui nem papel nem situação mudam (o `role` sai no `exclude`, e `status`
+    # não existe neste schema): só a remoção (P1) pode acontecer.
+    if "phone" in update_data:
+        _guarda_telefone_do_cliente(
+            role_final=user.role,
+            status_final=user.status,
+            telefone_final=update_data["phone"],
+            telefone_anterior=user.phone,
+            mudou_papel_ou_situacao=False,
+        )
+
     for field, value in update_data.items():
         setattr(user, field, value)
 
@@ -351,6 +537,7 @@ async def complete_onboarding(
 @router.post("/me/change-password", status_code=status.HTTP_204_NO_CONTENT)
 async def change_password(
     body: PasswordChange,
+    request: Request,
     db: Annotated[AsyncSession, Depends(get_db)],
     current_user: Annotated[User, Depends(get_current_user)],
 ) -> None:
@@ -369,7 +556,19 @@ async def change_password(
 
     user.password = await run_in_threadpool(hash_password, body.new_password)
     user.updated_at = datetime.now(UTC)
-    _audit(db, AuditAction.update, current_user.id, user.id)
+    # O mesmo rastro da redefinição por e-mail (`auth.py`): a Política de
+    # Privacidade promete IP e navegador nos eventos de conta, e a troca de
+    # senha é um deles.
+    db.add(
+        AuditLog(
+            user_id=current_user.id,
+            action=AuditAction.password_change,
+            entity_type="user",
+            entity_id=user.id,
+            ip_address=request.client.host if request.client else None,
+            user_agent=request.headers.get("user-agent", ""),
+        )
+    )
     await db.commit()
 
 
@@ -390,18 +589,48 @@ async def update_user(
             status_code=status.HTTP_403_FORBIDDEN,
             detail="Você não tem permissão para acessar este item.",
         )
-    if current_user.role != UserRole.admin and body.role is not None:
-        raise HTTPException(
-            status_code=status.HTTP_403_FORBIDDEN,
-            detail="Apenas administradores podem alterar o tipo de usuário.",
-        )
+    # `model_fields_set` e não o valor: nulo aqui é remover, não "não pediu".
+    _guarda_de_atribuicao_de_ramal(
+        ator=current_user,
+        ramal_enviado="api4com_extension" in body.model_fields_set,
+    )
 
     result = await db.execute(select(User).where(User.id == user_id))
     user = result.scalar_one_or_none()
     if not user:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Usuário não encontrado.")
 
+    # A guarda do papel desceu para DEPOIS da leitura, porque agora ela precisa
+    # saber o papel atual para responder "isto muda alguma coisa?". Só chega
+    # aqui quem é staff ou está editando a si mesmo — o 403 de acesso já foi
+    # dado acima —, então trocar a ordem não revela existência de conta a
+    # ninguém que já não pudesse listá-la.
+    _guarda_de_atribuicao_de_papel(
+        ator=current_user,
+        papel_atribuido=body.role if body.role != user.role else None,
+    )
+
     update_data = body.model_dump(exclude_unset=True)
+    # O estado resultante só difere do atual nos campos realmente enviados —
+    # é o `exclude_unset` que separa "não mandou" de "mandou vazio", e a regra
+    # prospectiva depende dessa distinção para não travar conta legada.
+    papel_final = update_data.get("role") or user.role
+    if "phone" in update_data or papel_final != user.role:
+        _guarda_telefone_do_cliente(
+            role_final=papel_final,
+            status_final=user.status,
+            telefone_final=(update_data["phone"] if "phone" in update_data else user.phone),
+            telefone_anterior=user.phone,
+            mudou_papel_ou_situacao=papel_final != user.role,
+        )
+
+    mudou_o_ramal = "api4com_extension" in update_data
+    if mudou_o_ramal or papel_final != user.role:
+        ramal_final = update_data["api4com_extension"] if mudou_o_ramal else user.api4com_extension
+        _guarda_de_ramal_do_cliente(papel_final=papel_final, ramal_final=ramal_final)
+    if mudou_o_ramal and update_data["api4com_extension"] is not None:
+        await _guarda_de_ramal_unico(db, update_data["api4com_extension"], user.id)
+
     for field, value in update_data.items():
         setattr(user, field, value)
 
@@ -431,6 +660,17 @@ async def update_user_status(
     user = result.scalar_one_or_none()
     if not user:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Usuário não encontrado.")
+
+    # Reativar é o instante em que a conta volta a valer para a telefonia:
+    # é aqui que um cliente sem telefone precisa ganhar um. Desativar nunca
+    # é bloqueado — a regra guarda o estado ATIVO, não a saída dele.
+    _guarda_telefone_do_cliente(
+        role_final=user.role,
+        status_final=body.status,
+        telefone_final=user.phone,
+        telefone_anterior=user.phone,
+        mudou_papel_ou_situacao=body.status != user.status,
+    )
 
     user.status = body.status
     _audit(db, AuditAction.status_change, actor.id, user.id)
@@ -473,9 +713,29 @@ async def toggle_user_ai(
 # ── PATCH /users/me/lgpd-consent ──────────────────────────────
 
 
+@router.get("/me/lgpd-consent", response_model=LGPDConsentStatus)
+async def get_lgpd_consent(
+    db: Annotated[AsyncSession, Depends(get_db)],
+    current_user: Annotated[User, Depends(get_current_user)],
+    settings: Annotated[Settings, Depends(get_settings)],
+) -> LGPDConsentStatus:
+    """A situação do aceite de quem está logado — o que a tela de re-aceite lê."""
+    ultimo = await consentimento.ultimo_aceite_vigente(db, current_user.id)
+    return LGPDConsentStatus(
+        revisao_politica_vigente=settings.lgpd_revisao_politica,
+        revisao_termos_vigente=settings.lgpd_revisao_termos,
+        revisao_politica_aceita=ultimo.revisao_politica if ultimo else None,
+        revisao_termos_aceita=ultimo.revisao_termos if ultimo else None,
+        precisa_reaceitar=consentimento.precisa_reaceitar(
+            ultimo, role=current_user.role, settings=settings
+        ),
+    )
+
+
 @router.patch("/me/lgpd-consent", response_model=UserResponse)
 async def update_lgpd_consent(
     body: LGPDConsentUpdate,
+    request: Request,
     db: Annotated[AsyncSession, Depends(get_db)],
     current_user: Annotated[User, Depends(get_current_user)],
 ) -> UserResponse:
@@ -484,9 +744,22 @@ async def update_lgpd_consent(
     if not user:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Usuário não encontrado.")
 
+    agora = datetime.now(UTC)
     user.lgpd_consent = body.lgpd_consent
-    user.lgpd_consent_at = datetime.now(UTC) if body.lgpd_consent else None
-    user.updated_at = datetime.now(UTC)
+    user.lgpd_consent_at = agora if body.lgpd_consent else None
+    user.updated_at = agora
+    # As colunas acima são a leitura rápida e seguem mutáveis. A prova fica no
+    # histórico: conceder é linha nova, revogar fecha as abertas sem apagar.
+    if body.lgpd_consent:
+        consentimento.registra_aceite(
+            db,
+            user_id=user.id,
+            origem=consentimento.ORIGEM_ALTERACAO_PROPRIA,
+            ip=request.client.host if request.client else None,
+            agora=agora,
+        )
+    else:
+        await consentimento.revoga_aceites(db, user_id=user.id, agora=agora)
     _audit(db, AuditAction.update, current_user.id, user.id)
     await db.commit()
     await db.refresh(user)
@@ -541,6 +814,12 @@ async def anonymize_user(
     user.avatar_url = None
     user.lgpd_consent = False
     user.lgpd_consent_at = None
+    # O ramal tem índice ÚNICO (`uq_users_api4com_extension`), e nada aqui o
+    # zerava até 29/09/2026 — a conta perdia nome, e-mail e telefone, mas
+    # continuava "dona" do ramal para sempre, e nenhum outro técnico podia
+    # recebê-lo. Não é dado pessoal (não entra na LGPD por isso), é recurso
+    # operacional preso a uma conta morta.
+    user.api4com_extension = None
     user.status = UserStatus.anonymized
     user.updated_at = ts
 
@@ -559,15 +838,27 @@ async def anonymize_user(
 
 
 # Toda referência a `users.id` que NÃO tem ondelete no banco — são exatamente
-# estas que fazem o DELETE falhar. As outras seis (SET NULL e CASCADE) se
+# estas que fazem o DELETE falhar. As outras nove (SET NULL e CASCADE) se
 # resolvem sozinhas e por isso não entram aqui.
 #
 # A guarda contava só `Ticket.creator_id`, então um técnico sem chamados
 # próprios mas com chamados atribuídos passava e ia bater na chave estrangeira.
 #
-# São 11 COUNTs numa rota que um admin usa raramente: preferi a clareza de uma
+# São 13 COUNTs numa rota que um admin usa raramente: preferi a clareza de uma
 # lista legível — que também alimenta a mensagem de erro — a uma query só,
 # montada com UNION, que ninguém consegue reler depois.
+#
+# ⚠️ Esta lista é escrita à mão contra o SCHEMA, não gerada dele — e por isso
+# ela já ficou desatualizada uma vez: nasceu em 25/08/2026 com 11 entradas, e
+# duas tabelas com FK sem `ondelete` chegaram depois sem que ninguém voltasse
+# aqui para acrescentá-las (`library_files` em 10/09, `ticket_sla_extensions`
+# em 23/09 — auditado em 29/09/2026, contra `information_schema` real, não
+# contra esta lista). O `except IntegrityError` de `delete_user` cobria a
+# lacuna com um 409 genérico enquanto ela existiu; as duas entradas abaixo
+# devolvem a contagem exata que faltava. Da próxima vez que uma migration
+# criar uma FK para `users.id` sem `ondelete`, é AQUI que ela precisa entrar —
+# não há teste que detecte a omissão por conta própria, e é por isso que este
+# comentário existe.
 _REFERENCIAS_QUE_BLOQUEIAM: tuple[tuple[str, type[Any], InstrumentedAttribute], ...] = (
     ("chamado(s) aberto(s)", Ticket, Ticket.creator_id),
     ("chamado(s) atribuído(s)", Ticket, Ticket.assignee_id),
@@ -580,6 +871,8 @@ _REFERENCIAS_QUE_BLOQUEIAM: tuple[tuple[str, type[Any], InstrumentedAttribute], 
     ("artigo(s) da base de conhecimento", KBArticle, KBArticle.author_id),
     ("avaliação(ões) de atendimento", SatisfactionSurvey, SatisfactionSurvey.user_id),
     ("registro(s) de auditoria", AuditLog, AuditLog.user_id),
+    ("arquivo(s) da biblioteca", LibraryFile, LibraryFile.uploaded_by),
+    ("extensão(ões) de SLA concedida(s)", TicketSlaExtension, TicketSlaExtension.user_id),
 )
 
 _COMO_RESOLVER = (

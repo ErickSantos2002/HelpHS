@@ -73,7 +73,7 @@ export function KBSuggestionsPanel({ ticketId }: KBSuggestionsPanelProps) {
   }
 
   return (
-    <div className="rounded-xl bg-background-surface border border-border p-5 space-y-4">
+    <div className="rounded-xl bg-surface border border-borda p-5 space-y-4">
       {/* Header */}
       <div className="flex items-center justify-between">
         <div className="flex items-center gap-2">
@@ -110,9 +110,9 @@ export function KBSuggestionsPanel({ ticketId }: KBSuggestionsPanelProps) {
           onChange={(e) => setSearch(e.target.value)}
           placeholder="Buscar artigos…"
           className={cn(
-            "w-full rounded-lg border bg-background-elevated px-3 py-1.5 text-sm text-slate-100",
+            "w-full rounded-lg border bg-surface-elevated px-3 py-1.5 text-sm text-slate-100",
             "placeholder:text-slate-500 focus:outline-none focus:ring-2 focus:ring-primary focus:border-transparent",
-            "border-border hover:border-slate-500 transition-colors",
+            "border-borda hover:border-slate-500 transition-colors",
           )}
         />
         {searching && (
@@ -138,7 +138,7 @@ export function KBSuggestionsPanel({ ticketId }: KBSuggestionsPanelProps) {
           articles.map((article) => (
             <div
               key={article.id}
-              className="flex items-start gap-2 p-2.5 rounded-lg bg-background-elevated border border-border hover:border-slate-600 transition-colors"
+              className="flex items-start gap-2 p-2.5 rounded-lg bg-surface-elevated border border-borda hover:border-slate-600 transition-colors"
             >
               <div className="flex-1 min-w-0">
                 <Link
@@ -162,7 +162,7 @@ export function KBSuggestionsPanel({ ticketId }: KBSuggestionsPanelProps) {
                   "shrink-0 flex items-center gap-1 text-xs px-2 py-1 rounded-md transition-colors",
                   sentIds.has(article.id)
                     ? "border border-green-700 text-green-500 cursor-default"
-                    : "border border-border text-slate-400 hover:border-primary hover:text-primary disabled:opacity-40",
+                    : "border border-borda text-slate-400 hover:border-primary hover:text-primary disabled:opacity-40",
                 )}
                 title={
                   sentIds.has(article.id)

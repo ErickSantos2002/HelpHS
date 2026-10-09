@@ -8,12 +8,14 @@ import { RoleGuard } from "./components/layout/RoleGuard";
 import { PublicOnlyRoute } from "./components/layout/PublicOnlyRoute";
 import { OnboardingGuard } from "./components/layout/OnboardingGuard";
 import { OnboardingOnlyRoute } from "./components/layout/OnboardingOnlyRoute";
+import { ReaceiteGuard } from "./components/layout/ReaceiteGuard";
 import { Spinner } from "./components/ui";
 
 // Pages (lazy-loaded for code splitting)
 const LoginPage = lazy(() => import("./pages/auth/LoginPage"));
 const RegisterPage = lazy(() => import("./pages/auth/RegisterPage"));
 const VerifyEmailPage = lazy(() => import("./pages/auth/VerifyEmailPage"));
+const TermosDeUsoPage = lazy(() => import("./pages/legal/TermosDeUsoPage"));
 const PoliticaPrivacidadePage = lazy(
   () => import("./pages/legal/PoliticaPrivacidadePage"),
 );
@@ -41,12 +43,27 @@ const EquipmentPage = lazy(() => import("./pages/equipment/EquipmentPage"));
 const AuditLogsPage = lazy(() => import("./pages/audit/AuditLogsPage"));
 const SettingsPage = lazy(() => import("./pages/settings/SettingsPage"));
 const QuickRepliesPage = lazy(() => import("./pages/settings/QuickRepliesPage"));
+const LibraryPage = lazy(() => import("./pages/library/LibraryPage"));
 const ForbiddenPage = lazy(() => import("./pages/errors/ForbiddenPage"));
 const NotFoundPage = lazy(() => import("./pages/errors/NotFoundPage"));
 
+/* Galeria da casca — SO EM DESENVOLVIMENTO (src/dev/GaleriaCasca.tsx).
+ * O ternario e o guarda: no build `import.meta.env.DEV` vira `false`, o ramo
+ * com o import dinamico fica inalcancavel e o Rollup nao emite o chunk. Por
+ * isso o `lazy()` mora dentro da condicao, e nao fora dela — se ficasse fora,
+ * o chunk seria gerado mesmo sem rota que o use. Sai na Fase 20. */
+const GaleriaCasca = import.meta.env.DEV
+  ? lazy(() => import("./dev/GaleriaCasca"))
+  : null;
+
+/* Galeria dos primitivos — mesma regra, mesmo guarda, mesma saida na Fase 20. */
+const GaleriaPrimitivos = import.meta.env.DEV
+  ? lazy(() => import("./dev/GaleriaPrimitivos"))
+  : null;
+
 function Loading() {
   return (
-    <div className="flex h-screen items-center justify-center bg-background">
+    <div className="flex h-screen items-center justify-center bg-surface-base">
       <Spinner size="lg" />
     </div>
   );
@@ -74,6 +91,15 @@ function App() {
               lida por quem está se cadastrando (sem sessão) e por quem já usa
               o sistema (com sessão). */}
           <Route path="/privacidade" element={<PoliticaPrivacidadePage />} />
+          <Route path="/termos" element={<TermosDeUsoPage />} />
+
+          {/* Galeria da casca — nao existe no bundle de producao. */}
+          {GaleriaCasca && (
+            <Route path="/galeria-ds" element={<GaleriaCasca />} />
+          )}
+          {GaleriaPrimitivos && (
+            <Route path="/galeria-primitivos" element={<GaleriaPrimitivos />} />
+          )}
 
           {/* ── Error pages ──────────────────────────────────── */}
           <Route path="/403" element={<ForbiddenPage />} />
@@ -89,6 +115,9 @@ function App() {
             </Route>
 
             <Route element={<OnboardingGuard />}>
+              {/* Novo aceite da Política de Privacidade, quando o backend
+                  cobrar (só cliente, só com LGPD_EXIGE_REACEITE ligado). */}
+              <Route element={<ReaceiteGuard />}>
               <Route element={<AppLayout />}>
                 {/* All authenticated roles */}
                 <Route path="/" element={<HomePage />} />
@@ -117,6 +146,11 @@ function App() {
                   <Route path="/etiquetas" element={<SettingsPage />} />
                   <Route path="/respostas-rapidas" element={<QuickRepliesPage />} />
                   <Route path="/grupos" element={<GroupsPage />} />
+                  {/* A listagem do acervo é SÓ staff, e a guarda é do backend
+                      antes de ser daqui: `GET /library` recusa cliente. Esta
+                      rota é a segunda tranca, não a primeira -- o cliente
+                      recebe o arquivo pelo que o técnico anexa na conversa. */}
+                  <Route path="/biblioteca" element={<LibraryPage />} />
                 </Route>
 
                 {/* Admin only */}
@@ -124,6 +158,7 @@ function App() {
                   <Route path="/sla-config" element={<SlaConfigPage />} />
                   <Route path="/audit-logs" element={<AuditLogsPage />} />
                 </Route>
+              </Route>
               </Route>
             </Route>
           </Route>

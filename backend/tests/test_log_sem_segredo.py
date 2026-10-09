@@ -25,10 +25,12 @@ com uma URL assinada dentro.
 """
 
 import logging
+from unittest.mock import MagicMock, patch
 
+import pytest
 from loguru import logger
 
-from app.core.logging import instalar_ponte_stdlib
+from app.core.logging import instalar_ponte_stdlib, setup_logging
 
 _TOKEN = "eyJhbGciOiJSUzI1NiJ9.cargaUtilQueNaoPodeVazar.assinaturaSecreta"
 
@@ -164,3 +166,346 @@ def test_o_carimbo_de_request_id_sobrevive_a_redacao():
 
     assert capturado, "o log parou de funcionar"
     assert "request_id" in capturado[-1], "o carimbo do request_id sumiu"
+
+
+# ── Valor de variável local não pode ser renderizado ─────────
+#
+# Outro caminho, e o patcher acima não alcança este. O `diagnose` do loguru
+# acrescenta ao traceback o VALOR das variáveis locais de cada quadro. Uma
+# função que tenha a credencial numa variável — montar um `Authorization`, por
+# exemplo — passa a imprimir a credencial em qualquer exceção que atravesse
+# aquele quadro.
+#
+# A redação de `_SEGREDO_NA_QUERY` reescreve `record["message"]`; o bloco de
+# diagnóstico é montado pelo loguru DEPOIS, ao formatar a exceção. São caminhos
+# diferentes, e por isso este grupo existe.
+#
+# Medido no loguru 0.7.3: `logger.add` tem `diagnose=True` por default, e o
+# `setup_logging` não passava o parâmetro em nenhum dos três sinks.
+
+_SEGREDO_EM_VARIAVEL = "credencial-que-so-existe-numa-variavel-local-7K3P"
+
+
+def _monta_cabecalho_e_falha(token: str) -> dict:
+    """Reproduz o risco real: a credencial numa variável, e a linha estoura.
+
+    A linha que falha é a MESMA que referencia `token`, e isso é o ponto. O
+    `diagnose` anota o valor das variáveis CITADAS na linha exibida de cada
+    quadro — uma primeira versão deste teste levantava o erro numa linha que
+    não mencionava a variável, o `diagnose=True` não anotava nada, e o teste
+    passava sem provar coisa nenhuma.
+    """
+    return {"Authorization": token, "estoura": 1 // 0}
+
+
+def _loga_excecao_com_segredo_na_pilha(**opcoes_do_sink) -> str:
+    """Loga uma exceção com o segredo na pilha e devolve o texto formatado."""
+    saida: list[str] = []
+    sink = logger.add(lambda m: saida.append(str(m)), level="DEBUG", **opcoes_do_sink)
+    try:
+        try:
+            _monta_cabecalho_e_falha(_SEGREDO_EM_VARIAVEL)
+        except ZeroDivisionError:
+            logger.exception("falha ao falar com o fornecedor")
+    finally:
+        logger.remove(sink)
+    return "".join(saida)
+
+
+def test_o_valor_de_variavel_local_nao_vai_para_o_traceback():
+    """Com `diagnose=False`, o traceback mostra as linhas e não os valores."""
+    texto = _loga_excecao_com_segredo_na_pilha(diagnose=False)
+
+    assert "ZeroDivisionError" in texto, "o traceback sumiu junto com o diagnóstico"
+    assert _SEGREDO_EM_VARIAVEL not in texto
+
+
+def test_o_teste_acima_detectaria_a_volta_do_default():
+    """Prova que o teste anterior tem dente.
+
+    Sem isto, `diagnose=False` poderia estar sendo verificado contra uma saída
+    que nunca renderizaria variável nenhuma, e o teste passaria por engano.
+    """
+    texto = _loga_excecao_com_segredo_na_pilha(diagnose=True)
+
+    assert _SEGREDO_EM_VARIAVEL in texto
+
+
+@pytest.mark.parametrize("ambiente", ["development", "production"])
+def test_setup_logging_desliga_o_diagnostico_em_todos_os_sinks(ambiente):
+    """Prende a configuração real, e não só o comportamento do loguru.
+
+    Os dois ramos de `setup_logging` são percorridos: development instala dois
+    sinks (stdout colorido e arquivo), produção instala um (stdout em JSON).
+    Qualquer `logger.add` novo que esqueça o `diagnose=False` derruba isto.
+    """
+    ajustes = MagicMock()
+    ajustes.log_level = "INFO"
+    # O sink de arquivo nunca chega a ser criado: `logger.add` está trocado.
+    ajustes.log_dir = "/caminho/que/nao/e/aberto"
+    ajustes.is_development = ambiente == "development"
+
+    with (
+        patch("app.core.logging.get_settings", return_value=ajustes),
+        patch("app.core.logging.instalar_ponte_stdlib"),
+        patch("app.core.logging.logger.remove"),
+        patch("app.core.logging.logger.add") as adicionar,
+    ):
+        setup_logging()
+
+    assert adicionar.call_count >= 1
+    for chamada in adicionar.call_args_list:
+        assert (
+            chamada.kwargs.get("diagnose") is False
+        ), f"um sink de {ambiente} foi instalado sem diagnose=False"
+
+
+# ══════════════════════════════════════════════════════════════
+# DADO PESSOAL NO LOG DE E-MAIL
+# ══════════════════════════════════════════════════════════════
+#
+# Os testes acima tratam de SEGREDO. Este grupo trata de DADO PESSOAL, que é
+# problema diferente e chega pelo mesmo cano.
+#
+# Até 25/09/2026 o caminho de e-mail logava, em `INFO`:
+#
+#     Email sent to cliente@empresa.com.br: [HelpHS] Novo chamado HS-2026-0042
+#     — Impressora da recepção sem conexão
+#
+# Endereço do cliente e TÍTULO DO CHAMADO, no log de produção, numa linha por
+# e-mail. Enquanto não houve SMTP configurado nada disso saiu — a função retorna
+# antes. Ligar o SMTP ligava o vazamento junto, e era o mesmo restart.
+#
+# O `patcher` de `logging.py` não alcança isto: ele apaga token de QUERY STRING,
+# e aqui o dado vem interpolado no texto da mensagem.
+#
+# ⚠️ E `str(exc)` também carrega endereço. Medido no aiosmtplib 3.0.2:
+# `SMTPSenderRefused` leva o remetente, `SMTPRecipientRefused` e
+# `SMTPRecipientsRefused` levam o DESTINATÁRIO. É por isso que o log passou a
+# registrar a CLASSE do erro e o código numérico, nunca a mensagem.
+
+_ENDERECO = "cliente.real@empresa.com.br"
+_TITULO_DO_CHAMADO = "Impressora da recepcao sem conexao"
+_ASSUNTO = f"[HelpHS] Novo chamado HS-2026-0042 - {_TITULO_DO_CHAMADO}"
+_SENHA_SMTP = "re_CHAVE-FALSA-DE-TESTE-9Q2W"
+
+# O que NUNCA pode aparecer numa linha de log do caminho de e-mail.
+_PROIBIDO = {
+    "endereço do destinatário": _ENDERECO,
+    "título do chamado": _TITULO_DO_CHAMADO,
+    "assunto do e-mail": _ASSUNTO,
+    "senha do SMTP": _SENHA_SMTP,
+}
+
+
+def _dado_pessoal_em(linhas: list[str]) -> list[str]:
+    """Quais fragmentos proibidos aparecem nas linhas. Vazio = limpo.
+
+    Devolve o NOME do fragmento, e não o valor: a mensagem de falha do pytest
+    vai para o terminal, e o terminal costuma virar print no chat.
+    """
+    texto = "\n".join(linhas)
+    return [nome for nome, valor in _PROIBIDO.items() if valor in texto]
+
+
+def _settings_com_smtp():
+    from app.core.config import Settings
+
+    return Settings(
+        database_url="postgresql+asyncpg://u:p@localhost/db",
+        smtp_from_email="naoresponda@test.com",
+        smtp_user="naoresponda@test.com",
+        smtp_password=_SENHA_SMTP,
+    )
+
+
+async def _envia_capturando(erro: BaseException | None = None, **extras) -> list[str]:
+    """Roda `send_email` com o sink instalado e devolve as linhas logadas."""
+    from unittest.mock import AsyncMock
+
+    from app.services import email as servico
+
+    linhas, sink = _captura()
+    enviar = AsyncMock(side_effect=erro) if erro else AsyncMock()
+    try:
+        with patch.object(servico.FastMail, "send_message", new=enviar):
+            await servico.send_email(
+                to_email=_ENDERECO,
+                subject=_ASSUNTO,
+                body="corpo",
+                settings=_settings_com_smtp(),
+                **extras,
+            )
+    finally:
+        logger.remove(sink)
+    return linhas
+
+
+# ── O detector tem dente ──────────────────────────────────────
+
+
+def test_o_detector_de_dado_pessoal_pegaria_o_formato_antigo():
+    """Prova que os testes abaixo não passam por vacuidade.
+
+    Reproduz as duas linhas que existiam antes da correção. Se `_dado_pessoal_em`
+    não as acusasse, todo teste deste grupo passaria sem verificar nada.
+    """
+    antigas = [
+        f"Email sent to {_ENDERECO}: {_ASSUNTO}",
+        f"Failed to send email to {_ENDERECO}: algum erro",
+    ]
+
+    achados = _dado_pessoal_em(antigas)
+    assert "endereço do destinatário" in achados
+    assert "assunto do e-mail" in achados
+    assert "título do chamado" in achados
+
+
+# ── Sucesso ───────────────────────────────────────────────────
+
+
+@pytest.mark.asyncio
+async def test_o_log_de_entrega_aceita_nao_leva_endereco_nem_assunto():
+    linhas = await _envia_capturando()
+
+    assert linhas, "o envio bem-sucedido deixou de registrar qualquer linha"
+    assert not _dado_pessoal_em(linhas), _dado_pessoal_em(linhas)
+
+
+@pytest.mark.asyncio
+async def test_o_log_de_entrega_ainda_diz_que_deu_certo():
+    """Remover dado pessoal não pode virar remover informação operacional."""
+    linhas = await _envia_capturando()
+
+    texto = " ".join(linhas).lower()
+    assert "accepted" in texto or "delivered" in texto or "sent" in texto
+
+
+# ── Falha ─────────────────────────────────────────────────────
+
+
+@pytest.mark.asyncio
+async def test_o_log_de_falha_nao_leva_o_endereco_que_a_excecao_carrega():
+    """O caso mais traiçoeiro: o endereço vem de DENTRO da exceção.
+
+    `SMTPRecipientRefused` guarda o destinatário e o expõe no `str()`. Logar
+    `{exc}` põe o endereço do cliente no log sem ninguém escrever `{to_email}`.
+    """
+    from aiosmtplib.errors import SMTPRecipientRefused
+
+    linhas = await _envia_capturando(
+        erro=SMTPRecipientRefused(550, "mailbox unavailable", _ENDERECO)
+    )
+
+    assert linhas, "a falha deixou de registrar qualquer linha"
+    assert not _dado_pessoal_em(linhas), _dado_pessoal_em(linhas)
+
+
+@pytest.mark.asyncio
+async def test_o_log_de_falha_diz_a_classe_e_o_codigo_do_servidor():
+    """O que sobra tem de bastar para diagnosticar.
+
+    A classe separa "não conectou" de "credencial recusada"; o código separa
+    535 (credencial) de 550 (domínio não verificado) e de 421 (tente depois).
+    O código é inteiro do protocolo, não texto de servidor.
+    """
+    from aiosmtplib.errors import SMTPAuthenticationError
+
+    linhas = await _envia_capturando(
+        erro=SMTPAuthenticationError(535, "Authentication credentials invalid")
+    )
+
+    texto = " ".join(linhas)
+    assert "SMTPAuthenticationError" in texto
+    assert "535" in texto
+
+
+@pytest.mark.asyncio
+async def test_o_log_de_falha_nao_leva_a_mensagem_do_servidor():
+    """Texto de servidor é conteúdo variável: hoje é inócuo, amanhã não."""
+    from aiosmtplib.errors import SMTPAuthenticationError
+
+    linhas = await _envia_capturando(erro=SMTPAuthenticationError(535, f"rejected for {_ENDERECO}"))
+
+    assert "rejected for" not in " ".join(linhas)
+
+
+@pytest.mark.asyncio
+async def test_a_senha_do_smtp_nunca_aparece_no_log():
+    """Regressão da conclusão da auditoria: credencial não vaza por este caminho.
+
+    Exercita os dois ramos — aceito e recusado — porque a senha está no
+    `Settings` dos dois.
+    """
+    from aiosmtplib.errors import SMTPAuthenticationError
+
+    aceito = await _envia_capturando()
+    recusado = await _envia_capturando(erro=SMTPAuthenticationError(535, "nope"))
+
+    assert _SENHA_SMTP not in " ".join(aceito + recusado)
+
+
+# ── SMTP desligado ────────────────────────────────────────────
+
+
+@pytest.mark.asyncio
+async def test_o_log_de_smtp_desligado_nao_leva_o_endereco():
+    from unittest.mock import AsyncMock
+
+    from app.core.config import Settings
+    from app.services import email as servico
+
+    sem_smtp = Settings(database_url="postgresql+asyncpg://u:p@localhost/db")
+
+    linhas, sink = _captura()
+    try:
+        with patch.object(servico.FastMail, "send_message", new=AsyncMock()):
+            await servico.send_email(_ENDERECO, _ASSUNTO, "corpo", sem_smtp)
+    finally:
+        logger.remove(sink)
+
+    assert not _dado_pessoal_em(linhas), _dado_pessoal_em(linhas)
+
+
+# ── A notificação mantém o id ─────────────────────────────────
+#
+# Até a Fase 3B, este arquivo tinha dois testes aqui: construíam um
+# `notifications._EmailPendente` direto e chamavam `notifications._send_and_log`,
+# provando que o log do disparo fire-and-forget mantinha o `notif_id` e perdia
+# o endereço. Esse mecanismo foi removido — o envio agora é do worker da
+# outbox, em outro módulo, e o correlator do log passou a ser o `outbox_id`
+# (não mais o `notif_id`). O equivalente, sucesso e falha, mora em
+# `tests/test_email_outbox_postgres.py::test_logs_do_ciclo_completo_sem_pii`
+# e `test_sucesso_nao_vaza_endereco_so_o_outbox_id` — precisam de Postgres de
+# verdade, porque `_processa_um` reconstrói o e-mail com um SELECT/JOIN real.
+
+
+# ── E-mail de conta: evento, não endereço ─────────────────────
+
+
+@pytest.mark.asyncio
+async def test_o_email_de_conta_registra_o_evento_e_nao_o_destinatario():
+    """E-mail de conta não tem `notif_id`, então o log diz QUE EVENTO foi.
+
+    Sem isso a linha de transporte seria indistinguível entre confirmação de
+    cadastro e redefinição de senha — e é a ÚNICA linha que esses três têm,
+    porque o `auth.py` só registra o enfileiramento, nunca o desfecho.
+    """
+    from unittest.mock import AsyncMock
+
+    from app.services import account_emails
+
+    linhas, sink = _captura()
+    try:
+        with patch.object(account_emails, "send_email", new=AsyncMock(return_value=True)) as enviar:
+            await account_emails.send_password_reset_email(
+                _ENDERECO, "Welton", "token-de-teste-123", _settings_com_smtp()
+            )
+    finally:
+        logger.remove(sink)
+
+    # O `contexto` é o que o `send_email` vai logar, e ele não pode ser o endereço.
+    contexto = enviar.await_args.kwargs.get("contexto", "")
+    assert contexto, "o e-mail de conta não disse ao `send_email` que evento é"
+    assert _ENDERECO not in contexto
+    assert not _dado_pessoal_em(linhas + [contexto]), _dado_pessoal_em(linhas + [contexto])

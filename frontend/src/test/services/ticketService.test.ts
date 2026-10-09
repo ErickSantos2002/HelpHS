@@ -9,6 +9,8 @@ import {
   getTicketHistory,
   reopenTicket,
   resolveTicket,
+  updateTicketPriority,
+  createTicketCall,
 } from "../../services/ticketService";
 import { api } from "../../services/api";
 
@@ -119,17 +121,44 @@ describe("createTicket", () => {
     const result = await createTicket({
       title: "Problema no sistema",
       description: "Detalhes",
-      priority: "medium",
       category: "software",
     });
 
     expect(mockPost).toHaveBeenCalledWith("/tickets", {
       title: "Problema no sistema",
       description: "Detalhes",
-      priority: "medium",
       category: "software",
     });
     expect(result.protocol).toBe("HS-2026-0001");
+  });
+
+  it("a abertura não leva prioridade no corpo", async () => {
+    // `toHaveBeenCalledWith` acima já é exato, mas ele cai por "objeto
+    // diferente" se qualquer campo mudar. Este diz POR QUE cairia — e é o que
+    // alguém lê quando pensa em pôr o campo de volta.
+    mockPost.mockResolvedValue({ data: ticket });
+
+    await createTicket({
+      title: "Problema no sistema",
+      description: "Detalhes",
+      category: "software",
+    });
+
+    const [, corpo] = mockPost.mock.calls[0];
+    expect(corpo).not.toHaveProperty("priority");
+  });
+});
+
+describe("updateTicketPriority", () => {
+  it("patches /tickets/:id/priority — e não o PATCH genérico", async () => {
+    mockPatch.mockResolvedValue({ data: { ...ticket, priority: "critical" } });
+
+    const result = await updateTicketPriority("t1", "critical");
+
+    expect(mockPatch).toHaveBeenCalledWith("/tickets/t1/priority", {
+      priority: "critical",
+    });
+    expect(result.priority).toBe("critical");
   });
 });
 
@@ -211,7 +240,6 @@ describe("equipamentos do chamado", () => {
     await createTicket({
       title: "Três aparelhos sem conexão",
       description: "Nenhum deles conecta",
-      priority: "high",
       category: "hardware",
       product_id: "p1",
       equipment_ids: ["e1", "e2", "e3"],
@@ -244,6 +272,51 @@ describe("resolveTicket", () => {
   });
 });
 
+describe("justificativa de SLA violado no corpo", () => {
+  // O backend exige `sla_breach_justification` para resolver chamado fora do
+  // prazo. Quando ela não existe, o corpo tem de ficar como sempre foi: uma
+  // chave `undefined` a mais é invisível para o `toHaveBeenCalledWith`, e por
+  // isso os casos de ausência olham a chave, e não a igualdade.
+  it("resolveTicket leva a justificativa quando ela existe", async () => {
+    mockPost.mockResolvedValue({ data: { ...ticket, status: "resolved" } });
+
+    await resolveTicket("t1", "Placa substituída.", "Peça importada atrasou.");
+
+    expect(mockPost).toHaveBeenLastCalledWith("/tickets/t1/resolve", {
+      resolution_note: "Placa substituída.",
+      sla_breach_justification: "Peça importada atrasou.",
+    });
+  });
+
+  it("sem justificativa, o corpo do resolve não ganha a chave", async () => {
+    mockPost.mockResolvedValue({ data: { ...ticket, status: "resolved" } });
+
+    await resolveTicket("t1", "Placa substituída.");
+
+    expect(mockPost.mock.lastCall?.[1]).not.toHaveProperty("sla_breach_justification");
+  });
+
+  it("updateTicketStatus leva a justificativa quando ela existe", async () => {
+    mockPatch.mockResolvedValue({ data: ticket });
+
+    await updateTicketStatus("t1", "resolved", undefined, "Peça importada atrasou.");
+
+    expect(mockPatch).toHaveBeenLastCalledWith("/tickets/t1/status", {
+      status: "resolved",
+      comment: undefined,
+      sla_breach_justification: "Peça importada atrasou.",
+    });
+  });
+
+  it("sem justificativa, o corpo do status não ganha a chave", async () => {
+    mockPatch.mockResolvedValue({ data: ticket });
+
+    await updateTicketStatus("t1", "in_progress", "Iniciando atendimento");
+
+    expect(mockPatch.mock.lastCall?.[1]).not.toHaveProperty("sla_breach_justification");
+  });
+});
+
 describe("reopenTicket", () => {
   it("envia o motivo da reabertura para o endpoint do chamado", async () => {
     mockPost.mockResolvedValue({ data: { ...ticket, status: "in_progress" } });
@@ -264,5 +337,36 @@ describe("reopenTicket", () => {
     await expect(reopenTicket("t1", "Voltou o problema")).rejects.toMatchObject({
       response: { status: 409 },
     });
+  });
+});
+
+describe("createTicketCall", () => {
+  beforeEach(() => {
+    mockPost.mockReset();
+  });
+
+  it("manda o corpo VAZIO — o navegador nao escolhe para quem se liga", async () => {
+    // O contrato do backend e `extra="forbid"` com zero campos. Qualquer
+    // `phone`, `called`, `caller`, `extension` ou `metadata` daqui viraria
+    // 422. Este caso e a prova de que nao mandamos nenhum deles.
+    mockPost.mockResolvedValue({
+      data: { id: "c1", creation_status: "confirmed", created_at: "2026-09-25T10:00:00Z" },
+    } as never);
+
+    const r = await createTicketCall("t1");
+
+    expect(mockPost).toHaveBeenCalledTimes(1);
+    expect(mockPost).toHaveBeenCalledWith("/tickets/t1/calls", {});
+    const [, corpo] = mockPost.mock.calls[0];
+    expect(Object.keys(corpo as object)).toHaveLength(0);
+    expect(r.creation_status).toBe("confirmed");
+  });
+
+  it("devolve so os tres campos publicos", async () => {
+    mockPost.mockResolvedValue({
+      data: { id: "c1", creation_status: "indeterminate", created_at: "2026-09-25T10:00:00Z" },
+    } as never);
+    const r = await createTicketCall("t1");
+    expect(Object.keys(r).sort()).toEqual(["created_at", "creation_status", "id"]);
   });
 });

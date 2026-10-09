@@ -1,4 +1,4 @@
-export const APP_VERSION = "v1.12.0";
+export const APP_VERSION = "v1.19.0";
 
 export type EntryType = "novidade" | "corrigido" | "melhoria";
 
@@ -14,6 +14,89 @@ export interface ChangelogVersion {
 }
 
 export const CHANGELOG: ChangelogVersion[] = [
+  {
+    version: "v1.19.0",
+    date: "07/10/2026",
+    entries: [
+      {
+        type: "novidade",
+        text: "Ligar para o cliente a partir do chamado. Na tela do chamado, técnico e administrador têm um botão que inicia a ligação para quem abriu o pedido, sem copiar número para o telefone nem sair do sistema. O destino não é escolhido na tela: ele vem do cadastro de quem abriu o chamado, no momento do clique, e por isso a ação só aparece quando o chamado foi aberto por um cliente que tem telefone cadastrado. Cada tentativa fica registrada no histórico do chamado, com quem ligou e quando — sem o número discado e sem o conteúdo da conversa.",
+      },
+      {
+        type: "novidade",
+        text: "O chamado passa a mostrar quem o abriu. Um bloco Solicitante reúne o nome, a empresa e o telefone de quem registrou o pedido, que antes exigiam sair para a tela de usuários. O telefone aparece só para quem pode ligar. E o técnico passa a corrigir o telefone do cliente ali mesmo: antes disso, número errado ou desatualizado só era ajustado por um administrador, e a ligação ficava bloqueada até isso acontecer.",
+      },
+      {
+        type: "melhoria",
+        text: "Antes da primeira ligação de cada sessão, o sistema lembra o que precisa estar pronto: o Webphone da operadora aberto, conectado com o ramal e com o microfone liberado. O aviso aparece uma vez por sessão do navegador e não se repete a cada chamada. É orientação, e não verificação: o HelpHS não tem como saber se o Webphone está aberto — a operadora não oferece nenhum caminho para consultar isso —, e prometer essa checagem seria afirmar o que não se mede.",
+      },
+      {
+        type: "melhoria",
+        text: "Quando a ligação não sai porque o ramal ou o Webphone estão indisponíveis, a mensagem diz isso, com a ação a tomar, em vez de um erro genérico. É a recusa mais comum na prática, e confundi-la com falha do sistema levava a tentar de novo sem abrir o Webphone. Repetir a tentativa é livre: não existe espera obrigatória entre uma ligação e a próxima no mesmo chamado, e o sistema nunca repete sozinho — quem decide ligar de novo é uma pessoa.",
+      },
+    ],
+  },
+  {
+    version: "v1.18.0",
+    date: "28/09/2026",
+    entries: [
+      { type: "novidade", text: "O HelpHS agora avisa a equipe quando o prazo de resolução de um chamado está próximo do vencimento. O aviso chega no sininho e por e-mail para todos os técnicos e administradores ativos, nos ambientes em que o envio de e-mail estiver configurado — sem isso, o aviso funciona normalmente pelo sininho e nenhum e-mail é enviado. Chamado pausado, aguardando o cliente, não recebe aviso: a equipe não pode agir nele enquanto espera, e um aviso nessa hora só seria ruído." },
+      { type: "melhoria", text: "O momento do aviso respeita o percentual configurado para cada nível de prioridade, na tela de Configuração de SLA — não é mais um número único para todos os chamados. Baixar o limiar de um nível faz o aviso chegar mais cedo só para ele." },
+      { type: "melhoria", text: "A barra de prazo da lista de chamados passa a acompanhar esse mesmo limite, em vez de mudar de cor sempre nos mesmos pontos fixos. Quem tem um limiar mais apertado configurado vê a barra ficar amarela e vermelha mais cedo, do mesmo jeito que o aviso chega mais cedo para esse nível." },
+      { type: "corrigido", text: "Chamados reabertos calculavam o percentual do prazo de resolução a partir da abertura original, e não do novo prazo que a reabertura concede. Um chamado antigo reaberto podia aparecer com a barra quase cheia no mesmo instante em que voltava a ser atendido. O percentual agora conta do início do ciclo atual." },
+    ],
+  },
+  {
+    version: "v1.17.0",
+    date: "24/09/2026",
+    entries: [
+      { type: "novidade", text: "Chamado aberto agora avisa a equipe inteira, e não só quem abriu. Todos os técnicos e administradores ativos recebem o aviso no sininho na hora, com o número e o título do chamado, e clicar nele abre o chamado direto. Antes o chamado novo só aparecia para quem estivesse olhando o quadro, e um pedido aberto no fim da tarde podia esperar a manhã seguinte para ser visto. O aviso vai para a equipe toda de propósito, e não para um técnico sorteado: o chamado nasce sem responsável, e escolher um seria inventar uma atribuição que ninguém pediu." },
+      { type: "melhoria", text: "Quem abre o chamado continua recebendo a mesma confirmação de antes, com o protocolo. Um técnico ou administrador que abre chamado em nome de um cliente recebe só essa confirmação, uma vez — ele não recebe também o aviso de chamado novo." },
+      { type: "novidade", text: "O chamado novo passa a gerar também aviso por e-mail para os técnicos e administradores ativos, nos ambientes em que o envio de e-mail estiver configurado. É o único evento da equipe que sai por e-mail: atribuição e reabertura seguem só no sininho, a pedido de quem trabalha dentro do sistema o dia inteiro." },
+      { type: "melhoria", text: "Os e-mails do sistema passam a usar um layout único com a identidade da Health & Safety: a marca no topo, o texto organizado e um botão que abre o chamado. A mesma mensagem leva também uma versão em texto simples, para quem lê e-mail em programa que não mostra imagem ou formatação — o conteúdo é o mesmo nos dois casos, e o nome da empresa continua legível mesmo se a imagem for bloqueada." },
+      { type: "melhoria", text: "O assunto dos e-mails passa a começar com [HelpHS] e a trazer o número do chamado. Antes cinco chamados resolvidos renderiam cinco e-mails com o mesmo assunto, sem dizer de qual chamado se tratava. Observação operacional: o envio de e-mail depende da configuração do servidor de e-mail (SMTP) do ambiente. Sem isso, os avisos do sininho funcionam normalmente e nenhum e-mail é enviado." },
+    ],
+  },
+  {
+    version: "v1.16.0",
+    date: "22/09/2026",
+    entries: [
+      { type: "melhoria", text: "As listas de escolha do sistema — os filtros das telas e os campos de formulário — passaram a abrir dentro do próprio sistema. Antes quem desenhava a lista era o Windows, o Android ou o navegador, e ela ficava de fora do tema: no modo escuro abria clara, e mudava de aparência conforme o aparelho de cada pessoa. Agora ela segue as cores do sistema em qualquer navegador, marca a opção que está escolhida e, no celular, abre para cima quando não há espaço embaixo. O que cada campo faz continua igual: as setas, o Enter e a digitação da primeira letra funcionam como antes, e nenhum filtro, formulário ou prazo mudou de comportamento." },
+    ],
+  },
+  {
+    version: "v1.15.0",
+    date: "16/09/2026",
+    entries: [
+      { type: "novidade", text: "Biblioteca de arquivos: a equipe guarda uma vez os manuais, formulários e documentos que manda toda semana, e passa a anexá-los nos chamados sem subir o mesmo arquivo de novo. Cada item nasce interno à equipe; deixá-lo visível para o cliente é uma escolha explícita de um administrador." },
+      { type: "novidade", text: "No chat do chamado, a equipe anexa um arquivo da biblioteca direto na conversa. Item marcado como interno não chega ao cliente." },
+      { type: "novidade", text: "Os eventos da agenda passaram a ter hora de início e de fim. Quem marca um treinamento que ocupa o dia todo deixa a chave \"dia inteiro\" ligada e não digita horário nenhum, e um plantão que vira a madrugada aparece nos dois dias. Os eventos que já existiam viraram dia inteiro, na mesma data de sempre." },
+      { type: "melhoria", text: "A cor do evento da agenda passou a vir do tipo dele, e a legenda voltou ao rodapé do calendário dizendo qual cor é qual. Antes a cor era escolhida à mão e não queria dizer nada: dois treinamentos podiam sair de cores diferentes, e um treinamento e uma reunião saíam do mesmo azul. Os tons foram escolhidos para o texto sobre a cor ficar legível." },
+      { type: "melhoria", text: "A agenda mostra quem criou cada evento." },
+      { type: "melhoria", text: "Os motivos de atraso informados pela equipe passaram a aparecer no relatório, logo depois da conformidade de SLA por prioridade. O relatório já dizia quantos chamados estouraram o prazo, mas não por quê — e cinco atrasos por peça em falta pedem providência diferente de cinco atrasos por chamado aberto na sexta às 17h." },
+      { type: "melhoria", text: "Quando o login é bloqueado por tentativas erradas, a tela passou a mostrar a contagem regressiva ao vivo até a liberação, e se libera sozinha quando ela zera." },
+      { type: "corrigido", text: "Entrar com o e-mail escrito em maiúsculas passou a funcionar. Antes \"Fulano@empresa.com\" e \"fulano@empresa.com\" podiam virar duas contas diferentes, e quem digitasse a caixa errada recebia \"senha incorreta\" sem entender o motivo." },
+      { type: "corrigido", text: "Clicar fora de uma janela do sistema não a fecha mais — um clique fora por engano descartava tudo o que já estava digitado. Ela sai pelo X ou pelo Cancelar, e todas as janelas passaram a ter o X." },
+      { type: "corrigido", text: "O indicador de SLA deixou de dar como cumprido um chamado que passou do prazo e ficou parado até ser resolvido. Na medição dos últimos seis meses o percentual não mudou — esses chamados já contavam pela data —, mas a marca de violação no chamado agora fica correta." },
+    ],
+  },
+  {
+    version: "v1.14.0",
+    date: "11/09/2026",
+    entries: [
+      { type: "novidade", text: "Ao concluir um chamado que passou do prazo, a equipe informa o motivo do atraso, que fica registrado no histórico do chamado." },
+      { type: "melhoria", text: "Os prazos de atendimento ficaram mais curtos e passaram a ser acompanhados em minutos. Um chamado de prioridade Crítica, por exemplo, recebe a primeira resposta em até 30 minutos." },
+      { type: "melhoria", text: "Feriados nacionais e o Carnaval deixaram de contar no prazo de atendimento. Feriados municipais continuam contando." },
+      { type: "corrigido", text: "Na tela de Configuração de SLA, os prazos passaram a ser exibidos e editados em minutos. Antes a prioridade Crítica aparecia como \"nullh\", editar a Crítica apagava os 30 minutos, e o texto informava o expediente das 8h às 18h, quando ele vai das 8h às 17h." },
+    ],
+  },
+  {
+    version: "v1.13.0",
+    date: "09/09/2026",
+    entries: [
+      { type: "novidade", text: "Interface alinhada ao design system da Health & Safety: cores, tipografia, contraste e tema escuro." },
+    ],
+  },
   {
     version: "v1.12.0",
     date: "31/08/2026",

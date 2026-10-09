@@ -1,6 +1,6 @@
 # Política de Privacidade — HelpHS
 
-**Documento:** PGS-TI-0XX · **Revisão:** 00 · **Vigência:** 31 de agosto de 2026
+**Documento:** PGS-TI-031 · **Revisão:** 00 · **Vigência:** 05/10/2026
 
 ---
 
@@ -8,7 +8,7 @@
 
 Estabelecer as regras e as informações sobre o tratamento de dados pessoais realizado na plataforma HelpHS, central de atendimento ao cliente da Health & Safety, em conformidade com a Lei nº 13.709/2018 – Lei Geral de Proteção de Dados Pessoais (LGPD), informando ao titular quais dados são coletados, com que finalidade, com quem são compartilhados, por quanto tempo são guardados e como exercer os seus direitos.
 
-**Vigência:** esta revisão entra em vigor em 31 de agosto de 2026 e substitui todas as versões anteriores deste documento.
+**Vigência:** esta revisão entra em vigor na Data de 05/10/2026 e substitui todas as versões anteriores deste documento.
 
 ## 2. Aplicação
 
@@ -23,7 +23,8 @@ Esta política deve ser lida em conjunto com os Termos de Uso da plataforma Help
 - Lei nº 13.709/2018 – Lei Geral de Proteção de Dados Pessoais (LGPD);
 - Lei nº 12.965/2014 – Marco Civil da Internet;
 - Lei nº 8.078/1990 – Código de Defesa do Consumidor;
-- Resolução CD/ANPD nº 19/2024 – Regulamento de Transferência Internacional de Dados;
+- Resolução CD/ANPD nº 15/2024 – Regulamento de Comunicação de Incidente de Segurança;
+- Resolução CD/ANPD nº 19/2024 – Regulamento de Transferência Internacional de Dados e cláusulas-padrão contratuais;
 - NBR ISO/IEC 27001 – Sistema de Gestão de Segurança da Informação;
 - NBR ISO 9001 – Sistema de Gestão da Qualidade;
 - PGS-TI-025 – Política de Privacidade;
@@ -51,15 +52,16 @@ Para os fins desta política aplicam-se as definições do art. 5º da LGPD e, a
 
 A Health & Safety atua como Controladora dos dados pessoais tratados na plataforma HelpHS.
 
+- **Razão social:** Health & Safety Distribuição Importação e Exportação de Instrumentos de Precisão Ltda
 - **CNPJ:** 08.857.492/0001-48
-- **Endereço:** [endereço completo da sede – rua, número, bairro, cidade/UF, CEP]
+- **Endereço:** Rua Viscondessa do Livramento, nº 54, Sala G, Derby, Recife/PE, CEP 52010-065
 - **Telefone:** 4007-1507 (capitais e regiões metropolitanas) | (81) 98177-1177
 - **Site institucional:** www.healthsafety.com.br
 
 A Health & Safety indicou formalmente Encarregado pelo Tratamento de Dados Pessoais, por meio do FORM-SGI-DPO-001, responsável por receber comunicações dos titulares e da ANPD, prestar esclarecimentos e adotar as providências cabíveis.
 
-- **Encarregado (DPO):** [nome do Encarregado]
-- **Contato do Encarregado:** [e-mail do Encarregado]
+- **Encarregado (DPO):** Erick Santos
+- **Contato do Encarregado:** ti@healthsafety.com.br
 
 ## 6. Dados Pessoais Tratados na Plataforma HelpHS
 
@@ -68,9 +70,11 @@ São coletados apenas os dados necessários ao funcionamento da plataforma e ao 
 | Categoria | Dados tratados | Origem |
 |---|---|---|
 | Dados cadastrais | Nome, endereço de e-mail, telefone e setor de atuação. | Informados pelo usuário no cadastro. |
+| Dados da empresa | Razão social, CNPJ, CEP, endereço, cidade e estado da empresa do usuário. | Informados pelo usuário no primeiro acesso. O endereço pode ser preenchido automaticamente a partir do CNPJ e do CEP (ver seção 12). |
+| Dados dos equipamentos | Produto, nome do equipamento, número de série e localização dos equipamentos cadastrados pelo cliente. | Informados pelo usuário no primeiro acesso e na tela de equipamentos. |
 | Credencial de acesso | Senha armazenada exclusivamente sob resumo criptográfico (hash) irreversível. A senha em texto legível não é armazenada e não pode ser recuperada nem visualizada por nenhum colaborador da Health & Safety. | Definida pelo próprio usuário. |
 | Imagem de perfil | Fotografia de perfil, quando o usuário optar por enviá-la. O envio é facultativo e a ausência da foto não limita o uso da plataforma. | Enviada voluntariamente pelo usuário. |
-| Dados de acesso | Data e hora do último acesso à plataforma. | Registrados automaticamente pelo sistema. |
+| Dados de acesso | Data e hora do último acesso à plataforma e, nos eventos de autenticação e de conta — como cadastro, login, logout e troca de senha —, o endereço IP e a identificação do navegador (user agent), com data e hora. | Registrados automaticamente pelo sistema. |
 | Conteúdo dos chamados | Título e descrição do chamado, mensagens trocadas no chat de atendimento e arquivos anexados pelo usuário ou pelo atendente (documentos, fotografias, capturas de tela e relatórios de equipamento). | Fornecidos pelo usuário e pela equipe de atendimento. |
 | Registro de auditoria | Registro das operações realizadas na plataforma — criação, alteração e encerramento de chamados, mudanças de status e de responsável e acessos a registros —, com identificação do autor, data e hora. | Registrados automaticamente pelo sistema. |
 | Registro de aceite | Data e hora do aceite dos Termos de Uso e desta política e a revisão dos documentos aceitos. | Registrado automaticamente no momento do aceite. |
@@ -100,7 +104,7 @@ Todo tratamento realizado na plataforma tem finalidade determinada e observa uma
 | Comunicar o usuário sobre andamento, atualização e encerramento dos chamados. | Nome, e-mail e telefone. | Execução de contrato (art. 7º, V). |
 | Personalizar a identificação visual do usuário na plataforma. | Imagem de perfil. | Consentimento, manifestado pelo envio facultativo da imagem (art. 7º, I). |
 | Manter registro de auditoria, garantir rastreabilidade e apurar incidentes de segurança. | Registro de auditoria e dados de acesso. | Legítimo interesse na segurança da informação (art. 7º, IX) e cumprimento de obrigação legal (art. 7º, II). |
-| Guardar os registros de acesso à aplicação de internet. | Data e hora de acesso. | Cumprimento de obrigação legal (art. 7º, II), nos termos do art. 15 da Lei nº 12.965/2014. |
+| Guardar os registros de acesso à aplicação de internet. | Endereço IP e data e hora de acesso. | Cumprimento de obrigação legal (art. 7º, II), nos termos do art. 15 da Lei nº 12.965/2014. |
 | Comprovar o aceite dos Termos de Uso e desta política e a revisão aceita. | Registro de aceite. | Cumprimento de obrigação legal (art. 7º, II) e exercício regular de direitos (art. 7º, VI). |
 | Exercer ou defender direitos em processo judicial, administrativo ou arbitral. | Dados pertinentes ao caso. | Exercício regular de direitos (art. 7º, VI). |
 | Produzir indicadores de desempenho do atendimento e melhorar a plataforma. | Dados estatísticos e agregados, sem identificação do titular. | Dados anonimizados, aos quais a LGPD não se aplica (art. 12); quando inviável a anonimização, legítimo interesse (art. 7º, IX). |
@@ -112,9 +116,9 @@ Não serão realizados tratamentos para finalidades incompatíveis com as inform
 
 ### 9.1. Estado atual
 
-A plataforma HelpHS possui, em seu código, quatro funcionalidades baseadas em inteligência artificial. Na data de vigência desta revisão essas funcionalidades estão **desativadas**: nenhuma chave de acesso a provedor de inteligência artificial está configurada e, portanto, nenhum conteúdo tratado na plataforma é enviado a provedores externos de inteligência artificial.
+A plataforma HelpHS possui, em seu código, cinco funcionalidades baseadas em inteligência artificial. Na data de vigência desta revisão essas funcionalidades estão **desativadas**: nenhuma chave de acesso a provedor de inteligência artificial está configurada e, portanto, nenhum conteúdo tratado na plataforma é enviado a provedores externos de inteligência artificial.
 
-Enquanto os recursos permanecerem desativados, todos os dados descritos na seção 6 são tratados exclusivamente na infraestrutura sob controle da Health & Safety.
+Enquanto os recursos permanecerem desativados, nenhum dado descrito na seção 6 é enviado a provedor de inteligência artificial.
 
 ### 9.2. Funcionalidades previstas
 
@@ -123,7 +127,8 @@ Quando ativadas, as seguintes funcionalidades passarão a operar:
 - Classificação automática do chamado na abertura, para direcionamento à equipe adequada e definição de prioridade;
 - Sugestão de resposta ao técnico responsável pelo atendimento, apresentada como rascunho de apoio;
 - Resumo de conversas longas, para facilitar a leitura do histórico do chamado;
-- Aprimoramento do texto de uma mensagem, a pedido de quem a está redigindo.
+- Aprimoramento do texto de uma mensagem, a pedido de quem a está redigindo;
+- Resposta da assistente virtual Helô ao usuário com base nos artigos da Base de Conhecimento da plataforma, apresentada como assistente virtual e com encaminhamento a um atendente humano sempre que o assunto não estiver documentado ou o usuário solicitar.
 
 ### 9.3. Conteúdo enviado ao provedor
 
@@ -131,7 +136,7 @@ Para executar essas funcionalidades, o conteúdo do chamado — título, descri�
 
 Não serão enviados ao provedor: a senha do usuário, a imagem de perfil e os registros de auditoria.
 
-Os anexos enviados nos chamados [definir: serão ou não serão] submetidos ao processamento por inteligência artificial. A definição constará da revisão que ativar o recurso.
+Os anexos enviados nos chamados não serão submetidos ao processamento por inteligência artificial.
 
 ### 9.4. Provedor e localização do processamento
 
@@ -139,7 +144,7 @@ O provedor de inteligência artificial selecionado é a **DeepSeek**, empresa co
 
 O processamento ocorrerá em servidores localizados fora do território brasileiro. Conforme a política de privacidade publicada pelo próprio provedor, os dados que lhe são enviados são coletados, processados e armazenados na República Popular da China.
 
-A ativação desse recurso configura transferência internacional de dados pessoais, regida pelos arts. 33 a 36 da LGPD e tratada na seção 10 deste documento.
+A ativação desse recurso configura transferência internacional de dados pessoais, regida pelos arts. 33 a 36 da LGPD e tratada na seção 10.2 deste documento.
 
 Caso a Health & Safety venha a substituir o provedor ou a acrescentar outro, esta política será revisada com a identificação do novo provedor e do país de destino dos dados, antes do início do novo tratamento.
 
@@ -153,7 +158,7 @@ Nenhum conteúdo será enviado a provedor de inteligência artificial antes de c
 
 ### 9.6. Supervisão humana e decisões automatizadas
 
-As funcionalidades de inteligência artificial têm caráter auxiliar. A classificação sugerida, o rascunho de resposta, o resumo e o texto aprimorado são apresentados a um profissional da equipe de atendimento, a quem cabe revisar, alterar, aprovar ou descartar o resultado antes de qualquer efeito para o usuário.
+As funcionalidades de inteligência artificial têm caráter auxiliar. A classificação sugerida, o rascunho de resposta, o resumo e o texto aprimorado são apresentados a um profissional da equipe de atendimento, a quem cabe revisar, alterar, aprovar ou descartar o resultado antes de qualquer efeito para o usuário. A exceção é a resposta da assistente virtual Helô descrita na seção 9.2, que é apresentada diretamente ao usuário. Ela se limita ao conteúdo dos artigos da Base de Conhecimento, é identificada como assistente virtual e encaminha o chamado a um atendente humano sempre que solicitado.
 
 A plataforma não toma decisões unicamente automatizadas que afetem interesses do titular, como concessão ou negativa de garantia, de atendimento ou de crédito.
 
@@ -163,24 +168,52 @@ A plataforma não toma decisões unicamente automatizadas que afetem interesses 
 
 Transferência internacional é o envio de dados pessoais para fora do território nacional. A LGPD admite essa operação apenas nas hipóteses do seu art. 33, regulamentadas pela Resolução CD/ANPD nº 19/2024, que aprovou o Regulamento de Transferência Internacional de Dados e o texto das cláusulas-padrão contratuais.
 
+O titular deve estar ciente de que, uma vez transferidos para outro país, os dados ficam também sujeitos à legislação local desse país, que pode prever hipóteses de acesso por autoridades estrangeiras distintas das previstas na legislação brasileira.
+
+### 10.1. Envio de e-mails
+
+Os e-mails enviados pela plataforma — confirmação de cadastro, redefinição de senha e notificações sobre chamados — são expedidos por meio da Resend (Plus Five Five, Inc.), provedor com sede nos Estados Unidos, que atua na condição de Operador.
+
+As mensagens são expedidas a partir de servidores localizados em São Paulo. Conforme a documentação do próprio provedor, porém, os registros dos envios — incluindo o endereço de e-mail do destinatário, o conteúdo e os metadados das mensagens — são armazenados nos Estados Unidos, o que configura transferência internacional de dados pessoais.
+
+Os Estados Unidos não são, nesta data, destino coberto por decisão de adequação emitida pelo Conselho Diretor da ANPD. A transferência fundamenta-se no art. 33, IX, combinado com o art. 7º, V, da LGPD, por ser necessária à execução do contrato de prestação do serviço de suporte, do qual o envio desses e-mails faz parte, e limita-se aos dados necessários a esse envio.
+
+Para dar transparência à operação, conforme as diretrizes da Resolução CD/ANPD nº 19/2024, as informações sobre essa transferência estão reunidas no quadro abaixo:
+
+| Aspecto | Informação |
+|---|---|
+| Forma | Transferência contínua, realizada automaticamente a cada envio de e-mail pela plataforma, com fundamento no art. 33, IX, da LGPD. |
+| Finalidade específica | Envio dos e-mails de confirmação de cadastro, de redefinição de senha e de notificações sobre chamados. Os dados não são utilizados para nenhuma outra finalidade. |
+| Duração | Enquanto a Health & Safety utilizar o provedor para o envio dos e-mails da plataforma. Encerrada a utilização, os dados são eliminados pelo provedor conforme os seus termos de tratamento de dados. |
+| País de destino | Estados Unidos. |
+| Dados transferidos | Nome e endereço de e-mail do destinatário, conteúdo das mensagens e metadados de envio. |
+| Controlador e exportador | Health & Safety, identificada na seção 5, responsável pelo atendimento aos titulares e pela comunicação de incidentes relativos à transferência. |
+| Operador e importador | Resend (Plus Five Five, Inc.), que trata os dados apenas para executar o envio, conforme as instruções da Health & Safety e os termos de tratamento de dados do provedor. |
+| Uso compartilhado | Os dados são compartilhados apenas com o provedor, para a finalidade indicada neste quadro (ver seção 12). |
+| Medidas de segurança | Comunicação criptografada (TLS) entre a plataforma e o provedor e obrigações de segurança e de confidencialidade previstas nos termos do provedor. |
+| Transferências posteriores | O provedor utiliza suboperadores para executar o serviço, entre eles a Amazon Web Services (AWS), responsável pela hospedagem e pela expedição das mensagens. A relação completa é publicada pelo provedor em resend.com/legal/subprocessors. |
+| Direitos do titular | Os direitos da seção 16 podem ser exercidos pelos canais da seção 22, inclusive o de peticionar contra a Health & Safety perante a ANPD. |
+
+### 10.2. Recursos de inteligência artificial
+
 Nesta revisão **não há** transferência internacional dos dados pessoais tratados na plataforma HelpHS decorrente das funcionalidades de inteligência artificial, uma vez que tais funcionalidades estão desativadas.
 
 Com a ativação dos recursos descritos na seção 9, o conteúdo dos chamados passará a ser transferido para a República Popular da China, onde será processado pelo provedor contratado.
 
 A República Popular da China não é, nesta data, destino coberto por decisão de adequação emitida pelo Conselho Diretor da ANPD. A transferência somente será realizada mediante a adoção de um dos mecanismos válidos do art. 33 da LGPD, a ser expressamente indicado na revisão que ativar o recurso, entre eles:
 
-- cláusulas-padrão contratuais aprovadas pela ANPD, incorporadas sem alteração ao instrumento contratual firmado com o provedor (art. 33, II, alínea "a"); ou
+- cláusulas-padrão contratuais aprovadas pela ANPD, incorporadas sem alteração ao instrumento contratual firmado com o provedor (art. 33, II, alínea “b”); ou
 - consentimento específico e destacado do titular para a transferência, com informação prévia sobre o caráter internacional da operação (art. 33, VIII).
 
 Antes da ativação, a Health & Safety realizará a avaliação do provedor conforme o procedimento interno de qualificação de fornecedores e verificará as condições contratuais aplicáveis ao uso, à retenção e ao eventual emprego do conteúdo enviado para treinamento de modelos.
 
-O titular deve estar ciente de que, uma vez transferidos para outro país, os dados ficam também sujeitos à legislação local desse país, que pode prever hipóteses de acesso por autoridades estrangeiras distintas das previstas na legislação brasileira.
+### 10.3. Hospedagem
 
-As demais operações de tratamento realizadas na plataforma — hospedagem, banco de dados e backups — ocorrem em infraestrutura localizada em [confirmar país/região da hospedagem].
+As demais operações de tratamento realizadas na plataforma — hospedagem, banco de dados e backups — ocorrem em infraestrutura localizada no Brasil, na cidade de São Paulo.
 
 ## 11. Assistente Virtual Helô
 
-A Helô é a assistente virtual da plataforma HelpHS. Nesta revisão sua atuação limita-se à apresentação de mensagem automática de boas-vindas na abertura do chamado, com texto fixo e sem qualquer processamento por inteligência artificial.
+A Helô é a assistente virtual da plataforma HelpHS. Nesta revisão ela atua na triagem inicial dos chamados, sem qualquer processamento por inteligência artificial. Na abertura do chamado, ela apresenta uma mensagem montada com dados do cadastro — o primeiro nome do usuário e, quando houver, o produto e o número de série do equipamento — e faz três perguntas sobre o problema. Após a resposta do usuário, ela encerra a triagem e informa quando um atendente assumirá o chamado. Se o usuário pedir para falar com uma pessoa, a triagem é interrompida imediatamente e o chamado segue para a equipe. As respostas do usuário ficam registradas no chamado, como parte do conteúdo descrito na seção 6.
 
 Caso a Helô passe a manter diálogo com o usuário mediante uso de inteligência artificial, aplicar-se-ão integralmente as regras das seções 9 e 10, incluindo a exigência de publicação prévia de nova revisão desta política e de comunicação prévia aos usuários.
 
@@ -193,12 +226,13 @@ A Health & Safety não vende nem disponibiliza dados pessoais a terceiros para f
 | Destinatário | Dados compartilhados | Motivo |
 |---|---|---|
 | Provedor de infraestrutura e hospedagem | Todos os dados armazenados na plataforma. | Hospedagem da aplicação, do banco de dados e das rotinas de backup, na condição de Operador. |
-| Provedor de serviços de e-mail e comunicação corporativa | Nome, e-mail e conteúdo das notificações. | Envio de notificações sobre chamados, na condição de Operador. |
+| Provedor de envio de e-mails (Resend, Estados Unidos) | Nome, e-mail e conteúdo das mensagens. | Envio de confirmação de cadastro, redefinição de senha e notificações sobre chamados, na condição de Operador. Ver seção 10.1. |
+| Serviços públicos de consulta de CNPJ e CEP (BrasilAPI e ViaCEP) | Somente o número do CNPJ ou do CEP digitado. Nenhum dado pessoal do usuário é enviado. | Preenchimento automático da razão social e do endereço no cadastro da empresa. |
 | Provedor de inteligência artificial | Conteúdo dos chamados. | Execução das funcionalidades da seção 9, após ativação e mediante nova revisão desta política. |
 | Auditores independentes e organismos certificadores | Amostras de registros e evidências, no menor volume possível. | Auditoria do Sistema de Gestão de Segurança da Informação, sob compromisso de confidencialidade. |
 | Autoridades públicas e Poder Judiciário | Dados especificamente requisitados. | Cumprimento de obrigação legal, ordem judicial ou requisição de autoridade competente. |
 
-Os Operadores contratados atuam mediante instrução da Health & Safety, estão vinculados por Termo de Confidencialidade e obrigações contratuais de segurança e não podem utilizar os dados para finalidades próprias.
+Os Operadores contratados atuam mediante instrução da Health & Safety, estão vinculados a obrigações contratuais de confidencialidade e de segurança e não podem utilizar os dados para finalidades próprias.
 
 ## 13. Retenção e Eliminação dos Dados
 
@@ -213,8 +247,6 @@ Os dados pessoais são mantidos apenas pelo tempo necessário ao cumprimento das
 | Registro de aceite dos Termos e desta política | Todo o período da relação e até 5 (cinco) anos após o seu encerramento. | Comprovação da revisão aceita pelo titular e exercício regular de direitos. |
 | Imagem de perfil | Enquanto a conta estiver ativa, ou até que o usuário a remova ou revogue o consentimento. | Consentimento do titular, revogável a qualquer tempo. |
 
-Os prazos acima devem ser confirmados pela área jurídica antes da publicação: [validar prazos de retenção].
-
 ### 13.1. Situação atual
 
 A plataforma HelpHS não executa, nesta revisão, rotina automática de expurgo por decurso de prazo: nenhum chamado, anexo ou registro é apagado pelo sistema apenas em razão do tempo decorrido.
@@ -225,7 +257,7 @@ Enquanto a rotina automática não estiver implantada, os dados podem permanecer
 
 ### 13.2. Eliminação ao término do prazo
 
-Os prazos do quadro acima passarão a ser aplicados automaticamente com a implantação da rotina de expurgo, prevista para [definir data de implantação da rotina de expurgo].
+Os prazos do quadro acima passarão a ser aplicados automaticamente com a implantação da rotina de expurgo, prevista para 30 de junho de 2027.
 
 Encerrado o prazo de retenção, os dados serão eliminados ou anonimizados de forma segura, ressalvadas as hipóteses de conservação previstas no art. 16 da LGPD.
 
@@ -304,15 +336,15 @@ Algumas solicitações podem não ser integralmente atendidas quando houver obri
 
 A Health & Safety mantém procedimento formal para o tratamento de incidentes de segurança da informação, contemplando detecção, contenção, apuração, correção e registro.
 
-Ocorrendo incidente que possa acarretar risco ou dano relevante aos titulares, a Health & Safety comunicará o fato à ANPD e aos titulares afetados em prazo razoável, informando, no mínimo, a natureza dos dados atingidos, os titulares envolvidos, as medidas técnicas de proteção adotadas, os riscos relacionados e as medidas adotadas para reverter ou mitigar os efeitos do prejuízo, nos termos do art. 48 da LGPD.
+Ocorrendo incidente que possa acarretar risco ou dano relevante aos titulares, a Health & Safety comunicará o fato à ANPD e aos titulares afetados no prazo de 3 (três) dias úteis, contados do conhecimento de que o incidente afetou dados pessoais, informando, no mínimo, a natureza dos dados atingidos, os titulares envolvidos, as medidas técnicas de proteção adotadas, os riscos relacionados e as medidas adotadas para reverter ou mitigar os efeitos do prejuízo, nos termos do art. 48 da LGPD e da Resolução CD/ANPD nº 15/2024.
 
 ## 18. Cookies
 
-A plataforma HelpHS utiliza cookies estritamente necessários ao seu funcionamento, com a finalidade de manter a sessão do usuário autenticada e preservar preferências básicas de navegação.
+A plataforma HelpHS não utiliza cookies. Para manter a sessão do usuário autenticada e lembrar preferências de exibição, como o tema claro ou escuro, utiliza o armazenamento local do navegador (localStorage), recurso semelhante aos cookies. Esses dados não são usados para rastreamento nem compartilhados com terceiros.
 
-A plataforma [confirmar: utiliza / não utiliza] cookies de análise de audiência ou de terceiros. Caso venham a ser utilizados, esta política será revisada com a identificação de cada cookie, sua finalidade, seu prazo de expiração e a forma de recusa.
+A plataforma não utiliza cookies nem tecnologias semelhantes de análise de audiência, publicidade ou de terceiros. Caso venham a ser utilizados, esta política será revisada com a identificação de cada recurso, sua finalidade, seu prazo de expiração e a forma de recusa.
 
-Os cookies estritamente necessários não podem ser desativados sem inviabilizar o funcionamento da plataforma. O usuário pode configurar o navegador para bloqueá-los, ciente de que essa opção impedirá a autenticação no sistema.
+Os dados de sessão são apagados do navegador quando o usuário sai da plataforma. O usuário também pode apagá-los a qualquer momento nas configurações do navegador, ciente de que isso encerrará a sessão e exigirá novo login.
 
 ## 19. Responsabilidades
 
@@ -336,13 +368,13 @@ Alterações meramente redacionais, que não modifiquem o tratamento de dados, e
 
 Esta política é regida pelas leis da República Federativa do Brasil, em especial pela Lei nº 13.709/2018 (LGPD), pela Lei nº 12.965/2014 (Marco Civil da Internet) e, quando aplicável, pela Lei nº 8.078/1990 (Código de Defesa do Consumidor).
 
-Fica eleito o foro da comarca de [confirmar comarca] para dirimir controvérsias decorrentes desta política, ressalvada a competência legalmente assegurada ao consumidor de demandar no foro do seu domicílio.
+Fica eleito o foro da comarca do Recife/PE para dirimir controvérsias decorrentes desta política, ressalvada a competência legalmente assegurada ao consumidor de demandar no foro do seu domicílio.
 
 ## 22. Canais de Contato
 
 Dúvidas, solicitações e reclamações relativas a esta política e ao tratamento de dados pessoais na plataforma HelpHS podem ser encaminhadas para:
 
-- **Encarregado (DPO):** [nome e e-mail do Encarregado]
+- **Encarregado (DPO):** Erick Santos – ti@healthsafety.com.br
 - **Suporte da plataforma:** https://helphs.healthsafetytech.com
 - **Telefone:** 4007-1507 | (81) 98177-1177
 
@@ -352,4 +384,4 @@ O titular pode, ainda, apresentar reclamação diretamente à Autoridade Naciona
 
 | Revisão | Sumário de mudança | Data | Elaborado | Aprovado |
 |---|---|---|---|---|
-| 00 | Emissão inicial – Política de Privacidade da plataforma HelpHS | 31/08/2026 | [elaborado por] | [aprovado por] |
+| 00 | Emissão Inicial | 25/09/2026 | Gustavo Oliveira | Nicholson Pimentel |

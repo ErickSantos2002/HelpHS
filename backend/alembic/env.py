@@ -7,9 +7,15 @@ from sqlalchemy.ext.asyncio import async_engine_from_config
 from alembic import context
 from app.core.config import get_settings
 from app.models.models import Base
+from app.utils.migrations import exige_alvo_liberado
 
 config = context.config
 settings = get_settings()
+
+# ANTES de qualquer coisa que conecte. A trava é sobre o ALVO, e o alvo já está
+# decidido aqui — esperar pelo `run_migrations_online` seria travar depois de a
+# URL já ter sido passada adiante.
+exige_alvo_liberado(settings.database_url)
 
 config.set_main_option("sqlalchemy.url", settings.database_url)
 
