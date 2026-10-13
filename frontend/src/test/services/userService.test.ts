@@ -9,6 +9,7 @@ import {
   setUserStatus,
   anonymizeUser,
   deleteUser,
+  removeAvatar,
   updateLGPDConsent,
   getTechnicians,
   USER_STATUSES,
@@ -177,6 +178,23 @@ describe("deleteUser", () => {
     await deleteUser("u1");
 
     expect(mockDelete).toHaveBeenCalledWith("/users/u1");
+  });
+});
+
+describe("removeAvatar", () => {
+  it("chama DELETE /users/me/avatar sem mandar chave nenhuma", async () => {
+    mockDelete.mockResolvedValue({});
+
+    await removeAvatar();
+
+    expect(mockDelete).toHaveBeenCalledWith("/users/me/avatar");
+    expect(mockDelete.mock.calls[0]).toHaveLength(1);
+  });
+
+  it("deixa o erro subir para a tela mostrar", async () => {
+    mockDelete.mockRejectedValue(new Error("rede"));
+
+    await expect(removeAvatar()).rejects.toThrow("rede");
   });
 });
 

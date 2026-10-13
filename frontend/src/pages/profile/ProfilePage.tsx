@@ -7,12 +7,15 @@ import {
   Card,
   Icon,
   Input,
+  Modal,
+  ModalFooter,
   Spinner,
 } from "../../components/ui";
 import {
   changePassword,
   completeOnboarding,
   getMe,
+  removeAvatar,
   updateMe,
   uploadAvatar,
   type UserSummary,
@@ -114,14 +117,20 @@ function ProfileAvatar({
   name,
   avatarUrl,
   uploading,
+  busy,
   onFileSelect,
 }: {
   name: string;
   avatarUrl: string | null;
   uploading: boolean;
+  /** Upload OU remoção em andamento: o botão de trocar não aceita outro clique. */
+  busy: boolean;
   onFileSelect: (file: File) => void;
 }) {
   const inputRef = useRef<HTMLInputElement>(null);
+  // Mesma regra do `Avatar` compartilhado: lembra QUAL endereço falhou, para
+  // não tentar de novo a mesma URL quebrada e voltar a tentar quando ela mudar.
+  const [urlQueFalhou, setUrlQueFalhou] = useState<string | null>(null);
   const initials = name
     .split(" ")
     .slice(0, 2)
@@ -132,8 +141,13 @@ function ProfileAvatar({
   return (
     <div className="relative shrink-0">
       <div className="w-20 h-20 rounded-full bg-tint-primary border-2 border-primary/30 overflow-hidden flex items-center justify-center">
-        {avatarUrl ? (
-          <img src={avatarUrl} alt={name} className="w-full h-full object-cover" />
+        {avatarUrl && avatarUrl !== urlQueFalhou ? (
+          <img
+            src={avatarUrl}
+            alt={name}
+            className="w-full h-full object-cover"
+            onError={() => setUrlQueFalhou(avatarUrl)}
+          />
         ) : (
           <span className="text-2xl font-bold text-on-tint-primary">{initials}</span>
         )}
@@ -147,7 +161,7 @@ function ProfileAvatar({
         type="button"
         aria-label="Alterar foto"
         onClick={() => inputRef.current?.click()}
-        disabled={uploading}
+        disabled={busy}
         className="absolute bottom-0 right-0 w-7 h-7 rounded-full bg-surface border border-borda flex items-center justify-center shadow-sm hover:bg-surface-elevated transition-colors cursor-pointer disabled:opacity-50"
       >
         {/* Os dois traçados da máquina fotográfica batiam caractere a caractere
@@ -727,7 +741,29 @@ export default function ProfilePage() {
   const [editingInfo, setEditingInfo] = useState(false);
   const [editingPassword, setEditingPassword] = useState(false);
   const [uploadingAvatar, setUploadingAvatar] = useState(false);
+  const [removingAvatar, setRemovingAvatar] = useState(false);
+  const [confirmingRemoval, setConfirmingRemoval] = useState(false);
   const [avatarError, setAvatarError] = useState<string | null>(null);
+  const avatarBusy = uploadingAvatar || removingAvatar;
+
+  // O clique duplo é barrado pelo `loading` do botão do diálogo: o React não
+  // entrega `onClick` a botão desabilitado, e o estado muda ao fim do primeiro
+  // clique, antes de o segundo chegar.
+  async function handleRemoveAvatar() {
+    setRemovingAvatar(true);
+    setAvatarError(null);
+    try {
+      await removeAvatar();
+      setProfile((prev) => (prev ? { ...prev, avatar_url: null } : prev));
+      updateAvatarUrl(null);
+    } catch (err: unknown) {
+      const detail = (err as { response?: { data?: { detail?: string } } })?.response?.data?.detail;
+      setAvatarError(detail ?? "Erro ao remover foto.");
+    } finally {
+      setRemovingAvatar(false);
+      setConfirmingRemoval(false);
+    }
+  }
 
   async function handleAvatarFile(file: File) {
     setUploadingAvatar(true);
@@ -787,6 +823,7 @@ export default function ProfilePage() {
             name={profile.name}
             avatarUrl={profile.avatar_url}
             uploading={uploadingAvatar}
+            busy={avatarBusy}
             onFileSelect={handleAvatarFile}
           />
           <div className="min-w-0 flex-1 space-y-1.5">
@@ -795,6 +832,20 @@ export default function ProfilePage() {
             {/* Papel desconhecido cai no neutro e mostra o valor cru: o dado vem
                 da REDE, e um papel novo no backend não pode derrubar a tela. */}
             <Badge variant={papelVariante}>{papelRotulo}</Badge>
+            {/* Só com foto: sem ela não há o que remover. Aparece também quando
+                a imagem não carrega — é justamente aí que a pessoa quer limpar. */}
+            {profile.avatar_url && (
+              <div>
+                <Button
+                  variant="ghost"
+                  size="sm"
+                  onClick={() => setConfirmingRemoval(true)}
+                  disabled={avatarBusy}
+                >
+                  Remover foto
+                </Button>
+              </div>
+            )}
           </div>
           <div className="hidden sm:flex flex-col gap-3 text-right shrink-0">
             <div>
@@ -809,6 +860,35 @@ export default function ProfilePage() {
         </div>
       </Card>
 
+      {/* Confirmação da remoção — forma da frota (D9.3). Enquanto remove, o
+          diálogo não fecha: fechar no meio deixaria a pessoa sem saber se a
+          foto saiu. */}
+      <Modal
+        open={confirmingRemoval}
+        onClose={() => {
+          if (!removingAvatar) setConfirmingRemoval(false);
+        }}
+        size="sm"
+        title="Remover foto"
+      >
+        <p className="text-sm text-conteudo-muted">
+          A sua foto de perfil será apagada, e no lugar dela aparecerão as suas
+          iniciais. Você pode enviar outra foto quando quiser.
+        </p>
+        <ModalFooter>
+          <Button
+            variant="secondary"
+            onClick={() => setConfirmingRemoval(false)}
+            disabled={removingAvatar}
+          >
+            Cancelar
+          </Button>
+          <Button variant="danger" onClick={handleRemoveAvatar} loading={removingAvatar}>
+            Remover
+          </Button>
+        </ModalFooter>
+      </Modal>
+
       {/* Personal info */}
       <SectionCard
         title="Informações pessoais"
@@ -821,7 +901,11 @@ export default function ProfilePage() {
         {editingInfo ? (
           <EditProfileForm
             profile={profile}
-            onSaved={(u) => { setProfile(u); setEditingInfo(false); }}
+            // A edição não mexe na foto, e a resposta do `PATCH /users/me` traz a
+            // chave crua (`avatars/...`), não o link assinado — o `updateMe` a
+            // transformava em `<API>/avatars/...`, rota que não existe, e a foto
+            // sumia da tela até recarregar. Fica a que já estava aqui.
+            onSaved={(u) => { setProfile({ ...u, avatar_url: profile.avatar_url }); setEditingInfo(false); }}
             onCancel={() => setEditingInfo(false)}
           />
         ) : (

@@ -1,4 +1,4 @@
-import { render, screen, waitFor } from "@testing-library/react";
+import { fireEvent, render, screen, waitFor } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { beforeEach, describe, expect, it, vi } from "vitest";
 
@@ -10,15 +10,19 @@ const sessao = vi.hoisted(() => ({
     role: string;
     name: string;
   },
+  // Espião estável: um `vi.fn()` criado dentro do `useAuth` seria outro a
+  // cada render, e não daria para conferir que o contexto foi atualizado.
+  updateAvatarUrl: vi.fn(),
 }));
 
 vi.mock("../../contexts/AuthContext", () => ({
-  useAuth: () => ({ user: sessao.user, updateAvatarUrl: vi.fn() }),
+  useAuth: () => ({ user: sessao.user, updateAvatarUrl: sessao.updateAvatarUrl }),
 }));
 vi.mock("../../services/userService", () => ({
   changePassword: vi.fn(),
   completeOnboarding: vi.fn(),
   getMe: vi.fn(),
+  removeAvatar: vi.fn(),
   updateMe: vi.fn(),
   uploadAvatar: vi.fn(),
 }));
@@ -232,5 +236,152 @@ describe("ProfilePage", () => {
 
     const aviso = await screen.findByRole("status");
     expect(aviso).toHaveTextContent("Senha alterada com sucesso!");
+  });
+});
+
+// ── A própria foto: remover e cair nas iniciais ────────────────────────
+
+const FOTO = "https://api.exemplo.com/api/v1/files/tok-da-foto";
+
+function botaoRemover() {
+  return screen.queryByRole("button", { name: "Remover foto" });
+}
+
+async function abrirConfirmacao() {
+  await userEvent.click(botaoRemover()!);
+  return screen.findByRole("dialog");
+}
+
+describe("ProfilePage — remover a própria foto", () => {
+  it("o botão aparece quando há foto", async () => {
+    await montar({ avatar_url: FOTO });
+    expect(botaoRemover()).toBeInTheDocument();
+  });
+
+  it("o botão não aparece sem foto", async () => {
+    await montar({ avatar_url: null });
+    expect(botaoRemover()).not.toBeInTheDocument();
+  });
+
+  it("pede confirmação e não remove nada antes dela", async () => {
+    await montar({ avatar_url: FOTO });
+
+    const dialogo = await abrirConfirmacao();
+
+    expect(dialogo).toHaveAccessibleName("Remover foto");
+    expect(userService.removeAvatar).not.toHaveBeenCalled();
+  });
+
+  it("cancelar fecha o diálogo e a foto fica", async () => {
+    await montar({ avatar_url: FOTO });
+    await abrirConfirmacao();
+
+    await userEvent.click(screen.getByRole("button", { name: "Cancelar" }));
+
+    expect(screen.queryByRole("dialog")).not.toBeInTheDocument();
+    expect(userService.removeAvatar).not.toHaveBeenCalled();
+    expect(screen.getByAltText("Ana Souza")).toHaveAttribute("src", FOTO);
+  });
+
+  it("confirmar remove, volta às iniciais e atualiza a sessão", async () => {
+    vi.mocked(userService.removeAvatar).mockResolvedValue();
+    await montar({ avatar_url: FOTO });
+    await abrirConfirmacao();
+
+    await userEvent.click(screen.getByRole("button", { name: "Remover" }));
+
+    await waitFor(() =>
+      expect(screen.queryByRole("dialog")).not.toBeInTheDocument(),
+    );
+    expect(userService.removeAvatar).toHaveBeenCalledTimes(1);
+    expect(screen.queryByAltText("Ana Souza")).not.toBeInTheDocument();
+    expect(screen.getByText("AS")).toBeInTheDocument();
+    // O Topbar lê do contexto: sem isto ele seguiria mostrando a foto.
+    expect(sessao.updateAvatarUrl).toHaveBeenCalledWith(null);
+    expect(botaoRemover()).not.toBeInTheDocument();
+  });
+
+  it("o erro aparece no aviso da página e a foto fica", async () => {
+    vi.mocked(userService.removeAvatar).mockRejectedValue({
+      response: { data: { detail: "Volume indisponível." } },
+    });
+    await montar({ avatar_url: FOTO });
+    await abrirConfirmacao();
+
+    await userEvent.click(screen.getByRole("button", { name: "Remover" }));
+
+    expect(await screen.findByText("Volume indisponível.")).toBeInTheDocument();
+    expect(screen.getByAltText("Ana Souza")).toHaveAttribute("src", FOTO);
+    expect(sessao.updateAvatarUrl).not.toHaveBeenCalled();
+  });
+
+  it("enquanto remove, um segundo clique não dispara outra remoção", async () => {
+    let concluir: () => void = () => {};
+    vi.mocked(userService.removeAvatar).mockReturnValue(
+      new Promise<void>((resolve) => {
+        concluir = resolve;
+      }),
+    );
+    await montar({ avatar_url: FOTO });
+    await abrirConfirmacao();
+    const remover = screen.getByRole("button", { name: "Remover" });
+
+    await userEvent.click(remover);
+    // `fireEvent` despacha o clique mesmo em botão desabilitado — quem o
+    // descarta é o React, porque o `loading` desabilitou o botão no primeiro.
+    fireEvent.click(remover);
+    fireEvent.click(remover);
+
+    expect(userService.removeAvatar).toHaveBeenCalledTimes(1);
+    expect(remover).toBeDisabled();
+    expect(screen.getByRole("button", { name: "Alterar foto" })).toBeDisabled();
+
+    concluir();
+    await waitFor(() =>
+      expect(screen.queryByRole("dialog")).not.toBeInTheDocument(),
+    );
+  });
+});
+
+describe("ProfilePage — a foto que não carrega", () => {
+  it("cai nas iniciais quando a imagem falha", async () => {
+    await montar({ avatar_url: FOTO });
+
+    fireEvent.error(screen.getByAltText("Ana Souza"));
+
+    expect(screen.queryByAltText("Ana Souza")).not.toBeInTheDocument();
+    expect(screen.getByText("AS")).toBeInTheDocument();
+    // A referência continua gravada: dá para remover mesmo sem ver a foto.
+    expect(botaoRemover()).toBeInTheDocument();
+  });
+
+  it("uma foto nova depois da falha é tentada normalmente", async () => {
+    const nova = { ...PERFIL, avatar_url: "https://api.exemplo.com/api/v1/files/tok-nova" };
+    vi.mocked(userService.uploadAvatar).mockResolvedValue(nova);
+    await montar({ avatar_url: FOTO });
+    fireEvent.error(screen.getByAltText("Ana Souza"));
+
+    const arquivo = new File(["x"], "eu.png", { type: "image/png" });
+    const campo = document.querySelector<HTMLInputElement>('input[type="file"]')!;
+    await userEvent.upload(campo, arquivo);
+
+    expect(await screen.findByAltText("Ana Souza")).toHaveAttribute("src", nova.avatar_url);
+  });
+
+  it("editar o perfil não troca a foto pela chave crua da resposta", async () => {
+    // O `PATCH /users/me` devolve `avatars/<id>.png`, que o serviço vira
+    // `<API>/avatars/...` — rota que não existe. A foto da tela tem que ficar.
+    vi.mocked(userService.updateMe).mockResolvedValue({
+      ...PERFIL,
+      name: "Ana Souza",
+      avatar_url: "https://api.exemplo.com/api/v1/avatars/u1.png",
+    });
+    await montar({ avatar_url: FOTO });
+
+    await userEvent.click(screen.getAllByRole("button", { name: "Editar" })[0]);
+    await userEvent.click(screen.getByRole("button", { name: /salvar/i }));
+
+    await waitFor(() => expect(userService.updateMe).toHaveBeenCalled());
+    expect(await screen.findByAltText("Ana Souza")).toHaveAttribute("src", FOTO);
   });
 });
