@@ -32,6 +32,7 @@ import {
 } from "../../services/productService";
 import { getUsers } from "../../services/userService";
 import { getApiError } from "../../lib/apiError";
+import { ActivePill, EquipmentDetailModal } from "../../components/equipment/EquipmentDetailModal";
 
 // ── Constants ─────────────────────────────────────────────────
 //
@@ -106,62 +107,6 @@ function FilterTabs({ value, onChange }: { value: FilterTab; onChange: (v: Filte
         </button>
       ))}
     </div>
-  );
-}
-
-// ── ActivePill ────────────────────────────────────────────────
-
-/**
- * O selo de ativo/inativo, agora sobre as tintas medidas.
- *
- * Era paleta crua dos dois lados — `emerald-300/50/100/500` no ativo,
- * `slate-100/200/300/400/500` no inativo —, com oito classes `dark:` para
- * inverter à mão o que o token já inverte sozinho. As duas receitas passaram
- * a ser as mesmas do `Badge`: tinta no fundo, o par da tinta no texto, e a
- * cor cheia da rampa a 30% na borda.
- *
- * **O hover mudou de lugar, e é de propósito.** A regra (a) do D8-a proíbe
- * modificador de opacidade sobre as tintas — elas já carregam 15% no token, e
- * `bg-tint-success/20` multiplicaria os dois. Sem `bg-tint-*` mais escuro
- * para onde ir, a resposta ao ponteiro passou para a borda, que é cor cheia e
- * aceita o modificador.
- *
- * O ponto não usa o degrau 500: a E19 mediu `--color-success-500` em 2,54:1
- * como preenchimento no tema claro, abaixo do piso de 3:1 da WCAG 1.4.11. O
- * neutro é `--border-control`, o único que **inverte por tema** — é o mesmo
- * raciocínio que `lib/prioridade.ts` registra para a prioridade baixa.
- *
- * O ponto nunca informa sozinho: o rótulo "Ativo"/"Inativo" vai ao lado, em
- * texto, e é ele que carrega o estado.
- */
-function ActivePill({
-  active,
-  loading,
-  onToggle,
-}: {
-  active: boolean;
-  loading?: boolean;
-  onToggle?: () => void;
-}) {
-  return (
-    <button
-      type="button"
-      onClick={onToggle}
-      disabled={!onToggle || loading}
-      title={active ? "Clique para desativar" : "Clique para ativar"}
-      className={`inline-flex items-center gap-1.5 px-2.5 py-1 rounded-full border text-xs font-medium transition-colors shrink-0 ${
-        active
-          ? "border-success/30 bg-tint-success text-on-tint-success hover:border-success/60 cursor-pointer"
-          : "border-borda bg-tint-neutral text-on-tint-neutral hover:border-borda-strong cursor-pointer"
-      } disabled:cursor-default`}
-    >
-      {loading ? (
-        <span className="w-1.5 h-1.5 rounded-full bg-current animate-pulse" />
-      ) : (
-        <span className={`w-1.5 h-1.5 rounded-full shrink-0 ${active ? "bg-fill-success" : "bg-borda-control"}`} />
-      )}
-      {active ? "Ativo" : "Inativo"}
-    </button>
   );
 }
 
@@ -334,72 +279,6 @@ function EquipmentFormModal({
           <Button type="submit" loading={form.formState.isSubmitting}>{editing ? "Salvar" : "Criar equipamento"}</Button>
         </ModalFooter>
       </form>
-    </Modal>
-  );
-}
-
-// ── EquipmentDetailModal ──────────────────────────────────────
-
-function EquipmentDetailModal({ equip, onClose, onEdit }: { equip: Equipment; onClose: () => void; onEdit: () => void }) {
-  function row(label: string, value?: string | null) {
-    if (!value) return null;
-    return (
-      <div className="flex flex-col gap-0.5">
-        <span className="text-[11px] font-semibold uppercase tracking-wide text-conteudo-muted">{label}</span>
-        <span className="text-sm text-conteudo break-words">{value}</span>
-      </div>
-    );
-  }
-
-  return (
-    <Modal open onClose={onClose} title={equip.name}>
-      <div className="space-y-4">
-        <div className="flex items-center gap-2">
-          <ActivePill active={equip.is_active} />
-          {equip.model && (
-            <span className="text-xs px-2 py-0.5 rounded-full bg-surface-elevated border border-borda/50 text-conteudo-muted">
-              {equip.model}
-            </span>
-          )}
-        </div>
-
-        <div className="grid grid-cols-1 sm:grid-cols-2 gap-3 rounded-xl border border-borda bg-surface-elevated p-4">
-          {row("Número de série", equip.serial_number)}
-          {row("Modelo", equip.model)}
-          {row("Localização", equip.location)}
-          {row("Descrição", equip.description)}
-        </div>
-
-        {(equip.owner_name || equip.company_name) && (
-          <div className="grid grid-cols-1 sm:grid-cols-2 gap-3 rounded-xl border border-borda bg-surface-elevated p-4">
-            {equip.owner_name && (
-              <div className="flex flex-col gap-0.5">
-                <span className="text-[11px] font-semibold uppercase tracking-wide text-conteudo-muted">Responsável</span>
-                <span className="text-sm text-conteudo">{equip.owner_name}</span>
-                {equip.owner_email && <span className="text-xs text-conteudo-muted">{equip.owner_email}</span>}
-              </div>
-            )}
-            {equip.company_name && (
-              <div className="flex flex-col gap-0.5">
-                <span className="text-[11px] font-semibold uppercase tracking-wide text-conteudo-muted">Empresa</span>
-                <span className="text-sm text-conteudo">{equip.company_name}</span>
-                {equip.company_cnpj && <span className="text-xs text-conteudo-muted">{formatCnpj(equip.company_cnpj)}</span>}
-              </div>
-            )}
-          </div>
-        )}
-
-        {(equip.created_at || equip.updated_at) && (
-          <div className="flex flex-wrap gap-x-5 gap-y-1 text-xs text-conteudo-muted">
-            {equip.created_at && <span>Criado em {new Date(equip.created_at).toLocaleDateString("pt-BR")}</span>}
-            {equip.updated_at && <span>Atualizado em {new Date(equip.updated_at).toLocaleDateString("pt-BR")}</span>}
-          </div>
-        )}
-      </div>
-      <ModalFooter>
-        <Button variant="secondary" onClick={onClose}>Fechar</Button>
-        <Button onClick={() => { onClose(); onEdit(); }}><Icon name="edit" size={16} strokeWidth={2} /> Editar</Button>
-      </ModalFooter>
     </Modal>
   );
 }

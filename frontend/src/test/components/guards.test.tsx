@@ -22,9 +22,22 @@ import type { AuthUser } from "../../types/auth";
 vi.mock("../../contexts/AuthContext", () => ({
   useAuth: vi.fn(),
 }));
+vi.mock("../../services/productService", () => ({
+  getProducts: vi.fn().mockResolvedValue({ items: [], total: 0, limit: 100, offset: 0 }),
+  listAllEquipments: vi.fn().mockResolvedValue({ items: [], total: 0, limit: 20, offset: 0 }),
+}));
+vi.mock("../../services/groupService", () => ({
+  listAllCompanies: vi.fn().mockResolvedValue({ items: [], total: 0, limit: 100, offset: 0 }),
+  listGroups: vi.fn().mockResolvedValue([]),
+  getCompanyById: vi.fn(),
+}));
 
 import { useAuth } from "../../contexts/AuthContext";
 import LoginPage from "../../pages/auth/LoginPage";
+import StaffEquipmentsPage from "../../pages/equipment/StaffEquipmentsPage";
+import StaffCompaniesPage from "../../pages/groups/StaffCompaniesPage";
+import { listAllEquipments } from "../../services/productService";
+import { listAllCompanies } from "../../services/groupService";
 
 const mockUseAuth = vi.mocked(useAuth);
 
@@ -373,6 +386,105 @@ describe("RoleGuard", () => {
     renderRoleGuard(["admin"]);
 
     expect(screen.getByText("acesso negado")).toBeInTheDocument();
+  });
+});
+
+// ── /equipamentos: a rota real, com o guarda real ─────────────
+
+/**
+ * Os papéis vêm do App.tsx, e não de uma cópia aqui: o que se prova é que a
+ * rota declarada mora dentro do `RoleGuard` de admin e técnico. Tirá-la do
+ * bloco — ou pô-la no bloco de "todos os autenticados" — derruba este caso.
+ */
+describe("App.tsx: /equipamentos é só da equipe", () => {
+  const FONTE = readFileSync(resolve(process.cwd(), "src/App.tsx"), "utf8");
+
+  function papeisDaRota(caminho: string): string[] {
+    const rota = FONTE.indexOf(`path="${caminho}"`);
+    expect(rota, `rota ${caminho} não declarada`).toBeGreaterThan(-1);
+    const abertura = FONTE.lastIndexOf("<RoleGuard roles={", rota);
+    expect(abertura, "a rota não está sob RoleGuard nenhum").toBeGreaterThan(-1);
+    // Entre o guarda e a rota não pode haver bloco fechado: senão a rota
+    // está DEPOIS do guarda, e não dentro dele.
+    expect(FONTE.slice(abertura, rota)).not.toContain("</Route>");
+    const lista = FONTE.slice(abertura).match(/roles=\{\[([^\]]*)\]\}/)![1];
+    return [...lista.matchAll(/"([^"]+)"/g)].map((m) => m[1]);
+  }
+
+  function renderEquipamentos(papel: AuthUser["role"]) {
+    mockUseAuth.mockReturnValue(autenticado(usuario({ role: papel })));
+    const papeis = papeisDaRota("/equipamentos") as AuthUser["role"][];
+    return render(
+      <MemoryRouter initialEntries={["/equipamentos"]}>
+        <Routes>
+          <Route element={<RoleGuard roles={papeis} />}>
+            <Route path="/equipamentos" element={<StaffEquipmentsPage />} />
+          </Route>
+          <Route path="/403" element={<div>acesso negado</div>} />
+        </Routes>
+      </MemoryRouter>,
+    );
+  }
+
+  it("declara exatamente admin e técnico", () => {
+    expect(papeisDaRota("/equipamentos").sort()).toEqual(["admin", "technician"]);
+  });
+
+  it("o cliente que digita a rota cai no /403, e a lista nem é pedida", () => {
+    renderEquipamentos("client");
+    expect(screen.getByText("acesso negado")).toBeInTheDocument();
+    expect(listAllEquipments).not.toHaveBeenCalled();
+  });
+
+  it.each(["technician", "admin"] as const)("%s abre a consulta", async (papel) => {
+    renderEquipamentos(papel);
+    expect(await screen.findByRole("heading", { name: "Equipamentos" })).toBeInTheDocument();
+    expect(screen.queryByText("acesso negado")).toBeNull();
+  });
+});
+
+describe("App.tsx: /empresas é só da equipe, com o mesmo guarda de /equipamentos", () => {
+  const FONTE = readFileSync(resolve(process.cwd(), "src/App.tsx"), "utf8");
+
+  function papeisDaRota(caminho: string): string[] {
+    const rota = FONTE.indexOf(`path="${caminho}"`);
+    expect(rota, `rota ${caminho} não declarada`).toBeGreaterThan(-1);
+    const abertura = FONTE.lastIndexOf("<RoleGuard roles={", rota);
+    expect(abertura).toBeGreaterThan(-1);
+    expect(FONTE.slice(abertura, rota)).not.toContain("</Route>");
+    const lista = FONTE.slice(abertura).match(/roles=\{\[([^\]]*)\]\}/)![1];
+    return [...lista.matchAll(/"([^"]+)"/g)].map((m) => m[1]);
+  }
+
+  function renderEmpresas(papel: AuthUser["role"]) {
+    mockUseAuth.mockReturnValue(autenticado(usuario({ role: papel })));
+    const papeis = papeisDaRota("/empresas") as AuthUser["role"][];
+    return render(
+      <MemoryRouter initialEntries={["/empresas"]}>
+        <Routes>
+          <Route element={<RoleGuard roles={papeis} />}>
+            <Route path="/empresas" element={<StaffCompaniesPage />} />
+          </Route>
+          <Route path="/403" element={<div>acesso negado</div>} />
+        </Routes>
+      </MemoryRouter>,
+    );
+  }
+
+  it("declara exatamente admin e técnico — o mesmo de /equipamentos", () => {
+    expect(papeisDaRota("/empresas").sort()).toEqual(["admin", "technician"]);
+    expect(papeisDaRota("/empresas")).toEqual(papeisDaRota("/equipamentos"));
+  });
+
+  it("o cliente que digita a rota cai no /403, e a lista de empresas nem é pedida", () => {
+    renderEmpresas("client");
+    expect(screen.getByText("acesso negado")).toBeInTheDocument();
+    expect(listAllCompanies).not.toHaveBeenCalled();
+  });
+
+  it.each(["technician", "admin"] as const)("%s abre a consulta de empresas", async (papel) => {
+    renderEmpresas(papel);
+    expect(await screen.findByRole("heading", { name: "Empresas" })).toBeInTheDocument();
   });
 });
 

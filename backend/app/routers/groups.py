@@ -3,18 +3,35 @@ Groups, Companies and Client-assignment endpoints.
 
 Permissões:
   Todos os endpoints — admin | technician
+
+Consulta transversal (tela de Empresas, só leitura):
+  GET /companies          — todas as empresas, paginado, busca por nome/CNPJ
+  GET /companies/{id}     — detalhe sem precisar do grupo
+  Ficam DEPOIS de `/companies/suggestions` no arquivo: o FastAPI casa rota na
+  ordem de registro, e `/companies/{id}` antes dela tentaria ler "suggestions"
+  como UUID e responderia 422.
 """
 
+import re
 import uuid
 from typing import Annotated
 
-from fastapi import APIRouter, Depends, HTTPException, status
-from sqlalchemy import func, select
+from fastapi import APIRouter, Depends, HTTPException, Query, status
+from sqlalchemy import ColumnElement, func, or_, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.core.database import get_db
 from app.core.security import authorize
-from app.models.models import Company, CompanyNote, Group, GroupNote, User, UserRole, UserStatus
+from app.models.models import (
+    Company,
+    CompanyNote,
+    Equipment,
+    Group,
+    GroupNote,
+    User,
+    UserRole,
+    UserStatus,
+)
 from app.schemas.groups import (
     AssignClientRequest,
     ClientInCompany,
@@ -24,6 +41,9 @@ from app.schemas.groups import (
     CompanyNoteCreate,
     CompanyNoteResponse,
     CompanyResponse,
+    CompanyStaffDetail,
+    CompanyStaffItem,
+    CompanyStaffListResponse,
     CompanySuggestion,
     CompanyUpdate,
     CreateCompanyFromSuggestion,
@@ -182,6 +202,42 @@ def _group_response(g: Group, company_count: int) -> GroupResponse:
     )
 
 
+async def _clientes_vinculados(db: AsyncSession, company_id: uuid.UUID) -> list[ClientInCompany]:
+    """Quem tem o VÍNCULO oficial (`users.company_id`) — não quem digitou o nome."""
+    linhas = await db.execute(select(User).where(User.company_id == company_id).order_by(User.name))
+    return [
+        ClientInCompany(
+            id=u.id,
+            name=u.name,
+            email=u.email,
+            phone=u.phone,
+            client_notes=u.client_notes,
+        )
+        for u in linhas.scalars().all()
+    ]
+
+
+async def _contagem_de_equipamentos_por_empresa(
+    db: AsyncSession, company_ids: list[uuid.UUID]
+) -> dict[uuid.UUID, int]:
+    """
+    Equipamentos cujo RESPONSÁVEL tem vínculo oficial com a empresa.
+
+    O equipamento não tem empresa própria; a dele é a do responsável. Conta os
+    inativos também — é o mesmo conjunto que `GET /equipments?company_id=`
+    devolve sem filtro de status, e as duas telas não podem discordar.
+    """
+    if not company_ids:
+        return {}
+    rows = await db.execute(
+        select(User.company_id, func.count(Equipment.id))
+        .join(User, User.id == Equipment.owner_id)
+        .where(User.company_id.in_(company_ids))
+        .group_by(User.company_id)
+    )
+    return {cid: total for cid, total in rows}
+
+
 async def _companies_to_response(db: AsyncSession, rows: list[Company]) -> list[CompanyResponse]:
     """Uma lista inteira com duas consultas de contagem, não duas por empresa."""
     ids = [c.id for c in rows]
@@ -327,21 +383,7 @@ async def get_company(
     group_id: uuid.UUID, company_id: uuid.UUID, db: _DBDep, _: _AdminDep
 ) -> CompanyDetail:
     c = await _get_company_or_404(db, group_id, company_id)
-    clients_rows = (
-        (await db.execute(select(User).where(User.company_id == company_id).order_by(User.name)))
-        .scalars()
-        .all()
-    )
-    clients = [
-        ClientInCompany(
-            id=u.id,
-            name=u.name,
-            email=u.email,
-            phone=u.phone,
-            client_notes=u.client_notes,
-        )
-        for u in clients_rows
-    ]
+    clients = await _clientes_vinculados(db, company_id)
     return CompanyDetail(
         id=c.id,
         group_id=c.group_id,
@@ -829,3 +871,98 @@ async def delete_company_note(
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Nota não encontrada")
     await db.delete(note)
     await db.commit()
+
+
+# ── Consulta transversal: tela de Empresas (só leitura) ───────
+#
+# A manutenção continua toda nas rotas por grupo acima: criar, editar,
+# excluir, vincular cliente e notas. Estas duas só leem.
+
+# Só dígitos e a pontuação do CNPJ: "11.222.333/0001-81", "222333", "555.666".
+# Um nome com dígito ("Filial 2") NÃO cai aqui — senão casaria com qualquer
+# CNPJ que tivesse um 2.
+_PARECE_CNPJ = re.compile(r"[\d./\-\s]+")
+
+
+def _busca_de_empresa(termo: str) -> ColumnElement[bool]:
+    condicoes = [Company.name.ilike(f"%{termo}%")]
+    digitos = re.sub(r"\D", "", termo)
+    if digitos and _PARECE_CNPJ.fullmatch(termo):
+        # A normalização do CNPJ das empresas antigas nunca rodou em produção:
+        # há valor pontuado e valor só com dígitos. Tirar a pontuação dos DOIS
+        # lados acha os dois.
+        condicoes.append(func.regexp_replace(Company.cnpj, r"\D", "", "g").like(f"%{digitos}%"))
+    return or_(*condicoes)
+
+
+async def _linhas_da_equipe(db: AsyncSession, rows: list[Company]) -> list[CompanyStaffItem]:
+    """A página inteira com uma consulta por contagem, e não uma por empresa."""
+    ids = [c.id for c in rows]
+    clientes = await _contagem_de_clientes_por_empresa(db, ids)
+    notas = await _contagem_de_notas_por_empresa(db, ids)
+    equipamentos = await _contagem_de_equipamentos_por_empresa(db, ids)
+    grupos: dict[uuid.UUID, str] = {}
+    ids_de_grupo = {c.group_id for c in rows}
+    if ids_de_grupo:
+        linhas = await db.execute(select(Group.id, Group.name).where(Group.id.in_(ids_de_grupo)))
+        grupos = {gid: nome for gid, nome in linhas.all()}
+    return [
+        CompanyStaffItem(
+            **_company_response(c, clientes.get(c.id, 0), notas.get(c.id, 0)).model_dump(),
+            group_name=grupos.get(c.group_id, ""),
+            equipment_count=equipamentos.get(c.id, 0),
+        )
+        for c in rows
+    ]
+
+
+@router.get("/companies", response_model=CompanyStaffListResponse)
+async def list_all_companies(
+    db: _DBDep,
+    _: _AdminDep,
+    offset: int = Query(default=0, ge=0),
+    limit: int = Query(default=20, ge=1, le=100),
+    search: str | None = Query(default=None, max_length=100),
+    group_id: uuid.UUID | None = Query(default=None),
+) -> CompanyStaffListResponse:
+    """
+    Todas as empresas, de todos os grupos — consulta da equipe.
+
+    O cliente é recusado pelo papel (403), antes de qualquer consulta: ele não
+    lista empresas, nem a própria, e não vê os colegas vinculados a ela.
+    """
+    base = select(Company)
+    if group_id is not None:
+        base = base.where(Company.group_id == group_id)
+    if search:
+        base = base.where(_busca_de_empresa(search))
+
+    total = (await db.execute(select(func.count()).select_from(base.subquery()))).scalar_one()
+    rows = (
+        (await db.execute(base.order_by(Company.name, Company.id).offset(offset).limit(limit)))
+        .scalars()
+        .all()
+    )
+    return CompanyStaffListResponse(
+        items=await _linhas_da_equipe(db, list(rows)),
+        total=total,
+        limit=limit,
+        offset=offset,
+    )
+
+
+@router.get("/companies/{company_id}", response_model=CompanyStaffDetail)
+async def get_company_for_staff(
+    company_id: uuid.UUID, db: _DBDep, _: _AdminDep
+) -> CompanyStaffDetail:
+    """O detalhe sem precisar saber o grupo — a tela de Empresas parte do id."""
+    c = (await db.execute(select(Company).where(Company.id == company_id))).scalar_one_or_none()
+    if c is None:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Empresa não encontrada")
+    (linha,) = await _linhas_da_equipe(db, [c])
+    clientes = await _clientes_vinculados(db, c.id)
+    return CompanyStaffDetail(
+        **linha.model_dump(exclude={"client_count"}),
+        client_count=len(clientes),
+        clients=clientes,
+    )

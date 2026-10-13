@@ -1,8 +1,14 @@
 import { fireEvent, render, screen, waitFor, within } from "@testing-library/react";
+import { MemoryRouter } from "react-router-dom";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
+
+vi.mock("../../services/productService", () => ({
+  listAllEquipments: vi.fn(),
+}));
 
 vi.mock("../../services/groupService", () => ({
   getCompany: vi.fn(),
+  getCompanyById: vi.fn(),
   listCompanyNotes: vi.fn(),
   updateCompany: vi.fn(),
   deleteCompany: vi.fn(),
@@ -31,7 +37,9 @@ vi.mock("../../services/groupService", () => ({
 vi.mock("sonner", () => ({ toast: { error: vi.fn(), success: vi.fn() } }));
 
 import GroupsPage, { CompanyDetailModal } from "../../pages/groups/GroupsPage";
+import { listAllEquipments } from "../../services/productService";
 import {
+  getCompanyById,
   deleteCompany,
   deleteCompanyNote,
   deleteGroup,
@@ -713,5 +721,133 @@ describe("GroupsPage — a lista de grupos", () => {
     await waitFor(() =>
       expect(deleteGroupNote).toHaveBeenCalledWith("grupo-A", "nota-G"),
     );
+  });
+});
+
+// ── Modo somente leitura (tela de Empresas) ───────────────────
+
+/**
+ * A tela de Empresas abre ESTE modal, e não uma cópia. Lá ele é consulta: some
+ * tudo que muda alguma coisa, aparecem o grupo e os equipamentos. Aqui, na tela
+ * de Grupos, ele continua exatamente como era — o segundo bloco prende isso.
+ */
+describe("CompanyDetailModal — somente leitura", () => {
+  const CLIENTE: ClientInCompany = {
+    id: "cli-1",
+    name: "Maria Souza",
+    email: "maria@alfa.com",
+    phone: null,
+    client_notes: "Prefere contato por e-mail",
+  };
+  const NOTA: CompanyNote = {
+    id: "nota-1",
+    company_id: EMPRESA.id,
+    author_id: "u-1",
+    author_name: "Téc. Ana",
+    content: "Contrato renovado em setembro",
+    created_at: "2026-09-10T12:00:00Z",
+  } as CompanyNote;
+
+  beforeEach(() => {
+    vi.mocked(getCompanyById).mockResolvedValue({
+      ...EMPRESA,
+      clients: [CLIENTE],
+      client_count: 1,
+      group_name: "Grupo Norte",
+      equipment_count: 2,
+    });
+    vi.mocked(getCompany).mockResolvedValue({ ...DETALHE, clients: [CLIENTE], client_count: 1 });
+    vi.mocked(listCompanyNotes).mockResolvedValue([NOTA]);
+    vi.mocked(listAllEquipments).mockResolvedValue({
+      items: [
+        {
+          id: "e1",
+          product_id: "p1",
+          product_name: "Titan",
+          name: "Titan da recepção",
+          serial_number: "SN-1",
+          model: null,
+          description: null,
+          is_active: true,
+          owner_name: "Maria Souza",
+        },
+      ],
+      total: 2,
+      limit: 10,
+      offset: 0,
+    });
+  });
+
+  afterEach(() => {
+    vi.clearAllMocks();
+  });
+
+  function montar(somenteLeitura: boolean) {
+    return render(
+      <MemoryRouter>
+        <CompanyDetailModal
+          groupId="grupo-A"
+          company={EMPRESA}
+          onClose={() => {}}
+          onUpdated={() => {}}
+          somenteLeitura={somenteLeitura}
+        />
+      </MemoryRouter>,
+    );
+  }
+
+  it("não oferece nenhuma manutenção: vincular, desvincular, notas do cliente, editar", async () => {
+    montar(true);
+    const modal = await screen.findByRole("dialog");
+    await within(modal).findByText("Maria Souza");
+
+    for (const nome of [/vincular/i, /desvincular/i, /editar empresa/i]) {
+      expect(within(modal).queryByRole("button", { name: nome }), String(nome)).toBeNull();
+    }
+    expect(within(modal).queryByTitle("Notas")).toBeNull();
+    // Carrega pela rota da consulta, sem depender do grupo.
+    expect(getCompanyById).toHaveBeenCalledWith(EMPRESA.id);
+    expect(getCompany).not.toHaveBeenCalled();
+  });
+
+  it("as notas da empresa podem ser lidas, mas não criadas nem excluídas", async () => {
+    montar(true);
+    const modal = await screen.findByRole("dialog");
+    await within(modal).findByText("Maria Souza");
+
+    fireEvent.click(within(modal).getByRole("button", { name: /Notas \(1\)/ }));
+
+    expect(await within(modal).findByText("Contrato renovado em setembro")).toBeInTheDocument();
+    expect(within(modal).queryByRole("button", { name: /adicionar nota/i })).toBeNull();
+    expect(within(modal).queryByRole("button", { name: "Deletar nota" })).toBeNull();
+  });
+
+  it("mostra o grupo e os equipamentos do vínculo oficial, com o caminho para a lista completa", async () => {
+    montar(true);
+    const modal = await screen.findByRole("dialog");
+    expect(await within(modal).findByText("Grupo Norte")).toBeInTheDocument();
+
+    fireEvent.click(within(modal).getByRole("button", { name: "Equipamentos (2)" }));
+
+    expect(await within(modal).findByText("Titan da recepção")).toBeInTheDocument();
+    expect(listAllEquipments).toHaveBeenCalledWith({ company_id: EMPRESA.id, limit: 10 });
+    const link = within(modal).getByRole("link", { name: /Ver os 2 equipamentos em Equipamentos/ });
+    expect(link.getAttribute("href")).toBe(`/equipamentos?empresa=${EMPRESA.id}`);
+    expect(within(modal).getByRole("link", { name: "Gerenciar em Grupos" }).getAttribute("href")).toBe(
+      "/grupos",
+    );
+  });
+
+  it("na tela de Grupos (modo normal) nada mudou: manutenção presente, sem equipamentos", async () => {
+    montar(false);
+    const modal = await screen.findByRole("dialog");
+    await within(modal).findByText("Maria Souza");
+
+    expect(within(modal).getByRole("button", { name: /^Vincular$/ })).toBeInTheDocument();
+    expect(within(modal).getByRole("button", { name: /editar empresa/i })).toBeInTheDocument();
+    expect(within(modal).getByRole("button", { name: "Desvincular Maria Souza" })).toBeInTheDocument();
+    expect(within(modal).queryByRole("button", { name: /^Equipamentos/ })).toBeNull();
+    expect(getCompany).toHaveBeenCalledWith("grupo-A", EMPRESA.id);
+    expect(listAllEquipments).not.toHaveBeenCalled();
   });
 });

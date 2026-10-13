@@ -5,6 +5,7 @@ import {
   updateProduct,
   setProductActive,
   getEquipments,
+  listAllEquipments,
   createEquipment,
   updateEquipment,
   setEquipmentActive,
@@ -260,5 +261,48 @@ describe("updateEquipment — dono", () => {
     await updateEquipment("e1", { owner_id: null });
 
     expect(mockPatch).toHaveBeenCalledWith("/equipments/e1", { owner_id: null });
+  });
+});
+
+describe("listAllEquipments", () => {
+  it("chama GET /equipments, sem produto no caminho", async () => {
+    mockGet.mockResolvedValue({ data: { items: [], total: 0, limit: 20, offset: 0 } });
+
+    await listAllEquipments();
+
+    expect(mockGet).toHaveBeenCalledWith("/equipments?");
+  });
+
+  it("manda busca, filtros e página como parâmetros", async () => {
+    mockGet.mockResolvedValue({ data: { items: [], total: 0, limit: 20, offset: 0 } });
+
+    await listAllEquipments({
+      search: "maria",
+      product_id: "p1",
+      is_active: false,
+      company_id: "c1",
+      without_owner: true,
+      limit: 20,
+      offset: 40,
+    });
+
+    const params = new URL(`http://x${mockGet.mock.calls[0][0] as string}`).searchParams;
+    expect(Object.fromEntries(params)).toEqual({
+      search: "maria",
+      product_id: "p1",
+      is_active: "false",
+      company_id: "c1",
+      without_owner: "true",
+      limit: "20",
+      offset: "40",
+    });
+  });
+
+  it("sem responsável desligado não vai na URL", async () => {
+    mockGet.mockResolvedValue({ data: { items: [], total: 0, limit: 20, offset: 0 } });
+
+    await listAllEquipments({ without_owner: false });
+
+    expect(mockGet.mock.calls[0][0]).not.toContain("without_owner");
   });
 });

@@ -1,4 +1,5 @@
 import { useCallback, useEffect, useState } from "react";
+import { Link } from "react-router-dom";
 import { useForm } from "react-hook-form";
 import { zodResolver } from "@hookform/resolvers/zod";
 import { z } from "zod";
@@ -23,6 +24,7 @@ import {
   updateGroup,
   deleteGroup,
   getCompany,
+  getCompanyById,
   createCompany,
   updateCompany,
   deleteCompany,
@@ -42,11 +44,13 @@ import {
   type GroupDetail,
   type CompanyResponse,
   type CompanyDetail,
+  type CompanyStaffDetail,
   type ClientInCompany,
   type CompanySuggestion,
   type GroupNote,
   type CompanyNote,
 } from "../../services/groupService";
+import { listAllEquipments, type Equipment } from "../../services/productService";
 
 // ── Form schemas ──────────────────────────────────────────────
 
@@ -473,10 +477,25 @@ const CLIENTS_PAGE_SIZE = 5;
 // Exportado só para o teste: `GroupsPage.test.tsx` precisa montar este modal
 // direto para contar as chamadas do efeito. Continua sendo renderizado apenas
 // por este arquivo.
+/**
+ * `somenteLeitura` é a tela de Empresas: consulta, sem manutenção.
+ *
+ * Nesse modo o modal some com TODAS as ações que mudam alguma coisa — vincular
+ * e desvincular cliente, notas do cliente, criar e excluir nota da empresa,
+ * editar a empresa —, porque a manutenção continua sendo da tela de Grupos.
+ * Em troca, mostra o grupo e os equipamentos: os do responsável com vínculo
+ * OFICIAL, pela mesma consulta da tela de Equipamentos.
+ */
 export function CompanyDetailModal({
-  groupId, company, onClose, onUpdated,
-}: { groupId: string; company: CompanyResponse; onClose: () => void; onUpdated: () => void; }) {
-  const [detail, setDetail] = useState<CompanyDetail | null>(null);
+  groupId, company, onClose, onUpdated, somenteLeitura = false,
+}: {
+  groupId: string;
+  company: CompanyResponse;
+  onClose: () => void;
+  onUpdated: () => void;
+  somenteLeitura?: boolean;
+}) {
+  const [detail, setDetail] = useState<CompanyDetail | CompanyStaffDetail | null>(null);
   const [loading, setLoading] = useState(true);
   const [showEdit, setShowEdit] = useState(false);
   const [showAssign, setShowAssign] = useState(false);
@@ -493,7 +512,9 @@ export function CompanyDetailModal({
   const [companyNoteSaving, setCompanyNoteSaving] = useState(false);
   const [companyNoteDeleting, setCompanyNoteDeleting] = useState<string | null>(null);
   const [deleteCompanyNoteTarget, setDeleteCompanyNoteTarget] = useState<CompanyNote | null>(null);
-  const [activeTab, setActiveTab] = useState<"clients" | "notes">("clients");
+  const [activeTab, setActiveTab] = useState<"clients" | "notes" | "equipments">("clients");
+  const [equipamentos, setEquipamentos] = useState<Equipment[] | null>(null);
+  const [erroEquipamentos, setErroEquipamentos] = useState(false);
 
   // `load` era redefinido a cada render e o efeito dependia só de `company.id`,
   // o que deixava `groupId` de fora: se ele mudasse sozinho, o modal seguiria
@@ -506,13 +527,26 @@ export function CompanyDetailModal({
   const load = useCallback(async () => {
     setLoading(true);
     try {
-      const d = await getCompany(groupId, company.id);
+      const d = somenteLeitura
+        ? await getCompanyById(company.id)
+        : await getCompany(groupId, company.id);
       setDetail(d);
       listCompanyNotes(groupId, company.id).then(setCompanyNotes).catch(() => {});
     } finally { setLoading(false); }
-  }, [groupId, company.id]);
+  }, [groupId, company.id, somenteLeitura]);
 
   useEffect(() => { load(); }, [load]);
+
+  // Equipamentos só na consulta: a tela de Grupos não os mostrava, e não passa
+  // a pedir dado que não exibe.
+  useEffect(() => {
+    if (!somenteLeitura) return;
+    listAllEquipments({ company_id: company.id, limit: 10 })
+      .then((res) => setEquipamentos(res.items))
+      .catch(() => setErroEquipamentos(true));
+  }, [somenteLeitura, company.id]);
+
+  const totalEquipamentos = detail && "equipment_count" in detail ? detail.equipment_count : null;
 
   // O ultimo `confirm()` nativo de `src/pages/**` sai aqui (D9.3). Ele
   // perguntava "Desvincular este cliente?" — a mesma frase para os cinco
@@ -567,6 +601,7 @@ export function CompanyDetailModal({
             <>
               {/* Company info */}
               <div className="flex flex-wrap gap-x-5 gap-y-1 text-sm text-conteudo-muted mb-4">
+                {"group_name" in detail && <span>Grupo: <span className="text-conteudo">{detail.group_name}</span></span>}
                 {detail.cnpj && <span>CNPJ: <span className="text-conteudo">{formatCnpj(detail.cnpj)}</span></span>}
                 {detail.phone && <span>Tel: <span className="text-conteudo">{detail.phone}</span></span>}
                 {detail.city && <span>{detail.city}{detail.state ? ` - ${detail.state}` : ""}</span>}
@@ -598,6 +633,19 @@ export function CompanyDetailModal({
                   <Icon name="document" size={16} strokeWidth={2} />
                   Notas ({companyNotes.length})
                 </button>
+                {somenteLeitura && (
+                  <button
+                    onClick={() => setActiveTab("equipments")}
+                    className={cn(
+                      "px-4 py-2 text-sm font-medium border-b-2 transition-colors cursor-pointer",
+                      activeTab === "equipments"
+                        ? "border-action text-conteudo-link"
+                        : "border-transparent text-conteudo-muted hover:text-conteudo",
+                    )}
+                  >
+                    Equipamentos ({totalEquipamentos ?? 0})
+                  </button>
+                )}
               </div>
 
               {/* Clients tab */}
@@ -605,13 +653,17 @@ export function CompanyDetailModal({
                 <>
                   <div className="flex items-center justify-between mb-2">
                     <p className="text-sm font-semibold text-conteudo">Clientes</p>
-                    <Button size="sm" onClick={() => setShowAssign(true)}><Icon name="plus" size={16} strokeWidth={2} />Vincular</Button>
+                    {!somenteLeitura && (
+                      <Button size="sm" onClick={() => setShowAssign(true)}><Icon name="plus" size={16} strokeWidth={2} />Vincular</Button>
+                    )}
                   </div>
 
                   {detail.clients.length === 0 ? (
                     <div className="flex-1 flex flex-col items-center justify-center text-center py-6 rounded-lg border border-dashed border-borda text-sm text-conteudo-muted">
                       Nenhum cliente vinculado.
-                      <div className="mt-2"><Button size="sm" onClick={() => setShowAssign(true)}><Icon name="plus" size={16} strokeWidth={2} />Vincular cliente</Button></div>
+                      {!somenteLeitura && (
+                        <div className="mt-2"><Button size="sm" onClick={() => setShowAssign(true)}><Icon name="plus" size={16} strokeWidth={2} />Vincular cliente</Button></div>
+                      )}
                     </div>
                   ) : (
                     <div className="flex-1 flex flex-col min-h-0">
@@ -623,12 +675,12 @@ export function CompanyDetailModal({
                               <p className="text-xs text-conteudo-muted truncate">{c.email}</p>
                               {c.client_notes && <p className="text-xs text-on-tint-warning line-clamp-1 mt-0.5">{c.client_notes}</p>}
                             </div>
-                            <div className="flex gap-1 ml-2 shrink-0">
+                            {!somenteLeitura && <div className="flex gap-1 ml-2 shrink-0">
                               <button title="Notas" onClick={() => setNoteClient(c)} className="p-1.5 rounded text-conteudo-muted hover:text-on-tint-warning hover:bg-tint-warning transition-colors cursor-pointer"><Icon name="document" size={16} strokeWidth={2} /></button>
                               <button title="Desvincular" aria-label={`Desvincular ${c.name}`} onClick={() => setUnassignTarget(c)} disabled={removingId === c.id} className="p-1.5 rounded text-conteudo-muted hover:text-on-tint-danger hover:bg-tint-danger transition-colors cursor-pointer disabled:opacity-50">
                                 {removingId === c.id ? <Spinner size="sm" /> : <Icon name="close" size={16} strokeWidth={2} />}
                               </button>
-                            </div>
+                            </div>}
                           </li>
                         ))}
                       </ul>
@@ -650,19 +702,23 @@ export function CompanyDetailModal({
                 <>
                   <div className="flex items-center justify-between mb-3">
                     <p className="text-sm font-semibold text-on-tint-warning">Notas da empresa</p>
-                    <Button size="sm" variant="ghost" onClick={() => setShowAddCompanyNote(true)}>
-                      <Icon name="plus" size={16} strokeWidth={2} />Adicionar nota
-                    </Button>
+                    {!somenteLeitura && (
+                      <Button size="sm" variant="ghost" onClick={() => setShowAddCompanyNote(true)}>
+                        <Icon name="plus" size={16} strokeWidth={2} />Adicionar nota
+                      </Button>
+                    )}
                   </div>
 
                   {companyNotes.length === 0 ? (
                     <div className="flex-1 flex flex-col items-center justify-center text-center py-8 rounded-lg border border-dashed border-warning/30 text-sm text-on-tint-warning">
                       Nenhuma nota ainda.
-                      <div className="mt-2">
-                        <Button size="sm" variant="ghost" onClick={() => setShowAddCompanyNote(true)}>
-                          <Icon name="plus" size={16} strokeWidth={2} />Adicionar nota
-                        </Button>
-                      </div>
+                      {!somenteLeitura && (
+                        <div className="mt-2">
+                          <Button size="sm" variant="ghost" onClick={() => setShowAddCompanyNote(true)}>
+                            <Icon name="plus" size={16} strokeWidth={2} />Adicionar nota
+                          </Button>
+                        </div>
+                      )}
                     </div>
                   ) : (
                     <div className="flex-1 overflow-y-auto space-y-2 pr-0.5">
@@ -678,7 +734,7 @@ export function CompanyDetailModal({
                               <span className="text-[10px] text-on-tint-warning">
                                 {new Date(n.created_at).toLocaleDateString("pt-BR", { day: "2-digit", month: "2-digit", year: "2-digit" })}
                               </span>
-                              <button
+                              {!somenteLeitura && <button
                                 // O botão é só o ícone, e o `Icon` é
                                 // `aria-hidden`: sem isto o leitor de tela
                                 // anuncia "botão" e mais nada.
@@ -688,7 +744,7 @@ export function CompanyDetailModal({
                                 className="opacity-0 group-hover:opacity-100 p-0.5 rounded text-on-tint-warning hover:text-on-tint-danger transition-all cursor-pointer"
                               >
                                 {companyNoteDeleting === n.id ? <Spinner size="sm" /> : <Icon name="trash" size={16} strokeWidth={2} />}
-                              </button>
+                              </button>}
                             </div>
                           </div>
                           <p className="text-xs text-on-tint-warning line-clamp-3 whitespace-pre-wrap">{n.content}</p>
@@ -699,8 +755,57 @@ export function CompanyDetailModal({
                 </>
               )}
 
+              {/* Equipments tab — só na consulta */}
+              {somenteLeitura && activeTab === "equipments" && (
+                <div className="flex-1 flex flex-col min-h-0">
+                  <p className="text-xs text-conteudo-muted mb-2">
+                    Equipamentos cujo responsável tem vínculo com esta empresa.
+                  </p>
+                  {erroEquipamentos ? (
+                    <p role="alert" className="text-sm text-on-tint-danger">Não foi possível carregar os equipamentos.</p>
+                  ) : equipamentos === null ? (
+                    <div className="flex justify-center py-6"><Spinner /></div>
+                  ) : equipamentos.length === 0 ? (
+                    <div className="flex-1 flex items-center justify-center text-center py-6 rounded-lg border border-dashed border-borda text-sm text-conteudo-muted">
+                      Nenhum equipamento com responsável desta empresa.
+                    </div>
+                  ) : (
+                    <ul className="divide-y divide-borda rounded-lg border border-borda overflow-y-auto flex-1">
+                      {equipamentos.map((e) => (
+                        <li key={e.id} className="flex items-center justify-between gap-3 px-3 py-2.5">
+                          <div className="min-w-0">
+                            <p className="text-sm font-medium text-conteudo-heading truncate">{e.name}</p>
+                            <p className="text-xs text-conteudo-muted truncate">
+                              {[e.product_name, e.serial_number].filter(Boolean).join(" · ") || "—"}
+                            </p>
+                          </div>
+                          <span className="text-xs text-conteudo-muted shrink-0">{e.owner_name}</span>
+                        </li>
+                      ))}
+                    </ul>
+                  )}
+                  {(totalEquipamentos ?? 0) > 0 && (
+                    <Link
+                      to={`/equipamentos?empresa=${encodeURIComponent(company.id)}`}
+                      className="mt-3 text-sm text-conteudo-link hover:text-conteudo-link-hover self-start rounded focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-action"
+                    >
+                      Ver {totalEquipamentos === 1 ? "o equipamento" : `os ${totalEquipamentos} equipamentos`} em Equipamentos
+                    </Link>
+                  )}
+                </div>
+              )}
+
               <ModalFooter>
-                <Button variant="ghost" onClick={() => setShowEdit(true)}><Icon name="edit" size={16} strokeWidth={2} />Editar empresa</Button>
+                {somenteLeitura ? (
+                  <Link
+                    to="/grupos"
+                    className="mr-auto text-sm text-conteudo-link hover:text-conteudo-link-hover rounded focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-action"
+                  >
+                    Gerenciar em Grupos
+                  </Link>
+                ) : (
+                  <Button variant="ghost" onClick={() => setShowEdit(true)}><Icon name="edit" size={16} strokeWidth={2} />Editar empresa</Button>
+                )}
                 <Button onClick={onClose}>Fechar</Button>
               </ModalFooter>
             </>
@@ -763,15 +868,17 @@ export function CompanyDetailModal({
             </div>
             <p className="text-sm text-on-tint-warning whitespace-pre-wrap leading-relaxed min-h-[80px]">{viewCompanyNote.content}</p>
             <ModalFooter>
-              <Button
-                variant="ghost"
-                size="sm"
-                className="text-on-tint-danger hover:bg-tint-danger"
-                loading={companyNoteDeleting === viewCompanyNote.id}
-                onClick={() => { setDeleteCompanyNoteTarget(viewCompanyNote); setViewCompanyNote(null); }}
-              >
-                Deletar
-              </Button>
+              {!somenteLeitura && (
+                <Button
+                  variant="ghost"
+                  size="sm"
+                  className="text-on-tint-danger hover:bg-tint-danger"
+                  loading={companyNoteDeleting === viewCompanyNote.id}
+                  onClick={() => { setDeleteCompanyNoteTarget(viewCompanyNote); setViewCompanyNote(null); }}
+                >
+                  Deletar
+                </Button>
+              )}
               <Button onClick={() => setViewCompanyNote(null)}>Fechar</Button>
             </ModalFooter>
           </div>

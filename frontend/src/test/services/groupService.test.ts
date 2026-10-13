@@ -2,6 +2,8 @@ import { describe, it, expect, vi, beforeEach } from "vitest";
 import {
   getCompanySuggestions,
   createCompanyFromSuggestion,
+  listAllCompanies,
+  getCompanyById,
   type CompanySuggestion,
 } from "../../services/groupService";
 import { api } from "../../services/api";
@@ -81,5 +83,31 @@ describe("createCompanyFromSuggestion", () => {
     const resultado = await createCompanyFromSuggestion("g1", sugestao, ["u1"]);
 
     expect(resultado.company_created).toBe(false);
+  });
+});
+
+describe("consulta transversal de empresas", () => {
+  it("listAllCompanies chama GET /companies com busca, grupo e página", async () => {
+    vi.mocked(api.get).mockResolvedValue({ data: { items: [], total: 0, limit: 20, offset: 20 } });
+
+    await listAllCompanies({ search: "11.222", group_id: "g1", limit: 20, offset: 20 });
+
+    const chamadas = vi.mocked(api.get).mock.calls;
+    const url = chamadas[chamadas.length - 1][0] as string;
+    expect(url.startsWith("/companies?")).toBe(true);
+    expect(Object.fromEntries(new URLSearchParams(url.split("?")[1]))).toEqual({
+      search: "11.222",
+      group_id: "g1",
+      limit: "20",
+      offset: "20",
+    });
+  });
+
+  it("getCompanyById chama GET /companies/:id, sem o grupo", async () => {
+    vi.mocked(api.get).mockResolvedValue({ data: { id: "c1" } });
+
+    await getCompanyById("c1");
+
+    expect(api.get).toHaveBeenLastCalledWith("/companies/c1");
   });
 });

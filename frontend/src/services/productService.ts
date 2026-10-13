@@ -23,8 +23,14 @@ export interface Equipment {
   owner_id?: string | null;
   owner_name?: string | null;
   owner_email?: string | null;
+  /** Empresa DECLARADA: o que o responsável digitou no cadastro. Não é vínculo. */
   company_name?: string | null;
   company_cnpj?: string | null;
+  /** Só para a equipe. */
+  product_name?: string | null;
+  /** Empresa OFICIAL: o vínculo feito por um admin na tela de Grupos. Só para a equipe. */
+  linked_company_id?: string | null;
+  linked_company_name?: string | null;
 }
 
 export interface ProductListResponse {
@@ -121,6 +127,37 @@ export async function getEquipments(
   const { data } = await api.get<EquipmentListResponse>(
     `/products/${productId}/equipments?${p}`,
   );
+  return data;
+}
+
+/**
+ * O parque inteiro, de todos os produtos — só para a equipe (`GET /equipments`).
+ *
+ * O backend recusa cliente com 403; a rota da tela é a segunda tranca, não a
+ * primeira. `company_id` filtra pelo vínculo OFICIAL do responsável — a
+ * empresa declarada não entra em filtro.
+ */
+export async function listAllEquipments(
+  params: {
+    search?: string;
+    product_id?: string;
+    is_active?: boolean;
+    company_id?: string;
+    without_owner?: boolean;
+    limit?: number;
+    offset?: number;
+  } = {},
+): Promise<EquipmentListResponse> {
+  const p = new URLSearchParams();
+  if (params.search) p.set("search", params.search);
+  if (params.product_id) p.set("product_id", params.product_id);
+  if (params.is_active !== undefined)
+    p.set("is_active", String(params.is_active));
+  if (params.company_id) p.set("company_id", params.company_id);
+  if (params.without_owner) p.set("without_owner", "true");
+  if (params.limit !== undefined) p.set("limit", String(params.limit));
+  if (params.offset !== undefined) p.set("offset", String(params.offset));
+  const { data } = await api.get<EquipmentListResponse>(`/equipments?${p}`);
   return data;
 }
 

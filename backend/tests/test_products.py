@@ -86,6 +86,11 @@ def _mock_equipment(serial=None):
     e.owner_email = None
     e.company_name = None
     e.company_cnpj = None
+    # Só a equipe recebe; no ORM não são colunas, e o MagicMock inventaria um
+    # valor para qualquer atributo que não fosse fixado aqui.
+    e.product_name = None
+    e.linked_company_id = None
+    e.linked_company_name = None
     return e
 
 
