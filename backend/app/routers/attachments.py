@@ -5,6 +5,8 @@ Permissões:
   POST   /tickets/{id}/attachments   — qualquer autenticado com acesso ao ticket
   GET    /tickets/{id}/attachments   — qualquer autenticado com acesso ao ticket
   GET    /attachments/{id}           — qualquer autenticado com acesso ao ticket
+  POST   /tickets/{id}/attachments/archive — qualquer autenticado com acesso ao ticket
+         (o ZIP em si sai por GET /files/archive/{token}, ver files.py)
   DELETE /attachments/{id}           — admin, technician
 
 Regras de negócio:
@@ -22,12 +24,14 @@ from datetime import UTC, datetime
 from typing import Annotated
 from urllib.parse import quote
 
-from fastapi import APIRouter, Depends, File, HTTPException, UploadFile, status
+from fastapi import APIRouter, Depends, File, HTTPException, Request, UploadFile, status
 from sqlalchemy import func, select
 from sqlalchemy.ext.asyncio import AsyncSession
+from sqlalchemy.orm import selectinload
 
 from app.core.config import Settings, get_settings
 from app.core.database import get_db
+from app.core.rate_limit import chave_por_usuario, limiter
 from app.core.security import authorize, get_current_user
 from app.models.models import (
     Attachment,
@@ -39,12 +43,15 @@ from app.models.models import (
     UserRole,
 )
 from app.schemas.attachment import (
+    AttachmentArchiveResponse,
+    AttachmentArchiveUnverified,
     AttachmentDownloadResponse,
     AttachmentListResponse,
     AttachmentResponse,
 )
-from app.services import antivirus, storage
+from app.services import antivirus, arquivo_zip, storage
 from app.utils.crud import get_or_404
+from app.utils.history import CAMPO_ANEXO_ADICIONADO, registra_historico
 from app.utils.ticket_access import ensure_ticket_visible
 from app.utils.uploads import ler_ate_o_limite
 
@@ -60,6 +67,23 @@ _ANEXO_NAO_ENCONTRADO = "Attachment not found"
 
 
 # ── Helpers ───────────────────────────────────────────────────
+
+
+def _resposta(attachment: Attachment, autor: User) -> AttachmentResponse:
+    """O anexo com nome e papel de quem enviou, lidos do cadastro AGORA.
+
+    Lidos na hora, e não copiados para o anexo no envio: conta anonimizada
+    depois do envio passa a aparecer anonimizada aqui também.
+
+    `autor` vem de fora porque cada chamador já o tem sem ir ao banco: no envio
+    é o próprio `actor`; na listagem, `attachment.user` carregado pelo
+    `selectinload` — numa sessão assíncrona, carga preguiçosa é
+    `MissingGreenlet`.
+    """
+    resposta = AttachmentResponse.model_validate(attachment)
+    resposta.uploaded_by_name = autor.name
+    resposta.uploaded_by_role = autor.role
+    return resposta
 
 
 async def _get_attachment_or_404(attachment_id: uuid.UUID, db: AsyncSession) -> Attachment:
@@ -180,13 +204,19 @@ async def upload_attachments(
                 entity_id=attachment.id,
             )
         )
+        # O acontecimento que a conversa e a aba Atividade mostram. Na mesma
+        # transação do anexo: se um arquivo do lote for recusado adiante, o
+        # commit abaixo nunca acontece e não sobra evento de arquivo que não
+        # existe. Grava só o id — nome de pessoa nenhum vai para o texto: quem
+        # enviou é o `user_id`, e o nome é lido do cadastro na hora de mostrar.
+        registra_historico(db, ticket_id, actor.id, CAMPO_ANEXO_ADICIONADO, None, attachment.id)
         created.append(attachment)
 
     await db.commit()
     for att in created:
         await db.refresh(att)
 
-    return [AttachmentResponse.model_validate(a) for a in created]
+    return [_resposta(a, actor) for a in created]
 
 
 @router.get("/tickets/{ticket_id}/attachments", response_model=AttachmentListResponse)
@@ -201,14 +231,99 @@ async def list_attachments(
 
     result = await db.execute(
         select(Attachment)
+        .options(selectinload(Attachment.user))
         .where(Attachment.ticket_id == ticket_id)
         .order_by(Attachment.created_at.asc())
     )
     attachments = result.scalars().all()
 
     return AttachmentListResponse(
-        items=[AttachmentResponse.model_validate(a) for a in attachments],
+        items=[_resposta(a, a.user) for a in attachments],
         total=len(attachments),
+    )
+
+
+@router.post("/tickets/{ticket_id}/attachments/archive", response_model=AttachmentArchiveResponse)
+# O decorador do slowapi roda DEPOIS das dependências: o usuário já foi
+# autenticado quando a chave é lida, e o 429 sai antes de qualquer consulta ao
+# chamado — sem token, sem auditoria, sem temporário. Alheio, inexistente e
+# próprio gastam o mesmo balde, então o 429 não diz nada sobre o chamado.
+@limiter.limit(get_settings().rate_limit_zip_anexos, key_func=chave_por_usuario)
+async def request_attachments_archive(
+    request: Request,
+    ticket_id: uuid.UUID,
+    db: Annotated[AsyncSession, Depends(get_db)],
+    actor: Annotated[User, Depends(get_current_user)],
+    settings: Annotated[Settings, Depends(get_settings)],
+) -> AttachmentArchiveResponse:
+    """Autoriza baixar TODOS os anexos do chamado num ZIP, e devolve o link.
+
+    O acesso é o da listagem: cliente só no chamado que é dele, com o mesmo 404
+    do chamado inexistente. Os ids saem congelados num token assinado — o ZIP
+    leva estes anexos e nenhum outro, nem os que chegarem depois.
+
+    Registra o pedido na auditoria como `export` (o valor existe no enum desde
+    o schema inicial), só com ids e contagens: nome de arquivo pode ser dado
+    pessoal, e a trilha não precisa dele para dizer quem levou o quê.
+    """
+    ticket = await get_or_404(db, Ticket, ticket_id, _CHAMADO_NAO_ENCONTRADO)
+    if actor.role == UserRole.client:
+        ensure_ticket_visible(ticket, actor, _CHAMADO_NAO_ENCONTRADO)
+
+    anexos = (
+        (
+            await db.execute(
+                select(Attachment)
+                .where(Attachment.ticket_id == ticket_id)
+                .order_by(Attachment.created_at.asc(), Attachment.id.asc())
+            )
+        )
+        .scalars()
+        .all()
+    )
+    if not anexos:
+        raise HTTPException(
+            status_code=status.HTTP_422_UNPROCESSABLE_CONTENT,
+            detail="Este chamado não tem anexos para baixar.",
+        )
+
+    # Confere o disco JÁ no pedido: é aqui que a tela consegue mostrar o erro.
+    # A entrega confere de novo, para o que sumir entre o pedido e o clique.
+    _, sumidos = arquivo_zip.confere_no_disco(anexos, settings)
+    if sumidos:
+        raise HTTPException(
+            status_code=status.HTTP_409_CONFLICT,
+            detail=arquivo_zip.mensagem_de_sumidos(sumidos),
+        )
+
+    ids = [str(a.id) for a in anexos]
+    nao_verificados = [a for a in anexos if not a.virus_scanned]
+
+    db.add(
+        AuditLog(
+            user_id=actor.id,
+            action=AuditAction.export,
+            entity_type="ticket",
+            entity_id=ticket.id,
+            new_data={
+                "attachment_ids": ids,
+                "total": len(ids),
+                "nao_verificados": len(nao_verificados),
+            },
+        )
+    )
+    await db.commit()
+
+    expira = settings.file_url_expires_seconds
+    token = storage.create_archive_token(str(ticket.id), ids, settings, expira)
+    return AttachmentArchiveResponse(
+        url=f"{settings.api_prefix}/files/archive/{token}",
+        expires_in=expira,
+        total=len(ids),
+        nao_verificados=[
+            AttachmentArchiveUnverified(id=a.id, original_name=a.original_name)
+            for a in nao_verificados
+        ],
     )
 
 
@@ -228,6 +343,13 @@ async def get_attachment_url(
     ticket = await get_or_404(db, Ticket, attachment.ticket_id, _ANEXO_NAO_ENCONTRADO)
     if actor.role == UserRole.client:
         ensure_ticket_visible(ticket, actor, _ANEXO_NAO_ENCONTRADO)
+
+    # O arquivo sumiu do disco (volume trocado, limpeza manual): o mesmo 404 do
+    # anexo inexistente, e não um link que leva a outro 404. Quem pede o link
+    # é a TELA, e é aqui que ela consegue mostrar o aviso; o `<iframe>` do
+    # visualizador não avisa erro HTTP e exibia o JSON cru do `/files`.
+    if not storage.file_exists(attachment.s3_key, settings):
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail=_ANEXO_NAO_ENCONTRADO)
 
     url = await storage.get_presigned_url(attachment.s3_key, settings)
     # Em disco o arquivo tem nome interno (uuid); sem isto o usuário baixaria

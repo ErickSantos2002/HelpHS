@@ -1767,6 +1767,7 @@ async def get_ticket_history(
     for h in entries:
         item = TicketHistoryResponse.model_validate(h)
         item.user_name = h.user.name if h.user else None
+        item.user_role = h.user.role if h.user else None
         items.append(item)
 
     return TicketHistoryListResponse(

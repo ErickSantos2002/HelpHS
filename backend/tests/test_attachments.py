@@ -57,6 +57,9 @@ _ATTACH_ID = uuid.uuid4()
 def _mock_user(role=UserRole.technician, user_id=None):
     u = MagicMock()
     u.id = user_id or uuid.uuid4()
+    # Nome de verdade: a resposta do anexo leva o nome de quem enviou, e um
+    # MagicMock no lugar da string falha a validação do schema.
+    u.name = f"Pessoa {role.value}"
     u.email = f"{role.value}@test.com"
     u.role = role
     u.status = UserStatus.active
@@ -87,6 +90,11 @@ def _mock_attachment():
     a.virus_scanned = True
     a.virus_clean = True
     a.created_at = _NOW
+    a.user = _mock_user(UserRole.client, _CREATOR_ID)
+    # O schema lê os dois do objeto (`from_attributes`) antes de o router
+    # preenchê-los; sem valor, o MagicMock inventa um e a validação falha.
+    a.uploaded_by_name = None
+    a.uploaded_by_role = None
     return a
 
 
@@ -167,6 +175,18 @@ def _db_seq_override(*responses):
 def _clear():
     yield
     app.dependency_overrides.clear()
+
+
+@pytest.fixture(autouse=True)
+def _arquivo_em_disco():
+    """Os anexos daqui são mocks, sem arquivo nenhum em disco.
+
+    `GET /attachments/{id}` passou a conferir o disco antes de emitir o link
+    (09/10/2026). Com banco e arquivo de verdade, o caso do arquivo sumido é
+    provado em `test_anexos_zip.py`; aqui o disco é dado como presente.
+    """
+    with patch("app.routers.attachments.storage.file_exists", return_value=True):
+        yield
 
 
 @pytest.fixture()

@@ -147,6 +147,7 @@ def _historico(field: str, antigo: str, novo: str):
     # Sem valor explícito o MagicMock devolve um objeto e a validação falha —
     # a mesma armadilha que `_mock_ticket` documenta para os campos opcionais.
     h.user_name = None
+    h.user_role = None
     from tests.test_tickets import _NOW
 
     h.created_at = _NOW

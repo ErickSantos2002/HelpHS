@@ -1,7 +1,10 @@
 import { describe, it, expect, vi, beforeEach } from "vitest";
 import {
   canPreview,
+  downloadAttachment,
   getAttachmentUrl,
+  requestAttachmentsArchive,
+  tipoDePrevia,
   uploadAttachments,
 } from "../../services/attachmentService";
 import { api } from "../../services/api";
@@ -125,5 +128,68 @@ describe("uploadAttachments — contrato com o backend", () => {
     });
     mockPost.mockRejectedValue(erro);
     await expect(uploadAttachments("t-1", [arquivo("evil.pdf")])).rejects.toBe(erro);
+  });
+});
+
+describe("tipoDePrevia", () => {
+  it("separa o que abre como imagem, PDF e texto", () => {
+    expect(tipoDePrevia("foto.JPG")).toBe("imagem");
+    expect(tipoDePrevia("print.webp")).toBe("imagem");
+    expect(tipoDePrevia("laudo.pdf")).toBe("pdf");
+    expect(tipoDePrevia("log.txt")).toBe("texto");
+  });
+
+  it("o resto não tem prévia — inclusive SVG e HTML, que o backend serve como download", () => {
+    for (const nome of ["planilha.xlsx", "icone.svg", "pagina.html", "sem-extensao", "pacote.zip"]) {
+      expect(tipoDePrevia(nome)).toBe("nenhuma");
+    }
+  });
+
+  it("canPreview continua dizendo o mesmo que tipoDePrevia", () => {
+    for (const nome of ["foto.png", "laudo.pdf", "log.txt", "planilha.xlsx"]) {
+      expect(canPreview(nome)).toBe(tipoDePrevia(nome) !== "nenhuma");
+    }
+  });
+});
+
+describe("downloadAttachment", () => {
+  it("pede o link ao backend com download=true e abre numa aba nova", async () => {
+    mockGet.mockResolvedValue({ data: { url: "/api/v1/files/tok?filename=laudo.pdf" } });
+    const abrir = vi.spyOn(window, "open").mockReturnValue(null);
+
+    await downloadAttachment("a1");
+
+    expect(mockGet).toHaveBeenCalledWith("/attachments/a1");
+    expect(abrir).toHaveBeenCalledWith(expect.stringContaining("download=true"), "_blank");
+    abrir.mockRestore();
+  });
+
+  it("deixa o erro do backend subir, sem abrir nada", async () => {
+    mockGet.mockRejectedValue(new Error("404"));
+    const abrir = vi.spyOn(window, "open").mockReturnValue(null);
+
+    await expect(downloadAttachment("a1")).rejects.toThrow("404");
+    expect(abrir).not.toHaveBeenCalled();
+    abrir.mockRestore();
+  });
+});
+
+describe("requestAttachmentsArchive", () => {
+  it("pede o lote por POST e devolve o link já resolvido", async () => {
+    mockPost.mockResolvedValue({
+      data: {
+        url: "/api/v1/files/archive/tok",
+        expires_in: 3600,
+        total: 2,
+        nao_verificados: [],
+      },
+    });
+
+    const lote = await requestAttachmentsArchive("t1");
+
+    expect(mockPost).toHaveBeenCalledWith("/tickets/t1/attachments/archive");
+    expect(lote.url).toMatch(/\/files\/archive\/tok$/);
+    expect(lote.url.startsWith("/api/v1") || lote.url.startsWith("http")).toBe(true);
+    expect(lote.total).toBe(2);
   });
 });

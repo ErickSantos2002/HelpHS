@@ -1,8 +1,16 @@
 import { act, fireEvent, render, screen, waitFor, within } from "@testing-library/react";
 import type { ReactNode } from "react";
-import { beforeEach, describe, expect, it, vi } from "vitest";
+import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
-vi.mock("../../components/chat/ChatPanel", () => ({ ChatPanel: () => null }));
+// As props do chat ficam guardadas: o painel é mockado, e o que a página
+// promete a ele (os acontecimentos de anexo) só se mede por aqui.
+let propsDoChat: Record<string, unknown> = {};
+vi.mock("../../components/chat/ChatPanel", () => ({
+  ChatPanel: (p: Record<string, unknown>) => {
+    propsDoChat = p;
+    return null;
+  },
+}));
 vi.mock("../../components/kb/KBSuggestionsPanel", () => ({
   KBSuggestionsPanel: () => null,
 }));
@@ -12,13 +20,20 @@ let papelDoUsuario = "admin";
 vi.mock("../../contexts/AuthContext", () => ({
   useAuth: () => ({ user: { id: "u1", role: papelDoUsuario, name: "Admin" } }),
 }));
-vi.mock("../../services/attachmentService", () => ({
-  getAttachments: vi.fn(),
-  uploadAttachments: vi.fn(),
-  deleteAttachment: vi.fn(),
-  downloadAttachment: vi.fn(),
-  attachmentPreviewUrl: vi.fn(),
-}));
+// A rede é falsa; as regras puras (`tipoDePrevia`, `canPreview`) são as de
+// verdade — o visualizador decide o que mostrar por elas.
+vi.mock("../../services/attachmentService", async (importOriginal) => {
+  const real = await importOriginal<typeof import("../../services/attachmentService")>();
+  return {
+    ...real,
+    getAttachments: vi.fn(),
+    uploadAttachments: vi.fn(),
+    deleteAttachment: vi.fn(),
+    downloadAttachment: vi.fn(),
+    getAttachmentUrl: vi.fn(),
+    requestAttachmentsArchive: vi.fn(),
+  };
+});
 vi.mock("../../services/ticketService", () => ({
   assignTicket: vi.fn(),
   toggleTicketAi: vi.fn(),
@@ -1881,5 +1896,312 @@ describe("TicketDetailPage — recusa com motivo", () => {
 
     expect(await screen.findByRole("dialog")).toBeInTheDocument();
     expect(ticketService.createTicketCall).not.toHaveBeenCalled();
+  });
+});
+
+// ── Anexo: quem enviou, e o acontecimento na conversa ─────────
+
+describe("TicketDetailPage — anexo adicionado", () => {
+  const ANEXO = {
+    id: "a1",
+    ticket_id: "t1",
+    uploaded_by: "u9",
+    uploaded_by_name: "Bruno Lima",
+    uploaded_by_role: "technician",
+    original_name: "laudo.pdf",
+    mime_type: "application/pdf",
+    size_bytes: 1024,
+    virus_scanned: true,
+    virus_clean: true,
+    created_at: "2026-10-09T17:03:00.000Z",
+  };
+  const EVENTO = {
+    id: "h9",
+    ticket_id: "t1",
+    user_id: "u9",
+    user_name: "Bruno Lima",
+    user_role: "technician",
+    field: "attachment_added",
+    old_value: null,
+    new_value: "a1",
+    comment: null,
+    created_at: "2026-10-09T17:03:00.000Z",
+  };
+
+  beforeEach(() => {
+    papelDoUsuario = "admin";
+    propsDoChat = {};
+    vi.clearAllMocks();
+  });
+
+  async function enviaUmArquivo() {
+    fireEvent.click(screen.getByText("Anexos"));
+    fireEvent.click(await screen.findByText("+ Adicionar arquivo"));
+    const entrada = document.querySelector('input[type="file"]') as HTMLInputElement;
+    const arquivo = new File(["%PDF"], "laudo.pdf", { type: "application/pdf" });
+    fireEvent.change(entrada, { target: { files: [arquivo] } });
+    await act(async () => {
+      fireEvent.click(screen.getByRole("button", { name: "Enviar" }));
+    });
+  }
+
+  it("o item do anexo diz quem enviou, com papel e data/hora", async () => {
+    await montar();
+    vi.mocked(attachmentService.getAttachments).mockResolvedValue({
+      items: [ANEXO],
+    } as never);
+    // `montar` já carregou com lista vazia; a troca de chamado não cabe aqui,
+    // então o anexo entra pelo envio, que recarrega a lista.
+    vi.mocked(attachmentService.uploadAttachments).mockResolvedValue([ANEXO] as never);
+    await enviaUmArquivo();
+
+    // Nome, papel e data na MESMA linha do item. A hora local depende do fuso
+    // do processo; a data, para este instante, não.
+    const linha = await screen.findByText(/Enviado por Bruno Lima/);
+    expect(linha.textContent).toMatch(/^Enviado por Bruno Lima \(Técnico\) · 09\/10\/2026/);
+  });
+
+  it("envio bem-sucedido recarrega anexos E histórico", async () => {
+    await montar();
+    const anexosAntes = vi.mocked(attachmentService.getAttachments).mock.calls.length;
+    const historicoAntes = vi.mocked(ticketService.getTicketHistory).mock.calls.length;
+    vi.mocked(attachmentService.uploadAttachments).mockResolvedValue([ANEXO] as never);
+
+    await enviaUmArquivo();
+
+    await waitFor(() =>
+      expect(vi.mocked(ticketService.getTicketHistory).mock.calls.length).toBe(
+        historicoAntes + 1,
+      ),
+    );
+    expect(vi.mocked(attachmentService.getAttachments).mock.calls.length).toBe(anexosAntes + 1);
+    expect(toast.success).toHaveBeenCalledWith("Anexos enviados com sucesso.");
+  });
+
+  it("envio recusado não anuncia sucesso nem recarrega o histórico", async () => {
+    await montar();
+    const historicoAntes = vi.mocked(ticketService.getTicketHistory).mock.calls.length;
+    vi.mocked(attachmentService.uploadAttachments).mockRejectedValue(new Error("422"));
+
+    await enviaUmArquivo();
+
+    await waitFor(() => expect(toast.error).toHaveBeenCalled());
+    expect(toast.success).not.toHaveBeenCalled();
+    expect(vi.mocked(ticketService.getTicketHistory).mock.calls.length).toBe(historicoAntes);
+  });
+
+  it("o cliente vê o evento de anexo na Atividade", async () => {
+    papelDoUsuario = "client";
+    await montar([], TICKET, [EVENTO]);
+    fireEvent.click(screen.getByText("Atividade"));
+    expect(await screen.findByText("Anexo adicionado")).toBeInTheDocument();
+  });
+
+  it("a conversa recebe o acontecimento pronto, com autor e arquivo", async () => {
+    vi.mocked(attachmentService.getAttachments).mockResolvedValue({
+      items: [ANEXO],
+    } as never);
+    vi.mocked(ticketService.getTicket).mockResolvedValue(TICKET as never);
+    vi.mocked(ticketService.getTicketHistory).mockResolvedValue({
+      items: [EVENTO, { ...EVENTO, id: "h10", field: "status", new_value: "open" }],
+    } as never);
+    vi.mocked(ticketService.listTicketNotes).mockResolvedValue([] as never);
+    vi.mocked(surveyService.getTicketSurvey).mockResolvedValue(null as never);
+    vi.mocked(userService.getTechnicians).mockResolvedValue([] as never);
+    vi.mocked(tagService.getTags).mockResolvedValue([] as never);
+    render(
+      <MemoryRouter initialEntries={["/tickets/t1"]}>
+        <Routes>
+          <Route path="/tickets/:id" element={<TicketDetailPage />} />
+        </Routes>
+      </MemoryRouter>,
+    );
+    await waitFor(() =>
+      expect(propsDoChat.eventosDeAnexo).toEqual([
+        {
+          id: "h9",
+          created_at: "2026-10-09T17:03:00.000Z",
+          autor: "Bruno Lima",
+          papel: "technician",
+          anexo: ANEXO,
+        },
+      ]),
+    );
+    expect(typeof propsDoChat.onAbrirAnexo).toBe("function");
+  });
+});
+
+// ── Visualizador e ZIP ───────────────────────────────────────
+
+describe("TicketDetailPage — visualizador e ZIP dos anexos", () => {
+  const ANEXO = {
+    id: "a1",
+    ticket_id: "t1",
+    uploaded_by: "u9",
+    uploaded_by_name: "Bruno Lima",
+    uploaded_by_role: "technician",
+    original_name: "foto.png",
+    mime_type: "image/png",
+    size_bytes: 1024,
+    virus_scanned: true,
+    virus_clean: true,
+    created_at: "2026-10-09T17:03:00.000Z",
+  };
+  const PLANILHA = { ...ANEXO, id: "a2", original_name: "planilha.xlsx" };
+
+  let abrir: ReturnType<typeof vi.spyOn>;
+
+  beforeEach(() => {
+    papelDoUsuario = "admin";
+    propsDoChat = {};
+    vi.clearAllMocks();
+    abrir = vi.spyOn(window, "open").mockReturnValue(null);
+    vi.mocked(attachmentService.getAttachmentUrl).mockResolvedValue("/api/v1/files/tok?f=x");
+  });
+
+  afterEach(() => {
+    abrir.mockRestore();
+  });
+
+  async function montarCom(anexos: unknown[]) {
+    vi.mocked(ticketService.getTicket).mockResolvedValue(TICKET as never);
+    vi.mocked(ticketService.getTicketHistory).mockResolvedValue({ items: [] } as never);
+    vi.mocked(ticketService.listTicketNotes).mockResolvedValue([] as never);
+    vi.mocked(attachmentService.getAttachments).mockResolvedValue({ items: anexos } as never);
+    vi.mocked(surveyService.getTicketSurvey).mockResolvedValue(null as never);
+    vi.mocked(userService.getTechnicians).mockResolvedValue([] as never);
+    vi.mocked(tagService.getTags).mockResolvedValue([] as never);
+    render(
+      <MemoryRouter initialEntries={["/tickets/t1"]}>
+        <Routes>
+          <Route path="/tickets/:id" element={<TicketDetailPage />} />
+        </Routes>
+      </MemoryRouter>,
+    );
+    await screen.findByRole("heading", { name: "Impressora não imprime" });
+    fireEvent.click(screen.getByText("Anexos"));
+  }
+
+  it("clicar no nome abre o visualizador na própria tela, com a autoria", async () => {
+    await montarCom([ANEXO]);
+    await act(async () => {
+      fireEvent.click(await screen.findByRole("button", { name: "foto.png" }));
+    });
+    const dialogo = screen.getByRole("dialog", { name: "foto.png" });
+    expect(within(dialogo).getByText(/^Enviado por Bruno Lima \(Técnico\)/)).toBeInTheDocument();
+    expect(await within(dialogo).findByRole("img", { name: "foto.png" })).toBeInTheDocument();
+    expect(abrir).not.toHaveBeenCalled();
+  });
+
+  it("formato sem prévia também abre o visualizador, que oferece baixar", async () => {
+    await montarCom([PLANILHA]);
+    await act(async () => {
+      fireEvent.click(await screen.findByRole("button", { name: "planilha.xlsx" }));
+    });
+    expect(screen.getByText(/não tem visualização no navegador/)).toBeInTheDocument();
+    expect(attachmentService.getAttachmentUrl).not.toHaveBeenCalled();
+  });
+
+  it("o olho abre o mesmo visualizador, e o X fecha", async () => {
+    await montarCom([ANEXO]);
+    await act(async () => {
+      fireEvent.click(await screen.findByRole("button", { name: "Visualizar foto.png" }));
+    });
+    expect(screen.getByRole("dialog", { name: "foto.png" })).toBeInTheDocument();
+    fireEvent.click(screen.getByRole("button", { name: "Fechar" }));
+    expect(screen.queryByRole("dialog", { name: "foto.png" })).not.toBeInTheDocument();
+  });
+
+  it("o botão de baixar da lista usa o download autorizado", async () => {
+    vi.mocked(attachmentService.downloadAttachment).mockResolvedValue();
+    await montarCom([ANEXO]);
+    await act(async () => {
+      fireEvent.click(await screen.findByRole("button", { name: "Baixar foto.png" }));
+    });
+    expect(attachmentService.downloadAttachment).toHaveBeenCalledWith("a1");
+  });
+
+  it("excluir tem nome acessível com o arquivo, e só a equipe vê", async () => {
+    vi.mocked(attachmentService.deleteAttachment).mockResolvedValue();
+    await montarCom([ANEXO]);
+    await act(async () => {
+      fireEvent.click(await screen.findByRole("button", { name: "Excluir foto.png" }));
+    });
+    expect(attachmentService.deleteAttachment).toHaveBeenCalledWith("a1");
+  });
+
+  it("o cliente não recebe o botão de excluir", async () => {
+    papelDoUsuario = "client";
+    await montarCom([ANEXO]);
+    await screen.findByRole("button", { name: "foto.png" });
+    expect(screen.queryByRole("button", { name: "Excluir foto.png" })).not.toBeInTheDocument();
+    expect(screen.getByRole("button", { name: "Baixar foto.png" })).toBeInTheDocument();
+  });
+
+  it("sem anexos, o ZIP fica desabilitado", async () => {
+    await montarCom([]);
+    expect(await screen.findByRole("button", { name: "Baixar todos (ZIP)" })).toBeDisabled();
+  });
+
+  it("ZIP sem não verificados: pede o lote e abre o link direto", async () => {
+    vi.mocked(attachmentService.requestAttachmentsArchive).mockResolvedValue({
+      url: "/api/v1/files/archive/tok",
+      expires_in: 3600,
+      total: 1,
+      nao_verificados: [],
+    });
+    await montarCom([ANEXO]);
+    await act(async () => {
+      fireEvent.click(await screen.findByRole("button", { name: "Baixar todos (ZIP)" }));
+    });
+    expect(attachmentService.requestAttachmentsArchive).toHaveBeenCalledWith("t1");
+    expect(abrir).toHaveBeenCalledWith("/api/v1/files/archive/tok", "_blank");
+  });
+
+  it("ZIP com não verificados: avisa antes, e só baixa se a pessoa confirmar", async () => {
+    vi.mocked(attachmentService.requestAttachmentsArchive).mockResolvedValue({
+      url: "/api/v1/files/archive/tok",
+      expires_in: 3600,
+      total: 2,
+      nao_verificados: [{ id: "a2", original_name: "planilha.xlsx" }],
+    });
+    await montarCom([ANEXO, { ...PLANILHA, virus_scanned: false }]);
+    await act(async () => {
+      fireEvent.click(await screen.findByRole("button", { name: "Baixar todos (ZIP)" }));
+    });
+    const aviso = screen.getByRole("dialog", { name: "Baixar anexos não verificados?" });
+    expect(within(aviso).getByText("planilha.xlsx")).toBeInTheDocument();
+    expect(abrir).not.toHaveBeenCalled();
+
+    fireEvent.click(within(aviso).getByRole("button", { name: "Cancelar" }));
+    expect(abrir).not.toHaveBeenCalled();
+    expect(screen.queryByRole("dialog")).not.toBeInTheDocument();
+
+    await act(async () => {
+      fireEvent.click(screen.getByRole("button", { name: "Baixar todos (ZIP)" }));
+    });
+    fireEvent.click(screen.getByRole("button", { name: "Baixar mesmo assim" }));
+    expect(abrir).toHaveBeenCalledWith("/api/v1/files/archive/tok", "_blank");
+  });
+
+  it("falha ao preparar o ZIP vira aviso, e nada é aberto", async () => {
+    vi.mocked(attachmentService.requestAttachmentsArchive).mockRejectedValue(
+      Object.assign(new Error("409"), { response: { status: 409, data: {} } }),
+    );
+    await montarCom([ANEXO]);
+    await act(async () => {
+      fireEvent.click(await screen.findByRole("button", { name: "Baixar todos (ZIP)" }));
+    });
+    await waitFor(() => expect(toast.error).toHaveBeenCalled());
+    expect(abrir).not.toHaveBeenCalled();
+  });
+
+  it("o evento da conversa abre o mesmo visualizador", async () => {
+    await montarCom([ANEXO]);
+    await waitFor(() => expect(typeof propsDoChat.onAbrirAnexo).toBe("function"));
+    await act(async () => {
+      (propsDoChat.onAbrirAnexo as (a: unknown) => void)(ANEXO);
+    });
+    expect(screen.getByRole("dialog", { name: "foto.png" })).toBeInTheDocument();
   });
 });

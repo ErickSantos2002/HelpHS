@@ -1,4 +1,4 @@
-export const APP_VERSION = "v1.19.0";
+export const APP_VERSION = "v1.20.0";
 
 export type EntryType = "novidade" | "corrigido" | "melhoria";
 
@@ -14,6 +14,28 @@ export interface ChangelogVersion {
 }
 
 export const CHANGELOG: ChangelogVersion[] = [
+  {
+    version: "v1.20.0",
+    date: "13/10/2026",
+    entries: [
+      {
+        type: "novidade",
+        text: "Visualizar anexos sem sair do chamado: imagens, PDFs e textos abrem na própria tela, e os demais formatos têm o botão Baixar.",
+      },
+      {
+        type: "novidade",
+        text: "Baixar todos os anexos do chamado de uma vez, num único arquivo ZIP. Se algum arquivo não passou pela verificação de vírus, o sistema avisa antes de baixar.",
+      },
+      {
+        type: "novidade",
+        text: "Quando alguém anexa um arquivo, a conversa e a Atividade do chamado mostram quem enviou, com o perfil e a data e hora.",
+      },
+      {
+        type: "melhoria",
+        text: "Cada anexo mostra quem o enviou e quando, e os botões de visualizar, baixar e excluir ficaram acessíveis pelo teclado e no celular.",
+      },
+    ],
+  },
   {
     version: "v1.19.0",
     date: "07/10/2026",

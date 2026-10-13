@@ -28,6 +28,9 @@ from loguru import logger
 from app.core.config import Settings
 
 _TOKEN_TYPE = "file"
+# Tipo PRÓPRIO para o lote de anexos: um token de arquivo único não abre ZIP, e
+# o do ZIP não abre arquivo nenhum em `/files/{token}`.
+_TOKEN_TYPE_LOTE = "attachments_archive"
 
 
 class StorageError(Exception):
@@ -115,6 +118,14 @@ async def delete_file(key: str, settings: Settings) -> None:
         logger.warning(f"Nao foi possivel remover {key}: {exc}")
 
 
+def file_exists(key: str, settings: Settings) -> bool:
+    """O arquivo está no disco? Key inválida conta como "não está"."""
+    try:
+        return resolve_path(key, settings).is_file()
+    except StorageError:
+        return False
+
+
 def create_file_token(key: str, settings: Settings, expires: int | None = None) -> str:
     """Token curto que autoriza baixar exatamente um arquivo."""
     now = datetime.now(UTC)
@@ -148,6 +159,49 @@ def read_file_token(token: str, settings: Settings) -> str:
     if not key:
         raise StorageError("Link invalido para download de arquivo.")
     return str(key)
+
+
+def create_archive_token(
+    ticket_id: str, attachment_ids: list[str], settings: Settings, expires: int | None = None
+) -> str:
+    """Token curto que autoriza baixar UM lote congelado de anexos de um chamado.
+
+    Os ids vão dentro do token assinado: o que foi autorizado no pedido é
+    exatamente o que pode sair no ZIP, nem um anexo a mais.
+    """
+    now = datetime.now(UTC)
+    ttl = expires if expires is not None else settings.file_url_expires_seconds
+    payload = {
+        "sub": ticket_id,
+        "ids": attachment_ids,
+        "type": _TOKEN_TYPE_LOTE,
+        "iat": now,
+        "exp": now + timedelta(seconds=ttl),
+        "iss": settings.jwt_issuer,
+    }
+    return jwt.encode(payload, settings.get_private_key(), algorithm=settings.jwt_algorithm)
+
+
+def read_archive_token(token: str, settings: Settings) -> tuple[str, list[str]]:
+    """Valida o token do lote e devolve (ticket_id, ids). StorageError se não servir."""
+    try:
+        payload = jwt.decode(
+            token,
+            settings.get_public_key(),
+            algorithms=[settings.jwt_algorithm],
+            issuer=settings.jwt_issuer,
+        )
+    except JWTError as exc:
+        raise StorageError("Link expirado ou invalido.") from exc
+
+    if payload.get("type") != _TOKEN_TYPE_LOTE:
+        raise StorageError("Link invalido para download de anexos.")
+
+    ticket_id = payload.get("sub")
+    ids = payload.get("ids")
+    if not ticket_id or not isinstance(ids, list) or not ids:
+        raise StorageError("Link invalido para download de anexos.")
+    return str(ticket_id), [str(i) for i in ids]
 
 
 async def get_presigned_url(key: str, settings: Settings, expires: int = 3600) -> str:
