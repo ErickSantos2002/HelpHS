@@ -1,3 +1,4 @@
+import { useState } from "react";
 import type { HTMLAttributes, ImgHTMLAttributes } from "react";
 import { cn } from "../../lib/utils";
 
@@ -68,7 +69,12 @@ export function Avatar({
   className,
   ...props
 }: AvatarProps) {
-  if (src) {
+  // Guarda QUAL endereço falhou, e não um "falhou" solto: a mesma URL
+  // quebrada não volta a ser tentada (nada de laço de onError), e uma URL
+  // nova — outra foto, ou o link renovado — é tentada normalmente.
+  const [srcQueFalhou, setSrcQueFalhou] = useState<string | null>(null);
+
+  if (src && src !== srcQueFalhou) {
     return (
       <img
         src={src}
@@ -79,6 +85,7 @@ export function Avatar({
           className,
         )}
         {...(props as ImgHTMLAttributes<HTMLImageElement>)}
+        onError={() => setSrcQueFalhou(src)}
       />
     );
   }

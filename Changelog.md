@@ -126,6 +126,22 @@ Regras completas em `docs/decisoes-e-regras.md`, seção "Anexos do chamado".
 
 ### Adicionado
 
+- **A pessoa pode remover a própria foto de perfil.** `DELETE /users/me/avatar`,
+  com confirmação na tela de perfil; sem foto, responde 204 do mesmo jeito. A
+  foto continua opcional, e sem ela — ou com uma imagem que não carrega — o
+  `Avatar` e o retrato do perfil mostram as iniciais, sem insistir na mesma URL
+  quebrada. A troca de `.png` por `.jpg` passa a apagar o arquivo anterior, e a
+  anonimização apaga o arquivo da foto; nos três casos o arquivo só sai **depois**
+  do commit, e só a chave legítima da própria conta é tocada. A gravação em disco
+  ficou atômica (temporário + `os.replace`), para uma falha não truncar a foto
+  sobrescrita. Corrige também dois defeitos anteriores do front: o
+  `getMeApi` não resolvia a URL da foto (o Topbar perdia a foto ao recarregar
+  com front e API em domínios diferentes), e salvar o perfil trocava a foto da
+  tela pela chave crua da resposta do `PATCH /users/me`. Sem migration. Foto de
+  terceiros continua fora. Cobertura em
+  `tests/test_foto_perfil_remocao_e_higiene.py` e nos testes de `Avatar`,
+  `ProfilePage`, `authService` e `userService`.
+
 - **Biblioteca de arquivos frequentes, e o anexo deles na conversa.** O acervo
   fica em `/biblioteca`, no grupo Gestão do menu, e é **só para staff** — o
   cliente não o vê, recebe o arquivo pelo que o técnico anexa. O técnico escolhe

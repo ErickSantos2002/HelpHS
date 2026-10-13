@@ -71,6 +71,28 @@ describe("getMeApi", () => {
     expect(mockGet).toHaveBeenCalledWith("/users/me");
     expect(result).toEqual(user);
   });
+
+  it("a foto sai como URL completa, e não como caminho relativo", async () => {
+    // Com front e API em domínios diferentes, `/api/v1/files/<token>` seria
+    // buscado no domínio do front — o Topbar ficava sem foto depois de recarregar.
+    vi.stubEnv("VITE_API_URL", "https://api.exemplo.com/api/v1");
+    mockGet.mockResolvedValue({
+      data: { id: "u1", avatar_url: "/api/v1/files/tok" },
+    });
+
+    try {
+      const result = await getMeApi();
+      expect(result.avatar_url).toBe("https://api.exemplo.com/api/v1/files/tok");
+    } finally {
+      vi.unstubAllEnvs();
+    }
+  });
+
+  it("sem foto continua nulo", async () => {
+    mockGet.mockResolvedValue({ data: { id: "u1", avatar_url: null } });
+
+    expect((await getMeApi()).avatar_url).toBeNull();
+  });
 });
 
 describe("logoutApi", () => {

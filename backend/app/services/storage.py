@@ -18,6 +18,8 @@ O "presigned url" aqui e um JWT curto embutido na URL, validado pelo endpoint
 """
 
 import asyncio
+import os
+import uuid
 from datetime import UTC, datetime, timedelta
 from functools import partial
 from pathlib import Path
@@ -75,13 +77,24 @@ async def upload_file(
     content_type: str,
     settings: Settings,
 ) -> str:
-    """Grava os bytes em disco e devolve a key."""
+    """Grava os bytes em disco e devolve a key.
+
+    A gravação é atômica: os bytes vão para um temporário no mesmo diretório
+    e só então substituem o destino. A foto de perfil sobrescreve a MESMA
+    chave quando a extensão não muda, e um `write_bytes` direto que falhasse
+    no meio (disco cheio) deixaria a foto anterior truncada no lugar.
+    """
     loop = asyncio.get_event_loop()
     destino = resolve_path(key, settings)
 
     def _write() -> None:
         destino.parent.mkdir(parents=True, exist_ok=True)
-        destino.write_bytes(data)
+        temporario = destino.with_name(f".{destino.name}.{uuid.uuid4().hex}.tmp")
+        try:
+            temporario.write_bytes(data)
+            os.replace(temporario, destino)
+        finally:
+            temporario.unlink(missing_ok=True)
 
     try:
         await loop.run_in_executor(None, _write)

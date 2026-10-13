@@ -1519,6 +1519,52 @@ chave errada entregaria a foto de outra pessoa.
 Fora do `/me`, a chave legítima continua saindo **crua** (não é URL
 utilizável). Mostrar foto de terceiros é decisão de produto ainda em aberto.
 
+### A própria foto: opcional, removível, sem arquivo órfão
+
+A foto **continua opcional**. Sem ela — ou com uma imagem que não carrega —
+aparecem as iniciais, tanto no `Avatar` compartilhado quanto no retrato da
+tela de perfil. O componente guarda **qual** endereço falhou: a mesma URL
+quebrada não é tentada de novo, e uma URL nova (outra foto, link renovado) é.
+
+**A pessoa remove a própria foto** por `DELETE /users/me/avatar`, com
+confirmação na tela. O endpoint não recebe chave nenhuma — tudo sai do usuário
+autenticado — e responde 204 também quando já não havia foto (sem gravar nem
+auditar nada). Havendo, zera `avatar_url`, audita como `update` e apaga o
+arquivo. Uma referência indevida gravada antes do PR #85 é zerada, porque é a
+linha de quem pediu, mas **nunca** vira exclusão de arquivo: ela pode apontar
+para a foto de outra conta.
+
+**O arquivo só sai do disco depois que o banco confirmou.** Vale para os três
+caminhos que apagam foto:
+
+| Caminho | O que sai do disco |
+|---|---|
+| `DELETE /users/me/avatar` | a chave legítima atual |
+| `POST /users/me/avatar` com extensão diferente (`.png` → `.jpg`) | a chave legítima anterior |
+| `POST /users/{id}/anonymize` | a chave legítima da conta anonimizada |
+
+Se o commit falhar, a linha continua apontando para um arquivo que continua
+lá. O contrário — apagar antes — deixaria a pessoa sem foto por uma falha do
+banco. É o oposto da ordem de `DELETE /attachments/{id}`, que apaga o arquivo
+antes da linha; lá a linha some junto, então não sobra referência quebrada.
+O `delete_file` não levanta: arquivo já ausente é sucesso, e erro de disco vira
+aviso no log. Por isso a remoção não trava num volume que perdeu o arquivo.
+
+Troca com a **mesma** extensão é a mesma chave: o arquivo é sobrescrito, e
+nada é apagado. Para isso não truncar a foto anterior numa falha de escrita
+(disco cheio), o `storage.upload_file` grava num temporário do mesmo
+diretório e só então substitui o destino (`os.replace`) — o que vale também
+para anexos e biblioteca.
+
+A anonimização apaga o arquivo da foto porque zerar a referência e deixar o
+arquivo no volume não anonimiza nada. Ela só faz isso depois das guardas: a
+recusa (técnico anonimizando admin, conta já anonimizada) não toca no disco.
+
+**Nenhuma regra de foto de terceiros entrou.** Admin não remove foto alheia, e
+nenhuma tela além do perfil e do Topbar mostra foto. Arquivos órfãos que já
+existem no volume (trocas de extensão e anonimizações anteriores) **não** foram
+limpos: isso seria um script avulso, com decisão própria.
+
 ## Anexos do chamado (13/10/2026)
 
 Anexo é só o que está na tabela `attachments`, enviado por

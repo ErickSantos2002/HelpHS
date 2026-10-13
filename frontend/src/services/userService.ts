@@ -203,6 +203,14 @@ export async function updateMe(
   return withAvatarUrl(data);
 }
 
+/**
+ * Remove a própria foto. Não manda chave nenhuma: o backend decide pelo
+ * usuário autenticado, e responde 204 também quando já não havia foto.
+ */
+export async function removeAvatar(): Promise<void> {
+  await api.delete("/users/me/avatar");
+}
+
 export async function completeOnboarding(
   payload: OnboardingPayload,
 ): Promise<UserSummary> {

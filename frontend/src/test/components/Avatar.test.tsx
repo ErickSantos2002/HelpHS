@@ -1,4 +1,4 @@
-import { render, screen } from "@testing-library/react";
+import { fireEvent, render, screen } from "@testing-library/react";
 import { describe, expect, it } from "vitest";
 import { Avatar } from "../../components/ui/Avatar";
 import { AA, contraste } from "../helpers/contraste";
@@ -19,6 +19,33 @@ describe("Avatar", () => {
     render(<Avatar name="Ana Ferreira" src="/foto.png" />);
     expect(screen.getByRole("img")).toHaveAccessibleName("Ana Ferreira");
     expect(screen.queryByText("AF")).not.toBeInTheDocument();
+  });
+
+  it("foto que não carrega cai nas iniciais", () => {
+    render(<Avatar name="Ana Ferreira" src="/quebrada.png" />);
+
+    fireEvent.error(screen.getByRole("img"));
+
+    expect(screen.queryByRole("img")).not.toBeInTheDocument();
+    expect(screen.getByText("AF")).toBeInTheDocument();
+  });
+
+  it("depois da falha, a MESMA url não é tentada de novo", () => {
+    const { rerender } = render(<Avatar name="Ana Ferreira" src="/quebrada.png" />);
+    fireEvent.error(screen.getByRole("img"));
+
+    rerender(<Avatar name="Ana Ferreira" src="/quebrada.png" />);
+
+    expect(screen.queryByRole("img")).not.toBeInTheDocument();
+  });
+
+  it("depois da falha, uma url NOVA é tentada normalmente", () => {
+    const { rerender } = render(<Avatar name="Ana Ferreira" src="/quebrada.png" />);
+    fireEvent.error(screen.getByRole("img"));
+
+    rerender(<Avatar name="Ana Ferreira" src="/nova.png" />);
+
+    expect(screen.getByRole("img")).toHaveAttribute("src", "/nova.png");
   });
 
   it.each([

@@ -1,4 +1,5 @@
 import { api } from "./api";
+import { resolveFileUrl } from "../lib/fileUrl";
 import type { AuthUser } from "../types/auth";
 
 export interface LoginRequest {
@@ -71,9 +72,16 @@ export async function verifyMfaApi(mfaToken: string, code: string): Promise<Toke
   return data;
 }
 
+/**
+ * A foto vai direto no `<img src>` do Topbar, então o caminho assinado que a
+ * API devolve (`/api/v1/files/<token>`) precisa virar URL completa aqui — como
+ * o `getMe` do `userService` já fazia. Sem isto, com front e API em domínios
+ * diferentes, o caminho relativo era buscado no domínio do front, e a foto só
+ * aparecia até o primeiro recarregamento depois de um upload.
+ */
 export async function getMeApi(): Promise<MeResponse> {
   const { data } = await api.get<MeResponse>("/users/me");
-  return data;
+  return { ...data, avatar_url: resolveFileUrl(data.avatar_url) };
 }
 
 export async function logoutApi(): Promise<void> {

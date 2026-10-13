@@ -524,15 +524,66 @@ async def upload_avatar(
     if not user:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Usuário não encontrado.")
 
+    # Só a chave LEGÍTIMA anterior é candidata a sair do disco: uma
+    # referência gravada antes do PR #85 pode apontar para a foto de outra
+    # conta, e trocar a minha não pode apagar a dela.
+    anterior = _avatar_do_proprio_usuario(user)
+
     user.avatar_url = key
     user.updated_at = datetime.now(UTC)
     _audit(db, AuditAction.update, current_user.id, user.id)
     await db.commit()
     await db.refresh(user)
 
+    # Depois do commit, e só se a extensão mudou: até aqui a linha ainda
+    # apontava para o arquivo antigo, e apagá-lo antes deixaria a pessoa sem
+    # foto se o banco falhasse. Mesma extensão é a mesma chave — o arquivo
+    # acabou de ser sobrescrito, e apagá-lo seria apagar a foto nova.
+    if anterior and anterior != key:
+        await storage.delete_file(anterior, settings)
+
     response = _to_response(user)
     response.avatar_url = url
     return response
+
+
+# ── DELETE /users/me/avatar ──────────────────────────────────
+
+
+@router.delete("/me/avatar", status_code=status.HTTP_204_NO_CONTENT)
+async def remove_avatar(
+    db: Annotated[AsyncSession, Depends(get_db)],
+    current_user: Annotated[User, Depends(get_current_user)],
+    settings: Annotated[Settings, Depends(get_settings)],
+) -> None:
+    """Remove a própria foto. Sem foto, não há o que fazer: 204 do mesmo jeito.
+
+    Não recebe chave nenhuma: tudo sai do usuário autenticado. O arquivo só é
+    apagado se a referência for a chave legítima dele; uma referência indevida
+    gravada antes do PR #85 é zerada (é a linha de quem pediu), mas nunca vira
+    `delete_file` — ela pode apontar para a foto de outra conta.
+    """
+    result = await db.execute(select(User).where(User.id == current_user.id))
+    user = result.scalar_one_or_none()
+    if not user:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Usuário não encontrado.")
+
+    if not user.avatar_url:
+        return
+
+    chave = _avatar_do_proprio_usuario(user)
+
+    user.avatar_url = None
+    user.updated_at = datetime.now(UTC)
+    _audit(db, AuditAction.update, current_user.id, user.id)
+    await db.commit()
+
+    # Depois do commit, como na troca: se o banco falhar, a linha ainda aponta
+    # para um arquivo que continua lá. O `delete_file` não levanta — arquivo
+    # já ausente é sucesso, e erro de disco vira aviso no log —, então a
+    # remoção nunca fica travada por um volume que perdeu o arquivo.
+    if chave:
+        await storage.delete_file(chave, settings)
 
 
 # ── PATCH /users/me/onboarding ───────────────────────────────
@@ -807,6 +858,7 @@ async def anonymize_user(
     user_id: uuid.UUID,
     db: Annotated[AsyncSession, Depends(get_db)],
     actor: Annotated[User, Depends(authorize(UserRole.admin, UserRole.technician))],
+    settings: Annotated[Settings, Depends(get_settings)],
 ) -> UserResponse:
     """Anonimiza os dados pessoais do usuário (LGPD — direito ao esquecimento)."""
     if actor.id == user_id:
@@ -839,6 +891,11 @@ async def anonymize_user(
             status_code=status.HTTP_409_CONFLICT, detail="User is already anonymized"
         )
 
+    # A foto é dado pessoal: zerar a referência e deixar o arquivo no volume
+    # não anonimiza nada. Só a chave legítima da conta é apagada — e só depois
+    # do commit, como na remoção pela própria pessoa.
+    foto = _avatar_do_proprio_usuario(user)
+
     ts = datetime.now(UTC)
     user.name = f"Usuário Anonimizado {str(user_id)[:8]}"
     user.email = f"anon_{str(user_id).replace('-', '')}@anonymized.invalid"
@@ -867,6 +924,8 @@ async def anonymize_user(
     )
     await db.commit()
     await db.refresh(user)
+    if foto:
+        await storage.delete_file(foto, settings)
     return _to_response(user)
 
 
