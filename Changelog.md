@@ -14,6 +14,33 @@ Trabalho que ainda **não** entrou numa versão do produto. Confira: se um
 item aqui já está em produção, ou ele foi para a versão errada, ou falta
 publicar uma versão nova.
 
+### Anexos do chamado (13/10/2026)
+
+Regras completas em `docs/decisoes-e-regras.md`, seção "Anexos do chamado".
+**Sem migration** e sem variável obrigatória nova.
+
+- **Anexo adicionado aparece na conversa e na Atividade.** Cada arquivo aceito
+  grava uma linha `attachment_added` em `ticket_history`, na transação do
+  anexo. Não é mensagem de chat: não mexe em SLA, primeira resposta, Helô,
+  não lidas, e-mail nem sininho. Sem evento retroativo nem de exclusão.
+- **Autoria do anexo.** `AttachmentResponse` ganha `uploaded_by_name` e
+  `uploaded_by_role`; `TicketHistoryResponse` ganha `user_role`. Lidos do
+  cadastro na hora, então a anonimização vale.
+- **Visualizador na tela do chamado** para imagem, PDF e TXT; os demais formatos
+  oferecem Baixar. `GET /attachments/{id}` passa a dar 404 quando o arquivo
+  sumiu do disco (o mesmo 404 do inexistente).
+- **ZIP com todos os anexos.** `POST /tickets/{id}/attachments/archive` +
+  `GET /files/archive/{token}`. Não verificados entram, com aviso antes; o
+  pedido é auditado como `export` (só ids e contagens); nenhum ZIP fica
+  guardado no servidor.
+
+| | |
+|---|---|
+| Variável NA API | `RATE_LIMIT_ZIP_ANEXOS` (opcional) |
+| Padrão | `5/15minutes`, por usuário |
+| Estado hoje | não configurar: o padrão vale |
+| Disco | o ZIP é montado no temporário do contêiner e apagado depois da entrega; o pior caso é 250 MB por pedido em andamento |
+
 ### Infraestrutura
 
 - **A Helô ganha um modo, e o padrão é a recepcionista da Fase 1.** Os manuais

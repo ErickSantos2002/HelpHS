@@ -1474,8 +1474,10 @@ mesmo que deixar terceiros publicarem conteúdo naquela origem: um `.html` ou um
 
 Por isso o endpoint `/files`:
 
-- só exibe inline **png, jpeg, gif e webp** — o necessário para foto de perfil e
-  pré-visualização de imagem;
+- só exibe inline **png, jpeg, gif, webp, pdf e txt** — o necessário para foto
+  de perfil e para o visualizador de anexos; PDF e texto puro não executam
+  nada sob a CSP abaixo (até 13/10/2026 esta lista dizia só imagens, mas o
+  código já servia PDF e TXT inline);
 - **SVG fica de fora de propósito**: é imagem, mas aceita `<script>` dentro;
 - qualquer outro tipo vira `application/octet-stream` com
   `Content-Disposition: attachment`;
@@ -1516,6 +1518,137 @@ chave errada entregaria a foto de outra pessoa.
 
 Fora do `/me`, a chave legítima continua saindo **crua** (não é URL
 utilizável). Mostrar foto de terceiros é decisão de produto ainda em aberto.
+
+## Anexos do chamado (13/10/2026)
+
+Anexo é só o que está na tabela `attachments`, enviado por
+`POST /tickets/{id}/attachments`. Arquivo da biblioteca mandado no chat é outro
+recurso (`library_files`) e fica fora de tudo abaixo. **Nada aqui precisou de
+migration.**
+
+### Quem pode o quê
+
+O acesso ao anexo é o acesso ao chamado, decidido no backend: o cliente só
+alcança o chamado que criou; técnico e admin, todos. Para o cliente, anexo de
+chamado alheio e anexo inexistente recebem **o mesmo 404** — em listar, abrir,
+baixar, histórico e ZIP (ver "A recusa não diz que o recurso existe"). Só
+técnico e admin excluem. Esconder botão na tela é apresentação, não proteção.
+
+### O anexo vira acontecimento do chamado
+
+Cada arquivo aceito grava **uma** linha `attachment_added` em `ticket_history`,
+na mesma transação do anexo. Se um arquivo do lote for recusado (extensão,
+antivírus, tamanho), o commit não acontece e não sobra evento de arquivo que
+não existe.
+
+- **O texto não guarda nome de pessoa.** `new_value` é o id do anexo e nada
+  mais; quem enviou é o `user_id` da linha. Nome e perfil são lidos do
+  cadastro na hora de mostrar — a conta anonimizada aparece anonimizada, sem
+  o nome antigo voltar.
+- **Não é mensagem de chat.** Não entra em `chat_messages`, não passa pelo
+  socket, não conta como primeira resposta, não mexe em SLA, status, Helô nem
+  em mensagens não lidas, e não gera e-mail nem sininho. A conversa só
+  intercala essas linhas na hora de desenhar, com apresentação de aviso de
+  sistema e "Anexo adicionado" escrito por extenso.
+- **Não é interno.** Quem vê o chamado vê todos os anexos, então vê o evento:
+  ele não está em `CAMPOS_INTERNOS`, e o cliente o recebe no histórico.
+- **Sem evento retroativo.** Anexo enviado antes de esta versão entrar no ar
+  não tem linha de histórico e não ganha uma — nem por migration, nem por
+  script. Regra nova é prospectiva.
+- **Sem evento de exclusão.** Excluir um anexo não grava nada no histórico; o
+  evento de quando ele entrou continua, e a tela diz "arquivo removido depois",
+  sem botão de abrir.
+
+### Quem enviou cada anexo
+
+A resposta dos anexos traz `uploaded_by_name` e `uploaded_by_role`, e a do
+histórico traz `user_role`, todos lidos do cadastro na hora. A tela escreve uma
+frase só, na lista e no visualizador: "Enviado por Nome (Perfil) · data/hora".
+
+### O visualizador
+
+Clicar no anexo — na aba Anexos ou no evento da conversa — abre um modal na
+própria tela do chamado. O link é pedido a `GET /attachments/{id}` **a cada
+abertura**: o backend confere o acesso de novo e não há URL pública nova.
+
+| Formato | No modal |
+|---|---|
+| png, jpg, jpeg, gif, webp | imagem |
+| pdf, txt | quadro (`<iframe>`) com o visualizador do navegador |
+| qualquer outro | "não tem visualização no navegador", com o botão Baixar |
+
+O conjunto é o mesmo que `/files` serve inline (ver "Por que quase tudo desce
+como download"). O PDF abre no quadro mesmo com a CSP `sandbox` do `/files`:
+**medido no Chrome 154 em 09/10/2026**. Firefox e Safari **não** foram medidos.
+O quadro não leva atributo `sandbox` próprio, que bloquearia o visualizador de
+PDF; quem isola o conteúdo é a CSP da resposta.
+
+Sem navegação anterior/próximo nesta versão. O modal usa o maior tamanho que o
+`Modal` tem (`2xl`); um tamanho novo seria emenda ao pacote do design system.
+
+### Arquivo removido
+
+- **Excluído pela tela:** some da lista; o evento na conversa fica, com
+  "arquivo removido depois".
+- **Sumiu do disco com a linha ainda no banco** (volume trocado, limpeza
+  manual): `GET /attachments/{id}` responde **o mesmo 404** do anexo
+  inexistente, em vez de emitir um link que leva a outro 404. Antes disso o
+  quadro do PDF mostrava o JSON cru do erro — um `<iframe>` não avisa erro
+  HTTP. O modal mostra "não está mais disponível" e desabilita o Baixar.
+
+### Download individual
+
+Um caminho só para a lista e o modal: o link é pedido ao backend na hora, com
+`download=true`, e abre em aba nova, como sempre abriu. Se o arquivo sumir
+entre o pedido do link e o clique, essa aba mostra o JSON do erro — corrida
+rara, aceita nesta versão.
+
+### Baixar todos os anexos (ZIP)
+
+Dois passos:
+
+1. **`POST /tickets/{id}/attachments/archive`** confere o acesso ao chamado,
+   recusa chamado sem anexos (422), confere que cada arquivo está em disco
+   (409 com os nomes que faltam), registra o pedido na auditoria e devolve um
+   link com os ids **congelados** num token assinado de tipo próprio
+   (`attachments_archive`), mais a lista dos não verificados.
+2. **`GET /files/archive/{token}`** confere de novo cada id e cada arquivo. Se
+   algo sumiu desde o pedido: 409, e **nenhum ZIP parcial**. Monta o ZIP num
+   temporário (em thread, sem compressão, lendo do disco aos poucos), entrega
+   com os cabeçalhos de segurança do `/files` e apaga o temporário depois.
+   Nada de ZIP guardado no servidor: cada pedido monta o seu.
+
+O token de arquivo único não abre ZIP, e o do ZIP não abre arquivo nenhum. O
+lote leva só os ids congelados — anexo que chega depois do pedido não entra.
+
+**Nomes dentro do ZIP.** O `original_name` é gravado cru no upload, então pode
+trazer caminho ou caractere invisível. Dentro do ZIP fica só o nome do
+arquivo, sem caracteres de controle nem de formatação (inclui o que inverte a
+direção do texto), com `<>:"|?*` trocados por `_` e prefixo nos nomes
+reservados do Windows. Repetidos ganham " (2)", " (3)", comparando sem
+diferenciar maiúscula. Sem nome que preste, vale o nome interno do anexo. O
+arquivo se chama `chamado-<protocolo>-anexos.zip`.
+
+**Não verificados entram, com aviso antes** (decisão de 09/10/2026). É a mesma
+regra do download individual, que já entrega esses arquivos com selo. A lista
+do aviso sai do mesmo token, então o que foi avisado é exatamente o que vem no
+ZIP. Dentro do ZIP o selo não existe — o aviso diz isso.
+
+**Auditoria.** O pedido grava `AuditAction.export` (valor do enum desde o
+schema inicial, nunca usado antes), com `entity_type="ticket"` e só ids e
+contagens em `new_data` — nome de arquivo pode ser dado pessoal. Pedido
+recusado (acesso, sem anexos, arquivo sumido, limite) não grava nada. O
+download individual continua sem auditoria: o lote expõe mais.
+
+**Limite.** O pedido tem rate limit por usuário (ver "Limite de tentativas").
+A entrega não tem limite próprio: o token é curto, assinado, de tipo próprio e
+a entrega confere tudo de novo.
+
+### Sem tempo real nesta versão
+
+Não há WebSocket novo: quem está com o chamado aberto só vê um anexo novo ou
+excluído ao recarregar a tela. Depois do próprio envio, a tela recarrega
+anexos e histórico.
 
 ## LGPD
 
@@ -1562,6 +1695,20 @@ entre os workers e sobrevivem a restart do backend. Desligado sob
 | `RATE_LIMIT_LOGIN` | 5/15min | login e verificação do segundo fator (tentativa de credencial) |
 | `RATE_LIMIT_ACCOUNT` | 5/15min | registro, reenviar confirmação, esqueci minha senha (disparam e-mail) |
 | `RATE_LIMIT_TOKEN` | 10/15min | confirmar e-mail, redefinir senha (quem chega já tem token assinado) |
+
+Fora da tabela, porque a chave é o **usuário** e não o IP
+(`chave_por_usuario`, para endpoint autenticado):
+
+| Variável | Default | Endpoints |
+|---|---|---|
+| `RATE_LIMIT_ZIP_ANEXOS` | 5/15min | pedido do ZIP com todos os anexos do chamado (13/10/2026) |
+
+O pedido do ZIP é barato; o que custa é o que ele autoriza — um ZIP de até
+250 MB num temporário. O teto corta a rajada sem tocar o uso real (um pedido é
+um clique). O 429 sai antes de qualquer consulta ao chamado: sem token, sem
+auditoria, sem temporário. Chamado próprio, alheio e inexistente gastam o
+mesmo balde, então o 429 não revela nada sobre o chamado. Listar, abrir,
+baixar um anexo, enviar e a entrega do ZIP pelo link não têm esse limite.
 
 Decisões:
 
