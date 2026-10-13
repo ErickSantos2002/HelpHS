@@ -1,4 +1,4 @@
-import React, { useCallback, useEffect, useRef, useState } from "react";
+import React, { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { toast } from "sonner";
 import { toastApiError } from "../../lib/toastError";
 import { readableTextColor } from "../../lib/colors";
@@ -10,6 +10,11 @@ import {
   type TicketPriority,
 } from "../../lib/prioridade";
 import { rotuloDeStatus } from "../../lib/status";
+import {
+  CAMPO_ANEXO_ADICIONADO,
+  autoriaDoAnexo,
+  eventosDeAnexo,
+} from "../../lib/anexoNaConversa";
 import { textoDoVencimento } from "../../lib/tempoUtil";
 import { cn, plural } from "../../lib/utils";
 import { Link, useParams } from "react-router-dom";
@@ -31,15 +36,18 @@ import {
   Textarea,
 } from "../../components/ui";
 import { ChatPanel } from "../../components/chat/ChatPanel";
+import { AttachmentPreviewModal } from "../../components/tickets/AttachmentPreviewModal";
 import { KBSuggestionsPanel } from "../../components/kb/KBSuggestionsPanel";
 import { useAuth } from "../../contexts/AuthContext";
 import {
   canPreview,
   deleteAttachment,
-  getAttachmentUrl,
+  downloadAttachment,
   getAttachments,
+  requestAttachmentsArchive,
   uploadAttachments,
   type Attachment,
+  type AttachmentArchive,
 } from "../../services/attachmentService";
 import {
   assignTicket,
@@ -104,6 +112,7 @@ const FIELD_LABEL: Record<string, string> = {
   // tocado.
   ligacao: "Tentativa de contato por telefone",
   client_observation: "Observação atualizada",
+  [CAMPO_ANEXO_ADICIONADO]: "Anexo adicionado",
   [CAMPO_JUSTIFICATIVA]: "Justificativa do SLA violado",
 };
 
@@ -148,7 +157,14 @@ function formataPrazoDaAtividade(quando: string): string {
   return textoDoVencimento(quando, "America/Sao_Paulo").replace("Vence em ", "");
 }
 
-function ActivityEntry({ entry }: { entry: TicketHistory }) {
+function ActivityEntry({
+  entry,
+  anexo,
+}: {
+  entry: TicketHistory;
+  /** Só para `attachment_added`: o anexo do evento, ou nulo se foi excluído. */
+  anexo?: Attachment | null;
+}) {
   const label = FIELD_LABEL[entry.field] ?? entry.field;
   const diff = Date.now() - new Date(entry.created_at).getTime();
   const mins = Math.floor(diff / 60000);
@@ -197,6 +213,15 @@ function ActivityEntry({ entry }: { entry: TicketHistory }) {
 
         {/* Quem fez a ação — sem autor significa que foi o próprio sistema */}
         <p className="text-xs text-conteudo-muted mt-0.5">por {entry.user_name ?? "Sistema"}</p>
+
+        {/* Anexo: o nome do arquivo vem da lista de anexos, não do evento */}
+        {entry.field === CAMPO_ANEXO_ADICIONADO && (
+          <p className="mt-1 truncate text-xs text-conteudo">
+            {anexo ? anexo.original_name : (
+              <span className="italic text-conteudo-muted">arquivo removido depois</span>
+            )}
+          </p>
+        )}
 
         {/* Status: de → para */}
         {entry.field === "status" && entry.new_value && (
@@ -310,26 +335,35 @@ function ActivityEntry({ entry }: { entry: TicketHistory }) {
 
 // ── Attachment item ───────────────────────────────────────────
 
+/**
+ * Um anexo da lista.
+ *
+ * O nome abre o visualizador para QUALQUER formato: o que não tem prévia cai
+ * na alternativa com "Baixar" dentro do próprio modal, e a pessoa não precisa
+ * saber de antemão o que o navegador sabe mostrar. Baixar direto continua no
+ * botão ao lado, pelo mesmo `downloadAttachment` do modal.
+ */
 function AttachmentItem({
   attachment,
   canDelete,
   onDelete,
+  onAbrir,
 }: {
   attachment: Attachment;
   canDelete: boolean;
   onDelete: (id: string) => void;
+  onAbrir: (attachment: Attachment) => void;
 }) {
   async function download() {
-    const url = await getAttachmentUrl(attachment.id, { download: true });
-    window.open(url, "_blank");
+    try {
+      await downloadAttachment(attachment.id);
+    } catch (err) {
+      toastApiError(err, "Não foi possível baixar o anexo.");
+    }
   }
-  async function preview() {
-    const url = await getAttachmentUrl(attachment.id);
-    window.open(url, "_blank");
-  }
+  const preview = () => onAbrir(attachment);
   const ext = attachment.original_name.split(".").pop()?.toUpperCase() ?? "FILE";
   const sizeMb = (attachment.size_bytes / 1024 / 1024).toFixed(1);
-  // Imagem, PDF e texto abrem no navegador; o resto só faz sentido baixar
   const viewable = canPreview(attachment.original_name);
 
   return (
@@ -339,7 +373,7 @@ function AttachmentItem({
       </div>
       <div className="min-w-0 flex-1">
         <button
-          onClick={viewable ? preview : download}
+          onClick={preview}
           className="block w-full truncate text-left text-sm font-medium text-conteudo hover:text-primary transition-colors cursor-pointer"
         >
           {attachment.original_name}
@@ -367,8 +401,17 @@ function AttachmentItem({
             </Badge>
           )}
         </p>
+        {/* Quem enviou e quando. Nome e papel vêm do backend, lidos do
+            cadastro na hora — conta anonimizada aparece anonimizada. */}
+        {/* Quebra linha, e não `truncate`: cortado com reticências, era a
+            HORA que sumia primeiro ("15:…"), vista no navegador a 842 px. */}
+        <p className="break-words text-xs text-conteudo-muted">{autoriaDoAnexo(attachment)}</p>
       </div>
-      <div className="flex items-center gap-1 opacity-0 group-hover:opacity-100 transition-opacity">
+      {/* Visíveis no foco e no toque, e não só sob o mouse. Era
+          `opacity-0 group-hover:opacity-100`: quem navega por Tab chegava a
+          três botões invisíveis, e no celular não há hover — eles nunca
+          apareciam. Abaixo de `sm` ficam sempre à vista. */}
+      <div className="flex items-center gap-1 transition-opacity sm:opacity-0 sm:group-hover:opacity-100 sm:group-focus-within:opacity-100">
         {viewable && (
           <button
             onClick={preview}
@@ -390,6 +433,7 @@ function AttachmentItem({
         {canDelete && (
           <button
             onClick={() => onDelete(attachment.id)}
+            aria-label={`Excluir ${attachment.original_name}`}
             className="p-1.5 rounded-md text-conteudo-muted hover:text-on-tint-danger hover:bg-tint-danger transition-colors cursor-pointer"
             title="Excluir"
           >
@@ -927,6 +971,12 @@ export default function TicketDetailPage() {
   const [ticket, setTicket] = useState<Ticket | null>(null);
   const [history, setHistory] = useState<TicketHistory[]>([]);
   const [attachments, setAttachments] = useState<Attachment[]>([]);
+  // Os anexos enviados, como acontecimentos da conversa. Memorizado porque o
+  // chat rola para o fim quando a lista muda de identidade.
+  const eventosDaConversa = useMemo(
+    () => eventosDeAnexo(history, attachments),
+    [history, attachments],
+  );
   const [technicians, setTechnicians] = useState<UserSummary[]>([]);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
@@ -977,6 +1027,11 @@ export default function TicketDetailPage() {
    */
   const ligandoRef = useRef(false);
   const [uploadModal, setUploadModal] = useState(false);
+  // O anexo aberto no visualizador — pela lista ou pelo evento da conversa.
+  const [anexoAberto, setAnexoAberto] = useState<Attachment | null>(null);
+  const [zipCarregando, setZipCarregando] = useState(false);
+  // O lote já autorizado, esperando a pessoa confirmar os não verificados.
+  const [zipAviso, setZipAviso] = useState<AttachmentArchive | null>(null);
   const [resolveModal, setResolveModal] = useState(false);
 
   const [resolveNote, setResolveNote] = useState("");
@@ -1437,15 +1492,25 @@ export default function TicketDetailPage() {
     setUploadLoading(true);
     try {
       await uploadAttachments(ticket.id, uploadFiles);
-      setAttachments((await getAttachments(ticket.id)).items);
-      setUploadModal(false);
-      setUploadFiles([]);
-      toast.success("Anexos enviados com sucesso.");
     } catch (err) {
       toastApiError(err, "Falha no upload. Verifique os arquivos e tente novamente.");
-    } finally {
       setUploadLoading(false);
+      return;
     }
+    setUploadModal(false);
+    setUploadFiles([]);
+    toast.success("Anexos enviados com sucesso.");
+    // Anexos E histórico: o acontecimento que a conversa e a Atividade mostram
+    // é a linha de histórico que o backend gravou junto com o anexo. Fora do
+    // `try` do envio de propósito — o arquivo já foi aceito, e uma falha ao
+    // recarregar não pode virar "Falha no upload".
+    const [a, h] = await Promise.allSettled([
+      getAttachments(ticket.id),
+      getTicketHistory(ticket.id),
+    ]);
+    if (a.status === "fulfilled") setAttachments(a.value.items);
+    if (h.status === "fulfilled") setHistory(h.value.items);
+    setUploadLoading(false);
   }
 
   async function handleAddNote() {
@@ -1514,10 +1579,37 @@ export default function TicketDetailPage() {
     }
   }
 
+  /**
+   * Baixar todos os anexos num ZIP.
+   *
+   * O backend confere o acesso e o disco e devolve o link de um lote
+   * congelado. Com algum anexo "não verificado" no lote, a tela avisa ANTES —
+   * a lista do aviso é a mesma do token, então o que foi avisado é o que vem.
+   * Abre em aba nova pelo mesmo caminho do download individual.
+   */
+  async function handleBaixarZip() {
+    if (!ticket || zipCarregando) return;
+    setZipCarregando(true);
+    try {
+      const lote = await requestAttachmentsArchive(ticket.id);
+      if (lote.nao_verificados.length > 0) {
+        setZipAviso(lote);
+      } else {
+        window.open(lote.url, "_blank");
+      }
+    } catch (err) {
+      toastApiError(err, "Não foi possível preparar o ZIP dos anexos.");
+    } finally {
+      setZipCarregando(false);
+    }
+  }
+
   async function handleDeleteAttachment(attachmentId: string) {
     try {
       await deleteAttachment(attachmentId);
       setAttachments((prev) => prev.filter((a) => a.id !== attachmentId));
+      // O visualizador não fica mostrando um anexo que acabou de sair.
+      setAnexoAberto((aberto) => (aberto?.id === attachmentId ? null : aberto));
       toast.success("Anexo removido.");
     } catch (err) {
       toastApiError(err, "Não foi possível remover o anexo.");
@@ -1573,9 +1665,15 @@ export default function TicketDetailPage() {
   // A extensão de prazo ENTRA na lista do cliente: ela é um compromisso
   // comunicado a ele, e a justificativa foi escrita para ele ler. Nenhum campo
   // interno do chamado vem junto — o que o cliente vê é o que já é dele.
+  //
+  // O anexo também entra: quem vê o chamado vê todos os anexos dele. Esta
+  // lista é só apresentação — quem decide o que o cliente recebe é o backend
+  // (`filtra_historico_para`).
   const visibleHistory =
     user?.role === "client"
-      ? history.filter((e) => ["created", "status", "sla_extension"].includes(e.field))
+      ? history.filter((e) =>
+          ["created", "status", "sla_extension", CAMPO_ANEXO_ADICIONADO].includes(e.field),
+        )
       : history;
 
   return (
@@ -1731,6 +1829,8 @@ export default function TicketDetailPage() {
                     ticketId={ticket.id}
                     currentUserId={user?.id ?? ""}
                     currentUserRole={user?.role}
+                    eventosDeAnexo={eventosDaConversa}
+                    onAbrirAnexo={setAnexoAberto}
                     savedSummary={ticket.ai_conversation_summary}
                     locked={!!isClosed}
                     onStatusChange={(s) =>
@@ -1880,7 +1980,11 @@ export default function TicketDetailPage() {
                   ) : (
                     <div>
                       {visibleHistory.map((entry) => (
-                        <ActivityEntry key={entry.id} entry={entry} />
+                        <ActivityEntry
+                          key={entry.id}
+                          entry={entry}
+                          anexo={attachments.find((a) => a.id === entry.new_value) ?? null}
+                        />
                       ))}
                     </div>
                   )}
@@ -1898,15 +2002,27 @@ export default function TicketDetailPage() {
                       Anexos ({attachments.length})
                     </h2>
                   </div>
-                  {!isClosed && (
+                  <div className="flex items-center gap-4">
+                    {/* Desabilitado sem anexo e durante o pedido: o clique
+                        repetido pediria dois lotes e duas linhas de auditoria. */}
                     <button
-                      onClick={() => setUploadModal(true)}
-                      className="flex items-center gap-1 text-xs font-medium text-primary hover:text-primary/80 transition-colors cursor-pointer"
+                      onClick={handleBaixarZip}
+                      disabled={attachments.length === 0 || zipCarregando}
+                      className="flex items-center gap-1 text-xs font-medium text-primary hover:text-primary/80 transition-colors cursor-pointer disabled:cursor-not-allowed disabled:text-conteudo-muted"
                     >
-                      <Icon name="plus" size={12} strokeWidth={2.5} />
-                      Adicionar
+                      <Icon name="download" size={12} strokeWidth={2.5} />
+                      {zipCarregando ? "Preparando ZIP…" : "Baixar todos (ZIP)"}
                     </button>
-                  )}
+                    {!isClosed && (
+                      <button
+                        onClick={() => setUploadModal(true)}
+                        className="flex items-center gap-1 text-xs font-medium text-primary hover:text-primary/80 transition-colors cursor-pointer"
+                      >
+                        <Icon name="plus" size={12} strokeWidth={2.5} />
+                        Adicionar
+                      </button>
+                    )}
+                  </div>
                 </div>
                 <div className="p-5">
                   {attachments.length === 0 ? (
@@ -1932,6 +2048,7 @@ export default function TicketDetailPage() {
                           attachment={a}
                           canDelete={isStaff}
                           onDelete={handleDeleteAttachment}
+                          onAbrir={setAnexoAberto}
                         />
                       ))}
                     </div>
@@ -2760,6 +2877,45 @@ export default function TicketDetailPage() {
               Assumir ticket
             </Button>
           )}
+        </ModalFooter>
+      </Modal>
+
+      <AttachmentPreviewModal anexo={anexoAberto} onClose={() => setAnexoAberto(null)} />
+
+      <Modal
+        open={zipAviso !== null}
+        onClose={() => setZipAviso(null)}
+        title="Baixar anexos não verificados?"
+      >
+        <p className="text-sm text-conteudo">
+          {zipAviso && zipAviso.nao_verificados.length === 1
+            ? "Um arquivo deste ZIP foi gravado com o antivírus indisponível e não foi examinado:"
+            : "Estes arquivos do ZIP foram gravados com o antivírus indisponível e não foram examinados:"}
+        </p>
+        <ul className="mt-2 space-y-1 text-sm text-conteudo">
+          {zipAviso?.nao_verificados.map((a) => (
+            <li key={a.id} className="flex items-center gap-2">
+              <Badge variant="warning">não verificado</Badge>
+              <span className="truncate">{a.original_name}</span>
+            </li>
+          ))}
+        </ul>
+        <p className="mt-3 text-xs text-conteudo-muted">
+          Dentro do ZIP o aviso não aparece. Abra esses arquivos com cuidado.
+        </p>
+        <ModalFooter>
+          <Button variant="secondary" onClick={() => setZipAviso(null)}>
+            Cancelar
+          </Button>
+          <Button
+            onClick={() => {
+              if (zipAviso) window.open(zipAviso.url, "_blank");
+              setZipAviso(null);
+            }}
+            icon={<Icon name="download" size={14} strokeWidth={2} />}
+          >
+            Baixar mesmo assim
+          </Button>
         </ModalFooter>
       </Modal>
 

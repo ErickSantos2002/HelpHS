@@ -34,6 +34,8 @@ import {
 } from "../../services/chatService";
 import { getLibraryFileUrl, getLibraryFiles } from "../../services/libraryService";
 import type { LibraryFile } from "../../services/libraryService";
+import type { Attachment } from "../../services/attachmentService";
+import type { EventoDeAnexo } from "../../lib/anexoNaConversa";
 import { listQuickReplies } from "../../services/quickReplyService";
 
 /**
@@ -703,5 +705,119 @@ describe("seletor da biblioteca", () => {
     await waitFor(() =>
       expect(toast.error).toHaveBeenCalledWith("Este arquivo da biblioteca é de uso interno."),
     );
+  });
+});
+
+/**
+ * ── Anexo enviado, contado na conversa ───────────────────────────────
+ *
+ * O acontecimento NÃO é mensagem: não vem do `getChatMessages`, não tem bolha e
+ * não tem autor no cabeçalho. Vem do histórico do chamado, pronto, pelo pai. O
+ * que se mede é o que a pessoa lê — a 1.4.1 de novo: "Anexo adicionado" fica
+ * ESCRITO, e não só um estilo diferente.
+ */
+describe("ChatPanel — anexo adicionado aparece na conversa", () => {
+  preparaOPainel();
+
+  const ANEXO: Attachment = {
+    id: "a1",
+    ticket_id: "t-1",
+    uploaded_by: "outra-pessoa",
+    uploaded_by_name: "Bruno Lima",
+    uploaded_by_role: "technician",
+    original_name: "laudo.pdf",
+    mime_type: "application/pdf",
+    size_bytes: 1024,
+    virus_scanned: true,
+    virus_clean: true,
+    created_at: "2026-09-08T12:05:00.000Z",
+  };
+
+  function evento(over: Partial<EventoDeAnexo> = {}): EventoDeAnexo {
+    return {
+      id: "h1",
+      created_at: "2026-09-08T12:05:00.000Z",
+      autor: "Bruno Lima",
+      papel: "technician",
+      anexo: ANEXO,
+      ...over,
+    };
+  }
+
+  async function montarComEventos(
+    eventos: EventoDeAnexo[],
+    historico: ChatMessage[] = [],
+    onAbrirAnexo = vi.fn(),
+  ) {
+    vi.mocked(getChatMessages).mockResolvedValue({
+      items: historico,
+    } as unknown as Awaited<ReturnType<typeof getChatMessages>>);
+    render(
+      <ChatPanel
+        ticketId="t-1"
+        currentUserId="eu"
+        currentUserRole="client"
+        eventosDeAnexo={eventos}
+        onAbrirAnexo={onAbrirAnexo}
+      />,
+    );
+    await act(async () => {});
+    return onAbrirAnexo;
+  }
+
+  it("diz quem anexou, com o papel, por escrito", async () => {
+    await montarComEventos([evento()]);
+    expect(screen.getByText(/Anexo adicionado por Bruno Lima \(Técnico\)/)).toBeInTheDocument();
+  });
+
+  it("entra na ordem do tempo, entre as mensagens", async () => {
+    await montarComEventos(
+      [evento()],
+      [
+        mensagem({ content: "antes", created_at: "2026-09-08T12:00:00.000Z" }),
+        mensagem({ content: "depois", created_at: "2026-09-08T12:10:00.000Z" }),
+      ],
+    );
+    const antes = screen.getByText("antes");
+    const ev = screen.getByText(/Anexo adicionado por/);
+    const depois = screen.getByText("depois");
+    expect(antes.compareDocumentPosition(ev) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy();
+    expect(ev.compareDocumentPosition(depois) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy();
+  });
+
+  it("não é bolha de mensagem: o nome não vira cabeçalho de autor", async () => {
+    await montarComEventos([evento()]);
+    // A bolha de outra pessoa escreve o nome sozinho num <span>. No evento o
+    // nome está dentro da frase — nenhum elemento tem só "Bruno Lima".
+    expect(screen.queryByText("Bruno Lima", { exact: true })).not.toBeInTheDocument();
+    expect(
+      screen.queryByText("Nenhuma mensagem ainda. Seja o primeiro a escrever."),
+    ).not.toBeInTheDocument();
+  });
+
+  it("o nome do arquivo abre pelo mesmo caminho da aba Anexos", async () => {
+    const onAbrir = await montarComEventos([evento()]);
+    fireEvent.click(screen.getByRole("button", { name: "Abrir laudo.pdf" }));
+    expect(onAbrir).toHaveBeenCalledWith(ANEXO);
+  });
+
+  it("anexo excluído depois: o acontecimento fica, sem botão para abrir", async () => {
+    await montarComEventos([evento({ anexo: null })]);
+    expect(screen.getByText(/arquivo removido depois/)).toBeInTheDocument();
+    expect(screen.queryByRole("button", { name: /^Abrir/ })).not.toBeInTheDocument();
+  });
+
+  it("sem autor no histórico, não inventa um", async () => {
+    await montarComEventos([evento({ autor: null, papel: null })]);
+    expect(screen.getByText(/Anexo adicionado/)).toBeInTheDocument();
+    expect(screen.queryByText(/ por /)).not.toBeInTheDocument();
+  });
+
+  it("não envia nada pelo socket nem conta como mensagem", async () => {
+    const ws = await (async () => {
+      await montarComEventos([evento()]);
+      return socketsConstruidos[0];
+    })();
+    expect(ws.enviados).toEqual([]);
   });
 });

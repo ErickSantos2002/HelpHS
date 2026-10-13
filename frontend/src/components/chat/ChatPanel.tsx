@@ -10,6 +10,8 @@ import { cn } from "../../lib/utils";
 import { Avatar, Button, Icon, Input, Modal, Spinner } from "../ui";
 import { rotuloDePapel, varianteDePapel } from "../../lib/papel";
 import { TOM_STATUS, type VarianteStatus } from "../../lib/status";
+import { dataHoraDoAnexo, type EventoDeAnexo } from "../../lib/anexoNaConversa";
+import type { Attachment } from "../../services/attachmentService";
 import {
   buildWsUrl,
   getChatMessages,
@@ -201,6 +203,61 @@ function ChatBubble({ msg, isOwn }: { msg: ChatMessage; isOwn: boolean }) {
   );
 }
 
+// ── Anexo adicionado ──────────────────────────────────────────
+
+/**
+ * O anexo enviado ao chamado, contado no meio da conversa.
+ *
+ * Não é bolha: não tem lado, não tem avatar e o nome não vira cabeçalho de
+ * autor — é um acontecimento do chamado, e se apresenta como os avisos de
+ * sistema, centrado. O que separa os dois é ESCRITO ("Anexo adicionado"), não
+ * só o ícone (1.4.1).
+ *
+ * O nome do arquivo abre pelo `onAbrir` do pai, o mesmo caminho do item da aba
+ * Anexos: visualizar ou baixar continuam sendo decididos lá, e o link continua
+ * sendo emitido pelo backend na hora do clique.
+ */
+function EventoAnexo({
+  evento,
+  onAbrir,
+}: {
+  evento: EventoDeAnexo;
+  onAbrir?: (anexo: Attachment) => void;
+}) {
+  const quem = evento.autor
+    ? ` por ${evento.autor}${evento.papel ? ` (${rotuloDePapel(evento.papel)})` : ""}`
+    : "";
+  return (
+    <div className="flex justify-center my-2">
+      <p className="flex max-w-[90%] flex-wrap items-center justify-center gap-x-1.5 gap-y-0.5 rounded-full bg-surface-elevated px-3 py-1 text-center text-xs text-conteudo-muted">
+        <Icon name="paperclip" size={12} strokeWidth={2} className="shrink-0" />
+        <span>Anexo adicionado{quem}:</span>
+        {evento.anexo ? (
+          onAbrir ? (
+            <button
+              type="button"
+              onClick={() => onAbrir(evento.anexo!)}
+              aria-label={`Abrir ${evento.anexo.original_name}`}
+              className="max-w-[16rem] truncate font-medium text-conteudo underline-offset-2 hover:underline cursor-pointer"
+            >
+              {evento.anexo.original_name}
+            </button>
+          ) : (
+            <span className="max-w-[16rem] truncate font-medium text-conteudo">
+              {evento.anexo.original_name}
+            </span>
+          )
+        ) : (
+          // O evento sobrevive à exclusão do anexo; o nome do arquivo, não —
+          // ele vinha da lista de anexos, e o arquivo saiu dela.
+          <span className="italic">arquivo removido depois</span>
+        )}
+        <span>· {dataHoraDoAnexo(evento.created_at)}</span>
+      </p>
+    </div>
+  );
+}
+
 // ── WS status indicator ───────────────────────────────────────
 
 type WsStatus = "connecting" | "connected" | "disconnected";
@@ -254,7 +311,21 @@ interface ChatPanelProps {
   savedSummary?: string | null;
   locked?: boolean;
   onStatusChange?: (status: string) => void;
+  /**
+   * Anexos enviados ao chamado, já ligados ao arquivo pelo pai. Vêm do
+   * histórico do chamado e não do chat: não entram em `messages`, não passam
+   * pelo socket e não contam como mensagem.
+   */
+  eventosDeAnexo?: EventoDeAnexo[];
+  onAbrirAnexo?: (anexo: Attachment) => void;
 }
+
+/** O que a lista desenha: mensagem ou acontecimento, na ordem do tempo. */
+type ItemDaConversa =
+  | { tipo: "mensagem"; quando: number; msg: ChatMessage }
+  | { tipo: "anexo"; quando: number; evento: EventoDeAnexo };
+
+const SEM_EVENTOS: EventoDeAnexo[] = [];
 
 export function ChatPanel({
   ticketId,
@@ -263,6 +334,8 @@ export function ChatPanel({
   savedSummary,
   locked = false,
   onStatusChange,
+  eventosDeAnexo = SEM_EVENTOS,
+  onAbrirAnexo,
 }: ChatPanelProps) {
   const isStaff =
     currentUserRole === "admin" || currentUserRole === "technician";
@@ -302,7 +375,21 @@ export function ChatPanel({
   // Auto-scroll to bottom when new messages arrive
   useEffect(() => {
     bottomRef.current?.scrollIntoView({ behavior: "smooth" });
-  }, [messages]);
+  }, [messages, eventosDeAnexo]);
+
+  // Ordena por data e, no empate, mantém a ordem de chegada — `sort` é estável.
+  const itens: ItemDaConversa[] = [
+    ...messages.map((msg) => ({
+      tipo: "mensagem" as const,
+      quando: new Date(msg.created_at).getTime(),
+      msg,
+    })),
+    ...eventosDeAnexo.map((evento) => ({
+      tipo: "anexo" as const,
+      quando: new Date(evento.created_at).getTime(),
+      evento,
+    })),
+  ].sort((a, b) => a.quando - b.quando);
 
   // Auto-resize textarea as content grows (max ~8 lines)
   useEffect(() => {
@@ -646,18 +733,26 @@ export function ChatPanel({
             Não foi possível carregar o histórico.
           </p>
         )}
-        {!loadError && messages.length === 0 && (
+        {!loadError && itens.length === 0 && (
           <p className="text-xs text-conteudo-muted text-center py-8">
             Nenhuma mensagem ainda. Seja o primeiro a escrever.
           </p>
         )}
-        {messages.map((msg) => (
-          <ChatBubble
-            key={msg.id}
-            msg={msg}
-            isOwn={msg.sender_id === currentUserId}
-          />
-        ))}
+        {itens.map((item) =>
+          item.tipo === "mensagem" ? (
+            <ChatBubble
+              key={item.msg.id}
+              msg={item.msg}
+              isOwn={item.msg.sender_id === currentUserId}
+            />
+          ) : (
+            <EventoAnexo
+              key={`anexo-${item.evento.id}`}
+              evento={item.evento}
+              onAbrir={onAbrirAnexo}
+            />
+          ),
+        )}
         <div ref={bottomRef} />
       </div>
 

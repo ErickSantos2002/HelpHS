@@ -8,7 +8,7 @@ from datetime import datetime
 
 from pydantic import ConfigDict, Field
 
-from app.models.models import TicketCategory, TicketPriority, TicketStatus
+from app.models.models import TicketCategory, TicketPriority, TicketStatus, UserRole
 from app.schemas.base import AppBaseModel
 from app.schemas.tag import TagResponse
 
@@ -344,6 +344,7 @@ class TicketHistoryResponse(AppBaseModel):
     ticket_id: uuid.UUID
     user_id: uuid.UUID | None = None  # NULL = ação do sistema
     user_name: str | None = None
+    user_role: UserRole | None = None
     field: str
     old_value: str | None
     new_value: str | None

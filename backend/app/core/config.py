@@ -728,6 +728,17 @@ class Settings(BaseSettings):
     # imaginar, e mesmo assim limita cada conta a 30 chamadas externas por hora
     # — antes do cache, que derruba esse número de novo.
     rate_limit_consulta_externa: str = "30/hour"
+    # Pedido do ZIP com todos os anexos de um chamado. Chaveado por USUÁRIO,
+    # como a consulta externa: é endpoint autenticado, e o que se limita é a
+    # conta, não o escritório inteiro atrás do mesmo IP.
+    #
+    # O que custa não é o pedido, é o que ele autoriza: cada link monta um ZIP
+    # de até 250 MB (10 arquivos de 25 MB) num temporário. 5 a cada 15 minutos
+    # é o mesmo teto do ciclo de conta, e cobre o uso real com folga — um
+    # pedido é um clique humano, e quem cancela o aviso dos não verificados e
+    # clica de novo gasta dois. O que ele corta é a rajada: sem teto, uma conta
+    # pedia dezenas de lotes de uma vez e enchia o disco de temporários.
+    rate_limit_zip_anexos: str = "5/15minutes"
 
     # Quem pode falar pelos outros: lista de IPs/redes cujo X-Forwarded-For o
     # uvicorn aceita como sendo o IP real de quem chamou. O uvicorn lê esta

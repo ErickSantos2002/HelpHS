@@ -114,6 +114,7 @@ export interface TicketHistory {
   /** null quando quem agiu foi o próprio sistema (fechamento automático). */
   user_id: string | null;
   user_name: string | null;
+  user_role: string | null;
   field: string;
   old_value: string | null;
   new_value: string | null;

@@ -18,6 +18,12 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.models.models import TicketHistory, User, UserRole
 
+# Arquivo anexado ao chamado. `new_value` é o id do anexo e nada mais: quem
+# enviou é o `user_id` da linha, e o nome sai do cadastro na hora de mostrar —
+# congelado no texto, sobreviveria à anonimização da conta. Não é campo
+# interno: quem vê o chamado vê todos os anexos dele, e vê o evento também.
+CAMPO_ANEXO_ADICIONADO = "attachment_added"
+
 
 def registra_historico(
     db: AsyncSession,

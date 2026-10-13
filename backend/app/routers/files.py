@@ -14,16 +14,24 @@ nessa origem. Um .html ou .svg com script rodaria como se fosse do sistema
 resto desce como download.
 """
 
+import asyncio
 import mimetypes
+import re
+import uuid
 from pathlib import Path
 from typing import Annotated
 from urllib.parse import quote
 
 from fastapi import APIRouter, Depends, HTTPException, Query, Request, status
 from fastapi.responses import FileResponse
+from sqlalchemy import select
+from sqlalchemy.ext.asyncio import AsyncSession
+from starlette.background import BackgroundTask
 
 from app.core.config import Settings, get_settings
-from app.services import storage
+from app.core.database import get_db
+from app.models.models import Attachment, Ticket
+from app.services import arquivo_zip, storage
 
 router = APIRouter(tags=["Files"])
 
@@ -122,6 +130,98 @@ def _safe_media_type(caminho: Path) -> tuple[str, bool]:
         return _FALLBACK_MIME, False
 
     return adivinhado, True
+
+
+# ── O ZIP com os anexos do chamado ───────────────────────────
+#
+# Pedido em `POST /tickets/{id}/attachments/archive` (attachments.py), que
+# confere o acesso e congela os ids no token. Aqui não há sessão de usuário
+# pelo mesmo motivo de `/files/{token}`: quem baixa é o navegador, por link.
+
+_LOTE_MUDOU = (
+    "{n} anexo(s) foram removidos depois do pedido. Nenhum ZIP foi gerado: "
+    "peça o download de novo."
+)
+
+
+def _nome_do_zip(ticket: Ticket) -> str:
+    """`chamado-HS-2026-0001-anexos.zip` — só letras, dígitos e hífen do protocolo."""
+    protocolo = re.sub(r"[^A-Za-z0-9-]", "", ticket.protocol or "") or "sem-protocolo"
+    return f"chamado-{protocolo}-anexos.zip"
+
+
+def _apaga(caminho: Path) -> None:
+    caminho.unlink(missing_ok=True)
+
+
+@router.get("/files/archive/{token}")
+async def download_attachments_archive(
+    token: str,
+    request: Request,
+    db: Annotated[AsyncSession, Depends(get_db)],
+    settings: Annotated[Settings, Depends(get_settings)],
+) -> FileResponse:
+    try:
+        ticket_id, ids = storage.read_archive_token(token, settings)
+        ticket_uuid = uuid.UUID(ticket_id)
+        uuids = [uuid.UUID(i) for i in ids]
+    except (storage.StorageError, ValueError) as exc:
+        raise HTTPException(
+            status_code=status.HTTP_403_FORBIDDEN, detail="Link expirado ou invalido."
+        ) from exc
+
+    _recusa_range_perigoso(request.headers.get("range"))
+
+    ticket = await db.get(Ticket, ticket_uuid)
+    anexos = (
+        (
+            await db.execute(
+                select(Attachment)
+                .where(Attachment.ticket_id == ticket_uuid, Attachment.id.in_(uuids))
+                .order_by(Attachment.created_at.asc(), Attachment.id.asc())
+            )
+        )
+        .scalars()
+        .all()
+    )
+    # Conferido de novo, e não confiado ao token: entre o pedido e o clique um
+    # anexo pode ter sido excluído. ZIP parcial nunca — erro explícito.
+    if ticket is None or len(anexos) != len(uuids):
+        faltam = len(uuids) - len(anexos)
+        raise HTTPException(
+            status_code=status.HTTP_409_CONFLICT, detail=_LOTE_MUDOU.format(n=faltam)
+        )
+
+    # O pedido já conferiu o disco; esta segunda conferência pega o arquivo
+    # que sumiu entre o pedido e o clique.
+    itens, sumidos = arquivo_zip.confere_no_disco(anexos, settings)
+    if sumidos:
+        raise HTTPException(
+            status_code=status.HTTP_409_CONFLICT,
+            detail=arquivo_zip.mensagem_de_sumidos(sumidos),
+        )
+
+    loop = asyncio.get_running_loop()
+    try:
+        zip_pronto = await loop.run_in_executor(None, arquivo_zip.monta_zip, itens)
+    except OSError as exc:
+        # O arquivo sumiu entre a conferência e a leitura. O `monta_zip` já
+        # apagou o temporário.
+        raise HTTPException(
+            status_code=status.HTTP_409_CONFLICT,
+            detail="Um dos arquivos deixou de estar disponível. Nenhum ZIP foi gerado.",
+        ) from exc
+
+    headers = dict(_SECURITY_HEADERS)
+    headers["Content-Disposition"] = f"attachment; filename*=UTF-8''{quote(_nome_do_zip(ticket))}"
+    # O temporário é apagado depois da entrega. Nada de ZIP guardado no
+    # servidor: cada pedido monta o seu.
+    return FileResponse(
+        path=zip_pronto,
+        media_type="application/zip",
+        headers=headers,
+        background=BackgroundTask(_apaga, zip_pronto),
+    )
 
 
 @router.get("/files/{token}")

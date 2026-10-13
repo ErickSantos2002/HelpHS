@@ -118,6 +118,9 @@ def _mock_history_entry(field="status", old_value=None, new_value="open"):
     h.ticket_id = _TICKET_ID
     h.user_id = _CREATOR_ID
     h.user_name = "Autor do histórico"
+    # O schema lê `user_role` do objeto (`from_attributes`); sem valor, o
+    # MagicMock inventa um e a validação do enum falha.
+    h.user_role = None
     h.field = field
     h.old_value = old_value
     h.new_value = new_value
