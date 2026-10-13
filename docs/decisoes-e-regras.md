@@ -1224,6 +1224,72 @@ existe: `users.cnpj` é autodeclarado e não serve para escopo (ver
 vinculou à mão pela tela de Grupos — caminho levantado em
 `docs/superpowers/specs/2026-08-24-duas-fontes-de-verdade-empresa.md`.
 
+## Consultas da equipe: Equipamentos e Empresas
+
+Duas telas de **consulta**, só para **admin e técnico**: `/equipamentos` e
+`/empresas`, no grupo Gestão do menu. Antes delas, achar o aparelho de um
+cliente exigia abrir produto por produto na tela de Produtos, e achar uma
+empresa exigia saber em que grupo ela estava.
+
+**São só leitura.** A manutenção continua onde já estava: equipamento se cria,
+edita e ativa na tela de **Produtos**; empresa se cria, edita, exclui, recebe
+cliente vinculado e notas na tela de **Grupos**. As telas novas não repetem
+nenhum desses fluxos — o detalhe da empresa é o mesmo modal da tela de Grupos,
+num modo que esconde todas as ações e aponta para "Gerenciar em Grupos". Não
+houve migration: tudo sai de colunas que já existiam.
+
+### Quem pode
+
+- `GET /equipments` e `GET /companies` / `GET /companies/{id}` recusam
+  **cliente com 403** de papel, antes de qualquer consulta e com qualquer
+  parâmetro. As rotas do front ficam sob o mesmo `RoleGuard` de admin e técnico,
+  mas são a segunda tranca, não a primeira.
+- O cliente **não lista empresas** — nem a própria — e não vê os colegas
+  vinculados a ela. Estar na mesma empresa não dá a ele acesso a equipamento,
+  chamado ou cadastro de ninguém.
+- O cliente também **não recebe o vínculo oficial** em lugar nenhum: os campos
+  novos de empresa vinculada saem nulos para ele, inclusive no
+  `GET /equipments/{id}` e na listagem por produto, que ele já usava.
+
+### "Responsável", e não "cadastrado por"
+
+`owner_id` é o **responsável atual** pelo equipamento, e a equipe pode trocá-lo
+na tela de Produtos. O sistema não guarda quem fez o cadastro original, e as
+telas não afirmam isso: o rótulo é sempre "Responsável", e o equipamento sem
+`owner_id` aparece como "Sem responsável".
+
+### Empresa oficial e empresa declarada
+
+São duas informações diferentes, e as telas mostram as duas **separadas**:
+
+- **Empresa vinculada** (oficial): o vínculo que um admin fez na tela de Grupos
+  (`users.company_id` → `companies`). O equipamento não tem empresa própria; a
+  dele é a do responsável. Sem vínculo, a tela diz "Sem empresa vinculada".
+- **Empresa declarada**: o que o cliente digitou no cadastro
+  (`users.company_name` e `users.cnpj`). Aparece marcada como declarada
+  ("Declarada: …", "Informada pelo responsável no cadastro; não é vínculo") e
+  nunca no lugar da vinculada.
+
+**Só o vínculo oficial filtra.** O `company_id` de `GET /equipments` casa o
+`users.company_id` do responsável; o nome declarado não entra em filtro, busca
+nem contagem, e não vira opção no seletor de empresa — as opções vêm de
+`GET /companies`. Nada aqui associa empresa automaticamente.
+
+### Contagens e busca
+
+- "Clientes vinculados" e "Equipamentos" da tela de Empresas contam o vínculo
+  oficial. A contagem de equipamentos inclui os inativos e é o mesmo conjunto de
+  `GET /equipments?company_id=` — as duas telas não podem discordar, e há teste
+  comparando as duas.
+- As contagens saem em consultas fixas por página (agrupadas), não uma por
+  linha.
+- A busca de empresas casa nome e CNPJ. O CNPJ é comparado **sem pontuação dos
+  dois lados**, porque a normalização do CNPJ das empresas antigas nunca rodou
+  em produção. Só termo feito de dígitos e pontuação vira busca por CNPJ: "Filial
+  2" é busca por nome, senão casaria com qualquer CNPJ que tivesse um 2.
+- `GET /companies/{id}` fica registrado **depois** de `/companies/suggestions`:
+  o FastAPI casa rota na ordem, e antes dela "suggestions" seria lido como id.
+
 ## Cadastro do cliente
 
 **CNPJ e CEP são obrigatórios** no onboarding e ao salvar os dados da empresa no

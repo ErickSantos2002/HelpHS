@@ -12,6 +12,7 @@ Permissões:
   Equipments (sub-resource de produto):
     POST   /products/{id}/equipments        — admin | technician
     GET    /products/{id}/equipments        — staff vê tudo; cliente só os próprios
+    GET    /equipments                      — admin | technician (todos os produtos)
     GET    /equipments/{id}                 — staff vê tudo; cliente só o próprio (404)
     PATCH  /equipments/{id}                 — admin | technician
     DELETE /equipments/{id}                 — admin | technician (soft-delete)
@@ -41,11 +42,12 @@ Permissões:
 """
 
 import uuid
+from collections.abc import Sequence
 from datetime import UTC, datetime
 from typing import Annotated
 
 from fastapi import APIRouter, Depends, HTTPException, Query, status
-from sqlalchemy import func, select
+from sqlalchemy import func, or_, select
 from sqlalchemy.dialects.postgresql import insert as pg_insert
 from sqlalchemy.ext.asyncio import AsyncSession
 
@@ -54,6 +56,7 @@ from app.core.security import authorize, get_current_user
 from app.models.models import (
     AuditAction,
     AuditLog,
+    Company,
     Equipment,
     Product,
     User,
@@ -182,6 +185,66 @@ async def _recusa_serie_do_produto(
         consulta = consulta.where(Equipment.id != ignorando)
     if (await db.execute(consulta)).scalar_one_or_none() is not None:
         raise HTTPException(status_code=status.HTTP_409_CONFLICT, detail=_SERIE_DUPLICADA)
+
+
+async def _enriquece(
+    db: AsyncSession, equipamentos: Sequence[Equipment], *, para_equipe: bool
+) -> list[EquipmentResponse]:
+    """
+    Junta a cada equipamento o responsável e, para a equipe, produto e empresa.
+
+    Uma consulta por tabela (responsáveis, produtos, empresas), qualquer que
+    seja o tamanho da página — e não uma por linha.
+
+    Duas empresas, em campos separados, porque são coisas diferentes:
+
+    - `company_name`/`company_cnpj`: o que o responsável DIGITOU no cadastro.
+      Já saía assim antes e continua saindo para quem já recebia.
+    - `linked_company_*`: o vínculo oficial (`users.company_id`), feito por um
+      admin na tela de Grupos. Só para a equipe — o cliente não lê o próprio
+      vínculo em lugar nenhum da API, e não é aqui que vai começar.
+
+    `para_equipe=False` devolve exatamente o que a listagem por produto já
+    devolvia ao cliente: responsável e empresa declarada, nada além.
+    """
+    ids_de_responsavel = {e.owner_id for e in equipamentos if e.owner_id}
+    responsaveis: dict[uuid.UUID, User] = {}
+    if ids_de_responsavel:
+        linhas = await db.execute(select(User).where(User.id.in_(ids_de_responsavel)))
+        responsaveis = {u.id: u for u in linhas.scalars().all()}
+
+    produtos: dict[uuid.UUID, str] = {}
+    empresas: dict[uuid.UUID, str] = {}
+    if para_equipe:
+        ids_de_produto = {e.product_id for e in equipamentos}
+        if ids_de_produto:
+            linhas_p = await db.execute(
+                select(Product.id, Product.name).where(Product.id.in_(ids_de_produto))
+            )
+            produtos = {pid: nome for pid, nome in linhas_p.all()}
+        ids_de_empresa = {u.company_id for u in responsaveis.values() if u.company_id}
+        if ids_de_empresa:
+            linhas_c = await db.execute(
+                select(Company.id, Company.name).where(Company.id.in_(ids_de_empresa))
+            )
+            empresas = {cid: nome for cid, nome in linhas_c.all()}
+
+    respostas = []
+    for e in equipamentos:
+        dado = EquipmentResponse.model_validate(e)
+        responsavel = responsaveis.get(e.owner_id) if e.owner_id else None
+        if responsavel:
+            dado.owner_name = responsavel.name
+            dado.owner_email = responsavel.email
+            dado.company_name = responsavel.company_name
+            dado.company_cnpj = responsavel.cnpj
+        if para_equipe:
+            dado.product_name = produtos.get(e.product_id)
+            if responsavel and responsavel.company_id in empresas:
+                dado.linked_company_id = responsavel.company_id
+                dado.linked_company_name = empresas[responsavel.company_id]
+        respostas.append(dado)
+    return respostas
 
 
 async def _anexa_usuario(db: AsyncSession, equipment_id: uuid.UUID, user_id: uuid.UUID) -> None:
@@ -375,6 +438,7 @@ async def list_equipments(
     without_owner: bool = Query(default=False),
 ) -> EquipmentListResponse:
     await get_or_404(db, Product, product_id, "Product not found")
+    para_equipe = actor.role != UserRole.client
 
     base = select(Equipment).where(Equipment.product_id == product_id)
     # Cliente só enxerga o próprio parque; staff precisa ver tudo para dar
@@ -405,26 +469,69 @@ async def list_equipments(
     rows = await db.execute(base.order_by(Equipment.name).offset(offset).limit(limit))
     equipments = rows.scalars().all()
 
-    # Fetch owner info for all equipments in one query
-    owner_ids = [e.owner_id for e in equipments if e.owner_id]
-    owners: dict[uuid.UUID, User] = {}
-    if owner_ids:
-        owner_rows = await db.execute(select(User).where(User.id.in_(owner_ids)))
-        for u in owner_rows.scalars().all():
-            owners[u.id] = u
+    return EquipmentListResponse(
+        items=await _enriquece(db, equipments, para_equipe=para_equipe),
+        total=total,
+        limit=limit,
+        offset=offset,
+    )
 
-    def _to_response(e: Equipment) -> EquipmentResponse:
-        data = EquipmentResponse.model_validate(e)
-        owner = owners.get(e.owner_id) if e.owner_id else None
-        if owner:
-            data.owner_name = owner.name
-            data.owner_email = owner.email
-            data.company_name = owner.company_name
-            data.company_cnpj = owner.cnpj
-        return data
+
+@router.get("/equipments", response_model=EquipmentListResponse)
+async def list_all_equipments(
+    db: Annotated[AsyncSession, Depends(get_db)],
+    _actor: Annotated[User, Depends(authorize(UserRole.admin, UserRole.technician))],
+    offset: int = Query(default=0, ge=0),
+    limit: int = Query(default=20, ge=1, le=100),
+    search: str | None = Query(default=None, max_length=100),
+    product_id: uuid.UUID | None = Query(default=None),
+    is_active: bool | None = Query(default=None),
+    company_id: uuid.UUID | None = Query(default=None),
+    without_owner: bool = Query(default=False),
+) -> EquipmentListResponse:
+    """
+    O parque inteiro, de todos os produtos — só para a equipe.
+
+    A listagem por produto obrigava a abrir produto por produto para achar um
+    aparelho. Esta é a mesma consulta sem o produto fixo, para a tela de
+    Equipamentos. O cliente é recusado pelo PAPEL (403), antes de qualquer
+    consulta: o escopo dele continua sendo o `/equipment/my`.
+
+    `company_id` casa só o vínculo oficial do responsável
+    (`users.company_id`). O nome de empresa que o cliente digitou
+    (`users.company_name`) não entra em filtro nem em busca: ele é
+    autodeclarado e não decide de que empresa alguém é.
+    """
+    # Outer join: o equipamento sem responsável continua na lista; só os
+    # filtros que dependem do responsável (busca por ele, empresa) o excluem.
+    base = select(Equipment).outerjoin(User, User.id == Equipment.owner_id)
+    if product_id is not None:
+        base = base.where(Equipment.product_id == product_id)
+    if is_active is not None:
+        base = base.where(Equipment.is_active == is_active)
+    if without_owner:
+        base = base.where(Equipment.owner_id.is_(None))
+    if company_id is not None:
+        base = base.where(User.company_id == company_id)
+    if search:
+        termo = f"%{search}%"
+        base = base.where(
+            or_(
+                Equipment.name.ilike(termo),
+                Equipment.serial_number.ilike(termo),
+                Equipment.model.ilike(termo),
+                User.name.ilike(termo),
+                User.email.ilike(termo),
+            )
+        )
+
+    total = (await db.execute(select(func.count()).select_from(base.subquery()))).scalar_one()
+    # O id desempata nomes iguais: sem ele, dois "Titan" trocariam de página
+    # entre uma requisição e outra.
+    rows = await db.execute(base.order_by(Equipment.name, Equipment.id).offset(offset).limit(limit))
 
     return EquipmentListResponse(
-        items=[_to_response(e) for e in equipments],
+        items=await _enriquece(db, rows.scalars().all(), para_equipe=True),
         total=total,
         limit=limit,
         offset=offset,
@@ -444,8 +551,11 @@ async def get_equipment(
     # mesmo critério do /equipment/my, que devolve só o que é dele.
     if actor.role == UserRole.client:
         _check_equipment_owner(equipment, actor)
+        # O cliente recebe o que sempre recebeu: o equipamento cru.
+        return EquipmentResponse.model_validate(equipment)
 
-    return EquipmentResponse.model_validate(equipment)
+    (resposta,) = await _enriquece(db, [equipment], para_equipe=True)
+    return resposta
 
 
 @router.patch("/equipments/{equipment_id}", response_model=EquipmentResponse)

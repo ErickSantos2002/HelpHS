@@ -268,6 +268,9 @@ async def test_patch_equipment_as_admin(patch_redis):
     equip.owner_email = None
     equip.company_name = None
     equip.company_cnpj = None
+    equip.product_name = None
+    equip.linked_company_id = None
+    equip.linked_company_name = None
 
     app.dependency_overrides[get_db] = _simple_db(equip)
     _override_user(_mock_user(UserRole.admin))

@@ -98,8 +98,18 @@ class EquipmentResponse(AppBaseModel):
     # Owner info (populated by admin list endpoint)
     owner_name: str | None = None
     owner_email: str | None = None
+    # `company_name`/`company_cnpj` são o que o RESPONSÁVEL DIGITOU no cadastro
+    # (`users.company_name`/`users.cnpj`): empresa declarada, não vínculo. Não
+    # servem para escopo, permissão nem filtro.
     company_name: str | None = None
     company_cnpj: str | None = None
+    # Só para a equipe. A empresa oficial é a do vínculo que um admin fez na
+    # tela de Grupos (`users.company_id` -> `companies`); o equipamento não tem
+    # empresa própria. Para o cliente ficam nulos — ele não lê o próprio vínculo
+    # em lugar nenhum da API.
+    product_name: str | None = None
+    linked_company_id: uuid.UUID | None = None
+    linked_company_name: str | None = None
 
 
 class EquipmentListResponse(AppBaseModel):

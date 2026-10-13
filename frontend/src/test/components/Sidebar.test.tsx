@@ -172,6 +172,8 @@ describe("Sidebar — quem vê o quê", () => {
       "Relatórios",
       "Agenda",
       "Grupos",
+      "Equipamentos",
+      "Empresas",
       "Respostas Rápidas",
       "Usuários",
       "Produtos",
@@ -194,6 +196,22 @@ describe("Sidebar — quem vê o quê", () => {
     // "Meus Equipamentos" é do cliente.
     expect(screen.queryByRole("link", { name: "Meus Equipamentos" })).toBeNull();
   });
+
+  it.each(["technician", "admin"] as const)(
+    "%s vê Equipamentos e Empresas em Gestão, apontando para as consultas da equipe",
+    (papel) => {
+      montar({ papel });
+      const gestao = screen.getByRole("group", { name: "Gestão" });
+      expect(within(gestao).getByRole("link", { name: "Equipamentos" }).getAttribute("href")).toBe(
+        "/equipamentos",
+      );
+      expect(within(gestao).getByRole("link", { name: "Empresas" }).getAttribute("href")).toBe(
+        "/empresas",
+      );
+      // A manutenção continua lá: Grupos não saiu do menu.
+      expect(within(gestao).getByRole("link", { name: "Grupos" })).toBeTruthy();
+    },
+  );
 
   it("um grupo que ficou sem item não é anunciado", () => {
     // O cliente não tem nenhum item de "Gestão"; o grupo vazio some inteiro,

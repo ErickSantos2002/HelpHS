@@ -40,6 +40,8 @@ const GroupsPage = lazy(() => import("./pages/groups/GroupsPage"));
 const CalendarPage = lazy(() => import("./pages/calendar/CalendarPage"));
 const ProfilePage = lazy(() => import("./pages/profile/ProfilePage"));
 const EquipmentPage = lazy(() => import("./pages/equipment/EquipmentPage"));
+const StaffEquipmentsPage = lazy(() => import("./pages/equipment/StaffEquipmentsPage"));
+const StaffCompaniesPage = lazy(() => import("./pages/groups/StaffCompaniesPage"));
 const AuditLogsPage = lazy(() => import("./pages/audit/AuditLogsPage"));
 const SettingsPage = lazy(() => import("./pages/settings/SettingsPage"));
 const QuickRepliesPage = lazy(() => import("./pages/settings/QuickRepliesPage"));
@@ -143,9 +145,15 @@ function App() {
                 <Route element={<RoleGuard roles={["admin", "technician"]} />}>
                   <Route path="/users" element={<UsersPage />} />
                   <Route path="/products" element={<ProductsPage />} />
+                  {/* Consulta do parque inteiro. A tranca de verdade é o
+                      backend: `GET /equipments` recusa cliente com 403. */}
+                  <Route path="/equipamentos" element={<StaffEquipmentsPage />} />
                   <Route path="/etiquetas" element={<SettingsPage />} />
                   <Route path="/respostas-rapidas" element={<QuickRepliesPage />} />
                   <Route path="/grupos" element={<GroupsPage />} />
+                  {/* Consulta; a manutenção é a rota de cima. A tranca de
+                      verdade é o backend: `GET /companies` recusa cliente. */}
+                  <Route path="/empresas" element={<StaffCompaniesPage />} />
                   {/* A listagem do acervo é SÓ staff, e a guarda é do backend
                       antes de ser daqui: `GET /library` recusa cliente. Esta
                       rota é a segunda tranca, não a primeira -- o cliente

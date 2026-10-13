@@ -42,6 +42,54 @@ export interface CompanyDetail extends CompanyResponse {
   clients: ClientInCompany[];
 }
 
+/**
+ * Linha da tela de Empresas (consulta da equipe, todos os grupos).
+ *
+ * `equipment_count` conta os equipamentos cujo responsável tem vínculo OFICIAL
+ * com a empresa — o mesmo conjunto de `GET /equipments?company_id=`.
+ */
+export interface CompanyStaffItem extends CompanyResponse {
+  group_name: string;
+  equipment_count: number;
+}
+
+export interface CompanyStaffListResponse {
+  items: CompanyStaffItem[];
+  total: number;
+  limit: number;
+  offset: number;
+}
+
+export interface CompanyStaffDetail extends CompanyDetail {
+  group_name: string;
+  equipment_count: number;
+}
+
+/**
+ * Todas as empresas, de todos os grupos — só para a equipe (`GET /companies`).
+ * O backend recusa cliente com 403. A busca casa nome e CNPJ (com ou sem
+ * pontuação).
+ */
+export async function listAllCompanies(
+  params: { search?: string; group_id?: string; limit?: number; offset?: number } = {},
+): Promise<CompanyStaffListResponse> {
+  const p = new URLSearchParams();
+  if (params.search) p.set("search", params.search);
+  if (params.group_id) p.set("group_id", params.group_id);
+  if (params.limit !== undefined) p.set("limit", String(params.limit));
+  if (params.offset !== undefined) p.set("offset", String(params.offset));
+  const { data } = await api.get<CompanyStaffListResponse>(`/companies?${p}`);
+  return data;
+}
+
+/** O detalhe sem precisar do grupo — a tela de Empresas parte do id. */
+export async function getCompanyById(companyId: string): Promise<CompanyStaffDetail> {
+  const { data } = await api.get<CompanyStaffDetail>(
+    `/companies/${encodeURIComponent(companyId)}`,
+  );
+  return data;
+}
+
 export interface GroupCreate {
   name: string;
   description?: string;

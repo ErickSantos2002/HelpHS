@@ -153,6 +153,31 @@ class GroupDetail(GroupResponse):
     companies: list[CompanyResponse] = []
 
 
+# ── Consulta transversal da equipe (`/companies`) ─────────────
+#
+# A tela de Empresas lista as empresas de TODOS os grupos. Além do que a
+# listagem por grupo já trazia, cada linha diz de que grupo é e quantos
+# equipamentos têm responsável vinculado a ela — a mesma conta que
+# `GET /equipments?company_id=` faz, para as duas telas nunca discordarem.
+
+
+class CompanyStaffItem(CompanyResponse):
+    group_name: str
+    equipment_count: int
+
+
+class CompanyStaffListResponse(AppBaseModel):
+    items: list[CompanyStaffItem]
+    total: int
+    limit: int
+    offset: int
+
+
+class CompanyStaffDetail(CompanyDetail):
+    group_name: str
+    equipment_count: int
+
+
 # ── Group Note schemas ────────────────────────────────────────
 
 

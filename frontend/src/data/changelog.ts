@@ -1,4 +1,4 @@
-export const APP_VERSION = "v1.20.0";
+export const APP_VERSION = "v1.21.0";
 
 export type EntryType = "novidade" | "corrigido" | "melhoria";
 
@@ -14,6 +14,24 @@ export interface ChangelogVersion {
 }
 
 export const CHANGELOG: ChangelogVersion[] = [
+  {
+    version: "v1.21.0",
+    date: "13/10/2026",
+    entries: [
+      {
+        type: "novidade",
+        text: "Tela de Equipamentos para técnicos e administradores: todo o parque de clientes numa lista só, com busca por nome, série, modelo ou responsável e filtros por produto, empresa, status e equipamentos sem responsável.",
+      },
+      {
+        type: "novidade",
+        text: "Tela de Empresas para técnicos e administradores: todas as empresas de todos os grupos, com busca por nome ou CNPJ, filtro por grupo, clientes vinculados e equipamentos de cada empresa.",
+      },
+      {
+        type: "melhoria",
+        text: "O detalhe do equipamento separa a empresa vinculada pela equipe da empresa informada pelo cliente no cadastro.",
+      },
+    ],
+  },
   {
     version: "v1.20.0",
     date: "13/10/2026",

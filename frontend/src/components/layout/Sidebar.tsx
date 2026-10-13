@@ -58,7 +58,13 @@ const NAV_GROUPS: NavGroup[] = [
     items: [
       { label: "Relatórios", path: "/reports", icon: "chart",    roles: ["admin", "technician"] },
       { label: "Agenda",     path: "/agenda",  icon: "calendar", roles: ["admin", "technician"] },
+      // O parque de todos os clientes, só para consulta. O cliente tem o dele
+      // em "Meus Equipamentos", e `GET /equipments` o recusa no backend.
+      { label: "Equipamentos", path: "/equipamentos", icon: "cpu", roles: ["admin", "technician"] },
       { label: "Grupos",     path: "/grupos",  icon: "groups",   roles: ["admin", "technician"] },
+      // Consulta de todas as empresas; a manutenção continua em Grupos, logo
+      // acima. `GET /companies` recusa cliente no backend.
+      { label: "Empresas",   path: "/empresas", icon: "building", roles: ["admin", "technician"] },
       { label: "Respostas Rápidas", path: "/respostas-rapidas", icon: "chat", roles: ["admin", "technician"] },
       // Gestão, e não Principal: o acervo é ferramenta de ATENDIMENTO,
       // vizinha das Respostas Rápidas. O cliente não o vê -- ele recebe

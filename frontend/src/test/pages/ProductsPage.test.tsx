@@ -271,6 +271,31 @@ describe("ProductsPage", () => {
     expect(screen.getByText("Maria Souza")).toBeInTheDocument();
   });
 
+  it("o detalhe extraído continua oferecendo Editar aqui, e separa as duas empresas", async () => {
+    // O modal saiu desta tela para servir a de Equipamentos, que é só de
+    // consulta. Aqui ele mantém o "Editar" — a manutenção continua sendo daqui.
+    vi.mocked(productService.getEquipments).mockResolvedValue({
+      items: [{ ...EQUIPAMENTO, linked_company_id: "c1", linked_company_name: "Alfa Oficial" }],
+      total: 1,
+      limit: 10,
+      offset: 0,
+    });
+    const user = userEvent.setup();
+    await montar();
+    await abrirEquipamentos(user);
+
+    await user.click(screen.getByRole("button", { name: "Visualizar" }));
+    const modal = await screen.findByRole("dialog");
+    expect(within(modal).getByText("Responsável")).toBeInTheDocument();
+    expect(within(modal).getByText("Empresa vinculada")).toBeInTheDocument();
+    expect(within(modal).getByText("Alfa Oficial")).toBeInTheDocument();
+    expect(within(modal).getByText("Empresa declarada")).toBeInTheDocument();
+    expect(within(modal).getByText("Construtora Alfa")).toBeInTheDocument();
+
+    await user.click(within(modal).getByRole("button", { name: "Editar" }));
+    expect(await screen.findByRole("dialog", { name: /editar equipamento/i })).toBeInTheDocument();
+  });
+
   it("o vazio de 'sem dono' diz outra coisa, e oferece voltar", async () => {
     // Dois vazios diferentes na mesma caixa: "não há equipamento" e "não há
     // equipamento SEM DONO". Trocar um pelo outro manda a pessoa cadastrar o
