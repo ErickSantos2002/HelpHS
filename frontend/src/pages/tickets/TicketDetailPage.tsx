@@ -13,8 +13,10 @@ import { rotuloDeStatus } from "../../lib/status";
 import {
   CAMPO_ANEXO_ADICIONADO,
   autoriaDoAnexo,
+  dataHoraDoAnexo,
   eventosDeAnexo,
 } from "../../lib/anexoNaConversa";
+import { rotuloDePapel } from "../../lib/papel";
 import { textoDoVencimento } from "../../lib/tempoUtil";
 import { cn, plural } from "../../lib/utils";
 import { Link, useParams } from "react-router-dom";
@@ -197,6 +199,13 @@ function ActivityEntry({
 
   const isUnassign = entry.field === "assignee_id" && !entry.new_value;
 
+  // O evento de anexo diz QUEM enviou, com o perfil, e QUANDO, com data e hora
+  // — é o que o changelog da v1.20.0 promete para a Atividade, e o que a
+  // conversa já mostrava. Os outros eventos seguem com o tempo relativo.
+  const eAnexo = entry.field === CAMPO_ANEXO_ADICIONADO;
+  const autor = entry.user_name ?? "Sistema";
+  const papel = eAnexo && entry.user_name && entry.user_role ? ` (${rotuloDePapel(entry.user_role)})` : "";
+
   return (
     <div className="flex gap-3 group">
       <div className="flex flex-col items-center pt-1 shrink-0">
@@ -208,11 +217,13 @@ function ActivityEntry({
           <p className="text-sm font-medium text-conteudo">
             {isUnassign ? "Responsável removido" : label}
           </p>
-          <time className="text-[11px] text-conteudo-muted shrink-0">{relTime}</time>
+          <time dateTime={entry.created_at} className="text-[11px] text-conteudo-muted shrink-0">
+            {eAnexo ? dataHoraDoAnexo(entry.created_at) : relTime}
+          </time>
         </div>
 
         {/* Quem fez a ação — sem autor significa que foi o próprio sistema */}
-        <p className="text-xs text-conteudo-muted mt-0.5">por {entry.user_name ?? "Sistema"}</p>
+        <p className="text-xs text-conteudo-muted mt-0.5">por {autor}{papel}</p>
 
         {/* Anexo: o nome do arquivo vem da lista de anexos, não do evento */}
         {entry.field === CAMPO_ANEXO_ADICIONADO && (

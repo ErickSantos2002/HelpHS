@@ -308,6 +308,52 @@ async def test_create_equipment_as_admin(patch_redis):
 
 
 @pytest.mark.asyncio
+async def test_tecnico_cria_equipamento_pela_tela_da_equipe(patch_redis):
+    """A pergunta "técnico pode criar equipamento?" tem resposta: sim, como o admin."""
+    from app.core.database import get_db
+
+    gen = _db_tabela_equipamentos([], product=_mock_product())
+    app.dependency_overrides[get_db] = gen
+    _override_user(_mock_user(UserRole.technician))
+
+    async with AsyncClient(transport=ASGITransport(app=app), base_url="http://test") as c:
+        resp = await c.post(
+            f"/api/v1/products/{_PRODUCT_ID}/equipments",
+            json={"name": "Titan #010", "serial_number": "SN-010"},
+        )
+
+    assert resp.status_code == 201, resp.text
+    assert resp.json()["name"] == "Titan #010"
+    criados = [c.args[0] for c in gen.session.add.call_args_list]
+    assert any(isinstance(o, Equipment) for o in criados)
+    # Entregue à sessão E confirmado: sem o commit, o 201 mentiria.
+    gen.session.commit.assert_awaited()
+
+
+@pytest.mark.asyncio
+async def test_cliente_e_recusado_no_cadastro_da_equipe(patch_redis):
+    """O cliente cadastra o PRÓPRIO aparelho por /equipment/my; o endpoint da equipe é 403.
+
+    Recusa de papel: sai antes de olhar produto ou série, e nada é gravado.
+    """
+    from app.core.database import get_db
+
+    gen = _db_tabela_equipamentos([], product=_mock_product())
+    app.dependency_overrides[get_db] = gen
+    _override_user(_CLIENT)
+
+    async with AsyncClient(transport=ASGITransport(app=app), base_url="http://test") as c:
+        resp = await c.post(
+            f"/api/v1/products/{_PRODUCT_ID}/equipments",
+            json={"name": "Titan #011", "serial_number": "SN-011", "owner_id": str(_CLIENT.id)},
+        )
+
+    assert resp.status_code == 403, resp.text
+    gen.session.add.assert_not_called()
+    gen.session.commit.assert_not_called()
+
+
+@pytest.mark.asyncio
 async def test_create_equipment_duplicate_serial(patch_redis):
     from app.core.database import get_db
 
