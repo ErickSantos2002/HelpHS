@@ -95,8 +95,14 @@ export default function ResetPasswordPage() {
           <button
             type="button"
             onClick={() => setVerSenha((v) => !v)}
-            aria-label={verSenha ? "Ocultar nova senha" : "Mostrar nova senha"}
-            title={verSenha ? "Ocultar nova senha" : "Mostrar nova senha"}
+            // Nome fixo, estado no `aria-pressed`: é o padrão de botão de
+            // alternância. Trocar o nome junto faria o leitor de tela anunciar
+            // "Ocultar nova senha, pressionado" — o estado dito duas vezes, e
+            // ao contrário. O `title` acompanha o nome pelo mesmo motivo; quem
+            // diz o estado na tela é o ícone, que continua alternando.
+            aria-pressed={verSenha}
+            aria-label="Mostrar nova senha"
+            title="Mostrar nova senha"
             className="absolute bottom-0 right-0 flex h-[38px] w-10 items-center justify-center rounded-r-lg text-slate-500 transition-colors hover:text-slate-300 focus:outline-none focus-visible:ring-2 focus-visible:ring-primary cursor-pointer"
           >
             <Icon name={verSenha ? "eyeOff" : "eye"} size={16} strokeWidth={2} />
@@ -116,8 +122,9 @@ export default function ResetPasswordPage() {
           <button
             type="button"
             onClick={() => setVerConfirmacao((v) => !v)}
-            aria-label={verConfirmacao ? "Ocultar confirmação da senha" : "Mostrar confirmação da senha"}
-            title={verConfirmacao ? "Ocultar confirmação da senha" : "Mostrar confirmação da senha"}
+            aria-pressed={verConfirmacao}
+            aria-label="Mostrar confirmação de senha"
+            title="Mostrar confirmação de senha"
             className="absolute bottom-0 right-0 flex h-[38px] w-10 items-center justify-center rounded-r-lg text-slate-500 transition-colors hover:text-slate-300 focus:outline-none focus-visible:ring-2 focus-visible:ring-primary cursor-pointer"
           >
             <Icon name={verConfirmacao ? "eyeOff" : "eye"} size={16} strokeWidth={2} />

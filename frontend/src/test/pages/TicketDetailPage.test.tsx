@@ -1997,6 +1997,32 @@ describe("TicketDetailPage — anexo adicionado", () => {
     expect(await screen.findByText("Anexo adicionado")).toBeInTheDocument();
   });
 
+  it("na Atividade, o evento de anexo traz nome, perfil e data/hora completa", async () => {
+    // O changelog da v1.20.0 promete "quem enviou, com o perfil e a data e
+    // hora" também na Atividade — não "2h atrás".
+    papelDoUsuario = "client";
+    await montar([], TICKET, [EVENTO]);
+    fireEvent.click(screen.getByText("Atividade"));
+
+    expect(await screen.findByText("por Bruno Lima (Técnico)")).toBeInTheDocument();
+    const quando = screen.getAllByText(/^09\/10\/2026, \d{2}:\d{2}$/)[0];
+    expect(quando.tagName).toBe("TIME");
+    expect(quando.getAttribute("datetime")).toBe(EVENTO.created_at);
+  });
+
+  it("na Atividade, os outros eventos continuam como eram", async () => {
+    papelDoUsuario = "admin";
+    await montar([], TICKET, [
+      { ...EVENTO, id: "h11", field: "status", old_value: "open", new_value: "in_progress" },
+    ]);
+    fireEvent.click(screen.getByText("Atividade"));
+
+    // Sem perfil e com o tempo relativo de antes: a mudança é só do anexo.
+    expect(await screen.findByText("por Bruno Lima")).toBeInTheDocument();
+    expect(screen.queryByText("por Bruno Lima (Técnico)")).toBeNull();
+    expect(screen.getByText(/atrás$|^agora$/)).toBeInTheDocument();
+  });
+
   it("a conversa recebe o acontecimento pronto, com autor e arquivo", async () => {
     vi.mocked(attachmentService.getAttachments).mockResolvedValue({
       items: [ANEXO],

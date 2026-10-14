@@ -10,8 +10,9 @@ Sem o token, ou com o token vencido, o arquivo não é servido.
 Sobre exibir inline: os arquivos vêm de upload de cliente, então servi-los
 inline no domínio da API é o mesmo que deixar terceiros publicarem conteúdo
 nessa origem. Um .html ou .svg com script rodaria como se fosse do sistema
-(XSS armazenado). Por isso só imagem de formato seguro abre inline; todo o
-resto desce como download.
+(XSS armazenado). Por isso só um conjunto fechado de formatos abre inline —
+imagem (png, jpeg, gif, webp), PDF e texto puro, sempre com `nosniff` e CSP
+`sandbox` —; todo o resto desce como download.
 """
 
 import asyncio

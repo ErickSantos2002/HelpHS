@@ -1755,9 +1755,14 @@ async def get_ticket_history(
     if recorte is not None:
         base = base.where(recorte)
     total = (await db.execute(select(func.count()).select_from(base.subquery()))).scalar_one()
+    # O `id` desempata. `created_at` é o `now()` da transação, então tudo que
+    # uma requisição grava junto (os N anexos de um envio) empata; sem um
+    # segundo critério, a ordem do empate fica com o plano de execução, e o
+    # grupo que atravessa a divisa de duas páginas repete uma linha e perde
+    # outra (`test_historico_ordem_postgres.py`).
     rows = await db.execute(
         base.options(selectinload(TicketHistory.user))
-        .order_by(TicketHistory.created_at.asc())
+        .order_by(TicketHistory.created_at.asc(), TicketHistory.id.asc())
         .offset(offset)
         .limit(limit)
     )

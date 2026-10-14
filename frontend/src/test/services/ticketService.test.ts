@@ -222,14 +222,110 @@ describe("assignTicket", () => {
 });
 
 describe("getTicketHistory", () => {
-  it("calls GET /tickets/:id/history with limit=100", async () => {
-    mockGet.mockResolvedValue({
-      data: { items: [], total: 0, limit: 100, offset: 0 },
+  /**
+   * Um backend falso com `total` linhas em ordem crescente, que responde às
+   * páginas como o real (`offset`/`limit`, teto de 200 por página).
+   */
+  function historicoCom(total: number) {
+    const todas = Array.from({ length: total }, (_, i) => ({
+      id: `h${i}`,
+      created_at: new Date(Date.UTC(2026, 9, 1) + i * 60_000).toISOString(),
+    }));
+    mockGet.mockImplementation(async (url: string) => {
+      const q = new URLSearchParams(url.split("?")[1]);
+      const limit = Number(q.get("limit"));
+      const offset = Number(q.get("offset") ?? 0);
+      expect(limit).toBeLessThanOrEqual(200);
+      return { data: { items: todas.slice(offset, offset + limit), total, limit, offset } };
+    });
+    return todas;
+  }
+
+  it("um chamado comum é uma requisição só", async () => {
+    historicoCom(30);
+
+    const res = await getTicketHistory("t1");
+
+    expect(mockGet).toHaveBeenCalledTimes(1);
+    expect(mockGet).toHaveBeenCalledWith("/tickets/t1/history?limit=200&offset=0");
+    expect(res.items).toHaveLength(30);
+  });
+
+  it("com mais de 100 eventos, os mais novos continuam presentes e em ordem", async () => {
+    // Era `limit=100` numa lista crescente: do 101º em diante, sumiam — e são
+    // justamente os mais novos, como o evento do anexo que acabou de entrar.
+    const todas = historicoCom(450);
+
+    const res = await getTicketHistory("t1");
+
+    expect(res.items).toHaveLength(450);
+    expect(res.items[res.items.length - 1].id).toBe(todas[449].id);
+    expect(res.items.map((h) => h.id)).toEqual(todas.map((h) => h.id));
+    expect(res.total).toBe(450);
+  });
+
+  it("acima do teto, fica com os mais recentes, ainda em ordem crescente", async () => {
+    const todas = historicoCom(1500);
+
+    const res = await getTicketHistory("t1");
+
+    expect(res.items).toHaveLength(1000);
+    expect(res.items[0].id).toBe(todas[500].id);
+    expect(res.items[res.items.length - 1].id).toBe(todas[1499].id);
+    const datas = res.items.map((h) => h.created_at);
+    expect([...datas].sort()).toEqual(datas);
+  });
+
+  function offsetsPedidos(): number[] {
+    return mockGet.mock.calls.map(([url]) =>
+      Number(new URLSearchParams(String(url).split("?")[1]).get("offset")),
+    );
+  }
+
+  it("pede exatamente as páginas necessárias — nenhuma vazia além do total", async () => {
+    historicoCom(450);
+    await getTicketHistory("t1");
+    expect(offsetsPedidos()).toEqual([0, 200, 400]);
+
+    mockGet.mockClear();
+    historicoCom(400); // múltiplo exato da página: não há terceira página
+    await getTicketHistory("t1");
+    expect(offsetsPedidos()).toEqual([0, 200]);
+
+    mockGet.mockClear();
+    historicoCom(1500); // acima do teto: a 1ª página e a janela dos 1000 recentes
+    await getTicketHistory("t1");
+    expect(offsetsPedidos()).toEqual([0, 500, 700, 900, 1100, 1300]);
+  });
+
+  it("falha numa página adicional faz a leitura inteira falhar, como antes", async () => {
+    // A política de erro é a de sempre: a tela recebe a rejeição e trata como
+    // tratava a requisição única. Devolver só um pedaço esconderia o buraco.
+    historicoCom(450);
+    const real = mockGet.getMockImplementation()!;
+    mockGet.mockImplementation(async (url: string) => {
+      if (url.includes("offset=200")) throw new Error("falha na página 2");
+      return real(url);
     });
 
-    await getTicketHistory("t1");
+    await expect(getTicketHistory("t1")).rejects.toThrow("falha na página 2");
+  });
 
-    expect(mockGet).toHaveBeenCalledWith("/tickets/t1/history?limit=100");
+  it("linha repetida entre páginas não aparece duas vezes", async () => {
+    // Paginação por offset: se uma linha entrar entre duas requisições, a
+    // última da página anterior volta no começo da seguinte.
+    const todas = historicoCom(250);
+    const real = mockGet.getMockImplementation()!;
+    mockGet.mockImplementation(async (url: string) => {
+      const r = (await real(url)) as { data: { items: unknown[] } };
+      if (url.includes("offset=200")) r.data.items = [todas[199], ...r.data.items];
+      return r;
+    });
+
+    const res = await getTicketHistory("t1");
+
+    expect(res.items).toHaveLength(250);
+    expect(new Set(res.items.map((h) => h.id)).size).toBe(250);
   });
 });
 

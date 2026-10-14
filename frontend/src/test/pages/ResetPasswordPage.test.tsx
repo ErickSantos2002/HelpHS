@@ -53,11 +53,42 @@ describe("ResetPasswordPage — mostrar/ocultar senha", () => {
       "button",
     );
     expect(
-      screen.getByRole("button", { name: "Mostrar confirmação da senha" }),
+      screen.getByRole("button", { name: "Mostrar confirmação de senha" }),
     ).toHaveAttribute("type", "button");
   });
 
-  it("cada controle alterna só o seu campo, o rótulo acompanha e o valor fica", async () => {
+  it("aria-pressed acompanha o estado de cada botão, de forma independente", async () => {
+    renderiza();
+    // Nome EXATO a cada consulta: se ele mudasse com o estado, a busca falharia.
+    const botaoSenha = () => screen.getByRole("button", { name: "Mostrar nova senha" });
+    const botaoConfirmacao = () => screen.getByRole("button", { name: "Mostrar confirmação de senha" });
+    expect(botaoSenha()).toHaveAttribute("aria-pressed", "false");
+    expect(botaoConfirmacao()).toHaveAttribute("aria-pressed", "false");
+
+    await userEvent.click(botaoSenha());
+    expect(botaoSenha()).toHaveAttribute("aria-pressed", "true");
+    expect(botaoConfirmacao()).toHaveAttribute("aria-pressed", "false");
+
+    await userEvent.click(botaoConfirmacao());
+    expect(botaoConfirmacao()).toHaveAttribute("aria-pressed", "true");
+
+    await userEvent.click(botaoSenha());
+    expect(botaoSenha()).toHaveAttribute("aria-pressed", "false");
+    expect(botaoConfirmacao()).toHaveAttribute("aria-pressed", "true");
+  });
+
+  it("o nome acessível não muda com o estado — quem diz o estado é o aria-pressed", async () => {
+    renderiza();
+    const botao = screen.getByRole("button", { name: "Mostrar nova senha" });
+
+    await userEvent.click(botao);
+
+    expect(botao).toHaveAccessibleName("Mostrar nova senha");
+    expect(botao).toHaveAttribute("aria-pressed", "true");
+    expect(screen.queryByRole("button", { name: /^Ocultar/ })).toBeNull();
+  });
+
+  it("cada controle alterna só o seu campo, o nome fica estável e o valor fica", async () => {
     renderiza();
     const { senha, confirmacao } = campos();
     await userEvent.type(senha, "SenhaNova1");
@@ -66,20 +97,20 @@ describe("ResetPasswordPage — mostrar/ocultar senha", () => {
     await userEvent.click(screen.getByRole("button", { name: "Mostrar nova senha" }));
     expect(senha).toHaveAttribute("type", "text");
     expect(confirmacao).toHaveAttribute("type", "password");
-    expect(screen.getByRole("button", { name: "Ocultar nova senha" })).toBeInTheDocument();
+    expect(screen.getByRole("button", { name: "Mostrar nova senha" })).toBeInTheDocument();
     expect(
-      screen.getByRole("button", { name: "Mostrar confirmação da senha" }),
+      screen.getByRole("button", { name: "Mostrar confirmação de senha" }),
     ).toBeInTheDocument();
 
-    await userEvent.click(screen.getByRole("button", { name: "Mostrar confirmação da senha" }));
+    await userEvent.click(screen.getByRole("button", { name: "Mostrar confirmação de senha" }));
     expect(confirmacao).toHaveAttribute("type", "text");
     expect(senha).toHaveAttribute("type", "text");
 
-    await userEvent.click(screen.getByRole("button", { name: "Ocultar nova senha" }));
+    await userEvent.click(screen.getByRole("button", { name: "Mostrar nova senha" }));
     expect(senha).toHaveAttribute("type", "password");
     expect(confirmacao).toHaveAttribute("type", "text");
 
-    await userEvent.click(screen.getByRole("button", { name: "Ocultar confirmação da senha" }));
+    await userEvent.click(screen.getByRole("button", { name: "Mostrar confirmação de senha" }));
     expect(confirmacao).toHaveAttribute("type", "password");
 
     expect(senha).toHaveValue("SenhaNova1");
@@ -101,7 +132,7 @@ describe("ResetPasswordPage — mostrar/ocultar senha", () => {
     expect(senha).toHaveAttribute("type", "password");
 
     const botaoConfirmacao = screen.getByRole("button", {
-      name: "Mostrar confirmação da senha",
+      name: "Mostrar confirmação de senha",
     });
     botaoConfirmacao.focus();
     await userEvent.keyboard(" ");
@@ -124,7 +155,7 @@ describe("ResetPasswordPage — mostrar/ocultar senha", () => {
     expect(confirmacao).toHaveFocus();
     await userEvent.tab();
     expect(
-      screen.getByRole("button", { name: "Mostrar confirmação da senha" }),
+      screen.getByRole("button", { name: "Mostrar confirmação de senha" }),
     ).toHaveFocus();
   });
 });

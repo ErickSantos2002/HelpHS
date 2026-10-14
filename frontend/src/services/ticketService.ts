@@ -129,9 +129,46 @@ export interface TicketHistoryListResponse {
   offset: number;
 }
 
+/** O teto por página do `GET /tickets/{id}/history` (`le=200` no backend). */
+const PAGINA_DO_HISTORICO = 200;
+/** Acima disto, a tela fica com os mais recentes — e nunca com os mais velhos. */
+const TETO_DO_HISTORICO = 1000;
+
+/**
+ * O histórico do chamado, em ordem crescente, sem perder os eventos mais novos.
+ *
+ * Era uma página só de `limit=100`. Como o backend devolve do mais antigo para
+ * o mais novo, do 101º evento em diante sumiam justamente os RECENTES — o anexo
+ * que acabou de entrar não aparecia na conversa nem na Atividade.
+ *
+ * Agora a primeira página diz o `total`, e o resto vem em paralelo. Chamado
+ * com mais de mil eventos fica com os mil mais recentes: o corte é sempre na
+ * ponta velha. A ordem que a tela recebe continua crescente, e linha repetida
+ * entre páginas (algo entrou no meio da leitura) não aparece duas vezes.
+ */
 export async function getTicketHistory(id: string): Promise<TicketHistoryListResponse> {
-  const { data } = await api.get<TicketHistoryListResponse>(`/tickets/${id}/history?limit=100`);
-  return data;
+  const pagina = async (offset: number) =>
+    (
+      await api.get<TicketHistoryListResponse>(
+        `/tickets/${id}/history?limit=${PAGINA_DO_HISTORICO}&offset=${offset}`,
+      )
+    ).data;
+
+  const primeira = await pagina(0);
+  const { total } = primeira;
+  if (primeira.items.length >= total) return primeira;
+
+  const cortaOsVelhos = total > TETO_DO_HISTORICO;
+  const inicio = cortaOsVelhos ? total - TETO_DO_HISTORICO : primeira.items.length;
+  const offsets: number[] = [];
+  for (let o = inicio; o < total; o += PAGINA_DO_HISTORICO) offsets.push(o);
+  const resto = await Promise.all(offsets.map(pagina));
+
+  const vistos = new Set<string>();
+  const items = [...(cortaOsVelhos ? [] : primeira.items), ...resto.flatMap((r) => r.items)].filter(
+    (h) => !vistos.has(h.id) && vistos.add(h.id),
+  );
+  return { items, total, limit: items.length, offset: cortaOsVelhos ? inicio : 0 };
 }
 
 export async function updateTicketStatus(
