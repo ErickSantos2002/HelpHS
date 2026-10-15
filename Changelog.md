@@ -43,6 +43,21 @@ Regras completas em `docs/decisoes-e-regras.md`, seção "Anexos do chamado".
 
 ### Infraestrutura
 
+- **Links de arquivo ~20× mais baratos de emitir, sem mudança visível.** Cada
+  link de foto, anexo ou biblioteca reinterpretava a chave PEM (~60 ms medidos
+  fora de produção); agora a chave interpretada fica em cache por processo e a
+  assinatura cai para o custo do RS256. O link é estável dentro de uma janela de
+  300 s — mesma assinatura memorizada, mesma URL — sem nunca passar da validade
+  configurada, e leva a versão do arquivo (`st_mtime_ns`) para que conteúdo
+  novo saia com URL nova. `/files` passa a responder
+  `Cache-Control: private, max-age` limitado à validade restante do link e a
+  `FILE_URL_EXPIRES_SECONDS`; `nosniff`, `no-referrer` e a CSP `sandbox`
+  continuam. Nenhuma tela, permissão ou contrato de resposta muda; sem migration
+  e sem dependência nova. Tokens de login e de conta (`core/security.py`,
+  `account_tokens.py`) **não** foram tocados. Cobertura em
+  `tests/test_assinatura_de_arquivos.py`. Regras em `docs/decisoes-e-regras.md`,
+  "O custo de assinar, e o link estável por janela".
+
 - **A Helô ganha um modo, e o padrão é a recepcionista da Fase 1.** Os manuais
   técnicos dos sete aparelhos estão sendo reescritos, e a Fase 2 com a base
   vazia escala toda pergunta. Em `triagem` ela saúda, encerra ou escala, sem

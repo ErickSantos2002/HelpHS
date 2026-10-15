@@ -19,12 +19,14 @@ O "presigned url" aqui e um JWT curto embutido na URL, validado pelo endpoint
 
 import asyncio
 import os
+import time
 import uuid
 from datetime import UTC, datetime, timedelta
-from functools import partial
+from functools import lru_cache, partial
 from pathlib import Path
 
-from jose import JWTError, jwt
+from jose import JWTError, jwk, jwt
+from jose.backends.base import Key
 from loguru import logger
 
 from app.core.config import Settings
@@ -139,26 +141,113 @@ def file_exists(key: str, settings: Settings) -> bool:
         return False
 
 
-def create_file_token(key: str, settings: Settings, expires: int | None = None) -> str:
-    """Token curto que autoriza baixar exatamente um arquivo."""
-    now = datetime.now(UTC)
-    ttl = expires if expires is not None else settings.file_url_expires_seconds
+# ── Assinatura dos links de arquivo ───────────────────────────
+#
+# Medido em 13/10/2026: cada link custava ~60 ms, e quase nada disso era a
+# assinatura RS256 (~1 ms). Era o `jose` reinterpretando e validando a chave
+# PEM a cada chamada, porque recebia o TEXTO da chave. Cem fotos numa lista
+# seriam seis segundos de CPU.
+#
+# Duas medidas, nenhuma muda o algoritmo, a chave ou quem pode baixar o quê:
+#
+# 1. A chave interpretada fica em cache por processo, indexada pelo CONTEÚDO do
+#    PEM. Não há recarga de segredo em tempo de execução no HelpHS (a chave vem
+#    do ambiente ou de arquivo, lida no boot); se a configuração apontar para
+#    outra chave, é outra entrada — a velha nunca é usada para o PEM novo.
+# 2. O link é estável dentro de uma janela de `_JANELA_DO_TOKEN` segundos:
+#    `iat` alinhado ao início da janela e `exp = iat + ttl`. Mesmo arquivo,
+#    mesma versão e mesma janela produzem o MESMO token — RS256 PKCS#1 v1.5 é
+#    determinístico —, e a assinatura fica memorizada. Isso deixa o navegador
+#    reaproveitar a imagem (ver `Cache-Control` em routers/files.py).
+
+_JANELA_DO_TOKEN = 300
+"""Segundos. A validade restante de um link fica entre `ttl - janela` e `ttl`."""
+
+
+def _agora() -> int:
+    """Relógio da emissão, em segundos. Separado para os testes o controlarem."""
+    return int(time.time())
+
+
+@lru_cache(maxsize=8)
+def _chave_jwt(pem: str, algoritmo: str) -> Key:
+    """A chave PEM interpretada uma vez por conteúdo — privada ou pública."""
+    return jwk.construct(pem, algoritmo)
+
+
+def _versao_do_arquivo(key: str, settings: Settings) -> int:
+    """`st_mtime_ns` do arquivo, ou 0 se ele não existe.
+
+    Entra no token para conteúdo novo sair com URL nova. A troca da própria
+    foto com a MESMA extensão sobrescreve a mesma chave: sem isto, o link
+    novo seria idêntico ao velho dentro da janela, o React não recarregaria a
+    `<img>` e o cache mostraria a foto antiga.
+    """
+    try:
+        return resolve_path(key, settings).stat().st_mtime_ns
+    except (StorageError, OSError):
+        return 0
+
+
+def _janela(agora: int, ttl: int) -> tuple[int, int]:
+    """(iat, exp) do link. Nunca devolve `exp` além de `agora + ttl`.
+
+    Abaixo de duas janelas, alinhar comeria uma fatia grande demais da
+    validade — e um `ttl` negativo (link já vencido, usado em teste) tem de
+    continuar vencido. Nesses casos vale o relógio puro, como era antes.
+    """
+    if ttl < 2 * _JANELA_DO_TOKEN:
+        return agora, agora + ttl
+    inicio = agora - (agora % _JANELA_DO_TOKEN)
+    return inicio, inicio + ttl
+
+
+@lru_cache(maxsize=4096)
+def _assina_token_de_arquivo(
+    key: str, versao: int, iat: int, exp: int, emissor: str, algoritmo: str, pem: str
+) -> str:
+    """A assinatura em si, memorizada por (arquivo, versão, janela, chave).
+
+    A janela está no próprio `iat`/`exp` da chave do cache: na virada, o token
+    é outro. Como `exp > agora` para todo `ttl >= 2 * janela`, o memo nunca
+    devolve um link já vencido.
+    """
     payload = {
         "sub": key,
         "type": _TOKEN_TYPE,
-        "iat": now,
-        "exp": now + timedelta(seconds=ttl),
-        "iss": settings.jwt_issuer,
+        "v": versao,
+        "iat": iat,
+        "exp": exp,
+        "iss": emissor,
     }
-    return jwt.encode(payload, settings.get_private_key(), algorithm=settings.jwt_algorithm)
+    return jwt.encode(payload, _chave_jwt(pem, algoritmo), algorithm=algoritmo)
 
 
-def read_file_token(token: str, settings: Settings) -> str:
-    """Valida o token e devolve a key. Levanta StorageError se nao servir."""
+def create_file_token(key: str, settings: Settings, expires: int | None = None) -> str:
+    """Token curto que autoriza baixar exatamente um arquivo."""
+    ttl = expires if expires is not None else settings.file_url_expires_seconds
+    iat, exp = _janela(_agora(), ttl)
+    return _assina_token_de_arquivo(
+        key,
+        _versao_do_arquivo(key, settings),
+        iat,
+        exp,
+        settings.jwt_issuer,
+        settings.jwt_algorithm,
+        settings.get_private_key(),
+    )
+
+
+def ler_token_de_arquivo(token: str, settings: Settings) -> tuple[str, int]:
+    """Valida o token e devolve (key, exp). Levanta StorageError se não servir.
+
+    O `exp` vai para o `Cache-Control` do `/files`: o navegador não pode
+    guardar a resposta além da validade do link que a pediu.
+    """
     try:
         payload = jwt.decode(
             token,
-            settings.get_public_key(),
+            _chave_jwt(settings.get_public_key(), settings.jwt_algorithm),
             algorithms=[settings.jwt_algorithm],
             issuer=settings.jwt_issuer,
         )
@@ -171,7 +260,12 @@ def read_file_token(token: str, settings: Settings) -> str:
     key = payload.get("sub")
     if not key:
         raise StorageError("Link invalido para download de arquivo.")
-    return str(key)
+    return str(key), int(payload["exp"])
+
+
+def read_file_token(token: str, settings: Settings) -> str:
+    """Valida o token e devolve a key. Levanta StorageError se nao servir."""
+    return ler_token_de_arquivo(token, settings)[0]
 
 
 def create_archive_token(
@@ -192,7 +286,13 @@ def create_archive_token(
         "exp": now + timedelta(seconds=ttl),
         "iss": settings.jwt_issuer,
     }
-    return jwt.encode(payload, settings.get_private_key(), algorithm=settings.jwt_algorithm)
+    # Sem janela: o lote é emitido uma vez por pedido, e não se repete. A chave
+    # interpretada é a mesma do cache, então não paga os ~60 ms.
+    return jwt.encode(
+        payload,
+        _chave_jwt(settings.get_private_key(), settings.jwt_algorithm),
+        algorithm=settings.jwt_algorithm,
+    )
 
 
 def read_archive_token(token: str, settings: Settings) -> tuple[str, list[str]]:
@@ -200,7 +300,7 @@ def read_archive_token(token: str, settings: Settings) -> tuple[str, list[str]]:
     try:
         payload = jwt.decode(
             token,
-            settings.get_public_key(),
+            _chave_jwt(settings.get_public_key(), settings.jwt_algorithm),
             algorithms=[settings.jwt_algorithm],
             issuer=settings.jwt_issuer,
         )

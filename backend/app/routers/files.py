@@ -18,6 +18,7 @@ imagem (png, jpeg, gif, webp), PDF e texto puro, sempre com `nosniff` e CSP
 import asyncio
 import mimetypes
 import re
+import time
 import uuid
 from pathlib import Path
 from typing import Annotated
@@ -234,7 +235,7 @@ async def download_file(
     filename: str | None = Query(default=None, max_length=255),
 ) -> FileResponse:
     try:
-        key = storage.read_file_token(token, settings)
+        key, expira_em = storage.ler_token_de_arquivo(token, settings)
         caminho = storage.resolve_path(key, settings)
     except storage.StorageError as exc:
         raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail=str(exc)) from exc
@@ -258,5 +259,21 @@ async def download_file(
         headers["Content-Disposition"] = f"inline; filename*=UTF-8''{quote(nome)}"
     else:
         headers["Content-Disposition"] = f"attachment; filename*=UTF-8''{quote(nome)}"
+    headers["Cache-Control"] = _cache_privado(expira_em, settings)
 
     return FileResponse(path=caminho, media_type=media_type, headers=headers)
+
+
+def _cache_privado(expira_em: int, settings: Settings) -> str:
+    """`private, max-age=N`, com N = o menor entre a validade restante do link
+    e `FILE_URL_EXPIRES_SECONDS`.
+
+    - `private`: só o navegador de quem pediu guarda; proxy compartilhado não.
+      Nunca `public` nem `immutable` — o arquivo é privado e o link vence.
+    - Restante do link: a resposta não sobrevive no cache ao link que a pediu.
+    - O teto: o link da própria foto vale 7 dias, e guardar a imagem 7 dias no
+      disco de um computador compartilhado não ajuda ninguém. Com o token
+      estável por janela (services/storage.py), uma hora já poupa a rede.
+    """
+    restante = max(0, expira_em - int(time.time()))
+    return f"private, max-age={min(restante, settings.file_url_expires_seconds)}"

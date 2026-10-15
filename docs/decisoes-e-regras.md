@@ -1532,6 +1532,51 @@ O token é do tipo `file`: um token de login **não** serve para baixar arquivo,
 vice-versa. A key é validada contra path traversal — nenhum caminho sai de
 `UPLOAD_DIR`.
 
+### O custo de assinar, e o link estável por janela
+
+Medido em 13/10/2026 (fora de produção, chave RS256 de 2048 bits): cada link
+custava **~60 ms**, e quase nada disso era assinatura — o `jose` recebia o
+**texto** da chave PEM e a reinterpretava e validava a cada chamada. Com a
+chave já carregada, a assinatura custa ~1 ms. Cem fotos numa lista seriam
+seis segundos de CPU; esse era o bloqueio para mostrar foto de terceiros.
+
+**A chave interpretada fica em cache por processo** (`storage._chave_jwt`),
+indexada pelo conteúdo do PEM e pelo algoritmo — privada para emitir, pública
+para verificar. Não há recarga de segredo em tempo de execução no HelpHS: a
+chave vem do ambiente (ou de arquivo, em desenvolvimento) e só muda com
+reinício. Se a configuração apontar para outra chave, é outra entrada no
+cache; a velha nunca serve para o PEM novo. RS256, a chave e o
+`algorithms=[...]` de todo `decode` continuam iguais — o portão contra
+confusão de algoritmo (`test_jwt_confusao_de_algoritmo.py`) não mudou.
+
+**O link de arquivo é estável dentro de uma janela de 300 s.** O `iat` é
+alinhado ao início da janela e o `exp` é `iat + ttl`, então:
+
+- mesmo arquivo, mesma versão, mesma janela → **o mesmo token** (RS256 PKCS#1
+  v1.5 é determinístico), e a assinatura fica memorizada;
+- a validade **nunca passa** de `agora + ttl` — a janela só tira, no máximo,
+  300 s da validade restante;
+- abaixo de duas janelas de TTL não há alinhamento: vale o relógio puro, como
+  antes (inclusive o link já vencido de teste continua vencido);
+- arquivos e tipos diferentes nunca compartilham token, e o token de lote
+  (ZIP) não tem janela — é emitido uma vez por pedido.
+
+**O token leva a versão do arquivo** (`v` = `st_mtime_ns`, ou 0 se ele não
+existe). Sem isso, a troca da própria foto com a **mesma** extensão — que
+sobrescreve a mesma chave — devolveria a mesma URL dentro da janela, e a tela
+continuaria mostrando a foto antiga. Conteúdo novo, URL nova.
+
+**`/files` responde `Cache-Control: private, max-age=N`**, com `N` = o menor
+entre a validade restante do link e `FILE_URL_EXPIRES_SECONDS`. `private`
+porque o arquivo é de quem tem o link, e nenhum proxy deve guardá-lo; nunca
+`public` nem `immutable`. O teto existe por causa da própria foto, cujo link
+vale 7 dias: guardar a imagem esse tempo no disco de um computador
+compartilhado não poupa nada que uma hora não poupe. `nosniff`, `no-referrer`
+e a CSP `sandbox` continuam em toda resposta.
+
+Nada disso muda tela, permissão ou quem pode baixar o quê: o `/files` segue
+autorizando por **posse do token**.
+
 ### Por que quase tudo desce como download
 
 Os arquivos vêm de upload de cliente. Servi-los inline no domínio da API é o
