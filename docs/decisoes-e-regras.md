@@ -1749,8 +1749,14 @@ mudar o contrato do upload:
 Se o commit falhar (ou o pedido for cancelado no meio dele), o arquivo volta
 para a chave com `storage.devolve_arquivo`, que usa `os.link` e **não
 sobrescreve**: se um upload já gravou a chave, a foto nova fica e o isolado é
-descartado. Em volume sem link físico (SMB, alguns FUSE), cai para "conferir
-e renomear", com uma janela mínima. Se a exclusão física falhar depois do
+descartado. Em volume sem link físico (SMB, alguns FUSE), a devolução copia
+para a chave com criação exclusiva (`O_CREAT | O_EXCL`), a mesma garantia do
+`link` — nunca "conferir e renomear", porque no Linux o `rename` sobrescreve.
+Se a cópia falhar no meio, só o arquivo que ela mesma criou é apagado
+(conferido por `st_dev`/`st_ino`); o isolado continua inteiro.
+
+O isolamento é o último passo antes do commit, dentro do mesmo `try`: nada
+que possa falhar fica entre o arquivo sair da chave e o caminho que o devolve. Se a exclusão física falhar depois do
 commit, sobra um órfão `.removendo` fora da chave pública, com aviso no log —
 nunca uma linha apontando para o vazio, nem a foto ainda servida.
 
