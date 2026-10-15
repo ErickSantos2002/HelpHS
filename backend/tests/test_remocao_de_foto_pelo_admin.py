@@ -13,9 +13,11 @@ sessão falsa encenando cada ordem possível; e em
 disputando a trava da linha.
 """
 
+import pathlib
 import uuid
 from datetime import UTC, datetime, timedelta, timezone
 from pathlib import Path
+from types import SimpleNamespace
 from unittest.mock import AsyncMock, MagicMock
 
 import pytest
@@ -558,11 +560,13 @@ async def test_falha_ao_isolar_o_arquivo_e_erro_sem_mudar_nada(disco, apagados, 
 
     resposta = await _remove(alvo, sessao)
 
+    # A falha ao isolar cai no mesmo caminho da falha de commit: nada foi
+    # comitado, a transação (linha e auditoria) é desfeita, o arquivo fica.
     assert resposta.status_code >= 500
-    assert alvo.avatar_url == chave
     assert arquivo.read_bytes() == _PNG
+    assert _arquivos(disco) == [chave]
     assert sessao.commits == 0
-    assert sessao.adicionados == []
+    assert sessao.rollbacks == 1
 
 
 @pytest.mark.asyncio
@@ -855,7 +859,7 @@ async def test_isolar_e_devolver_restaura_o_conteudo(disco):
 
 
 @pytest.mark.asyncio
-async def test_devolver_em_volume_sem_link_fisico_cai_no_rename(disco, monkeypatch):
+async def test_devolver_em_volume_sem_link_fisico_copia_de_volta(disco, monkeypatch):
     _grava(disco, "avatars/a.png")
     settings = get_settings()
     isolado = await storage.isola_arquivo("avatars/a.png", settings)
@@ -899,8 +903,95 @@ async def test_devolver_com_disco_quebrado_nao_levanta(disco, monkeypatch):
         raise PermissionError("sem permissão")
 
     monkeypatch.setattr(storage.os, "link", _falha)
-    monkeypatch.setattr(storage.os, "rename", _falha)
+    monkeypatch.setattr(storage.os, "open", _falha)
 
     await storage.devolve_arquivo(isolado, "avatars/a.png", settings)
 
-    assert (disco / isolado).exists()
+    # Nada se perde: o conteúdo segue no nome isolado, e o erro vai ao log.
+    assert (disco / isolado).read_bytes() == _PNG
+
+
+def _sem_link(*args, **kwargs):
+    raise OSError(95, "Operation not supported")
+
+
+@pytest.mark.asyncio
+async def test_devolver_sem_link_perde_a_corrida_para_um_upload_e_nao_sobrescreve(
+    disco, monkeypatch
+):
+    """A foto nova chega à chave no ÚLTIMO instante antes da devolução criar o
+    arquivo — o caso que "conferir e renomear" sobrescreveria. A criação
+    exclusiva perde a corrida e a foto nova fica."""
+    _grava(disco, "avatars/a.png")
+    settings = get_settings()
+    isolado = await storage.isola_arquivo("avatars/a.png", settings)
+    real_open = storage.os.open
+
+    def _upload_chega_antes(caminho, *args, **kwargs):
+        if str(caminho).endswith("a.png"):
+            _grava(disco, "avatars/a.png", _NOVA)
+        return real_open(caminho, *args, **kwargs)
+
+    monkeypatch.setattr(storage.os, "link", _sem_link)
+    monkeypatch.setattr(storage.os, "open", _upload_chega_antes)
+
+    await storage.devolve_arquivo(isolado, "avatars/a.png", settings)
+
+    assert (disco / "avatars/a.png").read_bytes() == _NOVA
+    assert _arquivos(disco) == ["avatars/a.png"]
+
+
+@pytest.mark.asyncio
+async def test_copia_que_falha_no_meio_apaga_so_o_que_ela_criou(disco, monkeypatch):
+    _grava(disco, "avatars/a.png")
+    settings = get_settings()
+    isolado = await storage.isola_arquivo("avatars/a.png", settings)
+
+    def _le_e_falha(self):
+        raise OSError(5, "erro de leitura")
+
+    monkeypatch.setattr(storage.os, "link", _sem_link)
+    monkeypatch.setattr(storage.Path, "read_bytes", _le_e_falha)
+
+    await storage.devolve_arquivo(isolado, "avatars/a.png", settings)
+    monkeypatch.undo()
+
+    # Nenhum arquivo pela metade na chave pública; o isolado continua inteiro.
+    assert not (disco / "avatars/a.png").exists()
+    assert (disco / isolado).read_bytes() == _PNG
+
+
+@pytest.mark.asyncio
+async def test_copia_que_falha_nao_apaga_a_foto_que_um_upload_pos_no_lugar(disco, monkeypatch):
+    """Se, durante a cópia, um upload trocou o arquivo da chave (`os.replace`),
+    o arquivo no caminho já não é o desta cópia: a limpeza não o apaga.
+
+    A troca é encenada pela IDENTIDADE (`st_dev`, `st_ino`) que o caminho
+    passa a ter, e não por um `os.replace` de verdade: no Windows não se
+    substitui arquivo aberto, e é a identidade que a limpeza compara.
+    """
+    _grava(disco, "avatars/a.png")
+    settings = get_settings()
+    isolado = await storage.isola_arquivo("avatars/a.png", settings)
+    publico = disco / "avatars/a.png"
+    real_stat = storage.os.stat
+
+    def _le_e_falha(self):
+        raise OSError(5, "erro de leitura")
+
+    def _outro_arquivo_no_caminho(caminho, *args, **kwargs):
+        resultado = real_stat(caminho, *args, **kwargs)
+        if pathlib.Path(caminho) == publico:
+            return SimpleNamespace(st_dev=resultado.st_dev, st_ino=resultado.st_ino + 1)
+        return resultado
+
+    monkeypatch.setattr(storage.os, "link", _sem_link)
+    monkeypatch.setattr(storage.Path, "read_bytes", _le_e_falha)
+    monkeypatch.setattr(storage.os, "stat", _outro_arquivo_no_caminho)
+
+    await storage.devolve_arquivo(isolado, "avatars/a.png", settings)
+    monkeypatch.undo()
+
+    # O arquivo no caminho "não é desta cópia": fica onde está.
+    assert publico.exists()
+    assert (disco / isolado).read_bytes() == _PNG

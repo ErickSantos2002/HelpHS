@@ -675,37 +675,42 @@ async def remove_user_avatar_by_admin(
         raise HTTPException(status_code=status.HTTP_409_CONFLICT, detail=_CONTA_MUDOU)
 
     chave = _avatar_do_proprio_usuario(user)
-    isolado = await storage.isola_arquivo(chave, settings) if chave else None
 
     user.avatar_url = None
     user.updated_at = datetime.now(UTC)
-    db.add(
-        AuditLog(
-            user_id=actor.id,
-            action=AuditAction.update,
-            entity_type="user",
-            entity_id=user.id,
-            old_data={"tinha_foto": True},
-            # O valor de uma referência indevida NÃO entra: pode ser URL de
-            # terceiro. Só o fato de que ela existia.
-            new_data={
-                "operacao": "remocao_de_foto_pelo_admin",
-                "justificativa": body.justification,
-                "referencia_indevida": chave is None,
-                "arquivo_encontrado": isolado is not None,
-            },
-            ip_address=request.client.host if request.client else None,
-            user_agent=request.headers.get("user-agent", "")[:500],
-        )
+    auditoria = AuditLog(
+        user_id=actor.id,
+        action=AuditAction.update,
+        entity_type="user",
+        entity_id=user.id,
+        old_data={"tinha_foto": True},
+        ip_address=request.client.host if request.client else None,
+        user_agent=request.headers.get("user-agent", "")[:500],
     )
+    db.add(auditoria)
+
+    # Isolar é a ÚLTIMA coisa antes do commit, e dentro do mesmo `try`: nada
+    # que possa falhar fica entre o arquivo sair da chave e o caminho que o
+    # devolve.
+    isolado: str | None = None
     try:
+        if chave:
+            isolado = await storage.isola_arquivo(chave, settings)
+        # O valor de uma referência indevida NÃO entra: pode ser URL de
+        # terceiro. Só o fato de que ela existia.
+        auditoria.new_data = {
+            "operacao": "remocao_de_foto_pelo_admin",
+            "justificativa": body.justification,
+            "referencia_indevida": chave is None,
+            "arquivo_encontrado": isolado is not None,
+        }
         await db.commit()
     except BaseException:
         # `BaseException`: um cancelamento no meio do commit também tem de
         # devolver o arquivo. A linha continua apontando para a chave: o
-        # arquivo volta para ela —
-        # antes do rollback, enquanto a trava ainda pode estar de pé. A
-        # devolução não sobrescreve: se um upload já gravou a chave, ele fica.
+        # arquivo volta para ela — antes do rollback, enquanto a trava ainda
+        # pode estar de pé. A devolução nunca sobrescreve: se um upload já
+        # gravou a chave, a foto dele fica.
         if isolado and chave:
             await storage.devolve_arquivo(isolado, chave, settings)
         await db.rollback()

@@ -168,6 +168,32 @@ async def isola_arquivo(key: str, settings: Settings) -> str | None:
     return isolado.relative_to(_root(settings)).as_posix()
 
 
+def _copia_sem_sobrescrever(origem: Path, destino: Path) -> None:
+    """Copia para `destino` só se ele não existe — `O_EXCL` decide, atômico.
+
+    Se o destino já existe, não faz nada: o que está lá é mais novo. Se a
+    cópia falhar no meio, apaga o que ESTA cópia criou, e só se o caminho
+    ainda for o mesmo arquivo (um `os.replace` de upload pode ter posto outro
+    no lugar, e esse não é nosso para apagar).
+    """
+    try:
+        fd = os.open(destino, os.O_WRONLY | os.O_CREAT | os.O_EXCL | getattr(os, "O_BINARY", 0))
+    except FileExistsError:
+        return
+    proprio = os.fstat(fd)
+    try:
+        with os.fdopen(fd, "wb") as saida:
+            saida.write(origem.read_bytes())
+    except OSError:
+        try:
+            agora = os.stat(destino)
+            if (agora.st_dev, agora.st_ino) == (proprio.st_dev, proprio.st_ino):
+                destino.unlink()
+        except OSError:
+            pass
+        raise
+
+
 async def devolve_arquivo(isolado: str, key: str, settings: Settings) -> None:
     """Desfaz `isola_arquivo` SEM sobrescrever o que estiver na chave.
 
@@ -187,12 +213,11 @@ async def devolve_arquivo(isolado: str, key: str, settings: Settings) -> None:
         except FileExistsError:
             pass
         except OSError:
-            # Volume sem link físico (SMB, alguns FUSE): conferir e mover.
-            # Sobra uma janela mínima, mas largar o arquivo isolado deixaria a
-            # linha apontando para o vazio com certeza.
-            if not destino.exists():
-                os.rename(origem, destino)
-                return
+            # Volume sem link físico (SMB, alguns FUSE). NÃO "conferir e
+            # renomear": no Linux o `rename` sobrescreve, e um upload que
+            # gravasse a chave entre a conferência e o `rename` perderia a
+            # foto nova. A criação exclusiva é a mesma garantia do `link`.
+            _copia_sem_sobrescrever(origem, destino)
         origem.unlink(missing_ok=True)
 
     try:
