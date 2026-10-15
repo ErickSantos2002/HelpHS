@@ -11,6 +11,7 @@ Permissões:
   PATCH  /users/{id}/status       — admin | technician
   PATCH  /users/me/lgpd-consent   — qualquer autenticado (próprio consentimento)
   POST   /users/{id}/anonymize    — admin | technician (anonimiza PII — LGPD)
+  POST   /users/{id}/avatar/remove — admin (tira a foto de outra conta, com justificativa)
   DELETE /users/{id}              — admin | technician (exclusão, apenas sem tickets)
 """
 
@@ -48,6 +49,7 @@ from app.models.models import (
 )
 from app.schemas.ticket import InterruptorDaIA
 from app.schemas.user import (
+    AvatarRemovalByAdmin,
     LGPDConsentStatus,
     LGPDConsentUpdate,
     OnboardingUpdate,
@@ -112,6 +114,22 @@ def _to_response(user: User) -> UserResponse:
     # antes da correção não sai por nenhuma delas, nem crua.
     response.avatar_url = _avatar_do_proprio_usuario(user)
     return response
+
+
+async def _trava_usuario(db: AsyncSession, user_id: uuid.UUID) -> User | None:
+    """Lê a linha do usuário com `FOR UPDATE`, que só solta no fim da transação.
+
+    `populate_existing`: o `get_current_user` já carregou esta linha na mesma
+    sessão, e sem ele o SQLAlchemy devolveria o objeto do mapa de identidade
+    com os valores de ANTES da espera pela trava.
+    """
+    result = await db.execute(
+        select(User)
+        .where(User.id == user_id)
+        .with_for_update()
+        .execution_options(populate_existing=True)
+    )
+    return result.scalar_one_or_none()
 
 
 def _audit(
@@ -515,14 +533,27 @@ async def upload_avatar(
     # memória — ver app/utils/uploads.py.
     data = await ler_ate_o_limite(file, max_bytes=_AVATAR_MAX_BYTES, rotulo="5 MB")
 
+    # A linha é travada ANTES de gravar o arquivo, e só solta no commit: a
+    # remoção pelo admin trava a mesma linha, então as duas nunca se cruzam
+    # no meio. Sem isto, o admin podia isolar e apagar o arquivo recém-gravado
+    # aqui, e este commit apontaria a linha para um arquivo que já não existe.
+    # A leitura do corpo fica FORA da trava — um upload lento não segura a
+    # linha. Ver "A foto removida pelo administrador" em docs/decisoes-e-regras.md.
+    user = await _trava_usuario(db, current_user.id)
+    if not user:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Usuário não encontrado.")
+    # O `get_current_user` conferiu a situação ANTES da leitura do corpo. Se a
+    # conta foi anonimizada ou desativada nesse meio-tempo, gravar a foto agora
+    # devolveria dado pessoal a uma conta anonimizada.
+    if user.status != UserStatus.active:
+        raise HTTPException(
+            status_code=status.HTTP_403_FORBIDDEN,
+            detail="Esta conta está inativa. Fale com um administrador.",
+        )
+
     key = _chave_do_avatar(current_user.id, _AVATAR_EXTENSOES[file.content_type])
     await storage.upload_file(data, key, file.content_type, settings)
     url = await storage.get_presigned_url(key, settings, expires=604800)
-
-    result = await db.execute(select(User).where(User.id == current_user.id))
-    user = result.scalar_one_or_none()
-    if not user:
-        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Usuário não encontrado.")
 
     # Só a chave LEGÍTIMA anterior é candidata a sair do disco: uma
     # referência gravada antes do PR #85 pode apontar para a foto de outra
@@ -584,6 +615,110 @@ async def remove_avatar(
     # remoção nunca fica travada por um volume que perdeu o arquivo.
     if chave:
         await storage.delete_file(chave, settings)
+
+
+# ── POST /users/{user_id}/avatar/remove ──────────────────────
+
+_CONTA_MUDOU = (
+    "A conta deste usuário mudou depois que você abriu a tela — pode ser uma "
+    "foto nova. A lista foi atualizada: confira e tente de novo."
+)
+
+
+@router.post("/{user_id}/avatar/remove", response_model=UserResponse)
+async def remove_user_avatar_by_admin(
+    user_id: uuid.UUID,
+    body: AvatarRemovalByAdmin,
+    request: Request,
+    db: Annotated[AsyncSession, Depends(get_db)],
+    actor: Annotated[User, Depends(authorize(UserRole.admin))],
+    settings: Annotated[Settings, Depends(get_settings)],
+) -> UserResponse:
+    """O admin tira a foto de perfil de outra conta, com justificativa.
+
+    Nada da requisição escolhe o arquivo: a chave sai da linha do alvo e só
+    vale se for a legítima dele (`_avatar_do_proprio_usuario`). Referência
+    indevida é zerada sem tocar em disco nenhum.
+
+    Concorrência com o upload do próprio dono — ver "A foto removida pelo
+    administrador" em docs/decisoes-e-regras.md:
+      1. a linha é travada (`FOR UPDATE`), e o upload trava a mesma linha
+         antes de gravar o arquivo;
+      2. o pedido traz o `updated_at` da linha que o admin tinha na tela
+         (`expected_updated_at`); se a linha travada não é mais essa — um
+         upload terminou enquanto ele escrevia a justificativa, ou enquanto
+         este pedido esperava a trava —, devolve 409 sem mexer em nada. A
+         foto nova não é apagada por uma decisão tomada antes dela;
+      3. o arquivo é ISOLADO antes do commit e só o nome isolado é apagado
+         depois: um upload que entre logo após o commit grava a chave pública
+         de novo, e nada daqui a alcança.
+    """
+    if actor.id == user_id:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail="Para remover a sua própria foto, use a opção do seu perfil.",
+        )
+
+    user = await _trava_usuario(db, user_id)
+    if not user:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Usuário não encontrado.")
+
+    if not user.avatar_url:
+        # Nada a remover, nada a auditar — como na remoção da própria foto.
+        return _to_response(user)
+
+    # Igualdade, e não "mais novo que": é um token de versão, e o relógio de
+    # quem escreveu a linha (a API, ou o banco pelo `onupdate`) não entra na
+    # conta. Qualquer escrita na conta desde que a tela carregou dá 409.
+    if user.updated_at != body.expected_updated_at:
+        await db.rollback()
+        raise HTTPException(status_code=status.HTTP_409_CONFLICT, detail=_CONTA_MUDOU)
+
+    chave = _avatar_do_proprio_usuario(user)
+    isolado = await storage.isola_arquivo(chave, settings) if chave else None
+
+    user.avatar_url = None
+    user.updated_at = datetime.now(UTC)
+    db.add(
+        AuditLog(
+            user_id=actor.id,
+            action=AuditAction.update,
+            entity_type="user",
+            entity_id=user.id,
+            old_data={"tinha_foto": True},
+            # O valor de uma referência indevida NÃO entra: pode ser URL de
+            # terceiro. Só o fato de que ela existia.
+            new_data={
+                "operacao": "remocao_de_foto_pelo_admin",
+                "justificativa": body.justification,
+                "referencia_indevida": chave is None,
+                "arquivo_encontrado": isolado is not None,
+            },
+            ip_address=request.client.host if request.client else None,
+            user_agent=request.headers.get("user-agent", "")[:500],
+        )
+    )
+    try:
+        await db.commit()
+    except BaseException:
+        # `BaseException`: um cancelamento no meio do commit também tem de
+        # devolver o arquivo. A linha continua apontando para a chave: o
+        # arquivo volta para ela —
+        # antes do rollback, enquanto a trava ainda pode estar de pé. A
+        # devolução não sobrescreve: se um upload já gravou a chave, ele fica.
+        if isolado and chave:
+            await storage.devolve_arquivo(isolado, chave, settings)
+        await db.rollback()
+        raise
+
+    # Depois do commit, e só o nome isolado. `delete_file` não levanta: se o
+    # disco falhar aqui, fica um arquivo órfão fora da chave pública (aviso no
+    # log) — nunca uma linha apontando para o vazio.
+    if isolado:
+        await storage.delete_file(isolado, settings)
+
+    await db.refresh(user)
+    return _to_response(user)
 
 
 # ── PATCH /users/me/onboarding ───────────────────────────────

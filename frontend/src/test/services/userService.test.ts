@@ -10,6 +10,7 @@ import {
   anonymizeUser,
   deleteUser,
   removeAvatar,
+  removeUserAvatar,
   updateLGPDConsent,
   getTechnicians,
   USER_STATUSES,
@@ -195,6 +196,36 @@ describe("removeAvatar", () => {
     mockDelete.mockRejectedValue(new Error("rede"));
 
     await expect(removeAvatar()).rejects.toThrow("rede");
+  });
+});
+
+describe("removeUserAvatar", () => {
+  it("chama POST /users/:id/avatar/remove com a justificativa e a versão, sem chave", async () => {
+    mockPost.mockResolvedValue({ data: { ...user, avatar_url: null } });
+
+    const resposta = await removeUserAvatar(
+      "u1",
+      "Foto imprópria",
+      "2026-10-15T10:00:00.123456Z",
+    );
+
+    expect(mockPost).toHaveBeenCalledWith("/users/u1/avatar/remove", {
+      justification: "Foto imprópria",
+      expected_updated_at: "2026-10-15T10:00:00.123456Z",
+    });
+    expect(Object.keys(mockPost.mock.calls[0][1] as object).sort()).toEqual([
+      "expected_updated_at",
+      "justification",
+    ]);
+    expect(resposta.avatar_url).toBeNull();
+  });
+
+  it("deixa o erro subir para o diálogo mostrar", async () => {
+    mockPost.mockRejectedValue(new Error("rede"));
+
+    await expect(
+      removeUserAvatar("u1", "Foto imprópria", "2026-10-15T10:00:00Z"),
+    ).rejects.toThrow("rede");
   });
 });
 

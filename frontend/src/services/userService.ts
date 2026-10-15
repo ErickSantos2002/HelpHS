@@ -151,6 +151,27 @@ export async function anonymizeUser(id: string): Promise<UserSummary> {
   return data;
 }
 
+/**
+ * O admin tira a foto de perfil de outra conta. O arquivo é escolhido pelo
+ * backend a partir do usuário-alvo — nenhuma chave vai no corpo, e campo a
+ * mais é recusado (422). Devolve o usuário já sem foto.
+ *
+ * `expectedUpdatedAt` é o `updated_at` da linha que a tela mostrava: se a
+ * conta mudou desde então (uma foto nova, por exemplo), o backend responde
+ * 409 em vez de apagar o que o admin não viu.
+ */
+export async function removeUserAvatar(
+  id: string,
+  justification: string,
+  expectedUpdatedAt: string,
+): Promise<UserSummary> {
+  const { data } = await api.post<UserSummary>(`/users/${id}/avatar/remove`, {
+    justification,
+    expected_updated_at: expectedUpdatedAt,
+  });
+  return data;
+}
+
 export async function deleteUser(id: string): Promise<void> {
   await api.delete(`/users/${id}`);
 }

@@ -1,6 +1,7 @@
 import { zodResolver } from "@hookform/resolvers/zod";
 import { useEffect, useState } from "react";
 import { Controller, useForm } from "react-hook-form";
+import { toast } from "sonner";
 import { z } from "zod";
 import {
   Alert,
@@ -15,6 +16,7 @@ import {
   Pagination,
   SelectMenu,
   Spinner,
+  Textarea,
 } from "../../components/ui";
 import { useAuth } from "../../contexts/AuthContext";
 import { getApiError } from "../../lib/apiError";
@@ -35,6 +37,7 @@ import {
   createUser,
   deleteUser,
   getUsers,
+  removeUserAvatar,
   setUserStatus,
   updateUser,
   type UserStatus,
@@ -414,13 +417,27 @@ function CreateModal({ onClose, onSaved }: { onClose: () => void; onSaved: (u: U
 
 // ── EditModal ─────────────────────────────────────────────────
 
-function EditModal({ user, onClose, onSaved }: { user: UserSummary; onClose: () => void; onSaved: (u: UserSummary) => void }) {
+function EditModal({
+  user,
+  onClose,
+  onSaved,
+  onRemoverFoto,
+}: {
+  user: UserSummary;
+  onClose: () => void;
+  onSaved: (u: UserSummary) => void;
+  onRemoverFoto: (u: UserSummary) => void;
+}) {
   const [submitError, setSubmitError] = useState<string | null>(null);
   // A rota `/users` é de admin E técnico — o técnico chega até aqui. Quem
   // decide é o backend, mas mostrar um campo que ele vai recusar é desenhar a
   // tela para frustrar.
   const { user: atual } = useAuth();
   const souAdmin = atual?.role === "admin";
+  // Só admin, só quando há foto, e nunca a própria — essa sai pelo perfil, e
+  // o backend recusa com 400 pela rota do admin. A foto em si NÃO aparece:
+  // ver a foto de terceiros é outra fase, e aqui só se sabe que ela existe.
+  const podeRemoverFoto = souAdmin && !!user.avatar_url && atual?.id !== user.id;
   const form = useForm<EditValues>({
     resolver: zodResolver(criaEditSchema(user)),
     defaultValues: {
@@ -529,6 +546,31 @@ function EditModal({ user, onClose, onSaved }: { user: UserSummary; onClose: () 
             {...form.register("api4com_extension")}
           />
         )}
+        {podeRemoverFoto && (
+          <div className="flex items-center justify-between gap-3 rounded-xl border border-borda px-4 py-3">
+            <div className="min-w-0">
+              <p className="text-sm font-medium text-conteudo-heading">Foto de perfil</p>
+              <p id="remover-foto-dica" className="text-xs text-conteudo-muted">
+                {/* A remoção troca de diálogo: com o formulário alterado, sair
+                    agora jogaria a edição fora sem aviso. */}
+                {form.formState.isDirty
+                  ? "Este usuário tem foto. Salve ou descarte as alterações antes de removê-la."
+                  : "Este usuário tem uma foto de perfil."}
+              </p>
+            </div>
+            <Button
+              type="button"
+              variant="secondary"
+              size="sm"
+              className="shrink-0"
+              aria-describedby="remover-foto-dica"
+              disabled={form.formState.isDirty || form.formState.isSubmitting}
+              onClick={() => onRemoverFoto(user)}
+            >
+              Remover foto
+            </Button>
+          </div>
+        )}
         <ModalFooter>
           <Button type="button" variant="secondary" onClick={onClose} disabled={form.formState.isSubmitting}>
             Cancelar
@@ -538,6 +580,90 @@ function EditModal({ user, onClose, onSaved }: { user: UserSummary; onClose: () 
           </Button>
         </ModalFooter>
       </form>
+    </Modal>
+  );
+}
+
+// ── RemoveAvatarModal ─────────────────────────────────────────
+
+// Mesmo piso e teto do backend (`AvatarRemovalByAdmin`). O botão segue o piso
+// para não mandar um pedido que vai voltar 422; o teto é o `maxLength`.
+const JUSTIFICATIVA_MIN = 5;
+const JUSTIFICATIVA_MAX = 2000;
+
+function RemoveAvatarModal({
+  user,
+  onClose,
+  onRemoved,
+  onConflito,
+}: {
+  user: UserSummary;
+  onClose: () => void;
+  onRemoved: (u: UserSummary) => void;
+  onConflito: (mensagem: string) => void;
+}) {
+  const [justificativa, setJustificativa] = useState("");
+  const [loading, setLoading] = useState(false);
+  const [error, setError] = useState<string | null>(null);
+  const texto = justificativa.trim();
+  const curta = texto.length < JUSTIFICATIVA_MIN;
+
+  async function handleRemove() {
+    if (curta || loading) return;
+    setLoading(true);
+    setError(null);
+    try {
+      // A versão da linha que a tela mostrava: se a conta mudou desde que a
+      // lista carregou, o backend recusa com 409 em vez de apagar uma foto
+      // que o admin não decidiu apagar.
+      const atualizado = await removeUserAvatar(user.id, texto, user.updated_at);
+      onRemoved(atualizado);
+    } catch (err: unknown) {
+      const mensagem = getApiError(err, "Erro ao remover a foto. Tente novamente.");
+      // 409: a versão que este diálogo carrega ficou velha, e tentar de novo
+      // daqui daria 409 para sempre. Quem resolve é a página, recarregando.
+      if ((err as { response?: { status?: number } })?.response?.status === 409) {
+        onConflito(mensagem);
+        return;
+      }
+      // Os demais erros ficam no diálogo, com a justificativa preenchida.
+      setError(mensagem);
+      setLoading(false);
+    }
+  }
+
+  return (
+    // Escape e o X chamam o `onClose` direto: durante o envio ele não faz
+    // nada, senão o diálogo some com o pedido ainda em voo.
+    <Modal open onClose={loading ? () => {} : onClose} size="md" title="Remover foto de perfil">
+      <div className="space-y-4">
+        {error && <Alert variant="danger">{error}</Alert>}
+        <UserPreviewCard user={user} />
+        <p className="text-sm text-conteudo-muted">
+          Remover a foto de perfil de{" "}
+          <span className="font-medium text-conteudo-heading">{user.name}</span>?
+          A pessoa volta a aparecer com as iniciais e pode enviar outra foto
+          depois.
+        </p>
+        <Textarea
+          label="Justificativa *"
+          hint={`Obrigatória, de ${JUSTIFICATIVA_MIN} a ${JUSTIFICATIVA_MAX} caracteres. Fica registrada na auditoria com o seu nome.`}
+          required
+          rows={3}
+          maxLength={JUSTIFICATIVA_MAX}
+          value={justificativa}
+          disabled={loading}
+          onChange={(e) => setJustificativa(e.target.value)}
+        />
+      </div>
+      <ModalFooter>
+        <Button variant="secondary" onClick={onClose} disabled={loading}>
+          Cancelar
+        </Button>
+        <Button variant="danger" onClick={handleRemove} loading={loading} disabled={curta}>
+          Remover foto
+        </Button>
+      </ModalFooter>
     </Modal>
   );
 }
@@ -617,6 +743,7 @@ export default function UsersPage() {
   const [createOpen, setCreateOpen] = useState(false);
   const [editTarget, setEditTarget] = useState<UserSummary | null>(null);
   const [deleteTarget, setDeleteTarget] = useState<UserSummary | null>(null);
+  const [avatarTarget, setAvatarTarget] = useState<UserSummary | null>(null);
 
   function load(p = page) {
     setLoading(true);
@@ -650,6 +777,22 @@ export default function UsersPage() {
 
   function handleToggled(updated: UserSummary) {
     setUsers((prev) => prev.map((u) => (u.id === updated.id ? updated : u)));
+  }
+
+  function handleAvatarRemoved(updated: UserSummary) {
+    setAvatarTarget(null);
+    // A linha recebe o usuário que o backend devolveu, já sem foto: reabrir a
+    // edição não mostra mais a opção de remover.
+    handleToggled(updated);
+    toast.success(`Foto de perfil de ${updated.name} removida.`);
+  }
+
+  function handleAvatarConflito(mensagem: string) {
+    // A conta mudou depois que a lista carregou: fecha, recarrega e explica.
+    // O admin reabre a edição já com o estado atual e decide de novo.
+    setAvatarTarget(null);
+    load();
+    toast.error(mensagem);
   }
 
   function handleDeleted() {
@@ -875,7 +1018,25 @@ export default function UsersPage() {
         <CreateModal onClose={() => setCreateOpen(false)} onSaved={handleSaved} />
       )}
       {editTarget && (
-        <EditModal user={editTarget} onClose={() => setEditTarget(null)} onSaved={handleSaved} />
+        <EditModal
+          user={editTarget}
+          onClose={() => setEditTarget(null)}
+          onSaved={handleSaved}
+          onRemoverFoto={(u) => {
+            // Troca de diálogo em vez de empilhar: dois `Modal` abertos
+            // disputariam a armadilha de foco.
+            setEditTarget(null);
+            setAvatarTarget(u);
+          }}
+        />
+      )}
+      {avatarTarget && (
+        <RemoveAvatarModal
+          user={avatarTarget}
+          onClose={() => setAvatarTarget(null)}
+          onRemoved={handleAvatarRemoved}
+          onConflito={handleAvatarConflito}
+        />
       )}
       {deleteTarget && (
         <DeleteModal user={deleteTarget} onClose={() => setDeleteTarget(null)} onDeleted={handleDeleted} />
