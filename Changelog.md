@@ -41,6 +41,28 @@ Regras completas em `docs/decisoes-e-regras.md`, seção "Anexos do chamado".
 | Estado hoje | não configurar: o padrão vale |
 | Disco | o ZIP é montado no temporário do contêiner e apagado depois da entrega; o pior caso é 250 MB por pedido em andamento |
 
+### Foto de perfil: remoção pelo administrador (15/10/2026)
+
+Regras em `docs/decisoes-e-regras.md`, "A foto removida pelo administrador".
+**Sem migration** e sem dependência nova.
+
+- **`POST /users/{id}/avatar/remove`**, só admin, com justificativa obrigatória
+  (5–2000 caracteres) e a versão da linha que a tela mostrava
+  (`expected_updated_at`). 403 para técnico e cliente, 400 para a própria
+  conta, 404 para inexistente, 422 para corpo inválido ou campo a mais, 409 se
+  a conta mudou desde que a tela carregou. Alvo sem foto: 200 sem gravar nada.
+- **Nenhuma chave vem do cliente**: o arquivo sai da linha do alvo e só a chave
+  legítima é tocada; referência indevida é zerada sem apagar arquivo.
+- **Auditoria** em `audit_logs` como `update`, com admin, alvo, justificativa,
+  IP e user agent; sem chave, URL ou token.
+- **Concorrência com o upload do dono**: `POST /users/me/avatar` passa a travar
+  a linha (`FOR UPDATE`) antes de gravar o arquivo e reconfere se a conta
+  continua ativa; a remoção isola o arquivo antes do commit e só apaga o nome
+  isolado depois. Contrato do upload inalterado.
+- **Tela de usuários**: o modal de edição indica, para o admin, que o usuário
+  tem foto (sem mostrá-la) e abre um diálogo de confirmação com justificativa
+  obrigatória; no 409 a lista é recarregada.
+
 ### Infraestrutura
 
 - **Links de arquivo ~20× mais baratos de emitir, sem mudança visível.** Cada
