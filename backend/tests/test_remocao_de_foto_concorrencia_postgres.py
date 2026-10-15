@@ -21,7 +21,7 @@ import pytest
 import pytest_asyncio
 from fastapi import Request
 from httpx import ASGITransport, AsyncClient
-from sqlalchemy import select, text
+from sqlalchemy import delete, func, or_, select, text
 from sqlalchemy.ext.asyncio import async_sessionmaker, create_async_engine
 
 from app.core.config import get_settings
@@ -69,6 +69,49 @@ async def fabrica(url_do_banco):
     await motor.dispose()
 
 
+@pytest_asyncio.fixture
+async def criados(fabrica):
+    """IDs dos usuários que o teste comitou — e a faxina deles, passe ou falhe.
+
+    Aqui não dá para reverter tudo no fim: a corrida precisa de commits de
+    verdade. E no CI o banco é UM só para todos os módulos (`TEST_POSTGRES_URL`);
+    um admin ativo esquecido aqui vira destinatário a mais nos avisos de SLA do
+    módulo seguinte. Então apaga só o que este teste criou, filtrado pelos IDs:
+    primeiro as auditorias que apontam para eles (`audit_logs.user_id` é FK; o
+    `entity_id` não é, mas também é rastro deste teste), depois os usuários.
+    Se a faxina falhar, o erro sobe e o teste acusa — não fica sujeira calada.
+    """
+    ids: list[uuid.UUID] = []
+    yield ids
+    if not ids:
+        return
+    async with fabrica() as s:
+        try:
+            # Um pedido que ficou pendurado por causa de uma falha ainda pode
+            # segurar a trava da linha; melhor erro em 10 s que teste travado.
+            await s.execute(text("SET LOCAL lock_timeout = '10s'"))
+            await s.execute(
+                delete(AuditLog).where(or_(AuditLog.user_id.in_(ids), AuditLog.entity_id.in_(ids)))
+            )
+            await s.execute(delete(User).where(User.id.in_(ids)))
+            await s.commit()
+        except BaseException:
+            await s.rollback()
+            raise
+    async with fabrica() as s:
+        sobra_usuario = (
+            await s.execute(select(func.count()).select_from(User).where(User.id.in_(ids)))
+        ).scalar_one()
+        sobra_auditoria = (
+            await s.execute(
+                select(func.count())
+                .select_from(AuditLog)
+                .where(or_(AuditLog.user_id.in_(ids), AuditLog.entity_id.in_(ids)))
+            )
+        ).scalar_one()
+    assert (sobra_usuario, sobra_auditoria) == (0, 0)
+
+
 @pytest.fixture()
 def disco(tmp_path):
     settings = get_settings()
@@ -104,7 +147,7 @@ def _usuario(papel: UserRole) -> User:
     )
 
 
-async def _prepara(fabrica, disco):
+async def _prepara(fabrica, disco, criados):
     """Um admin e um cliente com foto legítima gravada no disco e no banco."""
     admin = _usuario(UserRole.admin)
     dono = _usuario(UserRole.client)
@@ -112,6 +155,8 @@ async def _prepara(fabrica, disco):
     arquivo = disco / dono.avatar_url
     arquivo.parent.mkdir(parents=True, exist_ok=True)
     arquivo.write_bytes(_VELHA)
+    # Antes do commit: se ele passar e algo depois falhar, a faxina já sabe.
+    criados.extend([admin.id, dono.id])
     async with fabrica() as s:
         s.add_all([admin, dono])
         await s.commit()
@@ -190,8 +235,8 @@ def _sobras(disco):
 
 
 @pytest.mark.asyncio
-async def test_remocao_sozinha_grava_auditoria_no_banco_real(fabrica, disco):
-    admin, dono, arquivo = await _prepara(fabrica, disco)
+async def test_remocao_sozinha_grava_auditoria_no_banco_real(fabrica, disco, criados):
+    admin, dono, arquivo = await _prepara(fabrica, disco, criados)
 
     resposta = await _remove(admin, dono)
 
@@ -206,12 +251,12 @@ async def test_remocao_sozinha_grava_auditoria_no_banco_real(fabrica, disco):
 
 
 @pytest.mark.asyncio
-async def test_versao_que_a_propria_api_devolveu_volta_e_casa(fabrica, disco):
+async def test_versao_que_a_propria_api_devolveu_volta_e_casa(fabrica, disco, criados):
     """O token de versão faz a viagem inteira: banco → JSON da API → corpo do
     pedido → pydantic → comparação. Com microssegundos diferentes de zero, que
     é onde um corte para milissegundos (ou um formato sem fração) quebraria a
     igualdade e daria 409 para sempre."""
-    admin, dono, arquivo = await _prepara(fabrica, disco)
+    admin, dono, arquivo = await _prepara(fabrica, disco, criados)
     async with fabrica() as s:
         await s.execute(
             text("UPDATE users SET updated_at = :v WHERE id = :id"),
@@ -240,12 +285,14 @@ async def test_versao_que_a_propria_api_devolveu_volta_e_casa(fabrica, disco):
 
 
 @pytest.mark.asyncio
-async def test_upload_em_andamento_faz_a_remocao_esperar_e_recusar(fabrica, disco, monkeypatch):
+async def test_upload_em_andamento_faz_a_remocao_esperar_e_recusar(
+    fabrica, disco, criados, monkeypatch
+):
     """O upload gravou o arquivo novo e ainda não comitou. Sem a trava no
     upload, o admin isolaria e apagaria a foto nova, e o commit do upload
     apontaria a linha para o vazio. Com ela, o admin espera, vê a linha
     alterada depois do pedido dele e devolve 409 sem tocar em nada."""
-    admin, dono, arquivo = await _prepara(fabrica, disco)
+    admin, dono, arquivo = await _prepara(fabrica, disco, criados)
     gravou = asyncio.Event()
     solta = asyncio.Event()
     real = storage.upload_file
@@ -275,12 +322,14 @@ async def test_upload_em_andamento_faz_a_remocao_esperar_e_recusar(fabrica, disc
 
 
 @pytest.mark.asyncio
-async def test_upload_que_chega_durante_a_remocao_espera_e_sobrevive(fabrica, disco, monkeypatch):
+async def test_upload_que_chega_durante_a_remocao_espera_e_sobrevive(
+    fabrica, disco, criados, monkeypatch
+):
     """O admin já isolou o arquivo e ainda não comitou; o dono envia uma foto
     nova na MESMA chave. O upload espera a trava, grava depois do commit da
     remoção — e a exclusão física do admin, que vem por último, só alcança o
     nome isolado."""
-    admin, dono, arquivo = await _prepara(fabrica, disco)
+    admin, dono, arquivo = await _prepara(fabrica, disco, criados)
     isolou = asyncio.Event()
     solta = asyncio.Event()
     real = storage.isola_arquivo
