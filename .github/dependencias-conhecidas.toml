@@ -261,27 +261,43 @@ responsavel = "TI/Dev"
 data = "2026-09-01"
 
 [[backend]]
-id = "CVE-2026-85394"
+id = "PYSEC-2026-4298"
 pacote = "python-jose"
 versao_atual = "3.4.0"
 versao_corrigida = ""
 classe = "nao_aplicavel"
 motivo = """
-Confusão de algoritmo (RS256↔HS256): um verificador que aceite `alg: HS256`
-pode ser enganado por token HMAC assinado com a chave PÚBLICA RSA como segredo.
-Inalcançável aqui porque TODO `jwt.decode` do backend fixa
-`algorithms=["RS256"]`, e o jose recusa o `alg` fora dessa lista ANTES de tocar
-no material de chave. PROVADO, não deduzido: `backend/tests/
-test_jwt_confusao_de_algoritmo.py` forja um token `alg=HS256` e verifica que os
-QUATRO decodes reais (access, email_verify, password_reset, file) o rejeitam,
-enquanto o RS256 legítimo passa — e um teste de fonte exige `algorithms=` em
-todo `jwt.decode(`. Medido também: o jose 3.4.0 já recusa ASSINAR HS256 com
-chave assimétrica (JWSError). Comando: `python -m pytest
-tests/test_jwt_confusao_de_algoritmo.py` → 7 passed.
+Antes listada como CVE-2026-85394. É a MESMA vulnerabilidade: no OSV,
+PYSEC-2026-4298, CVE-2026-85394 e GHSA-3qf3-8w2g-rqmx são aliases mútuos, com
+texto idêntico; em 15/10/2026 o pip-audit passou a reportá-la pelo PYSEC.
+Correção incompleta do CVE-2024-33663 (GHSA-6c5p-j8vq-pqhj, corrigido no 3.4.0).
+
+Confusão de algoritmo (RS256↔HS256): a trava do jose que impede usar chave
+assimétrica como segredo HMAC só reconhece PEM e SSH; a chave PÚBLICA RSA em
+DER passa, e um verificador que aceite `alg: HS256` aceita token forjado com
+ela. Medido: no jose 3.4.0 instalado, `jwt.decode(token, der, algorithms=None)`
+ACEITA o token forjado — a falha é real na biblioteca.
+
+Inalcançável aqui por duas barreiras independentes:
+1. TODO `jwt.decode` do backend fixa `algorithms=[settings.jwt_algorithm]`
+   (RS256), e o jose recusa o `alg` fora da lista antes de tocar na chave.
+   São seis caminhos, todos provados com o token DER do ataque: access e
+   refresh (`decode_token`, que também serve WebSocket, rate limit e MFA),
+   email_verify, password_reset, link de arquivo e lote do ZIP (estes dois
+   com o `Key` em cache). Não há JWT de terceiros nem JWKS.
+2. A chave do HelpHS é PEM (`get_public_key`), que a trava do jose reconhece.
+   Mesmo com `JWT_ALGORITHM=HS256` no ambiente, o jose recusa a chave PEM e
+   nenhum token é emitido nem aceito (medido) — falha fechada, não forja.
+
+PROVADO, não deduzido: `backend/tests/test_jwt_confusao_de_algoritmo.py` —
+controle mostrando que o token DER engana um verificador ingênuo, os seis
+decoders reais rejeitando-o, os controles RS256 aceitos e o teste de fonte
+exigindo `algorithms=` em todo `jwt.decode(`. Comando: `python -m pytest
+tests/test_jwt_confusao_de_algoritmo.py` → 16 passed.
 """
-remover_quando = "sair correção do python-jose (hoje fix_versions=[], afeta <=3.5.0), ou se algum jwt.decode passar a aceitar alg não-RS256"
+remover_quando = "sair versão corrigida do python-jose (hoje nenhuma; afeta <=3.5.0, a última publicada), ou se algum jwt.decode passar a aceitar alg não-RS256, ou se a chave passar a ser carregada em DER"
 responsavel = "TI/Dev"
-data = "2026-10-07"
+data = "2026-10-16"
 
 
 # ══ FRONTEND — npm audit ═════════════════════════════════════════════════════
