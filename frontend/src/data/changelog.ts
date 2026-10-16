@@ -1,4 +1,4 @@
-export const APP_VERSION = "v1.21.0";
+export const APP_VERSION = "v1.22.0";
 
 export type EntryType = "novidade" | "corrigido" | "melhoria";
 
@@ -14,6 +14,32 @@ export interface ChangelogVersion {
 }
 
 export const CHANGELOG: ChangelogVersion[] = [
+  {
+    version: "v1.22.0",
+    date: "16/10/2026",
+    entries: [
+      {
+        type: "novidade",
+        text: "Remover a própria foto de perfil: na tela de perfil, um botão retira a foto depois de uma confirmação, e no lugar dela voltam as iniciais do nome.",
+      },
+      {
+        type: "novidade",
+        text: "Administradores podem remover a foto de perfil de outro usuário pela tela de Usuários, por exemplo quando a imagem é imprópria. A remoção exige uma justificativa, que fica registrada, e o administrador não vê a foto em nenhum momento.",
+      },
+      {
+        type: "corrigido",
+        text: "A foto de perfil deixava de aparecer depois de salvar o perfil. Agora ela continua na tela, e quando uma imagem não consegue carregar o sistema mostra as iniciais do nome em vez de uma imagem quebrada.",
+      },
+      {
+        type: "corrigido",
+        text: "A aba Atividade do chamado passa a mostrar o perfil e a data e hora de quem anexou cada arquivo. Em chamados com histórico longo, os eventos mais recentes aparecem sem nenhum repetido ou faltando.",
+      },
+      {
+        type: "melhoria",
+        text: "Fotos e anexos abrem mais rápido, e as imagens que já foram vistas são reaproveitadas pelo navegador em vez de baixadas de novo.",
+      },
+    ],
+  },
   {
     version: "v1.21.0",
     date: "13/10/2026",
