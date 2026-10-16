@@ -1671,10 +1671,111 @@ A anonimização apaga o arquivo da foto porque zerar a referência e deixar o
 arquivo no volume não anonimiza nada. Ela só faz isso depois das guardas: a
 recusa (técnico anonimizando admin, conta já anonimizada) não toca no disco.
 
-**Nenhuma regra de foto de terceiros entrou.** Admin não remove foto alheia, e
-nenhuma tela além do perfil e do Topbar mostra foto. Arquivos órfãos que já
-existem no volume (trocas de extensão e anonimizações anteriores) **não** foram
-limpos: isso seria um script avulso, com decisão própria.
+**Ver a foto de terceiros continua fora.** Nenhuma tela além do perfil e do
+Topbar mostra foto. A remoção pelo admin entrou depois, na seção seguinte.
+Arquivos órfãos que já existem no volume (trocas de extensão e anonimizações
+anteriores) **não** foram limpos: isso seria um script avulso, com decisão
+própria.
+
+### A foto removida pelo administrador (15/10/2026)
+
+**Só o admin** tira a foto de perfil de outra conta, por
+`POST /users/{id}/avatar/remove` com
+`{"justification": "...", "expected_updated_at": "..."}`. A justificativa tem
+de 5 a 2000 caracteres, sem contar os espaços das pontas; a versão é o
+`updated_at` da linha que a tela mostrava, com fuso. Técnico e cliente recebem
+403.
+`POST` e não `DELETE` porque a justificativa precisa de corpo, e corpo em
+`DELETE` não tem semântica garantida; na query string ela iria parar nos logs
+de acesso.
+
+| Caso | Resposta |
+|---|---|
+| sucesso | 200 com o usuário, `avatar_url: null` |
+| alvo sem foto (inclusive anonimizado) | 200, sem gravar nem auditar nada |
+| o próprio admin como alvo | 400 — a própria foto sai pelo perfil |
+| usuário inexistente | 404 |
+| justificativa ou versão ausente/inválida, ou campo a mais no corpo | 422 |
+| a conta do alvo mudou desde que a tela carregou | 409, nada muda |
+
+**Nada da requisição escolhe o arquivo.** O corpo aceita só a justificativa e
+a versão (`extra="forbid"`: `key`, `avatar_url` ou `user_id` a mais dão 422);
+a versão é um carimbo de tempo, não aponta para arquivo nenhum. A chave
+sai da linha do alvo e só vale se for a legítima dele, pela mesma igualdade de
+"A foto de perfil só muda pelo upload". Referência indevida é zerada sem tocar
+em disco nenhum, e o valor dela não vai para a auditoria nem para a resposta —
+pode ser URL de terceiro.
+
+**Não há upload em nome de terceiros.** Não existe rota que receba arquivo
+para `/users/{id}/avatar`; o admin só remove.
+
+**Auditoria.** Uma linha em `audit_logs`, na mesma transação da mudança:
+`action=update`, `user_id` = o admin, `entity_id` = o alvo, `ip_address` e
+`user_agent` (cortado em 500), `old_data = {"tinha_foto": true}` e
+`new_data = {"operacao": "remocao_de_foto_pelo_admin", "justificativa", "referencia_indevida", "arquivo_encontrado"}`.
+Sem chave, URL ou token. `update` e não um valor novo no enum: um valor novo
+exigiria migration (`ALTER TYPE`) e um rótulo novo na tela de auditoria, que
+já mostra o `new_data` como está. A justificativa é texto livre do admin e
+pode conter dado pessoal; só admin lê `audit_logs`.
+
+**Sem notificação** ao dono nesta versão.
+
+#### A corrida com o upload do próprio dono
+
+O dono pode trocar a foto enquanto o admin escreve a justificativa, ou
+exatamente enquanto o pedido dele é processado. Apagar a foto nova por uma
+decisão tomada antes dela **não** é aceito. Três peças, sem migration e sem
+mudar o contrato do upload:
+
+1. **Trava da linha.** A remoção e o `POST /users/me/avatar` leem o usuário
+   com `SELECT … FOR UPDATE`. O upload trava **antes** de gravar o arquivo e
+   solta no commit (a leitura do corpo fica fora, para um upload lento não
+   segurar a linha). As duas operações nunca se cruzam no meio.
+2. **Versão da tela → 409.** O pedido leva o `updated_at` da linha que o
+   admin via (`expected_updated_at`). Com a trava na mão, se o `updated_at`
+   atual é **diferente**, a conta mudou desde que a tela carregou — um upload
+   enquanto ele escrevia, ou um que terminou enquanto o pedido esperava a
+   trava. A remoção devolve 409 sem tocar em nada; a tela fecha o diálogo,
+   recarrega a lista e explica, e o admin decide de novo com o estado atual.
+   Igualdade, e não "mais novo que": é token de versão, e nenhum relógio
+   entra na conta. Qualquer escrita na conta (o `updated_at` tem `onupdate`)
+   também dá 409 — falso positivo inofensivo: recarregar e confirmar de novo.
+3. **Isolar antes, apagar depois.** Com a trava, o arquivo é renomeado para um
+   nome reservado no mesmo diretório (`avatars/.{id}.{ext}.{hex}.removendo`,
+   `storage.isola_arquivo`) — `rename` no mesmo volume é atômico. Depois do
+   commit, apaga-se **só o nome isolado**. Um upload que entre logo após o
+   commit grava a chave pública de novo, e nada da remoção a alcança.
+
+Se o commit falhar (ou o pedido for cancelado no meio dele), o arquivo volta
+para a chave com `storage.devolve_arquivo`, que usa `os.link` e **não
+sobrescreve**: se um upload já gravou a chave, a foto nova fica e o isolado é
+descartado. Em volume sem link físico (SMB, alguns FUSE), a devolução copia
+para a chave com criação exclusiva (`O_CREAT | O_EXCL`), a mesma garantia do
+`link` — nunca "conferir e renomear", porque no Linux o `rename` sobrescreve.
+Se a cópia falhar no meio, só o arquivo que ela mesma criou é apagado
+(conferido por `st_dev`/`st_ino`); o isolado continua inteiro.
+
+O isolamento é o último passo antes do commit, dentro do mesmo `try`: nada
+que possa falhar fica entre o arquivo sair da chave e o caminho que o devolve. Se a exclusão física falhar depois do
+commit, sobra um órfão `.removendo` fora da chave pública, com aviso no log —
+nunca uma linha apontando para o vazio, nem a foto ainda servida.
+
+Provas: `tests/test_remocao_de_foto_pelo_admin.py` encena cada ordem com a
+sessão falsa; `tests/test_remocao_de_foto_concorrencia_postgres.py` cruza duas
+transações reais no PostgreSQL, esperando o bloqueio aparecer em
+`pg_stat_activity` antes de soltar a primeira.
+
+**O upload reconfere a situação da conta com a trava na mão.** O
+`get_current_user` olha a conta antes da leitura do corpo; se ela foi
+anonimizada ou desativada nesse meio-tempo, o upload recusa com 403 em vez de
+devolver uma foto a uma conta anonimizada.
+
+**O que fica de fora, de propósito:** a remoção da própria foto
+(`DELETE /users/me/avatar`) e a anonimização continuam sem trava (a remoção do
+admin espera por elas na trava da linha, mas não o contrário); quem já
+carregou a imagem pode vê-la até o `max-age` do link vencer; e uma referência
+indevida antiga não aparece na tela de usuários (a listagem já a esconde), então
+não há botão para ela — o backend a trata se o pedido chegar.
 
 ## Anexos do chamado (13/10/2026)
 

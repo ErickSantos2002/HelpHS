@@ -13,10 +13,13 @@ vi.mock("../../services/userService", () => ({
   createUser: vi.fn(),
   deleteUser: vi.fn(),
   getUsers: vi.fn(),
+  removeUserAvatar: vi.fn(),
   setUserStatus: vi.fn(),
   updateUser: vi.fn(),
 }));
+vi.mock("sonner", () => ({ toast: { error: vi.fn(), success: vi.fn() } }));
 
+import { toast } from "sonner";
 import UsersPage from "../../pages/users/UsersPage";
 import * as userService from "../../services/userService";
 import type { UserSummary } from "../../services/userService";
@@ -651,5 +654,258 @@ describe("UsersPage", () => {
     // ordem, com "Anonimizado" de fora.
     const filtro = screen.getByRole("combobox", { name: "Status da conta" });
     expect(opcoesDoMenu(filtro)).toEqual(["Status", "Ativo", "Inativo"]);
+  });
+});
+
+
+/**
+ * Fase 3A: o admin tira a foto de perfil de outra conta.
+ *
+ * A foto em si NÃO aparece — ver a foto de terceiros é outra fase. O que a
+ * tela mostra é que ela existe, e o caminho até removê-la passa por um
+ * diálogo com justificativa obrigatória. O backend é quem decide; estes casos
+ * prendem que a tela não oferece o controle a quem vai levar 403, e que nada
+ * sai sem a confirmação.
+ */
+describe("UsersPage — remover a foto de perfil de outra conta", () => {
+  const BRUNO_COM_FOTO: UserSummary = { ...BRUNO, avatar_url: "avatars/u2.png" };
+  const EU_COM_FOTO: UserSummary = {
+    ...BASE,
+    id: "eu",
+    name: "Quem Edita",
+    email: "eu@exemplo.com",
+    role: "admin",
+    status: "active",
+    avatar_url: "avatars/eu.png",
+  };
+
+  beforeEach(() => {
+    papelDeQuemEdita = "admin";
+    comUsuarios([ANA, BRUNO_COM_FOTO, EU_COM_FOTO]);
+  });
+
+  async function abreEdicao(nome: string) {
+    const user = userEvent.setup();
+    await montar();
+    await user.click(await screen.findByRole("button", { name: `Editar ${nome}` }));
+    const dialogo = await screen.findByRole("dialog", { name: "Editar usuário" });
+    return { user, dialogo };
+  }
+
+  async function abreRemocao() {
+    const { user, dialogo } = await abreEdicao("Bruno Lima");
+    await user.click(within(dialogo).getByRole("button", { name: "Remover foto" }));
+    const remocao = await screen.findByRole("dialog", { name: "Remover foto de perfil" });
+    return { user, remocao };
+  }
+
+  it("o admin vê que o usuário tem foto e o controle para removê-la", async () => {
+    const { dialogo } = await abreEdicao("Bruno Lima");
+
+    expect(within(dialogo).getByText("Foto de perfil")).toBeInTheDocument();
+    const botao = within(dialogo).getByRole("button", { name: "Remover foto" });
+    expect(botao).toBeEnabled();
+    expect(botao).toHaveAccessibleDescription("Este usuário tem uma foto de perfil.");
+    // Indica que existe, mas não mostra: nenhuma imagem no diálogo.
+    expect(within(dialogo).queryByRole("img")).not.toBeInTheDocument();
+  });
+
+  it("sem foto, a seção nem aparece", async () => {
+    const { dialogo } = await abreEdicao("Ana Souza");
+
+    expect(within(dialogo).queryByText("Foto de perfil")).not.toBeInTheDocument();
+    expect(
+      within(dialogo).queryByRole("button", { name: "Remover foto" }),
+    ).not.toBeInTheDocument();
+  });
+
+  it("o técnico não recebe o controle", async () => {
+    papelDeQuemEdita = "technician";
+    const { dialogo } = await abreEdicao("Bruno Lima");
+
+    expect(
+      within(dialogo).queryByRole("button", { name: "Remover foto" }),
+    ).not.toBeInTheDocument();
+  });
+
+  it("a própria foto não sai por aqui — sai pelo perfil", async () => {
+    const { dialogo } = await abreEdicao("Quem Edita");
+
+    expect(
+      within(dialogo).queryByRole("button", { name: "Remover foto" }),
+    ).not.toBeInTheDocument();
+  });
+
+  it("com o formulário alterado, remover fica bloqueado e diz por quê", async () => {
+    const { user, dialogo } = await abreEdicao("Bruno Lima");
+
+    await user.type(within(dialogo).getByLabelText("Departamento"), "Suporte");
+
+    const botao = within(dialogo).getByRole("button", { name: "Remover foto" });
+    expect(botao).toBeDisabled();
+    expect(botao).toHaveAccessibleDescription(/Salve ou descarte as alterações/);
+  });
+
+  it("o diálogo nomeia quem perde a foto e só confirma com justificativa", async () => {
+    const { user, remocao } = await abreRemocao();
+
+    // O diálogo de edição foi trocado por este, não empilhado.
+    expect(
+      screen.queryByRole("dialog", { name: "Editar usuário" }),
+    ).not.toBeInTheDocument();
+    expect(
+      within(remocao).getByText(/volta a aparecer com as iniciais/),
+    ).toHaveTextContent("Bruno Lima");
+    expect(within(remocao).getByText("bruno@exemplo.com")).toBeInTheDocument();
+
+    const campo = within(remocao).getByLabelText("Justificativa *");
+    expect(campo).toBeRequired();
+    expect(campo).toHaveAttribute("maxLength", "2000");
+    expect(campo).toHaveAccessibleDescription(/de 5 a 2000 caracteres/);
+
+    const confirmar = within(remocao).getByRole("button", { name: "Remover foto" });
+    expect(confirmar).toBeDisabled();
+
+    // Espaço não conta: quatro letras cercadas de espaços seguem curtas.
+    await user.type(campo, "   abcd   ");
+    expect(confirmar).toBeDisabled();
+
+    await user.type(campo, "e");
+    expect(confirmar).toBeEnabled();
+    expect(userService.removeUserAvatar).not.toHaveBeenCalled();
+  });
+
+  it("cancelar fecha sem remover nada", async () => {
+    const { user, remocao } = await abreRemocao();
+
+    await user.type(within(remocao).getByLabelText("Justificativa *"), "Foto imprópria");
+    await user.click(within(remocao).getByRole("button", { name: "Cancelar" }));
+
+    await waitFor(() =>
+      expect(
+        screen.queryByRole("dialog", { name: "Remover foto de perfil" }),
+      ).not.toBeInTheDocument(),
+    );
+    expect(userService.removeUserAvatar).not.toHaveBeenCalled();
+  });
+
+  it("confirmar manda a justificativa limpa, fecha, avisa e atualiza a linha", async () => {
+    vi.mocked(userService.removeUserAvatar).mockResolvedValue({
+      ...BRUNO_COM_FOTO,
+      avatar_url: null,
+    });
+    const { user, remocao } = await abreRemocao();
+
+    await user.type(within(remocao).getByLabelText("Justificativa *"), "  Foto imprópria  ");
+    await user.click(within(remocao).getByRole("button", { name: "Remover foto" }));
+
+    await waitFor(() =>
+      // A versão é a da linha que a tela mostrava.
+      expect(userService.removeUserAvatar).toHaveBeenCalledWith(
+        "u2",
+        "Foto imprópria",
+        BRUNO_COM_FOTO.updated_at,
+      ),
+    );
+    await waitFor(() =>
+      expect(
+        screen.queryByRole("dialog", { name: "Remover foto de perfil" }),
+      ).not.toBeInTheDocument(),
+    );
+    expect(toast.success).toHaveBeenCalledWith("Foto de perfil de Bruno Lima removida.");
+
+    // A linha agora é o usuário sem foto: a edição não oferece mais remover,
+    // e isso sem recarregar a lista.
+    await user.click(screen.getByRole("button", { name: "Editar Bruno Lima" }));
+    const dialogo = await screen.findByRole("dialog", { name: "Editar usuário" });
+    expect(
+      within(dialogo).queryByRole("button", { name: "Remover foto" }),
+    ).not.toBeInTheDocument();
+    expect(userService.getUsers).toHaveBeenCalledTimes(1);
+  });
+
+  it("durante o envio, nada fecha e o clique duplo não manda dois pedidos", async () => {
+    let resolve: (u: UserSummary) => void = () => {};
+    vi.mocked(userService.removeUserAvatar).mockImplementation(
+      () =>
+        new Promise<UserSummary>((r) => {
+          resolve = r;
+        }),
+    );
+    const { user, remocao } = await abreRemocao();
+
+    await user.type(within(remocao).getByLabelText("Justificativa *"), "Foto imprópria");
+    const confirmar = within(remocao).getByRole("button", { name: "Remover foto" });
+    await user.click(confirmar);
+    await user.click(confirmar);
+
+    expect(userService.removeUserAvatar).toHaveBeenCalledTimes(1);
+    expect(confirmar).toBeDisabled();
+    expect(within(remocao).getByRole("button", { name: "Cancelar" })).toBeDisabled();
+    expect(within(remocao).getByLabelText("Justificativa *")).toBeDisabled();
+
+    await user.keyboard("{Escape}");
+    expect(
+      screen.getByRole("dialog", { name: "Remover foto de perfil" }),
+    ).toBeInTheDocument();
+
+    resolve({ ...BRUNO_COM_FOTO, avatar_url: null });
+    await waitFor(() =>
+      expect(
+        screen.queryByRole("dialog", { name: "Remover foto de perfil" }),
+      ).not.toBeInTheDocument(),
+    );
+  });
+
+  it("o erro do servidor fica no diálogo, com a justificativa preservada", async () => {
+    vi.mocked(userService.removeUserAvatar).mockRejectedValue({
+      response: { status: 500, data: { detail: "Nao foi possivel remover o arquivo no servidor." } },
+    });
+    const { user, remocao } = await abreRemocao();
+
+    await user.type(within(remocao).getByLabelText("Justificativa *"), "Foto imprópria");
+    await user.click(within(remocao).getByRole("button", { name: "Remover foto" }));
+
+    const alerta = await within(remocao).findByRole("alert");
+    expect(alerta).toHaveTextContent("Nao foi possivel remover o arquivo no servidor.");
+    expect(within(remocao).getByLabelText("Justificativa *")).toHaveValue("Foto imprópria");
+    expect(within(remocao).getByRole("button", { name: "Remover foto" })).toBeEnabled();
+    expect(toast.success).not.toHaveBeenCalled();
+  });
+
+  it("409: a conta mudou desde que a tela carregou — fecha, recarrega e explica", async () => {
+    // Tentar de novo do mesmo diálogo daria 409 para sempre: a versão que ele
+    // carrega ficou velha. A página recarrega e o admin decide de novo.
+    const detalhe =
+      "A conta deste usuário mudou depois que você abriu a tela — pode ser uma foto nova. A lista foi atualizada: confira e tente de novo.";
+    vi.mocked(userService.removeUserAvatar).mockRejectedValue({
+      response: { status: 409, data: { detail: detalhe } },
+    });
+    const { user, remocao } = await abreRemocao();
+    expect(userService.getUsers).toHaveBeenCalledTimes(1);
+
+    await user.type(within(remocao).getByLabelText("Justificativa *"), "Foto imprópria");
+    await user.click(within(remocao).getByRole("button", { name: "Remover foto" }));
+
+    await waitFor(() =>
+      expect(
+        screen.queryByRole("dialog", { name: "Remover foto de perfil" }),
+      ).not.toBeInTheDocument(),
+    );
+    expect(toast.error).toHaveBeenCalledWith(detalhe);
+    await waitFor(() => expect(userService.getUsers).toHaveBeenCalledTimes(2));
+    expect(toast.success).not.toHaveBeenCalled();
+  });
+
+  it("erro sem detalhe cai na mensagem genérica", async () => {
+    vi.mocked(userService.removeUserAvatar).mockRejectedValue(new Error("boom"));
+    const { user, remocao } = await abreRemocao();
+
+    await user.type(within(remocao).getByLabelText("Justificativa *"), "Foto imprópria");
+    await user.click(within(remocao).getByRole("button", { name: "Remover foto" }));
+
+    expect(await within(remocao).findByRole("alert")).toHaveTextContent(
+      "Erro ao remover a foto. Tente novamente.",
+    );
   });
 });

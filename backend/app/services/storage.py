@@ -133,6 +133,99 @@ async def delete_file(key: str, settings: Settings) -> None:
         logger.warning(f"Nao foi possivel remover {key}: {exc}")
 
 
+async def isola_arquivo(key: str, settings: Settings) -> str | None:
+    """Tira o arquivo da chave pública sem apagá-lo e devolve a chave isolada.
+
+    `None` se não há arquivo.
+
+    Renomeia para um nome reservado no MESMO diretório — `rename` no mesmo
+    volume é atômico, e reversível por `devolve_arquivo`. Existe para quem
+    precisa apagar DEPOIS do commit sem que a exclusão alcance um arquivo
+    gravado na mesma chave depois dele: o que se apaga no fim é o nome
+    isolado, nunca a chave pública. Ver "A foto removida pelo administrador"
+    em docs/decisoes-e-regras.md.
+
+    Erro de disco levanta `StorageError`: quem chama ainda não mudou nada.
+    """
+    loop = asyncio.get_event_loop()
+    origem = resolve_path(key, settings)
+    isolado = origem.with_name(f".{origem.name}.{uuid.uuid4().hex}.removendo")
+
+    def _move() -> bool:
+        try:
+            os.rename(origem, isolado)
+        except FileNotFoundError:
+            return False
+        return True
+
+    try:
+        movido = await loop.run_in_executor(None, _move)
+    except OSError as exc:
+        logger.error(f"Falha ao isolar {key}: {exc}")
+        raise StorageError("Nao foi possivel remover o arquivo no servidor.") from exc
+    if not movido:
+        return None
+    return isolado.relative_to(_root(settings)).as_posix()
+
+
+def _copia_sem_sobrescrever(origem: Path, destino: Path) -> None:
+    """Copia para `destino` só se ele não existe — `O_EXCL` decide, atômico.
+
+    Se o destino já existe, não faz nada: o que está lá é mais novo. Se a
+    cópia falhar no meio, apaga o que ESTA cópia criou, e só se o caminho
+    ainda for o mesmo arquivo (um `os.replace` de upload pode ter posto outro
+    no lugar, e esse não é nosso para apagar).
+    """
+    try:
+        fd = os.open(destino, os.O_WRONLY | os.O_CREAT | os.O_EXCL | getattr(os, "O_BINARY", 0))
+    except FileExistsError:
+        return
+    proprio = os.fstat(fd)
+    try:
+        with os.fdopen(fd, "wb") as saida:
+            saida.write(origem.read_bytes())
+    except OSError:
+        try:
+            agora = os.stat(destino)
+            if (agora.st_dev, agora.st_ino) == (proprio.st_dev, proprio.st_ino):
+                destino.unlink()
+        except OSError:
+            pass
+        raise
+
+
+async def devolve_arquivo(isolado: str, key: str, settings: Settings) -> None:
+    """Desfaz `isola_arquivo` SEM sobrescrever o que estiver na chave.
+
+    Se a chave já tem arquivo, ele é mais novo que o isolado (alguém gravou
+    depois) e fica; o isolado é que sai. Nunca levanta: é chamado num caminho
+    de erro, e a falha vira aviso no log.
+    """
+    loop = asyncio.get_event_loop()
+
+    def _devolve() -> None:
+        origem = resolve_path(isolado, settings)
+        destino = resolve_path(key, settings)
+        try:
+            # `link` falha se o destino existe: devolve sem corrida de
+            # "conferir e depois mover".
+            os.link(origem, destino)
+        except FileExistsError:
+            pass
+        except OSError:
+            # Volume sem link físico (SMB, alguns FUSE). NÃO "conferir e
+            # renomear": no Linux o `rename` sobrescreve, e um upload que
+            # gravasse a chave entre a conferência e o `rename` perderia a
+            # foto nova. A criação exclusiva é a mesma garantia do `link`.
+            _copia_sem_sobrescrever(origem, destino)
+        origem.unlink(missing_ok=True)
+
+    try:
+        await loop.run_in_executor(None, _devolve)
+    except (OSError, StorageError) as exc:
+        logger.error(f"Nao foi possivel devolver {key}: {exc}")
+
+
 def file_exists(key: str, settings: Settings) -> bool:
     """O arquivo está no disco? Key inválida conta como "não está"."""
     try:

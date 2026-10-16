@@ -6,7 +6,7 @@ import re
 import uuid
 from datetime import datetime
 
-from pydantic import ConfigDict, Field, field_validator
+from pydantic import AwareDatetime, ConfigDict, Field, field_validator
 
 from app.models.models import UserRole, UserStatus
 from app.schemas.base import AppBaseModel
@@ -116,6 +116,28 @@ class LGPDConsentStatus(AppBaseModel):
     revisao_politica_aceita: str | None
     revisao_termos_aceita: str | None
     precisa_reaceitar: bool
+
+
+class AvatarRemovalByAdmin(AppBaseModel):
+    """Pedido do admin para tirar a foto de perfil de outra conta.
+
+    Só a justificativa: a chave do arquivo sai do usuário-alvo, nunca da
+    requisição — por isso `extra="forbid"`, para que um `key` ou `avatar_url`
+    no corpo seja recusado em vez de ignorado em silêncio. Mesmo piso e teto
+    do motivo de reabertura.
+
+    `expected_updated_at` é o `updated_at` da linha que o admin tinha na tela:
+    um token de versão, não uma chave. Se a conta mudou desde então (uma foto
+    nova enviada enquanto ele escrevia a justificativa), a remoção dá 409 em
+    vez de apagar o que ele nunca decidiu apagar.
+    """
+
+    model_config = ConfigDict(extra="forbid")
+
+    justification: str = Field(..., min_length=5, max_length=2000)
+    # Com fuso: um horário sem fuso nunca é igual ao do banco, e viraria um
+    # 409 que não se resolve tentando de novo.
+    expected_updated_at: AwareDatetime
 
 
 class OnboardingUpdate(AppBaseModel):
