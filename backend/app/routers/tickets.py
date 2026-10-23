@@ -89,6 +89,7 @@ from app.services.ticket_lifecycle import (
     reopen_deadline,
     resolution_reference,
 )
+from app.utils.avatar import foto_visivel_no_chamado, links_das_fotos
 from app.utils.crud import get_or_404
 from app.utils.history import filtra_historico_para, registra_historico
 from app.utils.protocol import MAX_RETRIES, generate_protocol
@@ -776,6 +777,7 @@ async def get_ticket(
     ticket_id: uuid.UUID,
     db: Annotated[AsyncSession, Depends(get_db)],
     actor: Annotated[User, Depends(get_current_user)],
+    settings: Annotated[Settings, Depends(get_settings)],
 ) -> TicketDetailResponse:
     """Retrieve a single ticket by ID.
 
@@ -788,8 +790,8 @@ async def get_ticket(
         ensure_ticket_visible(ticket, actor, _CHAMADO_NAO_ENCONTRADO)
 
     response = _serialize_ticket(ticket, actor=actor, limiares=await configs_por_nivel(db))
+    assignee = await db.get(User, ticket.assignee_id) if ticket.assignee_id else None
     if ticket.assignee_id:
-        assignee = await db.get(User, ticket.assignee_id)
         response.assignee_name = assignee.name if assignee else None
     # Quem abriu o chamado, para a tela poder falar com ele sem sair daqui.
     #
@@ -801,9 +803,32 @@ async def get_ticket(
     await _fill_product_and_equipment(response, ticket, db)
 
     criador = await db.get(User, ticket.creator_id)
+
+    # Fase 3B: as fotos de quem aparece no detalhe. A visibilidade do CHAMADO
+    # já foi decidida acima; aqui só se decide de quem o ator vê a foto, e o
+    # link só é emitido depois disso — esconder na tela não protegeria nada.
+    # Responsável e solicitante podem ser a mesma pessoa: `links_das_fotos`
+    # assina uma vez por usuário.
+    com_foto = [p for p in (assignee, criador) if p and foto_visivel_no_chamado(p, actor)]
+    fotos = await links_das_fotos(com_foto, settings)
+
+    # Campo a campo, e não `model_validate(criador)`: a leitura automática de
+    # atributos é exatamente o caminho por onde a chave crua do disco chegaria
+    # ao `avatar_url` da resposta. O schema ainda tem a própria trava para quem
+    # um dia validar um `User` direto.
+    requester = None
+    if criador:
+        requester = TicketRequesterBrief(
+            id=criador.id,
+            name=criador.name,
+            email=criador.email,
+            phone=criador.phone,
+            company_name=criador.company_name,
+        ).model_copy(update={"avatar_url": fotos.get(criador.id)})
     detalhe = TicketDetailResponse(
         **response.model_dump(),
-        requester=TicketRequesterBrief.model_validate(criador) if criador else None,
+        requester=requester,
+        assignee_avatar_url=fotos.get(assignee.id) if assignee else None,
     )
     return detalhe
 

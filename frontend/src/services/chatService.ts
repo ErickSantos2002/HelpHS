@@ -1,5 +1,6 @@
 import { api } from "./api";
 import { tokenStorage } from "./api";
+import { resolveFileUrl } from "../lib/fileUrl";
 
 export interface ChatMessage {
   id: string;
@@ -31,6 +32,25 @@ export interface ChatMessage {
   library_file_name: string | null;
   library_file_mime: string | null;
   library_file_size: number | null;
+
+  // ── Foto de quem falou (Fase 3B) ───────────────────────────────
+  //
+  // Link de vida curta, montado na resposta e nunca gravado na mensagem: é a
+  // foto ATUAL da pessoa. Nulo para Helô, sistema, quem não tem foto e quem a
+  // regra do backend não deixa mostrar. Opcional porque o frame do WebSocket
+  // de um backend anterior não o traz.
+  sender_avatar_url?: string | null;
+}
+
+/**
+ * A mesma normalização para o histórico e para o frame do WebSocket.
+ *
+ * O link vem relativo à API (`/api/v1/files/...`). Sem isto, com a API em outro
+ * domínio a foto só apareceria depois de recarregar — ou nunca, se o caminho
+ * do tempo real esquecesse de normalizar.
+ */
+export function normalizaMensagem(msg: ChatMessage): ChatMessage {
+  return { ...msg, sender_avatar_url: resolveFileUrl(msg.sender_avatar_url) };
 }
 
 export interface ChatMessageListResponse {
@@ -48,7 +68,7 @@ export async function getChatMessages(
   if (params.limit !== undefined) p.set("limit", String(params.limit));
   if (params.offset !== undefined) p.set("offset", String(params.offset));
   const { data } = await api.get<ChatMessageListResponse>(`/tickets/${ticketId}/messages?${p}`);
-  return data;
+  return { ...data, items: data.items.map(normalizaMensagem) };
 }
 
 /**
@@ -80,7 +100,7 @@ export async function sendMessageWithLibraryFile(
     content,
     library_file_id: libraryFileId,
   });
-  return data;
+  return normalizaMensagem(data);
 }
 
 export async function suggestReply(ticketId: string): Promise<string> {

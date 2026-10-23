@@ -44,6 +44,11 @@ class ChatMessageResponse(AppBaseModel):
     # Flattened sender fields (populated manually)
     sender_name: str = ""
     sender_role: str = ""
+    # Fase 3B: o link da foto de quem falou. É a foto ATUAL da pessoa, não um
+    # retrato do momento da mensagem, e nunca é gravado: sai na montagem da
+    # resposta. Nulo para Helô, sistema, quem não tem foto e quem a regra de
+    # `foto_visivel_na_conversa` não deixa mostrar.
+    sender_avatar_url: str | None = None
 
 
 class ChatMessageListResponse(AppBaseModel):

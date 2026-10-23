@@ -21,8 +21,10 @@ vi.mock("../../contexts/AuthContext", () => ({
 vi.mock("../../services/userService", () => ({
   changePassword: vi.fn(),
   completeOnboarding: vi.fn(),
+  getExibicaoDaFoto: vi.fn(),
   getMe: vi.fn(),
   removeAvatar: vi.fn(),
+  setExibicaoDaFoto: vi.fn(),
   updateMe: vi.fn(),
   uploadAvatar: vi.fn(),
 }));
@@ -40,7 +42,7 @@ vi.mock("../../services/equipmentService", () => ({
 import ProfilePage from "../../pages/profile/ProfilePage";
 import * as userService from "../../services/userService";
 import * as authService from "../../services/authService";
-import type { UserSummary } from "../../services/userService";
+import type { ExibicaoDaFoto, UserSummary } from "../../services/userService";
 
 /**
  * O que esta tela tinha, e que estes casos prendem.
@@ -87,9 +89,26 @@ const PERFIL: UserSummary = {
 
 const MFA_DESLIGADO = { enabled: false, pending: false, available: true };
 
-async function montar(perfil: Partial<UserSummary> = {}, mfa = MFA_DESLIGADO) {
+// Versão e textos de TESTE, identificados como tal — nunca o texto real.
+const AVISO_DE_TESTE = {
+  versao: "TESTE-AVISO-01",
+  rotulo: "TESTE — permitir que minha foto apareça",
+  explicacao: ["TESTE — quem vê a foto", "TESTE — é opcional"],
+};
+const EXIBICAO_DESLIGADA: ExibicaoDaFoto = {
+  autorizada: false,
+  disponivel: true,
+  aviso: AVISO_DE_TESTE,
+};
+
+async function montar(
+  perfil: Partial<UserSummary> = {},
+  mfa = MFA_DESLIGADO,
+  exibicao: ExibicaoDaFoto = EXIBICAO_DESLIGADA,
+) {
   vi.mocked(userService.getMe).mockResolvedValue({ ...PERFIL, ...perfil });
   vi.mocked(authService.getMfaStatusApi).mockResolvedValue(mfa);
+  vi.mocked(userService.getExibicaoDaFoto).mockResolvedValue(exibicao);
 
   render(<ProfilePage />);
   await waitFor(() =>
@@ -149,6 +168,10 @@ describe("ProfilePage", () => {
     // ler a consequência antes da causa (emenda E12).
     sessao.user = { id: "c1", role: "client", name: "Cliente" };
     await montar({ role: "client", cnpj: null, company_cep: null });
+    // "Terminou de carregar" inclui a seção da foto, que lê o servidor à
+    // parte: até ela responder, o spinner dela é um `status` legítimo, e a
+    // asserção abaixo dependeria da velocidade da máquina.
+    await screen.findByRole("switch", { name: AVISO_DE_TESTE.rotulo });
 
     expect(
       screen.getByRole("heading", { name: "Empresa" }),
@@ -383,5 +406,250 @@ describe("ProfilePage — a foto que não carrega", () => {
 
     await waitFor(() => expect(userService.updateMe).toHaveBeenCalled());
     expect(await screen.findByAltText("Ana Souza")).toHaveAttribute("src", FOTO);
+  });
+});
+
+// ── A foto para outras pessoas (Fase 3B) ──────────────────────
+//
+// O que se prende: o estado na tela é o do servidor — inclusive no começo,
+// inclusive depois de um erro —, a escolha não passa pelo upload e o upload
+// não passa por ela, e o interruptor é alcançável pelo teclado.
+
+function interruptorDaFoto() {
+  return screen.getByRole("switch", { name: AVISO_DE_TESTE.rotulo });
+}
+
+function adiado<T>() {
+  let resolve!: (v: T) => void;
+  let reject!: (e: unknown) => void;
+  const promessa = new Promise<T>((ok, falha) => {
+    resolve = ok;
+    reject = falha;
+  });
+  return { promessa, resolve, reject };
+}
+
+describe("ProfilePage — foto para outras pessoas", () => {
+  it("começa desligada, com o rótulo e a explicação que o servidor mandou", async () => {
+    await montar();
+
+    const interruptor = await screen.findByRole("switch", { name: AVISO_DE_TESTE.rotulo });
+    expect(interruptor).not.toBeChecked();
+    expect(screen.getByText("TESTE — quem vê a foto")).toBeInTheDocument();
+    expect(screen.getByText("TESTE — é opcional")).toBeInTheDocument();
+    expect(screen.getByText(/Não permitido/)).toBeInTheDocument();
+  });
+
+  it("não desenha um interruptor presumido antes de o servidor responder", async () => {
+    const leitura = adiado<ExibicaoDaFoto>();
+    vi.mocked(userService.getMe).mockResolvedValue(PERFIL);
+    vi.mocked(authService.getMfaStatusApi).mockResolvedValue(MFA_DESLIGADO);
+    vi.mocked(userService.getExibicaoDaFoto).mockReturnValue(leitura.promessa);
+
+    render(<ProfilePage />);
+    await screen.findByRole("heading", { name: "Meu perfil" });
+    expect(screen.queryByRole("switch")).not.toBeInTheDocument();
+
+    leitura.resolve({ ...EXIBICAO_DESLIGADA, autorizada: true });
+    expect(await screen.findByRole("switch", { name: AVISO_DE_TESTE.rotulo })).toBeChecked();
+  });
+
+  it("o carregamento da seção se anuncia como tal, e some quando ela responde", async () => {
+    // A resposta fica presa de propósito: o teste não depende de a máquina
+    // ser rápida ou lenta. O carregamento é a ÚNICA região viva enquanto
+    // espera — o aviso de cadastro, que já estava na tela, continua sem
+    // papel (E12) — e, depois da resposta, não sobra nenhuma.
+    sessao.user = { id: "c1", role: "client", name: "Cliente" };
+    const leitura = adiado<ExibicaoDaFoto>();
+    vi.mocked(userService.getMe).mockResolvedValue({
+      ...PERFIL,
+      role: "client",
+      cnpj: null,
+      company_cep: null,
+    });
+    vi.mocked(authService.getMfaStatusApi).mockResolvedValue(MFA_DESLIGADO);
+    vi.mocked(userService.getExibicaoDaFoto).mockReturnValue(leitura.promessa);
+
+    render(<ProfilePage />);
+    await screen.findByText(/Complete o cadastro da sua empresa/);
+
+    const carregando = screen.getByRole("status");
+    expect(carregando).toHaveAccessibleName("Carregando...");
+    expect(carregando.closest("#foto-para-outras-pessoas")).not.toBeNull();
+
+    leitura.resolve(EXIBICAO_DESLIGADA);
+    await screen.findByRole("switch", { name: AVISO_DE_TESTE.rotulo });
+    expect(screen.queryByRole("status")).not.toBeInTheDocument();
+  });
+
+  it("autorizar manda a versão mostrada e só liga depois da confirmação", async () => {
+    await montar();
+    const pedido = adiado<ExibicaoDaFoto>();
+    vi.mocked(userService.setExibicaoDaFoto).mockReturnValue(pedido.promessa);
+
+    await userEvent.click(await screen.findByRole("switch", { name: AVISO_DE_TESTE.rotulo }));
+
+    expect(userService.setExibicaoDaFoto).toHaveBeenCalledWith(true, "TESTE-AVISO-01");
+    expect(interruptorDaFoto()).not.toBeChecked();
+    expect(screen.getByText("Salvando…")).toBeInTheDocument();
+
+    pedido.resolve({ ...EXIBICAO_DESLIGADA, autorizada: true });
+    await waitFor(() => expect(interruptorDaFoto()).toBeChecked());
+    expect(await screen.findByRole("status")).toHaveTextContent(
+      "Escolha salva: a sua foto pode aparecer para outras pessoas.",
+    );
+  });
+
+  it("revogar desliga conforme o servidor e não exige texto novo", async () => {
+    await montar({}, MFA_DESLIGADO, { ...EXIBICAO_DESLIGADA, autorizada: true });
+    vi.mocked(userService.setExibicaoDaFoto).mockResolvedValue(EXIBICAO_DESLIGADA);
+
+    await userEvent.click(await screen.findByRole("switch", { name: AVISO_DE_TESTE.rotulo }));
+
+    expect(userService.setExibicaoDaFoto).toHaveBeenCalledWith(false, "TESTE-AVISO-01");
+    await waitFor(() => expect(interruptorDaFoto()).not.toBeChecked());
+  });
+
+  it("a resposta do servidor manda, mesmo quando contradiz o clique", async () => {
+    await montar();
+    // Outra aba revogou no meio: o servidor responde "desligado".
+    vi.mocked(userService.setExibicaoDaFoto).mockResolvedValue(EXIBICAO_DESLIGADA);
+
+    await userEvent.click(await screen.findByRole("switch", { name: AVISO_DE_TESTE.rotulo }));
+
+    await screen.findByRole("status");
+    expect(interruptorDaFoto()).not.toBeChecked();
+  });
+
+  it("erro não simula sucesso: avisa, relê o estado verdadeiro e não liga", async () => {
+    await montar();
+    vi.mocked(userService.setExibicaoDaFoto).mockRejectedValue({
+      response: { data: { detail: "O texto desta opção mudou." } },
+    });
+
+    await userEvent.click(await screen.findByRole("switch", { name: AVISO_DE_TESTE.rotulo }));
+
+    expect(await screen.findByRole("alert")).toHaveTextContent("O texto desta opção mudou.");
+    expect(interruptorDaFoto()).not.toBeChecked();
+    expect(screen.queryByRole("status")).not.toBeInTheDocument();
+    expect(userService.getExibicaoDaFoto).toHaveBeenCalledTimes(2);
+  });
+
+  it("clique repetido enquanto salva não manda outro pedido", async () => {
+    await montar();
+    const pedido = adiado<ExibicaoDaFoto>();
+    vi.mocked(userService.setExibicaoDaFoto).mockReturnValue(pedido.promessa);
+    const interruptor = await screen.findByRole("switch", { name: AVISO_DE_TESTE.rotulo });
+
+    await userEvent.click(interruptor);
+    await userEvent.click(interruptor);
+    await userEvent.click(interruptor);
+
+    expect(userService.setExibicaoDaFoto).toHaveBeenCalledTimes(1);
+    expect(interruptor).toHaveAttribute("aria-disabled", "true");
+    pedido.resolve({ ...EXIBICAO_DESLIGADA, autorizada: true });
+    await waitFor(() => expect(interruptor).toBeChecked());
+  });
+
+  it("funciona pelo teclado e não perde o foco enquanto salva", async () => {
+    await montar();
+    vi.mocked(userService.setExibicaoDaFoto).mockResolvedValue({
+      ...EXIBICAO_DESLIGADA,
+      autorizada: true,
+    });
+    const interruptor = await screen.findByRole("switch", { name: AVISO_DE_TESTE.rotulo });
+
+    interruptor.focus();
+    await userEvent.keyboard(" ");
+
+    await waitFor(() => expect(interruptor).toBeChecked());
+    expect(interruptor).toHaveFocus();
+    expect(userService.setExibicaoDaFoto).toHaveBeenCalledWith(true, "TESTE-AVISO-01");
+  });
+
+  it("Space repetido enquanto salva não manda outro pedido", async () => {
+    // `aria-disabled` sozinho não segura o `onChange` do checkbox; quem segura
+    // é a guarda de `alterar`. Este teste é o do teclado, como o do clique
+    // triplo acima é o do mouse.
+    await montar();
+    const pedido = adiado<ExibicaoDaFoto>();
+    vi.mocked(userService.setExibicaoDaFoto).mockReturnValue(pedido.promessa);
+    const interruptor = await screen.findByRole("switch", { name: AVISO_DE_TESTE.rotulo });
+
+    interruptor.focus();
+    await userEvent.keyboard(" ");
+    await userEvent.keyboard(" ");
+    await userEvent.keyboard(" ");
+
+    expect(userService.setExibicaoDaFoto).toHaveBeenCalledTimes(1);
+    expect(interruptor).toHaveAttribute("aria-disabled", "true");
+    expect(interruptor).toHaveFocus();
+    pedido.resolve({ ...EXIBICAO_DESLIGADA, autorizada: true });
+    await waitFor(() => expect(interruptor).toBeChecked());
+    expect(userService.setExibicaoDaFoto).toHaveBeenCalledTimes(1);
+  });
+
+  it("a escolha e o upload são independentes", async () => {
+    const FOTO = "https://api.exemplo/files/tok-nova";
+    await montar();
+    vi.mocked(userService.uploadAvatar).mockResolvedValue({ ...PERFIL, avatar_url: FOTO });
+    await screen.findByRole("switch", { name: AVISO_DE_TESTE.rotulo });
+
+    const campo = document.querySelector<HTMLInputElement>('input[type="file"]')!;
+    await userEvent.upload(campo, new File(["x"], "foto.png", { type: "image/png" }));
+
+    await waitFor(() => expect(userService.uploadAvatar).toHaveBeenCalled());
+    expect(userService.setExibicaoDaFoto).not.toHaveBeenCalled();
+    expect(interruptorDaFoto()).not.toBeChecked();
+
+    vi.mocked(userService.setExibicaoDaFoto).mockResolvedValue({
+      ...EXIBICAO_DESLIGADA,
+      autorizada: true,
+    });
+    await userEvent.click(interruptorDaFoto());
+    await waitFor(() => expect(interruptorDaFoto()).toBeChecked());
+    expect(userService.uploadAvatar).toHaveBeenCalledTimes(1);
+    // A própria foto continua na tela, do jeito que estava.
+    expect(screen.getByAltText("Ana Souza")).toHaveAttribute("src", FOTO);
+  });
+
+  it("indisponível: não deixa autorizar, mas quem já autorizou pode desligar", async () => {
+    await montar({}, MFA_DESLIGADO, { autorizada: false, disponivel: false, aviso: null });
+    const desligado = await screen.findByRole("switch");
+    expect(desligado).toBeDisabled();
+    expect(screen.getByText(/ainda não está disponível/)).toBeInTheDocument();
+  });
+
+  it("indisponível com autorização antiga: o interruptor continua livre para revogar", async () => {
+    await montar({}, MFA_DESLIGADO, { autorizada: true, disponivel: false, aviso: null });
+    vi.mocked(userService.setExibicaoDaFoto).mockResolvedValue({
+      autorizada: false,
+      disponivel: false,
+      aviso: null,
+    });
+    const ligado = await screen.findByRole("switch");
+    expect(ligado).toBeEnabled();
+
+    await userEvent.click(ligado);
+
+    expect(userService.setExibicaoDaFoto).toHaveBeenCalledWith(false, null);
+    await waitFor(() => expect(ligado).not.toBeChecked());
+  });
+
+  it("recarregar a página mostra a escolha que o servidor guardou", async () => {
+    await montar({}, MFA_DESLIGADO, { ...EXIBICAO_DESLIGADA, autorizada: true });
+    expect(await screen.findByRole("switch", { name: AVISO_DE_TESTE.rotulo })).toBeChecked();
+    expect(screen.getByText(/^Permitido\./)).toBeInTheDocument();
+  });
+
+  it("falha ao carregar não presume escolha nenhuma", async () => {
+    vi.mocked(userService.getMe).mockResolvedValue(PERFIL);
+    vi.mocked(authService.getMfaStatusApi).mockResolvedValue(MFA_DESLIGADO);
+    vi.mocked(userService.getExibicaoDaFoto).mockRejectedValue(new Error("rede"));
+
+    render(<ProfilePage />);
+
+    expect(await screen.findByText(/Não foi possível carregar esta opção/)).toBeInTheDocument();
+    expect(screen.queryByRole("switch")).not.toBeInTheDocument();
   });
 });

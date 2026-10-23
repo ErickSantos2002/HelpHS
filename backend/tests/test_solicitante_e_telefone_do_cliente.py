@@ -129,11 +129,15 @@ async def _patch(corpo: dict, alvo_id) -> tuple[int, dict]:
 # ── O SOLICITANTE NO CHAMADO ─────────────────────────────────
 
 
-def test_o_schema_do_solicitante_traz_exatamente_quatro_dados_e_o_id():
+def test_o_schema_do_solicitante_traz_exatamente_cinco_dados_e_o_id():
     """A lista é a regra, não um começo.
 
     Cada campo a mais aqui é PII a mais numa tela que a equipe inteira abre. O
-    que entra serve para ATENDER: nome, empresa, e-mail, telefone.
+    que entra serve para ATENDER: nome, empresa, e-mail, telefone — e, desde a
+    Fase 3B, o LINK da foto, por decisão explícita para a equipe reconhecer
+    quem atende. É link assinado de vida curta, nunca a chave do disco (ver
+    `test_fotos_dos_participantes.py`). O próximo campo passa pela mesma
+    decisão, e não por acréscimo.
     """
     from app.schemas.ticket import TicketRequesterBrief
 
@@ -143,6 +147,7 @@ def test_o_schema_do_solicitante_traz_exatamente_quatro_dados_e_o_id():
         "email",
         "phone",
         "company_name",
+        "avatar_url",
     }
 
 
@@ -320,8 +325,9 @@ async def test_o_detalhe_do_chamado_devolve_o_solicitante_de_verdade():
     assert criador_json["email"] == "pedro@empresa.com"
     assert criador_json["phone"] == "+5581988887777"
     assert criador_json["company_name"] == "Health & Safety"
-    # E nada além dos cinco.
-    assert set(criador_json) == {"id", "name", "email", "phone", "company_name"}
+    # E nada além dos seis. Sem foto legítima, o link vem nulo.
+    assert set(criador_json) == {"id", "name", "email", "phone", "company_name", "avatar_url"}
+    assert criador_json["avatar_url"] is None
 
 
 def test_nenhum_campo_do_response_colide_com_relacionamento_lazy_do_orm():

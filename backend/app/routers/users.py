@@ -10,6 +10,8 @@ Permissões:
   PATCH  /users/{id}              — admin | technician (ou o próprio usuário, só admin muda role)
   PATCH  /users/{id}/status       — admin | technician
   PATCH  /users/me/lgpd-consent   — qualquer autenticado (próprio consentimento)
+  GET    /users/me/avatar/exibicao — qualquer autenticado (a própria escolha)
+  PUT    /users/me/avatar/exibicao — qualquer autenticado (só a própria foto para terceiros)
   POST   /users/{id}/anonymize    — admin | technician (anonimiza PII — LGPD)
   POST   /users/{id}/avatar/remove — admin (tira a foto de outra conta, com justificativa)
   DELETE /users/{id}              — admin | technician (exclusão, apenas sem tickets)
@@ -49,7 +51,10 @@ from app.models.models import (
 )
 from app.schemas.ticket import InterruptorDaIA
 from app.schemas.user import (
+    AvatarExibicaoStatus,
+    AvatarExibicaoUpdate,
     AvatarRemovalByAdmin,
+    AvisoDaExibicao,
     LGPDConsentStatus,
     LGPDConsentUpdate,
     OnboardingUpdate,
@@ -60,7 +65,12 @@ from app.schemas.user import (
     UserStatusUpdate,
     UserUpdate,
 )
-from app.services import consentimento, storage
+from app.services import consentimento, exibicao_da_foto, storage
+from app.utils.avatar import (
+    EXTENSOES_DO_AVATAR,
+    chave_do_avatar,
+    chave_legitima_do_avatar,
+)
 from app.utils.telefone import telefone_ausente
 from app.utils.uploads import ler_ate_o_limite
 
@@ -70,42 +80,15 @@ router = APIRouter(prefix="/users", tags=["Users"])
 # não documento de chamado.
 _AVATAR_MAX_BYTES = 5 * 1024 * 1024
 
-# Tipo aceito no upload → extensão gravada. É daqui que sai o único formato de
-# chave que um avatar já teve (`avatars/{id}{ext}`, desde `de2aa09`): o upload
-# grava com ele, e a leitura só aceita de volta exatamente isso.
-_AVATAR_EXTENSOES = {
-    "image/jpeg": ".jpg",
-    "image/png": ".png",
-    "image/gif": ".gif",
-    "image/webp": ".webp",
-}
+# A regra da chave legítima mora em `app/utils/avatar.py` desde a Fase 3B, que
+# a usa também no chamado e no chat. Os nomes antigos ficam aqui como apelidos:
+# o comportamento é o mesmo, e nenhum consumidor deste arquivo precisou mudar.
+_AVATAR_EXTENSOES = EXTENSOES_DO_AVATAR
+_chave_do_avatar = chave_do_avatar
+_avatar_do_proprio_usuario = chave_legitima_do_avatar
 
 
 # ── Helpers ───────────────────────────────────────────────────
-
-
-def _chave_do_avatar(user_id: uuid.UUID, extensao: str) -> str:
-    return f"avatars/{user_id}{extensao}"
-
-
-def _avatar_do_proprio_usuario(user: User) -> str | None:
-    """A chave gravada, se for a que o upload produz para ESTE usuário.
-
-    Até 09/10/2026 `avatar_url` era gravável por `PATCH /users/me` e
-    `PATCH /users/{id}` com qualquer texto — URL externa, chave da foto de
-    outra conta, caminho com `..`. O campo saiu do `UserUpdate`, mas o que
-    foi gravado antes continua no banco, e não é corrigido em massa aqui.
-
-    Por isso a leitura não confia no valor: compara por IGUALDADE com as
-    quatro chaves que o upload poderia ter gerado para este id. Sem prefixo e
-    sem parsing, não há travessia, maiúscula ou domínio de terceiro que passe.
-    Qualquer outra coisa vira "sem foto", e o front cai nas iniciais.
-    """
-    chave = user.avatar_url
-    if not chave:
-        return None
-    validas = {_chave_do_avatar(user.id, ext) for ext in _AVATAR_EXTENSOES.values()}
-    return chave if chave in validas else None
 
 
 def _to_response(user: User) -> UserResponse:
@@ -615,6 +598,118 @@ async def remove_avatar(
     # remoção nunca fica travada por um volume que perdeu o arquivo.
     if chave:
         await storage.delete_file(chave, settings)
+
+
+# ── GET/PUT /users/me/avatar/exibicao ────────────────────────
+#
+# A foto para OUTRAS pessoas nos chamados (Fase 3B). Rota própria, e só do
+# titular: nenhum PATCH genérico, cadastro, onboarding ou edição pelo admin
+# mexe nesta escolha — o campo não existe em `UserUpdate`, `UserCreate` nem
+# `OnboardingUpdate`. Ver "A foto para outras pessoas" em docs/decisoes-e-regras.md.
+
+
+def _status_da_exibicao(user: User, settings: Settings) -> AvatarExibicaoStatus:
+    aviso = exibicao_da_foto.aviso_vigente(settings)
+    return AvatarExibicaoStatus(
+        autorizada=user.avatar_visivel_a_terceiros,
+        disponivel=aviso is not None,
+        aviso=(
+            AvisoDaExibicao(
+                versao=aviso.versao,
+                rotulo=aviso.rotulo,
+                explicacao=list(aviso.explicacao_para(user.role)),
+            )
+            if aviso is not None
+            else None
+        ),
+    )
+
+
+@router.get("/me/avatar/exibicao", response_model=AvatarExibicaoStatus)
+async def get_avatar_exibicao(
+    db: Annotated[AsyncSession, Depends(get_db)],
+    current_user: Annotated[User, Depends(get_current_user)],
+    settings: Annotated[Settings, Depends(get_settings)],
+) -> AvatarExibicaoStatus:
+    """A escolha atual de quem está logado, e o texto que a tela deve mostrar."""
+    result = await db.execute(select(User).where(User.id == current_user.id))
+    user = result.scalar_one_or_none()
+    if not user:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Usuário não encontrado.")
+    return _status_da_exibicao(user, settings)
+
+
+_AUTORIZACAO_INDISPONIVEL = (
+    "A opção de mostrar a foto para outras pessoas ainda não está disponível."
+)
+_AVISO_DESATUALIZADO = (
+    "O texto desta opção mudou desde que a página foi aberta. Recarregue a "
+    "página e leia de novo antes de permitir."
+)
+
+
+@router.put("/me/avatar/exibicao", response_model=AvatarExibicaoStatus)
+async def put_avatar_exibicao(
+    body: AvatarExibicaoUpdate,
+    request: Request,
+    db: Annotated[AsyncSession, Depends(get_db)],
+    current_user: Annotated[User, Depends(get_current_user)],
+    settings: Annotated[Settings, Depends(get_settings)],
+) -> AvatarExibicaoStatus:
+    """Autoriza ou revoga a foto para outras pessoas. Só a própria conta.
+
+    A linha é travada (`FOR UPDATE`) antes de ler o estado: dois pedidos ao
+    mesmo tempo se enfileiram, e o segundo vê o que o primeiro gravou. Por
+    isso repetir a escolha — no duplo clique ou em duas abas — não grava um
+    segundo evento, e estado e histórico nunca divergem. Estado e evento vão
+    no mesmo commit; se ele falhar, nenhum dos dois fica.
+    """
+    user = await _trava_usuario(db, current_user.id)
+    if not user:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Usuário não encontrado.")
+    # Conta não ativa nem chega aqui: o `get_current_user` a recusa com 403.
+    # Esta conferência cobre só a corrida de a conta ser desativada entre a
+    # autenticação e a trava — a mesma do upload. Nessa corrida, barra só
+    # AUTORIZAR; e, de todo modo, a foto de conta não ativa não sai para
+    # terceiros (`app/utils/avatar.py`), com ou sem autorização gravada.
+    if body.autorizada and user.status != UserStatus.active:
+        raise HTTPException(
+            status_code=status.HTTP_403_FORBIDDEN,
+            detail="Esta conta está inativa. Fale com um administrador.",
+        )
+
+    try:
+        evento = exibicao_da_foto.altera_exibicao(
+            db,
+            usuario=user,
+            autorizada=body.autorizada,
+            versao_apresentada=body.versao_aviso,
+            ip=request.client.host if request.client else None,
+            agora=datetime.now(UTC),
+            settings=settings,
+        )
+    except exibicao_da_foto.AutorizacaoIndisponivelError:
+        raise HTTPException(
+            status_code=status.HTTP_409_CONFLICT, detail=_AUTORIZACAO_INDISPONIVEL
+        ) from None
+    except exibicao_da_foto.AvisoDesatualizadoError:
+        raise HTTPException(
+            status_code=status.HTTP_409_CONFLICT, detail=_AVISO_DESATUALIZADO
+        ) from None
+
+    # A resposta sai da linha travada, ANTES do commit: depois dele o objeto
+    # expira, e reler fora da sessão seria uma consulta a mais por nada.
+    resposta = _status_da_exibicao(user, settings)
+    if evento is None:
+        # Nada mudou. Solta a trava já, em vez de esperar o fim da requisição.
+        await db.rollback()
+        return resposta
+
+    # `updated_at` fica como estava (ver `altera_exibicao`): é o token de
+    # versão da remoção da foto pelo admin.
+    _audit(db, AuditAction.update, current_user.id, user.id)
+    await db.commit()
+    return resposta
 
 
 # ── POST /users/{user_id}/avatar/remove ──────────────────────

@@ -271,6 +271,18 @@ class User(Base):
     # padrão nem fallback. Ver `_guarda_de_atribuicao_de_ramal` no router.
     api4com_extension: Mapped[str | None] = mapped_column(String(20), nullable=True)
     avatar_url: Mapped[str | None] = mapped_column(String(500))
+    # A foto pode aparecer para OUTRAS pessoas nos chamados (Fase 3B)? Leitura
+    # rápida do estado atual; a prova de cada escolha está em
+    # `avatar_visibility_events`, e as duas coisas só mudam juntas, pela rota
+    # do próprio titular (`PUT /users/me/avatar/exibicao`).
+    #
+    # Falso no banco (`server_default`) e na aplicação: conta antiga, conta
+    # nova e conta criada por INSERT cru nascem sem autorização. Ter foto,
+    # aceitar a Política ou trocar a imagem não liga nada. A própria pessoa
+    # continua vendo a própria foto com isto desligado — ver `app/utils/avatar.py`.
+    avatar_visivel_a_terceiros: Mapped[bool] = mapped_column(
+        Boolean, default=False, server_default=text("false"), nullable=False
+    )
     last_login: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
 
     # LGPD
@@ -466,6 +478,62 @@ class LgpdConsent(Base):
         CheckConstraint(
             "origem IN ('auto_cadastro', 'criado_por_terceiro', 'alteracao_propria')",
             name="ck_lgpd_consents_origem_conhecida",
+        ),
+    )
+
+
+class AvatarVisibilityEvent(Base):
+    """Cada vez que o titular autorizou ou revogou a foto para outras pessoas.
+
+    `users.avatar_visivel_a_terceiros` é o estado; esta tabela é a prova de
+    como se chegou a ele. Separada de `lgpd_consents` de propósito: aceitar a
+    Política não é escolher mostrar a foto, e um registro não pode passar pelo
+    outro.
+
+    **Só cresce no fluxo normal.** Mudar de ideia é linha nova; nada aqui é
+    reescrito. Isso não define prazo de guarda — o prazo é decisão pendente do
+    responsável pela Política, e não há limpeza automática.
+
+    **Não guarda a foto**, nem a chave do arquivo, nem link ou token: a escolha
+    vale para a foto que estiver no perfil a cada momento, não para uma imagem.
+
+    `user_id` é `SET NULL`, como `lgpd_consents` (decisão de 24/09/2026):
+    excluir a conta não apaga o registro de que houve a escolha, e o DELETE de
+    usuário não passa a ser bloqueado por esta tabela.
+    """
+
+    __tablename__ = "avatar_visibility_events"
+
+    id: Mapped[uuid.UUID] = mapped_column(UUID(as_uuid=True), primary_key=True, default=uuid.uuid4)
+    user_id: Mapped[uuid.UUID | None] = mapped_column(
+        UUID(as_uuid=True), ForeignKey("users.id", ondelete="SET NULL"), nullable=True, index=True
+    )
+    evento: Mapped[str] = mapped_column(String(20), nullable=False)
+    # A versão do texto que a tela mostrou e o servidor conferiu. Nunca a que o
+    # navegador mandou sem conferência. Nula só em revogação: revogar não
+    # depende de texto novo nenhum.
+    versao_aviso: Mapped[str | None] = mapped_column(String(40), nullable=True)
+    origem: Mapped[str] = mapped_column(String(30), nullable=False)
+    registrado_em: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), nullable=False, server_default=func.now()
+    )
+    # Mesmo padrão do aceite da Política: o IP que o servidor viu, nunca um
+    # campo do corpo.
+    ip: Mapped[str | None] = mapped_column(String(45), nullable=True)
+
+    __table_args__ = (
+        CheckConstraint(
+            "evento IN ('autorizacao', 'revogacao')",
+            name="ck_avatar_visibility_events_evento_conhecido",
+        ),
+        CheckConstraint(
+            "origem IN ('alteracao_propria')",
+            name="ck_avatar_visibility_events_origem_conhecida",
+        ),
+        # Autorização sem o texto que a pessoa leu não é autorização.
+        CheckConstraint(
+            "evento = 'revogacao' OR versao_aviso IS NOT NULL",
+            name="ck_avatar_visibility_events_autorizacao_tem_aviso",
         ),
     )
 

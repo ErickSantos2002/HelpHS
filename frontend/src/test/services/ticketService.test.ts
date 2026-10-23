@@ -1,4 +1,4 @@
-import { describe, it, expect, vi, beforeEach } from "vitest";
+import { describe, it, expect, vi, beforeEach, afterEach } from "vitest";
 import {
   getTickets,
   getTicket,
@@ -464,5 +464,58 @@ describe("createTicketCall", () => {
     } as never);
     const r = await createTicketCall("t1");
     expect(Object.keys(r).sort()).toEqual(["created_at", "creation_status", "id"]);
+  });
+});
+
+// ── Fotos no detalhe (Fase 3B) ────────────────────────────────
+
+describe("getTicket — fotos do responsável e do solicitante", () => {
+  afterEach(() => {
+    vi.unstubAllEnvs();
+  });
+
+  const solicitante = {
+    id: "u1",
+    name: "Pedro",
+    email: "p@x.com",
+    phone: null,
+    company_name: null,
+  };
+
+  it("resolve os dois links contra a API em outro domínio", async () => {
+    vi.stubEnv("VITE_API_URL", "https://api.exemplo.com/api/v1");
+    mockGet.mockResolvedValue({
+      data: {
+        ...ticket,
+        assignee_avatar_url: "/api/v1/files/tok-resp",
+        requester: { ...solicitante, avatar_url: "/api/v1/files/tok-sol" },
+      },
+    });
+
+    const t = await getTicket("t1");
+
+    expect(t.assignee_avatar_url).toBe("https://api.exemplo.com/api/v1/files/tok-resp");
+    expect(t.requester?.avatar_url).toBe("https://api.exemplo.com/api/v1/files/tok-sol");
+    expect(t.requester?.name).toBe("Pedro");
+  });
+
+  it("sem foto e sem solicitante, nada é inventado", async () => {
+    mockGet.mockResolvedValue({
+      data: { ...ticket, assignee_avatar_url: null, requester: null },
+    });
+
+    const t = await getTicket("t1");
+
+    expect(t.assignee_avatar_url).toBeNull();
+    expect(t.requester).toBeNull();
+  });
+
+  it("resposta de backend sem os campos novos continua valendo", async () => {
+    mockGet.mockResolvedValue({ data: { ...ticket, requester: solicitante } });
+
+    const t = await getTicket("t1");
+
+    expect(t.assignee_avatar_url).toBeUndefined();
+    expect(t.requester?.avatar_url).toBeUndefined();
   });
 });

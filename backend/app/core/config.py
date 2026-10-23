@@ -602,7 +602,24 @@ class Settings(BaseSettings):
     # rascunho no primeiro login.
     lgpd_exige_reaceite: bool = False
 
-    @field_validator("lgpd_revisao_politica", "lgpd_revisao_termos")
+    # Foto de perfil para outras pessoas (Fase 3B) — QUAL texto de autorização
+    # está valendo. É uma chave de `app/services/exibicao_da_foto.py`, onde o
+    # texto mora junto da versão: o registro grava esta versão, e ela só prova
+    # o que foi mostrado porque a tela recebe o texto do servidor, não o tem
+    # escrito no bundle.
+    #
+    # VAZIA por padrão, e vazia desliga NOVAS autorizações: ninguém consegue
+    # permitir. NÃO é um interruptor da exibição — quem já autorizou continua
+    # aparecendo, porque a exibição olha só a escolha gravada. Em produção, só
+    # um texto marcado como aprovado no catálogo vale; o de hoje é minuta, e
+    # apontar para ele no painel deixa a opção indisponível em vez de
+    # registrar consentimento sobre um rascunho. Revogar não depende desta
+    # variável (precisa só de conta ativa, como qualquer rota logada). Ligar é
+    # decisão do responsável pela Política, depois do texto final — ver "A
+    # foto para outras pessoas" em docs/decisoes-e-regras.md.
+    avatar_aviso_exibicao_versao: str | None = None
+
+    @field_validator("lgpd_revisao_politica", "lgpd_revisao_termos", "avatar_aviso_exibicao_versao")
     @classmethod
     def _revisao_em_branco_e_ausente(cls, valor: str | None) -> str | None:
         # Variável criada no painel e deixada vazia é ausência, não a revisão "".

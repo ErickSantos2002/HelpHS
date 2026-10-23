@@ -2,14 +2,20 @@ import { act, fireEvent, render, screen, waitFor } from "@testing-library/react"
 import { useState } from "react";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
-vi.mock("../../services/chatService", () => ({
-  buildWsUrl: (id: string) => `ws://teste/${id}`,
-  getChatMessages: vi.fn(),
-  improveMessage: vi.fn(),
-  suggestReply: vi.fn(),
-  summarizeConversation: vi.fn(),
-  sendMessageWithLibraryFile: vi.fn(),
-}));
+vi.mock("../../services/chatService", async (importOriginal) => {
+  // A normalização é a DE VERDADE: é ela que o frame do WebSocket atravessa, e
+  // um dublê aqui deixaria passar justamente o defeito de esquecer de chamá-la.
+  const real = await importOriginal<typeof import("../../services/chatService")>();
+  return {
+    buildWsUrl: (id: string) => `ws://teste/${id}`,
+    getChatMessages: vi.fn(),
+    improveMessage: vi.fn(),
+    normalizaMensagem: real.normalizaMensagem,
+    suggestReply: vi.fn(),
+    summarizeConversation: vi.fn(),
+    sendMessageWithLibraryFile: vi.fn(),
+  };
+});
 
 vi.mock("../../services/libraryService", () => ({
   getLibraryFiles: vi.fn(),
@@ -819,5 +825,119 @@ describe("ChatPanel — anexo adicionado aparece na conversa", () => {
       return socketsConstruidos[0];
     })();
     expect(ws.enviados).toEqual([]);
+  });
+});
+
+// ── Foto de quem falou (Fase 3B) ──────────────────────────────
+
+describe("ChatPanel — a foto de quem falou", () => {
+  preparaOPainel();
+
+  afterEach(() => {
+    vi.unstubAllEnvs();
+  });
+
+  it("a mensagem de outra pessoa mostra a foto que o backend mandou", async () => {
+    await montar({
+      historico: [
+        mensagem({ sender_name: "Bruno Lima", sender_avatar_url: "https://cdn.x/b.png" }),
+      ],
+    });
+
+    expect(screen.getByRole("img", { name: "Bruno Lima" })).toHaveAttribute(
+      "src",
+      "https://cdn.x/b.png",
+    );
+  });
+
+  it("sem foto, continua nas iniciais", async () => {
+    await montar({
+      historico: [mensagem({ sender_name: "Bruno Lima", sender_avatar_url: null })],
+    });
+
+    expect(screen.queryByRole("img", { name: "Bruno Lima" })).not.toBeInTheDocument();
+    expect(screen.getByText("BL")).toBeInTheDocument();
+  });
+
+  it("a mensagem nova pelo WebSocket já chega com a foto, sem recarregar", async () => {
+    vi.stubEnv("VITE_API_URL", "https://api.exemplo.com/api/v1");
+    const ws = await montar();
+
+    await act(async () => {
+      ws.onmessage?.({
+        data: JSON.stringify({
+          type: "message",
+          data: mensagem({
+            sender_name: "Ana Souza",
+            sender_avatar_url: "/api/v1/files/tok",
+          }),
+        }),
+      });
+    });
+
+    // Relativo vira absoluto pela MESMA regra do histórico: com a API em
+    // outro domínio, um <img> com caminho relativo pediria ao front.
+    expect(screen.getByRole("img", { name: "Ana Souza" })).toHaveAttribute(
+      "src",
+      "https://api.exemplo.com/api/v1/files/tok",
+    );
+  });
+
+  it("link que falha cai nas iniciais e um link novo volta a ser tentado", async () => {
+    const ws = await montar({
+      historico: [
+        mensagem({ sender_name: "Bruno Lima", sender_avatar_url: "https://cdn.x/velho.png" }),
+      ],
+    });
+
+    fireEvent.error(screen.getByRole("img", { name: "Bruno Lima" }));
+    expect(screen.queryByRole("img", { name: "Bruno Lima" })).not.toBeInTheDocument();
+
+    await act(async () => {
+      ws.onmessage?.({
+        data: JSON.stringify({
+          type: "message",
+          data: mensagem({ sender_name: "Bruno Lima", sender_avatar_url: "https://cdn.x/novo.png" }),
+        }),
+      });
+    });
+
+    expect(screen.getByRole("img", { name: "Bruno Lima" })).toHaveAttribute(
+      "src",
+      "https://cdn.x/novo.png",
+    );
+  });
+
+  it("Helô e sistema mantêm a identidade própria, mesmo se viesse um link", async () => {
+    await montar({
+      historico: [
+        mensagem({
+          is_ai: true,
+          sender_id: null,
+          sender_name: "Helô",
+          sender_avatar_url: "https://cdn.x/h.png",
+        }),
+        mensagem({
+          is_system: true,
+          sender_id: null,
+          sender_name: "Sistema",
+          sender_avatar_url: "https://cdn.x/s.png",
+          content: "Status alterado.",
+        }),
+      ],
+    });
+
+    expect(screen.queryAllByRole("img")).toHaveLength(0);
+    expect(screen.getByText("Assistente IA")).toBeInTheDocument();
+  });
+
+  it("a minha mensagem continua sem avatar ao lado", async () => {
+    await montar({
+      historico: [
+        mensagem({ sender_id: "eu", sender_name: "Eu Mesmo", sender_avatar_url: "https://cdn.x/eu.png" }),
+      ],
+    });
+
+    expect(screen.queryByRole("img", { name: "Eu Mesmo" })).not.toBeInTheDocument();
   });
 });
