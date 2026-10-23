@@ -63,6 +63,55 @@ Regras em `docs/decisoes-e-regras.md`, "A foto removida pelo administrador".
   tem foto (sem mostrá-la) e abre um diálogo de confirmação com justificativa
   obrigatória; no 409 a lista é recarregada.
 
+### Foto dos participantes do chamado — Fase 3B (20/10/2026, implementação local)
+
+Regras em `docs/decisoes-e-regras.md`, "A foto dos participantes do chamado" e
+"A foto para outras pessoas: autorização individual". **Com migration**
+(`l8g9h0i1j2k3`, aditiva) e sem dependência nova. **Não publicada**: espera a
+Política de Privacidade (minuta em `docs/proposta-politica-foto-para-outras-pessoas.md`).
+
+- **A foto só aparece para outra pessoa se o dono autorizou**, no próprio
+  perfil (`GET`/`PUT /api/v1/users/me/avatar/exibicao`). Começa desligado para
+  todas as contas, antigas e novas, de todos os papéis; ter foto ou ter
+  aceitado a Política não autoriza. A autorização é condição a mais sobre a
+  regra abaixo, nunca a substitui. Cada escolha grava um evento em
+  `avatar_visibility_events` no mesmo commit do estado, sob a trava da linha;
+  repetir não grava de novo. A versão gravada é a do texto que o servidor
+  entregou à tela. Em produção só autoriza um texto marcado como aprovado no
+  catálogo; o único texto existente é minuta, e a opção fica indisponível
+  mesmo que `AVATAR_AVISO_EXIBICAO_VERSAO` aponte para ela. A variável controla
+  só novas autorizações: não esconde a foto de quem já autorizou. Revogar não
+  depende do texto (exige, como toda rota logada, conta ativa) e vale a partir
+  da próxima resposta — inclusive numa conversa com o WebSocket já aberto.
+- **Conta inativa ou anonimizada não emite foto para terceiros**, com ou sem
+  autorização gravada. Não é revogação: a escolha fica, nenhum evento é
+  gravado, e reativar a conta volta a respeitar o que estava gravado.
+- **Mudar a escolha não renova o `updated_at`** da conta, para não fazer a
+  remoção da foto pelo admin acusar conflito sem foto nova.
+- **Perfil:** seção "Foto para outras pessoas", com o interruptor no estado do
+  servidor. **Aviso de lançamento** no topo do conteúdo, que não bloqueia nada
+  e que, ao ser fechado, não autoriza nada.
+
+- **A foto aparece na conversa, no responsável e no solicitante do detalhe**,
+  e em nenhum outro lugar. Campos novos, opcionais:
+  `ChatMessage.sender_avatar_url`, `TicketDetailResponse.assignee_avatar_url`
+  e `TicketRequesterBrief.avatar_url`.
+- **No detalhe, a equipe vê a foto do responsável e do solicitante; o cliente
+  vê a própria e a da equipe**, nunca a de outro cliente. **Na conversa, só sai
+  a foto de quem é da equipe ou do dono do chamado**, para todo destinatário —
+  a foto de um remetente cliente que não é o dono (dado antigo, papel trocado)
+  fica de fora até para a equipe. O papel considerado é o atual. A
+  visibilidade do chamado não mudou.
+- **REST e WebSocket com a mesma regra.** O WebSocket manda o mesmo payload a
+  toda a sala, então a regra da conversa não depende de quem recebe.
+- **Link com o TTL dos arquivos (1 h)**, uma assinatura por pessoa por
+  resposta, nada gravado; falha ao assinar vira "sem foto". A validação da
+  chave legítima saiu de `routers/users.py` para `app/utils/avatar.py`, sem
+  mudar o comportamento.
+- **Front:** o `Avatar` da casa na conversa, no responsável (de 20 para 24 px)
+  e no nome do solicitante; o link passa por `resolveFileUrl` também no frame
+  do WebSocket.
+
 ### Infraestrutura
 
 - **Links de arquivo ~20× mais baratos de emitir, sem mudança visível.** Cada
