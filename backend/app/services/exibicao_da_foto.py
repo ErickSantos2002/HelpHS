@@ -188,3 +188,27 @@ def altera_exibicao(
     usuario.updated_at = User.updated_at
     db.add(evento)
     return evento
+
+
+def encerra_por_anonimizacao(usuario: User) -> bool:
+    """A anonimização encerra a autorização. Não faz commit, e não trava a linha.
+
+    Quem chama precisa ter travado `usuario` (`FOR UPDATE`) na mesma transação
+    da anonimização: sem a trava, um `PUT` do titular que comitasse entre a
+    leitura e o UPDATE deixaria `True` gravado numa conta anonimizada (o ORM
+    só manda a coluna que viu mudar).
+
+    NÃO é revogação, e por isso NÃO grava `AvatarVisibilityEvent`: aquele
+    registro é a manifestação do titular, e quem anonimiza é outra pessoa.
+    Quem chama registra o efeito no AuditLog da própria anonimização, com o
+    ator verdadeiro. Os eventos antigos ficam como estão.
+
+    Diferente da conta só inativa — que guarda a escolha e volta a respeitá-la
+    ao reativar —, a anonimizada perde a autorização de vez: se o mesmo
+    registro voltar a ser usado, uma foto nova só aparece com nova autorização.
+
+    Devolve se havia autorização.
+    """
+    havia = usuario.avatar_visivel_a_terceiros
+    usuario.avatar_visivel_a_terceiros = False
+    return havia

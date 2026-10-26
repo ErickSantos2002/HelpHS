@@ -116,7 +116,13 @@ async def _trava_usuario(db: AsyncSession, user_id: uuid.UUID) -> User | None:
 
 
 def _audit(
-    db: AsyncSession, action: AuditAction, actor_id: uuid.UUID, target_id: uuid.UUID
+    db: AsyncSession,
+    action: AuditAction,
+    actor_id: uuid.UUID,
+    target_id: uuid.UUID,
+    *,
+    old_data: dict | None = None,
+    new_data: dict | None = None,
 ) -> None:
     db.add(
         AuditLog(
@@ -124,6 +130,8 @@ def _audit(
             action=action,
             entity_type="user",
             entity_id=target_id,
+            old_data=old_data,
+            new_data=new_data,
         )
     )
 
@@ -975,8 +983,9 @@ async def update_user_status(
             detail="Admins cannot change their own status",
         )
 
-    result = await db.execute(select(User).where(User.id == user_id))
-    user = result.scalar_one_or_none()
+    # Travada: este endpoint também aceita `anonymized`, e aí encerra a
+    # autorização da foto — a mesma corrida descrita em `anonymize_user`.
+    user = await _trava_usuario(db, user_id)
     if not user:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Usuário não encontrado.")
 
@@ -991,8 +1000,19 @@ async def update_user_status(
         mudou_papel_ou_situacao=body.status != user.status,
     )
 
+    # Marcar como anonimizada por aqui encerra a autorização da foto, como no
+    # `POST /anonymize`: reativar depois não pode trazê-la de volta. Ir para
+    # `inactive` NÃO mexe nela — a conta só inativa guarda a escolha.
+    anotacao: dict[str, dict] = {}
+    if body.status == UserStatus.anonymized and user.status != UserStatus.anonymized:
+        havia = exibicao_da_foto.encerra_por_anonimizacao(user)
+        anotacao = {
+            "old_data": {"avatar_visivel_a_terceiros": havia},
+            "new_data": {"avatar_visivel_a_terceiros": False},
+        }
+
     user.status = body.status
-    _audit(db, AuditAction.status_change, actor.id, user.id)
+    _audit(db, AuditAction.status_change, actor.id, user.id, **anotacao)
     await db.commit()
     await db.refresh(user)
     return _to_response(user)
@@ -1102,8 +1122,12 @@ async def anonymize_user(
             detail="Admins cannot anonymize their own account",
         )
 
-    result = await db.execute(select(User).where(User.id == user_id))
-    user = result.scalar_one_or_none()
+    # Travada (`FOR UPDATE`): a anonimização encerra a autorização da foto, e
+    # um `PUT /users/me/avatar/exibicao` do titular que comitasse entre esta
+    # leitura e o UPDATE deixaria `True` gravado — o ORM só manda a coluna que
+    # viu mudar. Com a trava, ou o `PUT` espera e encontra a conta anonimizada
+    # (e recusa), ou a anonimização espera e relê o valor que ele gravou.
+    user = await _trava_usuario(db, user_id)
     if not user:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Usuário não encontrado.")
 
@@ -1145,6 +1169,10 @@ async def anonymize_user(
     # recebê-lo. Não é dado pessoal (não entra na LGPD por isso), é recurso
     # operacional preso a uma conta morta.
     user.api4com_extension = None
+    # A autorização da foto para outras pessoas deixa de valer, na mesma
+    # transação. Não é revogação do titular: nenhum evento em nome dele; o
+    # registro é este AuditLog, com o ator verdadeiro.
+    havia_autorizacao = exibicao_da_foto.encerra_por_anonimizacao(user)
     user.status = UserStatus.anonymized
     user.updated_at = ts
 
@@ -1154,7 +1182,8 @@ async def anonymize_user(
             action=AuditAction.anonymize,
             entity_type="user",
             entity_id=user_id,
-            new_data={"anonymized_at": ts.isoformat()},
+            old_data={"avatar_visivel_a_terceiros": havia_autorizacao},
+            new_data={"anonymized_at": ts.isoformat(), "avatar_visivel_a_terceiros": False},
         )
     )
     await db.commit()
