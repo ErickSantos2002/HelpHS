@@ -84,8 +84,14 @@ Política de Privacidade (minuta em `docs/proposta-politica-foto-para-outras-pes
   depende do texto (exige, como toda rota logada, conta ativa) e vale a partir
   da próxima resposta — inclusive numa conversa com o WebSocket já aberto.
 - **Conta inativa ou anonimizada não emite foto para terceiros**, com ou sem
-  autorização gravada. Não é revogação: a escolha fica, nenhum evento é
-  gravado, e reativar a conta volta a respeitar o que estava gravado.
+  autorização gravada. Na conta só inativa não é revogação: a escolha fica,
+  nenhum evento é gravado, e reativar a conta volta a respeitar o que estava
+  gravado.
+- **Anonimizar encerra a autorização**, na mesma transação, pelos dois
+  caminhos que deixam a conta anonimizada (`POST /anonymize` e
+  `PATCH /status`). Sem evento em nome do titular: o efeito vai no registro de
+  auditoria da anonimização. Se o registro voltar a ser usado, uma foto nova
+  só aparece com nova autorização.
 - **Mudar a escolha não renova o `updated_at`** da conta, para não fazer a
   remoção da foto pelo admin acusar conflito sem foto nova.
 - **Perfil:** seção "Foto para outras pessoas", com o interruptor no estado do

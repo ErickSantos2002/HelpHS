@@ -7,128 +7,161 @@ usuário.** Mora em `docs/` pelo mesmo motivo de
 qualquer rebuild publicaria um texto colocado ali. Este arquivo não entra no
 bundle.
 
-Preparado em 21/10/2026 para a Fase 3B (branch
-`feat/avatar-participantes-chamados`, sem commit). **Nada aqui está aprovado.**
-A Política publicada (PGS-TI-031, Revisão 00, vigência 05/10/2026) não foi
-alterada.
+Preparado em 21/10/2026 para a Fase 3B (PR #94, em rascunho) e revisto em
+26/10/2026 com as decisões de comportamento já tomadas. **Nada aqui está
+aprovado.** A Política publicada (PGS-TI-031, Revisão 00, vigência 05/10/2026)
+não foi alterada.
 
-## O que continua pendente — e não é decisão técnica
+## Para decidir — quatro pontos que não são técnicos
 
-1. **Redação final e revisão documental** deste texto, e se ele entra numa
-   Revisão 01 da PGS-TI-031.
-2. **Novo aceite geral ou não.** A seção 15 diz que inclusão de novo
-   destinatário pede novo aceite. A autorização implementada é específica e
-   opcional; se isso dispensa o re-aceite da Política inteira é decisão do
-   responsável.
-3. **Base legal das fotos da equipe** (técnicos e administradores) exibidas a
-   clientes. A implementação trata todos os papéis igual — exibição só com a
-   autorização individual —, mas a base legal declarada para funcionários
-   (consentimento, legítimo interesse ou outra) não foi escolhida.
-4. **Prazo de guarda dos registros** de autorização e revogação. A tabela
-   `avatar_visibility_events` não tem limpeza automática e nenhum prazo foi
-   escolhido.
-5. **Texto final da opção no perfil.** O texto em uso é minuta
-   (`MINUTA-2026-10-21`, em `backend/app/services/exibicao_da_foto.py`,
-   marcada `aprovado=False`). Em produção só um texto marcado como aprovado no
-   catálogo autoriza: configurar o nome da minuta em
-   `AVATAR_AVISO_EXIBICAO_VERSAO` deixa a opção indisponível. Nenhuma
-   autorização de produção pode ser registrada contra a minuta.
-6. **A autorização depois da anonimização.** A anonimização não zera a
-   escolha nem os eventos (que guardam o IP). Se uma conta anonimizada for
-   reativada e enviar foto nova, a escolha antiga volta a valer. Se isso deve
-   mudar é decisão de ciclo de vida, fora desta implementação.
+O comportamento do sistema já está decidido (abaixo). Estes quatro pontos
+continuam com o responsável pela Política, e o código não escolhe nenhum
+deles:
 
-## Como a implementação funciona (para a redação refletir o que é verdade)
+1. **Redação jurídica final** deste texto, e se ele entra numa Revisão 01 da
+   PGS-TI-031.
+2. **Novo aceite geral ou não.** A seção 15 da Política diz que a inclusão de
+   novo destinatário pede novo aceite. A autorização implementada é específica,
+   opcional e começa desligada; se isso dispensa o re-aceite da Política
+   inteira é decisão do responsável. O aceite geral **nunca** liga a
+   autorização da foto, com ou sem nova revisão.
+3. **Base legal para as fotos da equipe** (técnicos e administradores)
+   exibidas a clientes. O sistema trata todos os papéis igual — exibição só
+   com a autorização individual —, mas a base legal declarada para
+   funcionários não foi escolhida.
+4. **Prazo de guarda dos registros** de autorização e revogação
+   (`avatar_visibility_events`). Não há limpeza automática nem prazo no
+   código.
 
-- **Ninguém aparece para outras pessoas sem autorizar.** Vale para contas
-  existentes e novas, de clientes, técnicos e administradores. Ter foto, ter
-  aceitado a Política ou enviar uma foto nova não autoriza.
-- **Só o titular autoriza ou revoga**, no próprio perfil. Nenhum
-  administrador muda a escolha de outra pessoa.
-- **Quem vê, com autorização** (dentro de um chamado que a pessoa já pode ver):
-  - a foto do **cliente**: a equipe de atendimento, nos chamados que ele abriu
-    (bloco "Solicitante") e junto das mensagens que ele envia neles;
-  - a foto do **técnico ou administrador**: a equipe, nos chamados; o cliente,
-    nos chamados em que ele é o responsável; e, na conversa, a equipe e o
-    cliente que abriu o chamado, junto das mensagens que ele envia;
-  - **outro cliente nunca** vê a foto de um cliente, com ou sem autorização.
-- **A própria pessoa** vê a própria foto sempre (perfil, topo da tela e o
-  bloco do próprio chamado), com ou sem autorização. Na conversa, sem
-  autorização, a mensagem sai sem foto para todos, ela incluída.
-- **Recusar ou não responder** mantém as iniciais. Nada no atendimento muda.
-- **Revogar** vale para as telas abertas depois. Não apaga a foto do perfil.
-  Revogar exige estar logado, como qualquer opção do perfil: conta desativada
-  não entra no sistema.
-- **Conta desativada ou anonimizada** não tem a foto exibida a ninguém além
-  dela mesma, com ou sem autorização. Isso não é uma revogação: a escolha
-  fica guardada, nada é registrado em nome da pessoa, e reativar a conta volta
-  a respeitar a escolha que estava gravada.
-- **Fotos já enviadas** não foram apagadas e não precisam ser reenviadas.
-- **Limites que o texto precisa dizer:** um link já entregue a uma tela aberta
-  pode continuar exibindo a foto até expirar, o navegador pode manter a imagem
-  em cache, e uma imagem já vista, salva ou capturada por outra pessoa não
-  desaparece com a revogação.
+Depois da decisão, o texto aprovado da opção entra no catálogo
+(`backend/app/services/exibicao_da_foto.py`) com um **nome de versão novo** e
+`aprovado=True`. A minuta atual (`MINUTA-2026-10-21`, `aprovado=False`) não é
+editada no lugar: o nome é o que os registros gravam.
+
+## O comportamento decidido (para a redação refletir o que é verdade)
+
+- **Desligado por padrão**, para contas existentes e novas, de clientes,
+  técnicos e administradores. Ter foto, aceitar a Política ou enviar uma foto
+  nova não autoriza.
+- **Separado do envio da foto e opcional.** Recusar não limita nada no uso do
+  HelpHS.
+- **Só o titular** autoriza ou revoga, no próprio perfil. Nenhum administrador
+  muda a escolha de outra pessoa.
+- **Produção só aceita texto aprovado.** Ambientes de teste (staging) podem
+  usar a minuta para exercitar o fluxo; isso não gera autorização em produção,
+  que tem outro banco e recusa minuta, texto de teste e versão inexistente.
 - **Registro:** cada autorização e revogação é guardada com data e hora, a
-  versão do texto apresentado, a origem ("alteração própria") e o IP. A foto,
-  o arquivo e os links não são guardados nesse registro. Excluir a conta
-  desvincula o registro da conta, mas data, versão e IP permanecem; anonimizar
-  não altera o registro.
+  versão do texto apresentado, a origem ("alteração própria") e o IP. A foto, o
+  arquivo e os links não entram nesse registro.
 
-## Redação proposta
+## Pacote proposto para aprovação
 
-### Seção 6 — linha "Imagem de perfil"
+### A. Texto da opção no perfil
 
-> | Imagem de perfil | Fotografia de perfil, quando o usuário optar por enviá-la. O envio é facultativo e a ausência da foto não limita o uso da plataforma. A exibição da foto a outros participantes dos atendimentos depende de autorização específica do usuário, concedida e revogada no próprio perfil. | Enviada voluntariamente pelo usuário. |
+Rótulo (base sugerida em 26/10/2026):
 
-E uma linha nova:
+> Permitir que minha foto de perfil apareça para outros participantes dos
+> atendimentos nos quais essa visualização é permitida.
 
-> | Registro da autorização de exibição da foto | Data e hora de cada autorização e revogação, a versão do texto apresentado e o endereço IP. | Registrado automaticamente quando o usuário altera a escolha no perfil. |
+Complemento comum:
 
-### Seção 8 — substituir a linha da imagem de perfil
+> Essa escolha é opcional e pode ser alterada a qualquer momento. Se você não
+> autorizar, serão exibidas apenas suas iniciais.
 
-> | Identificar visualmente o usuário na plataforma: para o próprio usuário, sempre que houver foto; e, **somente com a sua autorização específica**, para os participantes dos atendimentos — a foto do cliente para a equipe de atendimento, nos chamados que ele abriu; a foto do técnico ou administrador para a equipe e para o cliente dos chamados em que é o responsável ou em que enviou mensagens. A foto de um cliente nunca é exibida a outro cliente. | Imagem de perfil. | Consentimento específico (art. 7º, I), revogável a qualquer tempo no perfil. **[Base legal para fotos de técnicos e administradores: decisão pendente do responsável pela Política.]** |
+Complemento por papel — necessário porque quem vê é diferente para cliente e
+para equipe (item B):
 
-E uma linha para o registro:
+- **Cliente:** "A equipe de atendimento (técnicos e administradores) verá a sua
+  foto nos chamados que você abriu e junto das mensagens que você enviar
+  neles. Outros clientes nunca veem a sua foto."
+- **Técnico ou administrador:** "A sua foto aparece para a equipe nos
+  chamados; para o cliente, nos chamados em que você é o responsável; e, nas
+  conversas, junto das mensagens que você enviar — para a equipe e para o
+  cliente que abriu o chamado."
 
-> | Comprovar a autorização e a revogação da exibição da foto. | Registro da autorização de exibição da foto. | Exercício regular de direitos (art. 7º, VI). **[A confirmar pelo responsável.]** |
+Avisos que a tela já mostra hoje e que o texto aprovado deve manter (itens D a
+F tratam do resto):
 
-### Seção 12 — compartilhamento
+> A permissão vale para a foto que estiver no seu perfil a cada momento: se
+> você trocar a foto, a nova aparece no lugar; se remover, aparecem as
+> iniciais. Desligar não apaga a sua foto: ela continua no seu perfil, para
+> você.
 
-Não há destinatário EXTERNO novo: a foto não sai da plataforma. Sugere-se uma
-frase depois da tabela, para não deixar dúvida:
+### B. Quem vê a foto, com autorização
 
-> A exibição da imagem de perfil a outros usuários da plataforma, nos
-> atendimentos de que participam, depende de autorização específica do titular
-> e é descrita na seção 8.
+Sempre dentro de um chamado que a pessoa já pode ver:
 
-### Seção 13 — retenção
+- **Foto do cliente:** a equipe de atendimento, nos chamados que ele abriu
+  (bloco "Solicitante") e junto das mensagens que ele envia neles.
+- **Foto do técnico ou administrador:** a equipe, nos chamados; o cliente, nos
+  chamados em que ele é o responsável; e, na conversa, a equipe e o cliente
+  que abriu o chamado, junto das mensagens que ele envia.
+- **Outro cliente nunca** vê a foto de um cliente, com ou sem autorização.
+- **A própria pessoa** vê a própria foto sempre (perfil, topo da tela e o
+  bloco do próprio chamado). Na conversa, sem autorização, a mensagem sai sem
+  foto para todos, ela incluída.
 
-Linha da imagem de perfil, mantida, com o acréscimo:
-
-> | Imagem de perfil | Enquanto a conta estiver ativa, ou até que o usuário a remova. A exibição a outras pessoas cessa com a revogação da autorização, sem apagar a imagem. | Consentimento do titular, revogável a qualquer tempo. |
-
-Linha nova:
-
-> | Registro da autorização de exibição da foto | **[Prazo a definir pelo responsável pela Política.]** | Comprovação da escolha do titular. |
-
-### Texto sobre a revogação (seção 8 ou 16)
-
-> O usuário pode revogar a autorização de exibição da foto a qualquer tempo, no
-> próprio perfil, sem prejuízo do atendimento. A revogação vale para as telas
-> abertas a partir de então. Imagens já exibidas podem permanecer
-> temporariamente em telas abertas ou na memória do navegador de quem as
-> visualizou, e a Health & Safety não tem como recolher cópias eventualmente
-> salvas ou capturadas por terceiros.
-
-### Fotos existentes
+### C. Fotos já existentes
 
 > As fotos enviadas antes desta revisão não são exibidas a outras pessoas até
 > que o próprio usuário autorize. Elas não foram apagadas e não precisam ser
-> enviadas novamente.
+> enviadas novamente: a decisão é feita no perfil.
+
+### D. Revogação
+
+> O usuário pode revogar a autorização a qualquer tempo, no próprio perfil,
+> sem prejuízo do atendimento. A partir da revogação, as novas telas deixam de
+> exibir a foto. Um link já entregue a uma tela aberta pode continuar exibindo
+> a imagem até expirar (até uma hora), o navegador de quem a viu pode
+> mantê-la em cache, e cópias salvas ou capturadas por outras pessoas não
+> podem ser apagadas retroativamente.
+
+### E. Conta inativa
+
+> Enquanto a conta estiver inativa, a foto não é exibida a outras pessoas. A
+> escolha do usuário fica guardada e volta a valer se a conta for reativada.
+> Isso não é uma revogação e nada é registrado em nome do usuário.
+
+### F. Anonimização
+
+> Quando a conta é anonimizada, a foto é apagada e a autorização deixa de
+> valer. Se a conta voltar a ser usada, a foto só volta a aparecer para outras
+> pessoas com uma nova autorização do titular.
+
+Sobre os registros, para a seção de retenção:
+
+> Os registros de autorização e revogação não são apagados quando a conta é
+> anonimizada ou excluída. Na exclusão, o registro deixa de apontar para a
+> conta, mas data, versão do texto e endereço IP permanecem. O prazo de guarda
+> desses registros é: **[a definir pelo responsável pela Política]**.
+
+## Onde cada parte entraria na Política (sugestão de encaixe)
+
+Marcadores **[...]** são decisões pendentes; nada aqui afirma base legal ou
+exigência legal como fato.
+
+- **Seção 6, linha "Imagem de perfil":** acrescentar "A exibição da foto a
+  outros participantes dos atendimentos depende de autorização específica do
+  usuário, concedida e revogada no próprio perfil." E uma linha nova para o
+  registro da autorização (data e hora, versão do texto, IP; registrado quando
+  o usuário altera a escolha).
+- **Seção 8, finalidade:** identificar visualmente o usuário — para ele mesmo,
+  sempre; para os participantes dos atendimentos, só com a autorização (item
+  B). Base legal: **[proposta: consentimento específico, revogável no perfil —
+  a confirmar; para técnicos e administradores, decisão pendente (ponto 3)]**.
+  Registro da autorização: finalidade de comprovar a escolha; base legal
+  **[a confirmar]**.
+- **Seção 12, compartilhamento:** não há destinatário externo novo; uma frase
+  remetendo à seção 8 evita dúvida.
+- **Seção 13, retenção:** imagem de perfil enquanto a conta existir ou até o
+  usuário removê-la (apagada na anonimização); registro da autorização
+  **[prazo a definir — ponto 4]**.
+- **Seção 16 ou 8, revogação:** item D.
 
 ## O que NÃO foi feito
 
 - A Política publicada não foi alterada.
+- Nenhum texto foi aprovado; a minuta segue `aprovado=False`.
 - Nenhum aceite, autorização ou registro foi criado para usuários reais.
 - Nenhum e-mail de aviso foi enviado; o aviso de lançamento é só dentro da
   plataforma e não bloqueia o uso.

@@ -1771,8 +1771,9 @@ anonimizada ou desativada nesse meio-tempo, o upload recusa com 403 em vez de
 devolver uma foto a uma conta anonimizada.
 
 **O que fica de fora, de propósito:** a remoção da própria foto
-(`DELETE /users/me/avatar`) e a anonimização continuam sem trava (a remoção do
-admin espera por elas na trava da linha, mas não o contrário); quem já
+(`DELETE /users/me/avatar`) continua sem trava (a remoção do admin espera
+por ela na trava da linha, mas não o contrário) — a anonimização passou a
+travar a linha na Fase 3B (ver "A anonimização encerra a autorização"); quem já
 carregou a imagem pode vê-la até o `max-age` do link vencer; e uma referência
 indevida antiga não aparece na tela de usuários (a listagem já a esconde), então
 não há botão para ela — o backend a trata se o pedido chegar.
@@ -1920,7 +1921,16 @@ tem `aprovado` explícito; o nome não decide ("não começa com MINUTA" não pr
 nada), e pôr a versão no painel não transforma um rascunho em texto aprovado.
 **O único texto existente é `MINUTA-2026-10-21`, com `aprovado=False`**: em
 produção a opção fica indisponível mesmo que alguém configure esse nome. Fora
-de produção a minuta e os textos de teste servem para exercitar o fluxo. O
+de produção a minuta e os textos de teste servem para exercitar o fluxo.
+
+**Staging aceita a minuta, e isso não vira consentimento de produção.** A
+separação é `aviso_vigente`: com `is_production` (`APP_ENV` = `production` ou
+`prod`, normalizado), texto sem `aprovado=True` não autoriza — minuta, texto de
+teste e versão inexistente dão 409. Staging é outro `APP_ENV` e outro banco:
+uma autorização registrada lá não existe em produção. **Premissa:** o padrão de
+`APP_ENV` é `development`; a produção precisa declarar `APP_ENV=production`,
+como já exigem as outras guardas de produção (documentação da API fechada,
+segredos obrigatórios). O
 texto aprovado entra com OUTRO nome (o nome é o que os eventos gravam) e é
 decisão do responsável pela Política — nenhum foi aprovado.
 
@@ -1957,7 +1967,8 @@ coisas diferentes:
 A desativação não apaga a foto nem a escolha. Reativar uma conta volta a
 respeitar a escolha gravada — quem tinha autorizado volta a aparecer, quem não
 tinha continua com as iniciais. Links já entregues e imagens já recebidas
-seguem os limites de sempre (abaixo).
+seguem os limites de sempre (abaixo). (Isso vale para a conta só INATIVA: a
+anonimizada perde a autorização — ver abaixo.)
 
 **Estado e evento no mesmo commit, sob a trava da linha.** O `PUT` trava
 `users` com `FOR UPDATE` (`_trava_usuario`, o mesmo do upload) antes de ler o
@@ -1988,13 +1999,44 @@ capturada não some. Não há revogação global de tokens nem limpeza remota.
 excluir a conta desvincula os eventos sem apagá-los, e o `DELETE /users/{id}`
 não ganhou bloqueio (a tabela não entra em `_REFERENCIAS_QUE_BLOQUEIAM`). O
 `SET NULL` **não anonimiza os eventos**: data, versão, origem e **IP**
-continuam na linha. A anonimização não foi tocada: ela apaga a foto e a conta
-fica não ativa (sem foto para terceiros), mas **não** zera a escolha e não
-mexe nos eventos, que continuam ligados ao `user_id` anonimizado, com IP. Se
-uma conta anonimizada for reativada e enviar foto nova, a escolha antiga
-volta a valer — o que fazer com a autorização depois da anonimização é decisão
-de ciclo de vida em aberto. Não há prazo de guarda nem limpeza automática dos
-eventos — decisão pendente.
+continuam na linha. Não há prazo de guarda nem limpeza automática dos
+eventos — decisão do responsável pela Política.
+
+**A anonimização encerra a autorização (decidido em 26/10/2026).** Ao
+anonimizar, `avatar_visivel_a_terceiros` vira `false` na MESMA transação que
+apaga os dados pessoais (`exibicao_da_foto.encerra_por_anonimizacao`). Há dois
+caminhos reais que deixam uma conta `anonymized`, e os dois fazem isso:
+
+- `POST /users/{id}/anonymize` — o caminho de verdade (apaga nome, e-mail,
+  telefone e foto);
+- `PATCH /users/{id}/status` com `anonymized` — a API aceita qualquer
+  `UserStatus`, embora a tela de usuários só alterne ativo/inativo. Este
+  caminho **só muda o status**, sem apagar dado pessoal: é lacuna anterior à
+  Fase 3B, registrada aqui e não tratada nesta frente.
+
+Não é revogação do titular: **nenhum `AvatarVisibilityEvent` é gravado** —
+aquele registro é a manifestação da pessoa, e quem anonimiza é outra. O efeito
+fica no AuditLog que a operação já grava, com o ator verdadeiro:
+`old_data`/`new_data` com `avatar_visivel_a_terceiros` (no `anonymize`, junto
+do `anonymized_at`; no `status_change`, só quando o destino é `anonymized`).
+Os eventos antigos não são apagados nem reescritos: continuam ligados ao
+`user_id` anonimizado, com data, versão, origem e IP — anonimizar a conta
+**não** anonimiza esses registros.
+
+Os dois caminhos passaram a travar a linha (`_trava_usuario`): sem a trava,
+um `PUT` do titular que comitasse entre a leitura e o UPDATE deixaria `true`
+gravado (o ORM só manda a coluna que viu mudar). Com ela, ou o `PUT` espera e
+encontra a conta anonimizada (e recusa), ou a anonimização espera e relê.
+
+O único reuso real do registro é o `PATCH /status` de volta a `active` (não
+há fluxo de recuperação de conta, e nenhum foi criado). Ele volta com a
+autorização em `false`: uma foto nova enviada depois só aparece para outras
+pessoas com nova autorização do titular. **A conta só inativa não muda**: ir
+para `inactive` guarda a escolha, e reativar volta a respeitá-la.
+
+Contas anonimizadas antes desta regra não precisam de correção de dados: a
+coluna nasceu `false` com a migration da Fase 3B, e conta não ativa não chega
+ao `PUT` que a liga.
 
 **Ressalvas que continuam.** A versão identifica o texto por convenção: não
 há prova automática contra editar o conteúdo sob o mesmo nome. Os testes de
@@ -2014,7 +2056,8 @@ dispara e-mail, não usa notificações.
 
 Provas: `test_exibicao_da_foto_postgres.py` (padrão, cada papel, corpo,
 versão, revogação, repetição, concorrência, atomicidade, PATCH/onboarding/admin,
-upload e aceite, exclusão, anonimização, a releitura do WebSocket, `updated_at`
+upload e aceite, exclusão, anonimização (inclusive pelo `PATCH /status`, a
+reativação depois dela e a corrida com o `PUT`), a releitura do WebSocket, `updated_at`
 contra a remoção pelo admin, login real com conta não ativa, desativação e
 reativação, e a minuta em produção),
 `test_exibicao_da_foto_migracao_postgres.py`, `test_exibicao_da_foto.py`,
