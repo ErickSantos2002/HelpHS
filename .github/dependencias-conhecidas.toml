@@ -385,28 +385,6 @@ responsavel = "TI/Dev"
 data = "2026-09-02"
 
 [[frontend]]
-pacote = "vite"
-advisory = "GHSA-fx2h-pf6j-xcff"
-severidade = "high"
-faixa = "<=6.4.2"
-classe = "aceito_com_prazo"
-motivo = "Bypass do `server.fs.deny` por caminho alternativo do Windows. Servidor de DESENVOLVIMENTO, e so no Windows. Producao e nginx servindo o dist/ -- o vite nao roda la (`npm ls --omit=dev vite` -> ausente). ATENCAO: afeta quem roda `npm run dev` no Windows, que e o caso desta equipe. Nao e 'nao aplicavel': e risco aceito na maquina de desenvolvimento."
-remover_quando = "vite > 6.4.2 com a correcao; enquanto isso, nao expor o dev server na rede (o host padrao segue localhost, sem --host)"
-responsavel = "TI/Dev"
-data = "2026-09-02"
-
-[[frontend]]
-pacote = "vite"
-advisory = "GHSA-v6wh-96g9-6wx3"
-severidade = "moderate"
-faixa = "<=6.4.2"
-classe = "aceito_com_prazo"
-motivo = "Vazamento de hash NTLMv2 pelo launch-editor via caminho UNC no Windows; exige clique no overlay de erro. Servidor de DESENVOLVIMENTO, e so no Windows. Producao e nginx servindo o dist/ -- o vite nao roda la (`npm ls --omit=dev vite` -> ausente). ATENCAO: afeta quem roda `npm run dev` no Windows, que e o caso desta equipe. Nao e 'nao aplicavel': e risco aceito na maquina de desenvolvimento."
-remover_quando = "vite > 6.4.2 com a correcao; enquanto isso, nao expor o dev server na rede (o host padrao segue localhost, sem --host)"
-responsavel = "TI/Dev"
-data = "2026-09-02"
-
-[[frontend]]
 pacote = "ws"
 advisory = "GHSA-58qx-3vcg-4xpx"
 severidade = "moderate"
@@ -429,24 +407,33 @@ responsavel = "TI/Dev"
 data = "2026-09-02"
 
 [[frontend]]
-pacote = "braces"
-advisory = "GHSA-vfj7-8cjw-p6xm"
+pacote = "happy-dom"
+advisory = "GHSA-834v-8h66-3h79"
 severidade = "high"
-faixa = "<=3.0.3"
+faixa = ">=17.0.0 <=21.0.3"
 classe = "nao_aplicavel"
 motivo = """
-Estouro de pilha com padrao de glob profundamente aninhado. NAO HA VERSAO
-CORRIGIDA: first_patched_version = null no GHSA (gh api
-advisories/GHSA-vfj7-8cjw-p6xm) e 3.0.3 e a ultima publicada (npm view braces
-versions). A unica saida pelo pai e tailwindcss 4, que e migracao major fora
-deste escopo. Inalcancavel por entrada de usuario, provado em 07/10/2026:
-(1) `npm ls --omit=dev braces` -> ausente; so entra por tailwindcss@3.4.19
-(micromatch e chokidar), dependencia de build. (2) `grep -rnE "from
-['\"](braces|micromatch|chokidar|fast-glob|tailwindcss)" src` -> vazio. (3)
-instrumentando braces() para registrar cada entrada e rodando `npm run build`:
-UMA chamada, com o literal "./src/**/*.{js,ts,jsx,tsx}" do `content` de
-tailwind.config.js -- texto do repositorio, nao do usuario.
+Injecao de codigo pelo compilador de ESM do happy-dom (alias de import sem
+validacao), correcao incompleta do CVE-2026-33943. Instalado: 20.8.9. A unica
+versao corrigida e a 21.0.4 -- MAJOR acima, fora desta frente.
+Pre-condicoes do advisory: `enableJavaScriptEvaluation: true` E HTML/modulo
+vindo do atacante. Nenhuma das duas existe aqui, provado em 26/10/2026:
+(1) `npm ls --omit=dev happy-dom` -> ausente: so o ambiente do Vitest.
+(2) `grep -rn "environmentOptions|environment-options|enableJavaScriptEvaluation"
+src e2e vite.config.ts` -> vazio: a avaliacao fica no padrao, que e desligado
+(node_modules/happy-dom/lib/browser/DefaultBrowserSettings.js).
+(3) sonda no Vitest do projeto: `window.happyDOM.settings.enableJavaScriptEvaluation`
+= false, e <script> classico, de modulo e via insertAdjacentHTML NAO rodaram.
+Controle: um Window do happy-dom com a opcao ligada EXECUTA o mesmo script --
+a sonda enxerga execucao quando ela existe.
+(4) o HTML processado nos testes e o dos componentes e fixtures do repositorio.
+Preso por `src/test/ambienteSemScript.test.ts` (3 casos): le o ambiente
+efetivo, prova que <script> nao roda e varre src/, e2e/ e vite.config.ts por
+`enableJavaScriptEvaluation`, `environmentOptions` e `vitest-environment-options`
+-- ligar a avaliacao na config OU em outro arquivo de teste derruba o guarda
+(as duas mutacoes foram feitas e pegas em 26/10/2026), e esta entrada deixa de
+valer.
 """
-remover_quando = "existir braces corrigido, o front migrar para tailwindcss 4, ou o content do tailwind passar a vir de fora do repositorio"
+remover_quando = "subir happy-dom para >= 21.0.4 (major, com plano proprio), ou se a avaliacao de JavaScript for ligada nos testes, ou se algum teste passar a processar HTML de fora do repositorio"
 responsavel = "TI/Dev"
-data = "2026-10-07"
+data = "2026-10-26"
