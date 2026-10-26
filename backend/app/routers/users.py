@@ -983,11 +983,23 @@ async def update_user_status(
             detail="Admins cannot change their own status",
         )
 
-    # Travada: este endpoint também aceita `anonymized`, e aí encerra a
-    # autorização da foto — a mesma corrida descrita em `anonymize_user`.
+    # Travada: a recusa abaixo precisa ver o status COMITADO. Sem a trava, uma
+    # anonimização que comitasse entre a leitura e o UPDATE seria desfeita —
+    # esta rota leria `active` e gravaria `inactive` por cima de `anonymized`.
     user = await _trava_usuario(db, user_id)
     if not user:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Usuário não encontrado.")
+
+    # A conta anonimizada é TERMINAL aqui: nem `active`, nem `inactive`. Voltar
+    # a ativa reabriria uma conta cujos dados foram apagados; ir para inativa
+    # apagaria a marca de que ela foi anonimizada. Não há fluxo de recuperação
+    # — se um dia existir, é operação própria. Vem antes da guarda do telefone:
+    # a anonimizada não tem telefone, e a recusa é por ser anonimizada.
+    if user.status == UserStatus.anonymized:
+        raise HTTPException(
+            status_code=status.HTTP_409_CONFLICT,
+            detail="Conta anonimizada não muda de situação.",
+        )
 
     # Reativar é o instante em que a conta volta a valer para a telefonia:
     # é aqui que um cliente sem telefone precisa ganhar um. Desativar nunca
@@ -1000,19 +1012,18 @@ async def update_user_status(
         mudou_papel_ou_situacao=body.status != user.status,
     )
 
-    # Marcar como anonimizada por aqui encerra a autorização da foto, como no
-    # `POST /anonymize`: reativar depois não pode trazê-la de volta. Ir para
-    # `inactive` NÃO mexe nela — a conta só inativa guarda a escolha.
-    anotacao: dict[str, dict] = {}
-    if body.status == UserStatus.anonymized and user.status != UserStatus.anonymized:
-        havia = exibicao_da_foto.encerra_por_anonimizacao(user)
-        anotacao = {
-            "old_data": {"avatar_visivel_a_terceiros": havia},
-            "new_data": {"avatar_visivel_a_terceiros": False},
-        }
-
+    # Ir para `inactive` não mexe na autorização da foto: a conta só inativa
+    # guarda a escolha, e reativar volta a respeitá-la.
+    anterior = user.status
     user.status = body.status
-    _audit(db, AuditAction.status_change, actor.id, user.id, **anotacao)
+    _audit(
+        db,
+        AuditAction.status_change,
+        actor.id,
+        user.id,
+        old_data={"status": anterior.value},
+        new_data={"status": user.status.value},
+    )
     await db.commit()
     await db.refresh(user)
     return _to_response(user)

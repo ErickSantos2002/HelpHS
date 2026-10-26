@@ -817,8 +817,9 @@ async def test_anonimizar_quem_nao_autorizou_continua_sem_autorizacao(fabrica, c
 
 
 @pytest.mark.asyncio
-async def test_marcar_anonimizada_pelo_patch_de_status_tambem_encerra(fabrica, criados):
-    """O `PATCH /status` aceita `anonymized`: é o segundo caminho real."""
+async def test_patch_de_status_recusa_anonymized_e_nao_toca_na_autorizacao(fabrica, criados):
+    """Anonimizar é só o `POST /anonymize`. O `PATCH /status` recusa o valor
+    no schema (422), e a autorização gravada fica como estava."""
     eu = _usuario(UserRole.technician, avatar_visivel_a_terceiros=True)
     admin = _usuario(UserRole.admin)
     await _grava(fabrica, criados, eu, admin)
@@ -826,18 +827,17 @@ async def test_marcar_anonimizada_pelo_patch_de_status_tambem_encerra(fabrica, c
 
     r = await _pede("PATCH", f"/api/v1/users/{eu.id}/status", admin, json={"status": "anonymized"})
 
-    assert r.status_code == 200, r.text
-    assert await _estado(fabrica, eu) == (False, [])
-    (registro,) = await _auditoria(fabrica, eu, AuditAction.status_change)
-    assert registro.user_id == admin.id
-    assert registro.old_data == {"avatar_visivel_a_terceiros": True}
-    assert registro.new_data == {"avatar_visivel_a_terceiros": False}
+    assert r.status_code == 422, r.text
+    relido = await _usuario_por_id(fabrica, eu.id)
+    assert relido.status == UserStatus.active
+    assert await _estado(fabrica, eu) == (True, [])
+    assert await _auditoria(fabrica, eu, AuditAction.status_change) == []
 
 
 @pytest.mark.asyncio
 async def test_inativar_pelo_patch_de_status_guarda_a_escolha(fabrica, criados):
     """A regra da conta só inativa não muda: a escolha fica, e o registro
-    do status continua sem dado da foto."""
+    do status leva só o status — nenhum dado da foto."""
     eu = _usuario(UserRole.technician, avatar_visivel_a_terceiros=True)
     admin = _usuario(UserRole.admin)
     await _grava(fabrica, criados, eu, admin)
@@ -848,50 +848,36 @@ async def test_inativar_pelo_patch_de_status_guarda_a_escolha(fabrica, criados):
     assert r.status_code == 200, r.text
     assert await _estado(fabrica, eu) == (True, [])
     (registro,) = await _auditoria(fabrica, eu, AuditAction.status_change)
-    assert registro.old_data is None and registro.new_data is None
+    assert registro.old_data == {"status": "active"}
+    assert registro.new_data == {"status": "inactive"}
 
 
-@pytest.mark.parametrize("caminho", ["anonymize", "patch_status"])
+@pytest.mark.parametrize("destino", ["active", "inactive"])
 @pytest.mark.asyncio
-async def test_reativar_a_conta_anonimizada_nao_ressuscita_a_autorizacao(
-    fabrica, criados, aviso_de_teste, tmp_path, monkeypatch, caminho
+async def test_conta_anonimizada_nao_volta_pelo_patch_e_a_autorizacao_segue_encerrada(
+    fabrica, criados, aviso_de_teste, destino
 ):
-    """O único reuso real do registro é o `PATCH /status` de volta a `active`.
-    Foto nova depois dele continua sem aparecer até nova autorização."""
+    """A anonimizada é terminal no `PATCH /status`: não reativa, e a
+    autorização que o `POST /anonymize` encerrou não tem por onde voltar."""
     eu = _usuario(UserRole.technician, avatar_url=None)
     admin = _usuario(UserRole.admin)
     await _grava(fabrica, criados, eu, admin)
     _atende_como(fabrica, eu, admin)
-    monkeypatch.setattr(get_settings(), "upload_dir", str(tmp_path))
     r = await _pede("PUT", _ROTA, eu, json=_autoriza())
     assert r.status_code == 200, r.text
-    if caminho == "anonymize":
-        r = await _pede("POST", f"/api/v1/users/{eu.id}/anonymize", admin)
-    else:
-        r = await _pede(
-            "PATCH", f"/api/v1/users/{eu.id}/status", admin, json={"status": "anonymized"}
-        )
+    r = await _pede("POST", f"/api/v1/users/{eu.id}/anonymize", admin)
     assert r.status_code == 200, r.text
 
-    r = await _pede("PATCH", f"/api/v1/users/{eu.id}/status", admin, json={"status": "active"})
-    assert r.status_code == 200, r.text
-    r = await _pede(
-        "POST", "/api/v1/users/me/avatar", eu, files={"file": ("n.png", b"\x89PNG", "image/png")}
-    )
-    assert r.status_code == 200, r.text
+    r = await _pede("PATCH", f"/api/v1/users/{eu.id}/status", admin, json={"status": destino})
 
+    assert r.status_code == 409, r.text
     relido = await _usuario_por_id(fabrica, eu.id)
-    assert relido.status == UserStatus.active
-    assert relido.avatar_url
+    assert relido.status == UserStatus.anonymized
     assert relido.avatar_visivel_a_terceiros is False
     assert pode_aparecer_para_terceiros(relido) is False
     _, eventos = await _estado(fabrica, eu)
     assert [e.evento for e in eventos] == ["autorizacao"]
-
-    # Só uma autorização NOVA do titular volta a mostrar a foto.
-    r = await _pede("PUT", _ROTA, eu, json=_autoriza())
-    assert r.status_code == 200, r.text
-    assert pode_aparecer_para_terceiros(await _usuario_por_id(fabrica, eu.id)) is True
+    assert await _auditoria(fabrica, eu, AuditAction.status_change) == []
 
 
 async def _espera_alguem_parado_na_trava(fabrica) -> None:
@@ -913,9 +899,8 @@ async def _espera_alguem_parado_na_trava(fabrica) -> None:
     raise AssertionError("a anonimização não chegou a esperar pela trava")
 
 
-@pytest.mark.parametrize("caminho", ["anonymize", "patch_status"])
 @pytest.mark.asyncio
-async def test_autorizacao_comitada_durante_a_anonimizacao_nao_sobrevive(fabrica, criados, caminho):
+async def test_autorizacao_comitada_durante_a_anonimizacao_nao_sobrevive(fabrica, criados):
     """Outra transação segura a linha e grava `true`; a anonimização chega
     nesse meio-tempo. Com a trava ela espera e relê `true` antes de zerar.
     Sem a trava, leria `false` antes, e o UPDATE nem levaria a coluna."""
@@ -930,17 +915,7 @@ async def test_autorizacao_comitada_durante_a_anonimizacao_nao_sobrevive(fabrica
             text("UPDATE users SET avatar_visivel_a_terceiros = true WHERE id = :id"),
             {"id": eu.id},
         )
-        if caminho == "anonymize":
-            pedido = asyncio.create_task(_pede("POST", f"/api/v1/users/{eu.id}/anonymize", admin))
-        else:
-            pedido = asyncio.create_task(
-                _pede(
-                    "PATCH",
-                    f"/api/v1/users/{eu.id}/status",
-                    admin,
-                    json={"status": "anonymized"},
-                )
-            )
+        pedido = asyncio.create_task(_pede("POST", f"/api/v1/users/{eu.id}/anonymize", admin))
         await _espera_alguem_parado_na_trava(fabrica)
         await segura.commit()
 
