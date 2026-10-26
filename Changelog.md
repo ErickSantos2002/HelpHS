@@ -87,11 +87,19 @@ Política de Privacidade (minuta em `docs/proposta-politica-foto-para-outras-pes
   autorização gravada. Na conta só inativa não é revogação: a escolha fica,
   nenhum evento é gravado, e reativar a conta volta a respeitar o que estava
   gravado.
-- **Anonimizar encerra a autorização**, na mesma transação, pelos dois
-  caminhos que deixam a conta anonimizada (`POST /anonymize` e
-  `PATCH /status`). Sem evento em nome do titular: o efeito vai no registro de
-  auditoria da anonimização. Se o registro voltar a ser usado, uma foto nova
-  só aparece com nova autorização.
+- **Anonimizar encerra a autorização**, na mesma transação do
+  `POST /anonymize`. Sem evento em nome do titular: o efeito vai no registro
+  de auditoria da anonimização.
+- **`anonymized` deixou de ser um status do `PATCH /users/{id}/status`**
+  (ANON-01). A rota alterna só os estados operacionais `active` e `inactive`;
+  `anonymized` ou outro valor dá 422 no schema. Anonimizar é exclusivamente o
+  `POST /users/{id}/anonymize` — o PATCH só trocava o status e deixava a conta
+  "anonimizada" com nome, e-mail, telefone e foto intactos. Conta anonimizada
+  é terminal nessa rota (409 para `active` e `inactive`), e não há fluxo de
+  recuperação. O `status_change` passa a registrar o status anterior e o novo.
+  O filtro `GET /users?status=anonymized` não muda. Fora do escopo,
+  registrados em `docs/decisoes-e-regras.md`: ANON-02 (dados que o
+  `POST /anonymize` preserva) e ANON-03 (sessões não revogadas).
 - **Mudar a escolha não renova o `updated_at`** da conta, para não fazer a
   remoção da foto pelo admin acusar conflito sem foto nova.
 - **Perfil:** seção "Foto para outras pessoas", com o interruptor no estado do

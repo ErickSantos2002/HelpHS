@@ -2004,35 +2004,29 @@ eventos — decisão do responsável pela Política.
 
 **A anonimização encerra a autorização (decidido em 26/10/2026).** Ao
 anonimizar, `avatar_visivel_a_terceiros` vira `false` na MESMA transação que
-apaga os dados pessoais (`exibicao_da_foto.encerra_por_anonimizacao`). Há dois
-caminhos reais que deixam uma conta `anonymized`, e os dois fazem isso:
-
-- `POST /users/{id}/anonymize` — o caminho de verdade (apaga nome, e-mail,
-  telefone e foto);
-- `PATCH /users/{id}/status` com `anonymized` — a API aceita qualquer
-  `UserStatus`, embora a tela de usuários só alterne ativo/inativo. Este
-  caminho **só muda o status**, sem apagar dado pessoal: é lacuna anterior à
-  Fase 3B, registrada aqui e não tratada nesta frente.
+apaga os dados pessoais (`exibicao_da_foto.encerra_por_anonimizacao`). O único
+caminho que deixa uma conta `anonymized` é o `POST /users/{id}/anonymize` (apaga
+nome, e-mail, telefone e foto). O `PATCH /users/{id}/status` também aceitava
+`anonymized` — e aí só mudava o status —, mas isso foi fechado na ANON-01 (ver
+"A situação da conta", na seção LGPD).
 
 Não é revogação do titular: **nenhum `AvatarVisibilityEvent` é gravado** —
 aquele registro é a manifestação da pessoa, e quem anonimiza é outra. O efeito
 fica no AuditLog que a operação já grava, com o ator verdadeiro:
-`old_data`/`new_data` com `avatar_visivel_a_terceiros` (no `anonymize`, junto
-do `anonymized_at`; no `status_change`, só quando o destino é `anonymized`).
+`old_data`/`new_data` com `avatar_visivel_a_terceiros`, junto do
+`anonymized_at`.
 Os eventos antigos não são apagados nem reescritos: continuam ligados ao
 `user_id` anonimizado, com data, versão, origem e IP — anonimizar a conta
 **não** anonimiza esses registros.
 
-Os dois caminhos passaram a travar a linha (`_trava_usuario`): sem a trava,
-um `PUT` do titular que comitasse entre a leitura e o UPDATE deixaria `true`
+A anonimização passou a travar a linha (`_trava_usuario`): sem a trava, um
+`PUT` do titular que comitasse entre a leitura e o UPDATE deixaria `true`
 gravado (o ORM só manda a coluna que viu mudar). Com ela, ou o `PUT` espera e
 encontra a conta anonimizada (e recusa), ou a anonimização espera e relê.
 
-O único reuso real do registro é o `PATCH /status` de volta a `active` (não
-há fluxo de recuperação de conta, e nenhum foi criado). Ele volta com a
-autorização em `false`: uma foto nova enviada depois só aparece para outras
-pessoas com nova autorização do titular. **A conta só inativa não muda**: ir
-para `inactive` guarda a escolha, e reativar volta a respeitá-la.
+A conta anonimizada não é reutilizada: o `PATCH /status` a recusa (409), e não
+há fluxo de recuperação de conta — nenhum foi criado. **A conta só inativa não
+muda**: ir para `inactive` guarda a escolha, e reativar volta a respeitá-la.
 
 Contas anonimizadas antes desta regra não precisam de correção de dados: a
 coluna nasceu `false` com a migration da Fase 3B, e conta não ativa não chega
@@ -2056,8 +2050,8 @@ dispara e-mail, não usa notificações.
 
 Provas: `test_exibicao_da_foto_postgres.py` (padrão, cada papel, corpo,
 versão, revogação, repetição, concorrência, atomicidade, PATCH/onboarding/admin,
-upload e aceite, exclusão, anonimização (inclusive pelo `PATCH /status`, a
-reativação depois dela e a corrida com o `PUT`), a releitura do WebSocket, `updated_at`
+upload e aceite, exclusão, anonimização (o `PATCH /status` recusando
+`anonymized` e a saída dela, e a corrida com o `PUT`), a releitura do WebSocket, `updated_at`
 contra a remoção pelo admin, login real com conta não ativa, desativação e
 reativação, e a minuta em produção),
 `test_exibicao_da_foto_migracao_postgres.py`, `test_exibicao_da_foto.py`,
@@ -2221,6 +2215,46 @@ anexos e histórico.
 
 A anonimização de usuário existe no backend e foi **removida da interface de
 propósito**. Manter o endpoint para uso futuro.
+
+### A situação da conta: `anonymized` é terminal (ANON-01, 26/10/2026)
+
+- **`active` e `inactive` são estados operacionais, reversíveis.** É só entre
+  eles que o `PATCH /users/{id}/status` alterna — o que a tela de usuários faz.
+  `inactive → active` continua permitido.
+- **A anonimização só ocorre pelo endpoint dedicado**, `POST
+  /users/{id}/anonymize`, com as guardas dele (técnico não anonimiza admin;
+  segunda vez é 409). O schema do PATCH (`UserStatusUpdate`, tipo
+  `SituacaoOperacional`) só aceita `active` e `inactive`: `anonymized` e
+  qualquer outro valor dão **422** antes do handler. Até aqui o PATCH aceitava
+  o enum inteiro, e `anonymized` por ele **só trocava o status**: a conta
+  passava a constar como anonimizada com nome, e-mail, telefone, foto, arquivo
+  e ramal intactos (medido em PostgreSQL descartável na auditoria da ANON-01).
+- **`anonymized` é terminal no PATCH genérico.** Conta anonimizada recebe
+  **409** para `active` e para `inactive`, e nada na linha muda. Voltar a ativa
+  reabriria uma conta cujos dados foram apagados (a sessão antiga, se o refresh
+  ainda vivesse, voltava a valer — ver ANON-03); ir para inativa apagaria a
+  marca de que ela foi anonimizada. A recusa vem antes da guarda do telefone: a
+  anonimizada não tem telefone, e o motivo é ser anonimizada.
+- **Não existe fluxo de recuperação de conta anonimizada.** Se um dia for
+  preciso, é operação própria, desenhada à parte — não uma volta pelo PATCH.
+- **O PATCH segue travando a linha.** Agora pela recusa: ela precisa ver o
+  status comitado. Sem a trava, uma anonimização que comitasse entre a leitura
+  e o UPDATE seria desfeita — o PATCH leria `active` e gravaria `inactive` por
+  cima de `anonymized`.
+- **O `status_change` registra o status anterior e o novo**
+  (`old_data={"status": ...}`, `new_data={"status": ...}`). Antes não levava
+  dado nenhum, e o registro não dizia para onde a conta tinha ido. A
+  anonimização continua sendo o registro `anonymize`, nunca `status_change`.
+- **O filtro `GET /users?status=` é outro contrato** e continua aceitando
+  `anonymized`.
+
+Nenhum consumidor dependia do valor removido: o frontend (`setUserStatus`) já
+era tipado como `"active" | "inactive"`, e testes, scripts, seeds, e2e e k6 não
+mandam `anonymized` por essa rota (auditado em 26/10/2026).
+
+Provas: `test_situacao_da_conta_postgres.py` (schema, PATCH com login real,
+409 sem mudança na linha, a corrida com a anonimização, o POST e o filtro) e
+`test_exibicao_da_foto_postgres.py` (a autorização da foto nesses caminhos).
 
 ⚠️ **Pendente e bloqueante: a gravação de ligações.** O ramal usado em
 produção **já grava** hoje (`gravar_audio = 1`, medido em 30/09/2026), o áudio
@@ -2779,6 +2813,41 @@ Ver `desenvolvimento-local.md` e `docs/fechar-banco-para-a-internet.md` — o
 banco estar alcançável da máquina do desenvolvedor é a outra metade disto.
 
 # Pendências conhecidas
+
+## Anonimização: achados fora da ANON-01 (26/10/2026)
+
+Medidos na auditoria da ANON-01, em PostgreSQL descartável, e **não
+corrigidos** — cada um pede decisão própria antes de código.
+
+### ANON-02 — o `POST /anonymize` preserva dados que pedem decisão
+
+A anonimização substitui nome e e-mail e apaga telefone, setor, foto (com o
+arquivo), ramal e o consentimento na conta. Ficam na linha:
+
+- **dados empresariais** da conta: `company_name`, `cnpj`, `company_cep`,
+  `company_address`, `company_city`, `company_state`;
+- **`client_notes`**: nota interna da equipe sobre o cliente, texto livre que
+  pode conter dado pessoal;
+- **senha (hash)** e `email_verified`;
+- **histórico de aceites** (`lgpd_consents`): as linhas ficam, sem marca de
+  revogação.
+
+Os itens acima foram medidos. Pela leitura do código, ficam também o MFA
+(`mfa_secret`, `mfa_enabled`) e o `last_login` — não exercitados na sondagem.
+
+Cada item precisa de auditoria (o que é dado pessoal, o que a retenção da
+Política exige guardar) antes de mudar o endpoint.
+
+### ANON-03 — sessões não são revogadas na anonimização
+
+O `POST /anonymize` não apaga o refresh token (`token:refresh:{uid}`, 7 dias).
+Hoje o efeito fica contido porque a conta anonimizada não passa no
+`get_current_user` nem no `/auth/refresh` (ambos exigem `active`) e, desde a
+ANON-01, não volta a `active` pelo PATCH. Na auditoria, antes da ANON-01, um
+técnico anonimizado e reativado voltava a renovar acesso com o refresh de
+ANTES da anonimização. Os access tokens já emitidos também seguem válidos até
+o vencimento (mesma limitação de "Access token sobrevive à revogação de
+sessão", em Dívidas com gatilho).
 
 ## Migrations: a política do caminho de volta
 
