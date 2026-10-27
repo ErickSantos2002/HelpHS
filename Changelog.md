@@ -14,6 +14,26 @@ Trabalho que ainda **não** entrou numa versão do produto. Confira: se um
 item aqui já está em produção, ou ele foi para a versão errada, ou falta
 publicar uma versão nova.
 
+### Hierarquia de contas e último administrador (F1-A, 27/10/2026)
+
+Regras completas em `docs/decisoes-e-regras.md`, seção "Contas da equipe: só o
+administrador gere". **Sem migration** e sem variável nova.
+
+- **Técnico não altera mais conta de admin nem de outro técnico.** Editar,
+  mudar situação, excluir e anonimizar devolvem 403 "Apenas administradores
+  podem alterar contas da equipe.". Cliente e a própria conta seguem livres.
+- **O sistema não fica sem administrador ativo.** Desativar, excluir,
+  anonimizar ou rebaixar o último admin ativo devolve 409, inclusive quando é
+  ele mesmo se rebaixando. Protegido contra corrida por trava do quadro de
+  admins (`FOR UPDATE`), provado em Postgres com 25 combinações concorrentes.
+- **Recusa só no log** (ids e papéis, sem dado pessoal); nada em `audit_logs`.
+  O que é aceito passa a auditar antes/depois de `status`, `role` e
+  `ai_enabled`.
+- **`PATCH /users/{id}/ai` em conta que não é de cliente devolve 422.**
+- **Tela de usuários:** técnico não vê Editar/Excluir nem alterna a situação
+  nas linhas da equipe; a recusa do servidor aparece em aviso (situação) ou no
+  diálogo (exclusão), que antes engoliam o erro ou só liam `detail` cru.
+
 ### Anexos do chamado (13/10/2026)
 
 Regras completas em `docs/decisoes-e-regras.md`, seção "Anexos do chamado".
