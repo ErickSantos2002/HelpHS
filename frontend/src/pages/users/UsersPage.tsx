@@ -20,6 +20,7 @@ import {
 } from "../../components/ui";
 import { useAuth } from "../../contexts/AuthContext";
 import { getApiError } from "../../lib/apiError";
+import { toastApiError } from "../../lib/toastError";
 import {
   ERRO_TELEFONE,
   PLACEHOLDER_TELEFONE,
@@ -240,25 +241,33 @@ type EditValues = z.infer<ReturnType<typeof criaEditSchema>>;
 function StatusPill({
   user,
   onToggled,
+  podeGerir,
 }: {
   user: UserSummary;
   onToggled: (u: UserSummary) => void;
+  /** Falso quando quem vê a tela não gere esta conta (F1-A): a pílula só diz o estado. */
+  podeGerir: boolean;
 }) {
   const [loading, setLoading] = useState(false);
 
   async function toggle() {
-    if (user.status === "anonymized") return;
+    if (!canToggle) return;
     setLoading(true);
     try {
       const next = user.status === "active" ? "inactive" : "active";
       const updated = await setUserStatus(user.id, next);
       onToggled(updated);
+    } catch (err) {
+      // 403 da hierarquia ou 409 do último admin ativo: sem o aviso, a pílula
+      // só voltava ao normal e parecia que nada tinha sido pedido.
+      toastApiError(err, "Não foi possível alterar a situação da conta.");
     } finally {
       setLoading(false);
     }
   }
 
-  const canToggle = user.status === "active" || user.status === "inactive";
+  const canToggle =
+    podeGerir && (user.status === "active" || user.status === "inactive");
   const estado = estadoDaConta(user.status);
 
   return (
@@ -681,8 +690,7 @@ function DeleteModal({ user, onClose, onDeleted }: { user: UserSummary; onClose:
       await deleteUser(user.id);
       onDeleted();
     } catch (err: unknown) {
-      const msg = (err as { response?: { data?: { detail?: string } } })?.response?.data?.detail;
-      setError(msg ?? "Erro ao excluir usuário.");
+      setError(getApiError(err, "Erro ao excluir usuário."));
     } finally {
       setLoading(false);
     }
@@ -730,6 +738,13 @@ function DeleteModal({ user, onClose, onDeleted }: { user: UserSummary; onClose:
 // ── UsersPage ─────────────────────────────────────────────────
 
 export default function UsersPage() {
+  const { user: atual } = useAuth();
+  // Espelho do guarda de hierarquia do backend (F1-A): admin gere todos;
+  // técnico gere cliente e a própria conta. O backend continua sendo quem
+  // barra — aqui só não se oferece o que vai voltar 403.
+  const podeGerir = (u: UserSummary) =>
+    atual?.role === "admin" || u.role === "client" || u.id === atual?.id;
+
   const [users, setUsers] = useState<UserSummary[]>([]);
   const [total, setTotal] = useState(0);
   const [loading, setLoading] = useState(true);
@@ -960,7 +975,7 @@ export default function UsersPage() {
 
                   {/* Status pill */}
                   <div className="hidden md:block shrink-0">
-                    <StatusPill user={u} onToggled={handleToggled} />
+                    <StatusPill user={u} onToggled={handleToggled} podeGerir={podeGerir(u)} />
                   </div>
 
                   {/* Created date */}
@@ -976,26 +991,33 @@ export default function UsersPage() {
                     qual. O `title` fica curto — é dica de mouse, e o mouse já
                     sabe em que linha está.
                   */}
-                  <div className="flex items-center gap-1 shrink-0">
-                    <button
-                      type="button"
-                      onClick={() => setEditTarget(u)}
-                      title="Editar"
-                      aria-label={`Editar ${u.name}`}
-                      className="p-1.5 rounded-lg text-conteudo-muted hover:text-conteudo-link hover:bg-action-tint transition-colors cursor-pointer focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-action"
-                    >
-                      <Icon name="edit" size={16} strokeWidth={2} />
-                    </button>
-                    <button
-                      type="button"
-                      onClick={() => setDeleteTarget(u)}
-                      title="Excluir"
-                      aria-label={`Excluir ${u.name}`}
-                      className="p-1.5 rounded-lg text-conteudo-muted hover:text-on-tint-danger hover:bg-tint-danger transition-colors cursor-pointer focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-action"
-                    >
-                      <Icon name="trash" size={16} strokeWidth={2} />
-                    </button>
-                  </div>
+                  {podeGerir(u) ? (
+                    <div className="flex items-center gap-1 shrink-0">
+                      <button
+                        type="button"
+                        onClick={() => setEditTarget(u)}
+                        title="Editar"
+                        aria-label={`Editar ${u.name}`}
+                        className="p-1.5 rounded-lg text-conteudo-muted hover:text-conteudo-link hover:bg-action-tint transition-colors cursor-pointer focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-action"
+                      >
+                        <Icon name="edit" size={16} strokeWidth={2} />
+                      </button>
+                      <button
+                        type="button"
+                        onClick={() => setDeleteTarget(u)}
+                        title="Excluir"
+                        aria-label={`Excluir ${u.name}`}
+                        className="p-1.5 rounded-lg text-conteudo-muted hover:text-on-tint-danger hover:bg-tint-danger transition-colors cursor-pointer focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-action"
+                      >
+                        <Icon name="trash" size={16} strokeWidth={2} />
+                      </button>
+                    </div>
+                  ) : (
+                    // Quem não gere a conta não recebe os controles (F1-A). A
+                    // largura dos dois botões fica reservada para a coluna da
+                    // data não andar entre uma linha e outra.
+                    <div aria-hidden="true" className="w-[60px] shrink-0" />
+                  )}
                 </div>
               ))}
             </div>
