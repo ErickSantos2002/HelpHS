@@ -7,6 +7,29 @@ O changelog do produto (o que o cliente vê) fica em
 
 ---
 
+## 27/10/2026 — F1-A: hierarquia de contas e último administrador
+
+Primeira frente da auditoria de outubro (`docs/auditoria-helphs/`), com as
+decisões D1–D6 aprovadas. Regras em `docs/decisoes-e-regras.md`, seção
+"Contas da equipe: só o administrador gere".
+
+⚠️ **Nada está no ar.** Branch `fix/hierarquia-de-usuarios`, commits locais,
+sem push e sem PR. Sem migration.
+
+- Só admin altera conta de técnico e de admin; técnico segue com cliente e com
+  a própria conta.
+- Nunca zero admins ativos: trava do quadro de admins antes do alvo, provada
+  com 25 combinações concorrentes em Postgres e por mutação.
+- Recusa vai para o log sem dado pessoal; aceito audita antes/depois.
+- IA por usuário só em cliente (422 no resto).
+- Tela de usuários esconde o que o técnico não pode e mostra a recusa do
+  servidor.
+
+⚠️ **Conflito previsto com o PR #96** (draft, anonimização terminal): os dois
+mexem em `update_user_status` e `anonymize_user`. Na integração, manter a
+ordem da trava (quadro de admins, depois alvo) e somar a recusa de situação de
+conta anonimizada do #96.
+
 ## 07/10/2026 — Protocolo de chamado durável, antes de zerar produção
 
 Pré-requisito da sanitização para o piloto. A auditoria só de leitura de
