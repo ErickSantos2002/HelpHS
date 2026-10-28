@@ -29,6 +29,7 @@ from app.core.security import (
     decode_token,
     delete_refresh_token,
     get_current_user,
+    get_current_user_sem_exigir_aceite,
     get_stored_refresh_token,
     hash_password,
     store_refresh_token,
@@ -628,7 +629,8 @@ async def logout(
     request: Request,
     credentials: Annotated[HTTPAuthorizationCredentials | None, Depends(bearer_scheme)],
     db: Annotated[AsyncSession, Depends(get_db)],
-    current_user: Annotated[User, Depends(get_current_user)],
+    # Sem exigir o aceite: é o "Recusar e sair" da tela de re-aceite.
+    current_user: Annotated[User, Depends(get_current_user_sem_exigir_aceite)],
 ) -> None:
     if credentials:
         token = credentials.credentials

@@ -115,6 +115,12 @@ class LGPDConsentStatus(AppBaseModel):
     # Do último aceite não revogado; nulas quando não há nenhum registrado.
     revisao_politica_aceita: str | None
     revisao_termos_aceita: str | None
+    # Bloqueia o backend (428 / 4428) para todos os papéis. Decisão 2.
+    politica_pendente: bool
+    # Só a tela, e só para clientes. NÃO bloqueia o backend nesta fase.
+    termos_pendentes: bool
+    # O booleano antigo (`politica_pendente or termos_pendentes`), mantido só
+    # para o bundle anterior do front durante o deploy. Não decide bloqueio.
     precisa_reaceitar: bool
 
 

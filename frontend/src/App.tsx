@@ -109,6 +109,12 @@ function App() {
 
           {/* ── Protected ────────────────────────────────────── */}
           <Route element={<AuthGuard />}>
+            {/* Novo aceite da Política de Privacidade, quando o backend
+                cobrar (todos os papéis; Termos só cliente; só com
+                LGPD_EXIGE_REACEITE ligado). Vem ANTES do onboarding: o
+                onboarding chama rotas que o backend recusa com 428 sem o
+                aceite, e a ordem é login → aceite → onboarding → sistema. */}
+            <Route element={<ReaceiteGuard />}>
             {/* Onboarding — outside AppLayout, no nav. O OnboardingOnlyRoute
                 é o par do OnboardingGuard: um empurra para cá quem ainda deve
                 preencher, o outro tira daqui quem não tem o que preencher. */}
@@ -117,9 +123,6 @@ function App() {
             </Route>
 
             <Route element={<OnboardingGuard />}>
-              {/* Novo aceite da Política de Privacidade, quando o backend
-                  cobrar (só cliente, só com LGPD_EXIGE_REACEITE ligado). */}
-              <Route element={<ReaceiteGuard />}>
               <Route element={<AppLayout />}>
                 {/* All authenticated roles */}
                 <Route path="/" element={<HomePage />} />
@@ -167,7 +170,7 @@ function App() {
                   <Route path="/audit-logs" element={<AuditLogsPage />} />
                 </Route>
               </Route>
-              </Route>
+            </Route>
             </Route>
           </Route>
         </Routes>

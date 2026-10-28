@@ -4,9 +4,15 @@
  * Request:  attaches Authorization: Bearer <access_token>
  * Response: on 401, tries to refresh the token once, then retries;
  *           if refresh fails, clears session and redirects to /login.
+ *           On 428 with code "aceite_politica_pendente", raises the
+ *           re-accept event instead (see `aceitePolitica.ts`).
  */
 import axios, { AxiosError } from "axios";
 import type { InternalAxiosRequestConfig } from "axios";
+import {
+  avisaAceitePoliticaPendente,
+  ehAceitePoliticaPendente,
+} from "./aceitePolitica";
 
 const BASE_URL = import.meta.env.VITE_API_URL ?? "/api/v1";
 
@@ -77,6 +83,13 @@ api.interceptors.response.use(
     const original = error.config as InternalAxiosRequestConfig & {
       _retry?: boolean;
     };
+
+    // Falta aceitar a Política vigente: a sessão é válida, então nada de
+    // refresh nem de /login — o `ReaceiteGuard` troca a tela pelo aceite.
+    if (ehAceitePoliticaPendente(error)) {
+      avisaAceitePoliticaPendente();
+      return Promise.reject(error);
+    }
 
     const is401 = error.response?.status === 401;
     const isRefreshEndpoint = original.url?.includes("/auth/refresh");

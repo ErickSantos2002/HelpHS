@@ -38,7 +38,13 @@ from starlette.concurrency import run_in_threadpool
 
 from app.core.config import Settings, get_settings
 from app.core.database import get_db
-from app.core.security import authorize, get_current_user, hash_password, verify_password
+from app.core.security import (
+    authorize,
+    get_current_user,
+    get_current_user_sem_exigir_aceite,
+    hash_password,
+    verify_password,
+)
 from app.models.models import (
     Attachment,
     AuditAction,
@@ -57,6 +63,7 @@ from app.models.models import (
     UserRole,
     UserStatus,
 )
+from app.routers.chat import fecha_chats_do_usuario
 from app.schemas.ticket import InterruptorDaIA
 from app.schemas.user import (
     AvatarExibicaoStatus,
@@ -519,7 +526,9 @@ async def list_users(
 
 @router.get("/me", response_model=UserResponse)
 async def get_me(
-    current_user: Annotated[User, Depends(get_current_user)],
+    # Sem exigir o aceite: o front monta a sessão por aqui, e sem ela a tela
+    # de re-aceite nem chega a aparecer.
+    current_user: Annotated[User, Depends(get_current_user_sem_exigir_aceite)],
     settings: Annotated[Settings, Depends(get_settings)],
 ) -> UserResponse:
     response = _to_response(current_user)
@@ -1242,19 +1251,22 @@ async def toggle_user_ai(
 @router.get("/me/lgpd-consent", response_model=LGPDConsentStatus)
 async def get_lgpd_consent(
     db: Annotated[AsyncSession, Depends(get_db)],
-    current_user: Annotated[User, Depends(get_current_user)],
+    # Sem exigir o aceite: é o que a tela de re-aceite consulta.
+    current_user: Annotated[User, Depends(get_current_user_sem_exigir_aceite)],
     settings: Annotated[Settings, Depends(get_settings)],
 ) -> LGPDConsentStatus:
     """A situação do aceite de quem está logado — o que a tela de re-aceite lê."""
-    ultimo = await consentimento.ultimo_aceite_vigente(db, current_user.id)
+    abertos = await consentimento.aceites_abertos(db, current_user.id)
+    situacao = consentimento.avalia_aceite(abertos, role=current_user.role, settings=settings)
+    ultimo = abertos[0] if abertos else None
     return LGPDConsentStatus(
         revisao_politica_vigente=settings.lgpd_revisao_politica,
         revisao_termos_vigente=settings.lgpd_revisao_termos,
         revisao_politica_aceita=ultimo.revisao_politica if ultimo else None,
         revisao_termos_aceita=ultimo.revisao_termos if ultimo else None,
-        precisa_reaceitar=consentimento.precisa_reaceitar(
-            ultimo, role=current_user.role, settings=settings
-        ),
+        politica_pendente=situacao.politica_pendente,
+        termos_pendentes=situacao.termos_pendentes,
+        precisa_reaceitar=situacao.precisa_reaceitar,
     )
 
 
@@ -1263,12 +1275,34 @@ async def update_lgpd_consent(
     body: LGPDConsentUpdate,
     request: Request,
     db: Annotated[AsyncSession, Depends(get_db)],
-    current_user: Annotated[User, Depends(get_current_user)],
+    # Sem exigir o aceite: é por aqui que a pessoa aceita.
+    current_user: Annotated[User, Depends(get_current_user_sem_exigir_aceite)],
+    settings: Annotated[Settings, Depends(get_settings)],
 ) -> UserResponse:
-    result = await db.execute(select(User).where(User.id == current_user.id))
-    user = result.scalar_one_or_none()
+    """Concede ou revoga o próprio aceite.
+
+    A trava na linha do usuário serializa os pedidos da MESMA pessoa: dois
+    "aceitar" simultâneos não gravam duas linhas, e aceitar e revogar ao mesmo
+    tempo não se cruzam. Depois da espera, a consulta dos aceites abertos é um
+    comando novo e já enxerga o que o outro pedido gravou.
+
+    Conceder de novo o que já está aceito (mesma revisão da Política e dos
+    Termos, origem própria, aberto) é um no-op: 200 sem linha nova, sem
+    auditoria e sem mexer em `lgpd_consent_at`.
+    """
+    user = await _trava_usuario(db, current_user.id)
     if not user:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Usuário não encontrado.")
+
+    if body.lgpd_consent:
+        abertos = await consentimento.aceites_abertos(db, user.id)
+        if consentimento.ja_aceitou_as_revisoes_vigentes(abertos, settings=settings):
+            # A resposta sai ANTES do rollback: o rollback expira o objeto, e
+            # ler atributo expirado numa sessão assíncrona estoura. O rollback
+            # só solta a trava — não há nada escrito para desfazer.
+            resposta = _to_response(user)
+            await db.rollback()
+            return resposta
 
     agora = datetime.now(UTC)
     user.lgpd_consent = body.lgpd_consent
@@ -1283,12 +1317,24 @@ async def update_lgpd_consent(
             origem=consentimento.ORIGEM_ALTERACAO_PROPRIA,
             ip=request.client.host if request.client else None,
             agora=agora,
+            settings=settings,
         )
     else:
         await consentimento.revoga_aceites(db, user_id=user.id, agora=agora)
     _audit(db, AuditAction.update, current_user.id, user.id)
     await db.commit()
     await db.refresh(user)
+
+    if not body.lgpd_consent:
+        # Revogar a Política, com o aceite obrigatório ligado, bloqueia a
+        # pessoa NA HORA (Decisão 2). As rotas já respondem 428 no próximo
+        # pedido; o chat aberto não pede nada, só recebe — então é fechado
+        # aqui, depois do commit, com o mesmo 4428 da conexão.
+        situacao = await consentimento.situacao_do_aceite(
+            db, user_id=user.id, role=user.role, settings=settings
+        )
+        if situacao.politica_pendente:
+            await fecha_chats_do_usuario(user.id)
     return _to_response(user)
 
 
