@@ -14,6 +14,38 @@ Trabalho que ainda **não** entrou numa versão do produto. Confira: se um
 item aqui já está em produção, ou ele foi para a versão errada, ou falta
 publicar uma versão nova.
 
+### Aceite obrigatório da Política no backend (28/10/2026)
+
+Decisão 2 (27/10/2026), Cenário B. Regras completas em
+`docs/decisoes-e-regras.md`, seção "LGPD". **Inerte**: só vale com
+`LGPD_EXIGE_REACEITE=true`, que continua `false`. O merge NÃO ativa nada.
+**Sem migration** e sem variável nova.
+
+- **A Política vigente bloqueia o backend.** Quem não tem aceite próprio
+  (`auto_cadastro` ou `alteracao_propria`), aberto, da revisão vigente recebe
+  **428** em toda rota autenticada. Vale para cliente, técnico e admin.
+  `criado_por_terceiro` não satisfaz.
+- **Rotas que passam sem o aceite:** `GET /users/me`,
+  `GET`/`PATCH /users/me/lgpd-consent` e `POST /auth/logout`. Login, MFA e
+  refresh continuam livres.
+- **Os Termos NÃO bloqueiam o backend.** Seguem só na tela, só para clientes,
+  como antes.
+- **Contrato do 428:** `{"detail", "code": "aceite_politica_pendente",
+  "revisao_politica_vigente"}`, em corpo plano. O front lê o `code`.
+- **Chat:** com o aceite pendente, a conexão é aceita e fechada com **4428**.
+  O aceite é conferido de novo a cada mensagem. Revogar fecha os chats abertos
+  da pessoa neste processo.
+- **`GET /users/me/lgpd-consent`** ganha `politica_pendente` e
+  `termos_pendentes`. O `precisa_reaceitar` fica, para compatibilidade.
+- **`PATCH /users/me/lgpd-consent` idempotente:** repetir o mesmo aceite
+  devolve 200 sem linha nova nem auditoria. Pedidos simultâneos não duplicam.
+- **Front:**
+  - o 428 e o 4428 levam à tela de aceite, de qualquer página;
+  - falha na consulta não libera mais o sistema;
+  - a tela de aceite vem antes do onboarding.
+- **Dívida registrada, não mexida:** 4001 e 4004 continuam fechando antes do
+  handshake (o navegador vê 1006 e reconecta a cada 3 s).
+
 ### Anexos do chamado (13/10/2026)
 
 Regras completas em `docs/decisoes-e-regras.md`, seção "Anexos do chamado".
