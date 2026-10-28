@@ -421,11 +421,23 @@ async def test_list_users_as_client_forbidden(patch_redis):
 # ── Helper: two-step DB (user lookup + scalar count) ─────────
 
 
+def _e_trava_do_quadro_de_admins(stmt) -> bool:
+    """A trava dos admins ativos (F1-A) é `SELECT users.id ... FOR UPDATE`.
+
+    Ela não lê nada que a rota use: o dublê sequencial não gasta resposta com
+    ela, senão a próxima consulta receberia o valor errado.
+    """
+    colunas = [c.key for c in getattr(stmt, "selected_columns", [])]
+    return getattr(stmt, "_for_update_arg", None) is not None and colunas == ["id"]
+
+
 def _db_two_step(first_user, count_value: int = 0):
     """First execute returns a user; second returns a scalar count."""
     calls = iter([first_user, count_value])
 
     async def _execute(*args, **kwargs):
+        if args and _e_trava_do_quadro_de_admins(args[0]):
+            return MagicMock()
         val = next(calls, None)
         result = MagicMock()
         if isinstance(val, int):
@@ -1028,6 +1040,8 @@ def _db_contagens(user, *contagens, erro_no_delete=None):
 
     async def _execute(*args, **kwargs):
         result = MagicMock()
+        if args and _e_trava_do_quadro_de_admins(args[0]):
+            return result
         if not hasattr(_execute, "_deu_usuario"):
             _execute._deu_usuario = True
             result.scalar_one_or_none.return_value = user

@@ -830,8 +830,11 @@ async def test_marcar_anonimizada_pelo_patch_de_status_tambem_encerra(fabrica, c
     assert await _estado(fabrica, eu) == (False, [])
     (registro,) = await _auditoria(fabrica, eu, AuditAction.status_change)
     assert registro.user_id == admin.id
-    assert registro.old_data == {"avatar_visivel_a_terceiros": True}
-    assert registro.new_data == {"avatar_visivel_a_terceiros": False}
+    # Um registro só, com as duas mudanças: a de situação (F1-A) e o
+    # encerramento da autorização da foto. Igualdade exata — chave a mais ou a
+    # menos reprova.
+    assert registro.old_data == {"status": "active", "avatar_visivel_a_terceiros": True}
+    assert registro.new_data == {"status": "anonymized", "avatar_visivel_a_terceiros": False}
 
 
 @pytest.mark.asyncio
@@ -848,7 +851,10 @@ async def test_inativar_pelo_patch_de_status_guarda_a_escolha(fabrica, criados):
     assert r.status_code == 200, r.text
     assert await _estado(fabrica, eu) == (True, [])
     (registro,) = await _auditoria(fabrica, eu, AuditAction.status_change)
-    assert registro.old_data is None and registro.new_data is None
+    # Desde a F1-A o registro leva a situação antes e depois — e só ela: a
+    # igualdade exata é o que prova que nenhum dado da foto entrou.
+    assert registro.old_data == {"status": "active"}
+    assert registro.new_data == {"status": "inactive"}
 
 
 @pytest.mark.parametrize("caminho", ["anonymize", "patch_status"])

@@ -770,6 +770,89 @@ alternativo aberto.
 > Se um dia isso virar problema de organização interna, o caminho do meio é a
 > auto-atribuição: quem age num chamado sem responsável vira o responsável.
 
+### Contas da equipe: só o administrador gere (F1-A, 27/10/2026)
+
+> **Conta de técnico e de administrador só é alterada por administrador.**
+> Técnico continua gerindo conta de **cliente** e editando a **própria** conta.
+> E o sistema **nunca** fica sem administrador ativo.
+
+Até aqui um técnico podia editar, desativar, excluir e anonimizar um
+administrador — a decisão antiga, registrada num comentário de
+`routers/users.py`, era deixar a trava só na troca de papel. A auditoria de
+outubro mostrou o que isso permite: um técnico tirava todos os administradores
+do sistema, e ninguém mais conseguiria promover ninguém.
+
+**O guarda de hierarquia** (`_guarda_de_hierarquia`) roda em editar, mudar
+situação, excluir e anonimizar. Passa quando quem age é admin, quando o alvo é
+a própria conta ou quando o alvo é cliente; o resto é **403** com
+"Apenas administradores podem alterar contas da equipe.". Promover continua
+barrado pelo guarda de papel que já existia.
+
+**O guarda do último administrador** (`_guarda_do_ultimo_admin`) roda quando o
+alvo é admin ativo e a operação o tira do quadro: desativar, excluir,
+anonimizar ou rebaixar. Se não sobra outro admin ativo, **409** com "O sistema
+precisa de pelo menos um administrador ativo. Promova ou reative outro
+administrador antes.". Vale também para o próprio admin: ele pode se rebaixar,
+mas só se houver outro admin ativo (D2). Excluir um admin **inativo** passa —
+ele já não contava.
+
+#### Por que a contagem sozinha não basta, e o que trava
+
+Contar "outros admins ativos" e decidir é verificar-e-agir: duas requisições
+simultâneas — dois admins desativando um ao outro, ou um admin se rebaixando
+enquanto outro é excluído — leem **as duas** "sobra 1", passam, e o sistema
+termina com zero. Travar só a linha do alvo não fecha isso, porque os dois
+pedidos travam linhas **diferentes**.
+
+O que fecha: antes de travar o alvo, toda operação que pode tirar um admin do
+quadro faz `SELECT id FROM users WHERE role = 'admin' AND status = 'active'
+ORDER BY id FOR UPDATE` (`_trava_para_alterar_conta`). Com isso:
+
+- quem chega em segundo **espera** o commit do primeiro na trava do quadro, e a
+  contagem que vem depois já enxerga o estado gravado (READ COMMITTED: cada
+  comando lê um retrato novo, e o Postgres reavalia o `WHERE` da linha travada
+  depois da espera);
+- a ordem é sempre a mesma — quadro de admins por id, depois o alvo —, então
+  não há deadlock entre essas operações;
+- o custo é serializar operações sobre contas **entre si**, num quadro de
+  poucos admins. Operação sobre cliente também passa pela trava (o mesmo
+  caminho para todos é mais simples de provar), e espera só se houver outra
+  operação de conta em curso.
+
+**Prova:** `backend/tests/test_hierarquia_de_usuarios_postgres.py`, em Postgres
+de verdade, roda as 25 combinações de {desativar, excluir, anonimizar,
+rebaixar outro, rebaixar a si} contra um quadro de **dois** admins, com a
+primeira transação segurando o commit até a segunda chegar ao dela. Toda
+combinação termina com exatamente **um** admin ativo, pelo menos uma operação
+aceita e nenhum 5xx; um anel de três admins desativando-se em roda termina com
+um. **Mutação:** sem o `FOR UPDATE` do quadro, 17 dos 26 casos de corrida
+ficam vermelhos — a trava do alvo sozinha não segura.
+
+#### Recusa vai para o log, não para o banco (D3)
+
+Recusa de hierarquia e de último admin escreve **uma linha de aviso** no log da
+aplicação com ação, motivo, id e papel de quem pediu e do alvo — **sem**
+nome, e-mail, telefone ou corpo do pedido. Não grava nada em `audit_logs`: a
+transação é desfeita, e uma tabela de auditoria que cresce a cada clique
+recusado vira vetor de enchimento. O que é **aceito** continua auditado, agora
+com antes/depois: `status`, `role` e `ai_enabled` mudados, e os nomes dos
+campos editados (nunca os valores pessoais).
+
+#### Atendimento por IA só em cliente (D4)
+
+`PATCH /users/{id}/ai` devolve **422** quando o alvo não é cliente, sem gravar
+nada. O campo nunca teve efeito em conta da equipe; aceitar era só deixar um
+dado sem sentido no cadastro.
+
+#### Na tela
+
+A lista de usuários não mostra Editar nem Excluir, e mostra a situação só como
+texto (pílula desabilitada), nas linhas de admin e técnico quando quem vê é
+técnico — exceto a própria linha. O backend é quem barra; a tela só não oferece
+o que vai voltar 403. Quando a recusa chega mesmo assim (lista desatualizada,
+último admin), o motivo do servidor aparece: em aviso na troca de situação, no
+diálogo na exclusão.
+
 ### A recusa não diz que o recurso existe
 
 Quando um **cliente** pede um chamado, um equipamento ou um anexo que não é
@@ -2018,12 +2101,16 @@ Não é revogação do titular: **nenhum `AvatarVisibilityEvent` é gravado** �
 aquele registro é a manifestação da pessoa, e quem anonimiza é outra. O efeito
 fica no AuditLog que a operação já grava, com o ator verdadeiro:
 `old_data`/`new_data` com `avatar_visivel_a_terceiros` (no `anonymize`, junto
-do `anonymized_at`; no `status_change`, só quando o destino é `anonymized`).
+do `anonymized_at`; no `status_change`, só quando o destino é `anonymized`,
+junto do `status` antes e depois que esse registro leva desde a F1-A — um
+registro só com as duas mudanças).
 Os eventos antigos não são apagados nem reescritos: continuam ligados ao
 `user_id` anonimizado, com data, versão, origem e IP — anonimizar a conta
 **não** anonimiza esses registros.
 
-Os dois caminhos passaram a travar a linha (`_trava_usuario`): sem a trava,
+Os dois caminhos passaram a travar a linha (`_trava_usuario`, que desde a F1-A
+é o último passo de `_trava_para_alterar_conta`, depois da trava do quadro de
+admins ativos): sem a trava,
 um `PUT` do titular que comitasse entre a leitura e o UPDATE deixaria `true`
 gravado (o ORM só manda a coluna que viu mudar). Com ela, ou o `PUT` espera e
 encontra a conta anonimizada (e recusa), ou a anonimização espera e relê.
