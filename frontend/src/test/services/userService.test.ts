@@ -11,6 +11,8 @@ import {
   deleteUser,
   removeAvatar,
   removeUserAvatar,
+  getExibicaoDaFoto,
+  setExibicaoDaFoto,
   updateLGPDConsent,
   getTechnicians,
   USER_STATUSES,
@@ -22,6 +24,7 @@ vi.mock("../../services/api", () => ({
     get: vi.fn(),
     post: vi.fn(),
     patch: vi.fn(),
+    put: vi.fn(),
     delete: vi.fn(),
   },
 }));
@@ -30,6 +33,7 @@ const mockGet = vi.mocked(api.get);
 const mockPost = vi.mocked(api.post);
 const mockPatch = vi.mocked(api.patch);
 const mockDelete = vi.mocked(api.delete);
+const mockPut = vi.mocked(api.put);
 
 const user = {
   id: "u1",
@@ -251,5 +255,45 @@ describe("getTechnicians", () => {
 
     expect(mockGet).toHaveBeenCalledWith("/users/technicians");
     expect(result).toHaveLength(1);
+  });
+});
+
+describe("foto para outras pessoas", () => {
+  const ESTADO = {
+    autorizada: true,
+    disponivel: true,
+    aviso: { versao: "TESTE-AVISO-01", rotulo: "TESTE", explicacao: ["TESTE"] },
+  };
+
+  it("lê a própria escolha em GET /users/me/avatar/exibicao", async () => {
+    mockGet.mockResolvedValue({ data: ESTADO });
+
+    await expect(getExibicaoDaFoto()).resolves.toEqual(ESTADO);
+    expect(mockGet).toHaveBeenCalledWith("/users/me/avatar/exibicao");
+  });
+
+  it("o PUT leva só a escolha e a versão mostrada — nada que escolha conta", async () => {
+    mockPut.mockResolvedValue({ data: ESTADO });
+
+    await expect(setExibicaoDaFoto(true, "TESTE-AVISO-01")).resolves.toEqual(ESTADO);
+
+    expect(mockPut).toHaveBeenCalledTimes(1);
+    const [url, corpo] = mockPut.mock.calls[0];
+    expect(url).toBe("/users/me/avatar/exibicao");
+    expect(corpo).toEqual({ autorizada: true, versao_aviso: "TESTE-AVISO-01" });
+  });
+
+  it("revogar sem texto manda versão nula", async () => {
+    mockPut.mockResolvedValue({ data: { ...ESTADO, autorizada: false } });
+
+    await setExibicaoDaFoto(false, null);
+
+    expect(mockPut.mock.calls[0][1]).toEqual({ autorizada: false, versao_aviso: null });
+  });
+
+  it("deixa o erro subir: a tela não pode presumir sucesso", async () => {
+    mockPut.mockRejectedValue(new Error("409"));
+
+    await expect(setExibicaoDaFoto(true, "TESTE-AVISO-01")).rejects.toThrow("409");
   });
 });

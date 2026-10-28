@@ -214,6 +214,18 @@ class TicketRequesterBrief(AppBaseModel):
     email: str
     phone: str | None = None
     company_name: str | None = None
+    # Fase 3B: o LINK da foto, para a equipe reconhecer quem atende. Entrou na
+    # lista por decisão explícita, e com a mesma régua: serve para atender.
+    #
+    # ⚠️ `validation_alias` com um nome que o `User` NÃO tem é a trava. O
+    # detalhe monta este resumo campo a campo, mas quem um dia fizer
+    # `model_validate(user)` leria atributo por atributo; com o alias padrão,
+    # copiaria `User.avatar_url` — a CHAVE crua do disco, ou a referência
+    # indevida de antes de 09/10 — direto para a resposta. Assim a leitura
+    # automática sempre dá `None`. Efeito colateral do alias: passar
+    # `avatar_url=` no construtor é ignorado em silêncio; o link assinado entra
+    # por `model_copy(update=...)`, como em `get_ticket`.
+    avatar_url: str | None = Field(default=None, validation_alias="avatar_url_assinado")
 
 
 class TicketResponse(AppBaseModel):
@@ -324,6 +336,10 @@ class TicketDetailResponse(TicketResponse):
     """
 
     requester: TicketRequesterBrief | None = None
+    # Fase 3B: o link da foto do responsável. Mora aqui pelo mesmo motivo do
+    # `requester`: as mutações devolvem `TicketResponse`, e a tela guarda a foto
+    # à parte para ela não sumir a cada mudança de status ou prioridade.
+    assignee_avatar_url: str | None = None
 
 
 class TicketListResponse(AppBaseModel):

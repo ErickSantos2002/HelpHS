@@ -20,6 +20,7 @@ import {
   buildWsUrl,
   getChatMessages,
   improveMessage,
+  normalizaMensagem,
   suggestReply,
   sendMessageWithLibraryFile,
   summarizeConversation,
@@ -182,7 +183,13 @@ function ChatBubble({ msg, isOwn }: { msg: ChatMessage; isOwn: boolean }) {
 
   return (
     <div className="flex gap-2 mb-3">
-      <Avatar name={msg.sender_name} size="sm" />
+      {/* A foto é a ATUAL da pessoa, e só vem quando o backend deixou: sem ela,
+          ou se o link falhar, o próprio Avatar cai nas iniciais. */}
+      <Avatar
+        name={msg.sender_name}
+        src={msg.sender_avatar_url ?? undefined}
+        size="sm"
+      />
       <div className="max-w-[75%]">
         <p className="text-xs mb-0.5">
           <span className="text-conteudo font-medium">{msg.sender_name}</span>
@@ -471,10 +478,14 @@ export function ChatPanel({
           onStatusChange?.(payload.data.status);
         }
         if (payload.type === "message" && payload.data) {
+          // O frame passa pela MESMA normalização do histórico: sem ela, a foto
+          // de uma mensagem nova quebraria com a API em outro domínio e só
+          // apareceria depois de recarregar.
+          const recebida = normalizaMensagem(payload.data);
           setMessages((prev) => {
             // Deduplicate by id
-            if (prev.some((m) => m.id === payload.data!.id)) return prev;
-            return [...prev, payload.data!];
+            if (prev.some((m) => m.id === recebida.id)) return prev;
+            return [...prev, recebida];
           });
         }
       } catch {

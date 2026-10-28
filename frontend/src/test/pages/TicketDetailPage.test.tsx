@@ -2231,3 +2231,159 @@ describe("TicketDetailPage — visualizador e ZIP dos anexos", () => {
     expect(screen.getByRole("dialog", { name: "foto.png" })).toBeInTheDocument();
   });
 });
+
+// ── Fotos do responsável e do solicitante (Fase 3B) ───────────
+
+describe("TicketDetailPage — fotos dos participantes", () => {
+  beforeEach(() => {
+    papelDoUsuario = "admin";
+    vi.mocked(ticketService.getTicket).mockReset();
+    vi.mocked(ticketService.assignTicket).mockReset();
+  });
+
+  const comFotos = (extra: Record<string, unknown> = {}) =>
+    ({
+      ...TICKET,
+      assignee_id: "tec1",
+      assignee_name: "Bruno Lima",
+      assignee_avatar_url: "https://cdn.x/bruno.png",
+      requester: { ...SOLICITANTE, avatar_url: "https://cdn.x/pedro.png" },
+      ...extra,
+    }) as unknown as typeof TICKET;
+
+  it("o responsável aparece com a foto, ao lado do nome", async () => {
+    await montar([], comFotos());
+    expect(screen.getByRole("img", { name: "Bruno Lima" })).toHaveAttribute(
+      "src",
+      "https://cdn.x/bruno.png",
+    );
+  });
+
+  it("o solicitante aparece com a foto no bloco dele", async () => {
+    await montar([], comFotos());
+    // A linha "Nome" do bloco, pelo rótulo — o mesmo âncora do `valorDoDado`.
+    const rotulo = screen
+      .getAllByText("Nome", { selector: "p" })
+      .find((el) => el.className.includes("uppercase")) as HTMLElement;
+    const linha = rotulo.parentElement as HTMLElement;
+    expect(within(linha).getByRole("img", { name: "Pedro Henrique" })).toHaveAttribute(
+      "src",
+      "https://cdn.x/pedro.png",
+    );
+  });
+
+  it("sem foto, responsável e solicitante ficam nas iniciais", async () => {
+    await montar(
+      [],
+      comFotos({
+        assignee_avatar_url: null,
+        requester: { ...SOLICITANTE, avatar_url: null },
+      }),
+    );
+    expect(screen.queryAllByRole("img", { name: /Bruno Lima|Pedro Henrique/ })).toHaveLength(0);
+    expect(screen.getByText("BL")).toBeInTheDocument();
+    expect(screen.getByText("PH")).toBeInTheDocument();
+  });
+
+  it("chamado sem responsável continua dizendo 'Não atribuído'", async () => {
+    await montar([], comFotos({ assignee_id: null, assignee_name: null, assignee_avatar_url: null }));
+    expect(screen.getByText("Não atribuído")).toBeInTheDocument();
+    expect(screen.queryByRole("img", { name: "Bruno Lima" })).not.toBeInTheDocument();
+  });
+
+  it("o cliente vê a foto do técnico e a própria, sem ganhar a ação de editar", async () => {
+    papelDoUsuario = "client";
+    await montar([], comFotos());
+    expect(screen.getByRole("img", { name: "Bruno Lima" })).toBeInTheDocument();
+    expect(screen.getByRole("img", { name: "Pedro Henrique" })).toBeInTheDocument();
+    expect(screen.queryByRole("button", { name: "Editar" })).not.toBeInTheDocument();
+  });
+
+  it("as fotos SOBREVIVEM a uma mutação que devolve o chamado sem os campos do detalhe", async () => {
+    // Mesma razão do bloco do solicitante: a mutação devolve `TicketResponse`,
+    // sem `assignee_avatar_url` nem `requester`, e a tela faz `setTicket` com ela.
+    vi.mocked(toast.success).mockClear();
+    vi.mocked(ticketService.toggleTicketAi).mockResolvedValue({
+      ...TICKET,
+      assignee_id: "tec1",
+      assignee_name: "Bruno Lima",
+      ai_enabled: false,
+    } as never);
+    await montar([], comFotos());
+
+    fireEvent.click(screen.getByRole("button", { name: /IA neste chamado/ }));
+    await waitFor(() => expect(toast.success).toHaveBeenCalled());
+
+    expect(screen.getByRole("img", { name: "Bruno Lima" })).toHaveAttribute(
+      "src",
+      "https://cdn.x/bruno.png",
+    );
+    expect(screen.getByRole("img", { name: "Pedro Henrique" })).toBeInTheDocument();
+    // O responsável é o mesmo: nada de consulta extra.
+    expect(ticketService.getTicket).toHaveBeenCalledTimes(1);
+  });
+
+  it("depois de assumir o chamado, a foto antiga não fica ao lado do nome novo", async () => {
+    papelDoUsuario = "technician";
+    // A consulta da foto nova fica PENDENTE até o caso decidir: é no intervalo
+    // entre a mutação e a resposta que a foto antiga poderia aparecer.
+    let entregaDetalheNovo: (v: unknown) => void = () => {};
+    const detalheNovo = new Promise((ok) => {
+      entregaDetalheNovo = ok;
+    });
+    vi.mocked(ticketService.getTicket)
+      .mockResolvedValueOnce(comFotos() as never)
+      .mockReturnValueOnce(detalheNovo as never);
+    vi.mocked(ticketService.getTicketHistory).mockResolvedValue({ items: [] } as never);
+    vi.mocked(ticketService.listTicketNotes).mockResolvedValue([] as never);
+    vi.mocked(attachmentService.getAttachments).mockResolvedValue({ items: [] } as never);
+    vi.mocked(surveyService.getTicketSurvey).mockResolvedValue(null as never);
+    vi.mocked(tagService.getTags).mockResolvedValue([] as never);
+    vi.mocked(ticketService.assignTicket).mockResolvedValue({
+      ...TICKET,
+      assignee_id: "u1",
+      assignee_name: "Admin",
+    } as never);
+
+    render(
+      <MemoryRouter initialEntries={["/tickets/t1"]}>
+        <Routes>
+          <Route path="/tickets/:id" element={<TicketDetailPage />} />
+        </Routes>
+      </MemoryRouter>,
+    );
+    await waitFor(() =>
+      expect(screen.getByRole("img", { name: "Bruno Lima" })).toBeInTheDocument(),
+    );
+
+    fireEvent.click(screen.getByRole("button", { name: "Reatribuir" }));
+    await act(async () => {
+      fireEvent.click(screen.getByRole("button", { name: "Assumir ticket" }));
+    });
+
+    // Nome novo, consulta ainda no ar: iniciais, e nunca a foto do Bruno.
+    await waitFor(() => expect(screen.getByTitle("Admin")).toBeInTheDocument());
+    expect(screen.queryByRole("img", { name: "Admin" })).not.toBeInTheDocument();
+    expect(screen.queryByRole("img", { name: "Bruno Lima" })).not.toBeInTheDocument();
+
+    await act(async () => {
+      entregaDetalheNovo(
+        comFotos({
+          assignee_id: "u1",
+          assignee_name: "Admin",
+          assignee_avatar_url: "https://cdn.x/eu.png",
+        }),
+      );
+    });
+
+    await waitFor(() =>
+      expect(screen.getByRole("img", { name: "Admin" })).toHaveAttribute(
+        "src",
+        "https://cdn.x/eu.png",
+      ),
+    );
+    expect(screen.queryByRole("img", { name: "Bruno Lima" })).not.toBeInTheDocument();
+    // Uma consulta a mais, e só uma: a da troca de responsável.
+    expect(ticketService.getTicket).toHaveBeenCalledTimes(2);
+  });
+});

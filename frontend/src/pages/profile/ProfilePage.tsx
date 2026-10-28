@@ -10,16 +10,21 @@ import {
   Modal,
   ModalFooter,
   Spinner,
+  Switch,
 } from "../../components/ui";
 import {
   changePassword,
   completeOnboarding,
+  getExibicaoDaFoto,
   getMe,
   removeAvatar,
+  setExibicaoDaFoto,
   updateMe,
   uploadAvatar,
+  type ExibicaoDaFoto,
   type UserSummary,
 } from "../../services/userService";
+import { avisaQueAExibicaoMudou } from "../../lib/exibicaoDaFoto";
 import {
   activateMfaApi,
   disableMfaApi,
@@ -436,6 +441,141 @@ function MfaSection() {
         )}
       </div>
     </SectionCard>
+  );
+}
+
+// ── A foto para outras pessoas (Fase 3B) ──────────────────────
+
+const ANCORA_DA_FOTO = "foto-para-outras-pessoas";
+
+/**
+ * A escolha de mostrar a foto de perfil aos outros participantes dos
+ * atendimentos. Separada do upload: muda sem enviar foto nenhuma, e enviar ou
+ * remover a foto não muda a escolha.
+ *
+ * **O estado na tela é sempre o do servidor.** O interruptor só se move quando
+ * a resposta confirma; enquanto salva, ele fica travado (sem clique duplo); e,
+ * se o pedido falha, a tela relê o estado verdadeiro em vez de presumir que
+ * nada mudou — uma falha de rede pode ter acontecido depois do commit.
+ *
+ * O texto (rótulo e explicação) vem do servidor junto da versão, e a versão
+ * volta no pedido: é isso que deixa o registro dizer qual texto a pessoa leu.
+ */
+function ExibicaoDaFotoSection() {
+  const [estado, setEstado] = useState<ExibicaoDaFoto | null>(null);
+  const [falhouAoCarregar, setFalhouAoCarregar] = useState(false);
+  const [salvando, setSalvando] = useState(false);
+  const [erro, setErro] = useState<string | null>(null);
+  // Só depois de uma resposta de sucesso: é o servidor que confirma.
+  const [salvo, setSalvo] = useState(false);
+  const ancoraRef = useRef<HTMLDivElement>(null);
+
+  useEffect(() => {
+    getExibicaoDaFoto()
+      .then(setEstado)
+      .catch(() => setFalhouAoCarregar(true));
+  }, []);
+
+  // O aviso de lançamento aponta para cá. Rolagem só depois de a seção ter
+  // conteúdo, senão ela pararia num cartão que ainda vai crescer.
+  useEffect(() => {
+    if (estado && window.location.hash === `#${ANCORA_DA_FOTO}`) {
+      ancoraRef.current?.scrollIntoView?.({ block: "start" });
+    }
+  }, [estado]);
+
+  async function alterar(autorizada: boolean) {
+    if (!estado || salvando) return;
+    setSalvando(true);
+    setErro(null);
+    setSalvo(false);
+    try {
+      const confirmado = await setExibicaoDaFoto(autorizada, estado.aviso?.versao ?? null);
+      setEstado(confirmado);
+      setSalvo(true);
+      avisaQueAExibicaoMudou(confirmado);
+    } catch (e) {
+      setErro(getApiError(e, "Não foi possível salvar a sua escolha. Tente de novo."));
+      try {
+        setEstado(await getExibicaoDaFoto());
+      } catch {
+        // Fica o último estado confirmado pelo servidor.
+      }
+    } finally {
+      setSalvando(false);
+    }
+  }
+
+  return (
+    <div id={ANCORA_DA_FOTO} ref={ancoraRef} className="scroll-mt-4">
+      <SectionCard title="Foto para outras pessoas">
+        {falhouAoCarregar ? (
+          <p className="text-sm text-conteudo-muted">
+            Não foi possível carregar esta opção agora. A sua foto continua aparecendo só
+            para você.
+          </p>
+        ) : !estado ? (
+          <div className="flex justify-center py-2">
+            <Spinner size="sm" />
+          </div>
+        ) : (
+          <div className="space-y-4" aria-busy={salvando}>
+            {erro && <Alert variant="danger">{erro}</Alert>}
+
+            <Switch
+              checked={estado.autorizada}
+              onChange={alterar}
+              // Sem texto vigente ninguém autoriza; quem já autorizou ainda
+              // pode desligar.
+              disabled={!estado.disponivel && !estado.autorizada}
+              // Enquanto salva: `aria-disabled`, e não `disabled`, porque
+              // desabilitar tira o foco de quem está no teclado. O segundo
+              // clique é barrado em `alterar`, e como o `checked` é o do
+              // servidor, o interruptor não se move sem resposta.
+              aria-disabled={salvando}
+              label={
+                estado.aviso?.rotulo ??
+                "Permitir que minha foto apareça para outros participantes dos atendimentos."
+              }
+            />
+
+            {/* A situação em texto: o estado nunca fica só na posição do
+                interruptor. Sem região viva — já está na tela ao abrir, e o
+                que se anuncia é a MUDANÇA, no aviso de sucesso abaixo (E12). */}
+            <p className="text-sm text-conteudo">
+              {salvando
+                ? "Salvando…"
+                : estado.autorizada
+                  ? "Permitido. A sua foto pode aparecer para os participantes descritos abaixo."
+                  : "Não permitido. Os outros participantes veem as suas iniciais."}
+            </p>
+            {salvo && !salvando && (
+              <Alert variant="success">
+                {estado.autorizada
+                  ? "Escolha salva: a sua foto pode aparecer para outras pessoas."
+                  : "Escolha salva: a sua foto não aparece para outras pessoas."}
+              </Alert>
+            )}
+
+            {!estado.disponivel && (
+              <p className="text-sm text-conteudo-muted">
+                {estado.autorizada
+                  ? "Esta opção está temporariamente indisponível para novas permissões. Você ainda pode desligá-la."
+                  : "Esta opção ainda não está disponível. Por enquanto, a sua foto aparece só para você."}
+              </p>
+            )}
+
+            {estado.aviso && (
+              <div className="space-y-2 text-sm text-conteudo-muted">
+                {estado.aviso.explicacao.map((paragrafo) => (
+                  <p key={paragrafo}>{paragrafo}</p>
+                ))}
+              </div>
+            )}
+          </div>
+        )}
+      </SectionCard>
+    </div>
   );
 }
 
@@ -888,6 +1028,9 @@ export default function ProfilePage() {
           </Button>
         </ModalFooter>
       </Modal>
+
+      {/* Logo abaixo da foto, de que ela trata — e separada do upload. */}
+      <ExibicaoDaFotoSection />
 
       {/* Personal info */}
       <SectionCard

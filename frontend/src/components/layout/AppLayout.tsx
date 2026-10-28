@@ -1,6 +1,7 @@
 import { useState } from "react";
 import { Outlet } from "react-router-dom";
 import { AppToaster } from "../ui/AppToaster";
+import { AvisoDaFotoParaTerceiros } from "./AvisoDaFotoParaTerceiros";
 import { Sidebar } from "./Sidebar";
 import { Topbar } from "./Topbar";
 
@@ -35,6 +36,7 @@ export function AppLayout() {
             esticava a rolagem do DOCUMENTO — sidebar e topbar rolavam junto.
             Quem rola, contém. Ver `e2e/rolagem-da-casca.spec.ts`. */}
         <main id="main-content" className="relative flex-1 overflow-y-auto p-4 md:p-6">
+          <AvisoDaFotoParaTerceiros />
           <Outlet />
         </main>
       </div>

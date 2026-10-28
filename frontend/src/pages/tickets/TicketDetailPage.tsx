@@ -22,6 +22,7 @@ import { cn, plural } from "../../lib/utils";
 import { Link, useParams } from "react-router-dom";
 import {
   Alert,
+  Avatar,
   Badge,
   Button,
   Icon,
@@ -554,6 +555,7 @@ function DadoDoSolicitante({
   valor,
   vazio,
   acao,
+  antes,
 }: {
   label: string;
   valor: string | null | undefined;
@@ -561,6 +563,8 @@ function DadoDoSolicitante({
    *  "sem telefone" é informação para quem vai atender. */
   vazio: string;
   acao?: React.ReactNode;
+  /** O que vem antes do valor, na mesma linha — hoje, só a foto do nome. */
+  antes?: React.ReactNode;
 }) {
   const tem = Boolean(valor && valor.trim());
   return (
@@ -569,13 +573,16 @@ function DadoDoSolicitante({
         {label}
       </p>
       <div className="flex items-center justify-between gap-2">
-        <span
-          className={cn(
-            "text-sm break-words min-w-0",
-            tem ? "font-medium text-conteudo" : "italic text-conteudo-muted",
-          )}
-        >
-          {tem ? valor : vazio}
+        <span className="flex min-w-0 items-center gap-2">
+          {antes}
+          <span
+            className={cn(
+              "text-sm break-words min-w-0",
+              tem ? "font-medium text-conteudo" : "italic text-conteudo-muted",
+            )}
+          >
+            {tem ? valor : vazio}
+          </span>
         </span>
         {acao}
       </div>
@@ -1016,6 +1023,16 @@ export default function TicketDetailPage() {
    * duplicação de estado: é dizer que o dado tem outro ciclo de vida.
    */
   const [solicitante, setSolicitante] = useState<TicketRequester | null>(null);
+  /**
+   * A foto do responsável, pelo mesmo motivo do `solicitante`: só o detalhe
+   * a traz, e as mutações a apagariam. Guardada COM o id de quem ela é: depois
+   * de uma reatribuição, a foto do técnico anterior não pode aparecer ao lado
+   * do nome do novo — por isso a tela compara o id antes de usar o link.
+   */
+  const [fotoDoResponsavel, setFotoDoResponsavel] = useState<{
+    id: string;
+    url: string | null;
+  } | null>(null);
   // Edição do telefone do solicitante, a partir do próprio chamado.
   const [telefoneModal, setTelefoneModal] = useState(false);
   const [telefoneValor, setTelefoneValor] = useState("");
@@ -1129,6 +1146,9 @@ export default function TicketDetailPage() {
       ]);
       setTicket(t);
       setSolicitante(t.requester ?? null);
+      setFotoDoResponsavel(
+        t.assignee_id ? { id: t.assignee_id, url: t.assignee_avatar_url ?? null } : null,
+      );
       setObsValue(t.client_observation ?? "");
       setHistory(h.items);
       setAttachments(a.items);
@@ -1150,6 +1170,31 @@ export default function TicketDetailPage() {
   useEffect(() => {
     load();
   }, [load]);
+
+  // Reatribuído nesta tela: a mutação devolve o novo `assignee_id`, mas não a
+  // foto dele. Uma consulta ao detalhe traz o link atual — uma vez por troca de
+  // responsável, e nunca em laço: o id fica registrado mesmo se a consulta
+  // falhar, e aí a tela fica nas iniciais.
+  const responsavelAtual = ticket?.assignee_id ?? null;
+  useEffect(() => {
+    if (!id || !responsavelAtual) return;
+    if (fotoDoResponsavel?.id === responsavelAtual) return;
+    let ativo = true;
+    getTicket(id)
+      .then((t) => {
+        if (!ativo) return;
+        setFotoDoResponsavel({
+          id: responsavelAtual,
+          url: t.assignee_id === responsavelAtual ? (t.assignee_avatar_url ?? null) : null,
+        });
+      })
+      .catch(() => {
+        if (ativo) setFotoDoResponsavel({ id: responsavelAtual, url: null });
+      });
+    return () => {
+      ativo = false;
+    };
+  }, [id, responsavelAtual, fotoDoResponsavel?.id]);
 
   useEffect(() => {
     if (user?.role === "admin")
@@ -2177,6 +2222,14 @@ export default function TicketDetailPage() {
                 label="Nome"
                 valor={solicitante.name}
                 vazio="Não informado"
+                antes={
+                  <Avatar
+                    name={solicitante.name}
+                    src={solicitante.avatar_url ?? undefined}
+                    size="xs"
+                    className="shrink-0"
+                  />
+                }
               />
               <DadoDoSolicitante
                 label="Empresa"
@@ -2222,9 +2275,19 @@ export default function TicketDetailPage() {
             <PropRow icon=<Icon name="user" size={16} strokeWidth={2} /> label="Responsável">
               {assignedTech ? (
                 <span className="flex items-center gap-2">
-                  <span className="flex h-5 w-5 items-center justify-center rounded-full bg-primary/20 text-[10px] font-bold text-primary">
-                    {assignedTech.charAt(0).toUpperCase()}
-                  </span>
+                  {/* O primitivo da casa, com foto quando há e iniciais quando
+                      não há ou o link falha. A foto só vale se for DESTE
+                      responsável — ver `fotoDoResponsavel`. */}
+                  <Avatar
+                    name={assignedTech}
+                    src={
+                      fotoDoResponsavel?.id === ticket.assignee_id
+                        ? (fotoDoResponsavel.url ?? undefined)
+                        : undefined
+                    }
+                    size="xs"
+                    className="shrink-0"
+                  />
                   {assignedTech}
                 </span>
               ) : (

@@ -1,4 +1,5 @@
 import { api } from "./api";
+import { resolveFileUrl } from "../lib/fileUrl";
 import type { TicketPriority } from "../lib/prioridade";
 import type { Expediente } from "../lib/tempoUtil";
 import type { Tag } from "./tagService";
@@ -19,6 +20,9 @@ export interface TicketRequester {
   email: string;
   phone: string | null;
   company_name: string | null;
+  /** Link da foto (Fase 3B). Nulo sem foto ou quando o ator não pode vê-la;
+   *  opcional porque o tipo vale também para respostas montadas antes dela. */
+  avatar_url?: string | null;
 }
 
 /** Equipamento como ele aparece dentro do chamado — não é a ficha completa. */
@@ -356,11 +360,23 @@ export async function reopenTicket(id: string, reason: string): Promise<Ticket> 
  */
 export interface TicketDetail extends Ticket {
   requester?: TicketRequester | null;
+  /** Link da foto do responsável (Fase 3B). Mesmo motivo do `requester`: só o
+   *  detalhe traz, e a tela guarda à parte para não sumir a cada mutação. */
+  assignee_avatar_url?: string | null;
 }
 
 export async function getTicket(id: string): Promise<TicketDetail> {
   const { data } = await api.get<TicketDetail>(`/tickets/${id}`);
-  return data;
+  // O backend devolve o link relativo à API (`/api/v1/files/...`). Com a API
+  // em outro domínio, o <img> pediria ao domínio do front — o mesmo motivo
+  // pelo qual a própria foto já passa por aqui.
+  return {
+    ...data,
+    assignee_avatar_url: resolveFileUrl(data.assignee_avatar_url),
+    requester: data.requester
+      ? { ...data.requester, avatar_url: resolveFileUrl(data.requester.avatar_url) }
+      : data.requester,
+  };
 }
 
 export interface TicketNote {

@@ -1854,11 +1854,336 @@ anonimizada ou desativada nesse meio-tempo, o upload recusa com 403 em vez de
 devolver uma foto a uma conta anonimizada.
 
 **O que fica de fora, de propósito:** a remoção da própria foto
-(`DELETE /users/me/avatar`) e a anonimização continuam sem trava (a remoção do
-admin espera por elas na trava da linha, mas não o contrário); quem já
+(`DELETE /users/me/avatar`) continua sem trava (a remoção do admin espera
+por ela na trava da linha, mas não o contrário) — a anonimização passou a
+travar a linha na Fase 3B (ver "A anonimização encerra a autorização"); quem já
 carregou a imagem pode vê-la até o `max-age` do link vencer; e uma referência
 indevida antiga não aparece na tela de usuários (a listagem já a esconde), então
 não há botão para ela — o backend a trata se o pedido chegar.
+
+### A foto dos participantes do chamado (Fase 3B, 20/10/2026)
+
+> **Implementada na branch `feat/avatar-participantes-chamados`, NÃO
+> publicada.** A publicação depende da decisão sobre a Política de Privacidade
+> registrada no fim desta seção.
+
+A foto de perfil deixa de aparecer só para o próprio dono. Dentro de um
+chamado que o ator **já** pode ver, ela aparece em três lugares, e em nenhum
+outro:
+
+| Onde | Campo | Quem aparece |
+|---|---|---|
+| conversa (histórico, `POST` e WebSocket) | `ChatMessage.sender_avatar_url` | quem escreveu |
+| detalhe — "Responsável" | `TicketDetailResponse.assignee_avatar_url` | o técnico atribuído |
+| detalhe — bloco "Solicitante" | `TicketRequesterBrief.avatar_url` | quem abriu o chamado |
+
+Fora: lista de chamados, lista e detalhe de usuários, seletores, comentários
+da base de conhecimento, autoria de anexos, histórico/Atividade,
+notificações, agenda, auditoria e relatórios. A tela de remoção pelo
+administrador (Fase 3A) continua **sem** mostrar a foto.
+
+**Tudo abaixo vale só para quem AUTORIZOU** a própria foto para outras
+pessoas — ver "A foto para outras pessoas: autorização individual", logo
+depois desta seção. Sem autorização, a matriz não chega a ser consultada: a
+foto de terceiro não é assinada em lugar nenhum.
+
+**Quem vê a foto de quem** (`app/utils/avatar.py`):
+
+| Ator | Vê a foto de |
+|---|---|
+| técnico ou admin | qualquer participante do chamado — o acesso da equipe a chamados não foi estreitado |
+| cliente | a própria e a de quem é da equipe (técnico ou admin) |
+| cliente | **nunca** a de outro cliente, nem por dado antigo ou troca de papel |
+
+A visibilidade do **chamado** não mudou e continua nos call sites
+(`ensure_ticket_visible`; sala do WebSocket só para equipe e criador). A regra
+da foto só roda depois dela, e o link só é emitido depois da regra: esconder
+na tela não protegeria nada. Não há endpoint de foto por id.
+
+**Na conversa, a regra não olha quem recebe.** O WebSocket manda o MESMO
+payload a toda a sala — e, pelo backplane, a todos os processos —, e a sala
+tem a equipe e o criador. A regra é a do pior destinatário: foto só de quem é
+da equipe ou do próprio criador (`foto_visivel_na_conversa`). O histórico e o
+`POST` usam exatamente a mesma regra, para recarregar a tela não mostrar algo
+diferente do tempo real. Helô (`is_ai`) e avisos do sistema (`is_system`) nunca
+levam foto, mesmo quando a mensagem carrega o id de alguém.
+
+Consequência aceita da regra conservadora: na conversa, a foto de um
+remetente cliente que não é o dono (dado antigo, papel trocado) fica de fora
+**também para a equipe**, que no detalhe veria a foto de um responsável
+nessa situação. O papel considerado é o **atual**, lido na hora: técnico
+rebaixado a cliente perde a foto nas mensagens antigas. O status da conta
+também é o atual: conta inativa ou anonimizada não emite foto para terceiros
+(ver "Conta não ativa", na autorização individual abaixo).
+
+**O link.** Só a chave que o upload produz para AQUELA conta é assinada —
+a mesma igualdade de "A foto de perfil só muda pelo upload", agora em
+`chave_legitima_do_avatar`. Chave de outra conta, URL externa ou caminho
+torto viram `null`. O link é o de qualquer arquivo
+(`storage.get_presigned_url`) com o TTL dos arquivos, **`FILE_URL_EXPIRES_SECONDS`
+(3600 s)**, e não os 7 dias da própria foto: é a foto de outra pessoa, que
+pode ser trocada ou removida. A janela de 300 s, o cache da chave e o
+`Cache-Control` do `/files` são os da Fase 3.0, sem mudança.
+
+- **Foto atual, não retrato histórico.** Nada é gravado na mensagem nem no
+  chamado; o link sai na montagem da resposta.
+- **Uma assinatura por pessoa** (`links_das_fotos`): 50 mensagens de 3
+  pessoas assinam 3 vezes. O remetente já vem no `selectinload` do histórico,
+  então a foto não acrescenta consulta; o detalhe usa os dois `db.get` que já
+  fazia.
+- **Falha ao assinar não derruba nada:** o chamado abre e a mensagem é lida
+  sem a foto. O log não leva chave nem link.
+- **`TicketRequesterBrief.avatar_url` tem `validation_alias` com um nome que o
+  `User` não tem**, e o detalhe monta o resumo campo a campo. As duas travas
+  impedem que a leitura automática de atributos copie a chave crua de
+  `users.avatar_url` para a resposta.
+
+**Na tela.** O `Avatar` da casa, com o fallback que já existia (iniciais, e a
+mesma URL quebrada não é tentada de novo; URL nova é). O link passa por
+`resolveFileUrl` no histórico, no envio com anexo, no `getTicket` **e no frame
+do WebSocket** (`normalizaMensagem`), para funcionar com a API em outro
+domínio. A foto do responsável é estado próprio, guardado com o id de quem
+ela é: as mutações devolvem `TicketResponse` sem ela, e depois de uma
+reatribuição a foto antiga nunca fica ao lado do nome novo — a tela mostra
+iniciais e consulta o detalhe uma vez para buscar a foto atual. O avatar do
+responsável passou de 20 px (bolinha com a inicial) para 24 px (`size="xs"`
+do primitivo).
+
+**Não há revogação instantânea:** quem já carregou a imagem pode vê-la até o
+link vencer ou o cache do navegador expirar. Foto removida ou trocada aparece
+certa na próxima consulta ao servidor.
+
+Provas: `tests/test_fotos_dos_participantes.py` (regra, chave, TTL real,
+deduplicação, detalhe, histórico e o WebSocket de verdade, com o frame
+atravessando a sala); no front, `ChatPanel`, `TicketDetailPage`, `chatService`
+e `ticketService`. Mutações nas guardas — chave de outra conta, regra do
+detalhe, regra da conversa, deduplicação, TTL, falha de assinatura, leitura
+crua no resumo, normalização do frame e foto antiga após reatribuição —
+detectadas.
+
+#### A foto para outras pessoas: autorização individual (21/10/2026)
+
+> **Implementada localmente na mesma branch, NÃO publicada.** Aprovada pelo
+> Rickelme em 21/10/2026 como ampliação da Fase 3B.
+
+A foto só aparece para OUTRA pessoa se o dono autorizou. É uma condição a
+mais sobre a matriz acima — nunca a substitui: autorizar não mostra a foto de
+um cliente a outro cliente, nem fora do chamado.
+
+| | |
+|---|---|
+| Estado | `users.avatar_visivel_a_terceiros`, `NOT NULL`, `server_default false` |
+| Prova | `avatar_visibility_events`: `autorizacao`/`revogacao`, `versao_aviso`, `origem` (`alteracao_propria`), `registrado_em`, `ip` |
+| Rota | `GET` e `PUT /api/v1/users/me/avatar/exibicao` — só a própria conta |
+| Migration | `l8g9h0i1j2k3`, sobre `0a17fd87823c`; aditiva, sem backfill |
+| Texto | `app/services/exibicao_da_foto.py`, por versão; vigente em `AVATAR_AVISO_EXIBICAO_VERSAO` |
+
+**Começa desligado para todo mundo**, conta antiga e nova, cliente, técnico e
+admin. A migration não converte upload nem `lgpd_consent` em autorização: as
+fotos antigas foram enviadas quando só o dono as via. Ter foto, aceitar a
+Política, enviar ou trocar a foto, mudar de papel ou editar o nome não mexem
+na escolha. O campo não existe em `UserUpdate`, `UserCreate`,
+`OnboardingUpdate` nem `RegisterRequest`, e não sai em `UserResponse` — nem a
+terceiros, nem o histórico.
+
+**A própria foto não depende da escolha:** `/users/me`, o Topbar e o bloco do
+próprio chamado (`foto_visivel_no_chamado` com pessoa = ator) continuam iguais,
+e upload, troca e remoção seguem funcionando. **Na conversa, sem autorização a
+mensagem sai sem foto para todos, o autor incluído** — o payload é um só para
+a sala, e a sala tem terceiros.
+
+**O texto viaja com a versão.** A tela recebe rótulo e explicação do servidor
+(por papel, descrevendo a matriz real). No `PUT`, ela devolve a versão que
+mostrou; o servidor só COMPARA com a vigente e grava a DELE. Versão diferente,
+ausente ou inventada: 409, e nenhum evento. Sem versão configurada — o padrão
+—, com versão que não existe no catálogo, ou, **em produção, com texto não
+aprovado**, ninguém autoriza (409) e `disponivel` vem falso.
+
+**Em produção só vale texto marcado como aprovado.** Cada texto do catálogo
+tem `aprovado` explícito; o nome não decide ("não começa com MINUTA" não prova
+nada), e pôr a versão no painel não transforma um rascunho em texto aprovado.
+**O único texto existente é `MINUTA-2026-10-21`, com `aprovado=False`**: em
+produção a opção fica indisponível mesmo que alguém configure esse nome. Fora
+de produção a minuta e os textos de teste servem para exercitar o fluxo.
+
+**Staging aceita a minuta, e isso não vira consentimento de produção.** A
+separação é `aviso_vigente`: com `is_production` (`APP_ENV` = `production` ou
+`prod`, normalizado), texto sem `aprovado=True` não autoriza — minuta, texto de
+teste e versão inexistente dão 409. Staging é outro `APP_ENV` e outro banco:
+uma autorização registrada lá não existe em produção. **Premissa:** o padrão de
+`APP_ENV` é `development`; a produção precisa declarar `APP_ENV=production`,
+como já exigem as outras guardas de produção (documentação da API fechada,
+segredos obrigatórios). O
+texto aprovado entra com OUTRO nome (o nome é o que os eventos gravam) e é
+decisão do responsável pela Política — nenhum foi aprovado.
+
+**O alcance real da variável.** `AVATAR_AVISO_EXIBICAO_VERSAO` controla SÓ se
+dá para autorizar agora. **Ela não é um interruptor da exibição:** quem já
+autorizou continua aparecendo com a variável vazia, porque `foto_visivel_*`
+olha apenas a escolha gravada. Com a opção indisponível, quem já autorizou vê
+a escolha como está e continua podendo revogar; nada é desligado em silêncio.
+
+Revogar não depende do texto: sem texto vigente, ou com a tela mostrando um
+texto antigo, a revogação passa e é gravada com `versao_aviso` nulo — o
+registro não afirma um texto que talvez não tenha sido mostrado. (Como toda
+rota logada, ela exige conta ativa — ver "Conta não ativa".) O banco recusa
+autorização sem versão (`ck_avatar_visibility_events_autorizacao_tem_aviso`).
+
+**O corpo não escolhe nada além da escolha:** `extra="forbid"` recusa
+`user_id`, `ip`, data, chave de arquivo com 422; `StrictBool` recusa `"true"`
+e `1`.
+
+**Conta não ativa.** O `get_current_user` recusa com 403 toda conta que não
+está ativa, antes de qualquer rota: conta inativa ou anonimizada **não lê nem
+muda** a escolha (`GET` e `PUT` dão 403) — revogar também não. A conferência
+de status dentro do `PUT` só cobre a corrida de a conta ser desativada entre o
+login e a trava, e aí barra autorizar. Para que isso não deixe a foto de quem
+foi desativado à mostra sem saída, **o dono precisa estar ativo para a foto
+dele sair para terceiros** (`titular_ativo`, em `foto_visivel_no_chamado` e
+`foto_visivel_na_conversa`): detalhe, histórico, `POST` e WebSocket. São duas
+coisas diferentes:
+
+- **revogação** é a manifestação do titular: muda a escolha e grava evento;
+- **suspensão por status** só impede novos links enquanto a conta não está
+  ativa: não muda a escolha, não grava evento e não atribui nada ao titular.
+
+A desativação não apaga a foto nem a escolha. Reativar uma conta volta a
+respeitar a escolha gravada — quem tinha autorizado volta a aparecer, quem não
+tinha continua com as iniciais. Links já entregues e imagens já recebidas
+seguem os limites de sempre (abaixo). (Isso vale para a conta só INATIVA: a
+anonimizada perde a autorização — ver abaixo.)
+
+**Estado e evento no mesmo commit, sob a trava da linha.** O `PUT` trava
+`users` com `FOR UPDATE` (`_trava_usuario`, o mesmo do upload) antes de ler o
+estado. Repetir a escolha não grava evento (e solta a trava na hora); pedidos
+simultâneos se enfileiram, e o segundo vê o que o primeiro gravou — o
+histórico alterna e o último evento é sempre o estado. Se o evento não entra,
+o estado também não fica. `updated_at` **não** muda: ele é o token de versão da
+remoção da foto pelo admin, e uma troca de preferência faria aquela tela
+acusar "pode ser uma foto nova". O `onupdate` do model continua (PATCH de nome,
+upload e as demais escritas renovam a coluna); só o UPDATE da preferência leva
+`updated_at = users.updated_at`, o valor da própria linha travada, lido pelo
+banco no UPDATE — nunca um horário guardado antes da trava, nem um valor da
+tela. O momento da escolha mora no evento.
+
+**Revogação e desativação com o WebSocket aberto.** A conexão guarda o
+`User` que autenticou ao abrir, e esse objeto não decide nada — nem a
+escolha, nem o status: a cada fala, o remetente é relido do banco (`_mensagem_com_remetente_atual`, com `populate_existing`, a
+mesma consulta que já existia). O `POST` usa a mesma releitura. O histórico e
+o detalhe leem a coluna junto do remetente — nenhuma consulta a mais por
+mensagem. O cache de assinatura da Fase 3.0 só é consultado DEPOIS da
+conferência, então não a substitui.
+
+**Limites que continuam:** link já entregue vale até vencer (até 1 h), o
+navegador pode manter a imagem em cache, e uma imagem já vista, salva ou
+capturada não some. Não há revogação global de tokens nem limpeza remota.
+
+**Exclusão e anonimização:** `user_id` é `SET NULL`, como `lgpd_consents` —
+excluir a conta desvincula os eventos sem apagá-los, e o `DELETE /users/{id}`
+não ganhou bloqueio (a tabela não entra em `_REFERENCIAS_QUE_BLOQUEIAM`). O
+`SET NULL` **não anonimiza os eventos**: data, versão, origem e **IP**
+continuam na linha. Não há prazo de guarda nem limpeza automática dos
+eventos — decisão do responsável pela Política.
+
+**A anonimização encerra a autorização (decidido em 26/10/2026).** Ao
+anonimizar, `avatar_visivel_a_terceiros` vira `false` na MESMA transação que
+apaga os dados pessoais (`exibicao_da_foto.encerra_por_anonimizacao`). Há dois
+caminhos reais que deixam uma conta `anonymized`, e os dois fazem isso:
+
+- `POST /users/{id}/anonymize` — o caminho de verdade (apaga nome, e-mail,
+  telefone e foto);
+- `PATCH /users/{id}/status` com `anonymized` — a API aceita qualquer
+  `UserStatus`, embora a tela de usuários só alterne ativo/inativo. Este
+  caminho **só muda o status**, sem apagar dado pessoal: é lacuna anterior à
+  Fase 3B, registrada aqui e não tratada nesta frente.
+
+Não é revogação do titular: **nenhum `AvatarVisibilityEvent` é gravado** —
+aquele registro é a manifestação da pessoa, e quem anonimiza é outra. O efeito
+fica no AuditLog que a operação já grava, com o ator verdadeiro:
+`old_data`/`new_data` com `avatar_visivel_a_terceiros` (no `anonymize`, junto
+do `anonymized_at`; no `status_change`, só quando o destino é `anonymized`,
+junto do `status` antes e depois que esse registro leva desde a F1-A — um
+registro só com as duas mudanças).
+Os eventos antigos não são apagados nem reescritos: continuam ligados ao
+`user_id` anonimizado, com data, versão, origem e IP — anonimizar a conta
+**não** anonimiza esses registros.
+
+Os dois caminhos passaram a travar a linha (`_trava_usuario`, que desde a F1-A
+é o último passo de `_trava_para_alterar_conta`, depois da trava do quadro de
+admins ativos): sem a trava,
+um `PUT` do titular que comitasse entre a leitura e o UPDATE deixaria `true`
+gravado (o ORM só manda a coluna que viu mudar). Com ela, ou o `PUT` espera e
+encontra a conta anonimizada (e recusa), ou a anonimização espera e relê.
+
+O único reuso real do registro é o `PATCH /status` de volta a `active` (não
+há fluxo de recuperação de conta, e nenhum foi criado). Ele volta com a
+autorização em `false`: uma foto nova enviada depois só aparece para outras
+pessoas com nova autorização do titular. **A conta só inativa não muda**: ir
+para `inactive` guarda a escolha, e reativar volta a respeitá-la.
+
+Contas anonimizadas antes desta regra não precisam de correção de dados: a
+coluna nasceu `false` com a migration da Fase 3B, e conta não ativa não chega
+ao `PUT` que a liga.
+
+**Ressalvas que continuam.** A versão identifica o texto por convenção: não
+há prova automática contra editar o conteúdo sob o mesmo nome. Os testes de
+pedidos simultâneos detectam a retirada da trava de forma estatística (o de
+pedidos opostos; o de pedidos iguais não detecta) — não são garantia
+determinística.
+
+**Na tela.** Seção "Foto para outras pessoas" no perfil, logo abaixo da foto:
+o `Switch` da casa, com o estado vindo do servidor (nada é desenhado antes da
+resposta), movendo-se só depois da confirmação, `aria-disabled` enquanto salva
+(sem perder o foco do teclado), erro com nova leitura do estado verdadeiro, e
+confirmação em `Alert` de sucesso. Aviso de lançamento no topo do conteúdo
+(`AvisoDaFotoParaTerceiros`): `Alert` informativo com link para o perfil, só
+quando há escolha a fazer; fechar guarda em `localStorage` (por pessoa e por
+versão) que o aviso foi visto e NÃO autoriza nada. Não bloqueia rota, não
+dispara e-mail, não usa notificações.
+
+Provas: `test_exibicao_da_foto_postgres.py` (padrão, cada papel, corpo,
+versão, revogação, repetição, concorrência, atomicidade, PATCH/onboarding/admin,
+upload e aceite, exclusão, anonimização (inclusive pelo `PATCH /status`, a
+reativação depois dela e a corrida com o `PUT`), a releitura do WebSocket, `updated_at`
+contra a remoção pelo admin, login real com conta não ativa, desativação e
+reativação, e a minuta em produção),
+`test_exibicao_da_foto_migracao_postgres.py`, `test_exibicao_da_foto.py`,
+`test_fotos_dos_participantes.py` (seção "A autorização individual", com o
+WebSocket aberto antes e depois da revogação); no front, `ProfilePage`,
+`AvisoDaFotoParaTerceiros` e `userService`. Mutações detectadas: autorização
+ignorada, padrão ligado (model e migration), campo no `UserUpdate`, WebSocket
+com o `User` da conexão, releitura sem `populate_existing`, estado sem evento,
+evento sem estado, commits separados, versão do navegador aceita, repetição
+gravando evento e `PUT` sem trava; e, na correção de 22/10, UPDATE da preferência
+sem preservar `updated_at`, status do titular ignorado (nos dois pontos e em
+cada um), produção aceitando texto não aprovado, produção decidindo pelo nome
+e o perfil sem a guarda do salvamento.
+
+#### Pendente para publicar: a Política
+
+A Política vigente (`frontend/src/content/politica-privacidade.md`, PGS-TI-031,
+Revisão 00, vigência 05/10/2026) declara para a imagem de perfil a finalidade
+"Personalizar a identificação visual do usuário na plataforma", com base no
+consentimento manifestado pelo envio facultativo (seção 8). A exibição a
+outras pessoas, agora condicionada à autorização individual, ainda não está
+descrita nela. O pacote está em `docs/proposta-politica-foto-para-outras-pessoas.md`,
+e a candidata completa da Revisão 01, em `docs/candidata-pgs-ti-031-revisao-01.md`
+(28/10/2026), fora do bundle.
+
+- **Novo aceite geral: DEFINIDO** pela Decisão 2 (27/10/2026). É obrigatório
+  para os três papéis, `criado_por_terceiro` não vale, e o aviso prévio é de no
+  mínimo 15 dias. O enforcement está na `main` (#97), inerte. Isso não aprova
+  nem publica a Revisão 01.
+- **Candidatos, pendentes de aprovação formal:**
+  - a redação da Revisão 01, que é elaborada pela Qualidade/SGI e aprovada pela
+    Diretoria;
+  - a base legal das fotos da equipe (Decisão 3: consentimento específico);
+  - o prazo de guarda dos eventos (Decisão 4: 5 anos). Não há expurgo
+    automático no código, e ele é requisito futuro;
+  - o aviso final `FOTO-PARTICIPANTES-2026-01`, que NÃO está no catálogo.
+
+Nenhum texto da Política publicada foi alterado, e nenhum consentimento ou
+autorização foi registrado para usuários reais.
 
 ## Anexos do chamado (13/10/2026)
 

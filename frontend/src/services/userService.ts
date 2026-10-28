@@ -260,6 +260,50 @@ export async function changePassword(
   });
 }
 
+// ── A foto para outras pessoas (Fase 3B) ───────────────────────
+
+/** O texto que a pessoa lê antes de decidir, na versão que o servidor deu. */
+export interface AvisoDaExibicao {
+  versao: string;
+  rotulo: string;
+  explicacao: string[];
+}
+
+/**
+ * A escolha de quem está logado. É estado do SERVIDOR: a tela mostra isto, e
+ * nunca um valor que ela mesma presumiu.
+ */
+export interface ExibicaoDaFoto {
+  autorizada: boolean;
+  /** Falso quando ninguém consegue autorizar agora. Revogar continua possível. */
+  disponivel: boolean;
+  aviso: AvisoDaExibicao | null;
+}
+
+export async function getExibicaoDaFoto(): Promise<ExibicaoDaFoto> {
+  const { data } = await api.get<ExibicaoDaFoto>("/users/me/avatar/exibicao");
+  return data;
+}
+
+/**
+ * Autoriza ou revoga. A rota é só da própria conta e o corpo não escolhe
+ * conta nenhuma — o backend recusa campo a mais.
+ *
+ * `versaoAviso` é a versão do texto que a tela MOSTROU, devolvida como veio.
+ * O servidor só a confere com a vigente: se o texto mudou desde que a página
+ * abriu, autorizar dá 409 em vez de registrar um texto que a pessoa não leu.
+ */
+export async function setExibicaoDaFoto(
+  autorizada: boolean,
+  versaoAviso: string | null,
+): Promise<ExibicaoDaFoto> {
+  const { data } = await api.put<ExibicaoDaFoto>("/users/me/avatar/exibicao", {
+    autorizada,
+    versao_aviso: versaoAviso,
+  });
+  return data;
+}
+
 export async function uploadAvatar(file: File): Promise<UserSummary> {
   const form = new FormData();
   form.append("file", file);

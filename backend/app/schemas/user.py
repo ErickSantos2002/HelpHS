@@ -6,7 +6,7 @@ import re
 import uuid
 from datetime import datetime
 
-from pydantic import AwareDatetime, ConfigDict, Field, field_validator
+from pydantic import AwareDatetime, ConfigDict, Field, StrictBool, field_validator
 
 from app.models.models import UserRole, UserStatus
 from app.schemas.base import AppBaseModel
@@ -144,6 +144,46 @@ class AvatarRemovalByAdmin(AppBaseModel):
     # Com fuso: um horário sem fuso nunca é igual ao do banco, e viraria um
     # 409 que não se resolve tentando de novo.
     expected_updated_at: AwareDatetime
+
+
+class AvisoDaExibicao(AppBaseModel):
+    """O texto que a tela mostra antes da escolha, na versão vigente."""
+
+    versao: str
+    rotulo: str
+    explicacao: list[str]
+
+
+class AvatarExibicaoStatus(AppBaseModel):
+    """A escolha de quem está logado sobre a foto aparecer para outras pessoas.
+
+    Só o estado atual. O histórico das escolhas não sai por nenhuma resposta.
+    """
+
+    autorizada: bool
+    # Falso quando não há texto vigente: ninguém consegue autorizar agora.
+    # Revogar continua possível.
+    disponivel: bool
+    aviso: AvisoDaExibicao | None
+
+
+class AvatarExibicaoUpdate(AppBaseModel):
+    """O pedido do titular. Nada aqui escolhe conta, data, IP, autor ou arquivo.
+
+    `extra="forbid"`: um `user_id`, `ip` ou `versao` a mais no corpo é recusado
+    com 422, em vez de ignorado em silêncio — quem tenta mandar sabe que não
+    passou.
+
+    `StrictBool`: `"true"`, `1` ou `"sim"` não viram autorização por coerção.
+
+    `versao_aviso` é a versão do texto que a tela MOSTROU. O servidor só a
+    compara com a vigente; o que fica gravado é a dele.
+    """
+
+    model_config = ConfigDict(extra="forbid")
+
+    autorizada: StrictBool
+    versao_aviso: str | None = Field(default=None, max_length=40)
 
 
 class OnboardingUpdate(AppBaseModel):

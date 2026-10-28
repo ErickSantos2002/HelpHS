@@ -6,6 +6,7 @@ import {
   summarizeConversation,
   improveMessage,
   buildWsUrl,
+  normalizaMensagem,
   type ChatMessage,
 } from "../../services/chatService";
 import { api, tokenStorage } from "../../services/api";
@@ -333,5 +334,65 @@ describe("sendMessageWithLibraryFile", () => {
     mockPost.mockRejectedValue(recusa);
 
     await expect(sendMessageWithLibraryFile("t1", "Segue.", "lib-7")).rejects.toBe(recusa);
+  });
+});
+
+// ── Foto de quem falou (Fase 3B) ──────────────────────────────
+
+describe("foto de quem falou", () => {
+  afterEach(() => {
+    vi.unstubAllEnvs();
+  });
+
+  it("o histórico resolve o link relativo contra a API em outro domínio", async () => {
+    vi.stubEnv("VITE_API_URL", "https://api.exemplo.com/api/v1");
+    mockGet.mockResolvedValue({
+      data: { ...pagina, items: [{ ...mensagem, sender_avatar_url: "/api/v1/files/tok" }] },
+    });
+
+    const result = await getChatMessages("t1");
+
+    expect(result.items[0].sender_avatar_url).toBe("https://api.exemplo.com/api/v1/files/tok");
+  });
+
+  it("link já absoluto passa intacto, e sem foto continua sem foto", async () => {
+    mockGet.mockResolvedValue({
+      data: {
+        ...pagina,
+        items: [
+          { ...mensagem, id: "a", sender_avatar_url: "https://cdn.exemplo.com/x.png" },
+          { ...mensagem, id: "b", sender_avatar_url: null },
+          { ...mensagem, id: "c" },
+        ],
+      },
+    });
+
+    const { items } = await getChatMessages("t1");
+
+    expect(items[0].sender_avatar_url).toBe("https://cdn.exemplo.com/x.png");
+    expect(items[1].sender_avatar_url).toBeNull();
+    expect(items[2].sender_avatar_url).toBeUndefined();
+  });
+
+  it("o envio com anexo devolve a mensagem já normalizada", async () => {
+    vi.stubEnv("VITE_API_URL", "https://api.exemplo.com/api/v1");
+    mockPost.mockResolvedValue({ data: { ...mensagem, sender_avatar_url: "/api/v1/files/tok" } });
+
+    const enviada = await sendMessageWithLibraryFile("t1", "segue", "lib-1");
+
+    expect(enviada.sender_avatar_url).toBe("https://api.exemplo.com/api/v1/files/tok");
+  });
+
+  it("o frame do WebSocket passa pela MESMA normalização", () => {
+    vi.stubEnv("VITE_API_URL", "https://api.exemplo.com/api/v1");
+
+    const recebida = normalizaMensagem({ ...mensagem, sender_avatar_url: "/api/v1/files/tok" });
+
+    expect(recebida.sender_avatar_url).toBe("https://api.exemplo.com/api/v1/files/tok");
+    // O resto da mensagem não muda.
+    expect({ ...recebida, sender_avatar_url: undefined }).toEqual({
+      ...mensagem,
+      sender_avatar_url: undefined,
+    });
   });
 });

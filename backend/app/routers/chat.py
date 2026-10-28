@@ -62,6 +62,7 @@ from app.services.helo import (
 )
 from app.services.llm import improve_message, suggest_reply, summarize_conversation
 from app.services.notifications import audiencia_operacional, commit_e_notificar, notify
+from app.utils.avatar import links_das_fotos, remetentes_com_foto
 from app.utils.crud import get_or_404
 from app.utils.library_access import ensure_pode_anexar_no_chat
 from app.utils.sla import register_first_response
@@ -189,7 +190,7 @@ async def _politica_pendente(db: AsyncSession, user: User) -> bool:
 # ── Helpers ───────────────────────────────────────────────────
 
 
-def _msg_to_response(msg: ChatMessage) -> ChatMessageResponse:
+def _msg_to_response(msg: ChatMessage, sender_avatar_url: str | None = None) -> ChatMessageResponse:
     sender = msg.sender
     arquivo = msg.library_file if msg.library_file_id else None
     return ChatMessageResponse(
@@ -210,7 +211,44 @@ def _msg_to_response(msg: ChatMessage) -> ChatMessageResponse:
         library_file_name=arquivo.original_name if arquivo else None,
         library_file_mime=arquivo.mime_type if arquivo else None,
         library_file_size=arquivo.size_bytes if arquivo else None,
+        sender_avatar_url=sender_avatar_url,
     )
+
+
+async def _fotos_da_conversa(
+    mensagens: list[ChatMessage], ticket: Ticket
+) -> dict[uuid.UUID, str | None]:
+    """O link da foto de cada MENSAGEM, assinado uma vez por remetente.
+
+    A regra de quem pode aparecer é `foto_visivel_na_conversa`, a mesma para o
+    histórico, o POST e o WebSocket — recarregar a tela não pode mostrar uma
+    foto que o tempo real não mostrou, nem o contrário. Helô e sistema ficam
+    sem foto mesmo quando a mensagem carrega o id de alguém.
+    """
+    links = await links_das_fotos(remetentes_com_foto(mensagens, ticket), settings)
+    return {
+        m.id: (None if m.is_ai or m.is_system or m.sender_id is None else links.get(m.sender_id))
+        for m in mensagens
+    }
+
+
+async def _mensagem_com_remetente_atual(db: AsyncSession, msg_id: uuid.UUID) -> ChatMessage:
+    """Relê a mensagem recém-gravada com o remetente como ele está no banco AGORA.
+
+    `populate_existing` é o ponto: o remetente não vem do `user` que a conexão
+    do WebSocket autenticou ao abrir. Quem revogou a foto com a sala aberta não
+    pode continuar saindo com foto só porque o socket guardou um `User` de
+    antes — e, sem a opção, o SQLAlchemy devolveria do mapa de identidade a
+    cópia que outro passo da mesma sessão (a Helô lendo o criador, por exemplo)
+    já tivesse carregado. É a consulta que já existia: nenhuma a mais.
+    """
+    result = await db.execute(
+        select(ChatMessage)
+        .options(selectinload(ChatMessage.sender))
+        .where(ChatMessage.id == msg_id)
+        .execution_options(populate_existing=True)
+    )
+    return result.scalar_one()
 
 
 async def _get_ticket_visivel(
@@ -344,7 +382,7 @@ async def list_messages(
     limit: int = Query(default=50, ge=1, le=100),
     offset: int = Query(default=0, ge=0),
 ) -> ChatMessageListResponse:
-    await _get_ticket_visivel(ticket_id, actor, db)
+    ticket = await _get_ticket_visivel(ticket_id, actor, db)
 
     total_result = await db.execute(select(func.count()).where(ChatMessage.ticket_id == ticket_id))
     total = total_result.scalar_one()
@@ -357,10 +395,13 @@ async def list_messages(
         .offset(offset)
         .limit(limit)
     )
-    messages = rows.scalars().all()
+    messages = list(rows.scalars().all())
+    # Os remetentes já vieram no `selectinload` acima: a foto não custa uma
+    # consulta por mensagem, só uma assinatura por pessoa.
+    fotos = await _fotos_da_conversa(messages, ticket)
 
     return ChatMessageListResponse(
-        items=[_msg_to_response(m) for m in messages],
+        items=[_msg_to_response(m, fotos.get(m.id)) for m in messages],
         total=total,
         limit=limit,
         offset=offset,
@@ -439,15 +480,12 @@ async def create_message(
 
     await commit_e_notificar(db)
 
-    # Reload with sender using selectinload
-    result = await db.execute(
-        select(ChatMessage)
-        .options(selectinload(ChatMessage.sender))
-        .where(ChatMessage.id == msg.id)
-    )
-    msg = result.scalar_one()
+    # A mesma releitura do WebSocket: o remetente sai do banco, não do `actor`
+    # que o `get_current_user` carregou no início da requisição.
+    msg = await _mensagem_com_remetente_atual(db, msg.id)
 
-    response = _msg_to_response(msg)
+    fotos = await _fotos_da_conversa([msg], ticket)
+    response = _msg_to_response(msg, fotos.get(msg.id))
 
     # Broadcast message
     await manager.broadcast(
@@ -784,12 +822,11 @@ async def websocket_chat(
 
                 await commit_e_notificar(db)
 
-                result = await db.execute(
-                    select(ChatMessage)
-                    .options(selectinload(ChatMessage.sender))
-                    .where(ChatMessage.id == msg.id)
-                )
-                msg = result.scalar_one()
+                msg = await _mensagem_com_remetente_atual(db, msg.id)
+                # A foto também sai aqui dentro, com o remetente carregado. O
+                # payload vai igual para toda a sala, e é por isso que a regra
+                # não olha quem recebe — ver `foto_visivel_na_conversa`.
+                foto_do_remetente = (await _fotos_da_conversa([msg], ticket)).get(msg.id)
 
                 # O payload dela é montado AQUI DENTRO, com a sessão ainda
                 # aberta. Montá-lo depois do `async with` significa mexer num
@@ -803,7 +840,7 @@ async def websocket_chat(
                     else None
                 )
 
-            response = _msg_to_response(msg)
+            response = _msg_to_response(msg, foto_do_remetente)
             await manager.broadcast(
                 tid_str,
                 {"type": "message", "data": _response_to_dict(response)},
@@ -842,6 +879,7 @@ def _response_to_dict(r: ChatMessageResponse) -> dict:
         "is_system": r.is_system,
         "is_ai": r.is_ai,
         "created_at": r.created_at.isoformat(),
+        "sender_avatar_url": r.sender_avatar_url,
     }
 
 
