@@ -41,7 +41,8 @@ Decisão 2 (27/10/2026), Cenário B. Regras completas em
   devolve 200 sem linha nova nem auditoria. Pedidos simultâneos não duplicam.
 - **Front:**
   - o 428 e o 4428 levam à tela de aceite, de qualquer página;
-  - falha na consulta não libera mais o sistema;
+  - falha na consulta inicial continua liberando o sistema, como antes; quem
+    obriga a Política é o 428 do backend;
   - a tela de aceite vem antes do onboarding.
 - **Dívida registrada, não mexida:** 4001 e 4004 continuam fechando antes do
   handshake (o navegador vê 1006 e reconecta a cada 3 s).

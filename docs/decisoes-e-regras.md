@@ -1997,7 +1997,17 @@ verify e refresh não usam o `get_current_user` e continuam acessíveis. O
 - O `api.ts` transforma o 428 com o `code` num aviso. O `ChatPanel` faz o
   mesmo com o 4428. A `ReaceiteGuard` escuta o aviso e troca qualquer tela
   pela de aceite.
-- Falha na consulta NÃO libera: mostra erro com "Tentar novamente".
+- A consulta inicial do guard é **fail-open**: se `GET /users/me/lgpd-consent`
+  falhar, o sistema abre, como antes da Decisão 2. Isso não enfraquece a
+  obrigatoriedade: a autoridade é o backend. Com a Política pendente, o
+  primeiro pedido protegido responde 428 e o aviso traz a tela de aceite de
+  volta. Bloquear no front só criaria indisponibilidade nova com
+  `LGPD_EXIGE_REACEITE` desligado.
+- A exceção é a consulta disparada pelo aviso do 428/4428: o backend já disse
+  que a Política está pendente, então, se ela falhar, a tela de aceite aparece
+  mesmo assim (sem isso, sistema → 428 → sistema, sem fim).
+- Os Termos continuam só no front, só para clientes, e a falha da consulta
+  também não os cobra — como na main.
 - A tela de aceite vem ANTES do onboarding (login → aceite → onboarding →
   sistema). Assim as rotas do onboarding não precisam ser liberadas.
 
