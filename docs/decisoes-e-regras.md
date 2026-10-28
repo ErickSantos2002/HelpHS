@@ -2166,12 +2166,24 @@ Revisão 00, vigência 05/10/2026) declara para a imagem de perfil a finalidade
 "Personalizar a identificação visual do usuário na plataforma", com base no
 consentimento manifestado pelo envio facultativo (seção 8). A exibição a
 outras pessoas, agora condicionada à autorização individual, ainda não está
-descrita nela. A minuta está em `docs/proposta-politica-foto-para-outras-pessoas.md`
-e deixa em aberto, para o responsável pela Política: a redação final, se há
-novo aceite geral (seção 15), a base legal das fotos da equipe, o prazo de
-guarda dos eventos e o texto aprovado da opção. Nenhum texto da Política foi
-alterado e nenhum consentimento ou autorização foi registrado para usuários
-reais.
+descrita nela. O pacote está em `docs/proposta-politica-foto-para-outras-pessoas.md`,
+e a candidata completa da Revisão 01, em `docs/candidata-pgs-ti-031-revisao-01.md`
+(28/10/2026), fora do bundle.
+
+- **Novo aceite geral: DEFINIDO** pela Decisão 2 (27/10/2026). É obrigatório
+  para os três papéis, `criado_por_terceiro` não vale, e o aviso prévio é de no
+  mínimo 15 dias. O enforcement está na `main` (#97), inerte. Isso não aprova
+  nem publica a Revisão 01.
+- **Candidatos, pendentes de aprovação formal:**
+  - a redação da Revisão 01, que é elaborada pela Qualidade/SGI e aprovada pela
+    Diretoria;
+  - a base legal das fotos da equipe (Decisão 3: consentimento específico);
+  - o prazo de guarda dos eventos (Decisão 4: 5 anos). Não há expurgo
+    automático no código, e ele é requisito futuro;
+  - o aviso final `FOTO-PARTICIPANTES-2026-01`, que NÃO está no catálogo.
+
+Nenhum texto da Política publicada foi alterado, e nenhum consentimento ou
+autorização foi registrado para usuários reais.
 
 ## Anexos do chamado (13/10/2026)
 
