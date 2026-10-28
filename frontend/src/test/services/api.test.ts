@@ -284,3 +284,68 @@ describe("tokenStorage", () => {
     expect(tokenStorage.getRefresh()).toBeNull();
   });
 });
+
+// ── Aceite da Política pendente (428) ─────────────────────────
+
+describe("response interceptor — aceite da Política pendente (428)", () => {
+  const ACEITE = {
+    detail: "Para continuar, aceite a revisão vigente da Política de Privacidade.",
+    code: "aceite_politica_pendente",
+    revisao_politica_vigente: "01",
+  };
+
+  async function escutaOAviso() {
+    const { aoAceitePoliticaPendente } = await import("../../services/aceitePolitica");
+    const aviso = vi.fn();
+    const para = aoAceitePoliticaPendente(aviso);
+    return { aviso, para };
+  }
+
+  it("428 com o code avisa a tela de aceite, sem refresh e sem /login", async () => {
+    const { axios, api, tokenStorage, respond, adapter } = await freshApi();
+    tokenStorage.set("valido", "refresh-1");
+    const postSpy = vi.spyOn(axios, "post");
+    const { aviso, para } = await escutaOAviso();
+    respond(428, ACEITE);
+
+    await expect(api.get("/tickets")).rejects.toMatchObject({ response: { status: 428 } });
+
+    expect(aviso).toHaveBeenCalledTimes(1);
+    expect(postSpy).not.toHaveBeenCalled();
+    expect(adapter).toHaveBeenCalledTimes(1);
+    expect(locationMock.href).toBe("");
+    expect(tokenStorage.getAccess()).toBe("valido");
+    para();
+  });
+
+  it("o contrato é o code, não o status: 428 sem o code não avisa", async () => {
+    const { api, respond } = await freshApi();
+    const { aviso, para } = await escutaOAviso();
+    respond(428, { detail: ACEITE.detail });
+
+    await expect(api.get("/tickets")).rejects.toMatchObject({ response: { status: 428 } });
+    expect(aviso).not.toHaveBeenCalled();
+    para();
+  });
+
+  it.each([403, 409, 500])("%i comum não abre a tela de aceite", async (status) => {
+    const { api, respond } = await freshApi();
+    const { aviso, para } = await escutaOAviso();
+    respond(status, { detail: "outra coisa", code: "aceite_politica_pendente" });
+
+    await expect(api.get("/tickets")).rejects.toMatchObject({ response: { status } });
+    expect(aviso).not.toHaveBeenCalled();
+    para();
+  });
+
+  it("401 continua sendo sessão: vai para /login, não para o aceite", async () => {
+    const { api, respond } = await freshApi();
+    const { aviso, para } = await escutaOAviso();
+    respond(401);
+
+    await expect(api.get("/tickets")).rejects.toBeDefined();
+    expect(locationMock.href).toBe("/login");
+    expect(aviso).not.toHaveBeenCalled();
+    para();
+  });
+});
