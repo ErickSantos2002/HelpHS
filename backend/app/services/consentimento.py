@@ -1,6 +1,9 @@
 """
 O histórico de aceites da Política de Privacidade — gravar, revogar, cobrar.
 
+Cobrar segue a Decisão 2 (27/10/2026): a Política vigente bloqueia o backend
+para todos os papéis; os Termos continuam só na tela, e só para clientes.
+
 Os routers chamam este módulo em vez de montar `LgpdConsent` à mão por um
 motivo só: a revisão gravada precisa vir SEMPRE da configuração vigente, e a
 `origem` precisa ser uma das três que o CHECK do banco aceita. Espalhado por
@@ -10,6 +13,8 @@ Desenho em `docs/superpowers/specs/2026-08-31-registro-da-revisao-aceita-design.
 """
 
 import uuid
+from collections.abc import Sequence
+from dataclasses import dataclass
 from datetime import datetime
 
 from sqlalchemy import select, update
@@ -77,20 +82,107 @@ async def ultimo_aceite_vigente(db: AsyncSession, user_id: uuid.UUID) -> LgpdCon
     return resultado.scalars().first()
 
 
-def precisa_reaceitar(ultimo: LgpdConsent | None, *, role: UserRole, settings: Settings) -> bool:
-    """Se a pessoa precisa passar pela tela de aceite antes de usar o sistema.
+@dataclass(frozen=True)
+class SituacaoDoAceite:
+    """O que falta a pessoa aceitar, com a Política e os Termos SEPARADOS.
 
-    Decisões de 24/09/2026: só clientes, e só com `LGPD_EXIGE_REACEITE` ligado.
-    Sem aceite registrado, precisa — a revisão de quem se cadastrou antes do
-    histórico é desconhecida, e é esse vazio que cobra o aceite, em vez de
-    fingir que foi a 00. Com aceite, precisa quando qualquer das duas revisões
-    difere da vigente, inclusive os Termos passando a existir depois.
+    Os dois campos têm usos diferentes, e é por isso que não são um booleano
+    só:
+
+    - `politica_pendente` BLOQUEIA o backend (`get_current_user` responde 428
+      e o WebSocket fecha com 4428). Decisão 2, de 27/10/2026: aceite
+      obrigatório da revisão vigente da Política, para todos os papéis.
+    - `termos_pendentes` só informa a tela de re-aceite, e só de clientes —
+      o comportamento de 24/09/2026, preservado. A Decisão 2 não autoriza
+      bloquear a API por mudança apenas nos Termos; nenhum caminho do backend
+      pode ler este campo para recusar um pedido.
     """
-    if not settings.lgpd_exige_reaceite or role != UserRole.client:
-        return False
-    if ultimo is None:
-        return True
-    return (
-        ultimo.revisao_politica != settings.lgpd_revisao_politica
-        or ultimo.revisao_termos != settings.lgpd_revisao_termos
+
+    politica_pendente: bool
+    termos_pendentes: bool
+
+    @property
+    def precisa_reaceitar(self) -> bool:
+        """O booleano antigo, só para apresentação.
+
+        Mantido para o bundle do front anterior a esta mudança continuar
+        funcionando durante o deploy. Não serve para decidir bloqueio.
+        """
+        return self.politica_pendente or self.termos_pendentes
+
+
+# As origens que são manifestação do PRÓPRIO titular. `criado_por_terceiro`
+# fica de fora de propósito (Decisão 2C): o registro da criação pela equipe
+# continua existindo, mas não satisfaz o aceite da revisão vigente.
+ORIGENS_PROPRIAS = frozenset({ORIGEM_AUTO_CADASTRO, ORIGEM_ALTERACAO_PROPRIA})
+
+
+async def aceites_abertos(db: AsyncSession, user_id: uuid.UUID) -> list[LgpdConsent]:
+    """Os aceites não revogados da pessoa, do mais recente para o mais antigo.
+
+    Uma consulta só, pelo índice de `user_id`: é dela que saem a situação do
+    aceite, a idempotência do PATCH e a resposta da tela.
+    """
+    resultado = await db.execute(
+        select(LgpdConsent)
+        .where(LgpdConsent.user_id == user_id, LgpdConsent.revogado_em.is_(None))
+        .order_by(LgpdConsent.concedido_em.desc())
+    )
+    return list(resultado.scalars().all())
+
+
+def avalia_aceite(
+    abertos: Sequence[LgpdConsent], *, role: UserRole, settings: Settings
+) -> SituacaoDoAceite:
+    """A situação do aceite a partir dos aceites abertos (`aceites_abertos`).
+
+    Com `LGPD_EXIGE_REACEITE` desligado nada fica pendente — é o estado de
+    hoje em produção, e é o que faz este código entrar inerte.
+
+    Política: pendente quando não existe NENHUMA linha aberta, de origem
+    própria, com a revisão vigente. "Existe alguma", e não "a última": não
+    depende da ordem das linhas, e várias abertas não atrapalham. Os Termos
+    não entram aqui. Sem linha nenhuma, fica pendente — a revisão de quem se
+    cadastrou antes do histórico é desconhecida, e `users.lgpd_consent` não
+    prova revisão nenhuma.
+
+    Termos: a regra de 24/09/2026, sem mudança — só clientes, e pendente
+    quando não há aceite aberto ou o mais recente traz outra revisão dos
+    Termos (inclusive os Termos passando a existir depois).
+    """
+    if not settings.lgpd_exige_reaceite:
+        return SituacaoDoAceite(politica_pendente=False, termos_pendentes=False)
+
+    politica_ok = any(
+        a.origem in ORIGENS_PROPRIAS and a.revisao_politica == settings.lgpd_revisao_politica
+        for a in abertos
+    )
+    ultimo = abertos[0] if abertos else None
+    termos_pendentes = role == UserRole.client and (
+        ultimo is None or ultimo.revisao_termos != settings.lgpd_revisao_termos
+    )
+    return SituacaoDoAceite(politica_pendente=not politica_ok, termos_pendentes=termos_pendentes)
+
+
+async def situacao_do_aceite(
+    db: AsyncSession, *, user_id: uuid.UUID, role: UserRole, settings: Settings
+) -> SituacaoDoAceite:
+    """`avalia_aceite` com a consulta. Com o interruptor desligado, nem consulta."""
+    if not settings.lgpd_exige_reaceite:
+        return SituacaoDoAceite(politica_pendente=False, termos_pendentes=False)
+    return avalia_aceite(await aceites_abertos(db, user_id), role=role, settings=settings)
+
+
+def ja_aceitou_as_revisoes_vigentes(abertos: Sequence[LgpdConsent], *, settings: Settings) -> bool:
+    """Se aceitar agora repetiria um aceite próprio que já está aberto.
+
+    É o que torna o PATCH idempotente: mesma revisão da Política E dos Termos
+    (a comparação em Python trata `None == None` como igual, que é o que o
+    `IS NOT DISTINCT FROM` faria no SQL), origem própria, não revogado.
+    """
+    return any(
+        a.origem in ORIGENS_PROPRIAS
+        and a.revisao_politica == settings.lgpd_revisao_politica
+        and a.revisao_termos == settings.lgpd_revisao_termos
+        for a in abertos
     )

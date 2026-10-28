@@ -113,10 +113,12 @@ def settings_com_upload_dir(tmp_path):
 
 async def _chama(metodo, caminho, *, ator, alvo, **kwargs):
     from app.core.database import get_db
-    from app.core.security import get_current_user
+    from app.core.security import get_current_user, get_current_user_sem_exigir_aceite
 
     app.dependency_overrides[get_db] = _db(alvo)
     app.dependency_overrides[get_current_user] = lambda: ator
+    # `GET /users/me` está na lista das rotas que não exigem o aceite.
+    app.dependency_overrides[get_current_user_sem_exigir_aceite] = lambda: ator
     async with AsyncClient(transport=ASGITransport(app=app), base_url="http://t") as cliente:
         return await cliente.request(metodo, f"/api/v1{caminho}", **kwargs)
 

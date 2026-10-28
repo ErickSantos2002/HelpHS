@@ -2004,6 +2004,131 @@ oferecida a pessoas antes de decisão sobre finalidade, base legal, aviso,
 quem ouve, retenção, exclusão e auditoria de acesso. A lista completa e as
 evidências estão em **Fases 2D.1 e 2D.2**, em *Pendências conhecidas*.
 
+### Aceite obrigatório da Política no backend (Decisão 2, 27/10/2026)
+
+Decisão registrada sob autorização expressa do responsável pela Política/LGPD
+(alternativa mais conservadora). Implementada **inerte**: só vale com
+`LGPD_EXIGE_REACEITE=true`, que nasce e continua `false`. Ligar NÃO faz parte
+do código — ver "Antes de ligar", abaixo.
+
+**Política × Termos.**
+
+- A **Política** vigente pode bloquear o backend. Fica pendente quando não
+  existe NENHUM aceite aberto, de origem própria, com
+  `revisao_politica == LGPD_REVISAO_POLITICA`. É "existe algum", não "o
+  último". Os Termos não entram nessa conta.
+- Os **Termos** NÃO bloqueiam o backend nesta fase. A Decisão 2 não autoriza
+  bloquear a API por mudança só em `LGPD_REVISAO_TERMOS`. Continua valendo a
+  regra de 24/09/2026: só clientes, só a tela de re-aceite no front.
+- O resultado é `SituacaoDoAceite(politica_pendente, termos_pendentes)`
+  (`services/consentimento.py`). Só `politica_pendente` decide bloqueio. O
+  `GET /users/me/lgpd-consent` devolve os dois e mantém `precisa_reaceitar`
+  (`politica_pendente or termos_pendentes`) só para o bundle anterior do front.
+- Nenhuma flag nova. Se um dia os Termos tiverem de bloquear, é decisão nova.
+
+**Quem.** Cliente, técnico e admin aceitam a Política.
+
+**`criado_por_terceiro` não satisfaz.** Valem `auto_cadastro` e
+`alteracao_propria`. A linha da equipe continua existindo, como registro da
+criação da conta. `users.lgpd_consent` sozinho também não vale: não prova
+revisão nenhuma.
+
+**Onde é cobrado.**
+
+- Dentro do `get_current_user`, depois de token, revogação, usuário e conta
+  ativa. Por isso conta inativa ou anonimizada continua 403, sessão inválida
+  continua 401, e o `authorize` herda o bloqueio.
+- Erro na verificação sobe como erro (500), nunca como acesso liberado.
+
+**Rotas que passam sem o aceite** (`get_current_user_sem_exigir_aceite`):
+
+- `GET /users/me`
+- `GET /users/me/lgpd-consent`
+- `PATCH /users/me/lgpd-consent`
+- `POST /auth/logout`
+
+Nada além disso sem justificativa. Para auditar:
+`grep -rn get_current_user_sem_exigir_aceite backend/app/routers`. Login, MFA
+verify e refresh não usam o `get_current_user` e continuam acessíveis. O
+`/privacidade` é do front.
+
+**Contrato REST: HTTP 428**, corpo plano:
+
+```json
+{"detail": "Para continuar, aceite a revisão vigente da Política de Privacidade.",
+ "code": "aceite_politica_pendente", "revisao_politica_vigente": "01"}
+```
+
+- O contrato é o `code`. O front não lê o texto.
+- Sem revisão dos Termos no corpo.
+- Exceção e tratador próprios (`AceitePoliticaPendenteError`): um
+  `HTTPException` com dicionário sairia aninhado em `detail`.
+- Por que 428: 401 dispararia o refresh do front, 403 já é conta inativa e
+  falta de permissão, 409 é conflito.
+
+**Contrato WebSocket: 4428**, motivo `aceite_politica_pendente`.
+
+- O backend chama `accept()` e só então `close(4428)`, sem mensagem antes.
+- Fechar antes do handshake não serve: o uvicorn responde HTTP 403 e o
+  navegador vê 1006, sem código. Isso foi medido em 28/10/2026 no Edge 156,
+  com uvicorn 0.34.0 e starlette 0.51.0.
+- O aceite é conferido na conexão e a cada mensagem recebida.
+- O `ChatPanel` não reconecta com 4428 e leva à tela de aceite.
+
+**Front.**
+
+- O `api.ts` transforma o 428 com o `code` num aviso. O `ChatPanel` faz o
+  mesmo com o 4428. A `ReaceiteGuard` escuta o aviso e troca qualquer tela
+  pela de aceite.
+- A consulta inicial do guard é **fail-open**: se `GET /users/me/lgpd-consent`
+  falhar, o sistema abre, como antes da Decisão 2. Isso não enfraquece a
+  obrigatoriedade: a autoridade é o backend. Com a Política pendente, o
+  primeiro pedido protegido responde 428 e o aviso traz a tela de aceite de
+  volta. Bloquear no front só criaria indisponibilidade nova com
+  `LGPD_EXIGE_REACEITE` desligado.
+- A exceção é a consulta disparada pelo aviso do 428/4428: o backend já disse
+  que a Política está pendente, então, se ela falhar, a tela de aceite aparece
+  mesmo assim (sem isso, sistema → 428 → sistema, sem fim).
+- Os Termos continuam só no front, só para clientes, e a falha da consulta
+  também não os cobra — como na main.
+- A tela de aceite vem ANTES do onboarding (login → aceite → onboarding →
+  sistema). Assim as rotas do onboarding não precisam ser liberadas.
+
+**Aceite idempotente.**
+
+- O `PATCH` trava a linha do usuário (`_trava_usuario`, `FOR UPDATE`) e só
+  então lê os aceites abertos. Aceitar e revogar usam a mesma trava.
+- Já existe aceite próprio, aberto, com as mesmas revisões de Política e de
+  Termos (`None == None` conta como igual)? Então devolve 200 sem linha nova,
+  sem auditoria e sem mexer em `lgpd_consent_at`.
+- Pedidos simultâneos da mesma pessoa não duplicam a linha.
+- Sem migration e sem constraint.
+
+**Revogar bloqueia de novo, na hora.** É consequência aceita do Cenário B:
+
+- as rotas fora da lista passam a responder 428;
+- os chats abertos da pessoa são fechados com 4428, depois do commit
+  (`fecha_chats_do_usuario`);
+- para voltar, ela aceita de novo.
+
+⚠️ O fechamento vale só para os sockets **deste processo**. Hoje há um worker
+(`start.sh`). Com vários, precisará de uma mensagem de controle pelo backplane,
+que não foi implementada.
+
+**Antes de ligar** (nada disto está no código):
+
+1. #94 integrado e publicado.
+2. Revisão 01 formalmente elaborada e aprovada.
+3. Texto correto publicado no front.
+4. Comunicação formal feita.
+5. Pelo menos 15 dias transcorridos.
+6. `LGPD_REVISAO_POLITICA=01`.
+7. Conferido em ambiente adequado que o proxy repassa o 4428.
+8. Só então `LGPD_EXIGE_REACEITE=true`.
+
+Os dois valores ficam em cache (`get_settings`): mudar qualquer um exige
+reiniciar a API.
+
 ---
 
 ## E-mail sem distinção de maiúsculas
@@ -2658,6 +2783,8 @@ por inércia.
 | **O teto de 0,25 depende do acervo** | Registrada em 10/09/2026. O número foi medido em 09/09 contra 74 trechos de 8 arquivos (margem de 0,009) e remedido em 10/09 contra 46 trechos de 3 artigos (margem de 0,007): mudou a fonte, mudou a margem, e ninguém mexeu no número. Com o suporte escrevendo artigos, o acervo vai continuar andando e o teto anda junto sem que nada quebre — a falha dele é silenciosa nas duas direções: acerto virando escalada, ou trecho errado passando. O método, as 40 perguntas e o viés (as 27 com resposta foram escritas por quem sabia a resposta; os acertos preservados são o melhor caso) estão em "Como remedir", na seção do teto. | **O acervo indexado mudar de ordem de grandeza** (46 trechos em 10/09; chegando às centenas, remedir), **ou entrar artigo de produto que hoje não tem manual** (Deimos, EBS-010, Mark X, Mercury) — as 40 perguntas não têm nenhuma sobre eles, então remedir inclui escrever perguntas para esse produto. Trocar o modelo de embedding invalida a medição inteira e também é gatilho. |
 | **Contador de artigo útil sem voto identificado** | `POST /kb/articles/{id}/feedback` incrementa sem registrar quem votou; o mesmo usuário incrementa em laço. Não vaza nada. | O número for usado para decidir alguma coisa. |
 | **O chamado não sabe quem é o cliente quando o staff o abre** | Medido em 18/09/2026: `Ticket` tem exatamente duas FKs para `users` — `creator_id` e `assignee_id` —, `TicketCreate` não tem campo de destinatário e `creator_id = actor.id` é incondicional. Quando um técnico abre chamado em nome de alguém (prática que o próprio código reconhece em comentário), **o cliente real fica sem vínculo nenhum**: some da listagem dele, leva 404 no detalhe, no chat e nos anexos, e a pesquisa de satisfação fica travada. Na mesma medição: 23 chamados, 4 abertos por staff, **os 4 já fechados e nenhum ativo**. Por isso a telefonia sai com o caminho barato — a ligação só aparece quando o criador do chamado é `role=client`, e nos demais a ação fica indisponível com motivo, em vez de discar para a pessoa errada. | **Antes de suportar formalmente a abertura de chamado por staff em nome de um cliente.** A saída é um `requester_id`/`client_id` explícito no chamado, com migration e backfill do histórico — e aí ele passa a ser a fonte do telefone da ligação, no lugar do criador. |
+| **WebSocket: 4001 e 4004 fecham antes do handshake** | Medido em 28/10/2026 (Edge 156, uvicorn 0.34.0, starlette 0.51.0): fechar antes do `accept()` vira HTTP 403, e o navegador recebe **1006**, sem código nem motivo. O `ChatPanel` só para de reconectar com 1000, 4001 e 4003, então token inválido e chamado inexistente ou alheio reconectam a cada 3 s, sem fim. O 4428 do aceite foi feito do jeito certo (`accept` e depois `close`). Os dois antigos ficaram fora de propósito, para não mudar contrato na frente do aceite. | Quando alguém mexer no contrato do chat, ou se aparecer carga de reconexão no log. O conserto é o mesmo padrão do 4428, com cuidado para manter igual o 4004 de chamado inexistente e o de chamado alheio. |
+| **Revogar o aceite fecha só os chats deste processo** | O `ConnectionManager` indexa os sockets por usuário na memória do processo. Com um worker (`start.sh`) isso cobre tudo. | **Antes de subir para mais de um worker.** A saída é uma mensagem de controle no backplane (`helphs:chat`) pedindo a cada worker que feche os sockets daquela pessoa. |
 | **Antivírus aceita quando está fora do ar** | Bloquear upload com o ClamAV indisponível derrubaria o anexo por falha de infraestrutura. Hoje o estado é reportado, não mais silencioso, e há script de revarredura. | O ClamAV estiver no ambiente e estável — aí bloquear passa a custar pouco. |
 
 

@@ -13,6 +13,10 @@ import { TOM_STATUS, type VarianteStatus } from "../../lib/status";
 import { dataHoraDoAnexo, type EventoDeAnexo } from "../../lib/anexoNaConversa";
 import type { Attachment } from "../../services/attachmentService";
 import {
+  WS_ACEITE_POLITICA_PENDENTE,
+  avisaAceitePoliticaPendente,
+} from "../../services/aceitePolitica";
+import {
   buildWsUrl,
   getChatMessages,
   improveMessage,
@@ -480,6 +484,12 @@ export function ChatPanel({
 
     ws.onclose = (ev) => {
       setWsStatus("disconnected");
+      // Falta aceitar a Política vigente: reconectar só repetiria o 4428 a
+      // cada 3 s, sem fim. O mesmo aviso do 428 leva à tela de aceite.
+      if (ev.code === WS_ACEITE_POLITICA_PENDENTE) {
+        avisaAceitePoliticaPendente();
+        return;
+      }
       // Auto-reconnect unless deliberately closed (code 1000) or auth error
       if (ev.code !== 1000 && ev.code !== 4001 && ev.code !== 4003) {
         reconnectTimer.current = setTimeout(connect, 3000);
