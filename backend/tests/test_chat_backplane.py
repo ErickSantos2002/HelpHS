@@ -13,6 +13,7 @@ processos não teria como ser escrito.
 """
 
 import asyncio
+import uuid
 
 import pytest
 
@@ -20,6 +21,9 @@ from app.routers.chat import ConnectionManager
 from app.services import chat_backplane
 
 _TICKET = "11111111-2222-3333-4444-555555555555"
+# O dono do socket: o manager indexa por pessoa para poder fechar os chats de quem
+# revogou o aceite. Aqui não importa quem é.
+_DONO = uuid.uuid4()
 _PAYLOAD = {"type": "message", "data": {"content": "oi"}}
 
 
@@ -141,7 +145,7 @@ async def test_mensagem_publicada_num_manager_chega_ao_outro(monkeypatch):
 
     a, b = ConnectionManager(), ConnectionManager()
     socket = _Socket()
-    b.connect(_TICKET, socket)
+    b.connect(_TICKET, socket, _DONO)
 
     tarefa = chat_backplane.start_chat_backplane(b.entregar_local, b.origem)
     try:
@@ -162,7 +166,7 @@ async def test_quem_publicou_nao_entrega_duas_vezes(monkeypatch):
 
     a = ConnectionManager()
     socket = _Socket()
-    a.connect(_TICKET, socket)
+    a.connect(_TICKET, socket, _DONO)
 
     tarefa = chat_backplane.start_chat_backplane(a.entregar_local, a.origem)
     try:
@@ -186,7 +190,7 @@ async def test_mensagem_de_sala_que_o_worker_nao_hospeda_e_descartada(monkeypatc
 
     a, b = ConnectionManager(), ConnectionManager()
     socket = _Socket()
-    b.connect("outro-chamado", socket)
+    b.connect("outro-chamado", socket, _DONO)
 
     tarefa = chat_backplane.start_chat_backplane(b.entregar_local, b.origem)
     try:
@@ -216,7 +220,7 @@ async def test_redis_fora_nao_impede_a_entrega_local(monkeypatch):
 
     a = ConnectionManager()
     socket = _Socket()
-    a.connect(_TICKET, socket)
+    a.connect(_TICKET, socket, _DONO)
 
     await a.broadcast(_TICKET, _PAYLOAD)
 
@@ -235,7 +239,7 @@ async def test_a_entrega_local_acontece_antes_do_publish(monkeypatch):
     monkeypatch.setattr(chat_backplane, "get_redis", _usando(broker))
 
     a = ConnectionManager()
-    a.connect(_TICKET, _Socket(ordem=ordem))
+    a.connect(_TICKET, _Socket(ordem=ordem), _DONO)
 
     await a.broadcast(_TICKET, _PAYLOAD)
 

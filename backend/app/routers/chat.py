@@ -25,6 +25,7 @@ from loguru import logger
 from sqlalchemy import func, select
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.orm import selectinload
+from starlette.websockets import WebSocketState
 
 from app.core.config import get_settings
 from app.core.database import AsyncSessionLocal, get_db
@@ -50,7 +51,7 @@ from app.schemas.chat import (
     ImproveMessageResponse,
     SuggestReplyResponse,
 )
-from app.services import chat_backplane
+from app.services import chat_backplane, consentimento
 from app.services.helo import (
     FALAS_MAXIMAS,
     MOTIVO_PEDIU_HUMANO,
@@ -90,17 +91,47 @@ class ConnectionManager:
     def __init__(self) -> None:
         # ticket_id (str) → set of active WebSocket connections
         self._rooms: dict[str, set[WebSocket]] = {}
+        # Quem é dono de cada socket. As salas são por chamado e o broadcast
+        # não olha quem recebe; sem este índice não haveria como fechar os
+        # chats de UMA pessoa — que é o que revogar o aceite da Política exige.
+        self._por_usuario: dict[uuid.UUID, set[WebSocket]] = {}
         self.origem = uuid.uuid4().hex[:12]
 
-    def connect(self, ticket_id: str, ws: WebSocket) -> None:
+    def connect(self, ticket_id: str, ws: WebSocket, user_id: uuid.UUID) -> None:
         self._rooms.setdefault(ticket_id, set()).add(ws)
+        self._por_usuario.setdefault(user_id, set()).add(ws)
 
-    def disconnect(self, ticket_id: str, ws: WebSocket) -> None:
+    def disconnect(self, ticket_id: str, ws: WebSocket, user_id: uuid.UUID) -> None:
         room = self._rooms.get(ticket_id)
         if room:
             room.discard(ws)
             if not room:
                 del self._rooms[ticket_id]
+        dele = self._por_usuario.get(user_id)
+        if dele:
+            dele.discard(ws)
+            if not dele:
+                del self._por_usuario[user_id]
+
+    async def fecha_do_usuario(self, user_id: uuid.UUID, *, code: int, reason: str) -> int:
+        """Fecha os sockets da pessoa NESTE processo; devolve quantos.
+
+        Quem limpa as salas é o `finally` do handler de cada socket, quando o
+        `receive` dele recebe o desconectar. Falha ao fechar um socket que já
+        morreu não impede fechar os outros.
+
+        ⚠️ Só este processo. Hoje há um worker (`start.sh`). Com vários, o
+        socket da pessoa pode estar noutro processo, e fechá-lo exigiria uma
+        mensagem de controle pelo backplane — não implementada.
+        """
+        fechados = 0
+        for ws in list(self._por_usuario.get(user_id, ())):
+            try:
+                await ws.close(code=code, reason=reason)
+                fechados += 1
+            except Exception:  # noqa: BLE001 — socket já morto não é erro aqui
+                pass
+        return fechados
 
     async def entregar_local(self, ticket_id: str, payload: dict) -> None:
         """Entrega aos sockets deste processo, e só a eles.
@@ -132,6 +163,27 @@ class ConnectionManager:
 
 
 manager = ConnectionManager()
+
+# Fechamento por aceite da Política pendente. O código precisa chegar ao
+# navegador, e por isso só é usado DEPOIS do `accept()`: fechar antes do
+# handshake vira HTTP 403 no uvicorn e o navegador só vê 1006, sem código nem
+# motivo (medido em 28/10/2026). O `ChatPanel` não reconecta com ele.
+WS_ACEITE_POLITICA_PENDENTE = 4428
+_MOTIVO_ACEITE_PENDENTE = "aceite_politica_pendente"
+
+
+async def fecha_chats_do_usuario(user_id: uuid.UUID) -> int:
+    """Fecha com 4428 os chats abertos da pessoa (quem revogou o aceite)."""
+    return await manager.fecha_do_usuario(
+        user_id, code=WS_ACEITE_POLITICA_PENDENTE, reason=_MOTIVO_ACEITE_PENDENTE
+    )
+
+
+async def _politica_pendente(db: AsyncSession, user: User) -> bool:
+    situacao = await consentimento.situacao_do_aceite(
+        db, user_id=user.id, role=user.role, settings=get_settings()
+    )
+    return situacao.politica_pendente
 
 
 # ── Helpers ───────────────────────────────────────────────────
@@ -590,6 +642,15 @@ async def websocket_chat(
             await websocket.close(code=4001, reason="Unauthorized")
             return
 
+        # Aceite da Política pendente: aceitar e SÓ ENTÃO fechar, para o 4428
+        # chegar ao navegador (ver `WS_ACEITE_POLITICA_PENDENTE`). Sem mensagem
+        # de erro antes: o código basta. O 4001 acima e o 4004 abaixo seguem
+        # fechando antes do handshake — dívida conhecida, fora desta frente.
+        if await _politica_pendente(db, user):
+            await websocket.accept()
+            await websocket.close(code=WS_ACEITE_POLITICA_PENDENTE, reason=_MOTIVO_ACEITE_PENDENTE)
+            return
+
         # Chamado inexistente e chamado alheio fecham IGUAL — mesmo código,
         # mesmo motivo. O 4003 ("Forbidden") de antes dizia que o chamado
         # existe, e quem tivesse uma lista de ids enumerava o sistema pelo
@@ -603,12 +664,27 @@ async def websocket_chat(
 
     await websocket.accept()
     tid_str = str(ticket_id)
-    manager.connect(tid_str, websocket)
+    manager.connect(tid_str, websocket, user.id)
     logger.info(f"WS connected: user={user.id} ticket={ticket_id}")
 
     try:
-        while True:
+        # Enquanto o socket estiver de pé do lado do servidor. Quem revoga o
+        # aceite tem o socket fechado por outro pedido (`fecha_chats_do_usuario`);
+        # se isso acontecer no meio do processamento de uma mensagem, o
+        # `receive_text` seguinte levantaria RuntimeError em vez de desconectar.
+        while websocket.application_state == WebSocketState.CONNECTED:
             raw = await websocket.receive_text()
+
+            # O aceite é conferido de novo a cada mensagem recebida, antes de
+            # qualquer outra coisa. Sozinho isto não basta — o socket parado só
+            # recebe, e o broadcast não olha quem é o destinatário; por isso
+            # revogar também fecha os chats da pessoa.
+            async with AsyncSessionLocal() as db:
+                if await _politica_pendente(db, user):
+                    await websocket.close(
+                        code=WS_ACEITE_POLITICA_PENDENTE, reason=_MOTIVO_ACEITE_PENDENTE
+                    )
+                    break
             try:
                 data = json.loads(raw)
                 content = str(data.get("content", "")).strip()
@@ -746,7 +822,7 @@ async def websocket_chat(
     except WebSocketDisconnect:
         logger.info(f"WS disconnected: user={user.id} ticket={ticket_id}")
     finally:
-        manager.disconnect(tid_str, websocket)
+        manager.disconnect(tid_str, websocket, user.id)
 
 
 # ── Internal helpers ──────────────────────────────────────────

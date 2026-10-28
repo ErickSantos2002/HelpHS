@@ -171,7 +171,7 @@ async def delete_refresh_token(user_id: UUID) -> None:
 # ── FastAPI dependency ────────────────────────────────────────
 
 
-async def get_current_user(
+async def get_current_user_sem_exigir_aceite(
     credentials: Annotated[HTTPAuthorizationCredentials | None, Depends(bearer_scheme)],
     db: Annotated[AsyncSession, Depends(get_db)],
 ) -> Any:
@@ -181,6 +181,12 @@ async def get_current_user(
     O retorno é `Any` e não `User` de propósito: o modelo é importado dentro da
     função para evitar import circular, então o nome não existe aqui em cima.
     Raises 401 if token is missing, invalid, expired, or blacklisted.
+
+    NÃO confere o aceite da Política. Só as rotas que a própria tela de
+    re-aceite precisa usam esta variante direto — `GET /users/me`,
+    `GET` e `PATCH /users/me/lgpd-consent` e `POST /auth/logout`. Qualquer
+    outra rota usa `get_current_user`. Para auditar a lista:
+    `grep -rn get_current_user_sem_exigir_aceite app/routers`.
     """
     from app.models.models import User, UserStatus  # avoid circular import
 
@@ -227,6 +233,37 @@ async def get_current_user(
             detail="Esta conta está inativa. Fale com um administrador.",
         )
 
+    return user
+
+
+async def get_current_user(
+    user: Annotated[Any, Depends(get_current_user_sem_exigir_aceite)],
+    db: Annotated[AsyncSession, Depends(get_db)],
+) -> Any:
+    """O usuário autenticado E com o aceite da Política vigente.
+
+    É o padrão de toda rota autenticada, e por isso o bloqueio mora aqui: rota
+    nova já nasce exigindo o aceite, o `authorize` herda, e a exceção fica
+    explícita na variante `get_current_user_sem_exigir_aceite`.
+
+    A ordem é a do caminho de sempre — token, assinatura e tipo, revogação,
+    usuário, conta ativa — e só depois o aceite: conta inativa continua 403,
+    sessão inválida continua 401. Com `LGPD_EXIGE_REACEITE` desligado não há
+    nem consulta.
+
+    Os Termos não entram (`SituacaoDoAceite.politica_pendente` só olha a
+    Política). E não há `try` aqui de propósito: erro do banco na verificação
+    sobe como erro, nunca como acesso liberado.
+    """
+    from app.core.exceptions import AceitePoliticaPendenteError  # avoid circular import
+    from app.services import consentimento
+
+    atual = get_settings()
+    situacao = await consentimento.situacao_do_aceite(
+        db, user_id=user.id, role=user.role, settings=atual
+    )
+    if situacao.politica_pendente:
+        raise AceitePoliticaPendenteError(atual.lgpd_revisao_politica)
     return user
 
 

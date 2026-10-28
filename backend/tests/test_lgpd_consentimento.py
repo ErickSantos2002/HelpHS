@@ -28,7 +28,8 @@ from app.services.consentimento import (
     ORIGEM_ALTERACAO_PROPRIA,
     ORIGEM_AUTO_CADASTRO,
     ORIGEM_CRIADO_POR_TERCEIRO,
-    precisa_reaceitar,
+    avalia_aceite,
+    ja_aceitou_as_revisoes_vigentes,
 )
 from tests.test_users import _ADMIN, _CLIENT, _get_redis, _user
 
@@ -71,6 +72,7 @@ def _sessao(*, usuario_da_consulta=None, ultimo_aceite=None):
         r = MagicMock()
         r.scalar_one_or_none.return_value = usuario_da_consulta
         r.scalars.return_value.first.return_value = ultimo_aceite
+        r.scalars.return_value.all.return_value = [ultimo_aceite] if ultimo_aceite else []
         return r
 
     async def _flush():
@@ -101,12 +103,14 @@ def _aceites(adicionados) -> list[LgpdConsent]:
 
 
 def _como(ator):
-    from app.core.security import get_current_user
+    from app.core.security import get_current_user, get_current_user_sem_exigir_aceite
 
     async def _ator():
         return ator
 
     app.dependency_overrides[get_current_user] = _ator
+    # As rotas do próprio aceite não exigem o aceite: usam a variante.
+    app.dependency_overrides[get_current_user_sem_exigir_aceite] = _ator
 
 
 _CORPO_CADASTRO = {
@@ -275,13 +279,13 @@ async def test_revogar_marca_revogado_em_e_nao_apaga(patch_redis, revisoes):
 # ══════════════════════════════════════════════════════════════
 
 
-def _aceite(politica="07", termos="03") -> LgpdConsent:
+def _aceite(politica="07", termos="03", origem=ORIGEM_AUTO_CADASTRO) -> LgpdConsent:
     return LgpdConsent(
         id=uuid.uuid4(),
         user_id=uuid.uuid4(),
         revisao_politica=politica,
         revisao_termos=termos,
-        origem=ORIGEM_AUTO_CADASTRO,
+        origem=origem,
         concedido_em=datetime.now(UTC),
     )
 
@@ -294,36 +298,98 @@ def _config(*, exige=True, politica="07", termos="03"):
     return c
 
 
-def test_interruptor_desligado_nao_cobra_ninguem():
-    assert precisa_reaceitar(None, role=UserRole.client, settings=_config(exige=False)) is False
+def _situacao(abertos, papel=UserRole.client, **config):
+    return avalia_aceite(abertos, role=papel, settings=_config(**config))
 
 
-@pytest.mark.parametrize("papel", [UserRole.admin, UserRole.technician])
-def test_equipe_nunca_passa_pela_tela(papel):
-    """Decisão de 24/09: só clientes. Travar a equipe no dia da publicação é
-    risco operacional que foi recusado."""
-    assert precisa_reaceitar(None, role=papel, settings=_config()) is False
+_PAPEIS = [UserRole.client, UserRole.technician, UserRole.admin]
+
+
+@pytest.mark.parametrize("papel", _PAPEIS)
+def test_interruptor_desligado_nao_cobra_ninguem(papel):
+    s = _situacao([], papel, exige=False)
+    assert (s.politica_pendente, s.termos_pendentes) == (False, False)
+
+
+@pytest.mark.parametrize("papel", _PAPEIS)
+def test_politica_cobra_todos_os_papeis(papel):
+    """Decisão 2D, de 27/10/2026: a Política vigente vale para todos."""
+    assert _situacao([], papel).politica_pendente is True
+    assert _situacao([_aceite(politica="06")], papel).politica_pendente is True
+    assert _situacao([_aceite()], papel).politica_pendente is False
+
+
+@pytest.mark.parametrize("papel", [UserRole.technician, UserRole.admin])
+def test_equipe_nao_e_cobrada_pelos_termos(papel):
+    """Os Termos seguem na regra de 24/09: só clientes."""
+    assert _situacao([_aceite(termos="02")], papel).termos_pendentes is False
 
 
 def test_cliente_sem_aceite_registrado_precisa_aceitar():
     """Quem se cadastrou antes do histórico tem revisão DESCONHECIDA — e é
-    esse NULL que dispara o re-aceite, em vez de fingir que foi a 00."""
-    assert precisa_reaceitar(None, role=UserRole.client, settings=_config()) is True
+    esse vazio que dispara o re-aceite, em vez de fingir que foi a 00."""
+    s = _situacao([])
+    assert (s.politica_pendente, s.termos_pendentes) == (True, True)
 
 
-def test_cliente_com_a_revisao_vigente_segue():
-    assert precisa_reaceitar(_aceite(), role=UserRole.client, settings=_config()) is False
+def test_cliente_com_as_revisoes_vigentes_segue():
+    s = _situacao([_aceite()])
+    assert (s.politica_pendente, s.termos_pendentes, s.precisa_reaceitar) == (False, False, False)
+
+
+def test_aceite_criado_por_terceiro_nao_satisfaz_a_politica():
+    """Decisão 2C: o registro da equipe não é manifestação do titular."""
+    terceiro = _aceite(origem=ORIGEM_CRIADO_POR_TERCEIRO)
+    assert _situacao([terceiro]).politica_pendente is True
+
+
+def test_alteracao_propria_satisfaz_a_politica():
+    assert _situacao([_aceite(origem=ORIGEM_ALTERACAO_PROPRIA)]).politica_pendente is False
+
+
+def test_vale_qualquer_aceite_proprio_aberto_e_nao_so_o_ultimo():
+    """'Existe algum', não 'o último': um aceite da equipe mais recente não
+    esconde o aceite próprio da revisão vigente."""
+    abertos = [_aceite(origem=ORIGEM_CRIADO_POR_TERCEIRO), _aceite(origem=ORIGEM_AUTO_CADASTRO)]
+    assert _situacao(abertos).politica_pendente is False
 
 
 def test_politica_nova_cobra_de_novo():
-    ultimo = _aceite(politica="06")
-    assert precisa_reaceitar(ultimo, role=UserRole.client, settings=_config()) is True
+    assert _situacao([_aceite(politica="06")]).politica_pendente is True
 
 
-def test_termos_publicados_depois_cobram_de_novo():
+def test_revisao_de_politica_mais_nova_que_a_vigente_tambem_cobra():
+    """Voltar a revisão vigente (rollback de configuração) não deixa passar."""
+    assert _situacao([_aceite(politica="08")]).politica_pendente is True
+
+
+def test_termos_novos_nao_tocam_na_politica():
+    """A Decisão 2 não autoriza bloquear o backend por mudança só nos Termos:
+    Termos pendentes NUNCA viram Política pendente."""
+    s = _situacao([_aceite(termos="02")])
+    assert (s.politica_pendente, s.termos_pendentes) == (False, True)
+    assert s.precisa_reaceitar is True
+
+
+def test_termos_publicados_depois_cobram_o_cliente_na_tela():
     """Aceitou quando os Termos não existiam (NULL); agora existem."""
-    ultimo = _aceite(termos=None)
-    assert precisa_reaceitar(ultimo, role=UserRole.client, settings=_config()) is True
+    s = _situacao([_aceite(termos=None)])
+    assert (s.politica_pendente, s.termos_pendentes) == (False, True)
+
+
+def test_aceite_ja_existente_e_reconhecido_pela_idempotencia():
+    config = _config()
+    assert ja_aceitou_as_revisoes_vigentes([_aceite()], settings=config) is True
+    assert ja_aceitou_as_revisoes_vigentes([_aceite(termos=None)], settings=config) is False
+    assert (
+        ja_aceitou_as_revisoes_vigentes(
+            [_aceite(origem=ORIGEM_CRIADO_POR_TERCEIRO)], settings=config
+        )
+        is False
+    )
+    # Sem Termos vigentes: NULL com NULL é o mesmo ato.
+    sem_termos = _config(termos=None)
+    assert ja_aceitou_as_revisoes_vigentes([_aceite(termos=None)], settings=sem_termos) is True
 
 
 # ══════════════════════════════════════════════════════════════
@@ -353,5 +419,7 @@ async def test_situacao_do_aceite_para_a_tela(patch_redis, revisoes):
         "revisao_termos_vigente": "03",
         "revisao_politica_aceita": "06",
         "revisao_termos_aceita": "03",
+        "politica_pendente": True,
+        "termos_pendentes": False,
         "precisa_reaceitar": True,
     }
