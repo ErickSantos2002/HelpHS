@@ -6,7 +6,7 @@ O que só o banco prova, e por isso mora aqui e não em dublê:
 - o padrão é falso para conta nova por ORM e por INSERT cru (`server_default`);
 - cada papel muda só a própria escolha, e nada do corpo escolhe outra conta;
 - PATCH genérico, edição pelo admin, onboarding, upload e aceite da Política
-  não mexem na escolha;
+  não mexem na escolha — e revogar o aceite da Política também não;
 - estado e evento vão no mesmo commit — se o evento não entra, o estado também
   não fica;
 - repetir não duplica, e pedidos simultâneos se enfileiram na trava da linha
@@ -622,6 +622,66 @@ async def test_aceite_da_politica_e_upload_nao_ativam_a_escolha(
     assert r.json()["avatar_url"]
 
     assert await _estado(fabrica, eu) == (False, [])
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize(
+    "exige_reaceite", [False, True], ids=["reaceite_desligado", "reaceite_ligado"]
+)
+@pytest.mark.parametrize("papel", [UserRole.client, UserRole.technician, UserRole.admin])
+async def test_revogar_o_aceite_da_politica_nao_revoga_a_autorizacao_da_foto(
+    fabrica, criados, aviso_de_teste, tmp_path, monkeypatch, papel, exige_reaceite
+):
+    """O aceite geral e a autorização da foto são registros separados.
+
+    Revogar o aceite da Política (PATCH /users/me/lgpd-consent com `false`)
+    encerra a linha de `lgpd_consents` e, com o re-aceite ligado, volta a
+    bloquear o backend — mas não toca na foto: nem no estado nem no histórico
+    de `avatar_visibility_events`. Quem quiser tirar a foto de terceiros
+    revoga a autorização, no perfil.
+    """
+    if exige_reaceite:
+        monkeypatch.setattr(get_settings(), "lgpd_exige_reaceite", True)
+        monkeypatch.setattr(get_settings(), "lgpd_revisao_politica", "TESTE-01")
+    eu = _usuario(papel, lgpd_consent=False, avatar_url=None)
+    await _grava(fabrica, criados, eu)
+    _atende_como(fabrica, eu)
+    monkeypatch.setattr(get_settings(), "upload_dir", str(tmp_path))
+
+    r = await _pede(
+        "POST", "/api/v1/users/me/avatar", eu, files={"file": ("f.png", b"\x89PNG", "image/png")}
+    )
+    assert r.status_code == 200, r.text
+    r = await _pede("PATCH", "/api/v1/users/me/lgpd-consent", eu, json={"lgpd_consent": True})
+    assert r.status_code == 200, r.text
+    r = await _pede("PUT", _ROTA, eu, json=_autoriza())
+    assert r.status_code == 200, r.text
+    visivel, antes = await _estado(fabrica, eu)
+    assert visivel is True
+    assert [e.evento for e in antes] == ["autorizacao"]
+    historico = [(e.id, e.evento, e.versao_aviso, e.origem, e.registrado_em) for e in antes]
+
+    r = await _pede("PATCH", "/api/v1/users/me/lgpd-consent", eu, json={"lgpd_consent": False})
+    assert r.status_code == 200, r.text
+
+    # O aceite foi mesmo revogado: sem isso o teste passaria por não ter feito nada.
+    async with fabrica() as s:
+        aceites = (
+            (await s.execute(select(LgpdConsent).where(LgpdConsent.user_id == eu.id)))
+            .scalars()
+            .all()
+        )
+        consentiu = (
+            await s.execute(select(User.lgpd_consent).where(User.id == eu.id))
+        ).scalar_one()
+    assert consentiu is False
+    assert aceites and all(a.revogado_em is not None for a in aceites)
+
+    visivel, depois = await _estado(fabrica, eu)
+    assert visivel is True
+    assert [
+        (e.id, e.evento, e.versao_aviso, e.origem, e.registrado_em) for e in depois
+    ] == historico
 
 
 @pytest.mark.asyncio
