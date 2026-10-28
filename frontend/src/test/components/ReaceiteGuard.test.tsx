@@ -17,7 +17,8 @@ import type { AuthUser } from "../../types/auth";
  * - Termos (`termos_pendentes`): só clientes, só a tela — a regra de
  *   24/09/2026, preservada.
  *
- * Dá para recusar, e recusar é sair. Falhar a consulta NÃO libera.
+ * Dá para recusar, e recusar é sair. Falhar a consulta LIBERA, como antes: quem
+ * obriga a Política é o backend, e o 428 dele traz a tela de volta.
  */
 
 vi.mock("../../contexts/AuthContext", () => ({
@@ -155,28 +156,44 @@ describe("ReaceiteGuard — Termos: comportamento antigo, só clientes", () => {
 });
 
 describe("ReaceiteGuard — falha na consulta", () => {
-  it("NÃO libera: mostra o erro e deixa tentar de novo", async () => {
-    comoUsuario("client");
-    mockStatus.mockRejectedValueOnce(new Error("rede caiu"));
-    mockStatus.mockResolvedValueOnce(situacao(false));
+  // Com `LGPD_EXIGE_REACEITE` desligado, bloquear aqui seria indisponibilidade
+  // nova por uma rota só. Com ele ligado, o 428 do backend é a trava.
+  it.each(PAPEIS)("%s: a consulta inicial falhou, o sistema abre", async (papel) => {
+    comoUsuario(papel);
+    mockStatus.mockRejectedValue(new Error("rede caiu"));
     monta();
 
-    expect(await screen.findByRole("alert")).toHaveTextContent(/não foi possível verificar/i);
-    expect(screen.queryByText("lista de chamados")).toBeNull();
-
-    await userEvent.click(screen.getByRole("button", { name: /tentar novamente/i }));
     expect(await screen.findByText("lista de chamados")).toBeInTheDocument();
-    expect(mockStatus).toHaveBeenCalledTimes(2);
+    expect(screen.queryByRole("heading", { name: TITULO })).toBeNull();
+    expect(screen.queryByRole("alert")).toBeNull();
   });
 
-  it("da tela de erro dá para sair", async () => {
-    comoUsuario("admin");
-    mockStatus.mockRejectedValue(new Error("timeout"));
+  it("o 428 depois da falha traz a tela de aceite", async () => {
+    comoUsuario("client");
+    mockStatus.mockRejectedValueOnce(new Error("rede caiu"));
+    mockStatus.mockResolvedValueOnce(situacao(true));
     monta();
+    expect(await screen.findByText("lista de chamados")).toBeInTheDocument();
 
-    await userEvent.click(await screen.findByRole("button", { name: /^sair$/i }));
-    await waitFor(() => expect(logout).toHaveBeenCalled());
-    expect(await screen.findByText("tela de login")).toBeInTheDocument();
+    act(() => avisaAceitePoliticaPendente());
+
+    expect(await screen.findByRole("heading", { name: TITULO })).toBeInTheDocument();
+    expect(screen.queryByText("lista de chamados")).toBeNull();
+  });
+
+  it("se a consulta disparada pelo 428 também falhar, cobra em vez de liberar", async () => {
+    // O 428 já disse que a Política está pendente. Liberar faria o sistema
+    // voltar, o 428 voltar, e assim sem fim.
+    comoUsuario("technician");
+    mockStatus.mockResolvedValueOnce(situacao(false));
+    mockStatus.mockRejectedValueOnce(new Error("rede caiu"));
+    monta();
+    expect(await screen.findByText("lista de chamados")).toBeInTheDocument();
+
+    act(() => avisaAceitePoliticaPendente());
+
+    expect(await screen.findByRole("heading", { name: TITULO })).toBeInTheDocument();
+    expect(screen.queryByText("lista de chamados")).toBeNull();
   });
 });
 

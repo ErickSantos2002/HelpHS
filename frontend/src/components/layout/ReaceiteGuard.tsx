@@ -1,4 +1,4 @@
-import { useEffect, useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import { Link, Outlet, useNavigate } from "react-router-dom";
 import { Alert, Button, Spinner } from "../ui";
 import { useAuth } from "../../contexts/AuthContext";
@@ -24,9 +24,13 @@ import logoFull from "../../assets/Logo HelpHS.png";
  * `aoAceitePoliticaPendente`, e o guard consulta de novo. Dá para recusar, e
  * recusar é sair.
  *
- * Falhou a consulta, NÃO libera: mostra o erro com "Tentar novamente". Liberar
- * seria deixar a pessoa numa tela que o backend recusaria pedido a pedido, e
- * fingir que a consulta deu certo.
+ * Falhou a consulta, LIBERA, como antes da Decisão 2. Quem obriga o aceite da
+ * Política é o backend: com ela pendente, o primeiro pedido protegido volta
+ * com 428 e o aviso traz esta tela de volta. Bloquear aqui só criaria
+ * indisponibilidade nova com `LGPD_EXIGE_REACEITE` desligado. A exceção é a
+ * consulta disparada por esse aviso: o 428 já disse que a Política está
+ * pendente, então, se ela falhar, a tela de aceite aparece mesmo assim — sem
+ * isso o sistema voltaria, o 428 voltaria, e assim sem fim.
  *
  * Vem ANTES do onboarding (`App.tsx`): o onboarding chama rotas que o backend
  * bloqueia sem o aceite.
@@ -36,17 +40,24 @@ export function ReaceiteGuard() {
   const navigate = useNavigate();
   const ehCliente = user?.role === "client";
 
-  const [situacao, setSituacao] = useState<
-    "verificando" | "liberado" | "cobrar" | "falhou"
-  >("verificando");
+  const [situacao, setSituacao] = useState<"verificando" | "liberado" | "cobrar">(
+    "verificando",
+  );
   const [revisao, setRevisao] = useState<string | null>(null);
   const [enviando, setEnviando] = useState(false);
   const [erro, setErro] = useState(false);
-  // Cada aviso de 428/4428, e cada "Tentar novamente", é uma consulta nova.
+  // Cada aviso de 428/4428 é uma consulta nova.
   const [consulta, setConsulta] = useState(0);
+  // O backend avisou que a Política está pendente e nenhuma consulta o
+  // desmentiu ainda: se a próxima falhar, cobra em vez de liberar.
+  const pendentePeloAviso = useRef(false);
 
   useEffect(
-    () => aoAceitePoliticaPendente(() => setConsulta((n) => n + 1)),
+    () =>
+      aoAceitePoliticaPendente(() => {
+        pendentePeloAviso.current = true;
+        setConsulta((n) => n + 1);
+      }),
     [],
   );
 
@@ -60,11 +71,12 @@ export function ReaceiteGuard() {
     getLgpdConsentStatus()
       .then((s) => {
         if (!vivo) return;
+        pendentePeloAviso.current = false;
         setRevisao(s.revisao_politica_vigente);
         setSituacao(precisaDaTela(s, ehCliente) ? "cobrar" : "liberado");
       })
       .catch(() => {
-        if (vivo) setSituacao("falhou");
+        if (vivo) setSituacao(pendentePeloAviso.current ? "cobrar" : "liberado");
       });
     return () => {
       vivo = false;
@@ -76,6 +88,7 @@ export function ReaceiteGuard() {
     setErro(false);
     try {
       await updateLGPDConsent(true);
+      pendentePeloAviso.current = false;
       setSituacao("liberado");
     } catch {
       setErro(true);
@@ -102,28 +115,6 @@ export function ReaceiteGuard() {
   }
 
   if (situacao === "liberado") return <Outlet />;
-
-  if (situacao === "falhou") {
-    return (
-      <div className="flex min-h-screen items-center justify-center bg-surface-base px-4 py-10">
-        <div className="w-full max-w-lg space-y-6 rounded-xl border border-borda bg-surface p-6 sm:p-8">
-          <img src={logoFull} alt="HelpHS" className="h-7 w-auto object-contain" />
-          <Alert variant="danger">
-            Não foi possível verificar o seu aceite da Política de Privacidade.
-            Confira a sua conexão e tente novamente.
-          </Alert>
-          <div className="flex flex-col-reverse gap-3 sm:flex-row sm:justify-end">
-            <Button variant="secondary" onClick={recusar} disabled={enviando}>
-              Sair
-            </Button>
-            <Button variant="primary" onClick={() => setConsulta((n) => n + 1)}>
-              Tentar novamente
-            </Button>
-          </div>
-        </div>
-      </div>
-    );
-  }
 
   return (
     <div className="flex min-h-screen items-center justify-center bg-surface-base px-4 py-10">
