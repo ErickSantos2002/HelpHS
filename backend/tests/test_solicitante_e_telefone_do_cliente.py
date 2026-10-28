@@ -440,14 +440,19 @@ async def test_tecnico_nao_muda_papel_de_cliente_para_staff(novo_papel):
 
 @pytest.mark.asyncio
 async def test_tecnico_nao_rebaixa_staff_a_cliente():
-    """Rebaixar também é MUDAR — e continua sendo atribuição de papel."""
+    """Rebaixar também é MUDAR — e técnico não mexe em conta de equipe.
+
+    Desde a F1-A (27/10/2026) quem barra primeiro é a hierarquia: o alvo é
+    técnico, e técnico só altera cliente. A guarda de papel continua lá atrás
+    dela; o 403 é o mesmo, muda só o motivo dito.
+    """
     alvo = _usuario(UserRole.technician)
     _prepara(_usuario(UserRole.technician), alvo)
 
     codigo, corpo = await _patch({"role": "client"}, alvo.id)
 
     assert codigo == 403
-    assert corpo.get("detail") == _ERRO_PAPEL
+    assert corpo.get("detail") == "Apenas administradores podem alterar contas da equipe."
 
 
 @pytest.mark.asyncio

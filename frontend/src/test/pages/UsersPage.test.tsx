@@ -443,7 +443,10 @@ describe("UsersPage", () => {
   });
 
   it("técnico não recebe o controle de ramal, nem para si", async () => {
+    // A linha é a do próprio técnico: desde a F1-A, a de outro técnico nem
+    // oferece "Editar" a quem não é admin.
     papelDeQuemEdita = "technician";
+    comUsuarios([ANA, { ...BRUNO, id: "eu" }, CARLA]);
     const user = userEvent.setup();
     await montar();
 
@@ -469,15 +472,27 @@ describe("UsersPage", () => {
     //
     // O backend também passou a comparar com o papel atual; esta metade é não
     // mandar o que não se pode mudar.
+    //
+    // O caso editava um técnico; desde a F1-A essa linha nem oferece "Editar"
+    // a técnico, e o caso passou a editar o cliente que o título sempre disse.
     const user = userEvent.setup();
     papelDeQuemEdita = "technician";
+    const DANI: UserSummary = {
+      ...BASE,
+      id: "u4",
+      name: "Dani Rocha",
+      email: "dani@exemplo.com",
+      role: "client",
+      status: "active",
+    };
+    comUsuarios([ANA, BRUNO, DANI]);
     vi.mocked(userService.updateUser).mockResolvedValue({
-      ...BRUNO,
+      ...DANI,
       phone: "+5581911112222",
     });
     await montar();
 
-    await user.click(await screen.findByRole("button", { name: "Editar Bruno Lima" }));
+    await user.click(await screen.findByRole("button", { name: "Editar Dani Rocha" }));
     const dialogo = await screen.findByRole("dialog");
     const campo = within(dialogo).getByLabelText("Telefone");
     await user.clear(campo);
@@ -659,6 +674,142 @@ describe("UsersPage", () => {
 
 
 /**
+ * F1-A: só administrador mexe em conta da equipe.
+ *
+ * O backend é quem barra (403 do guarda de hierarquia, 409 do último admin
+ * ativo); a tela só não oferece o que vai ser recusado e, quando a recusa
+ * chega mesmo assim — lista velha, papel trocado no meio do caminho —, diz o
+ * motivo com as palavras do servidor em vez de engolir o erro.
+ */
+describe("UsersPage — hierarquia de contas (F1-A)", () => {
+  const DANI: UserSummary = {
+    ...BASE,
+    id: "u4",
+    name: "Dani Rocha",
+    email: "dani@exemplo.com",
+    role: "client",
+    status: "inactive",
+  };
+  const EU_TECNICO: UserSummary = {
+    ...BASE,
+    id: "eu",
+    name: "Quem Edita",
+    email: "eu@exemplo.com",
+    role: "technician",
+    status: "active",
+  };
+  const ULTIMO_ADMIN =
+    "O sistema precisa de pelo menos um administrador ativo. Promova ou reative outro administrador antes.";
+
+  beforeEach(() => {
+    papelDeQuemEdita = "admin";
+    comUsuarios([ANA, BRUNO, DANI, EU_TECNICO]);
+  });
+
+  it("o técnico não recebe editar nem excluir na linha de admin ou de outro técnico", async () => {
+    papelDeQuemEdita = "technician";
+    await montar();
+
+    expect(await screen.findByText("Dani Rocha")).toBeInTheDocument();
+    for (const nome of ["Ana Souza", "Bruno Lima"]) {
+      expect(screen.queryByRole("button", { name: `Editar ${nome}` })).not.toBeInTheDocument();
+      expect(screen.queryByRole("button", { name: `Excluir ${nome}` })).not.toBeInTheDocument();
+    }
+  });
+
+  it("o técnico segue gerindo cliente, e editando a própria conta", async () => {
+    papelDeQuemEdita = "technician";
+    await montar();
+
+    expect(await screen.findByRole("button", { name: "Editar Dani Rocha" })).toBeInTheDocument();
+    expect(screen.getByRole("button", { name: "Excluir Dani Rocha" })).toBeInTheDocument();
+    expect(screen.getByRole("button", { name: "Editar Quem Edita" })).toBeInTheDocument();
+  });
+
+  it("para o técnico, a situação de conta da equipe é dita mas não alterna", async () => {
+    // Bruno (técnico) e Dani (cliente) estão os dois inativos: a pílula dele
+    // é só leitura, a dela continua controle. Some o controle, não o estado.
+    papelDeQuemEdita = "technician";
+    const user = userEvent.setup();
+    await montar();
+
+    await screen.findByText("Bruno Lima");
+    const [doBruno, daDani] = screen.getAllByRole("button", { name: "Inativo" });
+    expect(doBruno).toBeDisabled();
+    expect(daDani).toBeEnabled();
+    await user.click(doBruno);
+    expect(userService.setUserStatus).not.toHaveBeenCalled();
+  });
+
+  it("o admin recebe todas as ações em todas as linhas", async () => {
+    await montar();
+
+    for (const nome of ["Ana Souza", "Bruno Lima", "Dani Rocha", "Quem Edita"]) {
+      expect(await screen.findByRole("button", { name: `Editar ${nome}` })).toBeInTheDocument();
+      expect(screen.getByRole("button", { name: `Excluir ${nome}` })).toBeInTheDocument();
+    }
+    for (const pilula of screen.getAllByRole("button", { name: /^(Ativo|Inativo)$/ })) {
+      expect(pilula).toBeEnabled();
+    }
+  });
+
+  it("recusa ao alternar a situação vira aviso com o motivo do servidor", async () => {
+    // Antes o erro morria no `finally`: a pílula voltava ao normal e ninguém
+    // sabia que nada tinha mudado.
+    vi.mocked(userService.setUserStatus).mockRejectedValue({
+      response: { status: 409, data: { detail: ULTIMO_ADMIN } },
+    });
+    comUsuarios([ANA]);
+    const user = userEvent.setup();
+    await montar();
+
+    await user.click(await screen.findByRole("button", { name: "Ativo" }));
+
+    await waitFor(() =>
+      expect(toast.error).toHaveBeenCalledWith(
+        "Não foi possível alterar a situação da conta.",
+        { description: ULTIMO_ADMIN },
+      ),
+    );
+    expect(screen.getByRole("button", { name: "Ativo" })).toBeEnabled();
+  });
+
+  it("recusa ao excluir fica no diálogo com as palavras do servidor", async () => {
+    vi.mocked(userService.deleteUser).mockRejectedValue({
+      response: { status: 409, data: { detail: ULTIMO_ADMIN } },
+    });
+    const user = userEvent.setup();
+    await montar();
+
+    await user.click(await screen.findByRole("button", { name: "Excluir Ana Souza" }));
+    const dialogo = await screen.findByRole("dialog");
+    await user.click(within(dialogo).getByRole("button", { name: "Excluir" }));
+
+    expect(await within(dialogo).findByText(ULTIMO_ADMIN)).toBeInTheDocument();
+    // O diálogo fica aberto: fechar sumiria com o motivo.
+    expect(screen.getByRole("dialog")).toBe(dialogo);
+  });
+
+  it("403 sem frase própria ao excluir diz que falta permissão", async () => {
+    // O `detail` era lido à mão: sem ele, tudo virava "Erro ao excluir
+    // usuário.", e a falta de permissão ficava igual a uma queda de rede.
+    vi.mocked(userService.deleteUser).mockRejectedValue({
+      response: { status: 403, data: {} },
+    });
+    const user = userEvent.setup();
+    await montar();
+
+    await user.click(await screen.findByRole("button", { name: "Excluir Dani Rocha" }));
+    const dialogo = await screen.findByRole("dialog");
+    await user.click(within(dialogo).getByRole("button", { name: "Excluir" }));
+
+    expect(
+      await within(dialogo).findByText("Você não tem permissão para realizar esta ação."),
+    ).toBeInTheDocument();
+  });
+});
+
+/**
  * Fase 3A: o admin tira a foto de perfil de outra conta.
  *
  * A foto em si NÃO aparece — ver a foto de terceiros é outra fase. O que a
@@ -720,8 +871,10 @@ describe("UsersPage — remover a foto de perfil de outra conta", () => {
   });
 
   it("o técnico não recebe o controle", async () => {
+    // Num cliente: a linha de outro técnico nem oferece "Editar" a técnico.
     papelDeQuemEdita = "technician";
-    const { dialogo } = await abreEdicao("Bruno Lima");
+    comUsuarios([{ ...CARLA, status: "active", avatar_url: "avatars/u3.png" }]);
+    const { dialogo } = await abreEdicao("Carla Dias");
 
     expect(
       within(dialogo).queryByRole("button", { name: "Remover foto" }),

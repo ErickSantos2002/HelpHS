@@ -121,3 +121,41 @@ class UnauthorizedException(AppException):
             status.HTTP_401_UNAUTHORIZED,
             detail,
         )
+
+
+# ── Aceite da Política pendente (HTTP 428) ────────────────────
+
+# O contrato que o front lê. O texto do `detail` pode mudar; o `code`, não.
+CODIGO_ACEITE_POLITICA_PENDENTE = "aceite_politica_pendente"
+
+
+class AceitePoliticaPendenteError(Exception):
+    """A pessoa está autenticada, mas falta aceitar a revisão vigente da Política.
+
+    NÃO é `HTTPException` de propósito: o tratador genérico acima devolve só
+    `{"detail": ...}`, e um `detail` em dicionário sairia aninhado. Este erro
+    tem corpo próprio, com `code` no nível de cima, e um tratador só dele.
+
+    428 porque nenhum outro caminho do projeto usa: 401 dispararia o refresh do
+    front (e mudaria o sentido de "sessão inválida"), 403 já significa conta
+    inativa e falta de permissão, 409 é conflito de negócio.
+    """
+
+    def __init__(self, revisao_politica_vigente: str | None) -> None:
+        super().__init__(CODIGO_ACEITE_POLITICA_PENDENTE)
+        self.revisao_politica_vigente = revisao_politica_vigente
+
+
+async def aceite_politica_pendente_handler(
+    request: Request, exc: AceitePoliticaPendenteError
+) -> JSONResponse:
+    # Sem a revisão dos Termos: este erro é só da Política, e os Termos não
+    # bloqueiam o backend nesta fase.
+    return JSONResponse(
+        status_code=status.HTTP_428_PRECONDITION_REQUIRED,
+        content={
+            "detail": "Para continuar, aceite a revisão vigente da Política de Privacidade.",
+            "code": CODIGO_ACEITE_POLITICA_PENDENTE,
+            "revisao_politica_vigente": exc.revisao_politica_vigente,
+        },
+    )

@@ -80,6 +80,11 @@ class _Sessao:
         self.refresh = AsyncMock()
 
     async def execute(self, *a, **k):
+        # A trava dos admins ativos (F1-A, `SELECT users.id ... FOR UPDATE`)
+        # não lê nada que a rota use: não gasta resposta da fila.
+        colunas = [c.key for c in getattr(a[0], "selected_columns", [])] if a else []
+        if a and getattr(a[0], "_for_update_arg", None) is not None and colunas == ["id"]:
+            return MagicMock()
         valor = self._respostas[min(self._n, len(self._respostas) - 1)]
         self._n += 1
         r = MagicMock()

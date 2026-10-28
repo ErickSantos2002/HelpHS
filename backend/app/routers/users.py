@@ -9,12 +9,19 @@ Permissões:
   GET    /users/{id}              — admin | technician (ou o próprio usuário)
   PATCH  /users/{id}              — admin | technician (ou o próprio usuário, só admin muda role)
   PATCH  /users/{id}/status       — admin | technician
+  PATCH  /users/{id}/ai           — admin | technician (só conta de cliente)
   PATCH  /users/me/lgpd-consent   — qualquer autenticado (próprio consentimento)
   GET    /users/me/avatar/exibicao — qualquer autenticado (a própria escolha)
   PUT    /users/me/avatar/exibicao — qualquer autenticado (só a própria foto para terceiros)
   POST   /users/{id}/anonymize    — admin | technician (anonimiza PII — LGPD)
   POST   /users/{id}/avatar/remove — admin (tira a foto de outra conta, com justificativa)
   DELETE /users/{id}              — admin | technician (exclusão, apenas sem tickets)
+
+Hierarquia (F1-A, 27/10/2026): nas rotas que alteram OUTRA pessoa — editar,
+situação, excluir e anonimizar —, técnico só age sobre cliente. Conta de
+equipe (técnico ou admin) é gerida só por admin. E nenhuma operação deixa o
+sistema sem administrador ativo. Ver `_guarda_de_hierarquia` e
+`_guarda_do_ultimo_admin`, e "Gestão de usuários" em docs/decisoes-e-regras.md.
 """
 
 import uuid
@@ -22,6 +29,7 @@ from datetime import UTC, datetime
 from typing import Annotated, Any
 
 from fastapi import APIRouter, Depends, File, HTTPException, Query, Request, UploadFile, status
+from loguru import logger
 from sqlalchemy import func, select
 from sqlalchemy.exc import IntegrityError
 from sqlalchemy.ext.asyncio import AsyncSession
@@ -30,7 +38,13 @@ from starlette.concurrency import run_in_threadpool
 
 from app.core.config import Settings, get_settings
 from app.core.database import get_db
-from app.core.security import authorize, get_current_user, hash_password, verify_password
+from app.core.security import (
+    authorize,
+    get_current_user,
+    get_current_user_sem_exigir_aceite,
+    hash_password,
+    verify_password,
+)
 from app.models.models import (
     Attachment,
     AuditAction,
@@ -49,6 +63,7 @@ from app.models.models import (
     UserRole,
     UserStatus,
 )
+from app.routers.chat import fecha_chats_do_usuario
 from app.schemas.ticket import InterruptorDaIA
 from app.schemas.user import (
     AvatarExibicaoStatus,
@@ -113,6 +128,41 @@ async def _trava_usuario(db: AsyncSession, user_id: uuid.UUID) -> User | None:
         .execution_options(populate_existing=True)
     )
     return result.scalar_one_or_none()
+
+
+async def _trava_para_alterar_conta(db: AsyncSession, user_id: uuid.UUID) -> User | None:
+    """Trava os administradores ativos e, DEPOIS, a linha do alvo.
+
+    É o que torna a guarda do último admin verdadeira sob concorrência. Contar
+    os admins sem trava não basta: dois admins desativando um ao outro ao
+    mesmo tempo contam "sobra um" cada, os dois gravam e o sistema fica sem
+    nenhum — medido em `test_hierarquia_de_usuarios_postgres.py`.
+
+    Por que o CONJUNTO inteiro, e não só o alvo: as duas transações daquele
+    exemplo travariam alvos diferentes e nunca esperariam uma pela outra. Toda
+    operação que pode tirar um admin trava todos os admins ativos; quaisquer
+    duas delas disputam ao menos uma linha em comum, logo se enfileiram. A que
+    espera, ao ganhar a trava, tem as linhas reavaliadas pelo PostgreSQL contra
+    o `WHERE` — quem a outra desativou, rebaixou ou apagou sai do resultado —, e
+    a contagem seguinte já enxerga o que foi comitado.
+
+    Por que nesta ordem (admins em ordem de `id`, depois o alvo): todas as
+    transações pegam as travas na mesma sequência, então não há espera em
+    círculo. Quando o alvo é admin ativo, a linha dele já veio no conjunto, e
+    a segunda trava é reentrante.
+
+    Travar sempre, mesmo quando o alvo é cliente: o papel do alvo só é
+    confiável DEPOIS da trava — lido antes, uma promoção comitada no meio
+    tornaria a decisão velha. O custo é esperar pela equipe, que tem poucos
+    admins.
+    """
+    await db.execute(
+        select(User.id)
+        .where(User.role == UserRole.admin, User.status == UserStatus.active)
+        .order_by(User.id)
+        .with_for_update()
+    )
+    return await _trava_usuario(db, user_id)
 
 
 def _audit(
@@ -215,6 +265,88 @@ def _guarda_de_atribuicao_de_papel(*, ator: User, papel_atribuido: UserRole | No
     if papel_atribuido is None or ator.role == UserRole.admin:
         return
     raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail=_ERRO_PAPEL)
+
+
+_ERRO_HIERARQUIA = "Apenas administradores podem alterar contas da equipe."
+_ERRO_ULTIMO_ADMIN = (
+    "O sistema precisa de pelo menos um administrador ativo. Promova ou "
+    "reative outro administrador antes."
+)
+
+
+def _registra_recusa(motivo: str, acao: str, ator: User, alvo: User) -> None:
+    """Aviso no log da aplicação para operação negada — e só isso.
+
+    Ids e papéis, nunca nome nem e-mail: o log de arquivo guarda 30 dias e não
+    é lugar de dado pessoal. E nada no banco: recusa não escreve, nem
+    `audit_logs` (decisão D3 da F1-A).
+    """
+    logger.warning(
+        "Operação em conta recusada ({}): acao={} ator={} papel_ator={} alvo={} papel_alvo={}",
+        motivo,
+        acao,
+        ator.id,
+        ator.role.value,
+        alvo.id,
+        alvo.role.value,
+    )
+
+
+def _guarda_de_hierarquia(*, ator: User, alvo: User, acao: str) -> None:
+    """Conta de equipe é gerida só por administrador.
+
+    Técnico age sobre cliente e sobre a própria conta; técnico e admin alheios
+    estão fora do alcance dele, em qualquer das rotas que alteram outra
+    pessoa. Até 27/10/2026 só anonimizar tinha esta guarda, porque editar e
+    desativar eram vistos como reversíveis e excluir parecia barrado pelas
+    chaves estrangeiras. As duas premissas não seguravam: um técnico — ou uma
+    conta de técnico comprometida, sem MFA obrigatório — desativava todos os
+    admins, e admin recém-criado, sem histórico, era excluível.
+
+    Roda logo depois de ler o alvo e antes de qualquer validação de dado: o
+    técnico recebe 403, e não um 422 de telefone que contaria algo sobre a
+    conta que ele não pode administrar.
+    """
+    if ator.role == UserRole.admin or alvo.id == ator.id or alvo.role == UserRole.client:
+        return
+    _registra_recusa("hierarquia", acao, ator, alvo)
+    raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail=_ERRO_HIERARQUIA)
+
+
+def _e_admin_ativo(user: User) -> bool:
+    return user.role == UserRole.admin and user.status == UserStatus.active
+
+
+async def _guarda_do_ultimo_admin(
+    db: AsyncSession, *, ator: User, alvo: User, acao: str, alvo_sai: bool
+) -> None:
+    """Recusa com 409 a operação que deixaria o sistema sem admin ativo.
+
+    `alvo_sai` é decisão de quem chama: se, depois da operação, o alvo deixa
+    de ser admin ativo (desativado, rebaixado, excluído, anonimizado). Só
+    importa quando ele É admin ativo agora — tirar quem já não conta não
+    ameaça o quadro.
+
+    Pressupõe `_trava_para_alterar_conta` na mesma transação: sem a trava,
+    esta contagem é a corrida que ela existe para fechar.
+    """
+    if not (alvo_sai and _e_admin_ativo(alvo)):
+        return
+    restantes = (
+        await db.execute(
+            select(func.count())
+            .select_from(User)
+            .where(
+                User.role == UserRole.admin,
+                User.status == UserStatus.active,
+                User.id != alvo.id,
+            )
+        )
+    ).scalar_one()
+    if restantes:
+        return
+    _registra_recusa("ultimo_admin", acao, ator, alvo)
+    raise HTTPException(status_code=status.HTTP_409_CONFLICT, detail=_ERRO_ULTIMO_ADMIN)
 
 
 _ERRO_RAMAL = "Apenas administradores podem configurar o ramal da telefonia."
@@ -394,7 +526,9 @@ async def list_users(
 
 @router.get("/me", response_model=UserResponse)
 async def get_me(
-    current_user: Annotated[User, Depends(get_current_user)],
+    # Sem exigir o aceite: o front monta a sessão por aqui, e sem ela a tela
+    # de re-aceite nem chega a aparecer.
+    current_user: Annotated[User, Depends(get_current_user_sem_exigir_aceite)],
     settings: Annotated[Settings, Depends(get_settings)],
 ) -> UserResponse:
     response = _to_response(current_user)
@@ -922,10 +1056,11 @@ async def update_user(
         ramal_enviado="api4com_extension" in body.model_fields_set,
     )
 
-    result = await db.execute(select(User).where(User.id == user_id))
-    user = result.scalar_one_or_none()
+    user = await _trava_para_alterar_conta(db, user_id)
     if not user:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Usuário não encontrado.")
+
+    _guarda_de_hierarquia(ator=current_user, alvo=user, acao="editar")
 
     # A guarda do papel desceu para DEPOIS da leitura, porque agora ela precisa
     # saber o papel atual para responder "isto muda alguma coisa?". Só chega
@@ -935,6 +1070,14 @@ async def update_user(
     _guarda_de_atribuicao_de_papel(
         ator=current_user,
         papel_atribuido=body.role if body.role != user.role else None,
+    )
+    # Rebaixar — inclusive a si mesmo — é tirar alguém do quadro de admins.
+    await _guarda_do_ultimo_admin(
+        db,
+        ator=current_user,
+        alvo=user,
+        acao="rebaixar",
+        alvo_sai=body.role is not None and body.role != UserRole.admin,
     )
 
     update_data = body.model_dump(exclude_unset=True)
@@ -958,10 +1101,21 @@ async def update_user(
     if mudou_o_ramal and update_data["api4com_extension"] is not None:
         await _guarda_de_ramal_unico(db, update_data["api4com_extension"], user.id)
 
+    # A auditoria diz QUAIS campos mudaram, não os valores: nome, telefone e
+    # empresa são dado pessoal, e `audit_logs` não tem expurgo. O papel é a
+    # exceção — é o que a trilha existe para responder ("quem promoveu quem").
+    campos = sorted(campo for campo, valor in update_data.items() if getattr(user, campo) != valor)
+    papel_anterior = user.role
+
     for field, value in update_data.items():
         setattr(user, field, value)
 
-    _audit(db, AuditAction.update, current_user.id, user.id)
+    old_data: dict | None = None
+    new_data: dict = {"campos": campos}
+    if user.role != papel_anterior:
+        old_data = {"role": papel_anterior.value}
+        new_data["role"] = user.role.value
+    _audit(db, AuditAction.update, current_user.id, user.id, old_data=old_data, new_data=new_data)
     await db.commit()
     await db.refresh(user)
     return _to_response(user)
@@ -986,9 +1140,15 @@ async def update_user_status(
     # Travada: a recusa abaixo precisa ver o status COMITADO. Sem a trava, uma
     # anonimização que comitasse entre a leitura e o UPDATE seria desfeita —
     # esta rota leria `active` e gravaria `inactive` por cima de `anonymized`.
-    user = await _trava_usuario(db, user_id)
+    # A trava do quadro de admins (F1-A) vem antes e termina travando a linha
+    # do alvo (`_trava_usuario`), então essa proteção continua a mesma.
+    user = await _trava_para_alterar_conta(db, user_id)
     if not user:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Usuário não encontrado.")
+
+    # A recusa por papel vem antes da de estado: quem não gere a conta não
+    # fica sabendo se ela está anonimizada.
+    _guarda_de_hierarquia(ator=actor, alvo=user, acao="mudar_situacao")
 
     # A conta anonimizada é TERMINAL aqui: nem `active`, nem `inactive`. Voltar
     # a ativa reabriria uma conta cujos dados foram apagados; ir para inativa
@@ -1001,6 +1161,16 @@ async def update_user_status(
             detail="Conta anonimizada não muda de situação.",
         )
 
+    # O schema só aceita `active` e `inactive`: o único destino que tira um
+    # admin do quadro por aqui é `inactive`.
+    await _guarda_do_ultimo_admin(
+        db,
+        ator=actor,
+        alvo=user,
+        acao="mudar_situacao",
+        alvo_sai=body.status != UserStatus.active,
+    )
+
     # Reativar é o instante em que a conta volta a valer para a telefonia:
     # é aqui que um cliente sem telefone precisa ganhar um. Desativar nunca
     # é bloqueado — a regra guarda o estado ATIVO, não a saída dele.
@@ -1012,8 +1182,13 @@ async def update_user_status(
         mudou_papel_ou_situacao=body.status != user.status,
     )
 
+    # Daqui para baixo só se muda o que as guardas acima já liberaram:
+    # hierarquia, conta anonimizada, último admin ativo e telefone recusam
+    # ANTES de qualquer alteração na conta.
+    #
     # Ir para `inactive` não mexe na autorização da foto: a conta só inativa
-    # guarda a escolha, e reativar volta a respeitá-la.
+    # guarda a escolha, e reativar volta a respeitá-la. Anonimizar só pelo
+    # `POST /anonymize`, que encerra a autorização.
     anterior = user.status
     user.status = body.status
     _audit(
@@ -1051,9 +1226,29 @@ async def toggle_user_ai(
     if not user:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Usuário não encontrado.")
 
+    # A Helô só atende cliente: em conta de equipe a chave não tem efeito
+    # nenhum, e aceitá-la deixava técnico gravar em conta de admin sem
+    # consequência visível — exatamente o tipo de escrita que a hierarquia
+    # fecha nas outras rotas. 422, e não 403: a recusa é pelo alvo, não por
+    # quem pede (decisão D4 da F1-A).
+    if user.role != UserRole.client:
+        _registra_recusa("ia_fora_de_cliente", "configurar_ia", actor, user)
+        raise HTTPException(
+            status_code=status.HTTP_422_UNPROCESSABLE_CONTENT,
+            detail="O atendimento por IA só se configura em conta de cliente.",
+        )
+
     if user.ai_enabled != body.enabled:
+        anterior = user.ai_enabled
         user.ai_enabled = body.enabled
-        _audit(db, AuditAction.update, actor.id, user.id)
+        _audit(
+            db,
+            AuditAction.update,
+            actor.id,
+            user.id,
+            old_data={"ai_enabled": anterior},
+            new_data={"ai_enabled": user.ai_enabled},
+        )
         await db.commit()
         await db.refresh(user)
 
@@ -1066,19 +1261,22 @@ async def toggle_user_ai(
 @router.get("/me/lgpd-consent", response_model=LGPDConsentStatus)
 async def get_lgpd_consent(
     db: Annotated[AsyncSession, Depends(get_db)],
-    current_user: Annotated[User, Depends(get_current_user)],
+    # Sem exigir o aceite: é o que a tela de re-aceite consulta.
+    current_user: Annotated[User, Depends(get_current_user_sem_exigir_aceite)],
     settings: Annotated[Settings, Depends(get_settings)],
 ) -> LGPDConsentStatus:
     """A situação do aceite de quem está logado — o que a tela de re-aceite lê."""
-    ultimo = await consentimento.ultimo_aceite_vigente(db, current_user.id)
+    abertos = await consentimento.aceites_abertos(db, current_user.id)
+    situacao = consentimento.avalia_aceite(abertos, role=current_user.role, settings=settings)
+    ultimo = abertos[0] if abertos else None
     return LGPDConsentStatus(
         revisao_politica_vigente=settings.lgpd_revisao_politica,
         revisao_termos_vigente=settings.lgpd_revisao_termos,
         revisao_politica_aceita=ultimo.revisao_politica if ultimo else None,
         revisao_termos_aceita=ultimo.revisao_termos if ultimo else None,
-        precisa_reaceitar=consentimento.precisa_reaceitar(
-            ultimo, role=current_user.role, settings=settings
-        ),
+        politica_pendente=situacao.politica_pendente,
+        termos_pendentes=situacao.termos_pendentes,
+        precisa_reaceitar=situacao.precisa_reaceitar,
     )
 
 
@@ -1087,12 +1285,34 @@ async def update_lgpd_consent(
     body: LGPDConsentUpdate,
     request: Request,
     db: Annotated[AsyncSession, Depends(get_db)],
-    current_user: Annotated[User, Depends(get_current_user)],
+    # Sem exigir o aceite: é por aqui que a pessoa aceita.
+    current_user: Annotated[User, Depends(get_current_user_sem_exigir_aceite)],
+    settings: Annotated[Settings, Depends(get_settings)],
 ) -> UserResponse:
-    result = await db.execute(select(User).where(User.id == current_user.id))
-    user = result.scalar_one_or_none()
+    """Concede ou revoga o próprio aceite.
+
+    A trava na linha do usuário serializa os pedidos da MESMA pessoa: dois
+    "aceitar" simultâneos não gravam duas linhas, e aceitar e revogar ao mesmo
+    tempo não se cruzam. Depois da espera, a consulta dos aceites abertos é um
+    comando novo e já enxerga o que o outro pedido gravou.
+
+    Conceder de novo o que já está aceito (mesma revisão da Política e dos
+    Termos, origem própria, aberto) é um no-op: 200 sem linha nova, sem
+    auditoria e sem mexer em `lgpd_consent_at`.
+    """
+    user = await _trava_usuario(db, current_user.id)
     if not user:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Usuário não encontrado.")
+
+    if body.lgpd_consent:
+        abertos = await consentimento.aceites_abertos(db, user.id)
+        if consentimento.ja_aceitou_as_revisoes_vigentes(abertos, settings=settings):
+            # A resposta sai ANTES do rollback: o rollback expira o objeto, e
+            # ler atributo expirado numa sessão assíncrona estoura. O rollback
+            # só solta a trava — não há nada escrito para desfazer.
+            resposta = _to_response(user)
+            await db.rollback()
+            return resposta
 
     agora = datetime.now(UTC)
     user.lgpd_consent = body.lgpd_consent
@@ -1107,12 +1327,24 @@ async def update_lgpd_consent(
             origem=consentimento.ORIGEM_ALTERACAO_PROPRIA,
             ip=request.client.host if request.client else None,
             agora=agora,
+            settings=settings,
         )
     else:
         await consentimento.revoga_aceites(db, user_id=user.id, agora=agora)
     _audit(db, AuditAction.update, current_user.id, user.id)
     await db.commit()
     await db.refresh(user)
+
+    if not body.lgpd_consent:
+        # Revogar a Política, com o aceite obrigatório ligado, bloqueia a
+        # pessoa NA HORA (Decisão 2). As rotas já respondem 428 no próximo
+        # pedido; o chat aberto não pede nada, só recebe — então é fechado
+        # aqui, depois do commit, com o mesmo 4428 da conexão.
+        situacao = await consentimento.situacao_do_aceite(
+            db, user_id=user.id, role=user.role, settings=settings
+        )
+        if situacao.politica_pendente:
+            await fecha_chats_do_usuario(user.id)
     return _to_response(user)
 
 
@@ -1137,29 +1369,23 @@ async def anonymize_user(
     # um `PUT /users/me/avatar/exibicao` do titular que comitasse entre esta
     # leitura e o UPDATE deixaria `True` gravado — o ORM só manda a coluna que
     # viu mudar. Com a trava, ou o `PUT` espera e encontra a conta anonimizada
-    # (e recusa), ou a anonimização espera e relê o valor que ele gravou.
-    user = await _trava_usuario(db, user_id)
+    # (e recusa), ou a anonimização espera e relê o valor que ele gravou. A
+    # trava do quadro de admins (F1-A) vem antes e termina nesta mesma linha.
+    user = await _trava_para_alterar_conta(db, user_id)
     if not user:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Usuário não encontrado.")
 
-    # Anonimizar é o único dos quatro que NÃO tem volta: reescreve nome e
-    # e-mail e não existe caminho de desfazer. Editar e desativar são
-    # reversíveis e fazem parte do dia a dia de uma equipe pequena; excluir já
-    # é barrado pelas chaves estrangeiras. Só este precisa de guarda.
-    #
-    # Guarda de PAPEL, não de identidade: outro admin continua podendo. O que
-    # se fecha é o clique errado do técnico e a conta de técnico comprometida
-    # — não há MFA no sistema para segurar a segunda.
-    if user.role == UserRole.admin and actor.role != UserRole.admin:
-        raise HTTPException(
-            status_code=status.HTTP_403_FORBIDDEN,
-            detail="Apenas um administrador pode anonimizar a conta de outro administrador.",
-        )
+    # Até 27/10/2026 esta era a ÚNICA rota com guarda de papel — anonimizar
+    # não tem volta, e editar/desativar eram tidos como reversíveis. A guarda
+    # agora é a mesma das quatro rotas, e alcança também conta de técnico.
+    _guarda_de_hierarquia(ator=actor, alvo=user, acao="anonimizar")
 
     if user.status == UserStatus.anonymized:
         raise HTTPException(
             status_code=status.HTTP_409_CONFLICT, detail="User is already anonymized"
         )
+
+    await _guarda_do_ultimo_admin(db, ator=actor, alvo=user, acao="anonimizar", alvo_sai=True)
 
     # A foto é dado pessoal: zerar a referência e deixar o arquivo no volume
     # não anonimiza nada. Só a chave legítima da conta é apagada — e só depois
@@ -1265,10 +1491,12 @@ async def delete_user(
             detail="Admins cannot delete their own account",
         )
 
-    result = await db.execute(select(User).where(User.id == user_id))
-    user = result.scalar_one_or_none()
+    user = await _trava_para_alterar_conta(db, user_id)
     if not user:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Usuário não encontrado.")
+
+    _guarda_de_hierarquia(ator=actor, alvo=user, acao="excluir")
+    await _guarda_do_ultimo_admin(db, ator=actor, alvo=user, acao="excluir", alvo_sai=True)
 
     bloqueios: list[str] = []
     for rotulo, modelo, coluna in _REFERENCIAS_QUE_BLOQUEIAM:
@@ -1284,7 +1512,15 @@ async def delete_user(
             detail=f"{_COMO_RESOLVER} Encontrado: {', '.join(bloqueios)}.",
         )
 
-    _audit(db, AuditAction.delete, actor.id, user_id)
+    # Papel e situação de quem saiu: a conta deixa de existir, e sem isto a
+    # trilha não diria se foi um cliente ou um administrador.
+    _audit(
+        db,
+        AuditAction.delete,
+        actor.id,
+        user_id,
+        old_data={"role": user.role.value, "status": user.status.value},
+    )
     await db.delete(user)
     try:
         await db.commit()

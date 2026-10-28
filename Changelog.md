@@ -14,6 +14,59 @@ Trabalho que ainda **não** entrou numa versão do produto. Confira: se um
 item aqui já está em produção, ou ele foi para a versão errada, ou falta
 publicar uma versão nova.
 
+### Aceite obrigatório da Política no backend (28/10/2026)
+
+Decisão 2 (27/10/2026), Cenário B. Regras completas em
+`docs/decisoes-e-regras.md`, seção "LGPD". **Inerte**: só vale com
+`LGPD_EXIGE_REACEITE=true`, que continua `false`. O merge NÃO ativa nada.
+**Sem migration** e sem variável nova.
+
+- **A Política vigente bloqueia o backend.** Quem não tem aceite próprio
+  (`auto_cadastro` ou `alteracao_propria`), aberto, da revisão vigente recebe
+  **428** em toda rota autenticada. Vale para cliente, técnico e admin.
+  `criado_por_terceiro` não satisfaz.
+- **Rotas que passam sem o aceite:** `GET /users/me`,
+  `GET`/`PATCH /users/me/lgpd-consent` e `POST /auth/logout`. Login, MFA e
+  refresh continuam livres.
+- **Os Termos NÃO bloqueiam o backend.** Seguem só na tela, só para clientes,
+  como antes.
+- **Contrato do 428:** `{"detail", "code": "aceite_politica_pendente",
+  "revisao_politica_vigente"}`, em corpo plano. O front lê o `code`.
+- **Chat:** com o aceite pendente, a conexão é aceita e fechada com **4428**.
+  O aceite é conferido de novo a cada mensagem. Revogar fecha os chats abertos
+  da pessoa neste processo.
+- **`GET /users/me/lgpd-consent`** ganha `politica_pendente` e
+  `termos_pendentes`. O `precisa_reaceitar` fica, para compatibilidade.
+- **`PATCH /users/me/lgpd-consent` idempotente:** repetir o mesmo aceite
+  devolve 200 sem linha nova nem auditoria. Pedidos simultâneos não duplicam.
+- **Front:**
+  - o 428 e o 4428 levam à tela de aceite, de qualquer página;
+  - falha na consulta inicial continua liberando o sistema, como antes; quem
+    obriga a Política é o 428 do backend;
+  - a tela de aceite vem antes do onboarding.
+- **Dívida registrada, não mexida:** 4001 e 4004 continuam fechando antes do
+  handshake (o navegador vê 1006 e reconecta a cada 3 s).
+
+### Hierarquia de contas e último administrador (F1-A, 27/10/2026)
+
+Regras completas em `docs/decisoes-e-regras.md`, seção "Contas da equipe: só o
+administrador gere". **Sem migration** e sem variável nova.
+
+- **Técnico não altera mais conta de admin nem de outro técnico.** Editar,
+  mudar situação, excluir e anonimizar devolvem 403 "Apenas administradores
+  podem alterar contas da equipe.". Cliente e a própria conta seguem livres.
+- **O sistema não fica sem administrador ativo.** Desativar, excluir,
+  anonimizar ou rebaixar o último admin ativo devolve 409, inclusive quando é
+  ele mesmo se rebaixando. Protegido contra corrida por trava do quadro de
+  admins (`FOR UPDATE`), provado em Postgres com 25 combinações concorrentes.
+- **Recusa só no log** (ids e papéis, sem dado pessoal); nada em `audit_logs`.
+  O que é aceito passa a auditar antes/depois de `status`, `role` e
+  `ai_enabled`.
+- **`PATCH /users/{id}/ai` em conta que não é de cliente devolve 422.**
+- **Tela de usuários:** técnico não vê Editar/Excluir nem alterna a situação
+  nas linhas da equipe; a recusa do servidor aparece em aviso (situação) ou no
+  diálogo (exclusão), que antes engoliam o erro ou só liam `detail` cru.
+
 ### Anexos do chamado (13/10/2026)
 
 Regras completas em `docs/decisoes-e-regras.md`, seção "Anexos do chamado".

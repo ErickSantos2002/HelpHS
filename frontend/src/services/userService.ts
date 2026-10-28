@@ -191,6 +191,14 @@ export interface LgpdConsentStatus {
   revisao_termos_vigente: string | null;
   revisao_politica_aceita: string | null;
   revisao_termos_aceita: string | null;
+  /**
+   * A Política vigente não foi aceita. Bloqueia o backend (428) para todos os
+   * papéis. Ausente num backend anterior a esta mudança.
+   */
+  politica_pendente?: boolean;
+  /** Só a tela, e só para clientes. NÃO bloqueia o backend. */
+  termos_pendentes?: boolean;
+  /** O booleano antigo, mantido pelo backend para compatibilidade. */
   precisa_reaceitar: boolean;
 }
 

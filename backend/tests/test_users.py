@@ -261,7 +261,7 @@ async def test_create_user_duplicate_email(patch_redis):
 @pytest.mark.asyncio
 async def test_get_me(patch_redis):
     from app.core.database import get_db
-    from app.core.security import get_current_user
+    from app.core.security import get_current_user, get_current_user_sem_exigir_aceite
 
     app.dependency_overrides[get_db] = _simple_db(_ADMIN)
 
@@ -269,6 +269,8 @@ async def test_get_me(patch_redis):
         return _ADMIN
 
     app.dependency_overrides[get_current_user] = _admin
+    # `GET /users/me` não exige o aceite da Política: usa a variante.
+    app.dependency_overrides[get_current_user_sem_exigir_aceite] = _admin
 
     async with AsyncClient(transport=ASGITransport(app=app), base_url="http://test") as c:
         resp = await c.get("/api/v1/users/me")
@@ -421,11 +423,23 @@ async def test_list_users_as_client_forbidden(patch_redis):
 # ── Helper: two-step DB (user lookup + scalar count) ─────────
 
 
+def _e_trava_do_quadro_de_admins(stmt) -> bool:
+    """A trava dos admins ativos (F1-A) é `SELECT users.id ... FOR UPDATE`.
+
+    Ela não lê nada que a rota use: o dublê sequencial não gasta resposta com
+    ela, senão a próxima consulta receberia o valor errado.
+    """
+    colunas = [c.key for c in getattr(stmt, "selected_columns", [])]
+    return getattr(stmt, "_for_update_arg", None) is not None and colunas == ["id"]
+
+
 def _db_two_step(first_user, count_value: int = 0):
     """First execute returns a user; second returns a scalar count."""
     calls = iter([first_user, count_value])
 
     async def _execute(*args, **kwargs):
+        if args and _e_trava_do_quadro_de_admins(args[0]):
+            return MagicMock()
         val = next(calls, None)
         result = MagicMock()
         if isinstance(val, int):
@@ -499,14 +513,14 @@ async def test_update_status_user_not_found(patch_redis):
 @pytest.mark.asyncio
 async def test_update_lgpd_consent(patch_redis):
     from app.core.database import get_db
-    from app.core.security import get_current_user
+    from app.core.security import get_current_user_sem_exigir_aceite
 
     app.dependency_overrides[get_db] = _simple_db(_CLIENT)
 
     async def _client_user():
         return _CLIENT
 
-    app.dependency_overrides[get_current_user] = _client_user
+    app.dependency_overrides[get_current_user_sem_exigir_aceite] = _client_user
 
     async with AsyncClient(transport=ASGITransport(app=app), base_url="http://test") as c:
         resp = await c.patch("/api/v1/users/me/lgpd-consent", json={"lgpd_consent": True})
@@ -1028,6 +1042,8 @@ def _db_contagens(user, *contagens, erro_no_delete=None):
 
     async def _execute(*args, **kwargs):
         result = MagicMock()
+        if args and _e_trava_do_quadro_de_admins(args[0]):
+            return result
         if not hasattr(_execute, "_deu_usuario"):
             _execute._deu_usuario = True
             result.scalar_one_or_none.return_value = user

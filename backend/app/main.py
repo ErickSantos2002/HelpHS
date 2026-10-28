@@ -16,7 +16,12 @@ from app import __version__
 from app.core.config import get_settings
 from app.core.contexto import CABECALHO
 from app.core.database import engine
-from app.core.exceptions import http_exception_handler, validation_exception_handler
+from app.core.exceptions import (
+    AceitePoliticaPendenteError,
+    aceite_politica_pendente_handler,
+    http_exception_handler,
+    validation_exception_handler,
+)
 from app.core.logging import setup_logging
 from app.core.rate_limit import limiter
 from app.core.redis import close_redis, get_redis
@@ -249,6 +254,7 @@ async def rate_limit_handler(request: Request, exc: RateLimitExceeded) -> JSONRe
 app.add_exception_handler(RateLimitExceeded, rate_limit_handler)  # type: ignore[arg-type]
 app.add_exception_handler(RequestValidationError, validation_exception_handler)  # type: ignore[arg-type]
 app.add_exception_handler(StarletteHTTPException, http_exception_handler)  # type: ignore[arg-type]
+app.add_exception_handler(AceitePoliticaPendenteError, aceite_politica_pendente_handler)  # type: ignore[arg-type]
 
 app.include_router(auth.router, prefix=settings.api_prefix)
 app.include_router(users.router, prefix=settings.api_prefix)

@@ -941,3 +941,56 @@ describe("ChatPanel — a foto de quem falou", () => {
     expect(screen.queryByRole("img", { name: "Eu Mesmo" })).not.toBeInTheDocument();
   });
 });
+
+/**
+ * ── O 4428: aceite da Política pendente ───────────────────────────────
+ *
+ * O backend aceita a conexão e fecha com 4428 quando falta o aceite (ou quando
+ * a pessoa revoga com o chat aberto). Reconectar só repetiria o 4428 a cada
+ * 3 s, sem fim — foi o que a sondagem de 28/10/2026 mediu com o painel antigo.
+ */
+describe("ChatPanel — fechamento 4428 (aceite da Política pendente)", () => {
+  beforeEach(() => {
+    socketsConstruidos.length = 0;
+    vi.mocked(getChatMessages).mockResolvedValue({
+      items: [],
+    } as unknown as Awaited<ReturnType<typeof getChatMessages>>);
+    Element.prototype.scrollIntoView = vi.fn();
+    vi.stubGlobal("WebSocket", SocketFalso);
+  });
+
+  afterEach(() => {
+    vi.useRealTimers();
+    vi.unstubAllGlobals();
+    vi.clearAllMocks();
+  });
+
+  async function fechaCom(codigo: number) {
+    const { aoAceitePoliticaPendente } = await import("../../services/aceitePolitica");
+    const aviso = vi.fn();
+    const para = aoAceitePoliticaPendente(aviso);
+    render(<ChatPanel ticketId="t-1" currentUserId="u-1" />);
+    await act(async () => {});
+    vi.useFakeTimers();
+    act(() => socketsConstruidos[0].close(codigo));
+    act(() => {
+      vi.advanceTimersByTime(10_000);
+    });
+    para();
+    return aviso;
+  }
+
+  it("não reconecta e leva à tela de aceite", async () => {
+    const aviso = await fechaCom(4428);
+
+    expect(socketsConstruidos).toHaveLength(1);
+    expect(aviso).toHaveBeenCalledTimes(1);
+  });
+
+  it("queda comum continua reconectando, sem abrir a tela de aceite", async () => {
+    const aviso = await fechaCom(1006);
+
+    expect(socketsConstruidos.length).toBeGreaterThan(1);
+    expect(aviso).not.toHaveBeenCalled();
+  });
+});
