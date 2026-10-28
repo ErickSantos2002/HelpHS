@@ -458,6 +458,44 @@ async def test_ultimo_admin_ativo_nao_sai_nem_por_ator_desatualizado(fabrica, db
 
 
 @pytest.mark.asyncio
+async def test_ultimo_admin_nao_sai_pelo_patch_de_status_para_anonymized(fabrica, db):
+    """O `PATCH /status` também aceita `anonymized` — é o segundo caminho que
+    tira um admin do quadro, e ele encerra a autorização da foto (Fase 3B).
+
+    A recusa do último admin tem de vir ANTES desse encerramento: a linha sai
+    exatamente como estava, autorização da foto inclusive.
+    """
+    from app.routers.users import update_user_status
+
+    ator = await _pessoa(fabrica, UserRole.admin, UserStatus.inactive)
+    ator.status = UserStatus.active  # o que a autenticação viu
+    unico = await _pessoa(fabrica, UserRole.admin)
+    async with fabrica() as s:
+        await s.execute(
+            text("UPDATE users SET avatar_visivel_a_terceiros = true WHERE id = :id"),
+            {"id": unico.id},
+        )
+        await s.commit()
+    antes = await _retrato(fabrica, unico.id)
+
+    with pytest.raises(HTTPException) as erro:
+        await update_user_status(unico.id, UserStatusUpdate(status=UserStatus.anonymized), db, ator)
+
+    assert erro.value.status_code == 409
+    assert await _retrato(fabrica, unico.id) == antes
+    async with fabrica() as s:
+        autorizada = (
+            await s.execute(
+                text("SELECT avatar_visivel_a_terceiros FROM users WHERE id = :id"),
+                {"id": unico.id},
+            )
+        ).scalar_one()
+    assert autorizada is True
+    assert await _admins_ativos(fabrica) == 1
+    assert await _auditoria_sobre(fabrica, unico.id) == []
+
+
+@pytest.mark.asyncio
 async def test_admin_inativo_sai_sem_checar_quadro(fabrica, db):
     """Tirar quem já não conta como admin ativo não ameaça o quadro."""
     admin = await _pessoa(fabrica, UserRole.admin)
