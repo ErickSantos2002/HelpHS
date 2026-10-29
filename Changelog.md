@@ -14,6 +14,31 @@ Trabalho que ainda **não** entrou numa versão do produto. Confira: se um
 item aqui já está em produção, ou ele foi para a versão errada, ou falta
 publicar uma versão nova.
 
+### Erros de validação aparecem na tela e não a derrubam (F1-B-02, 29/10/2026)
+
+Auditoria Geral, achado FUN-02 (e FUN-191). **Sem migration** e sem variável
+nova. Contrato completo em `docs/decisoes-e-regras.md`, seção "Contrato de
+erros da API".
+
+- **`getApiError` lê o formato real do 422.** O backend manda
+  `detail: [{field, message}]` e o front lia `msg`: toda validação virava
+  "Alguns campos não foram preenchidos corretamente.". Agora lê `message`
+  (com `msg` como reserva), junta sem repetir, aceita `detail` em texto, lista
+  ou objeto e devolve sempre texto. Traceback no `detail` não vai para a tela.
+- **Sete pontos deixam de desenhar `detail` cru** e passam pelo `getApiError`:
+  troca de senha, remover e enviar a foto (perfil); adicionar, editar e
+  excluir equipamento; adicionar equipamento no primeiro acesso. Com o 422 em
+  lista, essas telas derrubavam a aplicação ("Objects are not valid as a React
+  child"). Também: o salvar de produto (mostrava só um genérico) e o envio de
+  mensagem com arquivo da biblioteca no chat (só aceitava `detail` em texto).
+- **Backend: sem o prefixo `"Value error, "`.** O `ValueError` de um validador
+  próprio chega com o texto do validador, tirado de `ctx["error"]`; o
+  `EmailStr` inválido vira "E-mail inválido" em vez do motivo em inglês. O item
+  do 422 continua só com `field` e `message`, sem eco do valor enviado.
+- **ErrorBoundary na raiz** (`ProtecaoDaRaiz`): um erro de renderização mostra
+  "Algo deu errado nesta tela" com Tentar novamente, Ir para o início e
+  Recarregar a página, em vez de tela em branco. Detalhes só no console.
+
 ### Senha errada não recarrega mais a tela de login (F1-B-01, 29/10/2026)
 
 Auditoria Geral, achado FUN-01. **Sem migration** e sem variável nova.

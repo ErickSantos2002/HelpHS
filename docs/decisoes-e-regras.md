@@ -2568,6 +2568,45 @@ Decisões:
   roteador divide o contador. Se algum cliente sentir o limite, o ajuste é a
   env var no painel — não é mudança de código.
 
+## Contrato de erros da API (F1-B-02, 29/10/2026)
+
+O front lia `item.msg` e o backend manda `message`: todo 422 caía na mensagem
+genérica, e as telas que desenhavam `detail` cru recebiam uma lista dentro de
+um `<Alert>` e derrubavam a aplicação. O contrato, para não voltar a divergir:
+
+| Situação | Corpo |
+|---|---|
+| Validação (422 do FastAPI/pydantic) | `{"detail": [{"field": "...", "message": "..."}]}` |
+| `HTTPException` | `{"detail": "texto"}` |
+| Aceite da Política pendente (428) | `{"detail", "code", "revisao_politica_vigente"}` em corpo plano |
+
+- **O item do 422 tem SÓ `field` e `message`.** Nunca `input`, `ctx`, `type`
+  ou `url`: o valor enviado (que pode ser uma senha) não volta. Preso por
+  `test_422_nao_ecoa_o_valor_enviado_nem_campos_internos`.
+- **`field`** é o caminho do campo sem `body`/`query`/`path`
+  (`backend/app/core/exceptions.py`). É nome de schema, não rótulo de tela: o
+  front não o mostra.
+- **`message` em português.** Os tipos comuns do pydantic são traduzidos em
+  `_PYDANTIC_MSG`. O `ValueError` de um validador próprio sai com o texto do
+  validador, tirado de `ctx["error"]`: o pydantic v2 acrescenta
+  `"Value error, "` na frente do `msg`, e esse prefixo não chega à tela. Não se
+  corta a string às cegas — um texto do validador que comece igual fica
+  inteiro. O `EmailStr` inválido vira "E-mail inválido" (o motivo vem em
+  inglês). Tipo sem tradução cai no `msg` do pydantic, em inglês: ao
+  encontrar um, traduzir em `_PYDANTIC_MSG`.
+- **No front, erro da API só passa por `getApiError` / `getApiErrorParts`**
+  (`frontend/src/lib/apiError.ts`). Ele lê `message` e, por compatibilidade,
+  `msg`; junta as mensagens sem repetir; aceita `detail` em texto, lista ou
+  objeto; e devolve SEMPRE texto. **Nenhuma tela lê `response.data.detail`
+  para mostrar.** Quem precisa decidir pelo conteúdo (o `prazosDoErro` da
+  justificativa de SLA) lê e confere o tipo antes.
+- **Traceback não vai para a tela**: um `detail` com `Traceback (most recent
+  call last)` cai na mensagem do status.
+- **ErrorBoundary na raiz** (`ProtecaoDaRaiz`, em `main.tsx`): última rede para
+  erro de renderização, não para erro HTTP. Mostra uma mensagem e três saídas
+  (tentar de novo, ir para o início, recarregar); a mensagem do erro e a pilha
+  vão só para o console do navegador. Trocar de rota limpa o erro.
+
 ## Formato do código
 
 ### O formatador do backend é o `black`. O `ruff` é linter, nunca formatador.
