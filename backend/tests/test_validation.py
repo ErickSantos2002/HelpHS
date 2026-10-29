@@ -198,3 +198,82 @@ async def test_validation_error_handler_translates_string_too_short():
     )
     assert result["field"] == "name"
     assert "2" in result["message"]
+
+
+# ── F1-B-02: mensagem útil, sem prefixo do pydantic e sem eco do valor ──
+
+
+def _item_do_campo(body: dict, campo: str) -> dict:
+    (item,) = [e for e in body["detail"] if e["field"] == campo]
+    return item
+
+
+@pytest.mark.asyncio
+async def test_validador_proprio_chega_sem_o_prefixo_value_error():
+    """O pydantic v2 devolve `msg = "Value error, <texto>"` para o ValueError de
+    um validador. O texto que interessa é o do validador, em português, que o
+    pydantic guarda inteiro em `ctx["error"]`."""
+    async with AsyncClient(transport=ASGITransport(app=app), base_url="http://test") as c:
+        resp = await c.post(
+            "/api/v1/auth/register",
+            json={"name": "Ana", "email": "ana@test.com", "password": "senhasemmaiuscula1"},
+        )
+    assert resp.status_code == 422
+    item = _item_do_campo(resp.json(), "password")
+    assert "maiúscula" in item["message"]
+    assert not item["message"].startswith("Value error")
+
+
+def test_texto_legitimo_do_validador_nao_e_cortado():
+    """Só sai o que o pydantic acrescentou: um texto do próprio validador que
+    por acaso comece igual continua inteiro."""
+    from app.core.exceptions import _translate_error
+
+    erro = ValueError("Value error, começa assim de propósito")
+    result = _translate_error(
+        {
+            "type": "value_error",
+            "loc": ["body", "nome"],
+            "msg": f"Value error, {erro}",
+            "ctx": {"error": erro},
+        }
+    )
+    assert result == {"field": "nome", "message": "Value error, começa assim de propósito"}
+
+
+def test_value_error_sem_o_erro_no_ctx_tira_so_o_prefixo_do_comeco():
+    from app.core.exceptions import _translate_error
+
+    result = _translate_error(
+        {"type": "value_error", "loc": ["body", "x"], "msg": "Value error, Texto útil", "ctx": {}}
+    )
+    assert result["message"] == "Texto útil"
+
+
+@pytest.mark.asyncio
+async def test_email_invalido_responde_em_portugues_sem_o_motivo_em_ingles():
+    """O EmailStr do pydantic v2 sai como `value_error` com um motivo em inglês
+    (`ctx["reason"]`); antes ele chegava cru à tela."""
+    async with AsyncClient(transport=ASGITransport(app=app), base_url="http://test") as c:
+        resp = await c.post(
+            "/api/v1/auth/login", json={"email": "not-an-email", "password": "Secret1"}
+        )
+    assert resp.status_code == 422
+    assert _item_do_campo(resp.json(), "email")["message"] == "E-mail inválido"
+
+
+@pytest.mark.asyncio
+async def test_422_nao_ecoa_o_valor_enviado_nem_campos_internos():
+    """Cada item tem só `field` e `message`: nada de `input`, `ctx`, `type` ou
+    `url`, e o valor digitado — que pode ser uma senha — não volta."""
+    segredo = "segredo-que-nao-volta"
+    async with AsyncClient(transport=ASGITransport(app=app), base_url="http://test") as c:
+        resp = await c.post(
+            "/api/v1/auth/register",
+            json={"name": "Ana", "email": segredo, "password": segredo},
+        )
+    assert resp.status_code == 422
+    assert segredo not in resp.text
+    for item in resp.json()["detail"]:
+        assert set(item) == {"field", "message"}
+        assert isinstance(item["message"], str) and item["message"]

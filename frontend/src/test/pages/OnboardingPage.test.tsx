@@ -327,3 +327,32 @@ describe("OnboardingPage — o indicador de passo, medido nos tokens", () => {
     }
   });
 });
+
+describe("OnboardingPage — erro de validação ao adicionar equipamento", () => {
+  beforeEach(() => {
+    vi.clearAllMocks();
+    vi.mocked(equipmentService.getMyEquipment).mockResolvedValue([]);
+  });
+
+  it("o 422 em lista vira mensagem, sem derrubar a tela (F1-B-02)", async () => {
+    vi.mocked(userService.completeOnboarding).mockResolvedValue({} as never);
+    vi.mocked(api.get).mockResolvedValue({
+      data: { items: [{ id: "p1", name: "Detector", version: "2.1", is_active: true }] },
+    } as never);
+    vi.mocked(equipmentService.createMyEquipment).mockRejectedValue({
+      response: {
+        status: 422,
+        data: { detail: [{ field: "name", message: "Deve ter no máximo 200 caractere(s)" }] },
+      },
+    });
+    render(<OnboardingPage />);
+    await preencherEmpresa();
+    await userEvent.click(screen.getByRole("button", { name: "Continuar" }));
+
+    await userEvent.type(await screen.findByLabelText("Nome do equipamento"), "Detector 10");
+    await userEvent.click(screen.getByRole("button", { name: "+ Adicionar equipamento" }));
+
+    expect(await screen.findByText("Deve ter no máximo 200 caractere(s)")).toBeTruthy();
+    expect(screen.getByText("Passo 2 de 3 — Equipamentos")).toBeTruthy();
+  });
+});

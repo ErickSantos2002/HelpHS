@@ -17,6 +17,7 @@ import {
   Spinner,
 } from "../../components/ui";
 import type { BadgeProps } from "../../components/ui";
+import { getApiError } from "../../lib/apiError";
 import { cn } from "../../lib/utils";
 import { api } from "../../services/api";
 import {
@@ -171,8 +172,7 @@ function AddModal({ products, onClose, onAdded }: {
       });
       onAdded(eq);
     } catch (err: unknown) {
-      const detail = (err as { response?: { data?: { detail?: string } } })?.response?.data?.detail;
-      setSubmitError(detail ?? "Erro ao adicionar equipamento.");
+      setSubmitError(getApiError(err, "Erro ao adicionar equipamento."));
     }
   }
 
@@ -256,8 +256,7 @@ function EditModal({ equipment, onClose, onSaved }: {
       });
       onSaved(updated);
     } catch (err: unknown) {
-      const detail = (err as { response?: { data?: { detail?: string } } })?.response?.data?.detail;
-      setSubmitError(detail ?? "Erro ao salvar.");
+      setSubmitError(getApiError(err, "Erro ao salvar."));
     }
   }
 
@@ -300,8 +299,7 @@ function DeleteModal({ equipment, onClose, onDeleted }: {
       await deleteMyEquipment(equipment.id);
       onDeleted();
     } catch (err: unknown) {
-      const detail = (err as { response?: { data?: { detail?: string } } })?.response?.data?.detail;
-      setError(detail ?? "Erro ao excluir equipamento.");
+      setError(getApiError(err, "Erro ao excluir equipamento."));
     } finally {
       setLoading(false);
     }

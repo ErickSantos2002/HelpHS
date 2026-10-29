@@ -158,3 +158,99 @@ describe("getRetryAfterSeconds", () => {
     expect(getRetryAfterSeconds(new Error("rede"))).toBeNull();
   });
 });
+
+/**
+ * O contrato real do 422 (backend/app/core/exceptions.py): `detail` é uma
+ * lista de `{field, message}`. O front lia `msg`, que o backend nunca manda —
+ * toda validação caía na mensagem genérica (auditoria F1-B-02). `{loc, msg}`
+ * continua aceito por compatibilidade.
+ */
+describe("getApiError — contrato do 422 {field, message}", () => {
+  const erro422 = (detail: unknown) => ({ response: { status: 422, data: { detail } } });
+
+  it("lê o message do formato que o backend devolve", () => {
+    const err = erro422([{ field: "new_password", message: "Deve ter no mínimo 8 caractere(s)" }]);
+    expect(getApiError(err)).toBe("Deve ter no mínimo 8 caractere(s)");
+  });
+
+  it("junta vários erros e não repete a mesma mensagem", () => {
+    const err = erro422([
+      { field: "name", message: "Campo obrigatório" },
+      { field: "email", message: "E-mail inválido" },
+      { field: "phone", message: "Campo obrigatório" },
+    ]);
+    expect(getApiError(err)).toBe("Campo obrigatório E-mail inválido");
+  });
+
+  it("aceita item misto: message primeiro, msg como reserva", () => {
+    const err = erro422([
+      { field: "cnpj", message: "CNPJ inválido." },
+      { loc: ["body", "cep"], msg: "CEP inválido." },
+    ]);
+    expect(getApiError(err)).toBe("CNPJ inválido. CEP inválido.");
+  });
+
+  it("aceita lista de textos soltos", () => {
+    expect(getApiError(erro422(["Primeiro motivo.", "Segundo motivo."]))).toBe(
+      "Primeiro motivo. Segundo motivo.",
+    );
+  });
+
+  it("ignora itens que não trazem texto e cai na mensagem do status", () => {
+    const err = erro422([null, 7, { field: "x" }, { message: { aninhado: true } }, { msg: "" }]);
+    expect(getApiError(err)).toBe("Alguns campos não foram preenchidos corretamente.");
+  });
+
+  it("detail em objeto usa o message dele, se for texto", () => {
+    expect(getApiError(erro422({ message: "Motivo do objeto." }))).toBe("Motivo do objeto.");
+    expect(getApiError(erro422({ code: "x", outro: 1 }))).toBe(
+      "Alguns campos não foram preenchidos corretamente.",
+    );
+  });
+
+  it.each([
+    ["lista", [{ field: "a", message: "ok" }]],
+    ["objeto", { message: "ok" }],
+    ["número", 42],
+    ["booleano", true],
+    ["lista aninhada", [[{ message: "dentro" }]]],
+    ["null", null],
+  ])("nunca devolve outra coisa que texto (detail %s)", (_nome, detail) => {
+    expect(typeof getApiError(erro422(detail))).toBe("string");
+    expect(typeof getApiErrorParts(erro422(detail), "Falhou.").title).toBe("string");
+  });
+});
+
+describe("getApiError — respostas inesperadas e dados internos", () => {
+  it("página HTML no lugar do JSON não vai para a tela", () => {
+    const err = { response: { status: 502, data: "<html><body>Bad Gateway</body></html>" } };
+    expect(getApiError(err)).toBe(
+      "O servidor está indisponível no momento. Tente novamente em instantes.",
+    );
+  });
+
+  it("traceback no detail não vai para a tela", () => {
+    const err = {
+      response: {
+        status: 500,
+        data: { detail: 'Traceback (most recent call last):\n  File "/app/x.py", line 1' },
+      },
+    };
+    expect(getApiError(err)).toBe("Erro interno no servidor. Tente novamente em instantes.");
+  });
+
+  it.each([
+    [401, "Sua sessão expirou"],
+    [403, "permissão"],
+    [404, "não foi encontrado"],
+    [409, "conflita"],
+    [422, "Alguns campos"],
+  ])("sem detail, o %i mantém a mensagem própria do status", (status, trecho) => {
+    expect(getApiError({ response: { status, data: {} } })).toContain(trecho);
+  });
+
+  it.each([401, 403, 404, 409])("com detail em texto, o %i mostra o texto do backend", (status) => {
+    const err = { response: { status, data: { detail: "Motivo do servidor." } } };
+    expect(getApiError(err)).toBe("Motivo do servidor.");
+  });
+});

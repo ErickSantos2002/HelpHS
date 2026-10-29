@@ -310,3 +310,57 @@ describe("EquipmentPage", () => {
     ).not.toBeInTheDocument();
   });
 });
+
+/**
+ * O 422 de validação chega com `detail` em LISTA de `{field, message}`. A tela
+ * guardava `detail` cru e desenhava dentro do `<Alert>`: com uma lista, o React
+ * derrubava a página inteira (auditoria F1-B-02). Agora a mensagem aparece.
+ */
+describe("EquipmentPage — erro de validação do servidor", () => {
+  const ERRO_422 = {
+    response: {
+      status: 422,
+      data: { detail: [{ field: "serial_number", message: "Deve ter no máximo 100 caractere(s)" }] },
+    },
+  };
+
+  it("adicionar mostra a mensagem do 422 e a tela continua de pé", async () => {
+    const user = userEvent.setup();
+    vi.mocked(equipmentService.createMyEquipment).mockRejectedValue(ERRO_422);
+    await montar();
+
+    await user.click(screen.getAllByRole("button", { name: "Adicionar equipamento" })[0]);
+    const dialogo = await screen.findByRole("dialog");
+    await user.type(within(dialogo).getByLabelText("Nome do equipamento *"), "Detector 10");
+    await user.click(within(dialogo).getByRole("button", { name: "Adicionar equipamento" }));
+
+    expect(await screen.findByText("Deve ter no máximo 100 caractere(s)")).toBeInTheDocument();
+    expect(screen.getByRole("heading", { name: "Meus equipamentos" })).toBeInTheDocument();
+  });
+
+  it("editar mostra a mensagem do 422", async () => {
+    const user = userEvent.setup();
+    vi.mocked(equipmentService.updateMyEquipment).mockRejectedValue(ERRO_422);
+    await montar();
+
+    await user.click(screen.getByRole("button", { name: "Editar Detector 04" }));
+    const dialogo = await screen.findByRole("dialog");
+    await user.click(within(dialogo).getByRole("button", { name: "Salvar alterações" }));
+
+    expect(await screen.findByText("Deve ter no máximo 100 caractere(s)")).toBeInTheDocument();
+  });
+
+  it("excluir mostra o motivo do servidor", async () => {
+    const user = userEvent.setup();
+    vi.mocked(equipmentService.deleteMyEquipment).mockRejectedValue({
+      response: { status: 409, data: { detail: [{ field: "id", message: "Equipamento em uso." }] } },
+    });
+    await montar();
+
+    await user.click(screen.getByRole("button", { name: "Excluir Detector 04" }));
+    const dialogo = await screen.findByRole("dialog");
+    await user.click(within(dialogo).getByRole("button", { name: "Excluir" }));
+
+    expect(await screen.findByText("Equipamento em uso.")).toBeInTheDocument();
+  });
+});

@@ -142,12 +142,8 @@ function ProductFormModal({
         : await createProduct(payload);
       onSaved(saved);
     } catch (err: unknown) {
-      const detail = (err as { response?: { data?: { detail?: string } } })?.response?.data?.detail;
-      setSubmitError(
-        detail === "Product name already exists"
-          ? "Já existe um produto com esse nome."
-          : "Erro ao salvar. Tente novamente.",
-      );
+      // "Product name already exists" é traduzido no `getApiError`
+      setSubmitError(getApiError(err, "Erro ao salvar. Tente novamente."));
     }
   }
 

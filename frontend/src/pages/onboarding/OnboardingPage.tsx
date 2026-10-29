@@ -12,6 +12,7 @@ import {
   type Equipment,
 } from "../../services/equipmentService";
 import { api } from "../../services/api";
+import { getApiError } from "../../lib/apiError";
 
 // ── Types ──────────────────────────────────────────────────────
 
@@ -327,9 +328,7 @@ function StepEquipment({ onNext }: { onNext: () => void }) {
       setSerial("");
       setLocation("");
     } catch (err: unknown) {
-      const detail = (err as { response?: { data?: { detail?: string } } })
-        ?.response?.data?.detail;
-      setError(detail ?? "Erro ao adicionar equipamento.");
+      setError(getApiError(err, "Erro ao adicionar equipamento."));
     } finally {
       setAdding(false);
     }
