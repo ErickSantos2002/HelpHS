@@ -14,6 +14,31 @@ Trabalho que ainda **não** entrou numa versão do produto. Confira: se um
 item aqui já está em produção, ou ele foi para a versão errada, ou falta
 publicar uma versão nova.
 
+### Relatórios por período de calendário, no fuso de Recife — backend (F1-B-03a, 29/10/2026)
+
+Auditoria Geral, achados FUN-10, FUN-11 (parte da API), FUN-16 e FUN-51.
+**Sem migration** e sem variável nova. Contrato completo em
+`docs/decisoes-e-regras.md`, seção "Contrato dos períodos dos relatórios".
+A tela (B-03b) ainda não usa as datas: o front no ar continua funcionando como
+antes, e "Hoje"/"Ontem" deixam de dar erro.
+
+- **"Hoje" e "Ontem" deixam de responder 422** nos relatórios por técnico:
+  `period` aceita de 1 a 365, como os outros relatórios.
+- **`start_date` e `end_date` em todos os relatórios** (geral, técnicos,
+  técnico, CSV e PDF), como dias do calendário em `America/Recife`, com janela
+  `[início, fim)`. Uma data só, início depois do fim, fim no futuro, mais de
+  366 dias ou formato fora de `AAAA-MM-DD` dão 422 com mensagem em português.
+  O banco segue em UTC; `period` continua aceito com o significado de sempre.
+- **Gráficos no relógio de Recife:** o chamado das 22:00 fica no dia em que foi
+  aberto, e dia da semana e hora seguem o mesmo relógio. O gráfico diário tem
+  uma barra por dia, sem a barra extra do intervalo personalizado.
+- **Comparação:** mês civil completo compara com o mês civil anterior; o resto,
+  com a mesma quantidade de dias imediatamente antes. A resposta traz o
+  intervalo aplicado (`start_date`, `end_date`, `timezone`) e o da comparação.
+- **Corrigidos:** 500 quando o período anterior tinha chamado sem prioridade;
+  justificativas de SLA sem o fim do período; média de 0,0 h mostrada como
+  ausência de dado; fim do intervalo em 23:59:59 perdia o último segundo.
+
 ### Erros de validação aparecem na tela e não a derrubam (F1-B-02, 29/10/2026)
 
 Auditoria Geral, achado FUN-02 (e FUN-191). **Sem migration** e sem variável
