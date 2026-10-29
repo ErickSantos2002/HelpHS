@@ -67,6 +67,22 @@ administrador gere". **Sem migration** e sem variável nova.
   nas linhas da equipe; a recusa do servidor aparece em aviso (situação) ou no
   diálogo (exclusão), que antes engoliam o erro ou só liam `detail` cru.
 
+### Dependências do frontend (PR #95 em 26/10/2026, PR #99 em 29/10/2026)
+
+Sem mudança de tela, de contrato ou de configuração. Baseline em
+`.github/dependencias-conhecidas.toml`.
+
+- **No bundle de produção (#95):** `dompurify` 3.4.16 → 3.4.17,
+  `follow-redirects` 1.16.0 → 1.16.2 (transitiva do `axios`) e `zod`
+  4.3.6 → 4.6.7, atualizações compatíveis.
+- **Só em build e testes:** `vite` 6.4.2 → 6.4.5 e `vitest`/`@vitest/*`
+  4.1.11 → 4.1.12 (#95); `happy-dom` 20.8.9 → 21.0.4, que leva o `ws` de
+  8.20.0 para 8.22.0 (#99). A 21 desliga por padrão o carregamento de CSS
+  externo e de página em iframe; nenhum teste dependia disso.
+- **Baseline:** o #99 corrige GHSA-c8p4-j97h-3vg8 e GHSA-5fpq-26gf-qwcr por
+  atualização, e as exceções do `happy-dom` (GHSA-834v-8h66-3h79) e do `ws`
+  (GHSA-58qx-3vcg-4xpx, GHSA-96hv-2xvq-fx4p) saem por terem ficado obsoletas.
+
 ### Anexos do chamado (13/10/2026)
 
 Regras completas em `docs/decisoes-e-regras.md`, seção "Anexos do chamado".

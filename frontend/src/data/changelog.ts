@@ -1,4 +1,4 @@
-export const APP_VERSION = "v1.22.0";
+export const APP_VERSION = "v1.23.0";
 
 export type EntryType = "novidade" | "corrigido" | "melhoria";
 
@@ -14,6 +14,36 @@ export interface ChangelogVersion {
 }
 
 export const CHANGELOG: ChangelogVersion[] = [
+  {
+    version: "v1.23.0",
+    date: "29/10/2026",
+    entries: [
+      {
+        type: "melhoria",
+        text: "Contas da equipe só com administradores: técnicos continuam gerenciando as contas de clientes, mas editar, ativar ou desativar, excluir e anonimizar contas de técnicos e de administradores passa a ser feito apenas por administradores.",
+      },
+      {
+        type: "melhoria",
+        text: "O sistema não deixa mais desativar, rebaixar, anonimizar ou excluir o último administrador ativo, para que a plataforma nunca fique sem administrador.",
+      },
+      {
+        type: "melhoria",
+        text: "Anonimizar uma conta é definitivo e acontece só pela ação Anonimizar: uma conta anonimizada não pode mais voltar a ficar ativa ou inativa.",
+      },
+      {
+        type: "melhoria",
+        text: "Preparação para uma futura opção de mostrar a sua foto de perfil aos outros participantes dos chamados. A opção ainda não está disponível: por enquanto, a sua foto continua aparecendo só para você.",
+      },
+      {
+        type: "melhoria",
+        text: "Preparação para um futuro novo aceite da Política de Privacidade. Nada muda agora: a Política continua na Revisão 00 e nenhum novo aceite é pedido.",
+      },
+      {
+        type: "melhoria",
+        text: "Atualizações de segurança em componentes do sistema.",
+      },
+    ],
+  },
   {
     version: "v1.22.0",
     date: "16/10/2026",
