@@ -113,6 +113,113 @@ describe("response interceptor — erros que passam reto", () => {
   });
 });
 
+// ── Credencial errada não é sessão vencida ────────────────────
+
+/**
+ * O 401 do login e do código de segundo fator quer dizer "credencial errada",
+ * não "sessão vencida". Tratar como sessão recarregava a página (`/login`) e
+ * levava junto a mensagem de erro, o e-mail digitado e o passo do código
+ * (auditoria F1-B-01). Estas rotas devolvem o erro para a tela, intocado.
+ */
+describe("response interceptor — 401 de credencial passa reto", () => {
+  const ROTAS = ["/auth/login", "/auth/mfa/verify"];
+
+  it.each(ROTAS)("401 de %s sem refresh guardado: sem /login e sem refresh", async (rota) => {
+    const { axios, api, tokenStorage, respond } = await freshApi();
+    const postSpy = vi.spyOn(axios, "post");
+    respond(401, { detail: "E-mail ou senha incorretos." });
+
+    await expect(api.post(rota, {})).rejects.toMatchObject({
+      response: { status: 401, data: { detail: "E-mail ou senha incorretos." } },
+    });
+
+    expect(postSpy).not.toHaveBeenCalled();
+    expect(locationMock.href).toBe("");
+    expect(tokenStorage.getAccess()).toBeNull();
+  });
+
+  it.each(ROTAS)(
+    "401 de %s com sessão antiga guardada: não renova, não reenvia e não apaga",
+    async (rota) => {
+      // Uma sessão antiga no storage não muda o significado do 401: renovar e
+      // reenviar a mesma senha errada só gastaria um refresh e uma tentativa.
+      const { axios, api, tokenStorage, respond, adapter } = await freshApi();
+      tokenStorage.set("acesso-antigo", "refresh-antigo");
+      const postSpy = vi.spyOn(axios, "post");
+      respond(401);
+
+      await expect(api.post(rota, {})).rejects.toMatchObject({ response: { status: 401 } });
+
+      expect(postSpy).not.toHaveBeenCalled();
+      expect(adapter).toHaveBeenCalledTimes(1);
+      expect(locationMock.href).toBe("");
+      expect(tokenStorage.getAccess()).toBe("acesso-antigo");
+      expect(tokenStorage.getRefresh()).toBe("refresh-antigo");
+    },
+  );
+
+  it("reconhece a rota com query string e com a base da API na frente", async () => {
+    const { axios, api, respond } = await freshApi();
+    const postSpy = vi.spyOn(axios, "post");
+    respond(401);
+    respond(401);
+
+    await expect(api.post("/auth/login?origem=tela", {})).rejects.toBeTruthy();
+    await expect(api.post("/api/v1/auth/mfa/verify", {})).rejects.toBeTruthy();
+
+    expect(postSpy).not.toHaveBeenCalled();
+    expect(locationMock.href).toBe("");
+  });
+
+  it.each(["/auth/mfa", "/auth/mfa/setup", "/auth/login-historico", "/tickets/auth/login"])(
+    "a comparação é exata: 401 de %s continua sendo sessão e renova",
+    async (rota) => {
+      // `/auth/mfa` é prefixo de `/auth/mfa/verify`: casar por `includes` ou
+      // `startsWith` tiraria rotas autenticadas da renovação.
+      const { axios, api, tokenStorage, respond } = await freshApi();
+      tokenStorage.set("expirado", "refresh-1");
+      const postSpy = vi.spyOn(axios, "post").mockResolvedValue({
+        data: { access_token: "novo-acesso", token_type: "bearer", expires_in: 28800 },
+      });
+      respond(401);
+      respond(200, { ok: true });
+
+      const { data } = await api.get(rota);
+
+      expect(data).toEqual({ ok: true });
+      expect(postSpy).toHaveBeenCalledTimes(1);
+    },
+  );
+
+  it("login certo passa direto, sem tocar no refresh", async () => {
+    const { axios, api, respond } = await freshApi();
+    const postSpy = vi.spyOn(axios, "post");
+    respond(200, { access_token: "a", refresh_token: "r", token_type: "bearer" });
+
+    const { data } = await api.post("/auth/login", {});
+
+    expect(data).toMatchObject({ access_token: "a" });
+    expect(postSpy).not.toHaveBeenCalled();
+    expect(locationMock.href).toBe("");
+  });
+
+  it("o 428 continua avisando a tela de aceite também nestas rotas", async () => {
+    const { api, respond } = await freshApi();
+    const { aoAceitePoliticaPendente } = await import("../../services/aceitePolitica");
+    const aviso = vi.fn();
+    const para = aoAceitePoliticaPendente(aviso);
+    respond(428, { detail: "aceite", code: "aceite_politica_pendente" });
+
+    await expect(api.post("/auth/mfa/verify", {})).rejects.toMatchObject({
+      response: { status: 428 },
+    });
+
+    expect(aviso).toHaveBeenCalledTimes(1);
+    expect(locationMock.href).toBe("");
+    para();
+  });
+});
+
 // ── Fluxo de refresh ──────────────────────────────────────────
 
 describe("response interceptor — refresh e retry", () => {

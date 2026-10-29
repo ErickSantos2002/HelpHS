@@ -4,6 +4,8 @@
  * Request:  attaches Authorization: Bearer <access_token>
  * Response: on 401, tries to refresh the token once, then retries;
  *           if refresh fails, clears session and redirects to /login.
+ *           A 401 from login, MFA verify or refresh is a rejected
+ *           credential, not an expired session: it goes straight back.
  *           On 428 with code "aceite_politica_pendente", raises the
  *           re-accept event instead (see `aceitePolitica.ts`).
  */
@@ -65,6 +67,29 @@ function processQueue(error: unknown, token: string | null) {
   failedQueue = [];
 }
 
+// ── Rotas em que 401 é credencial errada ──────────────────────
+
+/**
+ * Nestas rotas o 401 quer dizer "senha, código ou refresh recusado", não
+ * "sessão vencida": renovar e mandar para `/login` recarregava a tela de login
+ * e apagava a mensagem, o e-mail digitado e o passo do código (F1-B-01). O
+ * erro volta intocado para quem chamou. `/auth/refresh` está aqui porque um
+ * 401 dele renovado viraria loop.
+ */
+const ROTAS_DE_CREDENCIAL = new Set(["/auth/login", "/auth/mfa/verify", "/auth/refresh"]);
+
+/**
+ * Comparação EXATA do caminho, sem query e sem a base da API: `/auth/mfa` é
+ * prefixo de `/auth/mfa/verify`, e casar por `includes` tiraria da renovação
+ * rotas que exigem sessão.
+ */
+function ehRotaDeCredencial(url: string | undefined): boolean {
+  if (!url) return false;
+  let caminho = url.split("?")[0];
+  if (caminho.startsWith(BASE_URL)) caminho = caminho.slice(BASE_URL.length);
+  return ROTAS_DE_CREDENCIAL.has(caminho);
+}
+
 // ── Request interceptor ───────────────────────────────────────
 
 api.interceptors.request.use((config: InternalAxiosRequestConfig) => {
@@ -92,10 +117,9 @@ api.interceptors.response.use(
     }
 
     const is401 = error.response?.status === 401;
-    const isRefreshEndpoint = original.url?.includes("/auth/refresh");
     const alreadyRetried = original._retry;
 
-    if (!is401 || isRefreshEndpoint || alreadyRetried) {
+    if (!is401 || ehRotaDeCredencial(original.url) || alreadyRetried) {
       return Promise.reject(error);
     }
 

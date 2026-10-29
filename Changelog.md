@@ -14,6 +14,25 @@ Trabalho que ainda **não** entrou numa versão do produto. Confira: se um
 item aqui já está em produção, ou ele foi para a versão errada, ou falta
 publicar uma versão nova.
 
+### Senha errada não recarrega mais a tela de login (F1-B-01, 29/10/2026)
+
+Auditoria Geral, achado FUN-01. **Sem migration** e sem variável nova.
+
+- **O interceptor do front para de tratar credencial errada como sessão
+  vencida.** O 401 de `POST /auth/login`, `POST /auth/mfa/verify` e
+  `POST /auth/refresh` volta direto para a tela: sem renovar a sessão, sem
+  apagar o storage e sem `location.href = "/login"`. Antes, a senha errada
+  recarregava a página e levava junto a mensagem, o e-mail digitado e o passo
+  do código do segundo fator.
+- **Comparação exata do caminho** (sem query e sem a base da API). Qualquer
+  outra rota, inclusive `GET /auth/mfa` e `POST /auth/mfa/setup`, continua
+  renovando a sessão no 401 como antes. O 428 do aceite da Política não muda.
+- **`DELETE /auth/mfa` com senha errada responde 400** (`"Senha incorreta."`),
+  não mais 401. Quem chama está logado, e o 401 fazia o front renovar a sessão
+  e, sem refresh válido, deslogar a pessoa. A recusa não desliga o segundo
+  fator, não derruba sessões e não grava auditoria. Nenhum outro consumidor
+  dependia do 401.
+
 ### Aceite obrigatório da Política no backend (28/10/2026)
 
 Decisão 2 (27/10/2026), Cenário B. Regras completas em

@@ -1111,6 +1111,24 @@ desconfiar que foi comprometido.
 ⚠️ Isso **não** invalida os access tokens já emitidos — ver a dívida com gatilho
 correspondente.
 
+### 401 é sessão; credencial errada em rota logada é 400 (F1-B-01, 29/10/2026)
+
+Para o front, **401 quer dizer "sessão vencida"**: o interceptor
+(`frontend/src/services/api.ts`) renova a sessão e, sem refresh válido, manda
+para `/login`. Por isso:
+
+- **Rota que exige sessão não responde 401 por senha errada.** O
+  `DELETE /auth/mfa` respondia 401 "Senha incorreta." e o front deslogava quem
+  errou a senha. Agora é **400**. A recusa não desliga o fator, não despeja
+  sessões e não grava auditoria. A troca de senha (`/users/me/change-password`)
+  já usava 400.
+- **As rotas de credencial ficam fora da renovação:** `POST /auth/login`,
+  `POST /auth/mfa/verify` e `POST /auth/refresh`. Nelas o 401 é a credencial
+  recusada e volta intocado para a tela. A lista fica no interceptor
+  (`ROTAS_DE_CREDENCIAL`) e a comparação é **exata**: `/auth/mfa` é prefixo de
+  `/auth/mfa/verify`, e casar por prefixo tiraria rotas logadas da renovação.
+  Rota nova de credencial que responda 401 tem de entrar nessa lista.
+
 ### Nada falha para o lado de deixar entrar
 
 Redis fora do ar, segredo ilegível, conta desativada entre a senha e o código:
