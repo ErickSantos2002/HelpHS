@@ -671,3 +671,53 @@ describe("ProfilePage — foto para outras pessoas", () => {
     expect(screen.queryByRole("switch")).not.toBeInTheDocument();
   });
 });
+
+/**
+ * O 422 de validação chega com `detail` em LISTA de `{field, message}`. As três
+ * telas abaixo guardavam `detail` cru e desenhavam dentro do `<Alert>`: com uma
+ * lista, o React derrubava o perfil inteiro (auditoria F1-B-02).
+ */
+describe("ProfilePage — erro de validação do servidor não derruba a tela", () => {
+  const erro422 = (message: string) => ({
+    response: { status: 422, data: { detail: [{ field: "new_password", message }] } },
+  });
+
+  it("troca de senha recusada pelo servidor mostra o motivo", async () => {
+    vi.mocked(userService.changePassword).mockRejectedValue(
+      erro422("A nova senha deve ser diferente da atual"),
+    );
+    await montar();
+    await userEvent.click(screen.getByRole("button", { name: "Alterar senha" }));
+
+    await userEvent.type(screen.getByLabelText("Senha atual"), "SenhaAtual1");
+    await userEvent.type(screen.getByLabelText("Nova senha"), "NovaSenha1");
+    await userEvent.type(screen.getByLabelText("Confirmar nova senha"), "NovaSenha1");
+    await userEvent.click(screen.getByRole("button", { name: "Alterar senha" }));
+
+    expect(
+      await screen.findByText("A nova senha deve ser diferente da atual"),
+    ).toBeInTheDocument();
+    // O formulário continua na tela, pronto para a nova tentativa
+    expect(screen.getByLabelText("Nova senha")).toBeInTheDocument();
+  });
+
+  it("remover a foto com 422 em lista mostra o motivo", async () => {
+    vi.mocked(userService.removeAvatar).mockRejectedValue(erro422("Motivo da recusa."));
+    await montar({ avatar_url: FOTO });
+    await abrirConfirmacao();
+
+    await userEvent.click(screen.getByRole("button", { name: "Remover" }));
+
+    expect(await screen.findByText("Motivo da recusa.")).toBeInTheDocument();
+  });
+
+  it("enviar a foto com 422 em lista mostra o motivo", async () => {
+    vi.mocked(userService.uploadAvatar).mockRejectedValue(erro422("Imagem inválida."));
+    await montar();
+    const input = document.querySelector('input[type="file"]') as HTMLInputElement;
+
+    await userEvent.upload(input, new File(["x"], "foto.png", { type: "image/png" }));
+
+    expect(await screen.findByText("Imagem inválida.")).toBeInTheDocument();
+  });
+});

@@ -6,6 +6,7 @@ import {
   matchQuickReplies,
   type QuickReply,
 } from "../../services/quickReplyService";
+import { getApiError } from "../../lib/apiError";
 import { cn } from "../../lib/utils";
 import { Avatar, Button, Icon, Input, Modal, Spinner } from "../ui";
 import { rotuloDePapel, varianteDePapel } from "../../lib/papel";
@@ -589,11 +590,7 @@ export function ChatPanel({
     } catch (err) {
       // O 422 do item interno traz a razão escrita, e ela é para o técnico
       // ler: é ele quem precisa entender por que aquele arquivo não pode ir.
-      const detalhe = (err as { response?: { data?: { detail?: unknown } } })?.response?.data
-        ?.detail;
-      toast.error(
-        typeof detalhe === "string" ? detalhe : "Não foi possível enviar a mensagem.",
-      );
+      toast.error(getApiError(err, "Não foi possível enviar a mensagem."));
     } finally {
       setSending(false);
     }

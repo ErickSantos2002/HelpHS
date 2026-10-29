@@ -669,10 +669,7 @@ function ChangePasswordForm({ onDone }: { onDone: () => void }) {
       setSuccess(true);
       setTimeout(onDone, 1500);
     } catch (err: unknown) {
-      setError(
-        (err as { response?: { data?: { detail?: string } } })?.response?.data?.detail ??
-        "Erro ao alterar senha. Tente novamente.",
-      );
+      setError(getApiError(err, "Erro ao alterar senha. Tente novamente."));
     } finally {
       setSaving(false);
     }
@@ -897,8 +894,7 @@ export default function ProfilePage() {
       setProfile((prev) => (prev ? { ...prev, avatar_url: null } : prev));
       updateAvatarUrl(null);
     } catch (err: unknown) {
-      const detail = (err as { response?: { data?: { detail?: string } } })?.response?.data?.detail;
-      setAvatarError(detail ?? "Erro ao remover foto.");
+      setAvatarError(getApiError(err, "Erro ao remover foto."));
     } finally {
       setRemovingAvatar(false);
       setConfirmingRemoval(false);
@@ -913,8 +909,7 @@ export default function ProfilePage() {
       setProfile(updated);
       updateAvatarUrl(updated.avatar_url);
     } catch (err: unknown) {
-      const detail = (err as { response?: { data?: { detail?: string } } })?.response?.data?.detail;
-      setAvatarError(detail ?? "Erro ao enviar foto.");
+      setAvatarError(getApiError(err, "Erro ao enviar foto."));
     } finally {
       setUploadingAvatar(false);
     }

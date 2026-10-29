@@ -5,19 +5,28 @@ import { plural } from "./utils";
 /**
  * Traduz o erro da API numa mensagem que o usuário entenda.
  *
- * Cobre os quatro formatos que o backend devolve:
+ * Cobre os formatos que o backend devolve:
  *   - `detail` em string (caso comum do FastAPI)
- *   - `detail` em lista (erro de validação — sem tratamento viraria "[object Object]")
+ *   - `detail` em lista: o 422 de validação, `[{field, message}]`
+ *     (backend/app/core/exceptions.py). `{loc, msg}`, o formato cru do
+ *     FastAPI, segue aceito por compatibilidade
  *   - resposta sem corpo útil (usa uma mensagem por status HTTP)
  *   - nenhuma resposta (rede caiu, servidor fora do ar, timeout)
+ *
+ * O resultado é SEMPRE texto: uma tela que desenhasse `detail` cru recebia uma
+ * lista no 422 e derrubava o React (F1-B-02). Quem mostra erro da API usa
+ * `getApiError`, nunca `response.data.detail` direto.
  */
 
+/** Item do 422: `message` é o contrato; `msg` é o formato antigo/cru. */
 interface ValidationItem {
-  loc?: (string | number)[];
-  msg?: string;
+  field?: unknown;
+  message?: unknown;
+  loc?: unknown;
+  msg?: unknown;
 }
 
-type ApiErrorBody = { detail?: string | ValidationItem[] };
+type ApiErrorBody = { detail?: unknown };
 
 const STATUS_FALLBACKS: Record<number, string> = {
   400: "Os dados enviados não são válidos. Revise o formulário e tente de novo.",
@@ -63,6 +72,25 @@ const TRANSLATIONS: Record<string, string> = {
     "Não é possível editar a observação de um ticket fechado ou cancelado.",
 };
 
+/** O texto de um item do 422, ou `null` se ele não trouxer texto. */
+function textoDoItem(item: unknown): string | null {
+  if (typeof item === "string") return item.trim() || null;
+  if (!item || typeof item !== "object" || Array.isArray(item)) return null;
+  const { message, msg } = item as ValidationItem;
+  for (const candidato of [message, msg]) {
+    if (typeof candidato === "string" && candidato.trim()) return candidato.trim();
+  }
+  return null;
+}
+
+/**
+ * Texto que é diagnóstico do servidor, não mensagem para a pessoa: o backend
+ * não manda isso hoje, mas um traceback vazado não pode chegar à tela.
+ */
+function pareceInterno(texto: string): boolean {
+  return texto.includes("Traceback (most recent call last)");
+}
+
 function describeError(err: unknown): string | null {
   const axiosErr = err as AxiosError<ApiErrorBody>;
 
@@ -82,18 +110,21 @@ function describeError(err: unknown): string | null {
     }
   }
 
-  const detail = axiosErr?.response?.data?.detail;
+  const data = axiosErr?.response?.data;
+  const detail = data && typeof data === "object" ? data.detail : undefined;
 
   if (typeof detail === "string" && detail.trim()) {
     const clean = detail.trim();
-    return TRANSLATIONS[clean] ?? clean;
+    if (!pareceInterno(clean)) return TRANSLATIONS[clean] ?? clean;
   }
 
-  if (Array.isArray(detail) && detail.length > 0) {
-    const messages = detail
-      .map((item) => item?.msg?.trim())
-      .filter((msg): msg is string => Boolean(msg));
+  if (Array.isArray(detail)) {
+    // Sem repetir: três campos obrigatórios não viram "Campo obrigatório" três vezes
+    const messages = [...new Set(detail.map(textoDoItem).filter((m): m is string => m !== null))];
     if (messages.length > 0) return messages.join(" ");
+  } else if (detail && typeof detail === "object") {
+    const message = textoDoItem(detail);
+    if (message) return message;
   }
 
   const status = axiosErr?.response?.status;

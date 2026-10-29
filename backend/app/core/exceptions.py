@@ -18,7 +18,6 @@ _PYDANTIC_MSG: dict[str, str] = {
     "missing": "Campo obrigatório",
     "string_too_short": "Deve ter no mínimo {min_length} caractere(s)",
     "string_too_long": "Deve ter no máximo {max_length} caractere(s)",
-    "value_error": "{msg}",
     "string_type": "Deve ser um texto",
     "int_type": "Deve ser um número inteiro",
     "float_type": "Deve ser um número",
@@ -45,6 +44,32 @@ _PYDANTIC_MSG: dict[str, str] = {
 }
 
 
+_PREFIXO_DO_PYDANTIC = "Value error, "
+
+
+def _mensagem_do_value_error(raw_msg: str, ctx: dict) -> str:
+    """O texto do `ValueError` de um validador, sem o que o pydantic acrescenta.
+
+    O pydantic v2 monta `msg = "Value error, <texto>"` e guarda a exceção
+    original em `ctx["error"]` — o texto dela é exatamente o que o validador
+    escreveu, em português, e vale mais que cortar a string (F1-B-02). Sem a
+    exceção, corta só o prefixo exato do começo, uma vez: um texto legítimo
+    que contenha essas palavras mais adiante fica inteiro.
+
+    O `EmailStr` também sai como `value_error`, mas com um motivo em inglês em
+    `ctx["reason"]` e sem exceção: vira "E-mail inválido". Outro `value_error`
+    com `reason` não é tratado como e-mail.
+    """
+    erro = ctx.get("error")
+    if isinstance(erro, Exception) and str(erro).strip():
+        return str(erro).strip()
+    if "reason" in ctx and raw_msg.startswith("value is not a valid email address"):
+        return "E-mail inválido"
+    if raw_msg.startswith(_PREFIXO_DO_PYDANTIC):
+        return raw_msg[len(_PREFIXO_DO_PYDANTIC) :].strip() or "Valor inválido"
+    return raw_msg or "Valor inválido"
+
+
 def _translate_error(error: dict) -> dict:
     """Convert a single Pydantic error dict into a pt-BR friendly dict."""
     error_type: str = error.get("type", "")
@@ -57,6 +82,9 @@ def _translate_error(error: dict) -> dict:
     field = ".".join(field_parts) if field_parts else "campo"
 
     # Translate message
+    if error_type == "value_error":
+        return {"field": field, "message": _mensagem_do_value_error(raw_msg, ctx)}
+
     template = _PYDANTIC_MSG.get(error_type)
     if template:
         try:

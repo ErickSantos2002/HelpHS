@@ -712,6 +712,42 @@ describe("seletor da biblioteca", () => {
       expect(toast.error).toHaveBeenCalledWith("Este arquivo da biblioteca é de uso interno."),
     );
   });
+
+  it("o 422 de validação em lista também chega com a mensagem do campo (F1-B-02)", async () => {
+    // O `detail` em lista de `{field, message}` caía no texto genérico: a tela
+    // só aceitava `detail` em texto.
+    vi.mocked(getLibraryFiles).mockResolvedValue({
+      items: [arquivo()],
+      total: 1,
+      limit: 20,
+      offset: 0,
+    });
+    vi.mocked(sendMessageWithLibraryFile).mockRejectedValue({
+      response: {
+        status: 422,
+        data: { detail: [{ field: "content", message: "Deve ter no máximo 4000 caractere(s)" }] },
+      },
+    });
+
+    const ws = await montar({ papel: "technician" });
+    await abre(ws);
+    await act(async () => {
+      fireEvent.click(screen.getByRole("button", { name: "Anexar arquivo da biblioteca" }));
+    });
+    await act(async () => {
+      fireEvent.click(await screen.findByText("Manual do Phoebus"));
+    });
+    fireEvent.change(screen.getByPlaceholderText(/Escreva uma mensagem/), {
+      target: { value: "Segue." },
+    });
+    await act(async () => {
+      fireEvent.click(screen.getByRole("button", { name: "Enviar mensagem" }));
+    });
+
+    await waitFor(() =>
+      expect(toast.error).toHaveBeenCalledWith("Deve ter no máximo 4000 caractere(s)"),
+    );
+  });
 });
 
 /**

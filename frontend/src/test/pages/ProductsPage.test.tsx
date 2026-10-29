@@ -349,3 +349,34 @@ describe("ProductsPage", () => {
     ).toBeInTheDocument();
   });
 });
+
+describe("ProductsPage — motivo da recusa ao salvar produto (F1-B-02)", () => {
+  async function criaProduto(user: ReturnType<typeof userEvent.setup>) {
+    await montar();
+    await user.click(await screen.findByRole("button", { name: /Novo produto/ }));
+    const dialogo = await screen.findByRole("dialog");
+    await user.type(within(dialogo).getByLabelText("Nome *"), "Detector X");
+    await user.click(within(dialogo).getByRole("button", { name: "Criar produto" }));
+  }
+
+  it("nome repetido continua traduzido", async () => {
+    const user = userEvent.setup();
+    vi.mocked(productService.createProduct).mockRejectedValue({
+      response: { status: 409, data: { detail: "Product name already exists" } },
+    });
+    await criaProduto(user);
+    expect(await screen.findByText("Já existe um produto com esse nome.")).toBeInTheDocument();
+  });
+
+  it("o 422 em lista mostra a mensagem do campo, não um genérico", async () => {
+    const user = userEvent.setup();
+    vi.mocked(productService.createProduct).mockRejectedValue({
+      response: {
+        status: 422,
+        data: { detail: [{ field: "version", message: "Deve ter no máximo 50 caractere(s)" }] },
+      },
+    });
+    await criaProduto(user);
+    expect(await screen.findByText("Deve ter no máximo 50 caractere(s)")).toBeInTheDocument();
+  });
+});
