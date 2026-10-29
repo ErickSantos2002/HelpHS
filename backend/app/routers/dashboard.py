@@ -6,14 +6,20 @@ Permissões:
   GET /dashboard/reports        — admin, technician
   GET /dashboard/reports/export/csv — admin, technician
   GET /dashboard/reports/export/pdf — admin, technician
+  GET /dashboard/reports/technicians — admin
+  GET /dashboard/reports/technician  — admin, technician (o técnico vê só o seu)
+
+Período (F1-B-03a): todos os relatórios aceitam `start_date`/`end_date` — dias
+do calendário em America/Recife, janela `[início, fim)` — ou o `period` legado.
+O contrato inteiro está em `app/utils/periodo_relatorio.py`.
 """
 
 import csv
 import io
 import uuid
-from datetime import UTC, datetime, timedelta
+from datetime import UTC, datetime
 from datetime import date as date_type
-from typing import Annotated
+from typing import Annotated, Any
 
 from fastapi import APIRouter, Depends, HTTPException, Query, status
 from fastapi.responses import StreamingResponse
@@ -25,6 +31,7 @@ from reportlab.lib.units import cm
 from reportlab.platypus import Paragraph, SimpleDocTemplate, Spacer, Table, TableStyle
 from sqlalchemy import ColumnElement, and_, extract, func, or_, select, text
 from sqlalchemy.ext.asyncio import AsyncSession
+from sqlalchemy.orm import InstrumentedAttribute
 
 from app.core.database import get_db
 from app.core.redis import get_redis
@@ -64,6 +71,12 @@ from app.schemas.dashboard import (
     TechnicianSummary,
     TicketStats,
     WeekdayCount,
+)
+from app.utils.periodo_relatorio import (
+    NOME_DO_FUSO,
+    JanelaDoRelatorio,
+    intervalo_sql_do_fuso,
+    resolve_janela,
 )
 
 # ── SLA breach expressions (calculadas em tempo real via SQL) ──
@@ -119,6 +132,52 @@ def _response_breached_cond() -> ColumnElement[bool]:
             Ticket.status.in_(_ACTIVE_SLA_STATUSES),
         ),
     )
+
+
+# O deslocamento do fuso vai no SQL como LITERAL (`INTERVAL '-03:00'`), não
+# como parâmetro: o Postgres só reconhece que a expressão do SELECT é a mesma do
+# GROUP BY quando o texto é idêntico, e dois parâmetros `$1`/`$2` com o mesmo
+# valor não são. O valor é constante do código, nunca entrada de quem chama. Por
+# que intervalo e não o nome do fuso: ver `intervalo_sql_do_fuso`.
+_FUSO_SQL = text(intervalo_sql_do_fuso())
+
+# Uma coluna de instante: o atributo mapeado (`Ticket.created_at`) ou uma
+# expressão já montada.
+_Instante = ColumnElement[Any] | InstrumentedAttribute[Any]
+
+
+def _no_fuso(coluna: _Instante) -> ColumnElement:
+    """O instante como o relógio de Recife o mostra — para agrupar por dia,
+    dia da semana e hora. Sem isso, um chamado aberto às 22:00 caía no dia
+    seguinte do gráfico."""
+    return func.timezone(_FUSO_SQL, coluna)
+
+
+def _na_janela(coluna: _Instante, inicio: datetime, fim: datetime | None) -> list:
+    """`[inicio, fim)`. Sem `fim` (o `period` legado), só o começo."""
+    condicoes = [coluna >= inicio]
+    if fim is not None:
+        condicoes.append(coluna < fim)
+    return condicoes
+
+
+def _janela_ou_422(
+    period: int, start_date: date_type | None, end_date: date_type | None
+) -> JanelaDoRelatorio:
+    try:
+        return resolve_janela(period, start_date, end_date)
+    except ValueError as exc:
+        raise HTTPException(
+            status_code=status.HTTP_422_UNPROCESSABLE_CONTENT, detail=str(exc)
+        ) from exc
+
+
+def _serie_diaria(janela: JanelaDoRelatorio, contagens: dict[str, int]) -> list[DailyCount]:
+    """Uma barra por dia local da janela — nem a barra extra de antes."""
+    return [
+        DailyCount(date=dia.isoformat(), count=contagens.get(dia.isoformat(), 0))
+        for dia in janela.dias_do_grafico()
+    ]
 
 
 router = APIRouter(tags=["Dashboard"])
@@ -222,18 +281,18 @@ async def _build_report(
     priority: TicketPriority | None = None,
     start_date: date_type | None = None,
     end_date: date_type | None = None,
+    *,
+    janela: JanelaDoRelatorio | None = None,
 ) -> ReportData:
-    """Shared data collection used by JSON, CSV and PDF endpoints."""
-    if start_date and end_date:
-        since = datetime(start_date.year, start_date.month, start_date.day, 0, 0, 0, tzinfo=UTC)
-        until = datetime(end_date.year, end_date.month, end_date.day, 23, 59, 59, tzinfo=UTC)
-        actual_period = (end_date - start_date).days + 1
-        date_cond = [Ticket.created_at >= since, Ticket.created_at <= until]
-    else:
-        since = datetime.now(UTC) - timedelta(days=period)
-        until = datetime.now(UTC)
-        actual_period = period
-        date_cond = [Ticket.created_at >= since]
+    """Shared data collection used by JSON, CSV and PDF endpoints.
+
+    `janela` já resolvida (os endpoints validam antes, para responder 422);
+    sem ela, resolve aqui a partir de `period`/`start_date`/`end_date`.
+    """
+    if janela is None:
+        janela = resolve_janela(period, start_date, end_date)
+    since, until = janela.inicio, janela.fim
+    date_cond = _na_janela(Ticket.created_at, since, until)
 
     extra: list = []
     if category:
@@ -245,25 +304,17 @@ async def _build_report(
 
     total = (await db.execute(select(func.count()).select_from(Ticket).where(*base))).scalar_one()
 
+    dia_do_chamado = func.date_trunc(text("'day'"), _no_fuso(Ticket.created_at))
     rows = (
         await db.execute(
-            select(
-                func.date_trunc(text("'day'"), Ticket.created_at).label("day"),
-                func.count().label("cnt"),
-            )
+            select(dia_do_chamado.label("day"), func.count().label("cnt"))
             .where(*base)
-            .group_by(func.date_trunc(text("'day'"), Ticket.created_at))
-            .order_by(func.date_trunc(text("'day'"), Ticket.created_at))
+            .group_by(dia_do_chamado)
+            .order_by(dia_do_chamado)
         )
     ).all()
     counts_by_day: dict[str, int] = {r.day.strftime("%Y-%m-%d"): r.cnt for r in rows}
-    tickets_by_day = [
-        DailyCount(
-            date=(since + timedelta(days=i)).strftime("%Y-%m-%d"),
-            count=counts_by_day.get((since + timedelta(days=i)).strftime("%Y-%m-%d"), 0),
-        )
-        for i in range(actual_period + 1)
-    ]
+    tickets_by_day = _serie_diaria(janela, counts_by_day)
 
     cat_rows = (
         await db.execute(
@@ -311,11 +362,7 @@ async def _build_report(
         )
 
     # CSAT — join with Ticket when category/priority filter is active
-    csat_date_cond = (
-        [SatisfactionSurvey.created_at >= since, SatisfactionSurvey.created_at <= until]
-        if (start_date and end_date)
-        else [SatisfactionSurvey.created_at >= since]
-    )
+    csat_date_cond = _na_janela(SatisfactionSurvey.created_at, since, until)
     if extra:
         ticket_subq = select(Ticket.id).where(*date_cond, *extra).scalar_subquery()
         csat_cond = [*csat_date_cond, SatisfactionSurvey.ticket_id.in_(ticket_subq)]
@@ -374,7 +421,7 @@ async def _build_report(
         )
     ).all()
     resolution_map: dict[str, float | None] = {
-        r.priority.value: round(float(r.avg_hours), 1) if r.avg_hours else None
+        r.priority.value: round(float(r.avg_hours), 1) if r.avg_hours is not None else None
         for r in resolution_rows
         if r.priority is not None
     }
@@ -387,16 +434,17 @@ async def _build_report(
     ]
 
     # ── CSAT diário ───────────────────────────────────────────
+    dia_da_avaliacao = func.date_trunc(text("'day'"), _no_fuso(SatisfactionSurvey.created_at))
     csat_day_rows = (
         await db.execute(
             select(
-                func.date_trunc(text("'day'"), SatisfactionSurvey.created_at).label("day"),
+                dia_da_avaliacao.label("day"),
                 func.avg(SatisfactionSurvey.rating).label("avg_rating"),
                 func.count().label("cnt"),
             )
             .where(*csat_cond)
-            .group_by(func.date_trunc(text("'day'"), SatisfactionSurvey.created_at))
-            .order_by(func.date_trunc(text("'day'"), SatisfactionSurvey.created_at))
+            .group_by(dia_da_avaliacao)
+            .order_by(dia_da_avaliacao)
         )
     ).all()
     csat_day_map: dict[str, tuple[float, int]] = {
@@ -404,31 +452,23 @@ async def _build_report(
     }
     csat_by_day = [
         CsatDailyItem(
-            date=(since + timedelta(days=i)).strftime("%Y-%m-%d"),
+            date=dia.isoformat(),
             avg_rating=(
-                csat_day_map[(since + timedelta(days=i)).strftime("%Y-%m-%d")][0]
-                if (since + timedelta(days=i)).strftime("%Y-%m-%d") in csat_day_map
-                else None
+                csat_day_map[dia.isoformat()][0] if dia.isoformat() in csat_day_map else None
             ),
-            count=(
-                csat_day_map[(since + timedelta(days=i)).strftime("%Y-%m-%d")][1]
-                if (since + timedelta(days=i)).strftime("%Y-%m-%d") in csat_day_map
-                else 0
-            ),
+            count=csat_day_map[dia.isoformat()][1] if dia.isoformat() in csat_day_map else 0,
         )
-        for i in range(actual_period + 1)
+        for dia in janela.dias_do_grafico()
     ]
 
     # ── Distribuição por dia da semana (ISO: 1=Seg … 7=Dom) ──
+    dia_da_semana = extract("isodow", _no_fuso(Ticket.created_at))
     weekday_rows = (
         await db.execute(
-            select(
-                extract("isodow", Ticket.created_at).label("dow"),
-                func.count().label("cnt"),
-            )
+            select(dia_da_semana.label("dow"), func.count().label("cnt"))
             .where(*base)
-            .group_by(extract("isodow", Ticket.created_at))
-            .order_by(extract("isodow", Ticket.created_at))
+            .group_by(dia_da_semana)
+            .order_by(dia_da_semana)
         )
     ).all()
     weekday_map: dict[int, int] = {int(r.dow): r.cnt for r in weekday_rows}
@@ -448,7 +488,7 @@ async def _build_report(
         )
     ).all()
     first_resp_map: dict[str, float | None] = {
-        r.priority.value: round(float(r.avg_hours), 1) if r.avg_hours else None
+        r.priority.value: round(float(r.avg_hours), 1) if r.avg_hours is not None else None
         for r in first_resp_rows
         if r.priority is not None
     }
@@ -474,15 +514,13 @@ async def _build_report(
     ]
 
     # ── Distribuição por hora do dia ─────────────────────────────
+    hora_local = extract("hour", _no_fuso(Ticket.created_at))
     hour_rows = (
         await db.execute(
-            select(
-                extract("hour", Ticket.created_at).label("hr"),
-                func.count().label("cnt"),
-            )
+            select(hora_local.label("hr"), func.count().label("cnt"))
             .where(*base)
-            .group_by(extract("hour", Ticket.created_at))
-            .order_by(extract("hour", Ticket.created_at))
+            .group_by(hora_local)
+            .order_by(hora_local)
         )
     ).all()
     hour_map: dict[int, int] = {int(r.hr): r.cnt for r in hour_rows}
@@ -565,11 +603,7 @@ async def _build_report(
     ]
 
     # ── Taxa de reabertura ────────────────────────────────────────
-    reopen_date_cond = (
-        [TicketHistory.created_at >= since, TicketHistory.created_at <= until]
-        if (start_date and end_date)
-        else [TicketHistory.created_at >= since]
-    )
+    reopen_date_cond = _na_janela(TicketHistory.created_at, since, until)
     reopen_q = (
         select(func.count(func.distinct(TicketHistory.ticket_id)))
         .join(Ticket, TicketHistory.ticket_id == Ticket.id)
@@ -606,7 +640,7 @@ async def _build_report(
             .where(
                 Ticket.sla_breach_justification.is_not(None),
                 Ticket.resolved_at.is_not(None),
-                Ticket.resolved_at >= since,
+                *_na_janela(Ticket.resolved_at, since, until),
                 *extra,
             )
             .order_by(Ticket.resolved_at.desc())
@@ -626,10 +660,10 @@ async def _build_report(
         for r in justificativas_rows
     ]
 
-    comparison = await _build_comparison(db, since, actual_period, category, priority)
+    comparison = await _build_comparison(db, janela, category, priority)
 
     return ReportData(
-        period_days=actual_period,
+        period_days=janela.dias,
         total_tickets=total,
         tickets_by_day=tickets_by_day,
         tickets_by_category=tickets_by_category,
@@ -649,19 +683,24 @@ async def _build_report(
         reopen_rate=reopen_rate,
         sla_justifications=sla_justifications,
         comparison=comparison,
+        start_date=janela.primeiro_dia,
+        end_date=janela.ultimo_dia,
+        timezone=NOME_DO_FUSO,
     )
 
 
 async def _build_comparison(
     db: AsyncSession,
-    current_since: datetime,
-    period: int,
+    janela: JanelaDoRelatorio,
     category: TicketCategory | None,
     priority: TicketPriority | None,
 ) -> ReportComparison:
-    """Calcula as mesmas métricas para o período imediatamente anterior."""
-    prev_until = current_since
-    prev_since = current_since - timedelta(days=period)
+    """Calcula as mesmas métricas para o período de comparação da janela.
+
+    Mês civil completo compara com o mês civil anterior; o resto, com a mesma
+    quantidade de dias imediatamente antes (`resolve_janela`).
+    """
+    prev_since, prev_until = janela.anterior_inicio, janela.anterior_fim
 
     prev_date = [Ticket.created_at >= prev_since, Ticket.created_at < prev_until]
     prev_extra: list = []
@@ -686,8 +725,11 @@ async def _build_comparison(
             .group_by(Ticket.priority)
         )
     ).all()
+    # A mesma guarda do período atual: chamado não triado fica fora da
+    # conformidade (D2). Sem ela, a linha NULL do GROUP BY derrubava o
+    # relatório inteiro com 500 sempre que o período anterior tinha um.
     prev_sla_map: dict[str, tuple[int, int]] = {
-        r.priority.value: (r.total, r.breached) for r in prev_sla_rows
+        r.priority.value: (r.total, r.breached) for r in prev_sla_rows if r.priority is not None
     }
     prev_sla: list[SLAComplianceItem] = []
     for prio in [priority] if priority else list(TicketPriority):
@@ -716,6 +758,8 @@ async def _build_comparison(
         total_tickets=prev_total,
         csat_average=prev_csat,
         sla_compliance=prev_sla,
+        start_date=janela.anterior_primeiro_dia,
+        end_date=janela.anterior_ultimo_dia,
     )
 
 
@@ -729,7 +773,8 @@ async def get_reports(
     start_date: date_type | None = Query(default=None),
     end_date: date_type | None = Query(default=None),
 ) -> ReportData:
-    return await _build_report(db, period, category, priority, start_date, end_date)
+    janela = _janela_ou_422(period, start_date, end_date)
+    return await _build_report(db, period, category, priority, start_date, end_date, janela=janela)
 
 
 @router.get("/dashboard/reports/export/csv")
@@ -742,7 +787,8 @@ async def export_reports_csv(
     start_date: date_type | None = Query(default=None),
     end_date: date_type | None = Query(default=None),
 ) -> StreamingResponse:
-    data = await _build_report(db, period, category, priority, start_date, end_date)
+    janela = _janela_ou_422(period, start_date, end_date)
+    data = await _build_report(db, period, category, priority, start_date, end_date, janela=janela)
     buf = io.StringIO()
     writer = csv.writer(buf)
 
@@ -832,7 +878,8 @@ async def export_reports_pdf(
     start_date: date_type | None = Query(default=None),
     end_date: date_type | None = Query(default=None),
 ) -> StreamingResponse:
-    data = await _build_report(db, period, category, priority, start_date, end_date)
+    janela = _janela_ou_422(period, start_date, end_date)
+    data = await _build_report(db, period, category, priority, start_date, end_date, janela=janela)
     buf = io.BytesIO()
     styles = getSampleStyleSheet()
     doc = SimpleDocTemplate(buf, pagesize=A4, leftMargin=2 * cm, rightMargin=2 * cm)
@@ -898,7 +945,7 @@ async def export_reports_pdf(
                 ["Total de tickets no período", str(data.total_tickets)],
                 [
                     "Média CSAT (1 a 10)",
-                    f"{data.csat_average} / 10" if data.csat_average else "—",
+                    f"{data.csat_average} / 10" if data.csat_average is not None else "—",
                 ],
             ],
         )
@@ -956,7 +1003,11 @@ async def export_reports_pdf(
 
 
 async def _technician_summary(
-    db: AsyncSession, tech_id: uuid.UUID, tech_name: str, since: datetime
+    db: AsyncSession,
+    tech_id: uuid.UUID,
+    tech_name: str,
+    since: datetime,
+    until: datetime | None = None,
 ) -> TechnicianSummary:
     """Compute aggregated metrics for a single technician."""
     ticket_row = (
@@ -990,7 +1041,7 @@ async def _technician_summary(
                 )
                 .filter(func.coalesce(Ticket.resolved_at, Ticket.closed_at).is_not(None))
                 .label("avg_hours"),
-            ).where(Ticket.assignee_id == tech_id, Ticket.created_at >= since)
+            ).where(Ticket.assignee_id == tech_id, *_na_janela(Ticket.created_at, since, until))
         )
     ).one()
 
@@ -1001,7 +1052,10 @@ async def _technician_summary(
                 func.count(SatisfactionSurvey.id).label("cnt"),
             )
             .join(Ticket, SatisfactionSurvey.ticket_id == Ticket.id)
-            .where(Ticket.assignee_id == tech_id, SatisfactionSurvey.created_at >= since)
+            .where(
+                Ticket.assignee_id == tech_id,
+                *_na_janela(SatisfactionSurvey.created_at, since, until),
+            )
         )
     ).one()
 
@@ -1018,14 +1072,16 @@ async def _technician_summary(
         sla_breached=breached,
         sla_compliance_rate=compliance,
         avg_resolution_hours=(
-            round(float(ticket_row.avg_hours), 1) if ticket_row.avg_hours else None
+            round(float(ticket_row.avg_hours), 1) if ticket_row.avg_hours is not None else None
         ),
-        csat_average=round(float(csat_row.avg), 2) if csat_row.avg else None,
+        csat_average=round(float(csat_row.avg), 2) if csat_row.avg is not None else None,
         csat_count=csat_row.cnt or 0,
     )
 
 
-async def _resumos_de_tecnicos(db: AsyncSession, tech_rows: list, since: datetime) -> list:
+async def _resumos_de_tecnicos(
+    db: AsyncSession, tech_rows: list, since: datetime, until: datetime | None = None
+) -> list:
     """
     Os mesmos números do `_technician_summary`, agregados de uma vez para todos
     os técnicos com GROUP BY.
@@ -1069,7 +1125,7 @@ async def _resumos_de_tecnicos(db: AsyncSession, tech_rows: list, since: datetim
                 .filter(func.coalesce(Ticket.resolved_at, Ticket.closed_at).is_not(None))
                 .label("avg_hours"),
             )
-            .where(Ticket.assignee_id.in_(tech_ids), Ticket.created_at >= since)
+            .where(Ticket.assignee_id.in_(tech_ids), *_na_janela(Ticket.created_at, since, until))
             .group_by(Ticket.assignee_id)
         )
     ).all()
@@ -1083,7 +1139,10 @@ async def _resumos_de_tecnicos(db: AsyncSession, tech_rows: list, since: datetim
                 func.count(SatisfactionSurvey.id).label("cnt"),
             )
             .join(Ticket, SatisfactionSurvey.ticket_id == Ticket.id)
-            .where(Ticket.assignee_id.in_(tech_ids), SatisfactionSurvey.created_at >= since)
+            .where(
+                Ticket.assignee_id.in_(tech_ids),
+                *_na_janela(SatisfactionSurvey.created_at, since, until),
+            )
             .group_by(Ticket.assignee_id)
         )
     ).all()
@@ -1108,8 +1167,8 @@ async def _resumos_de_tecnicos(db: AsyncSession, tech_rows: list, since: datetim
                 sla_compliance_rate=(
                     round((1 - breached / total) * 100, 1) if total > 0 else 100.0
                 ),
-                avg_resolution_hours=round(float(avg_hours), 1) if avg_hours else None,
-                csat_average=round(float(csat_avg), 2) if csat_avg else None,
+                avg_resolution_hours=round(float(avg_hours), 1) if avg_hours is not None else None,
+                csat_average=round(float(csat_avg), 2) if csat_avg is not None else None,
                 csat_count=(c.cnt if c else 0) or 0,
             )
         )
@@ -1120,10 +1179,14 @@ async def _resumos_de_tecnicos(db: AsyncSession, tech_rows: list, since: datetim
 async def get_technician_list_report(
     db: Annotated[AsyncSession, Depends(get_db)],
     _actor: Annotated[User, Depends(authorize(UserRole.admin))],
-    period: Annotated[int, Query(ge=7, le=365)] = 30,
+    # `ge=1`, como os outros relatórios: o 7 era sobra de quando todos exigiam
+    # 7, e o "Hoje"/"Ontem" da tela respondiam 422 (F1-B-03a).
+    period: Annotated[int, Query(ge=1, le=365)] = 30,
+    start_date: date_type | None = Query(default=None),
+    end_date: date_type | None = Query(default=None),
 ) -> TechnicianListReport:
     """Admin-only: returns summary metrics for every active technician."""
-    since = datetime.now(UTC) - timedelta(days=period)
+    janela = _janela_ou_422(period, start_date, end_date)
 
     tech_rows = (
         await db.execute(
@@ -1136,17 +1199,25 @@ async def get_technician_list_report(
     # Duas consultas para a equipe inteira, não duas por técnico. Com 15
     # técnicos eram 31 consultas; agora são 3. O `_technician_summary` continua
     # existindo para o relatório de UM técnico, onde não há N+1 a evitar.
-    summaries = await _resumos_de_tecnicos(db, list(tech_rows), since)
+    summaries = await _resumos_de_tecnicos(db, list(tech_rows), janela.inicio, janela.fim)
 
-    return TechnicianListReport(period_days=period, technicians=summaries)
+    return TechnicianListReport(
+        period_days=janela.dias,
+        technicians=summaries,
+        start_date=janela.primeiro_dia,
+        end_date=janela.ultimo_dia,
+        timezone=NOME_DO_FUSO,
+    )
 
 
 @router.get("/dashboard/reports/technician", response_model=TechnicianDetailReport)
 async def get_technician_detail_report(
     db: Annotated[AsyncSession, Depends(get_db)],
     actor: Annotated[User, Depends(get_current_user)],
-    period: Annotated[int, Query(ge=7, le=365)] = 30,
+    period: Annotated[int, Query(ge=1, le=365)] = 30,
     technician_id: uuid.UUID | None = Query(default=None),
+    start_date: date_type | None = Query(default=None),
+    end_date: date_type | None = Query(default=None),
 ) -> TechnicianDetailReport:
     """
     Detailed metrics for a single technician.
@@ -1183,44 +1254,37 @@ async def get_technician_detail_report(
         tech_id = tech_row.id
         tech_name = tech_row.name
 
-    since = datetime.now(UTC) - timedelta(days=period)
+    janela = _janela_ou_422(period, start_date, end_date)
+    since, until = janela.inicio, janela.fim
 
-    summary = await _technician_summary(db, tech_id, tech_name, since)
+    summary = await _technician_summary(db, tech_id, tech_name, since, until)
 
     # In-progress count (not in resolved/closed/open)
     in_progress_row = (
         await db.execute(
             select(func.count()).where(
                 Ticket.assignee_id == tech_id,
-                Ticket.created_at >= since,
+                *_na_janela(Ticket.created_at, since, until),
                 Ticket.status == TicketStatus.in_progress,
             )
         )
     ).scalar_one()
 
     # Daily ticket volume for this technician
+    dia_do_chamado = func.date_trunc(text("'day'"), _no_fuso(Ticket.created_at))
     day_rows = (
         await db.execute(
-            select(
-                func.date_trunc(text("'day'"), Ticket.created_at).label("day"),
-                func.count().label("cnt"),
-            )
-            .where(Ticket.assignee_id == tech_id, Ticket.created_at >= since)
-            .group_by(func.date_trunc(text("'day'"), Ticket.created_at))
-            .order_by(func.date_trunc(text("'day'"), Ticket.created_at))
+            select(dia_do_chamado.label("day"), func.count().label("cnt"))
+            .where(Ticket.assignee_id == tech_id, *_na_janela(Ticket.created_at, since, until))
+            .group_by(dia_do_chamado)
+            .order_by(dia_do_chamado)
         )
     ).all()
     counts_by_day: dict[str, int] = {r.day.strftime("%Y-%m-%d"): r.cnt for r in day_rows}
-    tickets_by_day = [
-        DailyCount(
-            date=(since + timedelta(days=i)).strftime("%Y-%m-%d"),
-            count=counts_by_day.get((since + timedelta(days=i)).strftime("%Y-%m-%d"), 0),
-        )
-        for i in range(period + 1)
-    ]
+    tickets_by_day = _serie_diaria(janela, counts_by_day)
 
     return TechnicianDetailReport(
-        period_days=period,
+        period_days=janela.dias,
         technician_id=str(tech_id),
         technician_name=tech_name,
         total_assigned=summary.total_assigned,
@@ -1233,4 +1297,7 @@ async def get_technician_detail_report(
         csat_average=summary.csat_average,
         csat_count=summary.csat_count,
         tickets_by_day=tickets_by_day,
+        start_date=janela.primeiro_dia,
+        end_date=janela.ultimo_dia,
+        timezone=NOME_DO_FUSO,
     )

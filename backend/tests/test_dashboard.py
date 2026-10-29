@@ -205,6 +205,33 @@ async def test_get_reports_period_out_of_range(patch_redis):
 
 
 @pytest.mark.asyncio
+@pytest.mark.parametrize(
+    "valor, trecho",
+    [
+        ("2026-13-01", "AAAA-MM-DD"),
+        ("01/10/2026", "AAAA-MM-DD"),
+        ("abc", "AAAA-MM-DD"),
+        ("2026-10-01T10:00", "sem hora"),
+    ],
+)
+async def test_data_mal_formada_da_422_em_portugues(patch_redis, valor, trecho):
+    """O formato faz parte do contrato de datas (F1-B-03a): antes voltava em
+    inglês ("Input should be a valid date or datetime, ...")."""
+    _make_client_with_actor(_ADMIN)
+
+    async with AsyncClient(transport=ASGITransport(app=app), base_url="http://test") as c:
+        resp = await c.get(
+            "/api/v1/dashboard/reports", params={"start_date": valor, "end_date": "2026-10-02"}
+        )
+
+    assert resp.status_code == 422
+    item = resp.json()["detail"][0]
+    assert item["field"] == "start_date"
+    assert trecho in item["message"]
+    assert "Input should" not in item["message"]
+
+
+@pytest.mark.asyncio
 async def test_csat_distribution_cobre_as_notas_de_1_a_10(patch_redis):
     """A pesquisa usa escala de 1 a 10 — o relatório precisa listar as 10 notas."""
     _make_client_with_actor(_ADMIN)
