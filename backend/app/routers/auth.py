@@ -862,8 +862,11 @@ async def mfa_disable(
     """
     senha_ok = await run_in_threadpool(verify_password, body.password, current_user.password)
     if not senha_ok:
+        # 400, não 401: quem chega aqui está logado, e 401 é o sinal de sessão
+        # vencida para o front — que renovava e, sem refresh, deslogava a
+        # pessoa por ter errado a senha (F1-B-01).
         raise HTTPException(
-            status_code=status.HTTP_401_UNAUTHORIZED,
+            status_code=status.HTTP_400_BAD_REQUEST,
             detail="Senha incorreta.",
         )
 

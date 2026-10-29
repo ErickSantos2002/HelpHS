@@ -307,14 +307,31 @@ async def test_codigo_recusado_nao_despeja_sessao_nenhuma(chave_ligada):
 
 @pytest.mark.asyncio
 async def test_desligar_exige_a_senha_atual(chave_ligada):
-    usuario = _Usuario(mfa_enabled=True, mfa_secret=mfa.cifrar_segredo(mfa.gerar_segredo()))
+    """Senha errada aqui é 400, não 401.
 
-    async with await _cliente(usuario) as c:
-        resposta = await c.request("DELETE", "/api/v1/auth/mfa", json={"password": "senha-errada"})
+    Quem chama já está logado: 401 é o sinal de "sessão vencida" para o front,
+    que renovava a sessão e, sem refresh válido, deslogava a pessoa por ter
+    errado a senha (auditoria F1-B-01). A recusa não mexe em nada: o segundo
+    fator segue ligado, nenhuma sessão cai e nada vai para a auditoria.
+    """
+    segredo = mfa.cifrar_segredo(mfa.gerar_segredo())
+    usuario = _Usuario(mfa_enabled=True, mfa_secret=segredo)
 
-    assert resposta.status_code == 401
+    with (
+        patch("app.routers.auth.delete_refresh_token", new=AsyncMock()) as apaga,
+        patch("app.routers.auth._audit") as audita,
+    ):
+        async with await _cliente(usuario) as c:
+            resposta = await c.request(
+                "DELETE", "/api/v1/auth/mfa", json={"password": "senha-errada"}
+            )
+
+    assert resposta.status_code == 400
+    assert resposta.json() == {"detail": "Senha incorreta."}
     assert usuario.mfa_enabled is True
-    assert usuario.mfa_secret is not None
+    assert usuario.mfa_secret == segredo
+    apaga.assert_not_awaited()
+    audita.assert_not_called()
 
 
 @pytest.mark.asyncio

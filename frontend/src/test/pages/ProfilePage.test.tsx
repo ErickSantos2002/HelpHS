@@ -221,6 +221,24 @@ describe("ProfilePage", () => {
     expect(screen.getByLabelText("Sua senha atual")).toBeInTheDocument();
   });
 
+  it("senha errada ao desligar o segundo fator mostra o motivo e deixa tentar de novo", async () => {
+    // O backend responde 400 (F1-B-01): com 401 o interceptor tratava a senha
+    // errada como sessão vencida e podia deslogar a pessoa.
+    await montar({}, { enabled: true, pending: false, available: true });
+    vi.mocked(authService.disableMfaApi).mockRejectedValueOnce({
+      response: { status: 400, data: { detail: "Senha incorreta." } },
+    });
+
+    await userEvent.click(await screen.findByRole("button", { name: "Desativar" }));
+    await userEvent.type(screen.getByLabelText("Sua senha atual"), "SenhaErrada1");
+    await userEvent.click(screen.getByRole("button", { name: "Desativar" }));
+
+    expect(await screen.findByText("Senha incorreta.")).toBeInTheDocument();
+    // Continua no passo da senha; o status não foi relido como se tivesse desligado
+    expect(screen.getByLabelText("Sua senha atual")).toBeInTheDocument();
+    expect(authService.getMfaStatusApi).toHaveBeenCalledTimes(1);
+  });
+
   it("senha curta é recusada com o motivo, e não vai para a rede", async () => {
     await montar();
     await userEvent.click(
