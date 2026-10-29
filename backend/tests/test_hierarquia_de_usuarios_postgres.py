@@ -458,15 +458,14 @@ async def test_ultimo_admin_ativo_nao_sai_nem_por_ator_desatualizado(fabrica, db
 
 
 @pytest.mark.asyncio
-async def test_ultimo_admin_nao_sai_pelo_patch_de_status_para_anonymized(fabrica, db):
-    """O `PATCH /status` também aceita `anonymized` — é o segundo caminho que
-    tira um admin do quadro, e ele encerra a autorização da foto (Fase 3B).
+async def test_ultimo_admin_nao_sai_pela_anonimizacao_e_a_foto_fica(fabrica, db):
+    """Anonimizar encerra a autorização da foto (Fase 3B) — e, desde a
+    ANON-01, só o `POST /anonymize` anonimiza (o `PATCH /status` recusa o
+    valor no schema).
 
     A recusa do último admin tem de vir ANTES desse encerramento: a linha sai
     exatamente como estava, autorização da foto inclusive.
     """
-    from app.routers.users import update_user_status
-
     ator = await _pessoa(fabrica, UserRole.admin, UserStatus.inactive)
     ator.status = UserStatus.active  # o que a autenticação viu
     unico = await _pessoa(fabrica, UserRole.admin)
@@ -479,7 +478,7 @@ async def test_ultimo_admin_nao_sai_pelo_patch_de_status_para_anonymized(fabrica
     antes = await _retrato(fabrica, unico.id)
 
     with pytest.raises(HTTPException) as erro:
-        await update_user_status(unico.id, UserStatusUpdate(status=UserStatus.anonymized), db, ator)
+        await _anonimiza(db, ator, unico.id)
 
     assert erro.value.status_code == 409
     assert await _retrato(fabrica, unico.id) == antes

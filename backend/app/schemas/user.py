@@ -5,6 +5,7 @@ Pydantic v2 schemas for User endpoints.
 import re
 import uuid
 from datetime import datetime
+from typing import Literal
 
 from pydantic import AwareDatetime, ConfigDict, Field, StrictBool, field_validator
 
@@ -99,8 +100,17 @@ class PasswordChange(AppBaseModel):
         return v
 
 
+# Os dois estados OPERACIONAIS, reversíveis, que esta rota alterna. `anonymized`
+# fica de fora no próprio tipo: anonimizar é o `POST /users/{id}/anonymize`, que
+# apaga os dados pessoais — por aqui só trocaria o status, e a conta passaria a
+# constar como anonimizada com nome, e-mail, telefone e foto intactos. Fora
+# destes dois valores, 422 antes do handler. (O filtro `GET /users?status=` é
+# outro contrato e continua aceitando os três.)
+SituacaoOperacional = Literal[UserStatus.active, UserStatus.inactive]
+
+
 class UserStatusUpdate(AppBaseModel):
-    status: UserStatus
+    status: SituacaoOperacional
 
 
 class LGPDConsentUpdate(AppBaseModel):

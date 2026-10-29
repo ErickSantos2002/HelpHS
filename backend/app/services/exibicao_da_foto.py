@@ -204,8 +204,9 @@ def encerra_por_anonimizacao(usuario: User) -> bool:
     ator verdadeiro. Os eventos antigos ficam como estão.
 
     Diferente da conta só inativa — que guarda a escolha e volta a respeitá-la
-    ao reativar —, a anonimizada perde a autorização de vez: se o mesmo
-    registro voltar a ser usado, uma foto nova só aparece com nova autorização.
+    ao reativar —, a anonimizada perde a autorização de vez. A conta
+    anonimizada não volta pelo `PATCH /status` (é terminal ali); se um dia
+    houver fluxo próprio de recuperação, a foto só aparece com nova autorização.
 
     Devolve se havia autorização.
     """
