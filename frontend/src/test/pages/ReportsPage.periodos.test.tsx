@@ -307,3 +307,56 @@ describe("ReportsPage — permissões preservadas", () => {
     expect(reportService.getTechnicianDetailReport).not.toHaveBeenCalled();
   });
 });
+
+describe("ReportsPage — intervalo inválido não é carregamento (V1)", () => {
+  const AVISO = "Aguardando um período válido — corrija as datas acima.";
+
+  function inverter() {
+    escolherNoMenu(periodo(), "Personalizado");
+    fireEvent.change(screen.getByLabelText("Data inicial"), { target: { value: "2026-10-20" } });
+    fireEvent.change(screen.getByLabelText("Data final"), { target: { value: "2026-10-10" } });
+  }
+
+  it("visão geral: aviso no lugar do relatório, sem anel; corrigir volta a carregar", async () => {
+    padrao();
+    render(<ReportsPage />);
+    await screen.findByText("Tickets no período");
+    inverter();
+    await screen.findByText("A data inicial não pode ser posterior à data final.");
+    expect(screen.getByText(AVISO)).toBeInTheDocument();
+    expect(screen.queryByText("Tickets no período")).not.toBeInTheDocument();
+    expect(screen.queryAllByRole("status", { name: "Carregando..." })).toHaveLength(0);
+
+    fireEvent.change(screen.getByLabelText("Data final"), { target: { value: "2026-10-25" } });
+    expect(await screen.findByText("Tickets no período")).toBeInTheDocument();
+    expect(screen.queryByText(AVISO)).not.toBeInTheDocument();
+  });
+
+  it("por técnico com detalhe aberto: aviso, e o painel não diz «Carregando detalhes…»", async () => {
+    padrao();
+    render(<ReportsPage />);
+    await screen.findByText("Tickets no período");
+    fireEvent.click(screen.getByRole("button", { name: /Por técnico/ }));
+    fireEvent.click(await screen.findByRole("button", { name: "Detalhes de Ana Silva" }));
+    await screen.findByText("Detalhes — Ana Silva");
+    inverter();
+    await screen.findByText("A data inicial não pode ser posterior à data final.");
+
+    expect(screen.queryByText("Carregando detalhes…")).not.toBeInTheDocument();
+    expect(screen.getByText("Detalhes do técnico")).toBeInTheDocument();
+    expect(screen.getAllByText(AVISO)).toHaveLength(2);
+    expect(screen.queryAllByRole("status", { name: "Carregando..." })).toHaveLength(0);
+  });
+
+  it("técnico: as próprias métricas esperam um período válido", async () => {
+    sessao.atual = "tecnico";
+    padrao();
+    render(<ReportsPage />);
+    await screen.findByText("Atribuídos no período");
+    inverter();
+    await screen.findByText("A data inicial não pode ser posterior à data final.");
+    expect(screen.getByText(AVISO)).toBeInTheDocument();
+    expect(screen.queryByText("Atribuídos no período")).not.toBeInTheDocument();
+    expect(screen.queryAllByRole("status", { name: "Carregando..." })).toHaveLength(0);
+  });
+});

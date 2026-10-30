@@ -234,3 +234,16 @@ export function rotuloDoPreset(preset: PresetDePeriodo): string {
  */
 export const NOTA_COMPARACAO_DE_HOJE =
   "Hoje, até agora, comparado com o dia de ontem inteiro.";
+
+/**
+ * O que um bloco do período diz enquanto o "Personalizado" está inválido.
+ *
+ * Com o intervalo inválido a carga fica ociosa — nada é pedido —, e o bloco
+ * desenhava o anel de carregando para sempre, esperando uma resposta que não
+ * viria. O motivo exato está no seletor; o bloco só diz que espera.
+ */
+export const AVISO_DE_PERIODO_INVALIDO =
+  "Aguardando um período válido — corrija as datas acima.";
+
+/** A versão curta, para o subtítulo de um indicador. */
+export const SUBTITULO_DE_PERIODO_INVALIDO = "Período inválido";

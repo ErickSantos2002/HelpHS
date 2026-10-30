@@ -8,7 +8,7 @@ import { SeletorDePeriodo } from "../../components/relatorios/SeletorDePeriodo";
 import { cn } from "../../lib/utils";
 import { CROMO, COR_SERIE_TEMPORAL, ENVOLTORIO_DICA, ESTILO_DICA } from "../../lib/grafico";
 import { PRIORIDADE } from "../../lib/prioridade";
-import { rotuloDoPreset } from "../../lib/periodoRelatorio";
+import { AVISO_DE_PERIODO_INVALIDO, SUBTITULO_DE_PERIODO_INVALIDO, rotuloDoPreset } from "../../lib/periodoRelatorio";
 import { useCarga, type Carga } from "../../lib/useCarga";
 import { usePeriodoDoRelatorio } from "../../lib/usePeriodoDoRelatorio";
 import { useAuth } from "../../contexts/AuthContext";
@@ -192,9 +192,21 @@ export default function TechnicianDashboard() {
   const myBreachCount = myTickets.filter((t) => t.sla_response_breach || t.sla_resolve_breach).length;
   const d = detail.dados;
 
-  /** O subtítulo de um indicador cuja carga ainda não está pronta. */
+  /**
+   * O subtítulo de um indicador cuja carga ainda não está pronta. Ociosa, a
+   * carga do período espera um intervalo válido — não está carregando nada.
+   */
   const subDaCarga = (c: Carga<unknown>, pronto: string) =>
-    c.fase === "pronto" ? pronto : c.fase === "falha" ? "Indisponível" : "Carregando…";
+    c.fase === "pronto" ? pronto
+      : c.fase === "falha" ? "Indisponível"
+      : c.fase === "ocioso" ? SUBTITULO_DE_PERIODO_INVALIDO
+      : "Carregando…";
+
+  /** O miolo de um bloco do período sem relatório: falha, espera ou anel. */
+  const esperaDoDetalhe =
+    detail.fase === "falha" ? "Indisponível — veja o aviso acima."
+      : detail.fase === "ocioso" ? AVISO_DE_PERIODO_INVALIDO
+      : <Spinner size="md" />;
 
   const falhas: { titulo: string; carga: Carga<unknown> }[] = [
     { titulo: "Meu desempenho", carga: detail },
@@ -297,8 +309,8 @@ export default function TechnicianDashboard() {
           </div>
           <div className="p-5">
             {!d ? (
-              <div className="flex h-44 items-center justify-center text-sm text-conteudo-muted">
-                {detail.fase === "falha" ? "Indisponível — veja o aviso acima." : <Spinner size="md" />}
+              <div className="flex h-44 items-center justify-center px-4 text-center text-sm text-conteudo-muted">
+                {esperaDoDetalhe}
               </div>
             ) : d.tickets_by_day.length === 0 ? (
               <p className="text-conteudo-muted text-sm py-8 text-center">Sem dados para o período</p>
@@ -335,8 +347,8 @@ export default function TechnicianDashboard() {
               conformidade, e quem olhava lia "não atendi nada, tudo no
               prazo". */}
           {!d ? (
-            <div className="flex h-44 items-center justify-center text-sm text-conteudo-muted">
-              {detail.fase === "falha" ? "Indisponível — veja o aviso acima." : <Spinner size="md" />}
+            <div className="flex h-44 items-center justify-center px-4 text-center text-sm text-conteudo-muted">
+              {esperaDoDetalhe}
             </div>
           ) : (
           <div className="p-5 space-y-4">

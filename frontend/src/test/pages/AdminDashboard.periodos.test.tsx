@@ -108,6 +108,17 @@ function montar() {
 }
 
 const periodo = () => screen.getByRole("combobox", { name: "Período" });
+const AVISO = "Aguardando um período válido — corrija as datas acima.";
+
+/** O filtro de técnico: botão cujo nome soma o rótulo "Técnico" e o valor. */
+const filtroDeTecnico = () => screen.getByRole("button", { name: /^Técnico / });
+
+/** Inverte o intervalo personalizado: início depois do fim. */
+function inverterIntervalo() {
+  escolherNoMenu(periodo(), "Personalizado");
+  fireEvent.change(screen.getByLabelText("Data inicial"), { target: { value: "2026-10-20" } });
+  fireEvent.change(screen.getByLabelText("Data final"), { target: { value: "2026-10-10" } });
+}
 
 /** O intervalo pedido na última chamada de `getReports`. */
 function ultimoIntervaloDoRelatorio() {
@@ -293,7 +304,6 @@ describe("AdminDashboard — resposta atrasada", () => {
       .mockImplementationOnce(() => new Promise((res) => { soltarAntigo = res; }) as never)
       .mockResolvedValueOnce(relatorio(7) as never);
     montar();
-    console.log("CHAMADAS", JSON.stringify(vi.mocked(reportService.getReports).mock.calls));
 
     escolherNoMenu(periodo(), "Últimos 7 dias");
     expect(await screen.findByRole("img", { name: /Hardware: 7/ })).toBeInTheDocument();
@@ -349,5 +359,129 @@ describe("AdminDashboard — indicadores", () => {
     montar();
     escolherNoMenu(periodo(), "Mês passado");
     expect(await screen.findByText("01/09 – 30/09 · horário de Recife")).toBeInTheDocument();
+  });
+});
+
+describe("AdminDashboard — intervalo inválido não é carregamento (V1)", () => {
+  it("os blocos do período dizem que esperam um período válido, sem anel de carregando", async () => {
+    padrao();
+    montar();
+    await screen.findByText("Conformidade SLA — Últimos 30 dias");
+    await screen.findByRole("row", { name: /Ana Silva/ });
+    const relatorios = vi.mocked(reportService.getReports).mock.calls.length;
+    const listas = vi.mocked(reportService.getTechnicianListReport).mock.calls.length;
+
+    inverterIntervalo();
+
+    expect(await screen.findByText("A data inicial não pode ser posterior à data final."))
+      .toBeInTheDocument();
+    // Nenhum bloco do período fica girando: não há pedido a esperar.
+    expect(screen.queryAllByRole("status", { name: "Carregando..." })).toHaveLength(0);
+    expect(screen.queryByText("Carregando…")).not.toBeInTheDocument();
+    expect(screen.getAllByText(AVISO).length).toBeGreaterThanOrEqual(3);
+    expect(screen.getByText("Período inválido")).toBeInTheDocument();
+    // E nada foi pedido com o intervalo invertido (a 1ª ponta, 20/10–30/10, é válida).
+    const validos = (n: number) => n + 1;
+    expect(reportService.getReports).toHaveBeenCalledTimes(validos(relatorios));
+    expect(reportService.getTechnicianListReport).toHaveBeenCalledTimes(validos(listas));
+    // Nenhum número de antes: a equipe saiu da tela.
+    expect(screen.queryByRole("row", { name: /Ana Silva/ })).not.toBeInTheDocument();
+  });
+
+  it("corrigir o intervalo volta a carregar e tira o aviso", async () => {
+    padrao();
+    montar();
+    await screen.findByText("Conformidade SLA — Últimos 30 dias");
+    inverterIntervalo();
+    await screen.findByText("A data inicial não pode ser posterior à data final.");
+
+    fireEvent.change(screen.getByLabelText("Data final"), { target: { value: "2026-10-25" } });
+
+    await waitFor(() =>
+      expect(ultimoIntervaloDoRelatorio()).toEqual({ start_date: "2026-10-20", end_date: "2026-10-25" }),
+    );
+    expect(await screen.findByRole("img", { name: /Hardware: 16/ })).toBeInTheDocument();
+    expect(await screen.findByRole("row", { name: /Ana Silva/ })).toBeInTheDocument();
+    expect(screen.queryByText(AVISO)).not.toBeInTheDocument();
+  });
+});
+
+describe("AdminDashboard — o filtro de técnico não some (V2)", () => {
+  it("carregando: o filtro aparece, desabilitado", async () => {
+    padrao();
+    vi.mocked(reportService.getTechnicianListReport).mockImplementation(() => new Promise(() => {}));
+    montar();
+    const filtro = filtroDeTecnico();
+    expect(filtro).toHaveAccessibleName("Técnico Todos os técnicos");
+    expect(filtro).toBeDisabled();
+  });
+
+  it("falha da API: o filtro aparece, desabilitado", async () => {
+    padrao();
+    vi.mocked(reportService.getTechnicianListReport).mockRejectedValue(erroDaApi(500, "x"));
+    montar();
+    await screen.findByRole("alert");
+    expect(filtroDeTecnico()).toBeDisabled();
+  });
+
+  it("intervalo inválido: o filtro aparece, desabilitado", async () => {
+    padrao();
+    montar();
+    await waitFor(() => expect(filtroDeTecnico()).toBeEnabled());
+    inverterIntervalo();
+    await screen.findByText("A data inicial não pode ser posterior à data final.");
+    expect(filtroDeTecnico()).toBeDisabled();
+  });
+
+  it("Tentar de novo: desabilitado enquanto pede, habilitado com a lista", async () => {
+    padrao();
+    let soltar!: (v: unknown) => void;
+    vi.mocked(reportService.getTechnicianListReport)
+      .mockRejectedValueOnce(erroDaApi(500, "x"))
+      .mockImplementationOnce(() => new Promise((res) => { soltar = res; }) as never);
+    montar();
+    const aviso = await screen.findByRole("alert");
+    fireEvent.click(within(aviso).getByRole("button", { name: "Tentar de novo" }));
+
+    await waitFor(() => expect(screen.queryByRole("alert")).not.toBeInTheDocument());
+    expect(filtroDeTecnico()).toBeDisabled();
+    await act(async () => soltar(TECH_LIST));
+    expect(filtroDeTecnico()).toBeEnabled();
+  });
+
+  it("lista vazia: o filtro aparece, só com «Todos os técnicos»", async () => {
+    padrao();
+    vi.mocked(reportService.getTechnicianListReport).mockResolvedValue(
+      { period_days: 30, technicians: [] } as never,
+    );
+    montar();
+    await waitFor(() => expect(reportService.getTechnicianListReport).toHaveBeenCalled());
+    await waitFor(() => expect(filtroDeTecnico()).toBeEnabled());
+    fireEvent.click(filtroDeTecnico());
+    const opcoes = within(screen.getByRole("listbox")).getAllByRole("option");
+    // Só "Todos os técnicos": nenhum nome. (O filtro repete a opção como a
+    // linha de limpar do `Selector`, e isso já era assim antes desta tela.)
+    expect(new Set(opcoes.map((o) => o.textContent))).toEqual(new Set(["Todos os técnicos"]));
+  });
+
+  it("a escolha sobrevive ao intervalo inválido e vale para o intervalo corrigido", async () => {
+    padrao();
+    montar();
+    fireEvent.click(await screen.findByRole("row", { name: /Ana Silva — clique para filtrar/ }));
+    await waitFor(() => expect(filtroDeTecnico()).toHaveAccessibleName("Técnico Ana Silva"));
+
+    inverterIntervalo();
+    await screen.findByText("A data inicial não pode ser posterior à data final.");
+    expect(filtroDeTecnico()).toHaveAccessibleName("Técnico Ana Silva");
+    expect(filtroDeTecnico()).toBeDisabled();
+
+    fireEvent.change(screen.getByLabelText("Data final"), { target: { value: "2026-10-25" } });
+    await waitFor(() =>
+      expect(reportService.getTechnicianDetailReport).toHaveBeenLastCalledWith(
+        { start_date: "2026-10-20", end_date: "2026-10-25" }, "tech1",
+      ),
+    );
+    await waitFor(() => expect(filtroDeTecnico()).toBeEnabled());
+    expect(filtroDeTecnico()).toHaveAccessibleName("Técnico Ana Silva");
   });
 });

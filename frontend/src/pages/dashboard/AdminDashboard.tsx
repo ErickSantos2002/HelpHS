@@ -12,7 +12,11 @@ import {
 } from "../../lib/grafico";
 import { rotuloDeStatus, slotDeStatus, type TicketStatus } from "../../lib/status";
 import { rotuloDePrioridade, graficoDePrioridade, type TicketPriority } from "../../lib/prioridade";
-import { rotuloDoPreset } from "../../lib/periodoRelatorio";
+import {
+  AVISO_DE_PERIODO_INVALIDO,
+  SUBTITULO_DE_PERIODO_INVALIDO,
+  rotuloDoPreset,
+} from "../../lib/periodoRelatorio";
 import { useCarga, type Carga } from "../../lib/useCarga";
 import { usePeriodoDoRelatorio } from "../../lib/usePeriodoDoRelatorio";
 import { getDashboardStats, type DashboardStats } from "../../services/dashboardService";
@@ -178,11 +182,19 @@ function SectionCard({ title, action, children }: { title: string; action?: Reac
  * "Tentar de novo" fica UMA vez, no topo, por carga, e não repetido em cada
  * cartão que depende dela. Nunca um zero: um cartão sem dado diz que está sem
  * dado.
+ *
+ * Ociosa, a carga não pediu nada — aqui, só quando o "Personalizado" está
+ * inválido —, e o anel ficaria girando para sempre. O bloco diz que espera um
+ * período válido; o motivo está no seletor.
  */
 function EsperaDaCarga({ carga, altura = "h-48" }: { carga: Carga<unknown>; altura?: string }) {
   return (
-    <div className={cn("flex items-center justify-center text-sm text-conteudo-muted", altura)}>
-      {carga.fase === "falha" ? "Indisponível — veja o aviso acima." : <Spinner size="md" />}
+    <div className={cn("flex items-center justify-center px-4 text-center text-sm text-conteudo-muted", altura)}>
+      {carga.fase === "falha"
+        ? "Indisponível — veja o aviso acima."
+        : carga.fase === "ocioso"
+          ? AVISO_DE_PERIODO_INVALIDO
+          : <Spinner size="md" />}
     </div>
   );
 }
@@ -194,7 +206,14 @@ export default function AdminDashboard() {
   const { intervalo } = periodo;
 
   // Technician filter
-  const [selectedTechId, setSelectedTechId] = useState<string>("all");
+  //
+  // O nome vai junto com o id: enquanto a lista do período não está pronta
+  // (carregando, falha, intervalo inválido), o filtro continua à vista e
+  // mostrando QUEM está escolhido — e o nome só existia dentro da lista.
+  const [tecnicoEscolhido, setTecnicoEscolhido] = useState<{ id: string; nome: string } | null>(null);
+  const selectedTechId = tecnicoEscolhido?.id ?? "all";
+  const escolherTecnico = (id: string, nome: string | undefined) =>
+    setTecnicoEscolhido(id === "all" ? null : { id, nome: nome ?? "Técnico" });
 
   // ── As cargas, uma por bloco (F1-B-03b) ──────────────────────────────
   //
@@ -297,7 +316,21 @@ export default function AdminDashboard() {
   const chartData      = cargaDoGrafico.dados?.tickets_by_day ?? [];
   const slaCompliance  = report.dados?.sla_compliance ?? [];
   const nomeDoTecnico  = techList.dados?.technicians.find((t) => t.technician_id === selectedTechId)?.technician_name
-    ?? techDetail.dados?.technician_name;
+    ?? techDetail.dados?.technician_name
+    ?? tecnicoEscolhido?.nome;
+
+  // As opções do filtro. Com a lista pronta, todos os técnicos do período;
+  // sem ela, só o que já estava escolhido — para não perder a escolha nem
+  // mostrar um nome que não está lá.
+  const opcoesDeTecnico = [
+    { value: "all", label: "Todos os técnicos" },
+    ...(techList.dados
+      ? techList.dados.technicians.map((t) => ({ value: t.technician_id, label: t.technician_name }))
+      : tecnicoEscolhido
+        ? [{ value: tecnicoEscolhido.id, label: tecnicoEscolhido.nome }]
+        : []),
+  ];
+  const listaDeTecnicosPronta = techList.fase === "pronto";
   // "Personalizado" não diz quais dias; os dias, sim.
   const periodLabel    = periodo.preset === "personalizado"
     ? (periodo.descricao ?? "Personalizado")
@@ -331,20 +364,28 @@ export default function AdminDashboard() {
               O `label` é a razão da troca: o `FilterSelect` não o repassava, e
               o filtro se anunciava só pelo nome do técnico escolhido. O
               `Selector` desenha o rótulo `sr-only` e soma rótulo + valor no
-              nome acessível. */}
-          {techList.dados && (
+              nome acessível.
+
+              Fica SEMPRE à vista (F1-B-03b). Só existia com a lista pronta, e
+              sumia ao carregar, ao falhar e com o intervalo inválido. Sem a
+              lista, fica desabilitado — o `title` diz por quê — e mantém a
+              escolha. */}
+          <span
+            title={listaDeTecnicosPronta ? undefined : "Disponível quando a lista de técnicos do período carregar"}
+          >
             <Selector
               variant="filter"
               label="Técnico"
               value={selectedTechId}
-              onChange={(v) => setSelectedTechId(v ?? "all")}
-              options={[
-                { value: "all", label: "Todos os técnicos" },
-                ...techList.dados.technicians.map((t) => ({ value: t.technician_id, label: t.technician_name })),
-              ]}
+              onChange={(v) => {
+                const id = v ?? "all";
+                escolherTecnico(id, opcoesDeTecnico.find((o) => o.value === id)?.label);
+              }}
+              options={opcoesDeTecnico}
               placeholder="Todos os técnicos"
+              disabled={!listaDeTecnicosPronta}
             />
-          )}
+          </span>
 
           {/* O seletor fica fora de qualquer ramo de erro: é por ele que a
               pessoa sai de uma falha trocando de período. */}
@@ -461,7 +502,9 @@ export default function AdminDashboard() {
           sub={
             techList.fase === "pronto"
               ? avgResolutionHours != null ? `Média da equipe · ${periodLabel}` : `Sem dados · ${periodLabel}`
-              : techList.fase === "falha" ? "Indisponível" : "Carregando…"
+              : techList.fase === "falha" ? "Indisponível"
+              : techList.fase === "ocioso" ? SUBTITULO_DE_PERIODO_INVALIDO
+              : "Carregando…"
           }
           tone="primary"
           icon={<Icon name="chart" />}
@@ -758,7 +801,7 @@ export default function AdminDashboard() {
       </div>
 
       {/* ── Team table ───────────────────────────────────────── */}
-      {techList.fase === "carregando" && (
+      {(techList.fase === "carregando" || techList.fase === "ocioso") && (
         <SectionCard title={`Performance da equipe — ${periodLabel}`}>
           <EsperaDaCarga carga={techList} altura="h-32" />
         </SectionCard>
@@ -788,7 +831,7 @@ export default function AdminDashboard() {
                     // estava escrito em lugar nenhum.
                     <tr
                       key={t.technician_id}
-                      onClick={() => setSelectedTechId(isSelected ? "all" : t.technician_id)}
+                      onClick={() => escolherTecnico(isSelected ? "all" : t.technician_id, t.technician_name)}
                       aria-label={
                         isSelected
                           ? `${t.technician_name} — filtro ativo, clique para remover`

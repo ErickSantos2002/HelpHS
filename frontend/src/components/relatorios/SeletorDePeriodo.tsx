@@ -59,6 +59,9 @@ export function SeletorDePeriodo({
           value={preset}
           onChange={(v) => onPreset(v as PresetDePeriodo)}
           options={OPCOES_DE_PERIODO}
+          // As sete opções inteiras: no teto padrão "Personalizado" — a que
+          // abre as datas — aparecia cortada ao meio.
+          maxVisibleOptions={OPCOES_DE_PERIODO.length}
         />
 
         {preset === "personalizado" && (

@@ -225,3 +225,35 @@ describe("TechnicianDashboard — SLA sem dados", () => {
     expect(within(cartao).queryByText("100%")).not.toBeInTheDocument();
   });
 });
+
+describe("TechnicianDashboard — intervalo inválido não é carregamento (V1)", () => {
+  it("o desempenho espera um período válido, sem anel; corrigir volta a carregar", async () => {
+    padrao();
+    render(<MemoryRouter><TechnicianDashboard /></MemoryRouter>);
+    await screen.findByText("Atribuídos");
+    escolherNoMenu(screen.getByRole("combobox", { name: "Período" }), "Personalizado");
+    fireEvent.change(screen.getByLabelText("Data inicial"), { target: { value: "2026-10-20" } });
+    await waitFor(() =>
+      expect(reportService.getTechnicianDetailReport).toHaveBeenLastCalledWith(
+        { start_date: "2026-10-20", end_date: "2026-10-30" },
+      ),
+    );
+    await screen.findByText("Atribuídos");
+    const pedidos = vi.mocked(reportService.getTechnicianDetailReport).mock.calls.length;
+
+    fireEvent.change(screen.getByLabelText("Data final"), { target: { value: "2026-10-10" } });
+
+    await screen.findByText("A data inicial não pode ser posterior à data final.");
+    const aviso = "Aguardando um período válido — corrija as datas acima.";
+    expect(screen.getAllByText(aviso)).toHaveLength(2);
+    expect(screen.queryByText("Atribuídos")).not.toBeInTheDocument();
+    // As listas de agora continuam prontas; só o período espera.
+    expect(screen.queryAllByRole("status", { name: "Carregando..." })).toHaveLength(0);
+    expect(screen.getByText("Período inválido")).toBeInTheDocument();
+    expect(reportService.getTechnicianDetailReport).toHaveBeenCalledTimes(pedidos);
+
+    fireEvent.change(screen.getByLabelText("Data final"), { target: { value: "2026-10-25" } });
+    expect(await screen.findByText("Atribuídos")).toBeInTheDocument();
+    expect(screen.queryByText(aviso)).not.toBeInTheDocument();
+  });
+});

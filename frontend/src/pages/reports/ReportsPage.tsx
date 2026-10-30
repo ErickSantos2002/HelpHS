@@ -49,6 +49,7 @@ import { useAuth } from "../../contexts/AuthContext";
 import { FalhaDoBloco } from "../../components/relatorios/FalhaDoBloco";
 import { SeletorDePeriodo } from "../../components/relatorios/SeletorDePeriodo";
 import {
+  AVISO_DE_PERIODO_INVALIDO,
   NOTA_COMPARACAO_DE_HOJE,
   descreveIntervalo,
   type PresetDePeriodo,
@@ -829,7 +830,13 @@ function GlobalReport({ data, preset }: { data: ReportData; preset: PresetDePeri
           <ResponsiveContainer width="100%" height={240}>
             <BarChart data={slaChartData} margin={{ top: 4, right: 4, left: -20, bottom: 0 }}>
               <CartesianGrid strokeDasharray="3 3" stroke={CROMO.grade} />
+              {/* `interval={0}`: os quatro rótulos, sempre. Sem ele o Recharts
+                  pulava os que achava que não cabiam, e no cartão estreito
+                  "Média" sumia debaixo de uma barra sem nome. Inclinados,
+                  porque os quatro na horizontal se encostavam no cartão de
+                  um terço da largura. */}
               <XAxis dataKey="priority" stroke={CROMO.eixo} tick={{ fontSize: 10, fill: CROMO.eixo }}
+                interval={0} angle={-35} textAnchor="end" height={44}
                 tickFormatter={(v: string) => rotuloDePrioridade(v)} />
               <YAxis stroke={CROMO.eixo} tick={{ fontSize: 10, fill: CROMO.eixo }} domain={[0, 100]}
                 tickFormatter={(v: number) => `${v}%`} />
@@ -1175,9 +1182,11 @@ function TechnicianRanking({ data, onSelect }: { data: TechnicianListReport; onS
 
 // ── Technician detail panel (admin drill-down) ────────────────
 
-function TechnicianDetailPanel({ techDetail, techDetailLoading, erro, onTentarDeNovo, onClose }: {
+function TechnicianDetailPanel({ techDetail, techDetailLoading, aguardandoPeriodo, erro, onTentarDeNovo, onClose }: {
   techDetail: TechnicianDetailReport | null;
   techDetailLoading: boolean;
+  /** Intervalo inválido: nada foi pedido, e o painel não diz "Carregando". */
+  aguardandoPeriodo: boolean;
   /** O motivo da falha, ou `null`. Antes a falha deixava o painel vazio, calado. */
   erro: string | null;
   onTentarDeNovo: () => void;
@@ -1190,11 +1199,14 @@ function TechnicianDetailPanel({ techDetail, techDetailLoading, erro, onTentarDe
           <span className="text-sm font-semibold text-conteudo">
             {techDetail
               ? `Detalhes — ${techDetail.technician_name}`
-              : erro ? "Detalhes do técnico" : "Carregando detalhes…"}
+              : techDetailLoading ? "Carregando detalhes…" : "Detalhes do técnico"}
           </span>
         </div>
+        {/* `inline-flex` + `whitespace-nowrap`: a seta e "Fechar" numa linha
+            só. Em bloco, o ícone empurrava a palavra para baixo no cartão
+            estreito. */}
         <button onClick={onClose}
-          className="rounded-lg border border-borda/40 px-3 py-1 text-xs font-medium text-conteudo-muted hover:bg-surface-elevated hover:text-conteudo transition-colors cursor-pointer">
+          className="inline-flex shrink-0 items-center gap-1 whitespace-nowrap rounded-lg border border-borda/40 px-3 py-1 text-xs font-medium text-conteudo-muted hover:bg-surface-elevated hover:text-conteudo transition-colors cursor-pointer">
           <Icon name="chevronLeft" size={14} strokeWidth={2.5} /> Fechar
         </button>
       </div>
@@ -1202,11 +1214,27 @@ function TechnicianDetailPanel({ techDetail, techDetailLoading, erro, onTentarDe
         {techDetailLoading && (
           <div className="flex h-32 items-center justify-center"><Spinner size="md" /></div>
         )}
+        {aguardandoPeriodo && <EsperaDePeriodo altura="h-32" />}
         {erro && (
           <FalhaDoBloco titulo="Detalhes do técnico" erro={erro} onTentarDeNovo={onTentarDeNovo} />
         )}
         {!techDetailLoading && techDetail && <TechnicianDetail data={techDetail} />}
       </div>
+    </div>
+  );
+}
+
+/**
+ * O lugar de um relatório enquanto o "Personalizado" está inválido.
+ *
+ * A carga fica ociosa — nada é pedido —, e a tela não desenhava nada, ou o
+ * painel de detalhe dizia "Carregando detalhes…" sem carregar coisa alguma.
+ * O motivo exato está no seletor; aqui, só que se espera um período válido.
+ */
+function EsperaDePeriodo({ altura = "h-48" }: { altura?: string }) {
+  return (
+    <div className={`flex ${altura} items-center justify-center px-4 text-center text-sm text-conteudo-muted`}>
+      {AVISO_DE_PERIODO_INVALIDO}
     </div>
   );
 }
@@ -1430,7 +1458,9 @@ export default function ReportsPage() {
           ? <FalhaDoBloco titulo="Visão geral" erro={visaoGeral.erro} onTentarDeNovo={visaoGeral.tentarDeNovo} />
           : visaoGeral.fase === "carregando"
             ? <div className="flex h-48 items-center justify-center"><Spinner size="lg" /></div>
-            : globalData
+            : visaoGeral.fase === "ocioso"
+              ? <EsperaDePeriodo />
+              : globalData
               ? <GlobalReport data={globalData} preset={periodo.preset} />
               : null
       )}
@@ -1471,13 +1501,16 @@ export default function ReportsPage() {
             ? <FalhaDoBloco titulo="Desempenho por técnico" erro={techList.erro} onTentarDeNovo={techList.tentarDeNovo} />
             : techList.fase === "carregando"
               ? <div className="flex h-48 items-center justify-center"><Spinner size="lg" /></div>
-              : techListData && <TechnicianRanking data={techListData} onSelect={handleSelectTechnician} />
+              : techList.fase === "ocioso"
+                ? <EsperaDePeriodo />
+                : techListData && <TechnicianRanking data={techListData} onSelect={handleSelectTechnician} />
           }
 
           {selectedTechId && (
             <TechnicianDetailPanel
               techDetail={techDetail.dados}
               techDetailLoading={techDetail.fase === "carregando"}
+              aguardandoPeriodo={techDetail.fase === "ocioso"}
               erro={techDetail.fase === "falha" ? techDetail.erro : null}
               onTentarDeNovo={techDetail.tentarDeNovo}
               onClose={() => setSelectedTechId(undefined)}
@@ -1492,7 +1525,9 @@ export default function ReportsPage() {
           ? <FalhaDoBloco titulo="Suas métricas" erro={techDetail.erro} onTentarDeNovo={techDetail.tentarDeNovo} />
           : techDetail.fase === "carregando"
             ? <div className="flex h-48 items-center justify-center"><Spinner size="lg" /></div>
-            : techDetail.dados
+            : techDetail.fase === "ocioso"
+              ? <EsperaDePeriodo />
+              : techDetail.dados
               ? <TechnicianDetail data={techDetail.dados} />
               : null
       )}
