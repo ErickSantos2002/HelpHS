@@ -146,17 +146,18 @@ def test_interruptor_desligado_nao_consulta_nem_fecha():
     consulta.assert_not_awaited()
 
 
-def test_token_invalido_continua_4001():
-    """O contrato antigo do 4001 não muda nesta frente (dívida registrada)."""
+def test_token_invalido_fecha_4001_depois_do_aceite():
+    """A dívida registrada aqui foi paga na F1-B-04a: o 4001 também vem depois
+    do `accept()`, senão o navegador vê 1006 e reconecta para sempre."""
 
     async def _ninguem(token, db):
         return None
 
     with patch("app.routers.chat._authenticate_ws", _ninguem):
-        with pytest.raises(WebSocketDisconnect) as fechou:
-            with TestClient(app).websocket_connect(_URL):
-                pass
-    assert fechou.value.code == 4001
+        with TestClient(app).websocket_connect(_URL) as ws:
+            primeira = ws.receive()
+    assert primeira["type"] == "websocket.close"
+    assert primeira["code"] == 4001
 
 
 # ── Fechar os chats de quem revogou ───────────────────────────

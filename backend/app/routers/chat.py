@@ -14,6 +14,7 @@ Permissões:
   - Acesso = requester do ticket OU qualquer admin/técnico.
 """
 
+import base64
 import json
 import uuid
 from datetime import UTC, datetime
@@ -22,7 +23,8 @@ from typing import Annotated
 from fastapi import APIRouter, Depends, HTTPException, Query, WebSocket, WebSocketDisconnect, status
 from jose import JWTError
 from loguru import logger
-from sqlalchemy import func, select
+from sqlalchemy import func, literal, select, tuple_
+from sqlalchemy import inspect as sa_inspect
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.orm import selectinload
 from starlette.websockets import WebSocketState
@@ -64,7 +66,7 @@ from app.services.llm import improve_message, suggest_reply, summarize_conversat
 from app.services.notifications import audiencia_operacional, commit_e_notificar, notify
 from app.utils.avatar import links_das_fotos, remetentes_com_foto
 from app.utils.crud import get_or_404
-from app.utils.library_access import ensure_pode_anexar_no_chat
+from app.utils.library_access import ensure_pode_anexar_no_chat, visivel_para_cliente
 from app.utils.sla import register_first_response
 from app.utils.ticket_access import ensure_ticket_visible
 
@@ -190,9 +192,62 @@ async def _politica_pendente(db: AsyncSession, user: User) -> bool:
 # ── Helpers ───────────────────────────────────────────────────
 
 
-def _msg_to_response(msg: ChatMessage, sender_avatar_url: str | None = None) -> ChatMessageResponse:
+def _e_equipe(user: User) -> bool:
+    return user.role in (UserRole.admin, UserRole.technician)
+
+
+_SEM_ARQUIVO: dict = {
+    "library_file_id": None,
+    "library_file_name": None,
+    "library_file_mime": None,
+    "library_file_size": None,
+    "library_file_unavailable": False,
+}
+_ARQUIVO_INDISPONIVEL: dict = {**_SEM_ARQUIVO, "library_file_unavailable": True}
+
+
+def _arquivo_da_mensagem(msg: ChatMessage, *, ve_arquivo_interno: bool) -> dict:
+    """Os campos do arquivo da biblioteca, como quem lê pode vê-los.
+
+    O relacionamento TEM de vir carregado por quem consultou
+    (`selectinload(ChatMessage.library_file)`). Tocar nele sem isso, numa
+    sessão assíncrona, levanta `MissingGreenlet` — era o 500 que derrubava o
+    histórico inteiro de qualquer conversa com um arquivo. Se um caminho novo
+    esquecer o carregamento, a mensagem sai com o arquivo "indisponível" e o
+    aviso vai para o log: um arquivo a menos na tela, e não a conversa toda.
+
+    Cliente só vê o que está aberto para cliente. O arquivo pode ter voltado a
+    ser interno depois de anexado; aí nome, tipo, tamanho e até o id ficam de
+    fora, porque o próprio nome de um manual interno pode ser o segredo.
+    """
+    if msg.library_file_id is None:
+        return _SEM_ARQUIVO
+    if "library_file" in sa_inspect(msg).unloaded:
+        logger.warning(f"Chat: mensagem {msg.id} serializada sem o arquivo da biblioteca carregado")
+        return _ARQUIVO_INDISPONIVEL
+    arquivo = msg.library_file
+    if arquivo is None:
+        return _ARQUIVO_INDISPONIVEL
+    if not ve_arquivo_interno and not visivel_para_cliente(arquivo):
+        return _ARQUIVO_INDISPONIVEL
+    return {
+        "library_file_id": arquivo.id,
+        "library_file_name": arquivo.original_name,
+        "library_file_mime": arquivo.mime_type,
+        "library_file_size": arquivo.size_bytes,
+        "library_file_unavailable": False,
+    }
+
+
+def _msg_to_response(
+    msg: ChatMessage,
+    sender_avatar_url: str | None = None,
+    *,
+    ve_arquivo_interno: bool = False,
+) -> ChatMessageResponse:
+    """`ve_arquivo_interno` nasce falso: esquecer de passá-lo esconde um
+    arquivo da equipe, e não mostra um interno ao cliente."""
     sender = msg.sender
-    arquivo = msg.library_file if msg.library_file_id else None
     return ChatMessageResponse(
         id=msg.id,
         ticket_id=msg.ticket_id,
@@ -204,13 +259,7 @@ def _msg_to_response(msg: ChatMessage, sender_avatar_url: str | None = None) -> 
         created_at=msg.created_at,
         sender_name=sender.name if sender else "",
         sender_role=sender.role.value if sender else "",
-        library_file_id=msg.library_file_id,
-        # `msg.library_file` pode nao estar carregado em todo caminho; quando
-        # nao estiver, os campos saem nulos e a conversa desenha so o texto. O
-        # id acima e o que importa para a tela pedir o link.
-        library_file_name=arquivo.original_name if arquivo else None,
-        library_file_mime=arquivo.mime_type if arquivo else None,
-        library_file_size=arquivo.size_bytes if arquivo else None,
+        **_arquivo_da_mensagem(msg, ve_arquivo_interno=ve_arquivo_interno),
         sender_avatar_url=sender_avatar_url,
     )
 
@@ -241,10 +290,13 @@ async def _mensagem_com_remetente_atual(db: AsyncSession, msg_id: uuid.UUID) -> 
     antes — e, sem a opção, o SQLAlchemy devolveria do mapa de identidade a
     cópia que outro passo da mesma sessão (a Helô lendo o criador, por exemplo)
     já tivesse carregado. É a consulta que já existia: nenhuma a mais.
+
+    O arquivo da biblioteca vem junto, explícito: até aqui ele chegava ao
+    `_msg_to_response` só porque o POST o deixara no mapa de identidade.
     """
     result = await db.execute(
         select(ChatMessage)
-        .options(selectinload(ChatMessage.sender))
+        .options(selectinload(ChatMessage.sender), selectinload(ChatMessage.library_file))
         .where(ChatMessage.id == msg_id)
         .execution_options(populate_existing=True)
     )
@@ -374,37 +426,148 @@ def _exige_ia_ligada() -> None:
 # ── REST endpoints ────────────────────────────────────────────
 
 
+_CURSOR_INVALIDO = "Cursor de paginação inválido. Peça a página de novo, sem `before`."
+_PAGINA_PADRAO = 100
+_PAGINA_PADRAO_LEGADA = 50
+
+
+def _codifica_cursor(msg: ChatMessage) -> str:
+    """O ponto exato de uma mensagem: chamado, `created_at` e `id`.
+
+    Opaco para quem consome, mas não secreto nem assinado: alterá-lo só
+    desloca a janela DENTRO do chamado já autorizado, porque a consulta filtra
+    pelo chamado da URL de qualquer jeito. O `tk` existe para que um cursor
+    trocado de chamado seja recusado, em vez de virar uma página silenciosa no
+    lugar errado.
+    """
+    bruto = json.dumps(
+        {"tk": str(msg.ticket_id), "t": msg.created_at.isoformat(), "id": str(msg.id)},
+        separators=(",", ":"),
+    )
+    return base64.urlsafe_b64encode(bruto.encode()).decode().rstrip("=")
+
+
+def _decodifica_cursor(cursor: str, ticket_id: uuid.UUID) -> tuple[datetime, uuid.UUID]:
+    """O inverso de `_codifica_cursor`; qualquer coisa fora do formato é 422."""
+    try:
+        dados = json.loads(base64.urlsafe_b64decode(cursor + "=" * (-len(cursor) % 4)))
+        if not isinstance(dados, dict):
+            raise ValueError("cursor não é objeto")
+        chamado = uuid.UUID(dados["tk"])
+        instante = datetime.fromisoformat(dados["t"])
+        mensagem = uuid.UUID(dados["id"])
+    except (ValueError, KeyError, TypeError, AttributeError):
+        # `binascii.Error`, `UnicodeDecodeError` e `JSONDecodeError` são
+        # todos `ValueError`.
+        raise HTTPException(
+            status_code=status.HTTP_422_UNPROCESSABLE_CONTENT, detail=_CURSOR_INVALIDO
+        ) from None
+    # Sem fuso, a comparação com `timestamptz` dependeria do fuso da sessão do
+    # banco. O cursor que este módulo emite sempre tem.
+    if instante.tzinfo is None or chamado != ticket_id:
+        raise HTTPException(
+            status_code=status.HTTP_422_UNPROCESSABLE_CONTENT, detail=_CURSOR_INVALIDO
+        )
+    return instante, mensagem
+
+
 @router.get("/tickets/{ticket_id}/messages", response_model=ChatMessageListResponse)
 async def list_messages(
     ticket_id: uuid.UUID,
     db: Annotated[AsyncSession, Depends(get_db)],
     actor: Annotated[User, Depends(get_current_user)],
-    limit: int = Query(default=50, ge=1, le=100),
-    offset: int = Query(default=0, ge=0),
+    limit: int | None = Query(default=None, ge=1, le=100),
+    offset: int | None = Query(default=None, ge=0),
+    before: str | None = Query(default=None, max_length=512),
 ) -> ChatMessageListResponse:
+    """Histórico da conversa, sempre em ordem cronológica no corpo.
+
+    **Por cursor (padrão):** sem `offset`, devolve as `limit` (100) mensagens
+    MAIS RECENTES; com `before`, as imediatamente anteriores ao cursor. A
+    ordem é `(created_at, id)`: o `id` desempata mensagens do mesmo instante,
+    e é isso que impede repetir ou pular uma mensagem na fronteira entre
+    páginas.
+
+    **Legado por `offset`:** com `offset` presente — mesmo `offset=0` —, o
+    contrato antigo: do começo da conversa, 50 por página. Antes, sem
+    parâmetro nenhum, este endpoint também lia do começo, e a tela pedia 100
+    e mostrava as 100 MAIS ANTIGAS (FUN-30). Quem precisa da ordem antiga diz
+    `offset` e continua tendo.
+
+    ⚠️ `created_at` é carimbado antes do commit. Uma mensagem pode ficar
+    visível depois de outra mais "nova", e então cair atrás de um cursor já
+    usado: voltar com `before` não a traz. Quem a entrega é o WebSocket, ou
+    reler a página mais recente — ver `test_chat_historico_postgres.py`.
+    """
+    if offset is not None and before is not None:
+        raise HTTPException(
+            status_code=status.HTTP_422_UNPROCESSABLE_CONTENT,
+            detail="Use `before` ou `offset`, não os dois.",
+        )
+
+    # A autorização vem ANTES de olhar o cursor: chamado alheio responde o
+    # mesmo 404 com cursor válido, inválido ou sem cursor nenhum.
     ticket = await _get_ticket_visivel(ticket_id, actor, db)
+    ponto = _decodifica_cursor(before, ticket_id) if before is not None else None
 
     total_result = await db.execute(select(func.count()).where(ChatMessage.ticket_id == ticket_id))
     total = total_result.scalar_one()
 
-    rows = await db.execute(
+    # O arquivo da biblioteca vem carregado, explícito — ver `_arquivo_da_mensagem`.
+    consulta = (
         select(ChatMessage)
-        .options(selectinload(ChatMessage.sender))
+        .options(selectinload(ChatMessage.sender), selectinload(ChatMessage.library_file))
         .where(ChatMessage.ticket_id == ticket_id)
-        .order_by(ChatMessage.created_at.asc())
-        .offset(offset)
-        .limit(limit)
     )
-    messages = list(rows.scalars().all())
+
+    if offset is not None:
+        limite = limit or _PAGINA_PADRAO_LEGADA
+        rows = await db.execute(
+            consulta.order_by(ChatMessage.created_at.asc(), ChatMessage.id.asc())
+            .offset(offset)
+            .limit(limite)
+        )
+        messages = list(rows.scalars().all())
+        has_more = offset + len(messages) < total
+        next_before = None
+    else:
+        limite = limit or _PAGINA_PADRAO
+        if ponto is not None:
+            instante, mensagem = ponto
+            # Comparação de linha do Postgres: `(created_at, id) < (t, id)` é
+            # exatamente "vem antes na ordem da conversa", empate incluído.
+            consulta = consulta.where(
+                tuple_(ChatMessage.created_at, ChatMessage.id)
+                < tuple_(
+                    literal(instante, ChatMessage.created_at.type),
+                    literal(mensagem, ChatMessage.id.type),
+                )
+            )
+        # Uma a mais só para saber se há página anterior, sem outro COUNT.
+        rows = await db.execute(
+            consulta.order_by(ChatMessage.created_at.desc(), ChatMessage.id.desc()).limit(
+                limite + 1
+            )
+        )
+        lote = list(rows.scalars().all())
+        has_more = len(lote) > limite
+        messages = list(reversed(lote[:limite]))
+        next_before = _codifica_cursor(messages[0]) if has_more else None
+
     # Os remetentes já vieram no `selectinload` acima: a foto não custa uma
     # consulta por mensagem, só uma assinatura por pessoa.
     fotos = await _fotos_da_conversa(messages, ticket)
+    ve_interno = _e_equipe(actor)
 
     return ChatMessageListResponse(
-        items=[_msg_to_response(m, fotos.get(m.id)) for m in messages],
+        items=[
+            _msg_to_response(m, fotos.get(m.id), ve_arquivo_interno=ve_interno) for m in messages
+        ],
         total=total,
-        limit=limit,
-        offset=offset,
+        limit=limite,
+        offset=offset or 0,
+        has_more=has_more,
+        next_before=next_before,
     )
 
 
@@ -485,12 +648,16 @@ async def create_message(
     msg = await _mensagem_com_remetente_atual(db, msg.id)
 
     fotos = await _fotos_da_conversa([msg], ticket)
-    response = _msg_to_response(msg, fotos.get(msg.id))
+    response = _msg_to_response(msg, fotos.get(msg.id), ve_arquivo_interno=_e_equipe(actor))
 
-    # Broadcast message
+    # O quadro vai igual para a sala inteira, e na sala pode haver cliente:
+    # ele é montado com o olhar do cliente. Não esconde nada da equipe na
+    # prática — só entra em conversa o arquivo aberto para cliente
+    # (`ensure_pode_anexar_no_chat`, acima).
+    quadro = _msg_to_response(msg, fotos.get(msg.id))
     await manager.broadcast(
         str(ticket_id),
-        {"type": "message", "data": _response_to_dict(response)},
+        {"type": "message", "data": _response_to_dict(quadro)},
     )
 
     # Broadcast status change if a transition occurred
@@ -674,29 +841,35 @@ async def websocket_chat(
     Query params:
       token — JWT access token (browser WebSocket API doesn't support headers)
     """
+    # Todo fechamento de recusa — 4001, 4428 e 4004 — vem DEPOIS do `accept()`.
+    # Fechado antes do handshake, o uvicorn responde HTTP 403 e o navegador só
+    # vê 1006, sem código nem motivo (medido em 28/10/2026): o 4001 e o 4004
+    # nunca chegavam, e a tela tratava a recusa como queda de rede e
+    # reconectava a cada 3 s, para sempre. Aceitar e fechar em seguida não
+    # entrega nada a quem foi recusado: nenhum quadro sai antes do fechamento.
     async with AsyncSessionLocal() as db:
         user = await _authenticate_ws(token, db)
         if user is None:
+            await websocket.accept()
             await websocket.close(code=4001, reason="Unauthorized")
             return
 
-        # Aceite da Política pendente: aceitar e SÓ ENTÃO fechar, para o 4428
-        # chegar ao navegador (ver `WS_ACEITE_POLITICA_PENDENTE`). Sem mensagem
-        # de erro antes: o código basta. O 4001 acima e o 4004 abaixo seguem
-        # fechando antes do handshake — dívida conhecida, fora desta frente.
+        # Aceite da Política pendente (ver `WS_ACEITE_POLITICA_PENDENTE`). Sem
+        # mensagem de erro antes: o código basta.
         if await _politica_pendente(db, user):
             await websocket.accept()
             await websocket.close(code=WS_ACEITE_POLITICA_PENDENTE, reason=_MOTIVO_ACEITE_PENDENTE)
             return
 
-        # Chamado inexistente e chamado alheio fecham IGUAL — mesmo código,
-        # mesmo motivo. O 4003 ("Forbidden") de antes dizia que o chamado
-        # existe, e quem tivesse uma lista de ids enumerava o sistema pelo
-        # WebSocket sem nunca receber um HTTP 403.
-        ticket_result = await db.execute(select(Ticket).where(Ticket.id == ticket_id))
-        ticket = ticket_result.scalar_one_or_none()
-        is_staff = user.role in (UserRole.admin, UserRole.technician)
-        if ticket is None or (not is_staff and ticket.creator_id != user.id):
+        # A MESMA regra do REST (`_get_ticket_visivel`), em vez de uma cópia
+        # dela aqui: chamado inexistente e chamado alheio fecham IGUAL — mesmo
+        # código, mesmo motivo. O 4003 ("Forbidden") de antes dizia que o
+        # chamado existe, e quem tivesse uma lista de ids enumerava o sistema
+        # pelo WebSocket sem nunca receber um HTTP 403.
+        try:
+            await _get_ticket_visivel(ticket_id, user, db)
+        except HTTPException:
+            await websocket.accept()
             await websocket.close(code=4004, reason="Ticket not found")
             return
 
@@ -787,6 +960,9 @@ async def websocket_chat(
                 ticket_res = await db.execute(select(Ticket).where(Ticket.id == ticket_id))
                 ticket = ticket_res.scalar_one_or_none()
                 if ticket is None:
+                    # Excluído com a sala aberta: o mesmo 4004 da entrada, para
+                    # a tela parar de tentar em vez de ver uma queda comum.
+                    await websocket.close(code=4004, reason="Ticket not found")
                     break
 
                 now = datetime.now(UTC)
@@ -880,6 +1056,13 @@ def _response_to_dict(r: ChatMessageResponse) -> dict:
         "is_ai": r.is_ai,
         "created_at": r.created_at.isoformat(),
         "sender_avatar_url": r.sender_avatar_url,
+        # Sem estes campos, o arquivo enviado pelo POST chegava aos outros como
+        # mensagem só de texto, e só um F5 o mostrava (FUN-31).
+        "library_file_id": str(r.library_file_id) if r.library_file_id else None,
+        "library_file_name": r.library_file_name,
+        "library_file_mime": r.library_file_mime,
+        "library_file_size": r.library_file_size,
+        "library_file_unavailable": r.library_file_unavailable,
     }
 
 

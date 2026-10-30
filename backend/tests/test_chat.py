@@ -593,7 +593,13 @@ def _ws_close_code(user, ticket):
         # Postgres, e o que está sob teste é o handler, não a subida.
         tc = TestClient(app)
         try:
-            with tc.websocket_connect(f"/api/v1/ws/tickets/{_TICKET_ID}?token=x"):
+            # A recusa vem DEPOIS do `accept()` (F1-B-04a), então entrar no
+            # `with` não prova mais que o chat abriu. Prova manda um quadro:
+            # socket aberto devolve o erro de JSON; socket recusado levanta o
+            # fechamento com o código.
+            with tc.websocket_connect(f"/api/v1/ws/tickets/{_TICKET_ID}?token=x") as ws:
+                ws.send_text("isto não é json")
+                ws.receive_json()
                 return None, None
         except WebSocketDisconnect as exc:
             return exc.code, exc.reason

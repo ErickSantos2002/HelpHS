@@ -40,6 +40,11 @@ class ChatMessageResponse(AppBaseModel):
     library_file_name: str | None = None
     library_file_mime: str | None = None
     library_file_size: int | None = None
+    # Havia um arquivo, e quem lê não pode vê-lo: o cliente diante de um item
+    # que voltou a ser interno. Os quatro campos acima saem nulos — nem o nome
+    # vaza — e a tela diz só que o arquivo está indisponível. Arquivo EXCLUÍDO
+    # não chega aqui: a FK é `SET NULL`, e a mensagem perde o vínculo inteiro.
+    library_file_unavailable: bool = False
 
     # Flattened sender fields (populated manually)
     sender_name: str = ""
@@ -52,10 +57,17 @@ class ChatMessageResponse(AppBaseModel):
 
 
 class ChatMessageListResponse(AppBaseModel):
+    # Sempre em ordem cronológica, nos dois modos — ver `list_messages`.
     items: list[ChatMessageResponse]
     total: int
     limit: int
+    # 0 no modo por cursor; o valor pedido no modo legado por `offset`.
     offset: int
+    # Há mensagens mais ANTIGAS que a primeira de `items`.
+    has_more: bool = False
+    # Cursor para a página anterior (`before=`). Nulo sem página anterior e
+    # sempre nulo no modo legado, que pagina por `offset`.
+    next_before: str | None = None
 
 
 # Teto do conteúdo de uma mensagem de chat, em caracteres.

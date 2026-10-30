@@ -435,7 +435,10 @@ async def _historico(ator, chamado, mensagens):
     from app.core.database import get_db
     from app.core.security import get_current_user
 
-    respostas = iter([chamado, len(mensagens), mensagens])
+    # O histórico abre nas mais recentes (F1-B-04a): o banco devolve da mais
+    # nova para a mais antiga, e o endpoint desvira. O falso imita o banco,
+    # para que `items` volte na ordem em que `mensagens` foi escrita.
+    respostas = iter([chamado, len(mensagens), list(reversed(mensagens))])
     consultas = []
 
     async def _execute(*a, **k):
