@@ -46,6 +46,15 @@ import {
 import { rotuloDeStatus, slotDeStatus } from "../../lib/status";
 import { plural } from "../../lib/utils";
 import { useAuth } from "../../contexts/AuthContext";
+import { FalhaDoBloco } from "../../components/relatorios/FalhaDoBloco";
+import { SeletorDePeriodo } from "../../components/relatorios/SeletorDePeriodo";
+import {
+  NOTA_COMPARACAO_DE_HOJE,
+  descreveIntervalo,
+  type PresetDePeriodo,
+} from "../../lib/periodoRelatorio";
+import { useCarga } from "../../lib/useCarga";
+import { usePeriodoDoRelatorio } from "../../lib/usePeriodoDoRelatorio";
 import {
   exportReportsUrl,
   getReports,
@@ -60,19 +69,43 @@ import {
   type SlaJustificationItem,
   type TechnicianDistItem,
   type ReportFilters,
+  type SLAComplianceItem,
   type TechnicianDetailReport,
   type TechnicianListReport,
 } from "../../services/reportService";
 
 // ── Constants ─────────────────────────────────────────────────
 
-const PERIOD_OPTIONS = [
-  { value: "7",           label: "Últimos 7 dias"   },
-  { value: "14",          label: "Últimos 14 dias"  },
-  { value: "30",          label: "Últimos 30 dias"  },
-  { value: "90",          label: "Últimos 90 dias"  },
-  { value: "personalizado", label: "Personalizado"  },
-];
+// As opções de período saem de `lib/periodoRelatorio.ts`, as mesmas dos dois
+// dashboards (F1-B-03b). Eram cinco aqui — 7, 14, 30 e 90 dias e
+// "Personalizado" —, e o personalizado mandava as datas só para a visão
+// geral: os blocos de técnico recebiam uma quantidade de dias contada de
+// agora, e o mesmo filtro mostrava dois intervalos diferentes.
+
+/**
+ * Os dias que o servidor aplicou, por escrito.
+ *
+ * Vêm da resposta (`start_date`/`end_date`, F1-B-03a). Um backend anterior
+ * não os manda, e aí sobra o número de dias, como antes.
+ */
+function diasDaResposta(r: { period_days: number; start_date?: string | null; end_date?: string | null }): string {
+  if (r.start_date && r.end_date) {
+    return descreveIntervalo({ start_date: r.start_date, end_date: r.end_date });
+  }
+  return `últimos ${r.period_days} dias`;
+}
+
+/**
+ * A conformidade de uma prioridade, ou `null` quando não há o que medir.
+ *
+ * Sem chamado da prioridade no período, a API manda 100 (compatibilidade com a
+ * tela antiga). Mostrar 100% verde seria dizer "tudo no prazo" sobre nenhum
+ * chamado; a decisão D3 é mostrar "—".
+ */
+function conformidade(item: SLAComplianceItem | undefined): number | null {
+  if (!item || item.total === 0) return null;
+  return item.compliance_rate;
+}
 
 /*
  * As opções dos dois filtros saem dos módulos, e não de uma lista paralela.
@@ -650,10 +683,10 @@ function SlaJustificationsTable({ itens }: { itens: SlaJustificationItem[] }) {
  * As outras duas telas de gráfico usam `#f1f5f9`, que é o valor de
  * `--border-muted` no claro.
  */
-function GlobalReport({ data }: { data: ReportData; period?: number }) {
+function GlobalReport({ data, preset }: { data: ReportData; preset: PresetDePeriodo }) {
   const totalCsat = data.csat_distribution.reduce((s, d) => s + d.count, 0);
-  const criticalSla = data.sla_compliance.find((s) => s.priority === "critical")?.compliance_rate ?? 100;
-  const highSla     = data.sla_compliance.find((s) => s.priority === "high")?.compliance_rate ?? 100;
+  const criticalSla = conformidade(data.sla_compliance.find((s) => s.priority === "critical"));
+  const highSla     = conformidade(data.sla_compliance.find((s) => s.priority === "high"));
 
   function BarTooltip({ active, payload, label, labelFn, valueFn, valueLabel }: {
     active?: boolean; payload?: { value: number }[]; label?: string;
@@ -682,8 +715,22 @@ function GlobalReport({ data }: { data: ReportData; period?: number }) {
   }
 
   const cmp = data.comparison;
-  const prevCriticalSla = cmp?.sla_compliance.find((s) => s.priority === "critical")?.compliance_rate ?? null;
-  const prevHighSla     = cmp?.sla_compliance.find((s) => s.priority === "high")?.compliance_rate ?? null;
+  const prevCriticalSla = conformidade(cmp?.sla_compliance.find((s) => s.priority === "critical"));
+  const prevHighSla     = conformidade(cmp?.sla_compliance.find((s) => s.priority === "high"));
+
+  // A comparação é a da API, sem conta nova na tela: a mesma quantidade de
+  // dias imediatamente antes, ou o mês civil anterior inteiro quando o período
+  // é um mês civil inteiro (D6). A linha abaixo só diz QUAL foi.
+  const diasComparados = cmp?.start_date && cmp?.end_date
+    ? descreveIntervalo({ start_date: cmp.start_date, end_date: cmp.end_date })
+    : null;
+
+  // Prioridade sem chamado no período fica sem barra (D3): o Recharts não
+  // desenha valor nulo, e a dica diz "sem chamados".
+  const slaChartData = data.sla_compliance.map((item) => ({
+    ...item,
+    compliance_rate: conformidade(item),
+  }));
 
   const resolutionChartData = (data.avg_resolution_by_priority ?? [])
     .filter((r) => r.avg_hours != null)
@@ -697,28 +744,38 @@ function GlobalReport({ data }: { data: ReportData; period?: number }) {
       {/* KPIs */}
       <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 xl:grid-cols-6 gap-3">
         <StatCard label="Tickets no período" value={data.total_tickets}
-          sub={`últimos ${data.period_days} dias`}
+          sub={diasDaResposta(data)}
           delta={<Delta current={data.total_tickets} prev={cmp?.total_tickets ?? null} />} />
         <StatCard label="Média CSAT"
-          value={data.csat_average ? `${data.csat_average} / 10` : "—"}
+          value={data.csat_average != null ? `${data.csat_average} / 10` : "—"}
           sub={`${totalCsat} ${plural(totalCsat, "avaliação", "avaliações")}`}
           delta={data.csat_average != null && cmp?.csat_average != null
             ? <Delta current={data.csat_average * 10} prev={cmp.csat_average * 10} />
             : undefined} />
         <StatCard label="Recomendação"
-          value={data.recommend_average ? `${data.recommend_average} / 10` : "—"}
+          value={data.recommend_average != null ? `${data.recommend_average} / 10` : "—"}
           sub="o quanto recomendariam a empresa" />
-        <StatCard label="SLA Crítico" value={`${criticalSla}%`}
-          sub="conformidade resolução" colorCls={slaColor(criticalSla)}
-          delta={<Delta current={criticalSla} prev={prevCriticalSla} />} />
-        <StatCard label="SLA Alto" value={`${highSla}%`}
-          sub="conformidade resolução" colorCls={slaColor(highSla)}
-          delta={<Delta current={highSla} prev={prevHighSla} />} />
+        <StatCard label="SLA Crítico" value={criticalSla != null ? `${criticalSla}%` : "—"}
+          sub={criticalSla != null ? "conformidade resolução" : "sem chamados críticos"}
+          colorCls={criticalSla != null ? slaColor(criticalSla) : "text-conteudo-muted"}
+          delta={criticalSla != null ? <Delta current={criticalSla} prev={prevCriticalSla} /> : undefined} />
+        <StatCard label="SLA Alto" value={highSla != null ? `${highSla}%` : "—"}
+          sub={highSla != null ? "conformidade resolução" : "sem chamados de prioridade alta"}
+          colorCls={highSla != null ? slaColor(highSla) : "text-conteudo-muted"}
+          delta={highSla != null ? <Delta current={highSla} prev={prevHighSla} /> : undefined} />
         <StatCard label="Taxa de reabertura"
           value={`${data.reopen_rate ?? 0}%`}
           sub={`${data.reopened_count ?? 0} ticket${(data.reopened_count ?? 0) !== 1 ? "s" : ""} reaberto${(data.reopened_count ?? 0) !== 1 ? "s" : ""}`}
           colorCls={(data.reopen_rate ?? 0) === 0 ? "text-success-700 dark:text-success-400" : (data.reopen_rate ?? 0) <= 5 ? "text-conteudo-heading" : (data.reopen_rate ?? 0) <= 15 ? "text-warning-700 dark:text-warning-400" : "text-danger-700 dark:text-danger-400"} />
       </div>
+
+      {cmp && (diasComparados || preset === "hoje") && (
+        <p className="text-xs text-conteudo-muted" data-testid="nota-da-comparacao">
+          {preset === "hoje"
+            ? NOTA_COMPARACAO_DE_HOJE
+            : `Variações comparadas com ${diasComparados}.`}
+        </p>
+      )}
 
       {/* Tickets por dia */}
       <ChartCard title="Tickets criados por dia">
@@ -770,7 +827,7 @@ function GlobalReport({ data }: { data: ReportData; period?: number }) {
 
         <ChartCard title="Conformidade SLA por prioridade">
           <ResponsiveContainer width="100%" height={240}>
-            <BarChart data={data.sla_compliance} margin={{ top: 4, right: 4, left: -20, bottom: 0 }}>
+            <BarChart data={slaChartData} margin={{ top: 4, right: 4, left: -20, bottom: 0 }}>
               <CartesianGrid strokeDasharray="3 3" stroke={CROMO.grade} />
               <XAxis dataKey="priority" stroke={CROMO.eixo} tick={{ fontSize: 10, fill: CROMO.eixo }}
                 tickFormatter={(v: string) => rotuloDePrioridade(v)} />
@@ -782,7 +839,7 @@ function GlobalReport({ data }: { data: ReportData; period?: number }) {
                 content={({ active, payload, label }) => (
                   <BarTooltip active={active} payload={payload as unknown as { value: number }[]} label={String(label ?? "")}
                     labelFn={(v) => rotuloDePrioridade(v)}
-                    valueFn={(v) => `${v ?? 0}%`}
+                    valueFn={(v) => (v == null ? "sem chamados" : `${v}%`)}
                     valueLabel="Conformidade" />
                 )} />
               <Bar dataKey="compliance_rate" radius={[4, 4, 0, 0]}>
@@ -995,15 +1052,19 @@ function TechnicianDetail({ data }: { data: TechnicianDetailReport }) {
     <div className="space-y-4">
       <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-3">
         <StatCard label="Atribuídos no período"  value={data.total_assigned}
-          sub={`últimos ${data.period_days} dias`} />
+          sub={diasDaResposta(data)} />
         <StatCard label="Resolvidos / Fechados"  value={data.resolved}
           sub={data.total_assigned > 0 ? `${Math.round((data.resolved / data.total_assigned) * 100)}% do total` : "—"}
           colorCls="text-success-700 dark:text-success-400" />
-        <StatCard label="Conformidade SLA"  value={`${data.sla_compliance_rate}%`}
-          sub={`${data.sla_breached} ${plural(data.sla_breached, "violação", "violações")}`}
-          colorCls={slaColor(data.sla_compliance_rate)} />
+        {/* Sem chamado atribuído no período não há conformidade (D3). */}
+        <StatCard label="Conformidade SLA"
+          value={data.total_assigned > 0 ? `${data.sla_compliance_rate}%` : "—"}
+          sub={data.total_assigned > 0
+            ? `${data.sla_breached} ${plural(data.sla_breached, "violação", "violações")}`
+            : "sem chamados no período"}
+          colorCls={data.total_assigned > 0 ? slaColor(data.sla_compliance_rate) : "text-conteudo-muted"} />
         <StatCard label="CSAT médio"
-          value={data.csat_average ? `${data.csat_average} / 10` : "—"}
+          value={data.csat_average != null ? `${data.csat_average} / 10` : "—"}
           sub={data.csat_count > 0 ? `${data.csat_count} ${plural(data.csat_count, "avaliação", "avaliações")}` : "sem avaliações"} />
       </div>
 
@@ -1077,7 +1138,10 @@ function TechnicianRanking({ data, onSelect }: { data: TechnicianListReport; onS
               <TableCell muted>{t.total_assigned}</TableCell>
               <TableCell className="font-medium text-success-700 dark:text-success-400">{t.resolved}</TableCell>
               <TableCell muted>{t.open_count}</TableCell>
-              <TableCell className={`font-semibold ${slaColor(t.sla_compliance_rate)}`}>{t.sla_compliance_rate}%</TableCell>
+              {/* Sem chamado atribuído no período não há conformidade (D3). */}
+              {t.total_assigned > 0
+                ? <TableCell className={`font-semibold ${slaColor(t.sla_compliance_rate)}`}>{t.sla_compliance_rate}%</TableCell>
+                : <TableCell muted>—</TableCell>}
               <TableCell muted>
                 {t.avg_resolution_hours != null
                   ? t.avg_resolution_hours >= 24
@@ -1111,9 +1175,12 @@ function TechnicianRanking({ data, onSelect }: { data: TechnicianListReport; onS
 
 // ── Technician detail panel (admin drill-down) ────────────────
 
-function TechnicianDetailPanel({ techDetail, techDetailLoading, onClose }: {
+function TechnicianDetailPanel({ techDetail, techDetailLoading, erro, onTentarDeNovo, onClose }: {
   techDetail: TechnicianDetailReport | null;
   techDetailLoading: boolean;
+  /** O motivo da falha, ou `null`. Antes a falha deixava o painel vazio, calado. */
+  erro: string | null;
+  onTentarDeNovo: () => void;
   onClose: () => void;
 }) {
   return (
@@ -1121,7 +1188,9 @@ function TechnicianDetailPanel({ techDetail, techDetailLoading, onClose }: {
       <div className="flex items-center justify-between border-b border-borda/40 px-5 py-3.5">
         <div className="flex items-center gap-2">
           <span className="text-sm font-semibold text-conteudo">
-            {techDetail ? `Detalhes — ${techDetail.technician_name}` : "Carregando detalhes…"}
+            {techDetail
+              ? `Detalhes — ${techDetail.technician_name}`
+              : erro ? "Detalhes do técnico" : "Carregando detalhes…"}
           </span>
         </div>
         <button onClick={onClose}
@@ -1132,6 +1201,9 @@ function TechnicianDetailPanel({ techDetail, techDetailLoading, onClose }: {
       <div className="p-5">
         {techDetailLoading && (
           <div className="flex h-32 items-center justify-center"><Spinner size="md" /></div>
+        )}
+        {erro && (
+          <FalhaDoBloco titulo="Detalhes do técnico" erro={erro} onTentarDeNovo={onTentarDeNovo} />
         )}
         {!techDetailLoading && techDetail && <TechnicianDetail data={techDetail} />}
       </div>
@@ -1199,61 +1271,55 @@ export default function ReportsPage() {
   const isAdmin      = user?.role === "admin";
   const isTechnician = user?.role === "technician";
 
-  const [period,      setPeriod]      = useState("30");
-  const [customStart, setCustomStart] = useState("");
-  const [customEnd,   setCustomEnd]   = useState("");
+  const periodo = usePeriodoDoRelatorio();
+  const { intervalo } = periodo;
   const [category,    setCategory]    = useState("");
   const [priority,    setPriority]    = useState("");
   const [tab,         setTab]         = useState<Tab>(isAdmin ? "global" : "technicians");
+  const [selectedTechId, setSelectedTechId] = useState<string | undefined>(isTechnician ? user?.id : undefined);
 
-  const [globalData,        setGlobalData]        = useState<ReportData | null>(null);
-  const [globalLoading,     setGlobalLoading]     = useState(false);
-
-  const [techList,          setTechList]          = useState<TechnicianListReport | null>(null);
-  const [techListLoading,   setTechListLoading]   = useState(false);
-
-  const [selectedTechId,    setSelectedTechId]    = useState<string | undefined>(isTechnician ? user?.id : undefined);
-  const [techDetail,        setTechDetail]        = useState<TechnicianDetailReport | null>(null);
-  const [techDetailLoading, setTechDetailLoading] = useState(false);
-
-  const isCustom = period === "personalizado" && !!customStart && !!customEnd;
-  const p = isCustom
-    ? Math.max(1, Math.ceil((new Date(customEnd).getTime() - new Date(customStart).getTime()) / 86400000))
-    : Number(period) || 30;
-
+  // O MESMO intervalo vai para a visão geral, para a lista de técnicos e para o
+  // detalhe (F1-B-03b). Antes as datas do "Personalizado" iam só para a visão
+  // geral, e os blocos de técnico recebiam uma quantidade de dias contada de
+  // agora. Com o "Personalizado" inválido, `intervalo` é nulo e nada é pedido:
+  // o erro aparece no seletor, e nenhum número de antes fica na tela.
   const reportFilters: ReportFilters = {
-    ...(isCustom ? { start_date: customStart, end_date: customEnd } : { period: p }),
+    ...(intervalo ?? {}),
     ...(category ? { category } : {}),
     ...(priority ? { priority } : {}),
   };
 
-  useEffect(() => {
-    if (tab !== "global" || !isAdmin) return;
-    setGlobalLoading(true);
-    getReports(reportFilters).then(setGlobalData).catch(() => {}).finally(() => setGlobalLoading(false));
-  // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [tab, p, isAdmin, category, priority, customStart, customEnd]);
-
-  useEffect(() => {
-    if (tab !== "technicians" || !isAdmin) return;
-    setTechListLoading(true);
-    getTechnicianListReport(p).then(setTechList).catch(() => {}).finally(() => setTechListLoading(false));
-  }, [tab, p, isAdmin]);
-
-  useEffect(() => {
-    if (isTechnician) {
-      setTechDetailLoading(true);
-      getTechnicianDetailReport(p).then(setTechDetail).catch(() => {}).finally(() => setTechDetailLoading(false));
-      return;
-    }
-    if (!selectedTechId) return;
-    setTechDetailLoading(true);
-    getTechnicianDetailReport(p, selectedTechId).then(setTechDetail).catch(() => {}).finally(() => setTechDetailLoading(false));
-  }, [p, selectedTechId, isTechnician]);
+  // Uma carga por bloco: cada uma com o seu carregando, a sua falha e o seu
+  // "Tentar de novo". Antes os três `.catch(() => {})` engoliam o erro, e os
+  // dados do período anterior ficavam na tela como se fossem do novo.
+  const visaoGeral = useCarga(
+    intervalo && isAdmin && tab === "global" ? () => getReports(reportFilters) : null,
+    `${periodo.chave}|${category}|${priority}`,
+    "Não foi possível carregar o relatório do período.",
+  );
+  const techList = useCarga(
+    intervalo && isAdmin && tab === "technicians" ? () => getTechnicianListReport(intervalo) : null,
+    periodo.chave,
+    "Não foi possível carregar o desempenho por técnico.",
+  );
+  // O técnico vê só o próprio relatório: sem `technician_id`, o servidor usa
+  // quem está logado — a regra de permissão é dele, não desta tela.
+  const techDetail = useCarga(
+    !intervalo
+      ? null
+      : isTechnician
+        ? () => getTechnicianDetailReport(intervalo)
+        : selectedTechId
+          ? () => getTechnicianDetailReport(intervalo, selectedTechId)
+          : null,
+    `${periodo.chave}|${isTechnician ? "eu" : selectedTechId ?? ""}`,
+    "Não foi possível carregar os detalhes do técnico.",
+  );
+  const globalData = visaoGeral.dados;
+  const techListData = techList.dados;
 
   function handleSelectTechnician(id: string) {
     setSelectedTechId(id);
-    setTechDetail(null);
   }
 
   const activeFiltersCount = (category ? 1 : 0) + (priority ? 1 : 0);
@@ -1306,40 +1372,18 @@ export default function ReportsPage() {
             </div>
           )}
 
-          {/* D9.2 — cinco períodos fixos no código: lista curta e conhecida,
-              logo `SelectMenu`. O critério da D9.2 é o mesmo de sempre — quem
-              escreve a lista —; o que mudou foi o controle deste lado dela, que
-              era o `<select>` nativo e passou a ser o painel do pacote. Sem
-              `placeholder`: a linha vazia que ele desenha devolveria `""`, que
-              `Number(period) || 30` traduz de volta para trinta dias enquanto o
-              gatilho anuncia "Período" — um estado que mostra um número e diz
-              outro. Escolher o período é obrigatório e sempre foi.
-
-              O rótulo é `sr-only` porque a barra não tem espaço para ele: sem
-              rótulo o filtro se anunciava "Últimos 30 dias", sem dizer de quê. */}
-          <span id="rotulo-filtro-periodo" className="sr-only">
-            Período
-          </span>
-          <SelectMenu
-            id="filtro-periodo"
-            aria-labelledby="rotulo-filtro-periodo"
-            value={period}
-            onChange={(v) => setPeriod(v)}
-            options={PERIOD_OPTIONS}
+          {/* Fica fora de qualquer ramo de erro: é por ele que a pessoa sai de
+              uma falha trocando de período. */}
+          <SeletorDePeriodo
+            preset={periodo.preset}
+            onPreset={periodo.setPreset}
+            inicio={periodo.inicio}
+            fim={periodo.fim}
+            onInicio={periodo.setInicio}
+            onFim={periodo.setFim}
+            erro={periodo.erro}
+            descricao={periodo.descricao}
           />
-
-          {period === "personalizado" && (
-            <div className="flex h-9 items-center gap-1.5 rounded-lg border border-borda/60 bg-surface-elevated px-3 text-sm">
-              <span className="shrink-0 text-conteudo-muted"><Icon name="calendar" size={14} strokeWidth={2} /></span>
-              <input type="date" value={customStart} max={customEnd || undefined}
-                onChange={(e) => setCustomStart(e.target.value)}
-                className="bg-transparent text-conteudo text-xs outline-none cursor-pointer w-28 [color-scheme:light] dark:[color-scheme:dark]" />
-              <span className="text-conteudo-muted text-xs">até</span>
-              <input type="date" value={customEnd} min={customStart || undefined}
-                onChange={(e) => setCustomEnd(e.target.value)}
-                className="bg-transparent text-conteudo text-xs outline-none cursor-pointer w-28 [color-scheme:light] dark:[color-scheme:dark]" />
-            </div>
-          )}
 
           {/* Filtros de categoria e prioridade (visão geral apenas) */}
           {(isAdmin && tab === "global") || isTechnician ? (
@@ -1375,24 +1419,27 @@ export default function ReportsPage() {
             </>
           ) : null}
 
-          {isAdmin && <ExportDropdown filters={reportFilters} />}
+          {/* Sem intervalo válido não há o que exportar. */}
+          {isAdmin && intervalo && <ExportDropdown filters={reportFilters} />}
         </div>
       </div>
 
       {/* ── Global tab (admin) ── */}
       {isAdmin && tab === "global" && (
-        globalLoading
-          ? <div className="flex h-48 items-center justify-center"><Spinner size="lg" /></div>
-          : globalData
-            ? <GlobalReport data={globalData} period={p} />
-            : null
+        visaoGeral.fase === "falha"
+          ? <FalhaDoBloco titulo="Visão geral" erro={visaoGeral.erro} onTentarDeNovo={visaoGeral.tentarDeNovo} />
+          : visaoGeral.fase === "carregando"
+            ? <div className="flex h-48 items-center justify-center"><Spinner size="lg" /></div>
+            : globalData
+              ? <GlobalReport data={globalData} preset={periodo.preset} />
+              : null
       )}
 
       {/* ── Technicians tab (admin) ── */}
       {isAdmin && tab === "technicians" && (
         <div className="space-y-4">
           {/* Seletor rápido de técnico */}
-          {techList && techList.technicians.length > 0 && (
+          {techListData && techListData.technicians.length > 0 && (
             <div className="flex items-center gap-3 rounded-xl border border-borda/40 bg-surface px-4 py-3">
               <span className="text-xs font-medium text-conteudo-muted shrink-0">Ver detalhes de:</span>
               {/* D9.2 — lista LONGA: os técnicos vêm da rede e crescem com a
@@ -1405,13 +1452,13 @@ export default function ReportsPage() {
                 variant="filter"
                 label="Técnico"
                 value={selectedTechId ?? ""}
-                onChange={(v) => v ? handleSelectTechnician(v) : (setSelectedTechId(undefined), setTechDetail(null))}
-                options={techList.technicians.map((t) => ({ value: t.technician_id, label: t.technician_name }))}
+                onChange={(v) => v ? handleSelectTechnician(v) : setSelectedTechId(undefined)}
+                options={techListData.technicians.map((t) => ({ value: t.technician_id, label: t.technician_name }))}
                 placeholder="Selecione um técnico"
               />
               {selectedTechId && (
                 <button
-                  onClick={() => { setSelectedTechId(undefined); setTechDetail(null); }}
+                  onClick={() => setSelectedTechId(undefined)}
                   className="text-xs text-conteudo-muted hover:text-conteudo transition-colors cursor-pointer shrink-0"
                 >
                   Limpar
@@ -1420,16 +1467,20 @@ export default function ReportsPage() {
             </div>
           )}
 
-          {techListLoading
-            ? <div className="flex h-48 items-center justify-center"><Spinner size="lg" /></div>
-            : techList && <TechnicianRanking data={techList} onSelect={handleSelectTechnician} />
+          {techList.fase === "falha"
+            ? <FalhaDoBloco titulo="Desempenho por técnico" erro={techList.erro} onTentarDeNovo={techList.tentarDeNovo} />
+            : techList.fase === "carregando"
+              ? <div className="flex h-48 items-center justify-center"><Spinner size="lg" /></div>
+              : techListData && <TechnicianRanking data={techListData} onSelect={handleSelectTechnician} />
           }
 
           {selectedTechId && (
             <TechnicianDetailPanel
-              techDetail={techDetail}
-              techDetailLoading={techDetailLoading}
-              onClose={() => { setSelectedTechId(undefined); setTechDetail(null); }}
+              techDetail={techDetail.dados}
+              techDetailLoading={techDetail.fase === "carregando"}
+              erro={techDetail.fase === "falha" ? techDetail.erro : null}
+              onTentarDeNovo={techDetail.tentarDeNovo}
+              onClose={() => setSelectedTechId(undefined)}
             />
           )}
         </div>
@@ -1437,11 +1488,13 @@ export default function ReportsPage() {
 
       {/* ── Technician own view ── */}
       {isTechnician && (
-        techDetailLoading
-          ? <div className="flex h-48 items-center justify-center"><Spinner size="lg" /></div>
-          : techDetail
-            ? <TechnicianDetail data={techDetail} />
-            : null
+        techDetail.fase === "falha"
+          ? <FalhaDoBloco titulo="Suas métricas" erro={techDetail.erro} onTentarDeNovo={techDetail.tentarDeNovo} />
+          : techDetail.fase === "carregando"
+            ? <div className="flex h-48 items-center justify-center"><Spinner size="lg" /></div>
+            : techDetail.dados
+              ? <TechnicianDetail data={techDetail.dados} />
+              : null
       )}
     </div>
   );

@@ -201,11 +201,10 @@ describe("TechnicianDashboard", () => {
     expect(rotulos).toEqual([
       "Hoje",
       "Ontem",
-      "Esta Semana",
-      "Este Mês",
-      "Mês Passado",
-      "Este Trimestre",
-      "Este Ano",
+      "Últimos 7 dias",
+      "Últimos 30 dias",
+      "Este mês",
+      "Mês passado",
       "Personalizado",
     ]);
   });

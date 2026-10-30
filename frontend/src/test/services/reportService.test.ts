@@ -348,3 +348,46 @@ describe("exportReportsUrl", () => {
     expect(mockGet).not.toHaveBeenCalled();
   });
 });
+
+describe("relatórios de técnico com as datas do calendário (F1-B-03b)", () => {
+  beforeEach(() => mockGet.mockReset());
+
+  it("a lista de técnicos manda start_date e end_date, e nenhum period", async () => {
+    mockGet.mockResolvedValue({ data: listaTecnicos });
+
+    await getTechnicianListReport({ start_date: "2026-10-01", end_date: "2026-10-30" });
+
+    expect(mockGet).toHaveBeenCalledWith("/dashboard/reports/technicians", {
+      params: { start_date: "2026-10-01", end_date: "2026-10-30" },
+    });
+  });
+
+  it("o detalhe manda as datas e o técnico escolhido", async () => {
+    mockGet.mockResolvedValue({ data: detalheTecnico });
+
+    await getTechnicianDetailReport({ start_date: "2026-10-30", end_date: "2026-10-30" }, "u9");
+
+    expect(mockGet).toHaveBeenCalledWith("/dashboard/reports/technician", {
+      params: { start_date: "2026-10-30", end_date: "2026-10-30", technician_id: "u9" },
+    });
+  });
+
+  it("o detalhe sem técnico manda só as datas: o servidor usa quem está logado", async () => {
+    mockGet.mockResolvedValue({ data: detalheTecnico });
+
+    await getTechnicianDetailReport({ start_date: "2026-09-01", end_date: "2026-09-30" });
+
+    const { params } = mockGet.mock.calls[0][1] as { params: Record<string, unknown> };
+    expect(Object.keys(params).sort()).toEqual(["end_date", "start_date"]);
+  });
+
+  it("o número continua aceito como o period legado", async () => {
+    mockGet.mockResolvedValue({ data: listaTecnicos });
+
+    await getTechnicianListReport(1);
+
+    expect(mockGet).toHaveBeenCalledWith("/dashboard/reports/technicians", {
+      params: { period: 1 },
+    });
+  });
+});

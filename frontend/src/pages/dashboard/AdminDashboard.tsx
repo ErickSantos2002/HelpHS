@@ -1,49 +1,31 @@
-import { useEffect, useState } from "react";
+import { useState } from "react";
 import {
   Area, AreaChart, Bar, BarChart, Cell,
   Pie, PieChart, ResponsiveContainer, Tooltip, XAxis, YAxis,
 } from "recharts";
-import { Alert, Icon, KpiCard, SelectMenu, Selector, Spinner } from "../../components/ui";
+import { Icon, KpiCard, Selector, Spinner } from "../../components/ui";
+import { FalhaDoBloco } from "../../components/relatorios/FalhaDoBloco";
+import { SeletorDePeriodo } from "../../components/relatorios/SeletorDePeriodo";
 import { cn } from "../../lib/utils";
 import {
   CROMO, ESTILO_DICA, ENVOLTORIO_DICA, COR_SERIE_TEMPORAL,
 } from "../../lib/grafico";
 import { rotuloDeStatus, slotDeStatus, type TicketStatus } from "../../lib/status";
 import { rotuloDePrioridade, graficoDePrioridade, type TicketPriority } from "../../lib/prioridade";
+import { rotuloDoPreset } from "../../lib/periodoRelatorio";
+import { useCarga, type Carga } from "../../lib/useCarga";
+import { usePeriodoDoRelatorio } from "../../lib/usePeriodoDoRelatorio";
 import { getDashboardStats, type DashboardStats } from "../../services/dashboardService";
 import {
   getReports, getTechnicianListReport, getTechnicianDetailReport,
-  type ReportData, type TechnicianListReport, type TechnicianDetailReport,
 } from "../../services/reportService";
 
 // ── Period config ─────────────────────────────────────────────
-
-type PeriodKey = "hoje" | "ontem" | "semana" | "mes" | "mes-passado" | "trimestre" | "ano" | "custom";
-const PERIOD_OPTIONS: { key: PeriodKey; label: string; days: number }[] = [
-  { key: "hoje",        label: "Hoje",            days: 1   },
-  { key: "ontem",       label: "Ontem",           days: 2   },
-  { key: "semana",      label: "Esta Semana",      days: 7   },
-  { key: "mes",         label: "Este Mês",         days: 30  },
-  { key: "mes-passado", label: "Mês Passado",      days: 60  },
-  { key: "trimestre",   label: "Este Trimestre",   days: 90  },
-  { key: "ano",         label: "Este Ano",         days: 365 },
-  { key: "custom",      label: "Personalizado",    days: 0   },
-];
-
-function getDefaultCustomDates() {
-  const end = new Date();
-  const start = new Date();
-  start.setDate(start.getDate() - 30);
-  return {
-    start: start.toISOString().slice(0, 10),
-    end:   end.toISOString().slice(0, 10),
-  };
-}
-
-function customDays(start: string, end: string) {
-  const diff = new Date(end).getTime() - new Date(start).getTime();
-  return Math.max(1, Math.ceil(diff / 86400000) + 1);
-}
+//
+// As opções e as datas saem de `lib/periodoRelatorio.ts` (F1-B-03b): cada
+// opção vira `start_date`/`end_date` no calendário de Recife. A lista antiga
+// mandava dias contados de agora — "Ontem" eram 48 h, "Mês Passado" 60 dias —
+// e o "Personalizado" convertia as datas escolhidas numa quantidade de dias.
 
 // ── Colors ────────────────────────────────────────────────────
 //
@@ -189,56 +171,62 @@ function SectionCard({ title, action, children }: { title: string; action?: Reac
   );
 }
 
+/**
+ * O miolo de um cartão enquanto a carga dele não está pronta.
+ *
+ * Carregando, um anel; com falha, uma linha discreta — o aviso com o motivo e o
+ * "Tentar de novo" fica UMA vez, no topo, por carga, e não repetido em cada
+ * cartão que depende dela. Nunca um zero: um cartão sem dado diz que está sem
+ * dado.
+ */
+function EsperaDaCarga({ carga, altura = "h-48" }: { carga: Carga<unknown>; altura?: string }) {
+  return (
+    <div className={cn("flex items-center justify-center text-sm text-conteudo-muted", altura)}>
+      {carga.fase === "falha" ? "Indisponível — veja o aviso acima." : <Spinner size="md" />}
+    </div>
+  );
+}
+
 // ── AdminDashboard ────────────────────────────────────────────
 
 export default function AdminDashboard() {
-  // Period state
-  const [periodKey, setPeriodKey] = useState<PeriodKey>("mes");
-  const [customDates, setCustomDates] = useState(getDefaultCustomDates);
+  const periodo = usePeriodoDoRelatorio();
+  const { intervalo } = periodo;
 
   // Technician filter
   const [selectedTechId, setSelectedTechId] = useState<string>("all");
 
-  // Data
-  const [stats, setStats]         = useState<DashboardStats | null>(null);
-  const [report, setReport]       = useState<ReportData | null>(null);
-  const [techList, setTechList]   = useState<TechnicianListReport | null>(null);
-  const [techDetail, setTechDetail] = useState<TechnicianDetailReport | null>(null);
-  const [loading, setLoading]     = useState(true);
-  const [error, setError]         = useState<string | null>(null);
-
-  // O recuo existe porque `find` devolve `undefined` para chave desconhecida,
-  // e o `!` que estava aqui lia `days` dela — a tela quebrava inteira. O
-  // caminho conhecido era a opção de limpar do filtro antigo, que devolvia
-  // `""`; ela saiu na D9.2, mas o estouro nunca dependeu dela.
+  // ── As cargas, uma por bloco (F1-B-03b) ──────────────────────────────
   //
-  // Recuo para 30 e não para o primeiro da lista: 30 é o padrão declarado no
-  // backend (`period: Annotated[int, Query(ge=1, le=365)] = 30`), ou seja, o
-  // que o servidor faria sozinho se o parâmetro não fosse mandado. E é por
-  // esse mesmo `ge=1` que **não existe "todo o período"**: a opção de limpar
-  // não tem para onde apontar, e por isso saiu em vez de virar estado válido.
-  const activePeriod = periodKey === "custom"
-    ? customDays(customDates.start, customDates.end)
-    : (PERIOD_OPTIONS.find((p) => p.key === periodKey)?.days ?? 30);
-
-  useEffect(() => {
-    setLoading(true);
-    Promise.all([
-      getDashboardStats(),
-      getReports({ period: activePeriod }),
-      getTechnicianListReport(activePeriod),
-    ])
-      .then(([s, r, tl]) => { setStats(s); setReport(r); setTechList(tl); setTechDetail(null); })
-      .catch(() => setError("Não foi possível carregar as estatísticas."))
-      .finally(() => setLoading(false));
-  }, [activePeriod]);
-
-  useEffect(() => {
-    if (selectedTechId === "all") { setTechDetail(null); return; }
-    getTechnicianDetailReport(activePeriod, selectedTechId)
-      .then(setTechDetail)
-      .catch(() => setTechDetail(null));
-  }, [selectedTechId, activePeriod]);
+  // Eram um `Promise.all` só: qualquer falha levava a página inteira, o erro
+  // nunca era limpo e o seletor de período sumia com ela. Agora cada bloco
+  // carrega, falha e se recupera sozinho, e o seletor fica sempre à vista.
+  //
+  // `stats` (`/dashboard/stats`) NÃO depende do período: conta desde o início
+  // do sistema (D4). Por isso a chave dela é fixa e trocar de período não a
+  // recarrega — e a tela diz isso por escrito.
+  const stats = useCarga(
+    getDashboardStats,
+    "stats",
+    "Não foi possível carregar os indicadores gerais.",
+  );
+  const report = useCarga(
+    intervalo ? () => getReports(intervalo) : null,
+    periodo.chave,
+    "Não foi possível carregar o relatório do período.",
+  );
+  const techList = useCarga(
+    intervalo ? () => getTechnicianListReport(intervalo) : null,
+    periodo.chave,
+    "Não foi possível carregar o desempenho da equipe.",
+  );
+  const techDetail = useCarga(
+    intervalo && selectedTechId !== "all"
+      ? () => getTechnicianDetailReport(intervalo, selectedTechId)
+      : null,
+    `${periodo.chave}|${selectedTechId}`,
+    "Não foi possível carregar os atendimentos do técnico.",
+  );
 
   // O cromo (eixo, grade, dica) e a cor da série temporal única vêm de
   // `lib/grafico.ts` — não mais de `theme === "dark" ? A : B` escrito à mão.
@@ -246,20 +234,15 @@ export default function AdminDashboard() {
   // hexadecimal aqui em JS era reimplementar o seletor `.dark`, e sem essa
   // escolha o `useTheme()` desta tela deixou de ter uso.
 
-  if (loading) return <div className="flex h-64 items-center justify-center"><Spinner size="lg" /></div>;
-  if (error || !stats || !report) return <Alert variant="danger">{error ?? "Erro desconhecido."}</Alert>;
-
-  const { tickets, surveys, sla } = stats;
-  const avgRating = surveys.average_rating?.toFixed(1) ?? "—";
-
   const avgResolutionHours = (() => {
-    if (!techList?.technicians.length) return null;
-    const withData = techList.technicians.filter((t) => t.avg_resolution_hours != null);
+    const lista = techList.dados?.technicians;
+    if (!lista?.length) return null;
+    const withData = lista.filter((t) => t.avg_resolution_hours != null);
     if (!withData.length) return null;
     return withData.reduce((s, t) => s + (t.avg_resolution_hours ?? 0), 0) / withData.length;
   })();
 
-  const categoryData = [...(report.tickets_by_category ?? [])]
+  const categoryData = [...(report.dados?.tickets_by_category ?? [])]
     .sort((a, b) => b.count - a.count)
     .slice(0, 8);
   // Dois denominadores DIFERENTES, e a diferença é o ponto:
@@ -279,34 +262,53 @@ export default function AdminDashboard() {
   // Rótulo e cor por `lib/status.ts` / `SLOT_DE_STATUS` (E18) — nunca mapa
   // local. `name` é o que a legenda mostra: obrigatória num gráfico de status,
   // porque `--chart-*` é categórico e não diz sozinho "cancelado" a quem olha.
-  const statusData = BLOCOS_DE_STATUS
-    .map((chave) => ({
-      chave,
-      name: rotuloDoBlocoDeStatus(chave),
-      value: tickets[chave],
-      cor: corDoBlocoDeStatus(chave),
-    }))
-    .filter((d) => d.value > 0);
+  const tickets = stats.dados?.tickets ?? null;
+  const statusData = tickets
+    ? BLOCOS_DE_STATUS
+        .map((chave) => ({
+          chave,
+          name: rotuloDoBlocoDeStatus(chave),
+          value: tickets[chave],
+          cor: corDoBlocoDeStatus(chave),
+        }))
+        .filter((d) => d.value > 0)
+    : [];
 
   // Rótulo e preenchimento por `lib/prioridade.ts` — a mesma fonte que o selo
   // e o ponto da lista usam. O rótulo passa a sair no feminino (E17: "Alta",
   // não "Alto"), que é a mesma palavra que o resto do sistema já usa.
-  const priorityData = (
-    [
-      ["critical", tickets.by_priority_critical],
-      ["high",     tickets.by_priority_high],
-      ["medium",   tickets.by_priority_medium],
-      ["low",      tickets.by_priority_low],
-    ] as [TicketPriority, number][]
-  ).map(([chave, value]) => ({
-    name: rotuloDePrioridade(chave),
-    value,
-    cor: graficoDePrioridade(chave),
-  }));
+  const priorityData = tickets
+    ? (
+        [
+          ["critical", tickets.by_priority_critical],
+          ["high",     tickets.by_priority_high],
+          ["medium",   tickets.by_priority_medium],
+          ["low",      tickets.by_priority_low],
+        ] as [TicketPriority, number][]
+      ).map(([chave, value]) => ({
+        name: rotuloDePrioridade(chave),
+        value,
+        cor: graficoDePrioridade(chave),
+      }))
+    : [];
 
-  const chartData      = techDetail ? techDetail.tickets_by_day  : report.tickets_by_day;
-  const slaCompliance  = report.sla_compliance;
-  const periodLabel    = PERIOD_OPTIONS.find((p) => p.key === periodKey)?.label ?? "";
+  // Com um técnico escolhido, o gráfico temporal é o dele; senão, o geral.
+  const cargaDoGrafico = selectedTechId !== "all" ? techDetail : report;
+  const chartData      = cargaDoGrafico.dados?.tickets_by_day ?? [];
+  const slaCompliance  = report.dados?.sla_compliance ?? [];
+  const nomeDoTecnico  = techList.dados?.technicians.find((t) => t.technician_id === selectedTechId)?.technician_name
+    ?? techDetail.dados?.technician_name;
+  // "Personalizado" não diz quais dias; os dias, sim.
+  const periodLabel    = periodo.preset === "personalizado"
+    ? (periodo.descricao ?? "Personalizado")
+    : rotuloDoPreset(periodo.preset);
+
+  const falhas: { titulo: string; carga: Carga<unknown> }[] = [
+    { titulo: "Indicadores gerais", carga: stats },
+    { titulo: "Relatório do período", carga: report },
+    { titulo: "Desempenho da equipe", carga: techList },
+    { titulo: "Atendimentos do técnico", carga: techDetail },
+  ].filter((f) => f.carga.fase === "falha");
 
   return (
     <div className="space-y-5">
@@ -318,7 +320,7 @@ export default function AdminDashboard() {
           <p className="mt-0.5 text-sm text-conteudo-muted">Visão geral do sistema de atendimento</p>
         </div>
 
-        <div className="flex flex-wrap items-center justify-center sm:justify-end gap-2">
+        <div className="flex flex-wrap items-start justify-center sm:justify-end gap-2">
           {/* Technician filter — D9.2: lista LONGA. As opções vêm da rede
               (`getTechnicianListReport`) e crescem com a equipe, então o
               controle é o `Selector variant="filter"`, e não o de lista
@@ -330,7 +332,7 @@ export default function AdminDashboard() {
               o filtro se anunciava só pelo nome do técnico escolhido. O
               `Selector` desenha o rótulo `sr-only` e soma rótulo + valor no
               nome acessível. */}
-          {techList && (
+          {techList.dados && (
             <Selector
               variant="filter"
               label="Técnico"
@@ -338,60 +340,51 @@ export default function AdminDashboard() {
               onChange={(v) => setSelectedTechId(v ?? "all")}
               options={[
                 { value: "all", label: "Todos os técnicos" },
-                ...techList.technicians.map((t) => ({ value: t.technician_id, label: t.technician_name })),
+                ...techList.dados.technicians.map((t) => ({ value: t.technician_id, label: t.technician_name })),
               ]}
               placeholder="Todos os técnicos"
             />
           )}
 
-          {/* Period filter — D9.2: oito períodos fixos no código, lista curta e
-              conhecida, logo o controle de lista fechada. Este lado da regra
-              era o `<select>` nativo e passou a ser o `SelectMenu`: a lista
-              agora é desenhada por nós, com os tokens do tema, em vez de pelo
-              sistema operacional. O teclado, que o nativo dava de graça, o
-              `SelectMenu` implementa — setas, Enter, Escape e busca por letra.
-
-              Sem `placeholder`, e isso conserta uma queda: a linha de limpar do
-              `FilterSelect` devolvia `""`, e `activePeriod` lia
-              `PERIOD_OPTIONS.find((p) => p.key === "")!.days` — `days` de
-              `undefined`. Sem `placeholder` o `SelectMenu` não desenha linha de
-              limpar, exatamente como o nativo não tinha nenhuma. */}
-          <span id="rotulo-filtro-periodo" className="sr-only">
-            Período
-          </span>
-          <SelectMenu
-            id="filtro-periodo"
-            aria-labelledby="rotulo-filtro-periodo"
-            value={periodKey}
-            onChange={(v) => setPeriodKey(v as PeriodKey)}
-            options={PERIOD_OPTIONS.map((p) => ({ value: p.key, label: p.label }))}
+          {/* O seletor fica fora de qualquer ramo de erro: é por ele que a
+              pessoa sai de uma falha trocando de período. */}
+          <SeletorDePeriodo
+            preset={periodo.preset}
+            onPreset={periodo.setPreset}
+            inicio={periodo.inicio}
+            fim={periodo.fim}
+            onInicio={periodo.setInicio}
+            onFim={periodo.setFim}
+            erro={periodo.erro}
+            descricao={periodo.descricao}
           />
-
-          {/* Custom date range */}
-          {periodKey === "custom" && (
-            <div className="flex h-9 items-center gap-1.5 rounded-lg border border-borda/60 bg-surface-elevated px-3 text-sm">
-              <Icon name="calendar" size={14} strokeWidth={2} className="text-conteudo-muted" />
-              <input
-                type="date"
-                value={customDates.start}
-                max={customDates.end}
-                onChange={(e) => setCustomDates((d) => ({ ...d, start: e.target.value }))}
-                className="bg-transparent text-conteudo text-xs outline-none cursor-pointer w-28 [color-scheme:light] dark:[color-scheme:dark]"
-              />
-              <span className="text-conteudo-muted text-xs">até</span>
-              <input
-                type="date"
-                value={customDates.end}
-                min={customDates.start}
-                max={new Date().toISOString().slice(0, 10)}
-                onChange={(e) => setCustomDates((d) => ({ ...d, end: e.target.value }))}
-                className="bg-transparent text-conteudo text-xs outline-none cursor-pointer w-28 [color-scheme:light] dark:[color-scheme:dark]"
-              />
-            </div>
-          )}
         </div>
       </div>
 
+      {/* ── Falhas, uma por carga, cada uma com o seu "Tentar de novo" ── */}
+      {falhas.map((f) => (
+        <FalhaDoBloco
+          key={f.titulo}
+          titulo={f.titulo}
+          erro={f.carga.erro}
+          onTentarDeNovo={f.carga.tentarDeNovo}
+        />
+      ))}
+
+      {/* ── Indicadores acumulados (D4) ─────────────────────── */}
+      {/* Os números daqui vêm de `/dashboard/stats`, que conta desde o início
+          do sistema e não recebe período. O seletor ao lado dava a entender o
+          contrário; a frase abaixo desfaz o engano sem mudar o indicador. */}
+      <p className="text-xs font-medium text-conteudo-muted">
+        Acumulado desde o início do sistema — não muda com o período escolhido.
+      </p>
+
+      {!tickets || !stats.dados ? (
+        <div className="rounded-xl bg-surface border border-borda">
+          <EsperaDaCarga carga={stats} altura="h-32" />
+        </div>
+      ) : (
+      <>
       {/* ── KPI Row ─────────────────────────────────────────── */}
       <div className="grid grid-cols-1 sm:grid-cols-3 lg:grid-cols-6 gap-4">
         <KpiCard
@@ -431,44 +424,60 @@ export default function AdminDashboard() {
         />
         <KpiCard
           label="SLA violado"
-          value={sla.resolve_breached}
-          sub={`${sla.response_breached} resposta · ${sla.resolve_breached} resolução`}
-          tone={sla.resolve_breached > 0 ? "danger" : "neutral"}
+          value={stats.dados.sla.resolve_breached}
+          sub={`${stats.dados.sla.response_breached} resposta · ${stats.dados.sla.resolve_breached} resolução`}
+          tone={stats.dados.sla.resolve_breached > 0 ? "danger" : "neutral"}
           icon={<Icon name="warning" />}
         />
       </div>
 
       {/* ── Status bar ──────────────────────────────────────── */}
       <StatusBar t={tickets} />
+      </>
+      )}
 
       {/* ── Stats row ────────────────────────────────────────── */}
+      {/* Três cartões acumulados e um do período: o tempo médio vem do
+          desempenho da equipe NO PERÍODO, e o subtítulo diz qual. */}
       <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-4">
         <KpiCard
           label="CSAT médio"
-          value={avgRating === "—" ? "—" : `${avgRating} / 10`}
-          sub={`${surveys.total} avaliações`}
+          value={
+            stats.dados?.surveys.average_rating != null
+              ? `${stats.dados.surveys.average_rating.toFixed(1)} / 10`
+              : "—"
+          }
+          sub={
+            stats.dados
+              ? `${stats.dados.surveys.total} avaliações · acumulado`
+              : stats.fase === "falha" ? "Indisponível" : "Carregando…"
+          }
           tone="warning"
           icon={<Icon name="star" />}
         />
         <KpiCard
           label="Tempo médio resolução"
           value={fmtHours(avgResolutionHours)}
-          sub={avgResolutionHours != null ? "Média da equipe" : "Sem dados"}
+          sub={
+            techList.fase === "pronto"
+              ? avgResolutionHours != null ? `Média da equipe · ${periodLabel}` : `Sem dados · ${periodLabel}`
+              : techList.fase === "falha" ? "Indisponível" : "Carregando…"
+          }
           tone="primary"
           icon={<Icon name="chart" />}
         />
         <KpiCard
           label="SLA Resposta violado"
-          value={sla.response_breached}
-          sub="1º atendimento fora do prazo"
-          tone={sla.response_breached > 0 ? "warning" : "neutral"}
+          value={stats.dados?.sla.response_breached ?? "—"}
+          sub="1º atendimento fora do prazo · acumulado"
+          tone={(stats.dados?.sla.response_breached ?? 0) > 0 ? "warning" : "neutral"}
           icon={<Icon name="clock" />}
         />
         <KpiCard
           label="SLA Resolução violado"
-          value={sla.resolve_breached}
-          sub="Resolução fora do prazo"
-          tone={sla.resolve_breached > 0 ? "danger" : "neutral"}
+          value={stats.dados?.sla.resolve_breached ?? "—"}
+          sub="Resolução fora do prazo · acumulado"
+          tone={(stats.dados?.sla.resolve_breached ?? 0) > 0 ? "danger" : "neutral"}
           icon={<Icon name="warning" />}
         />
       </div>
@@ -479,13 +488,15 @@ export default function AdminDashboard() {
         <div className="rounded-xl bg-surface border border-borda overflow-hidden">
           <div className="px-5 py-4 border-b border-borda-muted">
             <p className="text-sm font-semibold text-conteudo">
-              {selectedTechId !== "all" && techDetail
-                ? `Atendimentos de ${techDetail.technician_name} — ${periodLabel}`
+              {selectedTechId !== "all"
+                ? `Atendimentos de ${nomeDoTecnico ?? "técnico"} — ${periodLabel}`
                 : `Tickets abertos por dia — ${periodLabel}`}
             </p>
           </div>
           <div className="p-5">
-            {chartData.length === 0 ? (
+            {cargaDoGrafico.fase !== "pronto" ? (
+              <EsperaDaCarga carga={cargaDoGrafico} />
+            ) : chartData.length === 0 ? (
               <div className="flex h-48 items-center justify-center text-conteudo-muted text-sm">Sem dados para o período</div>
             ) : (
               <ResponsiveContainer width="100%" height={220}>
@@ -513,9 +524,12 @@ export default function AdminDashboard() {
         <div className="rounded-xl bg-surface border border-borda overflow-hidden">
           <div className="px-5 py-4 border-b border-borda-muted">
             <p className="text-sm font-semibold text-conteudo">Tickets por Status</p>
+            <p className="text-xs text-conteudo-muted">Acumulado desde o início</p>
           </div>
           <div className="p-5">
-            {statusData.length === 0 ? (
+            {stats.fase !== "pronto" ? (
+              <EsperaDaCarga carga={stats} />
+            ) : statusData.length === 0 ? (
               <div className="flex h-48 items-center justify-center text-conteudo-muted text-sm">Nenhum ticket</div>
             ) : (
               <>
@@ -556,8 +570,10 @@ export default function AdminDashboard() {
       {/* ── Category + Charts row 2 ─────────────────────────── */}
       <div className="grid grid-cols-1 lg:grid-cols-3 gap-4">
         {/* Category breakdown */}
-        <SectionCard title="Chamados por Categoria">
-          {categoryData.length === 0 ? (
+        <SectionCard title={`Chamados por Categoria — ${periodLabel}`}>
+          {report.fase !== "pronto" ? (
+            <EsperaDaCarga carga={report} altura="h-40" />
+          ) : categoryData.length === 0 ? (
             <div className="flex h-40 items-center justify-center text-conteudo-muted text-sm">Sem categorias no período</div>
           ) : (
             <div className="space-y-3">
@@ -626,10 +642,13 @@ export default function AdminDashboard() {
         </SectionCard>
 
         {/* Priority */}
-        <SectionCard title="Tickets por Prioridade">
+        <SectionCard title="Tickets por Prioridade — acumulado">
           {/* Prioridade TEM significado próprio — não é série categórica —,
               então usa `graficoDePrioridade()` e não `--chart-*` (E16-b). O
               eixo já rotula cada barra; sem legenda separada. */}
+          {stats.fase !== "pronto" ? (
+            <EsperaDaCarga carga={stats} />
+          ) : (
           <ResponsiveContainer width="100%" height={200}>
             <BarChart data={priorityData} margin={{ top: 4, right: 4, left: -24, bottom: 0 }} barSize={36}>
               <XAxis dataKey="name" tick={{ fill: CROMO.eixo, fontSize: 12 }} axisLine={false} tickLine={false} />
@@ -655,15 +674,34 @@ export default function AdminDashboard() {
               </Bar>
             </BarChart>
           </ResponsiveContainer>
+          )}
         </SectionCard>
 
         {/* SLA compliance */}
         <SectionCard title={`Conformidade SLA — ${periodLabel}`}>
-          {slaCompliance.length === 0 ? (
+          {report.fase !== "pronto" ? (
+            <EsperaDaCarga carga={report} />
+          ) : slaCompliance.length === 0 ? (
             <div className="flex h-48 items-center justify-center text-conteudo-muted text-sm">Sem dados de SLA</div>
           ) : (
             <div className="space-y-5 py-1">
-              {slaCompliance.map((item) => (
+              {slaCompliance.map((item) => item.total === 0 ? (
+                // Sem chamado da prioridade no período não há conformidade a
+                // medir (D3). A API manda 100 nesse caso, por compatibilidade
+                // com a tela antiga; desenhar 100% verde seria dizer "tudo no
+                // prazo" sobre nada. Sem barra: um `meter` sem valor não é
+                // medição de nada.
+                <div key={item.priority} className="flex items-center justify-between">
+                  <div className="flex items-center gap-2">
+                    <span className="w-2 h-2 rounded-full bg-borda-control" />
+                    <span className="text-sm font-medium text-conteudo">{rotuloDePrioridade(item.priority)}</span>
+                  </div>
+                  <div className="text-right">
+                    <span className="text-sm font-bold tabular-nums text-conteudo-muted">—</span>
+                    <span className="text-xs text-conteudo-muted ml-2">(sem chamados)</span>
+                  </div>
+                </div>
+              ) : (
                 <div key={item.priority}>
                   <div className="flex items-center justify-between mb-2">
                     <div className="flex items-center gap-2">
@@ -720,7 +758,12 @@ export default function AdminDashboard() {
       </div>
 
       {/* ── Team table ───────────────────────────────────────── */}
-      {techList && techList.technicians.length > 0 && (
+      {techList.fase === "carregando" && (
+        <SectionCard title={`Performance da equipe — ${periodLabel}`}>
+          <EsperaDaCarga carga={techList} altura="h-32" />
+        </SectionCard>
+      )}
+      {techList.dados && techList.dados.technicians.length > 0 && (
         <SectionCard title={`Performance da equipe — ${periodLabel}`}>
           <div className="overflow-x-auto -mx-5 px-5">
             <table className="w-full text-sm min-w-[640px]">
@@ -732,7 +775,7 @@ export default function AdminDashboard() {
                 </tr>
               </thead>
               <tbody className="divide-y divide-borda-muted">
-                {techList.technicians.map((t) => {
+                {techList.dados.technicians.map((t) => {
                   const initials = t.technician_name.split(" ").slice(0, 2).map((w) => w[0]).join("").toUpperCase();
                   const isSelected = selectedTechId === t.technician_id;
                   return (
@@ -774,6 +817,11 @@ export default function AdminDashboard() {
                       <td className="py-3 pr-4 tabular-nums text-on-tint-success font-medium">{t.resolved}</td>
                       <td className="py-3 pr-4 tabular-nums text-on-tint-info">{t.open_count}</td>
                       <td className="py-3 pr-4">
+                        {t.total_assigned === 0 ? (
+                          // Nenhum chamado atribuído no período: não há
+                          // conformidade a medir (D3), e "100%" diria o contrário.
+                          <span className="text-xs text-conteudo-muted">— sem chamados</span>
+                        ) : (
                         <div className="flex items-center gap-2">
                           {/* A mesma medição da seção "Conformidade SLA", uma
                               por técnico: 0 a 100, faixa fixa, `meter`. O nome
@@ -794,6 +842,7 @@ export default function AdminDashboard() {
                             {t.sla_compliance_rate.toFixed(0)}%
                           </span>
                         </div>
+                        )}
                       </td>
                       <td className="py-3 pr-4 tabular-nums text-conteudo-muted">{fmtHours(t.avg_resolution_hours)}</td>
                       <td className="py-3">

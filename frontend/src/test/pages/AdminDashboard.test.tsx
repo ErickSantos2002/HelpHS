@@ -306,11 +306,10 @@ describe("AdminDashboard — ícones e nome acessível", () => {
     expect(rotulos).toEqual([
       "Hoje",
       "Ontem",
-      "Esta Semana",
-      "Este Mês",
-      "Mês Passado",
-      "Este Trimestre",
-      "Este Ano",
+      "Últimos 7 dias",
+      "Últimos 30 dias",
+      "Este mês",
+      "Mês passado",
       "Personalizado",
     ]);
   });
@@ -390,7 +389,7 @@ describe("AdminDashboard — ícones e nome acessível", () => {
     // Apagar o `<span>` da contagem reprova este caso — é o que impede que
     // "esconder o desenho" vire "esconder o dado".
     await montar();
-    const bloco = blocoDe("Chamados por Categoria");
+    const bloco = blocoDe("Chamados por Categoria — Últimos 30 dias");
 
     expect(within(bloco).queryAllByRole("meter")).toHaveLength(0);
     expect(within(bloco).queryAllByRole("progressbar")).toHaveLength(0);
@@ -447,7 +446,7 @@ describe("AdminDashboard — ícones e nome acessível", () => {
     );
     await waitFor(() => expect(screen.getByText("Dashboard")).toBeInTheDocument());
 
-    const bloco = blocoDe("Chamados por Categoria");
+    const bloco = blocoDe("Chamados por Categoria — Últimos 30 dias");
     for (const nome of [
       "Hardware: 6 chamados, 50% do total",
       "Software: 3 chamados, 25% do total",
@@ -519,7 +518,7 @@ describe("AdminDashboard — ícones e nome acessível", () => {
     // em `critical` criaria exatamente a divergência que ele existe para
     // evitar, e é esse par que este caso prende.
     await montar();
-    const bloco = blocoDe("Conformidade SLA — Este Mês");
+    const bloco = blocoDe("Conformidade SLA — Últimos 30 dias");
 
     expect(within(bloco).getByText("Crítica")).toBeInTheDocument();
     expect(within(bloco).getByText("Baixa")).toBeInTheDocument();
@@ -557,7 +556,7 @@ describe("AdminDashboard — ícones e nome acessível", () => {
     );
     await waitFor(() => expect(screen.getByText("Dashboard")).toBeInTheDocument());
 
-    const bloco = blocoDe("Chamados por Categoria");
+    const bloco = blocoDe("Chamados por Categoria — Últimos 30 dias");
     // Singular no de um, plural no de três — os dois no mesmo caso, senão
     // trocar o ternário por "chamado" fixo passaria igual.
     expect(within(bloco).getByRole("img", { name: "Rede: 1 chamado, 25% do total" })).toBeInTheDocument();

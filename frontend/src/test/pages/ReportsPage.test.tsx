@@ -333,10 +333,12 @@ describe("ReportsPage — os filtros da barra", () => {
 
     const rotulos = opcoesDoMenu(screen.getByRole("combobox", { name: "Período" }));
     expect(rotulos).toEqual([
+      "Hoje",
+      "Ontem",
       "Últimos 7 dias",
-      "Últimos 14 dias",
       "Últimos 30 dias",
-      "Últimos 90 dias",
+      "Este mês",
+      "Mês passado",
       "Personalizado",
     ]);
   });
