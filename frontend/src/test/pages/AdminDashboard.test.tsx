@@ -95,6 +95,21 @@ const TECH_LIST = {
   ],
 };
 
+/**
+ * Espera a tela inteira carregar: o cabeçalho e TODOS os blocos.
+ *
+ * Desde a F1-B-03b o cabeçalho aparece antes dos dados — cada bloco carrega
+ * sozinho. Esperar só o "Dashboard" deixava o caso ler um bloco ainda com o
+ * anel de carregando, e no CI, sob carga, isso reprovava. Pronto = nenhum
+ * anel na tela.
+ */
+async function ateCarregar() {
+  await waitFor(() => expect(screen.getByText("Dashboard")).toBeInTheDocument());
+  await waitFor(() =>
+    expect(screen.queryAllByRole("status", { name: "Carregando..." })).toHaveLength(0),
+  );
+}
+
 async function montar() {
   vi.mocked(dashboardService.getDashboardStats).mockResolvedValue(STATS as never);
   vi.mocked(reportService.getReports).mockResolvedValue(REPORT as never);
@@ -105,7 +120,7 @@ async function montar() {
       <AdminDashboard />
     </MemoryRouter>,
   );
-  await waitFor(() => expect(screen.getByText("Dashboard")).toBeInTheDocument());
+  await ateCarregar();
   return r;
 }
 
@@ -179,7 +194,7 @@ describe("AdminDashboard", () => {
         <AdminDashboard />
       </MemoryRouter>,
     );
-    await waitFor(() => expect(screen.getByText("Dashboard")).toBeInTheDocument());
+    await ateCarregar();
 
     expect(screen.getByText("Sem dados para o período")).toBeInTheDocument();
   });
@@ -200,7 +215,7 @@ describe("AdminDashboard", () => {
         <AdminDashboard />
       </MemoryRouter>,
     );
-    await waitFor(() => expect(screen.getByText("Dashboard")).toBeInTheDocument());
+    await ateCarregar();
 
     const rosca = blocoDe("Tickets por Status");
     expect(within(rosca).getByText("Nenhum ticket")).toBeInTheDocument();
@@ -444,7 +459,7 @@ describe("AdminDashboard — ícones e nome acessível", () => {
         <AdminDashboard />
       </MemoryRouter>,
     );
-    await waitFor(() => expect(screen.getByText("Dashboard")).toBeInTheDocument());
+    await ateCarregar();
 
     const bloco = blocoDe("Chamados por Categoria — Últimos 30 dias");
     for (const nome of [
@@ -554,7 +569,7 @@ describe("AdminDashboard — ícones e nome acessível", () => {
         <AdminDashboard />
       </MemoryRouter>,
     );
-    await waitFor(() => expect(screen.getByText("Dashboard")).toBeInTheDocument());
+    await ateCarregar();
 
     const bloco = blocoDe("Chamados por Categoria — Últimos 30 dias");
     // Singular no de um, plural no de três — os dois no mesmo caso, senão
