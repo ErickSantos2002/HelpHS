@@ -321,8 +321,10 @@ describe("AdminDashboard — indicadores", () => {
     const titulo = await screen.findByText("Conformidade SLA — Últimos 30 dias");
     const bloco = titulo.closest(".rounded-xl") as HTMLElement;
 
-    // Alta veio com total 0 e compliance_rate 100 da API.
-    expect(within(bloco).getByText("Alta")).toBeInTheDocument();
+    // Alta veio com total 0 e compliance_rate 100 da API. O título aparece
+    // já enquanto o relatório carrega; a leitura espera os dados chegarem
+    // (no CI, sob carga, o `getByText` direto pegava o anel de carregando).
+    expect(await within(bloco).findByText("Alta")).toBeInTheDocument();
     expect(within(bloco).getByText("(sem chamados)")).toBeInTheDocument();
     expect(within(bloco).queryByText("100%")).not.toBeInTheDocument();
     // Só a prioridade com chamado tem barra de medição.
