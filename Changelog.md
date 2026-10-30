@@ -37,6 +37,15 @@ backend**, sem migration, sem variável nova. Regras em
   dashboard do admin aparecem como acumulados desde o início (D4).
 - **Comparação:** a tela diz com que dias a variação foi comparada, e em "Hoje"
   avisa que o dia de hoje até agora é comparado com o dia de ontem inteiro.
+- **Personalizado inválido não fica "carregando":** os blocos do período dizem
+  "Aguardando um período válido — corrija as datas acima." em vez de girar
+  para sempre, e voltam a carregar quando as datas são corrigidas.
+- **O filtro de técnico do dashboard do admin não some** ao carregar, ao falhar,
+  com o intervalo inválido ou com a lista vazia: fica desabilitado enquanto a
+  lista não está pronta e mantém o técnico escolhido.
+- **Ajustes de tela:** os quatro rótulos do gráfico "Conformidade SLA por
+  prioridade" aparecem (inclinados); "Personalizado" aparece inteiro no menu
+  de período; "Fechar" do detalhe do técnico não quebra em duas linhas.
 
 ### Relatórios por período de calendário, no fuso de Recife — backend (F1-B-03a, 29/10/2026)
 

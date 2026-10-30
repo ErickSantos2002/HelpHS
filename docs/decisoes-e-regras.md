@@ -2720,7 +2720,18 @@ ou falha):
 - trocar de período ou tentar de novo limpa o aviso;
 - **resposta atrasada é descartada**: a do período anterior, chegando depois,
   não toma o lugar da atual;
-- enquanto o período novo carrega, os números do anterior saem da tela.
+- enquanto o período novo carrega, os números do anterior saem da tela;
+- **intervalo inválido não é carregamento**: sem intervalo válido a carga fica
+  ociosa (nada é pedido), e o bloco diz "Aguardando um período válido — corrija
+  as datas acima." (o subtítulo de indicador diz "Período inválido"). Antes, o
+  estado ocioso era desenhado como carregando, e o anel girava para sempre.
+
+**O filtro de técnico do dashboard do admin fica sempre à vista.** Ele só
+existia com a lista do período pronta, e sumia ao carregar, ao falhar, com o
+intervalo inválido e a cada troca de período. Agora fica desabilitado enquanto
+a lista não está pronta (com `title` dizendo por quê) e guarda o técnico
+escolhido — id e nome —, que continua valendo quando o intervalo volta a ser
+válido.
 
 **Indicadores:**
 
