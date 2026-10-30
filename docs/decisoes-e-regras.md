@@ -2607,6 +2607,70 @@ um `<Alert>` e derrubavam a aplicação. O contrato, para não voltar a divergir
   (tentar de novo, ir para o início, recarregar); a mensagem do erro e a pilha
   vão só para o console do navegador. Trocar de rota limpa o erro.
 
+## Contrato dos períodos dos relatórios (F1-B-03a, 29/10/2026)
+
+Os relatórios só conheciam "N dias contados de agora para trás", em UTC. A tela
+chamava isso de "Ontem" (eram 48 h) e "Mês passado" (eram 60 dias), o gráfico
+punha o chamado das 22:00 de Recife no dia seguinte, e os relatórios por técnico
+exigiam `period >= 7` — "Hoje" e "Ontem" respondiam 422. O código do contrato é
+`backend/app/utils/periodo_relatorio.py`.
+
+**Onde vale:** `GET /dashboard/reports`, `/reports/technicians`,
+`/reports/technician`, `/reports/export/csv` e `/reports/export/pdf`. Os cinco
+aceitam os mesmos parâmetros de período. Permissões não mudaram.
+`/dashboard/stats` não tem período: é o acumulado (decisão D4).
+
+| Parâmetro | Regra |
+|---|---|
+| `start_date`, `end_date` | `AAAA-MM-DD`, **dias do calendário em `America/Recife`** |
+| as duas ou nenhuma | uma só → 422 |
+| início ≤ fim | invertido → 422 |
+| fim não futuro | "hoje" é o dia de Recife, não o de UTC → 422 se passar |
+| até 366 dias | contando os dois extremos → 422 se passar |
+| formato | fora de `AAAA-MM-DD` → 422 em português |
+| `period` (legado) | 1 a 365 em TODOS os relatórios; vale só sem datas |
+
+- **Janela `[início, fim)`.** Início = 00:00 de `start_date` em Recife,
+  incluído; fim = 00:00 do dia seguinte a `end_date`, EXCLUÍDO. Meia-noite
+  pertence ao dia que começa: nenhum chamado conta em dois períodos vizinhos. O
+  `23:59:59` antigo perdia o último segundo do dia.
+- **O banco continua em UTC.** A conversão acontece no backend; o banco recebe
+  instantes `timestamptz`.
+- **Datas mandam sobre `period`.** Sem datas, `period` mantém o significado de
+  sempre (N dias até agora, sem limite superior), para o front que já está no ar
+  receber os mesmos números.
+- **Agrupamento em Recife.** Dia, dia da semana e hora dos gráficos usam o
+  relógio de Recife. No SQL vai `timezone(INTERVAL '-03:00', coluna)`, e não o
+  nome do fuso: o nome exige a base de fusos instalada no Postgres, e o
+  Postgres embutido do desenvolvimento local (pgserver no Windows) não tem
+  nenhuma. O intervalo fixo só é correto porque Recife não tem horário de verão
+  — há teste cobrando a premissa.
+- **Uma barra por dia.** O gráfico diário tem exatamente os dias da janela; a
+  barra extra (sempre zerada) do intervalo personalizado saiu.
+- **Comparação.** Um mês civil completo (dia 1º ao último) compara com o mês
+  civil anterior inteiro (D6); qualquer outro intervalo, com a mesma quantidade
+  de dias imediatamente antes. `period` legado: os N dias anteriores, como antes.
+- **A resposta diz o que foi aplicado:** `start_date`, `end_date` e `timezone`
+  em `ReportData`, `TechnicianListReport` e `TechnicianDetailReport`;
+  `comparison.start_date`/`end_date` no período de comparação. Com `period`,
+  são os dias locais que a janela toca. `period_days` continua.
+
+Corrigido junto, porque a janela errada escondia:
+
+- **500 na comparação** quando o período anterior tinha chamado sem prioridade:
+  faltava a guarda que o período atual já tinha (D2). Com a triagem, todo
+  chamado nasce sem prioridade — "Hoje" comparado com ontem caía nisso.
+- **Justificativas de SLA** filtravam só o início do período.
+- **Média 0,0 virava "sem dado"** (`if valor` em vez de `is not None`) na
+  resolução, primeira resposta, resumo de técnico e CSAT.
+
+**Fica para a tela (B-03b), por decisão:** conformidade de SLA de prioridade
+sem chamados continua `100.0` com `total = 0` na resposta — mudar o tipo
+quebraria o front no ar. Quem desenha mostra **"sem dados"** quando `total` é
+zero (D3). A taxa de reabertura segue dividindo reaberturas no período por
+chamados abertos no período: mudar isso é mudar o indicador, e não foi
+aprovado.
+
 ## Formato do código
 
 ### O formatador do backend é o `black`. O `ruff` é linter, nunca formatador.

@@ -27,6 +27,12 @@ _PYDANTIC_MSG: dict[str, str] = {
     "uuid_parsing": "UUID inválido",
     "datetime_type": "Deve ser uma data/hora válida",
     "datetime_parsing": "Formato de data/hora inválido",
+    # Datas puras, como `start_date`/`end_date` dos relatórios (F1-B-03a): sem
+    # estas entradas, "2026-13-01" voltava em inglês.
+    "date_type": "Data inválida. Use o formato AAAA-MM-DD",
+    "date_parsing": "Data inválida. Use o formato AAAA-MM-DD",
+    "date_from_datetime_parsing": "Data inválida. Use o formato AAAA-MM-DD",
+    "date_from_datetime_inexact": "Informe só a data, sem hora (AAAA-MM-DD)",
     "url_type": "Deve ser uma URL válida",
     "url_parsing": "URL inválida",
     "value_error.email": "E-mail inválido",

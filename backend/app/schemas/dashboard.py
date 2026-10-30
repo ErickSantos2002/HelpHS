@@ -2,6 +2,7 @@
 Schemas for dashboard statistics endpoint.
 """
 
+from datetime import date as date_type
 from datetime import datetime
 
 from pydantic import ConfigDict
@@ -126,6 +127,11 @@ class ReportComparison(AppBaseModel):
     total_tickets: int
     csat_average: float | None
     sla_compliance: list[SLAComplianceItem]
+    # Os dias (em `America/Recife`) do período com que se comparou. Um mês
+    # civil completo compara com o mês civil anterior; o resto, com a mesma
+    # quantidade de dias imediatamente antes (F1-B-03a).
+    start_date: date_type | None = None
+    end_date: date_type | None = None
 
 
 class SlaJustificationItem(AppBaseModel):
@@ -168,6 +174,12 @@ class ReportData(AppBaseModel):
     reopen_rate: float = 0.0
     sla_justifications: list[SlaJustificationItem] = []
     comparison: ReportComparison | None = None
+    # O intervalo que o servidor de fato aplicou, em dias do calendário de
+    # `timezone` (F1-B-03a). Com `period` legado, são os dias locais que a
+    # janela "N dias até agora" toca. A tela escreve o período a partir daqui.
+    start_date: date_type | None = None
+    end_date: date_type | None = None
+    timezone: str | None = None
 
 
 # ── Technician report schemas ─────────────────────────────────
@@ -189,6 +201,12 @@ class TechnicianSummary(AppBaseModel):
 class TechnicianListReport(AppBaseModel):
     period_days: int
     technicians: list[TechnicianSummary]
+    # O intervalo que o servidor de fato aplicou, em dias do calendário de
+    # `timezone` (F1-B-03a). Com `period` legado, são os dias locais que a
+    # janela "N dias até agora" toca. A tela escreve o período a partir daqui.
+    start_date: date_type | None = None
+    end_date: date_type | None = None
+    timezone: str | None = None
 
 
 class TechnicianDetailReport(AppBaseModel):
@@ -205,3 +223,7 @@ class TechnicianDetailReport(AppBaseModel):
     csat_average: float | None
     csat_count: int
     tickets_by_day: list[DailyCount]
+    # Mesmo significado que em `ReportData` (F1-B-03a).
+    start_date: date_type | None = None
+    end_date: date_type | None = None
+    timezone: str | None = None
