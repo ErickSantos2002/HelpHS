@@ -14,6 +14,42 @@ Trabalho que ainda **não** entrou numa versão do produto. Confira: se um
 item aqui já está em produção, ou ele foi para a versão errada, ou falta
 publicar uma versão nova.
 
+### Histórico do chat, anexo da biblioteca e fechamentos do WebSocket — backend (F1-B-04a, 30/10/2026)
+
+Auditoria Geral: parte de backend do FUN-30 e do FUN-32, e o FUN-31. **Sem
+migration**, sem variável nova. Regras em `docs/decisoes-e-regras.md`, seção
+"Histórico do chat".
+
+- **Arquivo da biblioteca não derruba mais o histórico.** `GET
+  /tickets/{id}/messages` respondia 500 (`MissingGreenlet`) em qualquer
+  conversa com uma mensagem com arquivo, e a tela mostrava "histórico não
+  carregou" para a conversa inteira. O arquivo agora vem carregado na consulta.
+- **O histórico abre nas 100 mensagens mais recentes**, em ordem cronológica,
+  com `has_more` e `next_before`; `before=<cursor>` traz as anteriores. A ordem
+  é `(created_at, id)`, sem repetir nem pular na fronteira entre páginas.
+  ⚠️ **Mudança de comportamento:** sem parâmetros, a resposta deixa de vir "do
+  começo da conversa". Quem precisa da ordem antiga manda `offset` (mesmo
+  `offset=0`) e recebe o contrato anterior, 50 por página. A tela atual, que
+  pede só `limit=100`, passa a mostrar as 100 mais recentes assim que este
+  backend subir.
+- **Cursor inválido, cursor de outro chamado ou `before` junto com `offset`
+  dão 422.** Chamado alheio continua com o mesmo 404 de inexistente, com ou sem
+  cursor: a autorização vem antes do cursor.
+- **A mensagem com arquivo chega pelo tempo real com o arquivo** (FUN-31): o
+  quadro do WebSocket leva os campos `library_file_*`.
+- **Arquivo que voltou a ser interno some para o cliente:** nome, tipo, tamanho
+  e id saem nulos e `library_file_unavailable` vem `true`. A equipe continua
+  vendo tudo. Campo novo, com default `false`.
+- **4001 e 4004 chegam ao navegador:** o WebSocket aceita a conexão e só então
+  fecha, como já fazia com o 4428. Antes o navegador via 1006, sem código, e a
+  tela reconectava a cada 3 s, para sempre. Chamado excluído com a sala aberta
+  também fecha com 4004.
+- **O WebSocket usa a mesma regra de visibilidade do REST**
+  (`_get_ticket_visivel`), em vez de uma cópia dela.
+- Testes contra PostgreSQL de verdade em `test_chat_historico_postgres.py`,
+  incluindo a caracterização do commit tardio: `created_at` é carimbado antes
+  do commit, e uma mensagem pode cair atrás de um cursor já usado.
+
 ### Dashboards e Relatórios por período de calendário — frontend (F1-B-03b, 30/10/2026)
 
 Auditoria Geral, achados FUN-10 a FUN-13 e a parte de tela do FUN-16. Usa o

@@ -1152,6 +1152,83 @@ seria uma forma de remover a proteção de outra pessoa.
 senha nova não destranca nada: o login segue pedindo o código depois dela. Para
 "perdi o celular", é o `desliga_mfa`. Para "perdi os dois", os dois, nessa ordem.
 
+## Histórico do chat (F1-B-04a, 30/10/2026)
+
+`GET /tickets/{id}/messages` tem dois modos, e o corpo vem **sempre em ordem
+cronológica**.
+
+| Pedido | O que volta |
+|---|---|
+| sem `offset` (padrão) | as `limit` (100) mensagens **mais recentes** |
+| `before=<cursor>` | as `limit` imediatamente anteriores ao cursor |
+| `offset=N` (legado) | do começo da conversa, a partir de N, 50 por página |
+| `offset` **e** `before` | 422 |
+
+- **Ordem `(created_at, id)`.** O `id` desempata mensagens do mesmo instante;
+  sem ele, a fronteira entre duas páginas podia repetir ou pular mensagem.
+- **`has_more`** diz se há mensagens mais antigas que a primeira de `items`.
+  **`next_before`** é o cursor para pedi-las: nulo quando não há, e sempre nulo
+  no modo legado.
+- **O cursor é opaco, mas não é segredo**: base64url de `{tk, t, id}` (chamado,
+  `created_at` com fuso, id da mensagem), sem assinatura. Alterá-lo só desloca
+  a janela dentro do chamado já autorizado, porque a consulta filtra pelo
+  chamado da URL. O `tk` existe para que um cursor trocado de chamado dê 422,
+  em vez de virar uma página silenciosa no lugar errado. Sem fuso, também 422.
+- **A autorização vem antes do cursor.** Chamado alheio responde o mesmo 404 de
+  inexistente com cursor válido, inválido ou sem cursor: um 422 confirmaria que
+  o chamado existe.
+- **Por que `offset` virou o modo legado, e não o contrário:** sem parâmetro, o
+  endpoint lia do começo, e a tela pedia 100 e mostrava as 100 **mais
+  antigas** (FUN-30). A única tela que consome o endpoint quer as mais
+  recentes; quem depende da ordem antiga diz `offset` e continua tendo.
+
+**Arquivo da biblioteca numa mensagem.** O relacionamento é carregado
+explicitamente em toda consulta que serializa mensagem. Sem isso, numa sessão
+assíncrona, tocar em `msg.library_file` levanta `MissingGreenlet`, e era esse o
+500 do histórico. Se um caminho novo esquecer o carregamento, a mensagem sai com
+o arquivo "indisponível" e um aviso no log: perde-se um arquivo na tela, não a
+conversa.
+
+| Quem lê | Arquivo aberto para cliente | Arquivo que voltou a ser interno |
+|---|---|---|
+| cliente | nome, tipo, tamanho e id | tudo nulo, `library_file_unavailable: true` |
+| técnico / admin | tudo | tudo |
+
+O quadro do WebSocket vai igual para a sala inteira, e na sala pode haver
+cliente: ele é montado com o olhar do cliente. Na prática, isso não esconde
+nada da equipe, porque só entra em conversa arquivo aberto para cliente
+(`ensure_pode_anexar_no_chat`). Arquivo **excluído** não deixa rastro: a FK é
+`SET NULL`, e a mensagem perde o vínculo inteiro. Não há como dizer que ali
+houve um arquivo.
+
+**Fechamentos do WebSocket.** Todo fechamento de recusa vem **depois** do
+`accept()`. Fechado antes do handshake, o uvicorn responde HTTP 403 e o
+navegador só vê 1006, sem código (medido em 28/10/2026).
+
+| Código | Quando | O que a tela deve fazer |
+|---|---|---|
+| 4001 | token inválido, revogado ou conta inativa | renovar a sessão; não insistir |
+| 4004 | chamado inexistente, alheio ou excluído com a sala aberta | parar de reconectar |
+| 4428 | aceite da Política pendente | levar à tela de aceite |
+
+A visibilidade do chamado no WebSocket é a mesma função do REST
+(`_get_ticket_visivel`): equipe vê qualquer chamado existente; cliente, só o
+que abriu. A revalidação da sessão durante a conexão aberta (SEC-14) continua
+fora (D6).
+
+**O limite que a paginação NÃO resolve.** `created_at` é carimbado **antes**
+do commit. No POST, entre o carimbo e o commit ainda rodam a Helô (que pode
+chamar o modelo de linguagem) e as notificações. Uma mensagem pode ficar visível
+depois de outra mais "nova" e cair atrás de um cursor já usado: voltar com
+`before` não a traz. O que a entrega é o WebSocket, se a tela já estava na sala
+quando ela comitou, ou reler a página **mais recente**, enquanto ela couber
+nessa página. Reler a página mais recente **não** recupera tudo quando, durante
+uma queda, chegam mais mensagens do que o `limit`, ou quando uma gravação fora
+de ordem fica além dessa página. A recuperação completa depende do desenho da
+D4 (envio confiável) e da B-04b (frontend). Os testes
+`test_commit_tardio_cai_atras_do_cursor_e_so_a_pagina_recente_o_recupera` e
+`test_gravacoes_concorrentes_entram_todas_uma_vez` prendem esse comportamento.
+
 ## Chat em mais de um worker
 
 O `ConnectionManager` guarda as salas na memória **do processo**: um dicionário
