@@ -83,6 +83,13 @@ export interface SelectMenuProps {
   onBlur?: () => void;
   /** Vai para o gatilho, como no `Select` nativo ia para o `<select>`. */
   className?: string;
+  /**
+   * Quantas linhas cabem no painel sem rolar, quando passam do teto padrão
+   * (`max-h-60`, 6,6 linhas). Só ERGUE o teto: uma lista curta e fixa — os
+   * sete períodos dos relatórios — cabe inteira, em vez de cortar a última
+   * linha ao meio. Sem ele, nada muda. A borda da tela continua mandando.
+   */
+  maxVisibleOptions?: number;
   "aria-label"?: string;
   "aria-labelledby"?: string;
 }
@@ -139,9 +146,9 @@ function achatar(s: string): string {
     .toLowerCase();
 }
 
-function posicionar(r: DOMRect, linhas: number): Posicao {
+function posicionar(r: DOMRect, linhas: number, teto = ALTURA_MAX): Posicao {
   const vh = window.innerHeight;
-  const desejada = Math.min(ALTURA_MAX, linhas * ALTURA_LINHA + 2);
+  const desejada = Math.min(teto, linhas * ALTURA_LINHA + 2);
   const abaixo = vh - r.bottom - ESPACO - MARGEM;
   const acima = r.top - ESPACO - MARGEM;
   const base = {
@@ -151,12 +158,12 @@ function posicionar(r: DOMRect, linhas: number): Posicao {
   };
 
   if (abaixo < desejada && acima > abaixo) {
-    return { ...base, bottom: vh - r.top + ESPACO, maxHeight: Math.min(ALTURA_MAX, acima) };
+    return { ...base, bottom: vh - r.top + ESPACO, maxHeight: Math.min(teto, acima) };
   }
   return {
     ...base,
     top: r.bottom + ESPACO,
-    maxHeight: Math.min(ALTURA_MAX, Math.max(abaixo, ALTURA_LINHA * 2)),
+    maxHeight: Math.min(teto, Math.max(abaixo, ALTURA_LINHA * 2)),
   };
 }
 
@@ -174,6 +181,7 @@ export const SelectMenu = forwardRef<HTMLButtonElement, SelectMenuProps>(
       id,
       onBlur,
       className,
+      maxVisibleOptions,
       "aria-label": ariaLabel,
       "aria-labelledby": ariaLabelledby,
     },
@@ -382,8 +390,11 @@ export const SelectMenu = forwardRef<HTMLButtonElement, SelectMenuProps>(
         setPos(null);
         return;
       }
-      setPos(posicionar(gatilhoRef.current.getBoundingClientRect(), quantas));
-    }, [aberto, quantas]);
+      const teto = maxVisibleOptions
+        ? Math.max(ALTURA_MAX, maxVisibleOptions * ALTURA_LINHA + 2)
+        : ALTURA_MAX;
+      setPos(posicionar(gatilhoRef.current.getBoundingClientRect(), quantas, teto));
+    }, [aberto, quantas, maxVisibleOptions]);
 
     // A linha em destaque pelo teclado fica à vista na lista longa.
     useEffect(() => {

@@ -153,6 +153,21 @@ function cardDe(titulo: string): HTMLElement {
   return card as HTMLElement;
 }
 
+/**
+ * Espera a tela inteira carregar: o cabeçalho e TODOS os blocos.
+ *
+ * Desde a F1-B-03b o cabeçalho aparece antes dos dados — cada bloco carrega
+ * sozinho. Esperar só o "Dashboard" deixava o caso ler um bloco ainda com o
+ * anel de carregando, e no CI, sob carga, isso reprovava. Pronto = nenhum
+ * anel na tela.
+ */
+async function ateCarregar() {
+  await waitFor(() => expect(screen.getByText("Dashboard")).toBeInTheDocument());
+  await waitFor(() =>
+    expect(screen.queryAllByRole("status", { name: "Carregando..." })).toHaveLength(0),
+  );
+}
+
 async function montar() {
   vi.mocked(dashboardService.getDashboardStats).mockResolvedValue(STATS as never);
   vi.mocked(reportService.getTechnicianDetailReport).mockResolvedValue(DETAIL as never);
@@ -163,7 +178,7 @@ async function montar() {
       <TechnicianDashboard />
     </MemoryRouter>,
   );
-  await waitFor(() => expect(screen.getByText("Dashboard")).toBeInTheDocument());
+  await ateCarregar();
   return r;
 }
 
@@ -201,11 +216,10 @@ describe("TechnicianDashboard", () => {
     expect(rotulos).toEqual([
       "Hoje",
       "Ontem",
-      "Esta Semana",
-      "Este Mês",
-      "Mês Passado",
-      "Este Trimestre",
-      "Este Ano",
+      "Últimos 7 dias",
+      "Últimos 30 dias",
+      "Este mês",
+      "Mês passado",
       "Personalizado",
     ]);
   });
@@ -285,7 +299,7 @@ describe("TechnicianDashboard", () => {
         <TechnicianDashboard />
       </MemoryRouter>,
     );
-    await waitFor(() => expect(screen.getByText("Dashboard")).toBeInTheDocument());
+    await ateCarregar();
 
     expect(screen.getByText("Nenhum ticket atribuído")).toBeInTheDocument();
     expect(screen.getByText("Nenhum ticket ativo na equipe")).toBeInTheDocument();
@@ -305,7 +319,7 @@ describe("TechnicianDashboard", () => {
         <TechnicianDashboard />
       </MemoryRouter>,
     );
-    await waitFor(() => expect(screen.getByText("Dashboard")).toBeInTheDocument());
+    await ateCarregar();
 
     expect(screen.getByText("Sem dados para o período")).toBeInTheDocument();
   });

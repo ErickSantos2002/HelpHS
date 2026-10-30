@@ -2671,6 +2671,84 @@ zero (D3). A taxa de reabertura segue dividindo reaberturas no período por
 chamados abertos no período: mudar isso é mudar o indicador, e não foi
 aprovado.
 
+## Períodos e indicadores na tela (F1-B-03b, 30/10/2026)
+
+A tela que consome o contrato acima: o dashboard do admin, o do técnico e os
+Relatórios. O código é `frontend/src/lib/periodoRelatorio.ts` (as datas),
+`lib/useCarga.ts` (o estado de cada bloco) e
+`components/relatorios/SeletorDePeriodo.tsx` (o seletor, um só para as três
+telas).
+
+**As opções (D1), todas como `start_date`/`end_date`:**
+
+| Opção | Dias |
+|---|---|
+| Hoje | hoje |
+| Ontem | ontem |
+| Últimos 7 dias | hoje − 6 até hoje (D2) |
+| Últimos 30 dias | hoje − 29 até hoje — é a opção com que as telas abrem |
+| Este mês | dia 1º até hoje |
+| Mês passado | o mês civil anterior inteiro (a API compara com o mês antes dele, D6) |
+| Personalizado | as datas escolhidas, sem conversão em quantidade de dias |
+
+- **"Hoje" é o dia de Recife.** A tela acha o dia com `Intl` e o fuso
+  `America/Recife` explícito, nunca com `toISOString()` (o dia em UTC, que às
+  21:00 de Recife já é amanhã e a API recusaria como futuro) nem com
+  `getDate()` (o fuso da máquina de quem olha). O `max` dos campos de data
+  segue a mesma regra.
+- **Personalizado é validado antes de pedir**, com as frases da API: as duas
+  datas, início ≤ fim, fim não futuro, até 366 dias. Inválido, a tela não pede
+  nada, mostra o motivo no seletor e tira o relatório anterior da tela.
+- **O mesmo intervalo vai para todos os blocos** — relatório geral, lista de
+  técnicos, detalhe do técnico e exportação. Antes o personalizado mandava as
+  datas só à visão geral.
+- **O seletor sempre à vista** mostra os dias que o período cobre ("24/10 –
+  30/10 · horário de Recife").
+- **Os Relatórios perderam "Últimos 14 dias" e "Últimos 90 dias"**: as três
+  telas passaram a ter a mesma lista (D1). Os dois intervalos seguem possíveis
+  pelo "Personalizado".
+
+**Cada bloco carrega, falha e se recupera sozinho.** Os painéis eram um
+`Promise.all` único; agora cada chamada tem estado próprio (carregando, pronto
+ou falha):
+
+- uma falha mostra um aviso com o título do bloco, o texto do `getApiError` e
+  "Tentar de novo"; o resto da tela continua;
+- **falha nunca vira número**: o bloco fica "Indisponível", nunca 0 nem 100%.
+  O dashboard do técnico fabricava um relatório zerado com SLA de 100% quando a
+  chamada falhava;
+- trocar de período ou tentar de novo limpa o aviso;
+- **resposta atrasada é descartada**: a do período anterior, chegando depois,
+  não toma o lugar da atual;
+- enquanto o período novo carrega, os números do anterior saem da tela;
+- **intervalo inválido não é carregamento**: sem intervalo válido a carga fica
+  ociosa (nada é pedido), e o bloco diz "Aguardando um período válido — corrija
+  as datas acima." (o subtítulo de indicador diz "Período inválido"). Antes, o
+  estado ocioso era desenhado como carregando, e o anel girava para sempre.
+
+**O filtro de técnico do dashboard do admin fica sempre à vista.** Ele só
+existia com a lista do período pronta, e sumia ao carregar, ao falhar, com o
+intervalo inválido e a cada troca de período. Agora fica desabilitado enquanto
+a lista não está pronta (com `title` dizendo por quê) e guarda o técnico
+escolhido — id e nome —, que continua valendo quando o intervalo volta a ser
+válido.
+
+**Indicadores:**
+
+- **Contagem** pode ser 0; **média sem amostra** é "—"; **conformidade de SLA
+  sem chamado** (prioridade com `total = 0`, ou técnico com `total_assigned =
+  0`) é "—", sem barra — nunca 100% (D3). A API continua mandando `100.0`.
+- **Os indicadores do topo do dashboard do admin são acumulados** desde o
+  início do sistema (`/dashboard/stats`, D4) e a tela diz isso por escrito. Não
+  recarregam ao trocar de período. Na lista do técnico, as listas de chamados e
+  a fila geral são o estado de agora e também não dependem do período.
+- **Taxa de reabertura:** a fórmula não mudou.
+
+**Comparação.** A tela não calcula comparação; mostra a da API e diz com que
+dias ela foi feita ("Variações comparadas com 01/09 – 30/09."). Em **Hoje**, a
+nota é "Hoje, até agora, comparado com o dia de ontem inteiro.": o dia parcial
+contra o dia inteiro tende a parecer queda.
+
 ## Formato do código
 
 ### O formatador do backend é o `black`. O `ruff` é linter, nunca formatador.

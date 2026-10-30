@@ -649,6 +649,30 @@ describe("SelectMenu — o painel não fica preso atrás de cartão, tabela ou m
     expect(painel.style.maxHeight).not.toBe("");
   });
 
+  it("maxVisibleOptions ergue o teto: sete linhas cabem inteiras", async () => {
+    // O seletor de período dos relatórios tem sete opções, e no teto padrão
+    // (240px) a sétima — "Personalizado" — aparecia cortada ao meio.
+    comRetangulo({ top: 100, bottom: 138, left: 40, right: 280, width: 240, height: 38 });
+    vi.spyOn(window, "innerHeight", "get").mockReturnValue(900);
+    const sete = Array.from({ length: 7 }, (_, i) => ({ value: String(i), label: "Opção " + String(i) }));
+    montar({ options: sete, maxVisibleOptions: 7 });
+
+    await userEvent.click(gatilho());
+
+    expect(parseFloat(screen.getByRole("listbox").style.maxHeight)).toBe(7 * 36 + 2);
+  });
+
+  it("sem maxVisibleOptions, o teto continua o de sempre", async () => {
+    comRetangulo({ top: 100, bottom: 138, left: 40, right: 280, width: 240, height: 38 });
+    vi.spyOn(window, "innerHeight", "get").mockReturnValue(900);
+    const sete = Array.from({ length: 7 }, (_, i) => ({ value: String(i), label: "Opção " + String(i) }));
+    montar({ options: sete });
+
+    await userEvent.click(gatilho());
+
+    expect(parseFloat(screen.getByRole("listbox").style.maxHeight)).toBe(240);
+  });
+
   it("fecha quando o campo sai de cena (desmonta com o menu aberto)", async () => {
     const { unmount } = montar();
     await userEvent.click(gatilho());

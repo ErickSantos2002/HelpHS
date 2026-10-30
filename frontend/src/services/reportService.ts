@@ -1,4 +1,5 @@
 import { api } from "./api";
+import type { IntervaloDeDatas } from "../lib/periodoRelatorio";
 
 export interface DailyCount {
   date: string;
@@ -96,6 +97,9 @@ export interface SlaJustificationItem {
 }
 
 export interface ReportComparison {
+  /** Os dias do período comparado (F1-B-03a). Ausentes num backend antigo. */
+  start_date?: string | null;
+  end_date?: string | null;
   total_tickets: number;
   csat_average: number | null;
   sla_compliance: SLAComplianceItem[];
@@ -103,6 +107,13 @@ export interface ReportComparison {
 
 export interface ReportData {
   period_days: number;
+  /**
+   * Os dias que o servidor de fato aplicou, e o fuso em que os leu (F1-B-03a).
+   * Opcionais: um backend anterior à F1-B-03a não os manda.
+   */
+  start_date?: string | null;
+  end_date?: string | null;
+  timezone?: string | null;
   total_tickets: number;
   tickets_by_day: DailyCount[];
   tickets_by_category: CategoryCount[];
@@ -140,11 +151,25 @@ export interface TechnicianSummary {
 
 export interface TechnicianListReport {
   period_days: number;
+  /**
+   * Os dias que o servidor de fato aplicou, e o fuso em que os leu (F1-B-03a).
+   * Opcionais: um backend anterior à F1-B-03a não os manda.
+   */
+  start_date?: string | null;
+  end_date?: string | null;
+  timezone?: string | null;
   technicians: TechnicianSummary[];
 }
 
 export interface TechnicianDetailReport {
   period_days: number;
+  /**
+   * Os dias que o servidor de fato aplicou, e o fuso em que os leu (F1-B-03a).
+   * Opcionais: um backend anterior à F1-B-03a não os manda.
+   */
+  start_date?: string | null;
+  end_date?: string | null;
+  timezone?: string | null;
   technician_id: string;
   technician_name: string;
   total_assigned: number;
@@ -180,25 +205,40 @@ export async function getReports(filters: ReportFilters = {}): Promise<ReportDat
   return data;
 }
 
+/**
+ * O recorte de tempo dos relatórios de técnico: as datas do calendário
+ * (F1-B-03a) ou, por compatibilidade, o `period` legado em dias.
+ *
+ * As telas mandam as datas. O número continua aceito para quem ainda o usa, e
+ * com o mesmo significado de antes: N dias contados de agora para trás.
+ */
+export type RecorteDeTempo = number | IntervaloDeDatas;
+
+function paramsDoRecorte(recorte: RecorteDeTempo): Record<string, string | number> {
+  return typeof recorte === "number"
+    ? { period: recorte }
+    : { start_date: recorte.start_date, end_date: recorte.end_date };
+}
+
 export async function getTechnicianListReport(
-  period: number = 30,
+  recorte: RecorteDeTempo = 30,
 ): Promise<TechnicianListReport> {
   const { data } = await api.get<TechnicianListReport>(
     "/dashboard/reports/technicians",
-    { params: { period } },
+    { params: paramsDoRecorte(recorte) },
   );
   return data;
 }
 
 export async function getTechnicianDetailReport(
-  period: number = 30,
+  recorte: RecorteDeTempo = 30,
   technicianId?: string,
 ): Promise<TechnicianDetailReport> {
   const { data } = await api.get<TechnicianDetailReport>(
     "/dashboard/reports/technician",
     {
       params: {
-        period,
+        ...paramsDoRecorte(recorte),
         ...(technicianId ? { technician_id: technicianId } : {}),
       },
     },

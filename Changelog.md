@@ -14,6 +14,39 @@ Trabalho que ainda **não** entrou numa versão do produto. Confira: se um
 item aqui já está em produção, ou ele foi para a versão errada, ou falta
 publicar uma versão nova.
 
+### Dashboards e Relatórios por período de calendário — frontend (F1-B-03b, 30/10/2026)
+
+Auditoria Geral, achados FUN-10 a FUN-13 e a parte de tela do FUN-16. Usa o
+contrato da F1-B-03a (precisa dela implantada antes). **Sem mudança no
+backend**, sem migration, sem variável nova. Regras em
+`docs/decisoes-e-regras.md`, seção "Períodos e indicadores na tela".
+
+- **Os mesmos sete períodos nas três telas** (dashboard do admin, do técnico e
+  Relatórios): Hoje, Ontem, Últimos 7 dias, Últimos 30 dias, Este mês, Mês
+  passado e Personalizado. Cada um vira `start_date`/`end_date` no calendário
+  de Recife; "Ontem" deixa de ser 48 h e "Mês passado" deixa de ser 60 dias.
+  Os Relatórios perdem "Últimos 14 dias" e "Últimos 90 dias" (cobertos pelo
+  Personalizado).
+- **Personalizado manda as datas de verdade** para todos os blocos, inclusive
+  os de técnico e a exportação, e é validado antes de pedir.
+- **Cada bloco falha sozinho**, com o motivo da API e "Tentar de novo"; o
+  seletor de período fica sempre à vista. Falha não vira zero nem SLA de 100%,
+  resposta atrasada não sobrescreve o período atual e números do período
+  anterior saem da tela enquanto o novo carrega.
+- **SLA sem chamado no período é "—"**, não 100% (D3). Os indicadores do topo do
+  dashboard do admin aparecem como acumulados desde o início (D4).
+- **Comparação:** a tela diz com que dias a variação foi comparada, e em "Hoje"
+  avisa que o dia de hoje até agora é comparado com o dia de ontem inteiro.
+- **Personalizado inválido não fica "carregando":** os blocos do período dizem
+  "Aguardando um período válido — corrija as datas acima." em vez de girar
+  para sempre, e voltam a carregar quando as datas são corrigidas.
+- **O filtro de técnico do dashboard do admin não some** ao carregar, ao falhar,
+  com o intervalo inválido ou com a lista vazia: fica desabilitado enquanto a
+  lista não está pronta e mantém o técnico escolhido.
+- **Ajustes de tela:** os quatro rótulos do gráfico "Conformidade SLA por
+  prioridade" aparecem (inclinados); "Personalizado" aparece inteiro no menu
+  de período; "Fechar" do detalhe do técnico não quebra em duas linhas.
+
 ### Relatórios por período de calendário, no fuso de Recife — backend (F1-B-03a, 29/10/2026)
 
 Auditoria Geral, achados FUN-10, FUN-11 (parte da API), FUN-16 e FUN-51.

@@ -1,45 +1,26 @@
-import { useEffect, useState } from "react";
 import { useNavigate } from "react-router-dom";
 import {
   Area, AreaChart, ResponsiveContainer, Tooltip, XAxis, YAxis,
 } from "recharts";
-import { Alert, Icon, KpiCard, SelectMenu, Spinner, StatusBadge } from "../../components/ui";
+import { Icon, KpiCard, Spinner, StatusBadge } from "../../components/ui";
+import { FalhaDoBloco } from "../../components/relatorios/FalhaDoBloco";
+import { SeletorDePeriodo } from "../../components/relatorios/SeletorDePeriodo";
 import { cn } from "../../lib/utils";
 import { CROMO, COR_SERIE_TEMPORAL, ENVOLTORIO_DICA, ESTILO_DICA } from "../../lib/grafico";
 import { PRIORIDADE } from "../../lib/prioridade";
+import { AVISO_DE_PERIODO_INVALIDO, SUBTITULO_DE_PERIODO_INVALIDO, rotuloDoPreset } from "../../lib/periodoRelatorio";
+import { useCarga, type Carga } from "../../lib/useCarga";
+import { usePeriodoDoRelatorio } from "../../lib/usePeriodoDoRelatorio";
 import { useAuth } from "../../contexts/AuthContext";
 import { getDashboardStats } from "../../services/dashboardService";
-import { getTechnicianDetailReport, type TechnicianDetailReport } from "../../services/reportService";
+import { getTechnicianDetailReport } from "../../services/reportService";
 import { getTickets, type Ticket } from "../../services/ticketService";
 
-// ── Period config (same as AdminDashboard) ────────────────────
-
-type PeriodKey = "hoje" | "ontem" | "semana" | "mes" | "mes-passado" | "trimestre" | "ano" | "custom";
-
-const PERIOD_OPTIONS: { key: PeriodKey; label: string; days: number }[] = [
-  { key: "hoje",        label: "Hoje",            days: 1   },
-  { key: "ontem",       label: "Ontem",           days: 2   },
-  { key: "semana",      label: "Esta Semana",      days: 7   },
-  { key: "mes",         label: "Este Mês",         days: 30  },
-  { key: "mes-passado", label: "Mês Passado",      days: 60  },
-  { key: "trimestre",   label: "Este Trimestre",   days: 90  },
-  { key: "ano",         label: "Este Ano",         days: 365 },
-  { key: "custom",      label: "Personalizado",    days: 0   },
-];
-
-function getDefaultCustomDates() {
-  const end = new Date();
-  const start = new Date();
-  start.setDate(start.getDate() - 30);
-  return {
-    start: start.toISOString().slice(0, 10),
-    end:   end.toISOString().slice(0, 10),
-  };
-}
-
-function customDays(start: string, end: string) {
-  return Math.max(1, Math.ceil((new Date(end).getTime() - new Date(start).getTime()) / 86400000) + 1);
-}
+// ── Period config ─────────────────────────────────────────────
+//
+// As opções e as datas saem de `lib/periodoRelatorio.ts`, as mesmas do
+// dashboard do admin e dos Relatórios (F1-B-03b). Só o relatório do técnico
+// depende do período; as listas de chamados e a fila são o estado de AGORA.
 
 // ── Helpers ───────────────────────────────────────────────────
 
@@ -100,17 +81,28 @@ function TicketRow({ ticket, showTech }: { ticket: Ticket; showTech?: boolean })
 }
 
 function TicketListCard({
-  title, count, tickets, emptyMsg, showTech,
+  title, count, tickets, emptyMsg, showTech, carga,
 }: {
   title: string; count: number; tickets: Ticket[]; emptyMsg: string; showTech?: boolean;
+  /** A carga da lista: enquanto não está pronta, nem contagem nem "lista vazia". */
+  carga: Carga<unknown>;
 }) {
+  const pronta = carga.fase === "pronto";
   return (
     <div className="rounded-xl bg-surface border border-borda overflow-hidden flex flex-col">
       <div className="flex items-center justify-between px-4 py-3.5 border-b border-borda/60 shrink-0">
         <p className="text-sm font-semibold text-conteudo">{title}</p>
-        <span className="text-xs font-medium text-conteudo-muted bg-surface-elevated px-2 py-0.5 rounded-full">{count}</span>
+        {pronta && (
+          <span className="text-xs font-medium text-conteudo-muted bg-surface-elevated px-2 py-0.5 rounded-full">{count}</span>
+        )}
       </div>
-      {tickets.length === 0 ? (
+      {!pronta ? (
+        // Falha não é "Fila limpa": a lista vazia só é dita quando a lista
+        // chegou e veio vazia.
+        <div className="flex items-center justify-center py-10 text-sm text-conteudo-muted">
+          {carga.fase === "falha" ? "Indisponível — veja o aviso acima." : <Spinner size="md" />}
+        </div>
+      ) : tickets.length === 0 ? (
         <div className="flex flex-col items-center justify-center py-10 gap-2">
           <div className="w-8 h-8 rounded-full bg-surface-elevated flex items-center justify-center">
             <Icon name="check" size={16} strokeWidth={1.5} className="text-conteudo-muted" />
@@ -133,88 +125,96 @@ function TicketListCard({
 
 interface TechGroup { name: string; tickets: Ticket[] }
 
+/** Os chamados ativos dos colegas, agrupados por técnico. */
+async function carregaEquipe(meuId: string): Promise<TechGroup[]> {
+  const respostas = await Promise.all([
+    getTickets({ status: "open", limit: 200 }),
+    getTickets({ status: "in_progress", limit: 200 }),
+    getTickets({ status: "awaiting_client", limit: 200 }),
+    getTickets({ status: "awaiting_technical", limit: 200 }),
+  ]);
+  const map = new Map<string, TechGroup>();
+  for (const t of respostas.flatMap((x) => x.items)) {
+    if (!t.assignee_id || t.assignee_id === meuId) continue;
+    if (!map.has(t.assignee_id)) map.set(t.assignee_id, { name: t.assignee_name ?? "Técnico", tickets: [] });
+    map.get(t.assignee_id)!.tickets.push(t);
+  }
+  return [...map.values()].sort((a, b) => a.name.localeCompare(b.name));
+}
+
 export default function TechnicianDashboard() {
   const { user } = useAuth();
+  const periodo = usePeriodoDoRelatorio();
+  const { intervalo } = periodo;
+  const periodLabel = periodo.preset === "personalizado"
+    ? (periodo.descricao ?? "Personalizado")
+    : rotuloDoPreset(periodo.preset);
 
-  // Period state
-  const [periodKey, setPeriodKey] = useState<PeriodKey>("mes");
-  const [customDates, setCustomDates] = useState(getDefaultCustomDates);
-
-  // O recuo existe porque `find` devolve `undefined` para chave desconhecida,
-  // e o `!` que estava aqui lia `days` dela — a tela quebrava inteira. O
-  // caminho conhecido era a opção de limpar do filtro antigo, que devolvia
-  // `""`; ela saiu na D9.2, mas o estouro nunca dependeu dela.
+  // ── As cargas, uma por bloco (F1-B-03b) ──────────────────────────────
   //
-  // Recuo para 30 e não para o primeiro da lista: 30 é o padrão declarado no
-  // backend (`period: Annotated[int, Query(ge=1, le=365)] = 30`), ou seja, o
-  // que o servidor faria sozinho se o parâmetro não fosse mandado. E é por
-  // esse mesmo `ge=1` que **não existe "todo o período"**: a opção de limpar
-  // não tem para onde apontar, e por isso saiu em vez de virar estado válido.
-  const activePeriod = periodKey === "custom"
-    ? customDays(customDates.start, customDates.end)
-    : (PERIOD_OPTIONS.find((p) => p.key === periodKey)?.days ?? 30);
+  // Eram um `Promise.all` só. A falha do relatório virava ZEROS e SLA de 100%
+  // sem aviso nenhum (um `.catch(() => emptyDetail)` fabricava o relatório),
+  // e a falha de qualquer outra chamada derrubava a tela inteira, com o
+  // seletor junto e sem saída além de recarregar a página.
+  //
+  // Só o relatório (`detail`) depende do período. As listas e a fila são o
+  // estado de agora, e trocar de período não as pede de novo.
+  const detail = useCarga(
+    user && intervalo ? () => getTechnicianDetailReport(intervalo) : null,
+    `${periodo.chave}|${user?.id ?? ""}`,
+    "Não foi possível carregar o seu desempenho no período.",
+  );
+  const stats = useCarga(
+    user ? getDashboardStats : null,
+    "stats",
+    "Não foi possível carregar a fila geral.",
+  );
+  const meus = useCarga(
+    user ? () => getTickets({ assignee_id: user.id, limit: 200 }).then((r) => r.items) : null,
+    `meus|${user?.id ?? ""}`,
+    "Não foi possível carregar os seus chamados.",
+  );
+  const fila = useCarga(
+    user ? () => getTickets({ status: "open", limit: 200 }).then((r) => r.items) : null,
+    "fila",
+    "Não foi possível carregar a fila de chamados abertos.",
+  );
+  const equipe = useCarga(
+    user ? () => carregaEquipe(user.id) : null,
+    `equipe|${user?.id ?? ""}`,
+    "Não foi possível carregar os chamados da equipe.",
+  );
 
-  const periodLabel = PERIOD_OPTIONS.find((p) => p.key === periodKey)?.label ?? "";
-
-  // Data
-  const [detail, setDetail]       = useState<TechnicianDetailReport | null>(null);
-  const [openCount, setOpenCount] = useState(0);
-  const [myTickets, setMyTickets] = useState<Ticket[]>([]);
-  const [queue, setQueue]         = useState<Ticket[]>([]);
-  const [teamGroups, setTeamGroups] = useState<TechGroup[]>([]);
-  const [loading, setLoading]     = useState(true);
-  const [error, setError]         = useState<string | null>(null);
-
-
-  useEffect(() => {
-    if (!user) return;
-    setLoading(true);
-    const emptyDetail: TechnicianDetailReport = {
-      period_days: activePeriod,
-      technician_id: user.id,
-      technician_name: user.name,
-      total_assigned: 0, resolved: 0, in_progress: 0, open_count: 0,
-      sla_breached: 0, sla_compliance_rate: 100,
-      avg_resolution_hours: null, csat_average: null, csat_count: 0,
-      tickets_by_day: [],
-    };
-    Promise.all([
-      getTechnicianDetailReport(activePeriod).catch(() => emptyDetail),
-      getDashboardStats(),
-      getTickets({ assignee_id: user.id, limit: 200 }),
-      getTickets({ status: "open", limit: 200 }),
-      Promise.all([
-        getTickets({ status: "open", limit: 200 }),
-        getTickets({ status: "in_progress", limit: 200 }),
-        getTickets({ status: "awaiting_client", limit: 200 }),
-        getTickets({ status: "awaiting_technical", limit: 200 }),
-      ]).then((r) => r.flatMap((x) => x.items)),
-    ])
-      .then(([detailData, statsData, myData, queueData, activeTickets]) => {
-        setDetail(detailData);
-        setOpenCount(statsData.tickets.open);
-        setMyTickets(myData.items);
-        setQueue(queueData.items);
-
-        const map = new Map<string, TechGroup>();
-        for (const t of activeTickets) {
-          if (!t.assignee_id || t.assignee_id === user.id) continue;
-          if (!map.has(t.assignee_id)) map.set(t.assignee_id, { name: t.assignee_name ?? "Técnico", tickets: [] });
-          map.get(t.assignee_id)!.tickets.push(t);
-        }
-        setTeamGroups([...map.values()].sort((a, b) => a.name.localeCompare(b.name)));
-      })
-      .catch(() => setError("Não foi possível carregar os tickets."))
-      .finally(() => setLoading(false));
-  }, [user, activePeriod]);
-
-  if (loading) return <div className="flex h-64 items-center justify-center"><Spinner size="lg" /></div>;
-  if (error)   return <Alert variant="danger">{error}</Alert>;
-  if (!detail) return <Alert variant="danger">Erro ao carregar dados.</Alert>;
-
+  const myTickets = meus.dados ?? [];
+  const queue = fila.dados ?? [];
+  const teamAllTickets = (equipe.dados ?? []).flatMap((g) => g.tickets);
   const myActiveCount = myTickets.filter((t) => t.status === "open" || t.status === "in_progress").length;
   const myBreachCount = myTickets.filter((t) => t.sla_response_breach || t.sla_resolve_breach).length;
-  const teamAllTickets = teamGroups.flatMap((g) => g.tickets);
+  const d = detail.dados;
+
+  /**
+   * O subtítulo de um indicador cuja carga ainda não está pronta. Ociosa, a
+   * carga do período espera um intervalo válido — não está carregando nada.
+   */
+  const subDaCarga = (c: Carga<unknown>, pronto: string) =>
+    c.fase === "pronto" ? pronto
+      : c.fase === "falha" ? "Indisponível"
+      : c.fase === "ocioso" ? SUBTITULO_DE_PERIODO_INVALIDO
+      : "Carregando…";
+
+  /** O miolo de um bloco do período sem relatório: falha, espera ou anel. */
+  const esperaDoDetalhe =
+    detail.fase === "falha" ? "Indisponível — veja o aviso acima."
+      : detail.fase === "ocioso" ? AVISO_DE_PERIODO_INVALIDO
+      : <Spinner size="md" />;
+
+  const falhas: { titulo: string; carga: Carga<unknown> }[] = [
+    { titulo: "Meu desempenho", carga: detail },
+    { titulo: "Fila geral", carga: stats },
+    { titulo: "Meus tickets", carga: meus },
+    { titulo: "Fila — tickets abertos", carga: fila },
+    { titulo: "Tickets da equipe", carga: equipe },
+  ].filter((f) => f.carga.fase === "falha");
 
   /*
    * Os tres icones dos indicadores ficaram como `<svg>` solto na primeira
@@ -242,87 +242,57 @@ export default function TechnicianDashboard() {
           </p>
         </div>
 
-        <div className="flex flex-wrap items-center justify-center sm:justify-end gap-2">
-          {/* Period filter */}
-          {/* D9.2 — oito períodos fixos no código: lista curta e conhecida,
-              logo o controle de lista fechada. O critério da D9.2 continua
-              sendo quem escreve a lista; o que mudou foi o controle deste
-              lado, que era o `<select>` nativo e passou a ser o `SelectMenu` —
-              painel nosso, no tema, igual em todo navegador. O teclado que o
-              nativo dava de graça não se perdeu: o `SelectMenu` o implementa
-              (setas, Enter, Escape, busca por letra).
-
-              Sem `placeholder`, e isso conserta uma queda. A linha de limpar do
-              `FilterSelect` devolvia `""`, e logo abaixo
-              `PERIOD_OPTIONS.find((p) => p.key === periodKey)!.days` lia `days`
-              de `undefined`. Sem `placeholder` o `SelectMenu` não desenha linha
-              de limpar — como o nativo não desenhava —, e o período passa a ser
-              o que sempre foi: uma escolha obrigatória.
-
-              O rótulo é `sr-only`: sem ele o filtro se anunciava "Este Mês". */}
-          <span id="rotulo-filtro-periodo" className="sr-only">
-            Período
-          </span>
-          <SelectMenu
-            id="filtro-periodo"
-            aria-labelledby="rotulo-filtro-periodo"
-            value={periodKey}
-            onChange={(v) => setPeriodKey(v as PeriodKey)}
-            options={PERIOD_OPTIONS.map((p) => ({ value: p.key, label: p.label }))}
-          />
-
-          {/* Custom date range */}
-          {periodKey === "custom" && (
-            <div className="flex h-9 items-center gap-1.5 rounded-lg border border-borda/60 bg-surface-elevated px-3 text-sm">
-              <Icon name="calendar" size={14} strokeWidth={2} className="shrink-0 text-conteudo-muted" />
-              <input
-                type="date"
-                value={customDates.start}
-                max={customDates.end}
-                onChange={(e) => setCustomDates((d) => ({ ...d, start: e.target.value }))}
-                className="bg-transparent text-conteudo text-xs outline-none cursor-pointer w-28 [color-scheme:light] dark:[color-scheme:dark]"
-              />
-              <span className="text-conteudo-muted text-xs">até</span>
-              <input
-                type="date"
-                value={customDates.end}
-                min={customDates.start}
-                max={new Date().toISOString().slice(0, 10)}
-                onChange={(e) => setCustomDates((d) => ({ ...d, end: e.target.value }))}
-                className="bg-transparent text-conteudo text-xs outline-none cursor-pointer w-28 [color-scheme:light] dark:[color-scheme:dark]"
-              />
-            </div>
-          )}
-        </div>
+        {/* O seletor fica fora de qualquer ramo de erro: é por ele que a pessoa
+            sai de uma falha trocando de período. */}
+        <SeletorDePeriodo
+          preset={periodo.preset}
+          onPreset={periodo.setPreset}
+          inicio={periodo.inicio}
+          fim={periodo.fim}
+          onInicio={periodo.setInicio}
+          onFim={periodo.setFim}
+          erro={periodo.erro}
+          descricao={periodo.descricao}
+        />
       </div>
+
+      {/* ── Falhas, uma por carga, cada uma com o seu "Tentar de novo" ── */}
+      {falhas.map((f) => (
+        <FalhaDoBloco
+          key={f.titulo}
+          titulo={f.titulo}
+          erro={f.carga.erro}
+          onTentarDeNovo={f.carga.tentarDeNovo}
+        />
+      ))}
 
       {/* ── KPI Row ─────────────────────────────────────────── */}
       <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-4">
         <KpiCard
           label="Meus tickets ativos"
-          value={myActiveCount}
-          sub="Abertos + em andamento"
+          value={meus.fase === "pronto" ? myActiveCount : "—"}
+          sub={subDaCarga(meus, "Abertos + em andamento")}
           tone={myActiveCount > 0 ? "info" : "neutral"}
           icon={<Icon name="clipboard" size={20} />}
         />
         <KpiCard
           label="Fila geral aberta"
-          value={openCount}
-          sub="Aguardando atendimento"
+          value={stats.dados?.tickets.open ?? "—"}
+          sub={subDaCarga(stats, "Aguardando atendimento")}
           tone="neutral"
           icon={<Icon name="inbox" size={20} />}
         />
         <KpiCard
           label="SLA em risco"
-          value={myBreachCount}
-          sub="Nos meus tickets"
+          value={meus.fase === "pronto" ? myBreachCount : "—"}
+          sub={subDaCarga(meus, "Nos meus tickets")}
           tone={myBreachCount > 0 ? "danger" : "neutral"}
           icon={<Icon name="warning" size={20} />}
         />
         <KpiCard
           label="Meu CSAT"
-          value={detail.csat_average != null ? `${detail.csat_average.toFixed(1)} / 10` : "—"}
-          sub={`${detail.csat_count} avaliações · ${periodLabel}`}
+          value={d?.csat_average != null ? `${d.csat_average.toFixed(1)} / 10` : "—"}
+          sub={subDaCarga(detail, `${d?.csat_count ?? 0} avaliações · ${periodLabel}`)}
           tone="warning"
           icon={<Icon name="star" />}
         />
@@ -338,14 +308,18 @@ export default function TechnicianDashboard() {
             </p>
           </div>
           <div className="p-5">
-            {detail.tickets_by_day.length === 0 ? (
+            {!d ? (
+              <div className="flex h-44 items-center justify-center px-4 text-center text-sm text-conteudo-muted">
+                {esperaDoDetalhe}
+              </div>
+            ) : d.tickets_by_day.length === 0 ? (
               <p className="text-conteudo-muted text-sm py-8 text-center">Sem dados para o período</p>
             ) : (
               <ResponsiveContainer width="100%" height={180}>
                 {/* Série temporal de medida única — chamados por dia —, então uma
                     cor só, `COR_SERIE_TEMPORAL`. Era `#0ea5e9` cravado, a quarta
                     cor diferente entre cinco gráficos da mesma natureza. */}
-                <AreaChart data={detail.tickets_by_day} margin={{ top: 4, right: 4, left: -24, bottom: 0 }}>
+                <AreaChart data={d.tickets_by_day} margin={{ top: 4, right: 4, left: -24, bottom: 0 }}>
                   <defs>
                     <linearGradient id="techGradient" x1="0" y1="0" x2="0" y2="1">
                       <stop offset="5%"  stopColor={COR_SERIE_TEMPORAL} stopOpacity={0.3} />
@@ -369,14 +343,24 @@ export default function TechnicianDashboard() {
               Meu desempenho — {periodLabel}
             </p>
           </div>
+          {/* Sem relatório, nenhum número: a falha virava zeros e "100%" de
+              conformidade, e quem olhava lia "não atendi nada, tudo no
+              prazo". */}
+          {!d ? (
+            <div className="flex h-44 items-center justify-center px-4 text-center text-sm text-conteudo-muted">
+              {esperaDoDetalhe}
+            </div>
+          ) : (
           <div className="p-5 space-y-4">
             {[
-              { label: "Atribuídos",        value: detail.total_assigned },
-              { label: "Resolvidos",         value: detail.resolved },
-              { label: "Em andamento",       value: detail.in_progress },
-              { label: "SLA violados",       value: detail.sla_breached,                             danger: detail.sla_breached > 0 },
-              { label: "Tempo médio",        value: formatHours(detail.avg_resolution_hours),        raw: true },
-              { label: "Conformidade SLA",   value: `${detail.sla_compliance_rate.toFixed(0)}%`,     raw: true },
+              { label: "Atribuídos",        value: d.total_assigned },
+              { label: "Resolvidos",         value: d.resolved },
+              { label: "Em andamento",       value: d.in_progress },
+              { label: "SLA violados",       value: d.sla_breached,                             danger: d.sla_breached > 0 },
+              { label: "Tempo médio",        value: formatHours(d.avg_resolution_hours),        raw: true },
+              // Sem chamado atribuído no período não há conformidade a medir
+              // (D3): a API manda 100, e a tela diz "—".
+              { label: "Conformidade SLA",   value: d.total_assigned > 0 ? `${d.sla_compliance_rate.toFixed(0)}%` : "—", raw: true },
             ].map((item) => (
               <div key={item.label} className="flex items-center justify-between">
                 <span className="text-sm text-conteudo-muted">{item.label}</span>
@@ -389,6 +373,7 @@ export default function TechnicianDashboard() {
               </div>
             ))}
           </div>
+          )}
         </div>
       </div>
 
@@ -399,6 +384,7 @@ export default function TechnicianDashboard() {
           count={myTickets.length}
           tickets={myTickets}
           emptyMsg="Nenhum ticket atribuído"
+          carga={meus}
         />
         <TicketListCard
           title="Tickets da equipe"
@@ -406,12 +392,14 @@ export default function TechnicianDashboard() {
           tickets={teamAllTickets}
           emptyMsg="Nenhum ticket ativo na equipe"
           showTech
+          carga={equipe}
         />
         <TicketListCard
           title="Fila — Tickets abertos"
           count={queue.length}
           tickets={queue}
           emptyMsg="Fila limpa"
+          carga={fila}
         />
       </div>
     </div>
