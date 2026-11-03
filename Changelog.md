@@ -14,11 +14,17 @@ Trabalho que ainda **não** entrou numa versão do produto. Confira: se um
 item aqui já está em produção, ou ele foi para a versão errada, ou falta
 publicar uma versão nova.
 
-### Histórico do chat, anexo da biblioteca e fechamentos do WebSocket — backend (F1-B-04a, 30/10/2026)
+### Histórico do chat, envio idempotente e fechamentos do WebSocket — backend (F1-B-04a, 30/10 e 03/11/2026)
 
-Auditoria Geral: parte de backend do FUN-30 e do FUN-32, e o FUN-31. **Sem
-migration**, sem variável nova. Regras em `docs/decisoes-e-regras.md`, seção
-"Histórico do chat".
+Auditoria Geral: parte de backend do FUN-30 e do FUN-32, o FUN-31 e a decisão
+D4 (envio idempotente). **Uma migration, aditiva** (`m9h0i1j2k3l4`), sem
+variável nova. Regras em `docs/decisoes-e-regras.md`, seções "Histórico do
+chat" e "Envio idempotente no chat".
+
+⚠️ **Rollback:** voltar a imagem anterior sem descer o banco derruba o boot (o
+`start.sh` roda `alembic upgrade head` e a imagem anterior não conhece a
+revision). Descer antes (`alembic downgrade l8g9h0i1j2k3`, com a imagem nova
+no ar) ou reverter o código mantendo o arquivo da migration.
 
 - **Arquivo da biblioteca não derruba mais o histórico.** `GET
   /tickets/{id}/messages` respondia 500 (`MissingGreenlet`) em qualquer
@@ -46,9 +52,24 @@ migration**, sem variável nova. Regras em `docs/decisoes-e-regras.md`, seção
   também fecha com 4004.
 - **O WebSocket usa a mesma regra de visibilidade do REST**
   (`_get_ticket_visivel`), em vez de uma cópia dela.
-- Testes contra PostgreSQL de verdade em `test_chat_historico_postgres.py`,
-  incluindo a caracterização do commit tardio: `created_at` é carimbado antes
-  do commit, e uma mensagem pode cair atrás de um cursor já usado.
+- **Envio idempotente (D4).** `POST /tickets/{id}/messages` e o WebSocket
+  aceitam um `client_message_id` (UUID) opcional. Reenviar a mesma mensagem com
+  a mesma chave devolve a que já foi gravada: 200 em vez de 201 no POST, e no
+  socket um quadro `ack` com `duplicate: true` só para quem reenviou. Não grava
+  de novo, não avisa ninguém de novo, não chama a Helô de novo, não muda o
+  status de novo e não transmite de novo para a sala. A mesma chave com outro
+  conteúdo dá 409 (no socket, erro `client_message_id_conflict`). A garantia é
+  um índice único parcial em `(ticket_id, sender_id, client_message_id)`; a
+  mensagem é gravada antes de qualquer efeito, e um reenvio simultâneo espera
+  nesse índice. Sem chave, nada muda. As respostas e os quadros passam a trazer
+  `client_message_id` (nulo para quem não mandou e para mensagens antigas), e
+  o socket manda `ack` também na criação, para quem mandou chave.
+- Testes contra PostgreSQL de verdade em `test_chat_historico_postgres.py` e
+  `test_chat_idempotencia_postgres.py`, incluindo a caracterização do commit
+  tardio (`created_at` é carimbado antes do commit, e uma mensagem pode cair
+  atrás de um cursor já usado — a D4 não muda isso) e corridas determinísticas
+  em que o teste só solta o primeiro envio depois de ver o segundo parado no
+  índice.
 
 ### Dashboards e Relatórios por período de calendário — frontend (F1-B-03b, 30/10/2026)
 
