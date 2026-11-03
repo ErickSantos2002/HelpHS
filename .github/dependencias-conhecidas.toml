@@ -43,6 +43,14 @@
 #    imprime esses nomes a cada rodada, para ninguém achar que deixaram de ser
 #    vigiados.
 #
+# 6. Só no FRONT: `versoes_avaliadas = ["x.y.z", ...]` limita a entrada às
+#    versões que a análise examinou. Sem o campo, a chave pacote + advisory
+#    aceita QUALQUER versão instalada; com ele, o gate lê a versão de cada cópia
+#    no package-lock e cai com VERSÃO NÃO AVALIADA (ou VERSÃO DESCONHECIDA, se
+#    não conseguir ler). Use sempre que o `motivo` depender da versão — caso do
+#    minimatch, em que a 3.1.5 nem tem o código e a 10.2.5 tem. No backend o
+#    campo é recusado: lá o gate não confere versão.
+#
 # ── COMO RODAR LOCALMENTE ────────────────────────────────────────────────────
 #
 #     cd backend  && pip install pip-audit && python ../.github/scripts/verifica_dependencias.py
@@ -125,56 +133,6 @@ jose.backends.cryptography_backend.CryptographyRSAKey — o backend do `cryptogr
 não o que usa ecdsa. O algoritmo do projeto é RS256.
 """
 remover_quando = "o projeto passar a usar algoritmo ES* (ECDSA), ou sair correção do pacote"
-responsavel = "TI/Dev"
-data = "2026-09-01"
-
-[[backend]]
-id = "PYSEC-2026-2263"
-pacote = "pyasn1"
-versao_atual = "0.4.8"
-versao_corrigida = "0.6.3"
-classe = "nao_aplicavel"
-motivo = """
-DoS por recursão ao DECODIFICAR ASN.1 vindo de fora. Não importamos pyasn1
-(`grep -rn pyasn1 app/ scripts/` → vazio). Dentro do jose, só
-`backends/rsa_backend.py` e `backends/_asn1.py` o usam — e RS256 resolve para
-CryptographyRSAKey, que não passa por lá. O único ASN.1 processado são as NOSSAS
-chaves PEM, lidas no boot: entrada confiável.
-"""
-remover_quando = "python-jose liberar pyasn1 >= 0.6.3 — hoje o pin é pyasn1<0.5.0"
-responsavel = "TI/Dev"
-data = "2026-09-01"
-
-[[backend]]
-id = "PYSEC-2026-3455"
-pacote = "pyasn1"
-versao_atual = "0.4.8"
-versao_corrigida = "0.6.4"
-classe = "nao_aplicavel"
-motivo = "Decoder BER, tags de forma longa. Mesma análise do PYSEC-2026-2263: o ASN.1 decodificado são as nossas próprias chaves PEM, e o caminho do jose que usa pyasn1 não é exercitado com RS256."
-remover_quando = "python-jose liberar pyasn1 >= 0.6.4"
-responsavel = "TI/Dev"
-data = "2026-09-01"
-
-[[backend]]
-id = "PYSEC-2026-3456"
-pacote = "pyasn1"
-versao_atual = "0.4.8"
-versao_corrigida = "0.6.4"
-classe = "nao_aplicavel"
-motivo = "Decoder BER/CER/DER, OBJECT IDENTIFIER. Mesma análise do PYSEC-2026-2263."
-remover_quando = "python-jose liberar pyasn1 >= 0.6.4"
-responsavel = "TI/Dev"
-data = "2026-09-01"
-
-[[backend]]
-id = "PYSEC-2026-3457"
-pacote = "pyasn1"
-versao_atual = "0.4.8"
-versao_corrigida = "0.6.4"
-classe = "nao_aplicavel"
-motivo = "univ.Real, conversão de mantissa/base/expoente. Mesma análise do PYSEC-2026-2263."
-remover_quando = "python-jose liberar pyasn1 >= 0.6.4"
 responsavel = "TI/Dev"
 data = "2026-09-01"
 
@@ -263,7 +221,7 @@ data = "2026-09-01"
 [[backend]]
 id = "PYSEC-2026-4298"
 pacote = "python-jose"
-versao_atual = "3.4.0"
+versao_atual = "3.5.0"
 versao_corrigida = ""
 classe = "nao_aplicavel"
 motivo = """
@@ -276,7 +234,9 @@ Confusão de algoritmo (RS256↔HS256): a trava do jose que impede usar chave
 assimétrica como segredo HMAC só reconhece PEM e SSH; a chave PÚBLICA RSA em
 DER passa, e um verificador que aceite `alg: HS256` aceita token forjado com
 ela. Medido: no jose 3.4.0 instalado, `jwt.decode(token, der, algorithms=None)`
-ACEITA o token forjado — a falha é real na biblioteca.
+ACEITA o token forjado — a falha é real na biblioteca. Remedido em 03/11/2026
+no 3.5.0 (SEC-DEP-01, subida exigida pelo pyasn1 0.6.5): mesma falha, mesmas
+duas barreiras, o teste abaixo segue verde.
 
 Inalcançável aqui por duas barreiras independentes:
 1. TODO `jwt.decode` do backend fixa `algorithms=[settings.jwt_algorithm]`
@@ -383,3 +343,57 @@ motivo = "Path traversal no auto-carregamento de source map anterior (sourceMapp
 remover_quando = "postcss passar a rodar em runtime no navegador"
 responsavel = "TI/Dev"
 data = "2026-09-02"
+
+[[frontend]]
+# SEC-DEP-01, aprovada por TI/Dev em 03/11/2026 como exceção controlada.
+# A faixa do advisory é <11.0.1, mas a entrada NÃO vale para ela inteira:
+# `versoes_avaliadas` restringe às duas cópias analisadas, e qualquer outra
+# versão no lock derruba o gate (regra 6).
+pacote = "minimatch"
+advisory = "GHSA-g3hv-75wg-m249"
+severidade = "moderate"
+faixa = "<11.0.1"
+versoes_avaliadas = ["3.1.5", "10.2.5"]
+classe = "nao_aplicavel"
+motivo = """
+CVE-2026-118764. DoS por amplificação de globParts em firstPhasePreProcess()
+(clona entradas `**/../` dentro do laço de ponto fixo, depois compara aos
+pares), quando o atacante controla o padrão de glob e optimizationLevel >= 2.
+A classe é nao_aplicavel por falta de caminho alcançável HOJE — não porque as
+versões estejam corrigidas, e não vale como atestado de que o pacote é seguro.
+
+Árvore (`npm ls minimatch --all`), só desenvolvimento:
+  3.1.5  <- eslint 9.39.4, @eslint/config-array 0.21.2, @eslint/eslintrc 3.3.5
+  10.2.5 <- @typescript-eslint/typescript-estree 8.58.0 (typescript-eslint)
+`npm ls --omit=dev minimatch --all` -> (empty); no package-lock as duas cópias
+são dev=true; `grep -rln minimatch src/ dist/` -> vazio depois de
+`npm run build`: não chega ao bundle de produção.
+
+3.1.5 — o mecanismo do advisory NÃO existe nessa versão:
+`grep -cE "firstPhasePreProcess|optimizationLevel" node_modules/minimatch/minimatch.js` -> 0.
+
+10.2.5 — o mecanismo EXISTE. O aviso do mantenedor cita só a 10.2.6, mas a
+função é idêntica byte a byte na 10.2.5 (diff de firstPhasePreProcess entre
+unpkg.com/minimatch@10.2.5 e @10.2.6, dist/commonjs/index.js -> vazio; a
+11.0.1 acrescenta o teto braceExpandMax); a base agregada (<11.0.1)
+é a que bate com o código. A exceção depende de não haver caminho até ele:
+- só roda com optimizationLevel >= 2; o padrão é 1
+  (dist/commonjs/index.js:341 e :661; dist/esm/index.js:332 e :652);
+- `grep -rln optimizationLevel node_modules --include=*.js --include=*.cjs
+  --include=*.mjs | grep -v /minimatch/` -> vazio: nenhum chamador muda o nível;
+- o único chamador é typescript-estree/dist/useProgramFromProjectService.js
+  (`minimatch(filePath, pattern, { dot: true })`, padrões de
+  allowDefaultProject), e `grep -nE "projectService|allowDefaultProject|parserOptions"
+  eslint.config.js` -> vazio: o caminho nem é exercitado, e os padrões seriam
+  da nossa própria config, não de quem ataca.
+- medido na 10.2.5 instalada, padrão `a/` + 14x `**/../b`: nível 1 -> set=1;
+  nível 2 -> set=26 em 136 ms. A amplificação existe e só aparece no nível 2.
+
+Por que não subir: a correção só existe na 11.0.1 (major). typescript-estree até
+8.72.1 (a última) exige minimatch ^10.2.2, e a 10.2.6, último da série, tem o
+mesmo código; @eslint/eslintrc 3.3.7 exige ^3.1.5. Override para 11.x forçaria
+uma major fora da faixa declarada pelas duas ferramentas.
+"""
+remover_quando = "revisão obrigatória até 2026-12-03 — antes, se typescript-eslint ou eslint aceitarem minimatch >= 11.0.1; reavaliar já se o eslint.config.js passar a usar projectService/allowDefaultProject, se algum pacote passar optimizationLevel >= 2, ou se minimatch entrar na árvore de produção"
+responsavel = "TI/Dev"
+data = "2026-11-03"

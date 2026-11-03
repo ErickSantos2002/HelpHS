@@ -171,10 +171,29 @@ def chaves_do_npm_audit(dados: dict) -> tuple[dict[str, dict], list[str]]:
             com_advisory_proprio.add(nome)
             detalhe = dict(via)
             detalhe["name"] = nome
+            # Os caminhos no lock de cada cópia instalada; `anota_versoes` lê a
+            # versão de cada um. São os do pacote AFETADO, não os de quem o puxa.
+            detalhe["nodes"] = list(vulnerabilidades.get(nome, info).get("nodes", []))
             achados[f"{nome} {id_do_advisory(via)}"] = detalhe
 
     heranca = sorted(p for p in vulnerabilidades if p not in com_advisory_proprio)
     return achados, heranca
+
+
+def anota_versoes(achados: dict[str, dict], lock: dict) -> None:
+    """Põe em cada achado as versões instaladas, lidas do package-lock.
+
+    O `npm audit` diz QUAIS nós estão afetados, mas não a versão de cada um; o
+    lock diz. Nó sem versão legível entra como "?" — nunca some, para que a
+    conferência de `versoes_avaliadas` falhe fechada em vez de passar por falta
+    de dado.
+    """
+    pacotes = lock.get("packages", {})
+    for detalhe in achados.values():
+        versoes = {
+            str(pacotes.get(no, {}).get("version") or "?") for no in detalhe.get("nodes", [])
+        }
+        detalhe["versoes"] = sorted(versoes)
 
 
 def _audita_frontend() -> tuple[dict[str, dict], list[str]]:
@@ -188,7 +207,10 @@ def _audita_frontend() -> tuple[dict[str, dict], list[str]]:
     )
     if not proc.stdout.strip():
         sys.exit(f"ERRO: npm audit não devolveu JSON.\n{proc.stderr[:800]}")
-    return chaves_do_npm_audit(json.loads(proc.stdout))
+    achados, heranca = chaves_do_npm_audit(json.loads(proc.stdout))
+    lock = json.loads((front / "package-lock.json").read_text(encoding="utf-8"))
+    anota_versoes(achados, lock)
+    return achados, heranca
 
 
 # ── Comparação ────────────────────────────────────────────────
@@ -216,7 +238,53 @@ def valida_entradas(entradas: list[dict], lado: str) -> list[str]:
                 f"[{lado}] {nome}: classe '{classe}' desconhecida. Use uma de: "
                 + ", ".join(sorted(_CLASSES))
             )
+        if "versoes_avaliadas" in e:
+            avaliadas = e["versoes_avaliadas"]
+            if lado == "backend":
+                # O backend não confere versão; o campo seria ignorado calado.
+                problemas.append(
+                    f"[{lado}] {nome}: 'versoes_avaliadas' só é conferido no frontend"
+                )
+            elif (
+                not isinstance(avaliadas, list)
+                or not avaliadas
+                or not all(isinstance(v, str) and v.strip() for v in avaliadas)
+            ):
+                problemas.append(
+                    f"[{lado}] {nome}: 'versoes_avaliadas' precisa ser lista não vazia de versões"
+                )
     return problemas
+
+
+def versoes_nao_avaliadas(achados: dict[str, dict], entradas: list[dict]) -> list[str]:
+    """Entrada com `versoes_avaliadas` cobre SÓ essas versões. Puro.
+
+    Sem o campo, a chave pacote + advisory aceita qualquer versão instalada —
+    uma justificativa escrita para a 10.2.5 valeria para uma 10.2.6 que ninguém
+    leu. Com o campo, versão fora da lista (ou que não se lê) derruba o gate.
+    """
+    falhas = []
+    for e in entradas:
+        avaliadas = e.get("versoes_avaliadas")
+        chave = chave_de_entrada(e, "frontend")
+        if not isinstance(avaliadas, list) or chave not in achados:
+            continue  # campo mal formado ou entrada obsoleta: outras regras acusam
+        instaladas = achados[chave].get("versoes") or ["?"]
+        if "?" in instaladas:
+            falhas.append(
+                f"[frontend] VERSÃO DESCONHECIDA: {chave}\n"
+                "           Não foi possível ler a versão instalada no package-lock.\n"
+                f"           A entrada cobre só {', '.join(map(str, avaliadas))}."
+            )
+            continue
+        fora = [v for v in instaladas if v not in avaliadas]
+        if fora:
+            falhas.append(
+                f"[frontend] VERSÃO NÃO AVALIADA: {chave} — instalada {', '.join(fora)}\n"
+                f"           A entrada cobre só {', '.join(map(str, avaliadas))}. Refaça a\n"
+                "           análise para a versão nova antes de acrescentá-la em versoes_avaliadas."
+            )
+    return falhas
 
 
 def compara(
@@ -265,6 +333,10 @@ def main(argv: list[str] | None = None) -> int:
             _audita_backend() if lado == "backend" else _audita_frontend()
         )
         novos, obsoletos = compara(achados, entradas, lado)
+        fora_do_avaliado = (
+            versoes_nao_avaliadas(achados, entradas) if lado == "frontend" else []
+        )
+        falhas.extend(fora_do_avaliado)
 
         print(f"\n-- {lado} --------------------------------------")
         print(f"  advisories hoje : {len(achados)}")
@@ -292,7 +364,7 @@ def main(argv: list[str] | None = None) -> int:
                 "           Apague esta entrada de .github/dependencias-conhecidas.toml."
             )
 
-        if not novos and not obsoletos:
+        if not novos and not obsoletos and not fora_do_avaliado:
             print("  OK: nenhuma vulnerabilidade nova fora do baseline")
 
     if falhas:

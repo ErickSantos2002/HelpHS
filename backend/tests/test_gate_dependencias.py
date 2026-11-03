@@ -293,6 +293,161 @@ def test_backend_continua_indexado_por_id() -> None:
     assert gate.chave_de_entrada({"id": "GHSA-9999"}, "backend") == "GHSA-9999"
 
 
+# ── Exceção limitada às versões avaliadas ─────────────────────
+#
+# Sem `versoes_avaliadas`, a entrada vale para qualquer versão instalada do
+# pacote: a chave é só pacote + advisory. Com o campo, ela cobre SÓ as versões
+# que alguém examinou — se o lock trouxer outra, o gate cai. Nasceu com o
+# minimatch (SEC-DEP-01): a análise vale para 3.1.5 e 10.2.5, não para
+# "qualquer coisa abaixo da 11.0.1".
+
+
+def lock(**versoes_por_no: str) -> dict[str, Any]:
+    """Um package-lock.json mínimo: caminho do nó -> versão."""
+    return {"packages": {no: {"version": v} for no, v in versoes_por_no.items()}}
+
+
+MM_RAIZ = "node_modules/minimatch"
+MM_ESTREE = "node_modules/@typescript-eslint/typescript-estree/node_modules/minimatch"
+
+
+def audit_com_nos(advisory: dict[str, Any], nos: list[str]) -> dict[str, Any]:
+    dados = audit(advisory)
+    dados["vulnerabilities"][advisory["name"]]["nodes"] = nos
+    return dados
+
+
+def roda_com_lock(
+    monkeypatch: pytest.MonkeyPatch,
+    capsys: pytest.CaptureFixture[str],
+    baseline: list[dict[str, Any]],
+    dados_do_npm: dict[str, Any],
+    lock_do_npm: dict[str, Any],
+) -> tuple[int, str]:
+    achados, heranca = gate.chaves_do_npm_audit(dados_do_npm)
+    gate.anota_versoes(achados, lock_do_npm)
+    monkeypatch.setattr(gate, "_carrega_baseline", lambda: {"frontend": baseline})
+    monkeypatch.setattr(gate, "_audita_frontend", lambda: (achados, heranca))
+    codigo = gate.main(["--lado", "frontend"])
+    return codigo, capsys.readouterr().out
+
+
+def test_as_versoes_avaliadas_passam(
+    monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str]
+) -> None:
+    codigo, saida = roda_com_lock(
+        monkeypatch,
+        capsys,
+        baseline=[entrada("minimatch", "GHSA-mm", versoes_avaliadas=["3.1.5", "10.2.5"])],
+        dados_do_npm=audit_com_nos(via("minimatch", "GHSA-mm"), [MM_ESTREE, MM_RAIZ]),
+        lock_do_npm=lock(**{MM_RAIZ: "3.1.5", MM_ESTREE: "10.2.5"}),
+    )
+
+    assert codigo == 0, saida
+    assert "nenhuma vulnerabilidade nova fora do baseline" in saida
+
+
+def test_versao_instalada_fora_das_avaliadas_derruba_o_gate(
+    monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str]
+) -> None:
+    """O lock sobe a 10.2.5 para 10.2.6: mesmo advisory, versão que ninguém olhou."""
+    codigo, saida = roda_com_lock(
+        monkeypatch,
+        capsys,
+        baseline=[entrada("minimatch", "GHSA-mm", versoes_avaliadas=["3.1.5", "10.2.5"])],
+        dados_do_npm=audit_com_nos(via("minimatch", "GHSA-mm"), [MM_ESTREE, MM_RAIZ]),
+        lock_do_npm=lock(**{MM_RAIZ: "3.1.5", MM_ESTREE: "10.2.6"}),
+    )
+
+    assert codigo == 1
+    assert "VERSÃO NÃO AVALIADA: minimatch GHSA-mm" in saida
+    assert "10.2.6" in saida
+    assert "nenhuma vulnerabilidade nova fora do baseline" not in saida
+
+
+def test_versao_que_nao_se_le_no_lock_derruba_o_gate(
+    monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str]
+) -> None:
+    """Sem a versão, não dá para saber se está no avaliado: falha fechada."""
+    codigo, saida = roda_com_lock(
+        monkeypatch,
+        capsys,
+        baseline=[entrada("minimatch", "GHSA-mm", versoes_avaliadas=["3.1.5", "10.2.5"])],
+        dados_do_npm=audit_com_nos(via("minimatch", "GHSA-mm"), [MM_ESTREE, MM_RAIZ]),
+        lock_do_npm=lock(**{MM_RAIZ: "3.1.5"}),
+    )
+
+    assert codigo == 1
+    assert "VERSÃO DESCONHECIDA: minimatch GHSA-mm" in saida
+
+
+def test_sem_nos_no_audit_a_versao_e_desconhecida(
+    monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str]
+) -> None:
+    codigo, saida = roda_com_lock(
+        monkeypatch,
+        capsys,
+        baseline=[entrada("minimatch", "GHSA-mm", versoes_avaliadas=["3.1.5"])],
+        dados_do_npm=audit(via("minimatch", "GHSA-mm")),
+        lock_do_npm=lock(**{MM_RAIZ: "3.1.5"}),
+    )
+
+    assert codigo == 1
+    assert "VERSÃO DESCONHECIDA: minimatch GHSA-mm" in saida
+
+
+def test_entrada_sem_versoes_avaliadas_segue_valendo_para_qualquer_versao(
+    monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str]
+) -> None:
+    """Contraprova: o campo é opt-in, as entradas antigas não mudam de sentido."""
+    codigo, saida = roda_com_lock(
+        monkeypatch,
+        capsys,
+        baseline=[entrada("minimatch", "GHSA-mm")],
+        dados_do_npm=audit_com_nos(via("minimatch", "GHSA-mm"), [MM_RAIZ]),
+        lock_do_npm=lock(**{MM_RAIZ: "9.9.9"}),
+    )
+
+    assert codigo == 0, saida
+
+
+def test_anota_versoes_le_o_lock_pelos_nos_do_audit() -> None:
+    achados, _ = gate.chaves_do_npm_audit(
+        audit_com_nos(via("minimatch", "GHSA-mm"), [MM_ESTREE, MM_RAIZ])
+    )
+
+    gate.anota_versoes(achados, lock(**{MM_RAIZ: "3.1.5", MM_ESTREE: "10.2.5"}))
+
+    assert achados["minimatch GHSA-mm"]["versoes"] == ["10.2.5", "3.1.5"]
+
+
+@pytest.mark.parametrize("valor", [[], "3.1.5", ["3.1.5", ""], [3]])
+def test_versoes_avaliadas_mal_formada_e_recusada(valor: Any) -> None:
+    problemas = gate.valida_entradas(
+        [entrada("minimatch", "GHSA-mm", versoes_avaliadas=valor)], "frontend"
+    )
+
+    assert any("versoes_avaliadas" in p for p in problemas), problemas
+
+
+def test_versoes_avaliadas_no_backend_e_recusada() -> None:
+    """O backend não confere versão: o campo seria ignorado calado, então é recusado."""
+    problemas = gate.valida_entradas(
+        [
+            {
+                "id": "GHSA-9999",
+                "classe": "nao_aplicavel",
+                "motivo": "m",
+                "remover_quando": "r",
+                "versoes_avaliadas": ["1.0.0"],
+            }
+        ],
+        "backend",
+    )
+
+    assert any("versoes_avaliadas" in p for p in problemas), problemas
+
+
 # ── O arquivo de verdade ──────────────────────────────────────
 
 
@@ -304,6 +459,16 @@ def test_o_baseline_do_repositorio_esta_bem_formado() -> None:
     problemas += gate.valida_entradas(baseline["frontend"], "frontend")
 
     assert problemas == []
+
+
+def test_a_excecao_do_minimatch_fica_presa_as_versoes_avaliadas() -> None:
+    """SEC-DEP-01: a análise vale para 3.1.5 e 10.2.5, não para toda a faixa <11.0.1."""
+    baseline = gate._carrega_baseline()
+
+    (minimatch,) = [e for e in baseline["frontend"] if e.get("advisory") == "GHSA-g3hv-75wg-m249"]
+
+    assert minimatch["pacote"] == "minimatch"
+    assert minimatch["versoes_avaliadas"] == ["3.1.5", "10.2.5"]
 
 
 def test_o_baseline_do_repositorio_nao_tem_chave_repetida() -> None:
