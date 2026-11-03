@@ -129,56 +129,6 @@ responsavel = "TI/Dev"
 data = "2026-09-01"
 
 [[backend]]
-id = "PYSEC-2026-2263"
-pacote = "pyasn1"
-versao_atual = "0.4.8"
-versao_corrigida = "0.6.3"
-classe = "nao_aplicavel"
-motivo = """
-DoS por recursão ao DECODIFICAR ASN.1 vindo de fora. Não importamos pyasn1
-(`grep -rn pyasn1 app/ scripts/` → vazio). Dentro do jose, só
-`backends/rsa_backend.py` e `backends/_asn1.py` o usam — e RS256 resolve para
-CryptographyRSAKey, que não passa por lá. O único ASN.1 processado são as NOSSAS
-chaves PEM, lidas no boot: entrada confiável.
-"""
-remover_quando = "python-jose liberar pyasn1 >= 0.6.3 — hoje o pin é pyasn1<0.5.0"
-responsavel = "TI/Dev"
-data = "2026-09-01"
-
-[[backend]]
-id = "PYSEC-2026-3455"
-pacote = "pyasn1"
-versao_atual = "0.4.8"
-versao_corrigida = "0.6.4"
-classe = "nao_aplicavel"
-motivo = "Decoder BER, tags de forma longa. Mesma análise do PYSEC-2026-2263: o ASN.1 decodificado são as nossas próprias chaves PEM, e o caminho do jose que usa pyasn1 não é exercitado com RS256."
-remover_quando = "python-jose liberar pyasn1 >= 0.6.4"
-responsavel = "TI/Dev"
-data = "2026-09-01"
-
-[[backend]]
-id = "PYSEC-2026-3456"
-pacote = "pyasn1"
-versao_atual = "0.4.8"
-versao_corrigida = "0.6.4"
-classe = "nao_aplicavel"
-motivo = "Decoder BER/CER/DER, OBJECT IDENTIFIER. Mesma análise do PYSEC-2026-2263."
-remover_quando = "python-jose liberar pyasn1 >= 0.6.4"
-responsavel = "TI/Dev"
-data = "2026-09-01"
-
-[[backend]]
-id = "PYSEC-2026-3457"
-pacote = "pyasn1"
-versao_atual = "0.4.8"
-versao_corrigida = "0.6.4"
-classe = "nao_aplicavel"
-motivo = "univ.Real, conversão de mantissa/base/expoente. Mesma análise do PYSEC-2026-2263."
-remover_quando = "python-jose liberar pyasn1 >= 0.6.4"
-responsavel = "TI/Dev"
-data = "2026-09-01"
-
-[[backend]]
 id = "PYSEC-2026-2270"
 pacote = "python-dotenv"
 versao_atual = "1.1.0"
@@ -263,7 +213,7 @@ data = "2026-09-01"
 [[backend]]
 id = "PYSEC-2026-4298"
 pacote = "python-jose"
-versao_atual = "3.4.0"
+versao_atual = "3.5.0"
 versao_corrigida = ""
 classe = "nao_aplicavel"
 motivo = """
@@ -276,7 +226,9 @@ Confusão de algoritmo (RS256↔HS256): a trava do jose que impede usar chave
 assimétrica como segredo HMAC só reconhece PEM e SSH; a chave PÚBLICA RSA em
 DER passa, e um verificador que aceite `alg: HS256` aceita token forjado com
 ela. Medido: no jose 3.4.0 instalado, `jwt.decode(token, der, algorithms=None)`
-ACEITA o token forjado — a falha é real na biblioteca.
+ACEITA o token forjado — a falha é real na biblioteca. Remedido em 03/11/2026
+no 3.5.0 (SEC-DEP-01, subida exigida pelo pyasn1 0.6.5): mesma falha, mesmas
+duas barreiras, o teste abaixo segue verde.
 
 Inalcançável aqui por duas barreiras independentes:
 1. TODO `jwt.decode` do backend fixa `algorithms=[settings.jwt_algorithm]`
