@@ -461,6 +461,16 @@ def test_o_baseline_do_repositorio_esta_bem_formado() -> None:
     assert problemas == []
 
 
+def test_a_excecao_do_minimatch_fica_presa_as_versoes_avaliadas() -> None:
+    """SEC-DEP-01: a análise vale para 3.1.5 e 10.2.5, não para toda a faixa <11.0.1."""
+    baseline = gate._carrega_baseline()
+
+    (minimatch,) = [e for e in baseline["frontend"] if e.get("advisory") == "GHSA-g3hv-75wg-m249"]
+
+    assert minimatch["pacote"] == "minimatch"
+    assert minimatch["versoes_avaliadas"] == ["3.1.5", "10.2.5"]
+
+
 def test_o_baseline_do_repositorio_nao_tem_chave_repetida() -> None:
     baseline = gate._carrega_baseline()
 

@@ -343,3 +343,57 @@ motivo = "Path traversal no auto-carregamento de source map anterior (sourceMapp
 remover_quando = "postcss passar a rodar em runtime no navegador"
 responsavel = "TI/Dev"
 data = "2026-09-02"
+
+[[frontend]]
+# SEC-DEP-01, aprovada por TI/Dev em 03/11/2026 como exceção controlada.
+# A faixa do advisory é <11.0.1, mas a entrada NÃO vale para ela inteira:
+# `versoes_avaliadas` restringe às duas cópias analisadas, e qualquer outra
+# versão no lock derruba o gate (regra 6).
+pacote = "minimatch"
+advisory = "GHSA-g3hv-75wg-m249"
+severidade = "moderate"
+faixa = "<11.0.1"
+versoes_avaliadas = ["3.1.5", "10.2.5"]
+classe = "nao_aplicavel"
+motivo = """
+CVE-2026-118764. DoS por amplificação de globParts em firstPhasePreProcess()
+(clona entradas `**/../` dentro do laço de ponto fixo, depois compara aos
+pares), quando o atacante controla o padrão de glob e optimizationLevel >= 2.
+A classe é nao_aplicavel por falta de caminho alcançável HOJE — não porque as
+versões estejam corrigidas, e não vale como atestado de que o pacote é seguro.
+
+Árvore (`npm ls minimatch --all`), só desenvolvimento:
+  3.1.5  <- eslint 9.39.4, @eslint/config-array 0.21.2, @eslint/eslintrc 3.3.5
+  10.2.5 <- @typescript-eslint/typescript-estree 8.58.0 (typescript-eslint)
+`npm ls --omit=dev minimatch --all` -> (empty); no package-lock as duas cópias
+são dev=true; `grep -rln minimatch src/ dist/` -> vazio depois de
+`npm run build`: não chega ao bundle de produção.
+
+3.1.5 — o mecanismo do advisory NÃO existe nessa versão:
+`grep -cE "firstPhasePreProcess|optimizationLevel" node_modules/minimatch/minimatch.js` -> 0.
+
+10.2.5 — o mecanismo EXISTE. O aviso do mantenedor cita só a 10.2.6, mas a
+função é idêntica byte a byte na 10.2.5 (diff de firstPhasePreProcess entre
+unpkg.com/minimatch@10.2.5 e @10.2.6, dist/commonjs/index.js -> vazio; a
+11.0.1 acrescenta o teto braceExpandMax); a base agregada (<11.0.1)
+é a que bate com o código. A exceção depende de não haver caminho até ele:
+- só roda com optimizationLevel >= 2; o padrão é 1
+  (dist/commonjs/index.js:341 e :661; dist/esm/index.js:332 e :652);
+- `grep -rln optimizationLevel node_modules --include=*.js --include=*.cjs
+  --include=*.mjs | grep -v /minimatch/` -> vazio: nenhum chamador muda o nível;
+- o único chamador é typescript-estree/dist/useProgramFromProjectService.js
+  (`minimatch(filePath, pattern, { dot: true })`, padrões de
+  allowDefaultProject), e `grep -nE "projectService|allowDefaultProject|parserOptions"
+  eslint.config.js` -> vazio: o caminho nem é exercitado, e os padrões seriam
+  da nossa própria config, não de quem ataca.
+- medido na 10.2.5 instalada, padrão `a/` + 14x `**/../b`: nível 1 -> set=1;
+  nível 2 -> set=26 em 136 ms. A amplificação existe e só aparece no nível 2.
+
+Por que não subir: a correção só existe na 11.0.1 (major). typescript-estree até
+8.72.1 (a última) exige minimatch ^10.2.2, e a 10.2.6, último da série, tem o
+mesmo código; @eslint/eslintrc 3.3.7 exige ^3.1.5. Override para 11.x forçaria
+uma major fora da faixa declarada pelas duas ferramentas.
+"""
+remover_quando = "revisão obrigatória até 2026-12-03 — antes, se typescript-eslint ou eslint aceitarem minimatch >= 11.0.1; reavaliar já se o eslint.config.js passar a usar projectService/allowDefaultProject, se algum pacote passar optimizationLevel >= 2, ou se minimatch entrar na árvore de produção"
+responsavel = "TI/Dev"
+data = "2026-11-03"
