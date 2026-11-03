@@ -31,6 +31,7 @@ from app.core.config import get_settings
 from app.main import app
 from app.models.models import TicketCategory, TicketStatus, UserRole, UserStatus
 from app.utils import avatar as av
+from tests.test_chat import _SavepointDeMentira
 
 # ── Montagem ──────────────────────────────────────────────────
 
@@ -427,6 +428,7 @@ def _mensagem(chamado, remetente, *, is_ai=False, is_system=False):
         read_at=None,
         created_at=datetime.now(UTC),
         library_file_id=None,
+        client_message_id=None,
         library_file=None,
     )
 
@@ -562,6 +564,8 @@ async def _posta(ator, chamado, recarregada):
     sessao = AsyncMock()
     sessao.execute = _execute
     sessao.add = MagicMock()
+    # O INSERT sai num SAVEPOINT antes da Helô (D4); ver `_SavepointDeMentira`.
+    sessao.begin_nested = MagicMock(return_value=_SavepointDeMentira())
 
     async def _db():
         yield sessao
@@ -641,6 +645,8 @@ def _manda_pelo_ws(usuario, chamado, recarregada):
 
     sessao.execute = _execute
     sessao.add = MagicMock()
+    # O INSERT sai num SAVEPOINT antes da Helô (D4); ver `_SavepointDeMentira`.
+    sessao.begin_nested = MagicMock(return_value=_SavepointDeMentira())
 
     class _Ctx:
         async def __aenter__(self):
@@ -870,6 +876,8 @@ def _manda_varias_pelo_ws(usuario, chamado, recarregadas):
 
     sessao.execute = _execute
     sessao.add = MagicMock()
+    # O INSERT sai num SAVEPOINT antes da Helô (D4); ver `_SavepointDeMentira`.
+    sessao.begin_nested = MagicMock(return_value=_SavepointDeMentira())
 
     class _Ctx:
         async def __aenter__(self):

@@ -54,6 +54,9 @@ class ChatMessageResponse(AppBaseModel):
     # resposta. Nulo para Helô, sistema, quem não tem foto e quem a regra de
     # `foto_visivel_na_conversa` não deixa mostrar.
     sender_avatar_url: str | None = None
+    # A chave de idempotência com que a mensagem foi enviada; nula para quem
+    # não mandou chave e para toda mensagem anterior a ela (D4, F1-B-04a).
+    client_message_id: uuid.UUID | None = None
 
 
 class ChatMessageListResponse(AppBaseModel):
@@ -87,6 +90,10 @@ class ChatMessageCreate(AppBaseModel):
     # Aponta para um item da biblioteca; nao carrega arquivo. Item INTERNO e
     # recusado pela API antes de gravar -- a conversa e lida pelo cliente.
     library_file_id: uuid.UUID | None = None
+    # Opcional. Reenviar com a mesma chave devolve a mensagem já gravada (200,
+    # e não 201); a mesma chave com outro conteúdo é 409. Sem chave, cada envio
+    # é uma mensagem nova, como sempre foi.
+    client_message_id: uuid.UUID | None = None
 
 
 class SuggestReplyResponse(AppBaseModel):

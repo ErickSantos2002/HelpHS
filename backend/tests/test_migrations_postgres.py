@@ -34,6 +34,7 @@ from pathlib import Path
 import pytest
 import pytest_asyncio
 from sqlalchemy import select, text
+from sqlalchemy.exc import IntegrityError
 from sqlalchemy.ext.asyncio import async_sessionmaker, create_async_engine
 
 from app.models.models import Equipment, Product, equipment_users
@@ -799,6 +800,167 @@ async def test_a_extensao_de_sla_sobe_e_desce(banco):
             .startswith("2026-09-24T15:11")
         )
     await motor.dispose()
+
+    assert _alembic(banco, "head").returncode == 0
+
+
+# ── Idempotência do envio no chat (D4, F1-B-04a) ──────────────
+
+_ANTES_DA_IDEMPOTENCIA = "l8g9h0i1j2k3"
+
+
+@pytest.mark.asyncio
+async def test_a_idempotencia_do_chat_sobe_e_desce_sem_tocar_nas_mensagens(banco):
+    """A mensagem que já existia sobrevive à ida e à volta, sem chave; o índice
+    nasce único e parcial, e recusa a segunda linha com a mesma chave; a
+    descida leva só o que esta revision criou."""
+    from tests.test_chat_idempotencia_postgres import REGRA_CHAVE_COM_IMPRESSAO
+
+    assert _alembic(banco, _ANTES_DA_IDEMPOTENCIA).returncode == 0
+
+    # Por SQL, com telefone e categoria deste ponto da cadeia: o
+    # `_semeia_usuario` lá embaixo é dos pontos anteriores ao telefone.
+    autor, chamado, antiga = uuid.uuid4(), uuid.uuid4(), uuid.uuid4()
+    motor = create_async_engine(banco)
+    async with async_sessionmaker(bind=motor, expire_on_commit=False)() as s:
+        await s.execute(
+            text(
+                "INSERT INTO users (id, name, email, password, role, status, phone, "
+                "lgpd_consent, email_verified, onboarding_completed) "
+                "VALUES (:id, 'Cliente', :email, 'x', 'client', 'active', "
+                "'+5581999999999', true, true, true)"
+            ),
+            {"id": autor, "email": f"{autor.hex[:8]}@test.com"},
+        )
+        await s.execute(
+            text(
+                "INSERT INTO tickets (id, protocol, title, description, status, priority, "
+                "category, creator_id, sla_total_paused_ms, sla_response_breach, "
+                "sla_resolve_breach, auto_closed, reopen_count, created_at, updated_at) "
+                "VALUES (:id, :protocolo, 'Chat', 'corpo', 'open', 'medium', 'hardware', "
+                ":autor, 0, false, false, false, 0, now(), now())"
+            ),
+            {"id": chamado, "protocolo": f"HS-D4-{chamado.hex[:6]}", "autor": autor},
+        )
+        await s.execute(
+            text(
+                "INSERT INTO chat_messages (id, ticket_id, sender_id, content, is_system, is_ai) "
+                "VALUES (:id, :chamado, :autor, 'mensagem de antes', false, false)"
+            ),
+            {"id": antiga, "chamado": chamado, "autor": autor},
+        )
+        await s.commit()
+    await motor.dispose()
+
+    subida = _alembic(banco, "head")
+    assert subida.returncode == 0, f"upgrade falhou: {subida.stdout} {subida.stderr}"
+
+    motor = create_async_engine(banco)
+    async with motor.connect() as conn:
+        linha = (
+            await conn.execute(
+                text(
+                    "SELECT content, client_message_id, client_message_fingerprint "
+                    "FROM chat_messages WHERE id = :id"
+                ),
+                {"id": antiga},
+            )
+        ).one()
+        indice = (
+            await conn.execute(
+                text("SELECT indexdef FROM pg_indexes WHERE indexname = 'uq_chat_messages_envio'")
+            )
+        ).scalar_one()
+        regra = (
+            await conn.execute(
+                text(
+                    "SELECT pg_get_constraintdef(oid) FROM pg_constraint "
+                    "WHERE conname = 'ck_chat_messages_chave_com_impressao'"
+                )
+            )
+        ).scalar_one()
+    await motor.dispose()
+
+    assert tuple(linha) == ("mensagem de antes", None, None)
+    assert indice.startswith("CREATE UNIQUE INDEX uq_chat_messages_envio")
+    assert "(ticket_id, sender_id, client_message_id)" in indice
+    assert indice.endswith("WHERE (client_message_id IS NOT NULL)")
+    assert regra == REGRA_CHAVE_COM_IMPRESSAO, "a migration e o model divergem no CHECK"
+
+    chave = uuid.uuid4()
+    motor = create_async_engine(banco)
+    async with motor.begin() as conn:
+        await conn.execute(
+            text(
+                "INSERT INTO chat_messages (id, ticket_id, sender_id, content, is_system, is_ai, "
+                "client_message_id, client_message_fingerprint) "
+                "VALUES (:id, :chamado, :autor, 'com chave', false, false, :chave, :impressao)"
+            ),
+            {
+                "id": uuid.uuid4(),
+                "chamado": chamado,
+                "autor": autor,
+                "chave": chave,
+                "impressao": "a" * 64,
+            },
+        )
+    with pytest.raises(IntegrityError, match="uq_chat_messages_envio"):
+        async with motor.begin() as conn:
+            await conn.execute(
+                text(
+                    "INSERT INTO chat_messages (id, ticket_id, sender_id, content, is_system, "
+                    "is_ai, client_message_id, client_message_fingerprint) "
+                    "VALUES (:id, :chamado, :autor, 'de novo', false, false, :chave, :impressao)"
+                ),
+                {
+                    "id": uuid.uuid4(),
+                    "chamado": chamado,
+                    "autor": autor,
+                    "chave": chave,
+                    "impressao": "a" * 64,
+                },
+            )
+    # O código ANTERIOR com o banco já no head: o INSERT dele nem cita as
+    # colunas novas. É o rollback "reverter o código mantendo a migration".
+    async with motor.begin() as conn:
+        await conn.execute(
+            text(
+                "INSERT INTO chat_messages (id, ticket_id, sender_id, content, is_system, is_ai) "
+                "VALUES (:id, :chamado, :autor, 'do código anterior', false, false)"
+            ),
+            {"id": uuid.uuid4(), "chamado": chamado, "autor": autor},
+        )
+    await motor.dispose()
+
+    descida = _alembic(banco, _ANTES_DA_IDEMPOTENCIA, comando="downgrade")
+    assert descida.returncode == 0, f"downgrade falhou: {descida.stdout} {descida.stderr}"
+
+    motor = create_async_engine(banco)
+    async with motor.connect() as conn:
+        colunas = (
+            (
+                await conn.execute(
+                    text(
+                        "SELECT column_name FROM information_schema.columns "
+                        "WHERE table_name = 'chat_messages'"
+                    )
+                )
+            )
+            .scalars()
+            .all()
+        )
+        sobrou_indice = (
+            await conn.execute(
+                text("SELECT count(*) FROM pg_indexes WHERE indexname = 'uq_chat_messages_envio'")
+            )
+        ).scalar_one()
+        mensagens = (await conn.execute(text("SELECT count(*) FROM chat_messages"))).scalar_one()
+    await motor.dispose()
+
+    assert "client_message_id" not in colunas
+    assert "client_message_fingerprint" not in colunas
+    assert sobrou_indice == 0
+    assert mensagens == 3, "a descida leva as chaves, nunca as mensagens"
 
     assert _alembic(banco, "head").returncode == 0
 

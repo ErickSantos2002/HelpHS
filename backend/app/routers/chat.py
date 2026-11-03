@@ -15,16 +15,27 @@ Permissões:
 """
 
 import base64
+import hashlib
 import json
 import uuid
 from datetime import UTC, datetime
 from typing import Annotated
 
-from fastapi import APIRouter, Depends, HTTPException, Query, WebSocket, WebSocketDisconnect, status
+from fastapi import (
+    APIRouter,
+    Depends,
+    HTTPException,
+    Query,
+    Response,
+    WebSocket,
+    WebSocketDisconnect,
+    status,
+)
 from jose import JWTError
 from loguru import logger
 from sqlalchemy import func, literal, select, tuple_
 from sqlalchemy import inspect as sa_inspect
+from sqlalchemy.exc import IntegrityError
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.orm import selectinload
 from starlette.websockets import WebSocketState
@@ -261,6 +272,7 @@ def _msg_to_response(
         sender_role=sender.role.value if sender else "",
         **_arquivo_da_mensagem(msg, ve_arquivo_interno=ve_arquivo_interno),
         sender_avatar_url=sender_avatar_url,
+        client_message_id=msg.client_message_id,
     )
 
 
@@ -301,6 +313,107 @@ async def _mensagem_com_remetente_atual(db: AsyncSession, msg_id: uuid.UUID) -> 
         .execution_options(populate_existing=True)
     )
     return result.scalar_one()
+
+
+# ── Idempotência do envio (D4, F1-B-04a) ──────────────────────
+
+
+_CHAVE_REUSADA = (
+    "Este client_message_id já foi usado para outra mensagem neste chamado. "
+    "Gere uma chave nova para cada mensagem nova."
+)
+
+
+class _ChaveReusadaError(Exception):
+    """A mesma chave de envio, da mesma pessoa, no mesmo chamado, com OUTRO
+    conteúdo. Não é reenvio: é chave reaproveitada, e devolver a mensagem
+    antiga como se fosse esta mentiria para quem enviou."""
+
+
+def _impressao_do_envio(conteudo: str, library_file_id: uuid.UUID | None) -> str:
+    """SHA-256 do que foi PEDIDO: o texto como é gravado e o arquivo.
+
+    Só isto muda a mensagem gravada. Chamado e remetente já estão na chave do
+    índice, e `is_ai`/`is_system` são sempre falsos para quem envia. O `v`
+    deixa trocar a receita um dia sem que impressões antigas passem a bater
+    por acaso com as novas.
+    """
+    canonico = json.dumps(
+        {
+            "v": 1,
+            "content": conteudo,
+            "library_file_id": str(library_file_id) if library_file_id else None,
+        },
+        ensure_ascii=False,
+        sort_keys=True,
+        separators=(",", ":"),
+    )
+    return hashlib.sha256(canonico.encode("utf-8")).hexdigest()
+
+
+async def _envio_anterior(
+    db: AsyncSession,
+    ticket_id: uuid.UUID,
+    sender_id: uuid.UUID,
+    chave: uuid.UUID | None,
+    impressao: str | None,
+) -> ChatMessage | None:
+    """A mensagem que ESTA pessoa já gravou com esta chave NESTE chamado.
+
+    O filtro por remetente e por chamado é o que impede a chave de virar
+    consulta: quem conhece a chave de outra pessoa só encontra as próprias
+    mensagens, e o chamado já passou por `_get_ticket_visivel`.
+    """
+    if chave is None:
+        return None
+    linha = (
+        await db.execute(
+            select(ChatMessage.id, ChatMessage.client_message_fingerprint).where(
+                ChatMessage.ticket_id == ticket_id,
+                ChatMessage.sender_id == sender_id,
+                ChatMessage.client_message_id == chave,
+            )
+        )
+    ).one_or_none()
+    if linha is None:
+        return None
+    if linha.client_message_fingerprint != impressao:
+        raise _ChaveReusadaError
+    return await _mensagem_com_remetente_atual(db, linha.id)
+
+
+async def _grava_uma_vez(db: AsyncSession, msg: ChatMessage) -> ChatMessage | None:
+    """Grava `msg` JÁ, antes de qualquer efeito do envio. Devolve `None` quando
+    gravou; a mensagem que já existia quando a chave chegou antes por outro
+    caminho.
+
+    O INSERT sai aqui, e não no commit, de propósito. Com ele feito, um reenvio
+    simultâneo com a mesma chave PARA no índice único — o PostgreSQL o faz
+    esperar a transação desta — antes de chamar a Helô, notificar ou mudar o
+    status. Se esta comitar, ele recebe a violação e devolve esta mensagem; se
+    esta desfizer, ele segue e grava. O índice decide, não a consulta prévia:
+    dois reenvios simultâneos passam os dois por ela.
+
+    O SAVEPOINT é para a violação não derrubar a transação inteira: sem ele, o
+    PostgreSQL aborta tudo e a consulta seguinte, que busca a vencedora, morre
+    com "current transaction is aborted".
+    """
+    ticket_id, sender_id = msg.ticket_id, msg.sender_id
+    chave, impressao = msg.client_message_id, msg.client_message_fingerprint
+    try:
+        async with db.begin_nested():
+            db.add(msg)
+            await db.flush()
+    except IntegrityError:
+        # Sem remetente ou sem chave, ou sem a vencedora no banco: foi outra
+        # regra (um arquivo excluído no meio do envio, por exemplo), não reenvio.
+        if sender_id is None:
+            raise
+        anterior = await _envio_anterior(db, ticket_id, sender_id, chave, impressao)
+        if anterior is None:
+            raise
+        return anterior
+    return None
 
 
 async def _get_ticket_visivel(
@@ -579,10 +692,25 @@ async def list_messages(
 async def create_message(
     ticket_id: uuid.UUID,
     payload: ChatMessageCreate,
+    response: Response,
     db: Annotated[AsyncSession, Depends(get_db)],
     actor: Annotated[User, Depends(get_current_user)],
 ) -> ChatMessageResponse:
     ticket = await _get_ticket_visivel(ticket_id, actor, db)
+    ve_arquivo_interno = _e_equipe(actor)
+
+    # O reenvio vem ANTES da conferência do arquivo: o que já foi aceito
+    # devolve o que foi gravado, mesmo que o arquivo tenha virado interno
+    # depois — a resposta o esconde de quem não pode vê-lo, como no histórico.
+    conteudo = payload.content.strip()
+    chave = payload.client_message_id
+    impressao = _impressao_do_envio(conteudo, payload.library_file_id) if chave else None
+    try:
+        anterior = await _envio_anterior(db, ticket_id, actor.id, chave, impressao)
+    except _ChaveReusadaError:
+        raise HTTPException(status.HTTP_409_CONFLICT, _CHAVE_REUSADA) from None
+    if anterior is not None:
+        return await _repeticao(anterior, ticket, response, ve_arquivo_interno=ve_arquivo_interno)
 
     # Antes de gravar qualquer coisa: item interno nao entra em conversa. A
     # recusa e da API, e nao da tela -- a API e chamada por outros clientes
@@ -599,16 +727,25 @@ async def create_message(
         id=uuid.uuid4(),
         ticket_id=ticket_id,
         sender_id=actor.id,
-        content=payload.content.strip(),
+        content=conteudo,
         is_system=False,
         is_ai=False,
         library_file_id=payload.library_file_id,
         created_at=now,
+        client_message_id=chave,
+        client_message_fingerprint=impressao,
     )
     # Evita um SELECT a mais na serializacao: o objeto ja esta em maos.
     if arquivo is not None:
         msg.library_file = arquivo
-    db.add(msg)
+    # Gravada antes da Helô, da notificação e do status: um reenvio
+    # simultâneo para no índice aqui e não repete nenhum deles.
+    try:
+        anterior = await _grava_uma_vez(db, msg)
+    except _ChaveReusadaError:
+        raise HTTPException(status.HTTP_409_CONFLICT, _CHAVE_REUSADA) from None
+    if anterior is not None:
+        return await _repeticao(anterior, ticket, response, ve_arquivo_interno=ve_arquivo_interno)
 
     # SLA: falar com o cliente é o que conta como primeira resposta
     register_first_response(
@@ -648,7 +785,7 @@ async def create_message(
     msg = await _mensagem_com_remetente_atual(db, msg.id)
 
     fotos = await _fotos_da_conversa([msg], ticket)
-    response = _msg_to_response(msg, fotos.get(msg.id), ve_arquivo_interno=_e_equipe(actor))
+    resposta = _msg_to_response(msg, fotos.get(msg.id), ve_arquivo_interno=ve_arquivo_interno)
 
     # O quadro vai igual para a sala inteira, e na sala pode haver cliente:
     # ele é montado com o olhar do cliente. Não esconde nada da equipe na
@@ -667,7 +804,22 @@ async def create_message(
             {"type": "status_update", "data": {"status": new_status_value}},
         )
 
-    return response
+    return resposta
+
+
+async def _repeticao(
+    anterior: ChatMessage, ticket: Ticket, response: Response, *, ve_arquivo_interno: bool
+) -> ChatMessageResponse:
+    """O reenvio de uma mensagem já gravada: 200 em vez de 201, e só isso.
+
+    Nada de sala, nem de Helô, nem de aviso, nem de status: tudo isso já
+    aconteceu com a original. Transmitir de novo mostraria a mensagem duas
+    vezes a quem já a recebeu; quem a perdeu a acha no histórico.
+    """
+    response.status_code = status.HTTP_200_OK
+    logger.info(f"Chat: reenvio da mensagem {anterior.id} devolvido sem gravar de novo")
+    fotos = await _fotos_da_conversa([anterior], ticket)
+    return _msg_to_response(anterior, fotos.get(anterior.id), ve_arquivo_interno=ve_arquivo_interno)
 
 
 @router.post(
@@ -903,6 +1055,20 @@ async def websocket_chat(
                 await websocket.send_json({"type": "error", "detail": "Invalid JSON"})
                 continue
 
+            # A chave de envio (D4) é opcional, como no POST. Inválida, a
+            # mensagem é recusada inteira: gravar sem a chave que veio
+            # transformaria o próximo reenvio numa duplicata.
+            try:
+                chave = _chave_do_quadro(data.get("client_message_id"))
+            except ValueError:
+                await websocket.send_json(
+                    {
+                        "type": "error",
+                        "detail": "client_message_id inválido: mande um UUID em texto, ou nada.",
+                    }
+                )
+                continue
+
             # Anexo da biblioteca NÃO passa por aqui, e a recusa é ALTA.
             #
             # Este laço lê `content` e descarta o resto do payload. Um
@@ -927,14 +1093,12 @@ async def websocket_chat(
             # justamente o que se está consertando.
             if data.get("library_file_id") is not None:
                 await websocket.send_json(
-                    {
-                        "type": "error",
-                        "detail": (
-                            "Este canal não aceita anexo da biblioteca. Envie a "
-                            "mensagem por POST /tickets/{id}/messages, que confere "
-                            "a visibilidade do arquivo antes de gravar."
-                        ),
-                    }
+                    _quadro_de_erro(
+                        "Este canal não aceita anexo da biblioteca. Envie a "
+                        "mensagem por POST /tickets/{id}/messages, que confere "
+                        "a visibilidade do arquivo antes de gravar.",
+                        chave,
+                    )
                 )
                 continue
 
@@ -946,13 +1110,11 @@ async def websocket_chat(
             # isso que ele seria o escolhido por quem quisesse abusar.
             if len(content) > LIMITE_CONTEUDO:
                 await websocket.send_json(
-                    {
-                        "type": "error",
-                        "detail": (
-                            f"Mensagem longa demais (máximo {LIMITE_CONTEUDO} caracteres). "
-                            "Para textos maiores, use um anexo."
-                        ),
-                    }
+                    _quadro_de_erro(
+                        f"Mensagem longa demais (máximo {LIMITE_CONTEUDO} caracteres). "
+                        "Para textos maiores, use um anexo.",
+                        chave,
+                    )
                 )
                 continue
 
@@ -965,6 +1127,7 @@ async def websocket_chat(
                     await websocket.close(code=4004, reason="Ticket not found")
                     break
 
+                impressao = _impressao_do_envio(content, None) if chave else None
                 now = datetime.now(UTC)
                 msg = ChatMessage(
                     id=uuid.uuid4(),
@@ -974,8 +1137,29 @@ async def websocket_chat(
                     is_system=False,
                     is_ai=False,
                     created_at=now,
+                    client_message_id=chave,
+                    client_message_fingerprint=impressao,
                 )
-                db.add(msg)
+                # Igual ao POST: a repetição é conferida antes de gravar, e a
+                # gravação sai antes de qualquer efeito, para que um reenvio
+                # simultâneo — por aqui ou pelo POST — pare no índice único.
+                try:
+                    anterior = await _envio_anterior(db, ticket_id, user.id, chave, impressao)
+                    if anterior is None:
+                        anterior = await _grava_uma_vez(db, msg)
+                except _ChaveReusadaError:
+                    await websocket.send_json(
+                        _quadro_de_erro(_CHAVE_REUSADA, chave, code="client_message_id_conflict")
+                    )
+                    continue
+                if anterior is not None and chave is not None:
+                    # Só para este socket: a sala já recebeu a original. (Sem
+                    # chave não há anterior; o `chave is not None` é para o tipo.)
+                    foto = (await _fotos_da_conversa([anterior], ticket)).get(anterior.id)
+                    await websocket.send_json(
+                        _confirmacao(_msg_to_response(anterior, foto), chave, repetida=True)
+                    )
+                    continue
 
                 register_first_response(
                     ticket, now, responder_id=user.id, is_ai=msg.is_ai, is_system=msg.is_system
@@ -1031,6 +1215,10 @@ async def websocket_chat(
                     tid_str,
                     {"type": "status_update", "data": {"status": new_status_value}},
                 )
+            # A confirmação vai depois da sala: quem a recebe já tem tudo o que
+            # o envio produziu. Sem chave, nada muda para o cliente antigo.
+            if chave is not None:
+                await websocket.send_json(_confirmacao(response, chave, repetida=False))
 
     except WebSocketDisconnect:
         logger.info(f"WS disconnected: user={user.id} ticket={ticket_id}")
@@ -1039,6 +1227,41 @@ async def websocket_chat(
 
 
 # ── Internal helpers ──────────────────────────────────────────
+
+
+def _chave_do_quadro(bruta: object) -> uuid.UUID | None:
+    """A `client_message_id` de um quadro do WebSocket. Ausente ou nula é
+    "sem chave"; qualquer outra coisa que não seja UUID em texto é ValueError.
+    Aqui não há Pydantic, e `uuid.UUID(123)` não falha com ValueError."""
+    if bruta is None:
+        return None
+    if not isinstance(bruta, str):
+        raise ValueError("client_message_id não é texto")
+    return uuid.UUID(bruta)
+
+
+def _quadro_de_erro(detalhe: str, chave: uuid.UUID | None, **extra: str) -> dict:
+    """O erro, com a chave do envio quando havia uma: é por ela que a tela
+    sabe QUAL rascunho falhou."""
+    quadro: dict = {"type": "error", "detail": detalhe, **extra}
+    if chave is not None:
+        quadro["client_message_id"] = str(chave)
+    return quadro
+
+
+def _confirmacao(r: ChatMessageResponse, chave: uuid.UUID, *, repetida: bool) -> dict:
+    """Só para quem enviou com chave: a mensagem gravada, inteira.
+
+    `duplicate` diz se este envio gravou (falso) ou se a chave já tinha sido
+    gravada antes (verdadeiro). A mensagem vem junto nos dois casos, porque
+    quem reenvia pode ter perdido a original — foi por isso que reenviou.
+    """
+    return {
+        "type": "ack",
+        "client_message_id": str(chave),
+        "duplicate": repetida,
+        "data": _response_to_dict(r),
+    }
 
 
 def _response_to_dict(r: ChatMessageResponse) -> dict:
@@ -1063,6 +1286,10 @@ def _response_to_dict(r: ChatMessageResponse) -> dict:
         "library_file_mime": r.library_file_mime,
         "library_file_size": r.library_file_size,
         "library_file_unavailable": r.library_file_unavailable,
+        # O eco da chave: quem enviou reconhece a própria mensagem na sala e
+        # apaga o rascunho (B-04b). Não serve a mais ninguém — vale só com o
+        # remetente dela (`_envio_anterior`).
+        "client_message_id": str(r.client_message_id) if r.client_message_id else None,
     }
 
 
