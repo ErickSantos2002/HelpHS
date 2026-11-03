@@ -21,10 +21,16 @@ D4 (envio idempotente). **Uma migration, aditiva** (`m9h0i1j2k3l4`), sem
 variável nova. Regras em `docs/decisoes-e-regras.md`, seções "Histórico do
 chat" e "Envio idempotente no chat".
 
-⚠️ **Rollback:** voltar a imagem anterior sem descer o banco derruba o boot (o
-`start.sh` roda `alembic upgrade head` e a imagem anterior não conhece a
-revision). Descer antes (`alembic downgrade l8g9h0i1j2k3`, com a imagem nova
-no ar) ou reverter o código mantendo o arquivo da migration.
+⚠️ **Rollback:** uma imagem sem o arquivo desta migration não sobe depois dela
+(o `start.sh` roda `alembic upgrade head`, e a revision é desconhecida). O
+rollback preferencial preserva esquema e dados: imagem de reversão com o código
+anterior **e** a revision `m9h0i1j2k3l4`. Downgrade não é o padrão e depende de
+autorização específica. Backup e restauração são planejados antes do deploy.
+
+⚠️ **Sem garantia de entrega de todas as mensagens:** `created_at` pode
+anteceder o commit, e uma mensagem gravada depois com horário antigo pode não
+ser encontrada pela paginação. Pendência técnica registrada; a B-04b testa o
+cenário e traz recomendação antes de qualquer deploy do chat.
 
 - **Arquivo da biblioteca não derruba mais o histórico.** `GET
   /tickets/{id}/messages` respondia 500 (`MissingGreenlet`) em qualquer

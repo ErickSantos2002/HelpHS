@@ -1328,15 +1328,19 @@ CONCURRENTLY`, avaliado e recusado:
 
 O repositório já criava índice único parcial assim.
 
-**Rollback (medido em 03/11/2026).** O downgrade apaga índice, regra e colunas,
-e só perde chaves: nenhuma mensagem. ⚠️ **Voltar a imagem anterior sem descer o
-banco derruba o boot:** o `start.sh` roda `alembic upgrade head` com `set -e`,
-e o código anterior falha com "Can't locate revision identified by
-'m9h0i1j2k3l4'". As duas saídas:
-- descer antes, com a imagem nova no ar (`alembic downgrade l8g9h0i1j2k3`), e
-  só então subir a anterior;
-- ou reverter o código mantendo o arquivo da migration. O código anterior
-  grava as colunas nulas, o que a regra aceita.
+**Rollback (decisão de 03/11/2026).** ⚠️ **Uma imagem antiga pode não subir
+depois desta migration:** o `start.sh` roda `alembic upgrade head` com `set -e`,
+e uma imagem sem o arquivo da revision falha com "Can't locate revision
+identified by 'm9h0i1j2k3l4'" (medido).
+- **O rollback preferencial preserva esquema e dados.** A imagem de reversão
+  leva o código anterior **e** todas as revisions Alembic que o banco já
+  conhece, inclusive `m9h0i1j2k3l4`. As colunas ficam, nulas, e o código
+  anterior grava as duas nulas, o que a regra aceita (medido no teste da
+  migration).
+- **Downgrade não é a estratégia padrão** e depende de autorização específica.
+  Se autorizado, `alembic downgrade l8g9h0i1j2k3` apaga índice, regra e
+  colunas e perde só as chaves, nenhuma mensagem.
+- **Backup e restauração são planejados antes do deploy.**
 
 **Recuperação na B-04b: proposta, não implementada.**
 
@@ -1355,16 +1359,21 @@ e o código anterior falha com "Can't locate revision identified by
    da queda, menos uma margem. Essa margem cobre o maior intervalo entre o
    carimbo e o commit, cujo grosso é a chamada da Helô ao modelo de linguagem.
 
-⚠️ **Pendência técnica: hoje a recuperação não é garantida.** Nada limita o
-tempo entre carimbar `created_at` e comitar: o código e a configuração do
-repositório não definem `statement_timeout` nem tempo limite de transação (o
-servidor de produção não foi consultado). Uma transação lenta pode, então, comitar
-atrás de qualquer margem, e o passo 3 reduz a perda sem eliminá-la. Garantir
-exige mudar o backend, com proposta e aprovação próprias. A opção mais direta
-é uma sequência por chamado, atribuída sob o bloqueio da linha do chamado
-imediatamente antes do commit. Como o bloqueio dura até o commit, a ordem da
-sequência é a ordem de commit, e a tela pediria "o que veio depois do número
-N", sem margem nenhuma.
+⚠️ **Pendência técnica (decisão de 03/11/2026): a entrega de todas as mensagens
+NÃO é garantida.**
+- `created_at` pode anteceder o commit.
+- A paginação por cursor não garante encontrar uma mensagem gravada depois
+  com horário antigo.
+- Reler a página recente e juntar por `id` reduz o risco, mas não garante a
+  recuperação completa. O código e a configuração do repositório não definem
+  `statement_timeout` nem tempo limite de transação (o servidor de produção
+  não foi consultado), então nenhuma margem cobre todos os casos.
+- **A B-04b testa este cenário e apresenta uma recomendação antes de qualquer
+  deploy do chat.**
+
+Uma sequência persistente por chamado, atribuída sob o bloqueio da linha do
+chamado logo antes do commit, daria a ordem de commit sem margem. Ela fica
+registrada como opção e **não será implementada agora**.
 
 ## Chat em mais de um worker
 

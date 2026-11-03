@@ -37,18 +37,21 @@ Avaliado e recusado:
 - o repositório já cria índice único parcial assim (`x4s5t6u7v8w9`,
   `u1p2q3r4s5t6`).
 
-O DOWNGRADE apaga o índice, a regra e as duas colunas. Perde só as chaves
-gravadas desde a subida; nenhuma mensagem é apagada.
+ROLLBACK
+--------
+⚠️ Uma imagem que não contém ESTE arquivo não sobe num banco que já passou por
+ele: o `start.sh` roda `alembic upgrade head` com `set -e`, e o Alembic falha
+com "Can't locate revision identified by 'm9h0i1j2k3l4'" (medido em
+03/11/2026).
 
-⚠️ VOLTAR A IMAGEM ANTERIOR SEM DESCER O BANCO DERRUBA O BOOT. O `start.sh`
-roda `alembic upgrade head` com `set -e`, e o código anterior não conhece esta
-revision: "Can't locate revision identified by 'm9h0i1j2k3l4'" (medido em
-03/11/2026). As duas saídas, ambas medidas:
-
-- descer ANTES, com a imagem nova ainda no ar
-  (`alembic downgrade l8g9h0i1j2k3`), e só então subir a anterior;
-- ou reverter o código MANTENDO este arquivo: as colunas ficam, nulas, e o
-  código anterior grava as duas nulas, o que a regra aceita.
+- O rollback PREFERENCIAL preserva esquema e dados: uma imagem de reversão
+  com o código anterior E esta revision (e todas as anteriores) no
+  `alembic/versions`. As colunas ficam, nulas; o código anterior grava as duas
+  nulas, o que a regra aceita (medido no teste da migration).
+- O DOWNGRADE não é a estratégia padrão e só roda com autorização específica.
+  Ele apaga o índice, a regra e as duas colunas: perde as chaves gravadas desde
+  a subida, nenhuma mensagem.
+- Backup e o caminho de restauração são planejados ANTES do deploy.
 """
 
 from collections.abc import Sequence
