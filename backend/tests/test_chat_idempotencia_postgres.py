@@ -416,9 +416,12 @@ def test_chave_alheia_nao_revela_mensagem_de_outro_chamado(banco_real):
     assert no_proprio.json()["ticket_id"] == str(do_intruso)
 
 
-def test_reenvio_depois_de_o_arquivo_virar_interno_devolve_a_original(banco_real):
+@pytest.mark.parametrize("quem", ["tecnico", "cliente"])
+def test_reenvio_depois_de_o_arquivo_virar_interno_devolve_a_original(banco_real, quem):
     """A repetição vem antes da conferência do arquivo: o que já foi aceito
-    não vira erro porque o arquivo mudou depois."""
+    não vira erro porque o arquivo mudou depois. E a repetição não fura a regra
+    do arquivo: para o cliente, o que virou interno sai sem nome, tipo,
+    tamanho nem id, como no histórico."""
     chave = uuid.uuid4()
 
     async def _cena(cena: _Cena):
@@ -426,7 +429,7 @@ def test_reenvio_depois_de_o_arquivo_virar_interno_devolve_a_original(banco_real
         await _grava(cena.fabrica, cena.criados, arquivo)
         with _rest(cena):
             primeira = await _post(
-                cena.chamado.id, "tecnico", chave=chave, library_file_id=str(arquivo.id)
+                cena.chamado.id, quem, chave=chave, library_file_id=str(arquivo.id)
             )
             async with cena.fabrica() as s:
                 await s.execute(
@@ -436,7 +439,7 @@ def test_reenvio_depois_de_o_arquivo_virar_interno_devolve_a_original(banco_real
                 )
                 await s.commit()
             reenvio = await _post(
-                cena.chamado.id, "tecnico", chave=chave, library_file_id=str(arquivo.id)
+                cena.chamado.id, quem, chave=chave, library_file_id=str(arquivo.id)
             )
             return primeira, reenvio
 
@@ -445,7 +448,16 @@ def test_reenvio_depois_de_o_arquivo_virar_interno_devolve_a_original(banco_real
     assert primeira.status_code == 201, primeira.text
     assert reenvio.status_code == 200, reenvio.text
     assert reenvio.json()["id"] == primeira.json()["id"]
-    assert reenvio.json()["library_file_name"] == "manual-do-equipamento.pdf"
+    corpo = reenvio.json()
+    if quem == "tecnico":
+        assert corpo["library_file_name"] == "manual-do-equipamento.pdf"
+        assert corpo["library_file_unavailable"] is False
+    else:
+        assert corpo["library_file_unavailable"] is True
+        assert corpo["library_file_id"] is None
+        assert corpo["library_file_name"] is None
+        assert corpo["library_file_mime"] is None
+        assert corpo["library_file_size"] is None
 
 
 # ── REST: a corrida ───────────────────────────────────────────
