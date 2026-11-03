@@ -43,6 +43,14 @@
 #    imprime esses nomes a cada rodada, para ninguém achar que deixaram de ser
 #    vigiados.
 #
+# 6. Só no FRONT: `versoes_avaliadas = ["x.y.z", ...]` limita a entrada às
+#    versões que a análise examinou. Sem o campo, a chave pacote + advisory
+#    aceita QUALQUER versão instalada; com ele, o gate lê a versão de cada cópia
+#    no package-lock e cai com VERSÃO NÃO AVALIADA (ou VERSÃO DESCONHECIDA, se
+#    não conseguir ler). Use sempre que o `motivo` depender da versão — caso do
+#    minimatch, em que a 3.1.5 nem tem o código e a 10.2.5 tem. No backend o
+#    campo é recusado: lá o gate não confere versão.
+#
 # ── COMO RODAR LOCALMENTE ────────────────────────────────────────────────────
 #
 #     cd backend  && pip install pip-audit && python ../.github/scripts/verifica_dependencias.py
