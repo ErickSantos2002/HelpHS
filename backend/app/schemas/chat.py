@@ -40,6 +40,11 @@ class ChatMessageResponse(AppBaseModel):
     library_file_name: str | None = None
     library_file_mime: str | None = None
     library_file_size: int | None = None
+    # Havia um arquivo, e quem lê não pode vê-lo: o cliente diante de um item
+    # que voltou a ser interno. Os quatro campos acima saem nulos — nem o nome
+    # vaza — e a tela diz só que o arquivo está indisponível. Arquivo EXCLUÍDO
+    # não chega aqui: a FK é `SET NULL`, e a mensagem perde o vínculo inteiro.
+    library_file_unavailable: bool = False
 
     # Flattened sender fields (populated manually)
     sender_name: str = ""
@@ -49,13 +54,23 @@ class ChatMessageResponse(AppBaseModel):
     # resposta. Nulo para Helô, sistema, quem não tem foto e quem a regra de
     # `foto_visivel_na_conversa` não deixa mostrar.
     sender_avatar_url: str | None = None
+    # A chave de idempotência com que a mensagem foi enviada; nula para quem
+    # não mandou chave e para toda mensagem anterior a ela (D4, F1-B-04a).
+    client_message_id: uuid.UUID | None = None
 
 
 class ChatMessageListResponse(AppBaseModel):
+    # Sempre em ordem cronológica, nos dois modos — ver `list_messages`.
     items: list[ChatMessageResponse]
     total: int
     limit: int
+    # 0 no modo por cursor; o valor pedido no modo legado por `offset`.
     offset: int
+    # Há mensagens mais ANTIGAS que a primeira de `items`.
+    has_more: bool = False
+    # Cursor para a página anterior (`before=`). Nulo sem página anterior e
+    # sempre nulo no modo legado, que pagina por `offset`.
+    next_before: str | None = None
 
 
 # Teto do conteúdo de uma mensagem de chat, em caracteres.
@@ -75,6 +90,10 @@ class ChatMessageCreate(AppBaseModel):
     # Aponta para um item da biblioteca; nao carrega arquivo. Item INTERNO e
     # recusado pela API antes de gravar -- a conversa e lida pelo cliente.
     library_file_id: uuid.UUID | None = None
+    # Opcional. Reenviar com a mesma chave devolve a mensagem já gravada (200,
+    # e não 201); a mesma chave com outro conteúdo é 409. Sem chave, cada envio
+    # é uma mensagem nova, como sempre foi.
+    client_message_id: uuid.UUID | None = None
 
 
 class SuggestReplyResponse(AppBaseModel):

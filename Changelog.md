@@ -14,6 +14,69 @@ Trabalho que ainda **não** entrou numa versão do produto. Confira: se um
 item aqui já está em produção, ou ele foi para a versão errada, ou falta
 publicar uma versão nova.
 
+### Histórico do chat, envio idempotente e fechamentos do WebSocket — backend (F1-B-04a, 30/10 e 03/11/2026)
+
+Auditoria Geral: parte de backend do FUN-30 e do FUN-32, o FUN-31 e a decisão
+D4 (envio idempotente). **Uma migration, aditiva** (`m9h0i1j2k3l4`), sem
+variável nova. Regras em `docs/decisoes-e-regras.md`, seções "Histórico do
+chat" e "Envio idempotente no chat".
+
+⚠️ **Rollback:** uma imagem sem o arquivo desta migration não sobe depois dela
+(o `start.sh` roda `alembic upgrade head`, e a revision é desconhecida). O
+rollback preferencial preserva esquema e dados: imagem de reversão com o código
+anterior **e** a revision `m9h0i1j2k3l4`. Downgrade não é o padrão e depende de
+autorização específica. Backup e restauração são planejados antes do deploy.
+
+⚠️ **Sem garantia de entrega de todas as mensagens:** `created_at` pode
+anteceder o commit, e uma mensagem gravada depois com horário antigo pode não
+ser encontrada pela paginação. Pendência técnica registrada; a B-04b testa o
+cenário e traz recomendação antes de qualquer deploy do chat.
+
+- **Arquivo da biblioteca não derruba mais o histórico.** `GET
+  /tickets/{id}/messages` respondia 500 (`MissingGreenlet`) em qualquer
+  conversa com uma mensagem com arquivo, e a tela mostrava "histórico não
+  carregou" para a conversa inteira. O arquivo agora vem carregado na consulta.
+- **O histórico abre nas 100 mensagens mais recentes**, em ordem cronológica,
+  com `has_more` e `next_before`; `before=<cursor>` traz as anteriores. A ordem
+  é `(created_at, id)`, sem repetir nem pular na fronteira entre páginas.
+  ⚠️ **Mudança de comportamento:** sem parâmetros, a resposta deixa de vir "do
+  começo da conversa". Quem precisa da ordem antiga manda `offset` (mesmo
+  `offset=0`) e recebe o contrato anterior, 50 por página. A tela atual, que
+  pede só `limit=100`, passa a mostrar as 100 mais recentes assim que este
+  backend subir.
+- **Cursor inválido, cursor de outro chamado ou `before` junto com `offset`
+  dão 422.** Chamado alheio continua com o mesmo 404 de inexistente, com ou sem
+  cursor: a autorização vem antes do cursor.
+- **A mensagem com arquivo chega pelo tempo real com o arquivo** (FUN-31): o
+  quadro do WebSocket leva os campos `library_file_*`.
+- **Arquivo que voltou a ser interno some para o cliente:** nome, tipo, tamanho
+  e id saem nulos e `library_file_unavailable` vem `true`. A equipe continua
+  vendo tudo. Campo novo, com default `false`.
+- **4001 e 4004 chegam ao navegador:** o WebSocket aceita a conexão e só então
+  fecha, como já fazia com o 4428. Antes o navegador via 1006, sem código, e a
+  tela reconectava a cada 3 s, para sempre. Chamado excluído com a sala aberta
+  também fecha com 4004.
+- **O WebSocket usa a mesma regra de visibilidade do REST**
+  (`_get_ticket_visivel`), em vez de uma cópia dela.
+- **Envio idempotente (D4).** `POST /tickets/{id}/messages` e o WebSocket
+  aceitam um `client_message_id` (UUID) opcional. Reenviar a mesma mensagem com
+  a mesma chave devolve a que já foi gravada: 200 em vez de 201 no POST, e no
+  socket um quadro `ack` com `duplicate: true` só para quem reenviou. Não grava
+  de novo, não avisa ninguém de novo, não chama a Helô de novo, não muda o
+  status de novo e não transmite de novo para a sala. A mesma chave com outro
+  conteúdo dá 409 (no socket, erro `client_message_id_conflict`). A garantia é
+  um índice único parcial em `(ticket_id, sender_id, client_message_id)`; a
+  mensagem é gravada antes de qualquer efeito, e um reenvio simultâneo espera
+  nesse índice. Sem chave, nada muda. As respostas e os quadros passam a trazer
+  `client_message_id` (nulo para quem não mandou e para mensagens antigas), e
+  o socket manda `ack` também na criação, para quem mandou chave.
+- Testes contra PostgreSQL de verdade em `test_chat_historico_postgres.py` e
+  `test_chat_idempotencia_postgres.py`, incluindo a caracterização do commit
+  tardio (`created_at` é carimbado antes do commit, e uma mensagem pode cair
+  atrás de um cursor já usado — a D4 não muda isso) e corridas determinísticas
+  em que o teste só solta o primeiro envio depois de ver o segundo parado no
+  índice.
+
 ### Dashboards e Relatórios por período de calendário — frontend (F1-B-03b, 30/10/2026)
 
 Auditoria Geral, achados FUN-10 a FUN-13 e a parte de tela do FUN-16. Usa o

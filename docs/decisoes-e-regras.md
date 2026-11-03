@@ -1152,6 +1152,229 @@ seria uma forma de remover a proteção de outra pessoa.
 senha nova não destranca nada: o login segue pedindo o código depois dela. Para
 "perdi o celular", é o `desliga_mfa`. Para "perdi os dois", os dois, nessa ordem.
 
+## Histórico do chat (F1-B-04a, 30/10/2026)
+
+`GET /tickets/{id}/messages` tem dois modos, e o corpo vem **sempre em ordem
+cronológica**.
+
+| Pedido | O que volta |
+|---|---|
+| sem `offset` (padrão) | as `limit` (100) mensagens **mais recentes** |
+| `before=<cursor>` | as `limit` imediatamente anteriores ao cursor |
+| `offset=N` (legado) | do começo da conversa, a partir de N, 50 por página |
+| `offset` **e** `before` | 422 |
+
+- **Ordem `(created_at, id)`.** O `id` desempata mensagens do mesmo instante;
+  sem ele, a fronteira entre duas páginas podia repetir ou pular mensagem.
+- **`has_more`** diz se há mensagens mais antigas que a primeira de `items`.
+  **`next_before`** é o cursor para pedi-las: nulo quando não há, e sempre nulo
+  no modo legado.
+- **O cursor é opaco, mas não é segredo**: base64url de `{tk, t, id}` (chamado,
+  `created_at` com fuso, id da mensagem), sem assinatura. Alterá-lo só desloca
+  a janela dentro do chamado já autorizado, porque a consulta filtra pelo
+  chamado da URL. O `tk` existe para que um cursor trocado de chamado dê 422,
+  em vez de virar uma página silenciosa no lugar errado. Sem fuso, também 422.
+- **A autorização vem antes do cursor.** Chamado alheio responde o mesmo 404 de
+  inexistente com cursor válido, inválido ou sem cursor: um 422 confirmaria que
+  o chamado existe.
+- **Por que `offset` virou o modo legado, e não o contrário:** sem parâmetro, o
+  endpoint lia do começo, e a tela pedia 100 e mostrava as 100 **mais
+  antigas** (FUN-30). A única tela que consome o endpoint quer as mais
+  recentes; quem depende da ordem antiga diz `offset` e continua tendo.
+
+**Arquivo da biblioteca numa mensagem.** O relacionamento é carregado
+explicitamente em toda consulta que serializa mensagem. Sem isso, numa sessão
+assíncrona, tocar em `msg.library_file` levanta `MissingGreenlet`, e era esse o
+500 do histórico. Se um caminho novo esquecer o carregamento, a mensagem sai com
+o arquivo "indisponível" e um aviso no log: perde-se um arquivo na tela, não a
+conversa.
+
+| Quem lê | Arquivo aberto para cliente | Arquivo que voltou a ser interno |
+|---|---|---|
+| cliente | nome, tipo, tamanho e id | tudo nulo, `library_file_unavailable: true` |
+| técnico / admin | tudo | tudo |
+
+O quadro do WebSocket vai igual para a sala inteira, e na sala pode haver
+cliente: ele é montado com o olhar do cliente. Na prática, isso não esconde
+nada da equipe, porque só entra em conversa arquivo aberto para cliente
+(`ensure_pode_anexar_no_chat`). Arquivo **excluído** não deixa rastro: a FK é
+`SET NULL`, e a mensagem perde o vínculo inteiro. Não há como dizer que ali
+houve um arquivo.
+
+**Fechamentos do WebSocket.** Todo fechamento de recusa vem **depois** do
+`accept()`. Fechado antes do handshake, o uvicorn responde HTTP 403 e o
+navegador só vê 1006, sem código (medido em 28/10/2026).
+
+| Código | Quando | O que a tela deve fazer |
+|---|---|---|
+| 4001 | token inválido, revogado ou conta inativa | renovar a sessão; não insistir |
+| 4004 | chamado inexistente, alheio ou excluído com a sala aberta | parar de reconectar |
+| 4428 | aceite da Política pendente | levar à tela de aceite |
+
+A visibilidade do chamado no WebSocket é a mesma função do REST
+(`_get_ticket_visivel`): equipe vê qualquer chamado existente; cliente, só o
+que abriu. A revalidação da sessão durante a conexão aberta (SEC-14) continua
+fora (D6).
+
+**O limite que a paginação NÃO resolve.** `created_at` é carimbado **antes**
+do commit. No POST, entre o carimbo e o commit ainda rodam a Helô (que pode
+chamar o modelo de linguagem) e as notificações. Uma mensagem pode ficar visível
+depois de outra mais "nova" e cair atrás de um cursor já usado: voltar com
+`before` não a traz. O que a entrega é o WebSocket, se a tela já estava na sala
+quando ela comitou, ou reler a página **mais recente**, enquanto ela couber
+nessa página. Reler a página mais recente **não** recupera tudo quando, durante
+uma queda, chegam mais mensagens do que o `limit`, ou quando uma gravação fora
+de ordem fica além dessa página. A D4 tornou o REENVIO seguro, mas não muda
+este limite: a proposta de recuperação para a B-04b, e a pendência que impede
+garanti-la, estão em "Envio idempotente no chat", logo abaixo. Os testes
+`test_commit_tardio_cai_atras_do_cursor_e_so_a_pagina_recente_o_recupera` e
+`test_gravacoes_concorrentes_entram_todas_uma_vez` prendem esse comportamento.
+
+## Envio idempotente no chat (D4, F1-B-04a, 03/11/2026)
+
+Quem envia pode mandar um `client_message_id` (UUID gerado por ele, um por
+mensagem). Reenviar a MESMA mensagem com a MESMA chave devolve a que já foi
+gravada, em vez de gravar outra. É o que deixa a tela reenviar um rascunho
+depois de uma queda sem duplicar a mensagem.
+
+**Contrato REST** (`POST /tickets/{id}/messages`):
+
+| Pedido | Resposta |
+|---|---|
+| sem chave | 201, mensagem nova, como sempre |
+| chave nova | 201, mensagem nova, com a chave |
+| mesma chave, mesmo conteúdo | 200, a mensagem já gravada; nada mais acontece |
+| mesma chave, outro texto ou outro arquivo | 409 (sem devolver a original) |
+| chamado alheio, com ou sem chave | o mesmo 404 de sempre |
+
+**Contrato do WebSocket.** O quadro de entrada aceita
+`{"content": ..., "client_message_id": "<uuid>"}`; a chave é opcional.
+
+| Situação | Quem recebe | Quadro |
+|---|---|---|
+| criou, com chave | a sala | `message`, com `client_message_id` |
+| | só quem enviou, depois da sala | `ack` com `duplicate: false` e a mensagem em `data` |
+| reenvio (mesma chave e conteúdo) | só quem enviou | `ack` com `duplicate: true` e a mensagem em `data`; a sala não recebe nada |
+| mesma chave, outro conteúdo | só quem enviou | `error` com `code: "client_message_id_conflict"` e a chave |
+| chave que não é UUID em texto | só quem enviou | `error`; nada é gravado |
+| sem chave | a sala | `message` com `client_message_id: null`; nenhum `ack` |
+
+Os erros de quem mandou chave (anexo pelo socket, texto longo demais) passam a
+trazer a chave, para a tela saber qual rascunho falhou. Toda resposta de
+mensagem (histórico, POST, quadros) traz `client_message_id`: nulo para quem
+não mandou e para toda mensagem anterior à D4.
+
+**Chave reaproveitada.** A chave sozinha não faz duas mensagens iguais. Na
+gravação fica também `client_message_fingerprint`: o SHA-256 do texto como é
+gravado e do id do arquivo, que são o que muda a mensagem. Chamado e remetente
+já estão na chave, e `is_ai`/`is_system` são sempre falsos para quem envia. A
+comparação é com a impressão do PEDIDO, e não com a linha atual, porque a linha
+muda: o arquivo excluído vira `NULL` (`SET NULL`), e o texto pode vir a ser
+anonimizado. Nenhum dos dois pode transformar um reenvio legítimo em 409.
+
+**A chave vale por (chamado, remetente).** A mesma chave em outro chamado, ou
+de outra pessoa, é outra mensagem. A busca só acha mensagens de quem pergunta,
+no chamado que já passou pela autorização: quem descobre a chave de outra
+pessoa não descobre nada com ela.
+
+**Concorrência: quem garante é o índice.** `uq_chat_messages_envio` é único em
+`(ticket_id, sender_id, client_message_id)`, só onde há chave. O servidor faz,
+nesta ordem:
+
+1. autorização do chamado;
+2. busca a chave: achou com a mesma impressão, devolve (200); com outra, 409;
+3. confere o arquivo (o reenvio vem antes, para que o que já foi aceito não
+   vire erro porque o arquivo mudou depois);
+4. **grava a mensagem já**, num SAVEPOINT;
+5. só então SLA, Helô, avisos e status; depois o commit e a transmissão.
+
+Dois reenvios simultâneos passam os dois pelo passo 2, porque o primeiro ainda
+não comitou. No passo 4, o PostgreSQL faz o segundo ESPERAR a transação do
+primeiro: se ela comitar, o segundo recebe a violação do índice e devolve a
+mensagem dela; se ela desfizer, ele segue e grava. O SAVEPOINT é para a
+violação não abortar a transação inteira antes da busca da vencedora. Gravar
+cedo não alonga a transação: o autoflush da primeira consulta da Helô, ou do
+aviso, já mandava o INSERT antes.
+
+**Por que nenhum efeito se repete.** Os efeitos que ficam no banco (mensagem,
+avisos e a outbox de e-mail, histórico de status, SLA, auditoria) estão na
+mesma transação, e quem perde a corrida não os produz: ele para no passo 4,
+antes de todos. O único efeito externo antes do commit é a chamada da Helô ao
+modelo de linguagem, e ela também fica depois do passo 4. A transmissão para a
+sala sai depois do commit, e a repetição não transmite. Não foi preciso outbox
+nem infraestrutura nova.
+
+**O que continua podendo acontecer, e é aceito:**
+
+- **Falha antes do commit:** nada fica gravado, e o reenvio com a mesma chave
+  grava normalmente. Se a falha veio depois da Helô, o modelo foi chamado e
+  será chamado de novo. É custo, não estado: a fala dela não foi gravada.
+- **Commit feito e resposta perdida:** o reenvio devolve 200 com a mensagem.
+  Se o processo caiu entre o commit e a transmissão, a sala não recebeu a
+  mensagem pelo tempo real, e o reenvio não a transmite. Os outros a veem ao
+  recarregar ou reconectar (ver a recuperação abaixo).
+- **Espera:** o reenvio simultâneo espera a transação do primeiro, que pode
+  incluir a chamada da Helô, até o tempo limite dela.
+
+**Migration `m9h0i1j2k3l4`, aditiva.** Duas colunas nulas, sem default (o
+PostgreSQL só altera o catálogo), uma regra (`chave` e `impressão` nascem e
+morrem juntas) e o índice parcial, que nasce vazio. Sem `CREATE INDEX
+CONCURRENTLY`, avaliado e recusado:
+- o `env.py` roda todas as revisions numa transação, e o `CONCURRENTLY` não
+  roda dentro dela;
+- uma falha deixaria um índice inválido que derruba o boot seguinte;
+- a montagem é uma leitura que não acha nenhuma linha com chave;
+- o `ADD COLUMN` já pede o bloqueio exclusivo de qualquer jeito.
+
+O repositório já criava índice único parcial assim.
+
+**Rollback (decisão de 03/11/2026).** ⚠️ **Uma imagem antiga pode não subir
+depois desta migration:** o `start.sh` roda `alembic upgrade head` com `set -e`,
+e uma imagem sem o arquivo da revision falha com "Can't locate revision
+identified by 'm9h0i1j2k3l4'" (medido).
+- **O rollback preferencial preserva esquema e dados.** A imagem de reversão
+  leva o código anterior **e** todas as revisions Alembic que o banco já
+  conhece, inclusive `m9h0i1j2k3l4`. As colunas ficam, nulas, e o código
+  anterior grava as duas nulas, o que a regra aceita (medido no teste da
+  migration).
+- **Downgrade não é a estratégia padrão** e depende de autorização específica.
+  Se autorizado, `alembic downgrade l8g9h0i1j2k3` apaga índice, regra e
+  colunas e perde só as chaves, nenhuma mensagem.
+- **Backup e restauração são planejados antes do deploy.**
+
+**Recuperação na B-04b: proposta, não implementada.**
+
+1. *Envio.* Cada rascunho ganha a chave ao nascer e a guarda junto. Depois de
+   uma queda, a tela reenvia os pendentes com a MESMA chave. Um rascunho sai da
+   lista ao chegar o `ack` dele, ou ao aparecer uma mensagem com a chave dele
+   na sala ou no histórico. Isso a D4 resolve inteiro.
+2. *Recebimento depois de uma queda.*
+   1. Reconectar o socket primeiro e guardar o que chegar.
+   2. Reler a página mais recente e juntar tudo por `id`, ordenando por
+      `(created_at, id)`.
+   3. Se essa página não alcança a última mensagem que a tela já tinha, voltar
+      com `before` até alcançar.
+3. *Gravação fora de ordem.* Mesmo depois de alcançar, continuar voltando
+   enquanto o `created_at` for mais novo que o da última mensagem vista antes
+   da queda, menos uma margem. Essa margem cobre o maior intervalo entre o
+   carimbo e o commit, cujo grosso é a chamada da Helô ao modelo de linguagem.
+
+⚠️ **Pendência técnica (decisão de 03/11/2026): a entrega de todas as mensagens
+NÃO é garantida.**
+- `created_at` pode anteceder o commit.
+- A paginação por cursor não garante encontrar uma mensagem gravada depois
+  com horário antigo.
+- Reler a página recente e juntar por `id` reduz o risco, mas não garante a
+  recuperação completa. O código e a configuração do repositório não definem
+  `statement_timeout` nem tempo limite de transação (o servidor de produção
+  não foi consultado), então nenhuma margem cobre todos os casos.
+- **A B-04b testa este cenário e apresenta uma recomendação antes de qualquer
+  deploy do chat.**
+
+Uma sequência persistente por chamado, atribuída sob o bloqueio da linha do
+chamado logo antes do commit, daria a ordem de commit sem margem. Ela fica
+registrada como opção e **não será implementada agora**.
+
 ## Chat em mais de um worker
 
 O `ConnectionManager` guarda as salas na memória **do processo**: um dicionário

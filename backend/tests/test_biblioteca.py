@@ -200,7 +200,8 @@ def test_no_chat_o_guarda_roda_antes_de_qualquer_gravacao():
     corpo = fonte[fonte.index("async def create_message(") :]
 
     guarda = corpo.index("ensure_pode_anexar_no_chat(")
-    gravacao = corpo.index("db.add(msg)")
+    # Desde a D4 a gravação sai por `_grava_uma_vez`, que faz o INSERT na hora.
+    gravacao = corpo.index("_grava_uma_vez(db, msg)")
 
     assert guarda < gravacao
 

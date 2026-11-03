@@ -1087,12 +1087,39 @@ class ChatMessage(Base):
     library_file: Mapped["LibraryFile | None"] = relationship()
     read_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now())
+    # Idempotência do envio (D4, F1-B-04a). A chave é gerada por quem envia e
+    # vale por (chamado, remetente): o reenvio da MESMA mensagem devolve a que
+    # já foi gravada, em vez de gravar outra. Nula para quem não manda chave e
+    # para toda mensagem anterior a esta coluna.
+    client_message_id: Mapped[uuid.UUID | None] = mapped_column(UUID(as_uuid=True), nullable=True)
+    # SHA-256 do que foi PEDIDO (texto e arquivo), carimbado na gravação. Uma
+    # chave repetida com outro conteúdo é recusada comparando com isto, e não
+    # com a linha atual: o arquivo pode sumir (`SET NULL`) e o texto pode vir a
+    # ser anonimizado, e nenhum dos dois faz de um reenvio legítimo um conflito.
+    client_message_fingerprint: Mapped[str | None] = mapped_column(String(64), nullable=True)
 
     # Relacionamentos
     ticket: Mapped["Ticket"] = relationship(back_populates="chat_messages")
     sender: Mapped["User"] = relationship(back_populates="chat_messages")
 
-    __table_args__ = (Index("ix_chat_messages_ticket_created", "ticket_id", "created_at"),)
+    __table_args__ = (
+        Index("ix_chat_messages_ticket_created", "ticket_id", "created_at"),
+        # A garantia contra o envio duplicado é ESTE índice, e não a consulta
+        # que o código faz antes de gravar: dois reenvios simultâneos passam os
+        # dois pela consulta, e só um passa por aqui.
+        Index(
+            "uq_chat_messages_envio",
+            "ticket_id",
+            "sender_id",
+            "client_message_id",
+            unique=True,
+            postgresql_where=text("client_message_id IS NOT NULL"),
+        ),
+        CheckConstraint(
+            "(client_message_id IS NULL) = (client_message_fingerprint IS NULL)",
+            name="ck_chat_messages_chave_com_impressao",
+        ),
+    )
 
 
 class KBArticle(Base):
