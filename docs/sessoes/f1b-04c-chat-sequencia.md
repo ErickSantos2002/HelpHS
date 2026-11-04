@@ -101,14 +101,102 @@ EXCLUSIVE` em `chat_messages`, então nenhuma mensagem comita entre o marco e o
 commit da migration. Ele substitui o "instante registrado no deploy": não
 depende de alguém anotar, e sobrevive a recuo de imagem (a tabela fica).
 
-Por que a margem de 15 min: a imagem antiga monta a mensagem (com
-`created_at`) ANTES e só grava depois — a Helô leva até ~40 s (modelo 30 s +
-embedding 10 s), mais o tempo parado esperando a migration. Uma mensagem dela
-pode ter `created_at` ANTERIOR ao marco e comitar depois. Olhar só "depois da
-primeira mensagem numerada", ou só "depois do marco", deixaria passar essa. Na
-janela de 15 min antes do marco não dá para distinguir histórico de imagem
-antiga; por isso o chamado com nulo na janela fica no legado, e o script não a
-numera sem `--incluir-janela`.
+### O que protege de verdade: a ordem dos bloqueios (medido 04/11)
+
+**A margem de 15 min NÃO é garantia** e não deve ser descrita como tal. Nenhum
+tempo de requisição a sustenta: o engine de `0450129` não tem
+`statement_timeout` nem `lock_timeout`, o timeout de 30 s do httpx é por fase
+e não total, e sem `ALEMBIC_LOCK_TIMEOUT` a espera da migration não tem teto (um
+`pg_dump` ou uma transação esquecida a prende — e todo envio entra na fila
+atrás dela).
+
+O que protege é a ordem:
+
+1. Os quatro escritores de mensagem de `0450129` travam a TABELA `tickets`
+   antes de calcular `created_at` (relógio da aplicação) e seguram a trava até
+   o commit:
+   - envio REST: `_get_ticket_visivel` (SELECT do chamado) antes do `now`;
+   - WebSocket: `select(Ticket)` antes do `now`;
+   - fala da Helô: na mesma transação do envio, que já segura a trava;
+   - saudação da abertura: o piso do protocolo
+     (`_maior_emitido_em_tickets`) lê `tickets` no início do `create_ticket`.
+2. A `n0i1` pega `ACCESS EXCLUSIVE` em `tickets` (`ALTER TABLE tickets ADD
+   COLUMN chat_seq`) antes do marco, e o marco é o último comando.
+3. Logo, um escritor antigo que comita depois da migration só conseguiu a
+   trava de `tickets` depois do commit dela — e o `created_at` dele é
+   posterior ao marco. **Medido** (cenário A): +35 ms. Se ele calculasse
+   `created_at` antes da trava, ficaria antes do marco pelo tempo inteiro
+   da espera.
+4. O escritor que já tinha o chamado quando a migration chegou termina em
+   deadlock (cenário B): ou a migration é desfeita inteira e a mensagem é
+   histórico, ou o envio dele falha com erro. Nos dois casos não sobra
+   mensagem antiga atrás do marco.
+
+Comparando os quatro tipos de carimbo:
+
+| Mensagem | `created_at` | Em relação ao marco | Resultado |
+|---|---|---|---|
+| Histórico (comitou antes da migration) | relógio da app | antes | nunca numerado; fora da janela, invisível ao incremental, como deve ser |
+| Imagem antiga, comitou depois da migration | relógio da app, depois da trava de `tickets` | depois (± desvio de relógio) | o chamado sai do incremental; o script numera |
+| Imagem de recuperação, num recuo | relógio da app, agora | depois | idem |
+| Imagem nova | relógio da app; `seq` no commit | depois | numerada no envio |
+
+O marco é `clock_timestamp()` do PostgreSQL; `created_at` é o relógio do
+contêiner da aplicação. **A margem de 15 min só cobre o desvio entre os
+dois**, que NÃO foi medido (contêineres no mesmo host dividem o relógio, mas não
+está verificado que o banco está no mesmo host). Mensagem com nulo dentro da
+janela deixa o chamado no legado, e o script não a numera sem
+`--incluir-janela`.
+
+Presos em teste: `test_migracao_concorrente_postgres.py` (cenários A e B, e o
+marco depois do `ALTER TABLE tickets` como último comando, pelo SQL offline).
+A regra depende do código de `0450129`, que é fixo: a imagem de recuperação
+é esse mesmo código.
+
+### Checklist do relógio (antes de ligar `CHAT_SINCRONIZACAO_INCREMENTAL`)
+
+Nada disso foi feito; é para o dia da ativação.
+
+1. No contêiner do backend em produção (o novo e, se ainda existir, o
+   antigo), três vezes:
+   ```sh
+   python - <<'PY'
+   import asyncio, os
+   from datetime import UTC, datetime
+   from sqlalchemy import text
+   from sqlalchemy.ext.asyncio import create_async_engine
+   async def m():
+       e = create_async_engine(os.environ["DATABASE_URL"])
+       async with e.connect() as c:
+           a = datetime.now(UTC)
+           b = (await c.execute(text("SELECT clock_timestamp()"))).scalar_one()
+           d = datetime.now(UTC)
+       await e.dispose()
+       print("desvio (banco - app):", b - (a + (d - a) / 2), "ida e volta:", d - a)
+   asyncio.run(m())
+   PY
+   ```
+   Só leitura: um `SELECT clock_timestamp()`.
+2. Aceitar só |desvio| bem abaixo da margem (sugestão: < 5 s, com ida e
+   volta < 1 s). Acima disso, ou sem medição, o interruptor fica desligado.
+3. Registrar os valores e o horário no relato do deploy.
+4. Se o host tiver acesso, conferir o NTP (`timedatectl`) do host do banco e
+   do da aplicação.
+
+### Guarda nos testes
+
+A fixture autouse `_guarda_do_seq` (`tests/conftest.py`) embrulha
+`_avisa_mensagens_sem_seq` e reprova o teste em que a guarda avisar, a menos
+que a gravação esteja em `sem_seq_intencional()` (semeadura de legado) ou o
+teste tenha `@pytest.mark.mensagem_sem_seq`. Ela não importa o `app`, não
+barra nem escreve no commit. Mutação: sem a numeração no POST, 16 testes de
+idempotência que não olham `seq` passaram a reprovar.
+
+| Propriedade | Existe? |
+|---|---|
+| Detecção em testes | sim, para todo teste que passe pelo commit de uma `Session` real (não pega `AsyncMock`) |
+| Observabilidade em produção | `logger.error` com ids; ninguém é alertado (não há alerta conhecido) |
+| Garantia transacional | não — é `incremental_disponivel` que mantém o chamado no legado quando há nulo |
 
 ### Guarda do commit
 
@@ -218,6 +306,47 @@ docker build -t helphs-backend:v1.23.0-recuperacao backend
   âncora maior que o contador restaurado recebe 409. Se o backup for de antes da
   migration, cai no caso do downgrade.
 
+## Implantação controlada (análise, NADA implementado)
+
+O risco medido: com envio em andamento durante a migration, há deadlock
+`tickets` × `chat_messages` (o escritor trava o chamado e depois a mensagem; a
+`m9h0` trava `chat_messages` e a `n0i1` depois `tickets`). Morre quem fechou o
+ciclo: ou a migration (rollback total, boot morre, deploy precisa ser repetido)
+ou o envio (erro para quem enviou, nada gravado). O `lock_timeout` não evita:
+deadlock é detectado em `deadlock_timeout` (1 s), antes de qualquer limite
+razoável.
+
+- **Janela de manutenção**: horário de pouco uso reduz a chance, não a zera.
+  A migration leva menos de 1 s com 200 mil mensagens; o volume de produção
+  não foi medido.
+- **Suspender novos envios**: a v1.23.0 não tem interruptor de envio. O
+  equivalente sem código é parar o serviço antigo no EasyPanel ANTES de subir
+  o novo — a migration roda sem nenhum escritor. Custo: indisponibilidade do
+  pull e do boot. É a única opção que elimina o ciclo sem mudar código.
+- **Transações em andamento**: antes do deploy, olhar `pg_stat_activity`
+  (transação `idle in transaction`, consulta longa) e confirmar que nenhum
+  `pg_dump`/backup está agendado para a janela. Com `ALEMBIC_LOCK_TIMEOUT`, a
+  migration desiste em vez de enfileirar todos os envios atrás dela.
+- **Reinício do EasyPanel**: não medido nesta frente. A memória de 19/08 diz
+  que o contêiner antigo segue atendendo quando o novo morre no boot. Se a
+  política reiniciar o novo em laço, cada tentativa é uma migration nova,
+  desfeita inteira se falhar — o laço é uma repetição, não corrupção.
+- **Coexistência**: imagem antiga contra o banco migrado funciona (grava sem
+  `seq`, detectado, o script numera). Imagem nova contra o banco não migrado
+  não sobe (`set -e` no `alembic upgrade head`).
+- **`LOCK TABLE` explícito** (`LOCK TABLE tickets, chat_messages IN ACCESS
+  EXCLUSIVE MODE` no início da transação): pega `tickets` antes de
+  `chat_messages`, na ordem dos escritores, e acaba com o ciclo. Custo: a
+  listagem de chamados também espera a migration inteira (hoje só espera da
+  `n0i1` em diante), e o pedido único espera toda transação que toque qualquer
+  das duas. Os escritores travam `users` antes, mas a migration não toca
+  `users`: não abre ciclo novo. Exige mudar o `env.py` ou a `m9h0` (mesclada).
+  Decisão da Sessão 0; não implementado.
+- **Falha no boot**: medida para timeout e para deadlock — rollback integral,
+  banco em `l8g9`, nada a desfazer, repetir o deploy. Se a migration passar e a
+  imagem nova falhar depois, a anterior NÃO sobe (não conhece `n0i1`): é para
+  isso que a imagem de recuperação é obrigatória antes do deploy.
+
 ## Socket fantasma (commit separado)
 
 `entregar_local` tirava da sala o socket cujo envio falhava e parava aí: ele
@@ -255,10 +384,18 @@ quadro não serializável fazia todos falharem e esvaziava a sala. Agora:
   anuncia e `after_seq` é 409 estruturado; sem marco não anuncia; mensagem de
   imagem antiga (depois do marco e na janela) desliga só aquele chamado e volta
   por `after_seq` depois do script.
+- `tests/test_migracao_concorrente_postgres.py` (4): cenário A, cenário B nas
+  duas ordens do ciclo (vítima registrada no junit, não afirmada; nas rodadas
+  morreu quem fechou o ciclo), ordem do marco pelo SQL offline.
+- `tests/test_fotos_dos_participantes.py`: 17 testes estavam vermelhos na
+  branch desde `456c0e1` (falso sem `seq`, falsos de banco sem o contador e a
+  numeração) e nenhuma rodada focada os pegou; corrigidos em `d26033a`. A
+  mensagem daquele commit diz "33" — o número medido é 17 (67 passavam).
 - Mutações, todas mortas: sem numeração; numeração antes da Helô; contador lido
   depois da página; deadlock sem tratamento; `SET LOCAL` fora do `env.py`; sem
   a margem; sem o filtro de nulo; guarda sem o teste de SAVEPOINT; guarda
-  muda; sem o `sorted`.
+  muda; sem o `sorted`; marco antes do `ALTER TABLE tickets`; sem a numeração
+  no POST (reprovado pela fixture da guarda).
 - NÃO rodados: suíte completa e gate de cobertura (exigem coordenação de
   recursos), E2E/Chrome.
 
