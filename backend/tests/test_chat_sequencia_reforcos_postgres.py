@@ -248,6 +248,7 @@ def test_varios_chamados_na_mesma_transacao_travam_em_ordem_de_id(banco_real):
 # ── A guarda do commit ────────────────────────────────────────
 
 
+@pytest.mark.mensagem_sem_seq
 def test_guarda_avisa_da_mensagem_montada_depois_da_numeracao(banco_real):
     async def _cena(cena: _Cena):
         antes = _mensagem(cena.chamado, cena.tecnico, datetime.now(UTC), texto="numerada")

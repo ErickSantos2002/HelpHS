@@ -59,6 +59,56 @@ os.environ["JWT_PRIVATE_KEY_PATH"] = str(_dir_de_chaves / "private.pem")
 os.environ["JWT_PUBLIC_KEY_PATH"] = str(_dir_de_chaves / "public.pem")
 
 
+import pytest  # noqa: E402
+
+
+def pytest_configure(config):
+    config.addinivalue_line(
+        "markers",
+        "mensagem_sem_seq: o teste grava mensagem do chat sem seq de propósito"
+        " (ver tests/_mensagem_sem_seq.py)",
+    )
+
+
+@pytest.fixture(autouse=True)
+def _guarda_do_seq(request, monkeypatch):
+    """Reprova o teste em que a guarda do commit avisou de mensagem sem `seq`
+    fora de `sem_seq_intencional()` e sem a marca `mensagem_sem_seq`.
+
+    Embrulha a função do aviso — o log de produção continua saindo, e nada no
+    commit muda: a guarda não barra, não escreve, não consulta.
+
+    Não importa nada do `app`: sem o módulo carregado, o listener da guarda
+    também não existe — e o teste que mexe no ambiente antes de importar o
+    `app` segue no controle do próprio import.
+    """
+    import sys
+
+    from tests._mensagem_sem_seq import intencional
+
+    chat_sequencia = sys.modules.get("app.services.chat_sequencia")
+    if chat_sequencia is None:
+        yield []
+        return
+    original = chat_sequencia._avisa_mensagens_sem_seq
+    flagradas: list[str] = []
+
+    def _observa(mensagens):
+        if not intencional.get():
+            flagradas.extend(f"{m.id} no chamado {m.ticket_id}" for m in mensagens)
+        original(mensagens)
+
+    monkeypatch.setattr(chat_sequencia, "_avisa_mensagens_sem_seq", _observa)
+    yield flagradas
+    if flagradas and request.node.get_closest_marker("mensagem_sem_seq") is None:
+        pytest.fail(
+            "mensagem do chat foi para o commit SEM seq (guarda F1-B-04c): "
+            + ", ".join(flagradas)
+            + ". Escritor novo: chame numera_mensagens_do_chat antes do commit. Legado"
+            " de propósito: sem_seq_intencional() ou @pytest.mark.mensagem_sem_seq."
+        )
+
+
 class EspiaDeThread:
     """
     Substitui uma função síncrona e registra em qual thread ela rodou.

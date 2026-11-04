@@ -136,12 +136,19 @@ def _confere_antes_do_commit(session: Session) -> None:
     gravadas = [m for m in session.info.get(_ANOTADAS, []) if inspect(m).persistent]
     sem_numero = [m for m in (*pendentes, *gravadas) if inspect(m).dict.get("seq") is None]
     if sem_numero:
-        logger.error(
-            "Chat: {} mensagem(ns) indo para o commit SEM seq (F1-B-04c) — o dono da"
-            " transação não chamou numera_mensagens_do_chat depois de montá-las: {}",
-            len(sem_numero),
-            ", ".join(f"{m.id} no chamado {m.ticket_id}" for m in sem_numero),
-        )
+        _avisa_mensagens_sem_seq(sem_numero)
+
+
+def _avisa_mensagens_sem_seq(mensagens: list[ChatMessage]) -> None:
+    """O aviso da guarda. Função à parte para a suíte observá-lo: a fixture de
+    `tests/conftest.py` a embrulha e reprova o teste que a disparar sem ter
+    declarado a intenção. Em produção, só o log."""
+    logger.error(
+        "Chat: {} mensagem(ns) indo para o commit SEM seq (F1-B-04c) — o dono da"
+        " transação não chamou numera_mensagens_do_chat depois de montá-las: {}",
+        len(mensagens),
+        ", ".join(f"{m.id} no chamado {m.ticket_id}" for m in mensagens),
+    )
 
 
 async def numera_mensagens_do_chat(db: AsyncSession) -> None:

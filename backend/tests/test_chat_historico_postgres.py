@@ -67,6 +67,7 @@ from app.models.models import (
     UserRole,
     UserStatus,
 )
+from tests._mensagem_sem_seq import sem_seq_intencional
 
 _AGORA = datetime.now(UTC)
 
@@ -668,9 +669,12 @@ def banco_real(url_do_banco):
 
 
 async def _grava(fabrica, criados, *objetos) -> None:
-    async with fabrica() as s:
-        s.add_all(objetos)
-        await s.commit()
+    # Semeadura direta pelo ORM: a mensagem que entra aqui é o legado (ou a
+    # imagem antiga) de propósito, sem `seq`. Ver tests/_mensagem_sem_seq.py.
+    with sem_seq_intencional():
+        async with fabrica() as s:
+            s.add_all(objetos)
+            await s.commit()
     for o in objetos:
         nome = o.__table__.name
         if nome in criados:
@@ -794,7 +798,8 @@ def test_commit_tardio_cai_atras_do_cursor_e_so_a_pagina_recente_o_recupera(banc
 
         async with fabrica() as leitura:
             pagina = await _uma_pagina(leitura, cliente, chamado.id, limit=2)
-        await sessao_a.commit()
+        with sem_seq_intencional():  # o legado: A comita tarde, sem número
+            await sessao_a.commit()
         await sessao_a.close()
 
         async with fabrica() as leitura:
