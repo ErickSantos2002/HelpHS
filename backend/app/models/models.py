@@ -10,6 +10,7 @@ from datetime import datetime
 
 from pgvector.sqlalchemy import Vector
 from sqlalchemy import (
+    BigInteger,
     Boolean,
     CheckConstraint,
     Column,
@@ -827,6 +828,17 @@ class Ticket(Base):
     auto_closed: Mapped[bool] = mapped_column(Boolean, default=False, nullable=False)
     reopened_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
     reopen_count: Mapped[int] = mapped_column(Integer, default=0, nullable=False)
+    # Quantas mensagens do chat este chamado já numerou (F1-B-04c). Só
+    # `chat_sequencia.numera_mensagens_do_chat` escreve aqui, com UPDATE
+    # relativo (`chat_seq + n`), e é esse UPDATE que trava a linha e põe os
+    # commits do mesmo chamado em fila. Sem índice de propósito: assim o
+    # UPDATE do contador é HOT e pede só `FOR NO KEY UPDATE`, que convive com
+    # o `FOR KEY SHARE` que cada INSERT de mensagem põe no chamado pela FK.
+    # Num índice ÚNICO a coluna viraria "chave" e o UPDATE pediria o bloqueio
+    # que conflita com ele.
+    chat_seq: Mapped[int] = mapped_column(
+        BigInteger, default=0, server_default=text("0"), nullable=False
+    )
 
     created_at: Mapped[datetime] = mapped_column(
         DateTime(timezone=True), server_default=func.now(), index=True
@@ -1097,6 +1109,11 @@ class ChatMessage(Base):
     # com a linha atual: o arquivo pode sumir (`SET NULL`) e o texto pode vir a
     # ser anonimizado, e nenhum dos dois faz de um reenvio legítimo um conflito.
     client_message_fingerprint: Mapped[str | None] = mapped_column(String(64), nullable=True)
+    # Posição da mensagem no chamado NA ORDEM DE COMMIT (F1-B-04c) — a ordem
+    # em que ela ficou visível, que não é a do `created_at`. É por ela que a
+    # tela recupera o que perdeu (`after_seq`). Nula nas mensagens anteriores
+    # à coluna; nunca é renumerada.
+    seq: Mapped[int | None] = mapped_column(BigInteger, nullable=True)
 
     # Relacionamentos
     ticket: Mapped["Ticket"] = relationship(back_populates="chat_messages")
@@ -1118,6 +1135,14 @@ class ChatMessage(Base):
         CheckConstraint(
             "(client_message_id IS NULL) = (client_message_fingerprint IS NULL)",
             name="ck_chat_messages_chave_com_impressao",
+        ),
+        # Um número por chamado. Parcial: as mensagens antigas ficam nulas.
+        Index(
+            "uq_chat_messages_seq",
+            "ticket_id",
+            "seq",
+            unique=True,
+            postgresql_where=text("seq IS NOT NULL"),
         ),
     )
 

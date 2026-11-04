@@ -226,6 +226,16 @@ def _clear():
     app.dependency_overrides.clear()
 
 
+@pytest.fixture(autouse=True)
+def _sem_numeracao_do_chat():
+    """A sessão aqui é de mentira, sem transação nem linha de chamado para
+    travar. A numeração do chat (F1-B-04c) só se prova no PostgreSQL: ver
+    `test_chat_sequencia_postgres.py`. Importada pelos módulos que montam
+    chamado com as fixtures deste."""
+    with patch("app.routers.tickets.numera_mensagens_do_chat", new=AsyncMock()):
+        yield
+
+
 @pytest.fixture()
 def patch_redis():
     with patch("app.core.security.get_redis", new=_get_redis):

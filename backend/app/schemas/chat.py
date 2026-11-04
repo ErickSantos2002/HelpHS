@@ -57,6 +57,9 @@ class ChatMessageResponse(AppBaseModel):
     # A chave de idempotência com que a mensagem foi enviada; nula para quem
     # não mandou chave e para toda mensagem anterior a ela (D4, F1-B-04a).
     client_message_id: uuid.UUID | None = None
+    # Posição no chamado na ORDEM DE COMMIT (F1-B-04c). Nula nas mensagens
+    # anteriores à numeração e nas gravadas por uma imagem antiga do backend.
+    seq: int | None = None
 
 
 class ChatMessageListResponse(AppBaseModel):
@@ -66,11 +69,21 @@ class ChatMessageListResponse(AppBaseModel):
     limit: int
     # 0 no modo por cursor; o valor pedido no modo legado por `offset`.
     offset: int
-    # Há mensagens mais ANTIGAS que a primeira de `items`.
+    # Há mensagens mais ANTIGAS que a primeira de `items` — ou, com
+    # `after_seq`, mais NOVAS que a última.
     has_more: bool = False
     # Cursor para a página anterior (`before=`). Nulo sem página anterior e
     # sempre nulo no modo legado, que pagina por `offset`.
     next_before: str | None = None
+    # O contador do chamado, lido ANTES das mensagens desta resposta: toda
+    # mensagem com `seq <= ultima_seq` já estava comitada naquele instante
+    # (F1-B-04c). Numa página sem `after_seq`, é a âncora para continuar por
+    # `after_seq` sem perder o que comitar entre esta leitura e a próxima.
+    ultima_seq: int | None = None
+    # Só com `after_seq`: de onde pedir a próxima página. Com `has_more`
+    # falso é o próprio `ultima_seq` — um buraco no fim (mensagem removida)
+    # não faz a tela pedir o mesmo trecho para sempre.
+    next_after_seq: int | None = None
 
 
 # Teto do conteúdo de uma mensagem de chat, em caracteres.
