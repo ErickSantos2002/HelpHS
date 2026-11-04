@@ -73,6 +73,53 @@ e a tela deduplica por id). Teste com commit injetado entre as duas leituras.
 servidor antigo não manda o campo, e servidor com o legado manda `ultima_seq = 0`
 num chamado com histórico inteiro sem número.
 
+### Interruptor (contrato definitivo)
+
+- `CHAT_SINCRONIZACAO_INCREMENTAL` (`chat_sincronizacao_incremental`), **padrão
+  `false`**. Desligado, a rota não faz consulta nenhuma a mais.
+- Toda resposta da listagem traz `sincronizacao_incremental: bool`. **É o único
+  sinal que a tela pode usar** para entrar no modo incremental — por chamado,
+  em cada leitura. Ausente (servidor antigo) ou `false` → histórico
+  tradicional. Tela antiga ignora o campo e não quebra.
+- `true` só quando TUDO vale: interruptor ligado, marco do corte presente
+  (`chat_seq_corte`), e nenhuma mensagem do chamado com `seq` nulo e
+  `created_at >= marco − 15 min`. Na dúvida, `false`.
+- `after_seq` quando não está disponível → `409 {"code":
+  "incremental_indisponivel", "detail": …}`, antes de qualquer leitura de
+  mensagem. A tela volta ao histórico (página recente) e não insiste.
+- O interruptor NÃO é a segurança: é o banco que decide. Ligado num banco sem a
+  migration ou depois de um recuo com imagem antiga, o próprio chamado se
+  desliga até o script numerar o que entrou sem número.
+- Não ligado em produção nesta frente; ligar é decisão da Sessão 0, depois do
+  front.
+
+### O marco do corte
+
+A `n0i1` cria `chat_seq_corte` (uma linha, `id = 1`) e grava `migrada_em =
+clock_timestamp()` como ÚLTIMO comando — a transação já segura `ACCESS
+EXCLUSIVE` em `chat_messages`, então nenhuma mensagem comita entre o marco e o
+commit da migration. Ele substitui o "instante registrado no deploy": não
+depende de alguém anotar, e sobrevive a recuo de imagem (a tabela fica).
+
+Por que a margem de 15 min: a imagem antiga monta a mensagem (com
+`created_at`) ANTES e só grava depois — a Helô leva até ~40 s (modelo 30 s +
+embedding 10 s), mais o tempo parado esperando a migration. Uma mensagem dela
+pode ter `created_at` ANTERIOR ao marco e comitar depois. Olhar só "depois da
+primeira mensagem numerada", ou só "depois do marco", deixaria passar essa. Na
+janela de 15 min antes do marco não dá para distinguir histórico de imagem
+antiga; por isso o chamado com nulo na janela fica no legado, e o script não a
+numera sem `--incluir-janela`.
+
+### Guarda do commit
+
+`before_commit` da `Session` (só no commit raiz — o SAVEPOINT de
+`_grava_uma_vez` dispara o evento antes da numeração): mensagem nova, ou
+anotada e já gravada, com `seq` nulo → `logger.error` com ids e chamado. **Só
+avisa**: não barra, não numera, não consulta o banco (lê o estado do objeto,
+sem lazy load) — nada que precise de await dentro do evento síncrono. Pega o
+escritor novo que esquecer `numera_mensagens_do_chat`; o escritor velho (imagem
+antiga) não passa por ela, e para ele valem o marco e o script.
+
 ## Legado
 
 **Decisão definitiva da Sessão 0 (04/11/2026): o histórico NÃO é numerado.**
@@ -83,10 +130,13 @@ contador de todo chamado existente nasce 0; a primeira mensagem nova é a 1.
 
 O `numera_mensagens_sem_seq.py` NÃO é ferramenta de backfill: serve só para o
 que for gravado sem número DEPOIS da migration (imagem antiga servindo durante
-a troca ou num recuo). O `--desde` é o instante em que a migration rodou em
-produção, registrado no deploy — nunca uma data anterior. Um `--desde` antigo
-numeraria histórico depois do contador, e a tela receberia mensagens de meses
-atrás como se fossem novas.
+a troca ou num recuo). Não há `--desde`: o corte é o marco da própria migration
+(`chat_seq_corte`), e sem ele o script não faz nada (saída 2). Numera só
+`created_at >= marco`; a janela ambígua dos 15 min anteriores só com
+`--incluir-janela`, decisão de quem implanta. Sem `--aplicar`, só conta (por
+chamado: depois do marco e na janela). Cada chamado é uma transação com o
+bloqueio do envio — testado esperando um envio que trava o chamado e rodando
+junto com 10 envios: sem número repetido nem buraco.
 
 ## Migration `n0i1j2k3l4m5` (down `m9h0i1j2k3l4`)
 
@@ -98,20 +148,67 @@ atrás como se fossem novas.
   bloqueia gravação, não leitura. O volume de produção NÃO foi medido.
 - `upgrade → downgrade → upgrade` não perde mensagem; o contador volta a 0.
 
+### Limites de espera (`alembic/env.py`)
+
+- `ALEMBIC_LOCK_TIMEOUT` e `ALEMBIC_STATEMENT_TIMEOUT`, duração simples
+  (`3s`, `500ms`, `2min`, inteiro = ms). **Sem as variáveis, nada muda**: a
+  migration espera como hoje (testado: segue na fila da transação alheia).
+- Com elas: `SET LOCAL` dentro da transação da migration, antes da primeira
+  revision. Estourou → erro, rollback da transação INTEIRA (nem a `m9h0`, que
+  roda antes, fica: sem colunas, índices, `chat_seq_corte`, versão em
+  `l8g9`), processo sai ≠ 0. Sem retry: com o `set -e` do `start.sh`, o
+  contêiner novo não sobe e o antigo segue atendendo. A tentativa seguinte,
+  sem concorrência, passa (testado com 1 s, para os dois limites).
+- Valor inválido (inclusive tentativa de injeção) é recusado ANTES de conectar.
+- `start.sh` não mudou. Onde e com que valor definir as variáveis no EasyPanel
+  é decisão da Sessão 0 (sugestão: `ALEMBIC_LOCK_TIMEOUT=5s`; statement sem
+  limite ou folgado, porque o `CREATE INDEX` varre a tabela).
+
 ## Rollback
 
 - **Preferido: rollback da IMAGEM mantendo a migration.** A imagem antiga não
   conhece `seq` e grava com `seq` nulo; o resto funciona. Ao voltar a imagem
-  nova, rodar `python -m scripts.numera_mensagens_sem_seq --desde <instante da
-  migration em produção>` (sem `--aplicar` primeiro): numera, depois do último número, o
-  que entrou sem número após o corte, com o mesmo bloqueio do envio. Telas que
-  já passaram daquele ponto as acham na próxima releitura.
+  nova, rodar `python -m scripts.numera_mensagens_sem_seq` (só conta) e depois
+  com `--aplicar`: numera, depois do último número, o que entrou sem número após
+  o marco, com o mesmo bloqueio do envio. Até lá, os chamados afetados anunciam
+  `sincronizacao_incremental: false` e ficam no histórico; telas que já passaram
+  daquele ponto as acham pelo `after_seq` depois do script.
 - **⚠️ A imagem anterior NÃO sobe com o banco no head novo** se não tiver o
   arquivo da revision (o `start.sh` morre no `alembic upgrade head`, ver o
   incidente de 03/11). Produção (v1.23.0, `0450129`) está em `l8g9h0i1j2k3`:
   o próximo boot aplica `m9h0i1j2k3l4` E `n0i1j2k3l4m5`, numa transação só. A
   imagem de recuperação é a v1.23.0 com os DOIS arquivos de revision e nada
-  mais — ver o plano entregue à Sessão 0 em 04/11.
+  mais — procedimento abaixo.
+
+### Imagem de recuperação (procedimento, NÃO executado)
+
+Reproduzível e isolado; não altera a imagem implantada, não publica no
+EasyPanel, não faz downgrade.
+
+```sh
+git worktree add ../recuperacao-v1.23.0 0450129
+cd ../recuperacao-v1.23.0
+git switch -c recuperacao/v1.23.0-seq
+for r in m9h0i1j2k3l4 n0i1j2k3l4m5; do
+  f=$(git ls-tree --name-only <SHA da main mesclada> backend/alembic/versions/ | grep "/${r}_")
+  git show "<SHA da main mesclada>:$f" > "$f"
+done
+git add backend/alembic/versions && git commit -m "recuperação: v1.23.0 + revisions m9h0 e n0i1"
+git diff --name-status 0450129   # tem de mostrar SÓ os 2 arquivos (A)
+(cd backend && python -m alembic heads)   # n0i1j2k3l4m5, um head só
+docker build -t helphs-backend:v1.23.0-recuperacao backend
+```
+
+- Os arquivos saem byte a byte do commit que for implantado (não desta
+  branch), para o `down_revision` e o corpo serem os mesmos do banco.
+- A imagem resultante conhece o head, então sobe; grava mensagens SEM `seq`
+  (é a v1.23.0) — exatamente o caso do marco e do script.
+- O `env.py` dela é o da v1.23.0: sem os limites de espera, o que não importa,
+  porque ela não tem nada a aplicar.
+- **Ensaio funcional obrigatório antes do deploy**: PG descartável em `l8g9` →
+  imagem nova sobe (aplica as duas) → troca pela de recuperação (sobe, envia,
+  `seq` nulo, chamado anuncia `false`) → volta a nova → script conta e numera →
+  chamado anuncia `true`.
 - **Downgrade não é estratégia de rollback**: apaga os números, zera o contador,
   e toda tela com âncora > 0 recebe 409 e recarrega. Nada se perde, mas todo
   mundo ressincroniza. Não automatizado.
@@ -147,8 +244,21 @@ quadro não serializável fazia todos falharem e esvaziava a sala. Agora:
   (6), `tests/test_chat_escritores_de_mensagem.py` (4, por AST: os 4 escritores
   de `ChatMessage(`, nada de `insert(ChatMessage)`/SQL cru, donos numeram depois
   da Helô e antes de todo commit).
+- `tests/test_migrations_limite_postgres.py` (14): upgrade conjunto desde
+  `l8g9`, espera sem limite, desistência com rollback total e nova tentativa,
+  valor inválido, head único.
+- `tests/test_chat_sequencia_reforcos_postgres.py` (7): Helô REAL com o
+  cliente do modelo atrasado (resposta e escalada), script esperando envio e
+  concorrendo com 10 envios, ordem de id entre chamados, guarda (aponta a
+  mensagem montada depois da numeração; quieta nos escritores reais).
+- Interruptor e marco, em `test_chat_sequencia_postgres.py`: desligado não
+  anuncia e `after_seq` é 409 estruturado; sem marco não anuncia; mensagem de
+  imagem antiga (depois do marco e na janela) desliga só aquele chamado e volta
+  por `after_seq` depois do script.
 - Mutações, todas mortas: sem numeração; numeração antes da Helô; contador lido
-  depois da página; deadlock sem tratamento.
+  depois da página; deadlock sem tratamento; `SET LOCAL` fora do `env.py`; sem
+  a margem; sem o filtro de nulo; guarda sem o teste de SAVEPOINT; guarda
+  muda; sem o `sorted`.
 - NÃO rodados: suíte completa e gate de cobertura (exigem coordenação de
   recursos), E2E/Chrome.
 
