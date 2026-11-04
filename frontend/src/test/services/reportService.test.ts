@@ -3,7 +3,7 @@ import {
   getReports,
   getTechnicianListReport,
   getTechnicianDetailReport,
-  exportReportsUrl,
+  paramsDaExportacao,
   type ReportData,
   type TechnicianListReport,
   type TechnicianDetailReport,
@@ -255,95 +255,85 @@ describe("getTechnicianDetailReport", () => {
   });
 });
 
-describe("exportReportsUrl", () => {
-  it("monta a URL de csv com o período", () => {
-    expect(exportReportsUrl("csv", { period: 30 })).toBe(
-      "/api/v1/dashboard/reports/export/csv?period=30",
-    );
-  });
-
-  it("troca o formato no caminho, não na query", () => {
-    expect(exportReportsUrl("pdf", { period: 30 })).toBe(
-      "/api/v1/dashboard/reports/export/pdf?period=30",
-    );
+/**
+ * Era `exportReportsUrl`, que devolvia o caminho relativo `/api/v1/...` — e
+ * esse caminho era o defeito (F1-C-01a): no domínio do front ele cai no
+ * `index.html` da SPA. A regra dos parâmetros não mudou, e os casos são os
+ * mesmos de antes, agora sobre os parâmetros que vão para o `api`. A base da
+ * URL deixou de ser responsabilidade desta função; o host e o token são
+ * provados em `reportService.download.test.ts`.
+ */
+describe("paramsDaExportacao", () => {
+  it("manda o período legado quando não há intervalo", () => {
+    expect(paramsDaExportacao({ period: 30 })).toEqual({ period: "30" });
   });
 
   it("usa o intervalo de datas quando as duas pontas vêm preenchidas", () => {
     expect(
-      exportReportsUrl("csv", {
+      paramsDaExportacao({
         start_date: "2026-08-01",
         end_date: "2026-08-31",
       }),
-    ).toBe(
-      "/api/v1/dashboard/reports/export/csv?start_date=2026-08-01&end_date=2026-08-31",
-    );
+    ).toEqual({ start_date: "2026-08-01", end_date: "2026-08-31" });
   });
 
   it("o intervalo de datas vence o período quando os dois são informados", () => {
-    const url = exportReportsUrl("pdf", {
+    const params = paramsDaExportacao({
       period: 90,
       start_date: "2026-08-01",
       end_date: "2026-08-31",
     });
 
-    expect(url).not.toContain("period=");
-    expect(url).toContain("start_date=2026-08-01");
-    expect(url).toContain("end_date=2026-08-31");
+    expect(params).not.toHaveProperty("period");
+    expect(params.start_date).toBe("2026-08-01");
+    expect(params.end_date).toBe("2026-08-31");
   });
 
   it("cai para o período quando só uma ponta do intervalo foi preenchida", () => {
     expect(
-      exportReportsUrl("csv", { period: 7, start_date: "2026-08-01" }),
-    ).toBe("/api/v1/dashboard/reports/export/csv?period=7");
+      paramsDaExportacao({ period: 7, start_date: "2026-08-01" }),
+    ).toEqual({ period: "7" });
 
-    expect(exportReportsUrl("csv", { period: 7, end_date: "2026-08-31" })).toBe(
-      "/api/v1/dashboard/reports/export/csv?period=7",
-    );
+    expect(paramsDaExportacao({ period: 7, end_date: "2026-08-31" })).toEqual({
+      period: "7",
+    });
   });
 
   it("sem período e com intervalo pela metade, não sobra nenhum parâmetro", () => {
-    expect(exportReportsUrl("csv", { start_date: "2026-08-01" })).toBe(
-      "/api/v1/dashboard/reports/export/csv?",
-    );
+    expect(paramsDaExportacao({ start_date: "2026-08-01" })).toEqual({});
   });
 
-  it("sem filtro nenhum, devolve a rota com a query vazia", () => {
-    expect(exportReportsUrl("pdf", {})).toBe(
-      "/api/v1/dashboard/reports/export/pdf?",
-    );
+  it("sem filtro nenhum, não manda parâmetro nenhum", () => {
+    expect(paramsDaExportacao({})).toEqual({});
   });
 
-  it("acrescenta categoria e prioridade depois do recorte de tempo", () => {
+  it("acrescenta categoria e prioridade ao recorte de tempo", () => {
     expect(
-      exportReportsUrl("csv", {
+      paramsDaExportacao({
         period: 30,
         category: "hardware",
         priority: "high",
       }),
-    ).toBe(
-      "/api/v1/dashboard/reports/export/csv?period=30&category=hardware&priority=high",
-    );
+    ).toEqual({ period: "30", category: "hardware", priority: "high" });
   });
 
-  it("escapa acento e espaço na categoria", () => {
-    const url = exportReportsUrl("csv", {
-      period: 30,
-      category: "manutenção preventiva",
-    });
-
-    expect(url).toBe(
-      "/api/v1/dashboard/reports/export/csv?period=30&category=manuten%C3%A7%C3%A3o+preventiva",
-    );
-  });
-
-  it("categoria e prioridade vazias não entram na query", () => {
+  it("entrega a categoria crua: quem codifica acento e espaço é o axios", () => {
+    // Antes este caso conferia o `%C3%A7` da URL montada à mão. Com os
+    // parâmetros indo pelo `params` do axios, a codificação é dele — e o caso
+    // de download confere a URL final que sai.
     expect(
-      exportReportsUrl("csv", { period: 30, category: "", priority: "" }),
-    ).toBe("/api/v1/dashboard/reports/export/csv?period=30");
+      paramsDaExportacao({ period: 30, category: "manutenção preventiva" }),
+    ).toEqual({ period: "30", category: "manutenção preventiva" });
+  });
+
+  it("categoria e prioridade vazias não entram nos parâmetros", () => {
+    expect(
+      paramsDaExportacao({ period: 30, category: "", priority: "" }),
+    ).toEqual({ period: "30" });
   });
 
   it("é função pura: não toca no cliente HTTP", () => {
-    exportReportsUrl("csv", { period: 30 });
+    paramsDaExportacao({ period: 30 });
 
     expect(mockGet).not.toHaveBeenCalled();
   });
