@@ -154,16 +154,48 @@ class ConnectionManager:
         É também o que o backplane chama ao receber mensagem de outro worker —
         por isso é público e recebe o `ticket_id` como string: o assinante não
         sabe o que é uma sala, só repassa o que chegou.
+
+        Quadro que não vira JSON é defeito de quem o montou, não dos sockets:
+        é recusado ANTES do laço. Sem isso, cada `send_json` falhava, e a sala
+        inteira era tratada como morta por um erro que não era de ninguém dela.
         """
-        room = self._rooms.get(ticket_id, set())
+        try:
+            json.dumps(payload)
+        except (TypeError, ValueError) as exc:
+            logger.error(f"Chat: quadro para a sala {ticket_id} não vira JSON ({exc}); descartado")
+            return
         dead: list[WebSocket] = []
-        for ws in list(room):
+        for ws in list(self._rooms.get(ticket_id, ())):
             try:
                 await ws.send_json(payload)
             except Exception:
                 dead.append(ws)
         for ws in dead:
+            await self._descarta(ticket_id, ws)
+
+    async def _descarta(self, ticket_id: str, ws: WebSocket) -> None:
+        """Tira dos DOIS índices e avisa o navegador com 1011.
+
+        Só tirar da sala deixava um fantasma: o socket seguia aberto e em
+        `_por_usuario`, e a tela, sem fechamento nenhum, ficava surda achando
+        que estava ao vivo. Com o fechamento ela reconecta — e sincroniza.
+        A limpeza vem ANTES do `close`: socket que nem fechar consegue não
+        pode continuar contado.
+        """
+        room = self._rooms.get(ticket_id)
+        if room is not None:
             room.discard(ws)
+            if not room:
+                del self._rooms[ticket_id]
+        for dono, sockets in list(self._por_usuario.items()):
+            if ws in sockets:
+                sockets.discard(ws)
+                if not sockets:
+                    del self._por_usuario[dono]
+        try:
+            await ws.close(code=status.WS_1011_INTERNAL_ERROR)
+        except Exception:  # noqa: BLE001 — já morto: a limpeza acima é o que importa
+            pass
 
     async def broadcast(self, ticket_id: str, payload: dict) -> None:
         """Entrega local PRIMEIRO, publica depois.
