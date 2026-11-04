@@ -1,4 +1,5 @@
 import { useEffect, useRef, useState } from "react";
+import { toast } from "sonner";
 import {
   Area,
   AreaChart,
@@ -45,6 +46,8 @@ import {
 } from "../../lib/prioridade";
 import { rotuloDeStatus, slotDeStatus } from "../../lib/status";
 import { plural } from "../../lib/utils";
+import { getApiErrorParts } from "../../lib/apiError";
+import { ehAceitePoliticaPendente } from "../../services/aceitePolitica";
 import { useAuth } from "../../contexts/AuthContext";
 import { FalhaDoBloco } from "../../components/relatorios/FalhaDoBloco";
 import { SeletorDePeriodo } from "../../components/relatorios/SeletorDePeriodo";
@@ -57,7 +60,8 @@ import {
 import { useCarga } from "../../lib/useCarga";
 import { usePeriodoDoRelatorio } from "../../lib/usePeriodoDoRelatorio";
 import {
-  exportReportsUrl,
+  ArquivoDeRelatorioInvalido,
+  baixarRelatorio,
   getReports,
   getTechnicianDetailReport,
   getTechnicianListReport,
@@ -69,6 +73,7 @@ import {
   type ReportData,
   type SlaJustificationItem,
   type TechnicianDistItem,
+  type FormatoDeExportacao,
   type ReportFilters,
   type SLAComplianceItem,
   type TechnicianDetailReport,
@@ -1241,9 +1246,48 @@ function EsperaDePeriodo({ altura = "h-48" }: { altura?: string }) {
 
 // ── Export dropdown ───────────────────────────────────────────
 
+const MENSAGEM_DE_ARQUIVO_INVALIDO =
+  "O servidor não devolveu um arquivo de relatório. Tente de novo; se continuar, avise o suporte.";
+
+/**
+ * O download sai por `baixarRelatorio` (F1-C-01a), e não mais por `<a href>`:
+ * o link ia ao domínio do front, sem token, e baixava o `index.html`.
+ *
+ * Um download por vez: o `ref` barra o segundo clique no MESMO tique — o
+ * estado só desabilita o botão no render seguinte.
+ */
 function ExportDropdown({ filters }: { filters: ReportFilters }) {
   const [open, setOpen] = useState(false);
+  const [baixando, setBaixando] = useState<FormatoDeExportacao | null>(null);
+  const emAndamento = useRef(false);
   const ref = useRef<HTMLDivElement>(null);
+
+  async function baixar(formato: FormatoDeExportacao) {
+    if (emAndamento.current) return;
+    emAndamento.current = true;
+    setOpen(false);
+    setBaixando(formato);
+    try {
+      await baixarRelatorio(formato, filters);
+    } catch (erro) {
+      // A tela do aceite assume sozinha (`ReaceiteGuard`); um aviso de falha
+      // por cima dela só confundiria.
+      if (!ehAceitePoliticaPendente(erro)) {
+        const titulo = `Não foi possível baixar o relatório em ${formato.toUpperCase()}.`;
+        const { description } =
+          erro instanceof ArquivoDeRelatorioInvalido
+            ? { description: MENSAGEM_DE_ARQUIVO_INVALIDO }
+            : getApiErrorParts(erro, titulo);
+        toast.error(titulo, {
+          ...(description ? { description } : {}),
+          action: { label: "Tentar de novo", onClick: () => void baixar(formato) },
+        });
+      }
+    } finally {
+      emAndamento.current = false;
+      setBaixando(null);
+    }
+  }
 
   useEffect(() => {
     function handle(e: MouseEvent) {
@@ -1256,34 +1300,45 @@ function ExportDropdown({ filters }: { filters: ReportFilters }) {
   return (
     <div ref={ref} className="relative">
       <button
+        type="button"
         onClick={() => setOpen((v) => !v)}
-        className="flex h-9 items-center gap-1.5 rounded-lg border border-borda/40 bg-surface-elevated px-3 text-xs font-medium text-conteudo-muted hover:bg-surface hover:text-conteudo transition-colors cursor-pointer"
+        disabled={baixando !== null}
+        aria-busy={baixando !== null}
+        aria-expanded={open}
+        className="flex h-9 items-center gap-1.5 rounded-lg border border-borda/40 bg-surface-elevated px-3 text-xs font-medium text-conteudo-muted hover:bg-surface hover:text-conteudo transition-colors cursor-pointer disabled:cursor-wait disabled:opacity-70"
       >
-        <Icon name="download" size={16} strokeWidth={2} />
-        Exportar
-        <span className={`transition-transform duration-200 ${open ? "rotate-180" : ""}`}>
-          <Icon name="chevronDown" size={14} strokeWidth={2.5} />
-        </span>
+        {baixando ? (
+          <>
+            <Spinner size="sm" aria-hidden="true" />
+            Gerando {baixando.toUpperCase()}…
+          </>
+        ) : (
+          <>
+            <Icon name="download" size={16} strokeWidth={2} />
+            Exportar
+            <span className={`transition-transform duration-200 ${open ? "rotate-180" : ""}`}>
+              <Icon name="chevronDown" size={14} strokeWidth={2.5} />
+            </span>
+          </>
+        )}
       </button>
 
       {open && (
         <div className="absolute right-0 top-full mt-1 z-20 min-w-[140px] rounded-xl border border-borda/40 bg-surface shadow-lg overflow-hidden">
-          <a
-            href={exportReportsUrl("csv", filters)}
-            download
-            onClick={() => setOpen(false)}
-            className="flex items-center gap-2 px-4 py-2.5 text-xs font-medium text-conteudo hover:bg-surface-elevated transition-colors"
+          <button
+            type="button"
+            onClick={() => void baixar("csv")}
+            className="flex w-full items-center gap-2 px-4 py-2.5 text-left text-xs font-medium text-conteudo hover:bg-surface-elevated transition-colors cursor-pointer"
           >
             <Icon name="download" size={16} strokeWidth={2} /> Exportar CSV
-          </a>
-          <a
-            href={exportReportsUrl("pdf", filters)}
-            download
-            onClick={() => setOpen(false)}
-            className="flex items-center gap-2 px-4 py-2.5 text-xs font-medium text-conteudo hover:bg-surface-elevated transition-colors border-t border-borda/30"
+          </button>
+          <button
+            type="button"
+            onClick={() => void baixar("pdf")}
+            className="flex w-full items-center gap-2 px-4 py-2.5 text-left text-xs font-medium text-conteudo hover:bg-surface-elevated transition-colors cursor-pointer border-t border-borda/30"
           >
             <Icon name="download" size={16} strokeWidth={2} /> Exportar PDF
-          </a>
+          </button>
         </div>
       )}
     </div>

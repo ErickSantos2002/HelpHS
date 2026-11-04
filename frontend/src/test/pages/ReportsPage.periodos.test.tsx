@@ -19,6 +19,8 @@ vi.mock("../../services/reportService", async (importOriginal) => {
     getReports: vi.fn(),
     getTechnicianListReport: vi.fn(),
     getTechnicianDetailReport: vi.fn(),
+    // O download real criaria arquivo; aqui só importa O QUE a tela pede.
+    baixarRelatorio: vi.fn().mockResolvedValue(undefined),
   };
 });
 
@@ -150,10 +152,15 @@ describe("ReportsPage — o mesmo intervalo em todos os relatórios", () => {
     escolherNoMenu(periodo(), "Mês passado");
     await waitFor(() => expect(reportService.getReports).toHaveBeenCalledTimes(2));
 
-    fireEvent.click(screen.getByRole("button", { name: /Exportar/ }));
-    const csv = screen.getByRole("link", { name: /Exportar CSV/ });
-    expect(csv.getAttribute("href")).toContain("start_date=2026-09-01");
-    expect(csv.getAttribute("href")).toContain("end_date=2026-09-30");
+    // Era o `href` do link; desde a F1-C-01a o download sai por
+    // `baixarRelatorio`, e a garantia é a mesma: as datas do período escolhido.
+    fireEvent.click(screen.getByRole("button", { name: /^Exportar$/ }));
+    fireEvent.click(screen.getByRole("button", { name: /Exportar CSV/ }));
+    await waitFor(() => expect(reportService.baixarRelatorio).toHaveBeenCalledTimes(1));
+    expect(vi.mocked(reportService.baixarRelatorio).mock.calls[0]).toEqual([
+      "csv",
+      expect.objectContaining({ start_date: "2026-09-01", end_date: "2026-09-30" }),
+    ]);
   });
 });
 
