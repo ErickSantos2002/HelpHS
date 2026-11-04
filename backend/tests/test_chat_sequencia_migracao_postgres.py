@@ -8,6 +8,7 @@ O que se prende aqui, em uma frase cada:
 - uma imagem ANTIGA do backend (que não conhece `seq`) continua gravando
   depois da migration, sem número — é o cenário do rollback de aplicação;
 - o índice único vale no banco, e só onde há número;
+- a migration grava o marco do corte no ÚLTIMO comando, e o downgrade o leva;
 - o script avulso numera só o que entrou sem número DEPOIS do corte, na
   ordem de `created_at`, continuando o contador — e não mexe no legado;
 - `upgrade → downgrade → upgrade` não perde mensagem; o contador volta a
@@ -30,7 +31,8 @@ from sqlalchemy.exc import IntegrityError
 from sqlalchemy.ext.asyncio import create_async_engine
 from sqlalchemy.pool import NullPool
 
-from scripts.numera_mensagens_sem_seq import numera
+from app.services.chat_sequencia import MARGEM_DO_CORTE
+from scripts.numera_mensagens_sem_seq import SemMarcoDoCorteError, numera, pendentes
 from tests.test_dashboard_postgres import _sobe_postgres
 from tests.test_ticket_calls_postgres import _alembic
 
@@ -167,9 +169,13 @@ async def test_upgrade_nao_numera_o_legado_nao_reescreve_e_imagem_antiga_segue_g
         await _arquivo_da_tabela(banco, "chat_messages"),
     )
 
+    antes_do_upgrade = datetime.now(UTC)
     r = _alembic(banco, "upgrade", _REVISION)
     assert r.returncode == 0, r.stderr
 
+    [(marco,)] = await _consulta(banco, "SELECT migrada_em FROM chat_seq_corte")
+    assert antes_do_upgrade - timedelta(seconds=5) < marco < datetime.now(UTC)
+    assert marco > max(q for _, _, q in conteudo_antes), "o legado fica antes do marco"
     assert await _consulta(banco, "SELECT chat_seq FROM tickets") == [(0,)]
     assert await _consulta(banco, "SELECT count(*) FROM chat_messages WHERE seq IS NOT NULL") == [
         (0,)
@@ -225,10 +231,12 @@ async def test_script_numera_so_o_que_entrou_sem_numero_depois_do_corte(banco):
 
     r = _alembic(banco, "upgrade", _REVISION)
     assert r.returncode == 0, r.stderr
-    corte = base
+    # O marco em instante conhecido, para o cenário ser determinístico.
+    await _executa(banco, "UPDATE chat_seq_corte SET migrada_em = :q", q=base)
 
-    # A imagem nova numerou duas; depois um rollback de aplicação trouxe a
-    # antiga, que gravou três sem número — a última carimbada mais cedo.
+    # A imagem nova numerou duas; depois um recuo trouxe a antiga, que gravou
+    # três sem número — a última carimbada mais cedo — e uma na JANELA antes
+    # do marco (montada antes, gravada depois: ambígua).
     for numero in (1, 2):
         mid = await _mensagem_antiga(banco, chamado, autor, base + timedelta(minutes=numero))
         await _executa(banco, "UPDATE chat_messages SET seq = :s WHERE id = :m", s=numero, m=mid)
@@ -238,14 +246,17 @@ async def test_script_numera_so_o_que_entrou_sem_numero_depois_do_corte(banco):
         await _mensagem_antiga(banco, chamado, autor, base + timedelta(minutes=20), "s2"),
         await _mensagem_antiga(banco, chamado, autor, base + timedelta(minutes=5), "s0"),
     ]
+    na_janela = await _mensagem_antiga(banco, outro, autor, base - MARGEM_DO_CORTE / 2, "na janela")
     await _mensagem_antiga(banco, outro, autor, base + timedelta(minutes=1), "do outro")
 
-    simulado = await numera(banco, corte, aplicar=False)
-    assert simulado == {str(chamado): 3, str(outro): 1}
-    assert await _consulta(banco, "SELECT count(*) FROM chat_messages WHERE seq IS NULL") == [(5,)]
+    contagem = await pendentes(banco)
+    assert contagem == {
+        str(chamado): {"depois": 3, "janela": 0},
+        str(outro): {"depois": 1, "janela": 1},
+    }
+    assert await _consulta(banco, "SELECT count(*) FROM chat_messages WHERE seq IS NULL") == [(6,)]
 
-    aplicado = await numera(banco, corte, aplicar=True)
-    assert aplicado == simulado
+    assert await numera(banco) == {str(chamado): 3, str(outro): 1}
 
     numeradas = dict(
         await _consulta(
@@ -255,13 +266,37 @@ async def test_script_numera_so_o_que_entrou_sem_numero_depois_do_corte(banco):
         )
     )
     assert numeradas == {"s0": 3, "s1": 4, "s2": 5}, "ordem de created_at, depois do contador"
-    assert await _consulta(banco, "SELECT id, chat_seq FROM tickets ORDER BY chat_seq") == sorted(
-        [(outro, 1), (chamado, 5)], key=lambda x: x[1]
-    )
     assert await _consulta(banco, "SELECT seq FROM chat_messages WHERE id = :m", m=legado) == [
         (None,)
-    ], "o legado anterior ao corte continua sem número"
-    assert await numera(banco, corte, aplicar=True) == {}, "rodar de novo não faz nada"
+    ], "o histórico NUNCA é numerado"
+    assert await _consulta(banco, "SELECT seq FROM chat_messages WHERE id = :m", m=na_janela) == [
+        (None,)
+    ], "a janela ambígua só com --incluir-janela"
+    assert await numera(banco) == {}, "rodar de novo não faz nada"
+
+    assert await numera(banco, incluir_janela=True) == {str(outro): 1}
+    assert await _consulta(banco, "SELECT seq FROM chat_messages WHERE id = :m", m=na_janela) == [
+        (2,)
+    ]
+    assert await _consulta(banco, "SELECT seq FROM chat_messages WHERE id = :m", m=legado) == [
+        (None,)
+    ]
+
+
+@pytest.mark.asyncio
+async def test_script_sem_o_marco_nao_faz_nada(banco):
+    r = _alembic(banco, "upgrade", _REVISION)
+    assert r.returncode == 0, r.stderr
+    await _executa(banco, "DELETE FROM chat_seq_corte")
+    autor = await _usuario(banco)
+    chamado = await _chamado(banco, autor)
+    await _mensagem_antiga(banco, chamado, autor, datetime.now(UTC))
+
+    with pytest.raises(SemMarcoDoCorteError):
+        await numera(banco, incluir_janela=True)
+    with pytest.raises(SemMarcoDoCorteError):
+        await pendentes(banco)
+    assert await _consulta(banco, "SELECT count(*) FROM chat_messages WHERE seq IS NULL") == [(1,)]
 
 
 @pytest.mark.asyncio
@@ -287,6 +322,7 @@ async def test_downgrade_nao_perde_mensagem_e_o_contador_volta_a_zero(banco):
         await _consulta(banco, "SELECT 1 FROM pg_indexes WHERE indexname = 'uq_chat_messages_seq'")
         == []
     )
+    assert await _consulta(banco, "SELECT to_regclass('chat_seq_corte')") == [(None,)]
 
     r = _alembic(banco, "upgrade", _REVISION)
     assert r.returncode == 0, r.stderr
@@ -345,9 +381,10 @@ async def test_custo_da_migration_com_volume(banco, capsys):
     assert fim - inicio < 60
 
 
-def test_o_script_recusa_corte_sem_fuso(monkeypatch, capsys):
+def test_o_script_sem_url_nao_roda(monkeypatch, capsys):
     from scripts import numera_mensagens_sem_seq as script
 
-    monkeypatch.setattr("sys.argv", ["x", "--desde", "2026-11-10T14:00:00"])
+    monkeypatch.setattr("sys.argv", ["x", "--aplicar"])
+    monkeypatch.delenv("DATABASE_URL", raising=False)
     assert asyncio.run(script.principal()) == 2
-    assert "fuso" in capsys.readouterr().out
+    assert "DATABASE_URL" in capsys.readouterr().out

@@ -59,23 +59,43 @@ Os escritores de `chat_messages` e quem é dono de cada transação estão
 inventariados em `tests/test_chat_escritores_de_mensagem.py`: um escritor
 novo, ou um dono que comite sem chamar `numera_mensagens_do_chat`, derruba o
 teste.
+
+QUANDO O MODO INCREMENTAL É ANUNCIADO
+-------------------------------------
+`incremental_disponivel`: só quando TUDO o que existe no chamado desde o corte
+tem número. Mensagem sem número a partir do corte (menos a margem) é de uma
+imagem que não numera — troca de instâncias ou recuo —, e `after_seq` não a
+devolveria: o chamado fica no histórico tradicional até o script de
+recuperação numerá-la. Sem o marco do corte no banco, não é anunciado. A
+variável de ambiente só LIGA a possibilidade; quem afirma que é seguro é o
+banco.
 """
 
 import uuid
+from datetime import datetime, timedelta
 
-from sqlalchemy import event, inspect, update
+from sqlalchemy import event, inspect, select, update
 from sqlalchemy.exc import DBAPIError
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.orm import Session, SessionTransaction
 from sqlalchemy.orm.attributes import set_committed_value
 
-from app.models.models import ChatMessage, Ticket
+from app.models.models import ChatMessage, ChatSeqCorte, Ticket
 
 _ANOTADAS = "chat_mensagens_gravadas_na_transacao"
 
 # deadlock_detected e serialization_failure. A segunda só existe fora do READ
 # COMMITTED (o padrão do app); está aqui para quem um dia subir o isolamento.
 _PERDEU_A_CORRIDA = frozenset({"40P01", "40001"})
+
+# Quanto antes do corte uma mensagem gravada DEPOIS dele pode ter sido
+# carimbada. `created_at` sai do relógio da aplicação quando a mensagem é
+# montada; numa imagem antiga o INSERT pode ficar para depois da Helô (até
+# 40 s) e da espera pela própria migration. Quinze minutos cobrem isso com
+# folga, e também uma diferença razoável entre o relógio da aplicação e o do
+# banco. Errar para mais só deixa o chamado no histórico tradicional; errar para
+# menos perde mensagem. Por isso é constante, e não configuração.
+MARGEM_DO_CORTE = timedelta(minutes=15)
 
 
 @event.listens_for(Session, "pending_to_persistent")
@@ -129,6 +149,34 @@ async def numera_mensagens_do_chat(db: AsyncSession) -> None:
         if carregado is not None:
             set_committed_value(carregado, "chat_seq", ultimo)
     await db.flush()
+
+
+async def corte_da_numeracao(db: AsyncSession) -> datetime | None:
+    """O instante gravado pela migration, ou `None` se a linha não existe."""
+    return (
+        await db.execute(select(ChatSeqCorte.migrada_em).where(ChatSeqCorte.id == 1))
+    ).scalar_one_or_none()
+
+
+async def incremental_disponivel(db: AsyncSession, ticket_id: uuid.UUID) -> bool:
+    """O chamado pode ser sincronizado por `after_seq` sem perder nada?
+
+    Não, quando falta o marco do corte, ou quando existe no chamado mensagem
+    sem número com `created_at` a partir do corte menos a margem. Na dúvida, não.
+    """
+    corte = await corte_da_numeracao(db)
+    if corte is None:
+        return False
+    sem_numero = await db.execute(
+        select(ChatMessage.id)
+        .where(
+            ChatMessage.ticket_id == ticket_id,
+            ChatMessage.seq.is_(None),
+            ChatMessage.created_at >= corte - MARGEM_DO_CORTE,
+        )
+        .limit(1)
+    )
+    return sem_numero.first() is None
 
 
 def perdeu_a_concorrencia(exc: BaseException) -> bool:

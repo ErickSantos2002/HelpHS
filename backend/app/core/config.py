@@ -332,6 +332,14 @@ class Settings(BaseSettings):
     # decisão, não default.
     helo_enabled: bool = False
 
+    # F1-B-04c: a sincronização do chat por `after_seq`. DESLIGADA por padrão, e
+    # só uma das condições: com ela ligada, o modo é anunciado por chamado apenas
+    # quando o banco confirma que nada ficou sem número desde o corte
+    # (`app/services/chat_sequencia.py::incremental_disponivel`). Desligar é o
+    # primeiro passo de qualquer recuo de imagem: a tela volta ao histórico
+    # tradicional sem deploy do front — basta reiniciar o backend.
+    chat_sincronizacao_incremental: bool = False
+
     # O que a Helô faz quando está ligada — e é ORTOGONAL ao `helo_enabled`:
     # desligada é desligada em qualquer modo.
     #

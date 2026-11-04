@@ -12,7 +12,20 @@ de 04/11/2026). Esta revision cria a numeração que segue a ORDEM DE COMMIT:
 
 - `tickets.chat_seq` (BIGINT, NOT NULL, DEFAULT 0): o contador do chamado;
 - `chat_messages.seq` (BIGINT, nula): o número da mensagem no chamado;
-- `uq_chat_messages_seq`: único em (ticket_id, seq), só onde há número.
+- `uq_chat_messages_seq`: único em (ticket_id, seq), só onde há número;
+- `chat_seq_corte`: UMA linha, com o instante em que esta revision terminou.
+
+O MARCO DO CORTE
+----------------
+`chat_seq_corte.migrada_em` é `clock_timestamp()` no ÚLTIMO comando daqui.
+Nesse ponto esta transação já segura `ACCESS EXCLUSIVE` em `chat_messages`
+(o `ADD COLUMN`), e só o solta no commit: nenhuma mensagem comita entre o
+marco e o fim da migration. Logo, mensagem com `seq` nula e `created_at` a
+partir do marco foi gravada DEPOIS — por uma imagem antiga, durante a troca
+ou num recuo. É o que a aplicação consulta antes de anunciar o modo
+incremental (`app/services/chat_sequencia.py`), e o ponto de partida do
+script de recuperação. Fica no banco, e não numa variável de ambiente, para
+sobreviver a recuo de imagem e voltar junto com um backup.
 
 Quem numera é a aplicação (`app/services/chat_sequencia.py`), no fim da
 transação do envio, travando a linha do chamado com o próprio UPDATE do
@@ -23,10 +36,10 @@ NADA MUDA PARA AS MENSAGENS QUE JÁ EXISTEM
 ------------------------------------------
 - `ADD COLUMN ... DEFAULT 0` com default constante só altera o catálogo no
   PostgreSQL 11+: a tabela de chamados não é reescrita.
-- `seq` nasce nula e assim fica nas mensagens antigas. Não há backfill
-  (regra do projeto: dado histórico se corrige em script avulso, nunca em
-  migration). Mensagem sem número continua no histórico (`before`/`offset`) e
-  só não volta pela consulta incremental `after_seq`.
+- `seq` nasce nula e assim fica nas mensagens antigas, para sempre: o
+  histórico NÃO é numerado, nem aqui nem por script (decisão definitiva da
+  Sessão 0, 04/11/2026). Mensagem sem número continua no histórico
+  (`before`/`offset`) e só não volta pela consulta incremental `after_seq`.
 - O índice parcial nasce vazio — nenhuma linha tem `seq` ainda.
 
 POR QUE SEM `CREATE INDEX CONCURRENTLY`
@@ -43,7 +56,8 @@ ROLLBACK
 ele (`start.sh`: `alembic upgrade head` com `set -e`).
 
 - O rollback PREFERENCIAL mantém esta revision: imagem com o código anterior
-  E este arquivo. O código anterior ignora as duas colunas e grava `seq` nula
+  E os arquivos desta revision e da `m9h0i1j2k3l4` (produção está em
+  `l8g9h0i1j2k3`). O código anterior ignora as duas colunas e grava `seq` nula
   — o índice parcial aceita. As mensagens dessa janela ficam sem número e não
   voltam por `after_seq` até `scripts/numera_mensagens_sem_seq.py` rodar.
 - O DOWNGRADE não é estratégia de rollback e só roda com autorização
@@ -77,9 +91,18 @@ def upgrade() -> None:
         unique=True,
         postgresql_where=sa.text("seq IS NOT NULL"),
     )
+    op.create_table(
+        "chat_seq_corte",
+        sa.Column("id", sa.SmallInteger(), primary_key=True),
+        sa.Column("migrada_em", sa.DateTime(timezone=True), nullable=False),
+        sa.CheckConstraint("id = 1", name="ck_chat_seq_corte_uma_linha"),
+    )
+    # O ÚLTIMO comando, de propósito — ver "O MARCO DO CORTE" acima.
+    op.execute("INSERT INTO chat_seq_corte (id, migrada_em) VALUES (1, clock_timestamp())")
 
 
 def downgrade() -> None:
+    op.drop_table("chat_seq_corte")
     op.drop_index("uq_chat_messages_seq", table_name="chat_messages")
     op.drop_column("chat_messages", "seq")
     op.drop_column("tickets", "chat_seq")

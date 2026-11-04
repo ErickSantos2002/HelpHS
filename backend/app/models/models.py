@@ -1147,6 +1147,24 @@ class ChatMessage(Base):
     )
 
 
+class ChatSeqCorte(Base):
+    """O instante em que a numeração do chat passou a existir (F1-B-04c).
+
+    Uma linha só, gravada pela migration `n0i1j2k3l4m5` no último comando dela.
+    Mensagem com `seq` nula e `created_at` a partir daqui foi gravada por uma
+    imagem que não numera — e enquanto houver uma no chamado, o modo
+    incremental não é anunciado para ele. Sem a linha, também não: na dúvida,
+    o histórico tradicional.
+    """
+
+    __tablename__ = "chat_seq_corte"
+
+    id: Mapped[int] = mapped_column(SmallInteger, primary_key=True)
+    migrada_em: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False)
+
+    __table_args__ = (CheckConstraint("id = 1", name="ck_chat_seq_corte_uma_linha"),)
+
+
 class KBArticle(Base):
     """Artigos da Base de Conhecimento"""
 

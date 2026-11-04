@@ -33,8 +33,13 @@ from app.core.security import get_current_user
 from app.main import app
 from app.models.models import ChatMessage, LibraryFile, LibraryVisibility, Ticket, UserRole
 from app.routers import chat as rota_do_chat
-from app.services.chat_sequencia import numera_mensagens_do_chat, perdeu_a_concorrencia
+from app.services.chat_sequencia import (
+    MARGEM_DO_CORTE,
+    numera_mensagens_do_chat,
+    perdeu_a_concorrencia,
+)
 from app.services.helo import FalaDaHelo
+from scripts.numera_mensagens_sem_seq import numera
 from tests import test_chat_historico_postgres as _base
 from tests import test_chat_idempotencia_postgres as _idem
 from tests.test_chat_historico_postgres import _arquivo, _grava, _mensagem, _usuario
@@ -51,6 +56,30 @@ _rodar = _idem._rodar
 _alguem_esperando_bloqueio = _idem._alguem_esperando_bloqueio
 _UMA_VEZ = _idem._UMA_VEZ
 _NADA = _idem._NADA
+
+# O marco do corte destes testes: um dia atrás. O "legado" deles é de três dias.
+_CORTE = datetime.now(UTC) - timedelta(days=1)
+
+
+async def _poe_o_marco(fabrica, quando=_CORTE) -> None:
+    async with fabrica() as s:
+        await s.execute(
+            text(
+                "INSERT INTO chat_seq_corte (id, migrada_em) VALUES (1, :q)"
+                " ON CONFLICT (id) DO UPDATE SET migrada_em = excluded.migrada_em"
+            ),
+            {"q": quando},
+        )
+        await s.commit()
+
+
+@pytest.fixture(autouse=True)
+def _incremental_ligado(banco_real):
+    """Interruptor ligado e marco no banco: o estado em que `after_seq` vale.
+    Os testes do anúncio desligam um ou outro."""
+    asyncio.run(_poe_o_marco(banco_real[0]))
+    with patch("app.routers.chat._incremental_ligado", lambda: True):
+        yield
 
 
 # ── Ambiente ──────────────────────────────────────────────────
@@ -778,3 +807,136 @@ def test_a_saudacao_da_helo_na_abertura_e_a_mensagem_1_do_chamado(banco_real):
 
     assert linhas == [(True, 1)]
     assert contador == 1
+
+
+# ── O anúncio do modo incremental ─────────────────────────────
+
+
+def test_interruptor_desligado_nao_anuncia_e_after_seq_e_409_estruturado(banco_real):
+    async def _cena(cena: _Cena):
+        with _rest(cena):
+            await _post(cena.chamado.id, "cliente")
+            with patch("app.routers.chat._incremental_ligado", lambda: False):
+                pagina = await _get(cena.chamado.id, "cliente")
+                incremental = await _get(cena.chamado.id, "cliente", after_seq=0)
+                anterior = await _get(cena.chamado.id, "cliente", limit=1, offset=0)
+        return pagina, incremental, anterior
+
+    pagina, incremental, anterior = _rodar(banco_real, _cena)
+
+    assert pagina.status_code == 200
+    assert pagina.json()["sincronizacao_incremental"] is False
+    assert len(pagina.json()["items"]) == 1, "o histórico tradicional segue inteiro"
+    assert incremental.status_code == 409
+    assert incremental.json()["detail"]["code"] == "incremental_indisponivel"
+    assert anterior.status_code == 200
+
+
+def test_sem_o_marco_do_corte_nao_anuncia_mesmo_com_o_interruptor(banco_real):
+    fabrica, _ = banco_real
+
+    async def _cena(cena: _Cena):
+        async with fabrica() as s:
+            await s.execute(text("DELETE FROM chat_seq_corte"))
+            await s.commit()
+        with _rest(cena):
+            await _post(cena.chamado.id, "cliente")
+            pagina = await _get(cena.chamado.id, "cliente")
+            incremental = await _get(cena.chamado.id, "cliente", after_seq=0)
+        await _poe_o_marco(fabrica)
+        return pagina, incremental
+
+    pagina, incremental = _rodar(banco_real, _cena)
+
+    assert pagina.json()["sincronizacao_incremental"] is False
+    assert incremental.json()["detail"]["code"] == "incremental_indisponivel"
+
+
+@pytest.mark.parametrize(
+    "carimbo",
+    [timedelta(0), -MARGEM_DO_CORTE / 2],
+    ids=["depois_do_corte", "na_janela_antes_do_corte"],
+)
+def test_mensagem_de_imagem_antiga_desliga_o_chamado_e_ela_volta_pelo_historico(
+    banco_real, url_do_banco, carimbo
+):
+    """O recuo, de ponta a ponta. A tela está no incremental, ancorada; uma
+    imagem que não numera grava no chamado. A partir daí o chamado NÃO é
+    anunciado, `after_seq` é 409, e a mensagem está no histórico tradicional —
+    nada some. O outro chamado não é afetado. Depois do script (com a janela,
+    quando é o caso), o chamado volta a ser anunciado e ela vem pelo número.
+
+    `na_janela_antes_do_corte` é o caso que uma regra "sem número depois da
+    primeira numerada" deixaria passar: a imagem antiga montou a mensagem
+    ANTES do marco e só gravou depois."""
+    fabrica, criados = banco_real
+
+    async def _cena(cena: _Cena):
+        await _poe_o_marco(fabrica, datetime.now(UTC) - timedelta(minutes=1))
+        with _rest(cena):
+            await _post(cena.chamado.id, "cliente", "numerada")
+            ancora = (await _get(cena.chamado.id, "cliente")).json()
+            await _grava(
+                fabrica,
+                criados,
+                _mensagem(
+                    cena.chamado,
+                    cena.tecnico,
+                    datetime.now(UTC) - timedelta(minutes=1) + carimbo,
+                    texto="da imagem antiga",
+                ),
+            )
+            depois = await _get(cena.chamado.id, "cliente")
+            incremental = await _get(cena.chamado.id, "cliente", after_seq=ancora["ultima_seq"])
+            outro = await _get(cena.outro_chamado.id, "cliente")
+            numeradas = await numera(url_do_banco, incluir_janela=carimbo < timedelta(0))
+            recuperado = await _get(cena.chamado.id, "cliente", after_seq=ancora["ultima_seq"])
+            pagina_final = await _get(cena.chamado.id, "cliente")
+        await _poe_o_marco(fabrica)
+        return ancora, depois, incremental, outro, numeradas, recuperado, pagina_final
+
+    ancora, depois, incremental, outro, numeradas, recuperado, pagina_final = _rodar(
+        banco_real, _cena
+    )
+
+    assert ancora["sincronizacao_incremental"] is True
+    assert depois.json()["sincronizacao_incremental"] is False
+    assert "da imagem antiga" in [m["content"] for m in depois.json()["items"]]
+    assert incremental.status_code == 409
+    assert incremental.json()["detail"]["code"] == "incremental_indisponivel"
+    assert outro.json()["sincronizacao_incremental"] is True, "só o chamado afetado"
+
+    assert sum(numeradas.values()) == 1
+    assert recuperado.status_code == 200
+    assert [m["content"] for m in recuperado.json()["items"]] == ["da imagem antiga"]
+    assert pagina_final.json()["sincronizacao_incremental"] is True
+
+
+def test_mensagem_na_janela_fica_no_legado_sem_incluir_janela(banco_real, url_do_banco):
+    """Sem `--incluir-janela`, a ambígua não é numerada — e o chamado continua
+    no histórico tradicional, em vez de arriscar uma mensagem sumida."""
+    fabrica, criados = banco_real
+
+    async def _cena(cena: _Cena):
+        await _poe_o_marco(fabrica, datetime.now(UTC) - timedelta(minutes=1))
+        await _grava(
+            fabrica,
+            criados,
+            _mensagem(
+                cena.chamado,
+                cena.tecnico,
+                datetime.now(UTC) - timedelta(minutes=5),
+                texto="ambígua",
+            ),
+        )
+        numeradas = await numera(url_do_banco)
+        with _rest(cena):
+            pagina = await _get(cena.chamado.id, "cliente")
+        await _poe_o_marco(fabrica)
+        return cena.chamado.id, numeradas, pagina
+
+    chamado_id, numeradas, pagina = _rodar(banco_real, _cena)
+
+    assert str(chamado_id) not in numeradas
+    assert pagina.json()["sincronizacao_incremental"] is False
+    assert [m["seq"] for m in pagina.json()["items"]] == [None]

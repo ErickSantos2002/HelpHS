@@ -65,7 +65,11 @@ from app.schemas.chat import (
     SuggestReplyResponse,
 )
 from app.services import chat_backplane, consentimento
-from app.services.chat_sequencia import numera_mensagens_do_chat, perdeu_a_concorrencia
+from app.services.chat_sequencia import (
+    incremental_disponivel,
+    numera_mensagens_do_chat,
+    perdeu_a_concorrencia,
+)
 from app.services.helo import (
     FALAS_MAXIMAS,
     MOTIVO_PEDIU_HUMANO,
@@ -668,6 +672,12 @@ async def list_messages(
     Toda resposta traz `ultima_seq`, lido ANTES das mensagens: tudo até ele
     já estava comitado, então uma página sem `after_seq` seguida de
     `after_seq=ultima_seq` não perde nada que comitar entre as duas.
+
+    **Só vale quando anunciado.** Toda resposta traz `sincronizacao_incremental`:
+    verdadeiro apenas com a configuração ligada E o banco confirmando que nada
+    do chamado ficou sem número desde o corte. Falso, `after_seq` é 409
+    `incremental_indisponivel`, e quem pediu volta ao histórico por cursor. A
+    presença de `ultima_seq` NÃO é anúncio.
     """
     if offset is not None and before is not None:
         raise HTTPException(
@@ -684,6 +694,17 @@ async def list_messages(
     # mesmo 404 com cursor válido, inválido ou sem cursor nenhum.
     ticket = await _get_ticket_visivel(ticket_id, actor, db)
     ponto = _decodifica_cursor(before, ticket_id) if before is not None else None
+
+    # Desligado, nem consulta: o anúncio é falso sem tocar no banco.
+    disponivel = _incremental_ligado() and await incremental_disponivel(db, ticket_id)
+    if after_seq is not None and not disponivel:
+        raise HTTPException(
+            status_code=status.HTTP_409_CONFLICT,
+            detail={
+                "code": "incremental_indisponivel",
+                "detail": "A sincronização incremental não está disponível. Use o histórico.",
+            },
+        )
 
     # ANTES das mensagens, num comando à parte. Em READ COMMITTED cada comando
     # vê o banco do seu próprio instante; lido depois, o contador poderia
@@ -774,7 +795,13 @@ async def list_messages(
         next_before=next_before,
         ultima_seq=ultima_seq,
         next_after_seq=next_after_seq,
+        sincronizacao_incremental=disponivel,
     )
+
+
+def _incremental_ligado() -> bool:
+    """A configuração, lida na hora: desligar vale no reinício seguinte."""
+    return get_settings().chat_sincronizacao_incremental
 
 
 async def _ultima_seq(db: AsyncSession, ticket_id: uuid.UUID) -> int:

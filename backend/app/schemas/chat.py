@@ -84,6 +84,9 @@ class ChatMessageListResponse(AppBaseModel):
     # falso é o próprio `ultima_seq` — um buraco no fim (mensagem removida)
     # não faz a tela pedir o mesmo trecho para sempre.
     next_after_seq: int | None = None
+    # F1-B-04c: o anúncio de que `after_seq` pode ser usado NESTE chamado. Falso
+    # por padrão — e é o que um front antigo, que não conhece o campo, assume.
+    sincronizacao_incremental: bool = False
 
 
 # Teto do conteúdo de uma mensagem de chat, em caracteres.

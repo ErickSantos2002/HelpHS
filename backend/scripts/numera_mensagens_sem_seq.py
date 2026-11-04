@@ -1,32 +1,39 @@
 """
 Numera as mensagens do chat que ficaram SEM `seq` depois da migration
-`n0i1j2k3l4m5` — as gravadas por uma imagem antiga do backend durante um
-rollback de aplicação que manteve a migration, ou por uma instância antiga
-que ainda servia enquanto a nova subia (F1-B-04c).
+`n0i1j2k3l4m5` — as gravadas por uma imagem que não numera: a antiga, que
+seguiu atendendo durante a troca, ou a imagem de recuperação num recuo
+(F1-B-04c).
 
-**Avulso, rodado à mão.** Não é migration, não entra no boot do container e
-não é backfill do legado: mensagem anterior à migration continua sem número,
-de propósito (regra do projeto). O corte é `--desde`, o instante em que a
-migration rodou em produção — o script recusa rodar sem ele.
+**Avulso, rodado à mão.** Não é migration, não entra no boot do contêiner e
+**não é backfill**: o histórico anterior à migration NUNCA é numerado (decisão
+definitiva da Sessão 0, 04/11/2026). O corte não é argumento: é o marco que a
+própria migration gravou em `chat_seq_corte`. Sem ele, o script não roda.
+
+O que conta como "depois da migration":
+
+- `created_at` a partir do marco: gravada depois, com certeza — numerada.
+- `created_at` na JANELA de `MARGEM_DO_CORTE` antes do marco: ambígua. Pode ser
+  histórico (gravada antes da migration) ou de uma imagem antiga que montou a
+  mensagem antes e só gravou depois. Por padrão NÃO é numerada, e o chamado
+  segue no histórico tradicional (`incremental_disponivel` o vê). Numerá-la
+  exige `--incluir-janela`, decisão de quem implanta — ela passa a valer
+  como mensagem nova para quem sincroniza.
 
 Por que numerar AGORA, e não "no lugar" em que elas comitaram: a tela que
-sincroniza por `after_seq` já passou daquele ponto. Um número novo, depois do
-último que existe, é o que a faz buscá-las na próxima releitura; é também a
-verdade sobre elas — do ponto de vista de quem sincroniza, elas ficaram
-visíveis agora. A exibição continua por `created_at`, no lugar de sempre.
+sincroniza por `after_seq` já passou daquele ponto. Um número depois do último
+é o que a faz buscá-las; a exibição continua por `created_at`.
 
-Cada chamado é uma transação, com o mesmo bloqueio do envio: o UPDATE relativo
-do contador trava a linha do chamado, e um envio simultâneo no mesmo chamado
-espera ou é esperado — nunca recebe o mesmo número.
+Cada chamado é uma transação, com o bloqueio do envio: a linha do chamado é
+travada ANTES de reler as mensagens, e um envio simultâneo no mesmo chamado
+espera ou é esperado — nunca recebe o mesmo número. Interromper no meio deixa
+os chamados já feitos numerados e os outros intactos; rodar de novo continua.
 
 Uso::
 
     cd backend
     export DATABASE_URL='postgresql+asyncpg://usuario:senha@host:porta/banco'
-    python -m scripts.numera_mensagens_sem_seq --desde 2026-11-10T14:00:00+00:00
-    python -m scripts.numera_mensagens_sem_seq --desde 2026-11-10T14:00:00+00:00 --aplicar
-
-Sem `--aplicar` nada é escrito: o script só conta, por chamado, o que faria.
+    python -m scripts.numera_mensagens_sem_seq            # só conta
+    python -m scripts.numera_mensagens_sem_seq --aplicar  # grava
 """
 
 import argparse
@@ -36,13 +43,16 @@ import sys
 from datetime import datetime
 
 from sqlalchemy import text
-from sqlalchemy.ext.asyncio import create_async_engine
+from sqlalchemy.ext.asyncio import AsyncEngine, create_async_engine
 
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
+
+from app.services.chat_sequencia import MARGEM_DO_CORTE  # noqa: E402
 
 if hasattr(sys.stdout, "reconfigure"):
     sys.stdout.reconfigure(encoding="utf-8", errors="replace")
 
+_CORTE = text("SELECT migrada_em FROM chat_seq_corte WHERE id = 1")
 _PENDENTES = text(
     "SELECT ticket_id, count(*) FROM chat_messages "
     "WHERE seq IS NULL AND created_at >= :desde GROUP BY ticket_id ORDER BY ticket_id"
@@ -59,17 +69,48 @@ _AVANCA = text("UPDATE tickets SET chat_seq = chat_seq + :n WHERE id = :t RETURN
 _NUMERA = text("UPDATE chat_messages SET seq = :s WHERE id = :m")
 
 
-async def numera(url: str, desde: datetime, *, aplicar: bool) -> dict[str, int]:
-    """Devolve {chamado: quantas} — numeradas com `aplicar`, a numerar sem."""
+class SemMarcoDoCorteError(RuntimeError):
+    """`chat_seq_corte` vazia: a migration não rodou neste banco."""
+
+
+async def _corte(motor: AsyncEngine) -> datetime:
+    async with motor.connect() as conn:
+        corte = (await conn.execute(_CORTE)).scalar_one_or_none()
+    if corte is None:
+        raise SemMarcoDoCorteError("chat_seq_corte sem a linha da migration n0i1j2k3l4m5.")
+    return corte
+
+
+async def pendentes(url: str) -> dict[str, dict[str, int]]:
+    """Por chamado: quantas depois do marco, e quantas na janela ambígua."""
+    motor = create_async_engine(url)
+    try:
+        corte = await _corte(motor)
+        async with motor.connect() as conn:
+            depois = (await conn.execute(_PENDENTES, {"desde": corte})).all()
+            com_janela = (await conn.execute(_PENDENTES, {"desde": corte - MARGEM_DO_CORTE})).all()
+    finally:
+        await motor.dispose()
+    resultado: dict[str, dict[str, int]] = {}
+    for chamado, quantas in com_janela:
+        resultado[str(chamado)] = {"depois": 0, "janela": int(quantas)}
+    for chamado, quantas in depois:
+        resultado[str(chamado)]["depois"] = int(quantas)
+        resultado[str(chamado)]["janela"] -= int(quantas)
+    return resultado
+
+
+async def numera(url: str, *, incluir_janela: bool = False) -> dict[str, int]:
+    """Numera e devolve {chamado: quantas}. Sem `incluir_janela`, só o que tem
+    `created_at` a partir do marco."""
     motor = create_async_engine(url)
     resultado: dict[str, int] = {}
     try:
+        corte = await _corte(motor)
+        desde = corte - MARGEM_DO_CORTE if incluir_janela else corte
         async with motor.connect() as conn:
-            pendentes = (await conn.execute(_PENDENTES, {"desde": desde})).all()
-        for chamado, quantas in pendentes:
-            if not aplicar:
-                resultado[str(chamado)] = int(quantas)
-                continue
+            chamados = [c for c, _ in (await conn.execute(_PENDENTES, {"desde": desde})).all()]
+        for chamado in chamados:
             async with motor.begin() as conn:
                 await conn.execute(_TRAVA, {"t": chamado})
                 ids = [
@@ -88,28 +129,34 @@ async def numera(url: str, desde: datetime, *, aplicar: bool) -> dict[str, int]:
 
 async def principal() -> int:
     parser = argparse.ArgumentParser(description=__doc__)
-    parser.add_argument(
-        "--desde",
-        required=True,
-        help="instante ISO-8601 COM fuso em que a migration n0i1j2k3l4m5 rodou",
-    )
     parser.add_argument("--aplicar", action="store_true", help="grava (sem isto, só conta)")
+    parser.add_argument(
+        "--incluir-janela",
+        action="store_true",
+        help="numera também a janela ambígua antes do marco (decisão de quem implanta)",
+    )
     args = parser.parse_args()
 
-    desde = datetime.fromisoformat(args.desde)
-    if desde.tzinfo is None:
-        print("--desde precisa de fuso (ex.: 2026-11-10T14:00:00+00:00).")
-        return 2
     url = os.environ.get("DATABASE_URL")
     if not url:
         print("DATABASE_URL não definida. Exporte-a antes de rodar.")
         return 2
-
-    por_chamado = await numera(url, desde, aplicar=args.aplicar)
-    verbo = "numeradas" if args.aplicar else "a numerar (nada gravado)"
-    for chamado, quantas in por_chamado.items():
-        print(f"chamado {chamado}: {quantas} {verbo}")
-    print(f"total: {sum(por_chamado.values())} {verbo} em {len(por_chamado)} chamado(s)")
+    try:
+        if not args.aplicar:
+            por_chamado = await pendentes(url)
+            for chamado, n in por_chamado.items():
+                print(f"chamado {chamado}: {n['depois']} depois do marco, {n['janela']} na janela")
+            depois = sum(n["depois"] for n in por_chamado.values())
+            janela = sum(n["janela"] for n in por_chamado.values())
+            print(f"total: {depois} a numerar, {janela} na janela (nada gravado)")
+            return 0
+        numeradas = await numera(url, incluir_janela=args.incluir_janela)
+    except SemMarcoDoCorteError as exc:
+        print(f"{exc} Nada foi feito.")
+        return 2
+    for chamado, quantas in numeradas.items():
+        print(f"chamado {chamado}: {quantas} numeradas")
+    print(f"total: {sum(numeradas.values())} numeradas em {len(numeradas)} chamado(s)")
     return 0
 
 

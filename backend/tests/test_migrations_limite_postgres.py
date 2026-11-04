@@ -172,6 +172,8 @@ async def test_upgrade_conjunto_desde_producao_nao_toca_no_que_existia(banco):
 
     assert await _versao(banco) == _HEAD
     assert await _rastros(banco) == sorted(_RASTROS)
+    [(marco,)] = await _consulta(banco, "SELECT migrada_em FROM chat_seq_corte")
+    assert marco > max(q for _, _, q in antes), "o histórico fica antes do marco"
     assert (
         await _consulta(banco, "SELECT id, content, created_at FROM chat_messages ORDER BY id")
         == antes
@@ -230,6 +232,7 @@ async def test_com_limite_desiste_desfaz_tudo_e_a_proxima_passa(banco, limite):
         )
         == []
     )
+    assert await _consulta(banco, "SELECT to_regclass('chat_seq_corte')") == [(None,)]
 
     # Sem ninguém segurando a tabela, a mesma tentativa passa.
     r = _alembic(banco, "upgrade", "head", **limite)
