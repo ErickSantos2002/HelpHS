@@ -5,7 +5,8 @@ Reforços da numeração do chat (F1-B-04c), contra PostgreSQL:
   atrasado), e não uma fala de mentira: o chamado fica livre enquanto o
   modelo pensa, inclusive no caminho da escalada, que altera o chamado;
 - o script de recuperação concorrendo com envios no mesmo chamado;
-- a ordem dos bloqueios entre chamados numa mesma transação.
+- a ordem dos bloqueios entre chamados numa mesma transação;
+- a guarda que avisa de mensagem indo para o commit sem número.
 
 O servidor e as fixtures são os do `test_chat_historico_postgres.py`.
 """
@@ -29,6 +30,7 @@ from tests.test_chat_historico_postgres import _grava, _mensagem
 from tests.test_chat_sequencia_postgres import (
     _chamado_livre,
     _contador,
+    _HeloQueFala,
     _linhas,
     _numera_gravando,
     _poe_o_marco,
@@ -241,3 +243,53 @@ def test_varios_chamados_na_mesma_transacao_travam_em_ordem_de_id(banco_real):
 
     assert inseridos != sorted(inseridos), "o cenário precisa da inserção fora de ordem"
     assert travados == sorted(inseridos)
+
+
+# ── A guarda do commit ────────────────────────────────────────
+
+
+def test_guarda_avisa_da_mensagem_montada_depois_da_numeracao(banco_real):
+    async def _cena(cena: _Cena):
+        antes = _mensagem(cena.chamado, cena.tecnico, datetime.now(UTC), texto="numerada")
+        depois = _mensagem(cena.chamado, cena.tecnico, datetime.now(UTC), texto="esquecida")
+        with patch("app.services.chat_sequencia.logger") as registro:
+            async with cena.fabrica() as s:
+                s.add(antes)
+                await numera_mensagens_do_chat(s)
+                s.add(depois)  # o defeito: depois da numeração, antes do commit
+                await s.commit()
+        return antes.id, depois.id, registro.error.call_args_list, await _linhas(cena)
+
+    antes_id, depois_id, chamadas, linhas = _rodar(banco_real, _cena)
+
+    assert len(chamadas) == 1
+    texto = " ".join(str(a) for a in chamadas[0].args)
+    assert str(depois_id) in texto and str(antes_id) not in texto
+    # Só avisa: não barra o commit e não numera.
+    assert {c: s for c, s, _ in linhas} == {"numerada": 1, "esquecida": None}
+
+
+def test_guarda_fica_quieta_nos_escritores_de_verdade(banco_real):
+    """O envio do cliente com a fala da Helô, o reenvio que para no índice
+    único (SAVEPOINT desfeito) e o envio do técnico: nenhum aviso. O
+    `before_commit` do SAVEPOINT de `_grava_uma_vez` — onde a mensagem ainda
+    não foi numerada — não pode contar."""
+    chave = uuid.uuid4()
+
+    async def _cena(cena: _Cena):
+        with (
+            patch("app.services.chat_sequencia.logger") as registro,
+            _rest(cena),
+            patch("app.routers.chat.responde_triagem", _HeloQueFala()),
+        ):
+            respostas = [
+                await _post(cena.chamado.id, "cliente", chave=chave),
+                await _post(cena.chamado.id, "cliente", chave=chave),
+                await _post(cena.chamado.id, "tecnico"),
+            ]
+        return respostas, registro.error.call_args_list
+
+    respostas, avisos = _rodar(banco_real, _cena)
+
+    assert [r.status_code for r in respostas] == [201, 200, 201]
+    assert avisos == []

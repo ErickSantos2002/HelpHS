@@ -58,7 +58,10 @@ fica de fora; mensagem que já tem número não é renumerada.
 Os escritores de `chat_messages` e quem é dono de cada transação estão
 inventariados em `tests/test_chat_escritores_de_mensagem.py`: um escritor
 novo, ou um dono que comite sem chamar `numera_mensagens_do_chat`, derruba o
-teste.
+teste. O que a leitura do código não pega — uma mensagem montada DEPOIS da
+numeração, no mesmo dono — a guarda `_confere_antes_do_commit` registra em
+log no commit. Ela só olha e avisa: não numera, não barra o commit, não
+consulta o banco.
 
 QUANDO O MODO INCREMENTAL É ANUNCIADO
 -------------------------------------
@@ -74,6 +77,7 @@ banco.
 import uuid
 from datetime import datetime, timedelta
 
+from loguru import logger
 from sqlalchemy import event, inspect, select, update
 from sqlalchemy.exc import DBAPIError
 from sqlalchemy.ext.asyncio import AsyncSession
@@ -110,6 +114,34 @@ def _esquece(session: Session, transacao: SessionTransaction) -> None:
     # mensagem gravada dentro dele e mantida continua sendo desta transação.
     if transacao.parent is None:
         session.info.pop(_ANOTADAS, None)
+
+
+@event.listens_for(Session, "before_commit")
+def _confere_antes_do_commit(session: Session) -> None:
+    """Avisa, no commit da transação de verdade, de mensagem que vai ficar sem
+    número: a pendente (montada e ainda não gravada) e a gravada nesta
+    transação que ninguém numerou.
+
+    Por que só log: barrar o commit derrubaria o envio do cliente por um
+    defeito que, enquanto o modo incremental estiver desligado, não custa nada
+    a ninguém; numerar aqui exigiria SQL dentro de um evento síncrono da
+    `AsyncSession`, caminho não validado com o asyncpg. O `before_commit` também
+    dispara no fim de cada SAVEPOINT — ali a mensagem ainda nem chegou à
+    numeração, e é ignorado. Lê só o que está na memória (`dict` do estado):
+    nada de carregar atributo, nada de consulta.
+    """
+    if session.in_nested_transaction():
+        return
+    pendentes = [m for m in session.new if isinstance(m, ChatMessage)]
+    gravadas = [m for m in session.info.get(_ANOTADAS, []) if inspect(m).persistent]
+    sem_numero = [m for m in (*pendentes, *gravadas) if inspect(m).dict.get("seq") is None]
+    if sem_numero:
+        logger.error(
+            "Chat: {} mensagem(ns) indo para o commit SEM seq (F1-B-04c) — o dono da"
+            " transação não chamou numera_mensagens_do_chat depois de montá-las: {}",
+            len(sem_numero),
+            ", ".join(f"{m.id} no chamado {m.ticket_id}" for m in sem_numero),
+        )
 
 
 async def numera_mensagens_do_chat(db: AsyncSession) -> None:
