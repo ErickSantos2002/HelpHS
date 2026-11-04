@@ -814,6 +814,35 @@ describe("ReportsPage — exportar CSV e PDF", () => {
     expect(toast.error).toHaveBeenCalledTimes(1);
   });
 
+  it("'Tentar de novo' de um aviso antigo não corre junto de um download em curso", async () => {
+    // O botão desabilitado não cobre este caminho: o aviso da falha anterior
+    // continua na tela e o "Tentar de novo" dele chama o download por fora do
+    // menu. Quem barra é a guarda síncrona.
+    const segundo = pendente();
+    vi.mocked(reportService.baixarRelatorio)
+      .mockRejectedValueOnce(erroDaApi(500))
+      .mockReturnValueOnce(segundo.promessa);
+    await montar();
+
+    abrirExportar();
+    fireEvent.click(screen.getByRole("button", { name: /Exportar CSV/ }));
+    await waitFor(() => expect(toast.error).toHaveBeenCalledTimes(1));
+    await screen.findByRole("button", { name: /^Exportar$/ });
+    const [, opcoes] = vi.mocked(toast.error).mock.calls[0];
+    const acao = opcoes?.action as { label: string; onClick: () => void };
+
+    abrirExportar();
+    fireEvent.click(screen.getByRole("button", { name: /Exportar PDF/ }));
+    await screen.findByRole("button", { name: /Gerando PDF/ });
+
+    act(() => acao.onClick());
+    expect(reportService.baixarRelatorio).toHaveBeenCalledTimes(2);
+    expect(screen.getByRole("button", { name: /Gerando PDF/ })).toBeInTheDocument();
+
+    segundo.resolver();
+    await screen.findByRole("button", { name: /^Exportar$/ });
+  });
+
   it("428 do aceite: nenhum aviso de falha por cima da tela do aceite", async () => {
     vi.mocked(reportService.baixarRelatorio).mockRejectedValue(
       erroDaApi(428, { detail: "Aceite pendente", code: "aceite_politica_pendente" }),
