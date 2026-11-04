@@ -75,9 +75,18 @@ num chamado com histórico inteiro sem número.
 
 ## Legado
 
-Sem backfill (regra do projeto). Mensagem anterior à migration fica com `seq`
-nulo: aparece no histórico por `created_at` como sempre, e nunca no incremental.
-O contador de todo chamado existente nasce 0; a primeira mensagem nova é a 1.
+**Decisão definitiva da Sessão 0 (04/11/2026): o histórico NÃO é numerado.**
+Nenhuma mensagem anterior à migration recebe `seq` — nem na migration, nem por
+script, nem depois. Ela fica com `seq` nulo, aparece no histórico tradicional
+(página recente e cursor `before`, por `created_at`) e nunca no incremental. O
+contador de todo chamado existente nasce 0; a primeira mensagem nova é a 1.
+
+O `numera_mensagens_sem_seq.py` NÃO é ferramenta de backfill: serve só para o
+que for gravado sem número DEPOIS da migration (imagem antiga servindo durante
+a troca ou num recuo). O `--desde` é o instante em que a migration rodou em
+produção, registrado no deploy — nunca uma data anterior. Um `--desde` antigo
+numeraria histórico depois do contador, e a tela receberia mensagens de meses
+atrás como se fossem novas.
 
 ## Migration `n0i1j2k3l4m5` (down `m9h0i1j2k3l4`)
 
@@ -94,13 +103,15 @@ O contador de todo chamado existente nasce 0; a primeira mensagem nova é a 1.
 - **Preferido: rollback da IMAGEM mantendo a migration.** A imagem antiga não
   conhece `seq` e grava com `seq` nulo; o resto funciona. Ao voltar a imagem
   nova, rodar `python -m scripts.numera_mensagens_sem_seq --desde <instante da
-  migration>` (sem `--aplicar` primeiro): numera, depois do último número, o
+  migration em produção>` (sem `--aplicar` primeiro): numera, depois do último número, o
   que entrou sem número após o corte, com o mesmo bloqueio do envio. Telas que
   já passaram daquele ponto as acham na próxima releitura.
 - **⚠️ A imagem anterior NÃO sobe com o banco no head novo** se não tiver o
   arquivo da revision (o `start.sh` morre no `alembic upgrade head`, ver o
-  incidente de 03/11). O rollback de imagem exige uma imagem que tenha o
-  arquivo `n0i1j2k3l4m5` — ou descer antes.
+  incidente de 03/11). Produção (v1.23.0, `0450129`) está em `l8g9h0i1j2k3`:
+  o próximo boot aplica `m9h0i1j2k3l4` E `n0i1j2k3l4m5`, numa transação só. A
+  imagem de recuperação é a v1.23.0 com os DOIS arquivos de revision e nada
+  mais — ver o plano entregue à Sessão 0 em 04/11.
 - **Downgrade não é estratégia de rollback**: apaga os números, zera o contador,
   e toda tela com âncora > 0 recebe 409 e recarrega. Nada se perde, mas todo
   mundo ressincroniza. Não automatizado.
