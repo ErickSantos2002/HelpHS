@@ -520,9 +520,14 @@ async def test_grupo_volta_a_ser_excluivel_depois_de_esvaziado(fabrica, http):
     c = await _empresa(fabrica, g)
     admin_http = _como(http, admin)
 
-    assert (await admin_http.delete(_url_grupo(g))).status_code == 409
-    assert (await admin_http.delete(_url_empresa(c))).status_code == 204
-    assert (await admin_http.delete(_url_grupo(g))).status_code == 204
+    r_grupo_cheio = await admin_http.delete(_url_grupo(g))
+    assert r_grupo_cheio.status_code == 409
+
+    r_empresa = await admin_http.delete(_url_empresa(c))
+    assert r_empresa.status_code == 204
+
+    r_grupo_vazio = await admin_http.delete(_url_grupo(g))
+    assert r_grupo_vazio.status_code == 204
     assert [a.entity_type for a in await _auditorias(fabrica)] == ["company", "group"]
 
 
