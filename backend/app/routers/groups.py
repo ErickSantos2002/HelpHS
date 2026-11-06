@@ -2,7 +2,11 @@
 Groups, Companies and Client-assignment endpoints.
 
 Permissões:
-  Todos os endpoints — admin | technician
+  Todos os endpoints — admin | technician, exceto:
+  DELETE /groups/{id}                  — admin
+  DELETE /groups/{id}/companies/{id}   — admin
+  As duas exclusões recusam (409) o que ainda tem conteúdo; ver
+  "Exclusão de grupo e empresa" mais abaixo.
 
 Consulta transversal (tela de Empresas, só leitura):
   GET /companies          — todas as empresas, paginado, busca por nome/CNPJ
@@ -17,12 +21,16 @@ import uuid
 from typing import Annotated
 
 from fastapi import APIRouter, Depends, HTTPException, Query, status
-from sqlalchemy import ColumnElement, func, or_, select
+from loguru import logger
+from sqlalchemy import ColumnElement, Select, func, or_, select
+from sqlalchemy.exc import IntegrityError
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.core.database import get_db
 from app.core.security import authorize
 from app.models.models import (
+    AuditAction,
+    AuditLog,
     Company,
     CompanyNote,
     Equipment,
@@ -59,6 +67,9 @@ from app.schemas.groups import (
 router = APIRouter(tags=["Groups"])
 
 _AdminDep = Annotated[User, Depends(authorize(UserRole.admin, UserRole.technician))]
+# O nome acima é antigo e engana: `_AdminDep` aceita técnico. As exclusões de
+# grupo e empresa são as únicas rotas deste router que exigem admin de fato.
+_SoAdminDep = Annotated[User, Depends(authorize(UserRole.admin))]
 _DBDep = Annotated[AsyncSession, Depends(get_db)]
 
 
@@ -328,11 +339,151 @@ async def update_group(
     return await _group_to_response(db, g)
 
 
+# ── Exclusão de grupo e empresa ───────────────────────────────
+#
+# Até 04/11/2026 excluir um grupo apagava as empresas e as notas dele em
+# cascata (`companies.group_id` ON DELETE CASCADE + `delete-orphan` no ORM), e
+# excluir uma empresa apagava as notas e soltava os clientes (`users.company_id`
+# ON DELETE SET NULL) — sem contar, sem auditar, e o técnico podia (F1-D1).
+# Agora só sai o que está vazio; o resto recusa com 409 e as contagens. As FKs
+# continuam como estão: a recusa vem antes delas, e trocar o ondelete é
+# mudança de model, fora desta entrega.
+#
+# A trava é `FOR UPDATE` na linha mãe, e o modo importa. Toda escrita que cria
+# um filho (empresa, nota, vínculo de cliente) passa pela checagem de FK, e o
+# PostgreSQL faz essa checagem pegando `FOR KEY SHARE` na linha mãe. `FOR
+# UPDATE` conflita com `FOR KEY SHARE`; `FOR NO KEY UPDATE` não. Então:
+#   - filho escrito e ainda não comitado → a exclusão espera o commit dele e,
+#     ao contar, já o vê: 409;
+#   - exclusão travou primeiro → a escrita do filho espera; se a exclusão
+#     comitar, a escrita falha na FK e não grava nada.
+# Contar sem trava não basta: o filho não comitado é invisível à contagem, e a
+# cascata o apagaria assim que ele comitasse — medido em
+# `test_exclusao_grupos_empresas_postgres.py` antes da correção.
+#
+# Recusa não grava `audit_logs`: vai só para o log da aplicação, com ids e
+# contagens (a mesma decisão da F1-A, ver `users.py::_registra_recusa`).
+
+
+async def _conta(db: AsyncSession, consulta: Select[tuple[int]]) -> int:
+    return (await db.execute(consulta)).scalar_one()
+
+
+async def _dependentes_do_grupo(db: AsyncSession, group_id: uuid.UUID) -> dict[str, int]:
+    empresas_do_grupo = select(Company.id).where(Company.group_id == group_id)
+    return {
+        "empresas": await _conta(
+            db, select(func.count()).select_from(Company).where(Company.group_id == group_id)
+        ),
+        "clientes_vinculados": await _conta(
+            db,
+            select(func.count()).select_from(User).where(User.company_id.in_(empresas_do_grupo)),
+        ),
+        "notas_do_grupo": await _conta(
+            db, select(func.count()).select_from(GroupNote).where(GroupNote.group_id == group_id)
+        ),
+        "notas_de_empresas": await _conta(
+            db,
+            select(func.count())
+            .select_from(CompanyNote)
+            .where(CompanyNote.company_id.in_(empresas_do_grupo)),
+        ),
+    }
+
+
+async def _dependentes_da_empresa(db: AsyncSession, company_id: uuid.UUID) -> dict[str, int]:
+    # Não reaproveita `_company_client_count`/`_company_note_count`: a segunda
+    # engole erro com `rollback()`, e um rollback aqui soltaria a trava.
+    return {
+        "clientes_vinculados": await _conta(
+            db, select(func.count()).select_from(User).where(User.company_id == company_id)
+        ),
+        "notas": await _conta(
+            db,
+            select(func.count())
+            .select_from(CompanyNote)
+            .where(CompanyNote.company_id == company_id),
+        ),
+    }
+
+
+_ROTULOS = {
+    "empresas": "empresa(s)",
+    "clientes_vinculados": "cliente(s) vinculado(s)",
+    "notas_do_grupo": "nota(s) do grupo",
+    "notas_de_empresas": "nota(s) de empresa",
+    "notas": "nota(s)",
+}
+
+
+def _recusa_exclusao(
+    entidade: str, alvo_id: uuid.UUID, ator: User, contagens: dict[str, int]
+) -> HTTPException:
+    """Monta o 409 e deixa o aviso no log. Só números: nunca quem são os clientes."""
+    presentes = {chave: n for chave, n in contagens.items() if n}
+    logger.warning(
+        "Exclusão recusada (tem conteúdo): entidade={} alvo={} ator={} contagens={}",
+        entidade,
+        alvo_id,
+        ator.id,
+        presentes,
+    )
+    itens = ", ".join(f"{n} {_ROTULOS[chave]}" for chave, n in presentes.items())
+    artigo, pronome = ("o grupo", "ele") if entidade == "group" else ("a empresa", "ela")
+    return HTTPException(
+        status_code=status.HTTP_409_CONFLICT,
+        detail=(
+            f"Não é possível excluir {artigo}: {pronome} ainda tem {itens}. "
+            f"Remova ou mova esses itens antes de excluir {artigo}."
+        ),
+    )
+
+
+_ERRO_MUDOU_DURANTE = (
+    "Não foi possível excluir: o registro mudou durante a operação. "
+    "Atualize a página e tente de novo."
+)
+
+
+async def _exclui_e_comita(db: AsyncSession, alvo: Group | Company) -> None:
+    """Exclusão com rede: uma FK que a contagem não previu vira 409, não 500.
+
+    A exclusão e a auditoria são a mesma transação — se uma falha, nenhuma fica.
+    O `delete` entra na rede junto com o commit: ele carrega as coleções em
+    cascata, e esse carregamento faz autoflush da auditoria já adicionada.
+    """
+    try:
+        await db.delete(alvo)
+        await db.commit()
+    except IntegrityError:
+        await db.rollback()
+        raise HTTPException(
+            status_code=status.HTTP_409_CONFLICT, detail=_ERRO_MUDOU_DURANTE
+        ) from None
+
+
 @router.delete("/groups/{group_id}", status_code=status.HTTP_204_NO_CONTENT)
-async def delete_group(group_id: uuid.UUID, db: _DBDep, _: _AdminDep) -> None:
-    g = await _get_group_or_404(db, group_id)
-    await db.delete(g)
-    await db.commit()
+async def delete_group(group_id: uuid.UUID, db: _DBDep, actor: _SoAdminDep) -> None:
+    g = (
+        await db.execute(select(Group).where(Group.id == group_id).with_for_update())
+    ).scalar_one_or_none()
+    if g is None:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Grupo não encontrado")
+
+    contagens = await _dependentes_do_grupo(db, group_id)
+    if any(contagens.values()):
+        raise _recusa_exclusao("group", group_id, actor, contagens)
+
+    db.add(
+        AuditLog(
+            user_id=actor.id,
+            action=AuditAction.delete,
+            entity_type="group",
+            entity_id=group_id,
+            old_data={"name": g.name, **contagens},
+        )
+    )
+    await _exclui_e_comita(db, g)
 
 
 # ── Companies CRUD ────────────────────────────────────────────
@@ -438,11 +589,34 @@ async def update_company(
 
 @router.delete("/groups/{group_id}/companies/{company_id}", status_code=status.HTTP_204_NO_CONTENT)
 async def delete_company(
-    group_id: uuid.UUID, company_id: uuid.UUID, db: _DBDep, _: _AdminDep
+    group_id: uuid.UUID, company_id: uuid.UUID, db: _DBDep, actor: _SoAdminDep
 ) -> None:
-    c = await _get_company_or_404(db, group_id, company_id)
-    await db.delete(c)
-    await db.commit()
+    c = (
+        await db.execute(
+            select(Company)
+            .where(Company.id == company_id, Company.group_id == group_id)
+            .with_for_update()
+        )
+    ).scalar_one_or_none()
+    if c is None:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Empresa não encontrada")
+
+    contagens = await _dependentes_da_empresa(db, company_id)
+    if any(contagens.values()):
+        raise _recusa_exclusao("company", company_id, actor, contagens)
+
+    # Nome e CNPJ dizem QUAL empresa saiu — dados da empresa, não de pessoa.
+    # Nenhum dado de cliente entra: a exclusão só passa sem cliente vinculado.
+    db.add(
+        AuditLog(
+            user_id=actor.id,
+            action=AuditAction.delete,
+            entity_type="company",
+            entity_id=company_id,
+            old_data={"name": c.name, "cnpj": c.cnpj, "group_id": str(c.group_id), **contagens},
+        )
+    )
+    await _exclui_e_comita(db, c)
 
 
 # ── Client assignment ─────────────────────────────────────────
