@@ -36,6 +36,14 @@ vi.mock("../../services/groupService", () => ({
 
 vi.mock("sonner", () => ({ toast: { error: vi.fn(), success: vi.fn() } }));
 
+// Quem está logado. Admin por padrão: é quem tem todas as ações da tela, e os
+// casos que não falam de papel continuam vendo o que sempre viram.
+const sessao = vi.hoisted(() => ({ role: "admin" as "admin" | "technician" }));
+vi.mock("../../contexts/AuthContext", () => ({
+  useAuth: () => ({ user: { id: "eu", role: sessao.role } }),
+}));
+
+import { toast } from "sonner";
 import GroupsPage, { CompanyDetailModal } from "../../pages/groups/GroupsPage";
 import { listAllEquipments } from "../../services/productService";
 import {
@@ -721,6 +729,200 @@ describe("GroupsPage — a lista de grupos", () => {
     await waitFor(() =>
       expect(deleteGroupNote).toHaveBeenCalledWith("grupo-A", "nota-G"),
     );
+  });
+});
+
+// ── Exclusão de grupo e de empresa (F1-D1) ────────────────────
+
+/**
+ * Desde a F1-D1 o backend só exclui grupo ou empresa VAZIOS, e só para admin:
+ * com conteúdo devolve 409 com as contagens no `detail`, e técnico recebe 403.
+ * A tela dizia o contrário — que o grupo saía "com as empresas e as notas" e a
+ * empresa "com os clientes vinculados" —, a exclusão de empresa engolia o erro
+ * sem aviso, e o técnico via a lixeira que o servidor recusa.
+ */
+describe("GroupsPage — exclusão de grupo e de empresa (F1-D1)", () => {
+  const RECUSA_GRUPO =
+    "Não é possível excluir o grupo: ele ainda tem 1 empresa(s). Remova ou mova esses itens antes de excluí-lo.";
+  const RECUSA_EMPRESA =
+    "Não é possível excluir a empresa: ela ainda tem 2 cliente(s) vinculado(s). Remova ou mova esses itens antes de excluí-la.";
+
+  beforeEach(() => {
+    sessao.role = "admin";
+    vi.mocked(listGroups).mockResolvedValue([GRUPO_ALFA, GRUPO_BETA]);
+    vi.mocked(getGroup).mockResolvedValue(DETALHE_ALFA);
+    vi.mocked(listGroupNotes).mockResolvedValue([]);
+  });
+
+  afterEach(() => {
+    sessao.role = "admin";
+    vi.clearAllMocks();
+  });
+
+  async function abrirGrupoAlfa() {
+    render(<GroupsPage />);
+    fireEvent.click(await screen.findByRole("button", { name: /Grupo Alfa/ }));
+    await screen.findByText("Transportes Alfa");
+  }
+
+  async function confirmar(nomeDoBotao: string, titulo: string) {
+    fireEvent.click(screen.getByRole("button", { name: nomeDoBotao }));
+    const dialogo = await screen.findByRole("dialog", { name: titulo });
+    fireEvent.click(within(dialogo).getByRole("button", { name: "Excluir" }));
+    return dialogo;
+  }
+
+  it("o diálogo do grupo diz a regra e não promete levar empresas e notas", async () => {
+    await abrirGrupoAlfa();
+    fireEvent.click(screen.getByRole("button", { name: "Excluir grupo Grupo Alfa" }));
+
+    const frase = await screen.findByText(/não pode ser desfeita/);
+    expect(frase).toHaveTextContent(
+      "Só é possível excluir um grupo sem empresas, clientes vinculados nem notas.",
+    );
+    expect(frase).not.toHaveTextContent(/com as empresas/);
+  });
+
+  it("o diálogo da empresa diz a regra e não promete levar os clientes", async () => {
+    await abrirGrupoAlfa();
+    fireEvent.click(
+      screen.getByRole("button", { name: "Excluir empresa Transportes Alfa" }),
+    );
+
+    const frase = await screen.findByText(/não pode ser desfeita/);
+    expect(frase).toHaveTextContent(
+      "Só é possível excluir uma empresa sem clientes vinculados nem notas.",
+    );
+    expect(frase).not.toHaveTextContent(/com os clientes/);
+  });
+
+  it("admin vê a lixeira do grupo e a da empresa", async () => {
+    await abrirGrupoAlfa();
+
+    expect(
+      screen.getByRole("button", { name: "Excluir grupo Grupo Alfa" }),
+    ).toBeInTheDocument();
+    expect(
+      screen.getByRole("button", { name: "Excluir empresa Transportes Alfa" }),
+    ).toBeInTheDocument();
+  });
+
+  it("técnico não vê nenhuma das duas lixeiras, e o resto da tela segue", async () => {
+    sessao.role = "technician";
+    await abrirGrupoAlfa();
+
+    expect(
+      screen.queryByRole("button", { name: "Excluir grupo Grupo Alfa" }),
+    ).not.toBeInTheDocument();
+    expect(
+      screen.queryByRole("button", { name: "Excluir empresa Transportes Alfa" }),
+    ).not.toBeInTheDocument();
+    // O que o técnico pode fazer continua lá.
+    expect(screen.getByRole("button", { name: /Editar/ })).toBeInTheDocument();
+    expect(
+      screen.getAllByRole("button", { name: /Adicionar empresa/ }).length,
+    ).toBeGreaterThan(0);
+  });
+
+  it("409 no grupo: mostra o motivo do servidor e o grupo fica", async () => {
+    vi.mocked(deleteGroup).mockRejectedValue({
+      response: { status: 409, data: { detail: RECUSA_GRUPO } },
+    });
+    await abrirGrupoAlfa();
+
+    const dialogo = await confirmar("Excluir grupo Grupo Alfa", "Excluir grupo");
+
+    await waitFor(() =>
+      expect(toast.error).toHaveBeenCalledWith("Não foi possível excluir o grupo.", {
+        description: RECUSA_GRUPO,
+      }),
+    );
+    expect(screen.getByRole("heading", { name: "Grupo Alfa" })).toBeInTheDocument();
+    expect(screen.getByText("Transportes Alfa")).toBeInTheDocument();
+    // O diálogo continua aberto: quem lê o aviso ainda vê de qual grupo se trata.
+    expect(dialogo).toBeInTheDocument();
+  });
+
+  it("409 na empresa: mostra o motivo do servidor e a empresa fica", async () => {
+    vi.mocked(deleteCompany).mockRejectedValue({
+      response: { status: 409, data: { detail: RECUSA_EMPRESA } },
+    });
+    await abrirGrupoAlfa();
+
+    const dialogo = await confirmar(
+      "Excluir empresa Transportes Alfa",
+      "Excluir empresa",
+    );
+
+    await waitFor(() =>
+      expect(toast.error).toHaveBeenCalledWith("Não foi possível excluir a empresa.", {
+        description: RECUSA_EMPRESA,
+      }),
+    );
+    // O cartão da empresa (`<p>`), não o nome citado no diálogo (`<span>`).
+    expect(screen.getByText("Transportes Alfa", { selector: "p" })).toBeInTheDocument();
+    expect(screen.getByText("Empresas (1)")).toBeInTheDocument();
+    expect(dialogo).toBeInTheDocument();
+    // E o botão volta a responder: o "excluindo" não fica preso.
+    expect(within(dialogo).getByRole("button", { name: "Excluir" })).toBeEnabled();
+  });
+
+  it("403 na empresa: diz que falta permissão, sem tirar nada da tela", async () => {
+    vi.mocked(deleteCompany).mockRejectedValue({
+      response: { status: 403, data: {} },
+    });
+    await abrirGrupoAlfa();
+
+    await confirmar("Excluir empresa Transportes Alfa", "Excluir empresa");
+
+    await waitFor(() =>
+      expect(toast.error).toHaveBeenCalledWith("Não foi possível excluir a empresa.", {
+        description: "Você não tem permissão para realizar esta ação.",
+      }),
+    );
+    expect(screen.getByText("Transportes Alfa", { selector: "p" })).toBeInTheDocument();
+  });
+
+  it("403 no grupo: diz que falta permissão, sem tirar nada da tela", async () => {
+    vi.mocked(deleteGroup).mockRejectedValue({
+      response: { status: 403, data: {} },
+    });
+    await abrirGrupoAlfa();
+
+    await confirmar("Excluir grupo Grupo Alfa", "Excluir grupo");
+
+    await waitFor(() =>
+      expect(toast.error).toHaveBeenCalledWith("Não foi possível excluir o grupo.", {
+        description: "Você não tem permissão para realizar esta ação.",
+      }),
+    );
+    expect(screen.getByRole("heading", { name: "Grupo Alfa" })).toBeInTheDocument();
+  });
+
+  it("exclusão de empresa aceita tira a empresa da lista e fecha o diálogo", async () => {
+    vi.mocked(deleteCompany).mockResolvedValue(undefined);
+    await abrirGrupoAlfa();
+
+    await confirmar("Excluir empresa Transportes Alfa", "Excluir empresa");
+
+    await waitFor(() =>
+      expect(screen.queryByText("Transportes Alfa")).not.toBeInTheDocument(),
+    );
+    expect(screen.getByText("Empresas (0)")).toBeInTheDocument();
+    expect(screen.queryByRole("dialog")).not.toBeInTheDocument();
+    expect(toast.error).not.toHaveBeenCalled();
+  });
+
+  it("exclusão de grupo aceita tira o grupo da lista e volta à escolha", async () => {
+    vi.mocked(deleteGroup).mockResolvedValue(undefined);
+    await abrirGrupoAlfa();
+
+    await confirmar("Excluir grupo Grupo Alfa", "Excluir grupo");
+
+    expect(await screen.findByText("Selecione um grupo")).toBeInTheDocument();
+    expect(screen.queryByRole("button", { name: /Grupo Alfa/ })).not.toBeInTheDocument();
+    expect(screen.getByText("Grupo Beta")).toBeInTheDocument();
+    expect(toast.error).not.toHaveBeenCalled();
   });
 });
 
