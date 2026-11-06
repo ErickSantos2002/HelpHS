@@ -692,9 +692,13 @@ async def test_vinculo_ou_nota_em_curso_impede_a_exclusao_da_empresa(fabrica, op
         notas = (await s.execute(select(func.count()).select_from(CompanyNote))).scalar_one()
     if operacao == "vincula_cliente":
         assert vinculo == c.id, "o cliente vinculado não pode ser solto"
+        # O vínculo é auditado desde a F2-A1; a recusa da exclusão, não.
+        assert [(a.action, a.entity_type) for a in await _auditorias(fabrica)] == [
+            (AuditAction.assign, "user")
+        ]
     else:
         assert notas == 1
-    assert await _auditorias(fabrica) == []
+        assert await _auditorias(fabrica) == []
 
 
 @pytest.mark.asyncio

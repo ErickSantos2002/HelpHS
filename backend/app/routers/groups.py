@@ -21,6 +21,8 @@ import uuid
 from typing import Annotated
 
 from fastapi import APIRouter, Depends, HTTPException, Query, status
+from fastapi.encoders import jsonable_encoder
+from fastapi.responses import JSONResponse
 from loguru import logger
 from sqlalchemy import ColumnElement, Select, func, or_, select
 from sqlalchemy.exc import IntegrityError
@@ -620,6 +622,94 @@ async def delete_company(
 
 
 # ── Client assignment ─────────────────────────────────────────
+#
+# `users.company_id` é a única autoridade sobre a empresa de um cliente (ver
+# "Qual é a autoridade…" em docs/decisoes-e-regras.md), e já decide escopo: a
+# Helô recorta o histórico de chamados por ele. Por isso o vínculo tem regra
+# própria desde a F2-A1:
+#   - cliente sem empresa → vincula (201) e audita;
+#   - já na MESMA empresa → nada muda (200), sem auditoria;
+#   - em OUTRA empresa → 409. Até aqui `assign_client` sobrescrevia: mover
+#     cliente de empresa acontecia sem aviso e sem rastro. Transferência, se
+#     vier, é operação própria, explícita;
+#   - cliente inativo ou anonimizado → 409.
+# Recusa não grava `audit_logs` (decisão da F1-A): só o aviso no log.
+#
+# Ordem das travas, a mesma nas três rotas: ATOR (`FOR KEY SHARE`) → grupo ou
+# empresa (`FOR KEY SHARE`) → clientes (`FOR UPDATE`, em ordem de id).
+#   - O ator vem primeiro porque o INSERT em `audit_logs` checa a FK `user_id`
+#     pegando `FOR KEY SHARE` na linha dele, e as alterações de conta da F1-A
+#     (`_trava_para_alterar_conta`) travam TODOS os admins com `FOR UPDATE` e
+#     depois o alvo. Com a auditoria por último, "eu tenho o cliente e espero
+#     o ator; ela tem o ator e espera o cliente" é deadlock — medido em
+#     PostgreSQL antes desta escrita. Pegando o ator antes do cliente, quem
+#     chega depois espera sem segurar nada que a outra precise.
+#   - A empresa (ou o grupo) em `FOR KEY SHARE` fecha a corrida com a
+#     exclusão da F1-D1, que trava a mesma linha com `FOR UPDATE`: ou a
+#     exclusão espera o vínculo e recusa (409, há cliente), ou o vínculo espera
+#     a exclusão e encontra a empresa sumida (404) — nunca o 500 da FK.
+#   - O cliente em `FOR UPDATE` serializa dois vínculos simultâneos (o segundo
+#     relê o vínculo comitado e recebe 409) e o vínculo contra a desativação ou
+#     anonimização, que travam a mesma linha.
+
+
+async def _trava_ator(db: AsyncSession, ator: User) -> None:
+    await db.execute(
+        select(User.id).where(User.id == ator.id).with_for_update(read=True, key_share=True)
+    )
+
+
+async def _trava_clientes(db: AsyncSession, ids: list[uuid.UUID]) -> list[User]:
+    """`FOR UPDATE` em ordem de id: duas listas cruzadas não esperam em círculo.
+
+    `populate_existing`: a linha pode já estar no mapa de identidade da sessão,
+    e sem ele o SQLAlchemy devolveria os valores de antes da espera.
+    """
+    return list(
+        (
+            await db.execute(
+                select(User)
+                .where(User.id.in_(ids))
+                .order_by(User.id)
+                .with_for_update()
+                .execution_options(populate_existing=True)
+            )
+        )
+        .scalars()
+        .all()
+    )
+
+
+def _retrato_do_vinculo(empresa: Company | None) -> dict[str, str | None]:
+    if empresa is None:
+        return {"company_id": None}
+    return {"company_id": str(empresa.id), "group_id": str(empresa.group_id)}
+
+
+def _audita_vinculo(
+    db: AsyncSession,
+    ator: User,
+    cliente_id: uuid.UUID,
+    antes: Company | None,
+    depois: Company | None,
+) -> None:
+    """Mesma transação do vínculo: se um não fica, o outro também não."""
+    db.add(
+        AuditLog(
+            user_id=ator.id,
+            action=AuditAction.assign,
+            entity_type="user",
+            entity_id=cliente_id,
+            old_data=_retrato_do_vinculo(antes),
+            new_data=_retrato_do_vinculo(depois),
+        )
+    )
+
+
+def _cliente_na_empresa(u: User) -> ClientInCompany:
+    return ClientInCompany(
+        id=u.id, name=u.name, email=u.email, phone=u.phone, client_notes=u.client_notes
+    )
 
 
 @router.post(
@@ -632,20 +722,68 @@ async def assign_client(
     company_id: uuid.UUID,
     body: AssignClientRequest,
     db: _DBDep,
-    _: _AdminDep,
-) -> ClientInCompany:
-    await _get_company_or_404(db, group_id, company_id)
-    u = (
-        await db.execute(select(User).where(User.id == body.user_id, User.role == UserRole.client))
+    actor: _AdminDep,
+) -> ClientInCompany | JSONResponse:
+    await _trava_ator(db, actor)
+    empresa = (
+        await db.execute(
+            select(Company)
+            .where(Company.id == company_id, Company.group_id == group_id)
+            .with_for_update(read=True, key_share=True)
+        )
     ).scalar_one_or_none()
-    if u is None:
+    if empresa is None:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Empresa não encontrada")
+
+    travados = await _trava_clientes(db, [body.user_id])
+    u = travados[0] if travados else None
+    if u is None or u.role != UserRole.client:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Cliente não encontrado")
+
+    # A situação vem antes da idempotência: conta inativa ou anonimizada não
+    # recebe confirmação de vínculo, nem do que já existia.
+    if u.status != UserStatus.active:
+        logger.warning(
+            "Vínculo recusado (cliente não ativo): cliente={} empresa={} ator={}",
+            u.id,
+            company_id,
+            actor.id,
+        )
+        raise HTTPException(
+            status_code=status.HTTP_409_CONFLICT,
+            detail="Só é possível vincular cliente ativo.",
+        )
+
+    if u.company_id == company_id:
+        return JSONResponse(
+            status_code=status.HTTP_200_OK, content=jsonable_encoder(_cliente_na_empresa(u))
+        )
+
+    if u.company_id is not None:
+        atual = (
+            await db.execute(select(Company.name).where(Company.id == u.company_id))
+        ).scalar_one_or_none()
+        logger.warning(
+            "Vínculo recusado (cliente já tem outra empresa): cliente={} empresa_atual={} "
+            "empresa_pedida={} ator={}",
+            u.id,
+            u.company_id,
+            company_id,
+            actor.id,
+        )
+        raise HTTPException(
+            status_code=status.HTTP_409_CONFLICT,
+            detail=(
+                f'Este cliente já está vinculado à empresa "{atual}". '
+                "Desvincule-o antes de vinculá-lo a outra."
+            ),
+        )
+
     u.company_id = company_id
+    _audita_vinculo(db, actor, u.id, None, empresa)
     await db.commit()
     await db.refresh(u)
-    return ClientInCompany(
-        id=u.id, name=u.name, email=u.email, phone=u.phone, client_notes=u.client_notes
-    )
+    return _cliente_na_empresa(u)
 
 
 @router.delete(
@@ -657,17 +795,29 @@ async def unassign_client(
     company_id: uuid.UUID,
     client_id: uuid.UUID,
     db: _DBDep,
-    _: _AdminDep,
+    actor: _AdminDep,
 ) -> None:
-    await _get_company_or_404(db, group_id, company_id)
-    u = (
-        await db.execute(select(User).where(User.id == client_id, User.company_id == company_id))
+    await _trava_ator(db, actor)
+    empresa = (
+        await db.execute(
+            select(Company)
+            .where(Company.id == company_id, Company.group_id == group_id)
+            .with_for_update(read=True, key_share=True)
+        )
     ).scalar_one_or_none()
-    if u is None:
+    if empresa is None:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Empresa não encontrada")
+
+    # Sem filtro de papel nem de situação, como antes: desvincular é o único
+    # jeito de limpar a empresa de quem deixou de ser cliente ou está inativo.
+    travados = await _trava_clientes(db, [client_id])
+    u = travados[0] if travados else None
+    if u is None or u.company_id != company_id:
         raise HTTPException(
             status_code=status.HTTP_404_NOT_FOUND, detail="Cliente não encontrado nesta empresa"
         )
     u.company_id = None
+    _audita_vinculo(db, actor, u.id, empresa, None)
     await db.commit()
 
 
@@ -805,7 +955,7 @@ async def create_company_from_suggestion(
     group_id: uuid.UUID,
     body: CreateCompanyFromSuggestion,
     db: _DBDep,
-    _: _AdminDep,
+    actor: _AdminDep,
 ) -> CompanyFromSuggestionResponse:
     """
     Cria a empresa e **vincula** os clientes que a sugeriram.
@@ -831,10 +981,37 @@ async def create_company_from_suggestion(
     cliente ativo — conflito de estado, não corpo malformado, e é o caso de
     alguém ter vinculado entre a tela e o clique. Nada é gravado: nem os
     vínculos, nem a empresa.
-    """
-    await _get_group_or_404(db, group_id)
 
-    alvos = (await db.execute(select(User).where(User.id.in_(body.client_ids)))).scalars().all()
+    Travas na ordem de "Client assignment" (ator → grupo → empresa
+    reaproveitada → clientes por id). A conferência acima só vale porque é
+    feita com os clientes travados: sem isso, duas confirmações simultâneas
+    com o mesmo cliente passavam as duas e a segunda o transferia em silêncio.
+
+    ⚠️ Fica de fora: duas confirmações simultâneas com o MESMO CNPJ e clientes
+    diferentes ainda podem criar duas empresas — nada trava "o CNPJ" e
+    `companies.cnpj` não é único (DAT-06). É decisão de integridade de empresa,
+    não de vínculo.
+    """
+    await _trava_ator(db, actor)
+    grupo = (
+        await db.execute(
+            select(Group.id).where(Group.id == group_id).with_for_update(read=True, key_share=True)
+        )
+    ).scalar_one_or_none()
+    if grupo is None:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Grupo não encontrado")
+
+    empresa = None
+    if body.cnpj:
+        empresa = (
+            await db.execute(
+                select(Company)
+                .where(Company.group_id == group_id, Company.cnpj == body.cnpj)
+                .with_for_update(read=True, key_share=True)
+            )
+        ).scalar_one_or_none()
+
+    alvos = await _trava_clientes(db, list(body.client_ids))
     encontrados = {u.id for u in alvos}
     if faltando := set(body.client_ids) - encontrados:
         raise HTTPException(
@@ -848,6 +1025,12 @@ async def create_company_from_suggestion(
         if u.role != UserRole.client or u.status != UserStatus.active or u.company_id is not None
     ]
     if indisponiveis:
+        logger.warning(
+            "Vínculo pela sugestão recusado: grupo={} ator={} indisponiveis={}",
+            group_id,
+            actor.id,
+            sorted(str(u.id) for u in indisponiveis),
+        )
         raise HTTPException(
             status_code=status.HTTP_409_CONFLICT,
             detail=(
@@ -855,14 +1038,6 @@ async def create_company_from_suggestion(
                 "(já têm empresa ou não estão ativos). Recarregue as sugestões."
             ),
         )
-
-    empresa = None
-    if body.cnpj:
-        empresa = (
-            await db.execute(
-                select(Company).where(Company.group_id == group_id, Company.cnpj == body.cnpj)
-            )
-        ).scalar_one_or_none()
 
     criada = empresa is None
     if empresa is None:
@@ -878,9 +1053,19 @@ async def create_company_from_suggestion(
         )
         db.add(empresa)
         await db.flush()
+        db.add(
+            AuditLog(
+                user_id=actor.id,
+                action=AuditAction.create,
+                entity_type="company",
+                entity_id=empresa.id,
+                new_data={"name": empresa.name, "cnpj": empresa.cnpj, "group_id": str(group_id)},
+            )
+        )
 
     for u in alvos:
         u.company_id = empresa.id
+        _audita_vinculo(db, actor, u.id, None, empresa)
 
     await db.commit()
     await db.refresh(empresa)
