@@ -5,6 +5,7 @@ import { zodResolver } from "@hookform/resolvers/zod";
 import { z } from "zod";
 import { toast } from "sonner";
 import { toastApiError } from "../../lib/toastError";
+import { useAuth } from "../../contexts/AuthContext";
 import { cn } from "../../lib/utils";
 import { formatCnpj, onlyDigits } from "../../lib/documents";
 import {
@@ -1008,6 +1009,10 @@ function GroupNotesList({ notes, noteDeleting, onView, onDelete, onAdd }: {
 // ── Main page ─────────────────────────────────────────────────
 
 export default function GroupsPage() {
+  // Excluir grupo e empresa é só de admin (F1-D1): o backend recusa o técnico
+  // com 403, então a lixeira nem aparece para ele.
+  const { user } = useAuth();
+  const souAdmin = user?.role === "admin";
   const [sidebarOpen, setSidebarOpen] = useState(true);
   const [groups, setGroups] = useState<GroupResponse[]>([]);
   const [groupSearch, setGroupSearch] = useState("");
@@ -1083,9 +1088,11 @@ export default function GroupsPage() {
       setSelectedGroup(null);
       setGroupDetail(null);
       setConfirmDeleteGroup(false);
-    } catch (err) { toastApiError(err, "Erro ao deletar grupo."); }
+    } catch (err) { toastApiError(err, "Não foi possível excluir o grupo."); }
   };
 
+  // O 409 traz no `detail` o que ainda prende a empresa; o diálogo fica aberto
+  // por baixo do aviso, como no grupo, para não perder de qual se trata.
   const handleDeleteCompany = async (company: CompanyResponse) => {
     if (!selectedGroup) return;
     setDeletingCompanyId(company.id);
@@ -1094,7 +1101,8 @@ export default function GroupsPage() {
       setGroupDetail((p) => p ? { ...p, companies: p.companies.filter((c) => c.id !== company.id), company_count: p.company_count - 1 } : p);
       setGroups((p) => p.map((g) => g.id === selectedGroup.id ? { ...g, company_count: g.company_count - 1 } : g));
       setDeleteCompanyTarget(null);
-    } finally { setDeletingCompanyId(null); }
+    } catch (err) { toastApiError(err, "Não foi possível excluir a empresa."); }
+    finally { setDeletingCompanyId(null); }
   };
 
   const refreshDetail = () => selectedGroup && loadGroupDetail(selectedGroup);
@@ -1241,7 +1249,9 @@ export default function GroupsPage() {
               </div>
               <div className="flex gap-2 shrink-0">
                 <Button size="sm" variant="ghost" onClick={() => setShowEditGroup(true)}><Icon name="edit" size={16} strokeWidth={2} />Editar</Button>
-                <Button size="sm" variant="ghost" className="text-on-tint-danger hover:bg-tint-danger" aria-label={`Excluir grupo ${selectedGroup.name}`} onClick={() => setConfirmDeleteGroup(true)}><Icon name="trash" size={16} strokeWidth={2} /></Button>
+                {souAdmin && (
+                  <Button size="sm" variant="ghost" className="text-on-tint-danger hover:bg-tint-danger" aria-label={`Excluir grupo ${selectedGroup.name}`} onClick={() => setConfirmDeleteGroup(true)}><Icon name="trash" size={16} strokeWidth={2} /></Button>
+                )}
               </div>
             </div>
 
@@ -1276,9 +1286,11 @@ export default function GroupsPage() {
                         </button>
                         <div className="flex gap-1 shrink-0">
                           <button onClick={() => setSelectedCompany(c)} title="Ver detalhes" className="p-1.5 rounded text-conteudo-muted hover:text-conteudo-link hover:bg-action-tint transition-colors cursor-pointer"><Icon name="chevronRight" size={16} strokeWidth={2} /></button>
-                          <button onClick={() => setDeleteCompanyTarget(c)} disabled={deletingCompanyId === c.id} title="Deletar" aria-label={`Excluir empresa ${c.name}`} className="p-1.5 rounded text-conteudo-muted hover:text-on-tint-danger hover:bg-tint-danger transition-colors cursor-pointer disabled:opacity-50">
-                            {deletingCompanyId === c.id ? <Spinner size="sm" /> : <Icon name="trash" size={16} strokeWidth={2} />}
-                          </button>
+                          {souAdmin && (
+                            <button onClick={() => setDeleteCompanyTarget(c)} disabled={deletingCompanyId === c.id} title="Deletar" aria-label={`Excluir empresa ${c.name}`} className="p-1.5 rounded text-conteudo-muted hover:text-on-tint-danger hover:bg-tint-danger transition-colors cursor-pointer disabled:opacity-50">
+                              {deletingCompanyId === c.id ? <Spinner size="sm" /> : <Icon name="trash" size={16} strokeWidth={2} />}
+                            </button>
+                          )}
                         </div>
                       </div>
                       <button onClick={() => setSelectedCompany(c)} className="mt-3 flex items-center gap-2 text-xs text-conteudo-muted hover:text-conteudo-link transition-colors cursor-pointer">
@@ -1462,9 +1474,9 @@ export default function GroupsPage() {
         <Modal open onClose={() => setConfirmDeleteGroup(false)} size="sm" title="Excluir grupo">
           <p className="text-sm text-conteudo-muted">
             Tem certeza que deseja excluir o grupo{" "}
-            <span className="font-medium text-conteudo">{selectedGroup.name}</span>? Ele
-            será removido com as empresas e as notas que carrega, e esta ação não
-            pode ser desfeita.
+            <span className="font-medium text-conteudo">{selectedGroup.name}</span>? Só é
+            possível excluir um grupo sem empresas, clientes vinculados nem notas.
+            Esta ação não pode ser desfeita.
           </p>
           <ModalFooter>
             <Button variant="secondary" onClick={() => setConfirmDeleteGroup(false)}>
@@ -1482,9 +1494,9 @@ export default function GroupsPage() {
         <Modal open onClose={() => setDeleteCompanyTarget(null)} size="sm" title="Excluir empresa">
           <p className="text-sm text-conteudo-muted">
             Tem certeza que deseja excluir a empresa{" "}
-            <span className="font-medium text-conteudo">{deleteCompanyTarget.name}</span>? Ela
-            será removida do grupo com os clientes vinculados, e esta ação não pode
-            ser desfeita.
+            <span className="font-medium text-conteudo">{deleteCompanyTarget.name}</span>? Só é
+            possível excluir uma empresa sem clientes vinculados nem notas. Esta
+            ação não pode ser desfeita.
           </p>
           <ModalFooter>
             <Button
