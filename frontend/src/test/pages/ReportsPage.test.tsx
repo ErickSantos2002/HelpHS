@@ -1,8 +1,10 @@
-import { render, screen, waitFor, within } from "@testing-library/react";
+import { act, fireEvent, render, screen, waitFor, within } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
-import { describe, expect, it, vi } from "vitest";
+import { AxiosError, AxiosHeaders } from "axios";
+import { toast } from "sonner";
+import { beforeEach, describe, expect, it, vi } from "vitest";
 
-import { opcoesDoMenu } from "../helpers/menu";
+import { campoDeMenu, escolherNoMenu, opcoesDoMenu } from "../helpers/menu";
 
 /**
  * O `ResponsiveContainer` mede o pai com `ResizeObserver`, e num DOM sem
@@ -32,14 +34,27 @@ vi.mock("recharts", async (importOriginal) => {
  */
 vi.setConfig({ testTimeout: 20000 });
 
+// O papel muda por caso (a exportação é só do admin); o padrão segue admin.
+const sessao = vi.hoisted(() => ({ papel: "admin" as "admin" | "technician" }));
 vi.mock("../../contexts/AuthContext", () => ({
-  useAuth: () => ({ user: { id: "u1", role: "admin", name: "Admin" } }),
+  useAuth: () => ({ user: { id: "u1", role: sessao.papel, name: "Admin" } }),
 }));
-vi.mock("../../services/reportService", () => ({
+// `ArquivoDeRelatorioInvalido` fica o de verdade: a tela o reconhece por
+// `instanceof`, e um duplo não provaria nada sobre isso.
+vi.mock("../../services/reportService", async (importOriginal) => ({
+  ...(await importOriginal<typeof import("../../services/reportService")>()),
   getReports: vi.fn(),
   getTechnicianListReport: vi.fn(),
   getTechnicianDetailReport: vi.fn(),
-  exportReportsUrl: () => "/api/v1/reports/export",
+  baixarRelatorio: vi.fn(),
+}));
+vi.mock("sonner", () => ({
+  toast: Object.assign(vi.fn(), {
+    error: vi.fn(),
+    success: vi.fn(),
+    info: vi.fn(),
+    warning: vi.fn(),
+  }),
 }));
 
 import ReportsPage from "../../pages/reports/ReportsPage";
@@ -588,5 +603,267 @@ describe("ReportsPage — SLA violado, o motivo do atraso", () => {
     */
     const semDono = screen.getByText("HS-2026-0100").closest("tr") as HTMLElement;
     expect(within(semDono).getAllByText("—")).toHaveLength(2);
+  });
+});
+
+/**
+ * A exportação (F1-C-01a). Antes eram dois `<a href>` relativos, sem token,
+ * que baixavam o `index.html`; o transporte é provado em
+ * `reportService.download.test.ts`. Aqui fica o que é da TELA: o que ela pede,
+ * o carregando, um download por vez, a falha com "Tentar de novo" e quem vê.
+ */
+describe("ReportsPage — exportar CSV e PDF", () => {
+  function erroDaApi(status: number, data?: unknown): AxiosError {
+    return new AxiosError("falhou", AxiosError.ERR_BAD_RESPONSE, undefined, {}, {
+      status,
+      statusText: "",
+      data,
+      headers: {},
+      config: { headers: new AxiosHeaders() },
+    });
+  }
+
+  function abrirExportar() {
+    fireEvent.click(screen.getByRole("button", { name: /^Exportar$/ }));
+  }
+
+  /** Uma promessa que o caso resolve quando quiser: o "durante" do download. */
+  function pendente() {
+    let resolver!: () => void;
+    let rejeitar!: (e: unknown) => void;
+    const promessa = new Promise<void>((res, rej) => {
+      resolver = res;
+      rejeitar = rej;
+    });
+    return { promessa, resolver, rejeitar };
+  }
+
+  beforeEach(() => {
+    sessao.papel = "admin";
+    vi.mocked(reportService.baixarRelatorio).mockReset();
+    vi.mocked(toast.error).mockReset();
+  });
+
+  it("os itens do menu são botões, e não links com href", async () => {
+    await montar();
+    abrirExportar();
+
+    expect(screen.getByRole("button", { name: /Exportar CSV/ })).toBeInTheDocument();
+    expect(screen.getByRole("button", { name: /Exportar PDF/ })).toBeInTheDocument();
+    expect(document.querySelector('a[href*="export"]')).toBeNull();
+  });
+
+  it.each(["csv", "pdf"] as const)(
+    "%s pede ao serviço o formato com os MESMOS filtros da visão geral",
+    async (formato) => {
+      vi.mocked(reportService.baixarRelatorio).mockResolvedValue();
+      await montar();
+
+      abrirExportar();
+      fireEvent.click(
+        screen.getByRole("button", { name: new RegExp(`Exportar ${formato.toUpperCase()}`) }),
+      );
+
+      await waitFor(() => expect(reportService.baixarRelatorio).toHaveBeenCalledTimes(1));
+      const filtrosDaTela = vi.mocked(reportService.getReports).mock.lastCall?.[0];
+      expect(reportService.baixarRelatorio).toHaveBeenCalledWith(formato, filtrosDaTela);
+      expect(filtrosDaTela?.start_date).toMatch(/^\d{4}-\d{2}-\d{2}$/);
+      expect(filtrosDaTela?.end_date).toMatch(/^\d{4}-\d{2}-\d{2}$/);
+    },
+  );
+
+  it("trocar o período e a categoria muda o que a exportação pede", async () => {
+    vi.mocked(reportService.baixarRelatorio).mockResolvedValue();
+    await montar();
+    const antes = vi.mocked(reportService.getReports).mock.lastCall?.[0];
+
+    escolherNoMenu(campoDeMenu("Período"), "Últimos 7 dias");
+    escolherNoMenu(campoDeMenu("Categoria"), "Hardware");
+    await waitFor(() =>
+      expect(vi.mocked(reportService.getReports).mock.lastCall?.[0]).toMatchObject({
+        category: "hardware",
+      }),
+    );
+    const depois = vi.mocked(reportService.getReports).mock.lastCall?.[0];
+    expect(depois?.start_date).not.toBe(antes?.start_date);
+
+    abrirExportar();
+    fireEvent.click(screen.getByRole("button", { name: /Exportar CSV/ }));
+
+    await waitFor(() =>
+      expect(reportService.baixarRelatorio).toHaveBeenCalledWith("csv", depois),
+    );
+  });
+
+  it("durante o download o botão diz o que gera, fica ocupado e volta depois", async () => {
+    const download = pendente();
+    vi.mocked(reportService.baixarRelatorio).mockReturnValue(download.promessa);
+    await montar();
+
+    abrirExportar();
+    fireEvent.click(screen.getByRole("button", { name: /Exportar PDF/ }));
+
+    const ocupado = await screen.findByRole("button", { name: /Gerando PDF/ });
+    expect(ocupado).toBeDisabled();
+    expect(ocupado).toHaveAttribute("aria-busy", "true");
+
+    download.resolver();
+
+    const livre = await screen.findByRole("button", { name: /^Exportar$/ });
+    expect(livre).toBeEnabled();
+    expect(livre).toHaveAttribute("aria-busy", "false");
+    expect(toast.error).not.toHaveBeenCalled();
+  });
+
+  it("não começa um segundo download enquanto o primeiro corre", async () => {
+    const download = pendente();
+    vi.mocked(reportService.baixarRelatorio).mockReturnValue(download.promessa);
+    await montar();
+
+    abrirExportar();
+    fireEvent.click(screen.getByRole("button", { name: /Exportar CSV/ }));
+    const ocupado = await screen.findByRole("button", { name: /Gerando CSV/ });
+
+    fireEvent.click(ocupado);
+    expect(screen.queryByRole("button", { name: /Exportar PDF/ })).toBeNull();
+    expect(reportService.baixarRelatorio).toHaveBeenCalledTimes(1);
+
+    download.resolver();
+    await screen.findByRole("button", { name: /^Exportar$/ });
+
+    // Terminado, o próximo pode sair.
+    vi.mocked(reportService.baixarRelatorio).mockResolvedValue();
+    abrirExportar();
+    fireEvent.click(screen.getByRole("button", { name: /Exportar PDF/ }));
+    await waitFor(() => expect(reportService.baixarRelatorio).toHaveBeenCalledTimes(2));
+  });
+
+  it.each([
+    [403, { detail: "Access denied" }, "Você não tem permissão para realizar esta ação."],
+    [422, { detail: "Data final inválida." }, "Data final inválida."],
+    [500, undefined, "Erro interno no servidor. Tente novamente em instantes."],
+  ])("%i: avisa a falha com o motivo e devolve o botão", async (status, data, motivo) => {
+    vi.mocked(reportService.baixarRelatorio).mockRejectedValue(erroDaApi(status, data));
+    await montar();
+
+    abrirExportar();
+    fireEvent.click(screen.getByRole("button", { name: /Exportar CSV/ }));
+
+    await waitFor(() => expect(toast.error).toHaveBeenCalledTimes(1));
+    expect(toast.error).toHaveBeenCalledWith(
+      "Não foi possível baixar o relatório em CSV.",
+      expect.objectContaining({ description: motivo }),
+    );
+    expect(await screen.findByRole("button", { name: /^Exportar$/ })).toBeEnabled();
+  });
+
+  it("falha de rede não trava o botão, e o aviso diz que é a conexão", async () => {
+    vi.mocked(reportService.baixarRelatorio).mockRejectedValue(
+      new AxiosError("Network Error", AxiosError.ERR_NETWORK, undefined, {}),
+    );
+    await montar();
+
+    abrirExportar();
+    fireEvent.click(screen.getByRole("button", { name: /Exportar PDF/ }));
+
+    await waitFor(() => expect(toast.error).toHaveBeenCalledTimes(1));
+    expect(toast.error).toHaveBeenCalledWith(
+      "Não foi possível baixar o relatório em PDF.",
+      expect.objectContaining({
+        description: "Não foi possível falar com o servidor. Verifique sua conexão e tente de novo.",
+      }),
+    );
+    expect(await screen.findByRole("button", { name: /^Exportar$/ })).toBeEnabled();
+  });
+
+  it("resposta que não é relatório vira aviso próprio, sem conteúdo do servidor", async () => {
+    vi.mocked(reportService.baixarRelatorio).mockRejectedValue(
+      new reportService.ArquivoDeRelatorioInvalido("csv"),
+    );
+    await montar();
+
+    abrirExportar();
+    fireEvent.click(screen.getByRole("button", { name: /Exportar CSV/ }));
+
+    await waitFor(() => expect(toast.error).toHaveBeenCalledTimes(1));
+    const [, opcoes] = vi.mocked(toast.error).mock.calls[0];
+    expect(opcoes?.description).toBe(
+      "O servidor não devolveu um arquivo de relatório. Tente de novo; se continuar, avise o suporte.",
+    );
+  });
+
+  it("'Tentar de novo' no aviso repete o MESMO formato", async () => {
+    vi.mocked(reportService.baixarRelatorio)
+      .mockRejectedValueOnce(erroDaApi(500))
+      .mockResolvedValueOnce();
+    await montar();
+
+    abrirExportar();
+    fireEvent.click(screen.getByRole("button", { name: /Exportar PDF/ }));
+    await waitFor(() => expect(toast.error).toHaveBeenCalledTimes(1));
+    await screen.findByRole("button", { name: /^Exportar$/ });
+
+    const [, opcoes] = vi.mocked(toast.error).mock.calls[0];
+    const acao = opcoes?.action as { label: string; onClick: () => void };
+    expect(acao.label).toBe("Tentar de novo");
+    act(() => acao.onClick());
+
+    await waitFor(() => expect(reportService.baixarRelatorio).toHaveBeenCalledTimes(2));
+    expect(vi.mocked(reportService.baixarRelatorio).mock.calls[1][0]).toBe("pdf");
+    await screen.findByRole("button", { name: /^Exportar$/ });
+    expect(toast.error).toHaveBeenCalledTimes(1);
+  });
+
+  it("'Tentar de novo' de um aviso antigo não corre junto de um download em curso", async () => {
+    // O botão desabilitado não cobre este caminho: o aviso da falha anterior
+    // continua na tela e o "Tentar de novo" dele chama o download por fora do
+    // menu. Quem barra é a guarda síncrona.
+    const segundo = pendente();
+    vi.mocked(reportService.baixarRelatorio)
+      .mockRejectedValueOnce(erroDaApi(500))
+      .mockReturnValueOnce(segundo.promessa);
+    await montar();
+
+    abrirExportar();
+    fireEvent.click(screen.getByRole("button", { name: /Exportar CSV/ }));
+    await waitFor(() => expect(toast.error).toHaveBeenCalledTimes(1));
+    await screen.findByRole("button", { name: /^Exportar$/ });
+    const [, opcoes] = vi.mocked(toast.error).mock.calls[0];
+    const acao = opcoes?.action as { label: string; onClick: () => void };
+
+    abrirExportar();
+    fireEvent.click(screen.getByRole("button", { name: /Exportar PDF/ }));
+    await screen.findByRole("button", { name: /Gerando PDF/ });
+
+    act(() => acao.onClick());
+    expect(reportService.baixarRelatorio).toHaveBeenCalledTimes(2);
+    expect(screen.getByRole("button", { name: /Gerando PDF/ })).toBeInTheDocument();
+
+    segundo.resolver();
+    await screen.findByRole("button", { name: /^Exportar$/ });
+  });
+
+  it("428 do aceite: nenhum aviso de falha por cima da tela do aceite", async () => {
+    vi.mocked(reportService.baixarRelatorio).mockRejectedValue(
+      erroDaApi(428, { detail: "Aceite pendente", code: "aceite_politica_pendente" }),
+    );
+    await montar();
+
+    abrirExportar();
+    fireEvent.click(screen.getByRole("button", { name: /Exportar CSV/ }));
+
+    await waitFor(() => expect(reportService.baixarRelatorio).toHaveBeenCalledTimes(1));
+    expect(await screen.findByRole("button", { name: /^Exportar$/ })).toBeEnabled();
+    expect(toast.error).not.toHaveBeenCalled();
+  });
+
+  it("o técnico não vê a exportação — a permissão da tela não mudou", async () => {
+    sessao.papel = "technician";
+    vi.mocked(reportService.getTechnicianDetailReport).mockResolvedValue(null as never);
+
+    render(<ReportsPage />);
+    await waitFor(() => expect(reportService.getTechnicianDetailReport).toHaveBeenCalled());
+
+    expect(screen.queryByRole("button", { name: /Exportar/ })).toBeNull();
   });
 });
