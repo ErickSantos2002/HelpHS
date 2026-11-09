@@ -31,15 +31,37 @@ import pytest
 import pytest_asyncio
 from httpx import ASGITransport, AsyncClient
 from sqlalchemy import event, select
+from sqlalchemy.dialects.postgresql import JSONB
 from sqlalchemy.ext.asyncio import async_sessionmaker, create_async_engine
+from sqlalchemy.ext.compiler import compiles
 from sqlalchemy.pool import StaticPool
 
 from app.core.database import get_db
 from app.core.security import get_current_user
 from app.main import app
-from app.models.models import Base, Company, CompanyNote, Group, User, UserRole, UserStatus
+from app.models.models import (
+    AuditAction,
+    AuditLog,
+    Base,
+    Company,
+    CompanyNote,
+    Group,
+    User,
+    UserRole,
+    UserStatus,
+)
 
-_TABELAS = ("groups", "companies", "users", "company_notes")
+_TABELAS = ("groups", "companies", "users", "company_notes", "audit_logs")
+
+
+# `audit_logs` entrou no subconjunto com a F2-A1: vincular e desvincular
+# cliente passaram a auditar na mesma transação. As colunas `old_data`/
+# `new_data` são `JSONB`, que o SQLite não sabe criar; aqui elas viram `JSON`.
+# Vale só para o dialeto SQLite — o PostgreSQL continua com `JSONB`.
+@compiles(JSONB, "sqlite")
+def _jsonb_no_sqlite(_tipo, _compilador, **_kw) -> str:
+    return "JSON"
+
 
 CNPJ_MASCARADO = "11.222.333/0001-81"
 CNPJ_DIGITOS = "11222333000181"
@@ -135,6 +157,10 @@ async def _cliente(db, **campos) -> User:
     await db.commit()
     await db.refresh(u)
     return u
+
+
+async def _auditorias(db) -> list[AuditLog]:
+    return list((await db.execute(select(AuditLog).order_by(AuditLog.created_at))).scalars())
 
 
 # ═══════════════════════════════════════════════════════════════
@@ -302,11 +328,13 @@ async def test_vincula_cliente_a_empresa(db, cliente_http):
 
 
 @pytest.mark.asyncio
-async def test_vincular_move_de_uma_empresa_para_outra_sem_reclamar(db, cliente_http):
+async def test_vincular_cliente_de_outra_empresa_recusa_sem_mover(db, cliente_http):
     """
-    `assign_client` não checa vínculo anterior: sobrescreve. Vale registrar —
-    é o que permite corrigir um vínculo errado sem desvincular antes, e
-    também o que deixa mover cliente sem rastro.
+    Até a F2-A1 este teste se chamava "move de uma empresa para outra sem
+    reclamar": `assign_client` sobrescrevia o vínculo, sem 409 e sem rastro.
+    Mover cliente de empresa é transferência, e transferência é operação
+    própria (futura), não efeito colateral de "vincular". Para corrigir um
+    vínculo errado: desvincular e vincular — duas ações, as duas auditadas.
     """
     g = await _grupo(db)
     c1 = await _empresa(db, g, name="Primeira")
@@ -317,9 +345,65 @@ async def test_vincular_move_de_uma_empresa_para_outra_sem_reclamar(db, cliente_
         f"/api/v1/groups/{g.id}/companies/{c2.id}/clients", json={"user_id": str(u.id)}
     )
 
-    assert resp.status_code == 201
+    assert resp.status_code == 409
+    assert '"Primeira"' in resp.json()["detail"]
     await db.refresh(u)
-    assert u.company_id == c2.id
+    assert u.company_id == c1.id, "a recusa não move o cliente"
+    assert await _auditorias(db) == []
+
+
+@pytest.mark.asyncio
+async def test_vincular_de_novo_na_mesma_empresa_e_idempotente(db, cliente_http):
+    """Nada mudou: 200 (não 201), sem auditoria nova."""
+    g = await _grupo(db)
+    c = await _empresa(db, g)
+    u = await _cliente(db, company_id=c.id)
+
+    resp = await cliente_http.post(
+        f"/api/v1/groups/{g.id}/companies/{c.id}/clients", json={"user_id": str(u.id)}
+    )
+
+    assert resp.status_code == 200
+    assert resp.json()["id"] == str(u.id)
+    await db.refresh(u)
+    assert u.company_id == c.id
+    assert await _auditorias(db) == []
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("situacao", [UserStatus.inactive, UserStatus.anonymized])
+async def test_vincular_cliente_que_nao_esta_ativo_recusa(db, cliente_http, situacao):
+    g = await _grupo(db)
+    c = await _empresa(db, g)
+    u = await _cliente(db, status=situacao)
+
+    resp = await cliente_http.post(
+        f"/api/v1/groups/{g.id}/companies/{c.id}/clients", json={"user_id": str(u.id)}
+    )
+
+    assert resp.status_code == 409
+    await db.refresh(u)
+    assert u.company_id is None
+    assert await _auditorias(db) == []
+
+
+@pytest.mark.asyncio
+async def test_vincular_grava_auditoria_com_antes_e_depois(db, cliente_http):
+    g = await _grupo(db)
+    c = await _empresa(db, g)
+    u = await _cliente(db)
+
+    resp = await cliente_http.post(
+        f"/api/v1/groups/{g.id}/companies/{c.id}/clients", json={"user_id": str(u.id)}
+    )
+
+    assert resp.status_code == 201
+    (registro,) = await _auditorias(db)
+    assert registro.action == AuditAction.assign
+    assert (registro.entity_type, registro.entity_id) == ("user", u.id)
+    assert registro.user_id is not None, "o autor fica registrado"
+    assert registro.old_data == {"company_id": None}
+    assert registro.new_data == {"company_id": str(c.id), "group_id": str(g.id)}
 
 
 @pytest.mark.asyncio
@@ -354,6 +438,11 @@ async def test_desvincula_cliente(db, cliente_http):
     assert resp.status_code == 204
     await db.refresh(u)
     assert u.company_id is None
+    (registro,) = await _auditorias(db)
+    assert registro.action == AuditAction.assign
+    assert (registro.entity_type, registro.entity_id) == ("user", u.id)
+    assert registro.old_data == {"company_id": str(c.id), "group_id": str(g.id)}
+    assert registro.new_data == {"company_id": None}
 
 
 @pytest.mark.asyncio
@@ -368,6 +457,7 @@ async def test_desvincular_cliente_de_outra_empresa_da_404(db, cliente_http):
     assert resp.status_code == 404
     await db.refresh(u)
     assert u.company_id == c1.id
+    assert await _auditorias(db) == []
 
 
 # ═══════════════════════════════════════════════════════════════
@@ -598,6 +688,59 @@ async def test_criar_da_sugestao_cria_a_empresa_e_vincula_os_clientes(db, client
     for u in (u1, u2):
         await db.refresh(u)
         assert u.company_id is not None
+
+    empresa_id = corpo["company"]["id"]
+    registros = await _auditorias(db)
+    assert [(r.action, r.entity_type) for r in registros if r.entity_type == "company"] == [
+        (AuditAction.create, "company")
+    ]
+    vinculos = {r.entity_id: r for r in registros if r.entity_type == "user"}
+    assert set(vinculos) == {u1.id, u2.id}, "uma linha por cliente vinculado"
+    for r in vinculos.values():
+        assert r.action == AuditAction.assign
+        assert r.old_data == {"company_id": None}
+        assert r.new_data == {"company_id": empresa_id, "group_id": str(g.id)}
+
+
+@pytest.mark.asyncio
+async def test_criar_da_sugestao_reusando_empresa_nao_audita_criacao(db, cliente_http):
+    """Empresa reaproveitada não foi criada: só os vínculos são registrados."""
+    g = await _grupo(db)
+    existente = await _empresa(db, g, name="Acme", cnpj=CNPJ_DIGITOS)
+    u = await _cliente(db, company_name="Acme", cnpj=CNPJ_DIGITOS)
+
+    resp = await cliente_http.post(
+        f"/api/v1/groups/{g.id}/companies/from-suggestion", json=await _sugestao_body([u])
+    )
+
+    assert resp.status_code == 201
+    assert resp.json()["company_created"] is False
+    registros = await _auditorias(db)
+    assert [(r.entity_type, r.entity_id) for r in registros] == [("user", u.id)]
+    assert registros[0].new_data == {"company_id": str(existente.id), "group_id": str(g.id)}
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("situacao", [UserStatus.inactive, UserStatus.anonymized])
+async def test_criar_da_sugestao_recusa_cliente_que_nao_esta_ativo(db, cliente_http, situacao):
+    g = await _grupo(db)
+    ativo = await _cliente(db, name="Ativo", company_name="Acme", cnpj=CNPJ_DIGITOS)
+    parado = await _cliente(
+        db, name="Parado", company_name="Acme", cnpj=CNPJ_DIGITOS, status=situacao
+    )
+
+    resp = await cliente_http.post(
+        f"/api/v1/groups/{g.id}/companies/from-suggestion",
+        json=await _sugestao_body([ativo, parado]),
+    )
+
+    assert resp.status_code == 409
+    for u in (ativo, parado):
+        await db.refresh(u)
+        assert u.company_id is None, "recusa é de tudo: ninguém é vinculado"
+    empresas = (await db.execute(select(Company))).scalars().all()
+    assert empresas == []
+    assert await _auditorias(db) == []
 
 
 @pytest.mark.asyncio
