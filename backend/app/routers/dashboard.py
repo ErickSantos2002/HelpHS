@@ -14,7 +14,6 @@ do calendário em America/Recife, janela `[início, fim)` — ou o `period` lega
 O contrato inteiro está em `app/utils/periodo_relatorio.py`.
 """
 
-import csv
 import io
 import uuid
 from datetime import UTC, datetime
@@ -72,6 +71,7 @@ from app.schemas.dashboard import (
     TicketStats,
     WeekdayCount,
 )
+from app.utils.csv_seguro import EscritorCsvSeguro
 from app.utils.periodo_relatorio import (
     NOME_DO_FUSO,
     JanelaDoRelatorio,
@@ -790,7 +790,10 @@ async def export_reports_csv(
     janela = _janela_ou_422(period, start_date, end_date)
     data = await _build_report(db, period, category, priority, start_date, end_date, janela=janela)
     buf = io.StringIO()
-    writer = csv.writer(buf)
+    # SEC-12: título, responsável e justificativa são texto de usuário. Toda
+    # célula passa pelo `celula_segura` antes de virar CSV — e sem exceção,
+    # para que uma seção nova não precise lembrar de proteger a sua.
+    writer = EscritorCsvSeguro(buf)
 
     period_label = (
         f"{start_date} a {end_date}"
