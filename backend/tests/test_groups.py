@@ -738,7 +738,8 @@ async def test_criar_da_sugestao_recusa_cliente_que_nao_esta_ativo(db, cliente_h
     for u in (ativo, parado):
         await db.refresh(u)
         assert u.company_id is None, "recusa é de tudo: ninguém é vinculado"
-    assert (await db.execute(select(Company))).scalars().all() == []
+    empresas = (await db.execute(select(Company))).scalars().all()
+    assert empresas == []
     assert await _auditorias(db) == []
 
 
