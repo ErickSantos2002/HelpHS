@@ -9,15 +9,15 @@ mais regra de negócio sobre empresa era o único sem rede.
 Estes testes são de **caracterização**: prendem o que o código faz hoje, para
 que a próxima mudança seja decisão e não descoberta. Dois comportamentos
 entram aqui exatamente porque são silenciosos e ninguém os escolheu de
-propósito — o `PUT` que ignora `None` e a exclusão que desvincula cliente sem
-avisar.
+propósito — o `PUT` que ignora `None` e a exclusão que desvinculava cliente
+sem avisar (esta, decidida na F1-D1: agora recusa com 409).
 
 Banco de verdade, não mock. A exclusão de empresa **não dá para provar com
-mock**: quem desvincula o cliente é o SQLAlchemy (a relação `Company.clients`
-não tem cascade de exclusão, então o ORM anula a FK) com a FK
-`ON DELETE SET NULL` por baixo. Um mock afirmaria que `db.delete` foi chamado
-e passaria mesmo que a regra fosse o contrário — o teste que promete mais do
-que prova. SQLite em memória serve: reproduz o mesmo resultado que o Postgres
+mock**: sem a recusa da F1-D1, quem desvincularia o cliente é o SQLAlchemy
+(a relação `Company.clients` não tem cascade de exclusão, então o ORM anula
+a FK) com a FK `ON DELETE SET NULL` por baixo. Um mock afirmaria que
+`db.delete` foi chamado e passaria mesmo que a regra fosse o contrário — o
+teste que promete mais do que prova. SQLite em memória serve: reproduz o mesmo resultado que o Postgres
 efêmero mostrou no levantamento de 24/08, e roda no CI sem subir serviço.
 
 `create_all` vai só no subconjunto de tabelas usado aqui porque `kb_articles`
@@ -31,15 +31,37 @@ import pytest
 import pytest_asyncio
 from httpx import ASGITransport, AsyncClient
 from sqlalchemy import event, select
+from sqlalchemy.dialects.postgresql import JSONB
 from sqlalchemy.ext.asyncio import async_sessionmaker, create_async_engine
+from sqlalchemy.ext.compiler import compiles
 from sqlalchemy.pool import StaticPool
 
 from app.core.database import get_db
 from app.core.security import get_current_user
 from app.main import app
-from app.models.models import Base, Company, CompanyNote, Group, User, UserRole, UserStatus
+from app.models.models import (
+    AuditAction,
+    AuditLog,
+    Base,
+    Company,
+    CompanyNote,
+    Group,
+    User,
+    UserRole,
+    UserStatus,
+)
 
-_TABELAS = ("groups", "companies", "users", "company_notes")
+_TABELAS = ("groups", "companies", "users", "company_notes", "audit_logs")
+
+
+# `audit_logs` entrou no subconjunto com a F2-A1: vincular e desvincular
+# cliente passaram a auditar na mesma transação. As colunas `old_data`/
+# `new_data` são `JSONB`, que o SQLite não sabe criar; aqui elas viram `JSON`.
+# Vale só para o dialeto SQLite — o PostgreSQL continua com `JSONB`.
+@compiles(JSONB, "sqlite")
+def _jsonb_no_sqlite(_tipo, _compilador, **_kw) -> str:
+    return "JSON"
+
 
 CNPJ_MASCARADO = "11.222.333/0001-81"
 CNPJ_DIGITOS = "11222333000181"
@@ -135,6 +157,10 @@ async def _cliente(db, **campos) -> User:
     await db.commit()
     await db.refresh(u)
     return u
+
+
+async def _auditorias(db) -> list[AuditLog]:
+    return list((await db.execute(select(AuditLog).order_by(AuditLog.created_at))).scalars())
 
 
 # ═══════════════════════════════════════════════════════════════
@@ -302,11 +328,13 @@ async def test_vincula_cliente_a_empresa(db, cliente_http):
 
 
 @pytest.mark.asyncio
-async def test_vincular_move_de_uma_empresa_para_outra_sem_reclamar(db, cliente_http):
+async def test_vincular_cliente_de_outra_empresa_recusa_sem_mover(db, cliente_http):
     """
-    `assign_client` não checa vínculo anterior: sobrescreve. Vale registrar —
-    é o que permite corrigir um vínculo errado sem desvincular antes, e
-    também o que deixa mover cliente sem rastro.
+    Até a F2-A1 este teste se chamava "move de uma empresa para outra sem
+    reclamar": `assign_client` sobrescrevia o vínculo, sem 409 e sem rastro.
+    Mover cliente de empresa é transferência, e transferência é operação
+    própria (futura), não efeito colateral de "vincular". Para corrigir um
+    vínculo errado: desvincular e vincular — duas ações, as duas auditadas.
     """
     g = await _grupo(db)
     c1 = await _empresa(db, g, name="Primeira")
@@ -317,9 +345,65 @@ async def test_vincular_move_de_uma_empresa_para_outra_sem_reclamar(db, cliente_
         f"/api/v1/groups/{g.id}/companies/{c2.id}/clients", json={"user_id": str(u.id)}
     )
 
-    assert resp.status_code == 201
+    assert resp.status_code == 409
+    assert '"Primeira"' in resp.json()["detail"]
     await db.refresh(u)
-    assert u.company_id == c2.id
+    assert u.company_id == c1.id, "a recusa não move o cliente"
+    assert await _auditorias(db) == []
+
+
+@pytest.mark.asyncio
+async def test_vincular_de_novo_na_mesma_empresa_e_idempotente(db, cliente_http):
+    """Nada mudou: 200 (não 201), sem auditoria nova."""
+    g = await _grupo(db)
+    c = await _empresa(db, g)
+    u = await _cliente(db, company_id=c.id)
+
+    resp = await cliente_http.post(
+        f"/api/v1/groups/{g.id}/companies/{c.id}/clients", json={"user_id": str(u.id)}
+    )
+
+    assert resp.status_code == 200
+    assert resp.json()["id"] == str(u.id)
+    await db.refresh(u)
+    assert u.company_id == c.id
+    assert await _auditorias(db) == []
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("situacao", [UserStatus.inactive, UserStatus.anonymized])
+async def test_vincular_cliente_que_nao_esta_ativo_recusa(db, cliente_http, situacao):
+    g = await _grupo(db)
+    c = await _empresa(db, g)
+    u = await _cliente(db, status=situacao)
+
+    resp = await cliente_http.post(
+        f"/api/v1/groups/{g.id}/companies/{c.id}/clients", json={"user_id": str(u.id)}
+    )
+
+    assert resp.status_code == 409
+    await db.refresh(u)
+    assert u.company_id is None
+    assert await _auditorias(db) == []
+
+
+@pytest.mark.asyncio
+async def test_vincular_grava_auditoria_com_antes_e_depois(db, cliente_http):
+    g = await _grupo(db)
+    c = await _empresa(db, g)
+    u = await _cliente(db)
+
+    resp = await cliente_http.post(
+        f"/api/v1/groups/{g.id}/companies/{c.id}/clients", json={"user_id": str(u.id)}
+    )
+
+    assert resp.status_code == 201
+    (registro,) = await _auditorias(db)
+    assert registro.action == AuditAction.assign
+    assert (registro.entity_type, registro.entity_id) == ("user", u.id)
+    assert registro.user_id is not None, "o autor fica registrado"
+    assert registro.old_data == {"company_id": None}
+    assert registro.new_data == {"company_id": str(c.id), "group_id": str(g.id)}
 
 
 @pytest.mark.asyncio
@@ -354,6 +438,11 @@ async def test_desvincula_cliente(db, cliente_http):
     assert resp.status_code == 204
     await db.refresh(u)
     assert u.company_id is None
+    (registro,) = await _auditorias(db)
+    assert registro.action == AuditAction.assign
+    assert (registro.entity_type, registro.entity_id) == ("user", u.id)
+    assert registro.old_data == {"company_id": str(c.id), "group_id": str(g.id)}
+    assert registro.new_data == {"company_id": None}
 
 
 @pytest.mark.asyncio
@@ -368,24 +457,24 @@ async def test_desvincular_cliente_de_outra_empresa_da_404(db, cliente_http):
     assert resp.status_code == 404
     await db.refresh(u)
     assert u.company_id == c1.id
+    assert await _auditorias(db) == []
 
 
 # ═══════════════════════════════════════════════════════════════
-# delete_company — a desvinculação silenciosa
+# delete_company — recusa quando há conteúdo (F1-D1)
 # ═══════════════════════════════════════════════════════════════
+#
+# Até 04/11/2026 os dois testes abaixo FIXAVAM o comportamento que ninguém
+# tinha escolhido: excluir a empresa respondia 204, soltava os clientes
+# (`company_id` nulo) e apagava as notas. Eles existiam "para que mudá-lo fosse
+# decisão" — a decisão veio na F1-D1: empresa com cliente vinculado ou nota
+# não sai. A prova completa, com concorrência e auditoria, está em
+# `test_exclusao_grupos_empresas_postgres.py`; aqui fica a mesma regra no
+# SQLite, que roda em qualquer máquina.
 
 
 @pytest.mark.asyncio
-async def test_excluir_empresa_desvincula_clientes_em_silencio(db, cliente_http):
-    """
-    **O comportamento que ninguém escolheu.** Excluir a empresa não é
-    bloqueado nem deixa FK órfã: o cliente sobrevive com `company_id` nulo,
-    o `204` não diz quantos foram soltos, e `_company_client_count` — que
-    existe e é exibido na listagem — não é consultado na exclusão.
-
-    Comprovado antes em Postgres efêmero (levantamento de 24/08) e reproduzido
-    aqui. O teste não aprova a regra; **fixa** para que mudá-la seja decisão.
-    """
+async def test_excluir_empresa_com_clientes_recusa_e_mantem_o_vinculo(db, cliente_http):
     g = await _grupo(db)
     c = await _empresa(db, g)
     u1 = await _cliente(db, name="Um", company_id=c.id)
@@ -393,28 +482,18 @@ async def test_excluir_empresa_desvincula_clientes_em_silencio(db, cliente_http)
 
     resp = await cliente_http.delete(f"/api/v1/groups/{g.id}/companies/{c.id}")
 
-    # O silêncio é o próprio 204: não bloqueia (409) e não informa (200 com
-    # contagem). Não se afirma corpo vazio — isso o 204 já garante, e seria
-    # asserção tautológica: verificado por mutação, um corpo devolvido aqui
-    # continuava passando.
-    assert resp.status_code == 204
-
+    assert resp.status_code == 409
+    assert "2 cliente(s) vinculado(s)" in resp.json()["detail"]
     for u in (u1, u2):
         await db.refresh(u)
-        assert u.company_id is None, "cliente desvinculado, não apagado"
-
+        assert u.company_id == c.id, "a recusa não solta o cliente"
     assert (
         await db.execute(select(Company).where(Company.id == c.id))
-    ).scalar_one_or_none() is None
+    ).scalar_one_or_none() is not None
 
 
 @pytest.mark.asyncio
-async def test_excluir_empresa_apaga_as_notas_da_empresa(db, cliente_http):
-    """
-    Diferente dos clientes: `CompanyNote` tem `cascade="all, delete-orphan"`,
-    então some junto. A assimetria é de propósito e vale registrar — nota é
-    da empresa, cliente não é.
-    """
+async def test_excluir_empresa_com_notas_recusa_e_mantem_as_notas(db, cliente_http):
     g = await _grupo(db)
     c = await _empresa(db, g)
     admin = (await db.execute(select(User).where(User.role == UserRole.admin))).scalars().first()
@@ -425,29 +504,34 @@ async def test_excluir_empresa_apaga_as_notas_da_empresa(db, cliente_http):
 
     resp = await cliente_http.delete(f"/api/v1/groups/{g.id}/companies/{c.id}")
 
-    assert resp.status_code == 204
+    assert resp.status_code == 409
+    assert "1 nota(s)" in resp.json()["detail"]
     assert (
         await db.execute(select(CompanyNote).where(CompanyNote.id == nota_id))
-    ).scalar_one_or_none() is None
+    ).scalar_one_or_none() is not None
 
 
 @pytest.mark.asyncio
 async def test_cliente_desvinculado_volta_a_aparecer_como_sugestao(db, cliente_http):
     """
-    O que salva parcialmente a exclusão silenciosa: `cnpj` e `company_name` do
-    cliente sobrevivem, então ele reaparece em `/companies/suggestions`. O
-    sistema meio que se autocura — mas em silêncio, e alimentando o bug de
-    empresa duplicada, porque criar a empresa pela sugestão não vincula
-    ninguém (defeito 1 do levantamento).
+    `cnpj` e `company_name` do cliente sobrevivem ao desvínculo, então ele
+    reaparece em `/companies/suggestions` — alimentando o bug de empresa
+    duplicada, porque criar a empresa pela sugestão não vincula ninguém
+    (defeito 1 do levantamento).
+
+    Até a F1-D1 o desvínculo aqui vinha de excluir a empresa; agora excluir
+    empresa com cliente recusa, e o caminho que solta o cliente é o
+    `DELETE .../clients/{id}`.
     """
     g = await _grupo(db)
     c = await _empresa(db, g, name="Acme", cnpj=CNPJ_DIGITOS)
-    await _cliente(db, company_id=c.id, company_name="Acme", cnpj=CNPJ_DIGITOS)
+    u = await _cliente(db, company_id=c.id, company_name="Acme", cnpj=CNPJ_DIGITOS)
 
     antes = await cliente_http.get("/api/v1/companies/suggestions")
     assert antes.json() == [], "vinculado não é sugestão"
 
-    await cliente_http.delete(f"/api/v1/groups/{g.id}/companies/{c.id}")
+    resp = await cliente_http.delete(f"/api/v1/groups/{g.id}/companies/{c.id}/clients/{u.id}")
+    assert resp.status_code == 204
 
     depois = await cliente_http.get("/api/v1/companies/suggestions")
     assert [s["company_name"] for s in depois.json()] == ["Acme"]
@@ -604,6 +688,59 @@ async def test_criar_da_sugestao_cria_a_empresa_e_vincula_os_clientes(db, client
     for u in (u1, u2):
         await db.refresh(u)
         assert u.company_id is not None
+
+    empresa_id = corpo["company"]["id"]
+    registros = await _auditorias(db)
+    assert [(r.action, r.entity_type) for r in registros if r.entity_type == "company"] == [
+        (AuditAction.create, "company")
+    ]
+    vinculos = {r.entity_id: r for r in registros if r.entity_type == "user"}
+    assert set(vinculos) == {u1.id, u2.id}, "uma linha por cliente vinculado"
+    for r in vinculos.values():
+        assert r.action == AuditAction.assign
+        assert r.old_data == {"company_id": None}
+        assert r.new_data == {"company_id": empresa_id, "group_id": str(g.id)}
+
+
+@pytest.mark.asyncio
+async def test_criar_da_sugestao_reusando_empresa_nao_audita_criacao(db, cliente_http):
+    """Empresa reaproveitada não foi criada: só os vínculos são registrados."""
+    g = await _grupo(db)
+    existente = await _empresa(db, g, name="Acme", cnpj=CNPJ_DIGITOS)
+    u = await _cliente(db, company_name="Acme", cnpj=CNPJ_DIGITOS)
+
+    resp = await cliente_http.post(
+        f"/api/v1/groups/{g.id}/companies/from-suggestion", json=await _sugestao_body([u])
+    )
+
+    assert resp.status_code == 201
+    assert resp.json()["company_created"] is False
+    registros = await _auditorias(db)
+    assert [(r.entity_type, r.entity_id) for r in registros] == [("user", u.id)]
+    assert registros[0].new_data == {"company_id": str(existente.id), "group_id": str(g.id)}
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("situacao", [UserStatus.inactive, UserStatus.anonymized])
+async def test_criar_da_sugestao_recusa_cliente_que_nao_esta_ativo(db, cliente_http, situacao):
+    g = await _grupo(db)
+    ativo = await _cliente(db, name="Ativo", company_name="Acme", cnpj=CNPJ_DIGITOS)
+    parado = await _cliente(
+        db, name="Parado", company_name="Acme", cnpj=CNPJ_DIGITOS, status=situacao
+    )
+
+    resp = await cliente_http.post(
+        f"/api/v1/groups/{g.id}/companies/from-suggestion",
+        json=await _sugestao_body([ativo, parado]),
+    )
+
+    assert resp.status_code == 409
+    for u in (ativo, parado):
+        await db.refresh(u)
+        assert u.company_id is None, "recusa é de tudo: ninguém é vinculado"
+    empresas = (await db.execute(select(Company))).scalars().all()
+    assert empresas == []
+    assert await _auditorias(db) == []
 
 
 @pytest.mark.asyncio
