@@ -18,7 +18,7 @@ jobs:
 
     services:
       postgres:
-        image: postgres:16
+        image: pgvector/pgvector:pg16
         env:
           POSTGRES_USER: postgres
           POSTGRES_PASSWORD: postgres
@@ -83,6 +83,14 @@ jobs:
           mkdir -p keys uploads
           openssl genpkey -algorithm RSA -pkeyopt rsa_keygen_bits:2048 -out keys/private.pem
           openssl pkey -in keys/private.pem -pubout -out keys/public.pem
+
+      - name: Extensão vector no banco do e2e
+        # A migration a7v8w9x0y1z2 exige a extensão e não a cria: pede
+        # superusuário e é por banco. A imagem `pgvector/pgvector` só põe os
+        # arquivos no servidor. O alvo é o serviço efêmero deste job.
+        run: psql -h localhost -U postgres -d helphs -c "CREATE EXTENSION IF NOT EXISTS vector"
+        env:
+          PGPASSWORD: postgres
 
       - name: Migrations
         working-directory: backend
