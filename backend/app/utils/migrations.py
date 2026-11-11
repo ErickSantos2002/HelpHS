@@ -20,6 +20,8 @@ o único lugar onde migration remota é o comportamento pretendido.
 """
 
 import os
+import re
+from collections.abc import Mapping
 
 from sqlalchemy.engine import make_url
 
@@ -72,3 +74,49 @@ def exige_alvo_liberado(url: str) -> None:
         "No contêiner quem faz isso é o `start.sh`, que é o único lugar onde\n"
         "migration contra banco remoto é o comportamento pretendido."
     )
+
+
+# ── Limites de espera das migrations (F1-B-04c) ────────────────
+#
+# O boot roda `alembic upgrade head` com a instância ANTERIOR ainda atendendo
+# (o EasyPanel só tira a antiga quando a nova sobe). Uma migration que precisa
+# de bloqueio exclusivo espera qualquer transação aberta na tabela — e, enquanto
+# espera, quem chega depois na mesma tabela fica parado atrás dela: o chat
+# congela pelo tempo que a espera durar. Com limite, ela desiste, o PostgreSQL
+# desfaz a transação INTEIRA das migrations (DDL é transacional nele) e o
+# `set -e` do `start.sh` encerra o contêiner antes do uvicorn.
+#
+# Desligado por padrão: sem as variáveis nada muda, em ambiente nenhum. Quem
+# liga é quem implanta, no ambiente do contêiner.
+LIMITES_DA_MIGRATION = (
+    ("lock_timeout", "ALEMBIC_LOCK_TIMEOUT"),
+    ("statement_timeout", "ALEMBIC_STATEMENT_TIMEOUT"),
+)
+# Só número e unidade: o valor entra no SQL, e o SET não aceita parâmetro.
+_DURACAO = re.compile(r"[0-9]+(ms|s|min)?")
+
+
+class LimiteDeMigrationInvalidoError(ValueError):
+    """Valor de `ALEMBIC_*_TIMEOUT` que não é uma duração simples."""
+
+
+def comandos_de_limite(ambiente: Mapping[str, str] | None = None) -> list[str]:
+    """Os `SET LOCAL` a rodar DENTRO da transação das migrations.
+
+    `SET LOCAL` e não `SET`: vale só para esta transação e morre com ela —
+    commit ou rollback —, sem vazar para nada que use a mesma conexão depois.
+    Valor inválido levanta ANTES de conectar: um limite que a pessoa pensou ter
+    ligado e não ligou é pior do que um boot que não sobe.
+    """
+    ambiente = os.environ if ambiente is None else ambiente
+    comandos = []
+    for parametro, variavel in LIMITES_DA_MIGRATION:
+        valor = ambiente.get(variavel, "").strip()
+        if not valor:
+            continue
+        if not _DURACAO.fullmatch(valor):
+            raise LimiteDeMigrationInvalidoError(
+                f"{variavel}={valor!r} não é uma duração (ex.: 3s, 500ms, 2min)."
+            )
+        comandos.append(f"SET LOCAL {parametro} = '{valor}'")
+    return comandos

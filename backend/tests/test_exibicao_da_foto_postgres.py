@@ -61,6 +61,7 @@ from app.models.models import (
 )
 from app.services import exibicao_da_foto
 from app.utils.avatar import pode_aparecer_para_terceiros
+from tests._mensagem_sem_seq import sem_seq_intencional
 from tests.test_dashboard_postgres import _sobe_postgres
 
 _VERSAO_DE_TESTE = "TESTE-AVISO-01"
@@ -1018,9 +1019,10 @@ async def test_a_releitura_da_mensagem_traz_o_remetente_atual_e_nao_a_copia_velh
     )
     await _grava(fabrica, criados, autor, cliente, chamado)
     msg = ChatMessage(id=uuid.uuid4(), ticket_id=chamado.id, sender_id=autor.id, content="oi")
-    async with fabrica() as s:
-        s.add(msg)
-        await s.commit()
+    with sem_seq_intencional():  # conversa já existente, semeada pelo ORM
+        async with fabrica() as s:
+            s.add(msg)
+            await s.commit()
 
     async with fabrica() as sessao_do_socket:
         velho = (
@@ -1291,11 +1293,14 @@ async def test_conta_desativada_nao_emite_foto_e_reativar_respeita_a_escolha_gua
     admin = _usuario(UserRole.admin)
     chamado = _chamado_de(cliente, tecnico)
     await _grava(fabrica, criados, cliente, tecnico, admin, chamado)
-    async with fabrica() as s:
-        s.add(
-            ChatMessage(id=uuid.uuid4(), ticket_id=chamado.id, sender_id=tecnico.id, content="oi")
-        )
-        await s.commit()
+    with sem_seq_intencional():  # conversa já existente, semeada pelo ORM
+        async with fabrica() as s:
+            s.add(
+                ChatMessage(
+                    id=uuid.uuid4(), ticket_id=chamado.id, sender_id=tecnico.id, content="oi"
+                )
+            )
+            await s.commit()
     _atende_com_login_real(fabrica, monkeypatch)
     foto = f"/api/v1/files/tok-avatars/{tecnico.id}.png"
 
@@ -1327,11 +1332,14 @@ async def test_reativar_quem_nao_autorizou_continua_sem_foto(fabrica, criados, m
     admin = _usuario(UserRole.admin)
     chamado = _chamado_de(cliente, tecnico)
     await _grava(fabrica, criados, cliente, tecnico, admin, chamado)
-    async with fabrica() as s:
-        s.add(
-            ChatMessage(id=uuid.uuid4(), ticket_id=chamado.id, sender_id=tecnico.id, content="oi")
-        )
-        await s.commit()
+    with sem_seq_intencional():  # conversa já existente, semeada pelo ORM
+        async with fabrica() as s:
+            s.add(
+                ChatMessage(
+                    id=uuid.uuid4(), ticket_id=chamado.id, sender_id=tecnico.id, content="oi"
+                )
+            )
+            await s.commit()
     _atende_com_login_real(fabrica, monkeypatch)
 
     r = await _pede_logado(
@@ -1358,9 +1366,10 @@ async def test_a_releitura_do_websocket_ve_a_desativacao_feita_por_outra_transac
     chamado = _chamado_de(cliente, autor)
     await _grava(fabrica, criados, autor, cliente, chamado)
     msg = ChatMessage(id=uuid.uuid4(), ticket_id=chamado.id, sender_id=autor.id, content="oi")
-    async with fabrica() as s:
-        s.add(msg)
-        await s.commit()
+    with sem_seq_intencional():  # conversa já existente, semeada pelo ORM
+        async with fabrica() as s:
+            s.add(msg)
+            await s.commit()
 
     async with fabrica() as sessao_do_socket:
         velho = (

@@ -52,7 +52,8 @@ _OUTBOX_CONTA = "c8b8d6994fae"  # outbox de conta e autenticação (Fase 3C, 30/
 _DESFECHO = "k7f8g9h0i1j2"  # desfecho da chamada em ticket_calls (02/10/2026)
 _PROTOCOLO = "0a17fd87823c"  # contador durável de protocolo (07/10/2026)
 _FOTO_TERCEIROS = "l8g9h0i1j2k3"  # foto para outras pessoas: autorização (Fase 3B, 21/10/2026)
-_HEAD = "m9h0i1j2k3l4"  # idempotência do envio no chat (D4, F1-B-04a, 03/11/2026)
+_IDEMPOTENCIA_CHAT = "m9h0i1j2k3l4"  # idempotência do envio no chat (D4, F1-B-04a, 03/11/2026)
+_HEAD = "n0i1j2k3l4m5"  # sequência do chat por chamado (F1-B-04c, 04/11/2026)
 
 
 async def _versao(conn) -> str:
@@ -212,12 +213,14 @@ def test_a_cadeia_e_linear_e_tem_um_head_so():
     # aviso de SLA depois dele, a outbox de e-mail (Fase 3A) depois do aviso de
     # SLA, a outbox de conta/autenticação (Fase 3C, generaliza a mesma tabela)
     # depois dela, o desfecho da chamada depois dela, o contador de
-    # protocolo depois dele, a autorização da foto (Fase 3B) depois dele, e a
-    # idempotência do chat (D4) depois de tudo.
+    # protocolo depois dele, a autorização da foto (Fase 3B) depois dele, a
+    # idempotência do chat (D4) depois dela, e a sequência do chat por chamado
+    # (F1-B-04c) depois de tudo.
     # Cada elo é uma afirmação separada de propósito:
     # "tem um head só" não diz NADA sobre a ordem, e foi a ordem que a colisão
     # embaralhou.
-    assert pai[_HEAD] == _FOTO_TERCEIROS
+    assert pai[_HEAD] == _IDEMPOTENCIA_CHAT
+    assert pai[_IDEMPOTENCIA_CHAT] == _FOTO_TERCEIROS
     assert pai[_FOTO_TERCEIROS] == _PROTOCOLO
     assert pai[_PROTOCOLO] == _DESFECHO
     assert pai[_DESFECHO] == _OUTBOX_CONTA

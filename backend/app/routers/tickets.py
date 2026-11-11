@@ -75,6 +75,7 @@ from app.schemas.ticket import (
     TicketUpdate,
 )
 from app.services import ligacao
+from app.services.chat_sequencia import numera_mensagens_do_chat
 from app.services.helo import abre_triagem
 from app.services.llm import classify_ticket
 from app.services.notifications import (
@@ -596,6 +597,10 @@ async def create_ticket(
             exclude_user_ids={actor.id},
         )
         try:
+            # A saudação da Helô ganha o número 1 do chamado (F1-B-04c). O
+            # chamado nasce nesta transação e ninguém mais o enxerga: o
+            # bloqueio do contador aqui não disputa com ninguém.
+            await numera_mensagens_do_chat(db)
             await commit_e_notificar(db)
             break
         except IntegrityError:

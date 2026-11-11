@@ -176,6 +176,15 @@ def _clear():
     app.dependency_overrides.clear()
 
 
+@pytest.fixture(autouse=True)
+def _sem_numeracao():
+    """A sessão aqui é um `AsyncMock`, sem transação nem linha de chamado para
+    travar. A numeração (F1-B-04c) só se prova no PostgreSQL: ver
+    `test_chat_sequencia_postgres.py`."""
+    with patch("app.routers.chat.numera_mensagens_do_chat", new=AsyncMock()):
+        yield
+
+
 @pytest.fixture()
 def patch_redis():
     with patch("app.core.security.get_redis", new=_get_redis):

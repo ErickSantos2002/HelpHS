@@ -429,6 +429,7 @@ def _mensagem(chamado, remetente, *, is_ai=False, is_system=False):
         created_at=datetime.now(UTC),
         library_file_id=None,
         client_message_id=None,
+        seq=None,
         library_file=None,
     )
 
@@ -467,6 +468,8 @@ async def _historico(ator, chamado, mensagens):
     with (
         patch("app.core.security.get_redis"),
         patch.object(av.storage, "get_presigned_url", new=assina),
+        # O contador do chamado (F1-B-04c), lido antes da página.
+        patch("app.routers.chat._ultima_seq", new=AsyncMock(return_value=0)),
     ):
         async with AsyncClient(transport=ASGITransport(app=app), base_url="http://t") as c:
             r = await c.get(f"/api/v1/tickets/{chamado.id}/messages")
@@ -582,6 +585,8 @@ async def _posta(ator, chamado, recarregada):
         patch("app.routers.chat._fala_da_helo_sem_derrubar", new=AsyncMock(return_value=None)),
         patch("app.routers.chat._apply_chat_transition", new=AsyncMock(return_value=None)),
         patch("app.routers.chat.commit_e_notificar", new=AsyncMock()),
+        # A numeração (F1-B-04c) é SQL de verdade; os testes dela são de PostgreSQL.
+        patch("app.routers.chat.numera_mensagens_do_chat", new=AsyncMock()),
         patch("app.routers.chat.register_first_response"),
         patch("app.routers.chat.manager.broadcast", new=broadcast),
         patch.object(
@@ -665,6 +670,8 @@ def _manda_pelo_ws(usuario, chamado, recarregada):
         patch("app.routers.chat._fala_da_helo_sem_derrubar", new=AsyncMock(return_value=None)),
         patch("app.routers.chat._apply_chat_transition", new=AsyncMock(return_value=None)),
         patch("app.routers.chat.commit_e_notificar", new=AsyncMock()),
+        # A numeração (F1-B-04c) é SQL de verdade; os testes dela são de PostgreSQL.
+        patch("app.routers.chat.numera_mensagens_do_chat", new=AsyncMock()),
         patch("app.routers.chat.register_first_response"),
         patch("app.routers.chat.chat_backplane.publicar", new=AsyncMock()),
         patch.object(
@@ -897,6 +904,8 @@ def _manda_varias_pelo_ws(usuario, chamado, recarregadas):
         patch("app.routers.chat._fala_da_helo_sem_derrubar", new=AsyncMock(return_value=None)),
         patch("app.routers.chat._apply_chat_transition", new=AsyncMock(return_value=None)),
         patch("app.routers.chat.commit_e_notificar", new=AsyncMock()),
+        # A numeração (F1-B-04c) é SQL de verdade; os testes dela são de PostgreSQL.
+        patch("app.routers.chat.numera_mensagens_do_chat", new=AsyncMock()),
         patch("app.routers.chat.register_first_response"),
         patch("app.routers.chat.chat_backplane.publicar", new=AsyncMock()),
         patch.object(

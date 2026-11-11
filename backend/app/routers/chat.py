@@ -35,7 +35,7 @@ from jose import JWTError
 from loguru import logger
 from sqlalchemy import func, literal, select, tuple_
 from sqlalchemy import inspect as sa_inspect
-from sqlalchemy.exc import IntegrityError
+from sqlalchemy.exc import DBAPIError, IntegrityError
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.orm import selectinload
 from starlette.websockets import WebSocketState
@@ -65,6 +65,11 @@ from app.schemas.chat import (
     SuggestReplyResponse,
 )
 from app.services import chat_backplane, consentimento
+from app.services.chat_sequencia import (
+    incremental_disponivel,
+    numera_mensagens_do_chat,
+    perdeu_a_concorrencia,
+)
 from app.services.helo import (
     FALAS_MAXIMAS,
     MOTIVO_PEDIU_HUMANO,
@@ -153,16 +158,48 @@ class ConnectionManager:
         É também o que o backplane chama ao receber mensagem de outro worker —
         por isso é público e recebe o `ticket_id` como string: o assinante não
         sabe o que é uma sala, só repassa o que chegou.
+
+        Quadro que não vira JSON é defeito de quem o montou, não dos sockets:
+        é recusado ANTES do laço. Sem isso, cada `send_json` falhava, e a sala
+        inteira era tratada como morta por um erro que não era de ninguém dela.
         """
-        room = self._rooms.get(ticket_id, set())
+        try:
+            json.dumps(payload)
+        except (TypeError, ValueError) as exc:
+            logger.error(f"Chat: quadro para a sala {ticket_id} não vira JSON ({exc}); descartado")
+            return
         dead: list[WebSocket] = []
-        for ws in list(room):
+        for ws in list(self._rooms.get(ticket_id, ())):
             try:
                 await ws.send_json(payload)
             except Exception:
                 dead.append(ws)
         for ws in dead:
+            await self._descarta(ticket_id, ws)
+
+    async def _descarta(self, ticket_id: str, ws: WebSocket) -> None:
+        """Tira dos DOIS índices e avisa o navegador com 1011.
+
+        Só tirar da sala deixava um fantasma: o socket seguia aberto e em
+        `_por_usuario`, e a tela, sem fechamento nenhum, ficava surda achando
+        que estava ao vivo. Com o fechamento ela reconecta — e sincroniza.
+        A limpeza vem ANTES do `close`: socket que nem fechar consegue não
+        pode continuar contado.
+        """
+        room = self._rooms.get(ticket_id)
+        if room is not None:
             room.discard(ws)
+            if not room:
+                del self._rooms[ticket_id]
+        for dono, sockets in list(self._por_usuario.items()):
+            if ws in sockets:
+                sockets.discard(ws)
+                if not sockets:
+                    del self._por_usuario[dono]
+        try:
+            await ws.close(code=status.WS_1011_INTERNAL_ERROR)
+        except Exception:  # noqa: BLE001 — já morto: a limpeza acima é o que importa
+            pass
 
     async def broadcast(self, ticket_id: str, payload: dict) -> None:
         """Entrega local PRIMEIRO, publica depois.
@@ -273,6 +310,7 @@ def _msg_to_response(
         **_arquivo_da_mensagem(msg, ve_arquivo_interno=ve_arquivo_interno),
         sender_avatar_url=sender_avatar_url,
         client_message_id=msg.client_message_id,
+        seq=msg.seq,
     )
 
 
@@ -321,6 +359,12 @@ async def _mensagem_com_remetente_atual(db: AsyncSession, msg_id: uuid.UUID) -> 
 _CHAVE_REUSADA = (
     "Este client_message_id já foi usado para outra mensagem neste chamado. "
     "Gere uma chave nova para cada mensagem nova."
+)
+
+# Deadlock ou falha de serialização no envio (F1-B-04c): o banco desfez tudo.
+_ENVIO_NAO_GRAVADO = (
+    "A mensagem não foi gravada: outra alteração no chamado aconteceu ao mesmo "
+    "tempo. Envie de novo."
 )
 
 
@@ -592,6 +636,7 @@ async def list_messages(
     limit: int | None = Query(default=None, ge=1, le=100),
     offset: int | None = Query(default=None, ge=0),
     before: str | None = Query(default=None, max_length=512),
+    after_seq: int | None = Query(default=None, ge=0),
 ) -> ChatMessageListResponse:
     """Histórico da conversa, sempre em ordem cronológica no corpo.
 
@@ -610,18 +655,70 @@ async def list_messages(
     ⚠️ `created_at` é carimbado antes do commit. Uma mensagem pode ficar
     visível depois de outra mais "nova", e então cair atrás de um cursor já
     usado: voltar com `before` não a traz. Quem a entrega é o WebSocket, ou
-    reler a página mais recente — ver `test_chat_historico_postgres.py`.
+    reler a página mais recente — ver `test_chat_historico_postgres.py` —, ou
+    o modo incremental abaixo.
+
+    **Incremental por `after_seq` (F1-B-04c):** as mensagens com
+    `seq > after_seq`, em ordem CRESCENTE de `seq` — a ordem de commit, não a
+    de `created_at`. `has_more` diz que há mais depois da última, e
+    `next_after_seq` é de onde continuar. Sozinho: com `before` ou `offset` é
+    422. `after_seq` maior que o contador do chamado é 409 `ressincronizar` —
+    o contador voltou (backup restaurado, numeração recriada) e a âncora de
+    quem pediu não vale mais. Mensagem sem número (anterior à numeração)
+    nunca volta por aqui: está no histórico por cursor. Um salto entre dois
+    números não é erro: a mensagem pode ter sido removida por quem tem
+    direito de remover.
+
+    Toda resposta traz `ultima_seq`, lido ANTES das mensagens: tudo até ele
+    já estava comitado, então uma página sem `after_seq` seguida de
+    `after_seq=ultima_seq` não perde nada que comitar entre as duas.
+
+    **Só vale quando anunciado.** Toda resposta traz `sincronizacao_incremental`:
+    verdadeiro apenas com a configuração ligada E o banco confirmando que nada
+    do chamado ficou sem número desde o corte. Falso, `after_seq` é 409
+    `incremental_indisponivel`, e quem pediu volta ao histórico por cursor. A
+    presença de `ultima_seq` NÃO é anúncio.
     """
     if offset is not None and before is not None:
         raise HTTPException(
             status_code=status.HTTP_422_UNPROCESSABLE_CONTENT,
             detail="Use `before` ou `offset`, não os dois.",
         )
+    if after_seq is not None and (offset is not None or before is not None):
+        raise HTTPException(
+            status_code=status.HTTP_422_UNPROCESSABLE_CONTENT,
+            detail="Use `after_seq` sozinho, sem `before` nem `offset`.",
+        )
 
     # A autorização vem ANTES de olhar o cursor: chamado alheio responde o
     # mesmo 404 com cursor válido, inválido ou sem cursor nenhum.
     ticket = await _get_ticket_visivel(ticket_id, actor, db)
     ponto = _decodifica_cursor(before, ticket_id) if before is not None else None
+
+    # Desligado, nem consulta: o anúncio é falso sem tocar no banco.
+    disponivel = _incremental_ligado() and await incremental_disponivel(db, ticket_id)
+    if after_seq is not None and not disponivel:
+        raise HTTPException(
+            status_code=status.HTTP_409_CONFLICT,
+            detail={
+                "code": "incremental_indisponivel",
+                "detail": "A sincronização incremental não está disponível. Use o histórico.",
+            },
+        )
+
+    # ANTES das mensagens, num comando à parte. Em READ COMMITTED cada comando
+    # vê o banco do seu próprio instante; lido depois, o contador poderia
+    # incluir um commit que a página não viu, e a âncora pularia a mensagem.
+    ultima_seq = await _ultima_seq(db, ticket_id)
+    if after_seq is not None and after_seq > ultima_seq:
+        raise HTTPException(
+            status_code=status.HTTP_409_CONFLICT,
+            detail={
+                "code": "ressincronizar",
+                "detail": "A conversa foi renumerada. Recarregue o histórico.",
+                "ultima_seq": ultima_seq,
+            },
+        )
 
     total_result = await db.execute(select(func.count()).where(ChatMessage.ticket_id == ticket_id))
     total = total_result.scalar_one()
@@ -633,7 +730,22 @@ async def list_messages(
         .where(ChatMessage.ticket_id == ticket_id)
     )
 
-    if offset is not None:
+    next_after_seq = None
+    if after_seq is not None:
+        limite = limit or _PAGINA_PADRAO
+        # Teto em `ultima_seq`: o que comitou depois da leitura do contador
+        # fica para a próxima página, e `next_after_seq` não passa por cima.
+        rows = await db.execute(
+            consulta.where(ChatMessage.seq > after_seq, ChatMessage.seq <= ultima_seq)
+            .order_by(ChatMessage.seq.asc())
+            .limit(limite + 1)
+        )
+        lote = list(rows.scalars().all())
+        has_more = len(lote) > limite
+        messages = lote[:limite]
+        next_after_seq = messages[-1].seq if has_more else ultima_seq
+        next_before = None
+    elif offset is not None:
         limite = limit or _PAGINA_PADRAO_LEGADA
         rows = await db.execute(
             consulta.order_by(ChatMessage.created_at.asc(), ChatMessage.id.asc())
@@ -681,7 +793,22 @@ async def list_messages(
         offset=offset or 0,
         has_more=has_more,
         next_before=next_before,
+        ultima_seq=ultima_seq,
+        next_after_seq=next_after_seq,
+        sincronizacao_incremental=disponivel,
     )
+
+
+def _incremental_ligado() -> bool:
+    """A configuração, lida na hora: desligar vale no reinício seguinte."""
+    return get_settings().chat_sincronizacao_incremental
+
+
+async def _ultima_seq(db: AsyncSession, ticket_id: uuid.UUID) -> int:
+    """O contador do chamado como está comitado agora. Função à parte para o
+    teste poder comitar uma mensagem entre esta leitura e a da página."""
+    valor = (await db.execute(select(Ticket.chat_seq).where(Ticket.id == ticket_id))).scalar_one()
+    return int(valor)
 
 
 @router.post(
@@ -747,38 +874,55 @@ async def create_message(
     if anterior is not None:
         return await _repeticao(anterior, ticket, response, ve_arquivo_interno=ve_arquivo_interno)
 
-    # SLA: falar com o cliente é o que conta como primeira resposta
-    register_first_response(
-        ticket, now, responder_id=actor.id, is_ai=msg.is_ai, is_system=msg.is_system
-    )
+    try:
+        # SLA: falar com o cliente é o que conta como primeira resposta
+        register_first_response(
+            ticket, now, responder_id=actor.id, is_ai=msg.is_ai, is_system=msg.is_system
+        )
 
-    # A Helô responde quando o cliente escreve. ANTES da notificação de
-    # propósito: é ela quem decide se a equipe precisa ser chamada, e um
-    # chamado que ela acabou de escalar é justamente o que precisa chegar à
-    # equipe com o aviso certo — e ainda não tem dono.
-    fala_da_helo = None
-    if actor.id == ticket.creator_id:
-        fala_da_helo = await _fala_da_helo_sem_derrubar(db, ticket, actor, msg.content)
+        # A Helô responde quando o cliente escreve. ANTES da notificação de
+        # propósito: é ela quem decide se a equipe precisa ser chamada, e um
+        # chamado que ela acabou de escalar é justamente o que precisa chegar à
+        # equipe com o aviso certo — e ainda não tem dono.
+        fala_da_helo = None
+        if actor.id == ticket.creator_id:
+            fala_da_helo = await _fala_da_helo_sem_derrubar(db, ticket, actor, msg.content)
 
-    # Notify the other party
-    await _notify_other_party(db, ticket, actor, msg)
+        # Notify the other party
+        await _notify_other_party(db, ticket, actor, msg)
 
-    # SÓ na escalada. Ela fala a cada turno agora, e avisar a equipe a cada
-    # fala mandaria seis notificações por chamado para todo técnico e
-    # todo admin — cinco delas dizendo que a triagem acabou enquanto a
-    # conversa seguia. Notificação que chega sempre deixa de ser lida.
-    # `motivo is not None` em vez de `.escalou`: a guarda e o argumento passam
-    # a olhar o MESMO campo. `escalou` é property, e property não estreita
-    # tipo — o mypy via `str | None` chegando onde se espera `str`, e estava
-    # certo: a property pode divergir do campo num refactor, o `is not None`
-    # não pode.
-    if fala_da_helo is not None and fala_da_helo.motivo is not None:
-        await _avisa_equipe_da_helo(db, ticket, motivo=fala_da_helo.motivo)
+        # SÓ na escalada. Ela fala a cada turno agora, e avisar a equipe a cada
+        # fala mandaria seis notificações por chamado para todo técnico e
+        # todo admin — cinco delas dizendo que a triagem acabou enquanto a
+        # conversa seguia. Notificação que chega sempre deixa de ser lida.
+        # `motivo is not None` em vez de `.escalou`: a guarda e o argumento passam
+        # a olhar o MESMO campo. `escalou` é property, e property não estreita
+        # tipo — o mypy via `str | None` chegando onde se espera `str`, e estava
+        # certo: a property pode divergir do campo num refactor, o `is not None`
+        # não pode.
+        if fala_da_helo is not None and fala_da_helo.motivo is not None:
+            await _avisa_equipe_da_helo(db, ticket, motivo=fala_da_helo.motivo)
 
-    # Auto status transition based on who is sending
-    new_status_value = await _apply_chat_transition(db, ticket, actor)
+        # Auto status transition based on who is sending
+        new_status_value = await _apply_chat_transition(db, ticket, actor)
 
-    await commit_e_notificar(db)
+        # O ÚLTIMO bloqueio do envio, e só depois da Helô: ver a ordem dos
+        # bloqueios em `app/services/chat_sequencia.py`.
+        await numera_mensagens_do_chat(db)
+        await commit_e_notificar(db)
+    except DBAPIError as exc:
+        if not perdeu_a_concorrencia(exc):
+            raise
+        # Deadlock ou serialização: o banco desfez a transação INTEIRA — a
+        # mensagem, o aviso, o status. Nada é repetido aqui: repetir chamaria
+        # a Helô de novo. A resposta diz que não gravou, e quem enviou reenvia.
+        await db.rollback()
+        logger.warning(f"Chat: envio no chamado {ticket_id} perdeu a concorrência ({exc.orig})")
+        raise HTTPException(
+            status.HTTP_503_SERVICE_UNAVAILABLE,
+            _ENVIO_NAO_GRAVADO,
+            headers={"Retry-After": "1"},
+        ) from None
 
     # A mesma releitura do WebSocket: o remetente sai do banco, não do `actor`
     # que o `get_current_user` carregou no início da requisição.
@@ -1161,26 +1305,44 @@ async def websocket_chat(
                     )
                     continue
 
-                register_first_response(
-                    ticket, now, responder_id=user.id, is_ai=msg.is_ai, is_system=msg.is_system
-                )
+                try:
+                    register_first_response(
+                        ticket, now, responder_id=user.id, is_ai=msg.is_ai, is_system=msg.is_system
+                    )
 
-                await _notify_other_party(db, ticket, user, msg)
+                    await _notify_other_party(db, ticket, user, msg)
 
-                # O chat do front conversa por WebSocket, entao ESTE e o
-                # caminho pelo qual a resposta do cliente chega de verdade. O
-                # POST existe, mas fica de reserva -- ligar a Helo so la a
-                # deixaria muda na tela onde ela aparece.
-                fala_da_helo = None
-                if user.id == ticket.creator_id:
-                    fala_da_helo = await _fala_da_helo_sem_derrubar(db, ticket, user, msg.content)
-                    # Só na escalada — ver o mesmo trecho no caminho do POST.
-                    if fala_da_helo is not None and fala_da_helo.motivo is not None:
-                        await _avisa_equipe_da_helo(db, ticket, motivo=fala_da_helo.motivo)
+                    # O chat do front conversa por WebSocket, entao ESTE e o
+                    # caminho pelo qual a resposta do cliente chega de verdade. O
+                    # POST existe, mas fica de reserva -- ligar a Helo so la a
+                    # deixaria muda na tela onde ela aparece.
+                    fala_da_helo = None
+                    if user.id == ticket.creator_id:
+                        fala_da_helo = await _fala_da_helo_sem_derrubar(
+                            db, ticket, user, msg.content
+                        )
+                        # Só na escalada — ver o mesmo trecho no caminho do POST.
+                        if fala_da_helo is not None and fala_da_helo.motivo is not None:
+                            await _avisa_equipe_da_helo(db, ticket, motivo=fala_da_helo.motivo)
 
-                new_status_value = await _apply_chat_transition(db, ticket, user)
+                    new_status_value = await _apply_chat_transition(db, ticket, user)
 
-                await commit_e_notificar(db)
+                    # O ÚLTIMO bloqueio do envio — ver o POST acima.
+                    await numera_mensagens_do_chat(db)
+                    await commit_e_notificar(db)
+                except DBAPIError as exc:
+                    if not perdeu_a_concorrencia(exc):
+                        raise
+                    # Igual ao POST: nada gravado, nada repetido. A chave volta no
+                    # erro, e a tela sabe QUAL envio não entrou; o socket segue.
+                    await db.rollback()
+                    logger.warning(
+                        f"Chat: envio no chamado {ticket_id} perdeu a concorrência ({exc.orig})"
+                    )
+                    await websocket.send_json(
+                        _quadro_de_erro(_ENVIO_NAO_GRAVADO, chave, code="envio_nao_gravado")
+                    )
+                    continue
 
                 msg = await _mensagem_com_remetente_atual(db, msg.id)
                 # A foto também sai aqui dentro, com o remetente carregado. O
@@ -1290,6 +1452,9 @@ def _response_to_dict(r: ChatMessageResponse) -> dict:
         # apaga o rascunho (B-04b). Não serve a mais ninguém — vale só com o
         # remetente dela (`_envio_anterior`).
         "client_message_id": str(r.client_message_id) if r.client_message_id else None,
+        # A posição na ordem de commit (F1-B-04c): é por ela que a tela sabe se
+        # perdeu alguma coisa entre dois quadros.
+        "seq": r.seq,
     }
 
 

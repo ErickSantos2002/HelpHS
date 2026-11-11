@@ -7,7 +7,7 @@ from sqlalchemy.ext.asyncio import async_engine_from_config
 from alembic import context
 from app.core.config import get_settings
 from app.models.models import Base
-from app.utils.migrations import exige_alvo_liberado
+from app.utils.migrations import comandos_de_limite, exige_alvo_liberado
 
 config = context.config
 settings = get_settings()
@@ -16,6 +16,8 @@ settings = get_settings()
 # decidido aqui — esperar pelo `run_migrations_online` seria travar depois de a
 # URL já ter sido passada adiante.
 exige_alvo_liberado(settings.database_url)
+# Também antes de conectar: limite com valor inválido não chega a abrir conexão.
+limites = comandos_de_limite()
 
 config.set_main_option("sqlalchemy.url", settings.database_url)
 
@@ -34,12 +36,18 @@ def run_migrations_offline() -> None:
         dialect_opts={"paramstyle": "named"},
     )
     with context.begin_transaction():
+        for comando in limites:
+            context.execute(comando)
         context.run_migrations()
 
 
 def do_run_migrations(connection):
     context.configure(connection=connection, target_metadata=target_metadata)
+    # DENTRO da transação que roda TODAS as revisions pendentes: o limite vale
+    # para cada comando de cada uma, e estourar desfaz o conjunto inteiro.
     with context.begin_transaction():
+        for comando in limites:
+            connection.exec_driver_sql(comando)
         context.run_migrations()
 
 

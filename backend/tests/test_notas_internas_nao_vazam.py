@@ -45,6 +45,7 @@ from tests.test_tickets import (
     _mock_ticket,
     _mock_user,
     _override_user,
+    _sem_numeracao_do_chat,  # noqa: F401 — autouse: sessão de mentira não numera
     patch_redis,  # noqa: F401 — fixture usada por nome
 )
 
