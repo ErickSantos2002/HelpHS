@@ -58,6 +58,11 @@ jobs:
       # o modo `sha_recuperacao` os exige.
       HASH_REV_1: d77211d4200d9b8fd3161a67b4f9feebebe56d3fa00aa2081eda103de4a049a7
       HASH_REV_2: 98ba7bd96168de0669bdd83a9e696503edf15968d00bc0993884e17e3f6ff3f2
+      # A referência definitiva de recuperação (branch `recuperacao/v1.23.0-seq`,
+      # tag `recuperacao-v1.23.0-seq`). `sha_recuperacao`, quando vem, tem de
+      # ser ESTE commit: outro, mesmo com a árvore igual, não é o que foi
+      # publicado e protegido.
+      SHA_RECUPERACAO_APROVADO: "775917fd710410f0a216ec2f55931ea26f159f52"
 
     steps:
       - name: Checkout
@@ -75,6 +80,7 @@ jobs:
           # branch ou de tag pode mudar de lugar, e SHA abreviado é ambíguo.
           if [ -n "$SHA_RECUPERACAO" ]; then
             [[ "$SHA_RECUPERACAO" =~ ^[0-9a-f]{40}$ ]] || { echo "::error::sha_recuperacao precisa ser um SHA completo (40 hex minúsculos)"; exit 1; }
+            [ "$SHA_RECUPERACAO" = "$SHA_RECUPERACAO_APROVADO" ] || { echo "::error::sha_recuperacao não é a referência de recuperação aprovada ($SHA_RECUPERACAO_APROVADO)"; exit 1; }
           fi
 
           BASE="$RUNNER_TEMP/ensaio"
@@ -298,6 +304,7 @@ jobs:
 
             # `cat-file -t` no SHA cru, sem `^{commit}`: o SHA de um objeto de
             # tag não passa por commit.
+            [ "$SHA_RECUPERACAO" = "$SHA_RECUPERACAO_APROVADO" ] || falha "sha_recuperacao não é a referência de recuperação aprovada"
             tipo=$(git cat-file -t "$SHA_RECUPERACAO" 2>/dev/null || true)
             [ "$tipo" = "commit" ] || falha "sha_recuperacao não é um commit presente no clone (tipo: ${tipo:-ausente})"
             git merge-base --is-ancestor "$SHA_ANTIGA" "$SHA_RECUPERACAO" || falha "o commit de recuperação não descende da v1.23.0"
