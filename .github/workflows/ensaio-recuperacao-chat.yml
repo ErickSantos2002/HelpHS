@@ -8,6 +8,11 @@ name: Ensaio de recuperação do chat (F1-B-04c)
 #   nova          a F1-B-04c (commit informado em `sha_nova`)
 #   recuperação   v1.23.0 + os DOIS arquivos de revision, e nada mais
 #
+# A recuperação sai de um de dois lugares. Sem `sha_recuperacao`, o job monta a
+# árvore aqui mesmo (v1.23.0 + os dois arquivos do commit novo). Com
+# `sha_recuperacao`, constrói o commit informado — a referência publicada —,
+# depois de conferir que ele é exatamente isso.
+#
 # Nada aqui toca produção: não há `secrets`, não há registry, não há etapa de
 # deploy, e a rede dos contêineres é `--internal` (sem saída para fora). As
 # senhas e as chaves JWT são geradas na hora e valem só para este job.
@@ -20,6 +25,10 @@ on:
         description: "Commit da F1-B-04c (40 hex). As duas revisions saem dele, byte a byte."
         required: true
         default: "b2f76371f319cb9edc067872ffe9d0b6390e738f"
+      sha_recuperacao:
+        description: "Opcional. Commit da referência de recuperação (40 hex; nome de branch ou tag não serve). Vazio: o job monta a árvore."
+        required: false
+        default: ""
 
 permissions:
   contents: read
@@ -38,12 +47,22 @@ jobs:
       # v1.23.0, o merge do #100 — o que está implantado.
       SHA_ANTIGA: "045012961e5d7a0d535b96946a115038af9a0abb"
       SHA_NOVA: ${{ inputs.sha_nova }}
+      SHA_RECUPERACAO: ${{ inputs.sha_recuperacao }}
       # Tudo o que o job cria leva este prefixo, e a limpeza só apaga o que o
       # tem: nada de `docker system prune`.
       P: ensaio-${{ github.run_id }}-${{ github.run_attempt }}
       HEAD_ANTIGO: l8g9h0i1j2k3
       REV_1: m9h0i1j2k3l4
       REV_2: n0i1j2k3l4m5
+      # SHA-256 do conteúdo versionado das duas revisions, como aprovadas. Só
+      # o modo `sha_recuperacao` os exige.
+      HASH_REV_1: d77211d4200d9b8fd3161a67b4f9feebebe56d3fa00aa2081eda103de4a049a7
+      HASH_REV_2: 98ba7bd96168de0669bdd83a9e696503edf15968d00bc0993884e17e3f6ff3f2
+      # A referência definitiva de recuperação (branch `recuperacao/v1.23.0-seq`,
+      # tag `recuperacao-v1.23.0-seq`). `sha_recuperacao`, quando vem, tem de
+      # ser ESTE commit: outro, mesmo com a árvore igual, não é o que foi
+      # publicado e protegido.
+      SHA_RECUPERACAO_APROVADO: "775917fd710410f0a216ec2f55931ea26f159f52"
 
     steps:
       - name: Checkout
@@ -57,6 +76,12 @@ jobs:
         run: |
           set -euo pipefail
           [[ "$SHA_NOVA" =~ ^[0-9a-f]{40}$ ]] || { echo "::error::sha_nova precisa ter 40 hex"; exit 1; }
+          # Vazio é o modo de sempre. Preenchido, só um SHA completo: nome de
+          # branch ou de tag pode mudar de lugar, e SHA abreviado é ambíguo.
+          if [ -n "$SHA_RECUPERACAO" ]; then
+            [[ "$SHA_RECUPERACAO" =~ ^[0-9a-f]{40}$ ]] || { echo "::error::sha_recuperacao precisa ser um SHA completo (40 hex minúsculos)"; exit 1; }
+            [ "$SHA_RECUPERACAO" = "$SHA_RECUPERACAO_APROVADO" ] || { echo "::error::sha_recuperacao não é a referência de recuperação aprovada ($SHA_RECUPERACAO_APROVADO)"; exit 1; }
+          fi
 
           BASE="$RUNNER_TEMP/ensaio"
           mkdir -p "$BASE/evidencias" "$BASE/chaves" "$BASE/arvores"
@@ -247,28 +272,75 @@ jobs:
 
           git worktree add --detach "$BASE/arvores/antiga" "$SHA_ANTIGA" > /dev/null
           git worktree add --detach "$BASE/arvores/nova" "$SHA_NOVA" > /dev/null
-          git worktree add --detach "$BASE/arvores/recuperacao" "$SHA_ANTIGA" > /dev/null
-
-          # Recuperação = v1.23.0 + os dois arquivos, byte a byte do commit novo.
           : > "$EVID/recuperacao-arquivos.txt"
-          for rev in "$REV_1" "$REV_2"; do
-            arq=$(git ls-tree --name-only "$SHA_NOVA" backend/alembic/versions/ | grep "/${rev}_")
-            [ "$(echo "$arq" | wc -l)" = "1" ] || falha "revision $rev: esperava um arquivo"
-            git cat-file blob "$SHA_NOVA:$arq" > "$BASE/arvores/recuperacao/$arq"
-            h_origem=$(git cat-file blob "$SHA_NOVA:$arq" | sha256sum | cut -d' ' -f1)
-            h_copia=$(sha256sum "$BASE/arvores/recuperacao/$arq" | cut -d' ' -f1)
-            h_nova=$(sha256sum "$BASE/arvores/nova/$arq" | cut -d' ' -f1)
-            echo "$arq  origem=$h_origem  recuperacao=$h_copia  nova=$h_nova" >> "$EVID/recuperacao-arquivos.txt"
-            [ "$h_origem" = "$h_copia" ] && [ "$h_origem" = "$h_nova" ] || falha "hash de $arq diverge"
-            ok "$rev: mesmo SHA-256 na origem, na nova e na recuperação"
-          done
 
-          # Só os dois arquivos, e como arquivos novos.
-          mudou=$(git -C "$BASE/arvores/recuperacao" status --porcelain --untracked-files=all)
-          echo "$mudou" >> "$EVID/recuperacao-arquivos.txt"
-          [ "$(echo "$mudou" | wc -l)" = "2" ] || { echo "$mudou"; falha "a árvore de recuperação mudou mais do que dois arquivos"; }
-          [ "$(echo "$mudou" | grep -c '^?? backend/alembic/versions/')" = "2" ] || { echo "$mudou"; falha "mudança fora de alembic/versions"; }
-          ok "árvore de recuperação = v1.23.0 + 2 arquivos"
+          if [ -z "$SHA_RECUPERACAO" ]; then
+            echo "modo: árvore montada pelo job (v1.23.0 + os dois arquivos de $SHA_NOVA)" >> "$EVID/recuperacao-arquivos.txt"
+            git worktree add --detach "$BASE/arvores/recuperacao" "$SHA_ANTIGA" > /dev/null
+
+            # Recuperação = v1.23.0 + os dois arquivos, byte a byte do commit novo.
+            for rev in "$REV_1" "$REV_2"; do
+              arq=$(git ls-tree --name-only "$SHA_NOVA" backend/alembic/versions/ | grep "/${rev}_")
+              [ "$(echo "$arq" | wc -l)" = "1" ] || falha "revision $rev: esperava um arquivo"
+              git cat-file blob "$SHA_NOVA:$arq" > "$BASE/arvores/recuperacao/$arq"
+              h_origem=$(git cat-file blob "$SHA_NOVA:$arq" | sha256sum | cut -d' ' -f1)
+              h_copia=$(sha256sum "$BASE/arvores/recuperacao/$arq" | cut -d' ' -f1)
+              h_nova=$(sha256sum "$BASE/arvores/nova/$arq" | cut -d' ' -f1)
+              echo "$arq  origem=$h_origem  recuperacao=$h_copia  nova=$h_nova" >> "$EVID/recuperacao-arquivos.txt"
+              [ "$h_origem" = "$h_copia" ] && [ "$h_origem" = "$h_nova" ] || falha "hash de $arq diverge"
+              ok "$rev: mesmo SHA-256 na origem, na nova e na recuperação"
+            done
+
+            # Só os dois arquivos, e como arquivos novos.
+            mudou=$(git -C "$BASE/arvores/recuperacao" status --porcelain --untracked-files=all)
+            echo "$mudou" >> "$EVID/recuperacao-arquivos.txt"
+            [ "$(echo "$mudou" | wc -l)" = "2" ] || { echo "$mudou"; falha "a árvore de recuperação mudou mais do que dois arquivos"; }
+            [ "$(echo "$mudou" | grep -c '^?? backend/alembic/versions/')" = "2" ] || { echo "$mudou"; falha "mudança fora de alembic/versions"; }
+            ok "árvore de recuperação = v1.23.0 + 2 arquivos"
+          else
+            # Modo SHA exato: nada é montado. A imagem sai do commit informado,
+            # e ele só serve se for a v1.23.0 mais as duas revisions aprovadas.
+            echo "modo: commit de recuperação informado ($SHA_RECUPERACAO)" >> "$EVID/recuperacao-arquivos.txt"
+
+            # `cat-file -t` no SHA cru, sem `^{commit}`: o SHA de um objeto de
+            # tag não passa por commit.
+            [ "$SHA_RECUPERACAO" = "$SHA_RECUPERACAO_APROVADO" ] || falha "sha_recuperacao não é a referência de recuperação aprovada"
+            tipo=$(git cat-file -t "$SHA_RECUPERACAO" 2>/dev/null || true)
+            [ "$tipo" = "commit" ] || falha "sha_recuperacao não é um commit presente no clone (tipo: ${tipo:-ausente})"
+            git merge-base --is-ancestor "$SHA_ANTIGA" "$SHA_RECUPERACAO" || falha "o commit de recuperação não descende da v1.23.0"
+            ok "recuperação: commit $SHA_RECUPERACAO, descendente da v1.23.0"
+
+            # A árvore INTEIRA, não só alembic/versions: dois arquivos a mais e
+            # nenhum original alterado, removido ou renomeado.
+            arq_1=$(git ls-tree --name-only "$SHA_NOVA" backend/alembic/versions/ | grep "/${REV_1}_")
+            arq_2=$(git ls-tree --name-only "$SHA_NOVA" backend/alembic/versions/ | grep "/${REV_2}_")
+            esperado_rec=$(printf 'A\t%s\nA\t%s\n' "$arq_1" "$arq_2")
+            obtido_rec=$(git diff --no-renames --name-status "$SHA_ANTIGA" "$SHA_RECUPERACAO")
+            echo "$obtido_rec" >> "$EVID/recuperacao-arquivos.txt"
+            [ "$obtido_rec" = "$esperado_rec" ] || { echo "$obtido_rec" | head -n 40; falha "o commit de recuperação não é a v1.23.0 mais exatamente as duas revisions"; }
+            ok "commit de recuperação = v1.23.0 + 2 arquivos, nenhum original alterado"
+
+            git worktree add --detach "$BASE/arvores/recuperacao" "$SHA_RECUPERACAO" > /dev/null
+
+            # Cada revision: o hash aprovado, o do commit novo e o do arquivo
+            # que vai para o build têm de ser o mesmo.
+            for par in "$REV_1:$HASH_REV_1:$arq_1" "$REV_2:$HASH_REV_2:$arq_2"; do
+              rev=${par%%:*}; resto=${par#*:}; aprovado=${resto%%:*}; arq=${resto#*:}
+              h_rec=$(git cat-file blob "$SHA_RECUPERACAO:$arq" | sha256sum | cut -d' ' -f1)
+              h_origem=$(git cat-file blob "$SHA_NOVA:$arq" | sha256sum | cut -d' ' -f1)
+              h_disco=$(sha256sum "$BASE/arvores/recuperacao/$arq" | cut -d' ' -f1)
+              echo "$arq  aprovado=$aprovado  recuperacao=$h_rec  nova=$h_origem  disco=$h_disco" >> "$EVID/recuperacao-arquivos.txt"
+              [ "$h_rec" = "$aprovado" ] || falha "$rev: o SHA-256 no commit de recuperação diverge do aprovado"
+              [ "$h_rec" = "$h_origem" ] || falha "$rev: o SHA-256 no commit de recuperação diverge do commit novo"
+              [ "$h_rec" = "$h_disco" ] || falha "$rev: o arquivo que vai para o build diverge do commit"
+              ok "$rev: SHA-256 aprovado no commit de recuperação, igual ao do commit novo"
+            done
+
+            # O que vai para o build é o commit, sem nada por cima.
+            mudou=$(git -C "$BASE/arvores/recuperacao" status --porcelain --untracked-files=all)
+            [ -z "$mudou" ] || { echo "$mudou"; falha "a árvore de recuperação não é um checkout limpo"; }
+            confere "commit na árvore de recuperação" "$(git -C "$BASE/arvores/recuperacao" rev-parse HEAD)" "$SHA_RECUPERACAO"
+          fi
 
           # A cadeia: m9h0 desce do head da v1.23.0, n0i1 desce da m9h0.
           v="$BASE/arvores/recuperacao/backend/alembic/versions"
