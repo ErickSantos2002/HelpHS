@@ -1,0 +1,607 @@
+name: Ensaio de recuperação do chat (F1-B-04c)
+
+# Ensaio, não deploy. Sobe três imagens do backend contra um Postgres e um
+# Redis que nascem e morrem com o job, e responde a uma pergunta só: depois de
+# o banco ir para a `n0i1j2k3l4m5`, dá para voltar à v1.23.0?
+#
+#   antiga        v1.23.0 pura (o que está em produção)
+#   nova          a F1-B-04c (commit informado em `sha_nova`)
+#   recuperação   v1.23.0 + os DOIS arquivos de revision, e nada mais
+#
+# Nada aqui toca produção: não há `secrets`, não há registry, não há etapa de
+# deploy, e a rede dos contêineres é `--internal` (sem saída para fora). As
+# senhas e as chaves JWT são geradas na hora e valem só para este job.
+#
+# Só roda à mão.
+on:
+  workflow_dispatch:
+    inputs:
+      sha_nova:
+        description: "Commit da F1-B-04c (40 hex). As duas revisions saem dele, byte a byte."
+        required: true
+        default: "b2f76371f319cb9edc067872ffe9d0b6390e738f"
+
+permissions:
+  contents: read
+
+concurrency:
+  group: ensaio-recuperacao-chat
+  cancel-in-progress: false
+
+jobs:
+  ensaio:
+    name: Ensaio (Docker)
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+
+    env:
+      # v1.23.0, o merge do #100 — o que está implantado.
+      SHA_ANTIGA: "045012961e5d7a0d535b96946a115038af9a0abb"
+      SHA_NOVA: ${{ inputs.sha_nova }}
+      # Tudo o que o job cria leva este prefixo, e a limpeza só apaga o que o
+      # tem: nada de `docker system prune`.
+      P: ensaio-${{ github.run_id }}-${{ github.run_attempt }}
+      HEAD_ANTIGO: l8g9h0i1j2k3
+      REV_1: m9h0i1j2k3l4
+      REV_2: n0i1j2k3l4m5
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+        with:
+          # Os três commits precisam estar no clone.
+          fetch-depth: 0
+          persist-credentials: false
+
+      - name: Preparo (senhas e chaves efêmeras, funções do ensaio)
+        run: |
+          set -euo pipefail
+          [[ "$SHA_NOVA" =~ ^[0-9a-f]{40}$ ]] || { echo "::error::sha_nova precisa ter 40 hex"; exit 1; }
+
+          BASE="$RUNNER_TEMP/ensaio"
+          mkdir -p "$BASE/evidencias" "$BASE/chaves" "$BASE/arvores"
+
+          # Nenhuma credencial literal: nascem aqui, são mascaradas no log e
+          # somem com o runner.
+          PG_SENHA=$(openssl rand -hex 24)
+          ADMIN_SENHA=$(openssl rand -hex 24)
+          echo "::add-mask::$PG_SENHA"
+          echo "::add-mask::$ADMIN_SENHA"
+
+          openssl genpkey -algorithm RSA -pkeyopt rsa_keygen_bits:2048 -out "$BASE/chaves/private.pem" 2>/dev/null
+          openssl pkey -in "$BASE/chaves/private.pem" -pubout -out "$BASE/chaves/public.pem"
+          # A imagem roda como `appuser`, que não é o dono destes arquivos. A
+          # chave é descartável e o diretório vai montado só para leitura.
+          chmod 755 "$BASE/chaves"
+          chmod 644 "$BASE/chaves/private.pem" "$BASE/chaves/public.pem"
+
+          {
+            echo "BASE=$BASE"
+            echo "EVID=$BASE/evidencias"
+            echo "ESTADO=$BASE/estado.env"
+            echo "REDE=$P-rede"
+            echo "PG=$P-pg"
+            echo "PG_SENHA=$PG_SENHA"
+            echo "ADMIN_SENHA=$ADMIN_SENHA"
+          } >> "$GITHUB_ENV"
+          : > "$BASE/estado.env"
+
+          cat > "$BASE/lib.sh" <<'LIB'
+          set -euo pipefail
+          # shellcheck disable=SC1090
+          [ -f "$ESTADO" ] && . "$ESTADO"
+
+          ADMIN_EMAIL="admin@healthsafety.com"
+
+          falha() { echo "::error::$*"; exit 1; }
+          ok() { echo "ok: $*"; echo "- ✅ $*" >> "$GITHUB_STEP_SUMMARY"; }
+          grava() { echo "$1=$2" >> "$ESTADO"; }
+
+          # confere <descrição> <obtido> <esperado>
+          confere() {
+            [ "$2" = "$3" ] || falha "$1: esperado '$3', veio '$2'"
+            ok "$1 = $3"
+          }
+
+          url_do_banco() { echo "postgresql+asyncpg://postgres:${PG_SENHA}@${PG}:5432/${1:-helphs}"; }
+
+          # sql <consulta> [banco] — pelo socket local do contêiner, sem senha.
+          sql() { docker exec "$PG" psql -U postgres -d "${2:-helphs}" -At -v ON_ERROR_STOP=1 -c "$1"; }
+
+          # sobe <nome> <imagem> [opções extras do docker run]
+          sobe() {
+            local nome=$1 imagem=$2; shift 2
+            DATABASE_URL="$(url_do_banco)" SEED_ADMIN_PASSWORD="$ADMIN_SENHA" \
+            docker run -d --name "$P-$nome" --network "$REDE" \
+              -v "$BASE/chaves:/app/keys:ro" \
+              -e APP_ENV=testing \
+              -e DATABASE_URL \
+              -e SEED_ADMIN_PASSWORD \
+              -e "REDIS_URL=redis://$P-redis:6379/0" \
+              -e LLM_ENABLED=false \
+              -e HELO_ENABLED=false \
+              -e SLA_WARNING_INTERVAL_SECONDS=0 \
+              "$@" "$imagem" > /dev/null
+          }
+
+          guarda_log() { docker logs "$P-$1" > "$EVID/$2.log" 2>&1 || true; }
+
+          # aguarda <nome> <arquivo de log> — contêiner de pé NÃO é app pronta:
+          # só vale quando o /health responde. Se o contêiner morrer, falha já.
+          aguarda() {
+            local nome=$1 i estado
+            for i in $(seq 1 90); do
+              estado=$(docker inspect -f '{{.State.Status}}' "$P-$nome" 2>/dev/null || echo ausente)
+              if [ "$estado" != "running" ]; then
+                guarda_log "$nome" "$2"; tail -n 40 "$EVID/$2.log" || true
+                falha "contêiner $nome parou no boot (estado: $estado)"
+              fi
+              if docker exec "$P-$nome" curl -fsS -m 5 -o /dev/null http://localhost:8000/health 2>/dev/null; then
+                ok "$nome: /health 200"
+                return 0
+              fi
+              sleep 2
+            done
+            guarda_log "$nome" "$2"; tail -n 40 "$EVID/$2.log" || true
+            falha "$nome não respondeu ao /health em 180 s"
+          }
+
+          # para <nome> <arquivo de log>
+          para() { guarda_log "$1" "$2"; docker rm -f -v "$P-$1" > /dev/null; }
+
+          # Nenhuma conexão sobrando no banco — é o "não há escritor antigo".
+          sem_conexoes() {
+            local i n
+            for i in $(seq 1 15); do
+              n=$(sql "select count(*) from pg_stat_activity where datname = '${1:-helphs}' and pid <> pg_backend_pid()" postgres)
+              [ "$n" = "0" ] && { ok "nenhuma conexão aberta em ${1:-helphs}"; return 0; }
+              sleep 1
+            done
+            falha "ainda há $n conexão(ões) em ${1:-helphs}"
+          }
+
+          # api <nome> <método> <caminho> [token] [corpo JSON]
+          # Deixa o status em API_CODIGO e o corpo em API_CORPO. O curl roda
+          # DENTRO do contêiner da aplicação: a rede não tem porta publicada.
+          api() {
+            local nome=$1 metodo=$2 caminho=$3 token=${4:-} corpo=${5:-} r
+            local args=(-sS -m 30 -w '\n%{http_code}' -X "$metodo" -H 'Accept: application/json')
+            [ -n "$token" ] && args+=(-H "Authorization: Bearer $token")
+            [ -n "$corpo" ] && args+=(-H 'Content-Type: application/json' --data "$corpo")
+            r=$(docker exec "$P-$nome" curl "${args[@]}" "http://localhost:8000$caminho") \
+              || falha "curl falhou em $metodo $caminho ($nome)"
+            API_CODIGO=${r##*$'\n'}
+            API_CORPO=${r%$'\n'*}
+          }
+
+          # espera_status <esperado> <o que era> — no erro mostra só o `detail`.
+          espera_status() {
+            [ "$API_CODIGO" = "$1" ] && return 0
+            falha "$2: HTTP $API_CODIGO (esperado $1) — $(echo "$API_CORPO" | jq -c '.detail? // "sem detail"' 2>/dev/null || echo 'corpo não é JSON')"
+          }
+
+          # entra <nome> — login real, pela rota da aplicação. Deixa TOKEN.
+          entra() {
+            api "$1" POST /api/v1/auth/login "" \
+              "$(jq -nc --arg e "$ADMIN_EMAIL" --arg p "$ADMIN_SENHA" '{email: $e, password: $p}')"
+            espera_status 200 "login em $1"
+            TOKEN=$(echo "$API_CORPO" | jq -r '.access_token')
+            [ -n "$TOKEN" ] && [ "$TOKEN" != "null" ] || falha "login em $1 sem access_token"
+            echo "::add-mask::$TOKEN"
+            ok "$1: login pelo REST"
+          }
+
+          # abre_chamado <nome> <título> — deixa o id em CHAMADO.
+          abre_chamado() {
+            api "$1" POST /api/v1/tickets "$TOKEN" \
+              "$(jq -nc --arg t "$2" '{title: $t, description: "Chamado sintetico do ensaio de recuperacao."}')"
+            espera_status 201 "abrir chamado em $1"
+            CHAMADO=$(echo "$API_CORPO" | jq -r '.id')
+            ok "$1: chamado aberto pelo REST"
+          }
+
+          # envia <nome> <chamado> <texto> — deixa o id em MENSAGEM e o corpo em API_CORPO.
+          envia() {
+            api "$1" POST "/api/v1/tickets/$2/messages" "$TOKEN" "$(jq -nc --arg c "$3" '{content: $c}')"
+            espera_status 201 "enviar mensagem em $1"
+            MENSAGEM=$(echo "$API_CORPO" | jq -r '.id')
+            ok "$1: mensagem enviada pelo REST"
+          }
+
+          # retrato <nome> — o estado do banco, em arquivo. Só dado sintético.
+          retrato() {
+            {
+              echo "== alembic_version"; sql "select version_num from alembic_version" "${2:-helphs}"
+              echo "== tickets (id | protocolo | chat_seq, se existir)"
+              sql "select to_jsonb(t) - 'description' - 'title' from (select id, protocol, to_jsonb(tickets)->'chat_seq' as chat_seq from tickets order by created_at) t" "${2:-helphs}"
+              echo "== chat_messages (id | chamado | seq, se existir | created_at | conteúdo)"
+              sql "select id, ticket_id, to_jsonb(chat_messages)->'seq', created_at, left(content, 60) from chat_messages order by created_at, id" "${2:-helphs}"
+              echo "== chat_seq_corte"
+              sql "select to_regclass('public.chat_seq_corte') is not null" "${2:-helphs}"
+            } > "$EVID/retrato-$1.txt" 2>&1 || echo "::warning::retrato $1 incompleto"
+          }
+
+          # impressao [banco] — um resumo para comparar antes e depois.
+          impressao() {
+            sql "select (select version_num from alembic_version) || '|' || (select count(*) from chat_messages) || '|' || (select count(*) from tickets) || '|' || (select count(*) from users) || '|' || (select coalesce(md5(string_agg(id::text, ',' order by id)), '-') from chat_messages)" "${1:-helphs}"
+          }
+          LIB
+          bash -n "$BASE/lib.sh"
+
+      # ── Construção ───────────────────────────────────────────
+      - name: Árvores das três imagens
+        run: |
+          . "$BASE/lib.sh"
+          git cat-file -e "$SHA_ANTIGA^{commit}" || falha "commit antigo ausente"
+          git cat-file -e "$SHA_NOVA^{commit}" || falha "commit novo ausente do clone"
+          git merge-base --is-ancestor "$SHA_ANTIGA" "$SHA_NOVA" || falha "a nova não descende da v1.23.0"
+
+          # A nova só pode ter, de migration a mais, as duas revisions. Se
+          # houver uma terceira, a imagem de recuperação estaria incompleta.
+          esperado=$(printf 'A\tbackend/alembic/versions/%s\nA\tbackend/alembic/versions/%s\n' \
+            "$(git ls-tree --name-only "$SHA_NOVA" backend/alembic/versions/ | grep "/${REV_1}_" | xargs basename)" \
+            "$(git ls-tree --name-only "$SHA_NOVA" backend/alembic/versions/ | grep "/${REV_2}_" | xargs basename)")
+          obtido=$(git diff --name-status "$SHA_ANTIGA" "$SHA_NOVA" -- backend/alembic/versions)
+          [ "$obtido" = "$esperado" ] || { echo "$obtido"; falha "as migrations entre a antiga e a nova não são só as duas revisions"; }
+          ok "entre a v1.23.0 e a nova há só as revisions $REV_1 e $REV_2"
+
+          git worktree add --detach "$BASE/arvores/antiga" "$SHA_ANTIGA" > /dev/null
+          git worktree add --detach "$BASE/arvores/nova" "$SHA_NOVA" > /dev/null
+          git worktree add --detach "$BASE/arvores/recuperacao" "$SHA_ANTIGA" > /dev/null
+
+          # Recuperação = v1.23.0 + os dois arquivos, byte a byte do commit novo.
+          : > "$EVID/recuperacao-arquivos.txt"
+          for rev in "$REV_1" "$REV_2"; do
+            arq=$(git ls-tree --name-only "$SHA_NOVA" backend/alembic/versions/ | grep "/${rev}_")
+            [ "$(echo "$arq" | wc -l)" = "1" ] || falha "revision $rev: esperava um arquivo"
+            git cat-file blob "$SHA_NOVA:$arq" > "$BASE/arvores/recuperacao/$arq"
+            h_origem=$(git cat-file blob "$SHA_NOVA:$arq" | sha256sum | cut -d' ' -f1)
+            h_copia=$(sha256sum "$BASE/arvores/recuperacao/$arq" | cut -d' ' -f1)
+            h_nova=$(sha256sum "$BASE/arvores/nova/$arq" | cut -d' ' -f1)
+            echo "$arq  origem=$h_origem  recuperacao=$h_copia  nova=$h_nova" >> "$EVID/recuperacao-arquivos.txt"
+            [ "$h_origem" = "$h_copia" ] && [ "$h_origem" = "$h_nova" ] || falha "hash de $arq diverge"
+            ok "$rev: mesmo SHA-256 na origem, na nova e na recuperação"
+          done
+
+          # Só os dois arquivos, e como arquivos novos.
+          mudou=$(git -C "$BASE/arvores/recuperacao" status --porcelain --untracked-files=all)
+          echo "$mudou" >> "$EVID/recuperacao-arquivos.txt"
+          [ "$(echo "$mudou" | wc -l)" = "2" ] || { echo "$mudou"; falha "a árvore de recuperação mudou mais do que dois arquivos"; }
+          [ "$(echo "$mudou" | grep -c '^?? backend/alembic/versions/')" = "2" ] || { echo "$mudou"; falha "mudança fora de alembic/versions"; }
+          ok "árvore de recuperação = v1.23.0 + 2 arquivos"
+
+          # A cadeia: m9h0 desce do head da v1.23.0, n0i1 desce da m9h0.
+          v="$BASE/arvores/recuperacao/backend/alembic/versions"
+          grep -Eq "^down_revision.*\"$HEAD_ANTIGO\"" "$v/${REV_1}_"*.py || falha "$REV_1 não desce de $HEAD_ANTIGO"
+          grep -Eq "^down_revision.*\"$REV_1\"" "$v/${REV_2}_"*.py || falha "$REV_2 não desce de $REV_1"
+          ok "cadeia $HEAD_ANTIGO → $REV_1 → $REV_2"
+
+      - name: Constrói as três imagens (sem publicar)
+        run: |
+          . "$BASE/lib.sh"
+          for nome in antiga recuperacao nova; do
+            docker build -t "$P-img-$nome" "$BASE/arvores/$nome/backend" > "$EVID/build-$nome.log" 2>&1 \
+              || { tail -n 40 "$EVID/build-$nome.log"; falha "build da imagem $nome falhou"; }
+            ok "imagem $nome construída"
+          done
+
+          # Um head só em cada uma, e o esperado. `alembic heads` lê os
+          # arquivos; não conecta em banco (e `--network none` garante).
+          cabeca() {
+            docker run --rm --network none -e APP_ENV=testing \
+              -e DATABASE_URL=postgresql+asyncpg://ninguem@127.0.0.1/nenhum \
+              "$P-img-$1" alembic heads 2>/dev/null
+          }
+          confere "head da antiga" "$(cabeca antiga)" "$HEAD_ANTIGO (head)"
+          confere "head da nova" "$(cabeca nova)" "$REV_2 (head)"
+          confere "head da recuperação" "$(cabeca recuperacao)" "$REV_2 (head)"
+
+      # ── Infraestrutura descartável ───────────────────────────
+      - name: Rede isolada, Postgres (pgvector) e Redis
+        run: |
+          . "$BASE/lib.sh"
+          # `--internal`: os contêineres se enxergam e não saem para lugar
+          # nenhum. Nenhuma porta é publicada no runner.
+          docker network create --internal "$REDE" > /dev/null
+          POSTGRES_PASSWORD="$PG_SENHA" docker run -d --name "$PG" --network "$REDE" \
+            -e POSTGRES_USER=postgres -e POSTGRES_PASSWORD -e POSTGRES_DB=helphs \
+            pgvector/pgvector:pg16 > /dev/null
+          docker run -d --name "$P-redis" --network "$REDE" redis:7 > /dev/null
+
+          # Por TCP de propósito: o servidor temporário do initdb só escuta no
+          # socket, então isto só passa com o servidor definitivo de pé.
+          for i in $(seq 1 60); do
+            docker exec "$PG" pg_isready -h 127.0.0.1 -U postgres -d helphs > /dev/null 2>&1 && break
+            [ "$i" = "60" ] && { docker logs "$PG" | tail -n 30; falha "Postgres não ficou pronto"; }
+            sleep 2
+          done
+          confere "Postgres responde" "$(sql 'select 1')" "1"
+          for i in $(seq 1 30); do
+            [ "$(docker exec "$P-redis" redis-cli ping 2>/dev/null)" = "PONG" ] && break
+            [ "$i" = "30" ] && falha "Redis não respondeu"
+            sleep 1
+          done
+          ok "Redis responde"
+
+          # A migration a7v8w9x0y1z2 exige a extensão e não a cria.
+          sql "CREATE EXTENSION IF NOT EXISTS vector" > /dev/null
+          confere "extensão vector" "$(sql "select count(*) from pg_extension where extname = 'vector'")" "1"
+
+      # ── Cenário A ────────────────────────────────────────────
+      - name: "A — estado inicial: v1.23.0 no esquema antigo"
+        run: |
+          . "$BASE/lib.sh"
+          sobe antiga "$P-img-antiga"
+          aguarda antiga A-antiga
+          confere "A: head do banco" "$(sql 'select version_num from alembic_version')" "$HEAD_ANTIGO"
+          confere "A: esquema antigo (colunas novas ausentes)" \
+            "$(sql "select count(*) from information_schema.columns where (table_name, column_name) in (('chat_messages','seq'),('chat_messages','client_message_id'),('tickets','chat_seq'))")" "0"
+
+          entra antiga
+          abre_chamado antiga "Ensaio - chamado do historico"
+          grava CHAMADO_A "$CHAMADO"
+          envia antiga "$CHAMADO" "historico 1, gravada pela v1.23.0"
+          envia antiga "$CHAMADO" "historico 2, gravada pela v1.23.0"
+          confere "A: mensagens gravadas" "$(sql "select count(*) from chat_messages where ticket_id = '$CHAMADO'")" "2"
+
+          api antiga GET "/api/v1/tickets/$CHAMADO/messages" "$TOKEN"
+          espera_status 200 "histórico pela antiga"
+          confere "A: histórico pelo REST" "$(echo "$API_CORPO" | jq -r '.items | length')" "2"
+
+          retrato A
+          # Para ANTES de qualquer imagem nova subir: o upgrade roda sem
+          # escritor antigo, que é a condição do deploy que se quer ensaiar.
+          para antiga A-antiga
+          sem_conexoes helphs
+          # Cópia no esquema antigo, para o ensaio de atomicidade.
+          sql "CREATE DATABASE helphs_l8g9 TEMPLATE helphs" postgres > /dev/null
+          ok "A: cópia helphs_l8g9 guardada"
+
+      # ── Cenário B ────────────────────────────────────────────
+      - name: "B — upgrade: a imagem nova aplica m9h0 e n0i1"
+        run: |
+          . "$BASE/lib.sh"
+          sem_conexoes helphs
+          sobe nova "$P-img-nova"
+          aguarda nova B-nova
+          guarda_log nova B-nova
+          grep -Fq "Running upgrade $HEAD_ANTIGO -> $REV_1" "$EVID/B-nova.log" || falha "B: o log não mostra a $REV_1"
+          grep -Fq "Running upgrade $REV_1 -> $REV_2" "$EVID/B-nova.log" || falha "B: o log não mostra a $REV_2"
+          grep -Fq "Migrations complete." "$EVID/B-nova.log" || falha "B: migrations não concluíram"
+          grep -Fq "Seeds complete." "$EVID/B-nova.log" || falha "B: seeds não concluíram"
+          ok "B: o boot aplicou $REV_1 e $REV_2 e rodou os seeds"
+
+          confere "B: head do banco" "$(sql 'select version_num from alembic_version')" "$REV_2"
+          confere "B: colunas novas" \
+            "$(sql "select count(*) from information_schema.columns where (table_name, column_name) in (('chat_messages','seq'),('chat_messages','client_message_id'),('chat_messages','client_message_fingerprint'),('tickets','chat_seq'))")" "4"
+          confere "B: índices únicos" \
+            "$(sql "select count(*) from pg_indexes where indexname in ('uq_chat_messages_envio','uq_chat_messages_seq')")" "2"
+          confere "B: marco do corte (uma linha)" "$(sql 'select count(*) from chat_seq_corte')" "1"
+          confere "B: histórico segue sem número" \
+            "$(sql "select count(*) from chat_messages where ticket_id = '$CHAMADO_A' and seq is null")" "2"
+
+          entra nova
+          envia nova "$CHAMADO_A" "gravada pela nova no chamado do historico"
+          confere "B: seq na resposta (chamado do histórico)" "$(echo "$API_CORPO" | jq -r '.seq')" "1"
+
+          abre_chamado nova "Ensaio - chamado da recuperacao"
+          grava CHAMADO_B "$CHAMADO"
+          envia nova "$CHAMADO" "numero 1, gravada pela nova"
+          confere "B: seq na resposta (chamado novo)" "$(echo "$API_CORPO" | jq -r '.seq')" "1"
+          confere "B: seq no banco" "$(sql "select seq from chat_messages where id = '$MENSAGEM'")" "1"
+          confere "B: contador do chamado" "$(sql "select chat_seq from tickets where id = '$CHAMADO'")" "1"
+
+          api nova GET "/api/v1/tickets/$CHAMADO/messages" "$TOKEN"
+          espera_status 200 "histórico pela nova"
+          confere "B: interruptor desligado não anuncia incremental" \
+            "$(echo "$API_CORPO" | jq -r '.sincronizacao_incremental')" "false"
+
+          retrato B
+          para nova B-nova
+          sem_conexoes helphs
+          # Cópia já migrada, só para o controle negativo.
+          sql "CREATE DATABASE helphs_controle TEMPLATE helphs" postgres > /dev/null
+          ok "B: cópia helphs_controle guardada"
+
+      # ── Cenário C ────────────────────────────────────────────
+      - name: "C — recuperação: v1.23.0 + revisions contra o banco migrado"
+        run: |
+          . "$BASE/lib.sh"
+          sobe recuperacao "$P-img-recuperacao"
+          aguarda recuperacao C-recuperacao
+          guarda_log recuperacao C-recuperacao
+          grep -Fq "Running upgrade" "$EVID/C-recuperacao.log" && falha "C: a recuperação aplicou migration — não devia ter nada a aplicar"
+          grep -Fq "Migrations complete." "$EVID/C-recuperacao.log" || falha "C: o alembic do boot não concluiu"
+          grep -Fq "Seeds complete." "$EVID/C-recuperacao.log" || falha "C: seeds da v1.23.0 não concluíram no esquema novo"
+          ok "C: boot sem migration a aplicar, seeds concluídos"
+          confere "C: head do banco intacto" "$(sql 'select version_num from alembic_version')" "$REV_2"
+
+          # Tudo daqui em diante é o código da v1.23.0 falando com o esquema
+          # novo, pelas rotas reais — não é INSERT.
+          entra recuperacao
+          api recuperacao GET "/api/v1/tickets/$CHAMADO_B/messages" "$TOKEN"
+          espera_status 200 "histórico pela recuperação"
+          confere "C: a v1.23.0 lê o histórico no esquema novo" "$(echo "$API_CORPO" | jq -r '.items | length')" "1"
+
+          envia recuperacao "$CHAMADO_B" "gravada pela recuperacao, sem numero"
+          grava MENSAGEM_C "$MENSAGEM"
+          confere "C: mensagem da recuperação persistida SEM seq" \
+            "$(sql "select seq is null from chat_messages where id = '$MENSAGEM'")" "t"
+          confere "C: gravada depois do marco" \
+            "$(sql "select m.created_at >= c.migrada_em from chat_messages m, chat_seq_corte c where m.id = '$MENSAGEM'")" "t"
+          confere "C: contador do chamado não andou" "$(sql "select chat_seq from tickets where id = '$CHAMADO_B'")" "1"
+
+          abre_chamado recuperacao "Ensaio - chamado aberto pela recuperacao"
+          confere "C: chamado da v1.23.0 nasce com contador 0" "$(sql "select chat_seq from tickets where id = '$CHAMADO'")" "0"
+
+          retrato C
+          para recuperacao C-recuperacao
+          sem_conexoes helphs
+
+      # ── Cenário D ────────────────────────────────────────────
+      - name: "D — controle negativo: v1.23.0 pura NÃO sobe com o banco migrado"
+        run: |
+          . "$BASE/lib.sh"
+          antes=$(impressao helphs)
+          confere "D: a cópia está migrada" "$(sql 'select version_num from alembic_version' helphs_controle)" "$REV_2"
+
+          # Em primeiro plano e contra a CÓPIA. O esperado é o start.sh morrer
+          # no `alembic upgrade head`.
+          set +e
+          DATABASE_URL="$(url_do_banco helphs_controle)" SEED_ADMIN_PASSWORD="$ADMIN_SENHA" \
+          timeout 180 docker run --name "$P-controle" --network "$REDE" \
+            -v "$BASE/chaves:/app/keys:ro" -e APP_ENV=testing -e DATABASE_URL -e SEED_ADMIN_PASSWORD \
+            -e "REDIS_URL=redis://$P-redis:6379/0" -e LLM_ENABLED=false -e HELO_ENABLED=false \
+            "$P-img-antiga" > "$EVID/D-controle.log" 2>&1
+          saida=$?
+          set -e
+          docker rm -f -v "$P-controle" > /dev/null 2>&1 || true
+
+          [ "$saida" != "0" ] || falha "D: a imagem antiga pura SUBIU com o banco migrado — a premissa do ensaio caiu"
+          [ "$saida" != "124" ] || falha "D: a imagem antiga não morreu em 180 s (ficou de pé?)"
+          # Falha esperada só vale com a causa exata no log.
+          grep -Fq "Can't locate revision identified by '$REV_2'" "$EVID/D-controle.log" \
+            || { tail -n 30 "$EVID/D-controle.log"; falha "D: morreu, mas não pela revision desconhecida"; }
+          grep -Fq "Migrations complete." "$EVID/D-controle.log" && falha "D: o alembic concluiu — não era para concluir"
+          ok "D: v1.23.0 pura morre no boot (saída $saida) por revision $REV_2 desconhecida"
+
+          confere "D: a cópia não foi alterada" "$(sql 'select version_num from alembic_version' helphs_controle)" "$REV_2"
+          confere "D: o banco principal não foi tocado" "$(impressao helphs)" "$antes"
+
+      # ── Cenário E ────────────────────────────────────────────
+      - name: "E — retorno à nova e numeração do que ficou sem seq"
+        run: |
+          . "$BASE/lib.sh"
+          # O interruptor liga SÓ aqui.
+          sobe nova "$P-img-nova" -e CHAT_SINCRONIZACAO_INCREMENTAL=true
+          aguarda nova E-nova
+          guarda_log nova E-nova
+          grep -Fq "Running upgrade" "$EVID/E-nova.log" && falha "E: a nova reaplicou migration"
+          confere "E: head do banco" "$(sql 'select version_num from alembic_version')" "$REV_2"
+
+          entra nova
+          api nova GET "/api/v1/tickets/$CHAMADO_B/messages" "$TOKEN"
+          espera_status 200 "histórico antes da numeração"
+          confere "E: com mensagem sem número, o chamado NÃO anuncia incremental" \
+            "$(echo "$API_CORPO" | jq -r '.sincronizacao_incremental')" "false"
+
+          # 1) Só conta. Nada pode mudar.
+          antes=$(impressao helphs)
+          docker exec "$P-nova" python -m scripts.numera_mensagens_sem_seq > "$EVID/E-script-conta.txt" 2>&1 \
+            || { cat "$EVID/E-script-conta.txt"; falha "E: o script falhou na contagem"; }
+          cat "$EVID/E-script-conta.txt"
+          grep -Eq '^total: 1 a numerar, ' "$EVID/E-script-conta.txt" || falha "E: a contagem não achou exatamente 1 mensagem a numerar"
+          confere "E: a contagem não gravou nada" "$(impressao helphs)" "$antes"
+          confere "E: a mensagem segue sem número depois da contagem" \
+            "$(sql "select seq is null from chat_messages where id = '$MENSAGEM_C'")" "t"
+
+          # 2) Aplica — neste banco descartável.
+          docker exec "$P-nova" python -m scripts.numera_mensagens_sem_seq --aplicar > "$EVID/E-script-aplica.txt" 2>&1 \
+            || { cat "$EVID/E-script-aplica.txt"; falha "E: o script falhou ao aplicar"; }
+          cat "$EVID/E-script-aplica.txt"
+          grep -Eq '^total: 1 numeradas em 1 chamado\(s\)$' "$EVID/E-script-aplica.txt" || falha "E: o script não numerou exatamente 1 mensagem"
+
+          confere "E: nada pendente depois do marco" \
+            "$(sql "select count(*) from chat_messages m, chat_seq_corte c where m.seq is null and m.created_at >= c.migrada_em")" "0"
+          confere "E: a mensagem da recuperação virou a número 2" "$(sql "select seq from chat_messages where id = '$MENSAGEM_C'")" "2"
+          confere "E: nenhum número repetido por chamado" \
+            "$(sql "select count(*) from (select ticket_id, seq from chat_messages where seq is not null group by 1, 2 having count(*) > 1) d")" "0"
+          confere "E: contador de cada chamado = maior número dele" \
+            "$(sql "select count(*) from tickets t where t.chat_seq <> coalesce((select max(seq) from chat_messages m where m.ticket_id = t.id), 0)")" "0"
+
+          api nova GET "/api/v1/tickets/$CHAMADO_B/messages" "$TOKEN"
+          espera_status 200 "histórico depois da numeração"
+          confere "E: o chamado anuncia sincronizacao_incremental" "$(echo "$API_CORPO" | jq -r '.sincronizacao_incremental')" "true"
+          confere "E: ultima_seq" "$(echo "$API_CORPO" | jq -r '.ultima_seq')" "2"
+
+          api nova GET "/api/v1/tickets/$CHAMADO_B/messages?after_seq=1" "$TOKEN"
+          espera_status 200 "sincronização por after_seq"
+          confere "E: after_seq=1 traz só a mensagem recuperada" \
+            "$(echo "$API_CORPO" | jq -r '[.items[].id] | join(",")')" "$MENSAGEM_C"
+
+          # O chamado do histórico tem as duas mensagens da v1.23.0 gravadas
+          # minutos antes do marco: caem na janela ambígua, o script não as
+          # numera sem `--incluir-janela`, e o chamado fica no modo tradicional.
+          api nova GET "/api/v1/tickets/$CHAMADO_A/messages" "$TOKEN"
+          espera_status 200 "histórico do chamado antigo"
+          confere "E: chamado com histórico na janela segue sem incremental" \
+            "$(echo "$API_CORPO" | jq -r '.sincronizacao_incremental')" "false"
+          confere "E: histórico da janela não foi numerado" \
+            "$(sql "select count(*) from chat_messages where ticket_id = '$CHAMADO_A' and seq is null")" "2"
+
+          retrato E
+          para nova E-nova
+
+      # ── Atomicidade ──────────────────────────────────────────
+      - name: "F — atomicidade: falha na n0i1 desfaz também a m9h0"
+        run: |
+          . "$BASE/lib.sh"
+          # Na cópia do esquema antigo. As migrations NÃO são alteradas: o
+          # obstáculo é uma tabela com o nome que a n0i1 vai criar, o que a faz
+          # falhar depois de a m9h0 inteira e metade da n0i1 já terem rodado.
+          confere "F: a cópia está no esquema antigo" "$(sql 'select version_num from alembic_version' helphs_l8g9)" "$HEAD_ANTIGO"
+          sql "CREATE TABLE chat_seq_corte (obstaculo integer)" helphs_l8g9 > /dev/null
+
+          migra() {
+            DATABASE_URL="$(url_do_banco helphs_l8g9)" \
+            timeout 180 docker run --rm --name "$P-atomicidade" --network "$REDE" \
+              -e APP_ENV=testing -e DATABASE_URL -e ALEMBIC_ALVO_REMOTO_LIBERADO=1 \
+              "$P-img-nova" alembic upgrade head
+          }
+          set +e
+          migra > "$EVID/F-falha.log" 2>&1
+          saida=$?
+          set -e
+          [ "$saida" != "0" ] || falha "F: o upgrade passou apesar do obstáculo"
+          grep -Fq "Running upgrade $HEAD_ANTIGO -> $REV_1" "$EVID/F-falha.log" || falha "F: a $REV_1 nem começou"
+          grep -Fq "Running upgrade $REV_1 -> $REV_2" "$EVID/F-falha.log" || falha "F: a $REV_2 nem começou"
+          grep -q "chat_seq_corte" "$EVID/F-falha.log" || { tail -n 30 "$EVID/F-falha.log"; falha "F: falhou por outro motivo"; }
+          ok "F: o upgrade falhou dentro da $REV_2, depois de a $REV_1 ter rodado"
+
+          confere "F: alembic_version voltou ao head antigo" "$(sql 'select version_num from alembic_version' helphs_l8g9)" "$HEAD_ANTIGO"
+          confere "F: nada da m9h0 nem da n0i1 ficou (colunas)" \
+            "$(sql "select count(*) from information_schema.columns where (table_name, column_name) in (('chat_messages','seq'),('chat_messages','client_message_id'),('chat_messages','client_message_fingerprint'),('tickets','chat_seq'))" helphs_l8g9)" "0"
+          confere "F: nada da m9h0 nem da n0i1 ficou (índices)" \
+            "$(sql "select count(*) from pg_indexes where indexname in ('uq_chat_messages_envio','uq_chat_messages_seq')" helphs_l8g9)" "0"
+
+          # Tirado o obstáculo, repetir resolve — é o "deploy precisa ser repetido".
+          sql "DROP TABLE chat_seq_corte" helphs_l8g9 > /dev/null
+          migra > "$EVID/F-repeticao.log" 2>&1 || { tail -n 30 "$EVID/F-repeticao.log"; falha "F: a repetição falhou"; }
+          confere "F: repetição leva ao head novo" "$(sql 'select version_num from alembic_version' helphs_l8g9)" "$REV_2"
+
+      # ── Evidências e limpeza ─────────────────────────────────
+      - name: Recolhe os logs (sem credencial)
+        if: always()
+        run: |
+          set -uo pipefail
+          [ -d "${EVID:-}" ] || exit 0
+          for c in $(docker ps -a --filter "name=$P-" --format '{{.Names}}'); do
+            docker logs "$c" > "$EVID/final-${c#"$P"-}.log" 2>&1 || true
+          done
+          # As senhas geradas não devem aparecer, mas a URL do banco pode ter
+          # sido ecoada por alguma biblioteca num traceback.
+          for segredo in "${PG_SENHA:-}" "${ADMIN_SENHA:-}"; do
+            [ -n "$segredo" ] && grep -rlF "$segredo" "$EVID" 2>/dev/null | xargs -r sed -i "s/$segredo/***/g"
+          done
+          ls -la "$EVID"
+
+      - name: Publica as evidências
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: ensaio-recuperacao-chat
+          path: ${{ runner.temp }}/ensaio/evidencias
+          retention-days: 14
+          if-no-files-found: warn
+
+      - name: Limpeza (só o que este job criou)
+        if: always()
+        run: |
+          set -uo pipefail
+          docker ps -aq --filter "name=$P-" | xargs -r docker rm -f -v > /dev/null 2>&1 || true
+          docker network rm "$P-rede" > /dev/null 2>&1 || true
+          for nome in antiga recuperacao nova; do
+            docker rmi -f "$P-img-$nome" > /dev/null 2>&1 || true
+          done
+          rm -rf "${RUNNER_TEMP:?}/ensaio/chaves"
+          echo "restaram: $(docker ps -aq --filter "name=$P-" | wc -l) contêiner(es) do ensaio"
