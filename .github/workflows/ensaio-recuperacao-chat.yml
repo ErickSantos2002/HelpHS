@@ -579,11 +579,51 @@ jobs:
             docker logs "$c" > "$EVID/final-${c#"$P"-}.log" 2>&1 || true
           done
           # As senhas geradas não devem aparecer, mas a URL do banco pode ter
-          # sido ecoada por alguma biblioteca num traceback.
+          # sido ecoada por alguma biblioteca num traceback. O que não pôde ser
+          # conferido não é publicado: o passo seguinte sobe o que estiver aqui.
+          retem() {
+            echo "::error::$1 — evidências retidas, nada é publicado"
+            find "$EVID" -mindepth 1 -delete
+            echo "Evidências retidas: $1." > "$EVID/EVIDENCIAS-RETIDAS.txt"
+          }
+          falhou=0
           for segredo in "${PG_SENHA:-}" "${ADMIN_SENHA:-}"; do
-            [ -n "$segredo" ] && grep -rlF "$segredo" "$EVID" 2>/dev/null | xargs -r sed -i "s/$segredo/***/g"
+            if [ -z "$segredo" ]; then
+              retem "senha do ensaio ausente do ambiente, conferência impossível"
+              falhou=1
+              break
+            fi
+            # grep: 0 = achou, 1 = não achou, 2 ou mais = não conseguiu ler.
+            # Só o 1 é "limpo"; o 2 não pode passar por limpo.
+            rc=0
+            achados=$(grep -rlF -- "$segredo" "$EVID") || rc=$?
+            case "$rc" in
+              1) ;;
+              0)
+                falhou=1
+                echo "::error::credencial do ensaio encontrada em $(echo "$achados" | wc -l) arquivo(s) de evidência"
+                while IFS= read -r arquivo; do
+                  echo "  $arquivo"
+                  sed -i "s/$segredo/***/g" "$arquivo" || true
+                done <<< "$achados"
+                # Só publica se a troca por *** tiver funcionado de fato.
+                rc=0
+                grep -rqF -- "$segredo" "$EVID" || rc=$?
+                if [ "$rc" != "1" ]; then
+                  retem "não foi possível remover a credencial dos logs"
+                  break
+                fi
+                ;;
+              *)
+                retem "a busca por credenciais falhou (grep saiu com $rc)"
+                falhou=1
+                break
+                ;;
+            esac
           done
           ls -la "$EVID"
+          [ "$falhou" = "0" ] || exit 1
+          echo "evidências conferidas: nenhuma credencial do ensaio nos arquivos"
 
       - name: Publica as evidências
         if: always()
