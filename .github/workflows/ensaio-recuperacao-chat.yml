@@ -570,67 +570,79 @@ jobs:
           confere "F: repetição leva ao head novo" "$(sql 'select version_num from alembic_version' helphs_l8g9)" "$REV_2"
 
       # ── Evidências e limpeza ─────────────────────────────────
+      # Fail-closed: as evidências só são publicadas se este passo declarar, na
+      # última linha, `publicar=sim`. Qualquer outro desfecho — credencial
+      # achada, busca que falhou, passo que morreu no meio — deixa a saída sem
+      # o `sim`, e o passo de publicação não roda.
       - name: Recolhe os logs (sem credencial)
+        id: coleta
         if: always()
         run: |
           set -uo pipefail
-          [ -d "${EVID:-}" ] || exit 0
+          # A pasta nasce no preparo. Sem ela não houve coleta: isso NÃO é
+          # "nenhuma credencial encontrada".
+          if [ ! -d "${EVID:-}" ]; then
+            echo "::error::pasta de evidências ausente (o preparo não concluiu): nada foi conferido e nada é publicado"
+            exit 1
+          fi
           for c in $(docker ps -a --filter "name=$P-" --format '{{.Names}}'); do
             docker logs "$c" > "$EVID/final-${c#"$P"-}.log" 2>&1 || true
           done
           # As senhas geradas não devem aparecer, mas a URL do banco pode ter
-          # sido ecoada por alguma biblioteca num traceback. O que não pôde ser
-          # conferido não é publicado: o passo seguinte sobe o que estiver aqui.
+          # sido ecoada por alguma biblioteca num traceback.
+          #
+          # retem <motivo genérico>: reprova o passo e não publica as
+          # evidências. Nada é "consertado" com sed — senha com caractere
+          # especial tornaria a troca insegura. O aviso vai para OUTRA pasta,
+          # que nunca recebeu log; a publicação das evidências não depende de
+          # a remoção abaixo dar certo, só da saída `publicar`.
+          AVISO="$(dirname "$EVID")/aviso"
           retem() {
-            echo "::error::$1 — evidências retidas, nada é publicado"
-            find "$EVID" -mindepth 1 -delete
-            echo "Evidências retidas: $1." > "$EVID/EVIDENCIAS-RETIDAS.txt"
-          }
-          falhou=0
-          for segredo in "${PG_SENHA:-}" "${ADMIN_SENHA:-}"; do
-            if [ -z "$segredo" ]; then
-              retem "senha do ensaio ausente do ambiente, conferência impossível"
-              falhou=1
-              break
+            echo "::error::$1 — evidências retidas; no máximo o aviso é publicado"
+            if mkdir -p "$AVISO" && printf 'Evidencias do ensaio retidas: %s.\nOs logs desta execucao nao foram publicados.\n' "$1" > "$AVISO/EVIDENCIAS-RETIDAS.txt"; then
+              echo "publicar=aviso" >> "$GITHUB_OUTPUT"
+            else
+              echo "::warning::não foi possível gravar o aviso; nada é publicado"
             fi
+            find "$EVID" -mindepth 1 -delete \
+              || echo "::warning::não foi possível apagar todas as evidências retidas (elas não são publicadas de qualquer forma)"
+            exit 1
+          }
+          for nome in PG_SENHA ADMIN_SENHA; do
+            segredo="${!nome:-}"
+            [ -n "$segredo" ] || retem "senha do ensaio ausente do ambiente, conferência impossível"
             # grep: 0 = achou, 1 = não achou, 2 ou mais = não conseguiu ler.
-            # Só o 1 é "limpo"; o 2 não pode passar por limpo.
+            # Só o 1 é "limpo". Sem `-q`: com ele, um arquivo ilegível passaria
+            # despercebido se outro casasse antes. O padrão vai por `-f`, e não
+            # como argumento: texto literal (`-F`), qualquer caractere serve.
             rc=0
-            achados=$(grep -rlF -- "$segredo" "$EVID") || rc=$?
+            grep -rlF -f <(printf '%s\n' "$segredo") -- "$EVID" > /dev/null || rc=$?
             case "$rc" in
               1) ;;
-              0)
-                falhou=1
-                echo "::error::credencial do ensaio encontrada em $(echo "$achados" | wc -l) arquivo(s) de evidência"
-                while IFS= read -r arquivo; do
-                  echo "  $arquivo"
-                  sed -i "s/$segredo/***/g" "$arquivo" || true
-                done <<< "$achados"
-                # Só publica se a troca por *** tiver funcionado de fato.
-                rc=0
-                grep -rqF -- "$segredo" "$EVID" || rc=$?
-                if [ "$rc" != "1" ]; then
-                  retem "não foi possível remover a credencial dos logs"
-                  break
-                fi
-                ;;
-              *)
-                retem "a busca por credenciais falhou (grep saiu com $rc)"
-                falhou=1
-                break
-                ;;
+              0) retem "credencial do ensaio encontrada nas evidências" ;;
+              *) retem "a busca por credenciais falhou (código $rc)" ;;
             esac
           done
           ls -la "$EVID"
-          [ "$falhou" = "0" ] || exit 1
           echo "evidências conferidas: nenhuma credencial do ensaio nos arquivos"
+          # Última linha, de propósito.
+          echo "publicar=sim" >> "$GITHUB_OUTPUT"
 
-      - name: Publica as evidências
-        if: always()
+      - name: Publica as evidências (só se conferidas)
+        if: always() && steps.coleta.outputs.publicar == 'sim'
         uses: actions/upload-artifact@v4
         with:
           name: ensaio-recuperacao-chat
           path: ${{ runner.temp }}/ensaio/evidencias
+          retention-days: 14
+          if-no-files-found: warn
+
+      - name: Publica o aviso de evidências retidas
+        if: always() && steps.coleta.outputs.publicar == 'aviso'
+        uses: actions/upload-artifact@v4
+        with:
+          name: ensaio-recuperacao-chat-retido
+          path: ${{ runner.temp }}/ensaio/aviso
           retention-days: 14
           if-no-files-found: warn
 
