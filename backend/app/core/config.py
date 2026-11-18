@@ -340,6 +340,14 @@ class Settings(BaseSettings):
     # tradicional sem deploy do front — basta reiniciar o backend.
     chat_sincronizacao_incremental: bool = False
 
+    # ECE-01: o cliente passa a ver e usar no chamado o equipamento da empresa
+    # a que está oficialmente vinculado (`users.company_id`), além do que ele
+    # mesmo cadastrou. DESLIGADA por padrão. A GRAVAÇÃO de
+    # `equipments.company_id` não depende dela — acontece sempre, para que a
+    # empresa já esteja no lugar quando a regra for ligada. Na Fase 1 nenhuma
+    # leitura consulta esta flag: ligá-la não concede nada.
+    equipamento_por_empresa: bool = False
+
     # O que a Helô faz quando está ligada — e é ORTOGONAL ao `helo_enabled`:
     # desligada é desligada em qualquer modo.
     #

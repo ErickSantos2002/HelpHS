@@ -14,8 +14,14 @@ em silêncio. E `users.company_id` é `ON DELETE SET NULL`: os clientes seriam
 soltos sem ninguém avisar. Movendo antes de apagar, nada se perde mesmo que a
 duplicata "vazia" não estivesse tão vazia quanto o relatório sugeria.
 
-Quem sobrevive: a empresa com mais conteúdo (clientes + notas); empatando, a
-mais antiga. O critério é o que preserva mais história sem precisar de
+Desde a ECE-01 a empresa também tem EQUIPAMENTOS (`equipments.company_id`), e
+essa FK é `ON DELETE RESTRICT`: apagar a duplicata sem mover os aparelhos não
+os solta — derruba o script no `DELETE`. Eles vão para a sobrevivente junto com
+clientes e notas. ⚠️ Por isso este script só roda em banco que já passou pela
+revision `o1j2k3l4m5n6`: antes dela a coluna não existe.
+
+Quem sobrevive: a empresa com mais conteúdo (clientes + notas + equipamentos);
+empatando, a mais antiga. O critério é o que preserva mais história sem precisar de
 julgamento humano linha a linha.
 
 Uso::
@@ -60,6 +66,11 @@ class Empresa(NamedTuple):
     criada_em: Any
     clientes: int
     notas: int
+    equipamentos: int = 0
+
+    @property
+    def conteudo(self) -> int:
+        return self.clientes + self.notas + self.equipamentos
 
 
 class Fusao(NamedTuple):
@@ -82,7 +93,8 @@ _LEVANTAMENTO = r"""
            c.group_id,
            c.created_at                                                    AS criada_em,
            (SELECT count(*) FROM users u WHERE u.company_id = c.id)         AS clientes,
-           (SELECT count(*) FROM company_notes n WHERE n.company_id = c.id) AS notas
+           (SELECT count(*) FROM company_notes n WHERE n.company_id = c.id) AS notas,
+           (SELECT count(*) FROM equipments e WHERE e.company_id = c.id)    AS equipamentos
       FROM companies c
       JOIN duplicadas d
         ON d.doc = regexp_replace(coalesce(c.cnpj, ''), '\D', '', 'g')
@@ -117,7 +129,7 @@ def planeja_fusao(empresas: Iterable[Empresa]) -> tuple[list[Fusao], list[list[E
             recusadas.append(linhas)
             continue
         # Mais conteúdo primeiro; empatando, a mais antiga.
-        ordenadas = sorted(linhas, key=lambda e: (-(e.clientes + e.notas), e.criada_em))
+        ordenadas = sorted(linhas, key=lambda e: (-e.conteudo, e.criada_em))
         fusoes.append(Fusao(doc=doc, sobrevivente=ordenadas[0], absorvidas=ordenadas[1:]))
 
     return fusoes, recusadas
@@ -127,21 +139,28 @@ def _relata(fusoes: Sequence[Fusao], recusadas: Sequence[Sequence[Empresa]]) -> 
     for f in fusoes:
         print(f"\n── CNPJ {f.doc} " + "─" * max(4, 44 - len(f.doc)))
         s = f.sobrevivente
-        print(f"  FICA     {s.id}  {s.nome!r}  {s.clientes} cliente(s), {s.notas} nota(s)")
+        print(
+            f"  FICA     {s.id}  {s.nome!r}  {s.clientes} cliente(s), {s.notas} nota(s), "
+            f"{s.equipamentos} equipamento(s)"
+        )
         for a in f.absorvidas:
             destino = ""
-            if a.clientes or a.notas:
-                destino = f"  -> move {a.clientes} cliente(s) e {a.notas} nota(s)"
+            if a.conteudo:
+                destino = (
+                    f"  -> move {a.clientes} cliente(s), {a.notas} nota(s) e "
+                    f"{a.equipamentos} equipamento(s)"
+                )
             print(f"  APAGA    {a.id}  {a.nome!r}{destino}")
 
     for grupo in recusadas:
         print(f"\n⚠️  CNPJ {grupo[0].doc}: empresas em GRUPOS diferentes — não fundidas")
         for e in grupo:
-            marca = "casca vazia" if not (e.clientes or e.notas) else "TEM CONTEUDO"
+            marca = "casca vazia" if not e.conteudo else "TEM CONTEUDO"
             print(f"     {e.id}  {e.nome!r}")
             print(
                 f"        grupo {e.group_id}  |  "
-                f"{e.clientes} cliente(s), {e.notas} nota(s)  -> {marca}"
+                f"{e.clientes} cliente(s), {e.notas} nota(s), "
+                f"{e.equipamentos} equipamento(s)  -> {marca}"
             )
         print("     Juntar mudaria o grupo dos clientes. Decida à mão.")
 
@@ -157,6 +176,13 @@ async def _aplica(conn, fusoes: Sequence[Fusao]) -> None:
         )
         await conn.execute(
             text("UPDATE company_notes SET company_id = :fica WHERE company_id = ANY(:alvos)"),
+            {"fica": f.sobrevivente.id, "alvos": alvos},
+        )
+        # A empresa do aparelho é RESTRICT: sem este passo o DELETE abaixo
+        # falha. A troca é de uma duplicata para a sobrevivente do MESMO CNPJ —
+        # a empresa do aparelho continua sendo a mesma empresa.
+        await conn.execute(
+            text("UPDATE equipments SET company_id = :fica WHERE company_id = ANY(:alvos)"),
             {"fica": f.sobrevivente.id, "alvos": alvos},
         )
         await conn.execute(
@@ -179,7 +205,16 @@ async def _main(aplicar: bool) -> None:
         async with engine.connect() as conn:
             linhas = (await conn.execute(text(_LEVANTAMENTO))).all()
             empresas = [
-                Empresa(r.id, r.doc, r.nome, r.group_id, r.criada_em, r.clientes, r.notas)
+                Empresa(
+                    r.id,
+                    r.doc,
+                    r.nome,
+                    r.group_id,
+                    r.criada_em,
+                    r.clientes,
+                    r.notas,
+                    r.equipamentos,
+                )
                 for r in linhas
             ]
             fusoes, recusadas = planeja_fusao(empresas)

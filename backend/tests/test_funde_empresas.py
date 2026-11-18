@@ -65,6 +65,32 @@ def test_clientes_e_notas_somam_no_criterio():
     assert fusoes[0].sobrevivente.nome == "so_notas"
 
 
+def test_equipamentos_tambem_somam_no_criterio():
+    """
+    ECE-01: a empresa passou a ter aparelhos, e eles contam como conteúdo.
+
+    Sem isso, a duplicata que só tem equipamentos perderia para uma casca
+    vazia mais antiga — nada se perderia (os aparelhos são movidos), mas o id
+    que a equipe vinculou aos aparelhos sumiria sem motivo.
+    """
+    casca_antiga = _empresa("casca_antiga", idade_em_dias=0)
+    com_aparelhos = Empresa(
+        id="id-com_aparelhos",
+        doc="12345678000110",
+        nome="com_aparelhos",
+        group_id=_GRUPO,
+        criada_em=_ONTEM + timedelta(days=5),
+        clientes=0,
+        notas=0,
+        equipamentos=2,
+    )
+
+    fusoes, _ = planeja_fusao([casca_antiga, com_aparelhos])
+
+    assert fusoes[0].sobrevivente.nome == "com_aparelhos"
+    assert com_aparelhos.conteudo == 2 and casca_antiga.conteudo == 0
+
+
 def test_grupos_diferentes_nao_sao_fundidos():
     """
     Fundir mudaria a que grupo os clientes pertencem — decisão de operação.

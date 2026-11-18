@@ -509,6 +509,7 @@ async def test_admin_exclui_empresa_vazia_e_audita(fabrica, http):
         "group_id": str(g.id),
         "clientes_vinculados": 0,
         "notas": 0,
+        "equipamentos": 0,
     }
 
 

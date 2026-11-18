@@ -95,6 +95,9 @@ def _audit(
     actor_id: uuid.UUID,
     entity_type: str,
     entity_id: uuid.UUID,
+    *,
+    old_data: dict[str, str | bool | None] | None = None,
+    new_data: dict[str, str | bool | None] | None = None,
 ) -> None:
     db.add(
         AuditLog(
@@ -102,8 +105,96 @@ def _audit(
             action=action,
             entity_type=entity_type,
             entity_id=entity_id,
+            old_data=old_data,
+            new_data=new_data,
         )
     )
+
+
+# ── A empresa do equipamento (ECE-01) ─────────────────────────
+#
+# `equipments.company_id` é gravado sempre, com `EQUIPAMENTO_POR_EMPRESA`
+# ligada ou não; nenhuma LEITURA deste arquivo o consulta ainda. De onde vem:
+#   - cadastro pelo cliente → o vínculo oficial dele (`users.company_id`), lido
+#     do banco na hora, nunca do corpo da requisição;
+#   - cadastro pela equipe → a empresa informada; omitida, a do responsável;
+#   - edição pela equipe → só quando a equipe manda o campo. Trocar o
+#     responsável NÃO muda a empresa;
+#   - vínculo do cliente → `groups.py::_propaga_empresa_aos_aparelhos`.
+#
+# O campo da equipe tem TRÊS estados, e quem os separa é o `model_fields_set`:
+#   - omitido → cadastro herda a do responsável; edição não mexe;
+#   - empresa informada → grava, e desfaz a marca abaixo;
+#   - `null` explícito → "sem empresa POR DECISÃO": `company_id` nulo E
+#     `sem_empresa_por_decisao` verdadeira. O nulo comum quer dizer "ainda não
+#     classificado" e é completado pelo vínculo do cliente e pelo script; o
+#     marcado não é tocado por nenhum preenchimento automático.
+# Toda gravação de empresa deixa o antes e o depois em `audit_logs`, com a
+# origem.
+#
+# Ordem das travas, a mesma de "Client assignment" em `groups.py`:
+# ATOR (`FOR KEY SHARE`) → responsável (`FOR KEY SHARE`) → empresa
+# (`FOR KEY SHARE`) → aparelho.
+#   - O vínculo trava o cliente com `FOR UPDATE` e DEPOIS escreve nos aparelhos
+#     dele. As rotas do cliente escreviam no aparelho e só no flush pegavam a
+#     própria linha (a FK `user_id` do `audit_logs`): "eu tenho o aparelho e
+#     espero a conta; o vínculo tem a conta e espera o aparelho". Pegando a
+#     conta antes, quem chega depois espera sem segurar nada.
+#   - É também o que faz o cadastro enxergar o vínculo: ou ele espera o vínculo
+#     comitar e lê a empresa nova, ou o vínculo espera o cadastro e a
+#     propagação já encontra o aparelho.
+#   - A empresa em `FOR KEY SHARE` fecha a corrida com a exclusão da F1-D1
+#     (`FOR UPDATE` na mesma linha): a exclusão em curso faz a gravação achar a
+#     empresa sumida (400), e a gravação em curso faz a exclusão contar o
+#     aparelho e recusar (409) — nunca o 500 da FK.
+
+_ORIGEM_CADASTRANTE = "empresa_do_cadastrante"
+_ORIGEM_RESPONSAVEL = "empresa_do_responsavel"
+_ORIGEM_EQUIPE = "equipe"
+
+
+def _retrato_da_empresa(
+    company_id: uuid.UUID | None, origem: str | None = None, *, por_decisao: bool = False
+) -> dict[str, str | bool | None]:
+    retrato: dict[str, str | bool | None] = {"company_id": str(company_id) if company_id else None}
+    # Só aparece quando verdadeira: é ela que distingue, na trilha, o nulo que a
+    # equipe escolheu do nulo de quem ainda não foi classificado.
+    if por_decisao:
+        retrato["sem_empresa_por_decisao"] = True
+    if origem is not None:
+        retrato["origem"] = origem
+    return retrato
+
+
+async def _trava_conta_e_le_empresa(db: AsyncSession, user_id: uuid.UUID) -> uuid.UUID | None:
+    """`FOR KEY SHARE` na conta e, de volta, o vínculo oficial COMITADO dela.
+
+    O ator chega carregado antes da requisição; o `company_id` do objeto pode
+    estar velho. Este é o valor que vale.
+    """
+    return (
+        await db.execute(
+            select(User.company_id)
+            .where(User.id == user_id)
+            .with_for_update(read=True, key_share=True)
+        )
+    ).scalar_one_or_none()
+
+
+async def _valida_empresa(db: AsyncSession, company_id: uuid.UUID) -> None:
+    """Recusa empresa que não existe — e segura a que existe até o commit."""
+    achada = (
+        await db.execute(
+            select(Company.id)
+            .where(Company.id == company_id)
+            .with_for_update(read=True, key_share=True)
+        )
+    ).scalar_one_or_none()
+    if achada is None:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail="A empresa informada não existe.",
+        )
 
 
 def _check_equipment_owner(equipment: Equipment, actor: User) -> None:
@@ -387,10 +478,25 @@ async def create_equipment(
     db: Annotated[AsyncSession, Depends(get_db)],
     actor: Annotated[User, Depends(authorize(UserRole.admin, UserRole.technician))],
 ) -> EquipmentResponse:
+    await _trava_conta_e_le_empresa(db, actor.id)
     await get_or_404(db, Product, product_id, "Product not found")
 
+    empresa_do_responsavel = None
     if body.owner_id:
         await _valida_dono(db, body.owner_id)
+        empresa_do_responsavel = await _trava_conta_e_le_empresa(db, body.owner_id)
+
+    # A empresa informada vence; omitida, o aparelho herda a do responsável.
+    # Nulo explícito é "sem empresa" de propósito — por isso `model_fields_set`
+    # e não `is None`.
+    por_decisao = False
+    if "company_id" in body.model_fields_set:
+        empresa, origem = body.company_id, _ORIGEM_EQUIPE
+        por_decisao = empresa is None
+    else:
+        empresa, origem = empresa_do_responsavel, _ORIGEM_RESPONSAVEL
+    if empresa is not None:
+        await _valida_empresa(db, empresa)
 
     # Pela tela de Produtos quem cadastra é staff, que já enxerga o parque
     # inteiro: aqui o 409 não conta nada que a listagem não conte, e recusar é
@@ -404,6 +510,8 @@ async def create_equipment(
         id=uuid.uuid4(),
         product_id=product_id,
         owner_id=body.owner_id,
+        company_id=empresa,
+        sem_empresa_por_decisao=por_decisao,
         name=body.name,
         serial_number=body.serial_number,
         model=body.model,
@@ -420,7 +528,18 @@ async def create_equipment(
     if body.owner_id is not None:
         await db.flush()
         await _anexa_usuario(db, equipment.id, body.owner_id)
-    _audit(db, AuditAction.create, actor.id, "equipment", equipment.id)
+    _audit(
+        db,
+        AuditAction.create,
+        actor.id,
+        "equipment",
+        equipment.id,
+        new_data=(
+            _retrato_da_empresa(empresa, origem, por_decisao=por_decisao)
+            if empresa or por_decisao
+            else None
+        ),
+    )
     await db.commit()
     await db.refresh(equipment)
     return EquipmentResponse.model_validate(equipment)
@@ -565,6 +684,7 @@ async def update_equipment(
     db: Annotated[AsyncSession, Depends(get_db)],
     actor: Annotated[User, Depends(authorize(UserRole.admin, UserRole.technician))],
 ) -> EquipmentResponse:
+    await _trava_conta_e_le_empresa(db, actor.id)
     equipment = await get_or_404(db, Equipment, equipment_id, _EQUIPAMENTO_NAO_ENCONTRADO)
 
     # É por aqui que se conserta o equipamento cadastrado sem dono. Enviar
@@ -576,16 +696,62 @@ async def update_equipment(
     # o par a validar e (produto, serie), e o produto nao muda por aqui. Sobra
     # a serie -- e so quando ela realmente muda.
     enviados = body.model_fields_set
+
+    # Quem mexe na empresa lê o aparelho de novo, TRAVADO, antes de decidir.
+    # O vínculo do cliente escreve a empresa nos aparelhos dele
+    # (`_propaga_empresa_aos_aparelhos`); sem a trava, uma edição que leu
+    # "sem empresa" e mandou `null` gravaria só a marca por cima da empresa
+    # recém-propagada — e o `CHECK` devolveria 500. Com ela, a edição espera o
+    # vínculo, enxerga a empresa e a troca de verdade, com o antes certo na
+    # auditoria. A empresa é validada ANTES, na ordem das travas (empresa →
+    # aparelho).
+    if "company_id" in enviados:
+        if body.company_id is not None:
+            await _valida_empresa(db, body.company_id)
+        await db.refresh(equipment, with_for_update=True)
+
     serial_final = body.serial_number if "serial_number" in enviados else equipment.serial_number
     if serial_final != equipment.serial_number:
         await _recusa_serie_do_produto(
             db, equipment.product_id, serial_final, ignorando=equipment.id
         )
 
+    # A empresa só muda quando a equipe manda o campo — trocar o responsável,
+    # sozinho, não a altera. E só a troca de verdade entra na auditoria com o
+    # antes e o depois: reenviar a mesma empresa não é mudança.
+    #
+    # `null` explícito num aparelho ainda não marcado É mudança, mesmo com a
+    # empresa indo de nulo para nulo: muda a INTENÇÃO, de "não classificado"
+    # para "sem empresa por decisão", e é isso que a propagação passa a
+    # respeitar. Repetir o `null` num aparelho já marcado não é.
+    empresa_antes = equipment.company_id
+    decisao_antes = equipment.sem_empresa_por_decisao
+    decisao_depois = body.company_id is None if "company_id" in enviados else decisao_antes
+    troca_de_empresa = "company_id" in enviados and (
+        body.company_id != empresa_antes or decisao_depois != decisao_antes
+    )
+
     for field, value in body.model_dump(exclude_unset=True).items():
         setattr(equipment, field, value)
+    equipment.sem_empresa_por_decisao = decisao_depois
 
-    _audit(db, AuditAction.update, actor.id, "equipment", equipment.id)
+    _audit(
+        db,
+        AuditAction.update,
+        actor.id,
+        "equipment",
+        equipment.id,
+        old_data=(
+            _retrato_da_empresa(empresa_antes, por_decisao=decisao_antes)
+            if troca_de_empresa
+            else None
+        ),
+        new_data=(
+            _retrato_da_empresa(body.company_id, _ORIGEM_EQUIPE, por_decisao=decisao_depois)
+            if troca_de_empresa
+            else None
+        ),
+    )
     await db.commit()
     await db.refresh(equipment)
     return EquipmentResponse.model_validate(equipment)
@@ -605,6 +771,10 @@ async def create_my_equipment(
     db: Annotated[AsyncSession, Depends(get_db)],
     actor: Annotated[User, Depends(authorize(UserRole.client))],
 ) -> EquipmentResponse:
+    # A empresa do aparelho é o vínculo oficial de quem cadastra, lido do banco
+    # com a conta travada — ver "A empresa do equipamento". O corpo não tem o
+    # campo: o cliente não escolhe empresa.
+    empresa = await _trava_conta_e_le_empresa(db, actor.id)
     await get_or_404(db, Product, product_id, "Product not found")
 
     # `(produto, série)` já cadastrado — dele, de outro cliente ou sem
@@ -625,6 +795,7 @@ async def create_my_equipment(
         id=uuid.uuid4(),
         product_id=product_id,
         owner_id=actor.id,
+        company_id=empresa,
         name=body.name,
         serial_number=body.serial_number,
         model=body.model,
@@ -640,7 +811,14 @@ async def create_my_equipment(
     # com a associação num OR e lembrar de tratar os dois casos.
     await db.flush()
     await _anexa_usuario(db, equipment.id, actor.id)
-    _audit(db, AuditAction.create, actor.id, "equipment", equipment.id)
+    _audit(
+        db,
+        AuditAction.create,
+        actor.id,
+        "equipment",
+        equipment.id,
+        new_data=_retrato_da_empresa(empresa, _ORIGEM_CADASTRANTE) if empresa else None,
+    )
     await db.commit()
     await db.refresh(equipment)
     return EquipmentResponse.model_validate(equipment)
@@ -677,6 +855,7 @@ async def update_my_equipment(
     db: Annotated[AsyncSession, Depends(get_db)],
     actor: Annotated[User, Depends(authorize(UserRole.client))],
 ) -> EquipmentResponse:
+    await _trava_conta_e_le_empresa(db, actor.id)
     equipment = await get_or_404(db, Equipment, equipment_id, _EQUIPAMENTO_NAO_ENCONTRADO)
     _check_equipment_owner(equipment, actor)
 
@@ -700,6 +879,7 @@ async def delete_my_equipment(
     db: Annotated[AsyncSession, Depends(get_db)],
     actor: Annotated[User, Depends(authorize(UserRole.client))],
 ) -> None:
+    await _trava_conta_e_le_empresa(db, actor.id)
     equipment = await get_or_404(db, Equipment, equipment_id, _EQUIPAMENTO_NAO_ENCONTRADO)
     _check_equipment_owner(equipment, actor)
     equipment.is_active = False

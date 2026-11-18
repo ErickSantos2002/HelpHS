@@ -47,6 +47,8 @@ servidor = _mig.servidor
 banco = _mig.banco
 
 _DEADLOCK = "40P01"
+# A revision do chat. Foi o head até a ECE-01 pôr a `o1j2k3l4m5n6` em cima dela.
+_SEQUENCIA_CHAT = "n0i1j2k3l4m5"
 
 
 async def _esperando(url: str) -> list[tuple]:
@@ -318,11 +320,17 @@ def test_o_marco_vem_depois_do_bloqueio_de_tickets_e_e_o_ultimo_comando():
     """Se o marco for gravado antes do `ALTER TABLE tickets` — ou se outra
     operação entrar depois dele —, a regra do cabeçalho deixa de valer: um
     escritor antigo poderia comitar depois do marco com `created_at` de
-    antes."""
+    antes.
+
+    "Último comando" é o último DA REVISION do chat, e por isso a comparação é
+    com a troca de versão para ela, não para o head: desde a ECE-01 o head é a
+    `o1j2k3l4m5n6`, que roda depois, na mesma transação. O `ACCESS EXCLUSIVE`
+    em `chat_messages` continua de pé até o commit — o que a revision seguinte
+    acrescenta é tempo com ele seguro, não escrita em `chat_messages`."""
     comandos = _sql_offline()
     tickets = _indice(comandos, "ALTER TABLE tickets ADD COLUMN chat_seq")
     marco = _indice(comandos, "INSERT INTO chat_seq_corte")
-    versao = _indice(comandos, f"UPDATE alembic_version SET version_num='{_HEAD}'")
+    versao = _indice(comandos, f"UPDATE alembic_version SET version_num='{_SEQUENCIA_CHAT}'")
 
     assert tickets < marco
     assert "clock_timestamp()" in comandos[marco]
