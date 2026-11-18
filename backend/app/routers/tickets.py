@@ -76,6 +76,11 @@ from app.schemas.ticket import (
 )
 from app.services import ligacao
 from app.services.chat_sequencia import numera_mensagens_do_chat
+from app.services.escopo_de_equipamento import (
+    cliente_enxerga,
+    compartilha_por_empresa,
+    trava_conta_e_le_empresa,
+)
 from app.services.helo import abre_triagem
 from app.services.llm import classify_ticket
 from app.services.notifications import (
@@ -407,6 +412,23 @@ async def _set_ticket_equipments(
     Um cliente só vincula equipamento que seja dele — sem isso, informar ids
     aleatórios revelaria o número de série de aparelhos de outras empresas na
     resposta da API.
+
+    ECE-01, com `EQUIPAMENTO_POR_EMPRESA` ligada:
+
+    - o cliente vincula o que ENXERGA (`services/escopo_de_equipamento.py`):
+      o dele e o ativo da empresa dele. Usar o aparelho do colega no chamado
+      não dá ao colega acesso ao chamado, nem a este cliente os chamados do
+      colega — a visibilidade de chamado não passa por equipamento;
+    - um chamado, uma classificação (`_empresas_incompativeis`), para
+      cliente e para a equipe: os equipamentos são todos da MESMA empresa ou
+      todos ainda sem empresa — nunca duas empresas, nunca classificado junto
+      de não classificado. Para a equipe vale ainda a empresa de quem abriu o
+      chamado, quando quem abriu é cliente vinculado;
+    - reenviar exatamente os equipamentos que o chamado já tem não é conferido
+      de novo: a regra é para a associação que se faz agora, e um chamado
+      antigo, anterior a ela, não pode ficar impossível de editar.
+
+    Desligada, o caminho é o de sempre, sem consulta a mais.
     """
     if not equipment_ids:
         ticket.equipments = []
@@ -434,15 +456,171 @@ async def _set_ticket_equipments(
             detail="Um ou mais equipamentos informados não existem.",
         )
 
-    if actor.role == UserRole.client:
+    # Os que o chamado JÁ tem. No chamado ainda pendente a coleção é vazia e
+    # não toca no banco; no persistente ela veio pelo `lazy="selectin"`.
+    inalterados = bool(unicos) and set(unicos) == {e.id for e in ticket.equipments}
+
+    if actor.role == UserRole.client and compartilha_por_empresa():
+        encontrados = await _confere_escopo_do_cliente(db, actor, unicos, encontrados)
+        # O escopo já passou: o cliente enxerga todos, e a recusa abaixo não
+        # conta nada sobre aparelho que ele não veja.
+        if _empresas_incompativeis(encontrados, None):
+            raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail=_MISTURA)
+    elif actor.role == UserRole.client:
         alheios = [e for e in encontrados if e.owner_id != actor.id]
         if alheios:
             raise HTTPException(
                 status_code=status.HTTP_403_FORBIDDEN,
                 detail="Só é possível vincular equipamentos que pertencem a você.",
             )
+    elif compartilha_por_empresa() and not inalterados:
+        encontrados = await _confere_empresas_para_a_equipe(db, ticket, unicos, encontrados)
 
     ticket.equipments = encontrados
+
+
+_FORA_DO_ESCOPO = "Só é possível vincular equipamentos que pertencem a você ou à sua empresa."
+
+
+async def _confere_escopo_do_cliente(
+    db: AsyncSession, actor: User, unicos: list[uuid.UUID], encontrados: list[Equipment]
+) -> list[Equipment]:
+    """O cliente só vincula o que enxerga — conferido duas vezes, de propósito.
+
+    A empresa vem do banco com a conta travada (`FOR KEY SHARE`): o desvínculo
+    pega a mesma linha com `FOR UPDATE`, então ou ele espera este chamado, ou
+    este chamado o espera e já lê o cliente sem empresa.
+
+    Primeiro a conferência SEM trava no aparelho, e só o que passou é travado
+    (`FOR SHARE`, em ordem de id) e conferido de novo. Travar antes de conferir
+    seguraria aparelho que o cliente nem enxerga — entre eles o de um colega
+    que está sendo vinculado agora, cuja propagação escreve nesses mesmos
+    aparelhos: espera em círculo. O que o cliente enxerga ou é dele (e a
+    propagação dele espera a conta dele, travada acima) ou já tem empresa (e a
+    propagação não toca em quem tem).
+
+    O `FOR SHARE` é o que impede a troca no meio: a equipe mudando a empresa do
+    aparelho ou o responsável inativando-o esperam o chamado comitar, ou o
+    chamado os espera e relê o aparelho como ficou.
+    """
+    # `no_autoflush` também aqui, pelo motivo explicado em
+    # `_set_ticket_equipments`: um SELECT fora dele dá flush no chamado recém
+    # adicionado, e a atribuição de `ticket.equipments` vira MissingGreenlet.
+    with db.no_autoflush:
+        empresa = await trava_conta_e_le_empresa(db, actor.id)
+
+    def _recusa_alheios(equipamentos: list[Equipment]) -> None:
+        if len(equipamentos) != len(unicos) or any(
+            not cliente_enxerga(e, actor.id, empresa) for e in equipamentos
+        ):
+            raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail=_FORA_DO_ESCOPO)
+
+    _recusa_alheios(encontrados)
+    with db.no_autoflush:
+        travados = list(
+            (
+                await db.execute(
+                    select(Equipment)
+                    .where(Equipment.id.in_(unicos))
+                    .order_by(Equipment.id)
+                    .with_for_update(read=True)
+                    .execution_options(populate_existing=True)
+                )
+            )
+            .scalars()
+            .all()
+        )
+    _recusa_alheios(travados)
+    return travados
+
+
+_MISTURA = (
+    "Os equipamentos de um chamado precisam ser todos da mesma empresa — a de quem "
+    "abriu o chamado, quando ele tem uma — ou todos ainda sem empresa."
+)
+
+
+def _empresas_incompativeis(
+    equipamentos: list[Equipment], empresa_de_quem_abriu: uuid.UUID | None
+) -> bool:
+    """Um chamado, uma classificação de empresa (ECE-01).
+
+    Pura, para ser lida de uma vez e mutada à vontade nos testes:
+
+    - duas empresas diferentes entre os equipamentos → incompatível;
+    - classificado junto de não classificado → incompatível: o "sem empresa"
+      pode ser de qualquer uma, e é justamente o que ainda não se sabe;
+    - todos sem empresa → compatível, tenha ou não empresa quem abriu;
+    - todos da mesma empresa → compatível, desde que seja a de quem abriu,
+      quando quem abriu tem uma (`empresa_de_quem_abriu`).
+    """
+    classificadas = {e.company_id for e in equipamentos if e.company_id is not None}
+    ha_sem_empresa = any(e.company_id is None for e in equipamentos)
+    if len(classificadas) > 1:
+        return True
+    if classificadas and ha_sem_empresa:
+        return True
+    return bool(
+        classificadas
+        and empresa_de_quem_abriu is not None
+        and empresa_de_quem_abriu not in classificadas
+    )
+
+
+async def _confere_empresas_para_a_equipe(
+    db: AsyncSession, ticket: Ticket, unicos: list[uuid.UUID], encontrados: list[Equipment]
+) -> list[Equipment]:
+    """A regra de `_empresas_incompativeis`, com a empresa de quem abriu.
+
+    A equipe enxerga o parque inteiro, e por isso a recusa pode dizer o motivo
+    — não há o que esconder dela.
+
+    A classificação é lida com os aparelhos TRAVADOS (`FOR SHARE`), para valer
+    no commit do chamado: outra pessoa da equipe trocando a empresa de um deles
+    espera, ou é esperada e relida. Antes dos aparelhos, as contas dos
+    responsáveis (`FOR KEY SHARE`), na ordem das travas de "Client assignment"
+    (responsável → aparelho): o vínculo do cliente segura a conta com
+    `FOR UPDATE` e depois escreve nos aparelhos dele, então quem chega aqui no
+    meio espera na conta, sem segurar aparelho nenhum.
+    """
+    with db.no_autoflush:
+        responsaveis = sorted({e.owner_id for e in encontrados if e.owner_id is not None})
+        if responsaveis:
+            await db.execute(
+                select(User.id)
+                .where(User.id.in_(responsaveis))
+                .order_by(User.id)
+                .with_for_update(read=True, key_share=True)
+            )
+        travados = list(
+            (
+                await db.execute(
+                    select(Equipment)
+                    .where(Equipment.id.in_(unicos))
+                    .order_by(Equipment.id)
+                    .with_for_update(read=True)
+                    .execution_options(populate_existing=True)
+                )
+            )
+            .scalars()
+            .all()
+        )
+        de_quem_abriu = (
+            await db.execute(select(User.role, User.company_id).where(User.id == ticket.creator_id))
+        ).one_or_none()
+    if len(travados) != len(unicos):
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail="Um ou mais equipamentos informados não existem.",
+        )
+    empresa_de_quem_abriu = (
+        de_quem_abriu.company_id
+        if de_quem_abriu is not None and de_quem_abriu.role == UserRole.client
+        else None
+    )
+    if _empresas_incompativeis(travados, empresa_de_quem_abriu):
+        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail=_MISTURA)
+    return travados
 
 
 def _justificativa_de_sla(ticket: Ticket, now: datetime, enviada: str | None) -> str | None:

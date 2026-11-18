@@ -1061,12 +1061,13 @@ async def test_o_vinculo_escreve_nos_aparelhos_depois_de_travar_os_clientes(fabr
 
 
 @pytest.mark.asyncio
-@pytest.mark.parametrize("flag", [False, True])
+@pytest.mark.parametrize("flag", [False])
 async def test_colega_da_mesma_empresa_continua_sem_acesso_ao_aparelho(fabrica, monkeypatch, flag):
     """As leituras são as de antes, com a empresa gravada e tudo.
 
-    Com a flag ligada também: nesta fase ninguém a consulta. O caso `True`
-    muda de propósito quando a Fase 2 trocar a função de escopo.
+    Só com a flag DESLIGADA. Na Fase 1 o caso `True` também passava aqui,
+    porque ninguém consultava a flag; a Fase 2 trocou a função de escopo, e o
+    que vale com ela ligada está em `test_equipamento_compartilhado_postgres.py`.
     """
     from app.routers.products import (
         delete_my_equipment,

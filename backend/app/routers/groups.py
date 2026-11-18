@@ -65,6 +65,7 @@ from app.schemas.groups import (
     GroupUpdate,
     UpdateClientNotesRequest,
 )
+from app.services.escopo_de_equipamento import compartilha_por_empresa
 
 router = APIRouter(tags=["Groups"])
 
@@ -234,14 +235,24 @@ async def _contagem_de_equipamentos_por_empresa(
     db: AsyncSession, company_ids: list[uuid.UUID]
 ) -> dict[uuid.UUID, int]:
     """
-    Equipamentos cujo RESPONSÁVEL tem vínculo oficial com a empresa.
+    Equipamentos de cada empresa, para a tela de Empresas da equipe.
 
-    O equipamento não tem empresa própria; a dele é a do responsável. Conta os
-    inativos também — é o mesmo conjunto que `GET /equipments?company_id=`
-    devolve sem filtro de status, e as duas telas não podem discordar.
+    Com `EQUIPAMENTO_POR_EMPRESA` desligada: aqueles cujo RESPONSÁVEL tem
+    vínculo oficial com a empresa, como sempre foi. Ligada: os que SÃO da
+    empresa (`equipments.company_id`) — a mesma coluna que decide quem enxerga
+    o aparelho. Nos dois modos conta os inativos também e é o mesmo conjunto
+    que `GET /equipments?company_id=` devolve sem filtro de status: as duas
+    telas trocam de critério juntas e não podem discordar.
     """
     if not company_ids:
         return {}
+    if compartilha_por_empresa():
+        da_empresa = await db.execute(
+            select(Equipment.company_id, func.count(Equipment.id))
+            .where(Equipment.company_id.in_(company_ids))
+            .group_by(Equipment.company_id)
+        )
+        return {cid: total for cid, total in da_empresa}
     rows = await db.execute(
         select(User.company_id, func.count(Equipment.id))
         .join(User, User.id == Equipment.owner_id)

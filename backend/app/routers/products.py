@@ -75,6 +75,15 @@ from app.schemas.product import (
     ProductResponse,
     ProductUpdate,
 )
+from app.services.escopo_de_equipamento import (
+    cliente_enxerga,
+    compartilha_por_empresa,
+    empresa_do_cliente,
+    escopo_do_cliente,
+)
+from app.services.escopo_de_equipamento import (
+    trava_conta_e_le_empresa as _trava_conta_e_le_empresa,
+)
 from app.utils.crud import get_or_404
 
 router = APIRouter(tags=["Products & Equipments"])
@@ -114,7 +123,8 @@ def _audit(
 # ── A empresa do equipamento (ECE-01) ─────────────────────────
 #
 # `equipments.company_id` é gravado sempre, com `EQUIPAMENTO_POR_EMPRESA`
-# ligada ou não; nenhuma LEITURA deste arquivo o consulta ainda. De onde vem:
+# ligada ou não. Quem o LÊ para decidir o que o cliente enxerga é
+# `services/escopo_de_equipamento.py`, e só com a flag ligada. De onde vem:
 #   - cadastro pelo cliente → o vínculo oficial dele (`users.company_id`), lido
 #     do banco na hora, nunca do corpo da requisição;
 #   - cadastro pela equipe → a empresa informada; omitida, a do responsável;
@@ -164,21 +174,6 @@ def _retrato_da_empresa(
     if origem is not None:
         retrato["origem"] = origem
     return retrato
-
-
-async def _trava_conta_e_le_empresa(db: AsyncSession, user_id: uuid.UUID) -> uuid.UUID | None:
-    """`FOR KEY SHARE` na conta e, de volta, o vínculo oficial COMITADO dela.
-
-    O ator chega carregado antes da requisição; o `company_id` do objeto pode
-    estar velho. Este é o valor que vale.
-    """
-    return (
-        await db.execute(
-            select(User.company_id)
-            .where(User.id == user_id)
-            .with_for_update(read=True, key_share=True)
-        )
-    ).scalar_one_or_none()
 
 
 async def _valida_empresa(db: AsyncSession, company_id: uuid.UUID) -> None:
@@ -278,6 +273,27 @@ async def _recusa_serie_do_produto(
         raise HTTPException(status_code=status.HTTP_409_CONFLICT, detail=_SERIE_DUPLICADA)
 
 
+def _para_o_cliente(dados: list[EquipmentResponse], cliente: User) -> list[EquipmentResponse]:
+    """Marca o que é do cliente e esconde o responsável do que não é (ECE-01).
+
+    Ponto único por onde passa TODA resposta de equipamento a um cliente. O
+    equipamento da empresa aparece para o colega; quem o cadastrou, não: nem o
+    id, nem nome, nem e-mail, nem a empresa e o CNPJ que essa pessoa declarou.
+
+    Com a flag desligada só chegam aqui equipamentos do próprio cliente — o
+    `is_mine` sai sempre verdadeiro e nada é escondido.
+    """
+    for dado in dados:
+        dado.is_mine = dado.owner_id == cliente.id
+        if not dado.is_mine:
+            dado.owner_id = None
+            dado.owner_name = None
+            dado.owner_email = None
+            dado.company_name = None
+            dado.company_cnpj = None
+    return dados
+
+
 async def _enriquece(
     db: AsyncSession, equipamentos: Sequence[Equipment], *, para_equipe: bool
 ) -> list[EquipmentResponse]:
@@ -314,6 +330,8 @@ async def _enriquece(
             )
             produtos = {pid: nome for pid, nome in linhas_p.all()}
         ids_de_empresa = {u.company_id for u in responsaveis.values() if u.company_id}
+        # A empresa do EQUIPAMENTO entra na mesma consulta de nomes.
+        ids_de_empresa |= {e.company_id for e in equipamentos if e.company_id}
         if ids_de_empresa:
             linhas_c = await db.execute(
                 select(Company.id, Company.name).where(Company.id.in_(ids_de_empresa))
@@ -334,6 +352,9 @@ async def _enriquece(
             if responsavel and responsavel.company_id in empresas:
                 dado.linked_company_id = responsavel.company_id
                 dado.linked_company_name = empresas[responsavel.company_id]
+            dado.equipment_company_id = e.company_id
+            dado.equipment_company_name = empresas.get(e.company_id) if e.company_id else None
+            dado.no_company_by_decision = bool(e.sem_empresa_por_decisao)
         respostas.append(dado)
     return respostas
 
@@ -563,8 +584,12 @@ async def list_equipments(
     # Cliente só enxerga o próprio parque; staff precisa ver tudo para dar
     # suporte. Sem este filtro a listagem entregava o número de série do
     # equipamento de qualquer outro cliente.
+    #
+    # ECE-01: com `EQUIPAMENTO_POR_EMPRESA` ligada entram também os ativos da
+    # empresa do cliente — a regra inteira está em `escopo_do_cliente`.
+    # Desligada, a condição é a de sempre, só o dono.
     if actor.role == UserRole.client:
-        base = base.where(Equipment.owner_id == actor.id)
+        base = base.where(escopo_do_cliente(actor.id, await empresa_do_cliente(db, actor.id)))
     # Achar o equipamento órfão para atribuir dono. Precisa ser filtro de
     # servidor: a listagem é paginada, então filtrar no navegador só varreria a
     # página aberta e o órfão da página 7 nunca apareceria.
@@ -579,6 +604,13 @@ async def list_equipments(
     # combinação não casa com nada, que é o resultado certo.
     if without_owner:
         base = base.where(Equipment.owner_id.is_(None))
+        # Para o cliente continua não casando com nada, com a flag ligada
+        # também: o equipamento da empresa pode não ter responsável, e este
+        # filtro contaria ao colega justamente isso. "Dono = ele" E "sem dono"
+        # é a mesma combinação impossível de sempre, agora dita por extenso
+        # porque o escopo acima pode ter deixado de ser só o dono.
+        if actor.role == UserRole.client:
+            base = base.where(Equipment.owner_id == actor.id)
     if is_active is not None:
         base = base.where(Equipment.is_active == is_active)
     if search:
@@ -588,12 +620,10 @@ async def list_equipments(
     rows = await db.execute(base.order_by(Equipment.name).offset(offset).limit(limit))
     equipments = rows.scalars().all()
 
-    return EquipmentListResponse(
-        items=await _enriquece(db, equipments, para_equipe=para_equipe),
-        total=total,
-        limit=limit,
-        offset=offset,
-    )
+    items = await _enriquece(db, equipments, para_equipe=para_equipe)
+    if not para_equipe:
+        items = _para_o_cliente(items, actor)
+    return EquipmentListResponse(items=items, total=total, limit=limit, offset=offset)
 
 
 @router.get("/equipments", response_model=EquipmentListResponse)
@@ -607,6 +637,7 @@ async def list_all_equipments(
     is_active: bool | None = Query(default=None),
     company_id: uuid.UUID | None = Query(default=None),
     without_owner: bool = Query(default=False),
+    without_company: bool = Query(default=False),
 ) -> EquipmentListResponse:
     """
     O parque inteiro, de todos os produtos — só para a equipe.
@@ -620,6 +651,13 @@ async def list_all_equipments(
     (`users.company_id`). O nome de empresa que o cliente digitou
     (`users.company_name`) não entra em filtro nem em busca: ele é
     autodeclarado e não decide de que empresa alguém é.
+
+    ECE-01: com `EQUIPAMENTO_POR_EMPRESA` ligada, `company_id` casa a empresa
+    DO EQUIPAMENTO (`equipments.company_id`) — a mesma que decide quem o
+    enxerga e a mesma do contador da tela de Empresas. `without_company` acha
+    o que ainda não tem empresa, para a equipe classificar; a resposta traz as
+    duas empresas (`linked_company_*` e `equipment_company_*`) para a
+    divergência aparecer.
     """
     # Outer join: o equipamento sem responsável continua na lista; só os
     # filtros que dependem do responsável (busca por ele, empresa) o excluem.
@@ -631,7 +669,12 @@ async def list_all_equipments(
     if without_owner:
         base = base.where(Equipment.owner_id.is_(None))
     if company_id is not None:
-        base = base.where(User.company_id == company_id)
+        if compartilha_por_empresa():
+            base = base.where(Equipment.company_id == company_id)
+        else:
+            base = base.where(User.company_id == company_id)
+    if without_company:
+        base = base.where(Equipment.company_id.is_(None))
     if search:
         termo = f"%{search}%"
         base = base.where(
@@ -668,10 +711,22 @@ async def get_equipment(
     # Staff precisa ver o parque inteiro para dar suporte. Para o cliente vale a
     # regra de dono — e equipamento sem dono também é negado (fail closed), o
     # mesmo critério do /equipment/my, que devolve só o que é dele.
+    #
+    # ECE-01: com a flag ligada o cliente abre também o ativo da empresa dele.
+    # A recusa é o MESMO 404 do id que não existe, nos dois modos.
     if actor.role == UserRole.client:
-        _check_equipment_owner(equipment, actor)
-        # O cliente recebe o que sempre recebeu: o equipamento cru.
-        return EquipmentResponse.model_validate(equipment)
+        if compartilha_por_empresa():
+            empresa = await empresa_do_cliente(db, actor.id)
+            if not cliente_enxerga(equipment, actor.id, empresa):
+                raise HTTPException(
+                    status_code=status.HTTP_404_NOT_FOUND,
+                    detail=_EQUIPAMENTO_NAO_ENCONTRADO,
+                )
+        else:
+            _check_equipment_owner(equipment, actor)
+        # O cliente recebe o equipamento cru — sem o responsável, se não for dele.
+        (resposta,) = _para_o_cliente([EquipmentResponse.model_validate(equipment)], actor)
+        return resposta
 
     (resposta,) = await _enriquece(db, [equipment], para_equipe=True)
     return resposta
@@ -821,7 +876,8 @@ async def create_my_equipment(
     )
     await db.commit()
     await db.refresh(equipment)
-    return EquipmentResponse.model_validate(equipment)
+    (resposta,) = _para_o_cliente([EquipmentResponse.model_validate(equipment)], actor)
+    return resposta
 
 
 @router.get("/equipment/my", response_model=EquipmentListResponse)
@@ -830,15 +886,21 @@ async def list_my_equipment(
     actor: Annotated[User, Depends(get_current_user)],
     is_active: bool | None = Query(default=None),
 ) -> EquipmentListResponse:
-    base = select(Equipment).where(Equipment.owner_id == actor.id)
+    # ECE-01: com `EQUIPAMENTO_POR_EMPRESA` ligada, "meus" passa a incluir os
+    # ativos da empresa do cliente, marcados com `is_mine=false` e sem o
+    # responsável. Desligada, é só o dono, como sempre.
+    base = select(Equipment).where(
+        escopo_do_cliente(actor.id, await empresa_do_cliente(db, actor.id))
+    )
     if is_active is not None:
         base = base.where(Equipment.is_active == is_active)  # noqa: E712
-    rows = await db.execute(base.order_by(Equipment.name))
+    # O id desempata nomes iguais — dois colegas com um "Titan" cada.
+    rows = await db.execute(base.order_by(Equipment.name, Equipment.id))
     equipments = rows.scalars().all()
     # Mesma escolha da lista de técnicos: são os equipamentos DO próprio
     # usuário, um conjunto pequeno e fechado que a tela mostra inteiro.
     return EquipmentListResponse(
-        items=[EquipmentResponse.model_validate(e) for e in equipments],
+        items=_para_o_cliente([EquipmentResponse.model_validate(e) for e in equipments], actor),
         total=len(equipments),
         limit=len(equipments),
         offset=0,
@@ -870,7 +932,8 @@ async def update_my_equipment(
     _audit(db, AuditAction.update, actor.id, "equipment", equipment.id)
     await db.commit()
     await db.refresh(equipment)
-    return EquipmentResponse.model_validate(equipment)
+    (resposta,) = _para_o_cliente([EquipmentResponse.model_validate(equipment)], actor)
+    return resposta
 
 
 @router.delete("/equipment/my/{equipment_id}", status_code=status.HTTP_204_NO_CONTENT)

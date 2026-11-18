@@ -25,6 +25,7 @@ from app.models.models import (
     User,
     ticket_equipments,
 )
+from app.services.escopo_de_equipamento import compartilha_por_empresa
 from app.utils.sla import _advance_to_business_hours, _to_sp
 
 SISTEMA = """\
@@ -279,13 +280,20 @@ async def _chamados_anteriores(
 
     Quando o cliente não tem empresa, o recorte cai para ele mesmo. É mais
     apertado do que o necessário, e é o lado certo para errar.
+
+    ECE-01: com `EQUIPAMENTO_POR_EMPRESA` ligada o recorte é SEMPRE o próprio
+    cliente. O colega passa a poder abrir chamado com o aparelho da empresa, e
+    com o recorte por empresa o título do chamado de um entraria no prompt do
+    outro — a Helô contaria ao colega o que nenhuma tela mostra a ele.
+    Compartilhar equipamento não compartilha chamado. Com a flag desligada o
+    recorte continua o de antes.
     """
     if not equipamentos:
         return "nenhum"
 
     de_quem = (
         User.company_id == cliente.company_id
-        if cliente.company_id is not None
+        if cliente.company_id is not None and not compartilha_por_empresa()
         else Ticket.creator_id == cliente.id
     )
     linhas = (

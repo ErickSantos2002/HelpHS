@@ -91,6 +91,14 @@ def _mock_equipment(serial=None):
     e.product_name = None
     e.linked_company_id = None
     e.linked_company_name = None
+    # ECE-01: campos que o router preenche; no mock precisam existir como None,
+    # senão o `from_attributes` os lê como MagicMock.
+    e.equipment_company_id = None
+    e.equipment_company_name = None
+    e.no_company_by_decision = None
+    e.is_mine = None
+    e.company_id = None
+    e.sem_empresa_por_decisao = False
     return e
 
 
