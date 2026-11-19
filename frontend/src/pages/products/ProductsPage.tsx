@@ -27,11 +27,14 @@ import {
   setProductActive,
   updateEquipment,
   updateProduct,
+  type EmpresaDoEquipamentoNoCorpo,
   type Equipment,
   type Product,
 } from "../../services/productService";
+import { listAllCompanies } from "../../services/groupService";
 import { getUsers } from "../../services/userService";
 import { getApiError } from "../../lib/apiError";
+import { conheceEmpresaDoEquipamento, situacaoDeEmpresa } from "../../lib/equipamento";
 import { ActivePill, EquipmentDetailModal } from "../../components/equipment/EquipmentDetailModal";
 
 // ── Constants ─────────────────────────────────────────────────
@@ -163,6 +166,42 @@ function ProductFormModal({
   );
 }
 
+// ── Empresa do equipamento (ECE-01) ───────────────────────────
+
+/**
+ * O que a equipe quer fazer com a empresa do equipamento. São três intenções, e
+ * a primeira é NÃO DIZER NADA — é a que o formulário abre marcada.
+ *
+ *   - `manter`:  o campo não vai no corpo. Na edição, o backend não mexe; no
+ *                cadastro, herda a empresa oficial do responsável.
+ *   - `definir`: vai o id da empresa escolhida.
+ *   - `sem`:     vai `null` explícito — tira a empresa e marca que foi decisão.
+ *
+ * Um campo de empresa "vazio" não distinguiria `manter` de `sem`, e salvar um
+ * equipamento só para trocar o nome dele apagaria a empresa. Por isso a
+ * intenção é um controle próprio, separado da escolha da empresa.
+ */
+type IntencaoDeEmpresa = "manter" | "definir" | "sem";
+
+function empresaNoCorpo(
+  intencao: IntencaoDeEmpresa,
+  empresaId: string | null,
+): { company_id?: EmpresaDoEquipamentoNoCorpo } {
+  if (intencao === "definir") return { company_id: empresaId };
+  if (intencao === "sem") return { company_id: null };
+  return {};
+}
+
+/** Como o equipamento está hoje — só quando a API manda a informação. */
+function empresaDeHoje(e: Equipment): string | null {
+  if (!conheceEmpresaDoEquipamento(e)) return null;
+  const situacao = situacaoDeEmpresa(e);
+  if (situacao === "classificado") return e.equipment_company_name ?? "empresa sem nome";
+  return situacao === "sem_empresa_por_decisao"
+    ? "sem empresa, por decisão da equipe"
+    : "sem empresa (ainda não classificado)";
+}
+
 // ── EquipmentFormModal ────────────────────────────────────────
 
 function EquipmentFormModal({
@@ -200,6 +239,19 @@ function EquipmentFormModal({
   // mostrar o que a tela acabou de exibir na tabela.
   const [donoAtual, setDonoAtual] = useState<string | null>(editing?.owner_name ?? null);
 
+  // A empresa fica fora do `useForm` de propósito: `manter` não é um valor de
+  // campo, é a ausência dele no corpo.
+  const [intencao, setIntencao] = useState<IntencaoDeEmpresa>("manter");
+  const [empresaId, setEmpresaId] = useState<string | null>(null);
+  const [empresaNome, setEmpresaNome] = useState<string | null>(null);
+  const [erroEmpresa, setErroEmpresa] = useState<string | null>(null);
+  const hoje = editing ? empresaDeHoje(editing) : null;
+
+  async function buscarEmpresas(termo: string) {
+    const { items } = await listAllCompanies({ search: termo || undefined, limit: 20 });
+    return items.map((c) => ({ value: c.id, label: c.name, hint: c.group_name }));
+  }
+
   async function buscarClientes(termo: string) {
     const { items } = await getUsers({ role: "client", search: termo, limit: 20 });
     return items.map((u) => ({ value: u.id, label: u.name, hint: u.email }));
@@ -207,6 +259,13 @@ function EquipmentFormModal({
 
   async function onSubmit(values: EquipmentValues) {
     setSubmitError(null);
+    // "Definir" sem empresa escolhida não vira `null`: `null` é a terceira
+    // intenção, e chegar nela por esquecimento marcaria o equipamento como
+    // "sem empresa por decisão" sem ninguém ter decidido.
+    if (intencao === "definir" && !empresaId) {
+      setErroEmpresa("Selecione a empresa.");
+      return;
+    }
     try {
       const payload = {
         name: values.name,
@@ -216,6 +275,7 @@ function EquipmentFormModal({
         // `null` explícito desvincula; `|| undefined` aqui comeria o null e
         // deixaria o dono antigo no lugar.
         owner_id: values.owner_id ?? null,
+        ...empresaNoCorpo(intencao, empresaId),
       };
       const saved = editing
         ? await updateEquipment(editing.id, payload)
@@ -269,6 +329,51 @@ function EquipmentFormModal({
             />
           )}
         />
+        <div className="space-y-2">
+          <SelectMenu
+            id="equipamento-empresa-intencao"
+            label="Empresa do equipamento"
+            options={[
+              {
+                value: "manter",
+                label: editing ? "Manter como está" : "Automática: a empresa do dono",
+              },
+              { value: "definir", label: "Definir a empresa…" },
+              { value: "sem", label: "Sem empresa (por decisão)" },
+            ]}
+            value={intencao}
+            onChange={(v) => {
+              setIntencao(v as IntencaoDeEmpresa);
+              setErroEmpresa(null);
+            }}
+          />
+          {intencao === "definir" && (
+            <SearchSelect
+              label="Empresa"
+              value={empresaId}
+              selectedLabel={empresaNome}
+              onChange={(id, nome) => {
+                setEmpresaId(id);
+                setEmpresaNome(nome);
+                setErroEmpresa(null);
+              }}
+              onSearch={buscarEmpresas}
+              placeholder="Buscar empresa por nome ou CNPJ…"
+              emptyLabel="— Selecionar —"
+              error={erroEmpresa ?? undefined}
+            />
+          )}
+          <p className="text-xs text-conteudo-muted">
+            {hoje && `Hoje: ${hoje}. `}
+            {intencao === "manter"
+              ? editing
+                ? "Salvar não altera a empresa deste equipamento."
+                : "O equipamento nasce na empresa oficial do dono, se ele tiver uma."
+              : intencao === "definir"
+                ? "É a empresa cujos clientes poderão ver e usar este equipamento quando o compartilhamento por empresa estiver ativo."
+                : "O equipamento fica sem empresa e marcado como decisão da equipe: nenhum colega o enxerga, e o vínculo do dono a uma empresa não o reclassifica."}
+          </p>
+        </div>
         <Textarea label="Descrição" rows={2} {...form.register("description")} />
         <ModalFooter>
           <Button type="button" variant="secondary" onClick={onClose} disabled={form.formState.isSubmitting}>Cancelar</Button>

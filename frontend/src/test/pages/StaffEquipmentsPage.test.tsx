@@ -363,7 +363,7 @@ describe("StaffEquipmentsPage — detalhe", () => {
 
     const modal = await screen.findByRole("dialog");
     expect(within(modal).getByText("Maria Souza")).toBeInTheDocument();
-    expect(within(modal).getByText("Empresa vinculada")).toBeInTheDocument();
+    expect(within(modal).getByText("Empresa do responsável")).toBeInTheDocument();
     expect(within(modal).getByText("Alfa Transportes")).toBeInTheDocument();
     expect(within(modal).getByText("Empresa declarada")).toBeInTheDocument();
     expect(within(modal).getByText("Alfa Transp. LTDA")).toBeInTheDocument();

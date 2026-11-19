@@ -211,6 +211,21 @@ describe("OnboardingPage — o passo dos equipamentos", () => {
     expect(screen.getByRole("button", { name: "Continuar" })).toBeTruthy();
   });
 
+  it("equipamento da empresa, cadastrado por colega, não conta como adicionado por quem chega", async () => {
+    // ECE-01: com o compartilhamento ligado, `/equipment/my` traz também os
+    // equipamentos da empresa (`is_mine=false`). O passo lista o que a PRÓPRIA
+    // pessoa adicionou — o do colega não é dela para aparecer aqui.
+    vi.mocked(equipmentService.getMyEquipment).mockResolvedValue([
+      { id: "e1", name: "Phoebus-PE", serial_number: "SN-1", location: null, is_mine: true },
+      { id: "e2", name: "Titan do colega", serial_number: "SN-2", location: null, is_mine: false },
+    ] as never);
+    vi.mocked(api.get).mockResolvedValue({ data: { items: [] } } as never);
+    await irParaEquipamentos();
+    expect(await screen.findByText("Phoebus-PE")).toBeTruthy();
+    expect(screen.getByText("Adicionados (1)")).toBeTruthy();
+    expect(screen.queryByText("Titan do colega")).toBeNull();
+  });
+
   it("o último passo conclui o onboarding e leva ao primeiro chamado", async () => {
     vi.mocked(equipmentService.getMyEquipment).mockResolvedValue([]);
     vi.mocked(api.get).mockResolvedValue({ data: { items: [] } } as never);

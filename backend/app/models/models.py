@@ -582,6 +582,33 @@ class Equipment(Base):
         UUID(as_uuid=True), ForeignKey("users.id", ondelete="SET NULL"), nullable=True, index=True
     )
     location: Mapped[str | None] = mapped_column(String(255))
+    # A empresa do APARELHO (ECE-01), separada da empresa do responsável: quem
+    # cadastrou pode sair da empresa, trocar de conta ou ser excluído, e o
+    # aparelho continua sendo dela. Quem grava é o servidor (o vínculo oficial
+    # de quem cadastra, a propagação do vínculo) ou a equipe — nunca o corpo de
+    # uma requisição de cliente.
+    #
+    # `RESTRICT`, e não o `SET NULL` de `users.company_id`: apagar a empresa
+    # soltaria os aparelhos em silêncio, e a regra é que empresa com
+    # equipamento não sai. A recusa de verdade é a contagem em
+    # `groups.py::_dependentes_da_empresa`; esta FK é a rede por baixo dela.
+    #
+    # Sem `relationship` do lado da empresa, de propósito: uma coleção ali
+    # faria o `db.delete(empresa)` do ORM carregar e mexer nos aparelhos.
+    company_id: Mapped[uuid.UUID | None] = mapped_column(
+        UUID(as_uuid=True),
+        ForeignKey("companies.id", ondelete="RESTRICT"),
+        nullable=True,
+        index=True,
+    )
+    # `company_id` nulo, sozinho, quer dizer "ainda não classificado": é o que o
+    # vínculo do cliente e o script de preenchimento completam. Quando é a
+    # EQUIPE que deixa o aparelho sem empresa (`company_id: null` explícito),
+    # esta marca fica verdadeira e nenhum preenchimento automático toca na
+    # linha. Informar uma empresa a desfaz.
+    sem_empresa_por_decisao: Mapped[bool] = mapped_column(
+        Boolean, default=False, server_default=text("false"), nullable=False
+    )
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now())
     updated_at: Mapped[datetime] = mapped_column(
         DateTime(timezone=True), server_default=func.now(), onupdate=func.now()
@@ -610,6 +637,12 @@ class Equipment(Base):
     # Ver `_recusa_serie_do_produto` em routers/products.
     __table_args__ = (
         Index("uq_equipments_product_serial", "product_id", "serial_number", unique=True),
+        # A marca só existe sem empresa. SQL portável: vale no `create_all` do
+        # SQLite e no PostgreSQL.
+        CheckConstraint(
+            "NOT sem_empresa_por_decisao OR company_id IS NULL",
+            name="ck_equipments_sem_empresa_por_decisao",
+        ),
     )
 
 

@@ -51,7 +51,17 @@ from app.models.models import (
     UserStatus,
 )
 
-_TABELAS = ("groups", "companies", "users", "company_notes", "audit_logs")
+_TABELAS = (
+    "groups",
+    "companies",
+    "users",
+    "company_notes",
+    "audit_logs",
+    # ECE-01: o vínculo propaga a empresa aos aparelhos do cliente e a exclusão
+    # de empresa conta os aparelhos dela — as duas rotas tocam em `equipments`.
+    "products",
+    "equipments",
+)
 
 
 # `audit_logs` entrou no subconjunto com a F2-A1: vincular e desvincular

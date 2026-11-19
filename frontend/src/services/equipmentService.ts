@@ -12,6 +12,15 @@ export interface Equipment {
   is_active: boolean;
   created_at: string;
   updated_at: string;
+  /**
+   * ECE-01. `true`: o equipamento é de quem está logado. `false`: é da empresa
+   * dele, cadastrado por um colega — e aí `owner_id` vem nulo, porque o cliente
+   * não fica sabendo quem é o responsável.
+   *
+   * Quem decide é o backend. Opcional porque uma API anterior ao campo não o
+   * manda; ver `ehDoProprioCliente` em `lib/equipamento.ts`.
+   */
+  is_mine?: boolean | null;
 }
 
 export interface EquipmentListResponse {

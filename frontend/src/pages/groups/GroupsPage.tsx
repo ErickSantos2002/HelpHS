@@ -760,7 +760,7 @@ export function CompanyDetailModal({
               {somenteLeitura && activeTab === "equipments" && (
                 <div className="flex-1 flex flex-col min-h-0">
                   <p className="text-xs text-conteudo-muted mb-2">
-                    Equipamentos cujo responsável tem vínculo com esta empresa.
+                    Equipamentos desta empresa, pela mesma consulta da tela de Equipamentos.
                   </p>
                   {erroEquipamentos ? (
                     <p role="alert" className="text-sm text-on-tint-danger">Não foi possível carregar os equipamentos.</p>
@@ -768,7 +768,7 @@ export function CompanyDetailModal({
                     <div className="flex justify-center py-6"><Spinner /></div>
                   ) : equipamentos.length === 0 ? (
                     <div className="flex-1 flex items-center justify-center text-center py-6 rounded-lg border border-dashed border-borda text-sm text-conteudo-muted">
-                      Nenhum equipamento com responsável desta empresa.
+                      Nenhum equipamento desta empresa.
                     </div>
                   ) : (
                     <ul className="divide-y divide-borda rounded-lg border border-borda overflow-y-auto flex-1">
