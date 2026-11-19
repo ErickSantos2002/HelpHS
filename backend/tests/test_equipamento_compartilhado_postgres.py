@@ -638,7 +638,7 @@ async def test_pela_rota_de_verdade_o_chamado_nasce_com_o_aparelho_da_empresa(
     do caminho vira MissingGreenlet (500) — aconteceu durante esta entrega."""
     from unittest.mock import AsyncMock
 
-    import app.routers.tickets as rota
+    from app.routers import tickets as rota
 
     # Só o que sai do banco fica de fora: classificação por IA e notificações.
     for nome in ("classify_ticket", "notify_ticket_created"):
@@ -827,7 +827,7 @@ async def test_pelas_rotas_de_verdade_post_e_patch_recusam_a_mistura(
 ):
     from unittest.mock import AsyncMock
 
-    import app.routers.tickets as rota
+    from app.routers import tickets as rota
 
     for nome in ("classify_ticket", "notify_ticket_created"):
         if hasattr(rota, nome):
