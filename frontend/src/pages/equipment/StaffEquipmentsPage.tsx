@@ -20,6 +20,11 @@ import {
 } from "../../components/ui";
 import { EquipmentDetailModal } from "../../components/equipment/EquipmentDetailModal";
 import {
+  conheceEmpresaDoEquipamento,
+  empresasDivergem,
+  situacaoDeEmpresa,
+} from "../../lib/equipamento";
+import {
   getProducts,
   listAllEquipments,
   type Equipment,
@@ -44,9 +49,19 @@ import {
  * cliente com 403.
  *
  * **Empresa é só a oficial.** As opções do filtro vêm de `GET /companies` —
- * empresas cadastradas pela equipe — e o filtro manda `company_id`, que casa o
- * vínculo do responsável. O nome que o cliente digitou nunca vira opção. A URL
- * aceita `?empresa=<id>`: é por ela que o detalhe da empresa traz para cá.
+ * empresas cadastradas pela equipe — e o filtro manda `company_id`. O nome que
+ * o cliente digitou nunca vira opção. A URL aceita `?empresa=<id>`: é por ela
+ * que o detalhe da empresa traz para cá.
+ *
+ * **Duas empresas oficiais por linha (ECE-01).** A do EQUIPAMENTO e a do
+ * RESPONSÁVEL. Costumam ser a mesma; quando não são — o aparelho mudou de
+ * responsável e ficou na empresa antiga —, a linha diz. É para isso que a
+ * equipe recebe as duas mesmo com o compartilhamento desligado: conferir a
+ * classificação ANTES de ligá-lo.
+ *
+ * O que `company_id` casa (a empresa do responsável ou a do equipamento) é
+ * decisão do backend, conforme o modo dele. A tela não sabe qual modo vale e
+ * não tenta adivinhar: manda o filtro e mostra o que voltou.
  */
 
 const PAGE_SIZE = 20;
@@ -56,8 +71,37 @@ const OPCOES_DE_STATUS = [
   { value: "false", label: "Inativos" },
 ];
 
-/** Vinculada é a oficial; a declarada vem marcada, e nunca no lugar dela. */
+/**
+ * A empresa do equipamento em cima; a do responsável embaixo quando diverge; a
+ * declarada sempre marcada, e nunca no lugar de nenhuma das duas.
+ *
+ * Diante de uma API anterior à ECE-01 (campo ausente), a célula é a de antes:
+ * só a empresa do responsável. Dizer "Sem empresa" ali seria inventar.
+ */
 function CelulaEmpresa({ equip }: { equip: Equipment }) {
+  if (conheceEmpresaDoEquipamento(equip)) {
+    const situacao = situacaoDeEmpresa(equip);
+    const diverge = empresasDivergem(equip);
+    return (
+      <div className="flex flex-col min-w-0">
+        {situacao === "classificado" ? (
+          <span className="truncate">{equip.equipment_company_name ?? "Empresa sem nome"}</span>
+        ) : situacao === "sem_empresa_por_decisao" ? (
+          <span className="text-conteudo-muted">Sem empresa (por decisão)</span>
+        ) : (
+          <span className="text-conteudo-muted">Sem empresa</span>
+        )}
+        {diverge && (
+          <span className="text-xs text-on-tint-warning truncate">
+            Diverge do responsável: {equip.linked_company_name ?? "sem empresa vinculada"}
+          </span>
+        )}
+        {equip.company_name && (
+          <span className="text-xs text-conteudo-muted truncate">Declarada: {equip.company_name}</span>
+        )}
+      </div>
+    );
+  }
   return (
     <div className="flex flex-col min-w-0">
       {equip.linked_company_name ? (
@@ -86,6 +130,7 @@ export default function StaffEquipmentsPage() {
   const [empresa, setEmpresa] = useState<string | null>(searchParams.get("empresa"));
   const [status, setStatus] = useState("");
   const [semResponsavel, setSemResponsavel] = useState(false);
+  const [semEmpresa, setSemEmpresa] = useState(false);
   const [page, setPage] = useState(1);
 
   const [detalhe, setDetalhe] = useState<Equipment | null>(null);
@@ -137,6 +182,7 @@ export default function StaffEquipmentsPage() {
       company_id: empresa ?? undefined,
       is_active: status === "" ? undefined : status === "true",
       without_owner: semResponsavel || undefined,
+      without_company: semEmpresa || undefined,
       limit: PAGE_SIZE,
       offset: (page - 1) * PAGE_SIZE,
     })
@@ -152,9 +198,21 @@ export default function StaffEquipmentsPage() {
       .finally(() => {
         if (esta === ultimaRequisicao.current) setLoading(false);
       });
-  }, [search, produto, empresa, status, semResponsavel, page]);
+  }, [search, produto, empresa, status, semResponsavel, semEmpresa, page]);
 
-  const hasFilters = !!(search || produto || empresa || status || semResponsavel);
+  // O que `company_id` casa é decisão do backend, e a tela não sabe qual das
+  // duas empresas ele está casando. O que ela SABE é o que voltou: se há linha
+  // cuja empresa do equipamento não é a filtrada, essa linha só pode ter
+  // entrado pela empresa do responsável. É constatação sobre a resposta, não
+  // palpite sobre o modo — sem linha assim, não há aviso.
+  const filtroCasouResponsavel =
+    !loading &&
+    !!empresa &&
+    equipamentos.some(
+      (e) => conheceEmpresaDoEquipamento(e) && (e.equipment_company_id ?? null) !== empresa,
+    );
+
+  const hasFilters = !!(search || produto || empresa || status || semResponsavel || semEmpresa);
 
   function limparFiltros() {
     setSearch("");
@@ -162,6 +220,7 @@ export default function StaffEquipmentsPage() {
     escolherEmpresa(null);
     setStatus("");
     setSemResponsavel(false);
+    setSemEmpresa(false);
     setPage(1);
   }
 
@@ -225,6 +284,13 @@ export default function StaffEquipmentsPage() {
             onChange={(v) => { setSemResponsavel(v); setPage(1); }}
             label="Sem responsável"
           />
+          {/* Os que falta classificar e os deixados sem empresa por decisão —
+              a linha diz qual dos dois. Peneira no servidor, como o vizinho. */}
+          <Checkbox
+            checked={semEmpresa}
+            onChange={(v) => { setSemEmpresa(v); setPage(1); }}
+            label="Sem empresa"
+          />
           {hasFilters && (
             <button
               type="button"
@@ -243,8 +309,14 @@ export default function StaffEquipmentsPage() {
         <div className="px-4 py-3 border-b border-borda">
           <p className="text-sm font-semibold text-conteudo-heading">Parque de equipamentos</p>
           <p className="text-xs text-conteudo-muted mt-0.5">
-            Consulta de todos os produtos. Para cadastrar ou editar, use a tela de Produtos.
+            Consulta de todos os produtos. Para cadastrar, editar ou definir a empresa de um equipamento, use a tela de Produtos.
           </p>
+          {filtroCasouResponsavel && (
+            <p role="note" className="text-xs text-on-tint-warning mt-1">
+              Este filtro trouxe equipamentos pela empresa do responsável. A coluna Empresa mostra a
+              empresa do próprio equipamento, que pode ser outra.
+            </p>
+          )}
         </div>
 
         {loading ? (
