@@ -1552,3 +1552,185 @@ async def test_o_preenchimento_pula_o_aparelho_marcado_depois_do_levantamento(fa
     assert (gravados, pulados) == ([], [aparelho.id])
     assert await _empresa_do(fabrica, aparelho.id) is None
     assert await _marca_do(fabrica, aparelho.id) is True
+
+
+# ══════════════════════════════════════════════════════════════
+# 9. O que o cadastro e a edição pela equipe DEVOLVEM
+# ══════════════════════════════════════════════════════════════
+#
+# A tela de Produtos troca a linha da lista pela resposta do salvar. As duas
+# rotas devolviam o equipamento cru — `equipment_company_id: null` com a
+# empresa gravada no banco — e a tela passava a dizer "sem empresa (ainda não
+# classificado)" logo depois de a equipe classificar. A resposta do salvar tem
+# de ser a MESMA do `GET /equipments/{id}`, pelo fio, nos dois modos da flag.
+
+_DA_EQUIPE = (
+    "product_name",
+    "owner_name",
+    "owner_email",
+    "linked_company_id",
+    "linked_company_name",
+    "equipment_company_id",
+    "equipment_company_name",
+    "no_company_by_decision",
+)
+
+
+async def _cenario_da_resposta(fabrica):
+    g = await _grupo(fabrica)
+    do_responsavel = await _empresa(fabrica, g, "Do responsavel")
+    outra = await _empresa(fabrica, g, "Outra")
+    cliente = await _pessoa(fabrica, company_id=do_responsavel.id)
+    produto = await _produto(fabrica)
+    return do_responsavel, outra, cliente, produto
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("flag", [False, True])
+@pytest.mark.parametrize("papel", [UserRole.admin, UserRole.technician])
+async def test_o_cadastro_pela_equipe_devolve_as_duas_empresas(
+    fabrica, http, monkeypatch, flag, papel
+):
+    monkeypatch.setattr(get_settings(), "equipamento_por_empresa", flag)
+    do_responsavel, outra, cliente, produto = await _cenario_da_resposta(fabrica)
+    http.estado["ator"] = await _pessoa(fabrica, papel)
+
+    r = await http.post(
+        f"/api/v1/products/{produto.id}/equipments",
+        json={"name": "Novo", "owner_id": str(cliente.id), "company_id": str(outra.id)},
+    )
+
+    assert r.status_code == 201, r.text
+    corpo = r.json()
+    assert corpo["equipment_company_id"] == str(outra.id)
+    assert corpo["equipment_company_name"] == "Outra"
+    assert corpo["no_company_by_decision"] is False
+    assert corpo["linked_company_id"] == str(do_responsavel.id)
+    assert corpo["linked_company_name"] == "Do responsavel"
+    assert corpo["owner_name"] == cliente.name
+    assert corpo["owner_email"] == cliente.email
+    assert corpo["product_name"] == produto.name
+    assert await _empresa_do(fabrica, uuid.UUID(corpo["id"])) == outra.id
+
+
+@pytest.mark.asyncio
+async def test_o_cadastro_que_herda_a_empresa_do_responsavel_devolve_a_herdada(fabrica, http):
+    do_responsavel, _, cliente, produto = await _cenario_da_resposta(fabrica)
+    http.estado["ator"] = await _pessoa(fabrica, UserRole.admin)
+
+    r = await http.post(
+        f"/api/v1/products/{produto.id}/equipments",
+        json={"name": "Herdado", "owner_id": str(cliente.id)},
+    )
+
+    assert r.status_code == 201, r.text
+    assert r.json()["equipment_company_id"] == str(do_responsavel.id)
+    assert r.json()["no_company_by_decision"] is False
+
+
+@pytest.mark.asyncio
+async def test_o_cadastro_sem_empresa_por_decisao_devolve_a_marca(fabrica, http):
+    _, _, cliente, produto = await _cenario_da_resposta(fabrica)
+    http.estado["ator"] = await _pessoa(fabrica, UserRole.admin)
+
+    r = await http.post(
+        f"/api/v1/products/{produto.id}/equipments",
+        json={"name": "De feira", "owner_id": str(cliente.id), "company_id": None},
+    )
+
+    assert r.status_code == 201, r.text
+    assert r.json()["equipment_company_id"] is None
+    assert r.json()["equipment_company_name"] is None
+    assert r.json()["no_company_by_decision"] is True
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("flag", [False, True])
+async def test_a_edicao_que_define_a_empresa_devolve_a_empresa_definida(
+    fabrica, http, monkeypatch, flag
+):
+    monkeypatch.setattr(get_settings(), "equipamento_por_empresa", flag)
+    do_responsavel, outra, cliente, produto = await _cenario_da_resposta(fabrica)
+    aparelho = await _aparelho(fabrica, produto, dono=cliente)
+    http.estado["ator"] = await _pessoa(fabrica, UserRole.technician)
+
+    r = await http.patch(f"/api/v1/equipments/{aparelho.id}", json={"company_id": str(outra.id)})
+
+    assert r.status_code == 200, r.text
+    corpo = r.json()
+    assert corpo["equipment_company_id"] == str(outra.id)
+    assert corpo["equipment_company_name"] == "Outra"
+    assert corpo["no_company_by_decision"] is False
+    assert corpo["linked_company_id"] == str(do_responsavel.id)
+    assert corpo["owner_name"] == cliente.name
+    assert corpo["product_name"] == produto.name
+
+
+@pytest.mark.asyncio
+async def test_a_edicao_com_null_devolve_sem_empresa_por_decisao(fabrica, http):
+    do_responsavel, _, cliente, produto = await _cenario_da_resposta(fabrica)
+    aparelho = await _aparelho(fabrica, produto, dono=cliente, company_id=do_responsavel.id)
+    http.estado["ator"] = await _pessoa(fabrica, UserRole.admin)
+
+    r = await http.patch(f"/api/v1/equipments/{aparelho.id}", json={"company_id": None})
+
+    assert r.status_code == 200, r.text
+    assert r.json()["equipment_company_id"] is None
+    assert r.json()["no_company_by_decision"] is True
+
+
+@pytest.mark.asyncio
+async def test_inativar_devolve_a_empresa_que_o_aparelho_ja_tinha(fabrica, http):
+    """É o caminho do botão de ativar/inativar: `PATCH` só com `is_active`."""
+    do_responsavel, _, cliente, produto = await _cenario_da_resposta(fabrica)
+    aparelho = await _aparelho(fabrica, produto, dono=cliente, company_id=do_responsavel.id)
+    http.estado["ator"] = await _pessoa(fabrica, UserRole.admin)
+
+    r = await http.patch(f"/api/v1/equipments/{aparelho.id}", json={"is_active": False})
+
+    assert r.status_code == 200, r.text
+    assert r.json()["is_active"] is False
+    assert r.json()["equipment_company_id"] == str(do_responsavel.id)
+    assert r.json()["equipment_company_name"] == "Do responsavel"
+    assert r.json()["no_company_by_decision"] is False
+    assert await _empresa_do(fabrica, aparelho.id) == do_responsavel.id
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize(
+    "corpo_da_edicao",
+    [{"name": "Renomeado"}, {"company_id": "OUTRA"}, {"company_id": None}, {"owner_id": None}],
+)
+async def test_a_resposta_do_salvar_e_a_mesma_do_detalhe(fabrica, http, corpo_da_edicao):
+    """A tela pode usar a resposta do salvar no lugar de reler o equipamento."""
+    _, outra, cliente, produto = await _cenario_da_resposta(fabrica)
+    http.estado["ator"] = await _pessoa(fabrica, UserRole.admin)
+    corpo = {k: (str(outra.id) if v == "OUTRA" else v) for k, v in corpo_da_edicao.items()}
+
+    criado = await http.post(
+        f"/api/v1/products/{produto.id}/equipments",
+        json={"name": "Novo", "owner_id": str(cliente.id)},
+    )
+    assert criado.status_code == 201, criado.text
+    detalhe = await http.get(f"/api/v1/equipments/{criado.json()['id']}")
+    assert criado.json() == detalhe.json()
+
+    editado = await http.patch(f"/api/v1/equipments/{criado.json()['id']}", json=corpo)
+    assert editado.status_code == 200, editado.text
+    detalhe = await http.get(f"/api/v1/equipments/{criado.json()['id']}")
+    assert editado.json() == detalhe.json()
+    assert set(_DA_EQUIPE) <= set(editado.json())
+
+
+@pytest.mark.asyncio
+async def test_o_cliente_continua_sem_alcancar_as_rotas_da_equipe(fabrica, http):
+    """Enriquecer a resposta não abriu a rota: o cliente segue com 403."""
+    do_responsavel, _, cliente, produto = await _cenario_da_resposta(fabrica)
+    aparelho = await _aparelho(fabrica, produto, dono=cliente, company_id=do_responsavel.id)
+    http.estado["ator"] = cliente
+
+    criar = await http.post(f"/api/v1/products/{produto.id}/equipments", json={"name": "X"})
+    editar = await http.patch(f"/api/v1/equipments/{aparelho.id}", json={"name": "Y"})
+
+    assert (criar.status_code, editar.status_code) == (403, 403)
+    assert "equipment_company_id" not in criar.text + editar.text

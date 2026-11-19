@@ -1157,7 +1157,12 @@ def _db_tabela_equipamentos(linhas, *, product=None, users=None, por_id=None):
         if "from products" in texto:
             return product
         if "from users" in texto:
-            return users.get(_param(stmt.compile().params, "id"))
+            chave = _param(stmt.compile().params, "id")
+            # `users.id IN (...)`: a resposta do salvar junta o responsável ao
+            # equipamento, como a listagem — e essa consulta vem com uma lista.
+            if isinstance(chave, list):
+                return [users[i] for i in chave if i in users]
+            return users.get(chave)
         if "from equipments" not in texto:
             return None
         # O SELECT lista todas as colunas, então "serial_number" aparece até na
@@ -1195,7 +1200,10 @@ def _db_tabela_equipamentos(linhas, *, product=None, users=None, por_id=None):
         result = MagicMock()
         result.scalar_one_or_none.return_value = encontrado
         result.scalar_one.return_value = 0
-        result.scalars.return_value.all.return_value = [encontrado] if encontrado else []
+        if isinstance(encontrado, list):
+            result.scalars.return_value.all.return_value = encontrado
+        else:
+            result.scalars.return_value.all.return_value = [encontrado] if encontrado else []
         return result
 
     session = AsyncMock()

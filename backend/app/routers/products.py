@@ -563,7 +563,12 @@ async def create_equipment(
     )
     await db.commit()
     await db.refresh(equipment)
-    return EquipmentResponse.model_validate(equipment)
+    # A resposta é a MESMA do `GET /equipments/{id}`: responsável, produto e as
+    # duas empresas. A tela de Produtos põe esta resposta na lista no lugar de
+    # reler — devolver o equipamento cru fazia um aparelho recém-classificado
+    # aparecer "sem empresa" até a página recarregar.
+    (resposta,) = await _enriquece(db, [equipment], para_equipe=True)
+    return resposta
 
 
 @router.get("/products/{product_id}/equipments", response_model=EquipmentListResponse)
@@ -809,7 +814,9 @@ async def update_equipment(
     )
     await db.commit()
     await db.refresh(equipment)
-    return EquipmentResponse.model_validate(equipment)
+    # Mesma resposta do cadastro e do detalhe — a tela troca a linha por ela.
+    (resposta,) = await _enriquece(db, [equipment], para_equipe=True)
+    return resposta
 
 
 # ── Client self-service equipment endpoints ───────────────────
