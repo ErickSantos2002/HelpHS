@@ -13,16 +13,21 @@ O admin do e2e é o mesmo de `app.seeds`; aqui entra só o que os specs precisam
 a mais: um cliente. Os valores são os defaults de `frontend/e2e/helpers.ts`, e
 há teste garantindo que os dois lados batem.
 
-Uso: python -m app.seeds_e2e --ece01
+Uso: E2E_ECE01_ANA_PASSWORD=… E2E_ECE01_BRUNO_PASSWORD=… python -m app.seeds_e2e --ece01
 
 Com `--ece01` entra TAMBÉM o cenário dos specs `ece01-*.spec.ts` (equipamento
 compartilhado por empresa): um grupo, duas empresas, dois clientes da mesma
 empresa, um produto e quatro equipamentos. É opcional de propósito — sem a
 opção o banco do e2e nasce exatamente como antes, e os specs das outras
 frentes não passam a contar com dado que não pediram.
+
+As senhas dos dois clientes desse cenário NÃO estão no código: chegam pelo
+ambiente, e quem roda escolhe (o workflow sorteia um par por execução). O
+Playwright lê as mesmas duas variáveis. Sem elas o seed para antes de gravar.
 """
 
 import asyncio
+import os
 import sys
 import uuid
 from datetime import UTC, datetime
@@ -48,8 +53,12 @@ E2E_CLIENT = {
 # ── Cenário da ECE-01 ─────────────────────────────────────────
 #
 # Tudo fictício e com "ECE01" no nome, para o spec achar o que é dele sem
-# depender do que outro spec criou. Os nomes e as credenciais são os mesmos de
+# depender do que outro spec criou. Os nomes e os e-mails são os mesmos de
 # `frontend/e2e/ece01.ts` — há teste garantindo que os dois lados batem.
+#
+# Senha não tem aqui, nem lá. `senha_env` é o NOME da variável de ambiente
+# de onde ela vem; o seed e o Playwright leem a mesma, e o valor só existe
+# durante a execução.
 #
 # Ana e Bruno são colegas: os dois na Alfa. É o que o compartilhamento exige.
 
@@ -60,13 +69,13 @@ E2E_ECE01_PRODUTO = "ECE01 Produto"
 
 E2E_ECE01_ANA = {
     "email": "ana.ece01.e2e@healthsafety.com",
-    "password": "AnaEce01@123",
+    "senha_env": "E2E_ECE01_ANA_PASSWORD",
     "name": "Ana ECE01",
     "phone": "+5581999990001",
 }
 E2E_ECE01_BRUNO = {
     "email": "bruno.ece01.e2e@healthsafety.com",
-    "password": "BrunoEce01@123",
+    "senha_env": "E2E_ECE01_BRUNO_PASSWORD",
     "name": "Bruno ECE01",
     "phone": "+5581999990002",
 }
@@ -133,13 +142,30 @@ async def seed_e2e_client(session: AsyncSession) -> None:
     logger.info(f"E2E client created: {E2E_CLIENT['email']}")
 
 
+def _senha_do_ambiente(dados: dict[str, str]) -> str:
+    """
+    A senha do cliente, lida da variável que `senha_env` nomeia.
+
+    Sem padrão de propósito: um valor de reserva seria uma senha fixa no
+    código de novo, com outro nome. A mensagem diz qual variável falta e nunca
+    repete valor — nem o que veio, nem o que se esperava.
+    """
+    senha = os.environ.get(dados["senha_env"], "")
+    if not senha:
+        raise RuntimeError(
+            f"seeds_e2e --ece01: defina {dados['senha_env']} com a senha fictícia de "
+            f"{dados['name']}. O Playwright lê a mesma variável."
+        )
+    return senha
+
+
 def _cliente_da_ece01(dados: dict[str, str], empresa: Company, agora: datetime) -> User:
     """Cliente ativo, confirmado, com onboarding feito e VINCULADO à empresa."""
     return User(
         id=uuid.uuid4(),
         email=dados["email"],
         name=dados["name"],
-        password=pwd_context.hash(dados["password"]),
+        password=pwd_context.hash(_senha_do_ambiente(dados)),
         role=UserRole.client,
         status=UserStatus.active,
         phone=dados["phone"],
@@ -164,6 +190,10 @@ async def seed_e2e_ece01(session: AsyncSession) -> None:
     que o workflow define por execução. O dado é o mesmo nos dois modos — o
     que muda é o que cada cliente enxerga dele.
     """
+    # Antes de qualquer leitura: faltando senha, nada é consultado nem gravado.
+    for dados in (E2E_ECE01_ANA, E2E_ECE01_BRUNO):
+        _senha_do_ambiente(dados)
+
     result = await session.execute(select(Group).where(Group.name == E2E_ECE01_GRUPO))
     if result.scalar_one_or_none():
         logger.info("E2E ECE-01 scenario already exists — skipping")

@@ -273,6 +273,21 @@ jobs:
         working-directory: backend
         run: python -m app.seeds
 
+      - name: Senhas fictícias dos dois clientes da ECE-01 (um par por execução)
+        # Nenhuma senha desses clientes mora no repositório: nascem aqui, de
+        # bytes aleatórios, e valem só para o banco descartável deste job.
+        # `add-mask` vem ANTES de o valor ir para o ambiente — daí em diante o
+        # runner troca qualquer aparição dele no log por ***. O seed e o
+        # Playwright leem as duas variáveis; nada as grava em arquivo do job.
+        # O prefixo e o sufixo fixos só dão forma de senha (maiúscula,
+        # minúscula, dígito, símbolo); o segredo são os 16 bytes do meio.
+        run: |
+          for conta in ANA BRUNO; do
+            senha="E2e-$(openssl rand -hex 16)-aA1!"
+            echo "::add-mask::${senha}"
+            echo "E2E_ECE01_${conta}_PASSWORD=${senha}" >> "$GITHUB_ENV"
+          done
+
       - name: Seeds do e2e com o cenário da ECE-01
         # `--ece01` acrescenta grupo, empresas, dois clientes colegas, produto
         # e equipamentos — tudo fictício. O módulo se recusa a rodar em produção.
@@ -311,11 +326,15 @@ jobs:
         # um diretório de checkout chamado "ece01-…" não puxar a suíte inteira.
         # Os specs das outras frentes não entram aqui. O de classificação roda nos dois modos; cada spec de
         # cliente roda no modo dele e se pula no outro.
+        #
+        # `--trace off`: a config liga o trace na repetição, e o trace guarda o
+        # corpo das requisições — o do login leva a senha sorteada acima, e o
+        # relatório vira artefato. Vale só para este job.
         working-directory: frontend
         env:
           CI: "true"
           E2E_ECE01: ${{ matrix.modo }}
-        run: npx playwright test e2e/ece01-
+        run: npx playwright test e2e/ece01- --trace off
 
       - name: Relatório do Playwright
         if: always()

@@ -4,8 +4,11 @@ import { expect, type Locator, type Page } from "@playwright/test";
  * O que os specs `ece01-*.spec.ts` têm em comum: o cenário semeado por
  * `python -m app.seeds_e2e --ece01` e o modo em que o backend está rodando.
  *
- * Os nomes e as credenciais são os de `backend/app/seeds_e2e.py`; há teste no
+ * Os nomes e os e-mails são os de `backend/app/seeds_e2e.py`; há teste no
  * backend garantindo que os dois lados batem.
+ *
+ * Senha não tem aqui. As dos dois clientes chegam por variável de ambiente —
+ * as MESMAS que o seed lê —, e o workflow sorteia um par por execução.
  */
 
 /**
@@ -30,31 +33,77 @@ export const ECE01 = {
   ana: {
     nome: "Ana ECE01",
     email: "ana.ece01.e2e@healthsafety.com",
-    password: "AnaEce01@123",
-  },
+    senhaEnv: "E2E_ECE01_ANA_PASSWORD",
+  } satisfies ContaDaEce01,
   bruno: {
     nome: "Bruno ECE01",
     email: "bruno.ece01.e2e@healthsafety.com",
-    password: "BrunoEce01@123",
-  },
+    senhaEnv: "E2E_ECE01_BRUNO_PASSWORD",
+  } satisfies ContaDaEce01,
   aparelhoDaAna: "ECE01 Aparelho da Ana",
   aparelhoDoBruno: "ECE01 Aparelho do Bruno",
   aparelhoDivergente: "ECE01 Aparelho divergente",
   aparelhoAClassificar: "ECE01 Aparelho a classificar",
 };
 
-/** O mesmo caminho do `login` de `helpers.ts`, para uma conta qualquer. */
-export async function entrar(
-  page: Page,
-  conta: { email: string; password: string },
-) {
+export interface ContaDaEce01 {
+  nome: string;
+  email: string;
+  /** NOME da variável de ambiente com a senha — a mesma que o seed lê. */
+  senhaEnv: string;
+}
+
+/**
+ * A senha da conta, lida do ambiente. Sem valor de reserva: seria uma senha
+ * fixa no repositório de novo. A mensagem diz qual variável falta, e só.
+ */
+function senhaDe(conta: ContaDaEce01): string {
+  const senha = process.env[conta.senhaEnv];
+  if (!senha) {
+    throw new Error(
+      `defina ${conta.senhaEnv} com a mesma senha passada a \`python -m app.seeds_e2e --ece01\``,
+    );
+  }
+  return senha;
+}
+
+/**
+ * O mesmo caminho do `login` de `helpers.ts`, para um cliente da ECE-01.
+ *
+ * A senha NÃO vai por `fill`: o Playwright escreve o valor digitado no título
+ * do passo, e o título vai para o relatório que o workflow guarda como
+ * artefato. Ela entra pelo setter nativo do campo, dentro de um `evaluate` —
+ * o relatório registra que houve um passo, não o que ele levou. O evento
+ * `input` é o que faz o React enxergar o valor, como numa digitação.
+ */
+export async function entrar(page: Page, conta: ContaDaEce01) {
+  const campoDaSenha = page.getByLabel("Senha", { exact: true });
+  const escreve = (valor: string) =>
+    campoDaSenha.evaluate((campo, texto) => {
+      const setter = Object.getOwnPropertyDescriptor(
+        HTMLInputElement.prototype,
+        "value",
+      )?.set;
+      setter?.call(campo, texto);
+      campo.dispatchEvent(new Event("input", { bubbles: true }));
+    }, valor);
+
   await page.goto("/login");
   await page.getByLabel("E-mail").fill(conta.email);
-  await page.getByLabel("Senha", { exact: true }).fill(conta.password);
+  await escreve(senhaDe(conta));
   await page.getByRole("button", { name: "Entrar" }).click();
-  await page.waitForURL((url) => !url.pathname.includes("/login"), {
-    timeout: 10_000,
-  });
+  try {
+    await page.waitForURL((url) => !url.pathname.includes("/login"), {
+      timeout: 10_000,
+    });
+  } catch (erro) {
+    // O login não saiu do lugar, e a senha continua no campo. Quando um teste
+    // falha, o Playwright fotografa a árvore da página — com o valor dos
+    // campos — e anexa ao resultado. Esvaziar antes de devolver o erro é o
+    // que mantém a senha fora dessa fotografia.
+    await escreve("").catch(() => {});
+    throw erro;
+  }
 }
 
 /**

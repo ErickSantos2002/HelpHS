@@ -7,13 +7,18 @@ O que este arquivo prende:
   das outras frentes não passam a depender de dado que não pediram;
 - com a opção, nasce o cenário que os specs `ece01-*.spec.ts` leem, e só ele;
 - em produção nada disso roda;
-- os nomes e as credenciais batem com `frontend/e2e/ece01.ts`.
+- os nomes e os e-mails batem com `frontend/e2e/ece01.ts`;
+- nenhuma senha desses clientes mora no repositório: o seed e o Playwright
+  leem as mesmas duas variáveis de ambiente, e sem elas o seed não grava nada.
 
 Sem banco: a sessão é de mentira, como em `test_seeds_e2e.py`. Que o cenário
 grava de verdade num Postgres (FKs, CHECK da empresa do equipamento) quem prova
 é o próprio workflow de e2e, que roda este seed antes dos specs.
 """
 
+import inspect
+import re
+import secrets
 from pathlib import Path
 from unittest.mock import MagicMock, patch
 
@@ -26,6 +31,19 @@ from app.models.models import Company, Equipment, Group, Product, User, UserRole
 
 _settings = get_settings()
 _pwd = CryptContext(schemes=["bcrypt"], deprecated="auto")
+
+_CONTAS = (seeds_e2e.E2E_ECE01_ANA, seeds_e2e.E2E_ECE01_BRUNO)
+_FRONT = Path(__file__).resolve().parents[2] / "frontend" / "e2e" / "ece01.ts"
+
+
+@pytest.fixture(autouse=True)
+def senhas(monkeypatch):
+    """Um par sorteado por teste, como o workflow sorteia por execução —
+    nem aqui há senha escrita."""
+    sorteadas = {dados["senha_env"]: secrets.token_urlsafe(18) for dados in _CONTAS}
+    for variavel, valor in sorteadas.items():
+        monkeypatch.setenv(variavel, valor)
+    return sorteadas
 
 
 class _Sessao:
@@ -118,7 +136,7 @@ async def test_com_a_opcao_nasce_o_cenario_inteiro(ambiente):
 
 
 @pytest.mark.asyncio
-async def test_os_dois_clientes_sao_colegas_e_entram_prontos_para_logar(ambiente):
+async def test_os_dois_clientes_sao_colegas_e_entram_prontos_para_logar(ambiente, senhas):
     ambiente("testing")
     sessao = _Sessao()
 
@@ -136,8 +154,78 @@ async def test_os_dois_clientes_sao_colegas_e_entram_prontos_para_logar(ambiente
         assert c.onboarding_completed is True
         assert c.lgpd_consent is True
         assert c.phone
-        assert c.password != dados["password"]
-        assert _pwd.verify(dados["password"], c.password)
+        # A senha é a do ambiente, e vai com hash — nunca em claro.
+        assert c.password != senhas[dados["senha_env"]]
+        assert _pwd.verify(senhas[dados["senha_env"]], c.password)
+    # Cada um com a sua: a senha de um não abre a conta do outro.
+    ana, bruno = (clientes[d["email"]] for d in _CONTAS)
+    assert not _pwd.verify(senhas[seeds_e2e.E2E_ECE01_ANA["senha_env"]], bruno.password)
+    assert not _pwd.verify(senhas[seeds_e2e.E2E_ECE01_BRUNO["senha_env"]], ana.password)
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("falta", [d["senha_env"] for d in _CONTAS])
+@pytest.mark.parametrize("como", ["ausente", "vazia"])
+async def test_sem_a_senha_no_ambiente_o_cenario_nao_grava_nada(
+    ambiente, senhas, monkeypatch, falta, como
+):
+    """Sem valor de reserva: faltou uma das duas, o seed para antes de
+    consultar o banco, diz QUAL variável falta e não repete senha nenhuma."""
+    ambiente("testing")
+    if como == "ausente":
+        monkeypatch.delenv(falta)
+    else:
+        monkeypatch.setenv(falta, "")
+    sessao = _Sessao()
+    consultas = []
+    execute = sessao.execute
+
+    async def conta_consulta(stmt):
+        consultas.append(str(stmt))
+        return await execute(stmt)
+
+    sessao.execute = conta_consulta
+
+    with pytest.raises(RuntimeError) as erro:
+        await _roda(sessao, ece01=True)
+
+    assert falta in str(erro.value)
+    assert not any(valor in str(erro.value) for valor in senhas.values())
+    # Só o cliente de sempre, que vem antes: do cenário, nada.
+    assert sessao.dos(Group) + sessao.dos(Company) + sessao.dos(Equipment) == []
+    assert [u.email for u in sessao.dos(User)] == [seeds_e2e.E2E_CLIENT["email"]]
+    assert not any("groups" in c for c in consultas)
+
+
+@pytest.mark.asyncio
+async def test_sem_a_opcao_o_seed_nao_pede_senha_nenhuma(ambiente, monkeypatch):
+    """A suíte geral não define as variáveis, e tem de seguir rodando."""
+    ambiente("testing")
+    for dados in _CONTAS:
+        monkeypatch.delenv(dados["senha_env"])
+    sessao = _Sessao()
+
+    await _roda(sessao)
+
+    assert len(sessao.adicionados) == 1
+
+
+def test_nenhuma_senha_dos_clientes_da_ece01_esta_escrita_no_repositorio():
+    """O que o GitGuardian acusou no PR #117. Uma senha fixa, mesmo fictícia,
+    é um literal que alguém copia — e que o verificador não distingue de uma
+    de verdade."""
+    for dados in _CONTAS:
+        assert set(dados) == {"email", "senha_env", "name", "phone"}
+        assert re.fullmatch(r"E2E_ECE01_[A-Z]+_PASSWORD", dados["senha_env"])
+
+    # No seed: do cenário da ECE-01 em diante, nenhuma chave de senha com valor.
+    do_cenario = inspect.getsource(seeds_e2e).split("# ── Cenário da ECE-01", 1)[1]
+    assert not re.search(r"""["']password["']\s*:""", do_cenario)
+
+    # No Playwright: a conta carrega o NOME da variável, nunca um valor.
+    do_front = _FRONT.read_text(encoding="utf-8")
+    assert not re.search(r"""\b(password|senha)\s*:\s*["'`]""", do_front)
+    assert "process.env[conta.senhaEnv]" in do_front
 
 
 @pytest.mark.asyncio
@@ -205,12 +293,11 @@ def test_o_cenario_nao_decide_o_modo_do_compartilhamento():
     assert "get_settings" not in fonte
 
 
-def test_os_nomes_e_as_credenciais_batem_com_o_playwright():
-    """`frontend/e2e/ece01.ts` repete estes valores. Se um lado mudar e o outro
-    não, o spec falha no login ou não acha o aparelho — este teste diz por quê."""
-    do_front = (Path(__file__).resolve().parents[2] / "frontend" / "e2e" / "ece01.ts").read_text(
-        encoding="utf-8"
-    )
+def test_os_nomes_e_as_variaveis_de_senha_batem_com_o_playwright():
+    """`frontend/e2e/ece01.ts` repete estes valores — e lê as senhas das MESMAS
+    variáveis. Se um lado mudar e o outro não, o spec falha no login ou não
+    acha o aparelho — este teste diz por quê."""
+    do_front = _FRONT.read_text(encoding="utf-8")
 
     for valor in (
         seeds_e2e.E2E_ECE01_PRODUTO,
@@ -223,7 +310,7 @@ def test_os_nomes_e_as_credenciais_batem_com_o_playwright():
         *(
             dados[campo]
             for dados in (seeds_e2e.E2E_ECE01_ANA, seeds_e2e.E2E_ECE01_BRUNO)
-            for campo in ("email", "password", "name")
+            for campo in ("email", "senha_env", "name")
         ),
     ):
         assert f'"{valor}"' in do_front, valor
