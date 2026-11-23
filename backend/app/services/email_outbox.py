@@ -228,12 +228,51 @@ async def enfileira_email_de_conta_em_segundo_plano(
     antes da Fase 3 inteira (só um INSERT, não mais um SMTP síncrono
     aguardado), mas não é zero — é o preço de não reabrir o oráculo de tempo
     de resposta, e foi uma escolha deliberada, não um descuido.
+
+    O desfecho fica no log (RS-04)
+    -------------------------------
+    Como a resposta já saiu, o log é o ÚNICO lugar onde a diferença entre
+    "pediu" e "gravou" aparece. O router registra o agendamento com o
+    `intent_id`; aqui saem as outras duas pontas, com o mesmo `intent`:
+
+    * gravado — só DEPOIS do `commit` voltar. Antes disso a linha não existe
+      para o worker, e dizer "enfileirado" seria repetir o defeito que a
+      auditoria de novembro/2026 encontrou (a linha `... queued` do router
+      saía antes de qualquer `INSERT`);
+    * falha — a exceção é registrada e NÃO sobe. Não há a quem devolvê-la, e
+      deixá-la escapar da `BackgroundTask` entregava ao log do servidor o
+      traceback cru de um erro de banco, com `[SQL: ...]` e `[parameters:
+      ...]` — o `user_id` e a `dedup_key` dentro.
+
+    Nenhuma das duas leva `user_id`, e-mail ou `str(exc)`: o `intent` liga as
+    linhas entre si, e o `outbox_id` liga a gravação à linha da tabela — quem
+    precisar do usuário chega nele pelo banco, não pelo log.
+
+    `except Exception`, não `BaseException`: `CancelledError` é o processo
+    desligando, não falha de gravação — engoli-la seguraria o shutdown.
     """
     from app.core.database import AsyncSessionLocal
 
-    async with AsyncSessionLocal() as db:
-        enqueue_account_email(db, user_id=user_id, event_type=event_type, intent_id=intent_id)
-        await db.commit()
+    try:
+        async with AsyncSessionLocal() as db:
+            outbox = enqueue_account_email(
+                db, user_id=user_id, event_type=event_type, intent_id=intent_id
+            )
+            # Guardado antes do `commit`: depois dele o objeto pode estar
+            # expirado, e ler o atributo abriria outra ida ao banco só para o log.
+            outbox_id = outbox.id
+            await db.commit()
+    except Exception as exc:  # noqa: BLE001
+        logger.error(
+            "Outbox de e-mail: falha ao gravar e-mail de conta na fila — "
+            f"event={event_type} intent={intent_id} error={_resumo_do_erro(exc)}"
+        )
+        return
+
+    logger.info(
+        "Outbox de e-mail: e-mail de conta gravado na fila — "
+        f"event={event_type} intent={intent_id} outbox_id={outbox_id}"
+    )
 
 
 # ══════════════════════════════════════════════════════════════

@@ -27,29 +27,38 @@ export default function ForgotPasswordPage() {
   }
 
   if (enviado) {
+    // A API responde o mesmo 200 para conta ativa, inativa, inexistente e para
+    // o e-mail que não é o do cadastro — de propósito, para não revelar quem
+    // tem conta. A tela, então, não sabe se algo foi enviado, e não pode dizer
+    // que foi: o "Enviamos as instruções" que estava aqui fazia o pedido que
+    // não gerou e-mail nenhum parecer falha de entrega (RS-03). Por isso o
+    // aviso é `info` e condicional, sem repetir o endereço e sem prazo — o
+    // prazo real do link é configuração do servidor e vai escrito no e-mail.
     return (
       <AuthShell
         title="Confira seu e-mail"
-        subtitle="Se este e-mail estiver cadastrado, as instruções chegarão em instantes."
         footer={
           <Link to="/login" className="text-primary hover:text-primary/80 transition-colors">
             Voltar para o acesso
           </Link>
         }
       >
-        <Alert variant="success">
-          Enviamos as instruções para <span className="font-semibold">{email}</span>. O link vale
-          por 1 hora e só pode ser usado uma vez.
+        <Alert variant="info">
+          Se houver uma conta ativa associada ao e-mail informado, você receberá instruções para
+          redefinir sua senha.
         </Alert>
         <p className="text-center text-xs text-slate-500">
-          Não recebeu? Confira a caixa de spam ou{" "}
+          Não recebeu? Verifique a pasta de spam e confirme que informou o e-mail utilizado no
+          cadastro. Se precisar, entre em contato com o suporte.
+        </p>
+        <p className="text-center text-xs">
           <button
+            type="button"
             onClick={() => setEnviado(false)}
             className="text-primary hover:text-primary/80 transition-colors cursor-pointer"
           >
-            tente com outro e-mail
+            Tentar com outro e-mail
           </button>
-          .
         </p>
       </AuthShell>
     );
