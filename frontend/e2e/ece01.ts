@@ -1,4 +1,5 @@
 import { expect, type Locator, type Page } from "@playwright/test";
+import { CREDENTIALS } from "./helpers";
 
 /**
  * O que os specs `ece01-*.spec.ts` têm em comum: o cenário semeado por
@@ -68,7 +69,7 @@ function senhaDe(conta: ContaDaEce01): string {
 }
 
 /**
- * O mesmo caminho do `login` de `helpers.ts`, para um cliente da ECE-01.
+ * O mesmo caminho do `login` de `helpers.ts`, sem deixar a senha em artefato.
  *
  * A senha NÃO vai por `fill`: o Playwright escreve o valor digitado no título
  * do passo, e o título vai para o relatório que o workflow guarda como
@@ -76,7 +77,7 @@ function senhaDe(conta: ContaDaEce01): string {
  * o relatório registra que houve um passo, não o que ele levou. O evento
  * `input` é o que faz o React enxergar o valor, como numa digitação.
  */
-export async function entrar(page: Page, conta: ContaDaEce01) {
+async function entrarSemExporASenha(page: Page, email: string, senha: string) {
   const campoDaSenha = page.getByLabel("Senha", { exact: true });
   const escreve = (valor: string) =>
     campoDaSenha.evaluate((campo, texto) => {
@@ -89,8 +90,8 @@ export async function entrar(page: Page, conta: ContaDaEce01) {
     }, valor);
 
   await page.goto("/login");
-  await page.getByLabel("E-mail").fill(conta.email);
-  await escreve(senhaDe(conta));
+  await page.getByLabel("E-mail").fill(email);
+  await escreve(senha);
   await page.getByRole("button", { name: "Entrar" }).click();
   try {
     await page.waitForURL((url) => !url.pathname.includes("/login"), {
@@ -104,6 +105,21 @@ export async function entrar(page: Page, conta: ContaDaEce01) {
     await escreve("").catch(() => {});
     throw erro;
   }
+}
+
+/** Entra como um dos clientes do cenário. */
+export async function entrar(page: Page, conta: ContaDaEce01) {
+  await entrarSemExporASenha(page, conta.email, senhaDe(conta));
+}
+
+/**
+ * Entra como o admin do seed. A conta é a mesma do `login(page, "admin")` de
+ * `helpers.ts`; o que muda é só o caminho da senha, para o relatório destes
+ * specs não a carregar.
+ */
+export async function entrarComoAdmin(page: Page) {
+  const { email, password } = CREDENTIALS.admin;
+  await entrarSemExporASenha(page, email, password);
 }
 
 /**

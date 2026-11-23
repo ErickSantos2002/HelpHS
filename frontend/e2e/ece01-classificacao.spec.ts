@@ -1,11 +1,11 @@
 import { test, expect } from "@playwright/test";
-import { login } from "./helpers";
 import {
   ECE01,
   MODO_ECE01,
   MOTIVO_DO_SKIP,
   abrirEquipamentosDoProduto,
   campoDoDetalhe,
+  entrarComoAdmin,
   linhaDoEquipamento,
 } from "./ece01";
 
@@ -23,7 +23,7 @@ test.describe.serial("ECE-01 — classificação pela equipe", () => {
   const aparelho = `ECE01 Classificado ${Date.now()}`;
 
   test.beforeEach(async ({ page }) => {
-    await login(page, "admin");
+    await entrarComoAdmin(page);
   });
 
   test("cadastra com empresa e a tela mostra a empresa sem recarregar", async ({

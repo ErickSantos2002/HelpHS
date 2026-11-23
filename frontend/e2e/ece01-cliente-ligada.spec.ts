@@ -1,10 +1,10 @@
 import { test, expect } from "@playwright/test";
-import { login } from "./helpers";
 import {
   ECE01,
   MODO_ECE01,
   MOTIVO_DO_SKIP,
   entrar,
+  entrarComoAdmin,
   equipamentoDoChamado,
   linhaDoCliente,
 } from "./ece01";
@@ -117,7 +117,7 @@ test.describe("ECE-01 — cliente com o compartilhamento ligado", () => {
       localStorage.clear();
       sessionStorage.clear();
     });
-    await login(page, "admin");
+    await entrarComoAdmin(page);
     await page.goto(`${urlDoChamado}/edit`);
 
     const naEdicao = page
