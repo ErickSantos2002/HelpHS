@@ -184,7 +184,7 @@ jobs:
     # Só por pedido explícito. `completa` (o padrão) e o agendamento continuam
     # rodando só o job de cima, como antes deste job existir.
     if: inputs.suite == 'ece01'
-    runs-on: ubuntu-latest
+    runs-on: ubuntu-24.04
     timeout-minutes: 20
     # O job só lê o repositório. O envio de artefato não usa esta permissão.
     permissions:
