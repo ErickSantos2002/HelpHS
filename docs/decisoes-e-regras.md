@@ -1052,6 +1052,17 @@ Três regras que valem para qualquer mudança futura nessa tela:
 A resposta HTTP não mudou. "Conta ativa" no texto não revela nada sobre o
 endereço digitado: a frase é a mesma para todos.
 
+O formulário, antes do pedido, segue a mesma regra: o subtítulo é "Informe o
+e-mail associado à sua conta para solicitar a redefinição de senha." e o
+botão é "Solicitar redefinição" — pedem, não prometem link.
+
+Acessibilidade da tela depois do pedido (medido em navegador, 23/11/2026):
+
+- **Texto de ajuda** em cor fixa (`#94a3b8`), 7,08:1 nos dois temas. A
+  `AuthShell` é escura nos dois temas e as classes `text-slate-*` trocam de
+  cor no tema claro; `text-slate-500` dava 3,82:1 ali.
+- **"Tentar com outro e-mail"** com 44 px de altura e anel de foco próprio.
+
 **RS-04 — o log dizia "enfileirado" antes de gravar, e calava na falha.**
 `forgot_password` e `resend_verification` gravam na `email_outbox` por
 `BackgroundTasks`, depois da resposta, para o tempo não denunciar quem tem
@@ -1091,7 +1102,10 @@ resposta evita.
   `/api/v1/health`. Pendente; nesta rodada o health não mudou.
 - **Gravar antes da resposta** (com piso de tempo igual nos dois ramos) —
   só se o log novo mostrar perda de verdade.
-- **O subtítulo do formulário** ("…enviaremos um link…") não foi tocado.
+- **A `AuthShell` no tema claro** — o fundo é escuro fixo e o título, o
+  rótulo do campo e os avisos trocam para cores de fundo claro (título
+  1,02:1, aviso `info` 2,26:1, medido em 23/11). Vale para todas as telas que
+  usam a moldura; corrigir é mexer nela, não nesta página.
 
 Limite do que isto resolve: o log do EasyPanel não guarda histórico (medido
 em 23/11: só um trecho curto e o ao vivo). As linhas novas servem a quem

@@ -29,6 +29,10 @@ e-mail e recuperação de senha".
   cadastro). Agora diz que as instruções chegam **se houver uma conta ativa
   com aquele e-mail**, e orienta a conferir o spam, o e-mail do cadastro e,
   se preciso, falar com o suporte. Não cita mais prazo nem repete o endereço.
+  O formulário também deixou de prometer link: o subtítulo pede "o e-mail
+  associado à sua conta" e o botão virou "Solicitar redefinição". O texto de
+  ajuda ganhou contraste (7:1) e "Tentar com outro e-mail" ganhou área de
+  toque de 44 px e foco visível.
 - **Log da gravação na fila de e-mail (backend).** O registro "queued" saía
   antes de qualquer gravação e uma falha ao gravar não tinha linha própria.
   Passam a existir três linhas ligadas por um identificador do pedido:

@@ -21,6 +21,10 @@ const MENSAGEM =
 const AJUDA =
   "Não recebeu? Verifique a pasta de spam e confirme que informou o e-mail utilizado no cadastro. Se precisar, entre em contato com o suporte.";
 
+/** Os dois textos do formulário, antes do pedido: pedem, não prometem envio. */
+const SUBTITULO = "Informe o e-mail associado à sua conta para solicitar a redefinição de senha.";
+const BOTAO = "Solicitar redefinição";
+
 function renderiza() {
   render(
     <MemoryRouter initialEntries={["/esqueci-senha"]}>
@@ -34,13 +38,73 @@ function renderiza() {
 
 async function pede(email = EMAIL) {
   await userEvent.type(screen.getByLabelText("E-mail"), email);
-  await userEvent.click(screen.getByRole("button", { name: "Enviar link de recuperação" }));
+  await userEvent.click(screen.getByRole("button", { name: BOTAO }));
 }
 
 /** Erro no formato do axios: resposta com status, `detail` e cabeçalhos. */
 function erroDaApi(status: number, detail?: string, headers: Record<string, string> = {}) {
   return { request: {}, response: { status, data: detail ? { detail } : {}, headers } };
 }
+
+describe("ForgotPasswordPage — antes do pedido (RS-03)", () => {
+  it("o formulário pede a redefinição sem prometer o envio de um link", () => {
+    renderiza();
+
+    expect(screen.getByText(SUBTITULO)).toBeInTheDocument();
+    expect(screen.getByRole("button", { name: BOTAO })).toHaveAttribute("type", "submit");
+
+    const tela = document.body.textContent ?? "";
+    expect(tela).not.toMatch(/enviaremos/i);
+    expect(tela).not.toMatch(/enviar link/i);
+  });
+});
+
+describe("ForgotPasswordPage — acessibilidade da tela depois do pedido", () => {
+  beforeEach(() => {
+    vi.clearAllMocks();
+  });
+
+  /**
+   * A `AuthShell` é escura nos dois temas, e as classes `text-slate-*` trocam
+   * de cor no tema claro (index.css). `text-slate-500` dava 3,8:1 ali; a cor
+   * fixa não troca e passa de 4,5:1 nos dois.
+   */
+  it("o texto de ajuda usa cor fixa, não a classe que reprova no contraste", async () => {
+    mockForgot.mockResolvedValue("ok");
+    renderiza();
+
+    await pede();
+
+    const ajuda = await screen.findByText(AJUDA);
+    expect(ajuda.className).not.toMatch(/text-slate-\d/);
+    expect(ajuda.className).toContain("text-[#94a3b8]");
+  });
+
+  it("'tentar com outro e-mail' tem área de toque de 44px e foco visível", async () => {
+    mockForgot.mockResolvedValue("ok");
+    renderiza();
+
+    await pede();
+
+    const botao = await screen.findByRole("button", { name: "Tentar com outro e-mail" });
+    expect(botao.className).toContain("min-h-11");
+    expect(botao.className).toContain("focus-visible:ring-2");
+  });
+
+  it("o aviso vem antes da ajuda e do botão, na ordem de leitura", async () => {
+    mockForgot.mockResolvedValue("ok");
+    renderiza();
+
+    await pede();
+
+    const aviso = await screen.findByRole("status");
+    const ajuda = screen.getByText(AJUDA);
+    const botao = screen.getByRole("button", { name: "Tentar com outro e-mail" });
+    const antes = Node.DOCUMENT_POSITION_FOLLOWING;
+    expect(aviso.compareDocumentPosition(ajuda) & antes).toBeTruthy();
+    expect(ajuda.compareDocumentPosition(botao) & antes).toBeTruthy();
+  });
+});
 
 describe("ForgotPasswordPage — depois do pedido (RS-03)", () => {
   beforeEach(() => {
@@ -170,7 +234,7 @@ describe("ForgotPasswordPage — erros", () => {
     await pede();
     expect(await screen.findByRole("alert")).toBeInTheDocument();
 
-    await userEvent.click(screen.getByRole("button", { name: "Enviar link de recuperação" }));
+    await userEvent.click(screen.getByRole("button", { name: BOTAO }));
 
     expect(await screen.findByText(MENSAGEM)).toBeInTheDocument();
     expect(screen.queryByRole("alert")).toBeNull();
