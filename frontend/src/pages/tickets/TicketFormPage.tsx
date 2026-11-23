@@ -1,5 +1,5 @@
 import { zodResolver } from "@hookform/resolvers/zod";
-import { useEffect, useId, useState } from "react";
+import { useEffect, useId, useMemo, useState } from "react";
 import { useForm } from "react-hook-form";
 import { Link, useNavigate, useParams } from "react-router-dom";
 import { z } from "zod";
@@ -54,6 +54,14 @@ const schema = z.object({
 });
 
 type FormValues = z.infer<typeof schema>;
+
+/** O que a ficha de equipamento mostra — serve ao aparelho da lista e ao do chamado. */
+type OpcaoDeEquipamento = { id: string; name: string; serial_number: string | null };
+
+/** Os mesmos ids, em qualquer ordem. */
+function mesmoConjunto(a: string[], b: string[]): boolean {
+  return a.length === b.length && a.every((id) => b.includes(id));
+}
 
 // ── Constants ─────────────────────────────────────────────────
 
@@ -334,7 +342,6 @@ export default function TicketFormPage() {
 
   const [products, setProducts] = useState<Product[]>([]);
   const [allMyEquipments, setAllMyEquipments] = useState<Equipment[]>([]);
-  const [equipments, setEquipments] = useState<Equipment[]>([]);
   const [loadingProducts, setLoadingProducts] = useState(true);
   const [loadingTicket, setLoadingTicket] = useState(isEdit);
   const [existingTicket, setExistingTicket] = useState<Ticket | null>(null);
@@ -364,17 +371,34 @@ export default function TicketFormPage() {
     ]).finally(() => setLoadingProducts(false));
   }, []);
 
+  // As fichas do produto escolhido: os equipamentos de quem está logado e, na
+  // edição, os que o chamado JÁ tem — quem edita é a equipe, e a lista dela não
+  // traz os aparelhos do cliente.
+  //
+  // Era um efeito que também ZERAVA a seleção a cada mudança de produto ou da
+  // lista — e, na edição, a carga do chamado é uma mudança de produto. O
+  // chamado abria com a seleção vazia, e salvar mandava `equipment_ids: []`:
+  // desvinculava tudo sem ninguém ter pedido. Agora a lista é só derivada, e
+  // quem limpa a seleção é o gesto de trocar o produto (`trocarProduto`).
+  const equipments = useMemo<OpcaoDeEquipamento[]>(() => {
+    if (!selectedProductId) return [];
+    const daLista = allMyEquipments.filter((e) => e.product_id === selectedProductId);
+    const doChamado = (existingTicket?.equipments ?? []).filter(
+      (e) =>
+        (e.product_id ?? existingTicket?.product_id ?? null) === selectedProductId &&
+        !daLista.some((m) => m.id === e.id),
+    );
+    return [...doChamado, ...daLista];
+  }, [selectedProductId, allMyEquipments, existingTicket]);
+
   // Trocar de produto descarta a seleção anterior: os aparelhos listados são
   // os daquele produto, e manter os antigos deixaria no chamado equipamento
-  // que sumiu da lista.
-  useEffect(() => {
-    setValue("equipment_ids", []);
-    if (selectedProductId) {
-      setEquipments(allMyEquipments.filter((e) => e.product_id === selectedProductId));
-    } else {
-      setEquipments([]);
-    }
-  }, [selectedProductId, allMyEquipments, setValue]);
+  // que sumiu da lista. Escolher de novo o produto que já está não é troca.
+  function trocarProduto(productId: string) {
+    if (productId === (currentValues.product_id ?? "")) return;
+    setValue("product_id", productId, { shouldValidate: true });
+    setValue("equipment_ids", [], { shouldValidate: true });
+  }
 
   useEffect(() => {
     if (!isEdit || !id) return;
@@ -411,6 +435,12 @@ export default function TicketFormPage() {
     setValue("equipment_ids", proximo, { shouldValidate: true });
   }
 
+  /** Os equipamentos que o chamado em edição já tem — vazio na criação. */
+  const originais = useMemo(
+    () => (existingTicket?.equipments ?? []).map((e) => e.id),
+    [existingTicket],
+  );
+
   function toggleAllEquipments() {
     setValue("equipment_ids", todosMarcados ? [] : selecionaveis.map((e) => e.id), {
       shouldValidate: true,
@@ -426,11 +456,18 @@ export default function TicketFormPage() {
         description: currentValues.description,
         category: currentValues.category,
         product_id: currentValues.product_id || null,
-        equipment_ids: currentValues.equipment_ids ?? [],
       };
+      const equipment_ids = currentValues.equipment_ids ?? [];
+      // Na edição, o conjunto que não mudou NÃO é reenviado: omitir o campo é o
+      // contrato do PATCH para "não mexa nos equipamentos". Qualquer mudança
+      // vai inteira — inclusive a lista vazia, que desvincula de propósito.
       const ticket = isEdit && id
-        ? await updateTicket(id, base)
-        : await createTicket({ ...base, client_observation: currentValues.client_observation || null });
+        ? await updateTicket(id, mesmoConjunto(equipment_ids, originais) ? base : { ...base, equipment_ids })
+        : await createTicket({
+            ...base,
+            equipment_ids,
+            client_observation: currentValues.client_observation || null,
+          });
 
       // Os anexos só podem subir depois que o chamado existe. Se falharem, o
       // chamado já foi criado — avisa em vez de fingir que deu tudo certo.
@@ -583,7 +620,7 @@ export default function TicketFormPage() {
               <FormDropdown
                 label="Produto"
                 value={currentValues.product_id ?? ""}
-                onChange={(v) => setValue("product_id", v, { shouldValidate: true })}
+                onChange={trocarProduto}
                 options={productOptions}
                 placeholder="Nenhum (opcional)"
               />
