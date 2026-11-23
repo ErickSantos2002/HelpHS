@@ -14,6 +14,35 @@ Trabalho que ainda **não** entrou numa versão do produto. Confira: se um
 item aqui já está em produção, ou ele foi para a versão errada, ou falta
 publicar uma versão nova.
 
+### Redefinição de senha: a tela não afirma mais o envio, e o log registra a gravação (RS-03 e RS-04, 23/11/2026)
+
+Resultado da auditoria "pedi a redefinição e o e-mail não chegou" (19 a
+23/11/2026). **Sem migration, sem variável nova, sem mudança na resposta da
+API.** Regras em `docs/decisoes-e-regras.md`, seção "Acesso: confirmação de
+e-mail e recuperação de senha".
+
+**Corrigido**
+
+- **Tela "Esqueci minha senha".** Depois do pedido, a tela dizia "Enviamos as
+  instruções para o seu e-mail. O link vale por 1 hora" mesmo quando nenhum
+  e-mail saía (conta inexistente, desativada ou e-mail diferente do
+  cadastro). Agora diz que as instruções chegam **se houver uma conta ativa
+  com aquele e-mail**, e orienta a conferir o spam, o e-mail do cadastro e,
+  se preciso, falar com o suporte. Não cita mais prazo nem repete o endereço.
+- **Log da gravação na fila de e-mail (backend).** O registro "queued" saía
+  antes de qualquer gravação e uma falha ao gravar não tinha linha própria.
+  Passam a existir três linhas ligadas por um identificador do pedido:
+  agendado, gravado (só depois do commit) e falha ao gravar (com a classe do
+  erro). Nenhuma leva e-mail, `user_id`, token ou SQL. Vale também para o
+  reenvio da confirmação de cadastro.
+
+**Não mudou:** a gravação continua em segundo plano, depois da resposta, e a
+resposta continua igual para conta existente e inexistente.
+
+**Pendente (não incluído):** RS-02 — recusar o pedido quando o worker da fila
+está desligado por configuração; e a alternativa D — expor falhas de gravação
+no health.
+
 ### Histórico do chat, envio idempotente e fechamentos do WebSocket — backend (F1-B-04a, 30/10 e 03/11/2026)
 
 Auditoria Geral: parte de backend do FUN-30 e do FUN-32, o FUN-31 e a decisão
