@@ -439,8 +439,9 @@ export default function TicketFormPage() {
 
   // Trocar de produto descarta a seleção anterior: os aparelhos listados são
   // os daquele produto, e manter os antigos deixaria no chamado equipamento
-  // que sumiu da lista.
+  // que sumiu da lista. Escolher de novo o produto que já está não é troca.
   function trocarProduto(productId: string) {
+    if (productId === (currentValues.product_id ?? "")) return;
     setValue("product_id", productId, { shouldValidate: true });
     setValue("equipment_ids", [], { shouldValidate: true });
   }
