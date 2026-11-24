@@ -14,6 +14,22 @@ Trabalho que ainda **não** entrou numa versão do produto. Confira: se um
 item aqui já está em produção, ou ele foi para a versão errada, ou falta
 publicar uma versão nova.
 
+### Edição de chamado preserva os equipamentos (TICKET-EDIT-01, v1.23.1, 24/11/2026)
+
+Hotfix só de frontend, publicado como v1.23.1 sobre a v1.23.0 (PR #120 na
+main). **Sem migration**, sem variável nova, sem mudança de contrato nem de
+permissão.
+
+- **O defeito:** em `TicketFormPage.tsx`, um efeito zerava `equipment_ids`
+  logo depois de o chamado ser carregado para edição, e o `PATCH /tickets/{id}`
+  levava o campo sempre. Saía `[]`, que o backend entende como "desvincule
+  todos": editar só a descrição apagava os vínculos. Existia desde a v1.6.0.
+- **A correção:** a lista de fichas é derivada (produto escolhido + aparelhos
+  que o chamado já tem); a seleção só é limpa quando quem edita troca o
+  produto; o conjunto inalterado é omitido do `PATCH`; o que muda vai inteiro,
+  inclusive `[]`, que continua desvinculando de propósito.
+- **O que NÃO faz:** não restaura vínculos perdidos antes da correção.
+
 ### Aceite obrigatório da Política no backend (28/10/2026)
 
 Decisão 2 (27/10/2026), Cenário B. Regras completas em

@@ -1,4 +1,4 @@
-export const APP_VERSION = "v1.23.0";
+export const APP_VERSION = "v1.23.1";
 
 export type EntryType = "novidade" | "corrigido" | "melhoria";
 
@@ -14,6 +14,16 @@ export interface ChangelogVersion {
 }
 
 export const CHANGELOG: ChangelogVersion[] = [
+  {
+    version: "v1.23.1",
+    date: "24/11/2026",
+    entries: [
+      {
+        type: "corrigido",
+        text: "Corrigido problema em que editar um chamado poderia remover involuntariamente os equipamentos associados. A edição agora preserva os vínculos quando o conjunto não é alterado, mantendo a opção de remover equipamentos intencionalmente.",
+      },
+    ],
+  },
   {
     version: "v1.23.0",
     date: "29/10/2026",
