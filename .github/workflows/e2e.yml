@@ -57,11 +57,8 @@ jobs:
       # `testing` desliga o rate limit. A suíte faz ~16 logins do mesmo IP
       # contra um limite de 5 por 15 minutos — sem isto ela morre no sexto.
       APP_ENV: testing
-      # `app.seeds` não cria mais o admin sem esta variável — a senha saiu do
-      # código para não nascer conta conhecida no banco real. Aqui o banco é o
-      # serviço efêmero do job, e o valor tem de bater com o default do
-      # `frontend/e2e/helpers.ts` (há teste guardando os dois lados).
-      SEED_ADMIN_PASSWORD: Admin@123456
+      # `SEED_ADMIN_PASSWORD` NÃO mora aqui: nasce no passo "Senha fictícia do
+      # admin de teste". Valor escrito neste bloco aparece no log de cada passo.
       DATABASE_URL: postgresql+asyncpg://postgres:postgres@localhost:5432/helphs
       REDIS_URL: redis://localhost:6379/0
       FRONTEND_URL: http://localhost:5173
@@ -105,6 +102,24 @@ jobs:
       - name: Migrations
         working-directory: backend
         run: alembic upgrade head
+
+      - name: Senha fictícia do admin de teste (uma por execução)
+        # `app.seeds` só cria o admin com `SEED_ADMIN_PASSWORD`, e o Playwright
+        # entra com `ADMIN_PASSWORD` (`frontend/e2e/helpers.ts`): as duas saem
+        # daqui com o MESMO valor, sorteado a cada execução e válido só para o
+        # banco descartável deste job. Nenhuma senha de admin mora no workflow.
+        #
+        # `add-mask` vem ANTES de o valor ir para o ambiente — daí em diante o
+        # runner troca qualquer aparição dele no log por ***. Nada aqui o
+        # imprime nem o grava em arquivo do job. O prefixo e o sufixo fixos só
+        # dão forma de senha; o segredo são os 16 bytes do meio.
+        run: |
+          senha="E2e-$(openssl rand -hex 16)-aA1!"
+          echo "::add-mask::${senha}"
+          {
+            echo "SEED_ADMIN_PASSWORD=${senha}"
+            echo "ADMIN_PASSWORD=${senha}"
+          } >> "$GITHUB_ENV"
 
       - name: Seeds (os mesmos do boot de produção)
         working-directory: backend
@@ -225,7 +240,6 @@ jobs:
 
     env:
       APP_ENV: testing
-      SEED_ADMIN_PASSWORD: Admin@123456
       DATABASE_URL: postgresql+asyncpg://postgres:postgres@localhost:5432/helphs
       REDIS_URL: redis://localhost:6379/0
       FRONTEND_URL: http://localhost:5173
@@ -268,6 +282,18 @@ jobs:
       - name: Migrations
         working-directory: backend
         run: alembic upgrade head
+
+      - name: Senha fictícia do admin de teste (uma por execução)
+        # Mesma receita do job de cima: sorteada aqui, mascarada antes de ir
+        # para o ambiente, igual para o seed (`SEED_ADMIN_PASSWORD`) e para o
+        # Playwright (`ADMIN_PASSWORD`).
+        run: |
+          senha="E2e-$(openssl rand -hex 16)-aA1!"
+          echo "::add-mask::${senha}"
+          {
+            echo "SEED_ADMIN_PASSWORD=${senha}"
+            echo "ADMIN_PASSWORD=${senha}"
+          } >> "$GITHUB_ENV"
 
       - name: Seeds (os mesmos do boot de produção)
         working-directory: backend
