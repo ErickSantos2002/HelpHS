@@ -128,8 +128,10 @@ def _audit(
 #   - cadastro pelo cliente → o vínculo oficial dele (`users.company_id`), lido
 #     do banco na hora, nunca do corpo da requisição;
 #   - cadastro pela equipe → a empresa informada; omitida, a do responsável;
-#   - edição pela equipe → só quando a equipe manda o campo. Trocar o
-#     responsável NÃO muda a empresa;
+#   - edição pela equipe → quando a equipe manda o campo. Trocar o
+#     responsável NÃO muda a empresa que o aparelho já tem; só completa o que
+#     ainda não foi classificado (sem empresa e sem a marca abaixo), com a do
+#     novo responsável — ver `update_equipment`;
 #   - vínculo do cliente → `groups.py::_propaga_empresa_aos_aparelhos`.
 #
 # O campo da equipe tem TRÊS estados, e quem os separa é o `model_fields_set`:
@@ -747,15 +749,21 @@ async def update_equipment(
     await _trava_conta_e_le_empresa(db, actor.id)
     equipment = await get_or_404(db, Equipment, equipment_id, _EQUIPAMENTO_NAO_ENCONTRADO)
 
+    enviados = body.model_fields_set
+
     # É por aqui que se conserta o equipamento cadastrado sem dono. Enviar
     # `owner_id: null` desvincula de propósito.
+    #
+    # O responsável informado tem a conta travada (`FOR KEY SHARE`) e o vínculo
+    # oficial lido do banco, como no cadastro pela equipe: é dele que o
+    # aparelho ainda não classificado herda a empresa, mais abaixo. O vínculo e
+    # o desvínculo pegam essa mesma linha com `FOR UPDATE` — ou esperam esta
+    # edição e a propagação já encontra o aparelho com o responsável novo, ou
+    # ela os espera e lê a empresa comitada.
+    empresa_do_responsavel = None
     if body.owner_id:
         await _valida_dono(db, body.owner_id)
-
-    # Com o dono fora da chave, trocar de dono nao mexe mais na unicidade:
-    # o par a validar e (produto, serie), e o produto nao muda por aqui. Sobra
-    # a serie -- e so quando ela realmente muda.
-    enviados = body.model_fields_set
+        empresa_do_responsavel = await _trava_conta_e_le_empresa(db, body.owner_id)
 
     # Quem mexe na empresa lê o aparelho de novo, TRAVADO, antes de decidir.
     # O vínculo do cliente escreve a empresa nos aparelhos dele
@@ -764,11 +772,20 @@ async def update_equipment(
     # recém-propagada — e o `CHECK` devolveria 500. Com ela, a edição espera o
     # vínculo, enxerga a empresa e a troca de verdade, com o antes certo na
     # auditoria. A empresa é validada ANTES, na ordem das travas (empresa →
-    # aparelho).
+    # aparelho) — a informada e, quando a equipe não manda o campo, a que o
+    # aparelho pode vir a herdar.
     if "company_id" in enviados:
         if body.company_id is not None:
             await _valida_empresa(db, body.company_id)
         await db.refresh(equipment, with_for_update=True)
+    elif body.owner_id:
+        if empresa_do_responsavel is not None:
+            await _valida_empresa(db, empresa_do_responsavel)
+        await db.refresh(equipment, with_for_update=True)
+
+    # Com o dono fora da chave, trocar de dono nao mexe mais na unicidade:
+    # o par a validar e (produto, serie), e o produto nao muda por aqui. Sobra
+    # a serie -- e so quando ela realmente muda.
 
     serial_final = body.serial_number if "serial_number" in enviados else equipment.serial_number
     if serial_final != equipment.serial_number:
@@ -776,9 +793,10 @@ async def update_equipment(
             db, equipment.product_id, serial_final, ignorando=equipment.id
         )
 
-    # A empresa só muda quando a equipe manda o campo — trocar o responsável,
-    # sozinho, não a altera. E só a troca de verdade entra na auditoria com o
-    # antes e o depois: reenviar a mesma empresa não é mudança.
+    # A empresa que o aparelho JÁ tem só muda quando a equipe manda o campo —
+    # trocar o responsável, sozinho, não a altera. E só a troca de verdade
+    # entra na auditoria com o antes e o depois: reenviar a mesma empresa não é
+    # mudança.
     #
     # `null` explícito num aparelho ainda não marcado É mudança, mesmo com a
     # empresa indo de nulo para nulo: muda a INTENÇÃO, de "não classificado"
@@ -790,10 +808,34 @@ async def update_equipment(
     troca_de_empresa = "company_id" in enviados and (
         body.company_id != empresa_antes or decisao_depois != decisao_antes
     )
+    empresa_depois, origem = body.company_id, _ORIGEM_EQUIPE
+
+    # A exceção: o aparelho ainda NÃO classificado — sem empresa e sem a marca
+    # de decisão — que troca de responsável herda a empresa oficial do novo.
+    # É a lacuna que o vínculo já completa (`_propaga_empresa_aos_aparelhos`):
+    # sem isto, o aparelho entregue a um cliente JÁ vinculado ficava sem
+    # empresa para sempre, porque a propagação só roda na hora do vínculo.
+    #
+    # Decidido com o aparelho travado, lido de novo logo acima: outra edição
+    # pode tê-lo classificado ou marcado no meio do caminho. Só na troca DE
+    # VERDADE, e só quando a equipe não mandou `company_id` — informar a
+    # empresa, ou `null`, continua sendo a palavra final.
+    if (
+        "company_id" not in enviados
+        and body.owner_id
+        and body.owner_id != equipment.owner_id
+        and empresa_do_responsavel is not None
+        and empresa_antes is None
+        and not decisao_antes
+    ):
+        troca_de_empresa = True
+        empresa_depois, origem = empresa_do_responsavel, _ORIGEM_RESPONSAVEL
 
     for field, value in body.model_dump(exclude_unset=True).items():
         setattr(equipment, field, value)
     equipment.sem_empresa_por_decisao = decisao_depois
+    if origem == _ORIGEM_RESPONSAVEL:
+        equipment.company_id = empresa_depois
 
     _audit(
         db,
@@ -807,7 +849,7 @@ async def update_equipment(
             else None
         ),
         new_data=(
-            _retrato_da_empresa(body.company_id, _ORIGEM_EQUIPE, por_decisao=decisao_depois)
+            _retrato_da_empresa(empresa_depois, origem, por_decisao=decisao_depois)
             if troca_de_empresa
             else None
         ),
