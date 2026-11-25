@@ -103,7 +103,7 @@ export default function ResetPasswordPage() {
             aria-pressed={verSenha}
             aria-label="Mostrar nova senha"
             title="Mostrar nova senha"
-            className="absolute bottom-0 right-0 flex h-[38px] w-10 items-center justify-center rounded-r-lg text-slate-500 transition-colors hover:text-slate-300 focus:outline-none focus-visible:ring-2 focus-visible:ring-primary cursor-pointer"
+            className="absolute bottom-0 right-0 flex h-[38px] w-10 items-center justify-center rounded-r-lg text-conteudo-muted transition-colors hover:text-conteudo focus:outline-none focus-visible:ring-2 focus-visible:ring-primary cursor-pointer"
           >
             <Icon name={verSenha ? "eyeOff" : "eye"} size={16} strokeWidth={2} />
           </button>
@@ -125,7 +125,7 @@ export default function ResetPasswordPage() {
             aria-pressed={verConfirmacao}
             aria-label="Mostrar confirmação de senha"
             title="Mostrar confirmação de senha"
-            className="absolute bottom-0 right-0 flex h-[38px] w-10 items-center justify-center rounded-r-lg text-slate-500 transition-colors hover:text-slate-300 focus:outline-none focus-visible:ring-2 focus-visible:ring-primary cursor-pointer"
+            className="absolute bottom-0 right-0 flex h-[38px] w-10 items-center justify-center rounded-r-lg text-conteudo-muted transition-colors hover:text-conteudo focus:outline-none focus-visible:ring-2 focus-visible:ring-primary cursor-pointer"
           >
             <Icon name={verConfirmacao ? "eyeOff" : "eye"} size={16} strokeWidth={2} />
           </button>

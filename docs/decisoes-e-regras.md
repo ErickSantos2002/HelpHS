@@ -1047,6 +1047,56 @@ O seed continua idempotente, e isso protege quem já trocou a senha em produçã
 com a linha presente, nada é tocado. Em contrapartida, **apagar o usuário não é
 uma forma de reiniciá-lo**: sem a variável, ele simplesmente não volta.
 
+### As telas de acesso têm fundo escuro fixo — e o texto precisa saber disso (AUTH-UI-01, 23/11/2026)
+
+Login, cadastro, esqueci a senha, redefinir senha e confirmar e-mail pintam o
+fundo com um escuro fixo (`#0D1623` no painel do formulário, `#080F1A` no de
+apresentação), nos dois temas. O texto, porém, seguia o tema da aplicação, por
+dois caminhos:
+
+- **tokens** — o rótulo do `Input`, as tintas do `Alert` e `text-conteudo-link`
+  leem variáveis que, sem a classe `dark`, valem as cores do tema claro;
+- **`text-slate-*`** — o `index.css` inverte essas classes no tema claro
+  (`html:not(.dark) .text-slate-100` e afins, decisão D5).
+
+No tema claro isso dava texto de fundo claro sobre fundo escuro. Medido em
+navegador, em ponto flutuante:
+
+| Elemento | Antes (claro) | Antes (escuro) | Depois (os dois) |
+|---|---|---|---|
+| Título | 1,02:1 | 16,58:1 | 16,58:1 |
+| Rótulo do campo | 1,24:1 | 14,73:1 | 14,73:1 |
+| Aviso de erro | 2,45:1 | 8,35:1 | 8,35:1 |
+| Texto de apoio (`text-slate-400`) | 2,40–2,53:1 | passava | 7,08:1 ou mais |
+| Links de Política e Termos | 3,44:1 | passava | passa |
+| Subtítulo (`text-slate-500`) | 3,82:1 | 3,82:1 | 7,08:1 |
+| Rodapé (`text-slate-600`) | passava | 2,40–2,53:1 | 7,08:1 ou mais |
+| Número do passo do cadastro | 4,41:1 | 4,41:1 | passa |
+
+Duas regras, cobertas por `src/test/pages/AuthContraste.test.tsx`:
+
+1. **Bloco de fundo escuro fixo carrega a classe `dark`.** Os tokens do tema
+   escuro estão em `.dark { }`, então valem dali para dentro, seja qual for o
+   tema do `<html>`. São quatro blocos: a raiz da `AuthShell`, os dois painéis
+   do login e o painel de apresentação do cadastro. O painel do formulário do
+   cadastro usa `bg-surface-base`, acompanha o tema, e **não** recebe o escopo.
+2. **Essas telas não escrevem `text-slate-*`.** A inversão do `index.css` é
+   pelo `<html>` e o escopo não a alcança. Título é `text-conteudo-heading`;
+   subtítulo, apoio e rodapé são `text-conteudo-muted`.
+
+Nada mudou em `index.css`, nos tokens, no `Input` nem no `Alert`.
+
+Também entrou: `text-conteudo-link` no lugar de `text-primary` onde o texto
+fica sobre 10–12% da cor de marca (botão "Reenviar e-mail de confirmação",
+4,24:1, e o número do passo); e 24 px de altura nos links isolados ("Esqueci
+minha senha", Política, Termos, e o link do rodapé da moldura). Link dentro de
+frase ("Registre-se", "Entrar") fica como está.
+
+Fica pendente, de propósito: a `ForgotPasswordPage` não foi tocada aqui (é do
+PR #118). Na versão da `main`, o texto de ajuda depois do pedido segue em
+`text-slate-500` (3,82:1); o #118 já o troca por cor fixa, que depois deve
+virar `text-conteudo-muted`.
+
 ## Segundo fator (TOTP)
 
 Vale **só para `admin` e `technician`**. Cliente não tem o recurso, e as rotas
