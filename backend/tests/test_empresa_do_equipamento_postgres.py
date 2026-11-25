@@ -2838,3 +2838,110 @@ async def test_exclusao_em_curso_da_duplicata_vazia_faz_a_fusao_recusar_o_plano(
     assert await asyncio.wait_for(fusao, timeout=20) == "desatualizado"
     assert await _empresas(fabrica) == {fica.id}
     assert await _plano(fabrica) == []
+
+
+# ══════════════════════════════════════════════════════════════
+# 12. A recusa da exclusão diz ONDE estão os equipamentos
+# ══════════════════════════════════════════════════════════════
+#
+# O 409 contava "N equipamento(s)" e mandava "remover ou mover". Quem ia
+# procurar não achava: a tela esconde os inativos por padrão, e o aparelho é
+# da empresa pela coluna dele — o responsável pode ser de outra, ou nenhum.
+
+
+async def _recusa_da_exclusao(fabrica, admin, c) -> str:
+    with pytest.raises(HTTPException) as recusa:
+        await _roda(fabrica, _exclui_empresa(admin, c))
+    assert recusa.value.status_code == 409
+    return recusa.value.detail
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("flag", [False, True])
+async def test_recusa_com_equipamento_ativo_explica_qual_empresa_conta(fabrica, monkeypatch, flag):
+    monkeypatch.setattr(get_settings(), "equipamento_por_empresa", flag)
+    g = await _grupo(fabrica)
+    c = await _empresa(fabrica, g)
+    outra = await _empresa(fabrica, g, "Outra")
+    de_fora = await _pessoa(fabrica, company_id=outra.id)
+    produto = await _produto(fabrica)
+    # Da empresa pela coluna do aparelho; o responsável é de OUTRA.
+    aparelho = await _aparelho(fabrica, produto, dono=de_fora, company_id=c.id)
+    admin = await _pessoa(fabrica, UserRole.admin)
+
+    detalhe = await _recusa_da_exclusao(fabrica, admin, c)
+
+    assert detalhe.startswith("Não é possível excluir a empresa: ela ainda tem 1 equipamento(s).")
+    assert "Remova ou mova esses itens antes de excluir a empresa." in detalhe
+    assert "empresa registrada no próprio equipamento" in detalhe
+    assert "inativo" not in detalhe
+    # Só números e regra: nada do aparelho nem de quem responde por ele.
+    for restrito in (aparelho.name, aparelho.serial_number, de_fora.name, de_fora.email, "Outra"):
+        assert restrito not in detalhe
+    assert await _conta(fabrica, Company) == 2
+
+
+@pytest.mark.asyncio
+async def test_recusa_so_com_equipamento_inativo_avisa_que_inativo_conta(fabrica):
+    """O caso que parecia mentira: a tela não mostra nenhum equipamento ativo
+    da empresa, e a exclusão é recusada "por equipamento"."""
+    g = await _grupo(fabrica)
+    c = await _empresa(fabrica, g)
+    produto = await _produto(fabrica)
+    await _aparelho(fabrica, produto, company_id=c.id, ativo=False)
+    admin = await _pessoa(fabrica, UserRole.admin)
+
+    detalhe = await _recusa_da_exclusao(fabrica, admin, c)
+
+    assert "ela ainda tem 1 equipamento(s)." in detalhe
+    assert "1 inativo(s), que também contam" in detalhe
+
+
+@pytest.mark.asyncio
+async def test_recusa_com_ativos_e_inativos_separa_os_dois_numeros(fabrica):
+    g = await _grupo(fabrica)
+    c = await _empresa(fabrica, g)
+    outra = await _empresa(fabrica, g, "Outra")
+    produto = await _produto(fabrica)
+    for ativo in (True, True, False):
+        await _aparelho(fabrica, produto, company_id=c.id, ativo=ativo)
+    await _aparelho(fabrica, produto, company_id=outra.id, ativo=False)  # não é dela
+    await _pessoa(fabrica, company_id=c.id)
+    admin = await _pessoa(fabrica, UserRole.admin)
+
+    detalhe = await _recusa_da_exclusao(fabrica, admin, c)
+
+    assert "ela ainda tem 1 cliente(s) vinculado(s), 3 equipamento(s)." in detalhe
+    assert "1 inativo(s), que também contam" in detalhe
+
+
+@pytest.mark.asyncio
+async def test_recusa_sem_equipamento_nao_fala_de_equipamento(fabrica):
+    g = await _grupo(fabrica)
+    c = await _empresa(fabrica, g)
+    cliente = await _pessoa(fabrica, company_id=c.id)
+    produto = await _produto(fabrica)
+    # Aparelho do cliente vinculado, mas SEM empresa: não é o que segura.
+    await _aparelho(fabrica, produto, dono=cliente)
+    admin = await _pessoa(fabrica, UserRole.admin)
+
+    detalhe = await _recusa_da_exclusao(fabrica, admin, c)
+
+    assert detalhe == (
+        "Não é possível excluir a empresa: ela ainda tem 1 cliente(s) vinculado(s). "
+        "Remova ou mova esses itens antes de excluir a empresa."
+    )
+
+
+@pytest.mark.asyncio
+async def test_empresa_sem_equipamento_e_sem_cliente_e_excluida(fabrica):
+    g = await _grupo(fabrica)
+    c = await _empresa(fabrica, g)
+    outra = await _empresa(fabrica, g, "Outra")
+    produto = await _produto(fabrica)
+    await _aparelho(fabrica, produto, company_id=outra.id)
+    admin = await _pessoa(fabrica, UserRole.admin)
+
+    await _roda(fabrica, _exclui_empresa(admin, c))
+
+    assert await _empresas(fabrica) == {outra.id}

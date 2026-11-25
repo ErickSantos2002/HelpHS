@@ -439,8 +439,23 @@ _ROTULOS = {
 }
 
 
+# O complemento do 409 quando o que segura a empresa são equipamentos. Só a
+# contagem não bastava: quem ia "remover ou mover" procurava pela empresa do
+# RESPONSÁVEL e com os inativos escondidos, não achava nada, e a recusa
+# parecia engano. A frase diz qual coluna conta e que inativo conta.
+_ONDE_ESTAO_OS_EQUIPAMENTOS = (
+    " Conta a empresa registrada no próprio equipamento (a coluna Empresa da tela de "
+    "Equipamentos), mesmo quando o responsável é de outra empresa ou não existe."
+)
+
+
 def _recusa_exclusao(
-    entidade: str, alvo_id: uuid.UUID, ator: User, contagens: dict[str, int]
+    entidade: str,
+    alvo_id: uuid.UUID,
+    ator: User,
+    contagens: dict[str, int],
+    *,
+    equipamentos_inativos: int = 0,
 ) -> HTTPException:
     """Monta o 409 e deixa o aviso no log. Só números: nunca quem são os clientes."""
     presentes = {chave: n for chave, n in contagens.items() if n}
@@ -453,11 +468,18 @@ def _recusa_exclusao(
     )
     itens = ", ".join(f"{n} {_ROTULOS[chave]}" for chave, n in presentes.items())
     artigo, pronome = ("o grupo", "ele") if entidade == "group" else ("a empresa", "ela")
+    complemento = ""
+    if presentes.get("equipamentos"):
+        if equipamentos_inativos:
+            complemento = (
+                f" Entre os equipamentos há {equipamentos_inativos} inativo(s), que também contam."
+            )
+        complemento += _ONDE_ESTAO_OS_EQUIPAMENTOS
     return HTTPException(
         status_code=status.HTTP_409_CONFLICT,
         detail=(
             f"Não é possível excluir {artigo}: {pronome} ainda tem {itens}. "
-            f"Remova ou mova esses itens antes de excluir {artigo}."
+            f"Remova ou mova esses itens antes de excluir {artigo}.{complemento}"
         ),
     )
 
@@ -626,7 +648,19 @@ async def delete_company(
 
     contagens = await _dependentes_da_empresa(db, company_id)
     if any(contagens.values()):
-        raise _recusa_exclusao("company", company_id, actor, contagens)
+        # Só para a mensagem, e só quando há equipamento: a contagem que decide
+        # (e vai para a auditoria) continua sendo a de cima, com todos.
+        inativos = 0
+        if contagens["equipamentos"]:
+            inativos = await _conta(
+                db,
+                select(func.count())
+                .select_from(Equipment)
+                .where(Equipment.company_id == company_id, Equipment.is_active.is_(False)),
+            )
+        raise _recusa_exclusao(
+            "company", company_id, actor, contagens, equipamentos_inativos=inativos
+        )
 
     # Nome e CNPJ dizem QUAL empresa saiu — dados da empresa, não de pessoa.
     # Nenhum dado de cliente entra: a exclusão só passa sem cliente vinculado.
