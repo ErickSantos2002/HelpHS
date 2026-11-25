@@ -1232,3 +1232,66 @@ async def test_logs_sem_pii_nem_token(db, db_factory):
     assert str(outbox_id) in texto, "o outbox_id é o correlator, e deve ficar"
 
     await _limpa(db, user)
+
+
+# ═══════════════════════════════════════════════════════════════
+# RS-04 — o enfileiramento em segundo plano registra o desfecho
+# ═══════════════════════════════════════════════════════════════
+
+
+@pytest.mark.asyncio
+async def test_segundo_plano_confirma_a_gravacao_e_registra_a_falha_do_insert(db, db_factory):
+    """Contra o banco de verdade: a linha existe quando a confirmação sai, e a
+
+    `UNIQUE(dedup_key)` estourando dentro do `commit` vira uma linha de log com
+    a classe do erro — sem subir, sem SQL e sem o `user_id` que o `str()` de um
+    `IntegrityError` carrega nos parâmetros.
+    """
+    from loguru import logger
+
+    from app.services.email_outbox import enfileira_email_de_conta_em_segundo_plano
+
+    user = _usuario()
+    endereco = user.email
+    db.add(user)
+    await db.commit()
+    intent_id = uuid.uuid4()
+
+    linhas: list[tuple[str, str]] = []
+    sink = logger.add(
+        lambda m: linhas.append((m.record["level"].name, m.record["message"])), level="DEBUG"
+    )
+    try:
+        with patch("app.core.database.AsyncSessionLocal", new=db_factory):
+            await enfileira_email_de_conta_em_segundo_plano(user.id, "password_reset", intent_id)
+            # Mesmo `intent_id` de novo: é a duplicação técnica, e o INSERT falha.
+            await enfileira_email_de_conta_em_segundo_plano(user.id, "password_reset", intent_id)
+    finally:
+        logger.remove(sink)
+
+    gravadas = (
+        (await db.execute(select(EmailOutbox).where(EmailOutbox.user_id == user.id)))
+        .scalars()
+        .all()
+    )
+    assert len(gravadas) == 1
+    assert gravadas[0].status == "pending"
+
+    confirmacoes = [m for nivel, m in linhas if "gravado na fila" in m]
+    falhas = [(nivel, m) for nivel, m in linhas if "falha ao gravar" in m]
+    assert len(confirmacoes) == 1
+    assert f"intent={intent_id}" in confirmacoes[0]
+    assert f"outbox_id={gravadas[0].id}" in confirmacoes[0]
+
+    assert len(falhas) == 1
+    assert falhas[0][0] == "ERROR"
+    assert "error=IntegrityError" in falhas[0][1]
+    assert f"intent={intent_id}" in falhas[0][1]
+
+    texto = "\n".join(m for _nivel, m in linhas)
+    assert str(user.id) not in texto
+    assert endereco not in texto
+    assert "INSERT" not in texto
+    assert "dedup_key" not in texto
+
+    await _limpa(db, user)

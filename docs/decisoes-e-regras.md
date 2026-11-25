@@ -1019,6 +1019,98 @@ endereços um a um.
 Uma exceção deliberada: **redefinir a senha confirma o e-mail junto**. Quem
 abriu o link provou ser dono da caixa.
 
+### "Pedi a redefinição e o e-mail não chegou": o que a tela diz e o que o log registra (RS-03 e RS-04, 23/11/2026)
+
+A queixa foi auditada de ponta a ponta entre 19 e 23/11/2026, só em leitura
+(Resend, health, `email_outbox` de produção). O envio **funciona**: na janela
+de 21/10 a 19/11 a fila tinha exatamente as duas redefinições que o Resend
+mostrava, ambas `sent` e `Delivered`, sem `pending`, `processing` ou `dead`.
+Quem reclamou e não era aquele destinatário **não tinha linha nenhuma** — o
+sistema não gerou e-mail para perder. A causa por usuário não ficou provada;
+o que ficou provado é que duas coisas impediam de provar.
+
+**RS-03 — a tela afirmava o que não sabia.** A API responde o mesmo 200 para
+conta ativa, inativa, inexistente e para o e-mail que não é o do cadastro (é
+a neutralidade da seção acima). A `ForgotPasswordPage` recebia esse 200 e
+dizia "Enviamos as instruções para *fulano@…*. O link vale por 1 hora". Para
+três dos quatro casos isso é falso, e a pessoa passava a procurar um e-mail
+que nunca existiu. O texto agora é condicional, em aviso `info`:
+
+> **Confira seu e-mail** — Se houver uma conta ativa associada ao e-mail
+> informado, você receberá instruções para redefinir sua senha.
+>
+> Não recebeu? Verifique a pasta de spam e confirme que informou o e-mail
+> utilizado no cadastro. Se precisar, entre em contato com o suporte.
+
+Três regras que valem para qualquer mudança futura nessa tela:
+
+- **Não afirmar envio.** Nem "enviamos", nem "em instantes".
+- **Não citar prazo.** A validade do link é `PASSWORD_RESET_TOKEN_HOURS`, do
+  servidor; a tela tinha "1 hora" fixo. O prazo certo vai escrito no e-mail.
+- **Não repetir o endereço digitado como se fosse destinatário confirmado.**
+
+A resposta HTTP não mudou. "Conta ativa" no texto não revela nada sobre o
+endereço digitado: a frase é a mesma para todos.
+
+O formulário, antes do pedido, segue a mesma regra: o subtítulo é "Informe o
+e-mail associado à sua conta para solicitar a redefinição de senha." e o
+botão é "Solicitar redefinição" — pedem, não prometem link.
+
+Acessibilidade da tela depois do pedido (medido em navegador, 23/11/2026):
+
+- **Texto de ajuda** em cor fixa (`#94a3b8`), 7,08:1 nos dois temas. A
+  `AuthShell` é escura nos dois temas e as classes `text-slate-*` trocam de
+  cor no tema claro; `text-slate-500` dava 3,82:1 ali.
+- **"Tentar com outro e-mail"** com 44 px de altura e anel de foco próprio.
+
+**RS-04 — o log dizia "enfileirado" antes de gravar, e calava na falha.**
+`forgot_password` e `resend_verification` gravam na `email_outbox` por
+`BackgroundTasks`, depois da resposta, para o tempo não denunciar quem tem
+conta — isso **continua assim**. O defeito era de observabilidade:
+
+| Momento | Antes | Agora |
+|---|---|---|
+| Conta elegível, tarefa agendada | `Password reset queued: user_id=…` | `Password reset scheduled: intent=…` |
+| `commit` concluído | nada | `Outbox de e-mail: e-mail de conta gravado na fila — event=… intent=… outbox_id=…` |
+| `INSERT`/`commit` falhou | exceção crua subia pela tarefa | `Outbox de e-mail: falha ao gravar e-mail de conta na fila — event=… intent=… error=<classe>` (nível ERROR) |
+
+O reenvio de confirmação usa `Verification email scheduled (resend): intent=…`
+e as mesmas duas linhas de desfecho.
+
+- **`intent`** é o identificador do pedido, gerado no request; liga as três
+  linhas. **`outbox_id`** liga a confirmação à linha da tabela. Quem precisar
+  do usuário chega nele pelo banco.
+- **Nenhuma das linhas leva `user_id`, e-mail, token, SQL ou `str(exc)`.** A
+  exceção de banco que antes subia carregava `[SQL: …]` e `[parameters: …]`
+  no traceback; agora fica só a classe (`_resumo_do_erro`).
+- **A falha não sobe.** A resposta já saiu; não há a quem devolvê-la.
+  `CancelledError` continua subindo — é o processo desligando.
+- **Como ler:** um `scheduled` sem `gravado` nem `falha` com o mesmo `intent`
+  é o processo morto entre a resposta e o `commit` — a janela de
+  não-durabilidade que já era conhecida, agora visível.
+
+O ramo neutro (conta inexistente, inativa, anonimizada) segue sem linha de
+log nenhuma: registrar "pedido recusado" criaria no log o oráculo que a
+resposta evita.
+
+**Ficou de fora, de propósito:**
+
+- **RS-02** — com `EMAIL_OUTBOX_INTERVAL_SECONDS=0` o pedido é aceito e a
+  linha fica `pending` para sempre. Responder 503 nesse caso é decisão
+  pendente.
+- **Alternativa D** — contar as falhas de gravação e expor no
+  `/api/v1/health`. Pendente; nesta rodada o health não mudou.
+- **Gravar antes da resposta** (com piso de tempo igual nos dois ramos) —
+  só se o log novo mostrar perda de verdade.
+- **A `AuthShell` no tema claro** — o fundo é escuro fixo e o título, o
+  rótulo do campo e os avisos trocam para cores de fundo claro (título
+  1,02:1, aviso `info` 2,26:1, medido em 23/11). Vale para todas as telas que
+  usam a moldura; corrigir é mexer nela, não nesta página.
+
+Limite do que isto resolve: o log do EasyPanel não guarda histórico (medido
+em 23/11: só um trecho curto e o ao vivo). As linhas novas servem a quem
+olhar perto do evento; a prova durável continua sendo a `email_outbox`.
+
 ### O admin inicial não nasce de seed em produção
 
 `start.sh` roda `python -m app.seeds` **a cada boot do container**, entre a
