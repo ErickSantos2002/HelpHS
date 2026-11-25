@@ -2945,3 +2945,104 @@ async def test_empresa_sem_equipamento_e_sem_cliente_e_excluida(fabrica):
     await _roda(fabrica, _exclui_empresa(admin, c))
 
     assert await _empresas(fabrica) == {outra.id}
+
+
+# ══════════════════════════════════════════════════════════════
+# 13. Desvincular o cliente: o que fica para trás, dito ANTES
+# ══════════════════════════════════════════════════════════════
+#
+# Desvincular não tira a empresa do aparelho (seção 2), e isso é regra. O que
+# faltava era o operador saber: o detalhe da empresa passa a dizer, por
+# cliente, quantos aparelhos de responsabilidade dele estão classificados
+# NELA — o número que a tela mostra na confirmação. Nada é bloqueado, nada é
+# reclassificado.
+
+
+async def _detalhe_da_empresa(fabrica, admin, c, rota="admin"):
+    from app.routers.groups import get_company, get_company_for_staff
+
+    if rota == "admin":
+        return await _roda(fabrica, lambda s: get_company(c.group_id, c.id, s, admin))
+    return await _roda(fabrica, lambda s: get_company_for_staff(c.id, s, admin))
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("rota", ["admin", "equipe"])
+@pytest.mark.parametrize("flag", [False, True])
+async def test_detalhe_da_empresa_conta_os_aparelhos_do_cliente_classificados_nela(
+    fabrica, monkeypatch, rota, flag
+):
+    monkeypatch.setattr(get_settings(), "equipamento_por_empresa", flag)
+    g = await _grupo(fabrica)
+    c = await _empresa(fabrica, g)
+    outra = await _empresa(fabrica, g, "Outra")
+    com_aparelhos = await _pessoa(fabrica, company_id=c.id)
+    sem_aparelhos = await _pessoa(fabrica, company_id=c.id)
+    de_fora = await _pessoa(fabrica, company_id=outra.id)
+    produto = await _produto(fabrica)
+    await _aparelho(fabrica, produto, dono=com_aparelhos, company_id=c.id)
+    await _aparelho(fabrica, produto, dono=com_aparelhos, company_id=c.id, ativo=False)
+    # Não entram na conta dele NESTA empresa:
+    await _aparelho(fabrica, produto, dono=com_aparelhos, company_id=outra.id)  # é de outra
+    await _aparelho(fabrica, produto, dono=com_aparelhos)  # sem empresa
+    await _aparelho(fabrica, produto, dono=de_fora, company_id=c.id)  # responsável de fora
+    await _aparelho(fabrica, produto, company_id=c.id)  # sem responsável
+    admin = await _pessoa(fabrica, UserRole.admin)
+
+    detalhe = await _detalhe_da_empresa(fabrica, admin, c, rota)
+
+    assert {x.id: x.company_equipment_count for x in detalhe.clients} == {
+        com_aparelhos.id: 2,
+        sem_aparelhos.id: 0,
+    }
+
+
+@pytest.mark.asyncio
+async def test_desvincular_nao_muda_os_aparelhos_que_a_contagem_anunciou(fabrica):
+    """O aviso é só aviso: a operação é a de sempre, e os aparelhos ficam como
+    estavam — empresa, responsável e situação."""
+    g = await _grupo(fabrica)
+    c = await _empresa(fabrica, g)
+    cliente = await _pessoa(fabrica, company_id=c.id)
+    produto = await _produto(fabrica)
+    ativo = await _aparelho(fabrica, produto, dono=cliente, company_id=c.id)
+    inativo = await _aparelho(fabrica, produto, dono=cliente, company_id=c.id, ativo=False)
+    admin = await _pessoa(fabrica, UserRole.admin)
+    (antes,) = (await _detalhe_da_empresa(fabrica, admin, c)).clients
+    assert antes.company_equipment_count == 2
+
+    await _roda(fabrica, _desvincula(admin, c, cliente))
+
+    assert await _empresa_da_conta(fabrica, cliente) is None
+    assert (await _detalhe_da_empresa(fabrica, admin, c)).clients == []
+    for aparelho in (ativo, inativo):
+        assert await _empresa_do(fabrica, aparelho.id) == c.id
+        assert await _dono_do(fabrica, aparelho.id) == cliente.id
+    async with fabrica() as s:
+        situacoes = set(
+            (await s.execute(select(Equipment.is_active).where(Equipment.owner_id == cliente.id)))
+            .scalars()
+            .all()
+        )
+    assert situacoes == {True, False}
+    assert await _auditorias_de_aparelho(fabrica) == []
+
+
+@pytest.mark.asyncio
+async def test_respostas_que_nao_sao_o_detalhe_nao_afirmam_contagem(fabrica):
+    """Vincular devolve o cliente sem a contagem — `None`, e não um zero que
+    ninguém mediu."""
+    g = await _grupo(fabrica)
+    c = await _empresa(fabrica, g)
+    cliente = await _pessoa(fabrica)
+    admin = await _pessoa(fabrica, UserRole.admin)
+
+    vinculado = await _roda(fabrica, _vincula(admin, c, cliente))
+
+    corpo = vinculado.body if hasattr(vinculado, "body") else vinculado
+    if isinstance(corpo, bytes):
+        import json
+
+        assert json.loads(corpo)["company_equipment_count"] is None
+    else:
+        assert corpo.company_equipment_count is None

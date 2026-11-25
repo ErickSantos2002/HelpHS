@@ -32,6 +32,13 @@ export interface ClientInCompany {
   email: string;
   phone: string | null;
   client_notes: string | null;
+  /**
+   * ECE-01. Só no detalhe da empresa: quantos equipamentos de que este cliente
+   * é o responsável estão classificados NESTA empresa, ativos ou não. É o que
+   * continua na empresa se ele for desvinculado. Ausente ou nulo = o backend
+   * não contou; não é zero.
+   */
+  company_equipment_count?: number | null;
 }
 
 export interface GroupDetail extends GroupResponse {

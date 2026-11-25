@@ -904,6 +904,25 @@ export function CompanyDetailModal({
             continua cadastrada — ela só deixa de pertencer a esta empresa, e pode
             ser vinculada de novo depois.
           </p>
+          {/* ECE-01: a empresa do equipamento não acompanha o vínculo do
+              responsável. O aviso só informa — não bloqueia, e a tela não
+              promete mover nada. Sem contagem (ou zero), não aparece. */}
+          {!!unassignTarget.company_equipment_count && (
+            <p role="note" className="mt-3 text-sm text-conteudo-muted">
+              <span className="font-medium text-conteudo">
+                {unassignTarget.company_equipment_count === 1
+                  ? "1 equipamento"
+                  : `${unassignTarget.company_equipment_count} equipamentos`}
+              </span>{" "}
+              sob responsabilidade de {unassignTarget.name}{" "}
+              {unassignTarget.company_equipment_count === 1
+                ? "continua classificado"
+                : "continuam classificados"}{" "}
+              em {company.name} depois da desvinculação. Nada muda neles: nem a
+              empresa, nem o responsável. Se algum não for mais desta empresa,
+              reclassifique na tela de Equipamentos.
+            </p>
+          )}
           <ModalFooter>
             <Button
               variant="secondary"

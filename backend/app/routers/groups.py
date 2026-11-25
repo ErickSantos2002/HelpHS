@@ -217,8 +217,27 @@ def _group_response(g: Group, company_count: int) -> GroupResponse:
 
 
 async def _clientes_vinculados(db: AsyncSession, company_id: uuid.UUID) -> list[ClientInCompany]:
-    """Quem tem o VÍNCULO oficial (`users.company_id`) — não quem digitou o nome."""
+    """Quem tem o VÍNCULO oficial (`users.company_id`) — não quem digitou o nome.
+
+    Cada cliente sai com `company_equipment_count`: os equipamentos de que ele
+    é o responsável e que estão classificados NESTA empresa. Desvincular não
+    os reclassifica (a empresa do aparelho não acompanha o vínculo), então é
+    esse o número que fica para trás — só a contagem, dos aparelhos desta
+    empresa e deste cliente; nada de outra empresa entra.
+    """
     linhas = await db.execute(select(User).where(User.company_id == company_id).order_by(User.name))
+    clientes = linhas.scalars().all()
+    por_responsavel: dict[uuid.UUID, int] = {}
+    if clientes:
+        contagem = await db.execute(
+            select(Equipment.owner_id, func.count(Equipment.id))
+            .where(
+                Equipment.company_id == company_id,
+                Equipment.owner_id.in_([u.id for u in clientes]),
+            )
+            .group_by(Equipment.owner_id)
+        )
+        por_responsavel = {dono: total for dono, total in contagem}
     return [
         ClientInCompany(
             id=u.id,
@@ -226,8 +245,9 @@ async def _clientes_vinculados(db: AsyncSession, company_id: uuid.UUID) -> list[
             email=u.email,
             phone=u.phone,
             client_notes=u.client_notes,
+            company_equipment_count=por_responsavel.get(u.id, 0),
         )
-        for u in linhas.scalars().all()
+        for u in clientes
     ]
 
 

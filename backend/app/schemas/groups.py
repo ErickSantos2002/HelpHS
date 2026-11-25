@@ -81,6 +81,12 @@ class ClientInCompany(AppBaseModel):
     email: str
     phone: str | None
     client_notes: str | None
+    # ECE-01. Só no detalhe da empresa: quantos equipamentos de que este
+    # cliente é o responsável estão classificados NESTA empresa
+    # (`equipments.company_id`), ativos ou não. É o que continua na empresa se
+    # ele for desvinculado — a tela avisa antes de confirmar. `None` nas demais
+    # respostas: ali ninguém contou, e zero seria uma afirmação.
+    company_equipment_count: int | None = None
 
 
 class AssignClientRequest(AppBaseModel):
