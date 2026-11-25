@@ -1,5 +1,5 @@
 import { expect, type Locator, type Page } from "@playwright/test";
-import { CREDENTIALS } from "./helpers";
+import { CREDENTIALS, entrarSemExporASenha } from "./helpers";
 
 /**
  * O que os specs `ece01-*.spec.ts` têm em comum: o cenário semeado por
@@ -68,54 +68,15 @@ function senhaDe(conta: ContaDaEce01): string {
   return senha;
 }
 
-/**
- * O mesmo caminho do `login` de `helpers.ts`, sem deixar a senha em artefato.
- *
- * A senha NÃO vai por `fill`: o Playwright escreve o valor digitado no título
- * do passo, e o título vai para o relatório que o workflow guarda como
- * artefato. Ela entra pelo setter nativo do campo, dentro de um `evaluate` —
- * o relatório registra que houve um passo, não o que ele levou. O evento
- * `input` é o que faz o React enxergar o valor, como numa digitação.
- */
-async function entrarSemExporASenha(page: Page, email: string, senha: string) {
-  const campoDaSenha = page.getByLabel("Senha", { exact: true });
-  const escreve = (valor: string) =>
-    campoDaSenha.evaluate((campo, texto) => {
-      const setter = Object.getOwnPropertyDescriptor(
-        HTMLInputElement.prototype,
-        "value",
-      )?.set;
-      setter?.call(campo, texto);
-      campo.dispatchEvent(new Event("input", { bubbles: true }));
-    }, valor);
-
-  await page.goto("/login");
-  await page.getByLabel("E-mail").fill(email);
-  await escreve(senha);
-  await page.getByRole("button", { name: "Entrar" }).click();
-  try {
-    await page.waitForURL((url) => !url.pathname.includes("/login"), {
-      timeout: 10_000,
-    });
-  } catch (erro) {
-    // O login não saiu do lugar, e a senha continua no campo. Quando um teste
-    // falha, o Playwright fotografa a árvore da página — com o valor dos
-    // campos — e anexa ao resultado. Esvaziar antes de devolver o erro é o
-    // que mantém a senha fora dessa fotografia.
-    await escreve("").catch(() => {});
-    throw erro;
-  }
-}
-
 /** Entra como um dos clientes do cenário. */
 export async function entrar(page: Page, conta: ContaDaEce01) {
   await entrarSemExporASenha(page, conta.email, senhaDe(conta));
 }
 
 /**
- * Entra como o admin do seed. A conta é a mesma do `login(page, "admin")` de
- * `helpers.ts`; o que muda é só o caminho da senha, para o relatório destes
- * specs não a carregar.
+ * Entra como o admin do seed — o mesmo que `login(page, "admin")` de
+ * `helpers.ts`, que desde a correção do helper também não deixa a senha em
+ * artefato. Fica o nome, que diz o que os specs daqui fazem.
  */
 export async function entrarComoAdmin(page: Page) {
   const { email, password } = CREDENTIALS.admin;
