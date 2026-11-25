@@ -21,6 +21,8 @@ O que se prova aqui
 7. **A troca de responsável completa o não classificado**: aparelho sem
    empresa e sem decisão herda a do novo responsável, com a conta dele e a
    empresa travadas antes do aparelho.
+8. **A fusão convive com o sistema em uso**: trava na ordem das rotas, não
+   grava plano que envelheceu e desfaz tudo em qualquer erro.
 
 Banco próprio e o mesmo jeito de forçar a corrida de
 `test_vinculo_cliente_empresa_postgres.py`.
@@ -30,6 +32,7 @@ import asyncio
 import shutil
 import tempfile
 import uuid
+from contextlib import asynccontextmanager
 from datetime import UTC, datetime
 
 import pytest
@@ -50,6 +53,7 @@ from app.models.models import (
     AuditLog,
     Base,
     Company,
+    CompanyNote,
     Equipment,
     Group,
     Product,
@@ -2252,3 +2256,585 @@ async def test_key_share_na_conta_segura_o_vinculo_mas_nao_um_update_solto(fabri
             await s.execute(select(User.company_id).where(User.id == cliente.id))
         ).scalar_one()
     assert gravado == c.id
+
+
+# ══════════════════════════════════════════════════════════════
+# 11. A fusão de empresas com o sistema em uso
+# ══════════════════════════════════════════════════════════════
+#
+# `scripts/funde_empresas_duplicadas.py` roda à mão, com as rotas no ar. Antes
+# de gravar ele trava empresa → cliente → nota → aparelho e confere o que
+# travou contra o plano mostrado; plano envelhecido não é gravado.
+#
+# As corridas daqui não dependem de relógio para decidir quem chega primeiro:
+# um lado é levado até um ponto conhecido e segurado ali (`_rota_em_curso`,
+# `_fusao_em_curso`), e o outro só é dado por "esperando" quando o próprio
+# PostgreSQL diz que há trava não concedida (`_ate_haver_espera`).
+
+_CNPJ = "11222333000181"
+
+
+async def _duplicadas(fabrica):
+    """Grupo, a empresa que FICA (com clientes) e a que SAI (vazia)."""
+    g = await _grupo(fabrica)
+    fica = await _empresa(fabrica, g, "Fica", cnpj=_CNPJ)
+    sai = await _empresa(fabrica, g, "Sai", cnpj="11.222.333/0001-81")
+    ancora = await _pessoa(fabrica, company_id=fica.id)
+    # Sobrevive quem tem mais conteúdo: a FICA nasce mais cheia do que qualquer
+    # cenário daqui deixa a SAI.
+    for _ in range(5):
+        await _pessoa(fabrica, company_id=fica.id)
+    return g, fica, sai, ancora
+
+
+async def _nota(fabrica, empresa: Company, autor: User) -> CompanyNote:
+    n = CompanyNote(id=uuid.uuid4(), company_id=empresa.id, author_id=autor.id, content="nota")
+    async with fabrica() as s:
+        s.add(n)
+        await s.commit()
+    return n
+
+
+async def _plano(fabrica):
+    """O plano como o script o monta: levantamento de verdade, sem gravar."""
+    from scripts.funde_empresas_duplicadas import _levanta, planeja_fusao
+
+    motor = await _conexao(fabrica)
+    async with motor.connect() as conn:
+        fusoes, _recusadas = planeja_fusao(await _levanta(conn))
+    return fusoes
+
+
+async def _funde(conn, fusoes):
+    """Roda a gravação do script e resume o desfecho numa palavra."""
+    from scripts.funde_empresas_duplicadas import PlanoDesatualizadoError, _aplica
+
+    try:
+        await _aplica(conn, fusoes)
+        return "ok"
+    except PlanoDesatualizadoError:
+        return "desatualizado"
+    except DBAPIError as e:
+        mensagem = str(e).lower()
+        if "deadlock" in mensagem:
+            return "deadlock"
+        if "lock timeout" in mensagem:
+            return "espera estourada"
+        raise
+
+
+async def _funde_agora(fabrica, fusoes):
+    motor = await _conexao(fabrica)
+    async with motor.connect() as conn:
+        return await _funde(conn, fusoes)
+
+
+async def _desfecho(fabrica, operacao):
+    """Roda uma rota em sessão própria: "ok", o status da recusa ou "deadlock"."""
+    async with fabrica() as s:
+        try:
+            await operacao(s)
+            return "ok"
+        except HTTPException as e:
+            return e.status_code
+        except DBAPIError as e:
+            if "deadlock" in str(e).lower():
+                return "deadlock"
+            raise
+
+
+async def _ate_haver_espera(fabrica) -> None:
+    """Volta quando o banco mostra alguma transação parada numa trava."""
+    async with fabrica() as s:
+        for _ in range(200):
+            presas = (
+                await s.execute(text("SELECT count(*) FROM pg_locks WHERE NOT granted"))
+            ).scalar_one()
+            if presas:
+                return
+            await asyncio.sleep(0.05)
+    raise AssertionError("ninguém ficou esperando por trava")
+
+
+class _ConexaoVigiada:
+    """A conexão do script, que para num ponto escolhido até ser liberada.
+
+    `pausa="commit"`: tudo travado e escrito, falta comitar.
+    `pausa="empresas"`: só as empresas travadas — clientes e aparelhos ainda não.
+    """
+
+    def __init__(self, conn, pausa: str) -> None:
+        self._conn, self._pausa = conn, pausa
+        self.parada, self.libera = asyncio.Event(), asyncio.Event()
+
+    async def _espera(self) -> None:
+        self.parada.set()
+        await self.libera.wait()
+
+    async def execute(self, instrucao, *args, **kwargs):
+        resultado = await self._conn.execute(instrucao, *args, **kwargs)
+        if self._pausa == "empresas" and "FROM companies" in str(instrucao):
+            await self._espera()
+        return resultado
+
+    async def commit(self) -> None:
+        if self._pausa == "commit":
+            await self._espera()
+        await self._conn.commit()
+
+    async def rollback(self) -> None:
+        await self._conn.rollback()
+
+
+@asynccontextmanager
+async def _fusao_em_curso(fabrica, fusoes, pausa="commit"):
+    """Dentro do bloco a fusão está parada em `pausa`; na saída ela segue."""
+    motor = await _conexao(fabrica)
+    async with motor.connect() as conn:
+        vigiada = _ConexaoVigiada(conn, pausa)
+        tarefa = asyncio.create_task(_funde(vigiada, fusoes))
+        await asyncio.wait_for(vigiada.parada.wait(), timeout=10)
+        try:
+            yield tarefa
+        finally:
+            vigiada.libera.set()
+            await asyncio.wait_for(tarefa, timeout=20)
+
+
+@asynccontextmanager
+async def _rota_em_curso(fabrica, operacao):
+    """Dentro do bloco a rota já travou e escreveu, e ainda não comitou."""
+    async with fabrica() as s:
+        commit_original = s.commit
+        parada, libera = asyncio.Event(), asyncio.Event()
+
+        async def commit_vigiado():
+            await s.flush()
+            parada.set()
+            await libera.wait()
+            await commit_original()
+
+        s.commit = commit_vigiado  # type: ignore[method-assign]
+        tarefa = asyncio.create_task(operacao(s))
+        await asyncio.wait_for(parada.wait(), timeout=10)
+        try:
+            yield tarefa
+        finally:
+            libera.set()
+            await asyncio.wait_for(tarefa, timeout=20)
+
+
+async def _empresa_da_conta(fabrica, pessoa: User) -> uuid.UUID | None:
+    async with fabrica() as s:
+        return (await s.execute(select(User.company_id).where(User.id == pessoa.id))).scalar_one()
+
+
+async def _empresas(fabrica) -> set[uuid.UUID]:
+    async with fabrica() as s:
+        return set((await s.execute(select(Company.id))).scalars())
+
+
+# ── Sem concorrência ──────────────────────────────────────────
+
+
+@pytest.mark.asyncio
+async def test_a_fusao_leva_clientes_notas_e_aparelhos_e_so_os_das_duplicadas(fabrica):
+    from scripts.funde_empresas_duplicadas import _aplica
+
+    g, fica, sai, ancora = await _duplicadas(fabrica)
+    vizinha = await _empresa(fabrica, g, "Vizinha", cnpj="99888777000166")
+    da_sai = await _pessoa(fabrica, company_id=sai.id)
+    da_vizinha = await _pessoa(fabrica, company_id=vizinha.id)
+    solto = await _pessoa(fabrica)
+    nota = await _nota(fabrica, sai, ancora)
+    produto = await _produto(fabrica)
+    aparelho = await _aparelho(fabrica, produto, dono=da_sai, company_id=sai.id)
+    marcado = await _aparelho(fabrica, produto, dono=da_sai)
+    await _marca(fabrica, marcado.id)
+    alheio = await _aparelho(fabrica, produto, company_id=vizinha.id)
+
+    fusoes = await _plano(fabrica)
+    assert [(f.sobrevivente.id, [a.id for a in f.absorvidas]) for f in fusoes] == [
+        (fica.id, [sai.id])
+    ]
+    motor = await _conexao(fabrica)
+    async with motor.connect() as conn:
+        movidos = await _aplica(conn, fusoes)
+
+    assert movidos == {"clientes": 1, "notas": 1, "equipamentos": 1}
+    assert await _empresas(fabrica) == {fica.id, vizinha.id}
+    assert await _empresa_da_conta(fabrica, da_sai) == fica.id
+    assert await _empresa_da_conta(fabrica, ancora) == fica.id
+    assert await _empresa_da_conta(fabrica, da_vizinha) == vizinha.id
+    assert await _empresa_da_conta(fabrica, solto) is None
+    assert await _empresa_do(fabrica, aparelho.id) == fica.id
+    assert await _dono_do(fabrica, aparelho.id) == da_sai.id
+    assert await _empresa_do(fabrica, alheio.id) == vizinha.id
+    # Sem empresa por decisão continua sem empresa: a fusão não classifica.
+    assert await _empresa_do(fabrica, marcado.id) is None
+    assert await _marca_do(fabrica, marcado.id) is True
+    async with fabrica() as s:
+        assert (
+            await s.execute(select(CompanyNote.company_id).where(CompanyNote.id == nota.id))
+        ).scalar_one() == fica.id
+    # Rodar de novo não acha nada.
+    assert await _plano(fabrica) == []
+
+
+@pytest.mark.asyncio
+async def test_a_fusao_trava_empresa_cliente_nota_e_aparelho_antes_de_escrever(fabrica):
+    """A ordem, lida nas instruções que chegam ao banco — a mesma das rotas:
+    empresa → cliente → aparelho. E o modo de cada uma."""
+    _g, _fica, sai, _ancora = await _duplicadas(fabrica)
+    await _pessoa(fabrica, company_id=sai.id)
+    fusoes = await _plano(fabrica)
+
+    instrucoes: list[str] = []
+
+    def _anota(_conn, _cursor, sql, *_args):
+        instrucoes.append(" ".join(sql.split()))
+
+    motor = await _conexao(fabrica)
+    event.listen(motor.sync_engine, "before_cursor_execute", _anota)
+    try:
+        async with motor.connect() as conn:
+            assert await _funde(conn, fusoes) == "ok"
+    finally:
+        event.remove(motor.sync_engine, "before_cursor_execute", _anota)
+
+    travas = [q for q in instrucoes if " FOR " in q]
+    assert [(q.split(" FROM ")[1].split()[0], q.split(" FOR ")[1]) for q in travas] == [
+        ("companies", "UPDATE"),
+        ("users", "NO KEY UPDATE"),
+        ("company_notes", "UPDATE"),
+        ("equipments", "UPDATE"),
+    ]
+    assert all(" ORDER BY id " in q for q in travas)
+    escritas = [i for i, q in enumerate(instrucoes) if q.startswith(("UPDATE", "DELETE"))]
+    assert min(escritas) > instrucoes.index(travas[-1])
+    assert instrucoes[max(escritas)].startswith("DELETE FROM companies")
+
+
+# ── O plano que envelheceu não é gravado ──────────────────────
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize(
+    "mudanca",
+    ["vinculo", "desvinculo", "aparelho_entra", "aparelho_sai", "nota", "cnpj", "exclusao"],
+)
+async def test_o_que_mudou_depois_do_levantamento_impede_a_gravacao(fabrica, mudanca):
+    """Entre mostrar o plano e gravar, o sistema seguiu em uso. Nada é gravado
+    por cima — nem a parte do plano que continuava certa."""
+    g, fica, sai, ancora = await _duplicadas(fabrica)
+    admin = await _pessoa(fabrica, UserRole.admin)
+    solto = await _pessoa(fabrica)
+    da_sai = await _pessoa(fabrica, company_id=sai.id)
+    outra = await _empresa(fabrica, g, "Outra")
+    produto = await _produto(fabrica)
+    aparelho = await _aparelho(fabrica, produto, company_id=sai.id)
+    livre = await _aparelho(fabrica, produto)
+    # Uma segunda dupla, intacta: prova que o plano cai INTEIRO.
+    fica2 = await _empresa(fabrica, g, "Fica 2", cnpj="55666777000122")
+    sai2 = await _empresa(fabrica, g, "Sai 2", cnpj="55666777000122")
+    da_sai2 = await _pessoa(fabrica, company_id=sai2.id)
+    await _pessoa(fabrica, company_id=fica2.id)
+    await _pessoa(fabrica, company_id=fica2.id)
+
+    fusoes = await _plano(fabrica)
+    assert len(fusoes) == 2
+
+    if mudanca == "vinculo":
+        await _roda(fabrica, _vincula(admin, sai, solto))
+    elif mudanca == "desvinculo":
+        await _roda(fabrica, _desvincula(admin, sai, da_sai))
+    elif mudanca == "aparelho_entra":
+        await _roda(fabrica, _equipe_edita(admin, livre, company_id=sai.id))
+    elif mudanca == "aparelho_sai":
+        await _roda(fabrica, _equipe_edita(admin, aparelho, company_id=outra.id))
+    elif mudanca == "nota":
+        await _nota(fabrica, sai, ancora)
+    elif mudanca == "cnpj":
+        async with fabrica() as s:
+            await s.execute(
+                text("UPDATE companies SET cnpj = '00111222000133' WHERE id = :id"), {"id": sai.id}
+            )
+            await s.commit()
+    else:
+        async with fabrica() as s:
+            await s.execute(text("DELETE FROM companies WHERE id = :id"), {"id": fica2.id})
+            await s.commit()
+    antes = (
+        await _empresa_da_conta(fabrica, da_sai),
+        await _empresa_da_conta(fabrica, solto),
+        await _empresa_do(fabrica, aparelho.id),
+        await _empresa_do(fabrica, livre.id),
+        await _empresas(fabrica),
+    )
+
+    assert await _funde_agora(fabrica, fusoes) == "desatualizado"
+
+    assert antes == (
+        await _empresa_da_conta(fabrica, da_sai),
+        await _empresa_da_conta(fabrica, solto),
+        await _empresa_do(fabrica, aparelho.id),
+        await _empresa_do(fabrica, livre.id),
+        await _empresas(fabrica),
+    )
+    assert await _empresa_da_conta(fabrica, da_sai2) == sai2.id
+    assert {sai.id, sai2.id} <= await _empresas(fabrica)
+
+
+@pytest.mark.asyncio
+async def test_plano_envelhecido_diz_o_que_mudou_e_o_plano_novo_entra(fabrica):
+    from scripts.funde_empresas_duplicadas import PlanoDesatualizadoError, _aplica
+
+    _g, fica, sai, _ancora = await _duplicadas(fabrica)
+    admin = await _pessoa(fabrica, UserRole.admin)
+    solto = await _pessoa(fabrica)
+    fusoes = await _plano(fabrica)
+    await _roda(fabrica, _vincula(admin, sai, solto))
+
+    motor = await _conexao(fabrica)
+    async with motor.connect() as conn:
+        with pytest.raises(PlanoDesatualizadoError) as recusa:
+            await _aplica(conn, fusoes)
+    assert len(recusa.value.diferencas) == 1
+    assert "clientes eram 0, agora 1" in recusa.value.diferencas[0]
+
+    assert await _funde_agora(fabrica, await _plano(fabrica)) == "ok"
+    assert await _empresa_da_conta(fabrica, solto) == fica.id
+    assert await _empresas(fabrica) == {fica.id}
+
+
+@pytest.mark.asyncio
+async def test_falha_do_banco_no_meio_desfaz_a_fusao_inteira(fabrica):
+    """Duas fusões no plano; o banco recusa na segunda. A primeira, que já
+    tinha movido e apagado, volta junto."""
+    g, fica, sai, _ancora = await _duplicadas(fabrica)
+    da_sai = await _pessoa(fabrica, company_id=sai.id)
+    fica2 = await _empresa(fabrica, g, "Fica 2", cnpj="55666777000122")
+    sai2 = await _empresa(fabrica, g, "Sai 2", cnpj="55666777000122")
+    await _pessoa(fabrica, company_id=fica2.id)
+    fusoes = sorted(await _plano(fabrica), key=lambda f: f.sobrevivente.id != fica.id)
+    assert [f.sobrevivente.id for f in fusoes] == [fica.id, fica2.id]
+
+    class _QuebraNaSegunda(_ConexaoVigiada):
+        apagadas = 0
+
+        async def execute(self, instrucao, *args, **kwargs):
+            if str(instrucao).startswith("DELETE FROM companies"):
+                self.apagadas += 1
+                if self.apagadas == 2:
+                    return await self._conn.execute(text("SELECT 1/0"))
+            return await self._conn.execute(instrucao, *args, **kwargs)
+
+    motor = await _conexao(fabrica)
+    async with motor.connect() as conn:
+        quebrada = _QuebraNaSegunda(conn, pausa="nenhuma")
+        with pytest.raises(DBAPIError):
+            await _funde(quebrada, fusoes)
+        assert quebrada.apagadas == 2
+
+    assert await _empresas(fabrica) == {fica.id, sai.id, fica2.id, sai2.id}
+    assert await _empresa_da_conta(fabrica, da_sai) == sai.id
+
+
+@pytest.mark.asyncio
+async def test_a_fusao_desiste_em_vez_de_esperar_para_sempre_por_uma_trava(fabrica, monkeypatch):
+    import scripts.funde_empresas_duplicadas as script
+
+    _g, fica, sai, _ancora = await _duplicadas(fabrica)
+    da_sai = await _pessoa(fabrica, company_id=sai.id)
+    fusoes = await _plano(fabrica)
+    monkeypatch.setattr(script, "_ESPERA_POR_TRAVA", "300ms")
+
+    async with fabrica() as esquecida:
+        await esquecida.execute(
+            text("SELECT id FROM companies WHERE id = :id FOR UPDATE"), {"id": sai.id}
+        )
+        relogio = asyncio.get_running_loop().time
+        inicio = relogio()
+        assert await _funde_agora(fabrica, fusoes) == "espera estourada"
+        # Desistiu no prazo configurado — não num prazo qualquer do servidor.
+        assert relogio() - inicio < 10
+
+    assert await _empresas(fabrica) == {fica.id, sai.id}
+    assert await _empresa_da_conta(fabrica, da_sai) == sai.id
+
+
+# ── Fusão em curso, a rota chega ──────────────────────────────
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("pausa", ["empresas", "commit"])
+async def test_troca_de_responsavel_que_herdaria_a_absorvida_nao_grava_nem_trava_a_fusao(
+    fabrica, pausa
+):
+    """A troca trava a conta do novo responsável (`FOR KEY SHARE`) e SÓ ENTÃO a
+    empresa; a fusão trava a empresa e SÓ ENTÃO a conta. Com `pausa="empresas"`
+    as duas ficam exatamente nesse cruzamento: a troca segurando a conta e
+    esperando a empresa, a fusão segurando a empresa e indo travar a conta. A
+    fusão passa (`FOR NO KEY UPDATE` convive com `FOR KEY SHARE`) e a troca,
+    que leu o vínculo antigo, não encontra mais a empresa: recusa, sem gravar
+    no aparelho uma empresa que deixou de existir."""
+    _g, fica, sai, _ancora = await _duplicadas(fabrica)
+    da_sai = await _pessoa(fabrica, company_id=sai.id)
+    tecnico = await _pessoa(fabrica, UserRole.technician)
+    produto = await _produto(fabrica)
+    aparelho = await _aparelho(fabrica, produto)
+    fusoes = await _plano(fabrica)
+
+    async with _fusao_em_curso(fabrica, fusoes, pausa) as fusao:
+        troca = asyncio.create_task(
+            _desfecho(fabrica, _equipe_edita(tecnico, aparelho, owner_id=da_sai.id))
+        )
+        await _ate_haver_espera(fabrica)
+        assert not troca.done()
+
+    assert fusao.result() == "ok"
+    assert await asyncio.wait_for(troca, timeout=10) == 400
+    assert await _empresas(fabrica) == {fica.id}
+    assert await _empresa_da_conta(fabrica, da_sai) == fica.id
+    assert await _dono_do(fabrica, aparelho.id) is None
+    assert await _empresa_do(fabrica, aparelho.id) is None
+    # Repetida depois da fusão, a mesma troca herda a sobrevivente.
+    assert await _desfecho(fabrica, _equipe_edita(tecnico, aparelho, owner_id=da_sai.id)) == "ok"
+    assert await _empresa_do(fabrica, aparelho.id) == fica.id
+
+
+@pytest.mark.asyncio
+async def test_troca_de_responsavel_da_sobrevivente_espera_a_fusao_e_herda(fabrica):
+    _g, fica, _sai, ancora = await _duplicadas(fabrica)
+    tecnico = await _pessoa(fabrica, UserRole.technician)
+    produto = await _produto(fabrica)
+    aparelho = await _aparelho(fabrica, produto)
+    fusoes = await _plano(fabrica)
+
+    async with _fusao_em_curso(fabrica, fusoes) as fusao:
+        troca = asyncio.create_task(
+            _desfecho(fabrica, _equipe_edita(tecnico, aparelho, owner_id=ancora.id))
+        )
+        await _ate_haver_espera(fabrica)
+
+    assert fusao.result() == "ok"
+    assert await asyncio.wait_for(troca, timeout=10) == "ok"
+    assert await _empresa_do(fabrica, aparelho.id) == fica.id
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("rota", ["vinculo", "desvinculo", "classificacao", "exclusao"])
+async def test_rota_que_chega_na_absorvida_durante_a_fusao_espera_e_nao_a_encontra(fabrica, rota):
+    """Vínculo, desvínculo, classificação de aparelho e exclusão pegam a
+    empresa antes de qualquer outra linha do plano. Esperam a fusão e saem com
+    recusa — nenhuma delas grava a empresa absorvida em lugar nenhum, e o
+    cliente que era dela não se perde: está na sobrevivente."""
+    _g, fica, sai, _ancora = await _duplicadas(fabrica)
+    admin = await _pessoa(fabrica, UserRole.admin)
+    solto = await _pessoa(fabrica)
+    da_sai = await _pessoa(fabrica, company_id=sai.id)
+    produto = await _produto(fabrica)
+    aparelho = await _aparelho(fabrica, produto)
+    fusoes = await _plano(fabrica)
+    operacao, esperado = {
+        "vinculo": (_vincula(admin, sai, solto), 404),
+        "desvinculo": (_desvincula(admin, sai, da_sai), 404),
+        "classificacao": (_equipe_edita(admin, aparelho, company_id=sai.id), 400),
+        "exclusao": (_exclui_empresa(admin, sai), 404),
+    }[rota]
+
+    async with _fusao_em_curso(fabrica, fusoes) as fusao:
+        chegada = asyncio.create_task(_desfecho(fabrica, operacao))
+        await _ate_haver_espera(fabrica)
+        assert not chegada.done()
+
+    assert fusao.result() == "ok"
+    assert await asyncio.wait_for(chegada, timeout=10) == esperado
+    assert await _empresas(fabrica) == {fica.id}
+    assert await _empresa_da_conta(fabrica, da_sai) == fica.id
+    assert await _empresa_da_conta(fabrica, solto) is None
+    assert await _empresa_do(fabrica, aparelho.id) is None
+
+
+# ── Rota em curso, a fusão chega ──────────────────────────────
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize(
+    "rota", ["vinculo", "desvinculo", "heranca", "classificacao_entra", "classificacao_sai"]
+)
+async def test_fusao_que_chega_com_a_rota_em_curso_espera_e_recusa_o_plano_velho(fabrica, rota):
+    """A rota já travou e escreveu, falta comitar. A fusão espera por ela —
+    na empresa, ou no aparelho quando ele está saindo da absorvida — e, ao
+    passar, vê que o plano não vale mais. O que a rota gravou fica como ela
+    gravou; o plano refeito leva tudo para a sobrevivente."""
+    g, fica, sai, _ancora = await _duplicadas(fabrica)
+    admin = await _pessoa(fabrica, UserRole.admin)
+    tecnico = await _pessoa(fabrica, UserRole.technician)
+    solto = await _pessoa(fabrica)
+    da_sai = await _pessoa(fabrica, company_id=sai.id)
+    outra = await _empresa(fabrica, g, "Outra")
+    produto = await _produto(fabrica)
+    livre = await _aparelho(fabrica, produto)
+    da_absorvida = await _aparelho(fabrica, produto, company_id=sai.id)
+    fusoes = await _plano(fabrica)
+    operacao = {
+        "vinculo": _vincula(admin, sai, solto),
+        "desvinculo": _desvincula(admin, sai, da_sai),
+        "heranca": _equipe_edita(tecnico, livre, owner_id=da_sai.id),
+        "classificacao_entra": _equipe_edita(admin, livre, company_id=sai.id),
+        "classificacao_sai": _equipe_edita(admin, da_absorvida, company_id=outra.id),
+    }[rota]
+
+    async with _rota_em_curso(fabrica, operacao):
+        fusao = asyncio.create_task(_funde_agora(fabrica, fusoes))
+        await _ate_haver_espera(fabrica)
+        assert not fusao.done()
+
+    assert await asyncio.wait_for(fusao, timeout=20) == "desatualizado"
+    assert {fica.id, sai.id} <= await _empresas(fabrica)
+    gravado = {
+        "vinculo": (await _empresa_da_conta(fabrica, solto), sai.id),
+        "desvinculo": (await _empresa_da_conta(fabrica, da_sai), None),
+        "heranca": (await _empresa_do(fabrica, livre.id), sai.id),
+        "classificacao_entra": (await _empresa_do(fabrica, livre.id), sai.id),
+        "classificacao_sai": (await _empresa_do(fabrica, da_absorvida.id), outra.id),
+    }[rota]
+    assert gravado[0] == gravado[1]
+
+    assert await _funde_agora(fabrica, await _plano(fabrica)) == "ok"
+    assert await _empresas(fabrica) == {fica.id, outra.id}
+    async with fabrica() as s:
+        orfaos = (
+            await s.execute(
+                text(
+                    "SELECT (SELECT count(*) FROM users WHERE company_id = :sai)"
+                    " + (SELECT count(*) FROM equipments WHERE company_id = :sai)"
+                ),
+                {"sai": sai.id},
+            )
+        ).scalar_one()
+    assert orfaos == 0
+    depois = {
+        "vinculo": (await _empresa_da_conta(fabrica, solto), fica.id),
+        "desvinculo": (await _empresa_da_conta(fabrica, da_sai), None),
+        "heranca": (await _empresa_do(fabrica, livre.id), fica.id),
+        "classificacao_entra": (await _empresa_do(fabrica, livre.id), fica.id),
+        "classificacao_sai": (await _empresa_do(fabrica, da_absorvida.id), outra.id),
+    }[rota]
+    assert depois[0] == depois[1]
+
+
+@pytest.mark.asyncio
+async def test_exclusao_em_curso_da_duplicata_vazia_faz_a_fusao_recusar_o_plano(fabrica):
+    _g, fica, sai, _ancora = await _duplicadas(fabrica)
+    admin = await _pessoa(fabrica, UserRole.admin)
+    fusoes = await _plano(fabrica)
+
+    async with _rota_em_curso(fabrica, _exclui_empresa(admin, sai)):
+        fusao = asyncio.create_task(_funde_agora(fabrica, fusoes))
+        await _ate_haver_espera(fabrica)
+
+    assert await asyncio.wait_for(fusao, timeout=20) == "desatualizado"
+    assert await _empresas(fabrica) == {fica.id}
+    assert await _plano(fabrica) == []

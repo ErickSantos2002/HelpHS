@@ -35,6 +35,14 @@ Uso::
 Sem `--aplicar` nada é escrito. O plano sai igual nos dois modos, então dá
 para conferir antes e comparar depois.
 
+Pode rodar com o sistema no ar. Antes de gravar, o `--aplicar` trava as
+empresas do plano e o que está pendurado nelas, na MESMA ordem das rotas
+(empresa → cliente → aparelho), e confere de novo o que travou contra o plano
+que acabou de mostrar. Se alguém vinculou um cliente, classificou um aparelho,
+mudou o CNPJ ou apagou uma empresa nesse intervalo, o script NÃO grava nada,
+diz o que mudou e sai com código 1 — é só rodar de novo para ver o plano novo.
+Tudo acontece numa transação só: ou todas as fusões entram, ou nenhuma.
+
 Duplicatas em GRUPOS diferentes são relatadas com destaque e **não são
 fundidas**: juntar empresas de grupos distintos muda a que grupo os clientes
 pertencem, e isso é decisão de quem conhece a operação, não de um script.
@@ -48,6 +56,7 @@ from collections.abc import Iterable, Sequence
 from typing import Any, NamedTuple
 
 from sqlalchemy import text
+from sqlalchemy.exc import DBAPIError
 from sqlalchemy.ext.asyncio import create_async_engine
 
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
@@ -165,31 +174,147 @@ def _relata(fusoes: Sequence[Fusao], recusadas: Sequence[Sequence[Empresa]]) -> 
         print("     Juntar mudaria o grupo dos clientes. Decida à mão.")
 
 
-async def _aplica(conn, fusoes: Sequence[Fusao]) -> None:
-    for f in fusoes:
-        alvos = [a.id for a in f.absorvidas]
-        # Move ANTES de apagar: company_notes é ON DELETE CASCADE e users é
-        # SET NULL. Na ordem inversa, nota vira lixo e cliente vira órfão.
-        await conn.execute(
-            text("UPDATE users SET company_id = :fica WHERE company_id = ANY(:alvos)"),
-            {"fica": f.sobrevivente.id, "alvos": alvos},
+class PlanoDesatualizadoError(Exception):
+    """O banco mudou entre o levantamento e a gravação. Nada foi gravado."""
+
+    def __init__(self, diferencas: Sequence[str]) -> None:
+        super().__init__("; ".join(diferencas))
+        self.diferencas = list(diferencas)
+
+
+# Quanto o script espera por uma trava antes de desistir. Ele segura as
+# empresas do plano em `FOR UPDATE` enquanto espera o resto, e com isso segura
+# as rotas que tocam nelas: esperar para sempre por uma transação esquecida
+# aberta pararia o cadastro junto. Estourou, nada é gravado.
+_ESPERA_POR_TRAVA = "15s"
+
+# As travas, na ordem das rotas (`groups.py` e `products.py`): EMPRESA →
+# cliente → aparelho, cada tabela em ordem de id.
+#
+#   - Empresa em `FOR UPDATE`, o modo da exclusão (F1-D1): conflita com o
+#     `FOR KEY SHARE` que vínculo, desvínculo, nota e classificação de aparelho
+#     pegam nela. Ou a rota comitou antes, e o que ela gravou aparece na
+#     reconferência; ou espera a fusão e encontra a empresa já fundida.
+#   - Cliente em `FOR NO KEY UPDATE` — o que o `UPDATE` de `company_id` pegaria
+#     de todo jeito, só que em ordem de id — e NÃO em `FOR UPDATE`. A troca de
+#     responsável (`PATCH /equipments/{id}`) trava a conta em `FOR KEY SHARE`
+#     ANTES da empresa; `FOR UPDATE` aqui esperaria por ela enquanto ela espera
+#     pela empresa: círculo. `FOR NO KEY UPDATE` convive com `FOR KEY SHARE`, e
+#     quem fecha essa corrida é a trava da empresa — a troca que leu o vínculo
+#     antigo para na empresa absorvida e, depois da fusão, não a encontra.
+#   - Nota e aparelho em `FOR UPDATE`, o modo das rotas de aparelho.
+_TRAVA_EMPRESAS = r"""
+    SELECT id, regexp_replace(coalesce(cnpj, ''), '\D', '', 'g') AS doc, group_id
+      FROM companies
+     WHERE id = ANY(:ids)
+     ORDER BY id
+       FOR UPDATE
+"""
+_TRAVA_DEPENDENTES = (
+    ("clientes", "users", "NO KEY UPDATE"),
+    ("notas", "company_notes", "UPDATE"),
+    ("equipamentos", "equipments", "UPDATE"),
+)
+
+
+async def _trava_e_confere(conn, fusoes: Sequence[Fusao]) -> None:
+    """Trava tudo o que o plano toca e recusa o plano que envelheceu.
+
+    O levantamento é uma leitura solta, feita antes de qualquer trava: entre
+    ele e a gravação o sistema continua em uso. Gravar por cima sem olhar
+    moveria em silêncio o que o plano mostrado não mostrava — ou elegeria a
+    sobrevivente por uma contagem que já não vale. Com as linhas travadas, o
+    que se lê aqui é o que será gravado.
+    """
+    planejadas = [e for f in fusoes for e in (f.sobrevivente, *f.absorvidas)]
+    ids = sorted({e.id for e in planejadas}, key=str)
+
+    travadas = {r.id: r for r in (await conn.execute(text(_TRAVA_EMPRESAS), {"ids": ids})).all()}
+    contagens: dict[str, dict[Any, int]] = {}
+    for rotulo, tabela, modo in _TRAVA_DEPENDENTES:
+        consulta = (
+            f"SELECT company_id FROM {tabela} WHERE company_id = ANY(:ids) "
+            f"ORDER BY id FOR {modo}"
         )
-        await conn.execute(
-            text("UPDATE company_notes SET company_id = :fica WHERE company_id = ANY(:alvos)"),
-            {"fica": f.sobrevivente.id, "alvos": alvos},
+        por_empresa: dict[Any, int] = {}
+        for (empresa_id,) in (await conn.execute(text(consulta), {"ids": ids})).all():
+            por_empresa[empresa_id] = por_empresa.get(empresa_id, 0) + 1
+        contagens[rotulo] = por_empresa
+
+    diferencas: list[str] = []
+    for e in planejadas:
+        atual = travadas.get(e.id)
+        if atual is None:
+            diferencas.append(f"{e.id} ({e.nome!r}): a empresa não existe mais")
+            continue
+        if atual.doc != e.doc:
+            diferencas.append(f"{e.id} ({e.nome!r}): o CNPJ mudou")
+        if atual.group_id != e.group_id:
+            diferencas.append(f"{e.id} ({e.nome!r}): o grupo mudou")
+        for rotulo, antes in (
+            ("clientes", e.clientes),
+            ("notas", e.notas),
+            ("equipamentos", e.equipamentos),
+        ):
+            agora = contagens[rotulo].get(e.id, 0)
+            if agora != antes:
+                diferencas.append(f"{e.id} ({e.nome!r}): {rotulo} eram {antes}, agora {agora}")
+    if diferencas:
+        raise PlanoDesatualizadoError(diferencas)
+
+
+async def _aplica(conn, fusoes: Sequence[Fusao]) -> dict[str, int]:
+    """Grava o plano inteiro numa transação; em qualquer erro, desfaz tudo.
+
+    Devolve quantas linhas foram movidas de cada tipo.
+    """
+    movidos = {"clientes": 0, "notas": 0, "equipamentos": 0}
+    try:
+        await conn.execute(text(f"SET LOCAL lock_timeout = '{_ESPERA_POR_TRAVA}'"))
+        await _trava_e_confere(conn, fusoes)
+        for f in fusoes:
+            alvos = [a.id for a in f.absorvidas]
+            # Move ANTES de apagar: company_notes é ON DELETE CASCADE e users é
+            # SET NULL. Na ordem inversa, nota vira lixo e cliente vira órfão.
+            # A empresa do aparelho é RESTRICT: sem movê-lo o DELETE falha. A
+            # troca é de uma duplicata para a sobrevivente do MESMO CNPJ — a
+            # empresa do aparelho continua sendo a mesma empresa.
+            for rotulo, tabela in (
+                ("clientes", "users"),
+                ("notas", "company_notes"),
+                ("equipamentos", "equipments"),
+            ):
+                resultado = await conn.execute(
+                    text(f"UPDATE {tabela} SET company_id = :fica WHERE company_id = ANY(:alvos)"),
+                    {"fica": f.sobrevivente.id, "alvos": alvos},
+                )
+                movidos[rotulo] += resultado.rowcount
+            await conn.execute(
+                text("DELETE FROM companies WHERE id = ANY(:alvos)"),
+                {"alvos": alvos},
+            )
+        await conn.commit()
+    except BaseException:
+        await conn.rollback()
+        raise
+    return movidos
+
+
+async def _levanta(conn) -> list[Empresa]:
+    linhas = (await conn.execute(text(_LEVANTAMENTO))).all()
+    return [
+        Empresa(
+            r.id,
+            r.doc,
+            r.nome,
+            r.group_id,
+            r.criada_em,
+            r.clientes,
+            r.notas,
+            r.equipamentos,
         )
-        # A empresa do aparelho é RESTRICT: sem este passo o DELETE abaixo
-        # falha. A troca é de uma duplicata para a sobrevivente do MESMO CNPJ —
-        # a empresa do aparelho continua sendo a mesma empresa.
-        await conn.execute(
-            text("UPDATE equipments SET company_id = :fica WHERE company_id = ANY(:alvos)"),
-            {"fica": f.sobrevivente.id, "alvos": alvos},
-        )
-        await conn.execute(
-            text("DELETE FROM companies WHERE id = ANY(:alvos)"),
-            {"alvos": alvos},
-        )
-    await conn.commit()
+        for r in linhas
+    ]
 
 
 async def _main(aplicar: bool) -> None:
@@ -203,21 +328,7 @@ async def _main(aplicar: bool) -> None:
     engine = create_async_engine(url)
     try:
         async with engine.connect() as conn:
-            linhas = (await conn.execute(text(_LEVANTAMENTO))).all()
-            empresas = [
-                Empresa(
-                    r.id,
-                    r.doc,
-                    r.nome,
-                    r.group_id,
-                    r.criada_em,
-                    r.clientes,
-                    r.notas,
-                    r.equipamentos,
-                )
-                for r in linhas
-            ]
-            fusoes, recusadas = planeja_fusao(empresas)
+            fusoes, recusadas = planeja_fusao(await _levanta(conn))
             _relata(fusoes, recusadas)
 
             if not fusoes and not recusadas:
@@ -225,9 +336,29 @@ async def _main(aplicar: bool) -> None:
                 return
 
             if aplicar and fusoes:
-                await _aplica(conn, fusoes)
+                try:
+                    movidos = await _aplica(conn, fusoes)
+                except PlanoDesatualizadoError as e:
+                    print("\nNADA FOI GRAVADO: o banco mudou depois do levantamento acima.")
+                    for diferenca in e.diferencas:
+                        print(f"  - {diferenca}")
+                    print("Rode de novo para ver o plano atual.")
+                    raise SystemExit(1) from None
+                except DBAPIError as e:
+                    # Só a classe do erro: a mensagem do driver pode trazer
+                    # valores das linhas.
+                    print(
+                        f"\nNADA FOI GRAVADO: o banco recusou a operação "
+                        f"({type(e.orig).__name__}). Se foi espera por trava, há outra "
+                        "operação em curso nessas empresas — rode de novo."
+                    )
+                    raise SystemExit(1) from None
                 apagadas = sum(len(f.absorvidas) for f in fusoes)
                 print(f"\nOK: {apagadas} empresa(s) absorvida(s) em {len(fusoes)} CNPJ(s).")
+                print(
+                    f"Movidos: {movidos['clientes']} cliente(s), {movidos['notas']} nota(s) e "
+                    f"{movidos['equipamentos']} equipamento(s)."
+                )
             elif fusoes:
                 apagadas = sum(len(f.absorvidas) for f in fusoes)
                 print(
