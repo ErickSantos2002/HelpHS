@@ -196,10 +196,19 @@ async def _produto(fabrica, nome="Titan") -> Product:
 
 
 async def _aparelho(
-    fabrica, produto: Product, *, dono: User | None = None, company_id=None, serie=None, ativo=True
+    fabrica,
+    produto: Product,
+    *,
+    dono: User | None = None,
+    company_id=None,
+    serie=None,
+    ativo=True,
+    id_: uuid.UUID | None = None,
 ) -> Equipment:
+    """`id_` só para o teste que depende da ORDEM dos ids (a das travas): ali o
+    id se constrói, não se sorteia até sair o que serve."""
     e = Equipment(
-        id=uuid.uuid4(),
+        id=id_ or uuid.uuid4(),
         product_id=produto.id,
         owner_id=dono.id if dono else None,
         company_id=company_id,

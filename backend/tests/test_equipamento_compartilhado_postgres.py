@@ -1050,12 +1050,11 @@ async def test_associacao_da_equipe_espera_o_vinculo_sem_segurar_aparelho(fabric
     os aparelhos primeiro, seguraria o livre enquanto espera o do cliente — e o
     vínculo, que escreve nos aparelhos em ordem nenhuma, fecharia o círculo."""
     c = await _cenario(fabrica)
-    for _ in range(40):  # um aparelho livre que venha ANTES na ordem das travas
-        livre = await _aparelho(fabrica, c["produto"])
-        if livre.id < c["do_solto"].id:
-            break
-    else:  # pragma: no cover
-        pytest.fail("não saiu um id menor em 40 sorteios")
+    # Um aparelho livre que venha ANTES na ordem das travas (`ORDER BY id`). O id
+    # é o vizinho de baixo do aparelho do cliente, construído: sorteando até
+    # sair um menor, o preparo falhava sozinho em 1 a cada 41 execuções.
+    livre = await _aparelho(fabrica, c["produto"], id_=uuid.UUID(int=c["do_solto"].id.int - 1))
+    assert livre.id < c["do_solto"].id
     chamado = await _roda(fabrica, _abre_chamado(c["admin"], []))
 
     async with fabrica() as do_vinculo:
