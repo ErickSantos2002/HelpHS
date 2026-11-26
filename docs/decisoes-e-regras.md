@@ -1756,6 +1756,40 @@ nem contagem, e não vira opção no seletor de empresa — as opções vêm de
 - `GET /companies/{id}` fica registrado **depois** de `/companies/suggestions`:
   o FastAPI casa rota na ordem, e antes dela "suggestions" seria lido como id.
 
+### O filtro `company_id` com a ECE-01 (decisão de 25/11/2026)
+
+A ECE-01 deu ao equipamento uma empresa própria (`equipments.company_id`), que
+pode diferir da empresa do responsável (`users.company_id`). O que cada parte
+da tela usa depende de `EQUIPAMENTO_POR_EMPRESA`:
+
+| | Flag desligada | Flag ligada |
+|---|---|---|
+| Filtro "Empresa" (`GET /equipments?company_id=`) | empresa do **responsável** | empresa do **equipamento** |
+| Contador "Equipamentos" da tela de Empresas | empresa do **responsável** | empresa do **equipamento** |
+| Coluna "Empresa" da consulta | empresa do **equipamento** | empresa do **equipamento** |
+| Recusa da exclusão de empresa (HTTP 409) | empresa do **equipamento** | empresa do **equipamento** |
+
+Com a flag desligada, filtro e contador ficam como sempre foram — a regra "as
+duas telas não podem discordar" continua valendo e continua presa por teste.
+A tela avisa quando o filtro trouxe linhas pela empresa do responsável.
+
+**Consequência conhecida e aceita, só com a flag desligada.** Um equipamento
+classificado pela equipe na empresa X não aparece no filtro X se o responsável
+não for de X; e a exclusão de X pode ser recusada por equipamento enquanto o
+contador mostra zero. A mensagem do 409 diz que a contagem é pela empresa do
+equipamento. A coerência completa chega com a flag ligada.
+
+**O que não foi feito, de propósito:** nenhum segundo filtro, nenhuma mudança
+na semântica do parâmetro `company_id`, nenhuma mudança no contador.
+
+**O que esta decisão não autoriza:** ligar `EQUIPAMENTO_POR_EMPRESA`. A
+divergência é aceita enquanto a flag estiver desligada; ligá-la depende de
+decisão própria, do preenchimento do histórico
+(`preenche_empresa_do_equipamento.py`) e do ensaio das migrations.
+
+**Possibilidade futura:** um parâmetro próprio para a empresa do equipamento,
+ao lado do atual, mediante nova decisão.
+
 ## Cadastro do cliente
 
 **CNPJ e CEP são obrigatórios** no onboarding e ao salvar os dados da empresa no

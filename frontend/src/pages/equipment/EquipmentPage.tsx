@@ -18,6 +18,7 @@ import {
 } from "../../components/ui";
 import type { BadgeProps } from "../../components/ui";
 import { getApiError } from "../../lib/apiError";
+import { ehDoProprioCliente } from "../../lib/equipamento";
 import { cn } from "../../lib/utils";
 import { api } from "../../services/api";
 import {
@@ -343,6 +344,9 @@ export default function EquipmentPage() {
   const [allEquipments, setAllEquipments] = useState<Equipment[]>([]);
   const [products, setProducts] = useState<Product[]>([]);
   const [loading, setLoading] = useState(true);
+  // A falha de carga era engolida: a tela abria dizendo "Nenhum equipamento
+  // cadastrado ainda" para quem tinha dez e estava sem rede.
+  const [loadError, setLoadError] = useState(false);
   const [page, setPage] = useState(1);
   const [filter, setFilter] = useState<Filtro>("all");
 
@@ -358,9 +362,14 @@ export default function EquipmentPage() {
       getMyEquipment(),
     ])
       .then(([prods, equips]) => { setProducts(prods); setAllEquipments(equips); })
-      .catch(() => {})
+      .catch(() => setLoadError(true))
       .finally(() => setLoading(false));
   }, []);
+
+  // ECE-01: com o compartilhamento por empresa ligado no backend, a lista traz
+  // também os equipamentos ativos da empresa, cadastrados por colegas. A tela
+  // não sabe se a flag está ligada — só lê `is_mine` de cada item.
+  const haCompartilhados = allEquipments.some((e) => !ehDoProprioCliente(e));
 
   const filtered = allEquipments.filter((e) => {
     if (filter === "active") return e.is_active;
@@ -394,6 +403,17 @@ export default function EquipmentPage() {
     return <div className="flex justify-center py-20"><Spinner size="lg" /></div>;
   }
 
+  if (loadError) {
+    return (
+      <div className="space-y-5">
+        <h1 className="text-2xl font-bold text-conteudo-heading">Meus equipamentos</h1>
+        <Alert variant="danger">
+          Não foi possível carregar os equipamentos. Atualize a página para tentar de novo.
+        </Alert>
+      </div>
+    );
+  }
+
   return (
     <div className="space-y-5">
       {/* Header */}
@@ -402,6 +422,8 @@ export default function EquipmentPage() {
           <h1 className="text-2xl font-bold text-conteudo-heading">Meus equipamentos</h1>
           <p className="text-conteudo-muted text-sm mt-0.5">
             Gerencie os equipamentos sob sua responsabilidade.
+            {haCompartilhados &&
+              " Os marcados como “Da empresa” foram cadastrados por colegas: você pode usá-los em chamados, mas não alterá-los."}
           </p>
         </div>
         {products.length > 0 && (
@@ -474,6 +496,7 @@ export default function EquipmentPage() {
             <div className="divide-y divide-borda">
               {paginated.map((e) => {
                 const prod = productMap[e.product_id];
+                const meu = ehDoProprioCliente(e);
                 return (
                   <div key={e.id} className="flex items-center gap-4 px-4 py-3 hover:bg-surface-elevated/40 transition-colors">
                     {/* Icon */}
@@ -508,11 +531,27 @@ export default function EquipmentPage() {
                       </Badge>
                     )}
 
+                    {/* Compartilhado: dito em palavra, e sem o nome de quem
+                        cadastrou — a API não o manda, e a tela não o procura. */}
+                    {!meu && (
+                      <Badge
+                        variant="info"
+                        className="shrink-0"
+                        title="Cadastrado por um colega da sua empresa"
+                      >
+                        Da empresa
+                      </Badge>
+                    )}
+
                     {/* Status */}
                     <SeloDeEstado ativo={e.is_active} />
 
-                    {/* Actions */}
-                    <div className="flex items-center gap-1 shrink-0">
+                    {/* Actions — só no que é da própria pessoa. A coluna
+                        continua no lugar para as linhas não desalinharem; o
+                        backend recusa a alteração de qualquer forma (404). */}
+                    <div className="flex items-center justify-end gap-1 shrink-0 w-[60px]">
+                      {meu && (
+                        <>
                       {/* O nome acessível diz QUAL equipamento: dez linhas na
                           página davam dez botões chamados "Editar", e o `title`
                           sozinho não resolve isso para quem navega por lista de
@@ -535,6 +574,8 @@ export default function EquipmentPage() {
                       >
                         <Icon name="trash" size={16} strokeWidth={2} />
                       </button>
+                        </>
+                      )}
                     </div>
                   </div>
                 );

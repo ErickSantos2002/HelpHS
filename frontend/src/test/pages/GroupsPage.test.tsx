@@ -436,6 +436,79 @@ describe("CompanyDetailModal — desvincular cliente", () => {
     expect(unassignClient).not.toHaveBeenCalled();
   });
 
+  it("avisa quantos equipamentos do cliente continuam classificados na empresa", async () => {
+    // ECE-01: desvincular nao tira a empresa do aparelho. O operador tem de
+    // saber disso ANTES de confirmar — com o numero, e sem a tela prometer
+    // que algo sera movido.
+    vi.mocked(getCompany).mockResolvedValue({
+      ...DETALHE,
+      clients: [{ ...CLIENTE, company_equipment_count: 2 }],
+      client_count: 1,
+    });
+    montar();
+
+    fireEvent.click(
+      await screen.findByRole("button", { name: "Desvincular Carla Dias" }),
+    );
+
+    const dialogo = await screen.findByRole("dialog", {
+      name: "Desvincular cliente",
+    });
+    const aviso = within(dialogo).getByRole("note");
+    expect(aviso).toHaveTextContent(
+      "2 equipamentos sob responsabilidade de Carla Dias continuam classificados em Transportes Alfa",
+    );
+    expect(aviso).toHaveTextContent("Nada muda neles");
+    // O aviso nao bloqueia: o botao de confirmar segue disponivel.
+    expect(
+      within(dialogo).getByRole("button", { name: "Desvincular" }),
+    ).toBeEnabled();
+    expect(unassignClient).not.toHaveBeenCalled();
+  });
+
+  it("no singular, o aviso concorda com um equipamento so", async () => {
+    vi.mocked(getCompany).mockResolvedValue({
+      ...DETALHE,
+      clients: [{ ...CLIENTE, company_equipment_count: 1 }],
+      client_count: 1,
+    });
+    montar();
+
+    fireEvent.click(
+      await screen.findByRole("button", { name: "Desvincular Carla Dias" }),
+    );
+
+    const dialogo = await screen.findByRole("dialog", {
+      name: "Desvincular cliente",
+    });
+    expect(within(dialogo).getByRole("note")).toHaveTextContent(
+      "1 equipamento sob responsabilidade de Carla Dias continua classificado em Transportes Alfa",
+    );
+  });
+
+  it.each([
+    ["zero", 0],
+    ["ausente (backend que ainda nao conta)", undefined],
+    ["nulo", null],
+  ])("sem equipamento na empresa (%s), o dialogo nao inventa aviso", async (_caso, contagem) => {
+    vi.mocked(getCompany).mockResolvedValue({
+      ...DETALHE,
+      clients: [{ ...CLIENTE, company_equipment_count: contagem }],
+      client_count: 1,
+    });
+    montar();
+
+    fireEvent.click(
+      await screen.findByRole("button", { name: "Desvincular Carla Dias" }),
+    );
+
+    const dialogo = await screen.findByRole("dialog", {
+      name: "Desvincular cliente",
+    });
+    expect(within(dialogo).queryByRole("note")).not.toBeInTheDocument();
+    expect(dialogo).not.toHaveTextContent(/equipamento/i);
+  });
+
   it("a frase promete que a conta CONTINUA cadastrada", async () => {
     // Este e o caso que a decisao pediu de verdade: desvincular nao destroi, e
     // o texto tem de dizer isso. Se a frase virar a de uma exclusao, reprova.

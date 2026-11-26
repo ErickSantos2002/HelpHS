@@ -24,7 +24,7 @@ from fastapi import APIRouter, Depends, HTTPException, Query, status
 from fastapi.encoders import jsonable_encoder
 from fastapi.responses import JSONResponse
 from loguru import logger
-from sqlalchemy import ColumnElement, Select, func, or_, select
+from sqlalchemy import ColumnElement, Select, func, or_, select, update
 from sqlalchemy.exc import IntegrityError
 from sqlalchemy.ext.asyncio import AsyncSession
 
@@ -65,6 +65,7 @@ from app.schemas.groups import (
     GroupUpdate,
     UpdateClientNotesRequest,
 )
+from app.services.escopo_de_equipamento import compartilha_por_empresa
 
 router = APIRouter(tags=["Groups"])
 
@@ -216,8 +217,27 @@ def _group_response(g: Group, company_count: int) -> GroupResponse:
 
 
 async def _clientes_vinculados(db: AsyncSession, company_id: uuid.UUID) -> list[ClientInCompany]:
-    """Quem tem o VÍNCULO oficial (`users.company_id`) — não quem digitou o nome."""
+    """Quem tem o VÍNCULO oficial (`users.company_id`) — não quem digitou o nome.
+
+    Cada cliente sai com `company_equipment_count`: os equipamentos de que ele
+    é o responsável e que estão classificados NESTA empresa. Desvincular não
+    os reclassifica (a empresa do aparelho não acompanha o vínculo), então é
+    esse o número que fica para trás — só a contagem, dos aparelhos desta
+    empresa e deste cliente; nada de outra empresa entra.
+    """
     linhas = await db.execute(select(User).where(User.company_id == company_id).order_by(User.name))
+    clientes = linhas.scalars().all()
+    por_responsavel: dict[uuid.UUID, int] = {}
+    if clientes:
+        contagem = await db.execute(
+            select(Equipment.owner_id, func.count(Equipment.id))
+            .where(
+                Equipment.company_id == company_id,
+                Equipment.owner_id.in_([u.id for u in clientes]),
+            )
+            .group_by(Equipment.owner_id)
+        )
+        por_responsavel = {dono: total for dono, total in contagem}
     return [
         ClientInCompany(
             id=u.id,
@@ -225,8 +245,9 @@ async def _clientes_vinculados(db: AsyncSession, company_id: uuid.UUID) -> list[
             email=u.email,
             phone=u.phone,
             client_notes=u.client_notes,
+            company_equipment_count=por_responsavel.get(u.id, 0),
         )
-        for u in linhas.scalars().all()
+        for u in clientes
     ]
 
 
@@ -234,14 +255,24 @@ async def _contagem_de_equipamentos_por_empresa(
     db: AsyncSession, company_ids: list[uuid.UUID]
 ) -> dict[uuid.UUID, int]:
     """
-    Equipamentos cujo RESPONSÁVEL tem vínculo oficial com a empresa.
+    Equipamentos de cada empresa, para a tela de Empresas da equipe.
 
-    O equipamento não tem empresa própria; a dele é a do responsável. Conta os
-    inativos também — é o mesmo conjunto que `GET /equipments?company_id=`
-    devolve sem filtro de status, e as duas telas não podem discordar.
+    Com `EQUIPAMENTO_POR_EMPRESA` desligada: aqueles cujo RESPONSÁVEL tem
+    vínculo oficial com a empresa, como sempre foi. Ligada: os que SÃO da
+    empresa (`equipments.company_id`) — a mesma coluna que decide quem enxerga
+    o aparelho. Nos dois modos conta os inativos também e é o mesmo conjunto
+    que `GET /equipments?company_id=` devolve sem filtro de status: as duas
+    telas trocam de critério juntas e não podem discordar.
     """
     if not company_ids:
         return {}
+    if compartilha_por_empresa():
+        da_empresa = await db.execute(
+            select(Equipment.company_id, func.count(Equipment.id))
+            .where(Equipment.company_id.in_(company_ids))
+            .group_by(Equipment.company_id)
+        )
+        return {cid: total for cid, total in da_empresa}
     rows = await db.execute(
         select(User.company_id, func.count(Equipment.id))
         .join(User, User.id == Equipment.owner_id)
@@ -406,6 +437,15 @@ async def _dependentes_da_empresa(db: AsyncSession, company_id: uuid.UUID) -> di
             .select_from(CompanyNote)
             .where(CompanyNote.company_id == company_id),
         ),
+        # ECE-01: os aparelhos DA EMPRESA (`equipments.company_id`), ativos ou
+        # não — não os do responsável vinculado, que já caem em
+        # `clientes_vinculados`. A FK é `RESTRICT`; a contagem vem antes dela
+        # para a recusa sair com número, e a gravação da empresa no aparelho
+        # pega `FOR KEY SHARE` nesta linha, como todo filho (ver acima).
+        "equipamentos": await _conta(
+            db,
+            select(func.count()).select_from(Equipment).where(Equipment.company_id == company_id),
+        ),
     }
 
 
@@ -415,11 +455,27 @@ _ROTULOS = {
     "notas_do_grupo": "nota(s) do grupo",
     "notas_de_empresas": "nota(s) de empresa",
     "notas": "nota(s)",
+    "equipamentos": "equipamento(s)",
 }
 
 
+# O complemento do 409 quando o que segura a empresa são equipamentos. Só a
+# contagem não bastava: quem ia "remover ou mover" procurava pela empresa do
+# RESPONSÁVEL e com os inativos escondidos, não achava nada, e a recusa
+# parecia engano. A frase diz qual coluna conta e que inativo conta.
+_ONDE_ESTAO_OS_EQUIPAMENTOS = (
+    " Conta a empresa registrada no próprio equipamento (a coluna Empresa da tela de "
+    "Equipamentos), mesmo quando o responsável é de outra empresa ou não existe."
+)
+
+
 def _recusa_exclusao(
-    entidade: str, alvo_id: uuid.UUID, ator: User, contagens: dict[str, int]
+    entidade: str,
+    alvo_id: uuid.UUID,
+    ator: User,
+    contagens: dict[str, int],
+    *,
+    equipamentos_inativos: int = 0,
 ) -> HTTPException:
     """Monta o 409 e deixa o aviso no log. Só números: nunca quem são os clientes."""
     presentes = {chave: n for chave, n in contagens.items() if n}
@@ -432,11 +488,18 @@ def _recusa_exclusao(
     )
     itens = ", ".join(f"{n} {_ROTULOS[chave]}" for chave, n in presentes.items())
     artigo, pronome = ("o grupo", "ele") if entidade == "group" else ("a empresa", "ela")
+    complemento = ""
+    if presentes.get("equipamentos"):
+        if equipamentos_inativos:
+            complemento = (
+                f" Entre os equipamentos há {equipamentos_inativos} inativo(s), que também contam."
+            )
+        complemento += _ONDE_ESTAO_OS_EQUIPAMENTOS
     return HTTPException(
         status_code=status.HTTP_409_CONFLICT,
         detail=(
             f"Não é possível excluir {artigo}: {pronome} ainda tem {itens}. "
-            f"Remova ou mova esses itens antes de excluir {artigo}."
+            f"Remova ou mova esses itens antes de excluir {artigo}.{complemento}"
         ),
     )
 
@@ -605,7 +668,19 @@ async def delete_company(
 
     contagens = await _dependentes_da_empresa(db, company_id)
     if any(contagens.values()):
-        raise _recusa_exclusao("company", company_id, actor, contagens)
+        # Só para a mensagem, e só quando há equipamento: a contagem que decide
+        # (e vai para a auditoria) continua sendo a de cima, com todos.
+        inativos = 0
+        if contagens["equipamentos"]:
+            inativos = await _conta(
+                db,
+                select(func.count())
+                .select_from(Equipment)
+                .where(Equipment.company_id == company_id, Equipment.is_active.is_(False)),
+            )
+        raise _recusa_exclusao(
+            "company", company_id, actor, contagens, equipamentos_inativos=inativos
+        )
 
     # Nome e CNPJ dizem QUAL empresa saiu — dados da empresa, não de pessoa.
     # Nenhum dado de cliente entra: a exclusão só passa sem cliente vinculado.
@@ -706,6 +781,58 @@ def _audita_vinculo(
     )
 
 
+async def _propaga_empresa_aos_aparelhos(
+    db: AsyncSession, ator: User, empresa: Company, clientes: list[uuid.UUID]
+) -> None:
+    """Leva a empresa aos aparelhos dos clientes recém-vinculados (ECE-01).
+
+    O cliente cadastra o aparelho no onboarding, ANTES de a equipe vinculá-lo:
+    sem isto o aparelho nasceria sem empresa e assim ficaria.
+
+    Só os aparelhos de que o cliente é o responsável e que ainda NÃO têm
+    empresa. Empresa já gravada — pela equipe, ou por um vínculo anterior do
+    responsável — não é trocada aqui: mudar a empresa de um aparelho é ato
+    explícito da equipe (`PATCH /equipments/{id}`). Pelo mesmo motivo o
+    desvínculo não tem contraparte: tirar o cliente da empresa não tira o
+    aparelho dela.
+
+    E o aparelho que a equipe deixou SEM empresa de propósito
+    (`sem_empresa_por_decisao`) também fica como está: aquele nulo é uma
+    decisão, não uma lacuna. A condição vai na própria instrução, e não numa
+    leitura anterior — se a equipe marcar o aparelho enquanto o vínculo roda,
+    o `UPDATE` espera a linha e reavalia o `WHERE` com a marca já gravada.
+
+    Roda com os clientes já travados (`FOR UPDATE`), no fim da ordem de travas:
+    as rotas do cliente pegam a própria conta antes de escrever no aparelho
+    (`products.py`, "A empresa do equipamento"), então ninguém segura um
+    aparelho destes esperando a conta. Mesma transação do vínculo, com o antes
+    e o depois de cada aparelho em `audit_logs`.
+    """
+    alterados = (
+        await db.execute(
+            update(Equipment)
+            .where(
+                Equipment.owner_id.in_(clientes),
+                Equipment.company_id.is_(None),
+                Equipment.sem_empresa_por_decisao.is_(False),
+            )
+            .values(company_id=empresa.id)
+            .returning(Equipment.id)
+        )
+    ).scalars()
+    for equipamento_id in sorted(alterados):
+        db.add(
+            AuditLog(
+                user_id=ator.id,
+                action=AuditAction.update,
+                entity_type="equipment",
+                entity_id=equipamento_id,
+                old_data={"company_id": None},
+                new_data={"company_id": str(empresa.id), "origem": "vinculo_do_responsavel"},
+            )
+        )
+
+
 def _cliente_na_empresa(u: User) -> ClientInCompany:
     return ClientInCompany(
         id=u.id, name=u.name, email=u.email, phone=u.phone, client_notes=u.client_notes
@@ -781,6 +908,7 @@ async def assign_client(
 
     u.company_id = company_id
     _audita_vinculo(db, actor, u.id, None, empresa)
+    await _propaga_empresa_aos_aparelhos(db, actor, empresa, [u.id])
     await db.commit()
     await db.refresh(u)
     return _cliente_na_empresa(u)
@@ -1066,6 +1194,7 @@ async def create_company_from_suggestion(
     for u in alvos:
         u.company_id = empresa.id
         _audita_vinculo(db, actor, u.id, None, empresa)
+    await _propaga_empresa_aos_aparelhos(db, actor, empresa, [u.id for u in alvos])
 
     await db.commit()
     await db.refresh(empresa)

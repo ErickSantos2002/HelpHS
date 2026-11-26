@@ -71,14 +71,24 @@ class EquipmentUpdate(AppBaseModel):
 # cliente — `owner_id` ali significaria o cliente escolhendo de quem é o
 # equipamento (o PATCH aplica o corpo com `setattr`). Herdando em vez de
 # repetir, um campo novo de equipamento entra uma vez só e vale para os dois.
+#
+# `company_id` (ECE-01) mora aqui pelo mesmo motivo, e com mais razão: a
+# empresa do aparelho decide quem o enxerga quando `EQUIPAMENTO_POR_EMPRESA`
+# está ligada. Só a equipe a informa. Omitir e mandar nulo são coisas
+# diferentes, e quem distingue é o `model_fields_set` no router:
+#   - omitido no cadastro → herda a empresa oficial do responsável;
+#   - omitido na edição → não mexe;
+#   - nulo → sem empresa, de propósito.
 
 
 class EquipmentStaffCreate(EquipmentCreate):
     owner_id: uuid.UUID | None = None
+    company_id: uuid.UUID | None = None
 
 
 class EquipmentStaffUpdate(EquipmentUpdate):
     owner_id: uuid.UUID | None = None
+    company_id: uuid.UUID | None = None
 
 
 class EquipmentResponse(AppBaseModel):
@@ -110,6 +120,20 @@ class EquipmentResponse(AppBaseModel):
     product_name: str | None = None
     linked_company_id: uuid.UUID | None = None
     linked_company_name: str | None = None
+    # ECE-01. Também só para a equipe: a empresa DO EQUIPAMENTO
+    # (`equipments.company_id`), ao lado da do responsável acima — as duas
+    # juntas é que mostram a divergência (aparelho que mudou de responsável e
+    # ficou na empresa antiga). Nomes próprios, e não `company_id`, para que o
+    # `from_attributes` não os preencha sozinho na resposta do cliente.
+    equipment_company_id: uuid.UUID | None = None
+    equipment_company_name: str | None = None
+    # A equipe deixou o aparelho sem empresa de propósito (não é lacuna).
+    no_company_by_decision: bool | None = None
+    # Só nas respostas ao CLIENTE: o equipamento é dele (`true`) ou é da
+    # empresa dele, cadastrado por um colega (`false`). Nos de colega,
+    # `owner_id`, `owner_name`, `owner_email`, `company_name` e `company_cnpj`
+    # saem nulos — o cliente não fica sabendo quem é o responsável.
+    is_mine: bool | None = None
 
 
 class EquipmentListResponse(AppBaseModel):

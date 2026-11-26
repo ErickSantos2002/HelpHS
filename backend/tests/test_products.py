@@ -91,6 +91,14 @@ def _mock_equipment(serial=None):
     e.product_name = None
     e.linked_company_id = None
     e.linked_company_name = None
+    # ECE-01: campos que o router preenche; no mock precisam existir como None,
+    # senão o `from_attributes` os lê como MagicMock.
+    e.equipment_company_id = None
+    e.equipment_company_name = None
+    e.no_company_by_decision = None
+    e.is_mine = None
+    e.company_id = None
+    e.sem_empresa_por_decisao = False
     return e
 
 
@@ -272,8 +280,8 @@ async def test_create_equipment_as_admin(patch_redis):
 
     product = _mock_product()
 
-    # execute calls: 1) product lookup, 2) serial number check
-    call_seq = [product, None]
+    # execute calls: 1) trava do ator (ECE-01), 2) product lookup, 3) serial number check
+    call_seq = [None, product, None]
     idx = 0
 
     async def _execute(*args, **kwargs):
@@ -360,7 +368,8 @@ async def test_create_equipment_duplicate_serial(patch_redis):
     product = _mock_product()
     existing_equip = _mock_equipment("SN-001")
 
-    call_seq = [product, existing_equip]
+    # A primeira consulta é a trava do ator (ECE-01), que não devolve linha aqui.
+    call_seq = [None, product, existing_equip]
     idx = 0
 
     async def _execute(*args, **kwargs):
@@ -653,6 +662,16 @@ async def test_staff_can_get_any_equipment(patch_redis):
 # compartilhado, o cliente passaria a mexer no dono pelos `/equipment/my`.
 
 
+def _e_trava(texto: str) -> bool:
+    """A consulta é uma das travas de linha da ECE-01, não uma busca.
+
+    O compilador genérico escreve `FOR UPDATE` para qualquer modo; o que chega
+    ao PostgreSQL é `FOR KEY SHARE` (conferido em
+    `test_empresa_do_equipamento_postgres.py`).
+    """
+    return texto.rstrip().endswith("for update")
+
+
 def _db_por_entidade(**por_tabela):
     """
     Sessão que responde de acordo com a tabela consultada.
@@ -665,6 +684,10 @@ def _db_por_entidade(**por_tabela):
 
     def _para(stmt):
         texto = str(stmt).lower()
+        # As travas da ECE-01 (`FOR KEY SHARE` na conta, lendo `company_id`)
+        # devolvem o vínculo oficial, não a linha: aqui, ninguém tem empresa.
+        if _e_trava(texto):
+            return None
         for tabela, valor in por_tabela.items():
             if f"from {tabela}" in texto:
                 return valor
@@ -1129,10 +1152,17 @@ def _db_tabela_equipamentos(linhas, *, product=None, users=None, por_id=None):
 
     def _responde(stmt):
         texto = str(stmt).lower()
+        if _e_trava(texto):
+            return None
         if "from products" in texto:
             return product
         if "from users" in texto:
-            return users.get(_param(stmt.compile().params, "id"))
+            chave = _param(stmt.compile().params, "id")
+            # `users.id IN (...)`: a resposta do salvar junta o responsável ao
+            # equipamento, como a listagem — e essa consulta vem com uma lista.
+            if isinstance(chave, list):
+                return [users[i] for i in chave if i in users]
+            return users.get(chave)
         if "from equipments" not in texto:
             return None
         # O SELECT lista todas as colunas, então "serial_number" aparece até na
@@ -1170,7 +1200,10 @@ def _db_tabela_equipamentos(linhas, *, product=None, users=None, por_id=None):
         result = MagicMock()
         result.scalar_one_or_none.return_value = encontrado
         result.scalar_one.return_value = 0
-        result.scalars.return_value.all.return_value = [encontrado] if encontrado else []
+        if isinstance(encontrado, list):
+            result.scalars.return_value.all.return_value = encontrado
+        else:
+            result.scalars.return_value.all.return_value = [encontrado] if encontrado else []
         return result
 
     session = AsyncMock()

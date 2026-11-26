@@ -18,11 +18,53 @@ export const CREDENTIALS = {
   },
 };
 
-export async function login(
+/**
+ * O que vai para o campo "Senha" no lugar da senha. Não é credencial de nada:
+ * é o texto que o relatório, o trace e a fotografia da página podem guardar à
+ * vontade.
+ */
+const NO_LUGAR_DA_SENHA = "senha-fora-do-relatorio";
+
+/**
+ * Entra pela tela de login sem que a senha passe pela página.
+ *
+ * Tudo o que o Playwright vê da página ele pode guardar: o valor de um `fill`
+ * vira título de passo no relatório HTML, o argumento de um `evaluate` e o
+ * corpo das requisições vão para o trace, e o valor dos campos sai na
+ * fotografia que acompanha o teste que falha. O relatório é artefato do
+ * workflow — e mascarar o log do GitHub não alcança artefato.
+ *
+ * Por isso a senha não é digitada. O formulário recebe um texto qualquer, e a
+ * troca acontece fora da página, na interceptação da própria chamada de login:
+ * o corpo que o navegador montou segue para o backend com a senha de verdade
+ * no lugar. O backend autentica como sempre — nada é pulado, e senha errada
+ * continua sendo recusada —, e o que fica registrado é o que a página enviou.
+ *
+ * A interceptação vale para UMA chamada de `/auth/login` e só troca o corpo
+ * que traz o texto combinado; qualquer outro passa intacto.
+ */
+export async function entrarSemExporASenha(
   page: Page,
-  role: keyof typeof CREDENTIALS = "admin",
+  email: string,
+  senha: string,
 ) {
-  const { email, password } = CREDENTIALS[role];
+  await page.route(
+    "**/auth/login",
+    async (rota) => {
+      const corpo = rota.request().postDataJSON() as {
+        password?: unknown;
+      } | null;
+      if (corpo?.password !== NO_LUGAR_DA_SENHA) {
+        await rota.continue();
+        return;
+      }
+      await rota.continue({
+        postData: JSON.stringify({ ...corpo, password: senha }),
+      });
+    },
+    { times: 1 },
+  );
+
   await page.goto("/login");
   await page.getByLabel("E-mail").fill(email);
   // `exact` porque a tela de login tem DOIS elementos rotulados com "senha": o
@@ -31,12 +73,20 @@ export async function login(
   // substring e sem diferenciar caixa, então sem isto o seletor é ambíguo e o
   // Playwright recusa com "strict mode violation" — foi o que derrubou 45 dos
   // 46 testes da suíte.
-  await page.getByLabel("Senha", { exact: true }).fill(password);
+  await page.getByLabel("Senha", { exact: true }).fill(NO_LUGAR_DA_SENHA);
   await page.getByRole("button", { name: "Entrar" }).click();
   // Wait for redirect away from /login
   await page.waitForURL((url) => !url.pathname.includes("/login"), {
     timeout: 10_000,
   });
+}
+
+export async function login(
+  page: Page,
+  role: keyof typeof CREDENTIALS = "admin",
+) {
+  const { email, password } = CREDENTIALS[role];
+  await entrarSemExporASenha(page, email, password);
 }
 
 export async function logout(page: Page) {

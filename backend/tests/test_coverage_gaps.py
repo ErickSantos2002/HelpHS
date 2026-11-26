@@ -271,6 +271,14 @@ async def test_patch_equipment_as_admin(patch_redis):
     equip.product_name = None
     equip.linked_company_id = None
     equip.linked_company_name = None
+    # ECE-01: campos que o router preenche; no mock precisam existir como None,
+    # senão o `from_attributes` os lê como MagicMock.
+    equip.equipment_company_id = None
+    equip.equipment_company_name = None
+    equip.no_company_by_decision = None
+    equip.is_mine = None
+    equip.company_id = None
+    equip.sem_empresa_por_decisao = False
 
     app.dependency_overrides[get_db] = _simple_db(equip)
     _override_user(_mock_user(UserRole.admin))

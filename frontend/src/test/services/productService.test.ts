@@ -306,3 +306,38 @@ describe("listAllEquipments", () => {
     expect(mockGet.mock.calls[0][0]).not.toContain("without_owner");
   });
 });
+
+describe("ECE-01 — empresa do equipamento no serviço", () => {
+  it("without_company ligado vai na URL; desligado, não", async () => {
+    mockGet.mockResolvedValue({ data: { items: [], total: 0, limit: 20, offset: 0 } });
+
+    await listAllEquipments({ without_company: true });
+    await listAllEquipments({ without_company: false });
+
+    expect(mockGet.mock.calls[0][0]).toBe("/equipments?without_company=true");
+    expect(mockGet.mock.calls[1][0]).toBe("/equipments?");
+  });
+
+  it("os três estados de company_id atravessam o serviço sem serem trocados", async () => {
+    mockPatch.mockResolvedValue({ data: {} });
+
+    await updateEquipment("e1", { name: "A" });
+    await updateEquipment("e1", { name: "A", company_id: "c1" });
+    await updateEquipment("e1", { name: "A", company_id: null });
+
+    const corpos = mockPatch.mock.calls.map((c) => JSON.parse(JSON.stringify(c[1])));
+    expect(corpos[0]).not.toHaveProperty("company_id");
+    expect(corpos[1]).toHaveProperty("company_id", "c1");
+    expect(corpos[2]).toHaveProperty("company_id", null);
+  });
+
+  it("no cadastro, company_id omitido não aparece no corpo", async () => {
+    mockPost.mockResolvedValue({ data: {} });
+
+    await createEquipment("p1", { name: "A" });
+    await createEquipment("p1", { name: "A", company_id: null });
+
+    expect(JSON.parse(JSON.stringify(mockPost.mock.calls[0][1]))).not.toHaveProperty("company_id");
+    expect(JSON.parse(JSON.stringify(mockPost.mock.calls[1][1]))).toHaveProperty("company_id", null);
+  });
+});

@@ -37,7 +37,7 @@ from sqlalchemy import select, text
 from sqlalchemy.exc import IntegrityError
 from sqlalchemy.ext.asyncio import async_sessionmaker, create_async_engine
 
-from app.models.models import Equipment, Product, equipment_users
+from app.models.models import Product, equipment_users
 from tests.test_dashboard_postgres import _sobe_postgres
 
 _BACKEND = Path(__file__).resolve().parent.parent
@@ -244,26 +244,33 @@ async def test_backfill_leva_o_dono_para_equipment_users(banco):
         )
         s.add(Product(id=produto_id, name="Phoebus"))
         await s.flush()
-        s.add(
-            Equipment(
-                id=equipamento_id,
-                product_id=produto_id,
-                owner_id=dono_id,
-                name="Phoebus da recepção",
-                serial_number="WATFR01-73041",
-                is_active=True,
-            )
+        # Os equipamentos também por INSERT explícito, pelo motivo acima: a
+        # ECE-01 pôs `company_id` no modelo, e o seed pelo ORM passou a mandar
+        # uma coluna que este ponto da cadeia ainda não tem.
+        inserir_equipamento = text(
+            "INSERT INTO equipments (id, product_id, owner_id, name, serial_number, is_active) "
+            "VALUES (:id, :produto, :dono, :nome, :serie, true)"
+        )
+        await s.execute(
+            inserir_equipamento,
+            {
+                "id": equipamento_id,
+                "produto": produto_id,
+                "dono": dono_id,
+                "nome": "Phoebus da recepção",
+                "serie": "WATFR01-73041",
+            },
         )
         # Órfão: sem dono, não deve gerar linha nenhuma no backfill.
-        s.add(
-            Equipment(
-                id=uuid.uuid4(),
-                product_id=produto_id,
-                owner_id=None,
-                name="Phoebus sem dono",
-                serial_number="WATFR01-00000",
-                is_active=True,
-            )
+        await s.execute(
+            inserir_equipamento,
+            {
+                "id": uuid.uuid4(),
+                "produto": produto_id,
+                "dono": None,
+                "nome": "Phoebus sem dono",
+                "serie": "WATFR01-00000",
+            },
         )
         await s.commit()
     await motor.dispose()

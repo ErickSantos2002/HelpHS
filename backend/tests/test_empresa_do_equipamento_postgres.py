@@ -1,0 +1,3057 @@
+"""
+Empresa do equipamento (ECE-01, Fase 1) — contra PostgreSQL real.
+
+O que se prova aqui
+-------------------
+1. **A empresa é gravada no cadastro**, com a flag `equipamento_por_empresa`
+   desligada: cliente vinculado cadastra e o aparelho nasce na empresa dele;
+   a equipe informa a empresa ou herda a do responsável. O cliente não escolhe
+   a empresa por nenhum corpo de requisição.
+2. **O vínculo oficial propaga.** Vincular o cliente leva a empresa aos
+   aparelhos dele que ainda não têm nenhuma — e só a esses. Desvincular não
+   tira; trocar o responsável não muda a empresa que o aparelho já tem.
+3. **Empresa com equipamento não sai**: 409 pela contagem e, por baixo, a FK
+   `RESTRICT`.
+4. **Sem espera em círculo.** As rotas do cliente travam a própria conta ANTES
+   do aparelho — a mesma ordem do vínculo (cliente → aparelhos).
+5. **Nenhuma permissão nova.** O colega da mesma empresa continua sem ver,
+   editar ou usar o aparelho: a leitura não mudou nesta fase.
+6. **Os dois scripts**: o de preenchimento só grava o que não tem dúvida e
+   mostra o resto; o de fusão leva os aparelhos junto.
+7. **A troca de responsável completa o não classificado**: aparelho sem
+   empresa e sem decisão herda a do novo responsável, com a conta dele e a
+   empresa travadas antes do aparelho.
+8. **A fusão convive com o sistema em uso**: trava na ordem das rotas, não
+   grava plano que envelheceu e desfaz tudo em qualquer erro.
+
+Banco próprio e o mesmo jeito de forçar a corrida de
+`test_vinculo_cliente_empresa_postgres.py`.
+"""
+
+import asyncio
+import shutil
+import tempfile
+import uuid
+from contextlib import asynccontextmanager
+from datetime import UTC, datetime
+
+import pytest
+import pytest_asyncio
+from fastapi import HTTPException
+from httpx import ASGITransport, AsyncClient
+from sqlalchemy import event, func, select, text
+from sqlalchemy.exc import DBAPIError, IntegrityError
+from sqlalchemy.ext.asyncio import async_sessionmaker, create_async_engine
+from sqlalchemy.pool import NullPool
+
+from app.core.config import get_settings
+from app.core.database import get_db
+from app.core.security import get_current_user
+from app.main import app
+from app.models.models import (
+    AuditAction,
+    AuditLog,
+    Base,
+    Company,
+    CompanyNote,
+    Equipment,
+    Group,
+    Product,
+    Ticket,
+    TicketCategory,
+    User,
+    UserRole,
+    UserStatus,
+    equipment_users,
+    ticket_equipments,
+)
+from app.schemas.groups import AssignClientRequest, CreateCompanyFromSuggestion
+from app.schemas.product import (
+    EquipmentCreate,
+    EquipmentStaffCreate,
+    EquipmentStaffUpdate,
+    EquipmentUpdate,
+)
+from app.services.escopo_de_equipamento import trava_conta_e_le_empresa
+
+_BANCO = "ece01_empresa_do_equipamento_testes"
+_AGORA = datetime.now(UTC)
+
+
+# ── Infraestrutura ────────────────────────────────────────────
+
+
+def _url_do_servidor() -> tuple[str | None, object]:
+    import os
+
+    do_ambiente = os.environ.get("TEST_POSTGRES_URL")
+    if do_ambiente:
+        return do_ambiente.replace("postgresql://", "postgresql+asyncpg://"), None
+    try:
+        import pgserver
+    except ImportError:
+        return None, None
+    pasta = tempfile.mkdtemp(prefix="helphs-testes-pg-")
+    servidor = pgserver.get_server(pasta, cleanup_mode=None)
+    url = servidor.get_uri(database="postgres")
+    return url.replace("postgresql://", "postgresql+asyncpg://"), (servidor, pasta)
+
+
+@pytest.fixture(scope="module")
+def url_do_banco():
+    servidor_url, recurso = _url_do_servidor()
+    if servidor_url is None:
+        pytest.skip("sem PostgreSQL à mão")
+
+    url = servidor_url.rsplit("/", 1)[0] + f"/{_BANCO}"
+
+    async def _monta() -> None:
+        admin = create_async_engine(servidor_url, isolation_level="AUTOCOMMIT", poolclass=NullPool)
+        async with admin.connect() as conn:
+            await conn.execute(text(f'DROP DATABASE IF EXISTS "{_BANCO}" WITH (FORCE)'))
+            await conn.execute(text(f'CREATE DATABASE "{_BANCO}"'))
+        await admin.dispose()
+        motor = create_async_engine(url, poolclass=NullPool)
+        async with motor.begin() as conn:
+            await conn.execute(text("CREATE EXTENSION IF NOT EXISTS vector"))
+            await conn.run_sync(Base.metadata.create_all)
+        await motor.dispose()
+
+    async def _desmonta() -> None:
+        admin = create_async_engine(servidor_url, isolation_level="AUTOCOMMIT", poolclass=NullPool)
+        async with admin.connect() as conn:
+            await conn.execute(text(f'DROP DATABASE IF EXISTS "{_BANCO}" WITH (FORCE)'))
+        await admin.dispose()
+
+    asyncio.run(_monta())
+    yield url
+    asyncio.run(_desmonta())
+
+    if recurso is not None:
+        servidor, pasta = recurso
+        try:
+            servidor.cleanup()
+        except Exception:  # noqa: BLE001
+            pass
+        shutil.rmtree(pasta, ignore_errors=True)
+
+
+@pytest_asyncio.fixture
+async def fabrica(url_do_banco):
+    motor = create_async_engine(url_do_banco, poolclass=NullPool)
+    async with motor.begin() as conn:
+        await conn.execute(
+            text("TRUNCATE groups, companies, users, audit_logs, products, equipments CASCADE")
+        )
+    yield async_sessionmaker(motor, expire_on_commit=False)
+    await motor.dispose()
+
+
+async def _pessoa(
+    fabrica, papel: UserRole = UserRole.client, *, company_id=None, situacao=UserStatus.active
+) -> User:
+    pessoa = User(
+        id=uuid.uuid4(),
+        name=f"Pessoa {papel.value} {uuid.uuid4().hex[:6]}",
+        email=f"{uuid.uuid4().hex[:12]}@test.invalid",
+        password="x",
+        role=papel,
+        status=situacao,
+        phone="+5511999990000",
+        company_id=company_id,
+        lgpd_consent=True,
+        email_verified=True,
+        onboarding_completed=True,
+        created_at=_AGORA,
+        updated_at=_AGORA,
+    )
+    async with fabrica() as s:
+        s.add(pessoa)
+        await s.commit()
+    return pessoa
+
+
+async def _grupo(fabrica, nome="Grupo Alfa") -> Group:
+    g = Group(id=uuid.uuid4(), name=nome)
+    async with fabrica() as s:
+        s.add(g)
+        await s.commit()
+    return g
+
+
+async def _empresa(fabrica, grupo: Group, nome="Acme Ltda", cnpj=None) -> Company:
+    c = Company(id=uuid.uuid4(), group_id=grupo.id, name=nome, cnpj=cnpj)
+    async with fabrica() as s:
+        s.add(c)
+        await s.commit()
+    return c
+
+
+async def _produto(fabrica, nome="Titan") -> Product:
+    p = Product(id=uuid.uuid4(), name=nome, is_active=True)
+    async with fabrica() as s:
+        s.add(p)
+        await s.commit()
+    return p
+
+
+async def _aparelho(
+    fabrica,
+    produto: Product,
+    *,
+    dono: User | None = None,
+    company_id=None,
+    serie=None,
+    ativo=True,
+    id_: uuid.UUID | None = None,
+) -> Equipment:
+    """`id_` só para o teste que depende da ORDEM dos ids (a das travas): ali o
+    id se constrói, não se sorteia até sair o que serve."""
+    e = Equipment(
+        id=id_ or uuid.uuid4(),
+        product_id=produto.id,
+        owner_id=dono.id if dono else None,
+        company_id=company_id,
+        name=f"Aparelho {uuid.uuid4().hex[:6]}",
+        serial_number=serie or uuid.uuid4().hex[:10],
+        is_active=ativo,
+        created_at=_AGORA,
+        updated_at=_AGORA,
+    )
+    async with fabrica() as s:
+        s.add(e)
+        await s.commit()
+    return e
+
+
+async def _empresa_do(fabrica, aparelho_id) -> uuid.UUID | None:
+    async with fabrica() as s:
+        return (
+            await s.execute(select(Equipment.company_id).where(Equipment.id == aparelho_id))
+        ).scalar_one()
+
+
+async def _marca_do(fabrica, aparelho_id) -> bool:
+    """`sem_empresa_por_decisao`: a equipe deixou o aparelho sem empresa de propósito."""
+    async with fabrica() as s:
+        return (
+            await s.execute(
+                select(Equipment.sem_empresa_por_decisao).where(Equipment.id == aparelho_id)
+            )
+        ).scalar_one()
+
+
+async def _auditorias_de_aparelho(fabrica) -> list[AuditLog]:
+    async with fabrica() as s:
+        return list(
+            (
+                await s.execute(
+                    select(AuditLog)
+                    .where(AuditLog.entity_type == "equipment")
+                    .order_by(AuditLog.created_at, AuditLog.id)
+                )
+            ).scalars()
+        )
+
+
+async def _conta(fabrica, modelo) -> int:
+    async with fabrica() as s:
+        return (await s.execute(select(func.count()).select_from(modelo))).scalar_one()
+
+
+async def _corrida(fabrica, primeira, segunda):
+    """Roda as duas em paralelo, segurando a primeira entre o flush e o commit.
+
+    Devolve, para cada uma, "ok", o status HTTP da recusa, "IntegrityError" ou
+    "deadlock". Qualquer outra exceção sobe.
+    """
+    a_segunda_chegou = asyncio.Event()
+
+    async def roda(operacao, e_a_primeira: bool):
+        async with fabrica() as s:
+            commit_original = s.commit
+
+            async def commit_vigiado():
+                if e_a_primeira:
+                    await s.flush()
+                    try:
+                        await asyncio.wait_for(a_segunda_chegou.wait(), timeout=1.0)
+                    except TimeoutError:
+                        pass  # a segunda está presa na trava
+                else:
+                    a_segunda_chegou.set()
+                await commit_original()
+
+            s.commit = commit_vigiado  # type: ignore[method-assign]
+            try:
+                await operacao(s)
+                return "ok"
+            except HTTPException as e:
+                return e.status_code
+            except IntegrityError:
+                return "IntegrityError"
+            except DBAPIError as e:
+                if "deadlock" in str(e).lower():
+                    return "deadlock"
+                raise
+
+    primeira_tarefa = asyncio.create_task(roda(primeira, True))
+    await asyncio.sleep(0.3)
+    segunda_tarefa = asyncio.create_task(roda(segunda, False))
+    return await asyncio.gather(primeira_tarefa, segunda_tarefa)
+
+
+# ── As operações, chamadas como o FastAPI as chama ────────────
+
+
+def _vincula(ator, c, cliente):
+    from app.routers.groups import assign_client
+
+    return lambda s: assign_client(
+        c.group_id, c.id, AssignClientRequest(user_id=cliente.id), s, ator
+    )
+
+
+def _desvincula(ator, c, cliente):
+    from app.routers.groups import unassign_client
+
+    return lambda s: unassign_client(c.group_id, c.id, cliente.id, s, ator)
+
+
+def _pela_sugestao(ator, g, clientes, nome="Pela Sugestao", cnpj=None):
+    from app.routers.groups import create_company_from_suggestion
+
+    corpo = CreateCompanyFromSuggestion(name=nome, cnpj=cnpj, client_ids=[u.id for u in clientes])
+    return lambda s: create_company_from_suggestion(g.id, corpo, s, ator)
+
+
+def _exclui_empresa(admin, c):
+    from app.routers.groups import delete_company
+
+    return lambda s: delete_company(c.group_id, c.id, s, admin)
+
+
+def _cliente_cadastra(cliente, produto, nome="Meu aparelho", serie=None):
+    from app.routers.products import create_my_equipment
+
+    corpo = EquipmentCreate(name=nome, serial_number=serie or uuid.uuid4().hex[:10])
+    return lambda s: create_my_equipment(corpo, produto.id, s, cliente)
+
+
+def _cliente_edita(cliente, aparelho, **campos):
+    from app.routers.products import update_my_equipment
+
+    return lambda s: update_my_equipment(aparelho.id, EquipmentUpdate(**campos), s, cliente)
+
+
+def _cliente_inativa(cliente, aparelho):
+    from app.routers.products import delete_my_equipment
+
+    return lambda s: delete_my_equipment(aparelho.id, s, cliente)
+
+
+def _equipe_cadastra(ator, produto, **campos):
+    from app.routers.products import create_equipment
+
+    campos.setdefault("name", "Da equipe")
+    campos.setdefault("serial_number", uuid.uuid4().hex[:10])
+    return lambda s: create_equipment(produto.id, EquipmentStaffCreate(**campos), s, ator)
+
+
+def _equipe_edita(ator, aparelho, **campos):
+    from app.routers.products import update_equipment
+
+    return lambda s: update_equipment(aparelho.id, EquipmentStaffUpdate(**campos), s, ator)
+
+
+async def _roda(fabrica, operacao):
+    async with fabrica() as s:
+        return await operacao(s)
+
+
+# ══════════════════════════════════════════════════════════════
+# 0. A flag
+# ══════════════════════════════════════════════════════════════
+
+
+def test_a_flag_nasce_desligada():
+    assert get_settings().equipamento_por_empresa is False
+
+
+# ══════════════════════════════════════════════════════════════
+# 1. A empresa é gravada no cadastro (flag desligada)
+# ══════════════════════════════════════════════════════════════
+
+
+@pytest.mark.asyncio
+async def test_cliente_vinculado_cadastra_e_o_aparelho_nasce_na_empresa_dele(fabrica):
+    g = await _grupo(fabrica)
+    c = await _empresa(fabrica, g)
+    cliente = await _pessoa(fabrica, company_id=c.id)
+    produto = await _produto(fabrica)
+
+    criado = await _roda(fabrica, _cliente_cadastra(cliente, produto))
+
+    assert await _empresa_do(fabrica, criado.id) == c.id
+    [auditoria] = await _auditorias_de_aparelho(fabrica)
+    assert auditoria.action == AuditAction.create
+    assert auditoria.new_data == {"company_id": str(c.id), "origem": "empresa_do_cadastrante"}
+
+
+@pytest.mark.asyncio
+async def test_cliente_sem_vinculo_cadastra_e_o_aparelho_fica_sem_empresa(fabrica):
+    cliente = await _pessoa(fabrica)
+    produto = await _produto(fabrica)
+
+    criado = await _roda(fabrica, _cliente_cadastra(cliente, produto))
+
+    assert await _empresa_do(fabrica, criado.id) is None
+    [auditoria] = await _auditorias_de_aparelho(fabrica)
+    assert auditoria.new_data is None
+
+
+@pytest.mark.asyncio
+async def test_a_empresa_vem_do_banco_e_nao_do_objeto_do_ator(fabrica):
+    """O ator chega carregado antes da requisição; o vínculo pode ter mudado."""
+    g = await _grupo(fabrica)
+    c = await _empresa(fabrica, g)
+    cliente = await _pessoa(fabrica)
+    produto = await _produto(fabrica)
+    admin = await _pessoa(fabrica, UserRole.admin)
+    await _roda(fabrica, _vincula(admin, c, cliente))
+    assert cliente.company_id is None, "o objeto em mãos ficou velho de propósito"
+
+    criado = await _roda(fabrica, _cliente_cadastra(cliente, produto))
+
+    assert await _empresa_do(fabrica, criado.id) == c.id
+
+
+@pytest.mark.asyncio
+async def test_equipe_cadastra_com_responsavel_e_herda_a_empresa_dele(fabrica):
+    g = await _grupo(fabrica)
+    c = await _empresa(fabrica, g)
+    cliente = await _pessoa(fabrica, company_id=c.id)
+    tecnico = await _pessoa(fabrica, UserRole.technician)
+    produto = await _produto(fabrica)
+
+    criado = await _roda(fabrica, _equipe_cadastra(tecnico, produto, owner_id=cliente.id))
+
+    assert await _empresa_do(fabrica, criado.id) == c.id
+    [auditoria] = await _auditorias_de_aparelho(fabrica)
+    assert auditoria.new_data == {"company_id": str(c.id), "origem": "empresa_do_responsavel"}
+
+
+@pytest.mark.asyncio
+async def test_equipe_informa_a_empresa_e_ela_vence_a_do_responsavel(fabrica):
+    g = await _grupo(fabrica)
+    do_responsavel = await _empresa(fabrica, g, "Do responsavel")
+    informada = await _empresa(fabrica, g, "Informada")
+    cliente = await _pessoa(fabrica, company_id=do_responsavel.id)
+    admin = await _pessoa(fabrica, UserRole.admin)
+    produto = await _produto(fabrica)
+
+    criado = await _roda(
+        fabrica, _equipe_cadastra(admin, produto, owner_id=cliente.id, company_id=informada.id)
+    )
+
+    assert await _empresa_do(fabrica, criado.id) == informada.id
+    [auditoria] = await _auditorias_de_aparelho(fabrica)
+    assert auditoria.new_data == {"company_id": str(informada.id), "origem": "equipe"}
+
+
+@pytest.mark.asyncio
+async def test_equipe_manda_empresa_nula_e_o_aparelho_nasce_sem_empresa(fabrica):
+    """Nulo explícito é decisão da equipe; omitir é que herda."""
+    g = await _grupo(fabrica)
+    c = await _empresa(fabrica, g)
+    cliente = await _pessoa(fabrica, company_id=c.id)
+    admin = await _pessoa(fabrica, UserRole.admin)
+    produto = await _produto(fabrica)
+
+    criado = await _roda(
+        fabrica, _equipe_cadastra(admin, produto, owner_id=cliente.id, company_id=None)
+    )
+
+    assert await _empresa_do(fabrica, criado.id) is None
+    assert await _marca_do(fabrica, criado.id) is True
+    [auditoria] = await _auditorias_de_aparelho(fabrica)
+    assert auditoria.new_data == {
+        "company_id": None,
+        "sem_empresa_por_decisao": True,
+        "origem": "equipe",
+    }
+
+
+@pytest.mark.asyncio
+async def test_equipe_cadastra_sem_responsavel_e_sem_empresa(fabrica):
+    admin = await _pessoa(fabrica, UserRole.admin)
+    produto = await _produto(fabrica)
+
+    criado = await _roda(fabrica, _equipe_cadastra(admin, produto))
+
+    assert await _empresa_do(fabrica, criado.id) is None
+
+
+@pytest.mark.asyncio
+async def test_equipe_informa_empresa_que_nao_existe_e_nada_e_gravado(fabrica):
+    admin = await _pessoa(fabrica, UserRole.admin)
+    produto = await _produto(fabrica)
+
+    with pytest.raises(HTTPException) as recusa:
+        await _roda(fabrica, _equipe_cadastra(admin, produto, company_id=uuid.uuid4()))
+
+    assert recusa.value.status_code == 400
+    assert await _conta(fabrica, Equipment) == 0
+
+
+@pytest.mark.asyncio
+async def test_o_cadastro_continua_gravando_equipment_users(fabrica):
+    """Regra 14: a tabela segue sendo gravada até a auditoria complementar."""
+    cliente = await _pessoa(fabrica)
+    produto = await _produto(fabrica)
+
+    criado = await _roda(fabrica, _cliente_cadastra(cliente, produto))
+
+    async with fabrica() as s:
+        vinculos = (await s.execute(select(equipment_users))).all()
+    assert [(v.equipment_id, v.user_id) for v in vinculos] == [(criado.id, cliente.id)]
+
+
+# ── A equipe controla a empresa ───────────────────────────────
+
+
+@pytest.mark.asyncio
+async def test_equipe_troca_a_empresa_do_aparelho_e_fica_auditado(fabrica):
+    g = await _grupo(fabrica)
+    antiga = await _empresa(fabrica, g, "Antiga")
+    nova = await _empresa(fabrica, g, "Nova")
+    produto = await _produto(fabrica)
+    aparelho = await _aparelho(fabrica, produto, company_id=antiga.id)
+    admin = await _pessoa(fabrica, UserRole.admin)
+
+    await _roda(fabrica, _equipe_edita(admin, aparelho, company_id=nova.id))
+
+    assert await _empresa_do(fabrica, aparelho.id) == nova.id
+    [auditoria] = await _auditorias_de_aparelho(fabrica)
+    assert auditoria.action == AuditAction.update
+    assert auditoria.user_id == admin.id
+    assert auditoria.old_data == {"company_id": str(antiga.id)}
+    assert auditoria.new_data == {"company_id": str(nova.id), "origem": "equipe"}
+
+
+@pytest.mark.asyncio
+async def test_equipe_tira_a_empresa_do_aparelho_e_fica_auditado(fabrica):
+    g = await _grupo(fabrica)
+    c = await _empresa(fabrica, g)
+    produto = await _produto(fabrica)
+    aparelho = await _aparelho(fabrica, produto, company_id=c.id)
+    tecnico = await _pessoa(fabrica, UserRole.technician)
+
+    await _roda(fabrica, _equipe_edita(tecnico, aparelho, company_id=None))
+
+    assert await _empresa_do(fabrica, aparelho.id) is None
+    [auditoria] = await _auditorias_de_aparelho(fabrica)
+    assert auditoria.old_data == {"company_id": str(c.id)}
+    assert auditoria.new_data == {
+        "company_id": None,
+        "sem_empresa_por_decisao": True,
+        "origem": "equipe",
+    }
+    assert await _marca_do(fabrica, aparelho.id) is True
+
+
+@pytest.mark.asyncio
+async def test_equipe_edita_outro_campo_e_a_empresa_nao_muda_nem_entra_na_auditoria(fabrica):
+    g = await _grupo(fabrica)
+    c = await _empresa(fabrica, g)
+    produto = await _produto(fabrica)
+    aparelho = await _aparelho(fabrica, produto, company_id=c.id)
+    admin = await _pessoa(fabrica, UserRole.admin)
+
+    await _roda(fabrica, _equipe_edita(admin, aparelho, location="Sala 2"))
+
+    assert await _empresa_do(fabrica, aparelho.id) == c.id
+    [auditoria] = await _auditorias_de_aparelho(fabrica)
+    assert auditoria.old_data is None and auditoria.new_data is None
+
+
+@pytest.mark.asyncio
+async def test_reenviar_a_mesma_empresa_nao_audita_troca(fabrica):
+    g = await _grupo(fabrica)
+    c = await _empresa(fabrica, g)
+    produto = await _produto(fabrica)
+    aparelho = await _aparelho(fabrica, produto, company_id=c.id)
+    admin = await _pessoa(fabrica, UserRole.admin)
+
+    await _roda(fabrica, _equipe_edita(admin, aparelho, company_id=c.id))
+
+    [auditoria] = await _auditorias_de_aparelho(fabrica)
+    assert auditoria.old_data is None and auditoria.new_data is None
+
+
+@pytest.mark.asyncio
+async def test_equipe_troca_para_empresa_que_nao_existe_e_nada_muda(fabrica):
+    g = await _grupo(fabrica)
+    c = await _empresa(fabrica, g)
+    produto = await _produto(fabrica)
+    aparelho = await _aparelho(fabrica, produto, company_id=c.id)
+    admin = await _pessoa(fabrica, UserRole.admin)
+
+    with pytest.raises(HTTPException) as recusa:
+        await _roda(fabrica, _equipe_edita(admin, aparelho, company_id=uuid.uuid4()))
+
+    assert recusa.value.status_code == 400
+    assert await _empresa_do(fabrica, aparelho.id) == c.id
+    assert await _auditorias_de_aparelho(fabrica) == []
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("novo_responsavel", ["de_outra_empresa", "sem_empresa", "nenhum"])
+async def test_trocar_o_responsavel_nao_muda_a_empresa(fabrica, novo_responsavel):
+    """Regra 8."""
+    g = await _grupo(fabrica)
+    c = await _empresa(fabrica, g, "Do aparelho")
+    outra = await _empresa(fabrica, g, "Outra")
+    antigo = await _pessoa(fabrica, company_id=c.id)
+    produto = await _produto(fabrica)
+    aparelho = await _aparelho(fabrica, produto, dono=antigo, company_id=c.id)
+    admin = await _pessoa(fabrica, UserRole.admin)
+    if novo_responsavel == "de_outra_empresa":
+        novo = (await _pessoa(fabrica, company_id=outra.id)).id
+    elif novo_responsavel == "sem_empresa":
+        novo = (await _pessoa(fabrica)).id
+    else:
+        novo = None
+
+    await _roda(fabrica, _equipe_edita(admin, aparelho, owner_id=novo))
+
+    assert await _empresa_do(fabrica, aparelho.id) == c.id
+    async with fabrica() as s:
+        dono = (
+            await s.execute(select(Equipment.owner_id).where(Equipment.id == aparelho.id))
+        ).scalar_one()
+    assert dono == novo
+
+
+# ── O cliente não escolhe a empresa ───────────────────────────
+
+
+@pytest_asyncio.fixture
+async def http(fabrica):
+    async def _get_db():
+        async with fabrica() as s:
+            yield s
+
+    estado: dict = {}
+
+    async def _get_current_user():
+        return estado["ator"]
+
+    app.dependency_overrides[get_db] = _get_db
+    app.dependency_overrides[get_current_user] = _get_current_user
+    async with AsyncClient(transport=ASGITransport(app=app), base_url="http://test") as c:
+        c.estado = estado  # type: ignore[attr-defined]
+        yield c
+    app.dependency_overrides.clear()
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("vinculado", [False, True])
+async def test_cliente_nao_escolhe_a_empresa_no_cadastro(fabrica, http, vinculado):
+    g = await _grupo(fabrica)
+    propria = await _empresa(fabrica, g, "Propria")
+    alheia = await _empresa(fabrica, g, "Alheia")
+    cliente = await _pessoa(fabrica, company_id=propria.id if vinculado else None)
+    produto = await _produto(fabrica)
+    http.estado["ator"] = cliente
+
+    resp = await http.post(
+        f"/api/v1/equipment/my?product_id={produto.id}",
+        json={"name": "Meu", "serial_number": "SN-1", "company_id": str(alheia.id)},
+    )
+
+    assert resp.status_code == 201, resp.text
+    assert "company_id" not in resp.json(), "o cliente não lê o próprio vínculo pela API"
+    esperada = propria.id if vinculado else None
+    assert await _empresa_do(fabrica, uuid.UUID(resp.json()["id"])) == esperada
+
+
+@pytest.mark.asyncio
+async def test_cliente_nao_troca_a_empresa_pela_edicao(fabrica, http):
+    g = await _grupo(fabrica)
+    propria = await _empresa(fabrica, g, "Propria")
+    alheia = await _empresa(fabrica, g, "Alheia")
+    cliente = await _pessoa(fabrica, company_id=propria.id)
+    produto = await _produto(fabrica)
+    aparelho = await _aparelho(fabrica, produto, dono=cliente, company_id=propria.id)
+    http.estado["ator"] = cliente
+
+    resp = await http.patch(
+        f"/api/v1/equipment/my/{aparelho.id}",
+        json={"name": "Renomeado", "company_id": str(alheia.id)},
+    )
+
+    assert resp.status_code == 200, resp.text
+    assert await _empresa_do(fabrica, aparelho.id) == propria.id
+
+
+# ══════════════════════════════════════════════════════════════
+# 2. O vínculo oficial propaga
+# ══════════════════════════════════════════════════════════════
+
+
+@pytest.mark.asyncio
+async def test_vincular_o_cliente_leva_a_empresa_aos_aparelhos_dele_sem_empresa(fabrica):
+    g = await _grupo(fabrica)
+    c = await _empresa(fabrica, g)
+    outra = await _empresa(fabrica, g, "Outra")
+    cliente = await _pessoa(fabrica)
+    vizinho = await _pessoa(fabrica)
+    produto = await _produto(fabrica)
+    um = await _aparelho(fabrica, produto, dono=cliente)
+    inativo = await _aparelho(fabrica, produto, dono=cliente, ativo=False)
+    ja_tem = await _aparelho(fabrica, produto, dono=cliente, company_id=outra.id)
+    do_vizinho = await _aparelho(fabrica, produto, dono=vizinho)
+    sem_dono = await _aparelho(fabrica, produto)
+    admin = await _pessoa(fabrica, UserRole.admin)
+
+    await _roda(fabrica, _vincula(admin, c, cliente))
+
+    assert await _empresa_do(fabrica, um.id) == c.id
+    assert await _empresa_do(fabrica, inativo.id) == c.id
+    assert await _empresa_do(fabrica, ja_tem.id) == outra.id, "empresa já gravada não é trocada"
+    assert await _empresa_do(fabrica, do_vizinho.id) is None
+    assert await _empresa_do(fabrica, sem_dono.id) is None
+    auditorias = await _auditorias_de_aparelho(fabrica)
+    assert {a.entity_id for a in auditorias} == {um.id, inativo.id}
+    for a in auditorias:
+        assert a.action == AuditAction.update
+        assert a.user_id == admin.id
+        assert a.old_data == {"company_id": None}
+        assert a.new_data == {"company_id": str(c.id), "origem": "vinculo_do_responsavel"}
+
+
+@pytest.mark.asyncio
+async def test_vinculo_repetido_na_mesma_empresa_nao_propaga_nem_audita(fabrica):
+    """O 200 idempotente da F2-A1 continua sem escrever nada."""
+    g = await _grupo(fabrica)
+    c = await _empresa(fabrica, g)
+    cliente = await _pessoa(fabrica, company_id=c.id)
+    produto = await _produto(fabrica)
+    antigo = await _aparelho(fabrica, produto, dono=cliente)
+    admin = await _pessoa(fabrica, UserRole.admin)
+
+    await _roda(fabrica, _vincula(admin, c, cliente))
+
+    assert await _empresa_do(fabrica, antigo.id) is None
+    assert await _conta(fabrica, AuditLog) == 0
+
+
+@pytest.mark.asyncio
+async def test_a_sugestao_propaga_para_os_aparelhos_de_cada_cliente(fabrica):
+    g = await _grupo(fabrica)
+    um = await _pessoa(fabrica)
+    dois = await _pessoa(fabrica)
+    produto = await _produto(fabrica)
+    do_um = await _aparelho(fabrica, produto, dono=um)
+    do_dois = await _aparelho(fabrica, produto, dono=dois)
+    admin = await _pessoa(fabrica, UserRole.admin)
+
+    resposta = await _roda(fabrica, _pela_sugestao(admin, g, [um, dois]))
+
+    criada = resposta.company.id
+    assert await _empresa_do(fabrica, do_um.id) == criada
+    assert await _empresa_do(fabrica, do_dois.id) == criada
+    assert len(await _auditorias_de_aparelho(fabrica)) == 2
+
+
+@pytest.mark.asyncio
+async def test_desvincular_o_cliente_nao_tira_a_empresa_do_aparelho(fabrica):
+    """Regra 7."""
+    g = await _grupo(fabrica)
+    c = await _empresa(fabrica, g)
+    cliente = await _pessoa(fabrica, company_id=c.id)
+    produto = await _produto(fabrica)
+    aparelho = await _aparelho(fabrica, produto, dono=cliente, company_id=c.id)
+    admin = await _pessoa(fabrica, UserRole.admin)
+
+    await _roda(fabrica, _desvincula(admin, c, cliente))
+
+    assert await _empresa_do(fabrica, aparelho.id) == c.id
+    assert await _auditorias_de_aparelho(fabrica) == []
+
+
+@pytest.mark.asyncio
+async def test_vinculo_recusado_nao_propaga(fabrica):
+    g = await _grupo(fabrica)
+    atual = await _empresa(fabrica, g, "Atual")
+    pedida = await _empresa(fabrica, g, "Pedida")
+    cliente = await _pessoa(fabrica, company_id=atual.id)
+    produto = await _produto(fabrica)
+    aparelho = await _aparelho(fabrica, produto, dono=cliente)
+    admin = await _pessoa(fabrica, UserRole.admin)
+
+    with pytest.raises(HTTPException) as recusa:
+        await _roda(fabrica, _vincula(admin, pedida, cliente))
+
+    assert recusa.value.status_code == 409
+    assert await _empresa_do(fabrica, aparelho.id) is None
+
+
+# ══════════════════════════════════════════════════════════════
+# 3. Empresa com equipamento não sai
+# ══════════════════════════════════════════════════════════════
+
+
+@pytest.mark.asyncio
+async def test_empresa_com_equipamento_nao_e_excluida(fabrica):
+    """Regra 9."""
+    g = await _grupo(fabrica)
+    c = await _empresa(fabrica, g)
+    produto = await _produto(fabrica)
+    aparelho = await _aparelho(fabrica, produto, company_id=c.id)
+    admin = await _pessoa(fabrica, UserRole.admin)
+
+    with pytest.raises(HTTPException) as recusa:
+        await _roda(fabrica, _exclui_empresa(admin, c))
+
+    assert recusa.value.status_code == 409
+    assert "1 equipamento(s)" in recusa.value.detail
+    assert await _conta(fabrica, Company) == 1
+    assert await _empresa_do(fabrica, aparelho.id) == c.id
+
+
+@pytest.mark.asyncio
+async def test_a_chave_estrangeira_recusa_apagar_empresa_com_equipamento(fabrica):
+    """A rede por baixo da contagem: nenhum caminho solta o aparelho em silêncio."""
+    g = await _grupo(fabrica)
+    c = await _empresa(fabrica, g)
+    produto = await _produto(fabrica)
+    await _aparelho(fabrica, produto, company_id=c.id)
+
+    async with fabrica() as s:
+        with pytest.raises(IntegrityError):
+            await s.execute(text("DELETE FROM companies WHERE id = :id"), {"id": c.id})
+
+    assert await _conta(fabrica, Company) == 1
+
+
+@pytest.mark.asyncio
+async def test_cadastro_em_curso_faz_a_exclusao_da_empresa_recusar(fabrica):
+    g = await _grupo(fabrica)
+    c = await _empresa(fabrica, g)
+    admin = await _pessoa(fabrica, UserRole.admin)
+    tecnico = await _pessoa(fabrica, UserRole.technician)
+    produto = await _produto(fabrica)
+
+    resultado = await _corrida(
+        fabrica,
+        _equipe_cadastra(tecnico, produto, company_id=c.id),
+        _exclui_empresa(admin, c),
+    )
+
+    assert resultado == ["ok", 409]
+    assert await _conta(fabrica, Company) == 1
+    assert await _conta(fabrica, Equipment) == 1
+
+
+@pytest.mark.asyncio
+async def test_exclusao_em_curso_faz_o_cadastro_recusar_sem_erro_de_chave(fabrica):
+    g = await _grupo(fabrica)
+    c = await _empresa(fabrica, g)
+    admin = await _pessoa(fabrica, UserRole.admin)
+    tecnico = await _pessoa(fabrica, UserRole.technician)
+    produto = await _produto(fabrica)
+
+    resultado = await _corrida(
+        fabrica,
+        _exclui_empresa(admin, c),
+        _equipe_cadastra(tecnico, produto, company_id=c.id),
+    )
+
+    assert resultado == ["ok", 400]
+    assert await _conta(fabrica, Company) == 0
+    assert await _conta(fabrica, Equipment) == 0
+
+
+@pytest.mark.asyncio
+async def test_troca_de_empresa_em_curso_faz_a_exclusao_recusar(fabrica):
+    g = await _grupo(fabrica)
+    c = await _empresa(fabrica, g)
+    produto = await _produto(fabrica)
+    aparelho = await _aparelho(fabrica, produto)
+    admin = await _pessoa(fabrica, UserRole.admin)
+    tecnico = await _pessoa(fabrica, UserRole.technician)
+
+    resultado = await _corrida(
+        fabrica,
+        _equipe_edita(tecnico, aparelho, company_id=c.id),
+        _exclui_empresa(admin, c),
+    )
+
+    assert resultado == ["ok", 409]
+    assert await _empresa_do(fabrica, aparelho.id) == c.id
+
+
+# ══════════════════════════════════════════════════════════════
+# 4. Concorrência: vínculo × cadastro e edição pelo cliente
+# ══════════════════════════════════════════════════════════════
+
+
+@pytest.mark.asyncio
+async def test_vinculo_em_curso_e_cadastro_do_cliente_terminam_com_a_empresa(fabrica):
+    """O cadastro espera o vínculo e lê a empresa já comitada."""
+    g = await _grupo(fabrica)
+    c = await _empresa(fabrica, g)
+    cliente = await _pessoa(fabrica)
+    admin = await _pessoa(fabrica, UserRole.admin)
+    produto = await _produto(fabrica)
+
+    resultado = await _corrida(
+        fabrica, _vincula(admin, c, cliente), _cliente_cadastra(cliente, produto)
+    )
+
+    assert resultado == ["ok", "ok"]
+    async with fabrica() as s:
+        empresas = list((await s.execute(select(Equipment.company_id))).scalars())
+    assert empresas == [c.id]
+
+
+@pytest.mark.asyncio
+async def test_cadastro_em_curso_e_vinculo_terminam_com_a_empresa(fabrica):
+    """O vínculo espera o cadastro e a propagação já enxerga o aparelho novo."""
+    g = await _grupo(fabrica)
+    c = await _empresa(fabrica, g)
+    cliente = await _pessoa(fabrica)
+    admin = await _pessoa(fabrica, UserRole.admin)
+    produto = await _produto(fabrica)
+
+    resultado = await _corrida(
+        fabrica, _cliente_cadastra(cliente, produto), _vincula(admin, c, cliente)
+    )
+
+    assert resultado == ["ok", "ok"]
+    async with fabrica() as s:
+        empresas = list((await s.execute(select(Equipment.company_id))).scalars())
+    assert empresas == [c.id]
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("ordem", ["vinculo_primeiro", "cliente_primeiro"])
+@pytest.mark.parametrize("operacao", ["edita", "inativa"])
+async def test_vinculo_e_escrita_do_cliente_no_aparelho_nao_travam_em_circulo(
+    fabrica, ordem, operacao
+):
+    g = await _grupo(fabrica)
+    c = await _empresa(fabrica, g)
+    cliente = await _pessoa(fabrica)
+    admin = await _pessoa(fabrica, UserRole.admin)
+    produto = await _produto(fabrica)
+    aparelho = await _aparelho(fabrica, produto, dono=cliente)
+    do_cliente = (
+        _cliente_edita(cliente, aparelho, location="Sala 9")
+        if operacao == "edita"
+        else _cliente_inativa(cliente, aparelho)
+    )
+    vinculo = _vincula(admin, c, cliente)
+    par = (vinculo, do_cliente) if ordem == "vinculo_primeiro" else (do_cliente, vinculo)
+
+    resultado = await _corrida(fabrica, *par)
+
+    assert resultado == ["ok", "ok"]
+    assert await _empresa_do(fabrica, aparelho.id) == c.id
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("operacao", ["cadastra", "edita", "inativa"])
+async def test_o_cliente_trava_a_propria_conta_antes_de_tocar_no_aparelho(fabrica, operacao):
+    """A ordem, lida nas instruções que chegam ao banco.
+
+    O vínculo trava o cliente (`FOR UPDATE`) e depois escreve nos aparelhos
+    dele. Se a rota do cliente escrevesse no aparelho antes de pegar a própria
+    linha — o INSERT em `audit_logs` checa a FK `user_id` com `FOR KEY SHARE`
+    —, "eu tenho o aparelho e espero a conta; o vínculo tem a conta e espera o
+    aparelho" é espera em círculo.
+    """
+    cliente = await _pessoa(fabrica)
+    produto = await _produto(fabrica)
+    aparelho = await _aparelho(fabrica, produto, dono=cliente)
+    op = {
+        "cadastra": _cliente_cadastra(cliente, produto),
+        "edita": _cliente_edita(cliente, aparelho, location="Sala 9"),
+        "inativa": _cliente_inativa(cliente, aparelho),
+    }[operacao]
+
+    instrucoes: list[str] = []
+
+    def _anota(_conn, _cursor, sql, *_args):
+        instrucoes.append(" ".join(sql.split()))
+
+    async with fabrica() as s:
+        motor = s.bind.sync_engine
+        event.listen(motor, "before_cursor_execute", _anota)
+        try:
+            await op(s)
+        finally:
+            event.remove(motor, "before_cursor_execute", _anota)
+
+    trava = next(
+        i for i, q in enumerate(instrucoes) if "FROM users" in q and q.endswith("FOR KEY SHARE")
+    )
+    escritas = [
+        i
+        for i, q in enumerate(instrucoes)
+        if q.startswith(("INSERT INTO equipments", "UPDATE equipments"))
+    ]
+    assert escritas, instrucoes
+    assert trava < min(escritas), instrucoes
+
+
+@pytest.mark.asyncio
+async def test_com_o_cliente_travado_a_edicao_espera_sem_segurar_o_aparelho(fabrica):
+    """O mesmo, com as travas de pé.
+
+    T2 faz o que o vínculo faz — `FOR UPDATE` no cliente — e, com a edição do
+    cliente já em andamento, consegue travar o aparelho. Se a edição tivesse
+    pegado o aparelho primeiro, o `NOWAIT` recusaria.
+    """
+    cliente = await _pessoa(fabrica)
+    produto = await _produto(fabrica)
+    aparelho = await _aparelho(fabrica, produto, dono=cliente)
+
+    async with fabrica() as t2:
+        await t2.execute(text("SELECT id FROM users WHERE id = :id FOR UPDATE"), {"id": cliente.id})
+        edicao = asyncio.create_task(
+            _roda(fabrica, _cliente_edita(cliente, aparelho, location="Sala 9"))
+        )
+        await asyncio.sleep(0.5)
+        assert not edicao.done(), "a edição tinha de estar esperando a conta"
+        await t2.execute(
+            text("SELECT id FROM equipments WHERE id = :id FOR UPDATE NOWAIT"),
+            {"id": aparelho.id},
+        )
+        await t2.commit()
+
+    await asyncio.wait_for(edicao, timeout=5)
+    async with fabrica() as s:
+        local = (
+            await s.execute(select(Equipment.location).where(Equipment.id == aparelho.id))
+        ).scalar_one()
+    assert local == "Sala 9"
+
+
+@pytest.mark.asyncio
+async def test_o_vinculo_escreve_nos_aparelhos_depois_de_travar_os_clientes(fabrica):
+    """A ordem da F2-A1 fica como está; os aparelhos entram no fim."""
+    g = await _grupo(fabrica)
+    c = await _empresa(fabrica, g)
+    cliente = await _pessoa(fabrica)
+    admin = await _pessoa(fabrica, UserRole.admin)
+    produto = await _produto(fabrica)
+    await _aparelho(fabrica, produto, dono=cliente)
+
+    instrucoes: list[str] = []
+
+    def _anota(_conn, _cursor, sql, *_args):
+        instrucoes.append(" ".join(sql.split()))
+
+    async with fabrica() as s:
+        motor = s.bind.sync_engine
+        event.listen(motor, "before_cursor_execute", _anota)
+        try:
+            await _vincula(admin, c, cliente)(s)
+        finally:
+            event.remove(motor, "before_cursor_execute", _anota)
+
+    travas = [q for q in instrucoes if " FOR " in q]
+    assert len(travas) == 3, travas
+    assert travas[0].endswith("FOR KEY SHARE") and "FROM users" in travas[0]
+    assert travas[1].endswith("FOR KEY SHARE") and "FROM companies" in travas[1]
+    assert travas[2].endswith("FOR UPDATE") and "FROM users" in travas[2]
+    dos_aparelhos = next(i for i, q in enumerate(instrucoes) if q.startswith("UPDATE equipments"))
+    assert dos_aparelhos > instrucoes.index(travas[2])
+
+
+# ══════════════════════════════════════════════════════════════
+# 5. Nenhuma permissão nova para o cliente
+# ══════════════════════════════════════════════════════════════
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("flag", [False])
+async def test_colega_da_mesma_empresa_continua_sem_acesso_ao_aparelho(fabrica, monkeypatch, flag):
+    """As leituras são as de antes, com a empresa gravada e tudo.
+
+    Só com a flag DESLIGADA. Na Fase 1 o caso `True` também passava aqui,
+    porque ninguém consultava a flag; a Fase 2 trocou a função de escopo, e o
+    que vale com ela ligada está em `test_equipamento_compartilhado_postgres.py`.
+    """
+    from app.routers.products import (
+        delete_my_equipment,
+        get_equipment,
+        list_equipments,
+        list_my_equipment,
+        update_my_equipment,
+    )
+    from app.routers.tickets import _set_ticket_equipments
+
+    monkeypatch.setattr(get_settings(), "equipamento_por_empresa", flag)
+    g = await _grupo(fabrica)
+    c = await _empresa(fabrica, g)
+    dono = await _pessoa(fabrica, company_id=c.id)
+    colega = await _pessoa(fabrica, company_id=c.id)
+    produto = await _produto(fabrica)
+    aparelho = await _aparelho(fabrica, produto, dono=dono, company_id=c.id)
+
+    async with fabrica() as s:
+        meus = await list_my_equipment(s, colega, None)
+        do_produto = await list_equipments(produto.id, s, colega, 0, 20, None, None, False)
+        assert meus.items == [] and do_produto.items == []
+
+        for recusada in (
+            lambda: get_equipment(aparelho.id, s, colega),
+            lambda: update_my_equipment(aparelho.id, EquipmentUpdate(name="Tomado"), s, colega),
+            lambda: delete_my_equipment(aparelho.id, s, colega),
+        ):
+            with pytest.raises(HTTPException) as recusa:
+                await recusada()
+            assert recusa.value.status_code == 404
+            await s.rollback()
+
+        with pytest.raises(HTTPException) as recusa:
+            await _set_ticket_equipments(s, Ticket(), [aparelho.id], colega)
+        assert recusa.value.status_code == 403
+
+    async with fabrica() as s:
+        intacto = (
+            await s.execute(select(Equipment).where(Equipment.id == aparelho.id))
+        ).scalar_one()
+    assert (intacto.name, intacto.is_active) == (aparelho.name, True)
+
+    async with fabrica() as s:
+        do_dono = await list_my_equipment(s, dono, None)
+    assert [e.id for e in do_dono.items] == [aparelho.id]
+
+
+# ══════════════════════════════════════════════════════════════
+# 6. Os scripts
+# ══════════════════════════════════════════════════════════════
+
+
+async def _conexao(fabrica):
+    async with fabrica() as s:
+        return s.bind
+
+
+@pytest.mark.asyncio
+async def test_o_preenchimento_grava_so_o_que_nao_tem_duvida(fabrica):
+    from scripts.preenche_empresa_do_equipamento import aplica, levanta, planeja
+
+    g = await _grupo(fabrica)
+    c = await _empresa(fabrica, g)
+    outra = await _empresa(fabrica, g, "Outra")
+    vinculado = await _pessoa(fabrica, company_id=c.id)
+    solto = await _pessoa(fabrica)
+    inativo = await _pessoa(fabrica, company_id=c.id, situacao=UserStatus.inactive)
+    de_fora = await _pessoa(fabrica, company_id=outra.id)
+    produto = await _produto(fabrica)
+    limpo = await _aparelho(fabrica, produto, dono=vinculado)
+    sem_dono = await _aparelho(fabrica, produto)
+    de_solto = await _aparelho(fabrica, produto, dono=solto)
+    de_inativo = await _aparelho(fabrica, produto, dono=inativo)
+    compartilhado = await _aparelho(fabrica, produto, dono=vinculado)
+    ja_tem = await _aparelho(fabrica, produto, dono=vinculado, company_id=outra.id)
+    async with fabrica() as s:
+        # Alguém de OUTRA empresa consta como usuário do aparelho: resto da
+        # anexação por série que existiu de 26/08 a 09/10.
+        await s.execute(
+            equipment_users.insert().values(equipment_id=compartilhado.id, user_id=de_fora.id)
+        )
+        await s.commit()
+
+    motor = await _conexao(fabrica)
+    async with motor.connect() as conn:
+        plano = planeja(await levanta(conn))
+
+    assert [i.id for i in plano["preenchivel"]] == [limpo.id]
+    assert [i.id for i in plano["sem_responsavel"]] == [sem_dono.id]
+    assert [i.id for i in plano["responsavel_sem_vinculo"]] == [de_solto.id]
+    assert [i.id for i in plano["responsavel_inapto"]] == [de_inativo.id]
+    assert [i.id for i in plano["ambiguo"]] == [compartilhado.id]
+    assert [i.id for i in plano["divergente"]] == [ja_tem.id]
+
+    # Só levantar não grava.
+    for aparelho in (limpo, sem_dono, de_solto, de_inativo, compartilhado):
+        assert await _empresa_do(fabrica, aparelho.id) is None
+
+    async with motor.connect() as conn:
+        gravados, pulados = await aplica(conn, plano["preenchivel"])
+
+    assert (gravados, pulados) == ([limpo.id], [])
+    assert await _empresa_do(fabrica, limpo.id) == c.id
+    for aparelho in (sem_dono, de_solto, de_inativo, compartilhado):
+        assert await _empresa_do(fabrica, aparelho.id) is None
+    assert await _empresa_do(fabrica, ja_tem.id) == outra.id
+    [auditoria] = await _auditorias_de_aparelho(fabrica)
+    assert auditoria.entity_id == limpo.id
+    assert auditoria.action == AuditAction.update
+    assert auditoria.user_id is None
+    assert auditoria.old_data == {"company_id": None}
+    assert auditoria.new_data == {
+        "company_id": str(c.id),
+        "origem": "script_preenche_empresa_do_equipamento",
+    }
+
+    # Rodar de novo não acha mais nada.
+    async with motor.connect() as conn:
+        de_novo = planeja(await levanta(conn))
+    assert de_novo["preenchivel"] == []
+
+
+@pytest.mark.asyncio
+async def test_chamado_aberto_por_gente_de_outra_empresa_torna_o_aparelho_ambiguo(fabrica):
+    from scripts.preenche_empresa_do_equipamento import levanta, planeja
+
+    g = await _grupo(fabrica)
+    c = await _empresa(fabrica, g)
+    outra = await _empresa(fabrica, g, "Outra")
+    dono = await _pessoa(fabrica, company_id=c.id)
+    de_fora = await _pessoa(fabrica, company_id=outra.id)
+    produto = await _produto(fabrica)
+    aparelho = await _aparelho(fabrica, produto, dono=dono)
+    async with fabrica() as s:
+        chamado = Ticket(
+            id=uuid.uuid4(),
+            protocol="HS-T-1",
+            title="Chamado de fora",
+            description="Aberto por gente de outra empresa",
+            category=next(iter(TicketCategory)),
+            creator_id=de_fora.id,
+        )
+        s.add(chamado)
+        await s.flush()
+        await s.execute(
+            ticket_equipments.insert().values(ticket_id=chamado.id, equipment_id=aparelho.id)
+        )
+        await s.commit()
+
+    motor = await _conexao(fabrica)
+    async with motor.connect() as conn:
+        plano = planeja(await levanta(conn))
+
+    assert plano["preenchivel"] == []
+    [item] = plano["ambiguo"]
+    assert item.id == aparelho.id
+    assert "chamado" in item.motivo
+
+
+@pytest.mark.asyncio
+async def test_o_preenchimento_pula_o_que_mudou_depois_do_levantamento(fabrica):
+    from scripts.preenche_empresa_do_equipamento import aplica, levanta, planeja
+
+    g = await _grupo(fabrica)
+    c = await _empresa(fabrica, g)
+    outra = await _empresa(fabrica, g, "Outra")
+    dono = await _pessoa(fabrica, company_id=c.id)
+    produto = await _produto(fabrica)
+    preenchido_no_meio = await _aparelho(fabrica, produto, dono=dono)
+    dono_desvinculado = await _pessoa(fabrica, company_id=c.id)
+    do_desvinculado = await _aparelho(fabrica, produto, dono=dono_desvinculado)
+    motor = await _conexao(fabrica)
+    async with motor.connect() as conn:
+        plano = planeja(await levanta(conn))
+    assert len(plano["preenchivel"]) == 2
+
+    async with fabrica() as s:
+        await s.execute(
+            text("UPDATE equipments SET company_id = :c WHERE id = :id"),
+            {"c": outra.id, "id": preenchido_no_meio.id},
+        )
+        await s.execute(
+            text("UPDATE users SET company_id = NULL WHERE id = :id"), {"id": dono_desvinculado.id}
+        )
+        await s.commit()
+
+    async with motor.connect() as conn:
+        gravados, pulados = await aplica(conn, plano["preenchivel"])
+
+    assert gravados == []
+    assert set(pulados) == {preenchido_no_meio.id, do_desvinculado.id}
+    assert await _empresa_do(fabrica, preenchido_no_meio.id) == outra.id
+    assert await _empresa_do(fabrica, do_desvinculado.id) is None
+    assert await _auditorias_de_aparelho(fabrica) == []
+
+
+@pytest.mark.asyncio
+async def test_a_fusao_de_empresas_leva_os_aparelhos_para_a_sobrevivente(fabrica):
+    from scripts.funde_empresas_duplicadas import Empresa, _aplica, planeja_fusao
+
+    g = await _grupo(fabrica)
+    fica = await _empresa(fabrica, g, "Fica", cnpj="11222333000181")
+    sai = await _empresa(fabrica, g, "Sai", cnpj="11.222.333/0001-81")
+    await _pessoa(fabrica, company_id=fica.id)
+    produto = await _produto(fabrica)
+    aparelho = await _aparelho(fabrica, produto, company_id=sai.id)
+    fusoes, recusadas = planeja_fusao(
+        [
+            Empresa(fica.id, "11222333000181", "Fica", g.id, _AGORA, 1, 0, 0),
+            Empresa(sai.id, "11222333000181", "Sai", g.id, _AGORA, 0, 0, 1),
+        ]
+    )
+    assert recusadas == []
+
+    motor = await _conexao(fabrica)
+    async with motor.connect() as conn:
+        await _aplica(conn, fusoes)
+
+    async with fabrica() as s:
+        restantes = list((await s.execute(select(Company.id))).scalars())
+    assert restantes == [fica.id]
+    assert await _empresa_do(fabrica, aparelho.id) == fica.id
+
+
+# ══════════════════════════════════════════════════════════════
+# 8. Sem empresa POR DECISÃO: o nulo que ninguém preenche
+# ══════════════════════════════════════════════════════════════
+#
+# `company_id` nulo é "ainda não classificado"; nulo com a marca é "a equipe
+# decidiu". O campo da equipe tem três estados — omitido, empresa, `null`
+# explícito — e cada um tem o próprio teste.
+
+_MARCADO = {"company_id": None, "sem_empresa_por_decisao": True, "origem": "equipe"}
+
+
+@pytest.mark.asyncio
+async def test_campo_omitido_no_cadastro_nao_marca_decisao(fabrica):
+    cliente = await _pessoa(fabrica)  # sem vínculo: herda "nenhuma"
+    admin = await _pessoa(fabrica, UserRole.admin)
+    produto = await _produto(fabrica)
+
+    da_equipe = await _roda(fabrica, _equipe_cadastra(admin, produto, owner_id=cliente.id))
+    do_cliente = await _roda(fabrica, _cliente_cadastra(cliente, produto))
+
+    for criado in (da_equipe, do_cliente):
+        assert await _empresa_do(fabrica, criado.id) is None
+        assert await _marca_do(fabrica, criado.id) is False
+    for auditoria in await _auditorias_de_aparelho(fabrica):
+        assert auditoria.new_data is None
+
+
+@pytest.mark.asyncio
+async def test_null_explicito_em_aparelho_sem_empresa_marca_e_audita(fabrica):
+    """De nulo para nulo a empresa não muda — muda a intenção, e isso se audita."""
+    produto = await _produto(fabrica)
+    aparelho = await _aparelho(fabrica, produto)
+    tecnico = await _pessoa(fabrica, UserRole.technician)
+
+    await _roda(fabrica, _equipe_edita(tecnico, aparelho, company_id=None))
+
+    assert await _empresa_do(fabrica, aparelho.id) is None
+    assert await _marca_do(fabrica, aparelho.id) is True
+    [auditoria] = await _auditorias_de_aparelho(fabrica)
+    assert auditoria.user_id == tecnico.id
+    assert auditoria.old_data == {"company_id": None}
+    assert auditoria.new_data == _MARCADO
+
+
+@pytest.mark.asyncio
+async def test_repetir_o_null_em_aparelho_ja_marcado_nao_audita(fabrica):
+    produto = await _produto(fabrica)
+    aparelho = await _aparelho(fabrica, produto)
+    admin = await _pessoa(fabrica, UserRole.admin)
+    await _roda(fabrica, _equipe_edita(admin, aparelho, company_id=None))
+
+    await _roda(fabrica, _equipe_edita(admin, aparelho, company_id=None))
+
+    assert await _marca_do(fabrica, aparelho.id) is True
+    primeira, segunda = await _auditorias_de_aparelho(fabrica)
+    assert primeira.new_data == _MARCADO
+    assert segunda.old_data is None and segunda.new_data is None
+
+
+@pytest.mark.asyncio
+async def test_informar_empresa_desfaz_a_marca_e_o_antes_fica_na_trilha(fabrica):
+    g = await _grupo(fabrica)
+    c = await _empresa(fabrica, g)
+    produto = await _produto(fabrica)
+    aparelho = await _aparelho(fabrica, produto)
+    admin = await _pessoa(fabrica, UserRole.admin)
+    await _roda(fabrica, _equipe_edita(admin, aparelho, company_id=None))
+
+    await _roda(fabrica, _equipe_edita(admin, aparelho, company_id=c.id))
+
+    assert await _empresa_do(fabrica, aparelho.id) == c.id
+    assert await _marca_do(fabrica, aparelho.id) is False
+    _, troca = await _auditorias_de_aparelho(fabrica)
+    assert troca.old_data == {"company_id": None, "sem_empresa_por_decisao": True}
+    assert troca.new_data == {"company_id": str(c.id), "origem": "equipe"}
+
+
+@pytest.mark.asyncio
+async def test_editar_outro_campo_nao_mexe_na_marca(fabrica):
+    cliente = await _pessoa(fabrica)
+    outro = await _pessoa(fabrica)
+    produto = await _produto(fabrica)
+    marcado = await _aparelho(fabrica, produto, dono=cliente)
+    solto = await _aparelho(fabrica, produto, dono=cliente)
+    admin = await _pessoa(fabrica, UserRole.admin)
+    await _roda(fabrica, _equipe_edita(admin, marcado, company_id=None))
+
+    await _roda(fabrica, _equipe_edita(admin, marcado, location="Sala 3", owner_id=outro.id))
+    await _roda(fabrica, _equipe_edita(admin, solto, location="Sala 3"))
+    await _roda(fabrica, _cliente_edita(cliente, solto, name="Renomeado"))
+
+    assert await _marca_do(fabrica, marcado.id) is True
+    assert await _marca_do(fabrica, solto.id) is False
+
+
+@pytest.mark.asyncio
+async def test_o_vinculo_nao_preenche_o_aparelho_sem_empresa_por_decisao(fabrica):
+    g = await _grupo(fabrica)
+    c = await _empresa(fabrica, g)
+    cliente = await _pessoa(fabrica)
+    produto = await _produto(fabrica)
+    marcado = await _aparelho(fabrica, produto, dono=cliente)
+    solto = await _aparelho(fabrica, produto, dono=cliente)
+    admin = await _pessoa(fabrica, UserRole.admin)
+    await _roda(fabrica, _equipe_edita(admin, marcado, company_id=None))
+
+    await _roda(fabrica, _vincula(admin, c, cliente))
+
+    assert await _empresa_do(fabrica, solto.id) == c.id
+    assert await _empresa_do(fabrica, marcado.id) is None, "decisão da equipe não é lacuna"
+    assert await _marca_do(fabrica, marcado.id) is True
+    propagadas = [
+        a
+        for a in await _auditorias_de_aparelho(fabrica)
+        if (a.new_data or {}).get("origem") == "vinculo_do_responsavel"
+    ]
+    assert [a.entity_id for a in propagadas] == [solto.id]
+
+
+@pytest.mark.asyncio
+async def test_a_sugestao_tambem_respeita_a_decisao_da_equipe(fabrica):
+    g = await _grupo(fabrica)
+    cliente = await _pessoa(fabrica)
+    produto = await _produto(fabrica)
+    marcado = await _aparelho(fabrica, produto, dono=cliente)
+    solto = await _aparelho(fabrica, produto, dono=cliente)
+    admin = await _pessoa(fabrica, UserRole.admin)
+    await _roda(fabrica, _equipe_edita(admin, marcado, company_id=None))
+
+    await _roda(fabrica, _pela_sugestao(admin, g, [cliente]))
+
+    assert await _empresa_do(fabrica, solto.id) is not None
+    assert await _empresa_do(fabrica, marcado.id) is None
+    assert await _marca_do(fabrica, marcado.id) is True
+
+
+@pytest.mark.asyncio
+async def test_o_banco_recusa_marca_de_decisao_com_empresa_gravada(fabrica):
+    g = await _grupo(fabrica)
+    c = await _empresa(fabrica, g)
+    produto = await _produto(fabrica)
+    aparelho = await _aparelho(fabrica, produto, company_id=c.id)
+
+    with pytest.raises(IntegrityError, match="ck_equipments_sem_empresa_por_decisao"):
+        async with fabrica() as s:
+            await s.execute(
+                text("UPDATE equipments SET sem_empresa_por_decisao = true WHERE id = :id"),
+                {"id": aparelho.id},
+            )
+            await s.commit()
+
+
+@pytest.mark.asyncio
+async def test_decisao_em_curso_faz_o_vinculo_pular_o_aparelho(fabrica):
+    """A equipe marca; o vínculo chega no meio e espera a linha. Quando ela
+    solta, o `WHERE` da propagação é reavaliado com a marca já gravada."""
+    g = await _grupo(fabrica)
+    c = await _empresa(fabrica, g)
+    cliente = await _pessoa(fabrica)
+    produto = await _produto(fabrica)
+    aparelho = await _aparelho(fabrica, produto, dono=cliente)
+    admin = await _pessoa(fabrica, UserRole.admin)
+    tecnico = await _pessoa(fabrica, UserRole.technician)
+
+    resultado = await _corrida(
+        fabrica,
+        _equipe_edita(tecnico, aparelho, company_id=None),
+        _vincula(admin, c, cliente),
+    )
+
+    assert resultado == ["ok", "ok"]
+    assert await _empresa_do(fabrica, aparelho.id) is None
+    assert await _marca_do(fabrica, aparelho.id) is True
+
+
+@pytest.mark.asyncio
+async def test_vinculo_em_curso_e_decisao_da_equipe_terminam_sem_empresa_e_sem_erro(fabrica):
+    """O vínculo propaga; a equipe manda `null` no meio. Sem a trava no
+    aparelho, a edição leria "sem empresa", gravaria só a marca por cima da
+    empresa recém-propagada e o `CHECK` responderia 500. Com ela, a edição
+    espera, vê a empresa e a tira — com o antes certo na trilha."""
+    g = await _grupo(fabrica)
+    c = await _empresa(fabrica, g)
+    cliente = await _pessoa(fabrica)
+    produto = await _produto(fabrica)
+    aparelho = await _aparelho(fabrica, produto, dono=cliente)
+    admin = await _pessoa(fabrica, UserRole.admin)
+    tecnico = await _pessoa(fabrica, UserRole.technician)
+
+    resultado = await _corrida(
+        fabrica,
+        _vincula(admin, c, cliente),
+        _equipe_edita(tecnico, aparelho, company_id=None),
+    )
+
+    assert resultado == ["ok", "ok"]
+    assert await _empresa_do(fabrica, aparelho.id) is None
+    assert await _marca_do(fabrica, aparelho.id) is True
+    da_equipe = [
+        a
+        for a in await _auditorias_de_aparelho(fabrica)
+        if (a.new_data or {}).get("origem") == "equipe"
+    ]
+    assert [a.old_data for a in da_equipe] == [{"company_id": str(c.id)}]
+    assert [a.new_data for a in da_equipe] == [_MARCADO]
+
+
+@pytest.mark.asyncio
+async def test_o_preenchimento_so_informa_o_aparelho_sem_empresa_por_decisao(fabrica):
+    from scripts.preenche_empresa_do_equipamento import aplica, levanta, planeja
+
+    g = await _grupo(fabrica)
+    c = await _empresa(fabrica, g)
+    vinculado = await _pessoa(fabrica, company_id=c.id)
+    produto = await _produto(fabrica)
+    limpo = await _aparelho(fabrica, produto, dono=vinculado)
+    marcado = await _aparelho(fabrica, produto, dono=vinculado)
+    admin = await _pessoa(fabrica, UserRole.admin)
+    await _roda(fabrica, _equipe_edita(admin, marcado, company_id=None))
+
+    motor = await _conexao(fabrica)
+    async with motor.connect() as conn:
+        plano = planeja(await levanta(conn))
+
+    assert [i.id for i in plano["preenchivel"]] == [limpo.id]
+    assert [i.id for i in plano["sem_empresa_por_decisao"]] == [marcado.id]
+
+    async with motor.connect() as conn:
+        gravados, pulados = await aplica(conn, plano["preenchivel"])
+    assert (gravados, pulados) == ([limpo.id], [])
+    assert await _empresa_do(fabrica, marcado.id) is None
+    assert await _marca_do(fabrica, marcado.id) is True
+
+
+@pytest.mark.asyncio
+async def test_o_preenchimento_pula_o_aparelho_marcado_depois_do_levantamento(fabrica):
+    """Entre o `--confere` e o `--aplicar` a equipe decide: a gravação refaz a
+    conferência na própria instrução e não passa por cima."""
+    from scripts.preenche_empresa_do_equipamento import aplica, levanta, planeja
+
+    g = await _grupo(fabrica)
+    c = await _empresa(fabrica, g)
+    vinculado = await _pessoa(fabrica, company_id=c.id)
+    produto = await _produto(fabrica)
+    aparelho = await _aparelho(fabrica, produto, dono=vinculado)
+    admin = await _pessoa(fabrica, UserRole.admin)
+
+    motor = await _conexao(fabrica)
+    async with motor.connect() as conn:
+        plano = planeja(await levanta(conn))
+    assert [i.id for i in plano["preenchivel"]] == [aparelho.id]
+
+    await _roda(fabrica, _equipe_edita(admin, aparelho, company_id=None))
+    async with motor.connect() as conn:
+        gravados, pulados = await aplica(conn, plano["preenchivel"])
+
+    assert (gravados, pulados) == ([], [aparelho.id])
+    assert await _empresa_do(fabrica, aparelho.id) is None
+    assert await _marca_do(fabrica, aparelho.id) is True
+
+
+# ══════════════════════════════════════════════════════════════
+# 9. O que o cadastro e a edição pela equipe DEVOLVEM
+# ══════════════════════════════════════════════════════════════
+#
+# A tela de Produtos troca a linha da lista pela resposta do salvar. As duas
+# rotas devolviam o equipamento cru — `equipment_company_id: null` com a
+# empresa gravada no banco — e a tela passava a dizer "sem empresa (ainda não
+# classificado)" logo depois de a equipe classificar. A resposta do salvar tem
+# de ser a MESMA do `GET /equipments/{id}`, pelo fio, nos dois modos da flag.
+
+_DA_EQUIPE = (
+    "product_name",
+    "owner_name",
+    "owner_email",
+    "linked_company_id",
+    "linked_company_name",
+    "equipment_company_id",
+    "equipment_company_name",
+    "no_company_by_decision",
+)
+
+
+async def _cenario_da_resposta(fabrica):
+    g = await _grupo(fabrica)
+    do_responsavel = await _empresa(fabrica, g, "Do responsavel")
+    outra = await _empresa(fabrica, g, "Outra")
+    cliente = await _pessoa(fabrica, company_id=do_responsavel.id)
+    produto = await _produto(fabrica)
+    return do_responsavel, outra, cliente, produto
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("flag", [False, True])
+@pytest.mark.parametrize("papel", [UserRole.admin, UserRole.technician])
+async def test_o_cadastro_pela_equipe_devolve_as_duas_empresas(
+    fabrica, http, monkeypatch, flag, papel
+):
+    monkeypatch.setattr(get_settings(), "equipamento_por_empresa", flag)
+    do_responsavel, outra, cliente, produto = await _cenario_da_resposta(fabrica)
+    http.estado["ator"] = await _pessoa(fabrica, papel)
+
+    r = await http.post(
+        f"/api/v1/products/{produto.id}/equipments",
+        json={"name": "Novo", "owner_id": str(cliente.id), "company_id": str(outra.id)},
+    )
+
+    assert r.status_code == 201, r.text
+    corpo = r.json()
+    assert corpo["equipment_company_id"] == str(outra.id)
+    assert corpo["equipment_company_name"] == "Outra"
+    assert corpo["no_company_by_decision"] is False
+    assert corpo["linked_company_id"] == str(do_responsavel.id)
+    assert corpo["linked_company_name"] == "Do responsavel"
+    assert corpo["owner_name"] == cliente.name
+    assert corpo["owner_email"] == cliente.email
+    assert corpo["product_name"] == produto.name
+    assert await _empresa_do(fabrica, uuid.UUID(corpo["id"])) == outra.id
+
+
+@pytest.mark.asyncio
+async def test_o_cadastro_que_herda_a_empresa_do_responsavel_devolve_a_herdada(fabrica, http):
+    do_responsavel, _, cliente, produto = await _cenario_da_resposta(fabrica)
+    http.estado["ator"] = await _pessoa(fabrica, UserRole.admin)
+
+    r = await http.post(
+        f"/api/v1/products/{produto.id}/equipments",
+        json={"name": "Herdado", "owner_id": str(cliente.id)},
+    )
+
+    assert r.status_code == 201, r.text
+    assert r.json()["equipment_company_id"] == str(do_responsavel.id)
+    assert r.json()["no_company_by_decision"] is False
+
+
+@pytest.mark.asyncio
+async def test_o_cadastro_sem_empresa_por_decisao_devolve_a_marca(fabrica, http):
+    _, _, cliente, produto = await _cenario_da_resposta(fabrica)
+    http.estado["ator"] = await _pessoa(fabrica, UserRole.admin)
+
+    r = await http.post(
+        f"/api/v1/products/{produto.id}/equipments",
+        json={"name": "De feira", "owner_id": str(cliente.id), "company_id": None},
+    )
+
+    assert r.status_code == 201, r.text
+    assert r.json()["equipment_company_id"] is None
+    assert r.json()["equipment_company_name"] is None
+    assert r.json()["no_company_by_decision"] is True
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("flag", [False, True])
+async def test_a_edicao_que_define_a_empresa_devolve_a_empresa_definida(
+    fabrica, http, monkeypatch, flag
+):
+    monkeypatch.setattr(get_settings(), "equipamento_por_empresa", flag)
+    do_responsavel, outra, cliente, produto = await _cenario_da_resposta(fabrica)
+    aparelho = await _aparelho(fabrica, produto, dono=cliente)
+    http.estado["ator"] = await _pessoa(fabrica, UserRole.technician)
+
+    r = await http.patch(f"/api/v1/equipments/{aparelho.id}", json={"company_id": str(outra.id)})
+
+    assert r.status_code == 200, r.text
+    corpo = r.json()
+    assert corpo["equipment_company_id"] == str(outra.id)
+    assert corpo["equipment_company_name"] == "Outra"
+    assert corpo["no_company_by_decision"] is False
+    assert corpo["linked_company_id"] == str(do_responsavel.id)
+    assert corpo["owner_name"] == cliente.name
+    assert corpo["product_name"] == produto.name
+
+
+@pytest.mark.asyncio
+async def test_a_edicao_com_null_devolve_sem_empresa_por_decisao(fabrica, http):
+    do_responsavel, _, cliente, produto = await _cenario_da_resposta(fabrica)
+    aparelho = await _aparelho(fabrica, produto, dono=cliente, company_id=do_responsavel.id)
+    http.estado["ator"] = await _pessoa(fabrica, UserRole.admin)
+
+    r = await http.patch(f"/api/v1/equipments/{aparelho.id}", json={"company_id": None})
+
+    assert r.status_code == 200, r.text
+    assert r.json()["equipment_company_id"] is None
+    assert r.json()["no_company_by_decision"] is True
+
+
+@pytest.mark.asyncio
+async def test_inativar_devolve_a_empresa_que_o_aparelho_ja_tinha(fabrica, http):
+    """É o caminho do botão de ativar/inativar: `PATCH` só com `is_active`."""
+    do_responsavel, _, cliente, produto = await _cenario_da_resposta(fabrica)
+    aparelho = await _aparelho(fabrica, produto, dono=cliente, company_id=do_responsavel.id)
+    http.estado["ator"] = await _pessoa(fabrica, UserRole.admin)
+
+    r = await http.patch(f"/api/v1/equipments/{aparelho.id}", json={"is_active": False})
+
+    assert r.status_code == 200, r.text
+    assert r.json()["is_active"] is False
+    assert r.json()["equipment_company_id"] == str(do_responsavel.id)
+    assert r.json()["equipment_company_name"] == "Do responsavel"
+    assert r.json()["no_company_by_decision"] is False
+    assert await _empresa_do(fabrica, aparelho.id) == do_responsavel.id
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize(
+    "corpo_da_edicao",
+    [{"name": "Renomeado"}, {"company_id": "OUTRA"}, {"company_id": None}, {"owner_id": None}],
+)
+async def test_a_resposta_do_salvar_e_a_mesma_do_detalhe(fabrica, http, corpo_da_edicao):
+    """A tela pode usar a resposta do salvar no lugar de reler o equipamento."""
+    _, outra, cliente, produto = await _cenario_da_resposta(fabrica)
+    http.estado["ator"] = await _pessoa(fabrica, UserRole.admin)
+    corpo = {k: (str(outra.id) if v == "OUTRA" else v) for k, v in corpo_da_edicao.items()}
+
+    criado = await http.post(
+        f"/api/v1/products/{produto.id}/equipments",
+        json={"name": "Novo", "owner_id": str(cliente.id)},
+    )
+    assert criado.status_code == 201, criado.text
+    detalhe = await http.get(f"/api/v1/equipments/{criado.json()['id']}")
+    assert criado.json() == detalhe.json()
+
+    editado = await http.patch(f"/api/v1/equipments/{criado.json()['id']}", json=corpo)
+    assert editado.status_code == 200, editado.text
+    detalhe = await http.get(f"/api/v1/equipments/{criado.json()['id']}")
+    assert editado.json() == detalhe.json()
+    assert set(_DA_EQUIPE) <= set(editado.json())
+
+
+@pytest.mark.asyncio
+async def test_o_cliente_continua_sem_alcancar_as_rotas_da_equipe(fabrica, http):
+    """Enriquecer a resposta não abriu a rota: o cliente segue com 403."""
+    do_responsavel, _, cliente, produto = await _cenario_da_resposta(fabrica)
+    aparelho = await _aparelho(fabrica, produto, dono=cliente, company_id=do_responsavel.id)
+    http.estado["ator"] = cliente
+
+    criar = await http.post(f"/api/v1/products/{produto.id}/equipments", json={"name": "X"})
+    editar = await http.patch(f"/api/v1/equipments/{aparelho.id}", json={"name": "Y"})
+
+    assert (criar.status_code, editar.status_code) == (403, 403)
+    assert "equipment_company_id" not in criar.text + editar.text
+
+
+# ══════════════════════════════════════════════════════════════
+# 10. A troca de responsável completa o aparelho ainda não classificado
+# ══════════════════════════════════════════════════════════════
+#
+# Trocar o responsável não muda a empresa que o aparelho JÁ tem (seção 2). O
+# que faltava: o aparelho sem empresa e sem decisão que passa a ser de um
+# cliente vinculado ficava sem empresa para sempre — a propagação só roda no
+# momento do vínculo, e o vínculo dele já tinha acontecido.
+
+_HERDADA = "empresa_do_responsavel"
+
+
+async def _dono_do(fabrica, aparelho_id) -> uuid.UUID | None:
+    async with fabrica() as s:
+        return (
+            await s.execute(select(Equipment.owner_id).where(Equipment.id == aparelho_id))
+        ).scalar_one()
+
+
+async def _marca(fabrica, aparelho_id) -> None:
+    """Deixa o aparelho "sem empresa por decisão", como a equipe deixaria."""
+    async with fabrica() as s:
+        await s.execute(
+            text("UPDATE equipments SET sem_empresa_por_decisao = true WHERE id = :id"),
+            {"id": aparelho_id},
+        )
+        await s.commit()
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("flag", [False, True])
+@pytest.mark.parametrize("papel", [UserRole.admin, UserRole.technician])
+@pytest.mark.parametrize("antes", ["sem_responsavel", "responsavel_sem_empresa"])
+async def test_aparelho_sem_empresa_herda_a_do_novo_responsavel(
+    fabrica, monkeypatch, flag, papel, antes
+):
+    """A gravação não depende da flag, como toda gravação de empresa."""
+    monkeypatch.setattr(get_settings(), "equipamento_por_empresa", flag)
+    g = await _grupo(fabrica)
+    c = await _empresa(fabrica, g)
+    novo = await _pessoa(fabrica, company_id=c.id)
+    antigo = await _pessoa(fabrica) if antes == "responsavel_sem_empresa" else None
+    produto = await _produto(fabrica)
+    aparelho = await _aparelho(fabrica, produto, dono=antigo)
+    ator = await _pessoa(fabrica, papel)
+
+    await _roda(fabrica, _equipe_edita(ator, aparelho, owner_id=novo.id))
+
+    assert await _dono_do(fabrica, aparelho.id) == novo.id
+    assert await _empresa_do(fabrica, aparelho.id) == c.id
+    assert await _marca_do(fabrica, aparelho.id) is False
+    (trilha,) = await _auditorias_de_aparelho(fabrica)
+    assert trilha.user_id == ator.id
+    assert trilha.old_data == {"company_id": None}
+    assert trilha.new_data == {"company_id": str(c.id), "origem": _HERDADA}
+
+
+@pytest.mark.asyncio
+async def test_a_resposta_da_troca_ja_traz_a_empresa_herdada(fabrica, http):
+    g = await _grupo(fabrica)
+    c = await _empresa(fabrica, g, "Herdada Ltda")
+    novo = await _pessoa(fabrica, company_id=c.id)
+    produto = await _produto(fabrica)
+    aparelho = await _aparelho(fabrica, produto)
+    http.estado["ator"] = await _pessoa(fabrica, UserRole.technician)
+
+    resposta = await http.patch(
+        f"/api/v1/equipments/{aparelho.id}", json={"owner_id": str(novo.id)}
+    )
+
+    assert resposta.status_code == 200, resposta.text
+    corpo = resposta.json()
+    assert corpo["owner_id"] == str(novo.id)
+    assert corpo["equipment_company_id"] == str(c.id)
+    assert corpo["equipment_company_name"] == "Herdada Ltda"
+    assert corpo["no_company_by_decision"] is False
+
+
+@pytest.mark.asyncio
+async def test_novo_responsavel_sem_empresa_nao_ha_o_que_herdar(fabrica):
+    novo = await _pessoa(fabrica)
+    produto = await _produto(fabrica)
+    aparelho = await _aparelho(fabrica, produto)
+    admin = await _pessoa(fabrica, UserRole.admin)
+
+    await _roda(fabrica, _equipe_edita(admin, aparelho, owner_id=novo.id))
+
+    assert await _dono_do(fabrica, aparelho.id) == novo.id
+    assert await _empresa_do(fabrica, aparelho.id) is None
+    assert await _marca_do(fabrica, aparelho.id) is False
+    (trilha,) = await _auditorias_de_aparelho(fabrica)
+    assert (trilha.old_data, trilha.new_data) == (None, None)
+
+
+@pytest.mark.asyncio
+async def test_aparelho_sem_empresa_por_decisao_nao_herda(fabrica):
+    """O nulo marcado é decisão da equipe, não lacuna — a troca o respeita
+    como a propagação do vínculo já respeita."""
+    g = await _grupo(fabrica)
+    c = await _empresa(fabrica, g)
+    novo = await _pessoa(fabrica, company_id=c.id)
+    produto = await _produto(fabrica)
+    aparelho = await _aparelho(fabrica, produto)
+    await _marca(fabrica, aparelho.id)
+    admin = await _pessoa(fabrica, UserRole.admin)
+
+    await _roda(fabrica, _equipe_edita(admin, aparelho, owner_id=novo.id))
+
+    assert await _dono_do(fabrica, aparelho.id) == novo.id
+    assert await _empresa_do(fabrica, aparelho.id) is None
+    assert await _marca_do(fabrica, aparelho.id) is True
+    (trilha,) = await _auditorias_de_aparelho(fabrica)
+    assert (trilha.old_data, trilha.new_data) == (None, None)
+
+
+@pytest.mark.asyncio
+async def test_empresa_informada_junto_com_o_responsavel_vence_a_heranca(fabrica):
+    g = await _grupo(fabrica)
+    do_responsavel = await _empresa(fabrica, g, "Do responsavel")
+    informada = await _empresa(fabrica, g, "Informada")
+    novo = await _pessoa(fabrica, company_id=do_responsavel.id)
+    produto = await _produto(fabrica)
+    aparelho = await _aparelho(fabrica, produto)
+    admin = await _pessoa(fabrica, UserRole.admin)
+
+    await _roda(fabrica, _equipe_edita(admin, aparelho, owner_id=novo.id, company_id=informada.id))
+
+    assert await _empresa_do(fabrica, aparelho.id) == informada.id
+    (trilha,) = await _auditorias_de_aparelho(fabrica)
+    assert trilha.new_data == {"company_id": str(informada.id), "origem": "equipe"}
+
+
+@pytest.mark.asyncio
+async def test_null_explicito_junto_com_o_responsavel_e_decisao_e_nao_heranca(fabrica):
+    g = await _grupo(fabrica)
+    c = await _empresa(fabrica, g)
+    novo = await _pessoa(fabrica, company_id=c.id)
+    produto = await _produto(fabrica)
+    aparelho = await _aparelho(fabrica, produto)
+    admin = await _pessoa(fabrica, UserRole.admin)
+
+    await _roda(fabrica, _equipe_edita(admin, aparelho, owner_id=novo.id, company_id=None))
+
+    assert await _dono_do(fabrica, aparelho.id) == novo.id
+    assert await _empresa_do(fabrica, aparelho.id) is None
+    assert await _marca_do(fabrica, aparelho.id) is True
+    (trilha,) = await _auditorias_de_aparelho(fabrica)
+    assert trilha.new_data == _MARCADO
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("corpo", ["mesmo_responsavel", "sem_o_campo", "responsavel_nulo"])
+async def test_sem_troca_de_responsavel_nada_e_herdado(fabrica, corpo):
+    """Herdar é efeito da TROCA. Reenviar o mesmo responsável, editar outro
+    campo ou tirar o responsável não classifica o aparelho: para o que já está
+    com o cliente vinculado existem o vínculo e o script de preenchimento."""
+    g = await _grupo(fabrica)
+    c = await _empresa(fabrica, g)
+    dono = await _pessoa(fabrica, company_id=c.id)
+    produto = await _produto(fabrica)
+    aparelho = await _aparelho(fabrica, produto, dono=dono)
+    admin = await _pessoa(fabrica, UserRole.admin)
+    campos = {
+        "mesmo_responsavel": {"owner_id": dono.id, "location": "Sala 2"},
+        "sem_o_campo": {"location": "Sala 2"},
+        "responsavel_nulo": {"owner_id": None},
+    }[corpo]
+
+    await _roda(fabrica, _equipe_edita(admin, aparelho, **campos))
+
+    assert await _empresa_do(fabrica, aparelho.id) is None
+    assert await _marca_do(fabrica, aparelho.id) is False
+    (trilha,) = await _auditorias_de_aparelho(fabrica)
+    assert (trilha.old_data, trilha.new_data) == (None, None)
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("invalido", ["inexistente", "tecnico", "admin"])
+async def test_responsavel_invalido_e_recusado_e_nada_muda(fabrica, invalido):
+    g = await _grupo(fabrica)
+    c = await _empresa(fabrica, g)
+    produto = await _produto(fabrica)
+    aparelho = await _aparelho(fabrica, produto)
+    admin = await _pessoa(fabrica, UserRole.admin)
+    alvo = {
+        "inexistente": uuid.uuid4(),
+        "tecnico": (await _pessoa(fabrica, UserRole.technician, company_id=c.id)).id,
+        "admin": (await _pessoa(fabrica, UserRole.admin, company_id=c.id)).id,
+    }[invalido]
+
+    with pytest.raises(HTTPException) as recusa:
+        await _roda(fabrica, _equipe_edita(admin, aparelho, owner_id=alvo))
+
+    assert recusa.value.status_code == 400
+    assert await _dono_do(fabrica, aparelho.id) is None
+    assert await _empresa_do(fabrica, aparelho.id) is None
+    assert await _auditorias_de_aparelho(fabrica) == []
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("flag", [False, True])
+async def test_a_heranca_nao_abre_o_aparelho_para_outra_empresa(fabrica, monkeypatch, flag):
+    """Quem passa a enxergar é só quem a regra de escopo já deixava: o novo
+    responsável sempre; o colega da MESMA empresa, com a flag ligada. Gente de
+    outra empresa e o responsável antigo continuam com 404, e nenhum cliente
+    alcança a rota que fez a troca."""
+    from app.routers.products import get_equipment, list_my_equipment
+
+    monkeypatch.setattr(get_settings(), "equipamento_por_empresa", flag)
+    g = await _grupo(fabrica)
+    c = await _empresa(fabrica, g, "Da heranca")
+    outra = await _empresa(fabrica, g, "Outra")
+    novo = await _pessoa(fabrica, company_id=c.id)
+    colega = await _pessoa(fabrica, company_id=c.id)
+    de_fora = await _pessoa(fabrica, company_id=outra.id)
+    antigo = await _pessoa(fabrica)
+    produto = await _produto(fabrica)
+    aparelho = await _aparelho(fabrica, produto, dono=antigo)
+    tecnico = await _pessoa(fabrica, UserRole.technician)
+
+    await _roda(fabrica, _equipe_edita(tecnico, aparelho, owner_id=novo.id))
+    assert await _empresa_do(fabrica, aparelho.id) == c.id
+
+    async def _ve(cliente) -> bool:
+        async with fabrica() as s:
+            lista = await list_my_equipment(s, cliente, None)
+            try:
+                await get_equipment(aparelho.id, s, cliente)
+                pelo_detalhe = True
+            except HTTPException as e:
+                assert e.status_code == 404
+                pelo_detalhe = False
+        assert (aparelho.id in [e.id for e in lista.items]) is pelo_detalhe
+        return pelo_detalhe
+
+    assert await _ve(novo) is True
+    assert await _ve(colega) is flag
+    assert await _ve(de_fora) is False
+    assert await _ve(antigo) is False
+
+
+@pytest.mark.asyncio
+async def test_cliente_nao_troca_o_responsavel_nem_pela_rota_da_equipe_nem_pela_propria(
+    fabrica, http
+):
+    g = await _grupo(fabrica)
+    c = await _empresa(fabrica, g)
+    dono = await _pessoa(fabrica)
+    esperto = await _pessoa(fabrica, company_id=c.id)
+    produto = await _produto(fabrica)
+    aparelho = await _aparelho(fabrica, produto, dono=dono)
+    proprio = await _aparelho(fabrica, produto, dono=esperto)
+    http.estado["ator"] = esperto
+
+    pela_equipe = await http.patch(
+        f"/api/v1/equipments/{aparelho.id}", json={"owner_id": str(esperto.id)}
+    )
+    pela_propria = await http.patch(
+        f"/api/v1/equipment/my/{proprio.id}", json={"owner_id": str(dono.id), "name": "Meu"}
+    )
+
+    assert pela_equipe.status_code == 403
+    assert pela_propria.status_code == 200
+    assert await _dono_do(fabrica, aparelho.id) == dono.id
+    assert await _dono_do(fabrica, proprio.id) == esperto.id
+    assert await _empresa_do(fabrica, aparelho.id) is None
+
+
+# ── Concorrência da troca ─────────────────────────────────────
+
+
+@pytest.mark.asyncio
+async def test_a_troca_trava_ator_responsavel_e_empresa_antes_do_aparelho(fabrica):
+    """A ordem, lida nas instruções que chegam ao banco: ATOR → responsável →
+    empresa → aparelho, a mesma do cadastro pela equipe e do vínculo."""
+    g = await _grupo(fabrica)
+    c = await _empresa(fabrica, g)
+    novo = await _pessoa(fabrica, company_id=c.id)
+    produto = await _produto(fabrica)
+    aparelho = await _aparelho(fabrica, produto)
+    tecnico = await _pessoa(fabrica, UserRole.technician)
+
+    instrucoes: list[tuple[str, tuple]] = []
+
+    def _anota(_conn, _cursor, sql, parametros, *_args):
+        instrucoes.append((" ".join(sql.split()), tuple(parametros or ())))
+
+    async with fabrica() as s:
+        motor = s.bind.sync_engine
+        event.listen(motor, "before_cursor_execute", _anota)
+        try:
+            await _equipe_edita(tecnico, aparelho, owner_id=novo.id)(s)
+        finally:
+            event.remove(motor, "before_cursor_execute", _anota)
+
+    travas = [(q, p) for q, p in instrucoes if " FOR " in q]
+    assert [
+        ("users" if "FROM users" in q else "companies" if "FROM companies" in q else "equipments")
+        + (" KEY SHARE" if q.endswith("FOR KEY SHARE") else " UPDATE")
+        for q, _ in travas
+    ] == ["users KEY SHARE", "users KEY SHARE", "companies KEY SHARE", "equipments UPDATE"], travas
+    alvos = [{str(v) for v in p} for _, p in travas]
+    assert str(tecnico.id) in alvos[0] and str(novo.id) in alvos[1]
+    assert str(c.id) in alvos[2] and str(aparelho.id) in alvos[3]
+    textos = [q for q, _ in instrucoes]
+    escrita = next(i for i, q in enumerate(textos) if q.startswith("UPDATE equipments"))
+    assert escrita > textos.index(travas[3][0])
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("ordem", ["vinculo_primeiro", "troca_primeiro"])
+async def test_vinculo_e_troca_de_responsavel_terminam_com_a_empresa(fabrica, ordem):
+    """O cliente está sendo vinculado enquanto a equipe passa o aparelho para
+    ele. Vínculo primeiro: a troca espera a conta e herda a empresa já
+    comitada. Troca primeiro: o vínculo espera, e a propagação já encontra o
+    aparelho com o novo responsável. Sem a trava na conta, a troca lia "sem
+    empresa" e a propagação não enxergava o aparelho — ficava sem empresa."""
+    g = await _grupo(fabrica)
+    c = await _empresa(fabrica, g)
+    cliente = await _pessoa(fabrica)
+    produto = await _produto(fabrica)
+    aparelho = await _aparelho(fabrica, produto)
+    admin = await _pessoa(fabrica, UserRole.admin)
+    tecnico = await _pessoa(fabrica, UserRole.technician)
+    vinculo = _vincula(admin, c, cliente)
+    troca = _equipe_edita(tecnico, aparelho, owner_id=cliente.id)
+    par = (vinculo, troca) if ordem == "vinculo_primeiro" else (troca, vinculo)
+
+    resultado = await _corrida(fabrica, *par)
+
+    assert resultado == ["ok", "ok"]
+    assert await _dono_do(fabrica, aparelho.id) == cliente.id
+    assert await _empresa_do(fabrica, aparelho.id) == c.id
+    com_empresa = [a for a in await _auditorias_de_aparelho(fabrica) if a.new_data]
+    assert [a.new_data["company_id"] for a in com_empresa] == [str(c.id)]
+
+
+@pytest.mark.asyncio
+async def test_desvinculo_em_curso_e_troca_nao_herdam_empresa_que_o_cliente_perdeu(fabrica):
+    """A troca espera o desvínculo comitar e lê o vínculo de verdade: nenhum."""
+    g = await _grupo(fabrica)
+    c = await _empresa(fabrica, g)
+    cliente = await _pessoa(fabrica, company_id=c.id)
+    produto = await _produto(fabrica)
+    aparelho = await _aparelho(fabrica, produto)
+    admin = await _pessoa(fabrica, UserRole.admin)
+    tecnico = await _pessoa(fabrica, UserRole.technician)
+
+    resultado = await _corrida(
+        fabrica,
+        _desvincula(admin, c, cliente),
+        _equipe_edita(tecnico, aparelho, owner_id=cliente.id),
+    )
+
+    assert resultado == ["ok", "ok"]
+    assert await _dono_do(fabrica, aparelho.id) == cliente.id
+    assert await _empresa_do(fabrica, aparelho.id) is None
+
+
+@pytest.mark.asyncio
+async def test_troca_em_curso_e_desvinculo_o_aparelho_fica_com_a_empresa_herdada(fabrica):
+    """O desvínculo espera a troca. Desvincular o cliente não tira a empresa do
+    aparelho (seção 2) — vale também para a empresa que veio por herança."""
+    g = await _grupo(fabrica)
+    c = await _empresa(fabrica, g)
+    cliente = await _pessoa(fabrica, company_id=c.id)
+    produto = await _produto(fabrica)
+    aparelho = await _aparelho(fabrica, produto)
+    admin = await _pessoa(fabrica, UserRole.admin)
+    tecnico = await _pessoa(fabrica, UserRole.technician)
+
+    resultado = await _corrida(
+        fabrica,
+        _equipe_edita(tecnico, aparelho, owner_id=cliente.id),
+        _desvincula(admin, c, cliente),
+    )
+
+    assert resultado == ["ok", "ok"]
+    assert await _empresa_do(fabrica, aparelho.id) == c.id
+
+
+@pytest.mark.asyncio
+async def test_decisao_em_curso_faz_a_troca_nao_herdar(fabrica):
+    """Uma edição marca "sem empresa por decisão"; a troca chega no meio,
+    espera o aparelho e decide com a marca já gravada — não com a leitura de
+    antes, em que o aparelho ainda era só "não classificado"."""
+    g = await _grupo(fabrica)
+    c = await _empresa(fabrica, g)
+    cliente = await _pessoa(fabrica, company_id=c.id)
+    produto = await _produto(fabrica)
+    aparelho = await _aparelho(fabrica, produto)
+    admin = await _pessoa(fabrica, UserRole.admin)
+    tecnico = await _pessoa(fabrica, UserRole.technician)
+
+    resultado = await _corrida(
+        fabrica,
+        _equipe_edita(admin, aparelho, company_id=None),
+        _equipe_edita(tecnico, aparelho, owner_id=cliente.id),
+    )
+
+    assert resultado == ["ok", "ok"]
+    assert await _dono_do(fabrica, aparelho.id) == cliente.id
+    assert await _empresa_do(fabrica, aparelho.id) is None
+    assert await _marca_do(fabrica, aparelho.id) is True
+
+
+@pytest.mark.asyncio
+async def test_classificacao_em_curso_faz_a_troca_respeitar_a_empresa_gravada(fabrica):
+    """A equipe grava uma empresa; a troca chega no meio. Ao pegar o aparelho,
+    ele já tem empresa — e empresa gravada não é trocada pela herança."""
+    g = await _grupo(fabrica)
+    do_cliente = await _empresa(fabrica, g, "Do cliente")
+    gravada = await _empresa(fabrica, g, "Gravada")
+    cliente = await _pessoa(fabrica, company_id=do_cliente.id)
+    produto = await _produto(fabrica)
+    aparelho = await _aparelho(fabrica, produto)
+    admin = await _pessoa(fabrica, UserRole.admin)
+    tecnico = await _pessoa(fabrica, UserRole.technician)
+
+    resultado = await _corrida(
+        fabrica,
+        _equipe_edita(admin, aparelho, company_id=gravada.id),
+        _equipe_edita(tecnico, aparelho, owner_id=cliente.id),
+    )
+
+    assert resultado == ["ok", "ok"]
+    assert await _dono_do(fabrica, aparelho.id) == cliente.id
+    assert await _empresa_do(fabrica, aparelho.id) == gravada.id
+
+
+@pytest.mark.asyncio
+async def test_troca_em_curso_segura_a_empresa_contra_a_exclusao(fabrica):
+    """A troca que vai herdar pega a empresa em `FOR KEY SHARE` antes de
+    escrever. Com ela em curso, quem tenta a trava da exclusão (`FOR UPDATE`
+    na empresa) não passa — é o que impede a empresa de sumir entre a leitura
+    do vínculo e a gravação no aparelho."""
+    g = await _grupo(fabrica)
+    c = await _empresa(fabrica, g)
+    cliente = await _pessoa(fabrica, company_id=c.id)
+    produto = await _produto(fabrica)
+    aparelho = await _aparelho(fabrica, produto)
+    tecnico = await _pessoa(fabrica, UserRole.technician)
+
+    async with fabrica() as troca:
+        commit_original = troca.commit
+        pronta = asyncio.Event()
+        libera = asyncio.Event()
+
+        async def commit_vigiado():
+            await troca.flush()
+            pronta.set()
+            await libera.wait()
+            await commit_original()
+
+        troca.commit = commit_vigiado  # type: ignore[method-assign]
+        tarefa = asyncio.create_task(_equipe_edita(tecnico, aparelho, owner_id=cliente.id)(troca))
+        await asyncio.wait_for(pronta.wait(), timeout=5)
+        try:
+            async with fabrica() as t2:
+                with pytest.raises(DBAPIError) as recusa:
+                    await t2.execute(
+                        text("SELECT id FROM companies WHERE id = :id FOR UPDATE NOWAIT"),
+                        {"id": c.id},
+                    )
+                assert "could not obtain lock" in str(recusa.value)
+        finally:
+            libera.set()
+            await asyncio.wait_for(tarefa, timeout=5)
+
+    assert await _empresa_do(fabrica, aparelho.id) == c.id
+
+
+@pytest.mark.asyncio
+async def test_key_share_na_conta_segura_o_vinculo_mas_nao_um_update_solto(fabrica):
+    """O limite da trava, medido — para ninguém contar com o que ela não dá.
+
+    `FOR KEY SHARE` na conta conflita com o `FOR UPDATE` que o vínculo e o
+    desvínculo pegam ANTES de gravar `users.company_id`. NÃO conflita com um
+    `UPDATE` direto dessa coluna: `company_id` não é chave, e o `UPDATE` pede
+    só `FOR NO KEY UPDATE`. A proteção é a disciplina das rotas, não o banco —
+    quem gravar o vínculo sem passar pelo `FOR UPDATE` (um script, por
+    exemplo) escapa dela.
+    """
+    g = await _grupo(fabrica)
+    c = await _empresa(fabrica, g)
+    cliente = await _pessoa(fabrica)
+
+    async with fabrica() as leitor:
+        await trava_conta_e_le_empresa(leitor, cliente.id)
+
+        async with fabrica() as como_o_vinculo:
+            with pytest.raises(DBAPIError) as recusa:
+                await como_o_vinculo.execute(
+                    text("SELECT id FROM users WHERE id = :id FOR UPDATE NOWAIT"),
+                    {"id": cliente.id},
+                )
+            assert "could not obtain lock" in str(recusa.value)
+
+        async with fabrica() as solto:
+            await solto.execute(text("SET LOCAL lock_timeout = '2s'"))
+            await solto.execute(
+                text("UPDATE users SET company_id = :c WHERE id = :id"),
+                {"c": c.id, "id": cliente.id},
+            )
+            await solto.commit()
+        await leitor.rollback()
+
+    async with fabrica() as s:
+        gravado = (
+            await s.execute(select(User.company_id).where(User.id == cliente.id))
+        ).scalar_one()
+    assert gravado == c.id
+
+
+# ══════════════════════════════════════════════════════════════
+# 11. A fusão de empresas com o sistema em uso
+# ══════════════════════════════════════════════════════════════
+#
+# `scripts/funde_empresas_duplicadas.py` roda à mão, com as rotas no ar. Antes
+# de gravar ele trava empresa → cliente → nota → aparelho e confere o que
+# travou contra o plano mostrado; plano envelhecido não é gravado.
+#
+# As corridas daqui não dependem de relógio para decidir quem chega primeiro:
+# um lado é levado até um ponto conhecido e segurado ali (`_rota_em_curso`,
+# `_fusao_em_curso`), e o outro só é dado por "esperando" quando o próprio
+# PostgreSQL diz que há trava não concedida (`_ate_haver_espera`).
+
+_CNPJ = "11222333000181"
+
+
+async def _duplicadas(fabrica):
+    """Grupo, a empresa que FICA (com clientes) e a que SAI (vazia)."""
+    g = await _grupo(fabrica)
+    fica = await _empresa(fabrica, g, "Fica", cnpj=_CNPJ)
+    sai = await _empresa(fabrica, g, "Sai", cnpj="11.222.333/0001-81")
+    ancora = await _pessoa(fabrica, company_id=fica.id)
+    # Sobrevive quem tem mais conteúdo: a FICA nasce mais cheia do que qualquer
+    # cenário daqui deixa a SAI.
+    for _ in range(5):
+        await _pessoa(fabrica, company_id=fica.id)
+    return g, fica, sai, ancora
+
+
+async def _nota(fabrica, empresa: Company, autor: User) -> CompanyNote:
+    n = CompanyNote(id=uuid.uuid4(), company_id=empresa.id, author_id=autor.id, content="nota")
+    async with fabrica() as s:
+        s.add(n)
+        await s.commit()
+    return n
+
+
+async def _plano(fabrica):
+    """O plano como o script o monta: levantamento de verdade, sem gravar."""
+    from scripts.funde_empresas_duplicadas import _levanta, planeja_fusao
+
+    motor = await _conexao(fabrica)
+    async with motor.connect() as conn:
+        fusoes, _recusadas = planeja_fusao(await _levanta(conn))
+    return fusoes
+
+
+async def _funde(conn, fusoes):
+    """Roda a gravação do script e resume o desfecho numa palavra."""
+    from scripts.funde_empresas_duplicadas import PlanoDesatualizadoError, _aplica
+
+    try:
+        await _aplica(conn, fusoes)
+        return "ok"
+    except PlanoDesatualizadoError:
+        return "desatualizado"
+    except DBAPIError as e:
+        mensagem = str(e).lower()
+        if "deadlock" in mensagem:
+            return "deadlock"
+        if "lock timeout" in mensagem:
+            return "espera estourada"
+        raise
+
+
+async def _funde_agora(fabrica, fusoes):
+    motor = await _conexao(fabrica)
+    async with motor.connect() as conn:
+        return await _funde(conn, fusoes)
+
+
+async def _desfecho(fabrica, operacao):
+    """Roda uma rota em sessão própria: "ok", o status da recusa ou "deadlock"."""
+    async with fabrica() as s:
+        try:
+            await operacao(s)
+            return "ok"
+        except HTTPException as e:
+            return e.status_code
+        except DBAPIError as e:
+            if "deadlock" in str(e).lower():
+                return "deadlock"
+            raise
+
+
+async def _ate_haver_espera(fabrica) -> None:
+    """Volta quando o banco mostra alguma transação parada numa trava."""
+    async with fabrica() as s:
+        for _ in range(200):
+            presas = (
+                await s.execute(text("SELECT count(*) FROM pg_locks WHERE NOT granted"))
+            ).scalar_one()
+            if presas:
+                return
+            await asyncio.sleep(0.05)
+    raise AssertionError("ninguém ficou esperando por trava")
+
+
+class _ConexaoVigiada:
+    """A conexão do script, que para num ponto escolhido até ser liberada.
+
+    `pausa="commit"`: tudo travado e escrito, falta comitar.
+    `pausa="empresas"`: só as empresas travadas — clientes e aparelhos ainda não.
+    """
+
+    def __init__(self, conn, pausa: str) -> None:
+        self._conn, self._pausa = conn, pausa
+        self.parada, self.libera = asyncio.Event(), asyncio.Event()
+
+    async def _espera(self) -> None:
+        self.parada.set()
+        await self.libera.wait()
+
+    async def execute(self, instrucao, *args, **kwargs):
+        resultado = await self._conn.execute(instrucao, *args, **kwargs)
+        if self._pausa == "empresas" and "FROM companies" in str(instrucao):
+            await self._espera()
+        return resultado
+
+    async def commit(self) -> None:
+        if self._pausa == "commit":
+            await self._espera()
+        await self._conn.commit()
+
+    async def rollback(self) -> None:
+        await self._conn.rollback()
+
+
+@asynccontextmanager
+async def _fusao_em_curso(fabrica, fusoes, pausa="commit"):
+    """Dentro do bloco a fusão está parada em `pausa`; na saída ela segue."""
+    motor = await _conexao(fabrica)
+    async with motor.connect() as conn:
+        vigiada = _ConexaoVigiada(conn, pausa)
+        tarefa = asyncio.create_task(_funde(vigiada, fusoes))
+        await asyncio.wait_for(vigiada.parada.wait(), timeout=10)
+        try:
+            yield tarefa
+        finally:
+            vigiada.libera.set()
+            await asyncio.wait_for(tarefa, timeout=20)
+
+
+@asynccontextmanager
+async def _rota_em_curso(fabrica, operacao):
+    """Dentro do bloco a rota já travou e escreveu, e ainda não comitou."""
+    async with fabrica() as s:
+        commit_original = s.commit
+        parada, libera = asyncio.Event(), asyncio.Event()
+
+        async def commit_vigiado():
+            await s.flush()
+            parada.set()
+            await libera.wait()
+            await commit_original()
+
+        s.commit = commit_vigiado  # type: ignore[method-assign]
+        tarefa = asyncio.create_task(operacao(s))
+        await asyncio.wait_for(parada.wait(), timeout=10)
+        try:
+            yield tarefa
+        finally:
+            libera.set()
+            await asyncio.wait_for(tarefa, timeout=20)
+
+
+async def _empresa_da_conta(fabrica, pessoa: User) -> uuid.UUID | None:
+    async with fabrica() as s:
+        return (await s.execute(select(User.company_id).where(User.id == pessoa.id))).scalar_one()
+
+
+async def _empresas(fabrica) -> set[uuid.UUID]:
+    async with fabrica() as s:
+        return set((await s.execute(select(Company.id))).scalars())
+
+
+# ── Sem concorrência ──────────────────────────────────────────
+
+
+@pytest.mark.asyncio
+async def test_a_fusao_leva_clientes_notas_e_aparelhos_e_so_os_das_duplicadas(fabrica):
+    from scripts.funde_empresas_duplicadas import _aplica
+
+    g, fica, sai, ancora = await _duplicadas(fabrica)
+    vizinha = await _empresa(fabrica, g, "Vizinha", cnpj="99888777000166")
+    da_sai = await _pessoa(fabrica, company_id=sai.id)
+    da_vizinha = await _pessoa(fabrica, company_id=vizinha.id)
+    solto = await _pessoa(fabrica)
+    nota = await _nota(fabrica, sai, ancora)
+    produto = await _produto(fabrica)
+    aparelho = await _aparelho(fabrica, produto, dono=da_sai, company_id=sai.id)
+    marcado = await _aparelho(fabrica, produto, dono=da_sai)
+    await _marca(fabrica, marcado.id)
+    alheio = await _aparelho(fabrica, produto, company_id=vizinha.id)
+
+    fusoes = await _plano(fabrica)
+    assert [(f.sobrevivente.id, [a.id for a in f.absorvidas]) for f in fusoes] == [
+        (fica.id, [sai.id])
+    ]
+    motor = await _conexao(fabrica)
+    async with motor.connect() as conn:
+        movidos = await _aplica(conn, fusoes)
+
+    assert movidos == {"clientes": 1, "notas": 1, "equipamentos": 1}
+    assert await _empresas(fabrica) == {fica.id, vizinha.id}
+    assert await _empresa_da_conta(fabrica, da_sai) == fica.id
+    assert await _empresa_da_conta(fabrica, ancora) == fica.id
+    assert await _empresa_da_conta(fabrica, da_vizinha) == vizinha.id
+    assert await _empresa_da_conta(fabrica, solto) is None
+    assert await _empresa_do(fabrica, aparelho.id) == fica.id
+    assert await _dono_do(fabrica, aparelho.id) == da_sai.id
+    assert await _empresa_do(fabrica, alheio.id) == vizinha.id
+    # Sem empresa por decisão continua sem empresa: a fusão não classifica.
+    assert await _empresa_do(fabrica, marcado.id) is None
+    assert await _marca_do(fabrica, marcado.id) is True
+    async with fabrica() as s:
+        assert (
+            await s.execute(select(CompanyNote.company_id).where(CompanyNote.id == nota.id))
+        ).scalar_one() == fica.id
+    # Rodar de novo não acha nada.
+    assert await _plano(fabrica) == []
+
+
+@pytest.mark.asyncio
+async def test_a_fusao_trava_empresa_cliente_nota_e_aparelho_antes_de_escrever(fabrica):
+    """A ordem, lida nas instruções que chegam ao banco — a mesma das rotas:
+    empresa → cliente → aparelho. E o modo de cada uma."""
+    _g, _fica, sai, _ancora = await _duplicadas(fabrica)
+    await _pessoa(fabrica, company_id=sai.id)
+    fusoes = await _plano(fabrica)
+
+    instrucoes: list[str] = []
+
+    def _anota(_conn, _cursor, sql, *_args):
+        instrucoes.append(" ".join(sql.split()))
+
+    motor = await _conexao(fabrica)
+    event.listen(motor.sync_engine, "before_cursor_execute", _anota)
+    try:
+        async with motor.connect() as conn:
+            assert await _funde(conn, fusoes) == "ok"
+    finally:
+        event.remove(motor.sync_engine, "before_cursor_execute", _anota)
+
+    travas = [q for q in instrucoes if " FOR " in q]
+    assert [(q.split(" FROM ")[1].split()[0], q.split(" FOR ")[1]) for q in travas] == [
+        ("companies", "UPDATE"),
+        ("users", "NO KEY UPDATE"),
+        ("company_notes", "UPDATE"),
+        ("equipments", "UPDATE"),
+    ]
+    assert all(" ORDER BY id " in q for q in travas)
+    escritas = [i for i, q in enumerate(instrucoes) if q.startswith(("UPDATE", "DELETE"))]
+    assert min(escritas) > instrucoes.index(travas[-1])
+    assert instrucoes[max(escritas)].startswith("DELETE FROM companies")
+
+
+# ── O plano que envelheceu não é gravado ──────────────────────
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize(
+    "mudanca",
+    ["vinculo", "desvinculo", "aparelho_entra", "aparelho_sai", "nota", "cnpj", "exclusao"],
+)
+async def test_o_que_mudou_depois_do_levantamento_impede_a_gravacao(fabrica, mudanca):
+    """Entre mostrar o plano e gravar, o sistema seguiu em uso. Nada é gravado
+    por cima — nem a parte do plano que continuava certa."""
+    g, fica, sai, ancora = await _duplicadas(fabrica)
+    admin = await _pessoa(fabrica, UserRole.admin)
+    solto = await _pessoa(fabrica)
+    da_sai = await _pessoa(fabrica, company_id=sai.id)
+    outra = await _empresa(fabrica, g, "Outra")
+    produto = await _produto(fabrica)
+    aparelho = await _aparelho(fabrica, produto, company_id=sai.id)
+    livre = await _aparelho(fabrica, produto)
+    # Uma segunda dupla, intacta: prova que o plano cai INTEIRO.
+    fica2 = await _empresa(fabrica, g, "Fica 2", cnpj="55666777000122")
+    sai2 = await _empresa(fabrica, g, "Sai 2", cnpj="55666777000122")
+    da_sai2 = await _pessoa(fabrica, company_id=sai2.id)
+    await _pessoa(fabrica, company_id=fica2.id)
+    await _pessoa(fabrica, company_id=fica2.id)
+
+    fusoes = await _plano(fabrica)
+    assert len(fusoes) == 2
+
+    if mudanca == "vinculo":
+        await _roda(fabrica, _vincula(admin, sai, solto))
+    elif mudanca == "desvinculo":
+        await _roda(fabrica, _desvincula(admin, sai, da_sai))
+    elif mudanca == "aparelho_entra":
+        await _roda(fabrica, _equipe_edita(admin, livre, company_id=sai.id))
+    elif mudanca == "aparelho_sai":
+        await _roda(fabrica, _equipe_edita(admin, aparelho, company_id=outra.id))
+    elif mudanca == "nota":
+        await _nota(fabrica, sai, ancora)
+    elif mudanca == "cnpj":
+        async with fabrica() as s:
+            await s.execute(
+                text("UPDATE companies SET cnpj = '00111222000133' WHERE id = :id"), {"id": sai.id}
+            )
+            await s.commit()
+    else:
+        async with fabrica() as s:
+            await s.execute(text("DELETE FROM companies WHERE id = :id"), {"id": fica2.id})
+            await s.commit()
+    antes = (
+        await _empresa_da_conta(fabrica, da_sai),
+        await _empresa_da_conta(fabrica, solto),
+        await _empresa_do(fabrica, aparelho.id),
+        await _empresa_do(fabrica, livre.id),
+        await _empresas(fabrica),
+    )
+
+    assert await _funde_agora(fabrica, fusoes) == "desatualizado"
+
+    assert antes == (
+        await _empresa_da_conta(fabrica, da_sai),
+        await _empresa_da_conta(fabrica, solto),
+        await _empresa_do(fabrica, aparelho.id),
+        await _empresa_do(fabrica, livre.id),
+        await _empresas(fabrica),
+    )
+    assert await _empresa_da_conta(fabrica, da_sai2) == sai2.id
+    assert {sai.id, sai2.id} <= await _empresas(fabrica)
+
+
+@pytest.mark.asyncio
+async def test_plano_envelhecido_diz_o_que_mudou_e_o_plano_novo_entra(fabrica):
+    from scripts.funde_empresas_duplicadas import PlanoDesatualizadoError, _aplica
+
+    _g, fica, sai, _ancora = await _duplicadas(fabrica)
+    admin = await _pessoa(fabrica, UserRole.admin)
+    solto = await _pessoa(fabrica)
+    fusoes = await _plano(fabrica)
+    await _roda(fabrica, _vincula(admin, sai, solto))
+
+    motor = await _conexao(fabrica)
+    async with motor.connect() as conn:
+        with pytest.raises(PlanoDesatualizadoError) as recusa:
+            await _aplica(conn, fusoes)
+    assert len(recusa.value.diferencas) == 1
+    assert "clientes eram 0, agora 1" in recusa.value.diferencas[0]
+
+    assert await _funde_agora(fabrica, await _plano(fabrica)) == "ok"
+    assert await _empresa_da_conta(fabrica, solto) == fica.id
+    assert await _empresas(fabrica) == {fica.id}
+
+
+@pytest.mark.asyncio
+async def test_falha_do_banco_no_meio_desfaz_a_fusao_inteira(fabrica):
+    """Duas fusões no plano; o banco recusa na segunda. A primeira, que já
+    tinha movido e apagado, volta junto."""
+    g, fica, sai, _ancora = await _duplicadas(fabrica)
+    da_sai = await _pessoa(fabrica, company_id=sai.id)
+    fica2 = await _empresa(fabrica, g, "Fica 2", cnpj="55666777000122")
+    sai2 = await _empresa(fabrica, g, "Sai 2", cnpj="55666777000122")
+    await _pessoa(fabrica, company_id=fica2.id)
+    fusoes = sorted(await _plano(fabrica), key=lambda f: f.sobrevivente.id != fica.id)
+    assert [f.sobrevivente.id for f in fusoes] == [fica.id, fica2.id]
+
+    class _QuebraNaSegunda(_ConexaoVigiada):
+        apagadas = 0
+
+        async def execute(self, instrucao, *args, **kwargs):
+            if str(instrucao).startswith("DELETE FROM companies"):
+                self.apagadas += 1
+                if self.apagadas == 2:
+                    return await self._conn.execute(text("SELECT 1/0"))
+            return await self._conn.execute(instrucao, *args, **kwargs)
+
+    motor = await _conexao(fabrica)
+    async with motor.connect() as conn:
+        quebrada = _QuebraNaSegunda(conn, pausa="nenhuma")
+        with pytest.raises(DBAPIError):
+            await _funde(quebrada, fusoes)
+        assert quebrada.apagadas == 2
+
+    assert await _empresas(fabrica) == {fica.id, sai.id, fica2.id, sai2.id}
+    assert await _empresa_da_conta(fabrica, da_sai) == sai.id
+
+
+@pytest.mark.asyncio
+async def test_a_fusao_desiste_em_vez_de_esperar_para_sempre_por_uma_trava(fabrica, monkeypatch):
+    import scripts.funde_empresas_duplicadas as script
+
+    _g, fica, sai, _ancora = await _duplicadas(fabrica)
+    da_sai = await _pessoa(fabrica, company_id=sai.id)
+    fusoes = await _plano(fabrica)
+    monkeypatch.setattr(script, "_ESPERA_POR_TRAVA", "300ms")
+
+    async with fabrica() as esquecida:
+        await esquecida.execute(
+            text("SELECT id FROM companies WHERE id = :id FOR UPDATE"), {"id": sai.id}
+        )
+        relogio = asyncio.get_running_loop().time
+        inicio = relogio()
+        assert await _funde_agora(fabrica, fusoes) == "espera estourada"
+        # Desistiu no prazo configurado — não num prazo qualquer do servidor.
+        assert relogio() - inicio < 10
+
+    assert await _empresas(fabrica) == {fica.id, sai.id}
+    assert await _empresa_da_conta(fabrica, da_sai) == sai.id
+
+
+# ── Fusão em curso, a rota chega ──────────────────────────────
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("pausa", ["empresas", "commit"])
+async def test_troca_de_responsavel_que_herdaria_a_absorvida_nao_grava_nem_trava_a_fusao(
+    fabrica, pausa
+):
+    """A troca trava a conta do novo responsável (`FOR KEY SHARE`) e SÓ ENTÃO a
+    empresa; a fusão trava a empresa e SÓ ENTÃO a conta. Com `pausa="empresas"`
+    as duas ficam exatamente nesse cruzamento: a troca segurando a conta e
+    esperando a empresa, a fusão segurando a empresa e indo travar a conta. A
+    fusão passa (`FOR NO KEY UPDATE` convive com `FOR KEY SHARE`) e a troca,
+    que leu o vínculo antigo, não encontra mais a empresa: recusa, sem gravar
+    no aparelho uma empresa que deixou de existir."""
+    _g, fica, sai, _ancora = await _duplicadas(fabrica)
+    da_sai = await _pessoa(fabrica, company_id=sai.id)
+    tecnico = await _pessoa(fabrica, UserRole.technician)
+    produto = await _produto(fabrica)
+    aparelho = await _aparelho(fabrica, produto)
+    fusoes = await _plano(fabrica)
+
+    async with _fusao_em_curso(fabrica, fusoes, pausa) as fusao:
+        troca = asyncio.create_task(
+            _desfecho(fabrica, _equipe_edita(tecnico, aparelho, owner_id=da_sai.id))
+        )
+        await _ate_haver_espera(fabrica)
+        assert not troca.done()
+
+    assert fusao.result() == "ok"
+    assert await asyncio.wait_for(troca, timeout=10) == 400
+    assert await _empresas(fabrica) == {fica.id}
+    assert await _empresa_da_conta(fabrica, da_sai) == fica.id
+    assert await _dono_do(fabrica, aparelho.id) is None
+    assert await _empresa_do(fabrica, aparelho.id) is None
+    # Repetida depois da fusão, a mesma troca herda a sobrevivente.
+    assert await _desfecho(fabrica, _equipe_edita(tecnico, aparelho, owner_id=da_sai.id)) == "ok"
+    assert await _empresa_do(fabrica, aparelho.id) == fica.id
+
+
+@pytest.mark.asyncio
+async def test_troca_de_responsavel_da_sobrevivente_espera_a_fusao_e_herda(fabrica):
+    _g, fica, _sai, ancora = await _duplicadas(fabrica)
+    tecnico = await _pessoa(fabrica, UserRole.technician)
+    produto = await _produto(fabrica)
+    aparelho = await _aparelho(fabrica, produto)
+    fusoes = await _plano(fabrica)
+
+    async with _fusao_em_curso(fabrica, fusoes) as fusao:
+        troca = asyncio.create_task(
+            _desfecho(fabrica, _equipe_edita(tecnico, aparelho, owner_id=ancora.id))
+        )
+        await _ate_haver_espera(fabrica)
+
+    assert fusao.result() == "ok"
+    assert await asyncio.wait_for(troca, timeout=10) == "ok"
+    assert await _empresa_do(fabrica, aparelho.id) == fica.id
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("rota", ["vinculo", "desvinculo", "classificacao", "exclusao"])
+async def test_rota_que_chega_na_absorvida_durante_a_fusao_espera_e_nao_a_encontra(fabrica, rota):
+    """Vínculo, desvínculo, classificação de aparelho e exclusão pegam a
+    empresa antes de qualquer outra linha do plano. Esperam a fusão e saem com
+    recusa — nenhuma delas grava a empresa absorvida em lugar nenhum, e o
+    cliente que era dela não se perde: está na sobrevivente."""
+    _g, fica, sai, _ancora = await _duplicadas(fabrica)
+    admin = await _pessoa(fabrica, UserRole.admin)
+    solto = await _pessoa(fabrica)
+    da_sai = await _pessoa(fabrica, company_id=sai.id)
+    produto = await _produto(fabrica)
+    aparelho = await _aparelho(fabrica, produto)
+    fusoes = await _plano(fabrica)
+    operacao, esperado = {
+        "vinculo": (_vincula(admin, sai, solto), 404),
+        "desvinculo": (_desvincula(admin, sai, da_sai), 404),
+        "classificacao": (_equipe_edita(admin, aparelho, company_id=sai.id), 400),
+        "exclusao": (_exclui_empresa(admin, sai), 404),
+    }[rota]
+
+    async with _fusao_em_curso(fabrica, fusoes) as fusao:
+        chegada = asyncio.create_task(_desfecho(fabrica, operacao))
+        await _ate_haver_espera(fabrica)
+        assert not chegada.done()
+
+    assert fusao.result() == "ok"
+    assert await asyncio.wait_for(chegada, timeout=10) == esperado
+    assert await _empresas(fabrica) == {fica.id}
+    assert await _empresa_da_conta(fabrica, da_sai) == fica.id
+    assert await _empresa_da_conta(fabrica, solto) is None
+    assert await _empresa_do(fabrica, aparelho.id) is None
+
+
+# ── Rota em curso, a fusão chega ──────────────────────────────
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize(
+    "rota", ["vinculo", "desvinculo", "heranca", "classificacao_entra", "classificacao_sai"]
+)
+async def test_fusao_que_chega_com_a_rota_em_curso_espera_e_recusa_o_plano_velho(fabrica, rota):
+    """A rota já travou e escreveu, falta comitar. A fusão espera por ela —
+    na empresa, ou no aparelho quando ele está saindo da absorvida — e, ao
+    passar, vê que o plano não vale mais. O que a rota gravou fica como ela
+    gravou; o plano refeito leva tudo para a sobrevivente."""
+    g, fica, sai, _ancora = await _duplicadas(fabrica)
+    admin = await _pessoa(fabrica, UserRole.admin)
+    tecnico = await _pessoa(fabrica, UserRole.technician)
+    solto = await _pessoa(fabrica)
+    da_sai = await _pessoa(fabrica, company_id=sai.id)
+    outra = await _empresa(fabrica, g, "Outra")
+    produto = await _produto(fabrica)
+    livre = await _aparelho(fabrica, produto)
+    da_absorvida = await _aparelho(fabrica, produto, company_id=sai.id)
+    fusoes = await _plano(fabrica)
+    operacao = {
+        "vinculo": _vincula(admin, sai, solto),
+        "desvinculo": _desvincula(admin, sai, da_sai),
+        "heranca": _equipe_edita(tecnico, livre, owner_id=da_sai.id),
+        "classificacao_entra": _equipe_edita(admin, livre, company_id=sai.id),
+        "classificacao_sai": _equipe_edita(admin, da_absorvida, company_id=outra.id),
+    }[rota]
+
+    async with _rota_em_curso(fabrica, operacao):
+        fusao = asyncio.create_task(_funde_agora(fabrica, fusoes))
+        await _ate_haver_espera(fabrica)
+        assert not fusao.done()
+
+    assert await asyncio.wait_for(fusao, timeout=20) == "desatualizado"
+    assert {fica.id, sai.id} <= await _empresas(fabrica)
+    gravado = {
+        "vinculo": (await _empresa_da_conta(fabrica, solto), sai.id),
+        "desvinculo": (await _empresa_da_conta(fabrica, da_sai), None),
+        "heranca": (await _empresa_do(fabrica, livre.id), sai.id),
+        "classificacao_entra": (await _empresa_do(fabrica, livre.id), sai.id),
+        "classificacao_sai": (await _empresa_do(fabrica, da_absorvida.id), outra.id),
+    }[rota]
+    assert gravado[0] == gravado[1]
+
+    assert await _funde_agora(fabrica, await _plano(fabrica)) == "ok"
+    assert await _empresas(fabrica) == {fica.id, outra.id}
+    async with fabrica() as s:
+        orfaos = (
+            await s.execute(
+                text(
+                    "SELECT (SELECT count(*) FROM users WHERE company_id = :sai)"
+                    " + (SELECT count(*) FROM equipments WHERE company_id = :sai)"
+                ),
+                {"sai": sai.id},
+            )
+        ).scalar_one()
+    assert orfaos == 0
+    depois = {
+        "vinculo": (await _empresa_da_conta(fabrica, solto), fica.id),
+        "desvinculo": (await _empresa_da_conta(fabrica, da_sai), None),
+        "heranca": (await _empresa_do(fabrica, livre.id), fica.id),
+        "classificacao_entra": (await _empresa_do(fabrica, livre.id), fica.id),
+        "classificacao_sai": (await _empresa_do(fabrica, da_absorvida.id), outra.id),
+    }[rota]
+    assert depois[0] == depois[1]
+
+
+@pytest.mark.asyncio
+async def test_exclusao_em_curso_da_duplicata_vazia_faz_a_fusao_recusar_o_plano(fabrica):
+    _g, fica, sai, _ancora = await _duplicadas(fabrica)
+    admin = await _pessoa(fabrica, UserRole.admin)
+    fusoes = await _plano(fabrica)
+
+    async with _rota_em_curso(fabrica, _exclui_empresa(admin, sai)):
+        fusao = asyncio.create_task(_funde_agora(fabrica, fusoes))
+        await _ate_haver_espera(fabrica)
+
+    assert await asyncio.wait_for(fusao, timeout=20) == "desatualizado"
+    assert await _empresas(fabrica) == {fica.id}
+    assert await _plano(fabrica) == []
+
+
+# ══════════════════════════════════════════════════════════════
+# 12. A recusa da exclusão diz ONDE estão os equipamentos
+# ══════════════════════════════════════════════════════════════
+#
+# O 409 contava "N equipamento(s)" e mandava "remover ou mover". Quem ia
+# procurar não achava: a tela esconde os inativos por padrão, e o aparelho é
+# da empresa pela coluna dele — o responsável pode ser de outra, ou nenhum.
+
+
+async def _recusa_da_exclusao(fabrica, admin, c) -> str:
+    with pytest.raises(HTTPException) as recusa:
+        await _roda(fabrica, _exclui_empresa(admin, c))
+    assert recusa.value.status_code == 409
+    return recusa.value.detail
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("flag", [False, True])
+async def test_recusa_com_equipamento_ativo_explica_qual_empresa_conta(fabrica, monkeypatch, flag):
+    monkeypatch.setattr(get_settings(), "equipamento_por_empresa", flag)
+    g = await _grupo(fabrica)
+    c = await _empresa(fabrica, g)
+    outra = await _empresa(fabrica, g, "Outra")
+    de_fora = await _pessoa(fabrica, company_id=outra.id)
+    produto = await _produto(fabrica)
+    # Da empresa pela coluna do aparelho; o responsável é de OUTRA.
+    aparelho = await _aparelho(fabrica, produto, dono=de_fora, company_id=c.id)
+    admin = await _pessoa(fabrica, UserRole.admin)
+
+    detalhe = await _recusa_da_exclusao(fabrica, admin, c)
+
+    assert detalhe.startswith("Não é possível excluir a empresa: ela ainda tem 1 equipamento(s).")
+    assert "Remova ou mova esses itens antes de excluir a empresa." in detalhe
+    assert "empresa registrada no próprio equipamento" in detalhe
+    assert "inativo" not in detalhe
+    # Só números e regra: nada do aparelho nem de quem responde por ele.
+    for restrito in (aparelho.name, aparelho.serial_number, de_fora.name, de_fora.email, "Outra"):
+        assert restrito not in detalhe
+    assert await _conta(fabrica, Company) == 2
+
+
+@pytest.mark.asyncio
+async def test_recusa_so_com_equipamento_inativo_avisa_que_inativo_conta(fabrica):
+    """O caso que parecia mentira: a tela não mostra nenhum equipamento ativo
+    da empresa, e a exclusão é recusada "por equipamento"."""
+    g = await _grupo(fabrica)
+    c = await _empresa(fabrica, g)
+    produto = await _produto(fabrica)
+    await _aparelho(fabrica, produto, company_id=c.id, ativo=False)
+    admin = await _pessoa(fabrica, UserRole.admin)
+
+    detalhe = await _recusa_da_exclusao(fabrica, admin, c)
+
+    assert "ela ainda tem 1 equipamento(s)." in detalhe
+    assert "1 inativo(s), que também contam" in detalhe
+
+
+@pytest.mark.asyncio
+async def test_recusa_com_ativos_e_inativos_separa_os_dois_numeros(fabrica):
+    g = await _grupo(fabrica)
+    c = await _empresa(fabrica, g)
+    outra = await _empresa(fabrica, g, "Outra")
+    produto = await _produto(fabrica)
+    for ativo in (True, True, False):
+        await _aparelho(fabrica, produto, company_id=c.id, ativo=ativo)
+    await _aparelho(fabrica, produto, company_id=outra.id, ativo=False)  # não é dela
+    await _pessoa(fabrica, company_id=c.id)
+    admin = await _pessoa(fabrica, UserRole.admin)
+
+    detalhe = await _recusa_da_exclusao(fabrica, admin, c)
+
+    assert "ela ainda tem 1 cliente(s) vinculado(s), 3 equipamento(s)." in detalhe
+    assert "1 inativo(s), que também contam" in detalhe
+
+
+@pytest.mark.asyncio
+async def test_recusa_sem_equipamento_nao_fala_de_equipamento(fabrica):
+    g = await _grupo(fabrica)
+    c = await _empresa(fabrica, g)
+    cliente = await _pessoa(fabrica, company_id=c.id)
+    produto = await _produto(fabrica)
+    # Aparelho do cliente vinculado, mas SEM empresa: não é o que segura.
+    await _aparelho(fabrica, produto, dono=cliente)
+    admin = await _pessoa(fabrica, UserRole.admin)
+
+    detalhe = await _recusa_da_exclusao(fabrica, admin, c)
+
+    assert detalhe == (
+        "Não é possível excluir a empresa: ela ainda tem 1 cliente(s) vinculado(s). "
+        "Remova ou mova esses itens antes de excluir a empresa."
+    )
+
+
+@pytest.mark.asyncio
+async def test_empresa_sem_equipamento_e_sem_cliente_e_excluida(fabrica):
+    g = await _grupo(fabrica)
+    c = await _empresa(fabrica, g)
+    outra = await _empresa(fabrica, g, "Outra")
+    produto = await _produto(fabrica)
+    await _aparelho(fabrica, produto, company_id=outra.id)
+    admin = await _pessoa(fabrica, UserRole.admin)
+
+    await _roda(fabrica, _exclui_empresa(admin, c))
+
+    assert await _empresas(fabrica) == {outra.id}
+
+
+# ══════════════════════════════════════════════════════════════
+# 13. Desvincular o cliente: o que fica para trás, dito ANTES
+# ══════════════════════════════════════════════════════════════
+#
+# Desvincular não tira a empresa do aparelho (seção 2), e isso é regra. O que
+# faltava era o operador saber: o detalhe da empresa passa a dizer, por
+# cliente, quantos aparelhos de responsabilidade dele estão classificados
+# NELA — o número que a tela mostra na confirmação. Nada é bloqueado, nada é
+# reclassificado.
+
+
+async def _detalhe_da_empresa(fabrica, admin, c, rota="admin"):
+    from app.routers.groups import get_company, get_company_for_staff
+
+    if rota == "admin":
+        return await _roda(fabrica, lambda s: get_company(c.group_id, c.id, s, admin))
+    return await _roda(fabrica, lambda s: get_company_for_staff(c.id, s, admin))
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("rota", ["admin", "equipe"])
+@pytest.mark.parametrize("flag", [False, True])
+async def test_detalhe_da_empresa_conta_os_aparelhos_do_cliente_classificados_nela(
+    fabrica, monkeypatch, rota, flag
+):
+    monkeypatch.setattr(get_settings(), "equipamento_por_empresa", flag)
+    g = await _grupo(fabrica)
+    c = await _empresa(fabrica, g)
+    outra = await _empresa(fabrica, g, "Outra")
+    com_aparelhos = await _pessoa(fabrica, company_id=c.id)
+    sem_aparelhos = await _pessoa(fabrica, company_id=c.id)
+    de_fora = await _pessoa(fabrica, company_id=outra.id)
+    produto = await _produto(fabrica)
+    await _aparelho(fabrica, produto, dono=com_aparelhos, company_id=c.id)
+    await _aparelho(fabrica, produto, dono=com_aparelhos, company_id=c.id, ativo=False)
+    # Não entram na conta dele NESTA empresa:
+    await _aparelho(fabrica, produto, dono=com_aparelhos, company_id=outra.id)  # é de outra
+    await _aparelho(fabrica, produto, dono=com_aparelhos)  # sem empresa
+    await _aparelho(fabrica, produto, dono=de_fora, company_id=c.id)  # responsável de fora
+    await _aparelho(fabrica, produto, company_id=c.id)  # sem responsável
+    admin = await _pessoa(fabrica, UserRole.admin)
+
+    detalhe = await _detalhe_da_empresa(fabrica, admin, c, rota)
+
+    assert {x.id: x.company_equipment_count for x in detalhe.clients} == {
+        com_aparelhos.id: 2,
+        sem_aparelhos.id: 0,
+    }
+
+
+@pytest.mark.asyncio
+async def test_desvincular_nao_muda_os_aparelhos_que_a_contagem_anunciou(fabrica):
+    """O aviso é só aviso: a operação é a de sempre, e os aparelhos ficam como
+    estavam — empresa, responsável e situação."""
+    g = await _grupo(fabrica)
+    c = await _empresa(fabrica, g)
+    cliente = await _pessoa(fabrica, company_id=c.id)
+    produto = await _produto(fabrica)
+    ativo = await _aparelho(fabrica, produto, dono=cliente, company_id=c.id)
+    inativo = await _aparelho(fabrica, produto, dono=cliente, company_id=c.id, ativo=False)
+    admin = await _pessoa(fabrica, UserRole.admin)
+    (antes,) = (await _detalhe_da_empresa(fabrica, admin, c)).clients
+    assert antes.company_equipment_count == 2
+
+    await _roda(fabrica, _desvincula(admin, c, cliente))
+
+    assert await _empresa_da_conta(fabrica, cliente) is None
+    assert (await _detalhe_da_empresa(fabrica, admin, c)).clients == []
+    for aparelho in (ativo, inativo):
+        assert await _empresa_do(fabrica, aparelho.id) == c.id
+        assert await _dono_do(fabrica, aparelho.id) == cliente.id
+    async with fabrica() as s:
+        situacoes = set(
+            (await s.execute(select(Equipment.is_active).where(Equipment.owner_id == cliente.id)))
+            .scalars()
+            .all()
+        )
+    assert situacoes == {True, False}
+    assert await _auditorias_de_aparelho(fabrica) == []
+
+
+@pytest.mark.asyncio
+async def test_respostas_que_nao_sao_o_detalhe_nao_afirmam_contagem(fabrica):
+    """Vincular devolve o cliente sem a contagem — `None`, e não um zero que
+    ninguém mediu."""
+    g = await _grupo(fabrica)
+    c = await _empresa(fabrica, g)
+    cliente = await _pessoa(fabrica)
+    admin = await _pessoa(fabrica, UserRole.admin)
+
+    vinculado = await _roda(fabrica, _vincula(admin, c, cliente))
+
+    corpo = vinculado.body if hasattr(vinculado, "body") else vinculado
+    if isinstance(corpo, bytes):
+        import json
+
+        assert json.loads(corpo)["company_equipment_count"] is None
+    else:
+        assert corpo.company_equipment_count is None

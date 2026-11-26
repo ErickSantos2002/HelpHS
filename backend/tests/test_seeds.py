@@ -226,23 +226,50 @@ def test_o_codigo_dos_seeds_nao_carrega_senha_nenhuma():
     assert "password" not in seeds.ADMIN_USER
 
 
-def test_o_workflow_de_e2e_define_a_senha_que_o_playwright_espera():
+def test_o_workflow_de_e2e_sorteia_a_senha_do_admin_e_nao_a_escreve():
     """
-    Acoplamento novo, criado por esta correção: sem `SEED_ADMIN_PASSWORD`, o
-    `app.seeds` não cria admin — e o Playwright faz login com ele.
+    Sem `SEED_ADMIN_PASSWORD`, o `app.seeds` não cria admin — e o Playwright
+    faz login com ele. O workflow tem de entregar a MESMA senha aos dois lados.
 
-    O valor no workflow tem de bater com o default do `helpers.ts`. Se um lado
-    mudar sozinho, o e2e quebra no login sem dizer por quê; este teste diz.
-    Espelha o `test_as_credenciais_batem_com_o_helpers_do_playwright`.
+    Até 24/11/2026 ela estava escrita no bloco `env:` dos dois jobs, e o runner
+    imprime esse bloco no log de cada passo. Agora nasce em tempo de execução:
+
+    - nenhuma chave `SEED_ADMIN_PASSWORD:`/`ADMIN_PASSWORD:` com valor no YAML;
+    - o default do `helpers.ts` não aparece no workflow;
+    - cada job sorteia, mascara (`add-mask`) ANTES de gravar no ambiente, e
+      grava as duas variáveis com o mesmo valor;
+    - o passo vem antes do seed que consome a senha;
+    - o `helpers.ts` continua lendo `ADMIN_PASSWORD` do ambiente.
     """
+    import re
     from pathlib import Path
 
     raiz = Path(__file__).resolve().parents[2]
     workflow = (raiz / ".github" / "workflows" / "e2e.yml").read_text(encoding="utf-8")
     helpers = (raiz / "frontend" / "e2e" / "helpers.ts").read_text(encoding="utf-8")
 
-    linha = next(x for x in workflow.splitlines() if "SEED_ADMIN_PASSWORD:" in x)
-    senha = linha.split(":", 1)[1].strip()
+    assert not re.search(r"^\s*(SEED_)?ADMIN_PASSWORD\s*:", workflow, flags=re.M)
 
-    assert senha, "o workflow precisa definir a senha, senão não há admin para logar"
-    assert senha in helpers, "a senha do workflow não bate com o default do helpers.ts"
+    padrao = re.search(r'process\.env\.ADMIN_PASSWORD \?\? "([^"]+)"', helpers)
+    assert padrao, "o helpers.ts precisa ler ADMIN_PASSWORD do ambiente"
+    assert padrao.group(1) not in workflow
+
+    linhas = [x.strip() for x in workflow.splitlines()]
+    sorteios = [i for i, x in enumerate(linhas) if x.startswith('senha="E2e-$(openssl rand')]
+    mascaras = [i for i, x in enumerate(linhas) if x == 'echo "::add-mask::${senha}"']
+    do_seed = [i for i, x in enumerate(linhas) if x == 'echo "SEED_ADMIN_PASSWORD=${senha}"']
+    do_playwright = [i for i, x in enumerate(linhas) if x == 'echo "ADMIN_PASSWORD=${senha}"']
+    seeds = [i for i, x in enumerate(linhas) if x == "run: python -m app.seeds"]
+
+    # Um por job (`e2e` e `ece01`), e nessa ordem dentro de cada um.
+    assert len(do_seed) == len(do_playwright) == len(seeds) == 2
+    for seed_env, playwright_env, seed in zip(do_seed, do_playwright, seeds, strict=True):
+        sorteio = max(i for i in sorteios if i < seed_env)
+        mascara = max(i for i in mascaras if i < seed_env)
+        assert sorteio < mascara < seed_env < playwright_env < seed
+        # Entre a máscara e o seed, nada imprime: só as duas gravações.
+        assert playwright_env - mascara <= 3
+
+    # Nenhum `echo` solto do valor, nem `set -x`, em lugar nenhum.
+    assert not re.search(r"echo\s+\"?\$\{?senha\}?\"?\s*$", workflow, flags=re.M)
+    assert "set -x" not in workflow

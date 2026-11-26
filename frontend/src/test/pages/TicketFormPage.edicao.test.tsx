@@ -279,6 +279,19 @@ describe("TicketFormPage — o que muda de propósito vai inteiro", () => {
     expect(corpo.equipment_ids).toEqual([]);
   });
 
+  it("escolher de novo o MESMO produto não é troca: a seleção fica e o PATCH não leva equipment_ids", async () => {
+    await abrirEdicao();
+    escolherProduto("Titan");
+
+    expect(ficha(/Titan da portaria/)).toHaveAttribute("aria-pressed", "true");
+    expect(ficha(/Titan do almoxarifado/)).toHaveAttribute("aria-pressed", "true");
+
+    descrever();
+    await enviar();
+
+    expect(await corpoDoPatch()).not.toHaveProperty("equipment_ids");
+  });
+
   it("voltar ao produto original mostra os aparelhos do chamado de novo, desmarcados", async () => {
     await abrirEdicao();
     escolherProduto("Phoebus");

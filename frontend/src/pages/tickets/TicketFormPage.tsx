@@ -1,4 +1,5 @@
 import { zodResolver } from "@hookform/resolvers/zod";
+import type { AxiosError } from "axios";
 import { useEffect, useId, useMemo, useState } from "react";
 import { useForm } from "react-hook-form";
 import { Link, useNavigate, useParams } from "react-router-dom";
@@ -25,6 +26,8 @@ import {
 } from "../../services/productService";
 import { getMyEquipment, type Equipment } from "../../services/equipmentService";
 import { uploadAttachments } from "../../services/attachmentService";
+import { getApiError } from "../../lib/apiError";
+import { ehDoProprioCliente } from "../../lib/equipamento";
 import { toastApiError } from "../../lib/toastError";
 import { cn, plural } from "../../lib/utils";
 import {
@@ -55,8 +58,51 @@ const schema = z.object({
 
 type FormValues = z.infer<typeof schema>;
 
-/** O que a ficha de equipamento mostra — serve ao aparelho da lista e ao do chamado. */
-type OpcaoDeEquipamento = { id: string; name: string; serial_number: string | null };
+/**
+ * O que a ficha de equipamento precisa. Serve tanto ao equipamento da lista de
+ * quem está logado quanto ao que JÁ está no chamado em edição — a equipe edita
+ * chamado de cliente, e os aparelhos dele não estão em `/equipment/my` dela.
+ */
+interface OpcaoDeEquipamento {
+  id: string;
+  name: string;
+  serial_number: string | null;
+  product_id: string | null;
+  is_mine?: boolean | null;
+}
+
+// ── Recusas do vínculo de equipamento (ECE-01) ────────────────
+
+const ERRO_GENERICO = "Erro ao salvar o chamado. Tente novamente.";
+
+/**
+ * Uma frase só para as duas recusas que significam "este equipamento não é
+ * para você": o 403 de fora do escopo e o 400 de id que não existe.
+ *
+ * O backend responde diferente nos dois casos; a tela não. Dizer "não existe"
+ * num e "não é seu" no outro contaria a quem está abrindo o chamado que o
+ * segundo equipamento existe.
+ */
+const EQUIPAMENTO_INDISPONIVEL =
+  "Um dos equipamentos selecionados não está mais disponível. A lista foi atualizada: confira a seleção e tente de novo.";
+
+type RecusaDeEquipamento = "indisponivel" | "mistura";
+
+function recusaDeEquipamento(err: unknown): RecusaDeEquipamento | null {
+  const resposta = (err as AxiosError<{ detail?: unknown }>)?.response;
+  const detalhe = typeof resposta?.data?.detail === "string" ? resposta.data.detail : "";
+  if (resposta?.status === 403 && detalhe.startsWith("Só é possível vincular equipamentos")) {
+    return "indisponivel";
+  }
+  if (resposta?.status === 400 && detalhe.startsWith("Um ou mais equipamentos informados")) {
+    return "indisponivel";
+  }
+  // Empresas diferentes, ou classificado junto de não classificado. Quem chega
+  // aqui já passou pelo escopo: a frase do backend só fala do que a pessoa
+  // mesma selecionou, e por isso pode ir inteira para a tela.
+  if (resposta?.status === 400 && detalhe.includes("todos da mesma empresa")) return "mistura";
+  return null;
+}
 
 /** Os mesmos ids, em qualquer ordem. */
 function mesmoConjunto(a: string[], b: string[]): boolean {
@@ -371,15 +417,15 @@ export default function TicketFormPage() {
     ]).finally(() => setLoadingProducts(false));
   }, []);
 
-  // As fichas do produto escolhido: os equipamentos de quem está logado e, na
-  // edição, os que o chamado JÁ tem — quem edita é a equipe, e a lista dela não
-  // traz os aparelhos do cliente.
+  // As fichas do produto escolhido: os equipamentos de quem está logado (os
+  // próprios e, com o compartilhamento ligado no backend, os da empresa) e, na
+  // edição, os que o chamado JÁ tem.
   //
-  // Era um efeito que também ZERAVA a seleção a cada mudança de produto ou da
-  // lista — e, na edição, a carga do chamado é uma mudança de produto. O
-  // chamado abria com a seleção vazia, e salvar mandava `equipment_ids: []`:
-  // desvinculava tudo sem ninguém ter pedido. Agora a lista é só derivada, e
-  // quem limpa a seleção é o gesto de trocar o produto (`trocarProduto`).
+  // Era um efeito que também ZERAVA a seleção a cada mudança de produto — e o
+  // `reset` da edição é uma mudança de produto. O chamado abria para editar com
+  // a seleção vazia, e salvar mandava `equipment_ids: []`: desvinculava tudo
+  // sem ninguém ter pedido. Agora a lista é só derivada, e quem limpa a seleção
+  // é o gesto de trocar o produto (`trocarProduto`).
   const equipments = useMemo<OpcaoDeEquipamento[]>(() => {
     if (!selectedProductId) return [];
     const daLista = allMyEquipments.filter((e) => e.product_id === selectedProductId);
@@ -459,8 +505,10 @@ export default function TicketFormPage() {
       };
       const equipment_ids = currentValues.equipment_ids ?? [];
       // Na edição, o conjunto que não mudou NÃO é reenviado: omitir o campo é o
-      // contrato do PATCH para "não mexa nos equipamentos". Qualquer mudança
-      // vai inteira — inclusive a lista vazia, que desvincula de propósito.
+      // contrato do PATCH para "não mexa nos equipamentos". É o que mantém
+      // editável o chamado antigo cujos aparelhos, pela regra de hoje, não
+      // poderiam mais ser associados juntos — e só vale para a edição, que é da
+      // equipe. Qualquer mudança no conjunto vai inteira, e o backend confere.
       const ticket = isEdit && id
         ? await updateTicket(id, mesmoConjunto(equipment_ids, originais) ? base : { ...base, equipment_ids })
         : await createTicket({
@@ -483,8 +531,18 @@ export default function TicketFormPage() {
       }
 
       navigate(`/tickets/${ticket.id}`);
-    } catch {
-      setSubmitError("Erro ao salvar o chamado. Tente novamente.");
+    } catch (err) {
+      const recusa = recusaDeEquipamento(err);
+      if (recusa === "indisponivel") {
+        setSubmitError(EQUIPAMENTO_INDISPONIVEL);
+        // A lista que a tela tinha envelheceu (o aparelho foi inativado,
+        // reclassificado ou a pessoa saiu da empresa). Busca de novo e devolve
+        // a seleção ao que era seguro: nada, ou o que o chamado já tinha.
+        setValue("equipment_ids", originais);
+        getMyEquipment().then(setAllMyEquipments).catch(() => {});
+      } else {
+        setSubmitError(getApiError(err, ERRO_GENERICO));
+      }
       setStep("form");
     } finally {
       setSubmitting(false);
@@ -650,13 +708,18 @@ export default function TicketFormPage() {
                   linha de flex junto: pô-lo dentro do `legend` costuraria o
                   texto dele ao nome do grupo ("Equipamentos Selecionar todos
                   (3)"), que é outra forma de perder o nome.
+
+                  O `-top-7` é a altura do `legend` mais o respiro do
+                  `space-y-2`: no navegador, o `top-0` de um filho posicionado
+                  de `fieldset` conta a partir de DEPOIS do `legend`, e o botão
+                  caía em cima da primeira linha de fichas.
                 */}
                 <legend className="text-sm font-medium text-conteudo">Equipamentos</legend>
                 {equipments.length > 1 && (
                   <button
                     type="button"
                     onClick={toggleAllEquipments}
-                    className="absolute right-0 top-0 cursor-pointer text-xs font-medium text-conteudo-link hover:underline"
+                    className="absolute right-0 -top-7 cursor-pointer text-xs font-medium text-conteudo-link hover:underline"
                   >
                     {todosMarcados
                       ? "Limpar seleção"
@@ -667,7 +730,7 @@ export default function TicketFormPage() {
                   <p className="text-sm text-conteudo-muted">Selecione um produto primeiro.</p>
                 ) : equipments.length === 0 ? (
                   <p className="text-sm text-conteudo-muted">
-                    Você não tem equipamentos cadastrados para este produto.
+                    Nenhum equipamento disponível para este produto.
                   </p>
                 ) : (
                   <>
@@ -696,6 +759,11 @@ export default function TicketFormPage() {
                               <span className="ml-2 font-mono text-xs text-conteudo-muted">
                                 {e.serial_number}
                               </span>
+                            )}
+                            {/* Cadastrado por um colega: dito em palavra, sem
+                                o nome dele — a API não manda, e não é preciso. */}
+                            {!ehDoProprioCliente(e) && (
+                              <span className="ml-2 text-xs text-conteudo-muted">· Da empresa</span>
                             )}
                           </button>
                         );

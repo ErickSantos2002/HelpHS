@@ -12,6 +12,7 @@ import {
   type Equipment,
 } from "../../services/equipmentService";
 import { api } from "../../services/api";
+import { ehDoProprioCliente } from "../../lib/equipamento";
 import { getApiError } from "../../lib/apiError";
 
 // ── Types ──────────────────────────────────────────────────────
@@ -298,7 +299,9 @@ function StepEquipment({ onNext }: { onNext: () => void }) {
     ])
       .then(([prods, equips]) => {
         setProducts(prods.filter((p) => p.is_active !== false));
-        setMyEquipments(equips);
+        // ECE-01: a lista pode trazer equipamento da empresa, cadastrado por
+        // colega. Aqui só conta o que a própria pessoa adicionou.
+        setMyEquipments(equips.filter(ehDoProprioCliente));
         if (prods.length > 0) setProductId(prods[0].id);
       })
       .catch(() => {})

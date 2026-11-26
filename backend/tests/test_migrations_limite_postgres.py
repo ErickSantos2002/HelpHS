@@ -4,6 +4,8 @@ Limites de espera das migrations (`ALEMBIC_LOCK_TIMEOUT` e
 
 Produção está em `l8g9h0i1j2k3`: o próximo boot aplica `m9h0i1j2k3l4` e
 `n0i1j2k3l4m5` numa transação só, com a instância anterior ainda atendendo.
+Desde a ECE-01 a mesma transação leva também a `o1j2k3l4m5n6` (empresa do
+equipamento): ela entra nos rastros abaixo, e desistir desfaz as três.
 O que se prende aqui:
 
 - o upgrade conjunto, desde `l8g9`, não toca no que já existia;
@@ -42,13 +44,15 @@ servidor = _mig.servidor
 banco = _mig.banco
 
 _PRODUCAO = "l8g9h0i1j2k3"
-_HEAD = "n0i1j2k3l4m5"
-# O que cada uma das duas revisions cria; nada disso pode sobrar de uma falha.
+_HEAD = "o1j2k3l4m5n6"
+# O que cada uma das revisions pendentes cria; nada disso pode sobrar de uma falha.
 _RASTROS = (
     ("chat_messages", "client_message_id"),
     ("chat_messages", "client_message_fingerprint"),
     ("chat_messages", "seq"),
     ("tickets", "chat_seq"),
+    ("equipments", "company_id"),
+    ("equipments", "sem_empresa_por_decisao"),
 )
 
 
@@ -80,7 +84,8 @@ async def _rastros(url: str) -> list[tuple]:
         "SELECT table_name, column_name FROM information_schema.columns"
         " WHERE (table_name, column_name) IN"
         " (('chat_messages', 'client_message_id'), ('chat_messages', 'client_message_fingerprint'),"
-        "  ('chat_messages', 'seq'), ('tickets', 'chat_seq'))"
+        "  ('chat_messages', 'seq'), ('tickets', 'chat_seq'), ('equipments', 'company_id'),"
+        "  ('equipments', 'sem_empresa_por_decisao'))"
         " ORDER BY 1, 2",
     )
 

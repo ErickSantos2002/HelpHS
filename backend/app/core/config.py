@@ -340,6 +340,24 @@ class Settings(BaseSettings):
     # tradicional sem deploy do front — basta reiniciar o backend.
     chat_sincronizacao_incremental: bool = False
 
+    # ECE-01: o cliente passa a ver e usar no chamado o equipamento da empresa
+    # a que está oficialmente vinculado (`users.company_id`), além do que ele
+    # mesmo cadastrou. DESLIGADA por padrão. A GRAVAÇÃO de
+    # `equipments.company_id` não depende dela — acontece sempre, para que a
+    # empresa já esteja no lugar quando a regra for ligada.
+    #
+    # Ligada, muda (regra em `services/escopo_de_equipamento.py`):
+    #   - o cliente lista, abre e usa em chamado próprio o equipamento ATIVO da
+    #     empresa dele, sem ver quem é o responsável; editar e inativar seguem
+    #     só com o responsável;
+    #   - a Helô só recebe o histórico de chamados que o próprio cliente abriu;
+    #   - filtro e contador de empresa das telas da equipe passam a usar a
+    #     empresa do equipamento, e não a do responsável;
+    #   - um chamado só recebe equipamentos todos da mesma empresa ou todos
+    #     ainda sem empresa (cliente e equipe).
+    # NÃO compartilha chamados: cada cliente continua vendo só os seus.
+    equipamento_por_empresa: bool = False
+
     # O que a Helô faz quando está ligada — e é ORTOGONAL ao `helo_enabled`:
     # desligada é desligada em qualquer modo.
     #

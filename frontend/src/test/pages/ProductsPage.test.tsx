@@ -287,7 +287,7 @@ describe("ProductsPage", () => {
     await user.click(screen.getByRole("button", { name: "Visualizar" }));
     const modal = await screen.findByRole("dialog");
     expect(within(modal).getByText("Responsável")).toBeInTheDocument();
-    expect(within(modal).getByText("Empresa vinculada")).toBeInTheDocument();
+    expect(within(modal).getByText("Empresa do responsável")).toBeInTheDocument();
     expect(within(modal).getByText("Alfa Oficial")).toBeInTheDocument();
     expect(within(modal).getByText("Empresa declarada")).toBeInTheDocument();
     expect(within(modal).getByText("Construtora Alfa")).toBeInTheDocument();

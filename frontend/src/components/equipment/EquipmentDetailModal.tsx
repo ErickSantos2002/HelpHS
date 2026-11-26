@@ -1,4 +1,9 @@
 import { formatCnpj } from "../../lib/documents";
+import {
+  conheceEmpresaDoEquipamento,
+  empresasDivergem,
+  situacaoDeEmpresa,
+} from "../../lib/equipamento";
 import { Button, Icon, Modal, ModalFooter } from "../ui";
 import type { Equipment } from "../../services/productService";
 
@@ -85,10 +90,14 @@ function Campo({ rotulo, children }: { rotulo: string; children: React.ReactNode
  * aparelho HOJE, e a equipe pode trocá-lo na tela de Produtos; o sistema não
  * guarda quem fez o cadastro original, e a tela não inventa essa informação.
  *
- * **Duas empresas, separadas.** A vinculada é a oficial: o vínculo que um
- * admin fez na tela de Grupos. A declarada é o que o responsável digitou no
- * próprio cadastro, e não decide de que empresa ninguém é. Antes o modal
- * mostrava a declarada sob o rótulo "Empresa", como se fosse o vínculo.
+ * **Três empresas, cada uma com o seu nome.** A do EQUIPAMENTO (ECE-01) é a
+ * que a equipe atribuiu ao aparelho, e é ela que decide quem o enxerga quando o
+ * compartilhamento por empresa está ligado. A do RESPONSÁVEL é o vínculo que
+ * um admin fez na tela de Grupos. A DECLARADA é o que o responsável digitou no
+ * próprio cadastro, e não decide de que empresa ninguém é.
+ *
+ * As duas primeiras costumam coincidir. Quando não coincidem, o modal avisa —
+ * e para por aí: não sugere qual está certa.
  */
 export function EquipmentDetailModal({
   equip,
@@ -140,7 +149,33 @@ export function EquipmentDetailModal({
               <span className="text-sm text-conteudo-muted">Sem responsável</span>
             )}
           </Campo>
-          <Campo rotulo="Empresa vinculada">
+          {conheceEmpresaDoEquipamento(equip) && (
+            <Campo rotulo="Empresa do equipamento">
+              {situacaoDeEmpresa(equip) === "classificado" ? (
+                <span className="text-sm text-conteudo">
+                  {equip.equipment_company_name ?? "Empresa sem nome"}
+                </span>
+              ) : situacaoDeEmpresa(equip) === "sem_empresa_por_decisao" ? (
+                <>
+                  <span className="text-sm text-conteudo-muted">Sem empresa (por decisão)</span>
+                  <span className="text-xs text-conteudo-muted">
+                    A equipe deixou este equipamento sem empresa de propósito.
+                  </span>
+                </>
+              ) : (
+                <>
+                  <span className="text-sm text-conteudo-muted">Sem empresa</span>
+                  <span className="text-xs text-conteudo-muted">Ainda não classificado.</span>
+                </>
+              )}
+              {empresasDivergem(equip) && (
+                <span role="note" className="text-xs text-on-tint-warning">
+                  Diferente da empresa do responsável.
+                </span>
+              )}
+            </Campo>
+          )}
+          <Campo rotulo="Empresa do responsável">
             {equip.linked_company_name ? (
               <span className="text-sm text-conteudo">{equip.linked_company_name}</span>
             ) : (
