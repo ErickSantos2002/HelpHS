@@ -46,7 +46,7 @@ async def _envia(
 
     O `evento` é obrigatório e sem default de propósito. Estes três e-mails não
     têm `notif_id`, e a linha que o `send_email` escreve é a ÚNICA que registra o
-    desfecho deles: o `auth.py` só registra o enfileiramento (`... queued`), e
+    desfecho deles: o `auth.py` só registra o agendamento (`... scheduled`), e
     nunca se aquilo chegou a ser aceito. Um default genérico faria confirmação de
     cadastro e redefinição de senha saírem indistinguíveis no log, justamente no
     momento em que alguém investiga "o cliente diz que não recebeu".

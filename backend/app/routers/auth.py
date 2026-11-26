@@ -322,10 +322,14 @@ async def resend_verification(
     if user is None or user.email_verified or not settings.requires_email_verification():
         return neutra
 
+    # "scheduled", não "queued": aqui nada foi gravado ainda. O `intent` é o
+    # que liga esta linha à do desfecho (gravado / falha ao gravar), que sai de
+    # `enfileira_email_de_conta_em_segundo_plano` — ver RS-04 lá.
+    intent_id = uuid.uuid4()
     background.add_task(
-        enfileira_email_de_conta_em_segundo_plano, user.id, "verification", uuid.uuid4()
+        enfileira_email_de_conta_em_segundo_plano, user.id, "verification", intent_id
     )
-    logger.info(f"Verification email queued (resend): user_id={user.id}")
+    logger.info(f"Verification email scheduled (resend): intent={intent_id}")
     return neutra
 
 
@@ -389,10 +393,13 @@ async def forgot_password(
     if user is None or user.status != UserStatus.active:
         return neutra
 
+    # Mesma disciplina do reenvio acima: "scheduled" + `intent`, e o desfecho
+    # da gravação sai do serviço, depois do commit (RS-04).
+    intent_id = uuid.uuid4()
     background.add_task(
-        enfileira_email_de_conta_em_segundo_plano, user.id, "password_reset", uuid.uuid4()
+        enfileira_email_de_conta_em_segundo_plano, user.id, "password_reset", intent_id
     )
-    logger.info(f"Password reset queued: user_id={user.id}")
+    logger.info(f"Password reset scheduled: intent={intent_id}")
     return neutra
 
 

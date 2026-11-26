@@ -89,7 +89,7 @@ export default function VerifyEmailPage() {
         </Alert>
       ) : (
         <form onSubmit={handleReenviar} className="space-y-3">
-          <p className="text-sm text-slate-400">
+          <p className="text-sm text-conteudo-muted">
             O link vale por tempo limitado. Informe seu e-mail para receber um novo:
           </p>
           <Input

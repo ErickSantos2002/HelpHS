@@ -208,8 +208,11 @@ export default function LoginPage() {
 
   return (
     <div className="min-h-screen flex">
-      {/* ── Left panel 60% — branding ───────────────────────── */}
-      <div className="hidden lg:flex lg:w-3/5 relative flex-col justify-between overflow-hidden bg-[#080F1A] px-14 py-12">
+      {/* ── Left panel 60% — branding ─────────────────────────
+          Os dois painéis têm fundo escuro FIXO, então carregam `dark`: os
+          tokens do tema escuro valem daqui para dentro mesmo com a
+          aplicação no tema claro (AUTH-UI-01). */}
+      <div className="dark hidden lg:flex lg:w-3/5 relative flex-col justify-between overflow-hidden bg-[#080F1A] px-14 py-12">
         {/* Decorative blobs */}
         <div className="pointer-events-none absolute -top-32 -right-32 w-[500px] h-[500px] rounded-full blur-[120px] bg-primary/[0.18]" />
         <div className="pointer-events-none absolute -bottom-40 -left-20 w-[400px] h-[400px] rounded-full blur-[100px] bg-primary/[0.09]" />
@@ -230,7 +233,7 @@ export default function LoginPage() {
               Suporte inteligente<br />
               para sua equipe
             </h1>
-            <p className="text-base text-slate-400 leading-relaxed max-w-md">
+            <p className="text-base text-conteudo-muted leading-relaxed max-w-md">
               Plataforma completa para gerenciar chamados, SLA e comunicação interna com foco em Saúde e Segurança do Trabalho.
             </p>
           </div>
@@ -244,7 +247,7 @@ export default function LoginPage() {
                 </div>
                 <div>
                   <p className="text-sm font-semibold text-white">{f.title}</p>
-                  <p className="text-xs text-slate-500 mt-0.5 leading-relaxed">{f.desc}</p>
+                  <p className="text-xs text-conteudo-muted mt-0.5 leading-relaxed">{f.desc}</p>
                 </div>
               </div>
             ))}
@@ -253,14 +256,14 @@ export default function LoginPage() {
 
         {/* Footer */}
         <div className="relative z-10">
-          <p className="text-xs text-slate-600">
+          <p className="text-xs text-conteudo-muted">
             © {new Date().getFullYear()} HelpHS — Health &amp; Safety Tech. Todos os direitos reservados.
           </p>
         </div>
       </div>
 
       {/* ── Right panel 40% — form ──────────────────────────── */}
-      <div className="flex flex-1 lg:w-2/5 flex-col items-center justify-center bg-[#0D1623] px-6 py-12">
+      <div className="dark flex flex-1 lg:w-2/5 flex-col items-center justify-center bg-[#0D1623] px-6 py-12">
         <div className="w-full max-w-sm space-y-8">
           {/* Mobile logo */}
           <div className="flex lg:hidden items-center justify-center">
@@ -269,10 +272,10 @@ export default function LoginPage() {
 
           {/* Heading */}
           <div className="space-y-1 text-center lg:text-left">
-            <h2 className="text-2xl font-bold text-slate-100">
+            <h2 className="text-2xl font-bold text-conteudo-heading">
               {desafio ? "Verificação em duas etapas" : "Bem-vindo de volta"}
             </h2>
-            <p className="text-sm text-slate-500">
+            <p className="text-sm text-conteudo-muted">
               {desafio
                 ? "Digite o código de 6 dígitos do seu aplicativo autenticador"
                 : "Entre com suas credenciais para continuar"}
@@ -308,7 +311,7 @@ export default function LoginPage() {
             <button
               onClick={handleReenviarConfirmacao}
               disabled={reenviando}
-              className="w-full rounded-lg border border-primary/30 bg-primary/10 px-4 py-2 text-sm font-medium text-primary transition-colors hover:bg-primary/20 disabled:opacity-50 cursor-pointer"
+              className="w-full rounded-lg border border-primary/30 bg-primary/10 px-4 py-2 text-sm font-medium text-conteudo-link transition-colors hover:bg-primary/20 disabled:opacity-50 cursor-pointer"
             >
               {reenviando ? "Enviando…" : "Reenviar e-mail de confirmação"}
             </button>
@@ -348,7 +351,7 @@ export default function LoginPage() {
               <button
                 type="button"
                 onClick={() => recomecar(null)}
-                className="w-full text-center text-xs font-medium text-slate-500 transition-colors hover:text-slate-300 cursor-pointer"
+                className="w-full py-1 text-center text-xs font-medium text-conteudo-muted transition-colors hover:text-conteudo cursor-pointer"
               >
                 Entrar com outra conta
               </button>
@@ -386,7 +389,7 @@ export default function LoginPage() {
                   onClick={() => setVerSenha((v) => !v)}
                   aria-label={verSenha ? "Ocultar senha" : "Mostrar senha"}
                   title={verSenha ? "Ocultar senha" : "Mostrar senha"}
-                  className="absolute bottom-0 right-0 flex h-[38px] w-10 items-center justify-center rounded-r-lg text-slate-500 transition-colors hover:text-slate-300 focus:outline-none focus-visible:ring-2 focus-visible:ring-primary cursor-pointer"
+                  className="absolute bottom-0 right-0 flex h-[38px] w-10 items-center justify-center rounded-r-lg text-conteudo-muted transition-colors hover:text-conteudo focus:outline-none focus-visible:ring-2 focus-visible:ring-primary cursor-pointer"
                 >
                   {verSenha ? IC.EyeOff : IC.Eye}
                 </button>
@@ -394,7 +397,7 @@ export default function LoginPage() {
               <div className="flex justify-end">
                 <Link
                   to="/esqueci-senha"
-                  className="text-xs font-medium text-primary hover:text-primary/80 transition-colors"
+                  className="inline-block py-1 text-xs font-medium text-primary hover:text-primary/80 transition-colors"
                 >
                   Esqueci minha senha
                 </Link>
@@ -417,14 +420,14 @@ export default function LoginPage() {
           {/* Footer links */}
           <div className="space-y-3 text-center">
             {!desafio && (
-              <p className="text-sm text-slate-500">
+              <p className="text-sm text-conteudo-muted">
                 Não tem uma conta?{" "}
                 <Link to="/register" className="text-primary hover:text-primary-400 transition-colors font-medium">
                   Registre-se
                 </Link>
               </p>
             )}
-            <p className="text-xs text-slate-600">
+            <p className="text-xs text-conteudo-muted">
               {desafio
                 ? "Perdeu o acesso ao aplicativo? Contate o administrador."
                 : "Problemas para acessar? Contate o administrador."}
@@ -435,7 +438,7 @@ export default function LoginPage() {
                 to="/privacidade"
                 target="_blank"
                 rel="noopener noreferrer"
-                className="text-conteudo-link hover:underline"
+                className="inline-block py-1 text-conteudo-link hover:underline"
               >
                 Política de Privacidade
               </Link>
@@ -444,7 +447,7 @@ export default function LoginPage() {
                 to="/termos"
                 target="_blank"
                 rel="noopener noreferrer"
-                className="text-conteudo-link hover:underline"
+                className="inline-block py-1 text-conteudo-link hover:underline"
               >
                 Termos de Uso
               </Link>

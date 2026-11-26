@@ -138,7 +138,7 @@ export default function RegisterPage() {
           Confira a caixa de <span className="font-semibold">{cadastradoEmail}</span> e clique no
           link para ativar sua conta. Ele vale por 24 horas.
         </Alert>
-        <p className="text-center text-xs text-slate-500">
+        <p className="text-center text-xs text-conteudo-muted">
           Não chegou? Veja também a caixa de spam. Você pode pedir um novo link na tela de acesso,
           ao tentar entrar.
         </p>
@@ -148,8 +148,11 @@ export default function RegisterPage() {
 
   return (
     <div className="min-h-screen flex">
-      {/* ── Left panel 60% — branding ───────────────────────── */}
-      <div className="hidden lg:flex lg:w-3/5 relative flex-col justify-between overflow-hidden bg-[#080F1A] px-14 py-12">
+      {/* ── Left panel 60% — branding ─────────────────────────
+          Fundo escuro FIXO, então carrega `dark` (AUTH-UI-01). O painel do
+          formulário, abaixo, usa `bg-surface-base` e acompanha o tema: não
+          recebe o escopo. */}
+      <div className="dark hidden lg:flex lg:w-3/5 relative flex-col justify-between overflow-hidden bg-[#080F1A] px-14 py-12">
         {/* Decorative blobs */}
         <div className="pointer-events-none absolute -top-32 -right-32 w-[500px] h-[500px] rounded-full blur-[120px] bg-primary/[0.18]" />
         <div className="pointer-events-none absolute -bottom-40 -left-20 w-[400px] h-[400px] rounded-full blur-[100px] bg-primary/[0.09]" />
@@ -170,19 +173,19 @@ export default function RegisterPage() {
               Comece a usar<br />
               em minutos
             </h1>
-            <p className="text-base text-slate-400 leading-relaxed max-w-md">
+            <p className="text-base text-conteudo-muted leading-relaxed max-w-md">
               Junte-se à plataforma que simplifica o suporte em Saúde e Segurança do Trabalho para equipes de todos os tamanhos.
             </p>
           </div>
 
           {/* How it works */}
           <div className="space-y-3">
-            <p className="text-xs font-semibold uppercase tracking-widest text-slate-600">Como funciona</p>
+            <p className="text-xs font-semibold uppercase tracking-widest text-conteudo-muted">Como funciona</p>
             <div className="space-y-4">
               {STEPS.map((step, i) => (
                 <div key={step.num} className="flex items-center gap-4">
                   <div className="relative shrink-0 flex items-center justify-center w-8 h-8 rounded-full border border-primary/30 bg-primary/[0.12]">
-                    <span className="text-xs font-bold text-primary">{step.num}</span>
+                    <span className="text-xs font-bold text-conteudo-link">{step.num}</span>
                     {i < STEPS.length - 1 && (
                       <div className="absolute top-full left-1/2 -translate-x-1/2 w-px h-4 bg-primary/20 mt-0.5" />
                     )}
@@ -225,7 +228,7 @@ export default function RegisterPage() {
             ].map((t) => (
               <div key={t.label} className="flex items-center gap-2">
                 <span className="text-primary">{t.icon}</span>
-                <span className="text-xs text-slate-500">{t.label}</span>
+                <span className="text-xs text-conteudo-muted">{t.label}</span>
               </div>
             ))}
           </div>
@@ -233,7 +236,7 @@ export default function RegisterPage() {
 
         {/* Footer */}
         <div className="relative z-10">
-          <p className="text-xs text-slate-600">
+          <p className="text-xs text-conteudo-muted">
             © {new Date().getFullYear()} HelpHS — Health &amp; Safety Tech. Todos os direitos reservados.
           </p>
         </div>
@@ -249,8 +252,8 @@ export default function RegisterPage() {
 
           {/* Heading */}
           <div className="space-y-1">
-            <h2 className="text-2xl font-bold text-slate-100">Criar conta</h2>
-            <p className="text-sm text-slate-500">Preencha os dados abaixo para se registrar</p>
+            <h2 className="text-2xl font-bold text-conteudo-heading">Criar conta</h2>
+            <p className="text-sm text-conteudo-muted">Preencha os dados abaixo para se registrar</p>
           </div>
 
           {/* Error alert */}
@@ -365,9 +368,9 @@ export default function RegisterPage() {
           </form>
 
           {/* Footer */}
-          <p className="text-center text-sm text-slate-500">
+          <p className="text-center text-sm text-conteudo-muted">
             Já tem uma conta?{" "}
-            <Link to="/login" className="text-primary hover:text-primary-400 transition-colors font-medium">
+            <Link to="/login" className="text-conteudo-link hover:text-conteudo-link-hover transition-colors font-medium">
               Entrar
             </Link>
           </p>
