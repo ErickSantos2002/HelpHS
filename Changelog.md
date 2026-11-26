@@ -14,6 +14,54 @@ Trabalho que ainda **não** entrou numa versão do produto. Confira: se um
 item aqui já está em produção, ou ele foi para a versão errada, ou falta
 publicar uma versão nova.
 
+### Equipamento por empresa — entra desligado (ECE-01, 26/11/2026)
+
+O equipamento passa a ter uma **empresa**, além do responsável. Com
+`EQUIPAMENTO_POR_EMPRESA` ligada, clientes da mesma empresa enxergam e usam em
+chamados os equipamentos uns dos outros; editar e excluir continua sendo do
+responsável e da equipe. **A flag nasce `false` e este pacote não a liga.**
+**Uma migration, aditiva** (`o1j2k3l4m5n6`), sem preenchimento de histórico.
+Regras em `docs/decisoes-e-regras.md`, seção "Consultas da equipe: Equipamentos
+e Empresas".
+
+⚠️ **Rollback:** o `downgrade` da `o1j2k3l4m5n6` **aborta** se houver
+equipamento com empresa ou com a marca "sem empresa por decisão". Uma imagem
+sem o arquivo desta migration não sobe num banco que já passou por ela (o
+`start.sh` roda `alembic upgrade head`). Reverter a imagem não desfaz a
+migration.
+
+**Adicionado**
+
+- `equipments.company_id` (FK `ON DELETE RESTRICT`) e
+  `sem_empresa_por_decisao`. A equipe classifica o equipamento: omitir não
+  altera, um id atribui, `null` explícito marca "sem empresa por decisão".
+- Com a flag ligada, `/equipment/my` devolve os próprios e os da empresa, com
+  `is_mine`; um chamado só aceita equipamentos todos da mesma empresa, ou todos
+  sem empresa.
+- Consulta da equipe mostra a empresa do equipamento e a do responsável,
+  aponta divergência e ganha o filtro "Sem empresa".
+- `GET .../companies/{id}` traz, por cliente, `company_equipment_count`; a
+  confirmação de "Desvincular cliente" avisa quantos equipamentos ficam na
+  empresa. A operação não muda.
+- Scripts avulsos, nunca executados em dados reais:
+  `preenche_empresa_do_equipamento.py` (confere por padrão; só escreve com
+  `--aplicar`) e `funde_empresas_duplicadas.py`.
+- E2E isolados da ECE-01 (`suite: ece01` no `e2e.yml`), nas duas configurações
+  da flag.
+
+**Muda com a flag DESLIGADA, assim que o backend for implantado**
+
+- A empresa passa a ser gravada no equipamento em todo cadastro e quando a
+  equipe vincula um cliente a uma empresa; cada gravação fica em `audit_logs`.
+- Empresa com equipamento vinculado não pode mais ser excluída: HTTP 409, com a
+  contagem e a indicação de que ela é pela empresa do equipamento.
+- O filtro "Empresa" e o contador da tela de Empresas **continuam** pela
+  empresa do responsável (decisão de 25/11/2026, registrada na documentação).
+
+**Pendente (não incluído):** ligar a flag; preencher o histórico; ensaio das
+migrations em PostgreSQL 17; referência de recuperação que conheça a
+`o1j2k3l4m5n6`.
+
 ### Redefinição de senha: a tela não afirma mais o envio, e o log registra a gravação (RS-03 e RS-04, 23/11/2026)
 
 Resultado da auditoria "pedi a redefinição e o e-mail não chegou" (19 a
