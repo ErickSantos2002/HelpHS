@@ -91,6 +91,7 @@ from app.services.ticket_lifecycle import (
     resolution_reference,
 )
 from app.utils.avatar import foto_visivel_no_chamado, links_das_fotos
+from app.utils.categoria import DESCRICAO_DO_FILTRO, CategoriaDoFiltro
 from app.utils.crud import get_or_404
 from app.utils.history import filtra_historico_para, registra_historico
 from app.utils.protocol import MAX_RETRIES, generate_protocol
@@ -646,7 +647,10 @@ async def list_tickets(
     limit: int = Query(default=20, ge=1, le=500),
     status_filter: TicketStatus | None = Query(default=None, alias="status"),
     priority: str | None = Query(default=None),
-    category: str | None = Query(default=None),
+    # Validada antes da consulta: valor fora do enum era 500 no PostgreSQL (INC-01).
+    # Precisa ser `Annotated[..., Query()] = None`: com `= Query(default=None)` o
+    # FastAPI ignora o AfterValidator do tipo, e o filtro passava cru.
+    category: Annotated[CategoriaDoFiltro, Query(description=DESCRICAO_DO_FILTRO)] = None,
     assignee_id: uuid.UUID | None = Query(default=None),
     creator_id: uuid.UUID | None = Query(default=None),
     tag_id: uuid.UUID | None = Query(default=None),

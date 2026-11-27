@@ -45,6 +45,7 @@ from app.schemas.kb import (
     KBCommentResponse,
     KBFeedbackPayload,
 )
+from app.utils.categoria import DESCRICAO_DO_FILTRO, CategoriaDoFiltro
 from app.utils.slug import slug_unico, slugifica
 
 router = APIRouter(tags=["Knowledge Base"])
@@ -274,7 +275,10 @@ async def list_articles(
     offset: int = Query(default=0, ge=0),
     limit: int = Query(default=20, ge=1, le=100),
     search: str | None = Query(default=None, max_length=100),
-    category: str | None = Query(default=None),
+    # Validada antes da consulta: valor fora do enum era 500 no PostgreSQL (INC-01).
+    # Precisa ser `Annotated[..., Query()] = None`: com `= Query(default=None)` o
+    # FastAPI ignora o AfterValidator do tipo, e o filtro passava cru.
+    category: Annotated[CategoriaDoFiltro, Query(description=DESCRICAO_DO_FILTRO)] = None,
     product_id: uuid.UUID | None = Query(default=None),
     status_filter: KBArticleStatus | None = Query(default=None, alias="status"),
 ) -> KBArticleListResponse:
