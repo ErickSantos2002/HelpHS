@@ -5,7 +5,8 @@ import {
   EMPTY_FILTERS,
   TicketFilters,
 } from "../../components/ui/TicketFilters";
-import { escolherNoMenu } from "../helpers/menu";
+import { CATEGORIAS } from "../../lib/categoria";
+import { escolherNoMenu, opcoesDoMenu } from "../helpers/menu";
 
 describe("TicketFilters", () => {
   it("renders search input and filter menus", () => {
@@ -64,6 +65,27 @@ describe("TicketFilters", () => {
     escolherNoMenu(selects[1], "Crítico");
     expect(onChange).toHaveBeenCalledWith(
       expect.objectContaining({ priority: "critical" }),
+    );
+  });
+
+  it("o filtro de categoria oferece as categorias da fonte única, sem 'Outro' (INC-01)", () => {
+    // Era uma cópia própria da lista, com `other` — valor que a API não aceita
+    // mais desde 18/09/2026. Agora sai de `CATEGORIAS`, como nas outras telas.
+    render(<TicketFilters value={EMPTY_FILTERS} onChange={vi.fn()} />);
+    const categoria = screen.getAllByRole("combobox")[2];
+    expect(opcoesDoMenu(categoria)).toEqual([
+      "Categoria",
+      ...CATEGORIAS.map((c) => c.label),
+    ]);
+    expect(opcoesDoMenu(categoria)).not.toContain("Outro");
+  });
+
+  it("filtrar por 'Geral' manda o valor do enum", () => {
+    const onChange = vi.fn();
+    render(<TicketFilters value={EMPTY_FILTERS} onChange={onChange} />);
+    escolherNoMenu(screen.getAllByRole("combobox")[2], "Geral");
+    expect(onChange).toHaveBeenCalledWith(
+      expect.objectContaining({ category: "general" }),
     );
   });
 

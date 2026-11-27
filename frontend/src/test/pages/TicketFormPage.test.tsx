@@ -52,9 +52,9 @@ describe("TicketFormPage", () => {
   it("categoria é grupo de rádio, com nome", async () => {
     await montar();
     expect(screen.getByRole("group", { name: "Categoria" })).toBeInTheDocument();
-    // Oito categorias, e nenhuma delas é botão. Eram doze enquanto as quatro
-    // prioridades moravam aqui.
-    expect(screen.getAllByRole("radio")).toHaveLength(8);
+    // Sete categorias, e nenhuma delas é botão. Eram doze enquanto as quatro
+    // prioridades moravam aqui, e oito enquanto "Outro" existia (INC-01).
+    expect(screen.getAllByRole("radio")).toHaveLength(7);
   });
 
   it("quem abre o chamado não escolhe prioridade", async () => {
@@ -188,18 +188,15 @@ describe("TicketFormPage — a descrição da categoria", () => {
     expect(bloco).toHaveTextContent("Acesso");
   });
 
-  it("'Outro' não tem frase, e a tela não inventa uma", async () => {
-    // Ele se sobrepõe a "Geral" e pode sair da lista; enquanto existir, o
-    // Resumo mostra o nome e cala sobre o significado.
+  it("'Outro' não é oferecido, e 'Geral' descreve o balde que ficou (INC-01)", async () => {
+    // A API recusa `other` desde 18/09/2026; oferecer a ficha era garantir o
+    // "Erro ao salvar o chamado" para quem a escolhesse.
     await montar();
     const grupo = screen.getByRole("group", { name: "Categoria" });
+    expect(screen.queryByRole("radio", { name: "Outro" })).not.toBeInTheDocument();
 
     await userEvent.click(screen.getByRole("radio", { name: "Geral" }));
     expect(grupo).toHaveAttribute("aria-describedby");
-
-    await userEvent.click(screen.getByRole("radio", { name: "Outro" }));
-    expect(grupo).not.toHaveAttribute("aria-describedby");
-    expect(fraseAbaixoDasFichas()).toHaveTextContent("");
-    expect(screen.queryByText(/Qualquer ocorrência/)).not.toBeInTheDocument();
+    expect(fraseAbaixoDasFichas()).toHaveTextContent(/Qualquer ocorrência/);
   });
 });

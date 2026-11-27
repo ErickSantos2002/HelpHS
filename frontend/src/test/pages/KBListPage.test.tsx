@@ -152,10 +152,11 @@ describe("KBListPage", () => {
     const filtro = screen.getByRole("combobox", { name: "Categoria" });
     const rotulos = opcoesDoMenu(filtro);
 
-    // As oito de `CATEGORIAS`, mais a linha de "todas".
+    // As sete de `CATEGORIAS`, mais a linha de "todas". "Outro" saiu: a API
+    // não aceita mais `other` (INC-01).
     expect(rotulos).toContain("Hardware");
-    expect(rotulos).toContain("Segurança");
-    expect(rotulos).toContain("Outro");
+    expect(rotulos).toContain("Geral");
+    expect(rotulos).not.toContain("Outro");
     expect(rotulos).toHaveLength(CATEGORIAS.length + 1);
   });
 

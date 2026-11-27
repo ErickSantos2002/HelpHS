@@ -52,14 +52,27 @@ describe("categoria — a descrição", () => {
     }
   });
 
-  it("'Outro' não tem descrição, e é o único sem", () => {
-    // Não é esquecimento: ele se sobrepõe a "Geral", e a decisão de tirá-lo do
-    // formulário é do operador. Inventar frase aqui seria inventar diferença
-    // entre duas opções que não diferem.
-    expect(descricaoDeCategoria("other")).toBeUndefined();
-
+  it("toda categoria oferecida tem descrição", () => {
+    // "Outro" era a única sem frase, e saiu (INC-01). Categoria nova chega com
+    // a frase dela, ou este caso reprova.
     const semDescricao = CATEGORIAS.filter((c) => !c.descricao).map((c) => c.value);
-    expect(semDescricao).toEqual(["other"]);
+    expect(semDescricao).toEqual([]);
+  });
+
+  it("'other' não é oferecido: a API recusa o valor desde 18/09/2026 (INC-01)", () => {
+    // O backend tirou `other` do enum no PR #28 e responde 422 a quem o manda.
+    // A tela continuou oferecendo "Outro", e quem o escolhia via "Erro ao
+    // salvar o chamado" sem saber por quê. "Geral" é o balde que ficou.
+    expect(CATEGORIAS.map((c) => c.value)).not.toContain("other");
+    expect(CATEGORIAS.map((c) => c.label)).not.toContain("Outro");
+    expect(CATEGORIAS.map((c) => c.value)).toContain("general");
+  });
+
+  it("valor antigo que chega do servidor ainda ganha nome, sem virar opção", () => {
+    // Um registro anterior à remoção, se existir, aparece com o valor cru em
+    // vez de quebrar a tela — o mesmo recuo de qualquer valor desconhecido.
+    expect(rotuloDeCategoria("other")).toBe("other");
+    expect(descricaoDeCategoria("other")).toBeUndefined();
   });
 
   it("valor que esta lista não conhece não inventa frase", () => {
@@ -69,9 +82,10 @@ describe("categoria — a descrição", () => {
     expect(rotuloDeCategoria("billing")).toBe("billing");
   });
 
-  it("as oito categorias continuam as mesmas, na mesma ordem", () => {
-    // A descrição entrou sem mexer no que o backend recebe: o `value` é o enum
-    // `TicketCategory`, e a ordem é a que a grade de fichas desenha.
+  it("as sete categorias são as do enum do backend, na mesma ordem", () => {
+    // O `value` é o enum `TicketCategory` (backend/app/models/models.py), e a
+    // ordem é a que a grade de fichas desenha. O lado do backend confere esta
+    // mesma lista em `backend/tests/test_categoria_contrato_front.py`.
     expect(CATEGORIAS.map((c) => c.value)).toEqual([
       "hardware",
       "software",
@@ -80,7 +94,6 @@ describe("categoria — a descrição", () => {
       "email",
       "security",
       "general",
-      "other",
     ]);
   });
 });

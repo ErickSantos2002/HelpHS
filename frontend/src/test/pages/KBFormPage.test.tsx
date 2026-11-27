@@ -231,7 +231,7 @@ describe("KBFormPage", () => {
 
   // ── As fontes únicas ────────────────────────────────────────
 
-  it("a categoria sai do módulo: as oito, com o rótulo do módulo", async () => {
+  it("a categoria sai do módulo: as sete, com o rótulo do módulo, sem 'Outro'", async () => {
     await montarNovo();
 
     const seletor = screen.getByRole("combobox", { name: "Categoria" });
@@ -243,7 +243,6 @@ describe("KBFormPage", () => {
       "E-mail",
       "Segurança",
       "Geral",
-      "Outro",
     ]);
   });
 
