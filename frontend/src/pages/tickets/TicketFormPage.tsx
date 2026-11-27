@@ -25,6 +25,8 @@ import {
 } from "../../services/productService";
 import { getMyEquipment, type Equipment } from "../../services/equipmentService";
 import { uploadAttachments } from "../../services/attachmentService";
+import { getApiErrorParts } from "../../lib/apiError";
+import { errosDeCampo } from "../../lib/errosDeCampo";
 import { toastApiError } from "../../lib/toastError";
 import { cn, plural } from "../../lib/utils";
 import {
@@ -68,6 +70,42 @@ function mesmoConjunto(a: string[], b: string[]): boolean {
 const ALLOWED_EXTENSIONS = [".pdf",".doc",".docx",".xls",".xlsx",".png",".jpg",".jpeg",".gif",".txt",".csv",".zip",".rar"];
 const MAX_FILE_SIZE_MB = 25;
 const MAX_FILES = 10;
+
+/** Quando nem a API nem a rede dizem o motivo — a frase de antes do INC-01. */
+const ERRO_GENERICO = "Erro ao salvar o chamado. Tente novamente.";
+
+/**
+ * O nome, na tela, de cada campo que o 422 pode apontar.
+ *
+ * Os com aviso próprio (`COM_AVISO_NO_CAMPO`) recebem o motivo do servidor
+ * debaixo deles; os outros não têm onde mostrá-lo, e o motivo vai no alerta.
+ */
+const ROTULOS_DOS_CAMPOS: Record<string, string> = {
+  title: "Título",
+  description: "Descrição",
+  category: "Categoria",
+  client_observation: "Observações adicionais",
+  product_id: "Produto",
+  equipment_ids: "Equipamentos",
+};
+const COM_AVISO_NO_CAMPO = ["title", "description", "category", "client_observation"] as const;
+type CampoComAviso = (typeof COM_AVISO_NO_CAMPO)[number];
+
+/**
+ * A frase da pessoa, no lugar do motivo do servidor, para o campo cuja recusa
+ * só pode ser uma. Categoria tem default no backend: o 422 dela é sempre "valor
+ * fora do enum", e o texto do servidor lista os valores crus ("'hardware', …
+ * or 'general'") — útil para quem integra a API, ilegível para quem abre o
+ * chamado (INC-01). Os outros campos mantêm o motivo do servidor, que diz o
+ * que corrigir.
+ */
+const MENSAGEM_DA_RECUSA: Partial<Record<CampoComAviso, string>> = {
+  category: "A categoria selecionada não está disponível. Selecione uma das categorias válidas.",
+};
+
+function temAvisoNoCampo(campo: string): campo is CampoComAviso {
+  return (COM_AVISO_NO_CAMPO as readonly string[]).includes(campo);
+}
 
 /*
  * As oito categorias saíram daqui: moram em `lib/categoria.ts`, que é a fonte
@@ -346,7 +384,7 @@ export default function TicketFormPage() {
   const [loadingTicket, setLoadingTicket] = useState(isEdit);
   const [existingTicket, setExistingTicket] = useState<Ticket | null>(null);
 
-  const { register, handleSubmit, watch, setValue, reset, formState: { errors } } = useForm<FormValues>({
+  const { register, handleSubmit, watch, setValue, setError, reset, formState: { errors } } = useForm<FormValues>({
     resolver: zodResolver(schema),
     defaultValues: { category: "", product_id: "", equipment_ids: [] },
   });
@@ -483,8 +521,36 @@ export default function TicketFormPage() {
       }
 
       navigate(`/tickets/${ticket.id}`);
-    } catch {
-      setSubmitError("Erro ao salvar o chamado. Tente novamente.");
+    } catch (err) {
+      // Era um `catch` vazio com a frase fixa: o 422 que dizia "categoria
+      // inválida" virava "Tente novamente", e tentar de novo falhava igual
+      // (INC-01). Agora o motivo chega à tela — por `getApiErrorParts`, que já
+      // troca traceback e corpo cru por mensagem segura — e o 422 de campo
+      // marca o campo. Um aviso só, no alerta: nada de toast repetindo.
+      const recusados = errosDeCampo(err).filter((e) => e.campo in ROTULOS_DOS_CAMPOS);
+      if (recusados.length > 0) {
+        for (const { campo, mensagem } of recusados) {
+          if (temAvisoNoCampo(campo)) {
+            setError(campo, { type: "server", message: MENSAGEM_DA_RECUSA[campo] ?? mensagem });
+          }
+        }
+        const nomes = recusados.map(({ campo, mensagem }) =>
+          temAvisoNoCampo(campo)
+            ? ROTULOS_DOS_CAMPOS[campo]
+            : `${ROTULOS_DOS_CAMPOS[campo]} (${mensagem})`,
+        );
+        setSubmitError(
+          `Não foi possível salvar o chamado. Revise ${
+            nomes.length === 1 ? "o campo" : "os campos"
+          }: ${nomes.join(", ")}.`,
+        );
+      } else {
+        const { description } = getApiErrorParts(err, ERRO_GENERICO);
+        setSubmitError(
+          description ? `Não foi possível salvar o chamado. ${description}` : ERRO_GENERICO,
+        );
+      }
+      // De volta ao formulário com tudo o que foi preenchido, para corrigir.
       setStep("form");
     } finally {
       setSubmitting(false);
@@ -563,7 +629,15 @@ export default function TicketFormPage() {
       ) : (
         <div className="grid grid-cols-1 gap-5 lg:grid-cols-[1fr_300px]">
           {/* ── Form column ─────────────────────────────────── */}
-          <form onSubmit={handleSubmit(() => setStep("preview"))} className="space-y-4 min-w-0">
+          <form
+            onSubmit={handleSubmit(() => {
+              // O alerta é da tentativa anterior; na revisão ele mentiria
+              // sobre um envio que ainda não aconteceu.
+              setSubmitError(null);
+              setStep("preview");
+            })}
+            className="space-y-4 min-w-0"
+          >
             {/* Identificação */}
             <FormSection title="Identificação">
               <div className="space-y-1">

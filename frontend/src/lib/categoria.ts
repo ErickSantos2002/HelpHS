@@ -31,7 +31,8 @@ export interface Categoria {
    * escolhida no Resumo; qualquer outra tela que precise explicar categoria
    * pega daqui em vez de reescrever.
    *
-   * É opcional porque "Outro" não tem descrição — ver o comentário na lista.
+   * É opcional no tipo, mas toda categoria oferecida hoje tem a sua — o teste
+   * `categoria.test.ts` reprova uma que chegue sem.
    */
   descricao?: string;
 }
@@ -76,14 +77,15 @@ export const CATEGORIAS: readonly Categoria[] = [
       "Qualquer ocorrência que não se encaixe nas demais, ou quando não sabe dizer.",
   },
   /*
-    "Outro" está sem descrição de propósito, e não por esquecimento: ele se
-    sobrepõe a "Geral" — as duas são a mesma ideia com dois nomes —, e a decisão
-    de tirá-lo do formulário é do operador, com a contagem de chamados já
-    abertos nesta categoria na mesa. Enquanto ele existir, escolher "Outro" não
-    mostra frase nenhuma no Resumo; escrever um texto agora seria inventar
-    diferença entre duas opções que não diferem.
+    "Outro" (`other`) saiu daqui em 27/11/2026 (INC-01). O backend o tirou do
+    enum em 18/09/2026 (PR #28) e passou a responder 422 a quem o mandasse;
+    esta lista continuou oferecendo a ficha, e quem a escolhia não conseguia
+    abrir o chamado. "Geral" é o balde que ficou.
+
+    Esta lista é conferida contra o enum `TicketCategory` pelo teste
+    `backend/tests/test_categoria_contrato_front.py`: mexer num lado sem o
+    outro reprova o CI.
   */
-  { value: "other", label: "Outro", icon: "ellipsis" },
 ] as const;
 
 /** O rótulo, com recuo para o valor cru quando o backend manda algo novo. */
@@ -94,7 +96,7 @@ export function rotuloDeCategoria(valor: string): string {
 /**
  * A descrição, quando existe.
  *
- * Devolve `undefined` para categoria sem descrição ("Outro") e para valor que
+ * Devolve `undefined` para categoria sem descrição e para valor que
  * esta lista não conhece — o mesmo recuo do rótulo, mas sem inventar frase: a
  * tela mostra o nome e cala sobre o significado, em vez de mentir.
  */

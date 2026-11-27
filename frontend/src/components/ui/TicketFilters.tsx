@@ -1,4 +1,5 @@
 import { useEffect, useRef } from "react";
+import { CATEGORIAS } from "../../lib/categoria";
 import { cn } from "../../lib/utils";
 import { Button } from "./Button";
 import { Input } from "./Input";
@@ -44,16 +45,10 @@ const PRIORITY_OPTIONS = [
   { value: "low", label: "Baixo" },
 ];
 
-const CATEGORY_OPTIONS = [
-  { value: "hardware", label: "Hardware" },
-  { value: "software", label: "Software" },
-  { value: "network", label: "Rede" },
-  { value: "access", label: "Acesso" },
-  { value: "email", label: "E-mail" },
-  { value: "security", label: "Segurança" },
-  { value: "general", label: "Geral" },
-  { value: "other", label: "Outro" },
-];
+// Da fonte única, como no formulário, na base de conhecimento e nos relatórios.
+// Esta era a última cópia própria da lista, e foi por ela que `other` — valor
+// que a API não aceita desde 18/09/2026 — continuou aparecendo (INC-01).
+const CATEGORY_OPTIONS = CATEGORIAS.map((c) => ({ value: c.value, label: c.label }));
 
 // ── TicketFilters ─────────────────────────────────────────────
 
