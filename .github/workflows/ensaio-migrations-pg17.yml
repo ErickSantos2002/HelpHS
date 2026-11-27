@@ -1,0 +1,200 @@
+name: Ensaio das migrations em PostgreSQL 17 (ECE-01)
+
+# Ensaio, não deploy. O roteiro é `.github/ensaio/ensaio_migrations.py`. Sobe um PostgreSQL 17 com pgvector que nasce e morre com
+# o job, cria o esquema na revision informada (a de produção, confirmada pelo
+# operador), semeia dados INVENTADOS, aplica as migrations reais uma a uma até
+# o head e prova backup, restauração e comparação de estado.
+#
+# Nada aqui toca produção: não há `secrets`, não há registry, não há etapa de
+# deploy, o banco só escuta em 127.0.0.1 do runner e a senha é sorteada na
+# hora. O roteiro recusa qualquer host que não seja a própria máquina e as
+# portas 5432 e 8888.
+#
+# Só roda à mão.
+on:
+  workflow_dispatch:
+    inputs:
+      sha:
+        description: "Commit a ensaiar (40 hex). As migrations saem dele, byte a byte."
+        required: true
+      base:
+        description: "Revision em que a produção está (12 caracteres), confirmada pelo operador."
+        required: true
+      escalas:
+        description: "Escalas de dados sintéticos, separadas por espaço."
+        required: false
+        default: "1 10"
+      imagem:
+        description: "Imagem do banco: pgvector/pgvector:<tag pg17>, opcionalmente com @sha256:<digest>. Fixar na versão exata de produção quando ela for conhecida."
+        required: false
+        default: "pgvector/pgvector:pg17"
+
+permissions:
+  contents: read
+
+concurrency:
+  group: ensaio-migrations-pg17
+  cancel-in-progress: false
+
+jobs:
+  ensaio:
+    name: Ensaio (PostgreSQL 17 + pgvector)
+    runs-on: ubuntu-24.04
+    timeout-minutes: 45
+
+    env:
+      SHA: ${{ inputs.sha }}
+      BASE_REV: ${{ inputs.base }}
+      ESCALAS: ${{ inputs.escalas }}
+      IMAGEM: ${{ inputs.imagem }}
+      # Tudo o que o job cria leva este nome, e a limpeza só apaga o que o tem.
+      PG: ensaio-pg17-${{ github.run_id }}-${{ github.run_attempt }}
+      # Nunca 5432 nem 8888: o roteiro recusa as duas.
+      PORTA: "55432"
+
+    steps:
+      - name: Confere as entradas
+        run: |
+          set -euo pipefail
+          [[ "$SHA" =~ ^[0-9a-f]{40}$ ]] || { echo "::error::sha precisa ter 40 hex minúsculos"; exit 1; }
+          [[ "$BASE_REV" =~ ^[0-9a-z]{12}$ ]] || { echo "::error::base precisa ser uma revision de 12 caracteres"; exit 1; }
+          [[ "$ESCALAS" =~ ^[0-9]{1,2}(\ [0-9]{1,2}){0,3}$ ]] || { echo "::error::escalas: até quatro números de 1 a 50, separados por espaço"; exit 1; }
+          for e in $ESCALAS; do
+            [ "$e" -ge 1 ] && [ "$e" -le 50 ] || { echo "::error::escala fora de 1 a 50: $e"; exit 1; }
+          done
+          # A tag é obrigatória e diz pg17; o digest é opcional e, presente, é o que o Docker usa.
+          [[ "$IMAGEM" =~ ^pgvector/pgvector:[0-9a-z.-]*pg17[0-9a-z.-]*(@sha256:[0-9a-f]{64})?$ ]] || { echo "::error::imagem precisa ser pgvector/pgvector com tag pg17, opcionalmente seguida de @sha256:<64 hex>"; exit 1; }
+
+      - name: Checkout do roteiro (este workflow)
+        uses: actions/checkout@v4
+        with:
+          path: ferramenta
+          # Todos os branches DESTE repositório, para a conferência abaixo.
+          fetch-depth: 0
+          persist-credentials: false
+
+      # O commit a ensaiar é CÓDIGO QUE VAI RODAR (migrations, scripts,
+      # dependências). Por isso ele não é buscado pelo SHA — o GitHub entrega,
+      # pelo SHA, commit que só existe num fork. Só serve o que já está num
+      # branch deste repositório, onde só quem tem escrita publica; e a árvore
+      # sai do clone acima, sem nova ida à rede.
+      - name: O commit a ensaiar pertence a um branch deste repositório
+        run: |
+          set -euo pipefail
+          cd ferramenta
+          git cat-file -e "${SHA}^{commit}" 2>/dev/null || { echo "::error::o commit não está em nenhum branch deste repositório"; exit 1; }
+          ramos=$(git branch -r --contains "$SHA" | grep -c 'origin/' || true)
+          [ "$ramos" -ge 1 ] || { echo "::error::o commit não está em nenhum branch deste repositório"; exit 1; }
+          git branch -r --contains "$SHA" | sed 's/^ *//' | head -5
+          git worktree add --detach "$GITHUB_WORKSPACE/alvo" "$SHA"
+          [ "$(git -C "$GITHUB_WORKSPACE/alvo" rev-parse HEAD)" = "$SHA" ]
+
+      - name: Setup Python 3.13
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.13"
+
+      - name: Dependências
+        run: |
+          set -euo pipefail
+          pip install -r alvo/backend/requirements.txt psycopg2-binary
+          # pg_dump e pg_restore da MESMA versão maior do servidor.
+          sudo install -d /usr/share/postgresql-common/pgdg
+          sudo curl -fsSL -o /usr/share/postgresql-common/pgdg/apt.postgresql.org.asc https://www.postgresql.org/media/keys/ACCC4CF8.asc
+          echo "deb [signed-by=/usr/share/postgresql-common/pgdg/apt.postgresql.org.asc] https://apt.postgresql.org/pub/repos/apt noble-pgdg main" | sudo tee /etc/apt/sources.list.d/pgdg.list >/dev/null
+          sudo apt-get update -qq
+          sudo apt-get install -y -qq postgresql-client-17
+          /usr/lib/postgresql/17/bin/pg_dump --version
+
+      - name: Banco descartável
+        run: |
+          set -euo pipefail
+          PG_SENHA=$(openssl rand -hex 24)
+          echo "::add-mask::$PG_SENHA"
+          echo "PG_SENHA=$PG_SENHA" >> "$GITHUB_ENV"
+          docker run -d --name "$PG" \
+            -e POSTGRES_USER=ensaio -e POSTGRES_PASSWORD="$PG_SENHA" -e POSTGRES_DB=postgres \
+            -p "127.0.0.1:${PORTA}:5432" "$IMAGEM" >/dev/null
+          for i in $(seq 1 30); do
+            docker exec "$PG" pg_isready -U ensaio -q && break
+            sleep 2
+          done
+          docker exec "$PG" pg_isready -U ensaio
+          mkdir -p "$RUNNER_TEMP/evid"
+          {
+            echo "imagem: $IMAGEM"
+            echo "digest: $(docker inspect --format '{{index .RepoDigests 0}}' "$IMAGEM")"
+            echo "servidor: $(docker exec "$PG" psql -U ensaio -Atc 'SHOW server_version')"
+            echo "pgvector disponível: $(docker exec "$PG" psql -U ensaio -Atc "SELECT default_version FROM pg_available_extensions WHERE name='vector'")"
+            echo "sha ensaiado: $SHA"
+            echo "revision base: $BASE_REV"
+          } | tee "$RUNNER_TEMP/evid/ambiente.txt"
+
+      - name: A cadeia do commit chega à base e tem um head só
+        working-directory: alvo/backend
+        run: |
+          set -euo pipefail
+          test ! -e .env
+          # As chaves JWT não são versionadas e a configuração as procura em
+          # `./keys`. Descartáveis, como no E2E.
+          mkdir -p keys
+          openssl genpkey -algorithm RSA -pkeyopt rsa_keygen_bits:2048 -out keys/private.pem 2>/dev/null
+          openssl pkey -in keys/private.pem -pubout -out keys/public.pem
+          [ "$(python -m alembic heads | wc -l)" = "1" ] || { echo "::error::mais de um head"; exit 1; }
+          python -m alembic history | grep -q "$BASE_REV" || { echo "::error::a revision base não existe neste commit"; exit 1; }
+          python -m alembic heads | tee -a "$RUNNER_TEMP/evid/ambiente.txt"
+
+      - name: Ensaio (uma rodada por escala)
+        working-directory: alvo/backend
+        run: |
+          set -uo pipefail
+          falhou=0
+          for e in $ESCALAS; do
+            echo "::group::escala $e"
+            python "$GITHUB_WORKSPACE/ferramenta/.github/ensaio/ensaio_migrations.py" \
+              --base "$BASE_REV" --escala "$e" --saida "$RUNNER_TEMP/evid/e$e" \
+              --servidor "postgresql://ensaio:${PG_SENHA}@127.0.0.1:${PORTA}/postgres" \
+              --pg-bin /usr/lib/postgresql/17/bin \
+              2>&1 | tee "$RUNNER_TEMP/evid/escala-$e.log"
+            # O roteiro sai com 1 em falha ou exceção; o `tee` não pode esconder isso.
+            [ "${PIPESTATUS[0]}" = "0" ] || falhou=1
+            echo "::endgroup::"
+            # E o JSON tem de dizer o mesmo: sem falha, e em PostgreSQL 17.
+            python - "$RUNNER_TEMP/evid/e$e/resultado.json" <<'PY' || falhou=1
+          import json, sys
+          r = json.load(open(sys.argv[1], encoding="utf-8"))
+          print("falhas:", len(r["falhas"]), "| PG 17:", r.get("equivalente_a_producao"))
+          for f in r["falhas"]:
+              print("::error::" + str(f)[:300])
+          sys.exit(0 if not r["falhas"] and r.get("equivalente_a_producao") else 1)
+          PY
+          done
+          exit $falhou
+
+      - name: Evidências sem senha
+        if: always()
+        run: |
+          set -euo pipefail
+          # Sem banco não há senha nem evidência a conferir.
+          [ -n "${PG_SENHA:-}" ] && [ -d "$RUNNER_TEMP/evid" ] || exit 0
+          # A senha é sorteada e mascarada, mas a conferência é barata.
+          if grep -rIl -- "$PG_SENHA" "$RUNNER_TEMP/evid" >/dev/null 2>&1; then
+            echo "::error::a senha do banco apareceu nas evidências; artefato não será publicado"
+            rm -rf "$RUNNER_TEMP/evid"
+            exit 1
+          fi
+          # O dump é de dados inventados, mas não precisa viajar.
+          find "$RUNNER_TEMP/evid" -name '*.dump' -delete
+
+      - name: Publica as evidências
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: ensaio-migrations-pg17-${{ github.run_id }}
+          path: ${{ runner.temp }}/evid
+          if-no-files-found: warn
+          retention-days: 30
+
+      - name: Limpeza
+        if: always()
+        run: docker rm -f -v "$PG" >/dev/null 2>&1 || true
