@@ -377,8 +377,11 @@ def main() -> None:
     # Só o que vem depois da base: produção pode já ter parte da cadeia.
     a_aplicar = conhecidas[conhecidas.index(args.base) + 1 :]
 
-    assert not pathlib.Path(".env").exists(), "há .env nesta pasta: abortando"
-    assert pathlib.Path("alembic.ini").exists(), "rode de backend/"
+    # `if`, não `assert`: com `python -O` o assert some, e a trava junto.
+    if pathlib.Path(".env").exists():
+        raise SystemExit("recusado: há .env nesta pasta")
+    if not pathlib.Path("alembic.ini").exists():
+        raise SystemExit("recusado: rode de backend/")
     saida = pathlib.Path(args.saida)
     saida.mkdir(parents=True, exist_ok=True)
 
@@ -418,7 +421,9 @@ def main() -> None:
         etapa("esquema na base", revision=args.base, segundos=round(dur, 2), pgvector=vector)
         confere(cod == 0, f"alembic upgrade {args.base}" + ("" if cod == 0 else f": {log[-300:]}"))
         if cod:
-            return
+            # Sair por aqui com `return` pularia o veredito do fim e daria 0.
+            # O `finally` ainda grava o JSON.
+            raise SystemExit(1)
         con = conecta(url, "ensaio")
         confere(revision(con) == args.base, "alembic_version na base")
         t0 = time.perf_counter()
@@ -460,7 +465,7 @@ def main() -> None:
             etapa(f"upgrade {rev}", segundos=round(dur, 2))
             confere(cod == 0, f"aplicou {rev}" + ("" if cod == 0 else f": {log[-400:]}"))
             if cod:
-                return
+                raise SystemExit(1)
 
         # 4. Integridade
         con = conecta(url, "ensaio")
@@ -558,14 +563,18 @@ def main() -> None:
             capture_output=True,
             text=True,
         )
-        etapa("restauração", segundos=round(time.perf_counter() - t0, 2))
-        # `CREATE EXTENSION` já existente gera aviso, não falha de dado.
-        erros = [
-            linha
-            for linha in r.stderr.splitlines()
-            if "error" in linha.lower() and "already exists" not in linha.lower()
-        ]
-        confere(not erros, f"pg_restore sem erro de dado ({len(erros)})")
+        etapa("restauração", segundos=round(time.perf_counter() - t0, 2), saida=r.returncode)
+        # O que o pg_restore disse fica guardado para investigação. A senha
+        # vai por variável de ambiente e não aparece aqui.
+        (saida / "pg_restore.log").write_text(r.stderr or "", encoding="utf-8")
+        # O veredito é o código de saída: erro ignorado na restauração também
+        # dá diferente de zero. A leitura do stderr só soma, não substitui.
+        erros = [linha for linha in r.stderr.splitlines() if "error" in linha.lower()]
+        confere(
+            r.returncode == 0 and not erros,
+            f"pg_restore terminou com 0 e sem erro (saída {r.returncode}, {len(erros)} linha(s) de erro)"
+            + ("" if r.returncode == 0 and not erros else f": {r.stderr[-300:]}"),
+        )
         con = conecta(url, "restaurado")
         confere(revision(con) == args.base, "banco restaurado está na revision base")
         confere(
@@ -601,7 +610,9 @@ def main() -> None:
                 texto="nenhum equipamento ganhou empresa nos scripts; a recusa do downgrade não foi exercitada",
             )
         con.close()
-        cod, d1, _ = alembic(url, "restaurado", "upgrade", "head")
+        # Até o fim da cadeia ensaiada, não até o `head`: o commit pode trazer
+        # migration posterior, que não é objeto deste ensaio.
+        cod, d1, log1 = alembic(url, "restaurado", "upgrade", CADEIA[-1])
         cod2, d2, log2 = alembic(url, "restaurado", "downgrade", args.base)
         etapa(
             "subida e descida inteiras em banco sem dado novo",
@@ -610,7 +621,8 @@ def main() -> None:
         )
         confere(
             cod == 0 and cod2 == 0,
-            "sobe as três e desce as três sem dado novo"
+            "sobe até o fim da cadeia e desce até a base sem dado novo"
+            + ("" if cod == 0 else f": {log1[-300:]}")
             + ("" if cod2 == 0 else f": {log2[-300:]}"),
         )
         con = conecta(url, "restaurado")

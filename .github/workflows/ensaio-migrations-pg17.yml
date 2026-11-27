@@ -25,7 +25,7 @@ on:
         required: false
         default: "1 10"
       imagem:
-        description: "Imagem do banco. Fixar a tag na versão exata de produção quando ela for conhecida."
+        description: "Imagem do banco: pgvector/pgvector:<tag pg17>, opcionalmente com @sha256:<digest>. Fixar na versão exata de produção quando ela for conhecida."
         required: false
         default: "pgvector/pgvector:pg17"
 
@@ -62,7 +62,8 @@ jobs:
           for e in $ESCALAS; do
             [ "$e" -ge 1 ] && [ "$e" -le 50 ] || { echo "::error::escala fora de 1 a 50: $e"; exit 1; }
           done
-          [[ "$IMAGEM" =~ ^pgvector/pgvector:[0-9a-z.-]*pg17[0-9a-z.-]*$ ]] || { echo "::error::imagem precisa ser pgvector/pgvector com pg17"; exit 1; }
+          # A tag é obrigatória e diz pg17; o digest é opcional e, presente, é o que o Docker usa.
+          [[ "$IMAGEM" =~ ^pgvector/pgvector:[0-9a-z.-]*pg17[0-9a-z.-]*(@sha256:[0-9a-f]{64})?$ ]] || { echo "::error::imagem precisa ser pgvector/pgvector com tag pg17, opcionalmente seguida de @sha256:<64 hex>"; exit 1; }
 
       - name: Checkout do roteiro (este workflow)
         uses: actions/checkout@v4
