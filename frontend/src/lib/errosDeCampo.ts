@@ -19,9 +19,31 @@ export interface ErroDeCampo {
   mensagem: string;
 }
 
+/**
+ * Sinais de texto que é diagnóstico do servidor, não mensagem para a pessoa.
+ *
+ * O `apiError.ts` só reconhece o traceback; aqui a lista é mais larga porque o
+ * formulário passou a mostrar o motivo da API (INC-01), e um vazamento futuro
+ * — handler novo, proxy, ORM — não pode virar texto na frente do cliente.
+ * Cada padrão é de coisa que não aparece em mensagem escrita em português para
+ * gente: SQL em maiúsculas, quadro de pilha, nome de biblioteca, HTML, URL de
+ * conexão e endereço IP.
+ */
+const SINAIS_DE_TEXTO_INTERNO: readonly RegExp[] = [
+  /Traceback \(most recent call last\)/,
+  /\bFile "[^"]+", line \d+/,
+  /\b(?:SELECT|INSERT|UPDATE|DELETE)\b[\s\S]*\b(?:FROM|INTO|SET|WHERE)\b/,
+  /\b(?:sqlalchemy|asyncpg|psycopg2?|pydantic_core|starlette|uvicorn|alembic)\b/i,
+  /\b\w+(?:Error|Exception):/,
+  /<\s*(?:!doctype|html|head|body|script|title)\b/i,
+  /\b[a-z][a-z0-9+.-]*:\/\/[^\s/@]+@/i,
+  /\b(?:postgres(?:ql)?|redis|mysql|amqp)(?:\+\w+)?:\/\//i,
+  /\b(?:\d{1,3}\.){3}\d{1,3}\b/,
+];
+
 /** Texto de servidor que não é para a pessoa ler. */
-function pareceInterno(texto: string): boolean {
-  return texto.includes("Traceback (most recent call last)");
+export function pareceInterno(texto: string): boolean {
+  return SINAIS_DE_TEXTO_INTERNO.some((sinal) => sinal.test(texto));
 }
 
 function campoDoItem(item: Record<string, unknown>): string | null {

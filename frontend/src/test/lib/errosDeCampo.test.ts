@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { errosDeCampo } from "../../lib/errosDeCampo";
+import { errosDeCampo, pareceInterno } from "../../lib/errosDeCampo";
 
 const resposta = (status: number, data: unknown) => ({ response: { status, data } });
 
@@ -43,5 +43,40 @@ describe("errosDeCampo", () => {
     expect(errosDeCampo({ request: {} })).toEqual([]);
     expect(errosDeCampo(new Error("x"))).toEqual([]);
     expect(errosDeCampo(undefined)).toEqual([]);
+  });
+});
+
+describe("pareceInterno", () => {
+  it.each([
+    "Traceback (most recent call last): boom",
+    'File "/app/app/main.py", line 12, in handler',
+    "SELECT id FROM tickets WHERE category = 'other'",
+    "UPDATE users SET role = 'admin'",
+    "sqlalchemy.exc.IntegrityError",
+    "erro no asyncpg ao executar",
+    "KeyError: 'category'",
+    "ValidationError: 1 validation error",
+    "<html><body>502</body></html>",
+    "<!DOCTYPE html>",
+    "postgresql+asyncpg://user:senha@db:5432/helphs",
+    "redis://cache:6379/0",
+    "https://usuario:token@interno.exemplo",
+    "falha ao falar com 10.0.0.5",
+  ])("reconhece texto técnico: %s", (texto) => {
+    expect(pareceInterno(texto)).toBe(true);
+  });
+
+  it.each([
+    "Valor inválido. Opções: hardware, software, network, access, email, security, general",
+    "Este chamado já foi encerrado e não aceita alterações. Abra um novo chamado.",
+    "Deve ter no máximo 200 caractere(s)",
+    "Ative a verificação em duas etapas para continuar.",
+    "Só é possível vincular equipamentos que pertencem a você ou à sua empresa.",
+    "Selecione onde o problema acontece, de 1 a 3 opções.",
+    "Atualize a página e tente de novo.",
+    "Data inválida. Use o formato AAAA-MM-DD",
+    "Versão 1.23.2 publicada.",
+  ])("deixa passar mensagem legítima: %s", (texto) => {
+    expect(pareceInterno(texto)).toBe(false);
   });
 });

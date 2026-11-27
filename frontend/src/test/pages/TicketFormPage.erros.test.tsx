@@ -299,3 +299,106 @@ describe("TicketFormPage — quando a API recusa (INC-01)", () => {
     expect(screen.getByLabelText("Título *")).toHaveValue("Chamado existente");
   });
 });
+
+/**
+ * Nenhum detalhe interno chega à tela (revisão da Fase 4).
+ *
+ * O backend de hoje não manda nada disto — o 500 dele é texto puro, e o 422 só
+ * traz mensagem traduzida. Estes casos existem porque o alerta passou a mostrar
+ * o motivo da API, e um vazamento futuro (handler novo, proxy, ORM) não pode
+ * virar texto na frente do cliente. O que se espera em cada um é a frase do
+ * status, ou a genérica, e nunca o pedaço técnico.
+ */
+describe("TicketFormPage — nenhum detalhe interno chega à tela", () => {
+  const casos: Array<[string, number, unknown, RegExp]> = [
+    ["SQL sem a palavra Traceback", 500,
+      { detail: "(sqlalchemy.exc.ProgrammingError) SELECT id FROM tickets WHERE category = 'other'" },
+      /SELECT|sqlalchemy|tickets WHERE/],
+    ["quadro de pilha Python", 500,
+      { detail: 'File "/app/app/routers/tickets.py", line 680, in list_tickets' },
+      /routers|line 680|\.py/],
+    ["nome de exceção do driver", 500,
+      { detail: "asyncpg.exceptions.InvalidTextRepresentationError: invalid input value for enum" },
+      /asyncpg|InvalidText|enum/],
+    ["URL de conexão com senha", 500,
+      { detail: "could not connect to postgresql://helphs:segredo@10.0.0.5:5432/helphs" },
+      /postgresql|segredo|10\.0\.0\.5/],
+    ["HTML cru do proxy dentro do detail", 502,
+      { detail: "<html><head><title>502 Bad Gateway</title></head><body>nginx</body></html>" },
+      /<html|nginx|Bad Gateway/],
+    ["traceback dentro de um item do 422", 422,
+      { detail: [{ field: "campo", message: "Traceback (most recent call last): KeyError" }] },
+      /Traceback|KeyError/],
+    ["SQL dentro de um item do 422 de campo da tela", 422,
+      { detail: [{ field: "product_id", message: "UPDATE tickets SET product_id = NULL WHERE id = 1" }] },
+      /UPDATE|SET product_id/],
+  ];
+
+  it.each(casos)("%s", async (_nome, status, data, proibido) => {
+    vi.mocked(createTicket).mockRejectedValue({ response: { status, data } });
+    await preencherERevisar();
+    await confirmar();
+
+    const alerta = await screen.findByRole("alert");
+    expect(alerta).toHaveTextContent("Não foi possível salvar o chamado");
+    expect(document.body).not.toHaveTextContent(proibido);
+  });
+
+  it.each([
+    ["corpo em texto puro", "Internal Server Error"],
+    ["corpo nulo", null],
+    ["detail de tipo inesperado", { detail: 42 }],
+    ["página HTML no lugar do JSON", "<!DOCTYPE html><html><body>erro</body></html>"],
+  ])("corpo inesperado (%s) dá a frase do status", async (_nome, data) => {
+    vi.mocked(createTicket).mockRejectedValue({ response: { status: 500, data } });
+    await preencherERevisar();
+    await confirmar();
+
+    const alerta = await screen.findByRole("alert");
+    expect(alerta).toHaveTextContent("Erro interno no servidor. Tente novamente em instantes.");
+    expect(alerta).not.toHaveTextContent(/DOCTYPE|<html|Internal Server Error|42/);
+  });
+
+  it("campo com nome de propriedade do Object não vira rótulo de função", async () => {
+    vi.mocked(createTicket).mockRejectedValue(erro422("constructor", "Valor inválido."));
+    await preencherERevisar();
+    await confirmar();
+
+    const alerta = await screen.findByRole("alert");
+    expect(alerta).not.toHaveTextContent(/function|native code|Revise o campo/);
+    expect(alerta).toHaveTextContent("Não foi possível salvar o chamado. Valor inválido.");
+  });
+
+  it("mensagem legítima do backend continua aparecendo inteira", async () => {
+    // Recusa de negócio, em português, com número e aspas: nada disso é técnico.
+    const motivo = "Este chamado já foi encerrado e não aceita alterações. Abra um novo chamado.";
+    vi.mocked(createTicket).mockRejectedValue({ response: { status: 409, data: { detail: motivo } } });
+    await preencherERevisar();
+    await confirmar();
+
+    expect(await screen.findByRole("alert")).toHaveTextContent(`Não foi possível salvar o chamado. ${motivo}`);
+  });
+
+  it("403 de segundo fator exigido mostra o motivo, sem enfraquecer nada", async () => {
+    // A exigência de MFA é do backend e do interceptor; a tela só não pode
+    // engolir nem deformar o motivo.
+    const motivo = "Ative a verificação em duas etapas para continuar.";
+    vi.mocked(createTicket).mockRejectedValue({ response: { status: 403, data: { detail: motivo } } });
+    await preencherERevisar();
+    await confirmar();
+
+    expect(await screen.findByRole("alert")).toHaveTextContent(motivo);
+    expect(createTicket).toHaveBeenCalledTimes(1);
+  });
+
+  it("depois de um 500, o que a pessoa preencheu continua no formulário", async () => {
+    vi.mocked(createTicket).mockRejectedValue({ response: { status: 500, data: "Internal Server Error" } });
+    await preencherERevisar("Geral");
+    await confirmar();
+    await screen.findByRole("alert");
+
+    expect(screen.getByLabelText("Título *")).toHaveValue(TITULO);
+    expect(screen.getByLabelText("Descrição *")).toHaveValue(DESCRICAO);
+    expect(screen.getByRole("radio", { name: "Geral" })).toBeChecked();
+  });
+});

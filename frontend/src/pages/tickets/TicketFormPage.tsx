@@ -26,7 +26,7 @@ import {
 import { getMyEquipment, type Equipment } from "../../services/equipmentService";
 import { uploadAttachments } from "../../services/attachmentService";
 import { getApiErrorParts } from "../../lib/apiError";
-import { errosDeCampo } from "../../lib/errosDeCampo";
+import { errosDeCampo, pareceInterno } from "../../lib/errosDeCampo";
 import { toastApiError } from "../../lib/toastError";
 import { cn, plural } from "../../lib/utils";
 import {
@@ -105,6 +105,29 @@ const MENSAGEM_DA_RECUSA: Partial<Record<CampoComAviso, string>> = {
 
 function temAvisoNoCampo(campo: string): campo is CampoComAviso {
   return (COM_AVISO_NO_CAMPO as readonly string[]).includes(campo);
+}
+
+/**
+ * Propriedade própria, e não `in`: `"constructor" in {}` é verdadeiro. (Sem
+ * `Object.hasOwn` porque o `lib` do app é ES2020.)
+ */
+function campoDaTela(campo: string): boolean {
+  return Object.prototype.hasOwnProperty.call(ROTULOS_DOS_CAMPOS, campo);
+}
+
+/**
+ * O motivo que a API deu, quando é seguro mostrar; senão, a frase do status.
+ *
+ * `getApiErrorParts` já troca traceback e corpo cru por frase por status, mas
+ * repassa qualquer outro `detail` em texto. Aqui o motivo passa ainda por
+ * `pareceInterno`; reprovado, a frase sai como se o servidor não tivesse dito
+ * nada — a do status HTTP, ou nenhuma (e aí vale a genérica).
+ */
+function motivoSeguro(err: unknown): string | undefined {
+  const { description } = getApiErrorParts(err, ERRO_GENERICO);
+  if (!description || !pareceInterno(description)) return description;
+  const status = (err as { response?: { status?: number } })?.response?.status;
+  return status ? getApiErrorParts({ response: { status, data: {} } }, ERRO_GENERICO).description : undefined;
 }
 
 /*
@@ -527,7 +550,7 @@ export default function TicketFormPage() {
       // (INC-01). Agora o motivo chega à tela — por `getApiErrorParts`, que já
       // troca traceback e corpo cru por mensagem segura — e o 422 de campo
       // marca o campo. Um aviso só, no alerta: nada de toast repetindo.
-      const recusados = errosDeCampo(err).filter((e) => e.campo in ROTULOS_DOS_CAMPOS);
+      const recusados = errosDeCampo(err).filter((e) => campoDaTela(e.campo));
       if (recusados.length > 0) {
         for (const { campo, mensagem } of recusados) {
           if (temAvisoNoCampo(campo)) {
@@ -545,7 +568,7 @@ export default function TicketFormPage() {
           }: ${nomes.join(", ")}.`,
         );
       } else {
-        const { description } = getApiErrorParts(err, ERRO_GENERICO);
+        const description = motivoSeguro(err);
         setSubmitError(
           description ? `Não foi possível salvar o chamado. ${description}` : ERRO_GENERICO,
         );
